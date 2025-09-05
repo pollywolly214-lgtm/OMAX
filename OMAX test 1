@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OMAX Maintenance Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>OMAX Maintenance & Log Tracker</h1>
+  </header>
+
+  <main>
+    <p>Welcome! This site will help us keep track of maintenance tasks for the OMAX 1530 waterjet system.</p>
+    <button id="helloBtn">Click me</button>
+    <p id="output"></p>
+  </main>
+
+  <footer>
+    <p>Built with ❤️ using GitHub Pages</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
