@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OMAX 1530 Maintenance Calendar</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>OMAX 1530 Maintenance Tracker</h1>
+    <div class="controls">
+      <div class="block">
+        <label>Total Machine Hours (manual): 
+          <input type="number" id="manualHours" placeholder="enter total hours" />
+        </label>
+        <button id="setHoursBtn">Set Hours</button>
+        <div class="hint">Baseline date: <span id="baselineDate">—</span></div>
+        <div class="hint">Projection uses +8 hrs/day from baseline.</div>
+      </div>
+
+      <div class="block">
+        <h3>Task Settings</h3>
+        <p class="mini">Enter <b>either</b> the last completed <u>total hours</u> or the <u>hours since last</u>. If both are entered, "since" wins.</p>
+        <div class="task-grid">
+          <div class="task-row">
+            <span class="task-name">Nozzle Change</span>
+            <span class="task-interval">Every 80 hrs</span>
+            <input type="number" id="nozLastTotal" placeholder="Last TOTAL hours" />
+            <input type="number" id="nozSince" placeholder="Hours since" />
+            <span class="task-status" id="statusNozzle">—</span>
+          </div>
+          <div class="task-row">
+            <span class="task-name">Pump Oil</span>
+            <span class="task-interval">Every 500 hrs</span>
+            <input type="number" id="oilLastTotal" placeholder="Last TOTAL hours" />
+            <input type="number" id="oilSince" placeholder="Hours since" />
+            <span class="task-status" id="statusOil">—</span>
+          </div>
+        </div>
+        <button id="saveTasksBtn">Save Task Settings</button>
+      </div>
+
+      <div class="block summary">
+        <div><b>Projected hours (today):</b> <span id="currentHours">—</span> hrs</div>
+        <div><b>Next Due Task:</b> <span id="nextTask">—</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="calendarSection">
+      <h2>Maintenance Calendar (Current + Next 2 Months)</h2>
+      <div id="months"></div>
+    </section>
+  </main>
+
+  <footer>
+    <small>Data is stored locally in your browser.</small>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
