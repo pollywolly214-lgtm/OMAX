@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OMAX 1530 Maintenance Calendar</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>OMAX 1530 Maintenance Tracker</h1>
+    <div class="controls">
+      <div class="block">
+        <label>Total Machine Hours (manual): 
+          <input type="number" id="manualHours" placeholder="enter total hours" />
+        </label>
+        <button id="setHoursBtn">Set Hours</button>
+        <div class="hint">Baseline date: <span id="baselineDate">—</span></div>
+      </div>
+
+      <div class="block">
+        <h3>Task Settings (last completed total hours)</h3>
+        <div class="task-row">
+          <span class="task-name">Nozzle Change</span>
+          <span class="task-interval">Interval: 80 hrs</span>
+          <input type="number" id="lastNozzle" placeholder="e.g., 2200" />
+          <span class="task-status" id="statusNozzle">—</span>
+        </div>
+        <div class="task-row">
+          <span class="task-name">Pump Oil</span>
+          <span class="task-interval">Interval: 500 hrs</span>
+          <input type="number" id="lastOil" placeholder="e.g., 2000" />
+          <span class="task-status" id="statusOil">—</span>
+        </div>
+        <button id="saveTasksBtn">Save Task Hours</button>
+      </div>
+
+      <div class="block summary">
+        <div><b>Projected hours (today):</b> <span id="currentHours">—</span> hrs</div>
+        <div><b>Next Due Task:</b> <span id="nextTask">—</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="calendarSection">
+      <h2>Maintenance Calendar (Current Month + Next 2)</h2>
+      <div id="months"></div>
+    </section>
+  </main>
+
+  <footer>
+    <small>Data is stored locally. Projection uses +8 hrs/day from the manual baseline.</small>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
