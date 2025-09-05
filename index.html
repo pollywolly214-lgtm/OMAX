@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OMAX 1530 Maintenance Calendar</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>OMAX 1530 Maintenance Tracker</h1>
+    <div class="controls">
+      <div class="block">
+        <h3>Total Machine Hours</h3>
+        <label>
+          Enter total hours now:
+          <input type="number" id="totalHoursInput" placeholder="e.g., 1279" />
+        </label>
+        <button id="logHoursBtn">Log Hours</button>
+        <div class="hint">
+          Last logged: <span id="lastLogged">—</span> •
+          Δ since last: <b><span id="deltaSince">0</span> hrs</b>
+        </div>
+        <details class="history">
+          <summary>View hour log (recent)</summary>
+          <ul id="hoursHistory"></ul>
+        </details>
+      </div>
+
+      <div class="block">
+        <h3>Task Settings</h3>
+        <p class="mini">
+          Set the baseline "<b>hours since last service</b>" for each task. We will
+          add today's total-hours change (Δ) automatically to compute the live value.
+        </p>
+        <div class="task-grid">
+          <div class="task-row">
+            <span class="task-name">Nozzle Change</span>
+            <span class="task-interval">Every 80 hrs</span>
+            <input type="number" id="nozSinceSet" placeholder="Set baseline since (e.g., 50)" />
+            <span class="task-live" id="nozLive">—</span>
+          </div>
+          <div class="task-row">
+            <span class="task-name">Pump Oil</span>
+            <span class="task-interval">Every 500 hrs</span>
+            <input type="number" id="oilSinceSet" placeholder="Set baseline since (e.g., 120)" />
+            <span class="task-live" id="oilLive">—</span>
+          </div>
+        </div>
+        <button id="saveTasksBtn">Save Task Baselines</button>
+      </div>
+
+      <div class="block summary">
+        <div><b>Current total hours:</b> <span id="currentTotal">—</span></div>
+        <div><b>Next Due Task:</b> <span id="nextTask">—</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="calendarSection">
+      <h2>Maintenance Calendar (Current + Next 2 Months)</h2>
+      <div id="months"></div>
+    </section>
+  </main>
+
+  <footer>
+    <small>Data is saved locally in your browser.</small>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
