@@ -1,0 +1,32 @@
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fa; color: #222; }
+header { background: #0a63c2; color: #fff; padding: 16px; }
+h1 { margin: 0 0 8px 0; font-size: 22px; }
+.controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.block { background: #e8f0fe; border: 1px solid #c7dafd; border-radius: 8px; padding: 12px; color: #083b75; }
+.block h3 { margin: 0 0 8px; font-size: 16px; }
+.block input { padding: 6px; width: 140px; }
+.block button { padding: 6px 10px; margin-left: 8px; background: #0a63c2; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
+.block button:hover { background: #084f9a; }
+.hint { font-size: 12px; color: #084f9a; margin-top: 4px; }
+.task-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.task-name { min-width: 120px; font-weight: bold; }
+.task-interval { color: #084f9a; font-size: 12px; }
+
+.summary { background: #e2f7ea; border-color: #bce9cb; color: #1c5d33; }
+
+main { padding: 16px; }
+#calendarSection h2 { margin: 8px 0 12px; }
+
+.month { margin-bottom: 16px; background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+.month-header { background: #f0f3f7; padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #ddd; }
+.weekdays, .week { display: grid; grid-template-columns: repeat(7, 1fr); }
+.weekdays div { background: #fafbfc; border-bottom: 1px solid #eee; padding: 6px 8px; font-size: 12px; font-weight: bold; color: #666; text-align: center; }
+.day { border-right: 1px solid #eee; border-bottom: 1px solid #eee; min-height: 90px; padding: 6px; position: relative; }
+.day:last-child { border-right: none; }
+.day .date { font-weight: bold; font-size: 12px; color: #444; }
+.day.today { background: #fff7d6; }
+.day.other-month { background: #f8f9fb; color: #aaa; }
+.event { margin-top: 4px; padding: 3px 4px; font-size: 12px; border-radius: 4px; background: #ffcf66; color: #333; display: inline-block; }
+.event.nozzle { background: #ffd166; }
+.event.oil { background: #9ad1ff; }
