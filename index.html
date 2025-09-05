@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OMAX Maintenance Calendar</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>OMAX 1530 Maintenance Tracker</h1>
+    <div class="inputs">
+      <label>Manual Hours: <input type="number" id="manualHours" /></label>
+      <button onclick="setManualHours()">Set</button>
+      <br/>
+      <label>Daily Entry Hours: <input type="number" id="dailyHours" /></label>
+      <button onclick="setDailyHours()">Update</button>
+    </div>
+    <div id="dashboard">
+      <p><b>Estimated Hours:</b> <span id="estHours"></span></p>
+      <p><b>Manual Hours:</b> <span id="manHours"></span></p>
+      <p><b>Next Due Task:</b> <span id="nextTask"></span></p>
+    </div>
+  </header>
+
+  <main>
+    <section id="taskControls">
+      <h2>Task Settings</h2>
+      <label>Nozzle Change - Last Done Hours: 
+        <input type="number" id="lastNozzle" onchange="updateTaskHours('Nozzle Change', this.value)" />
+      </label><br/>
+      <label>Pump Oil - Last Done Hours: 
+        <input type="number" id="lastOil" onchange="updateTaskHours('Pump Oil', this.value)" />
+      </label>
+    </section>
+
+    <h2>Maintenance Calendar (3 Months)</h2>
+    <div id="calendar"></div>
+  </main>
+
+  <footer>
+    <p>OMAX Maintenance Calendar - Prototype with LocalStorage</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
