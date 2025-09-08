@@ -2,23 +2,24 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OMAX 1530 Maintenance Tracker</title>
   <link rel="stylesheet" href="style.css" />
-  <!-- Firebase SDKs (v8 CDN for simple drop-in) -->
+
+  <!-- Firebase SDKs (v8 CDN for static sites) -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 
+  <!-- Your Firebase project config -->
   <script>
-    // TODO: paste your Firebase web config here
     window.FIREBASE_CONFIG = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_PROJECT_ID.appspot.com",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId: "YOUR_APP_ID",
+      apiKey: "AIzaSyDhUtEx4uvUN_CssllXlm5f3dE8-MTqei0",
+      authDomain: "omax-maintenance.firebaseapp.com",
+      projectId: "omax-maintenance",
+      storageBucket: "omax-maintenance.appspot.com",
+      messagingSenderId: "49676420080",
+      appId: "1:49676420080:web:43cdd192e462844f7b5335"
     };
   </script>
 </head>
@@ -37,9 +38,10 @@
   <main id="content"></main>
 
   <footer>
-    <small>Cloud-synced via Firestore (anonymous). Calendar shows current + next two months. Daily capacity assumed 8 hrs.</small>
+    <small>Cloud-synced via Firestore (anonymous). Calendar shows current + next two months. 8 hrs/day assumed.</small>
   </footer>
 
+  <!-- Your app logic -->
   <script src="app.js"></script>
 </body>
 </html>
