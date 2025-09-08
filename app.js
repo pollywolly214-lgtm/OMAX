@@ -1,29 +1,59 @@
 /* =========================================================
-   OMAX 1530 Maintenance Tracker — v6.2.1
-   - Calendar hover bubble + cutting jobs (from v6.2)
-   - FIX: editing "Baseline since last (hrs)" re-anchors task so the
-          calendar updates immediately after a manual change.
+   OMAX 1530 Maintenance Tracker — v7.0 (Cloud sync: Firebase)
+   - Persists state in Firestore under anonymous auth (per-user doc)
+   - Removes localStorage dependency for primary state
+   - Keeps all previous features (calendar bubbles, cutting jobs, etc.)
    ========================================================= */
 
 const DAILY_HOURS = 8;
 
-// ---- Storage keys & schema ----
-const APP_SCHEMA = 62;
-const LS_APP_SCHEMA    = "omax_app_schema";
-const LS_TOTAL_HISTORY = "omax_total_history_v2";   // [{dateISO, hours}]
-const LS_TASKS_INTERVAL = "omax_tasks_interval_v6"; // array
-const LS_TASKS_ASREQ   = "omax_tasks_asreq_v6";     // array
-const LS_INVENTORY     = "omax_inventory_v1";       // array
-const LS_CUTTING_JOBS  = "omax_cutting_jobs_v1";    // array
+/* ---------------- Firebase (Cloud) ---------------- */
+// Assumes Firebase SDKs loaded in index.html
+let FB = {
+  app: null,
+  auth: null,
+  db: null,
+  user: null,
+  docRef: null, // users/{uid}/app/state (single document)
+  ready: false
+};
 
-// ---- Utility helpers ----
-const $ = (s, r=document) => r.querySelector(s);
-const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
-function debounce(fn, ms=250) { let t; return (...a)=>{clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
-function genId(name) { const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
-function ymd(date){return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;}
+async function initFirebase() {
+  // Wait for SDK globals
+  if (!window.firebase || !firebase.initializeApp) {
+    console.error("Firebase SDK not found. Check index.html includes.");
+    return;
+  }
+  if (!window.FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey) {
+    console.error("Missing FIREBASE_CONFIG in index.html.");
+    return;
+  }
 
-// ---- Defaults ----
+  FB.app  = firebase.initializeApp(window.FIREBASE_CONFIG);
+  FB.auth = firebase.auth();
+  FB.db   = firebase.firestore();
+
+  // Optional, recommended for v9 compat CDN:
+  // firebase.firestore().settings({ ignoreUndefinedProperties: true });
+
+  // Anonymous sign-in
+  try {
+    const cred = await FB.auth.signInAnonymously();
+    FB.user = cred.user;
+  } catch (e) {
+    console.error("Auth error:", e);
+    alert("Cloud sign-in failed. Check Firebase rules and config.");
+    return;
+  }
+
+  // Document path per user
+  FB.docRef = FB.db.collection("users").doc(FB.user.uid).collection("app").doc("state");
+  FB.ready = true;
+}
+
+/* ---------------- Schema / Defaults ---------------- */
+const APP_SCHEMA = 70;
+
 const defaultIntervalTasks = [
   { id:"noz_filter_or", name:"Nozzle filter & inlet O-ring", interval:40,  sinceBase:null, anchorTotal:null, cost:"", link:"", pn:"307525", price:283 },
   { id:"pump_tube_noz_filter", name:"Pump tube & nozzle filter life", interval:80, sinceBase:null, anchorTotal:null, cost:"", link:"", pn:"307561-02", price:170 },
@@ -64,55 +94,74 @@ const defaultAsReqTasks = [
   { id:"clean_rails",           name:"Clean X-rails & Y-bridge rails", condition:"If debris occurs", cost:"", link:"" }
 ];
 
-// ---- State ----
+function seedInventoryFromTasks(){
+  return [
+    ...defaultIntervalTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.link||"" })),
+    ...defaultAsReqTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.link||"" }))
+  ];
+}
+
+/* ---------------- In-memory state ---------------- */
 let totalHistory = []; // [{dateISO,hours}]
 let tasksInterval = [];
 let tasksAsReq   = [];
 let inventory    = [];
 let cuttingJobs  = []; // [{id,name,estimateHours,material,notes,dueISO,startISO}]
+
 let RENDER_TOTAL = null;
 let RENDER_DELTA = 0;
 
-// ---- Storage & migration ----
-function loadState() {
-  totalHistory = JSON.parse(localStorage.getItem(LS_TOTAL_HISTORY) || "[]");
-  tasksInterval = JSON.parse(localStorage.getItem(LS_TASKS_INTERVAL) || "null") || defaultIntervalTasks.slice();
-  tasksAsReq   = JSON.parse(localStorage.getItem(LS_TASKS_ASREQ)   || "null") || defaultAsReqTasks.slice();
-  inventory    = JSON.parse(localStorage.getItem(LS_INVENTORY)     || "null") || seedInventoryFromTasks();
-  cuttingJobs  = JSON.parse(localStorage.getItem(LS_CUTTING_JOBS)  || "[]");
-  migrate();
+/* ---------------- Cloud Load/Save ---------------- */
+function snapshotState() {
+  return {
+    schema: APP_SCHEMA,
+    totalHistory, tasksInterval, tasksAsReq, inventory, cuttingJobs
+  };
 }
-function migrate() {
-  if (!Array.isArray(tasksInterval)) tasksInterval = [];
-  if (!Array.isArray(tasksAsReq)) tasksAsReq = [];
-  if (!Array.isArray(inventory)) inventory = [];
-  if (!Array.isArray(cuttingJobs)) cuttingJobs = [];
+function adoptState(docData) {
+  totalHistory = Array.isArray(docData.totalHistory) ? docData.totalHistory : [];
+  tasksInterval = Array.isArray(docData.tasksInterval) ? docData.tasksInterval : defaultIntervalTasks.slice();
+  tasksAsReq = Array.isArray(docData.tasksAsReq) ? docData.tasksAsReq : defaultAsReqTasks.slice();
+  inventory = Array.isArray(docData.inventory) ? docData.inventory : seedInventoryFromTasks();
+  cuttingJobs = Array.isArray(docData.cuttingJobs) ? docData.cuttingJobs : [];
+}
 
-  tasksInterval.forEach(t => {
-    if (typeof t.anchorTotal !== "number" && t.anchorTotal !== null) t.anchorTotal = null;
-  });
+const saveCloudDebounced = debounce(async () => {
+  if (!FB.ready || !FB.docRef) return;
+  try {
+    await FB.docRef.set(snapshotState(), { merge: true });
+    // Optional: toast("Saved to cloud");
+  } catch (e) {
+    console.error("Cloud save failed:", e);
+  }
+}, 350);
 
-  const cur = parseInt(localStorage.getItem(LS_APP_SCHEMA) || "0", 10);
-  if (cur !== APP_SCHEMA) {
-    localStorage.setItem(LS_APP_SCHEMA, String(APP_SCHEMA));
-    localStorage.setItem(LS_TASKS_INTERVAL, JSON.stringify(tasksInterval));
-    localStorage.setItem(LS_TASKS_ASREQ,   JSON.stringify(tasksAsReq));
-    localStorage.setItem(LS_INVENTORY,     JSON.stringify(inventory));
-    localStorage.setItem(LS_CUTTING_JOBS,  JSON.stringify(cuttingJobs));
+async function loadFromCloud() {
+  if (!FB.ready || !FB.docRef) return;
+  try {
+    const snap = await FB.docRef.get();
+    if (snap.exists) {
+      adoptState(snap.data());
+    } else {
+      // seed new doc
+      adoptState(snapshotState()); // with defaults
+      await FB.docRef.set(snapshotState());
+    }
+  } catch (e) {
+    console.error("Cloud load failed:", e);
+    // Fallback to defaults if needed
+    adoptState(snapshotState());
   }
 }
 
-// ---- Saves ----
-function saveTotal(hours) {
-  totalHistory.push({ dateISO: new Date().toISOString(), hours: parseFloat(hours) });
-  localStorage.setItem(LS_TOTAL_HISTORY, JSON.stringify(totalHistory));
-}
-function _saveTasksRaw(){ localStorage.setItem(LS_TASKS_INTERVAL, JSON.stringify(tasksInterval)); localStorage.setItem(LS_TASKS_ASREQ, JSON.stringify(tasksAsReq)); }
-function _saveInventoryRaw(){ localStorage.setItem(LS_INVENTORY, JSON.stringify(inventory)); }
-function _saveJobsRaw(){ localStorage.setItem(LS_CUTTING_JOBS, JSON.stringify(cuttingJobs)); }
-const saveTasksDebounced = debounce(_saveTasksRaw, 300);
+/* ---------------- Utility helpers ---------------- */
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+function debounce(fn, ms=250) { let t; return (...a)=>{clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
+function genId(name) { const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
+function ymd(date){return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;}
 
-// ---- Totals / Δ ----
+/* ---------------- Totals / Δ ---------------- */
 function currentTotal(){ return totalHistory.length ? totalHistory[totalHistory.length-1].hours : null; }
 function previousTotal(){ return totalHistory.length>1 ? totalHistory[totalHistory.length-2].hours : null; }
 function deltaSinceLast(){
@@ -122,7 +171,7 @@ function deltaSinceLast(){
   return Math.max(0, cur - prev);
 }
 
-// ---- Hours since / next due ----
+/* ---------------- Hours since / next due ---------------- */
 function liveSince(task){
   const cur = RENDER_TOTAL ?? currentTotal();
   const delta = RENDER_DELTA ?? deltaSinceLast();
@@ -140,20 +189,12 @@ function nextDue(task){
   return { since, remain, days, due, lastServicedAt };
 }
 
-// ---- Toast ----
+/* ---------------- Toast ---------------- */
 function toast(msg){
   const t = document.createElement("div");
   t.className = "toast"; t.textContent = msg; document.body.appendChild(t);
   setTimeout(()=>t.classList.add("show"),10);
-  setTimeout(()=>{t.classList.remove("show"); setTimeout(()=>t.remove(),200);},1600);
-}
-
-// ---- Seed inventory from tasks ----
-function seedInventoryFromTasks(){
-  return [
-    ...defaultIntervalTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.link||"" })),
-    ...defaultAsReqTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.link||"" }))
-  ];
+  setTimeout(()=>{t.classList.remove("show"); setTimeout(()=>t.remove(),200);},1400);
 }
 
 /* ======================= VIEWS ======================= */
@@ -193,9 +234,50 @@ function viewDashboard(){
       </div>
 
       <div id="months"></div>
-      <div class="small">Hover a due item for actions. Click “Complete” to reset hours to 0.</div>
+      <div class="small">Hover a due item for actions. Double-click is disabled for downloads.</div>
     </div>
   </div>`;
+}
+
+function taskDetailsInterval(task){
+  const nd = nextDue(task);
+  const sinceTxt = nd ? `${nd.since.toFixed(0)} / ${task.interval} hrs` : "—";
+  const daysTxt = nd ? `${nd.days} day(s) → ${nd.due.toDateString()}` : "—";
+  const lastServ = nd && nd.lastServicedAt!=null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
+
+  return `
+  <details data-task-id="${task.id}">
+    <summary>${task.name} — <span class="small">since: ${sinceTxt} | due: ${daysTxt}</span></summary>
+    <div class="row"><label>Name:</label><div><input type="text" data-k="name" data-id="${task.id}" data-list="interval" value="${task.name}" /></div></div>
+    <div class="row"><label>Interval (hrs):</label><div><input type="number" min="1" data-k="interval" data-id="${task.id}" data-list="interval" value="${task.interval}" /></div></div>
+    <div class="row"><label>Baseline “since last” (hrs):</label><div><input type="number" min="0" data-k="sinceBase" data-id="${task.id}" data-list="interval" value="${task.sinceBase!=null?task.sinceBase:""}" /></div></div>
+    <div class="row"><label>When last serviced (hrs):</label><div>${lastServ}</div></div>
+    <div class="row"><label>Cost placeholder:</label><div><input type="text" data-k="cost" data-id="${task.id}" data-list="interval" value="${task.cost||""}" placeholder="$____" /></div></div>
+    <div class="row"><label>Link:</label><div><input type="url" data-k="link" data-id="${task.id}" data-list="interval" value="${task.link||""}" placeholder="https://store…" /></div></div>
+    <div class="row"><label>Part #:</label><div><input type="text" data-k="pn" data-id="${task.id}" data-list="interval" value="${task.pn||""}" /></div></div>
+    <div class="row"><label>Price:</label><div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="interval" value="${task.price!=null?task.price:""}" /></div></div>
+    <div class="row"><label>Actions:</label>
+      <div>
+        <button class="btn-complete" data-complete="${task.id}">Mark Completed Now</button>
+        <button class="danger" data-remove="${task.id}" data-from="interval">Remove</button>
+      </div>
+    </div>
+  </details>`;
+}
+function taskDetailsAsReq(task){
+  return `
+  <details data-task-id="${task.id}">
+    <summary>${task.name} — <span class="small">${task.condition||"As required"}</span></summary>
+    <div class="row"><label>Name:</label><div><input type="text" data-k="name" data-id="${task.id}" data-list="asreq" value="${task.name}" /></div></div>
+    <div class="row"><label>Condition:</label><div><input type="text" data-k="condition" data-id="${task.id}" data-list="asreq" value="${task.condition||""}" /></div></div>
+    <div class="row"><label>Cost placeholder:</label><div><input type="text" data-k="cost" data-id="${task.id}" data-list="asreq" value="${task.cost||""}" placeholder="$____" /></div></div>
+    <div class="row"><label>Link:</label><div><input type="url" data-k="link" data-id="${task.id}" data-list="asreq" value="${task.link||""}" placeholder="https://store…" /></div></div>
+    <div class="row"><label>Part #:</label><div><input type="text" data-k="pn" data-id="${task.id}" data-list="asreq" value="${task.pn||""}" /></div></div>
+    <div class="row"><label>Price:</label><div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="asreq" value="${task.price!=null?task.price:""}" /></div></div>
+    <div class="row"><label>Actions:</label>
+      <div><button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button></div>
+    </div>
+  </details>`;
 }
 
 function viewSettings(){
@@ -203,7 +285,7 @@ function viewSettings(){
   <div class="container">
     <div class="block" style="grid-column: 1 / -1">
       <h3>Maintenance Settings</h3>
-      <p class="small">Two categories: <b>By Interval (hrs)</b> and <b>As Required</b>. Edits update Dashboard, Calendar, and Cost Analysis.</p>
+      <p class="small">Two categories: <b>By Interval (hrs)</b> and <b>As Required</b>. Cloud-synced.</p>
 
       <div class="add-forms">
         <form id="addIntervalForm" class="mini-form">
@@ -258,7 +340,37 @@ function viewCosts(){
   </div>`;
 }
 
-// ---- Cutting Jobs page ----
+function viewInventory(){
+  const rows = inventory.map((it, i) => `
+    <tr>
+      <td><input type="text" data-inv="name" data-i="${i}" value="${it.name}"></td>
+      <td><input type="text" data-inv="pn" data-i="${i}" value="${it.pn||""}"></td>
+      <td><input type="url"  data-inv="link" data-i="${i}" value="${it.link||""}"></td>
+      <td><input type="number" step="1" min="0" data-inv="qty" data-i="${i}" value="${it.qty||0}"></td>
+      <td><input type="text" data-inv="unit" data-i="${i}" value="${it.unit||"pcs"}"></td>
+      <td><input type="text" data-inv="note" data-i="${i}" value="${it.note||""}"></td>
+      <td><button class="danger" data-inv="remove" data-i="${i}">−</button></td>
+    </tr>`).join("");
+
+  return `
+  <div class="container">
+    <div class="block" style="grid-column: 1 / -1">
+      <h3>Inventory (Cloud)</h3>
+      <div class="inv-toolbar">
+        <button id="addInvRow">+ Add Item</button>
+        <button id="saveInv">Save Inventory</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Item</th><th>Part #</th><th>Link</th><th>Qty</th><th>Unit</th><th>Notes</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="invBody">${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+/* ---------------- Cutting Jobs ---------------- */
 function viewJobs(){
   const rows = cuttingJobs.map(j => `
     <tr>
@@ -298,49 +410,7 @@ function viewJobs(){
   </div>`;
 }
 
-/* ---------------- Task details blocks (Settings) ---------------- */
-function taskDetailsInterval(task){
-  const nd = nextDue(task);
-  const sinceTxt = nd ? `${nd.since.toFixed(0)} / ${task.interval} hrs` : "—";
-  const daysTxt = nd ? `${nd.days} day(s) → ${nd.due.toDateString()}` : "—";
-  const lastServ = nd && nd.lastServicedAt!=null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
-
-  return `
-  <details data-task-id="${task.id}">
-    <summary>${task.name} — <span class="small">since: ${sinceTxt} | due: ${daysTxt}</span></summary>
-    <div class="row"><label>Name:</label><div><input type="text" data-k="name" data-id="${task.id}" data-list="interval" value="${task.name}" /></div></div>
-    <div class="row"><label>Interval (hrs):</label><div><input type="number" min="1" data-k="interval" data-id="${task.id}" data-list="interval" value="${task.interval}" /></div></div>
-    <div class="row"><label>Baseline “since last” (hrs):</label><div><input type="number" min="0" data-k="sinceBase" data-id="${task.id}" data-list="interval" value="${task.sinceBase!=null?task.sinceBase:""}" /></div></div>
-    <div class="row"><label>When last serviced (hrs):</label><div>${lastServ}</div></div>
-    <div class="row"><label>Cost placeholder:</label><div><input type="text" data-k="cost" data-id="${task.id}" data-list="interval" value="${task.cost||""}" placeholder="$____" /></div></div>
-    <div class="row"><label>Link:</label><div><input type="url" data-k="link" data-id="${task.id}" data-list="interval" value="${task.link||""}" placeholder="https://store…" /></div></div>
-    <div class="row"><label>Part #:</label><div><input type="text" data-k="pn" data-id="${task.id}" data-list="interval" value="${task.pn||""}" /></div></div>
-    <div class="row"><label>Price:</label><div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="interval" value="${task.price!=null?task.price:""}" /></div></div>
-    <div class="row"><label>Actions:</label>
-      <div>
-        <button class="btn-complete" data-complete="${task.id}">Mark Completed Now</button>
-        <button class="danger" data-remove="${task.id}" data-from="interval">Remove</button>
-      </div>
-    </div>
-  </details>`;
-}
-function taskDetailsAsReq(task){
-  return `
-  <details data-task-id="${task.id}">
-    <summary>${task.name} — <span class="small">${task.condition||"As required"}</span></summary>
-    <div class="row"><label>Name:</label><div><input type="text" data-k="name" data-id="${task.id}" data-list="asreq" value="${task.name}" /></div></div>
-    <div class="row"><label>Condition:</label><div><input type="text" data-k="condition" data-id="${task.id}" data-list="asreq" value="${task.condition||""}" /></div></div>
-    <div class="row"><label>Cost placeholder:</label><div><input type="text" data-k="cost" data-id="${task.id}" data-list="asreq" value="${task.cost||""}" placeholder="$____" /></div></div>
-    <div class="row"><label>Link:</label><div><input type="url" data-k="link" data-id="${task.id}" data-list="asreq" value="${task.link||""}" placeholder="https://store…" /></div></div>
-    <div class="row"><label>Part #:</label><div><input type="text" data-k="pn" data-id="${task.id}" data-list="asreq" value="${task.pn||""}" /></div></div>
-    <div class="row"><label>Price:</label><div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="asreq" value="${task.price!=null?task.price:""}" /></div></div>
-    <div class="row"><label>Actions:</label>
-      <div><button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button></div>
-    </div>
-  </details>`;
-}
-
-/* ---------------- Calendar ---------------- */
+/* ---------------- Calendar (with bubbles & jobs) ---------------- */
 function renderCalendar(){
   const container = $("#months");
   if (!container) return;
@@ -355,7 +425,7 @@ function renderCalendar(){
     (dueMap[key] ||= []).push({ type:"task", id:t.id, name:t.name });
   });
 
-  // Cutting jobs expand over each day
+  // Jobs map (expanded per day)
   const jobsMap = {}; // key Y-M-D -> array of {type:"job", id, name}
   cuttingJobs.forEach(j => {
     const start = new Date(j.startISO);
@@ -403,7 +473,7 @@ function renderCalendar(){
 
       const key = ymd(date);
 
-      // Maintenance events (hover bubble + actions)
+      // Maintenance events
       (dueMap[key] || []).forEach(ev => {
         const btn = document.createElement("button");
         btn.type = "button";
@@ -475,9 +545,9 @@ function showTaskBubble(taskId, anchor){
       <button data-bbl-edit="${t.id}">Edit settings</button>
     </div>
   `;
-  $("[data-bbl-complete]").onclick = ()=>{ completeTask(taskId); hideBubble(); };
-  $("[data-bbl-remove]").onclick   = ()=>{ tasksInterval = tasksInterval.filter(x=>x.id!==taskId); _saveTasksRaw(); toast("Removed"); hideBubble(); route(); };
-  $("[data-bbl-edit]").onclick     = ()=>{ hideBubble(); openSettingsAndReveal(taskId); };
+  document.querySelector("[data-bbl-complete]").onclick = ()=>{ completeTask(taskId); hideBubble(); };
+  document.querySelector("[data-bbl-remove]").onclick   = ()=>{ tasksInterval = tasksInterval.filter(x=>x.id!==taskId); saveCloudDebounced(); toast("Removed"); hideBubble(); route(); };
+  document.querySelector("[data-bbl-edit]").onclick     = ()=>{ hideBubble(); openSettingsAndReveal(taskId); };
 }
 
 function showJobBubble(jobId, anchor){
@@ -495,18 +565,18 @@ function showJobBubble(jobId, anchor){
       <button class="danger" data-bbl-remove-job="${j.id}">Remove</button>
     </div>
   `;
-  $("[data-bbl-remove-job]").onclick = ()=>{ cuttingJobs = cuttingJobs.filter(x=>x.id!==jobId); _saveJobsRaw(); toast("Removed"); hideBubble(); route(); };
-  $("[data-bbl-edit-job]").onclick = ()=>{ hideBubble(); openJobsEditor(j.id); };
+  document.querySelector("[data-bbl-remove-job]").onclick = ()=>{ cuttingJobs = cuttingJobs.filter(x=>x.id!==jobId); saveCloudDebounced(); toast("Removed"); hideBubble(); route(); };
+  document.querySelector("[data-bbl-edit-job]").onclick = ()=>{ hideBubble(); openJobsEditor(j.id); };
 }
 
-/* -------- Completion, Quick Add, Settings open -------- */
+/* -------- Completion & quick add -------- */
 function completeTask(taskId){
   const t = tasksInterval.find(x => x.id === taskId);
   if (!t) return;
   const cur = RENDER_TOTAL ?? currentTotal();
   t.anchorTotal = cur != null ? cur : 0;
-  t.sinceBase = 0; // explicit in settings
-  _saveTasksRaw();
+  t.sinceBase = 0;
+  saveCloudDebounced();
   toast("Task completed");
   route();
 }
@@ -518,13 +588,13 @@ function quickAddFromCalendar({ name, interval, condition }){
     tasksAsReq.push({ id, name, condition:condition||"As required", cost:"", link:"" });
   }
   inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
-  _saveTasksRaw(); _saveInventoryRaw();
+  saveCloudDebounced();
   toast("Task added");
   route();
 }
 function openSettingsAndReveal(taskId){
   location.hash = "#settings";
-  setTimeout(()=>{ const el = document.querySelector(`[data-task-id="${taskId}"]`); if (el) { el.open = true; el.scrollIntoView({behavior:"smooth", block:"center"}); } }, 50);
+  setTimeout(()=>{ const el = document.querySelector(`[data-task-id="${taskId}"]`); if (el) { el.open = true; el.scrollIntoView({behavior:"smooth", block:"center"}); } }, 60);
 }
 
 /* -------- Cutting jobs helpers -------- */
@@ -544,8 +614,14 @@ function renderDashboard(){
 
   $("#logBtn").onclick = ()=> {
     const v = parseFloat($("#totalInput").value);
-    if (!isNaN(v)) { saveTotal(v); toast("Logged"); route(); }
+    if (!isNaN(v)) {
+      totalHistory.push({ dateISO: new Date().toISOString(), hours: v });
+      saveCloudDebounced();
+      toast("Logged");
+      route();
+    }
   };
+
   $("#quickAddForm").addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = $("#qa_name").value.trim();
@@ -573,7 +649,7 @@ function renderSettings(){
   const root = $("#content");
   root.innerHTML = viewSettings();
 
-  // Inputs (with re-anchor on sinceBase edits)
+  // Inputs (with re-anchor on sinceBase edits) — cloud save
   $$("#content [data-id]").forEach(inp => {
     inp.addEventListener("input", () => {
       const id   = inp.getAttribute("data-id");
@@ -585,24 +661,17 @@ function renderSettings(){
       let val = inp.value;
       if (["interval","sinceBase","price"].includes(key)) {
         val = (val === "" ? null : parseFloat(val));
-        if (key === "interval" && val !== null && !(val > 0)) {
-          inp.value = t.interval ?? ""; return;
-        }
+        if (key === "interval" && val !== null && !(val > 0)) { inp.value = t.interval ?? ""; return; }
       }
-
       t[key] = val;
 
-      // PATCH: when baseline 'since last' changes, re-anchor so calendar moves immediately
+      // When baseline 'since last' changes, re-anchor so calendar moves immediately
       if (list === "interval" && key === "sinceBase") {
         const cur = RENDER_TOTAL ?? currentTotal();
-        if (val !== null && cur != null) {
-          // liveSince = currentTotal - anchorTotal = desired 'since'
-          t.anchorTotal = cur - val;
-        }
-        // If baseline cleared (null), we keep existing anchor to avoid surprising jumps.
+        if (val !== null && cur != null) t.anchorTotal = cur - val;
       }
 
-      saveTasksDebounced();
+      saveCloudDebounced();
     });
   });
 
@@ -613,11 +682,11 @@ function renderSettings(){
       const from = btn.getAttribute("data-from");
       if (from === "interval") tasksInterval = tasksInterval.filter(t => t.id !== id);
       else tasksAsReq = tasksAsReq.filter(t => t.id !== id);
-      _saveTasksRaw(); toast("Removed"); route();
+      saveCloudDebounced(); toast("Removed"); route();
     });
   });
 
-  // Complete from settings
+  // Complete
   $$("#content .btn-complete").forEach(btn => {
     btn.addEventListener("click", () => completeTask(btn.getAttribute("data-complete")));
   });
@@ -631,7 +700,7 @@ function renderSettings(){
     const id = genId(name);
     tasksInterval.push({ id, name, interval, sinceBase:null, anchorTotal:null, cost:"", link:"" });
     inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
-    _saveTasksRaw(); _saveInventoryRaw(); toast("Task added"); route();
+    saveCloudDebounced(); toast("Task added"); route();
   });
   $("#addAsReqForm").addEventListener("submit",(e)=>{
     e.preventDefault();
@@ -641,10 +710,10 @@ function renderSettings(){
     const id = genId(name);
     tasksAsReq.push({ id, name, condition, cost:"", link:"" });
     inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
-    _saveTasksRaw(); _saveInventoryRaw(); toast("Task added"); route();
+    saveCloudDebounced(); toast("Task added"); route();
   });
 
-  $("#saveTasksBtn").onclick = ()=>{ _saveTasksRaw(); toast("Saved"); route(); };
+  $("#saveTasksBtn").onclick = ()=>{ saveCloudDebounced(); toast("Saved"); route(); };
 }
 
 function renderCosts(){
@@ -663,7 +732,7 @@ function renderCosts(){
         rows.push(`<tr>
           <td>${t.name}</td><td>Per Interval</td><td>${t.interval}</td>
           <td>${t.cost || (t.price!=null?("$"+t.price):"$____")}</td>
-          <td>${t.link ? `<a href="${t.link}" target="_blank">link</a>` : "link"}</td>
+          <td>${t.link ? `<a href="${t.link}" target="_blank" rel="noopener">link</a>` : "link"}</td>
         </tr>`);
       });
     }
@@ -672,7 +741,7 @@ function renderCosts(){
         rows.push(`<tr>
           <td>${t.name}</td><td>As Required</td><td>—</td>
           <td>${t.cost || (t.price!=null?("$"+t.price):"$____")}</td>
-          <td>${t.link ? `<a href="${t.link}" target="_blank">link</a>` : "link"}</td>
+          <td>${t.link ? `<a href="${t.link}" target="_blank" rel="noopener">link</a>` : "link"}</td>
         </tr>`);
       });
     }
@@ -682,10 +751,38 @@ function renderCosts(){
   draw();
 }
 
+function renderInventory(){
+  $("#content").innerHTML = viewInventory();
+
+  $$("#content [data-inv]").forEach(el => {
+    el.addEventListener("input", () => {
+      const i = parseInt(el.getAttribute("data-i"), 10);
+      const k = el.getAttribute("data-inv");
+      if (k === "remove") return;
+      inventory[i][k] = (k === "qty") ? parseFloat(el.value||0) : el.value;
+      saveCloudDebounced();
+    });
+  });
+  $$("#content [data-inv='remove']").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const i = parseInt(btn.getAttribute("data-i"), 10);
+      inventory.splice(i,1);
+      saveCloudDebounced();
+      toast("Removed");
+      renderInventory();
+    });
+  });
+  $("#addInvRow").onclick = () => {
+    inventory.push({ id:"inv_custom_"+Date.now(), name:"New Item", qty:0, unit:"pcs", note:"", pn:"", link:"" });
+    renderInventory();
+  };
+  $("#saveInv").onclick = () => { saveCloudDebounced(); toast("Saved"); route(); };
+}
+
+/* ---------------- Jobs ---------------- */
 function renderJobs(){
   $("#content").innerHTML = viewJobs();
 
-  // add job
   $("#jobForm").addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = $("#job_name").value.trim();
@@ -698,15 +795,14 @@ function renderJobs(){
     const span = computeJobSpan(dueISO, hours);
     const id = genId(name);
     cuttingJobs.push({ id, name, estimateHours:hours, material, notes, dueISO: span.dueISO, startISO: span.startISO });
-    _saveJobsRaw(); toast("Job added"); route();
+    saveCloudDebounced(); toast("Job added"); route();
   });
 
-  // table actions
   $$("#content [data-remove-job]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const id = btn.getAttribute("data-remove-job");
       cuttingJobs = cuttingJobs.filter(j=>j.id!==id);
-      _saveJobsRaw(); toast("Removed"); renderJobs();
+      saveCloudDebounced(); toast("Removed"); renderJobs();
     });
   });
   $$("#content [data-edit-job]").forEach(btn=>{
@@ -716,7 +812,6 @@ function renderJobs(){
   });
 }
 
-/* -------- Jobs editor (simple prompt modal replacement) -------- */
 function openJobsEditor(jobId){
   const j = cuttingJobs.find(x=>x.id===jobId);
   if (!j) return;
@@ -729,65 +824,7 @@ function openJobsEditor(jobId){
   const dueISO = new Date(`${dueStr}T00:00:00`).toISOString();
   const span = computeJobSpan(dueISO, est);
   Object.assign(j, { name, estimateHours:est, material, notes, dueISO:span.dueISO, startISO:span.startISO });
-  _saveJobsRaw(); toast("Updated"); route();
-}
-
-/* ---------------- Inventory ---------------- */
-function viewInventory(){
-  const rows = inventory.map((it, i) => `
-    <tr>
-      <td><input type="text" data-inv="name" data-i="${i}" value="${it.name}"></td>
-      <td><input type="text" data-inv="pn" data-i="${i}" value="${it.pn||""}"></td>
-      <td><input type="url"  data-inv="link" data-i="${i}" value="${it.link||""}"></td>
-      <td><input type="number" step="1" min="0" data-inv="qty" data-i="${i}" value="${it.qty||0}"></td>
-      <td><input type="text" data-inv="unit" data-i="${i}" value="${it.unit||"pcs"}"></td>
-      <td><input type="text" data-inv="note" data-i="${i}" value="${it.note||""}"></td>
-      <td><button class="danger" data-inv="remove" data-i="${i}">−</button></td>
-    </tr>`).join("");
-
-  return `
-  <div class="container">
-    <div class="block" style="grid-column: 1 / -1">
-      <h3>Inventory (Old & New)</h3>
-      <div class="inv-toolbar">
-        <button id="addInvRow">+ Add Item</button>
-        <button id="saveInv">Save Inventory</button>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Item</th><th>Part #</th><th>Link</th><th>Qty</th><th>Unit</th><th>Notes</th><th>Actions</th></tr>
-        </thead>
-        <tbody id="invBody">${rows}</tbody>
-      </table>
-    </div>
-  </div>`;
-}
-function renderInventory(){
-  $("#content").innerHTML = viewInventory();
-
-  $$("#content [data-inv]").forEach(el => {
-    el.addEventListener("input", () => {
-      const i = parseInt(el.getAttribute("data-i"), 10);
-      const k = el.getAttribute("data-inv");
-      if (k === "remove") return;
-      inventory[i][k] = (k === "qty") ? parseFloat(el.value||0) : el.value;
-      debounce(()=>localStorage.setItem(LS_INVENTORY, JSON.stringify(inventory)), 300)();
-    });
-  });
-  $$("#content [data-inv='remove']").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const i = parseInt(btn.getAttribute("data-i"), 10);
-      inventory.splice(i,1);
-      localStorage.setItem(LS_INVENTORY, JSON.stringify(inventory));
-      toast("Removed");
-      renderInventory();
-    });
-  });
-  $("#addInvRow").onclick = () => {
-    inventory.push({ id:"inv_custom_"+Date.now(), name:"New Item", qty:0, unit:"pcs", note:"", pn:"", link:"" });
-    renderInventory();
-  };
-  $("#saveInv").onclick = () => { localStorage.setItem(LS_INVENTORY, JSON.stringify(inventory)); toast("Saved"); route(); };
+  saveCloudDebounced(); toast("Updated"); route();
 }
 
 /* ---------------- Tabs / Router ---------------- */
@@ -812,6 +849,15 @@ function route(){
 }
 
 /* ---------------- Boot ---------------- */
-loadState();
-window.addEventListener("hashchange", route);
-route();
+(async function boot(){
+  await initFirebase();
+  await loadFromCloud();
+  window.addEventListener("hashchange", route);
+  route();
+
+  // Prevent double-click from triggering downloads on anchors
+  document.addEventListener("dblclick", (e) => {
+    const a = e.target.closest && e.target.closest("a");
+    if (a) { e.preventDefault(); window.open(a.href, "_blank", "noopener"); }
+  });
+})();
