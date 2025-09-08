@@ -22,6 +22,8 @@ table { width: 100%; border-collapse: collapse; }
 th, td { border: 1px solid #e1e5ee; padding: 8px; text-align: left; }
 th { background: #f7f9fc; }
 
+.inv-toolbar { display:flex; gap:8px; margin-bottom:8px; }
+
 /* Calendar */
 .month { margin-bottom: 16px; background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
 .month-header { background: #f0f3f7; padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #ddd; }
