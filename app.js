@@ -1,5 +1,8 @@
 /* =========================================================
-   OMAX 1530 Maintenance Tracker — v6.2 (calendar bubble + cutting jobs)
+   OMAX 1530 Maintenance Tracker — v6.2.1
+   - Calendar hover bubble + cutting jobs (from v6.2)
+   - FIX: editing "Baseline since last (hrs)" re-anchors task so the
+          calendar updates immediately after a manual change.
    ========================================================= */
 
 const DAILY_HOURS = 8;
@@ -18,11 +21,9 @@ const $ = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
 function debounce(fn, ms=250) { let t; return (...a)=>{clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
 function genId(name) { const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
-function pad2(n){return n<10?`0${n}`:`${n}`;}
 function ymd(date){return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;}
-function clone(d){return new Date(d.getTime());}
 
-// ---- Defaults (same as v6.1) ----
+// ---- Defaults ----
 const defaultIntervalTasks = [
   { id:"noz_filter_or", name:"Nozzle filter & inlet O-ring", interval:40,  sinceBase:null, anchorTotal:null, cost:"", link:"", pn:"307525", price:283 },
   { id:"pump_tube_noz_filter", name:"Pump tube & nozzle filter life", interval:80, sinceBase:null, anchorTotal:null, cost:"", link:"", pn:"307561-02", price:170 },
@@ -69,7 +70,6 @@ let tasksInterval = [];
 let tasksAsReq   = [];
 let inventory    = [];
 let cuttingJobs  = []; // [{id,name,estimateHours,material,notes,dueISO,startISO}]
-
 let RENDER_TOTAL = null;
 let RENDER_DELTA = 0;
 
@@ -355,7 +355,7 @@ function renderCalendar(){
     (dueMap[key] ||= []).push({ type:"task", id:t.id, name:t.name });
   });
 
-  // Cutting jobs: expand over each day
+  // Cutting jobs expand over each day
   const jobsMap = {}; // key Y-M-D -> array of {type:"job", id, name}
   cuttingJobs.forEach(j => {
     const start = new Date(j.startISO);
@@ -403,7 +403,7 @@ function renderCalendar(){
 
       const key = ymd(date);
 
-      // Maintenance events (clickable & hover bubble)
+      // Maintenance events (hover bubble + actions)
       (dueMap[key] || []).forEach(ev => {
         const btn = document.createElement("button");
         btn.type = "button";
@@ -475,7 +475,6 @@ function showTaskBubble(taskId, anchor){
       <button data-bbl-edit="${t.id}">Edit settings</button>
     </div>
   `;
-  // actions
   $("[data-bbl-complete]").onclick = ()=>{ completeTask(taskId); hideBubble(); };
   $("[data-bbl-remove]").onclick   = ()=>{ tasksInterval = tasksInterval.filter(x=>x.id!==taskId); _saveTasksRaw(); toast("Removed"); hideBubble(); route(); };
   $("[data-bbl-edit]").onclick     = ()=>{ hideBubble(); openSettingsAndReveal(taskId); };
@@ -506,7 +505,7 @@ function completeTask(taskId){
   if (!t) return;
   const cur = RENDER_TOTAL ?? currentTotal();
   t.anchorTotal = cur != null ? cur : 0;
-  t.sinceBase = 0;
+  t.sinceBase = 0; // explicit in settings
   _saveTasksRaw();
   toast("Task completed");
   route();
@@ -525,15 +524,11 @@ function quickAddFromCalendar({ name, interval, condition }){
 }
 function openSettingsAndReveal(taskId){
   location.hash = "#settings";
-  setTimeout(()=>{ // wait render
-    const el = document.querySelector(`[data-task-id="${taskId}"]`);
-    if (el) { el.open = true; el.scrollIntoView({behavior:"smooth", block:"center"}); }
-  }, 50);
+  setTimeout(()=>{ const el = document.querySelector(`[data-task-id="${taskId}"]`); if (el) { el.open = true; el.scrollIntoView({behavior:"smooth", block:"center"}); } }, 50);
 }
 
 /* -------- Cutting jobs helpers -------- */
 function computeJobSpan(dueISO, estimateHours){
-  // Back-fill from due date across days at 8 hrs/day
   const due = new Date(dueISO); due.setHours(0,0,0,0);
   const daysNeeded = Math.ceil(estimateHours / DAILY_HOURS);
   const start = new Date(due); start.setDate(due.getDate() - (daysNeeded - 1));
@@ -562,7 +557,6 @@ function renderDashboard(){
     quickAddFromCalendar({ name, interval, condition });
   });
 
-  // Next due
   const nds = tasksInterval.map(t => ({ t, nd: nextDue(t) })).filter(x => x.nd);
   nds.sort((a,b) => a.nd.due - b.nd.due);
   $("#nextDueBox").textContent = nds.length
@@ -579,7 +573,7 @@ function renderSettings(){
   const root = $("#content");
   root.innerHTML = viewSettings();
 
-  // Inputs
+  // Inputs (with re-anchor on sinceBase edits)
   $$("#content [data-id]").forEach(inp => {
     inp.addEventListener("input", () => {
       const id   = inp.getAttribute("data-id");
@@ -587,12 +581,27 @@ function renderSettings(){
       const list = inp.getAttribute("data-list");
       const arr  = list === "interval" ? tasksInterval : tasksAsReq;
       const t = arr.find(x => x.id === id); if (!t) return;
+
       let val = inp.value;
       if (["interval","sinceBase","price"].includes(key)) {
         val = (val === "" ? null : parseFloat(val));
-        if (key === "interval" && val !== null && !(val > 0)) { inp.value = t.interval ?? ""; return; }
+        if (key === "interval" && val !== null && !(val > 0)) {
+          inp.value = t.interval ?? ""; return;
+        }
       }
+
       t[key] = val;
+
+      // PATCH: when baseline 'since last' changes, re-anchor so calendar moves immediately
+      if (list === "interval" && key === "sinceBase") {
+        const cur = RENDER_TOTAL ?? currentTotal();
+        if (val !== null && cur != null) {
+          // liveSince = currentTotal - anchorTotal = desired 'since'
+          t.anchorTotal = cur - val;
+        }
+        // If baseline cleared (null), we keep existing anchor to avoid surprising jumps.
+      }
+
       saveTasksDebounced();
     });
   });
@@ -723,28 +732,7 @@ function openJobsEditor(jobId){
   _saveJobsRaw(); toast("Updated"); route();
 }
 
-/* ---------------- Tabs / Router ---------------- */
-function setActive(tab){
-  ["dashboard","settings","costs","inventory","jobs"].forEach(id=>{
-    const el = document.getElementById("tab-"+id);
-    if (el) el.classList.toggle("active", id===tab);
-  });
-}
-function route(){
-  const hash = (location.hash || "#dashboard").replace("#","");
-  setActive(hash);
-
-  RENDER_TOTAL = currentTotal();
-  RENDER_DELTA = deltaSinceLast();
-
-  if (hash === "settings") renderSettings();
-  else if (hash === "costs") renderCosts();
-  else if (hash === "inventory") renderInventory();
-  else if (hash === "jobs") renderJobs();
-  else renderDashboard();
-}
-
-/* ---------------- Inventory (unchanged from v6.1) ---------------- */
+/* ---------------- Inventory ---------------- */
 function viewInventory(){
   const rows = inventory.map((it, i) => `
     <tr>
@@ -800,6 +788,27 @@ function renderInventory(){
     renderInventory();
   };
   $("#saveInv").onclick = () => { localStorage.setItem(LS_INVENTORY, JSON.stringify(inventory)); toast("Saved"); route(); };
+}
+
+/* ---------------- Tabs / Router ---------------- */
+function setActive(tab){
+  ["dashboard","settings","costs","inventory","jobs"].forEach(id=>{
+    const el = document.getElementById("tab-"+id);
+    if (el) el.classList.toggle("active", id===tab);
+  });
+}
+function route(){
+  const hash = (location.hash || "#dashboard").replace("#","");
+  setActive(hash);
+
+  RENDER_TOTAL = currentTotal();
+  RENDER_DELTA = deltaSinceLast();
+
+  if (hash === "settings") renderSettings();
+  else if (hash === "costs") renderCosts();
+  else if (hash === "inventory") renderInventory();
+  else if (hash === "jobs") renderJobs();
+  else renderDashboard();
 }
 
 /* ---------------- Boot ---------------- */
