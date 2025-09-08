@@ -1,25 +1,22 @@
 /* =========================================================
    OMAX 1530 Maintenance Tracker — v7.0 (Cloud sync: Firebase)
    - Persists state in Firestore under anonymous auth (per-user doc)
-   - Removes localStorage dependency for primary state
-   - Keeps all previous features (calendar bubbles, cutting jobs, etc.)
+   - Works on GitHub Pages (static)
    ========================================================= */
 
 const DAILY_HOURS = 8;
 
 /* ---------------- Firebase (Cloud) ---------------- */
-// Assumes Firebase SDKs loaded in index.html
 let FB = {
   app: null,
   auth: null,
   db: null,
   user: null,
-  docRef: null, // users/{uid}/app/state (single document)
+  docRef: null, // users/{uid}/app/state
   ready: false
 };
 
 async function initFirebase() {
-  // Wait for SDK globals
   if (!window.firebase || !firebase.initializeApp) {
     console.error("Firebase SDK not found. Check index.html includes.");
     return;
@@ -33,20 +30,15 @@ async function initFirebase() {
   FB.auth = firebase.auth();
   FB.db   = firebase.firestore();
 
-  // Optional, recommended for v9 compat CDN:
-  // firebase.firestore().settings({ ignoreUndefinedProperties: true });
-
-  // Anonymous sign-in
   try {
     const cred = await FB.auth.signInAnonymously();
     FB.user = cred.user;
   } catch (e) {
     console.error("Auth error:", e);
-    alert("Cloud sign-in failed. Check Firebase rules and config.");
+    alert("Cloud sign-in failed. Check Firebase config and rules.");
     return;
   }
 
-  // Document path per user
   FB.docRef = FB.db.collection("users").doc(FB.user.uid).collection("app").doc("state");
   FB.ready = true;
 }
@@ -107,7 +99,6 @@ let tasksInterval = [];
 let tasksAsReq   = [];
 let inventory    = [];
 let cuttingJobs  = []; // [{id,name,estimateHours,material,notes,dueISO,startISO}]
-
 let RENDER_TOTAL = null;
 let RENDER_DELTA = 0;
 
@@ -119,18 +110,17 @@ function snapshotState() {
   };
 }
 function adoptState(docData) {
-  totalHistory = Array.isArray(docData.totalHistory) ? docData.totalHistory : [];
+  totalHistory  = Array.isArray(docData.totalHistory)  ? docData.totalHistory  : [];
   tasksInterval = Array.isArray(docData.tasksInterval) ? docData.tasksInterval : defaultIntervalTasks.slice();
-  tasksAsReq = Array.isArray(docData.tasksAsReq) ? docData.tasksAsReq : defaultAsReqTasks.slice();
-  inventory = Array.isArray(docData.inventory) ? docData.inventory : seedInventoryFromTasks();
-  cuttingJobs = Array.isArray(docData.cuttingJobs) ? docData.cuttingJobs : [];
+  tasksAsReq    = Array.isArray(docData.tasksAsReq)    ? docData.tasksAsReq    : defaultAsReqTasks.slice();
+  inventory     = Array.isArray(docData.inventory)     ? docData.inventory     : seedInventoryFromTasks();
+  cuttingJobs   = Array.isArray(docData.cuttingJobs)   ? docData.cuttingJobs   : [];
 }
 
 const saveCloudDebounced = debounce(async () => {
   if (!FB.ready || !FB.docRef) return;
   try {
     await FB.docRef.set(snapshotState(), { merge: true });
-    // Optional: toast("Saved to cloud");
   } catch (e) {
     console.error("Cloud save failed:", e);
   }
@@ -143,18 +133,16 @@ async function loadFromCloud() {
     if (snap.exists) {
       adoptState(snap.data());
     } else {
-      // seed new doc
-      adoptState(snapshotState()); // with defaults
-      await FB.docRef.set(snapshotState());
+      adoptState(snapshotState());          // defaults
+      await FB.docRef.set(snapshotState()); // seed doc
     }
   } catch (e) {
     console.error("Cloud load failed:", e);
-    // Fallback to defaults if needed
     adoptState(snapshotState());
   }
 }
 
-/* ---------------- Utility helpers ---------------- */
+/* ---------------- Helpers ---------------- */
 const $ = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
 function debounce(fn, ms=250) { let t; return (...a)=>{clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
@@ -234,11 +222,12 @@ function viewDashboard(){
       </div>
 
       <div id="months"></div>
-      <div class="small">Hover a due item for actions. Double-click is disabled for downloads.</div>
+      <div class="small">Hover a due item for actions. Double-click on links won’t download.</div>
     </div>
   </div>`;
 }
 
+/* -------- Settings item templates -------- */
 function taskDetailsInterval(task){
   const nd = nextDue(task);
   const sinceTxt = nd ? `${nd.since.toFixed(0)} / ${task.interval} hrs` : "—";
@@ -340,37 +329,7 @@ function viewCosts(){
   </div>`;
 }
 
-function viewInventory(){
-  const rows = inventory.map((it, i) => `
-    <tr>
-      <td><input type="text" data-inv="name" data-i="${i}" value="${it.name}"></td>
-      <td><input type="text" data-inv="pn" data-i="${i}" value="${it.pn||""}"></td>
-      <td><input type="url"  data-inv="link" data-i="${i}" value="${it.link||""}"></td>
-      <td><input type="number" step="1" min="0" data-inv="qty" data-i="${i}" value="${it.qty||0}"></td>
-      <td><input type="text" data-inv="unit" data-i="${i}" value="${it.unit||"pcs"}"></td>
-      <td><input type="text" data-inv="note" data-i="${i}" value="${it.note||""}"></td>
-      <td><button class="danger" data-inv="remove" data-i="${i}">−</button></td>
-    </tr>`).join("");
-
-  return `
-  <div class="container">
-    <div class="block" style="grid-column: 1 / -1">
-      <h3>Inventory (Cloud)</h3>
-      <div class="inv-toolbar">
-        <button id="addInvRow">+ Add Item</button>
-        <button id="saveInv">Save Inventory</button>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Item</th><th>Part #</th><th>Link</th><th>Qty</th><th>Unit</th><th>Notes</th><th>Actions</th></tr>
-        </thead>
-        <tbody id="invBody">${rows}</tbody>
-      </table>
-    </div>
-  </div>`;
-}
-
-/* ---------------- Cutting Jobs ---------------- */
+/* ---------------- Calendar ---------------- */
 function viewJobs(){
   const rows = cuttingJobs.map(j => `
     <tr>
@@ -410,7 +369,6 @@ function viewJobs(){
   </div>`;
 }
 
-/* ---------------- Calendar (with bubbles & jobs) ---------------- */
 function renderCalendar(){
   const container = $("#months");
   if (!container) return;
@@ -473,7 +431,7 @@ function renderCalendar(){
 
       const key = ymd(date);
 
-      // Maintenance events
+      // Maintenance events (hover bubble + actions)
       (dueMap[key] || []).forEach(ev => {
         const btn = document.createElement("button");
         btn.type = "button";
@@ -606,6 +564,45 @@ function computeJobSpan(dueISO, estimateHours){
 }
 
 /* ======================= Controllers ======================= */
+function viewInventory(){
+  const rows = inventory.map((it, i) => `
+    <tr>
+      <td><input type="text" data-inv="name" data-i="${i}" value="${it.name}"></td>
+      <td><input type="text" data-inv="pn" data-i="${i}" value="${it.pn||""}"></td>
+      <td><input type="url"  data-inv="link" data-i="${i}" value="${it.link||""}"></td>
+      <td><input type="number" step="1" min="0" data-inv="qty" data-i="${i}" value="${it.qty||0}"></td>
+      <td><input type="text" data-inv="unit" data-i="${i}" value="${it.unit||"pcs"}"></td>
+      <td><input type="text" data-inv="note" data-i="${i}" value="${it.note||""}"></td>
+      <td><button class="danger" data-inv="remove" data-i="${i}">−</button></td>
+    </tr>`).join("");
+
+  return `
+  <div class="container">
+    <div class="block" style="grid-column: 1 / -1">
+      <h3>Inventory (Cloud)</h3>
+      <div class="inv-toolbar">
+        <button id="addInvRow">+ Add Item</button>
+        <button id="saveInv">Save Inventory</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Item</th><th>Part #</th><th>Link</th><th>Qty</th><th>Unit</th><th>Notes</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="invBody">${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function viewDashboard(){
+  RENDER_TOTAL = currentTotal();
+  RENDER_DELTA = deltaSinceLast();
+
+  $("#content").innerHTML = viewDashboard();
+
+  // (This function name shadowed itself above; we keep only one renderDashboard below)
+}
+
 function renderDashboard(){
   RENDER_TOTAL = currentTotal();
   RENDER_DELTA = deltaSinceLast();
@@ -779,7 +776,6 @@ function renderInventory(){
   $("#saveInv").onclick = () => { saveCloudDebounced(); toast("Saved"); route(); };
 }
 
-/* ---------------- Jobs ---------------- */
 function renderJobs(){
   $("#content").innerHTML = viewJobs();
 
@@ -855,7 +851,7 @@ function route(){
   window.addEventListener("hashchange", route);
   route();
 
-  // Prevent double-click from triggering downloads on anchors
+  // Prevent double-click from “downloading” links accidentally
   document.addEventListener("dblclick", (e) => {
     const a = e.target.closest && e.target.closest("a");
     if (a) { e.preventDefault(); window.open(a.href, "_blank", "noopener"); }
