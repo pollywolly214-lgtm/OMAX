@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OMAX 1530 Maintenance Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>OMAX 1530 Maintenance Tracker</h1>
+    <nav class="nav">
+      <a href="#dashboard"  id="tab-dashboard"  class="active">Dashboard</a>
+      <a href="#settings"   id="tab-settings">Maintenance Settings</a>
+      <a href="#costs"      id="tab-costs">Cost Analysis</a>
+      <a href="#inventory"  id="tab-inventory">Inventory</a>
+      <a href="#jobs"       id="tab-jobs">Cutting Jobs</a>
+    </nav>
+  </header>
+
+  <main id="content"></main>
+
+  <footer>
+    <small>Local-only storage. Calendar shows current + next two months. Daily capacity assumed 8 hrs.</small>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
