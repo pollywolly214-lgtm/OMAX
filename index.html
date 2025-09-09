@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OMAX 1530 Maintenance Tracker</title>
+
+  <!-- Your stylesheet (keep your current one) -->
   <link rel="stylesheet" href="style.css" />
 
   <!-- Firebase SDKs (v8 CDN for static sites) -->
@@ -11,15 +13,15 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 
-  <!-- Your Firebase project config -->
+  <!-- Firebase project config (CORRECTED VALUES) -->
   <script>
     window.FIREBASE_CONFIG = {
       apiKey: "AIzaSyDhUtEx4uvUN_CssllXlm5f3dE8-MTqei0",
       authDomain: "omax-maintenance.firebaseapp.com",
       projectId: "omax-maintenance",
       storageBucket: "omax-maintenance.appspot.com",
-      messagingSenderId: "49676420080",
-      appId: "1:49676420080:web:43cdd192e462844f7b5335"
+      messagingSenderId: "496764208080",   // <- note the extra 8 here
+      appId: "1:496764208080:web:43cdd192e462844f7b5335"
     };
   </script>
 </head>
@@ -38,10 +40,10 @@
   <main id="content"></main>
 
   <footer>
-    <small>Cloud-synced via Firestore (anonymous). Calendar shows current + next two months. 8 hrs/day assumed.</small>
+    <small>Cloud sync via Firestore (anonymous). Assumes 8 hrs/day for scheduling.</small>
   </footer>
 
-  <!-- Your app logic -->
+  <!-- Your existing app logic (KEEP your current app.js as-is) -->
   <script src="app.js"></script>
 </body>
 </html>
