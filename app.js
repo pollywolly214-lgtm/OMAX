@@ -194,6 +194,127 @@ function debounce(fn, ms=250) { let t; return (...a)=>{clearTimeout(t); t=setTim
 function genId(name) { const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
 function ymd(date){return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;}
 
+// --------- Fuzzy search helpers (new) ---------
+function normalizeText(s){
+  return (s || "")
+    .toString()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, ""); // strip diacritics
+}
+
+// Levenshtein distance (iterative; good enough for short queries)
+function lev(a, b){
+  a = normalizeText(a); b = normalizeText(b);
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++){
+    let prev = dp[0]; dp[0] = i;
+    for (let j = 1; j <= n; j++){
+      const tmp = dp[j];
+      const cost = a[i-1] === b[j-1] ? 0 : 1;
+      dp[j] = Math.min(
+        dp[j] + 1,        // deletion
+        dp[j-1] + 1,      // insertion
+        prev + cost       // substitution
+      );
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+// Score: combines edit distance + substring/startsWith bonuses
+function fuzzyScore(query, text){
+  const q = normalizeText(query);
+  const t = normalizeText(text);
+  if (!q || !t) return Infinity;
+
+  // exact/substring boosts
+  const idx = t.indexOf(q);
+  let bonus = 0;
+  if (idx === 0) bonus -= 2;            // starts with
+  else if (idx > 0) bonus -= 1;         // substring
+
+  // token prefix bonus (e.g., "nozz" matches "nozzle")
+  const tokens = t.split(/[^a-z0-9]+/g).filter(Boolean);
+  if (tokens.some(tok => tok.startsWith(q))) bonus -= 2;
+
+  // distance normalized by length
+  const distance = lev(q, t);
+  const norm = distance / Math.max(t.length, 1);
+
+  return norm + bonus * 0.05; // small weight to bonuses
+}
+
+// Build and search across both lists
+function searchSettingsItems(query){
+  const results = [];
+  const push = (obj, listName) => {
+    const fields = [
+      obj.name || "",
+      obj.pn || "",
+      obj.condition || "",
+    ].join(" ");
+    const score = Math.min(
+      fuzzyScore(query, obj.name || ""),
+      fuzzyScore(query, fields)
+    );
+    results.push({
+      id: obj.id,
+      list: listName, // "interval" | "asreq"
+      name: obj.name,
+      pn: obj.pn || "",
+      condition: obj.condition || "",
+      score
+    });
+  };
+
+  tasksInterval.forEach(t => push(t, "interval"));
+  tasksAsReq.forEach(t => push(t, "asreq"));
+
+  results.sort((a,b) => a.score - b.score);
+  return results.slice(0, 12); // top 12 hits
+}
+
+function renderSettingsSearchResults(results){
+  const box = $("#settingsSearchResults");
+  if (!box) return;
+  if (!results || results.length === 0){
+    box.innerHTML = "";
+    box.style.display = "none";
+    return;
+  }
+  box.style.display = "block";
+  box.innerHTML = results.map(r => `
+    <div class="search-item" data-goto-id="${r.id}">
+      <div class="si-title">${r.name}</div>
+      <div class="si-meta">
+        <span class="badge">${r.list === "interval" ? "Per Interval" : "As Required"}</span>
+        ${r.pn ? `<span class="muted">PN: ${r.pn}</span>` : ""}
+        ${r.condition && r.list==="asreq" ? `<span class="muted">(${r.condition})</span>` : ""}
+      </div>
+    </div>
+  `).join("");
+
+  $$("#settingsSearchResults .search-item").forEach(el=>{
+    el.onclick = () => {
+      const id = el.getAttribute("data-goto-id");
+      // open the corresponding <details> and scroll
+      const panel = document.querySelector(`[data-task-id="${id}"]`);
+      if (panel){
+        panel.open = true;
+        panel.scrollIntoView({ behavior:"smooth", block:"center" });
+      }
+      // keep results open until user types again (optional: hide)
+    };
+  });
+}
+
+
 /* ---------------- Totals / Δ ---------------- */
 function currentTotal(){ return totalHistory.length ? totalHistory[totalHistory.length-1].hours : null; }
 function previousTotal(){ return totalHistory.length>1 ? totalHistory[totalHistory.length-2].hours : null; }
