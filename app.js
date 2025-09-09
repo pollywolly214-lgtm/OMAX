@@ -531,46 +531,85 @@ function makeBubble(anchor){
   return b;
 }
 
+// === REPLACE your existing showTaskBubble WITH THIS VERSION ===
 function showTaskBubble(taskId, anchor){
-  const t = tasksInterval.find(x=>x.id===taskId);
+  const t = tasksInterval.find(x => x.id === taskId);
   if (!t) return;
   const nd = nextDue(t);
   const b = makeBubble(anchor);
+
   b.innerHTML = `
     <div class="bubble-title">${t.name}</div>
     <div class="bubble-kv"><span>Interval:</span><span>${t.interval} hrs</span></div>
-    <div class="bubble-kv"><span>Since:</span><span>${nd?nd.since.toFixed(0):"—"} hrs</span></div>
-    <div class="bubble-kv"><span>Remain:</span><span>${nd?nd.remain.toFixed(0):"—"} hrs</span></div>
-    <div class="bubble-kv"><span>Last serviced at:</span><span>${nd&&nd.lastServicedAt!=null?nd.lastServicedAt.toFixed(0):"—"} hrs</span></div>
-    <div class="bubble-kv"><span>Cost:</span><span>${t.cost || (t.price!=null?("$"+t.price):"$____")}</span></div>
+    <div class="bubble-kv"><span>Last serviced:</span><span>${nd ? nd.since.toFixed(0) : "—"} hrs ago</span></div>
+    <div class="bubble-kv"><span>Remain:</span><span>${nd ? nd.remain.toFixed(0) : "—"} hrs</span></div>
+    <div class="bubble-kv"><span>Cost:</span><span>${
+      t.price != null ? ("$" + t.price) : (t.cost ? t.cost : "—")
+    }</span></div>
     <div class="bubble-actions">
       <button data-bbl-complete="${t.id}">Complete</button>
       <button class="danger" data-bbl-remove="${t.id}">Remove</button>
       <button data-bbl-edit="${t.id}">Edit settings</button>
     </div>
   `;
-  document.querySelector("[data-bbl-complete]").onclick = ()=>{ completeTask(taskId); hideBubble(); };
-  document.querySelector("[data-bbl-remove]").onclick   = ()=>{ tasksInterval = tasksInterval.filter(x=>x.id!==taskId); saveCloudDebounced(); toast("Removed"); hideBubble(); route(); };
-  document.querySelector("[data-bbl-edit]").onclick     = ()=>{ hideBubble(); openSettingsAndReveal(taskId); };
+
+  document.querySelector("[data-bbl-complete]").onclick = () => {
+    completeTask(taskId);
+    hideBubble();
+  };
+  document.querySelector("[data-bbl-remove]").onclick = () => {
+    tasksInterval = tasksInterval.filter(x => x.id !== taskId);
+    saveCloudDebounced();
+    toast("Removed");
+    hideBubble();
+    route();
+  };
+  document.querySelector("[data-bbl-edit]").onclick = () => {
+    hideBubble();
+    openSettingsAndReveal(taskId);
+  };
 }
 
+// === KEEP these as-is; if you accidentally removed them, paste these versions ===
 function showJobBubble(jobId, anchor){
-  const j = cuttingJobs.find(x=>x.id===jobId);
+  const j = cuttingJobs.find(x => x.id === jobId);
   if (!j) return;
   const b = makeBubble(anchor);
+
   b.innerHTML = `
     <div class="bubble-title">${j.name}</div>
     <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
-    <div class="bubble-kv"><span>Material:</span><span>${j.material||"—"}</span></div>
+    <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
     <div class="bubble-kv"><span>Schedule:</span><span>${(new Date(j.startISO)).toDateString()} → ${(new Date(j.dueISO)).toDateString()}</span></div>
-    <div class="bubble-kv"><span>Notes:</span><span>${j.notes||"—"}</span></div>
+    <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
     <div class="bubble-actions">
       <button data-bbl-edit-job="${j.id}">Edit</button>
       <button class="danger" data-bbl-remove-job="${j.id}">Remove</button>
     </div>
   `;
-  document.querySelector("[data-bbl-remove-job]").onclick = ()=>{ cuttingJobs = cuttingJobs.filter(x=>x.id!==jobId); saveCloudDebounced(); toast("Removed"); hideBubble(); route(); };
-  document.querySelector("[data-bbl-edit-job]").onclick = ()=>{ hideBubble(); openJobsEditor(j.id); };
+
+  document.querySelector("[data-bbl-remove-job]").onclick = () => {
+    cuttingJobs = cuttingJobs.filter(x => x.id !== jobId);
+    saveCloudDebounced();
+    toast("Removed");
+    hideBubble();
+    route();
+  };
+  document.querySelector("[data-bbl-edit-job]").onclick = () => {
+    hideBubble();
+    openJobsEditor(j.id);
+  };
+}
+
+function completeTask(taskId){
+  const t = tasksInterval.find(x => x.id === taskId);
+  if (!t) return;
+  const cur = RENDER_TOTAL ?? currentTotal();
+  t.anchorTotal = cur != null ? cur : 0; // reset anchor to current total
+  t.sinceBase = 0;                       // since = 0 going forward
+  saveCloudDebounced();
+  toast("Task completed");
+  route(); // re-render calendar and dashboard
 }
 
 /* -------- Completion & quick add -------- */
