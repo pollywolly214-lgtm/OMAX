@@ -866,6 +866,32 @@ function renderSettings(){
   const root = $("#content");
   root.innerHTML = viewSettings();
 
+   // --- Intelligent search wiring (new) ---
+const searchInput = $("#settingsSearch");
+const doSearch = debounce(() => {
+  const q = (searchInput.value || "").trim();
+  if (!q) {
+    renderSettingsSearchResults([]);
+    return;
+  }
+  const results = searchSettingsItems(q);
+  renderSettingsSearchResults(results);
+}, 120);
+
+if (searchInput){
+  searchInput.addEventListener("input", doSearch);
+  searchInput.addEventListener("keydown", (e)=>{
+    if (e.key === "Enter"){
+      e.preventDefault();
+      const q = (searchInput.value || "").trim();
+      const results = q ? searchSettingsItems(q) : [];
+      renderSettingsSearchResults(results);
+      const first = $("#settingsSearchResults .search-item");
+      if (first) first.click();
+    }
+  });
+}
+
   // Inputs (with re-anchor on sinceBase edits) — cloud save
   $$("#content [data-id]").forEach(inp => {
     inp.addEventListener("input", () => {
