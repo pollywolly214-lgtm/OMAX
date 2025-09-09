@@ -5,6 +5,9 @@
    ========================================================= */
 
 const DAILY_HOURS = 8;
+// Shared workspace identifier (everyone must use the same ID)
+const WORKSPACE_ID = "schreiner-robotics";
+
 
 /* ---------------- Firebase (Cloud) ---------------- */
 let FB = {
