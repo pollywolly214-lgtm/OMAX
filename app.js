@@ -889,14 +889,15 @@ function route(){
   const hash = (location.hash || "#dashboard").replace("#","");
   setActive(hash);
 
+  // recompute global render numbers
   RENDER_TOTAL = currentTotal();
   RENDER_DELTA = deltaSinceLast();
 
-  if (hash === "settings") renderSettings();
-  else if (hash === "costs") renderCosts();
-  else if (hash === "inventory") renderInventory();
-  else if (hash === "jobs") renderJobs();
-  else renderDashboard();
+  if (hash === "settings")      renderSettings();
+  else if (hash === "costs")    renderCosts();
+  else if (hash === "inventory")renderInventory();
+  else if (hash === "jobs")     renderJobs();
+  else                          renderDashboard(); // default = dashboard
 }
 
 /* ---------------- Boot ---------------- */
