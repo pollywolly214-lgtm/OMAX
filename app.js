@@ -232,9 +232,9 @@ function toast(msg){
 
 /* ======================= VIEWS ======================= */
 function viewDashboard(){
-  const cur = RENDER_TOTAL;
+  const cur = RENDER_TOTAL ?? currentTotal();
   const prev = previousTotal();
-  const delta = RENDER_DELTA;
+  const delta = RENDER_DELTA ?? deltaSinceLast();
 
   return `
   <div class="container">
@@ -245,7 +245,7 @@ function viewDashboard(){
       </label>
       <button id="logBtn">Log Hours</button>
       <div class="hint">Last updated: ${cur!=null? new Date(totalHistory[totalHistory.length-1].dateISO).toLocaleString(): "—"}</div>
-      <div class="small">Δ since last: <b>${delta.toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</div>
+      <div class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</div>
     </div>
 
     <div class="block">
@@ -266,6 +266,7 @@ function viewDashboard(){
         </form>
       </div>
 
+      <!-- IMPORTANT: the calendar container -->
       <div id="months"></div>
       <div class="small">Hover a due item for actions. Double-click on links won’t download.</div>
     </div>
