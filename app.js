@@ -128,19 +128,64 @@ const saveCloudDebounced = debounce(async () => {
 
 async function loadFromCloud() {
   if (!FB.ready || !FB.docRef) return;
+
   try {
     const snap = await FB.docRef.get();
+
     if (snap.exists) {
-      adoptState(snap.data());
+      // If the doc exists but is effectively empty, seed it.
+      const data = snap.data() || {};
+
+      const needsSeed =
+        !Array.isArray(data.tasksInterval) || data.tasksInterval.length === 0;
+
+      if (needsSeed) {
+        const seeded = {
+          schema: APP_SCHEMA,
+          totalHistory: Array.isArray(data.totalHistory) ? data.totalHistory : [],
+          tasksInterval: defaultIntervalTasks.slice(),
+          tasksAsReq: Array.isArray(data.tasksAsReq) && data.tasksAsReq.length
+            ? data.tasksAsReq
+            : defaultAsReqTasks.slice(),
+          inventory: Array.isArray(data.inventory) && data.inventory.length
+            ? data.inventory
+            : seedInventoryFromTasks(),
+          cuttingJobs: Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [],
+        };
+
+        adoptState(seeded);
+        await FB.docRef.set(seeded, { merge: true });
+      } else {
+        // Normal path: adopt data as-is (adoptState will still guard missing arrays)
+        adoptState(data);
+      }
     } else {
-      adoptState(snapshotState());          // defaults
-      await FB.docRef.set(snapshotState()); // seed doc
+      // First-ever run for this user: write defaults to Firestore instead of an empty doc
+      const seeded = {
+        schema: APP_SCHEMA,
+        totalHistory: [],
+        tasksInterval: defaultIntervalTasks.slice(),
+        tasksAsReq: defaultAsReqTasks.slice(),
+        inventory: seedInventoryFromTasks(),
+        cuttingJobs: [],
+      };
+      adoptState(seeded);
+      await FB.docRef.set(seeded); // create the doc with defaults
     }
   } catch (e) {
     console.error("Cloud load failed:", e);
-    adoptState(snapshotState());
+    // Graceful fallback: still show defaults locally
+    adoptState({
+      schema: APP_SCHEMA,
+      totalHistory: [],
+      tasksInterval: defaultIntervalTasks.slice(),
+      tasksAsReq: defaultAsReqTasks.slice(),
+      inventory: seedInventoryFromTasks(),
+      cuttingJobs: [],
+    });
   }
 }
+
 
 /* ---------------- Helpers ---------------- */
 const $ = (s, r=document) => r.querySelector(s);
