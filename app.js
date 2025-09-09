@@ -287,7 +287,7 @@ function taskDetailsInterval(task){
     <div class="row"><label>Interval (hrs):</label><div><input type="number" min="1" data-k="interval" data-id="${task.id}" data-list="interval" value="${task.interval}" /></div></div>
     <div class="row"><label>Baseline “since last” (hrs):</label><div><input type="number" min="0" data-k="sinceBase" data-id="${task.id}" data-list="interval" value="${task.sinceBase!=null?task.sinceBase:""}" /></div></div>
     <div class="row"><label>When last serviced (hrs):</label><div>${lastServ}</div></div>
-    <div class="row"><label>Cost placeholder:</label><div><input type="text" data-k="cost" data-id="${task.id}" data-list="interval" value="${task.cost||""}" placeholder="$____" /></div></div>
+   
     <div class="row"><label>Link:</label><div><input type="url" data-k="link" data-id="${task.id}" data-list="interval" value="${task.link||""}" placeholder="https://store…" /></div></div>
     <div class="row"><label>Part #:</label><div><input type="text" data-k="pn" data-id="${task.id}" data-list="interval" value="${task.pn||""}" /></div></div>
     <div class="row"><label>Price:</label><div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="interval" value="${task.price!=null?task.price:""}" /></div></div>
@@ -305,7 +305,7 @@ function taskDetailsAsReq(task){
     <summary>${task.name} — <span class="small">${task.condition||"As required"}</span></summary>
     <div class="row"><label>Name:</label><div><input type="text" data-k="name" data-id="${task.id}" data-list="asreq" value="${task.name}" /></div></div>
     <div class="row"><label>Condition:</label><div><input type="text" data-k="condition" data-id="${task.id}" data-list="asreq" value="${task.condition||""}" /></div></div>
-    <div class="row"><label>Cost placeholder:</label><div><input type="text" data-k="cost" data-id="${task.id}" data-list="asreq" value="${task.cost||""}" placeholder="$____" /></div></div>
+   
     <div class="row"><label>Link:</label><div><input type="url" data-k="link" data-id="${task.id}" data-list="asreq" value="${task.link||""}" placeholder="https://store…" /></div></div>
     <div class="row"><label>Part #:</label><div><input type="text" data-k="pn" data-id="${task.id}" data-list="asreq" value="${task.pn||""}" /></div></div>
     <div class="row"><label>Price:</label><div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="asreq" value="${task.price!=null?task.price:""}" /></div></div>
