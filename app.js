@@ -320,7 +320,12 @@ function viewSettings(){
   <div class="container">
     <div class="block" style="grid-column: 1 / -1">
       <h3>Maintenance Settings</h3>
-      <p class="small">Two categories: <b>By Interval (hrs)</b> and <b>As Required</b>. Cloud-synced.</p>
+
+      <!-- Intelligent Search -->
+      <div class="settings-search">
+        <input type="search" id="settingsSearch" placeholder="Search maintenance… (e.g., nozzle, o-ring, 307525)" />
+        <div id="settingsSearchResults" class="search-results"></div>
+      </div>
 
       <div class="add-forms">
         <form id="addIntervalForm" class="mini-form">
