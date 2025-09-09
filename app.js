@@ -640,48 +640,57 @@ function viewInventory(){
   </div>`;
 }
 
-function viewDashboard(){
-  RENDER_TOTAL = currentTotal();
-  RENDER_DELTA = deltaSinceLast();
-
-  $("#content").innerHTML = viewDashboard();
-
-  // (This function name shadowed itself above; we keep only one renderDashboard below)
-}
-
 function renderDashboard(){
+  // Compute current totals before rendering
   RENDER_TOTAL = currentTotal();
   RENDER_DELTA = deltaSinceLast();
 
+  // Inject the dashboard UI
   $("#content").innerHTML = viewDashboard();
 
-  $("#logBtn").onclick = ()=> {
-    const v = parseFloat($("#totalInput").value);
-    if (!isNaN(v)) {
-      totalHistory.push({ dateISO: new Date().toISOString(), hours: v });
-      saveCloudDebounced();
-      toast("Logged");
-      route();
-    }
-  };
+  // Bind: Log Hours
+  const logBtn = $("#logBtn");
+  if (logBtn) {
+    logBtn.onclick = () => {
+      const v = parseFloat($("#totalInput").value);
+      if (!isNaN(v)) {
+        totalHistory.push({ dateISO: new Date().toISOString(), hours: v });
+        saveCloudDebounced();
+        toast("Logged");
+        route(); // re-render to refresh calendar and next due
+      }
+    };
+  }
 
-  $("#quickAddForm").addEventListener("submit",(e)=>{
-    e.preventDefault();
-    const name = $("#qa_name").value.trim();
-    const intervalStr = $("#qa_interval").value;
-    const condition = $("#qa_condition").value.trim();
-    const interval = intervalStr === "" ? null : parseFloat(intervalStr);
-    if (!name) return;
-    if (interval !== null && !(interval>0)) { toast("Interval must be > 0"); return; }
-    quickAddFromCalendar({ name, interval, condition });
-  });
+  // Bind: Quick Add Task (from calendar toolbar)
+  const qaForm = $("#quickAddForm");
+  if (qaForm) {
+    qaForm.addEventListener("submit",(e)=>{
+      e.preventDefault();
+      const name = $("#qa_name").value.trim();
+      const intervalStr = $("#qa_interval").value;
+      const condition = $("#qa_condition").value.trim();
+      const interval = intervalStr === "" ? null : parseFloat(intervalStr);
+      if (!name) { toast("Enter a task name"); return; }
+      if (interval !== null && !(interval > 0)) { toast("Interval must be > 0"); return; }
+      quickAddFromCalendar({ name, interval, condition });
+    });
+  }
 
-  const nds = tasksInterval.map(t => ({ t, nd: nextDue(t) })).filter(x => x.nd);
-  nds.sort((a,b) => a.nd.due - b.nd.due);
-  $("#nextDueBox").textContent = nds.length
-    ? `${nds[0].t.name}: ${Math.max(0, nds[0].nd.remain.toFixed(0))} hrs → ${nds[0].nd.due.toDateString()} (in ${nds[0].nd.days} days)`
-    : "—";
+  // Compute "Next Due" box
+  const nds = tasksInterval
+    .map(t => ({ t, nd: nextDue(t) }))
+    .filter(x => x.nd)
+    .sort((a,b) => a.nd.due - b.nd.due);
 
+  const ndBox = $("#nextDueBox");
+  if (ndBox) {
+    ndBox.textContent = nds.length
+      ? `${nds[0].t.name}: ${Math.max(0, nds[0].nd.remain.toFixed(0))} hrs → ${nds[0].nd.due.toDateString()} (in ${nds[0].nd.days} days)`
+      : "—";
+  }
+
+  // Finally, draw the calendar grid + events
   renderCalendar();
 }
 
