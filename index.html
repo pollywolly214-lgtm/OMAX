@@ -43,6 +43,28 @@
     <small>Cloud sync via Firestore (anonymous). Assumes 8 hrs/day for scheduling.</small>
   </footer>
 
+<!-- Auth toolbar + modal -->
+<div id="authBar" style="display:flex; gap:8px; align-items:center; padding:8px 12px; border-top:1px solid #eee; margin-top:18px;">
+  <span id="authStatus">Not signed in</span>
+  <button id="btnSignIn">Sign In</button>
+  <button id="btnSignOut" style="display:none;">Sign Out</button>
+</div>
+
+<div id="authModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); align-items:center; justify-content:center;">
+  <div style="background:#fff; padding:16px; border-radius:10px; width:min(420px, 90%); box-shadow:0 10px 30px rgba(0,0,0,.2);">
+    <h3 style="margin:0 0 8px;">Sign in to workspace</h3>
+    <p style="margin:0 0 10px;">Use the same email on all devices to access the same shared data.</p>
+    <form id="authForm" style="display:grid; gap:8px;">
+      <input id="authEmail" type="email" placeholder="you@example.com" required />
+      <input id="authPass" type="password" placeholder="Password" required />
+      <button type="submit">Sign In</button>
+      <button type="button" id="authClose">Cancel</button>
+    </form>
+    <small style="color:#666; display:block; margin-top:8px;">First time? The account will be created automatically.</small>
+  </div>
+</div>
+
+  
   <!-- Your existing app logic (KEEP your current app.js as-is) -->
   <script src="app.js"></script>
 </body>
