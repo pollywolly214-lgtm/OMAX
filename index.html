@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OMAX 1530 Maintenance Tracker</title>
 
-  <!-- Your stylesheet (keep your current one) -->
+  <!-- Your stylesheet -->
   <link rel="stylesheet" href="style.css" />
 
   <!-- Firebase SDKs (v8 CDN for static sites) -->
@@ -13,14 +13,14 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 
-  <!-- Firebase project config (CORRECTED VALUES) -->
+  <!-- Firebase project config (correct values) -->
   <script>
     window.FIREBASE_CONFIG = {
       apiKey: "AIzaSyDhUtEx4uvUN_CssllXlm5f3dE8-MTqei0",
       authDomain: "omax-maintenance.firebaseapp.com",
       projectId: "omax-maintenance",
       storageBucket: "omax-maintenance.appspot.com",
-      messagingSenderId: "496764208080",   // <- note the extra 8 here
+      messagingSenderId: "496764208080",
       appId: "1:496764208080:web:43cdd192e462844f7b5335"
     };
   </script>
@@ -40,32 +40,31 @@
   <main id="content"></main>
 
   <footer>
-    <small>Cloud sync via Firestore (anonymous). Assumes 8 hrs/day for scheduling.</small>
+    <small>Cloud sync via Firestore. Assumes 8 hrs/day for scheduling.</small>
   </footer>
 
-<!-- Auth toolbar + modal -->
-<div id="authBar" style="display:flex; gap:8px; align-items:center; padding:8px 12px; border-top:1px solid #eee; margin-top:18px;">
-  <span id="authStatus">Not signed in</span>
-  <button id="btnSignIn">Sign In</button>
-  <button id="btnSignOut" style="display:none;">Sign Out</button>
-</div>
-
-<div id="authModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); align-items:center; justify-content:center;">
-  <div style="background:#fff; padding:16px; border-radius:10px; width:min(420px, 90%); box-shadow:0 10px 30px rgba(0,0,0,.2);">
-    <h3 style="margin:0 0 8px;">Sign in to workspace</h3>
-    <p style="margin:0 0 10px;">Use the same email on all devices to access the same shared data.</p>
-    <form id="authForm" style="display:grid; gap:8px;">
-      <input id="authEmail" type="email" placeholder="you@example.com" required />
-      <input id="authPass" type="password" placeholder="Password" required />
-      <button type="submit">Sign In</button>
-      <button type="button" id="authClose">Cancel</button>
-    </form>
-    <small style="color:#666; display:block; margin-top:8px;">First time? The account will be created automatically.</small>
+  <!-- Auth toolbar + modal (NEW) -->
+  <div id="authBar" style="display:flex; gap:8px; align-items:center; padding:8px 12px; border-top:1px solid #eee; margin-top:18px;">
+    <span id="authStatus">Not signed in</span>
+    <button id="btnSignIn">Sign In</button>
+    <button id="btnSignOut" style="display:none;">Sign Out</button>
   </div>
-</div>
 
-  
-  <!-- Your existing app logic (KEEP your current app.js as-is) -->
+  <div id="authModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); align-items:center; justify-content:center; z-index:9999;">
+    <div style="background:#fff; padding:16px; border-radius:10px; width:min(420px, 90%); box-shadow:0 10px 30px rgba(0,0,0,.2);">
+      <h3 style="margin:0 0 8px;">Sign in to workspace</h3>
+      <p style="margin:0 0 10px;">Use the same email on all devices to see the same shared data.</p>
+      <form id="authForm" style="display:grid; gap:8px;">
+        <input id="authEmail" type="email" placeholder="you@example.com" required />
+        <input id="authPass" type="password" placeholder="Password" required />
+        <button type="submit">Sign In</button>
+        <button type="button" id="authClose">Cancel</button>
+      </form>
+      <small style="color:#666; display:block; margin-top:8px;">First time with an email? The account will be created automatically.</small>
+    </div>
+  </div>
+
+  <!-- Your app code (must stay last so all elements exist) -->
   <script src="app.js"></script>
 </body>
 </html>
