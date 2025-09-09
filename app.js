@@ -21,11 +21,11 @@ let FB = {
 
 async function initFirebase() {
   if (!window.firebase || !firebase.initializeApp) {
-    console.error("Firebase SDK not found. Check index.html includes.");
+    alert("Firebase SDK not loaded. Check <script> tags in index.html.");
     return;
   }
-  if (!window.FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey) {
-    console.error("Missing FIREBASE_CONFIG in index.html.");
+  if (!window.FIREBASE_CONFIG) {
+    alert("Missing FIREBASE_CONFIG in index.html.");
     return;
   }
 
@@ -33,18 +33,86 @@ async function initFirebase() {
   FB.auth = firebase.auth();
   FB.db   = firebase.firestore();
 
-  try {
-    const cred = await FB.auth.signInAnonymously();
-    FB.user = cred.user;
-  } catch (e) {
-    console.error("Auth error:", e);
-    alert("Cloud sign-in failed. Check Firebase config and rules.");
-    return;
+  // --- UI elements (from index.html auth section) ---
+  const bar      = document.getElementById("authBar");
+  const statusEl = document.getElementById("authStatus");
+  const btnIn    = document.getElementById("btnSignIn");
+  const btnOut   = document.getElementById("btnSignOut");
+  const modal    = document.getElementById("authModal");
+  const form     = document.getElementById("authForm");
+  const emailEl  = document.getElementById("authEmail");
+  const passEl   = document.getElementById("authPass");
+  const btnClose = document.getElementById("authClose");
+
+  const showModal = () => { modal.style.display = "flex"; };
+  const hideModal = () => { modal.style.display = "none"; };
+
+  // Minimal email/password sign-in helper (creates the account if missing)
+  async function ensureEmailPassword(email, password){
+    try {
+      const cred = await FB.auth.signInWithEmailAndPassword(email, password);
+      return cred.user;
+    } catch (e) {
+      if (e.code === "auth/user-not-found") {
+        await FB.auth.createUserWithEmailAndPassword(email, password);
+        const cred = await FB.auth.signInWithEmailAndPassword(email, password);
+        return cred.user;
+      }
+      throw e;
+    }
   }
 
-  FB.docRef = FB.db.collection("users").doc(FB.user.uid).collection("app").doc("state");
-  FB.ready = true;
+  // Wire toolbar buttons
+  if (btnIn)  btnIn.onclick  = () => showModal();
+  if (btnOut) btnOut.onclick = async () => { await FB.auth.signOut(); };
+
+  if (btnClose) btnClose.onclick = hideModal;
+
+  if (form) {
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const email = (emailEl.value || "").trim();
+      const pass  = (passEl.value  || "").trim();
+      if (!email || !pass) return;
+      try {
+        await ensureEmailPassword(email, pass);
+        hideModal();
+      } catch (err) {
+        console.error(err);
+        alert(err.message || "Sign-in failed");
+      }
+    };
+  }
+
+  // React to auth state changes
+  FB.auth.onAuthStateChanged(async (user) => {
+    FB.user = user || null;
+    if (user) {
+      statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
+      btnIn.style.display = "none";
+      btnOut.style.display = "inline-block";
+
+      // === IMPORTANT: switch to shared workspace doc ===
+      FB.docRef = FB.db
+        .collection("workspaces").doc(WORKSPACE_ID)
+        .collection("app").doc("state");
+
+      FB.ready = true;
+      await loadFromCloud(); // will seed if empty
+      // Initial render once signed in
+      route();
+    } else {
+      statusEl.textContent = "Not signed in";
+      btnIn.style.display = "inline-block";
+      btnOut.style.display = "none";
+      FB.ready = false;
+      // Clear UI to a minimal state (optional)
+      const content = document.getElementById("content");
+      if (content) content.innerHTML = "<div class='container'><div class='block'><h3>Please sign in to view workspace.</h3></div></div>";
+    }
+  });
 }
+
 
 /* ---------------- Schema / Defaults ---------------- */
 const APP_SCHEMA = 70;
