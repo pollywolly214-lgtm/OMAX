@@ -875,47 +875,44 @@ function viewJobs(){
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
 
+    const editing = editingJobs.has(j.id);
+
     const effText = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
     const profitText = `$${(j.originalProfit||0).toFixed(2)} → $${eff.newProfit.toFixed(2)}`;
-
     const noteAuto = (eff.usedAutoFromManual)
-      ? `<div class="small"><strong>Automated Estimation</strong>: continuing from last manual log at ${DAILY_HOURS} hrs/day. Please enter exact hours.</div>`
-      : (eff.usedTotalHistory
-          ? `<div class="small"><strong>Automatic (Total Hours)</strong>: calculated from daily machine-hour logs.</div>`
-          : ``);
+      ? `<div class="small"><strong>Automated Estimation</strong>: continuing from last manual log at ${DAILY_HOURS} hrs/day.</div>`
+      : (eff.usedTotalHistory ? `<div class="small"><strong>Automatic (Total Hours)</strong>.</div>` : ``);
 
     const reqCell = (req.requiredPerDay === Infinity)
       ? `<span class="danger">Past due / no days remaining</span>`
       : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
 
-    const dueVal = (new Date(j.dueISO)).toISOString().slice(0,10);
     const startTxt = (new Date(j.startISO)).toDateString();
-    const dueTxt   = (new Date(j.dueISO)).toDateString();
+    const dueDate  = new Date(j.dueISO);
+    const dueTxt   = dueDate.toDateString();
+    const dueVal   = dueDate.toISOString().slice(0,10);
 
-    const editing = editingJobs.has(j.id);
+    // READ mode cells (plain text)
+    const readName     = `<div><strong>${j.name}</strong></div>${noteAuto}`;
+    const readEstimate = `${j.estimateHours} hrs`;
+    const readMaterial = j.material || "—";
+    const readSched    = `<div class="small">${startTxt} → ${dueTxt}</div><div class="muted">${dueVal}</div>`;
+    const readEff      = effText;
+    const readProfit   = `${profitText}<div class="muted">Original: $${(j.originalProfit||0).toFixed(2)}</div>`;
+    const readReq      = reqCell;
+    const readNotes    = j.notes || "—";
 
-    // READ CELLS
-    const readName      = `<div><strong>${j.name}</strong></div>${noteAuto}`;
-    const readEstimate  = `${j.estimateHours} hrs`;
-    const readMaterial  = j.material || "—";
-    const readSchedule  = `<div class="small">${startTxt} → ${dueTxt}</div><div class="muted">${dueVal}</div>`;
-    const readEff       = effText;
-    const readProfit    = `${profitText}<div class="muted">Original: $${(j.originalProfit||0).toFixed(2)}</div>`;
-    const readReq       = reqCell;
-    const readNotes     = j.notes || "—";
+    // EDIT mode cells (inputs)
+    const editName     = `<input type="text" class="job-input" data-k="name" value="${j.name}">`;
+    const editEstimate = `<input type="number" min="1" step="0.01" class="job-input" data-k="estimateHours" value="${j.estimateHours}">`;
+    const editMaterial = `<input type="text" class="job-input" data-k="material" value="${j.material||""}" placeholder="Material">`;
+    const editSched    = `<div class="small">${startTxt} → ${dueTxt}</div>
+                          <input type="date" class="job-input" data-k="dueISO" value="${dueVal}">`;
+    const editProfit   = `<input type="number" min="0" step="0.01" class="job-input" data-k="originalProfit" value="${j.originalProfit!=null?j.originalProfit:""}">
+                          <div class="small muted">Will recompute: ${profitText}</div>`;
+    const editReq      = reqCell; // computed
+    const editNotes    = `<input type="text" class="job-input" data-k="notes" value="${j.notes||""}" placeholder="Notes">`;
 
-    // EDIT CELLS
-    const editName     = `<input type="text" class="job-edit" data-k="name" data-job-id="${j.id}" value="${j.name}" />`;
-    const editEstimate = `<input type="number" min="1" step="0.01" class="job-edit" data-k="estimateHours" data-job-id="${j.id}" value="${j.estimateHours}">`;
-    const editMaterial = `<input type="text" class="job-edit" data-k="material" data-job-id="${j.id}" value="${j.material||""}" placeholder="Material">`;
-    const editDue      = `<div class="small">${startTxt} → ${dueTxt}</div>
-                          <input type="date" class="job-edit" data-k="dueISO" data-job-id="${j.id}" value="${dueVal}">`;
-    const editProfit   = `<input type="number" min="0" step="0.01" class="job-edit" data-k="originalProfit" data-job-id="${j.id}" value="${j.originalProfit!=null?j.originalProfit:""}">
-                          <div class="small">Computed: ${profitText}</div>`;
-    const editReq      = reqCell;
-    const editNotes    = `<input type="text" class="job-edit" data-k="notes" data-job-id="${j.id}" value="${j.notes||""}" placeholder="Notes">`;
-
-    // Actions
     const actions = editing
       ? `<button class="primary" data-save-job="${j.id}">Save</button>
          <button class="secondary" data-cancel-job="${j.id}">Cancel</button>
@@ -926,11 +923,11 @@ function viewJobs(){
          <button class="danger" data-remove-job="${j.id}">Remove</button>`;
 
     return `
-      <tr data-job="${j.id}">
+      <tr data-job="${j.id}" class="${editing?'row-editing':''}">
         <td>${editing ? editName     : readName}</td>
         <td>${editing ? editEstimate : readEstimate}</td>
         <td>${editing ? editMaterial : readMaterial}</td>
-        <td>${editing ? editDue      : readSchedule}</td>
+        <td>${editing ? editSched    : readSched}</td>
         <td>${readEff}</td>
         <td>${editing ? editProfit   : readProfit}</td>
         <td>${readReq}</td>
@@ -957,7 +954,7 @@ function viewJobs(){
   <div class="container">
     <div class="block">
       <h3>Cutting Jobs</h3>
-      <p class="small"><em>Tip:</em> Click <strong>Edit</strong> to change a single row. Save or Cancel keeps the table tidy.</p>
+      <p class="small"><em>Tip:</em> Click <strong>Edit</strong> on a row, make changes inline, then <strong>Save</strong> or <strong>Cancel</strong>.</p>
       <form id="jobForm" class="mini-form">
         <input type="text" id="job_name" placeholder="Job name" required>
         <input type="number" id="job_hours" placeholder="Estimate (hrs)" required min="1">
@@ -967,7 +964,7 @@ function viewJobs(){
         <input type="text" id="job_notes" placeholder="Notes">
         <button type="submit">Add Job</button>
       </form>
-      <p class="small">Calendar bars span from start to due. Baseline is <strong>${DAILY_HOURS}</strong> hrs/day.</p>
+      <p class="small">Calendar bars span start→due. Baseline is <strong>${DAILY_HOURS}</strong> hrs/day.</p>
     </div>
 
     <div class="block" style="grid-column: 1 / -1">
@@ -1595,10 +1592,9 @@ function renderInventory(){
 }
 
 function renderJobs(){
-  // 1) Render page
   $("#content").innerHTML = viewJobs();
 
-  // 2) Add job
+  // Add job
   const jobForm = $("#jobForm");
   if (jobForm) {
     jobForm.addEventListener("submit",(e)=>{
@@ -1607,7 +1603,7 @@ function renderJobs(){
       const hours = parseFloat($("#job_hours").value);
       const originalProfit = parseFloat($("#job_profit").value);
       const material = $("#job_material").value.trim();
-      const dueStr = $("#job_due").value; // yyyy-mm-dd
+      const dueStr = $("#job_due").value;
       const notes = $("#job_notes").value.trim();
 
       if (!name || !(hours>0) || isNaN(originalProfit) || !dueStr) {
@@ -1621,7 +1617,7 @@ function renderJobs(){
       cuttingJobs.push({
         id, name,
         estimateHours: hours,
-        originalProfit: originalProfit,
+        originalProfit,
         material, notes,
         dueISO: span.dueISO,
         startISO: span.startISO,
@@ -1630,108 +1626,107 @@ function renderJobs(){
         manualLogs: []
       });
 
-      saveCloudDebounced();
-      toast("Job added");
-      route();
+      saveCloudDebounced(); toast("Job added"); route();
     });
   }
 
-  // 3) Remove job
+  // Remove
   $$("#content [data-remove-job]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const id = btn.getAttribute("data-remove-job");
       cuttingJobs = cuttingJobs.filter(j=>j.id!==id);
-      saveCloudDebounced();
-      toast("Removed");
-      renderJobs();
+      editingJobs.delete(id);
+      saveCloudDebounced(); toast("Removed"); renderJobs();
     });
   });
 
-  // 4) EDIT button — focus row inputs (no cycling)
+  // Enter edit mode (single row)
   $$("#content [data-edit-job]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
-      const id  = btn.getAttribute("data-edit-job");
-      const row = btn.closest("tr");
-      if (!row) return;
-
-      // add a visual highlight
-      row.classList.add("row-editing");
-
-      // focus the first editable input in this row
-      const firstInput = row.querySelector(".job-edit");
-      if (firstInput) {
-        firstInput.focus();
-        firstInput.select?.();
-      }
-
-      // remove the highlight after a couple seconds
-      setTimeout(()=> row.classList.remove("row-editing"), 1800);
+      const id = btn.getAttribute("data-edit-job");
+      editingJobs.clear();
+      editingJobs.add(id);
+      renderJobs();
+      // focus first input
+      const first = document.querySelector(`tr[data-job="${id}"] .job-input`);
+      if (first) { first.focus(); first.select?.(); }
     });
   });
 
-  // 5) Inline edit handler (autosave on change)
-  $$("#content .job-edit").forEach(input=>{
-    input.addEventListener("change", ()=>{
-      const id = input.getAttribute("data-job-id");
-      const k  = input.getAttribute("data-k");
+  // Save row
+  $$("#content [data-save-job]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-save-job");
       const j  = cuttingJobs.find(x=>x.id===id);
       if (!j) return;
 
-      let v = input.value;
+      const row = document.querySelector(`tr[data-job="${id}"]`);
+      const inputs = row.querySelectorAll(".job-input");
+      const kv = {};
+      let invalid = false;
 
-      // normalize numbers
-      if (k === "estimateHours" || k === "originalProfit" ||
-          k === "materialCost"  || k === "materialQty") {
-        v = parseFloat(v);
-        if (!isFinite(v)) { toast("Invalid number"); return; }
-        if (k === "estimateHours" && v <= 0) { toast("Hours must be > 0"); return; }
-        if ((k === "originalProfit" || k === "materialCost" || k === "materialQty") && v < 0) {
-          toast("Value must be ≥ 0"); return;
+      inputs.forEach(inp=>{
+        const k = inp.getAttribute("data-k");
+        let v = inp.value;
+        if (k==="estimateHours" || k==="originalProfit"){
+          v = parseFloat(v);
+          if (!isFinite(v) || (k==="estimateHours" && v<=0) || (k==="originalProfit" && v<0)) {
+            invalid = true;
+          }
         }
-      }
+        kv[k] = v;
+      });
+      if (invalid) { toast("Fix invalid values"); return; }
 
-      if (k === "dueISO") {
-        // user edited the date input (yyyy-mm-dd)
-        const dueISO = new Date(`${v}T00:00:00`).toISOString();
-        const span   = computeJobSpan(dueISO, Number(j.estimateHours)||0);
-        j.dueISO   = span.dueISO;
-        j.startISO = span.startISO;
-      } else {
-        j[k] = v;
-        if (k === "estimateHours") {
-          // keep schedule aligned with new hours (due fixed, move start)
-          const span = computeJobSpan(j.dueISO, Number(j.estimateHours)||0);
+      // Apply with dependent recompute
+      Object.keys(kv).forEach(k=>{
+        if (k === "dueISO") {
+          const dueISO = new Date(`${kv[k]}T00:00:00`).toISOString();
+          const span = computeJobSpan(dueISO, Number(kv.estimateHours ?? j.estimateHours)||0);
+          j.dueISO = span.dueISO;
           j.startISO = span.startISO;
+        } else if (k === "estimateHours") {
+          j.estimateHours = kv[k];
+          const span = computeJobSpan(j.dueISO, Number(j.estimateHours)||0);
+          j.startISO = span.startISO; // keep due, move start
+        } else {
+          j[k] = kv[k];
         }
-      }
+      });
 
-      saveCloudDebounced();
-      // refresh so efficiency, required/day, and material total recompute
+      editingJobs.delete(id);
+      saveCloudDebounced(); toast("Saved"); renderJobs();
+    });
+  });
+
+  // Cancel row
+  $$("#content [data-cancel-job]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-cancel-job");
+      editingJobs.delete(id);
       renderJobs();
     });
   });
 
-  // 6) Manual logs (completed/remaining) — keeps your manual override workflow
+  // Manual logs (completed/remaining)
   $$(".job-manual-form").forEach(form=>{
     form.addEventListener("submit",(e)=>{
       e.preventDefault();
       const jobId   = form.getAttribute("data-job-id");
       const dateISO = form.querySelector(".jm-date").value;
-      const mode    = form.querySelector(".jm-mode").value; // "completed" | "remaining"
+      const mode    = form.querySelector(".jm-mode").value;
       const val     = parseFloat(form.querySelector(".jm-value").value);
       if (!dateISO || !isFinite(val)) { toast("Enter date and hours"); return; }
 
       if (addManualLog(jobId, dateISO, mode, val)) {
-        saveCloudDebounced();
-        toast("Manual progress saved");
-        renderJobs(); // refresh summary + required/day
+        saveCloudDebounced(); toast("Manual progress saved"); renderJobs();
       } else {
         toast("Job not found");
       }
     });
   });
 
-  // 7) Info bubble
+  // Info bubble
   $$(".jm-info").forEach(btn=>{
     btn.addEventListener("click",(e)=>{
       e.preventDefault();
