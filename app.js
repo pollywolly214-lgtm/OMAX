@@ -305,6 +305,63 @@ function debounce(fn, ms=250) { let t; return (...a)=>{clearTimeout(t); t=setTim
 function genId(name) { const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
 function ymd(date){return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;}
 
+// Inclusive days between two dates (both at local midnight)
+function daysBetweenInclusive(a, b){
+  const MS = 24*60*60*1000;
+  const d = Math.floor((b - a) / MS) + 1;
+  return d < 0 ? 0 : d;
+}
+
+// Build a { 'YYYY-M-D': hoursCutThatDay } map from totalHistory deltas
+function buildDailyHoursMap(){
+  const map = {};
+  if (!Array.isArray(totalHistory) || totalHistory.length < 2) return map;
+  const sorted = totalHistory.slice().sort((a,b)=> new Date(a.dateISO) - new Date(b.dateISO));
+  for (let i=1; i<sorted.length; i++){
+    const prev = sorted[i-1], cur = sorted[i];
+    let diff = (cur.hours - prev.hours);
+    if (!isFinite(diff) || diff < 0) diff = 0;
+    const d = new Date(cur.dateISO); d.setHours(0,0,0,0);
+    const key = ymd(d);
+    map[key] = (map[key] || 0) + diff;
+  }
+  return map;
+}
+
+/**
+ * Upsert a manual log for a job.
+ * mode: "completed" (hrs done so far) or "remaining" (hrs left)
+ * value: number of hours for the chosen mode
+ * dateISO: ISO date (yyyy-mm-dd) interpreted at local midnight
+ */
+function addManualLog(jobId, dateISO, mode, value){
+  const j = cuttingJobs.find(x=>x.id===jobId);
+  if (!j) return false;
+  if (!Array.isArray(j.manualLogs)) j.manualLogs = [];
+
+  const d = new Date(`${dateISO}T00:00:00`);
+  d.setHours(0,0,0,0);
+  const key = d.toISOString().slice(0,10);
+
+  const planned = Number(j.estimateHours)||0;
+  let completed = 0;
+  if (mode === "completed") {
+    completed = Math.max(0, Math.min(planned, Number(value)||0));
+  } else { // "remaining"
+    const rem = Math.max(0, Number(value)||0);
+    completed = Math.max(0, Math.min(planned, planned - rem));
+  }
+
+  const idx = j.manualLogs.findIndex(m => (m.dateISO === key));
+  const entry = { dateISO: key, completedHours: completed };
+  if (idx >= 0) j.manualLogs[idx] = entry; else j.manualLogs.push(entry);
+
+  // Keep logs sorted by date
+  j.manualLogs.sort((a,b)=> new Date(a.dateISO) - new Date(b.dateISO));
+  return true;
+}
+
+
 // Build a { 'YYYY-M-D': hoursCutThatDay } map from totalHistory deltas
 function buildDailyHoursMap(){
   const map = {};
