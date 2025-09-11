@@ -1557,7 +1557,9 @@ function renderJobs(){
     const dueStr = $("#job_due").value; // yyyy-mm-dd
     const notes = $("#job_notes").value.trim();
 
-    if (!name || !(hours>0) || isNaN(originalProfit) || !dueStr) { toast("Enter name, hours>0, profit, due date"); return; }
+    if (!name || !(hours>0) || isNaN(originalProfit) || !dueStr) {
+      toast("Enter name, hours>0, profit, due date"); return;
+    }
 
     const dueISO = new Date(`${dueStr}T00:00:00`).toISOString();
     const span = computeJobSpan(dueISO, hours);
@@ -1572,7 +1574,7 @@ function renderJobs(){
       startISO: span.startISO,
       materialCost: 0,
       materialQty: 0,
-      manualLogs: [] // new
+      manualLogs: [] // manual override store
     });
 
     saveCloudDebounced(); toast("Job added"); route();
@@ -1592,7 +1594,7 @@ function renderJobs(){
     });
   });
 
-  // Manual form handlers (delegate by row)
+  // Manual form handlers
   $$(".job-manual-form").forEach(form=>{
     form.addEventListener("submit",(e)=>{
       e.preventDefault();
@@ -1605,13 +1607,22 @@ function renderJobs(){
       if (addManualLog(jobId, dateISO, mode, val)) {
         saveCloudDebounced();
         toast("Manual progress saved");
-        renderJobs(); // refresh summary
+        renderJobs(); // refresh summary + required/day
       } else {
         toast("Job not found");
       }
     });
   });
+
+  // ℹ️ info bubble (this is what makes the button DO something)
+  $$(".jm-info").forEach(btn=>{
+    btn.addEventListener("click",(e)=>{
+      e.preventDefault();
+      showInfoBubble(btn);
+    });
+  });
 }
+
 
 function openJobsEditor(jobId){
   const j = cuttingJobs.find(x=>x.id===jobId);
