@@ -509,20 +509,39 @@ function viewDashboard(){
 function taskDetailsInterval(task){
   const nd = nextDue(task);
   const sinceTxt = nd ? `${nd.since.toFixed(0)} / ${task.interval} hrs` : "—";
-  const daysTxt = nd ? `${nd.days} day(s) → ${nd.due.toDateString()}` : "—";
-  const lastServ = nd && nd.lastServicedAt!=null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
+  const daysTxt  = nd ? `${nd.days} day(s) → ${nd.due.toDateString()}` : "—";
+  const lastServ = nd && nd.lastServicedAt != null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
 
   return `
   <details data-task-id="${task.id}">
     <summary>${task.name} — <span class="small">since: ${sinceTxt} | due: ${daysTxt}</span></summary>
-    <div class="row"><label>Name:</label><div><input type="text" data-k="name" data-id="${task.id}" data-list="interval" value="${task.name}" /></div></div>
-    <div class="row"><label>Interval (hrs):</label><div><input type="number" min="1" data-k="interval" data-id="${task.id}" data-list="interval" value="${task.interval}" /></div></div>
-    <div class="row"><label>Baseline “since last” (hrs):</label><div><input type="number" min="0" data-k="sinceBase" data-id="${task.id}" data-list="interval" value="${task.sinceBase!=null?task.sinceBase:""}" /></div></div>
-    <div class="row"><label>When last serviced (hrs):</label><div>${lastServ}</div></div>
-   
-    <div class="row"><label>Link:</label><div><input type="url" data-k="link" data-id="${task.id}" data-list="interval" value="${task.link||""}" placeholder="https://store…" /></div></div>
-    <div class="row"><label>Part #:</label><div><input type="text" data-k="pn" data-id="${task.id}" data-list="interval" value="${task.pn||""}" /></div></div>
-    <div class="row"><label>Price:</label><div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="interval" value="${task.price!=null?task.price:""}" /></div></div>
+    <div class="row"><label>Name:</label>
+      <div><input type="text" data-k="name" data-id="${task.id}" data-list="interval" value="${task.name}" /></div>
+    </div>
+    <div class="row"><label>Interval (hrs):</label>
+      <div><input type="number" min="1" data-k="interval" data-id="${task.id}" data-list="interval" value="${task.interval}" /></div>
+    </div>
+    <div class="row"><label>Baseline “since last” (hrs):</label>
+      <div><input type="number" min="0" data-k="sinceBase" data-id="${task.id}" data-list="interval" value="${task.sinceBase != null ? task.sinceBase : ""}" /></div>
+    </div>
+    <div class="row"><label>When last serviced (hrs):</label>
+      <div>${lastServ}</div>
+    </div>
+
+    <!-- New: separate manual & store links -->
+    <div class="row"><label>Manual link:</label>
+      <div><input type="url" data-k="manualLink" data-id="${task.id}" data-list="interval" value="${task.manualLink || ""}" placeholder="PDF / guide URL" /></div>
+    </div>
+    <div class="row"><label>Store link:</label>
+      <div><input type="url" data-k="storeLink" data-id="${task.id}" data-list="interval" value="${task.storeLink || ""}" placeholder="Where to buy" /></div>
+    </div>
+
+    <div class="row"><label>Part #:</label>
+      <div><input type="text" data-k="pn" data-id="${task.id}" data-list="interval" value="${task.pn || ""}" /></div>
+    </div>
+    <div class="row"><label>Price:</label>
+      <div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="interval" value="${task.price != null ? task.price : ""}" /></div>
+    </div>
     <div class="row"><label>Actions:</label>
       <div>
         <button class="btn-complete" data-complete="${task.id}">Mark Completed Now</button>
@@ -531,6 +550,7 @@ function taskDetailsInterval(task){
     </div>
   </details>`;
 }
+
 function taskDetailsAsReq(task){
   return `
   <details data-task-id="${task.id}">
