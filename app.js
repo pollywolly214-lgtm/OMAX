@@ -870,13 +870,20 @@ function viewCosts(){
 function viewJobs(){
   const rows = cuttingJobs.map(j => {
     const eff = computeJobEfficiency(j);
+    const req = computeRequiredDaily(j);
+
     const effText = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
     const profitText = `$${(j.originalProfit||0).toFixed(2)} → $${eff.newProfit.toFixed(2)}`;
+
     const noteAuto = (eff.usedAutoFromManual)
       ? `<div class="small"><strong>Automated Estimation</strong>: continuing from last manual log at ${DAILY_HOURS} hrs/day. Please enter exact hours.</div>`
       : (eff.usedTotalHistory
           ? `<div class="small"><strong>Automatic (Total Hours)</strong>: calculated from daily machine-hour logs.</div>`
           : ``);
+
+    const reqCell = (req.requiredPerDay === Infinity)
+      ? `<span class="danger">Past due / no days remaining</span>`
+      : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
 
     return `
       <tr data-job="${j.id}">
@@ -889,6 +896,7 @@ function viewJobs(){
         <td>${(new Date(j.startISO)).toDateString()} → ${(new Date(j.dueISO)).toDateString()}</td>
         <td>${effText}</td>
         <td>${profitText}</td>
+        <td>${reqCell}</td>
         <td>${j.notes?j.notes:"—"}</td>
         <td>
           <button data-edit-job="${j.id}">Edit</button>
@@ -896,7 +904,7 @@ function viewJobs(){
         </td>
       </tr>
       <tr class="job-manual-row" data-job="${j.id}">
-        <td colspan="8">
+        <td colspan="9">
           <form class="mini-form job-manual-form" data-job-id="${j.id}">
             <label><strong>Manual progress:</strong></label>
             <input type="date" class="jm-date" value="${(new Date()).toISOString().slice(0,10)}" required>
@@ -906,7 +914,7 @@ function viewJobs(){
             </select>
             <input type="number" class="jm-value" min="0" step="0.01" placeholder="e.g., 4" required>
             <button type="submit">Add/Update</button>
-            <button type="button" class="jm-info" title="Manual entries override automatic calculation. If you stop logging manually, the system will estimate from the last manual entry forward at 8 hrs/day until today or due date.">ℹ️</button>
+            <button type="button" class="jm-info" title="Info">ℹ️</button>
           </form>
         </td>
       </tr>`;
@@ -939,6 +947,7 @@ function viewJobs(){
             <th>Schedule</th>
             <th>Efficiency</th>
             <th>Profit (Original → New)</th>
+            <th>Required/day</th>
             <th>Notes</th>
             <th>Actions</th>
           </tr>
