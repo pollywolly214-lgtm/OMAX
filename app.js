@@ -1314,17 +1314,41 @@ function renderJobs(){
 function openJobsEditor(jobId){
   const j = cuttingJobs.find(x=>x.id===jobId);
   if (!j) return;
-  const name = prompt("Job name:", j.name); if (name===null) return;
-  const est = parseFloat(prompt("Estimate hours:", j.estimateHours)); if (!(est>0)) { toast("Hours > 0"); return; }
-  const material = prompt("Material:", j.material||"") ?? j.material;
-  const notes = prompt("Notes:", j.notes||"") ?? j.notes;
+
+  const name = prompt("Job name:", j.name);
+  if (name === null) return;
+
+  const est = parseFloat(prompt("Estimate hours:", j.estimateHours));
+  if (!(est>0)) { toast("Hours > 0"); return; }
+
+  const profitStr = prompt("Original Profit ($):", (j.originalProfit!=null? j.originalProfit : 0));
+  const originalProfit = profitStr === null ? j.originalProfit : parseFloat(profitStr);
+  if (originalProfit == null || isNaN(originalProfit) || originalProfit < 0){ toast("Profit must be ≥ 0"); return; }
+
+  const material = prompt("Material:", j.material||"");
+  if (material === null) return;
+
+  const notes = prompt("Notes:", j.notes||"");
+  if (notes === null) return;
+
   const dueStr = prompt("Due date (YYYY-MM-DD):", j.dueISO.slice(0,10));
   if (!dueStr) return;
+
   const dueISO = new Date(`${dueStr}T00:00:00`).toISOString();
   const span = computeJobSpan(dueISO, est);
-  Object.assign(j, { name, estimateHours:est, material, notes, dueISO:span.dueISO, startISO:span.startISO });
+
+  Object.assign(j, {
+    name,
+    estimateHours: est,
+    originalProfit: originalProfit,
+    material, notes,
+    dueISO: span.dueISO,
+    startISO: span.startISO
+  });
+
   saveCloudDebounced(); toast("Updated"); route();
 }
+
 
 /* ---------------- Tabs / Router ---------------- */
 function setActive(tab){
