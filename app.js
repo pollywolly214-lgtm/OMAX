@@ -554,21 +554,36 @@ function taskDetailsInterval(task){
 function taskDetailsAsReq(task){
   return `
   <details data-task-id="${task.id}">
-    <summary>${task.name} — <span class="small">${task.condition||"As required"}</span></summary>
-    <div class="row"><label>Name:</label><div><input type="text" data-k="name" data-id="${task.id}" data-list="asreq" value="${task.name}" /></div></div>
-    <div class="row"><label>Condition:</label><div><input type="text" data-k="condition" data-id="${task.id}" data-list="asreq" value="${task.condition||""}" /></div></div>
-   
-   <div class="row"><label>Manual link:</label>
-  <div><input type="url" data-k="manualLink" data-id="${task.id}" data-list="interval" value="${task.manualLink||""}" placeholder="PDF / guide URL" /></div>
-</div>
-<div class="row"><label>Store link:</label>
-  <div><input type="url" data-k="storeLink" data-id="${task.id}" data-list="interval" value="${task.storeLink||""}" placeholder="Where to buy" /></div>
-</div>
+    <summary>${task.name} — <span class="small">${task.condition || "As required"}</span></summary>
 
-    <div class="row"><label>Part #:</label><div><input type="text" data-k="pn" data-id="${task.id}" data-list="asreq" value="${task.pn||""}" /></div></div>
-    <div class="row"><label>Price:</label><div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="asreq" value="${task.price!=null?task.price:""}" /></div></div>
+    <div class="row"><label>Name:</label>
+      <div><input type="text" data-k="name" data-id="${task.id}" data-list="asreq" value="${task.name}" /></div>
+    </div>
+
+    <div class="row"><label>Condition/Notes:</label>
+      <div><input type="text" data-k="condition" data-id="${task.id}" data-list="asreq" value="${task.condition || ""}" placeholder="e.g., when clogged / visual check" /></div>
+    </div>
+
+    <!-- New: separate manual & store links -->
+    <div class="row"><label>Manual link:</label>
+      <div><input type="url" data-k="manualLink" data-id="${task.id}" data-list="asreq" value="${task.manualLink || ""}" placeholder="PDF / guide URL" /></div>
+    </div>
+    <div class="row"><label>Store link:</label>
+      <div><input type="url" data-k="storeLink" data-id="${task.id}" data-list="asreq" value="${task.storeLink || ""}" placeholder="Where to buy" /></div>
+    </div>
+
+    <div class="row"><label>Part #:</label>
+      <div><input type="text" data-k="pn" data-id="${task.id}" data-list="asreq" value="${task.pn || ""}" /></div>
+    </div>
+
+    <div class="row"><label>Price:</label>
+      <div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="asreq" value="${task.price != null ? task.price : ""}" /></div>
+    </div>
+
     <div class="row"><label>Actions:</label>
-      <div><button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button></div>
+      <div>
+        <button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button>
+      </div>
     </div>
   </details>`;
 }
