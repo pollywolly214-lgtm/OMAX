@@ -885,22 +885,32 @@ function viewJobs(){
       ? `<span class="danger">Past due / no days remaining</span>`
       : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
 
+    const dueVal = (new Date(j.dueISO)).toISOString().slice(0,10);
+    const startTxt = (new Date(j.startISO)).toDateString();
+    const dueTxt   = (new Date(j.dueISO)).toDateString();
+
     return `
       <tr data-job="${j.id}">
         <td>
-          <div>${j.name}</div>
+          <input type="text" class="job-edit" data-k="name" data-job-id="${j.id}" value="${j.name}" />
           ${noteAuto}
         </td>
-        <td>${j.estimateHours} hrs</td>
-        <td>${j.material||"—"}</td>
-        <td>${(new Date(j.startISO)).toDateString()} → ${(new Date(j.dueISO)).toDateString()}</td>
-        <td>${effText}</td>
-        <td>${profitText}</td>
-        <td>${reqCell}</td>
-        <td>${j.notes?j.notes:"—"}</td>
+        <td><input type="number" min="1" step="0.01" class="job-edit" data-k="estimateHours" data-job-id="${j.id}" value="${j.estimateHours}"></td>
+        <td><input type="text" class="job-edit" data-k="material" data-job-id="${j.id}" value="${j.material||""}" placeholder="Material"></td>
         <td>
-          <button data-edit-job="${j.id}">Edit</button>
+          <div class="small">${startTxt} → ${dueTxt}</div>
+          <input type="date" class="job-edit" data-k="dueISO" data-job-id="${j.id}" value="${dueVal}">
+        </td>
+        <td>${effText}</td>
+        <td>
+          <input type="number" min="0" step="0.01" class="job-edit" data-k="originalProfit" data-job-id="${j.id}" value="${j.originalProfit!=null?j.originalProfit:""}">
+          <div class="small">Computed: ${profitText}</div>
+        </td>
+        <td>${reqCell}</td>
+        <td><input type="text" class="job-edit" data-k="notes" data-job-id="${j.id}" value="${j.notes||""}" placeholder="Notes"></td>
+        <td>
           <button class="danger" data-remove-job="${j.id}">Remove</button>
+          <button type="button" class="jm-info" title="Info" data-job-id="${j.id}">ℹ️</button>
         </td>
       </tr>
       <tr class="job-manual-row" data-job="${j.id}">
@@ -914,7 +924,6 @@ function viewJobs(){
             </select>
             <input type="number" class="jm-value" min="0" step="0.01" placeholder="e.g., 4" required>
             <button type="submit">Add/Update</button>
-            <button type="button" class="jm-info" title="Info">ℹ️</button>
           </form>
         </td>
       </tr>`;
@@ -1423,7 +1432,7 @@ function renderCosts(){
   const tbodyAR   = $("#costTableAsReq tbody");
   const tbodyJobs = $("#costTableJobs tbody");
 
-  // helper
+  // helpers
   const linksCell = (obj) => {
     const m = obj.manualLink, s = obj.storeLink;
     return (m || s)
@@ -1432,87 +1441,104 @@ function renderCosts(){
   };
   const money = (v) => (v != null && isFinite(v)) ? ("$" + Number(v).toFixed(2)) : "—";
 
-  // --- Per Interval
-  const rowsInt = [];
-  tasksInterval.forEach(t => {
-    const costCell = (t.price != null) ? ("$" + t.price) : (t.cost || "—");
-    rowsInt.push(`<tr>
+  // --- Per Interval (editable cost)
+  tbodyInt.innerHTML = tasksInterval.map(t => {
+    const costTxt = (t.price != null && isFinite(t.price)) ? t.price : (t.cost || "");
+    return `<tr>
       <td>${t.name}</td>
       <td>${t.interval}</td>
-      <td>${costCell}</td>
+      <td>
+        <input type="text" class="cost-edit" data-list="interval" data-id="${t.id}" value="${costTxt}" placeholder="$ or text">
+      </td>
       <td>${linksCell(t)}</td>
-    </tr>`);
-  });
-  tbodyInt.innerHTML = rowsInt.join("");
+    </tr>`;
+  }).join("");
 
-  // --- As Required
-  const rowsAR = [];
-  tasksAsReq.forEach(t => {
-    const costCell = (t.price != null) ? ("$" + t.price) : (t.cost || "—");
-    rowsAR.push(`<tr>
+  // --- As Required (editable cost)
+  tbodyAR.innerHTML = tasksAsReq.map(t => {
+    const costTxt = (t.price != null && isFinite(t.price)) ? t.price : (t.cost || "");
+    return `<tr>
       <td>${t.name}</td>
       <td>${t.condition || "As required"}</td>
-      <td>${costCell}</td>
+      <td>
+        <input type="text" class="cost-edit" data-list="asreq" data-id="${t.id}" value="${costTxt}" placeholder="$ or text">
+      </td>
       <td>${linksCell(t)}</td>
-    </tr>`);
-  });
-  tbodyAR.innerHTML = rowsAR.join("");
+    </tr>`;
+  }).join("");
 
-  // --- Cutting Jobs (with inline editing for material cost/qty)
-  const rowsJobs = [];
-  cuttingJobs.forEach(j => {
+  // --- Cutting Jobs (material cost/qty still editable; now shows required/day as before)
+  tbodyJobs.innerHTML = cuttingJobs.map(j => {
     const eff = computeJobEfficiency(j);
+    const req = computeRequiredDaily(j);
+
     const effText = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
 
     const materialCost = (j.materialCost != null && isFinite(j.materialCost)) ? Number(j.materialCost) : 0;
     const materialQty  = (j.materialQty  != null && isFinite(j.materialQty))  ? Number(j.materialQty)  : 0;
     const materialTotal = materialCost * materialQty;
 
-    rowsJobs.push(`<tr data-job="${j.id}">
+    const reqCell = (req.requiredPerDay === Infinity)
+      ? `<span class="danger">Past due / no days</span>`
+      : `${req.requiredPerDay.toFixed(2)} hr/day`;
+
+    return `<tr data-job="${j.id}">
       <td>${j.name}</td>
       <td>${j.estimateHours} hrs</td>
       <td>${j.material || "—"}</td>
-      <td>
-        <input type="number" step="0.01" min="0" class="job-mcost" data-job-id="${j.id}" value="${materialCost}">
-      </td>
-      <td>
-        <input type="number" step="0.01" min="0" class="job-mqty" data-job-id="${j.id}" value="${materialQty}">
-      </td>
+      <td><input type="number" step="0.01" min="0" class="job-mcost" data-job-id="${j.id}" value="${materialCost}"></td>
+      <td><input type="number" step="0.01" min="0" class="job-mqty" data-job-id="${j.id}" value="${materialQty}"></td>
       <td>${money(materialTotal)}</td>
-      <td>${effText}</td>
+      <td>${effText} · ${reqCell}</td>
       <td>$${(j.originalProfit||0).toFixed(2)} → $${eff.newProfit.toFixed(2)}</td>
-    </tr>`);
-  });
-  tbodyJobs.innerHTML = rowsJobs.join("");
+    </tr>`;
+  }).join("");
 
-  // Inline edit handlers (delegate)
+  // Handlers: edit maintenance costs
+  $$(".cost-edit").forEach(inp=>{
+    inp.addEventListener("change", ()=>{
+      const list = inp.getAttribute("data-list"); // "interval" | "asreq"
+      const id   = inp.getAttribute("data-id");
+      const arr  = (list==="interval") ? tasksInterval : tasksAsReq;
+      const t    = arr.find(x=>x.id===id);
+      if (!t) return;
+
+      const raw = inp.value.trim();
+      const num = parseFloat(raw.replace(/^\$/, "")); // allow leading $
+      if (isFinite(num)) {
+        t.price = num;
+        t.cost  = ""; // canonical numeric store in price
+      } else {
+        t.price = null;
+        t.cost  = raw; // free text (e.g., "varies", "OEM only")
+      }
+      saveCloudDebounced();
+      toast("Cost saved");
+    });
+  });
+
+  // Handlers: edit job material cost/qty (already present)
+  const updateRowTotal = (row, job) => {
+    const cells = row.querySelectorAll("td");
+    if (cells[5]) {
+      const total = (Number(job.materialCost)||0) * (Number(job.materialQty)||0);
+      cells[5].textContent = total ? "$" + total.toFixed(2) : "—";
+    }
+  };
   tbodyJobs.addEventListener("input", (e) => {
     const el = e.target;
-    if (!el) return;
-    if (!el.matches(".job-mcost, .job-mqty")) return;
+    if (!el || !el.matches(".job-mcost, .job-mqty")) return;
     const id = el.getAttribute("data-job-id");
-    const job = cuttingJobs.find(x => x.id === id);
-    if (!job) return;
+    const j  = cuttingJobs.find(x=>x.id===id);
+    if (!j) return;
 
     const val = parseFloat(el.value);
-    if (el.classList.contains("job-mcost")) {
-      job.materialCost = isFinite(val) && val >= 0 ? val : 0;
-    } else {
-      job.materialQty = isFinite(val) && val >= 0 ? val : 0;
-    }
+    if (el.classList.contains("job-mcost")) j.materialCost = isFinite(val) && val >= 0 ? val : 0;
+    else j.materialQty = isFinite(val) && val >= 0 ? val : 0;
 
     saveCloudDebounced();
-
-    // Re-render only the Material Total cell for this row
     const row = el.closest("tr");
-    if (row) {
-      const mCost = (job.materialCost != null && isFinite(job.materialCost)) ? Number(job.materialCost) : 0;
-      const mQty  = (job.materialQty  != null && isFinite(job.materialQty))  ? Number(job.materialQty)  : 0;
-      const mTot  = mCost * mQty;
-      // Material Total is the 6th cell (0-based index 5)
-      const cells = row.querySelectorAll("td");
-      if (cells[5]) cells[5].textContent = (mTot ? "$" + mTot.toFixed(2) : "—");
-    }
+    if (row) updateRowTotal(row, j);
   });
 }
 
@@ -1574,13 +1600,13 @@ function renderJobs(){
       startISO: span.startISO,
       materialCost: 0,
       materialQty: 0,
-      manualLogs: [] // manual override store
+      manualLogs: []
     });
 
     saveCloudDebounced(); toast("Job added"); route();
   });
 
-  // Remove / edit
+  // Remove
   $$("#content [data-remove-job]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const id = btn.getAttribute("data-remove-job");
@@ -1588,9 +1614,40 @@ function renderJobs(){
       saveCloudDebounced(); toast("Removed"); renderJobs();
     });
   });
-  $$("#content [data-edit-job]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      openJobsEditor(btn.getAttribute("data-edit-job"));
+
+  // Inline edit handler for jobs
+  $$("#content .job-edit").forEach(input=>{
+    input.addEventListener("change", ()=>{
+      const id = input.getAttribute("data-job-id");
+      const k  = input.getAttribute("data-k");
+      const j  = cuttingJobs.find(x=>x.id===id);
+      if (!j) return;
+
+      let v = input.value;
+      if (k === "estimateHours" || k === "originalProfit") {
+        v = parseFloat(v);
+        if (!isFinite(v) || (k==="estimateHours" && v<=0) || (k==="originalProfit" && v<0)) {
+          toast("Invalid number"); return;
+        }
+      }
+
+      if (k === "dueISO") {
+        // recompute start based on new due and (possibly updated) estimateHours
+        const dueISO = new Date(`${v}T00:00:00`).toISOString();
+        const span = computeJobSpan(dueISO, Number(j.estimateHours)||0);
+        j.dueISO = span.dueISO;
+        j.startISO = span.startISO;
+      } else {
+        j[k] = v;
+        if (k === "estimateHours") {
+          // keep schedule length consistent with hours
+          const span = computeJobSpan(j.dueISO, Number(j.estimateHours)||0);
+          j.startISO = span.startISO; // due stays, start moves
+        }
+      }
+
+      saveCloudDebounced();
+      renderJobs(); // refresh efficiency & required/day text
     });
   });
 
@@ -1614,7 +1671,7 @@ function renderJobs(){
     });
   });
 
-  // ℹ️ info bubble (this is what makes the button DO something)
+  // Info bubble action
   $$(".jm-info").forEach(btn=>{
     btn.addEventListener("click",(e)=>{
       e.preventDefault();
