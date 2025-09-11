@@ -93,3 +93,10 @@ th { background: #f7f9fc; }
 .si-meta{ font-size: 12px; margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap; }
 .badge{ background:#eef2ff; color:#3949ab; border-radius: 999px; padding: 1px 8px; }
 .muted{ color: #666; }
+
+/* highlight a row briefly when Edit is clicked */
+tr.row-editing {
+  outline: 2px solid rgba(0, 120, 255, 0.4);
+  background: rgba(0, 120, 255, 0.06);
+  transition: background 0.8s ease;
+}
