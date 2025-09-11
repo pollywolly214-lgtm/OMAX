@@ -1509,6 +1509,7 @@ function renderInventory(){
 function renderJobs(){
   $("#content").innerHTML = viewJobs();
 
+  // Add job
   $("#jobForm").addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = $("#job_name").value.trim();
@@ -1524,20 +1525,22 @@ function renderJobs(){
     const span = computeJobSpan(dueISO, hours);
     const id = genId(name);
 
-   cuttingJobs.push({
-  id, name,
-  estimateHours: hours,
-  originalProfit: originalProfit,
-  material, notes,
-  dueISO: span.dueISO,
-  startISO: span.startISO,
-  materialCost: 0,
-  materialQty: 0
-});
+    cuttingJobs.push({
+      id, name,
+      estimateHours: hours,
+      originalProfit: originalProfit,
+      material, notes,
+      dueISO: span.dueISO,
+      startISO: span.startISO,
+      materialCost: 0,
+      materialQty: 0,
+      manualLogs: [] // new
+    });
 
     saveCloudDebounced(); toast("Job added"); route();
   });
 
+  // Remove / edit
   $$("#content [data-remove-job]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const id = btn.getAttribute("data-remove-job");
@@ -1548,6 +1551,26 @@ function renderJobs(){
   $$("#content [data-edit-job]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       openJobsEditor(btn.getAttribute("data-edit-job"));
+    });
+  });
+
+  // Manual form handlers (delegate by row)
+  $$(".job-manual-form").forEach(form=>{
+    form.addEventListener("submit",(e)=>{
+      e.preventDefault();
+      const jobId = form.getAttribute("data-job-id");
+      const dateISO = form.querySelector(".jm-date").value;
+      const mode    = form.querySelector(".jm-mode").value; // "completed" | "remaining"
+      const val     = parseFloat(form.querySelector(".jm-value").value);
+      if (!dateISO || !isFinite(val)) { toast("Enter date and hours"); return; }
+
+      if (addManualLog(jobId, dateISO, mode, val)) {
+        saveCloudDebounced();
+        toast("Manual progress saved");
+        renderJobs(); // refresh summary
+      } else {
+        toast("Job not found");
+      }
     });
   });
 }
