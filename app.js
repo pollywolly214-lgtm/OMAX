@@ -322,33 +322,90 @@ function buildDailyHoursMap(){
 }
 
 // Compute efficiency for a job over its scheduled days
-function computeJobEfficiency(job){
-  const planned = (job && job.estimateHours > 0) ? job.estimateHours : 0;
-  const pph = planned > 0 ? (Number(job.originalProfit || 0) / planned) : 0; // profit per planned hour
-  const daily = buildDailyHoursMap();
-
-  if (!job || !job.startISO || !job.dueISO) {
-    return { pph, sumDelta:0, efficiencyAmount:0, newProfit:Number(job.originalProfit||0) };
-  }
-
-  const start = new Date(job.startISO), end = new Date(job.dueISO);
-  start.setHours(0,0,0,0); end.setHours(0,0,0,0);
-
-  let cur = new Date(start);
-  let sumDelta = 0;
-
-  while (cur <= end){
-    const key = ymd(cur);
-    const actual = daily[key] || 0;    // hours cut that calendar day
-    sumDelta += (actual - DAILY_HOURS); // + if >8, - if <8
-    cur.setDate(cur.getDate()+1);
-  }
-
-  const efficiencyAmount = pph * sumDelta;
-  const newProfit = Number(job.originalProfit || 0) + efficiencyAmount;
-  return { pph, sumDelta, efficiencyAmount, newProfit };
+// Inclusive day difference at local midnight
+function daysBetweenInclusive(a, b){
+  const MS = 24*60*60*1000;
+  const d = Math.floor((b - a) / MS) + 1; // inclusive
+  return d < 0 ? 0 : d;
 }
 
+/**
+ * New efficiency model (matches your example):
+ * - plannedHours = job.estimateHours
+ * - rate $/hr = originalProfit / plannedHours
+ * - expectedHoursSoFar = min(plannedHours, DAILY_HOURS * daysElapsedWithinWindow)
+ * - actualHoursSoFar   = min(plannedHours, sum of logged hours within window-to-date)
+ * - deltaHours = expected - actual  (positive => behind, negative => ahead)
+ * - efficiencyAmount = - deltaHours * rate  (subtract when behind, add when ahead)
+ * - newProfit = originalProfit + efficiencyAmount
+ */
+function computeJobEfficiency(job){
+  const planned = (job && job.estimateHours > 0) ? Number(job.estimateHours) : 0;
+  const origProfit = Number(job && job.originalProfit != null ? job.originalProfit : 0);
+  const rate = planned > 0 ? (origProfit / planned) : 0; // $/hr
+
+  if (!job || !job.startISO || !job.dueISO || planned <= 0) {
+    return {
+      pph: rate,
+      expectedHours: 0,
+      actualHours: 0,
+      deltaHours: 0,
+      efficiencyAmount: 0,
+      newProfit: origProfit,
+      daysElapsed: 0,
+      totalDays: 0
+    };
+  }
+
+  // Normalize dates to local midnight
+  const start = new Date(job.startISO); start.setHours(0,0,0,0);
+  const due   = new Date(job.dueISO);   due.setHours(0,0,0,0);
+  const today = new Date();             today.setHours(0,0,0,0);
+
+  // Window considered = from start up to "as of" date (today or due, whichever is earlier)
+  const asOf = (today < due) ? today : due;
+
+  // Planned days = inclusive span between start and due
+  const totalDays = daysBetweenInclusive(start, due);
+
+  // Elapsed days so far within the window; zero if we haven't started yet
+  const daysElapsed = (asOf < start) ? 0 : daysBetweenInclusive(start, asOf);
+
+  // Expected hours so far (capped at the total planned hours)
+  const expectedHoursRaw = daysElapsed * DAILY_HOURS;
+  const expectedHours = Math.min(expectedHoursRaw, planned);
+
+  // Actual hours so far from your totalHistory deltas, just within [start ... asOf]
+  const daily = buildDailyHoursMap(); // { 'YYYY-M-D': hoursThatDay }
+  let actualRaw = 0;
+  if (daysElapsed > 0) {
+    const cur = new Date(start);
+    while (cur <= asOf) {
+      const key = ymd(cur);
+      actualRaw += (daily[key] || 0);
+      cur.setDate(cur.getDate() + 1);
+    }
+  }
+  const actualHours = Math.min(actualRaw, planned);
+
+  // Hours gap (positive = behind; negative = ahead)
+  const deltaHours = expectedHours - actualHours;
+
+  // Money impact; behind reduces profit, ahead increases it
+  const efficiencyAmount = - deltaHours * rate;
+  const newProfit = origProfit + efficiencyAmount;
+
+  return {
+    pph: rate,
+    expectedHours,
+    actualHours,
+    deltaHours,
+    efficiencyAmount,
+    newProfit,
+    daysElapsed,
+    totalDays
+  };
+}
 
 // --------- Fuzzy search helpers (new) ---------
 function normalizeText(s){
