@@ -305,6 +305,51 @@ function debounce(fn, ms=250) { let t; return (...a)=>{clearTimeout(t); t=setTim
 function genId(name) { const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
 function ymd(date){return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;}
 
+// Build a { 'YYYY-M-D': hoursCutThatDay } map from totalHistory deltas
+function buildDailyHoursMap(){
+  const map = {};
+  if (!Array.isArray(totalHistory) || totalHistory.length < 2) return map;
+  const sorted = totalHistory.slice().sort((a,b)=> new Date(a.dateISO) - new Date(b.dateISO));
+  for (let i=1; i<sorted.length; i++){
+    const prev = sorted[i-1], cur = sorted[i];
+    let diff = (cur.hours - prev.hours);
+    if (!isFinite(diff) || diff < 0) diff = 0;
+    const d = new Date(cur.dateISO); d.setHours(0,0,0,0);
+    const key = ymd(d);
+    map[key] = (map[key] || 0) + diff;
+  }
+  return map;
+}
+
+// Compute efficiency for a job over its scheduled days
+function computeJobEfficiency(job){
+  const planned = (job && job.estimateHours > 0) ? job.estimateHours : 0;
+  const pph = planned > 0 ? (Number(job.originalProfit || 0) / planned) : 0; // profit per planned hour
+  const daily = buildDailyHoursMap();
+
+  if (!job || !job.startISO || !job.dueISO) {
+    return { pph, sumDelta:0, efficiencyAmount:0, newProfit:Number(job.originalProfit||0) };
+  }
+
+  const start = new Date(job.startISO), end = new Date(job.dueISO);
+  start.setHours(0,0,0,0); end.setHours(0,0,0,0);
+
+  let cur = new Date(start);
+  let sumDelta = 0;
+
+  while (cur <= end){
+    const key = ymd(cur);
+    const actual = daily[key] || 0;    // hours cut that calendar day
+    sumDelta += (actual - DAILY_HOURS); // + if >8, - if <8
+    cur.setDate(cur.getDate()+1);
+  }
+
+  const efficiencyAmount = pph * sumDelta;
+  const newProfit = Number(job.originalProfit || 0) + efficiencyAmount;
+  return { pph, sumDelta, efficiencyAmount, newProfit };
+}
+
+
 // --------- Fuzzy search helpers (new) ---------
 function normalizeText(s){
   return (s || "")
