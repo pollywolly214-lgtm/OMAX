@@ -1089,52 +1089,56 @@ function renderCosts(){
   RENDER_DELTA = deltaSinceLast();
 
   $("#content").innerHTML = viewCosts();
-  const tbody = $("#costTable tbody");
+  const tbody  = $("#costTable tbody");
   const filter = $("#costFilter");
 
   function draw(){
-    const val = filter.value;
+    const val  = filter.value;
     const rows = [];
-    if (val==="interval" || val==="all") {
-      tasksInterval.forEach(t=>{
-        rows.push(`<tr>
-          <td>${t.name}</td><td>Per Interval</td><td>${t.interval}</td>
-          <td>${t.cost || (t.price!=null?("$"+t.price):"$____")}</td>
-         const linkCell = (t.manualLink || t.storeLink)
-  ? `${t.manualLink ? `<a href="${t.manualLink}" target="_blank">Manual</a>` : ""}${t.manualLink && t.storeLink ? " · " : ""}${t.storeLink ? `<a href="${t.storeLink}" target="_blank">Store</a>` : ""}`
-  : "—";
-rows.push(`<tr>
-  <td>${t.name}</td>
-  <td>Per Interval</td>
-  <td>${t.interval}</td>
-  <td>${t.cost || (t.price != null ? "$" + t.price : "$____")}</td>
-  <td>${linkCell}</td>
-</tr>`);
 
+    // --- Per-interval tasks ---
+    if (val === "interval" || val === "all") {
+      tasksInterval.forEach(t => {
+        const costCell = t.price != null ? ("$" + t.price) : (t.cost || "—");
+        const linkCell = (t.manualLink || t.storeLink)
+          ? `${t.manualLink ? `<a href="${t.manualLink}" target="_blank" rel="noopener">Manual</a>` : ""}${t.manualLink && t.storeLink ? " · " : ""}${t.storeLink ? `<a href="${t.storeLink}" target="_blank" rel="noopener">Store</a>` : ""}`
+          : "—";
+
+        rows.push(`<tr>
+          <td>${t.name}</td>
+          <td>Per Interval</td>
+          <td>${t.interval}</td>
+          <td>${costCell}</td>
+          <td>${linkCell}</td>
+        </tr>`);
       });
     }
-    if (val==="asreq" || val==="all") {
-      tasksAsReq.forEach(t=>{
-        rows.push(`<tr>
-          <td>${t.name}</td><td>As Required</td><td>—</td>
-          <td>${t.cost || (t.price!=null?("$"+t.price):"$____")}</td>
-         const linkCell = (t.manualLink || t.storeLink)
-  ? `${t.manualLink ? `<a href="${t.manualLink}" target="_blank">Manual</a>` : ""}${t.manualLink && t.storeLink ? " · " : ""}${t.storeLink ? `<a href="${t.storeLink}" target="_blank">Store</a>` : ""}`
-  : "—";
-rows.push(`<tr>
-  <td>${t.name}</td>
-  <td>Per Interval</td>
-  <td>${t.interval}</td>
-  <td>${t.cost || (t.price != null ? "$" + t.price : "$____")}</td>
-  <td>${linkCell}</td>
-</tr>`);
 
+    // --- As-required tasks ---
+    if (val === "asreq" || val === "all") {
+      tasksAsReq.forEach(t => {
+        const costCell = t.price != null ? ("$" + t.price) : (t.cost || "—");
+        const linkCell = (t.manualLink || t.storeLink)
+          ? `${t.manualLink ? `<a href="${t.manualLink}" target="_blank" rel="noopener">Manual</a>` : ""}${t.manualLink && t.storeLink ? " · " : ""}${t.storeLink ? `<a href="${t.storeLink}" target="_blank" rel="noopener">Store</a>` : ""}`
+          : "—";
+
+        rows.push(`<tr>
+          <td>${t.name}</td>
+          <td>As Required</td>
+          <td>—</td>
+          <td>${costCell}</td>
+          <td>${linkCell}</td>
+        </tr>`);
       });
     }
+
     tbody.innerHTML = rows.join("");
   }
+
   filter.addEventListener("change", draw);
   draw();
+}
+
 }
 
 function renderInventory(){
