@@ -210,6 +210,9 @@ let tasksInterval = [];
 let tasksAsReq   = [];
 let inventory    = [];
 let cuttingJobs  = []; // [{id,name,estimateHours,material,notes,dueISO,startISO}]
+
+// Tracks which job rows are currently in "edit mode"
+let editingJobs = new Set();
 let RENDER_TOTAL = null;
 let RENDER_DELTA = 0;
 
@@ -889,29 +892,50 @@ function viewJobs(){
     const startTxt = (new Date(j.startISO)).toDateString();
     const dueTxt   = (new Date(j.dueISO)).toDateString();
 
+    const editing = editingJobs.has(j.id);
+
+    // READ CELLS
+    const readName      = `<div><strong>${j.name}</strong></div>${noteAuto}`;
+    const readEstimate  = `${j.estimateHours} hrs`;
+    const readMaterial  = j.material || "—";
+    const readSchedule  = `<div class="small">${startTxt} → ${dueTxt}</div><div class="muted">${dueVal}</div>`;
+    const readEff       = effText;
+    const readProfit    = `${profitText}<div class="muted">Original: $${(j.originalProfit||0).toFixed(2)}</div>`;
+    const readReq       = reqCell;
+    const readNotes     = j.notes || "—";
+
+    // EDIT CELLS
+    const editName     = `<input type="text" class="job-edit" data-k="name" data-job-id="${j.id}" value="${j.name}" />`;
+    const editEstimate = `<input type="number" min="1" step="0.01" class="job-edit" data-k="estimateHours" data-job-id="${j.id}" value="${j.estimateHours}">`;
+    const editMaterial = `<input type="text" class="job-edit" data-k="material" data-job-id="${j.id}" value="${j.material||""}" placeholder="Material">`;
+    const editDue      = `<div class="small">${startTxt} → ${dueTxt}</div>
+                          <input type="date" class="job-edit" data-k="dueISO" data-job-id="${j.id}" value="${dueVal}">`;
+    const editProfit   = `<input type="number" min="0" step="0.01" class="job-edit" data-k="originalProfit" data-job-id="${j.id}" value="${j.originalProfit!=null?j.originalProfit:""}">
+                          <div class="small">Computed: ${profitText}</div>`;
+    const editReq      = reqCell;
+    const editNotes    = `<input type="text" class="job-edit" data-k="notes" data-job-id="${j.id}" value="${j.notes||""}" placeholder="Notes">`;
+
+    // Actions
+    const actions = editing
+      ? `<button class="primary" data-save-job="${j.id}">Save</button>
+         <button class="secondary" data-cancel-job="${j.id}">Cancel</button>
+         <button type="button" class="jm-info" title="Info" data-job-id="${j.id}">ℹ️</button>
+         <button class="danger" data-remove-job="${j.id}">Remove</button>`
+      : `<button data-edit-job="${j.id}">Edit</button>
+         <button type="button" class="jm-info" title="Info" data-job-id="${j.id}">ℹ️</button>
+         <button class="danger" data-remove-job="${j.id}">Remove</button>`;
+
     return `
       <tr data-job="${j.id}">
-        <td>
-          <input type="text" class="job-edit" data-k="name" data-job-id="${j.id}" value="${j.name}" />
-          ${noteAuto}
-        </td>
-        <td><input type="number" min="1" step="0.01" class="job-edit" data-k="estimateHours" data-job-id="${j.id}" value="${j.estimateHours}"></td>
-        <td><input type="text" class="job-edit" data-k="material" data-job-id="${j.id}" value="${j.material||""}" placeholder="Material"></td>
-        <td>
-          <div class="small">${startTxt} → ${dueTxt}</div>
-          <input type="date" class="job-edit" data-k="dueISO" data-job-id="${j.id}" value="${dueVal}">
-        </td>
-        <td>${effText}</td>
-        <td>
-          <input type="number" min="0" step="0.01" class="job-edit" data-k="originalProfit" data-job-id="${j.id}" value="${j.originalProfit!=null?j.originalProfit:""}">
-          <div class="small">Computed: ${profitText}</div>
-        </td>
-        <td>${reqCell}</td>
-        <td><input type="text" class="job-edit" data-k="notes" data-job-id="${j.id}" value="${j.notes||""}" placeholder="Notes"></td>
-        <td>
-          <button class="danger" data-remove-job="${j.id}">Remove</button>
-          <button type="button" class="jm-info" title="Info" data-job-id="${j.id}">ℹ️</button>
-        </td>
+        <td>${editing ? editName     : readName}</td>
+        <td>${editing ? editEstimate : readEstimate}</td>
+        <td>${editing ? editMaterial : readMaterial}</td>
+        <td>${editing ? editDue      : readSchedule}</td>
+        <td>${readEff}</td>
+        <td>${editing ? editProfit   : readProfit}</td>
+        <td>${readReq}</td>
+        <td>${editing ? editNotes    : readNotes}</td>
+        <td>${actions}</td>
       </tr>
       <tr class="job-manual-row" data-job="${j.id}">
         <td colspan="9">
@@ -932,7 +956,8 @@ function viewJobs(){
   return `
   <div class="container">
     <div class="block">
-      <h3>Add Cutting Job</h3>
+      <h3>Cutting Jobs</h3>
+      <p class="small"><em>Tip:</em> Click <strong>Edit</strong> to change a single row. Save or Cancel keeps the table tidy.</p>
       <form id="jobForm" class="mini-form">
         <input type="text" id="job_name" placeholder="Job name" required>
         <input type="number" id="job_hours" placeholder="Estimate (hrs)" required min="1">
@@ -942,11 +967,10 @@ function viewJobs(){
         <input type="text" id="job_notes" placeholder="Notes">
         <button type="submit">Add Job</button>
       </form>
-      <p class="small">Bars appear on the calendar from start to due. Baseline is ${DAILY_HOURS} hrs/day.</p>
+      <p class="small">Calendar bars span from start to due. Baseline is <strong>${DAILY_HOURS}</strong> hrs/day.</p>
     </div>
 
     <div class="block" style="grid-column: 1 / -1">
-      <h3>Jobs</h3>
       <table>
         <thead>
           <tr>
@@ -1678,6 +1702,29 @@ function renderJobs(){
       showInfoBubble(btn);
     });
   });
+}
+
+function showInfoBubble(anchor){
+  const b = makeBubble(anchor);
+  b.innerHTML = `
+    <div class="bubble-title">How calculations work</div>
+    <div class="bubble-kv">
+      <span><strong>Manual Logs</strong></span>
+      <span>We use your latest manual hours. If you stop logging, we estimate from that last entry at <b>${DAILY_HOURS}</b> hr/day until today or the due date.</span>
+    </div>
+    <div class="bubble-kv">
+      <span><strong>Automatic</strong></span>
+      <span>If there are no manual logs, actual hours come from your daily <em>Total Hours</em> logs.</span>
+    </div>
+    <div class="bubble-kv">
+      <span><strong>Efficiency</strong></span>
+      <span>Δhrs = expected − actual. Profit impact = −Δhrs × (originalProfit ÷ estimateHours).</span>
+    </div>
+    <div class="bubble-kv">
+      <span><strong>Required/day</strong></span>
+      <span>Remaining hours ÷ remaining calendar days (inclusive) to meet the due date. Can be above or below <b>${DAILY_HOURS}</b>.</span>
+    </div>
+  `;
 }
 
 function showJobBubble(jobId, anchor){
