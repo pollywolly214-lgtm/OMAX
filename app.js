@@ -1196,6 +1196,28 @@ function computeJobSpan(dueISO, estimateHours){
   const start = new Date(due); start.setDate(due.getDate() - (daysNeeded - 1));
   return { startISO: start.toISOString(), dueISO: due.toISOString() };
 }
+// Required hours/day to hit the due date, based on manual override (or auto fallback)
+function computeRequiredDaily(job){
+  if (!job || !job.startISO || !job.dueISO) {
+    return { remainingHours: 0, remainingDays: 0, requiredPerDay: 0 };
+  }
+  const eff = computeJobEfficiency(job);               // gives us actualHours so far
+  const planned = Number(job.estimateHours) || 0;
+  const remainingHours = Math.max(0, planned - eff.actualHours);
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const due   = new Date(job.dueISO); due.setHours(0,0,0,0);
+  const asOf  = (today < due) ? today : due;           // same “asOf” horizon as efficiency
+  const remainingDays = (asOf <= due)
+    ? Math.max(0, daysBetweenInclusive(asOf, due))     // inclusive of today
+    : 0;
+
+  const requiredPerDay = (remainingDays > 0)
+    ? (remainingHours / remainingDays)
+    : (remainingHours > 0 ? Infinity : 0);
+
+  return { remainingHours, remainingDays, requiredPerDay };
+}
 
 /* ======================= Controllers ======================= */
 function viewInventory(){
