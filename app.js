@@ -1432,14 +1432,16 @@ function renderJobs(){
     const span = computeJobSpan(dueISO, hours);
     const id = genId(name);
 
-    cuttingJobs.push({
-      id, name,
-      estimateHours: hours,
-      originalProfit: originalProfit,
-      material, notes,
-      dueISO: span.dueISO,
-      startISO: span.startISO
-    });
+   cuttingJobs.push({
+  id, name,
+  estimateHours: hours,
+  originalProfit: originalProfit,
+  material, notes,
+  dueISO: span.dueISO,
+  startISO: span.startISO,
+  materialCost: 0,
+  materialQty: 0
+});
 
     saveCloudDebounced(); toast("Job added"); route();
   });
