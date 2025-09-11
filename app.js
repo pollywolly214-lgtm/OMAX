@@ -739,19 +739,60 @@ function viewCosts(){
   <div class="container">
     <div class="block" style="grid-column: 1 / -1">
       <h3>Cost Analysis</h3>
-      <div class="mini-form">
-        <label for="costFilter"><strong>Show:</strong></label>
-        <select id="costFilter">
-          <option value="interval">Per Interval</option>
-          <option value="asreq">As Required</option>
-          <option value="jobs">Cutting Jobs</option>
-          <option value="all">All</option>
-        </select>
-      </div>
-      <table id="costTable">
-        <thead><tr><th>Item</th><th>Category</th><th>Interval (hrs)</th><th>Cost / Profit</th><th>Link</th></tr></thead>
+      <p class="small">Three sections: Per Interval, As Required, and Cutting Jobs. Edit cutting material cost/qty inline.</p>
+    </div>
+
+    <!-- Per Interval -->
+    <div class="block" style="grid-column: 1 / -1">
+      <h4>Per Interval</h4>
+      <table id="costTableInterval">
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Interval (hrs)</th>
+            <th>Cost</th>
+            <th>Links</th>
+          </tr>
+        </thead>
         <tbody></tbody>
       </table>
+    </div>
+
+    <!-- As Required -->
+    <div class="block" style="grid-column: 1 / -1">
+      <h4>As Required</h4>
+      <table id="costTableAsReq">
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Condition</th>
+            <th>Cost</th>
+            <th>Links</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Cutting Jobs -->
+    <div class="block" style="grid-column: 1 / -1">
+      <h4>Cutting Jobs</h4>
+      <table id="costTableJobs">
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Estimate (hrs)</th>
+            <th>Material</th>
+            <th>Material Cost ($)</th>
+            <th>Material Qty</th>
+            <th>Material Total ($)</th>
+            <th>Efficiency (hr Δ → $Δ)</th>
+            <th>Profit (Original → New)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p class="small">Material fields are editable. Changes save to cloud automatically.</p>
     </div>
   </div>`;
 }
