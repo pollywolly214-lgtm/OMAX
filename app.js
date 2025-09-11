@@ -1100,8 +1100,17 @@ function renderCosts(){
         rows.push(`<tr>
           <td>${t.name}</td><td>Per Interval</td><td>${t.interval}</td>
           <td>${t.cost || (t.price!=null?("$"+t.price):"$____")}</td>
-          <td>${t.link ? `<a href="${t.link}" target="_blank" rel="noopener">link</a>` : "link"}</td>
-        </tr>`);
+         const linkCell = (t.manualLink || t.storeLink)
+  ? `${t.manualLink ? `<a href="${t.manualLink}" target="_blank">Manual</a>` : ""}${t.manualLink && t.storeLink ? " · " : ""}${t.storeLink ? `<a href="${t.storeLink}" target="_blank">Store</a>` : ""}`
+  : "—";
+rows.push(`<tr>
+  <td>${t.name}</td>
+  <td>Per Interval</td>
+  <td>${t.interval}</td>
+  <td>${t.cost || (t.price != null ? "$" + t.price : "$____")}</td>
+  <td>${linkCell}</td>
+</tr>`);
+
       });
     }
     if (val==="asreq" || val==="all") {
@@ -1109,8 +1118,17 @@ function renderCosts(){
         rows.push(`<tr>
           <td>${t.name}</td><td>As Required</td><td>—</td>
           <td>${t.cost || (t.price!=null?("$"+t.price):"$____")}</td>
-          <td>${t.link ? `<a href="${t.link}" target="_blank" rel="noopener">link</a>` : "link"}</td>
-        </tr>`);
+         const linkCell = (t.manualLink || t.storeLink)
+  ? `${t.manualLink ? `<a href="${t.manualLink}" target="_blank">Manual</a>` : ""}${t.manualLink && t.storeLink ? " · " : ""}${t.storeLink ? `<a href="${t.storeLink}" target="_blank">Store</a>` : ""}`
+  : "—";
+rows.push(`<tr>
+  <td>${t.name}</td>
+  <td>Per Interval</td>
+  <td>${t.interval}</td>
+  <td>${t.cost || (t.price != null ? "$" + t.price : "$____")}</td>
+  <td>${linkCell}</td>
+</tr>`);
+
       });
     }
     tbody.innerHTML = rows.join("");
