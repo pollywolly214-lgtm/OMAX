@@ -790,6 +790,14 @@ function showTaskBubble(taskId, anchor){
       t.price != null ? ("$" + t.price) : (t.cost ? t.cost : "—")
     }</span></div>
     <div class="bubble-actions">
+    ${ (t.manualLink || t.storeLink)
+  ? `<div class="bubble-kv"><span>Links:</span><span>
+      ${t.manualLink ? `<a href="${t.manualLink}" target="_blank">Manual</a>` : ``}
+      ${t.manualLink && t.storeLink ? ` · ` : ``}
+      ${t.storeLink ? `<a href="${t.storeLink}" target="_blank">Store</a>` : ``}
+    </span></div>`
+  : `` }
+
       <button data-bbl-complete="${t.id}">Complete</button>
       <button class="danger" data-bbl-remove="${t.id}">Remove</button>
       <button data-bbl-edit="${t.id}">Edit settings</button>
