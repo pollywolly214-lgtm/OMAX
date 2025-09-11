@@ -1623,6 +1623,50 @@ function renderJobs(){
   });
 }
 
+function showJobBubble(jobId, anchor){
+  const j = cuttingJobs.find(x => x.id === jobId);
+  if (!j) return;
+  const b = makeBubble(anchor);
+
+  const eff = computeJobEfficiency(j);
+  const req = computeRequiredDaily(j);
+
+  const effText = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
+  const note = eff.usedAutoFromManual
+    ? `<div class="small"><strong>Automated Estimation</strong>: continuing from last manual log at ${DAILY_HOURS} hrs/day. Please enter exact hours.</div>`
+    : (eff.usedTotalHistory ? `<div class="small"><strong>Automatic (Total Hours)</strong></div>` : ``);
+
+  const reqCell = (req.requiredPerDay === Infinity)
+    ? `<span class="danger">Past due / no days remaining</span>`
+    : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
+
+  b.innerHTML = `
+    <div class="bubble-title">${j.name}</div>
+    <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
+    <div class="bubble-kv"><span>Material:</span><span>${j.material||"—"}</span></div>
+    <div class="bubble-kv"><span>Schedule:</span><span>${(new Date(j.startISO)).toDateString()} → ${(new Date(j.dueISO)).toDateString()}</span></div>
+
+    <div class="bubble-kv"><span>Original profit:</span><span>$${(j.originalProfit||0).toFixed(2)}</span></div>
+    <div class="bubble-kv"><span>Efficiency:</span><span>${effText}</span></div>
+    <div class="bubble-kv"><span>Required/day:</span><span>${reqCell}</span></div>
+    <div class="bubble-kv"><span>New profit:</span><span>$${eff.newProfit.toFixed(2)}</span></div>
+    ${note}
+    <div class="bubble-kv"><span>Notes:</span><span>${j.notes||"—"}</span></div>
+
+    <div class="bubble-actions">
+      <button data-bbl-edit-job="${j.id}">Edit</button>
+      <button class="danger" data-bbl-remove-job="${j.id}">Remove</button>
+    </div>
+  `;
+
+  document.querySelector("[data-bbl-remove-job]").onclick = () => {
+    cuttingJobs = cuttingJobs.filter(x => x.id !== jobId);
+    saveCloudDebounced(); toast("Removed"); hideBubble(); route();
+  };
+  document.querySelector("[data-bbl-edit-job]").onclick = () => { hideBubble(); openJobsEditor(j.id); };
+}
+
+
 
 function openJobsEditor(jobId){
   const j = cuttingJobs.find(x=>x.id===jobId);
