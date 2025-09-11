@@ -1139,8 +1139,6 @@ function renderCosts(){
   draw();
 }
 
-}
-
 function renderInventory(){
   $("#content").innerHTML = viewInventory();
 
