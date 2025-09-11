@@ -925,13 +925,18 @@ function showJobBubble(jobId, anchor){
   const j = cuttingJobs.find(x => x.id === jobId);
   if (!j) return;
   const b = makeBubble(anchor);
+  const eff = computeJobEfficiency(j);
+  const effText = `${eff.sumDelta>=0?"+":""}${eff.sumDelta} hr Δ → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
 
   b.innerHTML = `
     <div class="bubble-title">${j.name}</div>
     <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
-    <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
+    <div class="bubble-kv"><span>Material:</span><span>${j.material||"—"}</span></div>
     <div class="bubble-kv"><span>Schedule:</span><span>${(new Date(j.startISO)).toDateString()} → ${(new Date(j.dueISO)).toDateString()}</span></div>
-    <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
+    <div class="bubble-kv"><span>Original profit:</span><span>$${(j.originalProfit||0).toFixed(2)}</span></div>
+    <div class="bubble-kv"><span>Efficiency:</span><span>${effText}</span></div>
+    <div class="bubble-kv"><span>New profit:</span><span>$${eff.newProfit.toFixed(2)}</span></div>
+    <div class="bubble-kv"><span>Notes:</span><span>${j.notes||"—"}</span></div>
     <div class="bubble-actions">
       <button data-bbl-edit-job="${j.id}">Edit</button>
       <button class="danger" data-bbl-remove-job="${j.id}">Remove</button>
@@ -940,15 +945,9 @@ function showJobBubble(jobId, anchor){
 
   document.querySelector("[data-bbl-remove-job]").onclick = () => {
     cuttingJobs = cuttingJobs.filter(x => x.id !== jobId);
-    saveCloudDebounced();
-    toast("Removed");
-    hideBubble();
-    route();
+    saveCloudDebounced(); toast("Removed"); hideBubble(); route();
   };
-  document.querySelector("[data-bbl-edit-job]").onclick = () => {
-    hideBubble();
-    openJobsEditor(j.id);
-  };
+  document.querySelector("[data-bbl-edit-job]").onclick = () => { hideBubble(); openJobsEditor(j.id); };
 }
 
 function completeTask(taskId){
