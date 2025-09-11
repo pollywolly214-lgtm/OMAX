@@ -1274,14 +1274,26 @@ function renderJobs(){
     e.preventDefault();
     const name = $("#job_name").value.trim();
     const hours = parseFloat($("#job_hours").value);
+    const originalProfit = parseFloat($("#job_profit").value);
     const material = $("#job_material").value.trim();
     const dueStr = $("#job_due").value; // yyyy-mm-dd
     const notes = $("#job_notes").value.trim();
-    if (!name || !(hours>0) || !dueStr) { toast("Enter name, hours>0, due date"); return; }
+
+    if (!name || !(hours>0) || isNaN(originalProfit) || !dueStr) { toast("Enter name, hours>0, profit, due date"); return; }
+
     const dueISO = new Date(`${dueStr}T00:00:00`).toISOString();
     const span = computeJobSpan(dueISO, hours);
     const id = genId(name);
-    cuttingJobs.push({ id, name, estimateHours:hours, material, notes, dueISO: span.dueISO, startISO: span.startISO });
+
+    cuttingJobs.push({
+      id, name,
+      estimateHours: hours,
+      originalProfit: originalProfit,
+      material, notes,
+      dueISO: span.dueISO,
+      startISO: span.startISO
+    });
+
     saveCloudDebounced(); toast("Job added"); route();
   });
 
