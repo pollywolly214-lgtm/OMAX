@@ -687,11 +687,12 @@ function viewCosts(){
         <select id="costFilter">
           <option value="interval">Per Interval</option>
           <option value="asreq">As Required</option>
+          <option value="jobs">Cutting Jobs</option>
           <option value="all">All</option>
         </select>
       </div>
       <table id="costTable">
-        <thead><tr><th>Task</th><th>Category</th><th>Interval (hrs)</th><th>Cost</th><th>Link</th></tr></thead>
+        <thead><tr><th>Item</th><th>Category</th><th>Interval (hrs)</th><th>Cost / Profit</th><th>Link</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
