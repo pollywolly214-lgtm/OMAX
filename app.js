@@ -1595,51 +1595,81 @@ function renderInventory(){
 }
 
 function renderJobs(){
+  // 1) Render page
   $("#content").innerHTML = viewJobs();
 
-  // Add job
-  $("#jobForm").addEventListener("submit",(e)=>{
-    e.preventDefault();
-    const name = $("#job_name").value.trim();
-    const hours = parseFloat($("#job_hours").value);
-    const originalProfit = parseFloat($("#job_profit").value);
-    const material = $("#job_material").value.trim();
-    const dueStr = $("#job_due").value; // yyyy-mm-dd
-    const notes = $("#job_notes").value.trim();
+  // 2) Add job
+  const jobForm = $("#jobForm");
+  if (jobForm) {
+    jobForm.addEventListener("submit",(e)=>{
+      e.preventDefault();
+      const name = $("#job_name").value.trim();
+      const hours = parseFloat($("#job_hours").value);
+      const originalProfit = parseFloat($("#job_profit").value);
+      const material = $("#job_material").value.trim();
+      const dueStr = $("#job_due").value; // yyyy-mm-dd
+      const notes = $("#job_notes").value.trim();
 
-    if (!name || !(hours>0) || isNaN(originalProfit) || !dueStr) {
-      toast("Enter name, hours>0, profit, due date"); return;
-    }
+      if (!name || !(hours>0) || isNaN(originalProfit) || !dueStr) {
+        toast("Enter name, hours>0, profit, due date"); return;
+      }
 
-    const dueISO = new Date(`${dueStr}T00:00:00`).toISOString();
-    const span = computeJobSpan(dueISO, hours);
-    const id = genId(name);
+      const dueISO = new Date(`${dueStr}T00:00:00`).toISOString();
+      const span   = computeJobSpan(dueISO, hours);
+      const id     = genId(name);
 
-    cuttingJobs.push({
-      id, name,
-      estimateHours: hours,
-      originalProfit: originalProfit,
-      material, notes,
-      dueISO: span.dueISO,
-      startISO: span.startISO,
-      materialCost: 0,
-      materialQty: 0,
-      manualLogs: []
+      cuttingJobs.push({
+        id, name,
+        estimateHours: hours,
+        originalProfit: originalProfit,
+        material, notes,
+        dueISO: span.dueISO,
+        startISO: span.startISO,
+        materialCost: 0,
+        materialQty: 0,
+        manualLogs: []
+      });
+
+      saveCloudDebounced();
+      toast("Job added");
+      route();
     });
+  }
 
-    saveCloudDebounced(); toast("Job added"); route();
-  });
-
-  // Remove
+  // 3) Remove job
   $$("#content [data-remove-job]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const id = btn.getAttribute("data-remove-job");
       cuttingJobs = cuttingJobs.filter(j=>j.id!==id);
-      saveCloudDebounced(); toast("Removed"); renderJobs();
+      saveCloudDebounced();
+      toast("Removed");
+      renderJobs();
     });
   });
 
-  // Inline edit handler for jobs
+  // 4) EDIT button — focus row inputs (no cycling)
+  $$("#content [data-edit-job]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const id  = btn.getAttribute("data-edit-job");
+      const row = btn.closest("tr");
+      if (!row) return;
+
+      // add a visual highlight
+      row.classList.add("row-editing");
+
+      // focus the first editable input in this row
+      const firstInput = row.querySelector(".job-edit");
+      if (firstInput) {
+        firstInput.focus();
+        firstInput.select?.();
+      }
+
+      // remove the highlight after a couple seconds
+      setTimeout(()=> row.classList.remove("row-editing"), 1800);
+    });
+  });
+
+  // 5) Inline edit handler (autosave on change)
   $$("#content .job-edit").forEach(input=>{
     input.addEventListener("change", ()=>{
       const id = input.getAttribute("data-job-id");
@@ -1648,38 +1678,44 @@ function renderJobs(){
       if (!j) return;
 
       let v = input.value;
-      if (k === "estimateHours" || k === "originalProfit") {
+
+      // normalize numbers
+      if (k === "estimateHours" || k === "originalProfit" ||
+          k === "materialCost"  || k === "materialQty") {
         v = parseFloat(v);
-        if (!isFinite(v) || (k==="estimateHours" && v<=0) || (k==="originalProfit" && v<0)) {
-          toast("Invalid number"); return;
+        if (!isFinite(v)) { toast("Invalid number"); return; }
+        if (k === "estimateHours" && v <= 0) { toast("Hours must be > 0"); return; }
+        if ((k === "originalProfit" || k === "materialCost" || k === "materialQty") && v < 0) {
+          toast("Value must be ≥ 0"); return;
         }
       }
 
       if (k === "dueISO") {
-        // recompute start based on new due and (possibly updated) estimateHours
+        // user edited the date input (yyyy-mm-dd)
         const dueISO = new Date(`${v}T00:00:00`).toISOString();
-        const span = computeJobSpan(dueISO, Number(j.estimateHours)||0);
-        j.dueISO = span.dueISO;
+        const span   = computeJobSpan(dueISO, Number(j.estimateHours)||0);
+        j.dueISO   = span.dueISO;
         j.startISO = span.startISO;
       } else {
         j[k] = v;
         if (k === "estimateHours") {
-          // keep schedule length consistent with hours
+          // keep schedule aligned with new hours (due fixed, move start)
           const span = computeJobSpan(j.dueISO, Number(j.estimateHours)||0);
-          j.startISO = span.startISO; // due stays, start moves
+          j.startISO = span.startISO;
         }
       }
 
       saveCloudDebounced();
-      renderJobs(); // refresh efficiency & required/day text
+      // refresh so efficiency, required/day, and material total recompute
+      renderJobs();
     });
   });
 
-  // Manual form handlers
+  // 6) Manual logs (completed/remaining) — keeps your manual override workflow
   $$(".job-manual-form").forEach(form=>{
     form.addEventListener("submit",(e)=>{
       e.preventDefault();
-      const jobId = form.getAttribute("data-job-id");
+      const jobId   = form.getAttribute("data-job-id");
       const dateISO = form.querySelector(".jm-date").value;
       const mode    = form.querySelector(".jm-mode").value; // "completed" | "remaining"
       const val     = parseFloat(form.querySelector(".jm-value").value);
@@ -1695,7 +1731,7 @@ function renderJobs(){
     });
   });
 
-  // Info bubble action
+  // 7) Info bubble
   $$(".jm-info").forEach(btn=>{
     btn.addEventListener("click",(e)=>{
       e.preventDefault();
