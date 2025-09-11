@@ -1195,7 +1195,7 @@ function renderCosts(){
     const val  = filter.value;
     const rows = [];
 
-    // Per-interval tasks
+    // Per-interval maintenance
     if (val === "interval" || val === "all") {
       tasksInterval.forEach(t => {
         const costCell = t.price != null ? ("$" + t.price) : (t.cost || "—");
@@ -1213,7 +1213,7 @@ function renderCosts(){
       });
     }
 
-    // As-required tasks
+    // As-required maintenance
     if (val === "asreq" || val === "all") {
       tasksAsReq.forEach(t => {
         const costCell = t.price != null ? ("$" + t.price) : (t.cost || "—");
@@ -1227,6 +1227,21 @@ function renderCosts(){
           <td>—</td>
           <td>${costCell}</td>
           <td>${linkCell}</td>
+        </tr>`);
+      });
+    }
+
+    // Cutting jobs (profit/efficiency)
+    if (val === "jobs" || val === "all") {
+      cuttingJobs.forEach(j => {
+        const eff = computeJobEfficiency(j);
+        const profitCell = `$${(j.originalProfit||0).toFixed(2)} → $${eff.newProfit.toFixed(2)}<br><span class="small">${eff.sumDelta>=0?"+":""}${eff.sumDelta} hr Δ = ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}</span>`;
+        rows.push(`<tr>
+          <td>${j.name}</td>
+          <td>Cutting Job</td>
+          <td>—</td>
+          <td>${profitCell}</td>
+          <td>—</td>
         </tr>`);
       });
     }
