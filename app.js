@@ -1118,11 +1118,12 @@ function showJobBubble(jobId, anchor){
   const b = makeBubble(anchor);
   const eff = computeJobEfficiency(j);
   const effText = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
-  const note = eff.usedAutoFromManual
-    ? `<div class="small"><strong>Automated Estimation</strong>: continuing from last manual log at ${DAILY_HOURS} hrs/day. Please enter exact hours.</div>`
-    : (eff.usedTotalHistory
-        ? `<div class="small"><strong>Automatic (Total Hours)</strong>: calculated from daily machine-hour logs.</div>`
-        : ``);
+const note = eff.usedAutoFromManual
+  ? `<div class="small"><strong>Automated Estimation</strong></div>`
+  : (eff.usedTotalHistory ? `<div class="small"><strong>Automatic (Total Hours)</strong></div>` : ``);
+
+const effCell = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}${note}`;
+
 
   b.innerHTML = `
     <div class="bubble-title">${j.name}</div>
