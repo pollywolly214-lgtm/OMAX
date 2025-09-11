@@ -397,71 +397,83 @@ function daysBetweenInclusive(a, b){
  * - newProfit = originalProfit + efficiencyAmount
  */
 function computeJobEfficiency(job){
+  // Keep the same return keys as before for full compatibility
   const planned = (job && job.estimateHours > 0) ? Number(job.estimateHours) : 0;
   const origProfit = Number(job && job.originalProfit != null ? job.originalProfit : 0);
   const rate = planned > 0 ? (origProfit / planned) : 0; // $/hr
 
-  if (!job || !job.startISO || !job.dueISO || planned <= 0) {
-    return {
-      pph: rate,
-      expectedHours: 0,
-      actualHours: 0,
-      deltaHours: 0,
-      efficiencyAmount: 0,
-      newProfit: origProfit,
-      daysElapsed: 0,
-      totalDays: 0
-    };
-  }
+  // Default result shape (unchanged from your previous function)
+  const result = {
+    pph: rate,
+    expectedHours: 0,
+    actualHours: 0,
+    deltaHours: 0,
+    efficiencyAmount: 0,
+    newProfit: origProfit,
+    daysElapsed: 0,
+    totalDays: 0
+  };
 
-  // Normalize dates to local midnight
+  if (!job || !job.startISO || !job.dueISO || planned <= 0) return result;
+
+  // Normalize to local midnight
   const start = new Date(job.startISO); start.setHours(0,0,0,0);
   const due   = new Date(job.dueISO);   due.setHours(0,0,0,0);
   const today = new Date();             today.setHours(0,0,0,0);
+  const asOf  = (today < due) ? today : due;
 
-  // Window considered = from start up to "as of" date (today or due, whichever is earlier)
-  const asOf = (today < due) ? today : due;
+  // Window info (unchanged logic)
+  result.totalDays   = daysBetweenInclusive(start, due);
+  result.daysElapsed = (asOf < start) ? 0 : daysBetweenInclusive(start, asOf);
 
-  // Planned days = inclusive span between start and due
-  const totalDays = daysBetweenInclusive(start, due);
+  const expectedRaw = result.daysElapsed * DAILY_HOURS; // DAILY_HOURS should be 8
+  result.expectedHours = Math.min(planned, expectedRaw);
 
-  // Elapsed days so far within the window; zero if we haven't started yet
-  const daysElapsed = (asOf < start) ? 0 : daysBetweenInclusive(start, asOf);
+  // ----- NEW: manual override path -----
+  // If job.manualLogs is present, use latest manual entry <= asOf,
+  // then auto-estimate forward from that date at DAILY_HOURS/day.
+  let actual = NaN;
+  const hasManual = Array.isArray(job.manualLogs) && job.manualLogs.length > 0;
+  if (hasManual) {
+    const logs = job.manualLogs
+      .filter(m => new Date(`${m.dateISO}T00:00:00`) <= asOf)
+      .sort((a,b) => new Date(a.dateISO) - new Date(b.dateISO));
+    if (logs.length > 0) {
+      const last = logs[logs.length - 1];
+      const lastDate = new Date(`${last.dateISO}T00:00:00`); lastDate.setHours(0,0,0,0);
+      let completed = Math.max(0, Math.min(planned, Number(last.completedHours) || 0));
 
-  // Expected hours so far (capped at the total planned hours)
-  const expectedHoursRaw = daysElapsed * DAILY_HOURS;
-  const expectedHours = Math.min(expectedHoursRaw, planned);
-
-  // Actual hours so far from your totalHistory deltas, just within [start ... asOf]
-  const daily = buildDailyHoursMap(); // { 'YYYY-M-D': hoursThatDay }
-  let actualRaw = 0;
-  if (daysElapsed > 0) {
-    const cur = new Date(start);
-    while (cur <= asOf) {
-      const key = ymd(cur);
-      actualRaw += (daily[key] || 0);
-      cur.setDate(cur.getDate() + 1);
+      if (asOf > lastDate) {
+        // auto-continue from last manual entry at DAILY_HOURS per day
+        const daysForward = daysBetweenInclusive(lastDate, asOf) - 1; // exclude the last manual day itself
+        completed = completed + Math.max(0, daysForward) * DAILY_HOURS;
+      }
+      actual = Math.min(planned, completed);
     }
   }
-  const actualHours = Math.min(actualRaw, planned);
 
-  // Hours gap (positive = behind; negative = ahead)
-  const deltaHours = expectedHours - actualHours;
+  // ----- Automatic fallback if no usable manual entry -----
+  if (!isFinite(actual)) {
+    // Sum Total Hours deltas within [start..asOf]
+    const daily = buildDailyHoursMap(); // { 'YYYY-M-D': hoursThatDay }
+    let sum = 0;
+    if (result.daysElapsed > 0) {
+      const cur = new Date(start);
+      while (cur <= asOf) {
+        sum += (daily[ymd(cur)] || 0);
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+    actual = Math.min(planned, sum);
+  }
 
-  // Money impact; behind reduces profit, ahead increases it
-  const efficiencyAmount = - deltaHours * rate;
-  const newProfit = origProfit + efficiencyAmount;
+  // Finish (unchanged output keys)
+  result.actualHours = actual;
+  result.deltaHours = result.expectedHours - result.actualHours;        // + behind, - ahead
+  result.efficiencyAmount = - result.deltaHours * rate;                 // behind reduces profit
+  result.newProfit = origProfit + result.efficiencyAmount;
 
-  return {
-    pph: rate,
-    expectedHours,
-    actualHours,
-    deltaHours,
-    efficiencyAmount,
-    newProfit,
-    daysElapsed,
-    totalDays
-  };
+  return result;
 }
 
 // --------- Fuzzy search helpers (new) ---------
