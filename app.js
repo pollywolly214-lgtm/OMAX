@@ -1131,7 +1131,7 @@ function renderCosts(){
     const val  = filter.value;
     const rows = [];
 
-    // --- Per-interval tasks ---
+    // Per-interval tasks
     if (val === "interval" || val === "all") {
       tasksInterval.forEach(t => {
         const costCell = t.price != null ? ("$" + t.price) : (t.cost || "—");
@@ -1149,7 +1149,7 @@ function renderCosts(){
       });
     }
 
-    // --- As-required tasks ---
+    // As-required tasks
     if (val === "asreq" || val === "all") {
       tasksAsReq.forEach(t => {
         const costCell = t.price != null ? ("$" + t.price) : (t.cost || "—");
@@ -1173,6 +1173,7 @@ function renderCosts(){
   filter.addEventListener("change", draw);
   draw();
 }
+
 
 function renderInventory(){
   $("#content").innerHTML = viewInventory();
