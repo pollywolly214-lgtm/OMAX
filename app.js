@@ -813,32 +813,31 @@ function makeBubble(anchor){
 function showTaskBubble(taskId, anchor){
   const t = tasksInterval.find(x => x.id === taskId);
   if (!t) return;
+
   const nd = nextDue(t);
-  const b = makeBubble(anchor);
+  const b  = makeBubble(anchor);
 
   b.innerHTML = `
     <div class="bubble-title">${t.name}</div>
     <div class="bubble-kv"><span>Interval:</span><span>${t.interval} hrs</span></div>
     <div class="bubble-kv"><span>Last serviced:</span><span>${nd ? nd.since.toFixed(0) : "—"} hrs ago</span></div>
     <div class="bubble-kv"><span>Remain:</span><span>${nd ? nd.remain.toFixed(0) : "—"} hrs</span></div>
-    <div class="bubble-kv"><span>Cost:</span><span>${
-      t.price != null ? ("$" + t.price) : (t.cost ? t.cost : "—")
-    }</span></div>
-    <div class="bubble-actions">
+    <div class="bubble-kv"><span>Cost:</span><span>${t.price != null ? ("$" + t.price) : (t.cost ? t.cost : "—")}</span></div>
     ${ (t.manualLink || t.storeLink)
-  ? `<div class="bubble-kv"><span>Links:</span><span>
-      ${t.manualLink ? `<a href="${t.manualLink}" target="_blank">Manual</a>` : ``}
-      ${t.manualLink && t.storeLink ? ` · ` : ``}
-      ${t.storeLink ? `<a href="${t.storeLink}" target="_blank">Store</a>` : ``}
-    </span></div>`
-  : `` }
-
+        ? `<div class="bubble-kv"><span>Links:</span><span>
+             ${t.manualLink ? `<a href="${t.manualLink}" target="_blank" rel="noopener">Manual</a>` : ``}
+             ${t.manualLink && t.storeLink ? ` · ` : ``}
+             ${t.storeLink ? `<a href="${t.storeLink}" target="_blank" rel="noopener">Store</a>` : ``}
+           </span></div>`
+        : `` }
+    <div class="bubble-actions">
       <button data-bbl-complete="${t.id}">Complete</button>
       <button class="danger" data-bbl-remove="${t.id}">Remove</button>
       <button data-bbl-edit="${t.id}">Edit settings</button>
     </div>
   `;
 
+  // Same handlers as before
   document.querySelector("[data-bbl-complete]").onclick = () => {
     completeTask(taskId);
     hideBubble();
