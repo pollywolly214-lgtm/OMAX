@@ -872,9 +872,18 @@ function viewJobs(){
     const eff = computeJobEfficiency(j);
     const effText = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
     const profitText = `$${(j.originalProfit||0).toFixed(2)} → $${eff.newProfit.toFixed(2)}`;
+    const noteAuto = (eff.usedAutoFromManual)
+      ? `<div class="small"><strong>Automated Estimation</strong>: continuing from last manual log at ${DAILY_HOURS} hrs/day. Please enter exact hours.</div>`
+      : (eff.usedTotalHistory
+          ? `<div class="small"><strong>Automatic (Total Hours)</strong>: calculated from daily machine-hour logs.</div>`
+          : ``);
+
     return `
-      <tr>
-        <td>${j.name}</td>
+      <tr data-job="${j.id}">
+        <td>
+          <div>${j.name}</div>
+          ${noteAuto}
+        </td>
         <td>${j.estimateHours} hrs</td>
         <td>${j.material||"—"}</td>
         <td>${(new Date(j.startISO)).toDateString()} → ${(new Date(j.dueISO)).toDateString()}</td>
@@ -884,6 +893,21 @@ function viewJobs(){
         <td>
           <button data-edit-job="${j.id}">Edit</button>
           <button class="danger" data-remove-job="${j.id}">Remove</button>
+        </td>
+      </tr>
+      <tr class="job-manual-row" data-job="${j.id}">
+        <td colspan="8">
+          <form class="mini-form job-manual-form" data-job-id="${j.id}">
+            <label><strong>Manual progress:</strong></label>
+            <input type="date" class="jm-date" value="${(new Date()).toISOString().slice(0,10)}" required>
+            <select class="jm-mode">
+              <option value="completed">Hours Completed</option>
+              <option value="remaining">Hours Remaining</option>
+            </select>
+            <input type="number" class="jm-value" min="0" step="0.01" placeholder="e.g., 4" required>
+            <button type="submit">Add/Update</button>
+            <button type="button" class="jm-info" title="Manual entries override automatic calculation. If you stop logging manually, the system will estimate from the last manual entry forward at 8 hrs/day until today or due date.">ℹ️</button>
+          </form>
         </td>
       </tr>`;
   }).join("");
@@ -901,7 +925,7 @@ function viewJobs(){
         <input type="text" id="job_notes" placeholder="Notes">
         <button type="submit">Add Job</button>
       </form>
-      <p class="small">Bars appear on the calendar from start to due (8 hrs/day baseline).</p>
+      <p class="small">Bars appear on the calendar from start to due. Baseline is ${DAILY_HOURS} hrs/day.</p>
     </div>
 
     <div class="block" style="grid-column: 1 / -1">
@@ -924,7 +948,6 @@ function viewJobs(){
     </div>
   </div>`;
 }
-
 
 function renderCalendar(){
   const container = $("#months");
