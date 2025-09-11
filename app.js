@@ -760,7 +760,7 @@ function viewCosts(){
 function viewJobs(){
   const rows = cuttingJobs.map(j => {
     const eff = computeJobEfficiency(j);
-    const effText = `${eff.sumDelta>=0?"+":""}${eff.sumDelta} hr Δ → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
+    const effText = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
     const profitText = `$${(j.originalProfit||0).toFixed(2)} → $${eff.newProfit.toFixed(2)}`;
     return `
       <tr>
@@ -791,7 +791,7 @@ function viewJobs(){
         <input type="text" id="job_notes" placeholder="Notes">
         <button type="submit">Add Job</button>
       </form>
-      <p class="small">Bars appear on the calendar from start to due (8 hrs/day assumed).</p>
+      <p class="small">Bars appear on the calendar from start to due (8 hrs/day baseline).</p>
     </div>
 
     <div class="block" style="grid-column: 1 / -1">
