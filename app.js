@@ -47,20 +47,60 @@ async function initFirebase() {
   const showModal = () => { modal.style.display = "flex"; };
   const hideModal = () => { modal.style.display = "none"; };
 
-  // Minimal email/password sign-in helper (creates the account if missing)
-  async function ensureEmailPassword(email, password){
-    try {
-      const cred = await FB.auth.signInWithEmailAndPassword(email, password);
-      return cred.user;
-    } catch (e) {
-      if (e.code === "auth/user-not-found") {
+// Minimal email/password sign-in helper with robust fallback
+async function ensureEmailPassword(email, password){
+  if (!email || !password) throw new Error("Email and password are required.");
+  if (password.length < 6) throw new Error("Password must be at least 6 characters.");
+
+  try {
+    // Try to sign in first
+    const cred = await FB.auth.signInWithEmailAndPassword(email, password);
+    return cred.user;
+  } catch (e) {
+    const code = (e && e.code) ? String(e.code) : "";
+    const msg  = (e && e.message) ? String(e.message) : "";
+
+    // Some backends return generic errors; normalize a few
+    const looksLikeInvalidCred =
+      code === "auth/invalid-credential" ||
+      code === "auth/invalid-login-credentials" ||
+      msg.includes("INVALID_LOGIN_CREDENTIALS");
+
+    // If the account doesn't exist -> create it, then sign in
+    if (code === "auth/user-not-found" || looksLikeInvalidCred) {
+      try {
         await FB.auth.createUserWithEmailAndPassword(email, password);
-        const cred = await FB.auth.signInWithEmailAndPassword(email, password);
-        return cred.user;
+        const cred2 = await FB.auth.signInWithEmailAndPassword(email, password);
+        return cred2.user;
+      } catch (e2) {
+        // If the email actually existed but with a different password,
+        // create will throw 'auth/email-already-in-use'
+        if (e2.code === "auth/email-already-in-use") {
+          throw new Error("Account already exists; please check the password.");
+        }
+        if (e2.code === "auth/weak-password") {
+          throw new Error("Password must be at least 6 characters.");
+        }
+        throw e2;
       }
-      throw e;
     }
+
+    // Usual explicit cases
+    if (code === "auth/wrong-password") {
+      throw new Error("Incorrect password. Try again.");
+    }
+    if (code === "auth/too-many-requests") {
+      throw new Error("Too many attempts. Please wait a moment and try again.");
+    }
+    if (code === "auth/network-request-failed") {
+      throw new Error("Network error. Check your connection and try again.");
+    }
+
+    // Fallback: show the original message
+    throw e;
   }
+}
+
 
   // Wire toolbar buttons
   if (btnIn)  btnIn.onclick  = () => showModal();
