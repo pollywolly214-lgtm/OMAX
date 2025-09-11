@@ -1118,6 +1118,11 @@ function showJobBubble(jobId, anchor){
   const b = makeBubble(anchor);
   const eff = computeJobEfficiency(j);
   const effText = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
+  const note = eff.usedAutoFromManual
+    ? `<div class="small"><strong>Automated Estimation</strong>: continuing from last manual log at ${DAILY_HOURS} hrs/day. Please enter exact hours.</div>`
+    : (eff.usedTotalHistory
+        ? `<div class="small"><strong>Automatic (Total Hours)</strong>: calculated from daily machine-hour logs.</div>`
+        : ``);
 
   b.innerHTML = `
     <div class="bubble-title">${j.name}</div>
@@ -1128,8 +1133,9 @@ function showJobBubble(jobId, anchor){
     <div class="bubble-kv"><span>Original profit:</span><span>$${(j.originalProfit||0).toFixed(2)}</span></div>
     <div class="bubble-kv"><span>Efficiency:</span><span>${effText}</span></div>
     <div class="bubble-kv"><span>New profit:</span><span>$${eff.newProfit.toFixed(2)}</span></div>
-
+    ${note}
     <div class="bubble-kv"><span>Notes:</span><span>${j.notes||"—"}</span></div>
+
     <div class="bubble-actions">
       <button data-bbl-edit-job="${j.id}">Edit</button>
       <button class="danger" data-bbl-remove-job="${j.id}">Remove</button>
