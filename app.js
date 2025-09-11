@@ -1288,71 +1288,103 @@ function renderCosts(){
   RENDER_DELTA = deltaSinceLast();
 
   $("#content").innerHTML = viewCosts();
-  const tbody  = $("#costTable tbody");
-  const filter = $("#costFilter");
 
-  function draw(){
-    const val  = filter.value;
-    const rows = [];
+  const tbodyInt  = $("#costTableInterval tbody");
+  const tbodyAR   = $("#costTableAsReq tbody");
+  const tbodyJobs = $("#costTableJobs tbody");
 
-    // Per-interval maintenance
-    if (val === "interval" || val === "all") {
-      tasksInterval.forEach(t => {
-        const costCell = t.price != null ? ("$" + t.price) : (t.cost || "—");
-        const linkCell = (t.manualLink || t.storeLink)
-          ? `${t.manualLink ? `<a href="${t.manualLink}" target="_blank" rel="noopener">Manual</a>` : ""}${t.manualLink && t.storeLink ? " · " : ""}${t.storeLink ? `<a href="${t.storeLink}" target="_blank" rel="noopener">Store</a>` : ""}`
-          : "—";
+  // helper
+  const linksCell = (obj) => {
+    const m = obj.manualLink, s = obj.storeLink;
+    return (m || s)
+      ? `${m ? `<a href="${m}" target="_blank" rel="noopener">Manual</a>` : ""}${m && s ? " · " : ""}${s ? `<a href="${s}" target="_blank" rel="noopener">Store</a>` : ""}`
+      : "—";
+  };
+  const money = (v) => (v != null && isFinite(v)) ? ("$" + Number(v).toFixed(2)) : "—";
 
-        rows.push(`<tr>
-          <td>${t.name}</td>
-          <td>Per Interval</td>
-          <td>${t.interval}</td>
-          <td>${costCell}</td>
-          <td>${linkCell}</td>
-        </tr>`);
-      });
+  // --- Per Interval
+  const rowsInt = [];
+  tasksInterval.forEach(t => {
+    const costCell = (t.price != null) ? ("$" + t.price) : (t.cost || "—");
+    rowsInt.push(`<tr>
+      <td>${t.name}</td>
+      <td>${t.interval}</td>
+      <td>${costCell}</td>
+      <td>${linksCell(t)}</td>
+    </tr>`);
+  });
+  tbodyInt.innerHTML = rowsInt.join("");
+
+  // --- As Required
+  const rowsAR = [];
+  tasksAsReq.forEach(t => {
+    const costCell = (t.price != null) ? ("$" + t.price) : (t.cost || "—");
+    rowsAR.push(`<tr>
+      <td>${t.name}</td>
+      <td>${t.condition || "As required"}</td>
+      <td>${costCell}</td>
+      <td>${linksCell(t)}</td>
+    </tr>`);
+  });
+  tbodyAR.innerHTML = rowsAR.join("");
+
+  // --- Cutting Jobs (with inline editing for material cost/qty)
+  const rowsJobs = [];
+  cuttingJobs.forEach(j => {
+    const eff = computeJobEfficiency(j);
+    const effText = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
+
+    const materialCost = (j.materialCost != null && isFinite(j.materialCost)) ? Number(j.materialCost) : 0;
+    const materialQty  = (j.materialQty  != null && isFinite(j.materialQty))  ? Number(j.materialQty)  : 0;
+    const materialTotal = materialCost * materialQty;
+
+    rowsJobs.push(`<tr data-job="${j.id}">
+      <td>${j.name}</td>
+      <td>${j.estimateHours} hrs</td>
+      <td>${j.material || "—"}</td>
+      <td>
+        <input type="number" step="0.01" min="0" class="job-mcost" data-job-id="${j.id}" value="${materialCost}">
+      </td>
+      <td>
+        <input type="number" step="0.01" min="0" class="job-mqty" data-job-id="${j.id}" value="${materialQty}">
+      </td>
+      <td>${money(materialTotal)}</td>
+      <td>${effText}</td>
+      <td>$${(j.originalProfit||0).toFixed(2)} → $${eff.newProfit.toFixed(2)}</td>
+    </tr>`);
+  });
+  tbodyJobs.innerHTML = rowsJobs.join("");
+
+  // Inline edit handlers (delegate)
+  tbodyJobs.addEventListener("input", (e) => {
+    const el = e.target;
+    if (!el) return;
+    if (!el.matches(".job-mcost, .job-mqty")) return;
+    const id = el.getAttribute("data-job-id");
+    const job = cuttingJobs.find(x => x.id === id);
+    if (!job) return;
+
+    const val = parseFloat(el.value);
+    if (el.classList.contains("job-mcost")) {
+      job.materialCost = isFinite(val) && val >= 0 ? val : 0;
+    } else {
+      job.materialQty = isFinite(val) && val >= 0 ? val : 0;
     }
 
-    // As-required maintenance
-    if (val === "asreq" || val === "all") {
-      tasksAsReq.forEach(t => {
-        const costCell = t.price != null ? ("$" + t.price) : (t.cost || "—");
-        const linkCell = (t.manualLink || t.storeLink)
-          ? `${t.manualLink ? `<a href="${t.manualLink}" target="_blank" rel="noopener">Manual</a>` : ""}${t.manualLink && t.storeLink ? " · " : ""}${t.storeLink ? `<a href="${t.storeLink}" target="_blank" rel="noopener">Store</a>` : ""}`
-          : "—";
+    saveCloudDebounced();
 
-        rows.push(`<tr>
-          <td>${t.name}</td>
-          <td>As Required</td>
-          <td>—</td>
-          <td>${costCell}</td>
-          <td>${linkCell}</td>
-        </tr>`);
-      });
+    // Re-render only the Material Total cell for this row
+    const row = el.closest("tr");
+    if (row) {
+      const mCost = (job.materialCost != null && isFinite(job.materialCost)) ? Number(job.materialCost) : 0;
+      const mQty  = (job.materialQty  != null && isFinite(job.materialQty))  ? Number(job.materialQty)  : 0;
+      const mTot  = mCost * mQty;
+      // Material Total is the 6th cell (0-based index 5)
+      const cells = row.querySelectorAll("td");
+      if (cells[5]) cells[5].textContent = (mTot ? "$" + mTot.toFixed(2) : "—");
     }
-
-    // Cutting jobs (profit/efficiency)
-    if (val === "jobs" || val === "all") {
-      cuttingJobs.forEach(j => {
-        const eff = computeJobEfficiency(j);
-        const profitCell = `$${(j.originalProfit||0).toFixed(2)} → $${eff.newProfit.toFixed(2)}<br><span class="small">${eff.sumDelta>=0?"+":""}${eff.sumDelta} hr Δ = ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}</span>`;
-        rows.push(`<tr>
-          <td>${j.name}</td>
-          <td>Cutting Job</td>
-          <td>—</td>
-          <td>${profitCell}</td>
-          <td>—</td>
-        </tr>`);
-      });
-    }
-
-    tbody.innerHTML = rows.join("");
-  }
-
-  filter.addEventListener("change", draw);
-  draw();
+  });
 }
-
 
 function renderInventory(){
   $("#content").innerHTML = viewInventory();
