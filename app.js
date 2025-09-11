@@ -700,18 +700,25 @@ function viewCosts(){
 
 /* ---------------- Calendar ---------------- */
 function viewJobs(){
-  const rows = cuttingJobs.map(j => `
-    <tr>
-      <td>${j.name}</td>
-      <td>${j.estimateHours} hrs</td>
-      <td>${j.material||"—"}</td>
-      <td>${(new Date(j.startISO)).toDateString()} → ${(new Date(j.dueISO)).toDateString()}</td>
-      <td>${j.notes?j.notes:"—"}</td>
-      <td>
-        <button data-edit-job="${j.id}">Edit</button>
-        <button class="danger" data-remove-job="${j.id}">Remove</button>
-      </td>
-    </tr>`).join("");
+  const rows = cuttingJobs.map(j => {
+    const eff = computeJobEfficiency(j);
+    const effText = `${eff.sumDelta>=0?"+":""}${eff.sumDelta} hr Δ → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
+    const profitText = `$${(j.originalProfit||0).toFixed(2)} → $${eff.newProfit.toFixed(2)}`;
+    return `
+      <tr>
+        <td>${j.name}</td>
+        <td>${j.estimateHours} hrs</td>
+        <td>${j.material||"—"}</td>
+        <td>${(new Date(j.startISO)).toDateString()} → ${(new Date(j.dueISO)).toDateString()}</td>
+        <td>${effText}</td>
+        <td>${profitText}</td>
+        <td>${j.notes?j.notes:"—"}</td>
+        <td>
+          <button data-edit-job="${j.id}">Edit</button>
+          <button class="danger" data-remove-job="${j.id}">Remove</button>
+        </td>
+      </tr>`;
+  }).join("");
 
   return `
   <div class="container">
@@ -720,6 +727,7 @@ function viewJobs(){
       <form id="jobForm" class="mini-form">
         <input type="text" id="job_name" placeholder="Job name" required>
         <input type="number" id="job_hours" placeholder="Estimate (hrs)" required min="1">
+        <input type="number" id="job_profit" placeholder="Original Profit ($)" required min="0" step="0.01">
         <input type="text" id="job_material" placeholder="Material">
         <input type="date" id="job_due" required>
         <input type="text" id="job_notes" placeholder="Notes">
@@ -731,12 +739,24 @@ function viewJobs(){
     <div class="block" style="grid-column: 1 / -1">
       <h3>Jobs</h3>
       <table>
-        <thead><tr><th>Name</th><th>Estimate</th><th>Material</th><th>Schedule</th><th>Notes</th><th>Actions</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Estimate</th>
+            <th>Material</th>
+            <th>Schedule</th>
+            <th>Efficiency</th>
+            <th>Profit (Original → New)</th>
+            <th>Notes</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
         <tbody>${rows || ""}</tbody>
       </table>
     </div>
   </div>`;
 }
+
 
 function renderCalendar(){
   const container = $("#months");
