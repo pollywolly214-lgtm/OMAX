@@ -875,62 +875,65 @@ function viewJobs(){
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
 
-    const editing = editingJobs.has(j.id);
+    const noteAuto = eff.isAuto
+      ? `<div class="muted"><strong>Automated Estimation</strong> — please enter exact hours.</div>`
+      : ``;
 
-    const effText = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
-    const profitText = `$${(j.originalProfit||0).toFixed(2)} → $${eff.newProfit.toFixed(2)}`;
-    const noteAuto = (eff.usedAutoFromManual)
-      ? `<div class="small"><strong>Automated Estimation</strong>: continuing from last manual log at ${DAILY_HOURS} hrs/day.</div>`
-      : (eff.usedTotalHistory ? `<div class="small"><strong>Automatic (Total Hours)</strong>.</div>` : ``);
+    const startTxt = (new Date(j.startISO)).toDateString();
+    const dueTxt   = (new Date(j.dueISO)).toDateString();
+    const dueVal   = (new Date(j.dueISO)).toISOString().slice(0,10);
+
+    const effText  =
+      `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ ` +
+      `(exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ` +
+      `${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)} ` +
+      `<div class="muted">New profit: $${eff.newProfit.toFixed(2)} | $/hr: $${eff.pph.toFixed(2)}</div>`;
 
     const reqCell = (req.requiredPerDay === Infinity)
       ? `<span class="danger">Past due / no days remaining</span>`
-      : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
+      : `${req.requiredPerDay.toFixed(2)} hr/day ` +
+        `<span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
 
-    const startTxt = (new Date(j.startISO)).toDateString();
-    const dueDate  = new Date(j.dueISO);
-    const dueTxt   = dueDate.toDateString();
-    const dueVal   = dueDate.toISOString().slice(0,10);
+    const editing = editingJobs.has(j.id);
 
-    // READ mode cells (plain text)
-    const readName     = `<div><strong>${j.name}</strong></div>${noteAuto}`;
-    const readEstimate = `${j.estimateHours} hrs`;
-    const readMaterial = j.material || "—";
-    const readSched    = `<div class="small">${startTxt} → ${dueTxt}</div><div class="muted">${dueVal}</div>`;
-    const readEff      = effText;
-    const readProfit   = `${profitText}<div class="muted">Original: $${(j.originalProfit||0).toFixed(2)}</div>`;
-    const readReq      = reqCell;
-    const readNotes    = j.notes || "—";
+    // READ CELLS
+    const readName      = `<div><strong>${j.name}</strong></div>${noteAuto}`;
+    const readEstimate  = `${j.estimateHours} hrs`;
+    const readMaterial  = j.material || "—";
+    const readSchedule  = `<div class="small">${startTxt} → ${dueTxt}</div><div class="muted">${dueVal}</div>`;
+    const readEff       = effText;
+    const readProfit    = `${effText}<div class="muted">Original: $${(j.originalProfit||0).toFixed(2)}</div>`;
+    const readReq       = reqCell;
+    const readNotes     = j.notes || "—";
 
-    // EDIT mode cells (inputs)
+    // EDIT CELLS
     const editName     = `<input type="text" class="job-input" data-k="name" value="${j.name}">`;
     const editEstimate = `<input type="number" min="1" step="0.01" class="job-input" data-k="estimateHours" value="${j.estimateHours}">`;
     const editMaterial = `<input type="text" class="job-input" data-k="material" value="${j.material||""}" placeholder="Material">`;
     const editSched    = `<div class="small">${startTxt} → ${dueTxt}</div>
                           <input type="date" class="job-input" data-k="dueISO" value="${dueVal}">`;
     const editProfit   = `<input type="number" min="0" step="0.01" class="job-input" data-k="originalProfit" value="${j.originalProfit!=null?j.originalProfit:""}">
-                          <div class="small muted">Will recompute: ${profitText}</div>`;
-    const editReq      = reqCell; // computed
+                          <div class="small muted">Will recompute with changes</div>`;
     const editNotes    = `<input type="text" class="job-input" data-k="notes" value="${j.notes||""}" placeholder="Notes">`;
 
     const actions = editing
-      ? `<button class="primary" data-save-job="${j.id}">Save</button>
-         <button class="secondary" data-cancel-job="${j.id}">Cancel</button>
+      ? `<button type="button" class="primary" data-save-job="${j.id}">Save</button>
+         <button type="button" class="secondary" data-cancel-job="${j.id}">Cancel</button>
          <button type="button" class="jm-info" title="Info" data-job-id="${j.id}">ℹ️</button>
-         <button class="danger" data-remove-job="${j.id}">Remove</button>`
-      : `<button data-edit-job="${j.id}">Edit</button>
+         <button type="button" class="danger" data-remove-job="${j.id}">Remove</button>`
+      : `<button type="button" data-edit-job="${j.id}">Edit</button>
          <button type="button" class="jm-info" title="Info" data-job-id="${j.id}">ℹ️</button>
-         <button class="danger" data-remove-job="${j.id}">Remove</button>`;
+         <button type="button" class="danger" data-remove-job="${j.id}">Remove</button>`;
 
     return `
       <tr data-job="${j.id}" class="${editing?'row-editing':''}">
         <td>${editing ? editName     : readName}</td>
         <td>${editing ? editEstimate : readEstimate}</td>
         <td>${editing ? editMaterial : readMaterial}</td>
-        <td>${editing ? editSched    : readSched}</td>
-        <td>${readEff}</td>
-        <td>${editing ? editProfit   : readProfit}</td>
-        <td>${readReq}</td>
+        <td>${editing ? editSched    : readSchedule}</td>
+        <td>${effText}</td>
+        <td>${editing ? editProfit   : `<div class="small">Original: $${(j.originalProfit||0).toFixed(2)}</div>`}</td>
+        <td>${reqCell}</td>
         <td>${editing ? editNotes    : readNotes}</td>
         <td>${actions}</td>
       </tr>
@@ -951,41 +954,29 @@ function viewJobs(){
   }).join("");
 
   return `
-  <div class="container">
-    <div class="block">
-      <h3>Cutting Jobs</h3>
-      <p class="small"><em>Tip:</em> Click <strong>Edit</strong> on a row, make changes inline, then <strong>Save</strong> or <strong>Cancel</strong>.</p>
-      <form id="jobForm" class="mini-form">
-        <input type="text" id="job_name" placeholder="Job name" required>
-        <input type="number" id="job_hours" placeholder="Estimate (hrs)" required min="1">
-        <input type="number" id="job_profit" placeholder="Original Profit ($)" required min="0" step="0.01">
-        <input type="text" id="job_material" placeholder="Material">
-        <input type="date" id="job_due" required>
-        <input type="text" id="job_notes" placeholder="Notes">
-        <button type="submit">Add Job</button>
-      </form>
-      <p class="small">Calendar bars span start→due. Baseline is <strong>${DAILY_HOURS}</strong> hrs/day.</p>
-    </div>
+  <section class="jobs">
+    <h2>Cutting Jobs</h2>
 
-    <div class="block" style="grid-column: 1 / -1">
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Estimate</th>
-            <th>Material</th>
-            <th>Schedule</th>
-            <th>Efficiency</th>
-            <th>Profit (Original → New)</th>
-            <th>Required/day</th>
-            <th>Notes</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>${rows || ""}</tbody>
-      </table>
-    </div>
-  </div>`;
+    <form id="jobForm" class="mini-form">
+      <div><label>Name</label><input id="job_name" required></div>
+      <div><label>Hours</label><input id="job_hours" type="number" min="1" step="0.01" required></div>
+      <div><label>Material</label><input id="job_material"></div>
+      <div><label>Due date</label><input id="job_due" type="date" required></div>
+      <div><label>Original Profit ($)</label><input id="job_profit" type="number" min="0" step="0.01"></div>
+      <div class="grow"><label>Notes</label><input id="job_notes"></div>
+      <div><button type="submit" class="primary">Add Job</button></div>
+    </form>
+
+    <table class="grid">
+      <thead>
+        <tr>
+          <th>Job</th><th>Est (hr)</th><th>Material</th><th>Schedule</th>
+          <th>Efficiency</th><th>Profit</th><th>Req/day</th><th>Notes</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </section>`;
 }
 
 function renderCalendar(){
@@ -1594,73 +1585,60 @@ function renderInventory(){
 function renderJobs(){
   $("#content").innerHTML = viewJobs();
 
-  // Add job
-  const jobForm = $("#jobForm");
-  if (jobForm) {
-    jobForm.addEventListener("submit",(e)=>{
-      e.preventDefault();
-      const name = $("#job_name").value.trim();
-      const hours = parseFloat($("#job_hours").value);
-      const originalProfit = parseFloat($("#job_profit").value);
-      const material = $("#job_material").value.trim();
-      const dueStr = $("#job_due").value;
-      const notes = $("#job_notes").value.trim();
+  // Add new job
+  const form = $("#jobForm");
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name      = $("#job_name").value.trim();
+    const hours     = parseFloat($("#job_hours").value);
+    const material  = $("#job_material").value.trim();
+    const notes     = $("#job_notes").value.trim();
+    const dueStr    = $("#job_due").value; // yyyy-mm-dd
+    const originalProfit = parseFloat($("#job_profit").value) || 0;
+    if (!name || !(hours>0) || !dueStr) { toast("Enter name, hours>0, due date"); return; }
 
-      if (!name || !(hours>0) || isNaN(originalProfit) || !dueStr) {
-        toast("Enter name, hours>0, profit, due date"); return;
-      }
+    const dueISO = new Date(`${dueStr}T00:00:00`).toISOString();
+    const span   = computeJobSpan(dueISO, hours);
+    const id     = genId(name);
 
-      const dueISO = new Date(`${dueStr}T00:00:00`).toISOString();
-      const span   = computeJobSpan(dueISO, hours);
-      const id     = genId(name);
-
-      cuttingJobs.push({
-        id, name,
-        estimateHours: hours,
-        originalProfit,
-        material, notes,
-        dueISO: span.dueISO,
-        startISO: span.startISO,
-        materialCost: 0,
-        materialQty: 0,
-        manualLogs: []
-      });
-
-      saveCloudDebounced(); toast("Job added"); route();
+    cuttingJobs.push({
+      id, name,
+      estimateHours: hours,
+      originalProfit,
+      material, notes,
+      dueISO: span.dueISO,
+      startISO: span.startISO,
+      materialCost: 0,
+      materialQty: 0,
+      manualLogs: []
     });
-  }
 
-  // Remove
-  $$("#content [data-remove-job]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const id = btn.getAttribute("data-remove-job");
-      cuttingJobs = cuttingJobs.filter(j=>j.id!==id);
-      editingJobs.delete(id);
-      saveCloudDebounced(); toast("Removed"); renderJobs();
-    });
+    saveCloudDebounced(); toast("Job added"); route();
   });
 
-  // Enter edit mode (single row)
-  $$("#content [data-edit-job]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const id = btn.getAttribute("data-edit-job");
+  // ---- Delegated clicks inside #content for robustness
+  $("#content").addEventListener("click", (ev) => {
+    const editBtn   = ev.target.closest("[data-edit-job]");
+    const saveBtn   = ev.target.closest("[data-save-job]");
+    const cancelBtn = ev.target.closest("[data-cancel-job]");
+    const rmBtn     = ev.target.closest("[data-remove-job]");
+    const infoBtn   = ev.target.closest(".jm-info");
+
+    if (editBtn){
+      const id = editBtn.getAttribute("data-edit-job");
       editingJobs.clear();
       editingJobs.add(id);
       renderJobs();
-      // focus first input
       const first = document.querySelector(`tr[data-job="${id}"] .job-input`);
       if (first) { first.focus(); first.select?.(); }
-    });
-  });
-
-  // Save row
-  $$("#content [data-save-job]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const id = btn.getAttribute("data-save-job");
+      return;
+    }
+    if (saveBtn){
+      const id = saveBtn.getAttribute("data-save-job");
       const j  = cuttingJobs.find(x=>x.id===id);
       if (!j) return;
 
-      const row = document.querySelector(`tr[data-job="${id}"]`);
+      const row    = document.querySelector(`tr[data-job="${id}"]`);
       const inputs = row.querySelectorAll(".job-input");
       const kv = {};
       let invalid = false;
@@ -1682,7 +1660,7 @@ function renderJobs(){
       Object.keys(kv).forEach(k=>{
         if (k === "dueISO") {
           const dueISO = new Date(`${kv[k]}T00:00:00`).toISOString();
-          const span = computeJobSpan(dueISO, Number(kv.estimateHours ?? j.estimateHours)||0);
+          const span   = computeJobSpan(dueISO, Number(kv.estimateHours ?? j.estimateHours)||0);
           j.dueISO = span.dueISO;
           j.startISO = span.startISO;
         } else if (k === "estimateHours") {
@@ -1696,41 +1674,42 @@ function renderJobs(){
 
       editingJobs.delete(id);
       saveCloudDebounced(); toast("Saved"); renderJobs();
-    });
-  });
-
-  // Cancel row
-  $$("#content [data-cancel-job]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const id = btn.getAttribute("data-cancel-job");
+      return;
+    }
+    if (cancelBtn){
+      const id = cancelBtn.getAttribute("data-cancel-job");
       editingJobs.delete(id);
       renderJobs();
-    });
+      return;
+    }
+    if (rmBtn){
+      const id = rmBtn.getAttribute("data-remove-job");
+      cuttingJobs = cuttingJobs.filter(j=>j.id!==id);
+      editingJobs.delete(id);
+      saveCloudDebounced(); toast("Removed"); renderJobs();
+      return;
+    }
+    if (infoBtn){
+      const id = infoBtn.getAttribute("data-job-id");
+      showJobInfo(id);
+      return;
+    }
   });
 
-  // Manual logs (completed/remaining)
-  $$(".job-manual-form").forEach(form=>{
-    form.addEventListener("submit",(e)=>{
+  // Manual progress form(s)
+  $$(".job-manual-form").forEach(f=>{
+    f.addEventListener("submit", (e)=>{
       e.preventDefault();
-      const jobId   = form.getAttribute("data-job-id");
-      const dateISO = form.querySelector(".jm-date").value;
-      const mode    = form.querySelector(".jm-mode").value;
-      const val     = parseFloat(form.querySelector(".jm-value").value);
-      if (!dateISO || !isFinite(val)) { toast("Enter date and hours"); return; }
-
-      if (addManualLog(jobId, dateISO, mode, val)) {
-        saveCloudDebounced(); toast("Manual progress saved"); renderJobs();
-      } else {
-        toast("Job not found");
-      }
-    });
-  });
-
-  // Info bubble
-  $$(".jm-info").forEach(btn=>{
-    btn.addEventListener("click",(e)=>{
-      e.preventDefault();
-      showInfoBubble(btn);
+      const jobId = f.getAttribute("data-job-id");
+      const j = cuttingJobs.find(x=>x.id===jobId);
+      if (!j) return;
+      const dateStr = f.querySelector(".jm-date").value;
+      const mode    = f.querySelector(".jm-mode").value;       // "completed" or "remaining"
+      const val     = parseFloat(f.querySelector(".jm-value").value);
+      if (!dateStr || !(val>=0)) { toast("Enter a valid number"); return; }
+      if (!Array.isArray(j.manualLogs)) j.manualLogs=[];
+      j.manualLogs.push({ dateISO: new Date(`${dateStr}T00:00:00`).toISOString(), type:mode, hours:val });
+      saveCloudDebounced(); toast("Manual entry saved"); renderJobs();
     });
   });
 }
