@@ -1142,39 +1142,54 @@ function showTaskBubble(taskId, anchor){
 function showJobBubble(jobId, anchor){
   const j = cuttingJobs.find(x => x.id === jobId);
   if (!j) return;
-  const b = makeBubble(anchor);
-  const eff = computeJobEfficiency(j);
-  const effText = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}`;
-const note = eff.usedAutoFromManual
-  ? `<div class="small"><strong>Automated Estimation</strong></div>`
-  : (eff.usedTotalHistory ? `<div class="small"><strong>Automatic (Total Hours)</strong></div>` : ``);
 
-const effCell = `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ (exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)}${note}`;
+  const b   = makeBubble(anchor);
+  const eff = computeJobEfficiency(j);   // new $/hr model
+  const req = computeRequiredDaily(j);
 
+  const sign  = eff.gainLoss >= 0 ? "+" : "−";
+  const money = Math.abs(eff.gainLoss).toFixed(2);
+
+  const reqCell = (req.requiredPerDay === Infinity)
+    ? `<span class="danger">Past due / no days remaining</span>`
+    : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
+
+  const noteAuto = eff.usedAutoFromManual
+    ? `<div class="small"><strong>Auto from last manual</strong>: continuing at ${DAILY_HOURS} hr/day.</div>`
+    : (eff.usedFromStartAuto ? `<div class="small"><strong>Auto</strong>: assuming ${DAILY_HOURS} hr/day from start.</div>` : ``);
 
   b.innerHTML = `
     <div class="bubble-title">${j.name}</div>
+
     <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
-    <div class="bubble-kv"><span>Material:</span><span>${j.material||"—"}</span></div>
+    <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
     <div class="bubble-kv"><span>Schedule:</span><span>${(new Date(j.startISO)).toDateString()} → ${(new Date(j.dueISO)).toDateString()}</span></div>
 
-    <div class="bubble-kv"><span>Original profit:</span><span>$${(j.originalProfit||0).toFixed(2)}</span></div>
-    <div class="bubble-kv"><span>Efficiency:</span><span>${effText}</span></div>
-    <div class="bubble-kv"><span>New profit:</span><span>$${eff.newProfit.toFixed(2)}</span></div>
-    ${note}
-    <div class="bubble-kv"><span>Notes:</span><span>${j.notes||"—"}</span></div>
+    <div class="bubble-kv"><span>Hours Δ:</span>
+      <span>${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(1)} (exp ${eff.expectedHours.toFixed(1)} vs act ${eff.actualHours.toFixed(1)})</span>
+    </div>
+    <div class="bubble-kv"><span>Gain/Loss:</span>
+      <span>${sign}$${money} @ $${eff.rate}/hr</span>
+    </div>
+    <div class="bubble-kv"><span>Required/day:</span><span>${reqCell}</span></div>
+    <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
+
+    ${noteAuto}
 
     <div class="bubble-actions">
-      <button data-bbl-edit-job="${j.id}">Edit</button>
-      <button class="danger" data-bbl-remove-job="${j.id}">Remove</button>
+      <button type="button" data-bbl-edit-job="${j.id}">Edit</button>
+      <button type="button" class="danger" data-bbl-remove-job="${j.id}">Remove</button>
     </div>
   `;
 
-  document.querySelector("[data-bbl-remove-job]").onclick = () => {
-    cuttingJobs = cuttingJobs.filter(x => x.id !== jobId);
+  // actions
+  const removeBtn = b.querySelector("[data-bbl-remove-job]");
+  const editBtn   = b.querySelector("[data-bbl-edit-job]");
+  if (removeBtn) removeBtn.onclick = () => {
+    cuttingJobs = cuttingJobs.filter(x => x.id !== j.id);
     saveCloudDebounced(); toast("Removed"); hideBubble(); route();
   };
-  document.querySelector("[data-bbl-edit-job]").onclick = () => { hideBubble(); openJobsEditor(j.id); };
+  if (editBtn) editBtn.onclick = () => { hideBubble(); openJobsEditor(j.id); };
 }
 
 function completeTask(taskId){
