@@ -1,3 +1,33 @@
+/* Calendar chip/bar are fully interactive */
+.cal-task, .cal-job {
+  position: relative;
+  display: block;
+  cursor: pointer;
+}
+
+/* Bubble touches the anchor (no visual gap) */
+#bubble.bubble {
+  position: absolute;
+  z-index: 9999;
+  margin: 0;                 /* remove default margin */
+  transform: translateY(0);  /* no offset */
+  /* keep your existing padding, bg, border, shadow */
+}
+
+/* Optional: subtle arrow that overlaps the chip so there's zero dead zone */
+#bubble.bubble::before {
+  content: "";
+  position: absolute;
+  top: -6px;                 /* overlaps the chip by 6px */
+  left: 16px;
+  width: 12px;
+  height: 12px;
+  background: inherit;
+  transform: rotate(45deg);
+  box-shadow: inherit;
+}
+
+
 /* Base */
 * { box-sizing: border-box; }
 body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fa; color: #222; }
