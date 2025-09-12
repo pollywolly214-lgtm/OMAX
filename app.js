@@ -976,13 +976,50 @@ function viewJobs(){
   </section>`;
 }
 
+// Make the whole calendar interactive via delegation
+function wireCalendarBubbles(){
+  const months = $("#months");
+  if (!months) return;
+
+  let hoverTarget = null;
+
+  // Show bubble on hover anywhere on the chip/bar
+  months.addEventListener("mouseover", (e) => {
+    const el = e.target.closest("[data-cal-job], [data-cal-task]");
+    if (!el || el === hoverTarget) return;
+    hoverTarget = el;
+
+    if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
+    if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el);
+  });
+
+  // Hide when leaving the element (not when moving inside it)
+  months.addEventListener("mouseout", (e) => {
+    const from = e.target.closest("[data-cal-job], [data-cal-task]");
+    const to   = e.relatedTarget && e.relatedTarget.closest("[data-cal-job], [data-cal-task]");
+    if (from && !to) {
+      hoverTarget = null;
+      if (typeof hideBubbleSoon === "function") hideBubbleSoon();
+    }
+  });
+
+  // Also support click/tap to open bubbles
+  months.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-cal-job], [data-cal-task]");
+    if (!el) return;
+    if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
+    if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el);
+  });
+}
+
 function renderCalendar(){
   const container = $("#months");
   if (!container) return;
   container.innerHTML = "";
 
-  // Due map for interval tasks
-  const dueMap = {}; // key Y-M-D -> array of {type:"task", id, name}
+  // ---------- Build maintenance due map (by day) ----------
+  // key: "Y-M-D"  ->  [{type:"task", id, name}]
+  const dueMap = {};
   tasksInterval.forEach(t => {
     const nd = nextDue(t);
     if (!nd) return;
@@ -990,11 +1027,15 @@ function renderCalendar(){
     (dueMap[key] ||= []).push({ type:"task", id:t.id, name:t.name });
   });
 
-  // Jobs map (expanded per day)
-  const jobsMap = {}; // key Y-M-D -> array of {type:"job", id, name}
+  // ---------- Build cutting job day map ----------
+  // key: "Y-M-D"  ->  [{type:"job", id, name}]
+  const jobsMap = {};
   cuttingJobs.forEach(j => {
+    if (!j.startISO || !j.dueISO) return;
     const start = new Date(j.startISO);
-    const end = new Date(j.dueISO);
+    const end   = new Date(j.dueISO);
+    start.setHours(0,0,0,0);
+    end.setHours(0,0,0,0);
     const cur = new Date(start);
     while (cur <= end) {
       const key = ymd(cur);
@@ -1003,8 +1044,10 @@ function renderCalendar(){
     }
   });
 
+  // ---------- Render current + next 2 months ----------
   const today = new Date(); today.setHours(0,0,0,0);
-  for (let m=0; m<3; m++) {
+
+  for (let m = 0; m < 3; m++) {
     const first = new Date(today.getFullYear(), today.getMonth()+m, 1);
     const last  = new Date(today.getFullYear(), today.getMonth()+m+1, 0);
 
@@ -1019,58 +1062,72 @@ function renderCalendar(){
     const weekdays = document.createElement("div");
     weekdays.className = "weekdays";
     ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].forEach(d => {
-      const el = document.createElement("div"); el.textContent = d; weekdays.appendChild(el);
+      const el = document.createElement("div");
+      el.textContent = d;
+      weekdays.appendChild(el);
     });
     monthDiv.appendChild(weekdays);
 
     const grid = document.createElement("div");
     grid.className = "week";
 
-    for (let i=0; i<first.getDay(); i++) {
-      const blank = document.createElement("div"); blank.className = "day other-month"; grid.appendChild(blank);
+    // leading blanks
+    for (let i = 0; i < first.getDay(); i++) {
+      const blank = document.createElement("div");
+      blank.className = "day other-month";
+      grid.appendChild(blank);
     }
 
-    for (let day=1; day<=last.getDate(); day++) {
+    // days
+    for (let day = 1; day <= last.getDate(); day++) {
       const date = new Date(first.getFullYear(), first.getMonth(), day);
-      const cell = document.createElement("div"); cell.className = "day";
+      date.setHours(0,0,0,0);
+
+      const cell = document.createElement("div");
+      cell.className = "day";
       if (date.getTime() === today.getTime()) cell.classList.add("today");
       cell.innerHTML = `<div class="date">${day}</div>`;
 
       const key = ymd(date);
 
-      // Maintenance events (hover bubble + actions)
+      // Maintenance chips (entire chip is interactive)
       (dueMap[key] || []).forEach(ev => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "event generic";
-        btn.textContent = ev.name + " (due)";
-        btn.addEventListener("mouseenter",(e)=>showTaskBubble(ev.id, btn));
-        btn.addEventListener("mouseleave", hideBubbleSoon);
-        cell.appendChild(btn);
+        const chip = document.createElement("div");
+        chip.className = "event generic cal-task";
+        chip.dataset.calTask = ev.id;
+        chip.textContent = `${ev.name} (due)`;
+        cell.appendChild(chip);
       });
 
-      // Job bars
+      // Cutting job bars (entire bar is interactive)
       (jobsMap[key] || []).forEach(ev => {
         const bar = document.createElement("div");
-        bar.className = "job-bar";
+        bar.className = "job-bar cal-job";
+        bar.dataset.calJob = ev.id;
         bar.textContent = ev.name;
-        bar.addEventListener("mouseenter",()=>showJobBubble(ev.id, bar));
-        bar.addEventListener("mouseleave", hideBubbleSoon);
         cell.appendChild(bar);
       });
 
       grid.appendChild(cell);
     }
 
+    // trailing blanks
     const filled = first.getDay() + last.getDate();
     const rem = filled % 7;
-    if (rem !== 0) for (let i=0; i<7-rem; i++) {
-      const blank = document.createElement("div"); blank.className = "day other-month"; grid.appendChild(blank);
+    if (rem !== 0) {
+      for (let i = 0; i < 7 - rem; i++) {
+        const blank = document.createElement("div");
+        blank.className = "day other-month";
+        grid.appendChild(blank);
+      }
     }
 
     monthDiv.appendChild(grid);
     container.appendChild(monthDiv);
   }
+
+  // Attach delegated listeners once per render
+  wireCalendarBubbles();
 }
 
 /* --------- Calendar Hover Bubbles --------- */
