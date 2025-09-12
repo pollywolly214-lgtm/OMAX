@@ -3,6 +3,8 @@
    - Persists state in Firestore under anonymous auth (per-user doc)
    - Works on GitHub Pages (static)
    ========================================================= */
+// Fixed billing rate for jobs
+const JOB_RATE_PER_HOUR = 250;  // $/hr
 
 const DAILY_HOURS = 8;
 // Shared workspace identifier (everyone must use the same ID)
@@ -400,23 +402,19 @@ function daysBetweenInclusive(a, b){
  * - newProfit = originalProfit + efficiencyAmount
  */
 function computeJobEfficiency(job){
-  // Keep the same return keys as before for full compatibility
+  // Shape kept similar to your previous return so UI code stays happy
   const planned = (job && job.estimateHours > 0) ? Number(job.estimateHours) : 0;
-  const origProfit = Number(job && job.originalProfit != null ? job.originalProfit : 0);
-  const rate = planned > 0 ? (origProfit / planned) : 0; // $/hr
-
-  // Default result shape (unchanged from your previous function)
   const result = {
-    pph: rate,
+    rate: JOB_RATE_PER_HOUR,     // $/hr (fixed)
     expectedHours: 0,
     actualHours: 0,
-    deltaHours: 0,
-    efficiencyAmount: 0,
-    newProfit: origProfit,
+    deltaHours: 0,               // actual - expected ( >0 = ahead, <0 = behind )
+    gainLoss: 0,                 // $ ( + = ahead, - = behind )
     daysElapsed: 0,
-    totalDays: 0
+    totalDays: 0,
+    usedAutoFromManual: false,   // flags for the info bubble
+    usedFromStartAuto: false
   };
-
   if (!job || !job.startISO || !job.dueISO || planned <= 0) return result;
 
   // Normalize to local midnight
@@ -425,56 +423,49 @@ function computeJobEfficiency(job){
   const today = new Date();             today.setHours(0,0,0,0);
   const asOf  = (today < due) ? today : due;
 
-  // Window info (unchanged logic)
-  result.totalDays   = daysBetweenInclusive(start, due);
-  result.daysElapsed = (asOf < start) ? 0 : daysBetweenInclusive(start, asOf);
+  // Days window
+  result.totalDays   = Math.max(0, Math.floor((due - start) / (24*60*60*1000)) + 1);
+  result.daysElapsed = (asOf < start) ? 0 : Math.max(0, Math.floor((asOf - start) / (24*60*60*1000)) + 1);
 
-  const expectedRaw = result.daysElapsed * DAILY_HOURS; // DAILY_HOURS should be 8
-  result.expectedHours = Math.min(planned, expectedRaw);
+  // Expected so far (cap to planned)
+  result.expectedHours = Math.min(planned, result.daysElapsed * DAILY_HOURS);
 
-  // ----- NEW: manual override path -----
-  // If job.manualLogs is present, use latest manual entry <= asOf,
-  // then auto-estimate forward from that date at DAILY_HOURS/day.
-  let actual = NaN;
+  // --- ACTUAL HOURS: manual override with automatic carry-forward ---
+  let actual = 0;
   const hasManual = Array.isArray(job.manualLogs) && job.manualLogs.length > 0;
+
   if (hasManual) {
+    // use the latest manual <= asOf, then carry forward 8 hr/day after that
     const logs = job.manualLogs
       .filter(m => new Date(`${m.dateISO}T00:00:00`) <= asOf)
       .sort((a,b) => new Date(a.dateISO) - new Date(b.dateISO));
+
     if (logs.length > 0) {
       const last = logs[logs.length - 1];
       const lastDate = new Date(`${last.dateISO}T00:00:00`); lastDate.setHours(0,0,0,0);
-      let completed = Math.max(0, Math.min(planned, Number(last.completedHours) || 0));
-
+      actual = Math.max(0, Math.min(planned, Number(last.completedHours)||0));
       if (asOf > lastDate) {
-        // auto-continue from last manual entry at DAILY_HOURS per day
-        const daysForward = daysBetweenInclusive(lastDate, asOf) - 1; // exclude the last manual day itself
-        completed = completed + Math.max(0, daysForward) * DAILY_HOURS;
+        const daysForward = Math.max(0, Math.floor((asOf - lastDate)/(24*60*60*1000)));
+        actual += daysForward * DAILY_HOURS; // carry forward 8 hr/day
+        result.usedAutoFromManual = true;
       }
-      actual = Math.min(planned, completed);
+    } else {
+      // no manual ≤ asOf -> treat as no-manual path below
+      result.usedFromStartAuto = true;
+      actual = Math.min(planned, result.daysElapsed * DAILY_HOURS);
     }
+  } else {
+    // No manual entries at all: assume 8 hr/day since start
+    result.usedFromStartAuto = true;
+    actual = Math.min(planned, result.daysElapsed * DAILY_HOURS);
   }
 
-  // ----- Automatic fallback if no usable manual entry -----
-  if (!isFinite(actual)) {
-    // Sum Total Hours deltas within [start..asOf]
-    const daily = buildDailyHoursMap(); // { 'YYYY-M-D': hoursThatDay }
-    let sum = 0;
-    if (result.daysElapsed > 0) {
-      const cur = new Date(start);
-      while (cur <= asOf) {
-        sum += (daily[ymd(cur)] || 0);
-        cur.setDate(cur.getDate() + 1);
-      }
-    }
-    actual = Math.min(planned, sum);
-  }
+  // Cap to planned
+  result.actualHours = Math.min(planned, actual);
 
-  // Finish (unchanged output keys)
-  result.actualHours = actual;
-  result.deltaHours = result.expectedHours - result.actualHours;        // + behind, - ahead
-  result.efficiencyAmount = - result.deltaHours * rate;                 // behind reduces profit
-  result.newProfit = origProfit + result.efficiencyAmount;
+  // Delta & financial impact (gain/loss only, based on $/hr)
+  result.deltaHours = result.actualHours - result.expectedHours;     // + ahead, - behind
+  result.gainLoss   = result.deltaHours * result.rate;
 
   return result;
 }
@@ -875,45 +866,46 @@ function viewJobs(){
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
 
-    const noteAuto = eff.isAuto
-      ? `<div class="muted"><strong>Automated Estimation</strong> — please enter exact hours.</div>`
-      : ``;
-
-    const startTxt = (new Date(j.startISO)).toDateString();
-    const dueTxt   = (new Date(j.dueISO)).toDateString();
-    const dueVal   = (new Date(j.dueISO)).toISOString().slice(0,10);
-
-    const effText  =
-      `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(0)} hr Δ ` +
-      `(exp ${eff.expectedHours.toFixed(0)} vs act ${eff.actualHours.toFixed(0)}) → ` +
-      `${eff.efficiencyAmount>=0?"+":""}$${eff.efficiencyAmount.toFixed(2)} ` +
-      `<div class="muted">New profit: $${eff.newProfit.toFixed(2)} | $/hr: $${eff.pph.toFixed(2)}</div>`;
-
-    const reqCell = (req.requiredPerDay === Infinity)
-      ? `<span class="danger">Past due / no days remaining</span>`
-      : `${req.requiredPerDay.toFixed(2)} hr/day ` +
-        `<span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
-
     const editing = editingJobs.has(j.id);
 
-    // READ CELLS
-    const readName      = `<div><strong>${j.name}</strong></div>${noteAuto}`;
-    const readEstimate  = `${j.estimateHours} hrs`;
-    const readMaterial  = j.material || "—";
-    const readSchedule  = `<div class="small">${startTxt} → ${dueTxt}</div><div class="muted">${dueVal}</div>`;
-    const readEff       = effText;
-    const readProfit    = `${effText}<div class="muted">Original: $${(j.originalProfit||0).toFixed(2)}</div>`;
-    const readReq       = reqCell;
-    const readNotes     = j.notes || "—";
+    const startTxt = (new Date(j.startISO)).toDateString();
+    const dueDate  = new Date(j.dueISO);
+    const dueTxt   = dueDate.toDateString();
+    const dueVal   = dueDate.toISOString().slice(0,10);
 
-    // EDIT CELLS
+    // Efficiency: hours delta and $ gain/loss at fixed rate
+    const signMoney = eff.gainLoss >= 0 ? "+" : "−";
+    const absMoney  = Math.abs(eff.gainLoss).toFixed(2);
+    const effText   =
+      `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(1)} hr Δ ` +
+      `(exp ${eff.expectedHours.toFixed(1)} vs act ${eff.actualHours.toFixed(1)}) → ` +
+      `${signMoney}$${absMoney} @ $${eff.rate}/hr`;
+
+    // “Required per day” to finish on time
+    const reqCell = (req.requiredPerDay === Infinity)
+      ? `<span class="danger">Past due / no days remaining</span>`
+      : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
+
+    // Auto/Manual note
+    const noteAuto = eff.usedAutoFromManual
+      ? `<div class="muted"><strong>Auto from last manual</strong> — continuing at ${DAILY_HOURS} hr/day.</div>`
+      : (eff.usedFromStartAuto ? `<div class="muted"><strong>Auto</strong> — assuming ${DAILY_HOURS} hr/day from start.</div>` : ``);
+
+    // READ MODE CELLS
+    const readName     = `<div><strong>${j.name}</strong></div>${noteAuto}`;
+    const readHours    = `${j.estimateHours} hrs`;
+    const readMaterial = j.material || "—";
+    const readSched    = `<div class="small">${startTxt} → ${dueTxt}</div><div class="muted">${dueVal}</div>`;
+    const readEff      = effText;
+    const readReq      = reqCell;
+    const readNotes    = j.notes || "—";
+
+    // EDIT MODE CELLS
     const editName     = `<input type="text" class="job-input" data-k="name" value="${j.name}">`;
-    const editEstimate = `<input type="number" min="1" step="0.01" class="job-input" data-k="estimateHours" value="${j.estimateHours}">`;
+    const editHours    = `<input type="number" min="1" step="0.01" class="job-input" data-k="estimateHours" value="${j.estimateHours}">`;
     const editMaterial = `<input type="text" class="job-input" data-k="material" value="${j.material||""}" placeholder="Material">`;
     const editSched    = `<div class="small">${startTxt} → ${dueTxt}</div>
                           <input type="date" class="job-input" data-k="dueISO" value="${dueVal}">`;
-    const editProfit   = `<input type="number" min="0" step="0.01" class="job-input" data-k="originalProfit" value="${j.originalProfit!=null?j.originalProfit:""}">
-                          <div class="small muted">Will recompute with changes</div>`;
     const editNotes    = `<input type="text" class="job-input" data-k="notes" value="${j.notes||""}" placeholder="Notes">`;
 
     const actions = editing
@@ -928,17 +920,16 @@ function viewJobs(){
     return `
       <tr data-job="${j.id}" class="${editing?'row-editing':''}">
         <td>${editing ? editName     : readName}</td>
-        <td>${editing ? editEstimate : readEstimate}</td>
+        <td>${editing ? editHours    : readHours}</td>
         <td>${editing ? editMaterial : readMaterial}</td>
-        <td>${editing ? editSched    : readSchedule}</td>
-        <td>${effText}</td>
-        <td>${editing ? editProfit   : `<div class="small">Original: $${(j.originalProfit||0).toFixed(2)}</div>`}</td>
-        <td>${reqCell}</td>
+        <td>${editing ? editSched    : readSched}</td>
+        <td>${readEff}</td>
+        <td>${readReq}</td>
         <td>${editing ? editNotes    : readNotes}</td>
         <td>${actions}</td>
       </tr>
       <tr class="job-manual-row" data-job="${j.id}">
-        <td colspan="9">
+        <td colspan="8">
           <form class="mini-form job-manual-form" data-job-id="${j.id}">
             <label><strong>Manual progress:</strong></label>
             <input type="date" class="jm-date" value="${(new Date()).toISOString().slice(0,10)}" required>
@@ -948,6 +939,7 @@ function viewJobs(){
             </select>
             <input type="number" class="jm-value" min="0" step="0.01" placeholder="e.g., 4" required>
             <button type="submit">Add/Update</button>
+            <span class="muted small">Manual overrides; after your last manual entry, app continues at ${DAILY_HOURS} hr/day until you log again.</span>
           </form>
         </td>
       </tr>`;
@@ -958,11 +950,10 @@ function viewJobs(){
     <h2>Cutting Jobs</h2>
 
     <form id="jobForm" class="mini-form">
-      <div><label>Name</label><input id="job_name" required></div>
-      <div><label>Hours</label><input id="job_hours" type="number" min="1" step="0.01" required></div>
+      <div><label><b>Name</b></label><input id="job_name" required></div>
+      <div><label><b>Hours</b></label><input id="job_hours" type="number" min="1" step="0.01" required></div>
       <div><label>Material</label><input id="job_material"></div>
-      <div><label>Due date</label><input id="job_due" type="date" required></div>
-      <div><label>Original Profit ($)</label><input id="job_profit" type="number" min="0" step="0.01"></div>
+      <div><label><b>Due date</b></label><input id="job_due" type="date" required></div>
       <div class="grow"><label>Notes</label><input id="job_notes"></div>
       <div><button type="submit" class="primary">Add Job</button></div>
     </form>
@@ -970,8 +961,14 @@ function viewJobs(){
     <table class="grid">
       <thead>
         <tr>
-          <th>Job</th><th>Est (hr)</th><th>Material</th><th>Schedule</th>
-          <th>Efficiency</th><th>Profit</th><th>Req/day</th><th>Notes</th><th>Actions</th>
+          <th>Job</th>
+          <th>Est (hr)</th>
+          <th>Material</th>
+          <th>Schedule</th>
+          <th>Efficiency (hrs → $)</th>
+          <th>Required/day</th>
+          <th>Notes</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -1231,15 +1228,17 @@ function computeRequiredDaily(job){
   if (!job || !job.startISO || !job.dueISO) {
     return { remainingHours: 0, remainingDays: 0, requiredPerDay: 0 };
   }
-  const eff = computeJobEfficiency(job);               // gives us actualHours so far
+  const eff = computeJobEfficiency(job);  // gives actualHours
   const planned = Number(job.estimateHours) || 0;
   const remainingHours = Math.max(0, planned - eff.actualHours);
 
   const today = new Date(); today.setHours(0,0,0,0);
   const due   = new Date(job.dueISO); due.setHours(0,0,0,0);
-  const asOf  = (today < due) ? today : due;           // same “asOf” horizon as efficiency
+  const asOf  = (today < due) ? today : due;
+
+  // days left including today if before/equal due
   const remainingDays = (asOf <= due)
-    ? Math.max(0, daysBetweenInclusive(asOf, due))     // inclusive of today
+    ? Math.max(0, Math.floor((due - asOf)/(24*60*60*1000)) + 1)
     : 0;
 
   const requiredPerDay = (remainingDays > 0)
@@ -1583,19 +1582,23 @@ function renderInventory(){
 }
 
 function renderJobs(){
+  // Render the Cutting Jobs UI
   $("#content").innerHTML = viewJobs();
 
-  // Add new job
+  // -- Add new job -----------------------------------------------------------
   const form = $("#jobForm");
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    const name      = $("#job_name").value.trim();
-    const hours     = parseFloat($("#job_hours").value);
-    const material  = $("#job_material").value.trim();
-    const notes     = $("#job_notes").value.trim();
-    const dueStr    = $("#job_due").value; // yyyy-mm-dd
-    const originalProfit = parseFloat($("#job_profit").value) || 0;
-    if (!name || !(hours>0) || !dueStr) { toast("Enter name, hours>0, due date"); return; }
+    const name     = $("#job_name").value.trim();
+    const hours    = parseFloat($("#job_hours").value);
+    const material = $("#job_material").value.trim();
+    const notes    = $("#job_notes").value.trim();
+    const dueStr   = $("#job_due").value; // yyyy-mm-dd
+
+    if (!name || !(hours > 0) || !dueStr) {
+      toast("Enter name, hours > 0, and a due date.");
+      return;
+    }
 
     const dueISO = new Date(`${dueStr}T00:00:00`).toISOString();
     const span   = computeJobSpan(dueISO, hours);
@@ -1604,19 +1607,20 @@ function renderJobs(){
     cuttingJobs.push({
       id, name,
       estimateHours: hours,
-      originalProfit,
       material, notes,
       dueISO: span.dueISO,
       startISO: span.startISO,
-      materialCost: 0,
-      materialQty: 0,
+      // manualLogs is an array of normalized entries produced by addManualLog
+      // (If you still push raw objects elsewhere, keep the shape consistent.)
       manualLogs: []
     });
 
-    saveCloudDebounced(); toast("Job added"); route();
+    saveCloudDebounced();
+    toast("Job added");
+    route(); // re-render the page so calendar & summaries refresh
   });
 
-  // ---- Delegated clicks inside #content for robustness
+  // -- Delegated clicks inside #content (robust after re-renders) -----------
   $("#content").addEventListener("click", (ev) => {
     const editBtn   = ev.target.closest("[data-edit-job]");
     const saveBtn   = ev.target.closest("[data-save-job]");
@@ -1624,6 +1628,7 @@ function renderJobs(){
     const rmBtn     = ev.target.closest("[data-remove-job]");
     const infoBtn   = ev.target.closest(".jm-info");
 
+    // Enter edit mode for a single row
     if (editBtn){
       const id = editBtn.getAttribute("data-edit-job");
       editingJobs.clear();
@@ -1633,9 +1638,11 @@ function renderJobs(){
       if (first) { first.focus(); first.select?.(); }
       return;
     }
+
+    // Save row edits
     if (saveBtn){
       const id = saveBtn.getAttribute("data-save-job");
-      const j  = cuttingJobs.find(x=>x.id===id);
+      const j  = cuttingJobs.find(x => x.id === id);
       if (!j) return;
 
       const row    = document.querySelector(`tr[data-job="${id}"]`);
@@ -1643,73 +1650,95 @@ function renderJobs(){
       const kv = {};
       let invalid = false;
 
-      inputs.forEach(inp=>{
+      inputs.forEach(inp => {
         const k = inp.getAttribute("data-k");
-        let v = inp.value;
-        if (k==="estimateHours" || k==="originalProfit"){
+        let v   = inp.value;
+
+        if (k === "estimateHours") {
           v = parseFloat(v);
-          if (!isFinite(v) || (k==="estimateHours" && v<=0) || (k==="originalProfit" && v<0)) {
-            invalid = true;
-          }
+          if (!isFinite(v) || v <= 0) invalid = true;
         }
         kv[k] = v;
       });
+
       if (invalid) { toast("Fix invalid values"); return; }
 
-      // Apply with dependent recompute
-      Object.keys(kv).forEach(k=>{
+      // Apply changes with dependent recompute (start shifts to keep due)
+      Object.keys(kv).forEach(k => {
         if (k === "dueISO") {
           const dueISO = new Date(`${kv[k]}T00:00:00`).toISOString();
-          const span   = computeJobSpan(dueISO, Number(kv.estimateHours ?? j.estimateHours)||0);
-          j.dueISO = span.dueISO;
+          const span   = computeJobSpan(dueISO, Number(kv.estimateHours ?? j.estimateHours) || 0);
+          j.dueISO   = span.dueISO;
           j.startISO = span.startISO;
         } else if (k === "estimateHours") {
-          j.estimateHours = kv[k];
-          const span = computeJobSpan(j.dueISO, Number(j.estimateHours)||0);
-          j.startISO = span.startISO; // keep due, move start
+          j.estimateHours = Number(kv[k]);
+          const span = computeJobSpan(j.dueISO, j.estimateHours);
+          j.startISO = span.startISO; // keep due fixed; adjust start to fit hours
         } else {
           j[k] = kv[k];
         }
       });
 
       editingJobs.delete(id);
-      saveCloudDebounced(); toast("Saved"); renderJobs();
+      saveCloudDebounced();
+      toast("Saved");
+      renderJobs(); // refresh efficiency/required/day
       return;
     }
+
+    // Cancel row edits
     if (cancelBtn){
       const id = cancelBtn.getAttribute("data-cancel-job");
       editingJobs.delete(id);
       renderJobs();
       return;
     }
+
+    // Remove job
     if (rmBtn){
       const id = rmBtn.getAttribute("data-remove-job");
-      cuttingJobs = cuttingJobs.filter(j=>j.id!==id);
+      cuttingJobs = cuttingJobs.filter(j => j.id !== id);
       editingJobs.delete(id);
-      saveCloudDebounced(); toast("Removed"); renderJobs();
+      saveCloudDebounced();
+      toast("Removed");
+      renderJobs();
       return;
     }
+
+    // Info bubble (how math works)
     if (infoBtn){
-      const id = infoBtn.getAttribute("data-job-id");
-      showJobInfo(id);
+      showInfoBubble(infoBtn);
       return;
     }
   });
 
-  // Manual progress form(s)
-  $$(".job-manual-form").forEach(f=>{
-    f.addEventListener("submit", (e)=>{
+  // -- Manual progress (completed / remaining) ------------------------------
+  $$(".job-manual-form").forEach(f => {
+    f.addEventListener("submit", (e) => {
       e.preventDefault();
       const jobId = f.getAttribute("data-job-id");
-      const j = cuttingJobs.find(x=>x.id===jobId);
+      const j     = cuttingJobs.find(x => x.id === jobId);
       if (!j) return;
-      const dateStr = f.querySelector(".jm-date").value;
-      const mode    = f.querySelector(".jm-mode").value;       // "completed" or "remaining"
+
+      const dateStr = f.querySelector(".jm-date").value;  // yyyy-mm-dd
+      const mode    = f.querySelector(".jm-mode").value;  // "completed" | "remaining"
       const val     = parseFloat(f.querySelector(".jm-value").value);
-      if (!dateStr || !(val>=0)) { toast("Enter a valid number"); return; }
-      if (!Array.isArray(j.manualLogs)) j.manualLogs=[];
-      j.manualLogs.push({ dateISO: new Date(`${dateStr}T00:00:00`).toISOString(), type:mode, hours:val });
-      saveCloudDebounced(); toast("Manual entry saved"); renderJobs();
+
+      if (!dateStr || !(val >= 0)) { toast("Enter valid hours"); return; }
+
+      // Use your helper to normalize and store manual progress
+      if (typeof addManualLog === "function") {
+        const ok = addManualLog(jobId, dateStr, mode, val);
+        if (!ok) { toast("Job not found"); return; }
+      } else {
+        // Fallback: store raw entry (keeps your previous behavior)
+        if (!Array.isArray(j.manualLogs)) j.manualLogs = [];
+        j.manualLogs.push({ dateISO: dateStr, type: mode, hours: val });
+      }
+
+      saveCloudDebounced();
+      toast("Manual progress saved");
+      renderJobs();
     });
   });
 }
