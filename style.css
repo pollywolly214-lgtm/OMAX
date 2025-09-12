@@ -36,10 +36,44 @@ th { background: #f7f9fc; }
 .day.other-month { background: #f8f9fb; color: #aaa; }
 .calendar-toolbar { margin-bottom: 10px; }
 
-.event { margin-top: 4px; padding: 3px 4px; font-size: 12px; border-radius: 4px; background: #ffd166; color: #333; display: inline-block; border: 1px solid #e5b14a; }
-.event:hover { filter: brightness(0.95); }
+/* Calendar items — make the ENTIRE chip/bar interactive */
+.event, .job-bar, .cal-task, .cal-job {
+  margin-top: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  display: block;
+  cursor: pointer;
+  pointer-events: auto;
+  min-height: 18px;
+  line-height: 18px;
+  position: relative;
+  z-index: 2;
+}
 
-.job-bar { margin-top: 4px; padding: 3px 4px; font-size: 12px; border-radius: 4px; background: #9bd3ff; color: #123; border: 1px solid #68b7ee; display: block; }
+/* Maintenance chip (generic event) */
+.event.generic, .cal-task {
+  background: #ffd166;
+  color: #333;
+  border: 1px solid #e5b14a;
+}
+.event.generic:hover, .cal-task:hover {
+  filter: brightness(0.95);
+}
+
+/* Cutting job bar */
+.job-bar, .cal-job {
+  background: #9bd3ff;
+  color: #123;
+  border: 1px solid #68b7ee;
+}
+.job-bar:hover, .cal-job:hover {
+  background: #86caff;
+  border-color: #4aa6e7;
+}
+
+/* Ensure parent containers don't block pointer events */
+.month, .week, .day { pointer-events: auto; }
 
 /* Bubble (hover popover) */
 .bubble {
@@ -59,8 +93,7 @@ th { background: #f7f9fc; }
 }
 .toast.show { opacity: 1; }
 
-
-
+/* Settings search (kept) */
 .settings-search {
   position: relative;
   margin: 8px 0 14px;
