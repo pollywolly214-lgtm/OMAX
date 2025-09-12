@@ -1122,9 +1122,6 @@ function renderCalendar(){
 }
 
 /* --------- Calendar Hover Bubbles --------- */
-let bubbleTimer = null;
-function hideBubbleSoon(){ clearTimeout(bubbleTimer); bubbleTimer = setTimeout(hideBubble, 200); }
-function hideBubble(){ const b = $("#bubble"); if (b) b.remove(); }
 
 // ---- Bubble helpers (replace your current makeBubble / hide helpers if different)
 let bubbleTimer = null;
