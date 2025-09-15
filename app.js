@@ -1,4 +1,3 @@
-app_js = dedent(r"""
 /* =========================================================
    OMAX 1530 Maintenance Tracker — v7.1 (Regenerated)
    - Firestore cloud sync (email/password modal; shared workspace doc)
@@ -442,22 +441,22 @@ function renderPumpWidget(){
   const host = document.getElementById("pump-widget");
   if (!host) return;
   host.innerHTML = viewPumpWidget();
-  $("#pumpBaselineForm")?.addEventListener("submit",(e)=>{
+  document.getElementById("pumpBaselineForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
-    const rpm = Number($("#pumpBaselineRPM").value);
+    const rpm = Number(document.getElementById("pumpBaselineRPM").value);
     if (!isFinite(rpm) || rpm <= 0) { toast("Enter a valid RPM."); return; }
     pumpEff.baselineRPM     = rpm;
     pumpEff.baselineDateISO = new Date().toISOString().slice(0,10);
     saveCloudDebounced(); toast("Baseline set"); renderPumpWidget();
   });
-  $("#pumpLogForm")?.addEventListener("submit",(e)=>{
+  document.getElementById("pumpLogForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
-    const d   = $("#pumpLogDate").value;
-    const rpm = Number($("#pumpLogRPM").value);
+    const d   = document.getElementById("pumpLogDate").value;
+    const rpm = Number(document.getElementById("pumpLogRPM").value);
     if (!d || !isFinite(rpm) || rpm <= 0) { toast("Enter date and valid RPM."); return; }
     upsertPumpEntry(d, rpm); saveCloudDebounced(); toast("Log saved"); renderPumpWidget();
   });
-  drawPumpChart($("#pumpChart"));
+  drawPumpChart(document.getElementById("pumpChart"));
 }
 function drawPumpChart(canvas){
   if (!canvas) return;
@@ -991,8 +990,8 @@ function renderDashboard(){
   content.innerHTML = viewDashboard();
 
   // Log hours
-  $("#logBtn")?.addEventListener("click", ()=>{
-    const v = Number($("#totalInput").value);
+  document.getElementById("logBtn")?.addEventListener("click", ()=>{
+    const v = Number(document.getElementById("totalInput").value);
     if (!isFinite(v) || v < 0){ toast("Enter valid hours."); return; }
     const todayISO = new Date().toISOString().slice(0,10);
     const last = totalHistory[totalHistory.length-1];
@@ -1007,7 +1006,7 @@ function renderDashboard(){
   });
 
   // Next due summary
-  const ndBox = $("#nextDueBox");
+  const ndBox = document.getElementById("nextDueBox");
   const upcoming = tasksInterval
     .map(t => ({ t, nd: nextDue(t) }))
     .filter(x => x.nd)
@@ -1018,11 +1017,11 @@ function renderDashboard(){
     : `<div class="muted small">No upcoming due items.</div>`;
 
   // Quick add task
-  $("#quickAddForm")?.addEventListener("submit",(e)=>{
+  document.getElementById("quickAddForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
-    const name = $("#qa_name").value.trim();
-    const interval = Number($("#qa_interval").value);
-    const cond = $("#qa_condition").value.trim();
+    const name = document.getElementById("qa_name").value.trim();
+    const interval = Number(document.getElementById("qa_interval").value);
+    const cond = document.getElementById("qa_condition").value.trim();
     if (!name) return;
     if (isFinite(interval) && interval > 0){
       tasksInterval.push({ id: genId(name), name, interval, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" });
@@ -1045,11 +1044,11 @@ function openSettingsAndReveal(taskId){
 }
 
 function renderSettings(){
-  const content = $("#content"); if (!content) return;
+  const content = document.getElementById("content"); if (!content) return;
   content.innerHTML = viewSettings();
 
   // Interval list wiring
-  $("#intervalList")?.addEventListener("input",(e)=>{
+  document.getElementById("intervalList")?.addEventListener("input",(e)=>{
     const input = e.target;
     const id = input.getAttribute("data-id");
     const key = input.getAttribute("data-k");
@@ -1059,7 +1058,7 @@ function renderSettings(){
     t[key] = val;
     saveCloudDebounced();
   });
-  $("#intervalList")?.addEventListener("click",(e)=>{
+  document.getElementById("intervalList")?.addEventListener("click",(e)=>{
     const rm = e.target.closest("[data-remove]");
     const comp = e.target.closest("[data-complete]");
     if (rm){
@@ -1072,7 +1071,7 @@ function renderSettings(){
   });
 
   // As required wiring
-  $("#asreqList")?.addEventListener("input",(e)=>{
+  document.getElementById("asreqList")?.addEventListener("input",(e)=>{
     const input = e.target;
     const id = input.getAttribute("data-id");
     const key = input.getAttribute("data-k");
@@ -1081,7 +1080,7 @@ function renderSettings(){
     if (key==="price") t[key] = Number(t[key]) || null;
     saveCloudDebounced();
   });
-  $("#asreqList")?.addEventListener("click",(e)=>{
+  document.getElementById("asreqList")?.addEventListener("click",(e)=>{
     const rm = e.target.closest("[data-remove]");
     if (rm){
       const id = rm.getAttribute("data-remove");
@@ -1092,33 +1091,33 @@ function renderSettings(){
   });
 
   // Add forms
-  $("#addIntervalForm")?.addEventListener("submit",(e)=>{
+  document.getElementById("addIntervalForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
-    const name = $("#ai_name").value.trim();
-    const interval = Number($("#ai_interval").value);
+    const name = document.getElementById("ai_name").value.trim();
+    const interval = Number(document.getElementById("ai_interval").value);
     if (!name || !isFinite(interval) || interval<=0){ toast("Enter valid name + interval"); return; }
     tasksInterval.push({ id: genId(name), name, interval, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" });
     saveCloudDebounced(); renderSettings();
   });
-  $("#addAsReqForm")?.addEventListener("submit",(e)=>{
+  document.getElementById("addAsReqForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
-    const name = $("#ar_name").value.trim();
-    const cond = $("#ar_condition").value.trim();
+    const name = document.getElementById("ar_name").value.trim();
+    const cond = document.getElementById("ar_condition").value.trim();
     if (!name){ toast("Enter name"); return; }
     tasksAsReq.push({ id: genId(name), name, condition: cond||"As required", manualLink:"", storeLink:"" });
     saveCloudDebounced(); renderSettings();
   });
 
-  $("#saveTasksBtn")?.addEventListener("click",()=>{ saveCloudDebounced(); toast("Saved"); });
+  document.getElementById("saveTasksBtn")?.addEventListener("click",()=>{ saveCloudDebounced(); toast("Saved"); });
 }
 
 function renderCosts(){
-  const content = $("#content"); if (!content) return;
+  const content = document.getElementById("content"); if (!content) return;
   content.innerHTML = viewCosts();
 
-  const tbI = $("#costTableInterval tbody");
-  const tbA = $("#costTableAsReq tbody");
-  const tbJ = $("#costTableJobs tbody");
+  const tbI = document.querySelector("#costTableInterval tbody");
+  const tbA = document.querySelector("#costTableAsReq tbody");
+  const tbJ = document.querySelector("#costTableJobs tbody");
 
   tbI.innerHTML = tasksInterval.map(t=>`
     <tr>
@@ -1145,8 +1144,8 @@ function renderCosts(){
   function saveMatInline(e){
     const id = e.target.getAttribute("data-id");
     const j = cuttingJobs.find(x=>x.id===id); if (!j) return;
-    j.materialCost = Number($(`input.matCost[data-id="${id}"]`).value)||0;
-    j.materialQty  = Number($(`input.matQty[data-id="${id}"]`).value)||0;
+    j.materialCost = Number(document.querySelector(`input.matCost[data-id="${id}"]`).value)||0;
+    j.materialQty  = Number(document.querySelector(`input.matQty[data-id="${id}"]`).value)||0;
     saveCloudDebounced();
     renderCosts();
   }
@@ -1172,34 +1171,34 @@ function renderCosts(){
 }
 
 function renderJobs(){
-  const content = $("#content"); if (!content) return;
+  const content = document.getElementById("content"); if (!content) return;
   content.innerHTML = viewJobs();
 
-  $("#addJobForm")?.addEventListener("submit",(e)=>{
+  document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
-    const name = $("#jobName").value.trim();
-    const est  = Number($("#jobEst").value);
-    const start = $("#jobStart").value;
-    const due   = $("#jobDue").value;
+    const name = document.getElementById("jobName").value.trim();
+    const est  = Number(document.getElementById("jobEst").value);
+    const start = document.getElementById("jobStart").value;
+    const due   = document.getElementById("jobDue").value;
     if (!name || !isFinite(est) || est<=0 || !start || !due){ toast("Fill job fields."); return; }
     cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material:"", notes:"", manualLogs:[] });
     saveCloudDebounced(); renderJobs();
   });
 
   // Inline material $/qty in non-edit rows (handled in Costs too)
-  $("tbody")?.addEventListener("change",(e)=>{
+  document.querySelector("tbody")?.addEventListener("change",(e)=>{
     if (e.target.matches("input.matCost, input.matQty")){
       const id = e.target.getAttribute("data-id");
       const j = cuttingJobs.find(x=>x.id===id); if (!j) return;
-      j.materialCost = Number($(`input.matCost[data-id="${id}"]`).value)||0;
-      j.materialQty  = Number($(`input.matQty[data-id="${id}"]`).value)||0;
+      j.materialCost = Number(document.querySelector(`input.matCost[data-id="${id}"]`).value)||0;
+      j.materialQty  = Number(document.querySelector(`input.matQty[data-id="${id}"]`).value)||0;
       saveCloudDebounced();
       renderJobs();
     }
   });
 
   // Edit/Remove/Save/Cancel
-  $("tbody")?.addEventListener("click",(e)=>{
+  document.querySelector("tbody")?.addEventListener("click",(e)=>{
     const ed = e.target.closest("[data-edit-job]");
     const rm = e.target.closest("[data-remove-job]");
     const sv = e.target.closest("[data-save-job]");
@@ -1213,13 +1212,13 @@ function renderJobs(){
     if (sv){
       const id = sv.getAttribute("data-save-job");
       const j = cuttingJobs.find(x=>x.id===id); if (!j) return;
-      const qs = (k)=> $(`[data-j="${k}"][data-id="${id}"]`)?.value;
+      const qs = (k)=> document.querySelector(`[data-j="${k}"][data-id="${id}"]`)?.value;
       j.name = qs("name") || j.name;
       j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
       j.material = qs("material") || j.material || "";
       j.startISO = qs("startISO") || j.startISO;
       j.dueISO   = qs("dueISO") || j.dueISO;
-      j.notes    = $(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
+      j.notes    = document.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
       editingJobs.delete(id); saveCloudDebounced(); renderJobs();
     }
     if (ca){ editingJobs.delete(ca.getAttribute("data-cancel-job")); renderJobs(); }
@@ -1227,9 +1226,9 @@ function renderJobs(){
 }
 
 function renderInventory(){
-  const content = $("#content"); if (!content) return;
+  const content = document.getElementById("content"); if (!content) return;
   content.innerHTML = viewInventory();
-  $("tbody")?.addEventListener("input",(e)=>{
+  document.querySelector("tbody")?.addEventListener("input",(e)=>{
     const input = e.target;
     const id = input.getAttribute("data-id");
     const k  = input.getAttribute("data-inv");
@@ -1241,7 +1240,7 @@ function renderInventory(){
 }
 
 function renderSignedOut(){
-  const content = $("#content"); if (!content) return;
+  const content = document.getElementById("content"); if (!content) return;
   content.innerHTML = `<div class='container'><div class='block'><h3>Please sign in to view workspace.</h3></div></div>`;
 }
 
@@ -1260,13 +1259,13 @@ function nav(){
 }
 
 function route(){
-  const content = $("#content"); if (!content) return;
-  if (!$("#topNav")) {
+  const content = document.getElementById("content"); if (!content) return;
+  if (!document.getElementById("topNav")) {
     const wrapper = document.createElement("div");
     wrapper.id = "topNav";
     wrapper.innerHTML = nav();
     content.parentElement?.insertBefore(wrapper, content);
-    $("#topNav").addEventListener("click",(e)=>{
+    document.getElementById("topNav").addEventListener("click",(e)=>{
       const btn = e.target.closest("[data-go]"); if (!btn) return;
       location.hash = btn.getAttribute("data-go");
     });
@@ -1280,3 +1279,6 @@ function route(){
   else if (hash.startsWith("#/inventory")) renderInventory();
   else renderDashboard();
 }
+
+window.addEventListener("hashchange", route);
+window.addEventListener("load", ()=>{ initFirebase(); route(); });
