@@ -852,7 +852,11 @@ function taskDetailsAsReq(task){
 }
 
 function viewSettings(){
-  // helper: small chip based on next due
+  // Ensure a folders store exists (persistable via task .cat fields; empty folders live in settingsFolders)
+  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  const folders = window.settingsFolders; // [{id, name}]
+
+  // ===== helpers =====
   const chipFor = (t)=>{
     const nd = nextDue(t);
     if (!nd) return `<span class="chip">—</span>`;
@@ -864,7 +868,7 @@ function viewSettings(){
     return `<span class="chip ${cls}">${d}d → ${nd.due.toDateString()}</span>`;
   };
 
-  // helper: one sub-part row
+  // sub-part row (keeps the earlier sub-part capability)
   const partRow = (p, parentId, listType) => `
     <div class="mini-form" data-part-row data-parent="${parentId}" data-list="${listType}" data-part-id="${p.pid}">
       <input type="text" placeholder="Part name" value="${p.name||""}"
@@ -881,15 +885,14 @@ function viewSettings(){
               data-part-remove="${p.pid}" data-parent="${parentId}" data-list="${listType}">Remove</button>
     </div>`;
 
-  // helper: one maintenance “bubble card” with nested sub-parts UI.
+  // one maintenance card (bubble) — draggable so it can be dropped into a folder
   const card = (t, listType) => {
     const nd = nextDue(t);
-    const sinceTxt = nd ? `${nd.since.toFixed(0)} / ${t.interval} hrs` : "—";
     const lastServ = nd && nd.lastServicedAt != null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
     const parts = Array.isArray(t.parts) ? t.parts : [];
-
     return `
-    <details class="block" data-task-id="${t.id}">
+    <details class="block" draggable="true"
+             data-task-id="${t.id}" data-list="${listType}" data-cat="${t.cat||""}">
       <summary style="display:flex;align-items:center;gap:8px;">
         <b>${t.name}</b>
         ${listType === "interval" ? `<span class="chip">${t.interval}h</span>` : `<span class="chip">As req.</span>`}
@@ -912,6 +915,8 @@ function viewSettings(){
         <label>Part # (primary): <input type="text" data-k="pn" data-id="${t.id}" data-list="${listType}" value="${t.pn||""}"></label>
         <label>Price (primary): <input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${listType}" value="${t.price!=null?t.price:""}"></label>
 
+        <div class="small muted">Folder: <code>${t.cat || "Uncategorized"}</code></div>
+
         <div>
           <button class="btn-complete" data-complete="${t.id}">Mark Completed Now</button>
           <button class="danger" data-remove="${t.id}" data-from="${listType}">Remove</button>
@@ -920,7 +925,7 @@ function viewSettings(){
 
       <div class="block" style="background:#fff;margin-top:8px;">
         <h4 style="margin:0 0 6px 0;">Sub-parts</h4>
-        <div class="small muted">Use this to nest items like <i>mixing tube</i> or <i>washers</i> under “Nozzle Body.” These will be searchable.</div>
+        <div class="small muted">Nest items like <i>mixing tube</i> or <i>washers</i> under a parent. These are searchable.</div>
         <div id="parts_${t.id}" data-part-list data-parent="${t.id}" data-list="${listType}">
           ${parts.map(p => partRow(p, t.id, listType)).join("") || `<div class="small muted">No sub-parts yet.</div>`}
         </div>
@@ -936,14 +941,77 @@ function viewSettings(){
     </details>`;
   };
 
-  // build lists
-  const intervalCards = (Array.isArray(tasksInterval)?tasksInterval:[]).map(t => card(t, "interval")).join("");
-  const asreqCards    = (Array.isArray(tasksAsReq)?tasksAsReq:[]).map(t => card(t, "asreq")).join("");
+  // group tasks by folder id (t.cat)
+  const byFolder = (list, listType) => {
+    const groups = new Map();
+    // seed with existing folder objects
+    folders.forEach(f => groups.set(f.id, { folder: f, tasks: [] }));
+    // gather uncategorized
+    groups.set("__uncat__", { folder: {id:"__uncat__", name:"Uncategorized"}, tasks: [] });
 
+    (Array.isArray(list) ? list : []).forEach(t=>{
+      const cid = (t.cat && groups.has(t.cat)) ? t.cat : (t.cat ? t.cat : "__uncat__");
+      if (!groups.has(cid)){
+        // if a task references a folder id that exists only on tasks, surface it
+        groups.set(cid, { folder: {id: cid, name: t.cat}, tasks: [] });
+      }
+      groups.get(cid).tasks.push(t);
+    });
+    return [...groups.values()]
+      .sort((a,b)=> (a.folder.id==="__uncat__") - (b.folder.id==="__uncat__")) // uncat last
+      .map(g => renderFolderBlock(g.folder, g.tasks, listType))
+      .join("");
+  };
+
+  const renderFolderBlock = (folder, tasks, listType) => {
+    const isUncat = folder.id === "__uncat__";
+    const header = `
+      <summary class="folder-title" style="display:flex;align-items:center;gap:10px; font-weight:700;">
+        <span class="folder-name">${folder.name}</span>
+        ${isUncat ? `<span class="small muted">(auto)</span>` : `
+          <button class="small" data-rename-folder="${folder.id}">Rename</button>
+          <button class="danger small" data-remove-folder="${folder.id}">Remove</button>
+        `}
+      </summary>`;
+
+    const body = `
+      <div class="folder-dropzone small muted" data-drop-folder="${folder.id}"
+           style="border:1px dashed #bbb; padding:6px; margin:6px 0; border-radius:8px;">
+        Drag tasks here to move into <b>${folder.name}</b>
+      </div>
+      <div class="bubble-list" data-folder-body="${folder.id}">
+        ${tasks.map(t => card(t, listType)).join("") || `<div class="small muted">No tasks in this folder.</div>`}
+      </div>
+      <form class="mini-form" data-add-task-form data-list="${listType}" data-folder="${folder.id}" style="margin-top:6px">
+        <input type="text"  placeholder="Task name"  data-newtask="name"  required>
+        ${listType === "interval"
+          ? `<input type="number" min="1" placeholder="Interval (hrs)" data-newtask="interval" required>`
+          : `<input type="text" placeholder="Condition / Notes" data-newtask="condition">`
+         }
+        <button type="submit">+ Add task to ${folder.name}</button>
+      </form>`;
+
+    return `
+      <details class="folder block" data-folder-id="${folder.id}" open>
+        ${header}
+        ${body}
+      </details>`;
+  };
+
+  // build the two lists by folder
+  const intervalGrouped = byFolder(tasksInterval, "interval");
+  const asreqGrouped    = byFolder(tasksAsReq,    "asreq");
+
+  // main shell (keeps IDs so existing listeners still bind)
   return `
   <div class="container">
     <div class="block" style="grid-column: 1 / -1">
       <h3>Maintenance Settings</h3>
+
+      <div class="mini-form" style="display:flex;gap:8px;align-items:center; margin-bottom:8px">
+        <button id="addFolderBtn" title="Add a category (folder)">+ Add Category</button>
+        <span class="small muted">Folders are dropdowns; drag tasks into them. Bold header denotes a folder.</span>
+      </div>
 
       <div class="add-forms" style="margin-bottom:8px">
         <form id="addIntervalForm" class="mini-form">
@@ -961,11 +1029,15 @@ function viewSettings(){
         </form>
       </div>
 
-      <h4>By Interval (bubble cards)</h4>
-      <div id="intervalList" class="bubble-list">${intervalCards}</div>
+      <h4>By Interval (folders)</h4>
+      <div id="intervalList" class="folder-list" data-dnd-scope="interval">
+        ${intervalGrouped}
+      </div>
 
-      <h4 style="margin-top:16px;">As Required (bubble cards)</h4>
-      <div id="asreqList" class="bubble-list">${asreqCards}</div>
+      <h4 style="margin-top:16px;">As Required (folders)</h4>
+      <div id="asreqList" class="folder-list" data-dnd-scope="asreq">
+        ${asreqGrouped}
+      </div>
 
       <div style="margin-top:10px;">
         <button id="saveTasksBtn">Save All</button>
@@ -973,6 +1045,7 @@ function viewSettings(){
     </div>
   </div>`;
 }
+
 
 function viewCosts(){
   return `
