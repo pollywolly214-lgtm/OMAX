@@ -1259,26 +1259,69 @@ function nav(){
 }
 
 function route(){
-  const content = document.getElementById("content"); if (!content) return;
-  if (!document.getElementById("topNav")) {
-    const wrapper = document.createElement("div");
-    wrapper.id = "topNav";
-    wrapper.innerHTML = nav();
-    content.parentElement?.insertBefore(wrapper, content);
-    document.getElementById("topNav").addEventListener("click",(e)=>{
-      const btn = e.target.closest("[data-go]"); if (!btn) return;
-      location.hash = btn.getAttribute("data-go");
+  // Ensure a content root exists (defensive in case index.html missed it)
+  let content = document.getElementById("content");
+  if (!content) {
+    content = document.createElement("div");
+    content.id = "content";
+    document.body.appendChild(content);
+  }
+
+  // Ensure the top nav exists exactly once and wire its click handler
+  let topNav = document.getElementById("topNav");
+  if (!topNav) {
+    topNav = document.createElement("div");
+    topNav.id = "topNav";
+    topNav.innerHTML = nav();
+
+    // Prefer placing nav just before #content; fall back to prepend to body
+    if (content.parentElement) {
+      content.parentElement.insertBefore(topNav, content);
+    } else {
+      document.body.insertBefore(topNav, document.body.firstChild);
+    }
+
+    // Delegate clicks for all [data-go] targets
+    topNav.addEventListener("click", (e)=>{
+      const btn = e.target.closest("[data-go]");
+      if (!btn) return;
+      const target = btn.getAttribute("data-go") || "#/";
+      if (location.hash !== target) {
+        location.hash = target;   // triggers hashchange
+      } else {
+        // If hash is unchanged (e.g., clicking current tab), render immediately
+        route();
+      }
     });
   }
 
+  // Update active state on nav buttons
   const hash = location.hash || "#/";
-  if (!FB.ready){ renderSignedOut(); return; }
-  if (hash.startsWith("#/settings")) renderSettings();
-  else if (hash.startsWith("#/jobs")) renderJobs();
-  else if (hash.startsWith("#/costs")) renderCosts();
-  else if (hash.startsWith("#/inventory")) renderInventory();
-  else renderDashboard();
+  $$("#topNav [data-go]").forEach(el => {
+    if (el.getAttribute("data-go") === hash) el.classList.add("active");
+    else el.classList.remove("active");
+  });
+
+  // If not signed in, show the signed-out view but keep nav responsive
+  if (!FB.ready) {
+    renderSignedOut();
+    return;
+  }
+
+  // Render by route
+  if (hash.startsWith("#/settings")) {
+    renderSettings();
+  } else if (hash.startsWith("#/jobs")) {
+    renderJobs();
+  } else if (hash.startsWith("#/costs")) {
+    renderCosts();
+  } else if (hash.startsWith("#/inventory")) {
+    renderInventory();
+  } else {
+    renderDashboard();
+  }
 }
+
 
 window.addEventListener("hashchange", route);
 window.addEventListener("load", ()=>{ initFirebase(); route(); });
