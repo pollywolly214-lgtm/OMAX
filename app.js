@@ -1259,7 +1259,7 @@ function nav(){
 }
 
 function route(){
-  // Ensure a content root exists (defensive in case index.html missed it)
+  // Ensure a content root exists
   let content = document.getElementById("content");
   if (!content) {
     content = document.createElement("div");
@@ -1267,61 +1267,93 @@ function route(){
     document.body.appendChild(content);
   }
 
-  // Ensure the top nav exists exactly once and wire its click handler
+  // --- Wire header <nav> anchors to the router (one-time) ---
+  // index.html provides: <a href="#dashboard">, <a href="#settings">, etc.
+  // We normalize those to "#/..." so both styles are supported.
+  const headerNav = document.querySelector("header .nav");
+  if (headerNav && !headerNav.__wired) {
+    headerNav.addEventListener("click", (e)=>{
+      const a = e.target.closest("a[href^='#']");
+      if (!a) return;
+      const href = a.getAttribute("href") || "#dashboard";
+      // Normalize: "#dashboard" -> "#/"; "#settings" -> "#/settings"; etc.
+      const norm = normalizeHash(href);
+      if (location.hash !== norm) {
+        e.preventDefault();
+        location.hash = norm;       // will retrigger route()
+      } else {
+        // Same tab clicked: force re-render
+        e.preventDefault();
+        renderByHash(norm);
+      }
+    });
+    headerNav.__wired = true;
+  }
+
+  // --- Also ensure our injected topNav (buttons) works if present ---
   let topNav = document.getElementById("topNav");
-  if (!topNav) {
-    topNav = document.createElement("div");
-    topNav.id = "topNav";
-    topNav.innerHTML = nav();
-
-    // Prefer placing nav just before #content; fall back to prepend to body
-    if (content.parentElement) {
-      content.parentElement.insertBefore(topNav, content);
-    } else {
-      document.body.insertBefore(topNav, document.body.firstChild);
-    }
-
-    // Delegate clicks for all [data-go] targets
+  if (topNav && !topNav.__wired) {
     topNav.addEventListener("click", (e)=>{
       const btn = e.target.closest("[data-go]");
       if (!btn) return;
-      const target = btn.getAttribute("data-go") || "#/";
+      const target = normalizeHash(btn.getAttribute("data-go") || "#/");
       if (location.hash !== target) {
-        location.hash = target;   // triggers hashchange
+        location.hash = target;
       } else {
-        // If hash is unchanged (e.g., clicking current tab), render immediately
-        route();
+        renderByHash(target);
       }
     });
+    topNav.__wired = true;
   }
 
-  // Update active state on nav buttons
-  const hash = location.hash || "#/";
-  $$("#topNav [data-go]").forEach(el => {
-    if (el.getAttribute("data-go") === hash) el.classList.add("active");
-    else el.classList.remove("active");
-  });
-
-  // If not signed in, show the signed-out view but keep nav responsive
+  // --- Signed-out early view keeps nav responsive ---
   if (!FB.ready) {
-    renderSignedOut();
+    renderSignedOut(); // shows "Please sign in..." but header tabs still clickable
+    setActiveTabs(normalizeHash(location.hash || "#/"));
     return;
   }
 
-  // Render by route
-  if (hash.startsWith("#/settings")) {
-    renderSettings();
-  } else if (hash.startsWith("#/jobs")) {
-    renderJobs();
-  } else if (hash.startsWith("#/costs")) {
-    renderCosts();
-  } else if (hash.startsWith("#/inventory")) {
-    renderInventory();
-  } else {
-    renderDashboard();
+  // --- Render by normalized hash ---
+  const normHash = normalizeHash(location.hash || "#/");
+  renderByHash(normHash);
+  setActiveTabs(normHash);
+
+  // ---- Helpers (scoped to route) ----
+  function normalizeHash(h){
+    // Accept "#dashboard" | "#/dashboard" | "#/" | "#settings" | "#/settings" | "#jobs" | "#/jobs" | "#costs" | "#inventory"
+    const raw = (h || "#/").toLowerCase();
+    if (raw === "#dashboard" || raw === "#/dashboard" || raw === "#/") return "#/";
+    if (raw === "#settings"  || raw === "#/settings")  return "#/settings";
+    if (raw === "#jobs"      || raw === "#/jobs")      return "#/jobs";
+    if (raw === "#costs"     || raw === "#/costs")     return "#/costs";
+    if (raw === "#inventory" || raw === "#/inventory") return "#/inventory";
+    // Fallback to dashboard
+    return "#/";
+  }
+
+  function setActiveTabs(norm){
+    // Header <nav> anchors
+    document.querySelectorAll("header .nav a").forEach(a=>{
+      const want = normalizeHash(a.getAttribute("href") || "");
+      if (want === norm) a.classList.add("active");
+      else a.classList.remove("active");
+    });
+    // Injected button nav (if present)
+    document.querySelectorAll("#topNav [data-go]").forEach(btn=>{
+      const want = normalizeHash(btn.getAttribute("data-go") || "");
+      if (want === norm) btn.classList.add("active");
+      else btn.classList.remove("active");
+    });
+  }
+
+  function renderByHash(norm){
+    if (norm === "#/settings")      { renderSettings();   return; }
+    if (norm === "#/jobs")          { renderJobs();       return; }
+    if (norm === "#/costs")         { renderCosts();      return; }
+    if (norm === "#/inventory")     { renderInventory();  return; }
+    /* default */                     renderDashboard();
   }
 }
-
 
 window.addEventListener("hashchange", route);
 window.addEventListener("load", ()=>{ initFirebase(); route(); });
