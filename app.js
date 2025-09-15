@@ -1044,58 +1044,163 @@ function openSettingsAndReveal(taskId){
 }
 
 function renderSettings(){
-  const content = document.getElementById("content"); if (!content) return;
+  const content = document.getElementById("content"); 
+  if (!content) return;
+
+  // Render the standard Settings UI
   content.innerHTML = viewSettings();
 
-  // Interval list wiring
+  // ---- Inject the Settings search UI (once) ----
+  const block = content.querySelector(".block");
+  if (block && !document.getElementById("settingsSearchInput")){
+    const wrap = document.createElement("div");
+    wrap.className = "settings-search";
+    wrap.innerHTML = `
+      <input id="settingsSearchInput" type="search" 
+             placeholder="Search items, PN, links, notes… (min 2 chars)" 
+             autocomplete="off" />
+      <div id="settingsSearchResults" class="search-results"></div>
+    `;
+    const addForms = block.querySelector(".add-forms");
+    block.insertBefore(wrap, addForms || block.firstChild);
+  }
+
+  // ---- Wire search behavior (idempotent) ----
+  const input   = document.getElementById("settingsSearchInput");
+  const results = document.getElementById("settingsSearchResults");
+
+  function buildIndex(){
+    const toText = v => (v == null ? "" : String(v));
+    const items = [];
+
+    (Array.isArray(tasksInterval) ? tasksInterval : []).forEach(t=>{
+      items.push({
+        id: t.id,
+        title: t.name || "",
+        type: "interval",
+        meta: [ (t.interval ? `${t.interval} hrs` : null), (t.pn || null) ].filter(Boolean),
+        q: [t.name, t.pn, t.manualLink, t.storeLink].map(toText).join(" ").toLowerCase()
+      });
+    });
+    (Array.isArray(tasksAsReq) ? tasksAsReq : []).forEach(t=>{
+      items.push({
+        id: t.id,
+        title: t.name || "",
+        type: "asreq",
+        meta: [ (t.condition || "As required"), (t.pn || null) ].filter(Boolean),
+        q: [t.name, t.condition, t.pn, t.manualLink, t.storeLink].map(toText).join(" ").toLowerCase()
+      });
+    });
+    return items;
+  }
+
+  function renderResults(list){
+    if (!results) return;
+    if (!list.length){ results.style.display = "none"; results.innerHTML = ""; return; }
+    results.style.display = "block";
+    results.innerHTML = list.map(it => `
+      <div class="search-item" data-id="${it.id}">
+        <div class="si-title">${it.title}</div>
+        <div class="si-meta">
+          <span class="badge">${it.type === "interval" ? "Interval" : "As required"}</span>
+          ${it.meta.map(m => `<span class="muted">${m}</span>`).join("")}
+        </div>
+      </div>
+    `).join("");
+  }
+
+  let index = buildIndex();
+  function runSearch(q){
+    const s = (q || "").toLowerCase().trim();
+    if (s.length < 2){ renderResults([]); return; }
+    const terms = s.split(/\s+/).filter(Boolean);
+    const scored = index.map(it=>{
+      let score = 0;
+      for (const term of terms){
+        if (it.q.includes(term)) score += 1;
+        if (it.title.toLowerCase().includes(term)) score += 2;
+      }
+      return { it, score };
+    }).filter(x => x.score > 0)
+      .sort((a,b) => b.score - a.score)
+      .slice(0, 20)
+      .map(x => x.it);
+
+    renderResults(scored);
+  }
+
+  if (input && !input.__wired){
+    input.__wired = true;
+    input.addEventListener("input", () => runSearch(input.value));
+    input.addEventListener("focus", () => { index = buildIndex(); });
+  }
+  if (results && !results.__wired){
+    results.__wired = true;
+    results.addEventListener("click", (e)=>{
+      const item = e.target.closest(".search-item");
+      if (!item) return;
+      const id = item.getAttribute("data-id");
+      if (id && typeof openSettingsAndReveal === "function"){
+        openSettingsAndReveal(id); // opens the details and scrolls to it
+      }
+      results.style.display = "none";
+      if (input) input.value = "";
+    });
+  }
+
+  // ---- Existing wiring: Interval list ----
   document.getElementById("intervalList")?.addEventListener("input",(e)=>{
     const input = e.target;
-    const id = input.getAttribute("data-id");
+    const id  = input.getAttribute("data-id");
     const key = input.getAttribute("data-k");
     const t = tasksInterval.find(x=>x.id===id); if (!t) return;
     let val = input.value;
-    if (key === "interval" || key === "sinceBase" || key==="price"){ val = Number(val); if (!isFinite(val)) val = null; }
+    if (key === "interval" || key === "sinceBase" || key === "price"){
+      val = Number(val); if (!isFinite(val)) val = null;
+    }
     t[key] = val;
     saveCloudDebounced();
   });
   document.getElementById("intervalList")?.addEventListener("click",(e)=>{
-    const rm = e.target.closest("[data-remove]");
+    const rm   = e.target.closest("[data-remove]");
     const comp = e.target.closest("[data-complete]");
     if (rm){
       const id = rm.getAttribute("data-remove");
-      tasksInterval = tasksInterval.filter(x=>x.id!==id); saveCloudDebounced(); toast("Removed"); renderSettings();
+      tasksInterval = tasksInterval.filter(x=>x.id!==id);
+      saveCloudDebounced(); toast("Removed"); renderSettings();
     }
     if (comp){
-      const id = comp.getAttribute("data-complete"); completeTask(id);
+      const id = comp.getAttribute("data-complete");
+      completeTask(id);
     }
   });
 
-  // As required wiring
+  // ---- Existing wiring: As-required list ----
   document.getElementById("asreqList")?.addEventListener("input",(e)=>{
     const input = e.target;
-    const id = input.getAttribute("data-id");
+    const id  = input.getAttribute("data-id");
     const key = input.getAttribute("data-k");
     const t = tasksAsReq.find(x=>x.id===id); if (!t) return;
     t[key] = input.value;
-    if (key==="price") t[key] = Number(t[key]) || null;
+    if (key === "price") t[key] = Number(t[key]) || null;
     saveCloudDebounced();
   });
   document.getElementById("asreqList")?.addEventListener("click",(e)=>{
     const rm = e.target.closest("[data-remove]");
     if (rm){
-      const id = rm.getAttribute("data-remove");
+      const id   = rm.getAttribute("data-remove");
       const from = rm.getAttribute("data-from");
-      if (from==="asreq") tasksAsReq = tasksAsReq.filter(x=>x.id!==id);
+      if (from === "asreq") tasksAsReq = tasksAsReq.filter(x=>x.id!==id);
       saveCloudDebounced(); toast("Removed"); renderSettings();
     }
   });
 
-  // Add forms
+  // ---- Existing wiring: Add forms ----
   document.getElementById("addIntervalForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = document.getElementById("ai_name").value.trim();
     const interval = Number(document.getElementById("ai_interval").value);
-    if (!name || !isFinite(interval) || interval<=0){ toast("Enter valid name + interval"); return; }
+    if (!name || !isFinite(interval) || interval <= 0){ toast("Enter valid name + interval"); return; }
     tasksInterval.push({ id: genId(name), name, interval, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" });
     saveCloudDebounced(); renderSettings();
   });
@@ -1107,8 +1212,6 @@ function renderSettings(){
     tasksAsReq.push({ id: genId(name), name, condition: cond||"As required", manualLink:"", storeLink:"" });
     saveCloudDebounced(); renderSettings();
   });
-
-  document.getElementById("saveTasksBtn")?.addEventListener("click",()=>{ saveCloudDebounced(); toast("Saved"); });
 }
 
 function renderCosts(){
