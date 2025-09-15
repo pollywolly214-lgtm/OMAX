@@ -1785,7 +1785,7 @@ function renderSettings(){
     tasksAsReq.push({ id: genId(name), name, condition: cond||"As required", manualLink:"", storeLink:"" });
     saveCloudDebounced(); renderSettings();
   });
-}
+
 
 function renderCosts(){
   const content = document.getElementById("content"); if (!content) return;
