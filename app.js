@@ -851,8 +851,6 @@ function taskDetailsAsReq(task){
   </details>`;
 }
 
-unction viewSetting
-
 function viewCosts(){
   return `
   <div class="container">
