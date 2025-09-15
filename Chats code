@@ -1,5 +1,3 @@
-from textwrap import dedent
-
 app_js = dedent(r"""
 /* =========================================================
    OMAX 1530 Maintenance Tracker — v7.1 (Regenerated)
