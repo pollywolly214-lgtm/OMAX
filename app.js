@@ -299,6 +299,8 @@ function nextDue(task){
  * gainLoss   = deltaHours * JOB_RATE_PER_HOUR
  */
 function computeJobEfficiency(job){
+  // Link job progress to (1) manual logs, else (2) machine total hours, else (3) 8 hr/day.
+  // Keeps expected schedule at DAILY_HOURS baseline.
   const planned = (job && job.estimateHours > 0) ? Number(job.estimateHours) : 0;
   const result = {
     rate: JOB_RATE_PER_HOUR,
@@ -308,6 +310,8 @@ function computeJobEfficiency(job){
     gainLoss: 0,
     daysElapsed: 0,
     totalDays: 0,
+    usedManual: false,
+    usedMachineTotals: false,
     usedAutoFromManual: false,
     usedFromStartAuto: false,
   };
@@ -320,31 +324,98 @@ function computeJobEfficiency(job){
 
   result.totalDays   = Math.max(0, Math.floor((due - start) / (24*60*60*1000)) + 1);
   result.daysElapsed = (asOf < start) ? 0 : Math.max(0, Math.floor((asOf - start) / (24*60*60*1000)) + 1);
-
   result.expectedHours = Math.min(planned, result.daysElapsed * DAILY_HOURS);
 
+  // --- helpers (scoped) ---
+  function getHoursAt(dateISO){
+    // Machine total hours at or before dateISO (00:00).
+    // If date is today-or-later and RENDER_TOTAL is set (unsaved input), prefer it.
+    try{
+      const d0 = new Date(dateISO + "T00:00:00");
+      const todayISO = new Date().toISOString().slice(0,10);
+      if (RENDER_TOTAL != null){
+        const t0 = new Date(todayISO + "T00:00:00");
+        if (d0 >= t0) return Number(RENDER_TOTAL);
+      }
+      if (!Array.isArray(totalHistory) || !totalHistory.length) return null;
+      let best = null;
+      for (const h of totalHistory){
+        const d = new Date(h.dateISO + "T00:00:00");
+        if (d <= d0){ if (best==null || d > new Date(best.dateISO+"T00:00:00")) best = h; }
+      }
+      return best ? Number(best.hours) : null;
+    }catch{ return null; }
+  }
+  const nowH = (RENDER_TOTAL != null ? Number(RENDER_TOTAL) : currentTotal());
+
+  // --- actual hours logic (priority: manual -> machine totals -> auto) ---
   let actual = 0;
   const hasManual = Array.isArray(job.manualLogs) && job.manualLogs.length > 0;
   if (hasManual){
+    // Use the latest manual point on/before asOf as baseline.
     const logs = job.manualLogs
       .filter(m => new Date(`${m.dateISO}T00:00:00`) <= asOf)
       .sort((a,b)=> new Date(a.dateISO) - new Date(b.dateISO));
     if (logs.length > 0){
       const last = logs[logs.length-1];
-      const lastDate = new Date(`${last.dateISO}T00:00:00`); lastDate.setHours(0,0,0,0);
+      const lastDate = new Date(`${last.dateISO}T00:00:00`);
       actual = Math.max(0, Math.min(planned, Number(last.completedHours)||0));
-      if (asOf > lastDate){
+      result.usedManual = true;
+
+      if (nowH != null){
+        // Prefer real machine time since last manual entry.
+        const machineAtLast = getHoursAt(last.dateISO);
+        if (machineAtLast != null && nowH > machineAtLast){
+          const add = Math.max(0, nowH - machineAtLast);
+          actual = Math.min(planned, actual + add);
+          result.usedMachineTotals = true;
+        }else{
+          // Fallback: auto-progression at DAILY_HOURS per day
+          const daysForward = Math.max(0, Math.floor((asOf - lastDate)/(24*60*60*1000)));
+          if (daysForward > 0){
+            actual = Math.min(planned, actual + daysForward * DAILY_HOURS);
+            result.usedAutoFromManual = true;
+          }
+        }
+      }else{
+        // No current machine reading → fallback to days since last manual
         const daysForward = Math.max(0, Math.floor((asOf - lastDate)/(24*60*60*1000)));
-        actual += daysForward * DAILY_HOURS;
-        result.usedAutoFromManual = true;
+        if (daysForward > 0){
+          actual = Math.min(planned, actual + daysForward * DAILY_HOURS);
+          result.usedAutoFromManual = true;
+        }
+      }
+    }else{
+      // Manual logs exist but none before asOf; treat like "no manual"
+      if (nowH != null){
+        const startH = getHoursAt(job.startISO);
+        if (startH != null && nowH >= startH){
+          actual = Math.min(planned, Math.max(0, nowH - startH));
+          result.usedMachineTotals = true;
+        }else{
+          result.usedFromStartAuto = true;
+          actual = Math.min(planned, result.daysElapsed * DAILY_HOURS);
+        }
+      }else{
+        result.usedFromStartAuto = true;
+        actual = Math.min(planned, result.daysElapsed * DAILY_HOURS);
+      }
+    }
+  }else{
+    // No manual logs at all
+    if (nowH != null){
+      const startH = getHoursAt(job.startISO);
+      if (startH != null && nowH >= startH){
+        actual = Math.min(planned, Math.max(0, nowH - startH));
+        result.usedMachineTotals = true;
+      }else{
+        result.usedFromStartAuto = true;
+        actual = Math.min(planned, result.daysElapsed * DAILY_HOURS);
       }
     }else{
       result.usedFromStartAuto = true;
       actual = Math.min(planned, result.daysElapsed * DAILY_HOURS);
     }
-  }else{
-    result.usedFromStartAuto = true;
-    actual = Math.min(planned, result.daysElapsed * DAILY_HOURS);
   }
 
   result.actualHours = Math.min(planned, actual);
