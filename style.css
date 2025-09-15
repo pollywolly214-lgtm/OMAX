@@ -1,3 +1,23 @@
+/* Pump card */
+.pump-card summary { display:flex; align-items:center; gap:8px; }
+.pump-grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top:8px; }
+.pump-col { background:#fff; border:1px solid #dde3ee; border-radius:10px; padding:12px; }
+.pump-stats { margin-top:6px; display:grid; gap:4px; }
+.pump-stats .lbl { color:#666; display:inline-block; width:80px; }
+
+/* colored chip used in summary */
+.chip{
+  display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; line-height:18px;
+  border:1px solid transparent; background:#eef1f7; color:#333;
+}
+.chip.green{ background:#e5f6eb; color:#2e7d32; border-color:#ccebd6; }
+.chip.green-better{ background:#dff8e9; color:#1b5e20; border-color:#bce9d2; font-weight:600; }
+.chip.yellow{ background:#fff7d1; color:#8a6d00; border-color:#f2e4a3; }
+.chip.orange{ background:#ffe6d6; color:#a14d00; border-color:#ffd0b5; }
+.chip.red{ background:#ffe1e1; color:#c62828; border-color:#ffc9c9; }
+.chip.gray{ background:#f1f3f6; color:#6b7280; border-color:#e4e7ec; }
+
+
 /* Calendar chip/bar are fully interactive */
 .cal-task, .cal-job {
   position: relative;
