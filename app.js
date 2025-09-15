@@ -1035,6 +1035,22 @@ function renderDashboard(){
   renderPumpWidget();
 }
 
+function openJobsEditor(jobId){
+  // Navigate to the Jobs page, then open the specified job in edit mode.
+  // We wait briefly so the router can render the page before we toggle edit.
+  location.hash = "#/jobs";
+  setTimeout(()=>{
+    // Mark this job as "editing" so viewJobs() renders the edit row
+    editingJobs.add(String(jobId));
+    // Re-render Jobs with that state applied
+    if (typeof renderJobs === "function") renderJobs();
+    // Scroll the row into view for a clean handoff from the bubble
+    const row = document.querySelector(`tr[data-job-row="${jobId}"]`);
+    if (row) row.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, 60);
+}
+
+
 function openSettingsAndReveal(taskId){
   location.hash = "#/settings";
   setTimeout(()=>{
