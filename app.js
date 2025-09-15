@@ -1295,163 +1295,218 @@ function openSettingsAndReveal(taskId){
 }
 
 function renderSettings(){
-  const content = document.getElementById("content"); 
+  const content = document.getElementById("content");
   if (!content) return;
 
-  // Render the Settings UI (menus + folders + items shown as dropdowns)
-  content.innerHTML = viewSettings();
+  // ---------- Styles so categories stand out (bold/title), items normal ----------
+  if (!document.getElementById("settingsExplorerCSS")){
+    const st = document.createElement("style");
+    st.id = "settingsExplorerCSS";
+    st.textContent = `
+      /* folder headers */
+      details.folder > summary.folder-title{
+        font-weight: 800;
+        font-size: 1.05rem;
+        letter-spacing: .2px;
+        display:flex; align-items:center; gap:10px;
+      }
+      /* items (maintenance entries) */
+      details.item > summary{
+        font-weight: 500;
+        font-size: .98rem;
+        display:flex; align-items:center; gap:8px;
+      }
+      .dz{ border:1px dashed #bbb; border-radius:8px; padding:6px; margin:6px 0; color:#666; }
+      .dz.dragover{ background: rgba(0,0,0,.05); outline:2px dashed #888; }
+      details.dragging{ opacity:.6 }
+      .hilite{ outline:2px solid #6aa84f; border-radius:6px }
+      .muted{ color:#666 }
+      .small{ font-size:.85rem }
+      .hidden{ display:none !important }
+      .tree-toolbar{ display:flex; gap:8px; align-items:center; margin-bottom:10px }
+    `;
+    document.head.appendChild(st);
+  }
 
-  /* ---------------- Search (idempotent) ---------------- */
-  // If your template includes the small search bar above the forms, wire it.
-  (function wireSearch(){
-    const input   = document.getElementById("settingsSearchInput");
-    const results = document.getElementById("settingsSearchResults");
-    if (!input || !results) return;
-
-    const toText = v => (v == null ? "" : String(v));
-    function buildIndex(){
-      const items = [];
-      (Array.isArray(tasksInterval)?tasksInterval:[]).forEach(t=>{
-        items.push({ id:t.id, title:t.name||"", type:"interval",
-                     meta:[ t.interval?`${t.interval} hrs`:null, t.pn||null ].filter(Boolean),
-                     q:[t.name,t.pn,t.manualLink,t.storeLink].map(toText).join(" ").toLowerCase() });
-      });
-      (Array.isArray(tasksAsReq)?tasksAsReq:[]).forEach(t=>{
-        items.push({ id:t.id, title:t.name||"", type:"asreq",
-                     meta:[ t.condition||"As required", t.pn||null ].filter(Boolean),
-                     q:[t.name,t.condition,t.pn,t.manualLink,t.storeLink].map(toText).join(" ").toLowerCase() });
-      });
-      return items;
-    }
-    function renderResults(list){
-      if (!list.length){ results.style.display="none"; results.innerHTML=""; return; }
-      results.style.display="block";
-      results.innerHTML = list.map(it=>`
-        <div class="search-item" data-id="${it.id}">
-          <div class="si-title">${it.title}</div>
-          <div class="si-meta">
-            <span class="badge">${it.type==="interval"?"Interval":"As required"}</span>
-            ${it.meta.map(m=>`<span class="muted">${m}</span>`).join("")}
-          </div>
-        </div>`).join("");
-    }
-    const idx = buildIndex();
-    input.addEventListener("input", debounce(()=>{
-      const q = input.value.trim().toLowerCase();
-      if (q.length < 2){ renderResults([]); return; }
-      renderResults(idx.filter(it=>it.q.includes(q)));
-    }, 150));
-    results.addEventListener("click", (e)=>{
-      const row = e.target.closest(".search-item"); if (!row) return;
-      const id = row.getAttribute("data-id");
-      const el = content.querySelector(`[data-task-id="${id}"]`);
-      if (el){ el.open = true; el.scrollIntoView({behavior:"smooth", block:"center"}); }
-    });
-  })();
-
-  /* ------------- Inline edit + actions (items) ---------- */
-  // Interval list edits
-  document.getElementById("intervalList")?.addEventListener("input",(e)=>{
-    const input = e.target;
-    const id = input.getAttribute("data-id");
-    const key = input.getAttribute("data-k");
-    const t = tasksInterval.find(x=>x.id===id); if (!t) return;
-    let val = input.value;
-    if (key==="interval" || key==="sinceBase" || key==="price"){ val = Number(val); if (!isFinite(val)) val = null; }
-    t[key] = val;
-    saveCloudDebounced();
-  });
-  document.getElementById("intervalList")?.addEventListener("click",(e)=>{
-    const rm = e.target.closest("[data-remove]");
-    const comp = e.target.closest("[data-complete]");
-    if (rm){
-      const id = rm.getAttribute("data-remove");
-      tasksInterval = tasksInterval.filter(x=>x.id!==id);
-      saveCloudDebounced(); toast("Removed"); renderSettings();
-    }
-    if (comp){
-      completeTask(comp.getAttribute("data-complete"));
-    }
-  });
-
-  // As-required list edits
-  document.getElementById("asreqList")?.addEventListener("input",(e)=>{
-    const input = e.target;
-    const id = input.getAttribute("data-id");
-    const key = input.getAttribute("data-k");
-    const t = tasksAsReq.find(x=>x.id===id); if (!t) return;
-    t[key] = input.value;
-    if (key==="price") t[key] = Number(t[key]) || null;
-    saveCloudDebounced();
-  });
-  document.getElementById("asreqList")?.addEventListener("click",(e)=>{
-    const rm = e.target.closest("[data-remove]");
-    if (rm){
-      const id   = rm.getAttribute("data-remove");
-      const from = rm.getAttribute("data-from");
-      if (from==="asreq") tasksAsReq = tasksAsReq.filter(x=>x.id!==id);
-      saveCloudDebounced(); toast("Removed"); renderSettings();
-    }
-  });
-
-  /* ------------- Add task (supports either layout) ------ */
-  // New “single Add Task” form (if present)
-  document.getElementById("addTaskForm")?.addEventListener("submit",(e)=>{
-    e.preventDefault();
-    const name = (document.getElementById("at_name")?.value||"").trim();
-    const mode = (document.getElementById("at_mode")?.value||"interval"); // "interval" | "asreq"
-    if (!name){ toast("Enter task name"); return; }
-    if (mode === "interval"){
-      let hours = Number(document.getElementById("at_interval")?.value);
-      if (!isFinite(hours) || hours<=0){ hours = DAILY_HOURS; }
-      tasksInterval.push({ id: genId(name), name, interval: hours, sinceBase: null, anchorTotal: null, manualLink:"", storeLink:"" });
-    }else{
-      const cond = (document.getElementById("at_condition")?.value||"As required").trim();
-      tasksAsReq.push({ id: genId(name), name, condition: cond, manualLink:"", storeLink:"" });
-    }
-    saveCloudDebounced(); renderSettings();
-  });
-  // Backward-compatible: if your template still has two separate add forms
-  document.getElementById("addIntervalForm")?.addEventListener("submit",(e)=>{
-    e.preventDefault();
-    const name = document.getElementById("ai_name").value.trim();
-    const interval = Number(document.getElementById("ai_interval").value);
-    if (!name || !isFinite(interval) || interval<=0){ toast("Enter valid name + interval"); return; }
-    tasksInterval.push({ id: genId(name), name, interval, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" });
-    saveCloudDebounced(); renderSettings();
-  });
-  document.getElementById("addAsReqForm")?.addEventListener("submit",(e)=>{
-    e.preventDefault();
-    const name = document.getElementById("ar_name").value.trim();
-    const cond = document.getElementById("ar_condition").value.trim();
-    if (!name){ toast("Enter name"); return; }
-    tasksAsReq.push({ id: genId(name), name, condition: cond||"As required", manualLink:"", storeLink:"" });
-    saveCloudDebounced(); renderSettings();
-  });
-
-  /* ---------------- Folder helpers/state ---------------- */
-  // Shared category tree. Persisted if your snapshot/adoptState include it.
+  // ---------- State ----------
+  // Categories (folders) are stored here; support nesting via "parent"
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
   for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
 
-  const byIdFolder = (fid)=> window.settingsFolders.find(f=>String(f.id)===String(fid));
+  // Both legacy lists still exist, but UI treats all as generic "files"
+  const allItems = [
+    ...(Array.isArray(tasksInterval) ? tasksInterval.map(t => ({...t, __type:"interval"})) : []),
+    ...(Array.isArray(tasksAsReq)    ? tasksAsReq.map(t => ({...t, __type:"asreq"}))       : []),
+  ];
+
+  // ---------- Helper fns ----------
+  const byIdFolder = (id)=> window.settingsFolders.find(f => String(f.id)===String(id));
+  const kidsOf     = (parent)=> window.settingsFolders.filter(f => (f.parent||null)===(parent||null));
+  const itemsIn    = (folderId)=> allItems.filter(t => (t.cat||null)===(folderId||null));
   const isAncestor = (maybeAncestor, child)=>{
     if (!maybeAncestor || !child) return false;
-    let cur = child.parent||null;
-    while (cur){ if (cur === maybeAncestor.id) return true; cur = (byIdFolder(cur)||{}).parent||null; }
+    let cur = child.parent || null;
+    while (cur){
+      if (cur === maybeAncestor.id) return true;
+      const p = byIdFolder(cur); cur = p ? p.parent : null;
+    }
     return false;
   };
-  function saveAndRerender(){ saveCloudDebounced(); renderSettings(); }
+  const setNum  = (v)=> { const n = Number(v); return isFinite(n) ? n : null; };
+  const byIdItem = (id)=>{
+    const a = tasksInterval?.find(x=>String(x.id)===String(id));
+    if (a) return {ref:a, list:"interval"};
+    const b = tasksAsReq?.find(x=>String(x.id)===String(id));
+    if (b) return {ref:b, list:"asreq"};
+    return null;
+  };
 
-  /* ---------------- Folder CRUD buttons ----------------- */
-  // Add root folder
+  // Chip for due (reuse your existing nextDue)
+  const chipFor = (t)=>{
+    const nd = nextDue(t);
+    if (!nd) return `<span class="chip">—</span>`;
+    const d = nd.days;
+    let cls = "green"; if (d<=1) cls="red"; else if (d<=3) cls="orange"; else if (d<=7) cls="yellow";
+    return `<span class="chip ${cls}">${d}d → ${nd.due.toDateString()}</span>`;
+  };
+
+  // Sub-part inline editor row
+  const partRow = (p, parentId, listType) => `
+    <div class="mini-form" data-part-row data-parent="${parentId}" data-list="${listType}" data-part-id="${p.pid}">
+      <input type="text" placeholder="Part name" value="${p.name||""}"
+             data-part-k="name" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="text" placeholder="PN" value="${p.pn||""}"
+             data-part-k="pn" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="number" step="0.01" min="0" placeholder="Price" value="${p.price!=null?p.price:""}"
+             data-part-k="price" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="url" placeholder="Link" value="${p.link||""}"
+             data-part-k="link" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="text" placeholder="Note" value="${p.note||""}"
+             data-part-k="note" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <button class="danger" type="button"
+              data-part-remove="${p.pid}" data-parent="${parentId}" data-list="${listType}">Remove</button>
+    </div>`;
+
+  // One ITEM card (not a folder). Keeps data attributes so other code continues to work.
+  const itemCard = (t) => {
+    const listType = t.__type; // "interval" | "asreq"
+    const nd = nextDue(t);
+    const lastServ = nd && nd.lastServicedAt != null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
+    const parts = Array.isArray(t.parts) ? t.parts : [];
+    return `
+    <details class="item block" draggable="true"
+             data-task-id="${t.id}" data-list="${listType}" data-cat="${t.cat||""}">
+      <summary>
+        <b>${t.name}</b>
+        ${listType === "interval" ? `<span class="chip">${t.interval}h</span>` : `<span class="chip">As req.</span>`}
+        ${listType === "interval" ? chipFor(t) : ""}
+      </summary>
+
+      <div class="mini-form" style="margin:8px 0 4px 0;">
+        <label>Name: <input type="text" data-k="name" data-id="${t.id}" data-list="${listType}" value="${t.name}"></label>
+
+        ${listType === "interval" ? `
+        <label>Interval (hrs): <input type="number" min="1" data-k="interval" data-id="${t.id}" data-list="interval" value="${t.interval}"></label>
+        <label>Baseline “since last” (hrs): <input type="number" min="0" data-k="sinceBase" data-id="${t.id}" data-list="interval" value="${t.sinceBase!=null?t.sinceBase:""}"></label>
+        <div class="small muted">When last serviced: ${lastServ}</div>
+        ` : `
+        <label>Condition/Notes: <input type="text" data-k="condition" data-id="${t.id}" data-list="asreq" value="${t.condition||""}" placeholder="e.g., when clogged / visual check"></label>
+        `}
+
+        <label>Manual link: <input type="url" data-k="manualLink" data-id="${t.id}" data-list="${listType}" value="${t.manualLink||""}" placeholder="PDF / guide URL"></label>
+        <label>Store link: <input type="url" data-k="storeLink" data-id="${t.id}" data-list="${listType}" value="${t.storeLink||""}" placeholder="Where to buy"></label>
+        <label>Part # (primary): <input type="text" data-k="pn" data-id="${t.id}" data-list="${listType}" value="${t.pn||""}"></label>
+        <label>Price (primary): <input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${listType}" value="${t.price!=null?t.price:""}"></label>
+
+        <div>
+          <button class="btn-complete" data-complete="${t.id}">Mark Completed Now</button>
+          <button class="danger" data-remove="${t.id}" data-from="${listType}">Remove</button>
+        </div>
+      </div>
+
+      <div class="block" style="background:#fff;margin-top:8px;">
+        <h4 style="margin:0 0 6px 0;">Sub-parts</h4>
+        <div class="small muted">Use for washers, mixing tube, etc. These are searchable.</div>
+        <div id="parts_${t.id}" data-part-list data-parent="${t.id}" data-list="${listType}">
+          ${parts.map(p => partRow(p, t.id, listType)).join("") || `<div class="small muted">No sub-parts yet.</div>`}
+        </div>
+        <form class="mini-form" data-part-add-form data-parent="${t.id}" data-list="${listType}" style="margin-top:6px">
+          <input type="text"  placeholder="Part name"  data-part-new="name"  required>
+          <input type="text"  placeholder="PN"         data-part-new="pn">
+          <input type="number" step="0.01" min="0" placeholder="Price" data-part-new="price">
+          <input type="url"   placeholder="Link"       data-part-new="link">
+          <input type="text"  placeholder="Note"       data-part-new="note">
+          <button type="submit">+ Add sub-part</button>
+        </form>
+      </div>
+    </details>`;
+  };
+
+  // Folder (CATEGORY) recursive block
+  const renderFolder = (folder) => {
+    const subFolders = kidsOf(folder.id).map(renderFolder).join("");
+    const itemsHtml  = itemsIn(folder.id).map(itemCard).join("") || `<div class="small muted">No items in this category.</div>`;
+    return `
+      <details class="folder block" data-folder-id="${folder.id}" open draggable="true">
+        <summary class="folder-title">
+          <span class="folder-name">${folder.name}</span>
+          <span style="flex:1"></span>
+          <button class="small" data-add-subfolder="${folder.id}">+ Sub-category</button>
+          <button class="small" data-rename-folder="${folder.id}">Rename</button>
+          <button class="danger small" data-remove-folder="${folder.id}">Remove</button>
+        </summary>
+
+        <div class="dz" data-drop-folder="${folder.id}">Drop items or categories here → <b>${folder.name}</b></div>
+
+        <div class="folder-children" data-folder-body="${folder.id}">
+          ${subFolders}
+          <div class="bubble-list">
+            ${itemsHtml}
+          </div>
+        </div>
+      </details>`;
+  };
+
+  // Build the full tree view
+  const rootItems   = itemsIn(null).map(itemCard).join("");
+  const rootFolders = kidsOf(null).map(renderFolder).join("");
+  const toolbar = `
+    <div class="tree-toolbar">
+      <button id="addFolderBtn">+ Add Category</button>
+      <span class="small muted">Drag items and categories anywhere. Categories can nest.</span>
+      <span style="flex:1"></span>
+      <button id="saveTasksBtn">Save</button>
+    </div>`;
+
+  content.innerHTML = `
+    <div class="container">
+      <div class="block" style="grid-column:1 / -1">
+        <h3>Maintenance Settings</h3>
+        ${toolbar}
+        <div id="treeList">
+          <div class="dz" data-drop-root="1">Drop here to move to the top level</div>
+          <div class="bubble-list">
+            ${rootItems || `<div class="small muted">No items at the top level.</div>`}
+          </div>
+          <div class="tree-folders">
+            ${rootFolders || `<div class="small muted">No categories yet. Click “Add Category”.</div>`}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // ---------- Wiring (Explorer-like) ----------
+  const getList = (type)=> type === "interval" ? tasksInterval : tasksAsReq;
+  const focusScroll = (el)=> el?.scrollIntoView({behavior:"smooth", block:"center"});
+
+  // Add / Rename / Remove Category (folder)
   document.getElementById("addFolderBtn")?.addEventListener("click", ()=>{
     const name = prompt("Category name:", "New Category");
     if (!name) return;
     window.settingsFolders.push({ id: genId(name), name, parent: null });
-    saveAndRerender();
+    saveCloudDebounced(); renderSettings();
   });
-  // Delegate: add sub-folder / rename / remove
   content.addEventListener("click",(e)=>{
     const sub = e.target.closest("[data-add-subfolder]");
     const ren = e.target.closest("[data-rename-folder]");
@@ -1461,134 +1516,32 @@ function renderSettings(){
       const name = prompt("Sub-category name:", "New Sub-category");
       if (!name) return;
       window.settingsFolders.push({ id: genId(name), name, parent: pid });
-      saveAndRerender();
+      saveCloudDebounced(); renderSettings();
     }
     if (ren){
       const id = ren.getAttribute("data-rename-folder");
       const f = byIdFolder(id); if (!f) return;
       const name = prompt("Rename category:", f.name||"");
       if (!name) return;
-      f.name = name; saveAndRerender();
+      f.name = name; saveCloudDebounced(); renderSettings();
     }
     if (del){
       const id = del.getAttribute("data-remove-folder");
-      // Prevent deleting if it has children or tasks inside
       const hasChildren = window.settingsFolders.some(f=>f.parent===id);
-      const hasInterval = tasksInterval.some(t=>(t.cat||null)===id);
-      const hasAsReq    = tasksAsReq.some(t=>(t.cat||null)===id);
-      if (hasChildren || hasInterval || hasAsReq){ alert("Folder not empty. Move contents out before deleting."); return; }
+      const hasItems    = allItems.some(t=>(t.cat||null)===id);
+      if (hasChildren || hasItems){ alert("Folder not empty. Move contents out first."); return; }
       window.settingsFolders = window.settingsFolders.filter(f=>f.id!==id);
-      saveAndRerender();
+      saveCloudDebounced(); renderSettings();
     }
   });
 
-  /* ---------------- Drag & Drop (Explorer-like) ---------- */
-  // We support dragging:
-  //  - individual tasks (details[data-task-id]) between menus and folders
-  //  - folders (details.folder[data-folder-id]) into other folders or to root
-  const DRAG = { type:null, id:null, from:null }; // type: "task" | "folder"; from: "interval" | "asreq" | null
+  // Inline edits on items (keep existing keys and data attributes)
+  content.addEventListener("input",(e)=>{
+    const el = e.target;
+    // item field edits
+    const id = el.getAttribute("data-id");
+    const list = el.getAttribute("data-list")
 
-  // Mark draggable items
-  content.querySelectorAll('details[data-task-id]').forEach(el => el.setAttribute('draggable','true'));
-  content.querySelectorAll('details.folder').forEach(el => el.setAttribute('draggable','true'));
-
-  content.addEventListener("dragstart",(e)=>{
-    const task = e.target.closest('details[data-task-id]');
-    const fold = e.target.closest('details.folder');
-    if (task){
-      DRAG.type = "task";
-      DRAG.id   = task.getAttribute("data-task-id");
-      DRAG.from = task.getAttribute("data-list");   // "interval" | "asreq"
-      e.dataTransfer.setData("text/plain", DRAG.id);
-      e.dataTransfer.effectAllowed = "move";
-    }else if (fold){
-      DRAG.type = "folder";
-      DRAG.id   = fold.getAttribute("data-folder-id");
-      DRAG.from = null;
-      e.dataTransfer.setData("text/plain", DRAG.id);
-      e.dataTransfer.effectAllowed = "move";
-    }
-  });
-  content.addEventListener("dragend", ()=>{ DRAG.type=null; DRAG.id=null; DRAG.from=null; });
-
-  // Allow drop on folder dropzones, folder bodies, and menu dropzones
-  const isDropTarget = (el)=> el && (el.hasAttribute("data-drop-folder") || el.hasAttribute("data-folder-body") || el.hasAttribute("data-drop-menu") || el.id==="intervalList" || el.id==="asreqList");
-  content.addEventListener("dragover",(e)=>{
-    if (isDropTarget(e.target.closest("[data-drop-folder],[data-folder-body],[data-drop-menu],#intervalList,#asreqList"))){
-      e.preventDefault(); e.dataTransfer.dropEffect = "move";
-    }
-  });
-
-  // Helpers to move tasks/folders
-  function moveTask(taskId, fromList, toList, folderId){
-    if (fromList === toList){
-      // Only reparent to a folder
-      const list = (toList==="interval") ? tasksInterval : tasksAsReq;
-      const t = list.find(x=>x.id===taskId); if (!t) return false;
-      t.cat = folderId || null;
-      return true;
-    }
-    // Cross-menu move (convert)
-    if (toList === "interval"){
-      // take from asreq → interval (ask for interval hours)
-      const idx = tasksAsReq.findIndex(x=>x.id===taskId);
-      if (idx < 0) return false;
-      const src = tasksAsReq[idx];
-      let hours = Number(prompt(`Moving "${src.name}" to Interval. Enter interval hours:`, String(DAILY_HOURS)));
-      if (!isFinite(hours) || hours<=0) hours = DAILY_HOURS;
-      const neo = { id: src.id, name: src.name, interval: hours, sinceBase:null, anchorTotal:null, manualLink:src.manualLink||"", storeLink:src.storeLink||"", pn:src.pn||"", price:src.price??null, cat: folderId||null };
-      tasksAsReq.splice(idx,1);
-      tasksInterval.push(neo);
-      return true;
-    }else{
-      // interval → asreq
-      const idx = tasksInterval.findIndex(x=>x.id===taskId);
-      if (idx < 0) return false;
-      const src = tasksInterval[idx];
-      const cond = prompt(`Moving "${src.name}" to As-required. Enter condition/notes:`, "As required") || "As required";
-      const neo = { id: src.id, name: src.name, condition: cond, manualLink:src.manualLink||"", storeLink:src.storeLink||"", pn:src.pn||"", price:src.price??null, cat: folderId||null };
-      tasksInterval.splice(idx,1);
-      tasksAsReq.push(neo);
-      return true;
-    }
-  }
-  function moveFolder(folderId, newParentId){
-    const f = byIdFolder(folderId); if (!f) return false;
-    if (folderId === newParentId) return false;
-    const parent = newParentId ? byIdFolder(newParentId) : null;
-    if (parent && isAncestor(f, parent)) return false; // prevent cycles
-    f.parent = newParentId || null;
-    return true;
-  }
-
-  content.addEventListener("drop",(e)=>{
-    const zone = e.target.closest("[data-drop-folder],[data-folder-body],[data-drop-menu],#intervalList,#asreqList");
-    if (!zone || !DRAG.type) return;
-    e.preventDefault();
-
-    // Where did we drop?
-    const toFolder = zone.getAttribute("data-drop-folder") || zone.getAttribute("data-folder-body") || null;
-    const toMenu   = zone.getAttribute("data-drop-menu") || (zone.id==="intervalList"?"interval" : (zone.id==="asreqList"?"asreq": null));
-
-    let changed = false;
-    if (DRAG.type === "task"){
-      // When dropping onto a folder body/dropzone, keep current menu unless a menu dropzone is also specified
-      const targetMenu = toMenu || DRAG.from; // allow explicit cross-menu via menu dropzone
-      changed = moveTask(DRAG.id, DRAG.from, targetMenu, toFolder);
-    }else if (DRAG.type === "folder"){
-      // Folders can be nested into other folders, or moved to root by dropping into a menu dropzone
-      if (toMenu){ changed = moveFolder(DRAG.id, null); }
-      else if (toFolder){ changed = moveFolder(DRAG.id, toFolder); }
-    }
-
-    if (changed){ saveAndRerender(); }
-  });
-
-  /* ---------------- Save All (no-op wrapper) ------------- */
-  document.getElementById("saveTasksBtn")?.addEventListener("click", ()=>{
-    saveCloudDebounced(); toast("Saved");
-  });
-}
 
 
 function renderJobs(){
