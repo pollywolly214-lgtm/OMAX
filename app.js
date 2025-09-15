@@ -1175,6 +1175,19 @@ function makeBubble(anchor){
   return b;
 }
 
+// === Complete interval task (single copy only) ===
+function completeTask(taskId){
+  const t = tasksInterval.find(x => String(x.id) === String(taskId));
+  if (!t) return;
+  const cur = RENDER_TOTAL ?? currentTotal();
+  t.anchorTotal = cur != null ? cur : 0; // reset anchor to current total
+  t.sinceBase   = 0;                     // since = 0 going forward
+  saveCloudDebounced();
+  toast("Task completed");
+  route(); // re-render calendar and dashboard
+}
+
+
 // === REPLACE your existing showTaskBubble WITH THIS VERSION ===
 function showTaskBubble(taskId, anchor){
   const t = tasksInterval.find(x => x.id === taskId);
