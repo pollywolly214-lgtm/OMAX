@@ -1145,10 +1145,18 @@ function renderCalendar(){
 
 /* --------- Calendar Hover Bubbles --------- */
 
-// ---- Bubble helpers (replace your current makeBubble / hide helpers if different)
+// === Bubble helpers (single copy only) ===
 let bubbleTimer = null;
-function hideBubble(){ const b = document.getElementById("bubble"); if (b) b.remove(); }
-function hideBubbleSoon(){ clearTimeout(bubbleTimer); bubbleTimer = setTimeout(hideBubble, 180); }
+
+function hideBubble(){
+  const b = document.getElementById("bubble");
+  if (b) b.remove();
+}
+
+function hideBubbleSoon(){
+  clearTimeout(bubbleTimer);
+  bubbleTimer = setTimeout(hideBubble, 180);
+}
 
 function makeBubble(anchor){
   hideBubble();
@@ -1161,6 +1169,7 @@ function makeBubble(anchor){
   // Touch the element (no gap)
   b.style.left = `${rect.left + window.scrollX}px`;
   b.style.top  = `${rect.bottom + window.scrollY}px`;
+
   b.addEventListener("mouseenter", ()=>clearTimeout(bubbleTimer));
   b.addEventListener("mouseleave", hideBubbleSoon);
   return b;
