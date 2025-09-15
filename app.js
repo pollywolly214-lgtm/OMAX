@@ -1298,25 +1298,34 @@ function renderSettings(){
   const content = document.getElementById("content");
   if (!content) return;
 
-  // ---- 1) Render the Settings view (folders + cards UI) ----
+  // 0) Inject a tiny style tweak so CATEGORIES look different from ITEMS
+  if (!document.getElementById("settingsFolderCSS")){
+    const st = document.createElement("style");
+    st.id = "settingsFolderCSS";
+    st.textContent = `
+      .folder-title{ font-family: "Segoe UI", Roboto, system-ui, -apple-system, Arial, sans-serif; font-weight:800; letter-spacing:.2px; }
+      details.block > summary b{ font-weight:600; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+      .folder-dropzone.dragover, [data-drop-menu].dragover{ background: rgba(0,0,0,.05); outline: 2px dashed #888; }
+      details.block.dragging{ opacity:.6; }
+      .hilite{ outline: 2px solid #6aa84f; border-radius: 6px; }
+    `;
+    document.head.appendChild(st);
+  }
+
+  // 1) Render the Settings VIEW (keeps all IDs/data-* your app already uses)
   content.innerHTML = viewSettings();
 
-  // Ensure folders store exists
+  // 2) Ensure folders store exists (supports nesting)
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  for (const f of window.settingsFolders){ if (!("parent" in f)) f.parent = null; }
 
-  // === Utilities ===
+  // ---- Utilities kept local ----
   const getList = (type)=> type === "interval" ? tasksInterval : tasksAsReq;
   const setNum  = (v)=> { const n = Number(v); return isFinite(n) ? n : null; };
   const byId    = (arr,id)=> Array.isArray(arr) ? arr.find(x=>String(x.id)===String(id)) : null;
-  const folderName = (fid)=>{
-    if (!fid) return "Uncategorized";
-    if (fid === "__uncat__") return "Uncategorized";
-    const f = window.settingsFolders.find(x=>x.id===fid);
-    return f ? f.name : "Uncategorized";
-  };
   const focusScroll = (el)=> el?.scrollIntoView({behavior:"smooth", block:"center"});
 
-  // === 2) Inject / wire Settings search (kept from earlier step, extended to include folders & sub-parts) ===
+  // 3) (Re)Add the Settings search (extended earlier). No changes here beyond wiring.
   (function ensureSearch(){
     const block = content.querySelector(".block");
     if (!block) return;
@@ -1338,8 +1347,13 @@ function renderSettings(){
   function buildIndex(){
     const rows = [];
     const toText = v => (v==null ? "" : String(v));
+    const folderName = (fid)=>{
+      if (!fid) return "Root";
+      const f = window.settingsFolders.find(x=>x.id===fid);
+      return f ? f.name : "Root";
+    };
     const pushTask = (t, type)=>{
-      const base = {
+      rows.push({
         kind: "task",
         id: t.id,
         type,
@@ -1350,16 +1364,12 @@ function renderSettings(){
           (type==="interval" ? `${t.interval} hrs` : (t.condition||"as required")),
           folderName(t.cat)
         ].map(toText).join(" ").toLowerCase()
-      };
-      rows.push(base);
-      // sub-parts
+      });
       if (Array.isArray(t.parts)){
         for (const p of t.parts){
           rows.push({
             kind: "subpart",
-            id: t.id,
-            pid: p.pid,
-            type,
+            id: t.id, pid: p.pid, type,
             title: `${p.name||"(part)"} — ${t.name}`,
             folder: folderName(t.cat),
             q: [p.name, p.pn, p.link, p.note, t.name, folderName(t.cat)].map(toText).join(" ").toLowerCase()
@@ -1369,23 +1379,32 @@ function renderSettings(){
     };
     (Array.isArray(tasksInterval)?tasksInterval:[]).forEach(t => pushTask(t,"interval"));
     (Array.isArray(tasksAsReq)?tasksAsReq:[]).forEach(t => pushTask(t,"asreq"));
+    // Folders themselves (so searches can jump-open them)
+    for (const f of window.settingsFolders){
+      rows.push({
+        kind: "folder",
+        fid: f.id,
+        type: "both",
+        title: f.name,
+        folder: "—",
+        q: f.name.toLowerCase()
+      });
+    }
     return rows;
   }
-
   function renderQResults(list){
     if (!qResults) return;
     if (!list.length){ qResults.style.display="none"; qResults.innerHTML=""; return; }
     qResults.style.display="block";
     qResults.innerHTML = list.map(it=>`
-      <div class="search-item" data-kind="${it.kind}" data-id="${it.id}" data-pid="${it.pid||""}" data-type="${it.type}">
+      <div class="search-item" data-kind="${it.kind}" data-id="${it.id||""}" data-pid="${it.pid||""}" data-fid="${it.fid||""}" data-type="${it.type}">
         <div class="si-title">${it.title}</div>
         <div class="si-meta">
-          <span class="badge">${it.type==="interval"?"Interval":"As req."}</span>
-          <span class="muted">${it.folder}</span>
+          ${it.kind==="folder" ? `<span class="badge">Folder</span>` : `<span class="badge">${it.type==="interval"?"Interval":"As req."}</span>`}
+          ${it.folder ? `<span class="muted">${it.folder}</span>` : ""}
         </div>
       </div>`).join("");
   }
-
   let idx = buildIndex();
   function runSearch(q){
     const s = (q||"").toLowerCase().trim();
@@ -1394,8 +1413,8 @@ function renderSettings(){
     const scored = idx.map(it=>{
       let score=0;
       for (const term of terms){
-        if (it.q.includes(term)) score += 1;
-        if (it.title.toLowerCase().includes(term)) score += 2;
+        if ((it.q||"").includes(term)) score += 1;
+        if ((it.title||"").toLowerCase().includes(term)) score += 2;
       }
       return {it, score};
     }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,30).map(x=>x.it);
@@ -1412,34 +1431,38 @@ function renderSettings(){
       const item = e.target.closest(".search-item"); if (!item) return;
       const id   = item.getAttribute("data-id");
       const pid  = item.getAttribute("data-pid") || "";
+      const fid  = item.getAttribute("data-fid") || "";
       const type = item.getAttribute("data-type");
-      // Ensure correct page and unfold folder + card
       location.hash = "#/settings";
-      // Open correct folder if present
-      const listRoot = content.querySelector(type==="interval" ? "#intervalList" : "#asreqList");
-      // Find the task card
-      const card = listRoot?.querySelector(`details.block[data-task-id="${id}"]`);
-      // Ensure its parent FOLDER is open
-      const folderWrap = card?.closest("details.folder");
-      if (folderWrap) folderWrap.open = true;
-      // Open the card, then focus (sub-part if any)
-      if (card){ card.open = true; focusScroll(card); }
+      // Open right menu
+      const menuRoot = content.querySelector(type==="interval" ? '[data-menu="interval"]' : type==="asreq" ? '[data-menu="asreq"]' : '[data-menu="interval"]');
+      if (menuRoot) menuRoot.open = true;
+      // Open folder if provided
+      if (fid){
+        const fold = content.querySelector(`details.folder[data-folder-id="${fid}"]`);
+        if (fold) fold.open = true;
+      }
+      // Open card
+      if (id){
+        const card = content.querySelector(`details.block[data-task-id="${id}"]`);
+        if (card){ card.open = true; focusScroll(card); }
+      }
       if (pid){
         const pr = content.querySelector(`[data-part-row][data-parent="${id}"][data-part-id="${pid}"]`);
         pr?.classList.add("hilite");
-        setTimeout(()=> pr?.classList.remove("hilite"), 1600);
+        setTimeout(()=> pr?.classList.remove("hilite"), 1500);
       }
       qResults.style.display="none"; if (qInput) qInput.value = "";
     });
   }
 
-  // === 3) Top-level: Add Interval / Add AsReq (kept) ===
+  // 4) Top-level add forms (kept)
   document.getElementById("addIntervalForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = document.getElementById("ai_name").value.trim();
     const interval = Number(document.getElementById("ai_interval").value);
     if (!name || !isFinite(interval) || interval <= 0){ toast("Enter valid name + interval"); return; }
-    tasksInterval.push({ id: genId(name), name, interval, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", cat:null, parts:[] });
+    tasksInterval.push({ id: genId(name), name, interval, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"", price:null, cat:null, parts:[] });
     saveCloudDebounced(); renderSettings();
   });
   document.getElementById("addAsReqForm")?.addEventListener("submit",(e)=>{
@@ -1447,92 +1470,57 @@ function renderSettings(){
     const name = document.getElementById("ar_name").value.trim();
     const cond = document.getElementById("ar_condition").value.trim();
     if (!name){ toast("Enter name"); return; }
-    tasksAsReq.push({ id: genId(name), name, condition: cond||"As required", manualLink:"", storeLink:"", cat:null, parts:[] });
+    tasksAsReq.push({ id: genId(name), name, condition: cond||"As required", manualLink:"", storeLink:"", pn:"", price:null, cat:null, parts:[] });
     saveCloudDebounced(); renderSettings();
   });
 
-  // === 4) Folder controls ===
+  // 5) Folder controls (root + nested)
   document.getElementById("addFolderBtn")?.addEventListener("click", ()=>{
-    const name = prompt("New category (folder) name:","New Folder");
-    if (!name) return;
+    const name = prompt("New category (folder) name:","New Folder"); if (!name) return;
     const id = genId(`cat ${name}`);
-    window.settingsFolders.push({id, name});
-    saveCloudDebounced();
-    renderSettings();
+    window.settingsFolders.push({id, name, parent: null});
+    saveCloudDebounced(); renderSettings();
   });
   content.addEventListener("click",(e)=>{
     const rn = e.target.closest("[data-rename-folder]");
     const rm = e.target.closest("[data-remove-folder]");
+    const addSub = e.target.closest("[data-add-subfolder]");
     if (rn){
       const id = rn.getAttribute("data-rename-folder");
       const f = window.settingsFolders.find(x=>x.id===id); if (!f) return;
       const name = prompt("Rename folder:", f.name); if (!name) return;
-      f.name = name;
-      saveCloudDebounced(); renderSettings();
+      f.name = name; saveCloudDebounced(); renderSettings();
     }
     if (rm){
       const id = rm.getAttribute("data-remove-folder");
-      if (!confirm("Remove folder? Tasks will move to Uncategorized.")) return;
-      // move tasks to uncat
+      if (!confirm("Remove folder? Subfolders will move to root and tasks become root items.")) return;
+      // Move children folders to root
+      window.settingsFolders.forEach(x=>{ if (x.parent===id) x.parent = null; });
+      // Move tasks to root (no category)
       (Array.isArray(tasksInterval)?tasksInterval:[]).forEach(t=>{ if (t.cat===id) t.cat=null; });
       (Array.isArray(tasksAsReq)?tasksAsReq:[]).forEach(t=>{ if (t.cat===id) t.cat=null; });
+      // Remove folder
       window.settingsFolders = window.settingsFolders.filter(x=>x.id!==id);
+      saveCloudDebounced(); renderSettings();
+    }
+    if (addSub){
+      const pid = addSub.getAttribute("data-add-subfolder");
+      const name = prompt("Sub-category name:","New Subfolder"); if (!name) return;
+      const id = genId(`cat ${name}`);
+      window.settingsFolders.push({id, name, parent: pid});
       saveCloudDebounced(); renderSettings();
     }
   });
 
-  // === 5) Drag & Drop: move tasks into folders (per-scope) ===
-  // Start drag from a task card
-  ["interval","asreq"].forEach(scope=>{
-    const root = content.querySelector(scope==="interval" ? "#intervalList" : "#asreqList");
-    if (!root) return;
-
-    // drag start
-    root.addEventListener("dragstart",(e)=>{
-      const card = e.target.closest(`details.block[draggable="true"][data-list="${scope}"]`);
-      if (!card) return;
-      e.dataTransfer.setData("text/task", JSON.stringify({ id: card.getAttribute("data-task-id"), type: scope }));
-      e.dataTransfer.effectAllowed = "move";
-    });
-
-    // drag over dropzone
-    root.addEventListener("dragover",(e)=>{
-      const dz = e.target.closest(`[data-drop-folder]`);
-      if (!dz || dz.closest('[data-dnd-scope]')?.getAttribute("data-dnd-scope") !== scope) return;
-      e.preventDefault(); dz.classList.add("dragover");
-    });
-    root.addEventListener("dragleave",(e)=>{
-      const dz = e.target.closest(`[data-drop-folder]`);
-      if (dz) dz.classList.remove("dragover");
-    });
-
-    // drop
-    root.addEventListener("drop",(e)=>{
-      const dz = e.target.closest(`[data-drop-folder]`);
-      if (!dz || dz.closest('[data-dnd-scope]')?.getAttribute("data-dnd-scope") !== scope) return;
-      e.preventDefault();
-      dz.classList.remove("dragover");
-      try{
-        const data = JSON.parse(e.dataTransfer.getData("text/task") || "{}");
-        if (!data.id) return;
-        const list = getList(scope);
-        const t = byId(list, data.id); if (!t) return;
-        const folderId = dz.getAttribute("data-drop-folder");
-        t.cat = (folderId && folderId !== "__uncat__") ? folderId : null;
-        saveCloudDebounced(); renderSettings();
-      }catch(_){}
-    });
-  });
-
-  // === 6) Inputs on task cards (name, interval, links, price, etc.) ===
+  // 6) Inputs on task cards (name, interval, links, price, etc.) — unchanged
   function handleFieldInput(e){
     const el = e.target;
     const id   = el.getAttribute("data-id");
     const list = el.getAttribute("data-list"); // "interval" | "asreq"
     const key  = el.getAttribute("data-k");
     if (!id || !list || !key) return;
-    const t = byId(getList(list), id); if (!t) return;
-
+    const listArr = getList(list);
+    const t = byId(listArr, id); if (!t) return;
     let val = el.value;
     if (key === "interval" || key === "sinceBase" || key === "price") val = setNum(val);
     t[key] = val;
@@ -1560,38 +1548,17 @@ function renderSettings(){
   content.querySelector("#intervalList")?.addEventListener("click", handleClicks);
   content.querySelector("#asreqList")?.addEventListener("click", handleClicks);
 
-  // === 7) Add task inside a folder ===
-  content.addEventListener("submit",(e)=>{
-    const f = e.target.closest('[data-add-task-form]');
-    if (!f) return;
-    e.preventDefault();
-    const listType = f.getAttribute("data-list"); // interval | asreq
-    const folderId = f.getAttribute("data-folder");
-    const name = f.querySelector('[data-newtask="name"]')?.value.trim();
-    if (!name){ toast("Enter task name"); return; }
-    if (listType === "interval"){
-      const ival = Number(f.querySelector('[data-newtask="interval"]')?.value);
-      if (!isFinite(ival) || ival<=0){ toast("Enter valid interval"); return; }
-      getList("interval").push({ id: genId(name), name, interval: ival, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"", price:null, cat: (folderId==="__uncat__"? null:folderId), parts:[] });
-    }else{
-      const cond = f.querySelector('[data-newtask="condition"]')?.value.trim();
-      getList("asreq").push({ id: genId(name), name, condition: cond||"As required", manualLink:"", storeLink:"", pn:"", price:null, cat: (folderId==="__uncat__"? null:folderId), parts:[] });
-    }
-    saveCloudDebounced(); renderSettings();
-  });
-
-  // === 8) Sub-parts: add / edit / remove ===
+  // 7) Sub-parts: add / edit / remove — unchanged
   content.addEventListener("submit",(e)=>{
     const frm = e.target.closest("[data-part-add-form]");
     if (!frm) return;
     e.preventDefault();
-    const pid = genId("part");
     const parent = frm.getAttribute("data-parent");
     const list   = frm.getAttribute("data-list");
     const t = byId(getList(list), parent); if (!t) return;
     t.parts = Array.isArray(t.parts) ? t.parts : [];
     const p = {
-      pid,
+      pid: genId("part"),
       name: frm.querySelector('[data-part-new="name"]')?.value.trim() || "",
       pn:   frm.querySelector('[data-part-new="pn"]')?.value.trim() || "",
       price:setNum(frm.querySelector('[data-part-new="price"]')?.value),
@@ -1624,219 +1591,165 @@ function renderSettings(){
     saveCloudDebounced(); renderSettings();
   });
 
-  // === 9) Save All button (optional quick save) ===
+  // 8) Add task INSIDE a folder (kept)
+  content.addEventListener("submit",(e)=>{
+    const f = e.target.closest('[data-add-task-form]');
+    if (!f) return;
+    e.preventDefault();
+    const listType = f.getAttribute("data-list"); // interval | asreq
+    const folderId = f.getAttribute("data-folder");
+    const name = f.querySelector('[data-newtask="name"]')?.value.trim();
+    if (!name){ toast("Enter task name"); return; }
+    if (listType === "interval"){
+      const ival = Number(f.querySelector('[data-newtask="interval"]')?.value);
+      if (!isFinite(ival) || ival<=0){ toast("Enter valid interval"); return; }
+      getList("interval").push({ id: genId(name), name, interval: ival, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"", price:null, cat: (folderId==="__uncat__"? null:folderId), parts:[] });
+    }else{
+      const cond = f.querySelector('[data-newtask="condition"]')?.value.trim();
+      getList("asreq").push({ id: genId(name), name, condition: cond||"As required", manualLink:"", storeLink:"", pn:"", price:null, cat: (folderId==="__uncat__"? null:folderId), parts:[] });
+    }
+    saveCloudDebounced(); renderSettings();
+  });
+
+  // 9) DRAG & DROP — fixes:
+  //    - Drag only the INDIVIDUAL CARD (not whole list)
+  //    - Drop actually moves items, including ACROSS MENUS (Interval <-> As-Needed)
+  function wireDnD(scope){
+    const menu = content.querySelector(scope==="interval" ? '[data-menu="interval"]' : '[data-menu="asreq"]');
+    const root = content.querySelector(scope==="interval" ? "#intervalList" : "#asreqList");
+    if (!root) return;
+
+    // A) Start / end dragging (cards only)
+    root.addEventListener("dragstart",(e)=>{
+      const card = e.target.closest(`details.block[draggable="true"][data-list="${scope}"]`);
+      if (!card) return;
+      e.dataTransfer.setData("application/x-task", JSON.stringify({ id: card.getAttribute("data-task-id"), from: scope }));
+      e.dataTransfer.setData("text/plain", card.getAttribute("data-task-id")); // fallback
+      e.dataTransfer.effectAllowed = "move";
+      card.classList.add("dragging");
+    });
+    root.addEventListener("dragend",(e)=>{
+      const card = e.target.closest(`details.block[draggable="true"]`);
+      card?.classList.remove("dragging");
+    });
+
+    // B) Allow drop on folders within this menu
+    root.addEventListener("dragover",(e)=>{
+      const dz = e.target.closest(`[data-drop-folder]`);
+      if (!dz) return;
+      // Make sure we're still in the right menu scope
+      const scopeOfDZ = dz.closest('[data-dnd-scope]')?.getAttribute("data-dnd-scope");
+      if (scopeOfDZ !== scope) return;
+      e.preventDefault();
+      dz.classList.add("dragover");
+      e.dataTransfer.dropEffect = "move";
+    });
+    root.addEventListener("dragleave",(e)=>{
+      const dz = e.target.closest(`[data-drop-folder]`);
+      dz?.classList.remove("dragover");
+    });
+    root.addEventListener("drop",(e)=>{
+      const dz = e.target.closest(`[data-drop-folder]`);
+      if (!dz) return;
+      const scopeOfDZ = dz.closest('[data-dnd-scope]')?.getAttribute("data-dnd-scope");
+      if (scopeOfDZ !== scope) return;
+      e.preventDefault();
+      dz.classList.remove("dragover");
+      let payload = e.dataTransfer.getData("application/x-task") || e.dataTransfer.getData("text/plain");
+      try{ payload = JSON.parse(payload); }catch{ payload = { id: String(payload||"") }; }
+      const from = payload.from || scope;
+      const id = String(payload.id||"");
+      if (!id) return;
+
+      if (from === scope){
+        // Same-menu move → just set folder
+        const listArr = getList(scope);
+        const t = byId(listArr, id); if (!t) return;
+        const folderId = dz.getAttribute("data-drop-folder");
+        t.cat = (folderId && folderId !== "__uncat__") ? folderId : null;
+        saveCloudDebounced(); renderSettings();
+      }else{
+        // Cross-menu into specific folder inside this menu
+        moveAcrossMenus({ id, from, to: scope, folderId: dz.getAttribute("data-drop-folder") });
+      }
+    });
+
+    // C) Menu-level drop (top area of each menu)
+    menu?.addEventListener("dragover",(e)=>{
+      const dz = e.target.closest('[data-drop-menu]');
+      if (!dz) return;
+      const dest = dz.getAttribute("data-drop-menu");
+      if (dest !== scope) return;
+      e.preventDefault(); dz.classList.add("dragover"); e.dataTransfer.dropEffect="move";
+    });
+    menu?.addEventListener("dragleave",(e)=>{
+      const dz = e.target.closest('[data-drop-menu]');
+      dz?.classList.remove("dragover");
+    });
+    menu?.addEventListener("drop",(e)=>{
+      const dz = e.target.closest('[data-drop-menu]');
+      if (!dz) return;
+      const dest = dz.getAttribute("data-drop-menu");
+      if (dest !== scope) return;
+      e.preventDefault(); dz.classList.remove("dragover");
+      let payload = e.dataTransfer.getData("application/x-task") || e.dataTransfer.getData("text/plain");
+      try{ payload = JSON.parse(payload); }catch{ payload = { id: String(payload||"") }; }
+      const from = payload.from || (scope==="interval"?"asreq":"interval");
+      const id = String(payload.id||"");
+      if (!id) return;
+
+      // Cross-menu onto the menu itself → move to root of dest menu
+      moveAcrossMenus({ id, from, to: scope, folderId: null });
+    });
+  }
+
+  function moveAcrossMenus({ id, from, to, folderId }){
+    if (from === to) return;
+    const srcArr = getList(from);
+    const dstArr = getList(to);
+    const t = byId(srcArr, id); if (!t) return;
+
+    if (to === "interval"){
+      // Require an interval to join Interval menu
+      let ival = Number(t.interval);
+      if (!isFinite(ival) || ival<=0){
+        const ans = prompt("Moving to Interval maintenance. Enter Interval (hrs):","100");
+        ival = Number(ans);
+        if (!isFinite(ival) || ival<=0){ toast("Move cancelled: need a valid interval."); return; }
+      }
+      const moved = {
+        id: t.id, name: t.name, interval: ival,
+        sinceBase: t.sinceBase ?? null, anchorTotal: t.anchorTotal ?? null,
+        manualLink: t.manualLink||"", storeLink: t.storeLink||"",
+        pn: t.pn||"", price: t.price ?? null,
+        cat: folderId || null, parts: Array.isArray(t.parts)?t.parts.slice():[]
+      };
+      // remove from AsReq, push to Interval
+      tasksAsReq = srcArr.filter(x=>x.id!==t.id);
+      tasksInterval.push(moved);
+    }else{
+      // Moving to As-Needed: ensure condition text
+      const condDefault = (t.condition && String(t.condition).trim()) || "As required";
+      const cond = prompt("Moving to As-Needed. Condition/Notes:", condDefault) || condDefault;
+      const moved = {
+        id: t.id, name: t.name, condition: cond,
+        manualLink: t.manualLink||"", storeLink: t.storeLink||"",
+        pn: t.pn||"", price: t.price ?? null,
+        cat: folderId || null, parts: Array.isArray(t.parts)?t.parts.slice():[]
+      };
+      tasksInterval = srcArr.filter(x=>x.id!==t.id);
+      tasksAsReq.push(moved);
+    }
+    saveCloudDebounced(); renderSettings();
+  }
+
+  wireDnD("interval");
+  wireDnD("asreq");
+
+  // 10) Save All button (optional quick save)
   document.getElementById("saveTasksBtn")?.addEventListener("click", ()=>{
     saveCloudDebounced();
     toast("Saved");
-  });
-}
-
-
-  // ---- Wire search behavior (idempotent) ----
-  const input   = document.getElementById("settingsSearchInput");
-  const results = document.getElementById("settingsSearchResults");
-
-  function buildIndex(){
-    const toText = v => (v == null ? "" : String(v));
-    const items = [];
-
-    (Array.isArray(tasksInterval) ? tasksInterval : []).forEach(t=>{
-      items.push({
-        id: t.id,
-        title: t.name || "",
-        type: "interval",
-        meta: [ (t.interval ? `${t.interval} hrs` : null), (t.pn || null) ].filter(Boolean),
-        q: [t.name, t.pn, t.manualLink, t.storeLink].map(toText).join(" ").toLowerCase()
-      });
-    });
-    (Array.isArray(tasksAsReq) ? tasksAsReq : []).forEach(t=>{
-      items.push({
-        id: t.id,
-        title: t.name || "",
-        type: "asreq",
-        meta: [ (t.condition || "As required"), (t.pn || null) ].filter(Boolean),
-        q: [t.name, t.condition, t.pn, t.manualLink, t.storeLink].map(toText).join(" ").toLowerCase()
-      });
-    });
-    return items;
-  }
-
-  function renderResults(list){
-    if (!results) return;
-    if (!list.length){ results.style.display = "none"; results.innerHTML = ""; return; }
-    results.style.display = "block";
-    results.innerHTML = list.map(it => `
-      <div class="search-item" data-id="${it.id}">
-        <div class="si-title">${it.title}</div>
-        <div class="si-meta">
-          <span class="badge">${it.type === "interval" ? "Interval" : "As required"}</span>
-          ${it.meta.map(m => `<span class="muted">${m}</span>`).join("")}
-        </div>
-      </div>
-    `).join("");
-  }
-
-  let index = buildIndex();
-  function runSearch(q){
-    const s = (q || "").toLowerCase().trim();
-    if (s.length < 2){ renderResults([]); return; }
-    const terms = s.split(/\s+/).filter(Boolean);
-    const scored = index.map(it=>{
-      let score = 0;
-      for (const term of terms){
-        if (it.q.includes(term)) score += 1;
-        if (it.title.toLowerCase().includes(term)) score += 2;
-      }
-      return { it, score };
-    }).filter(x => x.score > 0)
-      .sort((a,b) => b.score - a.score)
-      .slice(0, 20)
-      .map(x => x.it);
-
-    renderResults(scored);
-  }
-
-  if (input && !input.__wired){
-    input.__wired = true;
-    input.addEventListener("input", () => runSearch(input.value));
-    input.addEventListener("focus", () => { index = buildIndex(); });
-  }
-  if (results && !results.__wired){
-    results.__wired = true;
-    results.addEventListener("click", (e)=>{
-      const item = e.target.closest(".search-item");
-      if (!item) return;
-      const id = item.getAttribute("data-id");
-      if (id && typeof openSettingsAndReveal === "function"){
-        openSettingsAndReveal(id); // opens the details and scrolls to it
-      }
-      results.style.display = "none";
-      if (input) input.value = "";
-    });
-  }
-
-  // ---- Existing wiring: Interval list ----
-  document.getElementById("intervalList")?.addEventListener("input",(e)=>{
-    const input = e.target;
-    const id  = input.getAttribute("data-id");
-    const key = input.getAttribute("data-k");
-    const t = tasksInterval.find(x=>x.id===id); if (!t) return;
-    let val = input.value;
-    if (key === "interval" || key === "sinceBase" || key === "price"){
-      val = Number(val); if (!isFinite(val)) val = null;
-    }
-    t[key] = val;
-    saveCloudDebounced();
-  });
-  document.getElementById("intervalList")?.addEventListener("click",(e)=>{
-    const rm   = e.target.closest("[data-remove]");
-    const comp = e.target.closest("[data-complete]");
-    if (rm){
-      const id = rm.getAttribute("data-remove");
-      tasksInterval = tasksInterval.filter(x=>x.id!==id);
-      saveCloudDebounced(); toast("Removed"); renderSettings();
-    }
-    if (comp){
-      const id = comp.getAttribute("data-complete");
-      completeTask(id);
-    }
-  });
-
-  // ---- Existing wiring: As-required list ----
-  document.getElementById("asreqList")?.addEventListener("input",(e)=>{
-    const input = e.target;
-    const id  = input.getAttribute("data-id");
-    const key = input.getAttribute("data-k");
-    const t = tasksAsReq.find(x=>x.id===id); if (!t) return;
-    t[key] = input.value;
-    if (key === "price") t[key] = Number(t[key]) || null;
-    saveCloudDebounced();
-  });
-  document.getElementById("asreqList")?.addEventListener("click",(e)=>{
-    const rm = e.target.closest("[data-remove]");
-    if (rm){
-      const id   = rm.getAttribute("data-remove");
-      const from = rm.getAttribute("data-from");
-      if (from === "asreq") tasksAsReq = tasksAsReq.filter(x=>x.id!==id);
-      saveCloudDebounced(); toast("Removed"); renderSettings();
-    }
-  });
-
-  // ---- Existing wiring: Add forms ----
-  document.getElementById("addIntervalForm")?.addEventListener("submit",(e)=>{
-    e.preventDefault();
-    const name = document.getElementById("ai_name").value.trim();
-    const interval = Number(document.getElementById("ai_interval").value);
-    if (!name || !isFinite(interval) || interval <= 0){ toast("Enter valid name + interval"); return; }
-    tasksInterval.push({ id: genId(name), name, interval, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" });
-    saveCloudDebounced(); renderSettings();
-  });
-  document.getElementById("addAsReqForm")?.addEventListener("submit",(e)=>{
-    e.preventDefault();
-    const name = document.getElementById("ar_name").value.trim();
-    const cond = document.getElementById("ar_condition").value.trim();
-    if (!name){ toast("Enter name"); return; }
-    tasksAsReq.push({ id: genId(name), name, condition: cond||"As required", manualLink:"", storeLink:"" });
-    saveCloudDebounced(); renderSettings();
-  });
-
-
-function renderCosts(){
-  const content = document.getElementById("content"); if (!content) return;
-  content.innerHTML = viewCosts();
-
-  const tbI = document.querySelector("#costTableInterval tbody");
-  const tbA = document.querySelector("#costTableAsReq tbody");
-  const tbJ = document.querySelector("#costTableJobs tbody");
-
-  tbI.innerHTML = tasksInterval.map(t=>`
-    <tr>
-      <td>${t.name}</td>
-      <td>${t.interval}</td>
-      <td>${t.price!=null?("$"+t.price):"—"}</td>
-      <td>
-        ${t.manualLink?`<a href="${t.manualLink}" target="_blank" rel="noopener">Manual</a>`:"—"}
-        ${t.storeLink?` · <a href="${t.storeLink}" target="_blank" rel="noopener">Store</a>`:""}
-      </td>
-    </tr>`).join("");
-
-  tbA.innerHTML = tasksAsReq.map(t=>`
-    <tr>
-      <td>${t.name}</td>
-      <td>${t.condition||"As required"}</td>
-      <td>${t.price!=null?("$"+t.price):"—"}</td>
-      <td>
-        ${t.manualLink?`<a href="${t.manualLink}" target="_blank" rel="noopener">Manual</a>`:"—"}
-        ${t.storeLink?` · <a href="${t.storeLink}" target="_blank" rel="noopener">Store</a>`:""}
-      </td>
-    </tr>`).join("");
-
-  function saveMatInline(e){
-    const id = e.target.getAttribute("data-id");
-    const j = cuttingJobs.find(x=>x.id===id); if (!j) return;
-    j.materialCost = Number(document.querySelector(`input.matCost[data-id="${id}"]`).value)||0;
-    j.materialQty  = Number(document.querySelector(`input.matQty[data-id="${id}"]`).value)||0;
-    saveCloudDebounced();
-    renderCosts();
-  }
-
-  tbJ.innerHTML = cuttingJobs.map(j=>{
-    const eff = computeJobEfficiency(j);
-    const sign = eff.gainLoss>=0?"+":"−";
-    const abs  = Math.abs(eff.gainLoss).toFixed(2);
-    return `<tr>
-      <td>${j.name}</td>
-      <td>${j.estimateHours||0}</td>
-      <td>${j.material||"—"}</td>
-      <td><input type="number" class="matCost" data-id="${j.id}" value="${j.materialCost||0}" step="0.01" min="0"></td>
-      <td><input type="number" class="matQty" data-id="${j.id}" value="${j.materialQty||0}" step="0.01" min="0"></td>
-      <td>${(((j.materialCost||0)*(j.materialQty||0))||0).toFixed(2)}</td>
-      <td>${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(1)} hr → ${sign}$${abs}</td>
-    </tr>`;
-  }).join("");
-
-  tbJ.addEventListener("change", (e)=>{
-    if (e.target.matches("input.matCost, input.matQty")) saveMatInline(e);
   });
 }
 
