@@ -991,41 +991,61 @@ function viewJobs(){
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
+
+    // Material totals
+    const matCost = Number(j.materialCost||0);
+    const matQty  = Number(j.materialQty||0);
+    const matTotal = (matCost * matQty) || 0;
+
+    // Remaining & per-day
+    const remainHrs = req.remainingHours || 0;
+    const needPerDay = req.requiredPerDay === Infinity
+      ? '∞'
+      : (req.requiredPerDay||0).toFixed(2);
+
+    // Profit delta (labor only) – keeps your original semantics (deltaHours * rate)
+    const money = eff.gainLoss || 0;
+    const moneyStyle = money >= 0 ? 'color:#2e7d32;font-weight:600' : 'color:#c43d3d;font-weight:600';
+    const moneySign  = money >= 0 ? '+' : '−';
+    const moneyAbs   = Math.abs(money).toFixed(2);
+
+    // Dates (for display / edit row)
     const startTxt = j.startISO ? (new Date(j.startISO)).toDateString() : "—";
     const dueDate  = j.dueISO ? new Date(j.dueISO) : null;
     const dueTxt   = dueDate ? dueDate.toDateString() : "—";
     const dueVal   = dueDate ? dueDate.toISOString().slice(0,10) : "";
 
-    const signMoney = eff.gainLoss >= 0 ? "+" : "−";
-    const absMoney  = Math.abs(eff.gainLoss).toFixed(2);
-    const effText   =
-      `${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(1)} hr Δ ` +
-      `(exp ${eff.expectedHours.toFixed(1)} vs act ${eff.actualHours.toFixed(1)}) → ` +
-      `${signMoney}$${absMoney} @ $${eff.rate}/hr`;
-
-    const reqCell = (req.requiredPerDay === Infinity)
-      ? `<span class="danger">Past due / no days remaining</span>`
-      : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
-
-    const noteAuto = eff.usedAutoFromManual
-      ? `<div class="muted"><strong>Auto from last manual</strong> — continuing at ${DAILY_HOURS} hr/day.</div>`
-      : (eff.usedFromStartAuto ? `<div class="muted"><strong>Auto</strong> — assuming ${DAILY_HOURS} hr/day from start.</div>` : ``);
-
     if (!editing){
+      // NORMAL ROW (with Log button UNDER the job name)
       return `<tr data-job-row="${j.id}">
-        <td><div><strong>${j.name}</strong></div>${noteAuto}</td>
+        <td>
+          <div><strong>${j.name}</strong></div>
+          <div class="small muted">${startTxt} → ${dueTxt}</div>
+          <div class="job-actions" style="margin-top:6px">
+            <button data-log-job="${j.id}">Log</button>
+          </div>
+        </td>
         <td>${j.estimateHours} hrs</td>
         <td>${j.material || "—"}</td>
-        <td><input type="number" class="matCost" data-id="${j.id}" value="${j.materialCost||0}" step="0.01" min="0"></td>
-        <td><input type="number" class="matQty" data-id="${j.id}" value="${j.materialQty||0}" step="0.01" min="0"></td>
-        <td>${(((j.materialCost||0)*(j.materialQty||0))||0).toFixed(2)}</td>
-        <td>${effText}<div class="small">${reqCell}</div></td>
+        <td><input type="number" class="matCost" data-id="${j.id}" value="${matCost}" step="0.01" min="0"></td>
+        <td><input type="number" class="matQty" data-id="${j.id}" value="${matQty}" step="0.01" min="0"></td>
+        <td>${matTotal.toFixed(2)}</td>
+        <td>${remainHrs.toFixed(1)}</td>
+        <td>${
+          req.requiredPerDay === Infinity
+            ? `<span class="danger">Past due</span>`
+            : `${needPerDay} hr/day`
+        }</td>
+        <td><span style="${moneyStyle}">${moneySign}$${moneyAbs}</span></td>
         <td>
+          <!-- Hidden placeholder prevents renderJobs() from injecting a duplicate Log button -->
+          <span data-log-job="${j.id}" style="display:none"></span>
           <button data-edit-job="${j.id}">Edit</button>
           <button class="danger" data-remove-job="${j.id}">Remove</button>
         </td>
       </tr>`;
-    }else{
+    } else {
+      // EDIT ROW
       return `<tr data-job-row="${j.id}">
         <td><input type="text" data-j="name" data-id="${j.id}" value="${j.name}"></td>
         <td><input type="number" min="1" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></td>
@@ -1034,7 +1054,8 @@ function viewJobs(){
           Start: <input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}">
           Due:   <input type="date" data-j="dueISO"   data-id="${j.id}" value="${dueVal}">
         </td>
-        <td colspan="2">
+        <td>${matTotal.toFixed(2)}</td>
+        <td colspan="3">
           <div class="small muted">${startTxt} → ${dueTxt}</div>
           <textarea data-j="notes" data-id="${j.id}" rows="2" placeholder="Notes...">${j.notes||""}</textarea>
         </td>
@@ -1057,10 +1078,25 @@ function viewJobs(){
         <input type="date" id="jobDue" required>
         <button type="submit">Add Job</button>
       </form>
+
       <table>
-        <thead><tr><th>Job</th><th>Estimate</th><th>Material</th><th>Mat. $</th><th>Qty</th><th>Total $</th><th>Efficiency</th><th>Actions</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Estimate (hrs)</th>
+            <th>Material</th>
+            <th>Material Cost ($)</th>
+            <th>Material Qty</th>
+            <th>Total $</th>
+            <th>Hours Remaining</th>
+            <th>Needed / Day</th>
+            <th>Est. Add’l Profit</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
         <tbody>${rows}</tbody>
       </table>
+      <p class="small">Material fields are editable. Changes save automatically.</p>
     </div>
   </div>`;
 }
