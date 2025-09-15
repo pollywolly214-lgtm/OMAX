@@ -1277,20 +1277,33 @@ function renderJobs(){
   const content = document.getElementById("content"); 
   if (!content) return;
 
-  // 1) Render Jobs view
+  // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
 
-  // 2) Helpers (scoped)
+  // 2) Insert a "Log" button into each job row's Actions cell (non-edit rows)
+  content.querySelectorAll('tr[data-job-row]').forEach(tr=>{
+    const id = tr.getAttribute('data-job-row');
+    let actionsCell = tr.querySelector('td:last-child');
+    // Fallback: if the row didn’t render an Actions cell, add one
+    if (!actionsCell){ actionsCell = document.createElement('td'); tr.appendChild(actionsCell); }
+    const logBtn = document.createElement('button');
+    logBtn.textContent = 'Log';
+    logBtn.setAttribute('data-log-job', id);
+    actionsCell.prepend(logBtn); // put Log before Edit/Remove
+  });
+
+  // 3) Small, scoped helpers for manual log math + defaults
   const todayISO = (()=>{ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); })();
   const curTotal = ()=> (RENDER_TOTAL ?? currentTotal());
+
   function getHoursAt(dateISO){
-    // last known totalHistory hours at or before dateISO
+    // Machine totalHours reading at or before dateISO
     if (!Array.isArray(totalHistory) || !totalHistory.length) return null;
     const target = new Date(dateISO + "T00:00:00");
     let best = null;
     for (const h of totalHistory){
       const d = new Date(h.dateISO + "T00:00:00");
-      if (d <= target) { if (best==null || d > new Date(best.dateISO+"T00:00:00")) best = h; }
+      if (d <= target){ if (best==null || d > new Date(best.dateISO+"T00:00:00")) best = h; }
     }
     return best ? Number(best.hours) : null;
   }
@@ -1307,7 +1320,7 @@ function renderJobs(){
     return Math.max(0, nowH - startH);
   }
   function suggestSpent(job){
-    // If manual exists: suggest DAILY_HOURS * days since last manual
+    // Suggest “spent since last manual” using 8 hrs/day; if no manual, 0
     const lm = lastManual(job);
     if (lm){
       const last = new Date(lm.dateISO + "T00:00:00");
@@ -1315,26 +1328,11 @@ function renderJobs(){
       const days = Math.max(0, Math.floor((today - last)/(24*60*60*1000)));
       return days * DAILY_HOURS;
     }
-    // Else: suggest machine hours accrued since start
-    const ms = machineSinceStart(job); // hours from machine log
-    return Math.max(0, ms);
+    return 0;
   }
-  function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
-  function ensureLogs(job){ if (!Array.isArray(job.manualLogs)) job.manualLogs = []; }
+  const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
 
-  // 3) Add inline "Log" button to each job row
-  document.querySelectorAll('tr[data-job-row]').forEach(tr=>{
-    const id = tr.getAttribute('data-job-row');
-    const actionsCell = tr.querySelector('td:last-child');
-    if (actionsCell && !actionsCell.querySelector(`[data-log-job="${id}"]`)){
-      const btn = document.createElement('button');
-      btn.setAttribute('data-log-job', id);
-      btn.textContent = 'Log';
-      actionsCell.insertBefore(btn, actionsCell.firstChild);
-    }
-  });
-
-  // 4) Event wiring: create jobs
+  // 4) Add Job (unchanged)
   document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name  = document.getElementById("jobName").value.trim();
@@ -1342,66 +1340,76 @@ function renderJobs(){
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
     if (!name || !isFinite(est) || est<=0 || !start || !due){ toast("Fill job fields."); return; }
-    cuttingJobs.push({
-      id: genId(name),
-      name,
-      estimateHours: est,
-      material: "",
-      materialCost: 0,
-      materialQty: 0,
-      startISO: start,
-      dueISO: due,
-      notes: "",
-      manualLogs: []
-    });
-    saveCloudDebounced();
-    renderJobs();
+    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material:"", notes:"", manualLogs:[] });
+    saveCloudDebounced(); renderJobs();
   });
 
-  // 5) Event wiring: edit / save / cancel / remove (existing behavior)
-  content.addEventListener("click",(e)=>{
+  // 5) Inline material $/qty (kept)
+  content.querySelector("tbody")?.addEventListener("change",(e)=>{
+    if (e.target.matches("input.matCost, input.matQty")){
+      const id = e.target.getAttribute("data-id");
+      const j = cuttingJobs.find(x=>x.id===id); if (!j) return;
+      j.materialCost = Number(content.querySelector(`input.matCost[data-id="${id}"]`).value)||0;
+      j.materialQty  = Number(content.querySelector(`input.matQty[data-id="${id}"]`).value)||0;
+      saveCloudDebounced();
+      renderJobs();
+    }
+  });
+
+  // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
+  content.querySelector("tbody")?.addEventListener("click",(e)=>{
     const ed = e.target.closest("[data-edit-job]");
     const rm = e.target.closest("[data-remove-job]");
     const sv = e.target.closest("[data-save-job]");
     const ca = e.target.closest("[data-cancel-job]");
     const lg = e.target.closest("[data-log-job]");
+    const apSpent  = e.target.closest("[data-log-apply-spent]");
+    const apRemain = e.target.closest("[data-log-apply-remain]");
 
-    if (ed){ editingJobs.add(ed.getAttribute("data-edit-job")); renderJobs(); }
+    // Edit
+    if (ed){ editingJobs.add(ed.getAttribute("data-edit-job")); renderJobs(); return; }
+
+    // Remove
     if (rm){
       const id = rm.getAttribute("data-remove-job");
       cuttingJobs = cuttingJobs.filter(x=>x.id!==id);
-      editingJobs.delete(id);
-      saveCloudDebounced(); renderJobs();
+      saveCloudDebounced(); toast("Removed"); renderJobs(); 
+      return;
     }
+
+    // Save (from edit row)
     if (sv){
       const id = sv.getAttribute("data-save-job");
-      const j = cuttingJobs.find(x=>x.id===id); if (!j) return;
-      const get = (k)=> document.querySelector(`[data-j="${k}"][data-id="${id}"]`)?.value;
-      j.name = get("name") || j.name;
-      j.estimateHours = Math.max(1, Number(get("estimateHours")) || j.estimateHours || 1);
-      j.material = get("material") || j.material || "";
-      j.startISO = get("startISO") || j.startISO;
-      j.dueISO   = get("dueISO")   || j.dueISO;
-      j.notes    = document.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
+      const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
+      const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${id}"]`)?.value;
+      j.name = qs("name") || j.name;
+      j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
+      j.material = qs("material") || j.material || "";
+      j.startISO = qs("startISO") || j.startISO;
+      j.dueISO   = qs("dueISO")   || j.dueISO;
+      j.notes    = content.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
       editingJobs.delete(id);
       saveCloudDebounced(); renderJobs();
+      return;
     }
-    if (ca){ editingJobs.delete(ca.getAttribute("data-cancel-job")); renderJobs(); }
 
-    // Toggle inline Log panel
+    // Cancel edit
+    if (ca){ editingJobs.delete(ca.getAttribute("data-cancel-job")); renderJobs(); return; }
+
+    // Toggle inline Log panel (adds both "spent" and "remaining" controls)
     if (lg){
       const id = lg.getAttribute("data-log-job");
-      const anchor = content.querySelector(`tr[data-job-row="${id}"]`);
+      const anchor   = content.querySelector(`tr[data-job-row="${id}"]`);
       const existing = content.querySelector(`tr[data-log-row="${id}"]`);
       if (existing){ existing.remove(); return; }
       if (!anchor) return;
 
-      const j = cuttingJobs.find(x=>x.id===id); if (!j) return;
+      const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
       const lm = lastManual(j);
       const spentSuggest = suggestSpent(j);
       const completedSoFar = lm ? Number(lm.completedHours)||0 : 0;
-      const machineInitNote = (!lm && spentSuggest>0) 
-        ? `<div class="muted small">Prefilled using <strong>machine hours since start</strong> (if available).</div>` : ``;
+      const machineInitNote = (!lm && machineSinceStart(j)>0)
+        ? `<div class="muted small">Prefilled uses <strong>machine hours since start</strong> when available.</div>` : ``;
 
       const trForm = document.createElement("tr");
       trForm.className = "manual-log-row";
@@ -1411,16 +1419,13 @@ function renderJobs(){
           <div class="mini-form" style="display:grid; gap:8px; align-items:end; grid-template-columns: repeat(6, minmax(0,1fr));">
             <div style="grid-column:1/7">
               <strong>Manual Log for: ${j.name}</strong>
-              <div class="small muted">Last manual ${
-                lm ? `${lm.completedHours} hr on ${lm.dateISO}` : "— none"
-              }. ${machineInitNote}</div>
+              <div class="small muted">Last manual ${ lm ? `${lm.completedHours} hr on ${lm.dateISO}` : "— none" }. ${machineInitNote}</div>
             </div>
 
             <label style="display:block">
               <span class="muted">Add time spent (hrs)</span>
               <input type="number" step="0.1" min="0" id="manSpent_${id}" value="${spentSuggest.toFixed(1)}">
             </label>
-
             <div style="display:flex; gap:8px; align-items:center">
               <button data-log-apply-spent="${id}">Apply spent</button>
             </div>
@@ -1429,73 +1434,56 @@ function renderJobs(){
               <span class="muted">Set time remaining (hrs)</span>
               <input type="number" step="0.1" min="0" id="manRemain_${id}" value="">
             </label>
-
             <div style="display:flex; gap:8px; align-items:center">
               <button data-log-apply-remain="${id}">Apply remaining</button>
             </div>
-
-            <div class="small muted" style="grid-column:1/7">
-              Note: Entries save as a new manual point for <em>today (${todayISO})</em>. 
-              Efficiency still projects at ${DAILY_HOURS} hr/day beyond the last manual.
-            </div>
           </div>
         </td>`;
-      anchor.parentNode.insertBefore(trForm, anchor.nextSibling);
+      anchor.insertAdjacentElement("afterend", trForm);
+      return;
+    }
+
+    // Apply "spent" (increment completedHours)
+    if (apSpent){
+      const id = apSpent.getAttribute("data-log-apply-spent");
+      const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
+      const add = Number(content.querySelector(`#manSpent_${id}`)?.value);
+      if (!isFinite(add) || add < 0){ toast("Enter a valid spent hours."); return; }
+
+      const lm = lastManual(j);
+      const base = lm ? (Number(lm.completedHours)||0) : machineSinceStart(j);
+      const est  = Number(j.estimateHours)||0;
+      const newCompleted = clamp(base + add, 0, est);
+
+      j.manualLogs = Array.isArray(j.manualLogs) ? j.manualLogs : [];
+      const idx = j.manualLogs.findIndex(m => m.dateISO === todayISO);
+      if (idx >= 0) j.manualLogs[idx].completedHours = newCompleted;
+      else j.manualLogs.push({ dateISO: todayISO, completedHours: newCompleted });
+      j.manualLogs.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
+
+      saveCloudDebounced(); toast("Manual hours updated"); renderJobs();
+      return;
+    }
+
+    // Apply "remaining" (set completedHours = estimate - remaining)
+    if (apRemain){
+      const id = apRemain.getAttribute("data-log-apply-remain");
+      const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
+      const remain = Number(content.querySelector(`#manRemain_${id}`)?.value);
+      const est    = Number(j.estimateHours)||0;
+      if (!isFinite(remain) || remain < 0){ toast("Enter valid remaining hours."); return; }
+
+      const completed = clamp(est - remain, 0, est);
+      j.manualLogs = Array.isArray(j.manualLogs) ? j.manualLogs : [];
+      const idx = j.manualLogs.findIndex(m => m.dateISO === todayISO);
+      if (idx >= 0) j.manualLogs[idx].completedHours = completed;
+      else j.manualLogs.push({ dateISO: todayISO, completedHours: completed });
+      j.manualLogs.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
+
+      saveCloudDebounced(); toast("Remaining → completed set"); renderJobs();
+      return;
     }
   });
-
-  // 6) Apply manual logs: spent / remaining
-  content.addEventListener("click",(e)=>{
-    const spentBtn = e.target.closest("[data-log-apply-spent]");
-    const remBtn   = e.target.closest("[data-log-apply-remain]");
-    if (!spentBtn && !remBtn) return;
-
-    const id = (spentBtn||remBtn).getAttribute(spentBtn ? "data-log-apply-spent" : "data-log-apply-remain");
-    const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
-    ensureLogs(j);
-
-    const est = Math.max(0, Number(j.estimateHours)||0);
-    const lm  = lastManual(j);
-    const baseCompleted = lm ? Number(lm.completedHours)||0 : 0;
-
-    let newCompleted = baseCompleted;
-
-    if (spentBtn){
-      const v = Number(document.getElementById(`manSpent_${id}`)?.value);
-      if (!isFinite(v) || v < 0){ toast("Enter valid hours spent"); return; }
-      newCompleted = clamp(baseCompleted + v, 0, est);
-    }
-    if (remBtn){
-      const r = Number(document.getElementById(`manRemain_${id}`)?.value);
-      if (!isFinite(r) || r < 0){ toast("Enter valid remaining hours"); return; }
-      newCompleted = clamp(est - r, 0, est);
-    }
-
-    // Write new manual point for today
-    const idx = j.manualLogs.findIndex(x => x.dateISO === todayISO);
-    const entry = { dateISO: todayISO, completedHours: Number(newCompleted.toFixed(2)) };
-    if (idx >= 0) j.manualLogs[idx] = entry; else j.manualLogs.push(entry);
-    j.manualLogs.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
-
-    saveCloudDebounced();
-    toast("Manual time updated");
-    renderJobs();
-  });
-
-  // 7) Material inline $ handling in Jobs table (kept behavior)
-  const jobTable = content.querySelector('div.block table');
-  if (jobTable){
-    jobTable.addEventListener("change",(e)=>{
-      if (!e.target.matches("input.matCost, input.matQty")) return;
-      const id = e.target.getAttribute("data-id");
-      const j = cuttingJobs.find(x=>x.id===id); if (!j) return;
-      j.materialCost = Number(document.querySelector(`input.matCost[data-id="${id}"]`)?.value)||0;
-      j.materialQty  = Number(document.querySelector(`input.matQty[data-id="${id}"]`)?.value)||0;
-      saveCloudDebounced();
-      // Keep user on Jobs page; costs summary recomputes next visit
-      renderJobs();
-    });
-  }
 }
 
 function renderInventory(){
