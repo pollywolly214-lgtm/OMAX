@@ -1295,174 +1295,129 @@ function openSettingsAndReveal(taskId){
 }
 
 function renderSettings(){
-  const content = document.getElementById("content");
+  const content = document.getElementById("content"); 
   if (!content) return;
 
-  // 0) Inject a tiny style tweak so CATEGORIES look different from ITEMS
-  if (!document.getElementById("settingsFolderCSS")){
-    const st = document.createElement("style");
-    st.id = "settingsFolderCSS";
-    st.textContent = `
-      .folder-title{ font-family: "Segoe UI", Roboto, system-ui, -apple-system, Arial, sans-serif; font-weight:800; letter-spacing:.2px; }
-      details.block > summary b{ font-weight:600; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
-      .folder-dropzone.dragover, [data-drop-menu].dragover{ background: rgba(0,0,0,.05); outline: 2px dashed #888; }
-      details.block.dragging{ opacity:.6; }
-      .hilite{ outline: 2px solid #6aa84f; border-radius: 6px; }
-    `;
-    document.head.appendChild(st);
-  }
-
-  // 1) Render the Settings VIEW (keeps all IDs/data-* your app already uses)
+  // Render the Settings UI (menus + folders + items shown as dropdowns)
   content.innerHTML = viewSettings();
 
-  // 2) Ensure folders store exists (supports nesting)
-  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
-  for (const f of window.settingsFolders){ if (!("parent" in f)) f.parent = null; }
+  /* ---------------- Search (idempotent) ---------------- */
+  // If your template includes the small search bar above the forms, wire it.
+  (function wireSearch(){
+    const input   = document.getElementById("settingsSearchInput");
+    const results = document.getElementById("settingsSearchResults");
+    if (!input || !results) return;
 
-  // ---- Utilities kept local ----
-  const getList = (type)=> type === "interval" ? tasksInterval : tasksAsReq;
-  const setNum  = (v)=> { const n = Number(v); return isFinite(n) ? n : null; };
-  const byId    = (arr,id)=> Array.isArray(arr) ? arr.find(x=>String(x.id)===String(id)) : null;
-  const focusScroll = (el)=> el?.scrollIntoView({behavior:"smooth", block:"center"});
-
-  // 3) (Re)Add the Settings search (extended earlier). No changes here beyond wiring.
-  (function ensureSearch(){
-    const block = content.querySelector(".block");
-    if (!block) return;
-    if (!document.getElementById("settingsSearchInput")){
-      const wrap = document.createElement("div");
-      wrap.className = "settings-search";
-      wrap.innerHTML = `
-        <input id="settingsSearchInput" type="search"
-               placeholder="Search items, PN, links, notes, folders… (min 2 chars)" autocomplete="off" />
-        <div id="settingsSearchResults" class="search-results"></div>`;
-      const addForms = block.querySelector(".add-forms");
-      block.insertBefore(wrap, addForms || block.firstChild);
+    const toText = v => (v == null ? "" : String(v));
+    function buildIndex(){
+      const items = [];
+      (Array.isArray(tasksInterval)?tasksInterval:[]).forEach(t=>{
+        items.push({ id:t.id, title:t.name||"", type:"interval",
+                     meta:[ t.interval?`${t.interval} hrs`:null, t.pn||null ].filter(Boolean),
+                     q:[t.name,t.pn,t.manualLink,t.storeLink].map(toText).join(" ").toLowerCase() });
+      });
+      (Array.isArray(tasksAsReq)?tasksAsReq:[]).forEach(t=>{
+        items.push({ id:t.id, title:t.name||"", type:"asreq",
+                     meta:[ t.condition||"As required", t.pn||null ].filter(Boolean),
+                     q:[t.name,t.condition,t.pn,t.manualLink,t.storeLink].map(toText).join(" ").toLowerCase() });
+      });
+      return items;
     }
+    function renderResults(list){
+      if (!list.length){ results.style.display="none"; results.innerHTML=""; return; }
+      results.style.display="block";
+      results.innerHTML = list.map(it=>`
+        <div class="search-item" data-id="${it.id}">
+          <div class="si-title">${it.title}</div>
+          <div class="si-meta">
+            <span class="badge">${it.type==="interval"?"Interval":"As required"}</span>
+            ${it.meta.map(m=>`<span class="muted">${m}</span>`).join("")}
+          </div>
+        </div>`).join("");
+    }
+    const idx = buildIndex();
+    input.addEventListener("input", debounce(()=>{
+      const q = input.value.trim().toLowerCase();
+      if (q.length < 2){ renderResults([]); return; }
+      renderResults(idx.filter(it=>it.q.includes(q)));
+    }, 150));
+    results.addEventListener("click", (e)=>{
+      const row = e.target.closest(".search-item"); if (!row) return;
+      const id = row.getAttribute("data-id");
+      const el = content.querySelector(`[data-task-id="${id}"]`);
+      if (el){ el.open = true; el.scrollIntoView({behavior:"smooth", block:"center"}); }
+    });
   })();
 
-  const qInput   = document.getElementById("settingsSearchInput");
-  const qResults = document.getElementById("settingsSearchResults");
-
-  function buildIndex(){
-    const rows = [];
-    const toText = v => (v==null ? "" : String(v));
-    const folderName = (fid)=>{
-      if (!fid) return "Root";
-      const f = window.settingsFolders.find(x=>x.id===fid);
-      return f ? f.name : "Root";
-    };
-    const pushTask = (t, type)=>{
-      rows.push({
-        kind: "task",
-        id: t.id,
-        type,
-        title: t.name || "",
-        folder: folderName(t.cat),
-        q: [
-          t.name, t.pn, t.manualLink, t.storeLink,
-          (type==="interval" ? `${t.interval} hrs` : (t.condition||"as required")),
-          folderName(t.cat)
-        ].map(toText).join(" ").toLowerCase()
-      });
-      if (Array.isArray(t.parts)){
-        for (const p of t.parts){
-          rows.push({
-            kind: "subpart",
-            id: t.id, pid: p.pid, type,
-            title: `${p.name||"(part)"} — ${t.name}`,
-            folder: folderName(t.cat),
-            q: [p.name, p.pn, p.link, p.note, t.name, folderName(t.cat)].map(toText).join(" ").toLowerCase()
-          });
-        }
-      }
-    };
-    (Array.isArray(tasksInterval)?tasksInterval:[]).forEach(t => pushTask(t,"interval"));
-    (Array.isArray(tasksAsReq)?tasksAsReq:[]).forEach(t => pushTask(t,"asreq"));
-    // Folders themselves (so searches can jump-open them)
-    for (const f of window.settingsFolders){
-      rows.push({
-        kind: "folder",
-        fid: f.id,
-        type: "both",
-        title: f.name,
-        folder: "—",
-        q: f.name.toLowerCase()
-      });
+  /* ------------- Inline edit + actions (items) ---------- */
+  // Interval list edits
+  document.getElementById("intervalList")?.addEventListener("input",(e)=>{
+    const input = e.target;
+    const id = input.getAttribute("data-id");
+    const key = input.getAttribute("data-k");
+    const t = tasksInterval.find(x=>x.id===id); if (!t) return;
+    let val = input.value;
+    if (key==="interval" || key==="sinceBase" || key==="price"){ val = Number(val); if (!isFinite(val)) val = null; }
+    t[key] = val;
+    saveCloudDebounced();
+  });
+  document.getElementById("intervalList")?.addEventListener("click",(e)=>{
+    const rm = e.target.closest("[data-remove]");
+    const comp = e.target.closest("[data-complete]");
+    if (rm){
+      const id = rm.getAttribute("data-remove");
+      tasksInterval = tasksInterval.filter(x=>x.id!==id);
+      saveCloudDebounced(); toast("Removed"); renderSettings();
     }
-    return rows;
-  }
-  function renderQResults(list){
-    if (!qResults) return;
-    if (!list.length){ qResults.style.display="none"; qResults.innerHTML=""; return; }
-    qResults.style.display="block";
-    qResults.innerHTML = list.map(it=>`
-      <div class="search-item" data-kind="${it.kind}" data-id="${it.id||""}" data-pid="${it.pid||""}" data-fid="${it.fid||""}" data-type="${it.type}">
-        <div class="si-title">${it.title}</div>
-        <div class="si-meta">
-          ${it.kind==="folder" ? `<span class="badge">Folder</span>` : `<span class="badge">${it.type==="interval"?"Interval":"As req."}</span>`}
-          ${it.folder ? `<span class="muted">${it.folder}</span>` : ""}
-        </div>
-      </div>`).join("");
-  }
-  let idx = buildIndex();
-  function runSearch(q){
-    const s = (q||"").toLowerCase().trim();
-    if (s.length < 2){ renderQResults([]); return; }
-    const terms = s.split(/\s+/).filter(Boolean);
-    const scored = idx.map(it=>{
-      let score=0;
-      for (const term of terms){
-        if ((it.q||"").includes(term)) score += 1;
-        if ((it.title||"").toLowerCase().includes(term)) score += 2;
-      }
-      return {it, score};
-    }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,30).map(x=>x.it);
-    renderQResults(scored);
-  }
-  if (qInput && !qInput.__wired){
-    qInput.__wired = true;
-    qInput.addEventListener("input", ()=> runSearch(qInput.value));
-    qInput.addEventListener("focus", ()=> { idx = buildIndex(); });
-  }
-  if (qResults && !qResults.__wired){
-    qResults.__wired = true;
-    qResults.addEventListener("click",(e)=>{
-      const item = e.target.closest(".search-item"); if (!item) return;
-      const id   = item.getAttribute("data-id");
-      const pid  = item.getAttribute("data-pid") || "";
-      const fid  = item.getAttribute("data-fid") || "";
-      const type = item.getAttribute("data-type");
-      location.hash = "#/settings";
-      // Open right menu
-      const menuRoot = content.querySelector(type==="interval" ? '[data-menu="interval"]' : type==="asreq" ? '[data-menu="asreq"]' : '[data-menu="interval"]');
-      if (menuRoot) menuRoot.open = true;
-      // Open folder if provided
-      if (fid){
-        const fold = content.querySelector(`details.folder[data-folder-id="${fid}"]`);
-        if (fold) fold.open = true;
-      }
-      // Open card
-      if (id){
-        const card = content.querySelector(`details.block[data-task-id="${id}"]`);
-        if (card){ card.open = true; focusScroll(card); }
-      }
-      if (pid){
-        const pr = content.querySelector(`[data-part-row][data-parent="${id}"][data-part-id="${pid}"]`);
-        pr?.classList.add("hilite");
-        setTimeout(()=> pr?.classList.remove("hilite"), 1500);
-      }
-      qResults.style.display="none"; if (qInput) qInput.value = "";
-    });
-  }
+    if (comp){
+      completeTask(comp.getAttribute("data-complete"));
+    }
+  });
 
-  // 4) Top-level add forms (kept)
+  // As-required list edits
+  document.getElementById("asreqList")?.addEventListener("input",(e)=>{
+    const input = e.target;
+    const id = input.getAttribute("data-id");
+    const key = input.getAttribute("data-k");
+    const t = tasksAsReq.find(x=>x.id===id); if (!t) return;
+    t[key] = input.value;
+    if (key==="price") t[key] = Number(t[key]) || null;
+    saveCloudDebounced();
+  });
+  document.getElementById("asreqList")?.addEventListener("click",(e)=>{
+    const rm = e.target.closest("[data-remove]");
+    if (rm){
+      const id   = rm.getAttribute("data-remove");
+      const from = rm.getAttribute("data-from");
+      if (from==="asreq") tasksAsReq = tasksAsReq.filter(x=>x.id!==id);
+      saveCloudDebounced(); toast("Removed"); renderSettings();
+    }
+  });
+
+  /* ------------- Add task (supports either layout) ------ */
+  // New “single Add Task” form (if present)
+  document.getElementById("addTaskForm")?.addEventListener("submit",(e)=>{
+    e.preventDefault();
+    const name = (document.getElementById("at_name")?.value||"").trim();
+    const mode = (document.getElementById("at_mode")?.value||"interval"); // "interval" | "asreq"
+    if (!name){ toast("Enter task name"); return; }
+    if (mode === "interval"){
+      let hours = Number(document.getElementById("at_interval")?.value);
+      if (!isFinite(hours) || hours<=0){ hours = DAILY_HOURS; }
+      tasksInterval.push({ id: genId(name), name, interval: hours, sinceBase: null, anchorTotal: null, manualLink:"", storeLink:"" });
+    }else{
+      const cond = (document.getElementById("at_condition")?.value||"As required").trim();
+      tasksAsReq.push({ id: genId(name), name, condition: cond, manualLink:"", storeLink:"" });
+    }
+    saveCloudDebounced(); renderSettings();
+  });
+  // Backward-compatible: if your template still has two separate add forms
   document.getElementById("addIntervalForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = document.getElementById("ai_name").value.trim();
     const interval = Number(document.getElementById("ai_interval").value);
-    if (!name || !isFinite(interval) || interval <= 0){ toast("Enter valid name + interval"); return; }
-    tasksInterval.push({ id: genId(name), name, interval, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"", price:null, cat:null, parts:[] });
+    if (!name || !isFinite(interval) || interval<=0){ toast("Enter valid name + interval"); return; }
+    tasksInterval.push({ id: genId(name), name, interval, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" });
     saveCloudDebounced(); renderSettings();
   });
   document.getElementById("addAsReqForm")?.addEventListener("submit",(e)=>{
@@ -1470,288 +1425,171 @@ function renderSettings(){
     const name = document.getElementById("ar_name").value.trim();
     const cond = document.getElementById("ar_condition").value.trim();
     if (!name){ toast("Enter name"); return; }
-    tasksAsReq.push({ id: genId(name), name, condition: cond||"As required", manualLink:"", storeLink:"", pn:"", price:null, cat:null, parts:[] });
+    tasksAsReq.push({ id: genId(name), name, condition: cond||"As required", manualLink:"", storeLink:"" });
     saveCloudDebounced(); renderSettings();
   });
 
-  // 5) Folder controls (root + nested)
+  /* ---------------- Folder helpers/state ---------------- */
+  // Shared category tree. Persisted if your snapshot/adoptState include it.
+  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
+
+  const byIdFolder = (fid)=> window.settingsFolders.find(f=>String(f.id)===String(fid));
+  const isAncestor = (maybeAncestor, child)=>{
+    if (!maybeAncestor || !child) return false;
+    let cur = child.parent||null;
+    while (cur){ if (cur === maybeAncestor.id) return true; cur = (byIdFolder(cur)||{}).parent||null; }
+    return false;
+  };
+  function saveAndRerender(){ saveCloudDebounced(); renderSettings(); }
+
+  /* ---------------- Folder CRUD buttons ----------------- */
+  // Add root folder
   document.getElementById("addFolderBtn")?.addEventListener("click", ()=>{
-    const name = prompt("New category (folder) name:","New Folder"); if (!name) return;
-    const id = genId(`cat ${name}`);
-    window.settingsFolders.push({id, name, parent: null});
-    saveCloudDebounced(); renderSettings();
+    const name = prompt("Category name:", "New Category");
+    if (!name) return;
+    window.settingsFolders.push({ id: genId(name), name, parent: null });
+    saveAndRerender();
   });
+  // Delegate: add sub-folder / rename / remove
   content.addEventListener("click",(e)=>{
-    const rn = e.target.closest("[data-rename-folder]");
-    const rm = e.target.closest("[data-remove-folder]");
-    const addSub = e.target.closest("[data-add-subfolder]");
-    if (rn){
-      const id = rn.getAttribute("data-rename-folder");
-      const f = window.settingsFolders.find(x=>x.id===id); if (!f) return;
-      const name = prompt("Rename folder:", f.name); if (!name) return;
-      f.name = name; saveCloudDebounced(); renderSettings();
+    const sub = e.target.closest("[data-add-subfolder]");
+    const ren = e.target.closest("[data-rename-folder]");
+    const del = e.target.closest("[data-remove-folder]");
+    if (sub){
+      const pid = sub.getAttribute("data-add-subfolder");
+      const name = prompt("Sub-category name:", "New Sub-category");
+      if (!name) return;
+      window.settingsFolders.push({ id: genId(name), name, parent: pid });
+      saveAndRerender();
     }
-    if (rm){
-      const id = rm.getAttribute("data-remove-folder");
-      if (!confirm("Remove folder? Subfolders will move to root and tasks become root items.")) return;
-      // Move children folders to root
-      window.settingsFolders.forEach(x=>{ if (x.parent===id) x.parent = null; });
-      // Move tasks to root (no category)
-      (Array.isArray(tasksInterval)?tasksInterval:[]).forEach(t=>{ if (t.cat===id) t.cat=null; });
-      (Array.isArray(tasksAsReq)?tasksAsReq:[]).forEach(t=>{ if (t.cat===id) t.cat=null; });
-      // Remove folder
-      window.settingsFolders = window.settingsFolders.filter(x=>x.id!==id);
-      saveCloudDebounced(); renderSettings();
+    if (ren){
+      const id = ren.getAttribute("data-rename-folder");
+      const f = byIdFolder(id); if (!f) return;
+      const name = prompt("Rename category:", f.name||"");
+      if (!name) return;
+      f.name = name; saveAndRerender();
     }
-    if (addSub){
-      const pid = addSub.getAttribute("data-add-subfolder");
-      const name = prompt("Sub-category name:","New Subfolder"); if (!name) return;
-      const id = genId(`cat ${name}`);
-      window.settingsFolders.push({id, name, parent: pid});
-      saveCloudDebounced(); renderSettings();
+    if (del){
+      const id = del.getAttribute("data-remove-folder");
+      // Prevent deleting if it has children or tasks inside
+      const hasChildren = window.settingsFolders.some(f=>f.parent===id);
+      const hasInterval = tasksInterval.some(t=>(t.cat||null)===id);
+      const hasAsReq    = tasksAsReq.some(t=>(t.cat||null)===id);
+      if (hasChildren || hasInterval || hasAsReq){ alert("Folder not empty. Move contents out before deleting."); return; }
+      window.settingsFolders = window.settingsFolders.filter(f=>f.id!==id);
+      saveAndRerender();
     }
   });
 
-  // 6) Inputs on task cards (name, interval, links, price, etc.) — unchanged
-  function handleFieldInput(e){
-    const el = e.target;
-    const id   = el.getAttribute("data-id");
-    const list = el.getAttribute("data-list"); // "interval" | "asreq"
-    const key  = el.getAttribute("data-k");
-    if (!id || !list || !key) return;
-    const listArr = getList(list);
-    const t = byId(listArr, id); if (!t) return;
-    let val = el.value;
-    if (key === "interval" || key === "sinceBase" || key === "price") val = setNum(val);
-    t[key] = val;
-    saveCloudDebounced();
-  }
-  content.querySelector("#intervalList")?.addEventListener("input", handleFieldInput);
-  content.querySelector("#asreqList")?.addEventListener("input", handleFieldInput);
+  /* ---------------- Drag & Drop (Explorer-like) ---------- */
+  // We support dragging:
+  //  - individual tasks (details[data-task-id]) between menus and folders
+  //  - folders (details.folder[data-folder-id]) into other folders or to root
+  const DRAG = { type:null, id:null, from:null }; // type: "task" | "folder"; from: "interval" | "asreq" | null
 
-  // Complete / Remove (top-level tasks)
-  function handleClicks(e){
-    const comp = e.target.closest("[data-complete]");
-    const rm   = e.target.closest("[data-remove]");
-    if (comp){
-      const id = comp.getAttribute("data-complete");
-      completeTask(id); renderSettings();
-    }
-    if (rm){
-      const id = rm.getAttribute("data-remove");
-      const from = rm.getAttribute("data-from");
-      if (from === "interval"){ tasksInterval = tasksInterval.filter(x=>x.id!==id); }
-      else if (from === "asreq"){ tasksAsReq = tasksAsReq.filter(x=>x.id!==id); }
-      saveCloudDebounced(); toast("Removed"); renderSettings();
-    }
-  }
-  content.querySelector("#intervalList")?.addEventListener("click", handleClicks);
-  content.querySelector("#asreqList")?.addEventListener("click", handleClicks);
+  // Mark draggable items
+  content.querySelectorAll('details[data-task-id]').forEach(el => el.setAttribute('draggable','true'));
+  content.querySelectorAll('details.folder').forEach(el => el.setAttribute('draggable','true'));
 
-  // 7) Sub-parts: add / edit / remove — unchanged
-  content.addEventListener("submit",(e)=>{
-    const frm = e.target.closest("[data-part-add-form]");
-    if (!frm) return;
-    e.preventDefault();
-    const parent = frm.getAttribute("data-parent");
-    const list   = frm.getAttribute("data-list");
-    const t = byId(getList(list), parent); if (!t) return;
-    t.parts = Array.isArray(t.parts) ? t.parts : [];
-    const p = {
-      pid: genId("part"),
-      name: frm.querySelector('[data-part-new="name"]')?.value.trim() || "",
-      pn:   frm.querySelector('[data-part-new="pn"]')?.value.trim() || "",
-      price:setNum(frm.querySelector('[data-part-new="price"]')?.value),
-      link: frm.querySelector('[data-part-new="link"]')?.value.trim() || "",
-      note: frm.querySelector('[data-part-new="note"]')?.value.trim() || ""
-    };
-    t.parts.push(p);
-    saveCloudDebounced(); renderSettings();
-  });
-  content.addEventListener("input",(e)=>{
-    const el = e.target.closest("[data-part-k]");
-    if (!el) return;
-    const key   = el.getAttribute("data-part-k");
-    const pid   = el.getAttribute("data-part-id");
-    const parent= el.getAttribute("data-parent");
-    const list  = el.getAttribute("data-list");
-    const t = byId(getList(list), parent); if (!t || !Array.isArray(t.parts)) return;
-    const p = t.parts.find(x=>x.pid===pid); if (!p) return;
-    p[key] = (key==="price") ? setNum(el.value) : el.value;
-    saveCloudDebounced();
-  });
-  content.addEventListener("click",(e)=>{
-    const rm = e.target.closest("[data-part-remove]");
-    if (!rm) return;
-    const pid   = rm.getAttribute("data-part-remove");
-    const parent= rm.getAttribute("data-parent");
-    const list  = rm.getAttribute("data-list");
-    const t = byId(getList(list), parent); if (!t || !Array.isArray(t.parts)) return;
-    t.parts = t.parts.filter(x=>x.pid!==pid);
-    saveCloudDebounced(); renderSettings();
-  });
-
-  // 8) Add task INSIDE a folder (kept)
-  content.addEventListener("submit",(e)=>{
-    const f = e.target.closest('[data-add-task-form]');
-    if (!f) return;
-    e.preventDefault();
-    const listType = f.getAttribute("data-list"); // interval | asreq
-    const folderId = f.getAttribute("data-folder");
-    const name = f.querySelector('[data-newtask="name"]')?.value.trim();
-    if (!name){ toast("Enter task name"); return; }
-    if (listType === "interval"){
-      const ival = Number(f.querySelector('[data-newtask="interval"]')?.value);
-      if (!isFinite(ival) || ival<=0){ toast("Enter valid interval"); return; }
-      getList("interval").push({ id: genId(name), name, interval: ival, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"", price:null, cat: (folderId==="__uncat__"? null:folderId), parts:[] });
-    }else{
-      const cond = f.querySelector('[data-newtask="condition"]')?.value.trim();
-      getList("asreq").push({ id: genId(name), name, condition: cond||"As required", manualLink:"", storeLink:"", pn:"", price:null, cat: (folderId==="__uncat__"? null:folderId), parts:[] });
-    }
-    saveCloudDebounced(); renderSettings();
-  });
-
-  // 9) DRAG & DROP — fixes:
-  //    - Drag only the INDIVIDUAL CARD (not whole list)
-  //    - Drop actually moves items, including ACROSS MENUS (Interval <-> As-Needed)
-  function wireDnD(scope){
-    const menu = content.querySelector(scope==="interval" ? '[data-menu="interval"]' : '[data-menu="asreq"]');
-    const root = content.querySelector(scope==="interval" ? "#intervalList" : "#asreqList");
-    if (!root) return;
-
-    // A) Start / end dragging (cards only)
-    root.addEventListener("dragstart",(e)=>{
-      const card = e.target.closest(`details.block[draggable="true"][data-list="${scope}"]`);
-      if (!card) return;
-      e.dataTransfer.setData("application/x-task", JSON.stringify({ id: card.getAttribute("data-task-id"), from: scope }));
-      e.dataTransfer.setData("text/plain", card.getAttribute("data-task-id")); // fallback
+  content.addEventListener("dragstart",(e)=>{
+    const task = e.target.closest('details[data-task-id]');
+    const fold = e.target.closest('details.folder');
+    if (task){
+      DRAG.type = "task";
+      DRAG.id   = task.getAttribute("data-task-id");
+      DRAG.from = task.getAttribute("data-list");   // "interval" | "asreq"
+      e.dataTransfer.setData("text/plain", DRAG.id);
       e.dataTransfer.effectAllowed = "move";
-      card.classList.add("dragging");
-    });
-    root.addEventListener("dragend",(e)=>{
-      const card = e.target.closest(`details.block[draggable="true"]`);
-      card?.classList.remove("dragging");
-    });
-
-    // B) Allow drop on folders within this menu
-    root.addEventListener("dragover",(e)=>{
-      const dz = e.target.closest(`[data-drop-folder]`);
-      if (!dz) return;
-      // Make sure we're still in the right menu scope
-      const scopeOfDZ = dz.closest('[data-dnd-scope]')?.getAttribute("data-dnd-scope");
-      if (scopeOfDZ !== scope) return;
-      e.preventDefault();
-      dz.classList.add("dragover");
-      e.dataTransfer.dropEffect = "move";
-    });
-    root.addEventListener("dragleave",(e)=>{
-      const dz = e.target.closest(`[data-drop-folder]`);
-      dz?.classList.remove("dragover");
-    });
-    root.addEventListener("drop",(e)=>{
-      const dz = e.target.closest(`[data-drop-folder]`);
-      if (!dz) return;
-      const scopeOfDZ = dz.closest('[data-dnd-scope]')?.getAttribute("data-dnd-scope");
-      if (scopeOfDZ !== scope) return;
-      e.preventDefault();
-      dz.classList.remove("dragover");
-      let payload = e.dataTransfer.getData("application/x-task") || e.dataTransfer.getData("text/plain");
-      try{ payload = JSON.parse(payload); }catch{ payload = { id: String(payload||"") }; }
-      const from = payload.from || scope;
-      const id = String(payload.id||"");
-      if (!id) return;
-
-      if (from === scope){
-        // Same-menu move → just set folder
-        const listArr = getList(scope);
-        const t = byId(listArr, id); if (!t) return;
-        const folderId = dz.getAttribute("data-drop-folder");
-        t.cat = (folderId && folderId !== "__uncat__") ? folderId : null;
-        saveCloudDebounced(); renderSettings();
-      }else{
-        // Cross-menu into specific folder inside this menu
-        moveAcrossMenus({ id, from, to: scope, folderId: dz.getAttribute("data-drop-folder") });
-      }
-    });
-
-    // C) Menu-level drop (top area of each menu)
-    menu?.addEventListener("dragover",(e)=>{
-      const dz = e.target.closest('[data-drop-menu]');
-      if (!dz) return;
-      const dest = dz.getAttribute("data-drop-menu");
-      if (dest !== scope) return;
-      e.preventDefault(); dz.classList.add("dragover"); e.dataTransfer.dropEffect="move";
-    });
-    menu?.addEventListener("dragleave",(e)=>{
-      const dz = e.target.closest('[data-drop-menu]');
-      dz?.classList.remove("dragover");
-    });
-    menu?.addEventListener("drop",(e)=>{
-      const dz = e.target.closest('[data-drop-menu]');
-      if (!dz) return;
-      const dest = dz.getAttribute("data-drop-menu");
-      if (dest !== scope) return;
-      e.preventDefault(); dz.classList.remove("dragover");
-      let payload = e.dataTransfer.getData("application/x-task") || e.dataTransfer.getData("text/plain");
-      try{ payload = JSON.parse(payload); }catch{ payload = { id: String(payload||"") }; }
-      const from = payload.from || (scope==="interval"?"asreq":"interval");
-      const id = String(payload.id||"");
-      if (!id) return;
-
-      // Cross-menu onto the menu itself → move to root of dest menu
-      moveAcrossMenus({ id, from, to: scope, folderId: null });
-    });
-  }
-
-  function moveAcrossMenus({ id, from, to, folderId }){
-    if (from === to) return;
-    const srcArr = getList(from);
-    const dstArr = getList(to);
-    const t = byId(srcArr, id); if (!t) return;
-
-    if (to === "interval"){
-      // Require an interval to join Interval menu
-      let ival = Number(t.interval);
-      if (!isFinite(ival) || ival<=0){
-        const ans = prompt("Moving to Interval maintenance. Enter Interval (hrs):","100");
-        ival = Number(ans);
-        if (!isFinite(ival) || ival<=0){ toast("Move cancelled: need a valid interval."); return; }
-      }
-      const moved = {
-        id: t.id, name: t.name, interval: ival,
-        sinceBase: t.sinceBase ?? null, anchorTotal: t.anchorTotal ?? null,
-        manualLink: t.manualLink||"", storeLink: t.storeLink||"",
-        pn: t.pn||"", price: t.price ?? null,
-        cat: folderId || null, parts: Array.isArray(t.parts)?t.parts.slice():[]
-      };
-      // remove from AsReq, push to Interval
-      tasksAsReq = srcArr.filter(x=>x.id!==t.id);
-      tasksInterval.push(moved);
-    }else{
-      // Moving to As-Needed: ensure condition text
-      const condDefault = (t.condition && String(t.condition).trim()) || "As required";
-      const cond = prompt("Moving to As-Needed. Condition/Notes:", condDefault) || condDefault;
-      const moved = {
-        id: t.id, name: t.name, condition: cond,
-        manualLink: t.manualLink||"", storeLink: t.storeLink||"",
-        pn: t.pn||"", price: t.price ?? null,
-        cat: folderId || null, parts: Array.isArray(t.parts)?t.parts.slice():[]
-      };
-      tasksInterval = srcArr.filter(x=>x.id!==t.id);
-      tasksAsReq.push(moved);
+    }else if (fold){
+      DRAG.type = "folder";
+      DRAG.id   = fold.getAttribute("data-folder-id");
+      DRAG.from = null;
+      e.dataTransfer.setData("text/plain", DRAG.id);
+      e.dataTransfer.effectAllowed = "move";
     }
-    saveCloudDebounced(); renderSettings();
+  });
+  content.addEventListener("dragend", ()=>{ DRAG.type=null; DRAG.id=null; DRAG.from=null; });
+
+  // Allow drop on folder dropzones, folder bodies, and menu dropzones
+  const isDropTarget = (el)=> el && (el.hasAttribute("data-drop-folder") || el.hasAttribute("data-folder-body") || el.hasAttribute("data-drop-menu") || el.id==="intervalList" || el.id==="asreqList");
+  content.addEventListener("dragover",(e)=>{
+    if (isDropTarget(e.target.closest("[data-drop-folder],[data-folder-body],[data-drop-menu],#intervalList,#asreqList"))){
+      e.preventDefault(); e.dataTransfer.dropEffect = "move";
+    }
+  });
+
+  // Helpers to move tasks/folders
+  function moveTask(taskId, fromList, toList, folderId){
+    if (fromList === toList){
+      // Only reparent to a folder
+      const list = (toList==="interval") ? tasksInterval : tasksAsReq;
+      const t = list.find(x=>x.id===taskId); if (!t) return false;
+      t.cat = folderId || null;
+      return true;
+    }
+    // Cross-menu move (convert)
+    if (toList === "interval"){
+      // take from asreq → interval (ask for interval hours)
+      const idx = tasksAsReq.findIndex(x=>x.id===taskId);
+      if (idx < 0) return false;
+      const src = tasksAsReq[idx];
+      let hours = Number(prompt(`Moving "${src.name}" to Interval. Enter interval hours:`, String(DAILY_HOURS)));
+      if (!isFinite(hours) || hours<=0) hours = DAILY_HOURS;
+      const neo = { id: src.id, name: src.name, interval: hours, sinceBase:null, anchorTotal:null, manualLink:src.manualLink||"", storeLink:src.storeLink||"", pn:src.pn||"", price:src.price??null, cat: folderId||null };
+      tasksAsReq.splice(idx,1);
+      tasksInterval.push(neo);
+      return true;
+    }else{
+      // interval → asreq
+      const idx = tasksInterval.findIndex(x=>x.id===taskId);
+      if (idx < 0) return false;
+      const src = tasksInterval[idx];
+      const cond = prompt(`Moving "${src.name}" to As-required. Enter condition/notes:`, "As required") || "As required";
+      const neo = { id: src.id, name: src.name, condition: cond, manualLink:src.manualLink||"", storeLink:src.storeLink||"", pn:src.pn||"", price:src.price??null, cat: folderId||null };
+      tasksInterval.splice(idx,1);
+      tasksAsReq.push(neo);
+      return true;
+    }
+  }
+  function moveFolder(folderId, newParentId){
+    const f = byIdFolder(folderId); if (!f) return false;
+    if (folderId === newParentId) return false;
+    const parent = newParentId ? byIdFolder(newParentId) : null;
+    if (parent && isAncestor(f, parent)) return false; // prevent cycles
+    f.parent = newParentId || null;
+    return true;
   }
 
-  wireDnD("interval");
-  wireDnD("asreq");
+  content.addEventListener("drop",(e)=>{
+    const zone = e.target.closest("[data-drop-folder],[data-folder-body],[data-drop-menu],#intervalList,#asreqList");
+    if (!zone || !DRAG.type) return;
+    e.preventDefault();
 
-  // 10) Save All button (optional quick save)
+    // Where did we drop?
+    const toFolder = zone.getAttribute("data-drop-folder") || zone.getAttribute("data-folder-body") || null;
+    const toMenu   = zone.getAttribute("data-drop-menu") || (zone.id==="intervalList"?"interval" : (zone.id==="asreqList"?"asreq": null));
+
+    let changed = false;
+    if (DRAG.type === "task"){
+      // When dropping onto a folder body/dropzone, keep current menu unless a menu dropzone is also specified
+      const targetMenu = toMenu || DRAG.from; // allow explicit cross-menu via menu dropzone
+      changed = moveTask(DRAG.id, DRAG.from, targetMenu, toFolder);
+    }else if (DRAG.type === "folder"){
+      // Folders can be nested into other folders, or moved to root by dropping into a menu dropzone
+      if (toMenu){ changed = moveFolder(DRAG.id, null); }
+      else if (toFolder){ changed = moveFolder(DRAG.id, toFolder); }
+    }
+
+    if (changed){ saveAndRerender(); }
+  });
+
+  /* ---------------- Save All (no-op wrapper) ------------- */
   document.getElementById("saveTasksBtn")?.addEventListener("click", ()=>{
-    saveCloudDebounced();
-    toast("Saved");
+    saveCloudDebounced(); toast("Saved");
   });
 }
+
 
 function renderJobs(){
   const content = document.getElementById("content"); 
