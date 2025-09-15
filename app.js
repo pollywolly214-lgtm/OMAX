@@ -1540,9 +1540,148 @@ function renderSettings(){
     const el = e.target;
     // item field edits
     const id = el.getAttribute("data-id");
-    const list = el.getAttribute("data-list")
+    const list = el.getAttribute("data-list");
+    const key = el.getAttribute("data-k");
+    if (id && list && key){
+      const ref = byIdItem(id); if (!ref || ref.list !== list) return;
+      let val = el.value;
+      if (key==="interval" || key==="sinceBase" || key==="price") val = setNum(val);
+      ref.ref[key] = val;
+      saveCloudDebounced();
+      return;
+    }
+    // sub-part edits
+    const pk = el.getAttribute("data-part-k");
+    if (pk){
+      const pid   = el.getAttribute("data-part-id");
+      const parent= el.getAttribute("data-parent");
+      const li    = el.getAttribute("data-list");
+      const ref = byIdItem(parent); if (!ref || ref.list !== li) return;
+      ref.ref.parts = Array.isArray(ref.ref.parts) ? ref.ref.parts : [];
+      const p = ref.ref.parts.find(x=>x.pid===pid); if (!p) return;
+      p[pk] = (pk==="price") ? setNum(el.value) : el.value;
+      saveCloudDebounced();
+    }
+  });
+  content.addEventListener("submit",(e)=>{
+    const frm = e.target.closest("[data-part-add-form]");
+    if (!frm) return;
+    e.preventDefault();
+    const parent = frm.getAttribute("data-parent");
+    const li     = frm.getAttribute("data-list");
+    const ref = byIdItem(parent); if (!ref || ref.list !== li) return;
+    ref.ref.parts = Array.isArray(ref.ref.parts) ? ref.ref.parts : [];
+    ref.ref.parts.push({
+      pid: genId("part"),
+      name: frm.querySelector('[data-part-new="name"]')?.value.trim() || "",
+      pn:   frm.querySelector('[data-part-new="pn"]')?.value.trim() || "",
+      price:setNum(frm.querySelector('[data-part-new="price"]')?.value),
+      link: frm.querySelector('[data-part-new="link"]')?.value.trim() || "",
+      note: frm.querySelector('[data-part-new="note"]')?.value.trim() || ""
+    });
+    saveCloudDebounced(); renderSettings();
+  });
+  content.addEventListener("click",(e)=>{
+    // complete/remove item
+    const comp = e.target.closest("[data-complete]");
+    const rm   = e.target.closest("[data-remove]");
+    if (comp){ completeTask(comp.getAttribute("data-complete")); renderSettings(); return; }
+    if (rm){
+      const id = rm.getAttribute("data-remove");
+      const from = rm.getAttribute("data-from"); // "interval" | "asreq"
+      if (from==="interval"){ tasksInterval = tasksInterval.filter(x=>x.id!==id); }
+      else if (from==="asreq"){ tasksAsReq = tasksAsReq.filter(x=>x.id!==id); }
+      saveCloudDebounced(); toast("Removed"); renderSettings();
+      return;
+    }
+    // remove sub-part
+    const pr = e.target.closest("[data-part-remove]");
+    if (pr){
+      const pid   = pr.getAttribute("data-part-remove");
+      const parent= pr.getAttribute("data-parent");
+      const li    = pr.getAttribute("data-list");
+      const ref = byIdItem(parent); if (!ref || ref.list !== li) return;
+      ref.ref.parts = (ref.ref.parts||[]).filter(x=>x.pid!==pid);
+      saveCloudDebounced(); renderSettings();
+    }
+  });
 
+  // ---------- Drag & Drop (Explorer-like) ----------
+  // Mark everything draggable (items + folders)
+  content.querySelectorAll('details.item').forEach(el => el.setAttribute('draggable','true'));
+  content.querySelectorAll('details.folder').forEach(el => el.setAttribute('draggable','true'));
 
+  const DRAG = { type:null, id:null, list:null }; // type: "item"|"folder", id: itemId/folderId, list for items
+
+  content.addEventListener("dragstart",(e)=>{
+    const item = e.target.closest('details.item');
+    const fold = e.target.closest('details.folder');
+    if (item){
+      DRAG.type = "item";
+      DRAG.id   = item.getAttribute("data-task-id");
+      DRAG.list = item.getAttribute("data-list"); // "interval"|"asreq"
+      item.classList.add("dragging");
+      e.dataTransfer.setData("text/plain", DRAG.id);
+      e.dataTransfer.effectAllowed = "move";
+    }else if (fold){
+      DRAG.type = "folder";
+      DRAG.id   = fold.getAttribute("data-folder-id");
+      fold.classList.add("dragging");
+      e.dataTransfer.setData("text/plain", DRAG.id);
+      e.dataTransfer.effectAllowed = "move";
+    }
+  });
+  content.addEventListener("dragend",(e)=>{
+    const el = e.target.closest('details.item,details.folder'); el?.classList.remove("dragging");
+    DRAG.type=null; DRAG.id=null; DRAG.list=null;
+  });
+
+  const isDZ = (el)=> !!el && (el.hasAttribute("data-drop-folder") || el.hasAttribute("data-drop-root"));
+  content.addEventListener("dragover",(e)=>{
+    const dz = e.target.closest("[data-drop-folder],[data-drop-root]");
+    if (!isDZ(dz)) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = "move";
+    dz.classList.add("dragover");
+  });
+  content.addEventListener("dragleave",(e)=>{
+    const dz = e.target.closest("[data-drop-folder],[data-drop-root]");
+    dz?.classList.remove("dragover");
+  });
+
+  content.addEventListener("drop",(e)=>{
+    const dz = e.target.closest("[data-drop-folder],[data-drop-root]");
+    if (!isDZ(dz) || !DRAG.type) return;
+    e.preventDefault(); dz.classList.remove("dragover");
+
+    // Destination
+    const toFolder = dz.hasAttribute("data-drop-folder") ? dz.getAttribute("data-drop-folder") : null; // null means root
+
+    let changed = false;
+    if (DRAG.type === "item"){
+      const ref = byIdItem(DRAG.id);
+      if (!ref) return;
+      ref.ref.cat = toFolder || null;  // Just re-parent; NO type conversion anymore
+      changed = true;
+    }else if (DRAG.type === "folder"){
+      const f = byIdFolder(DRAG.id); if (!f) return;
+      if (toFolder){
+        const parent = byIdFolder(toFolder);
+        if (parent && !isAncestor(f, parent) && f.id !== parent.id){
+          f.parent = parent.id; changed = true;
+        }
+      }else{
+        // Move to root
+        f.parent = null; changed = true;
+      }
+    }
+    if (changed){ saveCloudDebounced(); renderSettings(); }
+  });
+
+  // ---------- Save ----------
+  document.getElementById("saveTasksBtn")?.addEventListener("click", ()=>{
+    saveCloudDebounced(); toast("Saved");
+  });
+}
 
 function renderJobs(){
   const content = document.getElementById("content"); 
