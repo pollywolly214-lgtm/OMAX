@@ -470,6 +470,33 @@ function computeJobEfficiency(job){
   return result;
 }
 
+function computeRequiredDaily(job){
+  if (!job || !job.startISO || !job.dueISO) {
+    return { remainingHours: 0, remainingDays: 0, requiredPerDay: 0 };
+  }
+
+  // How many hours we’ve actually accumulated so far (manual override + 8h/day carry)
+  const eff = computeJobEfficiency(job);
+  const planned = Number(job.estimateHours) || 0;
+
+  const remainingHours = Math.max(0, planned - eff.actualHours);
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const due   = new Date(job.dueISO); due.setHours(0,0,0,0);
+
+  // days left including today (if due is not in the past)
+  let remainingDays;
+  if (today > due) {
+    remainingDays = 0;
+  } else {
+    remainingDays = Math.max(1, Math.floor((due - today) / (24*60*60*1000)) + 1);
+  }
+
+  const requiredPerDay = remainingDays > 0 ? (remainingHours / remainingDays) : Infinity;
+  return { remainingHours, remainingDays, requiredPerDay };
+}
+
+
 // --------- Fuzzy search helpers (new) ---------
 function normalizeText(s){
   return (s || "")
@@ -984,34 +1011,26 @@ function viewJobs(){
   </section>`;
 }
 
-// Make the whole calendar interactive via delegation
 function wireCalendarBubbles(){
   const months = $("#months");
   if (!months) return;
 
   let hoverTarget = null;
 
-  // Show bubble on hover anywhere on the chip/bar
   months.addEventListener("mouseover", (e) => {
     const el = e.target.closest("[data-cal-job], [data-cal-task]");
     if (!el || el === hoverTarget) return;
     hoverTarget = el;
-
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
     if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el);
   });
 
-  // Hide when leaving the element (not when moving inside it)
   months.addEventListener("mouseout", (e) => {
     const from = e.target.closest("[data-cal-job], [data-cal-task]");
     const to   = e.relatedTarget && e.relatedTarget.closest("[data-cal-job], [data-cal-task]");
-    if (from && !to) {
-      hoverTarget = null;
-      if (typeof hideBubbleSoon === "function") hideBubbleSoon();
-    }
+    if (from && !to) { hoverTarget = null; hideBubbleSoon(); }
   });
 
-  // Also support click/tap to open bubbles
   months.addEventListener("click", (e) => {
     const el = e.target.closest("[data-cal-job], [data-cal-task]");
     if (!el) return;
@@ -1025,7 +1044,6 @@ function renderCalendar(){
   if (!container) return;
   container.innerHTML = "";
 
-  // Maintenance due map (per-day)
   const dueMap = {};
   tasksInterval.forEach(t => {
     const nd = nextDue(t);
@@ -1034,7 +1052,6 @@ function renderCalendar(){
     (dueMap[key] ||= []).push({ type:"task", id:String(t.id), name:t.name });
   });
 
-  // Cutting jobs map (expanded per day)
   const jobsMap = {};
   cuttingJobs.forEach(j => {
     if (!j.startISO || !j.dueISO) return;
@@ -1090,20 +1107,18 @@ function renderCalendar(){
 
       const key = ymd(date);
 
-      // Maintenance chips
       (dueMap[key] || []).forEach(ev => {
         const chip = document.createElement("div");
         chip.className = "event generic cal-task";
-        chip.setAttribute("data-cal-task", ev.id);   // robust attribute
+        chip.setAttribute("data-cal-task", ev.id);
         chip.textContent = `${ev.name} (due)`;
         cell.appendChild(chip);
       });
 
-      // Cutting job bars
       (jobsMap[key] || []).forEach(ev => {
         const bar = document.createElement("div");
         bar.className = "job-bar cal-job";
-        bar.setAttribute("data-cal-job", ev.id);     // robust attribute
+        bar.setAttribute("data-cal-job", ev.id);
         bar.textContent = ev.name;
         cell.appendChild(bar);
       });
@@ -1125,16 +1140,15 @@ function renderCalendar(){
     container.appendChild(monthDiv);
   }
 
-  // Delegated listeners (hover anywhere on chip/bar)
-  wireCalendarBubbles();
+  wireCalendarBubbles(); // <— one time per render
 }
 
 /* --------- Calendar Hover Bubbles --------- */
 
 // ---- Bubble helpers (replace your current makeBubble / hide helpers if different)
 let bubbleTimer = null;
-function hideBubbleSoon(){ clearTimeout(bubbleTimer); bubbleTimer = setTimeout(hideBubble, 180); }
 function hideBubble(){ const b = document.getElementById("bubble"); if (b) b.remove(); }
+function hideBubbleSoon(){ clearTimeout(bubbleTimer); bubbleTimer = setTimeout(hideBubble, 180); }
 
 function makeBubble(anchor){
   hideBubble();
@@ -1144,14 +1158,13 @@ function makeBubble(anchor){
   document.body.appendChild(b);
 
   const rect = anchor.getBoundingClientRect();
-  // Position so it TOUCHES the chip/bar with no visible gap
+  // Touch the element (no gap)
   b.style.left = `${rect.left + window.scrollX}px`;
-  b.style.top  = `${rect.bottom + window.scrollY}px`; // no +6 offset
+  b.style.top  = `${rect.bottom + window.scrollY}px`;
   b.addEventListener("mouseenter", ()=>clearTimeout(bubbleTimer));
   b.addEventListener("mouseleave", hideBubbleSoon);
   return b;
 }
-
 
 // === REPLACE your existing showTaskBubble WITH THIS VERSION ===
 function showTaskBubble(taskId, anchor){
@@ -1199,87 +1212,68 @@ function showTaskBubble(taskId, anchor){
   };
 }
 
-// === KEEP these as-is; if you accidentally removed them, paste these versions ===
 function showJobBubble(jobId, anchor){
-  // Be robust to id type (string vs number)
-  const j = cuttingJobs.find(x => String(x.id) === String(jobId));
-
   const b = makeBubble(anchor);
 
-  if (!j) {
+  try {
+    const j = cuttingJobs.find(x => String(x.id) === String(jobId));
+    if (!j) {
+      b.innerHTML = `<div class="bubble-title">Job</div>
+                     <div class="bubble-kv"><span>Info:</span><span>Job not found (id: ${jobId})</span></div>`;
+      return;
+    }
+
+    const eff = computeJobEfficiency(j);
+    const req = computeRequiredDaily(j);
+
+    const sign  = eff.gainLoss >= 0 ? "+" : "−";
+    const money = Math.abs(eff.gainLoss).toFixed(2);
+
+    const reqCell = (req.requiredPerDay === Infinity)
+      ? `<span class="danger">Past due / no days remaining</span>`
+      : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
+
+    const noteAuto = eff.usedAutoFromManual
+      ? `<div class="small"><strong>Auto from last manual</strong>: continuing at ${DAILY_HOURS} hr/day.</div>`
+      : (eff.usedFromStartAuto ? `<div class="small"><strong>Auto</strong>: assuming ${DAILY_HOURS} hr/day from start.</div>` : ``);
+
+    const startTxt = j.startISO ? new Date(j.startISO).toDateString() : "—";
+    const dueTxt   = j.dueISO   ? new Date(j.dueISO).toDateString()   : "—";
+
     b.innerHTML = `
-      <div class="bubble-title">Job</div>
-      <div class="bubble-kv"><span>Info:</span><span>Job not found (id: ${jobId})</span></div>
+      <div class="bubble-title">${j.name}</div>
+      <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
+      <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
+      <div class="bubble-kv"><span>Schedule:</span><span>${startTxt} → ${dueTxt}</span></div>
+      <div class="bubble-kv"><span>Hours Δ:</span>
+        <span>${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(1)} (exp ${eff.expectedHours.toFixed(1)} vs act ${eff.actualHours.toFixed(1)})</span>
+      </div>
+      <div class="bubble-kv"><span>Gain/Loss:</span><span>${sign}$${money} @ $${eff.rate}/hr</span></div>
+      <div class="bubble-kv"><span>Required/day:</span><span>${reqCell}</span></div>
+      <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
+      ${noteAuto}
+      <div class="bubble-actions">
+        <button type="button" data-bbl-edit-job="${j.id}">Edit</button>
+        <button type="button" class="danger" data-bbl-remove-job="${j.id}">Remove</button>
+      </div>
     `;
-    return;
+
+    const removeBtn = b.querySelector("[data-bbl-remove-job]");
+    const editBtn   = b.querySelector("[data-bbl-edit-job]");
+    if (removeBtn) removeBtn.onclick = () => {
+      cuttingJobs = cuttingJobs.filter(x => String(x.id) !== String(j.id));
+      saveCloudDebounced(); toast("Removed"); hideBubble(); route();
+    };
+    if (editBtn) editBtn.onclick = () => { hideBubble(); openJobsEditor(j.id); };
+
+  } catch (err) {
+    console.error(err);
+    b.innerHTML = `<div class="bubble-title">Error</div>
+                   <div class="bubble-kv"><span>Details:</span><span>${err.message || err}</span></div>`;
   }
-
-  const eff = computeJobEfficiency(j);   // $/hr model
-  const req = computeRequiredDaily(j);
-
-  const sign  = eff.gainLoss >= 0 ? "+" : "−";
-  const money = Math.abs(eff.gainLoss).toFixed(2);
-
-  const reqCell = (req.requiredPerDay === Infinity)
-    ? `<span class="danger">Past due / no days remaining</span>`
-    : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
-
-  const noteAuto = eff.usedAutoFromManual
-    ? `<div class="small"><strong>Auto from last manual</strong>: continuing at ${DAILY_HOURS} hr/day.</div>`
-    : (eff.usedFromStartAuto ? `<div class="small"><strong>Auto</strong>: assuming ${DAILY_HOURS} hr/day from start.</div>` : ``);
-
-  const startTxt = j.startISO ? new Date(j.startISO).toDateString() : "—";
-  const dueTxt   = j.dueISO   ? new Date(j.dueISO).toDateString()   : "—";
-
-  b.innerHTML = `
-    <div class="bubble-title">${j.name}</div>
-    <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
-    <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
-    <div class="bubble-kv"><span>Schedule:</span><span>${startTxt} → ${dueTxt}</span></div>
-    <div class="bubble-kv"><span>Hours Δ:</span>
-      <span>${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(1)} (exp ${eff.expectedHours.toFixed(1)} vs act ${eff.actualHours.toFixed(1)})</span>
-    </div>
-    <div class="bubble-kv"><span>Gain/Loss:</span><span>${sign}$${money} @ $${eff.rate}/hr</span></div>
-    <div class="bubble-kv"><span>Required/day:</span><span>${reqCell}</span></div>
-    <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
-    ${noteAuto}
-    <div class="bubble-actions">
-      <button type="button" data-bbl-edit-job="${j.id}">Edit</button>
-      <button type="button" class="danger" data-bbl-remove-job="${j.id}">Remove</button>
-    </div>
-  `;
-
-  const removeBtn = b.querySelector("[data-bbl-remove-job]");
-  const editBtn   = b.querySelector("[data-bbl-edit-job]");
-  if (removeBtn) removeBtn.onclick = () => {
-    cuttingJobs = cuttingJobs.filter(x => String(x.id) !== String(j.id));
-    saveCloudDebounced(); toast("Removed"); hideBubble(); route();
-  };
-  if (editBtn) editBtn.onclick = () => { hideBubble(); openJobsEditor(j.id); };
 }
 
-function completeTask(taskId){
-  const t = tasksInterval.find(x => String(x.id) === String(taskId));
-  if (!t) return;
-  const cur = RENDER_TOTAL ?? currentTotal();
-  t.anchorTotal = cur != null ? cur : 0; // reset anchor to current total
-  t.sinceBase   = 0;                     // since = 0 going forward
-  saveCloudDebounced();
-  toast("Task completed");
-  route(); // re-render calendar and dashboard
-}
 
-/* -------- Completion & quick add -------- */
-function completeTask(taskId){
-  const t = tasksInterval.find(x => x.id === taskId);
-  if (!t) return;
-  const cur = RENDER_TOTAL ?? currentTotal();
-  t.anchorTotal = cur != null ? cur : 0;
-  t.sinceBase = 0;
-  saveCloudDebounced();
-  toast("Task completed");
-  route();
-}
 function quickAddFromCalendar({ name, interval, condition }){
   const id = genId(name);
   if (interval && interval > 0) {
@@ -1361,57 +1355,54 @@ function viewInventory(){
 }
 
 function renderDashboard(){
-  // Compute current totals before rendering
+  // recalc snapshot values used by nextDue()
   RENDER_TOTAL = currentTotal();
   RENDER_DELTA = deltaSinceLast();
 
-  // Inject the dashboard UI
   $("#content").innerHTML = viewDashboard();
 
-  // Bind: Log Hours
+  // log hours
   const logBtn = $("#logBtn");
   if (logBtn) {
     logBtn.onclick = () => {
       const v = parseFloat($("#totalInput").value);
-      if (!isNaN(v)) {
+      if (isFinite(v)) {
         totalHistory.push({ dateISO: new Date().toISOString(), hours: v });
         saveCloudDebounced();
         toast("Logged");
-        route(); // re-render to refresh calendar and next due
+        renderDashboard(); // re-render UI
       }
     };
   }
 
-  // Bind: Quick Add Task (from calendar toolbar)
-  const qaForm = $("#quickAddForm");
-  if (qaForm) {
-    qaForm.addEventListener("submit",(e)=>{
+  // quick add
+  const qa = $("#quickAddForm");
+  if (qa) {
+    qa.onsubmit = (e)=>{
       e.preventDefault();
       const name = $("#qa_name").value.trim();
-      const intervalStr = $("#qa_interval").value;
-      const condition = $("#qa_condition").value.trim();
-      const interval = intervalStr === "" ? null : parseFloat(intervalStr);
-      if (!name) { toast("Enter a task name"); return; }
-      if (interval !== null && !(interval > 0)) { toast("Interval must be > 0"); return; }
-      quickAddFromCalendar({ name, interval, condition });
-    });
+      const intv = parseFloat($("#qa_interval").value);
+      const cond = $("#qa_condition").value.trim();
+      if (!name) return;
+      quickAddFromCalendar({ name, interval: isFinite(intv)?intv:null, condition: cond });
+    };
   }
 
-  // Compute "Next Due" box
-  const nds = tasksInterval
-    .map(t => ({ t, nd: nextDue(t) }))
-    .filter(x => x.nd)
-    .sort((a,b) => a.nd.due - b.nd.due);
-
-  const ndBox = $("#nextDueBox");
-  if (ndBox) {
-    ndBox.textContent = nds.length
-      ? `${nds[0].t.name}: ${Math.max(0, nds[0].nd.remain.toFixed(0))} hrs → ${nds[0].nd.due.toDateString()} (in ${nds[0].nd.days} days)`
+  // fill “Next Due”
+  const box = $("#nextDueBox");
+  if (box) {
+    const list = tasksInterval
+      .map(t => ({ t, nd: nextDue(t) }))
+      .filter(x => x.nd)
+      .sort((a,b) => a.nd.due - b.nd.due);
+    box.innerHTML = list.length
+      ? `${list[0].t.name} — ${list[0].nd.remain.toFixed(0)} hrs → ${list[0].nd.due.toDateString()}`
       : "—";
   }
 
-  // Finally, draw the calendar grid + events
+  // render calendar and pump widget
   renderCalendar();
+  renderPumpWidget(); // your pump card renderer
 }
 
 function renderSettings(){
@@ -2020,63 +2011,6 @@ function showInfoBubble(anchor){
     </div>
   `;
 }
-
-function showJobBubble(jobId, anchor){
-  const j = cuttingJobs.find(x => String(x.id) === String(jobId));
-  const b = makeBubble(anchor);
-
-  if (!j) {
-    b.innerHTML = `<div class="bubble-title">Job</div>
-                   <div class="bubble-kv"><span>Info:</span><span>Job not found (id: ${jobId})</span></div>`;
-    return;
-  }
-
-  const eff = computeJobEfficiency(j);
-  const req = computeRequiredDaily(j);
-  const sign  = eff.gainLoss >= 0 ? "+" : "−";
-  const money = Math.abs(eff.gainLoss).toFixed(2);
-  const reqCell = (req.requiredPerDay === Infinity)
-    ? `<span class="danger">Past due / no days remaining</span>`
-    : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
-  const noteAuto = eff.usedAutoFromManual
-    ? `<div class="small"><strong>Auto from last manual</strong>: continuing at ${DAILY_HOURS} hr/day.</div>`
-    : (eff.usedFromStartAuto ? `<div class="small"><strong>Auto</strong>: assuming ${DAILY_HOURS} hr/day from start.</div>` : ``);
-
-  b.innerHTML = `
-    <div class="bubble-title">${j.name}</div>
-    <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
-    <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
-    <div class="bubble-kv"><span>Schedule:</span><span>${(new Date(j.startISO)).toDateString()} → ${(new Date(j.dueISO)).toDateString()}</span></div>
-    <div class="bubble-kv"><span>Hours Δ:</span>
-      <span>${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(1)} (exp ${eff.expectedHours.toFixed(1)} vs act ${eff.actualHours.toFixed(1)})</span>
-    </div>
-    <div class="bubble-kv"><span>Gain/Loss:</span><span>${sign}$${money} @ $${eff.rate}/hr</span></div>
-    <div class="bubble-kv"><span>Required/day:</span><span>${reqCell}</span></div>
-    <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
-    ${noteAuto}
-    <div class="bubble-actions">
-      <button type="button" data-bbl-edit-job="${j.id}">Edit</button>
-      <button type="button" class="danger" data-bbl-remove-job="${j.id}">Remove</button>
-    </div>
-  `;
-
-  // actions
-  const removeBtn = b.querySelector("[data-bbl-remove-job]");
-  const editBtn   = b.querySelector("[data-bbl-edit-job]");
-  if (removeBtn) removeBtn.onclick = () => {
-    cuttingJobs = cuttingJobs.filter(x => x.id !== j.id);
-    saveCloudDebounced(); toast("Removed"); hideBubble(); route();
-  };
-  if (editBtn) editBtn.onclick = () => { hideBubble(); openJobsEditor(j.id); };
-
-  document.querySelector("[data-bbl-remove-job]").onclick = () => {
-    cuttingJobs = cuttingJobs.filter(x => x.id !== jobId);
-    saveCloudDebounced(); toast("Removed"); hideBubble(); route();
-  };
-  document.querySelector("[data-bbl-edit-job]").onclick = () => { hideBubble(); openJobsEditor(j.id); };
-}
-
-
 
 function openJobsEditor(jobId){
   const j = cuttingJobs.find(x=>x.id===jobId);
