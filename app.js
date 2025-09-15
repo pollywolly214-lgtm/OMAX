@@ -852,12 +852,11 @@ function taskDetailsAsReq(task){
 }
 
 function viewSettings(){
-  // ------- Folder store (supports nesting via parent=null|folderId) -------
-  // Backward compatible if an older array exists without "parent".
+  // ------- Folder store (nesting via parent=null|folderId). Back-compat if older entries lack "parent".
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
-  for (const f of window.settingsFolders){ if (!("parent" in f)) f.parent = null; }
+  for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
 
-  // ------- Small helpers -------
+  // ------- Small helpers (IDs/data-* kept the same so existing handlers work) -------
   const chipFor = (t)=>{
     const nd = nextDue(t);
     if (!nd) return `<span class="chip">—</span>`;
@@ -867,7 +866,6 @@ function viewSettings(){
     return `<span class="chip ${cls}">${d}d → ${nd.due.toDateString()}</span>`;
   };
 
-  // Sub-part row (keeps previous wiring/data-attrs intact)
   const partRow = (p, parentId, listType) => `
     <div class="mini-form" data-part-row data-parent="${parentId}" data-list="${listType}" data-part-id="${p.pid}">
       <input type="text" placeholder="Part name" value="${p.name||""}"
@@ -884,7 +882,7 @@ function viewSettings(){
               data-part-remove="${p.pid}" data-parent="${parentId}" data-list="${listType}">Remove</button>
     </div>`;
 
-  // One maintenance card (draggable task). All data-* kept for renderSettings().
+  // One maintenance card (task). Kept attrs used by renderSettings().
   const card = (t, listType) => {
     const nd = nextDue(t);
     const lastServ = nd && nd.lastServicedAt != null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
@@ -938,22 +936,20 @@ function viewSettings(){
     </details>`;
   };
 
-  // ------- Folder tree helpers -------
+  // ------- Folder tree helpers (shared category tree; tasks filtered per menu) -------
   const folders = window.settingsFolders;
   const kidsOf  = (parentId)=> folders.filter(f => (f.parent||null) === (parentId||null));
   const tasksIn = (list, folderId)=> (Array.isArray(list)?list:[]).filter(t => (t.cat||null) === (folderId||null));
 
   const renderFolder = (folder, listType) => {
     const subFolders = kidsOf(folder.id).map(sf => renderFolder(sf, listType)).join("");
-    const taskList   = (listType==="interval"?tasksInterval:tasksAsReq);
-    const tasksHtml  = tasksIn(taskList, folder.id).map(t => card(t, listType)).join("")
-                     || `<div class="small muted">No tasks in this category.</div>`;
-
+    const list       = (listType==="interval"?tasksInterval:tasksAsReq);
+    const tasksHtml  = tasksIn(list, folder.id).map(t => card(t, listType)).join("")
+                      || `<div class="small muted">No items in this category.</div>`;
     return `
       <details class="folder block" data-folder-id="${folder.id}" open>
         <summary class="folder-title" style="display:flex;align-items:center;gap:10px;font-weight:700;">
           <span class="folder-name">${folder.name}</span>
-          <span class="small muted">(${listType})</span>
           <span style="flex:1"></span>
           <button class="small" data-add-subfolder="${folder.id}">+ Sub-category</button>
           <button class="small" data-rename-folder="${folder.id}">Rename</button>
@@ -971,52 +967,43 @@ function viewSettings(){
             ${tasksHtml}
           </div>
         </div>
-
-        <form class="mini-form" data-add-task-form data-list="${listType}" data-folder="${folder.id}" style="margin-top:6px">
-          <input type="text"  placeholder="Task name"  data-newtask="name"  required>
-          ${listType === "interval"
-            ? `<input type="number" min="1" placeholder="Interval (hrs)" data-newtask="interval" required>`
-            : `<input type="text" placeholder="Condition / Notes" data-newtask="condition">`
-          }
-          <button type="submit">+ Add task to ${folder.name}</button>
-        </form>
       </details>`;
   };
 
   // Root folders (parent=null)
-  const rootInterval = kidsOf(null).map(f => renderFolder(f, "interval")).join("");
-  const rootAsReq    = kidsOf(null).map(f => renderFolder(f, "asreq")).join("");
+  const rootFolders = kidsOf(null);
 
-  // Uncategorized bucket per list type
-  const uncatBlock = (listType)=>{
-    const list = listType==="interval" ? tasksInterval : tasksAsReq;
-    const items = tasksIn(list, null).map(t => card(t, listType)).join("")
-               || `<div class="small muted">No uncategorized tasks.</div>`;
+  // Root-level (no folder) tasks should appear at the top of each menu (no "Uncategorized" label).
+  const rootTasksBlock = (listType)=>{
+    const list = (listType==="interval" ? tasksInterval : tasksAsReq);
+    const items = tasksIn(list, null).map(t => card(t, listType)).join("");
+    return items || "";
+  };
+
+  // Menu shell: each maintenance type is a DROPDOWN now.
+  const buildMenu = (listType, title) => {
+    const menuDrop = `
+      <div class="folder-dropzone small muted" data-drop-menu="${listType}"
+           style="border:1px dashed #bbb; padding:6px; margin:6px 8px 10px 8px; border-radius:8px;">
+        Drag here to move an item into <b>${title}</b> (${listType === "interval" ? "will require an Interval" : "as-needed"})
+      </div>`;
+    const listId = listType==="interval" ? "intervalList" : "asreqList";
     return `
-      <details class="folder block" data-folder-id="__uncat__" open>
-        <summary class="folder-title" style="display:flex;align-items:center;gap:10px;font-weight:700;">
-          <span class="folder-name">Uncategorized</span>
-          <span class="small muted">(${listType})</span>
+      <details class="block" open data-menu="${listType}">
+        <summary style="display:flex;align-items:center;gap:10px;font-weight:700;">
+          <span>${title}</span>
+          <span style="flex:1"></span>
+          <!-- root add folder button stays global (#addFolderBtn) to keep existing handler -->
         </summary>
-        <div class="folder-dropzone small muted" data-drop-folder="__uncat__"
-             style="border:1px dashed #bbb; padding:6px; margin:6px 0; border-radius:8px;">
-          Drag here to remove from a category
+        ${menuDrop}
+        <div id="${listId}" class="folder-list" data-dnd-scope="${listType}">
+          ${rootTasksBlock(listType)}
+          ${rootFolders.map(f => renderFolder(f, listType)).join("")}
         </div>
-        <div class="bubble-list" data-folder-body="__uncat__" data-dnd-scope="${listType}">
-          ${items}
-        </div>
-        <form class="mini-form" data-add-task-form data-list="${listType}" data-folder="__uncat__" style="margin-top:6px">
-          <input type="text"  placeholder="Task name"  data-newtask="name"  required>
-          ${listType === "interval"
-            ? `<input type="number" min="1" placeholder="Interval (hrs)" data-newtask="interval" required>`
-            : `<input type="text" placeholder="Condition / Notes" data-newtask="condition">`
-          }
-          <button type="submit">+ Add task</button>
-        </form>
       </details>`;
   };
 
-  // ------- Main shell (IDs preserved for existing wiring) -------
+  // ------- Main shell (keeps existing IDs: #addIntervalForm, #addAsReqForm, #intervalList, #asreqList) -------
   return `
   <div class="container">
     <div class="block" style="grid-column: 1 / -1">
@@ -1024,7 +1011,7 @@ function viewSettings(){
 
       <div class="mini-form" style="display:flex;gap:8px;align-items:center; margin-bottom:8px">
         <button id="addFolderBtn" title="Add a root category">+ Add Category</button>
-        <span class="small muted">Categories are dropdowns; you can nest them and drag tasks into them.</span>
+        <span class="small muted">Drag items between menus or into categories. Folders can nest.</span>
       </div>
 
       <div class="add-forms" style="margin-bottom:8px">
@@ -1043,17 +1030,8 @@ function viewSettings(){
         </form>
       </div>
 
-      <h4>By Interval (categories)</h4>
-      <div id="intervalList" class="folder-list" data-dnd-scope="interval">
-        ${rootInterval}
-        ${uncatBlock("interval")}
-      </div>
-
-      <h4 style="margin-top:16px;">As Required (categories)</h4>
-      <div id="asreqList" class="folder-list" data-dnd-scope="asreq">
-        ${rootAsReq}
-        ${uncatBlock("asreq")}
-      </div>
+      ${buildMenu("interval","Interval Hourly Maintenance")}
+      ${buildMenu("asreq","As-Needed Maintenance")}
 
       <div style="margin-top:10px;">
         <button id="saveTasksBtn">Save All</button>
@@ -1061,7 +1039,6 @@ function viewSettings(){
     </div>
   </div>`;
 }
-
 
 
 function viewCosts(){
