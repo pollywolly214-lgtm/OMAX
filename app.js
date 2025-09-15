@@ -823,17 +823,107 @@ function taskDetailsAsReq(task){
 }
 
 function viewSettings(){
+  // helper: small chip based on next due
+  const chipFor = (t)=>{
+    const nd = nextDue(t);
+    if (!nd) return `<span class="chip">—</span>`;
+    const d = nd.days;
+    let cls = "green";
+    if (d <= 1) cls = "red";
+    else if (d <= 3) cls = "orange";
+    else if (d <= 7) cls = "yellow";
+    return `<span class="chip ${cls}">${d}d → ${nd.due.toDateString()}</span>`;
+  };
+
+  // helper: one sub-part row
+  const partRow = (p, parentId, listType) => `
+    <div class="mini-form" data-part-row data-parent="${parentId}" data-list="${listType}" data-part-id="${p.pid}">
+      <input type="text" placeholder="Part name" value="${p.name||""}"
+             data-part-k="name" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="text" placeholder="PN" value="${p.pn||""}"
+             data-part-k="pn" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="number" step="0.01" min="0" placeholder="Price" value="${p.price!=null?p.price:""}"
+             data-part-k="price" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="url" placeholder="Link" value="${p.link||""}"
+             data-part-k="link" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="text" placeholder="Note" value="${p.note||""}"
+             data-part-k="note" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <button class="danger" type="button"
+              data-part-remove="${p.pid}" data-parent="${parentId}" data-list="${listType}">Remove</button>
+    </div>`;
+
+  // helper: one maintenance “bubble card” with nested sub-parts UI.
+  const card = (t, listType) => {
+    const nd = nextDue(t);
+    const sinceTxt = nd ? `${nd.since.toFixed(0)} / ${t.interval} hrs` : "—";
+    const lastServ = nd && nd.lastServicedAt != null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
+    const parts = Array.isArray(t.parts) ? t.parts : [];
+
+    return `
+    <details class="block" data-task-id="${t.id}">
+      <summary style="display:flex;align-items:center;gap:8px;">
+        <b>${t.name}</b>
+        ${listType === "interval" ? `<span class="chip">${t.interval}h</span>` : `<span class="chip">As req.</span>`}
+        ${listType === "interval" ? chipFor(t) : ""}
+      </summary>
+
+      <div class="mini-form" style="margin:8px 0 4px 0;">
+        <label>Name: <input type="text" data-k="name" data-id="${t.id}" data-list="${listType}" value="${t.name}"></label>
+
+        ${listType === "interval" ? `
+        <label>Interval (hrs): <input type="number" min="1" data-k="interval" data-id="${t.id}" data-list="interval" value="${t.interval}"></label>
+        <label>Baseline “since last” (hrs): <input type="number" min="0" data-k="sinceBase" data-id="${t.id}" data-list="interval" value="${t.sinceBase!=null?t.sinceBase:""}"></label>
+        <div class="small muted">When last serviced: ${lastServ}</div>
+        ` : `
+        <label>Condition/Notes: <input type="text" data-k="condition" data-id="${t.id}" data-list="asreq" value="${t.condition||""}" placeholder="e.g., when clogged / visual check"></label>
+        `}
+
+        <label>Manual link: <input type="url" data-k="manualLink" data-id="${t.id}" data-list="${listType}" value="${t.manualLink||""}" placeholder="PDF / guide URL"></label>
+        <label>Store link: <input type="url" data-k="storeLink" data-id="${t.id}" data-list="${listType}" value="${t.storeLink||""}" placeholder="Where to buy"></label>
+        <label>Part # (primary): <input type="text" data-k="pn" data-id="${t.id}" data-list="${listType}" value="${t.pn||""}"></label>
+        <label>Price (primary): <input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${listType}" value="${t.price!=null?t.price:""}"></label>
+
+        <div>
+          <button class="btn-complete" data-complete="${t.id}">Mark Completed Now</button>
+          <button class="danger" data-remove="${t.id}" data-from="${listType}">Remove</button>
+        </div>
+      </div>
+
+      <div class="block" style="background:#fff;margin-top:8px;">
+        <h4 style="margin:0 0 6px 0;">Sub-parts</h4>
+        <div class="small muted">Use this to nest items like <i>mixing tube</i> or <i>washers</i> under “Nozzle Body.” These will be searchable.</div>
+        <div id="parts_${t.id}" data-part-list data-parent="${t.id}" data-list="${listType}">
+          ${parts.map(p => partRow(p, t.id, listType)).join("") || `<div class="small muted">No sub-parts yet.</div>`}
+        </div>
+        <form class="mini-form" data-part-add-form data-parent="${t.id}" data-list="${listType}" style="margin-top:6px">
+          <input type="text"  placeholder="Part name"  data-part-new="name"  required>
+          <input type="text"  placeholder="PN"         data-part-new="pn">
+          <input type="number" step="0.01" min="0" placeholder="Price" data-part-new="price">
+          <input type="url"   placeholder="Link"       data-part-new="link">
+          <input type="text"  placeholder="Note"       data-part-new="note">
+          <button type="submit">+ Add sub-part</button>
+        </form>
+      </div>
+    </details>`;
+  };
+
+  // build lists
+  const intervalCards = (Array.isArray(tasksInterval)?tasksInterval:[]).map(t => card(t, "interval")).join("");
+  const asreqCards    = (Array.isArray(tasksAsReq)?tasksAsReq:[]).map(t => card(t, "asreq")).join("");
+
   return `
   <div class="container">
     <div class="block" style="grid-column: 1 / -1">
       <h3>Maintenance Settings</h3>
-      <div class="add-forms">
+
+      <div class="add-forms" style="margin-bottom:8px">
         <form id="addIntervalForm" class="mini-form">
           <strong>Add Interval Task:</strong>
           <input type="text" id="ai_name" placeholder="Name" required>
           <input type="number" id="ai_interval" placeholder="Interval (hrs)" required min="1">
           <button type="submit">Add</button>
         </form>
+
         <form id="addAsReqForm" class="mini-form">
           <strong>Add As-Required Task:</strong>
           <input type="text" id="ar_name" placeholder="Name" required>
@@ -842,15 +932,11 @@ function viewSettings(){
         </form>
       </div>
 
-      <h4>By Interval (hrs)</h4>
-      <div id="intervalList">
-        ${tasksInterval.map(taskDetailsInterval).join("")}
-      </div>
+      <h4>By Interval (bubble cards)</h4>
+      <div id="intervalList" class="bubble-list">${intervalCards}</div>
 
-      <h4 style="margin-top:16px;">As Required</h4>
-      <div id="asreqList">
-        ${tasksAsReq.map(taskDetailsAsReq).join("")}
-      </div>
+      <h4 style="margin-top:16px;">As Required (bubble cards)</h4>
+      <div id="asreqList" class="bubble-list">${asreqCards}</div>
 
       <div style="margin-top:10px;">
         <button id="saveTasksBtn">Save All</button>
