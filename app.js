@@ -539,11 +539,28 @@ function showTaskBubble(taskId, anchor){
       <button class="danger" data-bbl-remove="${t.id}">Remove</button>
       <button data-bbl-edit="${t.id}">Edit settings</button>
     </div>`;
-  b.querySelector("[data-bbl-complete]")?.addEventListener("click", ()=>{ completeTask(taskId); hideBubble(); });
-  b.querySelector("[data-bbl-remove]")?.addEventListener("click", ()=>{
-    tasksInterval = tasksInterval.filter(x => x.id !== taskId); saveCloudDebounced(); toast("Removed"); hideBubble(); route();
+
+  // Action buttons
+  b.querySelector("[data-bbl-complete]")?.addEventListener("click", ()=>{
+    completeTask(taskId); hideBubble();
   });
-  b.querySelector("[data-bbl-edit]")?.addEventListener("click", ()=>{ hideBubble(); openSettingsAndReveal(taskId); });
+  b.querySelector("[data-bbl-remove]")?.addEventListener("click", ()=>{
+    tasksInterval = tasksInterval.filter(x => x.id !== taskId);
+    saveCloudDebounced(); toast("Removed"); hideBubble(); route();
+  });
+  b.querySelector("[data-bbl-edit]")?.addEventListener("click", ()=>{
+    hideBubble(); openSettingsAndReveal(taskId);
+  });
+
+  // NEW: click anywhere on the bubble (except buttons/links) → open Settings for this item
+  b.addEventListener("click", (e)=>{
+    // Ignore clicks on controls inside the bubble
+    if (e.target.closest(".bubble-actions")) return;
+    if (e.target.closest("button")) return;
+    if (e.target.closest("a")) return;
+    hideBubble();
+    openSettingsAndReveal(taskId);
+  });
 }
 
 function showJobBubble(jobId, anchor){
