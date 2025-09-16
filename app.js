@@ -2108,6 +2108,21 @@ function renderSettings(){
   });
 }
 
+// ---- Costs page (placeholder to satisfy router & nav) ----
+function renderCosts(){
+  const content = document.getElementById("content");
+  if (!content) return;
+
+  content.innerHTML = `
+    <div class="container">
+      <div class="block" style="grid-column:1 / -1">
+        <h3>Cost Analysis</h3>
+        <p class="small">Placeholder view. This exists so the #/costs route and the top-nav button do not break other pages. We can flesh this out later.</p>
+      </div>
+    </div>
+  `;
+}
+
 
 function renderJobs(){
   const content = document.getElementById("content"); 
