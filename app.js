@@ -1312,6 +1312,7 @@ function openJobsEditor(jobId){
 }
 
 
+
 function openSettingsAndReveal(taskId){
   location.hash = "#/settings";
   setTimeout(()=>{
@@ -1401,117 +1402,175 @@ function repairMaintenanceGraph(){
 // - nodeId: the id being moved
 // - target: { intoCat?: categoryId|null, intoTask?: taskId|null, beforeTask?: {id,type}, beforeCat?: {id} }
 //   exactly ONE of intoCat / intoTask / beforeTask / beforeCat should be set
+// Unified mover for tasks and categories.
+// Accepts the same "target" shape you already use:
+//   - { intoTask: <taskId> }              // make sub-component of a task
+//   - { beforeTask: { id, type } }        // reorder (top-level) before another task
+//   - { intoCat: <categoryId|null> }      // file task into a folder (or root)
+//   - { beforeCat: { id } }               // reorder a folder before another folder
 function moveNodeSafely(kind, nodeId, target){
-  // Source collections
+  // ---------- Common state ----------
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
-  window.tasksInterval = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
-  window.tasksAsReq    = Array.isArray(window.tasksAsReq)    ? window.tasksAsReq    : [];
-
-  // Helpers
-  const findTask = (id)=>{
-    let ref = window.tasksInterval.find(x=>String(x.id)===String(id));
-    if (ref) return {ref, list:"interval"};
-    ref = window.tasksAsReq.find(x=>String(x.id)===String(id));
-    return ref ? {ref, list:"asreq"} : null;
-  };
-  const findCat = (id)=> window.settingsFolders.find(f=>String(f.id)===String(id)) || null;
-
-  // Cycle guard for tasks: ensure parentTask chain of target never reaches nodeId
-  function wouldCreateTaskCycle(childId, newParentTaskId){
-    if (newParentTaskId == null) return false;
-    let cur = findTask(newParentTaskId);
-    let hops = 0;
-    while (cur && cur.ref && hops++ < 1000){
-      if (String(cur.ref.id) === String(childId)) return true;
-      cur = (cur.ref.parentTask != null) ? findTask(cur.ref.parentTask) : null;
-    }
-    return false;
-  }
-
-  // Cycle guard for categories: prevent putting a category inside its own descendant
-  function wouldCreateCatCycle(childCatId, newParentCatId){
-    if (newParentCatId == null) return false;
-    let cur = findCat(newParentCatId);
-    let hops = 0;
-    while (cur && hops++ < 1000){
-      if (String(cur.id) === String(childCatId)) return true;
-      cur = (cur.parent != null) ? findCat(cur.parent) : null;
-    }
-    return false;
-  }
-
-  // Order normalize within a list of siblings (highest = top)
-  function normalizeOrders(nodes, writeBack){
-    nodes.sort((a,b)=> (Number(b.order||0) - Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
-    let n = nodes.length;
-    for (const v of nodes){ v.order = n--; writeBack?.(v); }
-  }
-
-  // Ensure global counter
+  window.tasksInterval   = Array.isArray(window.tasksInterval)   ? window.tasksInterval   : [];
+  window.tasksAsReq      = Array.isArray(window.tasksAsReq)      ? window.tasksAsReq      : [];
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
-  if (kind === "task"){
-    const live = findTask(nodeId); if (!live) return false;
+  // ---------- Helpers: tasks ----------
+  const topListByType = (type) => (type === "interval" ? tasksInterval : tasksAsReq);
 
-    // Destination resolution
-    if (target.intoTask != null){
-      // move inside a task (subcomponent)
-      if (wouldCreateTaskCycle(live.ref.id, target.intoTask)) return false;
-      const parentLive = findTask(target.intoTask); if (!parentLive) return false;
-      live.ref.parentTask = parentLive.ref.id;
-      live.ref.cat = parentLive.ref.cat || null; // inherit folder
-      live.ref.order = ++window._maintOrderCounter;
-    }else if (Object.prototype.hasOwnProperty.call(target, "intoCat")){
-      // move into a category (top of that category)
-      const catId = target.intoCat; // can be null = root
-      if (catId != null && !findCat(catId)) return false;
-      live.ref.parentTask = null;
-      live.ref.cat = catId || null;
-      live.ref.order = ++window._maintOrderCounter;
-    }else if (target.beforeTask){
-      // reorder before another task (same container)
-      const t2 = findTask(target.beforeTask.id); if (!t2) return false;
-      live.ref.parentTask = t2.ref.parentTask || null;
-      live.ref.cat = t2.ref.cat || null;
-      live.ref.order = (Number(t2.ref.order)||0) + 0.5;
-
-      // normalize all tasks in that container
-      const same = []
-        .concat(window.tasksInterval.map(x=>({ref:x,list:"interval"})))
-        .concat(window.tasksAsReq.map(x=>({ref:x,list:"asreq"})))
-        .filter(x => String(x.ref.parentTask||"") === String(live.ref.parentTask||"")
-                  && String(x.ref.cat||"")        === String(live.ref.cat||""))
-        .map(x=>x.ref);
-      normalizeOrders(same);
-    }else{
-      return false; // unsupported target shape
+  // DFS find a task anywhere (top-level or nested .sub)
+  function findTaskRef(id){
+    function dfs(list, ownerType, parentTask=null, path=[]){
+      for (let i=0;i<list.length;i++){
+        const t = list[i];
+        if (String(t.id) === String(id)) return { task:t, index:i, list, ownerType, parentTask, path };
+        if (Array.isArray(t.sub) && t.sub.length){
+          const hit = dfs(t.sub, ownerType, t, path.concat(t.id));
+          if (hit) return hit;
+        }
+      }
+      return null;
     }
-    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-    if (typeof saveTasks === "function") saveTasks();
-    return true;
+    return dfs(tasksInterval, "interval") || dfs(tasksAsReq, "asreq");
   }
 
-  if (kind === "category"){
-    const cat = findCat(nodeId); if (!cat) return false;
+  // Find a task only at the top level of a list (for beforeTask insert)
+  function findTopRef(id){
+    let idx = tasksInterval.findIndex(t => String(t.id)===String(id));
+    if (idx>=0) return { list:tasksInterval, ownerType:"interval", index:idx, task:tasksInterval[idx], parentTask:null };
+    idx = tasksAsReq.findIndex(t => String(t.id)===String(id));
+    if (idx>=0) return { list:tasksAsReq, ownerType:"asreq", index:idx, task:tasksAsReq[idx], parentTask:null };
+    return null;
+  }
 
-    if (Object.prototype.hasOwnProperty.call(target, "intoCat")){
-      const parent = target.intoCat; // null = root
-      if (wouldCreateCatCycle(cat.id, parent)) return false;
-      if (parent != null && !findCat(parent)) return false;
-      cat.parent = parent || null;
-      cat.order = ++window._maintOrderCounter;
-    }else if (target.beforeCat){
-      const c2 = findCat(target.beforeCat.id); if (!c2) return false;
-      cat.parent = c2.parent || null;
-      cat.order = (Number(c2.order)||0) + 0.5;
-
-      const siblings = window.settingsFolders.filter(f => String(f.parent||"") === String(cat.parent||""));
-      normalizeOrders(siblings);
-    }else{
-      return false;
+  function isDescendant(ancestorTask, maybeChildId){
+    if (!ancestorTask || !Array.isArray(ancestorTask.sub)) return false;
+    for (const c of ancestorTask.sub){
+      if (String(c.id) === String(maybeChildId)) return true;
+      if (isDescendant(c, maybeChildId)) return true;
     }
-    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-    return true;
+    return false;
+  }
+
+  function detachTask(ref){
+    if (!ref) return;
+    if (ref.parentTask){
+      ref.parentTask.sub.splice(ref.index, 1);
+    }else{
+      ref.list.splice(ref.index, 1);
+    }
+  }
+
+  // ---------- Helpers: categories ----------
+  const findCat = (id)=> window.settingsFolders.find(f=>String(f.id)===String(id)) || null;
+
+  function normalizeFolderOrder(parentId){
+    const sibs = window.settingsFolders
+      .filter(f => String(f.parent||"") === String(parentId||""))
+      .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
+    let n = sibs.length;
+    for (const f of sibs){ f.order = n--; }
+  }
+
+  // ---------- TASK MOVES ----------
+  if (kind === "task"){
+    const src = findTaskRef(nodeId);
+    if (!src) return false;
+
+    // intoTask can be string or {id}
+    const intoTaskId = (target && Object.prototype.hasOwnProperty.call(target,"intoTask"))
+      ? (typeof target.intoTask === "object" ? target.intoTask?.id : target.intoTask)
+      : null;
+
+    if (intoTaskId != null){
+      // no self / no cycle
+      if (String(intoTaskId) === String(nodeId)) return false;
+      const parentRef = findTaskRef(intoTaskId);
+      if (!parentRef) return false;
+      if (isDescendant(src.task, intoTaskId)) return false;
+
+      // move: detach then push into parent's sub[]
+      detachTask(src);
+      if (!Array.isArray(parentRef.task.sub)) parentRef.task.sub = [];
+      parentRef.task.sub.push(src.task);
+
+      if (typeof saveTasks === "function") saveTasks();
+      if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+      return true;
+    }
+
+    if (target && target.beforeTask && target.beforeTask.id){
+      // Reorder at top level: place BEFORE the target card
+      const destTop = findTopRef(target.beforeTask.id);
+      const destType = target.beforeTask.type || destTop?.ownerType; // fallback if type missing
+      if (!destTop || !destType) return false;
+
+      // detach source from wherever it was
+      detachTask(src);
+
+      // insert into the destination list at the correct index
+      const destList = topListByType(destType);
+      const j = destList.findIndex(t => String(t.id)===String(destTop.task.id));
+      const insertAt = (j>=0) ? j : destList.length;
+      destList.splice(insertAt, 0, src.task);
+
+      if (typeof saveTasks === "function") saveTasks();
+      if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+      return true;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(target || {}, "intoCat")){
+      // File the task into a folder (no positional change required)
+      const catId = target.intoCat;
+      if (catId != null && !findCat(catId)) return false;
+      // ensure we keep the task where it is; just set a folder tag
+      src.task.cat = (catId || null);
+      if (typeof saveTasks === "function") saveTasks();
+      if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+      return true;
+    }
+
+    // nothing matched
+    return false;
+  }
+
+  // ---------- CATEGORY MOVES ----------
+  if (kind === "category"){
+    const cat = findCat(nodeId);
+    if (!cat) return false;
+
+    if (Object.prototype.hasOwnProperty.call(target || {}, "intoCat")){
+      const parent = target.intoCat; // may be null → root
+      // prevent cycles: cannot move into own descendant
+      let p = parent, hops = 0;
+      while (p != null && hops++ < 1000){
+        if (String(p) === String(cat.id)) return false;
+        p = findCat(p)?.parent ?? null;
+      }
+      if (parent != null && !findCat(parent)) return false;
+
+      cat.parent = parent || null;
+      cat.order  = ++window._maintOrderCounter;
+      normalizeFolderOrder(cat.parent);
+
+      if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+      return true;
+    }
+
+    if (target && target.beforeCat && target.beforeCat.id){
+      const sib = findCat(target.beforeCat.id);
+      if (!sib) return false;
+
+      cat.parent = sib.parent || null;
+      // Place "just before" by giving a slightly higher order, then normalize
+      cat.order = (Number(sib.order)||0) + 0.5;
+      normalizeFolderOrder(cat.parent);
+
+      if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+      return true;
+    }
+
+    return false;
   }
 
   return false;
