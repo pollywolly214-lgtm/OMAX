@@ -1585,7 +1585,7 @@ function renderSettings(){
   window.tasksAsReq    = Array.isArray(window.tasksAsReq)    ? window.tasksAsReq    : [];
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
-  // Persist helper (cloud or local)
+  // Persist helper: cloud or local
   function persist(){
     if (typeof saveCloudDebounced === "function") { try { saveCloudDebounced(); } catch(_){} }
     if (typeof saveTasks === "function") { try { saveTasks(); } catch(_){} }
@@ -1593,57 +1593,61 @@ function renderSettings(){
 
   const fmtPrice = v => (v==null || v==="") ? "" : String(v);
 
-  // ----- Minimal CSS (adds DnD visuals; no change to index.html needed) -----
+  // ----- Compact Styles (scoped) -----
+  // Visual changes only: smaller fonts, tighter paddings/margins, slimmer drop-zones.
   if (!document.getElementById("settingsDndCSS")){
     const st = document.createElement("style");
     st.id = "settingsDndCSS";
     st.textContent = `
-      #maintSettings .bar{display:flex;gap:.5rem;margin-bottom:.75rem}
-      #maintSettings details.task{border:1px solid #ddd;border-radius:8px;margin:.35rem 0;background:#fff}
-      #maintSettings details.task>summary{display:flex;justify-content:space-between;align-items:center;padding:.5rem .6rem;cursor:grab;user-select:none}
+      /* Container tweaks */
+      #maintSettings h3 { margin: 4px 0 6px; font-size: 1.05rem; }
+      #maintSettings h4 { margin: 6px 0 4px; font-size: 0.95rem; }
+
+      /* Cards */
+      #maintSettings details.task{border:1px solid #ddd;border-radius:6px;margin:.2rem 0;background:#fff}
+      #maintSettings details.task>summary{
+        display:flex;justify-content:space-between;align-items:center;
+        padding:.35rem .5rem; cursor:grab; user-select:none; font-size:.92rem; line-height:1.1
+      }
       #maintSettings details.task.dragging{opacity:.55}
-      #maintSettings .chip{font-size:.75rem;border:1px solid #bbb;border-radius:999px;padding:.1rem .5rem}
-      #maintSettings .body{padding:.6rem .8rem;border-top:1px dashed #e5e5e5}
-      #maintSettings .grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
-      #maintSettings label{font-size:.85rem;display:block}
-      #maintSettings input{width:100%;padding:.4rem .5rem}
-      #maintSettings .actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.5rem;flex-wrap:wrap}
-      #maintSettings .empty{padding:.8rem;color:#666}
-      #maintSettings .forms{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin:.5rem 0 1rem}
-      #maintSettings .forms .mini-form{border:1px solid #e5e5e5;border-radius:8px;padding:.5rem .6rem;background:#fff}
-      #maintSettings .forms strong{display:block;margin-bottom:.35rem}
-      /* DnD drop lines */
-      #maintSettings .dz{height:8px;margin:4px 0;border-radius:6px}
-      #maintSettings .dz.dragover{height:18px;background:rgba(0,0,0,.05);outline:2px dashed #888}
-      #maintSettings summary.drop-hint{outline:2px solid #6aa84f;border-radius:6px}
+      #maintSettings .chip{font-size:.68rem;border:1px solid #bbb;border-radius:999px;padding:.05rem .35rem}
+
+      /* Body */
+      #maintSettings .body{padding:.45rem .55rem;border-top:1px dashed #e5e5e5}
+      #maintSettings .grid{display:grid;grid-template-columns:1fr 1fr;gap:.4rem}
+      #maintSettings label{font-size:.8rem;display:block}
+      #maintSettings input{width:100%;padding:.3rem .4rem;font-size:.85rem}
+
+      /* Actions row */
+      #maintSettings .actions{display:flex;gap:.35rem;justify-content:flex-end;margin-top:.35rem;flex-wrap:wrap}
+      #maintSettings .actions button{padding:.25rem .45rem;font-size:.8rem}
+
+      /* Forms */
+      #maintSettings .forms{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin:.4rem 0 .6rem}
+      #maintSettings .forms .mini-form{border:1px solid #e5e5e5;border-radius:6px;padding:.45rem;background:#fff}
+      #maintSettings .forms strong{display:block;margin-bottom:.25rem;font-size:.85rem}
+      #maintSettings .forms input{padding:.28rem .4rem;font-size:.85rem}
+
+      /* Drop zones (reorder lines) */
+      #maintSettings .dz{height:4px;margin:2px 0;border-radius:5px}
+      #maintSettings .dz.dragover{height:10px;background:rgba(0,0,0,.05);outline:1px dashed #888}
+      #maintSettings summary.drop-hint{outline:1px solid #6aa84f;border-radius:5px}
+
+      /* Small helpers */
+      #maintSettings .empty{padding:.45rem;color:#666;font-size:.85rem}
     `;
     document.head.appendChild(st);
   }
 
-  // ----- Row renderers (add draggable & drop-zones) -----
-  function rowTemplate(task, type){
-    const commonTop = `
-      <div class="dz" data-drop-before="${task.id}" data-type="${type}"></div>
-      <details class="task" data-task-id="${task.id}" data-type="${type}">
+  // ----- Row renderers (summary is draggable) -----
+  function taskDetailsInterval(task){
+    return `
+      <details class="task" data-task-id="${task.id}" data-type="interval">
         <summary draggable="true">
-          <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:70%">${task.name}</strong>
-          <span class="chip">${type === "interval" ? "Hourly Interval" : "As Required"}</span>
+          <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:72%">${task.name}</strong>
+          <span class="chip">Hourly Interval</span>
         </summary>
         <div class="body">
-    `;
-    const commonBottom = `
-          <div class="actions">
-            <button data-move-top="${task.id}" data-from="${type}">Move to Top</button>
-            <button data-move-up="${task.id}"  data-from="${type}">Move Up</button>
-            <button data-move-down="${task.id}" data-from="${type}">Move Down</button>
-            ${type==="interval" ? `<button class="btn-complete" data-complete="${task.id}">Mark Completed Now</button>` : ""}
-            <button class="danger" data-remove="${task.id}" data-from="${type}">Remove</button>
-          </div>
-        </div>
-      </details>
-    `;
-    if (type === "interval"){
-      return commonTop + `
           <div class="grid">
             <label>Name
               <input data-k="name" data-id="${task.id}" data-list="interval" value="${task.name||""}">
@@ -1664,9 +1668,25 @@ function renderSettings(){
               <input type="url" data-k="link" data-id="${task.id}" data-list="interval" value="${task.link||task.storeLink||task.manualLink||""}" placeholder="https://…">
             </label>
           </div>
-      ` + commonBottom;
-    }else{
-      return commonTop + `
+          <div class="actions">
+            <button data-move-top="${task.id}" data-from="interval">Top</button>
+            <button data-move-up="${task.id}"  data-from="interval">Up</button>
+            <button data-move-down="${task.id}" data-from="interval">Down</button>
+            <span style="flex:1"></span>
+            <button class="btn-complete" data-complete="${task.id}">Complete</button>
+            <button class="danger" data-remove="${task.id}" data-from="interval">Remove</button>
+          </div>
+        </div>
+      </details>`;
+  }
+  function taskDetailsAsReq(task){
+    return `
+      <details class="task" data-task-id="${task.id}" data-type="asreq">
+        <summary draggable="true">
+          <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:72%">${task.name}</strong>
+          <span class="chip">As Required</span>
+        </summary>
+        <div class="body">
           <div class="grid">
             <label>Name
               <input data-k="name" data-id="${task.id}" data-list="asreq" value="${task.name||""}">
@@ -1684,16 +1704,32 @@ function renderSettings(){
               <input type="url" data-k="link" data-id="${task.id}" data-list="asreq" value="${task.link||task.storeLink||task.manualLink||""}" placeholder="https://…">
             </label>
           </div>
-      ` + commonBottom;
-    }
+          <div class="actions">
+            <button data-move-top="${task.id}" data-from="asreq">Top</button>
+            <button data-move-up="${task.id}"  data-from="asreq">Up</button>
+            <button data-move-down="${task.id}" data-from="asreq">Down</button>
+            <span style="flex:1"></span>
+            <button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button>
+          </div>
+        </div>
+      </details>`;
   }
 
-  // ----- Page view (kept same sectioning as your v6) -----
+  // Build lists with slim "drop-before" lines and an "end" line
+  const intervalRows = tasksInterval.map(t =>
+    `<div class="dz" data-drop-before="${t.id}" data-type="interval"></div>` + taskDetailsInterval(t)
+  ).join("") + `<div class="dz" data-drop-end="interval"></div>`;
+
+  const asreqRows = tasksAsReq.map(t =>
+    `<div class="dz" data-drop-before="${t.id}" data-type="asreq"></div>` + taskDetailsAsReq(t)
+  ).join("") + `<div class="dz" data-drop-end="asreq"></div>`;
+
+  // Page view
   const html = `
     <div id="maintSettings" class="container">
       <div class="block" style="grid-column:1 / -1">
         <h3>Maintenance Settings</h3>
-        <p class="small">Drag a task onto another task to make it a sub-component. Drag onto a thin line to reorder.</p>
+        <p class="small" style="margin:.15rem 0 .4rem;">Drag onto a header to nest; drag onto the thin line to reorder. Use Categories to file tasks.</p>
 
         <div class="forms">
           <form id="addIntervalForm" class="mini-form">
@@ -1713,25 +1749,23 @@ function renderSettings(){
 
         <h4>By Interval (hrs)</h4>
         <div id="intervalList">
-          ${tasksInterval.map(t => rowTemplate(t,"interval")).join("")}
-          <div class="dz" data-drop-end="interval"></div>
+          ${intervalRows}
         </div>
 
-        <h4 style="margin-top:16px;">As Required</h4>
+        <h4 style="margin-top:6px;">As Required</h4>
         <div id="asreqList">
-          ${tasksAsReq.map(t => rowTemplate(t,"asreq")).join("")}
-          <div class="dz" data-drop-end="asreq"></div>
+          ${asreqRows}
         </div>
 
-        <div style="margin-top:10px;">
-          <button id="saveTasksBtn">Save All</button>
+        <div style="margin-top:6px;">
+          <button id="saveTasksBtn" style="padding:.3rem .55rem;font-size:.85rem">Save All</button>
         </div>
       </div>
     </div>
   `;
   root.innerHTML = html;
 
-  // ------- Inline edit bindings -------
+  // ------- Inline edit (delegated) -------
   root.querySelectorAll("[data-id]").forEach(inp => {
     inp.addEventListener("input", () => {
       const id   = inp.getAttribute("data-id");
@@ -1779,7 +1813,7 @@ function renderSettings(){
     });
   });
 
-  // ------- Move Up / Down / Top (click controls) -------
+  // ------- Move Up / Down / Top (kept) -------
   function moveIn(arr, id, dir){
     const i = arr.findIndex(x => String(x.id) === String(id));
     if (i < 0) return;
@@ -1808,14 +1842,14 @@ function renderSettings(){
     renderSettings();
   });
 
-  // ------- Add forms (insert TOP) -------
+  // ------- Add forms (new tasks at TOP) -------
   document.getElementById("addIntervalForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = document.getElementById("ai_name").value.trim();
     const interval = Number(document.getElementById("ai_interval").value);
     if (!name || !isFinite(interval) || interval <= 0) return;
     const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
-    tasksInterval.unshift({ id, name, interval, sinceBase:null, anchorTotal:null, cost:"", link:"", parentTask:null, cat:null });
+    tasksInterval.unshift({ id, name, interval, sinceBase:null, anchorTotal:null, cost:"", link:"", parentTask:null, cat:null }); // TOP
     if (typeof inventory !== "undefined" && Array.isArray(inventory)){
       inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
       if (typeof saveInventory === "function") saveInventory();
@@ -1829,7 +1863,7 @@ function renderSettings(){
     const condition = (document.getElementById("ar_condition").value || "").trim() || "As required";
     if (!name) return;
     const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
-    tasksAsReq.unshift({ id, name, condition, cost:"", link:"", parentTask:null, cat:null });
+    tasksAsReq.unshift({ id, name, condition, cost:"", link:"", parentTask:null, cat:null }); // TOP
     if (typeof inventory !== "undefined" && Array.isArray(inventory)){
       inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
       if (typeof saveInventory === "function") saveInventory();
@@ -1837,7 +1871,6 @@ function renderSettings(){
     persist();
     renderSettings();
   });
-
   document.getElementById("saveTasksBtn")?.addEventListener("click", ()=>{
     persist();
     if (typeof route === "function") route();
@@ -1859,7 +1892,6 @@ function renderSettings(){
     e.dataTransfer.setData("text/plain", `task:${id}:${type}`); // also usable by Categories pane
     e.dataTransfer.effectAllowed = "move";
   });
-
   maint.addEventListener("dragend",(e)=>{
     const card = e.target.closest("details.task");
     card?.classList.remove("dragging");
@@ -1870,7 +1902,7 @@ function renderSettings(){
 
   function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
 
-  // Hover feedback: lines (reorder) or headers (into)
+  // Hover feedback
   maint.addEventListener("dragover",(e)=>{
     const dz = e.target.closest(".dz");
     const sum = e.target.closest("summary");
@@ -1884,28 +1916,28 @@ function renderSettings(){
 
   maint.addEventListener("drop",(e)=>{
     const payload = e.dataTransfer.getData("text/plain") || "";
-    const [kind, dragId, dragType] = payload.split(":");
+    const [kind, dragId/*, dragType*/] = payload.split(":");
     if (kind !== "task" || !dragId) return;
     e.preventDefault();
 
     const dz  = e.target.closest(".dz");
     const sum = e.target.closest("summary");
 
-    // Reorder: drop on line → place BEFORE that task (same container as target)
+    // Reorder: drop on line → place BEFORE target task
     if (dz && dz.hasAttribute("data-drop-before")){
       const beforeId   = dz.getAttribute("data-drop-before");
-      const beforeType = dz.getAttribute("data-type"); // not strictly needed, kept for future guards
+      const beforeType = dz.getAttribute("data-type");
       if (typeof moveNodeSafely === "function"){
         if (moveNodeSafely("task", dragId, { beforeTask:{ id: beforeId, type: beforeType } })){
           persist();
           renderSettings();
-          if (typeof renderSettingsCategoriesPane === "function") renderSettingsCategoriesPane(); // refresh folder view
+          if (typeof renderSettingsCategoriesPane === "function") renderSettingsCategoriesPane();
         }
       }
       return;
     }
 
-    // Drop at end of list
+    // End of list
     if (dz && dz.hasAttribute("data-drop-end")){
       const listType = dz.getAttribute("data-drop-end"); // "interval" | "asreq"
       const arr = (listType==="interval") ? tasksInterval : tasksAsReq;
@@ -1913,14 +1945,16 @@ function renderSettings(){
         const lastId = arr[arr.length-1].id;
         if (typeof moveNodeSafely === "function"){
           if (moveNodeSafely("task", dragId, { beforeTask:{ id: lastId, type: listType } })){
-            persist(); renderSettings(); if (typeof renderSettingsCategoriesPane==="function") renderSettingsCategoriesPane();
+            persist();
+            renderSettings();
+            if (typeof renderSettingsCategoriesPane === "function") renderSettingsCategoriesPane();
           }
         }
       }
       return;
     }
 
-    // Into-task: drop on header → become its sub-component
+    // Into-task: drop on header → become sub-component
     if (sum){
       const holder = sum.closest("details.task");
       const parentId = holder?.getAttribute("data-task-id");
@@ -1935,7 +1969,7 @@ function renderSettings(){
     }
   });
 
-  // ------- Also render folder pane on top -------
+  // ------- Render the Explorer folder pane on top -------
   if (typeof renderSettingsCategoriesPane === "function"){
     renderSettingsCategoriesPane();
   }
