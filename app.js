@@ -1397,186 +1397,246 @@ function repairMaintenanceGraph(){
 }
 
 function renderSettings(){
-  const content = document.getElementById("content");
-  if (!content) return;
+  const root = document.getElementById("content");
+  if (!root) return;
 
-  // --- Defensive: ensure arrays exist ---
+  // ------- Defensive: ensure arrays exist -------
   window.tasksInterval = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
   window.tasksAsReq    = Array.isArray(window.tasksAsReq)    ? window.tasksAsReq    : [];
 
-  // --- Order counter (higher = nearer top) ---
-  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
-  const allRaw = [...window.tasksInterval, ...window.tasksAsReq];
-  for (const t of allRaw){ if (!isFinite(t.order)) t.order = ++window._maintOrderCounter; }
+  // Persist helper: works for cloud or local builds
+  function persist(){
+    if (typeof saveCloudDebounced === "function") { try { saveCloudDebounced(); } catch(_){} }
+    if (typeof saveTasks === "function") { try { saveTasks(); } catch(_){} }
+  }
 
-  // unified with type tag (sorted, top→bottom)
-  const all = [
-    ...window.tasksInterval.map(t => ({...t, __type:"interval"})),
-    ...window.tasksAsReq.map(t      => ({...t, __type:"asreq"})),
-  ].sort((a,b)=> (Number(b.order||0) - Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
+  // Small safe formatter
+  const fmtPrice = v => (v==null || v==="") ? "" : String(v);
 
-  // --- Scoped CSS (simple, stable) ---
-  if (!document.getElementById("maintListCSS_min")){
+  // Minimal styles scoped to Settings
+  if (!document.getElementById("settingsBasicCSS")){
     const st = document.createElement("style");
-    st.id = "maintListCSS_min";
+    st.id = "settingsBasicCSS";
     st.textContent = `
-      #maintWrap .bar{display:flex;gap:.5rem;margin-bottom:.75rem}
-      #maintWrap .list details{border:1px solid #ddd;border-radius:8px;margin:.35rem 0;background:#fff}
-      #maintWrap .list summary{display:flex;justify-content:space-between;align-items:center;padding:.5rem .6rem;cursor:pointer}
-      #maintWrap .chip{font-size:.75rem;border:1px solid #bbb;border-radius:999px;padding:.1rem .5rem}
-      #maintWrap .body{padding:.6rem .8rem;border-top:1px dashed #e5e5e5}
-      #maintWrap .grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
-      #maintWrap label{font-size:.85rem;display:block}
-      #maintWrap input{width:100%;padding:.4rem .5rem}
-      #maintWrap .actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.5rem}
-      #maintWrap .empty{padding:.8rem;color:#666}
+      #maintSettings .bar{display:flex;gap:.5rem;margin-bottom:.75rem}
+      #maintSettings details.task{border:1px solid #ddd;border-radius:8px;margin:.35rem 0;background:#fff}
+      #maintSettings details.task>summary{display:flex;justify-content:space-between;align-items:center;padding:.5rem .6rem;cursor:pointer}
+      #maintSettings .chip{font-size:.75rem;border:1px solid #bbb;border-radius:999px;padding:.1rem .5rem}
+      #maintSettings .body{padding:.6rem .8rem;border-top:1px dashed #e5e5e5}
+      #maintSettings .grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+      #maintSettings label{font-size:.85rem;display:block}
+      #maintSettings input{width:100%;padding:.4rem .5rem}
+      #maintSettings .actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.5rem}
+      #maintSettings .empty{padding:.8rem;color:#666}
+      #maintSettings .forms{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin:.5rem 0 1rem}
+      #maintSettings .forms .mini-form{border:1px solid #e5e5e5;border-radius:8px;padding:.5rem .6rem;background:#fff}
+      #maintSettings .forms strong{display:block;margin-bottom:.35rem}
     `;
     document.head.appendChild(st);
   }
 
-  const tagOf = (t)=> t.__type === "interval" ? "Hourly Interval" : "As Required";
-
-  function rowHTML(t){
-    const price = (t.price!=null && t.price!=='') ? Number(t.price) : "";
-    const cond  = t.__type==="asreq" ? (t.condition||"") : "";
-    const interval = t.__type==="interval" ? (t.interval||"") : "";
+  // Simple row renderers (inline; no external deps)
+  function taskDetailsInterval(task){
     return `
-      <details data-id="${t.id}" data-type="${t.__type}">
+      <details class="task" data-task-id="${task.id}">
         <summary>
-          <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:70%">${t.name}</strong>
-          <span class="chip">${tagOf(t)}</span>
+          <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:70%">${task.name}</strong>
+          <span class="chip">Hourly Interval</span>
         </summary>
         <div class="body">
           <div class="grid">
             <label>Name
-              <input data-k="name" data-id="${t.id}" data-type="${t.__type}" value="${t.name||""}">
+              <input data-k="name" data-id="${task.id}" data-list="interval" value="${task.name||""}">
             </label>
-            ${
-              t.__type==="interval"
-                ? `<label>Interval (hrs)<input type="number" min="1" step="1" data-k="interval" data-id="${t.id}" data-type="interval" value="${interval}"></label>`
-                : `<label>Condition/Notes<input data-k="condition" data-id="${t.id}" data-type="asreq" value="${cond}" placeholder="optional"></label>`
-            }
-            <label>Part Number
-              <input data-k="pn" data-id="${t.id}" data-type="${t.__type}" value="${t.pn||''}" placeholder="optional">
+            <label>Interval (hrs)
+              <input type="number" min="1" step="1" data-k="interval" data-id="${task.id}" data-list="interval" value="${task.interval||""}">
+            </label>
+            <label>Baseline “since last” (hrs)
+              <input type="number" min="0" step="1" data-k="sinceBase" data-id="${task.id}" data-list="interval" value="${task.sinceBase!=null?task.sinceBase:""}" placeholder="e.g., 50">
+            </label>
+            <label>Part #
+              <input data-k="pn" data-id="${task.id}" data-list="interval" value="${task.pn||""}">
             </label>
             <label>Price
-              <input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-type="${t.__type}" value="${price!==''?price:''}" placeholder="optional">
+              <input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="interval" value="${fmtPrice(task.price)}" placeholder="optional">
             </label>
-            <label>Manual URL
-              <input data-k="manualLink" data-id="${t.id}" data-type="${t.__type}" value="${t.manualLink||''}" placeholder="https://…">
-            </label>
-            <label>Store Page URL
-              <input data-k="storeLink" data-id="${t.id}" data-type="${t.__type}" value="${t.storeLink||''}" placeholder="https://…">
+            <label>Store / Manual (URL)
+              <input type="url" data-k="link" data-id="${task.id}" data-list="interval" value="${task.link||task.storeLink||task.manualLink||""}" placeholder="https://…">
             </label>
           </div>
           <div class="actions">
-            <button data-move-up="${t.id}" data-type="${t.__type}">Move Up</button>
-            <button data-move-down="${t.id}" data-type="${t.__type}">Move Down</button>
-            <button class="danger" data-remove="${t.id}" data-type="${t.__type}">Delete</button>
+            <button class="btn-complete" data-complete="${task.id}">Mark Completed Now</button>
+            <button class="danger" data-remove="${task.id}" data-from="interval">Remove</button>
           </div>
         </div>
-      </details>
-    `;
+      </details>`;
+  }
+  function taskDetailsAsReq(task){
+    return `
+      <details class="task" data-task-id="${task.id}">
+        <summary>
+          <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:70%">${task.name}</strong>
+          <span class="chip">As Required</span>
+        </summary>
+        <div class="body">
+          <div class="grid">
+            <label>Name
+              <input data-k="name" data-id="${task.id}" data-list="asreq" value="${task.name||""}">
+            </label>
+            <label>Condition/Notes
+              <input data-k="condition" data-id="${task.id}" data-list="asreq" value="${task.condition||""}" placeholder="optional">
+            </label>
+            <label>Part #
+              <input data-k="pn" data-id="${task.id}" data-list="asreq" value="${task.pn||""}">
+            </label>
+            <label>Price
+              <input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="asreq" value="${fmtPrice(task.price)}" placeholder="optional">
+            </label>
+            <label>Store / Manual (URL)
+              <input type="url" data-k="link" data-id="${task.id}" data-list="asreq" value="${task.link||task.storeLink||task.manualLink||""}" placeholder="https://…">
+            </label>
+          </div>
+          <div class="actions">
+            <button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button>
+          </div>
+        </div>
+      </details>`;
   }
 
-  content.innerHTML = `
-    <div id="maintWrap">
-      <div class="bar">
-        <button id="btnAddCategory">Add Category</button>
-        <button id="btnAddTask" class="primary">Add Task</button>
-      </div>
-      <div id="maintList" class="list">
-        ${all.length ? all.map(rowHTML).join("") : `<div class="empty">No maintenance tasks yet.</div>`}
+  // Page view (kept close to your proven v6 structure)
+  const html = `
+    <div id="maintSettings" class="container">
+      <div class="block" style="grid-column:1 / -1">
+        <h3>Maintenance Settings</h3>
+        <p class="small">Two categories: <b>By Interval (hrs)</b> and <b>As Required</b>. Edits here affect Dashboard and Calendar.</p>
+
+        <div class="forms">
+          <form id="addIntervalForm" class="mini-form">
+            <strong>Add Interval Task</strong>
+            <input type="text" id="ai_name" placeholder="Name" required>
+            <input type="number" id="ai_interval" placeholder="Interval (hrs)" required>
+            <button type="submit">Add</button>
+          </form>
+
+          <form id="addAsReqForm" class="mini-form">
+            <strong>Add As-Required Task</strong>
+            <input type="text" id="ar_name" placeholder="Name" required>
+            <input type="text" id="ar_condition" placeholder="Condition (e.g., When damaged)">
+            <button type="submit">Add</button>
+          </form>
+        </div>
+
+        <h4>By Interval (hrs)</h4>
+        <div id="intervalList">
+          ${tasksInterval.map(taskDetailsInterval).join("")}
+        </div>
+
+        <h4 style="margin-top:16px;">As Required</h4>
+        <div id="asreqList">
+          ${tasksAsReq.map(taskDetailsAsReq).join("")}
+        </div>
+
+        <div style="margin-top:10px;">
+          <button id="saveTasksBtn">Save All</button>
+        </div>
       </div>
     </div>
   `;
+  root.innerHTML = html;
 
-  // --- Helpers to get live ref ---
-  function liveRef(id, type){
-    if (type === "interval"){
-      const r = window.tasksInterval.find(x=>String(x.id)===String(id));
-      return r ? {ref:r, list:"interval"} : null;
-    }else{
-      const r = window.tasksAsReq.find(x=>String(x.id)===String(id));
-      return r ? {ref:r, list:"asreq"} : null;
-    }
-  }
-
-  const listEl = document.getElementById("maintList");
-
-  // Inline edit (persists immediately)
-  listEl.addEventListener("input",(e)=>{
-    const el = e.target;
-    const id = el.getAttribute("data-id");
-    const type = el.getAttribute("data-type");
-    const key = el.getAttribute("data-k");
-    if (!id || !type || !key) return;
-    const live = liveRef(id, type); if (!live) return;
-    let val = el.value;
-    if (key==="interval" || key==="price"){
-      val = (val === "" ? null : Number(val));
-      if (key==="interval" && val!=null && val < 1) val = 1;
-    }
-    live.ref[key] = val;
-    saveCloudDebounced();
+  // ------- Bind inputs (delegated) -------
+  root.querySelectorAll("[data-id]").forEach(inp => {
+    inp.addEventListener("input", () => {
+      const id   = inp.getAttribute("data-id");
+      const key  = inp.getAttribute("data-k");
+      const list = inp.getAttribute("data-list");           // "interval" | "asreq"
+      const arr  = list === "interval" ? tasksInterval : tasksAsReq;
+      const t = arr.find(x => String(x.id) === String(id));
+      if (!t) return;
+      let val = inp.value;
+      if (["interval","sinceBase","price"].includes(key)){
+        val = (val === "" ? null : Number(val));
+        if (key === "interval" && val != null && val < 1) val = 1;
+      }
+      t[key] = val;
+      persist();
+    });
   });
 
-  // Move up/down + delete (no drag yet → simpler, robust)
-  listEl.addEventListener("click",(e)=>{
-    const del = e.target.closest("[data-remove]");
-    const up  = e.target.closest("[data-move-up]");
-    const dn  = e.target.closest("[data-move-down]");
-    if (del){
-      const id = del.getAttribute("data-remove");
-      const type = del.getAttribute("data-type");
-      if (type==="interval") window.tasksInterval = window.tasksInterval.filter(x=>String(x.id)!==String(id));
-      else window.tasksAsReq = window.tasksAsReq.filter(x=>String(x.id)!==String(id));
-      saveCloudDebounced(); renderSettings(); return;
-    }
-    const changeOrder = (id, type, dir)=>{
-      // dir = +1 move up (toward top), -1 move down
-      const merged = [
-        ...window.tasksInterval.map(t => ({...t, __type:"interval"})),
-        ...window.tasksAsReq.map(t      => ({...t, __type:"asreq"})),
-      ].sort((a,b)=> Number(b.order||0) - Number(a.order||0)); // current display order
-      const idx = merged.findIndex(x=>String(x.id)===String(id) && x.__type===type);
-      if (idx < 0) return;
-      const swapIdx = idx + (dir===+1 ? -1 : +1); // because highest order is at top (index 0)
-      if (swapIdx < 0 || swapIdx >= merged.length) return;
-      const A = merged[idx], B = merged[swapIdx];
-      const aRef = liveRef(A.id, A.__type).ref;
-      const bRef = liveRef(B.id, B.__type).ref;
-      const tmp = aRef.order; aRef.order = bRef.order; bRef.order = tmp;
-      saveCloudDebounced(); renderSettings();
-    };
-    if (up){ changeOrder(up.getAttribute("data-move-up"), up.getAttribute("data-type"), +1); return; }
-    if (dn){ changeOrder(dn.getAttribute("data-move-down"), dn.getAttribute("data-type"), -1); return; }
+  // ------- Remove + Complete buttons -------
+  root.querySelectorAll("[data-remove]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-remove");
+      const from = btn.getAttribute("data-from");
+      if (from === "interval") tasksInterval = tasksInterval.filter(t => String(t.id)!==String(id));
+      else tasksAsReq = tasksAsReq.filter(t => String(t.id)!==String(id));
+      persist();
+      renderSettings(); // refresh list
+    });
   });
 
-  // Add Task (minimal prompt; persists immediately, appears at top)
-  document.getElementById("btnAddTask")?.addEventListener("click", ()=>{
-    const name = prompt("Task name?"); if (!name) return;
-    const occ  = (prompt("Occurrence: type 'interval' or 'asreq'")||"").trim().toLowerCase();
-    if (occ !== "interval" && occ !== "asreq"){ alert("Please enter 'interval' or 'asreq'."); return; }
-    const id = genId(name);
-    const base = { id, name, order: (++window._maintOrderCounter), pn:"", price:null, manualLink:"", storeLink:"", cat:null, parentTask:null };
-    if (occ === "interval"){
-      const iv = Number(prompt("Interval hours? (positive number)", "100")||"0")||0;
-      if (iv<=0){ alert("Interval must be positive."); return; }
-      window.tasksInterval.unshift({ ...base, interval: iv, sinceBase:null, anchorTotal:null });
-    }else{
-      window.tasksAsReq.unshift({ ...base, condition:"As required" });
+  root.querySelectorAll(".btn-complete").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (typeof completeTask === "function"){
+        completeTask(btn.getAttribute("data-complete"));
+      } else {
+        // Local fallback: anchor to currentTotal if available
+        const id = btn.getAttribute("data-complete");
+        const t = tasksInterval.find(x => String(x.id)===String(id));
+        if (t){
+          const cur = (typeof currentTotal === "function") ? currentTotal() : null;
+          t.anchorTotal = cur!=null ? cur : 0;
+          t.sinceBase = 0;
+          persist();
+        }
+      }
+      renderSettings();
+    });
+  });
+
+  // ------- Add forms (match v6 behavior exactly) -------
+  const addInt = document.getElementById("addIntervalForm");
+  const addReq = document.getElementById("addAsReqForm");
+
+  addInt?.addEventListener("submit",(e)=>{
+    e.preventDefault();
+    const name = document.getElementById("ai_name").value.trim();
+    const interval = Number(document.getElementById("ai_interval").value);
+    if (!name || !isFinite(interval) || interval <= 0) return;
+    const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
+    tasksInterval.push({ id, name, interval, sinceBase:null, anchorTotal:null, cost:"", link:"" });
+    // Optional inventory seed if your build expects it:
+    if (typeof inventory !== "undefined" && Array.isArray(inventory)){
+      inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
+      if (typeof saveInventory === "function") saveInventory();
     }
-    saveCloudDebounced();
+    persist();
     renderSettings();
   });
 
-  // Category placeholder (we’ll restore folders once baseline is stable)
-  document.getElementById("btnAddCategory")?.addEventListener("click", ()=>{
-    alert("Categories will be re-enabled after we stabilize the task list.");
+  addReq?.addEventListener("submit",(e)=>{
+    e.preventDefault();
+    const name = document.getElementById("ar_name").value.trim();
+    const condition = (document.getElementById("ar_condition").value || "").trim() || "As required";
+    if (!name) return;
+    const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
+    tasksAsReq.push({ id, name, condition, cost:"", link:"" });
+    if (typeof inventory !== "undefined" && Array.isArray(inventory)){
+      inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
+      if (typeof saveInventory === "function") saveInventory();
+    }
+    persist();
+    renderSettings();
+  });
+
+  // ------- Save All (explicit button, like v6) -------
+  const saveBtn = document.getElementById("saveTasksBtn");
+  saveBtn?.addEventListener("click", ()=>{
+    persist();
+    // If you have a global route() that refreshes other pages, call it:
+    if (typeof route === "function") route();
   });
 }
-
 
 
 function renderJobs(){
