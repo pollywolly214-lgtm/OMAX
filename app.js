@@ -1790,6 +1790,169 @@ function renderSettings(){
   });
 }
 
+// Renders the Explorer-style Categories pane (folders only) with safe DnD.
+function renderSettingsCategoriesPane(){
+  // Ensure state
+  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+
+  const root = document.getElementById("maintSettings");
+  if (!root) return;
+
+  // ----- CSS (scoped) -----
+  if (!document.getElementById("catTreeCSS")){
+    const st = document.createElement("style");
+    st.id = "catTreeCSS";
+    st.textContent = `
+      #catPaneBlock { border:1px solid #e5e5e5; background:#fff; border-radius:10px; padding:10px; margin-bottom:12px; }
+      #catPaneBlock .head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+      #catPaneBlock .head h4 { margin:0; }
+      #catPaneBlock .head button { padding:6px 10px; }
+      #catTree details.cat { border:1px solid #eee; border-radius:8px; margin:6px 0; background:#fafafa; }
+      #catTree summary { font-weight:800; font-size:1.02rem; cursor:grab; user-select:none; padding:6px 8px; display:flex; align-items:center; gap:8px; }
+      #catTree details.cat.dragging { opacity:.55; }
+      #catTree .children { padding:6px 10px 10px 18px; }
+      #catTree .dz { height:8px; margin:4px 0; border-radius:6px; }
+      #catTree .dz.dragover { height:18px; background:rgba(0,0,0,.05); outline:2px dashed #888; }
+      #catTree .drop-hint { outline:2px solid #6aa84f; border-radius:6px; }
+      #catTree .empty { color:#666; padding:4px 2px; }
+    `;
+    document.head.appendChild(st);
+  }
+
+  // ----- Ensure a holder block exists (insert above your Add forms) -----
+  let block = document.getElementById("catPaneBlock");
+  if (!block){
+    block = document.createElement("div");
+    block.id = "catPaneBlock";
+    const forms = root.querySelector(".forms"); // from your renderSettings()
+    if (forms) root.firstElementChild.insertBefore(block, forms); else root.firstElementChild.prepend(block);
+  }
+
+  // Helpers
+  const byId = (id)=> window.settingsFolders.find(f=>String(f.id)===String(id)) || null;
+  const childrenOf = (parent)=> window.settingsFolders
+    .filter(f => String(f.parent||"") === String(parent||""))
+    .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
+
+  function normSiblings(parent){
+    const sibs = childrenOf(parent==null?null:parent);
+    let n = sibs.length;
+    for (const s of sibs){ s.order = n--; }
+  }
+
+  function folderHTML(f){
+    return `
+      <details class="cat" data-cat-id="${f.id}" open>
+        <summary draggable="true">${f.name}</summary>
+
+        <!-- Dropzones: into-this and before-children -->
+        <div class="dz" data-drop-into="${f.id}"></div>
+
+        <div class="children" data-children-of="${f.id}">
+          ${childrenOf(f.id).map(folderHTML).join("")}
+        </div>
+      </details>
+    `;
+  }
+
+  const roots = childrenOf(null);
+  block.innerHTML = `
+    <div class="head">
+      <h4>Categories (folders)</h4>
+      <button id="btnAddCategory">+ Add Category</button>
+      <span class="small muted">Drag folders to re-parent or reorder.</span>
+    </div>
+    <div id="catTree" role="tree">
+      <div class="dz" data-drop-root="1"></div>
+      ${roots.length ? roots.map(folderHTML).join("") : `<div class="empty">No categories yet.</div>`}
+    </div>
+  `;
+
+  // ----- Add Category (always to TOP at root) -----
+  document.getElementById("btnAddCategory")?.addEventListener("click", ()=>{
+    const name = prompt("Category name?");
+    if (!name) return;
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Math.random().toString(36).slice(2,7);
+    window.settingsFolders.push({ id, name, parent:null, order:(++window._maintOrderCounter) });
+    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+    renderSettingsCategoriesPane();
+  });
+
+  // ----- DnD wiring (folders only) -----
+  const tree = document.getElementById("catTree");
+  const DRAG = { id:null };
+
+  tree.addEventListener("dragstart",(e)=>{
+    const card = e.target.closest("details.cat");
+    if (!card) return;
+    DRAG.id = card.getAttribute("data-cat-id");
+    card.classList.add("dragging");
+    e.dataTransfer.setData("text/plain", `category:${DRAG.id}`);
+    e.dataTransfer.effectAllowed = "move";
+  });
+  tree.addEventListener("dragend",(e)=>{
+    const card = e.target.closest("details.cat");
+    card?.classList.remove("dragging");
+    tree.querySelectorAll(".drop-hint").forEach(x=>x.classList.remove("drop-hint"));
+    tree.querySelectorAll(".dz.dragover").forEach(x=>x.classList.remove("dragover"));
+    DRAG.id = null;
+  });
+
+  function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
+  tree.addEventListener("dragover",(e)=>{
+    const dz = e.target.closest(".dz");
+    const sum = e.target.closest("summary");
+    if (dz){ allow(e); dz.classList.add("dragover"); }
+    if (sum){ allow(e); sum.classList.add("drop-hint"); }
+  });
+  tree.addEventListener("dragleave",(e)=>{
+    const dz = e.target.closest(".dz"); dz?.classList.remove("dragover");
+    const sum = e.target.closest("summary"); sum?.classList.remove("drop-hint");
+  });
+
+  tree.addEventListener("drop",(e)=>{
+    const data = e.dataTransfer.getData("text/plain") || "";
+    const [kind,id] = data.split(":");
+    const dzRoot   = e.target.closest("[data-drop-root]");
+    const dzInto   = e.target.closest("[data-drop-into]");
+    const onSum    = e.target.closest("summary");
+    e.preventDefault();
+
+    if (kind !== "category") return; // this step supports folders only
+
+    if (dzRoot){
+      // Move to ROOT (top)
+      if (moveNodeSafely("category", id, { intoCat: null })){
+        if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+        renderSettingsCategoriesPane();
+      }
+      return;
+    }
+    if (dzInto){
+      // Move INTO this category (top of it)
+      const fid = dzInto.getAttribute("data-drop-into");
+      if (moveNodeSafely("category", id, { intoCat: fid })){
+        if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+        renderSettingsCategoriesPane();
+      }
+      return;
+    }
+    if (onSum){
+      // Reorder BEFORE this category (same parent)
+      const holder = onSum.closest("details.cat");
+      const beforeId = holder?.getAttribute("data-cat-id");
+      if (beforeId && moveNodeSafely("category", id, { beforeCat:{ id: beforeId } })){
+        if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+        renderSettingsCategoriesPane();
+      }
+    }
+  });
+     // Render the Explorer-style folder pane on top
+  renderSettingsCategoriesPane();
+}
+
+
 function renderJobs(){
   const content = document.getElementById("content"); 
   if (!content) return;
