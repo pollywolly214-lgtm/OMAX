@@ -1298,103 +1298,91 @@ function renderSettings(){
   const content = document.getElementById("content");
   if (!content) return;
 
-  // ---------- Sleeker layout: explorer pinned to a NARROW left pane; smaller bubbles ----------
-  if (!document.getElementById("settingsExplorerCSS")){
+  /* -------------------- Styles (scoped) -------------------- */
+  if (!document.getElementById("maintExplorerCSS")){
     const st = document.createElement("style");
-    st.id = "settingsExplorerCSS";
+    st.id = "maintExplorerCSS";
     st.textContent = `
-      /* Two columns; left is a narrow pane (about half of previous) */
-      #settingsPane.settings-grid{
-        display:grid;
-        grid-template-columns: minmax(260px, 400px) 1fr; /* narrower than before */
-        gap: 16px;
-        align-items:start;
-      }
-      #settingsPane .settings-left{ grid-column: 1 / 2; }
-      #settingsPane .settings-right{ grid-column: 2 / 3; }
+      #maintPane{ display:grid; grid-template-columns: minmax(340px, 520px) 1fr; gap:16px; align-items:start; }
+      #maintPane .left{ grid-column:1/2; }
+      #maintPane .right{ grid-column:2/3; }
+      #maintPane .toolbar{ display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+      #maintPane .toolbar button{ padding:6px 10px; }
+      #maintPane h3{ margin:0 0 8px 0; }
 
-      /* Smaller bubble cards (only in Settings) */
-      #settingsPane details.block{
-        border: 1px solid #e5e5e5;
-        border-radius: 8px;
-        padding: 4px 6px;     /* tighter */
-        margin: 4px 0;        /* tighter */
-        background: #fff;
+      /* Categories (folders): larger/bolder than tasks */
+      #maintPane details.folder > summary{
+        font-weight:800; font-size:1.05rem; letter-spacing:.2px; display:flex; align-items:center; gap:8px; cursor:pointer;
       }
-
-      /* Items: remove fold/caret and show always-open body (summary hidden) */
-      #settingsPane details.item[open] > summary{ display:none; }
-      #settingsPane details.item::-webkit-details-marker{ display:none; }
-      #settingsPane .item-head{
-        display:flex; align-items:center; gap:8px; 
-        font-weight:600; font-size:.88rem; margin-bottom:6px;
+      /* Tasks (one-line header only shows name) */
+      #maintPane details.task > summary{
+        display:flex; align-items:center; gap:8px; cursor:pointer;
+        font-weight:600; font-size:.92rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
       }
-      /* Categories keep current bold/title style */
-      #settingsPane details.folder > summary.folder-title{
-        font-weight:800; font-size:1.02rem; letter-spacing:.2px; display:flex; align-items:center; gap:10px;
+      /* Compact cards */
+      #maintPane details.block{
+        border:1px solid #e5e5e5; border-radius:10px; background:#fff;
+        padding:6px 8px; margin:6px 0;
       }
+      #maintPane .muted{ color:#666 } 
+      #maintPane .small{ font-size:.85rem }
 
-      /* Compact chips + mini-forms inside items */
-      #settingsPane .chip{ display:inline-block; padding:2px 6px; border-radius:10px; font-size:.68rem; background:#f1f1f1 }
-      #settingsPane .chip.green{ background:#e8f5e9 } 
-      #settingsPane .chip.yellow{ background:#fff8e1 } 
-      #settingsPane .chip.orange{ background:#ffe0b2 } 
-      #settingsPane .chip.red{ background:#ffebee }
-      #settingsPane .mini-form{ display:grid; grid-template-columns: 1fr 1fr; gap:6px; }
-      #settingsPane .mini-form label{ font-size:.82rem; }
-      #settingsPane .mini-form input{ padding:4px 6px; font-size:.86rem; }
-      #settingsPane .small{ font-size:.82rem } 
-      #settingsPane .muted{ color:#666 }
+      /* Drag+drop affordances */
+      #maintPane details.dragging{ opacity:.6 }
+      #maintPane .dz{ height:8px; border-radius:6px; margin:6px 0; }
+      #maintPane .dz.dragover{ height:20px; background:rgba(0,0,0,.05); outline:2px dashed #888; }
+      #maintPane .sort-hint{ outline:2px solid #6aa84f; border-radius:6px; }
 
-      /* Drag/drop affordances (sleek: dropzones are invisible rails until dragover) */
-      #settingsPane .dz{ height:8px; border-radius:6px; margin:6px 0; }
-      #settingsPane .dz.dragover{ height:22px; background:rgba(0,0,0,.05); outline:2px dashed #888; }
-      #settingsPane details.dragging{ opacity:.6 }
-      #settingsPane .sort-hint{ outline:2px solid #6aa84f; border-radius:6px; }
+      /* Forms inside detail bodies */
+      #maintPane .mini-form{ display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin:8px 0; }
+      #maintPane .mini-form label{ font-size:.85rem; }
+      #maintPane .mini-form input, #maintPane .mini-form select{ padding:4px 6px; font-size:.92rem; }
+      #maintPane .btns{ display:flex; gap:8px; align-items:center; }
+
+      /* Modal */
+      #taskModal, #catModal{
+        position:fixed; inset:0; display:none; place-items:center; background:rgba(0,0,0,.35); z-index:9999;
+      }
+      #taskModal .sheet, #catModal .sheet{
+        background:#fff; border-radius:12px; padding:14px; width:min(520px, 92vw); box-shadow:0 10px 40px rgba(0,0,0,.18);
+      }
+      #taskModal h4, #catModal h4{ margin:0 0 10px 0; }
+      #taskForm .row{ display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+      #taskForm input, #taskForm select{ width:100%; padding:6px 8px; font-size:.95rem; }
+      #taskForm .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:10px; }
+      #catForm .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:10px; }
+      #maintPane a.link{ color:#0b5ed7; text-decoration:underline; }
     `;
     document.head.appendChild(st);
   }
 
-  // ---------- State ----------
+  /* -------------------- State -------------------- */
+  // Categories (folders): can nest via parent
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
   for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
 
-  // Items come from legacy lists; treated as files (not folders)
-  const allItems = [
+  // Tasks continue to live in the app's existing lists so calendar logic still works.
+  // We simply add organizational fields: cat (folder id) and parentTask (task id) + order.
+  const allTasks = [
     ...(Array.isArray(tasksInterval) ? tasksInterval.map(t => ({...t, __type:"interval"})) : []),
     ...(Array.isArray(tasksAsReq)    ? tasksAsReq.map(t => ({...t, __type:"asreq"}))       : []),
   ];
 
-  // ---------- Ordering so new things appear at TOP + drag-to-reorder ----------
-  function getMaxOrder(){
-    const maxFolder = window.settingsFolders.reduce((m,f)=> Math.max(m, Number(f.order||0)), 0);
-    const maxItems  = allItems.reduce((m,t)=> Math.max(m, Number(t.order||0)), 0);
-    return Math.max(maxFolder, maxItems);
+  // Order: higher = nearer top
+  function currentMaxOrder(){
+    const maxF = window.settingsFolders.reduce((m,f)=>Math.max(m, Number(f.order||0)), 0);
+    const maxT = allTasks.reduce((m,t)=>Math.max(m, Number(t.order||0)), 0);
+    return Math.max(maxF, maxT);
   }
-  if (typeof window._orderInitialized === "undefined"){ window._orderInitialized = false; }
-  if (!window._orderInitialized){
-    let base = 0;
-    const parentIds = [null, ...new Set(window.settingsFolders.map(f=>f.parent).filter(Boolean))];
-    for (const pid of parentIds){
-      const group = window.settingsFolders.filter(f => (f.parent||null)===(pid||null));
-      for (const f of group){ if (typeof f.order === "undefined"){ f.order = ++base; } }
-    }
-    const folderIds = [null, ...new Set(allItems.map(t=>t.cat).filter(Boolean))];
-    for (const fid of folderIds){
-      const group = allItems.filter(t => (t.cat||null)===(fid||null));
-      for (const t of group){ if (typeof t.order === "undefined"){ t.order = ++base; } }
-    }
-    window._orderCounter = base;
-    window._orderInitialized = true;
-  } else {
-    window._orderCounter = Math.max(window._orderCounter||0, getMaxOrder());
-    for (const f of window.settingsFolders){ if (typeof f.order === "undefined"){ f.order = ++window._orderCounter; } }
-    for (const t of allItems){ if (typeof t.order === "undefined"){ t.order = ++window._orderCounter; } }
+  if (typeof window._maintOrderCounter === "undefined"){
+    window._maintOrderCounter = currentMaxOrder();
+  }else{
+    window._maintOrderCounter = Math.max(window._maintOrderCounter, currentMaxOrder());
   }
-  function bumpTop(obj){ obj.order = ++window._orderCounter; }
+  function bumpTop(obj){ obj.order = ++window._maintOrderCounter; }
 
-  const byIdFolder = (id)=> window.settingsFolders.find(f => String(f.id)===String(id));
-  const byIdItemLive = (id)=> {
+  const byFolder = id => window.settingsFolders.find(f => String(f.id)===String(id));
+  const byLiveTask = id => {
     const a = tasksInterval?.find(x=>String(x.id)===String(id));
     if (a) return {ref:a, list:"interval"};
     const b = tasksAsReq?.find(x=>String(x.id)===String(id));
@@ -1402,393 +1390,431 @@ function renderSettings(){
     return null;
   };
 
-  const kidsOf  = (parent)=> window.settingsFolders
-      .filter(f => (f.parent||null)===(parent||null))
-      .sort((a,b)=> (b.order||0) - (a.order||0) || String(a.name).localeCompare(String(b.name)));
+  // Containers:
+  // - Root: items with parentTask==null && cat==null; folders with parent==null
+  // - Folder X: items with parentTask==null && cat==X; folders with parent==X
+  // - Task T: items with parentTask==T (subcomponents)
+  const kidsFolders = parentId =>
+    window.settingsFolders
+      .filter(f => (f.parent||null)===(parentId||null))
+      .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
 
-  const itemsIn = (folderId)=> allItems
-      .filter(t => (t.cat||null)===(folderId||null))
-      .sort((a,b)=> (b.order||0) - (a.order||0) || String(a.name).localeCompare(String(b.name)));
+  const tasksInFolder = folderId =>
+    allTasks
+      .filter(t => (t.parentTask==null) && ((t.cat||null)===(folderId||null)))
+      .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
 
-  function normalizeFolderOrders(parentId){
-    const list = kidsOf(parentId);
-    let n = list.length;
-    for (const f of list){ f.order = n--; }
-    window._orderCounter = Math.max(window._orderCounter, list.length);
-  }
-  function normalizeItemOrders(folderId){
-    const list = itemsIn(folderId);
-    let n = list.length;
-    for (const v of list){
-      const arr = v.__type==="interval" ? tasksInterval : tasksAsReq;
-      const r = arr.find(x=>x.id===v.id);
-      if (r) r.order = n--;
-    }
-    window._orderCounter = Math.max(window._orderCounter, list.length);
-  }
+  const subTasksOf = taskId =>
+    allTasks
+      .filter(t => String(t.parentTask||"")===String(taskId))
+      .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
 
-  // ---------- Small helpers ----------
-  const setNum = (v)=> { const n = Number(v); return isFinite(n) ? n : null; };
-  const chipFor = (t)=>{
-    const nd = nextDue(t);
-    if (!nd) return `<span class="chip">—</span>`;
-    const d = nd.days; let cls = "green"; if (d<=1) cls="red"; else if (d<=3) cls="orange"; else if (d<=7) cls="yellow";
-    return `<span class="chip ${cls}">${d}d → ${nd.due.toDateString()}</span>`;
-  };
-  const partRow = (p, parentId, listType) => `
-    <div class="mini-form" data-part-row data-parent="${parentId}" data-list="${listType}" data-part-id="${p.pid}">
-      <input type="text" placeholder="Part name" value="${p.name||""}" data-part-k="name" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
-      <input type="text" placeholder="PN" value="${p.pn||""}" data-part-k="pn" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
-      <input type="number" step="0.01" min="0" placeholder="Price" value="${p.price!=null?p.price:""}" data-part-k="price" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
-      <input type="url" placeholder="Link" value="${p.link||""}" data-part-k="link" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
-      <input type="text" placeholder="Note" value="${p.note||""}" data-part-k="note" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
-      <button class="danger" type="button" data-part-remove="${p.pid}" data-parent="${parentId}" data-list="${listType}">Remove</button>
-    </div>`;
-
-  // Item card: always open (no folding)
-  const itemCard = (t) => {
-    const listType = t.__type;
-    const nd = nextDue(t);
-    const lastServ = nd && nd.lastServicedAt != null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
-    const parts = Array.isArray(t.parts) ? t.parts : [];
-    return `
-    <details class="item block" open draggable="true"
-             data-sort-type="item" data-sort-id="${t.id}"
-             data-task-id="${t.id}" data-list="${listType}" data-cat="${t.cat||""}">
-      <summary></summary> <!-- hidden by CSS (keeps details semantics but no fold) -->
-      <div class="item-head">
-        <span>${t.name}</span>
-        ${listType === "interval" ? `<span class="chip">${t.interval}h</span>` : `<span class="chip">As req.</span>`}
-        ${listType === "interval" ? chipFor(t) : ""}
-      </div>
-
-      <div class="mini-form" style="margin:6px 0 2px 0;">
-        <label>Name: <input type="text" data-k="name" data-id="${t.id}" data-list="${listType}" value="${t.name}"></label>
-
-        ${listType === "interval" ? `
-        <label>Interval (hrs): <input type="number" min="1" data-k="interval" data-id="${t.id}" data-list="interval" value="${t.interval}"></label>
-        <label>Baseline “since last” (hrs): <input type="number" min="0" data-k="sinceBase" data-id="${t.id}" data-list="interval" value="${t.sinceBase!=null?t.sinceBase:""}"></label>
-        <div class="small muted">When last serviced: ${lastServ}</div>
-        ` : `
-        <label>Condition/Notes: <input type="text" data-k="condition" data-id="${t.id}" data-list="asreq" value="${t.condition||""}" placeholder="e.g., when clogged / visual check"></label>
-        `}
-
-        <label>Manual link: <input type="url" data-k="manualLink" data-id="${t.id}" data-list="${listType}" value="${t.manualLink||""}" placeholder="PDF / guide URL"></label>
-        <label>Store link: <input type="url" data-k="storeLink" data-id="${t.id}" data-list="${listType}" value="${t.storeLink||""}" placeholder="Where to buy"></label>
-        <label>Part # (primary): <input type="text" data-k="pn" data-id="${t.id}" data-list="${listType}" value="${t.pn||""}"></label>
-        <label>Price (primary): <input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${listType}" value="${t.price!=null?t.price:""}"></label>
-
-        <div>
-          <button class="btn-complete" data-complete="${t.id}">Mark Completed Now</button>
-          <button class="danger" data-remove="${t.id}" data-from="${listType}">Remove</button>
+  /* -------------------- View -------------------- */
+  content.innerHTML = `
+    <div id="maintPane">
+      <div class="left">
+        <h3>Maintenance Settings</h3>
+        <div class="toolbar">
+          <button id="btnAddCat">+ Add Category</button>
+          <button id="btnAddTask">+ Add Task</button>
+          <span class="small muted">Drag categories and tasks anywhere. Tasks can nest inside tasks (as subcomponents).</span>
         </div>
+        <div id="rootContainer"></div>
       </div>
+      <div class="right"></div>
+    </div>
 
-      <div class="block" style="background:#fff;margin-top:6px;">
-        <h4 style="margin:0 0 4px 0;">Sub-parts</h4>
-        <div class="small muted">Use for washers, mixing tube, etc.</div>
-        <div id="parts_${t.id}" data-part-list data-parent="${t.id}" data-list="${t.__type}">
-          ${parts.map(p => partRow(p, t.id, listType)).join("") || `<div class="small muted">No sub-parts yet.</div>`}
-        </div>
-        <form class="mini-form" data-part-add-form data-parent="${t.id}" data-list="${listType}" style="margin-top:6px">
-          <input type="text"  placeholder="Part name"  data-part-new="name"  required>
-          <input type="text"  placeholder="PN"         data-part-new="pn">
-          <input type="number" step="0.01" min="0" placeholder="Price" data-part-new="price">
-          <input type="url"   placeholder="Link"       data-part-new="link">
-          <input type="text"  placeholder="Note"       data-part-new="note">
-          <button type="submit">+ Add sub-part</button>
+    <!-- Task modal -->
+    <div id="taskModal">
+      <div class="sheet">
+        <h4>New Task</h4>
+        <form id="taskForm">
+          <div class="row">
+            <div>
+              <label>Task Name*</label>
+              <input type="text" id="tk_name" required>
+            </div>
+            <div>
+              <label>Occurrence*</label>
+              <select id="tk_occ" required>
+                <option value="interval">Hourly Interval</option>
+                <option value="asreq">As Required</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Part Number</label>
+              <input type="text" id="tk_pn" placeholder="Optional">
+            </div>
+            <div>
+              <label>Price</label>
+              <input type="number" step="0.01" min="0" id="tk_price" placeholder="Optional">
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Manual (URL)</label>
+              <input type="url" id="tk_manual" placeholder="Optional">
+            </div>
+            <div>
+              <label>Store Page (URL)</label>
+              <input type="url" id="tk_store" placeholder="Optional">
+            </div>
+          </div>
+          <div class="actions">
+            <button type="button" id="tk_cancel">Cancel</button>
+            <button type="submit" id="tk_create">Create</button>
+          </div>
         </form>
       </div>
-    </details>`;
-  };
+    </div>
 
-  // Folder (category). Dropzone note removed; rail is invisible until dragover.
-  const renderFolder = (folder) => {
-    const subFolders = kidsOf(folder.id).map(renderFolder).join("");
-    const itemsHtml  = itemsIn(folder.id).map(itemCard).join("") || ``;
-    return `
-      <details class="folder block" data-folder-id="${folder.id}" data-sort-type="folder" data-sort-id="${folder.id}" open draggable="true">
-        <summary class="folder-title">
-          <span class="folder-name">${folder.name}</span>
-          <span style="flex:1"></span>
-          <button class="small" data-add-subfolder="${folder.id}">+ Sub-category</button>
-          <button class="small" data-rename-folder="${folder.id}">Rename</button>
-          <button class="danger small" data-remove-folder="${folder.id}">Remove</button>
-        </summary>
-
-        <div class="dz" data-drop-folder="${folder.id}"></div>
-
-        <div class="folder-children" data-folder-body="${folder.id}">
-          ${subFolders}
-          <div class="bubble-list">
-            ${itemsHtml}
+    <!-- Category modal -->
+    <div id="catModal">
+      <div class="sheet">
+        <h4>New Category</h4>
+        <form id="catForm">
+          <label>Category Name*</label>
+          <input type="text" id="cat_name" required>
+          <div class="actions">
+            <button type="button" id="cat_cancel">Cancel</button>
+            <button type="submit" id="cat_create">Create</button>
           </div>
-        </div>
-      </details>`;
-  };
-
-  // ---------- View: explorer on the LEFT (narrow) ----------
-  const rootItems   = itemsIn(null).map(itemCard).join("");
-  const rootFolders = kidsOf(null).map(renderFolder).join("");
-  const toolbar = `
-    <div class="tree-toolbar">
-      <button id="addFolderBtn">+ Add Category</button>
-      <span class="small muted">Drag items and categories anywhere. New things appear at the top.</span>
-      <span style="flex:1"></span>
-      <button id="saveTasksBtn">Save</button>
-    </div>`;
-
-  content.innerHTML = `
-    <div id="settingsPane" class="settings-grid">
-      <div class="settings-left">
-        <div class="block">
-          <h3>Maintenance Settings</h3>
-          ${toolbar}
-          <div id="treeList">
-            <div class="dz" data-drop-root="1"></div>
-            <div class="bubble-list">
-              ${rootItems}
-            </div>
-            <div class="tree-folders">
-              ${rootFolders || `<div class="small muted">No categories yet. Click “Add Category”.</div>`}
-            </div>
-          </div>
-        </div>
+        </form>
       </div>
-      <div class="settings-right"><!-- reserved --></div>
     </div>
   `;
 
-  // ---------- Input wiring (unchanged) ----------
-  const setLiveField = (id,list,key,val)=>{
-    const live = byIdItemLive(id); if (!live || live.list !== list) return;
-    if (key==="interval" || key==="sinceBase" || key==="price") val = setNum(val);
-    live.ref[key] = val; saveCloudDebounced();
-  };
+  /* -------------------- Render tree -------------------- */
+  const rootContainer = document.getElementById("rootContainer");
 
-  const pane = document.getElementById("settingsPane");
-  pane.addEventListener("input",(e)=>{
+  function taskCard(t){
+    // One-line header (name only). Details contain all fields + subcomponents.
+    const isInterval = t.__type === "interval";
+    const pn    = t.pn||"";
+    const price = (t.price!=null && t.price!=="") ? Number(t.price).toFixed(2) : "";
+    const man   = t.manualLink||"";
+    const sto   = t.storeLink||"";
+    return `
+      <details class="task block" data-sort-type="task" data-task-id="${t.id}" data-list="${t.__type}" ${/* keep collapsed by default */""}>
+        <summary>${t.name}</summary>
+        <div class="mini-form">
+          <div><label>Occurrence</label>
+            <input value="${isInterval ? "Hourly Interval" : "As Required"}" disabled>
+          </div>
+          ${isInterval ? `<div><label>Interval (hrs)</label><input type="number" min="1" data-k="interval" data-id="${t.id}" data-list="interval" value="${t.interval || 100}"></div>` : `<div></div>`}
+          <div><label>Part Number</label><input type="text" data-k="pn" data-id="${t.id}" data-list="${t.__type}" value="${pn}"></div>
+          <div><label>Price</label><input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${t.__type}" value="${price}"></div>
+          <div><label>Manual</label><input type="url" data-k="manualLink" data-id="${t.id}" data-list="${t.__type}" value="${man}" placeholder="https://…"></div>
+          <div><label>Store Page</label><input type="url" data-k="storeLink" data-id="${t.id}" data-list="${t.__type}" value="${sto}" placeholder="https://…"></div>
+        </div>
+
+        <div class="btns">
+          <button data-sub-for="${t.id}" data-sub-list="${t.__type}">+ Add Subcomponent</button>
+          <button class="danger" data-remove-task="${t.id}" data-from="${t.__type}">Remove Task</button>
+        </div>
+
+        <!-- Dropzone to move tasks inside this task (become subcomponents) -->
+        <div class="dz" data-drop-task="${t.id}"></div>
+
+        <!-- Subcomponents list -->
+        <div data-sublist-of="${t.id}">
+          ${subTasksOf(t.id).map(taskCard).join("")}
+        </div>
+      </details>
+    `;
+  }
+
+  function folderBlock(f){
+    return `
+      <details class="folder block" data-sort-type="folder" data-folder-id="${f.id}" open draggable="true">
+        <summary>${f.name}</summary>
+
+        <!-- Drop into this category (top) -->
+        <div class="dz" data-drop-folder="${f.id}"></div>
+
+        <!-- Child folders -->
+        <div data-folders-of="${f.id}">
+          ${kidsFolders(f.id).map(folderBlock).join("")}
+        </div>
+
+        <!-- Tasks directly in this category -->
+        <div data-tasks-of="${f.id}">
+          ${tasksInFolder(f.id).map(taskCard).join("")}
+        </div>
+      </details>
+    `;
+  }
+
+  function renderRoot(){
+    const roots = kidsFolders(null).map(folderBlock).join("");
+    const topTasks = tasksInFolder(null).map(taskCard).join("");
+    rootContainer.innerHTML = `
+      <div class="dz" data-drop-root="1"></div>
+      <div data-root-tasks>${topTasks}</div>
+      <div data-root-folders>${roots}</div>
+    `;
+    markDraggable();
+  }
+  renderRoot();
+
+  function markDraggable(){
+    // categories + tasks are draggable
+    rootContainer.querySelectorAll('details.folder').forEach(el => el.setAttribute('draggable','true'));
+    rootContainer.querySelectorAll('details.task').forEach(el => el.setAttribute('draggable','true'));
+  }
+
+  /* -------------------- Modal helpers -------------------- */
+  const modalTask = document.getElementById("taskModal");
+  const modalCat  = document.getElementById("catModal");
+  const openModal = m => (m.style.display="grid");
+  const closeModal= m => (m.style.display="none");
+
+  // Add Task (always to TOP of root unless invoked as subcomponent)
+  document.getElementById("btnAddTask")?.addEventListener("click", ()=>{
+    // clear form
+    document.getElementById("tk_name").value="";
+    document.getElementById("tk_occ").value="interval";
+    document.getElementById("tk_pn").value="";
+    document.getElementById("tk_price").value="";
+    document.getElementById("tk_manual").value="";
+    document.getElementById("tk_store").value="";
+    modalTask.dataset.parentTask = "";  // no parent => root task
+    openModal(modalTask);
+  });
+  document.getElementById("tk_cancel")?.addEventListener("click", ()=> closeModal(modalTask));
+  document.getElementById("taskForm")?.addEventListener("submit",(e)=>{
+    e.preventDefault();
+    const name = document.getElementById("tk_name").value.trim();
+    const occ  = document.getElementById("tk_occ").value; // "interval" | "asreq"
+    if (!name || !occ){ toast("Name and Occurrence are required."); return; }
+
+    const base = {
+      id: genId(name),
+      name,
+      pn: (document.getElementById("tk_pn").value||"").trim(),
+      price: Number(document.getElementById("tk_price").value||"") || null,
+      manualLink: (document.getElementById("tk_manual").value||"").trim(),
+      storeLink: (document.getElementById("tk_store").value||"").trim(),
+      cat: null,                // start at root (not inside a category)
+      parentTask: null,         // start as top-level task
+      order: (++window._maintOrderCounter) // TOP
+    };
+    const parentTarget = modalTask.dataset.parentTask || "";
+    if (parentTarget){ base.parentTask = parentTarget; } // subcomponent
+
+    if (occ === "interval"){
+      const obj = { ...base, interval: 100 }; // default interval; user can edit inside details
+      tasksInterval.push(obj);
+    }else{
+      const obj = { ...base }; // as required
+      tasksAsReq.push(obj);
+    }
+
+    saveCloudDebounced();
+    closeModal(modalTask);
+    renderSettings();
+  });
+
+  // Add Category (folder) — always TOP
+  document.getElementById("btnAddCat")?.addEventListener("click", ()=>{
+    document.getElementById("cat_name").value="";
+    modalCat.dataset.parent = ""; // root by default
+    openModal(modalCat);
+  });
+  document.getElementById("cat_cancel")?.addEventListener("click", ()=> closeModal(modalCat));
+  document.getElementById("catForm")?.addEventListener("submit",(e)=>{
+    e.preventDefault();
+    const name = document.getElementById("cat_name").value.trim();
+    if (!name){ toast("Category name required."); return; }
+    const parent = modalCat.dataset.parent || null;
+    window.settingsFolders.push({ id: genId(name), name, parent, order:(++window._maintOrderCounter) });
+    saveCloudDebounced();
+    closeModal(modalCat);
+    renderSettings();
+  });
+
+  // "+ Add Subcomponent" on a task → open Task modal with parentTask preset
+  rootContainer.addEventListener("click",(e)=>{
+    const sub = e.target.closest("[data-sub-for]");
+    const rm  = e.target.closest("[data-remove-task]");
+    if (sub){
+      const taskId = sub.getAttribute("data-sub-for");
+      document.getElementById("tk_name").value="";
+      document.getElementById("tk_occ").value="interval";
+      document.getElementById("tk_pn").value="";
+      document.getElementById("tk_price").value="";
+      document.getElementById("tk_manual").value="";
+      document.getElementById("tk_store").value="";
+      modalTask.dataset.parentTask = taskId; // create under task
+      openModal(modalTask);
+    }
+    if (rm){
+      const id = rm.getAttribute("data-remove-task");
+      const from = rm.getAttribute("data-from"); // interval|asreq
+      if (from==="interval"){ tasksInterval = tasksInterval.filter(t=>t.id!==id); }
+      else { tasksAsReq = tasksAsReq.filter(t=>t.id!==id); }
+      saveCloudDebounced();
+      renderSettings();
+    }
+  });
+
+  // Inline edits for task details inside dropdown
+  rootContainer.addEventListener("input",(e)=>{
     const el = e.target;
     const id = el.getAttribute("data-id");
     const list = el.getAttribute("data-list");
     const key = el.getAttribute("data-k");
-    if (id && list && key){ setLiveField(id, list, key, el.value); return; }
-
-    const pk = el.getAttribute("data-part-k");
-    if (pk){
-      const pid   = el.getAttribute("data-part-id");
-      const parent= el.getAttribute("data-parent");
-      const li    = el.getAttribute("data-list");
-      const live = byIdItemLive(parent); if (!live || live.list !== li) return;
-      live.ref.parts = Array.isArray(live.ref.parts) ? live.ref.parts : [];
-      const p = live.ref.parts.find(x=>x.pid===pid); if (!p) return;
-      p[pk] = (pk==="price") ? setNum(el.value) : el.value;
-      saveCloudDebounced();
-    }
-  });
-  pane.addEventListener("submit",(e)=>{
-    const frm = e.target.closest("[data-part-add-form]");
-    if (!frm) return;
-    e.preventDefault();
-    const parent = frm.getAttribute("data-parent");
-    const li     = frm.getAttribute("data-list");
-    const live = byIdItemLive(parent); if (!live || live.list !== li) return;
-    live.ref.parts = Array.isArray(live.ref.parts) ? live.ref.parts : [];
-    live.ref.parts.push({
-      pid: genId("part"),
-      name: frm.querySelector('[data-part-new="name"]')?.value.trim() || "",
-      pn:   frm.querySelector('[data-part-new="pn"]')?.value.trim() || "",
-      price:setNum(frm.querySelector('[data-part-new="price"]')?.value),
-      link: frm.querySelector('[data-part-new="link"]')?.value.trim() || "",
-      note: frm.querySelector('[data-part-new="note"]')?.value.trim() || ""
-    });
-    saveCloudDebounced(); renderSettings();
-  });
-  pane.addEventListener("click",(e)=>{
-    const comp = e.target.closest("[data-complete]");
-    const rm   = e.target.closest("[data-remove]");
-    if (comp){ completeTask(comp.getAttribute("data-complete")); renderSettings(); return; }
-    if (rm){
-      const id = rm.getAttribute("data-remove");
-      const from = rm.getAttribute("data-from");
-      if (from==="interval"){ tasksInterval = tasksInterval.filter(x=>x.id!==id); }
-      else if (from==="asreq"){ tasksAsReq = tasksAsReq.filter(x=>x.id!==id); }
-      saveCloudDebounced(); toast("Removed"); renderSettings();
-      return;
-    }
-    const pr = e.target.closest("[data-part-remove]");
-    if (pr){
-      const pid   = pr.getAttribute("data-part-remove");
-      const parent= pr.getAttribute("data-parent");
-      const li    = pr.getAttribute("data-list");
-      const live = byIdItemLive(parent); if (!live || live.list !== li) return;
-      live.ref.parts = (live.ref.parts||[]).filter(x=>x.pid!==pid);
-      saveCloudDebounced(); renderSettings();
-    }
+    if (!id || !list || !key) return;
+    const live = byLiveTask(id); if (!live || live.list !== list) return;
+    let val = el.value;
+    if (key==="interval" || key==="price") val = Number(val)||null;
+    live.ref[key] = val;
+    saveCloudDebounced();
   });
 
-  // ---------- Category CRUD (Add Category → TOP, no extra notes) ----------
-  pane.querySelector("#addFolderBtn")?.addEventListener("click", ()=>{
-    const name = prompt("Category name:", "New Category");
-    if (!name) return;
-    const id = genId(name);
-    const f = { id, name, parent:null, order:(++window._orderCounter) }; // TOP
-    window.settingsFolders.push(f);
-    saveCloudDebounced(); renderSettings();
-  });
-  pane.addEventListener("click",(e)=>{
-    const sub = e.target.closest("[data-add-subfolder]");
-    const ren = e.target.closest("[data-rename-folder]");
-    const del = e.target.closest("[data-remove-folder]");
-    if (sub){
-      const pid = sub.getAttribute("data-add-subfolder");
-      const name = prompt("Sub-category name:", "New Sub-category");
-      if (!name) return;
-      const id = genId(name);
-      const f = { id, name, parent: pid, order:(++window._orderCounter) }; // TOP within parent
-      window.settingsFolders.push(f);
-      saveCloudDebounced(); renderSettings();
-    }
-    if (ren){
-      const id = ren.getAttribute("data-rename-folder");
-      const f = byIdFolder(id); if (!f) return;
-      const name = prompt("Rename category:", f.name||"");
-      if (!name) return;
-      f.name = name; saveCloudDebounced(); renderSettings();
-    }
-    if (del){
-      const id = del.getAttribute("data-remove-folder");
-      const hasChildren = window.settingsFolders.some(f=>f.parent===id);
-      const hasItems    = allItems.some(t=>(t.cat||null)===id);
-      if (hasChildren || hasItems){ alert("Folder not empty. Move contents out first."); return; }
-      window.settingsFolders = window.settingsFolders.filter(f=>f.id!==id);
-      saveCloudDebounced(); renderSettings();
-    }
-  });
-
-  // ---------- Drag & Drop: folders + items; move & reorder ----------
-  pane.querySelectorAll('details.item').forEach(el => el.setAttribute('draggable','true'));
-  pane.querySelectorAll('details.folder').forEach(el => el.setAttribute('draggable','true'));
-
-  const DRAG = { type:null, id:null, list:null }; // "item"|"folder"
-  pane.addEventListener("dragstart",(e)=>{
-    const item = e.target.closest('details.item');
-    const fold = e.target.closest('details.folder');
-    if (item){
-      DRAG.type = "item"; DRAG.id = item.getAttribute("data-task-id"); DRAG.list = item.getAttribute("data-list");
-      item.classList.add("dragging");
-      e.dataTransfer.setData("text/plain", DRAG.id);
-      e.dataTransfer.effectAllowed = "move";
-    }else if (fold){
-      DRAG.type = "folder"; DRAG.id = fold.getAttribute("data-folder-id");
-      fold.classList.add("dragging");
-      e.dataTransfer.setData("text/plain", DRAG.id);
-      e.dataTransfer.effectAllowed = "move";
-    }
-  });
-  pane.addEventListener("dragend",(e)=>{
-    const el = e.target.closest('details.item,details.folder'); el?.classList.remove("dragging");
-    DRAG.type=null; DRAG.id=null; DRAG.list=null;
-    pane.querySelectorAll('.sort-hint').forEach(x=>x.classList.remove('sort-hint'));
-    pane.querySelectorAll('.dz').forEach(x=>x.classList.remove('dragover'));
-  });
-
+  /* -------------------- Drag & Drop -------------------- */
   function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect="move"; }
-  pane.addEventListener("dragover",(e)=>{
-    const target = e.target.closest('details.item,details.folder,[data-drop-folder],[data-drop-root]');
+  function markDrags(on){
+    on?.classList.add('sort-hint');
+    const dz = on?.closest('.dz'); dz?.classList.add('dragover');
+  }
+  function clearHints(){
+    rootContainer.querySelectorAll('.sort-hint').forEach(el=>el.classList.remove('sort-hint'));
+    rootContainer.querySelectorAll('.dz.dragover').forEach(el=>el.classList.remove('dragover'));
+  }
+
+  const DRAG = { type:null, id:null, list:null }; // type: "task"|"folder"
+  rootContainer.addEventListener("dragstart",(e)=>{
+    const F = e.target.closest('details.folder');
+    const T = e.target.closest('details.task');
+    if (F){
+      DRAG.type="folder"; DRAG.id=F.getAttribute("data-folder-id");
+      F.classList.add("dragging");
+      e.dataTransfer.setData("text/plain", DRAG.id);
+      e.dataTransfer.effectAllowed="move";
+    }else if (T){
+      DRAG.type="task"; DRAG.id=T.getAttribute("data-task-id"); DRAG.list=T.getAttribute("data-list");
+      T.classList.add("dragging");
+      e.dataTransfer.setData("text/plain", DRAG.id);
+      e.dataTransfer.effectAllowed="move";
+    }
+  });
+  rootContainer.addEventListener("dragend",(e)=>{
+    const card = e.target.closest('details.folder,details.task');
+    card?.classList.remove("dragging");
+    DRAG.type=null; DRAG.id=null; DRAG.list=null;
+    clearHints();
+  });
+
+  rootContainer.addEventListener("dragover",(e)=>{
+    const target = e.target.closest('[data-drop-root],[data-drop-folder],[data-drop-task],details.task,details.folder');
     if (!target) return;
     allow(e);
-    const card = e.target.closest('details.item,details.folder'); if (card) card.classList.add('sort-hint');
+    const card = e.target.closest('details.task,details.folder');
+    if (card) markDrags(card);
     const dz = e.target.closest('.dz'); if (dz) dz.classList.add('dragover');
   });
-  pane.addEventListener("dragleave",(e)=>{
-    const card = e.target.closest('details.item,details.folder'); card?.classList.remove('sort-hint');
-    const dz = e.target.closest('.dz'); dz?.classList.remove('dragover');
-  });
+  rootContainer.addEventListener("dragleave",()=> clearHints());
 
-  function moveItemToContainerTop(itemId, newFolderId){
-    const live = byIdItemLive(itemId); if (!live) return false;
-    live.ref.cat = newFolderId || null;
-    bumpTop(live.ref);   // always to TOP
+  function moveTaskToRootTop(taskId){
+    const live = byLiveTask(taskId); if (!live) return false;
+    live.ref.parentTask = null; live.ref.cat = null; bumpTop(live.ref); return true;
+  }
+  function moveTaskToFolderTop(taskId, folderId){
+    const live = byLiveTask(taskId); if (!live) return false;
+    live.ref.parentTask = null; live.ref.cat = folderId; bumpTop(live.ref); return true;
+  }
+  function moveTaskAsChild(taskId, parentTaskId){
+    if (String(taskId)===String(parentTaskId)) return false;
+    const live = byLiveTask(taskId); const parentLive = byLiveTask(parentTaskId);
+    if (!live || !parentLive) return false;
+    live.ref.parentTask = parentTaskId;
+    // inherit category from parent for organization
+    live.ref.cat = parentLive.ref.cat || null;
+    bumpTop(live.ref);
     return true;
   }
-  function moveFolderToContainerTop(folderId, newParentId){
-    const f = byIdFolder(folderId); if (!f) return false;
-    f.parent = newParentId || null;
-    bumpTop(f);          // always to TOP
-    return true;
+  function moveFolderToRootTop(folderId){
+    const f = byFolder(folderId); if (!f) return false;
+    f.parent = null; bumpTop(f); return true;
+  }
+  function moveFolderInsideFolder(folderId, parentId){
+    if (String(folderId)===String(parentId)) return false;
+    const f = byFolder(folderId); const p = byFolder(parentId);
+    if (!f || !p) return false;
+    // prevent cycles
+    let cur = p; while(cur){ if (String(cur.parent||"")===String(f.id)) return false; cur = byFolder(cur.parent||null); }
+    f.parent = parentId; bumpTop(f); return true;
   }
 
-  pane.addEventListener("drop",(e)=>{
-    const zoneFolder = e.target.closest("[data-drop-folder]");
-    const zoneRoot   = e.target.closest("[data-drop-root]");
-    const onCard     = e.target.closest('details.item,details.folder'); // relative reorder
-
+  rootContainer.addEventListener("drop",(e)=>{
+    const dzRoot   = e.target.closest("[data-drop-root]");
+    const dzFolder = e.target.closest("[data-drop-folder]");
+    const dzTask   = e.target.closest("[data-drop-task]");
+    const onCard   = e.target.closest("details.task,details.folder"); // reorder above card (same container)
     if (!DRAG.type) return;
+    allow(e);
 
-    if (zoneFolder){
-      allow(e);
-      const destFolder = zoneFolder.getAttribute("data-drop-folder");
-      const changed = (DRAG.type==="item")
-        ? moveItemToContainerTop(DRAG.id, destFolder)
-        : moveFolderToContainerTop(DRAG.id, destFolder);
-      if (changed){ saveCloudDebounced(); renderSettings(); }
+    // Into containers (always to top)
+    if (dzRoot){
+      if (DRAG.type==="task"){ if (moveTaskToRootTop(DRAG.id)){ saveCloudDebounced(); renderSettings(); } }
+      if (DRAG.type==="folder"){ if (moveFolderToRootTop(DRAG.id)){ saveCloudDebounced(); renderSettings(); } }
       return;
     }
-    if (zoneRoot){
-      allow(e);
-      const changed = (DRAG.type==="item")
-        ? moveItemToContainerTop(DRAG.id, null)
-        : moveFolderToContainerTop(DRAG.id, null);
-      if (changed){ saveCloudDebounced(); renderSettings(); }
+    if (dzFolder){
+      const fid = dzFolder.getAttribute("data-drop-folder");
+      if (DRAG.type==="task"){ if (moveTaskToFolderTop(DRAG.id, fid)){ saveCloudDebounced(); renderSettings(); } }
+      if (DRAG.type==="folder"){ if (moveFolderInsideFolder(DRAG.id, fid)){ saveCloudDebounced(); renderSettings(); } }
+      return;
+    }
+    if (dzTask){
+      const pid = dzTask.getAttribute("data-drop-task");
+      if (DRAG.type==="task"){ if (moveTaskAsChild(DRAG.id, pid)){ saveCloudDebounced(); renderSettings(); } }
+      // folders do not go into tasks
       return;
     }
 
-    // Reorder ABOVE a card within same container
+    // Reorder above a card within its container
     if (onCard){
-      allow(e);
-      if (DRAG.type==="item" && onCard.classList.contains('item')){
+      if (DRAG.type==="task" && onCard.classList.contains("task")){
         const targetId = onCard.getAttribute("data-task-id");
-        const targetLive = byIdItemLive(targetId); if (!targetLive) return;
-        const targetFolder = targetLive.ref.cat || null;
-
-        const live = byIdItemLive(DRAG.id); if (!live) return;
-        live.ref.cat = targetFolder;
+        const targetLive = byLiveTask(targetId); const live = byLiveTask(DRAG.id);
+        if (!targetLive || !live) return;
+        // match container (same parentTask and same cat), then place above
+        live.ref.parentTask = targetLive.ref.parentTask || null;
+        live.ref.cat = targetLive.ref.cat || null;
         live.ref.order = (Number(targetLive.ref.order)||0) + 0.5;
-        normalizeItemOrders(targetFolder);
+        // normalize within container
+        const containerKey = JSON.stringify({pt: live.ref.parentTask||null, cat: live.ref.cat||null});
+        const inSame = allTasks.filter(x => String(x.parentTask||"")===(live.ref.parentTask||"") && String(x.cat||"")===(live.ref.cat||""));
+        inSame.sort((a,b)=>Number(b.order||0)-Number(a.order||0));
+        let n=inSame.length; for (const v of inSame){
+          const arr = v.__type==="interval" ? tasksInterval : tasksAsReq;
+          const ref = arr.find(x=>x.id===v.id); if (ref) ref.order = n--;
+        }
         saveCloudDebounced(); renderSettings();
         return;
       }
-      if (DRAG.type==="folder" && onCard.classList.contains('folder')){
+      if (DRAG.type==="folder" && onCard.classList.contains("folder")){
         const targetId = onCard.getAttribute("data-folder-id");
-        const targetFolder = byIdFolder(targetId); if (!targetFolder) return;
-        const f = byIdFolder(DRAG.id); if (!f) return;
-        f.parent = targetFolder.parent || null;
-        f.order  = (Number(targetFolder.order)||0) + 0.5;
-        normalizeFolderOrders(f.parent || null);
+        const f = byFolder(DRAG.id); const tgt = byFolder(targetId);
+        if (!f || !tgt) return;
+        f.parent = tgt.parent || null;
+        f.order  = (Number(tgt.order)||0) + 0.5;
+        const siblings = kidsFolders(f.parent||null);
+        let n=siblings.length; for (const s of siblings){ s.order = n--; }
         saveCloudDebounced(); renderSettings();
         return;
       }
-      // Drop item onto a folder card (not dropzone) → move into that folder at TOP
-      if (DRAG.type==="item" && onCard.classList.contains('folder')){
-        const destFolder = onCard.getAttribute("data-folder-id");
-        if (moveItemToContainerTop(DRAG.id, destFolder)){ saveCloudDebounced(); renderSettings(); }
-        return;
-      }
-      // Drop folder onto an item card → move folder to that item's parent at TOP
-      if (DRAG.type==="folder" && onCard.classList.contains('item')){
-        const targetId = onCard.getAttribute("data-task-id");
-        const targetLive = byIdItemLive(targetId); if (!targetLive) return;
-        const parentId = targetLive.ref.cat || null;
-        if (moveFolderToContainerTop(DRAG.id, parentId)){ saveCloudDebounced(); renderSettings(); }
+      // dropping task onto folder card (not dropzone) → move into folder (top)
+      if (DRAG.type==="task" && onCard.classList.contains("folder")){
+        const dest = onCard.getAttribute("data-folder-id");
+        if (moveTaskToFolderTop(DRAG.id, dest)){ saveCloudDebounced(); renderSettings(); }
         return;
       }
     }
-  });
-
-  // ---------- Save ----------
-  pane.querySelector("#saveTasksBtn")?.addEventListener("click", ()=>{
-    saveCloudDebounced(); toast("Saved");
   });
 }
 
