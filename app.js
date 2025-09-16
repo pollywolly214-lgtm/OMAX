@@ -1396,6 +1396,128 @@ function repairMaintenanceGraph(){
   }
 }
 
+// Move a node safely in the "Explorer" tree (categories + tasks).
+// - kind: "task" | "category"
+// - nodeId: the id being moved
+// - target: { intoCat?: categoryId|null, intoTask?: taskId|null, beforeTask?: {id,type}, beforeCat?: {id} }
+//   exactly ONE of intoCat / intoTask / beforeTask / beforeCat should be set
+function moveNodeSafely(kind, nodeId, target){
+  // Source collections
+  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  window.tasksInterval = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  window.tasksAsReq    = Array.isArray(window.tasksAsReq)    ? window.tasksAsReq    : [];
+
+  // Helpers
+  const findTask = (id)=>{
+    let ref = window.tasksInterval.find(x=>String(x.id)===String(id));
+    if (ref) return {ref, list:"interval"};
+    ref = window.tasksAsReq.find(x=>String(x.id)===String(id));
+    return ref ? {ref, list:"asreq"} : null;
+  };
+  const findCat = (id)=> window.settingsFolders.find(f=>String(f.id)===String(id)) || null;
+
+  // Cycle guard for tasks: ensure parentTask chain of target never reaches nodeId
+  function wouldCreateTaskCycle(childId, newParentTaskId){
+    if (newParentTaskId == null) return false;
+    let cur = findTask(newParentTaskId);
+    let hops = 0;
+    while (cur && cur.ref && hops++ < 1000){
+      if (String(cur.ref.id) === String(childId)) return true;
+      cur = (cur.ref.parentTask != null) ? findTask(cur.ref.parentTask) : null;
+    }
+    return false;
+  }
+
+  // Cycle guard for categories: prevent putting a category inside its own descendant
+  function wouldCreateCatCycle(childCatId, newParentCatId){
+    if (newParentCatId == null) return false;
+    let cur = findCat(newParentCatId);
+    let hops = 0;
+    while (cur && hops++ < 1000){
+      if (String(cur.id) === String(childCatId)) return true;
+      cur = (cur.parent != null) ? findCat(cur.parent) : null;
+    }
+    return false;
+  }
+
+  // Order normalize within a list of siblings (highest = top)
+  function normalizeOrders(nodes, writeBack){
+    nodes.sort((a,b)=> (Number(b.order||0) - Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
+    let n = nodes.length;
+    for (const v of nodes){ v.order = n--; writeBack?.(v); }
+  }
+
+  // Ensure global counter
+  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+
+  if (kind === "task"){
+    const live = findTask(nodeId); if (!live) return false;
+
+    // Destination resolution
+    if (target.intoTask != null){
+      // move inside a task (subcomponent)
+      if (wouldCreateTaskCycle(live.ref.id, target.intoTask)) return false;
+      const parentLive = findTask(target.intoTask); if (!parentLive) return false;
+      live.ref.parentTask = parentLive.ref.id;
+      live.ref.cat = parentLive.ref.cat || null; // inherit folder
+      live.ref.order = ++window._maintOrderCounter;
+    }else if (Object.prototype.hasOwnProperty.call(target, "intoCat")){
+      // move into a category (top of that category)
+      const catId = target.intoCat; // can be null = root
+      if (catId != null && !findCat(catId)) return false;
+      live.ref.parentTask = null;
+      live.ref.cat = catId || null;
+      live.ref.order = ++window._maintOrderCounter;
+    }else if (target.beforeTask){
+      // reorder before another task (same container)
+      const t2 = findTask(target.beforeTask.id); if (!t2) return false;
+      live.ref.parentTask = t2.ref.parentTask || null;
+      live.ref.cat = t2.ref.cat || null;
+      live.ref.order = (Number(t2.ref.order)||0) + 0.5;
+
+      // normalize all tasks in that container
+      const same = []
+        .concat(window.tasksInterval.map(x=>({ref:x,list:"interval"})))
+        .concat(window.tasksAsReq.map(x=>({ref:x,list:"asreq"})))
+        .filter(x => String(x.ref.parentTask||"") === String(live.ref.parentTask||"")
+                  && String(x.ref.cat||"")        === String(live.ref.cat||""))
+        .map(x=>x.ref);
+      normalizeOrders(same);
+    }else{
+      return false; // unsupported target shape
+    }
+    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+    if (typeof saveTasks === "function") saveTasks();
+    return true;
+  }
+
+  if (kind === "category"){
+    const cat = findCat(nodeId); if (!cat) return false;
+
+    if (Object.prototype.hasOwnProperty.call(target, "intoCat")){
+      const parent = target.intoCat; // null = root
+      if (wouldCreateCatCycle(cat.id, parent)) return false;
+      if (parent != null && !findCat(parent)) return false;
+      cat.parent = parent || null;
+      cat.order = ++window._maintOrderCounter;
+    }else if (target.beforeCat){
+      const c2 = findCat(target.beforeCat.id); if (!c2) return false;
+      cat.parent = c2.parent || null;
+      cat.order = (Number(c2.order)||0) + 0.5;
+
+      const siblings = window.settingsFolders.filter(f => String(f.parent||"") === String(cat.parent||""));
+      normalizeOrders(siblings);
+    }else{
+      return false;
+    }
+    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+    return true;
+  }
+
+  return false;
+}
+
+
 function renderSettings(){
   const root = document.getElementById("content");
   if (!root) return;
