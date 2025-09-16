@@ -1838,6 +1838,76 @@ function renderSettings(){
   window.tasksAsReq      = Array.isArray(window.tasksAsReq)      ? window.tasksAsReq      : [];
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
+     // --- one-time hydration for legacy/remote tasks ---
+  if (!window.__hydratedTasksOnce && window.tasksInterval.length === 0 && window.tasksAsReq.length === 0){
+    window.__hydratedTasksOnce = true;
+
+    (async ()=>{
+      let filled = false;
+
+      // 1) Try Firestore (workspaces/{WORKSPACE_ID}/app/state)
+      try{
+        if (window.FB && FB.ready && FB.docRef && typeof FB.docRef.get === "function"){
+          const snap = await FB.docRef.get();
+          const data = snap && typeof snap.data === "function" ? snap.data() : null;
+          if (data && (Array.isArray(data.tasksInterval) || Array.isArray(data.tasksAsReq))){
+            window.tasksInterval = Array.isArray(data.tasksInterval) ? data.tasksInterval : [];
+            window.tasksAsReq    = Array.isArray(data.tasksAsReq)    ? data.tasksAsReq    : [];
+            filled = (window.tasksInterval.length + window.tasksAsReq.length) > 0;
+          }
+        }
+      }catch(e){ console.warn("Firestore hydrate failed:", e); }
+
+      // 2) Fallback: old localStorage keys from v6
+      if (!filled){
+        try{
+          const si = JSON.parse(localStorage.getItem("omax_tasks_interval_v6") || "null");
+          const sa = JSON.parse(localStorage.getItem("omax_tasks_asreq_v6")   || "null");
+          if (Array.isArray(si) || Array.isArray(sa)){
+            window.tasksInterval = si || [];
+            window.tasksAsReq    = sa || [];
+            filled = (window.tasksInterval.length + window.tasksAsReq.length) > 0;
+          }
+        }catch(e){ /* ignore */ }
+      }
+
+      // 3) Fallback: defaults (so Settings is never empty)
+      if (!filled){
+        if (Array.isArray(window.defaultIntervalTasks)) window.tasksInterval = window.defaultIntervalTasks.slice();
+        if (Array.isArray(window.defaultAsReqTasks))    window.tasksAsReq    = window.defaultAsReqTasks.slice();
+      }
+
+      // Normalize ids/orders so new Explorer view can render and sort predictably
+      const addId = (t)=>{
+        if (!t.id){
+          t.id = (String(t.name||"task").toLowerCase().replace(/[^a-z0-9]+/g,"_")
+                 +"_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6));
+        }
+      };
+      [...window.tasksInterval, ...window.tasksAsReq].forEach(t=>{
+        addId(t);
+        if (t.order == null) t.order = ++window._maintOrderCounter;
+      });
+
+      try{ if (typeof saveTasks === "function") saveTasks(); }catch(_){}
+      try{ if (typeof saveCloudDebounced === "function") saveCloudDebounced(); }catch(_){}
+
+      // After hydrating, re-render the page once
+      renderSettings();
+    })();
+
+    // Temporary placeholder while tasks load
+    root.innerHTML = `
+      <div class="container">
+        <div class="block" style="grid-column:1/-1">
+          <h3>Maintenance Settings</h3>
+          <div>Loading tasks…</div>
+        </div>
+      </div>`;
+    return; // prevent wiring before data is ready
+  }
+
+
   // --- Small, compact scoped styles (once) ---
   if (!document.getElementById("settingsExplorerCSS")){
     const st = document.createElement("style");
