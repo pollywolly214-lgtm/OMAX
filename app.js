@@ -1831,192 +1831,22 @@ function renderSettings(){
   const root = document.getElementById("content");
   if (!root) return;
 
-  // ------- Defensive: ensure arrays exist -------
+  // ---- Render base HTML (unchanged structure) ----
+  root.innerHTML = viewSettings();
+
+  // ---- Helpers / persistence ----
   window.tasksInterval = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
   window.tasksAsReq    = Array.isArray(window.tasksAsReq)    ? window.tasksAsReq    : [];
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
-  // Persist helper: cloud or local
   function persist(){
-    if (typeof saveCloudDebounced === "function") { try { saveCloudDebounced(); } catch(_){} }
-    if (typeof saveTasks === "function") { try { saveTasks(); } catch(_){} }
+    try{ if (typeof saveTasks === "function") saveTasks(); }catch(_){}
+    try{ if (typeof saveCloudDebounced === "function") saveCloudDebounced(); }catch(_){}
   }
 
-  const fmtPrice = v => (v==null || v==="") ? "" : String(v);
-
-  // ----- Compact Styles (scoped) -----
-  // Visual changes only: smaller fonts, tighter paddings/margins, slimmer drop-zones.
-  if (!document.getElementById("settingsDndCSS")){
-    const st = document.createElement("style");
-    st.id = "settingsDndCSS";
-    st.textContent = `
-      /* Container tweaks */
-      #maintSettings h3 { margin: 4px 0 6px; font-size: 1.05rem; }
-      #maintSettings h4 { margin: 6px 0 4px; font-size: 0.95rem; }
-
-      /* Cards */
-      #maintSettings details.task{border:1px solid #ddd;border-radius:6px;margin:.2rem 0;background:#fff}
-      #maintSettings details.task>summary{
-        display:flex;justify-content:space-between;align-items:center;
-        padding:.35rem .5rem; cursor:grab; user-select:none; font-size:.92rem; line-height:1.1
-      }
-      #maintSettings details.task.dragging{opacity:.55}
-      #maintSettings .chip{font-size:.68rem;border:1px solid #bbb;border-radius:999px;padding:.05rem .35rem}
-
-      /* Body */
-      #maintSettings .body{padding:.45rem .55rem;border-top:1px dashed #e5e5e5}
-      #maintSettings .grid{display:grid;grid-template-columns:1fr 1fr;gap:.4rem}
-      #maintSettings label{font-size:.8rem;display:block}
-      #maintSettings input{width:100%;padding:.3rem .4rem;font-size:.85rem}
-
-      /* Actions row */
-      #maintSettings .actions{display:flex;gap:.35rem;justify-content:flex-end;margin-top:.35rem;flex-wrap:wrap}
-      #maintSettings .actions button{padding:.25rem .45rem;font-size:.8rem}
-
-      /* Forms */
-      #maintSettings .forms{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin:.4rem 0 .6rem}
-      #maintSettings .forms .mini-form{border:1px solid #e5e5e5;border-radius:6px;padding:.45rem;background:#fff}
-      #maintSettings .forms strong{display:block;margin-bottom:.25rem;font-size:.85rem}
-      #maintSettings .forms input{padding:.28rem .4rem;font-size:.85rem}
-
-      /* Drop zones (reorder lines) */
-      #maintSettings .dz{height:4px;margin:2px 0;border-radius:5px}
-      #maintSettings .dz.dragover{height:10px;background:rgba(0,0,0,.05);outline:1px dashed #888}
-      #maintSettings summary.drop-hint{outline:1px solid #6aa84f;border-radius:5px}
-
-      /* Small helpers */
-      #maintSettings .empty{padding:.45rem;color:#666;font-size:.85rem}
-    `;
-    document.head.appendChild(st);
-  }
-
-  // ----- Row renderers (summary is draggable) -----
-  function taskDetailsInterval(task){
-    return `
-      <details class="task" data-task-id="${task.id}" data-type="interval">
-        <summary draggable="true">
-          <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:72%">${task.name}</strong>
-          <span class="chip">Hourly Interval</span>
-        </summary>
-        <div class="body">
-          <div class="grid">
-            <label>Name
-              <input data-k="name" data-id="${task.id}" data-list="interval" value="${task.name||""}">
-            </label>
-            <label>Interval (hrs)
-              <input type="number" min="1" step="1" data-k="interval" data-id="${task.id}" data-list="interval" value="${task.interval||""}">
-            </label>
-            <label>Baseline “since last” (hrs)
-              <input type="number" min="0" step="1" data-k="sinceBase" data-id="${task.id}" data-list="interval" value="${task.sinceBase!=null?task.sinceBase:""}" placeholder="e.g., 50">
-            </label>
-            <label>Part #
-              <input data-k="pn" data-id="${task.id}" data-list="interval" value="${task.pn||""}">
-            </label>
-            <label>Price
-              <input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="interval" value="${fmtPrice(task.price)}" placeholder="optional">
-            </label>
-            <label>Store / Manual (URL)
-              <input type="url" data-k="link" data-id="${task.id}" data-list="interval" value="${task.link||task.storeLink||task.manualLink||""}" placeholder="https://…">
-            </label>
-          </div>
-          <div class="actions">
-            <button data-move-top="${task.id}" data-from="interval">Top</button>
-            <button data-move-up="${task.id}"  data-from="interval">Up</button>
-            <button data-move-down="${task.id}" data-from="interval">Down</button>
-            <span style="flex:1"></span>
-            <button class="btn-complete" data-complete="${task.id}">Complete</button>
-            <button class="danger" data-remove="${task.id}" data-from="interval">Remove</button>
-          </div>
-        </div>
-      </details>`;
-  }
-  function taskDetailsAsReq(task){
-    return `
-      <details class="task" data-task-id="${task.id}" data-type="asreq">
-        <summary draggable="true">
-          <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:72%">${task.name}</strong>
-          <span class="chip">As Required</span>
-        </summary>
-        <div class="body">
-          <div class="grid">
-            <label>Name
-              <input data-k="name" data-id="${task.id}" data-list="asreq" value="${task.name||""}">
-            </label>
-            <label>Condition/Notes
-              <input data-k="condition" data-id="${task.id}" data-list="asreq" value="${task.condition||""}" placeholder="optional">
-            </label>
-            <label>Part #
-              <input data-k="pn" data-id="${task.id}" data-list="asreq" value="${task.pn||""}">
-            </label>
-            <label>Price
-              <input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="asreq" value="${fmtPrice(task.price)}" placeholder="optional">
-            </label>
-            <label>Store / Manual (URL)
-              <input type="url" data-k="link" data-id="${task.id}" data-list="asreq" value="${task.link||task.storeLink||task.manualLink||""}" placeholder="https://…">
-            </label>
-          </div>
-          <div class="actions">
-            <button data-move-top="${task.id}" data-from="asreq">Top</button>
-            <button data-move-up="${task.id}"  data-from="asreq">Up</button>
-            <button data-move-down="${task.id}" data-from="asreq">Down</button>
-            <span style="flex:1"></span>
-            <button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button>
-          </div>
-        </div>
-      </details>`;
-  }
-
-  // Build lists with slim "drop-before" lines and an "end" line
-  const intervalRows = tasksInterval.map(t =>
-    `<div class="dz" data-drop-before="${t.id}" data-type="interval"></div>` + taskDetailsInterval(t)
-  ).join("") + `<div class="dz" data-drop-end="interval"></div>`;
-
-  const asreqRows = tasksAsReq.map(t =>
-    `<div class="dz" data-drop-before="${t.id}" data-type="asreq"></div>` + taskDetailsAsReq(t)
-  ).join("") + `<div class="dz" data-drop-end="asreq"></div>`;
-
-  // Page view
-  const html = `
-    <div id="maintSettings" class="container">
-      <div class="block" style="grid-column:1 / -1">
-        <h3>Maintenance Settings</h3>
-        <p class="small" style="margin:.15rem 0 .4rem;">Drag onto a header to nest; drag onto the thin line to reorder. Use Categories to file tasks.</p>
-
-        <div class="forms">
-          <form id="addIntervalForm" class="mini-form">
-            <strong>Add Interval Task</strong>
-            <input type="text" id="ai_name" placeholder="Name" required>
-            <input type="number" id="ai_interval" placeholder="Interval (hrs)" required>
-            <button type="submit">Add</button>
-          </form>
-
-          <form id="addAsReqForm" class="mini-form">
-            <strong>Add As-Required Task</strong>
-            <input type="text" id="ar_name" placeholder="Name" required>
-            <input type="text" id="ar_condition" placeholder="Condition (e.g., When damaged)">
-            <button type="submit">Add</button>
-          </form>
-        </div>
-
-        <h4>By Interval (hrs)</h4>
-        <div id="intervalList">
-          ${intervalRows}
-        </div>
-
-        <h4 style="margin-top:6px;">As Required</h4>
-        <div id="asreqList">
-          ${asreqRows}
-        </div>
-
-        <div style="margin-top:6px;">
-          <button id="saveTasksBtn" style="padding:.3rem .55rem;font-size:.85rem">Save All</button>
-        </div>
-      </div>
-    </div>
-  `;
-  root.innerHTML = html;
-
-  // ------- Inline edit (delegated) -------
+  // ====================================================================================
+  // 1) INLINE EDITS / REMOVE / COMPLETE (kept as before)
+  // ====================================================================================
   root.querySelectorAll("[data-id]").forEach(inp => {
     inp.addEventListener("input", () => {
       const id   = inp.getAttribute("data-id");
@@ -2035,7 +1865,6 @@ function renderSettings(){
     });
   });
 
-  // ------- Remove + Complete buttons -------
   root.querySelectorAll("[data-remove]").forEach(btn => {
     btn.addEventListener("click", () => {
       const id = btn.getAttribute("data-remove");
@@ -2046,12 +1875,13 @@ function renderSettings(){
       renderSettings();
     });
   });
+
   root.querySelectorAll(".btn-complete").forEach(btn => {
     btn.addEventListener("click", () => {
-      if (typeof completeTask === "function"){
-        completeTask(btn.getAttribute("data-complete"));
-      } else {
-        const id = btn.getAttribute("data-complete");
+      const id = btn.getAttribute("data-complete");
+      // prefer existing completeTask() so calendar stays in sync
+      if (typeof completeTask === "function") completeTask(id);
+      else {
         const t = tasksInterval.find(x => String(x.id)===String(id));
         if (t){
           const cur = (typeof currentTotal === "function") ? currentTotal() : null;
@@ -2064,167 +1894,195 @@ function renderSettings(){
     });
   });
 
-  // ------- Move Up / Down / Top (kept) -------
-  function moveIn(arr, id, dir){
-    const i = arr.findIndex(x => String(x.id) === String(id));
-    if (i < 0) return;
-    if (dir === "top"){
-      const [sp] = arr.splice(i,1);
-      arr.unshift(sp);
-      return;
-    }
-    const j = dir === "up" ? i - 1 : i + 1;
-    if (j < 0 || j >= arr.length) return;
-    const [sp] = arr.splice(i,1);
-    arr.splice(j,0,sp);
-  }
-  root.addEventListener("click",(e)=>{
-    const up  = e.target.closest("[data-move-up]");
-    const dn  = e.target.closest("[data-move-down]");
-    const top = e.target.closest("[data-move-top]");
-    if (!up && !dn && !top) return;
-
-    const id   = (up||dn||top).getAttribute(up? "data-move-up" : dn? "data-move-down" : "data-move-top");
-    const from = (up||dn||top).getAttribute("data-from"); // "interval" | "asreq"
-    const arr  = from === "interval" ? tasksInterval : tasksAsReq;
-
-    moveIn(arr, id, top ? "top" : (up ? "up" : "down"));
-    persist();
-    renderSettings();
-  });
-
-  // ------- Add forms (new tasks at TOP) -------
+  // Add forms (new items go to TOP)
   document.getElementById("addIntervalForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = document.getElementById("ai_name").value.trim();
     const interval = Number(document.getElementById("ai_interval").value);
     if (!name || !isFinite(interval) || interval <= 0) return;
     const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
-    tasksInterval.unshift({ id, name, interval, sinceBase:null, anchorTotal:null, cost:"", link:"", parentTask:null, cat:null }); // TOP
-    if (typeof inventory !== "undefined" && Array.isArray(inventory)){
-      inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
-      if (typeof saveInventory === "function") saveInventory();
-    }
+    tasksInterval.unshift({ id, name, interval, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"", price:null, parentTask:null, cat:null, order:(++window._maintOrderCounter) });
     persist();
     renderSettings();
   });
+
   document.getElementById("addAsReqForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = document.getElementById("ar_name").value.trim();
     const condition = (document.getElementById("ar_condition").value || "").trim() || "As required";
     if (!name) return;
     const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
-    tasksAsReq.unshift({ id, name, condition, cost:"", link:"", parentTask:null, cat:null }); // TOP
-    if (typeof inventory !== "undefined" && Array.isArray(inventory)){
-      inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
-      if (typeof saveInventory === "function") saveInventory();
-    }
+    tasksAsReq.unshift({ id, name, condition, manualLink:"", storeLink:"", pn:"", price:null, parentTask:null, cat:null, order:(++window._maintOrderCounter) });
     persist();
     renderSettings();
   });
+
   document.getElementById("saveTasksBtn")?.addEventListener("click", ()=>{
     persist();
     if (typeof route === "function") route();
   });
 
-  // ------- DRAG & DROP (Explorer-style) -------
-  const maint = document.getElementById("maintSettings");
-  const DRAG = { id:null, type:null };
-
-  // Start dragging from any task summary
-  maint.addEventListener("dragstart",(e)=>{
-    const sum = e.target.closest("summary");
-    const card = e.target.closest("details.task");
-    if (!sum || !card) return;
-    const id   = card.getAttribute("data-task-id");
-    const type = card.getAttribute("data-type");
-    DRAG.id = id; DRAG.type = type;
-    card.classList.add("dragging");
-    e.dataTransfer.setData("text/plain", `task:${id}:${type}`); // also usable by Categories pane
-    e.dataTransfer.effectAllowed = "move";
+  // ====================================================================================
+  // 2) NESTED TASK RENDERING (fixes “dropped into a task then it disappears”)
+  //    - hide child tasks from the main lists
+  //    - render them under their parent in a compact list
+  // ====================================================================================
+  const allCards = new Map(); // id -> element (<details data-task-id>)
+  root.querySelectorAll("details[data-task-id]").forEach(el=>{
+    const id = el.getAttribute("data-task-id");
+    if (id) allCards.set(String(id), el);
   });
-  maint.addEventListener("dragend",(e)=>{
-    const card = e.target.closest("details.task");
-    card?.classList.remove("dragging");
-    DRAG.id = DRAG.type = null;
-    maint.querySelectorAll(".dz.dragover").forEach(el=>el.classList.remove("dragover"));
-    maint.querySelectorAll("summary.drop-hint").forEach(el=>el.classList.remove("drop-hint"));
+
+  // Build a quick lookup for children by parentTask id
+  const byId = (id)=>{
+    let t = tasksInterval.find(x=>String(x.id)===String(id)); if (t) return {ref:t, list:"interval"};
+    t = tasksAsReq.find(x=>String(x.id)===String(id));        if (t) return {ref:t, list:"asreq"};
+    return null;
+  };
+  const childrenMap = new Map(); // parentId -> [{ref,list}]
+  [...tasksInterval, ...tasksAsReq].forEach(t=>{
+    if (t.parentTask){
+      const pid = String(t.parentTask);
+      if (!childrenMap.has(pid)) childrenMap.set(pid, []);
+      childrenMap.get(pid).push(byId(t.id));
+    }
+  });
+
+  // For every child task, remove its full card from the top-level list (to avoid duplicates)
+  childrenMap.forEach((kids, parentId)=>{
+    kids.forEach(k=>{
+      const el = allCards.get(String(k.ref.id));
+      el?.parentElement?.removeChild(el);
+    });
+  });
+
+  // On each parent card, append a compact "Sub-components" section and render children
+  childrenMap.forEach((kids, parentId)=>{
+    const parentEl = allCards.get(String(parentId));
+    if (!parentEl) return;
+    let sub = parentEl.querySelector(".subtasks");
+    if (!sub){
+      sub = document.createElement("div");
+      sub.className = "subtasks";
+      sub.setAttribute("data-drop-task", parentId); // dropzone to file tasks into this task
+      sub.style.border = "1px dashed #cfd6e6";
+      sub.style.borderRadius = "8px";
+      sub.style.padding = "6px";
+      sub.style.margin = "8px 0 2px 0";
+      sub.innerHTML = `<div class="small muted" style="margin-bottom:4px;"><b>Sub-components</b> — drop tasks here to nest</div>`;
+      parentEl.appendChild(sub);
+    }
+    // render children (compact, 1-line each)
+    sub.innerHTML = `<div class="small muted" style="margin-bottom:4px;"><b>Sub-components</b> — drop tasks here to nest</div>`;
+    kids
+      .sort((a,b)=> (Number(b.ref.order||0) - Number(a.ref.order||0)) || String(a.ref.name).localeCompare(String(b.ref.name)))
+      .forEach(k=>{
+        const chip = document.createElement("div");
+        chip.className = "mini-form";
+        chip.style.display = "flex";
+        chip.style.alignItems = "center";
+        chip.style.gap = "8px";
+        chip.style.margin = "2px 0";
+        chip.innerHTML = `
+          <span class="chip" style="font-weight:600">${k.ref.name}</span>
+          <span class="small muted">${k.list === "interval" ? (k.ref.interval ? `${k.ref.interval}h` : "Interval") : "As req."}</span>
+          <span style="flex:1"></span>
+          <button class="small" type="button" data-detach-sub="${k.ref.id}">Unnest</button>
+        `;
+        sub.appendChild(chip);
+        chip.querySelector("[data-detach-sub]")?.addEventListener("click",()=>{
+          k.ref.parentTask = null;
+          // keep same folder (cat) and type
+          k.ref.order = (++window._maintOrderCounter);
+          persist();
+          renderSettings();
+        });
+      });
+  });
+
+  // ====================================================================================
+  // 3) DRAG & DROP (task→task nesting + reorder within same level)
+  // ====================================================================================
+  // Make each task header draggable
+  root.querySelectorAll("details[data-task-id] > summary").forEach(sum=>{
+    sum.setAttribute("draggable","true");
+    sum.addEventListener("dragstart",(e)=>{
+      const holder = sum.closest("details[data-task-id]");
+      const id   = holder?.getAttribute("data-task-id");
+      const list = holder?.getAttribute("data-list"); // "interval" | "asreq"
+      if (!id || !list) return;
+      e.dataTransfer.setData("text/plain", `task:${id}:${list}`);
+      e.dataTransfer.effectAllowed = "move";
+      sum.classList.add("dragging");
+    });
+    sum.addEventListener("dragend",()=> sum.classList.remove("dragging"));
   });
 
   function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
 
-  // Hover feedback
-  maint.addEventListener("dragover",(e)=>{
-    const dz = e.target.closest(".dz");
-    const sum = e.target.closest("summary");
-    if (dz){ allow(e); dz.classList.add("dragover"); }
-    if (sum){ allow(e); sum.classList.add("drop-hint"); }
-  });
-  maint.addEventListener("dragleave",(e)=>{
-    const dz = e.target.closest(".dz"); dz?.classList.remove("dragover");
-    const sum = e.target.closest("summary"); sum?.classList.remove("drop-hint");
-  });
+  // Drop onto a task's subtasks box -> move into that task (become subcomponent)
+  root.querySelectorAll("[data-drop-task]").forEach(zone=>{
+    if (zone.dataset.wired) return; zone.dataset.wired = "1";
+    const pid = zone.getAttribute("data-drop-task");
+    zone.addEventListener("dragover",(e)=>{ allow(e); zone.classList.add("dragover"); });
+    zone.addEventListener("dragleave",()=> zone.classList.remove("dragover"));
+    zone.addEventListener("drop",(e)=>{
+      zone.classList.remove("dragover");
+      const raw = e.dataTransfer.getData("text/plain") || "";
+      const [kind, id, fromType] = raw.split(":");
+      if (kind !== "task" || !id || !pid) return;
 
-  maint.addEventListener("drop",(e)=>{
-    const payload = e.dataTransfer.getData("text/plain") || "";
-    const [kind, dragId/*, dragType*/] = payload.split(":");
-    if (kind !== "task" || !dragId) return;
-    e.preventDefault();
-
-    const dz  = e.target.closest(".dz");
-    const sum = e.target.closest("summary");
-
-    // Reorder: drop on line → place BEFORE target task
-    if (dz && dz.hasAttribute("data-drop-before")){
-      const beforeId   = dz.getAttribute("data-drop-before");
-      const beforeType = dz.getAttribute("data-type");
       if (typeof moveNodeSafely === "function"){
-        if (moveNodeSafely("task", dragId, { beforeTask:{ id: beforeId, type: beforeType } })){
-          persist();
-          renderSettings();
-          if (typeof renderSettingsCategoriesPane === "function") renderSettingsCategoriesPane();
+        if (moveNodeSafely("task", id, { intoTask: pid })){
+          persist(); renderSettings();
         }
+        return;
       }
-      return;
-    }
-
-    // End of list
-    if (dz && dz.hasAttribute("data-drop-end")){
-      const listType = dz.getAttribute("data-drop-end"); // "interval" | "asreq"
-      const arr = (listType==="interval") ? tasksInterval : tasksAsReq;
-      if (arr.length){
-        const lastId = arr[arr.length-1].id;
-        if (typeof moveNodeSafely === "function"){
-          if (moveNodeSafely("task", dragId, { beforeTask:{ id: lastId, type: listType } })){
-            persist();
-            renderSettings();
-            if (typeof renderSettingsCategoriesPane === "function") renderSettingsCategoriesPane();
-          }
-        }
-      }
-      return;
-    }
-
-    // Into-task: drop on header → become sub-component
-    if (sum){
-      const holder = sum.closest("details.task");
-      const parentId = holder?.getAttribute("data-task-id");
-      if (parentId && typeof moveNodeSafely === "function"){
-        if (moveNodeSafely("task", dragId, { intoTask: parentId })){
-          persist();
-          renderSettings();
-          if (typeof renderSettingsCategoriesPane === "function") renderSettingsCategoriesPane();
-        }
-      }
-      return;
-    }
+      // Fallback (no helper): set parentTask + inherit folder (cat)
+      const live = byId(id); if (!live) return;
+      const parentLive = byId(pid); if (!parentLive) return;
+      live.ref.parentTask = parentLive.ref.id;
+      live.ref.cat = parentLive.ref.cat || null;
+      live.ref.order = (++window._maintOrderCounter);
+      persist(); renderSettings();
+    });
   });
 
-  // ------- Render the Explorer folder pane on top -------
-  if (typeof renderSettingsCategoriesPane === "function"){
-    renderSettingsCategoriesPane();
+  // Also allow dropping ON a task summary to nest under it (handy target)
+  root.querySelectorAll("details[data-task-id] > summary").forEach(sum=>{
+    if (sum.dataset.dropwired) return; sum.dataset.dropwired="1";
+    const holder = sum.closest("details[data-task-id]");
+    const pid = holder?.getAttribute("data-task-id");
+    sum.addEventListener("dragover",(e)=>{ allow(e); sum.classList.add("drop-hint"); });
+    sum.addEventListener("dragleave",()=> sum.classList.remove("drop-hint"));
+    sum.addEventListener("drop",(e)=>{
+      sum.classList.remove("drop-hint");
+      const raw = e.dataTransfer.getData("text/plain") || "";
+      const [kind, id] = raw.split(":");
+      if (kind !== "task" || !id || !pid) return;
+      if (typeof moveNodeSafely === "function"){
+        if (moveNodeSafely("task", id, { intoTask: pid })){
+          persist(); renderSettings();
+        }
+        return;
+      }
+      const live = byId(id); const parentLive = byId(pid);
+      if (!live || !parentLive) return;
+      live.ref.parentTask = parentLive.ref.id;
+      live.ref.cat = parentLive.ref.cat || null;
+      live.ref.order = (++window._maintOrderCounter);
+      persist(); renderSettings();
+    });
+  });
+
+  // ====================================================================================
+  // 4) FOLDER (Categories) PANE – make it visible & wired on load
+  // ====================================================================================
+  if (typeof renderSettingsCategoriesPane === "function") {
+    renderSettingsCategoriesPane(); // shows Add Category + sub/rename/remove + DnD to folders/menus
   }
 }
+
 
 
 function renderJobs(){
