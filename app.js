@@ -1834,199 +1834,29 @@ function renderSettings(){
   // ---------- defensive state ----------
   window.tasksInterval = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
   window.tasksAsReq    = Array.isArray(window.tasksAsReq)    ? window.tasksAsReq    : [];
+  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
-  // save helper (local + cloud-safe)
+  // persist helper (local + cloud-safe)
   function persist(){
     try { if (typeof saveTasks === "function") saveTasks(); } catch(_) {}
     try { if (typeof saveCloudDebounced === "function") saveCloudDebounced(); } catch(_) {}
   }
 
-  // ---------- compact styles (scoped) ----------
-  if (!document.getElementById("settingsCompactCSS")){
-    const st = document.createElement("style");
-    st.id = "settingsCompactCSS";
-    st.textContent = `
-      #maintSettings h3 { margin: 4px 0 6px; font-size: 1.05rem; }
-      #maintSettings h4 { margin: 6px 0 4px; font-size: 0.95rem; }
-      #maintSettings details.task{border:1px solid #ddd;border-radius:6px;margin:.25rem 0;background:#fff}
-      #maintSettings details.task>summary{
-        display:flex;justify-content:space-between;align-items:center;
-        padding:.35rem .5rem; user-select:none; font-size:.92rem; line-height:1.1
-      }
-      #maintSettings .chip{font-size:.68rem;border:1px solid #bbb;border-radius:999px;padding:.05rem .35rem}
-      #maintSettings .body{padding:.45rem .55rem;border-top:1px dashed #e5e5e5}
-      #maintSettings .grid{display:grid;grid-template-columns:1fr 1fr;gap:.4rem}
-      #maintSettings label{font-size:.8rem;display:block}
-      #maintSettings input{width:100%;padding:.3rem .4rem;font-size:.85rem}
-      #maintSettings .actions{display:flex;gap:.35rem;justify-content:flex-end;margin-top:.35rem;flex-wrap:wrap}
-      #maintSettings .actions button{padding:.25rem .45rem;font-size:.8rem}
-      #maintSettings .forms{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin:.4rem 0 .6rem}
-      #maintSettings .forms .mini-form{border:1px solid #e5e5e5;border-radius:6px;padding:.45rem;background:#fff}
-      #maintSettings .forms strong{display:block;margin-bottom:.25rem;font-size:.85rem}
-      #maintSettings .subtasks{border:1px dashed #cfd6e6;border-radius:8px;padding:6px;margin:8px 0 2px 0}
-      #maintSettings .subtasks .mini{display:flex;align-items:center;gap:8px;margin:2px 0}
-      #maintSettings .subtasks .mini .name{font-weight:600}
-      #maintSettings .subtasks .mini .meta{font-size:.75rem;color:#666}
-    `;
-    document.head.appendChild(st);
-  }
+  // ---------- render the full Settings UI ----------
+  // Uses your existing viewSettings() which builds menus + folders
+  root.innerHTML = viewSettings();
 
-  // ---------- small render helpers ----------
-  const fmtPrice = v => (v==null || v==="") ? "" : String(v);
-
-  // Return array of immediate child tasks for a given parent id
-  function childrenOf(parentId){
-    const id = String(parentId);
-    const all = [];
-    for (const t of tasksInterval){ if (String(t.parentTask||"") === id) all.push({ref:t, list:"interval"}); }
-    for (const t of tasksAsReq){ if (String(t.parentTask||"") === id) all.push({ref:t, list:"asreq"}); }
-    // newest (highest order) first, then by name
-    all.sort((a,b)=> (Number(b.ref.order||0)-Number(a.ref.order||0)) || String(a.ref.name).localeCompare(String(b.ref.name)));
-    return all;
-  }
-
-  function subcomponentsHTML(parentId){
-    const kids = childrenOf(parentId);
-    if (!kids.length) return "";
-    const rows = kids.map(k => `
-      <div class="mini">
-        <span class="name">${k.ref.name}</span>
-        <span class="meta">${k.list === "interval" ? (k.ref.interval ? `${k.ref.interval}h` : "Interval") : "As req."}</span>
-        <span style="flex:1"></span>
-        <button class="small" type="button" data-detach-sub="${k.ref.id}">Unnest</button>
-      </div>
-    `).join("");
-    return `<div class="subtasks"><div class="small muted" style="margin-bottom:4px;"><b>Sub-components</b></div>${rows}</div>`;
-  }
-
-  function rowInterval(task){
-    return `
-      <details class="task" data-task-id="${task.id}" data-list="interval">
-        <summary>
-          <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:72%">${task.name}</strong>
-          <span class="chip">Hourly Interval</span>
-        </summary>
-        <div class="body">
-          <div class="grid">
-            <label>Name
-              <input data-k="name" data-id="${task.id}" data-list="interval" value="${task.name||""}">
-            </label>
-            <label>Interval (hrs)
-              <input type="number" min="1" step="1" data-k="interval" data-id="${task.id}" data-list="interval" value="${task.interval||""}">
-            </label>
-            <label>Baseline “since last” (hrs)
-              <input type="number" min="0" step="1" data-k="sinceBase" data-id="${task.id}" data-list="interval" value="${task.sinceBase!=null?task.sinceBase:""}" placeholder="e.g., 50">
-            </label>
-            <label>Part #
-              <input data-k="pn" data-id="${task.id}" data-list="interval" value="${task.pn||""}">
-            </label>
-            <label>Price
-              <input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="interval" value="${fmtPrice(task.price)}" placeholder="optional">
-            </label>
-            <label>Store / Manual (URL)
-              <input type="url" data-k="link" data-id="${task.id}" data-list="interval" value="${task.link||task.storeLink||task.manualLink||""}" placeholder="https://…">
-            </label>
-          </div>
-          <div class="actions">
-            <button class="btn-complete" data-complete="${task.id}">Complete</button>
-            <span style="flex:1"></span>
-            <button class="danger" data-remove="${task.id}" data-from="interval">Remove</button>
-          </div>
-          ${subcomponentsHTML(task.id)}
-        </div>
-      </details>`;
-  }
-
-  function rowAsReq(task){
-    return `
-      <details class="task" data-task-id="${task.id}" data-list="asreq">
-        <summary>
-          <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:72%">${task.name}</strong>
-          <span class="chip">As Required</span>
-        </summary>
-        <div class="body">
-          <div class="grid">
-            <label>Name
-              <input data-k="name" data-id="${task.id}" data-list="asreq" value="${task.name||""}">
-            </label>
-            <label>Condition/Notes
-              <input data-k="condition" data-id="${task.id}" data-list="asreq" value="${task.condition||""}" placeholder="optional">
-            </label>
-            <label>Part #
-              <input data-k="pn" data-id="${task.id}" data-list="asreq" value="${task.pn||""}">
-            </label>
-            <label>Price
-              <input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="asreq" value="${fmtPrice(task.price)}" placeholder="optional">
-            </label>
-            <label>Store / Manual (URL)
-              <input type="url" data-k="link" data-id="${task.id}" data-list="asreq" value="${task.link||task.storeLink||task.manualLink||""}" placeholder="https://…">
-            </label>
-          </div>
-          <div class="actions">
-            <span style="flex:1"></span>
-            <button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button>
-          </div>
-          ${subcomponentsHTML(task.id)}
-        </div>
-      </details>`;
-  }
-
-  // ---------- base HTML skeleton ----------
-  const html = `
-    <div id="maintSettings" class="container">
-      <div class="block" style="grid-column: 1 / -1">
-        <h3>Maintenance Settings</h3>
-        <p class="small" style="margin:.15rem 0 .4rem;">This step restores visibility and editing. We’ll re-enable drag & drop in the next step.</p>
-
-        <div class="forms">
-          <form id="addIntervalForm" class="mini-form">
-            <strong>Add Interval Task</strong>
-            <input type="text" id="ai_name" placeholder="Name" required>
-            <input type="number" id="ai_interval" placeholder="Interval (hrs)" required>
-            <button type="submit">Add</button>
-          </form>
-
-          <form id="addAsReqForm" class="mini-form">
-            <strong>Add As-Required Task</strong>
-            <input type="text" id="ar_name" placeholder="Name" required>
-            <input type="text" id="ar_condition" placeholder="Condition (e.g., When damaged)">
-            <button type="submit">Add</button>
-          </form>
-        </div>
-
-        <h4>By Interval (hrs)</h4>
-        <div id="intervalList"></div>
-
-        <h4 style="margin-top:6px;">As Required</h4>
-        <div id="asreqList"></div>
-
-        <div style="margin-top:6px;">
-          <button id="saveTasksBtn" style="padding:.3rem .55rem;font-size:.85rem">Save All</button>
-        </div>
-      </div>
-    </div>
-  `;
-  root.innerHTML = html;
-
-  // ---------- build lists (show only top-level; children appear inside parent) ----------
-  const topInterval = tasksInterval.filter(t => !t.parentTask);
-  const topAsReq    = tasksAsReq.filter(t => !t.parentTask);
-
-  const intervalList = document.getElementById("intervalList");
-  const asreqList    = document.getElementById("asreqList");
-  intervalList.innerHTML = topInterval.map(rowInterval).join("");
-  asreqList.innerHTML    = topAsReq.map(rowAsReq).join("");
-
-  // ---------- wire inline edits ----------
+  // ---------- inline edit bindings ----------
   root.querySelectorAll("[data-id]").forEach(inp => {
     inp.addEventListener("input", () => {
       const id   = inp.getAttribute("data-id");
       const key  = inp.getAttribute("data-k");
-      const list = inp.getAttribute("data-list");
+      const list = inp.getAttribute("data-list");           // "interval" | "asreq"
       const arr  = list === "interval" ? tasksInterval : tasksAsReq;
       const t = arr.find(x => String(x.id) === String(id));
       if (!t) return;
+
       let val = inp.value;
       if (["interval","sinceBase","price"].includes(key)){
         val = (val === "" ? null : Number(val));
@@ -2037,43 +1867,29 @@ function renderSettings(){
     });
   });
 
-  // ---------- remove / complete ----------
+  // ---------- remove + complete ----------
   root.querySelectorAll("[data-remove]").forEach(btn => {
     btn.addEventListener("click", () => {
       const id = btn.getAttribute("data-remove");
-      const from = btn.getAttribute("data-from");
-      if (from === "interval") tasksInterval = tasksInterval.filter(t => String(t.id)!==String(id));
-      else tasksAsReq = tasksAsReq.filter(t => String(t.id)!==String(id));
+      const from = btn.getAttribute("data-from"); // "interval" | "asreq"
+      if (from === "interval") {
+        tasksInterval = tasksInterval.filter(t => String(t.id)!==String(id));
+      } else {
+        tasksAsReq = tasksAsReq.filter(t => String(t.id)!==String(id));
+      }
       persist();
       renderSettings();
     });
   });
+
   root.querySelectorAll(".btn-complete").forEach(btn => {
     btn.addEventListener("click", () => {
       const id = btn.getAttribute("data-complete");
-      if (typeof completeTask === "function"){ completeTask(id); }
-      else {
-        const t = tasksInterval.find(x => String(x.id)===String(id));
-        if (t){
-          const cur = (typeof currentTotal === "function") ? currentTotal() : null;
-          t.anchorTotal = cur!=null ? cur : 0;
-          t.sinceBase = 0;
-          persist();
-        }
-      }
-      renderSettings();
-    });
-  });
-
-  // ---------- unnest buttons ----------
-  root.querySelectorAll("[data-detach-sub]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const id = btn.getAttribute("data-detach-sub");
-      let t = tasksInterval.find(x=>String(x.id)===String(id));
-      if (!t) t = tasksAsReq.find(x=>String(x.id)===String(id));
+      const t = tasksInterval.find(x => String(x.id)===String(id));
       if (!t) return;
-      t.parentTask = null;
-      t.order = (++window._maintOrderCounter);
+      const cur = (typeof currentTotal === "function") ? currentTotal() : null;
+      t.anchorTotal = cur!=null ? cur : 0;
+      t.sinceBase = 0;
       persist();
       renderSettings();
     });
@@ -2086,7 +1902,13 @@ function renderSettings(){
     const interval = Number(document.getElementById("ai_interval").value);
     if (!name || !isFinite(interval) || interval <= 0) return;
     const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
-    tasksInterval.unshift({ id, name, interval, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"", price:null, parentTask:null, cat:null, order:(++window._maintOrderCounter) });
+    tasksInterval.unshift({
+      id, name, interval,
+      sinceBase:null, anchorTotal:null,
+      manualLink:"", storeLink:"", pn:"", price:null,
+      // for folder/ordering
+      cat:null, order:(++window._maintOrderCounter)
+    });
     persist();
     renderSettings();
   });
@@ -2097,7 +1919,11 @@ function renderSettings(){
     const condition = (document.getElementById("ar_condition").value || "").trim() || "As required";
     if (!name) return;
     const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
-    tasksAsReq.unshift({ id, name, condition, manualLink:"", storeLink:"", pn:"", price:null, parentTask:null, cat:null, order:(++window._maintOrderCounter) });
+    tasksAsReq.unshift({
+      id, name, condition,
+      manualLink:"", storeLink:"", pn:"", price:null,
+      cat:null, order:(++window._maintOrderCounter)
+    });
     persist();
     renderSettings();
   });
@@ -2106,7 +1932,180 @@ function renderSettings(){
     persist();
     if (typeof route === "function") route();
   });
+
+  // ---------- categories pane wiring (folders & type-swaps) ----------
+  // This uses your existing implementation that handles:
+  // - + Add Category, sub-folder ops, rename/remove
+  // - dropping tasks into folders
+  // - dropping on menu headers to convert interval <-> asreq
+  if (typeof renderSettingsCategoriesPane === "function"){
+    renderSettingsCategoriesPane();
+  }
+
+  // ---------- TASK drag & drop (order and placement) ----------
+  // We add: payload on dragstart and dropzones for "before" + "end" in each scope.
+  (function attachTaskDnD(){
+    const page = root;
+
+    // 1) Ensure each task card sets a proper drag payload
+    page.querySelectorAll('details.block[draggable="true"][data-task-id]').forEach(card=>{
+      if (card.dataset.dndWired) return;
+      card.dataset.dndWired = "1";
+
+      card.addEventListener("dragstart",(e)=>{
+        const id   = card.getAttribute("data-task-id");
+        const type = card.getAttribute("data-list"); // "interval"|"asreq"
+        if (!id || !type) return;
+        e.dataTransfer.setData("text/plain", `task:${id}:${type}`);
+        e.dataTransfer.effectAllowed = "move";
+        card.classList.add("dragging");
+      });
+      card.addEventListener("dragend",()=> card.classList.remove("dragging"));
+    });
+
+    // 2) Insert dropzones BEFORE each task to support reordering
+    function addBeforeDropzones(scopeEl){
+      const scopeType = scopeEl.getAttribute("data-dnd-scope"); // "interval" | "asreq"
+      if (!scopeType) return;
+
+      // drop BEFORE every task in this scope
+      scopeEl.querySelectorAll('details.block[data-task-id]').forEach(card=>{
+        const id = card.getAttribute("data-task-id");
+        if (!id) return;
+        // avoid duplicates
+        if (card.previousElementSibling && card.previousElementSibling.classList?.contains("dz")) return;
+
+        const dz = document.createElement("div");
+        dz.className = "dz";
+        dz.setAttribute("data-drop-before", id);
+        dz.setAttribute("data-scope", scopeType);
+        dz.style.height = "8px";
+        dz.style.margin = "4px 0";
+        dz.style.borderRadius = "6px";
+
+        dz.addEventListener("dragover",(e)=>{
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          dz.style.outline = "2px dashed #888";
+          dz.style.background = "rgba(0,0,0,.05)";
+          dz.style.height = "18px";
+        });
+        dz.addEventListener("dragleave",()=>{
+          dz.style.outline = "";
+          dz.style.background = "";
+          dz.style.height = "8px";
+        });
+        dz.addEventListener("drop",(e)=>{
+          e.preventDefault();
+          dz.style.outline = "";
+          dz.style.background = "";
+          dz.style.height = "8px";
+
+          const raw = e.dataTransfer.getData("text/plain") || "";
+          const parts = raw.split(":"); // "task:<id>:<type>"
+          if (parts[0] !== "task") return;
+          const draggedId   = parts[1];
+          const draggedType = parts[2] || null;
+
+          const beforeId = dz.getAttribute("data-drop-before");
+          const scope    = dz.getAttribute("data-scope"); // where we’re dropping
+
+          // Prefer the safe mover if present
+          if (typeof moveNodeSafely === "function"){
+            const ok = moveNodeSafely("task", draggedId, { beforeTask:{ id: beforeId, type: scope } });
+            if (ok){ persist(); renderSettings(); }
+            return;
+          }
+
+          // Fallback (top-level only)
+          const listFrom = (draggedType==="interval" ? tasksInterval : tasksAsReq);
+          const listTo   = (scope==="interval" ? tasksInterval : tasksAsReq);
+
+          const i = listFrom.findIndex(t => String(t.id)===String(draggedId));
+          const j = listTo.findIndex(t => String(t.id)===String(beforeId));
+          if (i<0 || j<0) return;
+
+          const [sp] = listFrom.splice(i,1);
+          listTo.splice(j,0,sp);
+          persist(); renderSettings();
+        });
+
+        card.parentNode.insertBefore(dz, card);
+      });
+
+      // bottom "end" dropzone in this scope
+      if (!scopeEl.querySelector('.dz[data-drop-end="1"]')){
+        const endDz = document.createElement("div");
+        endDz.className = "dz";
+        endDz.setAttribute("data-drop-end","1");
+        endDz.setAttribute("data-scope", scopeType);
+        endDz.style.height = "10px";
+        endDz.style.margin = "6px 0 2px 0";
+        endDz.style.borderRadius = "6px";
+
+        endDz.addEventListener("dragover",(e)=>{
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          endDz.style.outline = "2px dashed #888";
+          endDz.style.background = "rgba(0,0,0,.05)";
+          endDz.style.height = "18px";
+        });
+        endDz.addEventListener("dragleave",()=>{
+          endDz.style.outline = "";
+          endDz.style.background = "";
+          endDz.style.height = "10px";
+        });
+        endDz.addEventListener("drop",(e)=>{
+          e.preventDefault();
+          endDz.style.outline = "";
+          endDz.style.background = "";
+          endDz.style.height = "10px";
+
+          const raw = e.dataTransfer.getData("text/plain") || "";
+          const parts = raw.split(":"); // "task:<id>:<type>"
+          if (parts[0] !== "task") return;
+          const draggedId   = parts[1];
+          const draggedType = parts[2] || null;
+
+          // If safe mover exists, interpret "end drop" as "move into this menu/folder (top of container)"
+          if (typeof moveNodeSafely === "function"){
+            // Figure out if this scopeEl is inside a folder body (has data-folder-body)
+            const folderBody = endDz.closest("[data-folder-body]");
+            if (folderBody){
+              const fid = folderBody.getAttribute("data-folder-body") || null; // move into that category
+              const ok = moveNodeSafely("task", draggedId, { intoCat: fid });
+              if (ok){ persist(); renderSettings(); }
+              return;
+            }
+            // Else it's the root for that menu (interval/asreq) — move to that list (top/root)
+            const ok = moveNodeSafely("task", draggedId, { intoCat: null });
+            if (ok){ persist(); renderSettings(); }
+            return;
+          }
+
+          // Fallback (append to end of the scope list, top-level)
+          const listFrom = (draggedType==="interval" ? tasksInterval : tasksAsReq);
+          const listTo   = (endDz.getAttribute("data-scope")==="interval" ? tasksInterval : tasksAsReq);
+          const i = listFrom.findIndex(t => String(t.id)===String(draggedId));
+          if (i<0) return;
+          const [sp] = listFrom.splice(i,1);
+          listTo.push(sp);
+          persist(); renderSettings();
+        });
+
+        scopeEl.appendChild(endDz);
+      }
+    }
+
+    // Apply to every drag scope on the page (root & inside folders)
+    page.querySelectorAll("[data-dnd-scope]").forEach(addBeforeDropzones);
+
+    // NOTE: Dropping tasks ON folder/menu headers is handled by renderSettingsCategoriesPane()
+    // To keep this step small & stable, we do NOT wire "drop-into-task" yet.
+    // (We’ll add visible sub-component rendering + into-task drop in the next step so items don’t appear to “vanish”.)
+  })();
 }
+
 
 // ---- Costs page (placeholder to satisfy router & nav) ----
 function renderCosts(){
