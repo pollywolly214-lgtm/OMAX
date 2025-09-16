@@ -1838,46 +1838,60 @@ function renderSettings(){
   window.tasksAsReq      = Array.isArray(window.tasksAsReq)      ? window.tasksAsReq      : [];
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
-     // --- one-time hydration for legacy/remote tasks ---
-  if (!window.__hydratedTasksOnce && window.tasksInterval.length === 0 && window.tasksAsReq.length === 0){
+  // --- one-time hydration for legacy/remote tasks (per-list) ---
+  // Previously this only ran if BOTH lists were empty. That prevented legacy
+  // tasks from ever loading when just one list was non-empty. This version
+  // hydrates each list independently: Firestore → old localStorage → defaults.
+  if (!window.__hydratedTasksOnce && (window.tasksInterval.length === 0 || window.tasksAsReq.length === 0)){
     window.__hydratedTasksOnce = true;
 
     (async ()=>{
-      let filled = false;
+      let needInterval = window.tasksInterval.length === 0;
+      let needAsReq    = window.tasksAsReq.length === 0;
+      let filledAny    = false;
 
       // 1) Try Firestore (workspaces/{WORKSPACE_ID}/app/state)
       try{
         if (window.FB && FB.ready && FB.docRef && typeof FB.docRef.get === "function"){
           const snap = await FB.docRef.get();
-          const data = snap && typeof snap.data === "function" ? snap.data() : null;
-          if (data && (Array.isArray(data.tasksInterval) || Array.isArray(data.tasksAsReq))){
-            window.tasksInterval = Array.isArray(data.tasksInterval) ? data.tasksInterval : [];
-            window.tasksAsReq    = Array.isArray(data.tasksAsReq)    ? data.tasksAsReq    : [];
-            filled = (window.tasksInterval.length + window.tasksAsReq.length) > 0;
+          if (snap && snap.exists){
+            const data = typeof snap.data === "function" ? snap.data() : snap.data;
+            if (data){
+              if (needInterval && Array.isArray(data.tasksInterval) && data.tasksInterval.length){
+                window.tasksInterval = data.tasksInterval.slice(); needInterval = false; filledAny = true;
+              }
+              if (needAsReq && Array.isArray(data.tasksAsReq) && data.tasksAsReq.length){
+                window.tasksAsReq = data.tasksAsReq.slice(); needAsReq = false; filledAny = true;
+              }
+            }
           }
         }
       }catch(e){ console.warn("Firestore hydrate failed:", e); }
 
       // 2) Fallback: old localStorage keys from v6
-      if (!filled){
+      if (needInterval || needAsReq){
         try{
           const si = JSON.parse(localStorage.getItem("omax_tasks_interval_v6") || "null");
           const sa = JSON.parse(localStorage.getItem("omax_tasks_asreq_v6")   || "null");
-          if (Array.isArray(si) || Array.isArray(sa)){
-            window.tasksInterval = si || [];
-            window.tasksAsReq    = sa || [];
-            filled = (window.tasksInterval.length + window.tasksAsReq.length) > 0;
+          if (needInterval && Array.isArray(si) && si.length){
+            window.tasksInterval = si.slice(); needInterval = false; filledAny = true;
           }
-        }catch(e){ /* ignore */ }
+          if (needAsReq && Array.isArray(sa) && sa.length){
+            window.tasksAsReq = sa.slice(); needAsReq = false; filledAny = true;
+          }
+        }catch(_){}
       }
 
       // 3) Fallback: defaults (so Settings is never empty)
-      if (!filled){
-        if (Array.isArray(window.defaultIntervalTasks)) window.tasksInterval = window.defaultIntervalTasks.slice();
-        if (Array.isArray(window.defaultAsReqTasks))    window.tasksAsReq    = window.defaultAsReqTasks.slice();
+      if (needInterval && Array.isArray(window.defaultIntervalTasks)){
+        window.tasksInterval = window.defaultIntervalTasks.slice(); needInterval = false; filledAny = true;
+      }
+      if (needAsReq && Array.isArray(window.defaultAsReqTasks)){
+        window.tasksAsReq = window.defaultAsReqTasks.slice(); needAsReq = false; filledAny = true;
       }
 
-      // Normalize ids/orders so new Explorer view can render and sort predictably
+      // Normalize ids/orders so the Explorer view can sort predictably
+      if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
       const addId = (t)=>{
         if (!t.id){
           t.id = (String(t.name||"task").toLowerCase().replace(/[^a-z0-9]+/g,"_")
@@ -1906,6 +1920,7 @@ function renderSettings(){
       </div>`;
     return; // prevent wiring before data is ready
   }
+
 
 
   // --- Small, compact scoped styles (once) ---
