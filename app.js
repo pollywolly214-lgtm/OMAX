@@ -814,7 +814,7 @@ function taskDetailsInterval(task){
   const daysTxt  = nd ? `${nd.days} day(s) → ${nd.due.toDateString()}` : "—";
   const lastServ = nd && nd.lastServicedAt != null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
   return `
-  <details data-task-id="${task.id}">
+<details data-task-id="${task.id}" data-list="interval">
     <summary>${task.name} — <span class="small">since: ${sinceTxt} | due: ${daysTxt}</span></summary>
     <div class="row"><label>Name:</label>
       <div><input type="text" data-k="name" data-id="${task.id}" data-list="interval" value="${task.name}" /></div>
@@ -851,7 +851,7 @@ function taskDetailsInterval(task){
 
 function taskDetailsAsReq(task){
   return `
-  <details data-task-id="${task.id}">
+<details data-task-id="${task.id}" data-list="asreq">
     <summary>${task.name} — <span class="small">${task.condition || "As required"}</span></summary>
     <div class="row"><label>Name:</label>
       <div><input type="text" data-k="name" data-id="${task.id}" data-list="asreq" value="${task.name}" /></div>
