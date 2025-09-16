@@ -1298,54 +1298,91 @@ function renderSettings(){
   const content = document.getElementById("content");
   if (!content) return;
 
-  // ---------- Styling (folders bold/title; items normal) ----------
+  // ---------- Scoped styling: smaller bubbles; explorer pinned to LEFT HALF ----------
   if (!document.getElementById("settingsExplorerCSS")){
     const st = document.createElement("style");
     st.id = "settingsExplorerCSS";
     st.textContent = `
-      details.folder > summary.folder-title{ font-weight:800; font-size:1.05rem; letter-spacing:.2px; display:flex; align-items:center; gap:10px; }
-      details.item > summary{ font-weight:500; font-size:.98rem; display:flex; align-items:center; gap:8px; }
-      .dz{ border:1px dashed #bbb; border-radius:8px; padding:6px; margin:6px 0; color:#666; }
-      .dz.dragover{ background:rgba(0,0,0,.05); outline:2px dashed #888; }
-      details.dragging{ opacity:.6 }
-      .sort-hint{ outline:2px solid #6aa84f; border-radius:6px; }
-      .muted{ color:#666 } .small{ font-size:.85rem } .hidden{ display:none!important }
-      .tree-toolbar{ display:flex; gap:8px; align-items:center; margin-bottom:10px }
+      /* Layout: two columns; left = explorer, right = free space */
+      #settingsPane.settings-grid{
+        display:grid;
+        grid-template-columns: 1fr 1fr;   /* left half / right half */
+        gap: 16px;
+        align-items:start;
+      }
+      #settingsPane .settings-left{
+        grid-column: 1 / 2;
+      }
+      #settingsPane .settings-right{
+        grid-column: 2 / 3;
+      }
+
+      /* Smaller, tighter "bubble" cards but scoped to settings only */
+      #settingsPane details.block{
+        border: 1px solid #e4e4e4;
+        border-radius: 10px;
+        padding: 6px 8px;
+        margin: 6px 0;
+        background: #fff;
+      }
+      #settingsPane details.block > summary{
+        display:flex; align-items:center; gap:8px;
+        cursor: pointer;
+      }
+      #settingsPane details.item > summary{ font-weight:500; font-size:.94rem; }
+      #settingsPane details.folder > summary.folder-title{ font-weight:800; font-size:1.02rem; letter-spacing:.2px; }
+
+      /* Drag/drop affordances */
+      #settingsPane .dz{ border:1px dashed #bbb; border-radius:8px; padding:6px; margin:6px 0; color:#666; }
+      #settingsPane .dz.dragover{ background:rgba(0,0,0,.05); outline:2px dashed #888; }
+      #settingsPane details.dragging{ opacity:.6 }
+      #settingsPane .sort-hint{ outline:2px solid #6aa84f; border-radius:6px; }
+      #settingsPane .muted{ color:#666 } 
+      #settingsPane .small{ font-size:.85rem }
+      #settingsPane .hidden{ display:none!important }
+      #settingsPane .tree-toolbar{ display:flex; gap:8px; align-items:center; margin-bottom:10px }
+
+      /* Tighten mini-form within bubbles */
+      #settingsPane .mini-form{ display:grid; grid-template-columns: 1fr 1fr; gap:6px; }
+      #settingsPane .mini-form label{ font-size:.84rem; }
+      #settingsPane .mini-form input{ padding:4px 6px; font-size:.9rem; }
+
+      /* Keep chips compact */
+      #settingsPane .chip{ display:inline-block; padding:2px 6px; border-radius:10px; font-size:.72rem; background:#f1f1f1 }
+      #settingsPane .chip.green{ background:#e8f5e9 } 
+      #settingsPane .chip.yellow{ background:#fff8e1 } 
+      #settingsPane .chip.orange{ background:#ffe0b2 } 
+      #settingsPane .chip.red{ background:#ffebee }
     `;
     document.head.appendChild(st);
   }
 
-  // ---------- State ----------
-  // Categories (folders), with nesting via parent
+  // ---------- State (folders + items) ----------
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
   for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
 
-  // Items come from both legacy lists, but behave as generic files here
+  // Items from legacy lists; we treat them as files (not folders)
   const allItems = [
     ...(Array.isArray(tasksInterval) ? tasksInterval.map(t => ({...t, __type:"interval"})) : []),
     ...(Array.isArray(tasksAsReq)    ? tasksAsReq.map(t => ({...t, __type:"asreq"}))       : []),
   ];
 
-  // ---------- Ordering helpers ----------
-  // We keep a numeric "order" on both folders and items. Higher = nearer top.
+  // ---------- Ordering so new things appear at TOP and drag-to-reorder works ----------
   function getMaxOrder(){
     const maxFolder = window.settingsFolders.reduce((m,f)=> Math.max(m, Number(f.order||0)), 0);
     const maxItems  = allItems.reduce((m,t)=> Math.max(m, Number(t.order||0)), 0);
     return Math.max(maxFolder, maxItems);
   }
-  if (typeof window._orderInitialized === "undefined"){
-    window._orderInitialized = false;
-  }
+  if (typeof window._orderInitialized === "undefined"){ window._orderInitialized = false; }
   if (!window._orderInitialized){
-    // First run: assign baseline order so existing content keeps relative grouping
     let base = 0;
-    // Folders: assign per parent group to preserve existing visual grouping
+    // Folders grouped by parent
     const parentIds = [null, ...new Set(window.settingsFolders.map(f=>f.parent).filter(Boolean))];
     for (const pid of parentIds){
       const group = window.settingsFolders.filter(f => (f.parent||null)===(pid||null));
       for (const f of group){ if (typeof f.order === "undefined"){ f.order = ++base; } }
     }
-    // Items: assign per folder group
+    // Items grouped by category
     const folderIds = [null, ...new Set(allItems.map(t=>t.cat).filter(Boolean))];
     for (const fid of folderIds){
       const group = allItems.filter(t => (t.cat||null)===(fid||null));
@@ -1354,24 +1391,28 @@ function renderSettings(){
     window._orderCounter = base;
     window._orderInitialized = true;
   } else {
-    // Subsequent renders: any new object without order goes straight to top
     window._orderCounter = Math.max(window._orderCounter||0, getMaxOrder());
     for (const f of window.settingsFolders){ if (typeof f.order === "undefined"){ f.order = ++window._orderCounter; } }
     for (const t of allItems){ if (typeof t.order === "undefined"){ t.order = ++window._orderCounter; } }
   }
-
   function bumpTop(obj){ obj.order = ++window._orderCounter; }
 
-  function kidsOf(parent){
-    return window.settingsFolders
+  const byIdFolder = (id)=> window.settingsFolders.find(f => String(f.id)===String(id));
+  const byIdItemLive = (id)=> {
+    const a = tasksInterval?.find(x=>String(x.id)===String(id));
+    if (a) return {ref:a, list:"interval"};
+    const b = tasksAsReq?.find(x=>String(x.id)===String(id));
+    if (b) return {ref:b, list:"asreq"};
+    return null;
+  };
+
+  const kidsOf  = (parent)=> window.settingsFolders
       .filter(f => (f.parent||null)===(parent||null))
       .sort((a,b)=> (b.order||0) - (a.order||0) || String(a.name).localeCompare(String(b.name)));
-  }
-  function itemsIn(folderId){
-    return allItems
+
+  const itemsIn = (folderId)=> allItems
       .filter(t => (t.cat||null)===(folderId||null))
       .sort((a,b)=> (b.order||0) - (a.order||0) || String(a.name).localeCompare(String(b.name)));
-  }
 
   function normalizeFolderOrders(parentId){
     const list = kidsOf(parentId);
@@ -1382,7 +1423,6 @@ function renderSettings(){
   function normalizeItemOrders(folderId){
     const list = itemsIn(folderId);
     let n = list.length;
-    // Need to write back into the live arrays (tasksInterval / tasksAsReq)
     for (const v of list){
       const arr = v.__type==="interval" ? tasksInterval : tasksAsReq;
       const r = arr.find(x=>x.id===v.id);
@@ -1391,39 +1431,22 @@ function renderSettings(){
     window._orderCounter = Math.max(window._orderCounter, list.length);
   }
 
-  // ---------- View (single tree) ----------
-  const byIdFolder = (id)=> window.settingsFolders.find(f => String(f.id)===String(id));
-  const byIdItemLive = (id)=> {
-    const a = tasksInterval?.find(x=>String(x.id)===String(id));
-    if (a) return {ref:a, list:"interval"};
-    const b = tasksAsReq?.find(x=>String(x.id)===String(id));
-    if (b) return {ref:b, list:"asreq"};
-    return null;
-  };
-
+  // ---------- Small helpers ----------
   const setNum = (v)=> { const n = Number(v); return isFinite(n) ? n : null; };
-
   const chipFor = (t)=>{
     const nd = nextDue(t);
     if (!nd) return `<span class="chip">—</span>`;
     const d = nd.days; let cls = "green"; if (d<=1) cls="red"; else if (d<=3) cls="orange"; else if (d<=7) cls="yellow";
     return `<span class="chip ${cls}">${d}d → ${nd.due.toDateString()}</span>`;
   };
-
   const partRow = (p, parentId, listType) => `
     <div class="mini-form" data-part-row data-parent="${parentId}" data-list="${listType}" data-part-id="${p.pid}">
-      <input type="text" placeholder="Part name" value="${p.name||""}"
-             data-part-k="name" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
-      <input type="text" placeholder="PN" value="${p.pn||""}"
-             data-part-k="pn" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
-      <input type="number" step="0.01" min="0" placeholder="Price" value="${p.price!=null?p.price:""}"
-             data-part-k="price" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
-      <input type="url" placeholder="Link" value="${p.link||""}"
-             data-part-k="link" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
-      <input type="text" placeholder="Note" value="${p.note||""}"
-             data-part-k="note" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
-      <button class="danger" type="button"
-              data-part-remove="${p.pid}" data-parent="${parentId}" data-list="${listType}">Remove</button>
+      <input type="text" placeholder="Part name" value="${p.name||""}" data-part-k="name" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="text" placeholder="PN" value="${p.pn||""}" data-part-k="pn" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="number" step="0.01" min="0" placeholder="Price" value="${p.price!=null?p.price:""}" data-part-k="price" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="url" placeholder="Link" value="${p.link||""}" data-part-k="link" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="text" placeholder="Note" value="${p.note||""}" data-part-k="note" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <button class="danger" type="button" data-part-remove="${p.pid}" data-parent="${parentId}" data-list="${listType}">Remove</button>
     </div>`;
 
   const itemCard = (t) => {
@@ -1505,41 +1528,49 @@ function renderSettings(){
       </details>`;
   };
 
-  // Build the full tree view
+  // ---------- View: explorer on the LEFT half ----------
   const rootItems   = itemsIn(null).map(itemCard).join("");
   const rootFolders = kidsOf(null).map(renderFolder).join("");
   const toolbar = `
     <div class="tree-toolbar">
       <button id="addFolderBtn">+ Add Category</button>
-      <span class="small muted">Drag to reorder; drop on folders to move. New items/categories go to the top.</span>
+      <span class="small muted">Drag items and categories anywhere. Categories can nest. New things appear at the top.</span>
       <span style="flex:1"></span>
       <button id="saveTasksBtn">Save</button>
     </div>`;
 
   content.innerHTML = `
-    <div class="container">
-      <div class="block" style="grid-column:1 / -1">
-        <h3>Maintenance Settings</h3>
-        ${toolbar}
-        <div id="treeList">
-          <div class="dz" data-drop-root="1">Drop here to move to the top level</div>
-          <div class="bubble-list">
-            ${rootItems || `<div class="small muted">No items at the top level.</div>`}
-          </div>
-          <div class="tree-folders">
-            ${rootFolders || `<div class="small muted">No categories yet. Click “Add Category”.</div>`}
+    <div id="settingsPane" class="settings-grid">
+      <div class="settings-left">
+        <div class="block">
+          <h3>Maintenance Settings</h3>
+          ${toolbar}
+          <div id="treeList">
+            <div class="dz" data-drop-root="1">Drop here to move to the top level</div>
+            <div class="bubble-list">
+              ${rootItems || `<div class="small muted">No items at the top level.</div>`}
+            </div>
+            <div class="tree-folders">
+              ${rootFolders || `<div class="small muted">No categories yet. Click “Add Category”.</div>`}
+            </div>
           </div>
         </div>
+      </div>
+      <div class="settings-right">
+        <!-- Empty by design: left pane is the focus. Keep this space for future previews/help. -->
       </div>
     </div>
   `;
 
-  // ---------- Basic field wiring (unchanged) ----------
+  // ---------- Wiring (scoped to pane) ----------
+  const pane = document.getElementById("settingsPane");
   const getList = (type)=> type === "interval" ? tasksInterval : tasksAsReq;
 
-  content.addEventListener("input",(e)=>{
+  // Item field edits + sub-parts
+  pane.addEventListener("input",(e)=>{
     const el = e.target;
-    // item field edits
+
+    // Item field edits
     const id = el.getAttribute("data-id");
     const list = el.getAttribute("data-list");
     const key = el.getAttribute("data-k");
@@ -1551,7 +1582,8 @@ function renderSettings(){
       saveCloudDebounced();
       return;
     }
-    // sub-part edits
+
+    // Sub-part edits
     const pk = el.getAttribute("data-part-k");
     if (pk){
       const pid   = el.getAttribute("data-part-id");
@@ -1564,7 +1596,8 @@ function renderSettings(){
       saveCloudDebounced();
     }
   });
-  content.addEventListener("submit",(e)=>{
+
+  pane.addEventListener("submit",(e)=>{
     const frm = e.target.closest("[data-part-add-form]");
     if (!frm) return;
     e.preventDefault();
@@ -1580,10 +1613,10 @@ function renderSettings(){
       link: frm.querySelector('[data-part-new="link"]')?.value.trim() || "",
       note: frm.querySelector('[data-part-new="note"]')?.value.trim() || ""
     });
-    // Put the parent item at the top of its container when adding a sub-part? No—leave as-is.
     saveCloudDebounced(); renderSettings();
   });
-  content.addEventListener("click",(e)=>{
+
+  pane.addEventListener("click",(e)=>{
     // complete/remove item
     const comp = e.target.closest("[data-complete]");
     const rm   = e.target.closest("[data-remove]");
@@ -1608,16 +1641,16 @@ function renderSettings(){
     }
   });
 
-  // ---------- Category CRUD ----------
-  document.getElementById("addFolderBtn")?.addEventListener("click", ()=>{
+  // ---------- Category CRUD (add at TOP) ----------
+  pane.querySelector("#addFolderBtn")?.addEventListener("click", ()=>{
     const name = prompt("Category name:", "New Category");
     if (!name) return;
     const id = genId(name);
-    const f = { id, name, parent:null, order: (++window._orderCounter) }; // TOP
+    const f = { id, name, parent:null, order:(++window._orderCounter) }; // TOP
     window.settingsFolders.push(f);
     saveCloudDebounced(); renderSettings();
   });
-  content.addEventListener("click",(e)=>{
+  pane.addEventListener("click",(e)=>{
     const sub = e.target.closest("[data-add-subfolder]");
     const ren = e.target.closest("[data-rename-folder]");
     const del = e.target.closest("[data-remove-folder]");
@@ -1626,7 +1659,7 @@ function renderSettings(){
       const name = prompt("Sub-category name:", "New Sub-category");
       if (!name) return;
       const id = genId(name);
-      const f = { id, name, parent: pid, order: (++window._orderCounter) }; // TOP within that parent
+      const f = { id, name, parent: pid, order:(++window._orderCounter) }; // TOP in that parent
       window.settingsFolders.push(f);
       saveCloudDebounced(); renderSettings();
     }
@@ -1647,20 +1680,19 @@ function renderSettings(){
     }
   });
 
-  // ---------- Drag & Drop (reorder + move) ----------
-  // Mark elements draggable (items + folders)
-  content.querySelectorAll('details.item').forEach(el => el.setAttribute('draggable','true'));
-  content.querySelectorAll('details.folder').forEach(el => el.setAttribute('draggable','true'));
+  // ---------- Drag & Drop (folders + items; move & reorder; always scoped to left pane) ----------
+  pane.querySelectorAll('details.item').forEach(el => el.setAttribute('draggable','true'));
+  pane.querySelectorAll('details.folder').forEach(el => el.setAttribute('draggable','true'));
 
   const DRAG = { type:null, id:null, list:null }; // type: "item"|"folder"
 
-  content.addEventListener("dragstart",(e)=>{
+  pane.addEventListener("dragstart",(e)=>{
     const item = e.target.closest('details.item');
     const fold = e.target.closest('details.folder');
     if (item){
       DRAG.type = "item";
       DRAG.id   = item.getAttribute("data-task-id");
-      DRAG.list = item.getAttribute("data-list"); // "interval"|"asreq"
+      DRAG.list = item.getAttribute("data-list");
       item.classList.add("dragging");
       e.dataTransfer.setData("text/plain", DRAG.id);
       e.dataTransfer.effectAllowed = "move";
@@ -1672,83 +1704,75 @@ function renderSettings(){
       e.dataTransfer.effectAllowed = "move";
     }
   });
-  content.addEventListener("dragend",(e)=>{
+  pane.addEventListener("dragend",(e)=>{
     const el = e.target.closest('details.item,details.folder'); el?.classList.remove("dragging");
     DRAG.type=null; DRAG.id=null; DRAG.list=null;
-    document.querySelectorAll('.sort-hint').forEach(x=>x.classList.remove('sort-hint'));
+    pane.querySelectorAll('.sort-hint').forEach(x=>x.classList.remove('sort-hint'));
   });
 
-  function allow(e){
-    e.preventDefault(); e.dataTransfer.dropEffect="move";
-  }
-
-  // Highlight sort target when hovering an item/folder
-  content.addEventListener("dragover",(e)=>{
+  function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect="move"; }
+  pane.addEventListener("dragover",(e)=>{
     const target = e.target.closest('details.item,details.folder,[data-drop-folder],[data-drop-root]');
     if (!target) return;
     allow(e);
-    // add a subtle hint on item/folder bodies (used for reordering into position)
     const card = e.target.closest('details.item,details.folder');
     if (card) card.classList.add('sort-hint');
+    const dz = e.target.closest('.dz'); if (dz) dz.classList.add('dragover');
   });
-  content.addEventListener("dragleave",(e)=>{
-    const card = e.target.closest('details.item,details.folder');
-    card?.classList.remove('sort-hint');
+  pane.addEventListener("dragleave",(e)=>{
+    const card = e.target.closest('details.item,details.folder'); card?.classList.remove('sort-hint');
+    const dz = e.target.closest('.dz'); dz?.classList.remove('dragover');
   });
 
   function moveItemToContainerTop(itemId, newFolderId){
     const live = byIdItemLive(itemId); if (!live) return false;
     live.ref.cat = newFolderId || null;
-    bumpTop(live.ref);
+    bumpTop(live.ref);   // always to TOP
     return true;
   }
   function moveFolderToContainerTop(folderId, newParentId){
     const f = byIdFolder(folderId); if (!f) return false;
     f.parent = newParentId || null;
-    bumpTop(f);
+    bumpTop(f);          // always to TOP
     return true;
   }
 
-  // Drop handling:
-  content.addEventListener("drop",(e)=>{
+  pane.addEventListener("drop",(e)=>{
     const zoneFolder = e.target.closest("[data-drop-folder]");
     const zoneRoot   = e.target.closest("[data-drop-root]");
-    const onCard     = e.target.closest('details.item,details.folder'); // drop ON an item/folder to reorder relative to it
+    const onCard     = e.target.closest('details.item,details.folder'); // for relative reordering
+
     if (!DRAG.type) return;
 
-    // Container moves (into folder or top-level) → always go to TOP
     if (zoneFolder){
       allow(e);
       const destFolder = zoneFolder.getAttribute("data-drop-folder");
-      let changed=false;
-      if (DRAG.type==="item")   changed = moveItemToContainerTop(DRAG.id, destFolder);
-      if (DRAG.type==="folder") changed = moveFolderToContainerTop(DRAG.id, destFolder);
+      const changed = (DRAG.type==="item")
+        ? moveItemToContainerTop(DRAG.id, destFolder)
+        : moveFolderToContainerTop(DRAG.id, destFolder);
       if (changed){ saveCloudDebounced(); renderSettings(); }
       return;
     }
     if (zoneRoot){
       allow(e);
-      let changed=false;
-      if (DRAG.type==="item")   changed = moveItemToContainerTop(DRAG.id, null);
-      if (DRAG.type==="folder") changed = moveFolderToContainerTop(DRAG.id, null);
+      const changed = (DRAG.type==="item")
+        ? moveItemToContainerTop(DRAG.id, null)
+        : moveFolderToContainerTop(DRAG.id, null);
       if (changed){ saveCloudDebounced(); renderSettings(); }
       return;
     }
 
-    // Reordering ON an item/folder card (drop ABOVE the target)
+    // Reorder relative to a card (drop ABOVE it)
     if (onCard){
       allow(e);
-      const isTargetItem = onCard.classList.contains('item');
-      if (DRAG.type==="item" && isTargetItem){
+      if (DRAG.type==="item" && onCard.classList.contains('item')){
         const targetId = onCard.getAttribute("data-task-id");
         const targetLive = byIdItemLive(targetId); if (!targetLive) return;
         const targetFolder = targetLive.ref.cat || null;
 
         const live = byIdItemLive(DRAG.id); if (!live) return;
-        // If container differs, reparent first
-        live.ref.cat = targetFolder;
-        // place above target by giving slightly higher order, then normalize
-        live.ref.order = (Number(targetLive.ref.order)||0) + 0.5;
+        live.ref.cat = targetFolder;               // ensure same container
+        live.ref.order = (Number(targetLive.ref.order)||0) + 0.5; // above target
         normalizeItemOrders(targetFolder);
         saveCloudDebounced(); renderSettings();
         return;
@@ -1757,20 +1781,19 @@ function renderSettings(){
         const targetId = onCard.getAttribute("data-folder-id");
         const targetFolder = byIdFolder(targetId); if (!targetFolder) return;
         const f = byIdFolder(DRAG.id); if (!f) return;
-        // Reparent to target's parent, then position above it
-        f.parent = targetFolder.parent || null;
+        f.parent = targetFolder.parent || null;    // same parent
         f.order  = (Number(targetFolder.order)||0) + 0.5;
         normalizeFolderOrders(f.parent || null);
         saveCloudDebounced(); renderSettings();
         return;
       }
-      // Dropping item onto a folder card (not the dz): treat as move into that folder at TOP
+      // Dropping item onto a folder (not dropzone): move into that folder TOP
       if (DRAG.type==="item" && onCard.classList.contains('folder')){
         const destFolder = onCard.getAttribute("data-folder-id");
         if (moveItemToContainerTop(DRAG.id, destFolder)){ saveCloudDebounced(); renderSettings(); }
         return;
       }
-      // Dropping folder onto an item card: move folder next to the item's folder parent (top of that parent)
+      // Dropping folder onto an item: move folder to that item's parent TOP
       if (DRAG.type==="folder" && onCard.classList.contains('item')){
         const targetId = onCard.getAttribute("data-task-id");
         const targetLive = byIdItemLive(targetId); if (!targetLive) return;
@@ -1782,7 +1805,7 @@ function renderSettings(){
   });
 
   // ---------- Save ----------
-  document.getElementById("saveTasksBtn")?.addEventListener("click", ()=>{
+  pane.querySelector("#saveTasksBtn")?.addEventListener("click", ()=>{
     saveCloudDebounced(); toast("Saved");
   });
 }
