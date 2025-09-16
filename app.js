@@ -217,19 +217,34 @@ let RENDER_DELTA = 0;
 function snapshotState(){
   return { schema:APP_SCHEMA, totalHistory, tasksInterval, tasksAsReq, inventory, cuttingJobs, pumpEff };
 }
+
 function adoptState(doc){
-  totalHistory = Array.isArray(doc.totalHistory) ? doc.totalHistory : [];
-  tasksInterval = Array.isArray(doc.tasksInterval) ? doc.tasksInterval : defaultIntervalTasks.slice();
-  tasksAsReq    = Array.isArray(doc.tasksAsReq)    ? doc.tasksAsReq    : defaultAsReqTasks.slice();
-  inventory     = Array.isArray(doc.inventory)     ? doc.inventory     : seedInventoryFromTasks();
-  cuttingJobs   = Array.isArray(doc.cuttingJobs)   ? doc.cuttingJobs   : [];
-  // PumpEff
-  if (doc.pumpEff && typeof doc.pumpEff === "object"){
-    pumpEff.baselineRPM     = (doc.pumpEff.baselineRPM ?? pumpEff.baselineRPM);
-    pumpEff.baselineDateISO = (doc.pumpEff.baselineDateISO ?? pumpEff.baselineDateISO);
-    pumpEff.entries         = Array.isArray(doc.pumpEff.entries) ? doc.pumpEff.entries : pumpEff.entries;
+  const data = doc || {};
+
+  // Core lists (fallback to defaults if empty/missing)
+  totalHistory = Array.isArray(data.totalHistory) ? data.totalHistory : [];
+  tasksInterval = (Array.isArray(data.tasksInterval) && data.tasksInterval.length)
+    ? data.tasksInterval
+    : defaultIntervalTasks.slice();
+  tasksAsReq = (Array.isArray(data.tasksAsReq) && data.tasksAsReq.length)
+    ? data.tasksAsReq
+    : defaultAsReqTasks.slice();
+  inventory = Array.isArray(data.inventory) ? data.inventory : seedInventoryFromTasks();
+  cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
+
+  // Pump efficiency (guard against reading an undefined identifier)
+  const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+    ? window.pumpEff
+    : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+
+  if (data.pumpEff && typeof data.pumpEff === "object"){
+    pe.baselineRPM     = (data.pumpEff.baselineRPM ?? pe.baselineRPM);
+    pe.baselineDateISO = (data.pumpEff.baselineDateISO ?? pe.baselineDateISO);
+    pe.entries         = Array.isArray(data.pumpEff.entries) ? data.pumpEff.entries.slice() : pe.entries;
   }
 }
+
+
 const saveCloudDebounced = debounce(async ()=>{
   if (!FB.ready || !FB.docRef) return;
   try{ await FB.docRef.set(snapshotState(), { merge:true }); }catch(e){ console.error("Cloud save failed:", e); }
