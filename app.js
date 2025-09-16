@@ -1791,6 +1791,8 @@ function renderSettings(){
 }
 
 // Renders the Explorer-style Categories pane (folders only) with safe DnD.
+
+// Renders the Explorer-style Categories pane (folders) and accepts drops of FOLDERS and TASKS.
 function renderSettingsCategoriesPane(){
   // Ensure state
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
@@ -1825,7 +1827,7 @@ function renderSettingsCategoriesPane(){
   if (!block){
     block = document.createElement("div");
     block.id = "catPaneBlock";
-    const forms = root.querySelector(".forms"); // from your renderSettings()
+    const forms = root.querySelector(".forms"); // from renderSettings()
     if (forms) root.firstElementChild.insertBefore(block, forms); else root.firstElementChild.prepend(block);
   }
 
@@ -1835,18 +1837,12 @@ function renderSettingsCategoriesPane(){
     .filter(f => String(f.parent||"") === String(parent||""))
     .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
 
-  function normSiblings(parent){
-    const sibs = childrenOf(parent==null?null:parent);
-    let n = sibs.length;
-    for (const s of sibs){ s.order = n--; }
-  }
-
   function folderHTML(f){
     return `
       <details class="cat" data-cat-id="${f.id}" open>
         <summary draggable="true">${f.name}</summary>
 
-        <!-- Dropzones: into-this and before-children -->
+        <!-- Drop into this category (TOP) -->
         <div class="dz" data-drop-into="${f.id}"></div>
 
         <div class="children" data-children-of="${f.id}">
@@ -1861,7 +1857,7 @@ function renderSettingsCategoriesPane(){
     <div class="head">
       <h4>Categories (folders)</h4>
       <button id="btnAddCategory">+ Add Category</button>
-      <span class="small muted">Drag folders to re-parent or reorder.</span>
+      <span class="small muted">Drag folders to re-parent, and drag tasks here to file them.</span>
     </div>
     <div id="catTree" role="tree">
       <div class="dz" data-drop-root="1"></div>
@@ -1879,14 +1875,15 @@ function renderSettingsCategoriesPane(){
     renderSettingsCategoriesPane();
   });
 
-  // ----- DnD wiring (folders only) -----
+  // ----- DnD wiring: folders + tasks -----
   const tree = document.getElementById("catTree");
-  const DRAG = { id:null };
+  const DRAG = { id:null, kind:null };
 
   tree.addEventListener("dragstart",(e)=>{
     const card = e.target.closest("details.cat");
     if (!card) return;
     DRAG.id = card.getAttribute("data-cat-id");
+    DRAG.kind = "category";
     card.classList.add("dragging");
     e.dataTransfer.setData("text/plain", `category:${DRAG.id}`);
     e.dataTransfer.effectAllowed = "move";
@@ -1896,7 +1893,7 @@ function renderSettingsCategoriesPane(){
     card?.classList.remove("dragging");
     tree.querySelectorAll(".drop-hint").forEach(x=>x.classList.remove("drop-hint"));
     tree.querySelectorAll(".dz.dragover").forEach(x=>x.classList.remove("dragover"));
-    DRAG.id = null;
+    DRAG.id = DRAG.kind = null;
   });
 
   function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
@@ -1912,46 +1909,81 @@ function renderSettingsCategoriesPane(){
   });
 
   tree.addEventListener("drop",(e)=>{
-    const data = e.dataTransfer.getData("text/plain") || "";
-    const [kind,id] = data.split(":");
+    const raw = e.dataTransfer.getData("text/plain") || "";
+    // Supported payloads:
+    //  - "category:<id>"
+    //  - "task:<id>:<type>" where <type> is "interval" or "asreq"
+    const parts = raw.split(":");
+    const kind  = parts[0];
+    const id    = parts[1] || null;
+
     const dzRoot   = e.target.closest("[data-drop-root]");
     const dzInto   = e.target.closest("[data-drop-into]");
     const onSum    = e.target.closest("summary");
     e.preventDefault();
 
-    if (kind !== "category") return; // this step supports folders only
+    // ---- Move TASK into a category (or to root) ----
+    if (kind === "task" && id){
+      if (dzRoot){
+        if (moveNodeSafely("task", id, { intoCat: null })){
+          if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+          // Repaint both panes so the user sees changes immediately
+          renderSettingsCategoriesPane();
+          if (typeof renderSettings === "function") renderSettings();
+        }
+        return;
+      }
+      if (dzInto){
+        const fid = dzInto.getAttribute("data-drop-into");
+        if (moveNodeSafely("task", id, { intoCat: fid })){
+          if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+          renderSettingsCategoriesPane();
+          if (typeof renderSettings === "function") renderSettings();
+        }
+        return;
+      }
+      // Dropping a task ON a folder header = also file into that folder
+      if (onSum){
+        const holder = onSum.closest("details.cat");
+        const fid = holder?.getAttribute("data-cat-id");
+        if (fid && moveNodeSafely("task", id, { intoCat: fid })){
+          if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+          renderSettingsCategoriesPane();
+          if (typeof renderSettings === "function") renderSettings();
+        }
+        return;
+      }
+      return;
+    }
 
-    if (dzRoot){
-      // Move to ROOT (top)
-      if (moveNodeSafely("category", id, { intoCat: null })){
-        if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-        renderSettingsCategoriesPane();
+    // ---- Move CATEGORY (existing behavior) ----
+    if (kind === "category" && id){
+      if (dzRoot){
+        if (moveNodeSafely("category", id, { intoCat: null })){
+          if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+          renderSettingsCategoriesPane();
+        }
+        return;
       }
-      return;
-    }
-    if (dzInto){
-      // Move INTO this category (top of it)
-      const fid = dzInto.getAttribute("data-drop-into");
-      if (moveNodeSafely("category", id, { intoCat: fid })){
-        if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-        renderSettingsCategoriesPane();
+      if (dzInto){
+        const fid = dzInto.getAttribute("data-drop-into");
+        if (moveNodeSafely("category", id, { intoCat: fid })){
+          if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+          renderSettingsCategoriesPane();
+        }
+        return;
       }
-      return;
-    }
-    if (onSum){
-      // Reorder BEFORE this category (same parent)
-      const holder = onSum.closest("details.cat");
-      const beforeId = holder?.getAttribute("data-cat-id");
-      if (beforeId && moveNodeSafely("category", id, { beforeCat:{ id: beforeId } })){
-        if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-        renderSettingsCategoriesPane();
+      if (onSum){
+        const holder = onSum.closest("details.cat");
+        const beforeId = holder?.getAttribute("data-cat-id");
+        if (beforeId && moveNodeSafely("category", id, { beforeCat:{ id: beforeId } })){
+          if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+          renderSettingsCategoriesPane();
+        }
       }
     }
   });
-     // Render the Explorer-style folder pane on top
-  renderSettingsCategoriesPane();
 }
-
 
 function renderJobs(){
   const content = document.getElementById("content"); 
