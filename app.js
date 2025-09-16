@@ -1294,9 +1294,86 @@ function openSettingsAndReveal(taskId){
   }, 60);
 }
 
+// --- SAFETY: repair tasks/folders graph so Settings never crashes ---
+function repairMaintenanceGraph(){
+  try{
+    // Ensure arrays exist
+    if (!Array.isArray(window.settingsFolders)) window.settingsFolders = [];
+    if (!Array.isArray(window.tasksInterval))   window.tasksInterval   = [];
+    if (!Array.isArray(window.tasksAsReq))      window.tasksAsReq      = [];
+
+    // Build task map across both lists
+    const allTasks = [];
+    for (const t of window.tasksInterval){ if (t && t.id!=null){ t.__type="interval"; allTasks.push(t); } }
+    for (const t of window.tasksAsReq){    if (t && t.id!=null){ t.__type="asreq";    allTasks.push(t); } }
+    const tMap = Object.create(null);
+    for (const t of allTasks) tMap[String(t.id)] = t;
+
+    // Folder map
+    const fMap = Object.create(null);
+    for (const f of window.settingsFolders){ if (f && f.id!=null) fMap[String(f.id)] = f; }
+
+    // --- Fix bad folder parents & cycles ---
+    for (const f of window.settingsFolders){
+      if (f.parent == null) continue;
+      if (!fMap[String(f.parent)] || String(f.parent) === String(f.id)){
+        f.parent = null; // orphan or self-parent → root
+        continue;
+      }
+      // break cycles: walk up until root; if we re-meet self, detach
+      const seen = new Set([String(f.id)]);
+      let cur = f;
+      let p = fMap[String(cur.parent)];
+      while (p){
+        const pid = String(p.id);
+        if (seen.has(pid)){ f.parent = null; break; }
+        seen.add(pid);
+        if (p.parent == null) break;
+        p = fMap[String(p.parent)] || null;
+      }
+    }
+
+    // --- Fix bad task parentTask and cat (folder) pointers + cycles ---
+    for (const t of allTasks){
+      // self-parent or missing parent → detach
+      if (t.parentTask != null){
+        const pid = String(t.parentTask);
+        if (pid === String(t.id) || !tMap[pid]) t.parentTask = null;
+      }
+      // folder ref to nowhere → clear
+      if (t.cat != null && !fMap[String(t.cat)]) t.cat = null;
+
+      // break cycles: follow parentTask chain and cut if we loop
+      if (t.parentTask != null){
+        const seen = new Set([String(t.id)]);
+        let p = tMap[String(t.parentTask)];
+        let safe = true;
+        let hops = 0;
+        while (p && hops++ < 1000){
+          const pid = String(p.id);
+          if (seen.has(pid)){ safe = false; break; }
+          seen.add(pid);
+          if (p.parentTask == null) break;
+          p = tMap[String(p.parentTask)] || null;
+        }
+        if (!safe) t.parentTask = null;
+      }
+
+      // numeric 'order' normalization (optional but stabilizes rendering)
+      if (!isFinite(t.order)) t.order = 0;
+    }
+    for (const f of window.settingsFolders){
+      if (!isFinite(f.order)) f.order = 0;
+    }
+  }catch(err){
+    console.warn("repairMaintenanceGraph failed:", err);
+  }
+}
+
 function renderSettings(){
   const content = document.getElementById("content");
   if (!content) return;
+repairMaintenanceGraph();
 
   /* -------------------- Styles (scoped) -------------------- */
   if (!document.getElementById("maintExplorerCSS")){
