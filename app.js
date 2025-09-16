@@ -1410,10 +1410,9 @@ function renderSettings(){
     if (typeof saveTasks === "function") { try { saveTasks(); } catch(_){} }
   }
 
-  // Small safe formatter
   const fmtPrice = v => (v==null || v==="") ? "" : String(v);
 
-  // Minimal styles scoped to Settings
+  // Minimal styles scoped to Settings (kept stable)
   if (!document.getElementById("settingsBasicCSS")){
     const st = document.createElement("style");
     st.id = "settingsBasicCSS";
@@ -1426,7 +1425,7 @@ function renderSettings(){
       #maintSettings .grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
       #maintSettings label{font-size:.85rem;display:block}
       #maintSettings input{width:100%;padding:.4rem .5rem}
-      #maintSettings .actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.5rem}
+      #maintSettings .actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.5rem;flex-wrap:wrap}
       #maintSettings .empty{padding:.8rem;color:#666}
       #maintSettings .forms{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin:.5rem 0 1rem}
       #maintSettings .forms .mini-form{border:1px solid #e5e5e5;border-radius:8px;padding:.5rem .6rem;background:#fff}
@@ -1435,7 +1434,7 @@ function renderSettings(){
     document.head.appendChild(st);
   }
 
-  // Simple row renderers (inline; no external deps)
+  // Row renderers with move controls
   function taskDetailsInterval(task){
     return `
       <details class="task" data-task-id="${task.id}">
@@ -1465,6 +1464,10 @@ function renderSettings(){
             </label>
           </div>
           <div class="actions">
+            <button data-move-top="${task.id}" data-from="interval">Move to Top</button>
+            <button data-move-up="${task.id}"  data-from="interval">Move Up</button>
+            <button data-move-down="${task.id}" data-from="interval">Move Down</button>
+            <span style="flex:1"></span>
             <button class="btn-complete" data-complete="${task.id}">Mark Completed Now</button>
             <button class="danger" data-remove="${task.id}" data-from="interval">Remove</button>
           </div>
@@ -1497,13 +1500,17 @@ function renderSettings(){
             </label>
           </div>
           <div class="actions">
+            <button data-move-top="${task.id}" data-from="asreq">Move to Top</button>
+            <button data-move-up="${task.id}"  data-from="asreq">Move Up</button>
+            <button data-move-down="${task.id}" data-from="asreq">Move Down</button>
+            <span style="flex:1"></span>
             <button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button>
           </div>
         </div>
       </details>`;
   }
 
-  // Page view (kept close to your proven v6 structure)
+  // Page view (same structure as your v6)
   const html = `
     <div id="maintSettings" class="container">
       <div class="block" style="grid-column:1 / -1">
@@ -1518,7 +1525,7 @@ function renderSettings(){
             <button type="submit">Add</button>
           </form>
 
-          <form id="addAsReqForm" class="mini-form">
+        <form id="addAsReqForm" class="mini-form">
             <strong>Add As-Required Task</strong>
             <input type="text" id="ar_name" placeholder="Name" required>
             <input type="text" id="ar_condition" placeholder="Condition (e.g., When damaged)">
@@ -1544,7 +1551,7 @@ function renderSettings(){
   `;
   root.innerHTML = html;
 
-  // ------- Bind inputs (delegated) -------
+  // ------- Inline edit (delegated) -------
   root.querySelectorAll("[data-id]").forEach(inp => {
     inp.addEventListener("input", () => {
       const id   = inp.getAttribute("data-id");
@@ -1571,7 +1578,7 @@ function renderSettings(){
       if (from === "interval") tasksInterval = tasksInterval.filter(t => String(t.id)!==String(id));
       else tasksAsReq = tasksAsReq.filter(t => String(t.id)!==String(id));
       persist();
-      renderSettings(); // refresh list
+      renderSettings();
     });
   });
 
@@ -1580,7 +1587,6 @@ function renderSettings(){
       if (typeof completeTask === "function"){
         completeTask(btn.getAttribute("data-complete"));
       } else {
-        // Local fallback: anchor to currentTotal if available
         const id = btn.getAttribute("data-complete");
         const t = tasksInterval.find(x => String(x.id)===String(id));
         if (t){
@@ -1594,18 +1600,44 @@ function renderSettings(){
     });
   });
 
-  // ------- Add forms (match v6 behavior exactly) -------
-  const addInt = document.getElementById("addIntervalForm");
-  const addReq = document.getElementById("addAsReqForm");
+  // ------- Move Up / Down / Top -------
+  function moveIn(arr, id, dir){
+    const i = arr.findIndex(x => String(x.id) === String(id));
+    if (i < 0) return;
+    if (dir === "top"){
+      const [sp] = arr.splice(i,1);
+      arr.unshift(sp);
+      return;
+    }
+    const j = dir === "up" ? i - 1 : i + 1;
+    if (j < 0 || j >= arr.length) return;
+    const [sp] = arr.splice(i,1);
+    arr.splice(j,0,sp);
+  }
 
-  addInt?.addEventListener("submit",(e)=>{
+  root.addEventListener("click",(e)=>{
+    const up  = e.target.closest("[data-move-up]");
+    const dn  = e.target.closest("[data-move-down]");
+    const top = e.target.closest("[data-move-top]");
+    if (!up && !dn && !top) return;
+
+    const id   = (up||dn||top).getAttribute(up? "data-move-up" : dn? "data-move-down" : "data-move-top");
+    const from = (up||dn||top).getAttribute("data-from"); // "interval" | "asreq"
+    const arr  = from === "interval" ? tasksInterval : tasksAsReq;
+
+    moveIn(arr, id, top ? "top" : (up ? "up" : "down"));
+    persist();
+    renderSettings();
+  });
+
+  // ------- Add forms (put new tasks at TOP) -------
+  document.getElementById("addIntervalForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = document.getElementById("ai_name").value.trim();
     const interval = Number(document.getElementById("ai_interval").value);
     if (!name || !isFinite(interval) || interval <= 0) return;
     const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
-    tasksInterval.push({ id, name, interval, sinceBase:null, anchorTotal:null, cost:"", link:"" });
-    // Optional inventory seed if your build expects it:
+    tasksInterval.unshift({ id, name, interval, sinceBase:null, anchorTotal:null, cost:"", link:"" }); // TOP
     if (typeof inventory !== "undefined" && Array.isArray(inventory)){
       inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
       if (typeof saveInventory === "function") saveInventory();
@@ -1614,13 +1646,13 @@ function renderSettings(){
     renderSettings();
   });
 
-  addReq?.addEventListener("submit",(e)=>{
+  document.getElementById("addAsReqForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = document.getElementById("ar_name").value.trim();
     const condition = (document.getElementById("ar_condition").value || "").trim() || "As required";
     if (!name) return;
     const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
-    tasksAsReq.push({ id, name, condition, cost:"", link:"" });
+    tasksAsReq.unshift({ id, name, condition, cost:"", link:"" }); // TOP
     if (typeof inventory !== "undefined" && Array.isArray(inventory)){
       inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
       if (typeof saveInventory === "function") saveInventory();
@@ -1629,15 +1661,12 @@ function renderSettings(){
     renderSettings();
   });
 
-  // ------- Save All (explicit button, like v6) -------
-  const saveBtn = document.getElementById("saveTasksBtn");
-  saveBtn?.addEventListener("click", ()=>{
+  // ------- Save All -------
+  document.getElementById("saveTasksBtn")?.addEventListener("click", ()=>{
     persist();
-    // If you have a global route() that refreshes other pages, call it:
     if (typeof route === "function") route();
   });
 }
-
 
 function renderJobs(){
   const content = document.getElementById("content"); 
