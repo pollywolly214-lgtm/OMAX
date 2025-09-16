@@ -1828,282 +1828,335 @@ function moveNodeSafely(kind, nodeId, target){
 }
 
 function renderSettings(){
+  // === Explorer-style Maintenance Settings ===
   const root = document.getElementById("content");
   if (!root) return;
 
-  // ---------- defensive state ----------
-  window.tasksInterval = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
-  window.tasksAsReq    = Array.isArray(window.tasksAsReq)    ? window.tasksAsReq    : [];
+  // --- Ensure state is present ---
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  window.tasksInterval   = Array.isArray(window.tasksInterval)   ? window.tasksInterval   : [];
+  window.tasksAsReq      = Array.isArray(window.tasksAsReq)      ? window.tasksAsReq      : [];
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
-  // persist helper (local + cloud-safe)
-  function persist(){
-    try { if (typeof saveTasks === "function") saveTasks(); } catch(_) {}
-    try { if (typeof saveCloudDebounced === "function") saveCloudDebounced(); } catch(_) {}
+  // --- Small, compact scoped styles (once) ---
+  if (!document.getElementById("settingsExplorerCSS")){
+    const st = document.createElement("style");
+    st.id = "settingsExplorerCSS";
+    st.textContent = `
+      #explorer .toolbar{display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap}
+      #explorer .toolbar button{padding:.35rem .55rem;font-size:.92rem}
+      #explorer .hint{font-size:.8rem;color:#666}
+      #explorer .tree{border:1px solid #e5e5e5;background:#fff;border-radius:10px;padding:6px}
+      #explorer details{margin:4px 0;border:1px solid #eee;border-radius:8px;background:#fafafa}
+      #explorer details>summary{display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:grab;user-select:none}
+      #explorer details.task>summary{cursor:grab; font-weight:600; background:#fff}
+      #explorer details.cat>summary{font-weight:800}
+      #explorer .children{padding:4px 8px 8px 18px}
+      #explorer .dz{height:8px;margin:4px 0;border-radius:6px}
+      #explorer .dz.dragover{height:18px;background:rgba(0,0,0,.05);outline:2px dashed #888}
+      #explorer .drop-hint{outline:2px solid #6aa84f;border-radius:6px}
+      #explorer .body{padding:6px 8px;border-top:1px dashed #e5e5e5;background:#fff}
+      #explorer .grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+      #explorer label{font-size:.85rem;display:block}
+      #explorer input{width:100%;padding:.35rem .45rem}
+      #explorer .chip{font-size:.72rem;border:1px solid #bbb;border-radius:999px;padding:.05rem .45rem}
+      #explorer .row-actions{display:flex;gap:.4rem;justify-content:flex-end;margin-top:.4rem;flex-wrap:wrap}
+      #explorer .empty{padding:.5rem;color:#666}
+    `;
+    document.head.appendChild(st);
   }
 
-  // ---------- render the full Settings UI ----------
-  // Uses your existing viewSettings() which builds menus + folders
-  root.innerHTML = viewSettings();
+  // --- Helpers ---
+  const fmtPrice = v => (v==null || v==="") ? "" : String(v);
+  const byIdFolder = (id)=> window.settingsFolders.find(f => String(f.id)===String(id)) || null;
+  const childrenFolders = (parent)=> window.settingsFolders
+      .filter(f => String(f.parent||"") === String(parent||""))
+      .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
+  const topTasksInCat = (catId)=> {
+    const bucket = []
+      .concat(window.tasksInterval.map(x=>({t:x,type:"interval"})))
+      .concat(window.tasksAsReq.map(x=>({t:x,type:"asreq"})));
+    return bucket
+      .filter(x => (x.t.parentTask == null) && String(x.t.cat||"") === String(catId||""))
+      .sort((a,b)=> (Number(b.t.order||0) - Number(a.t.order||0)) || String(a.t.name||"").localeCompare(String(b.t.name||"")));
+  };
 
-  // ---------- inline edit bindings ----------
-  root.querySelectorAll("[data-id]").forEach(inp => {
-    inp.addEventListener("input", () => {
-      const id   = inp.getAttribute("data-id");
-      const key  = inp.getAttribute("data-k");
-      const list = inp.getAttribute("data-list");           // "interval" | "asreq"
-      const arr  = list === "interval" ? tasksInterval : tasksAsReq;
-      const t = arr.find(x => String(x.id) === String(id));
+  function ensureIdsOrder(obj){
+    if (!obj.id){
+      obj.id = (obj.name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_")+"_"+Date.now().toString(36);
+    }
+    if (obj.order == null) obj.order = ++window._maintOrderCounter;
+  }
+
+  // --- Row renderers ---
+  function taskRow({t,type}){
+    const badge = (type==="interval" ? (t.interval!=null?`<span class="chip">Interval: ${t.interval}h</span>`:`<span class="chip">Interval</span>`)
+                                     : `<span class="chip">As Required</span>`);
+    return `
+      <details class="task" data-task-id="${t.id}" data-owner="${type}">
+        <summary draggable="true">${t.name||"(unnamed)"} ${badge}</summary>
+        <div class="body">
+          <div class="grid">
+            <label>Name<input data-k="name" data-id="${t.id}" data-list="${type}" value="${t.name||""}"></label>
+            ${
+              type==="interval" 
+                ? `<label>Interval (hrs)<input type="number" min="1" step="1" data-k="interval" data-id="${t.id}" data-list="interval" value="${t.interval||""}"></label>`
+                : `<label>Condition/Notes<input data-k="condition" data-id="${t.id}" data-list="asreq" value="${t.condition||""}" placeholder="optional"></label>`
+            }
+            <label>Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${t.pn||""}"></label>
+            <label>Price<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${fmtPrice(t.price)}" placeholder="optional"></label>
+            <label>Store / Manual (URL)<input type="url" data-k="link" data-id="${t.id}" data-list="${type}" value="${t.link||t.storeLink||t.manualLink||""}" placeholder="https://…"></label>
+          </div>
+          <div class="row-actions">
+            ${type==="interval" ? `<button class="btn-complete" data-complete="${t.id}">Mark Completed</button>` : ``}
+            <button class="danger" data-remove="${t.id}" data-from="${type}">Remove</button>
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
+  function folderHTML(f){
+    ensureIdsOrder(f);
+    const kids = childrenFolders(f.id).map(folderHTML).join("");
+    const tasks = topTasksInCat(f.id).map(taskRow).join("");
+    return `
+      <details class="cat" data-cat-id="${f.id}" open>
+        <summary draggable="true">📁 ${f.name}</summary>
+        <div class="dz" data-drop-into-cat="${f.id}"></div>
+        <div class="children">
+          ${kids}
+          ${tasks || ""}
+        </div>
+      </details>
+    `;
+  }
+
+  const roots = childrenFolders(null);
+  const rootTasks = topTasksInCat(null).map(taskRow).join("");
+
+  // --- Page ---
+  root.innerHTML = `
+    <div id="explorer" class="container">
+      <div class="block" style="grid-column:1 / -1">
+        <h3>Maintenance Settings</h3>
+        <div class="toolbar">
+          <button id="btnAddCategory">+ Add Category</button>
+          <button id="btnAddTask">+ Add Task</button>
+          <span class="hint">Drag folders & tasks to organize. New items appear at the top.</span>
+        </div>
+        <div class="tree" id="tree">
+          <div class="dz" data-drop-root="1"></div>
+          ${roots.length ? roots.map(folderHTML).join("") : ""}
+          ${rootTasks || (roots.length ? "" : `<div class="empty">No tasks yet.</div>`)}
+        </div>
+      </div>
+    </div>
+  `;
+
+  // --- Wiring: add buttons ---
+  document.getElementById("btnAddCategory")?.addEventListener("click", ()=>{
+    const name = prompt("Category name?");
+    if (!name) return;
+    const cat = { id: name.toLowerCase().replace(/[^a-z0-9]+/g,"_")+"_"+Math.random().toString(36).slice(2,7), name, parent:null, order: ++window._maintOrderCounter };
+    window.settingsFolders.push(cat);
+    if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+    renderSettings();
+  });
+
+  document.getElementById("btnAddTask")?.addEventListener("click", ()=>{
+    const name = prompt("Task name?");
+    if (!name) return;
+    const occ = (prompt('Occurrence: type "interval" for Hourly Interval, or "asreq" for As Required').trim().toLowerCase());
+    const id  = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
+    if (occ === "interval"){
+      const interval = Number(prompt("Interval (hours):") || "");
+      const t = { id, name, interval: isFinite(interval)&&interval>0 ? interval : 8, sinceBase:null, anchorTotal:null, link:"", pn:"", price:null, cat:null, order: ++window._maintOrderCounter };
+      window.tasksInterval.unshift(t);
+    }else{
+      const t = { id, name, condition:"As required", link:"", pn:"", price:null, cat:null, order: ++window._maintOrderCounter };
+      window.tasksAsReq.unshift(t);
+    }
+    if (typeof saveTasks === "function") try{ saveTasks(); }catch(_){}
+    if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+    renderSettings();
+  });
+
+  // --- Inline edits ---
+  root.querySelectorAll("[data-id]").forEach(inp=>{
+    inp.addEventListener("input", ()=>{
+      const id = inp.getAttribute("data-id");
+      const k  = inp.getAttribute("data-k");
+      const list = inp.getAttribute("data-list");
+      const arr = list === "interval" ? window.tasksInterval : window.tasksAsReq;
+      const t = arr.find(x => String(x.id)===String(id));
       if (!t) return;
-
-      let val = inp.value;
-      if (["interval","sinceBase","price"].includes(key)){
-        val = (val === "" ? null : Number(val));
-        if (key === "interval" && val != null && val < 1) val = 1;
+      let v = inp.value;
+      if (["interval","price"].includes(k)){
+        v = (v === "" ? null : Number(v));
       }
-      t[key] = val;
-      persist();
+      t[k] = v;
+      if (typeof saveTasks === "function") try{ saveTasks(); }catch(_){}
+      if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
     });
   });
 
-  // ---------- remove + complete ----------
-  root.querySelectorAll("[data-remove]").forEach(btn => {
-    btn.addEventListener("click", () => {
+  // Remove + Complete
+  root.querySelectorAll("[data-remove]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
       const id = btn.getAttribute("data-remove");
-      const from = btn.getAttribute("data-from"); // "interval" | "asreq"
-      if (from === "interval") {
-        tasksInterval = tasksInterval.filter(t => String(t.id)!==String(id));
-      } else {
-        tasksAsReq = tasksAsReq.filter(t => String(t.id)!==String(id));
+      const from = btn.getAttribute("data-from");
+      if (from==="interval"){
+        window.tasksInterval = window.tasksInterval.filter(t=>String(t.id)!==String(id));
+      }else{
+        window.tasksAsReq = window.tasksAsReq.filter(t=>String(t.id)!==String(id));
       }
-      persist();
+      if (typeof saveTasks === "function") try{ saveTasks(); }catch(_){}
+      if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
       renderSettings();
     });
   });
-
-  root.querySelectorAll(".btn-complete").forEach(btn => {
-    btn.addEventListener("click", () => {
+  root.querySelectorAll(".btn-complete").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
       const id = btn.getAttribute("data-complete");
-      const t = tasksInterval.find(x => String(x.id)===String(id));
+      const t = window.tasksInterval.find(x=>String(x.id)===String(id));
       if (!t) return;
       const cur = (typeof currentTotal === "function") ? currentTotal() : null;
       t.anchorTotal = cur!=null ? cur : 0;
       t.sinceBase = 0;
-      persist();
+      if (typeof saveTasks === "function") try{ saveTasks(); }catch(_){}
+      if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
       renderSettings();
     });
   });
 
-  // ---------- add forms (new items at TOP) ----------
-  document.getElementById("addIntervalForm")?.addEventListener("submit",(e)=>{
+  // --- Drag & Drop (tasks + folders) ---
+  const tree = document.getElementById("tree");
+  const DRAG = { kind:null, id:null, type:null }; // type = interval|asreq for tasks
+
+  tree.addEventListener("dragstart",(e)=>{
+    const sum = e.target.closest("summary");
+    if (!sum) return;
+    const cardTask = sum.closest("details.task");
+    const cardCat  = sum.closest("details.cat");
+    if (cardTask){
+      DRAG.kind = "task";
+      DRAG.id   = cardTask.getAttribute("data-task-id");
+      DRAG.type = cardTask.getAttribute("data-owner");
+      e.dataTransfer.setData("text/plain", `task:${DRAG.id}:${DRAG.type}`);
+      e.dataTransfer.effectAllowed = "move";
+      sum.classList.add("drop-hint");
+    }else if (cardCat){
+      DRAG.kind = "category";
+      DRAG.id   = cardCat.getAttribute("data-cat-id");
+      e.dataTransfer.setData("text/plain", `category:${DRAG.id}`);
+      e.dataTransfer.effectAllowed = "move";
+      sum.classList.add("drop-hint");
+    }
+  });
+  tree.addEventListener("dragend", ()=>{
+    tree.querySelectorAll(".drop-hint").forEach(x=>x.classList.remove("drop-hint"));
+    tree.querySelectorAll(".dz.dragover").forEach(x=>x.classList.remove("dragover"));
+    DRAG.kind = DRAG.id = DRAG.type = null;
+  });
+
+  function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
+  tree.addEventListener("dragover",(e)=>{
+    const dz  = e.target.closest(".dz");
+    const sum = e.target.closest("summary");
+    if (dz){ allow(e); dz.classList.add("dragover"); }
+    if (sum){ allow(e); sum.classList.add("drop-hint"); }
+  });
+  tree.addEventListener("dragleave",(e)=>{
+    const dz  = e.target.closest(".dz"); dz?.classList.remove("dragover");
+    const sum = e.target.closest("summary"); sum?.classList.remove("drop-hint");
+  });
+
+  tree.addEventListener("drop",(e)=>{
+    const raw = e.dataTransfer.getData("text/plain") || "";
+    const parts = raw.split(":");
+    const kind  = parts[0];
+    const id    = parts[1] || null;
+    const type  = parts[2] || null;
+
+    const dzRoot = e.target.closest("[data-drop-root]");
+    const dzInto = e.target.closest("[data-drop-into-cat]");
+    const onSum  = e.target.closest("summary");
+
     e.preventDefault();
-    const name = document.getElementById("ai_name").value.trim();
-    const interval = Number(document.getElementById("ai_interval").value);
-    if (!name || !isFinite(interval) || interval <= 0) return;
-    const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
-    tasksInterval.unshift({
-      id, name, interval,
-      sinceBase:null, anchorTotal:null,
-      manualLink:"", storeLink:"", pn:"", price:null,
-      // for folder/ordering
-      cat:null, order:(++window._maintOrderCounter)
-    });
-    persist();
-    renderSettings();
-  });
 
-  document.getElementById("addAsReqForm")?.addEventListener("submit",(e)=>{
-    e.preventDefault();
-    const name = document.getElementById("ar_name").value.trim();
-    const condition = (document.getElementById("ar_condition").value || "").trim() || "As required";
-    if (!name) return;
-    const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
-    tasksAsReq.unshift({
-      id, name, condition,
-      manualLink:"", storeLink:"", pn:"", price:null,
-      cat:null, order:(++window._maintOrderCounter)
-    });
-    persist();
-    renderSettings();
-  });
-
-  document.getElementById("saveTasksBtn")?.addEventListener("click", ()=>{
-    persist();
-    if (typeof route === "function") route();
-  });
-
-  // ---------- categories pane wiring (folders & type-swaps) ----------
-  // This uses your existing implementation that handles:
-  // - + Add Category, sub-folder ops, rename/remove
-  // - dropping tasks into folders
-  // - dropping on menu headers to convert interval <-> asreq
-  if (typeof renderSettingsCategoriesPane === "function"){
-    renderSettingsCategoriesPane();
-  }
-
-  // ---------- TASK drag & drop (order and placement) ----------
-  // We add: payload on dragstart and dropzones for "before" + "end" in each scope.
-  (function attachTaskDnD(){
-    const page = root;
-
-    // 1) Ensure each task card sets a proper drag payload
-    page.querySelectorAll('details.block[draggable="true"][data-task-id]').forEach(card=>{
-      if (card.dataset.dndWired) return;
-      card.dataset.dndWired = "1";
-
-      card.addEventListener("dragstart",(e)=>{
-        const id   = card.getAttribute("data-task-id");
-        const type = card.getAttribute("data-list"); // "interval"|"asreq"
-        if (!id || !type) return;
-        e.dataTransfer.setData("text/plain", `task:${id}:${type}`);
-        e.dataTransfer.effectAllowed = "move";
-        card.classList.add("dragging");
-      });
-      card.addEventListener("dragend",()=> card.classList.remove("dragging"));
-    });
-
-    // 2) Insert dropzones BEFORE each task to support reordering
-    function addBeforeDropzones(scopeEl){
-      const scopeType = scopeEl.getAttribute("data-dnd-scope"); // "interval" | "asreq"
-      if (!scopeType) return;
-
-      // drop BEFORE every task in this scope
-      scopeEl.querySelectorAll('details.block[data-task-id]').forEach(card=>{
-        const id = card.getAttribute("data-task-id");
-        if (!id) return;
-        // avoid duplicates
-        if (card.previousElementSibling && card.previousElementSibling.classList?.contains("dz")) return;
-
-        const dz = document.createElement("div");
-        dz.className = "dz";
-        dz.setAttribute("data-drop-before", id);
-        dz.setAttribute("data-scope", scopeType);
-        dz.style.height = "8px";
-        dz.style.margin = "4px 0";
-        dz.style.borderRadius = "6px";
-
-        dz.addEventListener("dragover",(e)=>{
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-          dz.style.outline = "2px dashed #888";
-          dz.style.background = "rgba(0,0,0,.05)";
-          dz.style.height = "18px";
-        });
-        dz.addEventListener("dragleave",()=>{
-          dz.style.outline = "";
-          dz.style.background = "";
-          dz.style.height = "8px";
-        });
-        dz.addEventListener("drop",(e)=>{
-          e.preventDefault();
-          dz.style.outline = "";
-          dz.style.background = "";
-          dz.style.height = "8px";
-
-          const raw = e.dataTransfer.getData("text/plain") || "";
-          const parts = raw.split(":"); // "task:<id>:<type>"
-          if (parts[0] !== "task") return;
-          const draggedId   = parts[1];
-          const draggedType = parts[2] || null;
-
-          const beforeId = dz.getAttribute("data-drop-before");
-          const scope    = dz.getAttribute("data-scope"); // where we’re dropping
-
-          // Prefer the safe mover if present
-          if (typeof moveNodeSafely === "function"){
-            const ok = moveNodeSafely("task", draggedId, { beforeTask:{ id: beforeId, type: scope } });
-            if (ok){ persist(); renderSettings(); }
-            return;
-          }
-
-          // Fallback (top-level only)
-          const listFrom = (draggedType==="interval" ? tasksInterval : tasksAsReq);
-          const listTo   = (scope==="interval" ? tasksInterval : tasksAsReq);
-
-          const i = listFrom.findIndex(t => String(t.id)===String(draggedId));
-          const j = listTo.findIndex(t => String(t.id)===String(beforeId));
-          if (i<0 || j<0) return;
-
-          const [sp] = listFrom.splice(i,1);
-          listTo.splice(j,0,sp);
-          persist(); renderSettings();
-        });
-
-        card.parentNode.insertBefore(dz, card);
-      });
-
-      // bottom "end" dropzone in this scope
-      if (!scopeEl.querySelector('.dz[data-drop-end="1"]')){
-        const endDz = document.createElement("div");
-        endDz.className = "dz";
-        endDz.setAttribute("data-drop-end","1");
-        endDz.setAttribute("data-scope", scopeType);
-        endDz.style.height = "10px";
-        endDz.style.margin = "6px 0 2px 0";
-        endDz.style.borderRadius = "6px";
-
-        endDz.addEventListener("dragover",(e)=>{
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-          endDz.style.outline = "2px dashed #888";
-          endDz.style.background = "rgba(0,0,0,.05)";
-          endDz.style.height = "18px";
-        });
-        endDz.addEventListener("dragleave",()=>{
-          endDz.style.outline = "";
-          endDz.style.background = "";
-          endDz.style.height = "10px";
-        });
-        endDz.addEventListener("drop",(e)=>{
-          e.preventDefault();
-          endDz.style.outline = "";
-          endDz.style.background = "";
-          endDz.style.height = "10px";
-
-          const raw = e.dataTransfer.getData("text/plain") || "";
-          const parts = raw.split(":"); // "task:<id>:<type>"
-          if (parts[0] !== "task") return;
-          const draggedId   = parts[1];
-          const draggedType = parts[2] || null;
-
-          // If safe mover exists, interpret "end drop" as "move into this menu/folder (top of container)"
-          if (typeof moveNodeSafely === "function"){
-            // Figure out if this scopeEl is inside a folder body (has data-folder-body)
-            const folderBody = endDz.closest("[data-folder-body]");
-            if (folderBody){
-              const fid = folderBody.getAttribute("data-folder-body") || null; // move into that category
-              const ok = moveNodeSafely("task", draggedId, { intoCat: fid });
-              if (ok){ persist(); renderSettings(); }
-              return;
-            }
-            // Else it's the root for that menu (interval/asreq) — move to that list (top/root)
-            const ok = moveNodeSafely("task", draggedId, { intoCat: null });
-            if (ok){ persist(); renderSettings(); }
-            return;
-          }
-
-          // Fallback (append to end of the scope list, top-level)
-          const listFrom = (draggedType==="interval" ? tasksInterval : tasksAsReq);
-          const listTo   = (endDz.getAttribute("data-scope")==="interval" ? tasksInterval : tasksAsReq);
-          const i = listFrom.findIndex(t => String(t.id)===String(draggedId));
-          if (i<0) return;
-          const [sp] = listFrom.splice(i,1);
-          listTo.push(sp);
-          persist(); renderSettings();
-        });
-
-        scopeEl.appendChild(endDz);
+    // TASK moves
+    if (kind==="task" && id){
+      if (dzRoot){
+        if (typeof moveNodeSafely === "function" ? moveNodeSafely("task", id, { intoCat: null }) : (()=>{
+          // Fallback simple move: remove from both lists, push to top with cat=null
+          let ref = (type==="interval" ? window.tasksInterval : window.tasksAsReq).find(x=>String(x.id)===String(id));
+          if (!ref) return false;
+          // Remove from possible .sub locations is handled by moveNodeSafely only.
+          ref.cat = null; ref.parentTask = null; ref.order = ++window._maintOrderCounter;
+          return true;
+        })()){
+          if (typeof saveTasks === "function") try{ saveTasks(); }catch(_){}
+          if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+          renderSettings();
+        }
+        return;
+      }
+      if (dzInto){
+        const catId = dzInto.getAttribute("data-drop-into-cat");
+        if (typeof moveNodeSafely === "function" ? moveNodeSafely("task", id, { intoCat: catId }) : (()=>{
+          let ref = (type==="interval" ? window.tasksInterval : window.tasksAsReq).find(x=>String(x.id)===String(id));
+          if (!ref) return false;
+          ref.cat = catId; ref.parentTask = null; ref.order = ++window._maintOrderCounter;
+          return true;
+        })()){
+          if (typeof saveTasks === "function") try{ saveTasks(); }catch(_){}
+          if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+          renderSettings();
+        }
+        return;
+      }
+      if (onSum){
+        // Reorder before another task in the same container
+        const t2 = onSum.closest("details.task");
+        const beforeId = t2?.getAttribute("data-task-id");
+        if (beforeId && typeof moveNodeSafely === "function" && moveNodeSafely("task", id, { beforeTask: { id: beforeId } })){
+          if (typeof saveTasks === "function") try{ saveTasks(); }catch(_){}
+          if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+          renderSettings();
+        }
+        return;
       }
     }
 
-    // Apply to every drag scope on the page (root & inside folders)
-    page.querySelectorAll("[data-dnd-scope]").forEach(addBeforeDropzones);
-
-    // NOTE: Dropping tasks ON folder/menu headers is handled by renderSettingsCategoriesPane()
-    // To keep this step small & stable, we do NOT wire "drop-into-task" yet.
-    // (We’ll add visible sub-component rendering + into-task drop in the next step so items don’t appear to “vanish”.)
-  })();
+    // CATEGORY moves
+    if (kind==="category" && id){
+      if (dzRoot){
+        if (typeof moveNodeSafely === "function" && moveNodeSafely("category", id, { intoCat: null })){
+          if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+          renderSettings();
+        }
+        return;
+      }
+      if (dzInto){
+        const parent = dzInto.getAttribute("data-drop-into-cat");
+        if (typeof moveNodeSafely === "function" && moveNodeSafely("category", id, { intoCat: parent })){
+          if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+          renderSettings();
+        }
+        return;
+      }
+      if (onSum){
+        const holder = onSum.closest("details.cat");
+        const beforeId = holder?.getAttribute("data-cat-id");
+        if (beforeId && typeof moveNodeSafely === "function" && moveNodeSafely("category", id, { beforeCat: { id: beforeId } })){
+          if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+          renderSettings();
+        }
+        return;
+      }
+    }
+  });
 }
 
 
