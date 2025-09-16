@@ -1399,542 +1399,159 @@ function repairMaintenanceGraph(){
 function renderSettings(){
   const content = document.getElementById("content");
   if (!content) return;
-repairMaintenanceGraph();
 
-  /* -------------------- Styles (scoped) -------------------- */
-  if (!document.getElementById("maintExplorerCSS")){
-    const st = document.createElement("style");
-    st.id = "maintExplorerCSS";
-    st.textContent = `
-      #maintPane{ display:grid; grid-template-columns: minmax(340px, 520px) 1fr; gap:16px; align-items:start; }
-      #maintPane .left{ grid-column:1/2; }
-      #maintPane .right{ grid-column:2/3; }
-      #maintPane .toolbar{ display:flex; gap:8px; align-items:center; margin-bottom:12px; }
-      #maintPane .toolbar button{ padding:6px 10px; }
-      #maintPane h3{ margin:0 0 8px 0; }
-
-      /* Categories (folders): larger/bolder than tasks */
-      #maintPane details.folder > summary{
-        font-weight:800; font-size:1.05rem; letter-spacing:.2px; display:flex; align-items:center; gap:8px; cursor:pointer;
-      }
-      /* Tasks (one-line header only shows name) */
-      #maintPane details.task > summary{
-        display:flex; align-items:center; gap:8px; cursor:pointer;
-        font-weight:600; font-size:.92rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-      }
-      /* Compact cards */
-      #maintPane details.block{
-        border:1px solid #e5e5e5; border-radius:10px; background:#fff;
-        padding:6px 8px; margin:6px 0;
-      }
-      #maintPane .muted{ color:#666 } 
-      #maintPane .small{ font-size:.85rem }
-
-      /* Drag+drop affordances */
-      #maintPane details.dragging{ opacity:.6 }
-      #maintPane .dz{ height:8px; border-radius:6px; margin:6px 0; }
-      #maintPane .dz.dragover{ height:20px; background:rgba(0,0,0,.05); outline:2px dashed #888; }
-      #maintPane .sort-hint{ outline:2px solid #6aa84f; border-radius:6px; }
-
-      /* Forms inside detail bodies */
-      #maintPane .mini-form{ display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin:8px 0; }
-      #maintPane .mini-form label{ font-size:.85rem; }
-      #maintPane .mini-form input, #maintPane .mini-form select{ padding:4px 6px; font-size:.92rem; }
-      #maintPane .btns{ display:flex; gap:8px; align-items:center; }
-
-      /* Modal */
-      #taskModal, #catModal{
-        position:fixed; inset:0; display:none; place-items:center; background:rgba(0,0,0,.35); z-index:9999;
-      }
-      #taskModal .sheet, #catModal .sheet{
-        background:#fff; border-radius:12px; padding:14px; width:min(520px, 92vw); box-shadow:0 10px 40px rgba(0,0,0,.18);
-      }
-      #taskModal h4, #catModal h4{ margin:0 0 10px 0; }
-      #taskForm .row{ display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
-      #taskForm input, #taskForm select{ width:100%; padding:6px 8px; font-size:.95rem; }
-      #taskForm .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:10px; }
-      #catForm .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:10px; }
-      #maintPane a.link{ color:#0b5ed7; text-decoration:underline; }
-    `;
-    document.head.appendChild(st);
-  }
-
-  /* -------------------- State -------------------- */
-  // Categories (folders): can nest via parent
-  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
-  for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
-
-  // Tasks continue to live in the app's existing lists so calendar logic still works.
-  // We simply add organizational fields: cat (folder id) and parentTask (task id) + order.
+  // Build a live, unified list of tasks from persisted state
   const allTasks = [
-    ...(Array.isArray(tasksInterval) ? tasksInterval.map(t => ({...t, __type:"interval"})) : []),
-    ...(Array.isArray(tasksAsReq)    ? tasksAsReq.map(t => ({...t, __type:"asreq"}))       : []),
+    ...tasksInterval.map(t => ({...t, __type:"interval"})),
+    ...tasksAsReq.map(t   => ({...t, __type:"asreq"})),
   ];
 
-  // Order: higher = nearer top
-  function currentMaxOrder(){
-    const maxF = window.settingsFolders.reduce((m,f)=>Math.max(m, Number(f.order||0)), 0);
-    const maxT = allTasks.reduce((m,t)=>Math.max(m, Number(t.order||0)), 0);
-    return Math.max(maxF, maxT);
-  }
-  if (typeof window._maintOrderCounter === "undefined"){
-    window._maintOrderCounter = currentMaxOrder();
-  }else{
-    window._maintOrderCounter = Math.max(window._maintOrderCounter, currentMaxOrder());
-  }
-  function bumpTop(obj){ obj.order = ++window._maintOrderCounter; }
-
-  const byFolder = id => window.settingsFolders.find(f => String(f.id)===String(id));
-  const byLiveTask = id => {
-    const a = tasksInterval?.find(x=>String(x.id)===String(id));
-    if (a) return {ref:a, list:"interval"};
-    const b = tasksAsReq?.find(x=>String(x.id)===String(id));
-    if (b) return {ref:b, list:"asreq"};
-    return null;
-  };
-
-  // Containers:
-  // - Root: items with parentTask==null && cat==null; folders with parent==null
-  // - Folder X: items with parentTask==null && cat==X; folders with parent==X
-  // - Task T: items with parentTask==T (subcomponents)
-  const kidsFolders = parentId =>
-    window.settingsFolders
-      .filter(f => (f.parent||null)===(parentId||null))
-      .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
-
-  const tasksInFolder = folderId =>
-    allTasks
-      .filter(t => (t.parentTask==null) && ((t.cat||null)===(folderId||null)))
-      .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
-
-  const subTasksOf = taskId =>
-    allTasks
-      .filter(t => String(t.parentTask||"")===String(taskId))
-      .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
-
-  /* -------------------- View -------------------- */
-  content.innerHTML = `
-    <div id="maintPane">
-      <div class="left">
-        <h3>Maintenance Settings</h3>
-        <div class="toolbar">
-          <button id="btnAddCat">+ Add Category</button>
-          <button id="btnAddTask">+ Add Task</button>
-          <span class="small muted">Drag categories and tasks anywhere. Tasks can nest inside tasks (as subcomponents).</span>
+  // Simple list item line
+  function rowHTML(t){
+    const tag = (t.__type === "interval") ? "Hourly Interval" : "As Required";
+    return `
+      <div class="row" data-id="${t.id}">
+        <div class="left">
+          <strong>${t.name}</strong>
         </div>
-        <div id="rootContainer"></div>
+        <div class="right">
+          <span class="chip">${tag}</span>
+        </div>
       </div>
-      <div class="right"></div>
+    `;
+  }
+
+  // Page markup (kept small & reliable)
+  content.innerHTML = `
+    <div class="container">
+      <div class="block">
+        <div class="bar">
+          <button id="btnAddCategory">Add Category</button>
+          <button id="btnAddTask" class="primary">Add Task</button>
+        </div>
+
+        <div id="maintList" class="list">
+          ${allTasks.length ? allTasks.map(rowHTML).join("") : `
+            <div class="empty">No maintenance tasks yet.</div>
+          `}
+        </div>
+      </div>
     </div>
 
-    <!-- Task modal -->
-    <div id="taskModal">
-      <div class="sheet">
-        <h4>New Task</h4>
+    <!-- Add Task modal -->
+    <div id="taskModal" class="modal" style="display:none">
+      <div class="modal-card">
+        <h3>New Task</h3>
         <form id="taskForm">
+          <label>Task Name* <input id="tk_name" required></label>
+
+          <label>Occurrence*</label>
           <div class="row">
-            <div>
-              <label>Task Name*</label>
-              <input type="text" id="tk_name" required>
-            </div>
-            <div>
-              <label>Occurrence*</label>
-              <select id="tk_occ" required>
-                <option value="interval">Hourly Interval</option>
-                <option value="asreq">As Required</option>
-              </select>
-            </div>
+            <label><input type="radio" name="tk_occ" value="interval" required> Hourly Interval</label>
+            <label><input type="radio" name="tk_occ" value="asreq" required> As Required</label>
           </div>
-          <div class="row">
-            <div>
-              <label>Part Number</label>
-              <input type="text" id="tk_pn" placeholder="Optional">
-            </div>
-            <div>
-              <label>Price</label>
-              <input type="number" step="0.01" min="0" id="tk_price" placeholder="Optional">
-            </div>
+
+          <label>Part Number <input id="tk_pn" placeholder="optional"></label>
+          <label>Price <input id="tk_price" type="number" step="0.01" placeholder="optional"></label>
+          <label>Manual URL <input id="tk_manual" placeholder="optional"></label>
+          <label>Store Page URL <input id="tk_store" placeholder="optional"></label>
+
+          <div id="intervalRow" style="display:none">
+            <label>Interval Hours <input id="tk_interval" type="number" step="1" min="1" placeholder="required if 'Hourly Interval'"></label>
           </div>
-          <div class="row">
-            <div>
-              <label>Manual (URL)</label>
-              <input type="url" id="tk_manual" placeholder="Optional">
-            </div>
-            <div>
-              <label>Store Page (URL)</label>
-              <input type="url" id="tk_store" placeholder="Optional">
-            </div>
-          </div>
+
           <div class="actions">
             <button type="button" id="tk_cancel">Cancel</button>
-            <button type="submit" id="tk_create">Create</button>
+            <button type="submit" class="primary">Create</button>
           </div>
         </form>
       </div>
     </div>
 
-    <!-- Category modal -->
-    <div id="catModal">
-      <div class="sheet">
-        <h4>New Category</h4>
-        <form id="catForm">
-          <label>Category Name*</label>
-          <input type="text" id="cat_name" required>
-          <div class="actions">
-            <button type="button" id="cat_cancel">Cancel</button>
-            <button type="submit" id="cat_create">Create</button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <style>
+      .bar{display:flex;gap:.5rem;justify-content:flex-start;margin-bottom:.75rem}
+      .list .row{display:flex;justify-content:space-between;align-items:center;padding:.5rem .6rem;border:1px solid #ddd;border-radius:8px;margin:.35rem 0;background:#fff}
+      .chip{font-size:.75rem;border:1px solid #bbb;border-radius:999px;padding:.1rem .5rem}
+      .modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:1000}
+      .modal-card{background:#fff;border-radius:12px;min-width:320px;max-width:520px;padding:1rem 1.2rem;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+      .modal-card form{display:flex;flex-direction:column;gap:.5rem}
+      .modal-card input{width:100%}
+      .modal-card .actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:.25rem}
+      .empty{padding:.8rem;color:#666}
+    </style>
   `;
 
-  /* -------------------- Render tree -------------------- */
-  const rootContainer = document.getElementById("rootContainer");
+  // ------- Wire up modal toggles -------
+  const modal = document.getElementById("taskModal");
+  const intervalRow = document.getElementById("intervalRow");
 
-  function taskCard(t){
-    // One-line header (name only). Details contain all fields + subcomponents.
-    const isInterval = t.__type === "interval";
-    const pn    = t.pn||"";
-    const price = (t.price!=null && t.price!=="") ? Number(t.price).toFixed(2) : "";
-    const man   = t.manualLink||"";
-    const sto   = t.storeLink||"";
-    return `
-      <details class="task block" data-sort-type="task" data-task-id="${t.id}" data-list="${t.__type}" ${/* keep collapsed by default */""}>
-        <summary>${t.name}</summary>
-        <div class="mini-form">
-          <div><label>Occurrence</label>
-            <input value="${isInterval ? "Hourly Interval" : "As Required"}" disabled>
-          </div>
-          ${isInterval ? `<div><label>Interval (hrs)</label><input type="number" min="1" data-k="interval" data-id="${t.id}" data-list="interval" value="${t.interval || 100}"></div>` : `<div></div>`}
-          <div><label>Part Number</label><input type="text" data-k="pn" data-id="${t.id}" data-list="${t.__type}" value="${pn}"></div>
-          <div><label>Price</label><input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${t.__type}" value="${price}"></div>
-          <div><label>Manual</label><input type="url" data-k="manualLink" data-id="${t.id}" data-list="${t.__type}" value="${man}" placeholder="https://…"></div>
-          <div><label>Store Page</label><input type="url" data-k="storeLink" data-id="${t.id}" data-list="${t.__type}" value="${sto}" placeholder="https://…"></div>
-        </div>
-
-        <div class="btns">
-          <button data-sub-for="${t.id}" data-sub-list="${t.__type}">+ Add Subcomponent</button>
-          <button class="danger" data-remove-task="${t.id}" data-from="${t.__type}">Remove Task</button>
-        </div>
-
-        <!-- Dropzone to move tasks inside this task (become subcomponents) -->
-        <div class="dz" data-drop-task="${t.id}"></div>
-
-        <!-- Subcomponents list -->
-        <div data-sublist-of="${t.id}">
-          ${subTasksOf(t.id).map(taskCard).join("")}
-        </div>
-      </details>
-    `;
-  }
-
-  function folderBlock(f){
-    return `
-      <details class="folder block" data-sort-type="folder" data-folder-id="${f.id}" open draggable="true">
-        <summary>${f.name}</summary>
-
-        <!-- Drop into this category (top) -->
-        <div class="dz" data-drop-folder="${f.id}"></div>
-
-        <!-- Child folders -->
-        <div data-folders-of="${f.id}">
-          ${kidsFolders(f.id).map(folderBlock).join("")}
-        </div>
-
-        <!-- Tasks directly in this category -->
-        <div data-tasks-of="${f.id}">
-          ${tasksInFolder(f.id).map(taskCard).join("")}
-        </div>
-      </details>
-    `;
-  }
-
-  function renderRoot(){
-    const roots = kidsFolders(null).map(folderBlock).join("");
-    const topTasks = tasksInFolder(null).map(taskCard).join("");
-    rootContainer.innerHTML = `
-      <div class="dz" data-drop-root="1"></div>
-      <div data-root-tasks>${topTasks}</div>
-      <div data-root-folders>${roots}</div>
-    `;
-    markDraggable();
-  }
-  renderRoot();
-
-  function markDraggable(){
-    // categories + tasks are draggable
-    rootContainer.querySelectorAll('details.folder').forEach(el => el.setAttribute('draggable','true'));
-    rootContainer.querySelectorAll('details.task').forEach(el => el.setAttribute('draggable','true'));
-  }
-
-  /* -------------------- Modal helpers -------------------- */
-  const modalTask = document.getElementById("taskModal");
-  const modalCat  = document.getElementById("catModal");
-  const openModal = m => (m.style.display="grid");
-  const closeModal= m => (m.style.display="none");
-
-  // Add Task (always to TOP of root unless invoked as subcomponent)
   document.getElementById("btnAddTask")?.addEventListener("click", ()=>{
-    // clear form
-    document.getElementById("tk_name").value="";
-    document.getElementById("tk_occ").value="interval";
-    document.getElementById("tk_pn").value="";
-    document.getElementById("tk_price").value="";
-    document.getElementById("tk_manual").value="";
-    document.getElementById("tk_store").value="";
-    modalTask.dataset.parentTask = "";  // no parent => root task
-    openModal(modalTask);
+    // reset fields each time
+    document.getElementById("tk_name").value = "";
+    document.getElementById("tk_pn").value = "";
+    document.getElementById("tk_price").value = "";
+    document.getElementById("tk_manual").value = "";
+    document.getElementById("tk_store").value = "";
+    document.getElementById("tk_interval").value = "";
+    modal.style.display = "flex";
   });
-  document.getElementById("tk_cancel")?.addEventListener("click", ()=> closeModal(modalTask));
-  document.getElementById("taskForm")?.addEventListener("submit",(e)=>{
-    e.preventDefault();
-    const name = document.getElementById("tk_name").value.trim();
-    const occ  = document.getElementById("tk_occ").value; // "interval" | "asreq"
-    if (!name || !occ){ toast("Name and Occurrence are required."); return; }
 
-    const base = {
-      id: genId(name),
-      name,
-      pn: (document.getElementById("tk_pn").value||"").trim(),
-      price: Number(document.getElementById("tk_price").value||"") || null,
-      manualLink: (document.getElementById("tk_manual").value||"").trim(),
-      storeLink: (document.getElementById("tk_store").value||"").trim(),
-      cat: null,                // start at root (not inside a category)
-      parentTask: null,         // start as top-level task
-      order: (++window._maintOrderCounter) // TOP
-    };
-    const parentTarget = modalTask.dataset.parentTask || "";
-    if (parentTarget){ base.parentTask = parentTarget; } // subcomponent
+  document.getElementById("tk_cancel")?.addEventListener("click", ()=>{
+    modal.style.display = "none";
+  });
+
+  // Show/hide interval hours input when switching occurrence
+  document.getElementById("taskForm")?.addEventListener("change", (e)=>{
+    if (e.target && e.target.name === "tk_occ") {
+      intervalRow.style.display = (e.target.value === "interval") ? "block" : "none";
+    }
+  });
+
+  // ------- Persist new task (THIS WAS THE PART THAT WAS FAILING) -------
+  document.getElementById("taskForm")?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+
+    const name = (document.getElementById("tk_name").value || "").trim();
+    const occ  = (document.querySelector("input[name='tk_occ']:checked")?.value || "").trim();
+    const pn   = (document.getElementById("tk_pn").value || "").trim();
+    const price = Number(document.getElementById("tk_price").value || 0) || undefined;
+    const manualLink = (document.getElementById("tk_manual").value || "").trim();
+    const storeLink  = (document.getElementById("tk_store").value || "").trim();
+
+    if (!name || !occ){ alert("Name and Occurrence are required."); return; }
+
+    // Create canonical id and object
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"") + "_" + Math.random().toString(36).slice(2,7);
 
     if (occ === "interval"){
-      const obj = { ...base, interval: 100 }; // default interval; user can edit inside details
-      tasksInterval.push(obj);
-    }else{
-      const obj = { ...base }; // as required
-      tasksAsReq.push(obj);
+      const interval = Number(document.getElementById("tk_interval").value || 0);
+      if (!interval || interval <= 0){ alert("Please enter a positive Interval Hours."); return; }
+      tasksInterval.unshift({
+        id, name,
+        interval, sinceBase:null, anchorTotal:null,
+        pn: pn || undefined,
+        price: isFinite(price) && price>0 ? price : undefined,
+        manualLink, storeLink
+      });
+    } else {
+      tasksAsReq.unshift({
+        id, name,
+        condition:"As required",
+        pn: pn || undefined,
+        price: isFinite(price) && price>0 ? price : undefined,
+        manualLink, storeLink
+      });
     }
 
+    // Persist and re-render
     saveCloudDebounced();
-    closeModal(modalTask);
+    modal.style.display = "none";
     renderSettings();
   });
 
-  // Add Category (folder) — always TOP
-  document.getElementById("btnAddCat")?.addEventListener("click", ()=>{
-    document.getElementById("cat_name").value="";
-    modalCat.dataset.parent = ""; // root by default
-    openModal(modalCat);
-  });
-  document.getElementById("cat_cancel")?.addEventListener("click", ()=> closeModal(modalCat));
-  document.getElementById("catForm")?.addEventListener("submit",(e)=>{
-    e.preventDefault();
-    const name = document.getElementById("cat_name").value.trim();
-    if (!name){ toast("Category name required."); return; }
-    const parent = modalCat.dataset.parent || null;
-    window.settingsFolders.push({ id: genId(name), name, parent, order:(++window._maintOrderCounter) });
-    saveCloudDebounced();
-    closeModal(modalCat);
-    renderSettings();
-  });
-
-  // "+ Add Subcomponent" on a task → open Task modal with parentTask preset
-  rootContainer.addEventListener("click",(e)=>{
-    const sub = e.target.closest("[data-sub-for]");
-    const rm  = e.target.closest("[data-remove-task]");
-    if (sub){
-      const taskId = sub.getAttribute("data-sub-for");
-      document.getElementById("tk_name").value="";
-      document.getElementById("tk_occ").value="interval";
-      document.getElementById("tk_pn").value="";
-      document.getElementById("tk_price").value="";
-      document.getElementById("tk_manual").value="";
-      document.getElementById("tk_store").value="";
-      modalTask.dataset.parentTask = taskId; // create under task
-      openModal(modalTask);
-    }
-    if (rm){
-      const id = rm.getAttribute("data-remove-task");
-      const from = rm.getAttribute("data-from"); // interval|asreq
-      if (from==="interval"){ tasksInterval = tasksInterval.filter(t=>t.id!==id); }
-      else { tasksAsReq = tasksAsReq.filter(t=>t.id!==id); }
-      saveCloudDebounced();
-      renderSettings();
-    }
-  });
-
-  // Inline edits for task details inside dropdown
-  rootContainer.addEventListener("input",(e)=>{
-    const el = e.target;
-    const id = el.getAttribute("data-id");
-    const list = el.getAttribute("data-list");
-    const key = el.getAttribute("data-k");
-    if (!id || !list || !key) return;
-    const live = byLiveTask(id); if (!live || live.list !== list) return;
-    let val = el.value;
-    if (key==="interval" || key==="price") val = Number(val)||null;
-    live.ref[key] = val;
-    saveCloudDebounced();
-  });
-
-  /* -------------------- Drag & Drop -------------------- */
-  function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect="move"; }
-  function markDrags(on){
-    on?.classList.add('sort-hint');
-    const dz = on?.closest('.dz'); dz?.classList.add('dragover');
-  }
-  function clearHints(){
-    rootContainer.querySelectorAll('.sort-hint').forEach(el=>el.classList.remove('sort-hint'));
-    rootContainer.querySelectorAll('.dz.dragover').forEach(el=>el.classList.remove('dragover'));
-  }
-
-  const DRAG = { type:null, id:null, list:null }; // type: "task"|"folder"
-  rootContainer.addEventListener("dragstart",(e)=>{
-    const F = e.target.closest('details.folder');
-    const T = e.target.closest('details.task');
-    if (F){
-      DRAG.type="folder"; DRAG.id=F.getAttribute("data-folder-id");
-      F.classList.add("dragging");
-      e.dataTransfer.setData("text/plain", DRAG.id);
-      e.dataTransfer.effectAllowed="move";
-    }else if (T){
-      DRAG.type="task"; DRAG.id=T.getAttribute("data-task-id"); DRAG.list=T.getAttribute("data-list");
-      T.classList.add("dragging");
-      e.dataTransfer.setData("text/plain", DRAG.id);
-      e.dataTransfer.effectAllowed="move";
-    }
-  });
-  rootContainer.addEventListener("dragend",(e)=>{
-    const card = e.target.closest('details.folder,details.task');
-    card?.classList.remove("dragging");
-    DRAG.type=null; DRAG.id=null; DRAG.list=null;
-    clearHints();
-  });
-
-  rootContainer.addEventListener("dragover",(e)=>{
-    const target = e.target.closest('[data-drop-root],[data-drop-folder],[data-drop-task],details.task,details.folder');
-    if (!target) return;
-    allow(e);
-    const card = e.target.closest('details.task,details.folder');
-    if (card) markDrags(card);
-    const dz = e.target.closest('.dz'); if (dz) dz.classList.add('dragover');
-  });
-  rootContainer.addEventListener("dragleave",()=> clearHints());
-
-  function moveTaskToRootTop(taskId){
-    const live = byLiveTask(taskId); if (!live) return false;
-    live.ref.parentTask = null; live.ref.cat = null; bumpTop(live.ref); return true;
-  }
-  function moveTaskToFolderTop(taskId, folderId){
-    const live = byLiveTask(taskId); if (!live) return false;
-    live.ref.parentTask = null; live.ref.cat = folderId; bumpTop(live.ref); return true;
-  }
-
-function moveTaskAsChild(taskId, parentTaskId){
-  // no self-parent
-  if (String(taskId) === String(parentTaskId)) return false;
-
-  const live       = byLiveTask(taskId);
-  const parentLive = byLiveTask(parentTaskId);
-  if (!live || !parentLive) return false;
-
-  // cycle guard: walk up the parent chain; if we hit the child, reject
-  let cur = parentLive;
-  let hops = 0;
-  while (cur && hops++ < 1000){
-    if (String(cur.ref.id) === String(taskId)) return false;
-    const nextParentId = cur.ref.parentTask;
-    cur = (nextParentId != null) ? byLiveTask(nextParentId) : null;
-  }
-
-  // apply move
-  live.ref.parentTask = parentTaskId;
-  // inherit folder for consistent organization
-  live.ref.cat = parentLive.ref.cat || null;
-  bumpTop(live.ref);
-  return true;
-}
-
-   
-  function moveFolderToRootTop(folderId){
-    const f = byFolder(folderId); if (!f) return false;
-    f.parent = null; bumpTop(f); return true;
-  }
-  function moveFolderInsideFolder(folderId, parentId){
-    if (String(folderId)===String(parentId)) return false;
-    const f = byFolder(folderId); const p = byFolder(parentId);
-    if (!f || !p) return false;
-    // prevent cycles
-    let cur = p; while(cur){ if (String(cur.parent||"")===String(f.id)) return false; cur = byFolder(cur.parent||null); }
-    f.parent = parentId; bumpTop(f); return true;
-  }
-
-  rootContainer.addEventListener("drop",(e)=>{
-    const dzRoot   = e.target.closest("[data-drop-root]");
-    const dzFolder = e.target.closest("[data-drop-folder]");
-    const dzTask   = e.target.closest("[data-drop-task]");
-    const onCard   = e.target.closest("details.task,details.folder"); // reorder above card (same container)
-    if (!DRAG.type) return;
-    allow(e);
-
-    // Into containers (always to top)
-    if (dzRoot){
-      if (DRAG.type==="task"){ if (moveTaskToRootTop(DRAG.id)){ saveCloudDebounced(); renderSettings(); } }
-      if (DRAG.type==="folder"){ if (moveFolderToRootTop(DRAG.id)){ saveCloudDebounced(); renderSettings(); } }
-      return;
-    }
-    if (dzFolder){
-      const fid = dzFolder.getAttribute("data-drop-folder");
-      if (DRAG.type==="task"){ if (moveTaskToFolderTop(DRAG.id, fid)){ saveCloudDebounced(); renderSettings(); } }
-      if (DRAG.type==="folder"){ if (moveFolderInsideFolder(DRAG.id, fid)){ saveCloudDebounced(); renderSettings(); } }
-      return;
-    }
-    if (dzTask){
-      const pid = dzTask.getAttribute("data-drop-task");
-      if (DRAG.type==="task"){ if (moveTaskAsChild(DRAG.id, pid)){ saveCloudDebounced(); renderSettings(); } }
-      // folders do not go into tasks
-      return;
-    }
-
-    // Reorder above a card within its container
-    if (onCard){
-      if (DRAG.type==="task" && onCard.classList.contains("task")){
-        const targetId = onCard.getAttribute("data-task-id");
-        const targetLive = byLiveTask(targetId); const live = byLiveTask(DRAG.id);
-        if (!targetLive || !live) return;
-        // match container (same parentTask and same cat), then place above
-        live.ref.parentTask = targetLive.ref.parentTask || null;
-        live.ref.cat = targetLive.ref.cat || null;
-        live.ref.order = (Number(targetLive.ref.order)||0) + 0.5;
-        // normalize within container
-        const containerKey = JSON.stringify({pt: live.ref.parentTask||null, cat: live.ref.cat||null});
-        const inSame = allTasks.filter(x => String(x.parentTask||"")===(live.ref.parentTask||"") && String(x.cat||"")===(live.ref.cat||""));
-        inSame.sort((a,b)=>Number(b.order||0)-Number(a.order||0));
-        let n=inSame.length; for (const v of inSame){
-          const arr = v.__type==="interval" ? tasksInterval : tasksAsReq;
-          const ref = arr.find(x=>x.id===v.id); if (ref) ref.order = n--;
-        }
-        saveCloudDebounced(); renderSettings();
-        return;
-      }
-      if (DRAG.type==="folder" && onCard.classList.contains("folder")){
-        const targetId = onCard.getAttribute("data-folder-id");
-        const f = byFolder(DRAG.id); const tgt = byFolder(targetId);
-        if (!f || !tgt) return;
-        f.parent = tgt.parent || null;
-        f.order  = (Number(tgt.order)||0) + 0.5;
-        const siblings = kidsFolders(f.parent||null);
-        let n=siblings.length; for (const s of siblings){ s.order = n--; }
-        saveCloudDebounced(); renderSettings();
-        return;
-      }
-      // dropping task onto folder card (not dropzone) → move into folder (top)
-      if (DRAG.type==="task" && onCard.classList.contains("folder")){
-        const dest = onCard.getAttribute("data-folder-id");
-        if (moveTaskToFolderTop(DRAG.id, dest)){ saveCloudDebounced(); renderSettings(); }
-        return;
-      }
-    }
+  // Placeholder: Add Category button currently just informs; we’ll hook folder logic after list is stable.
+  document.getElementById("btnAddCategory")?.addEventListener("click", ()=>{
+    alert("Category folders will be added after the task list is stable again.");
   });
 }
 
