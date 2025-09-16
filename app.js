@@ -90,10 +90,19 @@ async function initFirebase(){
   if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
   if (!window.FIREBASE_CONFIG){ console.warn("Missing FIREBASE_CONFIG."); return; }
 
+  // Initialize
   FB.app  = firebase.initializeApp(window.FIREBASE_CONFIG);
   FB.auth = firebase.auth();
   FB.db   = firebase.firestore();
 
+  // Persist login across refreshes
+  try {
+    await FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  } catch (e) {
+    console.warn("Could not set auth persistence to LOCAL:", e);
+  }
+
+  // UI bits
   const statusEl = $("#authStatus");
   const btnIn    = $("#btnSignIn");
   const btnOut   = $("#btnSignOut");
@@ -124,6 +133,7 @@ async function initFirebase(){
   if (btnIn)  btnIn.onclick  = showModal;
   if (btnOut) btnOut.onclick = async ()=>{ await FB.auth.signOut(); };
   if (btnClose) btnClose.onclick = hideModal;
+
   if (form){
     form.onsubmit = async (e)=>{
       e.preventDefault();
@@ -154,6 +164,7 @@ async function initFirebase(){
     }
   });
 }
+
 
 /* ===================== DATA / STATE ======================== */
 const defaultIntervalTasks = [
@@ -1803,16 +1814,33 @@ repairMaintenanceGraph();
     const live = byLiveTask(taskId); if (!live) return false;
     live.ref.parentTask = null; live.ref.cat = folderId; bumpTop(live.ref); return true;
   }
-  function moveTaskAsChild(taskId, parentTaskId){
-    if (String(taskId)===String(parentTaskId)) return false;
-    const live = byLiveTask(taskId); const parentLive = byLiveTask(parentTaskId);
-    if (!live || !parentLive) return false;
-    live.ref.parentTask = parentTaskId;
-    // inherit category from parent for organization
-    live.ref.cat = parentLive.ref.cat || null;
-    bumpTop(live.ref);
-    return true;
+
+function moveTaskAsChild(taskId, parentTaskId){
+  // no self-parent
+  if (String(taskId) === String(parentTaskId)) return false;
+
+  const live       = byLiveTask(taskId);
+  const parentLive = byLiveTask(parentTaskId);
+  if (!live || !parentLive) return false;
+
+  // cycle guard: walk up the parent chain; if we hit the child, reject
+  let cur = parentLive;
+  let hops = 0;
+  while (cur && hops++ < 1000){
+    if (String(cur.ref.id) === String(taskId)) return false;
+    const nextParentId = cur.ref.parentTask;
+    cur = (nextParentId != null) ? byLiveTask(nextParentId) : null;
   }
+
+  // apply move
+  live.ref.parentTask = parentTaskId;
+  // inherit folder for consistent organization
+  live.ref.cat = parentLive.ref.cat || null;
+  bumpTop(live.ref);
+  return true;
+}
+
+   
   function moveFolderToRootTop(folderId){
     const f = byFolder(folderId); if (!f) return false;
     f.parent = null; bumpTop(f); return true;
