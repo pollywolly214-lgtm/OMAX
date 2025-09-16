@@ -1298,76 +1298,74 @@ function renderSettings(){
   const content = document.getElementById("content");
   if (!content) return;
 
-  // ---------- Scoped styling: smaller bubbles; explorer pinned to LEFT HALF ----------
+  // ---------- Sleeker layout: explorer pinned to a NARROW left pane; smaller bubbles ----------
   if (!document.getElementById("settingsExplorerCSS")){
     const st = document.createElement("style");
     st.id = "settingsExplorerCSS";
     st.textContent = `
-      /* Layout: two columns; left = explorer, right = free space */
+      /* Two columns; left is a narrow pane (about half of previous) */
       #settingsPane.settings-grid{
         display:grid;
-        grid-template-columns: 1fr 1fr;   /* left half / right half */
+        grid-template-columns: minmax(260px, 400px) 1fr; /* narrower than before */
         gap: 16px;
         align-items:start;
       }
-      #settingsPane .settings-left{
-        grid-column: 1 / 2;
-      }
-      #settingsPane .settings-right{
-        grid-column: 2 / 3;
-      }
+      #settingsPane .settings-left{ grid-column: 1 / 2; }
+      #settingsPane .settings-right{ grid-column: 2 / 3; }
 
-      /* Smaller, tighter "bubble" cards but scoped to settings only */
+      /* Smaller bubble cards (only in Settings) */
       #settingsPane details.block{
-        border: 1px solid #e4e4e4;
-        border-radius: 10px;
-        padding: 6px 8px;
-        margin: 6px 0;
+        border: 1px solid #e5e5e5;
+        border-radius: 8px;
+        padding: 4px 6px;     /* tighter */
+        margin: 4px 0;        /* tighter */
         background: #fff;
       }
-      #settingsPane details.block > summary{
-        display:flex; align-items:center; gap:8px;
-        cursor: pointer;
+
+      /* Items: remove fold/caret and show always-open body (summary hidden) */
+      #settingsPane details.item[open] > summary{ display:none; }
+      #settingsPane details.item::-webkit-details-marker{ display:none; }
+      #settingsPane .item-head{
+        display:flex; align-items:center; gap:8px; 
+        font-weight:600; font-size:.88rem; margin-bottom:6px;
       }
-      #settingsPane details.item > summary{ font-weight:500; font-size:.94rem; }
-      #settingsPane details.folder > summary.folder-title{ font-weight:800; font-size:1.02rem; letter-spacing:.2px; }
+      /* Categories keep current bold/title style */
+      #settingsPane details.folder > summary.folder-title{
+        font-weight:800; font-size:1.02rem; letter-spacing:.2px; display:flex; align-items:center; gap:10px;
+      }
 
-      /* Drag/drop affordances */
-      #settingsPane .dz{ border:1px dashed #bbb; border-radius:8px; padding:6px; margin:6px 0; color:#666; }
-      #settingsPane .dz.dragover{ background:rgba(0,0,0,.05); outline:2px dashed #888; }
-      #settingsPane details.dragging{ opacity:.6 }
-      #settingsPane .sort-hint{ outline:2px solid #6aa84f; border-radius:6px; }
-      #settingsPane .muted{ color:#666 } 
-      #settingsPane .small{ font-size:.85rem }
-      #settingsPane .hidden{ display:none!important }
-      #settingsPane .tree-toolbar{ display:flex; gap:8px; align-items:center; margin-bottom:10px }
-
-      /* Tighten mini-form within bubbles */
-      #settingsPane .mini-form{ display:grid; grid-template-columns: 1fr 1fr; gap:6px; }
-      #settingsPane .mini-form label{ font-size:.84rem; }
-      #settingsPane .mini-form input{ padding:4px 6px; font-size:.9rem; }
-
-      /* Keep chips compact */
-      #settingsPane .chip{ display:inline-block; padding:2px 6px; border-radius:10px; font-size:.72rem; background:#f1f1f1 }
+      /* Compact chips + mini-forms inside items */
+      #settingsPane .chip{ display:inline-block; padding:2px 6px; border-radius:10px; font-size:.68rem; background:#f1f1f1 }
       #settingsPane .chip.green{ background:#e8f5e9 } 
       #settingsPane .chip.yellow{ background:#fff8e1 } 
       #settingsPane .chip.orange{ background:#ffe0b2 } 
       #settingsPane .chip.red{ background:#ffebee }
+      #settingsPane .mini-form{ display:grid; grid-template-columns: 1fr 1fr; gap:6px; }
+      #settingsPane .mini-form label{ font-size:.82rem; }
+      #settingsPane .mini-form input{ padding:4px 6px; font-size:.86rem; }
+      #settingsPane .small{ font-size:.82rem } 
+      #settingsPane .muted{ color:#666 }
+
+      /* Drag/drop affordances (sleek: dropzones are invisible rails until dragover) */
+      #settingsPane .dz{ height:8px; border-radius:6px; margin:6px 0; }
+      #settingsPane .dz.dragover{ height:22px; background:rgba(0,0,0,.05); outline:2px dashed #888; }
+      #settingsPane details.dragging{ opacity:.6 }
+      #settingsPane .sort-hint{ outline:2px solid #6aa84f; border-radius:6px; }
     `;
     document.head.appendChild(st);
   }
 
-  // ---------- State (folders + items) ----------
+  // ---------- State ----------
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
   for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
 
-  // Items from legacy lists; we treat them as files (not folders)
+  // Items come from legacy lists; treated as files (not folders)
   const allItems = [
     ...(Array.isArray(tasksInterval) ? tasksInterval.map(t => ({...t, __type:"interval"})) : []),
     ...(Array.isArray(tasksAsReq)    ? tasksAsReq.map(t => ({...t, __type:"asreq"}))       : []),
   ];
 
-  // ---------- Ordering so new things appear at TOP and drag-to-reorder works ----------
+  // ---------- Ordering so new things appear at TOP + drag-to-reorder ----------
   function getMaxOrder(){
     const maxFolder = window.settingsFolders.reduce((m,f)=> Math.max(m, Number(f.order||0)), 0);
     const maxItems  = allItems.reduce((m,t)=> Math.max(m, Number(t.order||0)), 0);
@@ -1376,13 +1374,11 @@ function renderSettings(){
   if (typeof window._orderInitialized === "undefined"){ window._orderInitialized = false; }
   if (!window._orderInitialized){
     let base = 0;
-    // Folders grouped by parent
     const parentIds = [null, ...new Set(window.settingsFolders.map(f=>f.parent).filter(Boolean))];
     for (const pid of parentIds){
       const group = window.settingsFolders.filter(f => (f.parent||null)===(pid||null));
       for (const f of group){ if (typeof f.order === "undefined"){ f.order = ++base; } }
     }
-    // Items grouped by category
     const folderIds = [null, ...new Set(allItems.map(t=>t.cat).filter(Boolean))];
     for (const fid of folderIds){
       const group = allItems.filter(t => (t.cat||null)===(fid||null));
@@ -1449,22 +1445,24 @@ function renderSettings(){
       <button class="danger" type="button" data-part-remove="${p.pid}" data-parent="${parentId}" data-list="${listType}">Remove</button>
     </div>`;
 
+  // Item card: always open (no folding)
   const itemCard = (t) => {
     const listType = t.__type;
     const nd = nextDue(t);
     const lastServ = nd && nd.lastServicedAt != null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
     const parts = Array.isArray(t.parts) ? t.parts : [];
     return `
-    <details class="item block" draggable="true"
+    <details class="item block" open draggable="true"
              data-sort-type="item" data-sort-id="${t.id}"
              data-task-id="${t.id}" data-list="${listType}" data-cat="${t.cat||""}">
-      <summary>
-        <b>${t.name}</b>
+      <summary></summary> <!-- hidden by CSS (keeps details semantics but no fold) -->
+      <div class="item-head">
+        <span>${t.name}</span>
         ${listType === "interval" ? `<span class="chip">${t.interval}h</span>` : `<span class="chip">As req.</span>`}
         ${listType === "interval" ? chipFor(t) : ""}
-      </summary>
+      </div>
 
-      <div class="mini-form" style="margin:8px 0 4px 0;">
+      <div class="mini-form" style="margin:6px 0 2px 0;">
         <label>Name: <input type="text" data-k="name" data-id="${t.id}" data-list="${listType}" value="${t.name}"></label>
 
         ${listType === "interval" ? `
@@ -1486,8 +1484,8 @@ function renderSettings(){
         </div>
       </div>
 
-      <div class="block" style="background:#fff;margin-top:8px;">
-        <h4 style="margin:0 0 6px 0;">Sub-parts</h4>
+      <div class="block" style="background:#fff;margin-top:6px;">
+        <h4 style="margin:0 0 4px 0;">Sub-parts</h4>
         <div class="small muted">Use for washers, mixing tube, etc.</div>
         <div id="parts_${t.id}" data-part-list data-parent="${t.id}" data-list="${t.__type}">
           ${parts.map(p => partRow(p, t.id, listType)).join("") || `<div class="small muted">No sub-parts yet.</div>`}
@@ -1504,9 +1502,10 @@ function renderSettings(){
     </details>`;
   };
 
+  // Folder (category). Dropzone note removed; rail is invisible until dragover.
   const renderFolder = (folder) => {
     const subFolders = kidsOf(folder.id).map(renderFolder).join("");
-    const itemsHtml  = itemsIn(folder.id).map(itemCard).join("") || `<div class="small muted">No items in this category.</div>`;
+    const itemsHtml  = itemsIn(folder.id).map(itemCard).join("") || ``;
     return `
       <details class="folder block" data-folder-id="${folder.id}" data-sort-type="folder" data-sort-id="${folder.id}" open draggable="true">
         <summary class="folder-title">
@@ -1517,7 +1516,7 @@ function renderSettings(){
           <button class="danger small" data-remove-folder="${folder.id}">Remove</button>
         </summary>
 
-        <div class="dz" data-drop-folder="${folder.id}">Drop items or categories here → <b>${folder.name}</b></div>
+        <div class="dz" data-drop-folder="${folder.id}"></div>
 
         <div class="folder-children" data-folder-body="${folder.id}">
           ${subFolders}
@@ -1528,13 +1527,13 @@ function renderSettings(){
       </details>`;
   };
 
-  // ---------- View: explorer on the LEFT half ----------
+  // ---------- View: explorer on the LEFT (narrow) ----------
   const rootItems   = itemsIn(null).map(itemCard).join("");
   const rootFolders = kidsOf(null).map(renderFolder).join("");
   const toolbar = `
     <div class="tree-toolbar">
       <button id="addFolderBtn">+ Add Category</button>
-      <span class="small muted">Drag items and categories anywhere. Categories can nest. New things appear at the top.</span>
+      <span class="small muted">Drag items and categories anywhere. New things appear at the top.</span>
       <span style="flex:1"></span>
       <button id="saveTasksBtn">Save</button>
     </div>`;
@@ -1546,9 +1545,9 @@ function renderSettings(){
           <h3>Maintenance Settings</h3>
           ${toolbar}
           <div id="treeList">
-            <div class="dz" data-drop-root="1">Drop here to move to the top level</div>
+            <div class="dz" data-drop-root="1"></div>
             <div class="bubble-list">
-              ${rootItems || `<div class="small muted">No items at the top level.</div>`}
+              ${rootItems}
             </div>
             <div class="tree-folders">
               ${rootFolders || `<div class="small muted">No categories yet. Click “Add Category”.</div>`}
@@ -1556,34 +1555,25 @@ function renderSettings(){
           </div>
         </div>
       </div>
-      <div class="settings-right">
-        <!-- Empty by design: left pane is the focus. Keep this space for future previews/help. -->
-      </div>
+      <div class="settings-right"><!-- reserved --></div>
     </div>
   `;
 
-  // ---------- Wiring (scoped to pane) ----------
-  const pane = document.getElementById("settingsPane");
-  const getList = (type)=> type === "interval" ? tasksInterval : tasksAsReq;
+  // ---------- Input wiring (unchanged) ----------
+  const setLiveField = (id,list,key,val)=>{
+    const live = byIdItemLive(id); if (!live || live.list !== list) return;
+    if (key==="interval" || key==="sinceBase" || key==="price") val = setNum(val);
+    live.ref[key] = val; saveCloudDebounced();
+  };
 
-  // Item field edits + sub-parts
+  const pane = document.getElementById("settingsPane");
   pane.addEventListener("input",(e)=>{
     const el = e.target;
-
-    // Item field edits
     const id = el.getAttribute("data-id");
     const list = el.getAttribute("data-list");
     const key = el.getAttribute("data-k");
-    if (id && list && key){
-      const live = byIdItemLive(id); if (!live || live.list !== list) return;
-      let val = el.value;
-      if (key==="interval" || key==="sinceBase" || key==="price") val = setNum(val);
-      live.ref[key] = val;
-      saveCloudDebounced();
-      return;
-    }
+    if (id && list && key){ setLiveField(id, list, key, el.value); return; }
 
-    // Sub-part edits
     const pk = el.getAttribute("data-part-k");
     if (pk){
       const pid   = el.getAttribute("data-part-id");
@@ -1596,7 +1586,6 @@ function renderSettings(){
       saveCloudDebounced();
     }
   });
-
   pane.addEventListener("submit",(e)=>{
     const frm = e.target.closest("[data-part-add-form]");
     if (!frm) return;
@@ -1615,9 +1604,7 @@ function renderSettings(){
     });
     saveCloudDebounced(); renderSettings();
   });
-
   pane.addEventListener("click",(e)=>{
-    // complete/remove item
     const comp = e.target.closest("[data-complete]");
     const rm   = e.target.closest("[data-remove]");
     if (comp){ completeTask(comp.getAttribute("data-complete")); renderSettings(); return; }
@@ -1629,7 +1616,6 @@ function renderSettings(){
       saveCloudDebounced(); toast("Removed"); renderSettings();
       return;
     }
-    // remove sub-part
     const pr = e.target.closest("[data-part-remove]");
     if (pr){
       const pid   = pr.getAttribute("data-part-remove");
@@ -1641,7 +1627,7 @@ function renderSettings(){
     }
   });
 
-  // ---------- Category CRUD (add at TOP) ----------
+  // ---------- Category CRUD (Add Category → TOP, no extra notes) ----------
   pane.querySelector("#addFolderBtn")?.addEventListener("click", ()=>{
     const name = prompt("Category name:", "New Category");
     if (!name) return;
@@ -1659,7 +1645,7 @@ function renderSettings(){
       const name = prompt("Sub-category name:", "New Sub-category");
       if (!name) return;
       const id = genId(name);
-      const f = { id, name, parent: pid, order:(++window._orderCounter) }; // TOP in that parent
+      const f = { id, name, parent: pid, order:(++window._orderCounter) }; // TOP within parent
       window.settingsFolders.push(f);
       saveCloudDebounced(); renderSettings();
     }
@@ -1680,25 +1666,21 @@ function renderSettings(){
     }
   });
 
-  // ---------- Drag & Drop (folders + items; move & reorder; always scoped to left pane) ----------
+  // ---------- Drag & Drop: folders + items; move & reorder ----------
   pane.querySelectorAll('details.item').forEach(el => el.setAttribute('draggable','true'));
   pane.querySelectorAll('details.folder').forEach(el => el.setAttribute('draggable','true'));
 
-  const DRAG = { type:null, id:null, list:null }; // type: "item"|"folder"
-
+  const DRAG = { type:null, id:null, list:null }; // "item"|"folder"
   pane.addEventListener("dragstart",(e)=>{
     const item = e.target.closest('details.item');
     const fold = e.target.closest('details.folder');
     if (item){
-      DRAG.type = "item";
-      DRAG.id   = item.getAttribute("data-task-id");
-      DRAG.list = item.getAttribute("data-list");
+      DRAG.type = "item"; DRAG.id = item.getAttribute("data-task-id"); DRAG.list = item.getAttribute("data-list");
       item.classList.add("dragging");
       e.dataTransfer.setData("text/plain", DRAG.id);
       e.dataTransfer.effectAllowed = "move";
     }else if (fold){
-      DRAG.type = "folder";
-      DRAG.id   = fold.getAttribute("data-folder-id");
+      DRAG.type = "folder"; DRAG.id = fold.getAttribute("data-folder-id");
       fold.classList.add("dragging");
       e.dataTransfer.setData("text/plain", DRAG.id);
       e.dataTransfer.effectAllowed = "move";
@@ -1708,6 +1690,7 @@ function renderSettings(){
     const el = e.target.closest('details.item,details.folder'); el?.classList.remove("dragging");
     DRAG.type=null; DRAG.id=null; DRAG.list=null;
     pane.querySelectorAll('.sort-hint').forEach(x=>x.classList.remove('sort-hint'));
+    pane.querySelectorAll('.dz').forEach(x=>x.classList.remove('dragover'));
   });
 
   function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect="move"; }
@@ -1715,8 +1698,7 @@ function renderSettings(){
     const target = e.target.closest('details.item,details.folder,[data-drop-folder],[data-drop-root]');
     if (!target) return;
     allow(e);
-    const card = e.target.closest('details.item,details.folder');
-    if (card) card.classList.add('sort-hint');
+    const card = e.target.closest('details.item,details.folder'); if (card) card.classList.add('sort-hint');
     const dz = e.target.closest('.dz'); if (dz) dz.classList.add('dragover');
   });
   pane.addEventListener("dragleave",(e)=>{
@@ -1740,7 +1722,7 @@ function renderSettings(){
   pane.addEventListener("drop",(e)=>{
     const zoneFolder = e.target.closest("[data-drop-folder]");
     const zoneRoot   = e.target.closest("[data-drop-root]");
-    const onCard     = e.target.closest('details.item,details.folder'); // for relative reordering
+    const onCard     = e.target.closest('details.item,details.folder'); // relative reorder
 
     if (!DRAG.type) return;
 
@@ -1762,7 +1744,7 @@ function renderSettings(){
       return;
     }
 
-    // Reorder relative to a card (drop ABOVE it)
+    // Reorder ABOVE a card within same container
     if (onCard){
       allow(e);
       if (DRAG.type==="item" && onCard.classList.contains('item')){
@@ -1771,8 +1753,8 @@ function renderSettings(){
         const targetFolder = targetLive.ref.cat || null;
 
         const live = byIdItemLive(DRAG.id); if (!live) return;
-        live.ref.cat = targetFolder;               // ensure same container
-        live.ref.order = (Number(targetLive.ref.order)||0) + 0.5; // above target
+        live.ref.cat = targetFolder;
+        live.ref.order = (Number(targetLive.ref.order)||0) + 0.5;
         normalizeItemOrders(targetFolder);
         saveCloudDebounced(); renderSettings();
         return;
@@ -1781,19 +1763,19 @@ function renderSettings(){
         const targetId = onCard.getAttribute("data-folder-id");
         const targetFolder = byIdFolder(targetId); if (!targetFolder) return;
         const f = byIdFolder(DRAG.id); if (!f) return;
-        f.parent = targetFolder.parent || null;    // same parent
+        f.parent = targetFolder.parent || null;
         f.order  = (Number(targetFolder.order)||0) + 0.5;
         normalizeFolderOrders(f.parent || null);
         saveCloudDebounced(); renderSettings();
         return;
       }
-      // Dropping item onto a folder (not dropzone): move into that folder TOP
+      // Drop item onto a folder card (not dropzone) → move into that folder at TOP
       if (DRAG.type==="item" && onCard.classList.contains('folder')){
         const destFolder = onCard.getAttribute("data-folder-id");
         if (moveItemToContainerTop(DRAG.id, destFolder)){ saveCloudDebounced(); renderSettings(); }
         return;
       }
-      // Dropping folder onto an item: move folder to that item's parent TOP
+      // Drop folder onto an item card → move folder to that item's parent at TOP
       if (DRAG.type==="folder" && onCard.classList.contains('item')){
         const targetId = onCard.getAttribute("data-task-id");
         const targetLive = byIdItemLive(targetId); if (!targetLive) return;
