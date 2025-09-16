@@ -1720,6 +1720,35 @@ function renderSettings(){
     });
   });
 
+  // ------- Move Up / Down / Top (click controls) -------
+  function moveIn(arr, id, dir){
+    const i = arr.findIndex(x => String(x.id) === String(id));
+    if (i < 0) return;
+    if (dir === "top"){
+      const [sp] = arr.splice(i,1);
+      arr.unshift(sp);
+      return;
+    }
+    const j = dir === "up" ? i - 1 : i + 1;
+    if (j < 0 || j >= arr.length) return;
+    const [sp] = arr.splice(i,1);
+    arr.splice(j,0,sp);
+  }
+  root.addEventListener("click",(e)=>{
+    const up  = e.target.closest("[data-move-up]");
+    const dn  = e.target.closest("[data-move-down]");
+    const top = e.target.closest("[data-move-top]");
+    if (!up && !dn && !top) return;
+
+    const id   = (up||dn||top).getAttribute(up? "data-move-up" : dn? "data-move-down" : "data-move-top");
+    const from = (up||dn||top).getAttribute("data-from"); // "interval" | "asreq"
+    const arr  = from === "interval" ? tasksInterval : tasksAsReq;
+
+    moveIn(arr, id, top ? "top" : (up ? "up" : "down"));
+    persist();
+    renderSettings();
+  });
+
   // ------- Add forms (insert TOP) -------
   document.getElementById("addIntervalForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
@@ -1817,16 +1846,14 @@ function renderSettings(){
       return;
     }
 
-    // Drop at end of list (after last item): emulate "before" by choosing a sentinel strategy
+    // Drop at end of list
     if (dz && dz.hasAttribute("data-drop-end")){
       const listType = dz.getAttribute("data-drop-end"); // "interval" | "asreq"
       const arr = (listType==="interval") ? tasksInterval : tasksAsReq;
       if (arr.length){
         const lastId = arr[arr.length-1].id;
-        // We want after last; do before nothing → set order above last by using before-last then swap:
         if (typeof moveNodeSafely === "function"){
           if (moveNodeSafely("task", dragId, { beforeTask:{ id: lastId, type: listType } })){
-            // Then bump to top of the container by moving above first? Keep simple: re-render; user can fine tune.
             persist(); renderSettings(); if (typeof renderSettingsCategoriesPane==="function") renderSettingsCategoriesPane();
           }
         }
