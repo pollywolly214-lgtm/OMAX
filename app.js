@@ -1066,6 +1066,257 @@ function viewSettings(){
   </div>`;
 }
 
+function renderSettingsCategoriesPane(){
+  // ----- Guards & state -----
+  const root = document.getElementById("content");
+  if (!root) return;
+
+  // Ensure lists exist
+  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  window.tasksInterval   = Array.isArray(window.tasksInterval)   ? window.tasksInterval   : [];
+  window.tasksAsReq      = Array.isArray(window.tasksAsReq)      ? window.tasksAsReq      : [];
+  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+
+  // Save helpers (support local + cloud)
+  function persist(){
+    if (typeof saveTasks === "function") { try { saveTasks(); } catch(_){} }
+    if (typeof saveCloudDebounced === "function") { try { saveCloudDebounced(); } catch(_){} }
+  }
+
+  // Small helpers
+  const byIdFolder = id => window.settingsFolders.find(f => String(f.id)===String(id)) || null;
+  const hasChildren = (fid)=>{
+    const subF = window.settingsFolders.some(f => String(f.parent||"")===String(fid));
+    const tInt = window.tasksInterval.some(t => String(t.cat||"")===String(fid));
+    const tAR  = window.tasksAsReq.some(t => String(t.cat||"")===String(fid));
+    return subF || tInt || tAR;
+  };
+  const findTask = (id)=>{
+    let ref = window.tasksInterval.find(x=>String(x.id)===String(id));
+    if (ref) return {ref, list:"interval"};
+    ref = window.tasksAsReq.find(x=>String(x.id)===String(id));
+    return ref ? {ref, list:"asreq"} : null;
+  };
+
+  // ===== 1) Root "Add Category" button =====
+  const addBtn = root.querySelector("#addFolderBtn");
+  if (addBtn && !addBtn.dataset.wired){
+    addBtn.dataset.wired = "1";
+    addBtn.addEventListener("click", ()=>{
+      const name = prompt("New category (folder) name?");
+      if (!name) return;
+      const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Math.random().toString(36).slice(2,7));
+      window.settingsFolders.push({ id, name, parent:null, order:(++window._maintOrderCounter) });
+      persist();
+      // Re-render full Settings so the new folder appears in both menus.
+      if (typeof renderSettings === "function") renderSettings();
+    });
+  }
+
+  // ===== 2) Per-folder controls: add sub, rename, remove =====
+  // Add Sub-category
+  root.querySelectorAll("[data-add-subfolder]").forEach(btn=>{
+    if (btn.dataset.wired) return; btn.dataset.wired = "1";
+    btn.addEventListener("click", ()=>{
+      const parent = btn.getAttribute("data-add-subfolder");
+      if (!byIdFolder(parent)) { alert("Folder not found."); return; }
+      const name = prompt("Sub-category name?");
+      if (!name) return;
+      const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Math.random().toString(36).slice(2,7));
+      window.settingsFolders.push({ id, name, parent, order:(++window._maintOrderCounter) });
+      persist();
+      if (typeof renderSettings === "function") renderSettings();
+    });
+  });
+
+  // Rename
+  root.querySelectorAll("[data-rename-folder]").forEach(btn=>{
+    if (btn.dataset.wired) return; btn.dataset.wired = "1";
+    btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-rename-folder");
+      const f = byIdFolder(id); if (!f) return;
+      const name = prompt("New folder name:", f.name || "");
+      if (!name) return;
+      f.name = name;
+      persist();
+      if (typeof renderSettings === "function") renderSettings();
+    });
+  });
+
+  // Remove (blocked if anything inside)
+  root.querySelectorAll("[data-remove-folder]").forEach(btn=>{
+    if (btn.dataset.wired) return; btn.dataset.wired = "1";
+    btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-remove-folder");
+      if (!byIdFolder(id)) return;
+      if (hasChildren(id)){
+        alert("Folder is not empty. Move out sub-folders and tasks first.");
+        return;
+      }
+      window.settingsFolders = window.settingsFolders.filter(f => String(f.id)!==String(id));
+      persist();
+      if (typeof renderSettings === "function") renderSettings();
+    });
+  });
+
+  // ===== 3) Make folder headers draggable (Explorer-style) =====
+  root.querySelectorAll('details.folder > summary').forEach(sum=>{
+    if (sum.dataset.wired) return; sum.dataset.wired="1";
+    sum.setAttribute("draggable","true");
+    sum.addEventListener("dragstart",(e)=>{
+      const holder = sum.closest("details.folder");
+      const fid = holder?.getAttribute("data-folder-id");
+      if (!fid) return;
+      e.dataTransfer.setData("text/plain", `category:${fid}`);
+      e.dataTransfer.effectAllowed = "move";
+      sum.classList.add("dragging");
+    });
+    sum.addEventListener("dragend",()=> sum.classList.remove("dragging"));
+  });
+
+  // ===== 4) Drag targets: drop into a folder’s body (to file items here) =====
+  function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
+
+  // Drop tasks or folders into a folder
+  root.querySelectorAll("[data-drop-folder]").forEach(zone=>{
+    if (zone.dataset.wired) return; zone.dataset.wired = "1";
+    zone.addEventListener("dragover",(e)=>{ allow(e); zone.classList.add("dragover"); });
+    zone.addEventListener("dragleave",()=> zone.classList.remove("dragover"));
+    zone.addEventListener("drop",(e)=>{
+      const fid = zone.getAttribute("data-drop-folder");
+      zone.classList.remove("dragover");
+      const raw = e.dataTransfer.getData("text/plain") || "";
+      const [kind, id, type] = raw.split(":"); // task:<id>:<interval|asreq> | category:<id>
+      if (!fid) return;
+
+      // Drop a TASK into this folder
+      if (kind === "task" && id){
+        // Prefer shared mover if present; else set cat directly.
+        if (typeof moveNodeSafely === "function"){
+          if (moveNodeSafely("task", id, { intoCat: fid })){
+            persist(); if (typeof renderSettings === "function") renderSettings();
+          }
+          return;
+        }
+        const t = findTask(id); if (!t) return;
+        t.ref.cat = fid; t.ref.parentTask = null; t.ref.order = (++window._maintOrderCounter);
+        persist(); if (typeof renderSettings === "function") renderSettings();
+        return;
+      }
+
+      // Drop a FOLDER into this folder (re-parent)
+      if (kind === "category" && id){
+        if (typeof moveNodeSafely === "function"){
+          if (moveNodeSafely("category", id, { intoCat: fid })){
+            persist(); if (typeof renderSettings === "function") renderSettings();
+          }
+          return;
+        }
+        const f = byIdFolder(id); if (!f) return;
+        // Prevent cycle
+        let cur = byIdFolder(fid), hops=0;
+        while (cur && hops++<1000){
+          if (String(cur.id)===String(id)) return; // cycle; ignore
+          cur = (cur.parent!=null) ? byIdFolder(cur.parent) : null;
+        }
+        f.parent = fid; f.order = (++window._maintOrderCounter);
+        persist(); if (typeof renderSettings === "function") renderSettings();
+      }
+    });
+  });
+
+  // ===== 5) Drag targets: drop onto a menu header to change type (Interval <-> As-Needed) =====
+  root.querySelectorAll("[data-drop-menu]").forEach(zone=>{
+    if (zone.dataset.wired) return; zone.dataset.wired = "1";
+    zone.addEventListener("dragover",(e)=>{ allow(e); zone.classList.add("dragover"); });
+    zone.addEventListener("dragleave",()=> zone.classList.remove("dragover"));
+    zone.addEventListener("drop",(e)=>{
+      const targetMenu = zone.getAttribute("data-drop-menu"); // "interval" | "asreq"
+      zone.classList.remove("dragover");
+      const raw = e.dataTransfer.getData("text/plain") || "";
+      const [kind, id, fromType] = raw.split(":");
+
+      if (kind !== "task" || !id || !targetMenu) return;
+      const live = findTask(id); if (!live) return;
+
+      // If moving to same menu, just file at root (no folder)
+      if (live.list === targetMenu){
+        if (typeof moveNodeSafely === "function"){
+          if (moveNodeSafely("task", id, { intoCat: null })){
+            persist(); if (typeof renderSettings === "function") renderSettings();
+          }
+          return;
+        }
+        live.ref.cat = null; live.ref.parentTask = null; live.ref.order = (++window._maintOrderCounter);
+        persist(); if (typeof renderSettings === "function") renderSettings();
+        return;
+      }
+
+      // Convert type (Explorer-like "move to another tree")
+      if (targetMenu === "interval" && live.list === "asreq"){
+        // Ask for interval hours
+        let val = prompt("Interval hours for this item?", "8");
+        if (val === null) return;
+        val = Number(val);
+        if (!isFinite(val) || val <= 0) { alert("Enter a positive number."); return; }
+        // Remove from asreq and insert at TOP of interval (keep same id for continuity)
+        window.tasksAsReq = window.tasksAsReq.filter(x => String(x.id)!==String(live.ref.id));
+        const moved = {
+          id: live.ref.id, name: live.ref.name, interval: val,
+          sinceBase: null, anchorTotal: null,
+          manualLink: live.ref.manualLink||"", storeLink: live.ref.storeLink||"",
+          pn: live.ref.pn||"", price: live.ref.price!=null?live.ref.price:null,
+          parentTask: null, cat: null, order:(++window._maintOrderCounter)
+        };
+        window.tasksInterval.unshift(moved);
+        persist(); if (typeof renderSettings === "function") renderSettings();
+        return;
+      }
+
+      if (targetMenu === "asreq" && live.list === "interval"){
+        // Convert to As-Required (condition optional)
+        const cond = prompt("Condition/Notes (optional):", live.ref.condition||"As required") || "As required";
+        window.tasksInterval = window.tasksInterval.filter(x => String(x.id)!==String(live.ref.id));
+        const moved = {
+          id: live.ref.id, name: live.ref.name, condition: cond,
+          manualLink: live.ref.manualLink||"", storeLink: live.ref.storeLink||"",
+          pn: live.ref.pn||"", price: live.ref.price!=null?live.ref.price:null,
+          parentTask: null, cat: null, order:(++window._maintOrderCounter)
+        };
+        window.tasksAsReq.unshift(moved);
+        persist(); if (typeof renderSettings === "function") renderSettings();
+        return;
+      }
+    });
+  });
+
+  // ===== 6) Also allow dropping a task directly on a folder header (summary) =====
+  root.querySelectorAll("details.folder > summary").forEach(sum=>{
+    if (sum.dataset.dropWired) return; sum.dataset.dropWired="1";
+    sum.addEventListener("dragover",(e)=>{ allow(e); sum.classList.add("drop-hint"); });
+    sum.addEventListener("dragleave",()=> sum.classList.remove("drop-hint"));
+    sum.addEventListener("drop",(e)=>{
+      const holder = sum.closest("details.folder");
+      const fid = holder?.getAttribute("data-folder-id");
+      sum.classList.remove("drop-hint");
+      const raw = e.dataTransfer.getData("text/plain") || "";
+      const [kind, id] = raw.split(":");
+      if (!fid || kind!=="task" || !id) return;
+
+      if (typeof moveNodeSafely === "function"){
+        if (moveNodeSafely("task", id, { intoCat: fid })){
+          persist(); if (typeof renderSettings === "function") renderSettings();
+        }
+        return;
+      }
+      const live = findTask(id); if (!live) return;
+      live.ref.cat = fid; live.ref.parentTask = null; live.ref.order = (++window._maintOrderCounter);
+      persist(); if (typeof renderSettings === "function") renderSettings();
+    });
+  });
+}
+
+
 
 function viewCosts(){
   return `
