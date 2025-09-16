@@ -1400,246 +1400,183 @@ function renderSettings(){
   const content = document.getElementById("content");
   if (!content) return;
 
-  // ---------- minimal scoped styles for clickable + draggable rows ----------
-  if (!document.getElementById("maintListCSS")){
+  // --- Defensive: ensure arrays exist ---
+  window.tasksInterval = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  window.tasksAsReq    = Array.isArray(window.tasksAsReq)    ? window.tasksAsReq    : [];
+
+  // --- Order counter (higher = nearer top) ---
+  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+  const allRaw = [...window.tasksInterval, ...window.tasksAsReq];
+  for (const t of allRaw){ if (!isFinite(t.order)) t.order = ++window._maintOrderCounter; }
+
+  // unified with type tag (sorted, top→bottom)
+  const all = [
+    ...window.tasksInterval.map(t => ({...t, __type:"interval"})),
+    ...window.tasksAsReq.map(t      => ({...t, __type:"asreq"})),
+  ].sort((a,b)=> (Number(b.order||0) - Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
+
+  // --- Scoped CSS (simple, stable) ---
+  if (!document.getElementById("maintListCSS_min")){
     const st = document.createElement("style");
-    st.id = "maintListCSS";
+    st.id = "maintListCSS_min";
     st.textContent = `
-      .bar{display:flex;gap:.5rem;justify-content:flex-start;margin-bottom:.75rem}
-      .list details.task{border:1px solid #ddd;border-radius:8px;margin:.35rem 0;background:#fff}
-      .list details.task > summary{
-        display:flex;justify-content:space-between;align-items:center;
-        padding:.5rem .6rem; cursor:pointer; user-select:none;
-      }
-      .list details.task.dragging{opacity:.6}
-      .chip{font-size:.75rem;border:1px solid #bbb;border-radius:999px;padding:.1rem .5rem}
-      .task-body{padding:.6rem .8rem; border-top:1px dashed #e5e5e5}
-      .task-body .grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
-      .task-body label{font-size:.85rem;display:block}
-      .task-body input{width:100%;padding:.4rem .5rem}
-      .task-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.5rem}
-      .drop-hint{outline:2px solid #6aa84f;border-radius:8px}
-      .empty{padding:.8rem;color:#666}
+      #maintWrap .bar{display:flex;gap:.5rem;margin-bottom:.75rem}
+      #maintWrap .list details{border:1px solid #ddd;border-radius:8px;margin:.35rem 0;background:#fff}
+      #maintWrap .list summary{display:flex;justify-content:space-between;align-items:center;padding:.5rem .6rem;cursor:pointer}
+      #maintWrap .chip{font-size:.75rem;border:1px solid #bbb;border-radius:999px;padding:.1rem .5rem}
+      #maintWrap .body{padding:.6rem .8rem;border-top:1px dashed #e5e5e5}
+      #maintWrap .grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+      #maintWrap label{font-size:.85rem;display:block}
+      #maintWrap input{width:100%;padding:.4rem .5rem}
+      #maintWrap .actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.5rem}
+      #maintWrap .empty{padding:.8rem;color:#666}
     `;
     document.head.appendChild(st);
   }
 
-  // ---------- state helpers ----------
-  window.tasksInterval = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
-  window.tasksAsReq    = Array.isArray(window.tasksAsReq)    ? window.tasksAsReq    : [];
-
-  // unified read view with type tag
-  const all = [
-    ...window.tasksInterval.map(t => ({...t, __type:"interval"})),
-    ...window.tasksAsReq.map(t      => ({...t, __type:"asreq"})),
-  ];
-
-  // establish a persistent ordering so drag reorder survives reloads
-  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
-  let maxOrder = 0;
-  for (const t of all){
-    if (!isFinite(t.order)) t.order = ++window._maintOrderCounter; // unseen tasks bubble to top once
-    if (t.order > maxOrder) maxOrder = t.order;
-  }
-  window._maintOrderCounter = Math.max(window._maintOrderCounter, maxOrder);
-
-  // sorted view (highest order first)
-  const rows = all.slice().sort((a,b) =>
-    (Number(b.order||0) - Number(a.order||0)) || String(a.name).localeCompare(String(b.name))
-  );
-
   const tagOf = (t)=> t.__type === "interval" ? "Hourly Interval" : "As Required";
 
-  const rowHTML = (t)=> `
-    <details class="task" data-id="${t.id}" data-type="${t.__type}">
-      <summary draggable="true">
-        <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:70%">${t.name}</strong>
-        <span class="chip">${tagOf(t)}</span>
-      </summary>
-      <div class="task-body">
-        <div class="grid">
-          <label>Task Name
-            <input data-k="name" data-id="${t.id}" data-type="${t.__type}" value="${t.name||""}">
-          </label>
-          ${
-            t.__type === "interval" ? `
-            <label>Interval (hrs)
-              <input type="number" min="1" step="1" data-k="interval" data-id="${t.id}" data-type="interval" value="${t.interval||''}">
-            </label>` : `
-            <label>Condition/Notes
-              <input data-k="condition" data-id="${t.id}" data-type="asreq" value="${t.condition||''}" placeholder="optional">
-            </label>`
-          }
-          <label>Part Number
-            <input data-k="pn" data-id="${t.id}" data-type="${t.__type}" value="${t.pn||''}" placeholder="optional">
-          </label>
-          <label>Price
-            <input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-type="${t.__type}" value="${(t.price!=null&&t.price!=='')?t.price:''}" placeholder="optional">
-          </label>
-          <label>Manual URL
-            <input data-k="manualLink" data-id="${t.id}" data-type="${t.__type}" value="${t.manualLink||''}" placeholder="https://…">
-          </label>
-          <label>Store Page URL
-            <input data-k="storeLink" data-id="${t.id}" data-type="${t.__type}" value="${t.storeLink||''}" placeholder="https://…">
-          </label>
+  function rowHTML(t){
+    const price = (t.price!=null && t.price!=='') ? Number(t.price) : "";
+    const cond  = t.__type==="asreq" ? (t.condition||"") : "";
+    const interval = t.__type==="interval" ? (t.interval||"") : "";
+    return `
+      <details data-id="${t.id}" data-type="${t.__type}">
+        <summary>
+          <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:70%">${t.name}</strong>
+          <span class="chip">${tagOf(t)}</span>
+        </summary>
+        <div class="body">
+          <div class="grid">
+            <label>Name
+              <input data-k="name" data-id="${t.id}" data-type="${t.__type}" value="${t.name||""}">
+            </label>
+            ${
+              t.__type==="interval"
+                ? `<label>Interval (hrs)<input type="number" min="1" step="1" data-k="interval" data-id="${t.id}" data-type="interval" value="${interval}"></label>`
+                : `<label>Condition/Notes<input data-k="condition" data-id="${t.id}" data-type="asreq" value="${cond}" placeholder="optional"></label>`
+            }
+            <label>Part Number
+              <input data-k="pn" data-id="${t.id}" data-type="${t.__type}" value="${t.pn||''}" placeholder="optional">
+            </label>
+            <label>Price
+              <input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-type="${t.__type}" value="${price!==''?price:''}" placeholder="optional">
+            </label>
+            <label>Manual URL
+              <input data-k="manualLink" data-id="${t.id}" data-type="${t.__type}" value="${t.manualLink||''}" placeholder="https://…">
+            </label>
+            <label>Store Page URL
+              <input data-k="storeLink" data-id="${t.id}" data-type="${t.__type}" value="${t.storeLink||''}" placeholder="https://…">
+            </label>
+          </div>
+          <div class="actions">
+            <button data-move-up="${t.id}" data-type="${t.__type}">Move Up</button>
+            <button data-move-down="${t.id}" data-type="${t.__type}">Move Down</button>
+            <button class="danger" data-remove="${t.id}" data-type="${t.__type}">Delete</button>
+          </div>
         </div>
-        <div class="task-actions">
-          <button data-move-top="${t.id}" data-type="${t.__type}">Move to Top</button>
-          <button class="danger" data-remove="${t.id}" data-type="${t.__type}">Delete</button>
-        </div>
-      </div>
-    </details>
-  `;
-
-  // ---------- render ----------
-  content.innerHTML = `
-    <div class="container">
-      <div class="block">
-        <div class="bar">
-          <button id="btnAddCategory">Add Category</button>
-          <button id="btnAddTask" class="primary">Add Task</button>
-        </div>
-        <div id="maintList" class="list">
-          ${rows.length ? rows.map(rowHTML).join("") : `<div class="empty">No maintenance tasks yet.</div>`}
-        </div>
-      </div>
-    </div>
-    ${/* reuse your existing add-task modal from previous step if present; otherwise the Add Task button can keep opening your modal handler */""}
-  `;
-
-  // ---------- interactivity: inline editing ----------
-  const listEl = document.getElementById("maintList");
-
-  function findLive(id, type){
-    if (type === "interval"){
-      const ref = window.tasksInterval.find(x=>String(x.id)===String(id));
-      return ref ? {ref, list:"interval"} : null;
-    }
-    const ref = window.tasksAsReq.find(x=>String(x.id)===String(id));
-    return ref ? {ref, list:"asreq"} : null;
+      </details>
+    `;
   }
 
-  listEl.addEventListener("input",(e)=>{
-    const el   = e.target;
-    const id   = el.getAttribute("data-id");
-    const type = el.getAttribute("data-type");
-    const key  = el.getAttribute("data-k");
-    if (!id || !type || !key) return;
-    const live = findLive(id, type); if (!live) return;
+  content.innerHTML = `
+    <div id="maintWrap">
+      <div class="bar">
+        <button id="btnAddCategory">Add Category</button>
+        <button id="btnAddTask" class="primary">Add Task</button>
+      </div>
+      <div id="maintList" class="list">
+        ${all.length ? all.map(rowHTML).join("") : `<div class="empty">No maintenance tasks yet.</div>`}
+      </div>
+    </div>
+  `;
 
+  // --- Helpers to get live ref ---
+  function liveRef(id, type){
+    if (type === "interval"){
+      const r = window.tasksInterval.find(x=>String(x.id)===String(id));
+      return r ? {ref:r, list:"interval"} : null;
+    }else{
+      const r = window.tasksAsReq.find(x=>String(x.id)===String(id));
+      return r ? {ref:r, list:"asreq"} : null;
+    }
+  }
+
+  const listEl = document.getElementById("maintList");
+
+  // Inline edit (persists immediately)
+  listEl.addEventListener("input",(e)=>{
+    const el = e.target;
+    const id = el.getAttribute("data-id");
+    const type = el.getAttribute("data-type");
+    const key = el.getAttribute("data-k");
+    if (!id || !type || !key) return;
+    const live = liveRef(id, type); if (!live) return;
     let val = el.value;
-    if (key === "interval" || key === "price"){
+    if (key==="interval" || key==="price"){
       val = (val === "" ? null : Number(val));
-      if (key === "interval" && val != null && val < 1) val = 1;
+      if (key==="interval" && val!=null && val < 1) val = 1;
     }
     live.ref[key] = val;
     saveCloudDebounced();
   });
 
-  // delete + move-to-top actions
+  // Move up/down + delete (no drag yet → simpler, robust)
   listEl.addEventListener("click",(e)=>{
     const del = e.target.closest("[data-remove]");
-    const top = e.target.closest("[data-move-top]");
+    const up  = e.target.closest("[data-move-up]");
+    const dn  = e.target.closest("[data-move-down]");
     if (del){
       const id = del.getAttribute("data-remove");
       const type = del.getAttribute("data-type");
-      if (type === "interval"){
-        window.tasksInterval = window.tasksInterval.filter(x=>String(x.id)!==String(id));
-      }else{
-        window.tasksAsReq = window.tasksAsReq.filter(x=>String(x.id)!==String(id));
-      }
-      saveCloudDebounced();
-      renderSettings();
-      return;
+      if (type==="interval") window.tasksInterval = window.tasksInterval.filter(x=>String(x.id)!==String(id));
+      else window.tasksAsReq = window.tasksAsReq.filter(x=>String(x.id)!==String(id));
+      saveCloudDebounced(); renderSettings(); return;
     }
-    if (top){
-      const id = top.getAttribute("data-move-top");
-      const type = top.getAttribute("data-type");
-      const live = findLive(id, type); if (!live) return;
-      live.ref.order = ++window._maintOrderCounter; // bump to top
-      saveCloudDebounced();
-      renderSettings();
-      return;
+    const changeOrder = (id, type, dir)=>{
+      // dir = +1 move up (toward top), -1 move down
+      const merged = [
+        ...window.tasksInterval.map(t => ({...t, __type:"interval"})),
+        ...window.tasksAsReq.map(t      => ({...t, __type:"asreq"})),
+      ].sort((a,b)=> Number(b.order||0) - Number(a.order||0)); // current display order
+      const idx = merged.findIndex(x=>String(x.id)===String(id) && x.__type===type);
+      if (idx < 0) return;
+      const swapIdx = idx + (dir===+1 ? -1 : +1); // because highest order is at top (index 0)
+      if (swapIdx < 0 || swapIdx >= merged.length) return;
+      const A = merged[idx], B = merged[swapIdx];
+      const aRef = liveRef(A.id, A.__type).ref;
+      const bRef = liveRef(B.id, B.__type).ref;
+      const tmp = aRef.order; aRef.order = bRef.order; bRef.order = tmp;
+      saveCloudDebounced(); renderSettings();
+    };
+    if (up){ changeOrder(up.getAttribute("data-move-up"), up.getAttribute("data-type"), +1); return; }
+    if (dn){ changeOrder(dn.getAttribute("data-move-down"), dn.getAttribute("data-type"), -1); return; }
+  });
+
+  // Add Task (minimal prompt; persists immediately, appears at top)
+  document.getElementById("btnAddTask")?.addEventListener("click", ()=>{
+    const name = prompt("Task name?"); if (!name) return;
+    const occ  = (prompt("Occurrence: type 'interval' or 'asreq'")||"").trim().toLowerCase();
+    if (occ !== "interval" && occ !== "asreq"){ alert("Please enter 'interval' or 'asreq'."); return; }
+    const id = genId(name);
+    const base = { id, name, order: (++window._maintOrderCounter), pn:"", price:null, manualLink:"", storeLink:"", cat:null, parentTask:null };
+    if (occ === "interval"){
+      const iv = Number(prompt("Interval hours? (positive number)", "100")||"0")||0;
+      if (iv<=0){ alert("Interval must be positive."); return; }
+      window.tasksInterval.unshift({ ...base, interval: iv, sinceBase:null, anchorTotal:null });
+    }else{
+      window.tasksAsReq.unshift({ ...base, condition:"As required" });
     }
-  });
-
-  // ---------- drag & drop reordering ----------
-  const DRAG = { id:null, type:null };
-  listEl.addEventListener("dragstart",(e)=>{
-    const sum = e.target.closest("summary");
-    const card = e.target.closest("details.task");
-    if (!sum || !card) return;
-    DRAG.id   = card.getAttribute("data-id");
-    DRAG.type = card.getAttribute("data-type");
-    card.classList.add("dragging");
-    e.dataTransfer.setData("text/plain", DRAG.id);
-    e.dataTransfer.effectAllowed = "move";
-  });
-  listEl.addEventListener("dragend",(e)=>{
-    const card = e.target.closest("details.task");
-    card?.classList.remove("dragging");
-    DRAG.id = DRAG.type = null;
-    listEl.querySelectorAll(".drop-hint").forEach(x=>x.classList.remove("drop-hint"));
-  });
-  listEl.addEventListener("dragover",(e)=>{
-    const tgt = e.target.closest("details.task");
-    if (!tgt) return;
-    e.preventDefault();
-    tgt.classList.add("drop-hint");
-  });
-  listEl.addEventListener("dragleave",(e)=>{
-    const tgt = e.target.closest("details.task");
-    tgt?.classList.remove("drop-hint");
-  });
-  listEl.addEventListener("drop",(e)=>{
-    const tgt = e.target.closest("details.task");
-    if (!tgt || !DRAG.id || !DRAG.type) return;
-    e.preventDefault();
-    tgt.classList.remove("drop-hint");
-
-    // place dragged item directly above the drop target (same global list)
-    const targetId   = tgt.getAttribute("data-id");
-    const targetType = tgt.getAttribute("data-type");
-    const targetLive = findLive(targetId, targetType);
-    const dragLive   = findLive(DRAG.id, DRAG.type);
-    if (!targetLive || !dragLive) return;
-
-    // Keep types as-is (no list switching here); just order relative
-    dragLive.ref.order = (Number(targetLive.ref.order)||0) + 0.5;
-
-    // normalize sequence so we don't get fractional creep
-    const merged = [
-      ...window.tasksInterval.map(t => ({...t, __type:"interval"})),
-      ...window.tasksAsReq.map(t => ({...t, __type:"asreq"})),
-    ].sort((a,b)=> Number(b.order||0) - Number(a.order||0));
-
-    let n = merged.length;
-    for (const v of merged){
-      if (v.__type === "interval"){
-        const r = window.tasksInterval.find(x=>x.id===v.id); if (r) r.order = n--;
-      }else{
-        const r = window.tasksAsReq.find(x=>x.id===v.id); if (r) r.order = n--;
-      }
-    }
-    window._maintOrderCounter = merged.length;
-
     saveCloudDebounced();
     renderSettings();
   });
 
-  // ---------- Add Category / Add Task buttons ----------
+  // Category placeholder (we’ll restore folders once baseline is stable)
   document.getElementById("btnAddCategory")?.addEventListener("click", ()=>{
-    alert("Categories/folders coming next. For now, tasks are editable and draggable.");
-  });
-
-  // Reuse your existing Add Task modal/handler if present.
-  // If you want me to wire the button to the modal you already have, tell me the modal IDs you kept.
-  document.getElementById("btnAddTask")?.addEventListener("click", ()=>{
-    // If you already have a modal opener, call it here. Otherwise we can add it next.
-    if (typeof openAddTaskModal === "function"){ openAddTaskModal(); }
-    else{ alert("Add Task modal hookup can be added next; meanwhile, items are editable inline."); }
+    alert("Categories will be re-enabled after we stabilize the task list.");
   });
 }
+
 
 
 function renderJobs(){
