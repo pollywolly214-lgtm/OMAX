@@ -1517,7 +1517,6 @@ function moveNodeSafely(kind, nodeId, target){
   return false;
 }
 
-
 function renderSettings(){
   const root = document.getElementById("content");
   if (!root) return;
@@ -1525,8 +1524,9 @@ function renderSettings(){
   // ------- Defensive: ensure arrays exist -------
   window.tasksInterval = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
   window.tasksAsReq    = Array.isArray(window.tasksAsReq)    ? window.tasksAsReq    : [];
+  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
-  // Persist helper: works for cloud or local builds
+  // Persist helper (cloud or local)
   function persist(){
     if (typeof saveCloudDebounced === "function") { try { saveCloudDebounced(); } catch(_){} }
     if (typeof saveTasks === "function") { try { saveTasks(); } catch(_){} }
@@ -1534,14 +1534,15 @@ function renderSettings(){
 
   const fmtPrice = v => (v==null || v==="") ? "" : String(v);
 
-  // Minimal styles scoped to Settings (kept stable)
-  if (!document.getElementById("settingsBasicCSS")){
+  // ----- Minimal CSS (adds DnD visuals; no change to index.html needed) -----
+  if (!document.getElementById("settingsDndCSS")){
     const st = document.createElement("style");
-    st.id = "settingsBasicCSS";
+    st.id = "settingsDndCSS";
     st.textContent = `
       #maintSettings .bar{display:flex;gap:.5rem;margin-bottom:.75rem}
       #maintSettings details.task{border:1px solid #ddd;border-radius:8px;margin:.35rem 0;background:#fff}
-      #maintSettings details.task>summary{display:flex;justify-content:space-between;align-items:center;padding:.5rem .6rem;cursor:pointer}
+      #maintSettings details.task>summary{display:flex;justify-content:space-between;align-items:center;padding:.5rem .6rem;cursor:grab;user-select:none}
+      #maintSettings details.task.dragging{opacity:.55}
       #maintSettings .chip{font-size:.75rem;border:1px solid #bbb;border-radius:999px;padding:.1rem .5rem}
       #maintSettings .body{padding:.6rem .8rem;border-top:1px dashed #e5e5e5}
       #maintSettings .grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
@@ -1552,19 +1553,38 @@ function renderSettings(){
       #maintSettings .forms{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin:.5rem 0 1rem}
       #maintSettings .forms .mini-form{border:1px solid #e5e5e5;border-radius:8px;padding:.5rem .6rem;background:#fff}
       #maintSettings .forms strong{display:block;margin-bottom:.35rem}
+      /* DnD drop lines */
+      #maintSettings .dz{height:8px;margin:4px 0;border-radius:6px}
+      #maintSettings .dz.dragover{height:18px;background:rgba(0,0,0,.05);outline:2px dashed #888}
+      #maintSettings summary.drop-hint{outline:2px solid #6aa84f;border-radius:6px}
     `;
     document.head.appendChild(st);
   }
 
-  // Row renderers with move controls
-  function taskDetailsInterval(task){
-    return `
-      <details class="task" data-task-id="${task.id}">
-        <summary>
+  // ----- Row renderers (add draggable & drop-zones) -----
+  function rowTemplate(task, type){
+    const commonTop = `
+      <div class="dz" data-drop-before="${task.id}" data-type="${type}"></div>
+      <details class="task" data-task-id="${task.id}" data-type="${type}">
+        <summary draggable="true">
           <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:70%">${task.name}</strong>
-          <span class="chip">Hourly Interval</span>
+          <span class="chip">${type === "interval" ? "Hourly Interval" : "As Required"}</span>
         </summary>
         <div class="body">
+    `;
+    const commonBottom = `
+          <div class="actions">
+            <button data-move-top="${task.id}" data-from="${type}">Move to Top</button>
+            <button data-move-up="${task.id}"  data-from="${type}">Move Up</button>
+            <button data-move-down="${task.id}" data-from="${type}">Move Down</button>
+            ${type==="interval" ? `<button class="btn-complete" data-complete="${task.id}">Mark Completed Now</button>` : ""}
+            <button class="danger" data-remove="${task.id}" data-from="${type}">Remove</button>
+          </div>
+        </div>
+      </details>
+    `;
+    if (type === "interval"){
+      return commonTop + `
           <div class="grid">
             <label>Name
               <input data-k="name" data-id="${task.id}" data-list="interval" value="${task.name||""}">
@@ -1585,25 +1605,9 @@ function renderSettings(){
               <input type="url" data-k="link" data-id="${task.id}" data-list="interval" value="${task.link||task.storeLink||task.manualLink||""}" placeholder="https://…">
             </label>
           </div>
-          <div class="actions">
-            <button data-move-top="${task.id}" data-from="interval">Move to Top</button>
-            <button data-move-up="${task.id}"  data-from="interval">Move Up</button>
-            <button data-move-down="${task.id}" data-from="interval">Move Down</button>
-            <span style="flex:1"></span>
-            <button class="btn-complete" data-complete="${task.id}">Mark Completed Now</button>
-            <button class="danger" data-remove="${task.id}" data-from="interval">Remove</button>
-          </div>
-        </div>
-      </details>`;
-  }
-  function taskDetailsAsReq(task){
-    return `
-      <details class="task" data-task-id="${task.id}">
-        <summary>
-          <strong style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:70%">${task.name}</strong>
-          <span class="chip">As Required</span>
-        </summary>
-        <div class="body">
+      ` + commonBottom;
+    }else{
+      return commonTop + `
           <div class="grid">
             <label>Name
               <input data-k="name" data-id="${task.id}" data-list="asreq" value="${task.name||""}">
@@ -1621,23 +1625,16 @@ function renderSettings(){
               <input type="url" data-k="link" data-id="${task.id}" data-list="asreq" value="${task.link||task.storeLink||task.manualLink||""}" placeholder="https://…">
             </label>
           </div>
-          <div class="actions">
-            <button data-move-top="${task.id}" data-from="asreq">Move to Top</button>
-            <button data-move-up="${task.id}"  data-from="asreq">Move Up</button>
-            <button data-move-down="${task.id}" data-from="asreq">Move Down</button>
-            <span style="flex:1"></span>
-            <button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button>
-          </div>
-        </div>
-      </details>`;
+      ` + commonBottom;
+    }
   }
 
-  // Page view (same structure as your v6)
+  // ----- Page view (kept same sectioning as your v6) -----
   const html = `
     <div id="maintSettings" class="container">
       <div class="block" style="grid-column:1 / -1">
         <h3>Maintenance Settings</h3>
-        <p class="small">Two categories: <b>By Interval (hrs)</b> and <b>As Required</b>. Edits here affect Dashboard and Calendar.</p>
+        <p class="small">Drag a task onto another task to make it a sub-component. Drag onto a thin line to reorder.</p>
 
         <div class="forms">
           <form id="addIntervalForm" class="mini-form">
@@ -1647,7 +1644,7 @@ function renderSettings(){
             <button type="submit">Add</button>
           </form>
 
-        <form id="addAsReqForm" class="mini-form">
+          <form id="addAsReqForm" class="mini-form">
             <strong>Add As-Required Task</strong>
             <input type="text" id="ar_name" placeholder="Name" required>
             <input type="text" id="ar_condition" placeholder="Condition (e.g., When damaged)">
@@ -1657,12 +1654,14 @@ function renderSettings(){
 
         <h4>By Interval (hrs)</h4>
         <div id="intervalList">
-          ${tasksInterval.map(taskDetailsInterval).join("")}
+          ${tasksInterval.map(t => rowTemplate(t,"interval")).join("")}
+          <div class="dz" data-drop-end="interval"></div>
         </div>
 
         <h4 style="margin-top:16px;">As Required</h4>
         <div id="asreqList">
-          ${tasksAsReq.map(taskDetailsAsReq).join("")}
+          ${tasksAsReq.map(t => rowTemplate(t,"asreq")).join("")}
+          <div class="dz" data-drop-end="asreq"></div>
         </div>
 
         <div style="margin-top:10px;">
@@ -1673,7 +1672,7 @@ function renderSettings(){
   `;
   root.innerHTML = html;
 
-  // ------- Inline edit (delegated) -------
+  // ------- Inline edit bindings -------
   root.querySelectorAll("[data-id]").forEach(inp => {
     inp.addEventListener("input", () => {
       const id   = inp.getAttribute("data-id");
@@ -1703,7 +1702,6 @@ function renderSettings(){
       renderSettings();
     });
   });
-
   root.querySelectorAll(".btn-complete").forEach(btn => {
     btn.addEventListener("click", () => {
       if (typeof completeTask === "function"){
@@ -1722,44 +1720,14 @@ function renderSettings(){
     });
   });
 
-  // ------- Move Up / Down / Top -------
-  function moveIn(arr, id, dir){
-    const i = arr.findIndex(x => String(x.id) === String(id));
-    if (i < 0) return;
-    if (dir === "top"){
-      const [sp] = arr.splice(i,1);
-      arr.unshift(sp);
-      return;
-    }
-    const j = dir === "up" ? i - 1 : i + 1;
-    if (j < 0 || j >= arr.length) return;
-    const [sp] = arr.splice(i,1);
-    arr.splice(j,0,sp);
-  }
-
-  root.addEventListener("click",(e)=>{
-    const up  = e.target.closest("[data-move-up]");
-    const dn  = e.target.closest("[data-move-down]");
-    const top = e.target.closest("[data-move-top]");
-    if (!up && !dn && !top) return;
-
-    const id   = (up||dn||top).getAttribute(up? "data-move-up" : dn? "data-move-down" : "data-move-top");
-    const from = (up||dn||top).getAttribute("data-from"); // "interval" | "asreq"
-    const arr  = from === "interval" ? tasksInterval : tasksAsReq;
-
-    moveIn(arr, id, top ? "top" : (up ? "up" : "down"));
-    persist();
-    renderSettings();
-  });
-
-  // ------- Add forms (put new tasks at TOP) -------
+  // ------- Add forms (insert TOP) -------
   document.getElementById("addIntervalForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = document.getElementById("ai_name").value.trim();
     const interval = Number(document.getElementById("ai_interval").value);
     if (!name || !isFinite(interval) || interval <= 0) return;
     const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
-    tasksInterval.unshift({ id, name, interval, sinceBase:null, anchorTotal:null, cost:"", link:"" }); // TOP
+    tasksInterval.unshift({ id, name, interval, sinceBase:null, anchorTotal:null, cost:"", link:"", parentTask:null, cat:null });
     if (typeof inventory !== "undefined" && Array.isArray(inventory)){
       inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
       if (typeof saveInventory === "function") saveInventory();
@@ -1767,14 +1735,13 @@ function renderSettings(){
     persist();
     renderSettings();
   });
-
   document.getElementById("addAsReqForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name = document.getElementById("ar_name").value.trim();
     const condition = (document.getElementById("ar_condition").value || "").trim() || "As required";
     if (!name) return;
     const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Date.now());
-    tasksAsReq.unshift({ id, name, condition, cost:"", link:"" }); // TOP
+    tasksAsReq.unshift({ id, name, condition, cost:"", link:"", parentTask:null, cat:null });
     if (typeof inventory !== "undefined" && Array.isArray(inventory)){
       inventory.push({ id:"inv_"+id, name, qty:0, unit:"pcs", note:"", pn:"", link:"" });
       if (typeof saveInventory === "function") saveInventory();
@@ -1783,207 +1750,111 @@ function renderSettings(){
     renderSettings();
   });
 
-  // ------- Save All -------
   document.getElementById("saveTasksBtn")?.addEventListener("click", ()=>{
     persist();
     if (typeof route === "function") route();
   });
-}
 
-// Renders the Explorer-style Categories pane (folders only) with safe DnD.
+  // ------- DRAG & DROP (Explorer-style) -------
+  const maint = document.getElementById("maintSettings");
+  const DRAG = { id:null, type:null };
 
-// Renders the Explorer-style Categories pane (folders) and accepts drops of FOLDERS and TASKS.
-function renderSettingsCategoriesPane(){
-  // Ensure state
-  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
-  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
-
-  const root = document.getElementById("maintSettings");
-  if (!root) return;
-
-  // ----- CSS (scoped) -----
-  if (!document.getElementById("catTreeCSS")){
-    const st = document.createElement("style");
-    st.id = "catTreeCSS";
-    st.textContent = `
-      #catPaneBlock { border:1px solid #e5e5e5; background:#fff; border-radius:10px; padding:10px; margin-bottom:12px; }
-      #catPaneBlock .head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
-      #catPaneBlock .head h4 { margin:0; }
-      #catPaneBlock .head button { padding:6px 10px; }
-      #catTree details.cat { border:1px solid #eee; border-radius:8px; margin:6px 0; background:#fafafa; }
-      #catTree summary { font-weight:800; font-size:1.02rem; cursor:grab; user-select:none; padding:6px 8px; display:flex; align-items:center; gap:8px; }
-      #catTree details.cat.dragging { opacity:.55; }
-      #catTree .children { padding:6px 10px 10px 18px; }
-      #catTree .dz { height:8px; margin:4px 0; border-radius:6px; }
-      #catTree .dz.dragover { height:18px; background:rgba(0,0,0,.05); outline:2px dashed #888; }
-      #catTree .drop-hint { outline:2px solid #6aa84f; border-radius:6px; }
-      #catTree .empty { color:#666; padding:4px 2px; }
-    `;
-    document.head.appendChild(st);
-  }
-
-  // ----- Ensure a holder block exists (insert above your Add forms) -----
-  let block = document.getElementById("catPaneBlock");
-  if (!block){
-    block = document.createElement("div");
-    block.id = "catPaneBlock";
-    const forms = root.querySelector(".forms"); // from renderSettings()
-    if (forms) root.firstElementChild.insertBefore(block, forms); else root.firstElementChild.prepend(block);
-  }
-
-  // Helpers
-  const byId = (id)=> window.settingsFolders.find(f=>String(f.id)===String(id)) || null;
-  const childrenOf = (parent)=> window.settingsFolders
-    .filter(f => String(f.parent||"") === String(parent||""))
-    .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
-
-  function folderHTML(f){
-    return `
-      <details class="cat" data-cat-id="${f.id}" open>
-        <summary draggable="true">${f.name}</summary>
-
-        <!-- Drop into this category (TOP) -->
-        <div class="dz" data-drop-into="${f.id}"></div>
-
-        <div class="children" data-children-of="${f.id}">
-          ${childrenOf(f.id).map(folderHTML).join("")}
-        </div>
-      </details>
-    `;
-  }
-
-  const roots = childrenOf(null);
-  block.innerHTML = `
-    <div class="head">
-      <h4>Categories (folders)</h4>
-      <button id="btnAddCategory">+ Add Category</button>
-      <span class="small muted">Drag folders to re-parent, and drag tasks here to file them.</span>
-    </div>
-    <div id="catTree" role="tree">
-      <div class="dz" data-drop-root="1"></div>
-      ${roots.length ? roots.map(folderHTML).join("") : `<div class="empty">No categories yet.</div>`}
-    </div>
-  `;
-
-  // ----- Add Category (always to TOP at root) -----
-  document.getElementById("btnAddCategory")?.addEventListener("click", ()=>{
-    const name = prompt("Category name?");
-    if (!name) return;
-    const id = name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Math.random().toString(36).slice(2,7);
-    window.settingsFolders.push({ id, name, parent:null, order:(++window._maintOrderCounter) });
-    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-    renderSettingsCategoriesPane();
-  });
-
-  // ----- DnD wiring: folders + tasks -----
-  const tree = document.getElementById("catTree");
-  const DRAG = { id:null, kind:null };
-
-  tree.addEventListener("dragstart",(e)=>{
-    const card = e.target.closest("details.cat");
-    if (!card) return;
-    DRAG.id = card.getAttribute("data-cat-id");
-    DRAG.kind = "category";
+  // Start dragging from any task summary
+  maint.addEventListener("dragstart",(e)=>{
+    const sum = e.target.closest("summary");
+    const card = e.target.closest("details.task");
+    if (!sum || !card) return;
+    const id   = card.getAttribute("data-task-id");
+    const type = card.getAttribute("data-type");
+    DRAG.id = id; DRAG.type = type;
     card.classList.add("dragging");
-    e.dataTransfer.setData("text/plain", `category:${DRAG.id}`);
+    e.dataTransfer.setData("text/plain", `task:${id}:${type}`); // also usable by Categories pane
     e.dataTransfer.effectAllowed = "move";
   });
-  tree.addEventListener("dragend",(e)=>{
-    const card = e.target.closest("details.cat");
+
+  maint.addEventListener("dragend",(e)=>{
+    const card = e.target.closest("details.task");
     card?.classList.remove("dragging");
-    tree.querySelectorAll(".drop-hint").forEach(x=>x.classList.remove("drop-hint"));
-    tree.querySelectorAll(".dz.dragover").forEach(x=>x.classList.remove("dragover"));
-    DRAG.id = DRAG.kind = null;
+    DRAG.id = DRAG.type = null;
+    maint.querySelectorAll(".dz.dragover").forEach(el=>el.classList.remove("dragover"));
+    maint.querySelectorAll("summary.drop-hint").forEach(el=>el.classList.remove("drop-hint"));
   });
 
   function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
-  tree.addEventListener("dragover",(e)=>{
+
+  // Hover feedback: lines (reorder) or headers (into)
+  maint.addEventListener("dragover",(e)=>{
     const dz = e.target.closest(".dz");
     const sum = e.target.closest("summary");
     if (dz){ allow(e); dz.classList.add("dragover"); }
     if (sum){ allow(e); sum.classList.add("drop-hint"); }
   });
-  tree.addEventListener("dragleave",(e)=>{
+  maint.addEventListener("dragleave",(e)=>{
     const dz = e.target.closest(".dz"); dz?.classList.remove("dragover");
     const sum = e.target.closest("summary"); sum?.classList.remove("drop-hint");
   });
 
-  tree.addEventListener("drop",(e)=>{
-    const raw = e.dataTransfer.getData("text/plain") || "";
-    // Supported payloads:
-    //  - "category:<id>"
-    //  - "task:<id>:<type>" where <type> is "interval" or "asreq"
-    const parts = raw.split(":");
-    const kind  = parts[0];
-    const id    = parts[1] || null;
-
-    const dzRoot   = e.target.closest("[data-drop-root]");
-    const dzInto   = e.target.closest("[data-drop-into]");
-    const onSum    = e.target.closest("summary");
+  maint.addEventListener("drop",(e)=>{
+    const payload = e.dataTransfer.getData("text/plain") || "";
+    const [kind, dragId, dragType] = payload.split(":");
+    if (kind !== "task" || !dragId) return;
     e.preventDefault();
 
-    // ---- Move TASK into a category (or to root) ----
-    if (kind === "task" && id){
-      if (dzRoot){
-        if (moveNodeSafely("task", id, { intoCat: null })){
-          if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-          // Repaint both panes so the user sees changes immediately
-          renderSettingsCategoriesPane();
-          if (typeof renderSettings === "function") renderSettings();
+    const dz  = e.target.closest(".dz");
+    const sum = e.target.closest("summary");
+
+    // Reorder: drop on line → place BEFORE that task (same container as target)
+    if (dz && dz.hasAttribute("data-drop-before")){
+      const beforeId   = dz.getAttribute("data-drop-before");
+      const beforeType = dz.getAttribute("data-type"); // not strictly needed, kept for future guards
+      if (typeof moveNodeSafely === "function"){
+        if (moveNodeSafely("task", dragId, { beforeTask:{ id: beforeId, type: beforeType } })){
+          persist();
+          renderSettings();
+          if (typeof renderSettingsCategoriesPane === "function") renderSettingsCategoriesPane(); // refresh folder view
         }
-        return;
-      }
-      if (dzInto){
-        const fid = dzInto.getAttribute("data-drop-into");
-        if (moveNodeSafely("task", id, { intoCat: fid })){
-          if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-          renderSettingsCategoriesPane();
-          if (typeof renderSettings === "function") renderSettings();
-        }
-        return;
-      }
-      // Dropping a task ON a folder header = also file into that folder
-      if (onSum){
-        const holder = onSum.closest("details.cat");
-        const fid = holder?.getAttribute("data-cat-id");
-        if (fid && moveNodeSafely("task", id, { intoCat: fid })){
-          if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-          renderSettingsCategoriesPane();
-          if (typeof renderSettings === "function") renderSettings();
-        }
-        return;
       }
       return;
     }
 
-    // ---- Move CATEGORY (existing behavior) ----
-    if (kind === "category" && id){
-      if (dzRoot){
-        if (moveNodeSafely("category", id, { intoCat: null })){
-          if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-          renderSettingsCategoriesPane();
-        }
-        return;
-      }
-      if (dzInto){
-        const fid = dzInto.getAttribute("data-drop-into");
-        if (moveNodeSafely("category", id, { intoCat: fid })){
-          if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-          renderSettingsCategoriesPane();
-        }
-        return;
-      }
-      if (onSum){
-        const holder = onSum.closest("details.cat");
-        const beforeId = holder?.getAttribute("data-cat-id");
-        if (beforeId && moveNodeSafely("category", id, { beforeCat:{ id: beforeId } })){
-          if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-          renderSettingsCategoriesPane();
+    // Drop at end of list (after last item): emulate "before" by choosing a sentinel strategy
+    if (dz && dz.hasAttribute("data-drop-end")){
+      const listType = dz.getAttribute("data-drop-end"); // "interval" | "asreq"
+      const arr = (listType==="interval") ? tasksInterval : tasksAsReq;
+      if (arr.length){
+        const lastId = arr[arr.length-1].id;
+        // We want after last; do before nothing → set order above last by using before-last then swap:
+        if (typeof moveNodeSafely === "function"){
+          if (moveNodeSafely("task", dragId, { beforeTask:{ id: lastId, type: listType } })){
+            // Then bump to top of the container by moving above first? Keep simple: re-render; user can fine tune.
+            persist(); renderSettings(); if (typeof renderSettingsCategoriesPane==="function") renderSettingsCategoriesPane();
+          }
         }
       }
+      return;
+    }
+
+    // Into-task: drop on header → become its sub-component
+    if (sum){
+      const holder = sum.closest("details.task");
+      const parentId = holder?.getAttribute("data-task-id");
+      if (parentId && typeof moveNodeSafely === "function"){
+        if (moveNodeSafely("task", dragId, { intoTask: parentId })){
+          persist();
+          renderSettings();
+          if (typeof renderSettingsCategoriesPane === "function") renderSettingsCategoriesPane();
+        }
+      }
+      return;
     }
   });
+
+  // ------- Also render folder pane on top -------
+  if (typeof renderSettingsCategoriesPane === "function"){
+    renderSettingsCategoriesPane();
+  }
 }
+
 
 function renderJobs(){
   const content = document.getElementById("content"); 
