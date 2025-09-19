@@ -202,23 +202,32 @@ const defaultAsReqTasks = [
 ];
 
 /* ===================== Persisted state ===================== */
-let totalHistory = Array.isArray(totalHistory) ? totalHistory : [];        // [{dateISO, hours}]
-let tasksInterval = Array.isArray(tasksInterval) ? tasksInterval : [];     // interval tasks
-let tasksAsReq   = Array.isArray(tasksAsReq)   ? tasksAsReq   : [];        // as-required tasks
-let inventory    = Array.isArray(inventory)    ? inventory    : [];
-let cuttingJobs  = Array.isArray(cuttingJobs)  ? cuttingJobs  : [];        // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
+if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateISO, hours}]
+if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
+if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
+if (!Array.isArray(window.inventory))    window.inventory    = [];
+if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
+
+const totalHistory = window.totalHistory;
+const tasksInterval = window.tasksInterval;
+const tasksAsReq    = window.tasksAsReq;
+const inventory     = window.inventory;
+const cuttingJobs   = window.cuttingJobs;
 
 /* ================ Jobs editing & render flags ================ */
-let editingJobs  = (editingJobs instanceof Set) ? editingJobs : new Set();
-let RENDER_TOTAL = typeof RENDER_TOTAL === "number" ? RENDER_TOTAL : null;
-let RENDER_DELTA = typeof RENDER_DELTA === "number" ? RENDER_DELTA : 0;
+if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
+if (typeof window.RENDER_TOTAL !== "number") window.RENDER_TOTAL = null;
+if (typeof window.RENDER_DELTA !== "number") window.RENDER_DELTA = 0;
+
+const editingJobs  = window.editingJobs;
+let   RENDER_TOTAL = window.RENDER_TOTAL;
+let   RENDER_DELTA = window.RENDER_DELTA;
 
 /* ==================== Cloud load / save ===================== */
 function snapshotState(){
-  // pumpEff is defined elsewhere in app (9); guard so snapshot never throws
-  const safePumpEff = (typeof pumpEff !== "undefined") ? pumpEff : null;
+  const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
   return {
-    schema: APP_SCHEMA,
+    schema: window.APP_SCHEMA,
     totalHistory,
     tasksInterval,
     tasksAsReq,
@@ -229,42 +238,33 @@ function snapshotState(){
 }
 
 /* ======= Minimal folder model used by the explorer UI ======= */
-let folders = Array.isArray(window.folders) && window.folders.length
-  ? window.folders
-  : [
-      { id: "root",     name: "All Tasks",    parent: null },
-      { id: "interval", name: "Per Interval", parent: "root" },
-      { id: "asreq",    name: "As Required",  parent: "root" },
-    ];
+if (!Array.isArray(window.folders) || !window.folders.length) {
+  window.folders = [
+    { id: "root",     name: "All Tasks",    parent: null },
+    { id: "interval", name: "Per Interval", parent: "root" },
+    { id: "asreq",    name: "As Required",  parent: "root" },
+  ];
+}
+const folders = window.folders;
 
 /* ================ Explorer helper functions ================= */
 function childrenFolders(parentId){
-  return (Array.isArray(folders) ? folders : []).filter(f => f.parent === parentId);
+  return folders.filter(f => f.parent === parentId);
 }
 
 function topTasksInCat(folderId){
-  // Root shows both lists together; others are specific
   switch (folderId) {
-    case "interval": return Array.isArray(tasksInterval) ? tasksInterval : [];
-    case "asreq":    return Array.isArray(tasksAsReq)    ? tasksAsReq    : [];
-    default:         return []
-                        .concat(Array.isArray(tasksInterval) ? tasksInterval : [])
-                        .concat(Array.isArray(tasksAsReq)    ? tasksAsReq    : []);
+    case "interval": return tasksInterval;
+    case "asreq":    return tasksAsReq;
+    default:         return tasksInterval.concat(tasksAsReq);
   }
 }
 
 /* Ensure every task carries a category tag used by calendar/explorer */
 function ensureTaskCategories(){
-  if (Array.isArray(tasksInterval)) {
-    tasksInterval.forEach(t => { if (t && typeof t === "object" && !t.cat) t.cat = "interval"; });
-  }
-  if (Array.isArray(tasksAsReq)) {
-    tasksAsReq.forEach(t => { if (t && typeof t === "object" && !t.cat) t.cat = "asreq"; });
-  }
+  tasksInterval.forEach(t => { if (t && !t.cat) t.cat = "interval"; });
+  tasksAsReq.forEach(t =>    { if (t && !t.cat) t.cat = "asreq"; });
 }
-
-
-
 
 function adoptState(doc){
   const data = doc || {};
