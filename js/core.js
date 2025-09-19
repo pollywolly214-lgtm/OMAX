@@ -16,6 +16,8 @@ const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr
 const WORKSPACE_ID = "schreiner-robotics";
 
+window.APP_SCHEMA = APP_SCHEMA;
+
 /* Root helpers */
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
@@ -208,11 +210,15 @@ if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
 if (!Array.isArray(window.inventory))    window.inventory    = [];
 if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
 
-const totalHistory = window.totalHistory;
-const tasksInterval = window.tasksInterval;
-const tasksAsReq    = window.tasksAsReq;
-const inventory     = window.inventory;
-const cuttingJobs   = window.cuttingJobs;
+if (typeof window.pumpEff !== "object" || !window.pumpEff){
+  window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] };
+}
+
+let totalHistory = window.totalHistory;
+let tasksInterval = window.tasksInterval;
+let tasksAsReq    = window.tasksAsReq;
+let inventory     = window.inventory;
+let cuttingJobs   = window.cuttingJobs;
 
 /* ================ Jobs editing & render flags ================ */
 if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
@@ -223,11 +229,14 @@ const editingJobs  = window.editingJobs;
 let   RENDER_TOTAL = window.RENDER_TOTAL;
 let   RENDER_DELTA = window.RENDER_DELTA;
 
+window.defaultIntervalTasks = defaultIntervalTasks;
+window.defaultAsReqTasks = defaultAsReqTasks;
+
 /* ==================== Cloud load / save ===================== */
 function snapshotState(){
   const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
   return {
-    schema: window.APP_SCHEMA,
+    schema: window.APP_SCHEMA || APP_SCHEMA,
     totalHistory,
     tasksInterval,
     tasksAsReq,
@@ -280,6 +289,12 @@ function adoptState(doc){
   inventory = Array.isArray(data.inventory) ? data.inventory : seedInventoryFromTasks();
   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
 
+  window.totalHistory = totalHistory;
+  window.tasksInterval = tasksInterval;
+  window.tasksAsReq = tasksAsReq;
+  window.inventory = inventory;
+  window.cuttingJobs = cuttingJobs;
+
   // Pump efficiency (guard against reading an undefined identifier)
   const pe = (typeof window.pumpEff === "object" && window.pumpEff)
     ? window.pumpEff
@@ -290,7 +305,8 @@ function adoptState(doc){
     pe.baselineDateISO = (data.pumpEff.baselineDateISO ?? pe.baselineDateISO);
     pe.entries         = Array.isArray(data.pumpEff.entries) ? data.pumpEff.entries.slice() : pe.entries;
   }
-     ensureTaskCategories();
+
+  ensureTaskCategories();
 }
 
 
@@ -306,6 +322,9 @@ async function loadFromCloud(){
       const data = snap.data() || {};
       const needsSeed = !Array.isArray(data.tasksInterval) || data.tasksInterval.length === 0;
       if (needsSeed){
+        const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+          ? window.pumpEff
+          : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
         const seeded = {
           schema:APP_SCHEMA,
           totalHistory: Array.isArray(data.totalHistory) ? data.totalHistory : [],
@@ -313,7 +332,7 @@ async function loadFromCloud(){
           tasksAsReq: Array.isArray(data.tasksAsReq) && data.tasksAsReq.length ? data.tasksAsReq : defaultAsReqTasks.slice(),
           inventory: Array.isArray(data.inventory) && data.inventory.length ? data.inventory : seedInventoryFromTasks(),
           cuttingJobs: Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [],
-          pumpEff
+          pumpEff: pe
         };
         adoptState(seeded);
         await FB.docRef.set(seeded, { merge:true });
@@ -321,13 +340,19 @@ async function loadFromCloud(){
         adoptState(data);
       }
     }else{
-      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], pumpEff };
+      const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+        ? window.pumpEff
+        : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], pumpEff: pe };
       adoptState(seeded);
       await FB.docRef.set(seeded);
     }
   }catch(e){
     console.error("Cloud load failed:", e);
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], pumpEff });
+    const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+      ? window.pumpEff
+      : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], pumpEff: pe });
   }
 }
 
