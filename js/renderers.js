@@ -425,6 +425,16 @@ function renderSettings(){
 
 
 
+  // --- Normalize relationships so legacy data can't hide tasks ---
+  // Tasks synced from Firestore/localStorage may still carry the
+  // legacy `cat` values ("interval"/"asreq") or point at folders that
+  // no longer exist. That caused the new explorer view to render an
+  // empty list even though the calendar still had tasks. Running the
+  // shared repair step resets any stale pointers before we render.
+  if (typeof repairMaintenanceGraph === "function") {
+    repairMaintenanceGraph();
+  }
+
   // --- Small, compact scoped styles (once) ---
   if (!document.getElementById("settingsExplorerCSS")){
     const st = document.createElement("style");
