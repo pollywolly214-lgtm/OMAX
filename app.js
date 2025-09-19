@@ -201,42 +201,69 @@ const defaultAsReqTasks = [
   { id:"clean_rails",           name:"Clean X-rails & Y-bridge rails", condition:"If debris occurs", manualLink:"", storeLink:"" }
 ];
 
-/* Persisted state */
-let totalHistory = []; // [{dateISO,hours}]
-let tasksInterval = [];
-let tasksAsReq   = [];
-let inventory    = [];
-let cuttingJobs  = []; // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
+/* ===================== Persisted state ===================== */
+let totalHistory = Array.isArray(totalHistory) ? totalHistory : [];        // [{dateISO, hours}]
+let tasksInterval = Array.isArray(tasksInterval) ? tasksInterval : [];     // interval tasks
+let tasksAsReq   = Array.isArray(tasksAsReq)   ? tasksAsReq   : [];        // as-required tasks
+let inventory    = Array.isArray(inventory)    ? inventory    : [];
+let cuttingJobs  = Array.isArray(cuttingJobs)  ? cuttingJobs  : [];        // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
 
-/* Jobs editing */
-let editingJobs = new Set();
-let RENDER_TOTAL = null;
-let RENDER_DELTA = 0;
+/* ================ Jobs editing & render flags ================ */
+let editingJobs  = (editingJobs instanceof Set) ? editingJobs : new Set();
+let RENDER_TOTAL = typeof RENDER_TOTAL === "number" ? RENDER_TOTAL : null;
+let RENDER_DELTA = typeof RENDER_DELTA === "number" ? RENDER_DELTA : 0;
 
-/* --------- Cloud load/save --------- */
+/* ==================== Cloud load / save ===================== */
 function snapshotState(){
-  return { schema:APP_SCHEMA, totalHistory, tasksInterval, tasksAsReq, inventory, cuttingJobs, pumpEff };
+  // pumpEff is defined elsewhere in app (9); guard so snapshot never throws
+  const safePumpEff = (typeof pumpEff !== "undefined") ? pumpEff : null;
+  return {
+    schema: APP_SCHEMA,
+    totalHistory,
+    tasksInterval,
+    tasksAsReq,
+    inventory,
+    cuttingJobs,
+    pumpEff: safePumpEff
+  };
 }
 
-// Minimal folder model for the explorer
-let folders = window.folders || [
-  { id: "root",     name: "All Tasks",    parent: null },
-  { id: "interval", name: "Per Interval", parent: "root" },
-  { id: "asreq",    name: "As Required",  parent: "root" },
-];
+/* ======= Minimal folder model used by the explorer UI ======= */
+let folders = Array.isArray(window.folders) && window.folders.length
+  ? window.folders
+  : [
+      { id: "root",     name: "All Tasks",    parent: null },
+      { id: "interval", name: "Per Interval", parent: "root" },
+      { id: "asreq",    name: "As Required",  parent: "root" },
+    ];
 
-// Explorer helpers used by the Settings renderer
+/* ================ Explorer helper functions ================= */
 function childrenFolders(parentId){
-  return folders.filter(f => f.parent === parentId);
+  return (Array.isArray(folders) ? folders : []).filter(f => f.parent === parentId);
 }
 
-// Return the tasks that belong to the selected folder
 function topTasksInCat(folderId){
-  if (folderId === "interval") return tasksInterval || [];
-  if (folderId === "asreq")    return tasksAsReq   || [];
-  // Root shows both lists together
-  return (tasksInterval || []).concat(tasksAsReq || []);
+  // Root shows both lists together; others are specific
+  switch (folderId) {
+    case "interval": return Array.isArray(tasksInterval) ? tasksInterval : [];
+    case "asreq":    return Array.isArray(tasksAsReq)    ? tasksAsReq    : [];
+    default:         return []
+                        .concat(Array.isArray(tasksInterval) ? tasksInterval : [])
+                        .concat(Array.isArray(tasksAsReq)    ? tasksAsReq    : []);
+  }
 }
+
+/* Ensure every task carries a category tag used by calendar/explorer */
+function ensureTaskCategories(){
+  if (Array.isArray(tasksInterval)) {
+    tasksInterval.forEach(t => { if (t && typeof t === "object" && !t.cat) t.cat = "interval"; });
+  }
+  if (Array.isArray(tasksAsReq)) {
+    tasksAsReq.forEach(t => { if (t && typeof t === "object" && !t.cat) t.cat = "asreq"; });
+  }
+}
+
+
 
 
 function adoptState(doc){
