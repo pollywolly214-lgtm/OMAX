@@ -218,6 +218,27 @@ function snapshotState(){
   return { schema:APP_SCHEMA, totalHistory, tasksInterval, tasksAsReq, inventory, cuttingJobs, pumpEff };
 }
 
+// Minimal folder model for the explorer
+let folders = window.folders || [
+  { id: "root",     name: "All Tasks",    parent: null },
+  { id: "interval", name: "Per Interval", parent: "root" },
+  { id: "asreq",    name: "As Required",  parent: "root" },
+];
+
+// Explorer helpers used by the Settings renderer
+function childrenFolders(parentId){
+  return folders.filter(f => f.parent === parentId);
+}
+
+// Return the tasks that belong to the selected folder
+function topTasksInCat(folderId){
+  if (folderId === "interval") return tasksInterval || [];
+  if (folderId === "asreq")    return tasksAsReq   || [];
+  // Root shows both lists together
+  return (tasksInterval || []).concat(tasksAsReq || []);
+}
+
+
 function adoptState(doc){
   const data = doc || {};
 
@@ -242,6 +263,7 @@ function adoptState(doc){
     pe.baselineDateISO = (data.pumpEff.baselineDateISO ?? pe.baselineDateISO);
     pe.entries         = Array.isArray(data.pumpEff.entries) ? data.pumpEff.entries.slice() : pe.entries;
   }
+     ensureTaskCategories();
 }
 
 
@@ -883,6 +905,7 @@ function viewSettings(){
   for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
 
   // ------- Small helpers (IDs/data-* kept the same so existing handlers work) -------
+   
   const chipFor = (t)=>{
     const nd = nextDue(t);
     if (!nd) return `<span class="chip">—</span>`;
@@ -1084,6 +1107,19 @@ function renderSettingsCategoriesPane(){
   }
 
   // Small helpers
+// Give every task a category so the explorer can find them
+function ensureTaskCategories(){
+  // interval tasks live under the "interval" folder
+  if (Array.isArray(tasksInterval)) {
+    tasksInterval.forEach(t => { if (!t.cat) t.cat = "interval"; });
+  }
+  // as-required tasks live under the "asreq" folder
+  if (Array.isArray(tasksAsReq)) {
+    tasksAsReq.forEach(t => { if (!t.cat) t.cat = "asreq"; });
+  }
+}
+
+   
   const byIdFolder = id => window.settingsFolders.find(f => String(f.id)===String(id)) || null;
   const hasChildren = (fid)=>{
     const subF = window.settingsFolders.some(f => String(f.parent||"")===String(fid));
