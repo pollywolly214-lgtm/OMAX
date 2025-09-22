@@ -578,7 +578,6 @@ function viewCosts(model){
   const historyRows = Array.isArray(data.historyRows) ? data.historyRows : [];
   const jobBreakdown = Array.isArray(data.jobBreakdown) ? data.jobBreakdown : [];
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
-  const maintenanceJobs = Array.isArray(data.maintenanceJobs) ? data.maintenanceJobs : [];
   const maintenanceJobsNote = data.maintenanceJobsNote || "";
   const maintenanceJobsEmpty = data.maintenanceJobsEmpty || "";
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
@@ -651,22 +650,7 @@ function viewCosts(model){
     <div class="block">
       <h3>Maintenance Job Tracker</h3>
       ${maintenanceJobsNote ? `<p class="small muted">${esc(maintenanceJobsNote)}</p>` : ""}
-      <p class="small muted">Settings link <span class="muted">(coming soon)</span>. Use the Settings tab later to edit assignments.</p>
-      ${maintenanceJobs.length ? `
-        <table class="cost-table">
-          <thead><tr><th>Job</th><th>Target interval</th><th>Estimated cost</th><th>Links</th></tr></thead>
-          <tbody>
-            ${maintenanceJobs.map(job => `
-              <tr>
-                <td>${esc(job.name || "")}</td>
-                <td>${esc(job.intervalLabel || "")}</td>
-                <td>${esc(job.costLabel || "")}</td>
-                <td>${esc(job.linkLabel || "")}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      ` : `<p class="small muted">${esc(maintenanceJobsEmpty || "Add interval maintenance tasks from Settings (coming soon) to populate this tracker.")}</p>`}
+      ${maintenanceJobsEmpty ? `<p class="small muted">${esc(maintenanceJobsEmpty)}</p>` : ""}
     </div>
 
     <div class="block">
