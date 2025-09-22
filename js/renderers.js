@@ -1222,19 +1222,458 @@ function renderSettings(){
   });
 }
 
-// ---- Costs page (placeholder to satisfy router & nav) ----
+// ---- Costs page ----
+const COST_CHART_COLORS = {
+  maintenance: "#0a63c2",
+  jobs: "#2e7d32"
+};
+
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
 
-  content.innerHTML = `
-    <div class="container">
-      <div class="block" style="grid-column:1 / -1">
-        <h3>Cost Analysis</h3>
-        <p class="small">Placeholder view. This exists so the #/costs route and the top-nav button do not break other pages. We can flesh this out later.</p>
-      </div>
-    </div>
-  `;
+  const model = computeCostModel();
+  content.innerHTML = viewCosts(model);
+
+  const canvas = document.getElementById("costChart");
+  const toggleMaint = document.getElementById("toggleCostMaintenance");
+  const toggleJobs  = document.getElementById("toggleCostJobs");
+
+  const redraw = ()=>{
+    drawCostChart(canvas, model, {
+      maintenance: !toggleMaint || toggleMaint.checked,
+      jobs: !toggleJobs || toggleJobs.checked
+    });
+  };
+
+  redraw();
+  toggleMaint?.addEventListener("change", redraw);
+  toggleJobs?.addEventListener("change", redraw);
+}
+
+function computeCostModel(){
+  const safeHistory = Array.isArray(totalHistory) ? totalHistory.slice() : [];
+  const parsedHistory = safeHistory
+    .map(entry => {
+      if (!entry || entry.hours == null || !entry.dateISO) return null;
+      const hours = Number(entry.hours);
+      const date = new Date(entry.dateISO);
+      if (!isFinite(hours) || isNaN(date)) return null;
+      return { hours, date, dateISO: entry.dateISO };
+    })
+    .filter(Boolean)
+    .sort((a,b)=> a.date - b.date);
+
+  const currentHours = (typeof RENDER_TOTAL === "number" && isFinite(RENDER_TOTAL))
+    ? Number(RENDER_TOTAL)
+    : (typeof currentTotal === "function" ? Number(currentTotal() || 0) : 0);
+
+  const intervalTasks = Array.isArray(tasksInterval) ? tasksInterval : [];
+  const costPerHour = intervalTasks.reduce((sum, task)=>{
+    const price = Number(task?.price);
+    const interval = Number(task?.interval);
+    if (!isFinite(price) || !isFinite(interval) || interval <= 0 || price <= 0) return sum;
+    return sum + (price / interval);
+  }, 0);
+
+  const estimateMaintenanceCost = (hours)=>{
+    if (!isFinite(hours) || hours <= 0 || !isFinite(costPerHour) || costPerHour <= 0) return 0;
+    return hours * costPerHour;
+  };
+
+  const hoursAtDate = (targetDate)=>{
+    if (!parsedHistory.length) return null;
+    const target = targetDate.getTime();
+    let best = null;
+    for (const entry of parsedHistory){
+      const t = entry.date.getTime();
+      if (t > target) break;
+      best = entry;
+    }
+    return best ? Number(best.hours) : null;
+  };
+
+  const usageSinceDays = (days)=>{
+    if (!isFinite(days) || days <= 0 || !parsedHistory.length) return 0;
+    const now = new Date();
+    now.setHours(0,0,0,0);
+    const start = new Date(now);
+    start.setDate(start.getDate() - days);
+    const startHours = hoursAtDate(start);
+    const baseline = parsedHistory[0];
+    const compareHours = startHours != null ? startHours : (baseline ? baseline.hours : currentHours);
+    if (compareHours == null || !isFinite(compareHours)) return 0;
+    return Math.max(0, Number(currentHours || 0) - Number(compareHours));
+  };
+
+  const determineBaselineDailyHours = ()=>{
+    const windows = [30, 90, 180, 365];
+    for (const days of windows){
+      const usage = usageSinceDays(days);
+      if (usage > 0) return usage / days;
+    }
+    return 0;
+  };
+
+  const baselineDailyHours = determineBaselineDailyHours();
+  const predictedAnnual = estimateMaintenanceCost(baselineDailyHours * 365);
+
+  const timeframeDefs = [
+    { key: "year",   label: "Past 12 months", days: 365 },
+    { key: "six",    label: "Past 6 months",  days: 182 },
+    { key: "quarter",label: "Past 3 months",  days: 92  },
+    { key: "month",  label: "Past 30 days",   days: 30  }
+  ];
+
+  const timeframeRowsRaw = timeframeDefs.map(def => {
+    const hours = usageSinceDays(def.days);
+    return {
+      key: def.key,
+      label: def.label,
+      days: def.days,
+      hours,
+      costActual: estimateMaintenanceCost(hours),
+      costProjected: estimateMaintenanceCost(baselineDailyHours * def.days)
+    };
+  });
+
+  const maintenanceHistory = [];
+  for (let i=1; i<parsedHistory.length; i++){
+    const prev = parsedHistory[i-1];
+    const curr = parsedHistory[i];
+    const deltaHours = Number(curr.hours) - Number(prev.hours);
+    if (!isFinite(deltaHours) || deltaHours <= 0) continue;
+    maintenanceHistory.push({
+      date: curr.date,
+      dateISO: curr.dateISO,
+      hours: deltaHours,
+      cost: estimateMaintenanceCost(deltaHours)
+    });
+  }
+
+  const maintenanceSeries = maintenanceHistory.slice(-16).map(entry => ({
+    date: entry.date,
+    value: entry.cost
+  }));
+
+  const jobsInfo = [];
+  const jobSeriesRaw = [];
+  let totalGainLoss = 0;
+
+  if (Array.isArray(cuttingJobs)){
+    for (const job of cuttingJobs){
+      if (!job) continue;
+      const eff = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : { gainLoss:0, deltaHours:0 };
+      const gainLoss = Number(eff?.gainLoss) || 0;
+      const deltaHours = Number(eff?.deltaHours) || 0;
+      let date = null;
+      if (job.dueISO){
+        const due = new Date(job.dueISO);
+        if (!Number.isNaN(due.getTime())) date = due;
+      }
+      if (!date && job.startISO){
+        const start = new Date(job.startISO);
+        if (!Number.isNaN(start.getTime())) date = start;
+      }
+      if (!date){
+        const fallback = parsedHistory.length ? parsedHistory[parsedHistory.length-1].date : new Date();
+        date = new Date(fallback);
+      }
+      const status = deltaHours > 0.1 ? "Ahead" : (deltaHours < -0.1 ? "Behind" : "On pace");
+      const statusDetail = deltaHours ? `${deltaHours>0?"+":"-"}${Math.abs(deltaHours).toFixed(1)} hr` : "Balanced";
+      const milestoneDate = job.dueISO || job.startISO || "";
+      let milestoneLabel = "—";
+      if (milestoneDate){
+        const milestone = new Date(milestoneDate);
+        if (!Number.isNaN(milestone.getTime())) milestoneLabel = milestone.toLocaleDateString();
+      }
+
+      jobsInfo.push({
+        name: job.name || "Untitled job",
+        date,
+        milestoneLabel,
+        gainLoss,
+        status,
+        statusDetail
+      });
+
+      if (!Number.isNaN(date.getTime())){
+        jobSeriesRaw.push({ date, rawValue: gainLoss, label: job.name || "Job" });
+      }
+
+      totalGainLoss += gainLoss;
+    }
+  }
+
+  const jobSeriesSorted = jobSeriesRaw.slice().sort((a,b)=> a.date - b.date);
+  const jobSeries = [];
+  if (jobSeriesSorted.length){
+    let cumulative = 0;
+    jobSeriesSorted.forEach((pt, idx)=>{
+      cumulative += pt.rawValue;
+      jobSeries.push({ date: pt.date, value: cumulative / (idx + 1) });
+    });
+  }
+
+  const jobCount = jobsInfo.length;
+  const averageGainLoss = jobCount ? (totalGainLoss / jobCount) : 0;
+
+  const formatterCurrency = (value, { showPlus=false, decimals=null } = {})=>{
+    const absVal = Math.abs(value);
+    const fractionDigits = decimals != null ? decimals : (absVal < 1000 ? 2 : 0);
+    const formatted = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits
+    }).format(absVal);
+    if (value < 0) return `-${formatted}`;
+    if (value > 0 && showPlus) return `+${formatted}`;
+    return formatted;
+  };
+
+  const formatHours = (hours)=>{
+    if (!isFinite(hours) || hours <= 0) return "0 hr";
+    const decimals = hours >= 100 ? 0 : 1;
+    return `${hours.toFixed(decimals)} hr`;
+  };
+
+  const timeframeRows = timeframeRowsRaw.map(row => ({
+    key: row.key,
+    label: row.label,
+    hoursLabel: formatHours(row.hours),
+    costLabel: formatterCurrency(row.costActual, { decimals: row.costActual < 1000 ? 2 : 0 }),
+    projectedLabel: formatterCurrency(row.costProjected, { decimals: row.costProjected < 1000 ? 2 : 0 })
+  }));
+
+  const historyRows = maintenanceHistory.slice(-6).reverse().map(entry => ({
+    dateLabel: entry.date.toLocaleDateString(),
+    hoursLabel: formatHours(entry.hours),
+    costLabel: formatterCurrency(entry.cost, { decimals: entry.cost < 1000 ? 2 : 0 })
+  }));
+
+  const jobBreakdown = jobsInfo
+    .slice()
+    .sort((a,b)=> b.date - a.date)
+    .map(job => ({
+      name: job.name,
+      dateLabel: job.milestoneLabel || job.date.toLocaleDateString(),
+      statusLabel: job.status === "On pace" ? job.status : `${job.status} (${job.statusDetail})`,
+      costLabel: formatterCurrency(job.gainLoss, { showPlus: true, decimals: Math.abs(job.gainLoss) < 1000 ? 2 : 0 })
+    }));
+
+  const yearRow = timeframeRowsRaw.find(row => row.key === "year");
+  const yearActual = yearRow ? yearRow.costActual : 0;
+
+  let maintenanceHint;
+  if (costPerHour <= 0){
+    maintenanceHint = "Add prices to interval tasks to project maintenance spend.";
+  }else if (baselineDailyHours <= 0){
+    maintenanceHint = `Log machine hours to build a usage baseline. Rate ${formatterCurrency(costPerHour, { decimals: 2 })}/hr.`;
+  }else{
+    maintenanceHint = `Rate ${formatterCurrency(costPerHour, { decimals: 2 })}/hr × ${baselineDailyHours.toFixed(1)} hr/day baseline. Actual last 12 months: ${formatterCurrency(yearActual, { decimals: 0 })}.`;
+  }
+
+  const summaryCards = [
+    {
+      icon: "🛠️",
+      title: "Interval maintenance forecast",
+      value: formatterCurrency(predictedAnnual, { decimals: 0 }),
+      hint: maintenanceHint
+    },
+    {
+      icon: "✂️",
+      title: "Cutting jobs efficiency",
+      value: formatterCurrency(totalGainLoss, { decimals: 0, showPlus: true }),
+      hint: jobCount
+        ? `Average gain/loss ${formatterCurrency(averageGainLoss, { decimals: 0, showPlus: true })} across ${jobCount} job${jobCount===1?"":"s"}.`
+        : "No cutting jobs logged yet."
+    },
+    {
+      icon: "📊",
+      title: "Combined estimated impact",
+      value: formatterCurrency(predictedAnnual + totalGainLoss, { decimals: 0, showPlus: true }),
+      hint: "Maintenance forecast plus cutting job efficiency impact."
+    }
+  ];
+
+  const jobSummary = {
+    countLabel: String(jobCount),
+    totalLabel: formatterCurrency(totalGainLoss, { decimals: 0, showPlus: true }),
+    averageLabel: formatterCurrency(averageGainLoss, { decimals: 0, showPlus: true }),
+    rollingLabel: jobSeries.length
+      ? formatterCurrency(jobSeries[jobSeries.length-1].value, { decimals: 0, showPlus: true })
+      : formatterCurrency(0, { decimals: 0 })
+  };
+
+  const timeframeNote = "Maintenance projections use interval tasks only; as-required items remain excluded from forecasts.";
+  const historyEmpty = parsedHistory.length
+    ? "Log additional machine hours to expand the maintenance cost timeline."
+    : "No usage history yet. Log machine hours to estimate maintenance spend.";
+  const jobEmpty = "Add cutting jobs with estimates to build the efficiency tracker.";
+
+  const chartNote = `Maintenance line uses estimated spend per hours logged; cutting jobs line shows the rolling average gain/loss at ${formatterCurrency(JOB_RATE_PER_HOUR, { decimals: 0 })}/hr.`;
+
+  return {
+    summaryCards,
+    timeframeRows,
+    timeframeNote,
+    historyRows,
+    historyEmpty,
+    jobSummary,
+    jobBreakdown,
+    jobEmpty,
+    chartNote,
+    chartColors: COST_CHART_COLORS,
+    maintenanceSeries,
+    jobSeries
+  };
+}
+
+function drawCostChart(canvas, model, show){
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width;
+  const H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0,0,W,H);
+
+  const active = [];
+  if (show.maintenance && model.maintenanceSeries.length){
+    active.push({ key:"maintenance", color:model.chartColors.maintenance, points:model.maintenanceSeries });
+  }
+  if (show.jobs && model.jobSeries.length){
+    active.push({ key:"jobs", color:model.chartColors.jobs, points:model.jobSeries });
+  }
+
+  if (!active.length){
+    ctx.fillStyle = "#777";
+    ctx.font = "13px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Enable a dataset or add history to plot cost trends.", W/2, H/2);
+    return;
+  }
+
+  const xs = [];
+  const ys = [];
+  active.forEach(series => {
+    series.points.forEach(pt => {
+      if (!(pt.date instanceof Date) || isNaN(pt.date)) return;
+      xs.push(pt.date.getTime());
+      ys.push(Number(pt.value));
+    });
+  });
+
+  if (!xs.length){
+    ctx.fillStyle = "#777";
+    ctx.font = "13px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No dated data points available yet.", W/2, H/2);
+    return;
+  }
+
+  let xMin = Math.min(...xs);
+  let xMax = Math.max(...xs);
+  if (xMax === xMin){
+    xMin -= 24*60*60*1000;
+    xMax += 24*60*60*1000;
+  }
+
+  let yMin = Math.min(...ys, 0);
+  let yMax = Math.max(...ys, 0);
+  if (yMax === yMin){
+    yMin -= 1;
+    yMax += 1;
+  }else{
+    const pad = (yMax - yMin) * 0.1;
+    yMin -= pad;
+    yMax += pad;
+  }
+
+  const left = 60;
+  const right = W - 20;
+  const top = 20;
+  const bottom = H - 40;
+  const X = (time)=> left + ((time - xMin) / Math.max(1, xMax - xMin)) * (right - left);
+  const Y = (value)=> bottom - ((value - yMin) / Math.max(1e-6, yMax - yMin)) * (bottom - top);
+
+  ctx.strokeStyle = "#e2e6f1";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(left, top);
+  ctx.lineTo(left, bottom);
+  ctx.lineTo(right, bottom);
+  ctx.stroke();
+
+  if (0 >= yMin && 0 <= yMax){
+    const zeroY = Y(0);
+    ctx.strokeStyle = "#d0d5e2";
+    ctx.setLineDash([4,4]);
+    ctx.beginPath();
+    ctx.moveTo(left, zeroY);
+    ctx.lineTo(right, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#666";
+    ctx.textAlign = "right";
+    ctx.fillText("$0", right, zeroY - 4);
+  }
+
+  const formatDateLabel = (date)=>{
+    const opts = { month: "short", day: "numeric" };
+    if (Math.abs(xMax - xMin) > 31557600000){ opts.year = "numeric"; }
+    return date.toLocaleDateString(undefined, opts);
+  };
+
+  ctx.fillStyle = "#666";
+  ctx.textAlign = "left";
+  ctx.fillText(formatDateLabel(new Date(xMin)), left, H - 12);
+  ctx.textAlign = "right";
+  ctx.fillText(formatDateLabel(new Date(xMax)), right, H - 12);
+
+  const formatMoney = (value)=>{
+    const absVal = Math.abs(value);
+    const decimals = absVal < 1000 ? 2 : 0;
+    const formatted = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    }).format(absVal);
+    if (value < 0) return `-${formatted}`;
+    if (value > 0) return `+${formatted}`;
+    return formatted;
+  };
+
+  ctx.textAlign = "right";
+  ctx.fillText(formatMoney(yMax), right, top + 12);
+  ctx.fillText(formatMoney(yMin), right, bottom);
+
+  active.forEach(series => {
+    const points = series.points
+      .filter(pt => pt.date instanceof Date && !isNaN(pt.date))
+      .sort((a,b)=> a.date - b.date);
+    if (!points.length) return;
+    ctx.strokeStyle = series.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    points.forEach((pt, idx)=>{
+      const x = X(pt.date.getTime());
+      const y = Y(Number(pt.value));
+      if (idx === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+
+    ctx.fillStyle = series.color;
+    points.forEach(pt => {
+      const x = X(pt.date.getTime());
+      const y = Y(Number(pt.value));
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI*2);
+      ctx.fill();
+    });
+  });
 }
 
 
