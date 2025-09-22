@@ -79,6 +79,8 @@ header { background: #0a63c2; color: #fff; padding: 14px 16px; }
   height: auto;
   display: block;
   margin: 0;
+  border: 6px solid #073a83;
+  border-radius: 38px;
 }
 .header-motto {
   flex: 0 0 auto;
