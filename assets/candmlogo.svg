@@ -9,7 +9,7 @@
   </defs>
   <rect x="8" y="8" width="804" height="164" rx="36" fill="#ffffff" stroke="#0a63c2" stroke-width="12" />
   <rect x="36" y="36" width="748" height="108" rx="28" fill="url(#outerGlow)" opacity="0.35" />
-  <rect x="46" y="46" width="728" height="88" rx="24" fill="#ffffff" stroke="#0a63c2" stroke-width="4" />
+  <rect x="46" y="46" width="728" height="88" rx="24" fill="#ffffff" />
   <rect x="70" y="58" width="216" height="72" rx="36" fill="#0a63c2" />
   <text x="178" y="110" fill="#ffffff" font-family="'Arial Black','Segoe UI',sans-serif" font-size="60" font-weight="700" text-anchor="middle">C&amp;M</text>
   <text x="310" y="94" fill="#0a63c2" font-family="'Arial Black','Segoe UI',sans-serif" font-size="48" font-weight="700" text-anchor="start" letter-spacing="0.04em">CONCRETE</text>
