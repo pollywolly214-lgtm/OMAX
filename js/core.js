@@ -247,6 +247,131 @@ function snapshotState(){
   };
 }
 
+/* ======================== HISTORY ========================= */
+const HISTORY_LIMIT = 50;
+const undoStack = [];
+const redoStack = [];
+let currentSnapshotJSON = null;
+let suppressHistory = false;
+let skipNextHistoryCapture = false;
+
+function syncRenderTotalsFromHistory(){
+  const len = Array.isArray(totalHistory) ? totalHistory.length : 0;
+  const last = len ? totalHistory[len - 1] : null;
+  const prev = len > 1 ? totalHistory[len - 2] : null;
+
+  const curHours = last != null ? Number(last.hours) : NaN;
+  const prevHours = prev != null ? Number(prev.hours) : NaN;
+
+  const cur = Number.isFinite(curHours) ? curHours : null;
+  const prevVal = Number.isFinite(prevHours) ? prevHours : null;
+  const delta = (cur != null && prevVal != null) ? Math.max(0, cur - prevVal) : null;
+
+  RENDER_TOTAL = cur;
+  RENDER_DELTA = delta;
+  window.RENDER_TOTAL = RENDER_TOTAL;
+  window.RENDER_DELTA = RENDER_DELTA;
+}
+
+function resetHistoryToCurrent(){
+  try {
+    currentSnapshotJSON = JSON.stringify(snapshotState());
+  } catch (err) {
+    console.warn("Failed to seed history snapshot:", err);
+    currentSnapshotJSON = null;
+  }
+  undoStack.length = 0;
+  redoStack.length = 0;
+  syncRenderTotalsFromHistory();
+}
+
+function captureHistorySnapshot(){
+  if (suppressHistory) return;
+  if (skipNextHistoryCapture){
+    skipNextHistoryCapture = false;
+    return;
+  }
+  try {
+    const nextSnapshot = JSON.stringify(snapshotState());
+    if (nextSnapshot === currentSnapshotJSON) return;
+    if (currentSnapshotJSON){
+      undoStack.push(currentSnapshotJSON);
+      if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+    }
+    currentSnapshotJSON = nextSnapshot;
+    redoStack.length = 0;
+  } catch (err) {
+    console.warn("History capture failed:", err);
+  }
+}
+
+function applyHistorySnapshot(json){
+  if (!json) return false;
+  let data;
+  try {
+    data = JSON.parse(json);
+  } catch (err) {
+    console.warn("Could not parse history snapshot:", err);
+    return false;
+  }
+  suppressHistory = true;
+  try {
+    adoptState(data);
+    currentSnapshotJSON = json;
+  } catch (err) {
+    console.warn("Failed to apply history snapshot:", err);
+    return false;
+  } finally {
+    suppressHistory = false;
+  }
+  if (typeof route === "function") {
+    try { route(); } catch (err) { console.warn("Route after history failed:", err); }
+  }
+  skipNextHistoryCapture = true;
+  saveCloudDebounced();
+  return true;
+}
+
+function undoLastChange(){
+  if (!undoStack.length){
+    toast("Nothing to undo");
+    return false;
+  }
+  const target = undoStack.pop();
+  const previous = currentSnapshotJSON;
+  if (applyHistorySnapshot(target)){
+    if (previous){
+      redoStack.push(previous);
+      if (redoStack.length > HISTORY_LIMIT) redoStack.shift();
+    }
+    toast("Undid last change");
+    return true;
+  }
+  undoStack.push(target);
+  return false;
+}
+
+function redoLastUndo(){
+  if (!redoStack.length){
+    toast("Nothing to redo");
+    return false;
+  }
+  const target = redoStack.pop();
+  const previous = currentSnapshotJSON;
+  if (applyHistorySnapshot(target)){
+    if (previous){
+      undoStack.push(previous);
+      if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+    }
+    toast("Redid change");
+    return true;
+  }
+  redoStack.push(target);
+  return false;
+}
+
+resetHistoryToCurrent();
+
 /* ======= Minimal folder model used by the explorer UI ======= */
 if (!Array.isArray(window.folders) || !window.folders.length) {
   window.folders = [
@@ -310,13 +435,18 @@ function adoptState(doc){
   }
 
   ensureTaskCategories();
+  syncRenderTotalsFromHistory();
 }
 
 
-const saveCloudDebounced = debounce(async ()=>{
+const saveCloudInternal = debounce(async ()=>{
   if (!FB.ready || !FB.docRef) return;
   try{ await FB.docRef.set(snapshotState(), { merge:true }); }catch(e){ console.error("Cloud save failed:", e); }
 }, 300);
+function saveCloudDebounced(){
+  captureHistorySnapshot();
+  saveCloudInternal();
+}
 async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
   try{
@@ -338,9 +468,11 @@ async function loadFromCloud(){
           pumpEff: pe
         };
         adoptState(seeded);
+        resetHistoryToCurrent();
         await FB.docRef.set(seeded, { merge:true });
       }else{
         adoptState(data);
+        resetHistoryToCurrent();
       }
     }else{
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
@@ -348,6 +480,7 @@ async function loadFromCloud(){
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
       const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], pumpEff: pe };
       adoptState(seeded);
+      resetHistoryToCurrent();
       await FB.docRef.set(seeded);
     }
   }catch(e){
@@ -356,6 +489,7 @@ async function loadFromCloud(){
       ? window.pumpEff
       : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
     adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], pumpEff: pe });
+    resetHistoryToCurrent();
   }
 }
 
@@ -365,4 +499,33 @@ function seedInventoryFromTasks(){
     ...defaultAsReqTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"" })),
   ];
 }
+
+function isEditableTarget(el){
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  if (!tag) return false;
+  const upper = tag.toUpperCase();
+  return upper === "INPUT" || upper === "TEXTAREA" || upper === "SELECT";
+}
+
+window.addEventListener("keydown", (e)=>{
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const key = (e.key || "").toLowerCase();
+  if (key !== "z" && key !== "y") return;
+  if (isEditableTarget(e.target)) return;
+
+  if (key === "z" && !e.shiftKey){
+    e.preventDefault();
+    undoLastChange();
+    return;
+  }
+  if (key === "y" || (key === "z" && e.shiftKey)){
+    e.preventDefault();
+    redoLastUndo();
+  }
+});
+
+window.undoLastChange = undoLastChange;
+window.redoLastUndo = redoLastUndo;
 
