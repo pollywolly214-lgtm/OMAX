@@ -44,7 +44,10 @@ function toast(msg){
   .block{background:#f9fbff;border:1px solid #e6ecf7;border-radius:10px;padding:12px}
   .small{font-size:12px}.muted{color:#666}.danger{color:#b00020}
   .mini-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  .calendar-toolbar{margin-bottom:8px}
+  .calendar-toolbar{margin-bottom:8px;display:flex;justify-content:flex-end;align-items:center;gap:8px}
+  .calendar-add-btn{width:34px;height:34px;border-radius:50%;border:0;display:flex;align-items:center;justify-content:center;background:#0a63c2;color:#fff;font-size:20px;cursor:pointer;box-shadow:0 4px 8px rgba(10,99,194,.2)}
+  .calendar-add-btn:hover{background:#084f9a}
+  .calendar-add-btn:active{transform:translateY(1px)}
   table{width:100%;border-collapse:collapse} th,td{border:1px solid #e6ecf7;padding:6px;text-align:left;vertical-align:top}
   .grid{width:100%}
   .month{border:1px solid #e6ecf7;border-radius:10px;overflow:hidden;margin-bottom:10px}
@@ -53,8 +56,15 @@ function toast(msg){
   .weekdays>div{padding:4px 6px;background:#f6f9fe;border-bottom:1px solid #e6ecf7;font-size:12px}
   .day{min-height:78px;position:relative;border-right:1px solid #f0f4fb;border-bottom:1px solid #f0f4fb;padding:2px}
   .day.other-month{background:#fafbfd;opacity:.6}
+  .day.downtime{background:#ffe5e5}
+  .day.downtime .date{color:#b71c1c}
   .day.today{outline:2px solid #0a63c2;outline-offset:-2px}
   .date{font-size:12px;color:#555;margin-bottom:2px}
+  .day-add-bubble{position:absolute;bottom:6px;right:6px;width:28px;height:28px;border-radius:50%;border:0;display:flex;align-items:center;justify-content:center;background:#0a63c2;color:#fff;font-size:18px;font-weight:600;cursor:pointer;box-shadow:0 6px 12px rgba(10,99,194,.25);opacity:0;transform:scale(.85);transition:opacity .18s ease,transform .18s ease;z-index:3}
+  .day-add-bubble.is-visible{opacity:1;transform:scale(1)}
+  .day-add-bubble:hover{background:#084f9a}
+  .day-add-bubble:active{transform:scale(.92)}
+  .day-add-bubble:focus-visible{outline:2px solid #fff;outline-offset:-2px;box-shadow:0 0 0 3px rgba(10,99,194,.35)}
   .event.generic,.job-bar{display:block;padding:2px 6px;margin:2px 0;border-radius:8px;cursor:pointer;border:1px solid transparent}
   .event.generic{background:#fff0d6;border-color:#ffe1a5}
   .job-bar{background:#e1efff;border-color:#cddffb}
