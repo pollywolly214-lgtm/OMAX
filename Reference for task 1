@@ -1,0 +1,3987 @@
+Reference Task 1
+js.calendar
+/* =========================================================
+   OMAX 1530 Maintenance Tracker — v7.1 (Regenerated)
+   - Firestore cloud sync (email/password modal; shared workspace doc)
+   - 3-month calendar + hover bubbles
+   - Hours log → Δ distribution for maintenance intervals
+   - Cutting Jobs with efficiency model + required/day
+   - Pump Efficiency widget (baseline + daily RPM logs + chart)
+   - Settings + Costs (incl. materials) + lightweight Inventory
+   - Route-based rendering
+   - Minimal CSS injection (if stylesheet is missing)
+   ========================================================= */
+
+/* =================== CONSTANTS / GLOBALS =================== */
+const APP_SCHEMA = 71;
+const DAILY_HOURS = 8;
+const JOB_RATE_PER_HOUR = 250; // $/hr
+const WORKSPACE_ID = "schreiner-robotics";
+
+window.APP_SCHEMA = APP_SCHEMA;
+
+/* Root helpers */
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
+function genId(name){ const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
+function ymd(d){ const dt = new Date(d); const m = dt.getMonth()+1; const day = dt.getDate(); return `${dt.getFullYear()}-${m<10?'0':''}${m}-${day<10?'0':''}${day}`; }
+
+/* Toast */
+function toast(msg){
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = msg; document.body.appendChild(t);
+  setTimeout(()=>t.classList.add("show"),10);
+  setTimeout(()=>{ t.classList.remove("show"); setTimeout(()=>t.remove(),200); }, 1600);
+}
+
+/* ================ MINIMUM STYLE INJECTION ================== */
+(function ensureStyles(){
+  if (document.getElementById("mt-inline-styles")) return;
+  const css = `
+  .topnav{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+  .topnav button{padding:6px 10px;border:1px solid #dfe6f3;border-radius:8px;background:#fff;cursor:pointer}
+  .topnav .right{margin-left:auto;color:#555}
+  .container{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .block{background:#f9fbff;border:1px solid #e6ecf7;border-radius:10px;padding:12px}
+  .small{font-size:12px}.muted{color:#666}.danger{color:#b00020}
+  .mini-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .calendar-toolbar{margin-bottom:8px;display:flex;justify-content:flex-end;align-items:center;gap:8px}
+  .calendar-add-btn{width:34px;height:34px;border-radius:50%;border:0;display:flex;align-items:center;justify-content:center;background:#0a63c2;color:#fff;font-size:20px;cursor:pointer;box-shadow:0 4px 8px rgba(10,99,194,.2)}
+  .calendar-add-btn:hover{background:#084f9a}
+  .calendar-add-btn:active{transform:translateY(1px)}
+  table{width:100%;border-collapse:collapse} th,td{border:1px solid #e6ecf7;padding:6px;text-align:left;vertical-align:top}
+  .grid{width:100%}
+  .month{border:1px solid #e6ecf7;border-radius:10px;overflow:hidden;margin-bottom:10px}
+  .month-header{background:#eef3fb;padding:6px 10px;font-weight:600}
+  .weekdays,.week{display:grid;grid-template-columns:repeat(7,1fr)}
+  .weekdays>div{padding:4px 6px;background:#f6f9fe;border-bottom:1px solid #e6ecf7;font-size:12px}
+  .day{min-height:78px;position:relative;border-right:1px solid #f0f4fb;border-bottom:1px solid #f0f4fb;padding:2px}
+  .day.other-month{background:#fafbfd;opacity:.6}
+  .day.downtime{background:#ffe5e5}
+  .day.downtime .date{color:#b71c1c}
+  .day.today{outline:2px solid #0a63c2;outline-offset:-2px}
+  .date{font-size:12px;color:#555;margin-bottom:2px}
+  .event.generic,.job-bar{display:block;padding:2px 6px;margin:2px 0;border-radius:8px;cursor:pointer;border:1px solid transparent}
+  .event.generic{background:#fff0d6;border-color:#ffe1a5}
+  .event.downtime{background:#ff8a80;border-color:#ff5252;color:#fff}
+  .job-bar{background:#e1efff;border-color:#cddffb}
+  /* Bubble */
+  #bubble.bubble{position:absolute;z-index:9999;background:#fff;border:1px solid #dfe6f3;border-radius:10px;box-shadow:0 6px 18px rgba(15,25,40,.12);padding:10px;min-width:260px}
+  #bubble.bubble::before{content:"";position:absolute;top:-6px;left:16px;width:12px;height:12px;background:#fff;transform:rotate(45deg);border-left:1px solid #dfe6f3;border-top:1px solid #dfe6f3}
+  .bubble-title{font-weight:700;margin-bottom:6px}
+  .bubble-kv{display:flex;justify-content:space-between;gap:10px;font-size:13px;margin:3px 0}
+  .bubble-actions{display:flex;gap:8px;margin-top:8px}
+  .cal-task,.cal-job{position:relative;display:block;cursor:pointer}
+  /* Chips */
+  .chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;line-height:18px;border:1px solid transparent;background:#eef1f7;color:#333}
+  .chip.green{background:#e5f6eb;color:#2e7d32;border-color:#ccebd6}
+  .chip.green-better{background:#dff8e9;color:#1b5e20;border-color:#bce9d2;font-weight:600}
+  .chip.yellow{background:#fff7d1;color:#8a6d00;border-color:#f2e4a3}
+  .chip.orange{background:#ffe6d6;color:#a14d00;border-color:#ffd0b5}
+  .chip.red{background:#ffe1e1;color:#c62828;border-color:#ffc9c9}
+  /* Toast */
+  .toast{position:fixed;right:14px;bottom:14px;background:#0a63c2;color:#fff;padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(6px);transition:all .2s}
+  .toast.show{opacity:1;transform:translateY(0)}
+  /* Pump widget */
+  .pump-card{display:block}
+  .pump-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
+  .pump-col{background:#fff;border:1px solid #dde3ee;border-radius:10px;padding:12px}
+  .dash-modal-step[hidden]{display:none}
+  .dash-choice-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:12px}
+  .dash-choice{padding:12px;border-radius:10px;border:1px solid #d9e2f2;background:#f7f9fe;font-weight:600;cursor:pointer;transition:background .15s,border-color .15s}
+  .dash-choice:hover{background:#eef3fb;border-color:#0a63c2}
+  .subtask-section{margin-top:16px;border-top:1px solid #e2e8f5;padding-top:12px;display:grid;gap:12px}
+  .subtask-header{display:flex;align-items:center;justify-content:space-between}
+  .subtask-add-btn{padding:6px 10px;border-radius:6px;border:1px solid #cfd9ec;background:#eef3fb;color:#0a63c2;cursor:pointer}
+  .subtask-add-btn:hover{background:#e2e9f8}
+  .subtask-list{display:grid;gap:10px}
+  .subtask-row{border:1px solid #dfe4ef;border-radius:10px;background:#f9fbff;padding:10px;display:grid;gap:8px}
+  .subtask-row-top{display:flex;align-items:center;justify-content:space-between}
+  .subtask-remove{background:#e14b4b;color:#fff;border:0;border-radius:6px;padding:4px 10px;cursor:pointer}
+  .subtask-remove:hover{background:#c43d3d}
+  .subtask-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+  .subtask-grid label{font-size:.85rem}
+  .subtask-grid input,.subtask-grid select{width:100%}
+  .down-list{margin-top:16px;display:grid;gap:8px}
+  .down-item{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid #dfe4ef;border-radius:8px;background:#f7f9fe}
+  .down-remove-btn{background:#e14b4b;color:#fff;border:0;border-radius:6px;padding:4px 10px;cursor:pointer}
+  .down-remove-btn:hover{background:#c43d3d}
+  details > summary {cursor: pointer;}
+  details > summary::-webkit-details-marker {display: none;}
+  `;
+  const st = document.createElement("style"); st.id = "mt-inline-styles"; st.textContent = css; document.head.appendChild(st);
+})();
+
+/* ====================== FIREBASE =========================== */
+let FB = { app:null, auth:null, db:null, user:null, docRef:null, ready:false };
+
+async function initFirebase(){
+  if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
+  if (!window.FIREBASE_CONFIG){ console.warn("Missing FIREBASE_CONFIG."); return; }
+
+  // Initialize
+  FB.app  = firebase.initializeApp(window.FIREBASE_CONFIG);
+  FB.auth = firebase.auth();
+  FB.db   = firebase.firestore();
+
+  // Persist login across refreshes
+  try {
+    await FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  } catch (e) {
+    console.warn("Could not set auth persistence to LOCAL:", e);
+  }
+
+  // UI bits
+  const statusEl = $("#authStatus");
+  const btnIn    = $("#btnSignIn");
+  const btnOut   = $("#btnSignOut");
+  const modal    = $("#authModal");
+  const form     = $("#authForm");
+  const emailEl  = $("#authEmail");
+  const passEl   = $("#authPass");
+  const btnClose = $("#authClose");
+
+  const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
+  const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
+
+  async function ensureEmailPassword(email, password){
+    if (!email || !password) throw new Error("Email and password required.");
+    try{
+      const cred = await FB.auth.signInWithEmailAndPassword(email,password);
+      return cred.user;
+    }catch(e){
+      if (e && e.code === "auth/user-not-found"){
+        await FB.auth.createUserWithEmailAndPassword(email,password);
+        const cred = await FB.auth.signInWithEmailAndPassword(email,password);
+        return cred.user;
+      }
+      throw e;
+    }
+  }
+
+  if (btnIn)  btnIn.onclick  = showModal;
+  if (btnOut) btnOut.onclick = async ()=>{ await FB.auth.signOut(); };
+  if (btnClose) btnClose.onclick = hideModal;
+
+  if (form){
+    form.onsubmit = async (e)=>{
+      e.preventDefault();
+      try{
+        await ensureEmailPassword((emailEl.value||"").trim(), (passEl.value||"").trim());
+        hideModal();
+      }catch(err){ console.error(err); alert(err.message || "Sign-in failed"); }
+    };
+  }
+
+  FB.auth.onAuthStateChanged(async (user)=>{
+    FB.user = user || null;
+    if (user){
+      if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
+      if (btnIn)  btnIn.style.display  = "none";
+      if (btnOut) btnOut.style.display = "inline-block";
+
+      FB.docRef = FB.db.collection("workspaces").doc(WORKSPACE_ID).collection("app").doc("state");
+      FB.ready = true;
+      await loadFromCloud();
+      route();
+    }else{
+      FB.ready = false;
+      if (statusEl) statusEl.textContent = "Not signed in";
+      if (btnIn)  btnIn.style.display  = "inline-block";
+      if (btnOut) btnOut.style.display = "none";
+      renderSignedOut();
+    }
+  });
+}
+
+
+/* ===================== DATA / STATE ======================== */
+const defaultIntervalTasks = [
+  { id:"noz_filter_or", name:"Nozzle filter & inlet O-ring", interval:40,  sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"307525", price:283 },
+  { id:"pump_tube_noz_filter", name:"Pump tube & nozzle filter life", interval:80, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"307561-02", price:170 },
+  { id:"orifice_assembly", name:"Orifice assembly (jewel)", interval:500, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"305322-14", price:700 },
+  { id:"nozzle_body_life", name:"Nozzle body life", interval:500, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"303295", price:349 },
+  { id:"drain_hopper_reg_bowl", name:"Drain hopper regulator water bowl", interval:240, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"check_pinch_reg_conn",  name:"Check hopper pinch valve & air regulator connection", interval:240, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"inspect_relief_90psi",  name:"Inspect pressure relief valve (≤90 psi)", interval:240, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"buy_garnet_pallets_x4", name:"Buy Garnet Pallets x4", interval:160, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"ro_softener_daily_chk", name:"RO / Softener feed pressure & water quality — daily", interval:8, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"mixing_tube_rotation",  name:"Mixing tube rotation", interval:8, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"jewel_nozzle_clean",    name:"Jewell orifice & nozzle body cleaning (weekly)", interval:56, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"check_bonding_strap",   name:"Check hopper bonding strap (annually)", interval:2920, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"lube_z_axis",           name:"Lubricate Z-axis rail shafts & lead screw (annually)", interval:2920, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"filter_housing_or_2y",  name:"Filter housing O-ring (2 years / if leaking)", interval:5840, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"208665", price:4.85 }
+];
+const defaultAsReqTasks = [
+  { id:"purge_hopper_pressure_pot", name:"Purge hopper pressure pot", condition:"As required", manualLink:"", storeLink:"" },
+  { id:"replace_pot_sensors",       name:"Replace pressure pot sensors", condition:"When failed", manualLink:"", storeLink:"" },
+  { id:"empty_hopper_abrasive",     name:"Empty hopper abrasive material", condition:"If debris/contamination", manualLink:"", storeLink:"" },
+
+  { id:"replace_pinch_valve", name:"Replace hopper pinch valve", condition:"When damaged", manualLink:"", storeLink:"", pn:"204160", price:292 },
+  { id:"replace_feed_hose",   name:"Replace abrasive feed hose", condition:"When damaged", manualLink:"", storeLink:"", pn:"302240", price:121 },
+  { id:"ro_filter_housing",   name:"RO Filter Housing",          condition:"As needed",   manualLink:"", storeLink:"", pn:"208663", price:137 },
+  { id:"ro_micron_filter",    name:"RO Micron filter",           condition:"Per water quality/pressure", manualLink:"", storeLink:"", pn:"209260-01", price:35.5 },
+  { id:"ro_carbon_filter",    name:"RO Carbon filter",           condition:"Per chlorine breakthrough",  manualLink:"", storeLink:"", pn:"204365", price:25 },
+  { id:"ro_calcite_filter",   name:"RO Calcite filter",          condition:"Per water quality / pH",     manualLink:"", storeLink:"", pn:"204876", price:72 },
+
+  { id:"inspect_abrasive_tube", name:"Abrasive tubing inspection", condition:"Before each use", manualLink:"", storeLink:"" },
+  { id:"clean_xy_strips",       name:"Clean X– & Y–axis magnetic encoder strips", condition:"If errors occur", manualLink:"", storeLink:"" },
+  { id:"clean_lube_ballscrews", name:"Clean & lubricate ball screws", condition:"If debris occurs", manualLink:"", storeLink:"" },
+  { id:"clean_rails",           name:"Clean X-rails & Y-bridge rails", condition:"If debris occurs", manualLink:"", storeLink:"" }
+];
+
+/* ===================== Persisted state ===================== */
+function ensureArrayState(key, fallback){
+  const existing = window[key];
+  if (Array.isArray(existing)) return existing;
+
+  let seeded;
+  if (typeof fallback === "function"){
+    seeded = fallback();
+  }else if (Array.isArray(fallback)){
+    seeded = fallback.slice();
+  }else if (fallback && typeof fallback.length === "number"){
+    seeded = Array.from(fallback);
+  }
+
+  if (!Array.isArray(seeded)) seeded = [];
+
+  window[key] = seeded;
+  return seeded;
+}
+
+let totalHistory       = ensureArrayState("totalHistory");      // [{dateISO, hours}]
+let tasksInterval      = ensureArrayState("tasksInterval", () => defaultIntervalTasks.slice());
+let tasksAsReq         = ensureArrayState("tasksAsReq", () => defaultAsReqTasks.slice());
+let inventory          = ensureArrayState("inventory");
+let cuttingJobs        = ensureArrayState("cuttingJobs");       // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
+let downTimes          = ensureArrayState("downTimes");         // [{dateISO}]
+let pendingDownTimes   = ensureArrayState("pendingDownTimes");
+let pendingCuttingJobs = ensureArrayState("pendingCuttingJobs");
+
+if (typeof window.pumpEff !== "object" || !window.pumpEff){
+  window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] };
+}
+
+/* ================ Jobs editing & render flags ================ */
+if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
+if (typeof window.RENDER_TOTAL !== "number") window.RENDER_TOTAL = null;
+if (typeof window.RENDER_DELTA !== "number") window.RENDER_DELTA = 0;
+
+const editingJobs  = window.editingJobs;
+let   RENDER_TOTAL = window.RENDER_TOTAL;
+let   RENDER_DELTA = window.RENDER_DELTA;
+
+window.defaultIntervalTasks = defaultIntervalTasks;
+window.defaultAsReqTasks = defaultAsReqTasks;
+
+/* ==================== Cloud load / save ===================== */
+function snapshotState(){
+  const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
+  return {
+    schema: window.APP_SCHEMA || APP_SCHEMA,
+    totalHistory,
+    tasksInterval,
+    tasksAsReq,
+    inventory,
+    cuttingJobs,
+    downTimes,
+    pendingDownTimes,
+    pendingCuttingJobs,
+    pumpEff: safePumpEff
+  };
+}
+
+/* ======= Minimal folder model used by the explorer UI ======= */
+if (!Array.isArray(window.folders) || !window.folders.length) {
+  window.folders = [
+    { id: "root",     name: "All Tasks",    parent: null },
+    { id: "interval", name: "Per Interval", parent: "root" },
+    { id: "asreq",    name: "As Required",  parent: "root" },
+  ];
+}
+const folders = window.folders;
+
+/* ================ Explorer helper functions ================= */
+function childrenFolders(parentId){
+  return folders.filter(f => f.parent === parentId);
+}
+
+function topTasksInCat(folderId){
+  switch (folderId) {
+    case "interval": return tasksInterval;
+    case "asreq":    return tasksAsReq;
+    default:         return tasksInterval.concat(tasksAsReq);
+  }
+}
+
+/* Ensure every task carries a category tag used by calendar/explorer */
+function ensureTaskCategories(){
+  tasksInterval.forEach(t => { if (t && !t.cat) t.cat = "interval"; });
+  tasksAsReq.forEach(t =>    { if (t && !t.cat) t.cat = "asreq"; });
+}
+
+function adoptState(doc){
+  const data = doc || {};
+
+  // Core lists (fallback to defaults if empty/missing)
+  totalHistory = Array.isArray(data.totalHistory) ? data.totalHistory : [];
+  tasksInterval = (Array.isArray(data.tasksInterval) && data.tasksInterval.length)
+    ? data.tasksInterval
+    : defaultIntervalTasks.slice();
+  tasksAsReq = (Array.isArray(data.tasksAsReq) && data.tasksAsReq.length)
+    ? data.tasksAsReq
+    : defaultAsReqTasks.slice();
+  inventory = Array.isArray(data.inventory) ? data.inventory : seedInventoryFromTasks();
+  cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
+  downTimes = Array.isArray(data.downTimes)
+    ? data.downTimes.filter(dt => dt && typeof dt.dateISO === "string")
+    : [];
+  pendingDownTimes = Array.isArray(data.pendingDownTimes)
+    ? data.pendingDownTimes.filter(dt => dt && typeof dt.dateISO === "string")
+    : [];
+  pendingCuttingJobs = Array.isArray(data.pendingCuttingJobs)
+    ? data.pendingCuttingJobs.filter(job => job && typeof job.id === "string")
+    : [];
+
+  window.totalHistory = totalHistory;
+  window.tasksInterval = tasksInterval;
+  window.tasksAsReq = tasksAsReq;
+  window.inventory = inventory;
+  window.cuttingJobs = cuttingJobs;
+  window.downTimes = downTimes;
+  window.pendingDownTimes = pendingDownTimes;
+  window.pendingCuttingJobs = pendingCuttingJobs;
+
+  // Pump efficiency (guard against reading an undefined identifier)
+  const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+    ? window.pumpEff
+    : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+
+  if (data.pumpEff && typeof data.pumpEff === "object"){
+    pe.baselineRPM     = (data.pumpEff.baselineRPM ?? pe.baselineRPM);
+    pe.baselineDateISO = (data.pumpEff.baselineDateISO ?? pe.baselineDateISO);
+    pe.entries         = Array.isArray(data.pumpEff.entries) ? data.pumpEff.entries.slice() : pe.entries;
+  }
+
+  ensureTaskCategories();
+}
+
+
+const saveCloudDebounced = debounce(async ()=>{
+  if (!FB.ready || !FB.docRef) return;
+  try{ await FB.docRef.set(snapshotState(), { merge:true }); }catch(e){ console.error("Cloud save failed:", e); }
+}, 300);
+async function loadFromCloud(){
+  if (!FB.ready || !FB.docRef) return;
+  try{
+    const snap = await FB.docRef.get();
+    if (snap.exists){
+      const data = snap.data() || {};
+      const needsSeed = !Array.isArray(data.tasksInterval) || data.tasksInterval.length === 0;
+      if (needsSeed){
+        const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+          ? window.pumpEff
+          : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+        const seeded = {
+          schema:APP_SCHEMA,
+          totalHistory: Array.isArray(data.totalHistory) ? data.totalHistory : [],
+          tasksInterval: defaultIntervalTasks.slice(),
+          tasksAsReq: Array.isArray(data.tasksAsReq) && data.tasksAsReq.length ? data.tasksAsReq : defaultAsReqTasks.slice(),
+          inventory: Array.isArray(data.inventory) && data.inventory.length ? data.inventory : seedInventoryFromTasks(),
+          cuttingJobs: Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [],
+          downTimes: Array.isArray(data.downTimes) ? data.downTimes : [],
+          pendingDownTimes: Array.isArray(data.pendingDownTimes) ? data.pendingDownTimes : [],
+          pendingCuttingJobs: Array.isArray(data.pendingCuttingJobs) ? data.pendingCuttingJobs : [],
+          pumpEff: pe
+        };
+        adoptState(seeded);
+        await FB.docRef.set(seeded, { merge:true });
+      }else{
+        adoptState(data);
+      }
+    }else{
+      const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+        ? window.pumpEff
+        : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], downTimes:[], pendingDownTimes:[], pendingCuttingJobs:[], pumpEff: pe };
+      adoptState(seeded);
+      await FB.docRef.set(seeded);
+    }
+  }catch(e){
+    console.error("Cloud load failed:", e);
+    const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+      ? window.pumpEff
+      : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], downTimes:[], pendingDownTimes:[], pendingCuttingJobs:[], pumpEff: pe });
+  }
+}
+
+function seedInventoryFromTasks(){
+  return [
+    ...defaultIntervalTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"" })),
+    ...defaultAsReqTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"" })),
+  ];
+}
+
+
+core.js
+/* =========================================================
+   OMAX 1530 Maintenance Tracker — v7.1 (Regenerated)
+   - Firestore cloud sync (email/password modal; shared workspace doc)
+   - 3-month calendar + hover bubbles
+   - Hours log → Δ distribution for maintenance intervals
+   - Cutting Jobs with efficiency model + required/day
+   - Pump Efficiency widget (baseline + daily RPM logs + chart)
+   - Settings + Costs (incl. materials) + lightweight Inventory
+   - Route-based rendering
+   - Minimal CSS injection (if stylesheet is missing)
+   ========================================================= */
+
+/* =================== CONSTANTS / GLOBALS =================== */
+const APP_SCHEMA = 71;
+const DAILY_HOURS = 8;
+const JOB_RATE_PER_HOUR = 250; // $/hr
+const WORKSPACE_ID = "schreiner-robotics";
+
+window.APP_SCHEMA = APP_SCHEMA;
+
+/* Root helpers */
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
+function genId(name){ const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
+function ymd(d){ const dt = new Date(d); const m = dt.getMonth()+1; const day = dt.getDate(); return `${dt.getFullYear()}-${m<10?'0':''}${m}-${day<10?'0':''}${day}`; }
+
+/* Toast */
+function toast(msg){
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = msg; document.body.appendChild(t);
+  setTimeout(()=>t.classList.add("show"),10);
+  setTimeout(()=>{ t.classList.remove("show"); setTimeout(()=>t.remove(),200); }, 1600);
+}
+
+/* ================ MINIMUM STYLE INJECTION ================== */
+(function ensureStyles(){
+  if (document.getElementById("mt-inline-styles")) return;
+  const css = `
+  .topnav{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+  .topnav button{padding:6px 10px;border:1px solid #dfe6f3;border-radius:8px;background:#fff;cursor:pointer}
+  .topnav .right{margin-left:auto;color:#555}
+  .container{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .block{background:#f9fbff;border:1px solid #e6ecf7;border-radius:10px;padding:12px}
+  .small{font-size:12px}.muted{color:#666}.danger{color:#b00020}
+  .mini-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .calendar-toolbar{margin-bottom:8px;display:flex;justify-content:flex-end;align-items:center;gap:8px}
+  .calendar-add-btn{width:34px;height:34px;border-radius:50%;border:0;display:flex;align-items:center;justify-content:center;background:#0a63c2;color:#fff;font-size:20px;cursor:pointer;box-shadow:0 4px 8px rgba(10,99,194,.2)}
+  .calendar-add-btn:hover{background:#084f9a}
+  .calendar-add-btn:active{transform:translateY(1px)}
+  table{width:100%;border-collapse:collapse} th,td{border:1px solid #e6ecf7;padding:6px;text-align:left;vertical-align:top}
+  .grid{width:100%}
+  .month{border:1px solid #e6ecf7;border-radius:10px;overflow:hidden;margin-bottom:10px}
+  .month-header{background:#eef3fb;padding:6px 10px;font-weight:600}
+  .weekdays,.week{display:grid;grid-template-columns:repeat(7,1fr)}
+  .weekdays>div{padding:4px 6px;background:#f6f9fe;border-bottom:1px solid #e6ecf7;font-size:12px}
+  .day{min-height:78px;position:relative;border-right:1px solid #f0f4fb;border-bottom:1px solid #f0f4fb;padding:2px}
+  .day.other-month{background:#fafbfd;opacity:.6}
+  .day.downtime{background:#ffe5e5}
+  .day.downtime .date{color:#b71c1c}
+  .day.today{outline:2px solid #0a63c2;outline-offset:-2px}
+  .date{font-size:12px;color:#555;margin-bottom:2px}
+  .event.generic,.job-bar{display:block;padding:2px 6px;margin:2px 0;border-radius:8px;cursor:pointer;border:1px solid transparent}
+  .event.generic{background:#fff0d6;border-color:#ffe1a5}
+  .event.downtime{background:#ff8a80;border-color:#ff5252;color:#fff}
+  .job-bar{background:#e1efff;border-color:#cddffb}
+  /* Bubble */
+  #bubble.bubble{position:absolute;z-index:9999;background:#fff;border:1px solid #dfe6f3;border-radius:10px;box-shadow:0 6px 18px rgba(15,25,40,.12);padding:10px;min-width:260px}
+  #bubble.bubble::before{content:"";position:absolute;top:-6px;left:16px;width:12px;height:12px;background:#fff;transform:rotate(45deg);border-left:1px solid #dfe6f3;border-top:1px solid #dfe6f3}
+  .bubble-title{font-weight:700;margin-bottom:6px}
+  .bubble-kv{display:flex;justify-content:space-between;gap:10px;font-size:13px;margin:3px 0}
+  .bubble-actions{display:flex;gap:8px;margin-top:8px}
+  .cal-task,.cal-job{position:relative;display:block;cursor:pointer}
+  /* Chips */
+  .chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;line-height:18px;border:1px solid transparent;background:#eef1f7;color:#333}
+  .chip.green{background:#e5f6eb;color:#2e7d32;border-color:#ccebd6}
+  .chip.green-better{background:#dff8e9;color:#1b5e20;border-color:#bce9d2;font-weight:600}
+  .chip.yellow{background:#fff7d1;color:#8a6d00;border-color:#f2e4a3}
+  .chip.orange{background:#ffe6d6;color:#a14d00;border-color:#ffd0b5}
+  .chip.red{background:#ffe1e1;color:#c62828;border-color:#ffc9c9}
+  /* Toast */
+  .toast{position:fixed;right:14px;bottom:14px;background:#0a63c2;color:#fff;padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(6px);transition:all .2s}
+  .toast.show{opacity:1;transform:translateY(0)}
+  /* Pump widget */
+  .pump-card{display:block}
+  .pump-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
+  .pump-col{background:#fff;border:1px solid #dde3ee;border-radius:10px;padding:12px}
+  .dash-modal-step[hidden]{display:none}
+  .dash-choice-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:12px}
+  .dash-choice{padding:12px;border-radius:10px;border:1px solid #d9e2f2;background:#f7f9fe;font-weight:600;cursor:pointer;transition:background .15s,border-color .15s}
+  .dash-choice:hover{background:#eef3fb;border-color:#0a63c2}
+  .subtask-section{margin-top:16px;border-top:1px solid #e2e8f5;padding-top:12px;display:grid;gap:12px}
+  .subtask-header{display:flex;align-items:center;justify-content:space-between}
+  .subtask-add-btn{padding:6px 10px;border-radius:6px;border:1px solid #cfd9ec;background:#eef3fb;color:#0a63c2;cursor:pointer}
+  .subtask-add-btn:hover{background:#e2e9f8}
+  .subtask-list{display:grid;gap:10px}
+  .subtask-row{border:1px solid #dfe4ef;border-radius:10px;background:#f9fbff;padding:10px;display:grid;gap:8px}
+  .subtask-row-top{display:flex;align-items:center;justify-content:space-between}
+  .subtask-remove{background:#e14b4b;color:#fff;border:0;border-radius:6px;padding:4px 10px;cursor:pointer}
+  .subtask-remove:hover{background:#c43d3d}
+  .subtask-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+  .subtask-grid label{font-size:.85rem}
+  .subtask-grid input,.subtask-grid select{width:100%}
+  .down-list{margin-top:16px;display:grid;gap:8px}
+  .down-item{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid #dfe4ef;border-radius:8px;background:#f7f9fe}
+  .down-remove-btn{background:#e14b4b;color:#fff;border:0;border-radius:6px;padding:4px 10px;cursor:pointer}
+  .down-remove-btn:hover{background:#c43d3d}
+  details > summary {cursor: pointer;}
+  details > summary::-webkit-details-marker {display: none;}
+  `;
+  const st = document.createElement("style"); st.id = "mt-inline-styles"; st.textContent = css; document.head.appendChild(st);
+})();
+
+/* ====================== FIREBASE =========================== */
+let FB = { app:null, auth:null, db:null, user:null, docRef:null, ready:false };
+
+async function initFirebase(){
+  if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
+  if (!window.FIREBASE_CONFIG){ console.warn("Missing FIREBASE_CONFIG."); return; }
+
+  // Initialize
+  FB.app  = firebase.initializeApp(window.FIREBASE_CONFIG);
+  FB.auth = firebase.auth();
+  FB.db   = firebase.firestore();
+
+  // Persist login across refreshes
+  try {
+    await FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  } catch (e) {
+    console.warn("Could not set auth persistence to LOCAL:", e);
+  }
+
+  // UI bits
+  const statusEl = $("#authStatus");
+  const btnIn    = $("#btnSignIn");
+  const btnOut   = $("#btnSignOut");
+  const modal    = $("#authModal");
+  const form     = $("#authForm");
+  const emailEl  = $("#authEmail");
+  const passEl   = $("#authPass");
+  const btnClose = $("#authClose");
+
+  const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
+  const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
+
+  async function ensureEmailPassword(email, password){
+    if (!email || !password) throw new Error("Email and password required.");
+    try{
+      const cred = await FB.auth.signInWithEmailAndPassword(email,password);
+      return cred.user;
+    }catch(e){
+      if (e && e.code === "auth/user-not-found"){
+        await FB.auth.createUserWithEmailAndPassword(email,password);
+        const cred = await FB.auth.signInWithEmailAndPassword(email,password);
+        return cred.user;
+      }
+      throw e;
+    }
+  }
+
+  if (btnIn)  btnIn.onclick  = showModal;
+  if (btnOut) btnOut.onclick = async ()=>{ await FB.auth.signOut(); };
+  if (btnClose) btnClose.onclick = hideModal;
+
+  if (form){
+    form.onsubmit = async (e)=>{
+      e.preventDefault();
+      try{
+        await ensureEmailPassword((emailEl.value||"").trim(), (passEl.value||"").trim());
+        hideModal();
+      }catch(err){ console.error(err); alert(err.message || "Sign-in failed"); }
+    };
+  }
+
+  FB.auth.onAuthStateChanged(async (user)=>{
+    FB.user = user || null;
+    if (user){
+      if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
+      if (btnIn)  btnIn.style.display  = "none";
+      if (btnOut) btnOut.style.display = "inline-block";
+
+      FB.docRef = FB.db.collection("workspaces").doc(WORKSPACE_ID).collection("app").doc("state");
+      FB.ready = true;
+      await loadFromCloud();
+      route();
+    }else{
+      FB.ready = false;
+      if (statusEl) statusEl.textContent = "Not signed in";
+      if (btnIn)  btnIn.style.display  = "inline-block";
+      if (btnOut) btnOut.style.display = "none";
+      renderSignedOut();
+    }
+  });
+}
+
+
+/* ===================== DATA / STATE ======================== */
+const defaultIntervalTasks = [
+  { id:"noz_filter_or", name:"Nozzle filter & inlet O-ring", interval:40,  sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"307525", price:283 },
+  { id:"pump_tube_noz_filter", name:"Pump tube & nozzle filter life", interval:80, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"307561-02", price:170 },
+  { id:"orifice_assembly", name:"Orifice assembly (jewel)", interval:500, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"305322-14", price:700 },
+  { id:"nozzle_body_life", name:"Nozzle body life", interval:500, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"303295", price:349 },
+  { id:"drain_hopper_reg_bowl", name:"Drain hopper regulator water bowl", interval:240, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"check_pinch_reg_conn",  name:"Check hopper pinch valve & air regulator connection", interval:240, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"inspect_relief_90psi",  name:"Inspect pressure relief valve (≤90 psi)", interval:240, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"buy_garnet_pallets_x4", name:"Buy Garnet Pallets x4", interval:160, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"ro_softener_daily_chk", name:"RO / Softener feed pressure & water quality — daily", interval:8, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"mixing_tube_rotation",  name:"Mixing tube rotation", interval:8, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"jewel_nozzle_clean",    name:"Jewell orifice & nozzle body cleaning (weekly)", interval:56, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"check_bonding_strap",   name:"Check hopper bonding strap (annually)", interval:2920, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"lube_z_axis",           name:"Lubricate Z-axis rail shafts & lead screw (annually)", interval:2920, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" },
+  { id:"filter_housing_or_2y",  name:"Filter housing O-ring (2 years / if leaking)", interval:5840, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"", pn:"208665", price:4.85 }
+];
+const defaultAsReqTasks = [
+  { id:"purge_hopper_pressure_pot", name:"Purge hopper pressure pot", condition:"As required", manualLink:"", storeLink:"" },
+  { id:"replace_pot_sensors",       name:"Replace pressure pot sensors", condition:"When failed", manualLink:"", storeLink:"" },
+  { id:"empty_hopper_abrasive",     name:"Empty hopper abrasive material", condition:"If debris/contamination", manualLink:"", storeLink:"" },
+
+  { id:"replace_pinch_valve", name:"Replace hopper pinch valve", condition:"When damaged", manualLink:"", storeLink:"", pn:"204160", price:292 },
+  { id:"replace_feed_hose",   name:"Replace abrasive feed hose", condition:"When damaged", manualLink:"", storeLink:"", pn:"302240", price:121 },
+  { id:"ro_filter_housing",   name:"RO Filter Housing",          condition:"As needed",   manualLink:"", storeLink:"", pn:"208663", price:137 },
+  { id:"ro_micron_filter",    name:"RO Micron filter",           condition:"Per water quality/pressure", manualLink:"", storeLink:"", pn:"209260-01", price:35.5 },
+  { id:"ro_carbon_filter",    name:"RO Carbon filter",           condition:"Per chlorine breakthrough",  manualLink:"", storeLink:"", pn:"204365", price:25 },
+  { id:"ro_calcite_filter",   name:"RO Calcite filter",          condition:"Per water quality / pH",     manualLink:"", storeLink:"", pn:"204876", price:72 },
+
+  { id:"inspect_abrasive_tube", name:"Abrasive tubing inspection", condition:"Before each use", manualLink:"", storeLink:"" },
+  { id:"clean_xy_strips",       name:"Clean X– & Y–axis magnetic encoder strips", condition:"If errors occur", manualLink:"", storeLink:"" },
+  { id:"clean_lube_ballscrews", name:"Clean & lubricate ball screws", condition:"If debris occurs", manualLink:"", storeLink:"" },
+  { id:"clean_rails",           name:"Clean X-rails & Y-bridge rails", condition:"If debris occurs", manualLink:"", storeLink:"" }
+];
+
+/* ===================== Persisted state ===================== */
+function ensureArrayState(key, fallback){
+  const existing = window[key];
+  if (Array.isArray(existing)) return existing;
+
+  let seeded;
+  if (typeof fallback === "function"){
+    seeded = fallback();
+  }else if (Array.isArray(fallback)){
+    seeded = fallback.slice();
+  }else if (fallback && typeof fallback.length === "number"){
+    seeded = Array.from(fallback);
+  }
+
+  if (!Array.isArray(seeded)) seeded = [];
+
+  window[key] = seeded;
+  return seeded;
+}
+
+let totalHistory       = ensureArrayState("totalHistory");      // [{dateISO, hours}]
+let tasksInterval      = ensureArrayState("tasksInterval", () => defaultIntervalTasks.slice());
+let tasksAsReq         = ensureArrayState("tasksAsReq", () => defaultAsReqTasks.slice());
+let inventory          = ensureArrayState("inventory");
+let cuttingJobs        = ensureArrayState("cuttingJobs");       // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
+let downTimes          = ensureArrayState("downTimes");         // [{dateISO}]
+let pendingDownTimes   = ensureArrayState("pendingDownTimes");
+let pendingCuttingJobs = ensureArrayState("pendingCuttingJobs");
+
+if (typeof window.pumpEff !== "object" || !window.pumpEff){
+  window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] };
+}
+
+/* ================ Jobs editing & render flags ================ */
+if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
+if (typeof window.RENDER_TOTAL !== "number") window.RENDER_TOTAL = null;
+if (typeof window.RENDER_DELTA !== "number") window.RENDER_DELTA = 0;
+
+const editingJobs  = window.editingJobs;
+let   RENDER_TOTAL = window.RENDER_TOTAL;
+let   RENDER_DELTA = window.RENDER_DELTA;
+
+window.defaultIntervalTasks = defaultIntervalTasks;
+window.defaultAsReqTasks = defaultAsReqTasks;
+
+/* ==================== Cloud load / save ===================== */
+function snapshotState(){
+  const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
+  return {
+    schema: window.APP_SCHEMA || APP_SCHEMA,
+    totalHistory,
+    tasksInterval,
+    tasksAsReq,
+    inventory,
+    cuttingJobs,
+    downTimes,
+    pendingDownTimes,
+    pendingCuttingJobs,
+    pumpEff: safePumpEff
+  };
+}
+
+/* ======= Minimal folder model used by the explorer UI ======= */
+if (!Array.isArray(window.folders) || !window.folders.length) {
+  window.folders = [
+    { id: "root",     name: "All Tasks",    parent: null },
+    { id: "interval", name: "Per Interval", parent: "root" },
+    { id: "asreq",    name: "As Required",  parent: "root" },
+  ];
+}
+const folders = window.folders;
+
+/* ================ Explorer helper functions ================= */
+function childrenFolders(parentId){
+  return folders.filter(f => f.parent === parentId);
+}
+
+function topTasksInCat(folderId){
+  switch (folderId) {
+    case "interval": return tasksInterval;
+    case "asreq":    return tasksAsReq;
+    default:         return tasksInterval.concat(tasksAsReq);
+  }
+}
+
+/* Ensure every task carries a category tag used by calendar/explorer */
+function ensureTaskCategories(){
+  tasksInterval.forEach(t => { if (t && !t.cat) t.cat = "interval"; });
+  tasksAsReq.forEach(t =>    { if (t && !t.cat) t.cat = "asreq"; });
+}
+
+function adoptState(doc){
+  const data = doc || {};
+
+  // Core lists (fallback to defaults if empty/missing)
+  totalHistory = Array.isArray(data.totalHistory) ? data.totalHistory : [];
+  tasksInterval = (Array.isArray(data.tasksInterval) && data.tasksInterval.length)
+    ? data.tasksInterval
+    : defaultIntervalTasks.slice();
+  tasksAsReq = (Array.isArray(data.tasksAsReq) && data.tasksAsReq.length)
+    ? data.tasksAsReq
+    : defaultAsReqTasks.slice();
+  inventory = Array.isArray(data.inventory) ? data.inventory : seedInventoryFromTasks();
+  cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
+  downTimes = Array.isArray(data.downTimes)
+    ? data.downTimes.filter(dt => dt && typeof dt.dateISO === "string")
+    : [];
+  pendingDownTimes = Array.isArray(data.pendingDownTimes)
+    ? data.pendingDownTimes.filter(dt => dt && typeof dt.dateISO === "string")
+    : [];
+  pendingCuttingJobs = Array.isArray(data.pendingCuttingJobs)
+    ? data.pendingCuttingJobs.filter(job => job && typeof job.id === "string")
+    : [];
+
+  window.totalHistory = totalHistory;
+  window.tasksInterval = tasksInterval;
+  window.tasksAsReq = tasksAsReq;
+  window.inventory = inventory;
+  window.cuttingJobs = cuttingJobs;
+  window.downTimes = downTimes;
+  window.pendingDownTimes = pendingDownTimes;
+  window.pendingCuttingJobs = pendingCuttingJobs;
+
+  // Pump efficiency (guard against reading an undefined identifier)
+  const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+    ? window.pumpEff
+    : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+
+  if (data.pumpEff && typeof data.pumpEff === "object"){
+    pe.baselineRPM     = (data.pumpEff.baselineRPM ?? pe.baselineRPM);
+    pe.baselineDateISO = (data.pumpEff.baselineDateISO ?? pe.baselineDateISO);
+    pe.entries         = Array.isArray(data.pumpEff.entries) ? data.pumpEff.entries.slice() : pe.entries;
+  }
+
+  ensureTaskCategories();
+}
+
+
+const saveCloudDebounced = debounce(async ()=>{
+  if (!FB.ready || !FB.docRef) return;
+  try{ await FB.docRef.set(snapshotState(), { merge:true }); }catch(e){ console.error("Cloud save failed:", e); }
+}, 300);
+async function loadFromCloud(){
+  if (!FB.ready || !FB.docRef) return;
+  try{
+    const snap = await FB.docRef.get();
+    if (snap.exists){
+      const data = snap.data() || {};
+      const needsSeed = !Array.isArray(data.tasksInterval) || data.tasksInterval.length === 0;
+      if (needsSeed){
+        const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+          ? window.pumpEff
+          : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+        const seeded = {
+          schema:APP_SCHEMA,
+          totalHistory: Array.isArray(data.totalHistory) ? data.totalHistory : [],
+          tasksInterval: defaultIntervalTasks.slice(),
+          tasksAsReq: Array.isArray(data.tasksAsReq) && data.tasksAsReq.length ? data.tasksAsReq : defaultAsReqTasks.slice(),
+          inventory: Array.isArray(data.inventory) && data.inventory.length ? data.inventory : seedInventoryFromTasks(),
+          cuttingJobs: Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [],
+          downTimes: Array.isArray(data.downTimes) ? data.downTimes : [],
+          pendingDownTimes: Array.isArray(data.pendingDownTimes) ? data.pendingDownTimes : [],
+          pendingCuttingJobs: Array.isArray(data.pendingCuttingJobs) ? data.pendingCuttingJobs : [],
+          pumpEff: pe
+        };
+        adoptState(seeded);
+        await FB.docRef.set(seeded, { merge:true });
+      }else{
+        adoptState(data);
+      }
+    }else{
+      const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+        ? window.pumpEff
+        : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], downTimes:[], pendingDownTimes:[], pendingCuttingJobs:[], pumpEff: pe };
+      adoptState(seeded);
+      await FB.docRef.set(seeded);
+    }
+  }catch(e){
+    console.error("Cloud load failed:", e);
+    const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+      ? window.pumpEff
+      : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], downTimes:[], pendingDownTimes:[], pendingCuttingJobs:[], pumpEff: pe });
+  }
+}
+
+function seedInventoryFromTasks(){
+  return [
+    ...defaultIntervalTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"" })),
+    ...defaultAsReqTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"" })),
+  ];
+}
+
+render.js
+/* ====================== RENDERERS ========================= */
+function renderDashboard(){
+  const content = $("#content"); if (!content) return;
+  content.innerHTML = viewDashboard();
+
+  // Log hours
+  document.getElementById("logBtn")?.addEventListener("click", ()=>{
+    const v = Number(document.getElementById("totalInput").value);
+    if (!isFinite(v) || v < 0){ toast("Enter valid hours."); return; }
+    const todayISO = new Date().toISOString().slice(0,10);
+    const last = totalHistory[totalHistory.length-1];
+    if (last && last.dateISO === todayISO){
+      last.hours = v;
+    }else{
+      totalHistory.push({ dateISO: todayISO, hours: v });
+    }
+    RENDER_TOTAL = v; RENDER_DELTA = deltaSinceLast();
+    saveCloudDebounced(); toast("Hours logged");
+    renderDashboard();
+  });
+
+  // Next due summary
+  const ndBox = document.getElementById("nextDueBox");
+  const upcoming = tasksInterval
+    .map(t => ({ t, nd: nextDue(t) }))
+    .filter(x => x.nd)
+    .sort((a,b)=> a.nd.due - b.nd.due)
+    .slice(0,8);
+  ndBox.innerHTML = upcoming.length
+    ? `<ul>${upcoming.map(x=>`<li><span class="cal-task" data-cal-task="${x.t.id}">${x.t.name}</span> — ${x.nd.days}d → ${x.nd.due.toDateString()}</li>`).join("")}</ul>`
+    : `<div class="muted small">No upcoming due items.</div>`;
+
+  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+
+  const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+
+  const modal            = document.getElementById("dashboardAddModal");
+  const closeBtn         = document.getElementById("dashboardModalClose");
+  const taskForm         = document.getElementById("dashTaskForm");
+  const downForm         = document.getElementById("dashDownForm");
+  const jobForm          = document.getElementById("dashJobForm");
+  const downList         = document.getElementById("dashDownList");
+  const downDateInput    = document.getElementById("dashDownDate");
+  const taskTypeSelect   = document.getElementById("dashTaskType");
+  const taskNameInput    = document.getElementById("dashTaskName");
+  const taskIntervalInput= document.getElementById("dashTaskInterval");
+  const taskLastInput    = document.getElementById("dashTaskLast");
+  const taskConditionInput = document.getElementById("dashTaskCondition");
+  const taskManualInput  = document.getElementById("dashTaskManual");
+  const taskStoreInput   = document.getElementById("dashTaskStore");
+  const taskPNInput      = document.getElementById("dashTaskPN");
+  const taskPriceInput   = document.getElementById("dashTaskPrice");
+  const categorySelect   = document.getElementById("dashTaskCategory");
+  const subtaskList      = document.getElementById("dashSubtaskList");
+  const addSubtaskBtn    = document.getElementById("dashAddSubtask");
+  const jobNameInput     = document.getElementById("dashJobName");
+  const jobEstimateInput = document.getElementById("dashJobEstimate");
+  const jobStartInput    = document.getElementById("dashJobStart");
+  const jobDueInput      = document.getElementById("dashJobDue");
+
+  const taskFreqRow      = taskForm?.querySelector("[data-task-frequency]");
+  const taskLastRow      = taskForm?.querySelector("[data-task-last]");
+  const taskConditionRow = taskForm?.querySelector("[data-task-condition]");
+  const stepSections     = modal ? Array.from(modal.querySelectorAll("[data-step]")) : [];
+  let addContextDateISO  = null;
+
+  function setContextDate(dateISO){
+    addContextDateISO = dateISO || null;
+    if (modal){
+      if (addContextDateISO){
+        modal.setAttribute("data-context-date", addContextDateISO);
+      }else{
+        modal.removeAttribute("data-context-date");
+      }
+    }
+    if (downDateInput){
+      if (addContextDateISO){
+        downDateInput.value = addContextDateISO;
+      }else if (!modal || !modal.classList.contains("is-visible")){
+        downDateInput.value = "";
+      }
+    }
+  }
+
+  function ensureDownTimeArray(){
+    if (!Array.isArray(window.downTimes)) window.downTimes = [];
+    const arr = window.downTimes;
+    for (let i = arr.length - 1; i >= 0; i--){
+      const entry = arr[i];
+      if (!entry){ arr.splice(i,1); continue; }
+      if (typeof entry === "string"){ arr[i] = { dateISO: entry }; continue; }
+      if (typeof entry.dateISO !== "string") arr.splice(i,1);
+    }
+    return arr;
+  }
+
+  function refreshDownTimeList(){
+    if (!downList) return;
+    const arr = ensureDownTimeArray().slice().sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+    if (!arr.length){
+      downList.innerHTML = `<div class="small muted">No down time days yet.</div>`;
+      return;
+    }
+    downList.innerHTML = "";
+    arr.forEach(item => {
+      const row = document.createElement("div");
+      row.className = "down-item";
+      const label = document.createElement("span");
+      const parsed = new Date(item.dateISO + "T00:00:00");
+      label.textContent = isNaN(parsed.getTime()) ? item.dateISO : parsed.toLocaleDateString();
+      row.appendChild(label);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "down-remove-btn";
+      btn.textContent = "Remove";
+      btn.addEventListener("click", ()=>{ removeDownTime(item.dateISO); });
+      row.appendChild(btn);
+      downList.appendChild(row);
+    });
+  }
+
+  function removeDownTime(dateISO){
+    const arr = ensureDownTimeArray();
+    const idx = arr.findIndex(dt => dt.dateISO === dateISO);
+    if (idx < 0) return;
+    arr.splice(idx,1);
+    saveCloudDebounced();
+    toast("Down time removed");
+    refreshDownTimeList();
+    renderCalendar();
+  }
+
+  function populateCategoryOptions(){
+    if (!categorySelect) return;
+    const folders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+    const byParent = new Map();
+    folders.forEach(f => {
+      const key = String(f.parent ?? "");
+      if (!byParent.has(key)) byParent.set(key, []);
+      byParent.get(key).push(f);
+    });
+    byParent.forEach(list => list.sort((a,b)=> (Number(a.order||0) - Number(b.order||0)) || String(a.name||"").localeCompare(String(b.name||""))));
+    const opts = ['<option value="">(No Category)</option>'];
+    const walk = (parent, prefix)=>{
+      const key = String(parent ?? "");
+      const children = byParent.get(key) || [];
+      for (const child of children){
+        const label = `${prefix}${child.name}`;
+        opts.push(`<option value="${escapeHtml(String(child.id))}">${escapeHtml(label)}</option>`);
+        walk(child.id, `${prefix}${child.name} / `);
+      }
+    };
+    walk(null, "");
+    categorySelect.innerHTML = opts.join("");
+  }
+
+  function syncTaskMode(mode){
+    if (!taskFreqRow || !taskLastRow || !taskConditionRow) return;
+    if (mode === "asreq"){
+      taskFreqRow.hidden = true;
+      taskLastRow.hidden = true;
+      taskConditionRow.hidden = false;
+    }else{
+      taskFreqRow.hidden = false;
+      taskLastRow.hidden = false;
+      taskConditionRow.hidden = true;
+    }
+  }
+
+  function resetTaskForm(){
+    taskForm?.reset();
+    subtaskList?.replaceChildren();
+    syncTaskMode(taskTypeSelect?.value || "interval");
+  }
+
+  function showStep(step){
+    stepSections.forEach(section => {
+      if (!section) return;
+      section.hidden = section.dataset.step !== step;
+    });
+    if (step === "task"){
+      populateCategoryOptions();
+      syncTaskMode(taskTypeSelect?.value || "interval");
+    }
+    if (step === "downtime"){
+      refreshDownTimeList();
+      if (addContextDateISO && downDateInput){
+        downDateInput.value = addContextDateISO;
+      }
+    }
+  }
+
+  function showBackdrop(step){
+    if (!modal) return;
+    ensureDownTimeArray();
+    modal.classList.add("is-visible");
+    modal.removeAttribute("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    document.body?.classList.add("modal-open");
+    showStep(step);
+  }
+
+  function hideBackdrop(){
+    if (!modal) return;
+    modal.classList.remove("is-visible");
+    modal.setAttribute("hidden", "");
+    modal.setAttribute("aria-hidden", "true");
+    document.body?.classList.remove("modal-open");
+  }
+
+  function openModal(step="picker", opts={}){
+    if (opts && Object.prototype.hasOwnProperty.call(opts, "dateISO")){
+      setContextDate(opts.dateISO);
+    }else{
+      setContextDate(null);
+    }
+    const desiredStep = opts?.step || step;
+    showBackdrop(desiredStep);
+    if (desiredStep === "downtime" && addContextDateISO && downDateInput){
+      downDateInput.value = addContextDateISO;
+    }
+  }
+
+  function closeModal(){
+    hideBackdrop();
+    showStep("picker");
+    resetTaskForm();
+    downForm?.reset();
+    jobForm?.reset();
+    setContextDate(null);
+  }
+
+  window.openDashboardAddPicker = (opts={}) => {
+    const obj = typeof opts === "object" && opts !== null ? opts : {};
+    openModal(obj.step || "picker", obj);
+  };
+
+  window.dashboardRemoveDownTime = removeDownTime;
+
+  downDateInput?.addEventListener("input", ()=>{
+    if (!downDateInput) return;
+    const val = downDateInput.value;
+    addContextDateISO = val || null;
+    if (modal){
+      if (addContextDateISO){
+        modal.setAttribute("data-context-date", addContextDateISO);
+      }else{
+        modal.removeAttribute("data-context-date");
+      }
+    }
+  });
+
+  function createSubtaskRow(defaultType){
+    if (!subtaskList) return null;
+    const row = document.createElement("div");
+    row.className = "subtask-row";
+    row.dataset.subtaskRow = "1";
+    row.innerHTML = `
+      <div class="subtask-row-top">
+        <strong>Sub-task</strong>
+        <button type="button" class="subtask-remove" data-remove-subtask>Remove</button>
+      </div>
+      <div class="modal-grid subtask-grid">
+        <label>Sub-task name<input type="text" data-subtask-name placeholder="Name" required></label>
+        <label>Type<select data-subtask-type>
+          <option value="interval">Per interval</option>
+          <option value="asreq">As required</option>
+        </select></label>
+        <label data-subtask-frequency>Frequency (hrs)<input type="number" min="1" step="1" data-subtask-interval placeholder="e.g. 20"></label>
+        <label data-subtask-last>Last serviced at (hrs)<input type="number" min="0" step="0.01" data-subtask-last placeholder="optional"></label>
+        <label data-subtask-condition hidden>Condition / trigger<input type="text" data-subtask-condition-input placeholder="e.g. When needed"></label>
+      </div>`;
+    const typeSel = row.querySelector("[data-subtask-type]");
+    const freqRow = row.querySelector("[data-subtask-frequency]");
+    const lastRow = row.querySelector("[data-subtask-last]");
+    const condRow = row.querySelector("[data-subtask-condition]");
+    if (typeSel) typeSel.value = defaultType || "interval";
+    const sync = ()=>{
+      if (!typeSel) return;
+      const mode = typeSel.value === "asreq" ? "asreq" : "interval";
+      if (freqRow) freqRow.hidden = mode !== "interval";
+      if (lastRow) lastRow.hidden = mode !== "interval";
+      if (condRow) condRow.hidden = mode !== "asreq";
+    };
+    typeSel?.addEventListener("change", sync);
+    sync();
+    row.querySelector("[data-remove-subtask]")?.addEventListener("click", ()=> row.remove());
+    return row;
+  }
+
+  closeBtn?.addEventListener("click", closeModal);
+  modal?.addEventListener("click", (e)=>{ if (e.target === modal) closeModal(); });
+
+  modal?.querySelectorAll("[data-choice]")?.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const choice = btn.getAttribute("data-choice");
+      showStep(choice === "task" ? "task" : choice === "downtime" ? "downtime" : "job");
+    });
+  });
+
+  modal?.querySelectorAll("[data-step-back]")?.forEach(btn => {
+    btn.addEventListener("click", ()=> showStep("picker"));
+  });
+
+  taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
+  syncTaskMode(taskTypeSelect?.value || "interval");
+  populateCategoryOptions();
+
+  addSubtaskBtn?.addEventListener("click", ()=>{
+    const row = createSubtaskRow(taskTypeSelect?.value || "interval");
+    if (row) subtaskList?.appendChild(row);
+  });
+
+  taskForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    if (!taskForm) return;
+    const name = (taskNameInput?.value || "").trim();
+    if (!name){ alert("Task name is required."); return; }
+    const mode = (taskTypeSelect?.value === "asreq") ? "asreq" : "interval";
+    const manual = (taskManualInput?.value || "").trim();
+    const store  = (taskStoreInput?.value || "").trim();
+    const pn     = (taskPNInput?.value || "").trim();
+    const priceVal = taskPriceInput?.value;
+    const price  = priceVal === "" ? null : Number(priceVal);
+    const catId  = (categorySelect?.value || "").trim() || null;
+    const id     = genId(name);
+    const base = {
+      id,
+      name,
+      manualLink: manual,
+      storeLink: store,
+      pn,
+      price: isFinite(price) ? price : null,
+      cat: catId,
+      parentTask: null,
+      order: ++window._maintOrderCounter
+    };
+    if (mode === "interval"){
+      let interval = Number(taskIntervalInput?.value);
+      if (!isFinite(interval) || interval <= 0) interval = 8;
+      const task = Object.assign({}, base, { mode:"interval", interval, sinceBase:null, anchorTotal:null });
+      const lastVal = taskLastInput?.value;
+      if (lastVal !== undefined && lastVal !== ""){
+        const v = Number(lastVal);
+        if (isFinite(v)){ task.anchorTotal = v; task.sinceBase = 0; }
+      }
+      tasksInterval.unshift(task);
+    }else{
+      const condition = (taskConditionInput?.value || "").trim() || "As required";
+      const task = Object.assign({}, base, { mode:"asreq", condition });
+      tasksAsReq.unshift(task);
+    }
+
+    const parentInterval = Number(taskIntervalInput?.value);
+    const subRows = subtaskList ? Array.from(subtaskList.querySelectorAll("[data-subtask-row]")) : [];
+    subRows.forEach(row => {
+      const subName = (row.querySelector("[data-subtask-name]")?.value || "").trim();
+      if (!subName) return;
+      const subTypeSel = row.querySelector("[data-subtask-type]");
+      const subMode = subTypeSel && subTypeSel.value === "asreq" ? "asreq" : "interval";
+      const subBase = {
+        id: genId(subName),
+        name: subName,
+        manualLink: "",
+        storeLink: "",
+        pn: "",
+        price: null,
+        cat: catId,
+        parentTask: id,
+        order: ++window._maintOrderCounter
+      };
+      if (subMode === "interval"){
+        const intervalField = row.querySelector("[data-subtask-interval]");
+        let subInterval = Number(intervalField?.value);
+        if (!isFinite(subInterval) || subInterval <= 0){
+          subInterval = isFinite(parentInterval) && parentInterval > 0 ? parentInterval : 8;
+        }
+        const subTask = Object.assign({}, subBase, { mode:"interval", interval: subInterval, sinceBase:null, anchorTotal:null });
+        const lastField = row.querySelector("[data-subtask-last]");
+        const lastVal = lastField?.value;
+        if (lastVal){
+          const v = Number(lastVal);
+          if (isFinite(v)){ subTask.anchorTotal = v; subTask.sinceBase = 0; }
+        }
+        tasksInterval.unshift(subTask);
+      }else{
+        const condInput = row.querySelector("[data-subtask-condition-input]");
+        const subTask = Object.assign({}, subBase, { mode:"asreq", condition: (condInput?.value || "").trim() || "As required" });
+        tasksAsReq.unshift(subTask);
+      }
+    });
+
+    saveCloudDebounced();
+    toast("Task added");
+    closeModal();
+    renderDashboard();
+  });
+
+  downForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    const arr = ensureDownTimeArray();
+    const dateISO = downDateInput?.value;
+    if (!dateISO){ toast("Pick a date"); return; }
+    if (arr.some(dt => dt.dateISO === dateISO)){ toast("Day already marked as down time"); return; }
+    arr.push({ dateISO });
+    arr.sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+    saveCloudDebounced();
+    toast("Down time saved");
+    if (downDateInput) downDateInput.value = "";
+    refreshDownTimeList();
+    renderCalendar();
+  });
+
+  jobForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    const name = (jobNameInput?.value || "").trim();
+    const est  = Number(jobEstimateInput?.value);
+    const start = jobStartInput?.value;
+    const due   = jobDueInput?.value;
+    if (!name || !isFinite(est) || est <= 0 || !start || !due){ toast("Fill job fields."); return; }
+    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material:"", materialCost:0, materialQty:0, notes:"", manualLogs:[] });
+    saveCloudDebounced();
+    toast("Cutting job added");
+    closeModal();
+    renderDashboard();
+  });
+
+  refreshDownTimeList();
+
+  renderCalendar();
+  renderPumpWidget();
+}
+
+function openJobsEditor(jobId){
+  // Navigate to the Jobs page, then open the specified job in edit mode.
+  // We wait briefly so the router can render the page before we toggle edit.
+  location.hash = "#/jobs";
+  setTimeout(()=>{
+    // Mark this job as "editing" so viewJobs() renders the edit row
+    editingJobs.add(String(jobId));
+    // Re-render Jobs with that state applied
+    if (typeof renderJobs === "function") renderJobs();
+    // Scroll the row into view for a clean handoff from the bubble
+    const row = document.querySelector(`tr[data-job-row="${jobId}"]`);
+    if (row) row.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, 60);
+}
+
+
+
+function openSettingsAndReveal(taskId){
+  location.hash = "#/settings";
+  setTimeout(()=>{
+    const el = document.querySelector(`[data-task-id="${taskId}"]`);
+    if (el){ el.open = true; el.scrollIntoView({behavior:"smooth", block:"center"}); }
+  }, 60);
+}
+
+// --- SAFETY: repair tasks/folders graph so Settings never crashes ---
+function repairMaintenanceGraph(){
+  try{
+    // Ensure arrays exist
+    if (!Array.isArray(window.settingsFolders)) window.settingsFolders = [];
+    if (!Array.isArray(window.tasksInterval))   window.tasksInterval   = [];
+    if (!Array.isArray(window.tasksAsReq))      window.tasksAsReq      = [];
+
+    // Flatten any legacy nested `.sub` arrays so every task lives in the
+    // top-level list with a parentTask pointer (Explorer-style tree).
+    const seenIds = new Set();
+    function flattenTasks(list, type){
+      const flat = [];
+      function visit(task, parentId){
+        if (!task || task.id == null) return;
+        const tid = String(task.id);
+        if (seenIds.has(tid)) return; // guard against circular references
+        seenIds.add(tid);
+
+        if (!task.mode) task.mode = type;
+        else task.mode = type; // enforce consistency with owning list
+        task.parentTask = parentId != null ? parentId : null;
+        if (!isFinite(task.order)) task.order = 0;
+
+        flat.push(task);
+
+        if (Array.isArray(task.sub)){
+          const children = task.sub.slice();
+          delete task.sub;
+          for (const child of children){
+            visit(child, tid);
+          }
+        }
+      }
+      for (const task of list){ visit(task, null); }
+      list.splice(0, list.length, ...flat);
+    }
+
+    flattenTasks(window.tasksInterval, "interval");
+    flattenTasks(window.tasksAsReq, "asreq");
+
+    // Build task map across both lists
+    const allTasks = [];
+    for (const t of window.tasksInterval){ if (t && t.id!=null){ t.mode = "interval"; allTasks.push(t); } }
+    for (const t of window.tasksAsReq){    if (t && t.id!=null){ t.mode = "asreq";    allTasks.push(t); } }
+    const tMap = Object.create(null);
+    for (const t of allTasks) tMap[String(t.id)] = t;
+
+    // Folder map
+    const fMap = Object.create(null);
+    for (const f of window.settingsFolders){ if (f && f.id!=null) fMap[String(f.id)] = f; }
+
+    // --- Fix bad folder parents & cycles ---
+    for (const f of window.settingsFolders){
+      if (f.parent == null) continue;
+      if (!fMap[String(f.parent)] || String(f.parent) === String(f.id)){
+        f.parent = null; // orphan or self-parent → root
+        continue;
+      }
+      // break cycles: walk up until root; if we re-meet self, detach
+      const seen = new Set([String(f.id)]);
+      let cur = f;
+      let p = fMap[String(cur.parent)];
+      while (p){
+        const pid = String(p.id);
+        if (seen.has(pid)){ f.parent = null; break; }
+        seen.add(pid);
+        if (p.parent == null) break;
+        p = fMap[String(p.parent)] || null;
+      }
+    }
+
+    // --- Fix bad task parentTask and cat (folder) pointers + cycles ---
+    for (const t of allTasks){
+      // self-parent or missing parent → detach
+      if (t.parentTask != null){
+        const pid = String(t.parentTask);
+        if (pid === String(t.id) || !tMap[pid]) t.parentTask = null;
+      }
+      // folder ref to nowhere → clear
+      if (t.cat != null && !fMap[String(t.cat)]) t.cat = null;
+
+      // break cycles: follow parentTask chain and cut if we loop
+      if (t.parentTask != null){
+        const seen = new Set([String(t.id)]);
+        let p = tMap[String(t.parentTask)];
+        let safe = true;
+        let hops = 0;
+        while (p && hops++ < 1000){
+          const pid = String(p.id);
+          if (seen.has(pid)){ safe = false; break; }
+          seen.add(pid);
+          if (p.parentTask == null) break;
+          p = tMap[String(p.parentTask)] || null;
+        }
+        if (!safe) t.parentTask = null;
+        if (t.parentTask != null){
+          const parent = tMap[String(t.parentTask)];
+          if (parent){
+            t.cat = parent.cat ?? null;
+          }
+        }
+      }
+
+      // numeric 'order' normalization (optional but stabilizes rendering)
+      if (!isFinite(t.order)) t.order = 0;
+    }
+    for (const f of window.settingsFolders){
+      if (!isFinite(f.order)) f.order = 0;
+    }
+  }catch(err){
+    console.warn("repairMaintenanceGraph failed:", err);
+  }
+}
+
+// Move a node safely in the "Explorer" tree (categories + tasks).
+// - kind: "task" | "category"
+// - nodeId: the id being moved
+// - target: { intoCat?: categoryId|null, intoTask?: taskId|null, beforeTask?: {id,type}, beforeCat?: {id} }
+//   exactly ONE of intoCat / intoTask / beforeTask / beforeCat should be set
+// Unified mover for tasks and categories.
+// Accepts the same "target" shape you already use:
+//   - { intoTask: <taskId> }              // make sub-component of a task
+//   - { beforeTask: { id, type } }        // reorder (top-level) before another task
+//   - { intoCat: <categoryId|null>, position?: 'start'|'end' } // file task into a folder (or root)
+//   - { beforeCat: { id } }               // reorder a folder before another folder
+function moveNodeSafely(kind, nodeId, target){
+  // ---------- Common state ----------
+  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  window.tasksInterval   = Array.isArray(window.tasksInterval)   ? window.tasksInterval   : [];
+  window.tasksAsReq      = Array.isArray(window.tasksAsReq)      ? window.tasksAsReq      : [];
+  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+
+  // ---------- Helpers: tasks ----------
+  function findTaskMeta(id){
+    const tid = String(id);
+    let idx = window.tasksInterval.findIndex(t => String(t.id) === tid);
+    if (idx >= 0) return { task: window.tasksInterval[idx], list: window.tasksInterval, mode: "interval", index: idx };
+    idx = window.tasksAsReq.findIndex(t => String(t.id) === tid);
+    if (idx >= 0) return { task: window.tasksAsReq[idx], list: window.tasksAsReq, mode: "asreq", index: idx };
+    return null;
+  }
+
+  function gatherSiblings(catId, parentId, excludeId){
+    const keyCat = String(catId ?? "");
+    const keyParent = String(parentId ?? "");
+    const excludeKey = excludeId != null ? String(excludeId) : null;
+    const siblings = [];
+    for (const list of [window.tasksInterval, window.tasksAsReq]){
+      if (!Array.isArray(list)) continue;
+      for (const task of list){
+        if (!task || task.id == null) continue;
+        if (excludeKey != null && String(task.id) === excludeKey) continue;
+        if (String(task.parentTask ?? "") !== keyParent) continue;
+        if (String(task.cat ?? "") !== keyCat) continue;
+        siblings.push(task);
+      }
+    }
+    return siblings;
+  }
+
+  function normalizeTaskOrder(catId, parentId){
+    const siblings = gatherSiblings(catId, parentId, null)
+      .sort((a,b)=> (Number(b.order||0) - Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
+    let n = siblings.length;
+    for (const task of siblings){ task.order = n--; }
+    if (siblings.length){
+      window._maintOrderCounter = Math.max(Number(window._maintOrderCounter)||0, siblings.length);
+    }
+  }
+
+  function nextTaskOrder(catId, parentId, excludeId, place){
+    const siblings = gatherSiblings(catId, parentId, excludeId);
+    if (!siblings.length){
+      return 1;
+    }
+    if (place === "end"){
+      let min = Infinity;
+      for (const sib of siblings){
+        const val = Number(sib.order) || 0;
+        if (val < min) min = val;
+      }
+      if (!isFinite(min)) min = 0;
+      return min - 1;
+    }
+    let max = -Infinity;
+    for (const sib of siblings){
+      const val = Number(sib.order) || 0;
+      if (val > max) max = val;
+    }
+    if (!isFinite(max)) max = 0;
+    return max + 1;
+  }
+
+  function ensureFolder(catId){
+    if (catId == null) return true;
+    return window.settingsFolders.some(f => String(f.id) === String(catId));
+  }
+
+  function isDescendant(candidateId, possibleAncestorId){
+    if (candidateId == null || possibleAncestorId == null) return false;
+    let guard = 0;
+    let cur = findTaskMeta(candidateId);
+    while (cur && cur.task.parentTask != null && guard++ < 1000){
+      if (String(cur.task.parentTask) === String(possibleAncestorId)) return true;
+      cur = findTaskMeta(cur.task.parentTask);
+    }
+    return false;
+  }
+
+  // ---------- Helpers: categories ----------
+  const findCat = (id)=> window.settingsFolders.find(f=>String(f.id)===String(id)) || null;
+
+  function normalizeFolderOrder(parentId){
+    const sibs = window.settingsFolders
+      .filter(f => String(f.parent||"") === String(parentId||""))
+      .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
+    let n = sibs.length;
+    for (const f of sibs){ f.order = n--; }
+  }
+
+  // ---------- TASK MOVES ----------
+  if (kind === "task"){
+    const src = findTaskMeta(nodeId);
+    if (!src) return false;
+
+    const originalGroup = { cat: src.task.cat ?? null, parent: src.task.parentTask ?? null };
+
+    // intoTask can be string or {id}
+    const intoTaskId = (target && Object.prototype.hasOwnProperty.call(target,"intoTask"))
+      ? (typeof target.intoTask === "object" ? target.intoTask?.id : target.intoTask)
+      : null;
+
+    if (intoTaskId != null){
+      if (String(intoTaskId) === String(nodeId)) return false;
+      const parentRef = findTaskMeta(intoTaskId);
+      if (!parentRef) return false;
+      if (isDescendant(parentRef.task.id, src.task.id)) return false;
+
+      const place = target && target.position === "end" ? "end" : "start";
+      const nextOrder = nextTaskOrder(parentRef.task.cat ?? null, parentRef.task.id, src.task.id, place);
+
+      src.task.parentTask = parentRef.task.id;
+      src.task.cat = parentRef.task.cat ?? null;
+      src.task.order = nextOrder;
+      if (isFinite(Number(nextOrder))) {
+        window._maintOrderCounter = Math.max(window._maintOrderCounter, Number(nextOrder));
+      }
+
+      normalizeTaskOrder(src.task.cat ?? null, src.task.parentTask ?? null);
+      normalizeTaskOrder(originalGroup.cat, originalGroup.parent);
+      return true;
+    }
+
+    if (target && target.beforeTask && target.beforeTask.id){
+      const dest = findTaskMeta(target.beforeTask.id);
+      if (!dest) return false;
+
+      src.task.cat = dest.task.cat ?? null;
+      src.task.parentTask = dest.task.parentTask ?? null;
+      src.task.order = (Number(dest.task.order) || 0) + 0.5;
+
+      normalizeTaskOrder(dest.task.cat ?? null, dest.task.parentTask ?? null);
+      normalizeTaskOrder(originalGroup.cat, originalGroup.parent);
+      return true;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(target || {}, "intoCat")){
+      const catId = target.intoCat;
+      if (!ensureFolder(catId)) return false;
+
+      const place = target && target.position === "end" ? "end" : "start";
+      const nextOrder = nextTaskOrder(catId ?? null, null, src.task.id, place);
+
+      src.task.cat = catId ?? null;
+      src.task.parentTask = null;
+      src.task.order = nextOrder;
+      if (isFinite(Number(nextOrder))) {
+        window._maintOrderCounter = Math.max(window._maintOrderCounter, Number(nextOrder));
+      }
+
+      normalizeTaskOrder(src.task.cat ?? null, null);
+      normalizeTaskOrder(originalGroup.cat, originalGroup.parent);
+      return true;
+    }
+
+    return false;
+  }
+
+  // ---------- CATEGORY MOVES ----------
+  if (kind === "category"){
+    const cat = findCat(nodeId);
+    if (!cat) return false;
+    const originalParent = cat.parent || null;
+
+    if (Object.prototype.hasOwnProperty.call(target || {}, "intoCat")){
+      const parent = target.intoCat; // may be null → root
+      // prevent cycles: cannot move into own descendant
+      let p = parent, hops = 0;
+      while (p != null && hops++ < 1000){
+        if (String(p) === String(cat.id)) return false;
+        p = findCat(p)?.parent ?? null;
+      }
+      if (parent != null && !findCat(parent)) return false;
+
+      const place = target && target.position === "end" ? "end" : "start";
+      const nextOrder = (function nextFolderOrder(parentId, excludeId, pos){
+        const siblings = window.settingsFolders
+          .filter(f => String(f.parent||"") === String(parentId||""))
+          .filter(f => String(f.id) !== String(excludeId));
+        if (!siblings.length) return 1;
+        if (pos === "end"){
+          let min = Infinity;
+          for (const sib of siblings){
+            const val = Number(sib.order) || 0;
+            if (val < min) min = val;
+          }
+          if (!isFinite(min)) min = 0;
+          return min - 1;
+        }
+        let max = -Infinity;
+        for (const sib of siblings){
+          const val = Number(sib.order) || 0;
+          if (val > max) max = val;
+        }
+        if (!isFinite(max)) max = 0;
+        return max + 1;
+      })(parent ?? null, cat.id, place);
+
+      cat.parent = parent || null;
+      cat.order  = nextOrder;
+      if (isFinite(Number(nextOrder))) {
+        window._maintOrderCounter = Math.max(window._maintOrderCounter, Number(nextOrder));
+      }
+      normalizeFolderOrder(cat.parent);
+      normalizeFolderOrder(originalParent);
+
+      if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+      return true;
+    }
+
+    if (target && target.beforeCat && target.beforeCat.id){
+      const sib = findCat(target.beforeCat.id);
+      if (!sib) return false;
+
+      cat.parent = sib.parent || null;
+      // Place "just before" by giving a slightly higher order, then normalize
+      cat.order = (Number(sib.order)||0) + 0.5;
+      normalizeFolderOrder(cat.parent);
+      normalizeFolderOrder(originalParent);
+
+      if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+      return true;
+    }
+
+    return false;
+  }
+
+  return false;
+}
+
+function renderSettings(){
+  // === Explorer-style Maintenance Settings ===
+  const root = document.getElementById("content");
+  if (!root) return;
+
+  // --- Ensure state is present ---
+  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  window.tasksInterval   = Array.isArray(window.tasksInterval)   ? window.tasksInterval   : [];
+  window.tasksAsReq      = Array.isArray(window.tasksAsReq)      ? window.tasksAsReq      : [];
+  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+
+  // --- one-time hydration for legacy/remote tasks (per-list) ---
+  // Previously this only ran if BOTH lists were empty. That prevented legacy
+  // tasks from ever loading when just one list was non-empty. This version
+  // hydrates each list independently: Firestore → old localStorage → defaults.
+  if (!window.__hydratedTasksOnce && (window.tasksInterval.length === 0 || window.tasksAsReq.length === 0)){
+    window.__hydratedTasksOnce = true;
+
+    (async ()=>{
+      let needInterval = window.tasksInterval.length === 0;
+      let needAsReq    = window.tasksAsReq.length === 0;
+      let filledAny    = false;
+
+      // 1) Try Firestore (workspaces/{WORKSPACE_ID}/app/state)
+      try{
+        if (window.FB && FB.ready && FB.docRef && typeof FB.docRef.get === "function"){
+          const snap = await FB.docRef.get();
+          if (snap && snap.exists){
+            const data = typeof snap.data === "function" ? snap.data() : snap.data;
+            if (data){
+              if (needInterval && Array.isArray(data.tasksInterval) && data.tasksInterval.length){
+                window.tasksInterval = data.tasksInterval.slice(); needInterval = false; filledAny = true;
+              }
+              if (needAsReq && Array.isArray(data.tasksAsReq) && data.tasksAsReq.length){
+                window.tasksAsReq = data.tasksAsReq.slice(); needAsReq = false; filledAny = true;
+              }
+            }
+          }
+        }
+      }catch(e){ console.warn("Firestore hydrate failed:", e); }
+
+      // 2) Fallback: old localStorage keys from v6
+      if (needInterval || needAsReq){
+        try{
+          const si = JSON.parse(localStorage.getItem("omax_tasks_interval_v6") || "null");
+          const sa = JSON.parse(localStorage.getItem("omax_tasks_asreq_v6")   || "null");
+          if (needInterval && Array.isArray(si) && si.length){
+            window.tasksInterval = si.slice(); needInterval = false; filledAny = true;
+          }
+          if (needAsReq && Array.isArray(sa) && sa.length){
+            window.tasksAsReq = sa.slice(); needAsReq = false; filledAny = true;
+          }
+        }catch(_){}
+      }
+
+      // 3) Fallback: defaults (so Settings is never empty)
+      if (needInterval && Array.isArray(window.defaultIntervalTasks)){
+        window.tasksInterval = window.defaultIntervalTasks.slice(); needInterval = false; filledAny = true;
+      }
+      if (needAsReq && Array.isArray(window.defaultAsReqTasks)){
+        window.tasksAsReq = window.defaultAsReqTasks.slice(); needAsReq = false; filledAny = true;
+      }
+
+      // Normalize ids/orders so the Explorer view can sort predictably
+      if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+      const addId = (t)=>{
+        if (!t.id){
+          t.id = (String(t.name||"task").toLowerCase().replace(/[^a-z0-9]+/g,"_")
+                 +"_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6));
+        }
+      };
+      [...window.tasksInterval, ...window.tasksAsReq].forEach(t=>{
+        addId(t);
+        if (t.order == null) t.order = ++window._maintOrderCounter;
+      });
+
+      try{ if (typeof saveTasks === "function") saveTasks(); }catch(_){}
+      try{ if (typeof saveCloudDebounced === "function") saveCloudDebounced(); }catch(_){}
+
+      // After hydrating, re-render the page once
+      renderSettings();
+    })();
+
+    // Temporary placeholder while tasks load
+    root.innerHTML = `
+      <div class="container">
+        <div class="block" style="grid-column:1/-1">
+          <h3>Maintenance Settings</h3>
+          <div>Loading tasks…</div>
+        </div>
+      </div>`;
+    return; // prevent wiring before data is ready
+  }
+
+
+
+  // --- Normalize relationships so legacy data can't hide tasks ---
+  // Tasks synced from Firestore/localStorage may still carry the
+  // legacy `cat` values ("interval"/"asreq") or point at folders that
+  // no longer exist. That caused the new explorer view to render an
+  // empty list even though the calendar still had tasks. Running the
+  // shared repair step resets any stale pointers before we render.
+  if (typeof repairMaintenanceGraph === "function") {
+    repairMaintenanceGraph();
+  }
+
+  // --- Small, compact scoped styles (once) ---
+  if (!document.getElementById("settingsExplorerCSS")){
+    const st = document.createElement("style");
+    st.id = "settingsExplorerCSS";
+    st.textContent = `
+      #explorer .toolbar{display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap}
+      #explorer .toolbar button{padding:.35rem .55rem;font-size:.92rem}
+      #explorer .hint{font-size:.8rem;color:#666}
+      #explorer .tree{border:1px solid #e5e5e5;background:#fff;border-radius:10px;padding:6px}
+      #explorer details{margin:4px 0;border:1px solid #eee;border-radius:8px;background:#fafafa}
+      #explorer details>summary{display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:grab;user-select:none}
+      #explorer details.task>summary{background:#fff;font-weight:600;border-bottom:1px solid #ececec}
+      #explorer details.cat>summary{font-weight:700;background:#f4f6fb}
+      #explorer .task-name{flex:1;min-width:0}
+      #explorer summary .chip{font-size:.72rem;border:1px solid #bbb;border-radius:999px;padding:.05rem .45rem;background:#fff}
+      #explorer .body{padding:8px 10px;background:#fff;border-top:1px dashed #e5e5e5}
+      #explorer .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.5rem}
+      #explorer label{font-size:.85rem;display:flex;flex-direction:column;gap:4px}
+      #explorer input,#explorer select{width:100%;padding:.35rem .45rem;border:1px solid #ccd4e0;border-radius:6px;font-size:.9rem}
+      #explorer .row-actions{display:flex;gap:.4rem;justify-content:flex-end;margin-top:.6rem;flex-wrap:wrap}
+      #explorer .row-actions button{padding:.35rem .65rem;border-radius:6px;border:0;cursor:pointer;background:#eef3fb;color:#0a63c2}
+      #explorer .row-actions .danger{background:#e14b4b;color:#fff}
+      #explorer .row-actions .btn-complete{background:#0a63c2;color:#fff}
+      #explorer .children{padding:6px 8px 10px 18px}
+      #explorer .task-children{padding:6px 8px 12px 22px;background:#fbfbfb;border-top:1px solid #f0f0f0}
+      #explorer .task-children>.dz{margin:4px 0 6px;border:1px dashed #bbb;border-radius:8px;padding:6px;font-size:.78rem;color:#666;background:#fff;cursor:grab}
+      #explorer .dz{min-height:8px;margin:4px 0;border-radius:6px}
+      #explorer .dz.dragover{min-height:18px;background:rgba(10,99,194,.08);outline:2px dashed #0a63c2}
+      #explorer .dz-line{position:relative;min-height:0;height:12px;margin:4px 0;border:1px dashed transparent;border-radius:6px;padding:0 6px;display:flex;align-items:center;justify-content:center;background:transparent;color:#0a63c2;transition:background-color .12s ease,border-color .12s ease}
+      #explorer .dz-line::before{content:"";position:absolute;left:8px;right:8px;top:50%;border-top:2px dashed transparent;transform:translateY(-50%);pointer-events:none}
+      #explorer .dz-line span{font-size:.68rem;pointer-events:none;opacity:0;transition:opacity .12s ease}
+      #explorer .dz-line.dragover{background:rgba(10,99,194,.12);border-color:#0a63c2;outline:none}
+      #explorer .dz-line.dragover::before{border-color:#0a63c2}
+      #explorer .dz-line.dragover span{opacity:1}
+      #explorer summary.drop-hint{outline:2px solid #6aa84f;border-radius:6px}
+      #explorer .sub-empty{font-size:.78rem;color:#777;margin-left:4px}
+      #explorer .empty{padding:.5rem;color:#666}
+      #explorer .chip.due-ok{border-color:#ccebd6;background:#e5f6eb;color:#2e7d32}
+      #explorer .chip.due-warn{border-color:#f2e4a3;background:#fff7d1;color:#8a6d00}
+      #explorer .chip.due-soon{border-color:#ffd0b5;background:#ffe6d6;color:#a14d00}
+      #explorer .chip.due-late{border-color:#ffc9c9;background:#ffe1e1;color:#c62828}
+      .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999;padding:12px}
+      .modal-backdrop[hidden]{display:none}
+      .modal-card{background:#fff;border-radius:12px;padding:18px 20px;box-shadow:0 18px 36px rgba(0,0,0,.25);min-width:min(480px,90vw);max-height:90vh;overflow:auto;position:relative}
+      .modal-card h4{margin:0 0 12px;font-size:1.1rem}
+      .modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+      .modal-grid label{display:flex;flex-direction:column;font-size:.9rem;gap:4px}
+      .modal-grid input,.modal-grid select{padding:.45rem .55rem;border:1px solid #cdd4e1;border-radius:6px;font-size:.95rem}
+      .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+      .modal-actions button{padding:.45rem .85rem;border-radius:6px;border:0;cursor:pointer;font-weight:600}
+      .modal-actions .secondary{background:#eef3fb;color:#0a63c2}
+      .modal-actions .primary{background:#0a63c2;color:#fff}
+      .modal-close{position:absolute;top:10px;right:10px;background:none;border:0;font-size:1.4rem;cursor:pointer;color:#666;line-height:1}
+    `;
+    document.head.appendChild(st);
+  }
+
+  // --- Helpers & derived collections ---
+  const byIdFolder = (id)=> window.settingsFolders.find(f => String(f.id)===String(id)) || null;
+  const childrenFolders = (parent)=> window.settingsFolders
+      .filter(f => String(f.parent||"") === String(parent||""))
+      .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
+
+  function ensureIdsOrder(obj){
+    if (!obj.id){
+      obj.id = (obj.name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_")+"_"+Date.now().toString(36);
+    }
+    if (obj.order == null) obj.order = ++window._maintOrderCounter;
+  }
+
+  const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+
+  function ensureTaskDefaults(task, type){
+    ensureIdsOrder(task);
+    task.mode = type;
+    if (task.parentTask == null) task.parentTask = null;
+    if (task.cat == null) task.cat = task.cat ?? null;
+  }
+
+  const taskEntries = [];
+  window.tasksInterval.forEach(t=>{ if (t){ ensureTaskDefaults(t,"interval"); taskEntries.push({ task:t, type:"interval" }); } });
+  window.tasksAsReq.forEach(t=>{ if (t){ ensureTaskDefaults(t,"asreq"); taskEntries.push({ task:t, type:"asreq" }); } });
+
+  const tasksById = new Map();
+  const childrenByParent = new Map();
+  const topByCat = new Map();
+
+  const sortEntries = (arr)=> arr.sort((a,b)=> (Number(b.task.order||0) - Number(a.task.order||0)) || String(a.task.name||"").localeCompare(String(b.task.name||"")));
+
+  for (const entry of taskEntries){
+    const t = entry.task;
+    const id = String(t.id);
+    tasksById.set(id, entry);
+    if (t.parentTask != null){
+      const key = String(t.parentTask);
+      if (!childrenByParent.has(key)) childrenByParent.set(key, []);
+      childrenByParent.get(key).push(entry);
+    }else{
+      const catKey = String(t.cat ?? "");
+      if (!topByCat.has(catKey)) topByCat.set(catKey, []);
+      topByCat.get(catKey).push(entry);
+    }
+  }
+
+  childrenByParent.forEach(sortEntries);
+  topByCat.forEach(sortEntries);
+
+  function dueChip(task){
+    if (task.mode !== "interval" || typeof nextDue !== "function") return "";
+    try{
+      const nd = nextDue(task);
+      if (!nd){
+        return `<span class="chip due-warn" data-due-chip="${task.id}">Awaiting usage data</span>`;
+      }
+      let cls = "due-ok";
+      if (nd.days <= 1) cls = "due-late";
+      else if (nd.days <= 3) cls = "due-soon";
+      else if (nd.days <= 7) cls = "due-warn";
+      return `<span class="chip ${cls}" data-due-chip="${task.id}">${nd.days}d → ${escapeHtml(nd.due.toDateString())}</span>`;
+    }catch{
+      return `<span class="chip due-warn" data-due-chip="${task.id}">Awaiting usage data</span>`;
+    }
+  }
+
+  function renderTaskList(entries, options = {}){
+    const {
+      parentTaskId = null,
+      catId = null,
+      tailLabel = "Drop here to place at end",
+      emptyMessage = "",
+      emptyClass = "empty",
+      emptyAttrs = ""
+    } = options;
+    const tail = `<div class="dz dz-line dz-task-tail" data-drop-task-tail="1" data-tail-parent="${String(parentTaskId ?? "")}" data-tail-cat="${String(catId ?? "")}"><span>${escapeHtml(tailLabel)}</span></div>`;
+    if (!entries.length){
+      const attr = emptyAttrs ? ` ${emptyAttrs}` : "";
+      const msg = emptyMessage ? `<div class="${emptyClass}"${attr}>${escapeHtml(emptyMessage)}</div>` : "";
+      return `${msg}${tail}`;
+    }
+    const pieces = [];
+    for (const entry of entries){
+      const label = escapeHtml(entry.task.name || "(unnamed task)");
+      pieces.push(`<div class="dz dz-line dz-task-gap" data-drop-before-task="${entry.task.id}"><span>Drop before ${label}</span></div>`);
+      pieces.push(renderTask(entry));
+    }
+    pieces.push(tail);
+    return pieces.join("");
+  }
+
+  function renderTask(entry){
+    const t = entry.task;
+    const type = entry.type;
+    const name = escapeHtml(t.name || "(unnamed task)");
+    const condition = escapeHtml(t.condition || "As required");
+    const freq = t.interval ? `${t.interval} hrs` : "Set frequency";
+    const children = childrenByParent.get(String(t.id)) || [];
+    const dropLabelRaw = t.name || "this task";
+    const dropLabel = escapeHtml(dropLabelRaw);
+    const childList = renderTaskList(children, {
+      parentTaskId: t.id,
+      catId: t.cat ?? null,
+      tailLabel: `Drop here to place at end of ${dropLabelRaw}'s sub-tasks`,
+      emptyMessage: "No sub-tasks yet. Drag any task here to nest it.",
+      emptyClass: "sub-empty",
+      emptyAttrs: `data-empty-sub="${t.id}"`
+    });
+    return `
+      <details class="task task--${type}" data-task-id="${t.id}" data-owner="${type}">
+        <summary draggable="true">
+          <span class="task-name">${name}</span>
+          <span class="chip">${type === "interval" ? "By Interval" : "As Required"}</span>
+          ${type === "interval" ? `<span class=\"chip\" data-chip-frequency="${t.id}">${escapeHtml(freq)}</span>` : `<span class=\"chip\" data-chip-condition="${t.id}">${condition}</span>`}
+          ${type === "interval" ? dueChip(t) : ""}
+        </summary>
+        <div class="body">
+          <div class="grid">
+            <label>Task name<input data-k="name" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.name||"")}" placeholder="Name"></label>
+            <label>Type<select data-k="mode" data-id="${t.id}" data-list="${type}">
+              <option value="interval" ${type==="interval"?"selected":""}>By interval</option>
+              <option value="asreq" ${type==="asreq"?"selected":""}>As required</option>
+            </select></label>
+            ${type === "interval" ? `<label>Frequency (hrs)<input type=\"number\" min=\"1\" step=\"1\" data-k=\"interval\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${t.interval!=null?t.interval:""}\" placeholder=\"Hours between service\"></label>` : `<label>Condition / trigger<input data-k=\"condition\" data-id=\"${t.id}\" data-list=\"asreq\" value=\"${escapeHtml(t.condition||"")}\" placeholder=\"When to perform\"></label>`}
+            ${type === "interval" ? `<label>Last serviced at (machine hrs)<input type=\"number\" min=\"0\" step=\"0.01\" data-k=\"anchorTotal\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${t.anchorTotal!=null?t.anchorTotal:""}\" placeholder=\"optional\"></label>` : ""}
+            <label>Manual link<input type="url" data-k="manualLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.manualLink||"")}" placeholder="https://..."></label>
+            <label>Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
+            <label>Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
+            <label>Price ($)<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${t.price!=null?t.price:""}" placeholder="optional"></label>
+          </div>
+          <div class="row-actions">
+            ${type === "interval" ? `<button class="btn-complete" data-complete="${t.id}">Mark completed now</button>` : ""}
+            <button class="danger" data-remove="${t.id}" data-from="${type}">Remove</button>
+          </div>
+        </div>
+        <div class="task-children" data-task-children="${t.id}">
+          <div class="dz" data-drop-into-task="${t.id}">Drop here to make a sub-task of ${dropLabel}</div>
+          ${childList}
+        </div>
+      </details>
+    `;
+  }
+
+  function renderCategoryList(parentId, parentName){
+    const folders = childrenFolders(parentId);
+    const tailLabel = parentId == null
+      ? "Drop folders here to place at end of root categories"
+      : `Drop folders here to place at end of ${parentName || "this category"}`;
+    if (!folders.length){
+      return `<div class="dz dz-line dz-cat-tail" data-drop-cat-tail="1" data-tail-parent-cat="${String(parentId ?? "")}"><span>${escapeHtml(tailLabel)}</span></div>`;
+    }
+    const parts = [];
+    for (const folder of folders){
+      parts.push(`<div class="dz dz-line dz-cat-gap" data-drop-before-cat="${folder.id}"><span>Drop folder before ${escapeHtml(folder.name)}</span></div>`);
+      parts.push(renderFolder(folder));
+    }
+    parts.push(`<div class="dz dz-line dz-cat-tail" data-drop-cat-tail="1" data-tail-parent-cat="${String(parentId ?? "")}"><span>${escapeHtml(tailLabel)}</span></div>`);
+    return parts.join("");
+  }
+
+  function renderFolder(folder){
+    ensureIdsOrder(folder);
+    const taskEntriesForFolder = topByCat.get(String(folder.id)) || [];
+    const tasksHtml = renderTaskList(taskEntriesForFolder, {
+      parentTaskId: null,
+      catId: folder.id,
+      tailLabel: `Drop tasks here to place at end of ${folder.name}`,
+      emptyMessage: "No tasks in this category yet.",
+      emptyClass: "empty"
+    });
+    return `
+      <details class="cat" data-cat-id="${folder.id}" open>
+        <summary draggable="true"><span class="task-name">${escapeHtml(folder.name)}</span></summary>
+        <div class="dz" data-drop-into-cat="${folder.id}">Drop tasks here to file under ${escapeHtml(folder.name)}</div>
+        <div class="children">
+          ${renderCategoryList(folder.id, folder.name)}
+          ${tasksHtml}
+        </div>
+      </details>
+    `;
+  }
+
+  const rootTaskEntries = topByCat.get("") || [];
+  const rootTasks = renderTaskList(rootTaskEntries, {
+    parentTaskId: null,
+    catId: null,
+    tailLabel: "Drop tasks here to place at end of the root list",
+    emptyMessage: "",
+    emptyClass: "empty"
+  });
+  const folderHtml = renderCategoryList(null, null);
+
+  const flattenedFolders = [];
+  (function walk(parent, prefix){
+    for (const f of childrenFolders(parent)){
+      flattenedFolders.push({ id: f.id, label: `${prefix}${f.name}` });
+      walk(f.id, `${prefix}${f.name} / `);
+    }
+  })(null, "");
+
+  const categoryOptions = ["<option value=\"\">(No Category)</option>"]
+    .concat(flattenedFolders.map(f => `<option value=\"${f.id}\">${escapeHtml(f.label)}</option>`))
+    .join("");
+
+  root.innerHTML = `
+    <div id="explorer" class="container">
+      <div class="block" style="grid-column:1 / -1">
+        <h3>Maintenance Settings</h3>
+        <div class="toolbar">
+          <button id="btnAddCategory">+ Add Category</button>
+          <button id="btnAddTask">+ Add Task</button>
+          <span class="hint">Drag folders & tasks to organize. Tasks can hold sub-tasks like folders.</span>
+        </div>
+        <div class="tree" id="tree">
+          <div class="dz" data-drop-root="1">Drop here to move to the root</div>
+          ${rootTasks}
+          ${folderHtml}
+          ${(window.settingsFolders.length === 0 && window.tasksInterval.length + window.tasksAsReq.length === 0) ? `<div class="empty">No tasks yet. Add one to get started.</div>` : ``}
+        </div>
+      </div>
+    </div>
+    <div class="modal-backdrop" id="taskModal" hidden>
+      <div class="modal-card">
+        <button type="button" class="modal-close" id="closeTaskModal">×</button>
+        <h4>Create maintenance task</h4>
+        <form id="taskForm" class="modal-form">
+          <div class="modal-grid">
+            <label>Task name<input name="taskName" required placeholder="Task"></label>
+            <label>Type<select name="taskType" id="taskTypeSelect">
+              <option value="interval">By interval</option>
+              <option value="asreq">As required</option>
+            </select></label>
+            <label data-form-frequency>Frequency (hrs)<input type="number" min="1" step="1" name="taskInterval" placeholder="e.g. 40"></label>
+            <label data-form-last>Last serviced at (machine hrs)<input type="number" min="0" step="0.01" name="taskLastServiced" placeholder="optional"></label>
+            <label data-form-condition hidden>Condition / trigger<input name="taskCondition" placeholder="e.g. When clogged"></label>
+            <label>Manual link<input type="url" name="taskManual" placeholder="https://..."></label>
+            <label>Store link<input type="url" name="taskStore" placeholder="https://..."></label>
+            <label>Part #<input name="taskPN" placeholder="Part number"></label>
+            <label>Price ($)<input type="number" min="0" step="0.01" name="taskPrice" placeholder="optional"></label>
+            <label>Category<select name="taskCategory">${categoryOptions}</select></label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="secondary" id="cancelTaskModal">Cancel</button>
+            <button type="submit" class="primary">Create Task</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+
+  const tree = document.getElementById("tree");
+  const modal = document.getElementById("taskModal");
+  const form = document.getElementById("taskForm");
+  const typeField = document.getElementById("taskTypeSelect");
+  const freqRow = form?.querySelector('[data-form-frequency]');
+  const lastRow = form?.querySelector('[data-form-last]');
+  const conditionRow = form?.querySelector('[data-form-condition]');
+
+  const persist = ()=>{
+    if (typeof saveTasks === "function") { try{ saveTasks(); }catch(_){} }
+    if (typeof saveCloudDebounced === "function") { try{ saveCloudDebounced(); }catch(_){} }
+  };
+
+  function syncFormMode(mode){
+    if (!freqRow || !lastRow || !conditionRow) return;
+    if (mode === "interval"){
+      freqRow.hidden = false;
+      lastRow.hidden = false;
+      conditionRow.hidden = true;
+    }else{
+      freqRow.hidden = true;
+      lastRow.hidden = true;
+      conditionRow.hidden = false;
+    }
+  }
+
+  function showModal(){
+    if (!modal || !form || !typeField) return;
+    form.reset();
+    modal.hidden = false;
+    syncFormMode(typeField.value);
+  }
+  function hideModal(){ if (modal) modal.hidden = true; }
+
+  document.getElementById("btnAddCategory")?.addEventListener("click", ()=>{
+    const name = prompt("Category name?");
+    if (!name) return;
+    const cat = { id: name.toLowerCase().replace(/[^a-z0-9]+/g,"_")+"_"+Math.random().toString(36).slice(2,7), name, parent:null, order: ++window._maintOrderCounter };
+    window.settingsFolders.push(cat);
+    persist();
+    renderSettings();
+  });
+
+  document.getElementById("btnAddTask")?.addEventListener("click", showModal);
+  document.getElementById("cancelTaskModal")?.addEventListener("click", hideModal);
+  document.getElementById("closeTaskModal")?.addEventListener("click", hideModal);
+  modal?.addEventListener("click", (e)=>{ if (e.target === modal) hideModal(); });
+  typeField?.addEventListener("change", ()=> syncFormMode(typeField.value));
+  syncFormMode(typeField?.value || "interval");
+
+  form?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    if (!form) return;
+    const data = new FormData(form);
+    const name = (data.get("taskName")||"").toString().trim();
+    const mode = (data.get("taskType")||"interval").toString();
+    if (!name){ alert("Task name is required."); return; }
+    const catId = (data.get("taskCategory")||"").toString().trim() || null;
+    const manual = (data.get("taskManual")||"").toString().trim();
+    const store = (data.get("taskStore")||"").toString().trim();
+    const pn = (data.get("taskPN")||"").toString().trim();
+    const priceVal = data.get("taskPrice");
+    const price = priceVal === null || priceVal === "" ? null : Number(priceVal);
+    const id = genId(name);
+    const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
+
+    if (mode === "interval"){
+      const intervalVal = data.get("taskInterval");
+      const lastVal = data.get("taskLastServiced");
+      const interval = intervalVal === null || intervalVal === "" ? 8 : Number(intervalVal);
+      const task = Object.assign(base, { mode:"interval", interval: isFinite(interval) && interval>0 ? interval : 8, sinceBase:null, anchorTotal:null });
+      if (lastVal !== null && lastVal !== ""){ const v = Number(lastVal); if (isFinite(v)){ task.anchorTotal = v; task.sinceBase = 0; } }
+      window.tasksInterval.unshift(task);
+    }else{
+      const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
+      const task = Object.assign(base, { mode:"asreq", condition });
+      window.tasksAsReq.unshift(task);
+    }
+
+    persist();
+    hideModal();
+    renderSettings();
+  });
+
+  function findTaskMeta(id){
+    const tid = String(id);
+    let idx = window.tasksInterval.findIndex(t => String(t.id)===tid);
+    if (idx >= 0) return { task: window.tasksInterval[idx], mode:"interval", list: window.tasksInterval, index: idx };
+    idx = window.tasksAsReq.findIndex(t => String(t.id)===tid);
+    if (idx >= 0) return { task: window.tasksAsReq[idx], mode:"asreq", list: window.tasksAsReq, index: idx };
+    return null;
+  }
+
+  function updateDueChip(holder, task){
+    const chip = holder.querySelector('[data-due-chip]');
+    if (!chip) return;
+    chip.textContent = "";
+    chip.classList.remove("due-ok","due-warn","due-soon","due-late");
+    if (typeof nextDue !== "function"){ chip.textContent = "—"; return; }
+    const nd = nextDue(task);
+    if (!nd){ chip.textContent = "Awaiting usage data"; chip.classList.add("due-warn"); return; }
+    chip.textContent = `${nd.days}d → ${nd.due.toDateString()}`;
+    if (nd.days <= 1) chip.classList.add("due-late");
+    else if (nd.days <= 3) chip.classList.add("due-soon");
+    else if (nd.days <= 7) chip.classList.add("due-warn");
+    else chip.classList.add("due-ok");
+  }
+
+  tree?.addEventListener("input", (e)=>{
+    const target = e.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+    const holder = target.closest("[data-task-id]");
+    if (!holder) return;
+    const id = holder.getAttribute("data-task-id");
+    const meta = findTaskMeta(id);
+    if (!meta) return;
+    const key = target.getAttribute("data-k");
+    if (!key || key === "mode") return;
+    let value = target.value;
+    if (key === "price" || key === "interval" || key === "anchorTotal"){
+      value = value === "" ? null : Number(value);
+      if (value !== null && !isFinite(value)) return;
+    }
+    if (key === "interval"){
+      meta.task.interval = value == null ? null : Number(value);
+      const chip = holder.querySelector('[data-chip-frequency]');
+      if (chip) chip.textContent = meta.task.interval ? `${meta.task.interval} hrs` : "Set frequency";
+      updateDueChip(holder, meta.task);
+    }else if (key === "anchorTotal"){
+      if (value == null){ meta.task.anchorTotal = null; meta.task.sinceBase = null; }
+      else { meta.task.anchorTotal = Number(value); meta.task.sinceBase = 0; }
+      updateDueChip(holder, meta.task);
+    }else if (key === "price"){
+      meta.task.price = value == null ? null : Number(value);
+    }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition"){
+      meta.task[key] = target.value;
+      if (key === "name"){ const label = holder.querySelector('.task-name'); if (label) label.textContent = target.value || "(unnamed task)"; }
+      if (key === "condition"){ const chip = holder.querySelector('[data-chip-condition]'); if (chip) chip.textContent = target.value || "As required"; }
+    }
+    persist();
+  });
+
+  tree?.addEventListener("change", (e)=>{
+    const target = e.target;
+    if (!(target instanceof HTMLSelectElement)) return;
+    const holder = target.closest("[data-task-id]");
+    if (!holder) return;
+    const id = holder.getAttribute("data-task-id");
+    const meta = findTaskMeta(id);
+    if (!meta) return;
+    if (target.getAttribute("data-k") === "mode"){
+      const nextMode = target.value;
+      if (nextMode === meta.mode) return;
+      meta.list.splice(meta.index,1);
+      if (nextMode === "interval"){
+        meta.task.mode = "interval";
+        meta.task.interval = meta.task.interval && meta.task.interval>0 ? Number(meta.task.interval) : 8;
+        meta.task.sinceBase = meta.task.sinceBase ?? null;
+        meta.task.anchorTotal = meta.task.anchorTotal ?? null;
+        delete meta.task.condition;
+        window.tasksInterval.unshift(meta.task);
+      }else{
+        meta.task.mode = "asreq";
+        meta.task.condition = meta.task.condition || "As required";
+        delete meta.task.interval;
+        delete meta.task.sinceBase;
+        delete meta.task.anchorTotal;
+        window.tasksAsReq.unshift(meta.task);
+      }
+      persist();
+      renderSettings();
+    }
+  });
+
+  tree?.addEventListener("click", (e)=>{
+    const removeBtn = e.target.closest('[data-remove]');
+    if (removeBtn){
+      const id = removeBtn.getAttribute('data-remove');
+      const from = removeBtn.getAttribute('data-from');
+      window.tasksInterval.forEach(t => { if (String(t.parentTask) === String(id)) t.parentTask = null; });
+      window.tasksAsReq.forEach(t => { if (String(t.parentTask) === String(id)) t.parentTask = null; });
+      if (from === 'interval') window.tasksInterval = window.tasksInterval.filter(t => String(t.id)!==String(id));
+      else window.tasksAsReq = window.tasksAsReq.filter(t => String(t.id)!==String(id));
+      persist();
+      renderSettings();
+      return;
+    }
+    const completeBtn = e.target.closest('.btn-complete');
+    if (completeBtn){
+      const id = completeBtn.getAttribute('data-complete');
+      const meta = findTaskMeta(id);
+      if (!meta || meta.mode !== 'interval') return;
+      const cur = (typeof currentTotal === 'function') ? currentTotal() : null;
+      meta.task.anchorTotal = cur!=null ? cur : 0;
+      meta.task.sinceBase = 0;
+      persist();
+      renderSettings();
+    }
+  });
+
+  const DRAG = { kind:null, id:null, type:null };
+  tree?.addEventListener('dragstart',(e)=>{
+    const sum = e.target.closest('summary');
+    if (!sum) return;
+    const taskCard = sum.closest('details.task');
+    const catCard  = sum.closest('details.cat');
+    if (taskCard){
+      DRAG.kind = 'task';
+      DRAG.id   = taskCard.getAttribute('data-task-id');
+      DRAG.type = taskCard.getAttribute('data-owner');
+      e.dataTransfer.setData('text/plain', `task:${DRAG.id}:${DRAG.type}`);
+      e.dataTransfer.effectAllowed = 'move';
+      sum.classList.add('drop-hint');
+    }else if (catCard){
+      DRAG.kind = 'category';
+      DRAG.id   = catCard.getAttribute('data-cat-id');
+      e.dataTransfer.setData('text/plain', `category:${DRAG.id}`);
+      e.dataTransfer.effectAllowed = 'move';
+      sum.classList.add('drop-hint');
+    }
+  });
+  tree?.addEventListener('dragend',()=>{
+    tree.querySelectorAll('.drop-hint').forEach(el=>el.classList.remove('drop-hint'));
+    tree.querySelectorAll('.dz.dragover').forEach(el=>el.classList.remove('dragover'));
+    DRAG.kind = DRAG.id = DRAG.type = null;
+  });
+  function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
+  tree?.addEventListener('dragover',(e)=>{
+    const dz = e.target.closest('.dz');
+    if (dz){
+      if ((dz.hasAttribute('data-drop-before-task') || dz.hasAttribute('data-drop-task-tail') || dz.hasAttribute('data-drop-into-task')) && DRAG.kind === 'task'){
+        allow(e); dz.classList.add('dragover'); return;
+      }
+      if ((dz.hasAttribute('data-drop-before-cat') || dz.hasAttribute('data-drop-cat-tail')) && DRAG.kind === 'category'){
+        allow(e); dz.classList.add('dragover'); return;
+      }
+      if (dz.hasAttribute('data-drop-into-cat') && DRAG.kind === 'task'){
+        allow(e); dz.classList.add('dragover'); return;
+      }
+      if (dz.hasAttribute('data-drop-root') && (DRAG.kind === 'task' || DRAG.kind === 'category')){
+        allow(e); dz.classList.add('dragover'); return;
+      }
+    }
+    const sumTask = e.target.closest('details.task>summary');
+    if (sumTask && DRAG.kind === 'task'){ allow(e); sumTask.classList.add('drop-hint'); return; }
+    const sumCat = e.target.closest('details.cat>summary');
+    if (sumCat && (DRAG.kind === 'task' || DRAG.kind === 'category')){ allow(e); sumCat.classList.add('drop-hint'); }
+  });
+  tree?.addEventListener('dragleave',(e)=>{
+    e.target.closest('.dz')?.classList.remove('dragover');
+    e.target.closest('summary')?.classList.remove('drop-hint');
+  });
+  tree?.addEventListener('drop',(e)=>{
+    const raw = e.dataTransfer.getData('text/plain') || '';
+    const parts = raw.split(':');
+    const kind = parts[0];
+    const id = parts[1] || null;
+    e.preventDefault();
+    const dzRoot = e.target.closest('[data-drop-root]');
+    const dzCat  = e.target.closest('[data-drop-into-cat]');
+    const dzTask = e.target.closest('[data-drop-into-task]');
+    const dzBeforeTask = e.target.closest('[data-drop-before-task]');
+    const dzTaskTail = e.target.closest('[data-drop-task-tail]');
+    const dzBeforeCat = e.target.closest('[data-drop-before-cat]');
+    const dzCatTail = e.target.closest('[data-drop-cat-tail]');
+    const onTaskSummary = e.target.closest('details.task>summary');
+    const onCatSummary  = e.target.closest('details.cat>summary');
+
+    if (kind === 'task' && id){
+      if (dzBeforeTask){
+        const beforeId = dzBeforeTask.getAttribute('data-drop-before-task');
+        if (beforeId && typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { beforeTask: { id: beforeId } })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+      if (dzTaskTail){
+        const parentAttr = dzTaskTail.getAttribute('data-tail-parent') || '';
+        const catAttr = dzTaskTail.getAttribute('data-tail-cat') || '';
+        const parentId = parentAttr === '' ? null : parentAttr;
+        const catId = catAttr === '' ? null : catAttr;
+        if (parentId){
+          if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
+            persist();
+            renderSettings();
+          }
+        }else{
+          if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
+            persist();
+            renderSettings();
+          }
+        }
+        return;
+      }
+      if (dzRoot){
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: null, position: 'end' })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+      if (dzCat){
+        const catId = dzCat.getAttribute('data-drop-into-cat');
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+      if (dzTask){
+        const parentId = dzTask.getAttribute('data-drop-into-task');
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+      if (onTaskSummary){
+        const parentId = onTaskSummary.closest('details.task')?.getAttribute('data-task-id');
+        if (parentId && typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+      if (onCatSummary){
+        const catId = onCatSummary.closest('details.cat')?.getAttribute('data-cat-id');
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+    }
+
+    if (kind === 'category' && id){
+      if (dzBeforeCat){
+        const beforeId = dzBeforeCat.getAttribute('data-drop-before-cat');
+        if (beforeId && typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { beforeCat: { id: beforeId } })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+      if (dzCatTail){
+        const parentAttr = dzCatTail.getAttribute('data-tail-parent-cat') || '';
+        const parentId = parentAttr === '' ? null : parentAttr;
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { intoCat: parentId, position: 'end' })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+      if (dzRoot){
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { intoCat: null, position: 'end' })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+      if (onCatSummary){
+        const beforeId = onCatSummary.closest('details.cat')?.getAttribute('data-cat-id');
+        if (beforeId && typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { beforeCat: { id: beforeId } })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+    }
+  });
+}
+
+// ---- Costs page (placeholder to satisfy router & nav) ----
+function renderCosts(){
+  const content = document.getElementById("content");
+  if (!content) return;
+
+  content.innerHTML = `
+    <div class="container">
+      <div class="block" style="grid-column:1 / -1">
+        <h3>Cost Analysis</h3>
+        <p class="small">Placeholder view. This exists so the #/costs route and the top-nav button do not break other pages. We can flesh this out later.</p>
+      </div>
+    </div>
+  `;
+}
+
+
+function renderJobs(){
+  const content = document.getElementById("content"); 
+  if (!content) return;
+
+  // 1) Render the jobs view (includes the table with the Actions column)
+  content.innerHTML = viewJobs();
+
+  // 2) Insert a "Log" button into each job row's Actions cell (non-edit rows)
+  content.querySelectorAll('tr[data-job-row]').forEach(tr=>{
+    const id = tr.getAttribute('data-job-row');
+    let actionsCell = tr.querySelector('td:last-child');
+    // Fallback: if the row didn’t render an Actions cell, add one
+    if (!actionsCell){ actionsCell = document.createElement('td'); tr.appendChild(actionsCell); }
+    const logBtn = document.createElement('button');
+    logBtn.textContent = 'Log';
+    logBtn.setAttribute('data-log-job', id);
+    actionsCell.prepend(logBtn); // put Log before Edit/Remove
+  });
+
+  // 3) Small, scoped helpers for manual log math + defaults
+  const todayISO = (()=>{ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); })();
+  const curTotal = ()=> (RENDER_TOTAL ?? currentTotal());
+
+  function getHoursAt(dateISO){
+    // Machine totalHours reading at or before dateISO
+    if (!Array.isArray(totalHistory) || !totalHistory.length) return null;
+    const target = new Date(dateISO + "T00:00:00");
+    let best = null;
+    for (const h of totalHistory){
+      const d = new Date(h.dateISO + "T00:00:00");
+      if (d <= target){ if (best==null || d > new Date(best.dateISO+"T00:00:00")) best = h; }
+    }
+    return best ? Number(best.hours) : null;
+  }
+  function lastManual(job){
+    if (!job || !Array.isArray(job.manualLogs) || job.manualLogs.length===0) return null;
+    const logs = job.manualLogs.slice().sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
+    return logs[logs.length-1];
+  }
+  function machineSinceStart(job){
+    if (!job?.startISO) return 0;
+    const startH = getHoursAt(job.startISO);
+    const nowH   = curTotal();
+    if (startH==null || nowH==null) return 0;
+    return Math.max(0, nowH - startH);
+  }
+  function suggestSpent(job){
+    // Suggest “spent since last manual” using 8 hrs/day; if no manual, 0
+    const lm = lastManual(job);
+    if (lm){
+      const last = new Date(lm.dateISO + "T00:00:00");
+      const today = new Date(todayISO + "T00:00:00");
+      const days = Math.max(0, Math.floor((today - last)/(24*60*60*1000)));
+      return days * DAILY_HOURS;
+    }
+    return 0;
+  }
+  const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
+
+  // 4) Add Job (unchanged)
+  document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
+    e.preventDefault();
+    const name  = document.getElementById("jobName").value.trim();
+    const est   = Number(document.getElementById("jobEst").value);
+    const start = document.getElementById("jobStart").value;
+    const due   = document.getElementById("jobDue").value;
+    if (!name || !isFinite(est) || est<=0 || !start || !due){ toast("Fill job fields."); return; }
+    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material:"", notes:"", manualLogs:[] });
+    saveCloudDebounced(); renderJobs();
+  });
+
+  // 5) Inline material $/qty (kept)
+  content.querySelector("tbody")?.addEventListener("change",(e)=>{
+    if (e.target.matches("input.matCost, input.matQty")){
+      const id = e.target.getAttribute("data-id");
+      const j = cuttingJobs.find(x=>x.id===id); if (!j) return;
+      j.materialCost = Number(content.querySelector(`input.matCost[data-id="${id}"]`).value)||0;
+      j.materialQty  = Number(content.querySelector(`input.matQty[data-id="${id}"]`).value)||0;
+      saveCloudDebounced();
+      renderJobs();
+    }
+  });
+
+  // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
+  content.querySelector("tbody")?.addEventListener("click",(e)=>{
+    const ed = e.target.closest("[data-edit-job]");
+    const rm = e.target.closest("[data-remove-job]");
+    const sv = e.target.closest("[data-save-job]");
+    const ca = e.target.closest("[data-cancel-job]");
+    const lg = e.target.closest("[data-log-job]");
+    const apSpent  = e.target.closest("[data-log-apply-spent]");
+    const apRemain = e.target.closest("[data-log-apply-remain]");
+
+    // Edit
+    if (ed){ editingJobs.add(ed.getAttribute("data-edit-job")); renderJobs(); return; }
+
+    // Remove
+    if (rm){
+      const id = rm.getAttribute("data-remove-job");
+      cuttingJobs = cuttingJobs.filter(x=>x.id!==id);
+      saveCloudDebounced(); toast("Removed"); renderJobs(); 
+      return;
+    }
+
+    // Save (from edit row)
+    if (sv){
+      const id = sv.getAttribute("data-save-job");
+      const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
+      const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${id}"]`)?.value;
+      j.name = qs("name") || j.name;
+      j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
+      j.material = qs("material") || j.material || "";
+      j.startISO = qs("startISO") || j.startISO;
+      j.dueISO   = qs("dueISO")   || j.dueISO;
+      j.notes    = content.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
+      editingJobs.delete(id);
+      saveCloudDebounced(); renderJobs();
+      return;
+    }
+
+    // Cancel edit
+    if (ca){ editingJobs.delete(ca.getAttribute("data-cancel-job")); renderJobs(); return; }
+
+    // Toggle inline Log panel (adds both "spent" and "remaining" controls)
+    if (lg){
+      const id = lg.getAttribute("data-log-job");
+      const anchor   = content.querySelector(`tr[data-job-row="${id}"]`);
+      const existing = content.querySelector(`tr[data-log-row="${id}"]`);
+      if (existing){ existing.remove(); return; }
+      if (!anchor) return;
+
+      const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
+      const lm = lastManual(j);
+      const spentSuggest = suggestSpent(j);
+      const completedSoFar = lm ? Number(lm.completedHours)||0 : 0;
+      const machineInitNote = (!lm && machineSinceStart(j)>0)
+        ? `<div class="muted small">Prefilled uses <strong>machine hours since start</strong> when available.</div>` : ``;
+
+      const trForm = document.createElement("tr");
+      trForm.className = "manual-log-row";
+      trForm.setAttribute("data-log-row", id);
+      trForm.innerHTML = `
+        <td colspan="8">
+          <div class="mini-form" style="display:grid; gap:8px; align-items:end; grid-template-columns: repeat(6, minmax(0,1fr));">
+            <div style="grid-column:1/7">
+              <strong>Manual Log for: ${j.name}</strong>
+              <div class="small muted">Last manual ${ lm ? `${lm.completedHours} hr on ${lm.dateISO}` : "— none" }. ${machineInitNote}</div>
+            </div>
+
+            <label style="display:block">
+              <span class="muted">Add time spent (hrs)</span>
+              <input type="number" step="0.1" min="0" id="manSpent_${id}" value="${spentSuggest.toFixed(1)}">
+            </label>
+            <div style="display:flex; gap:8px; align-items:center">
+              <button data-log-apply-spent="${id}">Apply spent</button>
+            </div>
+
+            <label style="display:block">
+              <span class="muted">Set time remaining (hrs)</span>
+              <input type="number" step="0.1" min="0" id="manRemain_${id}" value="">
+            </label>
+            <div style="display:flex; gap:8px; align-items:center">
+              <button data-log-apply-remain="${id}">Apply remaining</button>
+            </div>
+          </div>
+        </td>`;
+      anchor.insertAdjacentElement("afterend", trForm);
+      return;
+    }
+
+    // Apply "spent" (increment completedHours)
+    if (apSpent){
+      const id = apSpent.getAttribute("data-log-apply-spent");
+      const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
+      const add = Number(content.querySelector(`#manSpent_${id}`)?.value);
+      if (!isFinite(add) || add < 0){ toast("Enter a valid spent hours."); return; }
+
+      const lm = lastManual(j);
+      const base = lm ? (Number(lm.completedHours)||0) : machineSinceStart(j);
+      const est  = Number(j.estimateHours)||0;
+      const newCompleted = clamp(base + add, 0, est);
+
+      j.manualLogs = Array.isArray(j.manualLogs) ? j.manualLogs : [];
+      const idx = j.manualLogs.findIndex(m => m.dateISO === todayISO);
+      if (idx >= 0) j.manualLogs[idx].completedHours = newCompleted;
+      else j.manualLogs.push({ dateISO: todayISO, completedHours: newCompleted });
+      j.manualLogs.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
+
+      saveCloudDebounced(); toast("Manual hours updated"); renderJobs();
+      return;
+    }
+
+    // Apply "remaining" (set completedHours = estimate - remaining)
+    if (apRemain){
+      const id = apRemain.getAttribute("data-log-apply-remain");
+      const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
+      const remain = Number(content.querySelector(`#manRemain_${id}`)?.value);
+      const est    = Number(j.estimateHours)||0;
+      if (!isFinite(remain) || remain < 0){ toast("Enter valid remaining hours."); return; }
+
+      const completed = clamp(est - remain, 0, est);
+      j.manualLogs = Array.isArray(j.manualLogs) ? j.manualLogs : [];
+      const idx = j.manualLogs.findIndex(m => m.dateISO === todayISO);
+      if (idx >= 0) j.manualLogs[idx].completedHours = completed;
+      else j.manualLogs.push({ dateISO: todayISO, completedHours: completed });
+      j.manualLogs.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
+
+      saveCloudDebounced(); toast("Remaining → completed set"); renderJobs();
+      return;
+    }
+  });
+}
+
+function renderInventory(){
+  const content = document.getElementById("content"); if (!content) return;
+  content.innerHTML = viewInventory();
+  document.querySelector("tbody")?.addEventListener("input",(e)=>{
+    const input = e.target;
+    const id = input.getAttribute("data-id");
+    const k  = input.getAttribute("data-inv");
+    const item = inventory.find(x=>x.id===id); if (!item) return;
+    if (k==="qty"){ item.qty = Math.max(0, Number(input.value)||0); }
+    else if (k==="note"){ item.note = input.value; }
+    saveCloudDebounced();
+  });
+}
+
+function renderSignedOut(){
+  const content = document.getElementById("content"); if (!content) return;
+  content.innerHTML = `<div class='container'><div class='block'><h3>Please sign in to view workspace.</h3></div></div>`;
+}
+
+
+view.js
+/* ========================= VIEWS ========================== */
+function viewDashboard(){
+  const cur   = RENDER_TOTAL ?? currentTotal();
+  const prev  = previousTotal();
+  const delta = RENDER_DELTA ?? deltaSinceLast();
+  return `
+  <div class="container">
+    <!-- Total hours -->
+    <div class="block">
+      <h3>Total Hours</h3>
+      <label>Enter total hours now:
+        <input type="number" id="totalInput" value="${cur!=null?cur:""}" />
+      </label>
+      <button id="logBtn">Log Hours</button>
+      <div class="hint">Last updated: ${cur!=null? new Date(totalHistory[totalHistory.length-1].dateISO).toLocaleString(): "—"}</div>
+      <div class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</div>
+    </div>
+
+    <!-- Next due -->
+    <div class="block">
+      <h3>Next Due</h3>
+      <div id="nextDueBox">Calculating…</div>
+    </div>
+
+    <!-- Pump Efficiency widget (rendered by renderPumpWidget) -->
+    <section id="pump-widget" class="block"></section>
+
+    <!-- Calendar -->
+    <div class="block" style="grid-column: 1 / -1">
+      <h3>Calendar (Current + Next 2 Months)</h3>
+
+      <div id="months"></div>
+      <div class="small">Hover a due item for actions. Click to pin the bubble.</div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="dashboardAddModal" hidden>
+    <div class="modal-card dashboard-modal-card">
+      <button type="button" class="modal-close" id="dashboardModalClose">×</button>
+
+      <section class="dash-modal-step" data-step="picker">
+        <h4>What would you like to add?</h4>
+        <div class="dash-choice-grid">
+          <button type="button" class="dash-choice" data-choice="task">Maintenance Task</button>
+          <button type="button" class="dash-choice" data-choice="downtime">Down Time</button>
+          <button type="button" class="dash-choice" data-choice="job">Cutting Job</button>
+        </div>
+      </section>
+
+      <section class="dash-modal-step" data-step="task" hidden>
+        <h4>Add maintenance task</h4>
+        <form id="dashTaskForm" class="modal-form">
+          <div class="modal-grid">
+            <label>Task name<input id="dashTaskName" required placeholder="Task"></label>
+            <label>Type<select id="dashTaskType">
+              <option value="interval">Per interval</option>
+              <option value="asreq">As required</option>
+            </select></label>
+            <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
+            <label data-task-last>Last serviced at (hrs)<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
+            <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
+            <label>Manual link<input type="url" id="dashTaskManual" placeholder="https://..."></label>
+            <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
+            <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
+            <label>Price ($)<input type="number" min="0" step="0.01" id="dashTaskPrice" placeholder="optional"></label>
+            <label>Category<select id="dashTaskCategory"></select></label>
+          </div>
+
+          <div class="subtask-section">
+            <div class="subtask-header">
+              <h5>Sub-tasks</h5>
+              <button type="button" id="dashAddSubtask" class="subtask-add-btn">+ Add sub-task</button>
+            </div>
+            <div id="dashSubtaskList" class="subtask-list"></div>
+            <p class="small muted">Sub-tasks inherit the calendar display and live under the main task.</p>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-step-back>Back</button>
+            <button type="submit" class="primary">Create Task</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="dash-modal-step" data-step="downtime" hidden>
+        <h4>Mark machine down time</h4>
+        <form id="dashDownForm" class="modal-form">
+          <div class="modal-grid">
+            <label>Down time date<input type="date" id="dashDownDate" required></label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-step-back>Back</button>
+            <button type="submit" class="primary">Save</button>
+          </div>
+        </form>
+        <div id="dashDownList" class="down-list"></div>
+      </section>
+
+      <section class="dash-modal-step" data-step="job" hidden>
+        <h4>Add cutting job</h4>
+        <form id="dashJobForm" class="modal-form">
+          <div class="modal-grid">
+            <label>Job name<input id="dashJobName" required placeholder="Job"></label>
+            <label>Estimate (hrs)<input type="number" min="1" step="0.1" id="dashJobEstimate" required placeholder="e.g. 12"></label>
+            <label>Start date<input type="date" id="dashJobStart" required></label>
+            <label>Due date<input type="date" id="dashJobDue" required></label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-step-back>Back</button>
+            <button type="submit" class="primary">Add Job</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </div>`;
+}
+
+function taskDetailsInterval(task){
+  const nd = nextDue(task);
+  const sinceTxt = nd ? `${nd.since.toFixed(0)} / ${task.interval} hrs` : "—";
+  const daysTxt  = nd ? `${nd.days} day(s) → ${nd.due.toDateString()}` : "—";
+  const lastServ = nd && nd.lastServicedAt != null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
+  return `
+<details data-task-id="${task.id}" data-list="interval">
+    <summary>${task.name} — <span class="small">since: ${sinceTxt} | due: ${daysTxt}</span></summary>
+    <div class="row"><label>Name:</label>
+      <div><input type="text" data-k="name" data-id="${task.id}" data-list="interval" value="${task.name}" /></div>
+    </div>
+    <div class="row"><label>Interval (hrs):</label>
+      <div><input type="number" min="1" data-k="interval" data-id="${task.id}" data-list="interval" value="${task.interval}" /></div>
+    </div>
+    <div class="row"><label>Baseline “since last” (hrs):</label>
+      <div><input type="number" min="0" data-k="sinceBase" data-id="${task.id}" data-list="interval" value="${task.sinceBase != null ? task.sinceBase : ""}" /></div>
+    </div>
+    <div class="row"><label>When last serviced (hrs):</label>
+      <div>${lastServ}</div>
+    </div>
+    <div class="row"><label>Manual link:</label>
+      <div><input type="url" data-k="manualLink" data-id="${task.id}" data-list="interval" value="${task.manualLink || ""}" placeholder="PDF / guide URL" /></div>
+    </div>
+    <div class="row"><label>Store link:</label>
+      <div><input type="url" data-k="storeLink" data-id="${task.id}" data-list="interval" value="${task.storeLink || ""}" placeholder="Where to buy" /></div>
+    </div>
+    <div class="row"><label>Part #:</label>
+      <div><input type="text" data-k="pn" data-id="${task.id}" data-list="interval" value="${task.pn || ""}" /></div>
+    </div>
+    <div class="row"><label>Price:</label>
+      <div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="interval" value="${task.price != null ? task.price : ""}" /></div>
+    </div>
+    <div class="row"><label>Actions:</label>
+      <div>
+        <button class="btn-complete" data-complete="${task.id}">Mark Completed Now</button>
+        <button class="danger" data-remove="${task.id}" data-from="interval">Remove</button>
+      </div>
+    </div>
+  </details>`;
+}
+
+function taskDetailsAsReq(task){
+  return `
+<details data-task-id="${task.id}" data-list="asreq">
+    <summary>${task.name} — <span class="small">${task.condition || "As required"}</span></summary>
+    <div class="row"><label>Name:</label>
+      <div><input type="text" data-k="name" data-id="${task.id}" data-list="asreq" value="${task.name}" /></div>
+    </div>
+    <div class="row"><label>Condition/Notes:</label>
+      <div><input type="text" data-k="condition" data-id="${task.id}" data-list="asreq" value="${task.condition || ""}" placeholder="e.g., when clogged / visual check" /></div>
+    </div>
+    <div class="row"><label>Manual link:</label>
+      <div><input type="url" data-k="manualLink" data-id="${task.id}" data-list="asreq" value="${task.manualLink || ""}" placeholder="PDF / guide URL" /></div>
+    </div>
+    <div class="row"><label>Store link:</label>
+      <div><input type="url" data-k="storeLink" data-id="${task.id}" data-list="asreq" value="${task.storeLink || ""}" placeholder="Where to buy" /></div>
+    </div>
+    <div class="row"><label>Part #:</label>
+      <div><input type="text" data-k="pn" data-id="${task.id}" data-list="asreq" value="${task.pn || ""}" /></div>
+    </div>
+    <div class="row"><label>Price:</label>
+      <div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="asreq" value="${task.price != null ? task.price : ""}" /></div>
+    </div>
+    <div class="row"><label>Actions:</label>
+      <div><button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button></div>
+    </div>
+  </details>`;
+}
+
+function viewSettings(){
+  // ------- Folder store (nesting via parent=null|folderId). Back-compat if older entries lack "parent".
+  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
+
+  // ------- Small helpers (IDs/data-* kept the same so existing handlers work) -------
+   
+  const chipFor = (t)=>{
+    const nd = nextDue(t);
+    if (!nd) return `<span class="chip">—</span>`;
+    const d = nd.days;
+    let cls = "green";
+    if (d <= 1) cls = "red"; else if (d <= 3) cls = "orange"; else if (d <= 7) cls = "yellow";
+    return `<span class="chip ${cls}">${d}d → ${nd.due.toDateString()}</span>`;
+  };
+
+  const partRow = (p, parentId, listType) => `
+    <div class="mini-form" data-part-row data-parent="${parentId}" data-list="${listType}" data-part-id="${p.pid}">
+      <input type="text" placeholder="Part name" value="${p.name||""}"
+             data-part-k="name" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="text" placeholder="PN" value="${p.pn||""}"
+             data-part-k="pn" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="number" step="0.01" min="0" placeholder="Price" value="${p.price!=null?p.price:""}"
+             data-part-k="price" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="url" placeholder="Link" value="${p.link||""}"
+             data-part-k="link" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <input type="text" placeholder="Note" value="${p.note||""}"
+             data-part-k="note" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
+      <button class="danger" type="button"
+              data-part-remove="${p.pid}" data-parent="${parentId}" data-list="${listType}">Remove</button>
+    </div>`;
+
+  // One maintenance card (task). Kept attrs used by renderSettings().
+  const card = (t, listType) => {
+    const nd = nextDue(t);
+    const lastServ = nd && nd.lastServicedAt != null ? `${nd.lastServicedAt.toFixed(0)} hrs` : "—";
+    const parts = Array.isArray(t.parts) ? t.parts : [];
+    return `
+    <details class="block" draggable="true"
+             data-task-id="${t.id}" data-list="${listType}" data-cat="${t.cat||""}">
+      <summary style="display:flex;align-items:center;gap:8px;">
+        <b>${t.name}</b>
+        ${listType === "interval" ? `<span class="chip">${t.interval}h</span>` : `<span class="chip">As req.</span>`}
+        ${listType === "interval" ? chipFor(t) : ""}
+      </summary>
+
+      <div class="mini-form" style="margin:8px 0 4px 0;">
+        <label>Name: <input type="text" data-k="name" data-id="${t.id}" data-list="${listType}" value="${t.name}"></label>
+
+        ${listType === "interval" ? `
+        <label>Interval (hrs): <input type="number" min="1" data-k="interval" data-id="${t.id}" data-list="interval" value="${t.interval}"></label>
+        <label>Baseline “since last” (hrs): <input type="number" min="0" data-k="sinceBase" data-id="${t.id}" data-list="interval" value="${t.sinceBase!=null?t.sinceBase:""}"></label>
+        <div class="small muted">When last serviced: ${lastServ}</div>
+        ` : `
+        <label>Condition/Notes: <input type="text" data-k="condition" data-id="${t.id}" data-list="asreq" value="${t.condition||""}" placeholder="e.g., when clogged / visual check"></label>
+        `}
+
+        <label>Manual link: <input type="url" data-k="manualLink" data-id="${t.id}" data-list="${listType}" value="${t.manualLink||""}" placeholder="PDF / guide URL"></label>
+        <label>Store link: <input type="url" data-k="storeLink" data-id="${t.id}" data-list="${listType}" value="${t.storeLink||""}" placeholder="Where to buy"></label>
+        <label>Part # (primary): <input type="text" data-k="pn" data-id="${t.id}" data-list="${listType}" value="${t.pn||""}"></label>
+        <label>Price (primary): <input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${listType}" value="${t.price!=null?t.price:""}"></label>
+
+        <div>
+          <button class="btn-complete" data-complete="${t.id}">Mark Completed Now</button>
+          <button class="danger" data-remove="${t.id}" data-from="${listType}">Remove</button>
+        </div>
+      </div>
+
+      <div class="block" style="background:#fff;margin-top:8px;">
+        <h4 style="margin:0 0 6px 0;">Sub-parts</h4>
+        <div class="small muted">Nested parts remain searchable.</div>
+        <div id="parts_${t.id}" data-part-list data-parent="${t.id}" data-list="${listType}">
+          ${parts.map(p => partRow(p, t.id, listType)).join("") || `<div class="small muted">No sub-parts yet.</div>`}
+        </div>
+        <form class="mini-form" data-part-add-form data-parent="${t.id}" data-list="${listType}" style="margin-top:6px">
+          <input type="text"  placeholder="Part name"  data-part-new="name"  required>
+          <input type="text"  placeholder="PN"         data-part-new="pn">
+          <input type="number" step="0.01" min="0" placeholder="Price" data-part-new="price">
+          <input type="url"   placeholder="Link"       data-part-new="link">
+          <input type="text"  placeholder="Note"       data-part-new="note">
+          <button type="submit">+ Add sub-part</button>
+        </form>
+      </div>
+    </details>`;
+  };
+
+  // ------- Folder tree helpers (shared category tree; tasks filtered per menu) -------
+  const folders = window.settingsFolders;
+  const kidsOf  = (parentId)=> folders.filter(f => (f.parent||null) === (parentId||null));
+  const tasksIn = (list, folderId)=> (Array.isArray(list)?list:[]).filter(t => (t.cat||null) === (folderId||null));
+
+  const renderFolder = (folder, listType) => {
+    const subFolders = kidsOf(folder.id).map(sf => renderFolder(sf, listType)).join("");
+    const list       = (listType==="interval"?tasksInterval:tasksAsReq);
+    const tasksHtml  = tasksIn(list, folder.id).map(t => card(t, listType)).join("")
+                      || `<div class="small muted">No items in this category.</div>`;
+    return `
+      <details class="folder block" data-folder-id="${folder.id}" open>
+        <summary class="folder-title" style="display:flex;align-items:center;gap:10px;font-weight:700;">
+          <span class="folder-name">${folder.name}</span>
+          <span style="flex:1"></span>
+          <button class="small" data-add-subfolder="${folder.id}">+ Sub-category</button>
+          <button class="small" data-rename-folder="${folder.id}">Rename</button>
+          <button class="danger small" data-remove-folder="${folder.id}">Remove</button>
+        </summary>
+
+        <div class="folder-dropzone small muted" data-drop-folder="${folder.id}"
+             style="border:1px dashed #bbb; padding:6px; margin:6px 0; border-radius:8px;">
+          Drag tasks here to move into <b>${folder.name}</b>
+        </div>
+
+        <div class="folder-children" data-folder-children="${folder.id}" data-dnd-scope="${listType}">
+          ${subFolders}
+          <div class="bubble-list" data-folder-body="${folder.id}">
+            ${tasksHtml}
+          </div>
+        </div>
+      </details>`;
+  };
+
+  // Root folders (parent=null)
+  const rootFolders = kidsOf(null);
+
+  // Root-level (no folder) tasks should appear at the top of each menu (no "Uncategorized" label).
+  const rootTasksBlock = (listType)=>{
+    const list = (listType==="interval" ? tasksInterval : tasksAsReq);
+    const items = tasksIn(list, null).map(t => card(t, listType)).join("");
+    return items || "";
+  };
+
+  // Menu shell: each maintenance type is a DROPDOWN now.
+  const buildMenu = (listType, title) => {
+    const menuDrop = `
+      <div class="folder-dropzone small muted" data-drop-menu="${listType}"
+           style="border:1px dashed #bbb; padding:6px; margin:6px 8px 10px 8px; border-radius:8px;">
+        Drag here to move an item into <b>${title}</b> (${listType === "interval" ? "will require an Interval" : "as-needed"})
+      </div>`;
+    const listId = listType==="interval" ? "intervalList" : "asreqList";
+    return `
+      <details class="block" open data-menu="${listType}">
+        <summary style="display:flex;align-items:center;gap:10px;font-weight:700;">
+          <span>${title}</span>
+          <span style="flex:1"></span>
+          <!-- root add folder button stays global (#addFolderBtn) to keep existing handler -->
+        </summary>
+        ${menuDrop}
+        <div id="${listId}" class="folder-list" data-dnd-scope="${listType}">
+          ${rootTasksBlock(listType)}
+          ${rootFolders.map(f => renderFolder(f, listType)).join("")}
+        </div>
+      </details>`;
+  };
+
+  // ------- Main shell (keeps existing IDs: #addIntervalForm, #addAsReqForm, #intervalList, #asreqList) -------
+  return `
+  <div class="container">
+    <div class="block" style="grid-column: 1 / -1">
+      <h3>Maintenance Settings</h3>
+
+      <div class="mini-form" style="display:flex;gap:8px;align-items:center; margin-bottom:8px">
+        <button id="addFolderBtn" title="Add a root category">+ Add Category</button>
+        <span class="small muted">Drag items between menus or into categories. Folders can nest.</span>
+      </div>
+
+      <div class="add-forms" style="margin-bottom:8px">
+        <form id="addIntervalForm" class="mini-form">
+          <strong>Add Interval Task:</strong>
+          <input type="text" id="ai_name" placeholder="Name" required>
+          <input type="number" id="ai_interval" placeholder="Interval (hrs)" required min="1">
+          <button type="submit">Add</button>
+        </form>
+
+        <form id="addAsReqForm" class="mini-form">
+          <strong>Add As-Required Task:</strong>
+          <input type="text" id="ar_name" placeholder="Name" required>
+          <input type="text" id="ar_condition" placeholder="Condition (e.g., When damaged)">
+          <button type="submit">Add</button>
+        </form>
+      </div>
+
+      ${buildMenu("interval","Interval Hourly Maintenance")}
+      ${buildMenu("asreq","As-Needed Maintenance")}
+
+      <div style="margin-top:10px;">
+        <button id="saveTasksBtn">Save All</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderSettingsCategoriesPane(){
+  // ----- Guards & state -----
+  const root = document.getElementById("content");
+  if (!root) return;
+
+  // Ensure lists exist
+  window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  window.tasksInterval   = Array.isArray(window.tasksInterval)   ? window.tasksInterval   : [];
+  window.tasksAsReq      = Array.isArray(window.tasksAsReq)      ? window.tasksAsReq      : [];
+  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+
+  // Save helpers (support local + cloud)
+  function persist(){
+    if (typeof saveTasks === "function") { try { saveTasks(); } catch(_){} }
+    if (typeof saveCloudDebounced === "function") { try { saveCloudDebounced(); } catch(_){} }
+  }
+
+  // Small helpers
+// Give every task a category so the explorer can find them
+function ensureTaskCategories(){
+  // interval tasks live under the "interval" folder
+  if (Array.isArray(tasksInterval)) {
+    tasksInterval.forEach(t => { if (!t.cat) t.cat = "interval"; });
+  }
+  // as-required tasks live under the "asreq" folder
+  if (Array.isArray(tasksAsReq)) {
+    tasksAsReq.forEach(t => { if (!t.cat) t.cat = "asreq"; });
+  }
+}
+
+   
+  const byIdFolder = id => window.settingsFolders.find(f => String(f.id)===String(id)) || null;
+  const hasChildren = (fid)=>{
+    const subF = window.settingsFolders.some(f => String(f.parent||"")===String(fid));
+    const tInt = window.tasksInterval.some(t => String(t.cat||"")===String(fid));
+    const tAR  = window.tasksAsReq.some(t => String(t.cat||"")===String(fid));
+    return subF || tInt || tAR;
+  };
+  const findTask = (id)=>{
+    let ref = window.tasksInterval.find(x=>String(x.id)===String(id));
+    if (ref) return {ref, list:"interval"};
+    ref = window.tasksAsReq.find(x=>String(x.id)===String(id));
+    return ref ? {ref, list:"asreq"} : null;
+  };
+
+  // ===== 1) Root "Add Category" button =====
+  const addBtn = root.querySelector("#addFolderBtn");
+  if (addBtn && !addBtn.dataset.wired){
+    addBtn.dataset.wired = "1";
+    addBtn.addEventListener("click", ()=>{
+      const name = prompt("New category (folder) name?");
+      if (!name) return;
+      const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Math.random().toString(36).slice(2,7));
+      window.settingsFolders.push({ id, name, parent:null, order:(++window._maintOrderCounter) });
+      persist();
+      // Re-render full Settings so the new folder appears in both menus.
+      if (typeof renderSettings === "function") renderSettings();
+    });
+  }
+
+  // ===== 2) Per-folder controls: add sub, rename, remove =====
+  // Add Sub-category
+  root.querySelectorAll("[data-add-subfolder]").forEach(btn=>{
+    if (btn.dataset.wired) return; btn.dataset.wired = "1";
+    btn.addEventListener("click", ()=>{
+      const parent = btn.getAttribute("data-add-subfolder");
+      if (!byIdFolder(parent)) { alert("Folder not found."); return; }
+      const name = prompt("Sub-category name?");
+      if (!name) return;
+      const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Math.random().toString(36).slice(2,7));
+      window.settingsFolders.push({ id, name, parent, order:(++window._maintOrderCounter) });
+      persist();
+      if (typeof renderSettings === "function") renderSettings();
+    });
+  });
+
+  // Rename
+  root.querySelectorAll("[data-rename-folder]").forEach(btn=>{
+    if (btn.dataset.wired) return; btn.dataset.wired = "1";
+    btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-rename-folder");
+      const f = byIdFolder(id); if (!f) return;
+      const name = prompt("New folder name:", f.name || "");
+      if (!name) return;
+      f.name = name;
+      persist();
+      if (typeof renderSettings === "function") renderSettings();
+    });
+  });
+
+  // Remove (blocked if anything inside)
+  root.querySelectorAll("[data-remove-folder]").forEach(btn=>{
+    if (btn.dataset.wired) return; btn.dataset.wired = "1";
+    btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-remove-folder");
+      if (!byIdFolder(id)) return;
+      if (hasChildren(id)){
+        alert("Folder is not empty. Move out sub-folders and tasks first.");
+        return;
+      }
+      window.settingsFolders = window.settingsFolders.filter(f => String(f.id)!==String(id));
+      persist();
+      if (typeof renderSettings === "function") renderSettings();
+    });
+  });
+
+  // ===== 3) Make folder headers draggable (Explorer-style) =====
+  root.querySelectorAll('details.folder > summary').forEach(sum=>{
+    if (sum.dataset.wired) return; sum.dataset.wired="1";
+    sum.setAttribute("draggable","true");
+    sum.addEventListener("dragstart",(e)=>{
+      const holder = sum.closest("details.folder");
+      const fid = holder?.getAttribute("data-folder-id");
+      if (!fid) return;
+      e.dataTransfer.setData("text/plain", `category:${fid}`);
+      e.dataTransfer.effectAllowed = "move";
+      sum.classList.add("dragging");
+    });
+    sum.addEventListener("dragend",()=> sum.classList.remove("dragging"));
+  });
+
+  // ===== 4) Drag targets: drop into a folder’s body (to file items here) =====
+  function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
+
+  // Drop tasks or folders into a folder
+  root.querySelectorAll("[data-drop-folder]").forEach(zone=>{
+    if (zone.dataset.wired) return; zone.dataset.wired = "1";
+    zone.addEventListener("dragover",(e)=>{ allow(e); zone.classList.add("dragover"); });
+    zone.addEventListener("dragleave",()=> zone.classList.remove("dragover"));
+    zone.addEventListener("drop",(e)=>{
+      const fid = zone.getAttribute("data-drop-folder");
+      zone.classList.remove("dragover");
+      const raw = e.dataTransfer.getData("text/plain") || "";
+      const [kind, id, type] = raw.split(":"); // task:<id>:<interval|asreq> | category:<id>
+      if (!fid) return;
+
+      // Drop a TASK into this folder
+      if (kind === "task" && id){
+        // Prefer shared mover if present; else set cat directly.
+        if (typeof moveNodeSafely === "function"){
+          if (moveNodeSafely("task", id, { intoCat: fid })){
+            persist(); if (typeof renderSettings === "function") renderSettings();
+          }
+          return;
+        }
+        const t = findTask(id); if (!t) return;
+        t.ref.cat = fid; t.ref.parentTask = null; t.ref.order = (++window._maintOrderCounter);
+        persist(); if (typeof renderSettings === "function") renderSettings();
+        return;
+      }
+
+      // Drop a FOLDER into this folder (re-parent)
+      if (kind === "category" && id){
+        if (typeof moveNodeSafely === "function"){
+          if (moveNodeSafely("category", id, { intoCat: fid })){
+            persist(); if (typeof renderSettings === "function") renderSettings();
+          }
+          return;
+        }
+        const f = byIdFolder(id); if (!f) return;
+        // Prevent cycle
+        let cur = byIdFolder(fid), hops=0;
+        while (cur && hops++<1000){
+          if (String(cur.id)===String(id)) return; // cycle; ignore
+          cur = (cur.parent!=null) ? byIdFolder(cur.parent) : null;
+        }
+        f.parent = fid; f.order = (++window._maintOrderCounter);
+        persist(); if (typeof renderSettings === "function") renderSettings();
+      }
+    });
+  });
+
+  // ===== 5) Drag targets: drop onto a menu header to change type (Interval <-> As-Needed) =====
+  root.querySelectorAll("[data-drop-menu]").forEach(zone=>{
+    if (zone.dataset.wired) return; zone.dataset.wired = "1";
+    zone.addEventListener("dragover",(e)=>{ allow(e); zone.classList.add("dragover"); });
+    zone.addEventListener("dragleave",()=> zone.classList.remove("dragover"));
+    zone.addEventListener("drop",(e)=>{
+      const targetMenu = zone.getAttribute("data-drop-menu"); // "interval" | "asreq"
+      zone.classList.remove("dragover");
+      const raw = e.dataTransfer.getData("text/plain") || "";
+      const [kind, id, fromType] = raw.split(":");
+
+      if (kind !== "task" || !id || !targetMenu) return;
+      const live = findTask(id); if (!live) return;
+
+      // If moving to same menu, just file at root (no folder)
+      if (live.list === targetMenu){
+        if (typeof moveNodeSafely === "function"){
+          if (moveNodeSafely("task", id, { intoCat: null })){
+            persist(); if (typeof renderSettings === "function") renderSettings();
+          }
+          return;
+        }
+        live.ref.cat = null; live.ref.parentTask = null; live.ref.order = (++window._maintOrderCounter);
+        persist(); if (typeof renderSettings === "function") renderSettings();
+        return;
+      }
+
+      // Convert type (Explorer-like "move to another tree")
+      if (targetMenu === "interval" && live.list === "asreq"){
+        // Ask for interval hours
+        let val = prompt("Interval hours for this item?", "8");
+        if (val === null) return;
+        val = Number(val);
+        if (!isFinite(val) || val <= 0) { alert("Enter a positive number."); return; }
+        // Remove from asreq and insert at TOP of interval (keep same id for continuity)
+        window.tasksAsReq = window.tasksAsReq.filter(x => String(x.id)!==String(live.ref.id));
+        const moved = {
+          id: live.ref.id, name: live.ref.name, interval: val,
+          sinceBase: null, anchorTotal: null,
+          manualLink: live.ref.manualLink||"", storeLink: live.ref.storeLink||"",
+          pn: live.ref.pn||"", price: live.ref.price!=null?live.ref.price:null,
+          parentTask: null, cat: null, order:(++window._maintOrderCounter)
+        };
+        window.tasksInterval.unshift(moved);
+        persist(); if (typeof renderSettings === "function") renderSettings();
+        return;
+      }
+
+      if (targetMenu === "asreq" && live.list === "interval"){
+        // Convert to As-Required (condition optional)
+        const cond = prompt("Condition/Notes (optional):", live.ref.condition||"As required") || "As required";
+        window.tasksInterval = window.tasksInterval.filter(x => String(x.id)!==String(live.ref.id));
+        const moved = {
+          id: live.ref.id, name: live.ref.name, condition: cond,
+          manualLink: live.ref.manualLink||"", storeLink: live.ref.storeLink||"",
+          pn: live.ref.pn||"", price: live.ref.price!=null?live.ref.price:null,
+          parentTask: null, cat: null, order:(++window._maintOrderCounter)
+        };
+        window.tasksAsReq.unshift(moved);
+        persist(); if (typeof renderSettings === "function") renderSettings();
+        return;
+      }
+    });
+  });
+
+  // ===== 6) Also allow dropping a task directly on a folder header (summary) =====
+  root.querySelectorAll("details.folder > summary").forEach(sum=>{
+    if (sum.dataset.dropWired) return; sum.dataset.dropWired="1";
+    sum.addEventListener("dragover",(e)=>{ allow(e); sum.classList.add("drop-hint"); });
+    sum.addEventListener("dragleave",()=> sum.classList.remove("drop-hint"));
+    sum.addEventListener("drop",(e)=>{
+      const holder = sum.closest("details.folder");
+      const fid = holder?.getAttribute("data-folder-id");
+      sum.classList.remove("drop-hint");
+      const raw = e.dataTransfer.getData("text/plain") || "";
+      const [kind, id] = raw.split(":");
+      if (!fid || kind!=="task" || !id) return;
+
+      if (typeof moveNodeSafely === "function"){
+        if (moveNodeSafely("task", id, { intoCat: fid })){
+          persist(); if (typeof renderSettings === "function") renderSettings();
+        }
+        return;
+      }
+      const live = findTask(id); if (!live) return;
+      live.ref.cat = fid; live.ref.parentTask = null; live.ref.order = (++window._maintOrderCounter);
+      persist(); if (typeof renderSettings === "function") renderSettings();
+    });
+  });
+}
+
+
+
+function viewCosts(){
+  return `
+  <div class="container">
+    <div class="block" style="grid-column: 1 / -1">
+      <h3>Cost Analysis</h3>
+      <p class="small">Per-interval & as-required items with optional price/links, plus cutting jobs efficiency impact and materials.</p>
+    </div>
+
+    <div class="block" style="grid-column: 1 / -1">
+      <h4>Per Interval</h4>
+      <table id="costTableInterval">
+        <thead><tr><th>Item</th><th>Interval (hrs)</th><th>Cost</th><th>Links</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="block" style="grid-column: 1 / -1">
+      <h4>As Required</h4>
+      <table id="costTableAsReq">
+        <thead><tr><th>Item</th><th>Condition</th><th>Cost</th><th>Links</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="block" style="grid-column: 1 / -1">
+      <h4>Cutting Jobs</h4>
+      <table id="costTableJobs">
+        <thead>
+          <tr>
+            <th>Job</th><th>Estimate (hrs)</th><th>Material</th>
+            <th>Material Cost ($)</th><th>Material Qty</th><th>Material Total ($)</th>
+            <th>Efficiency (hr Δ → $Δ)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p class="small">Material fields are editable. Changes save automatically.</p>
+    </div>
+  </div>`;
+}
+
+function viewJobs(){
+  const rows = cuttingJobs.map(j => {
+    const eff = computeJobEfficiency(j);
+    const req = computeRequiredDaily(j);
+    const editing = editingJobs.has(j.id);
+
+    // Material totals
+    const matCost = Number(j.materialCost||0);
+    const matQty  = Number(j.materialQty||0);
+    const matTotal = (matCost * matQty) || 0;
+
+    // Remaining & per-day
+    const actualRemain = eff.actualRemaining != null ? eff.actualRemaining : (req.remainingHours || 0);
+    const baselineRemain = eff.expectedRemaining != null
+      ? eff.expectedRemaining
+      : Math.max(0, (Number(j.estimateHours)||0) - (eff.expectedHours||0));
+    const remainHrs = actualRemain;
+    const needPerDay = req.requiredPerDay === Infinity
+      ? '∞'
+      : (req.requiredPerDay||0).toFixed(2);
+
+    // Cost efficiency (baseline vs actual remaining hours)
+    const EPS = 0.05;
+    const deltaRemain = baselineRemain - actualRemain;
+    const ahead = deltaRemain > EPS;
+    const behind = deltaRemain < -EPS;
+    const nearPace = !ahead && !behind;
+    const rawMoney = eff.gainLoss || 0;
+    const money = nearPace ? 0 : rawMoney;
+    const moneyStyle = ahead
+      ? 'color:#2e7d32;font-weight:600'
+      : (behind ? 'color:#c43d3d;font-weight:600' : 'color:#424242;font-weight:600');
+    const moneySign  = ahead ? '+' : (behind ? '−' : '');
+    const moneyAbs   = Math.abs(money).toFixed(2);
+    const statusLabel = nearPace ? 'On pace' : (ahead ? 'Ahead' : 'Behind');
+    const statusDetail = nearPace
+      ? ''
+      : ` by ${Math.abs(deltaRemain).toFixed(1)} hr`;
+    const baselineDetail = `${baselineRemain.toFixed(1)}h baseline vs ${actualRemain.toFixed(1)}h remaining`;
+    const statusSummary = statusLabel + (statusDetail || '');
+    const efficiencyDetail = `${statusSummary}; ${baselineDetail}`;
+
+    // Dates (for display / edit row)
+    const startTxt = j.startISO ? (new Date(j.startISO)).toDateString() : "—";
+    const dueDate  = j.dueISO ? new Date(j.dueISO) : null;
+    const dueTxt   = dueDate ? dueDate.toDateString() : "—";
+    const dueVal   = dueDate ? dueDate.toISOString().slice(0,10) : "";
+
+    if (!editing){
+      // NORMAL ROW (with Log button UNDER the job name)
+      return `<tr data-job-row="${j.id}">
+        <td>
+          <div><strong>${j.name}</strong></div>
+          <div class="small muted">${startTxt} → ${dueTxt}</div>
+          <div class="job-actions" style="margin-top:6px">
+            <button data-log-job="${j.id}">Log</button>
+          </div>
+        </td>
+        <td>${j.estimateHours} hrs</td>
+        <td>${j.material || "—"}</td>
+        <td><input type="number" class="matCost" data-id="${j.id}" value="${matCost}" step="0.01" min="0"></td>
+        <td><input type="number" class="matQty" data-id="${j.id}" value="${matQty}" step="0.01" min="0"></td>
+        <td>${matTotal.toFixed(2)}</td>
+        <td>${remainHrs.toFixed(1)}</td>
+        <td>${
+          req.requiredPerDay === Infinity
+            ? `<span class="danger">Past due</span>`
+            : `${needPerDay} hr/day`
+        }</td>
+        <td>
+          <div><span style="${moneyStyle}">${moneySign}$${moneyAbs}</span></div>
+          <div class="small muted">${efficiencyDetail}</div>
+        </td>
+        <td>
+          <!-- Hidden placeholder prevents renderJobs() from injecting a duplicate Log button -->
+          <span data-log-job="${j.id}" style="display:none"></span>
+          <button data-edit-job="${j.id}">Edit</button>
+          <button class="danger" data-remove-job="${j.id}">Remove</button>
+        </td>
+      </tr>`;
+    } else {
+      // EDIT ROW
+      return `<tr data-job-row="${j.id}">
+        <td><input type="text" data-j="name" data-id="${j.id}" value="${j.name}"></td>
+        <td><input type="number" min="1" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></td>
+        <td><input type="text" data-j="material" data-id="${j.id}" value="${j.material||""}"></td>
+        <td colspan="2">
+          Start: <input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}">
+          Due:   <input type="date" data-j="dueISO"   data-id="${j.id}" value="${dueVal}">
+        </td>
+        <td>${matTotal.toFixed(2)}</td>
+        <td colspan="3">
+          <div class="small muted">${startTxt} → ${dueTxt}</div>
+          <textarea data-j="notes" data-id="${j.id}" rows="2" placeholder="Notes...">${j.notes||""}</textarea>
+        </td>
+        <td>
+          <button data-save-job="${j.id}">Save</button>
+          <button class="danger" data-cancel-job="${j.id}">Cancel</button>
+        </td>
+      </tr>`;
+    }
+  }).join("");
+
+  return `
+  <div class="container">
+    <div class="block" style="grid-column:1 / -1">
+      <h3>Cutting Jobs</h3>
+      <form id="addJobForm" class="mini-form">
+        <input type="text" id="jobName" placeholder="Job name" required>
+        <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
+        <input type="date" id="jobStart" required>
+        <input type="date" id="jobDue" required>
+        <button type="submit">Add Job</button>
+      </form>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Estimate (hrs)</th>
+            <th>Material</th>
+            <th>Material Cost ($)</th>
+            <th>Material Qty</th>
+            <th>Total $</th>
+            <th>Hours Remaining</th>
+            <th>Needed / Day</th>
+            <th>Estimated Cost (Calculated)</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="small">Material fields are editable. Changes save automatically.</p>
+    </div>
+  </div>`;
+}
+
+function viewInventory(){
+  const rows = inventory.map(i => `
+    <tr>
+      <td>${i.name}</td>
+      <td><input type="number" min="0" step="1" data-inv="qty" data-id="${i.id}" value="${i.qty}"></td>
+      <td>${i.unit||"pcs"}</td>
+      <td>${i.pn||"—"}</td>
+      <td>${i.link ? `<a href="${i.link}" target="_blank" rel="noopener">link</a>` : "—"}</td>
+      <td><input type="text" data-inv="note" data-id="${i.id}" value="${i.note||""}"></td>
+    </tr>`).join("");
+  return `
+  <div class="container">
+    <div class="block" style="grid-column:1 / -1">
+      <h3>Inventory</h3>
+      <table>
+        <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>PN</th><th>Link</th><th>Note</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+style.css
+/* Pump card */
+.pump-card summary { display:flex; align-items:center; gap:8px; }
+.pump-grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top:8px; }
+.pump-col { background:#fff; border:1px solid #dde3ee; border-radius:10px; padding:12px; }
+.pump-stats { margin-top:6px; display:grid; gap:4px; }
+.pump-stats .lbl { color:#666; display:inline-block; width:80px; }
+
+/* colored chip used in summary */
+.chip{
+  display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; line-height:18px;
+  border:1px solid transparent; background:#eef1f7; color:#333;
+}
+.chip.green{ background:#e5f6eb; color:#2e7d32; border-color:#ccebd6; }
+.chip.green-better{ background:#dff8e9; color:#1b5e20; border-color:#bce9d2; font-weight:600; }
+.chip.yellow{ background:#fff7d1; color:#8a6d00; border-color:#f2e4a3; }
+.chip.orange{ background:#ffe6d6; color:#a14d00; border-color:#ffd0b5; }
+.chip.red{ background:#ffe1e1; color:#c62828; border-color:#ffc9c9; }
+.chip.gray{ background:#f1f3f6; color:#6b7280; border-color:#e4e7ec; }
+
+
+/* Calendar chip/bar are fully interactive */
+.cal-task, .cal-job {
+  position: relative;
+  display: block;
+  cursor: pointer;
+}
+
+/* Bubble touches the anchor (no visual gap) */
+#bubble.bubble {
+  position: absolute;
+  z-index: 9999;
+  margin: 0;                 /* remove default margin */
+  transform: translateY(0);  /* no offset */
+  /* keep your existing padding, bg, border, shadow */
+}
+
+/* Optional: subtle arrow that overlaps the chip so there's zero dead zone */
+#bubble.bubble::before {
+  content: "";
+  position: absolute;
+  top: -6px;                 /* overlaps the chip by 6px */
+  left: 16px;
+  width: 12px;
+  height: 12px;
+  background: inherit;
+  transform: rotate(45deg);
+  box-shadow: inherit;
+}
+
+
+/* Base */
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fa; color: #222; }
+header { background: #0a63c2; color: #fff; padding: 16px; }
+h1 { margin: 0 0 10px; font-size: 22px; }
+.nav a { color: #e7f0ff; text-decoration: none; margin-right: 12px; padding: 6px 10px; border-radius: 6px; }
+.nav a.active, .nav a:hover { background: #084f9a; }
+
+.container { padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+.block { background: #fff; border: 1px solid #dde3ee; border-radius: 10px; padding: 12px; }
+.block h3 { margin: 0 0 8px; font-size: 16px; }
+.block input, .block select { padding: 6px; width: 200px; }
+.block button { padding: 6px 10px; background: #0a63c2; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+.block button:hover { background: #084f9a; }
+.block .danger { background: #e14b4b; }
+.block .danger:hover { background: #c43d3d; }
+.small { font-size: 12px; color: #777; }
+.mini-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #e1e5ee; padding: 8px; text-align: left; }
+th { background: #f7f9fc; }
+
+.inv-toolbar { display:flex; gap:8px; margin-bottom:8px; }
+
+/* Calendar */
+.month { margin-bottom: 16px; background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+.month-header { background: #f0f3f7; padding: 8px 12px; font-weight: bold; border-bottom: 1px solid #ddd; }
+.weekdays, .week { display: grid; grid-template-columns: repeat(7, 1fr); }
+.weekdays div { background: #fafbfc; border-bottom: 1px solid #eee; padding: 6px 8px; font-size: 12px; font-weight: bold; color: #666; text-align: center; }
+.day { border-right: 1px solid #eee; border-bottom: 1px solid #eee; min-height: 110px; padding: 6px; position: relative; }
+.day:last-child { border-right: none; }
+.day .date { font-weight: bold; font-size: 12px; color: #444; }
+.day.today { background: #fff7d6; }
+.day.other-month { background: #f8f9fb; color: #aaa; }
+.day.downtime { background: #ffe5e5; }
+.day.downtime .date { color: #b71c1c; }
+.calendar-toolbar {
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.calendar-add-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a63c2;
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  box-shadow: 0 4px 8px rgba(10, 99, 194, 0.2);
+}
+
+.calendar-add-btn:hover { background: #084f9a; }
+.calendar-add-btn:active { transform: translateY(1px); }
+
+/* Calendar items — make the ENTIRE chip/bar interactive */
+.event, .job-bar, .cal-task, .cal-job {
+  margin-top: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  display: block;
+  cursor: pointer;
+  pointer-events: auto;
+  min-height: 18px;
+  line-height: 18px;
+  position: relative;
+  z-index: 2;
+}
+
+/* Maintenance chip (generic event) */
+.event.generic, .cal-task {
+  background: #ffd166;
+  color: #333;
+  border: 1px solid #e5b14a;
+}
+.event.generic:hover, .cal-task:hover {
+  filter: brightness(0.95);
+}
+
+.event.downtime {
+  background: #ff8a80;
+  color: #fff;
+  border: 1px solid #ff5252;
+}
+
+.day-add-bubble {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a63c2;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 14px rgba(10, 99, 194, 0.25);
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity .18s ease, transform .18s ease;
+  z-index: 3;
+}
+
+.day-add-bubble.is-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.day-add-bubble:hover {
+  background: #084f9a;
+}
+
+.day-add-bubble:active {
+  transform: scale(0.92);
+}
+
+.day-add-bubble:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -2px;
+  box-shadow: 0 0 0 3px rgba(10, 99, 194, 0.35);
+}
+
+/* Cutting job bar */
+.job-bar, .cal-job {
+  background: #9bd3ff;
+  color: #123;
+  border: 1px solid #68b7ee;
+}
+.job-bar:hover, .cal-job:hover {
+  background: #86caff;
+  border-color: #4aa6e7;
+}
+
+/* Ensure parent containers don't block pointer events */
+.month, .week, .day { pointer-events: auto; }
+
+/* Bubble (hover popover) */
+.bubble {
+  position: absolute; z-index: 9999; background: #fff; border: 1px solid #d8deea; border-radius: 10px;
+  padding: 10px; min-width: 260px; box-shadow: 0 8px 16px rgba(0,0,0,.12);
+}
+.bubble-title { font-weight: 700; margin-bottom: 6px; }
+.bubble-kv { display: grid; grid-template-columns: 120px 1fr; gap: 6px; font-size: 13px; margin: 3px 0; }
+.bubble-actions { margin-top: 8px; display:flex; gap:8px; flex-wrap: wrap; }
+
+/* Toast */
+.toast {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+  background: #0a63c2; color: #fff; padding: 8px 12px; border-radius: 8px;
+  opacity: 0; pointer-events: none; transition: opacity .2s ease;
+  box-shadow: 0 4px 12px rgba(0,0,0,.15); font-size: 13px;
+}
+.toast.show { opacity: 1; }
+
+/* Settings search (kept) */
+.settings-search {
+  position: relative;
+  margin: 8px 0 14px;
+}
+.settings-search input[type="search"]{
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line, #ddd);
+  border-radius: 8px;
+  font: inherit;
+}
+.search-results{
+  display: none;
+  position: relative;
+  margin-top: 8px;
+  border: 1px solid var(--line, #ddd);
+  border-radius: 8px;
+  background: var(--bg, #fff);
+  max-height: 260px;
+  overflow: auto;
+}
+.search-item{
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid #eee;
+}
+.search-item:last-child{ border-bottom: 0; }
+.search-item:hover{ background: #f7f7f7; }
+.si-title{ font-weight: 600; }
+.si-meta{ font-size: 12px; margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap; }
+.badge{ background:#eef2ff; color:#3949ab; border-radius: 999px; padding: 1px 8px; }
+.muted{ color: #666; }
+
+/* highlight a row briefly when Edit is clicked */
+tr.row-editing {
+  outline: 2px solid rgba(0, 120, 255, 0.4);
+  background: rgba(0, 120, 255, 0.06);
+  transition: background 0.8s ease;
+}
+
+.dash-choice-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin-top: 12px;
+}
+
+.dash-choice {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #d9e2f2;
+  background: #f7f9fe;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.dash-choice:hover {
+  background: #eef3fb;
+  border-color: #0a63c2;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(17, 24, 39, 0.45);
+  z-index: 1000;
+}
+
+.modal-backdrop[hidden] {
+  display: none !important;
+}
+
+.modal-backdrop.is-visible {
+  display: flex;
+}
+
+.modal-card {
+  position: relative;
+  width: min(600px, 94vw);
+  max-height: 92vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 22px;
+  box-shadow: 0 22px 40px rgba(15, 23, 42, 0.3);
+}
+
+.dashboard-modal-card {
+  width: min(640px, 94vw);
+}
+
+.modal-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  border: 0;
+  background: none;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #4b5563;
+}
+
+.modal-close:hover {
+  color: #1f2937;
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
+.dash-modal-step[hidden] { display: none; }
+
+.subtask-section {
+  margin-top: 16px;
+  border-top: 1px solid #e2e8f5;
+  padding-top: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.subtask-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.subtask-add-btn {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #cfd9ec;
+  background: #eef3fb;
+  color: #0a63c2;
+  cursor: pointer;
+}
+
+.subtask-add-btn:hover { background: #e2e9f8; }
+
+.subtask-list {
+  display: grid;
+  gap: 10px;
+}
+
+.subtask-row {
+  border: 1px solid #dfe4ef;
+  border-radius: 10px;
+  background: #f9fbff;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.subtask-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.subtask-remove {
+  background: #e14b4b;
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.subtask-remove:hover { background: #c43d3d; }
+
+.subtask-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.subtask-grid label { font-size: 0.85rem; }
+
+.subtask-grid input,
+.subtask-grid select {
+  width: 100%;
+}
+
+.down-list {
+  margin-top: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.down-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 1px solid #dfe4ef;
+  border-radius: 8px;
+  background: #f7f9fe;
+}
+
+.down-remove-btn {
+  background: #e14b4b;
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.down-remove-btn:hover { background: #c43d3d; }
+
+
