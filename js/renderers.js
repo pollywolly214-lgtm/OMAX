@@ -217,24 +217,36 @@ function moveNodeSafely(kind, nodeId, target){
     return null;
   }
 
-  function normalizeTaskOrder(mode, catId, parentId){
-    const list = mode === "interval" ? window.tasksInterval : window.tasksAsReq;
+  function gatherSiblings(catId, parentId, excludeId){
     const keyCat = String(catId ?? "");
     const keyParent = String(parentId ?? "");
-    const siblings = list
-      .filter(t => String(t.parentTask ?? "") === keyParent && String(t.cat ?? "") === keyCat)
-      .sort((a,b)=> (Number(b.order||0) - Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
-    let n = siblings.length;
-    for (const t of siblings){ t.order = n--; }
+    const excludeKey = excludeId != null ? String(excludeId) : null;
+    const siblings = [];
+    for (const list of [window.tasksInterval, window.tasksAsReq]){
+      if (!Array.isArray(list)) continue;
+      for (const task of list){
+        if (!task || task.id == null) continue;
+        if (excludeKey != null && String(task.id) === excludeKey) continue;
+        if (String(task.parentTask ?? "") !== keyParent) continue;
+        if (String(task.cat ?? "") !== keyCat) continue;
+        siblings.push(task);
+      }
+    }
+    return siblings;
   }
 
-  function nextTaskOrder(mode, catId, parentId, excludeId, place){
-    const list = mode === "interval" ? window.tasksInterval : window.tasksAsReq;
-    const siblings = list.filter(t =>
-      String(t.parentTask ?? "") === String(parentId ?? "") &&
-      String(t.cat ?? "") === String(catId ?? "") &&
-      String(t.id) !== String(excludeId)
-    );
+  function normalizeTaskOrder(catId, parentId){
+    const siblings = gatherSiblings(catId, parentId, null)
+      .sort((a,b)=> (Number(b.order||0) - Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
+    let n = siblings.length;
+    for (const task of siblings){ task.order = n--; }
+    if (siblings.length){
+      window._maintOrderCounter = Math.max(Number(window._maintOrderCounter)||0, siblings.length);
+    }
+  }
+
+  function nextTaskOrder(catId, parentId, excludeId, place){
+    const siblings = gatherSiblings(catId, parentId, excludeId);
     if (!siblings.length){
       return 1;
     }
@@ -302,7 +314,7 @@ function moveNodeSafely(kind, nodeId, target){
       if (isDescendant(parentRef.task.id, src.task.id)) return false;
 
       const place = target && target.position === "end" ? "end" : "start";
-      const nextOrder = nextTaskOrder(src.mode, parentRef.task.cat ?? null, parentRef.task.id, src.task.id, place);
+      const nextOrder = nextTaskOrder(parentRef.task.cat ?? null, parentRef.task.id, src.task.id, place);
 
       src.task.parentTask = parentRef.task.id;
       src.task.cat = parentRef.task.cat ?? null;
@@ -311,22 +323,21 @@ function moveNodeSafely(kind, nodeId, target){
         window._maintOrderCounter = Math.max(window._maintOrderCounter, Number(nextOrder));
       }
 
-      normalizeTaskOrder(src.mode, src.task.cat ?? null, src.task.parentTask ?? null);
-      normalizeTaskOrder(src.mode, originalGroup.cat, originalGroup.parent);
+      normalizeTaskOrder(src.task.cat ?? null, src.task.parentTask ?? null);
+      normalizeTaskOrder(originalGroup.cat, originalGroup.parent);
       return true;
     }
 
     if (target && target.beforeTask && target.beforeTask.id){
       const dest = findTaskMeta(target.beforeTask.id);
       if (!dest) return false;
-      if (dest.mode !== src.mode) return false;
 
       src.task.cat = dest.task.cat ?? null;
       src.task.parentTask = dest.task.parentTask ?? null;
       src.task.order = (Number(dest.task.order) || 0) + 0.5;
 
-      normalizeTaskOrder(src.mode, dest.task.cat ?? null, dest.task.parentTask ?? null);
-      normalizeTaskOrder(src.mode, originalGroup.cat, originalGroup.parent);
+      normalizeTaskOrder(dest.task.cat ?? null, dest.task.parentTask ?? null);
+      normalizeTaskOrder(originalGroup.cat, originalGroup.parent);
       return true;
     }
 
@@ -335,7 +346,7 @@ function moveNodeSafely(kind, nodeId, target){
       if (!ensureFolder(catId)) return false;
 
       const place = target && target.position === "end" ? "end" : "start";
-      const nextOrder = nextTaskOrder(src.mode, catId ?? null, null, src.task.id, place);
+      const nextOrder = nextTaskOrder(catId ?? null, null, src.task.id, place);
 
       src.task.cat = catId ?? null;
       src.task.parentTask = null;
@@ -344,8 +355,8 @@ function moveNodeSafely(kind, nodeId, target){
         window._maintOrderCounter = Math.max(window._maintOrderCounter, Number(nextOrder));
       }
 
-      normalizeTaskOrder(src.mode, src.task.cat ?? null, null);
-      normalizeTaskOrder(src.mode, originalGroup.cat, originalGroup.parent);
+      normalizeTaskOrder(src.task.cat ?? null, null);
+      normalizeTaskOrder(originalGroup.cat, originalGroup.parent);
       return true;
     }
 
