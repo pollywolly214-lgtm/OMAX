@@ -67,7 +67,7 @@ header { background: #0a63c2; color: #fff; padding: 16px; }
 }
 .header-logo {
   flex: 0 0 auto;
-  width: clamp(320px, 55vw, 580px);
+  width: clamp(360px, 58vw, 690px);
   max-width: 100%;
   height: auto;
   display: block;
