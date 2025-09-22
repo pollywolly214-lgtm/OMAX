@@ -611,7 +611,20 @@ function viewCosts(){
 }
 
 function viewJobs(){
+  const pendingFiles = Array.isArray(window.pendingNewJobFiles) ? window.pendingNewJobFiles : [];
+  const pendingSummary = pendingFiles.length
+    ? `${pendingFiles.length} file${pendingFiles.length===1?"":"s"} ready to attach`
+    : "No files selected";
   const rows = cuttingJobs.map(j => {
+    const jobFiles = Array.isArray(j.files) ? j.files : [];
+    const fileLinks = jobFiles.length
+      ? `<div class="job-files">${jobFiles.map((f, idx) => {
+          const safeName = f.name || `file_${idx+1}`;
+          const href = f.dataUrl || f.url || "";
+          if (!href) return "";
+          return `<a href="${href}" download="${safeName}" class="job-file-link">📎 ${safeName}</a>`;
+        }).filter(Boolean).join("<br>")}</div>`
+      : "";
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
@@ -667,6 +680,7 @@ function viewJobs(){
           <div class="job-actions" style="margin-top:6px">
             <button data-log-job="${j.id}">Log</button>
           </div>
+          ${fileLinks}
         </td>
         <td>${j.estimateHours} hrs</td>
         <td>${j.material || "—"}</td>
@@ -704,6 +718,18 @@ function viewJobs(){
         <td colspan="3">
           <div class="small muted">${startTxt} → ${dueTxt}</div>
           <textarea data-j="notes" data-id="${j.id}" rows="2" placeholder="Notes...">${j.notes||""}</textarea>
+          <div class="job-edit-files">
+            <button type="button" data-upload-job="${j.id}">Add Files</button>
+            <input type="file" data-job-file-input="${j.id}" multiple style="display:none">
+            <ul class="job-file-list">
+              ${jobFiles.length ? jobFiles.map((f, idx)=>{
+                const safeName = f.name || `file_${idx+1}`;
+                const href = f.dataUrl || f.url || "";
+                const link = href ? `<a href="${href}" download="${safeName}">${safeName}</a>` : safeName;
+                return `<li>${link} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
+              }).join("") : `<li class=\"muted\">No files attached</li>`}
+            </ul>
+          </div>
         </td>
         <td>
           <button data-save-job="${j.id}">Save</button>
@@ -722,8 +748,11 @@ function viewJobs(){
         <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
         <input type="date" id="jobStart" required>
         <input type="date" id="jobDue" required>
+        <button type="button" id="jobFilesBtn">Attach Files</button>
+        <input type="file" id="jobFiles" multiple style="display:none">
         <button type="submit">Add Job</button>
       </form>
+      <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
 
       <table>
         <thead>

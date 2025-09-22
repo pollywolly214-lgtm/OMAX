@@ -1,4 +1,42 @@
 /* ====================== RENDERERS ========================= */
+if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
+const pendingNewJobFiles = window.pendingNewJobFiles;
+
+function readFileAsDataUrl(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=> resolve(reader.result);
+    reader.onerror = ()=> reject(reader.error || new Error("Failed to read file"));
+    try {
+      reader.readAsDataURL(file);
+    } catch (err){
+      reject(err);
+    }
+  });
+}
+
+async function filesToAttachments(fileList){
+  const files = Array.from(fileList || []);
+  const attachments = [];
+  for (const file of files){
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      attachments.push({
+        id: genId(file.name || "job_file"),
+        name: file.name || "Attachment",
+        type: file.type || "",
+        size: typeof file.size === "number" ? file.size : null,
+        dataUrl,
+        addedAt: new Date().toISOString()
+      });
+    } catch (err){
+      console.error("Unable to read file", err);
+      toast("Failed to read one of the files.");
+    }
+  }
+  return attachments;
+}
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   content.innerHTML = viewDashboard();
@@ -1245,6 +1283,20 @@ function renderJobs(){
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
 
+  const newFilesBtn = document.getElementById("jobFilesBtn");
+  const newFilesInput = document.getElementById("jobFiles");
+  newFilesBtn?.addEventListener("click", ()=>{ newFilesInput?.click(); });
+  newFilesInput?.addEventListener("change", async (e)=>{
+    const files = e.target.files;
+    if (!files || !files.length) return;
+    const attachments = await filesToAttachments(files);
+    e.target.value = "";
+    if (!attachments.length) return;
+    pendingNewJobFiles.push(...attachments.map(a=>({ ...a })));
+    toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
+    renderJobs();
+  });
+
   // 2) Insert a "Log" button into each job row's Actions cell (non-edit rows)
   content.querySelectorAll('tr[data-job-row]').forEach(tr=>{
     const id = tr.getAttribute('data-job-row');
@@ -1305,12 +1357,14 @@ function renderJobs(){
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
     if (!name || !isFinite(est) || est<=0 || !start || !due){ toast("Fill job fields."); return; }
-    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material:"", notes:"", manualLogs:[] });
+    const attachments = pendingNewJobFiles.map(f=>({ ...f }));
+    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material:"", notes:"", manualLogs:[], files:attachments });
+    pendingNewJobFiles.length = 0;
     saveCloudDebounced(); renderJobs();
   });
 
   // 5) Inline material $/qty (kept)
-  content.querySelector("tbody")?.addEventListener("change",(e)=>{
+  content.querySelector("tbody")?.addEventListener("change", async (e)=>{
     if (e.target.matches("input.matCost, input.matQty")){
       const id = e.target.getAttribute("data-id");
       const j = cuttingJobs.find(x=>x.id===id); if (!j) return;
@@ -1318,11 +1372,47 @@ function renderJobs(){
       j.materialQty  = Number(content.querySelector(`input.matQty[data-id="${id}"]`).value)||0;
       saveCloudDebounced();
       renderJobs();
+      return;
+    }
+
+    if (e.target.matches("input[data-job-file-input]")){
+      const id = e.target.getAttribute("data-job-file-input");
+      const j = cuttingJobs.find(x=>x.id===id);
+      if (!j){ e.target.value = ""; return; }
+      const attachments = await filesToAttachments(e.target.files);
+      e.target.value = "";
+      if (!attachments.length) return;
+      j.files = Array.isArray(j.files) ? j.files : [];
+      attachments.forEach(att=> j.files.push({ ...att }));
+      saveCloudDebounced();
+      toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
+      renderJobs();
     }
   });
 
   // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
   content.querySelector("tbody")?.addEventListener("click",(e)=>{
+    const upload = e.target.closest("[data-upload-job]");
+    if (upload){
+      const id = upload.getAttribute("data-upload-job");
+      content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
+      return;
+    }
+
+    const removeFile = e.target.closest("[data-remove-file]");
+    if (removeFile){
+      const id = removeFile.getAttribute("data-remove-file");
+      const idx = Number(removeFile.getAttribute("data-file-index"));
+      const j = cuttingJobs.find(x=>x.id===id);
+      if (j && Array.isArray(j.files) && idx>=0 && idx<j.files.length){
+        j.files.splice(idx,1);
+        saveCloudDebounced();
+        toast("File removed");
+        renderJobs();
+      }
+      return;
+    }
+
     const ed = e.target.closest("[data-edit-job]");
     const rm = e.target.closest("[data-remove-job]");
     const sv = e.target.closest("[data-save-job]");

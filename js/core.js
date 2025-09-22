@@ -208,7 +208,8 @@ if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateIS
 if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
 if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
 if (!Array.isArray(window.inventory))    window.inventory    = [];
-if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
+if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
+if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
   window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] };
@@ -294,6 +295,8 @@ function adoptState(doc){
   window.tasksAsReq = tasksAsReq;
   window.inventory = inventory;
   window.cuttingJobs = cuttingJobs;
+  if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
+  window.pendingNewJobFiles.length = 0;
 
   // Pump efficiency (guard against reading an undefined identifier)
   const pe = (typeof window.pumpEff === "object" && window.pumpEff)
