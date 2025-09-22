@@ -67,14 +67,12 @@ header { background: #0a63c2; color: #fff; padding: 16px; }
 }
 .header-logo {
   flex: 0 0 auto;
-  width: clamp(260px, 42vw, 420px);
+  width: clamp(320px, 55vw, 580px);
   max-width: 100%;
   height: auto;
-  background: rgba(255, 255, 255, 0.95);
-  border: 3px solid rgba(255, 255, 255, 0.7);
-  border-radius: 14px;
-  padding: 8px 24px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  display: block;
+  margin: 0 auto;
+  filter: drop-shadow(0 12px 28px rgba(2, 36, 82, 0.35));
 }
 .header-motto {
   flex: 0 0 auto;
