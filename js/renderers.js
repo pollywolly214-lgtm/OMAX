@@ -169,16 +169,30 @@ function renderDashboard(){
     }
   }
 
-  function openModal(step="picker"){
+  function showBackdrop(step){
     if (!modal) return;
     ensureDownTimeArray();
-    modal.hidden = false;
+    modal.classList.add("is-visible");
+    modal.removeAttribute("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    document.body?.classList.add("modal-open");
     showStep(step);
   }
 
-  function closeModal(){
+  function hideBackdrop(){
     if (!modal) return;
-    modal.hidden = true;
+    modal.classList.remove("is-visible");
+    modal.setAttribute("hidden", "");
+    modal.setAttribute("aria-hidden", "true");
+    document.body?.classList.remove("modal-open");
+  }
+
+  function openModal(step="picker"){
+    showBackdrop(step);
+  }
+
+  function closeModal(){
+    hideBackdrop();
     showStep("picker");
     resetTaskForm();
     downForm?.reset();

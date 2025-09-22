@@ -238,6 +238,60 @@ tr.row-editing {
   border-color: #0a63c2;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(17, 24, 39, 0.45);
+  z-index: 1000;
+}
+
+.modal-backdrop[hidden] {
+  display: none !important;
+}
+
+.modal-backdrop.is-visible {
+  display: flex;
+}
+
+.modal-card {
+  position: relative;
+  width: min(600px, 94vw);
+  max-height: 92vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 22px;
+  box-shadow: 0 22px 40px rgba(15, 23, 42, 0.3);
+}
+
+.dashboard-modal-card {
+  width: min(640px, 94vw);
+}
+
+.modal-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  border: 0;
+  background: none;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #4b5563;
+}
+
+.modal-close:hover {
+  color: #1f2937;
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
 .dash-modal-step[hidden] { display: none; }
 
 .subtask-section {
