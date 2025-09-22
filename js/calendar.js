@@ -13,7 +13,8 @@ function makeBubble(anchor){
   return b;
 }
 
-const DAY_ADD_DELAY_MS = 400;
+const DAY_ADD_DELAY_SECONDS = 0.4;
+const DAY_ADD_DELAY_MS      = DAY_ADD_DELAY_SECONDS * 1000;
 let dayAddHoverTimer   = null;
 let dayAddPendingDay   = null;
 let dayAddActiveDay    = null;
