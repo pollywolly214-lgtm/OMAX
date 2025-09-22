@@ -44,7 +44,10 @@ function toast(msg){
   .block{background:#f9fbff;border:1px solid #e6ecf7;border-radius:10px;padding:12px}
   .small{font-size:12px}.muted{color:#666}.danger{color:#b00020}
   .mini-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  .calendar-toolbar{margin-bottom:8px}
+  .calendar-toolbar{margin-bottom:8px;display:flex;justify-content:flex-end;align-items:center;gap:8px}
+  .calendar-add-btn{width:34px;height:34px;border-radius:50%;border:0;display:flex;align-items:center;justify-content:center;background:#0a63c2;color:#fff;font-size:20px;cursor:pointer;box-shadow:0 4px 8px rgba(10,99,194,.2)}
+  .calendar-add-btn:hover{background:#084f9a}
+  .calendar-add-btn:active{transform:translateY(1px)}
   table{width:100%;border-collapse:collapse} th,td{border:1px solid #e6ecf7;padding:6px;text-align:left;vertical-align:top}
   .grid{width:100%}
   .month{border:1px solid #e6ecf7;border-radius:10px;overflow:hidden;margin-bottom:10px}
@@ -53,10 +56,13 @@ function toast(msg){
   .weekdays>div{padding:4px 6px;background:#f6f9fe;border-bottom:1px solid #e6ecf7;font-size:12px}
   .day{min-height:78px;position:relative;border-right:1px solid #f0f4fb;border-bottom:1px solid #f0f4fb;padding:2px}
   .day.other-month{background:#fafbfd;opacity:.6}
+  .day.downtime{background:#ffe5e5}
+  .day.downtime .date{color:#b71c1c}
   .day.today{outline:2px solid #0a63c2;outline-offset:-2px}
   .date{font-size:12px;color:#555;margin-bottom:2px}
   .event.generic,.job-bar{display:block;padding:2px 6px;margin:2px 0;border-radius:8px;cursor:pointer;border:1px solid transparent}
   .event.generic{background:#fff0d6;border-color:#ffe1a5}
+  .event.downtime{background:#ff8a80;border-color:#ff5252;color:#fff}
   .job-bar{background:#e1efff;border-color:#cddffb}
   /* Bubble */
   #bubble.bubble{position:absolute;z-index:9999;background:#fff;border:1px solid #dfe6f3;border-radius:10px;box-shadow:0 6px 18px rgba(15,25,40,.12);padding:10px;min-width:260px}
@@ -79,6 +85,26 @@ function toast(msg){
   .pump-card{display:block}
   .pump-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
   .pump-col{background:#fff;border:1px solid #dde3ee;border-radius:10px;padding:12px}
+  .dash-modal-step[hidden]{display:none}
+  .dash-choice-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:12px}
+  .dash-choice{padding:12px;border-radius:10px;border:1px solid #d9e2f2;background:#f7f9fe;font-weight:600;cursor:pointer;transition:background .15s,border-color .15s}
+  .dash-choice:hover{background:#eef3fb;border-color:#0a63c2}
+  .subtask-section{margin-top:16px;border-top:1px solid #e2e8f5;padding-top:12px;display:grid;gap:12px}
+  .subtask-header{display:flex;align-items:center;justify-content:space-between}
+  .subtask-add-btn{padding:6px 10px;border-radius:6px;border:1px solid #cfd9ec;background:#eef3fb;color:#0a63c2;cursor:pointer}
+  .subtask-add-btn:hover{background:#e2e9f8}
+  .subtask-list{display:grid;gap:10px}
+  .subtask-row{border:1px solid #dfe4ef;border-radius:10px;background:#f9fbff;padding:10px;display:grid;gap:8px}
+  .subtask-row-top{display:flex;align-items:center;justify-content:space-between}
+  .subtask-remove{background:#e14b4b;color:#fff;border:0;border-radius:6px;padding:4px 10px;cursor:pointer}
+  .subtask-remove:hover{background:#c43d3d}
+  .subtask-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+  .subtask-grid label{font-size:.85rem}
+  .subtask-grid input,.subtask-grid select{width:100%}
+  .down-list{margin-top:16px;display:grid;gap:8px}
+  .down-item{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid #dfe4ef;border-radius:8px;background:#f7f9fe}
+  .down-remove-btn{background:#e14b4b;color:#fff;border:0;border-radius:6px;padding:4px 10px;cursor:pointer}
+  .down-remove-btn:hover{background:#c43d3d}
   details > summary {cursor: pointer;}
   details > summary::-webkit-details-marker {display: none;}
   `;
@@ -209,6 +235,7 @@ if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
 if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
 if (!Array.isArray(window.inventory))    window.inventory    = [];
 if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
+if (!Array.isArray(window.downTimes))    window.downTimes    = [];   // [{dateISO}]
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
   window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] };
@@ -219,6 +246,7 @@ let tasksInterval = window.tasksInterval;
 let tasksAsReq    = window.tasksAsReq;
 let inventory     = window.inventory;
 let cuttingJobs   = window.cuttingJobs;
+let downTimes     = window.downTimes;
 
 /* ================ Jobs editing & render flags ================ */
 if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
@@ -242,6 +270,7 @@ function snapshotState(){
     tasksAsReq,
     inventory,
     cuttingJobs,
+    downTimes,
     pumpEff: safePumpEff
   };
 }
@@ -288,12 +317,16 @@ function adoptState(doc){
     : defaultAsReqTasks.slice();
   inventory = Array.isArray(data.inventory) ? data.inventory : seedInventoryFromTasks();
   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
+  downTimes = Array.isArray(data.downTimes)
+    ? data.downTimes.filter(dt => dt && typeof dt.dateISO === "string")
+    : [];
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
   window.tasksAsReq = tasksAsReq;
   window.inventory = inventory;
   window.cuttingJobs = cuttingJobs;
+  window.downTimes = downTimes;
 
   // Pump efficiency (guard against reading an undefined identifier)
   const pe = (typeof window.pumpEff === "object" && window.pumpEff)
@@ -332,6 +365,7 @@ async function loadFromCloud(){
           tasksAsReq: Array.isArray(data.tasksAsReq) && data.tasksAsReq.length ? data.tasksAsReq : defaultAsReqTasks.slice(),
           inventory: Array.isArray(data.inventory) && data.inventory.length ? data.inventory : seedInventoryFromTasks(),
           cuttingJobs: Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [],
+          downTimes: Array.isArray(data.downTimes) ? data.downTimes : [],
           pumpEff: pe
         };
         adoptState(seeded);
@@ -343,7 +377,7 @@ async function loadFromCloud(){
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
-      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], pumpEff: pe };
+      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], downTimes:[], pumpEff: pe };
       adoptState(seeded);
       await FB.docRef.set(seeded);
     }
@@ -352,7 +386,7 @@ async function loadFromCloud(){
     const pe = (typeof window.pumpEff === "object" && window.pumpEff)
       ? window.pumpEff
       : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], pumpEff: pe });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], downTimes:[], pumpEff: pe });
   }
 }
 
