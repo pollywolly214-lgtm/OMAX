@@ -136,7 +136,9 @@ function repairMaintenanceGraph(){
 
         if (!task.mode) task.mode = type;
         else task.mode = type; // enforce consistency with owning list
-        task.parentTask = parentId != null ? parentId : null;
+        if (parentId != null){
+          task.parentTask = parentId;
+        }
         if (!isFinite(task.order)) task.order = 0;
 
         flat.push(task);
