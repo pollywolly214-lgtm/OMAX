@@ -4,6 +4,14 @@
 .pump-col { background:#fff; border:1px solid #dde3ee; border-radius:10px; padding:12px; }
 .pump-stats { margin-top:6px; display:grid; gap:4px; }
 .pump-stats .lbl { color:#666; display:inline-block; width:80px; }
+.pump-chart-col { display:flex; flex-direction:column; gap:10px; }
+.pump-chart-toolbar { display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap; }
+.pump-chart-toolbar label { font-weight:600; }
+.pump-chart-toolbar select { width:auto; padding:4px 6px; font-size:12px; }
+.pump-chart-wrap { flex:1; display:flex; align-items:center; justify-content:center; }
+.pump-chart-wrap canvas { width:100%; max-width:560px; display:block; margin:0 auto; }
+.pump-legend { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
+.pump-legend span:first-child { font-weight:600; }
 
 /* colored chip used in summary */
 .chip{
