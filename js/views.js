@@ -23,7 +23,7 @@ function viewDashboard(){
     </div>
 
     <!-- Pump Efficiency widget (rendered by renderPumpWidget) -->
-    <section id="pump-widget" class="block"></section>
+    <section id="pump-widget" class="block pump-wide"></section>
 
     <!-- Calendar -->
     <div class="block" style="grid-column: 1 / -1">

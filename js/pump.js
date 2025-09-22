@@ -253,7 +253,8 @@ function renderPumpWidget(){
   const wrap   = document.querySelector(".pump-chart-wrap");
   if (canvas && wrap){
     const rect = wrap.getBoundingClientRect();
-    const targetWidth = Math.max(320, Math.floor((rect.width || wrap.clientWidth || canvas.width) - 8));
+    const availableWidth = rect.width || wrap.clientWidth || canvas.width || 320;
+    const targetWidth = Math.max(320, Math.floor(availableWidth));
     if (targetWidth && canvas.width !== targetWidth) canvas.width = targetWidth;
     const expanded = !!window.pumpChartExpanded;
     let targetHeight = expanded ? Math.max(320, Math.floor((window.innerHeight || 720) * 0.6)) : 240;
