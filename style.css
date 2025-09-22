@@ -203,6 +203,12 @@ h1 { margin: 0 0 10px; font-size: 22px; }
 .block .danger:hover { background: #c43d3d; }
 .small { font-size: 12px; color: #777; }
 .mini-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.total-hours-controls { align-items: center; margin-bottom: 4px; }
+.total-hours-label { display: flex; align-items: center; gap: 6px; margin: 0; font-weight: 600; }
+.total-hours-label input { width: 140px; }
+.total-hours-meta { display: flex; flex-direction: column; gap: 2px; }
+.total-hours-meta .hint,
+.total-hours-meta .small { margin: 0; }
 .job-files { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
 .job-file-link { color: #0a63c2; text-decoration: none; font-size: 12px; }
 .job-file-link:hover { text-decoration: underline; }

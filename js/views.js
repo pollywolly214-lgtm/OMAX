@@ -8,12 +8,16 @@ function viewDashboard(){
     <!-- Total hours -->
     <div class="block">
       <h3>Total Hours</h3>
-      <label>Enter total hours now:
-        <input type="number" id="totalInput" value="${cur!=null?cur:""}" />
-      </label>
-      <button id="logBtn">Log Hours</button>
-      <div class="hint">Last updated: ${cur!=null? new Date(totalHistory[totalHistory.length-1].dateISO).toLocaleString(): "—"}</div>
-      <div class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</div>
+      <div class="total-hours-controls mini-form">
+        <label class="total-hours-label">Enter total hours now:
+          <input type="number" id="totalInput" value="${cur!=null?cur:""}" />
+        </label>
+        <button id="logBtn">Log Hours</button>
+      </div>
+      <div class="total-hours-meta">
+        <div class="hint">Last updated: ${cur!=null? new Date(totalHistory[totalHistory.length-1].dateISO).toLocaleString(): "—"}</div>
+        <div class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</div>
+      </div>
     </div>
 
     <!-- Next due -->
