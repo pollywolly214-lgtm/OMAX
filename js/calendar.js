@@ -2,6 +2,17 @@
 let bubbleTimer = null;
 function hideBubble(){ const b = document.getElementById("bubble"); if (b) b.remove(); }
 function hideBubbleSoon(){ clearTimeout(bubbleTimer); bubbleTimer = setTimeout(hideBubble, 180); }
+function triggerDashboardAddPicker(opts){
+  const detail = (opts && typeof opts === "object") ? { ...opts } : {};
+  if (typeof window.openDashboardAddPicker === "function"){
+    window.openDashboardAddPicker(detail);
+    return;
+  }
+  if (!Array.isArray(window.__pendingDashboardAddRequests)){
+    window.__pendingDashboardAddRequests = [];
+  }
+  window.__pendingDashboardAddRequests.push(detail);
+}
 function makeBubble(anchor){
   hideBubble();
   const b = document.createElement("div"); b.id = "bubble"; b.className = "bubble"; document.body.appendChild(b);
@@ -178,6 +189,15 @@ function renderCalendar(){
     }
   });
 
+  const downSet = new Set();
+  if (Array.isArray(window.downTimes)){
+    window.downTimes.forEach(entry => {
+      if (!entry) return;
+      const iso = typeof entry === "string" ? entry : entry.dateISO;
+      if (iso) downSet.add(String(iso));
+    });
+  }
+
   const today = new Date(); today.setHours(0,0,0,0);
   for (let m=0; m<3; m++){
     const first = new Date(today.getFullYear(), today.getMonth()+m, 1);
@@ -207,12 +227,28 @@ function renderCalendar(){
       const cell = document.createElement("div"); cell.className = "day"; if (date.getTime()===today.getTime()) cell.classList.add("today");
       cell.innerHTML = `<div class="date">${day}</div>`;
       const key = ymd(date);
+      cell.dataset.dateIso = key;
+      if (downSet.has(key)) cell.classList.add("downtime");
       (dueMap[key]||[]).forEach(ev=>{
         const chip = document.createElement("div"); chip.className="event generic cal-task"; chip.dataset.calTask = ev.id; chip.textContent = `${ev.name} (due)`; cell.appendChild(chip);
       });
       (jobsMap[key]||[]).forEach(ev=>{
         const bar = document.createElement("div"); bar.className="job-bar cal-job"; bar.dataset.calJob = ev.id; bar.textContent = ev.name; cell.appendChild(bar);
       });
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.className = "day-add-bubble";
+      addBtn.textContent = "+";
+      addBtn.setAttribute("aria-label", `Add item on ${date.toDateString()}`);
+      addBtn.addEventListener("click", (ev)=>{
+        ev.stopPropagation();
+        triggerDashboardAddPicker({ dateISO: key, step: "task" });
+      });
+      addBtn.addEventListener("focus", ()=> addBtn.classList.add("is-visible"));
+      addBtn.addEventListener("blur", ()=> addBtn.classList.remove("is-visible"));
+      cell.appendChild(addBtn);
+      cell.addEventListener("mouseenter", ()=> addBtn.classList.add("is-visible"));
+      cell.addEventListener("mouseleave", ()=> addBtn.classList.remove("is-visible"));
       grid.appendChild(cell);
     }
 
