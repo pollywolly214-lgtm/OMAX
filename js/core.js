@@ -230,27 +230,26 @@ const defaultAsReqTasks = [
 ];
 
 /* ===================== Persisted state ===================== */
-if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateISO, hours}]
-if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
-if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
-if (!Array.isArray(window.inventory))    window.inventory    = [];
-if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
-if (!Array.isArray(window.downTimes))    window.downTimes    = [];   // [{dateISO}]
-if (!Array.isArray(window.pendingDownTimes)) window.pendingDownTimes = [];
-if (!Array.isArray(window.pendingCuttingJobs)) window.pendingCuttingJobs = [];
+function ensureArrayState(key){
+  const existing = window[key];
+  if (Array.isArray(existing)) return existing;
+  const seeded = [];
+  window[key] = seeded;
+  return seeded;
+}
+
+let totalHistory      = ensureArrayState("totalHistory");      // [{dateISO, hours}]
+let tasksInterval     = ensureArrayState("tasksInterval");
+let tasksAsReq        = ensureArrayState("tasksAsReq");
+let inventory         = ensureArrayState("inventory");
+let cuttingJobs       = ensureArrayState("cuttingJobs");       // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
+let downTimes         = ensureArrayState("downTimes");         // [{dateISO}]
+let pendingDownTimes  = ensureArrayState("pendingDownTimes");
+let pendingCuttingJobs = ensureArrayState("pendingCuttingJobs");
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
   window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] };
 }
-
-let totalHistory = window.totalHistory;
-let tasksInterval = window.tasksInterval;
-let tasksAsReq    = window.tasksAsReq;
-let inventory     = window.inventory;
-let cuttingJobs   = window.cuttingJobs;
-let downTimes     = window.downTimes;
-let pendingDownTimes   = window.pendingDownTimes;
-let pendingCuttingJobs = window.pendingCuttingJobs;
 
 /* ================ Jobs editing & render flags ================ */
 if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
