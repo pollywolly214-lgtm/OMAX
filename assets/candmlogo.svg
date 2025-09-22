@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 120" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 120" role="img" aria-labelledby="title desc">
   <title id="title">C&amp;M Concrete Precast and Construction logo</title>
   <desc id="desc">Rounded blue badge with C and M initials and stacked text for Concrete Precast and Construction.</desc>
-  <rect x="4" y="4" width="352" height="112" rx="18" ry="18" fill="#ffffff" stroke="#0a63c2" stroke-width="4" />
-  <rect x="24" y="28" width="120" height="64" rx="18" ry="18" fill="#0a63c2" />
-  <text x="84" y="70" fill="#ffffff" font-family="'Arial Black', 'Segoe UI', sans-serif" font-size="44" font-weight="700" text-anchor="middle">C&amp;M</text>
-  <text x="168" y="56" fill="#0a63c2" font-family="'Arial Black', 'Segoe UI', sans-serif" font-size="32" font-weight="700">CONCRETE</text>
-  <text x="168" y="82" fill="#0a63c2" font-family="'Arial', 'Segoe UI', sans-serif" font-size="22" font-weight="600">PRECAST &amp; CONSTRUCTION</text>
+  <rect x="4" y="4" width="472" height="112" rx="18" ry="18" fill="#ffffff" stroke="#0a63c2" stroke-width="4" />
+  <rect x="40" y="26" width="156" height="68" rx="20" ry="20" fill="#0a63c2" />
+  <text x="118" y="70" fill="#ffffff" font-family="'Arial Black', 'Segoe UI', sans-serif" font-size="48" font-weight="700" text-anchor="middle">C&amp;M</text>
+  <text x="320" y="56" fill="#0a63c2" font-family="'Arial Black', 'Segoe UI', sans-serif" font-size="34" font-weight="700" letter-spacing="0.04em" text-anchor="middle">CONCRETE</text>
+  <text x="320" y="84" fill="#0a63c2" font-family="'Arial', 'Segoe UI', sans-serif" font-size="22" font-weight="600" letter-spacing="0.06em" text-anchor="middle">PRECAST &amp; CONSTRUCTION</text>
 </svg>
