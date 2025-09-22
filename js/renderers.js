@@ -981,6 +981,38 @@ function renderSettings(){
     repairMaintenanceGraph();
   }
 
+  const existingTree = document.getElementById("tree");
+  const prevOpenTasks = new Set();
+  const prevOpenCats = new Set();
+  if (existingTree){
+    existingTree.querySelectorAll('details.task[open]').forEach(el => {
+      const id = el.getAttribute('data-task-id');
+      if (id != null) prevOpenTasks.add(String(id));
+    });
+    existingTree.querySelectorAll('details.cat[open]').forEach(el => {
+      const id = el.getAttribute('data-cat-id');
+      if (id != null) prevOpenCats.add(String(id));
+    });
+  }
+
+  function getForceSet(prop){
+    const raw = window[prop];
+    if (raw instanceof Set) return raw;
+    if (Array.isArray(raw)){
+      const setFromArr = new Set(raw.map(x => String(x)));
+      window[prop] = setFromArr;
+      return setFromArr;
+    }
+    const fresh = new Set();
+    window[prop] = fresh;
+    return fresh;
+  }
+
+  const pendingAutoOpenTasks = new Set(getForceSet('__settingsExplorerForceOpenTasks'));
+  const pendingAutoOpenCats = new Set(getForceSet('__settingsExplorerForceOpenCats'));
+  getForceSet('__settingsExplorerForceOpenTasks').clear();
+  getForceSet('__settingsExplorerForceOpenCats').clear();
+
   // --- Small, compact scoped styles (once) ---
   if (!document.getElementById("settingsExplorerCSS")){
     const st = document.createElement("style");
@@ -989,6 +1021,11 @@ function renderSettings(){
       #explorer .toolbar{display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap}
       #explorer .toolbar button{padding:.35rem .55rem;font-size:.92rem}
       #explorer .hint{font-size:.8rem;color:#666}
+      #explorer .type-lanes{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem;margin-bottom:.75rem}
+      #explorer .type-lanes .lane{border:1px dashed #b5c6e1;border-radius:10px;padding:.75rem;background:#f7f9fe;color:#1f3b57;min-height:90px;display:flex;flex-direction:column;gap:.3rem;transition:background-color .15s ease,border-color .15s ease,box-shadow .15s ease}
+      #explorer .type-lanes .lane strong{font-size:.95rem}
+      #explorer .type-lanes .lane p{margin:0;font-size:.8rem;color:#4d6783}
+      #explorer .type-lanes .lane.dragover{background:#e8f1ff;border-color:#0a63c2;box-shadow:0 0 0 2px rgba(10,99,194,.15)}
       #explorer .tree{border:1px solid #e5e5e5;background:#fff;border-radius:10px;padding:6px}
       #explorer details{margin:4px 0;border:1px solid #eee;border-radius:8px;background:#fafafa}
       #explorer details>summary{display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:grab;user-select:none}
@@ -1250,9 +1287,19 @@ function renderSettings(){
         <div class="toolbar">
           <button id="btnAddCategory">+ Add Category</button>
           <button id="btnAddTask">+ Add Task</button>
-          <span class="hint">Drag folders & tasks to organize. Tasks can hold sub-tasks like folders.</span>
+          <span class="hint">Drag folders & tasks to organize. Tasks can hold sub-tasks like folders. Use the conversion lanes below to switch task types quickly.</span>
         </div>
         <div class="tree" id="tree">
+          <div class="type-lanes" id="typeLanes">
+            <div class="lane" data-drop-type="interval">
+              <strong>Interval tasks</strong>
+              <p>Drop any task here to convert it to an interval item and return it to the root list.</p>
+            </div>
+            <div class="lane" data-drop-type="asreq">
+              <strong>As-required tasks</strong>
+              <p>Drop any task here to convert it to an as-required item and return it to the root list.</p>
+            </div>
+          </div>
           <div class="dz" data-drop-root="1">Drop here to move to the root</div>
           ${rootTasks}
           ${folderHtml}
@@ -1296,6 +1343,20 @@ function renderSettings(){
   const freqRow = form?.querySelector('[data-form-frequency]');
   const lastRow = form?.querySelector('[data-form-last]');
   const conditionRow = form?.querySelector('[data-form-condition]');
+
+  const reopenDetails = (kind, ids)=>{
+    if (!tree || !ids || typeof ids.forEach !== 'function') return;
+    const attr = kind === 'task' ? 'data-task-id' : 'data-cat-id';
+    ids.forEach(id => {
+      if (id == null) return;
+      const safe = String(id).replace(/"/g, '\"');
+      const el = tree.querySelector(`details.${kind}[${attr}="${safe}"]`);
+      if (el) el.open = true;
+    });
+  };
+
+  reopenDetails('task', new Set([...prevOpenTasks, ...pendingAutoOpenTasks]));
+  reopenDetails('cat', new Set([...prevOpenCats, ...pendingAutoOpenCats]));
 
   const persist = ()=>{
     if (typeof saveTasks === "function") { try{ saveTasks(); }catch(_){} }
@@ -1355,6 +1416,8 @@ function renderSettings(){
     const id = genId(name);
     const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
 
+    if (catId) queueAutoOpenCat(catId);
+
     if (mode === "interval"){
       const intervalVal = data.get("taskInterval");
       const lastVal = data.get("taskLastServiced");
@@ -1380,6 +1443,130 @@ function renderSettings(){
     idx = window.tasksAsReq.findIndex(t => String(t.id)===tid);
     if (idx >= 0) return { task: window.tasksAsReq[idx], mode:"asreq", list: window.tasksAsReq, index: idx };
     return null;
+  }
+
+  function gatherSiblingTasks(catId, parentId, excludeId){
+    const keyCat = String(catId ?? "");
+    const keyParent = String(parentId ?? "");
+    const keyExclude = excludeId != null ? String(excludeId) : null;
+    const siblings = [];
+    for (const list of [window.tasksInterval, window.tasksAsReq]){
+      if (!Array.isArray(list)) continue;
+      for (const task of list){
+        if (!task || task.id == null) continue;
+        if (keyExclude && String(task.id) === keyExclude) continue;
+        if (String(task.cat ?? "") !== keyCat) continue;
+        if (String(task.parentTask ?? "") !== keyParent) continue;
+        siblings.push(task);
+      }
+    }
+    return siblings;
+  }
+
+  function normalizeTaskOrder(catId, parentId){
+    const siblings = gatherSiblingTasks(catId, parentId, null)
+      .sort((a,b)=> (Number(b.order||0) - Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
+    let n = siblings.length;
+    for (const task of siblings){ task.order = n--; }
+    if (siblings.length){
+      const counter = Number(window._maintOrderCounter) || 0;
+      window._maintOrderCounter = Math.max(counter, siblings.length);
+    }
+  }
+
+  function convertTaskViaDrop(taskId, nextMode){
+    const meta = findTaskMeta(taskId);
+    if (!meta) return false;
+    if (meta.mode === nextMode){
+      const task = meta.task;
+      const oldCat = task.cat ?? null;
+      const oldParent = task.parentTask ?? null;
+      task.cat = null;
+      task.parentTask = null;
+      task.order = ++window._maintOrderCounter;
+      normalizeTaskOrder(oldCat, oldParent);
+      normalizeTaskOrder(task.cat ?? null, task.parentTask ?? null);
+      return true;
+    }
+
+    const task = meta.task;
+    const sourceList = meta.list;
+    const oldCat = task.cat ?? null;
+    const oldParent = task.parentTask ?? null;
+
+    if (nextMode === "interval"){
+      let intervalVal = task.interval;
+      if (!isFinite(intervalVal) || intervalVal <= 0){
+        const resp = prompt("Interval hours for this task?", "8");
+        if (resp === null){
+          return false;
+        }
+        const parsed = Number(resp);
+        if (!isFinite(parsed) || parsed <= 0){
+          alert("Enter a positive number.");
+          return false;
+        }
+        intervalVal = parsed;
+      }
+      sourceList.splice(meta.index, 1);
+      task.mode = "interval";
+      task.interval = Number(intervalVal);
+      task.sinceBase = task.sinceBase ?? null;
+      task.anchorTotal = task.anchorTotal ?? null;
+      delete task.condition;
+      task.parentTask = null;
+      task.cat = null;
+      task.order = ++window._maintOrderCounter;
+      window.tasksInterval.unshift(task);
+    }else if (nextMode === "asreq"){
+      sourceList.splice(meta.index, 1);
+      task.mode = "asreq";
+      task.condition = task.condition || "As required";
+      delete task.interval;
+      delete task.sinceBase;
+      delete task.anchorTotal;
+      task.parentTask = null;
+      task.cat = null;
+      task.order = ++window._maintOrderCounter;
+      window.tasksAsReq.unshift(task);
+    }else{
+      return false;
+    }
+
+    normalizeTaskOrder(oldCat, oldParent);
+    normalizeTaskOrder(task.cat ?? null, task.parentTask ?? null);
+    return true;
+  }
+
+  function queueAutoOpenCat(catId){
+    if (catId == null) return;
+    const target = getForceSet('__settingsExplorerForceOpenCats');
+    let current = catId;
+    let guard = 0;
+    while (current != null && guard++ < 100){
+      const key = String(current);
+      target.add(key);
+      const parent = window.settingsFolders.find(f => String(f.id) === key);
+      current = parent && parent.parent != null ? parent.parent : null;
+    }
+  }
+
+  function queueAutoOpenTask(taskId){
+    if (taskId == null) return;
+    const tasksSet = getForceSet('__settingsExplorerForceOpenTasks');
+    let current = taskId;
+    let guard = 0;
+    while (current != null && guard++ < 100){
+      const key = String(current);
+      tasksSet.add(key);
+      const meta = findTaskMeta(current);
+      if (meta && meta.task){
+        if (meta.task.cat != null) queueAutoOpenCat(meta.task.cat);
+        current = meta.task.parentTask != null ? meta.task.parentTask : null;
+      }else{
+        current = null;
+      }
+    }
   }
 
   function updateDueChip(holder, task){
@@ -1513,6 +1700,7 @@ function renderSettings(){
   tree?.addEventListener('dragend',()=>{
     tree.querySelectorAll('.drop-hint').forEach(el=>el.classList.remove('drop-hint'));
     tree.querySelectorAll('.dz.dragover').forEach(el=>el.classList.remove('dragover'));
+    tree.querySelectorAll('[data-drop-type].dragover').forEach(el=>el.classList.remove('dragover'));
     DRAG.kind = DRAG.id = DRAG.type = null;
   });
   function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
@@ -1532,6 +1720,8 @@ function renderSettings(){
         allow(e); dz.classList.add('dragover'); return;
       }
     }
+    const lane = e.target.closest('[data-drop-type]');
+    if (lane && DRAG.kind === 'task'){ allow(e); lane.classList.add('dragover'); return; }
     const sumTask = e.target.closest('details.task>summary');
     if (sumTask && DRAG.kind === 'task'){ allow(e); sumTask.classList.add('drop-hint'); return; }
     const sumCat = e.target.closest('details.cat>summary');
@@ -1540,13 +1730,18 @@ function renderSettings(){
   tree?.addEventListener('dragleave',(e)=>{
     e.target.closest('.dz')?.classList.remove('dragover');
     e.target.closest('summary')?.classList.remove('drop-hint');
+    e.target.closest('[data-drop-type]')?.classList.remove('dragover');
   });
   tree?.addEventListener('drop',(e)=>{
-    const raw = e.dataTransfer.getData('text/plain') || '';
-    const parts = raw.split(':');
-    const kind = parts[0];
-    const id = parts[1] || null;
+    const raw = e.dataTransfer?.getData?.('text/plain') || '';
+    const parts = raw ? raw.split(':') : [];
+    const kind = parts[0] || DRAG.kind || '';
+    const id = parts[1] || DRAG.id || null;
     e.preventDefault();
+    e.stopPropagation();
+    if (!kind || !id){
+      return;
+    }
     const dzRoot = e.target.closest('[data-drop-root]');
     const dzCat  = e.target.closest('[data-drop-into-cat]');
     const dzTask = e.target.closest('[data-drop-into-task]');
@@ -1556,11 +1751,28 @@ function renderSettings(){
     const dzCatTail = e.target.closest('[data-drop-cat-tail]');
     const onTaskSummary = e.target.closest('details.task>summary');
     const onCatSummary  = e.target.closest('details.cat>summary');
+    const lane = e.target.closest('[data-drop-type]');
 
     if (kind === 'task' && id){
+      if (lane){
+        const mode = lane.getAttribute('data-drop-type');
+        if (mode && convertTaskViaDrop(id, mode)){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
       if (dzBeforeTask){
         const beforeId = dzBeforeTask.getAttribute('data-drop-before-task');
         if (beforeId && typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { beforeTask: { id: beforeId } })){
+          const beforeMeta = findTaskMeta(beforeId);
+          if (beforeMeta && beforeMeta.task){
+            if (beforeMeta.task.parentTask != null){
+              queueAutoOpenTask(beforeMeta.task.parentTask);
+            }else if (beforeMeta.task.cat != null){
+              queueAutoOpenCat(beforeMeta.task.cat);
+            }
+          }
           persist();
           renderSettings();
         }
@@ -1573,11 +1785,13 @@ function renderSettings(){
         const catId = catAttr === '' ? null : catAttr;
         if (parentId){
           if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
+            queueAutoOpenTask(parentId);
             persist();
             renderSettings();
           }
         }else{
           if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
+            if (catId != null && catId !== '') queueAutoOpenCat(catId);
             persist();
             renderSettings();
           }
@@ -1594,6 +1808,7 @@ function renderSettings(){
       if (dzCat){
         const catId = dzCat.getAttribute('data-drop-into-cat');
         if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
+          if (catId != null && catId !== '') queueAutoOpenCat(catId);
           persist();
           renderSettings();
         }
@@ -1602,6 +1817,7 @@ function renderSettings(){
       if (dzTask){
         const parentId = dzTask.getAttribute('data-drop-into-task');
         if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
+          queueAutoOpenTask(parentId);
           persist();
           renderSettings();
         }
@@ -1610,6 +1826,7 @@ function renderSettings(){
       if (onTaskSummary){
         const parentId = onTaskSummary.closest('details.task')?.getAttribute('data-task-id');
         if (parentId && typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
+          queueAutoOpenTask(parentId);
           persist();
           renderSettings();
         }
@@ -1618,6 +1835,7 @@ function renderSettings(){
       if (onCatSummary){
         const catId = onCatSummary.closest('details.cat')?.getAttribute('data-cat-id');
         if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
+          if (catId != null && catId !== '') queueAutoOpenCat(catId);
           persist();
           renderSettings();
         }
