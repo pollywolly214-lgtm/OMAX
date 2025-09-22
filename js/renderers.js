@@ -1547,6 +1547,34 @@ function computeCostModel(){
       : formatterCurrency(0, { decimals: 0 })
   };
 
+  const maintenanceTasks = Array.isArray(tasksInterval) ? tasksInterval : [];
+  const maintenanceJobs = maintenanceTasks.map(task => {
+    const name = task?.name || "Untitled maintenance job";
+    const intervalRaw = Number(task?.interval);
+    const priceRaw = Number(task?.price);
+    const manualLink = typeof task?.manualLink === "string" ? task.manualLink.trim() : "";
+    const storeLink  = typeof task?.storeLink === "string" ? task.storeLink.trim() : "";
+    const linkCount = [manualLink, storeLink].filter(Boolean).length;
+    const intervalLabel = (isFinite(intervalRaw) && intervalRaw > 0)
+      ? `${intervalRaw} hr`
+      : "—";
+    const costLabel = (isFinite(priceRaw) && priceRaw > 0)
+      ? formatterCurrency(priceRaw, { decimals: priceRaw < 1000 ? 2 : 0 })
+      : "—";
+    const linkLabel = linkCount
+      ? `${linkCount} link${linkCount === 1 ? "" : "s"} configured`
+      : "Link via Settings (coming soon)";
+    return {
+      name,
+      intervalLabel,
+      costLabel,
+      linkLabel
+    };
+  });
+
+  const maintenanceJobsNote = "Group recurring maintenance work here while the dedicated planner is finalized.";
+  const maintenanceJobsEmpty = "Add interval maintenance tasks from the Settings tab (coming soon) to populate this tracker.";
+
   const timeframeNote = "Maintenance projections use interval tasks only; as-required items remain excluded from forecasts.";
   const historyEmpty = parsedHistory.length
     ? "Log additional machine hours to expand the maintenance cost timeline."
@@ -1564,6 +1592,9 @@ function computeCostModel(){
     jobSummary,
     jobBreakdown,
     jobEmpty,
+    maintenanceJobs,
+    maintenanceJobsNote,
+    maintenanceJobsEmpty,
     chartNote,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries,
