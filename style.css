@@ -155,6 +155,15 @@ h1 { margin: 0 0 10px; font-size: 22px; }
 .block .danger:hover { background: #c43d3d; }
 .small { font-size: 12px; color: #777; }
 .mini-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.job-files { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.job-file-link { color: #0a63c2; text-decoration: none; font-size: 12px; }
+.job-file-link:hover { text-decoration: underline; }
+.job-edit-files { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.job-file-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.job-file-list li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.job-file-list button.link { background: none; border: none; color: #c43d3d; cursor: pointer; padding: 0; font-size: 12px; }
+.job-file-list button.link:hover { text-decoration: underline; }
+.job-files-summary { margin-top: 4px; }
 
 /* Tables */
 table { width: 100%; border-collapse: collapse; }
