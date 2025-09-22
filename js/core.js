@@ -230,21 +230,32 @@ const defaultAsReqTasks = [
 ];
 
 /* ===================== Persisted state ===================== */
-function ensureArrayState(key){
+function ensureArrayState(key, fallback){
   const existing = window[key];
   if (Array.isArray(existing)) return existing;
-  const seeded = [];
+
+  let seeded;
+  if (typeof fallback === "function"){
+    seeded = fallback();
+  }else if (Array.isArray(fallback)){
+    seeded = fallback.slice();
+  }else if (fallback && typeof fallback.length === "number"){
+    seeded = Array.from(fallback);
+  }
+
+  if (!Array.isArray(seeded)) seeded = [];
+
   window[key] = seeded;
   return seeded;
 }
 
-let totalHistory      = ensureArrayState("totalHistory");      // [{dateISO, hours}]
-let tasksInterval     = ensureArrayState("tasksInterval");
-let tasksAsReq        = ensureArrayState("tasksAsReq");
-let inventory         = ensureArrayState("inventory");
-let cuttingJobs       = ensureArrayState("cuttingJobs");       // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
-let downTimes         = ensureArrayState("downTimes");         // [{dateISO}]
-let pendingDownTimes  = ensureArrayState("pendingDownTimes");
+let totalHistory       = ensureArrayState("totalHistory");      // [{dateISO, hours}]
+let tasksInterval      = ensureArrayState("tasksInterval", () => defaultIntervalTasks.slice());
+let tasksAsReq         = ensureArrayState("tasksAsReq", () => defaultAsReqTasks.slice());
+let inventory          = ensureArrayState("inventory");
+let cuttingJobs        = ensureArrayState("cuttingJobs");       // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
+let downTimes          = ensureArrayState("downTimes");         // [{dateISO}]
+let pendingDownTimes   = ensureArrayState("pendingDownTimes");
 let pendingCuttingJobs = ensureArrayState("pendingCuttingJobs");
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
