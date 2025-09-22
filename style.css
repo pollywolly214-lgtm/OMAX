@@ -66,8 +66,8 @@ header { background: #0a63c2; color: #fff; padding: 16px; }
 }
 .header-logo {
   flex: 0 0 auto;
-  max-width: 260px;
-  width: 100%;
+  width: clamp(160px, 24vw, 220px);
+  height: auto;
   background: rgba(255, 255, 255, 0.95);
   border: 3px solid rgba(255, 255, 255, 0.7);
   border-radius: 14px;
@@ -75,15 +75,15 @@ header { background: #0a63c2; color: #fff; padding: 16px; }
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
 }
 .header-motto {
-  flex: 0 1 220px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  flex: 0 1 240px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #e7f0ff;
-  font-size: 13px;
+  font-size: clamp(16px, 2.2vw, 20px);
   text-align: right;
   align-self: flex-start;
-  line-height: 1.4;
+  line-height: 1.2;
 }
 h1 { margin: 0 0 10px; font-size: 22px; }
 .nav {
