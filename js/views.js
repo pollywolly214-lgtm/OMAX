@@ -838,8 +838,24 @@ function viewJobs(){
   </div>`;
 }
 
-function viewInventory(){
-  const rows = inventory.map(i => `
+function filterInventoryItems(term){
+  const query = (term || "").trim().toLowerCase();
+  if (!query) return inventory.slice();
+  return inventory.filter(item => {
+    const fields = [item.name, item.unit, item.pn, item.note, item.link];
+    return fields.some(f => {
+      if (f == null) return false;
+      const text = String(f).toLowerCase();
+      return text.includes(query);
+    });
+  });
+}
+
+function inventoryRowsHTML(list){
+  if (!Array.isArray(list) || !list.length){
+    return `<tr><td colspan="6" class="muted">No inventory items match your search.</td></tr>`;
+  }
+  return list.map(i => `
     <tr>
       <td>${i.name}</td>
       <td><input type="number" min="0" step="1" data-inv="qty" data-id="${i.id}" value="${i.qty}"></td>
@@ -848,13 +864,28 @@ function viewInventory(){
       <td>${i.link ? `<a href="${i.link}" target="_blank" rel="noopener">link</a>` : "—"}</td>
       <td><input type="text" data-inv="note" data-id="${i.id}" value="${i.note||""}"></td>
     </tr>`).join("");
+}
+
+function viewInventory(){
+  const filtered = filterInventoryItems(inventorySearchTerm);
+  const rows = inventoryRowsHTML(filtered);
+  const searchValue = String(inventorySearchTerm || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
   return `
   <div class="container">
     <div class="block" style="grid-column:1 / -1">
       <h3>Inventory</h3>
+      <div class="mini-form" style="margin-bottom:8px;">
+        <input type="search" id="inventorySearch" placeholder="Search items, part numbers, notes, or links" value="${searchValue}">
+        <button type="button" id="inventorySearchClear">Clear</button>
+      </div>
+      <div class="small muted" style="margin-bottom:8px;">Results update as you type.</div>
       <table>
         <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>PN</th><th>Link</th><th>Note</th></tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody data-inventory-rows>${rows}</tbody>
       </table>
     </div>
   </div>`;
