@@ -622,16 +622,35 @@ function viewJobs(){
     const matTotal = (matCost * matQty) || 0;
 
     // Remaining & per-day
-    const remainHrs = req.remainingHours || 0;
+    const actualRemain = eff.actualRemaining != null ? eff.actualRemaining : (req.remainingHours || 0);
+    const baselineRemain = eff.expectedRemaining != null
+      ? eff.expectedRemaining
+      : Math.max(0, (Number(j.estimateHours)||0) - (eff.expectedHours||0));
+    const remainHrs = actualRemain;
     const needPerDay = req.requiredPerDay === Infinity
       ? '∞'
       : (req.requiredPerDay||0).toFixed(2);
 
-    // Profit delta (labor only) – keeps your original semantics (deltaHours * rate)
-    const money = eff.gainLoss || 0;
-    const moneyStyle = money >= 0 ? 'color:#2e7d32;font-weight:600' : 'color:#c43d3d;font-weight:600';
-    const moneySign  = money >= 0 ? '+' : '−';
+    // Cost efficiency (baseline vs actual remaining hours)
+    const EPS = 0.05;
+    const deltaRemain = baselineRemain - actualRemain;
+    const ahead = deltaRemain > EPS;
+    const behind = deltaRemain < -EPS;
+    const nearPace = !ahead && !behind;
+    const rawMoney = eff.gainLoss || 0;
+    const money = nearPace ? 0 : rawMoney;
+    const moneyStyle = ahead
+      ? 'color:#2e7d32;font-weight:600'
+      : (behind ? 'color:#c43d3d;font-weight:600' : 'color:#424242;font-weight:600');
+    const moneySign  = ahead ? '+' : (behind ? '−' : '');
     const moneyAbs   = Math.abs(money).toFixed(2);
+    const statusLabel = nearPace ? 'On pace' : (ahead ? 'Ahead' : 'Behind');
+    const statusDetail = nearPace
+      ? ''
+      : ` by ${Math.abs(deltaRemain).toFixed(1)} hr`;
+    const baselineDetail = `${baselineRemain.toFixed(1)}h baseline vs ${actualRemain.toFixed(1)}h remaining`;
+    const statusSummary = statusLabel + (statusDetail || '');
+    const efficiencyDetail = `${statusSummary}; ${baselineDetail}`;
 
     // Dates (for display / edit row)
     const startTxt = j.startISO ? (new Date(j.startISO)).toDateString() : "—";
@@ -660,7 +679,10 @@ function viewJobs(){
             ? `<span class="danger">Past due</span>`
             : `${needPerDay} hr/day`
         }</td>
-        <td><span style="${moneyStyle}">${moneySign}$${moneyAbs}</span></td>
+        <td>
+          <div><span style="${moneyStyle}">${moneySign}$${moneyAbs}</span></div>
+          <div class="small muted">${efficiencyDetail}</div>
+        </td>
         <td>
           <!-- Hidden placeholder prevents renderJobs() from injecting a duplicate Log button -->
           <span data-log-job="${j.id}" style="display:none"></span>
@@ -714,7 +736,7 @@ function viewJobs(){
             <th>Total $</th>
             <th>Hours Remaining</th>
             <th>Needed / Day</th>
-            <th>Est. Add’l Profit</th>
+            <th>Estimated Cost (Calculated)</th>
             <th>Actions</th>
           </tr>
         </thead>
