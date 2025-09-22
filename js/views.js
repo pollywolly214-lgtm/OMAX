@@ -578,6 +578,8 @@ function viewCosts(model){
   const historyRows = Array.isArray(data.historyRows) ? data.historyRows : [];
   const jobBreakdown = Array.isArray(data.jobBreakdown) ? data.jobBreakdown : [];
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
+  const maintenanceJobsNote = data.maintenanceJobsNote || "";
+  const maintenanceJobsEmpty = data.maintenanceJobsEmpty || "";
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
 
   return `
@@ -643,6 +645,12 @@ function viewCosts(model){
           `).join("")}
         </ul>
       ` : `<p class="small muted">${esc(data.historyEmpty || "No usage history yet. Log machine hours to estimate maintenance spend.")}</p>`}
+    </div>
+
+    <div class="block">
+      <h3>Maintenance Job Tracker</h3>
+      ${maintenanceJobsNote ? `<p class="small muted">${esc(maintenanceJobsNote)}</p>` : ""}
+      ${maintenanceJobsEmpty ? `<p class="small muted">${esc(maintenanceJobsEmpty)}</p>` : ""}
     </div>
 
     <div class="block">

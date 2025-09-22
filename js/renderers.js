@@ -1549,6 +1549,11 @@ function computeCostModel(){
       : formatterCurrency(0, { decimals: 0 })
   };
 
+  const maintenanceJobs = [];
+
+  const maintenanceJobsNote = "Maintenance job tracker will consolidate every job once the Jobs integration is complete.";
+  const maintenanceJobsEmpty = "Tracker setup is in progress. This space will list all maintenance jobs when the data wiring is finished.";
+
   const timeframeNote = "Maintenance projections use interval tasks only; as-required items remain excluded from forecasts.";
   const historyEmpty = parsedHistory.length
     ? "Log additional machine hours to expand the maintenance cost timeline."
@@ -1566,6 +1571,9 @@ function computeCostModel(){
     jobSummary,
     jobBreakdown,
     jobEmpty,
+    maintenanceJobs,
+    maintenanceJobsNote,
+    maintenanceJobsEmpty,
     chartNote,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries,
