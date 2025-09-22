@@ -14,7 +14,10 @@ function renderDashboard(){
     }else{
       totalHistory.push({ dateISO: todayISO, hours: v });
     }
-    RENDER_TOTAL = v; RENDER_DELTA = deltaSinceLast();
+    RENDER_TOTAL = v;
+    window.RENDER_TOTAL = RENDER_TOTAL;
+    RENDER_DELTA = deltaSinceLast();
+    window.RENDER_DELTA = RENDER_DELTA;
     saveCloudDebounced(); toast("Hours logged");
     renderDashboard();
   });

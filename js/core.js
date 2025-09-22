@@ -254,6 +254,24 @@ let currentSnapshotJSON = null;
 let suppressHistory = false;
 let skipNextHistoryCapture = false;
 
+function syncRenderTotalsFromHistory(){
+  const len = Array.isArray(totalHistory) ? totalHistory.length : 0;
+  const last = len ? totalHistory[len - 1] : null;
+  const prev = len > 1 ? totalHistory[len - 2] : null;
+
+  const curHours = last != null ? Number(last.hours) : NaN;
+  const prevHours = prev != null ? Number(prev.hours) : NaN;
+
+  const cur = Number.isFinite(curHours) ? curHours : null;
+  const prevVal = Number.isFinite(prevHours) ? prevHours : null;
+  const delta = (cur != null && prevVal != null) ? Math.max(0, cur - prevVal) : null;
+
+  RENDER_TOTAL = cur;
+  RENDER_DELTA = delta;
+  window.RENDER_TOTAL = RENDER_TOTAL;
+  window.RENDER_DELTA = RENDER_DELTA;
+}
+
 function resetHistoryToCurrent(){
   try {
     currentSnapshotJSON = JSON.stringify(snapshotState());
@@ -263,6 +281,7 @@ function resetHistoryToCurrent(){
   }
   undoStack.length = 0;
   redoStack.length = 0;
+  syncRenderTotalsFromHistory();
 }
 
 function captureHistorySnapshot(){
@@ -413,6 +432,7 @@ function adoptState(doc){
   }
 
   ensureTaskCategories();
+  syncRenderTotalsFromHistory();
 }
 
 
