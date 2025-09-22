@@ -3,27 +3,33 @@ function viewDashboard(){
   const cur   = RENDER_TOTAL ?? currentTotal();
   const prev  = previousTotal();
   const delta = RENDER_DELTA ?? deltaSinceLast();
+  const lastEntry = totalHistory.length ? totalHistory[totalHistory.length - 1] : null;
+  const lastUpdated = cur!=null && lastEntry && lastEntry.dateISO
+    ? new Date(lastEntry.dateISO).toLocaleString()
+    : "—";
   return `
   <div class="container">
-    <!-- Total hours -->
-    <div class="block">
-      <h3>Total Hours</h3>
-      <div class="total-hours-controls mini-form">
-        <label class="total-hours-label">Enter total hours now:
-          <input type="number" id="totalInput" value="${cur!=null?cur:""}" />
-        </label>
-        <button id="logBtn">Log Hours</button>
+    <div class="dashboard-top">
+      <!-- Total hours -->
+      <div class="block total-hours-block">
+        <h3>Total Hours</h3>
+        <div class="total-hours-controls mini-form">
+          <label class="total-hours-label"><span>Enter total hours now:</span>
+            <input type="number" id="totalInput" value="${cur!=null?cur:""}" />
+          </label>
+          <button id="logBtn">Log Hours</button>
+        </div>
+        <div class="total-hours-meta" aria-live="polite">
+          <span class="hint">Last updated: ${lastUpdated}</span>
+          <span class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</span>
+        </div>
       </div>
-      <div class="total-hours-meta">
-        <div class="hint">Last updated: ${cur!=null? new Date(totalHistory[totalHistory.length-1].dateISO).toLocaleString(): "—"}</div>
-        <div class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</div>
-      </div>
-    </div>
 
-    <!-- Next due -->
-    <div class="block">
-      <h3>Next Due</h3>
-      <div id="nextDueBox">Calculating…</div>
+      <!-- Next due -->
+      <div class="block next-due-block">
+        <h3>Next Due</h3>
+        <div id="nextDueBox">Calculating…</div>
+      </div>
     </div>
 
     <!-- Pump Efficiency widget (rendered by renderPumpWidget) -->
