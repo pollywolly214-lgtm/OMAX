@@ -1334,10 +1334,17 @@ function renderSettings(){
     e.target.closest('[data-drop-type]')?.classList.remove('dragover');
   });
   tree?.addEventListener('drop',(e)=>{
-    const raw = e.dataTransfer.getData('text/plain') || '';
-    const parts = raw.split(':');
-    const kind = parts[0];
-    const id = parts[1] || null;
+    let raw = '';
+    const dt = e.dataTransfer;
+    if (dt && typeof dt.getData === 'function'){
+      try{ raw = dt.getData('text/plain') || ''; }
+      catch(_){ raw = ''; }
+    }
+    const parts = raw ? raw.split(':') : [];
+    let kind = parts[0] || null;
+    let id = parts[1] || null;
+    if (!kind && DRAG.kind) kind = DRAG.kind;
+    if (!id && DRAG.id) id = DRAG.id;
     e.preventDefault();
     const dzRoot = e.target.closest('[data-drop-root]');
     const dzCat  = e.target.closest('[data-drop-into-cat]');
