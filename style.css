@@ -54,7 +54,7 @@ body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fa; color: #2
 header { background: #0a63c2; color: #fff; padding: 16px; }
 .header-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
   column-gap: 18px;
@@ -65,14 +65,25 @@ header { background: #0a63c2; color: #fff; padding: 16px; }
   font-size: 22px;
   flex: 1 1 260px;
 }
+.header-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+}
 .header-logo {
   flex: 0 0 auto;
-  width: clamp(360px, 58vw, 690px);
+  width: clamp(180px, 29vw, 345px);
   max-width: 100%;
   height: auto;
   display: block;
-  margin: 0 auto;
-  filter: drop-shadow(0 12px 28px rgba(2, 36, 82, 0.35));
+  margin: 0;
+  padding: 12px 24px;
+  border: 4px solid rgba(231, 240, 255, 0.75);
+  border-radius: 999px;
+  background: rgba(7, 37, 77, 0.25);
+  box-shadow: 0 10px 24px rgba(2, 36, 82, 0.25);
 }
 .header-motto {
   flex: 0 0 auto;
@@ -83,7 +94,7 @@ header { background: #0a63c2; color: #fff; padding: 16px; }
   color: #e7f0ff;
   font-size: clamp(16px, 2.4vw, 22px);
   text-align: right;
-  align-self: flex-start;
+  align-self: flex-end;
   line-height: 1.2;
 }
 h1 { margin: 0 0 10px; font-size: 22px; }
