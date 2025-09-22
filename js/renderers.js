@@ -1986,7 +1986,36 @@ function renderJobs(){
 function renderInventory(){
   const content = document.getElementById("content"); if (!content) return;
   content.innerHTML = viewInventory();
-  document.querySelector("tbody")?.addEventListener("input",(e)=>{
+  const rowsTarget = content.querySelector("[data-inventory-rows]");
+  const searchInput = content.querySelector("#inventorySearch");
+  const clearBtn = content.querySelector("#inventorySearchClear");
+
+  const refreshRows = ()=>{
+    if (!rowsTarget) return;
+    const filtered = filterInventoryItems(inventorySearchTerm);
+    rowsTarget.innerHTML = inventoryRowsHTML(filtered);
+  };
+
+  if (searchInput){
+    searchInput.addEventListener("input", ()=>{
+      inventorySearchTerm = searchInput.value;
+      window.inventorySearchTerm = inventorySearchTerm;
+      refreshRows();
+    });
+  }
+
+  if (clearBtn){
+    clearBtn.addEventListener("click", ()=>{
+      if (!inventorySearchTerm) return;
+      inventorySearchTerm = "";
+      window.inventorySearchTerm = "";
+      if (searchInput) searchInput.value = "";
+      refreshRows();
+      searchInput?.focus();
+    });
+  }
+
+  rowsTarget?.addEventListener("input",(e)=>{
     const input = e.target;
     const id = input.getAttribute("data-id");
     const k  = input.getAttribute("data-inv");

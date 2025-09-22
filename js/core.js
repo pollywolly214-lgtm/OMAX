@@ -221,6 +221,9 @@ let tasksAsReq    = window.tasksAsReq;
 let inventory     = window.inventory;
 let cuttingJobs   = window.cuttingJobs;
 
+if (typeof window.inventorySearchTerm !== "string") window.inventorySearchTerm = "";
+let inventorySearchTerm = window.inventorySearchTerm;
+
 /* ================ Jobs editing & render flags ================ */
 if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
 if (typeof window.RENDER_TOTAL !== "number") window.RENDER_TOTAL = null;
