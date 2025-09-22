@@ -217,15 +217,56 @@ function moveNodeSafely(kind, nodeId, target){
     return null;
   }
 
-  function normalizeTaskOrder(mode, catId, parentId){
-    const list = mode === "interval" ? window.tasksInterval : window.tasksAsReq;
+  function gatherSiblings(catId, parentId, excludeId){
     const keyCat = String(catId ?? "");
     const keyParent = String(parentId ?? "");
-    const siblings = list
-      .filter(t => String(t.parentTask ?? "") === keyParent && String(t.cat ?? "") === keyCat)
+    const excludeKey = excludeId != null ? String(excludeId) : null;
+    const siblings = [];
+    for (const list of [window.tasksInterval, window.tasksAsReq]){
+      if (!Array.isArray(list)) continue;
+      for (const task of list){
+        if (!task || task.id == null) continue;
+        if (excludeKey != null && String(task.id) === excludeKey) continue;
+        if (String(task.parentTask ?? "") !== keyParent) continue;
+        if (String(task.cat ?? "") !== keyCat) continue;
+        siblings.push(task);
+      }
+    }
+    return siblings;
+  }
+
+  function normalizeTaskOrder(catId, parentId){
+    const siblings = gatherSiblings(catId, parentId, null)
       .sort((a,b)=> (Number(b.order||0) - Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
     let n = siblings.length;
-    for (const t of siblings){ t.order = n--; }
+    for (const task of siblings){ task.order = n--; }
+    if (siblings.length){
+      const curMax = Number(window._maintOrderCounter) || 0;
+      window._maintOrderCounter = Math.max(curMax, siblings.length);
+    }
+  }
+
+  function nextTaskOrder(catId, parentId, excludeId, place){
+    const siblings = gatherSiblings(catId, parentId, excludeId);
+    if (!siblings.length){
+      return 1;
+    }
+    if (place === "end"){
+      let min = Infinity;
+      for (const sib of siblings){
+        const val = Number(sib.order) || 0;
+        if (val < min) min = val;
+      }
+      if (!isFinite(min)) min = 0;
+      return min - 1;
+    }
+    let max = -Infinity;
+    for (const sib of siblings){
+      const val = Number(sib.order) || 0;
+      if (val > max) max = val;
+    }
+    if (!isFinite(max)) max = 0;
+    return max + 1;
   }
 
   function ensureFolder(catId){
@@ -275,10 +316,10 @@ function moveNodeSafely(kind, nodeId, target){
 
       src.task.parentTask = parentRef.task.id;
       src.task.cat = parentRef.task.cat ?? null;
-      src.task.order = ++window._maintOrderCounter;
+      src.task.order = nextTaskOrder(src.task.cat ?? null, src.task.parentTask ?? null, src.task.id, "end");
 
-      normalizeTaskOrder(src.mode, src.task.cat ?? null, src.task.parentTask ?? null);
-      normalizeTaskOrder(src.mode, originalGroup.cat, originalGroup.parent);
+      normalizeTaskOrder(src.task.cat ?? null, src.task.parentTask ?? null);
+      normalizeTaskOrder(originalGroup.cat, originalGroup.parent);
       return true;
     }
 
@@ -291,8 +332,8 @@ function moveNodeSafely(kind, nodeId, target){
       src.task.parentTask = dest.task.parentTask ?? null;
       src.task.order = (Number(dest.task.order) || 0) + 0.5;
 
-      normalizeTaskOrder(src.mode, dest.task.cat ?? null, dest.task.parentTask ?? null);
-      normalizeTaskOrder(src.mode, originalGroup.cat, originalGroup.parent);
+      normalizeTaskOrder(dest.task.cat ?? null, dest.task.parentTask ?? null);
+      normalizeTaskOrder(originalGroup.cat, originalGroup.parent);
       return true;
     }
 
@@ -302,10 +343,10 @@ function moveNodeSafely(kind, nodeId, target){
 
       src.task.cat = catId ?? null;
       src.task.parentTask = null;
-      src.task.order = ++window._maintOrderCounter;
+      src.task.order = nextTaskOrder(src.task.cat ?? null, null, src.task.id, "end");
 
-      normalizeTaskOrder(src.mode, src.task.cat ?? null, null);
-      normalizeTaskOrder(src.mode, originalGroup.cat, originalGroup.parent);
+      normalizeTaskOrder(src.task.cat ?? null, null);
+      normalizeTaskOrder(originalGroup.cat, originalGroup.parent);
       return true;
     }
 
