@@ -1,7 +1,16 @@
 /* Pump card */
 .pump-card summary { display:flex; align-items:center; gap:8px; }
 .pump-wide { grid-column: 1 / -1; width:100%; max-width:none; justify-self:stretch; margin:0; }
-.pump-grid { display:grid; grid-template-columns: minmax(260px, 320px) minmax(520px, 1fr); gap:16px; margin-top:8px; align-items:stretch; }
+.pump-grid {
+  display:grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap:16px;
+  margin-top:8px;
+  align-items:stretch;
+}
+.pump-grid .pump-col:first-child {
+  max-width:320px;
+}
 .pump-col { background:#fff; border:1px solid #dde3ee; border-radius:10px; padding:12px; min-width:0; }
 .pump-stats { margin-top:6px; display:grid; gap:4px; }
 .pump-stats .lbl { color:#666; display:inline-block; width:80px; }
