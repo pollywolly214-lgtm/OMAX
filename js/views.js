@@ -29,10 +29,6 @@ function viewDashboard(){
     <div class="block" style="grid-column: 1 / -1">
       <h3>Calendar (Current + Next 2 Months)</h3>
 
-      <div class="calendar-toolbar">
-        <button type="button" id="dashboardAddBtn" class="calendar-add-btn" title="Add item">+</button>
-      </div>
-
       <div id="months"></div>
       <div class="small">Hover a due item for actions. Click to pin the bubble.</div>
     </div>

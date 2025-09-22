@@ -35,7 +35,6 @@ function renderDashboard(){
   const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 
   const modal            = document.getElementById("dashboardAddModal");
-  const addBtn           = document.getElementById("dashboardAddBtn");
   const closeBtn         = document.getElementById("dashboardModalClose");
   const taskForm         = document.getElementById("dashTaskForm");
   const downForm         = document.getElementById("dashDownForm");
@@ -63,6 +62,25 @@ function renderDashboard(){
   const taskLastRow      = taskForm?.querySelector("[data-task-last]");
   const taskConditionRow = taskForm?.querySelector("[data-task-condition]");
   const stepSections     = modal ? Array.from(modal.querySelectorAll("[data-step]")) : [];
+  let addContextDateISO  = null;
+
+  function setContextDate(dateISO){
+    addContextDateISO = dateISO || null;
+    if (modal){
+      if (addContextDateISO){
+        modal.setAttribute("data-context-date", addContextDateISO);
+      }else{
+        modal.removeAttribute("data-context-date");
+      }
+    }
+    if (downDateInput){
+      if (addContextDateISO){
+        downDateInput.value = addContextDateISO;
+      }else if (!modal || !modal.classList.contains("is-visible")){
+        downDateInput.value = "";
+      }
+    }
+  }
 
   function ensureDownTimeArray(){
     if (!Array.isArray(window.downTimes)) window.downTimes = [];
@@ -166,6 +184,9 @@ function renderDashboard(){
     }
     if (step === "downtime"){
       refreshDownTimeList();
+      if (addContextDateISO && downDateInput){
+        downDateInput.value = addContextDateISO;
+      }
     }
   }
 
@@ -187,8 +208,17 @@ function renderDashboard(){
     document.body?.classList.remove("modal-open");
   }
 
-  function openModal(step="picker"){
-    showBackdrop(step);
+  function openModal(step="picker", opts={}){
+    if (opts && Object.prototype.hasOwnProperty.call(opts, "dateISO")){
+      setContextDate(opts.dateISO);
+    }else{
+      setContextDate(null);
+    }
+    const desiredStep = opts?.step || step;
+    showBackdrop(desiredStep);
+    if (desiredStep === "downtime" && addContextDateISO && downDateInput){
+      downDateInput.value = addContextDateISO;
+    }
   }
 
   function closeModal(){
@@ -197,7 +227,28 @@ function renderDashboard(){
     resetTaskForm();
     downForm?.reset();
     jobForm?.reset();
+    setContextDate(null);
   }
+
+  window.openDashboardAddPicker = (opts={}) => {
+    const obj = typeof opts === "object" && opts !== null ? opts : {};
+    openModal(obj.step || "picker", obj);
+  };
+
+  window.dashboardRemoveDownTime = removeDownTime;
+
+  downDateInput?.addEventListener("input", ()=>{
+    if (!downDateInput) return;
+    const val = downDateInput.value;
+    addContextDateISO = val || null;
+    if (modal){
+      if (addContextDateISO){
+        modal.setAttribute("data-context-date", addContextDateISO);
+      }else{
+        modal.removeAttribute("data-context-date");
+      }
+    }
+  });
 
   function createSubtaskRow(defaultType){
     if (!subtaskList) return null;
@@ -237,7 +288,6 @@ function renderDashboard(){
     return row;
   }
 
-  addBtn?.addEventListener("click", ()=> openModal("picker"));
   closeBtn?.addEventListener("click", closeModal);
   modal?.addEventListener("click", (e)=>{ if (e.target === modal) closeModal(); });
 

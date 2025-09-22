@@ -13,6 +13,121 @@ function makeBubble(anchor){
   return b;
 }
 
+const DAY_ADD_DELAY_MS = 600;
+let dayAddHoverTimer   = null;
+let dayAddPendingDay   = null;
+let dayAddActiveDay    = null;
+let dayAddBubbleButton = null;
+
+function clearDayAddTimer(){
+  if (dayAddHoverTimer){
+    clearTimeout(dayAddHoverTimer);
+    dayAddHoverTimer = null;
+  }
+}
+
+function destroyDayAddBubble(){
+  if (dayAddBubbleButton){
+    const host = dayAddBubbleButton.parentElement;
+    dayAddBubbleButton.remove();
+    dayAddBubbleButton = null;
+    if (host) host.classList.remove("showing-add-bubble");
+  }
+  if (dayAddActiveDay){
+    dayAddActiveDay.classList.remove("showing-add-bubble");
+    dayAddActiveDay = null;
+  }
+}
+
+function hideDayAddBubble(){
+  destroyDayAddBubble();
+  clearDayAddTimer();
+  dayAddPendingDay = null;
+}
+
+function resetDayAddUI(){
+  clearDayAddTimer();
+  dayAddPendingDay = null;
+  destroyDayAddBubble();
+}
+
+function showDayAddBubble(dayEl){
+  if (!dayEl || dayEl.classList.contains("other-month")) return;
+  const iso = dayEl.dataset.dateIso;
+  if (!iso) return;
+  clearDayAddTimer();
+  dayAddPendingDay = null;
+  if (dayAddActiveDay === dayEl && dayAddBubbleButton) return;
+  destroyDayAddBubble();
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "day-add-bubble";
+  btn.textContent = "+";
+  btn.dataset.dateIso = iso;
+  btn.addEventListener("click", (evt)=>{
+    evt.stopPropagation();
+    const open = window.openDashboardAddPicker;
+    if (typeof open === "function"){
+      open({ dateISO: iso });
+    }
+    hideDayAddBubble();
+  });
+  btn.addEventListener("mouseenter", ()=> clearDayAddTimer());
+  btn.addEventListener("mouseleave", (evt)=>{
+    const toDay = evt.relatedTarget && evt.relatedTarget.closest && evt.relatedTarget.closest(".day");
+    if (toDay === dayEl) return;
+    hideDayAddBubble();
+  });
+
+  dayEl.appendChild(btn);
+  dayEl.classList.add("showing-add-bubble");
+  requestAnimationFrame(()=> btn.classList.add("is-visible"));
+
+  dayAddBubbleButton = btn;
+  dayAddActiveDay    = dayEl;
+}
+
+function scheduleDayAddBubble(dayEl){
+  if (!dayEl || dayEl.classList.contains("other-month")) return;
+  if (!dayEl.dataset.dateIso) return;
+  if (dayAddActiveDay === dayEl) return;
+  if (dayAddPendingDay === dayEl) return;
+  clearDayAddTimer();
+  dayAddPendingDay = dayEl;
+  dayAddHoverTimer = setTimeout(()=>{
+    if (dayAddPendingDay === dayEl) showDayAddBubble(dayEl);
+  }, DAY_ADD_DELAY_MS);
+}
+
+function handleDayMouseOver(e){
+  const day = e.target.closest && e.target.closest(".day");
+  if (!day) return;
+  if (day.classList.contains("other-month")) return;
+  if (!day.dataset.dateIso) return;
+  scheduleDayAddBubble(day);
+}
+
+function handleDayMouseOut(e){
+  const from = e.target.closest && e.target.closest(".day");
+  if (!from) return;
+  const toDay = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(".day");
+  if (toDay === from) return;
+  if (dayAddPendingDay === from){
+    dayAddPendingDay = null;
+    clearDayAddTimer();
+  }
+  const enteringBubble = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(".day-add-bubble");
+  if (enteringBubble && from === dayAddActiveDay) return;
+  if (dayAddActiveDay === from){
+    hideDayAddBubble();
+  }
+}
+
+function handleMonthsMouseLeave(){
+  resetDayAddUI();
+}
+
 function completeTask(taskId){
   const t = tasksInterval.find(x => String(x.id) === String(taskId));
   if (!t) return;
@@ -129,10 +244,53 @@ function showJobBubble(jobId, anchor){
   }
 }
 
+function showDownBubble(dateISO, anchor){
+  hideDayAddBubble();
+  const b = makeBubble(anchor);
+  const parsed = dateISO ? new Date(`${dateISO}T00:00:00`) : null;
+  const label = parsed && !isNaN(parsed.getTime()) ? parsed.toLocaleDateString() : (dateISO || "—");
+  b.innerHTML = `
+    <div class="bubble-title">Down time</div>
+    <div class="bubble-kv"><span>Date:</span><span>${label}</span></div>
+    <div class="bubble-actions">
+      <button type="button" class="danger" data-bbl-remove-down="${dateISO}">Remove</button>
+    </div>`;
+
+  b.querySelector("[data-bbl-remove-down]")?.addEventListener("click", ()=>{
+    const iso = dateISO;
+    let handled = false;
+    if (typeof window.dashboardRemoveDownTime === "function"){
+      window.dashboardRemoveDownTime(iso);
+      handled = true;
+    }else if (Array.isArray(window.downTimes)){
+      const arr = window.downTimes;
+      const idx = arr.findIndex(dt => {
+        if (!dt) return false;
+        if (typeof dt === "string") return dt === iso;
+        return dt.dateISO === iso;
+      });
+      if (idx >= 0){
+        arr.splice(idx,1);
+        if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+        if (typeof toast === "function") toast("Down time removed");
+        if (typeof renderCalendar === "function") renderCalendar();
+        handled = true;
+      }
+    }
+    if (!handled && typeof toast === "function"){
+      toast("Unable to remove down time");
+    }
+    hideBubble();
+  });
+}
+
 function wireCalendarBubbles(){
   const months = $("#months"); if (!months) return;
+  if (months.dataset.bubblesWired === "1") return;
+  months.dataset.bubblesWired = "1";
   let hoverTarget = null;
   months.addEventListener("mouseover", (e)=>{
+    handleDayMouseOver(e);
     const el = e.target.closest("[data-cal-job], [data-cal-task]");
     if (!el || el === hoverTarget) return;
     hoverTarget = el;
@@ -140,21 +298,26 @@ function wireCalendarBubbles(){
     if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el);
   });
   months.addEventListener("mouseout", (e)=>{
+    handleDayMouseOut(e);
     const from = e.target.closest("[data-cal-job], [data-cal-task]");
     const to   = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("[data-cal-job], [data-cal-task]");
     if (from && !to) { hoverTarget = null; hideBubbleSoon(); }
   });
+  months.addEventListener("mouseleave", handleMonthsMouseLeave);
   months.addEventListener("click", (e)=>{
-    const el = e.target.closest("[data-cal-job], [data-cal-task]");
+    const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-down]");
     if (!el) return;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
     if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el);
+    if (el.dataset.calDown) showDownBubble(el.dataset.calDown, el);
   });
 }
 
 function renderCalendar(){
   const container = $("#months");
   if (!container) return;
+  resetDayAddUI();
+  hideBubble();
   container.innerHTML = "";
 
   const dueMap = {};
@@ -215,10 +378,16 @@ function renderCalendar(){
 
     for (let day=1; day<=last.getDate(); day++){
       const date = new Date(first.getFullYear(), first.getMonth(), day); date.setHours(0,0,0,0);
-      const cell = document.createElement("div"); cell.className = "day"; if (date.getTime()===today.getTime()) cell.classList.add("today");
-      cell.innerHTML = `<div class="date">${day}</div>`;
+      const cell = document.createElement("div");
+      cell.className = "day";
+      if (date.getTime()===today.getTime()) cell.classList.add("today");
       const key = ymd(date);
-      if (downTimeSet.has(key)) cell.classList.add("downtime");
+      cell.dataset.dateIso = key;
+      cell.innerHTML = `<div class="date">${day}</div>`;
+      if (downTimeSet.has(key)){
+        cell.classList.add("downtime");
+        cell.dataset.calDown = key;
+      }
       (dueMap[key]||[]).forEach(ev=>{
         const chip = document.createElement("div"); chip.className="event generic cal-task"; chip.dataset.calTask = ev.id; chip.textContent = `${ev.name} (due)`; cell.appendChild(chip);
       });
@@ -229,6 +398,7 @@ function renderCalendar(){
         const tag = document.createElement("div");
         tag.className = "event downtime";
         tag.textContent = "Down time";
+        tag.dataset.calDown = key;
         cell.appendChild(tag);
       }
       grid.appendChild(cell);
