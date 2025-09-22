@@ -178,6 +178,17 @@ function renderCalendar(){
     }
   });
 
+  const downTimeSet = new Set(
+    Array.isArray(window.downTimes)
+      ? window.downTimes.map(dt => {
+          if (!dt) return null;
+          if (typeof dt === "string") return dt;
+          if (typeof dt.dateISO === "string") return dt.dateISO;
+          return null;
+        }).filter(Boolean)
+      : []
+  );
+
   const today = new Date(); today.setHours(0,0,0,0);
   for (let m=0; m<3; m++){
     const first = new Date(today.getFullYear(), today.getMonth()+m, 1);
@@ -207,12 +218,19 @@ function renderCalendar(){
       const cell = document.createElement("div"); cell.className = "day"; if (date.getTime()===today.getTime()) cell.classList.add("today");
       cell.innerHTML = `<div class="date">${day}</div>`;
       const key = ymd(date);
+      if (downTimeSet.has(key)) cell.classList.add("downtime");
       (dueMap[key]||[]).forEach(ev=>{
         const chip = document.createElement("div"); chip.className="event generic cal-task"; chip.dataset.calTask = ev.id; chip.textContent = `${ev.name} (due)`; cell.appendChild(chip);
       });
       (jobsMap[key]||[]).forEach(ev=>{
         const bar = document.createElement("div"); bar.className="job-bar cal-job"; bar.dataset.calJob = ev.id; bar.textContent = ev.name; cell.appendChild(bar);
       });
+      if (downTimeSet.has(key)){
+        const tag = document.createElement("div");
+        tag.className = "event downtime";
+        tag.textContent = "Down time";
+        cell.appendChild(tag);
+      }
       grid.appendChild(cell);
     }
 
