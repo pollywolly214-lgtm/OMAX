@@ -582,6 +582,38 @@ function renderSettings(){
     repairMaintenanceGraph();
   }
 
+  const existingTree = document.getElementById("tree");
+  const prevOpenTasks = new Set();
+  const prevOpenCats = new Set();
+  if (existingTree){
+    existingTree.querySelectorAll('details.task[open]').forEach(el => {
+      const id = el.getAttribute('data-task-id');
+      if (id != null) prevOpenTasks.add(String(id));
+    });
+    existingTree.querySelectorAll('details.cat[open]').forEach(el => {
+      const id = el.getAttribute('data-cat-id');
+      if (id != null) prevOpenCats.add(String(id));
+    });
+  }
+
+  function getForceSet(prop){
+    const raw = window[prop];
+    if (raw instanceof Set) return raw;
+    if (Array.isArray(raw)){
+      const setFromArr = new Set(raw.map(x => String(x)));
+      window[prop] = setFromArr;
+      return setFromArr;
+    }
+    const fresh = new Set();
+    window[prop] = fresh;
+    return fresh;
+  }
+
+  const pendingAutoOpenTasks = new Set(getForceSet('__settingsExplorerForceOpenTasks'));
+  const pendingAutoOpenCats = new Set(getForceSet('__settingsExplorerForceOpenCats'));
+  getForceSet('__settingsExplorerForceOpenTasks').clear();
+  getForceSet('__settingsExplorerForceOpenCats').clear();
+
   // --- Small, compact scoped styles (once) ---
   if (!document.getElementById("settingsExplorerCSS")){
     const st = document.createElement("style");
@@ -913,6 +945,20 @@ function renderSettings(){
   const lastRow = form?.querySelector('[data-form-last]');
   const conditionRow = form?.querySelector('[data-form-condition]');
 
+  const reopenDetails = (kind, ids)=>{
+    if (!tree || !ids || typeof ids.forEach !== 'function') return;
+    const attr = kind === 'task' ? 'data-task-id' : 'data-cat-id';
+    ids.forEach(id => {
+      if (id == null) return;
+      const safe = String(id).replace(/"/g, '\"');
+      const el = tree.querySelector(`details.${kind}[${attr}="${safe}"]`);
+      if (el) el.open = true;
+    });
+  };
+
+  reopenDetails('task', new Set([...prevOpenTasks, ...pendingAutoOpenTasks]));
+  reopenDetails('cat', new Set([...prevOpenCats, ...pendingAutoOpenCats]));
+
   const persist = ()=>{
     if (typeof saveTasks === "function") { try{ saveTasks(); }catch(_){} }
     if (typeof saveCloudDebounced === "function") { try{ saveCloudDebounced(); }catch(_){} }
@@ -970,6 +1016,8 @@ function renderSettings(){
     const price = priceVal === null || priceVal === "" ? null : Number(priceVal);
     const id = genId(name);
     const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
+
+    if (catId) queueAutoOpenCat(catId);
 
     if (mode === "interval"){
       const intervalVal = data.get("taskInterval");
@@ -1089,6 +1137,37 @@ function renderSettings(){
     normalizeTaskOrder(oldCat, oldParent);
     normalizeTaskOrder(task.cat ?? null, task.parentTask ?? null);
     return true;
+  }
+
+  function queueAutoOpenCat(catId){
+    if (catId == null) return;
+    const target = getForceSet('__settingsExplorerForceOpenCats');
+    let current = catId;
+    let guard = 0;
+    while (current != null && guard++ < 100){
+      const key = String(current);
+      target.add(key);
+      const parent = window.settingsFolders.find(f => String(f.id) === key);
+      current = parent && parent.parent != null ? parent.parent : null;
+    }
+  }
+
+  function queueAutoOpenTask(taskId){
+    if (taskId == null) return;
+    const tasksSet = getForceSet('__settingsExplorerForceOpenTasks');
+    let current = taskId;
+    let guard = 0;
+    while (current != null && guard++ < 100){
+      const key = String(current);
+      tasksSet.add(key);
+      const meta = findTaskMeta(current);
+      if (meta && meta.task){
+        if (meta.task.cat != null) queueAutoOpenCat(meta.task.cat);
+        current = meta.task.parentTask != null ? meta.task.parentTask : null;
+      }else{
+        current = null;
+      }
+    }
   }
 
   function updateDueChip(holder, task){
@@ -1283,6 +1362,14 @@ function renderSettings(){
       if (dzBeforeTask){
         const beforeId = dzBeforeTask.getAttribute('data-drop-before-task');
         if (beforeId && typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { beforeTask: { id: beforeId } })){
+          const beforeMeta = findTaskMeta(beforeId);
+          if (beforeMeta && beforeMeta.task){
+            if (beforeMeta.task.parentTask != null){
+              queueAutoOpenTask(beforeMeta.task.parentTask);
+            }else if (beforeMeta.task.cat != null){
+              queueAutoOpenCat(beforeMeta.task.cat);
+            }
+          }
           persist();
           renderSettings();
         }
@@ -1295,11 +1382,13 @@ function renderSettings(){
         const catId = catAttr === '' ? null : catAttr;
         if (parentId){
           if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
+            queueAutoOpenTask(parentId);
             persist();
             renderSettings();
           }
         }else{
           if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
+            if (catId != null && catId !== '') queueAutoOpenCat(catId);
             persist();
             renderSettings();
           }
@@ -1316,6 +1405,7 @@ function renderSettings(){
       if (dzCat){
         const catId = dzCat.getAttribute('data-drop-into-cat');
         if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
+          if (catId != null && catId !== '') queueAutoOpenCat(catId);
           persist();
           renderSettings();
         }
@@ -1324,6 +1414,7 @@ function renderSettings(){
       if (dzTask){
         const parentId = dzTask.getAttribute('data-drop-into-task');
         if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
+          queueAutoOpenTask(parentId);
           persist();
           renderSettings();
         }
@@ -1332,6 +1423,7 @@ function renderSettings(){
       if (onTaskSummary){
         const parentId = onTaskSummary.closest('details.task')?.getAttribute('data-task-id');
         if (parentId && typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
+          queueAutoOpenTask(parentId);
           persist();
           renderSettings();
         }
@@ -1340,6 +1432,7 @@ function renderSettings(){
       if (onCatSummary){
         const catId = onCatSummary.closest('details.cat')?.getAttribute('data-cat-id');
         if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
+          if (catId != null && catId !== '') queueAutoOpenCat(catId);
           persist();
           renderSettings();
         }
