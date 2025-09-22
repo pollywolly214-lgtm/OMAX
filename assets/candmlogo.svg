@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 180" role="img" aria-labelledby="title desc">
+  <title id="title">C&amp;M Concrete Precast and Construction logo</title>
+  <desc id="desc">Rounded rectangular badge with C and M initials in a blue pill and stacked concrete/precast text.</desc>
+  <rect x="8" y="8" width="804" height="164" rx="36" fill="#ffffff" />
+  <rect x="70" y="58" width="216" height="72" rx="36" fill="#0a63c2" />
+  <text x="178" y="110" fill="#ffffff" font-family="'Arial Black','Segoe UI',sans-serif" font-size="60" font-weight="700" text-anchor="middle">C&amp;M</text>
+  <text x="310" y="94" fill="#0a63c2" font-family="'Arial Black','Segoe UI',sans-serif" font-size="48" font-weight="700" text-anchor="start" letter-spacing="0.04em">CONCRETE</text>
+  <text x="310" y="132" fill="#0a63c2" font-family="'Arial','Segoe UI',sans-serif" font-size="26" font-weight="700" text-anchor="start" letter-spacing="0.08em">PRECAST &amp; CONSTRUCTION</text>
+</svg>
