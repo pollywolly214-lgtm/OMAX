@@ -151,7 +151,8 @@ header { background: #0a63c2; color: #fff; padding: 0 16px 4px; }
 }
 .header-bar h1 {
   margin: 0;
-  font-size: 20px;
+  font-size: clamp(26px, 4vw, 46px);
+  line-height: 1.15;
   flex: 1 1 240px;
 }
 .header-brand {
