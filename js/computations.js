@@ -27,11 +27,14 @@ function nextDue(task){
 }
 
 /* ------------ Cutting jobs efficiency model ---------------
- * plannedHours = j.estimateHours
- * expectedHoursSoFar = min(planned, DAILY_HOURS * daysElapsed)
- * actualHoursSoFar   = manual override with carry-forward 8h/day; else AUTO 8h/day
- * deltaHours = actual - expected  ( + ahead / - behind )
- * gainLoss   = deltaHours * JOB_RATE_PER_HOUR
+ * Baseline assumes 8 hr/day progress beginning on the start date.
+ * plannedHours        = j.estimateHours
+ * expectedHoursSoFar  = min(planned, DAILY_HOURS * daysElapsed)
+ * expectedRemaining   = max(0, planned - expectedHoursSoFar)
+ * actualHoursSoFar    = manual override with carry-forward 8h/day; else AUTO 8h/day
+ * actualRemaining     = max(0, planned - actualHoursSoFar)
+ * deltaHours          = expectedRemaining - actualRemaining  ( + ahead / - behind )
+ * gainLoss            = deltaHours * JOB_RATE_PER_HOUR
  */
 
 
@@ -45,6 +48,8 @@ function computeJobEfficiency(job){
     rate: JOB_RATE_PER_HOUR,
     expectedHours: 0,
     actualHours: 0,
+    expectedRemaining: 0,
+    actualRemaining: 0,
     deltaHours: 0,
     gainLoss: 0,
     daysElapsed: 0,
@@ -53,18 +58,17 @@ function computeJobEfficiency(job){
     usedMachineTotals: false,
     usedFromStartAuto: false
   };
-  if (!job || !job.startISO || !job.dueISO || planned <= 0) return result;
+  if (!job || !job.startISO || planned <= 0) return result;
 
   // Dates
   const start = new Date(job.startISO); start.setHours(0,0,0,0);
-  const due   = new Date(job.dueISO);   due.setHours(0,0,0,0);
   const today = new Date();              today.setHours(0,0,0,0);
-  const asOf  = (today < due) ? today : due;
 
-  // Schedule expectations (baseline = 8 hr/day)
-  result.totalDays   = Math.max(0, Math.floor((due - start)/(24*60*60*1000)) + 1);
-  result.daysElapsed = (asOf < start) ? 0 : Math.max(0, Math.floor((asOf - start)/(24*60*60*1000)) + 1);
+  const MS_PER_DAY = 24*60*60*1000;
+  result.totalDays   = planned > 0 ? Math.max(1, Math.ceil(planned / DAILY_HOURS)) : 0;
+  result.daysElapsed = (today < start) ? 0 : Math.max(0, Math.floor((today - start)/MS_PER_DAY) + 1);
   result.expectedHours = Math.min(planned, result.daysElapsed * DAILY_HOURS);
+  result.expectedRemaining = Math.max(0, planned - result.expectedHours);
 
   // Helper: machine total hours on/before a given date (00:00)
   function getHoursAt(dateISO){
@@ -85,10 +89,10 @@ function computeJobEfficiency(job){
     }catch{ return null; }
   }
 
-  // 1) If there is any manual log on/before "asOf", use the latest one EXACTLY (no auto add-on).
+  // 1) If there is any manual log on/before today, use the latest one EXACTLY (no auto add-on).
   const manualLogs = Array.isArray(job.manualLogs) ? job.manualLogs : [];
   const manualUpTo = manualLogs
-    .filter(m => m && m.dateISO && new Date(m.dateISO+"T00:00:00") <= asOf)
+    .filter(m => m && m.dateISO && new Date(m.dateISO+"T00:00:00") <= today)
     .sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
 
   if (manualUpTo.length){
@@ -110,9 +114,9 @@ function computeJobEfficiency(job){
     }
   }
 
-  // Delta & $
-  result.deltaHours = result.actualHours - result.expectedHours;   // + ahead / − behind
-  result.gainLoss   = result.deltaHours * result.rate;
+  result.actualRemaining = Math.max(0, planned - result.actualHours);
+  result.deltaHours      = result.expectedRemaining - result.actualRemaining;   // + ahead / − behind
+  result.gainLoss        = result.deltaHours * result.rate;
 
   return result;
 }
@@ -122,7 +126,9 @@ function computeRequiredDaily(job){
   if (!job || !job.startISO || !job.dueISO) return { remainingHours:0, remainingDays:0, requiredPerDay:0 };
   const eff = computeJobEfficiency(job);
   const planned = Number(job.estimateHours) || 0;
-  const remainingHours = Math.max(0, planned - eff.actualHours);
+  const remainingHours = eff.actualRemaining != null
+    ? eff.actualRemaining
+    : Math.max(0, planned - eff.actualHours);
 
   const today = new Date(); today.setHours(0,0,0,0);
   const due   = new Date(job.dueISO); due.setHours(0,0,0,0);

@@ -80,8 +80,23 @@ function showJobBubble(jobId, anchor){
     }
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
-    const sign  = eff.gainLoss >= 0 ? "+" : "−";
-    const money = Math.abs(eff.gainLoss).toFixed(2);
+    const baselineRemain = eff.expectedRemaining != null
+      ? eff.expectedRemaining
+      : Math.max(0, (Number(j.estimateHours)||0) - (eff.expectedHours||0));
+    const actualRemain = eff.actualRemaining != null
+      ? eff.actualRemaining
+      : Math.max(0, (Number(j.estimateHours)||0) - (eff.actualHours||0));
+    const deltaRemain = baselineRemain - actualRemain;
+    const EPS = 0.05;
+    const ahead = deltaRemain > EPS;
+    const behind = deltaRemain < -EPS;
+    const deltaSummary = ahead ? "Ahead" : (behind ? "Behind" : "On pace");
+    const deltaDetail = (ahead || behind)
+      ? `${deltaRemain > 0 ? "+" : "−"}${Math.abs(deltaRemain).toFixed(1)} hr`
+      : "";
+    const showMoney = (ahead || behind) ? eff.gainLoss : 0;
+    const sign  = showMoney > 0 ? "+" : (showMoney < 0 ? "−" : "");
+    const money = Math.abs(showMoney).toFixed(2);
     const reqCell = (req.requiredPerDay === Infinity)
       ? `<span class="danger">Past due / no days remaining</span>`
       : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
@@ -95,8 +110,8 @@ function showJobBubble(jobId, anchor){
       <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
       <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
       <div class="bubble-kv"><span>Schedule:</span><span>${startTxt} → ${dueTxt}</span></div>
-      <div class="bubble-kv"><span>Hours Δ:</span><span>${eff.deltaHours>=0?"+":""}${eff.deltaHours.toFixed(1)} (exp ${eff.expectedHours.toFixed(1)} vs act ${eff.actualHours.toFixed(1)})</span></div>
-      <div class="bubble-kv"><span>Gain/Loss:</span><span>${sign}$${money} @ $${eff.rate}/hr</span></div>
+      <div class="bubble-kv"><span>Remaining:</span><span>${actualRemain.toFixed(1)} hr (baseline ${baselineRemain.toFixed(1)} hr)</span></div>
+      <div class="bubble-kv"><span>Cost impact:</span><span>${deltaSummary}${deltaDetail ? ` ${deltaDetail}` : ""} → ${sign}$${money} @ $${eff.rate}/hr</span></div>
       <div class="bubble-kv"><span>Required/day:</span><span>${reqCell}</span></div>
       <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
       ${noteAuto}
