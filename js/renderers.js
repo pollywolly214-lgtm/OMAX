@@ -277,6 +277,18 @@ function renderDashboard(){
     openModal(obj.step || "picker", obj);
   };
 
+  if (Array.isArray(window.__pendingDashboardAddRequests) && window.__pendingDashboardAddRequests.length){
+    const queue = window.__pendingDashboardAddRequests.splice(0);
+    queue.forEach(req => {
+      try {
+        const obj = typeof req === "object" && req !== null ? req : {};
+        openModal(obj.step || "picker", obj);
+      } catch (err){
+        console.error("Failed to open dashboard add picker", err);
+      }
+    });
+  }
+
   window.dashboardRemoveDownTime = removeDownTime;
 
   downDateInput?.addEventListener("input", ()=>{

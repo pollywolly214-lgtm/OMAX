@@ -2,6 +2,17 @@
 let bubbleTimer = null;
 function hideBubble(){ const b = document.getElementById("bubble"); if (b) b.remove(); }
 function hideBubbleSoon(){ clearTimeout(bubbleTimer); bubbleTimer = setTimeout(hideBubble, 180); }
+function triggerDashboardAddPicker(opts){
+  const detail = (opts && typeof opts === "object") ? { ...opts } : {};
+  if (typeof window.openDashboardAddPicker === "function"){
+    window.openDashboardAddPicker(detail);
+    return;
+  }
+  if (!Array.isArray(window.__pendingDashboardAddRequests)){
+    window.__pendingDashboardAddRequests = [];
+  }
+  window.__pendingDashboardAddRequests.push(detail);
+}
 function makeBubble(anchor){
   hideBubble();
   const b = document.createElement("div"); b.id = "bubble"; b.className = "bubble"; document.body.appendChild(b);
@@ -231,9 +242,7 @@ function renderCalendar(){
       addBtn.setAttribute("aria-label", `Add item on ${date.toDateString()}`);
       addBtn.addEventListener("click", (ev)=>{
         ev.stopPropagation();
-        if (typeof window.openDashboardAddPicker === "function"){
-          window.openDashboardAddPicker({ dateISO: key, step: "task" });
-        }
+        triggerDashboardAddPicker({ dateISO: key, step: "task" });
       });
       addBtn.addEventListener("focus", ()=> addBtn.classList.add("is-visible"));
       addBtn.addEventListener("blur", ()=> addBtn.classList.remove("is-visible"));
