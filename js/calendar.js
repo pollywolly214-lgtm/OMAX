@@ -1,16 +1,89 @@
 /* ================== CALENDAR & BUBBLES ===================== */
 let bubbleTimer = null;
-function hideBubble(){ const b = document.getElementById("bubble"); if (b) b.remove(); }
+function hideBubble(){
+  clearTimeout(bubbleTimer);
+  const b = document.getElementById("bubble");
+  if (!b) return;
+  if (typeof b.__reposition === "function"){
+    window.removeEventListener("resize", b.__reposition);
+    window.removeEventListener("scroll", b.__reposition);
+  }
+  delete b.__reposition;
+  b.remove();
+}
 function hideBubbleSoon(){ clearTimeout(bubbleTimer); bubbleTimer = setTimeout(hideBubble, 180); }
+function positionBubble(bubble, anchor){
+  if (!bubble || !anchor) return;
+  if (!document.body.contains(anchor)){ hideBubble(); return; }
+  const margin = 12;
+  const rect = anchor.getBoundingClientRect();
+  const docEl = document.documentElement;
+  const viewportLeft = window.scrollX || docEl.scrollLeft || 0;
+  const viewportTop = window.scrollY || docEl.scrollTop || 0;
+  const viewportWidth = docEl.clientWidth || window.innerWidth || 0;
+  const viewportHeight = window.innerHeight || docEl.clientHeight || 0;
+  const bubbleRect = bubble.getBoundingClientRect();
+  const bubbleWidth = bubbleRect.width || bubble.offsetWidth || 0;
+  const bubbleHeight = bubbleRect.height || bubble.offsetHeight || 0;
+  let left = rect.left + viewportLeft;
+  if (viewportWidth > 0){
+    const maxLeft = viewportLeft + viewportWidth - bubbleWidth - margin;
+    if (isFinite(maxLeft)) left = Math.min(left, maxLeft);
+  }
+  left = Math.max(left, viewportLeft + margin);
+  let top = rect.bottom + viewportTop + margin;
+  const maxTop = viewportTop + viewportHeight - bubbleHeight - margin;
+  let placeAbove = false;
+  if (viewportHeight > 0 && top > maxTop && rect.top + viewportTop - bubbleHeight - margin >= viewportTop + margin){
+    top = rect.top + viewportTop - bubbleHeight - margin;
+    placeAbove = true;
+  }else{
+    if (viewportHeight > 0 && top > maxTop) top = maxTop;
+    if (top < viewportTop + margin) top = viewportTop + margin;
+  }
+  if (!isFinite(left)) left = viewportLeft + margin;
+  if (!isFinite(top)) top = viewportTop + margin;
+  bubble.classList.toggle("bubble-above", placeAbove);
+  bubble.style.left = `${left}px`;
+  bubble.style.top  = `${top}px`;
+  const effectiveWidth = bubbleWidth || bubble.getBoundingClientRect().width || 0;
+  const anchorCenter = rect.left + rect.width / 2 + viewportLeft;
+  let arrowLeft = anchorCenter - left - 6;
+  const arrowMin = 12;
+  const arrowMax = effectiveWidth ? effectiveWidth - 12 : null;
+  if (arrowMax != null){
+    if (arrowMax <= arrowMin){
+      arrowLeft = (effectiveWidth || 0) / 2;
+    }else{
+      arrowLeft = Math.min(Math.max(arrowLeft, arrowMin), arrowMax);
+    }
+  }else{
+    arrowLeft = Math.max(arrowMin, (effectiveWidth || 0) / 2);
+  }
+  if (!isFinite(arrowLeft)) arrowLeft = Math.max(arrowMin, (effectiveWidth || 0) / 2);
+  bubble.style.setProperty("--bubble-arrow-left", `${arrowLeft}px`);
+  bubble.style.visibility = "visible";
+}
 function makeBubble(anchor){
   hideBubble();
-  const b = document.createElement("div"); b.id = "bubble"; b.className = "bubble"; document.body.appendChild(b);
-  const rect = anchor.getBoundingClientRect();
-  b.style.left = `${rect.left + window.scrollX}px`;
-  b.style.top  = `${rect.bottom + window.scrollY}px`;
+  if (!anchor) return null;
+  const b = document.createElement("div");
+  b.id = "bubble";
+  b.className = "bubble";
+  b.style.visibility = "hidden";
+  document.body.appendChild(b);
+  const reposition = ()=>positionBubble(b, anchor);
+  b.__reposition = reposition;
+  window.addEventListener("resize", reposition);
+  window.addEventListener("scroll", reposition);
   b.addEventListener("mouseenter", ()=>clearTimeout(bubbleTimer));
   b.addEventListener("mouseleave", hideBubbleSoon);
   return b;
+}
+function scheduleBubblePosition(bubble, anchor){
+  if (!bubble || !anchor) return;
+  positionBubble(bubble, anchor);
+  requestAnimationFrame(()=>positionBubble(bubble, anchor));
 }
 
 function completeTask(taskId){
@@ -29,6 +102,7 @@ function showTaskBubble(taskId, anchor){
   if (!t) return;
   const nd = nextDue(t);
   const b  = makeBubble(anchor);
+  if (!b) return;
   b.innerHTML = `
     <div class="bubble-title">${t.name}</div>
     <div class="bubble-kv"><span>Interval:</span><span>${t.interval} hrs</span></div>
@@ -68,65 +142,68 @@ function showTaskBubble(taskId, anchor){
     hideBubble();
     openSettingsAndReveal(taskId);
   });
+  scheduleBubblePosition(b, anchor);
 }
 
 function showJobBubble(jobId, anchor){
   const b = makeBubble(anchor);
+  if (!b) return;
   try{
     const j = cuttingJobs.find(x => String(x.id) === String(jobId));
     if (!j){
       b.innerHTML = `<div class="bubble-title">Job</div><div class="bubble-kv"><span>Info:</span><span>Job not found (id: ${jobId})</span></div>`;
-      return;
+    }else{
+      const eff = computeJobEfficiency(j);
+      const req = computeRequiredDaily(j);
+      const baselineRemain = eff.expectedRemaining != null
+        ? eff.expectedRemaining
+        : Math.max(0, (Number(j.estimateHours)||0) - (eff.expectedHours||0));
+      const actualRemain = eff.actualRemaining != null
+        ? eff.actualRemaining
+        : Math.max(0, (Number(j.estimateHours)||0) - (eff.actualHours||0));
+      const deltaRemain = baselineRemain - actualRemain;
+      const EPS = 0.05;
+      const ahead = deltaRemain > EPS;
+      const behind = deltaRemain < -EPS;
+      const deltaSummary = ahead ? "Ahead" : (behind ? "Behind" : "On pace");
+      const deltaDetail = (ahead || behind)
+        ? `${deltaRemain > 0 ? "+" : "−"}${Math.abs(deltaRemain).toFixed(1)} hr`
+        : "";
+      const showMoney = (ahead || behind) ? eff.gainLoss : 0;
+      const sign  = showMoney > 0 ? "+" : (showMoney < 0 ? "−" : "");
+      const money = Math.abs(showMoney).toFixed(2);
+      const reqCell = (req.requiredPerDay === Infinity)
+        ? `<span class="danger">Past due / no days remaining</span>`
+        : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
+      const noteAuto = eff.usedAutoFromManual
+        ? `<div class="small"><strong>Auto from last manual</strong>: continuing at ${DAILY_HOURS} hr/day.</div>`
+        : (eff.usedFromStartAuto ? `<div class="small"><strong>Auto</strong>: assuming ${DAILY_HOURS} hr/day from start.</div>` :``);
+      const startTxt = j.startISO ? new Date(j.startISO).toDateString() : "—";
+      const dueTxt   = j.dueISO   ? new Date(j.dueISO).toDateString()   : "—";
+      b.innerHTML = `
+        <div class="bubble-title">${j.name}</div>
+        <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
+        <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
+        <div class="bubble-kv"><span>Schedule:</span><span>${startTxt} → ${dueTxt}</span></div>
+        <div class="bubble-kv"><span>Remaining:</span><span>${actualRemain.toFixed(1)} hr (baseline ${baselineRemain.toFixed(1)} hr)</span></div>
+        <div class="bubble-kv"><span>Cost impact:</span><span>${deltaSummary}${deltaDetail ? ` ${deltaDetail}` : ""} → ${sign}$${money} @ $${eff.rate}/hr</span></div>
+        <div class="bubble-kv"><span>Required/day:</span><span>${reqCell}</span></div>
+        <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
+        ${noteAuto}
+        <div class="bubble-actions">
+          <button type="button" data-bbl-edit-job="${j.id}">Edit</button>
+          <button type="button" class="danger" data-bbl-remove-job="${j.id}">Remove</button>
+        </div>`;
+      b.querySelector("[data-bbl-remove-job]")?.addEventListener("click", ()=>{
+        cuttingJobs = cuttingJobs.filter(x=>String(x.id)!==String(j.id)); saveCloudDebounced(); toast("Removed"); hideBubble(); route();
+      });
+      b.querySelector("[data-bbl-edit-job]")?.addEventListener("click", ()=>{ hideBubble(); openJobsEditor(j.id); });
     }
-    const eff = computeJobEfficiency(j);
-    const req = computeRequiredDaily(j);
-    const baselineRemain = eff.expectedRemaining != null
-      ? eff.expectedRemaining
-      : Math.max(0, (Number(j.estimateHours)||0) - (eff.expectedHours||0));
-    const actualRemain = eff.actualRemaining != null
-      ? eff.actualRemaining
-      : Math.max(0, (Number(j.estimateHours)||0) - (eff.actualHours||0));
-    const deltaRemain = baselineRemain - actualRemain;
-    const EPS = 0.05;
-    const ahead = deltaRemain > EPS;
-    const behind = deltaRemain < -EPS;
-    const deltaSummary = ahead ? "Ahead" : (behind ? "Behind" : "On pace");
-    const deltaDetail = (ahead || behind)
-      ? `${deltaRemain > 0 ? "+" : "−"}${Math.abs(deltaRemain).toFixed(1)} hr`
-      : "";
-    const showMoney = (ahead || behind) ? eff.gainLoss : 0;
-    const sign  = showMoney > 0 ? "+" : (showMoney < 0 ? "−" : "");
-    const money = Math.abs(showMoney).toFixed(2);
-    const reqCell = (req.requiredPerDay === Infinity)
-      ? `<span class="danger">Past due / no days remaining</span>`
-      : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
-    const noteAuto = eff.usedAutoFromManual
-      ? `<div class="small"><strong>Auto from last manual</strong>: continuing at ${DAILY_HOURS} hr/day.</div>`
-      : (eff.usedFromStartAuto ? `<div class="small"><strong>Auto</strong>: assuming ${DAILY_HOURS} hr/day from start.</div>` : ``);
-    const startTxt = j.startISO ? new Date(j.startISO).toDateString() : "—";
-    const dueTxt   = j.dueISO   ? new Date(j.dueISO).toDateString()   : "—";
-    b.innerHTML = `
-      <div class="bubble-title">${j.name}</div>
-      <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
-      <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
-      <div class="bubble-kv"><span>Schedule:</span><span>${startTxt} → ${dueTxt}</span></div>
-      <div class="bubble-kv"><span>Remaining:</span><span>${actualRemain.toFixed(1)} hr (baseline ${baselineRemain.toFixed(1)} hr)</span></div>
-      <div class="bubble-kv"><span>Cost impact:</span><span>${deltaSummary}${deltaDetail ? ` ${deltaDetail}` : ""} → ${sign}$${money} @ $${eff.rate}/hr</span></div>
-      <div class="bubble-kv"><span>Required/day:</span><span>${reqCell}</span></div>
-      <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
-      ${noteAuto}
-      <div class="bubble-actions">
-        <button type="button" data-bbl-edit-job="${j.id}">Edit</button>
-        <button type="button" class="danger" data-bbl-remove-job="${j.id}">Remove</button>
-      </div>`;
-    b.querySelector("[data-bbl-remove-job]")?.addEventListener("click", ()=>{
-      cuttingJobs = cuttingJobs.filter(x=>String(x.id)!==String(j.id)); saveCloudDebounced(); toast("Removed"); hideBubble(); route();
-    });
-    b.querySelector("[data-bbl-edit-job]")?.addEventListener("click", ()=>{ hideBubble(); openJobsEditor(j.id); });
   }catch(err){
     console.error(err);
     b.innerHTML = `<div class="bubble-title">Error</div><div class="bubble-kv"><span>Details:</span><span>${err.message||err}</span></div>`;
   }
+  scheduleBubblePosition(b, anchor);
 }
 
 function wireCalendarBubbles(){
