@@ -1,6 +1,7 @@
 /* =================== PUMP EFFICIENCY ======================= */
 window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, entries:[] }; // [{dateISO:"yyyy-mm-dd", rpm:number}]
 window.pumpChartRange = window.pumpChartRange || "3m";
+window.pumpChartExpanded = window.pumpChartExpanded || false;
 
 const DAY_MS = 24*60*60*1000;
 const PUMP_MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -32,6 +33,17 @@ function pumpFormatMonth(date){
 function pumpFormatMonthYear(date){
   const yr = String(date.getFullYear()).slice(-2);
   return `${pumpFormatMonth(date)} '${yr}`;
+}
+
+function pumpSubtractMonths(date, months){
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const day = date.getDate();
+  const anchor = new Date(year, month, 1);
+  anchor.setMonth(anchor.getMonth() - months);
+  const maxDay = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate();
+  anchor.setDate(Math.min(day, maxDay));
+  return anchor;
 }
 
 function upsertPumpEntry(dateISO, rpm){
@@ -66,11 +78,11 @@ function pumpRangeCutoff(latestDate, range){
   const cutoff = new Date(latestDate.getTime());
   switch(range){
     case "1w": cutoff.setDate(cutoff.getDate() - 6); break;
-    case "1m": cutoff.setMonth(cutoff.getMonth() - 1); break;
-    case "3m": cutoff.setMonth(cutoff.getMonth() - 3); break;
-    case "6m": cutoff.setMonth(cutoff.getMonth() - 6); break;
-    case "1y": cutoff.setFullYear(cutoff.getFullYear() - 1); break;
-    default: cutoff.setMonth(cutoff.getMonth() - 3); break;
+    case "1m": return pumpSubtractMonths(latestDate, 1);
+    case "3m": return pumpSubtractMonths(latestDate, 3);
+    case "6m": return pumpSubtractMonths(latestDate, 6);
+    case "1y": return pumpSubtractMonths(latestDate, 12);
+    default: return pumpSubtractMonths(latestDate, 3);
   }
   return cutoff;
 }
@@ -84,19 +96,6 @@ function pumpFilterEntriesByRange(entries, range){
     const d = new Date(entry.dateISO + "T00:00:00");
     return d >= cutoff;
   });
-}
-
-function pumpAdvanceCursor(range, cursor){
-  const next = new Date(cursor.getTime());
-  switch(range){
-    case "1w": next.setDate(next.getDate() + 1); break;
-    case "1m": next.setDate(next.getDate() + 7); break;
-    case "3m": next.setDate(next.getDate() + 14); break;
-    case "6m": next.setMonth(next.getMonth() + 1); break;
-    case "1y": next.setMonth(next.getMonth() + 1); break;
-    default: next.setDate(next.getDate() + 14); break;
-  }
-  return next;
 }
 
 function pumpTickLabel(range, index, date, startDate, endDate, isFinal){
@@ -144,24 +143,32 @@ function pumpBuildTimeTicks(range, startTime, endTime){
   const startDate = new Date(startTime);
   const endDate = new Date(endTime);
   const unitCap = PUMP_RANGE_UNIT_COUNT[range] || null;
-  let cursor = new Date(startDate.getTime());
-  let index = 0;
-  const epsilon = 60*60*1000; // 1 hour tolerance
-  const maxIterations = 200;
-  while (cursor.getTime() <= endTime + epsilon && index < maxIterations){
-    const info = pumpTickLabel(range, index, cursor, startDate, endDate, Math.abs(cursor.getTime() - endTime) <= epsilon);
-    ticks.push({ time: cursor.getTime(), label: info.label, subLabel: info.subLabel });
-    if (unitCap && ticks.length >= Math.max(1, unitCap - 1)) break;
-    const next = pumpAdvanceCursor(range, cursor);
-    if (next.getTime() <= cursor.getTime()) break;
-    cursor = next;
-    index++;
+  if (unitCap && unitCap > 0){
+    const divisions = unitCap > 1 ? unitCap - 1 : 1;
+    const span = endTime - startTime;
+    let prevTime = null;
+    for (let i = 0; i < unitCap; i++){
+      const ratio = divisions ? (i / divisions) : 0;
+      let time;
+      if (i === 0) time = startTime;
+      else if (i === unitCap - 1) time = endTime;
+      else {
+        time = Math.round(startTime + span * ratio);
+        if (time <= startTime) time = startTime + 1;
+        if (time >= endTime) time = endTime - 1;
+      }
+      if (prevTime != null && time <= prevTime) time = Math.min(endTime, prevTime + 1);
+      const date = new Date(time);
+      const info = pumpTickLabel(range, i, date, startDate, endDate, i === unitCap - 1);
+      ticks.push({ time, label: info.label, subLabel: info.subLabel });
+      prevTime = time;
+    }
+    return ticks;
   }
-  const last = ticks[ticks.length - 1];
-  if (!last || Math.abs(last.time - endTime) > epsilon){
-    const endInfo = pumpTickLabel(range, ticks.length, endDate, startDate, endDate, true);
-    ticks.push({ time: endTime, label: endInfo.label, subLabel: endInfo.subLabel });
-  }
+  const startInfo = pumpTickLabel(range, 0, startDate, startDate, endDate, false);
+  ticks.push({ time: startTime, label: startInfo.label, subLabel: startInfo.subLabel });
+  const endInfo = pumpTickLabel(range, 1, endDate, startDate, endDate, true);
+  ticks.push({ time: endTime, label: endInfo.label, subLabel: endInfo.subLabel });
   return ticks;
 }
 
@@ -171,9 +178,13 @@ function viewPumpWidget(){
   const col    = pumpColorFor(pct);
   const baselineVal = pumpEff.baselineRPM ?? "";
   const todayISO    = new Date().toISOString().slice(0,10);
-  const latestTxt   = latest ? `${latest.rpm} RPM on ${latest.dateISO}` : "—";
+  const latestTxt   = latest ? `${latest.rpm} RPM (${latest.dateISO})` : "—";
   const rangeValue  = window.pumpChartRange || "3m";
   const rangeOptions = PUMP_RANGE_OPTIONS.map(opt => `<option value="${opt.value}" ${opt.value===rangeValue?"selected":""}>Last ${opt.label}</option>`).join("");
+  const expanded = window.pumpChartExpanded === true;
+  const wrapCls = expanded ? "pump-chart-wrap pump-chart-wrap-expanded" : "pump-chart-wrap";
+  const expandLabel = expanded ? "Shrink" : "Expand";
+  const expandIcon = expanded ? "⤡" : "⤢";
   return `
   <details class="block pump-card" open>
     <summary><b>Pump Efficiency</b> <span class="chip ${col.cls}">${col.label}</span></summary>
@@ -201,8 +212,9 @@ function viewPumpWidget(){
           <label for="pumpRange">Timeframe:</label>
           <select id="pumpRange">${rangeOptions}</select>
         </div>
-        <div class="pump-chart-wrap">
-          <canvas id="pumpChart" height="240"></canvas>
+        <div class="${wrapCls}">
+          <canvas id="pumpChart" height="${expanded ? 360 : 240}"></canvas>
+          <button type="button" class="pump-expand-btn" data-expanded="${expanded}" title="${expandLabel} chart">${expandIcon} ${expandLabel}</button>
         </div>
         <div class="pump-legend small muted">
           <span>Color codes:</span>
@@ -214,12 +226,14 @@ function viewPumpWidget(){
         </div>
       </div>
     </div>
-  </details>`;
+  </details>
+  ${expanded ? '<div class="pump-chart-backdrop" data-pump-backdrop></div>' : ''}`;
 }
 function renderPumpWidget(){
   const host = document.getElementById("pump-widget");
   if (!host) return;
   host.innerHTML = viewPumpWidget();
+  document.body.classList.toggle("pump-chart-expanded", !!window.pumpChartExpanded);
   document.getElementById("pumpBaselineForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const rpm = Number(document.getElementById("pumpBaselineRPM").value);
@@ -238,8 +252,15 @@ function renderPumpWidget(){
   const canvas = document.getElementById("pumpChart");
   const wrap   = document.querySelector(".pump-chart-wrap");
   if (canvas && wrap){
-    const targetWidth = Math.max(320, Math.floor(wrap.clientWidth - 8));
+    const rect = wrap.getBoundingClientRect();
+    const targetWidth = Math.max(320, Math.floor((rect.width || wrap.clientWidth || canvas.width) - 8));
     if (targetWidth && canvas.width !== targetWidth) canvas.width = targetWidth;
+    const expanded = !!window.pumpChartExpanded;
+    let targetHeight = expanded ? Math.max(320, Math.floor((window.innerHeight || 720) * 0.6)) : 240;
+    if (expanded && rect.height){
+      targetHeight = Math.max(targetHeight, Math.floor(rect.height - 96));
+    }
+    if (canvas.height !== targetHeight) canvas.height = targetHeight;
   }
   const rangeSelect = document.getElementById("pumpRange");
   if (rangeSelect){
@@ -249,6 +270,16 @@ function renderPumpWidget(){
       drawPumpChart(canvas, window.pumpChartRange);
     });
   }
+  const expandBtn = document.querySelector(".pump-expand-btn");
+  expandBtn?.addEventListener("click", ()=>{
+    const isExpanded = expandBtn.getAttribute("data-expanded") === "true";
+    window.pumpChartExpanded = !isExpanded;
+    renderPumpWidget();
+  });
+  document.querySelector("[data-pump-backdrop]")?.addEventListener("click", ()=>{
+    window.pumpChartExpanded = false;
+    renderPumpWidget();
+  });
   drawPumpChart(canvas, window.pumpChartRange);
 }
 function drawPumpChart(canvas, rangeValue){
