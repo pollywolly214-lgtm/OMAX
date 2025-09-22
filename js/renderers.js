@@ -198,7 +198,7 @@ function repairMaintenanceGraph(){
 // Accepts the same "target" shape you already use:
 //   - { intoTask: <taskId> }              // make sub-component of a task
 //   - { beforeTask: { id, type } }        // reorder (top-level) before another task
-//   - { intoCat: <categoryId|null> }      // file task into a folder (or root)
+//   - { intoCat: <categoryId|null>, position?: 'start'|'end' } // file task into a folder (or root)
 //   - { beforeCat: { id } }               // reorder a folder before another folder
 function moveNodeSafely(kind, nodeId, target){
   // ---------- Common state ----------
@@ -226,6 +226,34 @@ function moveNodeSafely(kind, nodeId, target){
       .sort((a,b)=> (Number(b.order||0) - Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
     let n = siblings.length;
     for (const t of siblings){ t.order = n--; }
+  }
+
+  function nextTaskOrder(mode, catId, parentId, excludeId, place){
+    const list = mode === "interval" ? window.tasksInterval : window.tasksAsReq;
+    const siblings = list.filter(t =>
+      String(t.parentTask ?? "") === String(parentId ?? "") &&
+      String(t.cat ?? "") === String(catId ?? "") &&
+      String(t.id) !== String(excludeId)
+    );
+    if (!siblings.length){
+      return 1;
+    }
+    if (place === "end"){
+      let min = Infinity;
+      for (const sib of siblings){
+        const val = Number(sib.order) || 0;
+        if (val < min) min = val;
+      }
+      if (!isFinite(min)) min = 0;
+      return min - 1;
+    }
+    let max = -Infinity;
+    for (const sib of siblings){
+      const val = Number(sib.order) || 0;
+      if (val > max) max = val;
+    }
+    if (!isFinite(max)) max = 0;
+    return max + 1;
   }
 
   function ensureFolder(catId){
@@ -273,9 +301,15 @@ function moveNodeSafely(kind, nodeId, target){
       if (!parentRef) return false;
       if (isDescendant(parentRef.task.id, src.task.id)) return false;
 
+      const place = target && target.position === "end" ? "end" : "start";
+      const nextOrder = nextTaskOrder(src.mode, parentRef.task.cat ?? null, parentRef.task.id, src.task.id, place);
+
       src.task.parentTask = parentRef.task.id;
       src.task.cat = parentRef.task.cat ?? null;
-      src.task.order = ++window._maintOrderCounter;
+      src.task.order = nextOrder;
+      if (isFinite(Number(nextOrder))) {
+        window._maintOrderCounter = Math.max(window._maintOrderCounter, Number(nextOrder));
+      }
 
       normalizeTaskOrder(src.mode, src.task.cat ?? null, src.task.parentTask ?? null);
       normalizeTaskOrder(src.mode, originalGroup.cat, originalGroup.parent);
@@ -300,9 +334,15 @@ function moveNodeSafely(kind, nodeId, target){
       const catId = target.intoCat;
       if (!ensureFolder(catId)) return false;
 
+      const place = target && target.position === "end" ? "end" : "start";
+      const nextOrder = nextTaskOrder(src.mode, catId ?? null, null, src.task.id, place);
+
       src.task.cat = catId ?? null;
       src.task.parentTask = null;
-      src.task.order = ++window._maintOrderCounter;
+      src.task.order = nextOrder;
+      if (isFinite(Number(nextOrder))) {
+        window._maintOrderCounter = Math.max(window._maintOrderCounter, Number(nextOrder));
+      }
 
       normalizeTaskOrder(src.mode, src.task.cat ?? null, null);
       normalizeTaskOrder(src.mode, originalGroup.cat, originalGroup.parent);
@@ -316,6 +356,7 @@ function moveNodeSafely(kind, nodeId, target){
   if (kind === "category"){
     const cat = findCat(nodeId);
     if (!cat) return false;
+    const originalParent = cat.parent || null;
 
     if (Object.prototype.hasOwnProperty.call(target || {}, "intoCat")){
       const parent = target.intoCat; // may be null → root
@@ -327,9 +368,37 @@ function moveNodeSafely(kind, nodeId, target){
       }
       if (parent != null && !findCat(parent)) return false;
 
+      const place = target && target.position === "end" ? "end" : "start";
+      const nextOrder = (function nextFolderOrder(parentId, excludeId, pos){
+        const siblings = window.settingsFolders
+          .filter(f => String(f.parent||"") === String(parentId||""))
+          .filter(f => String(f.id) !== String(excludeId));
+        if (!siblings.length) return 1;
+        if (pos === "end"){
+          let min = Infinity;
+          for (const sib of siblings){
+            const val = Number(sib.order) || 0;
+            if (val < min) min = val;
+          }
+          if (!isFinite(min)) min = 0;
+          return min - 1;
+        }
+        let max = -Infinity;
+        for (const sib of siblings){
+          const val = Number(sib.order) || 0;
+          if (val > max) max = val;
+        }
+        if (!isFinite(max)) max = 0;
+        return max + 1;
+      })(parent ?? null, cat.id, place);
+
       cat.parent = parent || null;
-      cat.order  = ++window._maintOrderCounter;
+      cat.order  = nextOrder;
+      if (isFinite(Number(nextOrder))) {
+        window._maintOrderCounter = Math.max(window._maintOrderCounter, Number(nextOrder));
+      }
       normalizeFolderOrder(cat.parent);
+      normalizeFolderOrder(originalParent);
 
       if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
       return true;
@@ -343,6 +412,7 @@ function moveNodeSafely(kind, nodeId, target){
       // Place "just before" by giving a slightly higher order, then normalize
       cat.order = (Number(sib.order)||0) + 0.5;
       normalizeFolderOrder(cat.parent);
+      normalizeFolderOrder(originalParent);
 
       if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
       return true;
@@ -488,6 +558,12 @@ function renderSettings(){
       #explorer .task-children>.dz{margin:4px 0 6px;border:1px dashed #bbb;border-radius:8px;padding:6px;font-size:.78rem;color:#666;background:#fff;cursor:grab}
       #explorer .dz{min-height:8px;margin:4px 0;border-radius:6px}
       #explorer .dz.dragover{min-height:18px;background:rgba(10,99,194,.08);outline:2px dashed #0a63c2}
+      #explorer .dz-line{position:relative;min-height:0;height:12px;margin:4px 0;border:1px dashed transparent;border-radius:6px;padding:0 6px;display:flex;align-items:center;justify-content:center;background:transparent;color:#0a63c2;transition:background-color .12s ease,border-color .12s ease}
+      #explorer .dz-line::before{content:"";position:absolute;left:8px;right:8px;top:50%;border-top:2px dashed transparent;transform:translateY(-50%);pointer-events:none}
+      #explorer .dz-line span{font-size:.68rem;pointer-events:none;opacity:0;transition:opacity .12s ease}
+      #explorer .dz-line.dragover{background:rgba(10,99,194,.12);border-color:#0a63c2;outline:none}
+      #explorer .dz-line.dragover::before{border-color:#0a63c2}
+      #explorer .dz-line.dragover span{opacity:1}
       #explorer summary.drop-hint{outline:2px solid #6aa84f;border-radius:6px}
       #explorer .sub-empty{font-size:.78rem;color:#777;margin-left:4px}
       #explorer .empty{padding:.5rem;color:#666}
@@ -578,6 +654,31 @@ function renderSettings(){
     }
   }
 
+  function renderTaskList(entries, options = {}){
+    const {
+      parentTaskId = null,
+      catId = null,
+      tailLabel = "Drop here to place at end",
+      emptyMessage = "",
+      emptyClass = "empty",
+      emptyAttrs = ""
+    } = options;
+    const tail = `<div class="dz dz-line dz-task-tail" data-drop-task-tail="1" data-tail-parent="${String(parentTaskId ?? "")}" data-tail-cat="${String(catId ?? "")}"><span>${escapeHtml(tailLabel)}</span></div>`;
+    if (!entries.length){
+      const attr = emptyAttrs ? ` ${emptyAttrs}` : "";
+      const msg = emptyMessage ? `<div class="${emptyClass}"${attr}>${escapeHtml(emptyMessage)}</div>` : "";
+      return `${msg}${tail}`;
+    }
+    const pieces = [];
+    for (const entry of entries){
+      const label = escapeHtml(entry.task.name || "(unnamed task)");
+      pieces.push(`<div class="dz dz-line dz-task-gap" data-drop-before-task="${entry.task.id}"><span>Drop before ${label}</span></div>`);
+      pieces.push(renderTask(entry));
+    }
+    pieces.push(tail);
+    return pieces.join("");
+  }
+
   function renderTask(entry){
     const t = entry.task;
     const type = entry.type;
@@ -585,8 +686,16 @@ function renderSettings(){
     const condition = escapeHtml(t.condition || "As required");
     const freq = t.interval ? `${t.interval} hrs` : "Set frequency";
     const children = childrenByParent.get(String(t.id)) || [];
-    const childHtml = children.map(renderTask).join("");
-    const dropLabel = escapeHtml(t.name || "this task");
+    const dropLabelRaw = t.name || "this task";
+    const dropLabel = escapeHtml(dropLabelRaw);
+    const childList = renderTaskList(children, {
+      parentTaskId: t.id,
+      catId: t.cat ?? null,
+      tailLabel: `Drop here to place at end of ${dropLabelRaw}'s sub-tasks`,
+      emptyMessage: "No sub-tasks yet. Drag any task here to nest it.",
+      emptyClass: "sub-empty",
+      emptyAttrs: `data-empty-sub="${t.id}"`
+    });
     return `
       <details class="task task--${type}" data-task-id="${t.id}" data-owner="${type}">
         <summary draggable="true">
@@ -616,30 +725,60 @@ function renderSettings(){
         </div>
         <div class="task-children" data-task-children="${t.id}">
           <div class="dz" data-drop-into-task="${t.id}">Drop here to make a sub-task of ${dropLabel}</div>
-          ${childHtml || `<div class="sub-empty" data-empty-sub="${t.id}">No sub-tasks yet. Drag any task here to nest it.</div>`}
+          ${childList}
         </div>
       </details>
     `;
   }
 
+  function renderCategoryList(parentId, parentName){
+    const folders = childrenFolders(parentId);
+    const tailLabel = parentId == null
+      ? "Drop folders here to place at end of root categories"
+      : `Drop folders here to place at end of ${parentName || "this category"}`;
+    if (!folders.length){
+      return `<div class="dz dz-line dz-cat-tail" data-drop-cat-tail="1" data-tail-parent-cat="${String(parentId ?? "")}"><span>${escapeHtml(tailLabel)}</span></div>`;
+    }
+    const parts = [];
+    for (const folder of folders){
+      parts.push(`<div class="dz dz-line dz-cat-gap" data-drop-before-cat="${folder.id}"><span>Drop folder before ${escapeHtml(folder.name)}</span></div>`);
+      parts.push(renderFolder(folder));
+    }
+    parts.push(`<div class="dz dz-line dz-cat-tail" data-drop-cat-tail="1" data-tail-parent-cat="${String(parentId ?? "")}"><span>${escapeHtml(tailLabel)}</span></div>`);
+    return parts.join("");
+  }
+
   function renderFolder(folder){
     ensureIdsOrder(folder);
-    const kids = childrenFolders(folder.id).map(renderFolder).join("");
-    const taskList = (topByCat.get(String(folder.id)) || []).map(renderTask).join("");
+    const taskEntriesForFolder = topByCat.get(String(folder.id)) || [];
+    const tasksHtml = renderTaskList(taskEntriesForFolder, {
+      parentTaskId: null,
+      catId: folder.id,
+      tailLabel: `Drop tasks here to place at end of ${folder.name}`,
+      emptyMessage: "No tasks in this category yet.",
+      emptyClass: "empty"
+    });
     return `
       <details class="cat" data-cat-id="${folder.id}" open>
         <summary draggable="true"><span class="task-name">${escapeHtml(folder.name)}</span></summary>
         <div class="dz" data-drop-into-cat="${folder.id}">Drop tasks here to file under ${escapeHtml(folder.name)}</div>
         <div class="children">
-          ${kids}
-          ${taskList || `<div class="empty">No tasks in this category yet.</div>`}
+          ${renderCategoryList(folder.id, folder.name)}
+          ${tasksHtml}
         </div>
       </details>
     `;
   }
 
-  const rootTasks = (topByCat.get("") || []).map(renderTask).join("");
-  const folderHtml = childrenFolders(null).map(renderFolder).join("");
+  const rootTaskEntries = topByCat.get("") || [];
+  const rootTasks = renderTaskList(rootTaskEntries, {
+    parentTaskId: null,
+    catId: null,
+    tailLabel: "Drop tasks here to place at end of the root list",
+    emptyMessage: "",
+    emptyClass: "empty"
+  });
+  const folderHtml = renderCategoryList(null, null);
 
   const flattenedFolders = [];
   (function walk(parent, prefix){
@@ -664,8 +803,9 @@ function renderSettings(){
         </div>
         <div class="tree" id="tree">
           <div class="dz" data-drop-root="1">Drop here to move to the root</div>
-          ${rootTasks || ``}
-          ${folderHtml || (rootTasks ? `` : `<div class="empty">No tasks yet. Add one to get started.</div>`)}
+          ${rootTasks}
+          ${folderHtml}
+          ${(window.settingsFolders.length === 0 && window.tasksInterval.length + window.tasksAsReq.length === 0) ? `<div class="empty">No tasks yet. Add one to get started.</div>` : ``}
         </div>
       </div>
     </div>
@@ -927,9 +1067,24 @@ function renderSettings(){
   function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
   tree?.addEventListener('dragover',(e)=>{
     const dz = e.target.closest('.dz');
-    const sum = e.target.closest('summary');
-    if (dz){ allow(e); dz.classList.add('dragover'); }
-    if (sum){ allow(e); sum.classList.add('drop-hint'); }
+    if (dz){
+      if ((dz.hasAttribute('data-drop-before-task') || dz.hasAttribute('data-drop-task-tail') || dz.hasAttribute('data-drop-into-task')) && DRAG.kind === 'task'){
+        allow(e); dz.classList.add('dragover'); return;
+      }
+      if ((dz.hasAttribute('data-drop-before-cat') || dz.hasAttribute('data-drop-cat-tail')) && DRAG.kind === 'category'){
+        allow(e); dz.classList.add('dragover'); return;
+      }
+      if (dz.hasAttribute('data-drop-into-cat') && DRAG.kind === 'task'){
+        allow(e); dz.classList.add('dragover'); return;
+      }
+      if (dz.hasAttribute('data-drop-root') && (DRAG.kind === 'task' || DRAG.kind === 'category')){
+        allow(e); dz.classList.add('dragover'); return;
+      }
+    }
+    const sumTask = e.target.closest('details.task>summary');
+    if (sumTask && DRAG.kind === 'task'){ allow(e); sumTask.classList.add('drop-hint'); return; }
+    const sumCat = e.target.closest('details.cat>summary');
+    if (sumCat && (DRAG.kind === 'task' || DRAG.kind === 'category')){ allow(e); sumCat.classList.add('drop-hint'); }
   });
   tree?.addEventListener('dragleave',(e)=>{
     e.target.closest('.dz')?.classList.remove('dragover');
@@ -944,11 +1099,42 @@ function renderSettings(){
     const dzRoot = e.target.closest('[data-drop-root]');
     const dzCat  = e.target.closest('[data-drop-into-cat]');
     const dzTask = e.target.closest('[data-drop-into-task]');
-    const onSum  = e.target.closest('summary');
+    const dzBeforeTask = e.target.closest('[data-drop-before-task]');
+    const dzTaskTail = e.target.closest('[data-drop-task-tail]');
+    const dzBeforeCat = e.target.closest('[data-drop-before-cat]');
+    const dzCatTail = e.target.closest('[data-drop-cat-tail]');
+    const onTaskSummary = e.target.closest('details.task>summary');
+    const onCatSummary  = e.target.closest('details.cat>summary');
 
     if (kind === 'task' && id){
+      if (dzBeforeTask){
+        const beforeId = dzBeforeTask.getAttribute('data-drop-before-task');
+        if (beforeId && typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { beforeTask: { id: beforeId } })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+      if (dzTaskTail){
+        const parentAttr = dzTaskTail.getAttribute('data-tail-parent') || '';
+        const catAttr = dzTaskTail.getAttribute('data-tail-cat') || '';
+        const parentId = parentAttr === '' ? null : parentAttr;
+        const catId = catAttr === '' ? null : catAttr;
+        if (parentId){
+          if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
+            persist();
+            renderSettings();
+          }
+        }else{
+          if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
+            persist();
+            renderSettings();
+          }
+        }
+        return;
+      }
       if (dzRoot){
-        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: null })){
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: null, position: 'end' })){
           persist();
           renderSettings();
         }
@@ -956,7 +1142,7 @@ function renderSettings(){
       }
       if (dzCat){
         const catId = dzCat.getAttribute('data-drop-into-cat');
-        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId })){
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
           persist();
           renderSettings();
         }
@@ -964,15 +1150,23 @@ function renderSettings(){
       }
       if (dzTask){
         const parentId = dzTask.getAttribute('data-drop-into-task');
-        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId })){
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
           persist();
           renderSettings();
         }
         return;
       }
-      if (onSum){
-        const beforeId = onSum.closest('details.task')?.getAttribute('data-task-id');
-        if (beforeId && typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { beforeTask: { id: beforeId } })){
+      if (onTaskSummary){
+        const parentId = onTaskSummary.closest('details.task')?.getAttribute('data-task-id');
+        if (parentId && typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+      if (onCatSummary){
+        const catId = onCatSummary.closest('details.cat')?.getAttribute('data-cat-id');
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
           persist();
           renderSettings();
         }
@@ -981,23 +1175,32 @@ function renderSettings(){
     }
 
     if (kind === 'category' && id){
+      if (dzBeforeCat){
+        const beforeId = dzBeforeCat.getAttribute('data-drop-before-cat');
+        if (beforeId && typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { beforeCat: { id: beforeId } })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
+      if (dzCatTail){
+        const parentAttr = dzCatTail.getAttribute('data-tail-parent-cat') || '';
+        const parentId = parentAttr === '' ? null : parentAttr;
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { intoCat: parentId, position: 'end' })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
       if (dzRoot){
-        if (typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { intoCat: null })){
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { intoCat: null, position: 'end' })){
           persist();
           renderSettings();
         }
         return;
       }
-      if (dzCat){
-        const parent = dzCat.getAttribute('data-drop-into-cat');
-        if (typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { intoCat: parent })){
-          persist();
-          renderSettings();
-        }
-        return;
-      }
-      if (onSum){
-        const beforeId = onSum.closest('details.cat')?.getAttribute('data-cat-id');
+      if (onCatSummary){
+        const beforeId = onCatSummary.closest('details.cat')?.getAttribute('data-cat-id');
         if (beforeId && typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { beforeCat: { id: beforeId } })){
           persist();
           renderSettings();
