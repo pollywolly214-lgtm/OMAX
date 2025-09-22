@@ -236,6 +236,8 @@ if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
 if (!Array.isArray(window.inventory))    window.inventory    = [];
 if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}]}]
 if (!Array.isArray(window.downTimes))    window.downTimes    = [];   // [{dateISO}]
+if (!Array.isArray(window.pendingDownTimes)) window.pendingDownTimes = [];
+if (!Array.isArray(window.pendingCuttingJobs)) window.pendingCuttingJobs = [];
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
   window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] };
@@ -247,6 +249,8 @@ let tasksAsReq    = window.tasksAsReq;
 let inventory     = window.inventory;
 let cuttingJobs   = window.cuttingJobs;
 let downTimes     = window.downTimes;
+let pendingDownTimes   = window.pendingDownTimes;
+let pendingCuttingJobs = window.pendingCuttingJobs;
 
 /* ================ Jobs editing & render flags ================ */
 if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
@@ -271,6 +275,8 @@ function snapshotState(){
     inventory,
     cuttingJobs,
     downTimes,
+    pendingDownTimes,
+    pendingCuttingJobs,
     pumpEff: safePumpEff
   };
 }
@@ -320,6 +326,12 @@ function adoptState(doc){
   downTimes = Array.isArray(data.downTimes)
     ? data.downTimes.filter(dt => dt && typeof dt.dateISO === "string")
     : [];
+  pendingDownTimes = Array.isArray(data.pendingDownTimes)
+    ? data.pendingDownTimes.filter(dt => dt && typeof dt.dateISO === "string")
+    : [];
+  pendingCuttingJobs = Array.isArray(data.pendingCuttingJobs)
+    ? data.pendingCuttingJobs.filter(job => job && typeof job.id === "string")
+    : [];
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -327,6 +339,8 @@ function adoptState(doc){
   window.inventory = inventory;
   window.cuttingJobs = cuttingJobs;
   window.downTimes = downTimes;
+  window.pendingDownTimes = pendingDownTimes;
+  window.pendingCuttingJobs = pendingCuttingJobs;
 
   // Pump efficiency (guard against reading an undefined identifier)
   const pe = (typeof window.pumpEff === "object" && window.pumpEff)
@@ -366,6 +380,8 @@ async function loadFromCloud(){
           inventory: Array.isArray(data.inventory) && data.inventory.length ? data.inventory : seedInventoryFromTasks(),
           cuttingJobs: Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [],
           downTimes: Array.isArray(data.downTimes) ? data.downTimes : [],
+          pendingDownTimes: Array.isArray(data.pendingDownTimes) ? data.pendingDownTimes : [],
+          pendingCuttingJobs: Array.isArray(data.pendingCuttingJobs) ? data.pendingCuttingJobs : [],
           pumpEff: pe
         };
         adoptState(seeded);
@@ -377,7 +393,7 @@ async function loadFromCloud(){
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
-      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], downTimes:[], pumpEff: pe };
+      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], downTimes:[], pendingDownTimes:[], pendingCuttingJobs:[], pumpEff: pe };
       adoptState(seeded);
       await FB.docRef.set(seeded);
     }
@@ -386,7 +402,7 @@ async function loadFromCloud(){
     const pe = (typeof window.pumpEff === "object" && window.pumpEff)
       ? window.pumpEff
       : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], downTimes:[], pumpEff: pe });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], downTimes:[], pendingDownTimes:[], pendingCuttingJobs:[], pumpEff: pe });
   }
 }
 
