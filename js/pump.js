@@ -207,11 +207,6 @@ function viewPumpWidget(){
           <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
         </div>
       </div>
-      <div class="pump-col pump-nextdue-col">
-        <h4>Next Due</h4>
-        <div id="nextDueBox" class="next-due-box">Calculating…</div>
-        <div class="small muted">Tap a task to jump to its details.</div>
-      </div>
       <div class="pump-col pump-chart-col">
         <div class="pump-chart-toolbar small muted">
           <label for="pumpRange">Timeframe:</label>
@@ -229,6 +224,11 @@ function viewPumpWidget(){
           <span class="chip red">&gt;18%</span>
           <span class="chip green-better">Negative = better</span>
         </div>
+      </div>
+      <div class="pump-col pump-nextdue-col">
+        <h4>Next Due</h4>
+        <div id="nextDueBox" class="next-due-box">Calculating…</div>
+        <div class="small muted">Tap a task to jump to its details.</div>
       </div>
     </div>
   </details>
