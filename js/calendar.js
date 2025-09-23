@@ -1,6 +1,13 @@
 /* ================== CALENDAR & BUBBLES ===================== */
 let bubbleTimer = null;
-function hideBubble(){ const b = document.getElementById("bubble"); if (b) b.remove(); }
+function hideBubble(){
+  if (bubbleTimer){
+    clearTimeout(bubbleTimer);
+    bubbleTimer = null;
+  }
+  const b = document.getElementById("bubble");
+  if (b) b.remove();
+}
 function hideBubbleSoon(){ clearTimeout(bubbleTimer); bubbleTimer = setTimeout(hideBubble, 180); }
 function triggerDashboardAddPicker(opts){
   const detail = (opts && typeof opts === "object") ? { ...opts } : {};
@@ -14,6 +21,8 @@ function triggerDashboardAddPicker(opts){
   window.__pendingDashboardAddRequests.push(detail);
 }
 function makeBubble(anchor){
+  clearTimeout(bubbleTimer);
+  bubbleTimer = null;
   hideBubble();
   const b = document.createElement("div"); b.id = "bubble"; b.className = "bubble"; document.body.appendChild(b);
   const rect = anchor.getBoundingClientRect();
