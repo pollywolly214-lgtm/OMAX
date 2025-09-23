@@ -1921,9 +1921,15 @@ function renderCosts(){
     const availableWidth = rect.width || wrap.clientWidth || canvas.width || 320;
     const targetWidth = Math.max(320, Math.floor(availableWidth));
     if (targetWidth && canvas.width !== targetWidth) canvas.width = targetWidth;
-    let targetHeight = expanded ? Math.max(320, Math.floor((window.innerHeight || 720) * 0.6)) : 240;
-    if (expanded && rect.height){
-      targetHeight = Math.max(targetHeight, Math.floor(rect.height - 96));
+    let targetHeight;
+    if (expanded){
+      targetHeight = Math.max(320, Math.floor((window.innerHeight || 720) * 0.6));
+      if (rect.height){
+        targetHeight = Math.max(targetHeight, Math.floor(rect.height - 96));
+      }
+    } else {
+      const idealHeight = Math.round(targetWidth * 0.55);
+      targetHeight = Math.max(260, Math.min(idealHeight, 420));
     }
     if (canvas.height !== targetHeight) canvas.height = targetHeight;
   }
