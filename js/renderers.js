@@ -1,6 +1,7 @@
 /* ====================== RENDERERS ========================= */
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 const pendingNewJobFiles = window.pendingNewJobFiles;
+window.costChartExpanded = window.costChartExpanded || false;
 
 function readFileAsDataUrl(file){
   return new Promise((resolve, reject)=>{
@@ -1910,7 +1911,22 @@ function renderCosts(){
   const model = computeCostModel();
   content.innerHTML = viewCosts(model);
 
+  const expanded = window.costChartExpanded === true;
+  if (document.body) document.body.classList.toggle("cost-chart-expanded", expanded);
+
   const canvas = document.getElementById("costChart");
+  const wrap = document.querySelector(".cost-chart-wrap");
+  if (canvas && wrap){
+    const rect = wrap.getBoundingClientRect();
+    const availableWidth = rect.width || wrap.clientWidth || canvas.width || 320;
+    const targetWidth = Math.max(320, Math.floor(availableWidth));
+    if (targetWidth && canvas.width !== targetWidth) canvas.width = targetWidth;
+    let targetHeight = expanded ? Math.max(320, Math.floor((window.innerHeight || 720) * 0.6)) : 240;
+    if (expanded && rect.height){
+      targetHeight = Math.max(targetHeight, Math.floor(rect.height - 96));
+    }
+    if (canvas.height !== targetHeight) canvas.height = targetHeight;
+  }
   const toggleMaint = document.getElementById("toggleCostMaintenance");
   const toggleJobs  = document.getElementById("toggleCostJobs");
 
@@ -1924,6 +1940,16 @@ function renderCosts(){
   redraw();
   toggleMaint?.addEventListener("change", redraw);
   toggleJobs?.addEventListener("change", redraw);
+  const expandBtn = document.querySelector(".cost-expand-btn");
+  expandBtn?.addEventListener("click", ()=>{
+    const isExpanded = expandBtn.getAttribute("data-expanded") === "true";
+    window.costChartExpanded = !isExpanded;
+    renderCosts();
+  });
+  document.querySelector("[data-cost-backdrop]")?.addEventListener("click", ()=>{
+    window.costChartExpanded = false;
+    renderCosts();
+  });
 }
 
 function computeCostModel(){

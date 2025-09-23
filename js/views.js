@@ -762,6 +762,10 @@ function viewCosts(model){
   const maintenanceJobsNote = data.maintenanceJobsNote || "";
   const maintenanceJobsEmpty = data.maintenanceJobsEmpty || "";
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
+  const expanded = typeof window !== "undefined" && window.costChartExpanded === true;
+  const wrapCls = expanded ? "cost-chart-wrap cost-chart-wrap-expanded" : "cost-chart-wrap";
+  const expandLabel = expanded ? "Shrink" : "Expand";
+  const expandIcon = expanded ? "⤡" : "⤢";
 
   return `
   <div class="container cost-layout">
@@ -789,9 +793,13 @@ function viewCosts(model){
           <label><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> Cutting jobs</label>
         </div>
       </div>
-      <canvas id="costChart" width="780" height="240"></canvas>
+      <div class="${wrapCls}">
+        <canvas id="costChart" width="780" height="${expanded ? 360 : 240}"></canvas>
+        <button type="button" class="cost-expand-btn" data-expanded="${expanded}" title="${expandLabel} chart">${expandIcon} ${expandLabel}</button>
+      </div>
       ${data.chartNote ? `<p class="small muted">${esc(data.chartNote)}</p>` : `<p class="small muted">Toggle a line to explore how maintenance and job efficiency costs evolve over time.</p>`}
     </div>
+    ${expanded ? '<div class="cost-chart-backdrop" data-cost-backdrop></div>' : ''}
 
     <div class="block">
       <h3>Maintenance Cost Windows</h3>
