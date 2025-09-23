@@ -9,9 +9,9 @@
 .pump-chart-toolbar { display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap; }
 .pump-chart-toolbar label { font-weight:600; }
 .pump-chart-toolbar select { width:auto; padding:4px 6px; font-size:12px; }
-.pump-chart-wrap { flex:1; display:flex; align-items:center; justify-content:center; position:relative; padding:0 0 52px; width:100%; }
-.pump-chart-wrap canvas { width:100%; max-width:100%; display:block; margin:0 auto; }
-.pump-expand-btn {
+.pump-chart-wrap, .cost-chart-wrap { flex:1; display:flex; align-items:center; justify-content:center; position:relative; padding:0 0 52px; width:100%; }
+.pump-chart-wrap canvas, .cost-chart-wrap canvas { width:100%; max-width:100%; display:block; margin:0 auto; }
+.pump-expand-btn, .cost-expand-btn {
   position:absolute;
   right:14px;
   bottom:14px;
@@ -29,9 +29,9 @@
   cursor:pointer;
   transition:background 0.2s ease, transform 0.2s ease;
 }
-.pump-expand-btn:hover { background:#084f9a; transform:translateY(-1px); }
-.pump-expand-btn:active { transform:translateY(0); }
-.pump-chart-wrap.pump-chart-wrap-expanded {
+.pump-expand-btn:hover, .cost-expand-btn:hover { background:#084f9a; transform:translateY(-1px); }
+.pump-expand-btn:active, .cost-expand-btn:active { transform:translateY(0); }
+.pump-chart-wrap.pump-chart-wrap-expanded, .cost-chart-wrap.cost-chart-wrap-expanded {
   position:fixed;
   top:50%;
   left:50%;
@@ -48,25 +48,25 @@
   justify-content:flex-start;
   gap:16px;
 }
-.pump-chart-wrap.pump-chart-wrap-expanded canvas {
+.pump-chart-wrap.pump-chart-wrap-expanded canvas, .cost-chart-wrap.cost-chart-wrap-expanded canvas {
   max-width:none;
   flex:1;
   height:100%;
 }
-.pump-chart-backdrop {
+.pump-chart-backdrop, .cost-chart-backdrop {
   position:fixed;
   inset:0;
   background:rgba(12,23,44,0.45);
   z-index:1000;
 }
-body.pump-chart-expanded { overflow:hidden; }
+body.pump-chart-expanded, body.cost-chart-expanded { overflow:hidden; }
 .pump-legend { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
 .pump-legend span:first-child { font-weight:600; }
 
 @media (max-width: 960px) {
   .pump-grid { grid-template-columns: 1fr; }
-  .pump-chart-wrap { padding:0 0 48px; }
-  .pump-chart-wrap canvas { max-width:100%; }
+  .pump-chart-wrap, .cost-chart-wrap { padding:0 0 48px; }
+  .pump-chart-wrap canvas, .cost-chart-wrap canvas { max-width:100%; }
 }
 
 /* colored chip used in summary */
