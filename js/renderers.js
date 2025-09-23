@@ -744,6 +744,9 @@ function moveNodeSafely(kind, nodeId, target){
   window.tasksInterval   = Array.isArray(window.tasksInterval)   ? window.tasksInterval   : [];
   window.tasksAsReq      = Array.isArray(window.tasksAsReq)      ? window.tasksAsReq      : [];
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+  window.maintenanceSearchTerm = typeof window.maintenanceSearchTerm === "string"
+    ? window.maintenanceSearchTerm
+    : "";
 
   // ---------- Helpers: tasks ----------
   function findTaskMeta(id){
@@ -1079,13 +1082,27 @@ function renderSettings(){
     repairMaintenanceGraph();
   }
 
+  const searchValueRaw = window.maintenanceSearchTerm || "";
+  const searchTerm = searchValueRaw.trim().toLowerCase();
+  const searchActive = searchTerm.length > 0;
+
   // --- Small, compact scoped styles (once) ---
   if (!document.getElementById("settingsExplorerCSS")){
     const st = document.createElement("style");
     st.id = "settingsExplorerCSS";
     st.textContent = `
-      #explorer .toolbar{display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap}
-      #explorer .toolbar button{padding:.35rem .55rem;font-size:.92rem}
+      #explorer .toolbar{display:flex;flex-direction:column;align-items:center;gap:.75rem;margin-bottom:.75rem}
+      #explorer .toolbar-actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;width:100%}
+      #explorer .toolbar-actions button{padding:.35rem .65rem;font-size:.92rem;border-radius:8px}
+      #explorer .toolbar-search{display:flex;align-items:center;gap:.45rem;justify-content:center;background:#f3f4f8;border-radius:999px;padding:.4rem .7rem;border:1px solid #d0d7e4;box-shadow:0 6px 18px rgba(15,35,72,.08);margin:0 auto;width:min(420px,100%)}
+      #explorer .toolbar-search .icon{font-size:1.05rem;color:#5b6a82;display:flex;align-items:center;justify-content:center}
+      #explorer .toolbar-search input{flex:1;min-width:0;padding:.2rem;border:0;background:transparent;font-size:.95rem;color:#0f1e3a}
+      #explorer .toolbar-search input::placeholder{color:#8a94a8}
+      #explorer .toolbar-search input:focus{outline:none}
+      #explorer .toolbar-search button{padding:.32rem .7rem;font-size:.82rem;border-radius:999px;border:0;background:#eef2f8;color:#0a63c2;font-weight:600;cursor:pointer;transition:background .2s ease,color .2s ease,opacity .2s ease}
+      #explorer .toolbar-search button:hover:not(:disabled){background:#e0e7f3}
+      #explorer .toolbar-search button:disabled{opacity:.5;cursor:default}
+      #explorer .toolbar .hint{flex:1 1 auto;text-align:center;width:100%}
       #explorer .hint{font-size:.8rem;color:#666}
       #explorer .tree{border:1px solid #e5e5e5;background:#fff;border-radius:10px;padding:6px}
       #explorer details{margin:4px 0;border:1px solid #eee;border-radius:8px;background:#fafafa}
@@ -1162,6 +1179,67 @@ function renderSettings(){
   window.tasksInterval.forEach(t=>{ if (t){ ensureTaskDefaults(t,"interval"); taskEntries.push({ task:t, type:"interval" }); } });
   window.tasksAsReq.forEach(t=>{ if (t){ ensureTaskDefaults(t,"asreq"); taskEntries.push({ task:t, type:"asreq" }); } });
 
+  const entryById = new Map();
+  for (const entry of taskEntries){
+    const id = String(entry.task.id);
+    entryById.set(id, entry);
+  }
+
+  const matchesSearch = (entry)=>{
+    if (!searchActive) return true;
+    const task = entry.task || {};
+    const fields = [
+      task.name,
+      task.condition,
+      task.manualLink,
+      task.storeLink,
+      task.pn
+    ];
+    if (task.mode === "interval" && task.interval != null) fields.push(String(task.interval));
+    if (task.price != null) fields.push(String(task.price));
+    const parts = Array.isArray(task.parts) ? task.parts : [];
+    for (const part of parts){
+      fields.push(part.name, part.pn, part.note, part.link);
+      if (part.price != null) fields.push(String(part.price));
+    }
+    return fields.some(val => {
+      if (val == null) return false;
+      return String(val).toLowerCase().includes(searchTerm);
+    });
+  };
+
+  const matchedTaskIds = new Set();
+  if (searchActive){
+    for (const entry of taskEntries){
+      if (matchesSearch(entry)) matchedTaskIds.add(String(entry.task.id));
+    }
+  }else{
+    for (const entry of taskEntries){
+      matchedTaskIds.add(String(entry.task.id));
+    }
+  }
+
+  const visibleTaskIds = new Set();
+  if (searchActive){
+    const includeAncestors = (id)=>{
+      let current = id;
+      while (current){
+        if (visibleTaskIds.has(current)) break;
+        visibleTaskIds.add(current);
+        const entry = entryById.get(current);
+        if (!entry) break;
+        const parentRaw = entry.task?.parentTask;
+        if (parentRaw == null) break;
+        current = String(parentRaw);
+      }
+    };
+    matchedTaskIds.forEach(includeAncestors);
+  }else{
+    matchedTaskIds.forEach(id => visibleTaskIds.add(id));
+  }
+
+  const searchEmpty = searchActive && matchedTaskIds.size === 0;
+
   const tasksById = new Map();
   const childrenByParent = new Map();
   const topByCat = new Map();
@@ -1171,6 +1249,7 @@ function renderSettings(){
   for (const entry of taskEntries){
     const t = entry.task;
     const id = String(t.id);
+    if (searchActive && !visibleTaskIds.has(id)) continue;
     tasksById.set(id, entry);
     if (t.parentTask != null){
       const key = String(t.parentTask);
@@ -1185,6 +1264,16 @@ function renderSettings(){
 
   childrenByParent.forEach(sortEntries);
   topByCat.forEach(sortEntries);
+
+  const categoryHasVisibleContent = (catId)=>{
+    if (!searchActive) return true;
+    if ((topByCat.get(String(catId)) || []).length > 0) return true;
+    const kids = childrenFolders(catId);
+    for (const kid of kids){
+      if (categoryHasVisibleContent(kid.id)) return true;
+    }
+    return false;
+  };
 
   function dueChip(task){
     if (task.mode !== "interval" || typeof nextDue !== "function") return "";
@@ -1237,11 +1326,14 @@ function renderSettings(){
     const children = childrenByParent.get(String(t.id)) || [];
     const dropLabelRaw = t.name || "this task";
     const dropLabel = escapeHtml(dropLabelRaw);
+    const emptySubMsg = searchActive
+      ? "No sub-tasks match your search."
+      : "No sub-tasks yet. Drag any task here to nest it.";
     const childList = renderTaskList(children, {
       parentTaskId: t.id,
       catId: t.cat ?? null,
       tailLabel: `Drop here to place at end of ${dropLabelRaw}'s sub-tasks`,
-      emptyMessage: "No sub-tasks yet. Drag any task here to nest it.",
+      emptyMessage: emptySubMsg,
       emptyClass: "sub-empty",
       emptyAttrs: `data-empty-sub="${t.id}"`
     });
@@ -1290,6 +1382,7 @@ function renderSettings(){
     }
     const parts = [];
     for (const folder of folders){
+      if (searchActive && !categoryHasVisibleContent(folder.id)) continue;
       parts.push(`<div class="dz dz-line dz-cat-gap" data-drop-before-cat="${folder.id}"><span>Drop folder before ${escapeHtml(folder.name)}</span></div>`);
       parts.push(renderFolder(folder));
     }
@@ -1300,11 +1393,14 @@ function renderSettings(){
   function renderFolder(folder){
     ensureIdsOrder(folder);
     const taskEntriesForFolder = topByCat.get(String(folder.id)) || [];
+    const folderEmptyMsg = searchActive
+      ? "No tasks in this category match your search."
+      : "No tasks in this category yet.";
     const tasksHtml = renderTaskList(taskEntriesForFolder, {
       parentTaskId: null,
       catId: folder.id,
       tailLabel: `Drop tasks here to place at end of ${folder.name}`,
-      emptyMessage: "No tasks in this category yet.",
+      emptyMessage: folderEmptyMsg,
       emptyClass: "empty"
     });
     return `
@@ -1346,14 +1442,22 @@ function renderSettings(){
       <div class="block" style="grid-column:1 / -1">
         <h3>Maintenance Settings</h3>
         <div class="toolbar">
-          <button id="btnAddCategory">+ Add Category</button>
-          <button id="btnAddTask">+ Add Task</button>
+          <div class="toolbar-actions">
+            <button id="btnAddCategory">+ Add Category</button>
+            <button id="btnAddTask">+ Add Task</button>
+          </div>
+          <div class="toolbar-search">
+            <span class="icon" aria-hidden="true">🔍</span>
+            <input type="search" id="maintenanceSearch" placeholder="Search tasks, parts, or links" value="${escapeHtml(searchValueRaw)}" aria-label="Search maintenance tasks" autocomplete="off">
+            <button type="button" id="maintenanceSearchClear" ${searchValueRaw ? "" : "disabled"}>Clear</button>
+          </div>
           <span class="hint">Drag folders & tasks to organize. Tasks can hold sub-tasks like folders.</span>
         </div>
         <div class="tree" id="tree">
           <div class="dz" data-drop-root="1">Drop here to move to the root</div>
           ${rootTasks}
           ${folderHtml}
+          ${searchEmpty ? `<div class="empty">No maintenance tasks match your search.</div>` : ``}
           ${(window.settingsFolders.length === 0 && window.tasksInterval.length + window.tasksAsReq.length === 0) ? `<div class="empty">No tasks yet. Add one to get started.</div>` : ``}
         </div>
       </div>
@@ -1394,6 +1498,39 @@ function renderSettings(){
   const freqRow = form?.querySelector('[data-form-frequency]');
   const lastRow = form?.querySelector('[data-form-last]');
   const conditionRow = form?.querySelector('[data-form-condition]');
+  const searchInput = document.getElementById("maintenanceSearch");
+  const searchClear = document.getElementById("maintenanceSearchClear");
+
+  if (searchInput){
+    searchInput.addEventListener("input", ()=>{
+      window.maintenanceSearchTerm = searchInput.value;
+      renderSettings();
+      setTimeout(()=>{
+        const nextInput = document.getElementById("maintenanceSearch");
+        if (!nextInput) return;
+        const end = nextInput.value.length;
+        nextInput.focus();
+        if (typeof nextInput.setSelectionRange === "function"){
+          nextInput.setSelectionRange(end, end);
+        }
+      }, 0);
+    });
+  }
+
+  if (searchClear){
+    searchClear.addEventListener("click", ()=>{
+      if (!window.maintenanceSearchTerm){
+        searchInput?.focus();
+        return;
+      }
+      window.maintenanceSearchTerm = "";
+      renderSettings();
+      setTimeout(()=>{
+        const nextInput = document.getElementById("maintenanceSearch");
+        nextInput?.focus();
+      }, 0);
+    });
+  }
 
   const persist = ()=>{
     if (typeof saveTasks === "function") { try{ saveTasks(); }catch(_){} }
