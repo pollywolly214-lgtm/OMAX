@@ -284,9 +284,10 @@ h1 { margin: 0 0 10px; font-size: 22px; }
 }
 .dashboard-layout {
   display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
   gap:16px;
   position:relative;
+  width:100%;
 }
 .dashboard-layout .dash-window {
   position:relative;
@@ -294,8 +295,8 @@ h1 { margin: 0 0 10px; font-size: 22px; }
   min-height:200px;
   transition:box-shadow 0.2s ease, transform 0.2s ease;
 }
-.dashboard-layout .pump-chart-window { grid-column: span 2; }
-.dashboard-layout .calendar-block { grid-column: span 2; }
+.dashboard-layout .pump-chart-window { grid-column: 1 / -1; }
+.dashboard-layout .calendar-block { grid-column: 1 / -1; }
 .dashboard-layout.has-custom-layout {
   display:block;
   position:relative;
@@ -335,7 +336,7 @@ h1 { margin: 0 0 10px; font-size: 22px; }
 .small { font-size: 12px; color: #777; }
 .mini-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .dashboard-top { grid-column: 1 / -1; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
-.total-hours-block { flex: 1 1 260px; max-width: 360px; }
+.total-hours-block { flex: 1 1 260px; }
 .dashboard-schedule-row {
   grid-column: 1 / -1;
   display: flex;
@@ -345,7 +346,6 @@ h1 { margin: 0 0 10px; font-size: 22px; }
 }
 .next-due-block {
   flex: 0 1 280px;
-  max-width: 320px;
   display: flex;
   flex-direction: column;
 }

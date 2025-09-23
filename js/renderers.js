@@ -608,11 +608,14 @@ function initDashboardLayout(){
     event.preventDefault();
     const deltaX = event.clientX - active.startX;
     const deltaY = event.clientY - active.startY;
+    const metrics = getContainerMetrics();
+    const containerWidth = metrics.innerWidth || container.clientWidth || metrics.rect.width;
+    const containerHeight = metrics.innerHeight || container.clientHeight || metrics.rect.height;
     if (active.type === "drag"){
-      const containerWidth = container.clientWidth || container.getBoundingClientRect().width;
       const maxX = Math.max(0, containerWidth - active.startRect.width);
+      const maxY = Math.max(0, containerHeight - active.startRect.height);
       entry.x = clampValue(active.startRect.x + deltaX, 0, maxX);
-      entry.y = Math.max(0, active.startRect.y + deltaY);
+      entry.y = clampValue(active.startRect.y + deltaY, 0, maxY);
     }else{
       let { x, y, width, height } = active.startRect;
       if (active.edges.left){
@@ -637,11 +640,15 @@ function initDashboardLayout(){
       if (active.edges.bottom){
         height = Math.max(active.minHeight, active.startRect.height + deltaY);
       }
-      const containerWidth = container.clientWidth || container.getBoundingClientRect().width;
       if (containerWidth){
         width = Math.min(width, Math.max(containerWidth, active.minWidth));
         const maxX = Math.max(0, containerWidth - width);
         x = clampValue(x, 0, maxX);
+      }
+      if (containerHeight){
+        height = Math.min(height, Math.max(containerHeight, active.minHeight));
+        const maxY = Math.max(0, containerHeight - height);
+        y = clampValue(y, 0, maxY);
       }
       entry.x = x;
       entry.y = y;
@@ -694,38 +701,32 @@ function initDashboardLayout(){
   }
 
   function ensureEntries(map){
-    const rect = container.getBoundingClientRect();
+    const metrics = getContainerMetrics();
+    const rect = metrics.rect;
     windows.forEach(win => {
       const id = win.dataset.windowId;
       if (!id) return;
       if (!map[id]){
         const winRect = win.getBoundingClientRect();
-        map[id] = {
-          x: Math.round(winRect.left - rect.left),
-          y: Math.round(winRect.top - rect.top),
-          width: Math.round(winRect.width),
-          height: Math.round(winRect.height)
-        };
+        map[id] = entryFromRect(winRect, metrics);
       }
       clampEntry(map[id], win);
     });
+    normalizeLayout(map);
   }
 
   function captureLayout(){
-    const rect = container.getBoundingClientRect();
+    const metrics = getContainerMetrics();
+    const rect = metrics.rect;
     const map = {};
     windows.forEach(win => {
       const id = win.dataset.windowId;
       if (!id) return;
       const winRect = win.getBoundingClientRect();
-      map[id] = {
-        x: Math.round(winRect.left - rect.left),
-        y: Math.round(winRect.top - rect.top),
-        width: Math.round(winRect.width),
-        height: Math.round(winRect.height)
-      };
+      map[id] = entryFromRect(winRect, metrics);
       clampEntry(map[id], win);
     });
+    normalizeLayout(map);
     return map;
   }
 
@@ -744,6 +745,7 @@ function initDashboardLayout(){
       return;
     }
     clampLayout(map);
+    normalizeLayout(map);
     windows.forEach(win => {
       const id = win.dataset.windowId;
       if (!id) return;
@@ -768,11 +770,17 @@ function initDashboardLayout(){
     entry.y = Math.max(0, Number(entry.y) || 0);
     entry.width = Math.max(minWidth, Number(entry.width) || minWidth);
     entry.height = Math.max(minHeight, Number(entry.height) || minHeight);
-    const containerWidth = container.clientWidth || container.getBoundingClientRect().width;
+    const metrics = getContainerMetrics();
+    const containerWidth = metrics.innerWidth || container.clientWidth || metrics.rect.width;
+    const containerHeight = metrics.innerHeight || container.clientHeight || metrics.rect.height;
     if (containerWidth){
       entry.width = Math.min(entry.width, Math.max(containerWidth, minWidth));
       const maxX = Math.max(0, containerWidth - entry.width);
       entry.x = clampValue(entry.x, 0, maxX);
+    }
+    if (containerHeight){
+      const maxY = Math.max(0, containerHeight - entry.height);
+      entry.y = clampValue(entry.y, 0, maxY);
     }
   }
 
@@ -790,24 +798,21 @@ function initDashboardLayout(){
       return;
     }
     let bottom = 0;
+    const metrics = getContainerMetrics();
     Object.keys(map).forEach(id => {
       const entry = map[id];
       if (!entry) return;
       bottom = Math.max(bottom, (Number(entry.y) || 0) + (Number(entry.height) || 0));
     });
     const base = Number(container.dataset.baseHeight) || 480;
-    const finalHeight = Math.max(base, bottom + 32);
+    const pad = (metrics.padTop || 0) + (metrics.padBottom || 0);
+    const finalHeight = Math.max(base, bottom + pad + 32);
     container.style.height = `${Math.ceil(finalHeight)}px`;
   }
 
   function rectToEntry(rect){
-    const rectContainer = container.getBoundingClientRect();
-    return {
-      x: Math.round(rect.left - rectContainer.left),
-      y: Math.round(rect.top - rectContainer.top),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height)
-    };
+    const metrics = getContainerMetrics();
+    return entryFromRect(rect, metrics);
   }
 
   function loadLayout(){
@@ -828,7 +833,9 @@ function initDashboardLayout(){
       return;
     }
     try{
-      localStorage.setItem(DASHBOARD_LAYOUT_KEY, JSON.stringify(map));
+      const copy = JSON.parse(JSON.stringify(map));
+      normalizeLayout(copy);
+      localStorage.setItem(DASHBOARD_LAYOUT_KEY, JSON.stringify(copy));
     }catch(err){
       console.warn("Unable to save dashboard layout", err);
     }
@@ -849,6 +856,47 @@ function initDashboardLayout(){
   function clampValue(val, min, max){
     if (typeof max === "number") return Math.min(Math.max(val, min), max);
     return Math.max(val, min);
+  }
+
+  function entryFromRect(rect, metrics){
+    return {
+      x: Math.round(rect.left - metrics.rect.left - (metrics.padLeft || 0)),
+      y: Math.round(rect.top - metrics.rect.top - (metrics.padTop || 0)),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    };
+  }
+
+  function normalizeLayout(map){
+    if (!map) return;
+    const entries = Object.values(map).filter(Boolean);
+    if (!entries.length) return;
+    const minX = entries.reduce((min, entry)=>{
+      const x = Number(entry.x);
+      return isFinite(x) ? Math.min(min, x) : min;
+    }, Infinity);
+    if (isFinite(minX) && minX > 0){
+      entries.forEach(entry => {
+        entry.x = Math.max(0, (Number(entry.x) || 0) - minX);
+      });
+    }
+    entries.forEach(entry => {
+      if (!isFinite(entry.y)) entry.y = 0;
+      if (!isFinite(entry.width)) entry.width = 0;
+      if (!isFinite(entry.height)) entry.height = 0;
+    });
+  }
+
+  function getContainerMetrics(){
+    const rect = container.getBoundingClientRect();
+    const styles = window.getComputedStyle(container);
+    const padLeft = parseFloat(styles.paddingLeft) || 0;
+    const padTop = parseFloat(styles.paddingTop) || 0;
+    const padRight = parseFloat(styles.paddingRight) || 0;
+    const padBottom = parseFloat(styles.paddingBottom) || 0;
+    const innerWidth = Math.max(0, (container.clientWidth || rect.width) - padLeft - padRight);
+    const innerHeight = Math.max(0, (container.clientHeight || rect.height) - padTop - padBottom);
+    return { rect, padLeft, padTop, padRight, padBottom, innerWidth, innerHeight };
   }
 }
 
