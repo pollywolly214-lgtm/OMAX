@@ -33,3 +33,19 @@ changes locally. Any of the following approaches will work:
 After the server is running, open the site in your browser and edits to the files
 under `js/`, `index.html`, or `style.css` will be reflected on refresh. No build
 step is required.
+
+## Previewing on Vercel
+
+This project can be deployed as a static site on [Vercel](https://vercel.com)
+without any build step. The included `vercel.json` file configures Vercel to
+serve `index.html` for all routes so hash-based navigation continues to work in
+preview deployments.
+
+1. Install the Vercel CLI if you haven't already: `npm install -g vercel`.
+2. Authenticate with your Vercel account: `vercel login`.
+3. From the repository root, run `vercel` to create a new preview deployment.
+4. Subsequent previews can be generated with `vercel --prod` when you are ready
+   for a production deploy.
+
+Each deployment URL that Vercel prints to the console will render the latest
+committed changes, making it easy to share previews for review.
