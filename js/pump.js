@@ -301,7 +301,15 @@ function drawPumpChart(canvas, rangeValue){
   const dataAll = pumpEff.entries.slice();
   const filtered = pumpFilterEntriesByRange(dataAll, range);
   const usingFiltered = filtered.length > 0;
-  const data = usingFiltered ? filtered : [dataAll[dataAll.length - 1]];
+  const desiredCount = Math.min(3, dataAll.length);
+  let data = usingFiltered ? filtered.slice() : [dataAll[dataAll.length - 1]];
+  if (data.length < desiredCount && desiredCount > 0){
+    const fallback = dataAll.slice(-desiredCount);
+    const merged = new Map();
+    fallback.forEach(entry => merged.set(entry.dateISO, entry));
+    data.forEach(entry => merged.set(entry.dateISO, entry));
+    data = Array.from(merged.values()).sort((a,b)=>a.dateISO.localeCompare(b.dateISO));
+  }
   const dates = data.map(d=>new Date(d.dateISO+"T00:00:00"));
   const rpms  = data.map(d=>d.rpm);
   const minR  = Math.min(...rpms, pumpEff.baselineRPM ?? rpms[0]);
@@ -311,7 +319,11 @@ function drawPumpChart(canvas, rangeValue){
   const yMax = maxR + padY;
   const latestDate = dates[dates.length - 1];
   const axisEndDate = new Date(latestDate.getTime());
-  const axisStartDate = pumpRangeCutoff(axisEndDate, range);
+  const earliestDate = dates[0];
+  let axisStartDate = pumpRangeCutoff(axisEndDate, range);
+  if (earliestDate.getTime() < axisStartDate.getTime()){
+    axisStartDate = new Date(earliestDate.getTime());
+  }
   let xMin = axisStartDate.getTime();
   let xMax = axisEndDate.getTime();
   if (xMax <= xMin) xMax = xMin + DAY_MS;
