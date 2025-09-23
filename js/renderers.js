@@ -1808,12 +1808,12 @@ function computeCostModel(){
       const deltaHours = Number(eff?.deltaHours) || 0;
       let date = null;
       if (job.dueISO){
-        const due = new Date(job.dueISO);
-        if (!Number.isNaN(due.getTime())) date = due;
+        const due = parseDateLocal(job.dueISO);
+        if (due) date = due;
       }
       if (!date && job.startISO){
-        const start = new Date(job.startISO);
-        if (!Number.isNaN(start.getTime())) date = start;
+        const start = parseDateLocal(job.startISO);
+        if (start) date = start;
       }
       if (!date){
         const fallback = parsedHistory.length ? parsedHistory[parsedHistory.length-1].date : new Date();
@@ -1824,8 +1824,8 @@ function computeCostModel(){
       const milestoneDate = job.dueISO || job.startISO || "";
       let milestoneLabel = "—";
       if (milestoneDate){
-        const milestone = new Date(milestoneDate);
-        if (!Number.isNaN(milestone.getTime())) milestoneLabel = milestone.toLocaleDateString();
+        const milestone = parseDateLocal(milestoneDate);
+        if (milestone) milestoneLabel = milestone.toLocaleDateString();
       }
 
       jobsInfo.push({

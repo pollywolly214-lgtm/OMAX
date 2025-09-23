@@ -61,7 +61,9 @@ function computeJobEfficiency(job){
   if (!job || !job.startISO || planned <= 0) return result;
 
   // Dates
-  const start = new Date(job.startISO); start.setHours(0,0,0,0);
+  const start = parseDateLocal(job.startISO);
+  if (!start) return result;
+  start.setHours(0,0,0,0);
   const today = new Date();              today.setHours(0,0,0,0);
 
   const MS_PER_DAY = 24*60*60*1000;
@@ -131,7 +133,9 @@ function computeRequiredDaily(job){
     : Math.max(0, planned - eff.actualHours);
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const due   = new Date(job.dueISO); due.setHours(0,0,0,0);
+  const due   = parseDateLocal(job.dueISO);
+  if (!due) return { remainingHours:0, remainingDays:0, requiredPerDay:0 };
+  due.setHours(0,0,0,0);
 
   let remainingDays;
   if (today > due) remainingDays = 0;

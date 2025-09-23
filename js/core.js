@@ -23,7 +23,65 @@ const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
 function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
 function genId(name){ const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
-function ymd(d){ const dt = new Date(d); const m = dt.getMonth()+1; const day = dt.getDate(); return `${dt.getFullYear()}-${m<10?'0':''}${m}-${day<10?'0':''}${day}`; }
+function parseDateLocal(value){
+  if (value == null) return null;
+
+  const fromUTCParts = (dt)=>{
+    if (!(dt instanceof Date)) return null;
+    if (Number.isNaN(dt.getTime())) return null;
+    return new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
+  };
+
+  // Direct Date instance
+  if (value instanceof Date){
+    return fromUTCParts(value);
+  }
+
+  // Firestore Timestamp (has toDate()) or other date-like objects
+  if (value && typeof value === "object"){
+    if (typeof value.toDate === "function"){
+      try {
+        const dt = value.toDate();
+        const normalized = fromUTCParts(dt);
+        if (normalized) return normalized;
+      } catch (err) {
+        console.warn("parseDateLocal: toDate() failed", err);
+      }
+    }
+    if (typeof value.seconds === "number"){
+      try {
+        const millis = (value.seconds * 1000) + (typeof value.nanoseconds === "number" ? Math.floor(value.nanoseconds/1e6) : 0);
+        const dt = new Date(millis);
+        const normalized = fromUTCParts(dt);
+        if (normalized) return normalized;
+      } catch (err) {
+        console.warn("parseDateLocal: seconds conversion failed", err);
+      }
+    }
+  }
+
+  // ISO string (YYYY-MM-DD)
+  if (typeof value === "string"){
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const dateOnly = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s].*)?$/);
+    if (dateOnly){
+      const [y, m, d] = dateOnly[1].split("-").map(Number);
+      return new Date(y, m-1, d);
+    }
+  }
+
+  const dt = new Date(value);
+  const normalized = fromUTCParts(dt);
+  return normalized ?? null;
+}
+function ymd(d){
+  const dt = parseDateLocal(d);
+  if (!dt) return "";
+  const m = dt.getMonth()+1;
+  const day = dt.getDate();
+  return `${dt.getFullYear()}-${m<10?'0':''}${m}-${day<10?'0':''}${day}`;
+}
 
 /* Toast */
 function toast(msg){

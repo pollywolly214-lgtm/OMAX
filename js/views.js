@@ -820,10 +820,11 @@ function viewJobs(){
     const efficiencyDetail = `${statusSummary}; ${baselineDetail}`;
 
     // Dates (for display / edit row)
-    const startTxt = j.startISO ? (new Date(j.startISO)).toDateString() : "—";
-    const dueDate  = j.dueISO ? new Date(j.dueISO) : null;
-    const dueTxt   = dueDate ? dueDate.toDateString() : "—";
-    const dueVal   = dueDate ? dueDate.toISOString().slice(0,10) : "";
+    const startDate = parseDateLocal(j.startISO);
+    const dueDate   = parseDateLocal(j.dueISO);
+    const startTxt  = startDate ? startDate.toDateString() : "—";
+    const dueTxt    = dueDate ? dueDate.toDateString() : "—";
+    const dueVal    = dueDate ? ymd(dueDate) : (j.dueISO || "");
 
     if (!editing){
       // NORMAL ROW (with Log button UNDER the job name)
