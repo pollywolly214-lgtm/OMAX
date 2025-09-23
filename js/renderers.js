@@ -37,6 +37,32 @@ async function filesToAttachments(fileList){
   return attachments;
 }
 
+function populateNextDueBox(){
+  const ndBox = document.getElementById("nextDueBox");
+  if (!ndBox) return;
+  if (!ndBox.dataset.bound){
+    ndBox.addEventListener("click", (e)=>{
+      const target = e.target.closest("[data-cal-task]");
+      if (!target) return;
+      const id = target.dataset.calTask;
+      if (id) openSettingsAndReveal(id);
+    });
+    ndBox.dataset.bound = "1";
+  }
+  const escapeHtml = (str)=> String(str || "").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const upcoming = tasksInterval
+    .map(t => ({ task: t, nd: nextDue(t) }))
+    .filter(x => x.nd)
+    .sort((a,b)=> a.nd.due - b.nd.due)
+    .slice(0,8);
+  ndBox.innerHTML = upcoming.length
+    ? `<ul>${upcoming.map(({ task, nd })=>{
+        const dueTxt = nd.due instanceof Date ? nd.due.toDateString() : String(nd.due);
+        return `<li data-cal-task="${escapeHtml(task.id)}"><button type="button" class="next-due-link">${escapeHtml(task.name)}</button><span class="next-due-meta muted small">${nd.days}d → ${escapeHtml(dueTxt)}</span></li>`;
+      }).join("")}</ul>`
+    : `<div class="muted small">No upcoming due items.</div>`;
+}
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   content.innerHTML = viewDashboard();
@@ -60,17 +86,6 @@ function renderDashboard(){
     saveCloudDebounced(); toast("Hours logged");
     renderDashboard();
   });
-
-  // Next due summary
-  const ndBox = document.getElementById("nextDueBox");
-  const upcoming = tasksInterval
-    .map(t => ({ t, nd: nextDue(t) }))
-    .filter(x => x.nd)
-    .sort((a,b)=> a.nd.due - b.nd.due)
-    .slice(0,8);
-  ndBox.innerHTML = upcoming.length
-    ? `<ul>${upcoming.map(x=>`<li><span class="cal-task" data-cal-task="${x.t.id}">${x.t.name}</span> — ${x.nd.days}d → ${x.nd.due.toDateString()}</li>`).join("")}</ul>`
-    : `<div class="muted small">No upcoming due items.</div>`;
 
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
