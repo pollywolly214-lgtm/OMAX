@@ -16,12 +16,6 @@ function viewDashboard(){
       <div class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</div>
     </div>
 
-    <!-- Next due -->
-    <div class="block">
-      <h3>Next Due</h3>
-      <div id="nextDueBox">Calculating…</div>
-    </div>
-
     <!-- Pump Efficiency widget (rendered by renderPumpWidget) -->
     <section id="pump-widget" class="block pump-wide"></section>
 

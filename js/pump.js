@@ -189,7 +189,7 @@ function viewPumpWidget(){
   <details class="block pump-card" open>
     <summary><b>Pump Efficiency</b> <span class="chip ${col.cls}">${col.label}</span></summary>
     <div class="pump-grid">
-      <div class="pump-col">
+      <div class="pump-col pump-baseline-col">
         <h4>Baseline @ 49 ksi</h4>
         <form id="pumpBaselineForm" class="mini-form">
           <input type="number" id="pumpBaselineRPM" min="1" step="1" placeholder="RPM" value="${baselineVal}">
@@ -206,6 +206,11 @@ function viewPumpWidget(){
           <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO})` : "—"}</span></div>
           <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
         </div>
+      </div>
+      <div class="pump-col pump-nextdue-col">
+        <h4>Next Due</h4>
+        <div id="nextDueBox" class="next-due-box">Calculating…</div>
+        <div class="small muted">Tap a task to jump to its details.</div>
       </div>
       <div class="pump-col pump-chart-col">
         <div class="pump-chart-toolbar small muted">
@@ -281,6 +286,7 @@ function renderPumpWidget(){
     window.pumpChartExpanded = false;
     renderPumpWidget();
   });
+  if (typeof populateNextDueBox === "function") populateNextDueBox();
   drawPumpChart(canvas, window.pumpChartRange);
 }
 function drawPumpChart(canvas, rangeValue){
