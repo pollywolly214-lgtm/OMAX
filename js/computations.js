@@ -8,6 +8,31 @@ function deltaSinceLast(){
   return Math.max(0, cur - prev);
 }
 
+function parseDateISO(dateISO){
+  if (dateISO == null) return null;
+  const raw = String(dateISO).trim();
+  if (!raw) return null;
+  const [datePart] = raw.split("T");
+  const bits = datePart.split("-");
+  if (bits.length !== 3) return null;
+  const [y, m, d] = bits.map(Number);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(y, m - 1, d);
+  if (Number.isNaN(dt.getTime())) return null;
+  dt.setHours(0,0,0,0);
+  return dt;
+}
+
+function formatDateForInput(dateISO){
+  const dt = parseDateISO(dateISO);
+  if (!dt) return "";
+  const yyyy = String(dt.getFullYear());
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function liveSince(task){
   const cur = RENDER_TOTAL ?? currentTotal();
   const delta = RENDER_DELTA ?? deltaSinceLast();
@@ -58,11 +83,11 @@ function computeJobEfficiency(job){
     usedMachineTotals: false,
     usedFromStartAuto: false
   };
-  if (!job || !job.startISO || planned <= 0) return result;
+  const start = parseDateISO(job?.startISO);
+  if (!job || !start || planned <= 0) return result;
 
   // Dates
-  const start = new Date(job.startISO); start.setHours(0,0,0,0);
-  const today = new Date();              today.setHours(0,0,0,0);
+  const today = new Date(); today.setHours(0,0,0,0);
 
   const MS_PER_DAY = 24*60*60*1000;
   result.totalDays   = planned > 0 ? Math.max(1, Math.ceil(planned / DAILY_HOURS)) : 0;
@@ -123,7 +148,10 @@ function computeJobEfficiency(job){
 
 /* ----------- Required hrs/day to hit due date ------------- */
 function computeRequiredDaily(job){
-  if (!job || !job.startISO || !job.dueISO) return { remainingHours:0, remainingDays:0, requiredPerDay:0 };
+  if (!job) return { remainingHours:0, remainingDays:0, requiredPerDay:0 };
+  const start = parseDateISO(job.startISO);
+  const due   = parseDateISO(job.dueISO);
+  if (!start || !due) return { remainingHours:0, remainingDays:0, requiredPerDay:0 };
   const eff = computeJobEfficiency(job);
   const planned = Number(job.estimateHours) || 0;
   const remainingHours = eff.actualRemaining != null
@@ -131,7 +159,6 @@ function computeRequiredDaily(job){
     : Math.max(0, planned - eff.actualHours);
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const due   = new Date(job.dueISO); due.setHours(0,0,0,0);
 
   let remainingDays;
   if (today > due) remainingDays = 0;

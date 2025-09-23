@@ -935,10 +935,12 @@ function viewJobs(){
     const efficiencyDetail = `${statusSummary}; ${baselineDetail}`;
 
     // Dates (for display / edit row)
-    const startTxt = j.startISO ? (new Date(j.startISO)).toDateString() : "—";
-    const dueDate  = j.dueISO ? new Date(j.dueISO) : null;
-    const dueTxt   = dueDate ? dueDate.toDateString() : "—";
-    const dueVal   = dueDate ? dueDate.toISOString().slice(0,10) : "";
+    const startDate = typeof parseDateISO === "function" ? parseDateISO(j.startISO) : (j.startISO ? new Date(j.startISO) : null);
+    const dueDate   = typeof parseDateISO === "function" ? parseDateISO(j.dueISO)   : (j.dueISO   ? new Date(j.dueISO)   : null);
+    const startTxt  = startDate ? startDate.toDateString() : "—";
+    const dueTxt    = dueDate ? dueDate.toDateString() : "—";
+    const startVal  = typeof formatDateForInput === "function" ? formatDateForInput(j.startISO) : (j.startISO || "");
+    const dueVal    = typeof formatDateForInput === "function" ? formatDateForInput(j.dueISO)   : (j.dueISO   || "");
 
     if (!editing){
       // NORMAL ROW (with Log button UNDER the job name)
@@ -980,7 +982,7 @@ function viewJobs(){
         <td><input type="number" min="1" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></td>
         <td><input type="text" data-j="material" data-id="${j.id}" value="${j.material||""}"></td>
         <td colspan="2">
-          Start: <input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}">
+          Start: <input type="date" data-j="startISO" data-id="${j.id}" value="${startVal}">
           Due:   <input type="date" data-j="dueISO"   data-id="${j.id}" value="${dueVal}">
         </td>
         <td>${matTotal.toFixed(2)}</td>
