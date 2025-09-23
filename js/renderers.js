@@ -37,6 +37,39 @@ async function filesToAttachments(fileList){
   return attachments;
 }
 
+function buildNextDuePreview({ includeNote = true, noteText = "Preview of tracked tasks — log machine hours to replace this with your live schedule." } = {}){
+  const escapeHtml = (str)=> String(str || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const previewOffsets = [2, 6, 11, 19];
+  const previewSource = (Array.isArray(window.defaultIntervalTasks) && window.defaultIntervalTasks.length)
+    ? window.defaultIntervalTasks.slice(0, previewOffsets.length)
+    : [
+        { name: "Nozzle filter & inlet O-ring" },
+        { name: "Mixing tube rotation" },
+        { name: "Drain hopper regulator water bowl" },
+        { name: "Lubricate Z-axis rail shafts & lead screw" }
+      ];
+  const today = new Date(); today.setHours(0,0,0,0);
+  const formatter = (date)=> date.toLocaleDateString(undefined, { weekday:"short", month:"short", day:"numeric" });
+  const previewList = previewSource.map((task, idx) => {
+    const offset = previewOffsets[idx] ?? previewOffsets[previewOffsets.length - 1];
+    const due = new Date(today); due.setDate(due.getDate() + offset);
+    const dueText = `${offset}d → ${formatter(due)}`;
+    return `<li>
+      <div class="next-due-task next-due-task-preview" aria-hidden="true">
+        <span class="next-due-name">${escapeHtml(task.name || "Task setup pending")}</span>
+        <span class="next-due-meta">${escapeHtml(dueText)}</span>
+      </div>
+    </li>`;
+  }).join("");
+  const note = includeNote ? `<p class="next-due-preview-note">${escapeHtml(noteText)}</p>` : "";
+  return `
+    <div class="next-due-preview">
+      ${note}
+      <ul class="next-due-list" aria-hidden="true">${previewList}</ul>
+    </div>
+  `.trim();
+}
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   content.innerHTML = viewDashboard();
@@ -63,18 +96,83 @@ function renderDashboard(){
 
   // Next due summary
   const ndBox = document.getElementById("nextDueBox");
+  const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const upcoming = tasksInterval
     .map(t => ({ t, nd: nextDue(t) }))
     .filter(x => x.nd)
     .sort((a,b)=> a.nd.due - b.nd.due)
     .slice(0,8);
-  ndBox.innerHTML = upcoming.length
-    ? `<ul>${upcoming.map(x=>`<li><span class="cal-task" data-cal-task="${x.t.id}">${x.t.name}</span> — ${x.nd.days}d → ${x.nd.due.toDateString()}</li>`).join("")}</ul>`
-    : `<div class="muted small">No upcoming due items.</div>`;
+
+  if (upcoming.length){
+    const listHtml = upcoming.map(x => {
+      const id = String(x.t.id);
+      const dueText = `${x.nd.days}d → ${x.nd.due.toDateString()}`;
+      return `<li>
+        <button type="button" class="next-due-task cal-task" data-next-due-task="1" data-task-id="${escapeHtml(id)}" data-cal-task="${escapeHtml(id)}">
+          <span class="next-due-name">${escapeHtml(x.t.name)}</span>
+          <span class="next-due-meta">${escapeHtml(dueText)}</span>
+        </button>
+      </li>`;
+    }).join("");
+    ndBox.innerHTML = `<ul class="next-due-list">${listHtml}</ul>`;
+    ndBox.classList.remove("next-due-preview-mode");
+    delete ndBox.dataset.preview;
+  }else{
+    ndBox.innerHTML = buildNextDuePreview();
+    ndBox.classList.add("next-due-preview-mode");
+    ndBox.dataset.preview = "1";
+  }
+
+  if (!ndBox.dataset.wired){
+    ndBox.dataset.wired = "1";
+
+    const findTaskButton = (target)=> target && target.closest ? target.closest("[data-next-due-task]") : null;
+
+    ndBox.addEventListener("click", (e)=>{
+      const btn = findTaskButton(e.target);
+      if (!btn) return;
+      const taskId = btn.dataset.taskId || btn.dataset.calTask;
+      if (!taskId) return;
+      if (typeof hideBubble === "function") hideBubble();
+      if (typeof openSettingsAndReveal === "function") openSettingsAndReveal(taskId);
+    });
+
+    const showBubbleFor = (btn)=>{
+      const taskId = btn?.dataset?.taskId || btn?.dataset?.calTask;
+      if (!taskId) return;
+      if (typeof showTaskBubble === "function") showTaskBubble(String(taskId), btn);
+    };
+
+    const maybeHideBubble = (from, to)=>{
+      if (!from) return;
+      const leavingWidget = !to || !ndBox.contains(to);
+      if (leavingWidget && typeof hideBubbleSoon === "function") hideBubbleSoon();
+    };
+
+    ndBox.addEventListener("mouseover", (e)=>{
+      const btn = findTaskButton(e.target);
+      if (btn) showBubbleFor(btn);
+    });
+
+    ndBox.addEventListener("focusin", (e)=>{
+      const btn = findTaskButton(e.target);
+      if (btn) showBubbleFor(btn);
+    });
+
+    ndBox.addEventListener("mouseout", (e)=>{
+      const from = findTaskButton(e.target);
+      const to = findTaskButton(e.relatedTarget);
+      maybeHideBubble(from, to);
+    });
+
+    ndBox.addEventListener("focusout", (e)=>{
+      const from = findTaskButton(e.target);
+      const to = findTaskButton(e.relatedTarget);
+      maybeHideBubble(from, to);
+    });
+  }
 
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
-
-  const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 
   const modal            = document.getElementById("dashboardAddModal");
   const closeBtn         = document.getElementById("dashboardModalClose");
@@ -2435,6 +2533,20 @@ function renderInventory(){
 
 function renderSignedOut(){
   const content = document.getElementById("content"); if (!content) return;
-  content.innerHTML = `<div class='container'><div class='block'><h3>Please sign in to view workspace.</h3></div></div>`;
+  const preview = buildNextDuePreview({
+    noteText: "Sign in and add machine hours to generate your real next-due list.",
+    includeNote: true
+  });
+  content.innerHTML = `
+    <div class='container signed-out-container'>
+      <div class='block signed-out-message'>
+        <h3>Please sign in to view workspace.</h3>
+        <p class='small'>Use your maintenance login to sync tasks, hours, and inventory across the shop.</p>
+        <div class='next-due-preview-card'>
+          <h4 class='next-due-preview-title'>Next due preview</h4>
+          ${preview}
+        </div>
+      </div>
+    </div>`;
 }
 
