@@ -165,7 +165,7 @@ header { background: #0a63c2; color: #fff; padding: 0 16px 4px; }
 }
 .header-logo {
   flex: 0 0 auto;
-  width: clamp(110px, 18vw, 220px);
+  width: clamp(143px, 23.4vw, 286px);
   max-width: 100%;
   height: auto;
   display: block;
