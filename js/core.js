@@ -25,10 +25,39 @@ function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTim
 function genId(name){ const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
 function parseDateLocal(value){
   if (value == null) return null;
+
+  // Direct Date instance
   if (value instanceof Date){
     if (Number.isNaN(value.getTime())) return null;
     return new Date(value.getFullYear(), value.getMonth(), value.getDate());
   }
+
+  // Firestore Timestamp (has toDate()) or other date-like objects
+  if (value && typeof value === "object"){
+    if (typeof value.toDate === "function"){
+      try {
+        const dt = value.toDate();
+        if (dt instanceof Date && !Number.isNaN(dt.getTime())){
+          return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+        }
+      } catch (err) {
+        console.warn("parseDateLocal: toDate() failed", err);
+      }
+    }
+    if (typeof value.seconds === "number"){
+      try {
+        const millis = (value.seconds * 1000) + (typeof value.nanoseconds === "number" ? Math.floor(value.nanoseconds/1e6) : 0);
+        const dt = new Date(millis);
+        if (!Number.isNaN(dt.getTime())){
+          return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+        }
+      } catch (err) {
+        console.warn("parseDateLocal: seconds conversion failed", err);
+      }
+    }
+  }
+
+  // ISO string (YYYY-MM-DD)
   if (typeof value === "string"){
     const trimmed = value.trim();
     if (!trimmed) return null;
@@ -37,6 +66,7 @@ function parseDateLocal(value){
       return new Date(y, m-1, d);
     }
   }
+
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return null;
   return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
