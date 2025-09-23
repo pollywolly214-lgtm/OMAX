@@ -49,23 +49,75 @@ function buildNextDuePreview({ includeNote = true, noteText = "Preview of tracke
         { name: "Lubricate Z-axis rail shafts & lead screw" }
       ];
   const today = new Date(); today.setHours(0,0,0,0);
-  const formatter = (date)=> date.toLocaleDateString(undefined, { weekday:"short", month:"short", day:"numeric" });
-  const previewList = previewSource.map((task, idx) => {
-    const offset = previewOffsets[idx] ?? previewOffsets[previewOffsets.length - 1];
+  const formatDate = (date)=> date.toLocaleDateString(undefined, { weekday:"short", month:"short", day:"numeric" });
+  const offsetForIndex = (idx)=>{
+    if (!previewOffsets.length) return 0;
+    return previewOffsets[idx] ?? previewOffsets[previewOffsets.length - 1];
+  };
+  const formatDueLine = (offset, dueText)=>{
+    if (offset <= 0) return `Due today · ${dueText}`;
+    if (offset === 1) return `Due tomorrow · ${dueText}`;
+    return `Due in ${offset} days · ${dueText}`;
+  };
+  const formatRemain = (offset)=>{
+    const hours = Math.max(0, Math.round((typeof DAILY_HOURS === "number" ? DAILY_HOURS : 8) * offset));
+    return `${hours.toLocaleString()} hrs estimate`;
+  };
+  const statusClass = (offset)=>{
+    if (offset <= 0) return "is-due-now";
+    if (offset <= 3) return "is-due-soon";
+    return "is-due-later";
+  };
+
+  const featured = previewSource[0];
+  const featuredOffset = offsetForIndex(0);
+  const featuredDue = new Date(today); featuredDue.setDate(featuredDue.getDate() + featuredOffset);
+  const featuredMeta = `
+    <span class="next-due-meta-line">${escapeHtml(formatDueLine(featuredOffset, formatDate(featuredDue)))}</span>
+    <span class="next-due-meta-line next-due-meta-hours">${escapeHtml(formatRemain(featuredOffset))}</span>
+  `.trim();
+  const featuredCountdown = featuredOffset <= 0 ? "Due" : Math.max(0, featuredOffset).toLocaleString();
+  const featuredCountdownLabel = featuredOffset <= 0 ? "today" : (featuredOffset === 1 ? "day left" : "days left");
+  const featuredHtml = `
+    <div class="next-due-task next-due-featured next-due-task-preview ${statusClass(featuredOffset)}" aria-hidden="true">
+      <span class="next-due-featured-copy">
+        <span class="next-due-eyebrow">Preview</span>
+        <span class="next-due-name">${escapeHtml(featured?.name || "Task setup pending")}</span>
+        <span class="next-due-meta">${featuredMeta}</span>
+      </span>
+      <span class="next-due-countdown" aria-hidden="true">
+        <span class="next-due-count">${escapeHtml(featuredCountdown)}</span>
+        <span class="next-due-count-label">${escapeHtml(featuredCountdownLabel)}</span>
+      </span>
+    </div>
+  `;
+
+  const rest = previewSource.slice(1);
+  const restHtml = rest.map((task, idx) => {
+    const offset = offsetForIndex(idx + 1);
     const due = new Date(today); due.setDate(due.getDate() + offset);
-    const dueText = `${offset}d → ${formatter(due)}`;
+    const metaHtml = `
+      <span class="next-due-meta-line">${escapeHtml(formatDueLine(offset, formatDate(due)))}</span>
+      <span class="next-due-meta-line next-due-meta-hours">${escapeHtml(formatRemain(offset))}</span>
+    `.trim();
     return `<li>
-      <div class="next-due-task next-due-task-preview" aria-hidden="true">
-        <span class="next-due-name">${escapeHtml(task.name || "Task setup pending")}</span>
-        <span class="next-due-meta">${escapeHtml(dueText)}</span>
+      <div class="next-due-task next-due-task-preview ${statusClass(offset)}" aria-hidden="true">
+        <span class="next-due-name">${escapeHtml(task?.name || "Task setup pending")}</span>
+        <span class="next-due-meta">${metaHtml}</span>
       </div>
     </li>`;
   }).join("");
+
   const note = includeNote ? `<p class="next-due-preview-note">${escapeHtml(noteText)}</p>` : "";
+  const restSection = rest.length
+    ? `<div class="next-due-subtitle" aria-hidden="true">Upcoming sample</div><ul class="next-due-list" aria-hidden="true">${restHtml}</ul>`
+    : "";
+
   return `
-    <div class="next-due-preview">
+    <div class="next-due-window next-due-window-preview">
       ${note}
-      <ul class="next-due-list" aria-hidden="true">${previewList}</ul>
+      ${featuredHtml}
+      ${restSection}
     </div>
   `.trim();
 }
@@ -104,17 +156,80 @@ function renderDashboard(){
     .slice(0,8);
 
   if (upcoming.length){
-    const listHtml = upcoming.map(x => {
+    const formatDate = (date)=> date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    const formatDueLine = (days, dueText)=>{
+      if (days <= 0) return `Due today · ${dueText}`;
+      if (days === 1) return `Due tomorrow · ${dueText}`;
+      return `Due in ${days} days · ${dueText}`;
+    };
+    const formatRemain = (remain)=>{
+      const hours = Math.max(0, Math.round(remain ?? 0));
+      return `${hours.toLocaleString()} hrs left`;
+    };
+    const statusClass = (days)=>{
+      if (days <= 0) return "is-due-now";
+      if (days <= 3) return "is-due-soon";
+      return "is-due-later";
+    };
+    const buildMetaHtml = (nd)=>{
+      const dueLine = formatDueLine(Math.max(0, nd.days ?? 0), formatDate(nd.due));
+      const remainLine = formatRemain(nd.remain);
+      return `
+        <span class="next-due-meta-line">${escapeHtml(dueLine)}</span>
+        <span class="next-due-meta-line next-due-meta-hours">${escapeHtml(remainLine)}</span>
+      `.trim();
+    };
+    const buildAriaLabel = (name, nd)=>{
+      const dueLine = formatDueLine(Math.max(0, nd.days ?? 0), formatDate(nd.due));
+      const remainLine = formatRemain(nd.remain);
+      return `${name} — ${dueLine}, ${remainLine}`;
+    };
+
+    const featured = upcoming[0];
+    const featuredId = String(featured.t.id);
+    const featuredMeta = buildMetaHtml(featured.nd);
+    const featuredStatus = statusClass(featured.nd.days);
+    const countdownNumber = featured.nd.days <= 0
+      ? "Due"
+      : Math.max(0, featured.nd.days).toLocaleString();
+    const countdownLabel = featured.nd.days <= 0
+      ? "today"
+      : (featured.nd.days === 1 ? "day left" : "days left");
+    const eyebrow = featured.nd.days <= 0 ? "Due now" : "Next due";
+    const featuredButton = `
+      <button type="button" class="next-due-task next-due-featured ${featuredStatus} cal-task"
+        data-next-due-task="1" data-task-id="${escapeHtml(featuredId)}" data-cal-task="${escapeHtml(featuredId)}"
+        aria-label="${escapeHtml(buildAriaLabel(featured.t.name, featured.nd))}">
+        <span class="next-due-featured-copy">
+          <span class="next-due-eyebrow">${escapeHtml(eyebrow)}</span>
+          <span class="next-due-name">${escapeHtml(featured.t.name)}</span>
+          <span class="next-due-meta">${featuredMeta}</span>
+        </span>
+        <span class="next-due-countdown" aria-hidden="true">
+          <span class="next-due-count">${escapeHtml(countdownNumber)}</span>
+          <span class="next-due-count-label">${escapeHtml(countdownLabel)}</span>
+        </span>
+      </button>
+    `;
+
+    const rest = upcoming.slice(1);
+    const listHtml = rest.map(x => {
       const id = String(x.t.id);
-      const dueText = `${x.nd.days}d → ${x.nd.due.toDateString()}`;
+      const metaHtml = buildMetaHtml(x.nd);
+      const status = statusClass(x.nd.days);
       return `<li>
-        <button type="button" class="next-due-task cal-task" data-next-due-task="1" data-task-id="${escapeHtml(id)}" data-cal-task="${escapeHtml(id)}">
+        <button type="button" class="next-due-task ${status} cal-task" data-next-due-task="1" data-task-id="${escapeHtml(id)}" data-cal-task="${escapeHtml(id)}">
           <span class="next-due-name">${escapeHtml(x.t.name)}</span>
-          <span class="next-due-meta">${escapeHtml(dueText)}</span>
+          <span class="next-due-meta">${metaHtml}</span>
         </button>
       </li>`;
     }).join("");
-    ndBox.innerHTML = `<ul class="next-due-list">${listHtml}</ul>`;
+
+    const restSection = rest.length
+      ? `<div class="next-due-subtitle">Coming up</div><ul class="next-due-list">${listHtml}</ul>`
+      : `<p class="next-due-empty">No other tasks are scheduled yet.</p>`;
+
+    ndBox.innerHTML = `<div class="next-due-window">${featuredButton}${restSection}</div>`;
     ndBox.classList.remove("next-due-preview-mode");
     delete ndBox.dataset.preview;
   }else{
