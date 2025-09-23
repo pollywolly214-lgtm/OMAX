@@ -290,7 +290,19 @@ function viewSettings(){
   const tasksIn = (list, folderId)=> (Array.isArray(list)?list:[]).filter(t => (t.cat||null) === (folderId||null));
 
   const renderFolder = (folder, listType) => {
-    const subFolders = kidsOf(folder.id).map(sf => renderFolder(sf, listType)).join("");
+    const subFolderList = kidsOf(folder.id);
+    const subFolders = subFolderList.map(sf => `
+      <div class="folder-dropzone folder-dropzone-line small muted" data-drop-before-folder="${sf.id}"
+           style="border:1px dashed #bbb; padding:6px; margin:4px 0; border-radius:8px;">
+        Drag folders here to place before <b>${sf.name}</b>
+      </div>
+      ${renderFolder(sf, listType)}
+    `).join("");
+    const subFolderTail = subFolderList.length ? `
+      <div class="folder-dropzone folder-dropzone-line small muted" data-drop-folder-tail="${folder.id}"
+           style="border:1px dashed #bbb; padding:6px; margin:4px 0 6px; border-radius:8px;">
+        Drag folders here to place at the end of <b>${folder.name}</b>
+      </div>` : "";
     const list       = (listType==="interval"?tasksInterval:tasksAsReq);
     const tasksHtml  = tasksIn(list, folder.id).map(t => card(t, listType)).join("")
                       || `<div class="small muted">No items in this category.</div>`;
@@ -311,6 +323,7 @@ function viewSettings(){
 
         <div class="folder-children" data-folder-children="${folder.id}" data-dnd-scope="${listType}">
           ${subFolders}
+          ${subFolderTail}
           <div class="bubble-list" data-folder-body="${folder.id}">
             ${tasksHtml}
           </div>
@@ -320,6 +333,11 @@ function viewSettings(){
 
   // Root folders (parent=null)
   const rootFolders = kidsOf(null);
+  const rootFolderTail = `
+    <div class="folder-dropzone folder-dropzone-line small muted" data-drop-folder-tail=""
+         style="border:1px dashed #bbb; padding:6px; margin:4px 0 6px; border-radius:8px;">
+      Drag folders here to place at the end of root categories
+    </div>`;
 
   // Root-level (no folder) tasks should appear at the top of each menu (no "Uncategorized" label).
   const rootTasksBlock = (listType)=>{
@@ -346,7 +364,14 @@ function viewSettings(){
         ${menuDrop}
         <div id="${listId}" class="folder-list" data-dnd-scope="${listType}">
           ${rootTasksBlock(listType)}
-          ${rootFolders.map(f => renderFolder(f, listType)).join("")}
+          ${rootFolders.map(f => `
+            <div class="folder-dropzone folder-dropzone-line small muted" data-drop-before-folder="${f.id}"
+                 style="border:1px dashed #bbb; padding:6px; margin:4px 0; border-radius:8px;">
+              Drag folders here to place before <b>${f.name}</b>
+            </div>
+            ${renderFolder(f, listType)}
+          `).join("")}
+          ${rootFolderTail}
         </div>
       </details>`;
   };
@@ -420,6 +445,13 @@ function ensureTaskCategories(){
 
    
   const byIdFolder = id => window.settingsFolders.find(f => String(f.id)===String(id)) || null;
+  const normalizeFolderOrder = (parentId) => {
+    const siblings = window.settingsFolders
+      .filter(f => String(f.parent||"") === String(parentId||""))
+      .sort((a,b)=> (Number(b.order||0) - Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
+    let n = siblings.length;
+    siblings.forEach(f => { f.order = n--; });
+  };
   const hasChildren = (fid)=>{
     const subF = window.settingsFolders.some(f => String(f.parent||"")===String(fid));
     const tInt = window.tasksInterval.some(t => String(t.cat||"")===String(fid));
@@ -528,7 +560,7 @@ function ensureTaskCategories(){
       if (kind === "task" && id){
         // Prefer shared mover if present; else set cat directly.
         if (typeof moveNodeSafely === "function"){
-          if (moveNodeSafely("task", id, { intoCat: fid })){
+          if (moveNodeSafely("task", id, { intoCat: fid, position: "end" })){
             persist(); if (typeof renderSettings === "function") renderSettings();
           }
           return;
@@ -542,7 +574,7 @@ function ensureTaskCategories(){
       // Drop a FOLDER into this folder (re-parent)
       if (kind === "category" && id){
         if (typeof moveNodeSafely === "function"){
-          if (moveNodeSafely("category", id, { intoCat: fid })){
+          if (moveNodeSafely("category", id, { intoCat: fid, position: "end" })){
             persist(); if (typeof renderSettings === "function") renderSettings();
           }
           return;
@@ -555,6 +587,71 @@ function ensureTaskCategories(){
           cur = (cur.parent!=null) ? byIdFolder(cur.parent) : null;
         }
         f.parent = fid; f.order = (++window._maintOrderCounter);
+        persist(); if (typeof renderSettings === "function") renderSettings();
+      }
+    });
+  });
+
+  // ===== 4b) Drag targets: reorder folders among siblings =====
+  root.querySelectorAll("[data-drop-before-folder],[data-drop-folder-tail]").forEach(zone=>{
+    if (zone.dataset.reorderWired) return; zone.dataset.reorderWired = "1";
+    zone.addEventListener("dragover",(e)=>{ allow(e); zone.classList.add("dragover"); });
+    zone.addEventListener("dragleave",()=> zone.classList.remove("dragover"));
+    zone.addEventListener("drop",(e)=>{
+      const raw = e.dataTransfer.getData("text/plain") || "";
+      zone.classList.remove("dragover");
+      const [kind, id] = raw.split(":");
+      if (kind !== "category" || !id) return;
+
+      const beforeId = zone.getAttribute("data-drop-before-folder");
+      if (beforeId){
+        if (typeof moveNodeSafely === "function"){
+          if (moveNodeSafely("category", id, { beforeCat: { id: beforeId } })){
+            persist(); if (typeof renderSettings === "function") renderSettings();
+          }
+          return;
+        }
+        const dest = byIdFolder(beforeId);
+        const moving = byIdFolder(id);
+        if (!dest || !moving || String(dest.id) === String(moving.id)) return;
+        const originalParent = moving.parent || null;
+        moving.parent = dest.parent || null;
+        moving.order = (Number(dest.order) || 0) + 0.5;
+        normalizeFolderOrder(dest.parent || null);
+        if (String(originalParent||"") !== String(dest.parent||"")){
+          normalizeFolderOrder(originalParent);
+        }
+        persist(); if (typeof renderSettings === "function") renderSettings();
+        return;
+      }
+
+      if (zone.hasAttribute("data-drop-folder-tail")){
+        const parentAttr = zone.getAttribute("data-drop-folder-tail");
+        const parentId = parentAttr === "" ? null : parentAttr;
+        if (typeof moveNodeSafely === "function"){
+          if (moveNodeSafely("category", id, { intoCat: parentId, position: "end" })){
+            persist(); if (typeof renderSettings === "function") renderSettings();
+          }
+          return;
+        }
+        const moving = byIdFolder(id);
+        if (!moving) return;
+        const originalParent = moving.parent || null;
+        if (parentId != null){
+          let cur = parentId;
+          let guard = 0;
+          while (cur != null && guard++ < 1000){
+            if (String(cur) === String(moving.id)) return;
+            const next = byIdFolder(cur);
+            cur = next ? (next.parent || null) : null;
+          }
+        }
+        moving.parent = parentId;
+        moving.order = (++window._maintOrderCounter);
+        normalizeFolderOrder(parentId);
+        if (String(originalParent||"") !== String(parentId||"")){
+          normalizeFolderOrder(originalParent);
+        }
         persist(); if (typeof renderSettings === "function") renderSettings();
       }
     });

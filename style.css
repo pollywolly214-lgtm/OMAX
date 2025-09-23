@@ -196,6 +196,20 @@ header { background: #0a63c2; color: #fff; padding: 0 16px 4px; }
   align-self: flex-end;
   line-height: 1.2;
 }
+
+.folder-dropzone {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.folder-dropzone.dragover {
+  background: #e6f0ff !important;
+  border-color: #0a63c2 !important;
+  color: #0a3365 !important;
+}
+
+.folder-dropzone-line {
+  display: block;
+}
 h1 { margin: 0 0 10px; font-size: 22px; }
 .nav {
   display: flex;
