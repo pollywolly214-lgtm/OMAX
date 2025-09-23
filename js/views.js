@@ -762,6 +762,8 @@ function viewCosts(model){
   const maintenanceJobsNote = data.maintenanceJobsNote || "";
   const maintenanceJobsEmpty = data.maintenanceJobsEmpty || "";
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
+  const orderSummary = data.orderRequestSummary || {};
+  const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
 
   return `
   <div class="container cost-layout">
@@ -791,6 +793,30 @@ function viewCosts(model){
       </div>
       <canvas id="costChart" width="780" height="240"></canvas>
       ${data.chartNote ? `<p class="small muted">${esc(data.chartNote)}</p>` : `<p class="small muted">Toggle a line to explore how maintenance and job efficiency costs evolve over time.</p>`}
+    </div>
+
+    <div class="block">
+      <h3>Waterjet Part Summary</h3>
+      <div class="cost-jobs-summary order-cost-summary">
+        <div><span class="label">Requests logged</span><span>${esc(orderSummary.requestCountLabel || "0")}</span></div>
+        <div><span class="label">Approved spend</span><span>${esc(orderSummary.totalApprovedLabel || "$0.00")}</span></div>
+      </div>
+      ${orderRows.length ? `
+        <table class="cost-table">
+          <thead><tr><th>Request</th><th>Resolved</th><th>Status</th><th>Approved $</th><th>Requested $</th></tr></thead>
+          <tbody>
+            ${orderRows.map(row => `
+              <tr>
+                <td>${esc(row.code || "Order")}</td>
+                <td>${esc(row.resolvedLabel || "—")}</td>
+                <td>${esc(row.statusLabel || "")}</td>
+                <td>${esc(row.approvedLabel || "$0.00")}</td>
+                <td>${esc(row.requestedLabel || "$0.00")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      ` : `<p class="small muted">${esc(orderSummary.emptyMessage || "Approve or deny order requests to build the spend log.")}</p>`}
     </div>
 
     <div class="block">
@@ -1045,15 +1071,21 @@ function inventoryRowsHTML(list){
   if (!Array.isArray(list) || !list.length){
     return `<tr><td colspan="6" class="muted">No inventory items match your search.</td></tr>`;
   }
-  return list.map(i => `
+  return list.map(i => {
+    const priceVal = i.price != null && i.price !== "" ? Number(i.price) : "";
+    const priceDisplay = priceVal === "" || Number.isNaN(priceVal) ? "" : priceVal;
+    return `
     <tr>
       <td>${i.name}</td>
       <td><input type="number" min="0" step="1" data-inv="qty" data-id="${i.id}" value="${i.qty}"></td>
       <td>${i.unit||"pcs"}</td>
       <td>${i.pn||"—"}</td>
       <td>${i.link ? `<a href="${i.link}" target="_blank" rel="noopener">link</a>` : "—"}</td>
+      <td><input type="number" step="0.01" min="0" data-inv="price" data-id="${i.id}" value="${priceDisplay}"></td>
       <td><input type="text" data-inv="note" data-id="${i.id}" value="${i.note||""}"></td>
-    </tr>`).join("");
+      <td><button type="button" class="inventory-add" data-order-add="${i.id}">Add to order request</button></td>
+    </tr>`;
+  }).join("");
 }
 
 function viewInventory(){
@@ -1074,10 +1106,156 @@ function viewInventory(){
       </div>
       <div class="small muted" style="margin-bottom:8px;">Results update as you type.</div>
       <table>
-        <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>PN</th><th>Link</th><th>Note</th></tr></thead>
+        <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th></th></tr></thead>
         <tbody data-inventory-rows>${rows}</tbody>
       </table>
     </div>
   </div>`;
+}
+
+function viewOrderRequest(model){
+  const data = model || {};
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const tab = data.tab === "history" ? "history" : "active";
+  const summary = data.summary || {};
+  const active = data.active || {};
+  const history = Array.isArray(data.history) ? data.history : [];
+  const downloadLabel = esc(active.downloadLabel || "Download request (.csv)");
+
+  const activeContent = `
+    <div class="order-card">
+      <div class="order-card-header">
+        <div>
+          <h3>Current Order Request</h3>
+          <p class="small muted">${esc(active.subtitle || "Create a list of needed parts from inventory.")}</p>
+        </div>
+        <div class="order-meta">
+          <span class="label">Reference</span>
+          <span class="value">${esc(active.code || "—")}</span>
+          <span class="label">Created</span>
+          <span class="value">${esc(active.created || "—")}</span>
+        </div>
+      </div>
+      ${active.items && active.items.length ? `
+        <div class="order-table-wrap">
+          <table class="order-table">
+            <thead>
+              <tr>
+                <th>Approve?</th>
+                <th>Item</th>
+                <th>Part #</th>
+                <th>Unit price</th>
+                <th>Qty</th>
+                <th>Line total</th>
+                <th>Store link</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${active.items.map(item => `
+                <tr>
+                  <td><input type="checkbox" data-order-approve="${esc(item.id)}" ${item.selected ? "checked" : ""}></td>
+                  <td class="order-item-name">${esc(item.name || "Unnamed item")}</td>
+                  <td>${esc(item.pn || "—")}</td>
+                  <td><input type="number" step="0.01" min="0" data-order-price="${esc(item.id)}" value="${esc(item.priceInput || "")}" placeholder="0.00"></td>
+                  <td><input type="number" min="1" step="1" data-order-qty="${esc(item.id)}" value="${esc(item.qtyInput || "1")}"></td>
+                  <td class="order-money">${esc(item.lineTotal || "$0.00")}</td>
+                  <td>${item.link ? `<a href="${esc(item.link)}" target="_blank" rel="noopener">View</a>` : "—"}</td>
+                  <td><button type="button" class="link danger" data-order-remove="${esc(item.id)}">Remove</button></td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      ` : `<p class="small muted">No items yet. Use the inventory page to add parts to this order request.</p>`}
+      <div class="order-card-footer">
+        <div>
+          <div class="order-total">Requested total: <strong data-order-total-value>${esc(active.total || "$0.00")}</strong></div>
+          <div class="order-total small" data-order-selection-row ${active.selectionTotal ? "" : "hidden"}>Selected for approval: <strong data-order-selection-value>${esc(active.selectionTotal || "$0.00")}</strong></div>
+        </div>
+        <div class="order-actions">
+          <button type="button" data-order-download>${downloadLabel}</button>
+          <button type="button" class="primary" data-order-approve-all ${!active.canApprove ? "disabled" : ""}>Mark approved</button>
+          <button type="button" data-order-partial ${!active.canApprove ? "disabled" : ""}>Save partial approval</button>
+          <button type="button" class="secondary" data-order-deny ${!active.canApprove ? "disabled" : ""}>Mark denied</button>
+        </div>
+      </div>
+    </div>`;
+
+  const historyContent = `
+    <div class="order-history">
+      ${history.length ? history.map(req => `
+        <details class="order-history-entry">
+          <summary>
+            <span class="title">${esc(req.code || req.id || "Request")}</span>
+            <span class="dates">${esc(req.dateRange || "")}</span>
+            <span class="status ${esc(req.statusClass || "")}">${esc(req.statusLabel || "")}</span>
+            <span class="total">${esc(req.total || "$0.00")}</span>
+          </summary>
+          <div class="order-history-body">
+            <div class="order-history-meta">
+              <div><span class="label">Approved total</span><span class="value">${esc(req.approvedTotal || "$0.00")}</span></div>
+              <div><span class="label">Requested total</span><span class="value">${esc(req.total || "$0.00")}</span></div>
+              <div><span class="label">Items</span><span class="value">${esc(req.itemCount || "0")}</span></div>
+            </div>
+            ${req.items && req.items.length ? `
+              <table class="order-table">
+                <thead>
+                  <tr><th>Item</th><th>Part #</th><th>Unit price</th><th>Qty</th><th>Line total</th><th>Status</th><th>Store link</th></tr>
+                </thead>
+                <tbody>
+                  ${req.items.map(item => `
+                    <tr>
+                      <td>${esc(item.name || "")}</td>
+                      <td>${esc(item.pn || "—")}</td>
+                      <td>${esc(item.price || "$0.00")}</td>
+                      <td>${esc(item.qty || "0")}</td>
+                      <td class="order-money">${esc(item.total || "$0.00")}</td>
+                      <td><span class="status-chip ${esc(item.statusClass || "")}">${esc(item.statusLabel || "Pending")}</span></td>
+                      <td>${item.link ? `<a href="${esc(item.link)}" target="_blank" rel="noopener">View</a>` : "—"}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            ` : `<p class="small muted">No line items recorded.</p>`}
+            <div class="order-history-actions">
+              <button type="button" data-order-download-history="${esc(req.id)}">Download (.csv)</button>
+            </div>
+          </div>
+        </details>
+      `).join("") : `<p class="small muted">No previous order requests yet. Approved or denied requests will appear here.</p>`}
+    </div>`;
+
+  const summaryContent = `
+    <div class="order-summary">
+      <div class="order-summary-card">
+        <span class="label">Orders processed</span>
+        <span class="value">${esc(summary.requestCount || "0")}</span>
+      </div>
+      <div class="order-summary-card">
+        <span class="label">Approved spend to date</span>
+        <span class="value">${esc(summary.approvedTotal || "$0.00")}</span>
+      </div>
+      <div class="order-summary-card">
+        <span class="label">Last update</span>
+        <span class="value">${esc(summary.lastUpdated || "—")}</span>
+      </div>
+    </div>`;
+
+  return `
+    <div class="container order-request-layout">
+      <div class="block" style="grid-column:1 / -1">
+        <h3>Order Requests</h3>
+        <p class="small muted">Build purchase lists for waterjet parts, approve them, and keep an auditable history.</p>
+        ${summaryContent}
+        <div class="order-tabs">
+          <button type="button" data-order-tab="active" class="${tab === "active" ? "active" : ""}">Active request</button>
+          <button type="button" data-order-tab="history" class="${tab === "history" ? "active" : ""}">History</button>
+        </div>
+        <div class="order-tab-content">
+          ${tab === "history" ? historyContent : activeContent}
+        </div>
+      </div>
+    </div>`;
 }
 
