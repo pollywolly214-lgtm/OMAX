@@ -202,6 +202,20 @@ function viewSettings(){
   // ------- Folder store (nesting via parent=null|folderId). Back-compat if older entries lack "parent".
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
   for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
+  let highestOrder = Number(window._maintOrderCounter || 0) || 0;
+  window.settingsFolders.forEach(f => {
+    const raw = Number(f.order);
+    if (!isFinite(raw)){
+      highestOrder += 1;
+      f.order = highestOrder;
+    } else {
+      if (raw > highestOrder) highestOrder = raw;
+      f.order = raw;
+    }
+  });
+  if (typeof window._maintOrderCounter === "undefined" || window._maintOrderCounter < highestOrder){
+    window._maintOrderCounter = highestOrder;
+  }
 
   // ------- Small helpers (IDs/data-* kept the same so existing handlers work) -------
    
@@ -286,11 +300,31 @@ function viewSettings(){
 
   // ------- Folder tree helpers (shared category tree; tasks filtered per menu) -------
   const folders = window.settingsFolders;
-  const kidsOf  = (parentId)=> folders.filter(f => (f.parent||null) === (parentId||null));
+  const kidsOf  = (parentId)=> folders
+    .filter(f => (f.parent||null) === (parentId||null))
+    .slice()
+    .sort((a,b)=>{
+      const ao = Number(a.order)||0;
+      const bo = Number(b.order)||0;
+      if (ao !== bo) return ao - bo;
+      return String(a.name||"").localeCompare(String(b.name||""));
+    });
   const tasksIn = (list, folderId)=> (Array.isArray(list)?list:[]).filter(t => (t.cat||null) === (folderId||null));
 
+  function renderChildFolders(parentId, listType){
+    const childFolders = kidsOf(parentId);
+    const parentAttr = parentId == null ? "" : parentId;
+    let html = "";
+    childFolders.forEach(child => {
+      html += `<div class="folder-sortline" data-cat-sort data-parent="${parentAttr}" data-before="${child.id}"></div>`;
+      html += renderFolder(child, listType);
+    });
+    html += `<div class="folder-sortline" data-cat-sort data-parent="${parentAttr}" data-before=""></div>`;
+    return html;
+  }
+
   const renderFolder = (folder, listType) => {
-    const subFolders = kidsOf(folder.id).map(sf => renderFolder(sf, listType)).join("");
+    const subFolders = renderChildFolders(folder.id, listType);
     const list       = (listType==="interval"?tasksInterval:tasksAsReq);
     const tasksHtml  = tasksIn(list, folder.id).map(t => card(t, listType)).join("")
                       || `<div class="small muted">No items in this category.</div>`;
@@ -318,9 +352,6 @@ function viewSettings(){
       </details>`;
   };
 
-  // Root folders (parent=null)
-  const rootFolders = kidsOf(null);
-
   // Root-level (no folder) tasks should appear at the top of each menu (no "Uncategorized" label).
   const rootTasksBlock = (listType)=>{
     const list = (listType==="interval" ? tasksInterval : tasksAsReq);
@@ -346,7 +377,7 @@ function viewSettings(){
         ${menuDrop}
         <div id="${listId}" class="folder-list" data-dnd-scope="${listType}">
           ${rootTasksBlock(listType)}
-          ${rootFolders.map(f => renderFolder(f, listType)).join("")}
+          ${renderChildFolders(null, listType)}
         </div>
       </details>`;
   };
@@ -420,6 +451,61 @@ function ensureTaskCategories(){
 
    
   const byIdFolder = id => window.settingsFolders.find(f => String(f.id)===String(id)) || null;
+  const sortFoldersForOrder = (list)=> list.slice().sort((a,b)=>{
+    const ao = Number(a.order)||0;
+    const bo = Number(b.order)||0;
+    if (ao !== bo) return ao - bo;
+    return String(a.name||"").localeCompare(String(b.name||""));
+  });
+  function normalizeParentId(raw){
+    if (raw == null || raw === "") return null;
+    return raw;
+  }
+  function moveCategoryToPosition(folderId, parentRaw, beforeRaw){
+    const folder = byIdFolder(folderId);
+    if (!folder) return false;
+    const targetParent = normalizeParentId(parentRaw);
+    const beforeId = beforeRaw ? String(beforeRaw) : null;
+    if (String(folder.id) === String(targetParent||"")) return false;
+
+    let ancestor = targetParent ? byIdFolder(targetParent) : null;
+    let hops = 0;
+    while (ancestor && hops++ < 1000){
+      if (String(ancestor.id) === String(folder.id)) return false;
+      ancestor = ancestor.parent != null ? byIdFolder(ancestor.parent) : null;
+    }
+
+    if (beforeId && String(beforeId) === String(folder.id)){
+      if (String(folder.parent||"") === String(targetParent||"")) return false;
+    }
+
+    const siblings = sortFoldersForOrder(
+      window.settingsFolders.filter(f => (f.parent||null) === (targetParent||null) && String(f.id)!==String(folder.id))
+    );
+    let insertIndex = beforeId ? siblings.findIndex(f => String(f.id) === beforeId) : -1;
+    if (insertIndex < 0) insertIndex = siblings.length;
+    const newOrder = siblings.slice();
+    newOrder.splice(insertIndex, 0, folder);
+
+    const sameParent = String(folder.parent||"") === String(targetParent||"");
+    if (sameParent){
+      const currentOrder = sortFoldersForOrder(
+        window.settingsFolders.filter(f => (f.parent||null) === (targetParent||null))
+      ).map(f => String(f.id));
+      const desiredOrder = newOrder.map(f => String(f.id));
+      let identical = currentOrder.length === desiredOrder.length;
+      if (identical){
+        for (let i = 0; i < currentOrder.length; i++){
+          if (currentOrder[i] !== desiredOrder[i]){ identical = false; break; }
+        }
+      }
+      if (identical) return false;
+    }
+
+    folder.parent = targetParent;
+    newOrder.forEach(f => { f.order = (++window._maintOrderCounter); });
+    return true;
+  }
   const hasChildren = (fid)=>{
     const subF = window.settingsFolders.some(f => String(f.parent||"")===String(fid));
     const tInt = window.tasksInterval.some(t => String(t.cat||"")===String(fid));
@@ -494,6 +580,31 @@ function ensureTaskCategories(){
     });
   });
 
+  // ===== 2b) Drop lines to re-order categories within a parent =====
+  root.querySelectorAll("[data-cat-sort]").forEach(line => {
+    if (line.dataset.wired) return; line.dataset.wired = "1";
+    line.addEventListener("dragover",(e)=>{
+      if (!window._draggingCategoryId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      line.classList.add("dragover");
+    });
+    line.addEventListener("dragleave",()=> line.classList.remove("dragover"));
+    line.addEventListener("drop",(e)=>{
+      line.classList.remove("dragover");
+      const raw = e.dataTransfer.getData("text/plain") || "";
+      const [kind, id] = raw.split(":");
+      const catId = (kind === "category" && id) ? id : (window._draggingCategoryId || "");
+      if (!catId) return;
+      const parent = line.getAttribute("data-parent");
+      const before = line.getAttribute("data-before");
+      if (moveCategoryToPosition(catId, parent, before)){
+        persist();
+        if (typeof renderSettings === "function") renderSettings();
+      }
+    });
+  });
+
   // ===== 3) Make folder headers draggable (Explorer-style) =====
   root.querySelectorAll('details.folder > summary').forEach(sum=>{
     if (sum.dataset.wired) return; sum.dataset.wired="1";
@@ -504,9 +615,13 @@ function ensureTaskCategories(){
       if (!fid) return;
       e.dataTransfer.setData("text/plain", `category:${fid}`);
       e.dataTransfer.effectAllowed = "move";
+      window._draggingCategoryId = fid;
       sum.classList.add("dragging");
     });
-    sum.addEventListener("dragend",()=> sum.classList.remove("dragging"));
+    sum.addEventListener("dragend",()=>{
+      sum.classList.remove("dragging");
+      delete window._draggingCategoryId;
+    });
   });
 
   // ===== 4) Drag targets: drop into a folder’s body (to file items here) =====
@@ -820,10 +935,12 @@ function viewJobs(){
     const efficiencyDetail = `${statusSummary}; ${baselineDetail}`;
 
     // Dates (for display / edit row)
-    const startTxt = j.startISO ? (new Date(j.startISO)).toDateString() : "—";
-    const dueDate  = j.dueISO ? new Date(j.dueISO) : null;
-    const dueTxt   = dueDate ? dueDate.toDateString() : "—";
-    const dueVal   = dueDate ? dueDate.toISOString().slice(0,10) : "";
+    const startDate = typeof parseDateISO === "function" ? parseDateISO(j.startISO) : (j.startISO ? new Date(j.startISO) : null);
+    const dueDate   = typeof parseDateISO === "function" ? parseDateISO(j.dueISO)   : (j.dueISO   ? new Date(j.dueISO)   : null);
+    const startTxt  = startDate ? startDate.toDateString() : "—";
+    const dueTxt    = dueDate ? dueDate.toDateString() : "—";
+    const startVal  = typeof formatDateForInput === "function" ? formatDateForInput(j.startISO) : (j.startISO || "");
+    const dueVal    = typeof formatDateForInput === "function" ? formatDateForInput(j.dueISO)   : (j.dueISO   || "");
 
     if (!editing){
       // NORMAL ROW (with Log button UNDER the job name)
@@ -865,7 +982,7 @@ function viewJobs(){
         <td><input type="number" min="1" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></td>
         <td><input type="text" data-j="material" data-id="${j.id}" value="${j.material||""}"></td>
         <td colspan="2">
-          Start: <input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}">
+          Start: <input type="date" data-j="startISO" data-id="${j.id}" value="${startVal}">
           Due:   <input type="date" data-j="dueISO"   data-id="${j.id}" value="${dueVal}">
         </td>
         <td>${matTotal.toFixed(2)}</td>
