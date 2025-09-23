@@ -114,8 +114,10 @@ function showJobBubble(jobId, anchor){
     const noteAuto = eff.usedAutoFromManual
       ? `<div class="small"><strong>Auto from last manual</strong>: continuing at ${DAILY_HOURS} hr/day.</div>`
       : (eff.usedFromStartAuto ? `<div class="small"><strong>Auto</strong>: assuming ${DAILY_HOURS} hr/day from start.</div>` : ``);
-    const startTxt = j.startISO ? new Date(j.startISO).toDateString() : "—";
-    const dueTxt   = j.dueISO   ? new Date(j.dueISO).toDateString()   : "—";
+    const startDate = parseDateLocal(j.startISO);
+    const dueDate   = parseDateLocal(j.dueISO);
+    const startTxt  = startDate ? startDate.toDateString() : "—";
+    const dueTxt    = dueDate   ? dueDate.toDateString()   : "—";
     b.innerHTML = `
       <div class="bubble-title">${j.name}</div>
       <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
@@ -178,10 +180,11 @@ function renderCalendar(){
 
   const jobsMap = {};
   cuttingJobs.forEach(j => {
-    if (!j.startISO || !j.dueISO) return;
-    const start = new Date(j.startISO), end = new Date(j.dueISO);
+    const start = parseDateLocal(j.startISO);
+    const end   = parseDateLocal(j.dueISO);
+    if (!start || !end) return;
     start.setHours(0,0,0,0); end.setHours(0,0,0,0);
-    const cur = new Date(start);
+    const cur = new Date(start.getTime());
     while (cur <= end){
       const key = ymd(cur);
       (jobsMap[key] ||= []).push({ type:"job", id:String(j.id), name:j.name });
