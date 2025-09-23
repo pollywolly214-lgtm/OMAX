@@ -37,6 +37,39 @@ async function filesToAttachments(fileList){
   return attachments;
 }
 
+function buildNextDuePreview({ includeNote = true, noteText = "Preview of tracked tasks — log machine hours to replace this with your live schedule." } = {}){
+  const escapeHtml = (str)=> String(str || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const previewOffsets = [2, 6, 11, 19];
+  const previewSource = (Array.isArray(window.defaultIntervalTasks) && window.defaultIntervalTasks.length)
+    ? window.defaultIntervalTasks.slice(0, previewOffsets.length)
+    : [
+        { name: "Nozzle filter & inlet O-ring" },
+        { name: "Mixing tube rotation" },
+        { name: "Drain hopper regulator water bowl" },
+        { name: "Lubricate Z-axis rail shafts & lead screw" }
+      ];
+  const today = new Date(); today.setHours(0,0,0,0);
+  const formatter = (date)=> date.toLocaleDateString(undefined, { weekday:"short", month:"short", day:"numeric" });
+  const previewList = previewSource.map((task, idx) => {
+    const offset = previewOffsets[idx] ?? previewOffsets[previewOffsets.length - 1];
+    const due = new Date(today); due.setDate(due.getDate() + offset);
+    const dueText = `${offset}d → ${formatter(due)}`;
+    return `<li>
+      <div class="next-due-task next-due-task-preview" aria-hidden="true">
+        <span class="next-due-name">${escapeHtml(task.name || "Task setup pending")}</span>
+        <span class="next-due-meta">${escapeHtml(dueText)}</span>
+      </div>
+    </li>`;
+  }).join("");
+  const note = includeNote ? `<p class="next-due-preview-note">${escapeHtml(noteText)}</p>` : "";
+  return `
+    <div class="next-due-preview">
+      ${note}
+      <ul class="next-due-list" aria-hidden="true">${previewList}</ul>
+    </div>
+  `.trim();
+}
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   content.innerHTML = viewDashboard();
@@ -82,8 +115,12 @@ function renderDashboard(){
       </li>`;
     }).join("");
     ndBox.innerHTML = `<ul class="next-due-list">${listHtml}</ul>`;
+    ndBox.classList.remove("next-due-preview-mode");
+    delete ndBox.dataset.preview;
   }else{
-    ndBox.innerHTML = `<div class="muted small">No upcoming due items.</div>`;
+    ndBox.innerHTML = buildNextDuePreview();
+    ndBox.classList.add("next-due-preview-mode");
+    ndBox.dataset.preview = "1";
   }
 
   if (!ndBox.dataset.wired){
@@ -2496,6 +2533,20 @@ function renderInventory(){
 
 function renderSignedOut(){
   const content = document.getElementById("content"); if (!content) return;
-  content.innerHTML = `<div class='container'><div class='block'><h3>Please sign in to view workspace.</h3></div></div>`;
+  const preview = buildNextDuePreview({
+    noteText: "Sign in and add machine hours to generate your real next-due list.",
+    includeNote: true
+  });
+  content.innerHTML = `
+    <div class='container signed-out-container'>
+      <div class='block signed-out-message'>
+        <h3>Please sign in to view workspace.</h3>
+        <p class='small'>Use your maintenance login to sync tasks, hours, and inventory across the shop.</p>
+        <div class='next-due-preview-card'>
+          <h4 class='next-due-preview-title'>Next due preview</h4>
+          ${preview}
+        </div>
+      </div>
+    </div>`;
 }
 
