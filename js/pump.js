@@ -174,13 +174,60 @@ function pumpBuildTimeTicks(range, startTime, endTime){
   return ticks;
 }
 
-function viewPumpWidget(){
+
+function viewPumpInfoPanel(){
   const latest = pumpLatest();
   const pct    = latest ? pumpPercentChange(latest.rpm) : null;
   const col    = pumpColorFor(pct);
   const baselineVal = pumpEff.baselineRPM ?? "";
   const todayISO    = new Date().toISOString().slice(0,10);
+  const baselineTxt = pumpEff.baselineRPM
+    ? `${pumpEff.baselineRPM} RPM${pumpEff.baselineDateISO ? ` (${pumpEff.baselineDateISO})` : ""}`
+    : "—";
   const latestTxt   = latest ? `${latest.rpm} RPM (${latest.dateISO})` : "—";
+  let summary;
+  if (!pumpEff.baselineRPM){
+    summary = "Set a baseline after a rebuild to start tracking pump efficiency.";
+  }else if (!latest){
+    summary = "Log an RPM reading to compare against your baseline.";
+  }else if (pct != null){
+    if (Math.abs(pct) < 0.01){
+      summary = "Latest reading matches the baseline.";
+    }else if (pct > 0){
+      summary = `Latest reading is ${Math.abs(pct).toFixed(1)}% above the baseline.`;
+    }else{
+      summary = `Latest reading is ${Math.abs(pct).toFixed(1)}% below the baseline.`;
+    }
+  }else{
+    summary = "Latest reading recorded.";
+  }
+  return `
+    <div class="pump-info-header">
+      <h3>Pump Efficiency</h3>
+      <span class="chip ${col.cls}">${col.label}</span>
+    </div>
+    <p class="pump-info-summary small muted">${summary}</p>
+    <h4>Baseline @ 49 ksi</h4>
+    <form id="pumpBaselineForm" class="mini-form">
+      <input type="number" id="pumpBaselineRPM" min="1" step="1" placeholder="RPM" value="${baselineVal}">
+      <button type="submit">Set baseline (today)</button>
+    </form>
+    <p class="small muted">Lower RPM is better. Record the baseline right after a rebuild.</p>
+    <h4 style="margin-top:12px">Daily log</h4>
+    <form id="pumpLogForm" class="mini-form">
+      <input type="date" id="pumpLogDate" value="${todayISO}" required>
+      <input type="number" id="pumpLogRPM" min="1" step="1" placeholder="RPM at 49 ksi" required>
+      <button type="submit">Add / Update</button>
+    </form>
+    <div class="pump-stats">
+      <div><span class="lbl">Baseline:</span> <span>${baselineTxt}</span></div>
+      <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
+    </div>`;
+}
+function viewPumpChartPanel(){
+  const latest = pumpLatest();
+  const pct    = latest ? pumpPercentChange(latest.rpm) : null;
+  const col    = pumpColorFor(pct);
   const rangeValue  = window.pumpChartRange || "3m";
   const rangeOptions = PUMP_RANGE_OPTIONS.map(opt => `<option value="${opt.value}" ${opt.value===rangeValue?"selected":""}>Last ${opt.label}</option>`).join("");
   const expanded = window.pumpChartExpanded === true;
@@ -188,53 +235,34 @@ function viewPumpWidget(){
   const expandLabel = expanded ? "Shrink" : "Expand";
   const expandIcon = expanded ? "⤡" : "⤢";
   return `
-  <details class="block pump-card" open>
-    <summary><b>Pump Efficiency</b> <span class="chip ${col.cls}">${col.label}</span></summary>
-    <div class="pump-grid">
-      <div class="pump-col">
-        <h4>Baseline @ 49 ksi</h4>
-        <form id="pumpBaselineForm" class="mini-form">
-          <input type="number" id="pumpBaselineRPM" min="1" step="1" placeholder="RPM" value="${baselineVal}">
-          <button type="submit">Set baseline (today)</button>
-        </form>
-        <div class="small muted">Lower RPM = better. Baseline is recorded after a major/minor rebuild.</div>
-        <h4 style="margin-top:10px">Daily log</h4>
-        <form id="pumpLogForm" class="mini-form">
-          <input type="date" id="pumpLogDate" value="${todayISO}" required>
-          <input type="number" id="pumpLogRPM" min="1" step="1" placeholder="RPM at 49 ksi" required>
-          <button type="submit">Add / Update</button>
-        </form>
-        <div class="pump-stats">
-          <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO})` : "—"}</span></div>
-          <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
-        </div>
-      </div>
-      <div class="pump-col pump-chart-col">
-        <div class="pump-chart-toolbar small muted">
-          <label for="pumpRange">Timeframe:</label>
-          <select id="pumpRange">${rangeOptions}</select>
-        </div>
-        <div class="${wrapCls}">
-          <canvas id="pumpChart" height="${expanded ? 360 : 240}"></canvas>
-          <button type="button" class="pump-expand-btn" data-expanded="${expanded}" title="${expandLabel} chart">${expandIcon} ${expandLabel}</button>
-        </div>
-        <div class="pump-legend small muted">
-          <span>Color codes:</span>
-          <span class="chip green">0–&lt;8%</span>
-          <span class="chip yellow">8–15%</span>
-          <span class="chip orange">&gt;15–18%</span>
-          <span class="chip red">&gt;18%</span>
-          <span class="chip green-better">Negative = better</span>
-        </div>
-      </div>
+    <div class="pump-chart-header">
+      <h3>Pump Performance Trend</h3>
+      <span class="chip ${col.cls}">${col.label}</span>
     </div>
-  </details>
-  ${expanded ? '<div class="pump-chart-backdrop" data-pump-backdrop></div>' : ''}`;
+    <div class="pump-chart-toolbar small muted">
+      <label for="pumpRange">Timeframe:</label>
+      <select id="pumpRange">${rangeOptions}</select>
+    </div>
+    <div class="${wrapCls}">
+      <canvas id="pumpChart" height="${expanded ? 360 : 240}"></canvas>
+      <button type="button" class="pump-expand-btn" data-expanded="${expanded}" title="${expandLabel} chart">${expandIcon} ${expandLabel}</button>
+    </div>
+    <div class="pump-legend small muted">
+      <span>Color codes:</span>
+      <span class="chip green">0–&lt;8%</span>
+      <span class="chip yellow">8–15%</span>
+      <span class="chip orange">&gt;15–18%</span>
+      <span class="chip red">&gt;18%</span>
+      <span class="chip green-better">Negative = better</span>
+    </div>
+    ${expanded ? '<div class="pump-chart-backdrop" data-pump-backdrop></div>' : ''}`;
 }
 function renderPumpWidget(){
-  const host = document.getElementById("pump-widget");
-  if (!host) return;
-  host.innerHTML = viewPumpWidget();
+  const infoHost  = document.getElementById("pump-info-host");
+  const chartHost = document.getElementById("pump-chart-host");
+  if (!infoHost && !chartHost) return;
+  if (infoHost) infoHost.innerHTML = viewPumpInfoPanel();
+  if (chartHost) chartHost.innerHTML = viewPumpChartPanel();
   document.body.classList.toggle("pump-chart-expanded", !!window.pumpChartExpanded);
   document.getElementById("pumpBaselineForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
@@ -251,26 +279,12 @@ function renderPumpWidget(){
     if (!d || !isFinite(rpm) || rpm <= 0) { toast("Enter date and valid RPM."); return; }
     upsertPumpEntry(d, rpm); saveCloudDebounced(); toast("Log saved"); renderPumpWidget();
   });
-  const canvas = document.getElementById("pumpChart");
-  const wrap   = document.querySelector(".pump-chart-wrap");
-  if (canvas && wrap){
-    const rect = wrap.getBoundingClientRect();
-    const availableWidth = rect.width || wrap.clientWidth || canvas.width || 320;
-    const targetWidth = Math.max(320, Math.floor(availableWidth));
-    if (targetWidth && canvas.width !== targetWidth) canvas.width = targetWidth;
-    const expanded = !!window.pumpChartExpanded;
-    let targetHeight = expanded ? Math.max(320, Math.floor((window.innerHeight || 720) * 0.6)) : 240;
-    if (expanded && rect.height){
-      targetHeight = Math.max(targetHeight, Math.floor(rect.height - 96));
-    }
-    if (canvas.height !== targetHeight) canvas.height = targetHeight;
-  }
   const rangeSelect = document.getElementById("pumpRange");
   if (rangeSelect){
     if (rangeSelect.value !== window.pumpChartRange) rangeSelect.value = window.pumpChartRange;
     rangeSelect.addEventListener("change", (e)=>{
       window.pumpChartRange = e.target.value;
-      drawPumpChart(canvas, window.pumpChartRange);
+      refreshPumpChartSize();
     });
   }
   const expandBtn = document.querySelector(".pump-expand-btn");
@@ -283,8 +297,43 @@ function renderPumpWidget(){
     window.pumpChartExpanded = false;
     renderPumpWidget();
   });
+  requestAnimationFrame(()=> refreshPumpChartSize());
+}
+function refreshPumpChartSize(){
+  const canvas = document.getElementById("pumpChart");
+  const wrap   = document.querySelector(".pump-chart-wrap");
+  if (!canvas || !wrap) return;
+  const expanded = !!window.pumpChartExpanded;
+  const rect = wrap.getBoundingClientRect();
+  const availableWidth = rect.width || wrap.clientWidth || canvas.width || 320;
+  const targetWidth = Math.max(220, Math.floor(availableWidth));
+  if (targetWidth && canvas.width !== targetWidth) canvas.width = targetWidth;
+  let targetHeight = expanded ? Math.max(320, Math.floor((window.innerHeight || 720) * 0.6)) : 240;
+  if (expanded && rect.height){
+    targetHeight = Math.max(targetHeight, Math.floor(rect.height - 96));
+  }
+  if (!expanded){
+    const layoutEl = document.getElementById("dashboardLayout");
+    const hasCustom = layoutEl?.classList.contains("has-custom-layout");
+    if (hasCustom){
+      const chartWindow = document.querySelector(".pump-chart-window");
+      const host = document.getElementById("pump-chart-host");
+      if (chartWindow && host){
+        const header = host.querySelector(".pump-chart-header");
+        const toolbar = host.querySelector(".pump-chart-toolbar");
+        const legend = host.querySelector(".pump-legend");
+        const otherHeight = (header?.offsetHeight || 0) + (toolbar?.offsetHeight || 0) + (legend?.offsetHeight || 0) + 48;
+        const available = chartWindow.clientHeight - otherHeight;
+        if (available > 120){
+          targetHeight = Math.max(180, Math.floor(available));
+        }
+      }
+    }
+  }
+  if (canvas.height !== targetHeight) canvas.height = targetHeight;
   drawPumpChart(canvas, window.pumpChartRange);
 }
+
 function drawPumpChart(canvas, rangeValue){
   if (!canvas) return;
   const ctx = canvas.getContext("2d"), W = canvas.width, H = canvas.height;

@@ -485,7 +485,373 @@ function renderDashboard(){
 
   renderCalendar();
   renderPumpWidget();
+  initDashboardLayout();
 }
+
+
+const DASHBOARD_LAYOUT_KEY = "omaxDashLayout.v1";
+const DASHBOARD_EDGE_SIZE = 12;
+
+function initDashboardLayout(){
+  const container = document.getElementById("dashboardLayout");
+  const editBtn = document.getElementById("dashboardEditBtn");
+  if (!container || !editBtn) return;
+  const windows = Array.from(container.querySelectorAll(".dash-window"));
+  if (!windows.length) return;
+
+  const baseRect = container.getBoundingClientRect();
+  const baseHeight = Math.max(Math.round(baseRect.height) || 0, 420);
+  container.dataset.baseHeight = String(baseHeight);
+
+  let layout = loadLayout();
+  if (layout) ensureEntries(layout);
+  applyLayout(layout);
+
+  let editing = false;
+  let active = null;
+
+  editBtn.addEventListener("click", ()=> toggleEditing(!editing));
+  editBtn.setAttribute("aria-pressed", "false");
+
+  const moveHandler = (event)=> handlePointerMove(event);
+  const upHandler = (event)=> finishPointer(event);
+
+  if (window._dashMoveHandler){
+    window.removeEventListener("pointermove", window._dashMoveHandler);
+    window.removeEventListener("pointerup", window._dashUpHandler);
+    window.removeEventListener("pointercancel", window._dashCancelHandler);
+  }
+  window._dashMoveHandler = moveHandler;
+  window._dashUpHandler = upHandler;
+  window._dashCancelHandler = upHandler;
+
+  window.addEventListener("pointermove", moveHandler);
+  window.addEventListener("pointerup", upHandler);
+  window.addEventListener("pointercancel", upHandler);
+
+  if (window._dashResizeHandler){
+    window.removeEventListener("resize", window._dashResizeHandler);
+  }
+  const resizeHandler = ()=>{
+    if (!layout) return;
+    clampLayout(layout);
+    applyLayout(layout);
+  };
+  window._dashResizeHandler = resizeHandler;
+  window.addEventListener("resize", resizeHandler);
+
+  windows.forEach(win => {
+    if (win.dataset.fixed === "true") return;
+    win.addEventListener("pointerdown", event => beginPointer(win, event));
+    win.addEventListener("mousemove", event => updateCursor(win, event));
+    win.addEventListener("mouseleave", ()=>{ if (!active) win.style.cursor = ""; });
+  });
+
+  function toggleEditing(state){
+    if (editing === state) return;
+    editing = state;
+    container.classList.toggle("is-editing", editing);
+    editBtn.setAttribute("aria-pressed", editing ? "true" : "false");
+    editBtn.textContent = editing ? "Done" : "Edit Layout";
+    if (editing){
+      if (!layout){
+        layout = captureLayout();
+        applyLayout(layout);
+      }
+    }else{
+      if (layout){
+        clampLayout(layout);
+        applyLayout(layout);
+        saveLayout(layout);
+      }else{
+        clearLayout();
+      }
+      windows.forEach(win => win.style.cursor = "");
+    }
+  }
+
+  function beginPointer(win, event){
+    if (!editing || event.button !== 0) return;
+    const id = win.dataset.windowId;
+    if (!id) return;
+    event.preventDefault();
+    if (!layout){
+      layout = captureLayout();
+      applyLayout(layout);
+    }
+    if (!layout[id]){
+      layout[id] = rectToEntry(win.getBoundingClientRect());
+    }
+    clampEntry(layout[id], win);
+    const edges = detectEdges(win, event);
+    const type = (edges.left || edges.right || edges.top || edges.bottom) ? "resize" : "drag";
+    active = {
+      pointerId: event.pointerId,
+      id,
+      win,
+      type,
+      edges,
+      startX: event.clientX,
+      startY: event.clientY,
+      startRect: { x: layout[id].x, y: layout[id].y, width: layout[id].width, height: layout[id].height },
+      minWidth: getMinSize(win, "width"),
+      minHeight: getMinSize(win, "height")
+    };
+    win.classList.add("is-active");
+    win.setPointerCapture?.(event.pointerId);
+  }
+
+  function handlePointerMove(event){
+    if (!active || event.pointerId !== active.pointerId) return;
+    const entry = layout[active.id];
+    if (!entry) return;
+    event.preventDefault();
+    const deltaX = event.clientX - active.startX;
+    const deltaY = event.clientY - active.startY;
+    if (active.type === "drag"){
+      const containerWidth = container.clientWidth || container.getBoundingClientRect().width;
+      const maxX = Math.max(0, containerWidth - active.startRect.width);
+      entry.x = clampValue(active.startRect.x + deltaX, 0, maxX);
+      entry.y = Math.max(0, active.startRect.y + deltaY);
+    }else{
+      let { x, y, width, height } = active.startRect;
+      if (active.edges.left){
+        let newX = active.startRect.x + deltaX;
+        const maxX = active.startRect.x + active.startRect.width - active.minWidth;
+        newX = clampValue(newX, 0, maxX);
+        const diff = active.startRect.x - newX;
+        x = newX;
+        width = active.startRect.width + diff;
+      }
+      if (active.edges.right){
+        width = Math.max(active.minWidth, active.startRect.width + deltaX);
+      }
+      if (active.edges.top){
+        let newY = active.startRect.y + deltaY;
+        const maxY = active.startRect.y + active.startRect.height - active.minHeight;
+        newY = clampValue(newY, 0, maxY);
+        const diff = active.startRect.y - newY;
+        y = newY;
+        height = active.startRect.height + diff;
+      }
+      if (active.edges.bottom){
+        height = Math.max(active.minHeight, active.startRect.height + deltaY);
+      }
+      const containerWidth = container.clientWidth || container.getBoundingClientRect().width;
+      if (containerWidth){
+        width = Math.min(width, Math.max(containerWidth, active.minWidth));
+        const maxX = Math.max(0, containerWidth - width);
+        x = clampValue(x, 0, maxX);
+      }
+      entry.x = x;
+      entry.y = y;
+      entry.width = width;
+      entry.height = height;
+    }
+    updateWindowStyle(active.win, entry);
+    updateContainerHeight(layout);
+    requestAnimationFrame(()=> refreshPumpChartSize());
+  }
+
+  function finishPointer(event){
+    if (!active || event.pointerId !== active.pointerId) return;
+    if (active.win.hasPointerCapture?.(event.pointerId)) active.win.releasePointerCapture(event.pointerId);
+    clampEntry(layout[active.id], active.win);
+    updateWindowStyle(active.win, layout[active.id]);
+    active.win.classList.remove("is-active");
+    active = null;
+    updateContainerHeight(layout);
+    saveLayout(layout);
+    requestAnimationFrame(()=> refreshPumpChartSize());
+  }
+
+  function detectEdges(win, event){
+    const rect = win.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left;
+    const offsetY = event.clientY - rect.top;
+    return {
+      left: offsetX <= DASHBOARD_EDGE_SIZE,
+      right: rect.width - offsetX <= DASHBOARD_EDGE_SIZE,
+      top: offsetY <= DASHBOARD_EDGE_SIZE,
+      bottom: rect.height - offsetY <= DASHBOARD_EDGE_SIZE
+    };
+  }
+
+  function updateCursor(win, event){
+    if (!editing || active) return;
+    const edges = detectEdges(win, event);
+    let cursor = "move";
+    const horizontal = edges.left || edges.right;
+    const vertical = edges.top || edges.bottom;
+    if (horizontal && vertical){
+      cursor = (edges.left && edges.top) || (edges.right && edges.bottom) ? "nwse-resize" : "nesw-resize";
+    }else if (horizontal){
+      cursor = "ew-resize";
+    }else if (vertical){
+      cursor = "ns-resize";
+    }
+    win.style.cursor = cursor;
+  }
+
+  function ensureEntries(map){
+    const rect = container.getBoundingClientRect();
+    windows.forEach(win => {
+      const id = win.dataset.windowId;
+      if (!id) return;
+      if (!map[id]){
+        const winRect = win.getBoundingClientRect();
+        map[id] = {
+          x: Math.round(winRect.left - rect.left),
+          y: Math.round(winRect.top - rect.top),
+          width: Math.round(winRect.width),
+          height: Math.round(winRect.height)
+        };
+      }
+      clampEntry(map[id], win);
+    });
+  }
+
+  function captureLayout(){
+    const rect = container.getBoundingClientRect();
+    const map = {};
+    windows.forEach(win => {
+      const id = win.dataset.windowId;
+      if (!id) return;
+      const winRect = win.getBoundingClientRect();
+      map[id] = {
+        x: Math.round(winRect.left - rect.left),
+        y: Math.round(winRect.top - rect.top),
+        width: Math.round(winRect.width),
+        height: Math.round(winRect.height)
+      };
+      clampEntry(map[id], win);
+    });
+    return map;
+  }
+
+  function applyLayout(map){
+    const hasMap = map && Object.keys(map).length;
+    container.classList.toggle("has-custom-layout", !!hasMap);
+    if (!hasMap){
+      container.style.height = "";
+      windows.forEach(win => {
+        win.style.left = "";
+        win.style.top = "";
+        win.style.width = "";
+        win.style.height = "";
+      });
+      requestAnimationFrame(()=> refreshPumpChartSize());
+      return;
+    }
+    clampLayout(map);
+    windows.forEach(win => {
+      const id = win.dataset.windowId;
+      if (!id) return;
+      const entry = map[id];
+      if (entry) updateWindowStyle(win, entry);
+    });
+    updateContainerHeight(map);
+    requestAnimationFrame(()=> refreshPumpChartSize());
+  }
+
+  function updateWindowStyle(win, entry){
+    win.style.left = `${Math.round(entry.x)}px`;
+    win.style.top = `${Math.round(entry.y)}px`;
+    win.style.width = `${Math.round(Math.max(getMinSize(win, "width"), entry.width))}px`;
+    win.style.height = `${Math.round(Math.max(getMinSize(win, "height"), entry.height))}px`;
+  }
+
+  function clampEntry(entry, win){
+    const minWidth = getMinSize(win, "width");
+    const minHeight = getMinSize(win, "height");
+    entry.x = Math.max(0, Number(entry.x) || 0);
+    entry.y = Math.max(0, Number(entry.y) || 0);
+    entry.width = Math.max(minWidth, Number(entry.width) || minWidth);
+    entry.height = Math.max(minHeight, Number(entry.height) || minHeight);
+    const containerWidth = container.clientWidth || container.getBoundingClientRect().width;
+    if (containerWidth){
+      entry.width = Math.min(entry.width, Math.max(containerWidth, minWidth));
+      const maxX = Math.max(0, containerWidth - entry.width);
+      entry.x = clampValue(entry.x, 0, maxX);
+    }
+  }
+
+  function clampLayout(map){
+    windows.forEach(win => {
+      const id = win.dataset.windowId;
+      if (!id || !map[id]) return;
+      clampEntry(map[id], win);
+    });
+  }
+
+  function updateContainerHeight(map){
+    if (!map || !Object.keys(map).length){
+      container.style.height = "";
+      return;
+    }
+    let bottom = 0;
+    Object.keys(map).forEach(id => {
+      const entry = map[id];
+      if (!entry) return;
+      bottom = Math.max(bottom, (Number(entry.y) || 0) + (Number(entry.height) || 0));
+    });
+    const base = Number(container.dataset.baseHeight) || 480;
+    const finalHeight = Math.max(base, bottom + 32);
+    container.style.height = `${Math.ceil(finalHeight)}px`;
+  }
+
+  function rectToEntry(rect){
+    const rectContainer = container.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left - rectContainer.left),
+      y: Math.round(rect.top - rectContainer.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    };
+  }
+
+  function loadLayout(){
+    try{
+      const raw = localStorage.getItem(DASHBOARD_LAYOUT_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    }catch(err){
+      console.warn("Unable to load dashboard layout", err);
+      return null;
+    }
+  }
+
+  function saveLayout(map){
+    if (!map || !Object.keys(map).length){
+      clearLayout();
+      return;
+    }
+    try{
+      localStorage.setItem(DASHBOARD_LAYOUT_KEY, JSON.stringify(map));
+    }catch(err){
+      console.warn("Unable to save dashboard layout", err);
+    }
+  }
+
+  function clearLayout(){
+    try{ localStorage.removeItem(DASHBOARD_LAYOUT_KEY); }
+    catch(err){ /* ignore */ }
+  }
+
+  function getMinSize(win, axis){
+    const attr = axis === "width" ? "minWidth" : "minHeight";
+    const fallback = axis === "width" ? 240 : 200;
+    const raw = Number(win.dataset[attr]);
+    return Math.max(fallback, isFinite(raw) && raw > 0 ? raw : fallback);
+  }
+
+  function clampValue(val, min, max){
+    if (typeof max === "number") return Math.min(Math.max(val, min), max);
+    return Math.max(val, min);
+  }
+}
+
 
 function openJobsEditor(jobId){
   // Navigate to the Jobs page, then open the specified job in edit mode.

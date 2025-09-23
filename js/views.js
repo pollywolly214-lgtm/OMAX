@@ -8,10 +8,22 @@ function viewDashboard(){
     ? new Date(lastEntry.dateISO).toLocaleString()
     : "—";
   return `
-  <div class="container">
-    <div class="dashboard-top">
-      <!-- Total hours -->
-      <div class="block total-hours-block">
+  <div class="container dashboard-container">
+    <div class="dashboard-toolbar" data-dashboard-toolbar>
+      <button type="button" id="dashboardEditBtn" class="dashboard-edit-btn" aria-pressed="false">Edit Layout</button>
+      <span class="dashboard-edit-hint small muted">Drag widgets to reposition or resize them while editing. Calendar stays fixed.</span>
+    </div>
+
+    <div class="dashboard-layout" id="dashboardLayout">
+      <section class="dash-window block pump-info-window" data-window-id="pumpInfo" data-min-width="260" data-min-height="260">
+        <div id="pump-info-host"></div>
+      </section>
+
+      <section class="dash-window block pump-chart-window" data-window-id="pumpChart" data-min-width="360" data-min-height="280">
+        <div id="pump-chart-host"></div>
+      </section>
+
+      <section class="dash-window block total-hours-block" data-window-id="totalHours" data-min-width="260" data-min-height="220">
         <h3>Total Hours</h3>
         <div class="total-hours-controls mini-form">
           <label class="total-hours-label"><span>Enter total hours now:</span>
@@ -23,21 +35,14 @@ function viewDashboard(){
           <span class="hint">Last updated: ${lastUpdated}</span>
           <span class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</span>
         </div>
-      </div>
-    </div>
+      </section>
 
-    <!-- Pump Efficiency widget (rendered by renderPumpWidget) -->
-    <section id="pump-widget" class="block pump-wide"></section>
-
-    <div class="dashboard-schedule-row">
-      <!-- Next due -->
-      <div class="block next-due-block">
+      <section class="dash-window block next-due-block" data-window-id="nextDue" data-min-width="240" data-min-height="220">
         <h3>Next Due</h3>
         <div id="nextDueBox">Calculating…</div>
-      </div>
+      </section>
 
-      <!-- Calendar -->
-      <div class="block calendar-block">
+      <section class="dash-window block calendar-block" data-window-id="calendar" data-fixed="true" data-min-width="420" data-min-height="420">
         <h3>Calendar (Current + Next 2 Months)</h3>
 
         <div class="calendar-toolbar">
@@ -46,7 +51,7 @@ function viewDashboard(){
 
         <div id="months"></div>
         <div class="small">Hover a due item for actions. Click to pin the bubble.</div>
-      </div>
+      </section>
     </div>
   </div>
 
