@@ -203,7 +203,7 @@ h1 { margin: 0 0 10px; font-size: 22px; }
   gap: 6px;
   margin-top: 6px;
 }
-.nav a { color: #e7f0ff; text-decoration: none; padding: 3px 8px; border-radius: 6px; font-size: 13px; }
+.nav a { color: #e7f0ff; text-decoration: none; padding: 3px 8px; border-radius: 6px; font-size: 16px; }
 .nav a.active, .nav a:hover { background: #084f9a; }
 
 .container { padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
