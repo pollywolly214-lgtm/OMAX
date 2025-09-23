@@ -1,6 +1,6 @@
 # OMAX
 OMAX maintenance and log tracker
-
+  
 ## Code structure
 
 The frontend logic is organized into focused scripts under `js/` so each concern is
