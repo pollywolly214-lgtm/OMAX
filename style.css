@@ -427,12 +427,14 @@ th { background: #f7f9fc; }
 .month, .week, .day { pointer-events: auto; }
 
 /* Bubble (hover popover) */
-.bubble {
+.bubble {  
   position: absolute; z-index: 9999; background: #fff; border: 1px solid #d8deea; border-radius: 10px;
   padding: 10px; min-width: 260px; box-shadow: 0 8px 16px rgba(0,0,0,.12);
 }
 .bubble-title { font-weight: 700; margin-bottom: 6px; }
 .bubble-kv { display: grid; grid-template-columns: 120px 1fr; gap: 6px; font-size: 13px; margin: 3px 0; }
+.bubble-kv span:first-child { color: #5a6478; font-weight: 600; }
+.bubble-kv span:last-child { color: #0a63c2; font-weight: 600; }
 .bubble-actions { margin-top: 8px; display:flex; gap:8px; flex-wrap: wrap; }
 
 /* Toast */
