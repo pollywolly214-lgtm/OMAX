@@ -37,6 +37,19 @@ async function filesToAttachments(fileList){
   return attachments;
 }
 
+function populateNextDueBox(){
+  const ndBox = document.getElementById("nextDueBox");
+  if (!ndBox) return;
+  const upcoming = tasksInterval
+    .map(t => ({ t, nd: nextDue(t) }))
+    .filter(x => x.nd)
+    .sort((a,b)=> a.nd.due - b.nd.due)
+    .slice(0,8);
+  ndBox.innerHTML = upcoming.length
+    ? `<ul>${upcoming.map(x=>`<li><span class="cal-task" data-cal-task="${x.t.id}">${x.t.name}</span><span class="muted small">${x.nd.days}d → ${x.nd.due.toDateString()}</span></li>`).join("")}</ul>`
+    : `<div class="muted small">No upcoming due items.</div>`;
+}
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   content.innerHTML = viewDashboard();
@@ -61,16 +74,8 @@ function renderDashboard(){
     renderDashboard();
   });
 
-  // Next due summary
-  const ndBox = document.getElementById("nextDueBox");
-  const upcoming = tasksInterval
-    .map(t => ({ t, nd: nextDue(t) }))
-    .filter(x => x.nd)
-    .sort((a,b)=> a.nd.due - b.nd.due)
-    .slice(0,8);
-  ndBox.innerHTML = upcoming.length
-    ? `<ul>${upcoming.map(x=>`<li><span class="cal-task" data-cal-task="${x.t.id}">${x.t.name}</span> — ${x.nd.days}d → ${x.nd.due.toDateString()}</li>`).join("")}</ul>`
-    : `<div class="muted small">No upcoming due items.</div>`;
+  renderPumpWidget();
+  populateNextDueBox();
 
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
@@ -484,7 +489,6 @@ function renderDashboard(){
   document.getElementById("calendarAddBtn")?.addEventListener("click", ()=> openModal("picker"));
 
   renderCalendar();
-  renderPumpWidget();
 }
 
 function openJobsEditor(jobId){

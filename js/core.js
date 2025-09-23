@@ -87,8 +87,19 @@ function toast(msg){
   .toast.show{opacity:1;transform:translateY(0)}
   /* Pump widget */
   .pump-card{display:block}
-  .pump-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
+  .pump-grid{display:grid;grid-template-columns:minmax(240px,320px) minmax(0,1fr) minmax(180px,220px);gap:16px;margin-top:8px;align-items:stretch}
+  .pump-grid .pump-col:first-child{max-width:320px}
+  .pump-nextdue-col{grid-column:3;display:flex;flex-direction:column;gap:12px}
   .pump-col{background:#fff;border:1px solid #dde3ee;border-radius:10px;padding:12px}
+  @media (max-width:1150px){
+    .pump-grid{grid-template-columns:minmax(220px,280px) minmax(0,1fr)}
+    .pump-baseline-col{grid-column:1;grid-row:1}
+    .pump-nextdue-col{grid-column:1;grid-row:2}
+  }
+  @media (max-width:960px){
+    .pump-grid{grid-template-columns:1fr}
+    .pump-baseline-col,.pump-nextdue-col,.pump-chart-col{grid-column:1;grid-row:auto}
+  }
   details > summary {cursor: pointer;}
   details > summary::-webkit-details-marker {display: none;}
   `;
