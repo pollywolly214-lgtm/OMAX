@@ -25,18 +25,6 @@ function viewDashboard(){
         </div>
       </div>
 
-
-
-
-
-
-
-
-
-
-
-
-
       <!-- Next due -->
       <div class="block next-due-block">
         <h3>Next Due</h3>
