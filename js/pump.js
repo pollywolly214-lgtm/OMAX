@@ -189,23 +189,30 @@ function viewPumpWidget(){
   <details class="block pump-card" open>
     <summary><b>Pump Efficiency</b> <span class="chip ${col.cls}">${col.label}</span></summary>
     <div class="pump-grid">
-      <div class="pump-col pump-baseline-col">
-        <h4>Baseline @ 49 ksi</h4>
-        <form id="pumpBaselineForm" class="mini-form">
-          <input type="number" id="pumpBaselineRPM" min="1" step="1" placeholder="RPM" value="${baselineVal}">
-          <button type="submit">Set baseline (today)</button>
-        </form>
-        <div class="small muted">Lower RPM = better. Baseline is recorded after a major/minor rebuild.</div>
-        <h4 style="margin-top:10px">Daily log</h4>
-        <form id="pumpLogForm" class="mini-form">
-          <input type="date" id="pumpLogDate" value="${todayISO}" required>
-          <input type="number" id="pumpLogRPM" min="1" step="1" placeholder="RPM at 49 ksi" required>
-          <button type="submit">Add / Update</button>
-        </form>
-        <div class="pump-stats">
-          <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO})` : "—"}</span></div>
-          <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
-        </div>
+      <div class="pump-col pump-info-col">
+        <section class="pump-info-section">
+          <h4>Baseline @ 49 ksi</h4>
+          <form id="pumpBaselineForm" class="mini-form">
+            <input type="number" id="pumpBaselineRPM" min="1" step="1" placeholder="RPM" value="${baselineVal}">
+            <button type="submit">Set baseline (today)</button>
+          </form>
+          <div class="small muted">Lower RPM = better. Baseline is recorded after a major/minor rebuild.</div>
+          <h4>Daily log</h4>
+          <form id="pumpLogForm" class="mini-form">
+            <input type="date" id="pumpLogDate" value="${todayISO}" required>
+            <input type="number" id="pumpLogRPM" min="1" step="1" placeholder="RPM at 49 ksi" required>
+            <button type="submit">Add / Update</button>
+          </form>
+          <div class="pump-stats">
+            <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO})` : "—"}</span></div>
+            <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
+          </div>
+        </section>
+        <section class="pump-nextdue">
+          <h4>Next Due</h4>
+          <div id="nextDueBox" class="next-due-box">Calculating…</div>
+          <div class="small muted">Tap a task to jump to its details.</div>
+        </section>
       </div>
       <div class="pump-col pump-chart-col">
         <div class="pump-chart-toolbar small muted">
@@ -224,11 +231,6 @@ function viewPumpWidget(){
           <span class="chip red">&gt;18%</span>
           <span class="chip green-better">Negative = better</span>
         </div>
-      </div>
-      <div class="pump-col pump-nextdue-col">
-        <h4>Next Due</h4>
-        <div id="nextDueBox" class="next-due-box">Calculating…</div>
-        <div class="small muted">Tap a task to jump to its details.</div>
       </div>
     </div>
   </details>
