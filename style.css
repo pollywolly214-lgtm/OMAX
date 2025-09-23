@@ -219,6 +219,55 @@ h1 { margin: 0 0 10px; font-size: 22px; }
 .dashboard-top { grid-column: 1 / -1; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
 .total-hours-block { flex: 1 1 260px; max-width: 360px; }
 .next-due-block { flex: 1 1 220px; max-width: 320px; margin-left: auto; }
+.next-due-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.next-due-task {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid #e1e5ee;
+  background: #f8fbff;
+  color: #1e2b45;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.35;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.next-due-task .next-due-name {
+  font-weight: 600;
+  flex: 1 1 auto;
+}
+.next-due-task .next-due-meta {
+  color: #4b5a75;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.next-due-task:hover,
+.next-due-task:focus {
+  background: #e8f2ff;
+  border-color: #c8d9f6;
+  box-shadow: 0 0 0 2px rgba(10, 99, 194, 0.12);
+  outline: none;
+}
+.next-due-task:focus-visible {
+  outline: 2px solid #0a63c2;
+  outline-offset: 2px;
+  box-shadow: none;
+}
+.next-due-task::-moz-focus-inner {
+  border: 0;
+}
 .total-hours-controls { align-items: flex-end; flex-wrap: nowrap; gap: 6px; margin-bottom: 2px; }
 .total-hours-label { display: flex; align-items: flex-end; gap: 6px; margin: 0; font-weight: 600; flex: 1 1 auto; font-size: 13px; line-height: 1.2; }
 .total-hours-label span { white-space: nowrap; }

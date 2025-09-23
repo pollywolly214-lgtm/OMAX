@@ -68,9 +68,71 @@ function renderDashboard(){
     .filter(x => x.nd)
     .sort((a,b)=> a.nd.due - b.nd.due)
     .slice(0,8);
-  ndBox.innerHTML = upcoming.length
-    ? `<ul>${upcoming.map(x=>`<li><span class="cal-task" data-cal-task="${x.t.id}">${x.t.name}</span> — ${x.nd.days}d → ${x.nd.due.toDateString()}</li>`).join("")}</ul>`
-    : `<div class="muted small">No upcoming due items.</div>`;
+
+  if (upcoming.length){
+    const listHtml = upcoming.map(x => {
+      const id = String(x.t.id);
+      const dueText = `${x.nd.days}d → ${x.nd.due.toDateString()}`;
+      return `<li>
+        <button type="button" class="next-due-task cal-task" data-next-due-task="1" data-task-id="${escapeHtml(id)}" data-cal-task="${escapeHtml(id)}">
+          <span class="next-due-name">${escapeHtml(x.t.name)}</span>
+          <span class="next-due-meta">${escapeHtml(dueText)}</span>
+        </button>
+      </li>`;
+    }).join("");
+    ndBox.innerHTML = `<ul class="next-due-list">${listHtml}</ul>`;
+  }else{
+    ndBox.innerHTML = `<div class="muted small">No upcoming due items.</div>`;
+  }
+
+  if (!ndBox.dataset.wired){
+    ndBox.dataset.wired = "1";
+
+    const findTaskButton = (target)=> target && target.closest ? target.closest("[data-next-due-task]") : null;
+
+    ndBox.addEventListener("click", (e)=>{
+      const btn = findTaskButton(e.target);
+      if (!btn) return;
+      const taskId = btn.dataset.taskId || btn.dataset.calTask;
+      if (!taskId) return;
+      if (typeof hideBubble === "function") hideBubble();
+      if (typeof openSettingsAndReveal === "function") openSettingsAndReveal(taskId);
+    });
+
+    const showBubbleFor = (btn)=>{
+      const taskId = btn?.dataset?.taskId || btn?.dataset?.calTask;
+      if (!taskId) return;
+      if (typeof showTaskBubble === "function") showTaskBubble(String(taskId), btn);
+    };
+
+    const maybeHideBubble = (from, to)=>{
+      if (!from) return;
+      const leavingWidget = !to || !ndBox.contains(to);
+      if (leavingWidget && typeof hideBubbleSoon === "function") hideBubbleSoon();
+    };
+
+    ndBox.addEventListener("mouseover", (e)=>{
+      const btn = findTaskButton(e.target);
+      if (btn) showBubbleFor(btn);
+    });
+
+    ndBox.addEventListener("focusin", (e)=>{
+      const btn = findTaskButton(e.target);
+      if (btn) showBubbleFor(btn);
+    });
+
+    ndBox.addEventListener("mouseout", (e)=>{
+      const from = findTaskButton(e.target);
+      const to = findTaskButton(e.relatedTarget);
+      maybeHideBubble(from, to);
+    });
+
+    ndBox.addEventListener("focusout", (e)=>{
+      const from = findTaskButton(e.target);
+      const to = findTaskButton(e.relatedTarget);
+      maybeHideBubble(from, to);
+    });
+  }
 
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
