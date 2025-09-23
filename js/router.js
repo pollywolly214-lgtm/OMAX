@@ -6,6 +6,7 @@ function nav(){
     <button data-go="#/jobs">Jobs</button>
     <button data-go="#/costs">Costs</button>
     <button data-go="#/inventory">Inventory</button>
+    <button data-go="#/order-request">Order Request</button>
     <span class="right" id="authStatus">—</span>
     <button id="btnSignIn" style="margin-left:4px">Sign in</button>
     <button id="btnSignOut" style="display:none;margin-left:4px">Sign out</button>
@@ -81,6 +82,7 @@ function route(){
     if (raw === "#jobs"      || raw === "#/jobs")      return "#/jobs";
     if (raw === "#costs"     || raw === "#/costs")     return "#/costs";
     if (raw === "#inventory" || raw === "#/inventory") return "#/inventory";
+    if (raw === "#order-request" || raw === "#/order-request") return "#/order-request";
     // Fallback to dashboard
     return "#/";
   }
@@ -105,6 +107,7 @@ function route(){
     if (norm === "#/jobs")          { renderJobs();       return; }
     if (norm === "#/costs")         { renderCosts();      return; }
     if (norm === "#/inventory")     { renderInventory();  return; }
+    if (norm === "#/order-request") { renderOrderRequest(); return; }
     /* default */                     renderDashboard();
   }
 }

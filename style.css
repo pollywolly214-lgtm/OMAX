@@ -106,6 +106,64 @@ body.pump-chart-expanded { overflow:hidden; }
 .cost-jobs-summary .label{ display:block; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#5a6478; margin-bottom:2px; }
 .cost-jobs-summary span:last-child{ font-weight:600; color:#1e2b45; }
 
+.order-cost-summary { margin-bottom:12px; }
+
+.order-request-layout{ grid-template-columns:1fr; }
+.order-card{ background:#fff; border:1px solid #dbe3f4; border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:16px; }
+.order-card-header{ display:flex; flex-wrap:wrap; justify-content:space-between; gap:16px; align-items:flex-start; }
+.order-card-header h3{ margin:0 0 4px; }
+.order-meta{ display:grid; grid-template-columns:auto auto; gap:4px 12px; font-size:12px; text-align:right; align-self:flex-start; }
+.order-meta .label{ text-transform:uppercase; letter-spacing:.05em; color:#5a6478; }
+.order-meta .value{ font-weight:600; color:#1e2b45; }
+.order-table-wrap{ overflow-x:auto; }
+.order-table{ width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+.order-table th, .order-table td{ border:1px solid #dde3ee; padding:8px; vertical-align:middle; }
+.order-table th{ background:#f4f7fb; font-weight:600; color:#1b3558; }
+.order-table input{ width:100%; padding:4px 6px; border:1px solid #ccd5e6; border-radius:6px; font-size:14px; }
+.order-table input:focus{ outline:2px solid #0a63c2; outline-offset:1px; }
+.order-item-name{ font-weight:600; color:#1e2b45; }
+.order-money{ font-weight:600; color:#0a63c2; font-variant-numeric:tabular-nums; }
+.order-card-footer{ display:flex; gap:12px; justify-content:space-between; flex-wrap:wrap; align-items:flex-start; }
+.order-total{ color:#1e2b45; }
+.order-total strong{ color:#0a63c2; font-size:20px; }
+.order-total.small{ color:#5a6478; font-size:12px; }
+.order-actions{ display:flex; flex-wrap:wrap; gap:8px; }
+.order-actions button{ padding:8px 14px; border-radius:10px; border:1px solid #ccd5e6; background:#fff; cursor:pointer; font-weight:600; color:#1b3558; }
+.order-actions button.primary{ background:#0a63c2; border-color:#0a63c2; color:#fff; }
+.order-actions button.secondary{ background:#f4f7fb; color:#1e2b45; }
+.order-actions button:disabled{ opacity:0.55; cursor:not-allowed; }
+.order-card .link{ background:none; border:0; padding:0; color:#c62828; cursor:pointer; text-decoration:underline; }
+.order-card .link:hover{ color:#a31818; }
+.order-tabs{ margin:16px 0; display:flex; flex-wrap:wrap; gap:8px; }
+.order-tabs button{ padding:6px 14px; border-radius:999px; border:1px solid #d5deef; background:#f6f8fd; cursor:pointer; font-weight:600; color:#4a566d; }
+.order-tabs button.active{ background:#0a63c2; color:#fff; border-color:#0a63c2; }
+.order-summary{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:16px 0; }
+.order-summary-card{ background:#eef3fb; border:1px solid #d6deef; border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:4px; }
+.order-summary-card .label{ font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#5a6478; }
+.order-summary-card .value{ font-size:20px; font-weight:600; color:#0a63c2; }
+.order-history{ display:flex; flex-direction:column; gap:12px; }
+.order-history-entry{ border-radius:12px; overflow:hidden; border:1px solid #dde3ee; background:#f6f8fd; }
+.order-history-entry summary{ display:grid; grid-template-columns:2fr repeat(3,minmax(0,1fr)); gap:8px; align-items:center; padding:10px 12px; cursor:pointer; list-style:none; }
+.order-history-entry summary::-webkit-details-marker{ display:none; }
+.order-history-entry[open] summary{ border-bottom:1px solid #dde3ee; background:#eef3fb; }
+.order-history-entry .title{ font-weight:600; color:#1b3558; }
+.order-history-entry .dates{ color:#5a6478; font-size:13px; }
+.order-history-entry .status{ font-weight:600; color:#42506c; }
+.order-history-entry .total{ text-align:right; font-weight:600; color:#0a63c2; }
+.order-history-body{ background:#fff; padding:14px; display:flex; flex-direction:column; gap:12px; }
+.order-history-meta{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; font-variant-numeric:tabular-nums; }
+.order-history-meta .label{ display:block; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#5a6478; }
+.order-history-meta .value{ font-weight:600; color:#1e2b45; }
+.order-history-actions{ display:flex; justify-content:flex-end; }
+.status-chip{ display:inline-flex; align-items:center; justify-content:center; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+.status-approved{ background:#e5f6eb; color:#1b5e20; }
+.status-denied{ background:#ffe5e5; color:#c62828; }
+.status-partial{ background:#fff4e5; color:#b26a00; }
+.status-pending{ background:#f0f3fa; color:#4a566d; }
+.order-history-body table.order-table{ margin:0; }
+.inventory-add{ padding:6px 10px; border-radius:8px; border:1px solid #ccd5e6; background:#f4f7fb; cursor:pointer; font-weight:600; }
+.inventory-add:hover{ background:#e4ebf8; }
+
 
 /* Calendar chip/bar are fully interactive */
 .cal-task, .cal-job {

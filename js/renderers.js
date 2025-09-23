@@ -1,6 +1,8 @@
 /* ====================== RENDERERS ========================= */
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 const pendingNewJobFiles = window.pendingNewJobFiles;
+if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
+const orderPartialSelection = window.orderPartialSelection;
 
 function readFileAsDataUrl(file){
   return new Promise((resolve, reject)=>{
@@ -2194,6 +2196,47 @@ function computeCostModel(){
 
   const chartNote = `Maintenance line uses estimated spend per hours logged; cutting jobs line shows the rolling average gain/loss at ${formatterCurrency(JOB_RATE_PER_HOUR, { decimals: 0 })}/hr.`;
 
+  const orderHistory = Array.isArray(orderRequests)
+    ? orderRequests.filter(req => req && req.status && req.status !== "draft")
+    : [];
+  const orderSorted = orderHistory.slice().sort((a,b)=>{
+    const aTime = new Date(a.resolvedAt || a.createdAt || 0).getTime();
+    const bTime = new Date(b.resolvedAt || b.createdAt || 0).getTime();
+    return bTime - aTime;
+  });
+  let totalApprovedOrders = 0;
+  const orderRows = orderSorted.map(req => {
+    const approved = Array.isArray(req.items)
+      ? req.items.reduce((sum, item)=> item && item.status === "approved" ? sum + orderItemLineTotal(item) : sum, 0)
+      : 0;
+    const requested = Array.isArray(req.items)
+      ? req.items.reduce((sum, item)=> sum + orderItemLineTotal(item), 0)
+      : 0;
+    totalApprovedOrders += approved;
+    const resolvedISO = req.resolvedAt || req.createdAt || null;
+    const resolved = resolvedISO ? parseDateLocal(resolvedISO) : null;
+    const resolvedLabel = resolved ? resolved.toLocaleDateString() : "—";
+    let statusLabel = "Pending";
+    if (req.status === "approved") statusLabel = "Approved";
+    else if (req.status === "denied") statusLabel = "Denied";
+    else if (req.status === "partial") statusLabel = "Partial";
+    return {
+      id: req.id,
+      code: req.code || req.id || "Order",
+      resolvedLabel,
+      statusLabel,
+      approvedLabel: formatterCurrency(approved, { decimals: approved < 1000 ? 2 : 0 }),
+      requestedLabel: formatterCurrency(requested, { decimals: requested < 1000 ? 2 : 0 })
+    };
+  });
+
+  const orderRequestSummary = {
+    totalApprovedLabel: formatterCurrency(totalApprovedOrders, { decimals: totalApprovedOrders < 1000 ? 2 : 0 }),
+    requestCountLabel: String(orderRows.length),
+    rows: orderRows.slice(0, 6),
+    emptyMessage: orderRows.length ? "" : "Approve or deny order requests to build the spend log."
+  };
+
   return {
     summaryCards,
     timeframeRows,
@@ -2207,6 +2250,7 @@ function computeCostModel(){
     maintenanceJobsNote,
     maintenanceJobsEmpty,
     chartNote,
+    orderRequestSummary,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries,
     jobSeries
@@ -2664,7 +2708,16 @@ function renderInventory(){
     const item = inventory.find(x=>x.id===id); if (!item) return;
     if (k==="qty"){ item.qty = Math.max(0, Number(input.value)||0); }
     else if (k==="note"){ item.note = input.value; }
+    else if (k==="price"){ const val = input.value.trim(); item.price = val === "" ? null : Math.max(0, Number(val)||0); }
     saveCloudDebounced();
+  });
+
+  rowsTarget?.addEventListener("click", (e)=>{
+    const btn = e.target.closest("[data-order-add]");
+    if (!btn) return;
+    const id = btn.getAttribute("data-order-add");
+    if (!id) return;
+    addInventoryItemToOrder(id);
   });
 }
 
@@ -2685,5 +2738,408 @@ function renderSignedOut(){
         </div>
       </div>
     </div>`;
+}
+
+function formatOrderCurrency(value){
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "$0.00";
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(num);
+}
+
+function orderItemLineTotal(item){
+  if (!item) return 0;
+  const price = Number(item.price);
+  const qty = Number(item.qty);
+  if (!Number.isFinite(price) || !Number.isFinite(qty)) return 0;
+  return Math.max(0, price) * Math.max(0, qty);
+}
+
+function formatOrderDate(iso, { includeTime = false } = {}){
+  if (!iso) return "—";
+  const dt = parseDateLocal(iso) || new Date(iso);
+  if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "—";
+  if (includeTime){
+    return dt.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  }
+  return dt.toLocaleDateString();
+}
+
+function computeOrderRequestModel(){
+  const draft = ensureActiveOrderRequest();
+  const existingIds = new Set(draft.items.map(item => item.id));
+  orderPartialSelection.forEach(id => { if (!existingIds.has(id)) orderPartialSelection.delete(id); });
+
+  const requestedTotal = draft.items.reduce((sum, item)=> sum + orderItemLineTotal(item), 0);
+  const selectedTotal = draft.items.reduce((sum, item)=> orderPartialSelection.has(item.id) ? sum + orderItemLineTotal(item) : sum, 0);
+
+  const activeModel = {
+    id: draft.id,
+    code: draft.code,
+    created: formatOrderDate(draft.createdAt, { includeTime:true }),
+    subtitle: draft.items.length ? `${draft.items.length} item${draft.items.length===1?"":"s"} ready for approval` : "Add parts from inventory to start a request.",
+    items: draft.items.map(item => ({
+      id: item.id,
+      name: item.name || "",
+      pn: item.pn || "",
+      link: item.link || "",
+      priceInput: item.price != null ? String(item.price) : "",
+      qtyInput: item.qty != null ? String(item.qty) : "1",
+      lineTotal: formatOrderCurrency(orderItemLineTotal(item)),
+      selected: orderPartialSelection.has(item.id)
+    })),
+    total: formatOrderCurrency(requestedTotal),
+    selectionTotal: selectedTotal > 0 ? formatOrderCurrency(selectedTotal) : null,
+    canApprove: draft.items.length > 0,
+    downloadLabel: "Download request (.csv)"
+  };
+
+  const historyRaw = Array.isArray(orderRequests)
+    ? orderRequests.filter(req => req && req.status && req.status !== "draft")
+    : [];
+
+  const historySorted = historyRaw.slice().sort((a,b)=>{
+    const aTime = new Date(a.createdAt || 0).getTime();
+    const bTime = new Date(b.createdAt || 0).getTime();
+    return bTime - aTime;
+  });
+
+  const statusLabels = {
+    approved: "Approved",
+    denied: "Denied",
+    partial: "Partially approved",
+    draft: "Draft"
+  };
+  const statusClasses = {
+    approved: "status-approved",
+    denied: "status-denied",
+    partial: "status-partial",
+    draft: "status-draft"
+  };
+  const itemStatusLabels = {
+    approved: "Approved",
+    denied: "Denied",
+    pending: "Pending",
+  };
+  const itemStatusClasses = {
+    approved: "status-approved",
+    denied: "status-denied",
+    pending: "status-pending"
+  };
+
+  let approvedSpendTotal = 0;
+  let lastUpdatedISO = null;
+
+  const history = historySorted.map(req => {
+    const requested = req.items.reduce((sum, item)=> sum + orderItemLineTotal(item), 0);
+    const approved = req.items.reduce((sum, item)=> item.status === "approved" ? sum + orderItemLineTotal(item) : sum, 0);
+    if (approved > 0) approvedSpendTotal += approved;
+    const resolved = req.resolvedAt || null;
+    if (resolved){
+      if (!lastUpdatedISO || new Date(resolved) > new Date(lastUpdatedISO)){ lastUpdatedISO = resolved; }
+    }
+    return {
+      id: req.id,
+      code: req.code || req.id,
+      dateRange: resolved
+        ? `${formatOrderDate(req.createdAt)} → ${formatOrderDate(resolved)}`
+        : `Created ${formatOrderDate(req.createdAt)}`,
+      statusLabel: statusLabels[req.status] || req.status || "",
+      statusClass: statusClasses[req.status] || "",
+      total: formatOrderCurrency(requested),
+      approvedTotal: formatOrderCurrency(approved),
+      itemCount: String(req.items.length || 0),
+      items: req.items.map(item => ({
+        name: item.name || "",
+        pn: item.pn || "—",
+        price: formatOrderCurrency(item.price ?? 0),
+        qty: String(item.qty || 0),
+        total: formatOrderCurrency(orderItemLineTotal(item)),
+        statusLabel: itemStatusLabels[item.status] || itemStatusLabels.pending,
+        statusClass: itemStatusClasses[item.status] || itemStatusClasses.pending,
+        link: item.link || ""
+      }))
+    };
+  });
+
+  const summary = {
+    requestCount: String(history.length),
+    approvedTotal: formatOrderCurrency(approvedSpendTotal),
+    lastUpdated: lastUpdatedISO ? formatOrderDate(lastUpdatedISO, { includeTime:true }) : (history.length ? formatOrderDate(historySorted[0].createdAt, { includeTime:true }) : "—")
+  };
+
+  const tab = (typeof window.orderRequestTab === "string" && window.orderRequestTab === "history") ? "history" : "active";
+
+  return { tab, active: activeModel, history, summary };
+}
+
+function updateOrderTotalsUI(card, request){
+  if (!card || !request) return;
+  const total = request.items.reduce((sum, item)=> sum + orderItemLineTotal(item), 0);
+  const totalEl = card.querySelector("[data-order-total-value]");
+  if (totalEl) totalEl.textContent = formatOrderCurrency(total);
+
+  const selectionRow = card.querySelector("[data-order-selection-row]");
+  const selectionValueEl = card.querySelector("[data-order-selection-value]");
+  const selectedTotal = request.items.reduce((sum, item)=> orderPartialSelection.has(item.id) ? sum + orderItemLineTotal(item) : sum, 0);
+  if (selectionRow){
+    if (selectedTotal > 0){
+      selectionRow.removeAttribute("hidden");
+      if (selectionValueEl) selectionValueEl.textContent = formatOrderCurrency(selectedTotal);
+    }else{
+      selectionRow.setAttribute("hidden", "");
+      if (selectionValueEl) selectionValueEl.textContent = formatOrderCurrency(0);
+    }
+  }
+}
+
+function addInventoryItemToOrder(inventoryId){
+  const item = inventory.find(x => x.id === inventoryId);
+  if (!item){ toast("Inventory item not found."); return; }
+  const draft = ensureActiveOrderRequest();
+  const existing = draft.items.find(line => line.inventoryId === inventoryId);
+  if (existing){
+    const confirmAdd = window.confirm("Are you sure you want to add this? You already have this item in your order request.");
+    if (!confirmAdd) return;
+  }
+  const newItem = {
+    id: genId("order_item"),
+    inventoryId,
+    name: item.name || "",
+    pn: item.pn || "",
+    link: item.link || "",
+    price: item.price != null ? Number(item.price) : null,
+    qty: 1,
+    status: "pending"
+  };
+  draft.items.push(newItem);
+  orderPartialSelection.add(newItem.id);
+  saveCloudDebounced();
+  toast("Added to order request");
+  if (location.hash === "#/order-request" || location.hash === "#order-request"){ renderOrderRequest(); }
+}
+
+function downloadOrderRequestCSV(request){
+  if (!request) return;
+  const header = ["Item", "Part #", "Qty", "Unit price", "Line total", "Status", "Store link"];
+  const rows = [header];
+  request.items.forEach(item => {
+    const qty = Number(item.qty) || 0;
+    const unitPrice = Number(item.price) || 0;
+    const total = orderItemLineTotal(item);
+    rows.push([
+      item.name || "",
+      item.pn || "",
+      qty,
+      unitPrice,
+      total,
+      item.status || "pending",
+      item.link || ""
+    ]);
+  });
+  const csv = rows.map(row => row.map(val => {
+    const str = String(val ?? "");
+    if (str.includes(",") || str.includes("\"") || str.includes("\n")){
+      return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+  }).join(",")).join("\n");
+
+  const blob = new Blob([csv], { type:"text/csv" });
+  const url = URL.createObjectURL(blob);
+  const filename = `${request.code || request.id || "order"}.csv`;
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 0);
+}
+
+function applyInventoryForApprovedItems(items){
+  if (!Array.isArray(items)) return;
+  items.forEach(item => {
+    if (!item) return;
+    if (!item.inventoryId) return;
+    const inv = inventory.find(x => x.id === item.inventoryId);
+    if (!inv) return;
+    const qty = Number(item.qty);
+    if (!Number.isFinite(qty) || qty <= 0) return;
+    const base = Number(inv.qty);
+    inv.qty = (Number.isFinite(base) ? base : 0) + qty;
+    if (item.price != null && (inv.price == null || inv.price === "")){
+      inv.price = Number(item.price) || inv.price;
+    }
+  });
+}
+
+function finalizeOrderRequest(mode){
+  const draft = ensureActiveOrderRequest();
+  if (!draft.items.length){ toast("Add at least one item to the request."); return; }
+  const nowISO = new Date().toISOString();
+
+  if (mode === "approveAll"){
+    draft.items.forEach(item => item.status = "approved");
+    applyInventoryForApprovedItems(draft.items);
+    draft.status = "approved";
+    draft.resolvedAt = nowISO;
+    orderPartialSelection.clear();
+    toast("Order approved");
+  }else if (mode === "deny"){
+    draft.items.forEach(item => item.status = "denied");
+    draft.status = "denied";
+    draft.resolvedAt = nowISO;
+    orderPartialSelection.clear();
+    toast("Order denied");
+  }else if (mode === "partial"){
+    if (!orderPartialSelection.size){ toast("Select the line items you want to approve."); return; }
+    if (orderPartialSelection.size === draft.items.length){
+      finalizeOrderRequest("approveAll");
+      return;
+    }
+    const approvedItems = [];
+    const carryItems = [];
+    draft.items.forEach(item => {
+      if (orderPartialSelection.has(item.id)){
+        item.status = "approved";
+        approvedItems.push(item);
+      }else{
+        item.status = "pending";
+        carryItems.push(item);
+      }
+    });
+    if (approvedItems.length){
+      applyInventoryForApprovedItems(approvedItems);
+    }
+    draft.status = "partial";
+    draft.resolvedAt = nowISO;
+    orderPartialSelection.clear();
+    if (carryItems.length){
+      const next = createOrderRequest(carryItems);
+      orderRequests.push(next);
+    }
+    toast("Partial approval saved");
+  }
+
+  ensureActiveOrderRequest();
+  saveCloudDebounced();
+  renderOrderRequest();
+}
+
+function renderOrderRequest(){
+  const content = document.getElementById("content"); if (!content) return;
+  const model = computeOrderRequestModel();
+  content.innerHTML = viewOrderRequest(model);
+
+  const activeCard = content.querySelector(".order-card");
+  const draft = ensureActiveOrderRequest();
+
+  content.querySelectorAll("[data-order-tab]").forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const target = btn.getAttribute("data-order-tab") || "active";
+      window.orderRequestTab = target;
+      renderOrderRequest();
+    });
+  });
+
+  activeCard?.addEventListener("input", (e)=>{
+    const priceInput = e.target.closest("[data-order-price]");
+    if (priceInput){
+      const id = priceInput.getAttribute("data-order-price");
+      const line = draft.items.find(item => item.id === id);
+      if (!line) return;
+      const val = priceInput.value.trim();
+      line.price = val === "" ? null : Math.max(0, Number(val)||0);
+      const row = priceInput.closest("tr");
+      const totalCell = row?.querySelector(".order-money");
+      if (totalCell) totalCell.textContent = formatOrderCurrency(orderItemLineTotal(line));
+      updateOrderTotalsUI(activeCard, draft);
+      saveCloudDebounced();
+      return;
+    }
+    const qtyInput = e.target.closest("[data-order-qty]");
+    if (qtyInput){
+      const id = qtyInput.getAttribute("data-order-qty");
+      const line = draft.items.find(item => item.id === id);
+      if (!line) return;
+      const val = qtyInput.value.trim();
+      const qty = Number(val);
+      line.qty = Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 1;
+      if (qtyInput.value !== String(line.qty)) qtyInput.value = String(line.qty);
+      const row = qtyInput.closest("tr");
+      const totalCell = row?.querySelector(".order-money");
+      if (totalCell) totalCell.textContent = formatOrderCurrency(orderItemLineTotal(line));
+      updateOrderTotalsUI(activeCard, draft);
+      saveCloudDebounced();
+    }
+  });
+
+  activeCard?.addEventListener("change", (e)=>{
+    const checkbox = e.target.closest("[data-order-approve]");
+    if (!checkbox) return;
+    const id = checkbox.getAttribute("data-order-approve");
+    if (!id) return;
+    if (checkbox.checked) orderPartialSelection.add(id);
+    else orderPartialSelection.delete(id);
+    updateOrderTotalsUI(activeCard, draft);
+  });
+
+  activeCard?.addEventListener("click", (e)=>{
+    const removeBtn = e.target.closest("[data-order-remove]");
+    if (removeBtn){
+      const id = removeBtn.getAttribute("data-order-remove");
+      const idx = draft.items.findIndex(item => item.id === id);
+      if (idx >= 0){
+        draft.items.splice(idx,1);
+        orderPartialSelection.delete(id);
+        saveCloudDebounced();
+        renderOrderRequest();
+      }
+      return;
+    }
+
+    const downloadBtn = e.target.closest("[data-order-download]");
+    if (downloadBtn){
+      downloadOrderRequestCSV(draft);
+      return;
+    }
+
+    const approveBtn = e.target.closest("[data-order-approve-all]");
+    if (approveBtn){
+      finalizeOrderRequest("approveAll");
+      return;
+    }
+
+    const partialBtn = e.target.closest("[data-order-partial]");
+    if (partialBtn){
+      finalizeOrderRequest("partial");
+      return;
+    }
+
+    const denyBtn = e.target.closest("[data-order-deny]");
+    if (denyBtn){
+      const confirmed = window.confirm("Mark entire request as denied?");
+      if (confirmed) finalizeOrderRequest("deny");
+      return;
+    }
+  });
+
+  content.querySelectorAll("[data-order-download-history]").forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-order-download-history");
+      if (!id) return;
+      const req = orderRequests.find(r => r && r.id === id);
+      if (req) downloadOrderRequestCSV(req);
+    });
+  });
+
+  updateOrderTotalsUI(activeCard, draft);
 }
 

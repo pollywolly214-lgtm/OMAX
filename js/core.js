@@ -280,6 +280,8 @@ if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
 if (!Array.isArray(window.inventory))    window.inventory    = [];
 if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
+if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
   window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] };
@@ -290,6 +292,8 @@ let tasksInterval = window.tasksInterval;
 let tasksAsReq    = window.tasksAsReq;
 let inventory     = window.inventory;
 let cuttingJobs   = window.cuttingJobs;
+let orderRequests = window.orderRequests;
+let orderRequestTab = window.orderRequestTab;
 
 if (typeof window.inventorySearchTerm !== "string") window.inventorySearchTerm = "";
 let inventorySearchTerm = window.inventorySearchTerm;
@@ -316,6 +320,8 @@ function snapshotState(){
     tasksAsReq,
     inventory,
     cuttingJobs,
+    orderRequests,
+    orderRequestTab,
     pumpEff: safePumpEff
   };
 }
@@ -487,14 +493,27 @@ function adoptState(doc){
     : defaultAsReqTasks.slice();
   inventory = Array.isArray(data.inventory) ? data.inventory : seedInventoryFromTasks();
   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
+  orderRequests = normalizeOrderRequests(Array.isArray(data.orderRequests) ? data.orderRequests : []);
+  if (!orderRequests.some(req => req && req.status === "draft")){
+    orderRequests.push(createOrderRequest());
+  }
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
   window.tasksAsReq = tasksAsReq;
   window.inventory = inventory;
   window.cuttingJobs = cuttingJobs;
+  window.orderRequests = orderRequests;
   if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
   window.pendingNewJobFiles.length = 0;
+  if (typeof data.orderRequestTab === "string"){
+    orderRequestTab = data.orderRequestTab;
+    window.orderRequestTab = orderRequestTab;
+  }
+  if (typeof window.orderRequestTab !== "string" || !window.orderRequestTab){
+    window.orderRequestTab = orderRequestTab || "active";
+  }
+  orderRequestTab = window.orderRequestTab;
 
   // Pump efficiency (guard against reading an undefined identifier)
   const pe = (typeof window.pumpEff === "object" && window.pumpEff)
@@ -538,6 +557,8 @@ async function loadFromCloud(){
           tasksAsReq: Array.isArray(data.tasksAsReq) && data.tasksAsReq.length ? data.tasksAsReq : defaultAsReqTasks.slice(),
           inventory: Array.isArray(data.inventory) && data.inventory.length ? data.inventory : seedInventoryFromTasks(),
           cuttingJobs: Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [],
+          orderRequests: Array.isArray(data.orderRequests) ? normalizeOrderRequests(data.orderRequests) : [createOrderRequest()],
+          orderRequestTab: typeof data.orderRequestTab === "string" ? data.orderRequestTab : "active",
           pumpEff: pe
         };
         adoptState(seeded);
@@ -551,7 +572,7 @@ async function loadFromCloud(){
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
-      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], pumpEff: pe };
+      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe };
       adoptState(seeded);
       resetHistoryToCurrent();
       await FB.docRef.set(seeded);
@@ -561,16 +582,107 @@ async function loadFromCloud(){
     const pe = (typeof window.pumpEff === "object" && window.pumpEff)
       ? window.pumpEff
       : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], pumpEff: pe });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe });
     resetHistoryToCurrent();
   }
 }
 
 function seedInventoryFromTasks(){
   return [
-    ...defaultIntervalTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"" })),
-    ...defaultAsReqTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"" })),
+    ...defaultIntervalTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"", price:t.price!=null?Number(t.price):null })),
+    ...defaultAsReqTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"", price:t.price!=null?Number(t.price):null })),
   ];
+}
+
+function buildOrderRequestCode(dateISO){
+  const base = parseDateLocal(dateISO) || new Date();
+  const y = base.getFullYear();
+  const m = String(base.getMonth()+1).padStart(2, "0");
+  const d = String(base.getDate()).padStart(2, "0");
+  const hh = String(base.getHours()).padStart(2, "0");
+  const mm = String(base.getMinutes()).padStart(2, "0");
+  return `ORD-${y}${m}${d}-${hh}${mm}`;
+}
+
+function normalizeOrderItem(raw){
+  if (!raw) return null;
+  const qtyNum = Number(raw.qty);
+  const qty = Number.isFinite(qtyNum) && qtyNum > 0 ? qtyNum : 1;
+  const priceNum = raw.price == null ? null : Number(raw.price);
+  return {
+    id: raw.id || genId("order_item"),
+    inventoryId: raw.inventoryId || null,
+    name: raw.name || "",
+    pn: raw.pn || "",
+    link: raw.link || "",
+    price: Number.isFinite(priceNum) ? priceNum : null,
+    qty,
+    status: raw.status === "approved" || raw.status === "denied" ? raw.status : "pending"
+  };
+}
+
+function cloneOrderRequestItem(raw){
+  const base = normalizeOrderItem(raw);
+  if (!base) return null;
+  base.id = genId("order_item");
+  base.status = "pending";
+  return base;
+}
+
+function normalizeOrderRequest(raw){
+  if (!raw) return null;
+  const createdISO = raw.createdAt || new Date().toISOString();
+  const status = (raw.status === "approved" || raw.status === "denied" || raw.status === "partial" || raw.status === "draft")
+    ? raw.status
+    : "draft";
+  const items = Array.isArray(raw.items) ? raw.items.map(normalizeOrderItem).filter(Boolean) : [];
+  return {
+    id: raw.id || genId("order"),
+    code: raw.code || buildOrderRequestCode(createdISO),
+    createdAt: createdISO,
+    status,
+    resolvedAt: raw.resolvedAt || null,
+    note: raw.note || "",
+    items
+  };
+}
+
+function normalizeOrderRequests(list){
+  const normalized = Array.isArray(list) ? list.map(normalizeOrderRequest).filter(Boolean) : [];
+  normalized.sort((a,b)=>{
+    const aTime = new Date(a.createdAt || 0).getTime();
+    const bTime = new Date(b.createdAt || 0).getTime();
+    return aTime - bTime;
+  });
+  return normalized;
+}
+
+function createOrderRequest(items){
+  const createdAt = new Date().toISOString();
+  const template = {
+    id: genId("order"),
+    code: buildOrderRequestCode(createdAt),
+    createdAt,
+    status: "draft",
+    resolvedAt: null,
+    note: "",
+    items: []
+  };
+  if (Array.isArray(items) && items.length){
+    template.items = items.map(cloneOrderRequestItem).filter(Boolean);
+  }
+  return template;
+}
+
+function ensureActiveOrderRequest(){
+  if (!Array.isArray(orderRequests)) orderRequests = [];
+  let draft = orderRequests.find(req => req && req.status === "draft");
+  if (!draft){
+    draft = createOrderRequest();
+    orderRequests.push(draft);
+  }
+  window.orderRequests = orderRequests;
+  return draft;
 }
 
 function isEditableTarget(el){
