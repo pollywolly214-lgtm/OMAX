@@ -3,7 +3,7 @@
 .pump-wide { grid-column: 1 / -1; width:100%; max-width:none; justify-self:stretch; margin:0; }
 .pump-grid {
   display:grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(200px, 260px);
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr) minmax(180px, 220px);
   gap:16px;
   margin-top:8px;
   align-items:stretch;
@@ -110,7 +110,7 @@ body.pump-chart-expanded { overflow:hidden; }
 .pump-legend { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
 .pump-legend span:first-child { font-weight:600; }
 
-@media (max-width: 1280px) {
+@media (max-width: 1150px) {
   .pump-grid {
     grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
   }
