@@ -77,7 +77,9 @@ function pumpRangeLabel(val){
 function pumpRangeCutoff(latestDate, range){
   const cutoff = new Date(latestDate.getTime());
   switch(range){
-    case "1w": cutoff.setDate(cutoff.getDate() - 6); break;
+    case "1w":
+      cutoff.setTime(cutoff.getTime() - 7 * DAY_MS);
+      break;
     case "1m": return pumpSubtractMonths(latestDate, 1);
     case "3m": return pumpSubtractMonths(latestDate, 3);
     case "6m": return pumpSubtractMonths(latestDate, 6);
