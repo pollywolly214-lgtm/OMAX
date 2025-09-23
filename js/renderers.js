@@ -56,7 +56,8 @@ function renderDashboard(){
 
   // Log hours
   document.getElementById("logBtn")?.addEventListener("click", ()=>{
-    const v = Number(document.getElementById("totalInput").value);
+    const input = document.getElementById("totalInput");
+    const v = Number(input?.value);
     if (!isFinite(v) || v < 0){ toast("Enter valid hours."); return; }
     const todayISO = new Date().toISOString().slice(0,10);
     const last = totalHistory[totalHistory.length-1];
@@ -66,8 +67,8 @@ function renderDashboard(){
       totalHistory.push({ dateISO: todayISO, hours: v });
     }
     RENDER_TOTAL = v;
-    window.RENDER_TOTAL = RENDER_TOTAL;
     RENDER_DELTA = deltaSinceLast();
+    window.RENDER_TOTAL = RENDER_TOTAL;
     window.RENDER_DELTA = RENDER_DELTA;
     saveCloudDebounced(); toast("Hours logged");
     renderDashboard();
@@ -76,20 +77,416 @@ function renderDashboard(){
   renderPumpWidget();
   populateNextDueBox();
 
-  // Quick add task
-  document.getElementById("quickAddForm")?.addEventListener("submit",(e)=>{
-    e.preventDefault();
-    const name = document.getElementById("qa_name").value.trim();
-    const interval = Number(document.getElementById("qa_interval").value);
-    const cond = document.getElementById("qa_condition").value.trim();
-    if (!name) return;
-    if (isFinite(interval) && interval > 0){
-      tasksInterval.push({ id: genId(name), name, interval, sinceBase:null, anchorTotal:null, manualLink:"", storeLink:"" });
-    }else{
-      tasksAsReq.push({ id: genId(name), name, condition: cond || "As required", manualLink:"", storeLink:"" });
+  if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+
+  const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+
+  const modal            = document.getElementById("dashboardAddModal");
+  const closeBtn         = document.getElementById("dashboardModalClose");
+  const taskForm         = document.getElementById("dashTaskForm");
+  const downForm         = document.getElementById("dashDownForm");
+  const jobForm          = document.getElementById("dashJobForm");
+  const downList         = document.getElementById("dashDownList");
+  const downDateInput    = document.getElementById("dashDownDate");
+  const taskTypeSelect   = document.getElementById("dashTaskType");
+  const taskNameInput    = document.getElementById("dashTaskName");
+  const taskIntervalInput= document.getElementById("dashTaskInterval");
+  const taskLastInput    = document.getElementById("dashTaskLast");
+  const taskConditionInput = document.getElementById("dashTaskCondition");
+  const taskManualInput  = document.getElementById("dashTaskManual");
+  const taskStoreInput   = document.getElementById("dashTaskStore");
+  const taskPNInput      = document.getElementById("dashTaskPN");
+  const taskPriceInput   = document.getElementById("dashTaskPrice");
+  const categorySelect   = document.getElementById("dashTaskCategory");
+  const subtaskList      = document.getElementById("dashSubtaskList");
+  const addSubtaskBtn    = document.getElementById("dashAddSubtask");
+  const jobNameInput     = document.getElementById("dashJobName");
+  const jobEstimateInput = document.getElementById("dashJobEstimate");
+  const jobStartInput    = document.getElementById("dashJobStart");
+  const jobDueInput      = document.getElementById("dashJobDue");
+
+  const taskFreqRow      = taskForm?.querySelector("[data-task-frequency]");
+  const taskLastRow      = taskForm?.querySelector("[data-task-last]");
+  const taskConditionRow = taskForm?.querySelector("[data-task-condition]");
+  const stepSections     = modal ? Array.from(modal.querySelectorAll("[data-step]")) : [];
+  let addContextDateISO  = null;
+
+  function setContextDate(dateISO){
+    addContextDateISO = dateISO || null;
+    if (modal){
+      if (addContextDateISO){
+        modal.setAttribute("data-context-date", addContextDateISO);
+      }else{
+        modal.removeAttribute("data-context-date");
+      }
     }
-    saveCloudDebounced(); toast("Added"); renderDashboard();
+    if (downDateInput){
+      if (addContextDateISO){
+        downDateInput.value = addContextDateISO;
+      }else if (!modal || !modal.classList.contains("is-visible")){
+        downDateInput.value = "";
+      }
+    }
+  }
+
+  function ensureDownTimeArray(){
+    if (!Array.isArray(window.downTimes)) window.downTimes = [];
+    const arr = window.downTimes;
+    for (let i = arr.length - 1; i >= 0; i--){
+      const entry = arr[i];
+      if (!entry){ arr.splice(i,1); continue; }
+      if (typeof entry === "string"){ arr[i] = { dateISO: entry }; continue; }
+      if (typeof entry.dateISO !== "string") arr.splice(i,1);
+    }
+    return arr;
+  }
+
+  function refreshDownTimeList(){
+    if (!downList) return;
+    const arr = ensureDownTimeArray().slice().sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+    if (!arr.length){
+      downList.innerHTML = `<div class="small muted">No down time days yet.</div>`;
+      return;
+    }
+    downList.innerHTML = "";
+    arr.forEach(item => {
+      const row = document.createElement("div");
+      row.className = "down-item";
+      const label = document.createElement("span");
+      const parsed = new Date(item.dateISO + "T00:00:00");
+      label.textContent = isNaN(parsed.getTime()) ? item.dateISO : parsed.toLocaleDateString();
+      row.appendChild(label);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "down-remove-btn";
+      btn.textContent = "Remove";
+      btn.addEventListener("click", ()=>{ removeDownTime(item.dateISO); });
+      row.appendChild(btn);
+      downList.appendChild(row);
+    });
+  }
+
+  function removeDownTime(dateISO){
+    const arr = ensureDownTimeArray();
+    const idx = arr.findIndex(dt => dt.dateISO === dateISO);
+    if (idx < 0) return;
+    arr.splice(idx,1);
+    saveCloudDebounced();
+    toast("Down time removed");
+    refreshDownTimeList();
+    renderCalendar();
+  }
+
+  function populateCategoryOptions(){
+    if (!categorySelect) return;
+    const folders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+    const byParent = new Map();
+    folders.forEach(f => {
+      const key = String(f.parent ?? "");
+      if (!byParent.has(key)) byParent.set(key, []);
+      byParent.get(key).push(f);
+    });
+    byParent.forEach(list => list.sort((a,b)=> (Number(a.order||0) - Number(b.order||0)) || String(a.name||"").localeCompare(String(b.name||""))));
+    const opts = ['<option value="">(No Category)</option>'];
+    const walk = (parent, prefix)=>{
+      const key = String(parent ?? "");
+      const children = byParent.get(key) || [];
+      for (const child of children){
+        const label = `${prefix}${child.name}`;
+        opts.push(`<option value="${escapeHtml(String(child.id))}">${escapeHtml(label)}</option>`);
+        walk(child.id, `${prefix}${child.name} / `);
+      }
+    };
+    walk(null, "");
+    categorySelect.innerHTML = opts.join("");
+  }
+
+  function syncTaskMode(mode){
+    if (!taskFreqRow || !taskLastRow || !taskConditionRow) return;
+    if (mode === "asreq"){
+      taskFreqRow.hidden = true;
+      taskLastRow.hidden = true;
+      taskConditionRow.hidden = false;
+    }else{
+      taskFreqRow.hidden = false;
+      taskLastRow.hidden = false;
+      taskConditionRow.hidden = true;
+    }
+  }
+
+  function resetTaskForm(){
+    taskForm?.reset();
+    subtaskList?.replaceChildren();
+    syncTaskMode(taskTypeSelect?.value || "interval");
+  }
+
+  function showStep(step){
+    stepSections.forEach(section => {
+      if (!section) return;
+      section.hidden = section.dataset.step !== step;
+    });
+    if (step === "task"){
+      populateCategoryOptions();
+      syncTaskMode(taskTypeSelect?.value || "interval");
+    }
+    if (step === "downtime"){
+      refreshDownTimeList();
+      if (addContextDateISO && downDateInput){
+        downDateInput.value = addContextDateISO;
+      }
+    }
+  }
+
+  function showBackdrop(step){
+    if (!modal) return;
+    ensureDownTimeArray();
+    modal.classList.add("is-visible");
+    modal.removeAttribute("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    document.body?.classList.add("modal-open");
+    showStep(step);
+  }
+
+  function hideBackdrop(){
+    if (!modal) return;
+    modal.classList.remove("is-visible");
+    modal.setAttribute("hidden", "");
+    modal.setAttribute("aria-hidden", "true");
+    document.body?.classList.remove("modal-open");
+  }
+
+  function openModal(step="picker", opts={}){
+    if (opts && Object.prototype.hasOwnProperty.call(opts, "dateISO")){
+      setContextDate(opts.dateISO);
+    }else{
+      setContextDate(null);
+    }
+    const desiredStep = opts?.step || step;
+    showBackdrop(desiredStep);
+    if (desiredStep === "downtime" && addContextDateISO && downDateInput){
+      downDateInput.value = addContextDateISO;
+    }
+  }
+
+  function closeModal(){
+    hideBackdrop();
+    showStep("picker");
+    resetTaskForm();
+    downForm?.reset();
+    jobForm?.reset();
+    setContextDate(null);
+  }
+
+  window.openDashboardAddPicker = (opts={}) => {
+    const obj = typeof opts === "object" && opts !== null ? opts : {};
+    openModal(obj.step || "picker", obj);
+  };
+
+  if (Array.isArray(window.__pendingDashboardAddRequests) && window.__pendingDashboardAddRequests.length){
+    const queue = window.__pendingDashboardAddRequests.splice(0);
+    queue.forEach(req => {
+      try {
+        const obj = typeof req === "object" && req !== null ? req : {};
+        openModal(obj.step || "picker", obj);
+      } catch (err){
+        console.error("Failed to open dashboard add picker", err);
+      }
+    });
+  }
+
+  window.dashboardRemoveDownTime = removeDownTime;
+
+  downDateInput?.addEventListener("input", ()=>{
+    if (!downDateInput) return;
+    const val = downDateInput.value;
+    addContextDateISO = val || null;
+    if (modal){
+      if (addContextDateISO){
+        modal.setAttribute("data-context-date", addContextDateISO);
+      }else{
+        modal.removeAttribute("data-context-date");
+      }
+    }
   });
+
+  function createSubtaskRow(defaultType){
+    if (!subtaskList) return null;
+    const row = document.createElement("div");
+    row.className = "subtask-row";
+    row.dataset.subtaskRow = "1";
+    row.innerHTML = `
+      <div class="subtask-row-top">
+        <strong>Sub-task</strong>
+        <button type="button" class="subtask-remove" data-remove-subtask>Remove</button>
+      </div>
+      <div class="modal-grid subtask-grid">
+        <label>Sub-task name<input type="text" data-subtask-name placeholder="Name" required></label>
+        <label>Type<select data-subtask-type>
+          <option value="interval">Per interval</option>
+          <option value="asreq">As required</option>
+        </select></label>
+        <label data-subtask-frequency>Frequency (hrs)<input type="number" min="1" step="1" data-subtask-interval placeholder="e.g. 20"></label>
+        <label data-subtask-last>Last serviced at (hrs)<input type="number" min="0" step="0.01" data-subtask-last placeholder="optional"></label>
+        <label data-subtask-condition hidden>Condition / trigger<input type="text" data-subtask-condition-input placeholder="e.g. When needed"></label>
+      </div>`;
+    const typeSel = row.querySelector("[data-subtask-type]");
+    const freqRow = row.querySelector("[data-subtask-frequency]");
+    const lastRow = row.querySelector("[data-subtask-last]");
+    const condRow = row.querySelector("[data-subtask-condition]");
+    if (typeSel) typeSel.value = defaultType || "interval";
+    const sync = ()=>{
+      if (!typeSel) return;
+      const mode = typeSel.value === "asreq" ? "asreq" : "interval";
+      if (freqRow) freqRow.hidden = mode !== "interval";
+      if (lastRow) lastRow.hidden = mode !== "interval";
+      if (condRow) condRow.hidden = mode !== "asreq";
+    };
+    typeSel?.addEventListener("change", sync);
+    sync();
+    row.querySelector("[data-remove-subtask]")?.addEventListener("click", ()=> row.remove());
+    return row;
+  }
+
+  closeBtn?.addEventListener("click", closeModal);
+  modal?.addEventListener("click", (e)=>{ if (e.target === modal) closeModal(); });
+
+  modal?.querySelectorAll("[data-choice]")?.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const choice = btn.getAttribute("data-choice");
+      showStep(choice === "task" ? "task" : choice === "downtime" ? "downtime" : "job");
+    });
+  });
+
+  modal?.querySelectorAll("[data-step-back]")?.forEach(btn => {
+    btn.addEventListener("click", ()=> showStep("picker"));
+  });
+
+  taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
+  syncTaskMode(taskTypeSelect?.value || "interval");
+  populateCategoryOptions();
+
+  addSubtaskBtn?.addEventListener("click", ()=>{
+    const row = createSubtaskRow(taskTypeSelect?.value || "interval");
+    if (row) subtaskList?.appendChild(row);
+  });
+
+  taskForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    if (!taskForm) return;
+    const name = (taskNameInput?.value || "").trim();
+    if (!name){ alert("Task name is required."); return; }
+    const mode = (taskTypeSelect?.value === "asreq") ? "asreq" : "interval";
+    const manual = (taskManualInput?.value || "").trim();
+    const store  = (taskStoreInput?.value || "").trim();
+    const pn     = (taskPNInput?.value || "").trim();
+    const priceVal = taskPriceInput?.value;
+    const price  = priceVal === "" ? null : Number(priceVal);
+    const catId  = (categorySelect?.value || "").trim() || null;
+    const id     = genId(name);
+    const base = {
+      id,
+      name,
+      manualLink: manual,
+      storeLink: store,
+      pn,
+      price: isFinite(price) ? price : null,
+      cat: catId,
+      parentTask: null,
+      order: ++window._maintOrderCounter
+    };
+    if (mode === "interval"){
+      let interval = Number(taskIntervalInput?.value);
+      if (!isFinite(interval) || interval <= 0) interval = 8;
+      const task = Object.assign({}, base, { mode:"interval", interval, sinceBase:null, anchorTotal:null });
+      const lastVal = taskLastInput?.value;
+      if (lastVal !== undefined && lastVal !== ""){
+        const v = Number(lastVal);
+        if (isFinite(v)){ task.anchorTotal = v; task.sinceBase = 0; }
+      }
+      tasksInterval.unshift(task);
+    }else{
+      const condition = (taskConditionInput?.value || "").trim() || "As required";
+      const task = Object.assign({}, base, { mode:"asreq", condition });
+      tasksAsReq.unshift(task);
+    }
+
+    const parentInterval = Number(taskIntervalInput?.value);
+    const subRows = subtaskList ? Array.from(subtaskList.querySelectorAll("[data-subtask-row]")) : [];
+    subRows.forEach(row => {
+      const subName = (row.querySelector("[data-subtask-name]")?.value || "").trim();
+      if (!subName) return;
+      const subTypeSel = row.querySelector("[data-subtask-type]");
+      const subMode = subTypeSel && subTypeSel.value === "asreq" ? "asreq" : "interval";
+      const subBase = {
+        id: genId(subName),
+        name: subName,
+        manualLink: "",
+        storeLink: "",
+        pn: "",
+        price: null,
+        cat: catId,
+        parentTask: id,
+        order: ++window._maintOrderCounter
+      };
+      if (subMode === "interval"){
+        const intervalField = row.querySelector("[data-subtask-interval]");
+        let subInterval = Number(intervalField?.value);
+        if (!isFinite(subInterval) || subInterval <= 0){
+          subInterval = isFinite(parentInterval) && parentInterval > 0 ? parentInterval : 8;
+        }
+        const subTask = Object.assign({}, subBase, { mode:"interval", interval: subInterval, sinceBase:null, anchorTotal:null });
+        const lastField = row.querySelector("[data-subtask-last]");
+        const lastVal = lastField?.value;
+        if (lastVal){
+          const v = Number(lastVal);
+          if (isFinite(v)){ subTask.anchorTotal = v; subTask.sinceBase = 0; }
+        }
+        tasksInterval.unshift(subTask);
+      }else{
+        const condInput = row.querySelector("[data-subtask-condition-input]");
+        const subTask = Object.assign({}, subBase, { mode:"asreq", condition: (condInput?.value || "").trim() || "As required" });
+        tasksAsReq.unshift(subTask);
+      }
+    });
+
+    saveCloudDebounced();
+    toast("Task added");
+    closeModal();
+    renderDashboard();
+  });
+
+  downForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    const arr = ensureDownTimeArray();
+    const dateISO = downDateInput?.value;
+    if (!dateISO){ toast("Pick a date"); return; }
+    if (arr.some(dt => dt.dateISO === dateISO)){ toast("Day already marked as down time"); return; }
+    arr.push({ dateISO });
+    arr.sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+    saveCloudDebounced();
+    toast("Down time saved");
+    if (downDateInput) downDateInput.value = "";
+    refreshDownTimeList();
+    renderCalendar();
+  });
+
+  jobForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    const name = (jobNameInput?.value || "").trim();
+    const est  = Number(jobEstimateInput?.value);
+    const start = jobStartInput?.value;
+    const due   = jobDueInput?.value;
+    if (!name || !isFinite(est) || est <= 0 || !start || !due){ toast("Fill job fields."); return; }
+    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material:"", materialCost:0, materialQty:0, notes:"", manualLogs:[] });
+    saveCloudDebounced();
+    toast("Cutting job added");
+    closeModal();
+    renderDashboard();
+  });
+
+  refreshDownTimeList();
+
+  document.getElementById("calendarAddBtn")?.addEventListener("click", ()=> openModal("picker"));
 
   renderCalendar();
 }
@@ -140,7 +537,9 @@ function repairMaintenanceGraph(){
 
         if (!task.mode) task.mode = type;
         else task.mode = type; // enforce consistency with owning list
-        task.parentTask = parentId != null ? parentId : null;
+        if (parentId != null){
+          task.parentTask = parentId;
+        }
         if (!isFinite(task.order)) task.order = 0;
 
         flat.push(task);
@@ -1551,6 +1950,11 @@ function computeCostModel(){
       : formatterCurrency(0, { decimals: 0 })
   };
 
+  const maintenanceJobs = [];
+
+  const maintenanceJobsNote = "Maintenance job tracker will consolidate every job once the Jobs integration is complete.";
+  const maintenanceJobsEmpty = "Tracker setup is in progress. This space will list all maintenance jobs when the data wiring is finished.";
+
   const timeframeNote = "Maintenance projections use interval tasks only; as-required items remain excluded from forecasts.";
   const historyEmpty = parsedHistory.length
     ? "Log additional machine hours to expand the maintenance cost timeline."
@@ -1568,6 +1972,9 @@ function computeCostModel(){
     jobSummary,
     jobBreakdown,
     jobEmpty,
+    maintenanceJobs,
+    maintenanceJobsNote,
+    maintenanceJobsEmpty,
     chartNote,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries,

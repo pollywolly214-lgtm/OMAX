@@ -3,18 +3,27 @@ function viewDashboard(){
   const cur   = RENDER_TOTAL ?? currentTotal();
   const prev  = previousTotal();
   const delta = RENDER_DELTA ?? deltaSinceLast();
+  const lastEntry = totalHistory.length ? totalHistory[totalHistory.length - 1] : null;
+  const lastUpdated = cur!=null && lastEntry && lastEntry.dateISO
+    ? new Date(lastEntry.dateISO).toLocaleString()
+    : "—";
   return `
   <div class="container">
-    <!-- Total hours -->
-    <div class="block">
-      <h3>Total Hours</h3>
-      <label>Enter total hours now:
-        <input type="number" id="totalInput" value="${cur!=null?cur:""}" />
-      </label>
-      <button id="logBtn">Log Hours</button>
-      <div class="hint">Last updated: ${cur!=null? new Date(totalHistory[totalHistory.length-1].dateISO).toLocaleString(): "—"}</div>
-      <div class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</div>
-    </div>
+    <div class="dashboard-top">
+      <!-- Total hours -->
+      <div class="block total-hours-block">
+        <h3>Total Hours</h3>
+        <div class="total-hours-controls mini-form">
+          <label class="total-hours-label"><span>Enter total hours now:</span>
+            <input type="number" id="totalInput" value="${cur!=null?cur:""}" />
+          </label>
+          <button id="logBtn">Log Hours</button>
+        </div>
+        <div class="total-hours-meta" aria-live="polite">
+          <span class="hint">Last updated: ${lastUpdated}</span>
+          <span class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</span>
+        </div>
+      </div>
 
     <!-- Pump Efficiency widget (rendered by renderPumpWidget) -->
     <section id="pump-widget" class="block pump-wide"></section>
@@ -24,17 +33,91 @@ function viewDashboard(){
       <h3>Calendar (Current + Next 2 Months)</h3>
 
       <div class="calendar-toolbar">
-        <form id="quickAddForm" class="mini-form">
-          <strong>Quick add task:</strong>
-          <input type="text" id="qa_name" placeholder="Task name" required>
-          <input type="number" id="qa_interval" placeholder="Interval (hrs, blank = As Required)" min="0">
-          <input type="text" id="qa_condition" placeholder="Condition (for As Required)">
-          <button type="submit">Add</button>
-        </form>
+        <button type="button" class="calendar-add-btn" id="calendarAddBtn" title="Add maintenance task, down time, or job">+</button>
       </div>
 
       <div id="months"></div>
       <div class="small">Hover a due item for actions. Click to pin the bubble.</div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="dashboardAddModal" hidden>
+    <div class="modal-card dashboard-modal-card">
+      <button type="button" class="modal-close" id="dashboardModalClose">×</button>
+
+      <section class="dash-modal-step" data-step="picker">
+        <h4>What would you like to add?</h4>
+        <div class="dash-choice-grid">
+          <button type="button" class="dash-choice" data-choice="task">Maintenance Task</button>
+          <button type="button" class="dash-choice" data-choice="downtime">Down Time</button>
+          <button type="button" class="dash-choice" data-choice="job">Cutting Job</button>
+        </div>
+      </section>
+
+      <section class="dash-modal-step" data-step="task" hidden>
+        <h4>Add maintenance task</h4>
+        <form id="dashTaskForm" class="modal-form">
+          <div class="modal-grid">
+            <label>Task name<input id="dashTaskName" required placeholder="Task"></label>
+            <label>Type<select id="dashTaskType">
+              <option value="interval">Per interval</option>
+              <option value="asreq">As required</option>
+            </select></label>
+            <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
+            <label data-task-last>Last serviced at (hrs)<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
+            <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
+            <label>Manual link<input type="url" id="dashTaskManual" placeholder="https://..."></label>
+            <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
+            <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
+            <label>Price ($)<input type="number" min="0" step="0.01" id="dashTaskPrice" placeholder="optional"></label>
+            <label>Category<select id="dashTaskCategory"></select></label>
+          </div>
+
+          <div class="subtask-section">
+            <div class="subtask-header">
+              <h5>Sub-tasks</h5>
+              <button type="button" id="dashAddSubtask" class="subtask-add-btn">+ Add sub-task</button>
+            </div>
+            <div id="dashSubtaskList" class="subtask-list"></div>
+            <p class="small muted">Sub-tasks inherit the calendar display and live under the main task.</p>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-step-back>Back</button>
+            <button type="submit" class="primary">Create Task</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="dash-modal-step" data-step="downtime" hidden>
+        <h4>Mark machine down time</h4>
+        <form id="dashDownForm" class="modal-form">
+          <div class="modal-grid">
+            <label>Down time date<input type="date" id="dashDownDate" required></label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-step-back>Back</button>
+            <button type="submit" class="primary">Save</button>
+          </div>
+        </form>
+        <div id="dashDownList" class="down-list"></div>
+      </section>
+
+      <section class="dash-modal-step" data-step="job" hidden>
+        <h4>Add cutting job</h4>
+        <form id="dashJobForm" class="modal-form">
+          <div class="modal-grid">
+            <label>Job name<input id="dashJobName" required placeholder="Job"></label>
+            <label>Estimate (hrs)<input type="number" min="1" step="0.1" id="dashJobEstimate" required placeholder="e.g. 12"></label>
+            <label>Start date<input type="date" id="dashJobStart" required></label>
+            <label>Due date<input type="date" id="dashJobDue" required></label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-step-back>Back</button>
+            <button type="submit" class="primary">Add Job</button>
+          </div>
+        </form>
+      </section>
     </div>
   </div>`;
 }
@@ -572,6 +655,8 @@ function viewCosts(model){
   const historyRows = Array.isArray(data.historyRows) ? data.historyRows : [];
   const jobBreakdown = Array.isArray(data.jobBreakdown) ? data.jobBreakdown : [];
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
+  const maintenanceJobsNote = data.maintenanceJobsNote || "";
+  const maintenanceJobsEmpty = data.maintenanceJobsEmpty || "";
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
 
   return `
@@ -637,6 +722,12 @@ function viewCosts(model){
           `).join("")}
         </ul>
       ` : `<p class="small muted">${esc(data.historyEmpty || "No usage history yet. Log machine hours to estimate maintenance spend.")}</p>`}
+    </div>
+
+    <div class="block">
+      <h3>Maintenance Job Tracker</h3>
+      ${maintenanceJobsNote ? `<p class="small muted">${esc(maintenanceJobsNote)}</p>` : ""}
+      ${maintenanceJobsEmpty ? `<p class="small muted">${esc(maintenanceJobsEmpty)}</p>` : ""}
     </div>
 
     <div class="block">
