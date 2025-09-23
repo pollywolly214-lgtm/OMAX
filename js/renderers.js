@@ -993,12 +993,18 @@ function renderSettings(){
     const st = document.createElement("style");
     st.id = "settingsExplorerCSS";
     st.textContent = `
-      #explorer .toolbar{display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap}
-      #explorer .toolbar button{padding:.35rem .55rem;font-size:.92rem}
-      #explorer .toolbar-search{display:flex;gap:.35rem;align-items:center;margin-left:auto}
-      #explorer .toolbar-search input{min-width:220px;width:auto;padding:.35rem .5rem;border:1px solid #ccd4e0;border-radius:6px;font-size:.9rem}
-      #explorer .toolbar-search button{padding:.35rem .55rem;font-size:.85rem}
-      #explorer .toolbar .hint{flex:1 1 100%}
+      #explorer .toolbar{display:flex;flex-direction:column;align-items:center;gap:.75rem;margin-bottom:.75rem}
+      #explorer .toolbar-actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;width:100%}
+      #explorer .toolbar-actions button{padding:.35rem .65rem;font-size:.92rem;border-radius:8px}
+      #explorer .toolbar-search{display:flex;align-items:center;gap:.45rem;justify-content:center;background:#f3f4f8;border-radius:999px;padding:.4rem .7rem;border:1px solid #d0d7e4;box-shadow:0 6px 18px rgba(15,35,72,.08);margin:0 auto;width:min(420px,100%)}
+      #explorer .toolbar-search .icon{font-size:1.05rem;color:#5b6a82;display:flex;align-items:center;justify-content:center}
+      #explorer .toolbar-search input{flex:1;min-width:0;padding:.2rem;border:0;background:transparent;font-size:.95rem;color:#0f1e3a}
+      #explorer .toolbar-search input::placeholder{color:#8a94a8}
+      #explorer .toolbar-search input:focus{outline:none}
+      #explorer .toolbar-search button{padding:.32rem .7rem;font-size:.82rem;border-radius:999px;border:0;background:#eef2f8;color:#0a63c2;font-weight:600;cursor:pointer;transition:background .2s ease,color .2s ease,opacity .2s ease}
+      #explorer .toolbar-search button:hover:not(:disabled){background:#e0e7f3}
+      #explorer .toolbar-search button:disabled{opacity:.5;cursor:default}
+      #explorer .toolbar .hint{flex:1 1 auto;text-align:center;width:100%}
       #explorer .hint{font-size:.8rem;color:#666}
       #explorer .tree{border:1px solid #e5e5e5;background:#fff;border-radius:10px;padding:6px}
       #explorer details{margin:4px 0;border:1px solid #eee;border-radius:8px;background:#fafafa}
@@ -1338,9 +1344,12 @@ function renderSettings(){
       <div class="block" style="grid-column:1 / -1">
         <h3>Maintenance Settings</h3>
         <div class="toolbar">
-          <button id="btnAddCategory">+ Add Category</button>
-          <button id="btnAddTask">+ Add Task</button>
+          <div class="toolbar-actions">
+            <button id="btnAddCategory">+ Add Category</button>
+            <button id="btnAddTask">+ Add Task</button>
+          </div>
           <div class="toolbar-search">
+            <span class="icon" aria-hidden="true">🔍</span>
             <input type="search" id="maintenanceSearch" placeholder="Search tasks, parts, or links" value="${escapeHtml(searchValueRaw)}" aria-label="Search maintenance tasks" autocomplete="off">
             <button type="button" id="maintenanceSearchClear" ${searchValueRaw ? "" : "disabled"}>Clear</button>
           </div>
