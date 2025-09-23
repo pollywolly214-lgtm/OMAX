@@ -63,6 +63,7 @@ function renderDashboard(){
 
   // Next due summary
   const ndBox = document.getElementById("nextDueBox");
+  const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const upcoming = tasksInterval
     .map(t => ({ t, nd: nextDue(t) }))
     .filter(x => x.nd)
@@ -135,8 +136,6 @@ function renderDashboard(){
   }
 
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
-
-  const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 
   const modal            = document.getElementById("dashboardAddModal");
   const closeBtn         = document.getElementById("dashboardModalClose");
