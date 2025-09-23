@@ -137,6 +137,13 @@ body.pump-chart-expanded { overflow:hidden; }
 }
 
 
+:root {
+  --header-logo-scale: 1.3;
+  --header-logo-width-min: 110px;
+  --header-logo-width-ideal: 18vw;
+  --header-logo-width-max: 220px;
+}
+
 /* Base */
 * { box-sizing: border-box; }
 body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fa; color: #222; }
@@ -165,7 +172,11 @@ header { background: #0a63c2; color: #fff; padding: 0 16px 4px; }
 }
 .header-logo {
   flex: 0 0 auto;
-  width: clamp(143px, 23.4vw, 286px);
+  width: clamp(
+    calc(var(--header-logo-width-min) * var(--header-logo-scale)),
+    calc(var(--header-logo-width-ideal) * var(--header-logo-scale)),
+    calc(var(--header-logo-width-max) * var(--header-logo-scale))
+  );
   max-width: 100%;
   height: auto;
   display: block;
