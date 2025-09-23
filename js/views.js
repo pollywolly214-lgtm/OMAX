@@ -24,27 +24,29 @@ function viewDashboard(){
           <span class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</span>
         </div>
       </div>
-
-      <!-- Next due -->
-      <div class="block next-due-block">
-        <h3>Next Due</h3>
-        <div id="nextDueBox">Calculating…</div>
-      </div>
     </div>
 
     <!-- Pump Efficiency widget (rendered by renderPumpWidget) -->
     <section id="pump-widget" class="block pump-wide"></section>
 
-    <!-- Calendar -->
-    <div class="block" style="grid-column: 1 / -1">
-      <h3>Calendar (Current + Next 2 Months)</h3>
-
-      <div class="calendar-toolbar">
-        <button type="button" class="calendar-add-btn" id="calendarAddBtn" title="Add maintenance task, down time, or job">+</button>
+    <div class="dashboard-schedule-row">
+      <!-- Next due -->
+      <div class="block next-due-block">
+        <h3>Next Due</h3>
+        <div id="nextDueBox">Calculating…</div>
       </div>
 
-      <div id="months"></div>
-      <div class="small">Hover a due item for actions. Click to pin the bubble.</div>
+      <!-- Calendar -->
+      <div class="block calendar-block">
+        <h3>Calendar (Current + Next 2 Months)</h3>
+
+        <div class="calendar-toolbar">
+          <button type="button" class="calendar-add-btn" id="calendarAddBtn" title="Add maintenance task, down time, or job">+</button>
+        </div>
+
+        <div id="months"></div>
+        <div class="small">Hover a due item for actions. Click to pin the bubble.</div>
+      </div>
     </div>
   </div>
 
