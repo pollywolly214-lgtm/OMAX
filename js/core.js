@@ -26,10 +26,15 @@ function genId(name){ const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g
 function parseDateLocal(value){
   if (value == null) return null;
 
+  const fromUTCParts = (dt)=>{
+    if (!(dt instanceof Date)) return null;
+    if (Number.isNaN(dt.getTime())) return null;
+    return new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
+  };
+
   // Direct Date instance
   if (value instanceof Date){
-    if (Number.isNaN(value.getTime())) return null;
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    return fromUTCParts(value);
   }
 
   // Firestore Timestamp (has toDate()) or other date-like objects
@@ -37,9 +42,8 @@ function parseDateLocal(value){
     if (typeof value.toDate === "function"){
       try {
         const dt = value.toDate();
-        if (dt instanceof Date && !Number.isNaN(dt.getTime())){
-          return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
-        }
+        const normalized = fromUTCParts(dt);
+        if (normalized) return normalized;
       } catch (err) {
         console.warn("parseDateLocal: toDate() failed", err);
       }
@@ -48,9 +52,8 @@ function parseDateLocal(value){
       try {
         const millis = (value.seconds * 1000) + (typeof value.nanoseconds === "number" ? Math.floor(value.nanoseconds/1e6) : 0);
         const dt = new Date(millis);
-        if (!Number.isNaN(dt.getTime())){
-          return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
-        }
+        const normalized = fromUTCParts(dt);
+        if (normalized) return normalized;
       } catch (err) {
         console.warn("parseDateLocal: seconds conversion failed", err);
       }
@@ -61,15 +64,16 @@ function parseDateLocal(value){
   if (typeof value === "string"){
     const trimmed = value.trim();
     if (!trimmed) return null;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)){
-      const [y, m, d] = trimmed.split("-").map(Number);
+    const dateOnly = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s].*)?$/);
+    if (dateOnly){
+      const [y, m, d] = dateOnly[1].split("-").map(Number);
       return new Date(y, m-1, d);
     }
   }
 
   const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return null;
-  return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  const normalized = fromUTCParts(dt);
+  return normalized ?? null;
 }
 function ymd(d){
   const dt = parseDateLocal(d);
