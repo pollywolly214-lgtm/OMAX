@@ -156,6 +156,21 @@ header { background: #0a63c2; color: #fff; padding: 0 16px 4px; }
   column-gap: 12px;
   row-gap: 4px;
 }
+.header-smile {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(40px, 6vw, 54px);
+  height: clamp(40px, 6vw, 54px);
+  margin-left: 8px;
+  font-size: clamp(26px, 4vw, 36px);
+  line-height: 1;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 6px 16px rgba(7, 58, 131, 0.3);
+}
 .header-bar h1 {
   margin: 0;
   font-size: clamp(26px, 4vw, 46px);
