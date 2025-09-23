@@ -131,6 +131,8 @@ function toast(msg){
   #bubble.bubble::before{content:"";position:absolute;top:-6px;left:16px;width:12px;height:12px;background:#fff;transform:rotate(45deg);border-left:1px solid #dfe6f3;border-top:1px solid #dfe6f3}
   .bubble-title{font-weight:700;margin-bottom:6px}
   .bubble-kv{display:flex;justify-content:space-between;gap:10px;font-size:13px;margin:3px 0}
+  .bubble-kv span:first-child{color:#5a6478;font-weight:600}
+  .bubble-kv span:last-child{color:#0a63c2;font-weight:600}
   .bubble-actions{display:flex;gap:8px;margin-top:8px}
   .cal-task,.cal-job{position:relative;display:block;cursor:pointer}
   /* Chips */
