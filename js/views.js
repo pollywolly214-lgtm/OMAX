@@ -25,6 +25,16 @@ function viewDashboard(){
         </div>
       </div>
 
+<<<<<<< codex/adjust-plot-width-and-bubble-position
+=======
+      <!-- Next due -->
+      <div class="block next-due-block">
+        <h3>Next Due</h3>
+        <div id="nextDueBox">Calculating…</div>
+      </div>
+    </div>
+
+>>>>>>> main
       <!-- Next due -->
       <div class="block next-due-block">
         <h3>Next Due</h3>
