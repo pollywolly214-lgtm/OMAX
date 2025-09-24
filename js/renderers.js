@@ -2838,19 +2838,16 @@ function renderInventory(){
 
 function renderSignedOut(){
   const content = document.getElementById("content"); if (!content) return;
-  const preview = buildNextDuePreview({
-    noteText: "Sign in and add machine hours to generate your real next-due list.",
-    includeNote: true
-  });
   content.innerHTML = `
     <div class='container signed-out-container'>
       <div class='block signed-out-message'>
-        <h3>Please sign in to view workspace.</h3>
+        <h3>Sign in to view your workspace</h3>
         <p class='small'>Use your maintenance login to sync tasks, hours, and inventory across the shop.</p>
-        <div class='next-due-preview-card'>
-          <h4 class='next-due-preview-title'>Next due preview</h4>
-          ${preview}
-        </div>
+        <ul class='signed-out-tips'>
+          <li>Track machine hours and log maintenance in one place.</li>
+          <li>Share the same schedules, inventory, and orders with the team.</li>
+          <li>Automatic backups keep your latest changes ready on any device.</li>
+        </ul>
       </div>
     </div>`;
 }
