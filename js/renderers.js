@@ -1436,6 +1436,12 @@ function renderSettings(){
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
   window.tasksInterval   = Array.isArray(window.tasksInterval)   ? window.tasksInterval   : [];
   window.tasksAsReq      = Array.isArray(window.tasksAsReq)      ? window.tasksAsReq      : [];
+  if (!(window.settingsOpenFolders instanceof Set)) window.settingsOpenFolders = new Set();
+  const openFolderState = window.settingsOpenFolders;
+  const validFolderIds = new Set(window.settingsFolders.map(f => String(f.id)));
+  for (const id of Array.from(openFolderState)){
+    if (!validFolderIds.has(id)) openFolderState.delete(id);
+  }
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
   // --- one-time hydration for legacy/remote tasks (per-list) ---
@@ -1890,6 +1896,10 @@ function renderSettings(){
 
   function renderFolder(folder){
     ensureIdsOrder(folder);
+    const folderId = String(folder.id);
+    const forceOpen = searchActive && categoryHasVisibleContent(folderId);
+    const isOpen = forceOpen || openFolderState.has(folderId);
+    const openAttr = isOpen ? " open" : "";
     const folderEmptyMsg = searchActive
       ? "No tasks in this category match your search."
       : "No tasks in this category yet.";
@@ -1901,7 +1911,7 @@ function renderSettings(){
       emptyClass: "empty"
     });
     return `
-      <details class="cat" data-cat-id="${folder.id}" open>
+      <details class="cat" data-cat-id="${folder.id}"${openAttr}>
         <summary draggable="true"><span class="task-name">${escapeHtml(folder.name)}</span></summary>
         <div class="dz" data-drop-into-cat="${folder.id}" data-label="Move task here"></div>
         <div class="children">
@@ -1991,6 +2001,18 @@ function renderSettings(){
   const conditionRow = form?.querySelector('[data-form-condition]');
   const searchInput = document.getElementById("maintenanceSearch");
   const searchClear = document.getElementById("maintenanceSearchClear");
+
+  tree?.querySelectorAll("details.cat").forEach(det => {
+    det.addEventListener("toggle", ()=>{
+      const catId = det.getAttribute("data-cat-id");
+      if (!catId) return;
+      if (det.open){
+        openFolderState.add(catId);
+      }else{
+        openFolderState.delete(catId);
+      }
+    });
+  });
 
   if (searchInput){
     searchInput.addEventListener("input", ()=>{
