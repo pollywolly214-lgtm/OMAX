@@ -174,13 +174,41 @@ function pumpBuildTimeTicks(range, startTime, endTime){
   return ticks;
 }
 
-function viewPumpWidget(){
+function viewPumpLogWidget(){
   const latest = pumpLatest();
   const pct    = latest ? pumpPercentChange(latest.rpm) : null;
   const col    = pumpColorFor(pct);
   const baselineVal = pumpEff.baselineRPM ?? "";
   const todayISO    = new Date().toISOString().slice(0,10);
   const latestTxt   = latest ? `${latest.rpm} RPM (${latest.dateISO})` : "—";
+  return `
+  <details class="pump-card" open>
+    <summary><b>Pump Efficiency</b> <span class="chip ${col.cls}">${col.label}</span></summary>
+    <div class="pump-log-panel">
+      <div class="pump-log-section">
+        <h4>Baseline @ 49 ksi</h4>
+        <form id="pumpBaselineForm" class="mini-form">
+          <input type="number" id="pumpBaselineRPM" min="1" step="1" placeholder="RPM" value="${baselineVal}">
+          <button type="submit">Set baseline (today)</button>
+        </form>
+        <div class="small muted">Lower RPM = better. Baseline is recorded after a major/minor rebuild.</div>
+      </div>
+      <div class="pump-log-section">
+        <h4>Daily log</h4>
+        <form id="pumpLogForm" class="mini-form">
+          <input type="date" id="pumpLogDate" value="${todayISO}" required>
+          <input type="number" id="pumpLogRPM" min="1" step="1" placeholder="RPM at 49 ksi" required>
+          <button type="submit">Add / Update</button>
+        </form>
+      </div>
+      <div class="pump-stats">
+        <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO})` : "—"}</span></div>
+        <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
+      </div>
+    </div>
+  </details>`;
+}
+function viewPumpChartWidget(){
   const rangeValue  = window.pumpChartRange || "3m";
   const rangeOptions = PUMP_RANGE_OPTIONS.map(opt => `<option value="${opt.value}" ${opt.value===rangeValue?"selected":""}>Last ${opt.label}</option>`).join("");
   const expanded = window.pumpChartExpanded === true;
@@ -188,53 +216,35 @@ function viewPumpWidget(){
   const expandLabel = expanded ? "Shrink" : "Expand";
   const expandIcon = expanded ? "⤡" : "⤢";
   return `
-  <details class="block pump-card" open>
-    <summary><b>Pump Efficiency</b> <span class="chip ${col.cls}">${col.label}</span></summary>
-    <div class="pump-grid">
-      <div class="pump-col">
-        <h4>Baseline @ 49 ksi</h4>
-        <form id="pumpBaselineForm" class="mini-form">
-          <input type="number" id="pumpBaselineRPM" min="1" step="1" placeholder="RPM" value="${baselineVal}">
-          <button type="submit">Set baseline (today)</button>
-        </form>
-        <div class="small muted">Lower RPM = better. Baseline is recorded after a major/minor rebuild.</div>
-        <h4 style="margin-top:10px">Daily log</h4>
-        <form id="pumpLogForm" class="mini-form">
-          <input type="date" id="pumpLogDate" value="${todayISO}" required>
-          <input type="number" id="pumpLogRPM" min="1" step="1" placeholder="RPM at 49 ksi" required>
-          <button type="submit">Add / Update</button>
-        </form>
-        <div class="pump-stats">
-          <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO})` : "—"}</span></div>
-          <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
-        </div>
-      </div>
-      <div class="pump-col pump-chart-col">
-        <div class="pump-chart-toolbar small muted">
-          <label for="pumpRange">Timeframe:</label>
-          <select id="pumpRange">${rangeOptions}</select>
-        </div>
-        <div class="${wrapCls}">
-          <canvas id="pumpChart" height="${expanded ? 360 : 240}"></canvas>
-          <button type="button" class="pump-expand-btn" data-expanded="${expanded}" title="${expandLabel} chart">${expandIcon} ${expandLabel}</button>
-        </div>
-        <div class="pump-legend small muted">
-          <span>Color codes:</span>
-          <span class="chip green">0–&lt;8%</span>
-          <span class="chip yellow">8–15%</span>
-          <span class="chip orange">&gt;15–18%</span>
-          <span class="chip red">&gt;18%</span>
-          <span class="chip green-better">Negative = better</span>
-        </div>
+  <div class="pump-chart-card">
+    <div class="pump-chart-header">
+      <h3>Pump Efficiency Trend</h3>
+      <div class="pump-chart-toolbar small muted">
+        <label for="pumpRange">Timeframe:</label>
+        <select id="pumpRange">${rangeOptions}</select>
       </div>
     </div>
-  </details>
+    <div class="${wrapCls}">
+      <canvas id="pumpChart" height="${expanded ? 360 : 240}"></canvas>
+      <button type="button" class="pump-expand-btn" data-expanded="${expanded}" title="${expandLabel} chart">${expandIcon} ${expandLabel}</button>
+    </div>
+    <div class="pump-legend small muted">
+      <span>Color codes:</span>
+      <span class="chip green">0–&lt;8%</span>
+      <span class="chip yellow">8–15%</span>
+      <span class="chip orange">&gt;15–18%</span>
+      <span class="chip red">&gt;18%</span>
+      <span class="chip green-better">Negative = better</span>
+    </div>
+  </div>
   ${expanded ? '<div class="pump-chart-backdrop" data-pump-backdrop></div>' : ''}`;
 }
 function renderPumpWidget(){
-  const host = document.getElementById("pump-widget");
-  if (!host) return;
-  host.innerHTML = viewPumpWidget();
+  const logHost = document.getElementById("pump-log-widget");
+  if (logHost) logHost.innerHTML = viewPumpLogWidget();
+  const chartHost = document.getElementById("pump-chart-widget");
+  if (chartHost) chartHost.innerHTML = viewPumpChartWidget();
+  if (!logHost && !chartHost) return;
   document.body.classList.toggle("pump-chart-expanded", !!window.pumpChartExpanded);
   document.getElementById("pumpBaselineForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
@@ -252,7 +262,7 @@ function renderPumpWidget(){
     upsertPumpEntry(d, rpm); saveCloudDebounced(); toast("Log saved"); renderPumpWidget();
   });
   const canvas = document.getElementById("pumpChart");
-  const wrap   = document.querySelector(".pump-chart-wrap");
+  const wrap   = chartHost?.querySelector(".pump-chart-wrap");
   if (canvas && wrap){
     const rect = wrap.getBoundingClientRect();
     const availableWidth = rect.width || wrap.clientWidth || canvas.width || 320;
@@ -273,13 +283,13 @@ function renderPumpWidget(){
       drawPumpChart(canvas, window.pumpChartRange);
     });
   }
-  const expandBtn = document.querySelector(".pump-expand-btn");
+  const expandBtn = chartHost?.querySelector(".pump-expand-btn");
   expandBtn?.addEventListener("click", ()=>{
     const isExpanded = expandBtn.getAttribute("data-expanded") === "true";
     window.pumpChartExpanded = !isExpanded;
     renderPumpWidget();
   });
-  document.querySelector("[data-pump-backdrop]")?.addEventListener("click", ()=>{
+  chartHost?.querySelector("[data-pump-backdrop]")?.addEventListener("click", ()=>{
     window.pumpChartExpanded = false;
     renderPumpWidget();
   });

@@ -1,20 +1,14 @@
 /* Pump card */
 .pump-card summary { display:flex; align-items:center; gap:8px; }
-.pump-wide { grid-column: 1 / -1; width:100%; max-width: min(1100px, 100%); justify-self:center; margin:0 auto; }
-.pump-grid { display:grid; grid-template-columns: minmax(260px, 0.9fr) minmax(420px, 1.1fr); gap:16px; margin-top:8px; align-items:stretch; }
-.pump-col {
-  background: var(--brand-card-bg);
-  border: 1px solid var(--brand-card-border);
-  border-radius: 18px;
-  padding: 18px;
-  min-width: 0;
-  box-shadow: var(--brand-card-shadow);
-  backdrop-filter: blur(8px);
-  color: #0b1f3d;
-}
+.pump-log-block { display:flex; flex-direction:column; gap:12px; }
+.pump-log-panel { display:grid; gap:14px; }
+.pump-log-section { display:grid; gap:8px; }
+.pump-log-section h4 { margin:0; }
 .pump-stats { margin-top:6px; display:grid; gap:4px; }
 .pump-stats .lbl { color:#666; display:inline-block; width:80px; }
-.pump-chart-col { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.pump-chart-block { display:flex; flex-direction:column; gap:12px; }
+.pump-chart-card { display:flex; flex-direction:column; gap:12px; height:100%; }
+.pump-chart-header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 .pump-chart-toolbar { display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap; }
 .pump-chart-toolbar label { font-weight:600; }
 .pump-chart-toolbar select { width:auto; padding:4px 6px; font-size:12px; }
@@ -76,7 +70,6 @@ body.pump-chart-expanded { overflow:hidden; }
 .pump-legend span:first-child { font-weight:600; }
 
 @media (max-width: 960px) {
-  .pump-grid { grid-template-columns: 1fr; }
   .pump-chart-wrap { padding:0 0 48px; }
   .pump-chart-wrap canvas { max-width:100%; }
 }
@@ -546,7 +539,7 @@ h1 { margin: 0 0 10px; font-size: 22px; }
 .dashboard-layout.has-custom-layout .dashboard-window {
   position: absolute;
 }
-.dashboard-layout:not(.has-custom-layout) .dashboard-window[data-dashboard-window="pump"] {
+.dashboard-layout:not(.has-custom-layout) .dashboard-window[data-dashboard-window="pumpChart"] {
   grid-column: 1 / -1;
 }
 .dashboard-layout.is-editing .dashboard-window {

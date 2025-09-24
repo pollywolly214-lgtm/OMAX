@@ -38,8 +38,12 @@ function viewDashboard(){
         </div>
       </div>
 
-      <div class="dashboard-window" data-dashboard-window="pump">
-        <section id="pump-widget" class="block pump-wide"></section>
+      <div class="dashboard-window" data-dashboard-window="pumpLog">
+        <section id="pump-log-widget" class="block pump-log-block"></section>
+      </div>
+
+      <div class="dashboard-window" data-dashboard-window="pumpChart">
+        <section id="pump-chart-widget" class="block pump-chart-block"></section>
       </div>
     </div>
 
