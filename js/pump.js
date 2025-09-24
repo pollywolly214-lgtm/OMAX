@@ -313,7 +313,10 @@ function drawPumpChart(canvas, rangeValue){
   ctx.clearRect(0,0,W,H);
   ctx.fillStyle = "#fff";
   ctx.fillRect(0,0,W,H);
-  ctx.font = "12px sans-serif";
+  const fontScale = 3;
+  const scaled = (value)=> Math.round(value * fontScale);
+  const fontPx = (size)=> `${Math.max(1, Math.round(size * fontScale))}px sans-serif`;
+  ctx.font = fontPx(12);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   if (!pumpEff.entries.length){
@@ -364,7 +367,12 @@ function drawPumpChart(canvas, rangeValue){
   if (xMax <= xMin) xMax = xMin + DAY_MS;
   const ticks = pumpBuildTimeTicks(range, xMin, xMax);
   const hasSubLabel = ticks.some(t => t.subLabel);
-  const margin = { top: 40, right: 16, bottom: hasSubLabel ? 66 : 48, left: 48 };
+  const margin = {
+    top: Math.max(40, scaled(18)),
+    right: Math.max(16, scaled(6)),
+    bottom: Math.max(hasSubLabel ? 66 : 48, scaled(hasSubLabel ? 22 : 18)),
+    left: Math.max(48, scaled(16))
+  };
   const innerW = Math.max(10, W - margin.left - margin.right);
   const innerH = Math.max(10, H - margin.top - margin.bottom);
   const axisY = margin.top + innerH;
@@ -396,10 +404,11 @@ function drawPumpChart(canvas, rangeValue){
     ctx.setLineDash([]);
     ctx.fillStyle = "#666";
     ctx.textAlign = "left";
-    const labelOffset = baselineY <= margin.top + 6 ? 6 : -4;
+    ctx.font = fontPx(12);
+    const labelOffset = baselineY <= margin.top + scaled(6) ? scaled(6) : -scaled(4);
     ctx.textBaseline = labelOffset > 0 ? "top" : "bottom";
     const arrow = baselineArrow ? ` ${baselineArrow}` : "";
-    ctx.fillText(`Baseline ${baselineRPM} RPM${arrow}`, axisX0 + 6, baselineY + labelOffset);
+    ctx.fillText(`Baseline ${baselineRPM} RPM${arrow}`, axisX0 + scaled(2), baselineY + labelOffset);
   }
 
   ctx.strokeStyle = "#0a63c2";
@@ -428,7 +437,7 @@ function drawPumpChart(canvas, rangeValue){
   ticks.forEach(t => {
     const x = X(t.time);
     ctx.moveTo(x, axisY);
-    ctx.lineTo(x, axisY + 7);
+    ctx.lineTo(x, axisY + scaled(7));
   });
   ctx.stroke();
   ctx.restore();
@@ -436,9 +445,9 @@ function drawPumpChart(canvas, rangeValue){
   ctx.save();
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  const primaryFont = "11px sans-serif";
-  const secondaryFont = "10px sans-serif";
-  const baseY = axisY + 10;
+  const primaryFont = fontPx(11);
+  const secondaryFont = fontPx(10);
+  const baseY = axisY + scaled(10);
   ticks.forEach((t,idx) => {
     const x = X(t.time);
     ctx.font = primaryFont;
@@ -447,7 +456,7 @@ function drawPumpChart(canvas, rangeValue){
     if (t.subLabel){
       ctx.font = secondaryFont;
       ctx.fillStyle = "#6c7a90";
-      ctx.fillText(t.subLabel, x, baseY + 13);
+      ctx.fillText(t.subLabel, x, baseY + scaled(13));
     }
   });
   ctx.restore();
@@ -460,20 +469,23 @@ function drawPumpChart(canvas, rangeValue){
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillStyle = map[col] || "#333";
-    ctx.fillText(`Latest: ${latest.rpm} RPM (${latest.dateISO})  Δ%=${pct!=null?pct.toFixed(1):"—"}`, axisX0 + 4, margin.top / 2);
+    ctx.font = fontPx(12);
+    ctx.fillText(`Latest: ${latest.rpm} RPM (${latest.dateISO})  Δ%=${pct!=null?pct.toFixed(1):"—"}`, axisX0 + scaled(2), margin.top / 2);
   }
 
   ctx.fillStyle = "#4a5868";
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
+  ctx.font = fontPx(12);
   ctx.fillText(`Range: Last ${pumpRangeLabel(range)}`, axisX1, margin.top / 2);
 
   if (!usingFiltered){
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.fillStyle = "#777";
-    const infoY = axisY + (hasSubLabel ? 32 : 20);
-    ctx.fillText("No logs in selected range. Showing latest entry.", axisX0 + 4, infoY);
+    ctx.font = fontPx(12);
+    const infoY = axisY + scaled(hasSubLabel ? 32 : 20);
+    ctx.fillText("No logs in selected range. Showing latest entry.", axisX0 + scaled(2), infoY);
   }
 }
 
