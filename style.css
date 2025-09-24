@@ -110,6 +110,8 @@ body.pump-chart-expanded { overflow:hidden; }
 .cost-chart-toggle{ display:flex; gap:12px; flex-wrap:wrap; font-size:13px; color:#333; }
 .cost-chart-toggle label{ display:flex; align-items:center; gap:6px; cursor:pointer; }
 .cost-chart-toggle .dot{ display:inline-block; width:12px; height:12px; border-radius:999px; }
+.cost-chart-canvas { position: relative; }
+.cost-chart-canvas canvas { width: 100%; height: auto; display: block; }
 
 .cost-table{ width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
 .cost-table th, .cost-table td{ padding:8px; border:1px solid #e1e5ee; text-align:left; }
@@ -510,6 +512,7 @@ h1 { margin: 0 0 10px; font-size: 22px; }
 }
 
 .container { padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+.cost-container { row-gap: 16px; }
 .dashboard-toolbar {
   grid-column: 1 / -1;
   display: flex;
@@ -613,6 +616,10 @@ h1 { margin: 0 0 10px; font-size: 22px; }
   position: absolute;
 }
 .dashboard-layout:not(.has-custom-layout) .dashboard-window[data-dashboard-window="pumpChart"] {
+  grid-column: 1 / -1;
+}
+.cost-layout:not(.has-custom-layout) .dashboard-window[data-cost-window="overview"],
+.cost-layout:not(.has-custom-layout) .dashboard-window[data-cost-window="chart"] {
   grid-column: 1 / -1;
 }
 .dashboard-layout.is-editing .dashboard-window {

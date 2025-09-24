@@ -128,6 +128,10 @@ const DASHBOARD_LAYOUT_STORAGE_KEY = "dashboard_layout_windows_v1";
 const DASHBOARD_WINDOW_MIN_WIDTH   = 240;
 const DASHBOARD_WINDOW_MIN_HEIGHT  = 160;
 
+const COST_LAYOUT_STORAGE_KEY = "cost_layout_windows_v1";
+const COST_WINDOW_MIN_WIDTH   = 240;
+const COST_WINDOW_MIN_HEIGHT  = 160;
+
 function dashboardLayoutStorage(){
   try {
     if (typeof localStorage !== "undefined") return localStorage;
@@ -634,6 +638,538 @@ function notifyDashboardLayoutContentChanged(){
   if (!state.root || !state.root.classList.contains("has-custom-layout")) return;
   requestAnimationFrame(()=>{
     applyDashboardLayout(state);
+  });
+}
+
+function costLayoutStorage(){
+  try {
+    if (typeof localStorage !== "undefined") return localStorage;
+  } catch (err){
+    console.warn("localStorage unavailable", err);
+  }
+  return null;
+}
+
+function loadCostLayoutFromStorage(){
+  const storage = costLayoutStorage();
+  if (!storage) return { layout:{}, stored:false };
+  try {
+    const raw = storage.getItem(COST_LAYOUT_STORAGE_KEY);
+    if (!raw) return { layout:{}, stored:false };
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") return { layout: parsed, stored: true };
+  } catch (err){
+    console.warn("Unable to load cost layout", err);
+  }
+  return { layout:{}, stored:false };
+}
+
+function getCostLayoutState(){
+  if (!window.costLayoutState){
+    const loaded = loadCostLayoutFromStorage();
+    window.costLayoutState = {
+      layoutById: loaded.layout,
+      layoutStored: !!loaded.stored,
+      editing: false,
+      zCounter: 40,
+      root: null,
+      windows: [],
+      editButton: null,
+      settingsButton: null,
+      settingsMenu: null,
+      hintEl: null,
+      boundResize: false,
+      layoutNotifyPending: false,
+      onLayoutChange: null,
+      resizeHandler: null
+    };
+  }
+  return window.costLayoutState;
+}
+
+function hasSavedCostLayout(state){
+  return !!(state && state.layoutStored);
+}
+
+function persistCostLayout(state){
+  if (!state) return;
+  const storage = costLayoutStorage();
+  if (!storage) return;
+  try {
+    if (state.layoutById && Object.keys(state.layoutById).length){
+      storage.setItem(COST_LAYOUT_STORAGE_KEY, JSON.stringify(state.layoutById));
+      state.layoutStored = true;
+    }else{
+      storage.removeItem(COST_LAYOUT_STORAGE_KEY);
+      state.layoutStored = false;
+    }
+  } catch (err){
+    console.warn("Unable to persist cost layout", err);
+  }
+}
+
+function captureCostWindowRect(win, rootRect){
+  if (!win || !rootRect) return null;
+  const rect = win.getBoundingClientRect();
+  const width = Math.max(COST_WINDOW_MIN_WIDTH, Math.round(rect.width) || COST_WINDOW_MIN_WIDTH);
+  const height = Math.max(COST_WINDOW_MIN_HEIGHT, Math.round(rect.height) || COST_WINDOW_MIN_HEIGHT);
+  return {
+    x: Math.round(rect.left - rootRect.left),
+    y: Math.round(rect.top - rootRect.top),
+    width,
+    height
+  };
+}
+
+function costLayoutMaxBottom(layout){
+  let maxBottom = 0;
+  if (layout){
+    Object.values(layout).forEach(box => {
+      if (!box) return;
+      const bottom = Number(box.y || 0) + Number(box.height || 0);
+      if (isFinite(bottom)) maxBottom = Math.max(maxBottom, bottom);
+    });
+  }
+  return maxBottom;
+}
+
+function syncCostLayoutEntries(state){
+  if (!state.root) return;
+  if (!state.layoutById || typeof state.layoutById !== "object") state.layoutById = {};
+  const layout = state.layoutById;
+  const rootRect = state.root.getBoundingClientRect();
+  const useExisting = state.root.classList.contains("has-custom-layout") && Object.keys(layout).length;
+  const seen = new Set();
+  state.windows.forEach(win => {
+    if (!win || !win.dataset) return;
+    const id = String(win.dataset.costWindow || "");
+    if (!id) return;
+    seen.add(id);
+    if (!layout[id]){
+      if (useExisting){
+        const fallbackWidth = Math.max(COST_WINDOW_MIN_WIDTH, Math.round(win.offsetWidth) || COST_WINDOW_MIN_WIDTH);
+        const fallbackHeight = Math.max(COST_WINDOW_MIN_HEIGHT, Math.round(win.offsetHeight) || COST_WINDOW_MIN_HEIGHT);
+        const offsetY = costLayoutMaxBottom(layout) + 24;
+        layout[id] = { x: 0, y: offsetY, width: fallbackWidth, height: fallbackHeight };
+      }else{
+        layout[id] = captureCostWindowRect(win, rootRect);
+      }
+    }
+  });
+  Object.keys(layout).forEach(id => { if (!seen.has(id)) delete layout[id]; });
+}
+
+function setCostWindowStyle(win, box){
+  if (!win || !box) return;
+  win.style.left = `${box.x}px`;
+  win.style.top = `${box.y}px`;
+  win.style.width = `${box.width}px`;
+  win.style.height = `${box.height}px`;
+}
+
+function scheduleCostLayoutRefresh(state){
+  if (!state) return;
+  if (state.layoutNotifyPending) return;
+  state.layoutNotifyPending = true;
+  requestAnimationFrame(()=>{
+    state.layoutNotifyPending = false;
+    if (typeof state.onLayoutChange === "function"){
+      try {
+        state.onLayoutChange();
+      } catch (err){
+        console.error(err);
+      }
+    }
+  });
+}
+
+function updateCostRootSize(state){
+  if (!state.root) return;
+  if (!state.root.classList.contains("has-custom-layout")){
+    state.root.style.minHeight = "";
+    state.root.style.paddingBottom = "";
+    return;
+  }
+  const maxBottom = costLayoutMaxBottom(state.layoutById);
+  const extra = state.editing ? 160 : 60;
+  state.root.style.minHeight = `${Math.max(0, Math.ceil(maxBottom + extra))}px`;
+  state.root.style.paddingBottom = state.editing ? "120px" : "48px";
+}
+
+function applyCostLayout(state){
+  if (!state.root) return;
+  if (!state.root.classList.contains("has-custom-layout")){
+    state.windows.forEach(win => {
+      if (!win) return;
+      win.style.left = "";
+      win.style.top = "";
+      win.style.width = "";
+      win.style.height = "";
+    });
+    updateCostRootSize(state);
+    scheduleCostLayoutRefresh(state);
+    return;
+  }
+  state.windows.forEach(win => {
+    if (!win || !win.dataset) return;
+    const id = String(win.dataset.costWindow || "");
+    const box = state.layoutById[id];
+    if (box){ setCostWindowStyle(win, box); }
+  });
+  updateCostRootSize(state);
+  scheduleCostLayoutRefresh(state);
+}
+
+function updateCostEditUi(state){
+  if (state.editButton){
+    const label = state.editing ? "Done editing layout" : "Edit layout";
+    state.editButton.textContent = label;
+    const pressed = state.editing ? "true" : "false";
+    state.editButton.setAttribute("aria-pressed", pressed);
+    state.editButton.setAttribute("aria-checked", pressed);
+  }
+  if (state.hintEl){
+    state.hintEl.hidden = !state.editing;
+  }
+  if (state.settingsButton){
+    state.settingsButton.classList.toggle("is-active", !!state.editing);
+  }
+}
+
+function bringCostWindowToFront(state, win){
+  if (!state) return;
+  state.zCounter = (state.zCounter || 40) + 1;
+  if (win) win.style.zIndex = String(state.zCounter);
+}
+
+function removeCostWindowElevation(win){
+  if (win) win.style.zIndex = "";
+}
+
+function addCostWindowHandles(state){
+  state.windows.forEach(win => {
+    if (!win) return;
+    const id = String(win.dataset.costWindow || "");
+    if (!id) return;
+    if (!win.querySelector(":scope > .dashboard-drag-handle")){
+      const handle = document.createElement("div");
+      handle.className = "dashboard-drag-handle";
+      handle.title = "Drag to move";
+      handle.innerHTML = "<span>Drag</span>";
+      handle.setAttribute("aria-hidden", "true");
+      handle.addEventListener("pointerdown", (event)=> startCostWindowDrag(state, win, event));
+      win.appendChild(handle);
+    }
+    const resizeTypes = ["n","s","e","w","ne","nw","se","sw"];
+    resizeTypes.forEach(type => {
+      if (win.querySelector(`:scope > .dashboard-resize-${type}`)) return;
+      const handle = document.createElement("div");
+      handle.className = `dashboard-resize-handle dashboard-resize-${type}`;
+      handle.dataset.resize = type;
+      handle.title = "Drag to resize";
+      handle.setAttribute("aria-hidden", "true");
+      handle.addEventListener("pointerdown", (event)=> startCostWindowResize(state, win, type, event));
+      win.appendChild(handle);
+    });
+  });
+}
+
+function removeCostWindowHandles(state){
+  state.windows.forEach(win => {
+    if (!win) return;
+    win.querySelectorAll(":scope > .dashboard-drag-handle, :scope > .dashboard-resize-handle").forEach(el => el.remove());
+    removeCostWindowElevation(win);
+  });
+}
+
+function clampCostX(state, desiredX, width){
+  if (!state.root) return desiredX;
+  const rootWidth = state.root.clientWidth || state.root.getBoundingClientRect().width || width;
+  if (!isFinite(rootWidth) || rootWidth <= 0) return Math.max(0, desiredX);
+  const maxX = Math.max(0, rootWidth - width);
+  return Math.min(Math.max(0, desiredX), maxX);
+}
+
+function startCostWindowDrag(state, win, event){
+  if (!state || !win || !state.root) return;
+  const id = String(win.dataset.costWindow || "");
+  if (!id) return;
+  const box = state.layoutById[id];
+  if (!box) return;
+  if (event.button !== 0 && event.pointerType !== "touch") return;
+  event.preventDefault();
+  bringCostWindowToFront(state, win);
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const baseX = box.x;
+  const baseY = box.y;
+  const pointerId = event.pointerId;
+  const move = (ev)=>{
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    const nextX = clampCostX(state, baseX + dx, box.width);
+    const nextY = Math.max(0, baseY + dy);
+    box.x = Math.round(nextX);
+    box.y = Math.round(nextY);
+    setCostWindowStyle(win, box);
+    updateCostRootSize(state);
+    scheduleCostLayoutRefresh(state);
+  };
+  const stop = ()=>{
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+    win.releasePointerCapture?.(pointerId);
+    persistCostLayout(state);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", stop);
+  window.addEventListener("pointercancel", stop);
+  win.setPointerCapture?.(pointerId);
+}
+
+function startCostWindowResize(state, win, direction, event){
+  if (!state || !win || !state.root) return;
+  const id = String(win.dataset.costWindow || "");
+  if (!id) return;
+  const box = state.layoutById[id];
+  if (!box) return;
+  if (event.button !== 0 && event.pointerType !== "touch") return;
+  event.preventDefault();
+  bringCostWindowToFront(state, win);
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const startBox = { x: box.x, y: box.y, width: box.width, height: box.height };
+  const pointerId = event.pointerId;
+  const resize = (ev)=>{
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    let nextX = startBox.x;
+    let nextY = startBox.y;
+    let nextWidth = startBox.width;
+    let nextHeight = startBox.height;
+    if (direction.includes("e")){
+      nextWidth = Math.max(COST_WINDOW_MIN_WIDTH, startBox.width + dx);
+      const maxWidth = (state.root.clientWidth || state.root.getBoundingClientRect().width || nextWidth) - startBox.x;
+      if (isFinite(maxWidth) && maxWidth > 0) nextWidth = Math.min(nextWidth, maxWidth);
+    }
+    if (direction.includes("s")){
+      nextHeight = Math.max(COST_WINDOW_MIN_HEIGHT, startBox.height + dy);
+    }
+    if (direction.includes("w")){
+      const desiredX = startBox.x + dx;
+      const maxX = startBox.x + startBox.width - COST_WINDOW_MIN_WIDTH;
+      nextX = Math.max(0, Math.min(desiredX, maxX));
+      nextWidth = Math.max(COST_WINDOW_MIN_WIDTH, startBox.width + (startBox.x - nextX));
+    }
+    if (direction.includes("n")){
+      const desiredY = startBox.y + dy;
+      const maxY = startBox.y + startBox.height - COST_WINDOW_MIN_HEIGHT;
+      nextY = Math.max(0, Math.min(desiredY, maxY));
+      nextHeight = Math.max(COST_WINDOW_MIN_HEIGHT, startBox.height + (startBox.y - nextY));
+    }
+    nextX = clampCostX(state, nextX, nextWidth);
+    if (nextHeight < COST_WINDOW_MIN_HEIGHT) nextHeight = COST_WINDOW_MIN_HEIGHT;
+    box.x = Math.round(nextX);
+    box.y = Math.round(nextY);
+    box.width = Math.round(nextWidth);
+    box.height = Math.round(nextHeight);
+    setCostWindowStyle(win, box);
+    updateCostRootSize(state);
+    scheduleCostLayoutRefresh(state);
+  };
+  const stop = ()=>{
+    window.removeEventListener("pointermove", resize);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+    win.releasePointerCapture?.(pointerId);
+    persistCostLayout(state);
+  };
+  window.addEventListener("pointermove", resize);
+  window.addEventListener("pointerup", stop);
+  window.addEventListener("pointercancel", stop);
+  win.setPointerCapture?.(pointerId);
+}
+
+function ensureCostLayoutBoundResize(state){
+  if (state.boundResize) return;
+  state.boundResize = true;
+  window.addEventListener("resize", ()=>{
+    const curState = getCostLayoutState();
+    if (!curState.root || !curState.root.classList.contains("has-custom-layout")) return;
+    const rootWidth = curState.root.clientWidth || curState.root.getBoundingClientRect().width;
+    let changed = false;
+    Object.entries(curState.layoutById || {}).forEach(([id, box]) => {
+      if (!box) return;
+      const maxX = Math.max(0, (rootWidth || box.width) - box.width);
+      if (box.x > maxX){ box.x = Math.max(0, Math.round(maxX)); changed = true; }
+    });
+    if (changed){
+      applyCostLayout(curState);
+      persistCostLayout(curState);
+    }
+  });
+}
+
+function getCostSettingsElements(){
+  const button = document.getElementById("costSettingsToggle") || null;
+  const menu   = document.getElementById("costSettingsMenu") || null;
+  const wrap   = document.getElementById("costSettings") || null;
+  const state  = getCostLayoutState();
+  state.settingsButton = button;
+  state.settingsMenu = menu;
+  return { button, menu, wrap, state };
+}
+
+function closeCostSettingsMenu(state){
+  const ctxState = state || getCostLayoutState();
+  if (!ctxState.settingsButton || !ctxState.settingsMenu){
+    const fresh = getCostSettingsElements();
+    if (!ctxState.settingsButton) ctxState.settingsButton = fresh.button;
+    if (!ctxState.settingsMenu) ctxState.settingsMenu = fresh.menu;
+  }
+  const menu = ctxState.settingsMenu;
+  const button = ctxState.settingsButton;
+  if (menu && !menu.hidden){
+    menu.hidden = true;
+  }
+  if (button){
+    button.setAttribute("aria-expanded", "false");
+    button.classList.remove("is-open");
+  }
+}
+
+function openCostSettingsMenu(state){
+  const ctxState = state || getCostLayoutState();
+  if (!ctxState.settingsButton || !ctxState.settingsMenu){
+    const fresh = getCostSettingsElements();
+    if (!ctxState.settingsButton) ctxState.settingsButton = fresh.button;
+    if (!ctxState.settingsMenu) ctxState.settingsMenu = fresh.menu;
+  }
+  const menu = ctxState.settingsMenu;
+  const button = ctxState.settingsButton;
+  if (!menu || !button) return;
+  if (!menu.hidden) return;
+  menu.hidden = false;
+  button.setAttribute("aria-expanded", "true");
+  button.classList.add("is-open");
+  const focusTarget = menu.querySelector('[data-settings-focus], button, [href], [tabindex]:not([tabindex="-1"])');
+  focusTarget?.focus();
+}
+
+function wireCostSettingsMenu(){
+  if (typeof window.costSettingsCleanup === "function"){
+    window.costSettingsCleanup();
+    window.costSettingsCleanup = null;
+  }
+  const { button, menu, wrap, state } = getCostSettingsElements();
+  if (!button || !menu || !wrap) return;
+  menu.hidden = true;
+  button.setAttribute("aria-expanded", "false");
+  button.classList.remove("is-open");
+  const toggle = (event)=>{
+    event.preventDefault();
+    const expanded = button.getAttribute("aria-expanded") === "true";
+    if (expanded){ closeCostSettingsMenu(state); }
+    else { openCostSettingsMenu(state); }
+  };
+  if (!button.dataset.bound){
+    button.dataset.bound = "1";
+    button.addEventListener("click", toggle);
+    button.addEventListener("keydown", (event)=>{
+      if ((event.key === "Enter" || event.key === " ") && menu.hidden){
+        event.preventDefault();
+        openCostSettingsMenu(state);
+      }else if (event.key === "Escape" && !menu.hidden){
+        closeCostSettingsMenu(state);
+      }
+    });
+  }
+  const handleDocumentClick = (event)=>{
+    if (!wrap.contains(event.target)) closeCostSettingsMenu(state);
+  };
+  const handleDocumentKey = (event)=>{
+    if (event.key === "Escape" && !menu.hidden){
+      closeCostSettingsMenu(state);
+      button?.focus();
+    }
+  };
+  document.addEventListener("click", handleDocumentClick);
+  document.addEventListener("keydown", handleDocumentKey);
+  window.costSettingsCleanup = ()=>{
+    document.removeEventListener("click", handleDocumentClick);
+    document.removeEventListener("keydown", handleDocumentKey);
+  };
+  if (!menu.dataset.bound){
+    menu.dataset.bound = "1";
+    menu.addEventListener("keydown", (event)=>{
+      if (event.key === "Escape"){ closeCostSettingsMenu(state); button?.focus(); }
+    });
+  }
+}
+
+function setCostEditing(state, editing){
+  state.editing = !!editing;
+  if (!state.root) return;
+  if (editing){
+    if (!state.root.classList.contains("has-custom-layout")){
+      state.root.classList.add("has-custom-layout");
+      syncCostLayoutEntries(state);
+    }
+    addCostWindowHandles(state);
+    state.root.classList.add("is-editing");
+  }else{
+    state.root.classList.remove("is-editing");
+    removeCostWindowHandles(state);
+  }
+  applyCostLayout(state);
+  updateCostEditUi(state);
+  closeCostSettingsMenu(state);
+  if (!editing) persistCostLayout(state);
+}
+
+function toggleCostEditing(){
+  const state = getCostLayoutState();
+  setCostEditing(state, !state.editing);
+}
+
+function setupCostLayout(){
+  const state = getCostLayoutState();
+  state.root = document.getElementById("costLayout") || null;
+  state.editButton = document.getElementById("costEditToggle") || null;
+  state.settingsButton = document.getElementById("costSettingsToggle") || null;
+  state.settingsMenu = document.getElementById("costSettingsMenu") || null;
+  state.hintEl = document.getElementById("costEditHint") || null;
+  state.windows = state.root ? Array.from(state.root.querySelectorAll("[data-cost-window]")) : [];
+  if (!state.root){
+    updateCostEditUi(state);
+    return;
+  }
+  ensureCostLayoutBoundResize(state);
+  if (hasSavedCostLayout(state)){
+    state.root.classList.add("has-custom-layout");
+  }
+  syncCostLayoutEntries(state);
+  applyCostLayout(state);
+  updateCostEditUi(state);
+  if (state.editing){
+    addCostWindowHandles(state);
+    state.root.classList.add("is-editing");
+  }
+  if (state.editButton && !state.editButton.dataset.bound){
+    state.editButton.dataset.bound = "1";
+    state.editButton.addEventListener("click", ()=>{
+      toggleCostEditing();
+      closeCostSettingsMenu(state);
+    });
+  }
+}
+
+function notifyCostLayoutContentChanged(){
+  const state = getCostLayoutState();
+  if (!state.root || !state.root.classList.contains("has-custom-layout")) return;
+  requestAnimationFrame(()=>{
+    applyCostLayout(state);
   });
 }
 
@@ -2536,6 +3072,21 @@ const COST_CHART_COLORS = {
   jobs: "#2e7d32"
 };
 
+function resizeCostChartCanvas(canvas){
+  if (!canvas) return;
+  const parent = canvas.parentElement;
+  if (!parent) return;
+  const rect = parent.getBoundingClientRect();
+  const fallbackWidth = canvas.width || 720;
+  const rawWidth = rect.width || parent.clientWidth || fallbackWidth;
+  const width = Math.max(360, Math.round(rawWidth || fallbackWidth));
+  const ratio = 240 / 780; // original aspect ratio ~0.3077
+  const minHeight = 220;
+  const height = Math.max(minHeight, Math.round(width * ratio));
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+}
+
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
@@ -2547,16 +3098,32 @@ function renderCosts(){
   const toggleMaint = document.getElementById("toggleCostMaintenance");
   const toggleJobs  = document.getElementById("toggleCostJobs");
 
+  wireCostSettingsMenu();
+  setupCostLayout();
+
+  const state = getCostLayoutState();
+
   const redraw = ()=>{
+    if (!canvas) return;
+    resizeCostChartCanvas(canvas);
     drawCostChart(canvas, model, {
       maintenance: !toggleMaint || toggleMaint.checked,
       jobs: !toggleJobs || toggleJobs.checked
     });
   };
 
+  state.onLayoutChange = redraw;
+  if (state.resizeHandler){
+    window.removeEventListener("resize", state.resizeHandler);
+  }
+  state.resizeHandler = ()=> redraw();
+  window.addEventListener("resize", state.resizeHandler);
+
   redraw();
   toggleMaint?.addEventListener("change", redraw);
   toggleJobs?.addEventListener("change", redraw);
+
+  notifyCostLayoutContentChanged();
 }
 
 function computeCostModel(){
