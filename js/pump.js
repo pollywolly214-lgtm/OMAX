@@ -284,6 +284,9 @@ function renderPumpWidget(){
     renderPumpWidget();
   });
   drawPumpChart(canvas, window.pumpChartRange);
+  if (typeof notifyDashboardLayoutContentChanged === "function"){
+    notifyDashboardLayoutContentChanged();
+  }
 }
 function drawPumpChart(canvas, rangeValue){
   if (!canvas) return;
