@@ -3,6 +3,53 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
+const PUMP_BASE_FONT_SCALE = 3;
+const pumpViewportState = { bound:false, lastResponsiveScale:1 };
+
+function pumpGetViewportScale(){
+  if (window.visualViewport && typeof window.visualViewport.scale === "number"){
+    const scale = window.visualViewport.scale;
+    if (isFinite(scale) && scale > 0) return scale;
+  }
+  if (typeof window.devicePixelRatio === "number" && isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0){
+    return window.devicePixelRatio;
+  }
+  return 1;
+}
+
+function pumpGetResponsiveZoomFactor(){
+  const raw = pumpGetViewportScale();
+  if (!isFinite(raw) || raw <= 0) return 1;
+  if (raw < 1) return Math.max(0.5, raw);
+  return 1;
+}
+
+function pumpComputeFontScale(){
+  const factor = pumpGetResponsiveZoomFactor();
+  pumpViewportState.lastResponsiveScale = factor;
+  return PUMP_BASE_FONT_SCALE * factor;
+}
+
+function ensurePumpViewportWatcher(){
+  if (pumpViewportState.bound) return;
+  pumpViewportState.bound = true;
+  pumpViewportState.lastResponsiveScale = pumpGetResponsiveZoomFactor();
+  const handle = ()=>{
+    const next = pumpGetResponsiveZoomFactor();
+    if (!isFinite(next)) return;
+    if (Math.abs(next - pumpViewportState.lastResponsiveScale) < 0.01) return;
+    pumpViewportState.lastResponsiveScale = next;
+    const canvas = document.getElementById("pumpChart");
+    if (canvas){
+      drawPumpChart(canvas, window.pumpChartRange);
+    }
+  };
+  if (window.visualViewport){
+    window.visualViewport.addEventListener("resize", handle, { passive: true });
+  }
+  window.addEventListener("resize", handle);
+}
+
 const DAY_MS = 24*60*60*1000;
 const PUMP_MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -174,13 +221,41 @@ function pumpBuildTimeTicks(range, startTime, endTime){
   return ticks;
 }
 
-function viewPumpWidget(){
+function viewPumpLogWidget(){
   const latest = pumpLatest();
   const pct    = latest ? pumpPercentChange(latest.rpm) : null;
   const col    = pumpColorFor(pct);
   const baselineVal = pumpEff.baselineRPM ?? "";
   const todayISO    = new Date().toISOString().slice(0,10);
   const latestTxt   = latest ? `${latest.rpm} RPM (${latest.dateISO})` : "—";
+  return `
+  <details class="pump-card" open>
+    <summary><b>Pump Efficiency</b> <span class="chip ${col.cls}">${col.label}</span></summary>
+    <div class="pump-log-panel">
+      <div class="pump-log-section">
+        <h4>Baseline @ 49 ksi</h4>
+        <form id="pumpBaselineForm" class="mini-form">
+          <input type="number" id="pumpBaselineRPM" min="1" step="1" placeholder="RPM" value="${baselineVal}">
+          <button type="submit">Set baseline (today)</button>
+        </form>
+        <div class="small muted">Lower RPM = better. Baseline is recorded after a major/minor rebuild.</div>
+      </div>
+      <div class="pump-log-section">
+        <h4>Daily log</h4>
+        <form id="pumpLogForm" class="mini-form">
+          <input type="date" id="pumpLogDate" value="${todayISO}" required>
+          <input type="number" id="pumpLogRPM" min="1" step="1" placeholder="RPM at 49 ksi" required>
+          <button type="submit">Add / Update</button>
+        </form>
+      </div>
+      <div class="pump-stats">
+        <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO})` : "—"}</span></div>
+        <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
+      </div>
+    </div>
+  </details>`;
+}
+function viewPumpChartWidget(){
   const rangeValue  = window.pumpChartRange || "3m";
   const rangeOptions = PUMP_RANGE_OPTIONS.map(opt => `<option value="${opt.value}" ${opt.value===rangeValue?"selected":""}>Last ${opt.label}</option>`).join("");
   const expanded = window.pumpChartExpanded === true;
@@ -188,53 +263,35 @@ function viewPumpWidget(){
   const expandLabel = expanded ? "Shrink" : "Expand";
   const expandIcon = expanded ? "⤡" : "⤢";
   return `
-  <details class="block pump-card" open>
-    <summary><b>Pump Efficiency</b> <span class="chip ${col.cls}">${col.label}</span></summary>
-    <div class="pump-grid">
-      <div class="pump-col">
-        <h4>Baseline @ 49 ksi</h4>
-        <form id="pumpBaselineForm" class="mini-form">
-          <input type="number" id="pumpBaselineRPM" min="1" step="1" placeholder="RPM" value="${baselineVal}">
-          <button type="submit">Set baseline (today)</button>
-        </form>
-        <div class="small muted">Lower RPM = better. Baseline is recorded after a major/minor rebuild.</div>
-        <h4 style="margin-top:10px">Daily log</h4>
-        <form id="pumpLogForm" class="mini-form">
-          <input type="date" id="pumpLogDate" value="${todayISO}" required>
-          <input type="number" id="pumpLogRPM" min="1" step="1" placeholder="RPM at 49 ksi" required>
-          <button type="submit">Add / Update</button>
-        </form>
-        <div class="pump-stats">
-          <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO})` : "—"}</span></div>
-          <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
-        </div>
-      </div>
-      <div class="pump-col pump-chart-col">
-        <div class="pump-chart-toolbar small muted">
-          <label for="pumpRange">Timeframe:</label>
-          <select id="pumpRange">${rangeOptions}</select>
-        </div>
-        <div class="${wrapCls}">
-          <canvas id="pumpChart" height="${expanded ? 360 : 240}"></canvas>
-          <button type="button" class="pump-expand-btn" data-expanded="${expanded}" title="${expandLabel} chart">${expandIcon} ${expandLabel}</button>
-        </div>
-        <div class="pump-legend small muted">
-          <span>Color codes:</span>
-          <span class="chip green">0–&lt;8%</span>
-          <span class="chip yellow">8–15%</span>
-          <span class="chip orange">&gt;15–18%</span>
-          <span class="chip red">&gt;18%</span>
-          <span class="chip green-better">Negative = better</span>
-        </div>
+  <div class="pump-chart-card">
+    <div class="pump-chart-header">
+      <h3>Pump Efficiency Trend</h3>
+      <div class="pump-chart-toolbar small muted">
+        <label for="pumpRange">Timeframe:</label>
+        <select id="pumpRange">${rangeOptions}</select>
       </div>
     </div>
-  </details>
+    <div class="${wrapCls}">
+      <canvas id="pumpChart" height="${expanded ? 360 : 240}"></canvas>
+      <button type="button" class="pump-expand-btn" data-expanded="${expanded}" title="${expandLabel} chart">${expandIcon} ${expandLabel}</button>
+    </div>
+    <div class="pump-legend small muted">
+      <span>Color codes:</span>
+      <span class="chip green">0–&lt;8%</span>
+      <span class="chip yellow">8–15%</span>
+      <span class="chip orange">&gt;15–18%</span>
+      <span class="chip red">&gt;18%</span>
+      <span class="chip green-better">Negative = better</span>
+    </div>
+  </div>
   ${expanded ? '<div class="pump-chart-backdrop" data-pump-backdrop></div>' : ''}`;
 }
 function renderPumpWidget(){
-  const host = document.getElementById("pump-widget");
-  if (!host) return;
-  host.innerHTML = viewPumpWidget();
+  const logHost = document.getElementById("pump-log-widget");
+  if (logHost) logHost.innerHTML = viewPumpLogWidget();
+  const chartHost = document.getElementById("pump-chart-widget");
+  if (chartHost) chartHost.innerHTML = viewPumpChartWidget();
+  if (!logHost && !chartHost) return;
   document.body.classList.toggle("pump-chart-expanded", !!window.pumpChartExpanded);
   document.getElementById("pumpBaselineForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
@@ -252,19 +309,29 @@ function renderPumpWidget(){
     upsertPumpEntry(d, rpm); saveCloudDebounced(); toast("Log saved"); renderPumpWidget();
   });
   const canvas = document.getElementById("pumpChart");
-  const wrap   = document.querySelector(".pump-chart-wrap");
+  const wrap   = chartHost?.querySelector(".pump-chart-wrap");
   if (canvas && wrap){
     const rect = wrap.getBoundingClientRect();
     const availableWidth = rect.width || wrap.clientWidth || canvas.width || 320;
-    const targetWidth = Math.max(320, Math.floor(availableWidth));
-    if (targetWidth && canvas.width !== targetWidth) canvas.width = targetWidth;
+    let targetWidth = Math.max(320, Math.floor(availableWidth));
     const expanded = !!window.pumpChartExpanded;
-    let targetHeight = expanded ? Math.max(320, Math.floor((window.innerHeight || 720) * 0.6)) : 240;
+    const idealHeight = Math.round(targetWidth * 0.75); // 4:3 aspect ratio
+    let targetHeight = expanded ? Math.max(320, idealHeight) : Math.max(240, idealHeight);
     if (expanded && rect.height){
-      targetHeight = Math.max(targetHeight, Math.floor(rect.height - 96));
+      const paddingAllowance = 120; // top/bottom padding & controls inside expanded wrap
+      const availableHeight = Math.floor(rect.height - paddingAllowance);
+      if (availableHeight > 0 && availableHeight < targetHeight){
+        targetHeight = Math.max(320, availableHeight);
+        const widthFromHeight = Math.round(targetHeight * (4 / 3));
+        if (widthFromHeight > 0 && widthFromHeight < targetWidth){
+          targetWidth = widthFromHeight;
+        }
+      }
     }
+    if (canvas.width !== targetWidth) canvas.width = targetWidth;
     if (canvas.height !== targetHeight) canvas.height = targetHeight;
   }
+  ensurePumpViewportWatcher();
   const rangeSelect = document.getElementById("pumpRange");
   if (rangeSelect){
     if (rangeSelect.value !== window.pumpChartRange) rangeSelect.value = window.pumpChartRange;
@@ -273,17 +340,20 @@ function renderPumpWidget(){
       drawPumpChart(canvas, window.pumpChartRange);
     });
   }
-  const expandBtn = document.querySelector(".pump-expand-btn");
+  const expandBtn = chartHost?.querySelector(".pump-expand-btn");
   expandBtn?.addEventListener("click", ()=>{
     const isExpanded = expandBtn.getAttribute("data-expanded") === "true";
     window.pumpChartExpanded = !isExpanded;
     renderPumpWidget();
   });
-  document.querySelector("[data-pump-backdrop]")?.addEventListener("click", ()=>{
+  chartHost?.querySelector("[data-pump-backdrop]")?.addEventListener("click", ()=>{
     window.pumpChartExpanded = false;
     renderPumpWidget();
   });
   drawPumpChart(canvas, window.pumpChartRange);
+  if (typeof notifyDashboardLayoutContentChanged === "function"){
+    notifyDashboardLayoutContentChanged();
+  }
 }
 function drawPumpChart(canvas, rangeValue){
   if (!canvas) return;
@@ -291,7 +361,10 @@ function drawPumpChart(canvas, rangeValue){
   ctx.clearRect(0,0,W,H);
   ctx.fillStyle = "#fff";
   ctx.fillRect(0,0,W,H);
-  ctx.font = "12px sans-serif";
+  const fontScale = pumpComputeFontScale();
+  const scaled = (value)=> Math.max(1, Math.round(value * fontScale));
+  const fontPx = (size)=> `${Math.max(1, Math.round(size * fontScale))}px sans-serif`;
+  ctx.font = fontPx(12);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   if (!pumpEff.entries.length){
@@ -314,11 +387,22 @@ function drawPumpChart(canvas, rangeValue){
   }
   const dates = data.map(d=>new Date(d.dateISO+"T00:00:00"));
   const rpms  = data.map(d=>d.rpm);
-  const minR  = Math.min(...rpms, pumpEff.baselineRPM ?? rpms[0]);
-  const maxR  = Math.max(...rpms, pumpEff.baselineRPM ?? rpms[0]);
-  const padY  = Math.max(5, (maxR-minR)*0.1);
-  const yMin = minR - padY;
-  const yMax = maxR + padY;
+  const minR  = Math.min(...rpms);
+  const maxR  = Math.max(...rpms);
+  let padY = Math.max(5, (maxR - minR) * 0.04);
+  if (!isFinite(padY) || padY <= 0){
+    const ref = isFinite(maxR) ? Math.abs(maxR) : 0;
+    padY = Math.max(5, ref * 0.04 || 10);
+  }
+  let yMin = minR - padY;
+  let yMax = maxR + padY;
+  if (yMax - yMin < 10){
+    const adjust = (10 - (yMax - yMin)) / 2;
+    yMax += adjust;
+    yMin -= adjust;
+  }
+  const baselineRPM = pumpEff.baselineRPM;
+  const baselineArrow = baselineRPM != null ? (baselineRPM > yMax ? "↑" : baselineRPM < yMin ? "↓" : "") : "";
   const latestDate = dates[dates.length - 1];
   const axisEndDate = new Date(latestDate.getTime());
   const earliestDate = dates[0];
@@ -331,7 +415,12 @@ function drawPumpChart(canvas, rangeValue){
   if (xMax <= xMin) xMax = xMin + DAY_MS;
   const ticks = pumpBuildTimeTicks(range, xMin, xMax);
   const hasSubLabel = ticks.some(t => t.subLabel);
-  const margin = { top: 40, right: 16, bottom: hasSubLabel ? 66 : 48, left: 48 };
+  const margin = {
+    top: Math.max(40, scaled(18)),
+    right: Math.max(16, scaled(6)),
+    bottom: Math.max(hasSubLabel ? 66 : 48, scaled(hasSubLabel ? 22 : 18)),
+    left: Math.max(48, scaled(16))
+  };
   const innerW = Math.max(10, W - margin.left - margin.right);
   const innerH = Math.max(10, H - margin.top - margin.bottom);
   const axisY = margin.top + innerH;
@@ -351,8 +440,9 @@ function drawPumpChart(canvas, rangeValue){
   ctx.lineTo(axisX1, axisY);
   ctx.stroke();
 
-  if (pumpEff.baselineRPM){
-    const baselineY = Y(pumpEff.baselineRPM);
+  if (baselineRPM != null){
+    const baselineRawY = Y(baselineRPM);
+    const baselineY = Math.min(Math.max(baselineRawY, margin.top), axisY);
     ctx.strokeStyle = "#9aa5b5";
     ctx.setLineDash([4,4]);
     ctx.beginPath();
@@ -362,8 +452,11 @@ function drawPumpChart(canvas, rangeValue){
     ctx.setLineDash([]);
     ctx.fillStyle = "#666";
     ctx.textAlign = "left";
-    ctx.textBaseline = "bottom";
-    ctx.fillText(`Baseline ${pumpEff.baselineRPM} RPM`, axisX0 + 6, baselineY - 4);
+    ctx.font = fontPx(12);
+    const labelOffset = baselineY <= margin.top + scaled(6) ? scaled(6) : -scaled(4);
+    ctx.textBaseline = labelOffset > 0 ? "top" : "bottom";
+    const arrow = baselineArrow ? ` ${baselineArrow}` : "";
+    ctx.fillText(`Baseline ${baselineRPM} RPM${arrow}`, axisX0 + scaled(2), baselineY + labelOffset);
   }
 
   ctx.strokeStyle = "#0a63c2";
@@ -392,7 +485,7 @@ function drawPumpChart(canvas, rangeValue){
   ticks.forEach(t => {
     const x = X(t.time);
     ctx.moveTo(x, axisY);
-    ctx.lineTo(x, axisY + 7);
+    ctx.lineTo(x, axisY + scaled(7));
   });
   ctx.stroke();
   ctx.restore();
@@ -400,9 +493,9 @@ function drawPumpChart(canvas, rangeValue){
   ctx.save();
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  const primaryFont = "11px sans-serif";
-  const secondaryFont = "10px sans-serif";
-  const baseY = axisY + 10;
+  const primaryFont = fontPx(11);
+  const secondaryFont = fontPx(10);
+  const baseY = axisY + scaled(10);
   ticks.forEach((t,idx) => {
     const x = X(t.time);
     ctx.font = primaryFont;
@@ -411,7 +504,7 @@ function drawPumpChart(canvas, rangeValue){
     if (t.subLabel){
       ctx.font = secondaryFont;
       ctx.fillStyle = "#6c7a90";
-      ctx.fillText(t.subLabel, x, baseY + 13);
+      ctx.fillText(t.subLabel, x, baseY + scaled(13));
     }
   });
   ctx.restore();
@@ -424,20 +517,23 @@ function drawPumpChart(canvas, rangeValue){
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillStyle = map[col] || "#333";
-    ctx.fillText(`Latest: ${latest.rpm} RPM (${latest.dateISO})  Δ%=${pct!=null?pct.toFixed(1):"—"}`, axisX0 + 4, margin.top / 2);
+    ctx.font = fontPx(12);
+    ctx.fillText(`Latest: ${latest.rpm} RPM (${latest.dateISO})  Δ%=${pct!=null?pct.toFixed(1):"—"}`, axisX0 + scaled(2), margin.top / 2);
   }
 
   ctx.fillStyle = "#4a5868";
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
+  ctx.font = fontPx(12);
   ctx.fillText(`Range: Last ${pumpRangeLabel(range)}`, axisX1, margin.top / 2);
 
   if (!usingFiltered){
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.fillStyle = "#777";
-    const infoY = axisY + (hasSubLabel ? 32 : 20);
-    ctx.fillText("No logs in selected range. Showing latest entry.", axisX0 + 4, infoY);
+    ctx.font = fontPx(12);
+    const infoY = axisY + scaled(hasSubLabel ? 32 : 20);
+    ctx.fillText("No logs in selected range. Showing latest entry.", axisX0 + scaled(2), infoY);
   }
 }
 

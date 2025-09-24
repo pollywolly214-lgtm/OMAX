@@ -9,34 +9,52 @@ function viewDashboard(){
     : "—";
   return `
   <div class="container">
-    <div class="dashboard-top">
-      <!-- Total hours -->
-      <div class="block total-hours-block">
-        <h3>Total Hours</h3>
-        <div class="total-hours-controls mini-form">
-          <label class="total-hours-label"><span>Enter total hours now:</span>
-            <input type="number" id="totalInput" value="${cur!=null?cur:""}" />
-          </label>
-          <button id="logBtn">Log Hours</button>
+    <div class="dashboard-toolbar">
+      <span class="dashboard-edit-hint" id="dashboardEditHint" hidden>Drag windows to rearrange and resize. Calendar stays fixed.</span>
+      <div class="dashboard-settings" id="dashboardSettings">
+        <button type="button" class="dashboard-settings-btn" id="dashboardSettingsToggle" aria-haspopup="true" aria-expanded="false" aria-controls="dashboardSettingsMenu" aria-label="Dashboard settings" title="Dashboard settings">
+          <span aria-hidden="true">⚙</span>
+        </button>
+        <div class="dashboard-settings-menu" id="dashboardSettingsMenu" role="menu" hidden>
+          <button type="button" class="dashboard-settings-item" id="dashboardEditToggle" role="menuitemcheckbox" aria-checked="false" data-settings-focus>Edit layout</button>
         </div>
-        <div class="total-hours-meta" aria-live="polite">
-          <span class="hint">Last updated: ${lastUpdated}</span>
-          <span class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</span>
-        </div>
-      </div>
-
-      <!-- Next due -->
-      <div class="block next-due-block">
-        <h3>Next Due</h3>
-        <div id="nextDueBox">Calculating…</div>
       </div>
     </div>
 
-    <!-- Pump Efficiency widget (rendered by renderPumpWidget) -->
-    <section id="pump-widget" class="block pump-wide"></section>
+    <div class="dashboard-layout" id="dashboardLayout">
+      <div class="dashboard-window" data-dashboard-window="totalHours">
+        <div class="block total-hours-block">
+          <h3>Total Hours</h3>
+          <div class="total-hours-controls mini-form">
+            <label class="total-hours-label"><span>Enter total hours now:</span>
+              <input type="number" id="totalInput" value="${cur!=null?cur:""}" />
+            </label>
+            <button id="logBtn">Log Hours</button>
+          </div>
+          <div class="total-hours-meta" aria-live="polite">
+            <span class="hint">Last updated: ${lastUpdated}</span>
+            <span class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</span>
+          </div>
+        </div>
+      </div>
 
-    <!-- Calendar -->
-    <div class="block" style="grid-column: 1 / -1">
+      <div class="dashboard-window" data-dashboard-window="nextDue">
+        <div class="block next-due-block">
+          <h3>Next Due</h3>
+          <div id="nextDueBox">Calculating…</div>
+        </div>
+      </div>
+
+      <div class="dashboard-window" data-dashboard-window="pumpLog">
+        <section id="pump-log-widget" class="block pump-log-block"></section>
+      </div>
+
+      <div class="dashboard-window" data-dashboard-window="pumpChart">
+        <section id="pump-chart-widget" class="block pump-chart-block"></section>
+      </div>
+    </div>
+
+    <div class="block calendar-block">
       <h3>Calendar (Current + Next 2 Months)</h3>
 
       <div class="calendar-toolbar">

@@ -124,6 +124,519 @@ function buildNextDuePreview({ includeNote = true, noteText = "Preview of tracke
   `.trim();
 }
 
+const DASHBOARD_LAYOUT_STORAGE_KEY = "dashboard_layout_windows_v1";
+const DASHBOARD_WINDOW_MIN_WIDTH   = 240;
+const DASHBOARD_WINDOW_MIN_HEIGHT  = 160;
+
+function dashboardLayoutStorage(){
+  try {
+    if (typeof localStorage !== "undefined") return localStorage;
+  } catch (err){
+    console.warn("localStorage unavailable", err);
+  }
+  return null;
+}
+
+function loadDashboardLayoutFromStorage(){
+  const storage = dashboardLayoutStorage();
+  if (!storage) return { layout:{}, stored:false };
+  try {
+    const raw = storage.getItem(DASHBOARD_LAYOUT_STORAGE_KEY);
+    if (!raw) return { layout:{}, stored:false };
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") return { layout: parsed, stored: true };
+  } catch (err){
+    console.warn("Unable to load dashboard layout", err);
+  }
+  return { layout:{}, stored:false };
+}
+
+function getDashboardLayoutState(){
+  if (!window.dashboardLayoutState){
+    const loaded = loadDashboardLayoutFromStorage();
+    window.dashboardLayoutState = {
+      layoutById: loaded.layout,
+      layoutStored: !!loaded.stored,
+      editing: false,
+      zCounter: 50,
+      root: null,
+      windows: [],
+      editButton: null,
+      settingsButton: null,
+      settingsMenu: null,
+      hintEl: null,
+      boundResize: false
+    };
+  }
+  return window.dashboardLayoutState;
+}
+
+function hasSavedDashboardLayout(state){
+  return !!(state && state.layoutStored);
+}
+
+function persistDashboardLayout(state){
+  if (!state) return;
+  const storage = dashboardLayoutStorage();
+  if (!storage) return;
+  try {
+    if (state.layoutById && Object.keys(state.layoutById).length){
+      storage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify(state.layoutById));
+      state.layoutStored = true;
+    }else{
+      storage.removeItem(DASHBOARD_LAYOUT_STORAGE_KEY);
+      state.layoutStored = false;
+    }
+  } catch (err){
+    console.warn("Unable to persist dashboard layout", err);
+  }
+}
+
+function captureDashboardWindowRect(win, rootRect){
+  if (!win || !rootRect) return null;
+  const rect = win.getBoundingClientRect();
+  const width = Math.max(DASHBOARD_WINDOW_MIN_WIDTH, Math.round(rect.width) || DASHBOARD_WINDOW_MIN_WIDTH);
+  const height = Math.max(DASHBOARD_WINDOW_MIN_HEIGHT, Math.round(rect.height) || DASHBOARD_WINDOW_MIN_HEIGHT);
+  return {
+    x: Math.round(rect.left - rootRect.left),
+    y: Math.round(rect.top - rootRect.top),
+    width,
+    height
+  };
+}
+
+function dashboardLayoutMaxBottom(layout){
+  let maxBottom = 0;
+  if (layout){
+    Object.values(layout).forEach(box => {
+      if (!box) return;
+      const bottom = Number(box.y || 0) + Number(box.height || 0);
+      if (isFinite(bottom)) maxBottom = Math.max(maxBottom, bottom);
+    });
+  }
+  return maxBottom;
+}
+
+function syncDashboardLayoutEntries(state){
+  if (!state.root) return;
+  if (!state.layoutById || typeof state.layoutById !== "object") state.layoutById = {};
+  const layout = state.layoutById;
+  const rootRect = state.root.getBoundingClientRect();
+  const useExisting = state.root.classList.contains("has-custom-layout") && Object.keys(layout).length;
+  const seen = new Set();
+  state.windows.forEach(win => {
+    if (!win || !win.dataset) return;
+    const id = String(win.dataset.dashboardWindow || "");
+    if (!id) return;
+    seen.add(id);
+    if (!layout[id]){
+      if (useExisting){
+        const fallbackWidth = Math.max(DASHBOARD_WINDOW_MIN_WIDTH, Math.round(win.offsetWidth) || DASHBOARD_WINDOW_MIN_WIDTH);
+        const fallbackHeight = Math.max(DASHBOARD_WINDOW_MIN_HEIGHT, Math.round(win.offsetHeight) || DASHBOARD_WINDOW_MIN_HEIGHT);
+        const offsetY = dashboardLayoutMaxBottom(layout) + 24;
+        layout[id] = { x: 0, y: offsetY, width: fallbackWidth, height: fallbackHeight };
+      }else{
+        layout[id] = captureDashboardWindowRect(win, rootRect);
+      }
+    }
+  });
+  Object.keys(layout).forEach(id => { if (!seen.has(id)) delete layout[id]; });
+}
+
+function setDashboardWindowStyle(win, box){
+  if (!win || !box) return;
+  win.style.left = `${box.x}px`;
+  win.style.top = `${box.y}px`;
+  win.style.width = `${box.width}px`;
+  win.style.height = `${box.height}px`;
+}
+
+function updateDashboardRootSize(state){
+  if (!state.root) return;
+  if (!state.root.classList.contains("has-custom-layout")){
+    state.root.style.minHeight = "";
+    state.root.style.paddingBottom = "";
+    return;
+  }
+  const maxBottom = dashboardLayoutMaxBottom(state.layoutById);
+  const extra = state.editing ? 160 : 60;
+  state.root.style.minHeight = `${Math.max(0, Math.ceil(maxBottom + extra))}px`;
+  state.root.style.paddingBottom = state.editing ? "120px" : "48px";
+}
+
+function applyDashboardLayout(state){
+  if (!state.root) return;
+  if (!state.root.classList.contains("has-custom-layout")){
+    state.windows.forEach(win => {
+      if (!win) return;
+      win.style.left = "";
+      win.style.top = "";
+      win.style.width = "";
+      win.style.height = "";
+    });
+    updateDashboardRootSize(state);
+    return;
+  }
+  state.windows.forEach(win => {
+    if (!win || !win.dataset) return;
+    const id = String(win.dataset.dashboardWindow || "");
+    const box = state.layoutById[id];
+    if (box){ setDashboardWindowStyle(win, box); }
+  });
+  updateDashboardRootSize(state);
+}
+
+function updateDashboardEditUi(state){
+  if (state.editButton){
+    const label = state.editing ? "Done editing layout" : "Edit layout";
+    state.editButton.textContent = label;
+    const pressed = state.editing ? "true" : "false";
+    state.editButton.setAttribute("aria-pressed", pressed);
+    state.editButton.setAttribute("aria-checked", pressed);
+  }
+  if (state.hintEl){
+    state.hintEl.hidden = !state.editing;
+  }
+  if (state.settingsButton){
+    state.settingsButton.classList.toggle("is-active", !!state.editing);
+  }
+}
+
+function bringDashboardWindowToFront(state, win){
+  if (!state) return;
+  state.zCounter = (state.zCounter || 50) + 1;
+  if (win) win.style.zIndex = String(state.zCounter);
+}
+
+function removeDashboardWindowElevation(win){
+  if (win) win.style.zIndex = "";
+}
+
+function addDashboardWindowHandles(state){
+  state.windows.forEach(win => {
+    if (!win) return;
+    const id = String(win.dataset.dashboardWindow || "");
+    if (!id) return;
+    if (!win.querySelector(":scope > .dashboard-drag-handle")){
+      const handle = document.createElement("div");
+      handle.className = "dashboard-drag-handle";
+      handle.title = "Drag to move";
+      handle.innerHTML = "<span>Drag</span>";
+      handle.setAttribute("aria-hidden", "true");
+      handle.addEventListener("pointerdown", (event)=> startDashboardWindowDrag(state, win, event));
+      win.appendChild(handle);
+    }
+    const resizeTypes = ["n","s","e","w","ne","nw","se","sw"];
+    resizeTypes.forEach(type => {
+      if (win.querySelector(`:scope > .dashboard-resize-${type}`)) return;
+      const handle = document.createElement("div");
+      handle.className = `dashboard-resize-handle dashboard-resize-${type}`;
+      handle.dataset.resize = type;
+      handle.title = "Drag to resize";
+      handle.setAttribute("aria-hidden", "true");
+      handle.addEventListener("pointerdown", (event)=> startDashboardWindowResize(state, win, type, event));
+      win.appendChild(handle);
+    });
+  });
+}
+
+function removeDashboardWindowHandles(state){
+  state.windows.forEach(win => {
+    if (!win) return;
+    win.querySelectorAll(":scope > .dashboard-drag-handle, :scope > .dashboard-resize-handle").forEach(el => el.remove());
+    removeDashboardWindowElevation(win);
+  });
+}
+
+function clampDashboardX(state, desiredX, width){
+  if (!state.root) return desiredX;
+  const rootWidth = state.root.clientWidth || state.root.getBoundingClientRect().width || width;
+  if (!isFinite(rootWidth) || rootWidth <= 0) return Math.max(0, desiredX);
+  const maxX = Math.max(0, rootWidth - width);
+  return Math.min(Math.max(0, desiredX), maxX);
+}
+
+function startDashboardWindowDrag(state, win, event){
+  if (!state || !win || !state.root) return;
+  const id = String(win.dataset.dashboardWindow || "");
+  if (!id) return;
+  const box = state.layoutById[id];
+  if (!box) return;
+  if (event.button !== 0 && event.pointerType !== "touch") return;
+  event.preventDefault();
+  bringDashboardWindowToFront(state, win);
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const baseX = box.x;
+  const baseY = box.y;
+  const pointerId = event.pointerId;
+  const move = (ev)=>{
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    const nextX = clampDashboardX(state, baseX + dx, box.width);
+    const nextY = Math.max(0, baseY + dy);
+    box.x = Math.round(nextX);
+    box.y = Math.round(nextY);
+    setDashboardWindowStyle(win, box);
+    updateDashboardRootSize(state);
+  };
+  const stop = ()=>{
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+    win.releasePointerCapture?.(pointerId);
+    persistDashboardLayout(state);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", stop);
+  window.addEventListener("pointercancel", stop);
+  win.setPointerCapture?.(pointerId);
+}
+
+function startDashboardWindowResize(state, win, direction, event){
+  if (!state || !win || !state.root) return;
+  const id = String(win.dataset.dashboardWindow || "");
+  if (!id) return;
+  const box = state.layoutById[id];
+  if (!box) return;
+  if (event.button !== 0 && event.pointerType !== "touch") return;
+  event.preventDefault();
+  bringDashboardWindowToFront(state, win);
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const startBox = { x: box.x, y: box.y, width: box.width, height: box.height };
+  const pointerId = event.pointerId;
+  const resize = (ev)=>{
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    let nextX = startBox.x;
+    let nextY = startBox.y;
+    let nextWidth = startBox.width;
+    let nextHeight = startBox.height;
+    if (direction.includes("e")){
+      nextWidth = Math.max(DASHBOARD_WINDOW_MIN_WIDTH, startBox.width + dx);
+      const maxWidth = (state.root.clientWidth || state.root.getBoundingClientRect().width || nextWidth) - startBox.x;
+      if (isFinite(maxWidth) && maxWidth > 0) nextWidth = Math.min(nextWidth, maxWidth);
+    }
+    if (direction.includes("s")){
+      nextHeight = Math.max(DASHBOARD_WINDOW_MIN_HEIGHT, startBox.height + dy);
+    }
+    if (direction.includes("w")){
+      const desiredX = startBox.x + dx;
+      const maxX = startBox.x + startBox.width - DASHBOARD_WINDOW_MIN_WIDTH;
+      nextX = Math.max(0, Math.min(desiredX, maxX));
+      nextWidth = Math.max(DASHBOARD_WINDOW_MIN_WIDTH, startBox.width + (startBox.x - nextX));
+    }
+    if (direction.includes("n")){
+      const desiredY = startBox.y + dy;
+      const maxY = startBox.y + startBox.height - DASHBOARD_WINDOW_MIN_HEIGHT;
+      nextY = Math.max(0, Math.min(desiredY, maxY));
+      nextHeight = Math.max(DASHBOARD_WINDOW_MIN_HEIGHT, startBox.height + (startBox.y - nextY));
+    }
+    nextX = clampDashboardX(state, nextX, nextWidth);
+    if (nextHeight < DASHBOARD_WINDOW_MIN_HEIGHT) nextHeight = DASHBOARD_WINDOW_MIN_HEIGHT;
+    box.x = Math.round(nextX);
+    box.y = Math.round(nextY);
+    box.width = Math.round(nextWidth);
+    box.height = Math.round(nextHeight);
+    setDashboardWindowStyle(win, box);
+    updateDashboardRootSize(state);
+  };
+  const stop = ()=>{
+    window.removeEventListener("pointermove", resize);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+    win.releasePointerCapture?.(pointerId);
+    persistDashboardLayout(state);
+  };
+  window.addEventListener("pointermove", resize);
+  window.addEventListener("pointerup", stop);
+  window.addEventListener("pointercancel", stop);
+  win.setPointerCapture?.(pointerId);
+}
+
+function ensureDashboardLayoutBoundResize(state){
+  if (state.boundResize) return;
+  state.boundResize = true;
+  window.addEventListener("resize", ()=>{
+    const curState = getDashboardLayoutState();
+    if (!curState.root || !curState.root.classList.contains("has-custom-layout")) return;
+    const rootWidth = curState.root.clientWidth || curState.root.getBoundingClientRect().width;
+    let changed = false;
+    Object.entries(curState.layoutById || {}).forEach(([id, box]) => {
+      if (!box) return;
+      const maxX = Math.max(0, (rootWidth || box.width) - box.width);
+      if (box.x > maxX){ box.x = Math.max(0, Math.round(maxX)); changed = true; }
+    });
+    if (changed){
+      applyDashboardLayout(curState);
+      persistDashboardLayout(curState);
+    }
+  });
+}
+
+function getDashboardSettingsElements(){
+  const button = document.getElementById("dashboardSettingsToggle") || null;
+  const menu   = document.getElementById("dashboardSettingsMenu") || null;
+  const wrap   = document.getElementById("dashboardSettings") || null;
+  const state  = getDashboardLayoutState();
+  state.settingsButton = button;
+  state.settingsMenu = menu;
+  return { button, menu, wrap, state };
+}
+
+function closeDashboardSettingsMenu(state){
+  const ctxState = state || getDashboardLayoutState();
+  if (!ctxState.settingsButton || !ctxState.settingsMenu){
+    const fresh = getDashboardSettingsElements();
+    if (!ctxState.settingsButton) ctxState.settingsButton = fresh.button;
+    if (!ctxState.settingsMenu) ctxState.settingsMenu = fresh.menu;
+  }
+  const menu = ctxState.settingsMenu;
+  const button = ctxState.settingsButton;
+  if (menu && !menu.hidden){
+    menu.hidden = true;
+  }
+  if (button){
+    button.setAttribute("aria-expanded", "false");
+    button.classList.remove("is-open");
+  }
+}
+
+function openDashboardSettingsMenu(state){
+  const ctxState = state || getDashboardLayoutState();
+  if (!ctxState.settingsButton || !ctxState.settingsMenu){
+    const fresh = getDashboardSettingsElements();
+    if (!ctxState.settingsButton) ctxState.settingsButton = fresh.button;
+    if (!ctxState.settingsMenu) ctxState.settingsMenu = fresh.menu;
+  }
+  const menu = ctxState.settingsMenu;
+  const button = ctxState.settingsButton;
+  if (!menu || !button) return;
+  if (!menu.hidden) return;
+  menu.hidden = false;
+  button.setAttribute("aria-expanded", "true");
+  button.classList.add("is-open");
+  const focusTarget = menu.querySelector('[data-settings-focus], button, [href], [tabindex]:not([tabindex="-1"])');
+  focusTarget?.focus();
+}
+
+function wireDashboardSettingsMenu(){
+  if (typeof window.dashboardSettingsCleanup === "function"){
+    window.dashboardSettingsCleanup();
+    window.dashboardSettingsCleanup = null;
+  }
+  const { button, menu, wrap, state } = getDashboardSettingsElements();
+  if (!button || !menu || !wrap) return;
+  menu.hidden = true;
+  button.setAttribute("aria-expanded", "false");
+  button.classList.remove("is-open");
+  const toggle = (event)=>{
+    event.preventDefault();
+    const expanded = button.getAttribute("aria-expanded") === "true";
+    if (expanded){ closeDashboardSettingsMenu(state); }
+    else { openDashboardSettingsMenu(state); }
+  };
+  if (!button.dataset.bound){
+    button.dataset.bound = "1";
+    button.addEventListener("click", toggle);
+    button.addEventListener("keydown", (event)=>{
+      if ((event.key === "Enter" || event.key === " ") && menu.hidden){
+        event.preventDefault();
+        openDashboardSettingsMenu(state);
+      }else if (event.key === "Escape" && !menu.hidden){
+        closeDashboardSettingsMenu(state);
+      }
+    });
+  }
+  const handleDocumentClick = (event)=>{
+    if (!wrap.contains(event.target)) closeDashboardSettingsMenu(state);
+  };
+  const handleDocumentKey = (event)=>{
+    if (event.key === "Escape" && !menu.hidden){
+      closeDashboardSettingsMenu(state);
+      button?.focus();
+    }
+  };
+  document.addEventListener("click", handleDocumentClick);
+  document.addEventListener("keydown", handleDocumentKey);
+  window.dashboardSettingsCleanup = ()=>{
+    document.removeEventListener("click", handleDocumentClick);
+    document.removeEventListener("keydown", handleDocumentKey);
+  };
+  if (!menu.dataset.bound){
+    menu.dataset.bound = "1";
+    menu.addEventListener("keydown", (event)=>{
+      if (event.key === "Escape"){ closeDashboardSettingsMenu(state); button?.focus(); }
+    });
+  }
+}
+
+function setDashboardEditing(state, editing){
+  state.editing = !!editing;
+  if (!state.root) return;
+  if (editing){
+    if (!state.root.classList.contains("has-custom-layout")){
+      state.root.classList.add("has-custom-layout");
+      syncDashboardLayoutEntries(state);
+    }
+    addDashboardWindowHandles(state);
+    state.root.classList.add("is-editing");
+  }else{
+    state.root.classList.remove("is-editing");
+    removeDashboardWindowHandles(state);
+  }
+  applyDashboardLayout(state);
+  updateDashboardEditUi(state);
+  closeDashboardSettingsMenu(state);
+  if (!editing) persistDashboardLayout(state);
+}
+
+function toggleDashboardEditing(){
+  const state = getDashboardLayoutState();
+  setDashboardEditing(state, !state.editing);
+}
+
+function setupDashboardLayout(){
+  const state = getDashboardLayoutState();
+  state.root = document.getElementById("dashboardLayout") || null;
+  state.editButton = document.getElementById("dashboardEditToggle") || null;
+  state.settingsButton = document.getElementById("dashboardSettingsToggle") || null;
+  state.settingsMenu = document.getElementById("dashboardSettingsMenu") || null;
+  state.hintEl = document.getElementById("dashboardEditHint") || null;
+  state.windows = state.root ? Array.from(state.root.querySelectorAll("[data-dashboard-window]")) : [];
+  if (!state.root){
+    updateDashboardEditUi(state);
+    return;
+  }
+  ensureDashboardLayoutBoundResize(state);
+  if (hasSavedDashboardLayout(state)){
+    state.root.classList.add("has-custom-layout");
+  }
+  syncDashboardLayoutEntries(state);
+  applyDashboardLayout(state);
+  updateDashboardEditUi(state);
+  if (state.editing){
+    addDashboardWindowHandles(state);
+    state.root.classList.add("is-editing");
+  }
+  if (state.editButton && !state.editButton.dataset.bound){
+    state.editButton.dataset.bound = "1";
+    state.editButton.addEventListener("click", ()=>{
+      toggleDashboardEditing();
+      closeDashboardSettingsMenu(state);
+    });
+  }
+}
+
+function notifyDashboardLayoutContentChanged(){
+  const state = getDashboardLayoutState();
+  if (!state.root || !state.root.classList.contains("has-custom-layout")) return;
+  requestAnimationFrame(()=>{
+    applyDashboardLayout(state);
+  });
+}
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   content.innerHTML = viewDashboard();
@@ -698,8 +1211,11 @@ function renderDashboard(){
 
   document.getElementById("calendarAddBtn")?.addEventListener("click", ()=> openModal("picker"));
 
+  wireDashboardSettingsMenu();
+  setupDashboardLayout();
   renderCalendar();
   renderPumpWidget();
+  notifyDashboardLayoutContentChanged();
 }
 
 function openJobsEditor(jobId){
