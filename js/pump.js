@@ -336,11 +336,22 @@ function drawPumpChart(canvas, rangeValue){
   }
   const dates = data.map(d=>new Date(d.dateISO+"T00:00:00"));
   const rpms  = data.map(d=>d.rpm);
-  const minR  = Math.min(...rpms, pumpEff.baselineRPM ?? rpms[0]);
-  const maxR  = Math.max(...rpms, pumpEff.baselineRPM ?? rpms[0]);
-  const padY  = Math.max(5, (maxR-minR)*0.1);
-  const yMin = minR - padY;
-  const yMax = maxR + padY;
+  const minR  = Math.min(...rpms);
+  const maxR  = Math.max(...rpms);
+  let padY = Math.max(5, (maxR - minR) * 0.04);
+  if (!isFinite(padY) || padY <= 0){
+    const ref = isFinite(maxR) ? Math.abs(maxR) : 0;
+    padY = Math.max(5, ref * 0.04 || 10);
+  }
+  let yMin = minR - padY;
+  let yMax = maxR + padY;
+  if (yMax - yMin < 10){
+    const adjust = (10 - (yMax - yMin)) / 2;
+    yMax += adjust;
+    yMin -= adjust;
+  }
+  const baselineRPM = pumpEff.baselineRPM;
+  const baselineArrow = baselineRPM != null ? (baselineRPM > yMax ? "↑" : baselineRPM < yMin ? "↓" : "") : "";
   const latestDate = dates[dates.length - 1];
   const axisEndDate = new Date(latestDate.getTime());
   const earliestDate = dates[0];
@@ -373,8 +384,9 @@ function drawPumpChart(canvas, rangeValue){
   ctx.lineTo(axisX1, axisY);
   ctx.stroke();
 
-  if (pumpEff.baselineRPM){
-    const baselineY = Y(pumpEff.baselineRPM);
+  if (baselineRPM != null){
+    const baselineRawY = Y(baselineRPM);
+    const baselineY = Math.min(Math.max(baselineRawY, margin.top), axisY);
     ctx.strokeStyle = "#9aa5b5";
     ctx.setLineDash([4,4]);
     ctx.beginPath();
@@ -384,8 +396,10 @@ function drawPumpChart(canvas, rangeValue){
     ctx.setLineDash([]);
     ctx.fillStyle = "#666";
     ctx.textAlign = "left";
-    ctx.textBaseline = "bottom";
-    ctx.fillText(`Baseline ${pumpEff.baselineRPM} RPM`, axisX0 + 6, baselineY - 4);
+    const labelOffset = baselineY <= margin.top + 6 ? 6 : -4;
+    ctx.textBaseline = labelOffset > 0 ? "top" : "bottom";
+    const arrow = baselineArrow ? ` ${baselineArrow}` : "";
+    ctx.fillText(`Baseline ${baselineRPM} RPM${arrow}`, axisX0 + 6, baselineY + labelOffset);
   }
 
   ctx.strokeStyle = "#0a63c2";
