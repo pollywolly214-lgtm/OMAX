@@ -10,8 +10,15 @@ function viewDashboard(){
   return `
   <div class="container">
     <div class="dashboard-toolbar">
-      <button type="button" class="dashboard-edit-btn" id="dashboardEditToggle" aria-pressed="false">Edit layout</button>
       <span class="dashboard-edit-hint" id="dashboardEditHint" hidden>Drag windows to rearrange and resize. Calendar stays fixed.</span>
+      <div class="dashboard-settings" id="dashboardSettings">
+        <button type="button" class="dashboard-settings-btn" id="dashboardSettingsToggle" aria-haspopup="true" aria-expanded="false" aria-controls="dashboardSettingsMenu" aria-label="Dashboard settings" title="Dashboard settings">
+          <span aria-hidden="true">⚙</span>
+        </button>
+        <div class="dashboard-settings-menu" id="dashboardSettingsMenu" role="menu" hidden>
+          <button type="button" class="dashboard-settings-item" id="dashboardEditToggle" role="menuitemcheckbox" aria-checked="false" data-settings-focus>Edit layout</button>
+        </div>
+      </div>
     </div>
 
     <div class="dashboard-layout" id="dashboardLayout">

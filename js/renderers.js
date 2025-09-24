@@ -162,6 +162,8 @@ function getDashboardLayoutState(){
       root: null,
       windows: [],
       editButton: null,
+      settingsButton: null,
+      settingsMenu: null,
       hintEl: null,
       boundResize: false
     };
@@ -286,12 +288,17 @@ function applyDashboardLayout(state){
 
 function updateDashboardEditUi(state){
   if (state.editButton){
-    const label = state.editing ? "Done" : "Edit layout";
+    const label = state.editing ? "Done editing layout" : "Edit layout";
     state.editButton.textContent = label;
-    state.editButton.setAttribute("aria-pressed", state.editing ? "true" : "false");
+    const pressed = state.editing ? "true" : "false";
+    state.editButton.setAttribute("aria-pressed", pressed);
+    state.editButton.setAttribute("aria-checked", pressed);
   }
   if (state.hintEl){
     state.hintEl.hidden = !state.editing;
+  }
+  if (state.settingsButton){
+    state.settingsButton.classList.toggle("is-active", !!state.editing);
   }
 }
 
@@ -468,6 +475,103 @@ function ensureDashboardLayoutBoundResize(state){
   });
 }
 
+function getDashboardSettingsElements(){
+  const button = document.getElementById("dashboardSettingsToggle") || null;
+  const menu   = document.getElementById("dashboardSettingsMenu") || null;
+  const wrap   = document.getElementById("dashboardSettings") || null;
+  const state  = getDashboardLayoutState();
+  state.settingsButton = button;
+  state.settingsMenu = menu;
+  return { button, menu, wrap, state };
+}
+
+function closeDashboardSettingsMenu(state){
+  const ctxState = state || getDashboardLayoutState();
+  if (!ctxState.settingsButton || !ctxState.settingsMenu){
+    const fresh = getDashboardSettingsElements();
+    if (!ctxState.settingsButton) ctxState.settingsButton = fresh.button;
+    if (!ctxState.settingsMenu) ctxState.settingsMenu = fresh.menu;
+  }
+  const menu = ctxState.settingsMenu;
+  const button = ctxState.settingsButton;
+  if (menu && !menu.hidden){
+    menu.hidden = true;
+  }
+  if (button){
+    button.setAttribute("aria-expanded", "false");
+    button.classList.remove("is-open");
+  }
+}
+
+function openDashboardSettingsMenu(state){
+  const ctxState = state || getDashboardLayoutState();
+  if (!ctxState.settingsButton || !ctxState.settingsMenu){
+    const fresh = getDashboardSettingsElements();
+    if (!ctxState.settingsButton) ctxState.settingsButton = fresh.button;
+    if (!ctxState.settingsMenu) ctxState.settingsMenu = fresh.menu;
+  }
+  const menu = ctxState.settingsMenu;
+  const button = ctxState.settingsButton;
+  if (!menu || !button) return;
+  if (!menu.hidden) return;
+  menu.hidden = false;
+  button.setAttribute("aria-expanded", "true");
+  button.classList.add("is-open");
+  const focusTarget = menu.querySelector('[data-settings-focus], button, [href], [tabindex]:not([tabindex="-1"])');
+  focusTarget?.focus();
+}
+
+function wireDashboardSettingsMenu(){
+  if (typeof window.dashboardSettingsCleanup === "function"){
+    window.dashboardSettingsCleanup();
+    window.dashboardSettingsCleanup = null;
+  }
+  const { button, menu, wrap, state } = getDashboardSettingsElements();
+  if (!button || !menu || !wrap) return;
+  menu.hidden = true;
+  button.setAttribute("aria-expanded", "false");
+  button.classList.remove("is-open");
+  const toggle = (event)=>{
+    event.preventDefault();
+    const expanded = button.getAttribute("aria-expanded") === "true";
+    if (expanded){ closeDashboardSettingsMenu(state); }
+    else { openDashboardSettingsMenu(state); }
+  };
+  if (!button.dataset.bound){
+    button.dataset.bound = "1";
+    button.addEventListener("click", toggle);
+    button.addEventListener("keydown", (event)=>{
+      if ((event.key === "Enter" || event.key === " ") && menu.hidden){
+        event.preventDefault();
+        openDashboardSettingsMenu(state);
+      }else if (event.key === "Escape" && !menu.hidden){
+        closeDashboardSettingsMenu(state);
+      }
+    });
+  }
+  const handleDocumentClick = (event)=>{
+    if (!wrap.contains(event.target)) closeDashboardSettingsMenu(state);
+  };
+  const handleDocumentKey = (event)=>{
+    if (event.key === "Escape" && !menu.hidden){
+      closeDashboardSettingsMenu(state);
+      button?.focus();
+    }
+  };
+  document.addEventListener("click", handleDocumentClick);
+  document.addEventListener("keydown", handleDocumentKey);
+  window.dashboardSettingsCleanup = ()=>{
+    document.removeEventListener("click", handleDocumentClick);
+    document.removeEventListener("keydown", handleDocumentKey);
+  };
+  if (!menu.dataset.bound){
+    menu.dataset.bound = "1";
+    menu.addEventListener("keydown", (event)=>{
+      if (event.key === "Escape"){ closeDashboardSettingsMenu(state); button?.focus(); }
+    });
+  }
+}
+
 function setDashboardEditing(state, editing){
   state.editing = !!editing;
   if (!state.root) return;
@@ -484,6 +588,7 @@ function setDashboardEditing(state, editing){
   }
   applyDashboardLayout(state);
   updateDashboardEditUi(state);
+  closeDashboardSettingsMenu(state);
   if (!editing) persistDashboardLayout(state);
 }
 
@@ -496,6 +601,8 @@ function setupDashboardLayout(){
   const state = getDashboardLayoutState();
   state.root = document.getElementById("dashboardLayout") || null;
   state.editButton = document.getElementById("dashboardEditToggle") || null;
+  state.settingsButton = document.getElementById("dashboardSettingsToggle") || null;
+  state.settingsMenu = document.getElementById("dashboardSettingsMenu") || null;
   state.hintEl = document.getElementById("dashboardEditHint") || null;
   state.windows = state.root ? Array.from(state.root.querySelectorAll("[data-dashboard-window]")) : [];
   if (!state.root){
@@ -515,7 +622,10 @@ function setupDashboardLayout(){
   }
   if (state.editButton && !state.editButton.dataset.bound){
     state.editButton.dataset.bound = "1";
-    state.editButton.addEventListener("click", ()=> toggleDashboardEditing());
+    state.editButton.addEventListener("click", ()=>{
+      toggleDashboardEditing();
+      closeDashboardSettingsMenu(state);
+    });
   }
 }
 
@@ -1101,6 +1211,7 @@ function renderDashboard(){
 
   document.getElementById("calendarAddBtn")?.addEventListener("click", ()=> openModal("picker"));
 
+  wireDashboardSettingsMenu();
   setupDashboardLayout();
   renderCalendar();
   renderPumpWidget();
