@@ -1503,7 +1503,7 @@ function renderSettings(){
       #explorer .hint{font-size:.8rem;color:#666}
       #explorer .tree{border:1px solid #e5e5e5;background:#fff;border-radius:10px;padding:6px}
       #explorer details{margin:4px 0;border:1px solid #eee;border-radius:8px;background:#fafafa}
-      #explorer details>summary{display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:grab;user-select:none}
+      #explorer details>summary{position:relative;display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:grab;user-select:none}
       #explorer details.task>summary{background:#fff;font-weight:600;border-bottom:1px solid #ececec}
       #explorer details.cat>summary{font-weight:700;background:#f4f6fb}
       #explorer .task-name{flex:1;min-width:0}
@@ -1518,16 +1518,24 @@ function renderSettings(){
       #explorer .row-actions .btn-complete{background:#0a63c2;color:#fff}
       #explorer .children{padding:6px 8px 10px 18px}
       #explorer .task-children{padding:6px 8px 12px 22px;background:#fbfbfb;border-top:1px solid #f0f0f0}
-      #explorer .task-children>.dz{margin:4px 0 6px;border:1px dashed #bbb;border-radius:8px;padding:6px;font-size:.78rem;color:#666;background:#fff;cursor:grab}
-      #explorer .dz{min-height:8px;margin:4px 0;border-radius:6px}
-      #explorer .dz.dragover{min-height:18px;background:rgba(10,99,194,.08);outline:2px dashed #0a63c2}
-      #explorer .dz-line{position:relative;min-height:0;height:12px;margin:4px 0;border:1px dashed transparent;border-radius:6px;padding:0 6px;display:flex;align-items:center;justify-content:center;background:transparent;color:#0a63c2;transition:background-color .12s ease,border-color .12s ease}
-      #explorer .dz-line::before{content:"";position:absolute;left:8px;right:8px;top:50%;border-top:2px dashed transparent;transform:translateY(-50%);pointer-events:none}
-      #explorer .dz-line span{font-size:.68rem;pointer-events:none;opacity:0;transition:opacity .12s ease}
-      #explorer .dz-line.dragover{background:rgba(10,99,194,.12);border-color:#0a63c2;outline:none}
-      #explorer .dz-line.dragover::before{border-color:#0a63c2}
-      #explorer .dz-line.dragover span{opacity:1}
-      #explorer summary.drop-hint{outline:2px solid #6aa84f;border-radius:6px}
+      #explorer .task-children>.dz{margin:0;padding:0;border:0;background:transparent;min-height:0}
+      #explorer .dz{position:relative;margin:0;border-radius:8px;min-height:0;padding:0}
+      #explorer .dz::after{content:attr(data-label);position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:#0a63c2;color:#fff;font-size:.68rem;padding:2px 8px;border-radius:999px;box-shadow:0 4px 10px rgba(10,99,194,.25);opacity:0;pointer-events:none;white-space:nowrap;transition:opacity .12s ease,transform .12s ease}
+      #explorer .dz.dragover::after{opacity:1;transform:translate(-50%,-50%)}
+      #explorer .dz[data-drop-into-task],
+      #explorer .dz[data-drop-into-cat],
+      #explorer .dz[data-drop-root]{min-height:0;padding:0}
+      #explorer .dz[data-drop-into-task].dragover,
+      #explorer .dz[data-drop-into-cat].dragover,
+      #explorer .dz[data-drop-root].dragover{min-height:32px;padding:12px;background:rgba(10,99,194,.08);outline:2px dashed #0a63c2}
+      #explorer .dz-line{position:relative;height:1px;margin:0;border-radius:6px}
+      #explorer .dz-line::before{content:"";position:absolute;left:10px;right:10px;top:50%;height:1px;background:transparent;transform:translateY(-50%);opacity:0;transition:opacity .12s ease,background-color .12s ease}
+      #explorer .dz-line::after{top:0;transform:translate(-50%,-130%)}
+      #explorer .dz-line.dragover{height:18px}
+      #explorer .dz-line.dragover::before{opacity:1;background:#0a63c2;height:2px}
+      #explorer .dz-line.dragover::after{opacity:1;transform:translate(-50%,-160%)}
+      #explorer summary.drop-hint{outline:2px solid #0a63c2;border-radius:6px}
+      #explorer summary.drop-hint[data-drop-label]::after{content:attr(data-drop-label);position:absolute;left:16px;top:100%;transform:translateY(6px);background:#0a63c2;color:#fff;font-size:.68rem;padding:2px 8px;border-radius:999px;box-shadow:0 4px 10px rgba(10,99,194,.25);white-space:nowrap}
       #explorer .sub-empty{font-size:.78rem;color:#777;margin-left:4px}
       #explorer .empty{padding:.5rem;color:#666}
       #explorer .chip.due-ok{border-color:#ccebd6;background:#e5f6eb;color:#2e7d32}
@@ -1693,12 +1701,15 @@ function renderSettings(){
     const {
       parentTaskId = null,
       catId = null,
-      tailLabel = "Drop here to place at end",
+      tailLabel = "Move task here",
+      gapLabel = tailLabel,
       emptyMessage = "",
       emptyClass = "empty",
       emptyAttrs = ""
     } = options;
-    const tail = `<div class="dz dz-line dz-task-tail" data-drop-task-tail="1" data-tail-parent="${String(parentTaskId ?? "")}" data-tail-cat="${String(catId ?? "")}"><span>${escapeHtml(tailLabel)}</span></div>`;
+    const safeTail = escapeHtml(tailLabel);
+    const safeGap = escapeHtml(gapLabel);
+    const tail = `<div class="dz dz-line dz-task-tail" data-drop-task-tail="1" data-tail-parent="${String(parentTaskId ?? "")}" data-tail-cat="${String(catId ?? "")}" data-label="${safeTail}"></div>`;
     if (!entries.length){
       const attr = emptyAttrs ? ` ${emptyAttrs}` : "";
       const msg = emptyMessage ? `<div class="${emptyClass}"${attr}>${escapeHtml(emptyMessage)}</div>` : "";
@@ -1706,8 +1717,7 @@ function renderSettings(){
     }
     const pieces = [];
     for (const entry of entries){
-      const label = escapeHtml(entry.task.name || "(unnamed task)");
-      pieces.push(`<div class="dz dz-line dz-task-gap" data-drop-before-task="${entry.task.id}"><span>Drop before ${label}</span></div>`);
+      pieces.push(`<div class="dz dz-line dz-task-gap" data-drop-before-task="${entry.task.id}" data-label="${safeGap}"></div>`);
       pieces.push(renderTask(entry));
     }
     pieces.push(tail);
@@ -1721,15 +1731,14 @@ function renderSettings(){
     const condition = escapeHtml(t.condition || "As required");
     const freq = t.interval ? `${t.interval} hrs` : "Set frequency";
     const children = childrenByParent.get(String(t.id)) || [];
-    const dropLabelRaw = t.name || "this task";
-    const dropLabel = escapeHtml(dropLabelRaw);
     const emptySubMsg = searchActive
       ? "No sub-tasks match your search."
       : "No sub-tasks yet. Drag any task here to nest it.";
     const childList = renderTaskList(children, {
       parentTaskId: t.id,
       catId: t.cat ?? null,
-      tailLabel: `Drop here to place at end of ${dropLabelRaw}'s sub-tasks`,
+      tailLabel: "Move task here",
+      gapLabel: "Move task here",
       emptyMessage: emptySubMsg,
       emptyClass: "sub-empty",
       emptyAttrs: `data-empty-sub="${t.id}"`
@@ -1762,28 +1771,26 @@ function renderSettings(){
           </div>
         </div>
         <div class="task-children" data-task-children="${t.id}">
-          <div class="dz" data-drop-into-task="${t.id}">Drop here to make a sub-task of ${dropLabel}</div>
+          <div class="dz" data-drop-into-task="${t.id}" data-label="Create sub-task"></div>
           ${childList}
         </div>
       </details>
     `;
   }
 
-  function renderCategoryList(parentId, parentName){
+  function renderCategoryList(parentId){
     const folders = childrenFolders(parentId);
-    const tailLabel = parentId == null
-      ? "Drop folders here to place at end of root categories"
-      : `Drop folders here to place at end of ${parentName || "this category"}`;
+    const tailLabel = "Move category here";
     if (!folders.length){
-      return `<div class="dz dz-line dz-cat-tail" data-drop-cat-tail="1" data-tail-parent-cat="${String(parentId ?? "")}"><span>${escapeHtml(tailLabel)}</span></div>`;
+      return `<div class="dz dz-line dz-cat-tail" data-drop-cat-tail="1" data-tail-parent-cat="${String(parentId ?? "")}" data-label="${escapeHtml(tailLabel)}"></div>`;
     }
     const parts = [];
     for (const folder of folders){
       if (searchActive && !categoryHasVisibleContent(folder.id)) continue;
-      parts.push(`<div class="dz dz-line dz-cat-gap" data-drop-before-cat="${folder.id}"><span>Drop folder before ${escapeHtml(folder.name)}</span></div>`);
+      parts.push(`<div class="dz dz-line dz-cat-gap" data-drop-before-cat="${folder.id}" data-label="${escapeHtml(tailLabel)}"></div>`);
       parts.push(renderFolder(folder));
     }
-    parts.push(`<div class="dz dz-line dz-cat-tail" data-drop-cat-tail="1" data-tail-parent-cat="${String(parentId ?? "")}"><span>${escapeHtml(tailLabel)}</span></div>`);
+    parts.push(`<div class="dz dz-line dz-cat-tail" data-drop-cat-tail="1" data-tail-parent-cat="${String(parentId ?? "")}" data-label="${escapeHtml(tailLabel)}"></div>`);
     return parts.join("");
   }
 
@@ -1796,16 +1803,17 @@ function renderSettings(){
     const tasksHtml = renderTaskList(taskEntriesForFolder, {
       parentTaskId: null,
       catId: folder.id,
-      tailLabel: `Drop tasks here to place at end of ${folder.name}`,
+      tailLabel: "Move task here",
+      gapLabel: "Move task here",
       emptyMessage: folderEmptyMsg,
       emptyClass: "empty"
     });
     return `
       <details class="cat" data-cat-id="${folder.id}" open>
         <summary draggable="true"><span class="task-name">${escapeHtml(folder.name)}</span></summary>
-        <div class="dz" data-drop-into-cat="${folder.id}">Drop tasks here to file under ${escapeHtml(folder.name)}</div>
+        <div class="dz" data-drop-into-cat="${folder.id}" data-label="Move task here"></div>
         <div class="children">
-          ${renderCategoryList(folder.id, folder.name)}
+          ${renderCategoryList(folder.id)}
           ${tasksHtml}
         </div>
       </details>
@@ -1816,11 +1824,12 @@ function renderSettings(){
   const rootTasks = renderTaskList(rootTaskEntries, {
     parentTaskId: null,
     catId: null,
-    tailLabel: "Drop tasks here to place at end of the root list",
+    tailLabel: "Move task here",
+    gapLabel: "Move task here",
     emptyMessage: "",
     emptyClass: "empty"
   });
-  const folderHtml = renderCategoryList(null, null);
+  const folderHtml = renderCategoryList(null);
 
   const flattenedFolders = [];
   (function walk(parent, prefix){
@@ -1851,7 +1860,7 @@ function renderSettings(){
           <span class="hint">Drag folders & tasks to organize. Tasks can hold sub-tasks like folders.</span>
         </div>
         <div class="tree" id="tree">
-          <div class="dz" data-drop-root="1">Drop here to move to the root</div>
+          <div class="dz" data-drop-root="1" data-label="Move to top level"></div>
           ${rootTasks}
           ${folderHtml}
           ${searchEmpty ? `<div class="empty">No maintenance tasks match your search.</div>` : ``}
@@ -2121,6 +2130,17 @@ function renderSettings(){
     }
   });
 
+  const clearSummaryHint = (summary)=>{
+    if (!summary) return;
+    summary.classList.remove('drop-hint');
+    summary.removeAttribute('data-drop-label');
+  };
+  const clearAllDragIndicators = ()=>{
+    if (!tree) return;
+    tree.querySelectorAll('.dz.dragover').forEach(el=>el.classList.remove('dragover'));
+    tree.querySelectorAll('summary.drop-hint').forEach(clearSummaryHint);
+  };
+
   const DRAG = { kind:null, id:null, type:null };
   tree?.addEventListener('dragstart',(e)=>{
     const sum = e.target.closest('summary');
@@ -2133,18 +2153,19 @@ function renderSettings(){
       DRAG.type = taskCard.getAttribute('data-owner');
       e.dataTransfer.setData('text/plain', `task:${DRAG.id}:${DRAG.type}`);
       e.dataTransfer.effectAllowed = 'move';
+      sum.removeAttribute('data-drop-label');
       sum.classList.add('drop-hint');
     }else if (catCard){
       DRAG.kind = 'category';
       DRAG.id   = catCard.getAttribute('data-cat-id');
       e.dataTransfer.setData('text/plain', `category:${DRAG.id}`);
       e.dataTransfer.effectAllowed = 'move';
+      sum.removeAttribute('data-drop-label');
       sum.classList.add('drop-hint');
     }
   });
   tree?.addEventListener('dragend',()=>{
-    tree.querySelectorAll('.drop-hint').forEach(el=>el.classList.remove('drop-hint'));
-    tree.querySelectorAll('.dz.dragover').forEach(el=>el.classList.remove('dragover'));
+    clearAllDragIndicators();
     DRAG.kind = DRAG.id = DRAG.type = null;
   });
   function allow(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
@@ -2165,13 +2186,29 @@ function renderSettings(){
       }
     }
     const sumTask = e.target.closest('details.task>summary');
-    if (sumTask && DRAG.kind === 'task'){ allow(e); sumTask.classList.add('drop-hint'); return; }
+    if (sumTask && DRAG.kind === 'task'){
+      allow(e);
+      sumTask.dataset.dropLabel = 'Create sub-task';
+      sumTask.classList.add('drop-hint');
+      return;
+    }
     const sumCat = e.target.closest('details.cat>summary');
-    if (sumCat && (DRAG.kind === 'task' || DRAG.kind === 'category')){ allow(e); sumCat.classList.add('drop-hint'); }
+    if (sumCat && DRAG.kind === 'task'){
+      allow(e);
+      sumCat.dataset.dropLabel = 'Move task here';
+      sumCat.classList.add('drop-hint');
+      return;
+    }
+    if (sumCat && DRAG.kind === 'category'){
+      allow(e);
+      sumCat.dataset.dropLabel = 'Move category here';
+      sumCat.classList.add('drop-hint');
+    }
   });
   tree?.addEventListener('dragleave',(e)=>{
     e.target.closest('.dz')?.classList.remove('dragover');
-    e.target.closest('summary')?.classList.remove('drop-hint');
+    const sum = e.target.closest('summary');
+    if (sum) clearSummaryHint(sum);
   });
   tree?.addEventListener('drop',(e)=>{
     const raw = e.dataTransfer.getData('text/plain') || '';
@@ -2179,6 +2216,7 @@ function renderSettings(){
     const kind = parts[0];
     const id = parts[1] || null;
     e.preventDefault();
+    clearAllDragIndicators();
     const dzRoot = e.target.closest('[data-drop-root]');
     const dzCat  = e.target.closest('[data-drop-into-cat]');
     const dzTask = e.target.closest('[data-drop-into-task]');
