@@ -2469,6 +2469,63 @@ function computeCostModel(){
   const jobsInfo = [];
   const jobSeriesRaw = [];
   let totalGainLoss = 0;
+  let completedCount = 0;
+
+  const completedJobsList = Array.isArray(completedCuttingJobs) ? completedCuttingJobs : [];
+  if (completedJobsList.length){
+    for (const job of completedJobsList){
+      if (!job) continue;
+      const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
+      const gainLoss = eff && Number.isFinite(eff.gainLoss) ? Number(eff.gainLoss) : 0;
+      const deltaHours = eff && Number.isFinite(eff.deltaHours) ? Number(eff.deltaHours) : 0;
+      let date = null;
+      if (job.completedAtISO){
+        const completedDate = parseDateLocal(job.completedAtISO) || new Date(job.completedAtISO);
+        if (completedDate instanceof Date && !Number.isNaN(completedDate.getTime())){
+          date = completedDate;
+        }
+      }
+      if (!date && job.dueISO){
+        const due = parseDateLocal(job.dueISO);
+        if (due) date = due;
+      }
+      if (!date && job.startISO){
+        const start = parseDateLocal(job.startISO);
+        if (start) date = start;
+      }
+      if (!date){
+        const fallback = parsedHistory.length ? parsedHistory[parsedHistory.length-1].date : new Date();
+        date = new Date(fallback);
+      }
+      const milestone = job.completedAtISO
+        ? parseDateLocal(job.completedAtISO) || new Date(job.completedAtISO)
+        : parseDateLocal(job.dueISO || job.startISO || "");
+      const milestoneLabel = (milestone instanceof Date && !Number.isNaN(milestone))
+        ? milestone.toLocaleDateString()
+        : "—";
+      let statusDetail = "Finished on estimate";
+      if (Math.abs(deltaHours) > 0.1){
+        const prefix = deltaHours > 0 ? "Finished ahead" : "Finished behind";
+        statusDetail = `${prefix} (${deltaHours>0?"+":"-"}${Math.abs(deltaHours).toFixed(1)} hr)`;
+      }
+
+      jobsInfo.push({
+        name: job.name || "Untitled job",
+        date,
+        milestoneLabel,
+        gainLoss,
+        status: "Completed",
+        statusDetail
+      });
+
+      if (date instanceof Date && !Number.isNaN(date.getTime())){
+        jobSeriesRaw.push({ date, rawValue: gainLoss, label: job.name || "Job" });
+      }
+
+      totalGainLoss += gainLoss;
+      completedCount += 1;
+    }
+  }
 
   if (Array.isArray(cuttingJobs)){
     for (const job of cuttingJobs){
@@ -2506,12 +2563,6 @@ function computeCostModel(){
         status,
         statusDetail
       });
-
-      if (!Number.isNaN(date.getTime())){
-        jobSeriesRaw.push({ date, rawValue: gainLoss, label: job.name || "Job" });
-      }
-
-      totalGainLoss += gainLoss;
     }
   }
 
@@ -2525,7 +2576,7 @@ function computeCostModel(){
     });
   }
 
-  const jobCount = jobsInfo.length;
+  const jobCount = completedCount;
   const averageGainLoss = jobCount ? (totalGainLoss / jobCount) : 0;
 
   const formatterCurrency = (value, { showPlus=false, decimals=null } = {})=>{
@@ -2596,7 +2647,7 @@ function computeCostModel(){
       title: "Cutting jobs efficiency",
       value: formatterCurrency(totalGainLoss, { decimals: 0, showPlus: true }),
       hint: jobCount
-        ? `Average gain/loss ${formatterCurrency(averageGainLoss, { decimals: 0, showPlus: true })} across ${jobCount} job${jobCount===1?"":"s"}.`
+        ? `Average gain/loss ${formatterCurrency(averageGainLoss, { decimals: 0, showPlus: true })} across ${jobCount} completed job${jobCount===1?"":"s"}.`
         : "No cutting jobs logged yet."
     },
     {
@@ -2608,7 +2659,7 @@ function computeCostModel(){
   ];
 
   const jobSummary = {
-    countLabel: String(jobCount),
+    countLabel: jobCount ? `${jobCount} completed` : "0",
     totalLabel: formatterCurrency(totalGainLoss, { decimals: 0, showPlus: true }),
     averageLabel: formatterCurrency(averageGainLoss, { decimals: 0, showPlus: true }),
     rollingLabel: jobSeries.length
@@ -2951,6 +3002,16 @@ function renderJobs(){
     }
   });
 
+  content.querySelector("tbody")?.addEventListener("input", (e)=>{
+    if (e.target.matches("textarea[data-job-note]")){
+      const id = e.target.getAttribute("data-job-note");
+      const j = cuttingJobs.find(x=>x.id===id);
+      if (!j) return;
+      j.notes = e.target.value;
+      saveCloudDebounced();
+    }
+  });
+
   // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
   content.querySelector("tbody")?.addEventListener("click",(e)=>{
     const upload = e.target.closest("[data-upload-job]");
@@ -2979,6 +3040,7 @@ function renderJobs(){
     const sv = e.target.closest("[data-save-job]");
     const ca = e.target.closest("[data-cancel-job]");
     const lg = e.target.closest("[data-log-job]");
+    const complete = e.target.closest("[data-complete-job]");
     const apSpent  = e.target.closest("[data-log-apply-spent]");
     const apRemain = e.target.closest("[data-log-apply-remain]");
 
@@ -2989,7 +3051,59 @@ function renderJobs(){
     if (rm){
       const id = rm.getAttribute("data-remove-job");
       cuttingJobs = cuttingJobs.filter(x=>x.id!==id);
-      saveCloudDebounced(); toast("Removed"); renderJobs(); 
+      saveCloudDebounced(); toast("Removed"); renderJobs();
+      return;
+    }
+
+    if (complete){
+      const id = complete.getAttribute("data-complete-job");
+      const idx = cuttingJobs.findIndex(x=>x.id===id);
+      if (idx < 0) return;
+      const job = cuttingJobs[idx];
+      const eff = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
+      const now = new Date();
+      const completionISO = now.toISOString();
+      const efficiencySummary = eff ? {
+        rate: eff.rate ?? JOB_RATE_PER_HOUR,
+        expectedHours: eff.expectedHours ?? null,
+        actualHours: eff.actualHours ?? null,
+        expectedRemaining: eff.expectedRemaining ?? null,
+        actualRemaining: eff.actualRemaining ?? null,
+        deltaHours: eff.deltaHours ?? null,
+        gainLoss: eff.gainLoss ?? null
+      } : {
+        rate: JOB_RATE_PER_HOUR,
+        expectedHours: null,
+        actualHours: null,
+        expectedRemaining: null,
+        actualRemaining: null,
+        deltaHours: null,
+        gainLoss: null
+      };
+
+      const completed = {
+        id: job.id,
+        name: job.name,
+        estimateHours: job.estimateHours,
+        startISO: job.startISO,
+        dueISO: job.dueISO,
+        completedAtISO: completionISO,
+        notes: job.notes || "",
+        material: job.material || "",
+        materialCost: Number(job.materialCost)||0,
+        materialQty: Number(job.materialQty)||0,
+        manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
+        files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
+        actualHours: eff && Number.isFinite(eff.actualHours) ? eff.actualHours : null,
+        efficiency: efficiencySummary
+      };
+
+      completedCuttingJobs.push(completed);
+      cuttingJobs.splice(idx, 1);
+      editingJobs.delete(id);
+      saveCloudDebounced();
+      toast("Job marked complete");
+      renderJobs();
       return;
     }
 

@@ -909,10 +909,98 @@ function viewCosts(model){
 }
 
 function viewJobs(){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const textEsc = (str)=> String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const formatCurrency = (value, { showPlus = true } = {})=>{
+    const num = Number(value);
+    const safe = Number.isFinite(num) ? num : 0;
+    const abs = Math.abs(safe);
+    const formatted = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: abs < 1000 ? 2 : 0,
+      maximumFractionDigits: abs < 1000 ? 2 : 0
+    }).format(abs);
+    if (safe < 0) return `-${formatted}`;
+    if (safe > 0 && showPlus) return `+${formatted}`;
+    return formatted;
+  };
+  const formatHours = (value)=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "—";
+    const decimals = Math.abs(num) >= 100 ? 0 : 1;
+    return `${num.toFixed(decimals)} hr`;
+  };
+  const formatDate = (iso)=>{
+    if (!iso) return "—";
+    const dt = parseDateLocal(iso) || new Date(iso);
+    if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "—";
+    return dt.toLocaleDateString();
+  };
+
   const pendingFiles = Array.isArray(window.pendingNewJobFiles) ? window.pendingNewJobFiles : [];
   const pendingSummary = pendingFiles.length
     ? `${pendingFiles.length} file${pendingFiles.length===1?"":"s"} ready to attach`
     : "No files selected";
+  const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [];
+  const completedSorted = completedJobs.sort((a,b)=>{
+    const aTime = new Date(a.completedAtISO || a.dueISO || a.startISO || 0).getTime();
+    const bTime = new Date(b.completedAtISO || b.dueISO || b.startISO || 0).getTime();
+    return bTime - aTime;
+  });
+  const completedStats = completedSorted.reduce((acc, job)=>{
+    const eff = job && job.efficiency ? job.efficiency : {};
+    const gain = Number(eff.gainLoss);
+    acc.total += Number.isFinite(gain) ? gain : 0;
+    return acc;
+  }, { total: 0 });
+  const completedAverage = completedSorted.length ? (completedStats.total / completedSorted.length) : 0;
+  const completedRows = completedSorted.map(job => {
+    const eff = job && job.efficiency ? job.efficiency : {};
+    const delta = Number(eff.deltaHours);
+    const gainLoss = Number(eff.gainLoss);
+    const actualHours = Number(job.actualHours ?? eff.actualHours);
+    const estHours = Number(job.estimateHours);
+    let statusLabel = "Finished on estimate";
+    if (Number.isFinite(delta) && Math.abs(delta) > 0.1){
+      statusLabel = delta > 0 ? "Finished ahead" : "Finished behind";
+    }
+    const statusDetail = Number.isFinite(delta) && Math.abs(delta) > 0.1
+      ? ` (${delta > 0 ? "+" : "−"}${Math.abs(delta).toFixed(1)} hr)`
+      : "";
+    const noteDisplay = job?.notes
+      ? esc(String(job.notes)).replace(/\n/g, "<br>")
+      : "<span class=\"muted\">—</span>";
+    const materialLine = job?.material ? `<div class="small muted">${esc(job.material)}</div>` : "";
+    return `
+      <tr>
+        <td>
+          <div><strong>${esc(job?.name || "Job")}</strong></div>
+          ${materialLine}
+        </td>
+        <td>${formatDate(job?.completedAtISO)}</td>
+        <td>${formatHours(actualHours)} / ${formatHours(estHours)}</td>
+        <td>${esc(statusLabel)}${statusDetail}</td>
+        <td>${formatCurrency(gainLoss)}</td>
+        <td>${noteDisplay}</td>
+      </tr>
+    `;
+  }).join("");
+  const completedTable = completedSorted.length
+    ? `
+      <div class="past-jobs-summary">
+        <div><span class="label">Jobs logged</span><span>${completedSorted.length}</span></div>
+        <div><span class="label">Total impact</span><span>${formatCurrency(completedStats.total)}</span></div>
+        <div><span class="label">Avg per job</span><span>${formatCurrency(completedAverage)}</span></div>
+      </div>
+      <table class="past-jobs-table">
+        <thead>
+          <tr><th>Job</th><th>Completed</th><th>Actual vs estimate</th><th>Status</th><th>Cost impact</th><th>Note</th></tr>
+        </thead>
+        <tbody>${completedRows}</tbody>
+      </table>
+    `
+    : `<p class="small muted">Mark jobs complete to build a history of past cutting work.</p>`;
   const rows = cuttingJobs.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileLinks = jobFiles.length
@@ -979,6 +1067,9 @@ function viewJobs(){
           <div class="job-actions" style="margin-top:6px">
             <button data-log-job="${j.id}">Log</button>
           </div>
+          <div class="job-note-inline">
+            <textarea data-job-note="${j.id}" rows="2" placeholder="Add a note…">${textEsc(j.notes || "")}</textarea>
+          </div>
           ${fileLinks}
         </td>
         <td>${j.estimateHours} hrs</td>
@@ -1000,6 +1091,7 @@ function viewJobs(){
           <!-- Hidden placeholder prevents renderJobs() from injecting a duplicate Log button -->
           <span data-log-job="${j.id}" style="display:none"></span>
           <button data-edit-job="${j.id}">Edit</button>
+          <button data-complete-job="${j.id}">Mark complete</button>
           <button class="danger" data-remove-job="${j.id}">Remove</button>
         </td>
       </tr>`;
@@ -1071,6 +1163,10 @@ function viewJobs(){
         <tbody>${rows}</tbody>
       </table>
       <p class="small">Material fields are editable. Changes save automatically.</p>
+    </div>
+    <div class="block past-jobs-block">
+      <h3>Past Cutting Jobs</h3>
+      ${completedTable}
     </div>
   </div>`;
 }
