@@ -1248,11 +1248,11 @@ function renderSettings(){
       #explorer .dz[data-drop-into-task].dragover,
       #explorer .dz[data-drop-into-cat].dragover,
       #explorer .dz[data-drop-root].dragover{min-height:32px;padding:12px;background:rgba(10,99,194,.08);outline:2px dashed #0a63c2}
-      #explorer .dz-line{position:relative;height:12px;margin:4px 0;border-radius:6px}
-      #explorer .dz-line::before{content:"";position:absolute;left:10px;right:10px;top:50%;height:2px;background:transparent;transform:translateY(-50%);opacity:0;transition:opacity .12s ease,background-color .12s ease}
+      #explorer .dz-line{position:relative;height:1px;margin:0;border-radius:6px}
+      #explorer .dz-line::before{content:"";position:absolute;left:10px;right:10px;top:50%;height:1px;background:transparent;transform:translateY(-50%);opacity:0;transition:opacity .12s ease,background-color .12s ease}
       #explorer .dz-line::after{top:0;transform:translate(-50%,-130%)}
       #explorer .dz-line.dragover{height:18px}
-      #explorer .dz-line.dragover::before{opacity:1;background:#0a63c2}
+      #explorer .dz-line.dragover::before{opacity:1;background:#0a63c2;height:2px}
       #explorer .dz-line.dragover::after{opacity:1;transform:translate(-50%,-160%)}
       #explorer summary.drop-hint{outline:2px solid #0a63c2;border-radius:6px}
       #explorer summary.drop-hint[data-drop-label]::after{content:attr(data-drop-label);position:absolute;left:16px;top:100%;transform:translateY(6px);background:#0a63c2;color:#fff;font-size:.68rem;padding:2px 8px;border-radius:999px;box-shadow:0 4px 10px rgba(10,99,194,.25);white-space:nowrap}
