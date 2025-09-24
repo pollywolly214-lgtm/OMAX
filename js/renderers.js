@@ -314,12 +314,22 @@ function renderDashboard(){
   const jobEstimateInput = document.getElementById("dashJobEstimate");
   const jobStartInput    = document.getElementById("dashJobStart");
   const jobDueInput      = document.getElementById("dashJobDue");
+  const garnetForm       = document.getElementById("dashGarnetForm");
+  const garnetDateInput  = document.getElementById("dashGarnetDate");
+  const garnetStartInput = document.getElementById("dashGarnetStart");
+  const garnetEndInput   = document.getElementById("dashGarnetEnd");
+  const garnetNoteInput  = document.getElementById("dashGarnetNote");
+  const garnetSubmitBtn  = document.getElementById("dashGarnetSubmit");
+  const garnetCancelBtn  = document.getElementById("dashGarnetCancel");
+  const garnetList       = document.getElementById("dashGarnetList");
 
   const taskFreqRow      = taskForm?.querySelector("[data-task-frequency]");
   const taskLastRow      = taskForm?.querySelector("[data-task-last]");
   const taskConditionRow = taskForm?.querySelector("[data-task-condition]");
   const stepSections     = modal ? Array.from(modal.querySelectorAll("[data-step]")) : [];
   let addContextDateISO  = null;
+  let editingGarnetId    = null;
+  let pendingGarnetEditId = null;
 
   function setContextDate(dateISO){
     addContextDateISO = dateISO || null;
@@ -335,6 +345,13 @@ function renderDashboard(){
         downDateInput.value = addContextDateISO;
       }else if (!modal || !modal.classList.contains("is-visible")){
         downDateInput.value = "";
+      }
+    }
+    if (garnetDateInput && !editingGarnetId){
+      if (addContextDateISO){
+        garnetDateInput.value = addContextDateISO;
+      }else if (!modal || !modal.classList.contains("is-visible")){
+        garnetDateInput.value = "";
       }
     }
   }
@@ -384,6 +401,182 @@ function renderDashboard(){
     saveCloudDebounced();
     toast("Down time removed");
     refreshDownTimeList();
+    renderCalendar();
+  }
+
+  function formatTimeForDisplay(value){
+    const normalized = normalizeTimeString(value);
+    if (!normalized) return "—";
+    const [hhStr, mmStr] = normalized.split(":");
+    const hh = Number(hhStr);
+    const suffix = hh >= 12 ? "PM" : "AM";
+    const hour12 = ((hh + 11) % 12) + 1;
+    return `${hour12}:${mmStr} ${suffix}`;
+  }
+
+  function formatGarnetRangeLabel(start, end){
+    const startTxt = formatTimeForDisplay(start);
+    const endTxt = formatTimeForDisplay(end);
+    return `${startTxt} – ${endTxt}`;
+  }
+
+  function ensureGarnetArray(){
+    if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+    const arr = window.garnetCleanings;
+    for (let i = arr.length - 1; i >= 0; i--){
+      const entry = arr[i];
+      if (!entry || typeof entry !== "object"){ arr.splice(i,1); continue; }
+      if (!entry.id){ entry.id = genId("garnet_cleaning"); }
+      if (typeof entry.dateISO !== "string" || !entry.dateISO){ arr.splice(i,1); continue; }
+      entry.startTime = normalizeTimeString(entry.startTime) || "08:00";
+      entry.endTime   = normalizeTimeString(entry.endTime)   || "12:00";
+      const startMinutes = timeStringToMinutes(entry.startTime) ?? 0;
+      let endMinutes = timeStringToMinutes(entry.endTime);
+      if (endMinutes == null || endMinutes <= startMinutes){
+        endMinutes = Math.min(startMinutes + 60, (23 * 60) + 59);
+        const endHour = Math.floor(endMinutes / 60) % 24;
+        const endMinute = endMinutes % 60;
+        entry.endTime = `${String(endHour).padStart(2, "0")}:${String(endMinute).padStart(2, "0")}`;
+      }
+      entry.note = typeof entry.note === "string" ? entry.note : "";
+      entry.completed = Boolean(entry.completed);
+      entry.id = String(entry.id);
+    }
+    return arr;
+  }
+
+  function updateGarnetFormState(){
+    if (garnetSubmitBtn){
+      garnetSubmitBtn.textContent = editingGarnetId ? "Update Cleaning" : "Add Cleaning";
+    }
+    if (garnetCancelBtn){
+      garnetCancelBtn.hidden = !editingGarnetId;
+    }
+  }
+
+  function resetGarnetForm(){
+    garnetForm?.reset();
+    editingGarnetId = null;
+    if (garnetDateInput){
+      if (addContextDateISO){
+        garnetDateInput.value = addContextDateISO;
+      }else if (!garnetDateInput.value){
+        garnetDateInput.value = ymd(new Date());
+      }
+    }
+    updateGarnetFormState();
+  }
+
+  function startGarnetEdit(id){
+    const arr = ensureGarnetArray();
+    const entry = arr.find(item => String(item.id) === String(id));
+    if (!entry) return;
+    editingGarnetId = String(entry.id);
+    if (garnetDateInput) garnetDateInput.value = entry.dateISO || "";
+    if (garnetStartInput) garnetStartInput.value = normalizeTimeString(entry.startTime) || "08:00";
+    if (garnetEndInput) garnetEndInput.value = normalizeTimeString(entry.endTime) || "12:00";
+    if (garnetNoteInput) garnetNoteInput.value = entry.note || "";
+    updateGarnetFormState();
+    garnetForm?.scrollIntoView({ behavior:"smooth", block:"nearest" });
+  }
+
+  function prepareGarnetStep(){
+    refreshGarnetList();
+    if (pendingGarnetEditId){
+      const editId = pendingGarnetEditId;
+      pendingGarnetEditId = null;
+      startGarnetEdit(editId);
+      return;
+    }
+    if (!editingGarnetId){
+      resetGarnetForm();
+    }else{
+      updateGarnetFormState();
+    }
+  }
+
+  function refreshGarnetList(){
+    if (!garnetList) return;
+    const arr = ensureGarnetArray().slice().sort((a,b)=>{
+      const dateCmp = String(a.dateISO).localeCompare(String(b.dateISO));
+      if (dateCmp !== 0) return dateCmp;
+      const startA = timeStringToMinutes(a.startTime) ?? 0;
+      const startB = timeStringToMinutes(b.startTime) ?? 0;
+      return (startA - startB) || String(a.id).localeCompare(String(b.id));
+    });
+    if (!arr.length){
+      garnetList.innerHTML = `<div class="small muted">No Garnet cleanings scheduled yet.</div>`;
+      return;
+    }
+    garnetList.innerHTML = "";
+    arr.forEach(item => {
+      const row = document.createElement("div");
+      row.className = "garnet-item" + (item.completed ? " is-complete" : "");
+      const info = document.createElement("div");
+      info.className = "garnet-item-info";
+      const parsed = new Date(item.dateISO + "T00:00:00");
+      const dateText = isNaN(parsed.getTime())
+        ? item.dateISO
+        : parsed.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+      info.innerHTML = `
+        <div class="garnet-item-title">
+          <span class="garnet-item-date">${escapeHtml(dateText)}</span>
+          <span class="garnet-item-time">${escapeHtml(formatGarnetRangeLabel(item.startTime, item.endTime))}</span>
+        </div>
+        ${item.note ? `<div class="garnet-item-note">${escapeHtml(item.note)}</div>` : ""}
+      `;
+      row.appendChild(info);
+      const actions = document.createElement("div");
+      actions.className = "garnet-item-actions";
+      const completeBtn = document.createElement("button");
+      completeBtn.type = "button";
+      completeBtn.className = "garnet-complete-btn";
+      completeBtn.textContent = item.completed ? "Mark incomplete" : "Mark complete";
+      completeBtn.addEventListener("click", ()=> toggleGarnetComplete(item.id));
+      actions.appendChild(completeBtn);
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "garnet-edit-btn";
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", ()=>{
+        pendingGarnetEditId = item.id;
+        showStep("garnet");
+        prepareGarnetStep();
+      });
+      actions.appendChild(editBtn);
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "garnet-remove-btn";
+      removeBtn.textContent = "Remove";
+      removeBtn.addEventListener("click", ()=> removeGarnet(item.id));
+      actions.appendChild(removeBtn);
+      row.appendChild(actions);
+      garnetList.appendChild(row);
+    });
+  }
+
+  function toggleGarnetComplete(id){
+    const arr = ensureGarnetArray();
+    const entry = arr.find(item => String(item.id) === String(id));
+    if (!entry) return;
+    entry.completed = !entry.completed;
+    saveCloudDebounced();
+    toast(entry.completed ? "Garnet cleaning completed" : "Marked as scheduled");
+    refreshGarnetList();
+    renderCalendar();
+  }
+
+  function removeGarnet(id){
+    const arr = ensureGarnetArray();
+    const idx = arr.findIndex(item => String(item.id) === String(id));
+    if (idx < 0) return;
+    arr.splice(idx,1);
+    if (editingGarnetId && String(editingGarnetId) === String(id)){
+      resetGarnetForm();
+    }
+    saveCloudDebounced();
+    toast("Garnet cleaning removed");
+    refreshGarnetList();
     renderCalendar();
   }
 
@@ -445,6 +638,9 @@ function renderDashboard(){
         downDateInput.value = addContextDateISO;
       }
     }
+    if (step === "garnet"){
+      prepareGarnetStep();
+    }
   }
 
   function showBackdrop(step){
@@ -471,10 +667,18 @@ function renderDashboard(){
     }else{
       setContextDate(null);
     }
+    if (opts && Object.prototype.hasOwnProperty.call(opts, "garnetId") && opts.garnetId != null){
+      pendingGarnetEditId = String(opts.garnetId);
+    }else{
+      pendingGarnetEditId = null;
+    }
     const desiredStep = opts?.step || step;
     showBackdrop(desiredStep);
     if (desiredStep === "downtime" && addContextDateISO && downDateInput){
       downDateInput.value = addContextDateISO;
+    }
+    if (desiredStep === "garnet" && addContextDateISO && garnetDateInput && !editingGarnetId){
+      garnetDateInput.value = addContextDateISO;
     }
   }
 
@@ -484,7 +688,9 @@ function renderDashboard(){
     resetTaskForm();
     downForm?.reset();
     jobForm?.reset();
+    resetGarnetForm();
     setContextDate(null);
+    pendingGarnetEditId = null;
   }
 
   window.openDashboardAddPicker = (opts={}) => {
@@ -518,6 +724,69 @@ function renderDashboard(){
       }
     }
   });
+
+  garnetDateInput?.addEventListener("input", ()=>{
+    if (!garnetDateInput) return;
+    const val = garnetDateInput.value;
+    addContextDateISO = val || null;
+    if (modal){
+      if (addContextDateISO){
+        modal.setAttribute("data-context-date", addContextDateISO);
+      }else{
+        modal.removeAttribute("data-context-date");
+      }
+    }
+  });
+
+  garnetCancelBtn?.addEventListener("click", ()=>{
+    pendingGarnetEditId = null;
+    resetGarnetForm();
+  });
+
+  garnetForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    if (!garnetForm) return;
+    const arr = ensureGarnetArray();
+    const dateISO = (garnetDateInput?.value || "").trim();
+    if (!dateISO){ alert("Select a date for Garnet cleaning."); return; }
+    const start = normalizeTimeString(garnetStartInput?.value || "");
+    const end   = normalizeTimeString(garnetEndInput?.value || "");
+    if (!start || !end){ alert("Enter a valid start and end time."); return; }
+    const startMinutes = timeStringToMinutes(start);
+    const endMinutes = timeStringToMinutes(end);
+    if (startMinutes == null || endMinutes == null){ alert("Enter a valid time range."); return; }
+    if (endMinutes <= startMinutes){ alert("End time must be after the start time."); return; }
+    const note = (garnetNoteInput?.value || "").trim();
+    let message = "Garnet cleaning scheduled";
+    if (editingGarnetId){
+      const entry = arr.find(item => String(item.id) === String(editingGarnetId));
+      if (entry){
+        entry.dateISO = dateISO;
+        entry.startTime = start;
+        entry.endTime = end;
+        entry.note = note;
+        message = "Garnet cleaning updated";
+      }
+    }else{
+      arr.push({
+        id: genId("garnet_cleaning"),
+        dateISO,
+        startTime: start,
+        endTime: end,
+        note,
+        completed: false
+      });
+    }
+    setContextDate(dateISO);
+    saveCloudDebounced();
+    toast(message);
+    renderCalendar();
+    refreshGarnetList();
+    pendingGarnetEditId = null;
+    resetGarnetForm();
+  });
+
+  window.__dashRefreshGarnetList = refreshGarnetList;
 
   function createSubtaskRow(defaultType){
     if (!subtaskList) return null;
@@ -563,12 +832,23 @@ function renderDashboard(){
   modal?.querySelectorAll("[data-choice]")?.forEach(btn => {
     btn.addEventListener("click", ()=>{
       const choice = btn.getAttribute("data-choice");
-      showStep(choice === "task" ? "task" : choice === "downtime" ? "downtime" : "job");
+      let stepTarget = "task";
+      if (choice === "downtime") stepTarget = "downtime";
+      else if (choice === "job") stepTarget = "job";
+      else if (choice === "garnet") stepTarget = "garnet";
+      if (stepTarget !== "garnet") pendingGarnetEditId = null;
+      showStep(stepTarget);
     });
   });
 
   modal?.querySelectorAll("[data-step-back]")?.forEach(btn => {
-    btn.addEventListener("click", ()=> showStep("picker"));
+    btn.addEventListener("click", ()=>{
+      if (btn.closest('[data-step="garnet"]')){
+        pendingGarnetEditId = null;
+        resetGarnetForm();
+      }
+      showStep("picker");
+    });
   });
 
   taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));

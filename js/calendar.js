@@ -20,6 +20,37 @@ function triggerDashboardAddPicker(opts){
   }
   window.__pendingDashboardAddRequests.push(detail);
 }
+
+function escapeHtml(str){
+  return String(str || "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[c] || c);
+}
+
+function getGarnetEntries(){
+  if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+  return window.garnetCleanings;
+}
+
+function formatGarnetTime(value){
+  const normalized = normalizeTimeString(value);
+  if (!normalized) return "—";
+  const [hhStr, mmStr] = normalized.split(":");
+  const hh = Number(hhStr);
+  const suffix = hh >= 12 ? "PM" : "AM";
+  const hour12 = ((hh + 11) % 12) + 1;
+  return `${hour12}:${mmStr} ${suffix}`;
+}
+
+function formatGarnetRange(start, end){
+  const startTxt = formatGarnetTime(start);
+  const endTxt = formatGarnetTime(end);
+  return `${startTxt} – ${endTxt}`;
+}
 function makeBubble(anchor){
   clearTimeout(bubbleTimer);
   bubbleTimer = null;
@@ -151,26 +182,93 @@ function showJobBubble(jobId, anchor){
   }
 }
 
+function toggleGarnetComplete(id){
+  const entries = getGarnetEntries();
+  const entry = entries.find(item => String(item.id) === String(id));
+  if (!entry) return;
+  entry.completed = !entry.completed;
+  saveCloudDebounced();
+  toast(entry.completed ? "Garnet cleaning completed" : "Marked as scheduled");
+  renderCalendar();
+  if (typeof window.__dashRefreshGarnetList === "function") window.__dashRefreshGarnetList();
+}
+
+function removeGarnetEntry(id){
+  const entries = getGarnetEntries();
+  const idx = entries.findIndex(item => String(item.id) === String(id));
+  if (idx < 0) return;
+  entries.splice(idx,1);
+  saveCloudDebounced();
+  toast("Garnet cleaning removed");
+  renderCalendar();
+  if (typeof window.__dashRefreshGarnetList === "function") window.__dashRefreshGarnetList();
+}
+
+function showGarnetBubble(garnetId, anchor){
+  const entries = getGarnetEntries();
+  const entry = entries.find(item => String(item.id) === String(garnetId));
+  if (!entry) return;
+  const b = makeBubble(anchor);
+  const date = parseDateLocal(entry.dateISO);
+  const dateText = date ? date.toDateString() : (entry.dateISO || "—");
+  const rangeText = formatGarnetRange(entry.startTime, entry.endTime);
+  const statusText = entry.completed ? "Complete" : "Scheduled";
+  const completeLabel = entry.completed ? "Mark as incomplete" : "Mark as complete";
+  b.innerHTML = `
+    <div class="bubble-title">Garnet Cleaning</div>
+    <div class="bubble-kv"><span>Date:</span><span>${escapeHtml(dateText)}</span></div>
+    <div class="bubble-kv"><span>Time:</span><span>${escapeHtml(rangeText)}</span></div>
+    <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusText)}</span></div>
+    ${entry.note ? `<div class="bubble-kv"><span>Note:</span><span>${escapeHtml(entry.note)}</span></div>` : ""}
+    <div class="bubble-actions">
+      <button data-garnet-complete="${escapeHtml(String(entry.id))}">${escapeHtml(completeLabel)}</button>
+      <button data-garnet-edit="${escapeHtml(String(entry.id))}">Edit</button>
+      <button class="danger" data-garnet-remove="${escapeHtml(String(entry.id))}">Remove</button>
+    </div>`;
+
+  b.querySelector("[data-garnet-complete]")?.addEventListener("click", ()=>{
+    toggleGarnetComplete(entry.id);
+    hideBubble();
+  });
+  b.querySelector("[data-garnet-remove]")?.addEventListener("click", ()=>{
+    removeGarnetEntry(entry.id);
+    hideBubble();
+  });
+  b.querySelector("[data-garnet-edit]")?.addEventListener("click", ()=>{
+    hideBubble();
+    triggerDashboardAddPicker({ step:"garnet", garnetId: entry.id, dateISO: entry.dateISO });
+  });
+  b.addEventListener("click", (e)=>{
+    if (e.target.closest(".bubble-actions")) return;
+    if (e.target.closest("button")) return;
+    if (e.target.closest("a")) return;
+    hideBubble();
+    triggerDashboardAddPicker({ step:"garnet", garnetId: entry.id, dateISO: entry.dateISO });
+  });
+}
+
 function wireCalendarBubbles(){
   const months = $("#months"); if (!months) return;
   let hoverTarget = null;
   months.addEventListener("mouseover", (e)=>{
-    const el = e.target.closest("[data-cal-job], [data-cal-task]");
+    const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
     if (!el || el === hoverTarget) return;
     hoverTarget = el;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
     if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el);
+    if (el.dataset.calGarnet) showGarnetBubble(el.dataset.calGarnet, el);
   });
   months.addEventListener("mouseout", (e)=>{
-    const from = e.target.closest("[data-cal-job], [data-cal-task]");
-    const to   = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("[data-cal-job], [data-cal-task]");
+    const from = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
+    const to   = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
     if (from && !to) { hoverTarget = null; hideBubbleSoon(); }
   });
   months.addEventListener("click", (e)=>{
-    const el = e.target.closest("[data-cal-job], [data-cal-task]");
+    const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
     if (!el) return;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
     if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el);
+    if (el.dataset.calGarnet) showGarnetBubble(el.dataset.calGarnet, el);
   });
 }
 
@@ -200,6 +298,32 @@ function renderCalendar(){
       cur.setDate(cur.getDate()+1);
     }
   });
+
+  const garnetMap = {};
+  if (Array.isArray(window.garnetCleanings)){
+    window.garnetCleanings.forEach(entry => {
+      if (!entry || typeof entry.dateISO !== "string") return;
+      const date = parseDateLocal(entry.dateISO);
+      if (!date) return;
+      const key = ymd(date);
+      const id = entry.id != null ? String(entry.id) : null;
+      if (!id) return;
+      (garnetMap[key] ||= []).push({
+        id,
+        startTime: normalizeTimeString(entry.startTime),
+        endTime: normalizeTimeString(entry.endTime),
+        completed: Boolean(entry.completed),
+        note: entry.note || ""
+      });
+    });
+    Object.keys(garnetMap).forEach(key => {
+      garnetMap[key].sort((a,b)=>{
+        const startA = timeStringToMinutes(a.startTime) ?? 0;
+        const startB = timeStringToMinutes(b.startTime) ?? 0;
+        return (startA - startB) || String(a.id).localeCompare(String(b.id));
+      });
+    });
+  }
 
   const downSet = new Set();
   if (Array.isArray(window.downTimes)){
@@ -243,6 +367,15 @@ function renderCalendar(){
       if (downSet.has(key)) cell.classList.add("downtime");
       (dueMap[key]||[]).forEach(ev=>{
         const chip = document.createElement("div"); chip.className="event generic cal-task"; chip.dataset.calTask = ev.id; chip.textContent = `${ev.name} (due)`; cell.appendChild(chip);
+      });
+      (garnetMap[key]||[]).forEach(ev=>{
+        const chip = document.createElement("div");
+        let cls = "event garnet cal-garnet";
+        if (ev.completed) cls += " is-complete";
+        chip.className = cls;
+        chip.dataset.calGarnet = ev.id;
+        chip.textContent = `Garnet Cleaning (${formatGarnetRange(ev.startTime, ev.endTime)})`;
+        cell.appendChild(chip);
       });
       (jobsMap[key]||[]).forEach(ev=>{
         const bar = document.createElement("div"); bar.className="job-bar cal-job"; bar.dataset.calJob = ev.id; bar.textContent = ev.name; cell.appendChild(bar);
