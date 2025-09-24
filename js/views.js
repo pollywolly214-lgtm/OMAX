@@ -57,6 +57,7 @@ function viewDashboard(){
         <div class="dash-choice-grid">
           <button type="button" class="dash-choice" data-choice="task">Maintenance Task</button>
           <button type="button" class="dash-choice" data-choice="downtime">Down Time</button>
+          <button type="button" class="dash-choice" data-choice="garnet">Garnet Cleaning</button>
           <button type="button" class="dash-choice" data-choice="job">Cutting Job</button>
         </div>
       </section>
@@ -108,6 +109,26 @@ function viewDashboard(){
           </div>
         </form>
         <div id="dashDownList" class="down-list"></div>
+      </section>
+
+      <section class="dash-modal-step" data-step="garnet" hidden>
+        <h4>Schedule Garnet cleaning</h4>
+        <form id="dashGarnetForm" class="modal-form">
+          <div class="modal-grid">
+            <label>Date<input type="date" id="dashGarnetDate" required></label>
+            <label>Start time<input type="time" id="dashGarnetStart" required value="08:00"></label>
+            <label>End time<input type="time" id="dashGarnetEnd" required value="12:00"></label>
+            <label>Notes<input id="dashGarnetNote" placeholder="Optional note"></label>
+          </div>
+          <div class="modal-actions garnet-actions">
+            <button type="button" class="secondary" data-step-back>Back</button>
+            <div class="garnet-action-buttons">
+              <button type="button" class="secondary" id="dashGarnetCancel" hidden>Cancel edit</button>
+              <button type="submit" class="primary" id="dashGarnetSubmit">Add Cleaning</button>
+            </div>
+          </div>
+        </form>
+        <div id="dashGarnetList" class="garnet-list"></div>
       </section>
 
       <section class="dash-modal-step" data-step="job" hidden>

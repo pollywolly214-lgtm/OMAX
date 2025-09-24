@@ -83,6 +83,25 @@ function ymd(d){
   return `${dt.getFullYear()}-${m<10?'0':''}${m}-${day<10?'0':''}${day}`;
 }
 
+function normalizeTimeString(value){
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+}
+
+function timeStringToMinutes(value){
+  const normalized = normalizeTimeString(value);
+  if (!normalized) return null;
+  const [hh, mm] = normalized.split(":").map(Number);
+  return (hh * 60) + mm;
+}
+
 /* Toast */
 function toast(msg){
   const t = document.createElement("div");
@@ -281,6 +300,7 @@ if (!Array.isArray(window.inventory))    window.inventory    = [];
 if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
@@ -294,6 +314,7 @@ let inventory     = window.inventory;
 let cuttingJobs   = window.cuttingJobs;
 let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
+let garnetCleanings = window.garnetCleanings;
 
 if (typeof window.inventorySearchTerm !== "string") window.inventorySearchTerm = "";
 let inventorySearchTerm = window.inventorySearchTerm;
@@ -322,6 +343,7 @@ function snapshotState(){
     cuttingJobs,
     orderRequests,
     orderRequestTab,
+    garnetCleanings,
     pumpEff: safePumpEff
   };
 }
@@ -497,6 +519,7 @@ function adoptState(doc){
   if (!orderRequests.some(req => req && req.status === "draft")){
     orderRequests.push(createOrderRequest());
   }
+  garnetCleanings = Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [];
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -504,6 +527,7 @@ function adoptState(doc){
   window.inventory = inventory;
   window.cuttingJobs = cuttingJobs;
   window.orderRequests = orderRequests;
+  window.garnetCleanings = garnetCleanings;
   if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
   window.pendingNewJobFiles.length = 0;
   if (typeof data.orderRequestTab === "string"){
@@ -557,6 +581,7 @@ async function loadFromCloud(){
           tasksAsReq: Array.isArray(data.tasksAsReq) && data.tasksAsReq.length ? data.tasksAsReq : defaultAsReqTasks.slice(),
           inventory: Array.isArray(data.inventory) && data.inventory.length ? data.inventory : seedInventoryFromTasks(),
           cuttingJobs: Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [],
+          garnetCleanings: Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [],
           orderRequests: Array.isArray(data.orderRequests) ? normalizeOrderRequests(data.orderRequests) : [createOrderRequest()],
           orderRequestTab: typeof data.orderRequestTab === "string" ? data.orderRequestTab : "active",
           pumpEff: pe
@@ -573,6 +598,7 @@ async function loadFromCloud(){
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
       const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe };
+      seeded.garnetCleanings = [];
       adoptState(seeded);
       resetHistoryToCurrent();
       await FB.docRef.set(seeded);
@@ -582,7 +608,7 @@ async function loadFromCloud(){
     const pe = (typeof window.pumpEff === "object" && window.pumpEff)
       ? window.pumpEff
       : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, garnetCleanings: [] });
     resetHistoryToCurrent();
   }
 }

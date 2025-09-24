@@ -1224,6 +1224,97 @@ body.modal-open {
 
 .down-remove-btn:hover { background: #c43d3d; }
 
+.garnet-actions {
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.garnet-action-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.garnet-list {
+  margin-top: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.garnet-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #f0d6b8;
+  border-radius: 10px;
+  background: #fff4e6;
+}
+
+.garnet-item.is-complete {
+  opacity: 0.7;
+}
+
+.garnet-item-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 600;
+  color: #a14d00;
+}
+
+.garnet-item-note {
+  font-size: 0.85rem;
+  color: #714224;
+}
+
+.garnet-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.garnet-item-actions button {
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.garnet-complete-btn {
+  background: #0a63c2;
+  color: #fff;
+}
+
+.garnet-complete-btn:hover { background: #084f9a; }
+
+.garnet-edit-btn {
+  background: #f0f4ff;
+  color: #0a63c2;
+}
+
+.garnet-edit-btn:hover { background: #e2ebff; }
+
+.garnet-remove-btn {
+  background: #e14b4b;
+  color: #fff;
+}
+
+.garnet-remove-btn:hover { background: #c43d3d; }
+
+.event.garnet {
+  background: #ffe4c4;
+  border-color: #ffce96;
+  color: #a14d00;
+  font-weight: 600;
+}
+
+.event.garnet.is-complete {
+  opacity: 0.65;
+  text-decoration: line-through;
+}
+
 /* highlight a row briefly when Edit is clicked */
 tr.row-editing {
   outline: 2px solid rgba(0, 120, 255, 0.4);
