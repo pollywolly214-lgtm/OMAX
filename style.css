@@ -553,12 +553,12 @@ h1 { margin: 0 0 10px; font-size: 22px; }
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 18px;
-  border-radius: 20px;
-  border: 1px solid rgba(61, 165, 245, 0.5);
-  background: linear-gradient(150deg, rgba(8, 33, 78, 0.92), rgba(28, 95, 182, 0.88));
-  box-shadow: 0 20px 40px rgba(6, 30, 78, 0.35);
-  color: #e8f3ff;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid #dbe3f4;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(13, 46, 84, 0.08);
+  color: #1b2d4b;
   overflow: hidden;
 }
 .next-due-window::after {
@@ -566,14 +566,11 @@ h1 { margin: 0 0 10px; font-size: 22px; }
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background:
-    radial-gradient(circle at top right, rgba(74, 208, 255, 0.35), transparent 58%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 46%);
-  opacity: 1;
+  background: none;
 }
 .next-due-window > * { position: relative; z-index: 1; }
 .next-due-window-preview {
-  box-shadow: 0 16px 34px rgba(5, 28, 76, 0.38);
+  box-shadow: 0 8px 20px rgba(13, 46, 84, 0.08);
 }
 .next-due-list {
   list-style: none;
@@ -581,7 +578,7 @@ h1 { margin: 0 0 10px; font-size: 22px; }
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .next-due-task {
   appearance: none;
@@ -590,18 +587,18 @@ h1 { margin: 0 0 10px; font-size: 22px; }
   justify-content: space-between;
   gap: 12px;
   width: 100%;
-  border: 1px solid rgba(236, 185, 70, 0.7);
-  background: rgba(255, 253, 232, 0.96);
-  color: #3e2b00;
-  border-radius: 16px;
-  padding: 12px 16px;
+  border: 1px solid #dbe5f5;
+  background: #f7f9fc;
+  color: #1b2d4b;
+  border-radius: 14px;
+  padding: 12px 14px;
   font-size: 13.5px;
   line-height: 1.4;
   cursor: pointer;
   text-align: left;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
   font-variant-numeric: tabular-nums;
-  box-shadow: 0 10px 20px rgba(36, 22, 0, 0.12);
+  box-shadow: none;
 }
 .next-due-task .next-due-name {
   font-weight: 700;
@@ -614,7 +611,7 @@ h1 { margin: 0 0 10px; font-size: 22px; }
   flex-direction: column;
   align-items: flex-end;
   gap: 3px;
-  color: #4e3900;
+  color: #405070;
   font-size: 12.5px;
   text-align: right;
 }
@@ -623,47 +620,47 @@ h1 { margin: 0 0 10px; font-size: 22px; }
 .next-due-task:hover,
 .next-due-task:focus {
   transform: translateY(-1px);
-  box-shadow: 0 14px 26px rgba(217, 170, 44, 0.3);
-  background: rgba(255, 247, 194, 0.99);
-  border-color: rgba(210, 155, 32, 0.82);
+  box-shadow: 0 10px 20px rgba(13, 46, 84, 0.08);
+  background: #eef3fb;
+  border-color: #c3d3ee;
   outline: none;
 }
 .next-due-task:focus-visible {
-  outline: 2px solid rgba(61, 165, 245, 0.8);
+  outline: 2px solid #0a63c2;
   outline-offset: 3px;
-  box-shadow: none;
 }
 .next-due-task::-moz-focus-inner {
   border: 0;
 }
 .next-due-task.is-due-now {
-  border-color: rgba(236, 106, 70, 0.7);
-  background: rgba(255, 228, 216, 0.96);
-  color: #641f00;
+  border-color: #f1b5a4;
+  background: #fff5f3;
+  color: #712512;
 }
-.next-due-task.is-due-now .next-due-meta { color: #a63c14; }
+.next-due-task.is-due-now .next-due-meta { color: #8b3926; }
 .next-due-task.is-due-soon {
-  border-color: rgba(236, 185, 70, 0.78);
-  background: rgba(255, 243, 188, 0.97);
-  color: #3f2a00;
+  border-color: #f4d28c;
+  background: #fff9ec;
+  color: #6b4c05;
 }
+.next-due-task.is-due-soon .next-due-meta { color: #7c5b10; }
 .next-due-task.is-due-later {
-  border-color: rgba(214, 185, 96, 0.6);
-  background: rgba(255, 252, 226, 0.94);
-  color: #3e2b00;
+  border-color: #ccd8ee;
+  background: #f7f9fc;
+  color: #1b2d4b;
 }
-.next-due-task.is-due-later .next-due-meta { color: #7d6600; }
+.next-due-task.is-due-later .next-due-meta { color: #405070; }
 .next-due-featured {
   align-items: center;
   gap: 16px;
   padding: 16px 18px;
-  border-radius: 18px;
-  box-shadow: 0 18px 32px rgba(6, 30, 78, 0.32);
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(61, 165, 245, 0.35);
+  border-radius: 16px;
+  background: #edf3fe;
+  border: 1px solid #c8daf6;
+  box-shadow: none;
 }
 .next-due-featured .next-due-name { font-size: 17px; color: #10294f; }
-.next-due-featured .next-due-meta { color: #1f3d6b; }
+.next-due-featured .next-due-meta { color: #294a75; }
 .next-due-featured-copy {
   display: flex;
   flex-direction: column;
@@ -674,62 +671,71 @@ h1 { margin: 0 0 10px; font-size: 22px; }
 .next-due-eyebrow {
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: rgba(74, 208, 255, 0.85);
+  letter-spacing: 0.1em;
+  color: #5a6b85;
 }
 .next-due-countdown {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-width: 72px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(61, 165, 245, 0.6);
-  background: rgba(255, 255, 255, 0.16);
-  color: #ebf4ff;
-  font-weight: 700;
+  min-width: 68px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid #c8daf6;
+  background: #fff;
+  color: #16365c;
+  font-weight: 600;
   text-transform: uppercase;
-  gap: 4px;
-  text-shadow: 0 1px 2px rgba(3, 19, 54, 0.45);
+  gap: 2px;
+  text-shadow: none;
 }
-.next-due-count { font-size: 26px; line-height: 1; }
+.next-due-count { font-size: 24px; line-height: 1; }
 .next-due-count-label { font-size: 11px; letter-spacing: 0.08em; }
 .next-due-task.is-due-now .next-due-countdown {
-  background: rgba(244, 151, 122, 0.24);
-  border-color: rgba(236, 106, 70, 0.7);
-  color: #8b2c0c;
+  background: #fdecea;
+  border-color: #f1b5a4;
+  color: #7c2d1a;
+}
+.next-due-task.is-due-soon .next-due-countdown {
+  background: #fff4e0;
+  border-color: #f4d28c;
+  color: #6b4c05;
+}
+.next-due-task.is-due-later .next-due-countdown {
+  background: #f4f7fb;
+  border-color: #ccd8ee;
+  color: #1b2d4b;
 }
 .next-due-subtitle {
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(210, 230, 255, 0.9);
+  color: #5a6b85;
 }
 .next-due-empty {
   margin: 0;
   font-size: 12px;
   line-height: 1.45;
-  color: #e8f3ff;
-  background: rgba(16, 47, 92, 0.6);
-  border: 1px dashed rgba(74, 208, 255, 0.45);
+  color: #42506c;
+  background: #f7f9fc;
+  border: 1px dashed #cdd7ea;
   border-radius: 12px;
   padding: 10px 12px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 .next-due-preview-note {
   margin: 0;
   font-size: 12px;
-  line-height: 1.5;
-  color: #102a4f;
-  background: rgba(255, 255, 255, 0.76);
+  line-height: 1.45;
+  color: #42506c;
+  background: #f7f9fc;
+  border: 1px solid #dbe3f4;
   border-radius: 12px;
   padding: 10px 12px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 .next-due-preview-mode .next-due-window {
-  opacity: 0.98;
+  opacity: 1;
 }
 .next-due-task.next-due-task-preview {
   cursor: default;
@@ -742,13 +748,13 @@ h1 { margin: 0 0 10px; font-size: 22px; }
 .next-due-task.next-due-task-preview:focus {
   box-shadow: none;
   transform: none;
-  border-color: rgba(236, 185, 70, 0.55);
+  border-color: #ccd8ee;
 }
 .next-due-window-preview .next-due-featured {
-  box-shadow: 0 12px 26px rgba(6, 30, 78, 0.28);
+  box-shadow: none;
 }
 .next-due-window-preview .next-due-task {
-  background: rgba(255, 253, 230, 0.9);
+  background: #f7f9fc;
 }
 .signed-out-container {
   grid-template-columns: minmax(280px, 480px);
@@ -757,22 +763,32 @@ h1 { margin: 0 0 10px; font-size: 22px; }
 .signed-out-message {
   max-width: 480px;
 }
+.signed-out-tips {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: #42506c;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.signed-out-tips li + li {
+  margin-top: 6px;
+}
 .next-due-preview-card {
   margin-top: 16px;
-  border: 1px solid rgba(61, 165, 245, 0.45);
-  border-radius: 18px;
+  border: 1px solid #dbe3f4;
+  border-radius: 16px;
   padding: 18px;
-  background: linear-gradient(150deg, rgba(10, 42, 96, 0.92), rgba(35, 112, 196, 0.85));
-  box-shadow: 0 14px 30px rgba(6, 30, 78, 0.32);
-  color: #e8f3ff;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(13, 46, 84, 0.08);
+  color: #1b2d4b;
 }
 .next-due-preview-title {
-  margin: 0 0 12px;
-  font-size: 14px;
+  margin: 0 0 10px;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(210, 230, 255, 0.9);
+  color: #5a6b85;
 }
 .total-hours-controls { align-items: flex-end; flex-wrap: nowrap; gap: 6px; margin-bottom: 2px; }
 .total-hours-label { display: flex; align-items: flex-end; gap: 6px; margin: 0; font-weight: 600; flex: 1 1 auto; font-size: 13px; line-height: 1.2; }
