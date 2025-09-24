@@ -298,6 +298,7 @@ if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
 if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
 if (!Array.isArray(window.inventory))    window.inventory    = [];
 if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
+if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
 if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
@@ -312,6 +313,7 @@ let tasksInterval = window.tasksInterval;
 let tasksAsReq    = window.tasksAsReq;
 let inventory     = window.inventory;
 let cuttingJobs   = window.cuttingJobs;
+let completedCuttingJobs = window.completedCuttingJobs;
 let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
@@ -341,6 +343,7 @@ function snapshotState(){
     tasksAsReq,
     inventory,
     cuttingJobs,
+    completedCuttingJobs,
     orderRequests,
     orderRequestTab,
     garnetCleanings,
@@ -515,6 +518,7 @@ function adoptState(doc){
     : defaultAsReqTasks.slice();
   inventory = Array.isArray(data.inventory) ? data.inventory : seedInventoryFromTasks();
   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
+  completedCuttingJobs = Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [];
   orderRequests = normalizeOrderRequests(Array.isArray(data.orderRequests) ? data.orderRequests : []);
   if (!orderRequests.some(req => req && req.status === "draft")){
     orderRequests.push(createOrderRequest());
@@ -526,6 +530,7 @@ function adoptState(doc){
   window.tasksAsReq = tasksAsReq;
   window.inventory = inventory;
   window.cuttingJobs = cuttingJobs;
+  window.completedCuttingJobs = completedCuttingJobs;
   window.orderRequests = orderRequests;
   window.garnetCleanings = garnetCleanings;
   if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
@@ -581,6 +586,7 @@ async function loadFromCloud(){
           tasksAsReq: Array.isArray(data.tasksAsReq) && data.tasksAsReq.length ? data.tasksAsReq : defaultAsReqTasks.slice(),
           inventory: Array.isArray(data.inventory) && data.inventory.length ? data.inventory : seedInventoryFromTasks(),
           cuttingJobs: Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [],
+          completedCuttingJobs: Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [],
           garnetCleanings: Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [],
           orderRequests: Array.isArray(data.orderRequests) ? normalizeOrderRequests(data.orderRequests) : [createOrderRequest()],
           orderRequestTab: typeof data.orderRequestTab === "string" ? data.orderRequestTab : "active",
@@ -597,7 +603,7 @@ async function loadFromCloud(){
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
-      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe };
+      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe };
       seeded.garnetCleanings = [];
       adoptState(seeded);
       resetHistoryToCurrent();
@@ -608,7 +614,7 @@ async function loadFromCloud(){
     const pe = (typeof window.pumpEff === "object" && window.pumpEff)
       ? window.pumpEff
       : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, garnetCleanings: [] });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, garnetCleanings: [] });
     resetHistoryToCurrent();
   }
 }
