@@ -909,20 +909,108 @@ function viewCosts(model){
 }
 
 function viewJobs(){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const textEsc = (str)=> String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const formatCurrency = (value, { showPlus = true } = {})=>{
+    const num = Number(value);
+    const safe = Number.isFinite(num) ? num : 0;
+    const abs = Math.abs(safe);
+    const formatted = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: abs < 1000 ? 2 : 0,
+      maximumFractionDigits: abs < 1000 ? 2 : 0
+    }).format(abs);
+    if (safe < 0) return `-${formatted}`;
+    if (safe > 0 && showPlus) return `+${formatted}`;
+    return formatted;
+  };
+  const formatHours = (value)=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "—";
+    const decimals = Math.abs(num) >= 100 ? 0 : 1;
+    return `${num.toFixed(decimals)} hr`;
+  };
+  const formatDate = (iso)=>{
+    if (!iso) return "—";
+    const dt = parseDateLocal(iso) || new Date(iso);
+    if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "—";
+    return dt.toLocaleDateString();
+  };
+
   const pendingFiles = Array.isArray(window.pendingNewJobFiles) ? window.pendingNewJobFiles : [];
   const pendingSummary = pendingFiles.length
     ? `${pendingFiles.length} file${pendingFiles.length===1?"":"s"} ready to attach`
     : "No files selected";
+  const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [];
+  const completedSorted = completedJobs.sort((a,b)=>{
+    const aTime = new Date(a.completedAtISO || a.dueISO || a.startISO || 0).getTime();
+    const bTime = new Date(b.completedAtISO || b.dueISO || b.startISO || 0).getTime();
+    return bTime - aTime;
+  });
+  const completedStats = completedSorted.reduce((acc, job)=>{
+    const eff = job && job.efficiency ? job.efficiency : {};
+    const gain = Number(eff.gainLoss);
+    acc.total += Number.isFinite(gain) ? gain : 0;
+    return acc;
+  }, { total: 0 });
+  const completedAverage = completedSorted.length ? (completedStats.total / completedSorted.length) : 0;
+  const completedRows = completedSorted.map(job => {
+    const eff = job && job.efficiency ? job.efficiency : {};
+    const delta = Number(eff.deltaHours);
+    const gainLoss = Number(eff.gainLoss);
+    const actualHours = Number(job.actualHours ?? eff.actualHours);
+    const estHours = Number(job.estimateHours);
+    let statusLabel = "Finished on estimate";
+    if (Number.isFinite(delta) && Math.abs(delta) > 0.1){
+      statusLabel = delta > 0 ? "Finished ahead" : "Finished behind";
+    }
+    const statusDetail = Number.isFinite(delta) && Math.abs(delta) > 0.1
+      ? ` (${delta > 0 ? "+" : "−"}${Math.abs(delta).toFixed(1)} hr)`
+      : "";
+    const noteDisplay = job?.notes
+      ? esc(String(job.notes)).replace(/\n/g, "<br>")
+      : "<span class=\"muted\">—</span>";
+    const materialLine = job?.material ? `<div class="small muted">${esc(job.material)}</div>` : "";
+    return `
+      <tr>
+        <td>
+          <div><strong>${esc(job?.name || "Job")}</strong></div>
+          ${materialLine}
+        </td>
+        <td>${formatDate(job?.completedAtISO)}</td>
+        <td>${formatHours(actualHours)} / ${formatHours(estHours)}</td>
+        <td>${esc(statusLabel)}${statusDetail}</td>
+        <td>${formatCurrency(gainLoss)}</td>
+        <td>${noteDisplay}</td>
+      </tr>
+    `;
+  }).join("");
+  const completedTable = completedSorted.length
+    ? `
+      <div class="past-jobs-summary">
+        <div><span class="label">Jobs logged</span><span>${completedSorted.length}</span></div>
+        <div><span class="label">Total impact</span><span>${formatCurrency(completedStats.total)}</span></div>
+        <div><span class="label">Avg per job</span><span>${formatCurrency(completedAverage)}</span></div>
+      </div>
+      <table class="past-jobs-table">
+        <thead>
+          <tr><th>Job</th><th>Completed</th><th>Actual vs estimate</th><th>Status</th><th>Cost impact</th><th>Note</th></tr>
+        </thead>
+        <tbody>${completedRows}</tbody>
+      </table>
+    `
+    : `<p class="small muted">Mark jobs complete to build a history of past cutting work.</p>`;
   const rows = cuttingJobs.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileLinks = jobFiles.length
-      ? `<div class="job-files">${jobFiles.map((f, idx) => {
+      ? `<ul class="job-file-pill-list">${jobFiles.map((f, idx) => {
           const safeName = f.name || `file_${idx+1}`;
           const href = f.dataUrl || f.url || "";
           if (!href) return "";
-          return `<a href="${href}" download="${safeName}" class="job-file-link">📎 ${safeName}</a>`;
-        }).filter(Boolean).join("<br>")}</div>`
-      : "";
+          return `<li><a href="${href}" download="${safeName}" class="job-file-pill">${safeName}</a></li>`;
+        }).filter(Boolean).join("")}</ul>`
+      : `<p class="small muted">No files attached. Edit the job to add files.</p>`;
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
@@ -971,70 +1059,124 @@ function viewJobs(){
     const dueVal    = dueDate ? ymd(dueDate) : (j.dueISO || "");
 
     if (!editing){
-      // NORMAL ROW (with Log button UNDER the job name)
-      return `<tr data-job-row="${j.id}">
-        <td>
-          <div><strong>${j.name}</strong></div>
-          <div class="small muted">${startTxt} → ${dueTxt}</div>
-          <div class="job-actions" style="margin-top:6px">
-            <button data-log-job="${j.id}">Log</button>
-          </div>
-          ${fileLinks}
-        </td>
-        <td>${j.estimateHours} hrs</td>
-        <td>${j.material || "—"}</td>
-        <td><input type="number" class="matCost" data-id="${j.id}" value="${matCost}" step="0.01" min="0"></td>
-        <td><input type="number" class="matQty" data-id="${j.id}" value="${matQty}" step="0.01" min="0"></td>
-        <td>${matTotal.toFixed(2)}</td>
-        <td>${remainHrs.toFixed(1)}</td>
-        <td>${
-          req.requiredPerDay === Infinity
-            ? `<span class="danger">Past due</span>`
-            : `${needPerDay} hr/day`
-        }</td>
-        <td>
-          <div><span style="${moneyStyle}">${moneySign}$${moneyAbs}</span></div>
-          <div class="small muted">${efficiencyDetail}</div>
-        </td>
-        <td>
-          <!-- Hidden placeholder prevents renderJobs() from injecting a duplicate Log button -->
-          <span data-log-job="${j.id}" style="display:none"></span>
-          <button data-edit-job="${j.id}">Edit</button>
-          <button class="danger" data-remove-job="${j.id}">Remove</button>
-        </td>
-      </tr>`;
+      // NORMAL ROW WITH SUMMARY + DETAILS
+      const needLabel = req.requiredPerDay === Infinity
+        ? `<span class="job-chip danger">Past due</span>`
+        : `${needPerDay} hr/day`;
+      const efficiencySummaryShort = nearPace ? statusLabel : `${statusLabel}${statusDetail}`;
+      return `
+        <tr data-job-row="${j.id}" class="job-row">
+          <td class="job-cell job-cell-main">
+            <div class="job-title-group">
+              <strong>${j.name}</strong>
+              <span class="job-dates small muted">${startTxt} → ${dueTxt}</span>
+            </div>
+            <div class="job-material-label small muted">Material: ${j.material || "—"}</div>
+          </td>
+          <td class="job-cell job-cell-materials">
+            <div class="job-metric">
+              <span class="job-metric-label">Cost / unit</span>
+              <input type="number" class="matCost" data-id="${j.id}" value="${matCost}" step="0.01" min="0">
+            </div>
+            <div class="job-metric">
+              <span class="job-metric-label">Quantity</span>
+              <input type="number" class="matQty" data-id="${j.id}" value="${matQty}" step="0.01" min="0">
+            </div>
+            <div class="job-metric job-metric-total">
+              <span class="job-metric-label">Material total</span>
+              <span class="job-metric-value">$${matTotal.toFixed(2)}</span>
+            </div>
+          </td>
+          <td class="job-cell job-cell-progress">
+            <div class="job-metric">
+              <span class="job-metric-label">Remaining</span>
+              <span class="job-metric-value">${remainHrs.toFixed(1)} hr</span>
+            </div>
+            <div class="job-metric">
+              <span class="job-metric-label">Needed / day</span>
+              <span class="job-metric-value">${needLabel}</span>
+            </div>
+            <div class="job-inline-actions">
+              <button data-log-job="${j.id}">Log time</button>
+            </div>
+          </td>
+          <td class="job-cell job-cell-efficiency">
+            <div class="job-metric">
+              <span class="job-metric-label">Status</span>
+              <span class="job-metric-value">${efficiencySummaryShort}</span>
+            </div>
+            <div class="job-metric">
+              <span class="job-metric-label">Projected impact</span>
+              <span class="job-metric-value" style="${moneyStyle}">${moneySign}$${moneyAbs}</span>
+            </div>
+          </td>
+          <td class="job-cell job-cell-actions">
+            <button data-edit-job="${j.id}">Edit</button>
+            <button data-complete-job="${j.id}">Mark complete</button>
+            <button class="danger" data-remove-job="${j.id}">Remove</button>
+            <span data-log-job="${j.id}" style="display:none"></span>
+          </td>
+        </tr>
+        <tr class="job-detail-row">
+          <td colspan="5">
+            <div class="job-detail-card">
+              <div class="job-detail-note">
+                <label class="job-detail-label" for="jobNote_${j.id}">Notes</label>
+                <textarea id="jobNote_${j.id}" data-job-note="${j.id}" rows="2" placeholder="Add a note…">${textEsc(j.notes || "")}</textarea>
+              </div>
+              <div class="job-detail-meta">
+                <div class="job-detail-efficiency small muted">${efficiencyDetail}</div>
+                <div class="job-detail-files">
+                  <span class="job-detail-label">Files</span>
+                  ${fileLinks}
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>`;
     } else {
       // EDIT ROW
-      return `<tr data-job-row="${j.id}">
-        <td><input type="text" data-j="name" data-id="${j.id}" value="${j.name}"></td>
-        <td><input type="number" min="1" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></td>
-        <td><input type="text" data-j="material" data-id="${j.id}" value="${j.material||""}"></td>
-        <td colspan="2">
-          Start: <input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}">
-          Due:   <input type="date" data-j="dueISO"   data-id="${j.id}" value="${dueVal}">
-        </td>
-        <td>${matTotal.toFixed(2)}</td>
-        <td colspan="3">
-          <div class="small muted">${startTxt} → ${dueTxt}</div>
-          <textarea data-j="notes" data-id="${j.id}" rows="2" placeholder="Notes...">${j.notes||""}</textarea>
-          <div class="job-edit-files">
-            <button type="button" data-upload-job="${j.id}">Add Files</button>
-            <input type="file" data-job-file-input="${j.id}" multiple style="display:none">
-            <ul class="job-file-list">
-              ${jobFiles.length ? jobFiles.map((f, idx)=>{
-                const safeName = f.name || `file_${idx+1}`;
-                const href = f.dataUrl || f.url || "";
-                const link = href ? `<a href="${href}" download="${safeName}">${safeName}</a>` : safeName;
-                return `<li>${link} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
-              }).join("") : `<li class=\"muted\">No files attached</li>`}
-            </ul>
-          </div>
-        </td>
-        <td>
-          <button data-save-job="${j.id}">Save</button>
-          <button class="danger" data-cancel-job="${j.id}">Cancel</button>
-        </td>
-      </tr>`;
+      return `
+        <tr data-job-row="${j.id}" class="job-row editing">
+          <td colspan="5">
+            <div class="job-edit-card">
+              <div class="job-edit-grid">
+                <label>Job name<input type="text" data-j="name" data-id="${j.id}" value="${j.name}"></label>
+                <label>Estimate (hrs)<input type="number" min="1" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></label>
+                <label>Material<input type="text" data-j="material" data-id="${j.id}" value="${j.material||""}"></label>
+                <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
+                <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
+              </div>
+              <div class="job-edit-summary">
+                <div class="job-metric">
+                  <span class="job-metric-label">Material total</span>
+                  <span class="job-metric-value">$${matTotal.toFixed(2)}</span>
+                </div>
+                <div class="job-metric">
+                  <span class="job-metric-label">Schedule</span>
+                  <span class="job-metric-value small muted">${startTxt} → ${dueTxt}</span>
+                </div>
+              </div>
+              <label class="job-edit-note">Notes<textarea data-j="notes" data-id="${j.id}" rows="3" placeholder="Notes...">${j.notes||""}</textarea></label>
+              <div class="job-edit-files">
+                <button type="button" data-upload-job="${j.id}">Add Files</button>
+                <input type="file" data-job-file-input="${j.id}" multiple style="display:none">
+                <ul class="job-file-list">
+                  ${jobFiles.length ? jobFiles.map((f, idx)=>{
+                    const safeName = f.name || `file_${idx+1}`;
+                    const href = f.dataUrl || f.url || "";
+                    const link = href ? `<a href="${href}" download="${safeName}">${safeName}</a>` : safeName;
+                    return `<li>${link} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
+                  }).join("") : `<li class=\"muted\">No files attached</li>`}
+                </ul>
+              </div>
+              <div class="job-edit-actions">
+                <button data-save-job="${j.id}">Save</button>
+                <button class="danger" data-cancel-job="${j.id}">Cancel</button>
+              </div>
+            </div>
+          </td>
+        </tr>`;
     }
   }).join("");
 
@@ -1053,24 +1195,23 @@ function viewJobs(){
       </form>
       <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
 
-      <table>
+      <table class="job-table">
         <thead>
           <tr>
             <th>Job</th>
-            <th>Estimate (hrs)</th>
-            <th>Material</th>
-            <th>Material Cost ($)</th>
-            <th>Material Qty</th>
-            <th>Total $</th>
-            <th>Hours Remaining</th>
-            <th>Needed / Day</th>
-            <th>Estimated Cost (Calculated)</th>
+            <th>Materials</th>
+            <th>Progress</th>
+            <th>Efficiency</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
-      <p class="small">Material fields are editable. Changes save automatically.</p>
+      <p class="small muted">Material cost and quantity update immediately when changed.</p>
+    </div>
+    <div class="block past-jobs-block">
+      <h3>Past Cutting Jobs</h3>
+      ${completedTable}
     </div>
   </div>`;
 }
