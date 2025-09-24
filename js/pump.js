@@ -266,13 +266,22 @@ function renderPumpWidget(){
   if (canvas && wrap){
     const rect = wrap.getBoundingClientRect();
     const availableWidth = rect.width || wrap.clientWidth || canvas.width || 320;
-    const targetWidth = Math.max(320, Math.floor(availableWidth));
-    if (targetWidth && canvas.width !== targetWidth) canvas.width = targetWidth;
+    let targetWidth = Math.max(320, Math.floor(availableWidth));
     const expanded = !!window.pumpChartExpanded;
-    let targetHeight = expanded ? Math.max(320, Math.floor((window.innerHeight || 720) * 0.6)) : 240;
+    const idealHeight = Math.round(targetWidth * 0.75); // 4:3 aspect ratio
+    let targetHeight = expanded ? Math.max(320, idealHeight) : Math.max(240, idealHeight);
     if (expanded && rect.height){
-      targetHeight = Math.max(targetHeight, Math.floor(rect.height - 96));
+      const paddingAllowance = 120; // top/bottom padding & controls inside expanded wrap
+      const availableHeight = Math.floor(rect.height - paddingAllowance);
+      if (availableHeight > 0 && availableHeight < targetHeight){
+        targetHeight = Math.max(320, availableHeight);
+        const widthFromHeight = Math.round(targetHeight * (4 / 3));
+        if (widthFromHeight > 0 && widthFromHeight < targetWidth){
+          targetWidth = widthFromHeight;
+        }
+      }
     }
+    if (canvas.width !== targetWidth) canvas.width = targetWidth;
     if (canvas.height !== targetHeight) canvas.height = targetHeight;
   }
   const rangeSelect = document.getElementById("pumpRange");
