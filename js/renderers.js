@@ -1155,7 +1155,7 @@ function moveNodeSafely(kind, nodeId, target){
     return null;
   }
 
-  function gatherSiblings(catId, parentId, excludeId){
+  function gatherTaskSiblings(catId, parentId, excludeId){
     const keyCat = String(catId ?? "");
     const keyParent = String(parentId ?? "");
     const excludeKey = excludeId != null ? String(excludeId) : null;
@@ -1173,8 +1173,50 @@ function moveNodeSafely(kind, nodeId, target){
     return siblings;
   }
 
+  function gatherCategorySiblings(parentId, excludeId){
+    const keyParent = String(parentId ?? "");
+    const excludeKey = excludeId != null ? String(excludeId) : null;
+    return window.settingsFolders
+      .filter(f => String(f?.parent ?? "") === keyParent)
+      .filter(f => excludeKey == null || String(f.id) !== excludeKey);
+  }
+
+  function gatherMixedSiblings(catId, excludeTaskId = null, excludeCatId = null){
+    const tasks = gatherTaskSiblings(catId, null, excludeTaskId)
+      .map(task => ({ kind: "task", node: task }));
+    const folders = gatherCategorySiblings(catId, excludeCatId)
+      .map(cat => ({ kind: "category", node: cat }));
+    return tasks.concat(folders);
+  }
+
+  function normalizeMixedOrder(catId){
+    const combined = gatherMixedSiblings(catId, null, null)
+      .sort((a,b)=>{
+        const orderA = Number(a.node?.order || 0);
+        const orderB = Number(b.node?.order || 0);
+        if (orderB !== orderA) return orderB - orderA;
+        const nameA = a.kind === "task" ? String(a.node?.name || "") : String(a.node?.name || "");
+        const nameB = b.kind === "task" ? String(b.node?.name || "") : String(b.node?.name || "");
+        return nameA.localeCompare(nameB);
+      });
+    if (!combined.length) return;
+    let n = combined.length;
+    for (const item of combined){
+      if (item.node) item.node.order = n--;
+    }
+    const maxOrder = combined.reduce((max, item)=>{
+      const val = Number(item.node?.order || 0);
+      return Number.isFinite(val) && val > max ? val : max;
+    }, 0);
+    window._maintOrderCounter = Math.max(Number(window._maintOrderCounter)||0, maxOrder);
+  }
+
   function normalizeTaskOrder(catId, parentId){
-    const siblings = gatherSiblings(catId, parentId, null)
+    if (parentId == null){
+      normalizeMixedOrder(catId);
+      return;
+    }
+    const siblings = gatherTaskSiblings(catId, parentId, null)
       .sort((a,b)=> (Number(b.order||0) - Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
     let n = siblings.length;
     for (const task of siblings){ task.order = n--; }
@@ -1183,8 +1225,32 @@ function moveNodeSafely(kind, nodeId, target){
     }
   }
 
+  function nextMixedOrder(catId, excludeTaskId, excludeCatId, place){
+    const combined = gatherMixedSiblings(catId, excludeTaskId, excludeCatId);
+    if (!combined.length) return 1;
+    if (place === "end"){
+      let min = Infinity;
+      for (const item of combined){
+        const val = Number(item.node?.order || 0);
+        if (val < min) min = val;
+      }
+      if (!isFinite(min)) min = 0;
+      return min - 1;
+    }
+    let max = -Infinity;
+    for (const item of combined){
+      const val = Number(item.node?.order || 0);
+      if (val > max) max = val;
+    }
+    if (!isFinite(max)) max = 0;
+    return max + 1;
+  }
+
   function nextTaskOrder(catId, parentId, excludeId, place){
-    const siblings = gatherSiblings(catId, parentId, excludeId);
+    if (parentId == null){
+      return nextMixedOrder(catId, excludeId, null, place);
+    }
+    const siblings = gatherTaskSiblings(catId, parentId, excludeId);
     if (!siblings.length){
       return 1;
     }
@@ -1226,11 +1292,7 @@ function moveNodeSafely(kind, nodeId, target){
   const findCat = (id)=> window.settingsFolders.find(f=>String(f.id)===String(id)) || null;
 
   function normalizeFolderOrder(parentId){
-    const sibs = window.settingsFolders
-      .filter(f => String(f.parent||"") === String(parentId||""))
-      .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
-    let n = sibs.length;
-    for (const f of sibs){ f.order = n--; }
+    normalizeMixedOrder(parentId ?? null);
   }
 
   // ---------- TASK MOVES ----------
@@ -1318,28 +1380,7 @@ function moveNodeSafely(kind, nodeId, target){
       if (parent != null && !findCat(parent)) return false;
 
       const place = target && target.position === "end" ? "end" : "start";
-      const nextOrder = (function nextFolderOrder(parentId, excludeId, pos){
-        const siblings = window.settingsFolders
-          .filter(f => String(f.parent||"") === String(parentId||""))
-          .filter(f => String(f.id) !== String(excludeId));
-        if (!siblings.length) return 1;
-        if (pos === "end"){
-          let min = Infinity;
-          for (const sib of siblings){
-            const val = Number(sib.order) || 0;
-            if (val < min) min = val;
-          }
-          if (!isFinite(min)) min = 0;
-          return min - 1;
-        }
-        let max = -Infinity;
-        for (const sib of siblings){
-          const val = Number(sib.order) || 0;
-          if (val > max) max = val;
-        }
-        if (!isFinite(max)) max = 0;
-        return max + 1;
-      })(parent ?? null, cat.id, place);
+      const nextOrder = nextMixedOrder(parent ?? null, null, cat.id, place);
 
       cat.parent = parent || null;
       cat.order  = nextOrder;
@@ -1367,6 +1408,19 @@ function moveNodeSafely(kind, nodeId, target){
       return true;
     }
 
+    if (target && target.beforeTask && target.beforeTask.id){
+      const dest = findTaskMeta(target.beforeTask.id);
+      if (!dest || dest.task.parentTask != null) return false;
+
+      cat.parent = dest.task.cat ?? null;
+      cat.order = (Number(dest.task.order)||0) + 0.5;
+      normalizeFolderOrder(cat.parent);
+      normalizeFolderOrder(originalParent);
+
+      if (typeof saveCloudDebounced === "function") try{ saveCloudDebounced(); }catch(_){}
+      return true;
+    }
+
     return false;
   }
 
@@ -1382,6 +1436,12 @@ function renderSettings(){
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
   window.tasksInterval   = Array.isArray(window.tasksInterval)   ? window.tasksInterval   : [];
   window.tasksAsReq      = Array.isArray(window.tasksAsReq)      ? window.tasksAsReq      : [];
+  if (!(window.settingsOpenFolders instanceof Set)) window.settingsOpenFolders = new Set();
+  const openFolderState = window.settingsOpenFolders;
+  const validFolderIds = new Set(window.settingsFolders.map(f => String(f.id)));
+  for (const id of Array.from(openFolderState)){
+    if (!validFolderIds.has(id)) openFolderState.delete(id);
+  }
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
   // --- one-time hydration for legacy/remote tasks (per-list) ---
@@ -1778,58 +1838,94 @@ function renderSettings(){
     `;
   }
 
-  function renderCategoryList(parentId){
-    const folders = childrenFolders(parentId);
-    const tailLabel = "Move category here";
-    if (!folders.length){
-      return `<div class="dz dz-line dz-cat-tail" data-drop-cat-tail="1" data-tail-parent-cat="${String(parentId ?? "")}" data-label="${escapeHtml(tailLabel)}"></div>`;
+  function renderMixedList(catId, options = {}){
+    const {
+      taskGapLabel = "Move item here",
+      tailLabel = "Move item here",
+      catGapLabel = "Move category here",
+      emptyMessage = "",
+      emptyClass = "empty",
+      emptyAttrs = ""
+    } = options;
+    const catKey = String(catId ?? "");
+    const taskEntriesForCat = topByCat.get(catKey) || [];
+    const folders = childrenFolders(catId);
+    const nodes = [];
+
+    for (const entry of taskEntriesForCat){
+      nodes.push({ kind: "task", order: Number(entry.task?.order || 0), entry });
     }
-    const parts = [];
     for (const folder of folders){
       if (searchActive && !categoryHasVisibleContent(folder.id)) continue;
-      parts.push(`<div class="dz dz-line dz-cat-gap" data-drop-before-cat="${folder.id}" data-label="${escapeHtml(tailLabel)}"></div>`);
-      parts.push(renderFolder(folder));
+      nodes.push({ kind: "category", order: Number(folder.order || 0), folder });
     }
-    parts.push(`<div class="dz dz-line dz-cat-tail" data-drop-cat-tail="1" data-tail-parent-cat="${String(parentId ?? "")}" data-label="${escapeHtml(tailLabel)}"></div>`);
+
+    nodes.sort((a,b)=>{
+      const orderDiff = Number(b.order || 0) - Number(a.order || 0);
+      if (orderDiff !== 0) return orderDiff;
+      const nameA = a.kind === "task" ? String(a.entry?.task?.name || "") : String(a.folder?.name || "");
+      const nameB = b.kind === "task" ? String(b.entry?.task?.name || "") : String(b.folder?.name || "");
+      return nameA.localeCompare(nameB);
+    });
+
+    const parts = [];
+    if (!nodes.length && emptyMessage){
+      const attr = emptyAttrs ? ` ${emptyAttrs}` : "";
+      parts.push(`<div class="${emptyClass}"${attr}>${escapeHtml(emptyMessage)}</div>`);
+    }
+
+    const safeTaskGap = escapeHtml(taskGapLabel);
+    const safeCatGap = escapeHtml(catGapLabel);
+    const safeTail = escapeHtml(tailLabel);
+    const tailPosition = nodes.length ? "end" : "start";
+
+    for (const node of nodes){
+      if (node.kind === "task" && node.entry){
+        parts.push(`<div class="dz dz-line dz-task-gap" data-drop-before-task="${node.entry.task.id}" data-label="${safeTaskGap}" data-allow-category="1"></div>`);
+        parts.push(renderTask(node.entry));
+      }else if (node.kind === "category" && node.folder){
+        parts.push(`<div class="dz dz-line dz-cat-gap" data-drop-before-cat="${node.folder.id}" data-label="${safeCatGap}"></div>`);
+        parts.push(renderFolder(node.folder));
+      }
+    }
+
+    parts.push(`<div class="dz dz-line dz-mixed-tail" data-drop-task-tail="1" data-drop-cat-tail="1" data-tail-parent="" data-tail-cat="${String(catId ?? "")}" data-tail-parent-cat="${String(catId ?? "")}" data-label="${safeTail}" data-allow-category="1" data-tail-position="${tailPosition}"></div>`);
+
     return parts.join("");
   }
 
   function renderFolder(folder){
     ensureIdsOrder(folder);
-    const taskEntriesForFolder = topByCat.get(String(folder.id)) || [];
+    const folderId = String(folder.id);
+    const forceOpen = searchActive && categoryHasVisibleContent(folderId);
+    const isOpen = forceOpen || openFolderState.has(folderId);
+    const openAttr = isOpen ? " open" : "";
     const folderEmptyMsg = searchActive
       ? "No tasks in this category match your search."
       : "No tasks in this category yet.";
-    const tasksHtml = renderTaskList(taskEntriesForFolder, {
-      parentTaskId: null,
-      catId: folder.id,
-      tailLabel: "Move task here",
-      gapLabel: "Move task here",
+    const mixedHtml = renderMixedList(folder.id, {
+      taskGapLabel: "Move item here",
+      tailLabel: "Move item here",
+      catGapLabel: "Move category here",
       emptyMessage: folderEmptyMsg,
       emptyClass: "empty"
     });
     return `
-      <details class="cat" data-cat-id="${folder.id}" open>
+      <details class="cat" data-cat-id="${folder.id}"${openAttr}>
         <summary draggable="true"><span class="task-name">${escapeHtml(folder.name)}</span></summary>
         <div class="dz" data-drop-into-cat="${folder.id}" data-label="Move task here"></div>
         <div class="children">
-          ${renderCategoryList(folder.id)}
-          ${tasksHtml}
+          ${mixedHtml}
         </div>
       </details>
     `;
   }
 
-  const rootTaskEntries = topByCat.get("") || [];
-  const rootTasks = renderTaskList(rootTaskEntries, {
-    parentTaskId: null,
-    catId: null,
-    tailLabel: "Move task here",
-    gapLabel: "Move task here",
-    emptyMessage: "",
-    emptyClass: "empty"
+  const mixedRoot = renderMixedList(null, {
+    taskGapLabel: "Move item here",
+    tailLabel: "Move item here",
+    catGapLabel: "Move category here"
   });
-  const folderHtml = renderCategoryList(null);
 
   const flattenedFolders = [];
   (function walk(parent, prefix){
@@ -1861,8 +1957,7 @@ function renderSettings(){
         </div>
         <div class="tree" id="tree">
           <div class="dz" data-drop-root="1" data-label="Move to top level"></div>
-          ${rootTasks}
-          ${folderHtml}
+          ${mixedRoot}
           ${searchEmpty ? `<div class="empty">No maintenance tasks match your search.</div>` : ``}
           ${(window.settingsFolders.length === 0 && window.tasksInterval.length + window.tasksAsReq.length === 0) ? `<div class="empty">No tasks yet. Add one to get started.</div>` : ``}
         </div>
@@ -1906,6 +2001,18 @@ function renderSettings(){
   const conditionRow = form?.querySelector('[data-form-condition]');
   const searchInput = document.getElementById("maintenanceSearch");
   const searchClear = document.getElementById("maintenanceSearchClear");
+
+  tree?.querySelectorAll("details.cat").forEach(det => {
+    det.addEventListener("toggle", ()=>{
+      const catId = det.getAttribute("data-cat-id");
+      if (!catId) return;
+      if (det.open){
+        openFolderState.add(catId);
+      }else{
+        openFolderState.delete(catId);
+      }
+    });
+  });
 
   if (searchInput){
     searchInput.addEventListener("input", ()=>{
@@ -2172,10 +2279,17 @@ function renderSettings(){
   tree?.addEventListener('dragover',(e)=>{
     const dz = e.target.closest('.dz');
     if (dz){
+      const allowCatHere = dz.getAttribute('data-allow-category') === '1';
       if ((dz.hasAttribute('data-drop-before-task') || dz.hasAttribute('data-drop-task-tail') || dz.hasAttribute('data-drop-into-task')) && DRAG.kind === 'task'){
         allow(e); dz.classList.add('dragover'); return;
       }
+      if (dz.hasAttribute('data-drop-before-task') && DRAG.kind === 'category' && allowCatHere){
+        allow(e); dz.classList.add('dragover'); return;
+      }
       if ((dz.hasAttribute('data-drop-before-cat') || dz.hasAttribute('data-drop-cat-tail')) && DRAG.kind === 'category'){
+        allow(e); dz.classList.add('dragover'); return;
+      }
+      if (dz.hasAttribute('data-drop-task-tail') && DRAG.kind === 'category' && allowCatHere){
         allow(e); dz.classList.add('dragover'); return;
       }
       if (dz.hasAttribute('data-drop-into-cat') && DRAG.kind === 'task'){
@@ -2239,15 +2353,17 @@ function renderSettings(){
       if (dzTaskTail){
         const parentAttr = dzTaskTail.getAttribute('data-tail-parent') || '';
         const catAttr = dzTaskTail.getAttribute('data-tail-cat') || '';
+        const tailPosAttr = dzTaskTail.getAttribute('data-tail-position') || 'end';
+        const tailPosition = tailPosAttr === 'start' ? 'start' : 'end';
         const parentId = parentAttr === '' ? null : parentAttr;
         const catId = catAttr === '' ? null : catAttr;
         if (parentId){
-          if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: 'end' })){
+          if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoTask: parentId, position: tailPosition })){
             persist();
             renderSettings();
           }
         }else{
-          if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: 'end' })){
+          if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: catId, position: tailPosition })){
             persist();
             renderSettings();
           }
@@ -2255,7 +2371,7 @@ function renderSettings(){
         return;
       }
       if (dzRoot){
-        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: null, position: 'end' })){
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('task', id, { intoCat: null, position: 'start' })){
           persist();
           renderSettings();
         }
@@ -2296,6 +2412,15 @@ function renderSettings(){
     }
 
     if (kind === 'category' && id){
+      if (dzBeforeTask){
+        const beforeId = dzBeforeTask.getAttribute('data-drop-before-task');
+        const allowCat = dzBeforeTask.getAttribute('data-allow-category') === '1';
+        if (allowCat && beforeId && typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { beforeTask: { id: beforeId } })){
+          persist();
+          renderSettings();
+        }
+        return;
+      }
       if (dzBeforeCat){
         const beforeId = dzBeforeCat.getAttribute('data-drop-before-cat');
         if (beforeId && typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { beforeCat: { id: beforeId } })){
@@ -2304,17 +2429,33 @@ function renderSettings(){
         }
         return;
       }
+      if (dzTaskTail){
+        const allowCat = dzTaskTail.getAttribute('data-allow-category') === '1';
+        if (allowCat){
+          const parentAttr = dzTaskTail.getAttribute('data-tail-parent-cat') || '';
+          const parentId = parentAttr === '' ? null : parentAttr;
+          const tailPosAttr = dzTaskTail.getAttribute('data-tail-position') || 'end';
+          const tailPosition = tailPosAttr === 'start' ? 'start' : 'end';
+          if (typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { intoCat: parentId, position: tailPosition })){
+            persist();
+            renderSettings();
+          }
+        }
+        return;
+      }
       if (dzCatTail){
         const parentAttr = dzCatTail.getAttribute('data-tail-parent-cat') || '';
         const parentId = parentAttr === '' ? null : parentAttr;
-        if (typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { intoCat: parentId, position: 'end' })){
+        const tailPosAttr = dzCatTail.getAttribute('data-tail-position') || 'end';
+        const tailPosition = tailPosAttr === 'start' ? 'start' : 'end';
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { intoCat: parentId, position: tailPosition })){
           persist();
           renderSettings();
         }
         return;
       }
       if (dzRoot){
-        if (typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { intoCat: null, position: 'end' })){
+        if (typeof moveNodeSafely === 'function' && moveNodeSafely('category', id, { intoCat: null, position: 'start' })){
           persist();
           renderSettings();
         }
