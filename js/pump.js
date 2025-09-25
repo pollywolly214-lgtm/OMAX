@@ -4,6 +4,7 @@ window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
 const PUMP_BASE_FONT_SCALE = 3;
+const PUMP_FONT_ADJUST = 1.1;
 const pumpViewportState = { bound:false, lastResponsiveScale:1 };
 
 function pumpGetViewportScale(){
@@ -363,7 +364,7 @@ function drawPumpChart(canvas, rangeValue){
   ctx.fillRect(0,0,W,H);
   const fontScale = pumpComputeFontScale();
   const scaled = (value)=> Math.max(1, Math.round(value * fontScale));
-  const fontPx = (size)=> `${Math.max(1, Math.round(size * fontScale))}px sans-serif`;
+  const fontPx = (size)=> `${Math.max(1, Math.round(size * fontScale * PUMP_FONT_ADJUST))}px sans-serif`;
   ctx.font = fontPx(12);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";

@@ -7,6 +7,7 @@
 .pump-stats { margin-top:6px; display:grid; gap:4px; }
 .pump-stats .lbl { color:#666; display:inline-block; width:80px; }
 .pump-chart-block { display:flex; flex-direction:column; gap:12px; }
+.dashboard-window > .pump-chart-block { overflow:visible; }
 .pump-chart-card { display:flex; flex-direction:column; gap:12px; height:100%; }
 .pump-chart-header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 .pump-chart-toolbar { display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap; }
