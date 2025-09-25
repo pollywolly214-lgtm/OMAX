@@ -344,8 +344,8 @@
         if (typeof closeCostSettingsMenu === "function"){
           try { closeCostSettingsMenu(); } catch (_){}
         }else{
-          const menu = document.getElementById("costSettingsMenu");
-          const toggle = document.getElementById("costSettingsToggle");
+          const menu = document.getElementById("dashboardSettingsMenu");
+          const toggle = document.getElementById("dashboardSettingsToggle");
           if (menu){ menu.hidden = true; }
           if (toggle){
             toggle.setAttribute("aria-expanded", "false");

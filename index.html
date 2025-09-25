@@ -37,6 +37,24 @@
           alt="C &amp; M Concrete Precast and Construction logo"
         />
       </div>
+      <div class="header-actions">
+        <div class="dashboard-settings" id="dashboardSettings">
+          <button type="button" class="dashboard-settings-btn" id="dashboardSettingsToggle" aria-haspopup="true" aria-expanded="false" aria-controls="dashboardSettingsMenu" aria-label="Workspace settings" title="Workspace settings">
+            <span aria-hidden="true">⚙</span>
+          </button>
+          <div class="dashboard-settings-menu" id="dashboardSettingsMenu" role="menu" hidden>
+            <div class="dashboard-settings-section" data-app-settings-context="dashboard">
+              <button type="button" class="dashboard-settings-item" id="dashboardEditToggle" role="menuitemcheckbox" aria-checked="false" aria-pressed="false" data-settings-focus>Edit dashboard layout</button>
+            </div>
+            <div class="dashboard-settings-section" data-app-settings-context="costs">
+              <button type="button" class="dashboard-settings-item" id="costTrainerLaunch" role="menuitem" data-settings-focus>Launch cost guided tour</button>
+              <button type="button" class="dashboard-settings-item" id="costEditToggle" role="menuitemcheckbox" aria-checked="false" aria-pressed="false">Edit cost layout</button>
+            </div>
+            <div class="dashboard-settings-separator" role="separator"></div>
+            <button type="button" class="dashboard-settings-item dashboard-settings-item-danger" id="btnClearAllData" data-clear-all="1" role="menuitem" title="Reset all maintenance data">🧹 Clear All Data</button>
+          </div>
+        </div>
+      </div>
     </div>
     <nav class="nav">
       <a href="#dashboard"  id="tab-dashboard"  class="active">Dashboard</a>
