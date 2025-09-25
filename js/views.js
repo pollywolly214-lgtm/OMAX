@@ -1281,7 +1281,7 @@ function filterInventoryItems(term){
 
 function inventoryRowsHTML(list){
   if (!Array.isArray(list) || !list.length){
-    return `<tr><td colspan="6" class="muted">No inventory items match your search.</td></tr>`;
+    return `<tr><td colspan="8" class="muted">No inventory items match your search.</td></tr>`;
   }
   return list.map(i => {
     const priceVal = i.price != null && i.price !== "" ? Number(i.price) : "";
@@ -1295,7 +1295,10 @@ function inventoryRowsHTML(list){
       <td>${i.link ? `<a href="${i.link}" target="_blank" rel="noopener">link</a>` : "—"}</td>
       <td><input type="number" step="0.01" min="0" data-inv="price" data-id="${i.id}" value="${priceDisplay}"></td>
       <td><input type="text" data-inv="note" data-id="${i.id}" value="${i.note||""}"></td>
-      <td><button type="button" class="inventory-add" data-order-add="${i.id}">Add to order request</button></td>
+      <td class="inventory-actions">
+        <button type="button" class="inventory-add" data-order-add="${i.id}">Add to order request</button>
+        <button type="button" class="inventory-delete" data-inventory-delete="${i.id}">Delete</button>
+      </td>
     </tr>`;
   }).join("");
 }
@@ -1312,15 +1315,53 @@ function viewInventory(){
   <div class="container">
     <div class="block" style="grid-column:1 / -1">
       <h3>Inventory</h3>
-      <div class="mini-form" style="margin-bottom:8px;">
-        <input type="search" id="inventorySearch" placeholder="Search items, part numbers, notes, or links" value="${searchValue}">
-        <button type="button" id="inventorySearchClear">Clear</button>
+      <div class="inventory-toolbar">
+        <button type="button" class="inventory-add-trigger" id="inventoryAddBtn">+ Add inventory item</button>
+        <div class="inventory-search mini-form">
+          <input type="search" id="inventorySearch" placeholder="Search items, part numbers, notes, or links" value="${searchValue}">
+          <button type="button" id="inventorySearchClear">Clear</button>
+        </div>
       </div>
-      <div class="small muted" style="margin-bottom:8px;">Results update as you type.</div>
+      <div class="small muted inventory-hint">Results update as you type.</div>
       <table>
-        <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th></th></tr></thead>
+        <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
         <tbody data-inventory-rows>${rows}</tbody>
       </table>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="inventoryAddModal" hidden>
+    <div class="modal-card inventory-modal-card">
+      <button type="button" class="modal-close" data-close>&times;</button>
+
+      <section class="inventory-modal-step" data-step="prompt">
+        <h4>Add inventory item</h4>
+        <p>Do you want to add this to the maintenance settings page too?</p>
+        <div class="modal-actions inventory-modal-actions">
+          <button type="button" class="primary" data-choose="maintenance">Yes, open maintenance</button>
+          <button type="button" class="secondary" data-choose="inventory">No, inventory only</button>
+        </div>
+      </section>
+
+      <section class="inventory-modal-step" data-step="form" hidden>
+        <h4>Inventory details</h4>
+        <p class="small muted" data-maintenance-note hidden>After saving, you&rsquo;ll be redirected to Maintenance Settings to finish adding this part.</p>
+        <form id="inventoryAddForm" class="modal-form">
+          <div class="modal-grid">
+            <label>Item name<input name="inventoryName" required placeholder="Item"></label>
+            <label>Quantity<input type="number" min="0" step="1" name="inventoryQty" value="1"></label>
+            <label>Unit<input name="inventoryUnit" placeholder="pcs" value="pcs"></label>
+            <label>Part #<input name="inventoryPN" placeholder="Part number"></label>
+            <label>Store link<input type="url" name="inventoryLink" placeholder="https://..."></label>
+            <label>Price ($)<input type="number" min="0" step="0.01" name="inventoryPrice" placeholder="optional"></label>
+            <label>Notes<input name="inventoryNote" placeholder="Optional note"></label>
+          </div>
+          <div class="modal-actions inventory-modal-actions">
+            <button type="button" class="secondary" data-back>Back</button>
+            <button type="submit" class="primary">Add item</button>
+          </div>
+        </form>
+      </section>
     </div>
   </div>`;
 }
