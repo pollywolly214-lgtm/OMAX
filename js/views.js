@@ -1246,13 +1246,13 @@ function viewJobs(){
         : `<div id="jobNote_${j.id}" class="job-note-display job-note-empty" data-requires-edit="${j.id}">Add a note…</div>`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
-          <td class="job-col job-col-main" data-requires-edit="${j.id}">
+          <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">
             <div class="job-main">
               <strong>${j.name}</strong>
               <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
             </div>
           </td>
-          <td class="job-col job-col-estimate" data-requires-edit="${j.id}">${estimateDisplay}</td>
+          <td class="job-col job-col-estimate job-col-locked" data-requires-edit="${j.id}">${estimateDisplay}</td>
           <td class="job-col job-col-material job-col-locked" data-requires-edit="${j.id}">${j.material || '—'}</td>
           <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">${matCostDisplay}</td>
           <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">${matQtyDisplay}</td>
