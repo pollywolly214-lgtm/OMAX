@@ -4022,6 +4022,123 @@ function resizeCostChartCanvas(canvas){
   if (canvas.height !== height) canvas.height = height;
 }
 
+const costChartAutoResizeState = {
+  observer: null,
+  layoutHandler: null,
+  pendingFrame: null,
+  observedWrap: null,
+  observedCanvas: null,
+  lastWrapWidth: null,
+  lastWrapHeight: null
+};
+
+function teardownCostChartAutoResize(){
+  const state = costChartAutoResizeState;
+  if (state.observer){
+    try { state.observer.disconnect(); }
+    catch (err){ console.warn(err); }
+  }
+  state.observer = null;
+  if (state.layoutHandler){
+    window.removeEventListener("layoutWindowResized", state.layoutHandler);
+  }
+  state.layoutHandler = null;
+  if (state.pendingFrame != null && typeof cancelAnimationFrame === "function"){
+    cancelAnimationFrame(state.pendingFrame);
+  }
+  state.pendingFrame = null;
+  state.observedWrap = null;
+  state.observedCanvas = null;
+  state.lastWrapWidth = null;
+  state.lastWrapHeight = null;
+}
+
+function scheduleCostChartAutoRedraw(redraw){
+  if (typeof redraw !== "function") return;
+  const state = costChartAutoResizeState;
+  if (state.pendingFrame != null) return;
+  state.pendingFrame = requestAnimationFrame(()=>{
+    state.pendingFrame = null;
+    try {
+      redraw();
+    } catch (err){
+      console.error(err);
+    }
+  });
+}
+
+function updateCostChartResizeSnapshot(canvas){
+  if (!canvas) return;
+  const state = costChartAutoResizeState;
+  const wrap = state.observedWrap || canvas.parentElement || null;
+  if (wrap){
+    const rect = wrap.getBoundingClientRect();
+    if (rect){
+      const width = Math.round(rect.width || 0);
+      const height = Math.round(rect.height || 0);
+      state.lastWrapWidth = isFinite(width) ? width : state.lastWrapWidth;
+      state.lastWrapHeight = isFinite(height) ? height : state.lastWrapHeight;
+    }
+  }
+}
+
+function setupCostChartAutoResize(canvas, wrap, redraw){
+  teardownCostChartAutoResize();
+  if (!canvas || typeof redraw !== "function") return;
+
+  const state = costChartAutoResizeState;
+  state.observedCanvas = canvas;
+  state.observedWrap = wrap || canvas.parentElement || null;
+
+  if (state.observedWrap && typeof ResizeObserver === "function"){
+    state.observer = new ResizeObserver((entries)=>{
+      if (!Array.isArray(entries)) return;
+      let shouldRedraw = false;
+      entries.forEach(entry => {
+        if (!entry || entry.target !== state.observedWrap) return;
+        const rect = entry.contentRect || {};
+        const width = rect && typeof rect.width === "number" ? rect.width : null;
+        const height = rect && typeof rect.height === "number" ? rect.height : null;
+        if (width != null && isFinite(width)){
+          const rounded = Math.round(width);
+          if (state.lastWrapWidth == null || Math.abs(state.lastWrapWidth - rounded) >= 1){
+            shouldRedraw = true;
+          }
+          state.lastWrapWidth = rounded;
+        }
+        if (height != null && isFinite(height)){
+          const rounded = Math.round(height);
+          if (state.lastWrapHeight == null || Math.abs(state.lastWrapHeight - rounded) >= 1){
+            shouldRedraw = true;
+          }
+          state.lastWrapHeight = rounded;
+        }
+      });
+      if (shouldRedraw){
+        scheduleCostChartAutoRedraw(redraw);
+      }
+    });
+    try {
+      state.observer.observe(state.observedWrap);
+    } catch (err){
+      console.warn(err);
+    }
+  }
+
+  state.layoutHandler = (event)=>{
+    const detail = event?.detail;
+    if (!detail) return;
+    const area = detail.area ? String(detail.area) : "";
+    if (area && area !== "cost") return;
+    const id = String(detail.id || "");
+    if (id && id !== "chart") return;
+    scheduleCostChartAutoRedraw(redraw);
+  };
+  window.addEventListener("layoutWindowResized", state.layoutHandler);
+
+  updateCostChartResizeSnapshot(canvas);
+}
+
 function setupCostInfoPanel(){
   const panel = document.getElementById("costInfoPanel");
   const openBtn = document.getElementById("costInfoOpen");
@@ -4308,11 +4425,14 @@ function renderCosts(){
         maintenance: !toggleMaint || toggleMaint.checked,
         jobs: !toggleJobs || toggleJobs.checked
       });
+      updateCostChartResizeSnapshot(canvas);
     }
     if (typeof refreshCostTrainer === "function"){
       refreshCostTrainer();
     }
   };
+
+  setupCostChartAutoResize(canvas, canvasWrap, redraw);
 
   state.onLayoutChange = redraw;
   if (state.resizeHandler){

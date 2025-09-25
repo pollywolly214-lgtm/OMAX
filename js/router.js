@@ -103,6 +103,10 @@ function route(){
   }
 
   function renderByHash(norm){
+    if (typeof teardownCostChartAutoResize === "function"){
+      try { teardownCostChartAutoResize(); }
+      catch (err){ console.warn(err); }
+    }
     if (norm === "#/settings")      { renderSettings();   return; }
     if (norm === "#/jobs")          { renderJobs();       return; }
     if (norm === "#/costs")         { renderCosts();      return; }
