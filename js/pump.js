@@ -3,7 +3,8 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
-const PUMP_BASE_FONT_SCALE = 4.1;
+const PUMP_BASE_FONT_SCALE = 4.8;
+const PUMP_FONT_WIDTH_BASE = 360;
 const pumpViewportState = { bound:false, lastResponsiveScale:1, baseScale:null, baseScaleChanged:false };
 
 function pumpResetViewportBaseline(){
@@ -59,10 +60,19 @@ function pumpGetResponsiveZoomFactor(){
   return Math.max(0.5, Math.min(2.5, ratio));
 }
 
-function pumpComputeFontScale(){
+function pumpComputeFontScale(canvas){
   const factor = pumpGetResponsiveZoomFactor();
   pumpViewportState.lastResponsiveScale = factor;
-  return PUMP_BASE_FONT_SCALE * factor;
+  let widthFactor = 1;
+  if (canvas){
+    const canvasWidth = canvas.width || canvas.offsetWidth || 0;
+    if (canvasWidth > 0){
+      const normalized = Math.max(0.5, canvasWidth / PUMP_FONT_WIDTH_BASE);
+      const eased = Math.pow(normalized, 0.5);
+      widthFactor = Math.max(0.95, Math.min(1.3, eased));
+    }
+  }
+  return PUMP_BASE_FONT_SCALE * factor * widthFactor;
 }
 
 function ensurePumpViewportWatcher(){
@@ -412,7 +422,7 @@ function drawPumpChart(canvas, rangeValue){
   ctx.clearRect(0,0,W,H);
   ctx.fillStyle = "#fff";
   ctx.fillRect(0,0,W,H);
-  const fontScale = pumpComputeFontScale();
+  const fontScale = pumpComputeFontScale(canvas);
   const scaled = (value)=> Math.max(1, Math.round(value * fontScale));
   const fontPx = (size)=> `${Math.max(1, Math.round(size * fontScale))}px sans-serif`;
   ctx.font = fontPx(12);
