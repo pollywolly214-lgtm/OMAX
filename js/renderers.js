@@ -3098,6 +3098,11 @@ function renderSettings(){
   }
 
   const persist = ()=>{
+    if (typeof setSettingsFolders === "function") {
+      try { setSettingsFolders(window.settingsFolders); } catch (err) {
+        console.warn("Failed to sync folders before save", err);
+      }
+    }
     if (typeof saveTasks === "function") { try{ saveTasks(); }catch(_){} }
     if (typeof saveCloudDebounced === "function") { try{ saveCloudDebounced(); }catch(_){} }
   };
