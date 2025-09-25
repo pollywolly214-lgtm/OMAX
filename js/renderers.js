@@ -4675,46 +4675,12 @@ function drawCostChart(canvas, model, show){
     yMax += pad;
   }
 
-  const left = 60;
+  const left = 70;
   const right = W - 20;
   const top = 20;
   const bottom = H - 40;
   const X = (time)=> left + ((time - xMin) / Math.max(1, xMax - xMin)) * (right - left);
   const Y = (value)=> bottom - ((value - yMin) / Math.max(1e-6, yMax - yMin)) * (bottom - top);
-
-  ctx.strokeStyle = "#e2e6f1";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(left, top);
-  ctx.lineTo(left, bottom);
-  ctx.lineTo(right, bottom);
-  ctx.stroke();
-
-  if (0 >= yMin && 0 <= yMax){
-    const zeroY = Y(0);
-    ctx.strokeStyle = "#d0d5e2";
-    ctx.setLineDash([4,4]);
-    ctx.beginPath();
-    ctx.moveTo(left, zeroY);
-    ctx.lineTo(right, zeroY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = "#666";
-    ctx.textAlign = "right";
-    ctx.fillText("$0", right, zeroY - 4);
-  }
-
-  const formatDateLabel = (date)=>{
-    const opts = { month: "short", day: "numeric" };
-    if (Math.abs(xMax - xMin) > 31557600000){ opts.year = "numeric"; }
-    return date.toLocaleDateString(undefined, opts);
-  };
-
-  ctx.fillStyle = "#666";
-  ctx.textAlign = "left";
-  ctx.fillText(formatDateLabel(new Date(xMin)), left, H - 12);
-  ctx.textAlign = "right";
-  ctx.fillText(formatDateLabel(new Date(xMax)), right, H - 12);
 
   const formatMoney = (value)=>{
     const absVal = Math.abs(value);
@@ -4730,9 +4696,79 @@ function drawCostChart(canvas, model, show){
     return formatted;
   };
 
-  ctx.textAlign = "right";
-  ctx.fillText(formatMoney(yMax), right, top + 12);
-  ctx.fillText(formatMoney(yMin), right, bottom);
+  ctx.font = "12px sans-serif";
+  if (0 >= yMin && 0 <= yMax){
+    const zeroY = Y(0);
+    ctx.strokeStyle = "#d0d5e2";
+    ctx.setLineDash([4,4]);
+    ctx.beginPath();
+    ctx.moveTo(left, zeroY);
+    ctx.lineTo(right, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#666";
+    ctx.textAlign = "right";
+    ctx.fillText("$0", right, zeroY - 4);
+  }
+
+  const yTickCount = Math.min(6, Math.max(3, Math.round((bottom - top) / 50)));
+  if (yTickCount > 1){
+    const yRange = yMax - yMin;
+    ctx.textBaseline = "middle";
+    for (let i = 0; i < yTickCount; i++){
+      const ratio = (yTickCount === 1) ? 0 : i / (yTickCount - 1);
+      const value = yMin + (yRange * ratio);
+      const y = Y(value);
+      ctx.strokeStyle = (i === 0 || i === yTickCount - 1) ? "#d0d5e2" : "#eef1f8";
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(right, y);
+      ctx.stroke();
+      ctx.fillStyle = "#5b6271";
+      ctx.textAlign = "right";
+      ctx.fillText(formatMoney(value), left - 8, y);
+    }
+    ctx.textBaseline = "alphabetic";
+  }
+
+  ctx.strokeStyle = "#cbd2e3";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(left, top);
+  ctx.lineTo(left, bottom);
+  ctx.lineTo(right, bottom);
+  ctx.stroke();
+
+  const formatDateLabel = (date)=>{
+    const opts = { month: "short", day: "numeric" };
+    if (Math.abs(xMax - xMin) > 31557600000){ opts.year = "numeric"; }
+    return date.toLocaleDateString(undefined, opts);
+  };
+
+  const xTickCount = Math.min(7, Math.max(2, Math.round((right - left) / 110)));
+  ctx.textBaseline = "top";
+  if (xTickCount > 1){
+    const span = xMax - xMin;
+    for (let i = 0; i < xTickCount; i++){
+      const time = xMin + (span * i / (xTickCount - 1));
+      const x = X(time);
+      ctx.strokeStyle = "#f1f3f9";
+      ctx.beginPath();
+      ctx.moveTo(x, top);
+      ctx.lineTo(x, bottom);
+      ctx.stroke();
+      ctx.fillStyle = "#5b6271";
+      ctx.textAlign = "center";
+      ctx.fillText(formatDateLabel(new Date(time)), x, H - 20);
+    }
+  }else{
+    ctx.fillStyle = "#5b6271";
+    ctx.textAlign = "left";
+    ctx.fillText(formatDateLabel(new Date(xMin)), left, H - 20);
+    ctx.textAlign = "right";
+    ctx.fillText(formatDateLabel(new Date(xMax)), right, H - 20);
+  }
+  ctx.textBaseline = "alphabetic";
 
   active.forEach(series => {
     const points = series.points
@@ -4757,6 +4793,30 @@ function drawCostChart(canvas, model, show){
       ctx.arc(x, y, 3, 0, Math.PI*2);
       ctx.fill();
     });
+
+    const last = points[points.length - 1];
+    if (last){
+      const x = X(last.date.getTime());
+      const y = Y(Number(last.value));
+      const label = `${series.key === "maintenance" ? "Maintenance" : "Cutting jobs"} ${formatMoney(Number(last.value))}`;
+      ctx.font = "12px sans-serif";
+      const metrics = ctx.measureText(label);
+      const paddingX = 6;
+      const boxWidth = metrics.width + paddingX * 2;
+      const boxHeight = 18;
+      let boxX = Math.min(right - boxWidth, Math.max(left, x + 10));
+      let boxY = Math.max(top + boxHeight, y - boxHeight - 6);
+      boxY = Math.min(bottom - 4, boxY);
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillRect(boxX, boxY - boxHeight, boxWidth, boxHeight);
+      ctx.strokeStyle = series.color;
+      ctx.strokeRect(boxX, boxY - boxHeight, boxWidth, boxHeight);
+      ctx.fillStyle = "#1f2937";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, boxX + paddingX, boxY - (boxHeight / 2));
+      ctx.textBaseline = "alphabetic";
+    }
   });
 }
 
