@@ -3042,6 +3042,18 @@ function renderSettings(){
         </form>
       </div>
     </div>
+    <div class="modal-backdrop" id="linkedInventoryPrompt" hidden>
+      <div class="modal-card confirm-modal-card">
+        <button type="button" class="modal-close" data-close-linked>×</button>
+        <h4>Remove task?</h4>
+        <p class="confirm-modal-copy" data-linked-message></p>
+        <ul class="confirm-modal-list" data-linked-list hidden></ul>
+        <div class="modal-actions confirm-modal-actions">
+          <button type="button" class="secondary" data-linked-keep>Keep inventory</button>
+          <button type="button" class="danger" data-linked-remove>Remove from inventory too</button>
+        </div>
+      </div>
+    </div>
   `;
 
   const tree = document.getElementById("tree");
@@ -3053,6 +3065,67 @@ function renderSettings(){
   const conditionRow = form?.querySelector('[data-form-condition]');
   const searchInput = document.getElementById("maintenanceSearch");
   const searchClear = document.getElementById("maintenanceSearchClear");
+  const linkedPrompt = document.getElementById("linkedInventoryPrompt");
+  const linkedMessage = linkedPrompt?.querySelector('[data-linked-message]') || null;
+  const linkedList = linkedPrompt?.querySelector('[data-linked-list]') || null;
+  const linkedRemove = linkedPrompt?.querySelector('[data-linked-remove]') || null;
+  const linkedKeep = linkedPrompt?.querySelector('[data-linked-keep]') || null;
+  const linkedClose = linkedPrompt?.querySelector('[data-close-linked]') || null;
+
+  const promptRemoveLinkedInventory = (task, matches)=>{
+    if (!linkedPrompt) return Promise.resolve("keep");
+
+    const taskLabel = task && task.name ? `"${task.name}"` : "this task";
+    const count = matches.length;
+    const message = count === 1
+      ? `Delete ${taskLabel}? This task is also in inventory.`
+      : `Delete ${taskLabel}? This task is also in inventory with ${count} items.`;
+    if (linkedMessage){
+      linkedMessage.textContent = count === 1
+        ? `${message} Remove the linked inventory item as well?`
+        : `${message} Remove the linked inventory items as well?`;
+    }
+
+    if (linkedList){
+      if (count){
+        linkedList.innerHTML = matches.map(item => {
+          const name = item && item.name ? item.name : "Unnamed inventory item";
+          return `<li>${name}</li>`;
+        }).join("");
+        linkedList.removeAttribute("hidden");
+      }else{
+        linkedList.innerHTML = "";
+        linkedList.setAttribute("hidden", "");
+      }
+    }
+
+    return new Promise(resolve => {
+      const cleanup = ()=>{
+        linkedPrompt.classList.remove("is-visible");
+        linkedPrompt.setAttribute("hidden", "");
+        document.body?.classList.remove("modal-open");
+        if (linkedRemove) linkedRemove.removeEventListener("click", onRemove);
+        if (linkedKeep) linkedKeep.removeEventListener("click", onKeep);
+        if (linkedClose) linkedClose.removeEventListener("click", onKeep);
+        linkedPrompt.removeEventListener("click", onBackdropClick);
+      };
+
+      const onRemove = ()=>{ cleanup(); resolve("remove"); };
+      const onKeep = ()=>{ cleanup(); resolve("keep"); };
+      const onBackdropClick = (evt)=>{
+        if (evt.target === linkedPrompt) onKeep();
+      };
+
+      if (linkedRemove) linkedRemove.addEventListener("click", onRemove, { once: true });
+      if (linkedKeep) linkedKeep.addEventListener("click", onKeep, { once: true });
+      if (linkedClose) linkedClose.addEventListener("click", onKeep, { once: true });
+      linkedPrompt.addEventListener("click", onBackdropClick, { once: true });
+
+      linkedPrompt.classList.add("is-visible");
+      linkedPrompt.removeAttribute("hidden");
+      document.body?.classList.add("modal-open");
+    });
+  };
 
   tree?.querySelectorAll("details.cat").forEach(det => {
     det.addEventListener("toggle", ()=>{
@@ -3340,7 +3413,7 @@ function renderSettings(){
     }
   });
 
-  tree?.addEventListener("click", (e)=>{
+  tree?.addEventListener("click", async (e)=>{
     const removeBtn = e.target.closest('[data-remove]');
     if (removeBtn){
       const id = removeBtn.getAttribute('data-remove');
@@ -3350,16 +3423,8 @@ function renderSettings(){
       const matches = findInventoryMatchesForTask(task);
       let removeInventoryAlso = false;
       if (matches.length){
-        const taskLabel = task && task.name ? `"${task.name}"` : "this task";
-        if (typeof window.confirm === "function"){
-          const inventoryLabel = matches.length === 1
-            ? (matches[0] && matches[0].name ? `"${matches[0].name}"` : "this inventory item")
-            : `${matches.length} inventory items`;
-          const message = matches.length === 1
-            ? `Delete ${taskLabel}? This task is also in inventory as ${inventoryLabel}. Remove it from inventory too?`
-            : `Delete ${taskLabel}? This task is also in inventory (${inventoryLabel}). Remove them from inventory too?`;
-          removeInventoryAlso = window.confirm(message);
-        }
+        const choice = await promptRemoveLinkedInventory(task, matches);
+        removeInventoryAlso = choice === "remove";
       }
       window.tasksInterval.forEach(t => { if (String(t.parentTask) === String(id)) t.parentTask = null; });
       window.tasksAsReq.forEach(t => { if (String(t.parentTask) === String(id)) t.parentTask = null; });

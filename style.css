@@ -1819,6 +1819,48 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   box-shadow: 0 22px 40px rgba(15, 23, 42, 0.3);
 }
 
+.confirm-modal-card {
+  width: min(460px, 92vw);
+}
+
+.confirm-modal-copy {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #1f2937;
+}
+
+.confirm-modal-list {
+  margin: 0 0 18px 0;
+  padding: 0 0 0 20px;
+  color: #374151;
+  font-size: 0.92rem;
+}
+
+.confirm-modal-list li {
+  margin-bottom: 6px;
+}
+
+.confirm-modal-list li:last-child {
+  margin-bottom: 0;
+}
+
+.confirm-modal-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.modal-actions .danger {
+  background: #e14b4b;
+  color: #fff;
+}
+
+.modal-actions .danger:hover,
+.modal-actions .danger:focus {
+  background: #c43d3d;
+  color: #fff;
+}
+
 .dashboard-modal-card {
   width: min(640px, 94vw);
 }
