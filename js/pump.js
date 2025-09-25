@@ -3,7 +3,7 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
-const PUMP_BASE_FONT_SCALE = 3.4;
+const PUMP_BASE_FONT_SCALE = 3.15;
 const pumpViewportState = { bound:false, lastResponsiveScale:1 };
 const pumpChartLayout = {
   baseWidth: 640,
@@ -36,8 +36,10 @@ function pumpComputeFontScale(canvasWidth){
   pumpViewportState.lastResponsiveScale = factor;
   let widthFactor = 1;
   if (isFinite(canvasWidth) && canvasWidth > 0){
-    const normalized = Math.max(0.7, Math.min(canvasWidth / 520, 1.65));
-    widthFactor = Math.pow(normalized, 0.45);
+    const base = pumpChartLayout.baseWidth && pumpChartLayout.baseWidth > 0 ? pumpChartLayout.baseWidth : canvasWidth;
+    const ratio = base > 0 ? (canvasWidth / base) : 1;
+    const clamped = Math.max(0.75, Math.min(ratio, 1.5));
+    widthFactor = Math.pow(clamped, 0.35);
   }
   return PUMP_BASE_FONT_SCALE * widthFactor * factor;
 }
@@ -74,25 +76,33 @@ function pumpUpdateBaseChartSize(width, height){
 
 function pumpComputeCanvasSize(canvas){
   const expanded = window.pumpChartExpanded === true;
-  const aspect = pumpChartLayout.aspect || (pumpChartLayout.baseHeight / Math.max(pumpChartLayout.baseWidth, 1)) || 0.65;
+  const baseWidth = Math.max(1, pumpChartLayout.baseWidth || 0);
+  const baseHeight = Math.max(1, pumpChartLayout.baseHeight || 0);
+  const aspect = pumpChartLayout.aspect || (baseHeight / Math.max(baseWidth, 1)) || 0.65;
   let width;
   let height;
   if (expanded){
-    const viewportW = window.innerWidth || document.documentElement?.clientWidth || (pumpChartLayout.baseWidth * 1.35);
-    const viewportH = window.innerHeight || document.documentElement?.clientHeight || (pumpChartLayout.baseHeight * 1.35);
-    const maxWidth = Math.max(520, viewportW - 160);
-    const minWidth = Math.max(520, pumpChartLayout.baseWidth * 1.25, pumpChartLayout.baseWidth + 140);
-    width = Math.min(maxWidth, Math.max(minWidth, pumpChartLayout.baseWidth * 1.1));
+    const viewportW = window.innerWidth || document.documentElement?.clientWidth || (baseWidth * 1.35);
+    const viewportH = window.innerHeight || document.documentElement?.clientHeight || (baseHeight * 1.35);
+    const maxWidth = Math.max(420, viewportW - 200);
+    const rawMinWidth = Math.max(480, baseWidth + 120, baseWidth * 1.12);
+    const minWidth = Math.min(rawMinWidth, maxWidth);
+    const targetWidth = Math.max(minWidth, baseWidth * 1.35);
+    width = Math.round(Math.min(maxWidth, targetWidth));
+    if (width < minWidth) width = Math.round(minWidth);
     height = Math.round(width * aspect);
-    const maxHeight = Math.max(360, viewportH - 240);
+    const maxHeight = Math.max(320, viewportH - 240);
     if (height > maxHeight){
-      height = maxHeight;
+      height = Math.round(maxHeight);
       width = Math.round(height / aspect);
+      if (width > maxWidth) width = Math.round(maxWidth);
+      if (width < minWidth) width = Math.round(minWidth);
+      height = Math.round(width * aspect);
     }
   }else{
     const wrap = canvas ? canvas.closest(".pump-chart-wrap") : null;
     const rect = wrap ? wrap.getBoundingClientRect() : null;
-    width = rect && rect.width ? rect.width : pumpChartLayout.baseWidth;
+    width = rect && rect.width ? rect.width : baseWidth;
     width = Math.max(320, Math.round(width));
     height = Math.round(width * aspect);
     height = Math.max(240, height);
@@ -161,12 +171,16 @@ function pumpMountOverlay(card){
   if (dims){
     const viewportW = window.innerWidth || document.documentElement?.clientWidth || dims.width;
     const viewportH = window.innerHeight || document.documentElement?.clientHeight || dims.height;
-    const maxWidth = Math.max(560, viewportW - 80);
-    const modalWidth = Math.min(maxWidth, Math.max(dims.width + 96, pumpChartLayout.baseWidth + 160));
-    card.style.width = `${Math.round(modalWidth)}px`;
-    card.style.maxWidth = `${Math.round(maxWidth)}px`;
-    const modalMaxHeight = Math.max(360, viewportH - 80);
-    card.style.maxHeight = `${Math.round(modalMaxHeight)}px`;
+    const paddingAllowance = 72; // horizontal padding inside the card when expanded
+    const viewportWidthLimit = Math.max(320, viewportW - 48);
+    const minCardWidth = Math.min(viewportWidthLimit, dims.width + paddingAllowance);
+    const desiredCardWidth = Math.min(viewportWidthLimit, Math.max(minCardWidth, pumpChartLayout.baseWidth + paddingAllowance + 48));
+    card.style.maxWidth = `${Math.round(viewportWidthLimit)}px`;
+    card.style.width = `${Math.round(desiredCardWidth)}px`;
+    const verticalAllowance = 132; // top+bottom padding
+    const viewportHeightLimit = Math.max(360, viewportH - 48);
+    const desiredCardHeight = Math.min(viewportHeightLimit, dims.height + verticalAllowance);
+    card.style.maxHeight = `${Math.round(desiredCardHeight)}px`;
   }
   const close = ()=>{ window.pumpChartExpanded = false; renderPumpWidget(); };
   backdrop.addEventListener("click", close);
