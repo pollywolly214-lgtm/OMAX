@@ -16,6 +16,11 @@ const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr
 const WORKSPACE_ID = "schreiner-robotics";
 
+const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
+  ? window.CLEAR_DATA_PASSWORD
+  : "reset-omax";
+if (typeof window !== "undefined") window.CLEAR_DATA_PASSWORD = CLEAR_DATA_PASSWORD;
+
 window.APP_SCHEMA = APP_SCHEMA;
 
 /* Root helpers */
@@ -705,6 +710,76 @@ function createOrderRequest(items){
   }
   return template;
 }
+
+function buildCleanState(){
+  const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[] };
+  return {
+    schema: APP_SCHEMA,
+    totalHistory: [],
+    tasksInterval: defaultIntervalTasks.slice(),
+    tasksAsReq: defaultAsReqTasks.slice(),
+    inventory: seedInventoryFromTasks(),
+    cuttingJobs: [],
+    completedCuttingJobs: [],
+    orderRequests: [createOrderRequest()],
+    orderRequestTab: "active",
+    garnetCleanings: [],
+    pumpEff: { ...pumpDefaults }
+  };
+}
+
+async function clearAllAppData(){
+  const defaults = buildCleanState();
+
+  if (Array.isArray(window.settingsFolders)) window.settingsFolders.length = 0;
+  else window.settingsFolders = [];
+  if (window.settingsOpenFolders instanceof Set) window.settingsOpenFolders.clear();
+  else window.settingsOpenFolders = new Set();
+  window.maintenanceSearchTerm = "";
+  window.pendingMaintenanceAddFromInventory = null;
+
+  adoptState(defaults);
+  resetHistoryToCurrent();
+
+  try {
+    if (typeof window.localStorage !== "undefined" && window.localStorage){
+      const storage = window.localStorage;
+      [
+        "dashboard_layout_windows_v1",
+        "cost_layout_windows_v1",
+        "omax_tasks_interval_v6",
+        "omax_tasks_asreq_v6"
+      ].forEach(key => {
+        try { storage.removeItem(key); } catch(_){}
+      });
+    }
+  } catch (err) {
+    console.warn("Unable to clear layout storage", err);
+  }
+
+  try { if (window.dashboardLayoutState) delete window.dashboardLayoutState; } catch(_){ }
+  try { if (window.costLayoutState) delete window.costLayoutState; } catch(_){ }
+  try { if (Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles.length = 0; } catch(_){ }
+  if (typeof window.inventorySearchTerm === "string") window.inventorySearchTerm = "";
+  if (window.orderPartialSelection instanceof Set) window.orderPartialSelection.clear();
+
+  try { captureHistorySnapshot(); } catch(_){ }
+
+  try {
+    if (FB.ready && FB.docRef) {
+      await FB.docRef.set(snapshotState());
+    } else {
+      saveCloudDebounced();
+    }
+  } catch (err) {
+    console.error("Failed to sync cleared state", err);
+  }
+
+  if (typeof route === "function") route();
+  return defaults;
+}
+
+if (typeof window !== "undefined") window.clearAllAppData = clearAllAppData;
 
 function ensureActiveOrderRequest(){
   if (!Array.isArray(orderRequests)) orderRequests = [];

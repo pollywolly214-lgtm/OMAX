@@ -2735,6 +2735,9 @@ function renderSettings(){
       #explorer .toolbar{display:flex;flex-direction:column;align-items:center;gap:.75rem;margin-bottom:.75rem}
       #explorer .toolbar-actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;width:100%}
       #explorer .toolbar-actions button{padding:.35rem .65rem;font-size:.92rem;border-radius:8px}
+      #explorer .toolbar-actions button.danger{background:#ffe7e7;color:#b00020}
+      #explorer .toolbar-actions button.danger:hover:not(:disabled){background:#ffd1d1}
+      #explorer .toolbar-actions button:disabled{opacity:.55;cursor:default}
       #explorer .toolbar-search{display:flex;align-items:center;gap:.45rem;justify-content:center;background:#f3f4f8;border-radius:999px;padding:.4rem .7rem;border:1px solid #d0d7e4;box-shadow:0 6px 18px rgba(15,35,72,.08);margin:0 auto;width:min(420px,100%)}
       #explorer .toolbar-search .icon{font-size:1.05rem;color:#5b6a82;display:flex;align-items:center;justify-content:center}
       #explorer .toolbar-search input{flex:1;min-width:0;padding:.2rem;border:0;background:transparent;font-size:.95rem;color:#0f1e3a}
@@ -3137,6 +3140,7 @@ function renderSettings(){
           <div class="toolbar-actions">
             <button id="btnAddCategory">+ Add Category</button>
             <button id="btnAddTask">+ Add Task</button>
+            <button id="btnClearAllData" class="danger" title="Reset all maintenance data">🧹 Clear All Data</button>
           </div>
           <div class="toolbar-search">
             <span class="icon" aria-hidden="true">🔍</span>
@@ -3327,6 +3331,50 @@ function renderSettings(){
     modal.hidden = true;
     document.body?.classList.remove("modal-open");
   }
+
+  document.getElementById("btnClearAllData")?.addEventListener("click", async ()=>{
+    const handler = typeof window.clearAllAppData === "function" ? window.clearAllAppData : null;
+    if (!handler){
+      alert("Clearing data is not available right now.");
+      return;
+    }
+    const expected = (typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
+      ? window.CLEAR_DATA_PASSWORD
+      : "";
+    const attempt = prompt("Enter the admin password to clear all data:");
+    if (attempt === null) return;
+    if (attempt !== expected){
+      alert("Incorrect password. Data was not cleared.");
+      return;
+    }
+    const confirmed = await showConfirmModal({
+      title: "Clear all data?",
+      message: "This will erase history, maintenance tasks, jobs, inventory, and orders for every user. This cannot be undone.",
+      confirmText: "Yes, clear everything",
+      confirmVariant: "danger",
+      cancelText: "Keep data"
+    });
+    if (!confirmed) return;
+
+    const btn = document.getElementById("btnClearAllData");
+    const originalText = btn ? btn.textContent : "";
+    if (btn){
+      btn.disabled = true;
+      btn.textContent = "Clearing…";
+    }
+    try {
+      await handler();
+      toast("Workspace reset to defaults.");
+    } catch (err){
+      console.error("Failed to clear all data", err);
+      alert("Unable to clear data. Please try again.");
+    } finally {
+      if (btn && btn.isConnected){
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }
+  });
 
   document.getElementById("btnAddCategory")?.addEventListener("click", ()=>{
     const name = prompt("Category name?");
