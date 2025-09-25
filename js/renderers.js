@@ -2097,6 +2097,16 @@ function repairMaintenanceGraph(){
     if (!Array.isArray(window.tasksInterval))   window.tasksInterval   = [];
     if (!Array.isArray(window.tasksAsReq))      window.tasksAsReq      = [];
 
+    const ROOT_ID = (typeof window !== "undefined" && window.ROOT_FOLDER_ID)
+      ? String(window.ROOT_FOLDER_ID)
+      : "root";
+
+    if (!window.settingsFolders.some(f => f && String(f.id) === ROOT_ID)){
+      const fallbackOrder = Number(window._maintOrderCounter) || 0;
+      window.settingsFolders.push({ id: ROOT_ID, name: "All Tasks", parent: null, order: fallbackOrder + 1 });
+      window._maintOrderCounter = Math.max(Number(window._maintOrderCounter) || 0, fallbackOrder + 1);
+    }
+
     // Flatten any legacy nested `.sub` arrays so every task lives in the
     // top-level list with a parentTask pointer (Explorer-style tree).
     const seenIds = new Set();
@@ -2145,22 +2155,38 @@ function repairMaintenanceGraph(){
 
     // --- Fix bad folder parents & cycles ---
     for (const f of window.settingsFolders){
-      if (f.parent == null) continue;
-      if (!fMap[String(f.parent)] || String(f.parent) === String(f.id)){
-        f.parent = null; // orphan or self-parent → root
+      if (!f || f.id == null) continue;
+      const fid = String(f.id);
+      if (fid === ROOT_ID){
+        f.parent = null;
         continue;
       }
-      // break cycles: walk up until root; if we re-meet self, detach
-      const seen = new Set([String(f.id)]);
-      let cur = f;
-      let p = fMap[String(cur.parent)];
-      while (p){
-        const pid = String(p.id);
-        if (seen.has(pid)){ f.parent = null; break; }
-        seen.add(pid);
-        if (p.parent == null) break;
-        p = fMap[String(p.parent)] || null;
+
+      const parentRaw = f.parent != null ? String(f.parent) : null;
+      if (!parentRaw || parentRaw === fid || !fMap[parentRaw]){
+        f.parent = ROOT_ID;
       }
+
+      // break cycles: walk up until root; if we re-meet self, reset to ROOT
+      const seen = new Set([fid]);
+      let guard = 0;
+      let current = f;
+      let parent = current.parent != null ? String(current.parent) : null;
+      while (parent && guard++ < 1000){
+        if (seen.has(parent)){
+          f.parent = ROOT_ID;
+          break;
+        }
+        seen.add(parent);
+        const next = fMap[parent];
+        if (!next){
+          f.parent = ROOT_ID;
+          break;
+        }
+        parent = next.parent != null ? String(next.parent) : null;
+      }
+
+      f.parent = f.parent == null ? null : String(f.parent);
     }
 
     // --- Fix bad task parentTask and cat (folder) pointers + cycles ---
@@ -2171,7 +2197,8 @@ function repairMaintenanceGraph(){
         if (pid === String(t.id) || !tMap[pid]) t.parentTask = null;
       }
       // folder ref to nowhere → clear
-      if (t.cat != null && !fMap[String(t.cat)]) t.cat = null;
+      if (t.cat != null && !fMap[String(t.cat)]) t.cat = ROOT_ID;
+      if (t.cat == null) t.cat = ROOT_ID;
 
       // break cycles: follow parentTask chain and cut if we loop
       if (t.parentTask != null){
@@ -2195,11 +2222,17 @@ function repairMaintenanceGraph(){
         }
       }
 
+      if (t.parentTask == null && (t.cat == null || !fMap[String(t.cat)])){
+        t.cat = ROOT_ID;
+      }
+
       // numeric 'order' normalization (optional but stabilizes rendering)
       if (!isFinite(t.order)) t.order = 0;
+      if (t.cat != null) t.cat = String(t.cat);
     }
     for (const f of window.settingsFolders){
       if (!isFinite(f.order)) f.order = 0;
+      if (f.parent != null) f.parent = String(f.parent);
     }
   }catch(err){
     console.warn("repairMaintenanceGraph failed:", err);
@@ -2226,6 +2259,10 @@ function moveNodeSafely(kind, nodeId, target){
   window.maintenanceSearchTerm = typeof window.maintenanceSearchTerm === "string"
     ? window.maintenanceSearchTerm
     : "";
+
+  const ROOT_ID = (typeof window !== "undefined" && window.ROOT_FOLDER_ID)
+    ? String(window.ROOT_FOLDER_ID)
+    : "root";
 
   // ---------- Helpers: tasks ----------
   function findTaskMeta(id){
@@ -2355,7 +2392,7 @@ function moveNodeSafely(kind, nodeId, target){
   }
 
   function ensureFolder(catId){
-    if (catId == null) return true;
+    if (catId == null) return window.settingsFolders.some(f => String(f.id) === ROOT_ID);
     return window.settingsFolders.some(f => String(f.id) === String(catId));
   }
 
@@ -2424,13 +2461,14 @@ function moveNodeSafely(kind, nodeId, target){
     }
 
     if (Object.prototype.hasOwnProperty.call(target || {}, "intoCat")){
-      const catId = target.intoCat;
+      const rawCat = target.intoCat;
+      const catId = rawCat == null ? ROOT_ID : rawCat;
       if (!ensureFolder(catId)) return false;
 
       const place = target && target.position === "end" ? "end" : "start";
       const nextOrder = nextTaskOrder(catId ?? null, null, src.task.id, place);
 
-      src.task.cat = catId ?? null;
+      src.task.cat = catId;
       src.task.parentTask = null;
       src.task.order = nextOrder;
       if (isFinite(Number(nextOrder))) {
@@ -2450,21 +2488,31 @@ function moveNodeSafely(kind, nodeId, target){
     const cat = findCat(nodeId);
     if (!cat) return false;
     const originalParent = cat.parent || null;
+    const catId = String(cat.id);
+
+    if (catId === ROOT_ID && target && Object.prototype.hasOwnProperty.call(target || {}, "intoCat") && target.intoCat != null){
+      return false;
+    }
 
     if (Object.prototype.hasOwnProperty.call(target || {}, "intoCat")){
-      const parent = target.intoCat; // may be null → root
+      const rawParent = target.intoCat; // may be null → root
       // prevent cycles: cannot move into own descendant
-      let p = parent, hops = 0;
+      let p = rawParent, hops = 0;
       while (p != null && hops++ < 1000){
         if (String(p) === String(cat.id)) return false;
         p = findCat(p)?.parent ?? null;
       }
-      if (parent != null && !findCat(parent)) return false;
+      const parent = rawParent == null ? ROOT_ID : rawParent;
+      if (parent != null && String(parent) !== ROOT_ID && !findCat(parent)) return false;
 
       const place = target && target.position === "end" ? "end" : "start";
       const nextOrder = nextMixedOrder(parent ?? null, null, cat.id, place);
 
-      cat.parent = parent || null;
+      if (catId === ROOT_ID){
+        cat.parent = null;
+      }else{
+        cat.parent = parent == null ? ROOT_ID : parent;
+      }
       cat.order  = nextOrder;
       if (isFinite(Number(nextOrder))) {
         window._maintOrderCounter = Math.max(window._maintOrderCounter, Number(nextOrder));
@@ -2480,7 +2528,8 @@ function moveNodeSafely(kind, nodeId, target){
       const sib = findCat(target.beforeCat.id);
       if (!sib) return false;
 
-      cat.parent = sib.parent || null;
+      if (catId === ROOT_ID) return false;
+      cat.parent = sib.parent == null ? ROOT_ID : sib.parent;
       // Place "just before" by giving a slightly higher order, then normalize
       cat.order = (Number(sib.order)||0) + 0.5;
       normalizeFolderOrder(cat.parent);
@@ -2494,7 +2543,8 @@ function moveNodeSafely(kind, nodeId, target){
       const dest = findTaskMeta(target.beforeTask.id);
       if (!dest || dest.task.parentTask != null) return false;
 
-      cat.parent = dest.task.cat ?? null;
+      if (catId === ROOT_ID) return false;
+      cat.parent = dest.task.cat == null ? ROOT_ID : dest.task.cat;
       cat.order = (Number(dest.task.order)||0) + 0.5;
       normalizeFolderOrder(cat.parent);
       normalizeFolderOrder(originalParent);
@@ -3295,6 +3345,11 @@ function renderSettings(){
   }
 
   const persist = ()=>{
+    if (typeof setSettingsFolders === "function") {
+      try { setSettingsFolders(window.settingsFolders); } catch (err) {
+        console.warn("Failed to sync folders before save", err);
+      }
+    }
     if (typeof saveTasks === "function") { try{ saveTasks(); }catch(_){} }
     if (typeof saveCloudDebounced === "function") { try{ saveCloudDebounced(); }catch(_){} }
   };
@@ -3361,7 +3416,8 @@ function renderSettings(){
   document.getElementById("btnAddCategory")?.addEventListener("click", ()=>{
     const name = prompt("Category name?");
     if (!name) return;
-    const cat = { id: name.toLowerCase().replace(/[^a-z0-9]+/g,"_")+"_"+Math.random().toString(36).slice(2,7), name, parent:null, order: ++window._maintOrderCounter };
+    const rootId = (typeof window !== "undefined" && typeof window.ROOT_FOLDER_ID === "string") ? window.ROOT_FOLDER_ID : "root";
+    const cat = { id: name.toLowerCase().replace(/[^a-z0-9]+/g,"_")+"_"+Math.random().toString(36).slice(2,7), name, parent: rootId, order: ++window._maintOrderCounter };
     window.settingsFolders.push(cat);
     persist();
     renderSettings();
@@ -3417,7 +3473,9 @@ function renderSettings(){
     const name = (data.get("taskName")||"").toString().trim();
     const mode = (data.get("taskType")||"interval").toString();
     if (!name){ alert("Task name is required."); return; }
-    const catId = (data.get("taskCategory")||"").toString().trim() || null;
+    const rootId = (typeof window !== "undefined" && typeof window.ROOT_FOLDER_ID === "string") ? window.ROOT_FOLDER_ID : "root";
+    const catRaw = (data.get("taskCategory")||"").toString().trim();
+    const catId = catRaw ? catRaw : rootId;
     const manual = (data.get("taskManual")||"").toString().trim();
     const store = (data.get("taskStore")||"").toString().trim();
     const pn = (data.get("taskPN")||"").toString().trim();

@@ -341,11 +341,128 @@ function getEditingCompletedJobsSet(){
 window.getEditingCompletedJobsSet = getEditingCompletedJobsSet;
 
 window.defaultIntervalTasks = defaultIntervalTasks;
+const ROOT_FOLDER_ID = "root";
+window.ROOT_FOLDER_ID = ROOT_FOLDER_ID;
+const DEFAULT_SETTINGS_FOLDERS = [
+  { id: ROOT_FOLDER_ID, name: "All Tasks",    parent: null,           order: 3 },
+  { id: "interval",    name: "Per Interval", parent: ROOT_FOLDER_ID, order: 2 },
+  { id: "asreq",       name: "As Required",  parent: ROOT_FOLDER_ID, order: 1 }
+];
+
+function defaultSettingsFolders(){
+  return DEFAULT_SETTINGS_FOLDERS.map(f => ({ ...f }));
+}
+
+function normalizeSettingsFolders(raw){
+  const seen = new Set();
+  const normalized = [];
+  if (Array.isArray(raw)){
+    for (const entry of raw){
+      if (!entry || entry.id == null) continue;
+      const key = String(entry.id);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const rawParent = entry.parent != null ? entry.parent : null;
+      let parent = null;
+      if (key === ROOT_FOLDER_ID){
+        parent = null;
+      }else if (rawParent == null || String(rawParent) === "" || String(rawParent) === key){
+        parent = ROOT_FOLDER_ID;
+      }else{
+        parent = rawParent;
+      }
+      normalized.push({
+        id: entry.id,
+        name: typeof entry.name === "string" ? entry.name : "",
+        parent: parent == null ? null : String(parent),
+        order: Number.isFinite(entry.order) ? Number(entry.order) : 0
+      });
+    }
+  }
+  for (const template of DEFAULT_SETTINGS_FOLDERS){
+    const key = String(template.id);
+    if (seen.has(key)){
+      const existing = normalized.find(f => String(f.id) === key);
+      if (existing){
+        if (!existing.name) existing.name = template.name;
+        if (existing.parent == null && template.parent != null) existing.parent = template.parent;
+        if (!Number.isFinite(existing.order) && Number.isFinite(template.order)){
+          existing.order = Number(template.order);
+        }
+        if (key !== ROOT_FOLDER_ID && (existing.parent == null || String(existing.parent) === "")){
+          existing.parent = template.parent ?? ROOT_FOLDER_ID;
+        }
+      }
+      continue;
+    }
+    seen.add(key);
+    normalized.push({ ...template });
+  }
+  return normalized;
+}
+
+function setSettingsFolders(raw){
+  const normalized = normalizeSettingsFolders(raw);
+  window.settingsFolders = normalized;
+  window.folders = cloneFolders(window.settingsFolders);
+  return window.settingsFolders;
+}
+
+function cloneFolders(list){
+  if (!Array.isArray(list)) return [];
+  return list.map(folder => ({ ...folder }));
+}
+
+function foldersEqual(a, b){
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+
+  const normalizeEntry = (folder)=>(
+    {
+      id: folder && folder.id != null ? String(folder.id) : "",
+      name: typeof folder?.name === "string" ? folder.name : "",
+      parent: folder && folder.parent != null ? String(folder.parent) : null,
+      order: Number.isFinite(Number(folder?.order)) ? Number(folder.order) : 0
+    }
+  );
+
+  const map = new Map();
+  for (const entry of a){
+    const norm = normalizeEntry(entry);
+    if (!norm.id) continue;
+    map.set(norm.id, norm);
+  }
+
+  for (const entry of b){
+    const norm = normalizeEntry(entry);
+    if (!norm.id) return false;
+    const match = map.get(norm.id);
+    if (!match) return false;
+    if (match.name !== norm.name) return false;
+    if ((match.parent ?? null) !== (norm.parent ?? null)) return false;
+    if (match.order !== norm.order) return false;
+    map.delete(norm.id);
+  }
+
+  return map.size === 0;
+}
+
+function snapshotSettingsFolders(){
+  const source = Array.isArray(window.settingsFolders)
+    ? window.settingsFolders
+    : (Array.isArray(window.folders) ? window.folders : defaultSettingsFolders());
+  const normalized = normalizeSettingsFolders(source);
+  window.settingsFolders = normalized;
+  window.folders = cloneFolders(window.settingsFolders);
+  return cloneFolders(normalized);
+}
+
 window.defaultAsReqTasks = defaultAsReqTasks;
 
 /* ==================== Cloud load / save ===================== */
 function snapshotState(){
   const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
+  const foldersSnapshot = snapshotSettingsFolders();
   return {
     schema: window.APP_SCHEMA || APP_SCHEMA,
     totalHistory,
@@ -357,7 +474,9 @@ function snapshotState(){
     orderRequests,
     orderRequestTab,
     garnetCleanings,
-    pumpEff: safePumpEff
+    pumpEff: safePumpEff,
+    settingsFolders: foldersSnapshot,
+    folders: cloneFolders(window.settingsFolders)
   };
 }
 
@@ -487,18 +606,13 @@ function redoLastUndo(){
 resetHistoryToCurrent();
 
 /* ======= Minimal folder model used by the explorer UI ======= */
-if (!Array.isArray(window.folders) || !window.folders.length) {
-  window.folders = [
-    { id: "root",     name: "All Tasks",    parent: null },
-    { id: "interval", name: "Per Interval", parent: "root" },
-    { id: "asreq",    name: "As Required",  parent: "root" },
-  ];
-}
-const folders = window.folders;
+setSettingsFolders(window.settingsFolders || window.folders);
 
 /* ================ Explorer helper functions ================= */
 function childrenFolders(parentId){
-  return folders.filter(f => f.parent === parentId);
+  const key = String(parentId ?? "");
+  const folders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  return folders.filter(f => String((f?.parent ?? "")) === key);
 }
 
 function topTasksInCat(folderId){
@@ -554,6 +668,28 @@ function adoptState(doc){
   }
   orderRequestTab = window.orderRequestTab;
 
+  const rawFolders = Array.isArray(data.settingsFolders)
+    ? data.settingsFolders
+    : (Array.isArray(data.folders) ? data.folders : null);
+  setSettingsFolders(rawFolders);
+
+  if (typeof window._maintOrderCounter !== "number" || !Number.isFinite(window._maintOrderCounter)){
+    window._maintOrderCounter = 0;
+  }
+  let maxOrder = window._maintOrderCounter;
+  for (const list of [tasksInterval, tasksAsReq]){
+    if (!Array.isArray(list)) continue;
+    for (const task of list){
+      const val = Number(task && task.order);
+      if (Number.isFinite(val) && val > maxOrder) maxOrder = val;
+    }
+  }
+  for (const folder of window.settingsFolders){
+    const val = Number(folder && folder.order);
+    if (Number.isFinite(val) && val > maxOrder) maxOrder = val;
+  }
+  window._maintOrderCounter = maxOrder;
+
   // Pump efficiency (guard against reading an undefined identifier)
   const pe = (typeof window.pumpEff === "object" && window.pumpEff)
     ? window.pumpEff
@@ -575,6 +711,11 @@ const saveCloudInternal = debounce(async ()=>{
   try{ await FB.docRef.set(snapshotState(), { merge:true }); }catch(e){ console.error("Cloud save failed:", e); }
 }, 300);
 function saveCloudDebounced(){
+  try {
+    setSettingsFolders(window.settingsFolders);
+  } catch (err) {
+    console.warn("Failed to normalize folders before save:", err);
+  }
   captureHistorySnapshot();
   saveCloudInternal();
 }
@@ -589,6 +730,8 @@ async function loadFromCloud(){
         const pe = (typeof window.pumpEff === "object" && window.pumpEff)
           ? window.pumpEff
           : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+        const seededFolders = normalizeSettingsFolders(data.settingsFolders || data.folders);
+        const seededFoldersPayload = cloneFolders(seededFolders);
         const seeded = {
           schema:APP_SCHEMA,
           totalHistory: Array.isArray(data.totalHistory) ? data.totalHistory : [],
@@ -600,21 +743,62 @@ async function loadFromCloud(){
           garnetCleanings: Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [],
           orderRequests: Array.isArray(data.orderRequests) ? normalizeOrderRequests(data.orderRequests) : [createOrderRequest()],
           orderRequestTab: typeof data.orderRequestTab === "string" ? data.orderRequestTab : "active",
+          settingsFolders: seededFoldersPayload,
+          folders: cloneFolders(seededFoldersPayload),
           pumpEff: pe
         };
         adoptState(seeded);
         resetHistoryToCurrent();
         await FB.docRef.set(seeded, { merge:true });
       }else{
+        const docHasSettingsFolders = Array.isArray(data.settingsFolders);
+        const docHasLegacyFolders = Array.isArray(data.folders);
+        const docFoldersRaw = docHasSettingsFolders
+          ? data.settingsFolders
+          : (docHasLegacyFolders ? data.folders : null);
+        const normalizedDocFolders = normalizeSettingsFolders(docFoldersRaw);
+
         adoptState(data);
         resetHistoryToCurrent();
+
+        const localFoldersSnapshot = cloneFolders(window.settingsFolders);
+        let shouldSyncFolders = !docHasSettingsFolders || !docHasLegacyFolders;
+        if (!shouldSyncFolders){
+          shouldSyncFolders = !foldersEqual(normalizedDocFolders, localFoldersSnapshot);
+        }
+
+        if (shouldSyncFolders){
+          try {
+            const payloadFolders = cloneFolders(localFoldersSnapshot);
+            await FB.docRef.set({
+              settingsFolders: payloadFolders,
+              folders: cloneFolders(payloadFolders)
+            }, { merge:true });
+          } catch (err) {
+            console.warn("Failed to sync folders to cloud:", err);
+          }
+        }
       }
     }else{
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
-      const seeded = { schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe };
-      seeded.garnetCleanings = [];
+      const defaultFolders = defaultSettingsFolders();
+      const seeded = {
+        schema: APP_SCHEMA,
+        totalHistory: [],
+        tasksInterval: defaultIntervalTasks.slice(),
+        tasksAsReq: defaultAsReqTasks.slice(),
+        inventory: seedInventoryFromTasks(),
+        cuttingJobs: [],
+        completedCuttingJobs: [],
+        orderRequests: [createOrderRequest()],
+        orderRequestTab: "active",
+        pumpEff: pe,
+        settingsFolders: defaultFolders,
+        folders: cloneFolders(defaultFolders),
+        garnetCleanings: []
+      };
       adoptState(seeded);
       resetHistoryToCurrent();
       await FB.docRef.set(seeded);
@@ -624,7 +808,8 @@ async function loadFromCloud(){
     const pe = (typeof window.pumpEff === "object" && window.pumpEff)
       ? window.pumpEff
       : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, garnetCleanings: [] });
+    const fallbackFolders = defaultSettingsFolders();
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [] });
     resetHistoryToCurrent();
   }
 }
