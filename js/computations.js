@@ -20,7 +20,7 @@ function nextDue(task){
   const since = liveSince(task);
   if (since == null) return null;
   const remain = Math.max(0, task.interval - since);
-  const days = Math.round(remain / DAILY_HOURS);
+  const days = remain <= 0 ? 0 : Math.ceil(remain / DAILY_HOURS);
   const due = new Date(); due.setHours(0,0,0,0); due.setDate(due.getDate() + days);
   const lastServicedAt = (RENDER_TOTAL != null && since != null) ? Math.max(0, RENDER_TOTAL - since) : null;
   return { since, remain, days, due, lastServicedAt };
