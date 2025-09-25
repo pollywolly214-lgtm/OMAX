@@ -323,6 +323,31 @@ let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
 
+function refreshGlobalCollections(){
+  if (typeof window === "undefined") return;
+
+  if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
+  tasksInterval = window.tasksInterval;
+
+  if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
+  tasksAsReq = window.tasksAsReq;
+
+  if (!Array.isArray(window.inventory)) window.inventory = [];
+  inventory = window.inventory;
+
+  if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
+  cuttingJobs = window.cuttingJobs;
+
+  if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+  completedCuttingJobs = window.completedCuttingJobs;
+
+  if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+  orderRequests = window.orderRequests;
+
+  if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+  garnetCleanings = window.garnetCleanings;
+}
+
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 if (!Array.isArray(window.deletedItems)) window.deletedItems = [];
 
@@ -625,6 +650,7 @@ function applyRestoreByType(entry, index){
 }
 
 function restoreDeletedItem(id){
+  refreshGlobalCollections();
   purgeExpiredDeletedItems();
   const idx = deletedItems.findIndex(entry => entry && entry.id === id);
   if (idx < 0) return { ok:false, reason:"not_found" };
