@@ -3,8 +3,19 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
-const PUMP_BASE_FONT_SCALE = 3;
+const PUMP_BASE_FONT_SCALE = 3.4;
 const pumpViewportState = { bound:false, lastResponsiveScale:1 };
+
+function ensurePumpOverlayBackdrop(){
+  let backdrop = document.querySelector("[data-pump-overlay-backdrop]");
+  if (!backdrop){
+    backdrop = document.createElement("div");
+    backdrop.className = "pump-chart-backdrop";
+    backdrop.setAttribute("data-pump-overlay-backdrop", "true");
+    document.body.appendChild(backdrop);
+  }
+  return backdrop;
+}
 
 function pumpGetViewportScale(){
   if (window.visualViewport && typeof window.visualViewport.scale === "number"){
@@ -259,7 +270,6 @@ function viewPumpChartWidget(){
   const rangeValue  = window.pumpChartRange || "3m";
   const rangeOptions = PUMP_RANGE_OPTIONS.map(opt => `<option value="${opt.value}" ${opt.value===rangeValue?"selected":""}>Last ${opt.label}</option>`).join("");
   const expanded = window.pumpChartExpanded === true;
-  const wrapCls = expanded ? "pump-chart-wrap pump-chart-wrap-expanded" : "pump-chart-wrap";
   const expandLabel = expanded ? "Shrink" : "Expand";
   const expandIcon = expanded ? "⤡" : "⤢";
   return `
@@ -271,7 +281,7 @@ function viewPumpChartWidget(){
         <select id="pumpRange">${rangeOptions}</select>
       </div>
     </div>
-    <div class="${wrapCls}">
+    <div class="pump-chart-wrap">
       <canvas id="pumpChart" height="${expanded ? 360 : 240}"></canvas>
       <button type="button" class="pump-expand-btn" data-expanded="${expanded}" title="${expandLabel} chart">${expandIcon} ${expandLabel}</button>
     </div>
@@ -284,12 +294,14 @@ function viewPumpChartWidget(){
       <span class="chip green-better">Negative = better</span>
     </div>
   </div>
-  ${expanded ? '<div class="pump-chart-backdrop" data-pump-backdrop></div>' : ''}`;
+  `;
 }
 function renderPumpWidget(){
   const logHost = document.getElementById("pump-log-widget");
   if (logHost) logHost.innerHTML = viewPumpLogWidget();
   const chartHost = document.getElementById("pump-chart-widget");
+  document.querySelectorAll("[data-pump-overlay-card]").forEach(el => el.remove());
+  document.querySelector("[data-pump-overlay-backdrop]")?.remove();
   if (chartHost) chartHost.innerHTML = viewPumpChartWidget();
   if (!logHost && !chartHost) return;
   document.body.classList.toggle("pump-chart-expanded", !!window.pumpChartExpanded);
@@ -308,8 +320,21 @@ function renderPumpWidget(){
     if (!d || !isFinite(rpm) || rpm <= 0) { toast("Enter date and valid RPM."); return; }
     upsertPumpEntry(d, rpm); saveCloudDebounced(); toast("Log saved"); renderPumpWidget();
   });
+  const card = chartHost?.querySelector(".pump-chart-card");
+  const rangeSelect = card?.querySelector("#pumpRange");
+  const expandBtn = card?.querySelector(".pump-expand-btn");
+  if (window.pumpChartExpanded && card){
+    const backdrop = ensurePumpOverlayBackdrop();
+    backdrop.onclick = ()=>{
+      window.pumpChartExpanded = false;
+      renderPumpWidget();
+    };
+    card.classList.add("pump-chart-card-expanded");
+    card.setAttribute("data-pump-overlay-card", "true");
+    document.body.appendChild(card);
+  }
   const canvas = document.getElementById("pumpChart");
-  const wrap   = chartHost?.querySelector(".pump-chart-wrap");
+  const wrap   = canvas?.closest(".pump-chart-wrap");
   if (canvas && wrap){
     const rect = wrap.getBoundingClientRect();
     const availableWidth = rect.width || wrap.clientWidth || canvas.width || 320;
@@ -332,7 +357,6 @@ function renderPumpWidget(){
     if (canvas.height !== targetHeight) canvas.height = targetHeight;
   }
   ensurePumpViewportWatcher();
-  const rangeSelect = document.getElementById("pumpRange");
   if (rangeSelect){
     if (rangeSelect.value !== window.pumpChartRange) rangeSelect.value = window.pumpChartRange;
     rangeSelect.addEventListener("change", (e)=>{
@@ -340,16 +364,14 @@ function renderPumpWidget(){
       drawPumpChart(canvas, window.pumpChartRange);
     });
   }
-  const expandBtn = chartHost?.querySelector(".pump-expand-btn");
-  expandBtn?.addEventListener("click", ()=>{
-    const isExpanded = expandBtn.getAttribute("data-expanded") === "true";
-    window.pumpChartExpanded = !isExpanded;
-    renderPumpWidget();
-  });
-  chartHost?.querySelector("[data-pump-backdrop]")?.addEventListener("click", ()=>{
-    window.pumpChartExpanded = false;
-    renderPumpWidget();
-  });
+  if (expandBtn){
+    expandBtn.setAttribute("data-expanded", window.pumpChartExpanded ? "true" : "false");
+    expandBtn.addEventListener("click", ()=>{
+      const isExpanded = expandBtn.getAttribute("data-expanded") === "true";
+      window.pumpChartExpanded = !isExpanded;
+      renderPumpWidget();
+    });
+  }
   drawPumpChart(canvas, window.pumpChartRange);
   if (typeof notifyDashboardLayoutContentChanged === "function"){
     notifyDashboardLayoutContentChanged();

@@ -37,29 +37,33 @@
   box-shadow:0 10px 20px rgba(6, 28, 76, 0.3);
 }
 .pump-expand-btn:active { transform:translateY(0); }
-.pump-chart-wrap.pump-chart-wrap-expanded {
-  position:fixed;
-  top:50%;
-  left:50%;
-  transform:translate(-50%,-50%);
-  width:min(1000px,92vw);
-  height:min(80vh,680px);
-  background:var(--brand-card-bg);
-  box-shadow:0 40px 70px rgba(3, 19, 54, 0.45);
-  border-radius:24px;
-  padding:32px 32px 80px;
-  z-index:1100;
-  flex-direction:column;
-  align-items:stretch;
-  justify-content:flex-start;
-  gap:16px;
+.pump-chart-card.pump-chart-card-expanded {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(1000px, 92vw);
+  height: min(80vh, 680px);
+  background: var(--brand-card-bg);
+  box-shadow: 0 40px 70px rgba(3, 19, 54, 0.45);
+  border-radius: 24px;
+  padding: 32px 32px 80px;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: auto;
 }
-.pump-chart-wrap.pump-chart-wrap-expanded canvas {
-  max-width:100%;
-  width:100%;
-  height:auto;
-  flex:0 0 auto;
-  margin:0 auto;
+.pump-chart-card.pump-chart-card-expanded .pump-chart-wrap {
+  flex: 1 1 auto;
+  width: 100%;
+  padding: 0 0 52px;
+}
+.pump-chart-card.pump-chart-card-expanded .pump-chart-wrap canvas {
+  max-width: 100%;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
 }
 .pump-chart-backdrop {
   position:fixed;
