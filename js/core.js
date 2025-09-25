@@ -328,9 +328,17 @@ if (typeof window.RENDER_TOTAL !== "number") window.RENDER_TOTAL = null;
 if (typeof window.RENDER_DELTA !== "number") window.RENDER_DELTA = 0;
 
 const editingJobs  = window.editingJobs;
-const editingCompletedJobs = window.editingCompletedJobs;
 let   RENDER_TOTAL = window.RENDER_TOTAL;
 let   RENDER_DELTA = window.RENDER_DELTA;
+
+function getEditingCompletedJobsSet(){
+  if (!(window.editingCompletedJobs instanceof Set)){
+    window.editingCompletedJobs = new Set();
+  }
+  return window.editingCompletedJobs;
+}
+
+window.getEditingCompletedJobsSet = getEditingCompletedJobsSet;
 
 window.defaultIntervalTasks = defaultIntervalTasks;
 window.defaultAsReqTasks = defaultAsReqTasks;

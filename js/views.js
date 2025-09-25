@@ -1072,13 +1072,21 @@ function viewJobs(){
   };
 
   const historyColumnCount = 7;
+  const editingCompletedJobsSet = typeof getEditingCompletedJobsSet === "function"
+    ? getEditingCompletedJobsSet()
+    : (()=>{
+        if (!(window.editingCompletedJobs instanceof Set)){
+          window.editingCompletedJobs = new Set();
+        }
+        return window.editingCompletedJobs;
+      })();
   const completedRows = completedSorted.map(job => {
     const eff = job && job.efficiency ? job.efficiency : {};
     const delta = Number(eff.deltaHours);
     const gainLoss = Number(eff.gainLoss);
     const actualHours = Number(job.actualHours ?? eff.actualHours);
     const estHours = Number(job.estimateHours);
-    const editingHistory = editingCompletedJobs.has(String(job.id));
+    const editingHistory = editingCompletedJobsSet.has(String(job.id));
     let statusLabel = "Finished on estimate";
     if (Number.isFinite(delta) && Math.abs(delta) > 0.1){
       statusLabel = delta > 0 ? "Finished ahead" : "Finished behind";

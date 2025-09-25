@@ -4,6 +4,16 @@ const pendingNewJobFiles = window.pendingNewJobFiles;
 if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
 const orderPartialSelection = window.orderPartialSelection;
 
+function editingCompletedJobsSet(){
+  if (typeof getEditingCompletedJobsSet === "function"){
+    return getEditingCompletedJobsSet();
+  }
+  if (!(window.editingCompletedJobs instanceof Set)){
+    window.editingCompletedJobs = new Set();
+  }
+  return window.editingCompletedJobs;
+}
+
 function readFileAsDataUrl(file){
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
@@ -4891,13 +4901,13 @@ function renderJobs(){
 
     if (histEdit){
       const id = histEdit.getAttribute("data-history-edit");
-      if (id != null){ editingCompletedJobs.add(String(id)); renderJobs(); }
+      if (id != null){ editingCompletedJobsSet().add(String(id)); renderJobs(); }
       return;
     }
 
     if (histCancel){
       const id = histCancel.getAttribute("data-history-cancel");
-      if (id != null){ editingCompletedJobs.delete(String(id)); renderJobs(); }
+      if (id != null){ editingCompletedJobsSet().delete(String(id)); renderJobs(); }
       return;
     }
 
@@ -4911,7 +4921,7 @@ function renderJobs(){
       const idStr = String(id);
       completedCuttingJobs = completedCuttingJobs.filter(job => String(job?.id) !== idStr);
       window.completedCuttingJobs = completedCuttingJobs;
-      editingCompletedJobs.delete(idStr);
+      editingCompletedJobsSet().delete(idStr);
       saveCloudDebounced();
       toast("History entry deleted");
       renderJobs();
@@ -4984,7 +4994,7 @@ function renderJobs(){
         gainLoss
       };
 
-      editingCompletedJobs.delete(String(id));
+      editingCompletedJobsSet().delete(String(id));
       saveCloudDebounced();
       toast("History updated");
       renderJobs();
