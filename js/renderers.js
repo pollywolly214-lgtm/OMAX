@@ -3225,6 +3225,40 @@ function renderSettings(){
     return null;
   }
 
+  function findInventoryMatchesForTask(task){
+    if (!task || !Array.isArray(inventory)) return [];
+    const matches = [];
+    const seen = new Set();
+    const candidateIds = new Set();
+    if (task.inventoryId != null){
+      candidateIds.add(String(task.inventoryId));
+    }
+    if (task.id != null){
+      candidateIds.add(`inv_${task.id}`);
+    }
+    const taskPN = typeof task.pn === "string" ? task.pn.trim().toLowerCase() : "";
+    const taskLink = typeof task.storeLink === "string" ? task.storeLink.trim() : "";
+    inventory.forEach(item => {
+      if (!item) return;
+      const itemId = item.id != null ? String(item.id) : "";
+      if (itemId && candidateIds.has(itemId) && !seen.has(itemId)){
+        matches.push(item);
+        seen.add(itemId);
+        return;
+      }
+      if (taskPN && item.pn && String(item.pn).trim().toLowerCase() === taskPN && !seen.has(itemId)){
+        matches.push(item);
+        seen.add(itemId);
+        return;
+      }
+      if (taskLink && item.link && String(item.link).trim() === taskLink && !seen.has(itemId)){
+        matches.push(item);
+        seen.add(itemId);
+      }
+    });
+    return matches;
+  }
+
   function updateDueChip(holder, task){
     const chip = holder.querySelector('[data-due-chip]');
     if (!chip) return;
@@ -3310,13 +3344,40 @@ function renderSettings(){
     const removeBtn = e.target.closest('[data-remove]');
     if (removeBtn){
       const id = removeBtn.getAttribute('data-remove');
-      const from = removeBtn.getAttribute('data-from');
+      const meta = findTaskMeta(id);
+      if (!meta) return;
+      const task = meta.task;
+      const matches = findInventoryMatchesForTask(task);
+      let removeInventoryAlso = false;
+      if (matches.length){
+        const taskLabel = task && task.name ? `"${task.name}"` : "this task";
+        if (typeof window.confirm === "function"){
+          const inventoryLabel = matches.length === 1
+            ? (matches[0] && matches[0].name ? `"${matches[0].name}"` : "this inventory item")
+            : `${matches.length} inventory items`;
+          const message = matches.length === 1
+            ? `Delete ${taskLabel}? This task is also in inventory as ${inventoryLabel}. Remove it from inventory too?`
+            : `Delete ${taskLabel}? This task is also in inventory (${inventoryLabel}). Remove them from inventory too?`;
+          removeInventoryAlso = window.confirm(message);
+        }
+      }
       window.tasksInterval.forEach(t => { if (String(t.parentTask) === String(id)) t.parentTask = null; });
       window.tasksAsReq.forEach(t => { if (String(t.parentTask) === String(id)) t.parentTask = null; });
-      if (from === 'interval') window.tasksInterval = window.tasksInterval.filter(t => String(t.id)!==String(id));
+      if (meta.mode === 'interval') window.tasksInterval = window.tasksInterval.filter(t => String(t.id)!==String(id));
       else window.tasksAsReq = window.tasksAsReq.filter(t => String(t.id)!==String(id));
       persist();
-      renderSettings();
+      let reRendered = false;
+      if (removeInventoryAlso){
+        matches.forEach(item => {
+          if (!item || item.id == null) return;
+          if (deleteInventoryItem(item.id, { skipConfirm: true })){
+            reRendered = true;
+          }
+        });
+      }
+      if (!reRendered){
+        renderSettings();
+      }
       return;
     }
     const completeBtn = e.target.closest('.btn-complete');
@@ -4878,23 +4939,29 @@ function addInventoryItemToOrder(inventoryId){
   if (location.hash === "#/order-request" || location.hash === "#order-request"){ renderOrderRequest(); }
 }
 
-function deleteInventoryItem(id){
+function deleteInventoryItem(id, options){
+  const opts = options || {};
+  const skipConfirm = opts.skipConfirm === true;
+  const suppressToast = opts.suppressToast === true;
+  const suppressRender = opts.suppressRender === true;
   const idx = inventory.findIndex(item => item && item.id === id);
   if (idx < 0){ toast("Inventory item not found."); return false; }
 
   const item = inventory[idx];
   const label = item && item.name ? `"${item.name}"` : "this item";
   const message = `Delete ${label}? This will remove it from inventory, maintenance settings, and the dashboard on every page.`;
-  const confirmed = window.confirm(message);
+  const confirmed = skipConfirm ? true : window.confirm(message);
   if (!confirmed) return false;
 
   inventory.splice(idx, 1);
   saveCloudDebounced();
-  toast("Inventory item removed");
+  if (!suppressToast) toast("Inventory item removed");
 
-  const hash = (location.hash || "#").toLowerCase();
-  if (hash === "#/settings" || hash === "#settings"){ renderSettings(); }
-  if (hash === "#/dashboard" || hash === "#dashboard" || hash === "#/" || hash === "#"){ renderDashboard(); }
+  if (!suppressRender){
+    const hash = (location.hash || "#").toLowerCase();
+    if (hash === "#/settings" || hash === "#settings"){ renderSettings(); }
+    if (hash === "#/dashboard" || hash === "#dashboard" || hash === "#/" || hash === "#"){ renderDashboard(); }
+  }
 
   return true;
 }
