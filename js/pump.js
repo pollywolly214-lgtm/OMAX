@@ -3,8 +3,12 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
-const PUMP_BASE_FONT_SCALE = 3.15;
+const PUMP_BASE_FONT_SCALE = 1.45;
 const pumpViewportState = { bound:false, lastResponsiveScale:1 };
+let pumpLayoutObserver = null;
+let pumpObservedWrap = null;
+let pumpObservedCanvas = null;
+const pumpObservedSize = { width:null, height:null };
 const pumpChartLayout = {
   baseWidth: 640,
   baseHeight: 360,
@@ -55,7 +59,11 @@ function ensurePumpViewportWatcher(){
     pumpViewportState.lastResponsiveScale = next;
     const canvas = document.getElementById("pumpChart");
     if (canvas){
-      pumpResizeCanvas(canvas);
+      const dims = pumpResizeCanvas(canvas);
+      if (window.pumpChartExpanded){
+        const card = canvas.closest(".pump-chart-card");
+        pumpApplyExpandedCardSizing(card, dims);
+      }
       drawPumpChart(canvas, window.pumpChartRange);
     }
   };
@@ -74,6 +82,73 @@ function pumpUpdateBaseChartSize(width, height){
   }
 }
 
+function pumpDisconnectLayoutObserver(){
+  if (pumpLayoutObserver){
+    pumpLayoutObserver.disconnect();
+    pumpLayoutObserver = null;
+  }
+  pumpObservedWrap = null;
+  pumpObservedCanvas = null;
+  pumpObservedSize.width = null;
+  pumpObservedSize.height = null;
+}
+
+function pumpEnsureLayoutObserver(wrap, canvas){
+  pumpObservedCanvas = canvas || null;
+  if (!window.ResizeObserver){
+    return;
+  }
+  if (!wrap || !canvas){
+    pumpDisconnectLayoutObserver();
+    return;
+  }
+  if (pumpObservedWrap === wrap && pumpObservedCanvas === canvas) return;
+  pumpDisconnectLayoutObserver();
+  pumpLayoutObserver = new ResizeObserver(()=>{
+    if (!pumpObservedCanvas) return;
+    const dims = pumpResizeCanvas(pumpObservedCanvas);
+    if (!dims) return;
+    if (pumpObservedSize.width === dims.width && pumpObservedSize.height === dims.height) return;
+    pumpObservedSize.width = dims.width;
+    pumpObservedSize.height = dims.height;
+    if (window.pumpChartExpanded){
+      const card = pumpObservedCanvas.closest(".pump-chart-card");
+      pumpApplyExpandedCardSizing(card, dims);
+    }
+    drawPumpChart(pumpObservedCanvas, window.pumpChartRange);
+  });
+  pumpLayoutObserver.observe(wrap);
+  pumpObservedWrap = wrap;
+}
+
+function pumpComputeExpandedCardBounds(canvasDims){
+  if (!canvasDims) return null;
+  const viewportW = window.innerWidth || document.documentElement?.clientWidth || canvasDims.width;
+  const viewportH = window.innerHeight || document.documentElement?.clientHeight || canvasDims.height;
+  const horizontalPadding = 72;
+  const viewportWidthLimit = Math.max(360, viewportW - 48);
+  const desiredCardWidth = Math.max(canvasDims.width + horizontalPadding, pumpChartLayout.baseWidth + horizontalPadding + 48);
+  const cardWidth = Math.min(viewportWidthLimit, desiredCardWidth);
+  const verticalPadding = 132;
+  const viewportHeightLimit = Math.max(360, viewportH - 48);
+  const desiredCardHeight = Math.min(viewportHeightLimit, canvasDims.height + verticalPadding);
+  return {
+    width: Math.round(cardWidth),
+    maxWidth: Math.round(viewportWidthLimit),
+    maxHeight: Math.round(desiredCardHeight)
+  };
+}
+
+function pumpApplyExpandedCardSizing(card, canvasDims){
+  if (!card) return;
+  const bounds = pumpComputeExpandedCardBounds(canvasDims);
+  if (!bounds) return;
+  card.style.maxWidth = `${bounds.maxWidth}px`;
+  card.style.width = `${bounds.width}px`;
+  card.style.maxHeight = `${bounds.maxHeight}px`;
+  card.style.height = "auto";
+}
+
 function pumpComputeCanvasSize(canvas){
   const expanded = window.pumpChartExpanded === true;
   const baseWidth = Math.max(1, pumpChartLayout.baseWidth || 0);
@@ -84,19 +159,28 @@ function pumpComputeCanvasSize(canvas){
   if (expanded){
     const viewportW = window.innerWidth || document.documentElement?.clientWidth || (baseWidth * 1.35);
     const viewportH = window.innerHeight || document.documentElement?.clientHeight || (baseHeight * 1.35);
-    const maxWidth = Math.max(420, viewportW - 200);
-    const rawMinWidth = Math.max(480, baseWidth + 120, baseWidth * 1.12);
-    const minWidth = Math.min(rawMinWidth, maxWidth);
-    const targetWidth = Math.max(minWidth, baseWidth * 1.35);
-    width = Math.round(Math.min(maxWidth, targetWidth));
-    if (width < minWidth) width = Math.round(minWidth);
+    const horizontalPadding = 72;
+    const viewportWidthLimit = Math.max(360, viewportW - 48);
+    const desiredCardWidth = Math.max(
+      baseWidth * 1.4 + horizontalPadding,
+      baseWidth + horizontalPadding + 96,
+      540
+    );
+    const cardWidth = Math.min(viewportWidthLimit, Math.max(desiredCardWidth, baseWidth + horizontalPadding + 48));
+    width = Math.max(320, Math.round(cardWidth - horizontalPadding));
+    const viewportHeightLimit = Math.max(360, viewportH - 48);
+    const verticalPadding = 132;
+    const maxCanvasHeight = Math.max(280, viewportHeightLimit - verticalPadding);
     height = Math.round(width * aspect);
-    const maxHeight = Math.max(320, viewportH - 240);
-    if (height > maxHeight){
-      height = Math.round(maxHeight);
-      width = Math.round(height / aspect);
-      if (width > maxWidth) width = Math.round(maxWidth);
-      if (width < minWidth) width = Math.round(minWidth);
+    if (height > maxCanvasHeight){
+      height = Math.round(maxCanvasHeight);
+      width = Math.max(320, Math.round(height / aspect));
+      if (width + horizontalPadding > viewportWidthLimit){
+        width = Math.max(320, Math.round(viewportWidthLimit - horizontalPadding));
+      }
+    }
+    if (width + horizontalPadding > viewportWidthLimit){
+      width = Math.max(320, Math.round(viewportWidthLimit - horizontalPadding));
       height = Math.round(width * aspect);
     }
   }else{
@@ -168,20 +252,7 @@ function pumpMountOverlay(card){
   document.body.classList.add("pump-chart-expanded");
   const canvas = card.querySelector("#pumpChart");
   const dims = pumpResizeCanvas(canvas);
-  if (dims){
-    const viewportW = window.innerWidth || document.documentElement?.clientWidth || dims.width;
-    const viewportH = window.innerHeight || document.documentElement?.clientHeight || dims.height;
-    const paddingAllowance = 72; // horizontal padding inside the card when expanded
-    const viewportWidthLimit = Math.max(320, viewportW - 48);
-    const minCardWidth = Math.min(viewportWidthLimit, dims.width + paddingAllowance);
-    const desiredCardWidth = Math.min(viewportWidthLimit, Math.max(minCardWidth, pumpChartLayout.baseWidth + paddingAllowance + 48));
-    card.style.maxWidth = `${Math.round(viewportWidthLimit)}px`;
-    card.style.width = `${Math.round(desiredCardWidth)}px`;
-    const verticalAllowance = 132; // top+bottom padding
-    const viewportHeightLimit = Math.max(360, viewportH - 48);
-    const desiredCardHeight = Math.min(viewportHeightLimit, dims.height + verticalAllowance);
-    card.style.maxHeight = `${Math.round(desiredCardHeight)}px`;
-  }
+  pumpApplyExpandedCardSizing(card, dims);
   const close = ()=>{ window.pumpChartExpanded = false; renderPumpWidget(); };
   backdrop.addEventListener("click", close);
   pumpOverlayEscapeHandler = (event)=>{
@@ -431,6 +502,7 @@ function viewPumpChartWidget(){
 }
 function renderPumpWidget(){
   pumpDestroyOverlay();
+  pumpDisconnectLayoutObserver();
   const logHost = document.getElementById("pump-log-widget");
   if (logHost) logHost.innerHTML = viewPumpLogWidget();
   const chartHost = document.getElementById("pump-chart-widget");
@@ -452,19 +524,20 @@ function renderPumpWidget(){
     upsertPumpEntry(d, rpm); saveCloudDebounced(); toast("Log saved"); renderPumpWidget();
   });
   const card = chartHost?.querySelector(".pump-chart-card");
-  const canvas = document.getElementById("pumpChart");
-  if (canvas && !window.pumpChartExpanded){
-    pumpResizeCanvas(canvas);
-  }
   ensurePumpViewportWatcher();
   const rangeSelect = document.getElementById("pumpRange");
   if (rangeSelect){
     if (rangeSelect.value !== window.pumpChartRange) rangeSelect.value = window.pumpChartRange;
     rangeSelect.addEventListener("change", (e)=>{
       window.pumpChartRange = e.target.value;
-      if (canvas){
-        pumpResizeCanvas(canvas);
-        drawPumpChart(canvas, window.pumpChartRange);
+      const currentCanvas = document.getElementById("pumpChart");
+      if (currentCanvas){
+        const dims = pumpResizeCanvas(currentCanvas);
+        if (window.pumpChartExpanded){
+          const currentCard = currentCanvas.closest(".pump-chart-card");
+          pumpApplyExpandedCardSizing(currentCard, dims);
+        }
+        drawPumpChart(currentCanvas, window.pumpChartRange);
       }
     });
   }
@@ -479,11 +552,18 @@ function renderPumpWidget(){
   if (window.pumpChartExpanded && card){
     pumpMountOverlay(card);
   }
-  if (canvas){
+  const activeCanvas = document.getElementById("pumpChart");
+  const activeCard = activeCanvas?.closest(".pump-chart-card");
+  const activeWrap = activeCard?.querySelector(".pump-chart-wrap");
+  if (activeCanvas){
+    const dims = pumpResizeCanvas(activeCanvas);
     if (window.pumpChartExpanded){
-      pumpResizeCanvas(canvas);
+      pumpApplyExpandedCardSizing(activeCard, dims);
     }
-    drawPumpChart(canvas, window.pumpChartRange);
+    pumpEnsureLayoutObserver(activeWrap, activeCanvas);
+    drawPumpChart(activeCanvas, window.pumpChartRange);
+  }else{
+    pumpDisconnectLayoutObserver();
   }
   if (typeof notifyDashboardLayoutContentChanged === "function"){
     notifyDashboardLayoutContentChanged();
