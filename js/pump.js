@@ -3,8 +3,14 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
-const PUMP_BASE_FONT_SCALE = 3.9;
+const PUMP_BASE_FONT_SCALE = 4.1;
 const pumpViewportState = { bound:false, lastResponsiveScale:1, baseScale:null, baseScaleChanged:false };
+
+function pumpResetViewportBaseline(){
+  pumpViewportState.baseScale = null;
+  pumpViewportState.baseScaleChanged = true;
+  pumpViewportState.lastResponsiveScale = 1;
+}
 
 function ensurePumpOverlayBackdrop(){
   let backdrop = document.querySelector("[data-pump-overlay-backdrop]");
@@ -348,6 +354,7 @@ function renderPumpWidget(){
     const backdrop = ensurePumpOverlayBackdrop();
     backdrop.onclick = ()=>{
       window.pumpChartExpanded = false;
+      pumpResetViewportBaseline();
       renderPumpWidget();
     };
     card.classList.add("pump-chart-card-expanded");
@@ -390,6 +397,7 @@ function renderPumpWidget(){
     expandBtn.addEventListener("click", ()=>{
       const isExpanded = expandBtn.getAttribute("data-expanded") === "true";
       window.pumpChartExpanded = !isExpanded;
+      pumpResetViewportBaseline();
       renderPumpWidget();
     });
   }
