@@ -3,9 +3,10 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
-const PUMP_BASE_FONT_SCALE = 4.8;
+const PUMP_BASE_FONT_SCALE = 5.2;
 const PUMP_FONT_WIDTH_BASE = 360;
 const pumpViewportState = { bound:false, lastResponsiveScale:1, baseScale:null, baseScaleChanged:false };
+let pumpOverlayEscapeHandler = null;
 
 function pumpResetViewportBaseline(){
   pumpViewportState.baseScale = null;
@@ -13,15 +14,52 @@ function pumpResetViewportBaseline(){
   pumpViewportState.lastResponsiveScale = 1;
 }
 
-function ensurePumpOverlayBackdrop(){
-  let backdrop = document.querySelector("[data-pump-overlay-backdrop]");
-  if (!backdrop){
-    backdrop = document.createElement("div");
-    backdrop.className = "pump-chart-backdrop";
-    backdrop.setAttribute("data-pump-overlay-backdrop", "true");
-    document.body.appendChild(backdrop);
+function pumpRemoveOverlayEscapeHandler(){
+  if (pumpOverlayEscapeHandler){
+    document.removeEventListener("keydown", pumpOverlayEscapeHandler);
+    pumpOverlayEscapeHandler = null;
   }
-  return backdrop;
+}
+
+function pumpCloseExpandedChart(){
+  if (!window.pumpChartExpanded) return;
+  window.pumpChartExpanded = false;
+  pumpResetViewportBaseline();
+  pumpRemoveOverlayEscapeHandler();
+  renderPumpWidget();
+}
+
+function pumpAttachOverlayEscapeHandler(){
+  pumpRemoveOverlayEscapeHandler();
+  pumpOverlayEscapeHandler = (event)=>{
+    if (event.key === "Escape" || event.key === "Esc"){
+      event.preventDefault();
+      pumpCloseExpandedChart();
+    }
+  };
+  document.addEventListener("keydown", pumpOverlayEscapeHandler);
+}
+
+function pumpMountExpandedCard(card){
+  card.classList.add("pump-chart-card-expanded");
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-modal", "true");
+  card.setAttribute("tabindex", "-1");
+  const overlay = document.createElement("div");
+  overlay.className = "pump-chart-overlay";
+  overlay.setAttribute("data-pump-overlay-card", "true");
+
+  const backdrop = document.createElement("button");
+  backdrop.type = "button";
+  backdrop.className = "pump-chart-backdrop";
+  backdrop.setAttribute("aria-label", "Close expanded pump chart");
+  backdrop.addEventListener("click", pumpCloseExpandedChart);
+
+  overlay.appendChild(backdrop);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  pumpAttachOverlayEscapeHandler();
+  requestAnimationFrame(()=>{ card.focus(); });
 }
 
 function pumpGetViewportScale(){
@@ -338,7 +376,7 @@ function renderPumpWidget(){
   if (logHost) logHost.innerHTML = viewPumpLogWidget();
   const chartHost = document.getElementById("pump-chart-widget");
   document.querySelectorAll("[data-pump-overlay-card]").forEach(el => el.remove());
-  document.querySelector("[data-pump-overlay-backdrop]")?.remove();
+  pumpRemoveOverlayEscapeHandler();
   if (chartHost) chartHost.innerHTML = viewPumpChartWidget();
   if (!logHost && !chartHost) return;
   document.body.classList.toggle("pump-chart-expanded", !!window.pumpChartExpanded);
@@ -361,15 +399,7 @@ function renderPumpWidget(){
   const rangeSelect = card?.querySelector("#pumpRange");
   const expandBtn = card?.querySelector(".pump-expand-btn");
   if (window.pumpChartExpanded && card){
-    const backdrop = ensurePumpOverlayBackdrop();
-    backdrop.onclick = ()=>{
-      window.pumpChartExpanded = false;
-      pumpResetViewportBaseline();
-      renderPumpWidget();
-    };
-    card.classList.add("pump-chart-card-expanded");
-    card.setAttribute("data-pump-overlay-card", "true");
-    document.body.appendChild(card);
+    pumpMountExpandedCard(card);
   }
   const canvas = document.getElementById("pumpChart");
   const wrap   = canvas?.closest(".pump-chart-wrap");
