@@ -626,6 +626,7 @@ function renderPumpWidget(){
     }
     pumpEnsureLayoutObserver(activeWrap, activeCanvas);
     drawPumpChart(activeCanvas, window.pumpChartRange);
+    pumpWireChartTooltip(activeCard, activeCanvas);
   }else{
     pumpDisconnectLayoutObserver();
   }
@@ -633,6 +634,180 @@ function renderPumpWidget(){
     notifyDashboardLayoutContentChanged();
   }
 }
+
+function pumpEscapeTooltipValue(value){
+  return String(value ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[c] || c);
+}
+
+function pumpEnsureTooltip(wrap){
+  if (!wrap) return null;
+  let tooltip = wrap.querySelector(".pump-chart-tooltip");
+  if (!tooltip){
+    tooltip = document.createElement("div");
+    tooltip.className = "pump-chart-tooltip";
+    tooltip.setAttribute("role", "tooltip");
+    tooltip.hidden = true;
+    wrap.appendChild(tooltip);
+  }
+  return tooltip;
+}
+
+function pumpHideChartTooltip(canvas, tooltip){
+  if (tooltip){
+    tooltip.hidden = true;
+    tooltip.style.visibility = "";
+    tooltip.textContent = "";
+    delete tooltip.dataset.visible;
+    delete tooltip.dataset.placement;
+  }
+  if (canvas){
+    canvas.style.cursor = "";
+    delete canvas.__pumpChartHoveredKey;
+  }
+}
+
+function pumpShowChartTooltip(canvas, tooltip, target, { scaleX, scaleY }){
+  if (!canvas || !tooltip || !target) return;
+  const detailLines = Array.isArray(target.detailLines) ? target.detailLines : [];
+  const meta = canvas.__pumpChartTooltipMeta || {};
+  const extraLines = [];
+  if (meta && meta.usingFiltered === false){
+    extraLines.push("Only the most recent log is plotted.");
+  }
+  const contentLines = detailLines.concat(extraLines);
+  const lineMarkup = [`<strong>${pumpEscapeTooltipValue(target.datasetLabel)}</strong>`, `<span class="value">${pumpEscapeTooltipValue(target.valueLabel)}</span>`]
+    .concat(contentLines.map(line => `<span>${pumpEscapeTooltipValue(line)}</span>`))
+    .join("");
+  tooltip.innerHTML = lineMarkup;
+  tooltip.hidden = false;
+  tooltip.dataset.visible = "";
+  tooltip.dataset.placement = "";
+  tooltip.style.visibility = "hidden";
+  tooltip.style.left = "0px";
+  tooltip.style.top = "0px";
+
+  const cssScaleX = scaleX > 0 ? 1 / scaleX : 1;
+  const cssScaleY = scaleY > 0 ? 1 / scaleY : 1;
+  const centerX = target.rect.x + (target.rect.width / 2);
+  const canvasWidth = canvas.clientWidth || canvas.width;
+  const canvasHeight = canvas.clientHeight || canvas.height;
+  const margin = 18;
+
+  const tipBox = tooltip.getBoundingClientRect();
+  const tipWidth = tipBox.width || tooltip.offsetWidth || 0;
+  const tipHeight = tipBox.height || tooltip.offsetHeight || 0;
+
+  const halfWidth = tipWidth / 2;
+  const minAnchorX = margin + halfWidth;
+  const maxAnchorX = canvasWidth - margin - halfWidth;
+  const anchorXCss = maxAnchorX < minAnchorX
+    ? canvasWidth / 2
+    : Math.min(maxAnchorX, Math.max(minAnchorX, centerX * cssScaleX));
+
+  const targetTop = target.rect.y;
+  const targetBottom = target.rect.y + target.rect.height;
+  let anchorY = targetTop;
+  let placement = "above";
+
+  const topIfAbove = (targetTop * cssScaleY) - (tipHeight * 1.05);
+  if (topIfAbove < margin){
+    placement = "below";
+    anchorY = targetBottom;
+  }
+
+  let anchorYCss = anchorY * cssScaleY;
+  if (placement === "above"){
+    const minAnchorY = margin + (tipHeight * 1.05);
+    const maxAnchorY = canvasHeight - margin + (tipHeight * 0.1);
+    if (maxAnchorY < minAnchorY){
+      anchorYCss = (minAnchorY + maxAnchorY) / 2;
+    }else{
+      anchorYCss = Math.min(maxAnchorY, Math.max(minAnchorY, anchorYCss));
+    }
+  }else{
+    const minAnchorY = margin - (tipHeight * 0.1);
+    const maxAnchorY = canvasHeight - margin - (tipHeight * 1.05);
+    if (maxAnchorY < minAnchorY){
+      anchorYCss = (minAnchorY + maxAnchorY) / 2;
+    }else{
+      anchorYCss = Math.min(maxAnchorY, Math.max(minAnchorY, anchorYCss));
+    }
+  }
+
+  tooltip.dataset.placement = placement;
+  tooltip.style.left = `${anchorXCss}px`;
+  tooltip.style.top = `${anchorYCss}px`;
+  tooltip.style.visibility = "";
+  tooltip.dataset.visible = "true";
+  canvas.style.cursor = "pointer";
+  canvas.__pumpChartHoveredKey = target.key || null;
+}
+
+function pumpWireChartTooltip(card, canvas){
+  if (!canvas){
+    return;
+  }
+  if (typeof canvas.__pumpChartTooltipCleanup === "function"){
+    canvas.__pumpChartTooltipCleanup();
+  }
+  const wrap = card?.querySelector?.(".pump-chart-wrap") || canvas.closest?.(".pump-chart-wrap") || null;
+  const tooltip = pumpEnsureTooltip(wrap);
+  if (!wrap || !tooltip){
+    return;
+  }
+
+  const hide = ()=> pumpHideChartTooltip(canvas, tooltip);
+  const getTargets = ()=> Array.isArray(canvas.__pumpChartTargets) ? canvas.__pumpChartTargets : [];
+
+  const handlePointerHover = (event)=>{
+    const rect = canvas.getBoundingClientRect();
+    const clientWidth = canvas.clientWidth || rect.width || canvas.width;
+    const clientHeight = canvas.clientHeight || rect.height || canvas.height;
+    const scaleX = canvas.width / Math.max(1, clientWidth);
+    const scaleY = canvas.height / Math.max(1, clientHeight);
+    const pointerX = (event.clientX - rect.left) * scaleX;
+    const pointerY = (event.clientY - rect.top) * scaleY;
+    const targets = getTargets();
+    let hovered = null;
+    for (const target of targets){
+      if (!target || !target.rect) continue;
+      const { x, y, width, height } = target.rect;
+      if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
+        hovered = target;
+        break;
+      }
+    }
+    if (hovered){
+      pumpShowChartTooltip(canvas, tooltip, hovered, { scaleX, scaleY });
+    }else{
+      hide();
+    }
+  };
+
+  const handleLeave = ()=> hide();
+
+  canvas.addEventListener("pointermove", handlePointerHover);
+  canvas.addEventListener("pointerdown", handlePointerHover);
+  canvas.addEventListener("pointerleave", handleLeave);
+  canvas.addEventListener("pointercancel", handleLeave);
+  canvas.addEventListener("blur", handleLeave);
+
+  canvas.__pumpChartTooltipCleanup = ()=>{
+    canvas.removeEventListener("pointermove", handlePointerHover);
+    canvas.removeEventListener("pointerdown", handlePointerHover);
+    canvas.removeEventListener("pointerleave", handleLeave);
+    canvas.removeEventListener("pointercancel", handleLeave);
+    canvas.removeEventListener("blur", handleLeave);
+    hide();
+  };
+}
+
 function drawPumpChart(canvas, rangeValue){
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
@@ -658,6 +833,7 @@ function drawPumpChart(canvas, rangeValue){
   }
   const range = rangeValue || window.pumpChartRange || "3m";
   const dataAll = pumpEff.entries.slice();
+  const rangeLabel = pumpRangeLabel(range);
   const filtered = pumpFilterEntriesByRange(dataAll, range);
   const usingFiltered = filtered.length > 0;
   const desiredCount = Math.min(3, dataAll.length);
@@ -702,9 +878,11 @@ function drawPumpChart(canvas, rangeValue){
   const headerLatestY = Math.max(scaled(24), 30);
   const headerLineGap = Math.max(scaled(14), 18);
   const contextLabelY = headerLatestY + headerLineGap;
-  const topBlockPadding = Math.max(scaled(28), 34);
+  const contextDetailGap = Math.max(scaled(14), 16);
+  const entriesLabelY = contextLabelY + contextDetailGap;
+  const topBlockPadding = Math.max(scaled(30), 36);
   const margin = {
-    top: Math.max(contextLabelY + topBlockPadding, Math.max(74, scaled(48))),
+    top: Math.max(entriesLabelY + topBlockPadding, Math.max(76, scaled(50))),
     right: Math.max(18, scaled(7)),
     bottom: Math.max(hasSubLabel ? 72 : 52, scaled(hasSubLabel ? 26 : 22)),
     left: Math.max(52, scaled(18))
@@ -754,9 +932,10 @@ function drawPumpChart(canvas, rangeValue){
   ctx.lineWidth = Math.max(1.5, scaled(1.4));
   ctx.strokeStyle = "#0a63c2";
   ctx.fillStyle = "rgba(10,99,194,0.15)";
+  const pointRadius = Math.max(3, scaled(2.2));
   ctx.beginPath();
   if (singlePoint){
-    ctx.arc(X(xMin), Y(rpms[rpms.length-1]), Math.max(4, scaled(3)), 0, Math.PI * 2);
+    ctx.arc(X(xMin), Y(rpms[rpms.length-1]), Math.max(pointRadius, scaled(3.2)), 0, Math.PI * 2);
   }else{
     data.forEach((entry, idx)=>{
       const x = X(new Date(entry.dateISO+"T00:00:00").getTime());
@@ -773,14 +952,59 @@ function drawPumpChart(canvas, rangeValue){
   ctx.fillStyle = "#0a63c2";
   ctx.strokeStyle = "#0a63c2";
   ctx.lineWidth = Math.max(1, scaled(1.1));
+  const hitTargets = [];
+  const indexByDate = new Map();
+  dataAll.forEach((entry, idx)=>{ indexByDate.set(entry.dateISO, idx); });
+  const hoverRadius = Math.max(pointRadius * 2.8, scaled(18));
+
   data.forEach(entry => {
     const d = new Date(entry.dateISO+"T00:00:00");
     const x = X(d.getTime());
     const y = Y(entry.rpm);
     ctx.beginPath();
-    ctx.arc(x, y, Math.max(3, scaled(2.2)), 0, Math.PI*2);
+    ctx.arc(x, y, pointRadius, 0, Math.PI*2);
     ctx.fill();
     ctx.stroke();
+
+    const idxAll = indexByDate.get(entry.dateISO);
+    const prevEntry = (idxAll != null && idxAll > 0) ? dataAll[idxAll - 1] : null;
+    const pct = pumpPercentChange(entry.rpm);
+    const tooltipDate = d.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    });
+    const formattedRPM = Number.isFinite(entry.rpm)
+      ? Number(entry.rpm).toLocaleString(undefined, { maximumFractionDigits: 0 })
+      : String(entry.rpm ?? "");
+    const detailParts = [];
+    if (pct != null){
+      const pctSign = pct >= 0 ? "+" : "";
+      detailParts.push(`Δ vs baseline: ${pctSign}${pct.toFixed(1)}% (Baseline ${Number(baselineRPM).toLocaleString(undefined, { maximumFractionDigits: 0 })} RPM)`);
+    }else if (baselineRPM == null){
+      detailParts.push("Set a baseline to track % change.");
+    }
+    if (prevEntry && isFinite(prevEntry.rpm)){
+      const delta = Number(entry.rpm) - Number(prevEntry.rpm);
+      const deltaLabel = delta === 0
+        ? "No change from prior log"
+        : `${delta > 0 ? "+" : ""}${Math.round(delta).toLocaleString()} RPM vs prior log`;
+      detailParts.push(deltaLabel);
+    }
+    detailParts.push(`Range window: Last ${rangeLabel}`);
+    const rect = {
+      x: x - (hoverRadius / 2),
+      y: y - (hoverRadius / 2),
+      width: hoverRadius,
+      height: hoverRadius
+    };
+    hitTargets.push({
+      key: entry.dateISO,
+      rect,
+      datasetLabel: tooltipDate,
+      valueLabel: `${formattedRPM} RPM`,
+      detailLines: detailParts
+    });
   });
 
   ctx.strokeStyle = "rgba(12, 56, 112, 0.35)";
@@ -863,8 +1087,12 @@ function drawPumpChart(canvas, rangeValue){
   ctx.fillText(`Latest: ${latest.rpm} RPM (${latest.dateISO})  Δ%=${pct!=null?pct.toFixed(1):"—"}`, axisX0 + scaled(2), headerLatestY);
   ctx.font = fontPx(10.2);
   ctx.fillStyle = "#4b5b7a";
-  const label = usingFiltered ? pumpRangeLabel(range) : "Showing latest entry";
-  ctx.fillText(label, axisX0, contextLabelY);
+  ctx.fillText(`Range: Last ${rangeLabel}`, axisX0, contextLabelY);
+  ctx.fillStyle = usingFiltered ? "#4b5b7a" : "#b04545";
+  const entriesMessage = usingFiltered
+    ? `${data.length} log${data.length === 1 ? "" : "s"} plotted`
+    : "Latest log shown (no entries in selected window)";
+  ctx.fillText(entriesMessage, axisX0, entriesLabelY);
   if (!usingFiltered){
     ctx.fillStyle = "#b04545";
     ctx.font = fontPx(10.8);
@@ -872,4 +1100,16 @@ function drawPumpChart(canvas, rangeValue){
     ctx.fillText("No logs in selected range. Showing latest entry.", axisX0 + scaled(2), infoY);
   }
   ctx.restore();
+
+  canvas.__pumpChartTargets = hitTargets;
+  canvas.__pumpChartTooltipMeta = {
+    rangeLabel,
+    usingFiltered,
+    baselineRPM
+  };
+  const wrap = canvas.closest?.(".pump-chart-wrap") || null;
+  const tooltip = wrap ? wrap.querySelector(".pump-chart-tooltip") : null;
+  if (tooltip && tooltip.dataset.visible === "true"){
+    pumpHideChartTooltip(canvas, tooltip);
+  }
 }
