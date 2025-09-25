@@ -511,6 +511,17 @@ header::after {
   column-gap: 12px;
   row-gap: 4px;
 }
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+.header-actions .dashboard-settings {
+  margin-left: 0;
+}
 .header-bar h1 {
   margin: 0;
   font-size: clamp(26px, 4vw, 46px);
@@ -888,6 +899,20 @@ h1 { margin: 0 0 10px; font-size: 22px; }
   gap: 4px;
   z-index: 250;
 }
+.dashboard-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 0 2px;
+}
+.dashboard-settings-section[hidden] {
+  display: none;
+}
+.dashboard-settings-separator {
+  height: 1px;
+  margin: 6px 0;
+  background: linear-gradient(90deg, rgba(13, 50, 104, 0), rgba(13, 50, 104, 0.22), rgba(13, 50, 104, 0));
+}
 .dashboard-settings-menu[hidden] { display: none; }
 .dashboard-settings-item {
   width: 100%;
@@ -902,6 +927,15 @@ h1 { margin: 0 0 10px; font-size: 22px; }
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+.dashboard-settings-item-danger {
+  color: #b91c1c;
+  font-weight: 600;
+}
+.dashboard-settings-item-danger:hover,
+.dashboard-settings-item-danger:focus-visible {
+  background: rgba(185, 28, 28, 0.12);
+  color: #7f1313;
 }
 .dashboard-settings-item:hover,
 .dashboard-settings-item:focus-visible {

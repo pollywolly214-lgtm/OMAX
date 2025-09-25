@@ -318,7 +318,7 @@ function applyDashboardLayout(state){
 
 function updateDashboardEditUi(state){
   if (state.editButton){
-    const label = state.editing ? "Done editing layout" : "Edit layout";
+    const label = state.editing ? "Done editing dashboard" : "Edit dashboard layout";
     state.editButton.textContent = label;
     const pressed = state.editing ? "true" : "false";
     state.editButton.setAttribute("aria-pressed", pressed);
@@ -507,25 +507,38 @@ function ensureDashboardLayoutBoundResize(state){
   });
 }
 
-function getDashboardSettingsElements(){
+const appSettingsState = {
+  context: "default",
+  cleanup: null
+};
+
+function getAppSettingsElements(){
+  const wrap = document.getElementById("dashboardSettings") || null;
   const button = document.getElementById("dashboardSettingsToggle") || null;
-  const menu   = document.getElementById("dashboardSettingsMenu") || null;
-  const wrap   = document.getElementById("dashboardSettings") || null;
-  const state  = getDashboardLayoutState();
-  state.settingsButton = button;
-  state.settingsMenu = menu;
-  return { button, menu, wrap, state };
+  const menu = document.getElementById("dashboardSettingsMenu") || null;
+  return { wrap, button, menu };
 }
 
-function closeDashboardSettingsMenu(state){
-  const ctxState = state || getDashboardLayoutState();
-  if (!ctxState.settingsButton || !ctxState.settingsMenu){
-    const fresh = getDashboardSettingsElements();
-    if (!ctxState.settingsButton) ctxState.settingsButton = fresh.button;
-    if (!ctxState.settingsMenu) ctxState.settingsMenu = fresh.menu;
+function findAppSettingsFocusTarget(menu){
+  if (!menu) return null;
+  const candidates = Array.from(menu.querySelectorAll('[data-settings-focus], button, [href], [tabindex]:not([tabindex="-1"])'));
+  for (const el of candidates){
+    if (!el) continue;
+    if (el.closest('[hidden]')) continue;
+    if (typeof el.disabled !== "undefined" && el.disabled) continue;
+    if (typeof el.focus !== "function") continue;
+    const rects = el.getClientRects?.();
+    if (Array.isArray(rects) && rects.length === 0) continue;
+    if (rects && rects.length === 0) continue;
+    if (rects && rects.length && rects[0].width === 0 && rects[0].height === 0) continue;
+    if (el.offsetParent === null && window.getComputedStyle(el).position !== "fixed") continue;
+    return el;
   }
-  const menu = ctxState.settingsMenu;
-  const button = ctxState.settingsButton;
+  return null;
+}
+
+function closeDashboardSettingsMenu(){
+  const { button, menu } = getAppSettingsElements();
   if (menu && !menu.hidden){
     menu.hidden = true;
   }
@@ -535,73 +548,148 @@ function closeDashboardSettingsMenu(state){
   }
 }
 
-function openDashboardSettingsMenu(state){
-  const ctxState = state || getDashboardLayoutState();
-  if (!ctxState.settingsButton || !ctxState.settingsMenu){
-    const fresh = getDashboardSettingsElements();
-    if (!ctxState.settingsButton) ctxState.settingsButton = fresh.button;
-    if (!ctxState.settingsMenu) ctxState.settingsMenu = fresh.menu;
-  }
-  const menu = ctxState.settingsMenu;
-  const button = ctxState.settingsButton;
-  if (!menu || !button) return;
+function openDashboardSettingsMenu(){
+  const { button, menu } = getAppSettingsElements();
+  if (!button || !menu) return;
   if (!menu.hidden) return;
   menu.hidden = false;
   button.setAttribute("aria-expanded", "true");
   button.classList.add("is-open");
-  const focusTarget = menu.querySelector('[data-settings-focus], button, [href], [tabindex]:not([tabindex="-1"])');
-  focusTarget?.focus();
+  const focusTarget = findAppSettingsFocusTarget(menu);
+  if (focusTarget){
+    try { focusTarget.focus(); }
+    catch (_){ /* ignore */ }
+  }
 }
 
 function wireDashboardSettingsMenu(){
-  if (typeof window.dashboardSettingsCleanup === "function"){
-    window.dashboardSettingsCleanup();
-    window.dashboardSettingsCleanup = null;
-  }
-  const { button, menu, wrap, state } = getDashboardSettingsElements();
+  const { button, menu, wrap } = getAppSettingsElements();
   if (!button || !menu || !wrap) return;
+  if (typeof appSettingsState.cleanup === "function"){
+    appSettingsState.cleanup();
+    appSettingsState.cleanup = null;
+  }
   menu.hidden = true;
   button.setAttribute("aria-expanded", "false");
   button.classList.remove("is-open");
   const toggle = (event)=>{
     event.preventDefault();
     const expanded = button.getAttribute("aria-expanded") === "true";
-    if (expanded){ closeDashboardSettingsMenu(state); }
-    else { openDashboardSettingsMenu(state); }
+    if (expanded){ closeDashboardSettingsMenu(); }
+    else { openDashboardSettingsMenu(); }
   };
-  if (!button.dataset.bound){
-    button.dataset.bound = "1";
+  if (!button.dataset.boundAppSettings){
+    button.dataset.boundAppSettings = "1";
     button.addEventListener("click", toggle);
     button.addEventListener("keydown", (event)=>{
       if ((event.key === "Enter" || event.key === " ") && menu.hidden){
         event.preventDefault();
-        openDashboardSettingsMenu(state);
+        openDashboardSettingsMenu();
       }else if (event.key === "Escape" && !menu.hidden){
-        closeDashboardSettingsMenu(state);
+        closeDashboardSettingsMenu();
       }
     });
   }
   const handleDocumentClick = (event)=>{
-    if (!wrap.contains(event.target)) closeDashboardSettingsMenu(state);
+    if (!wrap.contains(event.target)) closeDashboardSettingsMenu();
   };
   const handleDocumentKey = (event)=>{
     if (event.key === "Escape" && !menu.hidden){
-      closeDashboardSettingsMenu(state);
+      closeDashboardSettingsMenu();
       button?.focus();
     }
   };
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("keydown", handleDocumentKey);
-  window.dashboardSettingsCleanup = ()=>{
+  appSettingsState.cleanup = ()=>{
     document.removeEventListener("click", handleDocumentClick);
     document.removeEventListener("keydown", handleDocumentKey);
   };
-  if (!menu.dataset.bound){
-    menu.dataset.bound = "1";
+  if (!menu.dataset.boundAppSettings){
+    menu.dataset.boundAppSettings = "1";
     menu.addEventListener("keydown", (event)=>{
-      if (event.key === "Escape"){ closeDashboardSettingsMenu(state); button?.focus(); }
+      if (event.key === "Escape"){ closeDashboardSettingsMenu(); button?.focus(); }
     });
   }
+  wireClearAllDataButtons();
+}
+
+function wireCostSettingsMenu(){
+  wireDashboardSettingsMenu();
+}
+
+function closeCostSettingsMenu(){
+  closeDashboardSettingsMenu();
+}
+
+function openCostSettingsMenu(){
+  openDashboardSettingsMenu();
+}
+
+function setAppSettingsContext(context){
+  appSettingsState.context = context || "default";
+  const { menu } = getAppSettingsElements();
+  if (!menu) return;
+  const sections = Array.from(menu.querySelectorAll("[data-app-settings-context]"));
+  sections.forEach(section => {
+    const attr = section.getAttribute("data-app-settings-context") || "";
+    const contexts = attr.split(",").map(s => s.trim()).filter(Boolean);
+    const show = contexts.length === 0 || contexts.includes(appSettingsState.context);
+    if (show) section.removeAttribute("hidden");
+    else section.setAttribute("hidden", "");
+  });
+  const divider = menu.querySelector(".dashboard-settings-separator");
+  if (divider){
+    const hasVisibleSection = sections.some(section => !section.hasAttribute("hidden"));
+    if (hasVisibleSection) divider.removeAttribute("hidden");
+    else divider.setAttribute("hidden", "");
+  }
+  closeDashboardSettingsMenu();
+}
+
+function wireClearAllDataButtons(){
+  const handler = typeof window.clearAllAppData === "function" ? window.clearAllAppData : null;
+  if (!handler) return;
+  document.querySelectorAll("#btnClearAllData").forEach(btn => {
+    if (!btn || btn.dataset.boundClearAll) return;
+    btn.dataset.boundClearAll = "1";
+    btn.addEventListener("click", async ()=>{
+      const expected = (typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
+        ? window.CLEAR_DATA_PASSWORD
+        : "";
+      const attempt = prompt("Enter the admin password to clear all data:");
+      if (attempt === null) return;
+      if (attempt !== expected){
+        alert("Incorrect password. Data was not cleared.");
+        return;
+      }
+      const confirmed = await showConfirmModal({
+        title: "Clear all data?",
+        message: "This will erase history, maintenance tasks, jobs, inventory, and orders for every user. This cannot be undone.",
+        confirmText: "Yes, clear everything",
+        confirmVariant: "danger",
+        cancelText: "Keep data"
+      });
+      if (!confirmed) return;
+
+      const originalText = btn.textContent;
+      const prevDisabled = btn.disabled;
+      btn.disabled = true;
+      btn.textContent = "Clearing…";
+      try {
+        await handler();
+        toast("Workspace reset to defaults.");
+      } catch (err){
+        console.error("Failed to clear all data", err);
+        alert("Unable to clear data. Please try again.");
+      } finally {
+        if (btn.isConnected){
+          btn.disabled = prevDisabled;
+          btn.textContent = originalText;
+        }
+      }
+    });
+  });
 }
 
 function setDashboardEditing(state, editing){
@@ -620,7 +708,7 @@ function setDashboardEditing(state, editing){
   }
   applyDashboardLayout(state);
   updateDashboardEditUi(state);
-  closeDashboardSettingsMenu(state);
+  closeDashboardSettingsMenu();
   if (!editing) persistDashboardLayout(state);
 }
 
@@ -656,7 +744,7 @@ function setupDashboardLayout(){
     state.editButton.dataset.bound = "1";
     state.editButton.addEventListener("click", ()=>{
       toggleDashboardEditing();
-      closeDashboardSettingsMenu(state);
+      closeDashboardSettingsMenu();
     });
   }
 }
@@ -850,7 +938,7 @@ function applyCostLayout(state){
 
 function updateCostEditUi(state){
   if (state.editButton){
-    const label = state.editing ? "Done editing layout" : "Edit layout";
+    const label = state.editing ? "Done editing cost layout" : "Edit cost layout";
     state.editButton.textContent = label;
     const pressed = state.editing ? "true" : "false";
     state.editButton.setAttribute("aria-pressed", pressed);
@@ -1041,103 +1129,6 @@ function ensureCostLayoutBoundResize(state){
   });
 }
 
-function getCostSettingsElements(){
-  const button = document.getElementById("costSettingsToggle") || null;
-  const menu   = document.getElementById("costSettingsMenu") || null;
-  const wrap   = document.getElementById("costSettings") || null;
-  const state  = getCostLayoutState();
-  state.settingsButton = button;
-  state.settingsMenu = menu;
-  return { button, menu, wrap, state };
-}
-
-function closeCostSettingsMenu(state){
-  const ctxState = state || getCostLayoutState();
-  if (!ctxState.settingsButton || !ctxState.settingsMenu){
-    const fresh = getCostSettingsElements();
-    if (!ctxState.settingsButton) ctxState.settingsButton = fresh.button;
-    if (!ctxState.settingsMenu) ctxState.settingsMenu = fresh.menu;
-  }
-  const menu = ctxState.settingsMenu;
-  const button = ctxState.settingsButton;
-  if (menu && !menu.hidden){
-    menu.hidden = true;
-  }
-  if (button){
-    button.setAttribute("aria-expanded", "false");
-    button.classList.remove("is-open");
-  }
-}
-
-function openCostSettingsMenu(state){
-  const ctxState = state || getCostLayoutState();
-  if (!ctxState.settingsButton || !ctxState.settingsMenu){
-    const fresh = getCostSettingsElements();
-    if (!ctxState.settingsButton) ctxState.settingsButton = fresh.button;
-    if (!ctxState.settingsMenu) ctxState.settingsMenu = fresh.menu;
-  }
-  const menu = ctxState.settingsMenu;
-  const button = ctxState.settingsButton;
-  if (!menu || !button) return;
-  if (!menu.hidden) return;
-  menu.hidden = false;
-  button.setAttribute("aria-expanded", "true");
-  button.classList.add("is-open");
-  const focusTarget = menu.querySelector('[data-settings-focus], button, [href], [tabindex]:not([tabindex="-1"])');
-  focusTarget?.focus();
-}
-
-function wireCostSettingsMenu(){
-  if (typeof window.costSettingsCleanup === "function"){
-    window.costSettingsCleanup();
-    window.costSettingsCleanup = null;
-  }
-  const { button, menu, wrap, state } = getCostSettingsElements();
-  if (!button || !menu || !wrap) return;
-  menu.hidden = true;
-  button.setAttribute("aria-expanded", "false");
-  button.classList.remove("is-open");
-  const toggle = (event)=>{
-    event.preventDefault();
-    const expanded = button.getAttribute("aria-expanded") === "true";
-    if (expanded){ closeCostSettingsMenu(state); }
-    else { openCostSettingsMenu(state); }
-  };
-  if (!button.dataset.bound){
-    button.dataset.bound = "1";
-    button.addEventListener("click", toggle);
-    button.addEventListener("keydown", (event)=>{
-      if ((event.key === "Enter" || event.key === " ") && menu.hidden){
-        event.preventDefault();
-        openCostSettingsMenu(state);
-      }else if (event.key === "Escape" && !menu.hidden){
-        closeCostSettingsMenu(state);
-      }
-    });
-  }
-  const handleDocumentClick = (event)=>{
-    if (!wrap.contains(event.target)) closeCostSettingsMenu(state);
-  };
-  const handleDocumentKey = (event)=>{
-    if (event.key === "Escape" && !menu.hidden){
-      closeCostSettingsMenu(state);
-      button?.focus();
-    }
-  };
-  document.addEventListener("click", handleDocumentClick);
-  document.addEventListener("keydown", handleDocumentKey);
-  window.costSettingsCleanup = ()=>{
-    document.removeEventListener("click", handleDocumentClick);
-    document.removeEventListener("keydown", handleDocumentKey);
-  };
-  if (!menu.dataset.bound){
-    menu.dataset.bound = "1";
-    menu.addEventListener("keydown", (event)=>{
-      if (event.key === "Escape"){ closeCostSettingsMenu(state); button?.focus(); }
-    });
-  }
-}
-
 function setCostEditing(state, editing){
   state.editing = !!editing;
   if (!state.root) return;
@@ -1154,7 +1145,7 @@ function setCostEditing(state, editing){
   }
   applyCostLayout(state);
   updateCostEditUi(state);
-  closeCostSettingsMenu(state);
+  closeCostSettingsMenu();
   if (!editing) persistCostLayout(state);
 }
 
@@ -1167,8 +1158,8 @@ function setupCostLayout(){
   const state = getCostLayoutState();
   state.root = document.getElementById("costLayout") || null;
   state.editButton = document.getElementById("costEditToggle") || null;
-  state.settingsButton = document.getElementById("costSettingsToggle") || null;
-  state.settingsMenu = document.getElementById("costSettingsMenu") || null;
+  state.settingsButton = document.getElementById("dashboardSettingsToggle") || null;
+  state.settingsMenu = document.getElementById("dashboardSettingsMenu") || null;
   state.hintEl = document.getElementById("costEditHint") || null;
   state.windows = state.root ? Array.from(state.root.querySelectorAll("[data-cost-window]")) : [];
   if (!state.root){
@@ -1190,7 +1181,7 @@ function setupCostLayout(){
     state.editButton.dataset.bound = "1";
     state.editButton.addEventListener("click", ()=>{
       toggleCostEditing();
-      closeCostSettingsMenu(state);
+      closeCostSettingsMenu();
     });
   }
 }
@@ -1206,6 +1197,8 @@ function notifyCostLayoutContentChanged(){
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   content.innerHTML = viewDashboard();
+  setAppSettingsContext("dashboard");
+  wireDashboardSettingsMenu();
 
   // Log hours
   document.getElementById("logBtn")?.addEventListener("click", ()=>{
@@ -2057,7 +2050,6 @@ function renderDashboard(){
 
   document.getElementById("calendarAddBtn")?.addEventListener("click", ()=> openModal("picker"));
 
-  wireDashboardSettingsMenu();
   setupDashboardLayout();
   renderCalendar();
   renderPumpWidget();
@@ -2645,6 +2637,8 @@ function renderSettings(){
   // === Explorer-style Maintenance Settings ===
   const root = document.getElementById("content");
   if (!root) return;
+  setAppSettingsContext("default");
+  wireDashboardSettingsMenu();
 
   // --- Ensure state is present ---
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
@@ -2765,6 +2759,9 @@ function renderSettings(){
       #explorer .toolbar{display:flex;flex-direction:column;align-items:center;gap:.75rem;margin-bottom:.75rem}
       #explorer .toolbar-actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;width:100%}
       #explorer .toolbar-actions button{padding:.35rem .65rem;font-size:.92rem;border-radius:8px}
+      #explorer .toolbar-actions button.danger{background:#ffe7e7;color:#b00020}
+      #explorer .toolbar-actions button.danger:hover:not(:disabled){background:#ffd1d1}
+      #explorer .toolbar-actions button:disabled{opacity:.55;cursor:default}
       #explorer .toolbar-search{display:flex;align-items:center;gap:.45rem;justify-content:center;background:#f3f4f8;border-radius:999px;padding:.4rem .7rem;border:1px solid #d0d7e4;box-shadow:0 6px 18px rgba(15,35,72,.08);margin:0 auto;width:min(420px,100%)}
       #explorer .toolbar-search .icon{font-size:1.05rem;color:#5b6a82;display:flex;align-items:center;justify-content:center}
       #explorer .toolbar-search input{flex:1;min-width:0;padding:.2rem;border:0;background:transparent;font-size:.95rem;color:#0f1e3a}
@@ -3167,6 +3164,7 @@ function renderSettings(){
           <div class="toolbar-actions">
             <button id="btnAddCategory">+ Add Category</button>
             <button id="btnAddTask">+ Add Task</button>
+            <button id="btnClearAllData" class="danger" title="Reset all maintenance data">🧹 Clear All Data</button>
           </div>
           <div class="toolbar-search">
             <span class="icon" aria-hidden="true">🔍</span>
@@ -3357,6 +3355,8 @@ function renderSettings(){
     modal.hidden = true;
     document.body?.classList.remove("modal-open");
   }
+
+  wireClearAllDataButtons();
 
   document.getElementById("btnAddCategory")?.addEventListener("click", ()=>{
     const name = prompt("Category name?");
@@ -4076,6 +4076,8 @@ function renderCosts(){
 
   const model = computeCostModel();
   content.innerHTML = viewCosts(model);
+  setAppSettingsContext("costs");
+  wireCostSettingsMenu();
 
   setupCostInfoPanel();
 
@@ -4234,7 +4236,6 @@ function renderCosts(){
 
   attachTooltipHandlers();
 
-  wireCostSettingsMenu();
   setupCostLayout();
   if (typeof setupCostTrainer === "function"){
     setupCostTrainer();
@@ -5062,8 +5063,10 @@ function drawCostChart(canvas, model, show){
 
 
 function renderJobs(){
-  const content = document.getElementById("content"); 
+  const content = document.getElementById("content");
   if (!content) return;
+  setAppSettingsContext("default");
+  wireDashboardSettingsMenu();
 
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
@@ -5508,6 +5511,8 @@ function renderJobs(){
 
 function renderInventory(){
   const content = document.getElementById("content"); if (!content) return;
+  setAppSettingsContext("default");
+  wireDashboardSettingsMenu();
   content.innerHTML = viewInventory();
   const rowsTarget = content.querySelector("[data-inventory-rows]");
   const searchInput = content.querySelector("#inventorySearch");
@@ -5696,6 +5701,8 @@ function renderInventory(){
 
 function renderSignedOut(){
   const content = document.getElementById("content"); if (!content) return;
+  setAppSettingsContext("default");
+  wireDashboardSettingsMenu();
   content.innerHTML = `
     <div class='container signed-out-container'>
       <div class='block signed-out-message'>
@@ -6090,6 +6097,8 @@ function finalizeOrderRequest(mode){
 
 function renderOrderRequest(){
   const content = document.getElementById("content"); if (!content) return;
+  setAppSettingsContext("default");
+  wireDashboardSettingsMenu();
   const model = computeOrderRequestModel();
   content.innerHTML = viewOrderRequest(model);
 
