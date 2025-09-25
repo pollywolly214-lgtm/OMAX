@@ -3,12 +3,12 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
-const PUMP_BASE_FONT_SCALE = 1.52;
+const PUMP_BASE_FONT_SCALE = 1.62;
 const pumpViewportState = { bound:false, lastResponsiveScale:1 };
 let pumpLayoutObserver = null;
 let pumpObservedWrap = null;
 let pumpObservedCanvas = null;
-const pumpObservedSize = { width:null, height:null };
+const pumpObservedSize = { width:null, height:null, rawWidth:null, rawHeight:null };
 const pumpChartLayout = {
   baseWidth: 640,
   baseHeight: 360,
@@ -91,6 +91,8 @@ function pumpDisconnectLayoutObserver(){
   pumpObservedCanvas = null;
   pumpObservedSize.width = null;
   pumpObservedSize.height = null;
+  pumpObservedSize.rawWidth = null;
+  pumpObservedSize.rawHeight = null;
 }
 
 function pumpEnsureLayoutObserver(wrap, canvas){
@@ -104,18 +106,31 @@ function pumpEnsureLayoutObserver(wrap, canvas){
   }
   if (pumpObservedWrap === wrap && pumpObservedCanvas === canvas) return;
   pumpDisconnectLayoutObserver();
-  pumpLayoutObserver = new ResizeObserver(()=>{
+  pumpLayoutObserver = new ResizeObserver((entries)=>{
     if (!pumpObservedCanvas) return;
-    const dims = pumpResizeCanvas(pumpObservedCanvas);
-    if (!dims) return;
-    if (pumpObservedSize.width === dims.width && pumpObservedSize.height === dims.height) return;
-    pumpObservedSize.width = dims.width;
-    pumpObservedSize.height = dims.height;
-    if (window.pumpChartExpanded){
-      const card = pumpObservedCanvas.closest(".pump-chart-card");
-      pumpApplyExpandedCardSizing(card, dims);
-    }
-    drawPumpChart(pumpObservedCanvas, window.pumpChartRange);
+    entries.forEach(entry => {
+      if (!entry || entry.target !== pumpObservedWrap) return;
+      const rawWidth = typeof entry.contentRect?.width === "number" ? entry.contentRect.width : null;
+      const rawHeight = typeof entry.contentRect?.height === "number" ? entry.contentRect.height : null;
+      requestAnimationFrame(()=>{
+        if (!pumpObservedCanvas) return;
+        const dims = pumpResizeCanvas(pumpObservedCanvas, { wrapWidth: rawWidth, wrapHeight: rawHeight });
+        if (!dims) return;
+        const sizeChanged = pumpObservedSize.width !== dims.width || pumpObservedSize.height !== dims.height;
+        const rawWidthChanged = rawWidth != null && (typeof pumpObservedSize.rawWidth !== "number" || Math.abs(pumpObservedSize.rawWidth - rawWidth) > 0.25);
+        const rawHeightChanged = rawHeight != null && (typeof pumpObservedSize.rawHeight !== "number" || Math.abs(pumpObservedSize.rawHeight - rawHeight) > 0.25);
+        if (!sizeChanged && !rawWidthChanged && !rawHeightChanged) return;
+        pumpObservedSize.width = dims.width;
+        pumpObservedSize.height = dims.height;
+        pumpObservedSize.rawWidth = rawWidth != null ? rawWidth : pumpObservedSize.rawWidth;
+        pumpObservedSize.rawHeight = rawHeight != null ? rawHeight : pumpObservedSize.rawHeight;
+        if (window.pumpChartExpanded){
+          const card = pumpObservedCanvas.closest(".pump-chart-card");
+          pumpApplyExpandedCardSizing(card, dims);
+        }
+        drawPumpChart(pumpObservedCanvas, window.pumpChartRange);
+      });
+    });
   });
   pumpLayoutObserver.observe(wrap);
   pumpObservedWrap = wrap;
@@ -149,7 +164,8 @@ function pumpApplyExpandedCardSizing(card, canvasDims){
   card.style.height = "auto";
 }
 
-function pumpComputeCanvasSize(canvas){
+function pumpComputeCanvasSize(canvas, overrides){
+  const opts = overrides || {};
   const expanded = window.pumpChartExpanded === true;
   const baseWidth = Math.max(1, pumpChartLayout.baseWidth || 0);
   const baseHeight = Math.max(1, pumpChartLayout.baseHeight || 0);
@@ -184,19 +200,32 @@ function pumpComputeCanvasSize(canvas){
       height = Math.round(width * aspect);
     }
   }else{
-    const wrap = canvas ? canvas.closest(".pump-chart-wrap") : null;
-    const rect = wrap ? wrap.getBoundingClientRect() : null;
-    width = rect && rect.width ? rect.width : baseWidth;
+    const wrapWidth = typeof opts.wrapWidth === "number" && isFinite(opts.wrapWidth) ? opts.wrapWidth : null;
+    if (wrapWidth != null && wrapWidth > 0){
+      width = wrapWidth;
+    }else{
+      const wrap = canvas ? canvas.closest(".pump-chart-wrap") : null;
+      const rect = wrap ? wrap.getBoundingClientRect() : null;
+      width = rect && rect.width ? rect.width : baseWidth;
+    }
     width = Math.max(320, Math.round(width));
     height = Math.round(width * aspect);
     height = Math.max(240, height);
+    const wrapHeight = typeof opts.wrapHeight === "number" && isFinite(opts.wrapHeight) ? opts.wrapHeight : null;
+    if (wrapHeight != null && wrapHeight > 0){
+      const boundedHeight = Math.max(240, Math.round(wrapHeight));
+      if (boundedHeight < height){
+        height = boundedHeight;
+        width = Math.max(320, Math.round(height / aspect));
+      }
+    }
   }
-  return { width, height };
+  return { width: Math.round(width), height: Math.round(height) };
 }
 
-function pumpResizeCanvas(canvas){
+function pumpResizeCanvas(canvas, overrides){
   if (!canvas) return null;
-  const dims = pumpComputeCanvasSize(canvas);
+  const dims = pumpComputeCanvasSize(canvas, overrides);
   const dpr = window.devicePixelRatio || 1;
   const cssWidth = Math.round(dims.width);
   const cssHeight = Math.round(dims.height);
@@ -206,7 +235,8 @@ function pumpResizeCanvas(canvas){
   const pixelHeight = Math.max(1, Math.round(cssHeight * dpr));
   if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
   if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
-  if (!window.pumpChartExpanded){
+  const opts = overrides || {};
+  if (!window.pumpChartExpanded && opts.skipBaseUpdate !== true){
     pumpUpdateBaseChartSize(cssWidth, cssHeight);
   }
   return { width: cssWidth, height: cssHeight };
@@ -635,15 +665,17 @@ function drawPumpChart(canvas, rangeValue){
   if (xMax <= xMin) xMax = xMin + DAY_MS;
   const ticks = pumpBuildTimeTicks(range, xMin, xMax);
   const hasSubLabel = ticks.some(t => t.subLabel);
+  const headerLatestY = Math.max(scaled(24), 30);
+  const headerLineGap = Math.max(scaled(14), 18);
+  const contextLabelY = headerLatestY + headerLineGap;
+  const topBlockPadding = Math.max(scaled(28), 34);
   const margin = {
-    top: Math.max(60, scaled(34)),
-    right: Math.max(16, scaled(6)),
-    bottom: Math.max(hasSubLabel ? 70 : 50, scaled(hasSubLabel ? 24 : 20)),
-    left: Math.max(48, scaled(16))
+    top: Math.max(contextLabelY + topBlockPadding, Math.max(74, scaled(48))),
+    right: Math.max(18, scaled(7)),
+    bottom: Math.max(hasSubLabel ? 72 : 52, scaled(hasSubLabel ? 26 : 22)),
+    left: Math.max(52, scaled(18))
   };
-  const headerLatestY = Math.max(scaled(20), margin.top - scaled(28));
-  const contextLabelY = margin.top - scaled(16);
-  const axisLabelY = margin.top - scaled(8);
+  const axisLabelY = margin.top - Math.max(scaled(12), 14);
   const innerW = Math.max(10, cssWidth - margin.left - margin.right);
   const innerH = Math.max(10, cssHeight - margin.top - margin.bottom);
   const axisY = margin.top + innerH;
