@@ -192,6 +192,9 @@ body.pump-chart-expanded { overflow:hidden; }
 .order-history-body table.order-table{ margin:0; }
 .inventory-add{ padding:6px 10px; border-radius:8px; border:1px solid #ccd5e6; background:#f4f7fb; cursor:pointer; font-weight:600; }
 .inventory-add:hover{ background:#e4ebf8; }
+.inventory-actions{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.inventory-delete{ padding:6px 10px; border-radius:8px; border:1px solid #f0b6b6; background:#fff4f4; color:#b3261e; cursor:pointer; font-weight:600; }
+.inventory-delete:hover{ background:#ffe4e4; }
 
 
 /* Calendar chip/bar are fully interactive */

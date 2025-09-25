@@ -1138,7 +1138,7 @@ function filterInventoryItems(term){
 
 function inventoryRowsHTML(list){
   if (!Array.isArray(list) || !list.length){
-    return `<tr><td colspan="6" class="muted">No inventory items match your search.</td></tr>`;
+    return `<tr><td colspan="8" class="muted">No inventory items match your search.</td></tr>`;
   }
   return list.map(i => {
     const priceVal = i.price != null && i.price !== "" ? Number(i.price) : "";
@@ -1152,7 +1152,10 @@ function inventoryRowsHTML(list){
       <td>${i.link ? `<a href="${i.link}" target="_blank" rel="noopener">link</a>` : "—"}</td>
       <td><input type="number" step="0.01" min="0" data-inv="price" data-id="${i.id}" value="${priceDisplay}"></td>
       <td><input type="text" data-inv="note" data-id="${i.id}" value="${i.note||""}"></td>
-      <td><button type="button" class="inventory-add" data-order-add="${i.id}">Add to order request</button></td>
+      <td class="inventory-actions">
+        <button type="button" class="inventory-add" data-order-add="${i.id}">Add to order request</button>
+        <button type="button" class="inventory-delete" data-inventory-delete="${i.id}">Delete</button>
+      </td>
     </tr>`;
   }).join("");
 }
@@ -1175,7 +1178,7 @@ function viewInventory(){
       </div>
       <div class="small muted" style="margin-bottom:8px;">Results update as you type.</div>
       <table>
-        <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th></th></tr></thead>
+        <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
         <tbody data-inventory-rows>${rows}</tbody>
       </table>
     </div>

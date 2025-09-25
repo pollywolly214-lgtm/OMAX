@@ -4370,9 +4370,18 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("click", (e)=>{
-    const btn = e.target.closest("[data-order-add]");
-    if (!btn) return;
-    const id = btn.getAttribute("data-order-add");
+    const deleteBtn = e.target.closest("[data-inventory-delete]");
+    if (deleteBtn){
+      const id = deleteBtn.getAttribute("data-inventory-delete");
+      if (!id) return;
+      const removed = deleteInventoryItem(id);
+      if (removed) refreshRows();
+      return;
+    }
+
+    const addBtn = e.target.closest("[data-order-add]");
+    if (!addBtn) return;
+    const id = addBtn.getAttribute("data-order-add");
     if (!id) return;
     addInventoryItemToOrder(id);
   });
@@ -4575,6 +4584,27 @@ function addInventoryItemToOrder(inventoryId){
   saveCloudDebounced();
   toast("Added to order request");
   if (location.hash === "#/order-request" || location.hash === "#order-request"){ renderOrderRequest(); }
+}
+
+function deleteInventoryItem(id){
+  const idx = inventory.findIndex(item => item && item.id === id);
+  if (idx < 0){ toast("Inventory item not found."); return false; }
+
+  const item = inventory[idx];
+  const label = item && item.name ? `"${item.name}"` : "this item";
+  const message = `Delete ${label}? This will remove it from inventory, maintenance settings, and the dashboard on every page.`;
+  const confirmed = window.confirm(message);
+  if (!confirmed) return false;
+
+  inventory.splice(idx, 1);
+  saveCloudDebounced();
+  toast("Inventory item removed");
+
+  const hash = (location.hash || "#").toLowerCase();
+  if (hash === "#/settings" || hash === "#settings"){ renderSettings(); }
+  if (hash === "#/dashboard" || hash === "#dashboard" || hash === "#/" || hash === "#"){ renderDashboard(); }
+
+  return true;
 }
 
 function downloadOrderRequestCSV(request){
