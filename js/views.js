@@ -1001,6 +1001,7 @@ function viewJobs(){
       </table>
     `
     : `<p class="small muted">Mark jobs complete to build a history of past cutting work.</p>`;
+  const activeColumnCount = 11;
   const rows = cuttingJobs.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileLinks = jobFiles.length
@@ -1038,11 +1039,10 @@ function viewJobs(){
     const nearPace = !ahead && !behind;
     const rawMoney = eff.gainLoss || 0;
     const money = nearPace ? 0 : rawMoney;
-    const moneyStyle = ahead
-      ? 'color:#2e7d32;font-weight:600'
-      : (behind ? 'color:#c43d3d;font-weight:600' : 'color:#424242;font-weight:600');
-    const moneySign  = ahead ? '+' : (behind ? '−' : '');
-    const moneyAbs   = Math.abs(money).toFixed(2);
+    const impactClass = ahead
+      ? 'job-impact-ahead'
+      : (behind ? 'job-impact-behind' : 'job-impact-neutral');
+    const impactDisplay = formatCurrency(money, { showPlus: true });
     const statusLabel = nearPace ? 'On pace' : (ahead ? 'Ahead' : 'Behind');
     const statusDetail = nearPace
       ? ''
@@ -1050,6 +1050,16 @@ function viewJobs(){
     const baselineDetail = `${baselineRemain.toFixed(1)}h baseline vs ${actualRemain.toFixed(1)}h remaining`;
     const statusSummary = statusLabel + (statusDetail || '');
     const efficiencyDetail = `${statusSummary}; ${baselineDetail}`;
+
+    const estimateDisplay = formatHours(j.estimateHours);
+    const remainingDisplay = formatHours(remainHrs);
+    const needDisplay = req.requiredPerDay === Infinity
+      ? '<span class="job-badge job-badge-overdue">Past due</span>'
+      : `${needPerDay} hr/day`;
+    const statusDisplay = [
+      `<div class="job-status ${ahead ? 'job-status-ahead' : (behind ? 'job-status-behind' : 'job-status-onpace')}">${statusLabel}</div>`,
+      statusDetail ? `<div class="job-status-detail">${statusDetail.trim()}</div>` : ''
+    ].join('');
 
     // Dates (for display / edit row)
     const startDate = parseDateLocal(j.startISO);
@@ -1059,66 +1069,35 @@ function viewJobs(){
     const dueVal    = dueDate ? ymd(dueDate) : (j.dueISO || "");
 
     if (!editing){
-      // NORMAL ROW WITH SUMMARY + DETAILS
-      const needLabel = req.requiredPerDay === Infinity
-        ? `<span class="job-chip danger">Past due</span>`
-        : `${needPerDay} hr/day`;
-      const efficiencySummaryShort = nearPace ? statusLabel : `${statusLabel}${statusDetail}`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
-          <td class="job-cell job-cell-main">
-            <div class="job-title-group">
+          <td class="job-col job-col-main">
+            <div class="job-main">
               <strong>${j.name}</strong>
-              <span class="job-dates small muted">${startTxt} → ${dueTxt}</span>
-            </div>
-            <div class="job-material-label small muted">Material: ${j.material || "—"}</div>
-          </td>
-          <td class="job-cell job-cell-materials">
-            <div class="job-metric">
-              <span class="job-metric-label">Cost / unit</span>
-              <input type="number" class="matCost" data-id="${j.id}" value="${matCost}" step="0.01" min="0">
-            </div>
-            <div class="job-metric">
-              <span class="job-metric-label">Quantity</span>
-              <input type="number" class="matQty" data-id="${j.id}" value="${matQty}" step="0.01" min="0">
-            </div>
-            <div class="job-metric job-metric-total">
-              <span class="job-metric-label">Material total</span>
-              <span class="job-metric-value">$${matTotal.toFixed(2)}</span>
+              <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
             </div>
           </td>
-          <td class="job-cell job-cell-progress">
-            <div class="job-metric">
-              <span class="job-metric-label">Remaining</span>
-              <span class="job-metric-value">${remainHrs.toFixed(1)} hr</span>
-            </div>
-            <div class="job-metric">
-              <span class="job-metric-label">Needed / day</span>
-              <span class="job-metric-value">${needLabel}</span>
-            </div>
-            <div class="job-inline-actions">
+          <td class="job-col job-col-estimate">${estimateDisplay}</td>
+          <td class="job-col job-col-material">${j.material || '—'}</td>
+          <td class="job-col job-col-input"><input type="number" class="job-input matCost" data-id="${j.id}" value="${matCost}" step="0.01" min="0"></td>
+          <td class="job-col job-col-input"><input type="number" class="job-input matQty" data-id="${j.id}" value="${matQty}" step="0.01" min="0"></td>
+          <td class="job-col job-col-money">$${matTotal.toFixed(2)}</td>
+          <td class="job-col job-col-hours">${remainingDisplay}</td>
+          <td class="job-col job-col-need">${needDisplay}</td>
+          <td class="job-col job-col-status">${statusDisplay}</td>
+          <td class="job-col job-col-impact"><span class="job-impact ${impactClass}">${impactDisplay}</span></td>
+          <td class="job-col job-col-actions">
+            <div class="job-actions">
               <button data-log-job="${j.id}">Log time</button>
+              <button data-edit-job="${j.id}">Edit</button>
+              <button data-complete-job="${j.id}">Mark complete</button>
+              <button class="danger" data-remove-job="${j.id}">Remove</button>
             </div>
-          </td>
-          <td class="job-cell job-cell-efficiency">
-            <div class="job-metric">
-              <span class="job-metric-label">Status</span>
-              <span class="job-metric-value">${efficiencySummaryShort}</span>
-            </div>
-            <div class="job-metric">
-              <span class="job-metric-label">Projected impact</span>
-              <span class="job-metric-value" style="${moneyStyle}">${moneySign}$${moneyAbs}</span>
-            </div>
-          </td>
-          <td class="job-cell job-cell-actions">
-            <button data-edit-job="${j.id}">Edit</button>
-            <button data-complete-job="${j.id}">Mark complete</button>
-            <button class="danger" data-remove-job="${j.id}">Remove</button>
             <span data-log-job="${j.id}" style="display:none"></span>
           </td>
         </tr>
         <tr class="job-detail-row">
-          <td colspan="5">
+          <td colspan="${activeColumnCount}">
             <div class="job-detail-card">
               <div class="job-detail-note">
                 <label class="job-detail-label" for="jobNote_${j.id}">Notes</label>
@@ -1138,7 +1117,7 @@ function viewJobs(){
       // EDIT ROW
       return `
         <tr data-job-row="${j.id}" class="job-row editing">
-          <td colspan="5">
+          <td colspan="${activeColumnCount}">
             <div class="job-edit-card">
               <div class="job-edit-grid">
                 <label>Job name<input type="text" data-j="name" data-id="${j.id}" value="${j.name}"></label>
@@ -1199,9 +1178,15 @@ function viewJobs(){
         <thead>
           <tr>
             <th>Job</th>
-            <th>Materials</th>
-            <th>Progress</th>
-            <th>Efficiency</th>
+            <th>Estimate</th>
+            <th>Material</th>
+            <th>Cost / unit</th>
+            <th>Quantity</th>
+            <th>Material total</th>
+            <th>Hours remaining</th>
+            <th>Needed / day</th>
+            <th>Status</th>
+            <th>Projected impact</th>
             <th>Actions</th>
           </tr>
         </thead>
