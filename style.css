@@ -190,6 +190,12 @@ body.pump-chart-expanded { overflow:hidden; }
 .status-partial{ background:#fff4e5; color:#b26a00; }
 .status-pending{ background:#f0f3fa; color:#4a566d; }
 .order-history-body table.order-table{ margin:0; }
+.inventory-toolbar{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:12px; }
+.inventory-add-trigger{ padding:8px 14px; border-radius:10px; border:1px solid #3b82f6; background:#e0edff; color:#0f3c91; font-weight:600; cursor:pointer; transition:background .2s ease, transform .2s ease; }
+.inventory-add-trigger:hover{ background:#cfe1ff; transform:translateY(-1px); }
+.inventory-add-trigger:focus-visible{ outline:3px solid rgba(59,130,246,.45); outline-offset:2px; }
+.inventory-search{ flex:1 1 260px; }
+.inventory-hint{ margin-bottom:12px; }
 .inventory-add{ padding:6px 10px; border-radius:8px; border:1px solid #ccd5e6; background:#f4f7fb; cursor:pointer; font-weight:600; }
 .inventory-add:hover{ background:#e4ebf8; }
 .inventory-actions{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
@@ -1387,6 +1393,9 @@ body.modal-open {
 }
 
 .dash-modal-step[hidden] { display: none; }
+.inventory-modal-card{ width:min(520px,94vw); }
+.inventory-modal-step p{ margin:0 0 12px; }
+.inventory-modal-actions{ flex-wrap:wrap; }
 
 .modal-grid {
   display: grid;
