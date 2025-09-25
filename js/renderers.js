@@ -510,7 +510,9 @@ function ensureDashboardLayoutBoundResize(state){
 const appSettingsState = {
   context: "default",
   cleanup: null,
-  reposition: null
+  reposition: null,
+  activeMenu: null,
+  activeButton: null
 };
 
 function getAppSettingsElements(){
@@ -538,25 +540,151 @@ function findAppSettingsFocusTarget(menu){
   return null;
 }
 
+function resetAppSettingsMenuPosition(menu){
+  if (!menu) return;
+  menu.style.position = "";
+  menu.style.left = "";
+  menu.style.top = "";
+  menu.style.maxHeight = "";
+  menu.style.width = "";
+  menu.style.overflowY = "";
+  menu.style.visibility = "";
+}
+
+function positionAppSettingsMenu(menu, button){
+  if (!menu || !button) return;
+  const docEl = document.documentElement || document.body;
+  const viewportWidth = Math.max(0, docEl ? docEl.clientWidth : window.innerWidth || 0);
+  const viewportHeight = Math.max(0, docEl ? docEl.clientHeight : window.innerHeight || 0);
+  const viewportPadding = 12;
+  const anchorGap = 8;
+  const buttonRect = button.getBoundingClientRect();
+
+  menu.style.visibility = "hidden";
+  menu.style.position = "fixed";
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+  menu.style.maxHeight = "";
+  menu.style.width = "";
+  menu.style.overflowY = "";
+
+  let menuRect = menu.getBoundingClientRect();
+  const maxWidth = Math.max(180, viewportWidth - viewportPadding * 2);
+  if (menuRect.width > maxWidth){
+    menu.style.width = `${Math.round(maxWidth)}px`;
+    menuRect = menu.getBoundingClientRect();
+  }
+
+  const maxHeight = Math.max(220, viewportHeight - viewportPadding * 2);
+  menu.style.maxHeight = `${Math.round(maxHeight)}px`;
+  if (menuRect.height > maxHeight){
+    menu.style.overflowY = "auto";
+    menuRect = menu.getBoundingClientRect();
+  }
+
+  let left = buttonRect.right - menuRect.width;
+  if (left + menuRect.width + viewportPadding > viewportWidth){
+    left = viewportWidth - menuRect.width - viewportPadding;
+  }
+  if (left < viewportPadding){
+    left = viewportPadding;
+  }
+
+  let top = buttonRect.bottom + anchorGap;
+  if (top + menuRect.height + viewportPadding > viewportHeight){
+    const above = buttonRect.top - anchorGap - menuRect.height;
+    if (above >= viewportPadding){
+      top = above;
+    } else {
+      top = Math.max(viewportPadding, viewportHeight - menuRect.height - viewportPadding);
+    }
+  }
+  if (top < viewportPadding){
+    top = viewportPadding;
+  }
+
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+  menu.style.visibility = "";
+}
+
+async function promptClearAllData(trigger){
+  const handler = typeof window.clearAllAppData === "function" ? window.clearAllAppData : null;
+  if (!handler){
+    alert("Clearing data is not available right now.");
+    return;
+  }
+  const expected = (typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
+    ? window.CLEAR_DATA_PASSWORD
+    : "";
+  const attempt = prompt("Enter the admin password to clear all data:");
+  if (attempt === null) return;
+  if (attempt !== expected){
+    alert("Incorrect password. Data was not cleared.");
+    return;
+  }
+  const confirmed = await showConfirmModal({
+    title: "Clear all data?",
+    message: "This will erase history, maintenance tasks, jobs, inventory, and orders for every user. This cannot be undone.",
+    confirmText: "Yes, clear everything",
+    confirmVariant: "danger",
+    cancelText: "Keep data"
+  });
+  if (!confirmed) return;
+
+  let restoreText = null;
+  const wasDisabled = trigger?.disabled ?? false;
+  if (trigger){
+    restoreText = trigger.textContent;
+    trigger.disabled = true;
+    trigger.textContent = "Clearing…";
+  }
+  try {
+    await handler();
+    toast("Workspace reset to defaults.");
+  } catch (err){
+    console.error("Failed to clear all data", err);
+    alert("Unable to clear data. Please try again.");
+  } finally {
+    if (trigger && trigger.isConnected){
+      trigger.disabled = wasDisabled;
+      if (restoreText != null){
+        trigger.textContent = restoreText;
+      }
+    }
+  }
+}
+
+function ensureClearAllDataHandlers(){
+  const buttons = document.querySelectorAll('[data-clear-all]');
+  buttons.forEach(btn => {
+    if (!btn || btn.dataset.boundClearAll === "1") return;
+    btn.dataset.boundClearAll = "1";
+    btn.addEventListener("click", async (event)=>{
+      event.preventDefault();
+      closeDashboardSettingsMenu();
+      await promptClearAllData(btn);
+    });
+  });
+}
+
 function closeDashboardSettingsMenu(){
   const { button, menu } = getAppSettingsElements();
   if (menu && !menu.hidden){
     menu.hidden = true;
-    menu.style.left = "";
-    menu.style.top = "";
-    menu.style.position = "";
-    menu.style.bottom = "";
-    menu.style.right = "";
-    if (appSettingsState.reposition){
-      window.removeEventListener("resize", appSettingsState.reposition);
-      window.removeEventListener("scroll", appSettingsState.reposition, true);
-      appSettingsState.reposition = null;
-    }
   }
   if (button){
     button.setAttribute("aria-expanded", "false");
     button.classList.remove("is-open");
   }
+  if (appSettingsState.reposition){
+    window.removeEventListener("resize", appSettingsState.reposition);
+    window.removeEventListener("scroll", appSettingsState.reposition, true);
+    appSettingsState.reposition = null;
+  }
+  resetAppSettingsMenuPosition(menu);
+  appSettingsState.activeMenu = null;
+  appSettingsState.activeButton = null;
 }
 
 function openDashboardSettingsMenu(){
@@ -566,48 +694,21 @@ function openDashboardSettingsMenu(){
   menu.hidden = false;
   button.setAttribute("aria-expanded", "true");
   button.classList.add("is-open");
-  const gap = 8;
   const reposition = ()=>{
     if (!button.isConnected || !menu.isConnected){
       closeDashboardSettingsMenu();
       return;
     }
-    menu.style.position = "fixed";
-    menu.style.left = "0px";
-    menu.style.top = "0px";
-    menu.style.right = "auto";
-    menu.style.bottom = "auto";
-    const buttonRect = button.getBoundingClientRect();
-    const menuWidth = menu.offsetWidth;
-    const menuHeight = menu.offsetHeight;
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-
-    const margin = 12;
-    let left = buttonRect.right - menuWidth;
-    const maxLeft = Math.max(margin, viewportWidth - menuWidth - margin);
-    if (left < margin) left = margin;
-    if (left > maxLeft) left = maxLeft;
-
-    let top = buttonRect.bottom + gap;
-    const spaceBelow = viewportHeight - buttonRect.bottom - margin;
-    const spaceAbove = buttonRect.top - margin;
-    if (menuHeight + gap > spaceBelow && spaceAbove > spaceBelow){
-      top = Math.max(margin, buttonRect.top - gap - menuHeight);
-    }
-    if (top + menuHeight > viewportHeight - margin){
-      top = Math.max(margin, viewportHeight - menuHeight - margin);
-    }
-    if (top < margin) top = margin;
-
-    menu.style.left = `${Math.round(left)}px`;
-    menu.style.top = `${Math.round(top)}px`;
+    positionAppSettingsMenu(menu, button);
   };
 
-  reposition();
+  positionAppSettingsMenu(menu, button);
+  requestAnimationFrame(()=> positionAppSettingsMenu(menu, button));
   window.addEventListener("resize", reposition);
   window.addEventListener("scroll", reposition, true);
   appSettingsState.reposition = reposition;
+  appSettingsState.activeMenu = menu;
+  appSettingsState.activeButton = button;
   const focusTarget = findAppSettingsFocusTarget(menu);
   if (focusTarget){
     try { focusTarget.focus(); }
@@ -623,6 +724,7 @@ function wireDashboardSettingsMenu(){
     appSettingsState.cleanup = null;
   }
   menu.hidden = true;
+  resetAppSettingsMenuPosition(menu);
   button.setAttribute("aria-expanded", "false");
   button.classList.remove("is-open");
   const toggle = (event)=>{
@@ -664,7 +766,7 @@ function wireDashboardSettingsMenu(){
       if (event.key === "Escape"){ closeDashboardSettingsMenu(); button?.focus(); }
     });
   }
-  wireClearAllDataButtons();
+  ensureClearAllDataHandlers();
 }
 
 function wireCostSettingsMenu(){
@@ -698,51 +800,6 @@ function setAppSettingsContext(context){
     else divider.setAttribute("hidden", "");
   }
   closeDashboardSettingsMenu();
-}
-
-function wireClearAllDataButtons(){
-  const handler = typeof window.clearAllAppData === "function" ? window.clearAllAppData : null;
-  if (!handler) return;
-  document.querySelectorAll("#btnClearAllData").forEach(btn => {
-    if (!btn || btn.dataset.boundClearAll) return;
-    btn.dataset.boundClearAll = "1";
-    btn.addEventListener("click", async ()=>{
-      const expected = (typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
-        ? window.CLEAR_DATA_PASSWORD
-        : "";
-      const attempt = prompt("Enter the admin password to clear all data:");
-      if (attempt === null) return;
-      if (attempt !== expected){
-        alert("Incorrect password. Data was not cleared.");
-        return;
-      }
-      const confirmed = await showConfirmModal({
-        title: "Clear all data?",
-        message: "This will erase history, maintenance tasks, jobs, inventory, and orders for every user. This cannot be undone.",
-        confirmText: "Yes, clear everything",
-        confirmVariant: "danger",
-        cancelText: "Keep data"
-      });
-      if (!confirmed) return;
-
-      const originalText = btn.textContent;
-      const prevDisabled = btn.disabled;
-      btn.disabled = true;
-      btn.textContent = "Clearing…";
-      try {
-        await handler();
-        toast("Workspace reset to defaults.");
-      } catch (err){
-        console.error("Failed to clear all data", err);
-        alert("Unable to clear data. Please try again.");
-      } finally {
-        if (btn.isConnected){
-          btn.disabled = prevDisabled;
-          btn.textContent = originalText;
-        }
-      }
-    });
-  });
 }
 
 function setDashboardEditing(state, editing){
@@ -3217,7 +3274,7 @@ function renderSettings(){
           <div class="toolbar-actions">
             <button id="btnAddCategory">+ Add Category</button>
             <button id="btnAddTask">+ Add Task</button>
-            <button id="btnClearAllData" class="danger" title="Reset all maintenance data">🧹 Clear All Data</button>
+            <button id="btnClearAllDataInline" class="danger" data-clear-all="1" title="Reset all maintenance data">🧹 Clear All Data</button>
           </div>
           <div class="toolbar-search">
             <span class="icon" aria-hidden="true">🔍</span>
@@ -3409,7 +3466,7 @@ function renderSettings(){
     document.body?.classList.remove("modal-open");
   }
 
-  wireClearAllDataButtons();
+  ensureClearAllDataHandlers();
 
   document.getElementById("btnAddCategory")?.addEventListener("click", ()=>{
     const name = prompt("Category name?");
