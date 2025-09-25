@@ -331,10 +331,12 @@ let   RENDER_TOTAL = window.RENDER_TOTAL;
 let   RENDER_DELTA = window.RENDER_DELTA;
 
 window.defaultIntervalTasks = defaultIntervalTasks;
+const ROOT_FOLDER_ID = "root";
+window.ROOT_FOLDER_ID = ROOT_FOLDER_ID;
 const DEFAULT_SETTINGS_FOLDERS = [
-  { id: "root",     name: "All Tasks",    parent: null,   order: 3 },
-  { id: "interval", name: "Per Interval", parent: "root", order: 2 },
-  { id: "asreq",    name: "As Required",  parent: "root", order: 1 }
+  { id: ROOT_FOLDER_ID, name: "All Tasks",    parent: null,           order: 3 },
+  { id: "interval",    name: "Per Interval", parent: ROOT_FOLDER_ID, order: 2 },
+  { id: "asreq",       name: "As Required",  parent: ROOT_FOLDER_ID, order: 1 }
 ];
 
 function defaultSettingsFolders(){
@@ -350,10 +352,19 @@ function normalizeSettingsFolders(raw){
       const key = String(entry.id);
       if (seen.has(key)) continue;
       seen.add(key);
+      const rawParent = entry.parent != null ? entry.parent : null;
+      let parent = null;
+      if (key === ROOT_FOLDER_ID){
+        parent = null;
+      }else if (rawParent == null || String(rawParent) === "" || String(rawParent) === key){
+        parent = ROOT_FOLDER_ID;
+      }else{
+        parent = rawParent;
+      }
       normalized.push({
         id: entry.id,
         name: typeof entry.name === "string" ? entry.name : "",
-        parent: entry.parent != null ? entry.parent : null,
+        parent: parent == null ? null : String(parent),
         order: Number.isFinite(entry.order) ? Number(entry.order) : 0
       });
     }
@@ -368,6 +379,9 @@ function normalizeSettingsFolders(raw){
         if (!Number.isFinite(existing.order) && Number.isFinite(template.order)){
           existing.order = Number(template.order);
         }
+        if (key !== ROOT_FOLDER_ID && (existing.parent == null || String(existing.parent) === "")){
+          existing.parent = template.parent ?? ROOT_FOLDER_ID;
+        }
       }
       continue;
     }
@@ -380,8 +394,8 @@ function normalizeSettingsFolders(raw){
 function setSettingsFolders(raw){
   const normalized = normalizeSettingsFolders(raw);
   window.settingsFolders = normalized;
-  window.folders = window.settingsFolders;
-  return normalized;
+  window.folders = cloneFolders(window.settingsFolders);
+  return window.settingsFolders;
 }
 
 function cloneFolders(list){
@@ -429,7 +443,7 @@ function snapshotSettingsFolders(){
     : (Array.isArray(window.folders) ? window.folders : defaultSettingsFolders());
   const normalized = normalizeSettingsFolders(source);
   window.settingsFolders = normalized;
-  window.folders = window.settingsFolders;
+  window.folders = cloneFolders(window.settingsFolders);
   return cloneFolders(normalized);
 }
 
@@ -587,7 +601,8 @@ setSettingsFolders(window.settingsFolders || window.folders);
 /* ================ Explorer helper functions ================= */
 function childrenFolders(parentId){
   const key = String(parentId ?? "");
-  return window.settingsFolders.filter(f => String((f?.parent ?? "")) === key);
+  const folders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  return folders.filter(f => String((f?.parent ?? "")) === key);
 }
 
 function topTasksInCat(folderId){

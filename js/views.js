@@ -324,9 +324,16 @@ function viewSettings(){
   };
 
   // ------- Folder tree helpers (shared category tree; tasks filtered per menu) -------
+  const rootFolderId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
   const folders = window.settingsFolders;
-  const kidsOf  = (parentId)=> folders.filter(f => (f.parent||null) === (parentId||null));
-  const tasksIn = (list, folderId)=> (Array.isArray(list)?list:[]).filter(t => (t.cat||null) === (folderId||null));
+  const kidsOf  = (parentId)=> folders.filter(f => (String(f.parent ?? null)) === (String(parentId ?? null)));
+  const tasksIn = (list, folderId)=>{
+    const normalizedTarget = folderId == null ? rootFolderId : folderId;
+    return (Array.isArray(list)?list:[]).filter(t => {
+      const cat = t.cat == null ? rootFolderId : t.cat;
+      return String(cat) === String(normalizedTarget);
+    });
+  };
 
   const renderFolder = (folder, listType) => {
     const subFolderList = kidsOf(folder.id);
@@ -380,8 +387,10 @@ function viewSettings(){
 
   // Root-level (no folder) tasks should appear at the top of each menu (no "Uncategorized" label).
   const rootTasksBlock = (listType)=>{
+    const hasRootFolder = folders.some(f => String(f.id) === rootFolderId);
+    if (hasRootFolder) return "";
     const list = (listType==="interval" ? tasksInterval : tasksAsReq);
-    const items = tasksIn(list, null).map(t => card(t, listType)).join("");
+    const items = tasksIn(list, rootFolderId).map(t => card(t, listType)).join("");
     return items || "";
   };
 
@@ -517,7 +526,7 @@ function ensureTaskCategories(){
       const name = prompt("New category (folder) name?");
       if (!name) return;
       const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Math.random().toString(36).slice(2,7));
-      window.settingsFolders.push({ id, name, parent:null, order:(++window._maintOrderCounter) });
+      window.settingsFolders.push({ id, name, parent: (typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root"), order:(++window._maintOrderCounter) });
       persist();
       // Re-render full Settings so the new folder appears in both menus.
       if (typeof renderSettings === "function") renderSettings();
@@ -610,7 +619,8 @@ function ensureTaskCategories(){
           return;
         }
         const t = findTask(id); if (!t) return;
-        t.ref.cat = fid; t.ref.parentTask = null; t.ref.order = (++window._maintOrderCounter);
+        const rootId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
+        t.ref.cat = fid ? fid : rootId; t.ref.parentTask = null; t.ref.order = (++window._maintOrderCounter);
         persist(); if (typeof renderSettings === "function") renderSettings();
         return;
       }
@@ -630,7 +640,8 @@ function ensureTaskCategories(){
           if (String(cur.id)===String(id)) return; // cycle; ignore
           cur = (cur.parent!=null) ? byIdFolder(cur.parent) : null;
         }
-        f.parent = fid; f.order = (++window._maintOrderCounter);
+        const rootId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
+        f.parent = fid ? fid : rootId; f.order = (++window._maintOrderCounter);
         persist(); if (typeof renderSettings === "function") renderSettings();
       }
     });
@@ -657,12 +668,15 @@ function ensureTaskCategories(){
         }
         const dest = byIdFolder(beforeId);
         const moving = byIdFolder(id);
+        const rootId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
         if (!dest || !moving || String(dest.id) === String(moving.id)) return;
-        const originalParent = moving.parent || null;
-        moving.parent = dest.parent || null;
+        const originalParent = moving.parent == null ? rootId : moving.parent;
+        const newParent = dest.parent == null ? rootId : dest.parent;
+        if (String(moving.id) === rootId) return;
+        moving.parent = newParent;
         moving.order = (Number(dest.order) || 0) + 0.5;
-        normalizeFolderOrder(dest.parent || null);
-        if (String(originalParent||"") !== String(dest.parent||"")){
+        normalizeFolderOrder(newParent);
+        if (String(originalParent||"") !== String(newParent||"")){
           normalizeFolderOrder(originalParent);
         }
         persist(); if (typeof renderSettings === "function") renderSettings();
@@ -679,8 +693,10 @@ function ensureTaskCategories(){
           return;
         }
         const moving = byIdFolder(id);
+        const rootId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
         if (!moving) return;
-        const originalParent = moving.parent || null;
+        if (String(moving.id) === rootId && parentId != null) return;
+        const originalParent = moving.parent == null ? rootId : moving.parent;
         if (parentId != null){
           let cur = parentId;
           let guard = 0;
@@ -690,10 +706,10 @@ function ensureTaskCategories(){
             cur = next ? (next.parent || null) : null;
           }
         }
-        moving.parent = parentId;
+        moving.parent = parentId == null ? rootId : parentId;
         moving.order = (++window._maintOrderCounter);
-        normalizeFolderOrder(parentId);
-        if (String(originalParent||"") !== String(parentId||"")){
+        normalizeFolderOrder(moving.parent);
+        if (String(originalParent||"") !== String(moving.parent||"")){
           normalizeFolderOrder(originalParent);
         }
         persist(); if (typeof renderSettings === "function") renderSettings();
@@ -723,7 +739,8 @@ function ensureTaskCategories(){
           }
           return;
         }
-        live.ref.cat = null; live.ref.parentTask = null; live.ref.order = (++window._maintOrderCounter);
+        const rootId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
+        live.ref.cat = rootId; live.ref.parentTask = null; live.ref.order = (++window._maintOrderCounter);
         persist(); if (typeof renderSettings === "function") renderSettings();
         return;
       }
@@ -737,12 +754,13 @@ function ensureTaskCategories(){
         if (!isFinite(val) || val <= 0) { alert("Enter a positive number."); return; }
         // Remove from asreq and insert at TOP of interval (keep same id for continuity)
         window.tasksAsReq = window.tasksAsReq.filter(x => String(x.id)!==String(live.ref.id));
+        const rootId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
         const moved = {
           id: live.ref.id, name: live.ref.name, interval: val,
           sinceBase: null, anchorTotal: null,
           manualLink: live.ref.manualLink||"", storeLink: live.ref.storeLink||"",
           pn: live.ref.pn||"", price: live.ref.price!=null?live.ref.price:null,
-          parentTask: null, cat: null, order:(++window._maintOrderCounter)
+          parentTask: null, cat: rootId, order:(++window._maintOrderCounter)
         };
         window.tasksInterval.unshift(moved);
         persist(); if (typeof renderSettings === "function") renderSettings();
@@ -753,11 +771,12 @@ function ensureTaskCategories(){
         // Convert to As-Required (condition optional)
         const cond = prompt("Condition/Notes (optional):", live.ref.condition||"As required") || "As required";
         window.tasksInterval = window.tasksInterval.filter(x => String(x.id)!==String(live.ref.id));
+        const rootId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
         const moved = {
           id: live.ref.id, name: live.ref.name, condition: cond,
           manualLink: live.ref.manualLink||"", storeLink: live.ref.storeLink||"",
           pn: live.ref.pn||"", price: live.ref.price!=null?live.ref.price:null,
-          parentTask: null, cat: null, order:(++window._maintOrderCounter)
+          parentTask: null, cat: rootId, order:(++window._maintOrderCounter)
         };
         window.tasksAsReq.unshift(moved);
         persist(); if (typeof renderSettings === "function") renderSettings();
