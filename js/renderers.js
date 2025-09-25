@@ -4072,6 +4072,157 @@ function renderCosts(){
   const canvas = document.getElementById("costChart");
   const toggleMaint = document.getElementById("toggleCostMaintenance");
   const toggleJobs  = document.getElementById("toggleCostJobs");
+  const canvasWrap = content.querySelector(".cost-chart-canvas");
+  let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
+
+  const escapeTooltip = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[c] || c);
+
+  const ensureTooltip = ()=>{
+    if (!canvasWrap) return null;
+    if (!tooltipEl){
+      tooltipEl = document.createElement("div");
+      tooltipEl.className = "cost-chart-tooltip";
+      tooltipEl.setAttribute("role", "tooltip");
+      tooltipEl.hidden = true;
+      canvasWrap.appendChild(tooltipEl);
+    }
+    return tooltipEl;
+  };
+
+  const hideTooltip = ()=>{
+    if (tooltipEl){
+      tooltipEl.hidden = true;
+      delete tooltipEl.dataset.visible;
+      delete tooltipEl.dataset.placement;
+      tooltipEl.style.visibility = "";
+      tooltipEl.textContent = "";
+    }
+    if (canvas){
+      canvas.style.cursor = "";
+    }
+  };
+
+  const showTooltip = (target, { scaleX, scaleY })=>{
+    const tip = ensureTooltip();
+    if (!tip || !canvas) return;
+    const label = `${target.datasetLabel} ${target.valueLabel}`;
+    tip.innerHTML = `<strong>${escapeTooltip(label)}</strong><span>${escapeTooltip(target.detail)}</span>`;
+    tip.hidden = false;
+    tip.dataset.visible = "";
+    tip.dataset.placement = "";
+    tip.style.visibility = "hidden";
+    tip.style.left = "0px";
+    tip.style.top = "0px";
+
+    const cssScaleX = scaleX > 0 ? 1 / scaleX : 1;
+    const cssScaleY = scaleY > 0 ? 1 / scaleY : 1;
+    const centerX = target.rect.x + (target.rect.width / 2);
+    const canvasWidth = canvas.clientWidth || canvas.width;
+    const canvasHeight = canvas.clientHeight || canvas.height;
+    const margin = 16;
+
+    const tipBox = tip.getBoundingClientRect();
+    const tipWidth = tipBox.width || tip.offsetWidth || 0;
+    const tipHeight = tipBox.height || tip.offsetHeight || 0;
+
+    const halfWidth = tipWidth / 2;
+    const minAnchorX = margin + halfWidth;
+    const maxAnchorX = canvasWidth - margin - halfWidth;
+    const anchorXCss = maxAnchorX < minAnchorX
+      ? canvasWidth / 2
+      : Math.min(maxAnchorX, Math.max(minAnchorX, centerX * cssScaleX));
+
+    const targetTop = target.rect.y;
+    const targetBottom = target.rect.y + target.rect.height;
+    let anchorY = targetTop;
+    let placement = "above";
+
+    const topIfAbove = (targetTop * cssScaleY) - (tipHeight * 1.1);
+    if (topIfAbove < margin){
+      placement = "below";
+      anchorY = targetBottom;
+    }
+
+    let anchorYCss = anchorY * cssScaleY;
+    if (placement === "above"){
+      const minAnchorY = margin + (tipHeight * 1.1);
+      const maxAnchorY = canvasHeight - margin + (tipHeight * 0.1);
+      if (maxAnchorY < minAnchorY){
+        anchorYCss = (minAnchorY + maxAnchorY) / 2;
+      }else{
+        anchorYCss = Math.min(maxAnchorY, Math.max(minAnchorY, anchorYCss));
+      }
+    }else{
+      const minAnchorY = margin - (tipHeight * 0.1);
+      const maxAnchorY = canvasHeight - margin - (tipHeight * 1.1);
+      if (maxAnchorY < minAnchorY){
+        anchorYCss = (minAnchorY + maxAnchorY) / 2;
+      }else{
+        anchorYCss = Math.min(maxAnchorY, Math.max(minAnchorY, anchorYCss));
+      }
+    }
+
+    tip.dataset.placement = placement;
+    tip.style.left = `${anchorXCss}px`;
+    tip.style.top = `${anchorYCss}px`;
+    tip.style.visibility = "";
+    tip.dataset.visible = "true";
+    canvas.style.cursor = "pointer";
+  };
+
+  const handlePointerHover = (event)=>{
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientWidth = canvas.clientWidth || rect.width || canvas.width;
+    const clientHeight = canvas.clientHeight || rect.height || canvas.height;
+    const scaleX = canvas.width / Math.max(1, clientWidth);
+    const scaleY = canvas.height / Math.max(1, clientHeight);
+    const pointerX = (event.clientX - rect.left) * scaleX;
+    const pointerY = (event.clientY - rect.top) * scaleY;
+    const targets = Array.isArray(canvas.__costChartTargets) ? canvas.__costChartTargets : [];
+    let hovered = null;
+    for (const target of targets){
+      if (!target || !target.rect) continue;
+      const { x, y, width, height } = target.rect;
+      if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
+        hovered = target;
+        break;
+      }
+    }
+    if (hovered){
+      showTooltip(hovered, { scaleX, scaleY });
+    }else{
+      hideTooltip();
+    }
+  };
+
+  const attachTooltipHandlers = ()=>{
+    if (!canvas) return;
+    ensureTooltip();
+    if (typeof canvas.__costHoverCleanup === "function"){
+      canvas.__costHoverCleanup();
+    }
+    const pointerMove = (event)=> handlePointerHover(event);
+    const pointerDown = (event)=> handlePointerHover(event);
+    const pointerLeave = ()=> hideTooltip();
+    canvas.addEventListener("pointermove", pointerMove);
+    canvas.addEventListener("pointerdown", pointerDown);
+    canvas.addEventListener("pointerleave", pointerLeave);
+    canvas.__costHoverCleanup = ()=>{
+      canvas.removeEventListener("pointermove", pointerMove);
+      canvas.removeEventListener("pointerdown", pointerDown);
+      canvas.removeEventListener("pointerleave", pointerLeave);
+      hideTooltip();
+    };
+  };
+
+  attachTooltipHandlers();
 
   wireCostSettingsMenu();
   setupCostLayout();
@@ -4083,6 +4234,7 @@ function renderCosts(){
 
   const redraw = ()=>{
     if (canvas){
+      hideTooltip();
       resizeCostChartCanvas(canvas);
       drawCostChart(canvas, model, {
         maintenance: !toggleMaint || toggleMaint.checked,
@@ -4341,10 +4493,33 @@ function computeCostModel(){
     });
   }
 
-  const maintenanceSeries = maintenanceHistory.slice(-16).map(entry => ({
-    date: entry.date,
-    value: entry.cost
-  }));
+  const formatHoursLabel = (hours)=>{
+    if (!Number.isFinite(hours) || hours <= 0) return null;
+    if (hours >= 10){
+      return Math.round(hours).toLocaleString();
+    }
+    const rounded = Math.round(hours * 10) / 10;
+    const hasFraction = Math.abs(rounded - Math.round(rounded)) > 1e-6;
+    return rounded.toLocaleString(undefined, {
+      minimumFractionDigits: hasFraction ? 1 : 0,
+      maximumFractionDigits: hasFraction ? 1 : 0
+    });
+  };
+
+  const maintenanceSeries = maintenanceHistory.slice(-16).map(entry => {
+    const dateLabel = (entry.date instanceof Date && !Number.isNaN(entry.date.getTime()))
+      ? entry.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+      : "the latest log";
+    const hoursLabel = formatHoursLabel(entry.hours);
+    const hoursFragment = hoursLabel
+      ? `${hoursLabel} machine ${Math.abs(entry.hours - 1) < 0.01 ? "hour" : "hours"}`
+      : "recent machine usage";
+    return {
+      date: entry.date,
+      value: entry.cost,
+      detail: `Estimated maintenance dollars allocated to ${hoursFragment} logged on ${dateLabel}.`
+    };
+  });
 
   const jobsInfo = [];
   const jobSeriesRaw = [];
@@ -4452,7 +4627,17 @@ function computeCostModel(){
     let cumulative = 0;
     jobSeriesSorted.forEach((pt, idx)=>{
       cumulative += pt.rawValue;
-      jobSeries.push({ date: pt.date, value: cumulative / (idx + 1) });
+      const rollingValue = cumulative / (idx + 1);
+      const dateLabel = (pt.date instanceof Date && !Number.isNaN(pt.date.getTime()))
+        ? pt.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+        : "the latest completed job";
+      const jobCount = idx + 1;
+      jobSeries.push({
+        date: pt.date,
+        value: rollingValue,
+        count: jobCount,
+        detail: `Rolling average profit per cutting job across ${jobCount} completed job${jobCount === 1 ? "" : "s"} through ${dateLabel}.`
+      });
     });
   }
 
@@ -4637,6 +4822,8 @@ function computeCostModel(){
 function drawCostChart(canvas, model, show){
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
+  const hitTargets = [];
+  canvas.__costChartTargets = hitTargets;
   const W = canvas.width;
   const H = canvas.height;
   ctx.clearRect(0,0,W,H);
@@ -4652,6 +4839,7 @@ function drawCostChart(canvas, model, show){
   }
 
   if (!active.length){
+    canvas.__costChartTargets = [];
     ctx.fillStyle = "#777";
     ctx.font = "13px sans-serif";
     ctx.textAlign = "center";
@@ -4670,6 +4858,7 @@ function drawCostChart(canvas, model, show){
   });
 
   if (!xs.length){
+    canvas.__costChartTargets = [];
     ctx.fillStyle = "#777";
     ctx.font = "13px sans-serif";
     ctx.textAlign = "center";
@@ -4695,46 +4884,12 @@ function drawCostChart(canvas, model, show){
     yMax += pad;
   }
 
-  const left = 60;
+  const left = 70;
   const right = W - 20;
   const top = 20;
   const bottom = H - 40;
   const X = (time)=> left + ((time - xMin) / Math.max(1, xMax - xMin)) * (right - left);
   const Y = (value)=> bottom - ((value - yMin) / Math.max(1e-6, yMax - yMin)) * (bottom - top);
-
-  ctx.strokeStyle = "#e2e6f1";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(left, top);
-  ctx.lineTo(left, bottom);
-  ctx.lineTo(right, bottom);
-  ctx.stroke();
-
-  if (0 >= yMin && 0 <= yMax){
-    const zeroY = Y(0);
-    ctx.strokeStyle = "#d0d5e2";
-    ctx.setLineDash([4,4]);
-    ctx.beginPath();
-    ctx.moveTo(left, zeroY);
-    ctx.lineTo(right, zeroY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = "#666";
-    ctx.textAlign = "right";
-    ctx.fillText("$0", right, zeroY - 4);
-  }
-
-  const formatDateLabel = (date)=>{
-    const opts = { month: "short", day: "numeric" };
-    if (Math.abs(xMax - xMin) > 31557600000){ opts.year = "numeric"; }
-    return date.toLocaleDateString(undefined, opts);
-  };
-
-  ctx.fillStyle = "#666";
-  ctx.textAlign = "left";
-  ctx.fillText(formatDateLabel(new Date(xMin)), left, H - 12);
-  ctx.textAlign = "right";
-  ctx.fillText(formatDateLabel(new Date(xMax)), right, H - 12);
 
   const formatMoney = (value)=>{
     const absVal = Math.abs(value);
@@ -4750,9 +4905,79 @@ function drawCostChart(canvas, model, show){
     return formatted;
   };
 
-  ctx.textAlign = "right";
-  ctx.fillText(formatMoney(yMax), right, top + 12);
-  ctx.fillText(formatMoney(yMin), right, bottom);
+  ctx.font = "12px sans-serif";
+  if (0 >= yMin && 0 <= yMax){
+    const zeroY = Y(0);
+    ctx.strokeStyle = "#d0d5e2";
+    ctx.setLineDash([4,4]);
+    ctx.beginPath();
+    ctx.moveTo(left, zeroY);
+    ctx.lineTo(right, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#666";
+    ctx.textAlign = "right";
+    ctx.fillText("$0", right, zeroY - 4);
+  }
+
+  const yTickCount = Math.min(6, Math.max(3, Math.round((bottom - top) / 50)));
+  if (yTickCount > 1){
+    const yRange = yMax - yMin;
+    ctx.textBaseline = "middle";
+    for (let i = 0; i < yTickCount; i++){
+      const ratio = (yTickCount === 1) ? 0 : i / (yTickCount - 1);
+      const value = yMin + (yRange * ratio);
+      const y = Y(value);
+      ctx.strokeStyle = (i === 0 || i === yTickCount - 1) ? "#d0d5e2" : "#eef1f8";
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(right, y);
+      ctx.stroke();
+      ctx.fillStyle = "#5b6271";
+      ctx.textAlign = "right";
+      ctx.fillText(formatMoney(value), left - 8, y);
+    }
+    ctx.textBaseline = "alphabetic";
+  }
+
+  ctx.strokeStyle = "#cbd2e3";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(left, top);
+  ctx.lineTo(left, bottom);
+  ctx.lineTo(right, bottom);
+  ctx.stroke();
+
+  const formatDateLabel = (date)=>{
+    const opts = { month: "short", day: "numeric" };
+    if (Math.abs(xMax - xMin) > 31557600000){ opts.year = "numeric"; }
+    return date.toLocaleDateString(undefined, opts);
+  };
+
+  const xTickCount = Math.min(7, Math.max(2, Math.round((right - left) / 110)));
+  ctx.textBaseline = "top";
+  if (xTickCount > 1){
+    const span = xMax - xMin;
+    for (let i = 0; i < xTickCount; i++){
+      const time = xMin + (span * i / (xTickCount - 1));
+      const x = X(time);
+      ctx.strokeStyle = "#f1f3f9";
+      ctx.beginPath();
+      ctx.moveTo(x, top);
+      ctx.lineTo(x, bottom);
+      ctx.stroke();
+      ctx.fillStyle = "#5b6271";
+      ctx.textAlign = "center";
+      ctx.fillText(formatDateLabel(new Date(time)), x, H - 20);
+    }
+  }else{
+    ctx.fillStyle = "#5b6271";
+    ctx.textAlign = "left";
+    ctx.fillText(formatDateLabel(new Date(xMin)), left, H - 20);
+    ctx.textAlign = "right";
+    ctx.fillText(formatDateLabel(new Date(xMax)), right, H - 20);
+  }
+  ctx.textBaseline = "alphabetic";
 
   active.forEach(series => {
     const points = series.points
@@ -4777,7 +5002,52 @@ function drawCostChart(canvas, model, show){
       ctx.arc(x, y, 3, 0, Math.PI*2);
       ctx.fill();
     });
+
+    const last = points[points.length - 1];
+    if (last){
+      const x = X(last.date.getTime());
+      const y = Y(Number(last.value));
+      const label = `${series.key === "maintenance" ? "Maintenance" : "Cutting jobs"} ${formatMoney(Number(last.value))}`;
+      ctx.font = "12px sans-serif";
+      const metrics = ctx.measureText(label);
+      const paddingX = 6;
+      const boxWidth = metrics.width + paddingX * 2;
+      const boxHeight = 18;
+      let boxX = Math.min(right - boxWidth, Math.max(left, x + 10));
+      let boxY = Math.max(top + boxHeight, y - boxHeight - 6);
+      boxY = Math.min(bottom - 4, boxY);
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillRect(boxX, boxY - boxHeight, boxWidth, boxHeight);
+      ctx.strokeStyle = series.color;
+      ctx.strokeRect(boxX, boxY - boxHeight, boxWidth, boxHeight);
+      ctx.fillStyle = "#1f2937";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, boxX + paddingX, boxY - (boxHeight / 2));
+      ctx.textBaseline = "alphabetic";
+
+      const datasetLabel = series.key === "maintenance" ? "Maintenance" : "Cutting jobs";
+      const valueLabel = formatMoney(Number(last.value));
+      const dateLabel = (last.date instanceof Date && !Number.isNaN(last.date.getTime()))
+        ? last.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+        : "the latest update";
+      let detail = (typeof last.detail === "string" && last.detail.trim()) ? last.detail.trim() : "";
+      if (!detail){
+        detail = series.key === "maintenance"
+          ? `Estimated maintenance dollars allocated to hours logged on ${dateLabel}.`
+          : `Rolling average profit per cutting job through ${dateLabel}.`;
+      }
+      hitTargets.push({
+        key: series.key,
+        datasetLabel,
+        valueLabel,
+        detail,
+        rect: { x: boxX, y: boxY - boxHeight, width: boxWidth, height: boxHeight }
+      });
+    }
   });
+
+  canvas.__costChartTargets = hitTargets;
 }
 
 
