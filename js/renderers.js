@@ -509,7 +509,8 @@ function ensureDashboardLayoutBoundResize(state){
 
 const appSettingsState = {
   context: "default",
-  cleanup: null
+  cleanup: null,
+  reposition: null
 };
 
 function getAppSettingsElements(){
@@ -541,6 +542,16 @@ function closeDashboardSettingsMenu(){
   const { button, menu } = getAppSettingsElements();
   if (menu && !menu.hidden){
     menu.hidden = true;
+    menu.style.left = "";
+    menu.style.top = "";
+    menu.style.position = "";
+    menu.style.bottom = "";
+    menu.style.right = "";
+    if (appSettingsState.reposition){
+      window.removeEventListener("resize", appSettingsState.reposition);
+      window.removeEventListener("scroll", appSettingsState.reposition, true);
+      appSettingsState.reposition = null;
+    }
   }
   if (button){
     button.setAttribute("aria-expanded", "false");
@@ -555,6 +566,48 @@ function openDashboardSettingsMenu(){
   menu.hidden = false;
   button.setAttribute("aria-expanded", "true");
   button.classList.add("is-open");
+  const gap = 8;
+  const reposition = ()=>{
+    if (!button.isConnected || !menu.isConnected){
+      closeDashboardSettingsMenu();
+      return;
+    }
+    menu.style.position = "fixed";
+    menu.style.left = "0px";
+    menu.style.top = "0px";
+    menu.style.right = "auto";
+    menu.style.bottom = "auto";
+    const buttonRect = button.getBoundingClientRect();
+    const menuWidth = menu.offsetWidth;
+    const menuHeight = menu.offsetHeight;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    const margin = 12;
+    let left = buttonRect.right - menuWidth;
+    const maxLeft = Math.max(margin, viewportWidth - menuWidth - margin);
+    if (left < margin) left = margin;
+    if (left > maxLeft) left = maxLeft;
+
+    let top = buttonRect.bottom + gap;
+    const spaceBelow = viewportHeight - buttonRect.bottom - margin;
+    const spaceAbove = buttonRect.top - margin;
+    if (menuHeight + gap > spaceBelow && spaceAbove > spaceBelow){
+      top = Math.max(margin, buttonRect.top - gap - menuHeight);
+    }
+    if (top + menuHeight > viewportHeight - margin){
+      top = Math.max(margin, viewportHeight - menuHeight - margin);
+    }
+    if (top < margin) top = margin;
+
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  };
+
+  reposition();
+  window.addEventListener("resize", reposition);
+  window.addEventListener("scroll", reposition, true);
+  appSettingsState.reposition = reposition;
   const focusTarget = findAppSettingsFocusTarget(menu);
   if (focusTarget){
     try { focusTarget.focus(); }

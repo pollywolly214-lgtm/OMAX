@@ -889,6 +889,8 @@ h1 { margin: 0 0 10px; font-size: 22px; }
   top: calc(100% + 8px);
   right: 0;
   min-width: 200px;
+  max-width: min(320px, calc(100vw - 24px));
+  width: max-content;
   padding: 8px 0;
   border-radius: 12px;
   border: 1px solid rgba(10, 63, 155, 0.16);
@@ -898,6 +900,8 @@ h1 { margin: 0 0 10px; font-size: 22px; }
   flex-direction: column;
   gap: 4px;
   z-index: 250;
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
 }
 .dashboard-settings-section {
   display: flex;
