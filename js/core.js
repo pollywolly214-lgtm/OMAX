@@ -389,6 +389,38 @@ function cloneFolders(list){
   return list.map(folder => ({ ...folder }));
 }
 
+function foldersEqual(a, b){
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+
+  const normalizeEntry = (folder)=>({
+    id: folder && folder.id != null ? String(folder.id) : "",
+    name: typeof folder?.name === "string" ? folder.name : "",
+    parent: folder && folder.parent != null ? String(folder.parent) : null,
+    order: Number.isFinite(Number(folder?.order)) ? Number(folder.order) : 0
+  });
+
+  const map = new Map();
+  for (const entry of a){
+    const norm = normalizeEntry(entry);
+    if (!norm.id) continue;
+    map.set(norm.id, norm);
+  }
+
+  for (const entry of b){
+    const norm = normalizeEntry(entry);
+    if (!norm.id) return false;
+    const match = map.get(norm.id);
+    if (!match) return false;
+    if (match.name !== norm.name) return false;
+    if ((match.parent ?? null) !== (norm.parent ?? null)) return false;
+    if (match.order !== norm.order) return false;
+    map.delete(norm.id);
+  }
+
+  return map.size === 0;
+}
+
 function snapshotSettingsFolders(){
   const source = Array.isArray(window.settingsFolders) && window.settingsFolders.length
     ? window.settingsFolders
@@ -687,8 +719,33 @@ async function loadFromCloud(){
         resetHistoryToCurrent();
         await FB.docRef.set(seeded, { merge:true });
       }else{
+        const docHasSettingsFolders = Array.isArray(data.settingsFolders);
+        const docHasLegacyFolders = Array.isArray(data.folders);
+        const docFoldersRaw = docHasSettingsFolders
+          ? data.settingsFolders
+          : (docHasLegacyFolders ? data.folders : null);
+        const normalizedDocFolders = normalizeSettingsFolders(docFoldersRaw);
+
         adoptState(data);
         resetHistoryToCurrent();
+
+        const localFoldersSnapshot = cloneFolders(window.settingsFolders);
+        let shouldSyncFolders = !docHasSettingsFolders || !docHasLegacyFolders;
+        if (!shouldSyncFolders){
+          shouldSyncFolders = !foldersEqual(normalizedDocFolders, localFoldersSnapshot);
+        }
+
+        if (shouldSyncFolders){
+          try {
+            const payloadFolders = cloneFolders(localFoldersSnapshot);
+            await FB.docRef.set({
+              settingsFolders: payloadFolders,
+              folders: cloneFolders(payloadFolders)
+            }, { merge:true });
+          } catch (err) {
+            console.warn("Failed to sync folders to cloud:", err);
+          }
+        }
       }
     }else{
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
