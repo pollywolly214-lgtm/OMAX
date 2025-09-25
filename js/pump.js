@@ -385,6 +385,14 @@ function pumpPercentChange(latestRPM){
   if (!pumpEff.baselineRPM || !isFinite(latestRPM)) return null;
   return ((latestRPM - pumpEff.baselineRPM) / pumpEff.baselineRPM) * 100;
 }
+const PUMP_DELTA_CLASS_COLORS = {
+  "green": "#2e7d32",
+  "green-better": "#1b5e20",
+  "yellow": "#8a6d00",
+  "orange": "#a14d00",
+  "red": "#c62828",
+  "gray": "#6b7280"
+};
 function pumpColorFor(pct){
   if (pct == null) return {cls:"gray", label:"—"};
   if (pct < 0) return {cls:"green-better", label:`${pct.toFixed(1)}% (better)`};
@@ -1189,8 +1197,17 @@ function drawPumpChart(canvas, rangeValue){
 
   const latest = data[data.length - 1];
   const pct = pumpPercentChange(latest?.rpm);
+  const deltaClass = pumpColorFor(pct).cls;
+  const deltaColor = PUMP_DELTA_CLASS_COLORS[deltaClass] || "#1f3a60";
+  const headerPrefix = `Latest: ${latest.rpm} RPM (${latest.dateISO})  Δ%=`;
+  const deltaValue = pct != null ? `${pct.toFixed(1)}%` : "—";
+  const headerX = axisX0 + scaled(2);
   ctx.font = fontPx(11.5);
-  ctx.fillText(`Latest: ${latest.rpm} RPM (${latest.dateISO})  Δ%=${pct!=null?pct.toFixed(1):"—"}`, axisX0 + scaled(2), headerLatestY);
+  ctx.fillStyle = "#1f3a60";
+  ctx.fillText(headerPrefix, headerX, headerLatestY);
+  ctx.fillStyle = deltaColor;
+  ctx.fillText(deltaValue, headerX + ctx.measureText(headerPrefix).width, headerLatestY);
+  ctx.fillStyle = "#1f3a60";
   ctx.font = fontPx(10.2);
   ctx.fillStyle = "#4b5b7a";
   ctx.fillText(`Range: Last ${rangeLabel}`, axisX0, contextLabelY);
