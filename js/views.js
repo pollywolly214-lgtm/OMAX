@@ -813,7 +813,8 @@ function viewCosts(model){
           <span aria-hidden="true">⚙</span>
         </button>
         <div class="dashboard-settings-menu" id="costSettingsMenu" role="menu" hidden>
-          <button type="button" class="dashboard-settings-item" id="costEditToggle" role="menuitemcheckbox" aria-checked="false" data-settings-focus>Edit layout</button>
+          <button type="button" class="dashboard-settings-item" id="costTrainerLaunch" role="menuitem" data-settings-focus>Launch guided tour</button>
+          <button type="button" class="dashboard-settings-item" id="costEditToggle" role="menuitemcheckbox" aria-checked="false">Edit layout</button>
         </div>
       </div>
     </div>

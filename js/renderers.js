@@ -3559,16 +3559,23 @@ function renderCosts(){
 
   wireCostSettingsMenu();
   setupCostLayout();
+  if (typeof setupCostTrainer === "function"){
+    setupCostTrainer();
+  }
 
   const state = getCostLayoutState();
 
   const redraw = ()=>{
-    if (!canvas) return;
-    resizeCostChartCanvas(canvas);
-    drawCostChart(canvas, model, {
-      maintenance: !toggleMaint || toggleMaint.checked,
-      jobs: !toggleJobs || toggleJobs.checked
-    });
+    if (canvas){
+      resizeCostChartCanvas(canvas);
+      drawCostChart(canvas, model, {
+        maintenance: !toggleMaint || toggleMaint.checked,
+        jobs: !toggleJobs || toggleJobs.checked
+      });
+    }
+    if (typeof refreshCostTrainer === "function"){
+      refreshCostTrainer();
+    }
   };
 
   state.onLayoutChange = redraw;
@@ -3583,6 +3590,9 @@ function renderCosts(){
   toggleJobs?.addEventListener("change", redraw);
 
   notifyCostLayoutContentChanged();
+  if (typeof refreshCostTrainer === "function"){
+    refreshCostTrainer();
+  }
 }
 
 function computeCostModel(){
