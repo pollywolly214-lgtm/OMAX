@@ -4,6 +4,16 @@ const pendingNewJobFiles = window.pendingNewJobFiles;
 if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
 const orderPartialSelection = window.orderPartialSelection;
 
+function editingCompletedJobsSet(){
+  if (typeof getEditingCompletedJobsSet === "function"){
+    return getEditingCompletedJobsSet();
+  }
+  if (!(window.editingCompletedJobs instanceof Set)){
+    window.editingCompletedJobs = new Set();
+  }
+  return window.editingCompletedJobs;
+}
+
 function readFileAsDataUrl(file){
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
@@ -5168,6 +5178,115 @@ function renderJobs(){
       attachments.forEach(att=> j.files.push({ ...att }));
       saveCloudDebounced();
       toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
+      renderJobs();
+    }
+  });
+
+  const historyBody = content.querySelector(".past-jobs-table tbody");
+  historyBody?.addEventListener("click", (e)=>{
+    const histEdit = e.target.closest("[data-history-edit]");
+    const histCancel = e.target.closest("[data-history-cancel]");
+    const histSave = e.target.closest("[data-history-save]");
+    const histDelete = e.target.closest("[data-history-delete]");
+
+    if (histEdit){
+      const id = histEdit.getAttribute("data-history-edit");
+      if (id != null){ editingCompletedJobsSet().add(String(id)); renderJobs(); }
+      return;
+    }
+
+    if (histCancel){
+      const id = histCancel.getAttribute("data-history-cancel");
+      if (id != null){ editingCompletedJobsSet().delete(String(id)); renderJobs(); }
+      return;
+    }
+
+    if (histDelete){
+      const id = histDelete.getAttribute("data-history-delete");
+      if (!id) return;
+      const proceed = typeof window.confirm === "function"
+        ? window.confirm("Delete this completed job entry?")
+        : true;
+      if (!proceed) return;
+      const idStr = String(id);
+      completedCuttingJobs = completedCuttingJobs.filter(job => String(job?.id) !== idStr);
+      window.completedCuttingJobs = completedCuttingJobs;
+      editingCompletedJobsSet().delete(idStr);
+      saveCloudDebounced();
+      toast("History entry deleted");
+      renderJobs();
+      return;
+    }
+
+    if (histSave){
+      const id = histSave.getAttribute("data-history-save");
+      if (!id) return;
+      const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
+      if (!entry) return;
+      const field = (key)=> content.querySelector(`[data-history-field="${key}"][data-history-id="${id}"]`);
+      const nameInput = field("name");
+      const estimateInput = field("estimateHours");
+      const actualInput = field("actualHours");
+      const materialInput = field("material");
+      const materialCostInput = field("materialCost");
+      const materialQtyInput = field("materialQty");
+      const notesInput = field("notes");
+      const completedInput = field("completedAtISO");
+
+      const name = (nameInput?.value || entry.name || "").trim();
+      if (!name){ toast("Enter a job name."); return; }
+
+      const estVal = estimateInput?.value;
+      const estNum = estVal === "" || estVal == null ? null : Number(estVal);
+      const estimateHours = Number.isFinite(estNum) && estNum >= 0 ? estNum : Number(entry.estimateHours) || 0;
+
+      const actVal = actualInput?.value;
+      const actualNum = actVal === "" || actVal == null ? null : Number(actVal);
+      const actualHours = Number.isFinite(actualNum) && actualNum >= 0 ? actualNum : null;
+
+      const material = materialInput?.value ?? entry.material ?? "";
+      const materialCostVal = materialCostInput?.value;
+      const materialCostNum = materialCostVal === "" || materialCostVal == null ? null : Number(materialCostVal);
+      const materialCost = Number.isFinite(materialCostNum) && materialCostNum >= 0 ? materialCostNum : Number(entry.materialCost) || 0;
+
+      const materialQtyVal = materialQtyInput?.value;
+      const materialQtyNum = materialQtyVal === "" || materialQtyVal == null ? null : Number(materialQtyVal);
+      const materialQty = Number.isFinite(materialQtyNum) && materialQtyNum >= 0 ? materialQtyNum : Number(entry.materialQty) || 0;
+
+      const notes = notesInput?.value ?? entry.notes ?? "";
+
+      const completedRaw = completedInput?.value;
+      if (completedRaw){
+        const dt = new Date(completedRaw);
+        if (!Number.isNaN(dt.getTime())) entry.completedAtISO = dt.toISOString();
+      }
+
+      entry.name = name;
+      entry.estimateHours = estimateHours;
+      entry.material = material;
+      entry.materialCost = materialCost;
+      entry.materialQty = materialQty;
+      entry.notes = notes;
+      entry.actualHours = actualHours != null ? actualHours : null;
+
+      const rate = Number(entry.efficiency?.rate) || JOB_RATE_PER_HOUR;
+      const deltaHours = actualHours != null ? (estimateHours - actualHours) : (entry.efficiency?.deltaHours ?? null);
+      const gainLoss = deltaHours != null ? deltaHours * rate : (entry.efficiency?.gainLoss ?? null);
+
+      entry.efficiency = {
+        ...entry.efficiency,
+        rate,
+        expectedHours: estimateHours,
+        actualHours: entry.actualHours,
+        expectedRemaining: 0,
+        actualRemaining: 0,
+        deltaHours,
+        gainLoss
+      };
+
+      editingCompletedJobsSet().delete(String(id));
+      saveCloudDebounced();
+      toast("History updated");
       renderJobs();
     }
   });

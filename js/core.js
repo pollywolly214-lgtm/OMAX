@@ -323,12 +323,22 @@ let inventorySearchTerm = window.inventorySearchTerm;
 
 /* ================ Jobs editing & render flags ================ */
 if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
+if (!(window.editingCompletedJobs instanceof Set)) window.editingCompletedJobs = new Set();
 if (typeof window.RENDER_TOTAL !== "number") window.RENDER_TOTAL = null;
 if (typeof window.RENDER_DELTA !== "number") window.RENDER_DELTA = 0;
 
 const editingJobs  = window.editingJobs;
 let   RENDER_TOTAL = window.RENDER_TOTAL;
 let   RENDER_DELTA = window.RENDER_DELTA;
+
+function getEditingCompletedJobsSet(){
+  if (!(window.editingCompletedJobs instanceof Set)){
+    window.editingCompletedJobs = new Set();
+  }
+  return window.editingCompletedJobs;
+}
+
+window.getEditingCompletedJobsSet = getEditingCompletedJobsSet;
 
 window.defaultIntervalTasks = defaultIntervalTasks;
 window.defaultAsReqTasks = defaultAsReqTasks;

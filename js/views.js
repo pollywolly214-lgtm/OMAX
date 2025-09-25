@@ -1058,12 +1058,35 @@ function viewJobs(){
     return acc;
   }, { total: 0 });
   const completedAverage = completedSorted.length ? (completedStats.total / completedSorted.length) : 0;
+  const numberInputValue = (value)=>{
+    const num = Number(value);
+    return Number.isFinite(num) ? String(num) : "";
+  };
+  const formatDateTimeLocal = (iso)=>{
+    if (!iso) return "";
+    const dt = new Date(iso);
+    if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "";
+    const offset = dt.getTimezoneOffset();
+    const local = new Date(dt.getTime() - offset * 60000);
+    return local.toISOString().slice(0,16);
+  };
+
+  const historyColumnCount = 7;
+  const editingCompletedJobsSet = typeof getEditingCompletedJobsSet === "function"
+    ? getEditingCompletedJobsSet()
+    : (()=>{
+        if (!(window.editingCompletedJobs instanceof Set)){
+          window.editingCompletedJobs = new Set();
+        }
+        return window.editingCompletedJobs;
+      })();
   const completedRows = completedSorted.map(job => {
     const eff = job && job.efficiency ? job.efficiency : {};
     const delta = Number(eff.deltaHours);
     const gainLoss = Number(eff.gainLoss);
     const actualHours = Number(job.actualHours ?? eff.actualHours);
     const estHours = Number(job.estimateHours);
+    const editingHistory = editingCompletedJobsSet.has(String(job.id));
     let statusLabel = "Finished on estimate";
     if (Number.isFinite(delta) && Math.abs(delta) > 0.1){
       statusLabel = delta > 0 ? "Finished ahead" : "Finished behind";
@@ -1075,17 +1098,53 @@ function viewJobs(){
       ? esc(String(job.notes)).replace(/\n/g, "<br>")
       : "<span class=\"muted\">—</span>";
     const materialLine = job?.material ? `<div class="small muted">${esc(job.material)}</div>` : "";
+
+    if (!editingHistory){
+      return `
+        <tr data-history-row="${job.id || ""}">
+          <td>
+            <div><strong>${esc(job?.name || "Job")}</strong></div>
+            ${materialLine}
+          </td>
+          <td>${formatDate(job?.completedAtISO)}</td>
+          <td>${formatHours(actualHours)} / ${formatHours(estHours)}</td>
+          <td>${esc(statusLabel)}${statusDetail}</td>
+          <td>${formatCurrency(gainLoss)}</td>
+          <td>${noteDisplay}</td>
+          <td class="past-job-actions">
+            <button type="button" data-history-edit="${job.id}">Edit</button>
+            <button type="button" class="danger" data-history-delete="${job.id}">Delete</button>
+          </td>
+        </tr>
+      `;
+    }
+
+    const completedVal = formatDateTimeLocal(job?.completedAtISO);
+    const actualVal = numberInputValue(actualHours);
+    const estimateVal = numberInputValue(estHours);
+    const materialCostVal = numberInputValue(job?.materialCost);
+    const materialQtyVal = numberInputValue(job?.materialQty);
+
     return `
-      <tr>
-        <td>
-          <div><strong>${esc(job?.name || "Job")}</strong></div>
-          ${materialLine}
+      <tr data-history-row="${job.id || ""}" class="editing">
+        <td colspan="${historyColumnCount}">
+          <div class="past-job-edit">
+            <div class="past-job-edit-grid">
+              <label>Job name<input type="text" data-history-field="name" data-history-id="${job.id}" value="${esc(job?.name || "")}"></label>
+              <label>Completed at<input type="datetime-local" data-history-field="completedAtISO" data-history-id="${job.id}" value="${completedVal}"></label>
+              <label>Estimate (hrs)<input type="number" min="0" step="0.1" data-history-field="estimateHours" data-history-id="${job.id}" value="${estimateVal}"></label>
+              <label>Actual (hrs)<input type="number" min="0" step="0.1" data-history-field="actualHours" data-history-id="${job.id}" value="${actualVal}"></label>
+              <label>Material<input type="text" data-history-field="material" data-history-id="${job.id}" value="${esc(job?.material || "")}"></label>
+              <label>Material cost<input type="number" min="0" step="0.01" data-history-field="materialCost" data-history-id="${job.id}" value="${materialCostVal}"></label>
+              <label>Material quantity<input type="number" min="0" step="0.01" data-history-field="materialQty" data-history-id="${job.id}" value="${materialQtyVal}"></label>
+            </div>
+            <label class="past-job-edit-notes">Notes<textarea data-history-field="notes" data-history-id="${job.id}" rows="3">${textEsc(job?.notes || "")}</textarea></label>
+            <div class="past-job-edit-actions">
+              <button type="button" data-history-save="${job.id}">Save</button>
+              <button type="button" class="danger" data-history-cancel="${job.id}">Cancel</button>
+            </div>
+          </div>
         </td>
-        <td>${formatDate(job?.completedAtISO)}</td>
-        <td>${formatHours(actualHours)} / ${formatHours(estHours)}</td>
-        <td>${esc(statusLabel)}${statusDetail}</td>
-        <td>${formatCurrency(gainLoss)}</td>
-        <td>${noteDisplay}</td>
       </tr>
     `;
   }).join("");
@@ -1098,7 +1157,7 @@ function viewJobs(){
       </div>
       <table class="past-jobs-table">
         <thead>
-          <tr><th>Job</th><th>Completed</th><th>Actual vs estimate</th><th>Status</th><th>Cost impact</th><th>Note</th></tr>
+          <tr><th>Job</th><th>Completed</th><th>Actual vs estimate</th><th>Status</th><th>Cost impact</th><th>Note</th><th>Actions</th></tr>
         </thead>
         <tbody>${completedRows}</tbody>
       </table>
