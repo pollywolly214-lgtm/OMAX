@@ -2666,6 +2666,11 @@ function renderSettings(){
       .modal-actions .secondary{background:#eef3fb;color:#0a63c2}
       .modal-actions .primary{background:#0a63c2;color:#fff}
       .modal-close{position:absolute;top:10px;right:10px;background:none;border:0;font-size:1.4rem;cursor:pointer;color:#666;line-height:1}
+      .settings-context-menu{position:fixed;z-index:10000;background:#fff;border:1px solid #d4dceb;border-radius:10px;box-shadow:0 12px 32px rgba(15,23,42,.18);padding:6px;display:flex;flex-direction:column;min-width:160px}
+      .settings-context-menu button{background:none;border:0;padding:8px 12px;text-align:left;font-size:.9rem;border-radius:6px;color:#1f2937;cursor:pointer}
+      .settings-context-menu button:hover{background:#eef3fb}
+      .settings-context-menu button.danger{color:#b91c1c}
+      .settings-context-menu button.danger:hover{background:#fee2e2}
     `;
     document.head.appendChild(st);
   }
@@ -3044,6 +3049,8 @@ function renderSettings(){
     </div>
   `;
 
+  closeContextMenu();
+
   const tree = document.getElementById("tree");
   const modal = document.getElementById("taskModal");
   const form = document.getElementById("taskForm");
@@ -3101,6 +3108,33 @@ function renderSettings(){
     if (typeof saveTasks === "function") { try{ saveTasks(); }catch(_){} }
     if (typeof saveCloudDebounced === "function") { try{ saveCloudDebounced(); }catch(_){} }
   };
+
+  function closeContextMenu(){
+    const menu = window.__settingsContextMenu;
+    if (!menu) return;
+    menu.hidden = true;
+    menu.removeAttribute("data-task-id");
+    menu.removeAttribute("data-owner");
+  }
+
+  function focusTaskForEdit(taskId){
+    if (!taskId) return;
+    const rawId = String(taskId);
+    const safeId = (typeof CSS !== "undefined" && typeof CSS.escape === "function")
+      ? CSS.escape(rawId)
+      : rawId.replace(/"/g, '\\"');
+    const card = document.querySelector(`#explorer [data-task-id="${safeId}"]`);
+    if (!card) return;
+    card.open = true;
+    try{ card.scrollIntoView({ block: "nearest" }); }catch(_){ }
+    const nameField = card.querySelector('[data-k="name"]');
+    if (nameField && typeof nameField.focus === "function"){
+      try{ nameField.focus(); }catch(_){ }
+      if (typeof nameField.select === "function"){
+        try{ nameField.select(); }catch(_){ }
+      }
+    }
+  }
 
   function syncFormMode(mode){
     if (!freqRow || !lastRow || !conditionRow) return;
@@ -3225,6 +3259,82 @@ function renderSettings(){
     return null;
   }
 
+  function removeTask(id, from){
+    const taskId = String(id || "").trim();
+    if (!taskId) return;
+    closeContextMenu();
+    const meta = findTaskMeta(taskId);
+    const mode = from || meta?.mode || null;
+    const detachChildren = (task)=>{
+      if (!task) return;
+      if (String(task.parentTask) === taskId) task.parentTask = null;
+    };
+    window.tasksInterval.forEach(detachChildren);
+    window.tasksAsReq.forEach(detachChildren);
+    if (mode === "interval"){
+      window.tasksInterval = window.tasksInterval.filter(t => String(t.id) !== taskId);
+    }else if (mode === "asreq"){
+      window.tasksAsReq = window.tasksAsReq.filter(t => String(t.id) !== taskId);
+    }else{
+      window.tasksInterval = window.tasksInterval.filter(t => String(t.id) !== taskId);
+      window.tasksAsReq = window.tasksAsReq.filter(t => String(t.id) !== taskId);
+    }
+    persist();
+    renderSettings();
+  }
+
+  function ensureContextMenu(){
+    let menu = window.__settingsContextMenu;
+    if (!menu){
+      menu = document.createElement("div");
+      menu.id = "settingsContextMenu";
+      menu.className = "settings-context-menu";
+      menu.hidden = true;
+      menu.innerHTML = `
+        <button type="button" data-action="edit">Edit</button>
+        <button type="button" data-action="delete" class="danger">Delete</button>
+      `;
+      menu.addEventListener("click", (evt)=>{
+        const btn = evt.target.closest("button[data-action]");
+        if (!btn) return;
+        evt.preventDefault();
+        const action = btn.getAttribute("data-action");
+        const taskId = menu.getAttribute("data-task-id");
+        const owner = menu.getAttribute("data-owner") || "";
+        closeContextMenu();
+        if (!taskId) return;
+        if (action === "edit"){
+          focusTaskForEdit(taskId);
+        }else if (action === "delete"){
+          const meta = owner ? { mode: owner } : findTaskMeta(taskId);
+          const type = owner || meta?.mode || "";
+          const confirmMsg = "Remove this maintenance task from every page? This action cannot be undone.";
+          if (window.confirm(confirmMsg)){
+            removeTask(taskId, type);
+          }
+        }
+      });
+      document.body.appendChild(menu);
+      window.__settingsContextMenu = menu;
+    }
+    if (!window.__settingsContextMenuListenersAttached){
+      window.__settingsContextMenuListenersAttached = true;
+      document.addEventListener("click", (event)=>{
+        const cm = window.__settingsContextMenu;
+        if (!cm || cm.hidden) return;
+        if (event.target && cm.contains(event.target)) return;
+        closeContextMenu();
+      });
+      document.addEventListener("keydown", (event)=>{
+        if (event.key === "Escape") closeContextMenu();
+      });
+      window.addEventListener("resize", closeContextMenu);
+      window.addEventListener("blur", closeContextMenu);
+      document.addEventListener("scroll", closeContextMenu, true);
+    }
+    return menu;
+  }
+
   function updateDueChip(holder, task){
     const chip = holder.querySelector('[data-due-chip]');
     if (!chip) return;
@@ -3311,12 +3421,7 @@ function renderSettings(){
     if (removeBtn){
       const id = removeBtn.getAttribute('data-remove');
       const from = removeBtn.getAttribute('data-from');
-      window.tasksInterval.forEach(t => { if (String(t.parentTask) === String(id)) t.parentTask = null; });
-      window.tasksAsReq.forEach(t => { if (String(t.parentTask) === String(id)) t.parentTask = null; });
-      if (from === 'interval') window.tasksInterval = window.tasksInterval.filter(t => String(t.id)!==String(id));
-      else window.tasksAsReq = window.tasksAsReq.filter(t => String(t.id)!==String(id));
-      persist();
-      renderSettings();
+      removeTask(id, from);
       return;
     }
     const completeBtn = e.target.closest('.btn-complete');
@@ -3330,6 +3435,37 @@ function renderSettings(){
       persist();
       renderSettings();
     }
+  });
+
+  tree?.addEventListener("contextmenu", (e)=>{
+    const summary = e.target.closest('details.task>summary');
+    if (!summary) return;
+    const card = summary.closest('details.task');
+    if (!card) return;
+    const id = card.getAttribute('data-task-id');
+    if (!id) return;
+    e.preventDefault();
+    const owner = card.getAttribute('data-owner') || "";
+    const menu = ensureContextMenu();
+    closeContextMenu();
+    menu.setAttribute('data-task-id', id);
+    menu.setAttribute('data-owner', owner);
+    menu.hidden = false;
+    menu.style.left = '0px';
+    menu.style.top = '0px';
+    const width = menu.offsetWidth;
+    const height = menu.offsetHeight;
+    const padding = 8;
+    let left = e.clientX;
+    let top = e.clientY;
+    const maxLeft = Math.max(padding, window.innerWidth - width - padding);
+    const maxTop = Math.max(padding, window.innerHeight - height - padding);
+    if (left > maxLeft) left = maxLeft;
+    if (top > maxTop) top = maxTop;
+    if (left < padding) left = padding;
+    if (top < padding) top = padding;
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
   });
 
   const clearSummaryHint = (summary)=>{
