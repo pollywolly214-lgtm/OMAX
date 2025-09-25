@@ -499,6 +499,52 @@ function pumpBuildTimeTicks(range, startTime, endTime){
   return ticks;
 }
 
+function pumpBuildRpmTicks(minValue, maxValue){
+  const ticks = [];
+  if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) return ticks;
+  let min = minValue;
+  let max = maxValue;
+  if (min === max){
+    const val = Number.isFinite(min) ? min : 0;
+    const label = Number(val).toLocaleString(undefined, { maximumFractionDigits: 0 });
+    return [{ value: val, label, decimals: 0 }];
+  }
+  if (min > max){
+    const swap = min;
+    min = max;
+    max = swap;
+  }
+  const span = max - min;
+  const desiredTicks = 6;
+  const roughStep = span / Math.max(1, desiredTicks - 1);
+  const magnitude = Math.pow(10, Math.floor(Math.log10(Math.max(roughStep, 1e-6))));
+  const bases = [1, 2, 2.5, 5, 10];
+  let niceStep = magnitude;
+  for (let i = 0; i < bases.length; i++){
+    const candidate = bases[i] * magnitude;
+    niceStep = candidate;
+    if (roughStep <= candidate){
+      break;
+    }
+  }
+  const niceMin = Math.floor(min / niceStep) * niceStep;
+  const niceMax = Math.ceil(max / niceStep) * niceStep;
+  const decimals = niceStep < 1 ? Math.min(3, Math.max(0, Math.round(-Math.log10(niceStep)))) : 0;
+  let value = niceMin;
+  let guard = 0;
+  while (value <= niceMax + niceStep * 0.5 && guard < 64){
+    const fixed = Number(value.toFixed(Math.max(decimals, 0)));
+    const label = Number(fixed).toLocaleString(undefined, {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    });
+    ticks.push({ value: fixed, label, decimals });
+    value += niceStep;
+    guard++;
+  }
+  return ticks;
+}
+
 function viewPumpLogWidget(){
   const latest = pumpLatest();
   const pct    = latest ? pumpPercentChange(latest.rpm) : null;
@@ -873,6 +919,7 @@ function drawPumpChart(canvas, rangeValue){
   let xMin = axisStartDate.getTime();
   let xMax = axisEndDate.getTime();
   if (xMax <= xMin) xMax = xMin + DAY_MS;
+  const yTicks = pumpBuildRpmTicks(yMin, yMax);
   const ticks = pumpBuildTimeTicks(range, xMin, xMax);
   const hasSubLabel = ticks.some(t => t.subLabel);
   const headerLatestY = Math.max(scaled(24), 30);
@@ -881,11 +928,21 @@ function drawPumpChart(canvas, rangeValue){
   const contextDetailGap = Math.max(scaled(14), 16);
   const entriesLabelY = contextLabelY + contextDetailGap;
   const topBlockPadding = Math.max(scaled(30), 36);
+  let maxYTickWidth = 0;
+  if (yTicks.length){
+    const prevFont = ctx.font;
+    ctx.font = fontPx(10.5);
+    yTicks.forEach(t => {
+      const width = ctx.measureText(t.label).width;
+      if (width > maxYTickWidth) maxYTickWidth = width;
+    });
+    ctx.font = prevFont;
+  }
   const margin = {
     top: Math.max(entriesLabelY + topBlockPadding, Math.max(76, scaled(50))),
     right: Math.max(18, scaled(7)),
     bottom: Math.max(hasSubLabel ? 72 : 52, scaled(hasSubLabel ? 26 : 22)),
-    left: Math.max(52, scaled(18))
+    left: Math.max(Math.max(52, scaled(18)), maxYTickWidth > 0 ? maxYTickWidth + scaled(18) : 0)
   };
   const axisLabelY = margin.top - Math.max(scaled(12), 14);
   const innerW = Math.max(10, cssWidth - margin.left - margin.right);
@@ -928,6 +985,23 @@ function drawPumpChart(canvas, rangeValue){
   ctx.lineTo(axisX1, Y(yMax));
   ctx.stroke();
   ctx.restore();
+
+  if (yTicks.length){
+    ctx.save();
+    ctx.strokeStyle = "rgba(98, 125, 179, 0.22)";
+    ctx.lineWidth = Math.max(1, scaled(0.6));
+    ctx.setLineDash([scaled(2.5), scaled(5.5)]);
+    yTicks.forEach(t => {
+      const y = Y(t.value);
+      if (y < margin.top - scaled(0.5) || y > axisY + scaled(0.5)) return;
+      if (Math.abs(y - axisY) < scaled(0.6)) return;
+      ctx.beginPath();
+      ctx.moveTo(axisX0, y);
+      ctx.lineTo(axisX1, y);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
 
   ctx.lineWidth = Math.max(1.5, scaled(1.4));
   ctx.strokeStyle = "#0a63c2";
@@ -1007,6 +1081,36 @@ function drawPumpChart(canvas, rangeValue){
     });
   });
 
+  if (yTicks.length){
+    ctx.save();
+    ctx.strokeStyle = "#1f3a60";
+    ctx.lineWidth = Math.max(1, scaled(0.7));
+    ctx.beginPath();
+    yTicks.forEach(t => {
+      const y = Y(t.value);
+      if (y < margin.top - scaled(0.5) || y > axisY + scaled(0.5)) return;
+      if (Math.abs(y - axisY) < scaled(0.6)) return;
+      ctx.moveTo(axisX0 - scaled(6), y);
+      ctx.lineTo(axisX0, y);
+    });
+    ctx.stroke();
+    ctx.fillStyle = "#1f3a60";
+    ctx.font = fontPx(10.5);
+    const prevAlign = ctx.textAlign;
+    const prevBaseline = ctx.textBaseline;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    yTicks.forEach(t => {
+      const y = Y(t.value);
+      if (y < margin.top - scaled(0.5) || y > axisY + scaled(0.5)) return;
+      if (Math.abs(y - axisY) < scaled(0.6)) return;
+      ctx.fillText(t.label, axisX0 - scaled(8), y);
+    });
+    ctx.textAlign = prevAlign;
+    ctx.textBaseline = prevBaseline;
+    ctx.restore();
+  }
+
   ctx.strokeStyle = "rgba(12, 56, 112, 0.35)";
   ctx.lineWidth = Math.max(1, scaled(0.8));
   ctx.setLineDash([scaled(2), scaled(4)]);
@@ -1049,6 +1153,8 @@ function drawPumpChart(canvas, rangeValue){
   }
 
   ctx.fillStyle = "#1f3a60";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
   ctx.font = fontPx(12);
   ctx.fillText(`RPM`, axisX0, axisLabelY);
   ctx.font = fontPx(11);
