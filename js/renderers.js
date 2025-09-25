@@ -3693,6 +3693,63 @@ function computeCostModel(){
   const jobsInfo = [];
   const jobSeriesRaw = [];
   let totalGainLoss = 0;
+  let completedCount = 0;
+
+  const completedJobsList = Array.isArray(completedCuttingJobs) ? completedCuttingJobs : [];
+  if (completedJobsList.length){
+    for (const job of completedJobsList){
+      if (!job) continue;
+      const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
+      const gainLoss = eff && Number.isFinite(eff.gainLoss) ? Number(eff.gainLoss) : 0;
+      const deltaHours = eff && Number.isFinite(eff.deltaHours) ? Number(eff.deltaHours) : 0;
+      let date = null;
+      if (job.completedAtISO){
+        const completedDate = parseDateLocal(job.completedAtISO) || new Date(job.completedAtISO);
+        if (completedDate instanceof Date && !Number.isNaN(completedDate.getTime())){
+          date = completedDate;
+        }
+      }
+      if (!date && job.dueISO){
+        const due = parseDateLocal(job.dueISO);
+        if (due) date = due;
+      }
+      if (!date && job.startISO){
+        const start = parseDateLocal(job.startISO);
+        if (start) date = start;
+      }
+      if (!date){
+        const fallback = parsedHistory.length ? parsedHistory[parsedHistory.length-1].date : new Date();
+        date = new Date(fallback);
+      }
+      const milestone = job.completedAtISO
+        ? parseDateLocal(job.completedAtISO) || new Date(job.completedAtISO)
+        : parseDateLocal(job.dueISO || job.startISO || "");
+      const milestoneLabel = (milestone instanceof Date && !Number.isNaN(milestone))
+        ? milestone.toLocaleDateString()
+        : "—";
+      let statusDetail = "Finished on estimate";
+      if (Math.abs(deltaHours) > 0.1){
+        const prefix = deltaHours > 0 ? "Finished ahead" : "Finished behind";
+        statusDetail = `${prefix} (${deltaHours>0?"+":"-"}${Math.abs(deltaHours).toFixed(1)} hr)`;
+      }
+
+      jobsInfo.push({
+        name: job.name || "Untitled job",
+        date,
+        milestoneLabel,
+        gainLoss,
+        status: "Completed",
+        statusDetail
+      });
+
+      if (date instanceof Date && !Number.isNaN(date.getTime())){
+        jobSeriesRaw.push({ date, rawValue: gainLoss, label: job.name || "Job" });
+      }
+
+      totalGainLoss += gainLoss;
+      completedCount += 1;
+    }
+  }
 
   if (Array.isArray(cuttingJobs)){
     for (const job of cuttingJobs){
@@ -3730,12 +3787,6 @@ function computeCostModel(){
         status,
         statusDetail
       });
-
-      if (!Number.isNaN(date.getTime())){
-        jobSeriesRaw.push({ date, rawValue: gainLoss, label: job.name || "Job" });
-      }
-
-      totalGainLoss += gainLoss;
     }
   }
 
@@ -3749,7 +3800,7 @@ function computeCostModel(){
     });
   }
 
-  const jobCount = jobsInfo.length;
+  const jobCount = completedCount;
   const averageGainLoss = jobCount ? (totalGainLoss / jobCount) : 0;
 
   const formatterCurrency = (value, { showPlus=false, decimals=null } = {})=>{
@@ -3820,7 +3871,7 @@ function computeCostModel(){
       title: "Cutting jobs efficiency",
       value: formatterCurrency(totalGainLoss, { decimals: 0, showPlus: true }),
       hint: jobCount
-        ? `Average gain/loss ${formatterCurrency(averageGainLoss, { decimals: 0, showPlus: true })} across ${jobCount} job${jobCount===1?"":"s"}.`
+        ? `Average gain/loss ${formatterCurrency(averageGainLoss, { decimals: 0, showPlus: true })} across ${jobCount} completed job${jobCount===1?"":"s"}.`
         : "No cutting jobs logged yet."
     },
     {
@@ -3832,7 +3883,7 @@ function computeCostModel(){
   ];
 
   const jobSummary = {
-    countLabel: String(jobCount),
+    countLabel: jobCount ? `${jobCount} completed` : "0",
     totalLabel: formatterCurrency(totalGainLoss, { decimals: 0, showPlus: true }),
     averageLabel: formatterCurrency(averageGainLoss, { decimals: 0, showPlus: true }),
     rollingLabel: jobSeries.length
@@ -4062,11 +4113,40 @@ function drawCostChart(canvas, model, show){
 
 
 function renderJobs(){
-  const content = document.getElementById("content"); 
+  const content = document.getElementById("content");
   if (!content) return;
+
+  if (window.pendingJobFieldFocus !== pendingJobFieldFocus){
+    pendingJobFieldFocus = window.pendingJobFieldFocus;
+  }
 
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
+
+  const focusRequest = (pendingJobFieldFocus && typeof pendingJobFieldFocus === "object")
+    ? { ...pendingJobFieldFocus }
+    : null;
+  if (focusRequest && focusRequest.id){
+    requestAnimationFrame(()=>{
+      const fieldSelectors = {
+        material: `[data-j="material"][data-id="${focusRequest.id}"]`,
+        materialCost: `[data-j="materialCost"][data-id="${focusRequest.id}"]`,
+        materialQty: `[data-j="materialQty"][data-id="${focusRequest.id}"]`,
+        notes: `[data-j="notes"][data-id="${focusRequest.id}"]`
+      };
+      const selector = fieldSelectors[focusRequest.field] || fieldSelectors.notes;
+      const target = selector ? content.querySelector(selector) : null;
+      if (target){
+        target.focus();
+        if (typeof target.select === "function") target.select();
+      }
+      pendingJobFieldFocus = null;
+      window.pendingJobFieldFocus = null;
+    });
+  } else {
+    pendingJobFieldFocus = null;
+    window.pendingJobFieldFocus = null;
+  }
 
   const newFilesBtn = document.getElementById("jobFilesBtn");
   const newFilesInput = document.getElementById("jobFiles");
@@ -4148,18 +4228,8 @@ function renderJobs(){
     saveCloudDebounced(); renderJobs();
   });
 
-  // 5) Inline material $/qty (kept)
+  // 5) File uploads + attachments
   content.querySelector("tbody")?.addEventListener("change", async (e)=>{
-    if (e.target.matches("input.matCost, input.matQty")){
-      const id = e.target.getAttribute("data-id");
-      const j = cuttingJobs.find(x=>x.id===id); if (!j) return;
-      j.materialCost = Number(content.querySelector(`input.matCost[data-id="${id}"]`).value)||0;
-      j.materialQty  = Number(content.querySelector(`input.matQty[data-id="${id}"]`).value)||0;
-      saveCloudDebounced();
-      renderJobs();
-      return;
-    }
-
     if (e.target.matches("input[data-job-file-input]")){
       const id = e.target.getAttribute("data-job-file-input");
       const j = cuttingJobs.find(x=>x.id===id);
@@ -4175,7 +4245,19 @@ function renderJobs(){
     }
   });
 
-  // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
+  // 6) Live update the material total preview inside the edit card
+  content.querySelector("tbody")?.addEventListener("input", (e)=>{
+    if (e.target.matches('[data-j="materialCost"], [data-j="materialQty"]')){
+      const id = e.target.getAttribute('data-id');
+      if (!id) return;
+      const cost = Number(content.querySelector(`[data-j="materialCost"][data-id="${id}"]`)?.value) || 0;
+      const qty  = Number(content.querySelector(`[data-j="materialQty"][data-id="${id}"]`)?.value) || 0;
+      const display = content.querySelector(`[data-job-material-total="${id}"]`);
+      if (display) display.textContent = `$${(cost * qty).toFixed(2)}`;
+    }
+  });
+
+  // 7) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
   content.querySelector("tbody")?.addEventListener("click",(e)=>{
     const upload = e.target.closest("[data-upload-job]");
     if (upload){
@@ -4198,11 +4280,38 @@ function renderJobs(){
       return;
     }
 
+    // Prompt users to enter edit mode when they tap read-only fields
+    const trigger = e.target.closest("[data-job-trigger]");
+    if (trigger){
+      const id = trigger.getAttribute("data-job-id");
+      if (!id) return;
+      const field = trigger.getAttribute("data-job-trigger");
+      const labelMap = {
+        material: "material",
+        materialCost: "material cost",
+        materialQty: "material quantity",
+        notes: "notes"
+      };
+      const label = labelMap[field] || "selected field";
+      const shouldEdit = (typeof window !== "undefined" && typeof window.confirm === "function")
+        ? window.confirm(`Open edit mode to update the ${label}?`)
+        : true;
+      if (shouldEdit){
+        pendingJobFieldFocus = { id, field };
+        window.pendingJobFieldFocus = pendingJobFieldFocus;
+        editingJobs.add(id);
+        renderJobs();
+      }
+      e.preventDefault();
+      return;
+    }
+
     const ed = e.target.closest("[data-edit-job]");
     const rm = e.target.closest("[data-remove-job]");
     const sv = e.target.closest("[data-save-job]");
     const ca = e.target.closest("[data-cancel-job]");
     const lg = e.target.closest("[data-log-job]");
+    const complete = e.target.closest("[data-complete-job]");
     const apSpent  = e.target.closest("[data-log-apply-spent]");
     const apRemain = e.target.closest("[data-log-apply-remain]");
 
@@ -4213,7 +4322,59 @@ function renderJobs(){
     if (rm){
       const id = rm.getAttribute("data-remove-job");
       cuttingJobs = cuttingJobs.filter(x=>x.id!==id);
-      saveCloudDebounced(); toast("Removed"); renderJobs(); 
+      saveCloudDebounced(); toast("Removed"); renderJobs();
+      return;
+    }
+
+    if (complete){
+      const id = complete.getAttribute("data-complete-job");
+      const idx = cuttingJobs.findIndex(x=>x.id===id);
+      if (idx < 0) return;
+      const job = cuttingJobs[idx];
+      const eff = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
+      const now = new Date();
+      const completionISO = now.toISOString();
+      const efficiencySummary = eff ? {
+        rate: eff.rate ?? JOB_RATE_PER_HOUR,
+        expectedHours: eff.expectedHours ?? null,
+        actualHours: eff.actualHours ?? null,
+        expectedRemaining: eff.expectedRemaining ?? null,
+        actualRemaining: eff.actualRemaining ?? null,
+        deltaHours: eff.deltaHours ?? null,
+        gainLoss: eff.gainLoss ?? null
+      } : {
+        rate: JOB_RATE_PER_HOUR,
+        expectedHours: null,
+        actualHours: null,
+        expectedRemaining: null,
+        actualRemaining: null,
+        deltaHours: null,
+        gainLoss: null
+      };
+
+      const completed = {
+        id: job.id,
+        name: job.name,
+        estimateHours: job.estimateHours,
+        startISO: job.startISO,
+        dueISO: job.dueISO,
+        completedAtISO: completionISO,
+        notes: job.notes || "",
+        material: job.material || "",
+        materialCost: Number(job.materialCost)||0,
+        materialQty: Number(job.materialQty)||0,
+        manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
+        files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
+        actualHours: eff && Number.isFinite(eff.actualHours) ? eff.actualHours : null,
+        efficiency: efficiencySummary
+      };
+
+      completedCuttingJobs.push(completed);
+      cuttingJobs.splice(idx, 1);
+      editingJobs.delete(id);
+      saveCloudDebounced();
+      toast("Job marked complete");
+      renderJobs();
       return;
     }
 
@@ -4225,9 +4386,12 @@ function renderJobs(){
       j.name = qs("name") || j.name;
       j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
       j.material = qs("material") || j.material || "";
+      j.materialCost = Math.max(0, Number(qs("materialCost")) || 0);
+      j.materialQty  = Math.max(0, Number(qs("materialQty")) || 0);
       j.startISO = qs("startISO") || j.startISO;
       j.dueISO   = qs("dueISO")   || j.dueISO;
-      j.notes    = content.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
+      const noteVal = qs("notes");
+      j.notes    = noteVal != null ? noteVal : (j.notes || "");
       editingJobs.delete(id);
       saveCloudDebounced(); renderJobs();
       return;
@@ -4255,7 +4419,7 @@ function renderJobs(){
       trForm.className = "manual-log-row";
       trForm.setAttribute("data-log-row", id);
       trForm.innerHTML = `
-        <td colspan="8">
+        <td colspan="5">
           <div class="mini-form" style="display:grid; gap:8px; align-items:end; grid-template-columns: repeat(6, minmax(0,1fr));">
             <div style="grid-column:1/7">
               <strong>Manual Log for: ${j.name}</strong>
