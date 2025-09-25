@@ -635,12 +635,16 @@ main::after {
 
 footer {
   position: relative;
-  z-index: 1;
+  z-index: 0;
   padding: 20px 16px;
   text-align: center;
   color: rgba(241, 245, 255, 0.78);
   background: linear-gradient(135deg, rgba(4, 28, 74, 0.92), rgba(13, 63, 145, 0.85));
   box-shadow: 0 -12px 30px rgba(0, 17, 46, 0.4);
+}
+
+body.modal-open footer {
+  pointer-events: none;
 }
 
 .folder-dropzone {
