@@ -2857,6 +2857,35 @@ function renderJobs(){
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
 
+  const historyBtn = content.querySelector("[data-job-history-trigger]");
+  if (historyBtn){
+    historyBtn.addEventListener("click", ()=>{
+      const target = document.getElementById("pastJobs");
+      if (!target) return;
+      const restoreTabindex = !target.hasAttribute("tabindex");
+      if (restoreTabindex){
+        target.setAttribute("tabindex", "-1");
+        target.dataset.tempTabindex = "1";
+      }
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      try {
+        target.focus({ preventScroll: true });
+      } catch (_) {
+        // Fallback focus handling for browsers without focus options
+        target.focus();
+      }
+      if (restoreTabindex){
+        const cleanup = ()=>{
+          if (!target.dataset.tempTabindex) return;
+          delete target.dataset.tempTabindex;
+          target.removeAttribute("tabindex");
+        };
+        target.addEventListener("blur", ()=> cleanup(), { once: true });
+        setTimeout(()=> cleanup(), 1500);
+      }
+    });
+  }
+
   const newFilesBtn = document.getElementById("jobFilesBtn");
   const newFilesInput = document.getElementById("jobFiles");
   newFilesBtn?.addEventListener("click", ()=>{ newFilesInput?.click(); });

@@ -1208,7 +1208,7 @@ function viewJobs(){
     <div class="block" style="grid-column:1 / -1">
       <h3>Cutting Jobs</h3>
       <div class="job-page-toolbar">
-        <a class="job-history-button" href="#pastJobs">Jump to history</a>
+        <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
       </div>
       <form id="addJobForm" class="mini-form">
         <input type="text" id="jobName" placeholder="Job name" required>
