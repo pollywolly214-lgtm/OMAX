@@ -3,7 +3,7 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
-const PUMP_BASE_FONT_SCALE = 1.45;
+const PUMP_BASE_FONT_SCALE = 1.52;
 const pumpViewportState = { bound:false, lastResponsiveScale:1 };
 let pumpLayoutObserver = null;
 let pumpObservedWrap = null;
@@ -636,11 +636,14 @@ function drawPumpChart(canvas, rangeValue){
   const ticks = pumpBuildTimeTicks(range, xMin, xMax);
   const hasSubLabel = ticks.some(t => t.subLabel);
   const margin = {
-    top: Math.max(40, scaled(18)),
+    top: Math.max(60, scaled(34)),
     right: Math.max(16, scaled(6)),
-    bottom: Math.max(hasSubLabel ? 66 : 48, scaled(hasSubLabel ? 22 : 18)),
+    bottom: Math.max(hasSubLabel ? 70 : 50, scaled(hasSubLabel ? 24 : 20)),
     left: Math.max(48, scaled(16))
   };
+  const headerLatestY = Math.max(scaled(20), margin.top - scaled(28));
+  const contextLabelY = margin.top - scaled(16);
+  const axisLabelY = margin.top - scaled(8);
   const innerW = Math.max(10, cssWidth - margin.left - margin.right);
   const innerH = Math.max(10, cssHeight - margin.top - margin.bottom);
   const axisY = margin.top + innerH;
@@ -757,9 +760,9 @@ function drawPumpChart(canvas, rangeValue){
 
   ctx.fillStyle = "#1f3a60";
   ctx.font = fontPx(12);
-  ctx.fillText(`RPM`, axisX0, margin.top - scaled(8));
+  ctx.fillText(`RPM`, axisX0, axisLabelY);
   ctx.font = fontPx(11);
-  ctx.fillText(`${range.toUpperCase()} trend`, axisX1 - scaled(96), margin.top - scaled(8));
+  ctx.fillText(`${range.toUpperCase()} trend`, axisX1 - scaled(96), axisLabelY);
 
   ctx.strokeStyle = "#1f3a60";
   ctx.lineWidth = Math.max(1, scaled(1));
@@ -791,11 +794,11 @@ function drawPumpChart(canvas, rangeValue){
   const latest = data[data.length - 1];
   const pct = pumpPercentChange(latest?.rpm);
   ctx.font = fontPx(11.5);
-  ctx.fillText(`Latest: ${latest.rpm} RPM (${latest.dateISO})  Δ%=${pct!=null?pct.toFixed(1):"—"}`, axisX0 + scaled(2), margin.top / 2);
+  ctx.fillText(`Latest: ${latest.rpm} RPM (${latest.dateISO})  Δ%=${pct!=null?pct.toFixed(1):"—"}`, axisX0 + scaled(2), headerLatestY);
   ctx.font = fontPx(10.2);
   ctx.fillStyle = "#4b5b7a";
   const label = usingFiltered ? pumpRangeLabel(range) : "Showing latest entry";
-  ctx.fillText(label, axisX0, margin.top - scaled(8));
+  ctx.fillText(label, axisX0, contextLabelY);
   if (!usingFiltered){
     ctx.fillStyle = "#b04545";
     ctx.font = fontPx(10.8);
