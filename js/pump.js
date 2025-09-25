@@ -3,8 +3,8 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
-const PUMP_BASE_FONT_SCALE = 3.4;
-const pumpViewportState = { bound:false, lastResponsiveScale:1 };
+const PUMP_BASE_FONT_SCALE = 3.9;
+const pumpViewportState = { bound:false, lastResponsiveScale:1, baseScale:null, baseScaleChanged:false };
 
 function ensurePumpOverlayBackdrop(){
   let backdrop = document.querySelector("[data-pump-overlay-backdrop]");
@@ -30,9 +30,27 @@ function pumpGetViewportScale(){
 
 function pumpGetResponsiveZoomFactor(){
   const raw = pumpGetViewportScale();
-  if (!isFinite(raw) || raw <= 0) return 1;
-  if (raw < 1) return Math.max(0.5, raw);
-  return 1;
+  if (!isFinite(raw) || raw <= 0){
+    pumpViewportState.baseScaleChanged = false;
+    return 1;
+  }
+  const previousBase = pumpViewportState.baseScale;
+  if (!isFinite(pumpViewportState.baseScale) || pumpViewportState.baseScale == null || pumpViewportState.baseScale <= 0){
+    pumpViewportState.baseScale = raw;
+  }
+  const baseline = pumpViewportState.baseScale || 1;
+  const ratio = raw / baseline;
+  if (!isFinite(ratio) || ratio <= 0){
+    pumpViewportState.baseScaleChanged = pumpViewportState.baseScale !== previousBase;
+    return 1;
+  }
+  if (ratio < 0.6 || ratio > 1.6){
+    pumpViewportState.baseScale = raw;
+    pumpViewportState.baseScaleChanged = pumpViewportState.baseScale !== previousBase;
+    return 1;
+  }
+  pumpViewportState.baseScaleChanged = pumpViewportState.baseScale !== previousBase;
+  return Math.max(0.5, Math.min(2.5, ratio));
 }
 
 function pumpComputeFontScale(){
@@ -45,11 +63,14 @@ function ensurePumpViewportWatcher(){
   if (pumpViewportState.bound) return;
   pumpViewportState.bound = true;
   pumpViewportState.lastResponsiveScale = pumpGetResponsiveZoomFactor();
+  pumpViewportState.baseScaleChanged = false;
   const handle = ()=>{
     const next = pumpGetResponsiveZoomFactor();
     if (!isFinite(next)) return;
-    if (Math.abs(next - pumpViewportState.lastResponsiveScale) < 0.01) return;
+    const scaleChanged = pumpViewportState.baseScaleChanged;
+    if (!scaleChanged && Math.abs(next - pumpViewportState.lastResponsiveScale) < 0.01) return;
     pumpViewportState.lastResponsiveScale = next;
+    pumpViewportState.baseScaleChanged = false;
     const canvas = document.getElementById("pumpChart");
     if (canvas){
       drawPumpChart(canvas, window.pumpChartRange);
