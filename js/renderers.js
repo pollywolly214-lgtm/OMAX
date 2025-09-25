@@ -4052,6 +4052,109 @@ function renderCosts(){
   const canvas = document.getElementById("costChart");
   const toggleMaint = document.getElementById("toggleCostMaintenance");
   const toggleJobs  = document.getElementById("toggleCostJobs");
+  const canvasWrap = content.querySelector(".cost-chart-canvas");
+  let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
+
+  const escapeTooltip = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[c] || c);
+
+  const ensureTooltip = ()=>{
+    if (!canvasWrap) return null;
+    if (!tooltipEl){
+      tooltipEl = document.createElement("div");
+      tooltipEl.className = "cost-chart-tooltip";
+      tooltipEl.setAttribute("role", "tooltip");
+      tooltipEl.hidden = true;
+      canvasWrap.appendChild(tooltipEl);
+    }
+    return tooltipEl;
+  };
+
+  const hideTooltip = ()=>{
+    if (tooltipEl){
+      tooltipEl.hidden = true;
+      delete tooltipEl.dataset.visible;
+      tooltipEl.textContent = "";
+    }
+    if (canvas){
+      canvas.style.cursor = "";
+    }
+  };
+
+  const showTooltip = (target, { scaleX, scaleY })=>{
+    const tip = ensureTooltip();
+    if (!tip || !canvas) return;
+    const label = `${target.datasetLabel} ${target.valueLabel}`;
+    tip.innerHTML = `<strong>${escapeTooltip(label)}</strong><span>${escapeTooltip(target.detail)}</span>`;
+    const cssScaleX = scaleX > 0 ? 1 / scaleX : 1;
+    const cssScaleY = scaleY > 0 ? 1 / scaleY : 1;
+    const centerX = target.rect.x + (target.rect.width / 2);
+    const anchorY = target.rect.y;
+    const canvasWidth = canvas.clientWidth || canvas.width;
+    const canvasHeight = canvas.clientHeight || canvas.height;
+    const maxX = Math.max(16, canvasWidth - 16);
+    const maxY = Math.max(16, canvasHeight - 16);
+    const posX = Math.min(maxX, Math.max(16, centerX * cssScaleX));
+    const posY = Math.min(maxY, Math.max(16, anchorY * cssScaleY));
+    tip.style.left = `${posX}px`;
+    tip.style.top = `${posY}px`;
+    tip.hidden = false;
+    tip.dataset.visible = "true";
+    canvas.style.cursor = "pointer";
+  };
+
+  const handlePointerHover = (event)=>{
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientWidth = canvas.clientWidth || rect.width || canvas.width;
+    const clientHeight = canvas.clientHeight || rect.height || canvas.height;
+    const scaleX = canvas.width / Math.max(1, clientWidth);
+    const scaleY = canvas.height / Math.max(1, clientHeight);
+    const pointerX = (event.clientX - rect.left) * scaleX;
+    const pointerY = (event.clientY - rect.top) * scaleY;
+    const targets = Array.isArray(canvas.__costChartTargets) ? canvas.__costChartTargets : [];
+    let hovered = null;
+    for (const target of targets){
+      if (!target || !target.rect) continue;
+      const { x, y, width, height } = target.rect;
+      if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
+        hovered = target;
+        break;
+      }
+    }
+    if (hovered){
+      showTooltip(hovered, { scaleX, scaleY });
+    }else{
+      hideTooltip();
+    }
+  };
+
+  const attachTooltipHandlers = ()=>{
+    if (!canvas) return;
+    ensureTooltip();
+    if (typeof canvas.__costHoverCleanup === "function"){
+      canvas.__costHoverCleanup();
+    }
+    const pointerMove = (event)=> handlePointerHover(event);
+    const pointerDown = (event)=> handlePointerHover(event);
+    const pointerLeave = ()=> hideTooltip();
+    canvas.addEventListener("pointermove", pointerMove);
+    canvas.addEventListener("pointerdown", pointerDown);
+    canvas.addEventListener("pointerleave", pointerLeave);
+    canvas.__costHoverCleanup = ()=>{
+      canvas.removeEventListener("pointermove", pointerMove);
+      canvas.removeEventListener("pointerdown", pointerDown);
+      canvas.removeEventListener("pointerleave", pointerLeave);
+      hideTooltip();
+    };
+  };
+
+  attachTooltipHandlers();
 
   wireCostSettingsMenu();
   setupCostLayout();
@@ -4063,6 +4166,7 @@ function renderCosts(){
 
   const redraw = ()=>{
     if (canvas){
+      hideTooltip();
       resizeCostChartCanvas(canvas);
       drawCostChart(canvas, model, {
         maintenance: !toggleMaint || toggleMaint.checked,
@@ -4321,10 +4425,33 @@ function computeCostModel(){
     });
   }
 
-  const maintenanceSeries = maintenanceHistory.slice(-16).map(entry => ({
-    date: entry.date,
-    value: entry.cost
-  }));
+  const formatHoursLabel = (hours)=>{
+    if (!Number.isFinite(hours) || hours <= 0) return null;
+    if (hours >= 10){
+      return Math.round(hours).toLocaleString();
+    }
+    const rounded = Math.round(hours * 10) / 10;
+    const hasFraction = Math.abs(rounded - Math.round(rounded)) > 1e-6;
+    return rounded.toLocaleString(undefined, {
+      minimumFractionDigits: hasFraction ? 1 : 0,
+      maximumFractionDigits: hasFraction ? 1 : 0
+    });
+  };
+
+  const maintenanceSeries = maintenanceHistory.slice(-16).map(entry => {
+    const dateLabel = (entry.date instanceof Date && !Number.isNaN(entry.date.getTime()))
+      ? entry.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+      : "the latest log";
+    const hoursLabel = formatHoursLabel(entry.hours);
+    const hoursFragment = hoursLabel
+      ? `${hoursLabel} machine ${Math.abs(entry.hours - 1) < 0.01 ? "hour" : "hours"}`
+      : "recent machine usage";
+    return {
+      date: entry.date,
+      value: entry.cost,
+      detail: `Estimated maintenance dollars allocated to ${hoursFragment} logged on ${dateLabel}.`
+    };
+  });
 
   const jobsInfo = [];
   const jobSeriesRaw = [];
@@ -4432,7 +4559,17 @@ function computeCostModel(){
     let cumulative = 0;
     jobSeriesSorted.forEach((pt, idx)=>{
       cumulative += pt.rawValue;
-      jobSeries.push({ date: pt.date, value: cumulative / (idx + 1) });
+      const rollingValue = cumulative / (idx + 1);
+      const dateLabel = (pt.date instanceof Date && !Number.isNaN(pt.date.getTime()))
+        ? pt.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+        : "the latest completed job";
+      const jobCount = idx + 1;
+      jobSeries.push({
+        date: pt.date,
+        value: rollingValue,
+        count: jobCount,
+        detail: `Rolling average profit per cutting job across ${jobCount} completed job${jobCount === 1 ? "" : "s"} through ${dateLabel}.`
+      });
     });
   }
 
@@ -4617,6 +4754,8 @@ function computeCostModel(){
 function drawCostChart(canvas, model, show){
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
+  const hitTargets = [];
+  canvas.__costChartTargets = hitTargets;
   const W = canvas.width;
   const H = canvas.height;
   ctx.clearRect(0,0,W,H);
@@ -4632,6 +4771,7 @@ function drawCostChart(canvas, model, show){
   }
 
   if (!active.length){
+    canvas.__costChartTargets = [];
     ctx.fillStyle = "#777";
     ctx.font = "13px sans-serif";
     ctx.textAlign = "center";
@@ -4650,6 +4790,7 @@ function drawCostChart(canvas, model, show){
   });
 
   if (!xs.length){
+    canvas.__costChartTargets = [];
     ctx.fillStyle = "#777";
     ctx.font = "13px sans-serif";
     ctx.textAlign = "center";
@@ -4816,8 +4957,29 @@ function drawCostChart(canvas, model, show){
       ctx.textBaseline = "middle";
       ctx.fillText(label, boxX + paddingX, boxY - (boxHeight / 2));
       ctx.textBaseline = "alphabetic";
+
+      const datasetLabel = series.key === "maintenance" ? "Maintenance" : "Cutting jobs";
+      const valueLabel = formatMoney(Number(last.value));
+      const dateLabel = (last.date instanceof Date && !Number.isNaN(last.date.getTime()))
+        ? last.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+        : "the latest update";
+      let detail = (typeof last.detail === "string" && last.detail.trim()) ? last.detail.trim() : "";
+      if (!detail){
+        detail = series.key === "maintenance"
+          ? `Estimated maintenance dollars allocated to hours logged on ${dateLabel}.`
+          : `Rolling average profit per cutting job through ${dateLabel}.`;
+      }
+      hitTargets.push({
+        key: series.key,
+        datasetLabel,
+        valueLabel,
+        detail,
+        rect: { x: boxX, y: boxY - boxHeight, width: boxWidth, height: boxHeight }
+      });
     }
   });
+
+  canvas.__costChartTargets = hitTargets;
 }
 
 
