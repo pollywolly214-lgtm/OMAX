@@ -422,9 +422,9 @@ function foldersEqual(a, b){
 }
 
 function snapshotSettingsFolders(){
-  const source = Array.isArray(window.settingsFolders) && window.settingsFolders.length
+  const source = Array.isArray(window.settingsFolders)
     ? window.settingsFolders
-    : (Array.isArray(window.folders) && window.folders.length ? window.folders : defaultSettingsFolders());
+    : (Array.isArray(window.folders) ? window.folders : defaultSettingsFolders());
   const normalized = normalizeSettingsFolders(source);
   window.settingsFolders = normalized;
   window.folders = window.settingsFolders;
@@ -684,6 +684,11 @@ const saveCloudInternal = debounce(async ()=>{
   try{ await FB.docRef.set(snapshotState(), { merge:true }); }catch(e){ console.error("Cloud save failed:", e); }
 }, 300);
 function saveCloudDebounced(){
+  try {
+    setSettingsFolders(window.settingsFolders);
+  } catch (err) {
+    console.warn("Failed to normalize folders before save:", err);
+  }
   captureHistorySnapshot();
   saveCloudInternal();
 }
