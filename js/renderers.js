@@ -3546,12 +3546,120 @@ function resizeCostChartCanvas(canvas){
   if (canvas.height !== height) canvas.height = height;
 }
 
+function setupCostInfoPanel(){
+  const panel = document.getElementById("costInfoPanel");
+  const openBtn = document.getElementById("costInfoOpen");
+
+  if (!panel){
+    window.openCostInfoPanel = ()=> false;
+    window.closeCostInfoPanel = ()=> false;
+    if (openBtn){ openBtn.setAttribute("aria-expanded", "false"); }
+    return;
+  }
+
+  if (panel.hasAttribute("hidden")){
+    panel.setAttribute("aria-hidden", "true");
+  }
+
+  const card = panel.querySelector(".cost-info-panel-card");
+  const closeBtn = panel.querySelector("[data-cost-info-close]");
+  const body = document.body;
+  let lastFocused = null;
+
+  const setExpanded = (expanded)=>{
+    if (!openBtn) return;
+    openBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+  };
+
+  const showPanel = ({ reason = "manual" } = {})=>{
+    if (!panel || !card) return false;
+    if (!panel.hasAttribute("hidden") && panel.classList.contains("is-visible")){
+      if (reason === "trainer"){ panel.dataset.trainerOpen = "1"; }
+      return true;
+    }
+    lastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    panel.classList.add("is-visible");
+    panel.removeAttribute("hidden");
+    panel.setAttribute("aria-hidden", "false");
+    if (body) body.classList.add("cost-info-visible");
+    setExpanded(true);
+    if (reason === "trainer"){ panel.dataset.trainerOpen = "1"; }
+    else { panel.dataset.trainerOpen = ""; }
+    const focusTarget = closeBtn || card;
+    if (focusTarget){
+      requestAnimationFrame(()=>{
+        try { focusTarget.focus({ preventScroll: true }); }
+        catch (_) { focusTarget.focus(); }
+      });
+    }
+    return true;
+  };
+
+  const hidePanel = ({ reason = "manual" } = {})=>{
+    if (!panel || panel.hasAttribute("hidden")) return false;
+    if (reason === "trainer" && panel.dataset.trainerOpen !== "1") return false;
+    panel.classList.remove("is-visible");
+    panel.setAttribute("hidden", "");
+    panel.setAttribute("aria-hidden", "true");
+    if (body) body.classList.remove("cost-info-visible");
+    panel.dataset.trainerOpen = "";
+    setExpanded(false);
+    if (reason !== "trainer"){
+      const returnFocus = lastFocused || openBtn;
+      if (returnFocus && typeof returnFocus.focus === "function"){
+        requestAnimationFrame(()=>{
+          try { returnFocus.focus({ preventScroll: true }); }
+          catch (_) { returnFocus.focus(); }
+        });
+      }
+    }
+    lastFocused = null;
+    return true;
+  };
+
+  const handleBackdropClick = (event)=>{
+    if (event.target === panel){
+      hidePanel({ reason: panel.dataset.trainerOpen === "1" ? "trainer" : "manual" });
+    }
+  };
+
+  const handleKeydown = (event)=>{
+    if (event.key === "Escape"){
+      event.preventDefault();
+      hidePanel({ reason: panel.dataset.trainerOpen === "1" ? "trainer" : "manual" });
+    }
+  };
+
+  panel.addEventListener("click", handleBackdropClick);
+  panel.addEventListener("keydown", handleKeydown);
+
+  if (openBtn){
+    openBtn.addEventListener("click", (event)=>{
+      event.preventDefault();
+      showPanel({ reason: "manual" });
+    });
+    openBtn.setAttribute("aria-expanded", panel.classList.contains("is-visible") && !panel.hasAttribute("hidden") ? "true" : "false");
+  }
+
+  if (closeBtn){
+    closeBtn.addEventListener("click", (event)=>{
+      event.preventDefault();
+      hidePanel({ reason: panel.dataset.trainerOpen === "1" ? "trainer" : "manual" });
+    });
+  }
+
+  window.openCostInfoPanel = showPanel;
+  window.closeCostInfoPanel = hidePanel;
+}
+
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
 
   const model = computeCostModel();
   content.innerHTML = viewCosts(model);
+
+  setupCostInfoPanel();
 
   const canvas = document.getElementById("costChart");
   const toggleMaint = document.getElementById("toggleCostMaintenance");
@@ -3613,17 +3721,116 @@ function computeCostModel(){
     : (typeof currentTotal === "function" ? Number(currentTotal() || 0) : 0);
 
   const intervalTasks = Array.isArray(tasksInterval) ? tasksInterval : [];
-  const costPerHour = intervalTasks.reduce((sum, task)=>{
+  const asReqTasks = Array.isArray(tasksAsReq) ? tasksAsReq : [];
+
+  const cleanPartNumber = (pn)=> String(pn || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  const maintenancePartNumbers = new Set();
+  intervalTasks.forEach(task => {
+    const pn = cleanPartNumber(task?.pn);
+    if (pn) maintenancePartNumbers.add(pn);
+  });
+  asReqTasks.forEach(task => {
+    const pn = cleanPartNumber(task?.pn);
+    if (pn) maintenancePartNumbers.add(pn);
+  });
+
+  const intervalCostPerHour = intervalTasks.reduce((sum, task)=>{
     const price = Number(task?.price);
     const interval = Number(task?.interval);
     if (!isFinite(price) || !isFinite(interval) || interval <= 0 || price <= 0) return sum;
     return sum + (price / interval);
   }, 0);
 
-  const estimateMaintenanceCost = (hours)=>{
-    if (!isFinite(hours) || hours <= 0 || !isFinite(costPerHour) || costPerHour <= 0) return 0;
-    return hours * costPerHour;
+  const estimateIntervalCost = (hours)=>{
+    if (!isFinite(hours) || hours <= 0 || !isFinite(intervalCostPerHour) || intervalCostPerHour <= 0) return 0;
+    return hours * intervalCostPerHour;
   };
+
+  const orderHistory = Array.isArray(orderRequests)
+    ? orderRequests.filter(req => req && req.status && req.status !== "draft")
+    : [];
+
+  const parseOrderDate = (iso)=>{
+    if (!iso) return null;
+    if (typeof parseDateLocal === "function"){
+      const parsed = parseDateLocal(iso);
+      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) return parsed;
+    }
+    const fallback = new Date(iso);
+    return (fallback instanceof Date && !Number.isNaN(fallback.getTime())) ? fallback : null;
+  };
+
+  const resolveOrderDate = (req)=>{
+    if (!req) return null;
+    return parseOrderDate(req.resolvedAt || req.updatedAt || req.createdAt);
+  };
+
+  const isMaintenanceOrderItem = (item, reqStatus)=>{
+    if (!item) return false;
+    if (item.maintenance === true) return true;
+    const category = String(item.category || "").toLowerCase();
+    if (category.includes("mainten")) return true;
+    const tags = Array.isArray(item.tags) ? item.tags : [];
+    if (tags.some(tag => String(tag).toLowerCase().includes("mainten"))) return true;
+    const pn = cleanPartNumber(item.pn);
+    if (pn && maintenancePartNumbers.has(pn)) return true;
+    return false;
+  };
+
+  const maintenanceOrderItems = [];
+  orderHistory.forEach(req => {
+    const resolved = resolveOrderDate(req);
+    if (!resolved) return;
+    const resolvedTime = resolved.getTime();
+    const reqStatus = typeof req.status === "string" ? req.status.toLowerCase() : "";
+    if (!Array.isArray(req.items)) return;
+    req.items.forEach(item => {
+      if (!isMaintenanceOrderItem(item, reqStatus)) return;
+      const itemStatus = typeof item?.status === "string" ? item.status.toLowerCase() : "";
+      const approved = itemStatus === "approved" || (!itemStatus && reqStatus === "approved");
+      if (!approved) return;
+      const amount = orderItemLineTotal(item);
+      if (!isFinite(amount) || amount <= 0) return;
+      maintenanceOrderItems.push({ amount, time: resolvedTime });
+    });
+  });
+
+  maintenanceOrderItems.sort((a,b)=> a.time - b.time);
+
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  const maintenanceSpendSince = (days)=>{
+    if (!isFinite(days) || days <= 0 || !maintenanceOrderItems.length) return 0;
+    const cutoff = Date.now() - (days * MS_PER_DAY);
+    let total = 0;
+    for (const entry of maintenanceOrderItems){
+      if (entry.time >= cutoff) total += entry.amount;
+    }
+    return total;
+  };
+
+  const expectedAsReqAnnualFromTasks = asReqTasks.reduce((sum, task)=>{
+    const price = Number(task?.price);
+    if (!isFinite(price) || price <= 0) return sum;
+    const candidates = [
+      Number(task?.expectedAnnual),
+      Number(task?.expectedPerYear),
+      Number(task?.expected_per_year)
+    ];
+    let expected = candidates.find(val => isFinite(val) && val > 0);
+    if (!isFinite(expected) || expected <= 0){
+      const perMonth = Number(task?.expectedPerMonth);
+      if (isFinite(perMonth) && perMonth > 0) expected = perMonth * 12;
+    }
+    if (!isFinite(expected) || expected <= 0){
+      const perQuarter = Number(task?.expectedPerQuarter);
+      if (isFinite(perQuarter) && perQuarter > 0) expected = perQuarter * 4;
+    }
+    if (!isFinite(expected) || expected <= 0) return sum;
+    return sum + (price * expected);
+  }, 0);
+
+  const asReqAnnualActual = maintenanceSpendSince(365);
+  const asReqAnnualProjection = asReqAnnualActual > 0 ? asReqAnnualActual : expectedAsReqAnnualFromTasks;
 
   const hoursAtDate = (targetDate)=>{
     if (!parsedHistory.length) return null;
@@ -3660,7 +3867,24 @@ function computeCostModel(){
   };
 
   const baselineDailyHours = determineBaselineDailyHours();
-  const predictedAnnual = estimateMaintenanceCost(baselineDailyHours * 365);
+  const hoursYear = usageSinceDays(365);
+  const baselineAnnualHours = baselineDailyHours * 365;
+  const hoursForRate = hoursYear > 0 ? hoursYear : (baselineAnnualHours > 0 ? baselineAnnualHours : 0);
+  const asReqCostPerHour = (asReqAnnualProjection > 0 && hoursForRate > 0)
+    ? asReqAnnualProjection / hoursForRate
+    : 0;
+  const combinedCostPerHour = intervalCostPerHour + asReqCostPerHour;
+
+  const predictedIntervalAnnual = (intervalCostPerHour > 0 && baselineAnnualHours > 0)
+    ? intervalCostPerHour * baselineAnnualHours
+    : 0;
+  const predictedAsReqAnnual = baselineAnnualHours > 0
+    ? asReqCostPerHour * baselineAnnualHours
+    : asReqAnnualProjection;
+  const predictedAnnual = predictedIntervalAnnual + predictedAsReqAnnual;
+
+  const intervalActualYear = estimateIntervalCost(hoursYear);
+  const combinedActualYear = intervalActualYear + asReqAnnualActual;
 
   const timeframeDefs = [
     { key: "year",   label: "Past 12 months", days: 365 },
@@ -3671,13 +3895,25 @@ function computeCostModel(){
 
   const timeframeRowsRaw = timeframeDefs.map(def => {
     const hours = usageSinceDays(def.days);
+    const intervalActual = estimateIntervalCost(hours);
+    const asReqActual = maintenanceSpendSince(def.days);
+    const intervalProjected = (baselineDailyHours > 0 && intervalCostPerHour > 0)
+      ? intervalCostPerHour * baselineDailyHours * def.days
+      : 0;
+    const asReqProjected = asReqAnnualProjection > 0
+      ? (asReqAnnualProjection / 365) * def.days
+      : 0;
     return {
       key: def.key,
       label: def.label,
       days: def.days,
       hours,
-      costActual: estimateMaintenanceCost(hours),
-      costProjected: estimateMaintenanceCost(baselineDailyHours * def.days)
+      intervalActual,
+      asReqActual,
+      intervalProjected,
+      asReqProjected,
+      costActual: intervalActual + asReqActual,
+      costProjected: intervalProjected + asReqProjected
     };
   });
 
@@ -3691,7 +3927,9 @@ function computeCostModel(){
       date: curr.date,
       dateISO: curr.dateISO,
       hours: deltaHours,
-      cost: estimateMaintenanceCost(deltaHours)
+      cost: combinedCostPerHour > 0
+        ? deltaHours * combinedCostPerHour
+        : estimateIntervalCost(deltaHours)
     });
   }
 
@@ -3806,22 +4044,31 @@ function computeCostModel(){
       costLabel: formatterCurrency(job.gainLoss, { showPlus: true, decimals: Math.abs(job.gainLoss) < 1000 ? 2 : 0 })
     }));
 
-  const yearRow = timeframeRowsRaw.find(row => row.key === "year");
-  const yearActual = yearRow ? yearRow.costActual : 0;
+  const rateParts = [];
+  if (intervalCostPerHour > 0){
+    rateParts.push(`Interval ${formatterCurrency(intervalCostPerHour, { decimals: 2 })}/hr`);
+  }
+  if (asReqCostPerHour > 0){
+    const sourceLabel = asReqAnnualActual > 0
+      ? "12-mo approved orders"
+      : (expectedAsReqAnnualFromTasks > 0 ? "task estimates" : "as-required rate");
+    rateParts.push(`As-required ${formatterCurrency(asReqCostPerHour, { decimals: 2 })}/hr (${sourceLabel})`);
+  }
+  if (baselineDailyHours > 0){
+    rateParts.push(`${baselineDailyHours.toFixed(1)} hr/day baseline`);
+  }
 
   let maintenanceHint;
-  if (costPerHour <= 0){
-    maintenanceHint = "Add prices to interval tasks to project maintenance spend.";
-  }else if (baselineDailyHours <= 0){
-    maintenanceHint = `Log machine hours to build a usage baseline. Rate ${formatterCurrency(costPerHour, { decimals: 2 })}/hr.`;
+  if (!rateParts.length){
+    maintenanceHint = "Add prices, part numbers, and approved orders to interval or as-required tasks to project maintenance spend.";
   }else{
-    maintenanceHint = `Rate ${formatterCurrency(costPerHour, { decimals: 2 })}/hr × ${baselineDailyHours.toFixed(1)} hr/day baseline. Actual last 12 months: ${formatterCurrency(yearActual, { decimals: 0 })}.`;
+    maintenanceHint = `${rateParts.join(" · ")}. Actual last 12 months: ${formatterCurrency(combinedActualYear, { decimals: combinedActualYear < 1000 ? 2 : 0 })}.`;
   }
 
   const summaryCards = [
     {
       icon: "🛠️",
-      title: "Interval maintenance forecast",
+      title: "Maintenance forecast (interval + as-required)",
       value: formatterCurrency(predictedAnnual, { decimals: 0 }),
       hint: maintenanceHint
     },
@@ -3855,17 +4102,21 @@ function computeCostModel(){
   const maintenanceJobsNote = "Maintenance job tracker will consolidate every job once the Jobs integration is complete.";
   const maintenanceJobsEmpty = "Tracker setup is in progress. This space will list all maintenance jobs when the data wiring is finished.";
 
-  const timeframeNote = "Maintenance projections use interval tasks only; as-required items remain excluded from forecasts.";
+  let timeframeNote;
+  if (maintenanceOrderItems.length){
+    timeframeNote = "Actual spend combines interval allocations with approved maintenance orders matched to your task part numbers.";
+  }else if (asReqAnnualProjection > 0 && expectedAsReqAnnualFromTasks > 0){
+    timeframeNote = "Projections include interval pricing plus expected as-required frequency captured on task settings. Add approved orders to validate the forecast.";
+  }else{
+    timeframeNote = "Add prices, part numbers, or expected frequency to interval/as-required tasks to build the combined maintenance forecast.";
+  }
   const historyEmpty = parsedHistory.length
     ? "Log additional machine hours to expand the maintenance cost timeline."
     : "No usage history yet. Log machine hours to estimate maintenance spend.";
   const jobEmpty = "Add cutting jobs with estimates to build the efficiency tracker.";
 
-  const chartNote = `Maintenance line uses estimated spend per hours logged; cutting jobs line shows the rolling average gain/loss at ${formatterCurrency(JOB_RATE_PER_HOUR, { decimals: 0 })}/hr.`;
+  const chartNote = `Maintenance line allocates interval pricing plus as-required spend per logged hour (${asReqAnnualActual > 0 ? "derived from approved orders" : "using task estimates when orders are unavailable"}); cutting jobs line shows the rolling average gain/loss at ${formatterCurrency(JOB_RATE_PER_HOUR, { decimals: 0 })}/hr.`;
 
-  const orderHistory = Array.isArray(orderRequests)
-    ? orderRequests.filter(req => req && req.status && req.status !== "draft")
-    : [];
   const orderSorted = orderHistory.slice().sort((a,b)=>{
     const aTime = new Date(a.resolvedAt || a.createdAt || 0).getTime();
     const bTime = new Date(b.resolvedAt || b.createdAt || 0).getTime();

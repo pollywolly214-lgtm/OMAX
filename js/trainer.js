@@ -4,15 +4,15 @@
   const COST_TRAINER_STEPS = [
     {
       id: "primer",
-      selector: "#costInfoBox",
+      selector: "#costInfoCard",
       title: "Understand the cost model",
-      description: "Start with the info box: it explains which data you must capture, how nightly allocators spread cost, and where to review variances before presenting numbers to leadership."
+      description: "Launch the ℹ️ Cost model primer button anytime to reopen this panel. It maps the capture → allocation → review workflow and links to the deeper articles the tour references."
     },
     {
       id: "overview",
       selector: '[data-cost-window="overview"] .block',
       title: "Cost Overview",
-      description: "These cards roll up net operating cost, cost per hour, and other KPIs using the configured rates and reconciled actuals. Missing inputs will lower their confidence score."
+      description: "These cards roll up the combined maintenance forecast (interval + as-required), net operating cost, and other KPIs using reconciled actuals. Missing inputs lower their confidence score until you backfill data."
     },
     {
       id: "chart",
@@ -24,7 +24,7 @@
       id: "timeframes",
       selector: '[data-cost-window="timeframes"] .block',
       title: "Maintenance projections",
-      description: "Rolling windows contrast projected maintenance spend with actual reconciled dollars so you can anticipate part replacements and schedule downtime."
+      description: "Rolling windows blend interval-task allocations with approved as-required orders. Actual = logged hours × interval pricing plus maintenance orders resolved in the window; Projected scales your hour baseline and 12-month order average so both scheduled and reactive spend are covered."
     },
     {
       id: "orders",
@@ -62,7 +62,8 @@
     boundResize: null,
     boundScroll: null,
     boundHash: null,
-    scrollTimer: null
+    scrollTimer: null,
+    primerOpenedByTrainer: false
   };
 
   function ensureOverlay(){
@@ -144,7 +145,20 @@
 
   function startTour(){
     ensureOverlay();
+    state.primerOpenedByTrainer = false;
+    if (typeof openCostInfoPanel === "function"){
+      try {
+        state.primerOpenedByTrainer = !!openCostInfoPanel({ reason: "trainer" });
+      } catch (_) {
+        state.primerOpenedByTrainer = false;
+      }
+    }
     if (!refreshSteps(false)){
+      if (typeof closeCostInfoPanel === "function" && state.primerOpenedByTrainer){
+        try { closeCostInfoPanel({ reason: "trainer" }); }
+        catch (_){ /* ignore */ }
+      }
+      state.primerOpenedByTrainer = false;
       if (typeof window.alert === "function"){
         window.alert("The guided tour is unavailable because the cost analysis layout is still loading.");
       }
@@ -223,6 +237,11 @@
     state.overlay.setAttribute("aria-hidden", "true");
     document.body.classList.remove("trainer-open");
     state.currentTarget = null;
+    if (state.primerOpenedByTrainer && typeof closeCostInfoPanel === "function"){
+      try { closeCostInfoPanel({ reason: "trainer" }); }
+      catch (_){ /* ignore */ }
+    }
+    state.primerOpenedByTrainer = false;
     unbindGlobalListeners();
   }
 

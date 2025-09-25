@@ -819,42 +819,53 @@ function viewCosts(model){
       </div>
     </div>
 
-    <section class="cost-info-box" id="costInfoBox">
-      <h2>How the waterjet cost model works</h2>
-      <p class="cost-info-intro">This dashboard blends projections with real activity so every decision reflects true operating cost and profit. Start by collecting accurate inputs, let the nightly allocators reconcile spend, then review the rollups and drill into any variance.</p>
-      <div class="cost-info-grid">
-        <article>
-          <h3>1. Capture the right data</h3>
-          <ul>
-            <li><strong>Machine hours:</strong> Upload hour-meter totals each shift or stream telemetry so usage windows and per-hour costs stay reliable.</li>
-            <li><strong>Maintenance tasks:</strong> Record default labor hours, parts cost, and downtime impact for every interval; confirm actuals when tasks close.</li>
-            <li><strong>Consumables &amp; utilities:</strong> Tag abrasive, water, electricity, and other orders so dollar-per-hour burn rates auto recalibrate.</li>
-            <li><strong>Cutting jobs:</strong> Log quoted vs. invoiced revenue, material spend, and direct labor to calculate real margins instead of relying on the $250/hr heuristic.</li>
-            <li><strong>Downtime &amp; overhead:</strong> Categorize every outage, capturing duration, direct repair spend, and opportunity cost; configure fixed monthly overhead for allocation.</li>
-          </ul>
-        </article>
-        <article>
-          <h3>2. Allocate costs automatically</h3>
-          <ul>
-            <li><strong>Maintenance:</strong> Spread parts and labor across the service interval, then reconcile variances when actual invoices land.</li>
-            <li><strong>Consumables:</strong> Nightly jobs match purchases to logged hours to refresh burn rates and flag stale assumptions.</li>
-            <li><strong>Downtime:</strong> Convert lost hours into dollars by combining opportunity cost with any repair spend.</li>
-            <li><strong>Overhead:</strong> Turn fixed monthly costs into an hourly burden using a rolling 90-day utilization average.</li>
-            <li><strong>Revenue:</strong> Calculate realized gross margin per job: invoice revenue minus labor, material, consumables, overhead, and downtime allocations.</li>
-          </ul>
-        </article>
-        <article>
-          <h3>3. Review &amp; act</h3>
-          <ul>
-            <li><strong>Variance tracking:</strong> Compare actual vs. projected cost buckets and escalate anything beyond a 15% swing.</li>
-            <li><strong>Audit trail:</strong> Every card, table row, and chart point links back to maintenance logs, downtime tickets, order requests, or job records.</li>
-            <li><strong>Confidence scoring:</strong> Highlight estimates that still rely on defaults so leadership knows which numbers are decision-ready.</li>
-            <li><strong>Reconciliation:</strong> Monthly checks line up the dashboard totals with accounting exports before sharing executive summaries.</li>
-            <li><strong>Trend reviews:</strong> Use the stacked chart and summary table to see how maintenance, consumables, downtime, and job performance shape net margin.</li>
-          </ul>
-        </article>
+    <div class="cost-info-trigger">
+      <button type="button" class="cost-info-button" id="costInfoOpen" aria-haspopup="dialog" aria-controls="costInfoPanel" aria-expanded="false">
+        <span class="cost-info-button-icon" aria-hidden="true">ℹ️</span>
+        <span class="cost-info-button-label">Cost model primer</span>
+      </button>
+      <span class="cost-info-trigger-hint">Open the full capture → allocation → review walkthrough.</span>
+    </div>
+
+    <div class="cost-info-panel" id="costInfoPanel" role="dialog" aria-modal="true" aria-labelledby="costInfoTitle" aria-describedby="costInfoIntro" hidden>
+      <div class="cost-info-panel-card" id="costInfoCard">
+        <button type="button" class="cost-info-close" data-cost-info-close aria-label="Close primer">×</button>
+        <h2 id="costInfoTitle">How the waterjet cost model works</h2>
+        <p class="cost-info-intro" id="costInfoIntro">This dashboard blends projections with real activity so every decision reflects true operating cost and profit. Start by collecting accurate inputs, let the nightly allocators reconcile spend, then review the rollups and drill into any variance.</p>
+        <div class="cost-info-grid">
+          <article>
+            <h3>1. Capture the right data</h3>
+            <ul>
+              <li><strong>Machine hours:</strong> Upload hour-meter totals each shift or stream telemetry so usage windows and per-hour costs stay reliable.</li>
+              <li><strong>Maintenance tasks:</strong> Record default labor hours, parts cost, and downtime impact for every interval; confirm actuals when tasks close.</li>
+              <li><strong>Consumables &amp; utilities:</strong> Tag abrasive, water, electricity, and other orders so dollar-per-hour burn rates auto recalibrate.</li>
+              <li><strong>Cutting jobs:</strong> Log quoted vs. invoiced revenue, material spend, and direct labor to calculate real margins instead of relying on the $250/hr heuristic.</li>
+              <li><strong>Downtime &amp; overhead:</strong> Categorize every outage, capturing duration, direct repair spend, and opportunity cost; configure fixed monthly overhead for allocation.</li>
+            </ul>
+          </article>
+          <article>
+            <h3>2. Allocate costs automatically</h3>
+            <ul>
+              <li><strong>Maintenance:</strong> Spread parts and labor across the service interval, then reconcile variances when actual invoices land.</li>
+              <li><strong>Consumables:</strong> Nightly jobs match purchases to logged hours to refresh burn rates and flag stale assumptions.</li>
+              <li><strong>Downtime:</strong> Convert lost hours into dollars by combining opportunity cost with any repair spend.</li>
+              <li><strong>Overhead:</strong> Turn fixed monthly costs into an hourly burden using a rolling 90-day utilization average.</li>
+              <li><strong>Revenue:</strong> Calculate realized gross margin per job: invoice revenue minus labor, material, consumables, overhead, and downtime allocations.</li>
+            </ul>
+          </article>
+          <article>
+            <h3>3. Review &amp; act</h3>
+            <ul>
+              <li><strong>Variance tracking:</strong> Compare actual vs. projected cost buckets and escalate anything beyond a 15% swing.</li>
+              <li><strong>Audit trail:</strong> Every card, table row, and chart point links back to maintenance logs, downtime tickets, order requests, or job records.</li>
+              <li><strong>Confidence scoring:</strong> Highlight estimates that still rely on defaults so leadership knows which numbers are decision-ready.</li>
+              <li><strong>Reconciliation:</strong> Monthly checks line up the dashboard totals with accounting exports before sharing executive summaries.</li>
+              <li><strong>Trend reviews:</strong> Use the stacked chart and summary table to see how maintenance, consumables, downtime, and job performance shape net margin.</li>
+            </ul>
+          </article>
+        </div>
       </div>
-    </section>
+    </div>
 
     <div class="dashboard-layout cost-layout" id="costLayout">
       <div class="dashboard-window" data-cost-window="overview">
