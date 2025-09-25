@@ -377,11 +377,21 @@ function normalizeSettingsFolders(raw){
   return normalized;
 }
 
+function setSettingsFolders(raw){
+  const normalized = normalizeSettingsFolders(raw);
+  window.settingsFolders = normalized;
+  window.folders = window.settingsFolders;
+  return normalized;
+}
+
 function snapshotSettingsFolders(){
   const source = Array.isArray(window.settingsFolders) && window.settingsFolders.length
     ? window.settingsFolders
     : (Array.isArray(window.folders) && window.folders.length ? window.folders : defaultSettingsFolders());
-  return normalizeSettingsFolders(source);
+  const normalized = normalizeSettingsFolders(source);
+  window.settingsFolders = normalized;
+  window.folders = window.settingsFolders;
+  return normalized.map(folder => ({ ...folder }));
 }
 
 window.defaultAsReqTasks = defaultAsReqTasks;
@@ -531,8 +541,7 @@ function redoLastUndo(){
 resetHistoryToCurrent();
 
 /* ======= Minimal folder model used by the explorer UI ======= */
-window.settingsFolders = normalizeSettingsFolders(window.settingsFolders || window.folders);
-window.folders = window.settingsFolders;
+setSettingsFolders(window.settingsFolders || window.folders);
 
 /* ================ Explorer helper functions ================= */
 function childrenFolders(parentId){
@@ -596,8 +605,7 @@ function adoptState(doc){
   const rawFolders = Array.isArray(data.settingsFolders)
     ? data.settingsFolders
     : (Array.isArray(data.folders) ? data.folders : null);
-  window.settingsFolders = normalizeSettingsFolders(rawFolders);
-  window.folders = window.settingsFolders;
+  setSettingsFolders(rawFolders);
 
   if (typeof window._maintOrderCounter !== "number" || !Number.isFinite(window._maintOrderCounter)){
     window._maintOrderCounter = 0;
