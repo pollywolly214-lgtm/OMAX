@@ -2871,20 +2871,7 @@ function renderJobs(){
     renderJobs();
   });
 
-  // 2) Insert a "Log" button into each job row's Actions cell (non-edit rows)
-  content.querySelectorAll('tr[data-job-row]').forEach(tr=>{
-    if (tr.classList.contains('editing')) return;
-    const id = tr.getAttribute('data-job-row');
-    let actionsCell = tr.querySelector('td:last-child');
-    // Fallback: if the row didn’t render an Actions cell, add one
-    if (!actionsCell){ actionsCell = document.createElement('td'); tr.appendChild(actionsCell); }
-    const logBtn = document.createElement('button');
-    logBtn.textContent = 'Log';
-    logBtn.setAttribute('data-log-job', id);
-    actionsCell.prepend(logBtn); // put Log before Edit/Remove
-  });
-
-  // 3) Small, scoped helpers for manual log math + defaults
+  // 2) Small, scoped helpers for manual log math + defaults
   const todayISO = (()=>{ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); })();
   const curTotal = ()=> (RENDER_TOTAL ?? currentTotal());
 

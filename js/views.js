@@ -812,7 +812,7 @@ function viewCosts(model){
           <label><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> Cutting jobs</label>
         </div>
       </div>
-      <canvas id="costChart" width="780" height="240"></canvas>
+      <canvas id="costChart" width="780" height="180"></canvas>
       ${data.chartNote ? `<p class="small muted">${esc(data.chartNote)}</p>` : `<p class="small muted">Toggle a line to explore how maintenance and job efficiency costs evolve over time.</p>`}
     </div>
 
