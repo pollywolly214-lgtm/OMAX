@@ -2476,7 +2476,139 @@ function moveNodeSafely(kind, nodeId, target){
     return false;
   }
 
-  return false;
+return false;
+}
+
+const sharedConfirmModalState = {
+  root: null,
+  titleEl: null,
+  messageEl: null,
+  listEl: null,
+  confirmBtn: null,
+  cancelBtn: null,
+  closeBtn: null
+};
+
+function ensureSharedConfirmModal(){
+  const template = `
+    <div class="modal-card confirm-modal-card">
+      <button type="button" class="modal-close" data-confirm-close>×</button>
+      <h4 data-confirm-title>Confirm</h4>
+      <p class="confirm-modal-copy" data-confirm-message></p>
+      <ul class="confirm-modal-list" data-confirm-list hidden></ul>
+      <div class="modal-actions confirm-modal-actions">
+        <button type="button" class="secondary" data-confirm-cancel>Cancel</button>
+        <button type="button" class="danger" data-confirm-confirm>Delete</button>
+      </div>
+    </div>
+  `.trim();
+
+  let root = sharedConfirmModalState.root;
+  if (!root || !root.isConnected){
+    root = document.getElementById("linkedInventoryPrompt");
+    if (!root){
+      root = document.createElement("div");
+      root.id = "linkedInventoryPrompt";
+      root.className = "modal-backdrop";
+      root.setAttribute("hidden", "");
+      const target = document.body || document.documentElement || document;
+      target.appendChild(root);
+    }
+    sharedConfirmModalState.root = root;
+  }
+
+  if (sharedConfirmModalState.root && sharedConfirmModalState.root.innerHTML.trim() === ""){
+    sharedConfirmModalState.root.innerHTML = template;
+  }
+
+  const ensureStructure = ()=>{
+    const host = sharedConfirmModalState.root;
+    if (!host) return;
+    if (!host.querySelector("[data-confirm-title]")){
+      host.innerHTML = template;
+    }
+    sharedConfirmModalState.titleEl = host.querySelector("[data-confirm-title]");
+    sharedConfirmModalState.messageEl = host.querySelector("[data-confirm-message]");
+    sharedConfirmModalState.listEl = host.querySelector("[data-confirm-list]");
+    sharedConfirmModalState.confirmBtn = host.querySelector("[data-confirm-confirm]");
+    sharedConfirmModalState.cancelBtn = host.querySelector("[data-confirm-cancel]");
+    sharedConfirmModalState.closeBtn = host.querySelector("[data-confirm-close]");
+  };
+
+  ensureStructure();
+  return sharedConfirmModalState;
+}
+
+function showConfirmModal(options){
+  const state = ensureSharedConfirmModal();
+  const root = state.root;
+  if (!root) return Promise.resolve(false);
+
+  const opts = options || {};
+  const safeText = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[c]);
+
+  if (state.titleEl) state.titleEl.textContent = opts.title || "Confirm";
+  if (state.messageEl) state.messageEl.textContent = opts.message || "";
+
+  if (state.listEl){
+    const listItems = Array.isArray(opts.items) ? opts.items.filter(item => item != null && item !== "") : [];
+    if (listItems.length){
+      state.listEl.innerHTML = listItems.map(item => `<li>${safeText(item)}</li>`).join("");
+      state.listEl.removeAttribute("hidden");
+    }else{
+      state.listEl.innerHTML = "";
+      state.listEl.setAttribute("hidden", "");
+    }
+  }
+
+  if (state.cancelBtn) state.cancelBtn.textContent = opts.cancelText || "Cancel";
+  if (state.confirmBtn){
+    state.confirmBtn.textContent = opts.confirmText || "Confirm";
+    const variant = opts.confirmVariant;
+    state.confirmBtn.classList.remove("danger", "primary", "secondary");
+    if (variant === "primary") state.confirmBtn.classList.add("primary");
+    else if (variant === "secondary") state.confirmBtn.classList.add("secondary");
+    else state.confirmBtn.classList.add("danger");
+  }
+
+  return new Promise(resolve => {
+    const cleanup = ()=>{
+      root.classList.remove("is-visible");
+      root.setAttribute("hidden", "");
+      document.body?.classList.remove("modal-open");
+      if (state.confirmBtn) state.confirmBtn.removeEventListener("click", onConfirm);
+      if (state.cancelBtn) state.cancelBtn.removeEventListener("click", onCancel);
+      if (state.closeBtn) state.closeBtn.removeEventListener("click", onCancel);
+      root.removeEventListener("click", onBackdropClick);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+
+    const onConfirm = ()=>{ cleanup(); resolve(true); };
+    const onCancel = ()=>{ cleanup(); resolve(false); };
+    const onBackdropClick = (evt)=>{ if (evt.target === root) onCancel(); };
+    const onKeyDown = (evt)=>{ if (evt.key === "Escape") onCancel(); };
+
+    if (state.confirmBtn) state.confirmBtn.addEventListener("click", onConfirm);
+    if (state.cancelBtn) state.cancelBtn.addEventListener("click", onCancel);
+    if (state.closeBtn) state.closeBtn.addEventListener("click", onCancel);
+    root.addEventListener("click", onBackdropClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    root.classList.add("is-visible");
+    root.removeAttribute("hidden");
+    document.body?.classList.add("modal-open");
+
+    const focusTarget = state.confirmBtn || state.cancelBtn;
+    if (focusTarget && typeof focusTarget.focus === "function"){
+      requestAnimationFrame(()=> focusTarget.focus());
+    }
+  });
 }
 
 function renderSettings(){
@@ -3042,18 +3174,6 @@ function renderSettings(){
         </form>
       </div>
     </div>
-    <div class="modal-backdrop" id="linkedInventoryPrompt" hidden>
-      <div class="modal-card confirm-modal-card">
-        <button type="button" class="modal-close" data-close-linked>×</button>
-        <h4>Remove task?</h4>
-        <p class="confirm-modal-copy" data-linked-message></p>
-        <ul class="confirm-modal-list" data-linked-list hidden></ul>
-        <div class="modal-actions confirm-modal-actions">
-          <button type="button" class="secondary" data-linked-keep>Keep inventory</button>
-          <button type="button" class="danger" data-linked-remove>Remove from inventory too</button>
-        </div>
-      </div>
-    </div>
   `;
 
   const tree = document.getElementById("tree");
@@ -3065,66 +3185,28 @@ function renderSettings(){
   const conditionRow = form?.querySelector('[data-form-condition]');
   const searchInput = document.getElementById("maintenanceSearch");
   const searchClear = document.getElementById("maintenanceSearchClear");
-  const linkedPrompt = document.getElementById("linkedInventoryPrompt");
-  const linkedMessage = linkedPrompt?.querySelector('[data-linked-message]') || null;
-  const linkedList = linkedPrompt?.querySelector('[data-linked-list]') || null;
-  const linkedRemove = linkedPrompt?.querySelector('[data-linked-remove]') || null;
-  const linkedKeep = linkedPrompt?.querySelector('[data-linked-keep]') || null;
-  const linkedClose = linkedPrompt?.querySelector('[data-close-linked]') || null;
 
-  const promptRemoveLinkedInventory = (task, matches)=>{
-    if (!linkedPrompt) return Promise.resolve("keep");
+  const promptRemoveLinkedInventory = async (task, matches)=>{
+    const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
+    if (!list.length) return "keep";
 
     const taskLabel = task && task.name ? `"${task.name}"` : "this task";
-    const count = matches.length;
-    const message = count === 1
+    const count = list.length;
+    const baseMessage = count === 1
       ? `Delete ${taskLabel}? This task is also in inventory.`
       : `Delete ${taskLabel}? This task is also in inventory with ${count} items.`;
-    if (linkedMessage){
-      linkedMessage.textContent = count === 1
-        ? `${message} Remove the linked inventory item as well?`
-        : `${message} Remove the linked inventory items as well?`;
-    }
-
-    if (linkedList){
-      if (count){
-        linkedList.innerHTML = matches.map(item => {
-          const name = item && item.name ? item.name : "Unnamed inventory item";
-          return `<li>${name}</li>`;
-        }).join("");
-        linkedList.removeAttribute("hidden");
-      }else{
-        linkedList.innerHTML = "";
-        linkedList.setAttribute("hidden", "");
-      }
-    }
-
-    return new Promise(resolve => {
-      const cleanup = ()=>{
-        linkedPrompt.classList.remove("is-visible");
-        linkedPrompt.setAttribute("hidden", "");
-        document.body?.classList.remove("modal-open");
-        if (linkedRemove) linkedRemove.removeEventListener("click", onRemove);
-        if (linkedKeep) linkedKeep.removeEventListener("click", onKeep);
-        if (linkedClose) linkedClose.removeEventListener("click", onKeep);
-        linkedPrompt.removeEventListener("click", onBackdropClick);
-      };
-
-      const onRemove = ()=>{ cleanup(); resolve("remove"); };
-      const onKeep = ()=>{ cleanup(); resolve("keep"); };
-      const onBackdropClick = (evt)=>{
-        if (evt.target === linkedPrompt) onKeep();
-      };
-
-      if (linkedRemove) linkedRemove.addEventListener("click", onRemove, { once: true });
-      if (linkedKeep) linkedKeep.addEventListener("click", onKeep, { once: true });
-      if (linkedClose) linkedClose.addEventListener("click", onKeep, { once: true });
-      linkedPrompt.addEventListener("click", onBackdropClick, { once: true });
-
-      linkedPrompt.classList.add("is-visible");
-      linkedPrompt.removeAttribute("hidden");
-      document.body?.classList.add("modal-open");
+    const confirmText = "Remove from inventory too";
+    const choice = await showConfirmModal({
+      title: "Remove task?",
+      message: count === 1
+        ? `${baseMessage} Remove the linked inventory item as well?`
+        : `${baseMessage} Remove the linked inventory items as well?`,
+      items: list.map(item => item && item.name ? item.name : "Unnamed inventory item"),
+      cancelText: "Keep inventory",
+      confirmText,
+      confirmVariant: "danger"
     });
+    return choice ? "remove" : "keep";
   };
 
   tree?.querySelectorAll("details.cat").forEach(det => {
@@ -3433,12 +3515,11 @@ function renderSettings(){
       persist();
       let reRendered = false;
       if (removeInventoryAlso){
-        matches.forEach(item => {
-          if (!item || item.id == null) return;
-          if (deleteInventoryItem(item.id, { skipConfirm: true })){
-            reRendered = true;
-          }
-        });
+        for (const item of matches){
+          if (!item || item.id == null) continue;
+          const deleted = await deleteInventoryItem(item.id, { skipConfirm: true });
+          if (deleted) reRendered = true;
+        }
       }
       if (!reRendered){
         renderSettings();
@@ -4672,12 +4753,12 @@ function renderInventory(){
     saveCloudDebounced();
   });
 
-  rowsTarget?.addEventListener("click", (e)=>{
+  rowsTarget?.addEventListener("click", async (e)=>{
     const deleteBtn = e.target.closest("[data-inventory-delete]");
     if (deleteBtn){
       const id = deleteBtn.getAttribute("data-inventory-delete");
       if (!id) return;
-      const removed = deleteInventoryItem(id);
+      const removed = await deleteInventoryItem(id);
       if (removed) refreshRows();
       return;
     }
@@ -5004,7 +5085,49 @@ function addInventoryItemToOrder(inventoryId){
   if (location.hash === "#/order-request" || location.hash === "#order-request"){ renderOrderRequest(); }
 }
 
-function deleteInventoryItem(id, options){
+function findTasksLinkedToInventoryItem(item){
+  const matches = [];
+  if (!item) return matches;
+
+  const itemId = item.id != null ? String(item.id) : "";
+  const itemPN = item.pn != null ? String(item.pn).trim().toLowerCase() : "";
+  const itemLink = item.link != null ? String(item.link).trim() : "";
+  const seen = new Set();
+
+  const tryAdd = (task)=>{
+    if (!task) return;
+    const fallbackId = `${task.name || ""}-${task.pn || ""}-${task.storeLink || ""}`;
+    const tid = task.id != null ? String(task.id) : fallbackId;
+    if (seen.has(tid)) return;
+    seen.add(tid);
+    matches.push(task);
+  };
+
+  const lists = [window.tasksInterval, window.tasksAsReq];
+  lists.forEach(list => {
+    if (!Array.isArray(list)) return;
+    list.forEach(task => {
+      if (!task) return;
+      const tid = task.id != null ? String(task.id) : "";
+      const taskInventoryId = task.inventoryId != null ? String(task.inventoryId) : "";
+      if (itemId && (taskInventoryId === itemId || (tid && `inv_${tid}` === itemId))){
+        tryAdd(task);
+        return;
+      }
+      if (itemPN && task.pn && String(task.pn).trim().toLowerCase() === itemPN){
+        tryAdd(task);
+        return;
+      }
+      if (itemLink && task.storeLink && String(task.storeLink).trim() === itemLink){
+        tryAdd(task);
+      }
+    });
+  });
+
+  return matches;
+}
+
+async function deleteInventoryItem(id, options){
   const opts = options || {};
   const skipConfirm = opts.skipConfirm === true;
   const suppressToast = opts.suppressToast === true;
@@ -5014,8 +5137,24 @@ function deleteInventoryItem(id, options){
 
   const item = inventory[idx];
   const label = item && item.name ? `"${item.name}"` : "this item";
-  const message = `Delete ${label}? This will remove it from inventory, maintenance settings, and the dashboard on every page.`;
-  const confirmed = skipConfirm ? true : window.confirm(message);
+  let confirmed = true;
+  if (!skipConfirm){
+    const linkedTasks = findTasksLinkedToInventoryItem(item);
+    const count = linkedTasks.length;
+    const message = count > 0
+      ? (count === 1
+        ? `Delete ${label}? This will unlink it from the maintenance task shown below.`
+        : `Delete ${label}? This will unlink it from these maintenance tasks.`)
+      : `Delete ${label}? This will remove it from inventory, maintenance settings, and the dashboard on every page.`;
+    confirmed = await showConfirmModal({
+      title: "Remove inventory item?",
+      message,
+      items: linkedTasks.map(task => task && task.name ? task.name : "Unnamed maintenance task"),
+      cancelText: "Keep item",
+      confirmText: "Delete inventory item",
+      confirmVariant: "danger"
+    });
+  }
   if (!confirmed) return false;
 
   inventory.splice(idx, 1);
