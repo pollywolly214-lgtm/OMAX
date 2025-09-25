@@ -787,123 +787,153 @@ function viewCosts(model){
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
 
   return `
-  <div class="container cost-layout">
-    <div class="block" style="grid-column:1 / -1">
-      <h3>Cost Overview</h3>
-      <div class="cost-summary-grid">
-        ${cards.length ? cards.map(card => `
-          <div class="cost-card">
-            <div class="cost-card-icon">${esc(card.icon || "")}</div>
-            <div class="cost-card-body">
-              <div class="cost-card-title">${esc(card.title || "")}</div>
-              <div class="cost-card-value">${esc(card.value || "")}</div>
-              <div class="cost-card-hint">${esc(card.hint || "")}</div>
-            </div>
-          </div>
-        `).join("") : `<p class="small muted">No cost metrics yet. Log machine hours and add pricing to interval tasks.</p>`}
-      </div>
-    </div>
-
-    <div class="block cost-chart-block" style="grid-column:1 / -1">
-      <div class="cost-chart-header">
-        <h3>Estimated Cost Trends</h3>
-        <div class="cost-chart-toggle">
-          <label><input type="checkbox" id="toggleCostMaintenance" checked> <span class="dot" style="background:${esc(chartColors.maintenance)}"></span> Maintenance</label>
-          <label><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> Cutting jobs</label>
+  <div class="container cost-container">
+    <div class="dashboard-toolbar">
+      <span class="dashboard-edit-hint" id="costEditHint" hidden>Drag windows to rearrange and resize the cost overview.</span>
+      <div class="dashboard-settings" id="costSettings">
+        <button type="button" class="dashboard-settings-btn" id="costSettingsToggle" aria-haspopup="true" aria-expanded="false" aria-controls="costSettingsMenu" aria-label="Cost settings" title="Cost settings">
+          <span aria-hidden="true">⚙</span>
+        </button>
+        <div class="dashboard-settings-menu" id="costSettingsMenu" role="menu" hidden>
+          <button type="button" class="dashboard-settings-item" id="costEditToggle" role="menuitemcheckbox" aria-checked="false" data-settings-focus>Edit layout</button>
         </div>
       </div>
-      <canvas id="costChart" width="780" height="180"></canvas>
-      ${data.chartNote ? `<p class="small muted">${esc(data.chartNote)}</p>` : `<p class="small muted">Toggle a line to explore how maintenance and job efficiency costs evolve over time.</p>`}
     </div>
 
-    <div class="block">
-      <h3>Waterjet Part Summary</h3>
-      <div class="cost-jobs-summary order-cost-summary">
-        <div><span class="label">Requests logged</span><span>${esc(orderSummary.requestCountLabel || "0")}</span></div>
-        <div><span class="label">Approved spend</span><span>${esc(orderSummary.totalApprovedLabel || "$0.00")}</span></div>
+    <div class="dashboard-layout cost-layout" id="costLayout">
+      <div class="dashboard-window" data-cost-window="overview">
+        <div class="block cost-overview-block">
+          <h3>Cost Overview</h3>
+          <div class="cost-summary-grid">
+            ${cards.length ? cards.map(card => `
+              <div class="cost-card">
+                <div class="cost-card-icon">${esc(card.icon || "")}</div>
+                <div class="cost-card-body">
+                  <div class="cost-card-title">${esc(card.title || "")}</div>
+                  <div class="cost-card-value">${esc(card.value || "")}</div>
+                  <div class="cost-card-hint">${esc(card.hint || "")}</div>
+                </div>
+              </div>
+            `).join("") : `<p class="small muted">No cost metrics yet. Log machine hours and add pricing to interval tasks.</p>`}
+          </div>
+        </div>
       </div>
-      ${orderRows.length ? `
-        <table class="cost-table">
-          <thead><tr><th>Request</th><th>Resolved</th><th>Status</th><th>Approved $</th><th>Requested $</th></tr></thead>
-          <tbody>
-            ${orderRows.map(row => `
-              <tr>
-                <td>${esc(row.code || "Order")}</td>
-                <td>${esc(row.resolvedLabel || "—")}</td>
-                <td>${esc(row.statusLabel || "")}</td>
-                <td>${esc(row.approvedLabel || "$0.00")}</td>
-                <td>${esc(row.requestedLabel || "$0.00")}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      ` : `<p class="small muted">${esc(orderSummary.emptyMessage || "Approve or deny order requests to build the spend log.")}</p>`}
-    </div>
 
-    <div class="block">
-      <h3>Maintenance Cost Windows</h3>
-      ${timeframeRows.length ? `
-        <table class="cost-table">
-          <thead><tr><th>Window</th><th>Usage</th><th>Estimated spend</th><th>Projected next window</th></tr></thead>
-          <tbody>
-            ${timeframeRows.map(row => `
-              <tr>
-                <td>${esc(row.label || "")}</td>
-                <td>${esc(row.hoursLabel || "")}</td>
-                <td>${esc(row.costLabel || "")}</td>
-                <td>${esc(row.projectedLabel || "")}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      ` : `<p class="small muted">No usage windows yet. Log machine hours to calculate maintenance spending.</p>`}
-      ${data.timeframeNote ? `<p class="small muted">${esc(data.timeframeNote)}</p>` : ""}
-    </div>
-
-    <div class="block">
-      <h3>Recent Maintenance Events</h3>
-      ${historyRows.length ? `
-        <ul class="cost-history">
-          ${historyRows.map(item => `
-            <li>
-              <span>${esc(item.dateLabel || "")}</span>
-              <span>${esc(item.hoursLabel || "")}</span>
-              <span>${esc(item.costLabel || "")}</span>
-            </li>
-          `).join("")}
-        </ul>
-      ` : `<p class="small muted">${esc(data.historyEmpty || "No usage history yet. Log machine hours to estimate maintenance spend.")}</p>`}
-    </div>
-
-    <div class="block">
-      <h3>Maintenance Job Tracker</h3>
-      ${maintenanceJobsNote ? `<p class="small muted">${esc(maintenanceJobsNote)}</p>` : ""}
-      ${maintenanceJobsEmpty ? `<p class="small muted">${esc(maintenanceJobsEmpty)}</p>` : ""}
-    </div>
-
-    <div class="block">
-      <h3>Cutting Job Efficiency Snapshot</h3>
-      <div class="cost-jobs-summary">
-        <div><span class="label">Jobs tracked</span><span>${esc(jobSummary.countLabel || "0")}</span></div>
-        <div><span class="label">Total gain / loss</span><span>${esc(jobSummary.totalLabel || "$0")}</span></div>
-        <div><span class="label">Avg per job</span><span>${esc(jobSummary.averageLabel || "$0")}</span></div>
-        <div><span class="label">Rolling avg (chart)</span><span>${esc(jobSummary.rollingLabel || "$0")}</span></div>
+      <div class="dashboard-window" data-cost-window="chart">
+        <div class="block cost-chart-block">
+          <div class="cost-chart-header">
+            <h3>Estimated Cost Trends</h3>
+            <div class="cost-chart-toggle">
+              <label><input type="checkbox" id="toggleCostMaintenance" checked> <span class="dot" style="background:${esc(chartColors.maintenance)}"></span> Maintenance</label>
+              <label><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> Cutting jobs</label>
+            </div>
+          </div>
+          <div class="cost-chart-canvas">
+            <canvas id="costChart" width="780" height="240"></canvas>
+          </div>
+          ${data.chartNote ? `<p class="small muted">${esc(data.chartNote)}</p>` : `<p class="small muted">Toggle a line to explore how maintenance and job efficiency costs evolve over time.</p>`}
+        </div>
       </div>
-      ${jobBreakdown.length ? `
-        <table class="cost-table">
-          <thead><tr><th>Job</th><th>Milestone</th><th>Status</th><th>Cost impact</th></tr></thead>
-          <tbody>
-            ${jobBreakdown.map(job => `
-              <tr>
-                <td>${esc(job.name || "")}</td>
-                <td>${esc(job.dateLabel || "")}</td>
-                <td>${esc(job.statusLabel || "")}</td>
-                <td>${esc(job.costLabel || "")}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      ` : `<p class="small muted">${esc(data.jobEmpty || "Add cutting jobs with estimates to build the efficiency tracker.")}</p>`}
+
+      <div class="dashboard-window" data-cost-window="orders">
+        <div class="block">
+          <h3>Waterjet Part Summary</h3>
+          <div class="cost-jobs-summary order-cost-summary">
+            <div><span class="label">Requests logged</span><span>${esc(orderSummary.requestCountLabel || "0")}</span></div>
+            <div><span class="label">Approved spend</span><span>${esc(orderSummary.totalApprovedLabel || "$0.00")}</span></div>
+          </div>
+          ${orderRows.length ? `
+            <table class="cost-table">
+              <thead><tr><th>Request</th><th>Resolved</th><th>Status</th><th>Approved $</th><th>Requested $</th></tr></thead>
+              <tbody>
+                ${orderRows.map(row => `
+                  <tr>
+                    <td>${esc(row.code || "Order")}</td>
+                    <td>${esc(row.resolvedLabel || "—")}</td>
+                    <td>${esc(row.statusLabel || "")}</td>
+                    <td>${esc(row.approvedLabel || "$0.00")}</td>
+                    <td>${esc(row.requestedLabel || "$0.00")}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          ` : `<p class="small muted">${esc(orderSummary.emptyMessage || "Approve or deny order requests to build the spend log.")}</p>`}
+        </div>
+      </div>
+
+      <div class="dashboard-window" data-cost-window="timeframes">
+        <div class="block">
+          <h3>Maintenance Cost Windows</h3>
+          ${timeframeRows.length ? `
+            <table class="cost-table">
+              <thead><tr><th>Window</th><th>Usage</th><th>Estimated spend</th><th>Projected next window</th></tr></thead>
+              <tbody>
+                ${timeframeRows.map(row => `
+                  <tr>
+                    <td>${esc(row.label || "")}</td>
+                    <td>${esc(row.hoursLabel || "")}</td>
+                    <td>${esc(row.costLabel || "")}</td>
+                    <td>${esc(row.projectedLabel || "")}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          ` : `<p class="small muted">No usage windows yet. Log machine hours to calculate maintenance spending.</p>`}
+          ${data.timeframeNote ? `<p class="small muted">${esc(data.timeframeNote)}</p>` : ""}
+        </div>
+      </div>
+
+      <div class="dashboard-window" data-cost-window="history">
+        <div class="block">
+          <h3>Recent Maintenance Events</h3>
+          ${historyRows.length ? `
+            <ul class="cost-history">
+              ${historyRows.map(item => `
+                <li>
+                  <span>${esc(item.dateLabel || "")}</span>
+                  <span>${esc(item.hoursLabel || "")}</span>
+                  <span>${esc(item.costLabel || "")}</span>
+                </li>
+              `).join("")}
+            </ul>
+          ` : `<p class="small muted">${esc(data.historyEmpty || "No usage history yet. Log machine hours to estimate maintenance spend.")}</p>`}
+        </div>
+      </div>
+
+      <div class="dashboard-window" data-cost-window="jobs">
+        <div class="block">
+          <h3>Maintenance Job Tracker</h3>
+          ${maintenanceJobsNote ? `<p class="small muted">${esc(maintenanceJobsNote)}</p>` : ""}
+          ${maintenanceJobsEmpty ? `<p class="small muted">${esc(maintenanceJobsEmpty)}</p>` : ""}
+        </div>
+      </div>
+
+      <div class="dashboard-window" data-cost-window="efficiency">
+        <div class="block">
+          <h3>Cutting Job Efficiency Snapshot</h3>
+          <div class="cost-jobs-summary">
+            <div><span class="label">Jobs tracked</span><span>${esc(jobSummary.countLabel || "0")}</span></div>
+            <div><span class="label">Total gain / loss</span><span>${esc(jobSummary.totalLabel || "$0")}</span></div>
+            <div><span class="label">Avg per job</span><span>${esc(jobSummary.averageLabel || "$0")}</span></div>
+            <div><span class="label">Rolling avg (chart)</span><span>${esc(jobSummary.rollingLabel || "$0")}</span></div>
+          </div>
+          ${jobBreakdown.length ? `
+            <table class="cost-table">
+              <thead><tr><th>Job</th><th>Milestone</th><th>Status</th><th>Cost impact</th></tr></thead>
+              <tbody>
+                ${jobBreakdown.map(job => `
+                  <tr>
+                    <td>${esc(job.name || "")}</td>
+                    <td>${esc(job.dateLabel || "")}</td>
+                    <td>${esc(job.statusLabel || "")}</td>
+                    <td>${esc(job.costLabel || "")}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          ` : `<p class="small muted">${esc(data.jobEmpty || "Add cutting jobs with estimates to build the efficiency tracker.")}</p>`}
+        </div>
+      </div>
     </div>
   </div>`;
 }
