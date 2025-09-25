@@ -255,6 +255,18 @@
       endTour();
       return;
     }
+    if (state.primerOpenedByTrainer && step.id !== "primer"){
+      const panel = document.getElementById("costInfoPanel");
+      let closedByCall = false;
+      if (typeof closeCostInfoPanel === "function"){
+        try {
+          closedByCall = !!closeCostInfoPanel({ reason: "trainer" });
+        } catch (_){ /* ignore */ }
+      }
+      if (closedByCall || !panel || panel.hasAttribute("hidden") || !panel.classList.contains("is-visible")){
+        state.primerOpenedByTrainer = false;
+      }
+    }
     state.counterEl.textContent = `Step ${state.index + 1} of ${state.steps.length}`;
     state.titleEl.textContent = step.title;
     state.bodyEl.textContent = step.description;
