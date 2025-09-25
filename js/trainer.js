@@ -3,40 +3,46 @@
   const RESCROLL_DELAY = 360;
   const COST_TRAINER_STEPS = [
     {
+      id: "primer",
+      selector: "#costInfoBox",
+      title: "Understand the cost model",
+      description: "Start with the info box: it explains which data you must capture, how nightly allocators spread cost, and where to review variances before presenting numbers to leadership."
+    },
+    {
       id: "overview",
       selector: '[data-cost-window="overview"] .block',
       title: "Cost Overview",
-      description: "Review current operating cost metrics at a glance, including total spend, cost per hour, and projected trends. Populate these cards by logging machine hours and pricing your maintenance intervals."
+      description: "These cards roll up net operating cost, cost per hour, and other KPIs using the configured rates and reconciled actuals. Missing inputs will lower their confidence score."
     },
     {
       id: "chart",
       selector: '[data-cost-window="chart"] .block',
-      title: "Estimated Cost Trends",
-      description: "Toggle maintenance and cutting-job lines to see how estimated expenses evolve. The chart updates whenever you log hours, approve spend, or track job performance."
+      title: "Cost & margin trends",
+      description: "Use the toggles to compare maintenance, consumables, downtime, and cutting-job performance over time. It highlights how allocations and revenue shifts change profitability."
     },
     {
       id: "timeframes",
       selector: '[data-cost-window="timeframes"] .block',
-      title: "Maintenance Cost Windows",
-      description: "Compare actual versus projected maintenance spend across rolling windows. This helps forecast upcoming part replacements and consumable burn."
+      title: "Maintenance projections",
+      description: "Rolling windows contrast projected maintenance spend with actual reconciled dollars so you can anticipate part replacements and schedule downtime."
     },
     {
       id: "orders",
       selector: '[data-cost-window="orders"] .block',
-      title: "Waterjet Part Summary",
-      description: "Track approved and pending order requests. Each row links spend back to its request so you can reconcile purchasing against expected maintenance costs."
+      title: "Consumables & parts ledger",
+      description: "Approved order requests feed burn-rate calibrations. Use this table to confirm every purchase is categorized and tied to the right cost driver."
     },
     {
       id: "history",
       selector: '[data-cost-window="history"] .block',
-      title: "Maintenance History",
-      description: "Reference recent hour log entries to understand when spikes or dips occurred. These entries power your cost projections."
+      title: "Hour log audit trail",
+      description: "Recent meter entries show when usage spikes or dips. These timestamps drive interval allocation and explain shifts in cost per hour."
     },
     {
       id: "jobs",
       selector: '[data-cost-window="efficiency"] .block',
-      title: "Cutting Job Efficiency",
-      description: "Monitor how each cutting job is performing against estimates. Positive variances improve profit, while negative ones show where you are losing margin."
+      title: "Cutting job profitability",
+      description: "Every job compares quoted assumptions against actual revenue, labor, material, consumables, and overhead so you see true margin instead of heuristic gains/losses."
     }
   ];
 
