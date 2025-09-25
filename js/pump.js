@@ -3,10 +3,109 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
-const PUMP_BASE_FONT_SCALE = 1.85;
+const PUMP_BASE_FONT_SCALE = 2.0;
 const PUMP_FONT_WIDTH_BASE = 520;
 const pumpViewportState = { bound:false, lastResponsiveScale:1, baseScale:null, baseScaleChanged:false };
 let pumpOverlayEscapeHandler = null;
+
+const PUMP_EXPANDED_SCALE = 1.45;
+const PUMP_EXPANDED_MIN_WIDTH = 360;
+const PUMP_EXPANDED_MIN_HEIGHT = 360;
+
+function pumpExtractCardMetrics(card){
+  if (!card) return null;
+  const metrics = { width:null, height:null, innerWidth:null, innerHeight:null, nonCanvasHeight:null, aspect:null };
+  try {
+    const cardRect = card.getBoundingClientRect();
+    if (cardRect && isFinite(cardRect.width) && cardRect.width > 0) metrics.width = cardRect.width;
+    if (cardRect && isFinite(cardRect.height) && cardRect.height > 0) metrics.height = cardRect.height;
+  } catch (err){ /* ignore */ }
+  if ((!isFinite(metrics.width) || metrics.width <= 0) && typeof getDashboardLayoutState === "function"){
+    try {
+      const layoutState = getDashboardLayoutState();
+      const box = layoutState?.layoutById?.pumpChart;
+      if (box){
+        const w = Number(box.width);
+        const h = Number(box.height);
+        if (isFinite(w) && w > 0) metrics.width = w;
+        if (isFinite(h) && h > 0) metrics.height = h;
+      }
+    } catch (err){ /* ignore */ }
+  }
+  if (!isFinite(metrics.width) || metrics.width <= 0 || !isFinite(metrics.height) || metrics.height <= 0){
+    const win = card.closest('[data-dashboard-window="pumpChart"]') || document.querySelector('[data-dashboard-window="pumpChart"]');
+    if (win){
+      try {
+        const winRect = win.getBoundingClientRect();
+        if (winRect && (!isFinite(metrics.width) || metrics.width <= 0) && isFinite(winRect.width) && winRect.width > 0){
+          metrics.width = winRect.width;
+        }
+        if (winRect && (!isFinite(metrics.height) || metrics.height <= 0) && isFinite(winRect.height) && winRect.height > 0){
+          metrics.height = winRect.height;
+        }
+      } catch (err){ /* ignore */ }
+    }
+  }
+  if (!isFinite(metrics.width) || metrics.width <= 0) metrics.width = 720;
+  if (!isFinite(metrics.height) || metrics.height <= 0) metrics.height = 520;
+  const wrap = card.querySelector('.pump-chart-wrap');
+  let wrapRect = null;
+  try {
+    wrapRect = wrap?.getBoundingClientRect() || null;
+  } catch (err){ wrapRect = null; }
+  if (wrapRect && isFinite(wrapRect.width) && wrapRect.width > 0) metrics.innerWidth = wrapRect.width;
+  if (wrapRect && isFinite(wrapRect.height) && wrapRect.height > 0) metrics.innerHeight = wrapRect.height;
+  let nonCanvas = 0;
+  try {
+    const cardRect = card.getBoundingClientRect();
+    if (cardRect && wrapRect){
+      nonCanvas = Math.max(0, (wrapRect.top - cardRect.top) + (cardRect.bottom - wrapRect.bottom));
+    }else{
+      const headerRect = card.querySelector('.pump-chart-header')?.getBoundingClientRect();
+      const legendRect = card.querySelector('.pump-legend')?.getBoundingClientRect();
+      nonCanvas = (headerRect?.height || 0) + (legendRect?.height || 0) + 96;
+    }
+  } catch (err){
+    nonCanvas = 180;
+  }
+  metrics.nonCanvasHeight = Math.max(140, nonCanvas || 0);
+  if (!isFinite(metrics.innerWidth) || metrics.innerWidth <= 0){
+    metrics.innerWidth = Math.max(320, metrics.width - 72);
+  }
+  if (!isFinite(metrics.innerHeight) || metrics.innerHeight <= 0){
+    metrics.innerHeight = Math.max(240, metrics.height - metrics.nonCanvasHeight);
+  }
+  const rawAspect = metrics.innerHeight / Math.max(metrics.innerWidth, 1);
+  metrics.aspect = Math.max(0.45, Math.min(1.4, rawAspect || 0.75));
+  return metrics;
+}
+
+function pumpComputeExpandedCardSize(metrics){
+  if (!metrics) return null;
+  const scale = PUMP_EXPANDED_SCALE;
+  let width = Math.max(metrics.width, metrics.width * scale);
+  let height = Math.max(metrics.height, metrics.height * scale);
+  width = Math.max(PUMP_EXPANDED_MIN_WIDTH, width);
+  height = Math.max(PUMP_EXPANDED_MIN_HEIGHT, height);
+  const viewportW = window.innerWidth || document.documentElement?.clientWidth || width;
+  const viewportH = window.innerHeight || document.documentElement?.clientHeight || height;
+  const horizontalAllowance = 80;
+  const verticalAllowance = 120;
+  const maxWidth = Math.max(PUMP_EXPANDED_MIN_WIDTH, viewportW - horizontalAllowance);
+  const maxHeight = Math.max(PUMP_EXPANDED_MIN_HEIGHT, viewportH - verticalAllowance);
+  const widthRatio = width > 0 ? maxWidth / width : 1;
+  const heightRatio = height > 0 ? maxHeight / height : 1;
+  const clampRatio = Math.min(1, widthRatio, heightRatio);
+  if (clampRatio < 1){
+    width *= clampRatio;
+    height *= clampRatio;
+  }
+  return {
+    width: Math.round(width),
+    height: Math.round(height),
+    aspect: metrics.aspect
+  };
+}
 
 function pumpResetViewportBaseline(){
   pumpViewportState.baseScale = null;
@@ -40,11 +139,22 @@ function pumpAttachOverlayEscapeHandler(){
   document.addEventListener("keydown", pumpOverlayEscapeHandler);
 }
 
-function pumpMountExpandedCard(card){
+function pumpMountExpandedCard(card, expandedDims){
   card.classList.add("pump-chart-card-expanded");
   card.setAttribute("role", "dialog");
   card.setAttribute("aria-modal", "true");
   card.setAttribute("tabindex", "-1");
+  if (expandedDims){
+    const { width, height } = expandedDims;
+    if (isFinite(width) && width > 0){
+      card.style.width = `${width}px`;
+      card.style.maxWidth = `${width}px`;
+    }
+    if (isFinite(height) && height > 0){
+      card.style.height = `${height}px`;
+      card.style.maxHeight = `${height}px`;
+    }
+  }
   const overlay = document.createElement("div");
   overlay.className = "pump-chart-overlay";
   overlay.setAttribute("data-pump-overlay-card", "true");
@@ -396,26 +506,52 @@ function renderPumpWidget(){
     upsertPumpEntry(d, rpm); saveCloudDebounced(); toast("Log saved"); renderPumpWidget();
   });
   const card = chartHost?.querySelector(".pump-chart-card");
+  const cardMetrics = card ? pumpExtractCardMetrics(card) : null;
+  const expandedDimensions = (window.pumpChartExpanded && card) ? pumpComputeExpandedCardSize(cardMetrics) : null;
+  if (window.pumpChartExpanded && card){
+    pumpMountExpandedCard(card, expandedDimensions);
+  }else if (card){
+    card.style.width = "";
+    card.style.maxWidth = "";
+    card.style.height = "";
+    card.style.maxHeight = "";
+  }
   const rangeSelect = card?.querySelector("#pumpRange");
   const expandBtn = card?.querySelector(".pump-expand-btn");
-  if (window.pumpChartExpanded && card){
-    pumpMountExpandedCard(card);
-  }
   const canvas = document.getElementById("pumpChart");
   const wrap   = canvas?.closest(".pump-chart-wrap");
   if (canvas && wrap){
     const rect = wrap.getBoundingClientRect();
-    const availableWidth = rect.width || wrap.clientWidth || canvas.width || 320;
-    let targetWidth = Math.max(320, Math.floor(availableWidth));
+    const metrics = cardMetrics;
     const expanded = !!window.pumpChartExpanded;
-    const idealHeight = Math.round(targetWidth * 0.75); // 4:3 aspect ratio
-    let targetHeight = expanded ? Math.max(320, idealHeight) : Math.max(240, idealHeight);
-    if (expanded && rect.height){
-      const paddingAllowance = 120; // top/bottom padding & controls inside expanded wrap
-      const availableHeight = Math.floor(rect.height - paddingAllowance);
-      if (availableHeight > 0 && availableHeight < targetHeight){
-        targetHeight = Math.max(320, availableHeight);
-        const widthFromHeight = Math.round(targetHeight * (4 / 3));
+    const innerWidthFallback = metrics ? metrics.innerWidth : null;
+    const innerHeightFallback = metrics ? metrics.innerHeight : null;
+    const nonCanvasHeight = metrics ? metrics.nonCanvasHeight : 160;
+    let availableWidth = rect.width || wrap.clientWidth || canvas.width || 320;
+    if (expanded && expandedDimensions){
+      const horizontalDiff = Math.max(0, (metrics?.width || 0) - (metrics?.innerWidth || 0));
+      const estimatedInnerWidth = Math.max(320, expandedDimensions.width - Math.max(48, horizontalDiff));
+      if (estimatedInnerWidth > availableWidth) availableWidth = estimatedInnerWidth;
+    }
+    if (!expanded && innerWidthFallback && innerWidthFallback > availableWidth){
+      availableWidth = innerWidthFallback;
+    }
+    let targetWidth = Math.max(320, Math.floor(availableWidth));
+    let chartAspect = metrics?.aspect;
+    if (!isFinite(chartAspect) || chartAspect <= 0){
+      chartAspect = 0.75;
+    }
+    chartAspect = Math.max(0.45, Math.min(1.4, chartAspect));
+    let targetHeight = Math.round(targetWidth * chartAspect);
+    const minHeight = expanded ? Math.max(320, Math.round(innerHeightFallback || 0)) : Math.max(240, Math.round(innerHeightFallback || 0));
+    if (isFinite(minHeight) && minHeight > 0 && targetHeight < minHeight){
+      targetHeight = minHeight;
+    }
+    if (expanded && expandedDimensions){
+      const maxHeight = Math.max(320, Math.round(expandedDimensions.height - (nonCanvasHeight || 0)));
+      if (isFinite(maxHeight) && maxHeight > 0 && targetHeight > maxHeight){
+        targetHeight = maxHeight;
+        const widthFromHeight = Math.round(targetHeight / chartAspect);
         if (widthFromHeight > 0 && widthFromHeight < targetWidth){
           targetWidth = widthFromHeight;
         }
