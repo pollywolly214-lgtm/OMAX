@@ -565,6 +565,14 @@ function ensureTaskCategories(){
         alert("Folder is not empty. Move out sub-folders and tasks first.");
         return;
       }
+      try {
+        if (typeof recordDeletedItem === "function"){
+          const folder = byIdFolder(id);
+          if (folder) recordDeletedItem("folder", folder, { parent: folder.parent ?? null });
+        }
+      } catch (err) {
+        console.warn("Failed to record deleted folder", err);
+      }
       window.settingsFolders = window.settingsFolders.filter(f => String(f.id)!==String(id));
       persist();
       if (typeof renderSettings === "function") renderSettings();
@@ -1625,5 +1633,52 @@ function viewOrderRequest(model){
         </div>
       </div>
     </div>`;
+}
+
+function viewDeletedItems(model){
+  const data = model || {};
+  const items = Array.isArray(data.items) ? data.items : [];
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const rows = items.map(item => `
+    <tr>
+      <td class="deleted-icon" aria-hidden="true">${esc(item.icon || "🗑")}</td>
+      <td class="deleted-main">
+        <div class="deleted-label">${esc(item.label || "Deleted item")}</div>
+        <div class="deleted-meta small muted">${esc(item.typeLabel || "Item type unknown")}</div>
+      </td>
+      <td class="deleted-when">
+        <div><strong>Deleted:</strong> ${esc(item.deletedAt || "—")}</div>
+        <div class="small muted"><strong>Expires:</strong> ${esc(item.expiresAt || "—")}</div>
+      </td>
+      <td class="deleted-actions">
+        <button type="button" data-trash-restore="${esc(item.id)}">Restore</button>
+        <button type="button" class="danger" data-trash-delete="${esc(item.id)}">Delete forever</button>
+      </td>
+    </tr>
+  `).join("");
+
+  const body = items.length
+    ? `<table class="deleted-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Item</th>
+            <th>Details</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`
+    : `<p class="small muted">Nothing has been deleted in the last 30 days.</p>`;
+
+  return `
+    <div class="container deleted-container">
+      <div class="block" style="grid-column:1 / -1">
+        <h3>Deleted items</h3>
+        <p class="small muted">Items remain here for 30 days after deletion. Restore them or delete forever.</p>
+        ${body}
+      </div>
+    </div>
+  `;
 }
 

@@ -766,6 +766,22 @@ function wireDashboardSettingsMenu(){
       if (event.key === "Escape"){ closeDashboardSettingsMenu(); button?.focus(); }
     });
   }
+  if (!menu.dataset.boundSettingsNav){
+    menu.dataset.boundSettingsNav = "1";
+    menu.addEventListener("click", (event)=>{
+      const link = event.target instanceof HTMLElement ? event.target.closest("[data-settings-nav]") : null;
+      if (!link) return;
+      event.preventDefault();
+      const target = link.getAttribute("href") || "#/deleted";
+      closeDashboardSettingsMenu();
+      const normalized = typeof route === "function" ? target : target;
+      if (location.hash !== normalized){
+        location.hash = normalized;
+      } else if (typeof route === "function") {
+        route();
+      }
+    });
+  }
   ensureClearAllDataHandlers();
 }
 
@@ -3743,6 +3759,13 @@ function renderSettings(){
       const meta = findTaskMeta(id);
       if (!meta) return;
       const task = meta.task;
+      try {
+        if (typeof recordDeletedItem === "function"){
+          recordDeletedItem("task", task, { list: meta.mode, cat: task?.cat ?? null, parentTask: task?.parentTask ?? null });
+        }
+      } catch (err) {
+        console.warn("Failed to record deleted task", err);
+      }
       const matches = findInventoryMatchesForTask(task);
       let removeInventoryAlso = false;
       if (matches.length){
@@ -5500,6 +5523,14 @@ function renderJobs(){
         : true;
       if (!proceed) return;
       const idStr = String(id);
+      const entry = completedCuttingJobs.find(job => String(job?.id) === idStr);
+      if (entry){
+        try {
+          if (typeof recordDeletedItem === "function") recordDeletedItem("completed-job", entry, {});
+        } catch (err) {
+          console.warn("Failed to record deleted completed job", err);
+        }
+      }
       completedCuttingJobs = completedCuttingJobs.filter(job => String(job?.id) !== idStr);
       window.completedCuttingJobs = completedCuttingJobs;
       editingCompletedJobsSet().delete(idStr);
@@ -5629,6 +5660,14 @@ function renderJobs(){
     // Remove
     if (rm){
       const id = rm.getAttribute("data-remove-job");
+      const job = cuttingJobs.find(x=>x.id===id);
+      if (job){
+        try {
+          if (typeof recordDeletedItem === "function") recordDeletedItem("job", job, {});
+        } catch (err) {
+          console.warn("Failed to record deleted job", err);
+        }
+      }
       cuttingJobs = cuttingJobs.filter(x=>x.id!==id);
       saveCloudDebounced(); toast("Removed"); renderJobs();
       return;
@@ -6260,6 +6299,13 @@ async function deleteInventoryItem(id, options){
   }
   if (!confirmed) return false;
 
+  try {
+    if (typeof recordDeletedItem === "function"){
+      recordDeletedItem("inventory", item, {});
+    }
+  } catch (err) {
+    console.warn("Failed to record deleted inventory item", err);
+  }
   inventory.splice(idx, 1);
   saveCloudDebounced();
   if (!suppressToast) toast("Inventory item removed");
@@ -6449,6 +6495,16 @@ function renderOrderRequest(){
       const id = removeBtn.getAttribute("data-order-remove");
       const idx = draft.items.findIndex(item => item.id === id);
       if (idx >= 0){
+        const line = draft.items[idx];
+        if (line){
+          try {
+            if (typeof recordDeletedItem === "function"){
+              recordDeletedItem("order-item", line, { requestId: draft.id });
+            }
+          } catch (err) {
+            console.warn("Failed to record deleted order item", err);
+          }
+        }
         draft.items.splice(idx,1);
         orderPartialSelection.delete(id);
         saveCloudDebounced();
@@ -6493,5 +6549,92 @@ function renderOrderRequest(){
   });
 
   updateOrderTotalsUI(activeCard, draft);
+}
+
+function describeDeletedType(type){
+  const key = (type || "").toLowerCase();
+  switch (key) {
+    case "task": return "Maintenance task";
+    case "inventory": return "Inventory item";
+    case "job": return "Active job";
+    case "completed-job": return "Completed job";
+    case "folder": return "Category";
+    case "garnet": return "Garnet cleaning";
+    case "order-item": return "Order request item";
+    case "total-history": return "Machine hours entry";
+    case "workspace": return "Workspace snapshot";
+    default: return type || "Item";
+  }
+}
+
+function formatTrashDate(iso){
+  if (!iso) return "—";
+  const dt = new Date(iso);
+  if (!Number.isFinite(dt.getTime())) return iso;
+  try {
+    return dt.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  } catch (_){
+    return dt.toISOString();
+  }
+}
+
+function computeDeletedItemsModel(){
+  const entries = typeof listDeletedItems === "function" ? listDeletedItems() : [];
+  const items = entries.map(entry => ({
+    id: entry.id,
+    icon: "🗑",
+    label: entry.label || describeDeletedType(entry.type),
+    typeLabel: describeDeletedType(entry.type),
+    deletedAt: formatTrashDate(entry.deletedAt),
+    deletedAtISO: entry.deletedAt || null,
+    expiresAt: entry.expiresAt ? formatTrashDate(entry.expiresAt) : "—",
+    expiresAtISO: entry.expiresAt || null
+  }));
+  return { items };
+}
+
+function renderDeletedItems(){
+  const content = document.getElementById("content"); if (!content) return;
+  setAppSettingsContext("default");
+  wireDashboardSettingsMenu();
+  try { if (typeof purgeExpiredDeletedItems === "function") purgeExpiredDeletedItems(); }
+  catch (_){ /* ignore */ }
+  const model = computeDeletedItemsModel();
+  content.innerHTML = viewDeletedItems(model);
+
+  content.querySelectorAll("[data-trash-restore]").forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-trash-restore");
+      if (!id) return;
+      try {
+        const result = typeof restoreDeletedItem === "function" ? restoreDeletedItem(id) : { ok:false };
+        if (result && result.ok){
+          toast("Item restored");
+          renderDeletedItems();
+        } else {
+          alert("Unable to restore this item.");
+        }
+      } catch (err) {
+        console.error("Restore failed", err);
+        alert("Unable to restore this item.");
+      }
+    });
+  });
+
+  content.querySelectorAll("[data-trash-delete]").forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-trash-delete");
+      if (!id) return;
+      const proceed = window.confirm ? window.confirm("Are you sure this will PERMINETLY Delete this forever") : true;
+      if (!proceed) return;
+      const removed = typeof removeDeletedItem === "function" ? removeDeletedItem(id) : false;
+      if (removed){
+        toast("Item deleted forever");
+        renderDeletedItems();
+      } else {
+        alert("Unable to delete this item.");
+      }
+    });
+  });
 }
 

@@ -103,6 +103,13 @@ function showTaskBubble(taskId, anchor){
     completeTask(taskId); hideBubble();
   });
   b.querySelector("[data-bbl-remove]")?.addEventListener("click", ()=>{
+    try {
+      if (typeof recordDeletedItem === "function"){
+        recordDeletedItem("task", t, { list: "interval", cat: t?.cat ?? null, parentTask: t?.parentTask ?? null });
+      }
+    } catch (err) {
+      console.warn("Failed to record deleted task from calendar", err);
+    }
     tasksInterval = tasksInterval.filter(x => x.id !== taskId);
     saveCloudDebounced(); toast("Removed"); hideBubble(); route();
   });
@@ -173,6 +180,13 @@ function showJobBubble(jobId, anchor){
         <button type="button" class="danger" data-bbl-remove-job="${j.id}">Remove</button>
       </div>`;
     b.querySelector("[data-bbl-remove-job]")?.addEventListener("click", ()=>{
+      try {
+        if (typeof recordDeletedItem === "function"){
+          recordDeletedItem("job", j, {});
+        }
+      } catch (err) {
+        console.warn("Failed to record deleted job from calendar", err);
+      }
       cuttingJobs = cuttingJobs.filter(x=>String(x.id)!==String(j.id)); saveCloudDebounced(); toast("Removed"); hideBubble(); route();
     });
     b.querySelector("[data-bbl-edit-job]")?.addEventListener("click", ()=>{ hideBubble(); openJobsEditor(j.id); });
@@ -197,6 +211,11 @@ function removeGarnetEntry(id){
   const entries = getGarnetEntries();
   const idx = entries.findIndex(item => String(item.id) === String(id));
   if (idx < 0) return;
+  try {
+    if (typeof recordDeletedItem === "function"){ recordDeletedItem("garnet", entries[idx], {}); }
+  } catch (err) {
+    console.warn("Failed to record deleted garnet entry", err);
+  }
   entries.splice(idx,1);
   saveCloudDebounced();
   toast("Garnet cleaning removed");

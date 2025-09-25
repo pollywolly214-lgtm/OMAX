@@ -83,6 +83,7 @@ function route(){
     if (raw === "#costs"     || raw === "#/costs")     return "#/costs";
     if (raw === "#inventory" || raw === "#/inventory") return "#/inventory";
     if (raw === "#order-request" || raw === "#/order-request") return "#/order-request";
+    if (raw === "#deleted" || raw === "#/deleted") return "#/deleted";
     // Fallback to dashboard
     return "#/";
   }
@@ -112,6 +113,7 @@ function route(){
     if (norm === "#/costs")         { renderCosts();      return; }
     if (norm === "#/inventory")     { renderInventory();  return; }
     if (norm === "#/order-request") { renderOrderRequest(); return; }
+    if (norm === "#/deleted")      { renderDeletedItems(); return; }
     /* default */                     renderDashboard();
   }
 }
