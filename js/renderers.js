@@ -2628,6 +2628,12 @@ function renderSettings(){
       #explorer .row-actions button{padding:.35rem .65rem;border-radius:6px;border:0;cursor:pointer;background:#eef3fb;color:#0a63c2}
       #explorer .row-actions .danger{background:#e14b4b;color:#fff}
       #explorer .row-actions .btn-complete{background:#0a63c2;color:#fff}
+      #maintenanceContextMenu{position:fixed;z-index:10000;background:#fff;border:1px solid #d0d7e4;border-radius:10px;box-shadow:0 14px 30px rgba(15,35,72,.16);display:flex;flex-direction:column;min-width:170px;padding:6px}
+      #maintenanceContextMenu[hidden]{display:none}
+      #maintenanceContextMenu button{background:none;border:0;text-align:left;padding:8px 12px;font-size:.9rem;color:#0f1e3a;border-radius:6px;cursor:pointer}
+      #maintenanceContextMenu button:hover{background:#eef3fb}
+      #maintenanceContextMenu button.danger{color:#c62828}
+      #maintenanceContextMenu button.danger:hover{background:#fde8e8}
       #explorer .children{padding:6px 8px 10px 18px}
       #explorer .task-children{padding:6px 8px 12px 22px;background:#fbfbfb;border-top:1px solid #f0f0f0}
       #explorer .task-children>.dz{margin:0;padding:0;border:0;background:transparent;min-height:0}
@@ -3042,6 +3048,10 @@ function renderSettings(){
         </form>
       </div>
     </div>
+    <div id="maintenanceContextMenu" class="context-menu" hidden>
+      <button type="button" data-action="edit">Edit</button>
+      <button type="button" class="danger" data-action="delete">Delete</button>
+    </div>
   `;
 
   const tree = document.getElementById("tree");
@@ -3053,6 +3063,8 @@ function renderSettings(){
   const conditionRow = form?.querySelector('[data-form-condition]');
   const searchInput = document.getElementById("maintenanceSearch");
   const searchClear = document.getElementById("maintenanceSearchClear");
+  const contextMenu = document.getElementById("maintenanceContextMenu");
+  let contextTarget = null;
 
   tree?.querySelectorAll("details.cat").forEach(det => {
     det.addEventListener("toggle", ()=>{
@@ -3101,6 +3113,37 @@ function renderSettings(){
     if (typeof saveTasks === "function") { try{ saveTasks(); }catch(_){} }
     if (typeof saveCloudDebounced === "function") { try{ saveCloudDebounced(); }catch(_){} }
   };
+
+  const hideContextMenu = ()=>{
+    if (contextMenu){
+      contextMenu.hidden = true;
+      contextMenu.style.left = "";
+      contextMenu.style.top = "";
+    }
+    contextTarget = null;
+  };
+
+  window.__maintenanceContextMenuRef = contextMenu;
+  window.__maintenanceContextMenuHide = hideContextMenu;
+  if (!window.__maintenanceContextMenuGlobalsAttached){
+    window.__maintenanceContextMenuGlobalsAttached = true;
+    document.addEventListener("click", (e)=>{
+      const menu = window.__maintenanceContextMenuRef;
+      if (!menu || menu.hidden) return;
+      if (e.target instanceof Node && menu.contains(e.target)) return;
+      if (typeof window.__maintenanceContextMenuHide === "function") window.__maintenanceContextMenuHide();
+    }, { capture: true });
+    document.addEventListener("scroll", ()=>{
+      const menu = window.__maintenanceContextMenuRef;
+      if (!menu || menu.hidden) return;
+      if (typeof window.__maintenanceContextMenuHide === "function") window.__maintenanceContextMenuHide();
+    }, { capture: true, passive: true });
+    document.addEventListener("keydown", (e)=>{
+      if (e.key === "Escape" && typeof window.__maintenanceContextMenuHide === "function"){
+        window.__maintenanceContextMenuHide();
+      }
+    });
+  }
 
   function syncFormMode(mode){
     if (!freqRow || !lastRow || !conditionRow) return;
@@ -3331,6 +3374,101 @@ function renderSettings(){
       renderSettings();
     }
   });
+
+  tree?.addEventListener("contextmenu", (e)=>{
+    if (!(e.target instanceof HTMLElement)) return;
+    const summary = e.target.closest("summary");
+    if (!summary) return;
+    const holder = summary.parentElement;
+    if (!(holder instanceof HTMLElement)) return;
+    const isTask = holder.classList.contains("task");
+    const isCat = holder.classList.contains("cat");
+    if (!isTask && !isCat) return;
+    const id = isTask ? holder.getAttribute("data-task-id") : holder.getAttribute("data-cat-id");
+    if (!id) return;
+    e.preventDefault();
+    contextTarget = { type: isTask ? "task" : "category", id: String(id), node: holder };
+    if (!contextMenu) return;
+    contextMenu.hidden = false;
+    contextMenu.style.left = "0px";
+    contextMenu.style.top = "0px";
+    requestAnimationFrame(()=>{
+      if (!contextMenu) return;
+      const menuRect = contextMenu.getBoundingClientRect();
+      let left = e.clientX;
+      let top = e.clientY;
+      const pad = 8;
+      const maxLeft = window.innerWidth - menuRect.width - pad;
+      const maxTop = window.innerHeight - menuRect.height - pad;
+      if (left > maxLeft) left = Math.max(pad, maxLeft);
+      if (top > maxTop) top = Math.max(pad, maxTop);
+      if (left < pad) left = pad;
+      if (top < pad) top = pad;
+      contextMenu.style.left = `${left}px`;
+      contextMenu.style.top = `${top}px`;
+    });
+  });
+
+  contextMenu?.addEventListener("click", (e)=>{
+    const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-action]") : null;
+    if (!btn) return;
+    const action = btn.getAttribute("data-action");
+    const target = contextTarget;
+    hideContextMenu();
+    if (!target || !action) return;
+    if (action === "edit"){
+      if (target.type === "task" && target.node instanceof HTMLElement){
+        target.node.open = true;
+        const input = target.node.querySelector('[data-k="name"]');
+        if (input instanceof HTMLElement && typeof input.focus === "function"){ input.focus(); if ("select" in input && typeof input.select === "function") input.select(); }
+      }else if (target.type === "category"){
+        const folder = byIdFolder(target.id);
+        const currentName = folder?.name || "";
+        const next = prompt("Rename category", currentName);
+        if (next == null) return;
+        const trimmed = next.trim();
+        if (!trimmed){ alert("Category name cannot be empty."); return; }
+        if (folder){ folder.name = trimmed; }
+        persist();
+        renderSettings();
+      }
+    }else if (action === "delete"){
+      if (target.type === "task"){
+        const meta = findTaskMeta(target.id);
+        const taskName = meta?.task?.name ? `“${meta.task.name}”` : "this task";
+        if (!meta) return;
+        const confirmed = window.confirm(`Delete ${taskName}? This will remove it from every page.`);
+        if (!confirmed) return;
+        window.tasksInterval.forEach(t => { if (String(t.parentTask) === String(target.id)) t.parentTask = null; });
+        window.tasksAsReq.forEach(t => { if (String(t.parentTask) === String(target.id)) t.parentTask = null; });
+        if (meta.mode === "interval"){
+          window.tasksInterval.splice(meta.index, 1);
+        }else{
+          window.tasksAsReq.splice(meta.index, 1);
+        }
+        persist();
+        renderSettings();
+      }else if (target.type === "category"){
+        const folder = byIdFolder(target.id);
+        if (!folder) return;
+        const label = folder.name ? `the “${folder.name}” category` : "this category";
+        const confirmed = window.confirm(`Delete ${label}? Tasks inside will move to the parent level and this will remove it from every page.`);
+        if (!confirmed) return;
+        const catId = String(folder.id);
+        const newParent = folder.parent != null ? String(folder.parent) : null;
+        window.settingsFolders = window.settingsFolders.filter(f => String(f.id) !== catId);
+        window.settingsFolders.forEach(f => {
+          if (String(f.parent || "") === catId){ f.parent = newParent; }
+        });
+        window.tasksInterval.forEach(t => { if (String(t.cat || "") === catId) t.cat = newParent; });
+        window.tasksAsReq.forEach(t => { if (String(t.cat || "") === catId) t.cat = newParent; });
+        openFolderState.delete(catId);
+        persist();
+        renderSettings();
+      }
+    }
+  });
+
 
   const clearSummaryHint = (summary)=>{
     if (!summary) return;
