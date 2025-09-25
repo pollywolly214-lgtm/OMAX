@@ -1980,23 +1980,23 @@ function renderDashboard(){
       let interval = Number(taskIntervalInput?.value);
       if (!isFinite(interval) || interval <= 0) interval = 8;
       const task = Object.assign({}, base, { mode:"interval", interval, sinceBase:0, anchorTotal:null });
+      const curHours = getCurrentMachineHours();
       const lastVal = taskLastInput?.value;
-      let baseline = null;
+      let lastReading = null;
       if (lastVal !== undefined && lastVal !== ""){
-        const v = Number(lastVal);
-        if (Number.isFinite(v) && v >= 0){
-          baseline = v;
+        const parsed = Number(lastVal);
+        if (Number.isFinite(parsed) && parsed >= 0){
+          lastReading = parsed;
         }
       }
-      if (baseline != null){
-        task.sinceBase = baseline;
-        const curHours = getCurrentMachineHours();
-        if (curHours != null){
-          const anchorCandidate = curHours - baseline;
-          if (Number.isFinite(anchorCandidate) && anchorCandidate >= 0){
-            task.anchorTotal = anchorCandidate;
-          }
+      if (lastReading != null){
+        task.anchorTotal = lastReading;
+        if (curHours != null && Number.isFinite(curHours)){
+          task.sinceBase = Math.max(0, curHours - lastReading);
         }
+      }else if (curHours != null && Number.isFinite(curHours)){
+        task.anchorTotal = curHours;
+        task.sinceBase = 0;
       }
       tasksInterval.unshift(task);
     }else{
@@ -2030,24 +2030,24 @@ function renderDashboard(){
           subInterval = isFinite(parentInterval) && parentInterval > 0 ? parentInterval : 8;
         }
         const subTask = Object.assign({}, subBase, { mode:"interval", interval: subInterval, sinceBase:0, anchorTotal:null });
+        const curHours = getCurrentMachineHours();
         const lastField = row.querySelector("[data-subtask-last]");
         const lastVal = lastField?.value;
-        let baseline = null;
+        let lastReading = null;
         if (lastVal !== undefined && lastVal !== ""){
-          const v = Number(lastVal);
-          if (Number.isFinite(v) && v >= 0){
-            baseline = v;
+          const parsed = Number(lastVal);
+          if (Number.isFinite(parsed) && parsed >= 0){
+            lastReading = parsed;
           }
         }
-        if (baseline != null){
-          subTask.sinceBase = baseline;
-          const curHours = getCurrentMachineHours();
-          if (curHours != null){
-            const anchorCandidate = curHours - baseline;
-            if (Number.isFinite(anchorCandidate) && anchorCandidate >= 0){
-              subTask.anchorTotal = anchorCandidate;
-            }
+        if (lastReading != null){
+          subTask.anchorTotal = lastReading;
+          if (curHours != null && Number.isFinite(curHours)){
+            subTask.sinceBase = Math.max(0, curHours - lastReading);
           }
+        }else if (curHours != null && Number.isFinite(curHours)){
+          subTask.anchorTotal = curHours;
+          subTask.sinceBase = 0;
         }
         tasksInterval.unshift(subTask);
       }else{
@@ -3528,22 +3528,22 @@ function renderSettings(){
       const lastVal = data.get("taskLastServiced");
       const interval = intervalVal === null || intervalVal === "" ? 8 : Number(intervalVal);
       const task = Object.assign(base, { mode:"interval", interval: isFinite(interval) && interval>0 ? interval : 8, sinceBase:0, anchorTotal:null });
-      let baseline = null;
+      const curHours = getCurrentMachineHours();
+      let lastReading = null;
       if (lastVal !== null && lastVal !== ""){
         const v = Number(lastVal);
         if (Number.isFinite(v) && v >= 0){
-          baseline = v;
+          lastReading = v;
         }
       }
-      if (baseline != null){
-        task.sinceBase = baseline;
-        const curHours = getCurrentMachineHours();
-        if (curHours != null){
-          const anchorCandidate = curHours - baseline;
-          if (Number.isFinite(anchorCandidate) && anchorCandidate >= 0){
-            task.anchorTotal = anchorCandidate;
-          }
+      if (lastReading != null){
+        task.anchorTotal = lastReading;
+        if (curHours != null && Number.isFinite(curHours)){
+          task.sinceBase = Math.max(0, curHours - lastReading);
         }
+      }else if (curHours != null && Number.isFinite(curHours)){
+        task.anchorTotal = curHours;
+        task.sinceBase = 0;
       }
       window.tasksInterval.unshift(task);
     }else{
