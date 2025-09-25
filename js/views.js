@@ -1207,6 +1207,9 @@ function viewJobs(){
   <div class="container">
     <div class="block" style="grid-column:1 / -1">
       <h3>Cutting Jobs</h3>
+      <div class="job-page-toolbar">
+        <a class="job-history-button" href="#pastJobs">Jump to history</a>
+      </div>
       <form id="addJobForm" class="mini-form">
         <input type="text" id="jobName" placeholder="Job name" required>
         <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
@@ -1238,7 +1241,7 @@ function viewJobs(){
       </table>
       <p class="small muted">Material cost and quantity update immediately when changed.</p>
     </div>
-    <div class="block past-jobs-block">
+    <div class="block past-jobs-block" id="pastJobs">
       <h3>Past Cutting Jobs</h3>
       ${completedTable}
     </div>
