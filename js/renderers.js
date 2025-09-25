@@ -2873,6 +2873,7 @@ function renderJobs(){
 
   // 2) Insert a "Log" button into each job row's Actions cell (non-edit rows)
   content.querySelectorAll('tr[data-job-row]').forEach(tr=>{
+    if (tr.classList.contains('editing')) return;
     const id = tr.getAttribute('data-job-row');
     let actionsCell = tr.querySelector('td:last-child');
     // Fallback: if the row didn’t render an Actions cell, add one
@@ -2939,16 +2940,6 @@ function renderJobs(){
 
   // 5) Inline material $/qty (kept)
   content.querySelector("tbody")?.addEventListener("change", async (e)=>{
-    if (e.target.matches("input.matCost, input.matQty")){
-      const id = e.target.getAttribute("data-id");
-      const j = cuttingJobs.find(x=>x.id===id); if (!j) return;
-      j.materialCost = Number(content.querySelector(`input.matCost[data-id="${id}"]`).value)||0;
-      j.materialQty  = Number(content.querySelector(`input.matQty[data-id="${id}"]`).value)||0;
-      saveCloudDebounced();
-      renderJobs();
-      return;
-    }
-
     if (e.target.matches("input[data-job-file-input]")){
       const id = e.target.getAttribute("data-job-file-input");
       const j = cuttingJobs.find(x=>x.id===id);
@@ -2964,18 +2955,17 @@ function renderJobs(){
     }
   });
 
-  content.querySelector("tbody")?.addEventListener("input", (e)=>{
-    if (e.target.matches("textarea[data-job-note]")){
-      const id = e.target.getAttribute("data-job-note");
-      const j = cuttingJobs.find(x=>x.id===id);
-      if (!j) return;
-      j.notes = e.target.value;
-      saveCloudDebounced();
-    }
-  });
-
   // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
   content.querySelector("tbody")?.addEventListener("click",(e)=>{
+    const locked = e.target.closest("[data-requires-edit]");
+    if (locked){
+      const id = locked.getAttribute("data-requires-edit");
+      if (!id) return;
+      const proceed = window.confirm ? window.confirm("Open edit mode to update this job?") : true;
+      if (proceed){ editingJobs.add(id); renderJobs(); }
+      return;
+    }
+
     const upload = e.target.closest("[data-upload-job]");
     if (upload){
       const id = upload.getAttribute("data-upload-job");
@@ -3077,6 +3067,8 @@ function renderJobs(){
       j.name = qs("name") || j.name;
       j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
       j.material = qs("material") || j.material || "";
+      j.materialCost = Math.max(0, Number(qs("materialCost")) || 0);
+      j.materialQty = Math.max(0, Number(qs("materialQty")) || 0);
       j.startISO = qs("startISO") || j.startISO;
       j.dueISO   = qs("dueISO")   || j.dueISO;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";

@@ -931,6 +931,12 @@ function viewJobs(){
     const decimals = Math.abs(num) >= 100 ? 0 : 1;
     return `${num.toFixed(decimals)} hr`;
   };
+  const formatQuantity = (value)=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "0";
+    const decimals = Math.abs(num) >= 100 ? 0 : 2;
+    return num.toFixed(decimals);
+  };
   const formatDate = (iso)=>{
     if (!iso) return "—";
     const dt = parseDateLocal(iso) || new Date(iso);
@@ -1069,6 +1075,12 @@ function viewJobs(){
     const dueVal    = dueDate ? ymd(dueDate) : (j.dueISO || "");
 
     if (!editing){
+      const matCostDisplay = formatCurrency(matCost, { showPlus: false });
+      const matQtyDisplay  = formatQuantity(matQty);
+      const noteContent = (j.notes || "").trim();
+      const noteMarkup = noteContent
+        ? `<div id="jobNote_${j.id}" class="job-note-display" data-requires-edit="${j.id}">${textEsc(j.notes || "").replace(/\n/g, "<br>")}</div>`
+        : `<div id="jobNote_${j.id}" class="job-note-display job-note-empty" data-requires-edit="${j.id}">Add a note…</div>`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
           <td class="job-col job-col-main">
@@ -1078,9 +1090,9 @@ function viewJobs(){
             </div>
           </td>
           <td class="job-col job-col-estimate">${estimateDisplay}</td>
-          <td class="job-col job-col-material">${j.material || '—'}</td>
-          <td class="job-col job-col-input"><input type="number" class="job-input matCost" data-id="${j.id}" value="${matCost}" step="0.01" min="0"></td>
-          <td class="job-col job-col-input"><input type="number" class="job-input matQty" data-id="${j.id}" value="${matQty}" step="0.01" min="0"></td>
+          <td class="job-col job-col-material job-col-locked" data-requires-edit="${j.id}">${j.material || '—'}</td>
+          <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">${matCostDisplay}</td>
+          <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">${matQtyDisplay}</td>
           <td class="job-col job-col-money">$${matTotal.toFixed(2)}</td>
           <td class="job-col job-col-hours">${remainingDisplay}</td>
           <td class="job-col job-col-need">${needDisplay}</td>
@@ -1101,7 +1113,7 @@ function viewJobs(){
             <div class="job-detail-card">
               <div class="job-detail-note">
                 <label class="job-detail-label" for="jobNote_${j.id}">Notes</label>
-                <textarea id="jobNote_${j.id}" data-job-note="${j.id}" rows="2" placeholder="Add a note…">${textEsc(j.notes || "")}</textarea>
+                ${noteMarkup}
               </div>
               <div class="job-detail-meta">
                 <div class="job-detail-efficiency small muted">${efficiencyDetail}</div>
@@ -1123,6 +1135,8 @@ function viewJobs(){
                 <label>Job name<input type="text" data-j="name" data-id="${j.id}" value="${j.name}"></label>
                 <label>Estimate (hrs)<input type="number" min="1" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></label>
                 <label>Material<input type="text" data-j="material" data-id="${j.id}" value="${j.material||""}"></label>
+                <label>Material cost ($)<input type="number" min="0" step="0.01" data-j="materialCost" data-id="${j.id}" value="${matCost}"></label>
+                <label>Material quantity<input type="number" min="0" step="0.01" data-j="materialQty" data-id="${j.id}" value="${matQty}"></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
               </div>
