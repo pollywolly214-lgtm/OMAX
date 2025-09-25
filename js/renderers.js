@@ -17,6 +17,52 @@ function getCurrentMachineHours(){
   return null;
 }
 
+function parseBaselineHours(value){
+  if (value === undefined || value === null || value === "") return null;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return num;
+}
+
+function applyIntervalBaseline(task, { baselineHours = null, currentHours } = {}){
+  if (!task || task.mode !== "interval") return;
+  const cur = currentHours !== undefined ? currentHours : getCurrentMachineHours();
+  if (baselineHours != null){
+    const consumed = Math.max(0, Number(baselineHours));
+    task.sinceBase = consumed;
+    if (cur != null){
+      const anchorCandidate = Number(cur) - consumed;
+      if (Number.isFinite(anchorCandidate) && anchorCandidate >= 0){
+        task.anchorTotal = anchorCandidate;
+      }else{
+        task.anchorTotal = null;
+      }
+    }else{
+      task.anchorTotal = null;
+    }
+  }else{
+    if (cur != null){
+      task.anchorTotal = Number(cur);
+      task.sinceBase = 0;
+    }else if (task.sinceBase == null){
+      task.sinceBase = 0;
+    }
+  }
+}
+
+function baselineInputValue(task){
+  if (!task) return "";
+  const base = Number(task.sinceBase);
+  if (Number.isFinite(base) && base >= 0) return base;
+  const cur = getCurrentMachineHours();
+  const anchor = Number(task.anchorTotal);
+  if (Number.isFinite(anchor) && cur != null){
+    const diff = Number(cur) - anchor;
+    if (Number.isFinite(diff) && diff >= 0) return diff;
+  }
+  return "";
+}
+
 function editingCompletedJobsSet(){
   if (typeof getEditingCompletedJobsSet === "function"){
     return getEditingCompletedJobsSet();
@@ -1897,7 +1943,7 @@ function renderDashboard(){
           <option value="asreq">As required</option>
         </select></label>
         <label data-subtask-frequency>Frequency (hrs)<input type="number" min="1" step="1" data-subtask-interval placeholder="e.g. 20"></label>
-        <label data-subtask-last>Last serviced at (hrs)<input type="number" min="0" step="0.01" data-subtask-last placeholder="optional"></label>
+        <label data-subtask-last>Hours since last service<input type="number" min="0" step="0.01" data-subtask-last placeholder="optional"></label>
         <label data-subtask-condition hidden>Condition / trigger<input type="text" data-subtask-condition-input placeholder="e.g. When needed"></label>
       </div>`;
     const typeSel = row.querySelector("[data-subtask-type]");
@@ -1981,23 +2027,8 @@ function renderDashboard(){
       if (!isFinite(interval) || interval <= 0) interval = 8;
       const task = Object.assign({}, base, { mode:"interval", interval, sinceBase:0, anchorTotal:null });
       const curHours = getCurrentMachineHours();
-      const lastVal = taskLastInput?.value;
-      let lastReading = null;
-      if (lastVal !== undefined && lastVal !== ""){
-        const parsed = Number(lastVal);
-        if (Number.isFinite(parsed) && parsed >= 0){
-          lastReading = parsed;
-        }
-      }
-      if (lastReading != null){
-        task.anchorTotal = lastReading;
-        if (curHours != null && Number.isFinite(curHours)){
-          task.sinceBase = Math.max(0, curHours - lastReading);
-        }
-      }else if (curHours != null && Number.isFinite(curHours)){
-        task.anchorTotal = curHours;
-        task.sinceBase = 0;
-      }
+      const baselineHours = parseBaselineHours(taskLastInput?.value);
+      applyIntervalBaseline(task, { baselineHours, currentHours: curHours });
       tasksInterval.unshift(task);
     }else{
       const condition = (taskConditionInput?.value || "").trim() || "As required";
@@ -2032,23 +2063,8 @@ function renderDashboard(){
         const subTask = Object.assign({}, subBase, { mode:"interval", interval: subInterval, sinceBase:0, anchorTotal:null });
         const curHours = getCurrentMachineHours();
         const lastField = row.querySelector("[data-subtask-last]");
-        const lastVal = lastField?.value;
-        let lastReading = null;
-        if (lastVal !== undefined && lastVal !== ""){
-          const parsed = Number(lastVal);
-          if (Number.isFinite(parsed) && parsed >= 0){
-            lastReading = parsed;
-          }
-        }
-        if (lastReading != null){
-          subTask.anchorTotal = lastReading;
-          if (curHours != null && Number.isFinite(curHours)){
-            subTask.sinceBase = Math.max(0, curHours - lastReading);
-          }
-        }else if (curHours != null && Number.isFinite(curHours)){
-          subTask.anchorTotal = curHours;
-          subTask.sinceBase = 0;
-        }
+        const baselineHours = parseBaselineHours(lastField?.value);
+        applyIntervalBaseline(subTask, { baselineHours, currentHours: curHours });
         tasksInterval.unshift(subTask);
       }else{
         const condInput = row.querySelector("[data-subtask-condition-input]");
@@ -3099,6 +3115,7 @@ function renderSettings(){
     const name = escapeHtml(t.name || "(unnamed task)");
     const condition = escapeHtml(t.condition || "As required");
     const freq = t.interval ? `${t.interval} hrs` : "Set frequency";
+    const baselineVal = baselineInputValue(t);
     const children = childrenByParent.get(String(t.id)) || [];
     const emptySubMsg = searchActive
       ? "No sub-tasks match your search."
@@ -3128,7 +3145,7 @@ function renderSettings(){
               <option value="asreq" ${type==="asreq"?"selected":""}>As required</option>
             </select></label>
             ${type === "interval" ? `<label>Frequency (hrs)<input type=\"number\" min=\"1\" step=\"1\" data-k=\"interval\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${t.interval!=null?t.interval:""}\" placeholder=\"Hours between service\"></label>` : `<label>Condition / trigger<input data-k=\"condition\" data-id=\"${t.id}\" data-list=\"asreq\" value=\"${escapeHtml(t.condition||"")}\" placeholder=\"When to perform\"></label>`}
-            ${type === "interval" ? `<label>Last serviced at (machine hrs)<input type=\"number\" min=\"0\" step=\"0.01\" data-k=\"anchorTotal\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${t.anchorTotal!=null?t.anchorTotal:""}\" placeholder=\"optional\"></label>` : ""}
+            ${type === "interval" ? `<label>Hours since last service<input type=\"number\" min=\"0\" step=\"0.01\" data-k=\"sinceBase\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${baselineVal!==""?baselineVal:""}\" placeholder=\"optional\"></label>` : ""}
             <label>Manual link<input type="url" data-k="manualLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.manualLink||"")}" placeholder="https://..."></label>
             <label>Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
             <label>Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
@@ -3284,7 +3301,7 @@ function renderSettings(){
               <option value="asreq">As required</option>
             </select></label>
             <label data-form-frequency>Frequency (hrs)<input type="number" min="1" step="1" name="taskInterval" placeholder="e.g. 40"></label>
-            <label data-form-last>Last serviced at (machine hrs)<input type="number" min="0" step="0.01" name="taskLastServiced" placeholder="optional"></label>
+            <label data-form-last>Hours since last service<input type="number" min="0" step="0.01" name="taskLastServiced" placeholder="optional"></label>
             <label data-form-condition hidden>Condition / trigger<input name="taskCondition" placeholder="e.g. When clogged"></label>
             <label>Manual link<input type="url" name="taskManual" placeholder="https://..."></label>
             <label>Store link<input type="url" name="taskStore" placeholder="https://..."></label>
@@ -3525,26 +3542,11 @@ function renderSettings(){
 
     if (mode === "interval"){
       const intervalVal = data.get("taskInterval");
-      const lastVal = data.get("taskLastServiced");
       const interval = intervalVal === null || intervalVal === "" ? 8 : Number(intervalVal);
       const task = Object.assign(base, { mode:"interval", interval: isFinite(interval) && interval>0 ? interval : 8, sinceBase:0, anchorTotal:null });
       const curHours = getCurrentMachineHours();
-      let lastReading = null;
-      if (lastVal !== null && lastVal !== ""){
-        const v = Number(lastVal);
-        if (Number.isFinite(v) && v >= 0){
-          lastReading = v;
-        }
-      }
-      if (lastReading != null){
-        task.anchorTotal = lastReading;
-        if (curHours != null && Number.isFinite(curHours)){
-          task.sinceBase = Math.max(0, curHours - lastReading);
-        }
-      }else if (curHours != null && Number.isFinite(curHours)){
-        task.anchorTotal = curHours;
-        task.sinceBase = 0;
-      }
+      const baselineHours = parseBaselineHours(data.get("taskLastServiced"));
+      applyIntervalBaseline(task, { baselineHours, currentHours: curHours });
       window.tasksInterval.unshift(task);
     }else{
       const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
@@ -3636,22 +3638,23 @@ function renderSettings(){
       if (chip) chip.textContent = meta.task.interval ? `${meta.task.interval} hrs` : "Set frequency";
       updateDueChip(holder, meta.task);
     }else if (key === "anchorTotal"){
-      if (value == null){ meta.task.anchorTotal = null; meta.task.sinceBase = null; }
-      else { meta.task.anchorTotal = Number(value); meta.task.sinceBase = 0; }
-      updateDueChip(holder, meta.task);
-    }else if (key === "sinceBase"){
       if (value == null){
+        meta.task.anchorTotal = null;
         meta.task.sinceBase = null;
       }else{
         const base = Math.max(0, Number(value));
         meta.task.sinceBase = base;
-        const curHours = getCurrentMachineHours();
-        if (curHours != null){
-          const anchorCandidate = curHours - base;
-          if (Number.isFinite(anchorCandidate) && anchorCandidate >= 0){
-            meta.task.anchorTotal = anchorCandidate;
-          }
-        }
+        applyIntervalBaseline(meta.task, { baselineHours: base });
+      }
+      updateDueChip(holder, meta.task);
+    }else if (key === "sinceBase"){
+      if (value == null){
+        meta.task.sinceBase = null;
+        meta.task.anchorTotal = null;
+      }else{
+        const base = Math.max(0, Number(value));
+        meta.task.sinceBase = base;
+        applyIntervalBaseline(meta.task, { baselineHours: base });
       }
       updateDueChip(holder, meta.task);
     }else if (key === "price"){
@@ -3680,8 +3683,9 @@ function renderSettings(){
         meta.task.mode = "interval";
         meta.task.interval = meta.task.interval && meta.task.interval>0 ? Number(meta.task.interval) : 8;
         const baseSince = Number(meta.task.sinceBase);
-        meta.task.sinceBase = Number.isFinite(baseSince) && baseSince >= 0 ? baseSince : 0;
-        meta.task.anchorTotal = meta.task.anchorTotal ?? null;
+        const baselineHours = Number.isFinite(baseSince) && baseSince >= 0 ? baseSince : 0;
+        meta.task.sinceBase = baselineHours;
+        applyIntervalBaseline(meta.task, { baselineHours });
         delete meta.task.condition;
         window.tasksInterval.unshift(meta.task);
       }else{
