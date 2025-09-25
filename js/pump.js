@@ -553,6 +553,55 @@ function pumpBuildRpmTicks(minValue, maxValue){
   return ticks;
 }
 
+function pumpSummarizeEntries(entries){
+  if (!Array.isArray(entries) || !entries.length) return null;
+  let minEntry = null;
+  let maxEntry = null;
+  let total = 0;
+  let count = 0;
+  entries.forEach(entry => {
+    if (!entry) return;
+    const rpm = Number(entry.rpm);
+    if (!Number.isFinite(rpm)) return;
+    if (!minEntry || rpm < minEntry.rpm){
+      minEntry = { dateISO: entry.dateISO, rpm };
+    }
+    if (!maxEntry || rpm > maxEntry.rpm){
+      maxEntry = { dateISO: entry.dateISO, rpm };
+    }
+    total += rpm;
+    count++;
+  });
+  if (!count) return null;
+  const avgRpm = total / count;
+  return { minEntry, maxEntry, avgRpm, count };
+}
+
+function pumpFormatShortDate(dateISO){
+  if (!dateISO) return "";
+  const parsed = new Date(`${dateISO}T00:00:00`);
+  if (!parsed || !isFinite(parsed.getTime())) return String(dateISO);
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
+}
+
+function pumpRoundedRectPath(ctx, x, y, width, height, radius){
+  const r = Math.max(0, Math.min(radius, Math.min(width, height) / 2));
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
 function viewPumpLogWidget(){
   const latest = pumpLatest();
   const pct    = latest ? pumpPercentChange(latest.rpm) : null;
@@ -930,12 +979,42 @@ function drawPumpChart(canvas, rangeValue){
   const yTicks = pumpBuildRpmTicks(yMin, yMax);
   const ticks = pumpBuildTimeTicks(range, xMin, xMax);
   const hasSubLabel = ticks.some(t => t.subLabel);
+  const summary = pumpSummarizeEntries(data);
+  const formatRpm = (value)=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return String(value ?? "—");
+    return num.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  };
+  const clamp = (value, min, max)=> Math.min(max, Math.max(min, value));
   const headerLatestY = Math.max(scaled(24), 30);
   const headerLineGap = Math.max(scaled(14), 18);
   const contextLabelY = headerLatestY + headerLineGap;
   const contextDetailGap = Math.max(scaled(14), 16);
   const entriesLabelY = contextLabelY + contextDetailGap;
-  const topBlockPadding = Math.max(scaled(30), 36);
+  const statsLines = [];
+  const sameExtremeEntry = summary && summary.minEntry && summary.maxEntry
+    ? (summary.minEntry.dateISO === summary.maxEntry.dateISO && summary.minEntry.rpm === summary.maxEntry.rpm)
+    : false;
+  if (summary){
+    if (sameExtremeEntry && summary.maxEntry){
+      statsLines.push(`High / Low: ${formatRpm(summary.maxEntry.rpm)} RPM on ${pumpFormatShortDate(summary.maxEntry.dateISO)}`);
+    }else{
+      if (summary.maxEntry){
+        statsLines.push(`High: ${formatRpm(summary.maxEntry.rpm)} RPM on ${pumpFormatShortDate(summary.maxEntry.dateISO)}`);
+      }
+      if (summary.minEntry){
+        statsLines.push(`Low: ${formatRpm(summary.minEntry.rpm)} RPM on ${pumpFormatShortDate(summary.minEntry.dateISO)}`);
+      }
+    }
+    if (Number.isFinite(summary.avgRpm)){
+      const avgLabel = Math.round(summary.avgRpm).toLocaleString(undefined, { maximumFractionDigits: 0 });
+      statsLines.push(`Average: ${avgLabel} RPM across ${summary.count} log${summary.count === 1 ? "" : "s"}`);
+    }
+  }
+  const statsLineGap = Math.max(scaled(12), 14);
+  const statsFirstY = statsLines.length ? entriesLabelY + statsLineGap : entriesLabelY;
+  const statsBottomY = statsLines.length ? statsFirstY + (statsLines.length - 1) * statsLineGap : entriesLabelY;
+  const topBlockBottom = Math.max(entriesLabelY, statsBottomY);
   let maxYTickWidth = 0;
   if (yTicks.length){
     const prevFont = ctx.font;
@@ -947,7 +1026,7 @@ function drawPumpChart(canvas, rangeValue){
     ctx.font = prevFont;
   }
   const margin = {
-    top: Math.max(entriesLabelY + topBlockPadding, Math.max(76, scaled(50))),
+    top: Math.max(topBlockBottom + Math.max(scaled(24), 28), Math.max(76, scaled(50))),
     right: Math.max(18, scaled(7)),
     bottom: Math.max(hasSubLabel ? 72 : 52, scaled(hasSubLabel ? 26 : 22)),
     left: Math.max(Math.max(52, scaled(18)), maxYTickWidth > 0 ? maxYTickWidth + scaled(18) : 0)
@@ -1035,6 +1114,7 @@ function drawPumpChart(canvas, rangeValue){
   ctx.strokeStyle = "#0a63c2";
   ctx.lineWidth = Math.max(1, scaled(1.1));
   const hitTargets = [];
+  const pointCoords = [];
   const indexByDate = new Map();
   dataAll.forEach((entry, idx)=>{ indexByDate.set(entry.dateISO, idx); });
   const hoverRadius = Math.max(pointRadius * 2.8, scaled(18));
@@ -1047,15 +1127,12 @@ function drawPumpChart(canvas, rangeValue){
     ctx.arc(x, y, pointRadius, 0, Math.PI*2);
     ctx.fill();
     ctx.stroke();
+    pointCoords.push({ entry, x, y });
 
     const idxAll = indexByDate.get(entry.dateISO);
     const prevEntry = (idxAll != null && idxAll > 0) ? dataAll[idxAll - 1] : null;
     const pct = pumpPercentChange(entry.rpm);
-    const tooltipDate = d.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric"
-    });
+    const tooltipDate = pumpFormatShortDate(entry.dateISO);
     const formattedRPM = Number.isFinite(entry.rpm)
       ? Number(entry.rpm).toLocaleString(undefined, { maximumFractionDigits: 0 })
       : String(entry.rpm ?? "");
@@ -1073,6 +1150,18 @@ function drawPumpChart(canvas, rangeValue){
         : `${delta > 0 ? "+" : ""}${Math.round(delta).toLocaleString()} RPM vs prior log`;
       detailParts.push(deltaLabel);
     }
+    if (summary){
+      const rpmValue = Number(entry.rpm);
+      const matchesMax = summary.maxEntry && entry.dateISO === summary.maxEntry.dateISO && Number.isFinite(rpmValue) && rpmValue === summary.maxEntry.rpm;
+      const matchesMin = summary.minEntry && entry.dateISO === summary.minEntry.dateISO && Number.isFinite(rpmValue) && rpmValue === summary.minEntry.rpm;
+      if (matchesMax && matchesMin){
+        detailParts.push("Highest and lowest RPM in view.");
+      }else if (matchesMax){
+        detailParts.push("Highest RPM in view.");
+      }else if (matchesMin){
+        detailParts.push("Lowest RPM in view.");
+      }
+    }
     detailParts.push(`Range window: Last ${rangeLabel}`);
     const rect = {
       x: x - (hoverRadius / 2),
@@ -1088,6 +1177,88 @@ function drawPumpChart(canvas, rangeValue){
       detailLines: detailParts
     });
   });
+
+  if (summary && pointCoords.length){
+    const calloutTargets = [];
+    if (summary.maxEntry){
+      calloutTargets.push({
+        dateISO: summary.maxEntry.dateISO,
+        rpm: summary.maxEntry.rpm,
+        label: sameExtremeEntry ? "High / Low" : "High",
+        color: "#d73354"
+      });
+    }
+    if (summary.minEntry && !sameExtremeEntry){
+      calloutTargets.push({
+        dateISO: summary.minEntry.dateISO,
+        rpm: summary.minEntry.rpm,
+        label: "Low",
+        color: "#1f7a4d"
+      });
+    }
+    if (calloutTargets.length){
+      const minCalloutX = margin.left + scaled(4);
+      const maxCalloutX = cssWidth - margin.right - scaled(4);
+      const minCalloutY = margin.top + scaled(4);
+      const maxCalloutY = axisY - scaled(6);
+      ctx.save();
+      const prevBaseline = ctx.textBaseline;
+      const prevAlign = ctx.textAlign;
+      ctx.textBaseline = "top";
+      ctx.textAlign = "left";
+      ctx.font = fontPx(10.5);
+      const calloutLineHeight = Math.max(scaled(13), 15);
+      const calloutPadX = Math.max(scaled(8), 10);
+      const calloutPadY = Math.max(scaled(6), 8);
+      const pointerGap = Math.max(scaled(10), 14);
+      const borderRadius = Math.max(scaled(6), 8);
+      calloutTargets.forEach(target => {
+        const point = pointCoords.find(p => p.entry.dateISO === target.dateISO);
+        if (!point) return;
+        const lines = [
+          `${target.label}: ${formatRpm(target.rpm)} RPM`,
+          pumpFormatShortDate(target.dateISO)
+        ];
+        const widths = lines.map(line => ctx.measureText(line).width);
+        const bubbleWidth = Math.max(...widths) + calloutPadX * 2;
+        const bubbleHeight = lines.length * calloutLineHeight + calloutPadY * 2;
+        if (!(bubbleWidth > 0 && bubbleHeight > 0)) return;
+        const anchorX = point.x;
+        const anchorY = point.y;
+        let labelX = anchorX + pointerGap;
+        if (anchorX > (margin.left + innerW / 2)){
+          labelX = anchorX - pointerGap - bubbleWidth;
+        }
+        const maxX = maxCalloutX - bubbleWidth;
+        labelX = clamp(labelX, minCalloutX, Math.max(minCalloutX, maxX));
+        let labelY = anchorY - (bubbleHeight / 2);
+        const maxY = maxCalloutY - bubbleHeight;
+        labelY = clamp(labelY, minCalloutY, Math.max(minCalloutY, maxY));
+        const pointerTargetX = clamp(anchorX, labelX, labelX + bubbleWidth);
+        const pointerTargetY = clamp(anchorY, labelY, labelY + bubbleHeight);
+        ctx.strokeStyle = target.color;
+        ctx.lineWidth = Math.max(1, scaled(0.8));
+        ctx.beginPath();
+        ctx.moveTo(anchorX, anchorY);
+        ctx.lineTo(pointerTargetX, pointerTargetY);
+        ctx.stroke();
+        ctx.beginPath();
+        pumpRoundedRectPath(ctx, labelX, labelY, bubbleWidth, bubbleHeight, borderRadius);
+        ctx.fillStyle = "rgba(15, 23, 42, 0.86)";
+        ctx.fill();
+        ctx.strokeStyle = target.color;
+        ctx.stroke();
+        ctx.fillStyle = "#f3f6ff";
+        lines.forEach((line, idx) => {
+          const textY = labelY + calloutPadY + idx * calloutLineHeight;
+          ctx.fillText(line, labelX + calloutPadX, textY);
+        });
+      });
+      ctx.textBaseline = prevBaseline;
+      ctx.textAlign = prevAlign;
+      ctx.restore();
+    }
+  }
 
   if (yTicks.length){
     ctx.save();
@@ -1216,6 +1387,13 @@ function drawPumpChart(canvas, rangeValue){
     ? `${data.length} log${data.length === 1 ? "" : "s"} plotted`
     : "Latest log shown (no entries in selected window)";
   ctx.fillText(entriesMessage, axisX0, entriesLabelY);
+  if (statsLines.length){
+    ctx.fillStyle = "#4b5b7a";
+    statsLines.forEach((line, idx) => {
+      const y = statsFirstY + idx * statsLineGap;
+      ctx.fillText(line, axisX0, y);
+    });
+  }
   if (!usingFiltered){
     ctx.fillStyle = "#b04545";
     ctx.font = fontPx(10.8);
@@ -1228,7 +1406,8 @@ function drawPumpChart(canvas, rangeValue){
   canvas.__pumpChartTooltipMeta = {
     rangeLabel,
     usingFiltered,
-    baselineRPM
+    baselineRPM,
+    summary
   };
   const wrap = canvas.closest?.(".pump-chart-wrap") || null;
   const tooltip = wrap ? wrap.querySelector(".pump-chart-tooltip") : null;
