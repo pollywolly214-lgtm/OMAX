@@ -17,12 +17,21 @@ function liveSince(task){
 }
 
 function nextDue(task){
-  const since = liveSince(task);
-  if (since == null) return null;
-  const remain = Math.max(0, task.interval - since);
-  const days = remain <= 0 ? 0 : Math.ceil(remain / DAILY_HOURS);
+  if (!task || task.interval == null) return null;
+  const sinceRaw = liveSince(task);
+  if (sinceRaw == null) return null;
+  const since = Math.max(0, Number(sinceRaw) || 0);
+  const interval = Number(task.interval);
+  if (!Number.isFinite(interval) || interval <= 0) return null;
+  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+    ? Number(DAILY_HOURS)
+    : 8;
+  const remain = Math.max(0, interval - since);
+  const days = remain <= 0 ? 0 : Math.ceil(remain / hoursPerDay);
   const due = new Date(); due.setHours(0,0,0,0); due.setDate(due.getDate() + days);
-  const lastServicedAt = (RENDER_TOTAL != null && since != null) ? Math.max(0, RENDER_TOTAL - since) : null;
+  const lastServicedAt = (typeof RENDER_TOTAL === "number" && Number.isFinite(RENDER_TOTAL))
+    ? Math.max(0, Number(RENDER_TOTAL) - since)
+    : null;
   return { since, remain, days, due, lastServicedAt };
 }
 

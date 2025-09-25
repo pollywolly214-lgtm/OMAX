@@ -4,6 +4,19 @@ const pendingNewJobFiles = window.pendingNewJobFiles;
 if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
 const orderPartialSelection = window.orderPartialSelection;
 
+function getCurrentMachineHours(){
+  if (typeof RENDER_TOTAL === "number" && Number.isFinite(RENDER_TOTAL)){
+    return Number(RENDER_TOTAL);
+  }
+  if (typeof currentTotal === "function"){
+    const val = currentTotal();
+    if (val != null && Number.isFinite(Number(val))){
+      return Number(val);
+    }
+  }
+  return null;
+}
+
 function editingCompletedJobsSet(){
   if (typeof getEditingCompletedJobsSet === "function"){
     return getEditingCompletedJobsSet();
@@ -1968,9 +1981,22 @@ function renderDashboard(){
       if (!isFinite(interval) || interval <= 0) interval = 8;
       const task = Object.assign({}, base, { mode:"interval", interval, sinceBase:0, anchorTotal:null });
       const lastVal = taskLastInput?.value;
+      let baseline = null;
       if (lastVal !== undefined && lastVal !== ""){
         const v = Number(lastVal);
-        if (isFinite(v)){ task.anchorTotal = v; task.sinceBase = 0; }
+        if (Number.isFinite(v) && v >= 0){
+          baseline = v;
+        }
+      }
+      if (baseline != null){
+        task.sinceBase = baseline;
+        const curHours = getCurrentMachineHours();
+        if (curHours != null){
+          const anchorCandidate = curHours - baseline;
+          if (Number.isFinite(anchorCandidate) && anchorCandidate >= 0){
+            task.anchorTotal = anchorCandidate;
+          }
+        }
       }
       tasksInterval.unshift(task);
     }else{
@@ -2006,9 +2032,22 @@ function renderDashboard(){
         const subTask = Object.assign({}, subBase, { mode:"interval", interval: subInterval, sinceBase:0, anchorTotal:null });
         const lastField = row.querySelector("[data-subtask-last]");
         const lastVal = lastField?.value;
-        if (lastVal){
+        let baseline = null;
+        if (lastVal !== undefined && lastVal !== ""){
           const v = Number(lastVal);
-          if (isFinite(v)){ subTask.anchorTotal = v; subTask.sinceBase = 0; }
+          if (Number.isFinite(v) && v >= 0){
+            baseline = v;
+          }
+        }
+        if (baseline != null){
+          subTask.sinceBase = baseline;
+          const curHours = getCurrentMachineHours();
+          if (curHours != null){
+            const anchorCandidate = curHours - baseline;
+            if (Number.isFinite(anchorCandidate) && anchorCandidate >= 0){
+              subTask.anchorTotal = anchorCandidate;
+            }
+          }
         }
         tasksInterval.unshift(subTask);
       }else{
@@ -3489,7 +3528,23 @@ function renderSettings(){
       const lastVal = data.get("taskLastServiced");
       const interval = intervalVal === null || intervalVal === "" ? 8 : Number(intervalVal);
       const task = Object.assign(base, { mode:"interval", interval: isFinite(interval) && interval>0 ? interval : 8, sinceBase:0, anchorTotal:null });
-      if (lastVal !== null && lastVal !== ""){ const v = Number(lastVal); if (isFinite(v)){ task.anchorTotal = v; task.sinceBase = 0; } }
+      let baseline = null;
+      if (lastVal !== null && lastVal !== ""){
+        const v = Number(lastVal);
+        if (Number.isFinite(v) && v >= 0){
+          baseline = v;
+        }
+      }
+      if (baseline != null){
+        task.sinceBase = baseline;
+        const curHours = getCurrentMachineHours();
+        if (curHours != null){
+          const anchorCandidate = curHours - baseline;
+          if (Number.isFinite(anchorCandidate) && anchorCandidate >= 0){
+            task.anchorTotal = anchorCandidate;
+          }
+        }
+      }
       window.tasksInterval.unshift(task);
     }else{
       const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
@@ -3571,7 +3626,7 @@ function renderSettings(){
     const key = target.getAttribute("data-k");
     if (!key || key === "mode") return;
     let value = target.value;
-    if (key === "price" || key === "interval" || key === "anchorTotal"){
+    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase"){
       value = value === "" ? null : Number(value);
       if (value !== null && !isFinite(value)) return;
     }
@@ -3583,6 +3638,21 @@ function renderSettings(){
     }else if (key === "anchorTotal"){
       if (value == null){ meta.task.anchorTotal = null; meta.task.sinceBase = null; }
       else { meta.task.anchorTotal = Number(value); meta.task.sinceBase = 0; }
+      updateDueChip(holder, meta.task);
+    }else if (key === "sinceBase"){
+      if (value == null){
+        meta.task.sinceBase = null;
+      }else{
+        const base = Math.max(0, Number(value));
+        meta.task.sinceBase = base;
+        const curHours = getCurrentMachineHours();
+        if (curHours != null){
+          const anchorCandidate = curHours - base;
+          if (Number.isFinite(anchorCandidate) && anchorCandidate >= 0){
+            meta.task.anchorTotal = anchorCandidate;
+          }
+        }
+      }
       updateDueChip(holder, meta.task);
     }else if (key === "price"){
       meta.task.price = value == null ? null : Number(value);
