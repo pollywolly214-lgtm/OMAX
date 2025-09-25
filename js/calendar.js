@@ -387,7 +387,7 @@ function renderCalendar(){
       addBtn.setAttribute("aria-label", `Add item on ${date.toDateString()}`);
       addBtn.addEventListener("click", (ev)=>{
         ev.stopPropagation();
-        triggerDashboardAddPicker({ dateISO: key, step: "task" });
+        triggerDashboardAddPicker({ dateISO: key });
       });
       addBtn.addEventListener("focus", ()=> addBtn.classList.add("is-visible"));
       addBtn.addEventListener("blur", ()=> addBtn.classList.remove("is-visible"));
