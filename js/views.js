@@ -1095,9 +1095,8 @@ function viewJobs(){
       ? ` (${delta > 0 ? "+" : "−"}${Math.abs(delta).toFixed(1)} hr)`
       : "";
     const noteDisplay = job?.notes
-      ? esc(String(job.notes)).replace(/
-/g, "<br>")
-      : "<span class="muted">—</span>";
+      ? esc(String(job.notes)).replace(/\n/g, "<br>")
+      : "<span class=\"muted\">—</span>";
     const materialLine = job?.material ? `<div class="small muted">${esc(job.material)}</div>` : "";
 
     if (!editingHistory){
