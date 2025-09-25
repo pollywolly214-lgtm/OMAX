@@ -4079,6 +4079,8 @@ function renderCosts(){
     if (tooltipEl){
       tooltipEl.hidden = true;
       delete tooltipEl.dataset.visible;
+      delete tooltipEl.dataset.placement;
+      tooltipEl.style.visibility = "";
       tooltipEl.textContent = "";
     }
     if (canvas){
@@ -4091,19 +4093,65 @@ function renderCosts(){
     if (!tip || !canvas) return;
     const label = `${target.datasetLabel} ${target.valueLabel}`;
     tip.innerHTML = `<strong>${escapeTooltip(label)}</strong><span>${escapeTooltip(target.detail)}</span>`;
+    tip.hidden = false;
+    tip.dataset.visible = "";
+    tip.dataset.placement = "";
+    tip.style.visibility = "hidden";
+    tip.style.left = "0px";
+    tip.style.top = "0px";
+
     const cssScaleX = scaleX > 0 ? 1 / scaleX : 1;
     const cssScaleY = scaleY > 0 ? 1 / scaleY : 1;
     const centerX = target.rect.x + (target.rect.width / 2);
-    const anchorY = target.rect.y;
     const canvasWidth = canvas.clientWidth || canvas.width;
     const canvasHeight = canvas.clientHeight || canvas.height;
-    const maxX = Math.max(16, canvasWidth - 16);
-    const maxY = Math.max(16, canvasHeight - 16);
-    const posX = Math.min(maxX, Math.max(16, centerX * cssScaleX));
-    const posY = Math.min(maxY, Math.max(16, anchorY * cssScaleY));
-    tip.style.left = `${posX}px`;
-    tip.style.top = `${posY}px`;
-    tip.hidden = false;
+    const margin = 16;
+
+    const tipBox = tip.getBoundingClientRect();
+    const tipWidth = tipBox.width || tip.offsetWidth || 0;
+    const tipHeight = tipBox.height || tip.offsetHeight || 0;
+
+    const halfWidth = tipWidth / 2;
+    const minAnchorX = margin + halfWidth;
+    const maxAnchorX = canvasWidth - margin - halfWidth;
+    const anchorXCss = maxAnchorX < minAnchorX
+      ? canvasWidth / 2
+      : Math.min(maxAnchorX, Math.max(minAnchorX, centerX * cssScaleX));
+
+    const targetTop = target.rect.y;
+    const targetBottom = target.rect.y + target.rect.height;
+    let anchorY = targetTop;
+    let placement = "above";
+
+    const topIfAbove = (targetTop * cssScaleY) - (tipHeight * 1.1);
+    if (topIfAbove < margin){
+      placement = "below";
+      anchorY = targetBottom;
+    }
+
+    let anchorYCss = anchorY * cssScaleY;
+    if (placement === "above"){
+      const minAnchorY = margin + (tipHeight * 1.1);
+      const maxAnchorY = canvasHeight - margin + (tipHeight * 0.1);
+      if (maxAnchorY < minAnchorY){
+        anchorYCss = (minAnchorY + maxAnchorY) / 2;
+      }else{
+        anchorYCss = Math.min(maxAnchorY, Math.max(minAnchorY, anchorYCss));
+      }
+    }else{
+      const minAnchorY = margin - (tipHeight * 0.1);
+      const maxAnchorY = canvasHeight - margin - (tipHeight * 1.1);
+      if (maxAnchorY < minAnchorY){
+        anchorYCss = (minAnchorY + maxAnchorY) / 2;
+      }else{
+        anchorYCss = Math.min(maxAnchorY, Math.max(minAnchorY, anchorYCss));
+      }
+    }
+
+    tip.dataset.placement = placement;
+    tip.style.left = `${anchorXCss}px`;
+    tip.style.top = `${anchorYCss}px`;
+    tip.style.visibility = "";
     tip.dataset.visible = "true";
     canvas.style.cursor = "pointer";
   };
