@@ -247,6 +247,22 @@ function syncDashboardLayoutEntries(state){
   Object.keys(layout).forEach(id => { if (!seen.has(id)) delete layout[id]; });
 }
 
+function dispatchLayoutWindowResize(area, id, win, box){
+  if (!id || !win || !box) return;
+  const detail = {
+    area,
+    id,
+    width: Number(box.width) || 0,
+    height: Number(box.height) || 0,
+    element: win
+  };
+  try {
+    window.dispatchEvent(new CustomEvent("layoutWindowResized", { detail }));
+  } catch (err){
+    console.warn("Unable to dispatch layoutWindowResized", err);
+  }
+}
+
 function setDashboardWindowStyle(win, box){
   if (!win || !box) return;
   win.style.left = `${box.x}px`;
@@ -445,6 +461,7 @@ function startDashboardWindowResize(state, win, direction, event){
     box.height = Math.round(nextHeight);
     setDashboardWindowStyle(win, box);
     updateDashboardRootSize(state);
+    dispatchLayoutWindowResize("dashboard", id, win, box);
   };
   const stop = ()=>{
     window.removeEventListener("pointermove", resize);
@@ -452,6 +469,7 @@ function startDashboardWindowResize(state, win, direction, event){
     window.removeEventListener("pointercancel", stop);
     win.releasePointerCapture?.(pointerId);
     persistDashboardLayout(state);
+    dispatchLayoutWindowResize("dashboard", id, win, box);
   };
   window.addEventListener("pointermove", resize);
   window.addEventListener("pointerup", stop);
@@ -977,6 +995,7 @@ function startCostWindowResize(state, win, direction, event){
     setCostWindowStyle(win, box);
     updateCostRootSize(state);
     scheduleCostLayoutRefresh(state);
+    dispatchLayoutWindowResize("cost", id, win, box);
   };
   const stop = ()=>{
     window.removeEventListener("pointermove", resize);
@@ -984,6 +1003,7 @@ function startCostWindowResize(state, win, direction, event){
     window.removeEventListener("pointercancel", stop);
     win.releasePointerCapture?.(pointerId);
     persistCostLayout(state);
+    dispatchLayoutWindowResize("cost", id, win, box);
   };
   window.addEventListener("pointermove", resize);
   window.addEventListener("pointerup", stop);

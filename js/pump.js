@@ -3,7 +3,7 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
-const PUMP_BASE_FONT_SCALE = 1.62;
+const PUMP_BASE_FONT_SCALE = 1.72;
 const pumpViewportState = { bound:false, lastResponsiveScale:1 };
 let pumpLayoutObserver = null;
 let pumpObservedWrap = null;
@@ -16,6 +16,8 @@ const pumpChartLayout = {
 };
 let pumpOverlayNode = null;
 let pumpOverlayEscapeHandler = null;
+let pumpLayoutResizeListener = null;
+let pumpLayoutResizeRaf = null;
 
 function pumpGetViewportScale(){
   if (window.visualViewport && typeof window.visualViewport.scale === "number"){
@@ -71,6 +73,37 @@ function ensurePumpViewportWatcher(){
     window.visualViewport.addEventListener("resize", handle, { passive: true });
   }
   window.addEventListener("resize", handle);
+}
+
+function pumpScheduleLayoutSync(){
+  if (pumpLayoutResizeRaf != null){
+    return;
+  }
+  pumpLayoutResizeRaf = requestAnimationFrame(()=>{
+    pumpLayoutResizeRaf = null;
+    const canvas = document.getElementById("pumpChart");
+    if (!canvas) return;
+    const dims = pumpResizeCanvas(canvas);
+    if (window.pumpChartExpanded){
+      const card = canvas.closest(".pump-chart-card");
+      pumpApplyExpandedCardSizing(card, dims);
+    }
+    drawPumpChart(canvas, window.pumpChartRange);
+  });
+}
+
+function ensurePumpLayoutResizeListener(){
+  if (pumpLayoutResizeListener || typeof window === "undefined") return;
+  pumpLayoutResizeListener = (event)=>{
+    const detail = event?.detail;
+    if (!detail) return;
+    const area = detail.area ? String(detail.area) : "";
+    if (area && area !== "dashboard") return;
+    const id = String(detail.id || "");
+    if (id !== "pumpChart") return;
+    pumpScheduleLayoutSync();
+  };
+  window.addEventListener("layoutWindowResized", pumpLayoutResizeListener);
 }
 
 function pumpUpdateBaseChartSize(width, height){
@@ -555,6 +588,7 @@ function renderPumpWidget(){
   });
   const card = chartHost?.querySelector(".pump-chart-card");
   ensurePumpViewportWatcher();
+  ensurePumpLayoutResizeListener();
   const rangeSelect = document.getElementById("pumpRange");
   if (rangeSelect){
     if (rangeSelect.value !== window.pumpChartRange) rangeSelect.value = window.pumpChartRange;
