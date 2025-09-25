@@ -1336,7 +1336,7 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgba(17, 24, 39, 0.45);
+  background: rgba(17, 24, 39, 0.25);
   z-index: 1000;
 }
 
@@ -1634,7 +1634,6 @@ tr.row-editing {
   align-items: flex-end;
   padding: 24px;
   background: rgba(17, 24, 39, 0.25);
-  backdrop-filter: blur(2px);
   transition: opacity 0.25s ease;
 }
 
