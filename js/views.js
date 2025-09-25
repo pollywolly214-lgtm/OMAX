@@ -11,14 +11,6 @@ function viewDashboard(){
   <div class="container">
     <div class="dashboard-toolbar">
       <span class="dashboard-edit-hint" id="dashboardEditHint" hidden>Drag windows to rearrange and resize. Calendar stays fixed.</span>
-      <div class="dashboard-settings" id="dashboardSettings">
-        <button type="button" class="dashboard-settings-btn" id="dashboardSettingsToggle" aria-haspopup="true" aria-expanded="false" aria-controls="dashboardSettingsMenu" aria-label="Dashboard settings" title="Dashboard settings">
-          <span aria-hidden="true">⚙</span>
-        </button>
-        <div class="dashboard-settings-menu" id="dashboardSettingsMenu" role="menu" hidden>
-          <button type="button" class="dashboard-settings-item" id="dashboardEditToggle" role="menuitemcheckbox" aria-checked="false" data-settings-focus>Edit layout</button>
-        </div>
-      </div>
     </div>
 
     <div class="dashboard-layout" id="dashboardLayout">
@@ -808,15 +800,6 @@ function viewCosts(model){
   <div class="container cost-container">
     <div class="dashboard-toolbar">
       <span class="dashboard-edit-hint" id="costEditHint" hidden>Drag windows to rearrange and resize the cost overview.</span>
-      <div class="dashboard-settings" id="costSettings">
-        <button type="button" class="dashboard-settings-btn" id="costSettingsToggle" aria-haspopup="true" aria-expanded="false" aria-controls="costSettingsMenu" aria-label="Cost settings" title="Cost settings">
-          <span aria-hidden="true">⚙</span>
-        </button>
-        <div class="dashboard-settings-menu" id="costSettingsMenu" role="menu" hidden>
-          <button type="button" class="dashboard-settings-item" id="costTrainerLaunch" role="menuitem" data-settings-focus>Launch guided tour</button>
-          <button type="button" class="dashboard-settings-item" id="costEditToggle" role="menuitemcheckbox" aria-checked="false">Edit layout</button>
-        </div>
-      </div>
     </div>
 
     <div class="cost-info-trigger">
