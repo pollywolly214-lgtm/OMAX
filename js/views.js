@@ -757,7 +757,7 @@ function ensureTaskCategories(){
         const rootId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
         const moved = {
           id: live.ref.id, name: live.ref.name, interval: val,
-          sinceBase: null, anchorTotal: null,
+          sinceBase: 0, anchorTotal: null,
           manualLink: live.ref.manualLink||"", storeLink: live.ref.storeLink||"",
           pn: live.ref.pn||"", price: live.ref.price!=null?live.ref.price:null,
           parentTask: null, cat: rootId, order:(++window._maintOrderCounter)

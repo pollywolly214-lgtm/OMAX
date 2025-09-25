@@ -1966,7 +1966,7 @@ function renderDashboard(){
     if (mode === "interval"){
       let interval = Number(taskIntervalInput?.value);
       if (!isFinite(interval) || interval <= 0) interval = 8;
-      const task = Object.assign({}, base, { mode:"interval", interval, sinceBase:null, anchorTotal:null });
+      const task = Object.assign({}, base, { mode:"interval", interval, sinceBase:0, anchorTotal:null });
       const lastVal = taskLastInput?.value;
       if (lastVal !== undefined && lastVal !== ""){
         const v = Number(lastVal);
@@ -2003,7 +2003,7 @@ function renderDashboard(){
         if (!isFinite(subInterval) || subInterval <= 0){
           subInterval = isFinite(parentInterval) && parentInterval > 0 ? parentInterval : 8;
         }
-        const subTask = Object.assign({}, subBase, { mode:"interval", interval: subInterval, sinceBase:null, anchorTotal:null });
+        const subTask = Object.assign({}, subBase, { mode:"interval", interval: subInterval, sinceBase:0, anchorTotal:null });
         const lastField = row.querySelector("[data-subtask-last]");
         const lastVal = lastField?.value;
         if (lastVal){
@@ -3488,7 +3488,7 @@ function renderSettings(){
       const intervalVal = data.get("taskInterval");
       const lastVal = data.get("taskLastServiced");
       const interval = intervalVal === null || intervalVal === "" ? 8 : Number(intervalVal);
-      const task = Object.assign(base, { mode:"interval", interval: isFinite(interval) && interval>0 ? interval : 8, sinceBase:null, anchorTotal:null });
+      const task = Object.assign(base, { mode:"interval", interval: isFinite(interval) && interval>0 ? interval : 8, sinceBase:0, anchorTotal:null });
       if (lastVal !== null && lastVal !== ""){ const v = Number(lastVal); if (isFinite(v)){ task.anchorTotal = v; task.sinceBase = 0; } }
       window.tasksInterval.unshift(task);
     }else{
@@ -3609,7 +3609,8 @@ function renderSettings(){
       if (nextMode === "interval"){
         meta.task.mode = "interval";
         meta.task.interval = meta.task.interval && meta.task.interval>0 ? Number(meta.task.interval) : 8;
-        meta.task.sinceBase = meta.task.sinceBase ?? null;
+        const baseSince = Number(meta.task.sinceBase);
+        meta.task.sinceBase = Number.isFinite(baseSince) && baseSince >= 0 ? baseSince : 0;
         meta.task.anchorTotal = meta.task.anchorTotal ?? null;
         delete meta.task.condition;
         window.tasksInterval.unshift(meta.task);
