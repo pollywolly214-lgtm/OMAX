@@ -255,7 +255,21 @@
       endTour();
       return;
     }
-    if (state.primerOpenedByTrainer && step.id !== "primer"){
+    if (step.id === "primer"){
+      if (typeof openCostInfoPanel === "function"){
+        let opened = false;
+        try {
+          opened = !!openCostInfoPanel({ reason: "trainer" });
+        } catch (_){ /* ignore */ }
+        if (!opened){
+          const panel = document.getElementById("costInfoPanel");
+          opened = !!(panel && !panel.hasAttribute("hidden") && panel.classList.contains("is-visible"));
+        }
+        state.primerOpenedByTrainer = opened;
+      } else {
+        state.primerOpenedByTrainer = false;
+      }
+    } else if (state.primerOpenedByTrainer){
       const panel = document.getElementById("costInfoPanel");
       let closedByCall = false;
       if (typeof closeCostInfoPanel === "function"){
