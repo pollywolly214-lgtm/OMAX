@@ -384,6 +384,11 @@ function setSettingsFolders(raw){
   return normalized;
 }
 
+function cloneFolders(list){
+  if (!Array.isArray(list)) return [];
+  return list.map(folder => ({ ...folder }));
+}
+
 function snapshotSettingsFolders(){
   const source = Array.isArray(window.settingsFolders) && window.settingsFolders.length
     ? window.settingsFolders
@@ -391,7 +396,7 @@ function snapshotSettingsFolders(){
   const normalized = normalizeSettingsFolders(source);
   window.settingsFolders = normalized;
   window.folders = window.settingsFolders;
-  return normalized.map(folder => ({ ...folder }));
+  return cloneFolders(normalized);
 }
 
 window.defaultAsReqTasks = defaultAsReqTasks;
@@ -399,6 +404,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
 /* ==================== Cloud load / save ===================== */
 function snapshotState(){
   const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
+  const foldersSnapshot = snapshotSettingsFolders();
   return {
     schema: window.APP_SCHEMA || APP_SCHEMA,
     totalHistory,
@@ -411,7 +417,8 @@ function snapshotState(){
     orderRequestTab,
     garnetCleanings,
     pumpEff: safePumpEff,
-    settingsFolders: snapshotSettingsFolders()
+    settingsFolders: foldersSnapshot,
+    folders: cloneFolders(window.settingsFolders)
   };
 }
 
@@ -660,6 +667,7 @@ async function loadFromCloud(){
           ? window.pumpEff
           : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
         const seededFolders = normalizeSettingsFolders(data.settingsFolders || data.folders);
+        const seededFoldersPayload = cloneFolders(seededFolders);
         const seeded = {
           schema:APP_SCHEMA,
           totalHistory: Array.isArray(data.totalHistory) ? data.totalHistory : [],
@@ -671,7 +679,8 @@ async function loadFromCloud(){
           garnetCleanings: Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [],
           orderRequests: Array.isArray(data.orderRequests) ? normalizeOrderRequests(data.orderRequests) : [createOrderRequest()],
           orderRequestTab: typeof data.orderRequestTab === "string" ? data.orderRequestTab : "active",
-          settingsFolders: seededFolders,
+          settingsFolders: seededFoldersPayload,
+          folders: cloneFolders(seededFoldersPayload),
           pumpEff: pe
         };
         adoptState(seeded);
@@ -685,6 +694,7 @@ async function loadFromCloud(){
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+      const defaultFolders = defaultSettingsFolders();
       const seeded = {
         schema: APP_SCHEMA,
         totalHistory: [],
@@ -696,7 +706,8 @@ async function loadFromCloud(){
         orderRequests: [createOrderRequest()],
         orderRequestTab: "active",
         pumpEff: pe,
-        settingsFolders: defaultSettingsFolders(),
+        settingsFolders: defaultFolders,
+        folders: cloneFolders(defaultFolders),
         garnetCleanings: []
       };
       adoptState(seeded);
@@ -708,7 +719,8 @@ async function loadFromCloud(){
     const pe = (typeof window.pumpEff === "object" && window.pumpEff)
       ? window.pumpEff
       : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, settingsFolders: defaultSettingsFolders(), garnetCleanings: [] });
+    const fallbackFolders = defaultSettingsFolders();
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [] });
     resetHistoryToCurrent();
   }
 }
