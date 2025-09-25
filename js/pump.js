@@ -3,174 +3,15 @@ window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, ent
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
-const PUMP_BASE_FONT_SCALE = 2.0;
-const PUMP_FONT_WIDTH_BASE = 520;
-const pumpViewportState = { bound:false, lastResponsiveScale:1, baseScale:null, baseScaleChanged:false };
+const PUMP_BASE_FONT_SCALE = 3.4;
+const pumpViewportState = { bound:false, lastResponsiveScale:1 };
+const pumpChartLayout = {
+  baseWidth: 640,
+  baseHeight: 360,
+  aspect: 360 / 640
+};
+let pumpOverlayNode = null;
 let pumpOverlayEscapeHandler = null;
-
-const PUMP_EXPANDED_SCALE = 1.45;
-const PUMP_EXPANDED_MIN_WIDTH = 360;
-const PUMP_EXPANDED_MIN_HEIGHT = 360;
-
-function pumpExtractCardMetrics(card){
-  if (!card) return null;
-  const metrics = { width:null, height:null, innerWidth:null, innerHeight:null, nonCanvasHeight:null, aspect:null };
-  try {
-    const cardRect = card.getBoundingClientRect();
-    if (cardRect && isFinite(cardRect.width) && cardRect.width > 0) metrics.width = cardRect.width;
-    if (cardRect && isFinite(cardRect.height) && cardRect.height > 0) metrics.height = cardRect.height;
-  } catch (err){ /* ignore */ }
-  if ((!isFinite(metrics.width) || metrics.width <= 0) && typeof getDashboardLayoutState === "function"){
-    try {
-      const layoutState = getDashboardLayoutState();
-      const box = layoutState?.layoutById?.pumpChart;
-      if (box){
-        const w = Number(box.width);
-        const h = Number(box.height);
-        if (isFinite(w) && w > 0) metrics.width = w;
-        if (isFinite(h) && h > 0) metrics.height = h;
-      }
-    } catch (err){ /* ignore */ }
-  }
-  if (!isFinite(metrics.width) || metrics.width <= 0 || !isFinite(metrics.height) || metrics.height <= 0){
-    const win = card.closest('[data-dashboard-window="pumpChart"]') || document.querySelector('[data-dashboard-window="pumpChart"]');
-    if (win){
-      try {
-        const winRect = win.getBoundingClientRect();
-        if (winRect && (!isFinite(metrics.width) || metrics.width <= 0) && isFinite(winRect.width) && winRect.width > 0){
-          metrics.width = winRect.width;
-        }
-        if (winRect && (!isFinite(metrics.height) || metrics.height <= 0) && isFinite(winRect.height) && winRect.height > 0){
-          metrics.height = winRect.height;
-        }
-      } catch (err){ /* ignore */ }
-    }
-  }
-  if (!isFinite(metrics.width) || metrics.width <= 0) metrics.width = 720;
-  if (!isFinite(metrics.height) || metrics.height <= 0) metrics.height = 520;
-  const wrap = card.querySelector('.pump-chart-wrap');
-  let wrapRect = null;
-  try {
-    wrapRect = wrap?.getBoundingClientRect() || null;
-  } catch (err){ wrapRect = null; }
-  if (wrapRect && isFinite(wrapRect.width) && wrapRect.width > 0) metrics.innerWidth = wrapRect.width;
-  if (wrapRect && isFinite(wrapRect.height) && wrapRect.height > 0) metrics.innerHeight = wrapRect.height;
-  let nonCanvas = 0;
-  try {
-    const cardRect = card.getBoundingClientRect();
-    if (cardRect && wrapRect){
-      nonCanvas = Math.max(0, (wrapRect.top - cardRect.top) + (cardRect.bottom - wrapRect.bottom));
-    }else{
-      const headerRect = card.querySelector('.pump-chart-header')?.getBoundingClientRect();
-      const legendRect = card.querySelector('.pump-legend')?.getBoundingClientRect();
-      nonCanvas = (headerRect?.height || 0) + (legendRect?.height || 0) + 96;
-    }
-  } catch (err){
-    nonCanvas = 180;
-  }
-  metrics.nonCanvasHeight = Math.max(140, nonCanvas || 0);
-  if (!isFinite(metrics.innerWidth) || metrics.innerWidth <= 0){
-    metrics.innerWidth = Math.max(320, metrics.width - 72);
-  }
-  if (!isFinite(metrics.innerHeight) || metrics.innerHeight <= 0){
-    metrics.innerHeight = Math.max(240, metrics.height - metrics.nonCanvasHeight);
-  }
-  const rawAspect = metrics.innerHeight / Math.max(metrics.innerWidth, 1);
-  metrics.aspect = Math.max(0.45, Math.min(1.4, rawAspect || 0.75));
-  return metrics;
-}
-
-function pumpComputeExpandedCardSize(metrics){
-  if (!metrics) return null;
-  const scale = PUMP_EXPANDED_SCALE;
-  let width = Math.max(metrics.width, metrics.width * scale);
-  let height = Math.max(metrics.height, metrics.height * scale);
-  width = Math.max(PUMP_EXPANDED_MIN_WIDTH, width);
-  height = Math.max(PUMP_EXPANDED_MIN_HEIGHT, height);
-  const viewportW = window.innerWidth || document.documentElement?.clientWidth || width;
-  const viewportH = window.innerHeight || document.documentElement?.clientHeight || height;
-  const horizontalAllowance = 80;
-  const verticalAllowance = 120;
-  const maxWidth = Math.max(PUMP_EXPANDED_MIN_WIDTH, viewportW - horizontalAllowance);
-  const maxHeight = Math.max(PUMP_EXPANDED_MIN_HEIGHT, viewportH - verticalAllowance);
-  const widthRatio = width > 0 ? maxWidth / width : 1;
-  const heightRatio = height > 0 ? maxHeight / height : 1;
-  const clampRatio = Math.min(1, widthRatio, heightRatio);
-  if (clampRatio < 1){
-    width *= clampRatio;
-    height *= clampRatio;
-  }
-  return {
-    width: Math.round(width),
-    height: Math.round(height),
-    aspect: metrics.aspect
-  };
-}
-
-function pumpResetViewportBaseline(){
-  pumpViewportState.baseScale = null;
-  pumpViewportState.baseScaleChanged = true;
-  pumpViewportState.lastResponsiveScale = 1;
-}
-
-function pumpRemoveOverlayEscapeHandler(){
-  if (pumpOverlayEscapeHandler){
-    document.removeEventListener("keydown", pumpOverlayEscapeHandler);
-    pumpOverlayEscapeHandler = null;
-  }
-}
-
-function pumpCloseExpandedChart(){
-  if (!window.pumpChartExpanded) return;
-  window.pumpChartExpanded = false;
-  pumpResetViewportBaseline();
-  pumpRemoveOverlayEscapeHandler();
-  renderPumpWidget();
-}
-
-function pumpAttachOverlayEscapeHandler(){
-  pumpRemoveOverlayEscapeHandler();
-  pumpOverlayEscapeHandler = (event)=>{
-    if (event.key === "Escape" || event.key === "Esc"){
-      event.preventDefault();
-      pumpCloseExpandedChart();
-    }
-  };
-  document.addEventListener("keydown", pumpOverlayEscapeHandler);
-}
-
-function pumpMountExpandedCard(card, expandedDims){
-  card.classList.add("pump-chart-card-expanded");
-  card.setAttribute("role", "dialog");
-  card.setAttribute("aria-modal", "true");
-  card.setAttribute("tabindex", "-1");
-  if (expandedDims){
-    const { width, height } = expandedDims;
-    if (isFinite(width) && width > 0){
-      card.style.width = `${width}px`;
-      card.style.maxWidth = `${width}px`;
-    }
-    if (isFinite(height) && height > 0){
-      card.style.height = `${height}px`;
-      card.style.maxHeight = `${height}px`;
-    }
-  }
-  const overlay = document.createElement("div");
-  overlay.className = "pump-chart-overlay";
-  overlay.setAttribute("data-pump-overlay-card", "true");
-
-  const backdrop = document.createElement("button");
-  backdrop.type = "button";
-  backdrop.className = "pump-chart-backdrop";
-  backdrop.setAttribute("aria-label", "Close expanded pump chart");
-  backdrop.addEventListener("click", pumpCloseExpandedChart);
-
-  overlay.appendChild(backdrop);
-  overlay.appendChild(card);
-  document.body.appendChild(overlay);
-  pumpAttachOverlayEscapeHandler();
-  requestAnimationFrame(()=>{ card.focus(); });
-}
 
 function pumpGetViewportScale(){
   if (window.visualViewport && typeof window.visualViewport.scale === "number"){
@@ -185,58 +26,34 @@ function pumpGetViewportScale(){
 
 function pumpGetResponsiveZoomFactor(){
   const raw = pumpGetViewportScale();
-  if (!isFinite(raw) || raw <= 0){
-    pumpViewportState.baseScaleChanged = false;
-    return 1;
-  }
-  const previousBase = pumpViewportState.baseScale;
-  if (!isFinite(pumpViewportState.baseScale) || pumpViewportState.baseScale == null || pumpViewportState.baseScale <= 0){
-    pumpViewportState.baseScale = raw;
-  }
-  const baseline = pumpViewportState.baseScale || 1;
-  const ratio = raw / baseline;
-  if (!isFinite(ratio) || ratio <= 0){
-    pumpViewportState.baseScaleChanged = pumpViewportState.baseScale !== previousBase;
-    return 1;
-  }
-  if (ratio < 0.6 || ratio > 1.6){
-    pumpViewportState.baseScale = raw;
-    pumpViewportState.baseScaleChanged = pumpViewportState.baseScale !== previousBase;
-    return 1;
-  }
-  pumpViewportState.baseScaleChanged = pumpViewportState.baseScale !== previousBase;
-  return Math.max(0.5, Math.min(2.5, ratio));
+  if (!isFinite(raw) || raw <= 0) return 1;
+  if (raw < 1) return Math.max(0.5, raw);
+  return 1;
 }
 
-function pumpComputeFontScale(canvas){
+function pumpComputeFontScale(canvasWidth){
   const factor = pumpGetResponsiveZoomFactor();
   pumpViewportState.lastResponsiveScale = factor;
   let widthFactor = 1;
-  if (canvas){
-    const canvasWidth = Math.max(canvas.width || 0, canvas.offsetWidth || 0);
-    if (canvasWidth > 0){
-      const normalized = Math.max(0.5, canvasWidth / PUMP_FONT_WIDTH_BASE);
-      const eased = Math.pow(normalized, 0.45);
-      widthFactor = Math.max(0.9, Math.min(1.2, eased));
-    }
+  if (isFinite(canvasWidth) && canvasWidth > 0){
+    const normalized = Math.max(0.7, Math.min(canvasWidth / 520, 1.65));
+    widthFactor = Math.pow(normalized, 0.45);
   }
-  return PUMP_BASE_FONT_SCALE * factor * widthFactor;
+  return PUMP_BASE_FONT_SCALE * widthFactor * factor;
 }
 
 function ensurePumpViewportWatcher(){
   if (pumpViewportState.bound) return;
   pumpViewportState.bound = true;
   pumpViewportState.lastResponsiveScale = pumpGetResponsiveZoomFactor();
-  pumpViewportState.baseScaleChanged = false;
   const handle = ()=>{
     const next = pumpGetResponsiveZoomFactor();
     if (!isFinite(next)) return;
-    const scaleChanged = pumpViewportState.baseScaleChanged;
-    if (!scaleChanged && Math.abs(next - pumpViewportState.lastResponsiveScale) < 0.01) return;
+    if (Math.abs(next - pumpViewportState.lastResponsiveScale) < 0.01) return;
     pumpViewportState.lastResponsiveScale = next;
-    pumpViewportState.baseScaleChanged = false;
     const canvas = document.getElementById("pumpChart");
     if (canvas){
+      pumpResizeCanvas(canvas);
       drawPumpChart(canvas, window.pumpChartRange);
     }
   };
@@ -244,6 +61,123 @@ function ensurePumpViewportWatcher(){
     window.visualViewport.addEventListener("resize", handle, { passive: true });
   }
   window.addEventListener("resize", handle);
+}
+
+function pumpUpdateBaseChartSize(width, height){
+  if (isFinite(width) && width > 0) pumpChartLayout.baseWidth = width;
+  if (isFinite(height) && height > 0) pumpChartLayout.baseHeight = height;
+  if (isFinite(width) && width > 0 && isFinite(height) && height > 0){
+    const ratio = height / width;
+    pumpChartLayout.aspect = Math.max(0.45, Math.min(ratio, 1.25));
+  }
+}
+
+function pumpComputeCanvasSize(canvas){
+  const expanded = window.pumpChartExpanded === true;
+  const aspect = pumpChartLayout.aspect || (pumpChartLayout.baseHeight / Math.max(pumpChartLayout.baseWidth, 1)) || 0.65;
+  let width;
+  let height;
+  if (expanded){
+    const viewportW = window.innerWidth || document.documentElement?.clientWidth || (pumpChartLayout.baseWidth * 1.35);
+    const viewportH = window.innerHeight || document.documentElement?.clientHeight || (pumpChartLayout.baseHeight * 1.35);
+    const maxWidth = Math.max(520, viewportW - 160);
+    const minWidth = Math.max(520, pumpChartLayout.baseWidth * 1.25, pumpChartLayout.baseWidth + 140);
+    width = Math.min(maxWidth, Math.max(minWidth, pumpChartLayout.baseWidth * 1.1));
+    height = Math.round(width * aspect);
+    const maxHeight = Math.max(360, viewportH - 240);
+    if (height > maxHeight){
+      height = maxHeight;
+      width = Math.round(height / aspect);
+    }
+  }else{
+    const wrap = canvas ? canvas.closest(".pump-chart-wrap") : null;
+    const rect = wrap ? wrap.getBoundingClientRect() : null;
+    width = rect && rect.width ? rect.width : pumpChartLayout.baseWidth;
+    width = Math.max(320, Math.round(width));
+    height = Math.round(width * aspect);
+    height = Math.max(240, height);
+  }
+  return { width, height };
+}
+
+function pumpResizeCanvas(canvas){
+  if (!canvas) return null;
+  const dims = pumpComputeCanvasSize(canvas);
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = Math.round(dims.width);
+  const cssHeight = Math.round(dims.height);
+  if (canvas.style.width !== `${cssWidth}px`) canvas.style.width = `${cssWidth}px`;
+  if (canvas.style.height !== `${cssHeight}px`) canvas.style.height = `${cssHeight}px`;
+  const pixelWidth = Math.max(1, Math.round(cssWidth * dpr));
+  const pixelHeight = Math.max(1, Math.round(cssHeight * dpr));
+  if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+  if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+  if (!window.pumpChartExpanded){
+    pumpUpdateBaseChartSize(cssWidth, cssHeight);
+  }
+  return { width: cssWidth, height: cssHeight };
+}
+
+function pumpDestroyOverlay(){
+  if (pumpOverlayNode){
+    pumpOverlayNode.remove();
+    pumpOverlayNode = null;
+  }
+  if (pumpOverlayEscapeHandler){
+    document.removeEventListener("keydown", pumpOverlayEscapeHandler);
+    pumpOverlayEscapeHandler = null;
+  }
+  document.querySelectorAll('[data-pump-placeholder]').forEach(el => el.remove());
+  document.body.classList.remove("pump-chart-expanded");
+}
+
+function pumpMountOverlay(card){
+  if (!card) return;
+  const parent = card.parentElement;
+  if (parent){
+    const placeholder = document.createElement("div");
+    placeholder.setAttribute("data-pump-placeholder", "true");
+    const phHeight = card.getBoundingClientRect?.().height || card.offsetHeight || 0;
+    if (phHeight > 0) placeholder.style.height = `${Math.round(phHeight)}px`;
+    parent.insertBefore(placeholder, card.nextSibling);
+  }
+  pumpOverlayNode = document.createElement("div");
+  pumpOverlayNode.className = "pump-chart-overlay";
+  pumpOverlayNode.setAttribute("data-pump-overlay", "true");
+  const backdrop = document.createElement("button");
+  backdrop.type = "button";
+  backdrop.className = "pump-chart-backdrop";
+  backdrop.setAttribute("aria-label", "Close expanded pump chart");
+  pumpOverlayNode.appendChild(backdrop);
+  card.classList.add("pump-chart-card-expanded");
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-modal", "true");
+  card.setAttribute("tabindex", "-1");
+  pumpOverlayNode.appendChild(card);
+  document.body.appendChild(pumpOverlayNode);
+  document.body.classList.add("pump-chart-expanded");
+  const canvas = card.querySelector("#pumpChart");
+  const dims = pumpResizeCanvas(canvas);
+  if (dims){
+    const viewportW = window.innerWidth || document.documentElement?.clientWidth || dims.width;
+    const viewportH = window.innerHeight || document.documentElement?.clientHeight || dims.height;
+    const maxWidth = Math.max(560, viewportW - 80);
+    const modalWidth = Math.min(maxWidth, Math.max(dims.width + 96, pumpChartLayout.baseWidth + 160));
+    card.style.width = `${Math.round(modalWidth)}px`;
+    card.style.maxWidth = `${Math.round(maxWidth)}px`;
+    const modalMaxHeight = Math.max(360, viewportH - 80);
+    card.style.maxHeight = `${Math.round(modalMaxHeight)}px`;
+  }
+  const close = ()=>{ window.pumpChartExpanded = false; renderPumpWidget(); };
+  backdrop.addEventListener("click", close);
+  pumpOverlayEscapeHandler = (event)=>{
+    if (event.key === "Escape" || event.key === "Esc"){
+      event.preventDefault();
+      close();
+    }
+  };
+  document.addEventListener("keydown", pumpOverlayEscapeHandler);
+  requestAnimationFrame(()=>{ card.focus(); });
 }
 
 const DAY_MS = 24*60*60*1000;
@@ -482,14 +416,12 @@ function viewPumpChartWidget(){
   `;
 }
 function renderPumpWidget(){
+  pumpDestroyOverlay();
   const logHost = document.getElementById("pump-log-widget");
   if (logHost) logHost.innerHTML = viewPumpLogWidget();
   const chartHost = document.getElementById("pump-chart-widget");
-  document.querySelectorAll("[data-pump-overlay-card]").forEach(el => el.remove());
-  pumpRemoveOverlayEscapeHandler();
   if (chartHost) chartHost.innerHTML = viewPumpChartWidget();
   if (!logHost && !chartHost) return;
-  document.body.classList.toggle("pump-chart-expanded", !!window.pumpChartExpanded);
   document.getElementById("pumpBaselineForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const rpm = Number(document.getElementById("pumpBaselineRPM").value);
@@ -506,89 +438,55 @@ function renderPumpWidget(){
     upsertPumpEntry(d, rpm); saveCloudDebounced(); toast("Log saved"); renderPumpWidget();
   });
   const card = chartHost?.querySelector(".pump-chart-card");
-  const cardMetrics = card ? pumpExtractCardMetrics(card) : null;
-  const expandedDimensions = (window.pumpChartExpanded && card) ? pumpComputeExpandedCardSize(cardMetrics) : null;
-  if (window.pumpChartExpanded && card){
-    pumpMountExpandedCard(card, expandedDimensions);
-  }else if (card){
-    card.style.width = "";
-    card.style.maxWidth = "";
-    card.style.height = "";
-    card.style.maxHeight = "";
-  }
-  const rangeSelect = card?.querySelector("#pumpRange");
-  const expandBtn = card?.querySelector(".pump-expand-btn");
   const canvas = document.getElementById("pumpChart");
-  const wrap   = canvas?.closest(".pump-chart-wrap");
-  if (canvas && wrap){
-    const rect = wrap.getBoundingClientRect();
-    const metrics = cardMetrics;
-    const expanded = !!window.pumpChartExpanded;
-    const innerWidthFallback = metrics ? metrics.innerWidth : null;
-    const innerHeightFallback = metrics ? metrics.innerHeight : null;
-    const nonCanvasHeight = metrics ? metrics.nonCanvasHeight : 160;
-    let availableWidth = rect.width || wrap.clientWidth || canvas.width || 320;
-    if (expanded && expandedDimensions){
-      const horizontalDiff = Math.max(0, (metrics?.width || 0) - (metrics?.innerWidth || 0));
-      const estimatedInnerWidth = Math.max(320, expandedDimensions.width - Math.max(48, horizontalDiff));
-      if (estimatedInnerWidth > availableWidth) availableWidth = estimatedInnerWidth;
-    }
-    if (!expanded && innerWidthFallback && innerWidthFallback > availableWidth){
-      availableWidth = innerWidthFallback;
-    }
-    let targetWidth = Math.max(320, Math.floor(availableWidth));
-    let chartAspect = metrics?.aspect;
-    if (!isFinite(chartAspect) || chartAspect <= 0){
-      chartAspect = 0.75;
-    }
-    chartAspect = Math.max(0.45, Math.min(1.4, chartAspect));
-    let targetHeight = Math.round(targetWidth * chartAspect);
-    const minHeight = expanded ? Math.max(320, Math.round(innerHeightFallback || 0)) : Math.max(240, Math.round(innerHeightFallback || 0));
-    if (isFinite(minHeight) && minHeight > 0 && targetHeight < minHeight){
-      targetHeight = minHeight;
-    }
-    if (expanded && expandedDimensions){
-      const maxHeight = Math.max(320, Math.round(expandedDimensions.height - (nonCanvasHeight || 0)));
-      if (isFinite(maxHeight) && maxHeight > 0 && targetHeight > maxHeight){
-        targetHeight = maxHeight;
-        const widthFromHeight = Math.round(targetHeight / chartAspect);
-        if (widthFromHeight > 0 && widthFromHeight < targetWidth){
-          targetWidth = widthFromHeight;
-        }
-      }
-    }
-    if (canvas.width !== targetWidth) canvas.width = targetWidth;
-    if (canvas.height !== targetHeight) canvas.height = targetHeight;
+  if (canvas && !window.pumpChartExpanded){
+    pumpResizeCanvas(canvas);
   }
   ensurePumpViewportWatcher();
+  const rangeSelect = document.getElementById("pumpRange");
   if (rangeSelect){
     if (rangeSelect.value !== window.pumpChartRange) rangeSelect.value = window.pumpChartRange;
     rangeSelect.addEventListener("change", (e)=>{
       window.pumpChartRange = e.target.value;
-      drawPumpChart(canvas, window.pumpChartRange);
+      if (canvas){
+        pumpResizeCanvas(canvas);
+        drawPumpChart(canvas, window.pumpChartRange);
+      }
     });
   }
+  const expandBtn = chartHost?.querySelector(".pump-expand-btn");
   if (expandBtn){
     expandBtn.setAttribute("data-expanded", window.pumpChartExpanded ? "true" : "false");
     expandBtn.addEventListener("click", ()=>{
-      const isExpanded = expandBtn.getAttribute("data-expanded") === "true";
-      window.pumpChartExpanded = !isExpanded;
-      pumpResetViewportBaseline();
+      window.pumpChartExpanded = !window.pumpChartExpanded;
       renderPumpWidget();
     });
   }
-  drawPumpChart(canvas, window.pumpChartRange);
+  if (window.pumpChartExpanded && card){
+    pumpMountOverlay(card);
+  }
+  if (canvas){
+    if (window.pumpChartExpanded){
+      pumpResizeCanvas(canvas);
+    }
+    drawPumpChart(canvas, window.pumpChartRange);
+  }
   if (typeof notifyDashboardLayoutContentChanged === "function"){
     notifyDashboardLayoutContentChanged();
   }
 }
 function drawPumpChart(canvas, rangeValue){
   if (!canvas) return;
-  const ctx = canvas.getContext("2d"), W = canvas.width, H = canvas.height;
-  ctx.clearRect(0,0,W,H);
+  const ctx = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.width / dpr;
+  const cssHeight = canvas.height / dpr;
+  ctx.save();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
   ctx.fillStyle = "#fff";
-  ctx.fillRect(0,0,W,H);
-  const fontScale = pumpComputeFontScale(canvas);
+  ctx.fillRect(0, 0, cssWidth, cssHeight);
+  const fontScale = pumpComputeFontScale(cssWidth);
   const scaled = (value)=> Math.max(1, Math.round(value * fontScale));
   const fontPx = (size)=> `${Math.max(1, Math.round(size * fontScale))}px sans-serif`;
   ctx.font = fontPx(12);
@@ -596,7 +494,8 @@ function drawPumpChart(canvas, rangeValue){
   ctx.textBaseline = "alphabetic";
   if (!pumpEff.entries.length){
     ctx.fillStyle = "#888";
-    ctx.fillText("No pump logs yet.", 14, H/2);
+    ctx.fillText("No pump logs yet.", 14, cssHeight / 2);
+    ctx.restore();
     return;
   }
   const range = rangeValue || window.pumpChartRange || "3m";
@@ -648,119 +547,166 @@ function drawPumpChart(canvas, rangeValue){
     bottom: Math.max(hasSubLabel ? 66 : 48, scaled(hasSubLabel ? 22 : 18)),
     left: Math.max(48, scaled(16))
   };
-  const innerW = Math.max(10, W - margin.left - margin.right);
-  const innerH = Math.max(10, H - margin.top - margin.bottom);
+  const innerW = Math.max(10, cssWidth - margin.left - margin.right);
+  const innerH = Math.max(10, cssHeight - margin.top - margin.bottom);
   const axisY = margin.top + innerH;
   const axisX0 = margin.left;
-  const axisX1 = W - margin.right;
+  const axisX1 = cssWidth - margin.right;
   const span = xMax - xMin;
   const singlePoint = span < 1000;
   const X = t => singlePoint ? (axisX0 + axisX1) / 2 : axisX0 + ((t - xMin) / span) * innerW;
   const ySpan = Math.max(1e-6, (yMax - yMin));
   const Y = v => axisY - ((v - yMin) / ySpan) * innerH;
 
-  ctx.strokeStyle = "#d8deeb";
-  ctx.lineWidth = 1;
+  ctx.save();
+  ctx.fillStyle = "#f9fbff";
+  ctx.fillRect(margin.left - scaled(12), margin.top - scaled(8), innerW + scaled(24), innerH + scaled(16));
+  ctx.strokeStyle = "#e3e8f3";
+  ctx.lineWidth = Math.max(1, scaled(0.6));
   ctx.beginPath();
-  ctx.moveTo(axisX0, margin.top - 4);
+  ctx.moveTo(axisX0, margin.top);
   ctx.lineTo(axisX0, axisY);
   ctx.lineTo(axisX1, axisY);
   ctx.stroke();
+  ctx.strokeStyle = "rgba(98, 125, 179, 0.35)";
+  ctx.lineWidth = Math.max(1, scaled(0.8));
+  ctx.setLineDash([scaled(3), scaled(5)]);
+  ctx.beginPath();
+  ctx.moveTo(axisX0, axisY);
+  ctx.lineTo(axisX1, axisY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#1f3a60";
+  ctx.fillRect(axisX0, axisY, innerW, scaled(1.4));
+  ctx.beginPath();
+  ctx.moveTo(axisX0, axisY);
+  ctx.lineTo(axisX0, Y(yMax));
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(axisX1, axisY);
+  ctx.lineTo(axisX1, Y(yMax));
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.lineWidth = Math.max(1.5, scaled(1.4));
+  ctx.strokeStyle = "#0a63c2";
+  ctx.fillStyle = "rgba(10,99,194,0.15)";
+  ctx.beginPath();
+  if (singlePoint){
+    ctx.arc(X(xMin), Y(rpms[rpms.length-1]), Math.max(4, scaled(3)), 0, Math.PI * 2);
+  }else{
+    data.forEach((entry, idx)=>{
+      const x = X(new Date(entry.dateISO+"T00:00:00").getTime());
+      const y = Y(entry.rpm);
+      if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+  }
+  ctx.stroke();
+  ctx.lineTo(X(xMax), axisY);
+  ctx.lineTo(X(xMin), axisY);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "#0a63c2";
+  ctx.strokeStyle = "#0a63c2";
+  ctx.lineWidth = Math.max(1, scaled(1.1));
+  data.forEach(entry => {
+    const d = new Date(entry.dateISO+"T00:00:00");
+    const x = X(d.getTime());
+    const y = Y(entry.rpm);
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(3, scaled(2.2)), 0, Math.PI*2);
+    ctx.fill();
+    ctx.stroke();
+  });
+
+  ctx.strokeStyle = "rgba(12, 56, 112, 0.35)";
+  ctx.lineWidth = Math.max(1, scaled(0.8));
+  ctx.setLineDash([scaled(2), scaled(4)]);
+  ctx.beginPath();
+  ctx.moveTo(axisX0, Y(yMax));
+  ctx.lineTo(axisX1, Y(yMax));
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(axisX0, Y(yMin));
+  ctx.lineTo(axisX1, Y(yMin));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.strokeStyle = "#d73354";
+  ctx.lineWidth = Math.max(1, scaled(1));
+  ctx.beginPath();
+  ctx.moveTo(axisX0, Y(minR));
+  ctx.lineTo(axisX1, Y(minR));
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(axisX0, Y(maxR));
+  ctx.lineTo(axisX1, Y(maxR));
+  ctx.stroke();
 
   if (baselineRPM != null){
-    const baselineRawY = Y(baselineRPM);
-    const baselineY = Math.min(Math.max(baselineRawY, margin.top), axisY);
-    ctx.strokeStyle = "#9aa5b5";
-    ctx.setLineDash([4,4]);
+    const baselineY = Y(baselineRPM);
+    ctx.strokeStyle = "#6d7a99";
+    ctx.lineWidth = Math.max(1, scaled(1));
+    ctx.setLineDash([scaled(6), scaled(6)]);
     ctx.beginPath();
     ctx.moveTo(axisX0, baselineY);
     ctx.lineTo(axisX1, baselineY);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = "#666";
-    ctx.textAlign = "left";
-    ctx.font = fontPx(12);
-    const labelOffset = baselineY <= margin.top + scaled(6) ? scaled(6) : -scaled(4);
-    ctx.textBaseline = labelOffset > 0 ? "top" : "bottom";
+    ctx.fillStyle = "#34415d";
     const arrow = baselineArrow ? ` ${baselineArrow}` : "";
+    ctx.font = fontPx(11);
+    const labelOffset = baselineY <= margin.top + scaled(6) ? scaled(6) : -scaled(4);
     ctx.fillText(`Baseline ${baselineRPM} RPM${arrow}`, axisX0 + scaled(2), baselineY + labelOffset);
   }
 
-  ctx.strokeStyle = "#0a63c2";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  dates.forEach((d,i)=>{
-    const x = X(d.getTime());
-    const y = Y(rpms[i]);
-    if (i === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-  });
-  ctx.stroke();
+  ctx.fillStyle = "#1f3a60";
+  ctx.font = fontPx(12);
+  ctx.fillText(`RPM`, axisX0, margin.top - scaled(8));
+  ctx.font = fontPx(11);
+  ctx.fillText(`${range.toUpperCase()} trend`, axisX1 - scaled(96), margin.top - scaled(8));
 
-  ctx.fillStyle = "#0a63c2";
-  dates.forEach((d,i)=>{
-    const x = X(d.getTime());
-    const y = Y(rpms[i]);
-    ctx.beginPath();
-    ctx.arc(x,y,3,0,Math.PI*2);
-    ctx.fill();
-  });
-
-  ctx.save();
-  ctx.strokeStyle = "#9aa5b5";
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = "#1f3a60";
+  ctx.lineWidth = Math.max(1, scaled(1));
   ctx.beginPath();
   ticks.forEach(t => {
     const x = X(t.time);
     ctx.moveTo(x, axisY);
-    ctx.lineTo(x, axisY + scaled(7));
+    ctx.lineTo(x, axisY + scaled(6));
   });
   ctx.stroke();
-  ctx.restore();
 
-  ctx.save();
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  const primaryFont = fontPx(11);
-  const secondaryFont = fontPx(10);
+  ctx.fillStyle = "#1f3a60";
+  ctx.font = fontPx(10.5);
   const baseY = axisY + scaled(10);
-  ticks.forEach((t,idx) => {
+  ticks.forEach((t, idx) => {
     const x = X(t.time);
-    ctx.font = primaryFont;
-    ctx.fillStyle = "#4a5868";
+    ctx.textAlign = idx === ticks.length - 1 ? "right" : idx === 0 ? "left" : "center";
     ctx.fillText(t.label, x, baseY);
     if (t.subLabel){
-      ctx.font = secondaryFont;
-      ctx.fillStyle = "#6c7a90";
+      ctx.font = fontPx(9.2);
+      ctx.fillStyle = "#4b5b7a";
       ctx.fillText(t.subLabel, x, baseY + scaled(13));
+      ctx.fillStyle = "#1f3a60";
+      ctx.font = fontPx(10.5);
     }
   });
-  ctx.restore();
+  ctx.textAlign = "left";
 
-  const latest = pumpLatest();
-  if (latest){
-    const pct = pumpPercentChange(latest.rpm);
-    const col = pumpColorFor(pct).cls;
-    const map={green:"#2e7d32","green-better":"#2e7d32",yellow:"#c29b00",orange:"#d9822b",red:"#c62828",gray:"#777"};
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = map[col] || "#333";
-    ctx.font = fontPx(12);
-    ctx.fillText(`Latest: ${latest.rpm} RPM (${latest.dateISO})  Δ%=${pct!=null?pct.toFixed(1):"—"}`, axisX0 + scaled(2), margin.top / 2);
-  }
-
-  ctx.fillStyle = "#4a5868";
-  ctx.textAlign = "right";
-  ctx.textBaseline = "middle";
-  ctx.font = fontPx(12);
-  ctx.fillText(`Range: Last ${pumpRangeLabel(range)}`, axisX1, margin.top / 2);
-
+  const latest = data[data.length - 1];
+  const pct = pumpPercentChange(latest?.rpm);
+  ctx.font = fontPx(11.5);
+  ctx.fillText(`Latest: ${latest.rpm} RPM (${latest.dateISO})  Δ%=${pct!=null?pct.toFixed(1):"—"}`, axisX0 + scaled(2), margin.top / 2);
+  ctx.font = fontPx(10.2);
+  ctx.fillStyle = "#4b5b7a";
+  const label = usingFiltered ? pumpRangeLabel(range) : "Showing latest entry";
+  ctx.fillText(label, axisX0, margin.top - scaled(8));
   if (!usingFiltered){
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillStyle = "#777";
-    ctx.font = fontPx(12);
+    ctx.fillStyle = "#b04545";
+    ctx.font = fontPx(10.8);
     const infoY = axisY + scaled(hasSubLabel ? 32 : 20);
     ctx.fillText("No logs in selected range. Showing latest entry.", axisX0 + scaled(2), infoY);
   }
+  ctx.restore();
 }
-
