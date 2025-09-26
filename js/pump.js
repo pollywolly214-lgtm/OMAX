@@ -883,11 +883,25 @@ function pumpWireChartTooltip(card, canvas){
     const targets = getTargets();
     let hovered = null;
     for (const target of targets){
-      if (!target || !target.rect) continue;
-      const { x, y, width, height } = target.rect;
-      if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
-        hovered = target;
-        break;
+      if (!target) continue;
+      const radius = Number.isFinite(target.hitRadius) && target.hitRadius > 0
+        ? target.hitRadius
+        : (target.rect ? Math.max(target.rect.width, target.rect.height) / 2 : 0);
+      const hasCenter = Number.isFinite(target.centerX) && Number.isFinite(target.centerY) && radius > 0;
+      if (hasCenter){
+        const dx = pointerX - target.centerX;
+        const dy = pointerY - target.centerY;
+        if ((dx * dx) + (dy * dy) <= radius * radius){
+          hovered = target;
+          break;
+        }
+      }
+      if (!hovered && target.rect){
+        const { x, y, width, height } = target.rect;
+        if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
+          hovered = target;
+          break;
+        }
       }
     }
     if (hovered){
@@ -900,11 +914,17 @@ function pumpWireChartTooltip(card, canvas){
   const supportsPointerEvents = typeof window !== "undefined" && "PointerEvent" in window;
 
   if (supportsPointerEvents){
-    const handlePointerDown = (event)=>{
+    const pointerState = { touchActive: false };
+
+    const handlePointerMove = (event)=>{
+      const type = String(event.pointerType || "").toLowerCase();
+      if (type === "touch" && !pointerState.touchActive) return;
       performInteraction(event.clientX, event.clientY);
     };
 
-    const handlePointerMove = (event)=>{
+    const handlePointerDown = (event)=>{
+      const type = String(event.pointerType || "").toLowerCase();
+      pointerState.touchActive = type === "touch" || type === "pen";
       performInteraction(event.clientX, event.clientY);
     };
 
@@ -915,6 +935,7 @@ function pumpWireChartTooltip(card, canvas){
     const handlePointerUp = (event)=>{
       const type = String(event.pointerType || "").toLowerCase();
       if (type === "touch" || type === "pen"){
+        pointerState.touchActive = false;
         hide();
       }else{
         performInteraction(event.clientX, event.clientY);
@@ -922,15 +943,17 @@ function pumpWireChartTooltip(card, canvas){
     };
 
     const handlePointerCancel = ()=>{
+      pointerState.touchActive = false;
       hide();
     };
 
     const handlePointerLeave = ()=>{
+      pointerState.touchActive = false;
       hide();
     };
 
-    canvas.addEventListener("pointerdown", handlePointerDown);
     canvas.addEventListener("pointermove", handlePointerMove);
+    canvas.addEventListener("pointerdown", handlePointerDown);
     canvas.addEventListener("pointerenter", handlePointerEnter);
     canvas.addEventListener("pointerup", handlePointerUp);
     canvas.addEventListener("pointercancel", handlePointerCancel);
@@ -938,13 +961,14 @@ function pumpWireChartTooltip(card, canvas){
     canvas.addEventListener("blur", hide);
 
     canvas.__pumpChartTooltipCleanup = ()=>{
-      canvas.removeEventListener("pointerdown", handlePointerDown);
       canvas.removeEventListener("pointermove", handlePointerMove);
+      canvas.removeEventListener("pointerdown", handlePointerDown);
       canvas.removeEventListener("pointerenter", handlePointerEnter);
       canvas.removeEventListener("pointerup", handlePointerUp);
       canvas.removeEventListener("pointercancel", handlePointerCancel);
       canvas.removeEventListener("pointerleave", handlePointerLeave);
       canvas.removeEventListener("blur", hide);
+      pointerState.touchActive = false;
       hide();
     };
   }else{
@@ -1231,7 +1255,7 @@ function drawPumpChart(canvas, rangeValue){
   const pointCoords = [];
   const indexByDate = new Map();
   dataAll.forEach((entry, idx)=>{ indexByDate.set(entry.dateISO, idx); });
-  const hoverRadius = Math.max(pointRadius * 2.8, scaled(18));
+  const hoverRadius = Math.max(pointRadius * 3.4, scaled(24));
 
   data.forEach(entry => {
     const d = new Date(entry.dateISO+"T00:00:00");
@@ -1286,6 +1310,9 @@ function drawPumpChart(canvas, rangeValue){
     hitTargets.push({
       key: entry.dateISO,
       rect,
+      centerX: x,
+      centerY: y,
+      hitRadius: hoverRadius / 2,
       datasetLabel: tooltipDate,
       valueLabel: `${formattedRPM} RPM`,
       detailLines: detailParts
