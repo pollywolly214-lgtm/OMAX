@@ -2332,11 +2332,16 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   width: min(460px, 92vw);
 }
 
+.confirm-modal-card h4 {
+  color: #0b1120;
+  font-weight: 700;
+}
+
 .confirm-modal-copy {
   margin: 0 0 12px;
   font-size: 0.95rem;
   line-height: 1.5;
-  color: #1f2937;
+  color: #111827;
 }
 
 .confirm-modal-list {
