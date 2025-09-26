@@ -123,27 +123,6 @@ body.pump-chart-expanded { overflow:hidden; }
   box-shadow:0 18px 36px rgba(7, 30, 78, 0.28);
   backdrop-filter: blur(6px);
 }
-button.cost-card{
-  width:100%;
-  color:inherit;
-  text-align:left;
-  cursor:pointer;
-  font:inherit;
-}
-.cost-card.cost-card-clickable{
-  transition:transform 0.18s ease, box-shadow 0.18s ease;
-}
-.cost-card.cost-card-clickable:hover{
-  transform:translateY(-2px);
-  box-shadow:0 26px 46px rgba(7, 30, 78, 0.32);
-}
-.cost-card.cost-card-clickable:active{
-  transform:translateY(0);
-}
-button.cost-card:focus-visible{
-  outline:2px solid var(--brand-blue-400, #2563eb);
-  outline-offset:3px;
-}
 .cost-card-icon{ font-size:26px; line-height:1; }
 .cost-card-body{ display:flex; flex-direction:column; gap:4px; }
 .cost-card-title{ font-weight:600; color:#13294a; }
@@ -272,10 +251,41 @@ button.cost-card:focus-visible{
   text-align:left;
   white-space:normal;
 }
+.forecast-table th:nth-child(2),
+.forecast-table td:nth-child(2){
+  text-align:left;
+  white-space:normal;
+}
 .forecast-table tbody tr:nth-child(even){ background:rgba(234, 241, 255, 0.6); }
 .forecast-table tfoot{ background:rgba(13,55,117,0.12); font-weight:600; color:#0a1f3f; }
 .forecast-total-row th,
 .forecast-total-row td{ border-bottom:1px solid rgba(13,55,117,0.18); }
+.forecast-section-row th{
+  background:rgba(16, 61, 130, 0.08);
+  color:#0a1f3f;
+  font-size:13px;
+}
+.forecast-section-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.forecast-section-title{ font-weight:600; }
+.forecast-section-total{
+  font-weight:600;
+  color:#0b1a38;
+  font-variant-numeric:tabular-nums;
+}
+.forecast-empty-row td{
+  text-align:center;
+  font-style:italic;
+  color:#5b6b87;
+}
+.forecast-grand-total-row{
+  font-weight:700;
+  font-size:14px;
+}
 .forecast-table-note{ font-size:12px; color:#1e3352; margin:0; }
 body.forecast-modal-open{ overflow:hidden; }
 

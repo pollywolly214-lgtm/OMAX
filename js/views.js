@@ -828,29 +828,37 @@ function viewCosts(model){
   const orderSummary = data.orderRequestSummary || {};
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
   const breakdown = data.forecastBreakdown || {};
-  const breakdownRows = Array.isArray(breakdown.rows) ? breakdown.rows : [];
-  const breakdownTotals = Array.isArray(breakdown.totals) ? breakdown.totals : [];
+  const breakdownSections = Array.isArray(breakdown.sections) ? breakdown.sections : [];
+  const breakdownTotals = breakdown.totals || {};
+  const hasSections = breakdownSections.length > 0;
+  const hasTotals = Boolean(
+    breakdownTotals && (
+      breakdownTotals.intervalLabel ||
+      breakdownTotals.asReqLabel ||
+      breakdownTotals.combinedLabel
+    )
+  );
   const forecastNote = breakdown.note || "Add pricing to maintenance tasks and approve order requests to enrich the forecast.";
 
   const renderSummaryCard = (card = {})=>{
     const isForecast = card && card.key === "maintenanceForecast";
-    const tag = isForecast ? "button" : "div";
     const classes = ["cost-card"];
-    if (isForecast) classes.push("cost-card-clickable");
-    const classAttr = classes.join(" ");
-    const dataAttr = isForecast && card.key ? ` data-card-key="${esc(card.key)}"` : "";
-    const attr = isForecast
-      ? `type="button" class="${classAttr}"${dataAttr}`
-      : `class="${classAttr}"`;
+    const attrParts = [`class="${classes.join(" ")}"`];
+    if (isForecast && card.key){
+      attrParts.push(`data-card-key="${esc(card.key)}"`);
+      attrParts.push("role=\"button\"");
+      attrParts.push("tabindex=\"0\"");
+    }
+    const attr = attrParts.join(" ");
     return `
-              <${tag} ${attr}>
+              <div ${attr}>
                 <div class="cost-card-icon">${esc(card.icon || "")}</div>
                 <div class="cost-card-body">
                   <div class="cost-card-title">${esc(card.title || "")}</div>
                   <div class="cost-card-value">${esc(card.value || "")}</div>
                   <div class="cost-card-hint">${esc(card.hint || "")}</div>
                 </div>
-              </${tag}>
+              </div>
             `;
   };
 
@@ -858,55 +866,68 @@ function viewCosts(model){
     ? cards.map(renderSummaryCard).join("")
     : `<p class="small muted">No cost metrics yet. Log machine hours and add pricing to interval tasks.</p>`;
 
-  const forecastTableHTML = (breakdownRows.length || breakdownTotals.length)
+  const forecastTableHTML = (hasSections || hasTotals)
     ? `
       <div class="forecast-table-wrap">
         <table class="forecast-table">
           <thead>
             <tr>
-              <th scope="col">Period</th>
-              <th scope="col">Machine hours</th>
-              <th scope="col">Interval actual</th>
-              <th scope="col">As-required actual</th>
-              <th scope="col">Combined actual</th>
-              <th scope="col">Interval projected</th>
-              <th scope="col">As-required projected</th>
-              <th scope="col">Combined projected</th>
+              <th scope="col">Task</th>
+              <th scope="col">Cadence</th>
+              <th scope="col">Unit cost</th>
+              <th scope="col">Annual estimate</th>
             </tr>
           </thead>
           <tbody>
-            ${breakdownRows.map(row => `
+            ${breakdownSections.map(section => {
+              const rows = Array.isArray(section.rows) ? section.rows : [];
+              const headerRow = `
+              <tr class="forecast-section-row">
+                <th scope="rowgroup" colspan="4">
+                  <span class="forecast-section-header">
+                    <span class="forecast-section-title">${esc(section.label || "")}</span>
+                    ${section.totalLabel ? `<span class="forecast-section-total">${esc(section.totalLabel)}</span>` : ""}
+                  </span>
+                </th>
+              </tr>`;
+              const rowsHtml = rows.length
+                ? rows.map(row => `
               <tr>
-                <th scope="row">${esc(row.label || "")}</th>
-                <td>${esc(row.hoursLabel || "—")}</td>
-                <td>${esc(row.intervalActualLabel || "—")}</td>
-                <td>${esc(row.asReqActualLabel || "—")}</td>
-                <td>${esc(row.totalActualLabel || "—")}</td>
-                <td>${esc(row.intervalProjectedLabel || "—")}</td>
-                <td>${esc(row.asReqProjectedLabel || "—")}</td>
-                <td>${esc(row.totalProjectedLabel || "—")}</td>
+                <th scope="row">${esc(row.name || "")}</th>
+                <td>${esc(row.cadenceLabel || "—")}</td>
+                <td>${esc(row.unitCostLabel || "—")}</td>
+                <td>${esc(row.annualTotalLabel || "—")}</td>
               </tr>
-            `).join("")}
+            `).join("")
+                : `
+              <tr class="forecast-empty-row">
+                <td colspan="4">${esc(section.emptyMessage || "No tasks yet.")}</td>
+              </tr>`;
+              return `${headerRow}${rowsHtml}`;
+            }).join("")}
           </tbody>
-          ${breakdownTotals.length ? `
+          ${hasTotals ? `
           <tfoot>
-            ${breakdownTotals.map(total => `
-              <tr class="forecast-total-row">
-                <th scope="row">${esc(total.label || "")}</th>
-                <td>${esc(total.hoursLabel || "—")}</td>
-                <td>${esc(total.intervalActualLabel || "—")}</td>
-                <td>${esc(total.asReqActualLabel || "—")}</td>
-                <td>${esc(total.totalActualLabel || "—")}</td>
-                <td>${esc(total.intervalProjectedLabel || "—")}</td>
-                <td>${esc(total.asReqProjectedLabel || "—")}</td>
-                <td>${esc(total.totalProjectedLabel || "—")}</td>
-              </tr>
-            `).join("")}
+            <tr class="forecast-total-row">
+              <th scope="row">Interval total</th>
+              <td colspan="2"></td>
+              <td>${esc(breakdownTotals.intervalLabel || "—")}</td>
+            </tr>
+            <tr class="forecast-total-row">
+              <th scope="row">As-required total</th>
+              <td colspan="2"></td>
+              <td>${esc(breakdownTotals.asReqLabel || "—")}</td>
+            </tr>
+            <tr class="forecast-grand-total-row">
+              <th scope="row">Combined total</th>
+              <td colspan="2"></td>
+              <td>${esc(breakdownTotals.combinedLabel || "—")}</td>
+            </tr>
           </tfoot>` : ""}
         </table>
       </div>
     `
-    : `<p class="small muted">Add maintenance intervals, pricing, and approved orders to project spend.</p>`;
+    : `<p class="small muted">Add maintenance intervals, pricing, and expected frequency to project spend.</p>`;
 
   return `
   <div class="container cost-container">
@@ -967,7 +988,7 @@ function viewCosts(model){
       <div class="forecast-modal-card" role="document" tabindex="-1" data-forecast-initial>
         <button type="button" class="forecast-modal-close" data-forecast-close aria-label="Close maintenance forecast breakdown">×</button>
         <h2 id="forecastModalTitle">Maintenance forecast breakdown</h2>
-        <p class="forecast-modal-subtitle">Combined interval and as-required totals by timeframe.</p>
+        <p class="forecast-modal-subtitle">Interval and as-required tasks with annualized totals.</p>
         ${forecastTableHTML}
         <p class="forecast-table-note">${esc(forecastNote)}</p>
       </div>
