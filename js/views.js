@@ -819,7 +819,6 @@ function viewCosts(model){
 
   const cards = Array.isArray(data.summaryCards) ? data.summaryCards : [];
   const timeframeRows = Array.isArray(data.timeframeRows) ? data.timeframeRows : [];
-  const historyRows = Array.isArray(data.historyRows) ? data.historyRows : [];
   const jobBreakdown = Array.isArray(data.jobBreakdown) ? data.jobBreakdown : [];
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
   const maintenanceJobsNote = data.maintenanceJobsNote || "";
@@ -831,7 +830,6 @@ function viewCosts(model){
   const overviewInsight = data.overviewInsight || "Totals blend the latest maintenance allocations, consumable burn rates, downtime burdens, and job margin data so you always see current cost exposure.";
   const ordersInsight = data.ordersInsight || "Tracks every waterjet part request from submission through approval so finance can confirm spend and spot stalled orders.";
   const timeframeInsight = data.timeframeInsight || "Usage windows combine logged machine hours with interval pricing to estimate what each upcoming maintenance window will cost.";
-  const historyInsight = data.historyInsight || "Shows the latest completed maintenance, combining hours logged and reconciled spend to highlight cost spikes.";
   const maintenanceJobsInsight = data.maintenanceJobsInsight || "Lists maintenance jobs that need attention, including follow-up actions and any cost exceptions that still require confirmation.";
   const efficiencyInsight = data.efficiencyInsight || "Summarizes cutting job profitability by tying revenue to labor, material, consumable, and overhead allocations so you can act on true margins.";
   const breakdown = data.forecastBreakdown || {};
@@ -1124,34 +1122,6 @@ function viewCosts(model){
               </button>
               <div class="chart-info-bubble" id="costTimeframesInsight" role="tooltip">
                 <p>${esc(timeframeInsight)}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="dashboard-window" data-cost-window="history">
-        <div class="block">
-          <h3>Recent Maintenance Events</h3>
-          ${historyRows.length ? `
-            <ul class="cost-history">
-              ${historyRows.map(item => `
-                <li>
-                  <span>${esc(item.dateLabel || "")}</span>
-                  <span>${esc(item.hoursLabel || "")}</span>
-                  <span>${esc(item.costLabel || "")}</span>
-                </li>
-              `).join("")}
-            </ul>
-          ` : `<p class="small muted">${esc(data.historyEmpty || "No usage history yet. Log machine hours to estimate maintenance spend.")}</p>`}
-          <div class="cost-window-insight">
-            <div class="chart-info">
-              <button type="button" class="chart-info-button" aria-describedby="costHistoryInsight" aria-label="Explain Recent Maintenance Events list">
-                <span aria-hidden="true">?</span>
-                <span class="sr-only">Show how Recent Maintenance Events are curated</span>
-              </button>
-              <div class="chart-info-bubble" id="costHistoryInsight" role="tooltip">
-                <p>${esc(historyInsight)}</p>
               </div>
             </div>
           </div>
