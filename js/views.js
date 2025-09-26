@@ -825,8 +825,15 @@ function viewCosts(model){
   const maintenanceJobsNote = data.maintenanceJobsNote || "";
   const maintenanceJobsEmpty = data.maintenanceJobsEmpty || "";
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
+  const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
   const orderSummary = data.orderRequestSummary || {};
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
+  const overviewInsight = data.overviewInsight || "Totals blend the latest maintenance allocations, consumable burn rates, downtime burdens, and job margin data so you always see current cost exposure.";
+  const ordersInsight = data.ordersInsight || "Tracks every waterjet part request from submission through approval so finance can confirm spend and spot stalled orders.";
+  const timeframeInsight = data.timeframeInsight || "Usage windows combine logged machine hours with interval pricing to estimate what each upcoming maintenance window will cost.";
+  const historyInsight = data.historyInsight || "Shows the latest completed maintenance, combining hours logged and reconciled spend to highlight cost spikes.";
+  const maintenanceJobsInsight = data.maintenanceJobsInsight || "Lists maintenance jobs that need attention, including follow-up actions and any cost exceptions that still require confirmation.";
+  const efficiencyInsight = data.efficiencyInsight || "Summarizes cutting job profitability by tying revenue to labor, material, consumable, and overhead allocations so you can act on true margins.";
   const breakdown = data.forecastBreakdown || {};
   const breakdownSections = Array.isArray(breakdown.sections) ? breakdown.sections : [];
   const breakdownTotals = breakdown.totals || {};
@@ -1001,13 +1008,26 @@ function viewCosts(model){
           <div class="cost-summary-grid">
             ${summaryCardsHTML}
           </div>
+          <div class="cost-window-insight">
+            <div class="chart-info">
+              <button type="button" class="chart-info-button" aria-describedby="costOverviewInsight" aria-label="Explain Cost Overview metrics">
+                <span aria-hidden="true">?</span>
+                <span class="sr-only">Show how Cost Overview metrics are calculated</span>
+              </button>
+              <div class="chart-info-bubble" id="costOverviewInsight" role="tooltip">
+                <p>${esc(overviewInsight)}</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
       <div class="dashboard-window" data-cost-window="chart">
         <div class="block cost-chart-block">
           <div class="cost-chart-header">
-            <h3>Estimated Cost Trends</h3>
+            <div class="cost-chart-title">
+              <h3>Estimated Cost Trends</h3>
+            </div>
             <div class="cost-chart-toggle">
               <label><input type="checkbox" id="toggleCostMaintenance" checked> <span class="dot" style="background:${esc(chartColors.maintenance)}"></span> Maintenance</label>
               <label><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> Cutting jobs</label>
@@ -1017,6 +1037,17 @@ function viewCosts(model){
             <canvas id="costChart" width="780" height="240"></canvas>
           </div>
           ${data.chartNote ? `<p class="small muted">${esc(data.chartNote)}</p>` : `<p class="small muted">Toggle a line to explore how maintenance and job efficiency costs evolve over time.</p>`}
+          <div class="cost-window-insight">
+            <div class="chart-info">
+              <button type="button" class="chart-info-button" aria-describedby="costChartInfo" aria-label="Explain Estimated Cost Trends">
+                <span aria-hidden="true">?</span>
+                <span class="sr-only">Show how the Estimated Cost Trends chart is calculated</span>
+              </button>
+              <div class="chart-info-bubble" id="costChartInfo" role="tooltip">
+                <p>${esc(chartInfo)}</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1043,6 +1074,17 @@ function viewCosts(model){
               </tbody>
             </table>
           ` : `<p class="small muted">${esc(orderSummary.emptyMessage || "Approve or deny order requests to build the spend log.")}</p>`}
+          <div class="cost-window-insight">
+            <div class="chart-info">
+              <button type="button" class="chart-info-button" aria-describedby="costOrdersInsight" aria-label="Explain Waterjet Part Summary tracking">
+                <span aria-hidden="true">?</span>
+                <span class="sr-only">Show how the Waterjet Part Summary data is compiled</span>
+              </button>
+              <div class="chart-info-bubble" id="costOrdersInsight" role="tooltip">
+                <p>${esc(ordersInsight)}</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1065,6 +1107,17 @@ function viewCosts(model){
             </table>
           ` : `<p class="small muted">No usage windows yet. Log machine hours to calculate maintenance spending.</p>`}
           ${data.timeframeNote ? `<p class="small muted">${esc(data.timeframeNote)}</p>` : ""}
+          <div class="cost-window-insight">
+            <div class="chart-info">
+              <button type="button" class="chart-info-button" aria-describedby="costTimeframesInsight" aria-label="Explain Maintenance Cost Windows table">
+                <span aria-hidden="true">?</span>
+                <span class="sr-only">Show how Maintenance Cost Windows are generated</span>
+              </button>
+              <div class="chart-info-bubble" id="costTimeframesInsight" role="tooltip">
+                <p>${esc(timeframeInsight)}</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1082,6 +1135,17 @@ function viewCosts(model){
               `).join("")}
             </ul>
           ` : `<p class="small muted">${esc(data.historyEmpty || "No usage history yet. Log machine hours to estimate maintenance spend.")}</p>`}
+          <div class="cost-window-insight">
+            <div class="chart-info">
+              <button type="button" class="chart-info-button" aria-describedby="costHistoryInsight" aria-label="Explain Recent Maintenance Events list">
+                <span aria-hidden="true">?</span>
+                <span class="sr-only">Show how Recent Maintenance Events are curated</span>
+              </button>
+              <div class="chart-info-bubble" id="costHistoryInsight" role="tooltip">
+                <p>${esc(historyInsight)}</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1090,6 +1154,17 @@ function viewCosts(model){
           <h3>Maintenance Job Tracker</h3>
           ${maintenanceJobsNote ? `<p class="small muted">${esc(maintenanceJobsNote)}</p>` : ""}
           ${maintenanceJobsEmpty ? `<p class="small muted">${esc(maintenanceJobsEmpty)}</p>` : ""}
+          <div class="cost-window-insight">
+            <div class="chart-info">
+              <button type="button" class="chart-info-button" aria-describedby="costJobsInsight" aria-label="Explain Maintenance Job Tracker">
+                <span aria-hidden="true">?</span>
+                <span class="sr-only">Show how the Maintenance Job Tracker should be used</span>
+              </button>
+              <div class="chart-info-bubble" id="costJobsInsight" role="tooltip">
+                <p>${esc(maintenanceJobsInsight)}</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1117,6 +1192,17 @@ function viewCosts(model){
               </tbody>
             </table>
           ` : `<p class="small muted">${esc(data.jobEmpty || "Add cutting jobs with estimates to build the efficiency tracker.")}</p>`}
+          <div class="cost-window-insight">
+            <div class="chart-info">
+              <button type="button" class="chart-info-button" aria-describedby="costEfficiencyInsight" aria-label="Explain Cutting Job Efficiency Snapshot">
+                <span aria-hidden="true">?</span>
+                <span class="sr-only">Show how the Cutting Job Efficiency Snapshot reveals margin trends</span>
+              </button>
+              <div class="chart-info-bubble" id="costEfficiencyInsight" role="tooltip">
+                <p>${esc(efficiencyInsight)}</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
