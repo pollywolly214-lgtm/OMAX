@@ -4556,6 +4556,125 @@ function setupCostInfoPanel(){
   window.closeCostInfoPanel = hidePanel;
 }
 
+function setupForecastBreakdownModal(){
+  const trigger = document.querySelector('[data-card-key="maintenanceForecast"]');
+  const modal = document.getElementById("forecastBreakdownModal");
+  if (!trigger || !modal) return;
+
+  if (trigger.dataset.forecastWired === "1") return;
+  trigger.dataset.forecastWired = "1";
+
+  const body = document.body;
+  const card = modal.querySelector(".forecast-modal-card");
+  const initialFocus = modal.querySelector("[data-forecast-initial]") || card;
+  const focusSelectors = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  let lastFocused = null;
+  let keyHandler = null;
+
+  const updateExpanded = (expanded)=>{
+    trigger.setAttribute("aria-expanded", expanded ? "true" : "false");
+  };
+
+  trigger.setAttribute("aria-haspopup", "dialog");
+  trigger.setAttribute("aria-controls", "forecastBreakdownModal");
+  updateExpanded(false);
+
+  const getFocusable = ()=> Array.from(modal.querySelectorAll(focusSelectors))
+    .filter(el => el instanceof HTMLElement && !el.hasAttribute("disabled") && el.tabIndex !== -1 && (el.offsetParent !== null || el === document.activeElement));
+
+  const trapFocus = (event)=>{
+    if (event.key !== "Tab") return;
+    const focusable = getFocusable();
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey){
+      if (active === first || !modal.contains(active)){
+        event.preventDefault();
+        last.focus();
+      }
+    }else{
+      if (active === last){
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  };
+
+  const closeModal = ()=>{
+    if (modal.hasAttribute("hidden")) return;
+    modal.classList.remove("is-visible");
+    modal.setAttribute("hidden", "");
+    modal.setAttribute("aria-hidden", "true");
+    if (body) body.classList.remove("forecast-modal-open");
+    if (typeof keyHandler === "function"){
+      document.removeEventListener("keydown", keyHandler);
+      keyHandler = null;
+    }
+    updateExpanded(false);
+    const returnFocus = lastFocused || trigger;
+    lastFocused = null;
+    if (returnFocus && typeof returnFocus.focus === "function"){
+      requestAnimationFrame(()=>{
+        try { returnFocus.focus({ preventScroll: true }); }
+        catch (_) { returnFocus.focus(); }
+      });
+    }
+  };
+
+  const openModal = ()=>{
+    if (!modal.hasAttribute("hidden") && modal.classList.contains("is-visible")) return;
+    lastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    modal.classList.add("is-visible");
+    modal.removeAttribute("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    if (body) body.classList.add("forecast-modal-open");
+    updateExpanded(true);
+    const focusTarget = initialFocus || card || modal;
+    if (focusTarget && typeof focusTarget.focus === "function"){
+      requestAnimationFrame(()=>{
+        try { focusTarget.focus({ preventScroll: true }); }
+        catch (_) { focusTarget.focus(); }
+      });
+    }
+    keyHandler = (event)=>{
+      if (event.key === "Escape"){
+        event.preventDefault();
+        closeModal();
+        return;
+      }
+      if (event.key === "Tab"){
+        trapFocus(event);
+      }
+    };
+    document.addEventListener("keydown", keyHandler);
+  };
+
+  trigger.addEventListener("click", (event)=>{
+    event.preventDefault();
+    openModal();
+  });
+
+  modal.addEventListener("click", (event)=>{
+    const target = event.target;
+    if (target && target.hasAttribute && target.hasAttribute("data-forecast-close")){
+      event.preventDefault();
+      closeModal();
+    }
+  });
+
+  const closeButtons = modal.querySelectorAll("[data-forecast-close]");
+  closeButtons.forEach(btn => {
+    btn.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " "){
+        event.preventDefault();
+        closeModal();
+      }
+    });
+  });
+}
+
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
@@ -4566,6 +4685,7 @@ function renderCosts(){
   wireCostSettingsMenu();
 
   setupCostInfoPanel();
+  setupForecastBreakdownModal();
 
   const canvas = document.getElementById("costChart");
   const toggleMaint = document.getElementById("toggleCostMaintenance");
@@ -5172,6 +5292,45 @@ function computeCostModel(){
     projectedLabel: formatterCurrency(row.costProjected, { decimals: row.costProjected < 1000 ? 2 : 0 })
   }));
 
+  const forecastBreakdown = {
+    rows: timeframeRowsRaw.map(row => ({
+      key: row.key,
+      label: row.label,
+      hoursLabel: formatHours(row.hours),
+      intervalActualLabel: formatterCurrency(row.intervalActual, { decimals: row.intervalActual < 1000 ? 2 : 0 }),
+      asReqActualLabel: formatterCurrency(row.asReqActual, { decimals: row.asReqActual < 1000 ? 2 : 0 }),
+      totalActualLabel: formatterCurrency(row.costActual, { decimals: row.costActual < 1000 ? 2 : 0 }),
+      intervalProjectedLabel: formatterCurrency(row.intervalProjected, { decimals: row.intervalProjected < 1000 ? 2 : 0 }),
+      asReqProjectedLabel: formatterCurrency(row.asReqProjected, { decimals: row.asReqProjected < 1000 ? 2 : 0 }),
+      totalProjectedLabel: formatterCurrency(row.costProjected, { decimals: row.costProjected < 1000 ? 2 : 0 })
+    })),
+    totals: [
+      {
+        key: "actualYear",
+        label: "Actual maintenance spend (past 12 months)",
+        hoursLabel: formatHours(hoursYear),
+        intervalActualLabel: formatterCurrency(intervalActualYear, { decimals: intervalActualYear < 1000 ? 2 : 0 }),
+        asReqActualLabel: formatterCurrency(asReqAnnualActual, { decimals: asReqAnnualActual < 1000 ? 2 : 0 }),
+        totalActualLabel: formatterCurrency(combinedActualYear, { decimals: combinedActualYear < 1000 ? 2 : 0 }),
+        intervalProjectedLabel: "—",
+        asReqProjectedLabel: "—",
+        totalProjectedLabel: "—"
+      },
+      {
+        key: "forecast",
+        label: "Forecast using baseline utilization",
+        hoursLabel: formatHours(baselineAnnualHours),
+        intervalActualLabel: "—",
+        asReqActualLabel: "—",
+        totalActualLabel: "—",
+        intervalProjectedLabel: formatterCurrency(predictedIntervalAnnual, { decimals: predictedIntervalAnnual < 1000 ? 2 : 0 }),
+        asReqProjectedLabel: formatterCurrency(predictedAsReqAnnual, { decimals: predictedAsReqAnnual < 1000 ? 2 : 0 }),
+        totalProjectedLabel: formatterCurrency(predictedAnnual, { decimals: predictedAnnual < 1000 ? 2 : 0 })
+      }
+    ],
+    note: "Interval spend spreads parts and labor across the default service interval; as-required spend pulls approved order history or task estimates when available."
+  };
+
   const historyRows = maintenanceHistory.slice(-6).reverse().map(entry => ({
     dateLabel: entry.date.toLocaleDateString(),
     hoursLabel: formatHours(entry.hours),
@@ -5211,6 +5370,7 @@ function computeCostModel(){
 
   const summaryCards = [
     {
+      key: "maintenanceForecast",
       icon: "🛠️",
       title: "Maintenance forecast (interval + as-required)",
       value: formatterCurrency(predictedAnnual, { decimals: 0 }),
@@ -5302,6 +5462,7 @@ function computeCostModel(){
   return {
     summaryCards,
     timeframeRows,
+    forecastBreakdown,
     timeframeNote,
     historyRows,
     historyEmpty,

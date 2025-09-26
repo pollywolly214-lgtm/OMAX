@@ -827,6 +827,86 @@ function viewCosts(model){
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
   const orderSummary = data.orderRequestSummary || {};
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
+  const breakdown = data.forecastBreakdown || {};
+  const breakdownRows = Array.isArray(breakdown.rows) ? breakdown.rows : [];
+  const breakdownTotals = Array.isArray(breakdown.totals) ? breakdown.totals : [];
+  const forecastNote = breakdown.note || "Add pricing to maintenance tasks and approve order requests to enrich the forecast.";
+
+  const renderSummaryCard = (card = {})=>{
+    const isForecast = card && card.key === "maintenanceForecast";
+    const tag = isForecast ? "button" : "div";
+    const classes = ["cost-card"];
+    if (isForecast) classes.push("cost-card-clickable");
+    const classAttr = classes.join(" ");
+    const dataAttr = isForecast && card.key ? ` data-card-key="${esc(card.key)}"` : "";
+    const attr = isForecast
+      ? `type="button" class="${classAttr}"${dataAttr}`
+      : `class="${classAttr}"`;
+    return `
+              <${tag} ${attr}>
+                <div class="cost-card-icon">${esc(card.icon || "")}</div>
+                <div class="cost-card-body">
+                  <div class="cost-card-title">${esc(card.title || "")}</div>
+                  <div class="cost-card-value">${esc(card.value || "")}</div>
+                  <div class="cost-card-hint">${esc(card.hint || "")}</div>
+                </div>
+              </${tag}>
+            `;
+  };
+
+  const summaryCardsHTML = cards.length
+    ? cards.map(renderSummaryCard).join("")
+    : `<p class="small muted">No cost metrics yet. Log machine hours and add pricing to interval tasks.</p>`;
+
+  const forecastTableHTML = (breakdownRows.length || breakdownTotals.length)
+    ? `
+      <div class="forecast-table-wrap">
+        <table class="forecast-table">
+          <thead>
+            <tr>
+              <th scope="col">Period</th>
+              <th scope="col">Machine hours</th>
+              <th scope="col">Interval actual</th>
+              <th scope="col">As-required actual</th>
+              <th scope="col">Combined actual</th>
+              <th scope="col">Interval projected</th>
+              <th scope="col">As-required projected</th>
+              <th scope="col">Combined projected</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${breakdownRows.map(row => `
+              <tr>
+                <th scope="row">${esc(row.label || "")}</th>
+                <td>${esc(row.hoursLabel || "—")}</td>
+                <td>${esc(row.intervalActualLabel || "—")}</td>
+                <td>${esc(row.asReqActualLabel || "—")}</td>
+                <td>${esc(row.totalActualLabel || "—")}</td>
+                <td>${esc(row.intervalProjectedLabel || "—")}</td>
+                <td>${esc(row.asReqProjectedLabel || "—")}</td>
+                <td>${esc(row.totalProjectedLabel || "—")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+          ${breakdownTotals.length ? `
+          <tfoot>
+            ${breakdownTotals.map(total => `
+              <tr class="forecast-total-row">
+                <th scope="row">${esc(total.label || "")}</th>
+                <td>${esc(total.hoursLabel || "—")}</td>
+                <td>${esc(total.intervalActualLabel || "—")}</td>
+                <td>${esc(total.asReqActualLabel || "—")}</td>
+                <td>${esc(total.totalActualLabel || "—")}</td>
+                <td>${esc(total.intervalProjectedLabel || "—")}</td>
+                <td>${esc(total.asReqProjectedLabel || "—")}</td>
+                <td>${esc(total.totalProjectedLabel || "—")}</td>
+              </tr>
+            `).join("")}
+          </tfoot>` : ""}
+        </table>
+      </div>
+    `
+    : `<p class="small muted">Add maintenance intervals, pricing, and approved orders to project spend.</p>`;
 
   return `
   <div class="container cost-container">
@@ -879,6 +959,17 @@ function viewCosts(model){
             </ul>
           </article>
         </div>
+    </div>
+  </div>
+
+    <div class="forecast-modal" id="forecastBreakdownModal" role="dialog" aria-modal="true" aria-labelledby="forecastModalTitle" hidden aria-hidden="true">
+      <button type="button" class="forecast-modal-backdrop" data-forecast-close aria-label="Close maintenance forecast breakdown"></button>
+      <div class="forecast-modal-card" role="document" tabindex="-1" data-forecast-initial>
+        <button type="button" class="forecast-modal-close" data-forecast-close aria-label="Close maintenance forecast breakdown">×</button>
+        <h2 id="forecastModalTitle">Maintenance forecast breakdown</h2>
+        <p class="forecast-modal-subtitle">Combined interval and as-required totals by timeframe.</p>
+        ${forecastTableHTML}
+        <p class="forecast-table-note">${esc(forecastNote)}</p>
       </div>
     </div>
 
@@ -887,16 +978,7 @@ function viewCosts(model){
         <div class="block cost-overview-block">
           <h3>Cost Overview</h3>
           <div class="cost-summary-grid">
-            ${cards.length ? cards.map(card => `
-              <div class="cost-card">
-                <div class="cost-card-icon">${esc(card.icon || "")}</div>
-                <div class="cost-card-body">
-                  <div class="cost-card-title">${esc(card.title || "")}</div>
-                  <div class="cost-card-value">${esc(card.value || "")}</div>
-                  <div class="cost-card-hint">${esc(card.hint || "")}</div>
-                </div>
-              </div>
-            `).join("") : `<p class="small muted">No cost metrics yet. Log machine hours and add pricing to interval tasks.</p>`}
+            ${summaryCardsHTML}
           </div>
         </div>
       </div>
