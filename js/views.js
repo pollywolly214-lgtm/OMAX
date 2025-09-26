@@ -907,7 +907,7 @@ function viewCosts(model){
             <h3>Estimated Cost Trends</h3>
             <div class="cost-chart-toggle">
               <label><input type="checkbox" id="toggleCostMaintenance" checked> <span class="dot" style="background:${esc(chartColors.maintenance)}"></span> Maintenance</label>
-              <label><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> Cutting jobs</label>
+              <label class="cost-chart-toggle-jobs"><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> <span class="cost-chart-toggle-link" data-cost-jobs-history role="link" tabindex="0">Cutting jobs</span></label>
             </div>
           </div>
           <div class="cost-chart-canvas">
