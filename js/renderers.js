@@ -5546,6 +5546,12 @@ function computeCostModel(){
     }
   };
 
+  const historyRows = maintenanceHistory.slice(-6).reverse().map(entry => ({
+    dateLabel: entry.date.toLocaleDateString(),
+    hoursLabel: formatHours(entry.hours),
+    costLabel: formatterCurrency(entry.cost, { decimals: entry.cost < 1000 ? 2 : 0 })
+  }));
+
   const jobBreakdown = jobsInfo
     .slice()
     .sort((a,b)=> b.date - a.date)
@@ -5612,11 +5618,6 @@ function computeCostModel(){
       : formatterCurrency(0, { decimals: 0 })
   };
 
-  const maintenanceJobs = [];
-
-  const maintenanceJobsNote = "Maintenance job tracker will consolidate every job once the Jobs integration is complete.";
-  const maintenanceJobsEmpty = "Tracker setup is in progress. This space will list all maintenance jobs when the data wiring is finished.";
-
   let timeframeNote;
   if (maintenanceOrderItems.length){
     timeframeNote = "Actual spend combines interval allocations with approved maintenance orders matched to your task part numbers.";
@@ -5628,6 +5629,9 @@ function computeCostModel(){
   if (forecastBreakdown){
     forecastBreakdown.note = timeframeNote || "Add pricing to maintenance tasks and approve order requests to enrich the forecast.";
   }
+  const historyEmpty = parsedHistory.length
+    ? "Log additional machine hours to expand the maintenance cost timeline."
+    : "No usage history yet. Log machine hours to estimate maintenance spend.";
   const jobEmpty = "Add cutting jobs with estimates to build the efficiency tracker.";
 
   const chartNote = `Maintenance line allocates interval pricing plus as-required spend per logged hour (${asReqAnnualActual > 0 ? "derived from approved orders" : "using task estimates when orders are unavailable"}); cutting jobs line shows the rolling average gain/loss at ${formatterCurrency(JOB_RATE_PER_HOUR, { decimals: 0 })}/hr.`;
@@ -5676,12 +5680,11 @@ function computeCostModel(){
     timeframeRows,
     forecastBreakdown,
     timeframeNote,
+    historyRows,
+    historyEmpty,
     jobSummary,
     jobBreakdown,
     jobEmpty,
-    maintenanceJobs,
-    maintenanceJobsNote,
-    maintenanceJobsEmpty,
     chartNote,
     chartInfo,
     orderRequestSummary,
