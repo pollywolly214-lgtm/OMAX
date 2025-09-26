@@ -4567,35 +4567,39 @@ function renderCosts(){
 
   setupCostInfoPanel();
 
-  const canvas = document.getElementById("costChart");
-  const toggleMaint = document.getElementById("toggleCostMaintenance");
-  const toggleJobs  = document.getElementById("toggleCostJobs");
-  const canvasWrap = content.querySelector(".cost-chart-canvas");
-  let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
+  const goToJobsHistory = ()=>{
+    window.pendingJobHistoryFocus = true;
+    const targetHash = "#/jobs";
+    if (location.hash !== targetHash){
+      location.hash = targetHash;
+    }else if (typeof renderJobs === "function"){
+      renderJobs();
+    }
+  };
 
-  const jobsHistoryLink = content.querySelector("[data-cost-jobs-history]");
-  if (jobsHistoryLink){
-    const goToJobsHistory = ()=>{
-      window.pendingJobHistoryFocus = true;
-      const targetHash = "#/jobs";
-      if (location.hash !== targetHash){
-        location.hash = targetHash;
-      }else{
-        renderJobs();
-      }
-    };
+  const wireJobsHistoryShortcut = (element)=>{
+    if (!element) return;
     const activateHistoryLink = (event)=>{
       event.preventDefault();
       event.stopPropagation();
       goToJobsHistory();
     };
-    jobsHistoryLink.addEventListener("click", activateHistoryLink);
-    jobsHistoryLink.addEventListener("keydown", (event)=>{
+    element.addEventListener("click", activateHistoryLink);
+    element.addEventListener("keydown", (event)=>{
       if (event.key === "Enter" || event.key === " "){
         activateHistoryLink(event);
       }
     });
-  }
+  };
+
+  wireJobsHistoryShortcut(content.querySelector("[data-cost-jobs-history]"));
+  wireJobsHistoryShortcut(content.querySelector("[data-cost-cutting-card]"));
+
+  const canvas = document.getElementById("costChart");
+  const toggleMaint = document.getElementById("toggleCostMaintenance");
+  const toggleJobs  = document.getElementById("toggleCostJobs");
+  const canvasWrap = content.querySelector(".cost-chart-canvas");
+  let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
 
   const escapeTooltip = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
     "&": "&amp;",
@@ -5235,12 +5239,14 @@ function computeCostModel(){
 
   const summaryCards = [
     {
+      key: "maintenance-forecast",
       icon: "🛠️",
       title: "Maintenance forecast (interval + as-required)",
       value: formatterCurrency(predictedAnnual, { decimals: 0 }),
       hint: maintenanceHint
     },
     {
+      key: "cutting-jobs",
       icon: "✂️",
       title: "Cutting jobs efficiency",
       value: formatterCurrency(totalGainLoss, { decimals: 0, showPlus: true }),
@@ -5249,6 +5255,7 @@ function computeCostModel(){
         : "No cutting jobs logged yet."
     },
     {
+      key: "combined-impact",
       icon: "📊",
       title: "Combined estimated impact",
       value: formatterCurrency(predictedAnnual + totalGainLoss, { decimals: 0, showPlus: true }),

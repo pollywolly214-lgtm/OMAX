@@ -887,8 +887,12 @@ function viewCosts(model){
         <div class="block cost-overview-block">
           <h3>Cost Overview</h3>
           <div class="cost-summary-grid">
-            ${cards.length ? cards.map(card => `
-              <div class="cost-card">
+            ${cards.length ? cards.map(card => {
+              const extraAttrs = card && card.key === "cutting-jobs"
+                ? " data-cost-cutting-card role=\"link\" tabindex=\"0\""
+                : "";
+              return `
+              <div class="cost-card"${extraAttrs}>
                 <div class="cost-card-icon">${esc(card.icon || "")}</div>
                 <div class="cost-card-body">
                   <div class="cost-card-title">${esc(card.title || "")}</div>
@@ -896,7 +900,8 @@ function viewCosts(model){
                   <div class="cost-card-hint">${esc(card.hint || "")}</div>
                 </div>
               </div>
-            `).join("") : `<p class="small muted">No cost metrics yet. Log machine hours and add pricing to interval tasks.</p>`}
+            `;
+            }).join("") : `<p class="small muted">No cost metrics yet. Log machine hours and add pricing to interval tasks.</p>`}
           </div>
         </div>
       </div>
