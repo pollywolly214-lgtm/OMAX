@@ -3066,6 +3066,60 @@ function renderSettings(){
     document.head.appendChild(st);
   }
 
+  const escapeAttr = (value)=>{
+    const str = String(value ?? "");
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function"){
+      return CSS.escape(str);
+    }
+    return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\]/g, "\\]");
+  };
+
+  function ensureDetailsChainOpen(element){
+    let current = element;
+    while (current){
+      if (current.tagName && current.tagName.toLowerCase() === "details"){
+        current.open = true;
+      }
+      current = current.parentElement;
+    }
+  }
+
+  function focusTasksForInventory(pending){
+    if (!pending || !root) return;
+    const ids = Array.isArray(pending.taskIds)
+      ? pending.taskIds.map(id => String(id)).filter(Boolean)
+      : [];
+    if (!ids.length) return;
+    const seen = new Set();
+    let firstMatch = null;
+    ids.forEach(id => {
+      const selector = `[data-task-id="${escapeAttr(id)}"]`;
+      const el = root.querySelector(selector);
+      if (!el || seen.has(el)) return;
+      seen.add(el);
+      ensureDetailsChainOpen(el);
+      el.classList.add("task--focus");
+      const target = el;
+      window.setTimeout(()=>{ target.classList.remove("task--focus"); }, 2400);
+      if (!firstMatch) firstMatch = el;
+    });
+    if (firstMatch){
+      try {
+        const summary = firstMatch.querySelector("summary");
+        if (summary){
+          try { summary.focus({ preventScroll: true }); }
+          catch (_){ summary.focus(); }
+        }
+      } catch (_){ }
+      try {
+        firstMatch.scrollIntoView({ behavior: "smooth", block: "center" });
+      } catch (_){
+        try { firstMatch.scrollIntoView(); }
+        catch(__){}
+      }
+    }
+  }
+
   // --- Helpers & derived collections ---
   const byIdFolder = (id)=> window.settingsFolders.find(f => String(f.id)===String(id)) || null;
   const childrenFolders = (parent)=> window.settingsFolders
@@ -3772,6 +3826,12 @@ function renderSettings(){
       }, 60);
     }
   });
+
+  const pendingFocus = window.pendingMaintenanceFocus;
+  if (pendingFocus){
+    window.pendingMaintenanceFocus = null;
+    requestAnimationFrame(()=> focusTasksForInventory(pendingFocus));
+  }
 
   function findTaskMeta(id){
     const tid = String(id);
@@ -6361,6 +6421,55 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("click", async (e)=>{
+    const nameBtn = e.target.closest("[data-inventory-maintenance]");
+    if (nameBtn){
+      const id = nameBtn.getAttribute("data-inventory-maintenance");
+      if (!id) return;
+      const item = inventory.find(entry => entry && String(entry.id) === String(id));
+      if (!item){ toast("Inventory item not found."); return; }
+      const linkedTasks = findTasksLinkedToInventoryItem(item);
+      if (linkedTasks.length){
+        window.pendingMaintenanceFocus = {
+          taskIds: linkedTasks.map(task => task && task.id != null ? String(task.id) : "").filter(Boolean),
+          itemName: item.name || "",
+          inventoryId: item.id
+        };
+        window.maintenanceSearchTerm = "";
+        toast("Opening Maintenance Settings…");
+        const hash = (location.hash || "#").toLowerCase();
+        if (hash === "#/settings" || hash === "#settings"){
+          renderSettings();
+        }else{
+          location.hash = "#/settings";
+        }
+      }else{
+        const confirmed = await showConfirmModal({
+          title: "No item found",
+          message: "No item found in Maintenance Settings. Add it now?",
+          confirmText: "Add now",
+          confirmVariant: "primary",
+          cancelText: "No thanks"
+        });
+        if (confirmed){
+          window.pendingMaintenanceAddFromInventory = {
+            name: item.name || "",
+            pn: item.pn || "",
+            link: item.link || "",
+            price: item.price != null ? item.price : null,
+            note: item.note || ""
+          };
+          window.maintenanceSearchTerm = "";
+          const hash = (location.hash || "#").toLowerCase();
+          if (hash === "#/settings" || hash === "#settings"){
+            renderSettings();
+          }else{
+            location.hash = "#/settings";
+          }
+        }
+      }
+      return;
+    }
+
     const deleteBtn = e.target.closest("[data-inventory-delete]");
     if (deleteBtn){
       const id = deleteBtn.getAttribute("data-inventory-delete");

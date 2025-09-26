@@ -488,6 +488,13 @@ body.cost-info-visible{
 .order-actions button:disabled{ opacity:0.55; cursor:not-allowed; }
 .order-card .link{ background:none; border:0; padding:0; color:#c62828; cursor:pointer; text-decoration:underline; }
 .order-card .link:hover{ color:#a31818; }
+
+#explorer .task.task--focus{ outline:2px solid #0a63c2; box-shadow:0 0 0 3px rgba(10,99,194,.18); animation:explorerTaskFocusPulse 1.6s ease-in-out 0s 2; }
+@keyframes explorerTaskFocusPulse{
+  0%{ box-shadow:0 0 0 0 rgba(10,99,194,.35); }
+  50%{ box-shadow:0 0 0 8px rgba(10,99,194,.08); }
+  100%{ box-shadow:0 0 0 0 rgba(10,99,194,.35); }
+}
 .order-tabs{ margin:16px 0; display:flex; flex-wrap:wrap; gap:8px; }
 .order-tabs button{ padding:6px 14px; border-radius:999px; border:1px solid #d5deef; background:#f6f8fd; cursor:pointer; font-weight:600; color:#4a566d; }
 .order-tabs button.active{ background:#0a63c2; color:#fff; border-color:#0a63c2; }
@@ -521,6 +528,9 @@ body.cost-info-visible{
 .inventory-add-trigger:focus-visible{ outline:3px solid rgba(59,130,246,.45); outline-offset:2px; }
 .inventory-search{ flex:1 1 260px; }
 .inventory-hint{ margin-bottom:12px; }
+.inventory-name-btn{ background:none; border:0; padding:0; font:inherit; color:#0a63c2; cursor:pointer; text-decoration:underline; }
+.inventory-name-btn:hover{ color:#084a94; }
+.inventory-name-btn:focus-visible{ outline:3px solid rgba(10,99,194,.35); outline-offset:2px; }
 .inventory-add{ padding:6px 10px; border-radius:8px; border:1px solid #ccd5e6; background:#f4f7fb; cursor:pointer; font-weight:600; }
 .inventory-add:hover{ background:#e4ebf8; }
 .inventory-actions{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
