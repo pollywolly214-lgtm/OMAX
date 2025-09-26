@@ -5580,6 +5580,7 @@ function computeCostModel(){
   const jobEmpty = "Add cutting jobs with estimates to build the efficiency tracker.";
 
   const chartNote = `Maintenance line allocates interval pricing plus as-required spend per logged hour (${asReqAnnualActual > 0 ? "derived from approved orders" : "using task estimates when orders are unavailable"}); cutting jobs line shows the rolling average gain/loss at ${formatterCurrency(JOB_RATE_PER_HOUR, { decimals: 0 })}/hr.`;
+  const chartInfo = "Maintenance trend distributes interval task pricing and approved as-required spend across each logged machine hour so you can monitor burn rate, while the cutting jobs trend plots rolling average gain or loss to highlight profitability swings.";
 
   const orderSorted = orderHistory.slice().sort((a,b)=>{
     const aTime = new Date(a.resolvedAt || a.createdAt || 0).getTime();
@@ -5633,6 +5634,7 @@ function computeCostModel(){
     maintenanceJobsNote,
     maintenanceJobsEmpty,
     chartNote,
+    chartInfo,
     orderRequestSummary,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries,
