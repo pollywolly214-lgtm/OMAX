@@ -123,17 +123,38 @@ body.pump-chart-expanded { overflow:hidden; }
   box-shadow:0 18px 36px rgba(7, 30, 78, 0.28);
   backdrop-filter: blur(6px);
 }
-.cost-card[role="button"]{
+.cost-card[role="button"],
+.cost-card[role="link"]{
   cursor:pointer;
   transition:box-shadow 160ms ease, transform 160ms ease, border-color 160ms ease;
 }
 .cost-card[role="button"]:hover,
-.cost-card[role="button"]:focus-visible{
+.cost-card[role="button"]:focus-visible,
+.cost-card[role="button"]:active,
+.cost-card[role="link"]:hover,
+.cost-card[role="link"]:focus-visible,
+.cost-card[role="link"]:active{
   border-color:rgba(16, 70, 150, 0.35);
   box-shadow:0 22px 42px rgba(7, 30, 78, 0.34);
   transform:translateY(-1px);
 }
-.cost-card[role="button"]:focus-visible{
+.cost-card[role="button"]:focus-visible,
+.cost-card[role="link"]:focus-visible{
+  outline:2px solid rgba(37, 99, 235, 0.9);
+  outline-offset:3px;
+}
+.block[data-cost-jobs-history]{
+  cursor:pointer;
+  transition:box-shadow 160ms ease, transform 160ms ease, border-color 160ms ease;
+}
+.block[data-cost-jobs-history]:hover,
+.block[data-cost-jobs-history]:focus-visible,
+.block[data-cost-jobs-history]:active{
+  border-color:rgba(16, 70, 150, 0.35);
+  box-shadow:0 22px 42px rgba(7, 30, 78, 0.34);
+  transform:translateY(-1px);
+}
+.block[data-cost-jobs-history]:focus-visible{
   outline:2px solid rgba(37, 99, 235, 0.9);
   outline-offset:3px;
 }
@@ -146,6 +167,10 @@ body.pump-chart-expanded { overflow:hidden; }
 .cost-chart-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
 .cost-chart-toggle{ display:flex; gap:12px; flex-wrap:wrap; font-size:13px; color:#333; }
 .cost-chart-toggle label{ display:flex; align-items:center; gap:6px; cursor:pointer; }
+.cost-chart-toggle-jobs{ gap:6px; }
+.cost-chart-toggle-link{ cursor:pointer; text-decoration:underline; color:inherit; }
+.cost-chart-toggle-link:focus-visible{ outline:2px solid #0a63c2; outline-offset:2px; border-radius:2px; }
+.cost-chart-toggle-link:active{ color:#0a63c2; }
 .cost-chart-toggle .dot{ display:inline-block; width:12px; height:12px; border-radius:999px; }
 .cost-chart-canvas { position: relative; }
 .cost-chart-canvas canvas { width: 100%; height: auto; display: block; }

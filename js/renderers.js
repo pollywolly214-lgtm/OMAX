@@ -4694,6 +4694,36 @@ function renderCosts(){
   setupCostInfoPanel();
   setupForecastBreakdownModal();
 
+  const goToJobsHistory = ()=>{
+    window.pendingJobHistoryFocus = true;
+    const targetHash = "#/jobs";
+    if (location.hash !== targetHash){
+      location.hash = targetHash;
+    }else if (typeof renderJobs === "function"){
+      renderJobs();
+    }
+  };
+
+  const wireJobsHistoryShortcut = (element)=>{
+    if (!element) return;
+    const activateHistoryLink = (event)=>{
+      event.preventDefault();
+      event.stopPropagation();
+      goToJobsHistory();
+    };
+    element.addEventListener("click", activateHistoryLink);
+    element.addEventListener("keydown", (event)=>{
+      if (event.repeat) return;
+      if (event.key === "Enter" || event.key === " " || event.key === "Spacebar"){
+        activateHistoryLink(event);
+      }
+    });
+  };
+
+  wireJobsHistoryShortcut(content.querySelector("[data-cost-jobs-history]"));
+  wireJobsHistoryShortcut(content.querySelector("[data-cost-cutting-card]"));
+  wireJobsHistoryShortcut(content.querySelector(".cost-chart-toggle-link"));
+
   const canvas = document.getElementById("costChart");
   const toggleMaint = document.getElementById("toggleCostMaintenance");
   const toggleJobs  = document.getElementById("toggleCostJobs");
@@ -5502,6 +5532,7 @@ function computeCostModel(){
       hint: maintenanceHint
     },
     {
+      key: "cuttingJobs",
       icon: "✂️",
       title: "Cutting jobs efficiency",
       value: formatterCurrency(totalGainLoss, { decimals: 0, showPlus: true }),
@@ -5510,10 +5541,11 @@ function computeCostModel(){
         : "No cutting jobs logged yet."
     },
     {
+      key: "combinedImpact",
       icon: "📊",
       title: "Combined estimated impact",
-      value: formatterCurrency(totalGainLoss - predictedAnnual, { decimals: 0, showPlus: true }),
-      hint: "Cutting job efficiency impact minus the maintenance forecast (cost treated as negative)."
+      value: formatterCurrency(predictedAnnual + totalGainLoss, { decimals: 0, showPlus: true }),
+      hint: "Maintenance forecast plus cutting job efficiency impact."
     }
   ];
 
@@ -5849,32 +5881,44 @@ function renderJobs(){
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
 
+  const focusPastJobs = ()=>{
+    const target = document.getElementById("pastJobs");
+    if (!target) return;
+    const restoreTabindex = !target.hasAttribute("tabindex");
+    if (restoreTabindex){
+      target.setAttribute("tabindex", "-1");
+      target.dataset.tempTabindex = "1";
+    }
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    try {
+      target.focus({ preventScroll: true });
+    } catch (_) {
+      // Fallback focus handling for browsers without focus options
+      target.focus();
+    }
+    if (restoreTabindex){
+      const cleanup = ()=>{
+        if (!target.dataset.tempTabindex) return;
+        delete target.dataset.tempTabindex;
+        target.removeAttribute("tabindex");
+      };
+      target.addEventListener("blur", ()=> cleanup(), { once: true });
+      setTimeout(()=> cleanup(), 1500);
+    }
+  };
+
   const historyBtn = content.querySelector("[data-job-history-trigger]");
   if (historyBtn){
-    historyBtn.addEventListener("click", ()=>{
-      const target = document.getElementById("pastJobs");
-      if (!target) return;
-      const restoreTabindex = !target.hasAttribute("tabindex");
-      if (restoreTabindex){
-        target.setAttribute("tabindex", "-1");
-        target.dataset.tempTabindex = "1";
-      }
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
-      try {
-        target.focus({ preventScroll: true });
-      } catch (_) {
-        // Fallback focus handling for browsers without focus options
-        target.focus();
-      }
-      if (restoreTabindex){
-        const cleanup = ()=>{
-          if (!target.dataset.tempTabindex) return;
-          delete target.dataset.tempTabindex;
-          target.removeAttribute("tabindex");
-        };
-        target.addEventListener("blur", ()=> cleanup(), { once: true });
-        setTimeout(()=> cleanup(), 1500);
-      }
+    historyBtn.addEventListener("click", (event)=>{
+      event.preventDefault();
+      focusPastJobs();
+    });
+  }
+
+  if (window.pendingJobHistoryFocus){
+    delete window.pendingJobHistoryFocus;
+    requestAnimationFrame(()=>{
+      focusPastJobs();
     });
   }
 
