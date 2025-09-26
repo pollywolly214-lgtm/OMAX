@@ -825,6 +825,22 @@ function wireDashboardSettingsMenu(){
       if (event.key === "Escape"){ closeDashboardSettingsMenu(); button?.focus(); }
     });
   }
+  if (!menu.dataset.boundSettingsNav){
+    menu.dataset.boundSettingsNav = "1";
+    menu.addEventListener("click", (event)=>{
+      const link = event.target instanceof HTMLElement ? event.target.closest("[data-settings-nav]") : null;
+      if (!link) return;
+      event.preventDefault();
+      const target = link.getAttribute("href") || "#/deleted";
+      closeDashboardSettingsMenu();
+      const normalized = typeof route === "function" ? target : target;
+      if (location.hash !== normalized){
+        location.hash = normalized;
+      } else if (typeof route === "function") {
+        route();
+      }
+    });
+  }
   ensureClearAllDataHandlers();
 }
 
@@ -3518,6 +3534,85 @@ function renderSettings(){
     if (typeof saveCloudDebounced === "function") { try{ saveCloudDebounced(); }catch(_){} }
   };
 
+  async function promptAddTaskToInventory(task){
+    if (!task) return;
+    const label = task.name ? `"${task.name}"` : "this task";
+    const matchesRaw = findInventoryMatchesForTask(task);
+    const matches = Array.isArray(matchesRaw) ? matchesRaw.slice() : [];
+    matches.sort((a, b)=>{
+      const aScore = (a && String(a.id) === String(task.inventoryId)) ? 3
+        : (a && String(a.linkedTaskId || "") === String(task.id)) ? 2
+        : 1;
+      const bScore = (b && String(b.id) === String(task.inventoryId)) ? 3
+        : (b && String(b.linkedTaskId || "") === String(task.id)) ? 2
+        : 1;
+      if (bScore !== aScore) return bScore - aScore;
+      const aName = a && a.name ? a.name : "";
+      const bName = b && b.name ? b.name : "";
+      return aName.localeCompare(bName);
+    });
+    const hasMatches = matches.length > 0;
+    const message = hasMatches
+      ? `Add ${label} to inventory and relink the matching item below?`
+      : `Add ${label} to inventory so you can track stock and reorders?`;
+    const confirmText = hasMatches ? "Link inventory" : "Add to inventory";
+    const confirmed = await showConfirmModal({
+      title: "Add to inventory?",
+      message,
+      items: hasMatches ? matches.map(item => item && item.name ? item.name : "Unnamed inventory item") : [],
+      cancelText: "Not now",
+      confirmText,
+      confirmVariant: "primary"
+    });
+    if (!confirmed) return;
+
+    if (hasMatches){
+      const preferred = matches[0];
+      if (!preferred) return;
+      preferred.linkedTaskId = task.id;
+      task.inventoryId = preferred.id;
+      if (task.pn && !preferred.pn) preferred.pn = task.pn;
+      if (task.storeLink && !preferred.link) preferred.link = task.storeLink;
+      if (task.price != null && (preferred.price == null || preferred.price === "")){
+        const priceNum = Number(task.price);
+        if (Number.isFinite(priceNum)) preferred.price = priceNum;
+      }
+      persist();
+      toast("Linked to inventory");
+      return;
+    }
+
+    const existingIds = new Set(Array.isArray(inventory) ? inventory.filter(Boolean).map(item => String(item.id)) : []);
+    let newId = task && task.id ? `inv_${task.id}` : "";
+    if (!newId || existingIds.has(newId)){
+      do {
+        newId = genId("inventory");
+      } while (existingIds.has(newId));
+    }
+    const priceNum = Number(task.price);
+    const price = Number.isFinite(priceNum) ? priceNum : null;
+    const newItem = {
+      id: newId,
+      name: task.name || "",
+      qty: 1,
+      unit: "pcs",
+      pn: task.pn || "",
+      link: task.storeLink || "",
+      price,
+      note: "",
+      linkedTaskId: task.id,
+      autoCreatedFromTask: true
+    };
+    if (!Array.isArray(inventory)) inventory = [];
+    inventory.unshift(newItem);
+    window.inventory = inventory;
+    task.inventoryId = newItem.id;
+    persist();
+    toast("Inventory item created");
+  }
+
+  window.__promptAddInventoryForTask = promptAddTaskToInventory;
+
   const hideContextMenu = ()=>{
     if (contextMenu){
       contextMenu.hidden = true;
@@ -3650,6 +3745,7 @@ function renderSettings(){
     const id = genId(name);
     const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
 
+    let createdTask = null;
     if (mode === "interval"){
       const intervalVal = data.get("taskInterval");
       const interval = intervalVal === null || intervalVal === "" ? 8 : Number(intervalVal);
@@ -3658,15 +3754,23 @@ function renderSettings(){
       const baselineHours = parseBaselineHours(data.get("taskLastServiced"));
       applyIntervalBaseline(task, { baselineHours, currentHours: curHours });
       window.tasksInterval.unshift(task);
+      createdTask = task;
     }else{
       const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
       const task = Object.assign(base, { mode:"asreq", condition });
       window.tasksAsReq.unshift(task);
+      createdTask = task;
     }
 
     persist();
     hideModal();
     renderSettings();
+    if (createdTask){
+      setTimeout(()=>{
+        const fn = window.__promptAddInventoryForTask;
+        if (typeof fn === "function") fn(createdTask);
+      }, 60);
+    }
   });
 
   function findTaskMeta(id){
@@ -3691,12 +3795,19 @@ function renderSettings(){
     }
     const taskPN = typeof task.pn === "string" ? task.pn.trim().toLowerCase() : "";
     const taskLink = typeof task.storeLink === "string" ? task.storeLink.trim() : "";
+    const fallbackId = `${task.name || ""}-${task.pn || ""}-${task.storeLink || ""}`;
     inventory.forEach(item => {
       if (!item) return;
       const itemId = item.id != null ? String(item.id) : "";
+      const itemLinkedTask = item.linkedTaskId != null ? String(item.linkedTaskId) : "";
       if (itemId && candidateIds.has(itemId) && !seen.has(itemId)){
         matches.push(item);
         seen.add(itemId);
+        return;
+      }
+      if (itemLinkedTask && itemLinkedTask === String(task.id) && !seen.has(itemId || fallbackId)){
+        matches.push(item);
+        seen.add(itemId || fallbackId);
         return;
       }
       if (taskPN && item.pn && String(item.pn).trim().toLowerCase() === taskPN && !seen.has(itemId)){
@@ -3818,6 +3929,21 @@ function renderSettings(){
       const meta = findTaskMeta(id);
       if (!meta) return;
       const task = meta.task;
+      try {
+        if (typeof recordDeletedItem === "function"){
+          const deletionMeta = {
+            list: meta.mode,
+            cat: task?.cat ?? null,
+            parentTask: task?.parentTask ?? null,
+            inventoryId: task?.inventoryId ?? null,
+            linkedInventoryId: task?.inventoryId ?? null,
+            inventoryIdOriginal: task?.inventoryId ?? null
+          };
+          recordDeletedItem("task", task, deletionMeta);
+        }
+      } catch (err) {
+        console.warn("Failed to record deleted task", err);
+      }
       const matches = findInventoryMatchesForTask(task);
       let removeInventoryAlso = false;
       if (matches.length){
@@ -3833,7 +3959,7 @@ function renderSettings(){
       if (removeInventoryAlso){
         for (const item of matches){
           if (!item || item.id == null) continue;
-          const deleted = await deleteInventoryItem(item.id, { skipConfirm: true });
+          const deleted = await deleteInventoryItem(item.id, { skipConfirm: true, linkedTaskId: task.id });
           if (deleted) reRendered = true;
         }
       }
@@ -5575,6 +5701,14 @@ function renderJobs(){
         : true;
       if (!proceed) return;
       const idStr = String(id);
+      const entry = completedCuttingJobs.find(job => String(job?.id) === idStr);
+      if (entry){
+        try {
+          if (typeof recordDeletedItem === "function") recordDeletedItem("completed-job", entry, {});
+        } catch (err) {
+          console.warn("Failed to record deleted completed job", err);
+        }
+      }
       completedCuttingJobs = completedCuttingJobs.filter(job => String(job?.id) !== idStr);
       window.completedCuttingJobs = completedCuttingJobs;
       editingCompletedJobsSet().delete(idStr);
@@ -5704,6 +5838,14 @@ function renderJobs(){
     // Remove
     if (rm){
       const id = rm.getAttribute("data-remove-job");
+      const job = cuttingJobs.find(x=>x.id===id);
+      if (job){
+        try {
+          if (typeof recordDeletedItem === "function") recordDeletedItem("job", job, {});
+        } catch (err) {
+          console.warn("Failed to record deleted job", err);
+        }
+      }
       cuttingJobs = cuttingJobs.filter(x=>x.id!==id);
       saveCloudDebounced(); toast("Removed"); renderJobs();
       return;
@@ -6310,6 +6452,7 @@ async function deleteInventoryItem(id, options){
   const skipConfirm = opts.skipConfirm === true;
   const suppressToast = opts.suppressToast === true;
   const suppressRender = opts.suppressRender === true;
+  const linkedTaskIdOpt = opts.linkedTaskId != null ? String(opts.linkedTaskId) : null;
   const idx = inventory.findIndex(item => item && item.id === id);
   if (idx < 0){ toast("Inventory item not found."); return false; }
 
@@ -6335,7 +6478,38 @@ async function deleteInventoryItem(id, options){
   }
   if (!confirmed) return false;
 
+  try {
+    if (typeof recordDeletedItem === "function"){
+      const deletionMeta = {
+        linkedTaskId: linkedTaskIdOpt || (item && item.linkedTaskId != null ? item.linkedTaskId : null),
+        originalId: item && item.id != null ? item.id : null
+      };
+      recordDeletedItem("inventory", item, deletionMeta);
+    }
+  } catch (err) {
+    console.warn("Failed to record deleted inventory item", err);
+  }
+  const itemIdStr = item && item.id != null ? String(item.id) : null;
+  if (itemIdStr){
+    const lists = [window.tasksInterval, window.tasksAsReq];
+    let touched = false;
+    lists.forEach(list => {
+      if (!Array.isArray(list)) return;
+      list.forEach(task => {
+        if (!task) return;
+        if (String(task.inventoryId || "") === itemIdStr){
+          task.inventoryId = null;
+          touched = true;
+        }
+      });
+    });
+    if (touched){
+      try { if (typeof saveTasks === "function") saveTasks(); }
+      catch (err) { console.warn("Failed to persist tasks after inventory unlink", err); }
+    }
+  }
   inventory.splice(idx, 1);
+  window.inventory = inventory;
   saveCloudDebounced();
   if (!suppressToast) toast("Inventory item removed");
 
@@ -6524,6 +6698,16 @@ function renderOrderRequest(){
       const id = removeBtn.getAttribute("data-order-remove");
       const idx = draft.items.findIndex(item => item.id === id);
       if (idx >= 0){
+        const line = draft.items[idx];
+        if (line){
+          try {
+            if (typeof recordDeletedItem === "function"){
+              recordDeletedItem("order-item", line, { requestId: draft.id });
+            }
+          } catch (err) {
+            console.warn("Failed to record deleted order item", err);
+          }
+        }
         draft.items.splice(idx,1);
         orderPartialSelection.delete(id);
         saveCloudDebounced();
@@ -6568,5 +6752,92 @@ function renderOrderRequest(){
   });
 
   updateOrderTotalsUI(activeCard, draft);
+}
+
+function describeDeletedType(type){
+  const key = (type || "").toLowerCase();
+  switch (key) {
+    case "task": return "Maintenance task";
+    case "inventory": return "Inventory item";
+    case "job": return "Active job";
+    case "completed-job": return "Completed job";
+    case "folder": return "Category";
+    case "garnet": return "Garnet cleaning";
+    case "order-item": return "Order request item";
+    case "total-history": return "Machine hours entry";
+    case "workspace": return "Workspace snapshot";
+    default: return type || "Item";
+  }
+}
+
+function formatTrashDate(iso){
+  if (!iso) return "—";
+  const dt = new Date(iso);
+  if (!Number.isFinite(dt.getTime())) return iso;
+  try {
+    return dt.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  } catch (_){
+    return dt.toISOString();
+  }
+}
+
+function computeDeletedItemsModel(){
+  const entries = typeof listDeletedItems === "function" ? listDeletedItems() : [];
+  const items = entries.map(entry => ({
+    id: entry.id,
+    icon: "🗑",
+    label: entry.label || describeDeletedType(entry.type),
+    typeLabel: describeDeletedType(entry.type),
+    deletedAt: formatTrashDate(entry.deletedAt),
+    deletedAtISO: entry.deletedAt || null,
+    expiresAt: entry.expiresAt ? formatTrashDate(entry.expiresAt) : "—",
+    expiresAtISO: entry.expiresAt || null
+  }));
+  return { items };
+}
+
+function renderDeletedItems(){
+  const content = document.getElementById("content"); if (!content) return;
+  setAppSettingsContext("default");
+  wireDashboardSettingsMenu();
+  try { if (typeof purgeExpiredDeletedItems === "function") purgeExpiredDeletedItems(); }
+  catch (_){ /* ignore */ }
+  const model = computeDeletedItemsModel();
+  content.innerHTML = viewDeletedItems(model);
+
+  content.querySelectorAll("[data-trash-restore]").forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-trash-restore");
+      if (!id) return;
+      try {
+        const result = typeof restoreDeletedItem === "function" ? restoreDeletedItem(id) : { ok:false };
+        if (result && result.ok){
+          toast("Item restored");
+          renderDeletedItems();
+        } else {
+          alert("Unable to restore this item.");
+        }
+      } catch (err) {
+        console.error("Restore failed", err);
+        alert("Unable to restore this item.");
+      }
+    });
+  });
+
+  content.querySelectorAll("[data-trash-delete]").forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-trash-delete");
+      if (!id) return;
+      const proceed = window.confirm ? window.confirm("Are you sure this will PERMINETLY Delete this forever") : true;
+      if (!proceed) return;
+      const removed = typeof removeDeletedItem === "function" ? removeDeletedItem(id) : false;
+      if (removed){
+        toast("Item deleted forever");
+        renderDeletedItems();
+      } else {
+        alert("Unable to delete this item.");
+      }
+    });
+  });
 }
 

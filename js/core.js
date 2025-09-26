@@ -323,6 +323,510 @@ let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
 
+function refreshGlobalCollections(){
+  if (typeof window === "undefined") return;
+
+  if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
+  tasksInterval = window.tasksInterval;
+
+  if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
+  tasksAsReq = window.tasksAsReq;
+
+  if (!Array.isArray(window.inventory)) window.inventory = [];
+  inventory = window.inventory;
+
+  if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
+  cuttingJobs = window.cuttingJobs;
+
+  if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+  completedCuttingJobs = window.completedCuttingJobs;
+
+  if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+  orderRequests = window.orderRequests;
+
+  if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+  garnetCleanings = window.garnetCleanings;
+}
+
+const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+if (!Array.isArray(window.deletedItems)) window.deletedItems = [];
+
+function cloneStructured(value){
+  if (value == null) return value;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (err) {
+    console.warn("Failed to clone value for trash entry", err);
+    return value;
+  }
+}
+
+function computeTrashExpiresAt(deletedISO){
+  const deleted = deletedISO ? new Date(deletedISO) : null;
+  const base = deleted ? deleted.getTime() : NaN;
+  if (!Number.isFinite(base)) return null;
+  return new Date(base + TRASH_RETENTION_MS).toISOString();
+}
+
+function buildTrashLabel(type, payload, meta){
+  const safePayload = payload || {};
+  const name = safePayload.name || safePayload.title || safePayload.label;
+  switch (type) {
+    case "task":
+      return `Maintenance task: ${name || "(unnamed task)"}`;
+    case "inventory":
+      return `Inventory item: ${name || "(unnamed item)"}`;
+    case "job":
+      return `Active job: ${name || "(unnamed job)"}`;
+    case "completed-job":
+      return `Completed job: ${name || "(unnamed job)"}`;
+    case "folder":
+      return `Category: ${name || "(unnamed category)"}`;
+    case "garnet":
+      return `Garnet cleaning on ${safePayload.dateISO || "(unknown date)"}`;
+    case "order-item":
+      return `Order item: ${name || "(unnamed item)"}`;
+    case "total-history":
+      return `Machine hours entry (${safePayload.dateISO || "unknown date"})`;
+    case "workspace":
+      return "Workspace snapshot";
+    default:
+      if (meta && typeof meta.label === "string" && meta.label.trim()){
+        return meta.label.trim();
+      }
+      return type ? `Deleted ${type}` : "Deleted item";
+  }
+}
+
+function normalizeDeletedItem(raw){
+  if (!raw || typeof raw !== "object") return null;
+  const type = typeof raw.type === "string" && raw.type ? raw.type : "unknown";
+  const deletedISO = raw.deletedAt || raw.deletedISO || raw.deleted_at || raw.timestamp || null;
+  const deletedDate = deletedISO ? new Date(deletedISO) : new Date();
+  const deletedMs = deletedDate.getTime();
+  if (!Number.isFinite(deletedMs)) return null;
+  if ((Date.now() - deletedMs) > TRASH_RETENTION_MS) return null;
+  const payload = cloneStructured(raw.payload);
+  const meta = raw.meta && typeof raw.meta === "object" ? { ...raw.meta } : {};
+  const label = typeof raw.label === "string" && raw.label ? raw.label : buildTrashLabel(type, payload, meta);
+  const id = raw.id ? String(raw.id) : genId(`trash_${type}`);
+  return {
+    id,
+    type,
+    payload,
+    meta,
+    label,
+    deletedAt: new Date(deletedMs).toISOString()
+  };
+}
+
+function normalizeDeletedItems(list){
+  const normalized = [];
+  if (Array.isArray(list)){
+    for (const raw of list){
+      const entry = normalizeDeletedItem(raw);
+      if (entry) normalized.push(entry);
+    }
+  }
+  normalized.sort((a, b)=>{
+    const aTime = new Date(a.deletedAt || 0).getTime();
+    const bTime = new Date(b.deletedAt || 0).getTime();
+    return bTime - aTime;
+  });
+  return normalized;
+}
+
+let deletedItems = normalizeDeletedItems(window.deletedItems);
+window.deletedItems = deletedItems;
+
+function findTaskByIdLocal(taskId){
+  const id = taskId != null ? String(taskId) : "";
+  if (!id) return null;
+  if (Array.isArray(tasksInterval)){
+    for (const task of tasksInterval){
+      if (task && String(task.id) === id) return task;
+    }
+  }
+  if (Array.isArray(tasksAsReq)){
+    for (const task of tasksAsReq){
+      if (task && String(task.id) === id) return task;
+    }
+  }
+  return null;
+}
+
+function findInventoryByIdLocal(inventoryId){
+  const id = inventoryId != null ? String(inventoryId) : "";
+  if (!id) return null;
+  if (!Array.isArray(inventory)) return null;
+  for (const item of inventory){
+    if (item && String(item.id) === id) return item;
+  }
+  return null;
+}
+
+function ensureTaskInventoryLink(task, item){
+  if (!task || !item) return;
+  task.inventoryId = item.id;
+  item.linkedTaskId = task.id;
+}
+
+function restoreLinkedDeletedEntry(predicate, options = {}){
+  if (typeof predicate !== "function") return null;
+  const opts = options || {};
+  const skipId = opts.skipId ? String(opts.skipId) : null;
+  try { purgeExpiredDeletedItems(); }
+  catch (err) { console.warn("Failed to purge before restoring linked entry", err); }
+  for (let i = 0; i < deletedItems.length; i += 1){
+    const entry = deletedItems[i];
+    if (!entry) continue;
+    if (skipId && String(entry.id) === skipId) continue;
+    let matches = false;
+    try {
+      matches = Boolean(predicate(entry));
+    } catch (err) {
+      console.warn("Linked trash predicate failed", err);
+      matches = false;
+    }
+    if (!matches) continue;
+    const result = applyRestoreByType(entry, i);
+    if (!result) return null;
+    if (!result.handledRemoval){
+      deletedItems.splice(i, 1);
+      window.deletedItems = deletedItems;
+    }else{
+      deletedItems = window.deletedItems = normalizeDeletedItems(window.deletedItems);
+    }
+    return { entry, result };
+  }
+  return null;
+}
+
+function purgeExpiredDeletedItems(){
+  const normalized = normalizeDeletedItems(deletedItems);
+  let changed = normalized.length !== deletedItems.length;
+  if (!changed){
+    for (let i = 0; i < normalized.length; i += 1){
+      if (normalized[i].id !== deletedItems[i].id){
+        changed = true;
+        break;
+      }
+    }
+  }
+  if (changed){
+    deletedItems = normalized;
+    window.deletedItems = deletedItems;
+  }
+  return changed;
+}
+
+function listDeletedItems(){
+  purgeExpiredDeletedItems();
+  return deletedItems.map(entry => ({
+    ...entry,
+    expiresAt: computeTrashExpiresAt(entry.deletedAt)
+  }));
+}
+
+function addDeletedItem(type, payload, meta){
+  const entryPayload = cloneStructured(payload);
+  const entryMeta = meta && typeof meta === "object" ? { ...meta } : {};
+  const entry = {
+    id: genId(`trash_${type || "item"}`),
+    type: type || "unknown",
+    payload: entryPayload,
+    meta: entryMeta,
+    label: buildTrashLabel(type, entryPayload, entryMeta),
+    deletedAt: new Date().toISOString()
+  };
+  deletedItems.unshift(entry);
+  purgeExpiredDeletedItems();
+  window.deletedItems = deletedItems;
+  try { saveCloudDebounced(); }
+  catch (err) { console.warn("Failed to schedule save after recording deleted item", err); }
+  return entry;
+}
+
+function removeDeletedItem(id){
+  purgeExpiredDeletedItems();
+  const idx = deletedItems.findIndex(entry => entry && entry.id === id);
+  if (idx < 0) return false;
+  deletedItems.splice(idx, 1);
+  window.deletedItems = deletedItems;
+  try { saveCloudDebounced(); }
+  catch (err) { console.warn("Failed to schedule save after deleting trash entry", err); }
+  return true;
+}
+
+function applyRestoreByType(entry, index){
+  if (!entry) return null;
+  const { type, payload, meta } = entry;
+  const clone = cloneStructured(payload) || {};
+  switch (type) {
+    case "task": {
+      const mode = meta && meta.list === "asreq" ? "asreq" : "interval";
+      let targetList = mode === "asreq" ? tasksAsReq : tasksInterval;
+      if (!Array.isArray(targetList)) targetList = [];
+      if (!clone.id) clone.id = genId(clone.name || "task");
+      const existing = new Set(targetList.filter(Boolean).map(item => String(item.id)));
+      while (existing.has(String(clone.id))){
+        clone.id = genId(clone.name || "task");
+      }
+      clone.mode = mode;
+      if (clone.parentTask == null) clone.parentTask = null;
+      if (clone.cat === undefined) clone.cat = clone.cat ?? null;
+      if (typeof window._maintOrderCounter !== "number" || !Number.isFinite(window._maintOrderCounter)){
+        window._maintOrderCounter = 0;
+      }
+      const orderVal = Number(clone.order);
+      if (Number.isFinite(orderVal)){
+        if (orderVal > window._maintOrderCounter) window._maintOrderCounter = orderVal;
+      } else {
+        clone.order = ++window._maintOrderCounter;
+      }
+      targetList.push(clone);
+      if (mode === "asreq"){ tasksAsReq = targetList; window.tasksAsReq = tasksAsReq; }
+      else { tasksInterval = targetList; window.tasksInterval = tasksInterval; }
+
+      const taskIdStr = String(clone.id);
+      const candidateInventoryIds = [];
+      if (clone.inventoryId != null) candidateInventoryIds.push(clone.inventoryId);
+      if (meta && meta.inventoryId != null) candidateInventoryIds.push(meta.inventoryId);
+      if (meta && meta.linkedInventoryId != null) candidateInventoryIds.push(meta.linkedInventoryId);
+      if (meta && meta.inventoryIdOriginal != null) candidateInventoryIds.push(meta.inventoryIdOriginal);
+
+      let linkedItem = null;
+      for (const candidate of candidateInventoryIds){
+        if (candidate == null) continue;
+        linkedItem = findInventoryByIdLocal(candidate);
+        if (linkedItem) break;
+      }
+      if (!linkedItem && Array.isArray(inventory)){
+        linkedItem = inventory.find(item => item && String(item.linkedTaskId || "") === taskIdStr) || null;
+      }
+      if (!linkedItem){
+        const restored = restoreLinkedDeletedEntry(entryCandidate => {
+          if (!entryCandidate || entryCandidate.type !== "inventory") return false;
+          const payload = entryCandidate.payload || {};
+          const metaInfo = entryCandidate.meta || {};
+          const payloadId = payload.id != null ? String(payload.id) : "";
+          const metaId = metaInfo.originalId != null ? String(metaInfo.originalId) : "";
+          const metaLinked = metaInfo.linkedTaskId != null ? String(metaInfo.linkedTaskId) : "";
+          const payloadLinked = payload.linkedTaskId != null ? String(payload.linkedTaskId) : "";
+          for (const candidate of candidateInventoryIds){
+            const candidateId = candidate != null ? String(candidate) : "";
+            if (candidateId && (payloadId === candidateId || metaId === candidateId)) return true;
+          }
+          if (metaLinked && metaLinked === taskIdStr) return true;
+          if (payloadLinked && payloadLinked === taskIdStr) return true;
+          return false;
+        }, { skipId: entry.id });
+        if (restored && restored.result && restored.result.value && restored.result.value.type === "inventory"){
+          linkedItem = findInventoryByIdLocal(restored.result.value.id) || null;
+          if (!linkedItem && Array.isArray(inventory)){
+            linkedItem = inventory.find(item => item && String(item.linkedTaskId || "") === taskIdStr) || null;
+          }
+        }
+      }
+      if (linkedItem){
+        ensureTaskInventoryLink(clone, linkedItem);
+      }else{
+        clone.inventoryId = null;
+      }
+      return { handledRemoval: false, value: { type: "task", id: clone.id } };
+    }
+    case "inventory": {
+      if (!Array.isArray(inventory)) inventory = [];
+      if (!clone.id) clone.id = genId(clone.name || "item");
+      const existing = new Set(inventory.filter(Boolean).map(item => String(item.id)));
+      while (existing.has(String(clone.id))){
+        clone.id = genId(clone.name || "item");
+      }
+      inventory.push(clone);
+      window.inventory = inventory;
+
+      const linkedTaskIdRaw = clone.linkedTaskId != null ? clone.linkedTaskId : (meta && meta.linkedTaskId != null ? meta.linkedTaskId : null);
+      const linkedTaskId = linkedTaskIdRaw != null ? String(linkedTaskIdRaw) : "";
+      if (linkedTaskId){
+        let task = findTaskByIdLocal(linkedTaskId);
+        if (!task){
+          const restored = restoreLinkedDeletedEntry(entryCandidate => {
+            if (!entryCandidate || entryCandidate.type !== "task") return false;
+            const payload = entryCandidate.payload || {};
+            const metaInfo = entryCandidate.meta || {};
+            const payloadId = payload.id != null ? String(payload.id) : "";
+            if (payloadId && payloadId === linkedTaskId) return true;
+            const metaInventoryId = metaInfo.inventoryId != null ? String(metaInfo.inventoryId) : "";
+            const metaLinkedInventoryId = metaInfo.linkedInventoryId != null ? String(metaInfo.linkedInventoryId) : "";
+            const payloadInventoryId = payload.inventoryId != null ? String(payload.inventoryId) : "";
+            const metaInventoryOriginal = metaInfo.inventoryIdOriginal != null ? String(metaInfo.inventoryIdOriginal) : "";
+            const inventoryIds = [metaInventoryId, metaLinkedInventoryId, payloadInventoryId, metaInventoryOriginal].filter(Boolean);
+            const cloneIdStr = String(clone.id);
+            if (inventoryIds.some(candidate => candidate === cloneIdStr)) return true;
+            return false;
+          }, { skipId: entry.id });
+          if (restored && restored.result && restored.result.value && restored.result.value.type === "task"){
+            task = findTaskByIdLocal(restored.result.value.id);
+          }
+        }
+        if (task){
+          ensureTaskInventoryLink(task, clone);
+        }
+      }
+      return { handledRemoval: false, value: { type: "inventory", id: clone.id } };
+    }
+    case "job": {
+      if (!Array.isArray(cuttingJobs)) cuttingJobs = [];
+      if (!Array.isArray(clone.manualLogs)) clone.manualLogs = [];
+      if (!Array.isArray(clone.files)) clone.files = [];
+      if (!clone.id) clone.id = genId(clone.name || "job");
+      const existing = new Set(cuttingJobs.filter(Boolean).map(job => String(job.id)));
+      while (existing.has(String(clone.id))){
+        clone.id = genId(clone.name || "job");
+      }
+      cuttingJobs.push(clone);
+      window.cuttingJobs = cuttingJobs;
+      return { handledRemoval: false, value: { type: "job", id: clone.id } };
+    }
+    case "completed-job": {
+      if (!Array.isArray(completedCuttingJobs)) completedCuttingJobs = [];
+      if (!Array.isArray(clone.manualLogs)) clone.manualLogs = [];
+      if (!Array.isArray(clone.files)) clone.files = [];
+      if (!clone.id) clone.id = genId(clone.name || "job");
+      const existing = new Set(completedCuttingJobs.filter(Boolean).map(job => String(job.id)));
+      while (existing.has(String(clone.id))){
+        clone.id = genId(clone.name || "job");
+      }
+      completedCuttingJobs.push(clone);
+      window.completedCuttingJobs = completedCuttingJobs;
+      return { handledRemoval: false, value: { type: "completed-job", id: clone.id } };
+    }
+    case "folder": {
+      window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+      const existing = new Set(window.settingsFolders.map(f => String(f.id)));
+      if (!clone.id) clone.id = genId(clone.name || "folder");
+      while (existing.has(String(clone.id))){
+        clone.id = genId(clone.name || "folder");
+      }
+      if (typeof window._maintOrderCounter !== "number" || !Number.isFinite(window._maintOrderCounter)){
+        window._maintOrderCounter = 0;
+      }
+      const orderVal = Number(clone.order);
+      if (Number.isFinite(orderVal)){
+        if (orderVal > window._maintOrderCounter) window._maintOrderCounter = orderVal;
+      } else {
+        clone.order = ++window._maintOrderCounter;
+      }
+      window.settingsFolders.push(clone);
+      try { setSettingsFolders(window.settingsFolders); }
+      catch (err) { console.warn("Failed to normalize folders after restore", err); }
+      return { handledRemoval: false, value: { type: "folder", id: clone.id } };
+    }
+    case "garnet": {
+      if (!Array.isArray(garnetCleanings)) garnetCleanings = [];
+      if (!clone.id) clone.id = genId("garnet");
+      const existing = new Set(garnetCleanings.filter(Boolean).map(item => String(item.id)));
+      while (existing.has(String(clone.id))){
+        clone.id = genId("garnet");
+      }
+      garnetCleanings.push(clone);
+      garnetCleanings.sort((a, b)=> String(a.dateISO || "").localeCompare(String(b.dateISO || "")));
+      window.garnetCleanings = garnetCleanings;
+      return { handledRemoval: false, value: { type: "garnet", id: clone.id } };
+    }
+    case "order-item": {
+      if (!Array.isArray(orderRequests)) orderRequests = [];
+      let request = null;
+      if (meta && meta.requestId){
+        request = orderRequests.find(req => req && req.id === meta.requestId);
+      }
+      if (!request){
+        try { request = ensureActiveOrderRequest(); }
+        catch (_){ request = null; }
+      }
+      if (!request){
+        const created = createOrderRequest();
+        orderRequests.push(created);
+        request = created;
+      }
+      request.items = Array.isArray(request.items) ? request.items : [];
+      if (!clone.id) clone.id = genId(clone.name || "order_item");
+      const existing = new Set(request.items.filter(Boolean).map(item => String(item.id)));
+      while (existing.has(String(clone.id))){
+        clone.id = genId(clone.name || "order_item");
+      }
+      request.items.push(clone);
+      window.orderRequests = orderRequests;
+      return { handledRemoval: false, value: { type: "order-item", id: clone.id, requestId: request.id } };
+    }
+    case "total-history": {
+      if (!Array.isArray(totalHistory)) totalHistory = [];
+      if (!clone.dateISO) clone.dateISO = new Date().toISOString().slice(0,10);
+      if (clone.hours == null) clone.hours = 0;
+      totalHistory.push(clone);
+      totalHistory.sort((a, b)=> String(a.dateISO||"").localeCompare(String(b.dateISO||"")));
+      window.totalHistory = totalHistory;
+      try { syncRenderTotalsFromHistory(); }
+      catch (err) { console.warn("Failed to sync totals after restoring history", err); }
+      return { handledRemoval: false, value: { type: "total-history", dateISO: clone.dateISO } };
+    }
+    case "workspace": {
+      const snapshot = cloneStructured(payload) || {};
+      const survivors = deletedItems
+        .filter((_, idx) => idx !== index)
+        .map(item => ({ id: item.id, type: item.type, payload: cloneStructured(item.payload), meta: { ...item.meta }, label: item.label, deletedAt: item.deletedAt }));
+      snapshot.deletedItems = survivors;
+      adoptState(snapshot);
+      try { resetHistoryToCurrent(); }
+      catch (err) { console.warn("Failed to reset history after restoring workspace", err); }
+      return { handledRemoval: true, value: { type: "workspace" } };
+    }
+    default:
+      console.warn("Unhandled trash restore type", type);
+      return null;
+  }
+}
+
+function restoreDeletedItem(id){
+  refreshGlobalCollections();
+  purgeExpiredDeletedItems();
+  const idx = deletedItems.findIndex(entry => entry && entry.id === id);
+  if (idx < 0) return { ok:false, reason:"not_found" };
+  const entry = deletedItems[idx];
+  const result = applyRestoreByType(entry, idx);
+  if (!result) return { ok:false, reason:"restore_failed" };
+  if (!result.handledRemoval){
+    const currentIdx = deletedItems.findIndex(e => e && e.id === entry.id);
+    if (currentIdx >= 0){
+      deletedItems.splice(currentIdx, 1);
+    }
+    window.deletedItems = deletedItems;
+  } else {
+    deletedItems = window.deletedItems = normalizeDeletedItems(window.deletedItems);
+  }
+  try { saveCloudDebounced(); }
+  catch (err) { console.warn("Failed to schedule save after restoring deleted item", err); }
+  return { ok:true, value: result.value };
+}
+
+function snapshotWorkspaceForTrash(){
+  const snap = snapshotState();
+  snap.deletedItems = [];
+  return snap;
+}
+
+function recordDeletedItem(type, payload, meta){
+  return addDeletedItem(type, payload, meta);
+}
+
+if (typeof window !== "undefined"){
+  window.listDeletedItems = listDeletedItems;
+  window.recordDeletedItem = recordDeletedItem;
+  window.restoreDeletedItem = restoreDeletedItem;
+  window.removeDeletedItem = removeDeletedItem;
+  window.purgeExpiredDeletedItems = purgeExpiredDeletedItems;
+}
+
 if (typeof window.inventorySearchTerm !== "string") window.inventorySearchTerm = "";
 let inventorySearchTerm = window.inventorySearchTerm;
 
@@ -468,6 +972,14 @@ window.defaultAsReqTasks = defaultAsReqTasks;
 function snapshotState(){
   const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
   const foldersSnapshot = snapshotSettingsFolders();
+  const trashSnapshot = deletedItems.map(entry => ({
+    id: entry.id,
+    type: entry.type,
+    payload: cloneStructured(entry.payload),
+    meta: entry.meta && typeof entry.meta === "object" ? { ...entry.meta } : {},
+    label: entry.label,
+    deletedAt: entry.deletedAt
+  }));
   return {
     schema: window.APP_SCHEMA || APP_SCHEMA,
     totalHistory,
@@ -480,6 +992,7 @@ function snapshotState(){
     orderRequestTab,
     garnetCleanings,
     pumpEff: safePumpEff,
+    deletedItems: trashSnapshot,
     settingsFolders: foldersSnapshot,
     folders: cloneFolders(window.settingsFolders)
   };
@@ -662,6 +1175,9 @@ function adoptState(doc){
   window.completedCuttingJobs = completedCuttingJobs;
   window.orderRequests = orderRequests;
   window.garnetCleanings = garnetCleanings;
+  deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
+  window.deletedItems = deletedItems;
+  purgeExpiredDeletedItems();
   if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
   window.pendingNewJobFiles.length = 0;
   if (typeof data.orderRequestTab === "string"){
@@ -750,7 +1266,8 @@ async function loadFromCloud(){
           orderRequestTab: typeof data.orderRequestTab === "string" ? data.orderRequestTab : "active",
           settingsFolders: seededFoldersPayload,
           folders: cloneFolders(seededFoldersPayload),
-          pumpEff: pe
+          pumpEff: pe,
+          deletedItems: normalizeDeletedItems(data.deletedItems || data.deleted_items || [])
         };
         adoptState(seeded);
         resetHistoryToCurrent();
@@ -802,7 +1319,8 @@ async function loadFromCloud(){
         pumpEff: pe,
         settingsFolders: defaultFolders,
         folders: cloneFolders(defaultFolders),
-        garnetCleanings: []
+        garnetCleanings: [],
+        deletedItems: []
       };
       adoptState(seeded);
       resetHistoryToCurrent();
@@ -814,7 +1332,7 @@ async function loadFromCloud(){
       ? window.pumpEff
       : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
     const fallbackFolders = defaultSettingsFolders();
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [] });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [] });
     resetHistoryToCurrent();
   }
 }
@@ -919,12 +1437,33 @@ function buildCleanState(){
     orderRequests: [createOrderRequest()],
     orderRequestTab: "active",
     garnetCleanings: [],
-    pumpEff: { ...pumpDefaults }
+    pumpEff: { ...pumpDefaults },
+    deletedItems: []
   };
 }
 
 async function clearAllAppData(){
+  try {
+    const label = (()=>{
+      try {
+        return `Workspace snapshot (${new Date().toLocaleString()})`;
+      } catch (_){
+        return "Workspace snapshot";
+      }
+    })();
+    recordDeletedItem("workspace", snapshotWorkspaceForTrash(), { reason: "clear-all", label });
+  } catch (err) {
+    console.warn("Failed to snapshot workspace before clearing", err);
+  }
   const defaults = buildCleanState();
+  defaults.deletedItems = deletedItems.map(entry => ({
+    id: entry.id,
+    type: entry.type,
+    payload: cloneStructured(entry.payload),
+    meta: entry.meta && typeof entry.meta === "object" ? { ...entry.meta } : {},
+    label: entry.label,
+    deletedAt: entry.deletedAt
+  }));
 
   if (Array.isArray(window.settingsFolders)) window.settingsFolders.length = 0;
   else window.settingsFolders = [];

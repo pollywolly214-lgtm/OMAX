@@ -357,6 +357,14 @@ body.cost-info-visible{
 .order-table input:focus{ outline:2px solid #0a63c2; outline-offset:1px; }
 .order-item-name{ font-weight:600; color:#1e2b45; }
 .order-money{ font-weight:600; color:#0a63c2; font-variant-numeric:tabular-nums; }
+
+.deleted-container .deleted-table{width:100%;border-collapse:collapse;margin-top:12px}
+.deleted-container .deleted-table th,
+.deleted-container .deleted-table td{border:1px solid #e6ecf7;padding:8px;vertical-align:top}
+.deleted-container .deleted-icon{font-size:1.5rem;text-align:center;width:48px}
+.deleted-container .deleted-label{font-weight:600}
+.deleted-container .deleted-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.deleted-container .deleted-when{min-width:180px}
 .order-card-footer{ display:flex; gap:12px; justify-content:space-between; flex-wrap:wrap; align-items:flex-start; }
 .order-total{ color:#1e2b45; }
 .order-total strong{ color:#0a63c2; font-size:20px; }
