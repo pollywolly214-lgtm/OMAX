@@ -841,12 +841,21 @@ function viewCosts(model){
   const forecastNote = breakdown.note || "Add pricing to maintenance tasks and approve order requests to enrich the forecast.";
 
   const renderSummaryCard = (card = {})=>{
-    const isForecast = card && card.key === "maintenanceForecast";
+    const key = card && card.key ? String(card.key) : "";
+    const isForecast = key === "maintenanceForecast";
+    const isCutting = key === "cuttingJobs";
     const classes = ["cost-card"];
     const attrParts = [`class="${classes.join(" ")}"`];
-    if (isForecast && card.key){
-      attrParts.push(`data-card-key="${esc(card.key)}"`);
+    if (key){
+      attrParts.push(`data-card-key="${esc(key)}"`);
+    }
+    if (isForecast){
       attrParts.push("role=\"button\"");
+      attrParts.push("tabindex=\"0\"");
+    }
+    if (isCutting){
+      attrParts.push("data-cost-cutting-card=\"\"");
+      attrParts.push("role=\"link\"");
       attrParts.push("tabindex=\"0\"");
     }
     const attr = attrParts.join(" ");
@@ -1010,7 +1019,7 @@ function viewCosts(model){
             <h3>Estimated Cost Trends</h3>
             <div class="cost-chart-toggle">
               <label><input type="checkbox" id="toggleCostMaintenance" checked> <span class="dot" style="background:${esc(chartColors.maintenance)}"></span> Maintenance</label>
-              <label><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> Cutting jobs</label>
+              <label class="cost-chart-toggle-jobs"><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> <span class="cost-chart-toggle-link" role="link" tabindex="0">Cutting jobs</span></label>
             </div>
           </div>
           <div class="cost-chart-canvas">
@@ -1094,7 +1103,7 @@ function viewCosts(model){
       </div>
 
       <div class="dashboard-window" data-cost-window="efficiency">
-        <div class="block">
+        <div class="block" data-cost-jobs-history role="link" tabindex="0">
           <h3>Cutting Job Efficiency Snapshot</h3>
           <div class="cost-jobs-summary">
             <div><span class="label">Jobs tracked</span><span>${esc(jobSummary.countLabel || "0")}</span></div>
