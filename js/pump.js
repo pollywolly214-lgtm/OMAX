@@ -868,7 +868,7 @@ function pumpWireChartTooltip(card, canvas){
   const hide = ()=> pumpHideChartTooltip(canvas, tooltip);
   const getTargets = ()=> Array.isArray(canvas.__pumpChartTargets) ? canvas.__pumpChartTargets : [];
 
-  const handlePointerHover = (event)=>{
+  const handleInteraction = (event)=>{
     const rect = canvas.getBoundingClientRect();
     const clientWidth = canvas.clientWidth || rect.width || canvas.width;
     const clientHeight = canvas.clientHeight || rect.height || canvas.height;
@@ -893,20 +893,67 @@ function pumpWireChartTooltip(card, canvas){
     }
   };
 
-  const handleLeave = ()=> hide();
+  let isDragging = false;
+  let activePointerId = null;
 
-  canvas.addEventListener("pointermove", handlePointerHover);
-  canvas.addEventListener("pointerdown", handlePointerHover);
-  canvas.addEventListener("pointerleave", handleLeave);
-  canvas.addEventListener("pointercancel", handleLeave);
-  canvas.addEventListener("blur", handleLeave);
+  const endDrag = ()=>{
+    if (activePointerId != null && typeof canvas.releasePointerCapture === "function"){
+      try{ canvas.releasePointerCapture(activePointerId); }catch(e){}
+    }
+    activePointerId = null;
+    if (isDragging){
+      isDragging = false;
+      hide();
+    }
+  };
+
+  const handlePointerDown = (event)=>{
+    isDragging = true;
+    activePointerId = event.pointerId;
+    if (typeof canvas.setPointerCapture === "function"){
+      try{ canvas.setPointerCapture(event.pointerId); }catch(e){}
+    }
+    handleInteraction(event);
+  };
+
+  const handlePointerMove = (event)=>{
+    if (!isDragging) return;
+    handleInteraction(event);
+  };
+
+  const handlePointerUp = ()=>{
+    endDrag();
+  };
+
+  const handlePointerCancel = ()=>{
+    endDrag();
+    hide();
+  };
+
+  const handlePointerLeave = ()=>{
+    if (isDragging){
+      endDrag();
+    }else{
+      hide();
+    }
+  };
+
+  canvas.addEventListener("pointerdown", handlePointerDown);
+  canvas.addEventListener("pointermove", handlePointerMove);
+  canvas.addEventListener("pointerup", handlePointerUp);
+  canvas.addEventListener("pointercancel", handlePointerCancel);
+  canvas.addEventListener("pointerleave", handlePointerLeave);
+  canvas.addEventListener("blur", hide);
 
   canvas.__pumpChartTooltipCleanup = ()=>{
-    canvas.removeEventListener("pointermove", handlePointerHover);
-    canvas.removeEventListener("pointerdown", handlePointerHover);
-    canvas.removeEventListener("pointerleave", handleLeave);
-    canvas.removeEventListener("pointercancel", handleLeave);
-    canvas.removeEventListener("blur", handleLeave);
+    canvas.removeEventListener("pointerdown", handlePointerDown);
+    canvas.removeEventListener("pointermove", handlePointerMove);
+    canvas.removeEventListener("pointerup", handlePointerUp);
+    canvas.removeEventListener("pointercancel", handlePointerCancel);
+    canvas.removeEventListener("pointerleave", handlePointerLeave);
+    canvas.removeEventListener("blur", hide);
+    activePointerId = null;
+    isDragging = false;
     hide();
   };
 }
