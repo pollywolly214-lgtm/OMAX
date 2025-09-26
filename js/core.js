@@ -208,6 +208,10 @@ async function initFirebase(){
   const passEl   = $("#authPass");
   const btnClose = $("#authClose");
 
+  const AUTO_LOGIN_EMAIL = "ryder@candmprecast.com";
+  const AUTO_LOGIN_PASSWORD = "Matthew7:21";
+  let autoLoginInProgress = false;
+
   const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
   const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
 
@@ -239,6 +243,29 @@ async function initFirebase(){
       }catch(err){ console.error(err); alert(err.message || "Sign-in failed"); }
     };
   }
+
+  const handleAutoLoginShortcut = async (event)=>{
+    if (!(event && (event.ctrlKey || event.metaKey))) return;
+    const key = (event.key || "").toLowerCase();
+    if (key !== "s") return;
+    if (FB.user || autoLoginInProgress) return;
+    event.preventDefault();
+    autoLoginInProgress = true;
+    try {
+      if (emailEl) emailEl.value = AUTO_LOGIN_EMAIL;
+      if (passEl) passEl.value = AUTO_LOGIN_PASSWORD;
+      showModal();
+      await ensureEmailPassword(AUTO_LOGIN_EMAIL, AUTO_LOGIN_PASSWORD);
+      hideModal();
+    } catch (err) {
+      console.error("Auto sign-in failed", err);
+      alert(err && err.message ? err.message : "Automatic sign-in failed");
+    } finally {
+      autoLoginInProgress = false;
+    }
+  };
+
+  window.addEventListener("keydown", handleAutoLoginShortcut);
 
   FB.auth.onAuthStateChanged(async (user)=>{
     FB.user = user || null;
