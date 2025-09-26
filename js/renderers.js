@@ -4848,7 +4848,8 @@ function computeCostModel(){
   const TASK_PART_FIELDS = [
     "pn", "partnumber", "part_number", "partnum", "part_num",
     "partno", "part_no", "sku",
-    "itemnumber", "item_number", "itemno", "item_no"
+    "itemnumber", "item_number", "itemno", "item_no",
+    "parts", "partsused", "parts_used", "components"
   ];
 
   const extractTaskMetadata = (entry)=>{
@@ -4866,19 +4867,15 @@ function computeCostModel(){
     const seenParts = new Set();
     const visited = new Set();
 
-    const pushId = (value)=>{
+    const addIdPrimitive = (value)=>{
       if (value == null) return;
-      if (typeof value === "object"){
-        visit(value);
-        return;
-      }
       const str = String(value).trim();
       if (!str || seenIds.has(str)) return;
       seenIds.add(str);
       ids.push(str);
     };
 
-    const pushName = (value)=>{
+    const addNamePrimitive = (value)=>{
       if (typeof value !== "string") return;
       const trimmed = value.trim();
       if (!trimmed || seenNames.has(trimmed)) return;
@@ -4886,7 +4883,7 @@ function computeCostModel(){
       names.push(trimmed);
     };
 
-    const pushFuzzy = (value)=>{
+    const addFuzzyPrimitive = (value)=>{
       if (typeof value !== "string") return;
       const trimmed = value.trim();
       if (!trimmed || seenFuzzy.has(trimmed)) return;
@@ -4894,21 +4891,37 @@ function computeCostModel(){
       fuzzyNames.push(trimmed);
     };
 
-    const pushPart = (value)=>{
-      const pn = cleanPartNumber(value);
-      if (!pn || seenParts.has(pn)) return;
-      seenParts.add(pn);
-      partNumbers.push(pn);
+    const addPartPrimitive = (value)=>{
+      const cleaned = cleanPartNumber(value);
+      if (!cleaned || seenParts.has(cleaned)) return;
+      seenParts.add(cleaned);
+      partNumbers.push(cleaned);
     };
 
-    const visit = (value, depth = 0)=>{
-      if (!value || depth > 3) return;
+    const CONTEXT_HINTS = [
+      "task", "job", "maint", "service", "repair", "component", "subtask",
+      "maintenance", "workorder", "work_order", "maintenanceevent", "maintenance_job",
+      "maintenance_task", "maintenanceitem", "maintenance_item", "workorderitem", "work_order_item"
+    ];
+
+    const CONTEXT_ID_HINTS = ["id", "uuid", "identifier", "code", "taskcode", "jobcode"];
+    const CONTEXT_NAME_HINTS = [
+      "task", "job", "component", "item", "operation", "step", "title", "maintenance", "service"
+    ];
+    const CONTEXT_PART_HINTS = ["part", "partnum", "partnumber", "component", "item", "parts", "partsused", "components"];
+
+    const shouldTreatAsTaskContext = (path)=>{
+      return path.some(segment => CONTEXT_HINTS.some(hint => segment.includes(hint)));
+    };
+
+    const visit = (value, depth = 0, path = [])=>{
+      if (!value || depth > 6) return;
       if (Array.isArray(value)){
-        value.forEach(item => visit(item, depth + 1));
+        value.forEach(item => visit(item, depth + 1, path));
         return;
       }
       if (typeof value !== "object"){
-        if (depth > 0) pushFuzzy(value);
+        if (depth > 0) addFuzzyPrimitive(value);
         return;
       }
       if (visited.has(value)) return;
@@ -4918,57 +4931,70 @@ function computeCostModel(){
         const val = value[key];
         if (val == null) continue;
         const lower = key.toLowerCase();
+        const nextPath = path.concat(lower);
+        const inContext = shouldTreatAsTaskContext(path) || shouldTreatAsTaskContext(nextPath);
+
+        const collect = (input, handler)=>{
+          if (input == null) return;
+          if (Array.isArray(input)){
+            input.forEach(item => collect(item, handler));
+            return;
+          }
+          if (typeof input === "object"){
+            visit(input, depth + 1, nextPath);
+            return;
+          }
+          handler(input);
+        };
+
         if (TASK_ID_FIELDS.includes(lower)){
-          pushId(val);
+          collect(val, addIdPrimitive);
           continue;
         }
         if (TASK_NAME_FIELDS.includes(lower)){
-          pushName(val);
+          collect(val, addNamePrimitive);
           continue;
         }
         if (TASK_PART_FIELDS.includes(lower)){
-          pushPart(val);
+          collect(val, addPartPrimitive);
           continue;
         }
         if (TASK_FUZZY_FIELDS.includes(lower)){
-          if (typeof val === "object") visit(val, depth + 1);
-          else pushFuzzy(val);
+          collect(val, addFuzzyPrimitive);
           continue;
         }
 
-        if (lower === "task" || lower === "maintenancetask" || lower === "maintenance" || lower === "job"){
-          if (typeof val === "string" || typeof val === "number"){
-            pushName(val);
-            pushId(val);
+        if (inContext){
+          if (CONTEXT_ID_HINTS.includes(lower)){
+            collect(val, addIdPrimitive);
+            continue;
+          }
+          if (CONTEXT_NAME_HINTS.includes(lower)){
+            collect(val, addNamePrimitive);
+            continue;
+          }
+          if (CONTEXT_PART_HINTS.includes(lower)){
+            collect(val, addPartPrimitive);
+            continue;
+          }
+          if (lower.includes("note") || lower.includes("description")){
+            collect(val, addFuzzyPrimitive);
             continue;
           }
         }
 
-        if (lower === "parts" || lower === "partsused" || lower === "components"){
-          const list = Array.isArray(val) ? val : [];
-          list.forEach(item => {
-            if (typeof item === "string" || typeof item === "number"){
-              pushPart(item);
-            }else if (item && typeof item === "object"){
-              pushPart(item.pn || item.partNumber || item.part_no || item.sku || item.itemNumber);
-              visit(item, depth + 1);
-            }
-          });
-          continue;
-        }
-
         if (lower === "meta" || lower === "payload" || lower === "event" || lower === "details" || lower === "data" || lower === "context" || lower === "source" || lower === "target" || lower === "item"){
-          visit(val, depth + 1);
+          visit(val, depth + 1, nextPath);
           continue;
         }
 
         if (typeof val === "object"){
-          visit(val, depth + 1);
+          visit(val, depth + 1, nextPath);
         }
       }
     };
 
-    visit(entry);
+    visit(entry, 0, []);
 
     const primaryId = ids.length ? ids[0] : null;
     const primaryName = names.length ? names[0] : null;
