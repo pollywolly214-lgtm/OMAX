@@ -5227,8 +5227,8 @@ function computeCostModel(){
     {
       icon: "📊",
       title: "Combined estimated impact",
-      value: formatterCurrency(predictedAnnual + totalGainLoss, { decimals: 0, showPlus: true }),
-      hint: "Maintenance forecast plus cutting job efficiency impact."
+      value: formatterCurrency(totalGainLoss - predictedAnnual, { decimals: 0, showPlus: true }),
+      hint: "Cutting job efficiency impact minus the maintenance forecast (cost treated as negative)."
     }
   ];
 
