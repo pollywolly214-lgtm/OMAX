@@ -868,22 +868,40 @@ function pumpWireChartTooltip(card, canvas){
   const hide = ()=> pumpHideChartTooltip(canvas, tooltip);
   const getTargets = ()=> Array.isArray(canvas.__pumpChartTargets) ? canvas.__pumpChartTargets : [];
 
-  const handlePointerHover = (event)=>{
+  const performInteraction = (clientX, clientY)=>{
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)){
+      hide();
+      return;
+    }
     const rect = canvas.getBoundingClientRect();
     const clientWidth = canvas.clientWidth || rect.width || canvas.width;
     const clientHeight = canvas.clientHeight || rect.height || canvas.height;
     const scaleX = canvas.width / Math.max(1, clientWidth);
     const scaleY = canvas.height / Math.max(1, clientHeight);
-    const pointerX = (event.clientX - rect.left) * scaleX;
-    const pointerY = (event.clientY - rect.top) * scaleY;
+    const pointerX = (clientX - rect.left) * scaleX;
+    const pointerY = (clientY - rect.top) * scaleY;
     const targets = getTargets();
     let hovered = null;
     for (const target of targets){
-      if (!target || !target.rect) continue;
-      const { x, y, width, height } = target.rect;
-      if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
-        hovered = target;
-        break;
+      if (!target) continue;
+      const radius = Number.isFinite(target.hitRadius) && target.hitRadius > 0
+        ? target.hitRadius
+        : (target.rect ? Math.max(target.rect.width, target.rect.height) / 2 : 0);
+      const hasCenter = Number.isFinite(target.centerX) && Number.isFinite(target.centerY) && radius > 0;
+      if (hasCenter){
+        const dx = pointerX - target.centerX;
+        const dy = pointerY - target.centerY;
+        if ((dx * dx) + (dy * dy) <= radius * radius){
+          hovered = target;
+          break;
+        }
+      }
+      if (!hovered && target.rect){
+        const { x, y, width, height } = target.rect;
+        if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
+          hovered = target;
+          break;
+        }
       }
     }
     if (hovered){
@@ -893,22 +911,142 @@ function pumpWireChartTooltip(card, canvas){
     }
   };
 
-  const handleLeave = ()=> hide();
+  const supportsPointerEvents = typeof window !== "undefined" && "PointerEvent" in window;
 
-  canvas.addEventListener("pointermove", handlePointerHover);
-  canvas.addEventListener("pointerdown", handlePointerHover);
-  canvas.addEventListener("pointerleave", handleLeave);
-  canvas.addEventListener("pointercancel", handleLeave);
-  canvas.addEventListener("blur", handleLeave);
+  if (supportsPointerEvents){
+    const pointerState = { touchActive: false };
 
-  canvas.__pumpChartTooltipCleanup = ()=>{
-    canvas.removeEventListener("pointermove", handlePointerHover);
-    canvas.removeEventListener("pointerdown", handlePointerHover);
-    canvas.removeEventListener("pointerleave", handleLeave);
-    canvas.removeEventListener("pointercancel", handleLeave);
-    canvas.removeEventListener("blur", handleLeave);
-    hide();
-  };
+    const handlePointerMove = (event)=>{
+      const type = String(event.pointerType || "").toLowerCase();
+      if (type === "touch" && !pointerState.touchActive) return;
+      performInteraction(event.clientX, event.clientY);
+    };
+
+    const handlePointerDown = (event)=>{
+      const type = String(event.pointerType || "").toLowerCase();
+      pointerState.touchActive = type === "touch" || type === "pen";
+      performInteraction(event.clientX, event.clientY);
+    };
+
+    const handlePointerEnter = (event)=>{
+      performInteraction(event.clientX, event.clientY);
+    };
+
+    const handlePointerUp = (event)=>{
+      const type = String(event.pointerType || "").toLowerCase();
+      if (type === "touch" || type === "pen"){
+        pointerState.touchActive = false;
+        hide();
+      }else{
+        performInteraction(event.clientX, event.clientY);
+      }
+    };
+
+    const handlePointerCancel = ()=>{
+      pointerState.touchActive = false;
+      hide();
+    };
+
+    const handlePointerLeave = ()=>{
+      pointerState.touchActive = false;
+      hide();
+    };
+
+    canvas.addEventListener("pointermove", handlePointerMove);
+    canvas.addEventListener("pointerdown", handlePointerDown);
+    canvas.addEventListener("pointerenter", handlePointerEnter);
+    canvas.addEventListener("pointerup", handlePointerUp);
+    canvas.addEventListener("pointercancel", handlePointerCancel);
+    canvas.addEventListener("pointerleave", handlePointerLeave);
+    canvas.addEventListener("blur", hide);
+
+    canvas.__pumpChartTooltipCleanup = ()=>{
+      canvas.removeEventListener("pointermove", handlePointerMove);
+      canvas.removeEventListener("pointerdown", handlePointerDown);
+      canvas.removeEventListener("pointerenter", handlePointerEnter);
+      canvas.removeEventListener("pointerup", handlePointerUp);
+      canvas.removeEventListener("pointercancel", handlePointerCancel);
+      canvas.removeEventListener("pointerleave", handlePointerLeave);
+      canvas.removeEventListener("blur", hide);
+      pointerState.touchActive = false;
+      hide();
+    };
+  }else{
+    const handleMouseDown = (event)=>{
+      performInteraction(event.clientX, event.clientY);
+    };
+
+    const handleMouseMove = (event)=>{
+      performInteraction(event.clientX, event.clientY);
+    };
+
+    const handleMouseEnter = (event)=>{
+      performInteraction(event.clientX, event.clientY);
+    };
+
+    const handleMouseUp = (event)=>{
+      performInteraction(event.clientX, event.clientY);
+    };
+
+    const handleMouseLeave = ()=>{
+      hide();
+    };
+
+    const resolveTouchPoint = (event)=>{
+      if (!event) return null;
+      const source = (event.touches && event.touches[0])
+        || (event.changedTouches && event.changedTouches[0])
+        || null;
+      if (!source) return null;
+      const { clientX, clientY } = source;
+      if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+      return { clientX, clientY };
+    };
+
+    const handleTouchStart = (event)=>{
+      const point = resolveTouchPoint(event);
+      if (point){
+        performInteraction(point.clientX, point.clientY);
+      }
+    };
+
+    const handleTouchMove = (event)=>{
+      const point = resolveTouchPoint(event);
+      if (point){
+        performInteraction(point.clientX, point.clientY);
+      }
+    };
+
+    const handleTouchEnd = ()=>{
+      hide();
+    };
+
+    canvas.addEventListener("mousedown", handleMouseDown);
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseenter", handleMouseEnter);
+    canvas.addEventListener("mouseup", handleMouseUp);
+    canvas.addEventListener("mouseleave", handleMouseLeave);
+    const passiveOptions = { passive: true };
+    canvas.addEventListener("touchstart", handleTouchStart, passiveOptions);
+    canvas.addEventListener("touchmove", handleTouchMove, passiveOptions);
+    canvas.addEventListener("touchend", handleTouchEnd);
+    canvas.addEventListener("touchcancel", handleTouchEnd);
+    canvas.addEventListener("blur", hide);
+
+    canvas.__pumpChartTooltipCleanup = ()=>{
+      canvas.removeEventListener("mousedown", handleMouseDown);
+      canvas.removeEventListener("mousemove", handleMouseMove);
+      canvas.removeEventListener("mouseenter", handleMouseEnter);
+      canvas.removeEventListener("mouseup", handleMouseUp);
+      canvas.removeEventListener("mouseleave", handleMouseLeave);
+      canvas.removeEventListener("touchstart", handleTouchStart, passiveOptions);
+      canvas.removeEventListener("touchmove", handleTouchMove, passiveOptions);
+      canvas.removeEventListener("touchend", handleTouchEnd);
+      canvas.removeEventListener("touchcancel", handleTouchEnd);
+      canvas.removeEventListener("blur", hide);
+      hide();
+    };
+  }
 }
 
 function drawPumpChart(canvas, rangeValue){
@@ -1117,7 +1255,7 @@ function drawPumpChart(canvas, rangeValue){
   const pointCoords = [];
   const indexByDate = new Map();
   dataAll.forEach((entry, idx)=>{ indexByDate.set(entry.dateISO, idx); });
-  const hoverRadius = Math.max(pointRadius * 2.8, scaled(18));
+  const hoverRadius = Math.max(pointRadius * 3.4, scaled(24));
 
   data.forEach(entry => {
     const d = new Date(entry.dateISO+"T00:00:00");
@@ -1172,93 +1310,14 @@ function drawPumpChart(canvas, rangeValue){
     hitTargets.push({
       key: entry.dateISO,
       rect,
+      centerX: x,
+      centerY: y,
+      hitRadius: hoverRadius / 2,
       datasetLabel: tooltipDate,
       valueLabel: `${formattedRPM} RPM`,
       detailLines: detailParts
     });
   });
-
-  if (summary && pointCoords.length){
-    const calloutTargets = [];
-    if (summary.maxEntry){
-      calloutTargets.push({
-        dateISO: summary.maxEntry.dateISO,
-        rpm: summary.maxEntry.rpm,
-        label: sameExtremeEntry ? "High / Low" : "High",
-        color: "#d73354"
-      });
-    }
-    if (summary.minEntry && !sameExtremeEntry){
-      calloutTargets.push({
-        dateISO: summary.minEntry.dateISO,
-        rpm: summary.minEntry.rpm,
-        label: "Low",
-        color: "#1f7a4d"
-      });
-    }
-    if (calloutTargets.length){
-      const minCalloutX = margin.left + scaled(4);
-      const maxCalloutX = cssWidth - margin.right - scaled(4);
-      const minCalloutY = margin.top + scaled(4);
-      const maxCalloutY = axisY - scaled(6);
-      ctx.save();
-      const prevBaseline = ctx.textBaseline;
-      const prevAlign = ctx.textAlign;
-      ctx.textBaseline = "top";
-      ctx.textAlign = "left";
-      ctx.font = fontPx(10.5);
-      const calloutLineHeight = Math.max(scaled(13), 15);
-      const calloutPadX = Math.max(scaled(8), 10);
-      const calloutPadY = Math.max(scaled(6), 8);
-      const pointerGap = Math.max(scaled(10), 14);
-      const borderRadius = Math.max(scaled(6), 8);
-      calloutTargets.forEach(target => {
-        const point = pointCoords.find(p => p.entry.dateISO === target.dateISO);
-        if (!point) return;
-        const lines = [
-          `${target.label}: ${formatRpm(target.rpm)} RPM`,
-          pumpFormatShortDate(target.dateISO)
-        ];
-        const widths = lines.map(line => ctx.measureText(line).width);
-        const bubbleWidth = Math.max(...widths) + calloutPadX * 2;
-        const bubbleHeight = lines.length * calloutLineHeight + calloutPadY * 2;
-        if (!(bubbleWidth > 0 && bubbleHeight > 0)) return;
-        const anchorX = point.x;
-        const anchorY = point.y;
-        let labelX = anchorX + pointerGap;
-        if (anchorX > (margin.left + innerW / 2)){
-          labelX = anchorX - pointerGap - bubbleWidth;
-        }
-        const maxX = maxCalloutX - bubbleWidth;
-        labelX = clamp(labelX, minCalloutX, Math.max(minCalloutX, maxX));
-        let labelY = anchorY - (bubbleHeight / 2);
-        const maxY = maxCalloutY - bubbleHeight;
-        labelY = clamp(labelY, minCalloutY, Math.max(minCalloutY, maxY));
-        const pointerTargetX = clamp(anchorX, labelX, labelX + bubbleWidth);
-        const pointerTargetY = clamp(anchorY, labelY, labelY + bubbleHeight);
-        ctx.strokeStyle = target.color;
-        ctx.lineWidth = Math.max(1, scaled(0.8));
-        ctx.beginPath();
-        ctx.moveTo(anchorX, anchorY);
-        ctx.lineTo(pointerTargetX, pointerTargetY);
-        ctx.stroke();
-        ctx.beginPath();
-        pumpRoundedRectPath(ctx, labelX, labelY, bubbleWidth, bubbleHeight, borderRadius);
-        ctx.fillStyle = "rgba(15, 23, 42, 0.86)";
-        ctx.fill();
-        ctx.strokeStyle = target.color;
-        ctx.stroke();
-        ctx.fillStyle = "#f3f6ff";
-        lines.forEach((line, idx) => {
-          const textY = labelY + calloutPadY + idx * calloutLineHeight;
-          ctx.fillText(line, labelX + calloutPadX, textY);
-        });
-      });
-      ctx.textBaseline = prevBaseline;
-      ctx.textAlign = prevAlign;
-      ctx.restore();
-    }
-  }
 
   if (yTicks.length){
     ctx.save();
@@ -1329,6 +1388,130 @@ function drawPumpChart(canvas, rangeValue){
     ctx.font = fontPx(11);
     const labelOffset = baselineY <= margin.top + scaled(6) ? scaled(6) : -scaled(4);
     ctx.fillText(`Baseline ${baselineRPM} RPM${arrow}`, axisX0 + scaled(2), baselineY + labelOffset);
+  }
+
+  if (summary && pointCoords.length){
+    const calloutTargets = [];
+    if (summary.maxEntry){
+      calloutTargets.push({
+        dateISO: summary.maxEntry.dateISO,
+        rpm: summary.maxEntry.rpm,
+        label: sameExtremeEntry ? "High & Low" : "High",
+        palette: "high"
+      });
+    }
+    if (summary.minEntry && !sameExtremeEntry){
+      calloutTargets.push({
+        dateISO: summary.minEntry.dateISO,
+        rpm: summary.minEntry.rpm,
+        label: "Low",
+        palette: "low"
+      });
+    }
+    if (calloutTargets.length){
+      const accentColors = {
+        high: { stroke: "#e45a72", fill: "#f27d8f" },
+        low: { stroke: "#2f9c6b", fill: "#46c58a" },
+        both: { stroke: "#3b82f6", fill: "#60a5fa" }
+      };
+      const minCalloutX = margin.left + scaled(6);
+      const maxCalloutX = cssWidth - margin.right - scaled(6);
+      const minCalloutY = margin.top + scaled(6);
+      const maxCalloutY = axisY - scaled(8);
+      ctx.save();
+      const prevBaseline = ctx.textBaseline;
+      const prevAlign = ctx.textAlign;
+      const labelFont = fontPx(10.2);
+      const detailFont = fontPx(9.2);
+      const labelLineHeight = Math.max(scaled(12), 13);
+      const detailLineHeight = Math.max(scaled(11), 12);
+      const calloutPadX = Math.max(scaled(6), 7);
+      const calloutPadY = Math.max(scaled(5), 6);
+      const pointerGap = Math.max(scaled(8), 10);
+      const borderRadius = Math.max(scaled(5), 6.5);
+      const accentRadius = Math.max(scaled(3), 3.8);
+      const accentGap = Math.max(scaled(4.5), 5.5);
+      ctx.textBaseline = "top";
+      ctx.textAlign = "left";
+
+      calloutTargets.forEach(target => {
+        const point = pointCoords.find(p => p.entry.dateISO === target.dateISO);
+        if (!point) return;
+        const paletteKey = accentColors[target.palette] ? target.palette : "both";
+        const palette = accentColors[paletteKey];
+        const accentStroke = palette.stroke;
+        const accentFill = palette.fill;
+        const labelLine = `${target.label}: ${formatRpm(target.rpm)} RPM`;
+        const detailLine = pumpFormatShortDate(target.dateISO);
+
+        ctx.font = labelFont;
+        const labelWidth = ctx.measureText(labelLine).width;
+        ctx.font = detailFont;
+        const detailWidth = ctx.measureText(detailLine).width;
+        const contentWidth = Math.max(labelWidth, detailWidth) + (accentRadius * 2) + accentGap;
+        const bubbleWidth = contentWidth + calloutPadX * 2;
+        const bubbleHeight = calloutPadY * 2 + labelLineHeight + detailLineHeight;
+        if (!(bubbleWidth > 0 && bubbleHeight > 0)) return;
+
+        const anchorX = point.x;
+        const anchorY = point.y;
+        let labelX = anchorX + pointerGap;
+        if (anchorX > (margin.left + innerW / 2)){
+          labelX = anchorX - pointerGap - bubbleWidth;
+        }
+        const maxX = maxCalloutX - bubbleWidth;
+        labelX = clamp(labelX, minCalloutX, Math.max(minCalloutX, maxX));
+        let labelY = anchorY - (bubbleHeight / 2);
+        const maxY = maxCalloutY - bubbleHeight;
+        labelY = clamp(labelY, minCalloutY, Math.max(minCalloutY, maxY));
+        const pointerTargetX = clamp(anchorX, labelX, labelX + bubbleWidth);
+        const pointerTargetY = clamp(anchorY, labelY, labelY + bubbleHeight);
+
+        ctx.save();
+        ctx.strokeStyle = `${accentStroke}dd`;
+        ctx.lineWidth = Math.max(1, scaled(0.7));
+        ctx.beginPath();
+        ctx.moveTo(anchorX, anchorY);
+        ctx.lineTo(pointerTargetX, pointerTargetY);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.shadowColor = "rgba(15, 23, 42, 0.45)";
+        ctx.shadowBlur = Math.max(scaled(4), 6);
+        ctx.beginPath();
+        pumpRoundedRectPath(ctx, labelX, labelY, bubbleWidth, bubbleHeight, borderRadius);
+        ctx.fillStyle = "rgba(10, 17, 32, 0.94)";
+        ctx.fill();
+        ctx.restore();
+
+        ctx.beginPath();
+        pumpRoundedRectPath(ctx, labelX, labelY, bubbleWidth, bubbleHeight, borderRadius);
+        ctx.lineWidth = Math.max(1, scaled(0.6));
+        ctx.strokeStyle = "rgba(148, 163, 184, 0.5)";
+        ctx.stroke();
+
+        const textBaseX = labelX + calloutPadX + (accentRadius * 2) + accentGap;
+        const labelTextY = labelY + calloutPadY;
+        const detailTextY = labelTextY + labelLineHeight;
+
+        ctx.beginPath();
+        ctx.fillStyle = accentFill;
+        ctx.arc(labelX + calloutPadX + accentRadius, labelTextY + (labelLineHeight / 2), accentRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.font = labelFont;
+        ctx.fillStyle = accentStroke;
+        ctx.fillText(labelLine, textBaseX, labelTextY);
+        ctx.font = detailFont;
+        ctx.fillStyle = "#d8e2ff";
+        ctx.fillText(detailLine, textBaseX, detailTextY);
+      });
+
+      ctx.textBaseline = prevBaseline;
+      ctx.textAlign = prevAlign;
+      ctx.restore();
+    }
   }
 
   ctx.fillStyle = "#1f3a60";
