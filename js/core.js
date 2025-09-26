@@ -439,6 +439,69 @@ function normalizeDeletedItems(list){
 let deletedItems = normalizeDeletedItems(window.deletedItems);
 window.deletedItems = deletedItems;
 
+function findTaskByIdLocal(taskId){
+  const id = taskId != null ? String(taskId) : "";
+  if (!id) return null;
+  if (Array.isArray(tasksInterval)){
+    for (const task of tasksInterval){
+      if (task && String(task.id) === id) return task;
+    }
+  }
+  if (Array.isArray(tasksAsReq)){
+    for (const task of tasksAsReq){
+      if (task && String(task.id) === id) return task;
+    }
+  }
+  return null;
+}
+
+function findInventoryByIdLocal(inventoryId){
+  const id = inventoryId != null ? String(inventoryId) : "";
+  if (!id) return null;
+  if (!Array.isArray(inventory)) return null;
+  for (const item of inventory){
+    if (item && String(item.id) === id) return item;
+  }
+  return null;
+}
+
+function ensureTaskInventoryLink(task, item){
+  if (!task || !item) return;
+  task.inventoryId = item.id;
+  item.linkedTaskId = task.id;
+}
+
+function restoreLinkedDeletedEntry(predicate, options = {}){
+  if (typeof predicate !== "function") return null;
+  const opts = options || {};
+  const skipId = opts.skipId ? String(opts.skipId) : null;
+  try { purgeExpiredDeletedItems(); }
+  catch (err) { console.warn("Failed to purge before restoring linked entry", err); }
+  for (let i = 0; i < deletedItems.length; i += 1){
+    const entry = deletedItems[i];
+    if (!entry) continue;
+    if (skipId && String(entry.id) === skipId) continue;
+    let matches = false;
+    try {
+      matches = Boolean(predicate(entry));
+    } catch (err) {
+      console.warn("Linked trash predicate failed", err);
+      matches = false;
+    }
+    if (!matches) continue;
+    const result = applyRestoreByType(entry, i);
+    if (!result) return null;
+    if (!result.handledRemoval){
+      deletedItems.splice(i, 1);
+      window.deletedItems = deletedItems;
+    }else{
+      deletedItems = window.deletedItems = normalizeDeletedItems(window.deletedItems);
+    }
+    return { entry, result };
+  }
+  return null;
+}
+
 function purgeExpiredDeletedItems(){
   const normalized = normalizeDeletedItems(deletedItems);
   let changed = normalized.length !== deletedItems.length;
@@ -524,6 +587,52 @@ function applyRestoreByType(entry, index){
       targetList.push(clone);
       if (mode === "asreq"){ tasksAsReq = targetList; window.tasksAsReq = tasksAsReq; }
       else { tasksInterval = targetList; window.tasksInterval = tasksInterval; }
+
+      const taskIdStr = String(clone.id);
+      const candidateInventoryIds = [];
+      if (clone.inventoryId != null) candidateInventoryIds.push(clone.inventoryId);
+      if (meta && meta.inventoryId != null) candidateInventoryIds.push(meta.inventoryId);
+      if (meta && meta.linkedInventoryId != null) candidateInventoryIds.push(meta.linkedInventoryId);
+      if (meta && meta.inventoryIdOriginal != null) candidateInventoryIds.push(meta.inventoryIdOriginal);
+
+      let linkedItem = null;
+      for (const candidate of candidateInventoryIds){
+        if (candidate == null) continue;
+        linkedItem = findInventoryByIdLocal(candidate);
+        if (linkedItem) break;
+      }
+      if (!linkedItem && Array.isArray(inventory)){
+        linkedItem = inventory.find(item => item && String(item.linkedTaskId || "") === taskIdStr) || null;
+      }
+      if (!linkedItem){
+        const restored = restoreLinkedDeletedEntry(entryCandidate => {
+          if (!entryCandidate || entryCandidate.type !== "inventory") return false;
+          const payload = entryCandidate.payload || {};
+          const metaInfo = entryCandidate.meta || {};
+          const payloadId = payload.id != null ? String(payload.id) : "";
+          const metaId = metaInfo.originalId != null ? String(metaInfo.originalId) : "";
+          const metaLinked = metaInfo.linkedTaskId != null ? String(metaInfo.linkedTaskId) : "";
+          const payloadLinked = payload.linkedTaskId != null ? String(payload.linkedTaskId) : "";
+          for (const candidate of candidateInventoryIds){
+            const candidateId = candidate != null ? String(candidate) : "";
+            if (candidateId && (payloadId === candidateId || metaId === candidateId)) return true;
+          }
+          if (metaLinked && metaLinked === taskIdStr) return true;
+          if (payloadLinked && payloadLinked === taskIdStr) return true;
+          return false;
+        }, { skipId: entry.id });
+        if (restored && restored.result && restored.result.value && restored.result.value.type === "inventory"){
+          linkedItem = findInventoryByIdLocal(restored.result.value.id) || null;
+          if (!linkedItem && Array.isArray(inventory)){
+            linkedItem = inventory.find(item => item && String(item.linkedTaskId || "") === taskIdStr) || null;
+          }
+        }
+      }
+      if (linkedItem){
+        ensureTaskInventoryLink(clone, linkedItem);
+      }else{
+        clone.inventoryId = null;
+      }
       return { handledRemoval: false, value: { type: "task", id: clone.id } };
     }
     case "inventory": {
@@ -535,6 +644,35 @@ function applyRestoreByType(entry, index){
       }
       inventory.push(clone);
       window.inventory = inventory;
+
+      const linkedTaskIdRaw = clone.linkedTaskId != null ? clone.linkedTaskId : (meta && meta.linkedTaskId != null ? meta.linkedTaskId : null);
+      const linkedTaskId = linkedTaskIdRaw != null ? String(linkedTaskIdRaw) : "";
+      if (linkedTaskId){
+        let task = findTaskByIdLocal(linkedTaskId);
+        if (!task){
+          const restored = restoreLinkedDeletedEntry(entryCandidate => {
+            if (!entryCandidate || entryCandidate.type !== "task") return false;
+            const payload = entryCandidate.payload || {};
+            const metaInfo = entryCandidate.meta || {};
+            const payloadId = payload.id != null ? String(payload.id) : "";
+            if (payloadId && payloadId === linkedTaskId) return true;
+            const metaInventoryId = metaInfo.inventoryId != null ? String(metaInfo.inventoryId) : "";
+            const metaLinkedInventoryId = metaInfo.linkedInventoryId != null ? String(metaInfo.linkedInventoryId) : "";
+            const payloadInventoryId = payload.inventoryId != null ? String(payload.inventoryId) : "";
+            const metaInventoryOriginal = metaInfo.inventoryIdOriginal != null ? String(metaInfo.inventoryIdOriginal) : "";
+            const inventoryIds = [metaInventoryId, metaLinkedInventoryId, payloadInventoryId, metaInventoryOriginal].filter(Boolean);
+            const cloneIdStr = String(clone.id);
+            if (inventoryIds.some(candidate => candidate === cloneIdStr)) return true;
+            return false;
+          }, { skipId: entry.id });
+          if (restored && restored.result && restored.result.value && restored.result.value.type === "task"){
+            task = findTaskByIdLocal(restored.result.value.id);
+          }
+        }
+        if (task){
+          ensureTaskInventoryLink(task, clone);
+        }
+      }
       return { handledRemoval: false, value: { type: "inventory", id: clone.id } };
     }
     case "job": {
@@ -658,7 +796,10 @@ function restoreDeletedItem(id){
   const result = applyRestoreByType(entry, idx);
   if (!result) return { ok:false, reason:"restore_failed" };
   if (!result.handledRemoval){
-    deletedItems.splice(idx, 1);
+    const currentIdx = deletedItems.findIndex(e => e && e.id === entry.id);
+    if (currentIdx >= 0){
+      deletedItems.splice(currentIdx, 1);
+    }
     window.deletedItems = deletedItems;
   } else {
     deletedItems = window.deletedItems = normalizeDeletedItems(window.deletedItems);
