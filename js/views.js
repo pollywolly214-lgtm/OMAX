@@ -1607,9 +1607,10 @@ function inventoryRowsHTML(list){
   return list.map(i => {
     const priceVal = i.price != null && i.price !== "" ? Number(i.price) : "";
     const priceDisplay = priceVal === "" || Number.isNaN(priceVal) ? "" : priceVal;
+    const nameDisplay = i.name || "";
     return `
     <tr>
-      <td>${i.name}</td>
+      <td><button type="button" class="inventory-name-btn" data-inventory-maintenance="${i.id}">${nameDisplay}</button></td>
       <td><input type="number" min="0" step="1" data-inv="qty" data-id="${i.id}" value="${i.qty}"></td>
       <td>${i.unit||"pcs"}</td>
       <td>${i.pn||"—"}</td>
