@@ -4556,6 +4556,132 @@ function setupCostInfoPanel(){
   window.closeCostInfoPanel = hidePanel;
 }
 
+function setupForecastBreakdownModal(){
+  const trigger = document.querySelector('[data-card-key="maintenanceForecast"]');
+  const modal = document.getElementById("forecastBreakdownModal");
+  if (!trigger || !modal) return;
+
+  if (trigger.dataset.forecastWired === "1") return;
+  trigger.dataset.forecastWired = "1";
+
+  const body = document.body;
+  const card = modal.querySelector(".forecast-modal-card");
+  const initialFocus = modal.querySelector("[data-forecast-initial]") || card;
+  const focusSelectors = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  let lastFocused = null;
+  let keyHandler = null;
+
+  const updateExpanded = (expanded)=>{
+    trigger.setAttribute("aria-expanded", expanded ? "true" : "false");
+  };
+
+  trigger.setAttribute("aria-haspopup", "dialog");
+  trigger.setAttribute("aria-controls", "forecastBreakdownModal");
+  updateExpanded(false);
+
+  const getFocusable = ()=> Array.from(modal.querySelectorAll(focusSelectors))
+    .filter(el => el instanceof HTMLElement && !el.hasAttribute("disabled") && el.tabIndex !== -1 && (el.offsetParent !== null || el === document.activeElement));
+
+  const trapFocus = (event)=>{
+    if (event.key !== "Tab") return;
+    const focusable = getFocusable();
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey){
+      if (active === first || !modal.contains(active)){
+        event.preventDefault();
+        last.focus();
+      }
+    }else{
+      if (active === last){
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  };
+
+  const closeModal = ()=>{
+    if (modal.hasAttribute("hidden")) return;
+    modal.classList.remove("is-visible");
+    modal.setAttribute("hidden", "");
+    modal.setAttribute("aria-hidden", "true");
+    if (body) body.classList.remove("forecast-modal-open");
+    if (typeof keyHandler === "function"){
+      document.removeEventListener("keydown", keyHandler);
+      keyHandler = null;
+    }
+    updateExpanded(false);
+    const returnFocus = lastFocused || trigger;
+    lastFocused = null;
+    if (returnFocus && typeof returnFocus.focus === "function"){
+      requestAnimationFrame(()=>{
+        try { returnFocus.focus({ preventScroll: true }); }
+        catch (_) { returnFocus.focus(); }
+      });
+    }
+  };
+
+  const openModal = ()=>{
+    if (!modal.hasAttribute("hidden") && modal.classList.contains("is-visible")) return;
+    lastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    modal.classList.add("is-visible");
+    modal.removeAttribute("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    if (body) body.classList.add("forecast-modal-open");
+    updateExpanded(true);
+    const focusTarget = initialFocus || card || modal;
+    if (focusTarget && typeof focusTarget.focus === "function"){
+      requestAnimationFrame(()=>{
+        try { focusTarget.focus({ preventScroll: true }); }
+        catch (_) { focusTarget.focus(); }
+      });
+    }
+    keyHandler = (event)=>{
+      if (event.key === "Escape"){
+        event.preventDefault();
+        closeModal();
+        return;
+      }
+      if (event.key === "Tab"){
+        trapFocus(event);
+      }
+    };
+    document.addEventListener("keydown", keyHandler);
+  };
+
+  trigger.addEventListener("click", (event)=>{
+    event.preventDefault();
+    openModal();
+  });
+
+  trigger.addEventListener("keydown", (event)=>{
+    if (event.key === "Enter" || event.key === " "){
+      event.preventDefault();
+      openModal();
+    }
+  });
+
+  modal.addEventListener("click", (event)=>{
+    const target = event.target;
+    if (target && target.hasAttribute && target.hasAttribute("data-forecast-close")){
+      event.preventDefault();
+      closeModal();
+    }
+  });
+
+  const closeButtons = modal.querySelectorAll("[data-forecast-close]");
+  closeButtons.forEach(btn => {
+    btn.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " "){
+        event.preventDefault();
+        closeModal();
+      }
+    });
+  });
+}
+
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
@@ -4566,6 +4692,7 @@ function renderCosts(){
   wireCostSettingsMenu();
 
   setupCostInfoPanel();
+  setupForecastBreakdownModal();
 
   const canvas = document.getElementById("costChart");
   const toggleMaint = document.getElementById("toggleCostMaintenance");
@@ -5164,6 +5291,31 @@ function computeCostModel(){
     return `${hours.toFixed(decimals)} hr`;
   };
 
+  const formatCount = (value)=>{
+    if (!isFinite(value) || value <= 0) return null;
+    const abs = Math.abs(value);
+    let decimals = 2;
+    if (abs >= 100) decimals = 0;
+    else if (abs >= 10) decimals = 1;
+    const rounded = Number(value.toFixed(decimals));
+    return rounded.toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: decimals
+    });
+  };
+
+  const formatHoursValue = (value)=>{
+    if (!isFinite(value) || value <= 0) return null;
+    const abs = Math.abs(value);
+    let decimals = 0;
+    if (abs < 10) decimals = 1;
+    const rounded = Number(value.toFixed(decimals));
+    return rounded.toLocaleString(undefined, {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    });
+  };
+
   const timeframeRows = timeframeRowsRaw.map(row => ({
     key: row.key,
     label: row.label,
@@ -5171,6 +5323,138 @@ function computeCostModel(){
     costLabel: formatterCurrency(row.costActual, { decimals: row.costActual < 1000 ? 2 : 0 }),
     projectedLabel: formatterCurrency(row.costProjected, { decimals: row.costProjected < 1000 ? 2 : 0 })
   }));
+
+  const intervalAnnualBasis = baselineAnnualHours > 0
+    ? baselineAnnualHours
+    : (hoursYear > 0 ? hoursYear : 0);
+
+  const intervalTaskRowsRaw = intervalTasks.map((task, index) => {
+    const name = task?.name || `Interval task ${index + 1}`;
+    const intervalHours = Number(task?.interval);
+    const price = Number(task?.price);
+    const hasPrice = Number.isFinite(price) && price > 0;
+    const hasInterval = Number.isFinite(intervalHours) && intervalHours > 0;
+    const servicesPerYear = (intervalAnnualBasis > 0 && hasInterval)
+      ? intervalAnnualBasis / intervalHours
+      : 0;
+    const intervalLabel = hasInterval ? formatHoursValue(intervalHours) : null;
+    const servicesLabel = formatCount(servicesPerYear);
+    const cadenceParts = [];
+    if (intervalLabel) cadenceParts.push(`Every ${intervalLabel} hr`);
+    if (servicesLabel) cadenceParts.push(`~${servicesLabel}×/yr`);
+    if (!cadenceParts.length && task?.condition){
+      cadenceParts.push(String(task.condition));
+    }
+    const annualCost = hasPrice ? Math.max(0, price * Math.max(0, servicesPerYear)) : 0;
+    return {
+      key: task?.id || `interval_${index}`,
+      name,
+      cadenceLabel: cadenceParts.length ? cadenceParts.join(" · ") : "—",
+      unitCostLabel: hasPrice
+        ? formatterCurrency(price, { decimals: price < 1000 ? 2 : 0 })
+        : "—",
+      annualTotalLabel: hasPrice
+        ? formatterCurrency(annualCost, { decimals: annualCost < 1000 ? 2 : 0 })
+        : "—",
+      annualCost
+    };
+  });
+
+  const expectedAnnualFromTask = (task)=>{
+    const candidates = [
+      Number(task?.expectedAnnual),
+      Number(task?.expectedPerYear),
+      Number(task?.expected_per_year)
+    ];
+    let expected = candidates.find(val => Number.isFinite(val) && val > 0);
+    if (!Number.isFinite(expected) || expected <= 0){
+      const perMonth = Number(task?.expectedPerMonth);
+      if (Number.isFinite(perMonth) && perMonth > 0) expected = perMonth * 12;
+    }
+    if (!Number.isFinite(expected) || expected <= 0){
+      const perQuarter = Number(task?.expectedPerQuarter);
+      if (Number.isFinite(perQuarter) && perQuarter > 0) expected = perQuarter * 4;
+    }
+    return Number.isFinite(expected) && expected > 0 ? expected : 0;
+  };
+
+  const asReqTaskRowsRaw = asReqTasks.map((task, index) => {
+    const name = task?.name || `As-required task ${index + 1}`;
+    const price = Number(task?.price);
+    const hasPrice = Number.isFinite(price) && price > 0;
+    const expectedPerYear = expectedAnnualFromTask(task);
+    const frequencyLabel = formatCount(expectedPerYear);
+    const cadenceParts = [];
+    if (frequencyLabel) cadenceParts.push(`Expected ${frequencyLabel}×/yr`);
+    const condition = String(task?.condition || "").trim();
+    if (condition){
+      if (!cadenceParts.length || condition.toLowerCase() !== "as required"){
+        cadenceParts.push(condition);
+      }
+    }
+    if (!cadenceParts.length){
+      cadenceParts.push("As required");
+    }
+    const annualCost = hasPrice ? Math.max(0, price * Math.max(0, expectedPerYear)) : 0;
+    return {
+      key: task?.id || `asreq_${index}`,
+      name,
+      cadenceLabel: cadenceParts.join(" · "),
+      unitCostLabel: hasPrice
+        ? formatterCurrency(price, { decimals: price < 1000 ? 2 : 0 })
+        : "—",
+      annualTotalLabel: hasPrice
+        ? formatterCurrency(annualCost, { decimals: annualCost < 1000 ? 2 : 0 })
+        : "—",
+      annualCost
+    };
+  });
+
+  const intervalAnnualTotal = intervalTaskRowsRaw.reduce((sum, row) => sum + (Number(row.annualCost) || 0), 0);
+  const asReqAnnualTotal = asReqTaskRowsRaw.reduce((sum, row) => sum + (Number(row.annualCost) || 0), 0);
+  const combinedForecastTotal = intervalAnnualTotal + asReqAnnualTotal;
+
+  const formatTotalLabel = (value)=> formatterCurrency(value, { decimals: value < 1000 ? 2 : 0 });
+
+  const forecastBreakdown = {
+    sections: [
+      {
+        key: "interval",
+        label: "Interval tasks",
+        rows: intervalTaskRowsRaw.map(row => ({
+          key: row.key,
+          name: row.name,
+          cadenceLabel: row.cadenceLabel,
+          unitCostLabel: row.unitCostLabel,
+          annualTotalLabel: row.annualTotalLabel
+        })),
+        totalLabel: formatTotalLabel(intervalAnnualTotal),
+        emptyMessage: intervalTaskRowsRaw.length
+          ? ""
+          : "Add interval tasks to project maintenance spend."
+      },
+      {
+        key: "asRequired",
+        label: "As-required tasks",
+        rows: asReqTaskRowsRaw.map(row => ({
+          key: row.key,
+          name: row.name,
+          cadenceLabel: row.cadenceLabel,
+          unitCostLabel: row.unitCostLabel,
+          annualTotalLabel: row.annualTotalLabel
+        })),
+        totalLabel: formatTotalLabel(asReqAnnualTotal),
+        emptyMessage: asReqTaskRowsRaw.length
+          ? ""
+          : "Add as-required tasks with expected frequency to estimate spend."
+      }
+    ],
+    totals: {
+      intervalLabel: formatTotalLabel(intervalAnnualTotal),
+      asReqLabel: formatTotalLabel(asReqAnnualTotal),
+      combinedLabel: formatTotalLabel(combinedForecastTotal)
+    }
+  };
 
   const historyRows = maintenanceHistory.slice(-6).reverse().map(entry => ({
     dateLabel: entry.date.toLocaleDateString(),
@@ -5211,6 +5495,7 @@ function computeCostModel(){
 
   const summaryCards = [
     {
+      key: "maintenanceForecast",
       icon: "🛠️",
       title: "Maintenance forecast (interval + as-required)",
       value: formatterCurrency(predictedAnnual, { decimals: 0 }),
@@ -5253,6 +5538,9 @@ function computeCostModel(){
     timeframeNote = "Projections include interval pricing plus expected as-required frequency captured on task settings. Add approved orders to validate the forecast.";
   }else{
     timeframeNote = "Add prices, part numbers, or expected frequency to interval/as-required tasks to build the combined maintenance forecast.";
+  }
+  if (forecastBreakdown){
+    forecastBreakdown.note = timeframeNote || "Add pricing to maintenance tasks and approve order requests to enrich the forecast.";
   }
   const historyEmpty = parsedHistory.length
     ? "Log additional machine hours to expand the maintenance cost timeline."
@@ -5302,6 +5590,7 @@ function computeCostModel(){
   return {
     summaryCards,
     timeframeRows,
+    forecastBreakdown,
     timeframeNote,
     historyRows,
     historyEmpty,
