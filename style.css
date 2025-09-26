@@ -145,6 +145,10 @@ body.pump-chart-expanded { overflow:hidden; }
 .chart-info:hover .chart-info-bubble,
 .chart-info:focus-within .chart-info-bubble{ opacity:1; transform:translateY(0); pointer-events:auto; }
 .chart-info-bubble p{ margin:0; }
+.cost-window-insight{ margin-top:16px; display:flex; justify-content:flex-end; }
+.cost-window-insight .chart-info{ margin-left:auto; }
+.cost-window-insight .chart-info-bubble{ top:auto; bottom:calc(100% + 10px); left:auto; right:0; transform:translateY(-6px); }
+.cost-window-insight .chart-info-bubble::before{ top:auto; bottom:-6px; left:auto; right:16px; border-left:1px solid rgba(19, 41, 74, 0.2); border-top:0; border-right:0; border-bottom:1px solid rgba(19, 41, 74, 0.2); }
 .sr-only{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 .cost-chart-tooltip{
   position:absolute;
