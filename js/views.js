@@ -970,13 +970,23 @@ function viewCosts(model){
           <h3>Recent Maintenance Events</h3>
           ${historyRows.length ? `
             <ul class="cost-history">
-              ${historyRows.map(item => `
-                <li>
-                  <span>${esc(item.dateLabel || "")}</span>
-                  <span>${esc(item.hoursLabel || "")}</span>
-                  <span>${esc(item.costLabel || "")}</span>
-                </li>
-              `).join("")}
+              ${historyRows.map(item => {
+                const hasTask = item.taskId && String(item.taskId).trim().length;
+                const jobLabel = item.jobLabel || "—";
+                const attrs = hasTask
+                  ? `type="button" class="cost-history-entry" data-maintenance-task-id="${esc(item.taskId)}"`
+                  : `type="button" class="cost-history-entry" disabled`;
+                return `
+                  <li>
+                    <button ${attrs}>
+                      <span class="cost-history-date">${esc(item.dateLabel || "")}</span>
+                      <span class="cost-history-job">${esc(jobLabel)}</span>
+                      <span class="cost-history-hours">${esc(item.hoursLabel || "")}</span>
+                      <span class="cost-history-cost">${esc(item.costLabel || "")}</span>
+                    </button>
+                  </li>
+                `;
+              }).join("")}
             </ul>
           ` : `<p class="small muted">${esc(data.historyEmpty || "No usage history yet. Log machine hours to estimate maintenance spend.")}</p>`}
         </div>

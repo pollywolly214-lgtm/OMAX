@@ -202,9 +202,11 @@ body.pump-chart-expanded { overflow:hidden; }
 .cost-table th{ background:#f4f7fb; font-weight:600; color:#3b475f; }
 
 .cost-history{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
-.cost-history li{
+.cost-history li{ margin:0; padding:0; }
+.cost-history-entry{
+  width:100%;
   display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
+  grid-template-columns:minmax(0,1fr) minmax(0,1.2fr) minmax(0,0.8fr) minmax(0,0.8fr);
   gap:8px;
   padding:10px 12px;
   background:rgba(255, 255, 255, 0.75);
@@ -212,8 +214,22 @@ body.pump-chart-expanded { overflow:hidden; }
   border-radius:12px;
   font-variant-numeric:tabular-nums;
   box-shadow:0 12px 24px rgba(6, 24, 64, 0.18);
+  text-align:left;
+  color:inherit;
+  font:inherit;
+  cursor:pointer;
+  transition:box-shadow .15s ease, transform .15s ease;
 }
-.cost-history span:last-child{ text-align:right; font-weight:600; color:var(--brand-blue-400); }
+.cost-history-entry:hover:not(:disabled){
+  box-shadow:0 16px 28px rgba(6, 24, 64, 0.22);
+  transform:translateY(-1px);
+}
+.cost-history-entry:disabled{
+  cursor:default;
+  opacity:0.7;
+}
+.cost-history-entry span:last-child{ text-align:right; font-weight:600; color:var(--brand-blue-400); }
+.cost-history-job{ font-weight:600; color:#1e2b45; }
 
 .cost-jobs-summary{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; margin-bottom:10px; font-variant-numeric:tabular-nums; }
 .cost-jobs-summary .label{ display:block; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#5a6478; margin-bottom:2px; }

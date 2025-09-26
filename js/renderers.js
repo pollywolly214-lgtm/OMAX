@@ -4757,6 +4757,25 @@ function renderCosts(){
   toggleMaint?.addEventListener("change", redraw);
   toggleJobs?.addEventListener("change", redraw);
 
+  const historyList = content.querySelector(".cost-history");
+  if (historyList && !historyList.dataset.bound){
+    historyList.dataset.bound = "1";
+    historyList.addEventListener("click", (event)=>{
+      const button = event.target instanceof Element
+        ? event.target.closest("[data-maintenance-task-id]")
+        : null;
+      if (!button || button.hasAttribute("disabled")) return;
+      const taskId = button.getAttribute("data-maintenance-task-id");
+      if (!taskId) return;
+      event.preventDefault();
+      if (typeof openSettingsAndReveal === "function"){ 
+        openSettingsAndReveal(taskId);
+      }else{
+        location.hash = "#/settings";
+      }
+    });
+  }
+
   notifyCostLayoutContentChanged();
   if (typeof refreshCostTrainer === "function"){
     refreshCostTrainer();
@@ -4771,7 +4790,20 @@ function computeCostModel(){
       const hours = Number(entry.hours);
       const date = new Date(entry.dateISO);
       if (!isFinite(hours) || isNaN(date)) return null;
-      return { hours, date, dateISO: entry.dateISO };
+      const rawTaskId = entry.maintenanceTaskId ?? entry.taskId ?? entry.task ?? entry.jobId ?? entry.maintenanceJobId ?? null;
+      const taskId = rawTaskId != null && rawTaskId !== "" ? String(rawTaskId) : null;
+      const nameCandidates = [
+        entry.maintenanceTaskName,
+        entry.taskName,
+        entry.jobName,
+        entry.job,
+        entry.label,
+        entry.note,
+        entry.description
+      ];
+      const rawName = nameCandidates.find(val => typeof val === "string" && val.trim()) || null;
+      const taskName = typeof rawName === "string" ? rawName.trim() : null;
+      return { hours, date, dateISO: entry.dateISO, taskId, taskName };
     })
     .filter(Boolean)
     .sort((a,b)=> a.date - b.date);
@@ -4983,13 +5015,23 @@ function computeCostModel(){
     const curr = parsedHistory[i];
     const deltaHours = Number(curr.hours) - Number(prev.hours);
     if (!isFinite(deltaHours) || deltaHours <= 0) continue;
+    let taskId = curr.taskId || null;
+    let taskName = curr.taskName || null;
+    if (!taskName && taskId && typeof findTaskByIdLocal === "function"){ 
+      const linkedTask = findTaskByIdLocal(taskId);
+      if (linkedTask && typeof linkedTask.name === "string" && linkedTask.name.trim()){
+        taskName = linkedTask.name.trim();
+      }
+    }
     maintenanceHistory.push({
       date: curr.date,
       dateISO: curr.dateISO,
       hours: deltaHours,
       cost: combinedCostPerHour > 0
         ? deltaHours * combinedCostPerHour
-        : estimateIntervalCost(deltaHours)
+        : estimateIntervalCost(deltaHours),
+      taskId,
+      taskName: taskName || null
     });
   }
 
@@ -5175,7 +5217,9 @@ function computeCostModel(){
   const historyRows = maintenanceHistory.slice(-6).reverse().map(entry => ({
     dateLabel: entry.date.toLocaleDateString(),
     hoursLabel: formatHours(entry.hours),
-    costLabel: formatterCurrency(entry.cost, { decimals: entry.cost < 1000 ? 2 : 0 })
+    costLabel: formatterCurrency(entry.cost, { decimals: entry.cost < 1000 ? 2 : 0 }),
+    jobLabel: entry.taskName || (entry.taskId ? "View maintenance task" : "—"),
+    taskId: entry.taskId || null
   }));
 
   const jobBreakdown = jobsInfo
