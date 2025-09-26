@@ -825,6 +825,7 @@ function viewCosts(model){
   const maintenanceJobsNote = data.maintenanceJobsNote || "";
   const maintenanceJobsEmpty = data.maintenanceJobsEmpty || "";
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
+  const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
   const orderSummary = data.orderRequestSummary || {};
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
   const breakdown = data.forecastBreakdown || {};
@@ -1007,7 +1008,18 @@ function viewCosts(model){
       <div class="dashboard-window" data-cost-window="chart">
         <div class="block cost-chart-block">
           <div class="cost-chart-header">
-            <h3>Estimated Cost Trends</h3>
+            <div class="cost-chart-title">
+              <h3>Estimated Cost Trends</h3>
+              <div class="chart-info">
+                <button type="button" class="chart-info-button" aria-describedby="costChartInfo" aria-label="Explain Estimated Cost Trends">
+                  <span aria-hidden="true">?</span>
+                  <span class="sr-only">Show how the Estimated Cost Trends chart is calculated</span>
+                </button>
+                <div class="chart-info-bubble" id="costChartInfo" role="tooltip">
+                  <p>${esc(chartInfo)}</p>
+                </div>
+              </div>
+            </div>
             <div class="cost-chart-toggle">
               <label><input type="checkbox" id="toggleCostMaintenance" checked> <span class="dot" style="background:${esc(chartColors.maintenance)}"></span> Maintenance</label>
               <label><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> Cutting jobs</label>
