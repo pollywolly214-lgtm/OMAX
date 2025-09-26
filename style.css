@@ -14,7 +14,7 @@
 .pump-chart-toolbar select { width:auto; padding:4px 6px; font-size:12px; }
 .pump-chart-wrap { flex:1; display:flex; align-items:center; justify-content:center; position:relative; padding:0 0 52px; width:100%; }
 .pump-chart-wrap canvas { width:100%; max-width:100%; display:block; margin:0 auto; }
-.pump-chart-tooltip{ position:absolute; pointer-events:none; background:#0f1f3d; color:#f3f6ff; padding:8px 10px; border-radius:6px; font-size:12px; line-height:1.4; max-width:240px; box-shadow:0 12px 28px rgba(15,23,42,0.32); opacity:0; transition:opacity 120ms ease, transform 120ms ease; z-index:5; white-space:normal; }
+.pump-chart-tooltip{ position:absolute; pointer-events:none; background:#0f1f3d; color:#f3f6ff; padding:8px 10px; border-radius:6px; font-size:12px; line-height:1.4; max-width:240px; box-shadow:0 12px 28px rgba(15,23,42,0.32); opacity:0; transition:opacity 120ms ease, transform 120ms ease; z-index:20; white-space:normal; }
 .pump-chart-tooltip[data-placement="above"]{ transform:translate(-50%, -110%); }
 .pump-chart-tooltip[data-placement="above"][data-visible="true"]{ opacity:1; transform:translate(-50%, -120%); }
 .pump-chart-tooltip[data-placement="below"]{ transform:translate(-50%, 10%); }

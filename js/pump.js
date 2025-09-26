@@ -893,53 +893,38 @@ function pumpWireChartTooltip(card, canvas){
     }
   };
 
-  let isDragging = false;
-  let activePointerId = null;
-
-  const endDrag = ()=>{
-    if (activePointerId != null && typeof canvas.releasePointerCapture === "function"){
-      try{ canvas.releasePointerCapture(activePointerId); }catch(e){}
-    }
-    activePointerId = null;
-    if (isDragging){
-      isDragging = false;
-      hide();
-    }
-  };
-
   const handlePointerDown = (event)=>{
-    isDragging = true;
-    activePointerId = event.pointerId;
-    if (typeof canvas.setPointerCapture === "function"){
-      try{ canvas.setPointerCapture(event.pointerId); }catch(e){}
-    }
     handleInteraction(event);
   };
 
   const handlePointerMove = (event)=>{
-    if (!isDragging) return;
     handleInteraction(event);
   };
 
-  const handlePointerUp = ()=>{
-    endDrag();
+  const handlePointerEnter = (event)=>{
+    handleInteraction(event);
+  };
+
+  const handlePointerUp = (event)=>{
+    const type = String(event.pointerType || "").toLowerCase();
+    if (type === "touch" || type === "pen"){
+      hide();
+    }else{
+      handleInteraction(event);
+    }
   };
 
   const handlePointerCancel = ()=>{
-    endDrag();
     hide();
   };
 
   const handlePointerLeave = ()=>{
-    if (isDragging){
-      endDrag();
-    }else{
-      hide();
-    }
+    hide();
   };
 
   canvas.addEventListener("pointerdown", handlePointerDown);
   canvas.addEventListener("pointermove", handlePointerMove);
+  canvas.addEventListener("pointerenter", handlePointerEnter);
   canvas.addEventListener("pointerup", handlePointerUp);
   canvas.addEventListener("pointercancel", handlePointerCancel);
   canvas.addEventListener("pointerleave", handlePointerLeave);
@@ -948,12 +933,11 @@ function pumpWireChartTooltip(card, canvas){
   canvas.__pumpChartTooltipCleanup = ()=>{
     canvas.removeEventListener("pointerdown", handlePointerDown);
     canvas.removeEventListener("pointermove", handlePointerMove);
+    canvas.removeEventListener("pointerenter", handlePointerEnter);
     canvas.removeEventListener("pointerup", handlePointerUp);
     canvas.removeEventListener("pointercancel", handlePointerCancel);
     canvas.removeEventListener("pointerleave", handlePointerLeave);
     canvas.removeEventListener("blur", hide);
-    activePointerId = null;
-    isDragging = false;
     hide();
   };
 }
@@ -1225,30 +1209,6 @@ function drawPumpChart(canvas, rangeValue){
     });
   });
 
-  let pendingCalloutTargets = null;
-  if (summary && pointCoords.length){
-    const calloutTargets = [];
-    if (summary.maxEntry){
-      calloutTargets.push({
-        dateISO: summary.maxEntry.dateISO,
-        rpm: summary.maxEntry.rpm,
-        label: sameExtremeEntry ? "High / Low" : "High",
-        color: "#d73354"
-      });
-    }
-    if (summary.minEntry && !sameExtremeEntry){
-      calloutTargets.push({
-        dateISO: summary.minEntry.dateISO,
-        rpm: summary.minEntry.rpm,
-        label: "Low",
-        color: "#1f7a4d"
-      });
-    }
-    if (calloutTargets.length){
-      pendingCalloutTargets = calloutTargets;
-    }
-  }
-
   if (yTicks.length){
     ctx.save();
     ctx.strokeStyle = "#1f3a60";
@@ -1302,77 +1262,6 @@ function drawPumpChart(canvas, rangeValue){
   ctx.moveTo(axisX0, Y(maxR));
   ctx.lineTo(axisX1, Y(maxR));
   ctx.stroke();
-
-  if (pendingCalloutTargets){
-    const minCalloutX = margin.left + scaled(4);
-    const maxCalloutX = cssWidth - margin.right - scaled(4);
-    const minCalloutY = margin.top + scaled(4);
-    const maxCalloutY = axisY - scaled(6);
-    ctx.save();
-    const prevBaseline = ctx.textBaseline;
-    const prevAlign = ctx.textAlign;
-    ctx.textBaseline = "top";
-    ctx.textAlign = "left";
-    ctx.font = fontPx(9.6);
-    const calloutLineHeight = Math.max(scaled(12), 14);
-    const calloutPadX = Math.max(scaled(6), 8);
-    const calloutPadY = Math.max(scaled(5), 6);
-    const pointerGap = Math.max(scaled(8), 10);
-    const borderRadius = Math.max(scaled(5), 7);
-    const calloutOutlineWidth = Math.max(1, scaled(0.6));
-    pendingCalloutTargets.forEach(target => {
-      const point = pointCoords.find(p => p.entry.dateISO === target.dateISO);
-      if (!point) return;
-      const lines = [
-        `${target.label}: ${formatRpm(target.rpm)} RPM`,
-        pumpFormatShortDate(target.dateISO)
-      ];
-      const widths = lines.map(line => ctx.measureText(line).width);
-      const bubbleWidth = Math.max(...widths) + calloutPadX * 2;
-      const bubbleHeight = lines.length * calloutLineHeight + calloutPadY * 2;
-      if (!(bubbleWidth > 0 && bubbleHeight > 0)) return;
-      const anchorX = point.x;
-      const anchorY = point.y;
-      let labelX = anchorX + pointerGap;
-      if (anchorX > (margin.left + innerW / 2)){
-        labelX = anchorX - pointerGap - bubbleWidth;
-      }
-      const maxX = maxCalloutX - bubbleWidth;
-      labelX = clamp(labelX, minCalloutX, Math.max(minCalloutX, maxX));
-      let labelY = anchorY - (bubbleHeight / 2);
-      const maxY = maxCalloutY - bubbleHeight;
-      labelY = clamp(labelY, minCalloutY, Math.max(minCalloutY, maxY));
-      const pointerTargetX = clamp(anchorX, labelX, labelX + bubbleWidth);
-      const pointerTargetY = clamp(anchorY, labelY, labelY + bubbleHeight);
-      ctx.save();
-      ctx.strokeStyle = target.color;
-      ctx.globalAlpha = 0.8;
-      ctx.lineWidth = calloutOutlineWidth;
-      ctx.beginPath();
-      ctx.moveTo(anchorX, anchorY);
-      ctx.lineTo(pointerTargetX, pointerTargetY);
-      ctx.stroke();
-      ctx.restore();
-      ctx.save();
-      ctx.beginPath();
-      pumpRoundedRectPath(ctx, labelX, labelY, bubbleWidth, bubbleHeight, borderRadius);
-      ctx.fillStyle = "rgba(17, 24, 39, 0.9)";
-      ctx.fill();
-      ctx.strokeStyle = target.color;
-      ctx.globalAlpha = 0.85;
-      ctx.lineWidth = calloutOutlineWidth;
-      ctx.stroke();
-      ctx.restore();
-      ctx.fillStyle = "#e6ecf7";
-      lines.forEach((line, idx) => {
-        const textY = labelY + calloutPadY + idx * calloutLineHeight;
-        ctx.fillText(line, labelX + calloutPadX, textY);
-      });
-    });
-    ctx.textBaseline = prevBaseline;
-    ctx.textAlign = prevAlign;
-    ctx.restore();
-  }
 
   if (baselineRPM != null){
     const baselineY = Y(baselineRPM);
