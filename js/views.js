@@ -971,11 +971,18 @@ function viewCosts(model){
           ${historyRows.length ? `
             <ul class="cost-history">
               ${historyRows.map(item => {
-                const hasTask = item.taskId && String(item.taskId).trim().length;
+                const hasTaskId = item.taskId && String(item.taskId).trim().length;
+                const hasTaskName = item.taskName && String(item.taskName).trim().length;
                 const jobLabel = item.jobLabel || "—";
-                const attrs = hasTask
-                  ? `type="button" class="cost-history-entry" data-maintenance-task-id="${esc(item.taskId)}"`
-                  : `type="button" class="cost-history-entry" disabled`;
+                const attrParts = ["type=\"button\"", "class=\"cost-history-entry\""];
+                if (hasTaskId){
+                  attrParts.push(`data-maintenance-task-id="${esc(item.taskId)}"`);
+                }else if (hasTaskName){
+                  attrParts.push(`data-maintenance-task-name="${esc(item.taskName)}"`);
+                }else{
+                  attrParts.push("disabled");
+                }
+                const attrs = attrParts.join(" ");
                 return `
                   <li>
                     <button ${attrs}>

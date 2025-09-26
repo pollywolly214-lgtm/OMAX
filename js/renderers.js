@@ -4761,18 +4761,51 @@ function renderCosts(){
   if (historyList && !historyList.dataset.bound){
     historyList.dataset.bound = "1";
     historyList.addEventListener("click", (event)=>{
-      const button = event.target instanceof Element
-        ? event.target.closest("[data-maintenance-task-id]")
-        : null;
+      if (!(event.target instanceof Element)) return;
+      const button = event.target.closest(".cost-history-entry");
       if (!button || button.hasAttribute("disabled")) return;
       const taskId = button.getAttribute("data-maintenance-task-id");
-      if (!taskId) return;
+      const taskName = button.getAttribute("data-maintenance-task-name");
+      if (!taskId && !taskName) return;
       event.preventDefault();
-      if (typeof openSettingsAndReveal === "function"){ 
-        openSettingsAndReveal(taskId);
-      }else{
-        location.hash = "#/settings";
+
+      const navigateToTask = (id)=>{
+        if (!id) return false;
+        if (typeof openSettingsAndReveal === "function"){
+          openSettingsAndReveal(id);
+        }else{
+          location.hash = "#/settings";
+        }
+        return true;
+      };
+
+      if (taskId && navigateToTask(taskId)) return;
+
+      const normalizedName = (taskName || "").trim().toLowerCase();
+      if (!normalizedName) return;
+
+      window.maintenanceSearchTerm = taskName ? taskName.trim() : "";
+
+      let matchedId = null;
+      const lists = [window.tasksInterval, window.tasksAsReq];
+      for (const list of lists){
+        if (!Array.isArray(list)) continue;
+        for (const task of list){
+          if (!task || task.id == null || typeof task.name !== "string") continue;
+          if (task.name.trim().toLowerCase() === normalizedName){
+            matchedId = String(task.id);
+            break;
+          }
+        }
+        if (matchedId) break;
       }
+
+      if (matchedId){
+        navigateToTask(matchedId);
+        return;
+      }
+
+      location.hash = "#/settings";
     });
   }
 
@@ -4784,29 +4817,185 @@ function renderCosts(){
 
 function computeCostModel(){
   const safeHistory = Array.isArray(totalHistory) ? totalHistory.slice() : [];
+
+  const cleanPartNumber = (pn)=> String(pn || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+
+  const TASK_ID_FIELDS = [
+    "maintenancetaskid", "maintenance_task_id", "maintenanceTaskId",
+    "taskid", "task_id", "taskID",
+    "maintenancejobid", "maintenance_job_id", "maintenanceJobId",
+    "jobid", "job_id", "jobID",
+    "linkedtaskid", "linked_task_id",
+    "relatedtaskid", "related_task_id",
+    "sourcetaskid", "source_task_id",
+    "targettaskid", "target_task_id"
+  ];
+
+  const TASK_NAME_FIELDS = [
+    "maintenancetaskname", "maintenance_task_name", "maintenanceTaskName",
+    "taskname", "task_name", "tasklabel",
+    "jobname", "job_name", "job",
+    "name", "title", "label", "eventname", "event_name",
+    "summary"
+  ];
+
+  const TASK_FUZZY_FIELDS = [
+    "note", "notes", "description", "details",
+    "message", "comment", "maintenance_note",
+    "maintenanceNote", "maintenanceDescription", "maintenance_description"
+  ];
+
+  const TASK_PART_FIELDS = [
+    "pn", "partnumber", "part_number", "partnum", "part_num",
+    "partno", "part_no", "sku",
+    "itemnumber", "item_number", "itemno", "item_no"
+  ];
+
+  const extractTaskMetadata = (entry)=>{
+    if (!entry || typeof entry !== "object"){
+      return { ids: [], names: [], fuzzyNames: [], partNumbers: [], primaryId: null, primaryName: null, hintName: null };
+    }
+
+    const ids = [];
+    const names = [];
+    const fuzzyNames = [];
+    const partNumbers = [];
+    const seenIds = new Set();
+    const seenNames = new Set();
+    const seenFuzzy = new Set();
+    const seenParts = new Set();
+    const visited = new Set();
+
+    const pushId = (value)=>{
+      if (value == null) return;
+      if (typeof value === "object"){
+        visit(value);
+        return;
+      }
+      const str = String(value).trim();
+      if (!str || seenIds.has(str)) return;
+      seenIds.add(str);
+      ids.push(str);
+    };
+
+    const pushName = (value)=>{
+      if (typeof value !== "string") return;
+      const trimmed = value.trim();
+      if (!trimmed || seenNames.has(trimmed)) return;
+      seenNames.add(trimmed);
+      names.push(trimmed);
+    };
+
+    const pushFuzzy = (value)=>{
+      if (typeof value !== "string") return;
+      const trimmed = value.trim();
+      if (!trimmed || seenFuzzy.has(trimmed)) return;
+      seenFuzzy.add(trimmed);
+      fuzzyNames.push(trimmed);
+    };
+
+    const pushPart = (value)=>{
+      const pn = cleanPartNumber(value);
+      if (!pn || seenParts.has(pn)) return;
+      seenParts.add(pn);
+      partNumbers.push(pn);
+    };
+
+    const visit = (value, depth = 0)=>{
+      if (!value || depth > 3) return;
+      if (Array.isArray(value)){
+        value.forEach(item => visit(item, depth + 1));
+        return;
+      }
+      if (typeof value !== "object"){
+        if (depth > 0) pushFuzzy(value);
+        return;
+      }
+      if (visited.has(value)) return;
+      visited.add(value);
+
+      for (const key of Object.keys(value)){
+        const val = value[key];
+        if (val == null) continue;
+        const lower = key.toLowerCase();
+        if (TASK_ID_FIELDS.includes(lower)){
+          pushId(val);
+          continue;
+        }
+        if (TASK_NAME_FIELDS.includes(lower)){
+          pushName(val);
+          continue;
+        }
+        if (TASK_PART_FIELDS.includes(lower)){
+          pushPart(val);
+          continue;
+        }
+        if (TASK_FUZZY_FIELDS.includes(lower)){
+          if (typeof val === "object") visit(val, depth + 1);
+          else pushFuzzy(val);
+          continue;
+        }
+
+        if (lower === "task" || lower === "maintenancetask" || lower === "maintenance" || lower === "job"){
+          if (typeof val === "string" || typeof val === "number"){
+            pushName(val);
+            pushId(val);
+            continue;
+          }
+        }
+
+        if (lower === "parts" || lower === "partsused" || lower === "components"){
+          const list = Array.isArray(val) ? val : [];
+          list.forEach(item => {
+            if (typeof item === "string" || typeof item === "number"){
+              pushPart(item);
+            }else if (item && typeof item === "object"){
+              pushPart(item.pn || item.partNumber || item.part_no || item.sku || item.itemNumber);
+              visit(item, depth + 1);
+            }
+          });
+          continue;
+        }
+
+        if (lower === "meta" || lower === "payload" || lower === "event" || lower === "details" || lower === "data" || lower === "context" || lower === "source" || lower === "target" || lower === "item"){
+          visit(val, depth + 1);
+          continue;
+        }
+
+        if (typeof val === "object"){
+          visit(val, depth + 1);
+        }
+      }
+    };
+
+    visit(entry);
+
+    const primaryId = ids.length ? ids[0] : null;
+    const primaryName = names.length ? names[0] : null;
+    const hintName = primaryName || (fuzzyNames.length ? fuzzyNames[0] : null);
+
+    return { ids, names, fuzzyNames, partNumbers, primaryId, primaryName, hintName };
+  };
+
   const parsedHistory = safeHistory
     .map(entry => {
       if (!entry || entry.hours == null || !entry.dateISO) return null;
       const hours = Number(entry.hours);
       const date = new Date(entry.dateISO);
       if (!isFinite(hours) || isNaN(date)) return null;
-      const rawTaskId = entry.maintenanceTaskId ?? entry.taskId ?? entry.task ?? entry.jobId ?? entry.maintenanceJobId ?? null;
-      const taskId = rawTaskId != null && rawTaskId !== "" ? String(rawTaskId) : null;
-      const nameCandidates = [
-        entry.maintenanceTaskName,
-        entry.taskName,
-        entry.jobName,
-        entry.job,
-        entry.label,
-        entry.note,
-        entry.description,
-        entry.maintenanceTask?.name,
-        entry.maintenance?.name,
-        entry.task?.name
-      ];
-      const rawName = nameCandidates.find(val => typeof val === "string" && val.trim()) || null;
-      const taskName = typeof rawName === "string" ? rawName.trim() : null;
-      return { hours, date, dateISO: entry.dateISO, taskId, taskName };
+      const meta = extractTaskMetadata(entry);
+      return {
+        hours,
+        date,
+        dateISO: entry.dateISO,
+        taskId: meta.primaryId,
+        taskName: meta.primaryName,
+        taskIds: meta.ids,
+        taskNames: meta.names,
+        fuzzyNames: meta.fuzzyNames,
+        partNumbers: meta.partNumbers,
+        hintName: meta.hintName
+      };
     })
     .filter(Boolean)
     .sort((a,b)=> a.date - b.date);
@@ -4819,31 +5008,50 @@ function computeCostModel(){
   const asReqTasks = Array.isArray(tasksAsReq) ? tasksAsReq : [];
 
   const maintenanceTaskNames = new Map();
-  for (const task of intervalTasks){
-    if (!task || task.id == null) continue;
-    const id = String(task.id);
-    if (!maintenanceTaskNames.has(id) && typeof task.name === "string" && task.name.trim()){
-      maintenanceTaskNames.set(id, task.name.trim());
-    }
-  }
-  for (const task of asReqTasks){
-    if (!task || task.id == null) continue;
-    const id = String(task.id);
-    if (!maintenanceTaskNames.has(id) && typeof task.name === "string" && task.name.trim()){
-      maintenanceTaskNames.set(id, task.name.trim());
-    }
-  }
-
-  const cleanPartNumber = (pn)=> String(pn || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  const maintenanceTaskNameIndex = new Map();
+  const maintenanceTaskPartIndex = new Map();
   const maintenancePartNumbers = new Set();
-  intervalTasks.forEach(task => {
-    const pn = cleanPartNumber(task?.pn);
-    if (pn) maintenancePartNumbers.add(pn);
-  });
-  asReqTasks.forEach(task => {
-    const pn = cleanPartNumber(task?.pn);
-    if (pn) maintenancePartNumbers.add(pn);
-  });
+
+  const indexTask = (task)=>{
+    if (!task || task.id == null) return;
+    const id = String(task.id);
+    const name = typeof task.name === "string" ? task.name.trim() : "";
+    if (name){
+      if (!maintenanceTaskNames.has(id)){
+        maintenanceTaskNames.set(id, name);
+      }
+      const nameKey = name.toLowerCase();
+      if (!maintenanceTaskNameIndex.has(nameKey)) maintenanceTaskNameIndex.set(nameKey, []);
+      const list = maintenanceTaskNameIndex.get(nameKey);
+      if (!list.includes(id)) list.push(id);
+    }
+
+    const pnCandidates = [
+      task.pn,
+      task.partNumber,
+      task.part_number,
+      task.partNum,
+      task.part_no,
+      task.partNo,
+      task.itemNumber,
+      task.item_number,
+      task.itemNo,
+      task.item_no
+    ];
+    for (const candidate of pnCandidates){
+      const pn = cleanPartNumber(candidate);
+      if (!pn) continue;
+      maintenancePartNumbers.add(pn);
+      if (!maintenanceTaskPartIndex.has(pn)) maintenanceTaskPartIndex.set(pn, []);
+      const list = maintenanceTaskPartIndex.get(pn);
+      if (!list.some(entry => entry.id === id)){
+        list.push({ id, name });
+      }
+    }
+  };
+
+  intervalTasks.forEach(indexTask);
+  asReqTasks.forEach(indexTask);
 
   const intervalCostPerHour = intervalTasks.reduce((sum, task)=>{
     const price = Number(task?.price);
@@ -5034,17 +5242,104 @@ function computeCostModel(){
     const curr = parsedHistory[i];
     const deltaHours = Number(curr.hours) - Number(prev.hours);
     if (!isFinite(deltaHours) || deltaHours <= 0) continue;
-    let taskId = curr.taskId || prev.taskId || null;
-    let taskName = curr.taskName || prev.taskName || null;
+
+    const candidateIds = [];
+    const candidateNames = [];
+    const fuzzyCandidates = [];
+    const partNumbers = new Set();
+    const nameHints = [];
+
+    const appendEntryMeta = (entry)=>{
+      if (!entry) return;
+      const idList = [];
+      if (entry.taskId != null) idList.push(entry.taskId);
+      if (Array.isArray(entry.taskIds)) idList.push(...entry.taskIds);
+      for (const idVal of idList){
+        const str = idVal != null ? String(idVal).trim() : "";
+        if (str && !candidateIds.includes(str)) candidateIds.push(str);
+      }
+
+      const nameList = [];
+      if (entry.taskName) nameList.push(entry.taskName);
+      if (Array.isArray(entry.taskNames)) nameList.push(...entry.taskNames);
+      for (const nameVal of nameList){
+        if (typeof nameVal !== "string") continue;
+        const trimmed = nameVal.trim();
+        if (trimmed && !candidateNames.includes(trimmed)) candidateNames.push(trimmed);
+      }
+
+      if (Array.isArray(entry.fuzzyNames)){
+        for (const fuzzy of entry.fuzzyNames){
+          if (typeof fuzzy !== "string") continue;
+          const trimmed = fuzzy.trim();
+          if (trimmed && !fuzzyCandidates.includes(trimmed)) fuzzyCandidates.push(trimmed);
+        }
+      }
+
+      if (Array.isArray(entry.partNumbers)){
+        for (const pn of entry.partNumbers){
+          if (typeof pn === "string" && pn) partNumbers.add(pn);
+        }
+      }
+
+      if (typeof entry.hintName === "string"){
+        const trimmed = entry.hintName.trim();
+        if (trimmed && !nameHints.includes(trimmed)) nameHints.push(trimmed);
+      }
+    };
+
+    appendEntryMeta(curr);
+    appendEntryMeta(prev);
+
+    let taskId = candidateIds.length ? candidateIds[0] : null;
+    let taskName = candidateNames.length ? candidateNames[0] : null;
+
+    if (!taskId && partNumbers.size){
+      for (const pn of partNumbers){
+        const matches = maintenanceTaskPartIndex.get(pn);
+        if (!matches || !matches.length) continue;
+        taskId = matches[0].id || taskId;
+        if (!taskName && matches[0].name) taskName = matches[0].name;
+        if (matches.length === 1) break;
+      }
+    }
+
+    const nameSearch = candidateNames.concat(nameHints, fuzzyCandidates).filter(Boolean);
+    if (!taskId && nameSearch.length){
+      for (const candidate of nameSearch){
+        const key = candidate.toLowerCase();
+        const matches = maintenanceTaskNameIndex.get(key);
+        if (!matches || !matches.length) continue;
+        taskId = matches[0];
+        if (!taskName){
+          taskName = maintenanceTaskNames.get(matches[0]) || candidate;
+        }
+        if (matches.length === 1) break;
+      }
+    }
+
     if (!taskName && taskId && typeof findTaskByIdLocal === "function"){
       const linkedTask = findTaskByIdLocal(taskId);
       if (linkedTask && typeof linkedTask.name === "string" && linkedTask.name.trim()){
         taskName = linkedTask.name.trim();
       }
     }
+
     if (!taskName && taskId && maintenanceTaskNames.has(taskId)){
       taskName = maintenanceTaskNames.get(taskId);
     }
+
+    const displayName = taskName
+      || (taskId && maintenanceTaskNames.get(taskId))
+      || (candidateNames.length ? candidateNames[0] : null)
+      || (nameHints.length ? nameHints[0] : null)
+      || (fuzzyCandidates.length ? fuzzyCandidates[0] : null)
+      || null;
+
+    const searchName = taskName
+      ? taskName
+      : (candidateNames.length ? candidateNames[0] : (nameHints.length ? nameHints[0] : (fuzzyCandidates.length ? fuzzyCandidates[0] : null)));
+
     maintenanceHistory.push({
       date: curr.date,
       dateISO: curr.dateISO,
@@ -5053,7 +5348,9 @@ function computeCostModel(){
         ? deltaHours * combinedCostPerHour
         : estimateIntervalCost(deltaHours),
       taskId,
-      taskName: taskName || null
+      taskName: taskName || null,
+      taskNameHint: searchName || null,
+      taskDisplayName: displayName || null
     });
   }
 
@@ -5236,13 +5533,23 @@ function computeCostModel(){
     projectedLabel: formatterCurrency(row.costProjected, { decimals: row.costProjected < 1000 ? 2 : 0 })
   }));
 
-  const historyRows = maintenanceHistory.slice(-6).reverse().map(entry => ({
-    dateLabel: entry.date.toLocaleDateString(),
-    hoursLabel: formatHours(entry.hours),
-    costLabel: formatterCurrency(entry.cost, { decimals: entry.cost < 1000 ? 2 : 0 }),
-    jobLabel: entry.taskName || (entry.taskId ? "View maintenance task" : "—"),
-    taskId: entry.taskId || null
-  }));
+  const historyRows = maintenanceHistory.slice(-6).reverse().map(entry => {
+    const mappedName = entry.taskId && maintenanceTaskNames.has(entry.taskId)
+      ? maintenanceTaskNames.get(entry.taskId)
+      : null;
+    const fallbackName = entry.taskNameHint || null;
+    const displayName = entry.taskDisplayName || entry.taskName || mappedName || fallbackName || null;
+    const jobLabel = displayName || (entry.taskId ? (mappedName || "View maintenance task") : "—");
+    const taskNameForSearch = entry.taskName || mappedName || fallbackName || null;
+    return {
+      dateLabel: entry.date.toLocaleDateString(),
+      hoursLabel: formatHours(entry.hours),
+      costLabel: formatterCurrency(entry.cost, { decimals: entry.cost < 1000 ? 2 : 0 }),
+      jobLabel,
+      taskId: entry.taskId || null,
+      taskName: taskNameForSearch
+    };
+  });
 
   const jobBreakdown = jobsInfo
     .slice()
