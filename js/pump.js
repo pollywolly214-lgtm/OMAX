@@ -868,14 +868,18 @@ function pumpWireChartTooltip(card, canvas){
   const hide = ()=> pumpHideChartTooltip(canvas, tooltip);
   const getTargets = ()=> Array.isArray(canvas.__pumpChartTargets) ? canvas.__pumpChartTargets : [];
 
-  const handleInteraction = (event)=>{
+  const performInteraction = (clientX, clientY)=>{
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)){
+      hide();
+      return;
+    }
     const rect = canvas.getBoundingClientRect();
     const clientWidth = canvas.clientWidth || rect.width || canvas.width;
     const clientHeight = canvas.clientHeight || rect.height || canvas.height;
     const scaleX = canvas.width / Math.max(1, clientWidth);
     const scaleY = canvas.height / Math.max(1, clientHeight);
-    const pointerX = (event.clientX - rect.left) * scaleX;
-    const pointerY = (event.clientY - rect.top) * scaleY;
+    const pointerX = (clientX - rect.left) * scaleX;
+    const pointerY = (clientY - rect.top) * scaleY;
     const targets = getTargets();
     let hovered = null;
     for (const target of targets){
@@ -893,53 +897,132 @@ function pumpWireChartTooltip(card, canvas){
     }
   };
 
-  const handlePointerDown = (event)=>{
-    handleInteraction(event);
-  };
+  const supportsPointerEvents = typeof window !== "undefined" && "PointerEvent" in window;
 
-  const handlePointerMove = (event)=>{
-    handleInteraction(event);
-  };
+  if (supportsPointerEvents){
+    const handlePointerDown = (event)=>{
+      performInteraction(event.clientX, event.clientY);
+    };
 
-  const handlePointerEnter = (event)=>{
-    handleInteraction(event);
-  };
+    const handlePointerMove = (event)=>{
+      performInteraction(event.clientX, event.clientY);
+    };
 
-  const handlePointerUp = (event)=>{
-    const type = String(event.pointerType || "").toLowerCase();
-    if (type === "touch" || type === "pen"){
+    const handlePointerEnter = (event)=>{
+      performInteraction(event.clientX, event.clientY);
+    };
+
+    const handlePointerUp = (event)=>{
+      const type = String(event.pointerType || "").toLowerCase();
+      if (type === "touch" || type === "pen"){
+        hide();
+      }else{
+        performInteraction(event.clientX, event.clientY);
+      }
+    };
+
+    const handlePointerCancel = ()=>{
       hide();
-    }else{
-      handleInteraction(event);
-    }
-  };
+    };
 
-  const handlePointerCancel = ()=>{
-    hide();
-  };
+    const handlePointerLeave = ()=>{
+      hide();
+    };
 
-  const handlePointerLeave = ()=>{
-    hide();
-  };
+    canvas.addEventListener("pointerdown", handlePointerDown);
+    canvas.addEventListener("pointermove", handlePointerMove);
+    canvas.addEventListener("pointerenter", handlePointerEnter);
+    canvas.addEventListener("pointerup", handlePointerUp);
+    canvas.addEventListener("pointercancel", handlePointerCancel);
+    canvas.addEventListener("pointerleave", handlePointerLeave);
+    canvas.addEventListener("blur", hide);
 
-  canvas.addEventListener("pointerdown", handlePointerDown);
-  canvas.addEventListener("pointermove", handlePointerMove);
-  canvas.addEventListener("pointerenter", handlePointerEnter);
-  canvas.addEventListener("pointerup", handlePointerUp);
-  canvas.addEventListener("pointercancel", handlePointerCancel);
-  canvas.addEventListener("pointerleave", handlePointerLeave);
-  canvas.addEventListener("blur", hide);
+    canvas.__pumpChartTooltipCleanup = ()=>{
+      canvas.removeEventListener("pointerdown", handlePointerDown);
+      canvas.removeEventListener("pointermove", handlePointerMove);
+      canvas.removeEventListener("pointerenter", handlePointerEnter);
+      canvas.removeEventListener("pointerup", handlePointerUp);
+      canvas.removeEventListener("pointercancel", handlePointerCancel);
+      canvas.removeEventListener("pointerleave", handlePointerLeave);
+      canvas.removeEventListener("blur", hide);
+      hide();
+    };
+  }else{
+    const handleMouseDown = (event)=>{
+      performInteraction(event.clientX, event.clientY);
+    };
 
-  canvas.__pumpChartTooltipCleanup = ()=>{
-    canvas.removeEventListener("pointerdown", handlePointerDown);
-    canvas.removeEventListener("pointermove", handlePointerMove);
-    canvas.removeEventListener("pointerenter", handlePointerEnter);
-    canvas.removeEventListener("pointerup", handlePointerUp);
-    canvas.removeEventListener("pointercancel", handlePointerCancel);
-    canvas.removeEventListener("pointerleave", handlePointerLeave);
-    canvas.removeEventListener("blur", hide);
-    hide();
-  };
+    const handleMouseMove = (event)=>{
+      performInteraction(event.clientX, event.clientY);
+    };
+
+    const handleMouseEnter = (event)=>{
+      performInteraction(event.clientX, event.clientY);
+    };
+
+    const handleMouseUp = (event)=>{
+      performInteraction(event.clientX, event.clientY);
+    };
+
+    const handleMouseLeave = ()=>{
+      hide();
+    };
+
+    const resolveTouchPoint = (event)=>{
+      if (!event) return null;
+      const source = (event.touches && event.touches[0])
+        || (event.changedTouches && event.changedTouches[0])
+        || null;
+      if (!source) return null;
+      const { clientX, clientY } = source;
+      if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+      return { clientX, clientY };
+    };
+
+    const handleTouchStart = (event)=>{
+      const point = resolveTouchPoint(event);
+      if (point){
+        performInteraction(point.clientX, point.clientY);
+      }
+    };
+
+    const handleTouchMove = (event)=>{
+      const point = resolveTouchPoint(event);
+      if (point){
+        performInteraction(point.clientX, point.clientY);
+      }
+    };
+
+    const handleTouchEnd = ()=>{
+      hide();
+    };
+
+    canvas.addEventListener("mousedown", handleMouseDown);
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseenter", handleMouseEnter);
+    canvas.addEventListener("mouseup", handleMouseUp);
+    canvas.addEventListener("mouseleave", handleMouseLeave);
+    const passiveOptions = { passive: true };
+    canvas.addEventListener("touchstart", handleTouchStart, passiveOptions);
+    canvas.addEventListener("touchmove", handleTouchMove, passiveOptions);
+    canvas.addEventListener("touchend", handleTouchEnd);
+    canvas.addEventListener("touchcancel", handleTouchEnd);
+    canvas.addEventListener("blur", hide);
+
+    canvas.__pumpChartTooltipCleanup = ()=>{
+      canvas.removeEventListener("mousedown", handleMouseDown);
+      canvas.removeEventListener("mousemove", handleMouseMove);
+      canvas.removeEventListener("mouseenter", handleMouseEnter);
+      canvas.removeEventListener("mouseup", handleMouseUp);
+      canvas.removeEventListener("mouseleave", handleMouseLeave);
+      canvas.removeEventListener("touchstart", handleTouchStart, passiveOptions);
+      canvas.removeEventListener("touchmove", handleTouchMove, passiveOptions);
+      canvas.removeEventListener("touchend", handleTouchEnd);
+      canvas.removeEventListener("touchcancel", handleTouchEnd);
+      canvas.removeEventListener("blur", hide);
+      hide();
+    };
+  }
 }
 
 function drawPumpChart(canvas, rangeValue){
