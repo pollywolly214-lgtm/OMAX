@@ -4799,7 +4799,10 @@ function computeCostModel(){
         entry.job,
         entry.label,
         entry.note,
-        entry.description
+        entry.description,
+        entry.maintenanceTask?.name,
+        entry.maintenance?.name,
+        entry.task?.name
       ];
       const rawName = nameCandidates.find(val => typeof val === "string" && val.trim()) || null;
       const taskName = typeof rawName === "string" ? rawName.trim() : null;
@@ -4814,6 +4817,22 @@ function computeCostModel(){
 
   const intervalTasks = Array.isArray(tasksInterval) ? tasksInterval : [];
   const asReqTasks = Array.isArray(tasksAsReq) ? tasksAsReq : [];
+
+  const maintenanceTaskNames = new Map();
+  for (const task of intervalTasks){
+    if (!task || task.id == null) continue;
+    const id = String(task.id);
+    if (!maintenanceTaskNames.has(id) && typeof task.name === "string" && task.name.trim()){
+      maintenanceTaskNames.set(id, task.name.trim());
+    }
+  }
+  for (const task of asReqTasks){
+    if (!task || task.id == null) continue;
+    const id = String(task.id);
+    if (!maintenanceTaskNames.has(id) && typeof task.name === "string" && task.name.trim()){
+      maintenanceTaskNames.set(id, task.name.trim());
+    }
+  }
 
   const cleanPartNumber = (pn)=> String(pn || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
   const maintenancePartNumbers = new Set();
@@ -5015,13 +5034,16 @@ function computeCostModel(){
     const curr = parsedHistory[i];
     const deltaHours = Number(curr.hours) - Number(prev.hours);
     if (!isFinite(deltaHours) || deltaHours <= 0) continue;
-    let taskId = curr.taskId || null;
-    let taskName = curr.taskName || null;
-    if (!taskName && taskId && typeof findTaskByIdLocal === "function"){ 
+    let taskId = curr.taskId || prev.taskId || null;
+    let taskName = curr.taskName || prev.taskName || null;
+    if (!taskName && taskId && typeof findTaskByIdLocal === "function"){
       const linkedTask = findTaskByIdLocal(taskId);
       if (linkedTask && typeof linkedTask.name === "string" && linkedTask.name.trim()){
         taskName = linkedTask.name.trim();
       }
+    }
+    if (!taskName && taskId && maintenanceTaskNames.has(taskId)){
+      taskName = maintenanceTaskNames.get(taskId);
     }
     maintenanceHistory.push({
       date: curr.date,
