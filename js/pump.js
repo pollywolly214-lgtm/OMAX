@@ -1390,6 +1390,130 @@ function drawPumpChart(canvas, rangeValue){
     ctx.fillText(`Baseline ${baselineRPM} RPM${arrow}`, axisX0 + scaled(2), baselineY + labelOffset);
   }
 
+  if (summary && pointCoords.length){
+    const calloutTargets = [];
+    if (summary.maxEntry){
+      calloutTargets.push({
+        dateISO: summary.maxEntry.dateISO,
+        rpm: summary.maxEntry.rpm,
+        label: sameExtremeEntry ? "High & Low" : "High",
+        palette: "high"
+      });
+    }
+    if (summary.minEntry && !sameExtremeEntry){
+      calloutTargets.push({
+        dateISO: summary.minEntry.dateISO,
+        rpm: summary.minEntry.rpm,
+        label: "Low",
+        palette: "low"
+      });
+    }
+    if (calloutTargets.length){
+      const accentColors = {
+        high: { stroke: "#e45a72", fill: "#f27d8f" },
+        low: { stroke: "#2f9c6b", fill: "#46c58a" },
+        both: { stroke: "#3b82f6", fill: "#60a5fa" }
+      };
+      const minCalloutX = margin.left + scaled(6);
+      const maxCalloutX = cssWidth - margin.right - scaled(6);
+      const minCalloutY = margin.top + scaled(6);
+      const maxCalloutY = axisY - scaled(8);
+      ctx.save();
+      const prevBaseline = ctx.textBaseline;
+      const prevAlign = ctx.textAlign;
+      const labelFont = fontPx(10.2);
+      const detailFont = fontPx(9.2);
+      const labelLineHeight = Math.max(scaled(12), 13);
+      const detailLineHeight = Math.max(scaled(11), 12);
+      const calloutPadX = Math.max(scaled(6), 7);
+      const calloutPadY = Math.max(scaled(5), 6);
+      const pointerGap = Math.max(scaled(8), 10);
+      const borderRadius = Math.max(scaled(5), 6.5);
+      const accentRadius = Math.max(scaled(3), 3.8);
+      const accentGap = Math.max(scaled(4.5), 5.5);
+      ctx.textBaseline = "top";
+      ctx.textAlign = "left";
+
+      calloutTargets.forEach(target => {
+        const point = pointCoords.find(p => p.entry.dateISO === target.dateISO);
+        if (!point) return;
+        const paletteKey = accentColors[target.palette] ? target.palette : "both";
+        const palette = accentColors[paletteKey];
+        const accentStroke = palette.stroke;
+        const accentFill = palette.fill;
+        const labelLine = `${target.label}: ${formatRpm(target.rpm)} RPM`;
+        const detailLine = pumpFormatShortDate(target.dateISO);
+
+        ctx.font = labelFont;
+        const labelWidth = ctx.measureText(labelLine).width;
+        ctx.font = detailFont;
+        const detailWidth = ctx.measureText(detailLine).width;
+        const contentWidth = Math.max(labelWidth, detailWidth) + (accentRadius * 2) + accentGap;
+        const bubbleWidth = contentWidth + calloutPadX * 2;
+        const bubbleHeight = calloutPadY * 2 + labelLineHeight + detailLineHeight;
+        if (!(bubbleWidth > 0 && bubbleHeight > 0)) return;
+
+        const anchorX = point.x;
+        const anchorY = point.y;
+        let labelX = anchorX + pointerGap;
+        if (anchorX > (margin.left + innerW / 2)){
+          labelX = anchorX - pointerGap - bubbleWidth;
+        }
+        const maxX = maxCalloutX - bubbleWidth;
+        labelX = clamp(labelX, minCalloutX, Math.max(minCalloutX, maxX));
+        let labelY = anchorY - (bubbleHeight / 2);
+        const maxY = maxCalloutY - bubbleHeight;
+        labelY = clamp(labelY, minCalloutY, Math.max(minCalloutY, maxY));
+        const pointerTargetX = clamp(anchorX, labelX, labelX + bubbleWidth);
+        const pointerTargetY = clamp(anchorY, labelY, labelY + bubbleHeight);
+
+        ctx.save();
+        ctx.strokeStyle = `${accentStroke}dd`;
+        ctx.lineWidth = Math.max(1, scaled(0.7));
+        ctx.beginPath();
+        ctx.moveTo(anchorX, anchorY);
+        ctx.lineTo(pointerTargetX, pointerTargetY);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.shadowColor = "rgba(15, 23, 42, 0.45)";
+        ctx.shadowBlur = Math.max(scaled(4), 6);
+        ctx.beginPath();
+        pumpRoundedRectPath(ctx, labelX, labelY, bubbleWidth, bubbleHeight, borderRadius);
+        ctx.fillStyle = "rgba(10, 17, 32, 0.94)";
+        ctx.fill();
+        ctx.restore();
+
+        ctx.beginPath();
+        pumpRoundedRectPath(ctx, labelX, labelY, bubbleWidth, bubbleHeight, borderRadius);
+        ctx.lineWidth = Math.max(1, scaled(0.6));
+        ctx.strokeStyle = "rgba(148, 163, 184, 0.5)";
+        ctx.stroke();
+
+        const textBaseX = labelX + calloutPadX + (accentRadius * 2) + accentGap;
+        const labelTextY = labelY + calloutPadY;
+        const detailTextY = labelTextY + labelLineHeight;
+
+        ctx.beginPath();
+        ctx.fillStyle = accentFill;
+        ctx.arc(labelX + calloutPadX + accentRadius, labelTextY + (labelLineHeight / 2), accentRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.font = labelFont;
+        ctx.fillStyle = accentStroke;
+        ctx.fillText(labelLine, textBaseX, labelTextY);
+        ctx.font = detailFont;
+        ctx.fillStyle = "#d8e2ff";
+        ctx.fillText(detailLine, textBaseX, detailTextY);
+      });
+
+      ctx.textBaseline = prevBaseline;
+      ctx.textAlign = prevAlign;
+      ctx.restore();
+    }
+  }
+
   ctx.fillStyle = "#1f3a60";
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
