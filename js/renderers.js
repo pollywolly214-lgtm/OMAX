@@ -4700,6 +4700,30 @@ function renderCosts(){
   const canvasWrap = content.querySelector(".cost-chart-canvas");
   let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
 
+  const jobsHistoryLink = content.querySelector("[data-cost-jobs-history]");
+  if (jobsHistoryLink){
+    const goToJobsHistory = ()=>{
+      window.pendingJobHistoryFocus = true;
+      const targetHash = "#/jobs";
+      if (location.hash !== targetHash){
+        location.hash = targetHash;
+      }else{
+        renderJobs();
+      }
+    };
+    const activateHistoryLink = (event)=>{
+      event.preventDefault();
+      event.stopPropagation();
+      goToJobsHistory();
+    };
+    jobsHistoryLink.addEventListener("click", activateHistoryLink);
+    jobsHistoryLink.addEventListener("keydown", (event)=>{
+      if (event.key === "Enter" || event.key === " "){
+        activateHistoryLink(event);
+      }
+    });
+  }
+
   const escapeTooltip = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -5849,32 +5873,44 @@ function renderJobs(){
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
 
+  const focusPastJobs = ()=>{
+    const target = document.getElementById("pastJobs");
+    if (!target) return;
+    const restoreTabindex = !target.hasAttribute("tabindex");
+    if (restoreTabindex){
+      target.setAttribute("tabindex", "-1");
+      target.dataset.tempTabindex = "1";
+    }
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    try {
+      target.focus({ preventScroll: true });
+    } catch (_) {
+      // Fallback focus handling for browsers without focus options
+      target.focus();
+    }
+    if (restoreTabindex){
+      const cleanup = ()=>{
+        if (!target.dataset.tempTabindex) return;
+        delete target.dataset.tempTabindex;
+        target.removeAttribute("tabindex");
+      };
+      target.addEventListener("blur", ()=> cleanup(), { once: true });
+      setTimeout(()=> cleanup(), 1500);
+    }
+  };
+
   const historyBtn = content.querySelector("[data-job-history-trigger]");
   if (historyBtn){
-    historyBtn.addEventListener("click", ()=>{
-      const target = document.getElementById("pastJobs");
-      if (!target) return;
-      const restoreTabindex = !target.hasAttribute("tabindex");
-      if (restoreTabindex){
-        target.setAttribute("tabindex", "-1");
-        target.dataset.tempTabindex = "1";
-      }
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
-      try {
-        target.focus({ preventScroll: true });
-      } catch (_) {
-        // Fallback focus handling for browsers without focus options
-        target.focus();
-      }
-      if (restoreTabindex){
-        const cleanup = ()=>{
-          if (!target.dataset.tempTabindex) return;
-          delete target.dataset.tempTabindex;
-          target.removeAttribute("tabindex");
-        };
-        target.addEventListener("blur", ()=> cleanup(), { once: true });
-        setTimeout(()=> cleanup(), 1500);
-      }
+    historyBtn.addEventListener("click", (event)=>{
+      event.preventDefault();
+      focusPastJobs();
+    });
+  }
+
+  if (window.pendingJobHistoryFocus){
+    delete window.pendingJobHistoryFocus;
+    requestAnimationFrame(()=>{
+      focusPastJobs();
     });
   }
 
