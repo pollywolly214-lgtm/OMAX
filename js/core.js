@@ -23,6 +23,87 @@ if (typeof window !== "undefined") window.CLEAR_DATA_PASSWORD = CLEAR_DATA_PASSW
 
 window.APP_SCHEMA = APP_SCHEMA;
 
+if (typeof window !== "undefined"){
+  window.cloudDashboardLayout = {};
+  window.cloudCostLayout = {};
+  window.cloudDashboardLayoutLoaded = false;
+  window.cloudCostLayoutLoaded = false;
+}
+
+const DASHBOARD_LAYOUT_MIN_WIDTH = 240;
+const DASHBOARD_LAYOUT_MIN_HEIGHT = 160;
+const COST_LAYOUT_MIN_WIDTH = 240;
+const COST_LAYOUT_MIN_HEIGHT = 160;
+const LAYOUT_MAX_POSITION = 12000;
+const LAYOUT_MAX_DIMENSION = 16000;
+
+function sanitizeLayoutMap(layout, {
+  minWidth = 1,
+  minHeight = 1,
+  maxWidth = LAYOUT_MAX_DIMENSION,
+  maxHeight = LAYOUT_MAX_DIMENSION,
+  maxPosition = LAYOUT_MAX_POSITION
+} = {}){
+  const source = (layout && typeof layout === "object") ? layout : {};
+  const sanitized = {};
+  let changed = false;
+
+  const clampNumber = (value, { min = 0, max = maxPosition })=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return { value: min, changed: true };
+    let next = Math.round(num);
+    if (next < min){ next = min; return { value: next, changed: true }; }
+    if (next > max){ next = max; return { value: next, changed: true }; }
+    return { value: next, changed: next !== num };
+  };
+
+  for (const [id, rawBox] of Object.entries(source)){
+    if (!rawBox || typeof rawBox !== "object"){
+      changed = true;
+      continue;
+    }
+
+    const { value: xVal, changed: xChanged } = clampNumber(rawBox.x, { min: 0, max: maxPosition });
+    const { value: yVal, changed: yChanged } = clampNumber(rawBox.y, { min: 0, max: maxPosition });
+
+    const clampDimension = (value, min, max)=>{
+      const num = Number(value);
+      if (!Number.isFinite(num)) return { value: min, changed: true };
+      let next = Math.round(num);
+      if (next < min){ next = min; return { value: next, changed: true }; }
+      if (next > max){ next = max; return { value: next, changed: true }; }
+      return { value: next, changed: next !== num };
+    };
+
+    const { value: widthVal, changed: wChanged } = clampDimension(rawBox.width, minWidth, maxWidth);
+    const { value: heightVal, changed: hChanged } = clampDimension(rawBox.height, minHeight, maxHeight);
+
+    sanitized[id] = { x: xVal, y: yVal, width: widthVal, height: heightVal };
+    if (xChanged || yChanged || wChanged || hChanged) changed = true;
+  }
+
+  return { layout: sanitized, changed };
+}
+
+function sanitizeDashboardLayout(layout){
+  return sanitizeLayoutMap(layout, {
+    minWidth: DASHBOARD_LAYOUT_MIN_WIDTH,
+    minHeight: DASHBOARD_LAYOUT_MIN_HEIGHT
+  });
+}
+
+function sanitizeCostLayout(layout){
+  return sanitizeLayoutMap(layout, {
+    minWidth: COST_LAYOUT_MIN_WIDTH,
+    minHeight: COST_LAYOUT_MIN_HEIGHT
+  });
+}
+
+if (typeof window !== "undefined"){
+  window.sanitizeDashboardLayout = sanitizeDashboardLayout;
+  window.sanitizeCostLayout = sanitizeCostLayout;
+}
+
 /* Root helpers */
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
@@ -1007,6 +1088,12 @@ function snapshotState(){
     label: entry.label,
     deletedAt: entry.deletedAt
   }));
+  const dashLayoutSource = window.cloudDashboardLayoutLoaded
+    ? window.cloudDashboardLayout
+    : (window.dashboardLayoutState && window.dashboardLayoutState.layoutById);
+  const costLayoutSource = window.cloudCostLayoutLoaded
+    ? window.cloudCostLayout
+    : (window.costLayoutState && window.costLayoutState.layoutById);
   return {
     schema: window.APP_SCHEMA || APP_SCHEMA,
     totalHistory,
@@ -1021,7 +1108,9 @@ function snapshotState(){
     pumpEff: safePumpEff,
     deletedItems: trashSnapshot,
     settingsFolders: foldersSnapshot,
-    folders: cloneFolders(window.settingsFolders)
+    folders: cloneFolders(window.settingsFolders),
+    dashboardLayout: cloneStructured(dashLayoutSource) || {},
+    costLayout: cloneStructured(costLayoutSource) || {}
   };
 }
 
@@ -1221,6 +1310,82 @@ function adoptState(doc){
     : (Array.isArray(data.folders) ? data.folders : null);
   setSettingsFolders(rawFolders);
 
+  const rawDashboardLayout = (data.dashboardLayout && typeof data.dashboardLayout === "object")
+    ? data.dashboardLayout
+    : {};
+  const rawCostLayout = (data.costLayout && typeof data.costLayout === "object")
+    ? data.costLayout
+    : {};
+
+  const dashSanitized = sanitizeDashboardLayout(rawDashboardLayout);
+  const costSanitized = sanitizeCostLayout(rawCostLayout);
+  const dashLayout = dashSanitized.layout;
+  const costLayout = costSanitized.layout;
+
+  if (typeof window !== "undefined"){
+    window.cloudDashboardLayout = cloneStructured(dashLayout) || {};
+    window.cloudDashboardLayoutLoaded = true;
+    window.cloudCostLayout = cloneStructured(costLayout) || {};
+    window.cloudCostLayoutLoaded = true;
+  }
+
+  try {
+    if (typeof window.localStorage !== "undefined" && window.localStorage){
+      const storage = window.localStorage;
+      const dashKeys = Object.keys(window.cloudDashboardLayout || {});
+      if (dashKeys.length){
+        storage.setItem("dashboard_layout_windows_v1", JSON.stringify(window.cloudDashboardLayout));
+      } else {
+        storage.removeItem("dashboard_layout_windows_v1");
+      }
+      const costKeys = Object.keys(window.cloudCostLayout || {});
+      if (costKeys.length){
+        storage.setItem("cost_layout_windows_v1", JSON.stringify(window.cloudCostLayout));
+      } else {
+        storage.removeItem("cost_layout_windows_v1");
+      }
+    }
+  } catch (err) {
+    console.warn("Unable to sync layout storage from cloud", err);
+  }
+
+  const dashState = (typeof window !== "undefined") ? window.dashboardLayoutState : null;
+  if (dashState && typeof dashState === "object"){
+    dashState.layoutById = cloneStructured(window.cloudDashboardLayout) || {};
+    const hasLayout = dashState.layoutById && Object.keys(dashState.layoutById).length > 0;
+    dashState.layoutStored = hasLayout;
+    if (dashState.root && dashState.root.classList){
+      dashState.root.classList.toggle("has-custom-layout", hasLayout);
+      if (typeof applyDashboardLayout === "function"){
+        try { applyDashboardLayout(dashState); } catch (err) { console.warn("Failed to apply dashboard layout", err); }
+      }
+      if (typeof updateDashboardEditUi === "function"){
+        try { updateDashboardEditUi(dashState); } catch (err) { console.warn("Failed to update dashboard layout UI", err); }
+      }
+    }
+  }
+
+  const costState = (typeof window !== "undefined") ? window.costLayoutState : null;
+  if (costState && typeof costState === "object"){
+    costState.layoutById = cloneStructured(window.cloudCostLayout) || {};
+    const hasLayout = costState.layoutById && Object.keys(costState.layoutById).length > 0;
+    costState.layoutStored = hasLayout;
+    if (costState.root && costState.root.classList){
+      costState.root.classList.toggle("has-custom-layout", hasLayout);
+      if (typeof applyCostLayout === "function"){
+        try { applyCostLayout(costState); } catch (err) { console.warn("Failed to apply cost layout", err); }
+      }
+      if (typeof updateCostEditUi === "function"){
+        try { updateCostEditUi(costState); } catch (err) { console.warn("Failed to update cost layout UI", err); }
+      }
+    }
+  }
+
+  if ((dashSanitized.changed || costSanitized.changed) && typeof saveCloudDebounced === "function"){
+    try { saveCloudDebounced(); }
+    catch (err) { console.warn("Failed to resave sanitized layouts", err); }
+  }
+
   if (typeof window._maintOrderCounter !== "number" || !Number.isFinite(window._maintOrderCounter)){
     window._maintOrderCounter = 0;
   }
@@ -1294,7 +1459,9 @@ async function loadFromCloud(){
           settingsFolders: seededFoldersPayload,
           folders: cloneFolders(seededFoldersPayload),
           pumpEff: pe,
-          deletedItems: normalizeDeletedItems(data.deletedItems || data.deleted_items || [])
+          deletedItems: normalizeDeletedItems(data.deletedItems || data.deleted_items || []),
+          dashboardLayout: cloneStructured(data.dashboardLayout && typeof data.dashboardLayout === "object" ? data.dashboardLayout : {}) || {},
+          costLayout: cloneStructured(data.costLayout && typeof data.costLayout === "object" ? data.costLayout : {}) || {}
         };
         adoptState(seeded);
         resetHistoryToCurrent();
@@ -1347,7 +1514,9 @@ async function loadFromCloud(){
         settingsFolders: defaultFolders,
         folders: cloneFolders(defaultFolders),
         garnetCleanings: [],
-        deletedItems: []
+        deletedItems: [],
+        dashboardLayout: {},
+        costLayout: {}
       };
       adoptState(seeded);
       resetHistoryToCurrent();
@@ -1359,7 +1528,7 @@ async function loadFromCloud(){
       ? window.pumpEff
       : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
     const fallbackFolders = defaultSettingsFolders();
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [] });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {} });
     resetHistoryToCurrent();
   }
 }
@@ -1465,7 +1634,9 @@ function buildCleanState(){
     orderRequestTab: "active",
     garnetCleanings: [],
     pumpEff: { ...pumpDefaults },
-    deletedItems: []
+    deletedItems: [],
+    dashboardLayout: {},
+    costLayout: {}
   };
 }
 
@@ -1520,6 +1691,14 @@ async function clearAllAppData(){
 
   try { if (window.dashboardLayoutState) delete window.dashboardLayoutState; } catch(_){ }
   try { if (window.costLayoutState) delete window.costLayoutState; } catch(_){ }
+  try {
+    window.cloudDashboardLayout = {};
+    window.cloudDashboardLayoutLoaded = true;
+  } catch(_){ }
+  try {
+    window.cloudCostLayout = {};
+    window.cloudCostLayoutLoaded = true;
+  } catch(_){ }
   try { if (Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles.length = 0; } catch(_){ }
   if (typeof window.inventorySearchTerm === "string") window.inventorySearchTerm = "";
   if (window.orderPartialSelection instanceof Set) window.orderPartialSelection.clear();
