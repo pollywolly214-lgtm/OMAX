@@ -2486,8 +2486,28 @@ body.modal-open {
 }
 
 .modal-actions .primary {
-  background: #0a63c2;
+  background: #084cba;
+  border: 1px solid #063d97;
   color: #fff;
+  box-shadow: 0 0 0 0 rgba(8, 76, 186, 0.45);
+}
+
+.modal-actions .primary:hover,
+.modal-actions .primary:focus {
+  background: #063d97;
+  border-color: #05347f;
+  box-shadow: 0 0 0 3px rgba(8, 76, 186, 0.35);
+  color: #fff;
+}
+
+.modal-actions .primary:active {
+  background: #052f77;
+  border-color: #04255e;
+  box-shadow: 0 0 0 3px rgba(8, 76, 186, 0.45);
+}
+
+.modal-actions .primary:focus-visible {
+  outline: none;
 }
 
 .subtask-section {
