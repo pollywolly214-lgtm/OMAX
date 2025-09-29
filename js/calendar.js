@@ -157,7 +157,7 @@ function showJobBubble(jobId, anchor){
     const money = Math.abs(showMoney).toFixed(2);
     const reqCell = (req.requiredPerDay === Infinity)
       ? `<span class="danger">Past due / no days remaining</span>`
-      : `${req.requiredPerDay.toFixed(2)} hr/day <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
+      : `${req.requiredPerDay.toFixed(2)} hr/day needed to meet goal <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
     const noteAuto = eff.usedAutoFromManual
       ? `<div class="small"><strong>Auto from last manual</strong>: continuing at ${DAILY_HOURS} hr/day.</div>`
       : (eff.usedFromStartAuto ? `<div class="small"><strong>Auto</strong>: assuming ${DAILY_HOURS} hr/day from start.</div>` : ``);

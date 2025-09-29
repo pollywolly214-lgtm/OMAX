@@ -1408,7 +1408,7 @@ function viewJobs(){
     const remainingDisplay = formatHours(remainHrs);
     const needDisplay = req.requiredPerDay === Infinity
       ? '<span class="job-badge job-badge-overdue">Past due</span>'
-      : `${needPerDay} hr/day`;
+      : `${needPerDay} hr/day needed to meet goal`;
     const statusDisplay = [
       `<div class="job-status ${ahead ? 'job-status-ahead' : (behind ? 'job-status-behind' : 'job-status-onpace')}">${statusLabel}</div>`,
       statusDetail ? `<div class="job-status-detail">${statusDetail.trim()}</div>` : ''
