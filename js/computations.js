@@ -1,4 +1,6 @@
 /* ==================== CORE COMPUTATIONS ==================== */
+const MS_PER_DAY = 24*60*60*1000;
+
 function currentTotal(){ return totalHistory.length ? totalHistory[totalHistory.length-1].hours : null; }
 function previousTotal(){ return totalHistory.length>1 ? totalHistory[totalHistory.length-2].hours : null; }
 function deltaSinceLast(){
@@ -49,6 +51,21 @@ function nextDue(task){
  */
 
 
+function daysBetweenUTC(startDate, endDate){
+  if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) return null;
+  if (!(endDate   instanceof Date) || Number.isNaN(endDate.getTime()))   return null;
+  const startUTC = Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const endUTC   = Date.UTC(endDate.getFullYear(),   endDate.getMonth(),   endDate.getDate());
+  const diff = Math.floor((endUTC - startUTC) / MS_PER_DAY);
+  return diff;
+}
+
+function inclusiveDayCount(startDate, endDate){
+  const diff = daysBetweenUTC(startDate, endDate);
+  if (diff == null) return 0;
+  return diff < 0 ? 0 : diff + 1;
+}
+
 function computeJobEfficiency(job){
   // Priority for actual progress:
   // 1) Manual logs (authoritative)
@@ -81,19 +98,18 @@ function computeJobEfficiency(job){
   due.setHours(0,0,0,0);
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const MS_PER_DAY = 24*60*60*1000;
   const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
     ? Number(DAILY_HOURS)
     : 8;
 
-  const totalDays = Math.max(1, Math.floor((due - start)/MS_PER_DAY) + 1);
+  const totalDays = Math.max(1, inclusiveDayCount(start, due));
   result.totalDays = totalDays;
 
   let daysElapsed = 0;
   if (today > due) {
     daysElapsed = totalDays;
   }else if (today > start){
-    daysElapsed = Math.min(totalDays, Math.floor((today - start)/MS_PER_DAY));
+    daysElapsed = Math.min(totalDays, Math.max(0, daysBetweenUTC(start, today)));
   }
   result.daysElapsed = daysElapsed;
 
@@ -167,7 +183,7 @@ function computeRequiredDaily(job){
 
   let remainingDays;
   if (today > due) remainingDays = 0;
-  else remainingDays = Math.max(1, Math.floor((due - today)/(24*60*60*1000)) + 1);
+  else remainingDays = Math.max(1, inclusiveDayCount(today, due));
 
   const requiredPerDay = remainingDays > 0 ? (remainingHours / remainingDays) : (remainingHours>0 ? Infinity : 0);
   return { remainingHours, remainingDays, requiredPerDay };
