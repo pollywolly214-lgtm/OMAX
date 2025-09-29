@@ -2979,6 +2979,263 @@ function showConfirmModal(options){
   });
 }
 
+const makeActiveCopyModalState = {
+  root: null,
+  form: null,
+  titleEl: null,
+  messageEl: null,
+  durationEl: null,
+  startInput: null,
+  dueInput: null,
+  cancelBtn: null,
+  closeBtn: null,
+  submitBtn: null,
+  resolver: null,
+  keydownHandler: null,
+  listenersBound: false,
+  updateDuration: null
+};
+
+const DATE_INPUT_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function parseJobDate(value){
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())){
+    const copy = new Date(value.getTime());
+    copy.setHours(0, 0, 0, 0);
+    return copy;
+  }
+  let parsed = null;
+  if (typeof parseDateLocal === "function"){
+    try {
+      parsed = parseDateLocal(value);
+    } catch (_err){
+      parsed = null;
+    }
+    if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+      parsed.setHours(0, 0, 0, 0);
+      return parsed;
+    }
+  }
+  if (typeof value === "string" && DATE_INPUT_RE.test(value.trim())){
+    parsed = new Date(`${value.trim()}T00:00:00`);
+    if (!Number.isNaN(parsed.getTime())){
+      parsed.setHours(0, 0, 0, 0);
+      return parsed;
+    }
+  }
+  parsed = new Date(value);
+  if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+    parsed.setHours(0, 0, 0, 0);
+    return parsed;
+  }
+  return null;
+}
+
+function toDateInputValue(date){
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const normalized = new Date(date.getTime());
+  normalized.setHours(0, 0, 0, 0);
+  const offset = normalized.getTimezoneOffset();
+  const local = new Date(normalized.getTime() - offset * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function ensureMakeActiveCopyModal(){
+  const template = `
+    <div class="modal-card dashboard-modal-card" data-active-copy-card>
+      <button type="button" class="modal-close" data-active-copy-close>×</button>
+      <h4 data-active-copy-title>Make active copy</h4>
+      <p class="confirm-modal-copy" data-active-copy-message></p>
+      <form data-active-copy-form>
+        <div class="modal-grid">
+          <label>Start date
+            <input type="date" data-active-copy-start required>
+          </label>
+          <label>Due date
+            <input type="date" data-active-copy-due required>
+          </label>
+        </div>
+        <p class="confirm-modal-copy" data-active-copy-duration hidden aria-live="polite"></p>
+        <div class="modal-actions">
+          <button type="button" class="secondary" data-active-copy-cancel>Cancel</button>
+          <button type="submit" class="primary" data-active-copy-submit>Make active copy</button>
+        </div>
+      </form>
+    </div>
+  `.trim();
+
+  let root = makeActiveCopyModalState.root;
+  if (!root || !root.isConnected){
+    root = document.getElementById("makeActiveCopyModal");
+    if (!root){
+      root = document.createElement("div");
+      root.id = "makeActiveCopyModal";
+      root.className = "modal-backdrop";
+      root.setAttribute("hidden", "");
+      const host = document.body || document.documentElement || document;
+      host.appendChild(root);
+    }
+    makeActiveCopyModalState.root = root;
+  }
+
+  if (makeActiveCopyModalState.root && makeActiveCopyModalState.root.innerHTML.trim() === ""){
+    makeActiveCopyModalState.root.innerHTML = template;
+  }
+
+  const ensureStructure = () => {
+    const host = makeActiveCopyModalState.root;
+    if (!host) return;
+    if (!host.querySelector("[data-active-copy-form]")){
+      host.innerHTML = template;
+    }
+    makeActiveCopyModalState.form = host.querySelector("[data-active-copy-form]");
+    makeActiveCopyModalState.titleEl = host.querySelector("[data-active-copy-title]");
+    makeActiveCopyModalState.messageEl = host.querySelector("[data-active-copy-message]");
+    makeActiveCopyModalState.durationEl = host.querySelector("[data-active-copy-duration]");
+    makeActiveCopyModalState.startInput = host.querySelector("[data-active-copy-start]");
+    makeActiveCopyModalState.dueInput = host.querySelector("[data-active-copy-due]");
+    makeActiveCopyModalState.cancelBtn = host.querySelector("[data-active-copy-cancel]");
+    makeActiveCopyModalState.closeBtn = host.querySelector("[data-active-copy-close]");
+    makeActiveCopyModalState.submitBtn = host.querySelector("[data-active-copy-submit]");
+  };
+
+  ensureStructure();
+
+  const state = makeActiveCopyModalState;
+  if (!state.listenersBound && state.form && state.startInput && state.dueInput){
+    const updateDuration = () => {
+      const startVal = state.startInput?.value || "";
+      const dueVal = state.dueInput?.value || "";
+      if (state.dueInput){
+        if (startVal){
+          state.dueInput.min = startVal;
+        }else{
+          state.dueInput.removeAttribute("min");
+        }
+      }
+      if (state.durationEl){
+        const startDate = parseJobDate(startVal);
+        const dueDate = parseJobDate(dueVal);
+        if (startDate && dueDate && dueDate >= startDate){
+          const days = Math.max(1, Math.round((dueDate.getTime() - startDate.getTime()) / MS_PER_DAY) + 1);
+          state.durationEl.textContent = `Cutting days: ${days}`;
+          state.durationEl.hidden = false;
+        }else{
+          state.durationEl.hidden = true;
+          state.durationEl.textContent = "";
+        }
+      }
+    };
+
+    state.startInput.addEventListener("change", updateDuration);
+    state.startInput.addEventListener("input", updateDuration);
+    state.dueInput.addEventListener("change", updateDuration);
+    state.dueInput.addEventListener("input", updateDuration);
+
+    state.form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!state.startInput || !state.dueInput) return;
+      const startISO = state.startInput.value;
+      const dueISO = state.dueInput.value;
+      if (!startISO){ toast("Choose a start date."); return; }
+      if (!dueISO){ toast("Choose a due date."); return; }
+      const startDate = parseJobDate(startISO);
+      const dueDate = parseJobDate(dueISO);
+      if (!startDate || !dueDate){ toast("Enter valid dates."); return; }
+      if (dueDate < startDate){ toast("Due date cannot be before the start date."); return; }
+      closeMakeActiveCopyModal({ startISO, dueISO });
+    });
+
+    const cancel = () => closeMakeActiveCopyModal(null);
+    state.cancelBtn?.addEventListener("click", cancel);
+    state.closeBtn?.addEventListener("click", cancel);
+    state.root?.addEventListener("click", (event) => {
+      if (event.target === state.root){
+        cancel();
+      }
+    });
+
+    state.listenersBound = true;
+    state.updateDuration = updateDuration;
+  }
+
+  return makeActiveCopyModalState;
+}
+
+function closeMakeActiveCopyModal(result){
+  const state = makeActiveCopyModalState;
+  const root = state.root;
+  if (root){
+    root.classList.remove("is-visible");
+    root.setAttribute("hidden", "");
+  }
+  document.body?.classList.remove("modal-open");
+  if (state.keydownHandler){
+    document.removeEventListener("keydown", state.keydownHandler);
+    state.keydownHandler = null;
+  }
+  const resolver = state.resolver;
+  state.resolver = null;
+  if (typeof resolver === "function"){
+    resolver(result);
+  }
+}
+
+function showMakeActiveCopyModal(options){
+  const state = ensureMakeActiveCopyModal();
+  const root = state.root;
+  if (!root || !state.form || !state.startInput || !state.dueInput){
+    return Promise.resolve(null);
+  }
+
+  const opts = options || {};
+  const { jobName, defaultStart, defaultEnd } = opts;
+
+  if (state.resolver){
+    closeMakeActiveCopyModal(null);
+  }
+
+  state.titleEl && (state.titleEl.textContent = "Make active copy");
+  if (state.messageEl){
+    state.messageEl.textContent = jobName
+      ? `Select the start and due dates for "${jobName}".`
+      : "Select the start and due dates for the new active job.";
+  }
+
+  state.startInput.value = defaultStart || "";
+  state.dueInput.value = defaultEnd || "";
+  if (defaultStart){
+    state.dueInput.min = defaultStart;
+  }else{
+    state.dueInput.removeAttribute("min");
+  }
+
+  if (typeof state.updateDuration === "function"){
+    state.updateDuration();
+  }
+
+  root.classList.add("is-visible");
+  root.removeAttribute("hidden");
+  document.body?.classList.add("modal-open");
+
+  if (!state.keydownHandler){
+    state.keydownHandler = (event) => {
+      if (event.key === "Escape"){ event.preventDefault(); closeMakeActiveCopyModal(null); }
+    };
+    document.addEventListener("keydown", state.keydownHandler);
+  }
+
+  requestAnimationFrame(() => {
+    state.startInput?.focus();
+  });
+
+  return new Promise((resolve) => {
+    state.resolver = resolve;
+  });
+}
+
 function renderSettings(){
   // === Explorer-style Maintenance Settings ===
   const root = document.getElementById("content");
@@ -6177,11 +6434,118 @@ function renderJobs(){
   });
 
   const historyBody = content.querySelector(".past-jobs-table tbody");
-  historyBody?.addEventListener("click", (e)=>{
+  historyBody?.addEventListener("click", async (e)=>{
     const histEdit = e.target.closest("[data-history-edit]");
     const histCancel = e.target.closest("[data-history-cancel]");
     const histSave = e.target.closest("[data-history-save]");
     const histDelete = e.target.closest("[data-history-delete]");
+    const histActivate = e.target.closest("[data-history-activate]");
+
+    if (histActivate){
+      const id = histActivate.getAttribute("data-history-activate");
+      if (!id) return;
+      const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
+      if (!entry){ toast("Unable to locate completed job."); return; }
+
+      const hoursPerDay = (typeof DAILY_HOURS === "number" && isFinite(DAILY_HOURS) && DAILY_HOURS > 0) ? DAILY_HOURS : 8;
+      const safeToday = (() => {
+        const parsed = parseJobDate(todayISO) || parseJobDate(new Date());
+        if (parsed){
+          return parsed;
+        }
+        const fallback = new Date();
+        fallback.setHours(0, 0, 0, 0);
+        return fallback;
+      })();
+
+      const entryStartDate = parseJobDate(entry.startISO);
+      const entryDueDate = parseJobDate(entry.dueISO);
+
+      const defaultStartDate = (() => {
+        const source = entryStartDate || safeToday;
+        if (!source || Number.isNaN(source.getTime())) return null;
+        const clone = new Date(source.getTime());
+        clone.setHours(0, 0, 0, 0);
+        return clone;
+      })();
+
+      let defaultDueDate = null;
+      if (entryDueDate){
+        defaultDueDate = new Date(entryDueDate.getTime());
+        defaultDueDate.setHours(0, 0, 0, 0);
+        if (defaultStartDate && defaultDueDate < defaultStartDate){
+          defaultDueDate = new Date(defaultStartDate.getTime());
+        }
+      }
+
+      if (!defaultDueDate){
+        let projectedDays = null;
+        if (entryStartDate && entryDueDate && entryDueDate >= entryStartDate){
+          projectedDays = Math.max(1, Math.round((entryDueDate.getTime() - entryStartDate.getTime()) / MS_PER_DAY) + 1);
+        }
+        if (projectedDays == null){
+          const est = Number(entry.estimateHours);
+          if (Number.isFinite(est) && est > 0){
+            projectedDays = Math.max(1, Math.ceil(est / hoursPerDay));
+          }
+        }
+        if (projectedDays == null){
+          projectedDays = 1;
+        }
+        const baseSource = (defaultStartDate instanceof Date && !Number.isNaN(defaultStartDate.getTime())) ? defaultStartDate : safeToday;
+        const base = baseSource ? new Date(baseSource.getTime()) : new Date();
+        base.setHours(0, 0, 0, 0);
+        defaultDueDate = new Date(base.getTime() + (Math.max(1, projectedDays) - 1) * MS_PER_DAY);
+        defaultDueDate.setHours(0, 0, 0, 0);
+      }
+
+      const defaultStart = toDateInputValue(defaultStartDate) || toDateInputValue(safeToday) || todayISO;
+      const defaultEnd = toDateInputValue(defaultDueDate) || defaultStart;
+
+      let startISO = defaultStart;
+      let dueISO = defaultEnd;
+
+      const selection = await showMakeActiveCopyModal({
+        jobName: entry.name || "Cutting job",
+        defaultStart,
+        defaultEnd
+      });
+      if (!selection) return;
+      if (selection.startISO) startISO = selection.startISO;
+      if (selection.dueISO) dueISO = selection.dueISO;
+
+      const startDate = parseJobDate(startISO);
+      const dueDate = parseJobDate(dueISO);
+      if (!startDate || !dueDate){ toast("Enter valid dates."); return; }
+      const normalizedDays = Math.max(1, Math.round((dueDate.getTime() - startDate.getTime()) / MS_PER_DAY) + 1);
+
+      let estimateHours = Number(entry.estimateHours);
+      const materialCost = Number(entry.materialCost);
+      const materialQty = Number(entry.materialQty);
+      if (!Number.isFinite(estimateHours) || estimateHours <= 0){
+        estimateHours = normalizedDays * hoursPerDay;
+      }
+      const newJob = {
+        id: genId(entry.name || "job"),
+        name: entry.name || "Cutting job",
+        estimateHours,
+        startISO,
+        dueISO,
+        material: entry.material || "",
+        materialCost: Number.isFinite(materialCost) ? materialCost : 0,
+        materialQty: Number.isFinite(materialQty) ? materialQty : 0,
+        notes: entry.notes || "",
+        manualLogs: [],
+        files: Array.isArray(entry.files) ? entry.files.map(f => ({ ...f })) : []
+      };
+
+      cuttingJobs.push(newJob);
+      window.cuttingJobs = cuttingJobs;
+      saveCloudDebounced();
+      toast("Active cutting job created");
+      renderJobs();
+      return;
+    }
 
     if (histEdit){
       const id = histEdit.getAttribute("data-history-edit");
