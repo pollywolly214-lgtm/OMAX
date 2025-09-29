@@ -6067,6 +6067,84 @@ function renderJobs(){
     const histCancel = e.target.closest("[data-history-cancel]");
     const histSave = e.target.closest("[data-history-save]");
     const histDelete = e.target.closest("[data-history-delete]");
+    const histActivate = e.target.closest("[data-history-activate]");
+
+    if (histActivate){
+      const id = histActivate.getAttribute("data-history-activate");
+      if (!id) return;
+      const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
+      if (!entry){ toast("Unable to locate completed job."); return; }
+
+      const hoursPerDay = (typeof DAILY_HOURS === "number" && isFinite(DAILY_HOURS) && DAILY_HOURS > 0) ? DAILY_HOURS : 8;
+      const MS_PER_DAY = 24 * 60 * 60 * 1000;
+      let defaultDays = 0;
+      if (entry.startISO && entry.dueISO){
+        const start = new Date(entry.startISO + "T00:00:00");
+        const due = new Date(entry.dueISO + "T00:00:00");
+        if (!Number.isNaN(start.getTime()) && !Number.isNaN(due.getTime())){
+          const diff = Math.round((due - start) / MS_PER_DAY) + 1;
+          if (diff > 0) defaultDays = diff;
+        }
+      }
+      if (!defaultDays){
+        const est = Number(entry.estimateHours);
+        if (Number.isFinite(est) && est > 0){
+          defaultDays = Math.max(1, Math.ceil(est / hoursPerDay));
+        }
+      }
+      if (!defaultDays) defaultDays = 1;
+
+      let chosenDays = defaultDays;
+      if (typeof window.prompt === "function"){
+        const response = window.prompt("How many cutting days should the new active job cover?", String(defaultDays));
+        if (response === null) return;
+        const parsed = Number(response);
+        if (!Number.isFinite(parsed) || parsed <= 0){
+          toast("Enter a valid number of cutting days.");
+          return;
+        }
+        chosenDays = parsed;
+      }
+      const normalizedDays = Math.max(1, Math.ceil(chosenDays));
+      const startDate = new Date(todayISO + "T00:00:00");
+      startDate.setHours(0, 0, 0, 0);
+      const dueDate = new Date(startDate.getTime() + (normalizedDays - 1) * MS_PER_DAY);
+      dueDate.setHours(0, 0, 0, 0);
+      const startISO = startDate.toISOString().slice(0, 10);
+      const dueISO = dueDate.toISOString().slice(0, 10);
+
+      if (typeof window.confirm === "function"){
+        const confirmMessage = `Create a new active job from "${entry.name || "Completed job"}" spanning ${normalizedDays} cutting day${normalizedDays === 1 ? "" : "s"}?\nStart: ${startISO}\nDue: ${dueISO}`;
+        if (!window.confirm(confirmMessage)) return;
+      }
+
+      let estimateHours = Number(entry.estimateHours);
+      const materialCost = Number(entry.materialCost);
+      const materialQty = Number(entry.materialQty);
+      if (!Number.isFinite(estimateHours) || estimateHours <= 0){
+        estimateHours = normalizedDays * hoursPerDay;
+      }
+      const newJob = {
+        id: genId(entry.name || "job"),
+        name: entry.name || "Cutting job",
+        estimateHours,
+        startISO,
+        dueISO,
+        material: entry.material || "",
+        materialCost: Number.isFinite(materialCost) ? materialCost : 0,
+        materialQty: Number.isFinite(materialQty) ? materialQty : 0,
+        notes: entry.notes || "",
+        manualLogs: [],
+        files: Array.isArray(entry.files) ? entry.files.map(f => ({ ...f })) : []
+      };
+
+      cuttingJobs.push(newJob);
+      window.cuttingJobs = cuttingJobs;
+      saveCloudDebounced();
+      toast("Active cutting job created");
+      renderJobs();
+      return;
+    }
 
     if (histEdit){
       const id = histEdit.getAttribute("data-history-edit");

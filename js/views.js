@@ -1303,6 +1303,7 @@ function viewJobs(){
           <td>${formatCurrency(gainLoss)}</td>
           <td>${noteDisplay}</td>
           <td class="past-job-actions">
+            <button type="button" data-history-activate="${job.id}">Make active copy</button>
             <button type="button" data-history-edit="${job.id}">Edit</button>
             <button type="button" class="danger" data-history-delete="${job.id}">Delete</button>
           </td>
