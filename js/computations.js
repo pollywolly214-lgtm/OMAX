@@ -137,9 +137,8 @@ function computeRequiredDaily(job){
   if (!job || !job.startISO || !job.dueISO) return { remainingHours:0, remainingDays:0, requiredPerDay:0 };
   const eff = computeJobEfficiency(job);
   const planned = Number(job.estimateHours) || 0;
-  const remainingHours = eff.actualRemaining != null
-    ? eff.actualRemaining
-    : Math.max(0, planned - eff.actualHours);
+  const actualForRequirement = eff.usedFromStartAuto ? 0 : eff.actualHours;
+  const remainingHours = Math.max(0, planned - actualForRequirement);
 
   const today = new Date(); today.setHours(0,0,0,0);
   const due   = parseDateLocal(job.dueISO);
