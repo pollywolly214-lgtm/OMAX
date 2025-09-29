@@ -6077,44 +6077,74 @@ function renderJobs(){
 
       const hoursPerDay = (typeof DAILY_HOURS === "number" && isFinite(DAILY_HOURS) && DAILY_HOURS > 0) ? DAILY_HOURS : 8;
       const MS_PER_DAY = 24 * 60 * 60 * 1000;
-      let defaultDays = 0;
-      if (entry.startISO && entry.dueISO){
-        const start = new Date(entry.startISO + "T00:00:00");
-        const due = new Date(entry.dueISO + "T00:00:00");
-        if (!Number.isNaN(start.getTime()) && !Number.isNaN(due.getTime())){
-          const diff = Math.round((due - start) / MS_PER_DAY) + 1;
-          if (diff > 0) defaultDays = diff;
+      const defaultStart = (() => {
+        if (entry.startISO){
+          const start = new Date(entry.startISO + "T00:00:00");
+          if (!Number.isNaN(start.getTime())) return start.toISOString().slice(0, 10);
         }
-      }
-      if (!defaultDays){
-        const est = Number(entry.estimateHours);
-        if (Number.isFinite(est) && est > 0){
-          defaultDays = Math.max(1, Math.ceil(est / hoursPerDay));
+        return todayISO;
+      })();
+      const defaultEnd = (() => {
+        if (entry.dueISO){
+          const due = new Date(entry.dueISO + "T00:00:00");
+          if (!Number.isNaN(due.getTime())) return due.toISOString().slice(0, 10);
         }
-      }
-      if (!defaultDays) defaultDays = 1;
+        const start = new Date(defaultStart + "T00:00:00");
+        if (!Number.isNaN(start.getTime())){
+          let days = 0;
+          const est = Number(entry.estimateHours);
+          if (Number.isFinite(est) && est > 0){
+            days = Math.max(1, Math.ceil(est / hoursPerDay));
+          }
+          const due = new Date(start.getTime() + (Math.max(1, days) - 1) * MS_PER_DAY);
+          return due.toISOString().slice(0, 10);
+        }
+        return defaultStart;
+      })();
 
-      let chosenDays = defaultDays;
+      let startISO = defaultStart;
+      let dueISO = defaultEnd;
+
+      const parseISODate = (value) => {
+        if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+        const dt = new Date(value + "T00:00:00");
+        if (Number.isNaN(dt.getTime())) return null;
+        dt.setHours(0, 0, 0, 0);
+        return dt;
+      };
+
       if (typeof window.prompt === "function"){
-        const response = window.prompt("How many cutting days should the new active job cover?", String(defaultDays));
-        if (response === null) return;
-        const parsed = Number(response);
-        if (!Number.isFinite(parsed) || parsed <= 0){
-          toast("Enter a valid number of cutting days.");
+        const startResponse = window.prompt("Start date for the new active job (YYYY-MM-DD)", startISO);
+        if (startResponse === null) return;
+        const parsedStart = parseISODate(startResponse.trim());
+        if (!parsedStart){
+          toast("Enter a valid start date in YYYY-MM-DD format.");
           return;
         }
-        chosenDays = parsed;
+        startISO = parsedStart.toISOString().slice(0, 10);
+
+        const dueResponse = window.prompt("Due date for the new active job (YYYY-MM-DD)", dueISO);
+        if (dueResponse === null) return;
+        const parsedDue = parseISODate(dueResponse.trim());
+        if (!parsedDue){
+          toast("Enter a valid due date in YYYY-MM-DD format.");
+          return;
+        }
+        if (parsedDue < parsedStart){
+          toast("Due date cannot be before the start date.");
+          return;
+        }
+        dueISO = parsedDue.toISOString().slice(0, 10);
       }
-      const normalizedDays = Math.max(1, Math.ceil(chosenDays));
-      const startDate = new Date(todayISO + "T00:00:00");
+
+      const startDate = new Date(startISO + "T00:00:00");
+      const dueDate = new Date(dueISO + "T00:00:00");
       startDate.setHours(0, 0, 0, 0);
-      const dueDate = new Date(startDate.getTime() + (normalizedDays - 1) * MS_PER_DAY);
       dueDate.setHours(0, 0, 0, 0);
-      const startISO = startDate.toISOString().slice(0, 10);
-      const dueISO = dueDate.toISOString().slice(0, 10);
+      const normalizedDays = Math.max(1, Math.round((dueDate - startDate) / MS_PER_DAY) + 1);
 
       if (typeof window.confirm === "function"){
-        const confirmMessage = `Create a new active job from "${entry.name || "Completed job"}" spanning ${normalizedDays} cutting day${normalizedDays === 1 ? "" : "s"}?\nStart: ${startISO}\nDue: ${dueISO}`;
+        const confirmMessage = `Create a new active job from "${entry.name || "Completed job"}"?\nStart: ${startISO}\nDue: ${dueISO}\nDuration: ${normalizedDays} cutting day${normalizedDays === 1 ? "" : "s"}.`;
         if (!window.confirm(confirmMessage)) return;
       }
 
