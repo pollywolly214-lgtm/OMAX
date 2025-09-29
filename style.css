@@ -2345,7 +2345,7 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgba(17, 24, 39, 0.25);
+  background: rgba(15, 23, 42, 0.45);
   z-index: 1000;
 }
 
@@ -2366,6 +2366,7 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   border-radius: 12px;
   padding: 20px 22px;
   box-shadow: 0 22px 40px rgba(15, 23, 42, 0.3);
+  color: #0f172a;
 }
 
 .confirm-modal-card {
@@ -2455,6 +2456,7 @@ body.modal-open {
   flex-direction: column;
   font-size: 0.9rem;
   gap: 4px;
+  color: inherit;
 }
 
 .modal-grid input,
@@ -2463,6 +2465,8 @@ body.modal-open {
   border: 1px solid #cdd4e1;
   border-radius: 6px;
   font-size: 0.95rem;
+  color: #0b1120;
+  background: #fff;
 }
 
 .modal-actions {
