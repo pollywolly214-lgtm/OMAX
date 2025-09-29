@@ -2881,6 +2881,52 @@ const makeActiveCopyModalState = {
   updateDuration: null
 };
 
+const DATE_INPUT_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function parseJobDate(value){
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())){
+    const copy = new Date(value.getTime());
+    copy.setHours(0, 0, 0, 0);
+    return copy;
+  }
+  let parsed = null;
+  if (typeof parseDateLocal === "function"){
+    try {
+      parsed = parseDateLocal(value);
+    } catch (_err){
+      parsed = null;
+    }
+    if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+      parsed.setHours(0, 0, 0, 0);
+      return parsed;
+    }
+  }
+  if (typeof value === "string" && DATE_INPUT_RE.test(value.trim())){
+    parsed = new Date(`${value.trim()}T00:00:00`);
+    if (!Number.isNaN(parsed.getTime())){
+      parsed.setHours(0, 0, 0, 0);
+      return parsed;
+    }
+  }
+  parsed = new Date(value);
+  if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+    parsed.setHours(0, 0, 0, 0);
+    return parsed;
+  }
+  return null;
+}
+
+function toDateInputValue(date){
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const normalized = new Date(date.getTime());
+  normalized.setHours(0, 0, 0, 0);
+  const offset = normalized.getTimezoneOffset();
+  const local = new Date(normalized.getTime() - offset * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
 function ensureMakeActiveCopyModal(){
   const template = `
     <div class="modal-card dashboard-modal-card" data-active-copy-card>
@@ -2896,7 +2942,7 @@ function ensureMakeActiveCopyModal(){
             <input type="date" data-active-copy-due required>
           </label>
         </div>
-        <p class="confirm-modal-copy" data-active-copy-duration hidden></p>
+        <p class="confirm-modal-copy" data-active-copy-duration hidden aria-live="polite"></p>
         <div class="modal-actions">
           <button type="button" class="secondary" data-active-copy-cancel>Cancel</button>
           <button type="submit" class="primary" data-active-copy-submit>Make active copy</button>
@@ -2955,11 +3001,10 @@ function ensureMakeActiveCopyModal(){
         }
       }
       if (state.durationEl){
-        const startDate = startVal ? new Date(startVal + "T00:00:00") : null;
-        const dueDate = dueVal ? new Date(dueVal + "T00:00:00") : null;
-        if (startDate && dueDate && !Number.isNaN(startDate.getTime()) && !Number.isNaN(dueDate.getTime()) && dueDate >= startDate){
-          const MS_PER_DAY = 24 * 60 * 60 * 1000;
-          const days = Math.max(1, Math.round((dueDate - startDate) / MS_PER_DAY) + 1);
+        const startDate = parseJobDate(startVal);
+        const dueDate = parseJobDate(dueVal);
+        if (startDate && dueDate && dueDate >= startDate){
+          const days = Math.max(1, Math.round((dueDate.getTime() - startDate.getTime()) / MS_PER_DAY) + 1);
           state.durationEl.textContent = `Cutting days: ${days}`;
           state.durationEl.hidden = false;
         }else{
@@ -2981,9 +3026,9 @@ function ensureMakeActiveCopyModal(){
       const dueISO = state.dueInput.value;
       if (!startISO){ toast("Choose a start date."); return; }
       if (!dueISO){ toast("Choose a due date."); return; }
-      const startDate = new Date(startISO + "T00:00:00");
-      const dueDate = new Date(dueISO + "T00:00:00");
-      if (Number.isNaN(startDate.getTime()) || Number.isNaN(dueDate.getTime())){ toast("Enter valid dates."); return; }
+      const startDate = parseJobDate(startISO);
+      const dueDate = parseJobDate(dueISO);
+      if (!startDate || !dueDate){ toast("Enter valid dates."); return; }
       if (dueDate < startDate){ toast("Due date cannot be before the start date."); return; }
       closeMakeActiveCopyModal({ startISO, dueISO });
     });
@@ -6288,31 +6333,59 @@ function renderJobs(){
       if (!entry){ toast("Unable to locate completed job."); return; }
 
       const hoursPerDay = (typeof DAILY_HOURS === "number" && isFinite(DAILY_HOURS) && DAILY_HOURS > 0) ? DAILY_HOURS : 8;
-      const MS_PER_DAY = 24 * 60 * 60 * 1000;
-      const defaultStart = (() => {
-        if (entry.startISO){
-          const start = new Date(entry.startISO + "T00:00:00");
-          if (!Number.isNaN(start.getTime())) return start.toISOString().slice(0, 10);
+      const safeToday = (() => {
+        const parsed = parseJobDate(todayISO) || parseJobDate(new Date());
+        if (parsed){
+          return parsed;
         }
-        return todayISO;
+        const fallback = new Date();
+        fallback.setHours(0, 0, 0, 0);
+        return fallback;
       })();
-      const defaultEnd = (() => {
-        if (entry.dueISO){
-          const due = new Date(entry.dueISO + "T00:00:00");
-          if (!Number.isNaN(due.getTime())) return due.toISOString().slice(0, 10);
+
+      const entryStartDate = parseJobDate(entry.startISO);
+      const entryDueDate = parseJobDate(entry.dueISO);
+
+      const defaultStartDate = (() => {
+        const source = entryStartDate || safeToday;
+        if (!source || Number.isNaN(source.getTime())) return null;
+        const clone = new Date(source.getTime());
+        clone.setHours(0, 0, 0, 0);
+        return clone;
+      })();
+
+      let defaultDueDate = null;
+      if (entryDueDate){
+        defaultDueDate = new Date(entryDueDate.getTime());
+        defaultDueDate.setHours(0, 0, 0, 0);
+        if (defaultStartDate && defaultDueDate < defaultStartDate){
+          defaultDueDate = new Date(defaultStartDate.getTime());
         }
-        const start = new Date(defaultStart + "T00:00:00");
-        if (!Number.isNaN(start.getTime())){
-          let days = 0;
+      }
+
+      if (!defaultDueDate){
+        let projectedDays = null;
+        if (entryStartDate && entryDueDate && entryDueDate >= entryStartDate){
+          projectedDays = Math.max(1, Math.round((entryDueDate.getTime() - entryStartDate.getTime()) / MS_PER_DAY) + 1);
+        }
+        if (projectedDays == null){
           const est = Number(entry.estimateHours);
           if (Number.isFinite(est) && est > 0){
-            days = Math.max(1, Math.ceil(est / hoursPerDay));
+            projectedDays = Math.max(1, Math.ceil(est / hoursPerDay));
           }
-          const due = new Date(start.getTime() + (Math.max(1, days) - 1) * MS_PER_DAY);
-          return due.toISOString().slice(0, 10);
         }
-        return defaultStart;
-      })();
+        if (projectedDays == null){
+          projectedDays = 1;
+        }
+        const baseSource = (defaultStartDate instanceof Date && !Number.isNaN(defaultStartDate.getTime())) ? defaultStartDate : safeToday;
+        const base = baseSource ? new Date(baseSource.getTime()) : new Date();
+        base.setHours(0, 0, 0, 0);
+        defaultDueDate = new Date(base.getTime() + (Math.max(1, projectedDays) - 1) * MS_PER_DAY);
+        defaultDueDate.setHours(0, 0, 0, 0);
+      }
+
+      const defaultStart = toDateInputValue(defaultStartDate) || toDateInputValue(safeToday) || todayISO;
+      const defaultEnd = toDateInputValue(defaultDueDate) || defaultStart;
 
       let startISO = defaultStart;
       let dueISO = defaultEnd;
@@ -6326,11 +6399,10 @@ function renderJobs(){
       if (selection.startISO) startISO = selection.startISO;
       if (selection.dueISO) dueISO = selection.dueISO;
 
-      const startDate = new Date(startISO + "T00:00:00");
-      const dueDate = new Date(dueISO + "T00:00:00");
-      startDate.setHours(0, 0, 0, 0);
-      dueDate.setHours(0, 0, 0, 0);
-      const normalizedDays = Math.max(1, Math.round((dueDate - startDate) / MS_PER_DAY) + 1);
+      const startDate = parseJobDate(startISO);
+      const dueDate = parseJobDate(dueISO);
+      if (!startDate || !dueDate){ toast("Enter valid dates."); return; }
+      const normalizedDays = Math.max(1, Math.round((dueDate.getTime() - startDate.getTime()) / MS_PER_DAY) + 1);
 
       let estimateHours = Number(entry.estimateHours);
       const materialCost = Number(entry.materialCost);
