@@ -2864,6 +2864,218 @@ function showConfirmModal(options){
   });
 }
 
+const makeActiveCopyModalState = {
+  root: null,
+  form: null,
+  titleEl: null,
+  messageEl: null,
+  durationEl: null,
+  startInput: null,
+  dueInput: null,
+  cancelBtn: null,
+  closeBtn: null,
+  submitBtn: null,
+  resolver: null,
+  keydownHandler: null,
+  listenersBound: false,
+  updateDuration: null
+};
+
+function ensureMakeActiveCopyModal(){
+  const template = `
+    <div class="modal-card dashboard-modal-card" data-active-copy-card>
+      <button type="button" class="modal-close" data-active-copy-close>×</button>
+      <h4 data-active-copy-title>Make active copy</h4>
+      <p class="confirm-modal-copy" data-active-copy-message></p>
+      <form data-active-copy-form>
+        <div class="modal-grid">
+          <label>Start date
+            <input type="date" data-active-copy-start required>
+          </label>
+          <label>Due date
+            <input type="date" data-active-copy-due required>
+          </label>
+        </div>
+        <p class="confirm-modal-copy" data-active-copy-duration hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="secondary" data-active-copy-cancel>Cancel</button>
+          <button type="submit" class="primary" data-active-copy-submit>Make active copy</button>
+        </div>
+      </form>
+    </div>
+  `.trim();
+
+  let root = makeActiveCopyModalState.root;
+  if (!root || !root.isConnected){
+    root = document.getElementById("makeActiveCopyModal");
+    if (!root){
+      root = document.createElement("div");
+      root.id = "makeActiveCopyModal";
+      root.className = "modal-backdrop";
+      root.setAttribute("hidden", "");
+      const host = document.body || document.documentElement || document;
+      host.appendChild(root);
+    }
+    makeActiveCopyModalState.root = root;
+  }
+
+  if (makeActiveCopyModalState.root && makeActiveCopyModalState.root.innerHTML.trim() === ""){
+    makeActiveCopyModalState.root.innerHTML = template;
+  }
+
+  const ensureStructure = () => {
+    const host = makeActiveCopyModalState.root;
+    if (!host) return;
+    if (!host.querySelector("[data-active-copy-form]")){
+      host.innerHTML = template;
+    }
+    makeActiveCopyModalState.form = host.querySelector("[data-active-copy-form]");
+    makeActiveCopyModalState.titleEl = host.querySelector("[data-active-copy-title]");
+    makeActiveCopyModalState.messageEl = host.querySelector("[data-active-copy-message]");
+    makeActiveCopyModalState.durationEl = host.querySelector("[data-active-copy-duration]");
+    makeActiveCopyModalState.startInput = host.querySelector("[data-active-copy-start]");
+    makeActiveCopyModalState.dueInput = host.querySelector("[data-active-copy-due]");
+    makeActiveCopyModalState.cancelBtn = host.querySelector("[data-active-copy-cancel]");
+    makeActiveCopyModalState.closeBtn = host.querySelector("[data-active-copy-close]");
+    makeActiveCopyModalState.submitBtn = host.querySelector("[data-active-copy-submit]");
+  };
+
+  ensureStructure();
+
+  const state = makeActiveCopyModalState;
+  if (!state.listenersBound && state.form && state.startInput && state.dueInput){
+    const updateDuration = () => {
+      const startVal = state.startInput?.value || "";
+      const dueVal = state.dueInput?.value || "";
+      if (state.dueInput){
+        if (startVal){
+          state.dueInput.min = startVal;
+        }else{
+          state.dueInput.removeAttribute("min");
+        }
+      }
+      if (state.durationEl){
+        const startDate = startVal ? new Date(startVal + "T00:00:00") : null;
+        const dueDate = dueVal ? new Date(dueVal + "T00:00:00") : null;
+        if (startDate && dueDate && !Number.isNaN(startDate.getTime()) && !Number.isNaN(dueDate.getTime()) && dueDate >= startDate){
+          const MS_PER_DAY = 24 * 60 * 60 * 1000;
+          const days = Math.max(1, Math.round((dueDate - startDate) / MS_PER_DAY) + 1);
+          state.durationEl.textContent = `Cutting days: ${days}`;
+          state.durationEl.hidden = false;
+        }else{
+          state.durationEl.hidden = true;
+          state.durationEl.textContent = "";
+        }
+      }
+    };
+
+    state.startInput.addEventListener("change", updateDuration);
+    state.startInput.addEventListener("input", updateDuration);
+    state.dueInput.addEventListener("change", updateDuration);
+    state.dueInput.addEventListener("input", updateDuration);
+
+    state.form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!state.startInput || !state.dueInput) return;
+      const startISO = state.startInput.value;
+      const dueISO = state.dueInput.value;
+      if (!startISO){ toast("Choose a start date."); return; }
+      if (!dueISO){ toast("Choose a due date."); return; }
+      const startDate = new Date(startISO + "T00:00:00");
+      const dueDate = new Date(dueISO + "T00:00:00");
+      if (Number.isNaN(startDate.getTime()) || Number.isNaN(dueDate.getTime())){ toast("Enter valid dates."); return; }
+      if (dueDate < startDate){ toast("Due date cannot be before the start date."); return; }
+      closeMakeActiveCopyModal({ startISO, dueISO });
+    });
+
+    const cancel = () => closeMakeActiveCopyModal(null);
+    state.cancelBtn?.addEventListener("click", cancel);
+    state.closeBtn?.addEventListener("click", cancel);
+    state.root?.addEventListener("click", (event) => {
+      if (event.target === state.root){
+        cancel();
+      }
+    });
+
+    state.listenersBound = true;
+    state.updateDuration = updateDuration;
+  }
+
+  return makeActiveCopyModalState;
+}
+
+function closeMakeActiveCopyModal(result){
+  const state = makeActiveCopyModalState;
+  const root = state.root;
+  if (root){
+    root.classList.remove("is-visible");
+    root.setAttribute("hidden", "");
+  }
+  document.body?.classList.remove("modal-open");
+  if (state.keydownHandler){
+    document.removeEventListener("keydown", state.keydownHandler);
+    state.keydownHandler = null;
+  }
+  const resolver = state.resolver;
+  state.resolver = null;
+  if (typeof resolver === "function"){
+    resolver(result);
+  }
+}
+
+function showMakeActiveCopyModal(options){
+  const state = ensureMakeActiveCopyModal();
+  const root = state.root;
+  if (!root || !state.form || !state.startInput || !state.dueInput){
+    return Promise.resolve(null);
+  }
+
+  const opts = options || {};
+  const { jobName, defaultStart, defaultEnd } = opts;
+
+  if (state.resolver){
+    closeMakeActiveCopyModal(null);
+  }
+
+  state.titleEl && (state.titleEl.textContent = "Make active copy");
+  if (state.messageEl){
+    state.messageEl.textContent = jobName
+      ? `Select the start and due dates for "${jobName}".`
+      : "Select the start and due dates for the new active job.";
+  }
+
+  state.startInput.value = defaultStart || "";
+  state.dueInput.value = defaultEnd || "";
+  if (defaultStart){
+    state.dueInput.min = defaultStart;
+  }else{
+    state.dueInput.removeAttribute("min");
+  }
+
+  if (typeof state.updateDuration === "function"){
+    state.updateDuration();
+  }
+
+  root.classList.add("is-visible");
+  root.removeAttribute("hidden");
+  document.body?.classList.add("modal-open");
+
+  if (!state.keydownHandler){
+    state.keydownHandler = (event) => {
+      if (event.key === "Escape"){ event.preventDefault(); closeMakeActiveCopyModal(null); }
+    };
+    document.addEventListener("keydown", state.keydownHandler);
+  }
+
+  requestAnimationFrame(() => {
+    state.startInput?.focus();
+  });
+
+  return new Promise((resolve) => {
+    state.resolver = resolve;
+  });
+}
+
 function renderSettings(){
   // === Explorer-style Maintenance Settings ===
   const root = document.getElementById("content");
@@ -6062,7 +6274,7 @@ function renderJobs(){
   });
 
   const historyBody = content.querySelector(".past-jobs-table tbody");
-  historyBody?.addEventListener("click", (e)=>{
+  historyBody?.addEventListener("click", async (e)=>{
     const histEdit = e.target.closest("[data-history-edit]");
     const histCancel = e.target.closest("[data-history-cancel]");
     const histSave = e.target.closest("[data-history-save]");
@@ -6105,48 +6317,20 @@ function renderJobs(){
       let startISO = defaultStart;
       let dueISO = defaultEnd;
 
-      const parseISODate = (value) => {
-        if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-        const dt = new Date(value + "T00:00:00");
-        if (Number.isNaN(dt.getTime())) return null;
-        dt.setHours(0, 0, 0, 0);
-        return dt;
-      };
-
-      if (typeof window.prompt === "function"){
-        const startResponse = window.prompt("Start date for the new active job (YYYY-MM-DD)", startISO);
-        if (startResponse === null) return;
-        const parsedStart = parseISODate(startResponse.trim());
-        if (!parsedStart){
-          toast("Enter a valid start date in YYYY-MM-DD format.");
-          return;
-        }
-        startISO = parsedStart.toISOString().slice(0, 10);
-
-        const dueResponse = window.prompt("Due date for the new active job (YYYY-MM-DD)", dueISO);
-        if (dueResponse === null) return;
-        const parsedDue = parseISODate(dueResponse.trim());
-        if (!parsedDue){
-          toast("Enter a valid due date in YYYY-MM-DD format.");
-          return;
-        }
-        if (parsedDue < parsedStart){
-          toast("Due date cannot be before the start date.");
-          return;
-        }
-        dueISO = parsedDue.toISOString().slice(0, 10);
-      }
+      const selection = await showMakeActiveCopyModal({
+        jobName: entry.name || "Cutting job",
+        defaultStart,
+        defaultEnd
+      });
+      if (!selection) return;
+      if (selection.startISO) startISO = selection.startISO;
+      if (selection.dueISO) dueISO = selection.dueISO;
 
       const startDate = new Date(startISO + "T00:00:00");
       const dueDate = new Date(dueISO + "T00:00:00");
       startDate.setHours(0, 0, 0, 0);
       dueDate.setHours(0, 0, 0, 0);
       const normalizedDays = Math.max(1, Math.round((dueDate - startDate) / MS_PER_DAY) + 1);
-
-      if (typeof window.confirm === "function"){
-        const confirmMessage = `Create a new active job from "${entry.name || "Completed job"}"?\nStart: ${startISO}\nDue: ${dueISO}\nDuration: ${normalizedDays} cutting day${normalizedDays === 1 ? "" : "s"}.`;
-        if (!window.confirm(confirmMessage)) return;
-      }
 
       let estimateHours = Number(entry.estimateHours);
       const materialCost = Number(entry.materialCost);
