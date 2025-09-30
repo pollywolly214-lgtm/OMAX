@@ -1670,7 +1670,7 @@ function viewInventory(){
         </div>
       </div>
       <div class="small muted inventory-hint">Results update as you type.</div>
-      <table>
+      <table class="inventory-table">
         <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
         <tbody data-inventory-rows>${rows}</tbody>
       </table>
