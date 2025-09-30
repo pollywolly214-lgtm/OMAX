@@ -2469,6 +2469,71 @@ body.modal-open {
   background: #fff;
 }
 
+.task-mode-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.task-mode-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #eef3fb;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #0b1120;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.task-mode-toggle label:hover,
+.task-mode-toggle label:focus-within {
+  background: #e1e9f9;
+}
+
+.task-mode-toggle input[type="radio"] {
+  accent-color: #084cba;
+}
+
+.task-existing-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.task-existing-section label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: inherit;
+}
+
+.task-existing-section select {
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #cdd4e1;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  color: #0b1120;
+  background: #fff;
+}
+
+.task-existing-section select:disabled {
+  opacity: 0.65;
+}
+
+[data-task-new-section] {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

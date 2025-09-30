@@ -1682,6 +1682,12 @@ function renderDashboard(){
   const categorySelect   = document.getElementById("dashTaskCategory");
   const subtaskList      = document.getElementById("dashSubtaskList");
   const addSubtaskBtn    = document.getElementById("dashAddSubtask");
+  const taskVariantInputs= taskForm ? Array.from(taskForm.querySelectorAll('input[name="dashTaskVariant"]')) : [];
+  const taskExistingSection = taskForm?.querySelector('[data-task-existing-section]');
+  const taskNewSection   = taskForm?.querySelector('[data-task-new-section]');
+  const existingTaskSelect = document.getElementById("dashTaskExistingSelect");
+  const existingTaskEmpty  = taskForm?.querySelector('[data-task-existing-empty]');
+  const taskSubmitButton = taskForm?.querySelector('[data-task-submit]');
   const jobNameInput     = document.getElementById("dashJobName");
   const jobEstimateInput = document.getElementById("dashJobEstimate");
   const jobStartInput    = document.getElementById("dashJobStart");
@@ -1702,6 +1708,202 @@ function renderDashboard(){
   let addContextDateISO  = null;
   let editingGarnetId    = null;
   let pendingGarnetEditId = null;
+
+  function findMaintenanceTaskById(id){
+    if (id == null) return null;
+    const lookup = String(id);
+    let task = tasksInterval.find(item => item && String(item.id) === lookup);
+    if (task) return { task, list: "interval" };
+    task = tasksAsReq.find(item => item && String(item.id) === lookup);
+    if (task) return { task, list: "asreq" };
+    return null;
+  }
+
+  function gatherMaintenanceTaskMetas(){
+    const metas = [];
+    const all = [];
+    if (Array.isArray(tasksInterval)){
+      tasksInterval.forEach(task => {
+        if (!task || task.id == null) return;
+        all.push({ task, list: "interval" });
+      });
+    }
+    if (Array.isArray(tasksAsReq)){
+      tasksAsReq.forEach(task => {
+        if (!task || task.id == null) return;
+        all.push({ task, list: "asreq" });
+      });
+    }
+    if (!all.length) return metas;
+
+    const byId = new Map();
+    all.forEach(meta => {
+      byId.set(String(meta.task.id), meta.task);
+    });
+
+    const folderById = new Map();
+    if (Array.isArray(window.settingsFolders)){
+      window.settingsFolders.forEach(folder => {
+        if (!folder || folder.id == null) return;
+        folderById.set(String(folder.id), folder);
+      });
+    }
+
+    const folderLabelCache = new Map();
+    const resolveFolderPath = (catId)=>{
+      if (catId == null) return "";
+      const key = String(catId);
+      if (folderLabelCache.has(key)) return folderLabelCache.get(key);
+      let current = folderById.get(key);
+      const visited = new Set();
+      const parts = [];
+      while (current && current.id != null && !visited.has(String(current.id))){
+        if (current.name) parts.unshift(current.name);
+        visited.add(String(current.id));
+        if (current.parent == null) break;
+        current = folderById.get(String(current.parent));
+      }
+      const label = parts.join(" › ");
+      folderLabelCache.set(key, label);
+      return label;
+    };
+
+    all.forEach(meta => {
+      const task = meta.task;
+      const pieces = [];
+      pieces.push(task.mode === "asreq" ? "As req." : "Interval");
+      pieces.push("•");
+      const nameParts = [];
+      if (task.parentTask != null){
+        const parent = byId.get(String(task.parentTask));
+        if (parent && parent.name) nameParts.push(parent.name);
+      }
+      nameParts.push(task.name || "Untitled task");
+      pieces.push(nameParts.join(" › "));
+      const folderLabel = resolveFolderPath(task.cat);
+      const label = folderLabel ? `${pieces.join(" ")} (${folderLabel})` : pieces.join(" ");
+      metas.push({ task, list: meta.list, label });
+    });
+
+    metas.sort((a,b)=> a.label.localeCompare(b.label));
+    return metas;
+  }
+
+  function currentTaskVariant(){
+    if (!Array.isArray(taskVariantInputs) || !taskVariantInputs.length) return "new";
+    const checked = taskVariantInputs.find(r => r.checked && !r.disabled);
+    if (checked) return checked.value;
+    const fallback = taskVariantInputs.find(r => !r.disabled);
+    return fallback ? fallback.value : "new";
+  }
+
+  function syncTaskVariant(){
+    const variant = currentTaskVariant();
+    taskVariantInputs.forEach(radio => {
+      radio.checked = !radio.disabled && radio.value === variant;
+    });
+    if (taskExistingSection) taskExistingSection.hidden = variant !== "existing";
+    if (taskNewSection) taskNewSection.hidden = variant !== "new";
+    if (taskSubmitButton){
+      taskSubmitButton.textContent = variant === "existing" ? "Add to Calendar" : "Create Task";
+    }
+  }
+
+  function refreshTaskVariantUI(preferredVariant = null){
+    const metas = gatherMaintenanceTaskMetas();
+    const hasExisting = metas.length > 0;
+    if (existingTaskEmpty) existingTaskEmpty.hidden = hasExisting;
+    if (existingTaskSelect){
+      existingTaskSelect.innerHTML = "";
+      if (!hasExisting){
+        existingTaskSelect.disabled = true;
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No maintenance tasks saved yet";
+        opt.disabled = true;
+        opt.selected = true;
+        existingTaskSelect.appendChild(opt);
+      }else{
+        existingTaskSelect.disabled = false;
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Select a maintenance task…";
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        existingTaskSelect.appendChild(placeholder);
+        metas.forEach(meta => {
+          const opt = document.createElement("option");
+          opt.value = String(meta.task.id);
+          opt.textContent = meta.label;
+          opt.dataset.list = meta.list;
+          opt.dataset.mode = meta.task.mode;
+          existingTaskSelect.appendChild(opt);
+        });
+      }
+    }
+    const existingRadio = taskVariantInputs.find(r => r.value === "existing");
+    const newRadio = taskVariantInputs.find(r => r.value === "new");
+    if (existingRadio){
+      existingRadio.disabled = !hasExisting;
+      if (!hasExisting) existingRadio.checked = false;
+    }
+    if (preferredVariant){
+      taskVariantInputs.forEach(radio => {
+        if (!radio.disabled) radio.checked = radio.value === preferredVariant;
+      });
+    }else if (!taskVariantInputs.some(r => r.checked && !r.disabled)){
+      if (existingRadio && !existingRadio.disabled){
+        existingRadio.checked = true;
+      }else if (newRadio){
+        newRadio.checked = true;
+      }
+    }else{
+      const checked = taskVariantInputs.find(r => r.checked);
+      if (checked && checked.disabled){
+        checked.checked = false;
+        if (existingRadio && !existingRadio.disabled){
+          existingRadio.checked = true;
+        }else if (newRadio){
+          newRadio.checked = true;
+        }
+      }
+    }
+    syncTaskVariant();
+  }
+
+  function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
+    if (!task || task.mode !== "interval") return false;
+    const interval = Number(task.interval);
+    if (!Number.isFinite(interval) || interval <= 0) return false;
+    let baselineHours = Number(task.sinceBase);
+    if (!Number.isFinite(baselineHours) || baselineHours < 0){
+      baselineHours = null;
+    }
+    let targetISO = dateISO;
+    if (!targetISO){
+      targetISO = ymd(new Date());
+    }
+    if (targetISO){
+      const targetDate = parseDateLocal(targetISO);
+      if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        targetDate.setHours(0,0,0,0);
+        const diffMs = targetDate.getTime() - today.getTime();
+        const days = Math.max(0, Math.round(diffMs / (24*60*60*1000)));
+        const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+          ? Number(DAILY_HOURS)
+          : 8;
+        let remainHours = days * hoursPerDay;
+        if (!Number.isFinite(remainHours) || remainHours < 0) remainHours = 0;
+        if (remainHours > interval) remainHours = interval;
+        baselineHours = interval - remainHours;
+        if (!Number.isFinite(baselineHours) || baselineHours < 0) baselineHours = 0;
+      }
+    }
+    applyIntervalBaseline(task, { baselineHours, currentHours: getCurrentMachineHours() });
+    return true;
+  }
 
   function setContextDate(dateISO){
     addContextDateISO = dateISO || null;
@@ -1992,6 +2194,7 @@ function renderDashboard(){
   function resetTaskForm(){
     taskForm?.reset();
     subtaskList?.replaceChildren();
+    refreshTaskVariantUI();
     syncTaskMode(taskTypeSelect?.value || "interval");
   }
 
@@ -2002,6 +2205,8 @@ function renderDashboard(){
     });
     if (step === "task"){
       populateCategoryOptions();
+      refreshTaskVariantUI();
+      syncTaskVariant();
       syncTaskMode(taskTypeSelect?.value || "interval");
     }
     if (step === "downtime"){
@@ -2226,6 +2431,11 @@ function renderDashboard(){
   taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
   syncTaskMode(taskTypeSelect?.value || "interval");
   populateCategoryOptions();
+  refreshTaskVariantUI();
+
+  taskVariantInputs.forEach(radio => {
+    radio.addEventListener("change", ()=> syncTaskVariant());
+  });
 
   addSubtaskBtn?.addEventListener("click", ()=>{
     const row = createSubtaskRow(taskTypeSelect?.value || "interval");
@@ -2235,6 +2445,36 @@ function renderDashboard(){
   taskForm?.addEventListener("submit", (e)=>{
     e.preventDefault();
     if (!taskForm) return;
+    const variant = currentTaskVariant();
+    if (variant === "existing"){
+      const selectedId = existingTaskSelect?.value;
+      if (!selectedId){ alert("Select a maintenance task to schedule."); return; }
+      const meta = findMaintenanceTaskById(selectedId);
+      if (!meta || !meta.task){
+        alert("Selected maintenance task could not be found.");
+        refreshTaskVariantUI();
+        return;
+      }
+      const task = meta.task;
+      const targetISO = addContextDateISO || ymd(new Date());
+      let message = "Maintenance task added";
+      if (task.mode === "interval"){
+        scheduleExistingIntervalTask(task, { dateISO: targetISO });
+        const parsed = parseDateLocal(targetISO);
+        const dateLabel = (parsed instanceof Date && !Number.isNaN(parsed.getTime()))
+          ? parsed.toLocaleDateString()
+          : targetISO;
+        message = `Scheduled "${task.name || "Task"}" for ${dateLabel}`;
+      }else{
+        message = "As-required task linked from Maintenance Settings";
+      }
+      setContextDate(targetISO);
+      saveCloudDebounced();
+      toast(message);
+      closeModal();
+      renderDashboard();
+      return;
+    }
     const name = (taskNameInput?.value || "").trim();
     if (!name){ alert("Task name is required."); return; }
     const mode = (taskTypeSelect?.value === "asreq") ? "asreq" : "interval";
