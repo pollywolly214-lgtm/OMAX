@@ -33,6 +33,210 @@ function escapeHtml(str){
   })[c] || c);
 }
 
+function findCalendarTaskMeta(taskId){
+  const tid = String(taskId);
+  const intervalList = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  let index = intervalList.findIndex(t => t && String(t.id) === tid);
+  if (index >= 0){
+    return { task: intervalList[index], mode: "interval", list: intervalList, index };
+  }
+  const asReqList = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  index = asReqList.findIndex(t => t && String(t.id) === tid);
+  if (index >= 0){
+    return { task: asReqList[index], mode: "asreq", list: asReqList, index };
+  }
+  return null;
+}
+
+function normalizeDateKey(value){
+  if (!value) return null;
+  if (value instanceof Date) return ymd(value);
+  if (typeof value === "string"){
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    const parsed = parseDateLocal(value);
+    if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+      parsed.setHours(0,0,0,0);
+      return ymd(parsed);
+    }
+  }
+  return null;
+}
+
+function markCalendarTaskComplete(meta, dateISO){
+  if (!meta || !meta.task) return false;
+  const key = normalizeDateKey(dateISO || new Date());
+  if (!key) return false;
+  const task = meta.task;
+  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
+  let changed = false;
+
+  if (mode === "interval"){
+    const currentHoursRaw = typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : null;
+    const currentHours = currentHoursRaw != null && Number.isFinite(Number(currentHoursRaw)) ? Number(currentHoursRaw) : null;
+    if (currentHours != null){
+      task.anchorTotal = currentHours;
+    }
+    task.sinceBase = 0;
+
+    if (!Array.isArray(task.completedDates)) task.completedDates = [];
+    if (!task.completedDates.includes(key)){
+      task.completedDates.push(key);
+      task.completedDates.sort();
+      changed = true;
+    }
+
+    const history = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(task)
+      : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
+    const defaultDaily = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+      ? Number(DAILY_HOURS)
+      : 8;
+    let entry = history.find(item => item && normalizeDateKey(item.dateISO) === key);
+    if (!entry){
+      entry = {
+        dateISO: key,
+        hoursAtEntry: null,
+        recordedAtISO: new Date().toISOString(),
+        status: "completed",
+        source: "estimate",
+        estimatedDailyHours: defaultDaily
+      };
+      history.push(entry);
+      changed = true;
+    }else{
+      if (entry.status !== "completed"){ entry.status = "completed"; changed = true; }
+      entry.recordedAtISO = new Date().toISOString();
+      if (entry.estimatedDailyHours == null) entry.estimatedDailyHours = defaultDaily;
+    }
+
+    const snapshotHours = typeof hoursSnapshotOnOrBefore === "function" ? hoursSnapshotOnOrBefore(key) : null;
+    if (snapshotHours != null && Number.isFinite(Number(snapshotHours))){
+      entry.hoursAtEntry = Number(snapshotHours);
+      entry.source = "machine";
+    }else if (entry.hoursAtEntry != null && !Number.isFinite(Number(entry.hoursAtEntry))){
+      entry.hoursAtEntry = null;
+    }
+
+    history.sort((a,b)=> String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")));
+    task.manualHistory = history;
+
+    if (!task.calendarDateISO || normalizeDateKey(task.calendarDateISO) === key){
+      task.calendarDateISO = key;
+    }
+    changed = true;
+  }else{
+    if (!Array.isArray(task.completedDates)) task.completedDates = [];
+    if (!task.completedDates.includes(key)){
+      task.completedDates.push(key);
+      task.completedDates.sort();
+      changed = true;
+    }
+    if (normalizeDateKey(task.calendarDateISO) !== key){
+      task.calendarDateISO = key;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function unmarkCalendarTaskComplete(meta, dateISO){
+  if (!meta || !meta.task) return false;
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  const task = meta.task;
+  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
+  let changed = false;
+
+  if (Array.isArray(task.completedDates)){
+    const idx = task.completedDates.indexOf(key);
+    if (idx >= 0){
+      task.completedDates.splice(idx,1);
+      changed = true;
+    }
+  }
+
+  if (mode === "interval"){
+    const history = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(task)
+      : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
+    const entry = history.find(item => item && normalizeDateKey(item.dateISO) === key);
+    if (entry && entry.status !== "scheduled"){
+      entry.status = "scheduled";
+      changed = true;
+    }
+    task.manualHistory = history;
+    applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
+  }
+
+  return changed;
+}
+
+function removeCalendarTaskOccurrence(meta, dateISO){
+  if (!meta || !meta.task) return false;
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  const task = meta.task;
+  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
+  let changed = false;
+
+  if (mode === "interval"){
+    const history = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(task)
+      : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
+    for (let i = history.length - 1; i >= 0; i--){
+      const entry = history[i];
+      if (entry && normalizeDateKey(entry.dateISO) === key){
+        history.splice(i,1);
+        changed = true;
+      }
+    }
+    if (changed){
+      task.manualHistory = history;
+    }
+    if (Array.isArray(task.completedDates)){
+      const idx = task.completedDates.indexOf(key);
+      if (idx >= 0){
+        task.completedDates.splice(idx,1);
+        changed = true;
+      }
+    }
+    if (normalizeDateKey(task.calendarDateISO) === key){
+      task.calendarDateISO = null;
+      changed = true;
+    }
+    if (changed){
+      applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
+    }
+  }else{
+    if (normalizeDateKey(task.calendarDateISO) === key){
+      task.calendarDateISO = null;
+      changed = true;
+    }
+    if (Array.isArray(task.completedDates)){
+      const idx = task.completedDates.indexOf(key);
+      if (idx >= 0){
+        task.completedDates.splice(idx,1);
+        changed = true;
+      }
+    }
+  }
+
+  return changed;
+}
+
+function removeCalendarTaskEverywhere(meta){
+  if (!meta || !meta.list || typeof meta.index !== "number" || meta.index < 0) return false;
+  const list = meta.list;
+  list.splice(meta.index, 1);
+  if (meta.mode === "asreq"){
+    window.tasksAsReq = list;
+  }else{
+    window.tasksInterval = list;
+  }
+  return true;
+}
+
 function getGarnetEntries(){
   if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
   return window.garnetCleanings;
@@ -67,69 +271,144 @@ function makeBubble(anchor){
 }
 
 function completeTask(taskId){
-  const t = tasksInterval.find(x => String(x.id) === String(taskId));
-  if (!t) return;
-  const cur = RENDER_TOTAL ?? currentTotal();
-  t.anchorTotal = cur != null ? cur : 0;
-  t.sinceBase   = 0;
-  const todayKey = ymd(new Date());
-  if (todayKey){
-    if (!Array.isArray(t.completedDates)) t.completedDates = [];
-    if (!t.completedDates.includes(todayKey)){
-      t.completedDates.push(todayKey);
-      t.completedDates.sort();
-    }
+  const meta = findCalendarTaskMeta(taskId);
+  if (!meta) return;
+  const todayKey = normalizeDateKey(new Date());
+  if (!todayKey) return;
+  const changed = markCalendarTaskComplete(meta, todayKey);
+  if (changed){
+    saveCloudDebounced();
+    toast("Task completed");
+    route();
   }
-  saveCloudDebounced();
-  toast("Task completed");
-  route();
 }
 
-function showTaskBubble(taskId, anchor){
-  const t = tasksInterval.find(x => x.id === taskId);
-  if (!t) return;
-  const nd = nextDue(t);
-  const b  = makeBubble(anchor);
-  b.innerHTML = `
-    <div class="bubble-title">${t.name}</div>
-    <div class="bubble-kv"><span>Interval:</span><span>${t.interval} hrs</span></div>
-    <div class="bubble-kv"><span>Last serviced:</span><span>${nd ? nd.since.toFixed(0) : "—"} hrs ago</span></div>
-    <div class="bubble-kv"><span>Remain:</span><span>${nd ? nd.remain.toFixed(0) : "—"} hrs</span></div>
-    <div class="bubble-kv"><span>Cost:</span><span>${t.price != null ? ("$" + t.price) : "—"}</span></div>
-    ${(t.manualLink || t.storeLink) ?
-      `<div class="bubble-kv"><span>Links:</span><span>
-        ${t.manualLink ? `<a href="${t.manualLink}" target="_blank" rel="noopener">Manual</a>` : ``}
-        ${t.manualLink && t.storeLink ? ` · ` : ``}
-        ${t.storeLink ? `<a href="${t.storeLink}" target="_blank" rel="noopener">Store</a>` : ``}
-      </span></div>` : ``}
-    <div class="bubble-actions">
-      <button data-bbl-complete="${t.id}">Complete</button>
-      <button class="danger" data-bbl-remove="${t.id}">Remove</button>
-      <button data-bbl-edit="${t.id}">Edit settings</button>
-    </div>`;
+function showTaskBubble(taskId, anchor, options = {}){
+  const statusHint = options.status || anchor?.getAttribute("data-cal-status") || null;
+  const modeHint = options.mode || anchor?.getAttribute("data-cal-mode") || null;
+  const dateHint = options.dateISO || anchor?.getAttribute("data-cal-date") || anchor?.closest(".day")?.dataset.dateIso || null;
+  const meta = findCalendarTaskMeta(taskId);
+  if (!meta || !meta.task) return;
+  const task = meta.task;
+  const mode = modeHint === "asreq" || meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
+  const dateKey = normalizeDateKey(dateHint);
+  const displayDate = dateKey ? (()=>{
+    const parsed = parseDateLocal(dateKey);
+    return parsed instanceof Date && !Number.isNaN(parsed.getTime()) ? parsed.toDateString() : dateKey;
+  })() : null;
 
-  // Action buttons
+  const completedSet = new Set(Array.isArray(task.completedDates) ? task.completedDates.map(normalizeDateKey).filter(Boolean) : []);
+  const normalizedStatus = statusHint || (completedSet.has(dateKey || "") ? "completed" : (mode === "asreq" && dateKey ? "manual" : "due"));
+  const isCompleted = !!(dateKey && completedSet.has(dateKey)) || normalizedStatus === "completed";
+  const history = typeof ensureTaskManualHistory === "function"
+    ? ensureTaskManualHistory(task)
+    : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
+  const hasHistoryEntry = !!(dateKey && history.some(entry => entry && normalizeDateKey(entry.dateISO) === dateKey));
+  const manualDateMatches = dateKey && normalizeDateKey(task.calendarDateISO) === dateKey;
+  const canRemoveOccurrence = !!dateKey && (manualDateMatches || isCompleted || hasHistoryEntry);
+  const canMarkComplete = !!dateKey && !isCompleted;
+  const canUnmarkComplete = !!dateKey && isCompleted;
+
+  const statusLabel = isCompleted
+    ? "Completed"
+    : (normalizedStatus === "manual" ? "Scheduled" : normalizedStatus === "due" ? "Projected" : "Scheduled");
+
+  const infoParts = [];
+  infoParts.push(`<div class="bubble-title">${escapeHtml(task.name || "Task")}</div>`);
+  if (displayDate){
+    infoParts.push(`<div class="bubble-kv"><span>Date:</span><span>${escapeHtml(displayDate)}</span></div>`);
+  }
+  if (mode === "interval"){
+    infoParts.push(`<div class="bubble-kv"><span>Interval:</span><span>${task.interval != null ? escapeHtml(`${task.interval} hrs`) : "—"}</span></div>`);
+    const nd = typeof nextDue === "function" ? nextDue(task) : null;
+    infoParts.push(`<div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusLabel)}</span></div>`);
+    infoParts.push(`<div class="bubble-kv"><span>Last serviced:</span><span>${nd ? escapeHtml(`${nd.since.toFixed(0)} hrs ago`) : "—"}</span></div>`);
+    infoParts.push(`<div class="bubble-kv"><span>Remain:</span><span>${nd ? escapeHtml(`${nd.remain.toFixed(0)} hrs`) : "—"}</span></div>`);
+    infoParts.push(`<div class="bubble-kv"><span>Cost:</span><span>${task.price != null ? escapeHtml(`$${task.price}`) : "—"}</span></div>`);
+  }else{
+    infoParts.push(`<div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusLabel)}</span></div>`);
+    infoParts.push(`<div class="bubble-kv"><span>Condition:</span><span>${escapeHtml(task.condition || "As required")}</span></div>`);
+  }
+
+  if (task.manualLink || task.storeLink){
+    const links = [];
+    if (task.manualLink) links.push(`<a href="${task.manualLink}" target="_blank" rel="noopener">Manual</a>`);
+    if (task.storeLink) links.push(`<a href="${task.storeLink}" target="_blank" rel="noopener">Store</a>`);
+    infoParts.push(`<div class="bubble-kv"><span>Links:</span><span>${links.join(" · ")}</span></div>`);
+  }
+
+  const actions = [];
+  if (canMarkComplete){
+    actions.push(`<button data-bbl-complete>Mark complete</button>`);
+  }
+  if (canUnmarkComplete){
+    actions.push(`<button data-bbl-uncomplete>Unmark complete</button>`);
+  }
+  if (canRemoveOccurrence){
+    actions.push(`<button class="secondary" data-bbl-remove-occurrence>Remove occurrence</button>`);
+  }
+  actions.push(`<button data-bbl-edit>Edit settings</button>`);
+  actions.push(`<button class="danger" data-bbl-remove-task>Remove task</button>`);
+
+  const b  = makeBubble(anchor);
+  b.innerHTML = `${infoParts.join("")}<div class="bubble-actions">${actions.join("")}</div>`;
+
+  const targetKey = dateKey || normalizeDateKey(new Date());
+
   b.querySelector("[data-bbl-complete]")?.addEventListener("click", ()=>{
-    completeTask(taskId); hideBubble();
+    const changed = markCalendarTaskComplete(meta, targetKey);
+    if (changed){
+      saveCloudDebounced();
+      toast("Task marked complete");
+      hideBubble();
+      route();
+    }
   });
-  b.querySelector("[data-bbl-remove]")?.addEventListener("click", ()=>{
+
+  b.querySelector("[data-bbl-uncomplete]")?.addEventListener("click", ()=>{
+    const changed = unmarkCalendarTaskComplete(meta, targetKey);
+    if (changed){
+      saveCloudDebounced();
+      toast("Completion removed");
+      hideBubble();
+      route();
+    }
+  });
+
+  b.querySelector("[data-bbl-remove-occurrence]")?.addEventListener("click", ()=>{
+    const shouldRemove = window.confirm ? window.confirm("Remove this occurrence from the calendar?") : true;
+    if (!shouldRemove) return;
+    const changed = removeCalendarTaskOccurrence(meta, targetKey);
+    if (changed){
+      saveCloudDebounced();
+      toast("Removed from calendar");
+      hideBubble();
+      route();
+    }
+  });
+
+  b.querySelector("[data-bbl-remove-task]")?.addEventListener("click", ()=>{
     try {
       if (typeof recordDeletedItem === "function"){
-        recordDeletedItem("task", t, { list: "interval", cat: t?.cat ?? null, parentTask: t?.parentTask ?? null });
+        recordDeletedItem("task", task, { list: mode, cat: task?.cat ?? null, parentTask: task?.parentTask ?? null });
       }
     } catch (err) {
       console.warn("Failed to record deleted task from calendar", err);
     }
-    tasksInterval = tasksInterval.filter(x => x.id !== taskId);
-    saveCloudDebounced(); toast("Removed"); hideBubble(); route();
-  });
-  b.querySelector("[data-bbl-edit]")?.addEventListener("click", ()=>{
-    hideBubble(); openSettingsAndReveal(taskId);
+    if (removeCalendarTaskEverywhere(meta)){
+      saveCloudDebounced();
+      toast("Task removed");
+      hideBubble();
+      route();
+    }
   });
 
-  // NEW: click anywhere on the bubble (except buttons/links) → open Settings for this item
+  b.querySelector("[data-bbl-edit]")?.addEventListener("click", ()=>{
+    hideBubble();
+    openSettingsAndReveal(taskId);
+  });
+
   b.addEventListener("click", (e)=>{
-    // Ignore clicks on controls inside the bubble
     if (e.target.closest(".bubble-actions")) return;
     if (e.target.closest("button")) return;
     if (e.target.closest("a")) return;
@@ -315,12 +594,21 @@ function showGarnetBubble(garnetId, anchor){
 function wireCalendarBubbles(){
   const months = $("#months"); if (!months) return;
   let hoverTarget = null;
+  const extractTaskOptions = (el)=>{
+    if (!el) return {};
+    return {
+      status: el.getAttribute("data-cal-status") || null,
+      mode: el.getAttribute("data-cal-mode") || null,
+      dateISO: el.getAttribute("data-cal-date") || el.closest(".day")?.dataset.dateIso || null
+    };
+  };
+
   months.addEventListener("mouseover", (e)=>{
     const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
     if (!el || el === hoverTarget) return;
     hoverTarget = el;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
-    if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el);
+    if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el, extractTaskOptions(el));
     if (el.dataset.calGarnet) showGarnetBubble(el.dataset.calGarnet, el);
   });
   months.addEventListener("mouseout", (e)=>{
@@ -332,7 +620,7 @@ function wireCalendarBubbles(){
     const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
     if (!el) return;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
-    if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el);
+    if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el, extractTaskOptions(el));
     if (el.dataset.calGarnet) showGarnetBubble(el.dataset.calGarnet, el);
   });
 }
@@ -469,6 +757,7 @@ function renderCalendar(){
     const id = String(task.id);
     const statusKey = status || "due";
     const statusPriority = { completed: 3, manual: 2, due: 1 };
+    const mode = task && task.mode === "asreq" ? "asreq" : "interval";
     const existing = events.find(ev => ev.type === "task" && ev.id === id);
     if (existing){
       existing.name = task.name;
@@ -478,9 +767,11 @@ function renderCalendar(){
       if (nextPriority >= existingPriority){
         existing.status = statusKey;
       }
+      existing.mode = mode;
+      existing.dateISO = key;
       return;
     }
-    events.push({ type:"task", id, name:task.name, status: statusKey });
+    events.push({ type:"task", id, name:task.name, status: statusKey, mode, dateISO: key });
   }
 
   const intervalTasks = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
@@ -533,8 +824,15 @@ function renderCalendar(){
 
   const asReqTasks = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
   asReqTasks.forEach(t => {
-    if (!t || !t.calendarDateISO) return;
-    pushTaskEvent(t, t.calendarDateISO, "manual");
+    if (!t) return;
+    const completedDates = new Set(Array.isArray(t.completedDates) ? t.completedDates.map(normalizeDateKey).filter(Boolean) : []);
+    completedDates.forEach(dateKey => {
+      if (dateKey) pushTaskEvent(t, dateKey, "completed");
+    });
+    const manualKey = normalizeDateKey(t.calendarDateISO);
+    if (manualKey){
+      pushTaskEvent(t, manualKey, completedDates.has(manualKey) ? "completed" : "manual");
+    }
   });
 
   const jobsMap = {};
@@ -656,6 +954,9 @@ function renderCalendar(){
         if (ev.status === "completed") cls += " is-complete";
         chip.className = cls;
         chip.dataset.calTask = ev.id;
+        chip.dataset.calStatus = ev.status || "due";
+        if (ev.mode) chip.dataset.calMode = ev.mode;
+        chip.dataset.calDate = ev.dateISO || key;
         let label = ev.name;
         if (ev.status === "completed") label += " (completed)";
         else if (ev.status === "manual") label += " (scheduled)";
