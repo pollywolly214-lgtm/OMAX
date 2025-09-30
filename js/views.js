@@ -1446,7 +1446,10 @@ function viewJobs(){
           <td class="job-col job-col-hours">${remainingDisplay}</td>
           <td class="job-col job-col-need">${needDisplay}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
-          <td class="job-col job-col-impact"><span class="job-impact ${impactClass}">${impactDisplay}</span></td>
+          <td class="job-col job-col-impact">
+            <span class="job-impact ${impactClass}">${impactDisplay}</span>
+            <div class="job-impact-note small muted">Log cutting hours to get accurate prediction</div>
+          </td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
               <button data-log-job="${j.id}">Log time</button>
