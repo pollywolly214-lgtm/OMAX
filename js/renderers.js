@@ -63,7 +63,7 @@ function baselineInputValue(task){
   return "";
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const DASHBOARD_DAY_MS = 24 * 60 * 60 * 1000;
 
 function hoursSnapshotOnOrBefore(dateISO){
   if (!dateISO || !Array.isArray(totalHistory) || !totalHistory.length) return null;
@@ -1995,11 +1995,11 @@ function renderDashboard(){
           consumedHours = Math.max(0, effectiveNowHours - hoursAtTarget);
           source = "machine";
         }else{
-          const diffDays = Math.max(0, Math.round((today.getTime() - targetDate.getTime()) / DAY_MS));
+          const diffDays = Math.max(0, Math.round((today.getTime() - targetDate.getTime()) / DASHBOARD_DAY_MS));
           consumedHours = diffDays * hoursPerDay;
         }
       }else{
-        const diffDays = Math.max(0, Math.round((targetDate.getTime() - today.getTime()) / DAY_MS));
+        const diffDays = Math.max(0, Math.round((targetDate.getTime() - today.getTime()) / DASHBOARD_DAY_MS));
         const remainHours = Math.min(interval, diffDays * hoursPerDay);
         consumedHours = Math.max(0, interval - remainHours);
       }
