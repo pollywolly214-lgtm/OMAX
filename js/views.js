@@ -1554,7 +1554,7 @@ function viewJobs(){
             <th>Hours remaining</th>
             <th>Needed / day</th>
             <th>Status</th>
-            <th>Projected impact</th>
+            <th>Projected impact<div class="small muted">log cutting hours to get accurate prediction</div></th>
             <th>Actions</th>
           </tr>
         </thead>
