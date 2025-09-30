@@ -1693,6 +1693,9 @@ function renderDashboard(){
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
   const jobNameInput     = document.getElementById("dashJobName");
   const jobEstimateInput = document.getElementById("dashJobEstimate");
+  const jobMaterialInput = document.getElementById("dashJobMaterial");
+  const jobMaterialCostInput = document.getElementById("dashJobMaterialCost");
+  const jobMaterialQtyInput = document.getElementById("dashJobMaterialQty");
   const jobStartInput    = document.getElementById("dashJobStart");
   const jobDueInput      = document.getElementById("dashJobDue");
   const garnetForm       = document.getElementById("dashGarnetForm");
@@ -2652,10 +2655,17 @@ function renderDashboard(){
     e.preventDefault();
     const name = (jobNameInput?.value || "").trim();
     const est  = Number(jobEstimateInput?.value);
+    const material = (jobMaterialInput?.value || "").trim();
+    const materialCostRaw = jobMaterialCostInput?.value ?? "";
+    const materialQtyRaw  = jobMaterialQtyInput?.value ?? "";
     const start = jobStartInput?.value;
     const due   = jobDueInput?.value;
+    const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
+    const materialQty  = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
     if (!name || !isFinite(est) || est <= 0 || !start || !due){ toast("Fill job fields."); return; }
-    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material:"", materialCost:0, materialQty:0, notes:"", manualLogs:[] });
+    if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
+    if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
+    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, notes:"", manualLogs:[] });
     saveCloudDebounced();
     toast("Cutting job added");
     closeModal();
