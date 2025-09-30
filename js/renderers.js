@@ -1680,6 +1680,7 @@ function renderDashboard(){
   const taskPNInput      = document.getElementById("dashTaskPN");
   const taskPriceInput   = document.getElementById("dashTaskPrice");
   const categorySelect   = document.getElementById("dashTaskCategory");
+  const taskDateInput    = document.getElementById("dashTaskDate");
   const subtaskList      = document.getElementById("dashSubtaskList");
   const addSubtaskBtn    = document.getElementById("dashAddSubtask");
   const jobNameInput     = document.getElementById("dashJobName");
@@ -1703,6 +1704,18 @@ function renderDashboard(){
   let editingGarnetId    = null;
   let pendingGarnetEditId = null;
 
+  function syncTaskDateInput(){
+    if (!taskDateInput) return;
+    if (addContextDateISO){
+      taskDateInput.value = addContextDateISO;
+      return;
+    }
+    const modalVisible = modal?.classList.contains("is-visible");
+    if (!modalVisible || !taskDateInput.value){
+      taskDateInput.value = ymd(new Date());
+    }
+  }
+
   function setContextDate(dateISO){
     addContextDateISO = dateISO || null;
     if (modal){
@@ -1712,6 +1725,7 @@ function renderDashboard(){
         modal.removeAttribute("data-context-date");
       }
     }
+    syncTaskDateInput();
     if (downDateInput){
       if (addContextDateISO){
         downDateInput.value = addContextDateISO;
@@ -1993,6 +2007,7 @@ function renderDashboard(){
     taskForm?.reset();
     subtaskList?.replaceChildren();
     syncTaskMode(taskTypeSelect?.value || "interval");
+    syncTaskDateInput();
   }
 
   function showStep(step){
@@ -2003,6 +2018,7 @@ function renderDashboard(){
     if (step === "task"){
       populateCategoryOptions();
       syncTaskMode(taskTypeSelect?.value || "interval");
+      syncTaskDateInput();
     }
     if (step === "downtime"){
       refreshDownTimeList();
@@ -2095,6 +2111,12 @@ function renderDashboard(){
         modal.removeAttribute("data-context-date");
       }
     }
+    syncTaskDateInput();
+  });
+
+  taskDateInput?.addEventListener("input", ()=>{
+    const val = (taskDateInput?.value || "").trim();
+    setContextDate(val || null);
   });
 
   garnetDateInput?.addEventListener("input", ()=>{
@@ -2108,6 +2130,7 @@ function renderDashboard(){
         modal.removeAttribute("data-context-date");
       }
     }
+    syncTaskDateInput();
   });
 
   garnetCancelBtn?.addEventListener("click", ()=>{
@@ -2225,6 +2248,7 @@ function renderDashboard(){
 
   taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
   syncTaskMode(taskTypeSelect?.value || "interval");
+  syncTaskDateInput();
   populateCategoryOptions();
 
   addSubtaskBtn?.addEventListener("click", ()=>{
@@ -2245,6 +2269,8 @@ function renderDashboard(){
     const price  = priceVal === "" ? null : Number(priceVal);
     const catId  = (categorySelect?.value || "").trim() || null;
     const id     = genId(name);
+    const rawDate = (taskDateInput?.value || "").trim();
+    const dateISO = rawDate ? ymd(rawDate) : null;
     const base = {
       id,
       name,
@@ -2254,7 +2280,8 @@ function renderDashboard(){
       price: isFinite(price) ? price : null,
       cat: catId,
       parentTask: null,
-      order: ++window._maintOrderCounter
+      order: ++window._maintOrderCounter,
+      calendarDateISO: dateISO || null
     };
     if (mode === "interval"){
       let interval = Number(taskIntervalInput?.value);
@@ -2286,7 +2313,8 @@ function renderDashboard(){
         price: null,
         cat: catId,
         parentTask: id,
-        order: ++window._maintOrderCounter
+        order: ++window._maintOrderCounter,
+        calendarDateISO: dateISO || null
       };
       if (subMode === "interval"){
         const intervalField = row.querySelector("[data-subtask-interval]");
