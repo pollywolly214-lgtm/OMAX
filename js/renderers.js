@@ -7366,7 +7366,7 @@ function renderInventory(){
     if (deleteBtn){
       const id = deleteBtn.getAttribute("data-inventory-delete");
       if (!id) return;
-      const removed = await deleteInventoryItem(id);
+      const removed = await deleteInventoryItem(id, { unlinkMaintenance: false });
       if (removed) refreshRows();
       return;
     }
@@ -7743,6 +7743,7 @@ async function deleteInventoryItem(id, options){
   const suppressToast = opts.suppressToast === true;
   const suppressRender = opts.suppressRender === true;
   const linkedTaskIdOpt = opts.linkedTaskId != null ? String(opts.linkedTaskId) : null;
+  const unlinkMaintenance = opts.unlinkMaintenance !== false;
   const idx = inventory.findIndex(item => item && item.id === id);
   if (idx < 0){ toast("Inventory item not found."); return false; }
 
@@ -7752,17 +7753,31 @@ async function deleteInventoryItem(id, options){
   if (!skipConfirm){
     const linkedTasks = findTasksLinkedToInventoryItem(item);
     const count = linkedTasks.length;
-    const message = count > 0
-      ? (count === 1
-        ? `Delete ${label}? This will unlink it from the maintenance task shown below.`
-        : `Delete ${label}? This will unlink it from these maintenance tasks.`)
-      : `Delete ${label}? This will remove it from inventory, maintenance settings, and the dashboard on every page.`;
+    const linkedTaskNames = linkedTasks.map(task => task && task.name ? task.name : "Unnamed maintenance task");
+    let message;
+    let confirmText = "Delete inventory item";
+    if (unlinkMaintenance){
+      message = count > 0
+        ? (count === 1
+          ? `Delete ${label}? This will unlink it from the maintenance task shown below.`
+          : `Delete ${label}? This will unlink it from these maintenance tasks.`)
+        : `Delete ${label}? This will remove it from inventory, maintenance settings, and the dashboard on every page.`;
+    }else{
+      confirmText = "Remove from inventory";
+      if (count > 0){
+        message = count === 1
+          ? `Remove ${label} from inventory? The linked maintenance task shown below will stay in Maintenance Settings.`
+          : `Remove ${label} from inventory? The linked maintenance tasks shown below will stay in Maintenance Settings.`;
+      }else{
+        message = `Remove ${label} from inventory? It will stay available in Maintenance Settings.`;
+      }
+    }
     confirmed = await showConfirmModal({
-      title: "Remove inventory item?",
+      title: unlinkMaintenance ? "Remove inventory item?" : "Remove from inventory?",
       message,
-      items: linkedTasks.map(task => task && task.name ? task.name : "Unnamed maintenance task"),
+      items: linkedTaskNames,
       cancelText: "Keep item",
-      confirmText: "Delete inventory item",
+      confirmText,
       confirmVariant: "danger"
     });
   }
@@ -7780,7 +7795,7 @@ async function deleteInventoryItem(id, options){
     console.warn("Failed to record deleted inventory item", err);
   }
   const itemIdStr = item && item.id != null ? String(item.id) : null;
-  if (itemIdStr){
+  if (unlinkMaintenance && itemIdStr){
     const lists = [window.tasksInterval, window.tasksAsReq];
     let touched = false;
     lists.forEach(list => {
