@@ -1,5 +1,7 @@
 /* ================== CALENDAR & BUBBLES ===================== */
 let bubbleTimer = null;
+const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
+
 function hideBubble(){
   if (bubbleTimer){
     clearTimeout(bubbleTimer);
@@ -335,6 +337,124 @@ function wireCalendarBubbles(){
   });
 }
 
+function estimateIntervalDailyHours(task, baselineEntry, today){
+  const defaultHours = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+    ? Number(DAILY_HOURS)
+    : 8;
+  if (!baselineEntry) return defaultHours;
+  const baseDate = baselineEntry.dateISO ? parseDateLocal(baselineEntry.dateISO) : null;
+  const baseHours = baselineEntry.hoursAtEntry != null ? Number(baselineEntry.hoursAtEntry) : null;
+  const currentHours = typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : null;
+  if (baseDate instanceof Date && !Number.isNaN(baseDate.getTime())){
+    baseDate.setHours(0,0,0,0);
+    const diffMs = today.getTime() - baseDate.getTime();
+    if (diffMs > 0 && Number.isFinite(baseHours) && currentHours != null && Number.isFinite(currentHours)){
+      const diffDays = diffMs / CALENDAR_DAY_MS;
+      if (diffDays > 0){
+        const diffHours = Math.max(0, Number(currentHours) - baseHours);
+        const rate = diffHours / diffDays;
+        if (Number.isFinite(rate) && rate > 0){
+          return rate;
+        }
+      }
+    }
+  }
+  if (baselineEntry.estimatedDailyHours != null){
+    const est = Number(baselineEntry.estimatedDailyHours);
+    if (Number.isFinite(est) && est > 0) return est;
+  }
+  return defaultHours;
+}
+
+function projectIntervalDueDates(task, options = {}){
+  if (!task || task.mode !== "interval") return [];
+  const interval = Number(task.interval);
+  if (!Number.isFinite(interval) || interval <= 0) return [];
+
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  let manualHistory = [];
+  if (typeof ensureTaskManualHistory === "function"){
+    try {
+      manualHistory = ensureTaskManualHistory(task).slice();
+    } catch (err){
+      console.warn("Failed to normalize manual history for schedule projection", err);
+      manualHistory = Array.isArray(task.manualHistory) ? task.manualHistory.slice() : [];
+    }
+  }else{
+    manualHistory = Array.isArray(task.manualHistory) ? task.manualHistory.slice() : [];
+  }
+
+  manualHistory.sort((a,b)=> String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")));
+
+  let baselineEntry = null;
+  for (let i = manualHistory.length - 1; i >= 0; i--){
+    const entry = manualHistory[i];
+    if (!entry || typeof entry.dateISO !== "string") continue;
+    baselineEntry = entry;
+    break;
+  }
+
+  const hasBaseline = baselineEntry
+    || (typeof task.calendarDateISO === "string" && task.calendarDateISO)
+    || (Array.isArray(task.completedDates) && task.completedDates.length > 0);
+  if (!hasBaseline) return [];
+
+  let baseDate = baselineEntry?.dateISO ? parseDateLocal(baselineEntry.dateISO) : null;
+  if (!(baseDate instanceof Date) || Number.isNaN(baseDate.getTime())){
+    baseDate = task.calendarDateISO ? parseDateLocal(task.calendarDateISO) : null;
+  }
+  if (!(baseDate instanceof Date) || Number.isNaN(baseDate.getTime())){
+    const completed = Array.isArray(task.completedDates) ? task.completedDates.slice().sort() : [];
+    const lastCompleted = completed.length ? completed[completed.length - 1] : null;
+    baseDate = lastCompleted ? parseDateLocal(lastCompleted) : null;
+  }
+  if (!(baseDate instanceof Date) || Number.isNaN(baseDate.getTime())){
+    baseDate = new Date(today);
+  }
+  baseDate.setHours(0,0,0,0);
+
+  const hoursPerDay = estimateIntervalDailyHours(task, baselineEntry, today);
+  const intervalDays = interval / hoursPerDay;
+  if (!Number.isFinite(intervalDays) || intervalDays <= 0) return [];
+
+  const baseTime = baseDate.getTime();
+  const intervalMs = intervalDays * CALENDAR_DAY_MS;
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) return [];
+
+  const monthsAheadRaw = Number(options.monthsAhead);
+  const monthsAhead = Number.isFinite(monthsAheadRaw) && monthsAheadRaw > 0 ? monthsAheadRaw : 3;
+  const horizon = new Date(today); horizon.setMonth(horizon.getMonth() + monthsAhead);
+
+  const events = [];
+  const seen = new Set();
+  const maxIterations = 240;
+
+  for (let idx = 1; idx <= maxIterations; idx++){
+    const dueTime = baseTime + (idx * intervalMs);
+    if (!Number.isFinite(dueTime)) break;
+    const dueDate = new Date(dueTime);
+    dueDate.setHours(0,0,0,0);
+    const key = ymd(dueDate);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    events.push({ dateISO: key, dueDate });
+    if (dueDate > horizon && dueDate > today){
+      break;
+    }
+  }
+
+  if (!events.length){
+    const fallbackDue = new Date(baseTime + intervalMs);
+    fallbackDue.setHours(0,0,0,0);
+    const key = ymd(fallbackDue);
+    if (key) events.push({ dateISO: key, dueDate: fallbackDue });
+  }
+
+  events.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
+  return events;
+}
+
 function renderCalendar(){
   const container = $("#months");
   if (!container) return;
@@ -387,6 +507,20 @@ function renderCalendar(){
     if (manualKey && !(completedKeys && completedKeys.has(manualKey))){
       pushTaskEvent(t, manualKey, "manual");
     }
+    const projections = projectIntervalDueDates(t, { monthsAhead: 3 });
+    if (projections.length){
+      projections.forEach(pred => {
+        const dueKey = pred?.dateISO ? ymd(pred.dateISO) : null;
+        if (!dueKey) return;
+        if (completedKeys && completedKeys.has(dueKey)) return;
+        if (manualKey && manualKey === dueKey && !(completedKeys && completedKeys.has(dueKey))){
+          return;
+        }
+        pushTaskEvent(t, dueKey, "due");
+      });
+      return;
+    }
+
     const nd = nextDue(t);
     if (!nd) return;
     const dueKey = ymd(nd.due);
