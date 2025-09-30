@@ -134,6 +134,59 @@ function editTaskCompletion(taskId, dateKey){
   return true;
 }
 
+function removeJobCompletion(jobId){
+  if (!jobId) return false;
+  const idStr = String(jobId);
+  if (!idStr) return false;
+  if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+  const list = window.completedCuttingJobs;
+  const idx = list.findIndex(job => String(job?.id) === idStr);
+  if (idx < 0) return false;
+  list.splice(idx, 1);
+  window.completedCuttingJobs = list;
+  if (typeof completedCuttingJobs !== "undefined") completedCuttingJobs = list;
+  saveCloudDebounced();
+  toast("Completion removed");
+  route();
+  return true;
+}
+
+function editJobCompletion(jobId, dateKey){
+  if (!jobId) return false;
+  if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+  const list = window.completedCuttingJobs;
+  const idStr = String(jobId);
+  const entry = list.find(job => String(job?.id) === idStr);
+  if (!entry) return false;
+  const currentNormalized = ymd(dateKey || entry.completedAtISO || entry.dueISO || new Date());
+  const promptLabel = "Enter a new completion date (YYYY-MM-DD or MM/DD/YYYY)";
+  const nextRaw = window.prompt ? window.prompt(promptLabel, currentNormalized || "") : currentNormalized;
+  if (nextRaw == null) return false;
+  const parsed = parseDateLocal(nextRaw);
+  if (!parsed){
+    toast("Could not understand that date");
+    return false;
+  }
+  const normalizedNext = ymd(parsed);
+  if (!normalizedNext){
+    toast("Could not normalize the selected date");
+    return false;
+  }
+  const nextDate = parseDateLocal(normalizedNext);
+  if (!nextDate){
+    toast("Could not normalize the selected date");
+    return false;
+  }
+  nextDate.setHours(0, 0, 0, 0);
+  entry.completedAtISO = nextDate.toISOString();
+  window.completedCuttingJobs = list;
+  if (typeof completedCuttingJobs !== "undefined") completedCuttingJobs = list;
+  saveCloudDebounced();
+  toast("Completion updated");
+  route();
+  return true;
+}
+
 function showTaskBubble(taskId, anchor){
   const t = tasksInterval.find(x => x.id === taskId);
   if (!t) return;
@@ -227,13 +280,16 @@ function showJobBubble(jobId, anchor){
     const active = cuttingJobs.find(x => String(x.id) === String(jobId));
     const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
     const completed = completedJobs.find(x => String(x?.id) === String(jobId));
+    const status = anchor?.dataset?.calStatus || "";
+    const dateKey = anchor?.dataset?.calDate || "";
+    const completedEvent = status === "completed" && dateKey;
     if (!active && !completed){
       b.innerHTML = `<div class="bubble-title">Job</div><div class="bubble-kv"><span>Info:</span><span>Job not found (id: ${jobId})</span></div>`;
       return;
     }
     if (!active && completed){
       const finishedDate = completed.completedAtISO ? parseDateLocal(completed.completedAtISO) : null;
-      const finishedText = finishedDate ? finishedDate.toDateString() : "—";
+      const finishedText = finishedDate ? finishedDate.toDateString() : (dateKey ? (parseDateLocal(dateKey)?.toDateString() || dateKey) : "—");
       const estimateVal = Number(completed.estimateHours);
       const actualVal = Number(completed.actualHours);
       const estimateText = Number.isFinite(estimateVal) ? `${estimateVal.toFixed(1)} hr` : "—";
@@ -252,6 +308,16 @@ function showJobBubble(jobId, anchor){
       const gainLossHtml = Number.isFinite(gainLossRaw)
         ? `${escapeHtml(gainLossText)}${rateText !== "—" ? ` <span class="muted">@ ${escapeHtml(rateText)}</span>` : ""}`
         : "—";
+      const completionLabel = (()=>{
+        const parsed = completed.completedAtISO ? parseDateLocal(completed.completedAtISO) : null;
+        if (parsed) return parsed.toLocaleDateString();
+        if (dateKey){
+          const fromKey = parseDateLocal(dateKey);
+          if (fromKey) return fromKey.toLocaleDateString();
+          return dateKey;
+        }
+        return finishedText;
+      })();
       b.innerHTML = `
         <div class="bubble-title">${escapeHtml(completed.name || "Completed job")}</div>
         <div class="bubble-kv"><span>Status:</span><span>Completed</span></div>
@@ -261,7 +327,31 @@ function showJobBubble(jobId, anchor){
         <div class="bubble-kv"><span>Actual hours:</span><span>${escapeHtml(actualText)}</span></div>
         <div class="bubble-kv"><span>Material:</span><span>${materialText}</span></div>
         <div class="bubble-kv"><span>Gain / loss:</span><span>${gainLossHtml}</span></div>
-        ${notesHtml}`;
+        ${notesHtml}
+        ${completedEvent ? `<div class="bubble-kv"><span>Completed on:</span><span>${escapeHtml(completionLabel)}</span></div>` : ""}
+        ${completedEvent ? `
+          <div class="bubble-actions">
+            <button data-bbl-job-completion-edit="${escapeHtml(String(completed.id))}" data-bbl-job-completion-date="${escapeHtml(dateKey)}">Edit completion</button>
+            <button class="danger" data-bbl-job-completion-remove="${escapeHtml(String(completed.id))}" data-bbl-job-completion-date="${escapeHtml(dateKey)}">Remove completion</button>
+          </div>
+        ` : ""}`;
+      if (completedEvent){
+        const editBtn = b.querySelector("[data-bbl-job-completion-edit]");
+        editBtn?.addEventListener("click", ()=>{
+          const targetDate = editBtn.getAttribute("data-bbl-job-completion-date") || completed.completedAtISO || dateKey;
+          hideBubble();
+          editJobCompletion(jobId, targetDate);
+        });
+        const removeBtn = b.querySelector("[data-bbl-job-completion-remove]");
+        removeBtn?.addEventListener("click", ()=>{
+          const parsed = parseDateLocal(dateKey);
+          const label = parsed ? parsed.toLocaleDateString() : (dateKey || "this entry");
+          const shouldRemove = window.confirm ? window.confirm(`Remove completion logged on ${label}?`) : true;
+          if (!shouldRemove) return;
+          hideBubble();
+          removeJobCompletion(jobId);
+        });
+      }
       return;
     }
     const j = active;
@@ -497,7 +587,7 @@ function renderCalendar(){
     const cur = new Date(start.getTime());
     while (cur <= end){
       const key = ymd(cur);
-      (jobsMap[key] ||= []).push({ type:"job", id:String(j.id), name:j.name, status:"active" });
+      (jobsMap[key] ||= []).push({ type:"job", id:String(j.id), name:j.name, status:"active", dateKey:key });
       cur.setDate(cur.getDate()+1);
     }
   });
@@ -507,7 +597,7 @@ function renderCalendar(){
     if (!job) return;
     const completionKey = job.completedAtISO ? ymd(job.completedAtISO) : (job.dueISO ? ymd(job.dueISO) : null);
     if (!completionKey) return;
-    (jobsMap[completionKey] ||= []).push({ type:"job", id:String(job.id), name:job.name, status:"completed" });
+    (jobsMap[completionKey] ||= []).push({ type:"job", id:String(job.id), name:job.name, status:"completed", dateKey:completionKey, completedAtISO: job.completedAtISO || null });
   });
 
   const garnetMap = {};
@@ -631,6 +721,9 @@ function renderCalendar(){
         if (ev.status === "completed") cls += " is-complete";
         bar.className = cls;
         bar.dataset.calJob = ev.id;
+        if (ev.status) bar.dataset.calStatus = ev.status;
+        if (ev.dateKey) bar.dataset.calDate = ev.dateKey;
+        if (ev.completedAtISO) bar.dataset.calCompletedIso = ev.completedAtISO;
         bar.textContent = ev.status === "completed" ? `${ev.name} (completed)` : ev.name;
         cell.appendChild(bar);
       });
