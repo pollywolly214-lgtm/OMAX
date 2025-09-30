@@ -247,11 +247,17 @@ function getCloudLayout(area){
 function setCloudLayout(area, layout){
   if (typeof window === "undefined") return;
   const clone = cloneLayoutData(layout);
+  let normalized = clone;
+  if (area === "dashboard" && typeof sanitizeDashboardLayout === "function"){
+    normalized = sanitizeDashboardLayout(clone).layout;
+  }else if (area !== "dashboard" && typeof sanitizeCostLayout === "function"){
+    normalized = sanitizeCostLayout(clone).layout;
+  }
   if (area === "dashboard"){
-    window.cloudDashboardLayout = clone;
+    window.cloudDashboardLayout = normalized;
     window.cloudDashboardLayoutLoaded = true;
   }else{
-    window.cloudCostLayout = clone;
+    window.cloudCostLayout = normalized;
     window.cloudCostLayoutLoaded = true;
   }
 }
@@ -286,8 +292,11 @@ function dashboardLayoutStorage(){
 function loadDashboardLayoutFromStorage(){
   const cloud = getCloudLayout("dashboard");
   if (cloud.loaded){
-    const layout = cloneLayoutData(cloud.layout);
-    return { layout, stored: layoutHasEntries(layout) };
+    const cloned = cloneLayoutData(cloud.layout);
+    const sanitized = (typeof sanitizeDashboardLayout === "function")
+      ? sanitizeDashboardLayout(cloned)
+      : { layout: cloned, changed: false };
+    return { layout: sanitized.layout, stored: layoutHasEntries(sanitized.layout) };
   }
   const storage = dashboardLayoutStorage();
   if (!storage) return { layout:{}, stored:false };
@@ -295,7 +304,12 @@ function loadDashboardLayoutFromStorage(){
     const raw = storage.getItem(DASHBOARD_LAYOUT_STORAGE_KEY);
     if (!raw) return { layout:{}, stored:false };
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") return { layout: parsed, stored: layoutHasEntries(parsed) };
+    if (parsed && typeof parsed === "object"){
+      const sanitized = (typeof sanitizeDashboardLayout === "function")
+        ? sanitizeDashboardLayout(parsed)
+        : { layout: parsed, changed: false };
+      return { layout: sanitized.layout, stored: layoutHasEntries(sanitized.layout) };
+    }
   } catch (err){
     console.warn("Unable to load dashboard layout", err);
   }
@@ -330,12 +344,19 @@ function persistDashboardLayout(state){
   if (!state) return;
   const layoutSource = (state.layoutById && typeof state.layoutById === "object") ? state.layoutById : {};
   const layoutClone = cloneLayoutData(layoutSource);
-  const hasLayout = layoutHasEntries(layoutClone);
+  let normalizedLayout = layoutClone;
+  let sanitizedChanged = false;
+  if (typeof sanitizeDashboardLayout === "function"){
+    const result = sanitizeDashboardLayout(layoutClone);
+    normalizedLayout = result.layout;
+    sanitizedChanged = result.changed;
+  }
+  const hasLayout = layoutHasEntries(normalizedLayout);
   const storage = dashboardLayoutStorage();
   if (storage){
     try {
       if (hasLayout){
-        storage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify(layoutClone));
+        storage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify(normalizedLayout));
       }else{
         storage.removeItem(DASHBOARD_LAYOUT_STORAGE_KEY);
       }
@@ -343,17 +364,18 @@ function persistDashboardLayout(state){
       console.warn("Unable to persist dashboard layout", err);
     }
   }
+  state.layoutById = normalizedLayout;
   state.layoutStored = hasLayout;
   if (state.root && state.root.classList){
     state.root.classList.toggle("has-custom-layout", hasLayout);
   }
   const cloud = getCloudLayout("dashboard");
-  let changed = !cloud.loaded || !layoutsEqual(cloud.layout, layoutClone);
+  let changed = !cloud.loaded || !layoutsEqual(cloud.layout, normalizedLayout);
   if (!cloud.loaded || changed){
-    setCloudLayout("dashboard", layoutClone);
+    setCloudLayout("dashboard", normalizedLayout);
   }
   if (!cloud.loaded) changed = true;
-  if (changed && typeof saveCloudDebounced === "function"){
+  if ((changed || sanitizedChanged) && typeof saveCloudDebounced === "function"){
     try { saveCloudDebounced(); }
     catch (err) { console.warn("Unable to schedule cloud save for dashboard layout", err); }
   }
@@ -1048,8 +1070,11 @@ function costLayoutStorage(){
 function loadCostLayoutFromStorage(){
   const cloud = getCloudLayout("cost");
   if (cloud.loaded){
-    const layout = cloneLayoutData(cloud.layout);
-    return { layout, stored: layoutHasEntries(layout) };
+    const cloned = cloneLayoutData(cloud.layout);
+    const sanitized = (typeof sanitizeCostLayout === "function")
+      ? sanitizeCostLayout(cloned)
+      : { layout: cloned, changed: false };
+    return { layout: sanitized.layout, stored: layoutHasEntries(sanitized.layout) };
   }
   const storage = costLayoutStorage();
   if (!storage) return { layout:{}, stored:false };
@@ -1057,7 +1082,12 @@ function loadCostLayoutFromStorage(){
     const raw = storage.getItem(COST_LAYOUT_STORAGE_KEY);
     if (!raw) return { layout:{}, stored:false };
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") return { layout: parsed, stored: layoutHasEntries(parsed) };
+    if (parsed && typeof parsed === "object"){
+      const sanitized = (typeof sanitizeCostLayout === "function")
+        ? sanitizeCostLayout(parsed)
+        : { layout: parsed, changed: false };
+      return { layout: sanitized.layout, stored: layoutHasEntries(sanitized.layout) };
+    }
   } catch (err){
     console.warn("Unable to load cost layout", err);
   }
@@ -1095,12 +1125,19 @@ function persistCostLayout(state){
   if (!state) return;
   const layoutSource = (state.layoutById && typeof state.layoutById === "object") ? state.layoutById : {};
   const layoutClone = cloneLayoutData(layoutSource);
-  const hasLayout = layoutHasEntries(layoutClone);
+  let normalizedLayout = layoutClone;
+  let sanitizedChanged = false;
+  if (typeof sanitizeCostLayout === "function"){
+    const result = sanitizeCostLayout(layoutClone);
+    normalizedLayout = result.layout;
+    sanitizedChanged = result.changed;
+  }
+  const hasLayout = layoutHasEntries(normalizedLayout);
   const storage = costLayoutStorage();
   if (storage){
     try {
       if (hasLayout){
-        storage.setItem(COST_LAYOUT_STORAGE_KEY, JSON.stringify(layoutClone));
+        storage.setItem(COST_LAYOUT_STORAGE_KEY, JSON.stringify(normalizedLayout));
       }else{
         storage.removeItem(COST_LAYOUT_STORAGE_KEY);
       }
@@ -1108,17 +1145,18 @@ function persistCostLayout(state){
       console.warn("Unable to persist cost layout", err);
     }
   }
+  state.layoutById = normalizedLayout;
   state.layoutStored = hasLayout;
   if (state.root && state.root.classList){
     state.root.classList.toggle("has-custom-layout", hasLayout);
   }
   const cloud = getCloudLayout("cost");
-  let changed = !cloud.loaded || !layoutsEqual(cloud.layout, layoutClone);
+  let changed = !cloud.loaded || !layoutsEqual(cloud.layout, normalizedLayout);
   if (!cloud.loaded || changed){
-    setCloudLayout("cost", layoutClone);
+    setCloudLayout("cost", normalizedLayout);
   }
   if (!cloud.loaded) changed = true;
-  if (changed && typeof saveCloudDebounced === "function"){
+  if ((changed || sanitizedChanged) && typeof saveCloudDebounced === "function"){
     try { saveCloudDebounced(); }
     catch (err) { console.warn("Unable to schedule cloud save for cost layout", err); }
   }
