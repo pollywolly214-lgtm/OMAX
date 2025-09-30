@@ -2139,12 +2139,13 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   backdrop-filter: blur(6px);
 }
 .month-header {
-  background: linear-gradient(135deg, rgba(9, 68, 165, 0.82), rgba(33, 182, 255, 0.65));
+  background: linear-gradient(135deg, #eef3ff, #d4e2ff);
   padding: 10px 16px;
   font-weight: bold;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.35);
-  color: #fff;
+  border-bottom: 1px solid rgba(15, 31, 60, 0.15);
+  color: #07112c;
   letter-spacing: 0.04em;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 .weekdays, .week { display: grid; grid-template-columns: repeat(7, 1fr); }
 .weekdays div {
