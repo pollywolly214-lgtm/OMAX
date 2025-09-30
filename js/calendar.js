@@ -297,11 +297,30 @@ function renderCalendar(){
   container.innerHTML = "";
 
   const dueMap = {};
-  tasksInterval.forEach(t => {
+  function pushTaskEvent(task, iso){
+    if (!task || !iso) return;
+    const key = ymd(iso);
+    if (!key) return;
+    (dueMap[key] ||= []).push({ type:"task", id:String(task.id), name:task.name });
+  }
+
+  const intervalTasks = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  intervalTasks.forEach(t => {
+    if (!t) return;
+    const manualKey = t.calendarDateISO ? ymd(t.calendarDateISO) : null;
+    if (manualKey) pushTaskEvent(t, manualKey);
     const nd = nextDue(t);
     if (!nd) return;
-    const key = ymd(nd.due);
-    (dueMap[key] ||= []).push({ type:"task", id:String(t.id), name:t.name });
+    const dueKey = ymd(nd.due);
+    if (dueKey && (!manualKey || manualKey !== dueKey)){
+      pushTaskEvent(t, dueKey);
+    }
+  });
+
+  const asReqTasks = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  asReqTasks.forEach(t => {
+    if (!t || !t.calendarDateISO) return;
+    pushTaskEvent(t, t.calendarDateISO);
   });
 
   const jobsMap = {};

@@ -89,6 +89,7 @@ function viewDashboard(){
             <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
             <label>Price ($)<input type="number" min="0" step="0.01" id="dashTaskPrice" placeholder="optional"></label>
             <label>Category<select id="dashTaskCategory"></select></label>
+            <label>Calendar date<input type="date" id="dashTaskDate"></label>
           </div>
 
           <div class="subtask-section">
