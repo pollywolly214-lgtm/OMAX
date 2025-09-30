@@ -2497,6 +2497,8 @@ function renderDashboard(){
       parentTask: null,
       order: ++window._maintOrderCounter
     };
+    const targetISO = addContextDateISO || ymd(new Date());
+    let message = "Task added";
     if (mode === "interval"){
       let interval = Number(taskIntervalInput?.value);
       if (!isFinite(interval) || interval <= 0) interval = 8;
@@ -2505,10 +2507,17 @@ function renderDashboard(){
       const baselineHours = parseBaselineHours(taskLastInput?.value);
       applyIntervalBaseline(task, { baselineHours, currentHours: curHours });
       tasksInterval.unshift(task);
+      scheduleExistingIntervalTask(task, { dateISO: targetISO });
+      const parsed = parseDateLocal(targetISO);
+      const dateLabel = (parsed instanceof Date && !Number.isNaN(parsed.getTime()))
+        ? parsed.toLocaleDateString()
+        : targetISO;
+      message = `Scheduled "${task.name || "Task"}" for ${dateLabel}`;
     }else{
       const condition = (taskConditionInput?.value || "").trim() || "As required";
       const task = Object.assign({}, base, { mode:"asreq", condition });
       tasksAsReq.unshift(task);
+      message = "As-required task added to Maintenance Settings";
     }
 
     const parentInterval = Number(taskIntervalInput?.value);
@@ -2548,10 +2557,15 @@ function renderDashboard(){
       }
     });
 
+    setContextDate(targetISO);
     saveCloudDebounced();
-    toast("Task added");
+    toast(message);
     closeModal();
     renderDashboard();
+    const hash = (location.hash || "#").toLowerCase();
+    if (hash.startsWith("#/costs")){
+      renderCosts();
+    }
   });
 
   taskExistingForm?.addEventListener("submit", (e)=>{
@@ -2582,6 +2596,10 @@ function renderDashboard(){
     toast(message);
     closeModal();
     renderDashboard();
+    const hash = (location.hash || "#").toLowerCase();
+    if (hash.startsWith("#/costs")){
+      renderCosts();
+    }
   });
 
   downForm?.addEventListener("submit", (e)=>{
