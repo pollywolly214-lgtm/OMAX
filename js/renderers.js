@@ -2370,11 +2370,19 @@ function openJobsEditor(jobId){
 
 
 function openSettingsAndReveal(taskId){
-  location.hash = "#/settings";
-  setTimeout(()=>{
-    const el = document.querySelector(`[data-task-id="${taskId}"]`);
-    if (el){ el.open = true; el.scrollIntoView({behavior:"smooth", block:"center"}); }
-  }, 60);
+  if (taskId == null) return;
+  const id = String(taskId);
+  if (!id) return;
+  if (typeof window !== "undefined"){
+    window.maintenanceSearchTerm = "";
+    window.pendingMaintenanceFocus = { taskIds: [id] };
+  }
+  const hash = (location.hash || "#").toLowerCase();
+  if (hash === "#/settings" || hash === "#settings"){
+    if (typeof renderSettings === "function") renderSettings();
+  }else{
+    location.hash = "#/settings";
+  }
 }
 
 // --- SAFETY: repair tasks/folders graph so Settings never crashes ---
