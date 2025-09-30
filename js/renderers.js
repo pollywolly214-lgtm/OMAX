@@ -3723,7 +3723,10 @@ function renderSettings(){
       #explorer .body{padding:8px 10px;background:#fff;border-top:1px dashed #e5e5e5}
       #explorer .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.5rem}
       #explorer label{font-size:.85rem;display:flex;flex-direction:column;gap:4px}
-      #explorer input,#explorer select{width:100%;padding:.35rem .45rem;border:1px solid #ccd4e0;border-radius:6px;font-size:.9rem}
+      #explorer input,#explorer select,#explorer textarea{width:100%;padding:.35rem .45rem;border:1px solid #ccd4e0;border-radius:6px;font-size:.9rem}
+      #explorer textarea{min-height:70px;resize:vertical}
+      #explorer .task-note{grid-column:1/-1}
+      #explorer .task-note textarea{min-height:90px}
       #explorer .row-actions{display:flex;gap:.4rem;justify-content:flex-end;margin-top:.6rem;flex-wrap:wrap}
       #explorer .row-actions button{padding:.35rem .65rem;border-radius:6px;border:0;cursor:pointer;background:#eef3fb;color:#0a63c2}
       #explorer .row-actions .danger{background:#e14b4b;color:#fff}
@@ -3766,7 +3769,9 @@ function renderSettings(){
       .modal-card h4{margin:0 0 12px;font-size:1.1rem}
       .modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
       .modal-grid label{display:flex;flex-direction:column;font-size:.9rem;gap:4px}
-      .modal-grid input,.modal-grid select{padding:.45rem .55rem;border:1px solid #cdd4e1;border-radius:6px;font-size:.95rem}
+      .modal-grid input,.modal-grid select,.modal-grid textarea{padding:.45rem .55rem;border:1px solid #cdd4e1;border-radius:6px;font-size:.95rem}
+      .modal-grid textarea{min-height:90px;resize:vertical}
+      .modal-grid .task-note{grid-column:1/-1}
       .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
       .modal-actions button{padding:.45rem .85rem;border-radius:6px;border:0;cursor:pointer;font-weight:600}
       .modal-actions .secondary{background:#eef3fb;color:#0a63c2}
@@ -3851,6 +3856,7 @@ function renderSettings(){
     if (task.parentTask == null) task.parentTask = null;
     if (task.cat == null) task.cat = task.cat ?? null;
     if (!Array.isArray(task.completedDates)) task.completedDates = [];
+    if (typeof task.note !== "string") task.note = "";
   }
 
   const taskEntries = [];
@@ -3871,7 +3877,8 @@ function renderSettings(){
       task.condition,
       task.manualLink,
       task.storeLink,
-      task.pn
+      task.pn,
+      task.note
     ];
     if (task.mode === "interval" && task.interval != null) fields.push(String(task.interval));
     if (task.price != null) fields.push(String(task.price));
@@ -4038,6 +4045,7 @@ function renderSettings(){
             <label>Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
             <label>Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
             <label>Price ($)<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${t.price!=null?t.price:""}" placeholder="optional"></label>
+            <label class="task-note">Note<textarea data-k="note" data-id="${t.id}" data-list="${type}" rows="2" placeholder="Optional note">${escapeHtml(t.note||"")}</textarea></label>
           </div>
           <div class="row-actions">
             ${type === "interval" ? `<button class="btn-complete" data-complete="${t.id}">Mark completed now</button>` : ""}
@@ -4196,6 +4204,7 @@ function renderSettings(){
             <label>Store link<input type="url" name="taskStore" placeholder="https://..."></label>
             <label>Part #<input name="taskPN" placeholder="Part number"></label>
             <label>Price ($)<input type="number" min="0" step="0.01" name="taskPrice" placeholder="optional"></label>
+            <label class="task-note">Note<textarea name="taskNote" rows="2" placeholder="Optional note"></textarea></label>
             <label>Category<select name="taskCategory">${categoryOptions}</select></label>
           </div>
           <div class="modal-actions">
@@ -4466,6 +4475,7 @@ function renderSettings(){
       const pnInput = form.querySelector('[name="taskPN"]');
       const linkInput = form.querySelector('[name="taskStore"]');
       const priceInput = form.querySelector('[name="taskPrice"]');
+      const noteInput = form.querySelector('[name="taskNote"]');
       if (pendingFromInventory.name && nameInput){
         nameInput.value = pendingFromInventory.name;
         requestAnimationFrame(()=>{
@@ -4481,6 +4491,9 @@ function renderSettings(){
       }
       if (pendingFromInventory.link && linkInput){
         linkInput.value = pendingFromInventory.link;
+      }
+      if (pendingFromInventory.note && noteInput){
+        noteInput.value = pendingFromInventory.note;
       }
       if (priceInput){
         if (pendingFromInventory.price != null && Number.isFinite(Number(pendingFromInventory.price))){
@@ -4507,8 +4520,10 @@ function renderSettings(){
     const pn = (data.get("taskPN")||"").toString().trim();
     const priceVal = data.get("taskPrice");
     const price = priceVal === null || priceVal === "" ? null : Number(priceVal);
+    const noteRaw = (data.get("taskNote")||"").toString();
+    const note = noteRaw.trim() ? noteRaw : "";
     const id = genId(name);
-    const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
+    const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, note, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
 
     let createdTask = null;
     if (mode === "interval"){
@@ -4651,7 +4666,7 @@ function renderSettings(){
       updateDueChip(holder, meta.task);
     }else if (key === "price"){
       meta.task.price = value == null ? null : Number(value);
-    }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition"){
+    }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
       meta.task[key] = target.value;
       if (key === "name"){ const label = holder.querySelector('.task-name'); if (label) label.textContent = target.value || "(unnamed task)"; }
       if (key === "condition"){ const chip = holder.querySelector('[data-chip-condition]'); if (chip) chip.textContent = target.value || "As required"; }
