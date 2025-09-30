@@ -179,6 +179,9 @@ function viewDashboard(){
           <div class="modal-grid">
             <label>Job name<input id="dashJobName" required placeholder="Job"></label>
             <label>Estimate (hrs)<input type="number" min="1" step="0.1" id="dashJobEstimate" required placeholder="e.g. 12"></label>
+            <label>Material<input id="dashJobMaterial" placeholder="Material"></label>
+            <label>Material cost ($)<input type="number" min="0" step="0.01" id="dashJobMaterialCost" placeholder="optional"></label>
+            <label>Material quantity<input type="number" min="0" step="0.01" id="dashJobMaterialQty" placeholder="optional"></label>
             <label>Start date<input type="date" id="dashJobStart" required></label>
             <label>Due date<input type="date" id="dashJobDue" required></label>
           </div>
