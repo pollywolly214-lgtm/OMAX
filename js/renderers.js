@@ -1666,6 +1666,7 @@ function renderDashboard(){
   const modal            = document.getElementById("dashboardAddModal");
   const closeBtn         = document.getElementById("dashboardModalClose");
   const taskForm         = document.getElementById("dashTaskForm");
+  const taskExistingForm = document.getElementById("dashTaskExistingForm");
   const downForm         = document.getElementById("dashDownForm");
   const jobForm          = document.getElementById("dashJobForm");
   const downList         = document.getElementById("dashDownList");
@@ -1682,12 +1683,13 @@ function renderDashboard(){
   const categorySelect   = document.getElementById("dashTaskCategory");
   const subtaskList      = document.getElementById("dashSubtaskList");
   const addSubtaskBtn    = document.getElementById("dashAddSubtask");
-  const taskVariantInputs= taskForm ? Array.from(taskForm.querySelectorAll('input[name="dashTaskVariant"]')) : [];
-  const taskExistingSection = taskForm?.querySelector('[data-task-existing-section]');
-  const taskNewSection   = taskForm?.querySelector('[data-task-new-section]');
+  const taskOptionStage  = modal?.querySelector('[data-task-option-stage]');
+  const taskOptionButtons= Array.from(modal?.querySelectorAll('[data-task-option]') || []);
+  const taskExistingSearchInput = document.getElementById("dashTaskExistingSearch");
+  const taskExistingSearchWrapper = taskExistingForm?.querySelector(".task-existing-search");
   const existingTaskSelect = document.getElementById("dashTaskExistingSelect");
-  const existingTaskEmpty  = taskForm?.querySelector('[data-task-existing-empty]');
-  const taskSubmitButton = taskForm?.querySelector('[data-task-submit]');
+  const existingTaskEmpty  = taskExistingForm?.querySelector('[data-task-existing-empty]');
+  const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
   const jobNameInput     = document.getElementById("dashJobName");
   const jobEstimateInput = document.getElementById("dashJobEstimate");
   const jobStartInput    = document.getElementById("dashJobStart");
@@ -1789,30 +1791,16 @@ function renderDashboard(){
     return metas;
   }
 
-  function currentTaskVariant(){
-    if (!Array.isArray(taskVariantInputs) || !taskVariantInputs.length) return "new";
-    const checked = taskVariantInputs.find(r => r.checked && !r.disabled);
-    if (checked) return checked.value;
-    const fallback = taskVariantInputs.find(r => !r.disabled);
-    return fallback ? fallback.value : "new";
-  }
+  let activeTaskVariant = null;
 
-  function syncTaskVariant(){
-    const variant = currentTaskVariant();
-    taskVariantInputs.forEach(radio => {
-      radio.checked = !radio.disabled && radio.value === variant;
-    });
-    if (taskExistingSection) taskExistingSection.hidden = variant !== "existing";
-    if (taskNewSection) taskNewSection.hidden = variant !== "new";
-    if (taskSubmitButton){
-      taskSubmitButton.textContent = variant === "existing" ? "Add to Calendar" : "Create Task";
-    }
-  }
-
-  function refreshTaskVariantUI(preferredVariant = null){
+  function refreshExistingTaskOptions(searchTerm = ""){
     const metas = gatherMaintenanceTaskMetas();
     const hasExisting = metas.length > 0;
-    if (existingTaskEmpty) existingTaskEmpty.hidden = hasExisting;
+    const normalized = (searchTerm || "").trim().toLowerCase();
+    const filtered = normalized
+      ? metas.filter(meta => meta.label.toLowerCase().includes(normalized))
+      : metas;
+
     if (existingTaskSelect){
       existingTaskSelect.innerHTML = "";
       if (!hasExisting){
@@ -1820,6 +1808,14 @@ function renderDashboard(){
         const opt = document.createElement("option");
         opt.value = "";
         opt.textContent = "No maintenance tasks saved yet";
+        opt.disabled = true;
+        opt.selected = true;
+        existingTaskSelect.appendChild(opt);
+      }else if (!filtered.length){
+        existingTaskSelect.disabled = true;
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No tasks match your search";
         opt.disabled = true;
         opt.selected = true;
         existingTaskSelect.appendChild(opt);
@@ -1831,7 +1827,7 @@ function renderDashboard(){
         placeholder.disabled = true;
         placeholder.selected = true;
         existingTaskSelect.appendChild(placeholder);
-        metas.forEach(meta => {
+        filtered.forEach(meta => {
           const opt = document.createElement("option");
           opt.value = String(meta.task.id);
           opt.textContent = meta.label;
@@ -1841,34 +1837,58 @@ function renderDashboard(){
         });
       }
     }
-    const existingRadio = taskVariantInputs.find(r => r.value === "existing");
-    const newRadio = taskVariantInputs.find(r => r.value === "new");
-    if (existingRadio){
-      existingRadio.disabled = !hasExisting;
-      if (!hasExisting) existingRadio.checked = false;
+
+    if (existingTaskEmpty) existingTaskEmpty.hidden = hasExisting;
+    if (existingTaskSearchEmpty){
+      const showSearchEmpty = hasExisting && !filtered.length && normalized.length > 0;
+      existingTaskSearchEmpty.hidden = !showSearchEmpty;
     }
-    if (preferredVariant){
-      taskVariantInputs.forEach(radio => {
-        if (!radio.disabled) radio.checked = radio.value === preferredVariant;
-      });
-    }else if (!taskVariantInputs.some(r => r.checked && !r.disabled)){
-      if (existingRadio && !existingRadio.disabled){
-        existingRadio.checked = true;
-      }else if (newRadio){
-        newRadio.checked = true;
+    if (taskExistingSearchWrapper){
+      taskExistingSearchWrapper.hidden = !hasExisting;
+    }
+    if (taskExistingSearchInput){
+      taskExistingSearchInput.disabled = !hasExisting;
+    }
+  }
+
+  function resetExistingTaskForm(){
+    if (taskExistingSearchInput) taskExistingSearchInput.value = "";
+    refreshExistingTaskOptions("");
+    if (existingTaskSelect){
+      existingTaskSelect.selectedIndex = 0;
+    }
+  }
+
+  function showTaskOptionStage(){
+    activeTaskVariant = null;
+    if (taskOptionStage) taskOptionStage.hidden = false;
+    if (taskExistingForm) taskExistingForm.hidden = true;
+    if (taskForm) taskForm.hidden = true;
+  }
+
+  function activateTaskVariant(variant){
+    const choice = variant === "existing" ? "existing" : "new";
+    activeTaskVariant = choice;
+    if (taskOptionStage) taskOptionStage.hidden = true;
+    if (taskExistingForm) taskExistingForm.hidden = choice !== "existing";
+    if (taskForm) taskForm.hidden = choice !== "new";
+    if (choice === "existing"){
+      const term = taskExistingSearchInput?.value || "";
+      refreshExistingTaskOptions(term);
+      if (existingTaskSelect){
+        existingTaskSelect.selectedIndex = 0;
+      }
+      if (taskExistingSearchInput && !taskExistingSearchInput.disabled){
+        taskExistingSearchInput.focus();
+      }else if (existingTaskSelect && !existingTaskSelect.disabled){
+        existingTaskSelect.focus();
       }
     }else{
-      const checked = taskVariantInputs.find(r => r.checked);
-      if (checked && checked.disabled){
-        checked.checked = false;
-        if (existingRadio && !existingRadio.disabled){
-          existingRadio.checked = true;
-        }else if (newRadio){
-          newRadio.checked = true;
-        }
+      syncTaskMode(taskTypeSelect?.value || "interval");
+      if (taskNameInput){
+        taskNameInput.focus();
       }
     }
-    syncTaskVariant();
   }
 
   function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
@@ -2194,7 +2214,8 @@ function renderDashboard(){
   function resetTaskForm(){
     taskForm?.reset();
     subtaskList?.replaceChildren();
-    refreshTaskVariantUI();
+    resetExistingTaskForm();
+    showTaskOptionStage();
     syncTaskMode(taskTypeSelect?.value || "interval");
   }
 
@@ -2205,9 +2226,7 @@ function renderDashboard(){
     });
     if (step === "task"){
       populateCategoryOptions();
-      refreshTaskVariantUI();
-      syncTaskVariant();
-      syncTaskMode(taskTypeSelect?.value || "interval");
+      resetTaskForm();
     }
     if (step === "downtime"){
       refreshDownTimeList();
@@ -2424,18 +2443,30 @@ function renderDashboard(){
         pendingGarnetEditId = null;
         resetGarnetForm();
       }
+      if (btn.closest('[data-step="task"]') && activeTaskVariant){
+        showTaskOptionStage();
+        return;
+      }
       showStep("picker");
     });
+  });
+
+  taskOptionButtons.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const variant = btn.getAttribute("data-task-option");
+      activateTaskVariant(variant === "existing" ? "existing" : "new");
+    });
+  });
+
+  taskExistingSearchInput?.addEventListener("input", ()=>{
+    refreshExistingTaskOptions(taskExistingSearchInput.value);
   });
 
   taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
   syncTaskMode(taskTypeSelect?.value || "interval");
   populateCategoryOptions();
-  refreshTaskVariantUI();
-
-  taskVariantInputs.forEach(radio => {
-    radio.addEventListener("change", ()=> syncTaskVariant());
-  });
+  resetExistingTaskForm();
+  showTaskOptionStage();
 
   addSubtaskBtn?.addEventListener("click", ()=>{
     const row = createSubtaskRow(taskTypeSelect?.value || "interval");
@@ -2445,36 +2476,6 @@ function renderDashboard(){
   taskForm?.addEventListener("submit", (e)=>{
     e.preventDefault();
     if (!taskForm) return;
-    const variant = currentTaskVariant();
-    if (variant === "existing"){
-      const selectedId = existingTaskSelect?.value;
-      if (!selectedId){ alert("Select a maintenance task to schedule."); return; }
-      const meta = findMaintenanceTaskById(selectedId);
-      if (!meta || !meta.task){
-        alert("Selected maintenance task could not be found.");
-        refreshTaskVariantUI();
-        return;
-      }
-      const task = meta.task;
-      const targetISO = addContextDateISO || ymd(new Date());
-      let message = "Maintenance task added";
-      if (task.mode === "interval"){
-        scheduleExistingIntervalTask(task, { dateISO: targetISO });
-        const parsed = parseDateLocal(targetISO);
-        const dateLabel = (parsed instanceof Date && !Number.isNaN(parsed.getTime()))
-          ? parsed.toLocaleDateString()
-          : targetISO;
-        message = `Scheduled "${task.name || "Task"}" for ${dateLabel}`;
-      }else{
-        message = "As-required task linked from Maintenance Settings";
-      }
-      setContextDate(targetISO);
-      saveCloudDebounced();
-      toast(message);
-      closeModal();
-      renderDashboard();
-      return;
-    }
     const name = (taskNameInput?.value || "").trim();
     if (!name){ alert("Task name is required."); return; }
     const mode = (taskTypeSelect?.value === "asreq") ? "asreq" : "interval";
@@ -2549,6 +2550,36 @@ function renderDashboard(){
 
     saveCloudDebounced();
     toast("Task added");
+    closeModal();
+    renderDashboard();
+  });
+
+  taskExistingForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    const selectedId = existingTaskSelect?.value;
+    if (!selectedId){ alert("Select a maintenance task to schedule."); return; }
+    const meta = findMaintenanceTaskById(selectedId);
+    if (!meta || !meta.task){
+      alert("Selected maintenance task could not be found.");
+      refreshExistingTaskOptions(taskExistingSearchInput?.value || "");
+      return;
+    }
+    const task = meta.task;
+    const targetISO = addContextDateISO || ymd(new Date());
+    let message = "Maintenance task added";
+    if (task.mode === "interval"){
+      scheduleExistingIntervalTask(task, { dateISO: targetISO });
+      const parsed = parseDateLocal(targetISO);
+      const dateLabel = (parsed instanceof Date && !Number.isNaN(parsed.getTime()))
+        ? parsed.toLocaleDateString()
+        : targetISO;
+      message = `Scheduled "${task.name || "Task"}" for ${dateLabel}`;
+    }else{
+      message = "As-required task linked from Maintenance Settings";
+    }
+    setContextDate(targetISO);
+    saveCloudDebounced();
+    toast(message);
     closeModal();
     renderDashboard();
   });
