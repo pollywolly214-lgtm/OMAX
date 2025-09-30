@@ -157,14 +157,37 @@ function unmarkCalendarTaskComplete(meta, dateISO){
   }
 
   if (mode === "interval"){
+    const defaultDaily = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+      ? Number(DAILY_HOURS)
+      : 8;
     const history = typeof ensureTaskManualHistory === "function"
       ? ensureTaskManualHistory(task)
       : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
-    const entry = history.find(item => item && normalizeDateKey(item.dateISO) === key);
-    if (entry && entry.status !== "scheduled"){
-      entry.status = "scheduled";
+    let entry = history.find(item => item && normalizeDateKey(item.dateISO) === key);
+    const nowIso = new Date().toISOString();
+    if (!entry){
+      entry = {
+        dateISO: key,
+        hoursAtEntry: null,
+        recordedAtISO: nowIso,
+        status: "scheduled",
+        source: "estimate",
+        estimatedDailyHours: defaultDaily
+      };
+      history.push(entry);
       changed = true;
+    }else{
+      if (entry.status !== "scheduled"){
+        entry.status = "scheduled";
+        changed = true;
+      }
+      if (entry.estimatedDailyHours == null && defaultDaily != null){
+        entry.estimatedDailyHours = defaultDaily;
+        changed = true;
+      }
+      entry.recordedAtISO = nowIso;
     }
+    history.sort((a,b)=> String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")));
     task.manualHistory = history;
     applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
   }
@@ -781,30 +804,59 @@ function renderCalendar(){
     const rawDates = Array.isArray(t.completedDates) ? t.completedDates : [];
     const set = new Set();
     rawDates.forEach(dateISO => {
-      const key = ymd(dateISO);
+      const key = normalizeDateKey(dateISO);
       if (key) set.add(key);
     });
-    if (set.size) completedByTask.set(String(t.id), set);
+    completedByTask.set(String(t.id), set);
   });
   intervalTasks.forEach(t => {
     if (!t) return;
-    const manualKey = t.calendarDateISO ? ymd(t.calendarDateISO) : null;
-    const completedKeys = completedByTask.get(String(t.id));
-    if (completedKeys){
-      completedKeys.forEach(dateKey => {
-        pushTaskEvent(t, dateKey, "completed");
-      });
+    const taskKey = String(t.id);
+    let completedKeys = completedByTask.get(taskKey);
+    if (!(completedKeys instanceof Set)){
+      completedKeys = new Set();
+      completedByTask.set(taskKey, completedKeys);
     }
-    if (manualKey && !(completedKeys && completedKeys.has(manualKey))){
-      pushTaskEvent(t, manualKey, "manual");
-    }
+    completedKeys.forEach(dateKey => {
+      if (!dateKey) return;
+      pushTaskEvent(t, dateKey, "completed");
+    });
+
+    const manualHistory = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(t)
+      : (Array.isArray(t.manualHistory) ? t.manualHistory : []);
+    const manualDates = new Set();
+    manualHistory.forEach(entry => {
+      if (!entry) return;
+      const entryKey = normalizeDateKey(entry.dateISO);
+      if (!entryKey) return;
+      const status = entry.status || "logged";
+      if (status === "completed"){
+        if (!completedKeys.has(entryKey)){
+          completedKeys.add(entryKey);
+          pushTaskEvent(t, entryKey, "completed");
+        }
+        return;
+      }
+      manualDates.add(entryKey);
+    });
+
+    const manualKey = normalizeDateKey(t.calendarDateISO);
+    if (manualKey) manualDates.add(manualKey);
+
+    manualDates.forEach(dateKey => {
+      if (!dateKey) return;
+      if (completedKeys.has(dateKey)) return;
+      pushTaskEvent(t, dateKey, "manual");
+    });
+
     const projections = projectIntervalDueDates(t, { monthsAhead: 3 });
     if (projections.length){
       projections.forEach(pred => {
-        const dueKey = pred?.dateISO ? ymd(pred.dateISO) : null;
+        const dueKey = normalizeDateKey(pred?.dateISO);
         if (!dueKey) return;
-        if (completedKeys && completedKeys.has(dueKey)) return;
-        if (manualKey && manualKey === dueKey && !(completedKeys && completedKeys.has(dueKey))){
+        if (completedKeys.has(dueKey)) return;
+        if (manualKey && manualKey === dueKey && !completedKeys.has(dueKey)){
           return;
         }
         pushTaskEvent(t, dueKey, "due");
@@ -814,9 +866,9 @@ function renderCalendar(){
 
     const nd = nextDue(t);
     if (!nd) return;
-    const dueKey = ymd(nd.due);
+    const dueKey = normalizeDateKey(nd.due);
     if (!dueKey) return;
-    if (completedKeys && completedKeys.has(dueKey)) return;
+    if (completedKeys.has(dueKey)) return;
     if (!manualKey || manualKey !== dueKey){
       pushTaskEvent(t, dueKey, "due");
     }
