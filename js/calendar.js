@@ -83,17 +83,78 @@ function completeTask(taskId){
   route();
 }
 
+function removeTaskCompletion(taskId, dateKey){
+  if (!taskId || !dateKey) return false;
+  const normalizedKey = ymd(dateKey);
+  if (!normalizedKey) return false;
+  const t = tasksInterval.find(x => x.id === taskId);
+  if (!t) return false;
+  if (!Array.isArray(t.completedDates)) t.completedDates = [];
+  const idx = t.completedDates.findIndex(entry => ymd(entry) === normalizedKey);
+  if (idx < 0) return false;
+  t.completedDates.splice(idx, 1);
+  saveCloudDebounced();
+  toast("Completion removed");
+  route();
+  return true;
+}
+
+function editTaskCompletion(taskId, dateKey){
+  if (!taskId || !dateKey) return false;
+  const normalizedOld = ymd(dateKey);
+  if (!normalizedOld) return false;
+  const t = tasksInterval.find(x => x.id === taskId);
+  if (!t) return false;
+  if (!Array.isArray(t.completedDates)) t.completedDates = [];
+  const idx = t.completedDates.findIndex(entry => ymd(entry) === normalizedOld);
+  if (idx < 0) return false;
+  const promptLabel = "Enter a new completion date (YYYY-MM-DD or MM/DD/YYYY)";
+  const nextRaw = window.prompt ? window.prompt(promptLabel, normalizedOld) : normalizedOld;
+  if (nextRaw == null) return false;
+  const parsed = parseDateLocal(nextRaw);
+  if (!parsed){
+    toast("Could not understand that date");
+    return false;
+  }
+  const normalizedNext = ymd(parsed);
+  if (!normalizedNext){
+    toast("Could not normalize the selected date");
+    return false;
+  }
+  const existingIdx = t.completedDates.findIndex(entry => ymd(entry) === normalizedNext);
+  if (existingIdx >= 0 && existingIdx !== idx){
+    toast("This task is already marked complete on that date");
+    return false;
+  }
+  t.completedDates[idx] = normalizedNext;
+  t.completedDates.sort();
+  saveCloudDebounced();
+  toast("Completion updated");
+  route();
+  return true;
+}
+
 function showTaskBubble(taskId, anchor){
   const t = tasksInterval.find(x => x.id === taskId);
   if (!t) return;
   const nd = nextDue(t);
   const b  = makeBubble(anchor);
+  const status = anchor?.dataset?.calStatus || "";
+  const dateKey = anchor?.dataset?.calDate || "";
+  const completedEvent = status === "completed" && dateKey;
+  let completionInfoHtml = "";
+  if (completedEvent){
+    const parsed = parseDateLocal(dateKey);
+    const label = parsed ? parsed.toLocaleDateString() : dateKey;
+    completionInfoHtml = `<div class="bubble-kv"><span>Completed on:</span><span>${escapeHtml(label)}</span></div>`;
+  }
   b.innerHTML = `
     <div class="bubble-title">${t.name}</div>
     <div class="bubble-kv"><span>Interval:</span><span>${t.interval} hrs</span></div>
     <div class="bubble-kv"><span>Last serviced:</span><span>${nd ? nd.since.toFixed(0) : "—"} hrs ago</span></div>
     <div class="bubble-kv"><span>Remain:</span><span>${nd ? nd.remain.toFixed(0) : "—"} hrs</span></div>
     <div class="bubble-kv"><span>Cost:</span><span>${t.price != null ? ("$" + t.price) : "—"}</span></div>
+    ${completionInfoHtml}
     ${(t.manualLink || t.storeLink) ?
       `<div class="bubble-kv"><span>Links:</span><span>
         ${t.manualLink ? `<a href="${t.manualLink}" target="_blank" rel="noopener">Manual</a>` : ``}
@@ -104,7 +165,13 @@ function showTaskBubble(taskId, anchor){
       <button data-bbl-complete="${t.id}">Complete</button>
       <button class="danger" data-bbl-remove="${t.id}">Remove</button>
       <button data-bbl-edit="${t.id}">Edit settings</button>
-    </div>`;
+    </div>
+    ${completedEvent ? `
+      <div class="bubble-actions">
+        <button data-bbl-completion-edit="${t.id}" data-bbl-completion-date="${escapeHtml(dateKey)}">Edit completion</button>
+        <button class="danger" data-bbl-completion-remove="${t.id}" data-bbl-completion-date="${escapeHtml(dateKey)}">Remove completion</button>
+      </div>
+    ` : ``}`;
 
   // Action buttons
   b.querySelector("[data-bbl-complete]")?.addEventListener("click", ()=>{
@@ -124,6 +191,24 @@ function showTaskBubble(taskId, anchor){
   b.querySelector("[data-bbl-edit]")?.addEventListener("click", ()=>{
     hideBubble(); openSettingsAndReveal(taskId);
   });
+  if (completedEvent){
+    const editBtn = b.querySelector("[data-bbl-completion-edit]");
+    editBtn?.addEventListener("click", ()=>{
+      const target = editBtn.getAttribute("data-bbl-completion-date") || dateKey;
+      hideBubble();
+      editTaskCompletion(taskId, target);
+    });
+    const removeBtn = b.querySelector("[data-bbl-completion-remove]");
+    removeBtn?.addEventListener("click", ()=>{
+      const target = removeBtn.getAttribute("data-bbl-completion-date") || dateKey;
+      const parsed = parseDateLocal(target);
+      const label = parsed ? parsed.toLocaleDateString() : target;
+      const shouldRemove = window.confirm ? window.confirm(`Remove completion logged on ${label}?`) : true;
+      if (!shouldRemove) return;
+      hideBubble();
+      removeTaskCompletion(taskId, target);
+    });
+  }
 
   // NEW: click anywhere on the bubble (except buttons/links) → open Settings for this item
   b.addEventListener("click", (e)=>{
@@ -522,6 +607,8 @@ function renderCalendar(){
         if (ev.status === "completed") cls += " is-complete";
         chip.className = cls;
         chip.dataset.calTask = ev.id;
+        chip.dataset.calStatus = ev.status || "";
+        chip.dataset.calDate = key || "";
         let label = ev.name;
         if (ev.status === "completed") label += " (completed)";
         else if (ev.status === "manual") label += " (scheduled)";
