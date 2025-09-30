@@ -685,6 +685,39 @@ function projectIntervalDueDates(task, options = {}){
   const today = new Date(); today.setHours(0,0,0,0);
   const todayTime = today.getTime();
 
+  const excludeListRaw = options.excludeDates;
+  const excludeSet = new Set();
+  const addExclude = (value)=>{
+    const key = normalizeDateKey(value);
+    if (key) excludeSet.add(key);
+  };
+  if (excludeListRaw && typeof excludeListRaw.forEach === "function"){
+    try {
+      excludeListRaw.forEach((value, maybeKey)=>{
+        if (value == null && maybeKey != null){
+          addExclude(maybeKey);
+        }else{
+          addExclude(value);
+        }
+      });
+    } catch (err){
+      if (typeof console !== "undefined" && console && typeof console.warn === "function"){
+        console.warn("Failed to iterate excludeDates via forEach", err);
+      }
+    }
+  } else if (excludeListRaw && typeof excludeListRaw[Symbol.iterator] === "function"){
+    for (const value of excludeListRaw){
+      addExclude(value);
+    }
+  } else if (excludeListRaw && typeof excludeListRaw === "object"){
+    Object.keys(excludeListRaw).forEach(key => addExclude(key));
+  }
+
+  const minOccurrencesRaw = Number(options.minOccurrences);
+  const minOccurrences = Number.isFinite(minOccurrencesRaw) && minOccurrencesRaw > 0
+    ? Math.floor(minOccurrencesRaw)
+    : 6;
+
   const toDayStart = (value)=>{
     const key = normalizeDateKey(value);
     if (!key) return null;
@@ -710,6 +743,7 @@ function projectIntervalDueDates(task, options = {}){
 
   let baselineEntry = null;
   let futureBaselineEntry = null;
+  let futureBaselineTime = Infinity;
   for (let i = manualHistory.length - 1; i >= 0; i--){
     const entry = manualHistory[i];
     if (!entry || typeof entry.dateISO !== "string") continue;
@@ -720,8 +754,9 @@ function projectIntervalDueDates(task, options = {}){
       baselineEntry = entry;
       break;
     }
-    if (!futureBaselineEntry){
+    if (entryTime < futureBaselineTime){
       futureBaselineEntry = entry;
+      futureBaselineTime = entryTime;
     }
   }
   if (!baselineEntry) baselineEntry = futureBaselineEntry;
@@ -796,17 +831,30 @@ function projectIntervalDueDates(task, options = {}){
     const key = ymd(dueDate);
     if (!key || seen.has(key)) continue;
     seen.add(key);
+    if (excludeSet.has(key)){
+      if (dueDate > horizon && dueDate > horizonAnchor && events.length >= minOccurrences){
+        break;
+      }
+      continue;
+    }
     events.push({ dateISO: key, dueDate });
-    if (dueDate > horizon && dueDate > horizonAnchor){
+    if (dueDate > horizon && dueDate > horizonAnchor && events.length >= minOccurrences){
       break;
     }
   }
 
   if (!events.length){
-    const fallbackDue = new Date(baseTime + intervalMs);
-    fallbackDue.setHours(0,0,0,0);
-    const key = ymd(fallbackDue);
-    if (key) events.push({ dateISO: key, dueDate: fallbackDue });
+    let attempt = 1;
+    while (attempt <= maxIterations){
+      const fallbackDue = new Date(baseTime + (attempt * intervalMs));
+      fallbackDue.setHours(0,0,0,0);
+      const key = ymd(fallbackDue);
+      if (key && !excludeSet.has(key)){
+        events.push({ dateISO: key, dueDate: fallbackDue });
+        break;
+      }
+      attempt++;
+    }
   }
 
   events.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
@@ -897,7 +945,13 @@ function renderCalendar(){
       pushTaskEvent(t, dateKey, "manual");
     });
 
-    const projections = projectIntervalDueDates(t, { monthsAhead: 3 });
+    const skipDates = new Set(completedKeys);
+    manualDates.forEach(dateKey => skipDates.add(dateKey));
+    const projections = projectIntervalDueDates(t, {
+      monthsAhead: 3,
+      excludeDates: skipDates,
+      minOccurrences: 6
+    });
     if (projections.length){
       projections.forEach(pred => {
         const dueKey = normalizeDateKey(pred?.dateISO);
@@ -992,7 +1046,32 @@ function renderCalendar(){
   }
 
   const today = new Date(); today.setHours(0,0,0,0);
-  for (let m=0; m<3; m++){
+  let monthsToRender = 3;
+  const dueKeys = Object.keys(dueMap);
+  if (dueKeys.length){
+    let latest = null;
+    dueKeys.forEach(key => {
+      const normalized = normalizeDateKey(key);
+      if (!normalized) return;
+      if (!latest || normalized > latest){
+        latest = normalized;
+      }
+    });
+    if (latest){
+      const latestDate = parseDateLocal(latest);
+      if (latestDate instanceof Date && !Number.isNaN(latestDate.getTime())){
+        latestDate.setHours(0,0,0,0);
+        const diffMonths = (latestDate.getFullYear() - today.getFullYear()) * 12
+          + (latestDate.getMonth() - today.getMonth());
+        const required = diffMonths + 1;
+        if (Number.isFinite(required) && required > monthsToRender){
+          monthsToRender = Math.min(required, 12);
+        }
+      }
+    }
+  }
+
+  for (let m=0; m<monthsToRender; m++){
     const first = new Date(today.getFullYear(), today.getMonth()+m, 1);
     const last  = new Date(today.getFullYear(), today.getMonth()+m+1, 0);
 
