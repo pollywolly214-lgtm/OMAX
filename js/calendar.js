@@ -119,6 +119,7 @@ function showTaskBubble(taskId, anchor){
       console.warn("Failed to record deleted task from calendar", err);
     }
     tasksInterval = tasksInterval.filter(x => x.id !== taskId);
+    window.tasksInterval = tasksInterval;
     saveCloudDebounced(); toast("Removed"); hideBubble(); route();
   });
   b.querySelector("[data-bbl-edit]")?.addEventListener("click", ()=>{
@@ -231,7 +232,7 @@ function showJobBubble(jobId, anchor){
       } catch (err) {
         console.warn("Failed to record deleted job from calendar", err);
       }
-      cuttingJobs = cuttingJobs.filter(x=>String(x.id)!==String(j.id)); saveCloudDebounced(); toast("Removed"); hideBubble(); route();
+      cuttingJobs = cuttingJobs.filter(x=>String(x.id)!==String(j.id)); window.cuttingJobs = cuttingJobs; saveCloudDebounced(); toast("Removed"); hideBubble(); route();
     });
     b.querySelector("[data-bbl-edit-job]")?.addEventListener("click", ()=>{ hideBubble(); openJobsEditor(j.id); });
   }catch(err){
