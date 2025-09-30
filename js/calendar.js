@@ -383,7 +383,32 @@ function renderCalendar(){
       cell.innerHTML = `<div class="date">${day}</div>`;
       const key = ymd(date);
       cell.dataset.dateIso = key;
-      if (downSet.has(key)) cell.classList.add("downtime");
+      if (downSet.has(key)){
+        cell.classList.add("downtime");
+        cell.dataset.calDown = key;
+        cell.addEventListener("click", (event)=>{
+          if (!cell.classList.contains("downtime")) return;
+          if (event.target.closest(".day-add-bubble")) return;
+          if (event.target.closest("[data-cal-task]")) return;
+          if (event.target.closest("[data-cal-job]")) return;
+          if (event.target.closest("[data-cal-garnet]")) return;
+          const iso = cell.dataset.dateIso;
+          if (!iso) return;
+          const removeFn = typeof window.dashboardRemoveDownTime === "function"
+            ? window.dashboardRemoveDownTime
+            : null;
+          if (!removeFn) return;
+          const parsed = new Date(`${iso}T00:00:00`);
+          const label = isNaN(parsed.getTime())
+            ? iso
+            : parsed.toLocaleDateString();
+          const shouldRemove = window.confirm
+            ? window.confirm(`Remove down time scheduled for ${label}?`)
+            : true;
+          if (!shouldRemove) return;
+          removeFn(iso);
+        });
+      }
       (dueMap[key]||[]).forEach(ev=>{
         const chip = document.createElement("div"); chip.className="event generic cal-task"; chip.dataset.calTask = ev.id; chip.textContent = `${ev.name} (due)`; cell.appendChild(chip);
       });
