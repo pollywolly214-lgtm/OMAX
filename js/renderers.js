@@ -6414,11 +6414,18 @@ function renderJobs(){
     e.preventDefault();
     const name  = document.getElementById("jobName").value.trim();
     const est   = Number(document.getElementById("jobEst").value);
+    const material = document.getElementById("jobMaterial")?.value.trim() || "";
+    const materialCostRaw = document.getElementById("jobMaterialCost")?.value ?? "";
+    const materialQtyRaw = document.getElementById("jobMaterialQty")?.value ?? "";
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
+    const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
+    const materialQty = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
     if (!name || !isFinite(est) || est<=0 || !start || !due){ toast("Fill job fields."); return; }
+    if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
+    if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material:"", notes:"", manualLogs:[], files:attachments });
+    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, notes:"", manualLogs:[], files:attachments });
     pendingNewJobFiles.length = 0;
     saveCloudDebounced(); renderJobs();
   });
