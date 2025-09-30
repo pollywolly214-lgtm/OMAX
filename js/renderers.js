@@ -2286,7 +2286,7 @@ function renderDashboard(){
     if (mode === "interval"){
       let interval = Number(taskIntervalInput?.value);
       if (!isFinite(interval) || interval <= 0) interval = 8;
-      const task = Object.assign({}, base, { mode:"interval", interval, sinceBase:0, anchorTotal:null });
+      const task = Object.assign({}, base, { mode:"interval", interval, sinceBase:0, anchorTotal:null, completedDates: [] });
       const curHours = getCurrentMachineHours();
       const baselineHours = parseBaselineHours(taskLastInput?.value);
       applyIntervalBaseline(task, { baselineHours, currentHours: curHours });
@@ -2322,7 +2322,7 @@ function renderDashboard(){
         if (!isFinite(subInterval) || subInterval <= 0){
           subInterval = isFinite(parentInterval) && parentInterval > 0 ? parentInterval : 8;
         }
-        const subTask = Object.assign({}, subBase, { mode:"interval", interval: subInterval, sinceBase:0, anchorTotal:null });
+        const subTask = Object.assign({}, subBase, { mode:"interval", interval: subInterval, sinceBase:0, anchorTotal:null, completedDates: [] });
         const curHours = getCurrentMachineHours();
         const lastField = row.querySelector("[data-subtask-last]");
         const baselineHours = parseBaselineHours(lastField?.value);
@@ -3548,6 +3548,7 @@ function renderSettings(){
     task.mode = type;
     if (task.parentTask == null) task.parentTask = null;
     if (task.cat == null) task.cat = task.cat ?? null;
+    if (!Array.isArray(task.completedDates)) task.completedDates = [];
   }
 
   const taskEntries = [];
@@ -4211,7 +4212,7 @@ function renderSettings(){
     if (mode === "interval"){
       const intervalVal = data.get("taskInterval");
       const interval = intervalVal === null || intervalVal === "" ? 8 : Number(intervalVal);
-      const task = Object.assign(base, { mode:"interval", interval: isFinite(interval) && interval>0 ? interval : 8, sinceBase:0, anchorTotal:null });
+      const task = Object.assign(base, { mode:"interval", interval: isFinite(interval) && interval>0 ? interval : 8, sinceBase:0, anchorTotal:null, completedDates: [] });
       const curHours = getCurrentMachineHours();
       const baselineHours = parseBaselineHours(data.get("taskLastServiced"));
       applyIntervalBaseline(task, { baselineHours, currentHours: curHours });
@@ -4439,13 +4440,27 @@ function renderSettings(){
     const completeBtn = e.target.closest('.btn-complete');
     if (completeBtn){
       const id = completeBtn.getAttribute('data-complete');
-      const meta = findTaskMeta(id);
-      if (!meta || meta.mode !== 'interval') return;
-      const cur = (typeof currentTotal === 'function') ? currentTotal() : null;
-      meta.task.anchorTotal = cur!=null ? cur : 0;
-      meta.task.sinceBase = 0;
-      persist();
-      renderSettings();
+      if (!id) return;
+      if (typeof completeTask === 'function'){
+        completeTask(id);
+      } else {
+        const meta = findTaskMeta(id);
+        if (!meta || meta.mode !== 'interval') return;
+        const cur = (typeof currentTotal === 'function') ? currentTotal() : null;
+        meta.task.anchorTotal = cur!=null ? cur : 0;
+        meta.task.sinceBase = 0;
+        const key = typeof ymd === 'function' ? ymd(new Date()) : null;
+        if (key){
+          if (!Array.isArray(meta.task.completedDates)) meta.task.completedDates = [];
+          if (!meta.task.completedDates.includes(key)){
+            meta.task.completedDates.push(key);
+            meta.task.completedDates.sort();
+          }
+        }
+        persist();
+        renderSettings();
+      }
+      return;
     }
   });
 
