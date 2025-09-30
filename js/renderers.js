@@ -1666,6 +1666,7 @@ function renderDashboard(){
   const modal            = document.getElementById("dashboardAddModal");
   const closeBtn         = document.getElementById("dashboardModalClose");
   const taskForm         = document.getElementById("dashTaskForm");
+  const taskExistingForm = document.getElementById("dashTaskExistingForm");
   const downForm         = document.getElementById("dashDownForm");
   const jobForm          = document.getElementById("dashJobForm");
   const downList         = document.getElementById("dashDownList");
@@ -1683,6 +1684,13 @@ function renderDashboard(){
   const taskDateInput    = document.getElementById("dashTaskDate");
   const subtaskList      = document.getElementById("dashSubtaskList");
   const addSubtaskBtn    = document.getElementById("dashAddSubtask");
+  const taskOptionStage  = modal?.querySelector('[data-task-option-stage]');
+  const taskOptionButtons= Array.from(modal?.querySelectorAll('[data-task-option]') || []);
+  const taskExistingSearchInput = document.getElementById("dashTaskExistingSearch");
+  const taskExistingSearchWrapper = taskExistingForm?.querySelector(".task-existing-search");
+  const existingTaskSelect = document.getElementById("dashTaskExistingSelect");
+  const existingTaskEmpty  = taskExistingForm?.querySelector('[data-task-existing-empty]');
+  const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
   const jobNameInput     = document.getElementById("dashJobName");
   const jobEstimateInput = document.getElementById("dashJobEstimate");
   const jobStartInput    = document.getElementById("dashJobStart");
@@ -1703,6 +1711,222 @@ function renderDashboard(){
   let addContextDateISO  = null;
   let editingGarnetId    = null;
   let pendingGarnetEditId = null;
+
+  function findMaintenanceTaskById(id){
+    if (id == null) return null;
+    const lookup = String(id);
+    let task = tasksInterval.find(item => item && String(item.id) === lookup);
+    if (task) return { task, list: "interval" };
+    task = tasksAsReq.find(item => item && String(item.id) === lookup);
+    if (task) return { task, list: "asreq" };
+    return null;
+  }
+
+  function gatherMaintenanceTaskMetas(){
+    const metas = [];
+    const all = [];
+    if (Array.isArray(tasksInterval)){
+      tasksInterval.forEach(task => {
+        if (!task || task.id == null) return;
+        all.push({ task, list: "interval" });
+      });
+    }
+    if (Array.isArray(tasksAsReq)){
+      tasksAsReq.forEach(task => {
+        if (!task || task.id == null) return;
+        all.push({ task, list: "asreq" });
+      });
+    }
+    if (!all.length) return metas;
+
+    const byId = new Map();
+    all.forEach(meta => {
+      byId.set(String(meta.task.id), meta.task);
+    });
+
+    const folderById = new Map();
+    if (Array.isArray(window.settingsFolders)){
+      window.settingsFolders.forEach(folder => {
+        if (!folder || folder.id == null) return;
+        folderById.set(String(folder.id), folder);
+      });
+    }
+
+    const folderLabelCache = new Map();
+    const resolveFolderPath = (catId)=>{
+      if (catId == null) return "";
+      const key = String(catId);
+      if (folderLabelCache.has(key)) return folderLabelCache.get(key);
+      let current = folderById.get(key);
+      const visited = new Set();
+      const parts = [];
+      while (current && current.id != null && !visited.has(String(current.id))){
+        if (current.name) parts.unshift(current.name);
+        visited.add(String(current.id));
+        if (current.parent == null) break;
+        current = folderById.get(String(current.parent));
+      }
+      const label = parts.join(" › ");
+      folderLabelCache.set(key, label);
+      return label;
+    };
+
+    all.forEach(meta => {
+      const task = meta.task;
+      const pieces = [];
+      pieces.push(task.mode === "asreq" ? "As req." : "Interval");
+      pieces.push("•");
+      const nameParts = [];
+      if (task.parentTask != null){
+        const parent = byId.get(String(task.parentTask));
+        if (parent && parent.name) nameParts.push(parent.name);
+      }
+      nameParts.push(task.name || "Untitled task");
+      pieces.push(nameParts.join(" › "));
+      const folderLabel = resolveFolderPath(task.cat);
+      const label = folderLabel ? `${pieces.join(" ")} (${folderLabel})` : pieces.join(" ");
+      metas.push({ task, list: meta.list, label });
+    });
+
+    metas.sort((a,b)=> a.label.localeCompare(b.label));
+    return metas;
+  }
+
+  let activeTaskVariant = null;
+
+  function refreshExistingTaskOptions(searchTerm = ""){
+    const metas = gatherMaintenanceTaskMetas();
+    const hasExisting = metas.length > 0;
+    const normalized = (searchTerm || "").trim().toLowerCase();
+    const filtered = normalized
+      ? metas.filter(meta => meta.label.toLowerCase().includes(normalized))
+      : metas;
+
+    if (existingTaskSelect){
+      existingTaskSelect.innerHTML = "";
+      if (!hasExisting){
+        existingTaskSelect.disabled = true;
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No maintenance tasks saved yet";
+        opt.disabled = true;
+        opt.selected = true;
+        existingTaskSelect.appendChild(opt);
+      }else if (!filtered.length){
+        existingTaskSelect.disabled = true;
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No tasks match your search";
+        opt.disabled = true;
+        opt.selected = true;
+        existingTaskSelect.appendChild(opt);
+      }else{
+        existingTaskSelect.disabled = false;
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Select a maintenance task…";
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        existingTaskSelect.appendChild(placeholder);
+        filtered.forEach(meta => {
+          const opt = document.createElement("option");
+          opt.value = String(meta.task.id);
+          opt.textContent = meta.label;
+          opt.dataset.list = meta.list;
+          opt.dataset.mode = meta.task.mode;
+          existingTaskSelect.appendChild(opt);
+        });
+      }
+    }
+
+    if (existingTaskEmpty) existingTaskEmpty.hidden = hasExisting;
+    if (existingTaskSearchEmpty){
+      const showSearchEmpty = hasExisting && !filtered.length && normalized.length > 0;
+      existingTaskSearchEmpty.hidden = !showSearchEmpty;
+    }
+    if (taskExistingSearchWrapper){
+      taskExistingSearchWrapper.hidden = !hasExisting;
+    }
+    if (taskExistingSearchInput){
+      taskExistingSearchInput.disabled = !hasExisting;
+    }
+  }
+
+  function resetExistingTaskForm(){
+    if (taskExistingSearchInput) taskExistingSearchInput.value = "";
+    refreshExistingTaskOptions("");
+    if (existingTaskSelect){
+      existingTaskSelect.selectedIndex = 0;
+    }
+  }
+
+  function showTaskOptionStage(){
+    activeTaskVariant = null;
+    if (taskOptionStage) taskOptionStage.hidden = false;
+    if (taskExistingForm) taskExistingForm.hidden = true;
+    if (taskForm) taskForm.hidden = true;
+  }
+
+  function activateTaskVariant(variant){
+    const choice = variant === "existing" ? "existing" : "new";
+    activeTaskVariant = choice;
+    if (taskOptionStage) taskOptionStage.hidden = true;
+    if (taskExistingForm) taskExistingForm.hidden = choice !== "existing";
+    if (taskForm) taskForm.hidden = choice !== "new";
+    if (choice === "existing"){
+      const term = taskExistingSearchInput?.value || "";
+      refreshExistingTaskOptions(term);
+      if (existingTaskSelect){
+        existingTaskSelect.selectedIndex = 0;
+      }
+      if (taskExistingSearchInput && !taskExistingSearchInput.disabled){
+        taskExistingSearchInput.focus();
+      }else if (existingTaskSelect && !existingTaskSelect.disabled){
+        existingTaskSelect.focus();
+      }
+    }else{
+      syncTaskMode(taskTypeSelect?.value || "interval");
+      syncTaskDateInput();
+      if (taskNameInput){
+        taskNameInput.focus();
+      }
+    }
+  }
+
+  function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
+    if (!task || task.mode !== "interval") return false;
+    const interval = Number(task.interval);
+    if (!Number.isFinite(interval) || interval <= 0) return false;
+    let baselineHours = Number(task.sinceBase);
+    if (!Number.isFinite(baselineHours) || baselineHours < 0){
+      baselineHours = null;
+    }
+    let targetISO = dateISO;
+    if (!targetISO){
+      targetISO = ymd(new Date());
+    }
+    if (targetISO){
+      const targetDate = parseDateLocal(targetISO);
+      if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        targetDate.setHours(0,0,0,0);
+        const diffMs = targetDate.getTime() - today.getTime();
+        const days = Math.max(0, Math.round(diffMs / (24*60*60*1000)));
+        const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+          ? Number(DAILY_HOURS)
+          : 8;
+        let remainHours = days * hoursPerDay;
+        if (!Number.isFinite(remainHours) || remainHours < 0) remainHours = 0;
+        if (remainHours > interval) remainHours = interval;
+        baselineHours = interval - remainHours;
+        if (!Number.isFinite(baselineHours) || baselineHours < 0) baselineHours = 0;
+      }
+    }
+    task.calendarDateISO = targetISO || null;
+    applyIntervalBaseline(task, { baselineHours, currentHours: getCurrentMachineHours() });
+    return true;
+  }
 
   function syncTaskDateInput(){
     if (!taskDateInput) return;
@@ -2006,6 +2230,8 @@ function renderDashboard(){
   function resetTaskForm(){
     taskForm?.reset();
     subtaskList?.replaceChildren();
+    resetExistingTaskForm();
+    showTaskOptionStage();
     syncTaskMode(taskTypeSelect?.value || "interval");
     syncTaskDateInput();
   }
@@ -2017,8 +2243,7 @@ function renderDashboard(){
     });
     if (step === "task"){
       populateCategoryOptions();
-      syncTaskMode(taskTypeSelect?.value || "interval");
-      syncTaskDateInput();
+      resetTaskForm();
     }
     if (step === "downtime"){
       refreshDownTimeList();
@@ -2242,14 +2467,31 @@ function renderDashboard(){
         pendingGarnetEditId = null;
         resetGarnetForm();
       }
+      if (btn.closest('[data-step="task"]') && activeTaskVariant){
+        showTaskOptionStage();
+        return;
+      }
       showStep("picker");
     });
+  });
+
+  taskOptionButtons.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const variant = btn.getAttribute("data-task-option");
+      activateTaskVariant(variant === "existing" ? "existing" : "new");
+    });
+  });
+
+  taskExistingSearchInput?.addEventListener("input", ()=>{
+    refreshExistingTaskOptions(taskExistingSearchInput.value);
   });
 
   taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
   syncTaskMode(taskTypeSelect?.value || "interval");
   syncTaskDateInput();
   populateCategoryOptions();
+  resetExistingTaskForm();
+  showTaskOptionStage();
 
   addSubtaskBtn?.addEventListener("click", ()=>{
     const row = createSubtaskRow(taskTypeSelect?.value || "interval");
@@ -2270,7 +2512,9 @@ function renderDashboard(){
     const catId  = (categorySelect?.value || "").trim() || null;
     const id     = genId(name);
     const rawDate = (taskDateInput?.value || "").trim();
-    const dateISO = rawDate ? ymd(rawDate) : null;
+    const dateISO = rawDate ? ymd(rawDate) : "";
+    const targetISO = dateISO || addContextDateISO || ymd(new Date());
+    const calendarDateISO = targetISO || null;
     const base = {
       id,
       name,
@@ -2281,8 +2525,9 @@ function renderDashboard(){
       cat: catId,
       parentTask: null,
       order: ++window._maintOrderCounter,
-      calendarDateISO: dateISO || null
+      calendarDateISO
     };
+    let message = "Task added";
     if (mode === "interval"){
       let interval = Number(taskIntervalInput?.value);
       if (!isFinite(interval) || interval <= 0) interval = 8;
@@ -2291,10 +2536,17 @@ function renderDashboard(){
       const baselineHours = parseBaselineHours(taskLastInput?.value);
       applyIntervalBaseline(task, { baselineHours, currentHours: curHours });
       tasksInterval.unshift(task);
+      scheduleExistingIntervalTask(task, { dateISO: targetISO });
+      const parsed = parseDateLocal(targetISO);
+      const dateLabel = (parsed instanceof Date && !Number.isNaN(parsed.getTime()))
+        ? parsed.toLocaleDateString()
+        : targetISO;
+      message = `Scheduled "${task.name || "Task"}" for ${dateLabel}`;
     }else{
       const condition = (taskConditionInput?.value || "").trim() || "As required";
       const task = Object.assign({}, base, { mode:"asreq", condition });
       tasksAsReq.unshift(task);
+      message = "As-required task added to Maintenance Settings";
     }
 
     const parentInterval = Number(taskIntervalInput?.value);
@@ -2314,7 +2566,7 @@ function renderDashboard(){
         cat: catId,
         parentTask: id,
         order: ++window._maintOrderCounter,
-        calendarDateISO: dateISO || null
+        calendarDateISO
       };
       if (subMode === "interval"){
         const intervalField = row.querySelector("[data-subtask-interval]");
@@ -2335,10 +2587,50 @@ function renderDashboard(){
       }
     });
 
+    setContextDate(calendarDateISO);
     saveCloudDebounced();
-    toast("Task added");
+    toast(message);
     closeModal();
     renderDashboard();
+    const hash = (location.hash || "#").toLowerCase();
+    if (hash.startsWith("#/costs")){
+      renderCosts();
+    }
+  });
+
+  taskExistingForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    const selectedId = existingTaskSelect?.value;
+    if (!selectedId){ alert("Select a maintenance task to schedule."); return; }
+    const meta = findMaintenanceTaskById(selectedId);
+    if (!meta || !meta.task){
+      alert("Selected maintenance task could not be found.");
+      refreshExistingTaskOptions(taskExistingSearchInput?.value || "");
+      return;
+    }
+    const task = meta.task;
+    const targetISO = addContextDateISO || ymd(new Date());
+    let message = "Maintenance task added";
+    if (task.mode === "interval"){
+      scheduleExistingIntervalTask(task, { dateISO: targetISO });
+      const parsed = parseDateLocal(targetISO);
+      const dateLabel = (parsed instanceof Date && !Number.isNaN(parsed.getTime()))
+        ? parsed.toLocaleDateString()
+        : targetISO;
+      message = `Scheduled "${task.name || "Task"}" for ${dateLabel}`;
+    }else{
+      task.calendarDateISO = targetISO || null;
+      message = "As-required task linked from Maintenance Settings";
+    }
+    setContextDate(targetISO);
+    saveCloudDebounced();
+    toast(message);
+    closeModal();
+    renderDashboard();
+    const hash = (location.hash || "#").toLowerCase();
+    if (hash.startsWith("#/costs")){
+      renderCosts();
+    }
   });
 
   downForm?.addEventListener("submit", (e)=>{
