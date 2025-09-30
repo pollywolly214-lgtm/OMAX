@@ -1622,16 +1622,21 @@ function filterInventoryItems(term){
 
 function inventoryRowsHTML(list){
   if (!Array.isArray(list) || !list.length){
-    return `<tr><td colspan="8" class="muted">No inventory items match your search.</td></tr>`;
+    return `<tr><td colspan="9" class="muted">No inventory items match your search.</td></tr>`;
   }
   return list.map(i => {
     const priceVal = i.price != null && i.price !== "" ? Number(i.price) : "";
     const priceDisplay = priceVal === "" || Number.isNaN(priceVal) ? "" : priceVal;
     const nameDisplay = i.name || "";
+    const qtyNewNum = Number(i.qtyNew);
+    const qtyOldNum = Number(i.qtyOld);
+    const qtyNewDisplay = Number.isFinite(qtyNewNum) && qtyNewNum >= 0 ? qtyNewNum : 0;
+    const qtyOldDisplay = Number.isFinite(qtyOldNum) && qtyOldNum >= 0 ? qtyOldNum : 0;
     return `
     <tr>
       <td><button type="button" class="inventory-name-btn" data-inventory-maintenance="${i.id}">${nameDisplay}</button></td>
-      <td><input type="number" min="0" step="1" data-inv="qty" data-id="${i.id}" value="${i.qty}"></td>
+      <td><input type="number" min="0" step="1" data-inv="qtyNew" data-id="${i.id}" value="${qtyNewDisplay}"></td>
+      <td><input type="number" min="0" step="1" data-inv="qtyOld" data-id="${i.id}" value="${qtyOldDisplay}"></td>
       <td>${i.unit||"pcs"}</td>
       <td>${i.pn||"—"}</td>
       <td>${i.link ? `<a href="${i.link}" target="_blank" rel="noopener">link</a>` : "—"}</td>
@@ -1666,7 +1671,7 @@ function viewInventory(){
       </div>
       <div class="small muted inventory-hint">Results update as you type.</div>
       <table>
-        <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
         <tbody data-inventory-rows>${rows}</tbody>
       </table>
     </div>
@@ -1691,7 +1696,8 @@ function viewInventory(){
         <form id="inventoryAddForm" class="modal-form">
           <div class="modal-grid">
             <label>Item name<input name="inventoryName" required placeholder="Item"></label>
-            <label>Quantity<input type="number" min="0" step="1" name="inventoryQty" value="1"></label>
+            <label>New quantity<input type="number" min="0" step="1" name="inventoryQtyNew" value="1"></label>
+            <label>Old quantity<input type="number" min="0" step="1" name="inventoryQtyOld" value="0"></label>
             <label>Unit<input name="inventoryUnit" placeholder="pcs" value="pcs"></label>
             <label>Part #<input name="inventoryPN" placeholder="Part number"></label>
             <label>Store link<input type="url" name="inventoryLink" placeholder="https://..."></label>

@@ -4365,10 +4365,11 @@ function renderSettings(){
     }
     const priceNum = Number(task.price);
     const price = Number.isFinite(priceNum) ? priceNum : null;
-    const newItem = {
+    const baseItem = {
       id: newId,
       name: task.name || "",
-      qty: 1,
+      qtyNew: 1,
+      qtyOld: 0,
       unit: "pcs",
       pn: task.pn || "",
       link: task.storeLink || "",
@@ -4377,6 +4378,9 @@ function renderSettings(){
       linkedTaskId: task.id,
       autoCreatedFromTask: true
     };
+    const newItem = typeof normalizeInventoryItem === "function"
+      ? normalizeInventoryItem(baseItem)
+      : { ...baseItem, qty: 1 };
     if (!Array.isArray(inventory)) inventory = [];
     inventory.unshift(newItem);
     window.inventory = inventory;
@@ -7273,7 +7277,8 @@ function renderInventory(){
   const maintenanceNote = modal?.querySelector("[data-maintenance-note]");
   const stepSections = modal ? Array.from(modal.querySelectorAll("[data-step]")) : [];
   const nameField = modal?.querySelector("[name=\"inventoryName\"]");
-  const qtyField = modal?.querySelector("[name=\"inventoryQty\"]");
+  const qtyNewField = modal?.querySelector("[name=\"inventoryQtyNew\"]");
+  const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
   let addToMaintenance = false;
 
   const refreshRows = ()=>{
@@ -7306,9 +7311,24 @@ function renderInventory(){
     const id = input.getAttribute("data-id");
     const k  = input.getAttribute("data-inv");
     const item = inventory.find(x=>x.id===id); if (!item) return;
-    if (k==="qty"){ item.qty = Math.max(0, Number(input.value)||0); }
-    else if (k==="note"){ item.note = input.value; }
-    else if (k==="price"){ const val = input.value.trim(); item.price = val === "" ? null : Math.max(0, Number(val)||0); }
+    if (k === "qtyNew"){
+      item.qtyNew = Math.max(0, Number(input.value) || 0);
+    } else if (k === "qtyOld"){
+      item.qtyOld = Math.max(0, Number(input.value) || 0);
+    } else if (k === "qty"){
+      item.qtyNew = Math.max(0, Number(input.value) || 0);
+      item.qtyOld = Math.max(0, Number(item.qtyOld) || 0);
+    } else if (k === "note"){
+      item.note = input.value;
+    } else if (k === "price"){
+      const val = input.value.trim();
+      item.price = val === "" ? null : Math.max(0, Number(val) || 0);
+    }
+    if (k === "qtyNew" || k === "qtyOld" || k === "qty"){
+      const newVal = Number(item.qtyNew);
+      const oldVal = Number(item.qtyOld);
+      item.qty = (Number.isFinite(newVal) ? newVal : 0) + (Number.isFinite(oldVal) ? oldVal : 0);
+    }
     saveCloudDebounced();
   });
 
@@ -7403,7 +7423,8 @@ function renderInventory(){
     modal.removeAttribute("hidden");
     document.body?.classList.add("modal-open");
     form?.reset();
-    if (qtyField) qtyField.value = qtyField.defaultValue || "1";
+    if (qtyNewField) qtyNewField.value = qtyNewField.defaultValue || "1";
+    if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
   }
 
   function closeInventoryModal(){
@@ -7413,7 +7434,8 @@ function renderInventory(){
     document.body?.classList.remove("modal-open");
     addToMaintenance = false;
     form?.reset();
-    if (qtyField) qtyField.value = qtyField.defaultValue || "1";
+    if (qtyNewField) qtyNewField.value = qtyNewField.defaultValue || "1";
+    if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
   }
 
   addBtn?.addEventListener("click", openInventoryModal);
@@ -7437,10 +7459,16 @@ function renderInventory(){
     const data = new FormData(form);
     const name = (data.get("inventoryName") || "").toString().trim();
     if (!name){ toast("Enter an item name."); return; }
-    const qtyRaw = data.get("inventoryQty");
-    const qtyNum = qtyRaw === null || qtyRaw === "" ? 1 : Number(qtyRaw);
-    if (!Number.isFinite(qtyNum) || qtyNum < 0){
-      toast("Enter a valid quantity.");
+    const qtyNewRaw = data.get("inventoryQtyNew");
+    const qtyOldRaw = data.get("inventoryQtyOld");
+    const qtyNewNum = qtyNewRaw === null || qtyNewRaw === "" ? 1 : Number(qtyNewRaw);
+    const qtyOldNum = qtyOldRaw === null || qtyOldRaw === "" ? 0 : Number(qtyOldRaw);
+    if (!Number.isFinite(qtyNewNum) || qtyNewNum < 0){
+      toast("Enter a valid new quantity.");
+      return;
+    }
+    if (!Number.isFinite(qtyOldNum) || qtyOldNum < 0){
+      toast("Enter a valid old quantity.");
       return;
     }
     const unit = (data.get("inventoryUnit") || "").toString().trim() || "pcs";
@@ -7455,16 +7483,20 @@ function renderInventory(){
     }
     const note = (data.get("inventoryNote") || "").toString().trim();
 
-    const item = {
+    const baseItem = {
       id: genId("inventory"),
       name,
-      qty: qtyNum,
+      qtyNew: qtyNewNum,
+      qtyOld: qtyOldNum,
       unit,
       pn,
       link,
       price,
       note
     };
+    const item = typeof normalizeInventoryItem === "function"
+      ? normalizeInventoryItem(baseItem)
+      : { ...baseItem, qty: (qtyNewNum || 0) + (qtyOldNum || 0) };
 
     inventory.unshift(item);
     window.inventory = inventory;
@@ -7861,8 +7893,12 @@ function applyInventoryForApprovedItems(items){
     if (!inv) return;
     const qty = Number(item.qty);
     if (!Number.isFinite(qty) || qty <= 0) return;
-    const base = Number(inv.qty);
-    inv.qty = (Number.isFinite(base) ? base : 0) + qty;
+    const baseNew = Number(inv.qtyNew);
+    const baseOld = Number(inv.qtyOld);
+    const nextNew = (Number.isFinite(baseNew) ? baseNew : 0) + qty;
+    inv.qtyNew = nextNew;
+    inv.qtyOld = Number.isFinite(baseOld) && baseOld >= 0 ? baseOld : 0;
+    inv.qty = nextNew + inv.qtyOld;
     if (item.price != null && (inv.price == null || inv.price === "")){
       inv.price = Number(item.price) || inv.price;
     }
