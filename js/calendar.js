@@ -683,6 +683,16 @@ function projectIntervalDueDates(task, options = {}){
   if (!Number.isFinite(interval) || interval <= 0) return [];
 
   const today = new Date(); today.setHours(0,0,0,0);
+  const todayTime = today.getTime();
+
+  const toDayStart = (value)=>{
+    const key = normalizeDateKey(value);
+    if (!key) return null;
+    const parsed = parseDateLocal(key);
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+    parsed.setHours(0,0,0,0);
+    return parsed;
+  };
 
   let manualHistory = [];
   if (typeof ensureTaskManualHistory === "function"){
@@ -699,31 +709,65 @@ function projectIntervalDueDates(task, options = {}){
   manualHistory.sort((a,b)=> String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")));
 
   let baselineEntry = null;
+  let futureBaselineEntry = null;
   for (let i = manualHistory.length - 1; i >= 0; i--){
     const entry = manualHistory[i];
     if (!entry || typeof entry.dateISO !== "string") continue;
-    baselineEntry = entry;
-    break;
+    const entryDate = toDayStart(entry.dateISO);
+    if (!entryDate) continue;
+    const entryTime = entryDate.getTime();
+    if (entryTime <= todayTime){
+      baselineEntry = entry;
+      break;
+    }
+    if (!futureBaselineEntry){
+      futureBaselineEntry = entry;
+    }
   }
+  if (!baselineEntry) baselineEntry = futureBaselineEntry;
 
   const hasBaseline = baselineEntry
     || (typeof task.calendarDateISO === "string" && task.calendarDateISO)
     || (Array.isArray(task.completedDates) && task.completedDates.length > 0);
   if (!hasBaseline) return [];
 
-  let baseDate = baselineEntry?.dateISO ? parseDateLocal(baselineEntry.dateISO) : null;
-  if (!(baseDate instanceof Date) || Number.isNaN(baseDate.getTime())){
-    baseDate = task.calendarDateISO ? parseDateLocal(task.calendarDateISO) : null;
+  const pickBaselineDate = (values)=>{
+    if (!Array.isArray(values)) return null;
+    let latestPast = null;
+    let latestPastTime = -Infinity;
+    let earliestFuture = null;
+    let earliestFutureTime = Infinity;
+    values.forEach(value => {
+      const date = toDayStart(value);
+      if (!date) return;
+      const time = date.getTime();
+      if (time <= todayTime){
+        if (time > latestPastTime){
+          latestPast = date;
+          latestPastTime = time;
+        }
+      }else if (time < earliestFutureTime){
+        earliestFuture = date;
+        earliestFutureTime = time;
+      }
+    });
+    return latestPast || earliestFuture || null;
+  };
+
+  let baseDate = baselineEntry?.dateISO ? toDayStart(baselineEntry.dateISO) : null;
+  if (!(baseDate instanceof Date)){
+    const calendarDate = typeof task.calendarDateISO === "string" ? toDayStart(task.calendarDateISO) : null;
+    if (calendarDate){
+      baseDate = calendarDate;
+    }
   }
-  if (!(baseDate instanceof Date) || Number.isNaN(baseDate.getTime())){
-    const completed = Array.isArray(task.completedDates) ? task.completedDates.slice().sort() : [];
-    const lastCompleted = completed.length ? completed[completed.length - 1] : null;
-    baseDate = lastCompleted ? parseDateLocal(lastCompleted) : null;
+  if (!(baseDate instanceof Date)){
+    const completedDates = Array.isArray(task.completedDates) ? task.completedDates : [];
+    baseDate = pickBaselineDate(completedDates);
   }
-  if (!(baseDate instanceof Date) || Number.isNaN(baseDate.getTime())){
+  if (!(baseDate instanceof Date)){
     baseDate = new Date(today);
   }
-  baseDate.setHours(0,0,0,0);
 
   const hoursPerDay = estimateIntervalDailyHours(task, baselineEntry, today);
   const intervalDays = interval / hoursPerDay;
@@ -735,7 +779,10 @@ function projectIntervalDueDates(task, options = {}){
 
   const monthsAheadRaw = Number(options.monthsAhead);
   const monthsAhead = Number.isFinite(monthsAheadRaw) && monthsAheadRaw > 0 ? monthsAheadRaw : 3;
-  const horizon = new Date(today); horizon.setMonth(horizon.getMonth() + monthsAhead);
+  const horizonAnchor = baseTime > todayTime ? new Date(baseTime) : new Date(today);
+  horizonAnchor.setHours(0,0,0,0);
+  const horizon = new Date(horizonAnchor);
+  horizon.setMonth(horizon.getMonth() + monthsAhead);
 
   const events = [];
   const seen = new Set();
@@ -750,7 +797,7 @@ function projectIntervalDueDates(task, options = {}){
     if (!key || seen.has(key)) continue;
     seen.add(key);
     events.push({ dateISO: key, dueDate });
-    if (dueDate > horizon && dueDate > today){
+    if (dueDate > horizon && dueDate > horizonAnchor){
       break;
     }
   }
