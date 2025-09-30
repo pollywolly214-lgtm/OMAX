@@ -1531,6 +1531,9 @@ function viewJobs(){
       <form id="addJobForm" class="mini-form">
         <input type="text" id="jobName" placeholder="Job name" required>
         <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
+        <input type="text" id="jobMaterial" placeholder="Material">
+        <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
+        <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
         <input type="date" id="jobStart" required>
         <input type="date" id="jobDue" required>
         <button type="button" id="jobFilesBtn">Attach Files</button>
