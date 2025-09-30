@@ -70,6 +70,14 @@ function completeTask(taskId){
   const cur = RENDER_TOTAL ?? currentTotal();
   t.anchorTotal = cur != null ? cur : 0;
   t.sinceBase   = 0;
+  const todayKey = ymd(new Date());
+  if (todayKey){
+    if (!Array.isArray(t.completedDates)) t.completedDates = [];
+    if (!t.completedDates.includes(todayKey)){
+      t.completedDates.push(todayKey);
+      t.completedDates.sort();
+    }
+  }
   saveCloudDebounced();
   toast("Task completed");
   route();
@@ -131,11 +139,47 @@ function showTaskBubble(taskId, anchor){
 function showJobBubble(jobId, anchor){
   const b = makeBubble(anchor);
   try{
-    const j = cuttingJobs.find(x => String(x.id) === String(jobId));
-    if (!j){
+    const active = cuttingJobs.find(x => String(x.id) === String(jobId));
+    const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
+    const completed = completedJobs.find(x => String(x?.id) === String(jobId));
+    if (!active && !completed){
       b.innerHTML = `<div class="bubble-title">Job</div><div class="bubble-kv"><span>Info:</span><span>Job not found (id: ${jobId})</span></div>`;
       return;
     }
+    if (!active && completed){
+      const finishedDate = completed.completedAtISO ? parseDateLocal(completed.completedAtISO) : null;
+      const finishedText = finishedDate ? finishedDate.toDateString() : "—";
+      const estimateVal = Number(completed.estimateHours);
+      const actualVal = Number(completed.actualHours);
+      const estimateText = Number.isFinite(estimateVal) ? `${estimateVal.toFixed(1)} hr` : "—";
+      const actualText = Number.isFinite(actualVal) ? `${actualVal.toFixed(1)} hr` : "—";
+      const materialText = completed.material ? escapeHtml(completed.material) : "—";
+      const dueText = completed.dueISO ? (parseDateLocal(completed.dueISO)?.toDateString() || "—") : "—";
+      const startText = completed.startISO ? (parseDateLocal(completed.startISO)?.toDateString() || "—") : "—";
+      const gainLossRaw = completed.efficiency && completed.efficiency.gainLoss != null ? Number(completed.efficiency.gainLoss) : null;
+      const gainLossText = Number.isFinite(gainLossRaw)
+        ? `${gainLossRaw >= 0 ? "+" : "−"}$${Math.abs(gainLossRaw).toFixed(2)}`
+        : "—";
+      const rateValRaw = completed && completed.efficiency ? completed.efficiency.rate : null;
+      const rateVal = Number(rateValRaw);
+      const rateText = Number.isFinite(rateVal) ? `$${rateVal.toFixed(2)}/hr` : "—";
+      const notesHtml = completed.notes ? `<div class="bubble-kv"><span>Notes:</span><span>${escapeHtml(completed.notes)}</span></div>` : "";
+      const gainLossHtml = Number.isFinite(gainLossRaw)
+        ? `${escapeHtml(gainLossText)}${rateText !== "—" ? ` <span class="muted">@ ${escapeHtml(rateText)}</span>` : ""}`
+        : "—";
+      b.innerHTML = `
+        <div class="bubble-title">${escapeHtml(completed.name || "Completed job")}</div>
+        <div class="bubble-kv"><span>Status:</span><span>Completed</span></div>
+        <div class="bubble-kv"><span>Finished:</span><span>${escapeHtml(finishedText)}</span></div>
+        <div class="bubble-kv"><span>Schedule:</span><span>${escapeHtml(startText)} → ${escapeHtml(dueText)}</span></div>
+        <div class="bubble-kv"><span>Estimate:</span><span>${escapeHtml(estimateText)}</span></div>
+        <div class="bubble-kv"><span>Actual hours:</span><span>${escapeHtml(actualText)}</span></div>
+        <div class="bubble-kv"><span>Material:</span><span>${materialText}</span></div>
+        <div class="bubble-kv"><span>Gain / loss:</span><span>${gainLossHtml}</span></div>
+        ${notesHtml}`;
+      return;
+    }
+    const j = active;
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const baselineRemain = eff.expectedRemaining != null
@@ -297,30 +341,66 @@ function renderCalendar(){
   container.innerHTML = "";
 
   const dueMap = {};
-  function pushTaskEvent(task, iso){
+  function pushTaskEvent(task, iso, status){
     if (!task || !iso) return;
     const key = ymd(iso);
     if (!key) return;
-    (dueMap[key] ||= []).push({ type:"task", id:String(task.id), name:task.name });
+    const events = dueMap[key] ||= [];
+    const id = String(task.id);
+    const statusKey = status || "due";
+    const statusPriority = { completed: 3, manual: 2, due: 1 };
+    const existing = events.find(ev => ev.type === "task" && ev.id === id);
+    if (existing){
+      existing.name = task.name;
+      const existingStatus = existing.status || "due";
+      const existingPriority = statusPriority[existingStatus] || 1;
+      const nextPriority = statusPriority[statusKey] || 1;
+      if (nextPriority >= existingPriority){
+        existing.status = statusKey;
+      }
+      return;
+    }
+    events.push({ type:"task", id, name:task.name, status: statusKey });
   }
 
   const intervalTasks = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  const completedByTask = new Map();
+  intervalTasks.forEach(t => {
+    if (!t) return;
+    const rawDates = Array.isArray(t.completedDates) ? t.completedDates : [];
+    const set = new Set();
+    rawDates.forEach(dateISO => {
+      const key = ymd(dateISO);
+      if (key) set.add(key);
+    });
+    if (set.size) completedByTask.set(String(t.id), set);
+  });
   intervalTasks.forEach(t => {
     if (!t) return;
     const manualKey = t.calendarDateISO ? ymd(t.calendarDateISO) : null;
-    if (manualKey) pushTaskEvent(t, manualKey);
+    const completedKeys = completedByTask.get(String(t.id));
+    if (completedKeys){
+      completedKeys.forEach(dateKey => {
+        pushTaskEvent(t, dateKey, "completed");
+      });
+    }
+    if (manualKey && !(completedKeys && completedKeys.has(manualKey))){
+      pushTaskEvent(t, manualKey, "manual");
+    }
     const nd = nextDue(t);
     if (!nd) return;
     const dueKey = ymd(nd.due);
-    if (dueKey && (!manualKey || manualKey !== dueKey)){
-      pushTaskEvent(t, dueKey);
+    if (!dueKey) return;
+    if (completedKeys && completedKeys.has(dueKey)) return;
+    if (!manualKey || manualKey !== dueKey){
+      pushTaskEvent(t, dueKey, "due");
     }
   });
 
   const asReqTasks = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
   asReqTasks.forEach(t => {
     if (!t || !t.calendarDateISO) return;
-    pushTaskEvent(t, t.calendarDateISO);
+    pushTaskEvent(t, t.calendarDateISO, "manual");
   });
 
   const jobsMap = {};
@@ -332,9 +412,17 @@ function renderCalendar(){
     const cur = new Date(start.getTime());
     while (cur <= end){
       const key = ymd(cur);
-      (jobsMap[key] ||= []).push({ type:"job", id:String(j.id), name:j.name });
+      (jobsMap[key] ||= []).push({ type:"job", id:String(j.id), name:j.name, status:"active" });
       cur.setDate(cur.getDate()+1);
     }
+  });
+
+  const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
+  completedJobs.forEach(job => {
+    if (!job) return;
+    const completionKey = job.completedAtISO ? ymd(job.completedAtISO) : (job.dueISO ? ymd(job.dueISO) : null);
+    if (!completionKey) return;
+    (jobsMap[completionKey] ||= []).push({ type:"job", id:String(job.id), name:job.name, status:"completed" });
   });
 
   const garnetMap = {};
@@ -429,7 +517,17 @@ function renderCalendar(){
         });
       }
       (dueMap[key]||[]).forEach(ev=>{
-        const chip = document.createElement("div"); chip.className="event generic cal-task"; chip.dataset.calTask = ev.id; chip.textContent = `${ev.name} (due)`; cell.appendChild(chip);
+        const chip = document.createElement("div");
+        let cls = "event generic cal-task";
+        if (ev.status === "completed") cls += " is-complete";
+        chip.className = cls;
+        chip.dataset.calTask = ev.id;
+        let label = ev.name;
+        if (ev.status === "completed") label += " (completed)";
+        else if (ev.status === "manual") label += " (scheduled)";
+        else label += " (due)";
+        chip.textContent = label;
+        cell.appendChild(chip);
       });
       (garnetMap[key]||[]).forEach(ev=>{
         const chip = document.createElement("div");
@@ -441,7 +539,13 @@ function renderCalendar(){
         cell.appendChild(chip);
       });
       (jobsMap[key]||[]).forEach(ev=>{
-        const bar = document.createElement("div"); bar.className="job-bar cal-job"; bar.dataset.calJob = ev.id; bar.textContent = ev.name; cell.appendChild(bar);
+        const bar = document.createElement("div");
+        let cls = "job-bar cal-job";
+        if (ev.status === "completed") cls += " is-complete";
+        bar.className = cls;
+        bar.dataset.calJob = ev.id;
+        bar.textContent = ev.status === "completed" ? `${ev.name} (completed)` : ev.name;
+        cell.appendChild(bar);
       });
       const addBtn = document.createElement("button");
       addBtn.type = "button";
