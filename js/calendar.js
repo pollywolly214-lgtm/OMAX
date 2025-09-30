@@ -1,5 +1,6 @@
 /* ================== CALENDAR & BUBBLES ===================== */
 let bubbleTimer = null;
+const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
 function hideBubble(){
   if (bubbleTimer){
     clearTimeout(bubbleTimer);
@@ -29,6 +30,230 @@ function escapeHtml(str){
     '"': "&quot;",
     "'": "&#39;"
   })[c] || c);
+}
+
+function findCalendarTaskMeta(taskId){
+  const tid = String(taskId);
+  const intervalList = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  let index = intervalList.findIndex(t => t && String(t.id) === tid);
+  if (index >= 0){
+    return { task: intervalList[index], mode: "interval", list: intervalList, index };
+  }
+  const asReqList = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  index = asReqList.findIndex(t => t && String(t.id) === tid);
+  if (index >= 0){
+    return { task: asReqList[index], mode: "asreq", list: asReqList, index };
+  }
+  return null;
+}
+
+function normalizeDateKey(value){
+  if (!value) return null;
+  if (value instanceof Date) return ymd(value);
+  if (typeof value === "string"){
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    const parsed = parseDateLocal(value);
+    if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+      parsed.setHours(0,0,0,0);
+      return ymd(parsed);
+    }
+  }
+  return null;
+}
+
+function markCalendarTaskComplete(meta, dateISO){
+  if (!meta || !meta.task) return false;
+  const key = normalizeDateKey(dateISO || new Date());
+  if (!key) return false;
+  const task = meta.task;
+  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
+  let changed = false;
+
+  if (mode === "interval"){
+    const currentHoursRaw = typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : null;
+    const currentHours = currentHoursRaw != null && Number.isFinite(Number(currentHoursRaw)) ? Number(currentHoursRaw) : null;
+    if (currentHours != null){
+      task.anchorTotal = currentHours;
+    }
+    task.sinceBase = 0;
+
+    if (!Array.isArray(task.completedDates)) task.completedDates = [];
+    if (!task.completedDates.includes(key)){
+      task.completedDates.push(key);
+      task.completedDates.sort();
+      changed = true;
+    }
+
+    const history = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(task)
+      : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
+    const defaultDaily = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+      ? Number(DAILY_HOURS)
+      : 8;
+    let entry = history.find(item => item && normalizeDateKey(item.dateISO) === key);
+    if (!entry){
+      entry = {
+        dateISO: key,
+        hoursAtEntry: null,
+        recordedAtISO: new Date().toISOString(),
+        status: "completed",
+        source: "estimate",
+        estimatedDailyHours: defaultDaily
+      };
+      history.push(entry);
+      changed = true;
+    }else{
+      if (entry.status !== "completed"){ entry.status = "completed"; changed = true; }
+      entry.recordedAtISO = new Date().toISOString();
+      if (entry.estimatedDailyHours == null) entry.estimatedDailyHours = defaultDaily;
+    }
+
+    const snapshotHours = typeof hoursSnapshotOnOrBefore === "function" ? hoursSnapshotOnOrBefore(key) : null;
+    if (snapshotHours != null && Number.isFinite(Number(snapshotHours))){
+      entry.hoursAtEntry = Number(snapshotHours);
+      entry.source = "machine";
+    }else if (entry.hoursAtEntry != null && !Number.isFinite(Number(entry.hoursAtEntry))){
+      entry.hoursAtEntry = null;
+    }
+
+    history.sort((a,b)=> String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")));
+    task.manualHistory = history;
+
+    if (!task.calendarDateISO || normalizeDateKey(task.calendarDateISO) === key){
+      task.calendarDateISO = key;
+    }
+    changed = true;
+  }else{
+    if (!Array.isArray(task.completedDates)) task.completedDates = [];
+    if (!task.completedDates.includes(key)){
+      task.completedDates.push(key);
+      task.completedDates.sort();
+      changed = true;
+    }
+    if (normalizeDateKey(task.calendarDateISO) !== key){
+      task.calendarDateISO = key;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function unmarkCalendarTaskComplete(meta, dateISO){
+  if (!meta || !meta.task) return false;
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  const task = meta.task;
+  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
+  let changed = false;
+
+  if (Array.isArray(task.completedDates)){
+    const idx = task.completedDates.indexOf(key);
+    if (idx >= 0){
+      task.completedDates.splice(idx,1);
+      changed = true;
+    }
+  }
+
+  if (mode === "interval"){
+    const defaultDaily = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+      ? Number(DAILY_HOURS)
+      : 8;
+    const history = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(task)
+      : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
+    let entry = history.find(item => item && normalizeDateKey(item.dateISO) === key);
+    const nowIso = new Date().toISOString();
+    if (!entry){
+      entry = {
+        dateISO: key,
+        hoursAtEntry: null,
+        recordedAtISO: nowIso,
+        status: "scheduled",
+        source: "estimate",
+        estimatedDailyHours: defaultDaily
+      };
+      history.push(entry);
+      changed = true;
+    }else{
+      if (entry.status !== "scheduled"){ entry.status = "scheduled"; changed = true; }
+      if (entry.estimatedDailyHours == null && defaultDaily != null){
+        entry.estimatedDailyHours = defaultDaily;
+        changed = true;
+      }
+      entry.recordedAtISO = nowIso;
+    }
+    history.sort((a,b)=> String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")));
+    task.manualHistory = history;
+    applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
+  }
+
+  return changed;
+}
+
+function removeCalendarTaskOccurrence(meta, dateISO){
+  if (!meta || !meta.task) return false;
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  const task = meta.task;
+  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
+  let changed = false;
+
+  if (mode === "interval"){
+    const history = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(task)
+      : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
+    for (let i = history.length - 1; i >= 0; i--){
+      const entry = history[i];
+      if (entry && normalizeDateKey(entry.dateISO) === key){
+        history.splice(i,1);
+        changed = true;
+      }
+    }
+    if (changed){
+      task.manualHistory = history;
+    }
+    if (Array.isArray(task.completedDates)){
+      const idx = task.completedDates.indexOf(key);
+      if (idx >= 0){
+        task.completedDates.splice(idx,1);
+        changed = true;
+      }
+    }
+    if (normalizeDateKey(task.calendarDateISO) === key){
+      task.calendarDateISO = null;
+      changed = true;
+    }
+    if (changed){
+      applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
+    }
+  }else{
+    if (normalizeDateKey(task.calendarDateISO) === key){
+      task.calendarDateISO = null;
+      changed = true;
+    }
+    if (Array.isArray(task.completedDates)){
+      const idx = task.completedDates.indexOf(key);
+      if (idx >= 0){
+        task.completedDates.splice(idx,1);
+        changed = true;
+      }
+    }
+  }
+
+  return changed;
+}
+
+function removeCalendarTaskEverywhere(meta){
+  if (!meta || !meta.list || typeof meta.index !== "number" || meta.index < 0) return false;
+  const list = meta.list;
+  list.splice(meta.index, 1);
+  if (meta.mode === "asreq"){
+    window.tasksAsReq = list;
+  }else{
+    window.tasksInterval = list;
+  }
+  return true;
 }
 
 function getGarnetEntries(){
@@ -65,70 +290,144 @@ function makeBubble(anchor){
 }
 
 function completeTask(taskId){
-  const t = tasksInterval.find(x => String(x.id) === String(taskId));
-  if (!t) return;
-  const cur = RENDER_TOTAL ?? currentTotal();
-  t.anchorTotal = cur != null ? cur : 0;
-  t.sinceBase   = 0;
-  const todayKey = ymd(new Date());
-  if (todayKey){
-    if (!Array.isArray(t.completedDates)) t.completedDates = [];
-    if (!t.completedDates.includes(todayKey)){
-      t.completedDates.push(todayKey);
-      t.completedDates.sort();
-    }
+  const meta = findCalendarTaskMeta(taskId);
+  if (!meta) return;
+  const todayKey = normalizeDateKey(new Date());
+  if (!todayKey) return;
+  const changed = markCalendarTaskComplete(meta, todayKey);
+  if (changed){
+    saveCloudDebounced();
+    toast("Task completed");
+    route();
   }
-  saveCloudDebounced();
-  toast("Task completed");
-  route();
 }
 
-function showTaskBubble(taskId, anchor){
-  const t = tasksInterval.find(x => x.id === taskId);
-  if (!t) return;
-  const nd = nextDue(t);
-  const b  = makeBubble(anchor);
-  b.innerHTML = `
-    <div class="bubble-title">${t.name}</div>
-    <div class="bubble-kv"><span>Interval:</span><span>${t.interval} hrs</span></div>
-    <div class="bubble-kv"><span>Last serviced:</span><span>${nd ? nd.since.toFixed(0) : "—"} hrs ago</span></div>
-    <div class="bubble-kv"><span>Remain:</span><span>${nd ? nd.remain.toFixed(0) : "—"} hrs</span></div>
-    <div class="bubble-kv"><span>Cost:</span><span>${t.price != null ? ("$" + t.price) : "—"}</span></div>
-    ${(t.manualLink || t.storeLink) ?
-      `<div class="bubble-kv"><span>Links:</span><span>
-        ${t.manualLink ? `<a href="${t.manualLink}" target="_blank" rel="noopener">Manual</a>` : ``}
-        ${t.manualLink && t.storeLink ? ` · ` : ``}
-        ${t.storeLink ? `<a href="${t.storeLink}" target="_blank" rel="noopener">Store</a>` : ``}
-      </span></div>` : ``}
-    <div class="bubble-actions">
-      <button data-bbl-complete="${t.id}">Complete</button>
-      <button class="danger" data-bbl-remove="${t.id}">Remove</button>
-      <button data-bbl-edit="${t.id}">Edit settings</button>
-    </div>`;
+function showTaskBubble(taskId, anchor, options = {}){
+  const statusHint = options.status || anchor?.getAttribute("data-cal-status") || null;
+  const modeHint = options.mode || anchor?.getAttribute("data-cal-mode") || null;
+  const dateHint = options.dateISO || anchor?.getAttribute("data-cal-date") || anchor?.closest(".day")?.dataset.dateIso || null;
+  const meta = findCalendarTaskMeta(taskId);
+  if (!meta || !meta.task) return;
+  const task = meta.task;
+  const mode = modeHint === "asreq" || meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
+  const dateKey = normalizeDateKey(dateHint);
+  const displayDate = dateKey ? (()=>{
+    const parsed = parseDateLocal(dateKey);
+    return parsed instanceof Date && !Number.isNaN(parsed.getTime()) ? parsed.toDateString() : dateKey;
+  })() : null;
 
-  // Action buttons
+  const completedSet = new Set(Array.isArray(task.completedDates) ? task.completedDates.map(normalizeDateKey).filter(Boolean) : []);
+  const normalizedStatus = statusHint || (completedSet.has(dateKey || "") ? "completed" : (mode === "asreq" && dateKey ? "manual" : "due"));
+  const isCompleted = !!(dateKey && completedSet.has(dateKey)) || normalizedStatus === "completed";
+  const history = typeof ensureTaskManualHistory === "function"
+    ? ensureTaskManualHistory(task)
+    : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
+  const hasHistoryEntry = !!(dateKey && history.some(entry => entry && normalizeDateKey(entry.dateISO) === dateKey));
+  const manualDateMatches = dateKey && normalizeDateKey(task.calendarDateISO) === dateKey;
+  const canRemoveOccurrence = !!dateKey && (manualDateMatches || isCompleted || hasHistoryEntry);
+  const canMarkComplete = !!dateKey && !isCompleted;
+  const canUnmarkComplete = !!dateKey && isCompleted;
+
+  const statusLabel = isCompleted
+    ? "Completed"
+    : (normalizedStatus === "manual" ? "Scheduled" : normalizedStatus === "due" ? "Projected" : "Scheduled");
+
+  const infoParts = [];
+  infoParts.push(`<div class="bubble-title">${escapeHtml(task.name || "Task")}</div>`);
+  if (displayDate){
+    infoParts.push(`<div class="bubble-kv"><span>Date:</span><span>${escapeHtml(displayDate)}</span></div>`);
+  }
+  if (mode === "interval"){
+    infoParts.push(`<div class="bubble-kv"><span>Interval:</span><span>${task.interval != null ? escapeHtml(`${task.interval} hrs`) : "—"}</span></div>`);
+    const nd = typeof nextDue === "function" ? nextDue(task) : null;
+    infoParts.push(`<div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusLabel)}</span></div>`);
+    infoParts.push(`<div class="bubble-kv"><span>Last serviced:</span><span>${nd ? escapeHtml(`${nd.since.toFixed(0)} hrs ago`) : "—"}</span></div>`);
+    infoParts.push(`<div class="bubble-kv"><span>Remain:</span><span>${nd ? escapeHtml(`${nd.remain.toFixed(0)} hrs`) : "—"}</span></div>`);
+    infoParts.push(`<div class="bubble-kv"><span>Cost:</span><span>${task.price != null ? escapeHtml(`$${task.price}`) : "—"}</span></div>`);
+  }else{
+    infoParts.push(`<div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusLabel)}</span></div>`);
+    infoParts.push(`<div class="bubble-kv"><span>Condition:</span><span>${escapeHtml(task.condition || "As required")}</span></div>`);
+  }
+
+  if (task.manualLink || task.storeLink){
+    const links = [];
+    if (task.manualLink) links.push(`<a href="${task.manualLink}" target="_blank" rel="noopener">Manual</a>`);
+    if (task.storeLink) links.push(`<a href="${task.storeLink}" target="_blank" rel="noopener">Store</a>`);
+    infoParts.push(`<div class="bubble-kv"><span>Links:</span><span>${links.join(" · ")}</span></div>`);
+  }
+
+  const actions = [];
+  if (canMarkComplete){
+    actions.push(`<button data-bbl-complete>Mark complete</button>`);
+  }
+  if (canUnmarkComplete){
+    actions.push(`<button data-bbl-uncomplete>Unmark complete</button>`);
+  }
+  if (canRemoveOccurrence){
+    actions.push(`<button class="secondary" data-bbl-remove-occurrence>Remove occurrence</button>`);
+  }
+  actions.push(`<button data-bbl-edit>Edit settings</button>`);
+  actions.push(`<button class="danger" data-bbl-remove-task>Remove task</button>`);
+
+  const b  = makeBubble(anchor);
+  b.innerHTML = `${infoParts.join("")}<div class="bubble-actions">${actions.join("")}</div>`;
+
+  const targetKey = dateKey || normalizeDateKey(new Date());
+
   b.querySelector("[data-bbl-complete]")?.addEventListener("click", ()=>{
-    completeTask(taskId); hideBubble();
+    const changed = markCalendarTaskComplete(meta, targetKey);
+    if (changed){
+      saveCloudDebounced();
+      toast("Task marked complete");
+      hideBubble();
+      route();
+    }
   });
-  b.querySelector("[data-bbl-remove]")?.addEventListener("click", ()=>{
+
+  b.querySelector("[data-bbl-uncomplete]")?.addEventListener("click", ()=>{
+    const changed = unmarkCalendarTaskComplete(meta, targetKey);
+    if (changed){
+      saveCloudDebounced();
+      toast("Completion removed");
+      hideBubble();
+      route();
+    }
+  });
+
+  b.querySelector("[data-bbl-remove-occurrence]")?.addEventListener("click", ()=>{
+    const shouldRemove = window.confirm ? window.confirm("Remove this occurrence from the calendar?") : true;
+    if (!shouldRemove) return;
+    const changed = removeCalendarTaskOccurrence(meta, targetKey);
+    if (changed){
+      saveCloudDebounced();
+      toast("Removed from calendar");
+      hideBubble();
+      route();
+    }
+  });
+
+  b.querySelector("[data-bbl-remove-task]")?.addEventListener("click", ()=>{
     try {
       if (typeof recordDeletedItem === "function"){
-        recordDeletedItem("task", t, { list: "interval", cat: t?.cat ?? null, parentTask: t?.parentTask ?? null });
+        recordDeletedItem("task", task, { list: mode, cat: task?.cat ?? null, parentTask: task?.parentTask ?? null });
       }
     } catch (err) {
       console.warn("Failed to record deleted task from calendar", err);
     }
-    tasksInterval = tasksInterval.filter(x => x.id !== taskId);
-    window.tasksInterval = tasksInterval;
-    saveCloudDebounced(); toast("Removed"); hideBubble(); route();
-  });
-  b.querySelector("[data-bbl-edit]")?.addEventListener("click", ()=>{
-    hideBubble(); openSettingsAndReveal(taskId);
+    if (removeCalendarTaskEverywhere(meta)){
+      saveCloudDebounced();
+      toast("Task removed");
+      hideBubble();
+      route();
+    }
   });
 
-  // NEW: click anywhere on the bubble (except buttons/links) → open Settings for this item
+  b.querySelector("[data-bbl-edit]")?.addEventListener("click", ()=>{
+    hideBubble();
+    openSettingsAndReveal(taskId);
+  });
+
   b.addEventListener("click", (e)=>{
-    // Ignore clicks on controls inside the bubble
     if (e.target.closest(".bubble-actions")) return;
     if (e.target.closest("button")) return;
     if (e.target.closest("a")) return;
@@ -314,12 +613,21 @@ function showGarnetBubble(garnetId, anchor){
 function wireCalendarBubbles(){
   const months = $("#months"); if (!months) return;
   let hoverTarget = null;
+  const extractTaskOptions = (el)=>{
+    if (!el) return {};
+    return {
+      status: el.getAttribute("data-cal-status") || null,
+      mode: el.getAttribute("data-cal-mode") || null,
+      dateISO: el.getAttribute("data-cal-date") || el.closest(".day")?.dataset.dateIso || null
+    };
+  };
+
   months.addEventListener("mouseover", (e)=>{
     const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
     if (!el || el === hoverTarget) return;
     hoverTarget = el;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
-    if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el);
+    if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el, extractTaskOptions(el));
     if (el.dataset.calGarnet) showGarnetBubble(el.dataset.calGarnet, el);
   });
   months.addEventListener("mouseout", (e)=>{
@@ -331,9 +639,222 @@ function wireCalendarBubbles(){
     const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
     if (!el) return;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
-    if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el);
+    if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el, extractTaskOptions(el));
     if (el.dataset.calGarnet) showGarnetBubble(el.dataset.calGarnet, el);
   });
+}
+
+function estimateIntervalDailyHours(task, baselineEntry, today){
+  const defaultHours = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+    ? Number(DAILY_HOURS)
+    : 8;
+  if (!baselineEntry) return defaultHours;
+  const baseDate = baselineEntry.dateISO ? parseDateLocal(baselineEntry.dateISO) : null;
+  const baseHours = baselineEntry.hoursAtEntry != null ? Number(baselineEntry.hoursAtEntry) : null;
+  const currentHours = typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : null;
+  if (baseDate instanceof Date && !Number.isNaN(baseDate.getTime())){
+    baseDate.setHours(0,0,0,0);
+    const diffMs = today.getTime() - baseDate.getTime();
+    if (diffMs > 0 && Number.isFinite(baseHours) && currentHours != null && Number.isFinite(currentHours)){
+      const diffDays = diffMs / CALENDAR_DAY_MS;
+      if (diffDays > 0){
+        const diffHours = Math.max(0, Number(currentHours) - baseHours);
+        const rate = diffHours / diffDays;
+        if (Number.isFinite(rate) && rate > 0){
+          return rate;
+        }
+      }
+    }
+  }
+  if (baselineEntry.estimatedDailyHours != null){
+    const est = Number(baselineEntry.estimatedDailyHours);
+    if (Number.isFinite(est) && est > 0) return est;
+  }
+  return defaultHours;
+}
+
+function projectIntervalDueDates(task, options = {}){
+  if (!task || task.mode !== "interval") return [];
+  const interval = Number(task.interval);
+  if (!Number.isFinite(interval) || interval <= 0) return [];
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayTime = today.getTime();
+
+  const excludeListRaw = options.excludeDates;
+  const excludeSet = new Set();
+  const addExclude = (value)=>{
+    const key = normalizeDateKey(value);
+    if (key) excludeSet.add(key);
+  };
+  if (excludeListRaw && typeof excludeListRaw.forEach === "function"){
+    try {
+      excludeListRaw.forEach((value, maybeKey)=>{
+        if (value == null && maybeKey != null){
+          addExclude(maybeKey);
+        }else{
+          addExclude(value);
+        }
+      });
+    } catch (err){
+      if (typeof console !== "undefined" && console && typeof console.warn === "function"){
+        console.warn("Failed to iterate excludeDates via forEach", err);
+      }
+    }
+  } else if (excludeListRaw && typeof excludeListRaw[Symbol.iterator] === "function"){
+    for (const value of excludeListRaw){
+      addExclude(value);
+    }
+  } else if (excludeListRaw && typeof excludeListRaw === "object"){
+    Object.keys(excludeListRaw).forEach(key => addExclude(key));
+  }
+
+  const minOccurrencesRaw = Number(options.minOccurrences);
+  const minOccurrences = Number.isFinite(minOccurrencesRaw) && minOccurrencesRaw > 0
+    ? Math.floor(minOccurrencesRaw)
+    : 6;
+
+  const toDayStart = (value)=>{
+    const key = normalizeDateKey(value);
+    if (!key) return null;
+    const parsed = parseDateLocal(key);
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+    parsed.setHours(0,0,0,0);
+    return parsed;
+  };
+
+  let manualHistory = [];
+  if (typeof ensureTaskManualHistory === "function"){
+    try {
+      manualHistory = ensureTaskManualHistory(task).slice();
+    } catch (err){
+      console.warn("Failed to normalize manual history for schedule projection", err);
+      manualHistory = Array.isArray(task.manualHistory) ? task.manualHistory.slice() : [];
+    }
+  }else{
+    manualHistory = Array.isArray(task.manualHistory) ? task.manualHistory.slice() : [];
+  }
+
+  manualHistory.sort((a,b)=> String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")));
+
+  let baselineEntry = null;
+  let futureBaselineEntry = null;
+  let futureBaselineTime = Infinity;
+  for (let i = manualHistory.length - 1; i >= 0; i--){
+    const entry = manualHistory[i];
+    if (!entry || typeof entry.dateISO !== "string") continue;
+    const entryDate = toDayStart(entry.dateISO);
+    if (!entryDate) continue;
+    const entryTime = entryDate.getTime();
+    if (entryTime <= todayTime){
+      baselineEntry = entry;
+      break;
+    }
+    if (entryTime < futureBaselineTime){
+      futureBaselineEntry = entry;
+      futureBaselineTime = entryTime;
+    }
+  }
+  if (!baselineEntry) baselineEntry = futureBaselineEntry;
+
+  const hasBaseline = baselineEntry
+    || (typeof task.calendarDateISO === "string" && task.calendarDateISO)
+    || (Array.isArray(task.completedDates) && task.completedDates.length > 0);
+  if (!hasBaseline) return [];
+
+  const pickBaselineDate = (values)=>{
+    if (!Array.isArray(values)) return null;
+    let latestPast = null;
+    let latestPastTime = -Infinity;
+    let earliestFuture = null;
+    let earliestFutureTime = Infinity;
+    values.forEach(value => {
+      const date = toDayStart(value);
+      if (!date) return;
+      const time = date.getTime();
+      if (time <= todayTime){
+        if (time > latestPastTime){
+          latestPast = date;
+          latestPastTime = time;
+        }
+      }else if (time < earliestFutureTime){
+        earliestFuture = date;
+        earliestFutureTime = time;
+      }
+    });
+    return latestPast || earliestFuture || null;
+  };
+
+  let baseDate = baselineEntry?.dateISO ? toDayStart(baselineEntry.dateISO) : null;
+  if (!(baseDate instanceof Date)){
+    const calendarDate = typeof task.calendarDateISO === "string" ? toDayStart(task.calendarDateISO) : null;
+    if (calendarDate){
+      baseDate = calendarDate;
+    }
+  }
+  if (!(baseDate instanceof Date)){
+    const completedDates = Array.isArray(task.completedDates) ? task.completedDates : [];
+    baseDate = pickBaselineDate(completedDates);
+  }
+  if (!(baseDate instanceof Date)){
+    baseDate = new Date(today);
+  }
+
+  const hoursPerDay = estimateIntervalDailyHours(task, baselineEntry, today);
+  const intervalDays = interval / hoursPerDay;
+  if (!Number.isFinite(intervalDays) || intervalDays <= 0) return [];
+
+  const baseTime = baseDate.getTime();
+  const intervalMs = intervalDays * CALENDAR_DAY_MS;
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) return [];
+
+  const monthsAheadRaw = Number(options.monthsAhead);
+  const monthsAhead = Number.isFinite(monthsAheadRaw) && monthsAheadRaw > 0 ? monthsAheadRaw : 3;
+  const horizonAnchor = baseTime > todayTime ? new Date(baseTime) : new Date(today);
+  horizonAnchor.setHours(0,0,0,0);
+  const horizon = new Date(horizonAnchor);
+  horizon.setMonth(horizon.getMonth() + monthsAhead);
+
+  const events = [];
+  const seen = new Set();
+  const maxIterations = 240;
+
+  for (let idx = 1; idx <= maxIterations; idx++){
+    const dueTime = baseTime + (idx * intervalMs);
+    if (!Number.isFinite(dueTime)) break;
+    const dueDate = new Date(dueTime);
+    dueDate.setHours(0,0,0,0);
+    const key = ymd(dueDate);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    if (excludeSet.has(key)){
+      if (dueDate > horizon && dueDate > horizonAnchor && events.length >= minOccurrences){
+        break;
+      }
+      continue;
+    }
+    events.push({ dateISO: key, dueDate });
+    if (dueDate > horizon && dueDate > horizonAnchor && events.length >= minOccurrences){
+      break;
+    }
+  }
+
+  if (!events.length){
+    let attempt = 1;
+    while (attempt <= maxIterations){
+      const fallbackDue = new Date(baseTime + (attempt * intervalMs));
+      fallbackDue.setHours(0,0,0,0);
+      const key = ymd(fallbackDue);
+      if (key && !excludeSet.has(key)){
+        events.push({ dateISO: key, dueDate: fallbackDue });
+        break;
+      }
+      attempt++;
+    }
+  }
+
+  events.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
+  return events;
 }
 
 function renderCalendar(){
@@ -344,7 +865,7 @@ function renderCalendar(){
   const dueMap = {};
   function pushTaskEvent(task, iso, status){
     if (!task || !iso) return;
-    const key = ymd(iso);
+    const key = normalizeDateKey(iso);
     if (!key) return;
     const events = dueMap[key] ||= [];
     const id = String(task.id);
@@ -359,9 +880,11 @@ function renderCalendar(){
       if (nextPriority >= existingPriority){
         existing.status = statusKey;
       }
+      existing.mode = task && task.mode === "asreq" ? "asreq" : "interval";
+      existing.dateISO = key;
       return;
     }
-    events.push({ type:"task", id, name:task.name, status: statusKey });
+    events.push({ type:"task", id, name:task.name, status: statusKey, mode: task && task.mode === "asreq" ? "asreq" : "interval", dateISO: key });
   }
 
   const intervalTasks = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
@@ -370,29 +893,73 @@ function renderCalendar(){
     if (!t) return;
     const rawDates = Array.isArray(t.completedDates) ? t.completedDates : [];
     const set = new Set();
-    rawDates.forEach(dateISO => {
-      const key = ymd(dateISO);
-      if (key) set.add(key);
-    });
-    if (set.size) completedByTask.set(String(t.id), set);
+    rawDates.map(normalizeDateKey).filter(Boolean).forEach(key => set.add(key));
+    completedByTask.set(String(t.id), set);
   });
   intervalTasks.forEach(t => {
     if (!t) return;
-    const manualKey = t.calendarDateISO ? ymd(t.calendarDateISO) : null;
-    const completedKeys = completedByTask.get(String(t.id));
-    if (completedKeys){
-      completedKeys.forEach(dateKey => {
-        pushTaskEvent(t, dateKey, "completed");
+    const taskKey = String(t.id);
+    let completedKeys = completedByTask.get(taskKey);
+    if (!(completedKeys instanceof Set)){
+      completedKeys = new Set();
+      completedByTask.set(taskKey, completedKeys);
+    }
+    completedKeys.forEach(dateKey => {
+      if (!dateKey) return;
+      pushTaskEvent(t, dateKey, "completed");
+    });
+
+    const manualHistory = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(t)
+      : (Array.isArray(t.manualHistory) ? t.manualHistory : []);
+    const manualDates = new Set();
+    manualHistory.forEach(entry => {
+      if (!entry) return;
+      const entryKey = normalizeDateKey(entry.dateISO);
+      if (!entryKey) return;
+      const status = entry.status || "logged";
+      if (status === "completed"){
+        if (!completedKeys.has(entryKey)){
+          completedKeys.add(entryKey);
+          pushTaskEvent(t, entryKey, "completed");
+        }
+        return;
+      }
+      manualDates.add(entryKey);
+    });
+
+    const manualKey = normalizeDateKey(t.calendarDateISO);
+    if (manualKey) manualDates.add(manualKey);
+
+    manualDates.forEach(dateKey => {
+      if (!dateKey) return;
+      if (completedKeys.has(dateKey)) return;
+      pushTaskEvent(t, dateKey, "manual");
+    });
+
+    const skipDates = new Set(completedKeys);
+    manualDates.forEach(dateKey => skipDates.add(dateKey));
+    const projections = projectIntervalDueDates(t, {
+      monthsAhead: 3,
+      excludeDates: skipDates,
+      minOccurrences: 6
+    });
+    if (projections.length){
+      projections.forEach(pred => {
+        const dueKey = normalizeDateKey(pred?.dateISO);
+        if (!dueKey) return;
+        if (completedKeys.has(dueKey)) return;
+        if (manualKey && manualKey === dueKey && !completedKeys.has(dueKey)) return;
+        pushTaskEvent(t, dueKey, "due");
       });
+      return;
     }
-    if (manualKey && !(completedKeys && completedKeys.has(manualKey))){
-      pushTaskEvent(t, manualKey, "manual");
-    }
+
     const nd = nextDue(t);
     if (!nd) return;
-    const dueKey = ymd(nd.due);
+    const dueKey = normalizeDateKey(nd.due);
     if (!dueKey) return;
-    if (completedKeys && completedKeys.has(dueKey)) return;
+    if (completedKeys.has(dueKey)) return;
     if (!manualKey || manualKey !== dueKey){
       pushTaskEvent(t, dueKey, "due");
     }
@@ -400,8 +967,15 @@ function renderCalendar(){
 
   const asReqTasks = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
   asReqTasks.forEach(t => {
-    if (!t || !t.calendarDateISO) return;
-    pushTaskEvent(t, t.calendarDateISO, "manual");
+    if (!t) return;
+    const completedDates = new Set(Array.isArray(t.completedDates) ? t.completedDates.map(normalizeDateKey).filter(Boolean) : []);
+    completedDates.forEach(dateKey => {
+      if (dateKey) pushTaskEvent(t, dateKey, "completed");
+    });
+    const manualKey = normalizeDateKey(t.calendarDateISO);
+    if (manualKey){
+      pushTaskEvent(t, manualKey, completedDates.has(manualKey) ? "completed" : "manual");
+    }
   });
 
   const jobsMap = {};
@@ -462,7 +1036,32 @@ function renderCalendar(){
   }
 
   const today = new Date(); today.setHours(0,0,0,0);
-  for (let m=0; m<3; m++){
+  let monthsToRender = 3;
+  const dueKeys = Object.keys(dueMap);
+  if (dueKeys.length){
+    let latest = null;
+    dueKeys.forEach(key => {
+      const normalized = normalizeDateKey(key);
+      if (!normalized) return;
+      if (!latest || normalized > latest){
+        latest = normalized;
+      }
+    });
+    if (latest){
+      const latestDate = parseDateLocal(latest);
+      if (latestDate instanceof Date && !Number.isNaN(latestDate.getTime())){
+        latestDate.setHours(0,0,0,0);
+        const diffMonths = (latestDate.getFullYear() - today.getFullYear()) * 12
+          + (latestDate.getMonth() - today.getMonth());
+        const required = diffMonths + 1;
+        if (Number.isFinite(required) && required > monthsToRender){
+          monthsToRender = Math.min(required, 12);
+        }
+      }
+    }
+  }
+
+  for (let m=0; m<monthsToRender; m++){
     const first = new Date(today.getFullYear(), today.getMonth()+m, 1);
     const last  = new Date(today.getFullYear(), today.getMonth()+m+1, 0);
 
@@ -523,6 +1122,9 @@ function renderCalendar(){
         if (ev.status === "completed") cls += " is-complete";
         chip.className = cls;
         chip.dataset.calTask = ev.id;
+        chip.dataset.calStatus = ev.status || "due";
+        if (ev.mode) chip.dataset.calMode = ev.mode;
+        chip.dataset.calDate = ev.dateISO || key;
         let label = ev.name;
         if (ev.status === "completed") label += " (completed)";
         else if (ev.status === "manual") label += " (scheduled)";
