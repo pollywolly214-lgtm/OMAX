@@ -385,6 +385,33 @@ function refreshGlobalCollections(){
   garnetCleanings = window.garnetCleanings;
 }
 
+function resolveTaskVariant(task){
+  if (!task || typeof task !== "object") return null;
+  const raw = typeof task.variant === "string" ? task.variant.toLowerCase() : "";
+  if (raw === "template" || raw === "instance") return raw;
+  if (task.templateId != null && String(task.templateId) !== String(task.id)) return "instance";
+  return null;
+}
+
+function isTemplateTask(task){
+  const variant = resolveTaskVariant(task);
+  if (variant) return variant === "template";
+  return !!(task && (task.mode === "interval" || task.mode === "asreq"));
+}
+
+function isInstanceTask(task){
+  return resolveTaskVariant(task) === "instance";
+}
+
+function ensureTaskVariant(task, type){
+  if (!task || typeof task !== "object") return;
+  const variant = resolveTaskVariant(task);
+  if (variant === "template" || variant === "instance") return;
+  if (type === "interval" || type === "asreq"){
+    task.variant = "template";
+  }
+}
+
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 if (!Array.isArray(window.deletedItems)) window.deletedItems = [];
 
@@ -1317,6 +1344,7 @@ function adoptState(doc){
   for (const list of [tasksInterval, tasksAsReq]){
     if (!Array.isArray(list)) continue;
     for (const task of list){
+      ensureTaskVariant(task, task && task.mode);
       const val = Number(task && task.order);
       if (Number.isFinite(val) && val > maxOrder) maxOrder = val;
     }

@@ -199,6 +199,19 @@ function removeCalendarTaskOccurrence(meta, dateISO){
   const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
   let changed = false;
 
+  if (isInstanceTask(task)){
+    if (Array.isArray(meta.list)){
+      meta.list.splice(meta.index, 1);
+      changed = true;
+      if (meta.mode === "asreq"){
+        window.tasksAsReq = meta.list;
+      }else{
+        window.tasksInterval = meta.list;
+      }
+    }
+    return changed;
+  }
+
   if (mode === "interval"){
     const history = typeof ensureTaskManualHistory === "function"
       ? ensureTaskManualHistory(task)
@@ -256,6 +269,37 @@ function removeCalendarTaskEverywhere(meta){
   return true;
 }
 
+function removeCalendarTaskFamily(meta){
+  if (!meta || !meta.task) return false;
+  const task = meta.task;
+  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
+  const list = mode === "asreq" ? (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []) : (Array.isArray(window.tasksInterval) ? window.tasksInterval : []);
+  const templateId = task.templateId != null ? String(task.templateId) : String(task.id);
+  const toRemove = [];
+  list.forEach((item, idx) => {
+    if (!item) return;
+    if (String(item.id) === templateId && isTemplateTask(item)){
+      toRemove.push(idx);
+      return;
+    }
+    if (String(item.templateId) === templateId && isInstanceTask(item)){
+      toRemove.push(idx);
+    }
+  });
+  if (!toRemove.length){
+    return removeCalendarTaskEverywhere(meta);
+  }
+  toRemove.sort((a,b)=> b - a).forEach(idx => {
+    if (idx >= 0 && idx < list.length) list.splice(idx,1);
+  });
+  if (mode === "asreq"){
+    window.tasksAsReq = list;
+  }else{
+    window.tasksInterval = list;
+  }
+  return true;
+}
+
 function getGarnetEntries(){
   if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
   return window.garnetCleanings;
@@ -290,8 +334,16 @@ function makeBubble(anchor){
 }
 
 function completeTask(taskId){
-  const meta = findCalendarTaskMeta(taskId);
+  let meta = findCalendarTaskMeta(taskId);
   if (!meta) return;
+  if (isTemplateTask(meta.task) && meta.task.mode === "interval"){
+    const instance = scheduleExistingIntervalTask(meta.task, { dateISO: ymd(new Date()) });
+    if (instance){
+      const nextMeta = findCalendarTaskMeta(instance.id);
+      if (nextMeta) meta = nextMeta;
+      else meta = { task: instance, mode: "interval", list: window.tasksInterval, index: window.tasksInterval.indexOf(instance) };
+    }
+  }
   const todayKey = normalizeDateKey(new Date());
   if (!todayKey) return;
   const changed = markCalendarTaskComplete(meta, todayKey);
@@ -407,14 +459,21 @@ function showTaskBubble(taskId, anchor, options = {}){
   });
 
   b.querySelector("[data-bbl-remove-task]")?.addEventListener("click", ()=>{
+    const templateId = task.templateId != null ? String(task.templateId) : String(task.id);
+    const list = mode === "asreq" ? (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []) : (Array.isArray(window.tasksInterval) ? window.tasksInterval : []);
+    const templateTask = list.find(item => item && String(item.id) === templateId && isTemplateTask(item)) || (isTemplateTask(task) ? task : null);
+    const label = templateTask?.name || task.name || "Task";
+    const confirmText = `Remove "${label}" from Maintenance Settings and delete all scheduled copies?`;
+    const shouldRemove = window.confirm ? window.confirm(confirmText) : true;
+    if (!shouldRemove) return;
     try {
       if (typeof recordDeletedItem === "function"){
-        recordDeletedItem("task", task, { list: mode, cat: task?.cat ?? null, parentTask: task?.parentTask ?? null });
+        recordDeletedItem("task", templateTask || task, { list: mode, cat: (templateTask || task)?.cat ?? null, parentTask: (templateTask || task)?.parentTask ?? null });
       }
     } catch (err) {
       console.warn("Failed to record deleted task from calendar", err);
     }
-    if (removeCalendarTaskEverywhere(meta)){
+    if (removeCalendarTaskFamily(meta)){
       saveCloudDebounced();
       toast("Task removed");
       hideBubble();
@@ -424,7 +483,10 @@ function showTaskBubble(taskId, anchor, options = {}){
 
   b.querySelector("[data-bbl-edit]")?.addEventListener("click", ()=>{
     hideBubble();
-    openSettingsAndReveal(taskId);
+    const targetId = isTemplateTask(task)
+      ? taskId
+      : (task.templateId != null ? String(task.templateId) : taskId);
+    openSettingsAndReveal(targetId);
   });
 
   b.addEventListener("click", (e)=>{
@@ -432,7 +494,10 @@ function showTaskBubble(taskId, anchor, options = {}){
     if (e.target.closest("button")) return;
     if (e.target.closest("a")) return;
     hideBubble();
-    openSettingsAndReveal(taskId);
+    const targetId = isTemplateTask(task)
+      ? taskId
+      : (task.templateId != null ? String(task.templateId) : taskId);
+    openSettingsAndReveal(targetId);
   });
 }
 
@@ -887,7 +952,9 @@ function renderCalendar(){
     events.push({ type:"task", id, name:task.name, status: statusKey, mode: task && task.mode === "asreq" ? "asreq" : "interval", dateISO: key });
   }
 
-  const intervalTasks = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  const intervalTasks = Array.isArray(window.tasksInterval)
+    ? window.tasksInterval.filter(t => t && t.mode === "interval" && isInstanceTask(t))
+    : [];
   const completedByTask = new Map();
   intervalTasks.forEach(t => {
     if (!t) return;
