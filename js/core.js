@@ -679,7 +679,11 @@ function applyRestoreByType(entry, index){
       while (existing.has(String(clone.id))){
         clone.id = genId(clone.name || "item");
       }
-      inventory.push(clone);
+      const normalizedInventory = normalizeInventoryItem(clone);
+      if (!normalizedInventory) return { handledRemoval: false, value: { type: "inventory", id: clone.id } };
+      const idx = inventory.findIndex(item => item && String(item.id) === String(normalizedInventory.id));
+      if (idx >= 0) inventory[idx] = normalizedInventory;
+      else inventory.push(normalizedInventory);
       window.inventory = inventory;
 
       const linkedTaskIdRaw = clone.linkedTaskId != null ? clone.linkedTaskId : (meta && meta.linkedTaskId != null ? meta.linkedTaskId : null);
@@ -1197,6 +1201,27 @@ function ensureTaskCategories(){
   tasksAsReq.forEach(t =>    { if (t && !t.cat) t.cat = "asreq"; });
 }
 
+function normalizeInventoryItem(raw){
+  if (!raw || typeof raw !== "object") return null;
+  const item = { ...raw };
+  const newVal = Number(item.qtyNew);
+  const oldVal = Number(item.qtyOld);
+  const legacyVal = Number(item.qty);
+  let qtyNew = Number.isFinite(newVal) && newVal >= 0 ? newVal : null;
+  let qtyOld = Number.isFinite(oldVal) && oldVal >= 0 ? oldVal : null;
+  if (qtyNew == null){
+    qtyNew = Number.isFinite(legacyVal) && legacyVal >= 0 ? legacyVal : 0;
+  }
+  if (qtyOld == null){
+    qtyOld = 0;
+  }
+  item.qtyNew = qtyNew;
+  item.qtyOld = qtyOld;
+  item.qty = qtyNew + qtyOld;
+  if (!item.unit){ item.unit = "pcs"; }
+  return item;
+}
+
 function adoptState(doc){
   const data = doc || {};
 
@@ -1208,7 +1233,9 @@ function adoptState(doc){
   tasksAsReq = (Array.isArray(data.tasksAsReq) && data.tasksAsReq.length)
     ? data.tasksAsReq
     : defaultAsReqTasks.slice();
-  inventory = Array.isArray(data.inventory) ? data.inventory : seedInventoryFromTasks();
+  inventory = Array.isArray(data.inventory)
+    ? data.inventory.map(normalizeInventoryItem).filter(Boolean)
+    : seedInventoryFromTasks();
   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
   completedCuttingJobs = Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [];
   orderRequests = normalizeOrderRequests(Array.isArray(data.orderRequests) ? data.orderRequests : []);
@@ -1459,9 +1486,9 @@ async function loadFromCloud(){
 
 function seedInventoryFromTasks(){
   return [
-    ...defaultIntervalTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"", price:t.price!=null?Number(t.price):null })),
-    ...defaultAsReqTasks.map(t => ({ id:`inv_${t.id}`, name:t.name, qty:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"", price:t.price!=null?Number(t.price):null })),
-  ];
+    ...defaultIntervalTasks.map(t => normalizeInventoryItem({ id:`inv_${t.id}`, name:t.name, qtyNew:0, qtyOld:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"", price:t.price!=null?Number(t.price):null })),
+    ...defaultAsReqTasks.map(t => normalizeInventoryItem({ id:`inv_${t.id}`, name:t.name, qtyNew:0, qtyOld:0, unit:"pcs", note:"", pn:t.pn||"", link:t.storeLink||"", price:t.price!=null?Number(t.price):null })),
+  ].filter(Boolean);
 }
 
 function buildOrderRequestCode(dateISO){
