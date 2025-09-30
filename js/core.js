@@ -360,6 +360,9 @@ let garnetCleanings = window.garnetCleanings;
 function refreshGlobalCollections(){
   if (typeof window === "undefined") return;
 
+  if (!Array.isArray(window.totalHistory)) window.totalHistory = [];
+  totalHistory = window.totalHistory;
+
   if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
   tasksInterval = window.tasksInterval;
 
@@ -1004,6 +1007,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
 
 /* ==================== Cloud load / save ===================== */
 function snapshotState(){
+  refreshGlobalCollections();
   const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
   const foldersSnapshot = snapshotSettingsFolders();
   const trashSnapshot = deletedItems.map(entry => ({

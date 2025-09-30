@@ -7072,6 +7072,7 @@ function renderJobs(){
         }
       }
       cuttingJobs = cuttingJobs.filter(x=>x.id!==id);
+      window.cuttingJobs = cuttingJobs;
       saveCloudDebounced(); toast("Removed"); renderJobs();
       return;
     }
