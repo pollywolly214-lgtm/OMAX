@@ -74,7 +74,38 @@ function viewDashboard(){
 
       <section class="dash-modal-step" data-step="task" hidden>
         <h4>Add maintenance task</h4>
-        <form id="dashTaskForm" class="modal-form">
+        <div class="task-option-stage" data-task-option-stage>
+          <p class="small muted">Choose how you'd like to add this maintenance task.</p>
+          <div class="task-option-grid">
+            <button type="button" class="task-option" data-task-option="existing">
+              <span class="task-option-title">Select from current tasks</span>
+              <span class="task-option-sub">Place a saved task onto the calendar.</span>
+            </button>
+            <button type="button" class="task-option" data-task-option="new">
+              <span class="task-option-title">Create new task</span>
+              <span class="task-option-sub">Add a brand-new maintenance task.</span>
+            </button>
+          </div>
+          <div class="task-option-actions">
+            <button type="button" class="secondary" data-step-back>Back</button>
+          </div>
+        </div>
+
+        <form id="dashTaskExistingForm" class="modal-form" data-task-variant="existing" hidden>
+          <div class="task-existing-search">
+            <label>Search tasks<input type="search" id="dashTaskExistingSearch" placeholder="Search saved maintenance tasks" autocomplete="off"></label>
+          </div>
+          <label>Maintenance task<select id="dashTaskExistingSelect"></select></label>
+          <p class="small muted">Pick a task saved in Maintenance Settings to schedule it on the calendar.</p>
+          <p class="small muted" data-task-existing-empty hidden>No maintenance tasks yet. Create one below to get started.</p>
+          <p class="small muted" data-task-existing-search-empty hidden>No tasks match your search. Try a different name.</p>
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-step-back>Back</button>
+            <button type="submit" class="primary">Add to Calendar</button>
+          </div>
+        </form>
+
+        <form id="dashTaskForm" class="modal-form" data-task-variant="new" hidden>
           <div class="modal-grid">
             <label>Task name<input id="dashTaskName" required placeholder="Task"></label>
             <label>Type<select id="dashTaskType">
@@ -103,7 +134,7 @@ function viewDashboard(){
 
           <div class="modal-actions">
             <button type="button" class="secondary" data-step-back>Back</button>
-            <button type="submit" class="primary">Create Task</button>
+            <button type="submit" class="primary" data-task-submit>Create Task</button>
           </div>
         </form>
       </section>
