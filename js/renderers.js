@@ -2997,7 +2997,7 @@ const makeActiveCopyModalState = {
 };
 
 const DATE_INPUT_RE = /^\d{4}-\d{2}-\d{2}$/;
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const JOB_DAY_MS = 24 * 60 * 60 * 1000;
 
 function parseJobDate(value){
   if (!value) return null;
@@ -3119,7 +3119,7 @@ function ensureMakeActiveCopyModal(){
         const startDate = parseJobDate(startVal);
         const dueDate = parseJobDate(dueVal);
         if (startDate && dueDate && dueDate >= startDate){
-          const days = Math.max(1, Math.round((dueDate.getTime() - startDate.getTime()) / MS_PER_DAY) + 1);
+          const days = Math.max(1, Math.round((dueDate.getTime() - startDate.getTime()) / JOB_DAY_MS) + 1);
           state.durationEl.textContent = `Cutting days: ${days}`;
           state.durationEl.hidden = false;
         }else{
@@ -5446,10 +5446,9 @@ function computeCostModel(){
 
   maintenanceOrderItems.sort((a,b)=> a.time - b.time);
 
-  const MS_PER_DAY = 24 * 60 * 60 * 1000;
   const maintenanceSpendSince = (days)=>{
     if (!isFinite(days) || days <= 0 || !maintenanceOrderItems.length) return 0;
-    const cutoff = Date.now() - (days * MS_PER_DAY);
+    const cutoff = Date.now() - (days * JOB_DAY_MS);
     let total = 0;
     for (const entry of maintenanceOrderItems){
       if (entry.time >= cutoff) total += entry.amount;
@@ -6481,7 +6480,7 @@ function renderJobs(){
       if (!defaultDueDate){
         let projectedDays = null;
         if (entryStartDate && entryDueDate && entryDueDate >= entryStartDate){
-          projectedDays = Math.max(1, Math.round((entryDueDate.getTime() - entryStartDate.getTime()) / MS_PER_DAY) + 1);
+          projectedDays = Math.max(1, Math.round((entryDueDate.getTime() - entryStartDate.getTime()) / JOB_DAY_MS) + 1);
         }
         if (projectedDays == null){
           const est = Number(entry.estimateHours);
@@ -6495,7 +6494,7 @@ function renderJobs(){
         const baseSource = (defaultStartDate instanceof Date && !Number.isNaN(defaultStartDate.getTime())) ? defaultStartDate : safeToday;
         const base = baseSource ? new Date(baseSource.getTime()) : new Date();
         base.setHours(0, 0, 0, 0);
-        defaultDueDate = new Date(base.getTime() + (Math.max(1, projectedDays) - 1) * MS_PER_DAY);
+        defaultDueDate = new Date(base.getTime() + (Math.max(1, projectedDays) - 1) * JOB_DAY_MS);
         defaultDueDate.setHours(0, 0, 0, 0);
       }
 
@@ -6517,7 +6516,7 @@ function renderJobs(){
       const startDate = parseJobDate(startISO);
       const dueDate = parseJobDate(dueISO);
       if (!startDate || !dueDate){ toast("Enter valid dates."); return; }
-      const normalizedDays = Math.max(1, Math.round((dueDate.getTime() - startDate.getTime()) / MS_PER_DAY) + 1);
+      const normalizedDays = Math.max(1, Math.round((dueDate.getTime() - startDate.getTime()) / JOB_DAY_MS) + 1);
 
       let estimateHours = Number(entry.estimateHours);
       const materialCost = Number(entry.materialCost);
