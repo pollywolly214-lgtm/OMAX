@@ -47,14 +47,15 @@ function viewDashboard(){
     </div>
 
     <div class="block calendar-block">
-      <h3>Calendar (Current + Next 2 Months)</h3>
+      <h3>Calendar</h3>
 
       <div class="calendar-toolbar">
+        <button type="button" class="calendar-toggle-btn" id="calendarToggleBtn" aria-pressed="false" aria-controls="months">Show All Months</button>
         <button type="button" class="calendar-add-btn" id="calendarAddBtn" title="Add maintenance task, down time, or job">+</button>
       </div>
 
       <div id="months"></div>
-      <div class="small">Hover a due item for actions. Click to pin the bubble.</div>
+      <div class="small">Hover a due item for actions. Click to pin the bubble. Toggle “Show All Months” to scroll through the schedule.</div>
     </div>
   </div>
 
