@@ -2909,6 +2909,12 @@ function renderDashboard(){
   refreshDownTimeList();
 
   document.getElementById("calendarAddBtn")?.addEventListener("click", ()=> openModal("picker"));
+  document.getElementById("calendarToggleBtn")?.addEventListener("click", (event)=>{
+    toggleCalendarShowAllMonths();
+    if (event?.currentTarget instanceof HTMLElement){
+      event.currentTarget.blur();
+    }
+  });
 
   setupDashboardLayout();
   renderCalendar();

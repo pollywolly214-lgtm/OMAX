@@ -2197,6 +2197,53 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
 .day.downtime { background: #ffe5e5; }
 .day.downtime .date { color: #b71c1c; }
 .calendar-toolbar { margin-bottom: 10px; display:flex; justify-content:flex-end; align-items:center; gap:8px; }
+.calendar-block--compact #months { overflow: visible; max-height: none; }
+.calendar-block--expanded #months {
+  max-height: 65vh;
+  overflow-y: auto;
+  padding-right: 8px;
+  scrollbar-gutter: stable;
+}
+.calendar-block--expanded #months::-webkit-scrollbar { width: 8px; }
+.calendar-block--expanded #months::-webkit-scrollbar-thumb {
+  background: rgba(10, 63, 155, 0.35);
+  border-radius: 999px;
+}
+.calendar-block--expanded #months::-webkit-scrollbar-thumb:hover {
+  background: rgba(10, 63, 155, 0.55);
+}
+.calendar-toggle-btn {
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(10, 63, 155, 0.28);
+  background: rgba(255, 255, 255, 0.85);
+  color: #0a3f9b;
+  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: none;
+}
+.calendar-toggle-btn:hover {
+  background: #e5eeff;
+  border-color: rgba(10, 63, 155, 0.45);
+  color: #073177;
+}
+.calendar-toggle-btn:focus-visible {
+  outline: 2px solid #0a63c2;
+  outline-offset: 2px;
+}
+.calendar-toggle-btn[aria-pressed="true"] {
+  background: #0a63c2;
+  border-color: #0a63c2;
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(9, 65, 150, 0.25);
+}
+.calendar-toggle-btn[aria-pressed="true"]:hover {
+  background: #084f9d;
+  border-color: #084f9d;
+}
 .calendar-add-btn {
   width: 36px;
   height: 36px;

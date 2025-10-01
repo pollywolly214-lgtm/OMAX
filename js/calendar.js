@@ -1,6 +1,14 @@
 /* ================== CALENDAR & BUBBLES ===================== */
 let bubbleTimer = null;
 const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
+if (typeof window !== "undefined"){
+  if (typeof window.__calendarShowAllMonths !== "boolean"){
+    window.__calendarShowAllMonths = false;
+  }
+  if (typeof window.__calendarAvailableMonths !== "number"){
+    window.__calendarAvailableMonths = 3;
+  }
+}
 function hideBubble(){
   if (bubbleTimer){
     clearTimeout(bubbleTimer);
@@ -925,7 +933,9 @@ function projectIntervalDueDates(task, options = {}){
 function renderCalendar(){
   const container = $("#months");
   if (!container) return;
+  let showAll = Boolean(window.__calendarShowAllMonths);
   container.innerHTML = "";
+  const block = container.closest(".calendar-block");
 
   const dueMap = {};
   function pushTaskEvent(task, iso, status){
@@ -1103,7 +1113,7 @@ function renderCalendar(){
   }
 
   const today = new Date(); today.setHours(0,0,0,0);
-  let monthsToRender = 3;
+  let maxMonthsNeeded = 3;
   const dueKeys = Object.keys(dueMap);
   if (dueKeys.length){
     let latest = null;
@@ -1121,12 +1131,37 @@ function renderCalendar(){
         const diffMonths = (latestDate.getFullYear() - today.getFullYear()) * 12
           + (latestDate.getMonth() - today.getMonth());
         const required = diffMonths + 1;
-        if (Number.isFinite(required) && required > monthsToRender){
-          monthsToRender = Math.min(required, 12);
+        if (Number.isFinite(required)){
+          const limited = Math.min(Math.max(Math.round(required), 1), 12);
+          if (limited > maxMonthsNeeded){
+            maxMonthsNeeded = limited;
+          }
         }
       }
     }
   }
+
+  const expandedMonths = Math.max(maxMonthsNeeded, 12);
+  window.__calendarAvailableMonths = expandedMonths;
+
+  const expanded = Boolean(showAll);
+  if (block){
+    block.classList.toggle("calendar-block--expanded", expanded);
+    block.classList.toggle("calendar-block--compact", !expanded);
+  }
+
+  const toggleBtn = document.getElementById("calendarToggleBtn");
+  if (toggleBtn){
+    toggleBtn.hidden = false;
+    toggleBtn.textContent = expanded ? "Show 3 Months" : "Show All Months";
+    toggleBtn.setAttribute("aria-pressed", expanded ? "true" : "false");
+    toggleBtn.title = expanded
+      ? "Collapse to show only the current and next two months"
+      : `Expand to view all ${expandedMonths} months`;
+  }
+
+  let monthsToRender = expanded ? expandedMonths : 3;
+  monthsToRender = Math.max(1, Math.round(monthsToRender));
 
   for (let m=0; m<monthsToRender; m++){
     const first = new Date(today.getFullYear(), today.getMonth()+m, 1);
@@ -1244,5 +1279,11 @@ function renderCalendar(){
     container.appendChild(monthDiv);
   }
   wireCalendarBubbles();
+}
+
+function toggleCalendarShowAllMonths(){
+  const next = !Boolean(window.__calendarShowAllMonths);
+  window.__calendarShowAllMonths = next;
+  renderCalendar();
 }
 
