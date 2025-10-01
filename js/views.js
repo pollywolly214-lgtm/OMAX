@@ -1645,7 +1645,7 @@ function inventoryRowsHTML(list){
       <td><input type="text" data-inv="note" data-id="${i.id}" value="${i.note||""}"></td>
       <td class="inventory-actions">
         <button type="button" class="inventory-add" data-order-add="${i.id}">Add to order request</button>
-        <button type="button" class="inventory-delete" data-inventory-delete="${i.id}">Delete</button>
+        <button type="button" class="inventory-delete" data-inventory-delete="${i.id}">Remove item</button>
       </td>
     </tr>`;
   }).join("");

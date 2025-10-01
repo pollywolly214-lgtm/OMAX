@@ -3557,6 +3557,138 @@ function showConfirmModal(options){
   });
 }
 
+const inventoryDeleteChoiceState = {
+  root: null,
+  titleEl: null,
+  messageEl: null,
+  listEl: null,
+  cancelBtn: null,
+  inventoryBtn: null,
+  bothBtn: null,
+  closeBtn: null
+};
+
+function ensureInventoryDeleteChoiceModal(){
+  const template = `
+    <div class="modal-card confirm-modal-card">
+      <button type="button" class="modal-close" data-choice-close>×</button>
+      <h4 data-choice-title>Remove inventory item?</h4>
+      <p class="confirm-modal-copy" data-choice-message></p>
+      <ul class="confirm-modal-list" data-choice-list hidden></ul>
+      <div class="modal-actions confirm-modal-actions inventory-delete-actions">
+        <button type="button" class="secondary" data-choice-cancel>Cancel</button>
+        <button type="button" class="secondary" data-choice-inventory>Inventory only</button>
+        <button type="button" class="danger" data-choice-both>Inventory &amp; Maintenance</button>
+      </div>
+    </div>
+  `.trim();
+
+  let root = inventoryDeleteChoiceState.root;
+  if (!root || !root.isConnected){
+    root = document.getElementById("inventoryDeleteChoiceModal");
+    if (!root){
+      root = document.createElement("div");
+      root.id = "inventoryDeleteChoiceModal";
+      root.className = "modal-backdrop";
+      root.setAttribute("hidden", "");
+      const target = document.body || document.documentElement || document;
+      target.appendChild(root);
+    }
+    inventoryDeleteChoiceState.root = root;
+  }
+
+  if (inventoryDeleteChoiceState.root && inventoryDeleteChoiceState.root.innerHTML.trim() === ""){
+    inventoryDeleteChoiceState.root.innerHTML = template;
+  }
+
+  const ensureStructure = ()=>{
+    const host = inventoryDeleteChoiceState.root;
+    if (!host) return;
+    if (!host.querySelector("[data-choice-title]")){
+      host.innerHTML = template;
+    }
+    inventoryDeleteChoiceState.titleEl = host.querySelector("[data-choice-title]");
+    inventoryDeleteChoiceState.messageEl = host.querySelector("[data-choice-message]");
+    inventoryDeleteChoiceState.listEl = host.querySelector("[data-choice-list]");
+    inventoryDeleteChoiceState.cancelBtn = host.querySelector("[data-choice-cancel]");
+    inventoryDeleteChoiceState.inventoryBtn = host.querySelector("[data-choice-inventory]");
+    inventoryDeleteChoiceState.bothBtn = host.querySelector("[data-choice-both]");
+    inventoryDeleteChoiceState.closeBtn = host.querySelector("[data-choice-close]");
+  };
+
+  ensureStructure();
+  return inventoryDeleteChoiceState;
+}
+
+function showInventoryDeleteChoiceModal(options){
+  const state = ensureInventoryDeleteChoiceModal();
+  const root = state.root;
+  if (!root) return Promise.resolve("cancel");
+
+  const opts = options || {};
+  const safeText = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[c]);
+
+  if (state.titleEl) state.titleEl.textContent = opts.title || "Remove inventory item?";
+  if (state.messageEl) state.messageEl.textContent = opts.message || "Choose how you'd like to remove this item.";
+
+  if (state.listEl){
+    const listItems = Array.isArray(opts.items) ? opts.items.filter(item => item != null && item !== "") : [];
+    if (listItems.length){
+      state.listEl.innerHTML = listItems.map(item => `<li>${safeText(item)}</li>`).join("");
+      state.listEl.removeAttribute("hidden");
+    }else{
+      state.listEl.innerHTML = "";
+      state.listEl.setAttribute("hidden", "");
+    }
+  }
+
+  if (state.cancelBtn) state.cancelBtn.textContent = opts.cancelText || "Cancel";
+  if (state.inventoryBtn) state.inventoryBtn.textContent = opts.inventoryText || "Inventory only";
+  if (state.bothBtn) state.bothBtn.textContent = opts.bothText || "Inventory & Maintenance";
+
+  return new Promise(resolve => {
+    const cleanup = ()=>{
+      root.classList.remove("is-visible");
+      root.setAttribute("hidden", "");
+      document.body?.classList.remove("modal-open");
+      if (state.cancelBtn) state.cancelBtn.removeEventListener("click", onCancel);
+      if (state.inventoryBtn) state.inventoryBtn.removeEventListener("click", onInventory);
+      if (state.bothBtn) state.bothBtn.removeEventListener("click", onBoth);
+      if (state.closeBtn) state.closeBtn.removeEventListener("click", onCancel);
+      root.removeEventListener("click", onBackdropClick);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+
+    const onCancel = ()=>{ cleanup(); resolve("cancel"); };
+    const onInventory = ()=>{ cleanup(); resolve("inventory"); };
+    const onBoth = ()=>{ cleanup(); resolve("both"); };
+    const onBackdropClick = (evt)=>{ if (evt.target === root) onCancel(); };
+    const onKeyDown = (evt)=>{ if (evt.key === "Escape") onCancel(); };
+
+    if (state.cancelBtn) state.cancelBtn.addEventListener("click", onCancel);
+    if (state.inventoryBtn) state.inventoryBtn.addEventListener("click", onInventory);
+    if (state.bothBtn) state.bothBtn.addEventListener("click", onBoth);
+    if (state.closeBtn) state.closeBtn.addEventListener("click", onCancel);
+    root.addEventListener("click", onBackdropClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    root.classList.add("is-visible");
+    root.removeAttribute("hidden");
+    document.body?.classList.add("modal-open");
+
+    const focusTarget = state.inventoryBtn || state.bothBtn || state.cancelBtn;
+    if (focusTarget && typeof focusTarget.focus === "function"){
+      requestAnimationFrame(()=> focusTarget.focus());
+    }
+  });
+}
+
 const makeActiveCopyModalState = {
   root: null,
   form: null,
@@ -7662,8 +7794,44 @@ function renderInventory(){
     if (deleteBtn){
       const id = deleteBtn.getAttribute("data-inventory-delete");
       if (!id) return;
-      const removed = await deleteInventoryItem(id);
-      if (removed) refreshRows();
+      const item = inventory.find(entry => entry && String(entry.id) === String(id));
+      if (!item){ toast("Inventory item not found."); return; }
+      const linkedTasks = findTasksLinkedToInventoryItem(item);
+      const taskNames = linkedTasks.map(task => task && task.name ? task.name : "Unnamed maintenance task");
+      const itemLabel = item && item.name ? `"${item.name}"` : "this item";
+      const count = linkedTasks.length;
+      const baseMessage = count > 0
+        ? (count === 1
+          ? `Choose how to remove ${itemLabel}. It's linked to the maintenance task shown below.`
+          : `Choose how to remove ${itemLabel}. It's linked to these maintenance tasks.`)
+        : `Remove ${itemLabel} from inventory. You can also delete any linked maintenance tasks.`;
+      const choice = await showInventoryDeleteChoiceModal({
+        title: "Remove inventory item?",
+        message: baseMessage,
+        items: taskNames,
+        cancelText: "Keep item",
+        inventoryText: "Inventory only",
+        bothText: "Inventory & Maintenance"
+      });
+      if (choice === "cancel") return;
+
+      let tasksRemoved = false;
+      if (choice === "both" && linkedTasks.length){
+        tasksRemoved = removeMaintenanceTasksForInventoryItem(item, linkedTasks);
+      }
+
+      const removed = await deleteInventoryItem(id, {
+        skipConfirm: true,
+        suppressToast: true
+      });
+      if (!removed) return;
+
+      if (choice === "both" && (tasksRemoved || linkedTasks.length)){
+        toast("Removed from inventory and Maintenance Settings");
+      }else{
+        toast("Removed from inventory");
+      }
+      refreshRows();
       return;
     }
 
@@ -8043,6 +8211,79 @@ function findTasksLinkedToInventoryItem(item){
   });
 
   return matches;
+}
+
+function removeMaintenanceTasksForInventoryItem(item, matches){
+  const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
+  if (!list.length) return false;
+
+  const idsToRemove = new Set();
+  list.forEach(task => {
+    if (!task || task.id == null) return;
+    idsToRemove.add(String(task.id));
+  });
+  if (idsToRemove.size === 0) return false;
+
+  let removedAny = false;
+  const recordTaskDeletion = (task, mode)=>{
+    if (!task) return;
+    if (typeof recordDeletedItem !== "function") return;
+    try {
+      const deletionMeta = {
+        list: mode,
+        cat: task?.cat ?? null,
+        parentTask: task?.parentTask ?? null,
+        inventoryId: task?.inventoryId ?? null,
+        linkedInventoryId: task?.inventoryId ?? null,
+        inventoryIdOriginal: task?.inventoryId ?? null
+      };
+      recordDeletedItem("task", task, deletionMeta);
+    } catch (err){
+      console.warn("Failed to record deleted task", err);
+    }
+  };
+
+  const removeFromList = (source, mode)=>{
+    if (!Array.isArray(source)) return [];
+    const next = [];
+    source.forEach(task => {
+      if (!task){
+        return;
+      }
+      const tid = task.id != null ? String(task.id) : "";
+      if (tid && idsToRemove.has(tid)){
+        removedAny = true;
+        recordTaskDeletion(task, mode);
+        return;
+      }
+      next.push(task);
+    });
+    return next;
+  };
+
+  window.tasksInterval = removeFromList(window.tasksInterval, "interval");
+  window.tasksAsReq = removeFromList(window.tasksAsReq, "asreq");
+
+  const cleanupParents = (collection)=>{
+    if (!Array.isArray(collection)) return;
+    collection.forEach(task => {
+      if (!task) return;
+      if (task.parentTask != null && idsToRemove.has(String(task.parentTask))){
+        task.parentTask = null;
+      }
+    });
+  };
+
+  if (removedAny){
+    cleanupParents(window.tasksInterval);
+    cleanupParents(window.tasksAsReq);
+    try { if (typeof saveTasks === "function") saveTasks(); }
+    catch (err) { console.warn("Failed to save tasks after removal", err); }
+    try { if (typeof saveCloudDebounced === "function") saveCloudDebounced(); }
+    catch (err) { console.warn("Failed to sync cloud after task removal", err); }
+  }
+
+  return removedAny;
 }
 
 async function deleteInventoryItem(id, options){
