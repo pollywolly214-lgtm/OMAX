@@ -3438,6 +3438,7 @@ function ensureSharedConfirmModal(){
       <ul class="confirm-modal-list" data-confirm-list hidden></ul>
       <div class="modal-actions confirm-modal-actions">
         <button type="button" class="secondary" data-confirm-cancel>Cancel</button>
+        <button type="button" class="secondary" data-confirm-secondary hidden>Secondary</button>
         <button type="button" class="danger" data-confirm-confirm>Delete</button>
       </div>
     </div>
@@ -3472,6 +3473,7 @@ function ensureSharedConfirmModal(){
     sharedConfirmModalState.listEl = host.querySelector("[data-confirm-list]");
     sharedConfirmModalState.confirmBtn = host.querySelector("[data-confirm-confirm]");
     sharedConfirmModalState.cancelBtn = host.querySelector("[data-confirm-cancel]");
+    sharedConfirmModalState.secondaryBtn = host.querySelector("[data-confirm-secondary]");
     sharedConfirmModalState.closeBtn = host.querySelector("[data-confirm-close]");
   };
 
@@ -3508,6 +3510,11 @@ function showConfirmModal(options){
   }
 
   if (state.cancelBtn) state.cancelBtn.textContent = opts.cancelText || "Cancel";
+  if (state.secondaryBtn){
+    state.secondaryBtn.textContent = opts.secondaryText || "";
+    state.secondaryBtn.classList.remove("danger", "primary", "secondary");
+    state.secondaryBtn.setAttribute("hidden", "");
+  }
   if (state.confirmBtn){
     state.confirmBtn.textContent = opts.confirmText || "Confirm";
     const variant = opts.confirmVariant;
@@ -3523,6 +3530,7 @@ function showConfirmModal(options){
       root.setAttribute("hidden", "");
       document.body?.classList.remove("modal-open");
       if (state.confirmBtn) state.confirmBtn.removeEventListener("click", onConfirm);
+      if (state.secondaryBtn) state.secondaryBtn.removeEventListener("click", onSecondary);
       if (state.cancelBtn) state.cancelBtn.removeEventListener("click", onCancel);
       if (state.closeBtn) state.closeBtn.removeEventListener("click", onCancel);
       root.removeEventListener("click", onBackdropClick);
@@ -3530,11 +3538,13 @@ function showConfirmModal(options){
     };
 
     const onConfirm = ()=>{ cleanup(); resolve(true); };
+    const onSecondary = ()=>{ cleanup(); resolve(true); };
     const onCancel = ()=>{ cleanup(); resolve(false); };
     const onBackdropClick = (evt)=>{ if (evt.target === root) onCancel(); };
     const onKeyDown = (evt)=>{ if (evt.key === "Escape") onCancel(); };
 
     if (state.confirmBtn) state.confirmBtn.addEventListener("click", onConfirm);
+    if (state.secondaryBtn) state.secondaryBtn.addEventListener("click", onSecondary);
     if (state.cancelBtn) state.cancelBtn.addEventListener("click", onCancel);
     if (state.closeBtn) state.closeBtn.addEventListener("click", onCancel);
     root.addEventListener("click", onBackdropClick);
@@ -3545,6 +3555,100 @@ function showConfirmModal(options){
     document.body?.classList.add("modal-open");
 
     const focusTarget = state.confirmBtn || state.cancelBtn;
+    if (focusTarget && typeof focusTarget.focus === "function"){
+      requestAnimationFrame(()=> focusTarget.focus());
+    }
+  });
+}
+
+function showConfirmChoices(options){
+  const state = ensureSharedConfirmModal();
+  const root = state.root;
+  if (!root) return Promise.resolve("cancel");
+
+  const opts = options || {};
+  const safeText = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[c]);
+
+  if (state.titleEl) state.titleEl.textContent = opts.title || "Confirm";
+  if (state.messageEl) state.messageEl.textContent = opts.message || "";
+
+  if (state.listEl){
+    const listItems = Array.isArray(opts.items) ? opts.items.filter(item => item != null && item !== "") : [];
+    if (listItems.length){
+      state.listEl.innerHTML = listItems.map(item => `<li>${safeText(item)}</li>`).join("");
+      state.listEl.removeAttribute("hidden");
+    }else{
+      state.listEl.innerHTML = "";
+      state.listEl.setAttribute("hidden", "");
+    }
+  }
+
+  if (state.cancelBtn) state.cancelBtn.textContent = opts.cancelText || "Cancel";
+
+  if (state.secondaryBtn){
+    if (opts.secondaryText){
+      state.secondaryBtn.textContent = opts.secondaryText;
+      const variant = opts.secondaryVariant;
+      state.secondaryBtn.classList.remove("danger", "primary", "secondary");
+      if (variant === "primary") state.secondaryBtn.classList.add("primary");
+      else if (variant === "danger") state.secondaryBtn.classList.add("danger");
+      else state.secondaryBtn.classList.add("secondary");
+      state.secondaryBtn.removeAttribute("hidden");
+    }else{
+      state.secondaryBtn.textContent = "";
+      state.secondaryBtn.classList.remove("danger", "primary", "secondary");
+      state.secondaryBtn.setAttribute("hidden", "");
+    }
+  }
+
+  if (state.confirmBtn){
+    state.confirmBtn.textContent = opts.confirmText || "Confirm";
+    const variant = opts.confirmVariant;
+    state.confirmBtn.classList.remove("danger", "primary", "secondary");
+    if (variant === "primary") state.confirmBtn.classList.add("primary");
+    else if (variant === "secondary") state.confirmBtn.classList.add("secondary");
+    else state.confirmBtn.classList.add("danger");
+  }
+
+  return new Promise(resolve => {
+    const cleanup = ()=>{
+      root.classList.remove("is-visible");
+      root.setAttribute("hidden", "");
+      document.body?.classList.remove("modal-open");
+      if (state.confirmBtn) state.confirmBtn.removeEventListener("click", onConfirm);
+      if (state.secondaryBtn) state.secondaryBtn.removeEventListener("click", onSecondary);
+      if (state.cancelBtn) state.cancelBtn.removeEventListener("click", onCancel);
+      if (state.closeBtn) state.closeBtn.removeEventListener("click", onCancel);
+      root.removeEventListener("click", onBackdropClick);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+
+    const onConfirm = ()=>{ cleanup(); resolve("confirm"); };
+    const onSecondary = ()=>{ cleanup(); resolve("secondary"); };
+    const onCancel = ()=>{ cleanup(); resolve("cancel"); };
+    const onBackdropClick = (evt)=>{ if (evt.target === root) onCancel(); };
+    const onKeyDown = (evt)=>{ if (evt.key === "Escape") onCancel(); };
+
+    if (state.confirmBtn) state.confirmBtn.addEventListener("click", onConfirm);
+    if (state.secondaryBtn && !state.secondaryBtn.hasAttribute("hidden")){
+      state.secondaryBtn.addEventListener("click", onSecondary);
+    }
+    if (state.cancelBtn) state.cancelBtn.addEventListener("click", onCancel);
+    if (state.closeBtn) state.closeBtn.addEventListener("click", onCancel);
+    root.addEventListener("click", onBackdropClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    root.classList.add("is-visible");
+    root.removeAttribute("hidden");
+    document.body?.classList.add("modal-open");
+
+    const focusTarget = state.confirmBtn || state.secondaryBtn || state.cancelBtn;
     if (focusTarget && typeof focusTarget.focus === "function"){
       requestAnimationFrame(()=> focusTarget.focus());
     }
@@ -4482,26 +4586,112 @@ function renderSettings(){
 
   const promptRemoveLinkedInventory = async (task, matches)=>{
     const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
-    if (!list.length) return "keep";
-
     const taskLabel = task && task.name ? `"${task.name}"` : "this task";
+    if (!list.length){
+      const confirmed = await showConfirmModal({
+        title: "Remove maintenance task?",
+        message: `Delete ${taskLabel}? This will remove it from every page.`,
+        cancelText: "Cancel",
+        confirmText: "Delete task",
+        confirmVariant: "danger"
+      });
+      return confirmed ? "task" : "cancel";
+    }
+
     const count = list.length;
     const baseMessage = count === 1
-      ? `Delete ${taskLabel}? This task is also in inventory.`
-      : `Delete ${taskLabel}? This task is also in inventory with ${count} items.`;
-    const confirmText = "Remove from inventory too";
-    const choice = await showConfirmModal({
-      title: "Remove task?",
-      message: count === 1
-        ? `${baseMessage} Remove the linked inventory item as well?`
-        : `${baseMessage} Remove the linked inventory items as well?`,
+      ? `Delete ${taskLabel}? It's linked to the inventory item below.`
+      : `Delete ${taskLabel}? It's linked to these ${count} inventory items.`;
+    const choice = await showConfirmChoices({
+      title: "Remove maintenance task?",
+      message: `${baseMessage} Choose what to delete.`,
       items: list.map(item => item && item.name ? item.name : "Unnamed inventory item"),
-      cancelText: "Keep inventory",
-      confirmText,
-      confirmVariant: "danger"
+      cancelText: "Cancel",
+      confirmText: "Delete task & inventory",
+      confirmVariant: "danger",
+      secondaryText: "Delete task only",
+      secondaryVariant: "secondary"
     });
-    return choice ? "remove" : "keep";
+    if (choice === "confirm") return "both";
+    if (choice === "secondary") return "task";
+    return "cancel";
   };
+
+  async function deleteMaintenanceTaskMeta(meta, options){
+    if (!meta) return false;
+    const opts = options || {};
+    const task = meta.task;
+    const presetMatches = Array.isArray(opts.matches) ? opts.matches : null;
+    const matches = presetMatches ? presetMatches : findInventoryMatchesForTask(task);
+    let removeInventoryAlso = opts.deleteInventory === true;
+    if (!opts.skipPrompt){
+      const decision = await promptRemoveLinkedInventory(task, matches);
+      if (decision === "cancel") return false;
+      removeInventoryAlso = decision === "both";
+    }
+    try {
+      if (typeof recordDeletedItem === "function"){
+        const deletionMeta = {
+          list: meta.mode,
+          cat: task?.cat ?? null,
+          parentTask: task?.parentTask ?? null,
+          inventoryId: task?.inventoryId ?? null,
+          linkedInventoryId: task?.inventoryId ?? null,
+          inventoryIdOriginal: task?.inventoryId ?? null
+        };
+        recordDeletedItem("task", task, deletionMeta);
+      }
+    } catch (err) {
+      console.warn("Failed to record deleted task", err);
+    }
+
+    const id = meta.task?.id != null ? String(meta.task.id) : null;
+    window.tasksInterval.forEach(t => { if (String(t?.parentTask) === String(id)) t.parentTask = null; });
+    window.tasksAsReq.forEach(t => { if (String(t?.parentTask) === String(id)) t.parentTask = null; });
+    if (meta.mode === 'interval'){
+      window.tasksInterval = window.tasksInterval.filter(t => {
+        if (!t) return true;
+        if (String(t.id) === String(id)) return false;
+        if (isInstanceTask(t) && String(t.templateId) === String(id)) return false;
+        return true;
+      });
+    }else{
+      window.tasksAsReq = window.tasksAsReq.filter(t => {
+        if (!t) return true;
+        if (String(t.id) === String(id)) return false;
+        if (isInstanceTask(t) && String(t.templateId) === String(id)) return false;
+        return true;
+      });
+    }
+    persist();
+
+    let inventoryChanged = false;
+    if (removeInventoryAlso && matches.length){
+      const processed = new Set();
+      for (const item of matches){
+        if (!item || item.id == null) continue;
+        const key = String(item.id);
+        if (processed.has(key)) continue;
+        processed.add(key);
+        const deleted = await deleteInventoryItem(item.id, {
+          skipConfirm: true,
+          linkedTaskId: task?.id ?? null,
+          suppressRender: true,
+          suppressToast: true
+        });
+        if (deleted) inventoryChanged = true;
+      }
+    }
+
+    if (!opts.suppressRender){
+      renderSettings();
+    }
+    if (inventoryChanged){
+      const hash = (location.hash || "#").toLowerCase();
+      if (hash === "#/inventory" || hash === "#inventory"){ renderInventory(); }
+    }
+    return true;
+  }
 
   tree?.querySelectorAll("details.cat").forEach(det => {
     det.addEventListener("toggle", ()=>{
@@ -4975,57 +5165,7 @@ function renderSettings(){
       const id = removeBtn.getAttribute('data-remove');
       const meta = findTaskMeta(id);
       if (!meta) return;
-      const task = meta.task;
-      try {
-        if (typeof recordDeletedItem === "function"){
-          const deletionMeta = {
-            list: meta.mode,
-            cat: task?.cat ?? null,
-            parentTask: task?.parentTask ?? null,
-            inventoryId: task?.inventoryId ?? null,
-            linkedInventoryId: task?.inventoryId ?? null,
-            inventoryIdOriginal: task?.inventoryId ?? null
-          };
-          recordDeletedItem("task", task, deletionMeta);
-        }
-      } catch (err) {
-        console.warn("Failed to record deleted task", err);
-      }
-      const matches = findInventoryMatchesForTask(task);
-      let removeInventoryAlso = false;
-      if (matches.length){
-        const choice = await promptRemoveLinkedInventory(task, matches);
-        removeInventoryAlso = choice === "remove";
-      }
-      window.tasksInterval.forEach(t => { if (String(t.parentTask) === String(id)) t.parentTask = null; });
-      window.tasksAsReq.forEach(t => { if (String(t.parentTask) === String(id)) t.parentTask = null; });
-      if (meta.mode === 'interval'){
-        window.tasksInterval = window.tasksInterval.filter(t => {
-          if (!t) return true;
-          if (String(t.id) === String(id)) return false;
-          if (isInstanceTask(t) && String(t.templateId) === String(id)) return false;
-          return true;
-        });
-      }else{
-        window.tasksAsReq = window.tasksAsReq.filter(t => {
-          if (!t) return true;
-          if (String(t.id) === String(id)) return false;
-          if (isInstanceTask(t) && String(t.templateId) === String(id)) return false;
-          return true;
-        });
-      }
-      persist();
-      let reRendered = false;
-      if (removeInventoryAlso){
-        for (const item of matches){
-          if (!item || item.id == null) continue;
-          const deleted = await deleteInventoryItem(item.id, { skipConfirm: true, linkedTaskId: task.id });
-          if (deleted) reRendered = true;
-        }
-      }
-      if (!reRendered){
-        renderSettings();
-      }
+      await deleteMaintenanceTaskMeta(meta);
       return;
     }
     const completeBtn = e.target.closest('.btn-complete');
@@ -5089,7 +5229,7 @@ function renderSettings(){
     });
   });
 
-  contextMenu?.addEventListener("click", (e)=>{
+  contextMenu?.addEventListener("click", async (e)=>{
     const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-action]") : null;
     if (!btn) return;
     const action = btn.getAttribute("data-action");
@@ -5115,19 +5255,8 @@ function renderSettings(){
     }else if (action === "delete"){
       if (target.type === "task"){
         const meta = findTaskMeta(target.id);
-        const taskName = meta?.task?.name ? `“${meta.task.name}”` : "this task";
         if (!meta) return;
-        const confirmed = window.confirm(`Delete ${taskName}? This will remove it from every page.`);
-        if (!confirmed) return;
-        window.tasksInterval.forEach(t => { if (String(t.parentTask) === String(target.id)) t.parentTask = null; });
-        window.tasksAsReq.forEach(t => { if (String(t.parentTask) === String(target.id)) t.parentTask = null; });
-        if (meta.mode === "interval"){
-          window.tasksInterval.splice(meta.index, 1);
-        }else{
-          window.tasksAsReq.splice(meta.index, 1);
-        }
-        persist();
-        renderSettings();
+        await deleteMaintenanceTaskMeta(meta);
       }else if (target.type === "category"){
         const folder = byIdFolder(target.id);
         if (!folder) return;
@@ -8045,30 +8174,125 @@ async function deleteInventoryItem(id, options){
   const suppressToast = opts.suppressToast === true;
   const suppressRender = opts.suppressRender === true;
   const linkedTaskIdOpt = opts.linkedTaskId != null ? String(opts.linkedTaskId) : null;
+  const removeLinkedTasksOpt = opts.removeLinkedTasks === true;
   const idx = inventory.findIndex(item => item && item.id === id);
   if (idx < 0){ toast("Inventory item not found."); return false; }
 
   const item = inventory[idx];
   const label = item && item.name ? `"${item.name}"` : "this item";
-  let confirmed = true;
+  const linkedTasks = findTasksLinkedToInventoryItem(item);
+
+  let removeLinkedTasks = removeLinkedTasksOpt;
   if (!skipConfirm){
-    const linkedTasks = findTasksLinkedToInventoryItem(item);
-    const count = linkedTasks.length;
-    const message = count > 0
-      ? (count === 1
-        ? `Delete ${label}? This will unlink it from the maintenance task shown below.`
-        : `Delete ${label}? This will unlink it from these maintenance tasks.`)
-      : `Delete ${label}? This will remove it from inventory, maintenance settings, and the dashboard on every page.`;
-    confirmed = await showConfirmModal({
-      title: "Remove inventory item?",
-      message,
-      items: linkedTasks.map(task => task && task.name ? task.name : "Unnamed maintenance task"),
-      cancelText: "Keep item",
-      confirmText: "Delete inventory item",
-      confirmVariant: "danger"
-    });
+    if (linkedTasks.length){
+      const count = linkedTasks.length;
+      const choice = await showConfirmChoices({
+        title: "Remove inventory item?",
+        message: count === 1
+          ? `Delete ${label}? It's linked to the maintenance task below.`
+          : `Delete ${label}? It's linked to these ${count} maintenance tasks.`,
+        items: linkedTasks.map(task => task && task.name ? task.name : "Unnamed maintenance task"),
+        cancelText: "Cancel",
+        confirmText: "Delete inventory & tasks",
+        confirmVariant: "danger",
+        secondaryText: "Inventory only",
+        secondaryVariant: "secondary"
+      });
+      if (choice === "cancel") return false;
+      removeLinkedTasks = choice === "confirm";
+    }else{
+      const confirmed = await showConfirmModal({
+        title: "Remove inventory item?",
+        message: `Delete ${label}? This will remove it from inventory and maintenance settings.`,
+        cancelText: "Cancel",
+        confirmText: "Delete inventory item",
+        confirmVariant: "danger"
+      });
+      if (!confirmed) return false;
+    }
   }
-  if (!confirmed) return false;
+
+  const findTaskMetaLocal = (taskId)=>{
+    const tid = String(taskId);
+    if (Array.isArray(window.tasksInterval)){
+      const intervalIndex = window.tasksInterval.findIndex(t => t && String(t.id) === tid);
+      if (intervalIndex >= 0){
+        return { task: window.tasksInterval[intervalIndex], mode: "interval", index: intervalIndex };
+      }
+    }
+    if (Array.isArray(window.tasksAsReq)){
+      const asReqIndex = window.tasksAsReq.findIndex(t => t && String(t.id) === tid);
+      if (asReqIndex >= 0){
+        return { task: window.tasksAsReq[asReqIndex], mode: "asreq", index: asReqIndex };
+      }
+    }
+    return null;
+  };
+
+  if (removeLinkedTasks && linkedTasks.length){
+    const idsToRemove = Array.from(new Set(linkedTasks
+      .map(task => task && task.id != null ? String(task.id) : null)
+      .filter(Boolean)));
+    if (idsToRemove.length){
+      const metas = idsToRemove
+        .map(taskId => findTaskMetaLocal(taskId))
+        .filter(meta => meta && meta.task);
+      if (metas.length){
+        const idSet = new Set(metas.map(meta => String(meta.task.id)));
+        metas.forEach(meta => {
+          try {
+            if (typeof recordDeletedItem === "function"){
+              const task = meta.task;
+              const deletionMeta = {
+                list: meta.mode,
+                cat: task?.cat ?? null,
+                parentTask: task?.parentTask ?? null,
+                inventoryId: task?.inventoryId ?? null,
+                linkedInventoryId: task?.inventoryId ?? null,
+                inventoryIdOriginal: task?.inventoryId ?? null
+              };
+              recordDeletedItem("task", task, deletionMeta);
+            }
+          } catch (err) {
+            console.warn("Failed to record deleted task", err);
+          }
+        });
+        const clearParentRefs = (list)=>{
+          if (!Array.isArray(list)) return;
+          list.forEach(task => {
+            if (!task) return;
+            const parentId = task.parentTask != null ? String(task.parentTask) : null;
+            if (parentId && idSet.has(parentId)) task.parentTask = null;
+          });
+        };
+        clearParentRefs(window.tasksInterval);
+        clearParentRefs(window.tasksAsReq);
+        if (Array.isArray(window.tasksInterval)){
+          window.tasksInterval = window.tasksInterval.filter(task => {
+            if (!task) return true;
+            const tid = task.id != null ? String(task.id) : "";
+            if (idSet.has(tid)) return false;
+            if (isInstanceTask(task) && task.templateId != null && idSet.has(String(task.templateId))) return false;
+            return true;
+          });
+        }
+        if (Array.isArray(window.tasksAsReq)){
+          window.tasksAsReq = window.tasksAsReq.filter(task => {
+            if (!task) return true;
+            const tid = task.id != null ? String(task.id) : "";
+            if (idSet.has(tid)) return false;
+            if (isInstanceTask(task) && task.templateId != null && idSet.has(String(task.templateId))) return false;
+            return true;
+          });
+        }
+        try {
+          if (typeof saveTasks === "function") saveTasks();
+        } catch (err) {
+          console.warn("Failed to persist tasks after linked task removal", err);
+        }
+      }
+    }
+  }
 
   try {
     if (typeof recordDeletedItem === "function"){
@@ -8081,6 +8305,7 @@ async function deleteInventoryItem(id, options){
   } catch (err) {
     console.warn("Failed to record deleted inventory item", err);
   }
+
   const itemIdStr = item && item.id != null ? String(item.id) : null;
   if (itemIdStr){
     const lists = [window.tasksInterval, window.tasksAsReq];
@@ -8100,6 +8325,7 @@ async function deleteInventoryItem(id, options){
       catch (err) { console.warn("Failed to persist tasks after inventory unlink", err); }
     }
   }
+
   inventory.splice(idx, 1);
   window.inventory = inventory;
   saveCloudDebounced();
