@@ -63,6 +63,231 @@ function baselineInputValue(task){
   return "";
 }
 
+const DASHBOARD_DAY_MS = 24 * 60 * 60 * 1000;
+
+function hoursSnapshotOnOrBefore(dateISO){
+  if (!dateISO || !Array.isArray(totalHistory) || !totalHistory.length) return null;
+  let best = null;
+  let bestTime = -Infinity;
+  const target = new Date(`${dateISO}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return null;
+  for (const entry of totalHistory){
+    if (!entry || typeof entry.dateISO !== "string") continue;
+    const entryDate = new Date(`${entry.dateISO}T00:00:00`);
+    if (Number.isNaN(entryDate.getTime())) continue;
+    if (entryDate > target) continue;
+    const hoursVal = Number(entry.hours);
+    if (!Number.isFinite(hoursVal)) continue;
+    const timeVal = entryDate.getTime();
+    if (timeVal > bestTime){
+      bestTime = timeVal;
+      best = hoursVal;
+    }
+  }
+  return best;
+}
+
+function ensureTaskManualHistory(task){
+  if (!task) return [];
+  const normalized = [];
+  const existing = Array.isArray(task.manualHistory) ? task.manualHistory : [];
+  existing.forEach(entry => {
+    if (!entry || typeof entry.dateISO !== "string") return;
+    const clone = { ...entry };
+    if (clone.hoursAtEntry != null){
+      const h = Number(clone.hoursAtEntry);
+      clone.hoursAtEntry = Number.isFinite(h) && h >= 0 ? h : null;
+    } else {
+      clone.hoursAtEntry = null;
+    }
+    if (typeof clone.recordedAtISO !== "string") clone.recordedAtISO = null;
+    if (clone.status !== "completed" && clone.status !== "scheduled" && clone.status !== "logged"){
+      clone.status = "logged";
+    }
+    if (clone.source !== "machine" && clone.source !== "estimate"){
+      clone.source = clone.hoursAtEntry != null ? "machine" : "estimate";
+    }
+    if (clone.estimatedDailyHours != null){
+      const est = Number(clone.estimatedDailyHours);
+      clone.estimatedDailyHours = Number.isFinite(est) && est > 0 ? est : null;
+    } else {
+      clone.estimatedDailyHours = null;
+    }
+    normalized.push(clone);
+  });
+  normalized.sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+  task.manualHistory = normalized;
+  return task.manualHistory;
+}
+
+function createIntervalTaskInstance(template){
+  if (!template || template.mode !== "interval") return null;
+  const templateId = template.templateId != null ? template.templateId : template.id;
+  const intervalVal = Number(template.interval);
+  const copy = {
+    id: genId(template.name || "task"),
+    variant: "instance",
+    templateId: templateId != null ? templateId : null,
+    mode: "interval",
+    name: template.name || "",
+    manualLink: template.manualLink || "",
+    storeLink: template.storeLink || "",
+    pn: template.pn || "",
+    price: template.price != null && Number.isFinite(Number(template.price)) ? Number(template.price) : null,
+    cat: template.cat ?? null,
+    parentTask: template.parentTask ?? null,
+    order: ++window._maintOrderCounter,
+    interval: Number.isFinite(intervalVal) && intervalVal > 0 ? intervalVal : 8,
+    calendarDateISO: null,
+    sinceBase: 0,
+    anchorTotal: null,
+    completedDates: [],
+    manualHistory: [],
+    note: template.note || ""
+  };
+  if (Array.isArray(template.parts)){
+    copy.parts = template.parts.map(part => part ? { ...part } : part).filter(Boolean);
+  }
+  return copy;
+}
+
+function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
+  if (!task || task.mode !== "interval") return null;
+  if (!Array.isArray(tasksInterval)){
+    if (Array.isArray(window.tasksInterval)){
+      tasksInterval = window.tasksInterval;
+    }else{
+      tasksInterval = [];
+      window.tasksInterval = tasksInterval;
+    }
+  }
+  let template = task;
+  let instance = task;
+  if (!isInstanceTask(task)){
+    template = task;
+    ensureTaskVariant(template, "interval");
+    template.templateId = template.templateId != null ? template.templateId : template.id;
+    instance = createIntervalTaskInstance(template);
+    if (!instance) return null;
+    tasksInterval.unshift(instance);
+    window.tasksInterval = tasksInterval;
+  }else{
+    const templateId = task.templateId != null ? String(task.templateId) : null;
+    if (templateId){
+      template = tasksInterval.find(item => item && String(item.id) === templateId) || template;
+    }
+    instance = task;
+  }
+
+  ensureTaskVariant(instance, "interval");
+  if (resolveTaskVariant(instance) !== "instance") instance.variant = "instance";
+  if (instance.templateId == null){
+    if (template && template.templateId != null) instance.templateId = template.templateId;
+    else if (template && template.id != null) instance.templateId = template.id;
+    else instance.templateId = instance.id;
+  }
+
+  const interval = Number(instance.interval);
+  if (!Number.isFinite(interval) || interval <= 0) return null;
+  ensureTaskManualHistory(instance);
+
+  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+    ? Number(DAILY_HOURS)
+    : 8;
+
+  let targetISO = dateISO || ymd(new Date());
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayISO = ymd(today);
+
+  const liveHoursRaw = getCurrentMachineHours();
+  const liveHours = (liveHoursRaw != null && Number.isFinite(Number(liveHoursRaw)))
+    ? Number(liveHoursRaw)
+    : null;
+  const historyToday = hoursSnapshotOnOrBefore(todayISO);
+  const effectiveNowHours = liveHours != null
+    ? liveHours
+    : (historyToday != null && Number.isFinite(Number(historyToday)) ? Number(historyToday) : null);
+
+  let baselineHours = Number(instance.sinceBase);
+  if (!Number.isFinite(baselineHours) || baselineHours < 0){
+    baselineHours = null;
+  }
+
+  const targetDate = targetISO ? parseDateLocal(targetISO) : null;
+  if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
+    targetDate.setHours(0,0,0,0);
+    targetISO = ymd(targetDate);
+    const isPastOrToday = targetDate.getTime() <= today.getTime();
+    const hoursAtTarget = hoursSnapshotOnOrBefore(targetISO);
+    let consumedHours;
+    let source = "estimate";
+
+    if (isPastOrToday){
+      if (effectiveNowHours != null && hoursAtTarget != null){
+        consumedHours = Math.max(0, effectiveNowHours - hoursAtTarget);
+        source = "machine";
+      }else{
+        const diffDays = Math.max(0, Math.round((today.getTime() - targetDate.getTime()) / DASHBOARD_DAY_MS));
+        consumedHours = diffDays * hoursPerDay;
+      }
+    }else{
+      const diffDays = Math.max(0, Math.round((targetDate.getTime() - today.getTime()) / DASHBOARD_DAY_MS));
+      const remainHours = Math.min(interval, diffDays * hoursPerDay);
+      consumedHours = Math.max(0, interval - remainHours);
+    }
+
+    if (!Number.isFinite(consumedHours) || consumedHours < 0) consumedHours = 0;
+    baselineHours = consumedHours;
+    applyIntervalBaseline(instance, { baselineHours, currentHours: effectiveNowHours });
+
+    if (isPastOrToday){
+      const completionKey = ymd(targetDate);
+      if (completionKey){
+        if (!Array.isArray(instance.completedDates)) instance.completedDates = [];
+        if (!instance.completedDates.includes(completionKey)){
+          instance.completedDates.push(completionKey);
+          instance.completedDates.sort();
+        }
+      }
+    }
+
+    const manualHistory = ensureTaskManualHistory(instance);
+    const entryHours = hoursAtTarget != null
+      ? hoursAtTarget
+      : (effectiveNowHours != null ? Math.max(0, effectiveNowHours - baselineHours) : null);
+    const entry = {
+      dateISO: targetISO,
+      hoursAtEntry: (entryHours != null && Number.isFinite(entryHours) && entryHours >= 0) ? entryHours : null,
+      recordedAtISO: new Date().toISOString(),
+      status: isPastOrToday ? "completed" : "scheduled",
+      source,
+      estimatedDailyHours: hoursPerDay
+    };
+    const existingIdx = manualHistory.findIndex(item => item && item.dateISO === targetISO);
+    if (existingIdx >= 0){
+      manualHistory[existingIdx] = { ...manualHistory[existingIdx], ...entry };
+    }else{
+      manualHistory.push(entry);
+    }
+    manualHistory.sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+    instance.manualHistory = manualHistory;
+  }else{
+    applyIntervalBaseline(instance, { baselineHours, currentHours: effectiveNowHours });
+  }
+
+  instance.calendarDateISO = targetISO || null;
+  if (template && template.variant !== "template"){
+    ensureTaskVariant(template, "interval");
+    if (template.templateId == null) template.templateId = template.id;
+  }
+  return instance;
+}
+
+if (typeof window !== "undefined"){
+  window.scheduleExistingIntervalTask = scheduleExistingIntervalTask;
+  window.createIntervalTaskInstance = createIntervalTaskInstance;
+}
+
 function editingCompletedJobsSet(){
   if (typeof getEditingCompletedJobsSet === "function"){
     return getEditingCompletedJobsSet();
@@ -1524,6 +1749,7 @@ function renderDashboard(){
   const ndBox = document.getElementById("nextDueBox");
   const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const upcoming = tasksInterval
+    .filter(task => task && task.mode === "interval" && isInstanceTask(task))
     .map(t => ({ t, nd: nextDue(t) }))
     .filter(x => x.nd)
     .sort((a,b)=> a.nd.due - b.nd.due)
@@ -1731,12 +1957,14 @@ function renderDashboard(){
     if (Array.isArray(tasksInterval)){
       tasksInterval.forEach(task => {
         if (!task || task.id == null) return;
+        if (task.mode === "interval" && isInstanceTask(task)) return;
         all.push({ task, list: "interval" });
       });
     }
     if (Array.isArray(tasksAsReq)){
       tasksAsReq.forEach(task => {
         if (!task || task.id == null) return;
+        if (task.mode === "asreq" && isInstanceTask(task)) return;
         all.push({ task, list: "asreq" });
       });
     }
@@ -1894,41 +2122,6 @@ function renderDashboard(){
         taskNameInput.focus();
       }
     }
-  }
-
-  function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
-    if (!task || task.mode !== "interval") return false;
-    const interval = Number(task.interval);
-    if (!Number.isFinite(interval) || interval <= 0) return false;
-    let baselineHours = Number(task.sinceBase);
-    if (!Number.isFinite(baselineHours) || baselineHours < 0){
-      baselineHours = null;
-    }
-    let targetISO = dateISO;
-    if (!targetISO){
-      targetISO = ymd(new Date());
-    }
-    if (targetISO){
-      const targetDate = parseDateLocal(targetISO);
-      if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        targetDate.setHours(0,0,0,0);
-        const diffMs = targetDate.getTime() - today.getTime();
-        const days = Math.max(0, Math.round(diffMs / (24*60*60*1000)));
-        const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-          ? Number(DAILY_HOURS)
-          : 8;
-        let remainHours = days * hoursPerDay;
-        if (!Number.isFinite(remainHours) || remainHours < 0) remainHours = 0;
-        if (remainHours > interval) remainHours = interval;
-        baselineHours = interval - remainHours;
-        if (!Number.isFinite(baselineHours) || baselineHours < 0) baselineHours = 0;
-      }
-    }
-    task.calendarDateISO = targetISO || null;
-    applyIntervalBaseline(task, { baselineHours, currentHours: getCurrentMachineHours() });
-    return true;
   }
 
   function syncTaskDateInput(){
@@ -2528,26 +2721,44 @@ function renderDashboard(){
       cat: catId,
       parentTask: null,
       order: ++window._maintOrderCounter,
-      calendarDateISO
+      calendarDateISO: null
     };
     let message = "Task added";
     if (mode === "interval"){
       let interval = Number(taskIntervalInput?.value);
       if (!isFinite(interval) || interval <= 0) interval = 8;
-      const task = Object.assign({}, base, { mode:"interval", interval, sinceBase:0, anchorTotal:null, completedDates: [] });
+      const template = Object.assign({}, base, {
+        mode:"interval",
+        interval,
+        sinceBase:0,
+        anchorTotal:null,
+        completedDates: [],
+        manualHistory: [],
+        variant: "template",
+        templateId: id
+      });
       const curHours = getCurrentMachineHours();
       const baselineHours = parseBaselineHours(taskLastInput?.value);
-      applyIntervalBaseline(task, { baselineHours, currentHours: curHours });
-      tasksInterval.unshift(task);
-      scheduleExistingIntervalTask(task, { dateISO: targetISO });
+      applyIntervalBaseline(template, { baselineHours, currentHours: curHours });
+      tasksInterval.unshift(template);
+      const instance = scheduleExistingIntervalTask(template, { dateISO: targetISO }) || template;
       const parsed = parseDateLocal(targetISO);
-      const dateLabel = (parsed instanceof Date && !Number.isNaN(parsed.getTime()))
-        ? parsed.toLocaleDateString()
-        : targetISO;
-      message = `Scheduled "${task.name || "Task"}" for ${dateLabel}`;
+      const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+      let dateLabel = targetISO;
+      let completed = false;
+      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+        const display = new Date(parsed.getTime());
+        dateLabel = display.toLocaleDateString();
+        const compare = new Date(parsed.getTime());
+        compare.setHours(0,0,0,0);
+        completed = compare.getTime() <= todayMidnight.getTime();
+      }
+      message = completed
+        ? `Logged "${instance.name || "Task"}" as completed on ${dateLabel}`
+        : `Scheduled "${instance.name || "Task"}" for ${dateLabel}`;
     }else{
       const condition = (taskConditionInput?.value || "").trim() || "As required";
-      const task = Object.assign({}, base, { mode:"asreq", condition });
+      const task = Object.assign({}, base, { mode:"asreq", condition, variant: "template", templateId: id });
       tasksAsReq.unshift(task);
       message = "As-required task added to Maintenance Settings";
     }
@@ -2569,7 +2780,7 @@ function renderDashboard(){
         cat: catId,
         parentTask: id,
         order: ++window._maintOrderCounter,
-        calendarDateISO
+        calendarDateISO: null
       };
       if (subMode === "interval"){
         const intervalField = row.querySelector("[data-subtask-interval]");
@@ -2577,7 +2788,16 @@ function renderDashboard(){
         if (!isFinite(subInterval) || subInterval <= 0){
           subInterval = isFinite(parentInterval) && parentInterval > 0 ? parentInterval : 8;
         }
-        const subTask = Object.assign({}, subBase, { mode:"interval", interval: subInterval, sinceBase:0, anchorTotal:null, completedDates: [] });
+        const subTask = Object.assign({}, subBase, {
+          mode:"interval",
+          interval: subInterval,
+          sinceBase:0,
+          anchorTotal:null,
+          completedDates: [],
+          manualHistory: [],
+          variant: "template",
+          templateId: subBase.id
+        });
         const curHours = getCurrentMachineHours();
         const lastField = row.querySelector("[data-subtask-last]");
         const baselineHours = parseBaselineHours(lastField?.value);
@@ -2585,7 +2805,12 @@ function renderDashboard(){
         tasksInterval.unshift(subTask);
       }else{
         const condInput = row.querySelector("[data-subtask-condition-input]");
-        const subTask = Object.assign({}, subBase, { mode:"asreq", condition: (condInput?.value || "").trim() || "As required" });
+        const subTask = Object.assign({}, subBase, {
+          mode:"asreq",
+          condition: (condInput?.value || "").trim() || "As required",
+          variant: "template",
+          templateId: subBase.id
+        });
         tasksAsReq.unshift(subTask);
       }
     });
@@ -2615,12 +2840,21 @@ function renderDashboard(){
     const targetISO = addContextDateISO || ymd(new Date());
     let message = "Maintenance task added";
     if (task.mode === "interval"){
-      scheduleExistingIntervalTask(task, { dateISO: targetISO });
+      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO }) || task;
       const parsed = parseDateLocal(targetISO);
-      const dateLabel = (parsed instanceof Date && !Number.isNaN(parsed.getTime()))
-        ? parsed.toLocaleDateString()
-        : targetISO;
-      message = `Scheduled "${task.name || "Task"}" for ${dateLabel}`;
+      const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+      let dateLabel = targetISO;
+      let completed = false;
+      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+        const display = new Date(parsed.getTime());
+        dateLabel = display.toLocaleDateString();
+        const compare = new Date(parsed.getTime());
+        compare.setHours(0,0,0,0);
+        completed = compare.getTime() <= todayMidnight.getTime();
+      }
+      message = completed
+        ? `Logged "${instance.name || "Task"}" as completed on ${dateLabel}`
+        : `Scheduled "${instance.name || "Task"}" for ${dateLabel}`;
     }else{
       task.calendarDateISO = targetISO || null;
       message = "As-required task linked from Maintenance Settings";
@@ -3853,15 +4087,29 @@ function renderSettings(){
   function ensureTaskDefaults(task, type){
     ensureIdsOrder(task);
     task.mode = type;
+    ensureTaskVariant(task, type);
     if (task.parentTask == null) task.parentTask = null;
     if (task.cat == null) task.cat = task.cat ?? null;
     if (!Array.isArray(task.completedDates)) task.completedDates = [];
     if (typeof task.note !== "string") task.note = "";
+    if ((type === "interval" || type === "asreq") && isTemplateTask(task)){
+      if (task.templateId == null) task.templateId = task.id;
+    }
   }
 
   const taskEntries = [];
-  window.tasksInterval.forEach(t=>{ if (t){ ensureTaskDefaults(t,"interval"); taskEntries.push({ task:t, type:"interval" }); } });
-  window.tasksAsReq.forEach(t=>{ if (t){ ensureTaskDefaults(t,"asreq"); taskEntries.push({ task:t, type:"asreq" }); } });
+  window.tasksInterval.forEach(t=>{
+    if (!t) return;
+    ensureTaskDefaults(t,"interval");
+    if (isInstanceTask(t)) return;
+    taskEntries.push({ task:t, type:"interval" });
+  });
+  window.tasksAsReq.forEach(t=>{
+    if (!t) return;
+    ensureTaskDefaults(t,"asreq");
+    if (isInstanceTask(t)) return;
+    taskEntries.push({ task:t, type:"asreq" });
+  });
 
   const entryById = new Map();
   for (const entry of taskEntries){
@@ -4533,7 +4781,16 @@ function renderSettings(){
     if (mode === "interval"){
       const intervalVal = data.get("taskInterval");
       const interval = intervalVal === null || intervalVal === "" ? 8 : Number(intervalVal);
-      const task = Object.assign(base, { mode:"interval", interval: isFinite(interval) && interval>0 ? interval : 8, sinceBase:0, anchorTotal:null, completedDates: [] });
+      const task = Object.assign(base, {
+        mode:"interval",
+        interval: isFinite(interval) && interval>0 ? interval : 8,
+        sinceBase:0,
+        anchorTotal:null,
+        completedDates: [],
+        manualHistory: [],
+        variant: "template",
+        templateId: id
+      });
       const curHours = getCurrentMachineHours();
       const baselineHours = parseBaselineHours(data.get("taskLastServiced"));
       applyIntervalBaseline(task, { baselineHours, currentHours: curHours });
@@ -4541,7 +4798,7 @@ function renderSettings(){
       createdTask = task;
     }else{
       const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
-      const task = Object.assign(base, { mode:"asreq", condition });
+      const task = Object.assign(base, { mode:"asreq", condition, variant: "template", templateId: id });
       window.tasksAsReq.unshift(task);
       createdTask = task;
     }
@@ -4742,8 +4999,21 @@ function renderSettings(){
       }
       window.tasksInterval.forEach(t => { if (String(t.parentTask) === String(id)) t.parentTask = null; });
       window.tasksAsReq.forEach(t => { if (String(t.parentTask) === String(id)) t.parentTask = null; });
-      if (meta.mode === 'interval') window.tasksInterval = window.tasksInterval.filter(t => String(t.id)!==String(id));
-      else window.tasksAsReq = window.tasksAsReq.filter(t => String(t.id)!==String(id));
+      if (meta.mode === 'interval'){
+        window.tasksInterval = window.tasksInterval.filter(t => {
+          if (!t) return true;
+          if (String(t.id) === String(id)) return false;
+          if (isInstanceTask(t) && String(t.templateId) === String(id)) return false;
+          return true;
+        });
+      }else{
+        window.tasksAsReq = window.tasksAsReq.filter(t => {
+          if (!t) return true;
+          if (String(t.id) === String(id)) return false;
+          if (isInstanceTask(t) && String(t.templateId) === String(id)) return false;
+          return true;
+        });
+      }
       persist();
       let reRendered = false;
       if (removeInventoryAlso){
