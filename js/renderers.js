@@ -4907,8 +4907,16 @@ function renderSettings(){
   typeField?.addEventListener("change", ()=> syncFormMode(typeField.value));
   syncFormMode(typeField?.value || "interval");
 
+  let pendingInventoryIdForNewTask = null;
+  let pendingInventoryNameForNewTask = null;
   const pendingFromInventory = window.pendingMaintenanceAddFromInventory;
   if (pendingFromInventory){
+    pendingInventoryIdForNewTask = pendingFromInventory.inventoryId != null
+      ? String(pendingFromInventory.inventoryId)
+      : null;
+    pendingInventoryNameForNewTask = typeof pendingFromInventory.name === "string"
+      ? pendingFromInventory.name.trim()
+      : null;
     window.pendingMaintenanceAddFromInventory = null;
     setTimeout(()=>{
       showModal();
@@ -4968,6 +4976,7 @@ function renderSettings(){
     const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, note, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
 
     let createdTask = null;
+    let autoLinkedInventory = false;
     if (mode === "interval"){
       const intervalVal = data.get("taskInterval");
       const interval = intervalVal === null || intervalVal === "" ? 8 : Number(intervalVal);
@@ -4993,10 +5002,32 @@ function renderSettings(){
       createdTask = task;
     }
 
+    if (createdTask){
+      if (!pendingInventoryIdForNewTask && pendingInventoryNameForNewTask){
+        const matchByName = Array.isArray(inventory)
+          ? inventory.find(entry => entry && typeof entry.name === "string" && entry.name.trim() === pendingInventoryNameForNewTask)
+          : null;
+        if (matchByName && matchByName.id != null){
+          pendingInventoryIdForNewTask = String(matchByName.id);
+        }
+      }
+      if (pendingInventoryIdForNewTask){
+        const linkedInventory = Array.isArray(inventory)
+          ? inventory.find(entry => entry && String(entry.id) === pendingInventoryIdForNewTask)
+          : null;
+        if (linkedInventory){
+          if (createdTask.inventoryId == null) createdTask.inventoryId = linkedInventory.id;
+          if (linkedInventory.linkedTaskId == null) linkedInventory.linkedTaskId = createdTask.id;
+          autoLinkedInventory = true;
+          window.inventory = inventory;
+        }
+      }
+    }
+
     persist();
     hideModal();
     renderSettings();
-    if (createdTask){
+    if (createdTask && !autoLinkedInventory){
       setTimeout(()=>{
         const fn = window.__promptAddInventoryForTask;
         if (typeof fn === "function") fn(createdTask);
@@ -5032,29 +5063,40 @@ function renderSettings(){
     }
     const taskPN = typeof task.pn === "string" ? task.pn.trim().toLowerCase() : "";
     const taskLink = typeof task.storeLink === "string" ? task.storeLink.trim() : "";
+    const taskName = typeof task.name === "string" ? task.name.trim() : "";
     const fallbackId = `${task.name || ""}-${task.pn || ""}-${task.storeLink || ""}`;
+    const registerMatch = (item, key)=>{
+      const itemId = item && item.id != null ? String(item.id) : "";
+      const itemName = item && typeof item.name === "string" ? item.name.trim() : "";
+      let dedupeKey = itemId || key || (itemName ? `name:${itemName}` : "");
+      if (!dedupeKey){
+        const extra = key ? String(key) : fallbackId;
+        dedupeKey = extra ? `fallback:${extra}` : `auto:${matches.length}`;
+      }
+      if (seen.has(dedupeKey)) return false;
+      seen.add(dedupeKey);
+      matches.push(item);
+      return true;
+    };
     inventory.forEach(item => {
       if (!item) return;
       const itemId = item.id != null ? String(item.id) : "";
       const itemLinkedTask = item.linkedTaskId != null ? String(item.linkedTaskId) : "";
-      if (itemId && candidateIds.has(itemId) && !seen.has(itemId)){
-        matches.push(item);
-        seen.add(itemId);
+      const itemName = typeof item.name === "string" ? item.name.trim() : "";
+      if (itemId && candidateIds.has(itemId) && registerMatch(item, itemId)){
         return;
       }
-      if (itemLinkedTask && itemLinkedTask === String(task.id) && !seen.has(itemId || fallbackId)){
-        matches.push(item);
-        seen.add(itemId || fallbackId);
+      if (itemLinkedTask && itemLinkedTask === String(task.id) && registerMatch(item, itemLinkedTask)){
         return;
       }
-      if (taskPN && item.pn && String(item.pn).trim().toLowerCase() === taskPN && !seen.has(itemId)){
-        matches.push(item);
-        seen.add(itemId);
+      if (taskName && itemName && itemName === taskName && registerMatch(item, `name:${itemName}`)){
         return;
       }
-      if (taskLink && item.link && String(item.link).trim() === taskLink && !seen.has(itemId)){
-        matches.push(item);
-        seen.add(itemId);
+      if (taskPN && item.pn && String(item.pn).trim().toLowerCase() === taskPN && registerMatch(item, itemId || `pn:${taskPN}`)){
+        return;
+      }
+      if (taskLink && item.link && String(item.link).trim() === taskLink){
+        registerMatch(item, itemId || `link:${taskLink}`);
       }
     });
     return matches;
@@ -7767,7 +7809,8 @@ function renderInventory(){
             pn: item.pn || "",
             link: item.link || "",
             price: item.price != null ? item.price : null,
-            note: item.note || ""
+            note: item.note || "",
+            inventoryId: item.id != null ? item.id : null
           };
           window.maintenanceSearchTerm = "";
           const hash = (location.hash || "#").toLowerCase();
@@ -7910,7 +7953,8 @@ function renderInventory(){
       pn,
       link,
       price,
-      note
+      note,
+      inventoryId: item.id
     } : null;
 
     if (pendingDetails){
@@ -8133,12 +8177,16 @@ function findTasksLinkedToInventoryItem(item){
   const itemId = item.id != null ? String(item.id) : "";
   const itemPN = item.pn != null ? String(item.pn).trim().toLowerCase() : "";
   const itemLink = item.link != null ? String(item.link).trim() : "";
+  const itemName = item.name != null && typeof item.name === "string" ? item.name.trim() : "";
   const seen = new Set();
 
-  const tryAdd = (task)=>{
+  const tryAdd = (task, keyOverride)=>{
     if (!task) return;
     const fallbackId = `${task.name || ""}-${task.pn || ""}-${task.storeLink || ""}`;
-    const tid = task.id != null ? String(task.id) : fallbackId;
+    const inventoryKey = task.inventoryId != null ? String(task.inventoryId) : null;
+    const taskId = task.id != null ? String(task.id) : null;
+    const override = keyOverride != null ? String(keyOverride) : null;
+    const tid = inventoryKey || taskId || override || fallbackId;
     if (seen.has(tid)) return;
     seen.add(tid);
     matches.push(task);
@@ -8151,16 +8199,21 @@ function findTasksLinkedToInventoryItem(item){
       if (!task) return;
       const tid = task.id != null ? String(task.id) : "";
       const taskInventoryId = task.inventoryId != null ? String(task.inventoryId) : "";
+      const taskName = typeof task.name === "string" ? task.name.trim() : "";
       if (itemId && (taskInventoryId === itemId || (tid && `inv_${tid}` === itemId))){
-        tryAdd(task);
+        tryAdd(task, taskInventoryId || itemId);
+        return;
+      }
+      if (itemName && taskName && taskName === itemName){
+        tryAdd(task, `name:${taskName}`);
         return;
       }
       if (itemPN && task.pn && String(task.pn).trim().toLowerCase() === itemPN){
-        tryAdd(task);
+        tryAdd(task, taskInventoryId || `pn:${itemPN}`);
         return;
       }
       if (itemLink && task.storeLink && String(task.storeLink).trim() === itemLink){
-        tryAdd(task);
+        tryAdd(task, taskInventoryId || `link:${itemLink}`);
       }
     });
   });
