@@ -1168,13 +1168,27 @@ function viewCosts(model){
           <h3>Recent Maintenance Events</h3>
           ${historyRows.length ? `
             <ul class="cost-history">
-              ${historyRows.map(item => `
-                <li>
-                  <span>${esc(item.dateLabel || "")}</span>
-                  <span>${esc(item.hoursLabel || "")}</span>
-                  <span>${esc(item.costLabel || "")}</span>
-                </li>
-              `).join("")}
+              ${historyRows.map(item => {
+                const attrs = [
+                  'data-history-item="1"',
+                  item.dateISO ? `data-history-date="${esc(item.dateISO)}"` : '',
+                  item.taskId ? `data-task-id="${esc(item.taskId)}"` : '',
+                  item.originalTaskId ? `data-original-task-id="${esc(item.originalTaskId)}"` : '',
+                  item.taskMode ? `data-task-mode="${esc(item.taskMode)}"` : '',
+                  item.taskName ? `data-task-name="${esc(item.taskName)}"` : '',
+                  item.trashId ? `data-trash-id="${esc(item.trashId)}"` : '',
+                  item.missingTask ? 'data-task-missing="true"' : '',
+                  !item.hasLinkedTasks ? 'data-task-empty="true"' : ''
+                ].filter(Boolean).join(' ');
+                const titleAttr = item.tooltipLabel ? ` title="${esc(item.tooltipLabel)}"` : '';
+                return `
+                <li role="button" tabindex="0" ${attrs}${titleAttr}>
+                  <span class="cost-history-date">${esc(item.dateLabel || "")}</span>
+                  <span class="cost-history-hours">${esc(item.hoursLabel || "")}</span>
+                  <span class="cost-history-cost">${esc(item.costLabel || "")}</span>
+                  ${item.taskLabel ? `<span class="cost-history-task-label">${esc(item.taskLabel)}</span>` : ``}
+                </li>`;
+              }).join("")}
             </ul>
           ` : `<p class="small muted">${esc(data.historyEmpty || "No usage history yet. Log machine hours to estimate maintenance spend.")}</p>`}
           <div class="cost-window-insight">

@@ -364,8 +364,16 @@ body.forecast-modal-open{ overflow:hidden; }
   border-radius:12px;
   font-variant-numeric:tabular-nums;
   box-shadow:0 12px 24px rgba(6, 24, 64, 0.18);
+  cursor:pointer;
+  transition:transform .12s ease, box-shadow .12s ease;
 }
-.cost-history span:last-child{ text-align:right; font-weight:600; color:var(--brand-blue-400); }
+.cost-history li:hover{ box-shadow:0 16px 28px rgba(6,24,64,0.24); transform:translateY(-1px); }
+.cost-history li:focus-visible{ outline:2px solid rgba(10,99,194,0.6); outline-offset:2px; }
+.cost-history li[data-task-missing]{ border-style:dashed; }
+.cost-history-date{ text-align:left; }
+.cost-history-hours{ text-align:center; }
+.cost-history-cost{ text-align:right; font-weight:600; color:var(--brand-blue-400); }
+.cost-history-task-label{ grid-column:1/-1; font-size:.82rem; color:#4f5d75; text-align:left; margin-top:4px; }
 
 .cost-jobs-summary{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; margin-bottom:10px; font-variant-numeric:tabular-nums; }
 .cost-jobs-summary .label{ display:block; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#5a6478; margin-bottom:2px; }
