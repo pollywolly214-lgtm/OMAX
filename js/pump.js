@@ -1,5 +1,7 @@
 /* =================== PUMP EFFICIENCY ======================= */
-window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, entries:[] }; // [{dateISO:"yyyy-mm-dd", rpm:number}]
+window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] }; // [{dateISO:"yyyy-mm-dd", rpm:number}]
+if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
+if (!Array.isArray(window.pumpEff.notes)) window.pumpEff.notes = [];
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
@@ -18,6 +20,10 @@ let pumpOverlayNode = null;
 let pumpOverlayEscapeHandler = null;
 let pumpLayoutResizeListener = null;
 let pumpLayoutResizeRaf = null;
+let pumpNotesModalNode = null;
+let pumpNotesModalDialog = null;
+let pumpNotesModalState = null;
+let pumpNotesEscHandler = null;
 
 function pumpGetViewportScale(){
   if (window.visualViewport && typeof window.visualViewport.scale === "number"){
@@ -422,6 +428,101 @@ function pumpRangeCutoff(latestDate, range){
   return cutoff;
 }
 
+function pumpEnsureNotesArray(){
+  if (!window.pumpEff || typeof window.pumpEff !== "object"){
+    window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
+  }
+  if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
+  if (!Array.isArray(window.pumpEff.notes)) window.pumpEff.notes = [];
+  return window.pumpEff.notes;
+}
+
+function pumpSortNotesInPlace(notes){
+  if (!Array.isArray(notes)) return notes;
+  notes.sort((a, b)=>{
+    const updatedA = a?.updatedISO || "";
+    const updatedB = b?.updatedISO || "";
+    if (updatedA !== updatedB){
+      if (!updatedA) return 1;
+      if (!updatedB) return -1;
+      const cmp = updatedB.localeCompare(updatedA);
+      if (cmp !== 0) return cmp;
+    }
+    const dateA = a?.dateISO || "";
+    const dateB = b?.dateISO || "";
+    if (dateA !== dateB) return dateB.localeCompare(dateA);
+    const rangeA = String(a?.range ?? "");
+    const rangeB = String(b?.range ?? "");
+    if (rangeA !== rangeB) return rangeA.localeCompare(rangeB);
+    return 0;
+  });
+  return notes;
+}
+
+function pumpGetNotesSorted(){
+  const notes = pumpEnsureNotesArray().slice();
+  pumpSortNotesInPlace(notes);
+  return notes;
+}
+
+function pumpGetNotesForRange(rangeValue){
+  const range = String(rangeValue ?? "");
+  return pumpEnsureNotesArray().filter(note => note && String(note.range ?? "") === range);
+}
+
+function pumpFindNote(dateISO, rangeValue){
+  const range = String(rangeValue ?? "");
+  return pumpEnsureNotesArray().find(note => note && note.dateISO === dateISO && String(note.range ?? "") === range) || null;
+}
+
+function pumpFormatRangeDisplay(rangeValue){
+  const range = String(rangeValue ?? "");
+  if (!range) return "Current range";
+  const label = pumpRangeLabel(range);
+  if (!label) return range;
+  if (label === range) return label;
+  return `Last ${label}`;
+}
+
+function pumpSaveNote(dateISO, rangeValue, text){
+  const notes = pumpEnsureNotesArray();
+  const range = String(rangeValue ?? "");
+  const idx = notes.findIndex(note => note && note.dateISO === dateISO && String(note.range ?? "") === range);
+  const trimmed = typeof text === "string" ? text.trim() : "";
+  if (!trimmed){
+    if (idx >= 0){
+      const removed = notes.splice(idx, 1);
+      return { status:"deleted", note: removed[0] || null };
+    }
+    return { status:"noop", note:null };
+  }
+  const nowISO = new Date().toISOString();
+  if (idx >= 0){
+    const existing = notes[idx] || {};
+    notes[idx] = { ...existing, dateISO, range, text: trimmed, updatedISO: nowISO };
+    pumpSortNotesInPlace(notes);
+    return { status:"updated", note: notes[idx] };
+  }
+  const note = {
+    id: `note_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    dateISO,
+    range,
+    text: trimmed,
+    updatedISO: nowISO
+  };
+  notes.push(note);
+  pumpSortNotesInPlace(notes);
+  return { status:"created", note };
+}
+
+function pumpDeleteNote(dateISO, rangeValue){
+  return pumpSaveNote(dateISO, rangeValue, "");
+}
+
+function pumpCountNotes(){
+  return pumpEnsureNotesArray().length;
+}
+
 function pumpFilterEntriesByRange(entries, range){
   if (!entries.length) return [];
   const data = entries.slice();
@@ -642,6 +743,9 @@ function viewPumpChartWidget(){
   const expanded = window.pumpChartExpanded === true;
   const expandLabel = expanded ? "Shrink" : "Expand";
   const expandIcon = expanded ? "⤡" : "⤢";
+  const noteCount = pumpCountNotes();
+  const notesLabel = noteCount ? `📝 Notes (${noteCount})` : "📝 Notes";
+  const notesAria = noteCount ? `View pump notes (${noteCount})` : "View pump notes";
   return `
   <div class="pump-chart-card">
     <div class="pump-chart-header">
@@ -652,6 +756,7 @@ function viewPumpChartWidget(){
       </div>
     </div>
     <div class="pump-chart-wrap">
+      <button type="button" class="pump-notes-btn" id="pumpNotesBtn" aria-haspopup="dialog" title="${notesAria}" aria-label="${notesAria}">${notesLabel}</button>
       <canvas id="pumpChart" height="${expanded ? 360 : 240}"></canvas>
       <button type="button" class="pump-expand-btn" data-expanded="${expanded}" title="${expandLabel} chart">${expandIcon} ${expandLabel}</button>
     </div>
@@ -673,6 +778,7 @@ function renderPumpWidget(){
   if (logHost) logHost.innerHTML = viewPumpLogWidget();
   const chartHost = document.getElementById("pump-chart-widget");
   if (chartHost) chartHost.innerHTML = viewPumpChartWidget();
+  pumpEnsureNotesArray();
   if (!logHost && !chartHost) return;
   document.getElementById("pumpBaselineForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
@@ -714,6 +820,12 @@ function renderPumpWidget(){
     expandBtn.addEventListener("click", ()=>{
       window.pumpChartExpanded = !window.pumpChartExpanded;
       renderPumpWidget();
+    });
+  }
+  const notesBtn = document.getElementById("pumpNotesBtn");
+  if (notesBtn){
+    notesBtn.addEventListener("click", ()=>{
+      pumpOpenNotesModal({ view:"list" });
     });
   }
   if (window.pumpChartExpanded && card){
@@ -773,6 +885,229 @@ function pumpHideChartTooltip(canvas, tooltip){
     canvas.style.cursor = "";
     delete canvas.__pumpChartHoveredKey;
   }
+}
+
+function pumpEnsureNotesModal(){
+  if (pumpNotesModalNode) return;
+  const overlay = document.createElement("div");
+  overlay.className = "pump-notes-overlay";
+  const backdrop = document.createElement("button");
+  backdrop.type = "button";
+  backdrop.className = "pump-notes-backdrop";
+  backdrop.setAttribute("aria-label", "Close pump notes");
+  const dialog = document.createElement("div");
+  dialog.className = "pump-notes-dialog";
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("tabindex", "-1");
+  overlay.appendChild(backdrop);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  pumpNotesModalNode = overlay;
+  pumpNotesModalDialog = dialog;
+  backdrop.addEventListener("click", pumpCloseNotesModal);
+}
+
+function pumpOpenNotesModal(state){
+  pumpEnsureNotesModal();
+  if (!pumpNotesModalDialog) return;
+  if (!pumpNotesEscHandler){
+    pumpNotesEscHandler = (event)=>{
+      if (event.key === "Escape" || event.key === "Esc"){
+        event.preventDefault();
+        pumpCloseNotesModal();
+      }
+    };
+    document.addEventListener("keydown", pumpNotesEscHandler);
+  }
+  document.body.classList.add("pump-notes-open");
+  pumpSetNotesModalState(state);
+  requestAnimationFrame(()=>{
+    if (!pumpNotesModalDialog) return;
+    try {
+      pumpNotesModalDialog.focus({ preventScroll:true });
+    } catch (_) {
+      pumpNotesModalDialog.focus();
+    }
+  });
+}
+
+function pumpSetNotesModalState(state){
+  const base = state && typeof state === "object" ? state : {};
+  const view = typeof base.view === "string" ? base.view : "list";
+  pumpNotesModalState = { view };
+  Object.keys(base).forEach(key => {
+    if (key === "view") return;
+    pumpNotesModalState[key] = base[key];
+  });
+  pumpRenderNotesModal();
+}
+
+function pumpRenderNotesModal(){
+  if (!pumpNotesModalDialog) return;
+  pumpEnsureNotesArray();
+  const state = pumpNotesModalState || { view:"list" };
+  const view = state.view === "edit" ? "edit" : "list";
+  if (view === "edit"){
+    const dateISO = state.dateISO || "";
+    const rangeValue = state.range ?? window.pumpChartRange ?? "3m";
+    const rangeDisplay = state.rangeDisplay || pumpFormatRangeDisplay(rangeValue);
+    const note = dateISO ? pumpFindNote(dateISO, rangeValue) : null;
+    const entry = dateISO ? pumpEff.entries.find(e => e && e.dateISO === dateISO) : null;
+    const rpmSource = state.rpm != null ? state.rpm : (entry ? entry.rpm : null);
+    const rpmLabel = Number.isFinite(Number(rpmSource)) ? `${Number(rpmSource).toLocaleString()} RPM` : "";
+    const dateLabel = dateISO ? pumpFormatShortDate(dateISO) : "";
+    const headingId = "pumpNotesHeading";
+    const subtitleParts = [];
+    if (dateLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(dateLabel)}</span>`);
+    if (rangeDisplay) subtitleParts.push(`<span>${pumpEscapeTooltipValue(rangeDisplay)}</span>`);
+    if (rpmLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(rpmLabel)}</span>`);
+    const subtitle = subtitleParts.length
+      ? `<p class="pump-notes-subtitle">${subtitleParts.join('<span aria-hidden="true">·</span>')}</p>`
+      : "";
+    pumpNotesModalDialog.innerHTML = `
+      <header class="pump-notes-header">
+        <div class="pump-notes-title-group">
+          <h3 id="${headingId}" data-pump-notes-heading>${note ? "Edit note" : "Add note"}</h3>
+          ${subtitle}
+        </div>
+        <button type="button" class="pump-notes-close" data-pump-notes-close aria-label="Close notes">×</button>
+      </header>
+      <div class="pump-notes-body">
+        <div class="pump-notes-links">
+          <button type="button" class="pump-notes-link" data-pump-notes-show-list>View saved notes</button>
+        </div>
+        <form class="pump-notes-form" id="pumpNoteForm">
+          <label class="pump-notes-label" for="pumpNoteText">Note details</label>
+          <textarea id="pumpNoteText" rows="6" placeholder="Add context about pressures, filters, or other settings…"></textarea>
+          <div class="pump-notes-actions">
+            ${note ? `<button type="button" class="pump-note-delete-btn" data-pump-note-delete>Delete note</button>` : ""}
+            <span class="pump-notes-actions-spacer"></span>
+            <button type="button" class="secondary" data-pump-notes-cancel>Close</button>
+            <button type="submit" class="primary">${note ? "Save note" : "Add note"}</button>
+          </div>
+        </form>
+      </div>
+      <footer class="pump-notes-footer small muted">Notes are stored per range selection so you can track how settings impact performance.</footer>
+    `;
+    pumpNotesModalDialog.setAttribute("aria-labelledby", headingId);
+    const closeBtn = pumpNotesModalDialog.querySelector("[data-pump-notes-close]");
+    closeBtn?.addEventListener("click", pumpCloseNotesModal);
+    const cancelBtn = pumpNotesModalDialog.querySelector("[data-pump-notes-cancel]");
+    cancelBtn?.addEventListener("click", pumpCloseNotesModal);
+    const listBtn = pumpNotesModalDialog.querySelector("[data-pump-notes-show-list]");
+    listBtn?.addEventListener("click", ()=>{ pumpSetNotesModalState({ view:"list" }); });
+    const form = pumpNotesModalDialog.querySelector("#pumpNoteForm");
+    const textField = pumpNotesModalDialog.querySelector("#pumpNoteText");
+    if (textField) textField.value = note?.text || "";
+    form?.addEventListener("submit", (event)=>{
+      event.preventDefault();
+      if (!dateISO){ pumpCloseNotesModal(); return; }
+      const value = textField ? textField.value : "";
+      const { status } = pumpSaveNote(dateISO, rangeValue, value);
+      pumpCloseNotesModal();
+      if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){} }
+      if (status === "deleted"){ toast("Note removed"); }
+      else if (status === "noop"){ toast("Note cleared"); }
+      else if (status === "created"){ toast("Note added"); }
+      else { toast("Note saved"); }
+      renderPumpWidget();
+    });
+    const deleteBtn = pumpNotesModalDialog.querySelector("[data-pump-note-delete]");
+    if (deleteBtn){
+      deleteBtn.addEventListener("click", ()=>{
+        if (!dateISO){ pumpCloseNotesModal(); return; }
+        const { status } = pumpDeleteNote(dateISO, rangeValue);
+        pumpCloseNotesModal();
+        if (status === "deleted"){ toast("Note removed"); }
+        if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){} }
+        renderPumpWidget();
+      });
+    }
+    requestAnimationFrame(()=>{
+      try {
+        textField?.focus({ preventScroll:true });
+      } catch (_) {
+        textField?.focus();
+      }
+    });
+  }else{
+    const headingId = "pumpNotesHeading";
+    const notes = pumpGetNotesSorted();
+    const items = notes.map(note => {
+      const dateLabel = pumpFormatShortDate(note.dateISO);
+      const rangeDisplay = pumpFormatRangeDisplay(note.range);
+      let updatedLabel = "";
+      if (note.updatedISO){
+        const parsed = new Date(note.updatedISO);
+        updatedLabel = Number.isFinite(parsed.getTime())
+          ? parsed.toLocaleString()
+          : String(note.updatedISO);
+      }
+      const textHtml = pumpEscapeTooltipValue(note.text || "").replace(/\n/g, "<br>");
+      const metaParts = [
+        `<span class="pump-note-date">${pumpEscapeTooltipValue(dateLabel)}</span>`,
+        `<span class="pump-note-range">${pumpEscapeTooltipValue(rangeDisplay)}</span>`
+      ];
+      if (updatedLabel){
+        metaParts.push(`<span class="pump-note-updated">Updated ${pumpEscapeTooltipValue(updatedLabel)}</span>`);
+      }
+      return `
+        <article class="pump-note-item">
+          <div class="pump-note-item-meta">${metaParts.join("")}</div>
+          <div class="pump-note-text">${textHtml}</div>
+          <div class="pump-note-item-actions">
+            <button type="button" class="pump-note-edit-btn" data-pump-note-edit data-note-date="${note.dateISO}" data-note-range="${note.range}">Edit</button>
+          </div>
+        </article>
+      `;
+    }).join("");
+    pumpNotesModalDialog.innerHTML = `
+      <header class="pump-notes-header">
+        <h3 id="${headingId}" data-pump-notes-heading>Pump notes</h3>
+        <button type="button" class="pump-notes-close" data-pump-notes-close aria-label="Close notes">×</button>
+      </header>
+      <div class="pump-notes-body">
+        ${notes.length ? `<div class="pump-notes-list">${items}</div>` : `<p class="pump-notes-empty">No notes yet. Click a chart point to add a note for that day and range.</p>`}
+      </div>
+      <footer class="pump-notes-footer small muted">Notes are labelled with the day and chart range so you can see which settings were active.</footer>
+    `;
+    pumpNotesModalDialog.setAttribute("aria-labelledby", headingId);
+    const closeBtn = pumpNotesModalDialog.querySelector("[data-pump-notes-close]");
+    closeBtn?.addEventListener("click", pumpCloseNotesModal);
+    pumpNotesModalDialog.querySelectorAll("[data-pump-note-edit]").forEach(btn => {
+      btn.addEventListener("click", ()=>{
+        const dateISO = btn.getAttribute("data-note-date") || "";
+        const rangeValue = btn.getAttribute("data-note-range") || "";
+        pumpSetNotesModalState({ view:"edit", dateISO, range: rangeValue });
+      });
+    });
+  }
+}
+
+function pumpCloseNotesModal(){
+  if (pumpNotesModalNode){
+    pumpNotesModalNode.remove();
+    pumpNotesModalNode = null;
+    pumpNotesModalDialog = null;
+  }
+  if (pumpNotesEscHandler){
+    document.removeEventListener("keydown", pumpNotesEscHandler);
+    pumpNotesEscHandler = null;
+  }
+  pumpNotesModalState = null;
+  document.body.classList.remove("pump-notes-open");
+}
+
+function pumpOpenNoteEditorForTarget(canvas, target){
+  if (!target) return;
+  const dateISO = target.dateISO || target.key || "";
+  if (!dateISO) return;
+  const rangeValue = target.rangeValue || (canvas && canvas.__pumpChartRange) || window.pumpChartRange || "3m";
+  const entry = pumpEff.entries.find(e => e && e.dateISO === dateISO) || null;
+  const rpm = target.rpm != null ? target.rpm : (entry ? entry.rpm : null);
+  const rangeDisplay = pumpFormatRangeDisplay(rangeValue);
+  pumpOpenNotesModal({ view:"edit", dateISO, range: rangeValue, rpm, rangeDisplay });
 }
 
 function pumpShowChartTooltip(canvas, tooltip, target, { scaleX, scaleY }){
@@ -871,7 +1206,7 @@ function pumpWireChartTooltip(card, canvas){
   const performInteraction = (clientX, clientY)=>{
     if (!Number.isFinite(clientX) || !Number.isFinite(clientY)){
       hide();
-      return;
+      return null;
     }
     const rect = canvas.getBoundingClientRect();
     const clientWidth = canvas.clientWidth || rect.width || canvas.width;
@@ -909,9 +1244,18 @@ function pumpWireChartTooltip(card, canvas){
     }else{
       hide();
     }
+    return hovered;
   };
 
   const supportsPointerEvents = typeof window !== "undefined" && "PointerEvent" in window;
+
+  const handleChartClick = (event)=>{
+    if (event && typeof event.button === "number" && event.button !== 0) return;
+    const hovered = performInteraction(event.clientX, event.clientY);
+    if (hovered){
+      pumpOpenNoteEditorForTarget(canvas, hovered);
+    }
+  };
 
   if (supportsPointerEvents){
     const pointerState = { touchActive: false };
@@ -936,6 +1280,10 @@ function pumpWireChartTooltip(card, canvas){
       const type = String(event.pointerType || "").toLowerCase();
       if (type === "touch" || type === "pen"){
         pointerState.touchActive = false;
+        const hovered = performInteraction(event.clientX, event.clientY);
+        if (hovered){
+          pumpOpenNoteEditorForTarget(canvas, hovered);
+        }
         hide();
       }else{
         performInteraction(event.clientX, event.clientY);
@@ -959,6 +1307,7 @@ function pumpWireChartTooltip(card, canvas){
     canvas.addEventListener("pointercancel", handlePointerCancel);
     canvas.addEventListener("pointerleave", handlePointerLeave);
     canvas.addEventListener("blur", hide);
+    canvas.addEventListener("click", handleChartClick);
 
     canvas.__pumpChartTooltipCleanup = ()=>{
       canvas.removeEventListener("pointermove", handlePointerMove);
@@ -968,6 +1317,7 @@ function pumpWireChartTooltip(card, canvas){
       canvas.removeEventListener("pointercancel", handlePointerCancel);
       canvas.removeEventListener("pointerleave", handlePointerLeave);
       canvas.removeEventListener("blur", hide);
+      canvas.removeEventListener("click", handleChartClick);
       pointerState.touchActive = false;
       hide();
     };
@@ -1032,6 +1382,7 @@ function pumpWireChartTooltip(card, canvas){
     canvas.addEventListener("touchend", handleTouchEnd);
     canvas.addEventListener("touchcancel", handleTouchEnd);
     canvas.addEventListener("blur", hide);
+    canvas.addEventListener("click", handleChartClick);
 
     canvas.__pumpChartTooltipCleanup = ()=>{
       canvas.removeEventListener("mousedown", handleMouseDown);
@@ -1044,6 +1395,7 @@ function pumpWireChartTooltip(card, canvas){
       canvas.removeEventListener("touchend", handleTouchEnd);
       canvas.removeEventListener("touchcancel", handleTouchEnd);
       canvas.removeEventListener("blur", hide);
+      canvas.removeEventListener("click", handleChartClick);
       hide();
     };
   }
@@ -1073,6 +1425,7 @@ function drawPumpChart(canvas, rangeValue){
     return;
   }
   const range = rangeValue || window.pumpChartRange || "3m";
+  pumpEnsureNotesArray();
   const dataAll = pumpEff.entries.slice();
   const rangeLabel = pumpRangeLabel(range);
   const filtered = pumpFilterEntriesByRange(dataAll, range);
@@ -1257,29 +1610,49 @@ function drawPumpChart(canvas, rangeValue){
   dataAll.forEach((entry, idx)=>{ indexByDate.set(entry.dateISO, idx); });
   const hoverRadius = Math.max(pointRadius * 3.4, scaled(24));
 
-  data.forEach(entry => {
-    const d = new Date(entry.dateISO+"T00:00:00");
+    data.forEach(entry => {
+      const noteForEntry = pumpFindNote(entry.dateISO, range);
+      const d = new Date(entry.dateISO+"T00:00:00");
     const x = X(d.getTime());
     const y = Y(entry.rpm);
-    ctx.beginPath();
-    ctx.arc(x, y, pointRadius, 0, Math.PI*2);
-    ctx.fill();
-    ctx.stroke();
-    pointCoords.push({ entry, x, y });
+      ctx.beginPath();
+      ctx.arc(x, y, pointRadius, 0, Math.PI*2);
+      ctx.fill();
+      ctx.stroke();
+      if (noteForEntry){
+        ctx.save();
+        ctx.strokeStyle = "#f59e0b";
+        ctx.lineWidth = Math.max(1.4, scaled(1.2));
+        ctx.beginPath();
+        ctx.arc(x, y, pointRadius + Math.max(1.6, scaled(1.1)), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      pointCoords.push({ entry, x, y });
 
-    const idxAll = indexByDate.get(entry.dateISO);
-    const prevEntry = (idxAll != null && idxAll > 0) ? dataAll[idxAll - 1] : null;
-    const pct = pumpPercentChange(entry.rpm);
-    const tooltipDate = pumpFormatShortDate(entry.dateISO);
-    const formattedRPM = Number.isFinite(entry.rpm)
-      ? Number(entry.rpm).toLocaleString(undefined, { maximumFractionDigits: 0 })
-      : String(entry.rpm ?? "");
-    const detailParts = [];
-    if (pct != null){
-      const pctSign = pct >= 0 ? "+" : "";
-      detailParts.push(`Δ vs baseline: ${pctSign}${pct.toFixed(1)}% (Baseline ${Number(baselineRPM).toLocaleString(undefined, { maximumFractionDigits: 0 })} RPM)`);
-    }else if (baselineRPM == null){
-      detailParts.push("Set a baseline to track % change.");
+      const idxAll = indexByDate.get(entry.dateISO);
+      const prevEntry = (idxAll != null && idxAll > 0) ? dataAll[idxAll - 1] : null;
+      const pct = pumpPercentChange(entry.rpm);
+      const tooltipDate = pumpFormatShortDate(entry.dateISO);
+      const formattedRPM = Number.isFinite(entry.rpm)
+        ? Number(entry.rpm).toLocaleString(undefined, { maximumFractionDigits: 0 })
+        : String(entry.rpm ?? "");
+      const detailParts = [];
+      if (noteForEntry){
+        const trimmedNote = String(noteForEntry.text || "").trim();
+        if (trimmedNote){
+          const firstLine = trimmedNote.split(/\r?\n/, 1)[0];
+          const preview = firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine;
+          detailParts.push(`Note: ${preview}`);
+        }else{
+          detailParts.push("Note saved for this range.");
+        }
+      }
+      if (pct != null){
+        const pctSign = pct >= 0 ? "+" : "";
+        detailParts.push(`Δ vs baseline: ${pctSign}${pct.toFixed(1)}% (Baseline ${Number(baselineRPM).toLocaleString(undefined, { maximumFractionDigits: 0 })} RPM)`);
+      }else if (baselineRPM == null){
+        detailParts.push("Set a baseline to track % change.");
     }
     if (prevEntry && isFinite(prevEntry.rpm)){
       const delta = Number(entry.rpm) - Number(prevEntry.rpm);
@@ -1307,17 +1680,22 @@ function drawPumpChart(canvas, rangeValue){
       width: hoverRadius,
       height: hoverRadius
     };
-    hitTargets.push({
-      key: entry.dateISO,
-      rect,
-      centerX: x,
-      centerY: y,
-      hitRadius: hoverRadius / 2,
-      datasetLabel: tooltipDate,
-      valueLabel: `${formattedRPM} RPM`,
-      detailLines: detailParts
+      hitTargets.push({
+        key: entry.dateISO,
+        rect,
+        centerX: x,
+        centerY: y,
+        hitRadius: hoverRadius / 2,
+        datasetLabel: tooltipDate,
+        valueLabel: `${formattedRPM} RPM`,
+        detailLines: detailParts,
+        dateISO: entry.dateISO,
+        rpm: entry.rpm,
+        rangeValue: range,
+        rangeLabel: pumpFormatRangeDisplay(range),
+        hasNote: !!noteForEntry
+      });
     });
-  });
 
   if (yTicks.length){
     ctx.save();
@@ -1586,6 +1964,8 @@ function drawPumpChart(canvas, rangeValue){
   ctx.restore();
 
   canvas.__pumpChartTargets = hitTargets;
+  canvas.__pumpChartRange = range;
+  canvas.__pumpChartRangeLabel = pumpFormatRangeDisplay(range);
   canvas.__pumpChartTooltipMeta = {
     rangeLabel,
     usingFiltered,

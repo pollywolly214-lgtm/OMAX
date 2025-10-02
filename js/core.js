@@ -344,8 +344,10 @@ if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
-  window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] };
+  window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
 }
+if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
+if (!Array.isArray(window.pumpEff.notes)) window.pumpEff.notes = [];
 
 let totalHistory = window.totalHistory;
 let tasksInterval = window.tasksInterval;
@@ -1385,12 +1387,15 @@ function adoptState(doc){
   // Pump efficiency (guard against reading an undefined identifier)
   const pe = (typeof window.pumpEff === "object" && window.pumpEff)
     ? window.pumpEff
-    : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+    : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
+  if (!Array.isArray(pe.entries)) pe.entries = [];
+  if (!Array.isArray(pe.notes)) pe.notes = [];
 
   if (data.pumpEff && typeof data.pumpEff === "object"){
     pe.baselineRPM     = (data.pumpEff.baselineRPM ?? pe.baselineRPM);
     pe.baselineDateISO = (data.pumpEff.baselineDateISO ?? pe.baselineDateISO);
     pe.entries         = Array.isArray(data.pumpEff.entries) ? data.pumpEff.entries.slice() : pe.entries;
+    pe.notes           = Array.isArray(data.pumpEff.notes) ? data.pumpEff.notes.slice() : pe.notes;
   }
 
   ensureTaskCategories();
@@ -1421,7 +1426,9 @@ async function loadFromCloud(){
       if (needsSeed){
         const pe = (typeof window.pumpEff === "object" && window.pumpEff)
           ? window.pumpEff
-          : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+          : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
+        if (!Array.isArray(pe.entries)) pe.entries = [];
+        if (!Array.isArray(pe.notes)) pe.notes = [];
         const seededFolders = normalizeSettingsFolders(data.settingsFolders || data.folders);
         const seededFoldersPayload = cloneFolders(seededFolders);
         const seeded = {
@@ -1477,7 +1484,9 @@ async function loadFromCloud(){
     }else{
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
-        : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+        : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
+      if (!Array.isArray(pe.entries)) pe.entries = [];
+      if (!Array.isArray(pe.notes)) pe.notes = [];
       const defaultFolders = defaultSettingsFolders();
       const seeded = {
         schema: APP_SCHEMA,
@@ -1505,7 +1514,9 @@ async function loadFromCloud(){
     console.error("Cloud load failed:", e);
     const pe = (typeof window.pumpEff === "object" && window.pumpEff)
       ? window.pumpEff
-      : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[] });
+      : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
+    if (!Array.isArray(pe.entries)) pe.entries = [];
+    if (!Array.isArray(pe.notes)) pe.notes = [];
     const fallbackFolders = defaultSettingsFolders();
     adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {} });
     resetHistoryToCurrent();
@@ -1600,7 +1611,7 @@ function createOrderRequest(items){
 }
 
 function buildCleanState(){
-  const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[] };
+const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
   return {
     schema: APP_SCHEMA,
     totalHistory: [],
