@@ -8691,7 +8691,8 @@ function computeDeletedItemsModel(){
   };
 }
 
-function renderDeletedItems(){
+function renderDeletedItems(options){
+  const opts = options && typeof options === "object" ? options : {};
   const content = document.getElementById("content"); if (!content) return;
   setAppSettingsContext("default");
   wireDashboardSettingsMenu();
@@ -8741,18 +8742,40 @@ function renderDeletedItems(){
     searchInput.addEventListener("input", ()=>{
       const value = searchInput.value || "";
       if (typeof window.deletedItemsSearchTerm === "string" && window.deletedItemsSearchTerm === value) return;
+      const shouldRestoreFocus = document.activeElement === searchInput;
+      const selectionStart = shouldRestoreFocus && typeof searchInput.selectionStart === "number"
+        ? searchInput.selectionStart
+        : undefined;
+      const selectionEnd = shouldRestoreFocus && typeof searchInput.selectionEnd === "number"
+        ? searchInput.selectionEnd
+        : undefined;
       window.deletedItemsSearchTerm = value;
-      renderDeletedItems();
+      renderDeletedItems({
+        focusSearch: shouldRestoreFocus,
+        selectionStart,
+        selectionEnd
+      });
     });
   }
   if (clearButton){
     clearButton.addEventListener("click", ()=>{
       if (!window.deletedItemsSearchTerm) return;
       window.deletedItemsSearchTerm = "";
-      renderDeletedItems();
+      renderDeletedItems({ focusSearch: true, selectionStart: 0, selectionEnd: 0 });
       const nextInput = document.getElementById("deletedItemsSearch");
       if (nextInput) nextInput.focus();
     });
+  }
+
+  if (opts.focusSearch && searchInput){
+    searchInput.focus();
+    const selStart = typeof opts.selectionStart === "number" ? opts.selectionStart : searchInput.value.length;
+    const selEnd = typeof opts.selectionEnd === "number" ? opts.selectionEnd : selStart;
+    try {
+      searchInput.setSelectionRange(selStart, selEnd);
+    } catch (_){
+      /* ignore selection failures (e.g. unsupported input types) */
+    }
   }
 }
 
