@@ -2945,13 +2945,25 @@ function openSettingsAndReveal(taskId){
   if (!id) return;
   if (typeof window !== "undefined"){
     window.maintenanceSearchTerm = "";
-    window.pendingMaintenanceFocus = { taskIds: [id] };
-  }
-  const hash = (location.hash || "#").toLowerCase();
-  if (hash === "#/settings" || hash === "#settings"){
-    if (typeof renderSettings === "function") renderSettings();
-  }else{
-    location.hash = "#/settings";
+    const pending = { taskIds: [id], attempts: 0 };
+    window.pendingMaintenanceFocus = pending;
+    const focusNow = typeof window.__focusMaintenanceTaskNow === "function"
+      ? ()=> window.__focusMaintenanceTaskNow(pending)
+      : null;
+    const hash = (location.hash || "#").toLowerCase();
+    if (hash === "#/settings" || hash === "#settings"){
+      if (focusNow && focusNow()){
+        window.pendingMaintenanceFocus = null;
+        return;
+      }
+      if (typeof renderSettings === "function"){
+        renderSettings();
+      }else if (focusNow){
+        focusNow();
+      }
+    }else{
+      location.hash = "#/settings";
+    }
   }
 }
 
@@ -4144,24 +4156,37 @@ function renderSettings(){
   }
 
   function focusTasksForInventory(pending){
-    if (!pending || !root) return;
-    const ids = Array.isArray(pending.taskIds)
-      ? pending.taskIds.map(id => String(id)).filter(Boolean)
-      : [];
-    if (!ids.length) return;
+    if (!pending || !root) return false;
+    const idsSource = Array.isArray(pending.taskIds)
+      ? pending.taskIds
+      : (Array.isArray(pending) ? pending : []);
+    const ids = idsSource.map(id => String(id)).filter(Boolean);
+    if (!ids.length) return false;
     const seen = new Set();
     let firstMatch = null;
+    let anyFound = false;
     ids.forEach(id => {
       const selector = `[data-task-id="${escapeAttr(id)}"]`;
       const el = root.querySelector(selector);
       if (!el || seen.has(el)) return;
       seen.add(el);
+      anyFound = true;
       ensureDetailsChainOpen(el);
       el.classList.add("task--focus");
       const target = el;
       window.setTimeout(()=>{ target.classList.remove("task--focus"); }, 2400);
       if (!firstMatch) firstMatch = el;
     });
+    if (!anyFound){
+      const attempt = Number(pending.attempts) || 0;
+      if (attempt < 6){
+        pending.attempts = attempt + 1;
+        const delay = 120 * (attempt + 1);
+        window.setTimeout(()=> focusTasksForInventory(pending), delay);
+      }
+      return false;
+    }
+    pending.attempts = 0;
     if (firstMatch){
       try {
         const summary = firstMatch.querySelector("summary");
@@ -4177,7 +4202,18 @@ function renderSettings(){
         catch(__){}
       }
     }
+    return true;
   }
+
+  window.__focusMaintenanceTaskNow = (input)=>{
+    if (!input) return false;
+    if (Array.isArray(input.taskIds) || Array.isArray(input)){
+      return focusTasksForInventory(input);
+    }
+    const value = String(input);
+    if (!value) return false;
+    return focusTasksForInventory({ taskIds: [value], attempts: 0 });
+  };
 
   // --- Helpers & derived collections ---
   const byIdFolder = (id)=> window.settingsFolders.find(f => String(f.id)===String(id)) || null;
@@ -5945,6 +5981,107 @@ function renderCosts(){
   setupCostInfoPanel();
   setupForecastBreakdownModal();
 
+  function getHistoryMessageState(){
+    const existing = window.__costHistoryMessageState;
+    if (existing && typeof existing === "object") return existing;
+    const state = { el: null, timer: null, listenersAttached: false, boundHide: null };
+    window.__costHistoryMessageState = state;
+    return state;
+  }
+
+  function hideHistoryMessage(){
+    const state = getHistoryMessageState();
+    if (state.timer){
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+    const el = state.el;
+    if (!el) return;
+    el.classList.remove("is-visible");
+    el.removeAttribute("data-placement");
+    el.style.visibility = "";
+  }
+
+  function ensureHistoryMessageEl(){
+    const state = getHistoryMessageState();
+    let el = state.el;
+    if (!el || !el.isConnected){
+      el = document.createElement("div");
+      el.className = "cost-history-popover";
+      el.setAttribute("role", "status");
+      el.setAttribute("aria-live", "polite");
+      const text = document.createElement("span");
+      text.className = "cost-history-popover__text";
+      el.appendChild(text);
+      document.body.appendChild(el);
+      state.el = el;
+    }
+    if (!state.listenersAttached){
+      const boundHide = ()=> hideHistoryMessage();
+      window.addEventListener("scroll", boundHide, true);
+      window.addEventListener("resize", boundHide);
+      window.addEventListener("hashchange", boundHide);
+      state.listenersAttached = true;
+      state.boundHide = boundHide;
+    }
+    return el;
+  }
+
+  function showHistoryMessage(trigger, message){
+    if (!(trigger instanceof HTMLElement) || !message) return;
+    const state = getHistoryMessageState();
+    const el = ensureHistoryMessageEl();
+    const text = el.querySelector(".cost-history-popover__text");
+    if (text) text.textContent = message;
+    if (state.timer){
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+    el.classList.remove("is-visible");
+    el.removeAttribute("data-placement");
+    el.style.visibility = "hidden";
+    el.style.left = "0px";
+    el.style.top = "0px";
+
+    const rect = trigger.getBoundingClientRect();
+    const bubbleRect = el.getBoundingClientRect();
+    const margin = 12;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || bubbleRect.width || 0;
+
+    let placement = "above";
+    let top = rect.top - bubbleRect.height - margin;
+    if (top < margin){
+      placement = "below";
+      top = rect.bottom + margin;
+    }
+
+    let left = rect.left + (rect.width / 2) - (bubbleRect.width / 2);
+    const maxLeft = viewportWidth - bubbleRect.width - margin;
+    if (maxLeft < margin){
+      left = Math.max(margin, Math.min(viewportWidth - margin, rect.left + (rect.width / 2) - (bubbleRect.width / 2)));
+    }else{
+      if (left < margin) left = margin;
+      if (left > maxLeft) left = maxLeft;
+    }
+
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top = `${Math.round(top)}px`;
+    el.dataset.placement = placement;
+    el.style.visibility = "";
+    requestAnimationFrame(()=> el.classList.add("is-visible"));
+
+    state.timer = window.setTimeout(()=> hideHistoryMessage(), 3400);
+  }
+
+  function notifyHistoryMessage(trigger, message){
+    if (!message) return;
+    if (trigger instanceof HTMLElement){
+      showHistoryMessage(trigger, message);
+    }else if (typeof toast === "function"){ toast(message); }
+  }
+
+  hideHistoryMessage();
+
   const goToJobsHistory = ()=>{
     window.pendingJobHistoryFocus = true;
     const targetHash = "#/jobs";
@@ -6100,9 +6237,9 @@ function renderCosts(){
       }
     }
     if (!missing){
-      if (typeof toast === "function"){
-        toast(hasAnyTask ? "No linked maintenance task is available." : "No maintenance task is linked to this event yet.");
-      }
+      notifyHistoryMessage(element, hasAnyTask
+        ? "No linked maintenance task is available."
+        : "No maintenance task is linked to this event yet.");
       return;
     }
     let shouldRestore = true;
@@ -6152,11 +6289,11 @@ function renderCosts(){
       }
     }
     if (restoredId){
-      if (typeof toast === "function") toast("Maintenance task restored.");
+      notifyHistoryMessage(element, "Maintenance task restored.");
       if (typeof openSettingsAndReveal === "function") openSettingsAndReveal(restoredId);
       else location.hash = "#/settings";
-    }else if (typeof toast === "function"){
-      toast("Unable to restore this maintenance task.");
+    }else{
+      notifyHistoryMessage(element, "Unable to restore this maintenance task.");
     }
   };
 
