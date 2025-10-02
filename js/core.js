@@ -897,6 +897,8 @@ if (typeof window !== "undefined"){
 
 if (typeof window.inventorySearchTerm !== "string") window.inventorySearchTerm = "";
 let inventorySearchTerm = window.inventorySearchTerm;
+if (typeof window.jobHistorySearchTerm !== "string") window.jobHistorySearchTerm = "";
+let jobHistorySearchTerm = window.jobHistorySearchTerm;
 
 /* ================ Jobs editing & render flags ================ */
 if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
@@ -1680,6 +1682,9 @@ async function clearAllAppData(){
   } catch(_){ }
   try { if (Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles.length = 0; } catch(_){ }
   if (typeof window.inventorySearchTerm === "string") window.inventorySearchTerm = "";
+  inventorySearchTerm = "";
+  if (typeof window.jobHistorySearchTerm === "string") window.jobHistorySearchTerm = "";
+  jobHistorySearchTerm = "";
   if (window.orderPartialSelection instanceof Set) window.orderPartialSelection.clear();
 
   try { captureHistorySnapshot(); } catch(_){ }

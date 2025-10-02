@@ -7166,6 +7166,55 @@ function renderJobs(){
     });
   }
 
+  const historySearchInput = document.getElementById("jobHistorySearch");
+  const historySearchClear = document.getElementById("jobHistorySearchClear");
+
+  if (historySearchInput){
+    historySearchInput.addEventListener("input", (event)=>{
+      jobHistorySearchTerm = event.target.value;
+      window.jobHistorySearchTerm = jobHistorySearchTerm;
+      const selectionStart = event.target.selectionStart ?? jobHistorySearchTerm.length;
+      const selectionEnd = event.target.selectionEnd ?? selectionStart;
+      const selectionDirection = event.target.selectionDirection || "none";
+      renderJobs();
+      requestAnimationFrame(()=>{
+        const nextInput = document.getElementById("jobHistorySearch");
+        if (!nextInput) return;
+        try {
+          nextInput.focus({ preventScroll: true });
+        } catch (_){
+          nextInput.focus();
+        }
+        try {
+          const start = Math.min(selectionStart, nextInput.value.length);
+          const end = Math.min(selectionEnd, nextInput.value.length);
+          nextInput.setSelectionRange(start, end, selectionDirection);
+        } catch (_){ }
+      });
+    });
+  }
+
+  if (historySearchClear){
+    historySearchClear.addEventListener("click", ()=>{
+      if (!jobHistorySearchTerm) return;
+      jobHistorySearchTerm = "";
+      window.jobHistorySearchTerm = "";
+      renderJobs();
+      requestAnimationFrame(()=>{
+        const nextInput = document.getElementById("jobHistorySearch");
+        if (!nextInput) return;
+        try {
+          nextInput.focus({ preventScroll: true });
+        } catch (_){
+          nextInput.focus();
+        }
+        try {
+          nextInput.setSelectionRange(0, 0);
+        } catch (_){ }
+      });
+    });
+  }
+
   const newFilesBtn = document.getElementById("jobFilesBtn");
   const newFilesInput = document.getElementById("jobFiles");
   newFilesBtn?.addEventListener("click", ()=>{ newFilesInput?.click(); });
