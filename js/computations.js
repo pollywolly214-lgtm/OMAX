@@ -75,10 +75,15 @@ function computeJobEfficiency(job){
   const result = {
     rate: JOB_RATE_PER_HOUR,
     expectedHours: 0,
+    expectedDays: 0,
     actualHours: 0,
+    actualDays: 0,
     expectedRemaining: 0,
+    expectedRemainingDays: 0,
     actualRemaining: 0,
+    actualRemainingDays: 0,
     deltaHours: 0,
+    deltaDays: 0,
     gainLoss: 0,
     daysElapsed: 0,
     totalDays: 0,
@@ -117,6 +122,8 @@ function computeJobEfficiency(job){
   const expectedHours = Math.min(totalCapacity, daysElapsed * hoursPerDay);
   result.expectedHours = expectedHours;
   result.expectedRemaining = Math.max(0, totalCapacity - expectedHours);
+  result.expectedDays = expectedHours / hoursPerDay;
+  result.expectedRemainingDays = result.expectedRemaining / hoursPerDay;
 
   // Helper: machine total hours on/before a given date (00:00)
   function getHoursAt(dateISO){
@@ -164,6 +171,9 @@ function computeJobEfficiency(job){
   result.actualRemaining = Math.max(0, planned - result.actualHours);
   result.deltaHours      = result.expectedRemaining - result.actualRemaining;   // + ahead / − behind
   result.gainLoss        = result.deltaHours * result.rate;
+  result.actualDays = result.actualHours / hoursPerDay;
+  result.actualRemainingDays = result.actualRemaining / hoursPerDay;
+  result.deltaDays = result.deltaHours / hoursPerDay;
 
   return result;
 }
