@@ -7166,6 +7166,68 @@ function renderJobs(){
     });
   }
 
+  const historySearchInput = document.getElementById("jobHistorySearch");
+  const historySearchClear = document.getElementById("jobHistorySearchClear");
+
+  const captureScrollPosition = ()=> ({
+    x: window.scrollX || document.documentElement.scrollLeft || document.body.scrollLeft || 0,
+    y: window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0
+  });
+  const restoreScrollPosition = (pos)=>{
+    if (!pos || typeof pos.x !== "number" || typeof pos.y !== "number") return;
+    window.scrollTo(pos.x, pos.y);
+  };
+
+  if (historySearchInput){
+    historySearchInput.addEventListener("input", (event)=>{
+      jobHistorySearchTerm = event.target.value;
+      window.jobHistorySearchTerm = jobHistorySearchTerm;
+      const selectionStart = event.target.selectionStart ?? jobHistorySearchTerm.length;
+      const selectionEnd = event.target.selectionEnd ?? selectionStart;
+      const selectionDirection = event.target.selectionDirection || "none";
+      const scrollPosition = captureScrollPosition();
+      renderJobs();
+      requestAnimationFrame(()=>{
+        restoreScrollPosition(scrollPosition);
+        const nextInput = document.getElementById("jobHistorySearch");
+        if (!nextInput) return;
+        try {
+          nextInput.focus({ preventScroll: true });
+        } catch (_){
+          nextInput.focus();
+        }
+        try {
+          const start = Math.min(selectionStart, nextInput.value.length);
+          const end = Math.min(selectionEnd, nextInput.value.length);
+          nextInput.setSelectionRange(start, end, selectionDirection);
+        } catch (_){ }
+      });
+    });
+  }
+
+  if (historySearchClear){
+    historySearchClear.addEventListener("click", ()=>{
+      if (!jobHistorySearchTerm) return;
+      jobHistorySearchTerm = "";
+      window.jobHistorySearchTerm = "";
+      const scrollPosition = captureScrollPosition();
+      renderJobs();
+      requestAnimationFrame(()=>{
+        restoreScrollPosition(scrollPosition);
+        const nextInput = document.getElementById("jobHistorySearch");
+        if (!nextInput) return;
+        try {
+          nextInput.focus({ preventScroll: true });
+        } catch (_){
+          nextInput.focus();
+        }
+        try {
+          nextInput.setSelectionRange(0, 0);
+        } catch (_){ }
+      });
+    });
+  }
+
   const newFilesBtn = document.getElementById("jobFilesBtn");
   const newFilesInput = document.getElementById("jobFiles");
   newFilesBtn?.addEventListener("click", ()=>{ newFilesInput?.click(); });

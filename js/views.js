@@ -1278,13 +1278,97 @@ function viewJobs(){
     const bTime = new Date(b.completedAtISO || b.dueISO || b.startISO || 0).getTime();
     return bTime - aTime;
   });
-  const completedStats = completedSorted.reduce((acc, job)=>{
+  const historySearchRaw = typeof jobHistorySearchTerm === "string"
+    ? jobHistorySearchTerm
+    : (typeof window.jobHistorySearchTerm === "string" ? window.jobHistorySearchTerm : "");
+  const historySearchValue = String(historySearchRaw || "");
+  const historyQuery = historySearchValue.trim().toLowerCase();
+
+  const editingCompletedJobsSet = typeof getEditingCompletedJobsSet === "function"
+    ? getEditingCompletedJobsSet()
+    : (()=>{
+        if (!(window.editingCompletedJobs instanceof Set)){
+          window.editingCompletedJobs = new Set();
+        }
+        return window.editingCompletedJobs;
+      })();
+
+  const matchesHistorySearch = (job)=>{
+    if (!job) return false;
+    if (!historyQuery) return true;
+    if (editingCompletedJobsSet.has(String(job.id))) return true;
+    const eff = job && job.efficiency ? job.efficiency : {};
+    const delta = Number(eff.deltaHours);
+    const gainLoss = Number(eff.gainLoss);
+    const actualHours = Number(job.actualHours ?? eff.actualHours);
+    const estHours = Number(job.estimateHours);
+    const statusLabel = Number.isFinite(delta) && Math.abs(delta) > 0.1
+      ? (delta > 0 ? "Finished ahead" : "Finished behind")
+      : "Finished on estimate";
+    const statusDetail = Number.isFinite(delta) && Math.abs(delta) > 0.1
+      ? `${delta > 0 ? "+" : "-"}${Math.abs(delta).toFixed(1)} hr`
+      : "";
+    const completedLabel = formatDate(job?.completedAtISO);
+    const startLabel = formatDate(job?.startISO);
+    const dueLabel = formatDate(job?.dueISO);
+    const actualLabel = formatHours(actualHours);
+    const estimateLabel = formatHours(estHours);
+    const tokens = [
+      job.id,
+      job.name,
+      job.material,
+      job.notes,
+      job.completedAtISO,
+      job.startISO,
+      job.dueISO,
+      statusLabel,
+      statusDetail,
+      Number.isFinite(delta) ? delta.toFixed(1) : "",
+      Number.isFinite(delta) ? (delta > 0 ? "ahead" : delta < 0 ? "behind" : "on pace") : "",
+      Number.isFinite(gainLoss) ? gainLoss.toString() : ""
+    ];
+    [completedLabel, startLabel, dueLabel].forEach(label => {
+      if (label && label !== "—") tokens.push(label);
+    });
+    if (actualLabel && actualLabel !== "—") tokens.push(actualLabel);
+    if (estimateLabel && estimateLabel !== "—") tokens.push(estimateLabel);
+    if (actualLabel && estimateLabel && actualLabel !== "—" && estimateLabel !== "—"){
+      tokens.push(`${actualLabel} / ${estimateLabel}`);
+    }
+    if (Number.isFinite(gainLoss)){
+      tokens.push(formatCurrency(gainLoss));
+      tokens.push(formatCurrency(gainLoss, { showPlus: false }));
+    }
+    const numericFields = [
+      job.materialCost,
+      job.materialQty,
+      job.actualHours,
+      job.estimateHours,
+      eff.actualHours,
+      eff.expectedHours,
+      eff.expectedRemaining,
+      eff.actualRemaining
+    ];
+    numericFields.forEach(value => {
+      if (value == null || value === "") return;
+      tokens.push(String(value));
+    });
+    return tokens.some(field => {
+      if (field == null) return false;
+      const text = String(field).trim();
+      if (!text) return false;
+      return text.toLowerCase().includes(historyQuery);
+    });
+  };
+
+  const completedFiltered = completedSorted.filter(matchesHistorySearch);
+  const completedStats = completedFiltered.reduce((acc, job)=>{
     const eff = job && job.efficiency ? job.efficiency : {};
     const gain = Number(eff.gainLoss);
     acc.total += Number.isFinite(gain) ? gain : 0;
     return acc;
   }, { total: 0 });
-  const completedAverage = completedSorted.length ? (completedStats.total / completedSorted.length) : 0;
+  const completedAverage = completedFiltered.length ? (completedStats.total / completedFiltered.length) : 0;
   const numberInputValue = (value)=>{
     const num = Number(value);
     return Number.isFinite(num) ? String(num) : "";
@@ -1299,15 +1383,12 @@ function viewJobs(){
   };
 
   const historyColumnCount = 7;
-  const editingCompletedJobsSet = typeof getEditingCompletedJobsSet === "function"
-    ? getEditingCompletedJobsSet()
-    : (()=>{
-        if (!(window.editingCompletedJobs instanceof Set)){
-          window.editingCompletedJobs = new Set();
-        }
-        return window.editingCompletedJobs;
-      })();
-  const completedRows = completedSorted.map(job => {
+  const historySearchDisplay = historySearchValue
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+  const completedRows = completedFiltered.map(job => {
     const eff = job && job.efficiency ? job.efficiency : {};
     const delta = Number(eff.deltaHours);
     const gainLoss = Number(eff.gainLoss);
@@ -1376,10 +1457,15 @@ function viewJobs(){
       </tr>
     `;
   }).join("");
-  const completedTable = completedSorted.length
+  const historySearchActive = historyQuery.length > 0;
+  const totalCompletedCount = completedSorted.length;
+  const historyEmptyMessage = historySearchActive
+    ? "No past cutting jobs match your search."
+    : "Mark jobs complete to build a history of past cutting work.";
+  const completedTable = completedFiltered.length
     ? `
       <div class="past-jobs-summary">
-        <div><span class="label">Jobs logged</span><span>${completedSorted.length}</span></div>
+        <div><span class="label">Jobs logged</span><span>${completedFiltered.length}</span></div>
         <div><span class="label">Total impact</span><span>${formatCurrency(completedStats.total)}</span></div>
         <div><span class="label">Avg per job</span><span>${formatCurrency(completedAverage)}</span></div>
       </div>
@@ -1390,7 +1476,10 @@ function viewJobs(){
         <tbody>${completedRows}</tbody>
       </table>
     `
-    : `<p class="small muted">Mark jobs complete to build a history of past cutting work.</p>`;
+    : `<p class="small muted">${historyEmptyMessage}</p>`;
+  const historyFilterStatus = historySearchActive
+    ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
+    : "";
   const activeColumnCount = 11;
   const rows = cuttingJobs.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
@@ -1603,6 +1692,14 @@ function viewJobs(){
     </div>
     <div class="block past-jobs-block" id="pastJobs">
       <h3>Past Cutting Jobs</h3>
+      <div class="past-jobs-toolbar">
+        <div class="past-jobs-search mini-form">
+          <input type="search" id="jobHistorySearch" placeholder="Search past jobs by name, material, notes, or date" value="${historySearchDisplay}">
+          <button type="button" id="jobHistorySearchClear">Clear</button>
+        </div>
+      </div>
+      <div class="small muted past-jobs-hint">Results update as you type.</div>
+      ${historyFilterStatus}
       ${completedTable}
     </div>
   </div>`;
