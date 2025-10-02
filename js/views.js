@@ -1864,6 +1864,9 @@ function viewOrderRequest(model){
 function viewDeletedItems(model){
   const data = model || {};
   const items = Array.isArray(data.items) ? data.items : [];
+  const totalCount = typeof data.totalCount === "number" ? data.totalCount : items.length;
+  const searchValue = String(data.searchTerm || "");
+  const searchDisabled = totalCount === 0 && !searchValue;
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const rows = items.map(item => `
     <tr>
@@ -1895,13 +1898,20 @@ function viewDeletedItems(model){
         </thead>
         <tbody>${rows}</tbody>
       </table>`
-    : `<p class="small muted">Nothing has been deleted in the last 30 days.</p>`;
+    : totalCount > 0
+      ? `<p class="small muted">No deleted items match your search.</p>`
+      : `<p class="small muted">Nothing has been deleted in the last 30 days.</p>`;
 
   return `
     <div class="container deleted-container">
       <div class="block" style="grid-column:1 / -1">
         <h3>Deleted items</h3>
         <p class="small muted">Items remain here for 30 days after deletion. Restore them or delete forever.</p>
+        <div class="deleted-search">
+          <label class="sr-only" for="deletedItemsSearch">Search deleted items</label>
+          <input type="search" id="deletedItemsSearch" placeholder="Search deleted items" value="${esc(searchValue)}" ${searchDisabled ? "disabled" : ""} autocomplete="off">
+          <button type="button" id="deletedItemsSearchClear" ${searchValue ? "" : "disabled"}>Clear</button>
+        </div>
         ${body}
       </div>
     </div>

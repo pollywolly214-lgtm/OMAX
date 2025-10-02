@@ -8664,6 +8664,8 @@ function formatTrashDate(iso){
 
 function computeDeletedItemsModel(){
   const entries = typeof listDeletedItems === "function" ? listDeletedItems() : [];
+  const searchRaw = typeof window.deletedItemsSearchTerm === "string" ? window.deletedItemsSearchTerm : "";
+  const searchTerm = searchRaw.trim().toLowerCase();
   const items = entries.map(entry => ({
     id: entry.id,
     icon: "🗑",
@@ -8674,7 +8676,19 @@ function computeDeletedItemsModel(){
     expiresAt: entry.expiresAt ? formatTrashDate(entry.expiresAt) : "—",
     expiresAtISO: entry.expiresAt || null
   }));
-  return { items };
+  const filtered = searchTerm
+    ? items.filter(item => {
+        const fields = [item.label, item.typeLabel, item.deletedAt, item.expiresAt]
+          .map(value => String(value || "").toLowerCase());
+        return fields.some(text => text.includes(searchTerm));
+      })
+    : items;
+  return {
+    items: filtered,
+    totalCount: items.length,
+    searchTerm: searchRaw,
+    hasActiveSearch: Boolean(searchTerm)
+  };
 }
 
 function renderDeletedItems(){
@@ -8720,5 +8734,25 @@ function renderDeletedItems(){
       }
     });
   });
+
+  const searchInput = content.querySelector("#deletedItemsSearch");
+  const clearButton = content.querySelector("#deletedItemsSearchClear");
+  if (searchInput){
+    searchInput.addEventListener("input", ()=>{
+      const value = searchInput.value || "";
+      if (typeof window.deletedItemsSearchTerm === "string" && window.deletedItemsSearchTerm === value) return;
+      window.deletedItemsSearchTerm = value;
+      renderDeletedItems();
+    });
+  }
+  if (clearButton){
+    clearButton.addEventListener("click", ()=>{
+      if (!window.deletedItemsSearchTerm) return;
+      window.deletedItemsSearchTerm = "";
+      renderDeletedItems();
+      const nextInput = document.getElementById("deletedItemsSearch");
+      if (nextInput) nextInput.focus();
+    });
+  }
 }
 
