@@ -8726,6 +8726,8 @@ function formatTrashDate(iso){
 
 function computeDeletedItemsModel(){
   const entries = typeof listDeletedItems === "function" ? listDeletedItems() : [];
+  const searchRaw = typeof window.deletedItemsSearchTerm === "string" ? window.deletedItemsSearchTerm : "";
+  const searchTerm = searchRaw.trim().toLowerCase();
   const items = entries.map(entry => ({
     id: entry.id,
     icon: "🗑",
@@ -8736,10 +8738,23 @@ function computeDeletedItemsModel(){
     expiresAt: entry.expiresAt ? formatTrashDate(entry.expiresAt) : "—",
     expiresAtISO: entry.expiresAt || null
   }));
-  return { items };
+  const filtered = searchTerm
+    ? items.filter(item => {
+        const fields = [item.label, item.typeLabel, item.deletedAt, item.expiresAt]
+          .map(value => String(value || "").toLowerCase());
+        return fields.some(text => text.includes(searchTerm));
+      })
+    : items;
+  return {
+    items: filtered,
+    totalCount: items.length,
+    searchTerm: searchRaw,
+    hasActiveSearch: Boolean(searchTerm)
+  };
 }
 
-function renderDeletedItems(){
+function renderDeletedItems(options){
+  const opts = options && typeof options === "object" ? options : {};
   const content = document.getElementById("content"); if (!content) return;
   setAppSettingsContext("default");
   wireDashboardSettingsMenu();
@@ -8782,5 +8797,47 @@ function renderDeletedItems(){
       }
     });
   });
+
+  const searchInput = content.querySelector("#deletedItemsSearch");
+  const clearButton = content.querySelector("#deletedItemsSearchClear");
+  if (searchInput){
+    searchInput.addEventListener("input", ()=>{
+      const value = searchInput.value || "";
+      if (typeof window.deletedItemsSearchTerm === "string" && window.deletedItemsSearchTerm === value) return;
+      const shouldRestoreFocus = document.activeElement === searchInput;
+      const selectionStart = shouldRestoreFocus && typeof searchInput.selectionStart === "number"
+        ? searchInput.selectionStart
+        : undefined;
+      const selectionEnd = shouldRestoreFocus && typeof searchInput.selectionEnd === "number"
+        ? searchInput.selectionEnd
+        : undefined;
+      window.deletedItemsSearchTerm = value;
+      renderDeletedItems({
+        focusSearch: shouldRestoreFocus,
+        selectionStart,
+        selectionEnd
+      });
+    });
+  }
+  if (clearButton){
+    clearButton.addEventListener("click", ()=>{
+      if (!window.deletedItemsSearchTerm) return;
+      window.deletedItemsSearchTerm = "";
+      renderDeletedItems({ focusSearch: true, selectionStart: 0, selectionEnd: 0 });
+      const nextInput = document.getElementById("deletedItemsSearch");
+      if (nextInput) nextInput.focus();
+    });
+  }
+
+  if (opts.focusSearch && searchInput){
+    searchInput.focus();
+    const selStart = typeof opts.selectionStart === "number" ? opts.selectionStart : searchInput.value.length;
+    const selEnd = typeof opts.selectionEnd === "number" ? opts.selectionEnd : selStart;
+    try {
+      searchInput.setSelectionRange(selStart, selEnd);
+    } catch (_){
+      /* ignore selection failures (e.g. unsupported input types) */
+    }
+  }
 }
 

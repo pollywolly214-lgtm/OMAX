@@ -641,6 +641,9 @@ body.cost-info-visible{
 .deleted-container .deleted-label{font-weight:600}
 .deleted-container .deleted-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .deleted-container .deleted-when{min-width:180px}
+.deleted-container .deleted-search{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.deleted-container .deleted-search input[type="search"]{flex:1 1 220px;min-width:200px}
+.deleted-container .deleted-search button{flex:0 0 auto}
 .order-card-footer{ display:flex; gap:12px; justify-content:space-between; flex-wrap:wrap; align-items:flex-start; }
 .order-total{ color:#1e2b45; }
 .order-total strong{ color:#0a63c2; font-size:20px; }

@@ -897,6 +897,7 @@ if (typeof window !== "undefined"){
   window.purgeExpiredDeletedItems = purgeExpiredDeletedItems;
 }
 
+if (typeof window.deletedItemsSearchTerm !== "string") window.deletedItemsSearchTerm = "";
 if (typeof window.inventorySearchTerm !== "string") window.inventorySearchTerm = "";
 let inventorySearchTerm = window.inventorySearchTerm;
 if (typeof window.jobHistorySearchTerm !== "string") window.jobHistorySearchTerm = "";
