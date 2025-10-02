@@ -6656,6 +6656,41 @@ function computeCostModel(){
     });
   }
 
+  const deletedList = typeof listDeletedItems === "function"
+    ? listDeletedItems()
+    : (Array.isArray(window.deletedItems) ? window.deletedItems : []);
+  if (Array.isArray(deletedList)){
+    deletedList.forEach(entry => {
+      if (!entry || entry.type !== "task") return;
+      const payload = entry.payload || {};
+      const meta = entry.meta || {};
+      const payloadId = payload.id != null ? String(payload.id) : null;
+      if (!payloadId) return;
+      const mode = payload.mode === "asreq" || meta.list === "asreq" ? "asreq" : "interval";
+      const name = payload.name || entry.label || "Maintenance task";
+      const baseInfo = {
+        id: payloadId,
+        originalId: payloadId,
+        mode,
+        name,
+        exists: false,
+        trashId: entry.id != null ? String(entry.id) : null
+      };
+      const completedDates = Array.isArray(payload.completedDates) ? payload.completedDates : [];
+      completedDates.forEach(dateVal => {
+        const key = toHistoryDateKey(dateVal);
+        if (key) addTaskEventForDate(key, baseInfo);
+      });
+      const manualHistory = Array.isArray(payload.manualHistory) ? payload.manualHistory : [];
+      manualHistory.forEach(item => {
+        if (!item) return;
+        const statusRaw = typeof item.status === "string" ? item.status.toLowerCase() : "";
+        if (statusRaw === "scheduled") return;
+        const key = toHistoryDateKey(item.dateISO);
+        if (key) addTaskEventForDate(key, baseInfo);
+      });
+    });
+  }
   const captureTaskHistory = (task, { exists = true, trashId = null } = {})=>{
     if (!task) return;
     const rawId = task.id != null ? String(task.id) : null;
@@ -6726,218 +6761,6 @@ function computeCostModel(){
   }
   if (Array.isArray(tasksAsReq)){
     tasksAsReq.forEach(task => captureTaskHistory(task, { exists: true }));
-  }
-
-  const deletedList = typeof listDeletedItems === "function"
-    ? listDeletedItems()
-    : (Array.isArray(window.deletedItems) ? window.deletedItems : []);
-  if (Array.isArray(deletedList)){
-    deletedList.forEach(entry => {
-      if (!entry || entry.type !== "task") return;
-      const payload = entry.payload || {};
-      const meta = entry.meta || {};
-      const payloadId = payload.id != null ? String(payload.id) : null;
-      if (!payloadId) return;
-      const mode = payload.mode === "asreq" || meta.list === "asreq" ? "asreq" : "interval";
-      const name = payload.name || entry.label || "Maintenance task";
-      const baseInfo = {
-        id: payloadId,
-        originalId: payloadId,
-        mode,
-        name,
-        exists: false,
-        trashId: entry.id != null ? String(entry.id) : null
-      };
-      const completedDates = Array.isArray(payload.completedDates) ? payload.completedDates : [];
-      completedDates.forEach(dateVal => {
-        const key = toHistoryDateKey(dateVal);
-        if (key) addTaskEventForDate(key, baseInfo);
-      });
-      const manualHistory = Array.isArray(payload.manualHistory) ? payload.manualHistory : [];
-      manualHistory.forEach(item => {
-        if (!item) return;
-        const statusRaw = typeof item.status === "string" ? item.status.toLowerCase() : "";
-        if (statusRaw === "scheduled") return;
-        const key = toHistoryDateKey(item.dateISO);
-        if (key) addTaskEventForDate(key, baseInfo);
-      });
-    });
-  }
-
-
-  const toHistoryDateKey = (value)=>{
-    if (!value) return null;
-    if (typeof normalizeDateKey === "function"){
-      try {
-        const normalized = normalizeDateKey(value);
-        if (normalized) return normalized;
-      } catch (_err){}
-    }
-    if (value instanceof Date && !Number.isNaN(value.getTime())){
-      return value.toISOString().slice(0, 10);
-    }
-    if (typeof value === "string"){
-      const trimmed = value.trim();
-      if (!trimmed) return null;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-      const parsed = new Date(trimmed);
-      if (!Number.isNaN(parsed.getTime())){
-        return parsed.toISOString().slice(0, 10);
-      }
-    }
-    return null;
-  };
-
-  const taskEventsByDate = new Map();
-
-  const addTaskEventForDate = (dateKey, info)=>{
-    if (!dateKey || !info || !info.originalId) return;
-    let list = taskEventsByDate.get(dateKey);
-    if (!list){
-      list = [];
-      taskEventsByDate.set(dateKey, list);
-    }
-    const existsAlready = list.some(existing => existing && existing.originalId === info.originalId);
-    if (!existsAlready){
-      list.push({ ...info });
-    }
-  };
-
-  const templateMetaById = new Map();
-  const registerTemplateMeta = (task)=>{
-    if (!task || task.id == null) return;
-    const id = String(task.id);
-    if (templateMetaById.has(id)) return;
-    const mode = task.mode === "asreq" ? "asreq" : "interval";
-    const name = task.name || "Maintenance task";
-    templateMetaById.set(id, { id, mode, name });
-  };
-
-  if (Array.isArray(tasksInterval)){
-    tasksInterval.forEach(task => {
-      if (!task) return;
-      const isInstance = typeof isInstanceTask === "function"
-        ? isInstanceTask(task)
-        : (task.variant === "instance");
-      if (!isInstance) registerTemplateMeta(task);
-    });
-  }
-  if (Array.isArray(tasksAsReq)){
-    tasksAsReq.forEach(task => {
-      if (!task) return;
-      const isInstance = typeof isInstanceTask === "function"
-        ? isInstanceTask(task)
-        : (task.variant === "instance");
-      if (!isInstance) registerTemplateMeta(task);
-    });
-  }
-
-  const captureTaskHistory = (task, { exists = true, trashId = null } = {})=>{
-    if (!task) return;
-    const rawId = task.id != null ? String(task.id) : null;
-    if (!rawId) return;
-
-    let targetId = rawId;
-    let templateMeta = templateMetaById.get(rawId) || null;
-    const isInstance = typeof isInstanceTask === "function"
-      ? isInstanceTask(task)
-      : (task.variant === "instance");
-    if (isInstance){
-      const templateId = task.templateId != null ? String(task.templateId) : null;
-      if (templateId){
-        targetId = templateId;
-        templateMeta = templateMetaById.get(templateId) || templateMeta;
-      }
-    }else if (!templateMeta && task.templateId != null){
-      const templateId = String(task.templateId);
-      targetId = templateId;
-      templateMeta = templateMetaById.get(templateId) || templateMeta;
-    }
-
-    if (!templateMeta){
-      const mode = task.mode === "asreq" ? "asreq" : "interval";
-      const name = task.name || "Maintenance task";
-      templateMeta = { id: targetId, mode, name };
-      if (exists) templateMetaById.set(targetId, templateMeta);
-    }
-
-    const baseInfo = {
-      id: targetId,
-      originalId: targetId,
-      mode: templateMeta.mode,
-      name: templateMeta.name,
-      exists: Boolean(exists),
-      trashId: trashId != null ? String(trashId) : null
-    };
-
-    const pushHistory = (sourceTask)=>{
-      if (!sourceTask) return;
-      const completedDates = Array.isArray(sourceTask.completedDates) ? sourceTask.completedDates : [];
-      completedDates.forEach(dateVal => {
-        const key = toHistoryDateKey(dateVal);
-        if (key) addTaskEventForDate(key, baseInfo);
-      });
-      const manualHistory = Array.isArray(sourceTask.manualHistory) ? sourceTask.manualHistory : [];
-      manualHistory.forEach(entry => {
-        if (!entry) return;
-        const statusRaw = typeof entry.status === "string" ? entry.status.toLowerCase() : "";
-        if (statusRaw === "scheduled") return;
-        const key = toHistoryDateKey(entry.dateISO);
-        if (key) addTaskEventForDate(key, baseInfo);
-      });
-    };
-
-    pushHistory(task);
-    if (isInstance){
-      const templateId = task.templateId != null ? String(task.templateId) : null;
-      if (templateId && Array.isArray(tasksInterval)){
-        const templateTask = tasksInterval.find(item => item && String(item.id) === templateId);
-        if (templateTask) pushHistory(templateTask);
-      }
-    }
-  };
-
-  if (Array.isArray(tasksInterval)){
-    tasksInterval.forEach(task => captureTaskHistory(task, { exists: true }));
-  }
-  if (Array.isArray(tasksAsReq)){
-    tasksAsReq.forEach(task => captureTaskHistory(task, { exists: true }));
-  }
-
-  const deletedList = typeof listDeletedItems === "function"
-    ? listDeletedItems()
-    : (Array.isArray(window.deletedItems) ? window.deletedItems : []);
-  if (Array.isArray(deletedList)){
-    deletedList.forEach(entry => {
-      if (!entry || entry.type !== "task") return;
-      const payload = entry.payload || {};
-      const meta = entry.meta || {};
-      const payloadId = payload.id != null ? String(payload.id) : null;
-      if (!payloadId) return;
-      const mode = payload.mode === "asreq" || meta.list === "asreq" ? "asreq" : "interval";
-      const name = payload.name || entry.label || "Maintenance task";
-      const baseInfo = {
-        id: payloadId,
-        originalId: payloadId,
-        mode,
-        name,
-        exists: false,
-        trashId: entry.id != null ? String(entry.id) : null
-      };
-      const completedDates = Array.isArray(payload.completedDates) ? payload.completedDates : [];
-      completedDates.forEach(dateVal => {
-        const key = toHistoryDateKey(dateVal);
-        if (key) addTaskEventForDate(key, baseInfo);
-      });
-      const manualHistory = Array.isArray(payload.manualHistory) ? payload.manualHistory : [];
-      manualHistory.forEach(item => {
-        if (!item) return;
-        const statusRaw = typeof item.status === "string" ? item.status.toLowerCase() : "";
-        if (statusRaw === "scheduled") return;
-        const key = toHistoryDateKey(item.dateISO);
-        if (key) addTaskEventForDate(key, baseInfo);
-      });
-    });
   }
 
   const maintenanceHistory = [];
