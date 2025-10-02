@@ -2945,7 +2945,54 @@ function openSettingsAndReveal(taskId){
   if (!id) return;
   if (typeof window !== "undefined"){
     window.maintenanceSearchTerm = "";
-    const pending = { taskIds: [id], attempts: 0 };
+    const openTaskIds = new Set();
+    const openFolderIds = new Set();
+    const findTask = typeof findTaskByIdLocal === "function" ? findTaskByIdLocal : null;
+    const targetTask = findTask ? findTask(id) : null;
+    const folderById = new Map();
+    if (Array.isArray(window.settingsFolders)){
+      window.settingsFolders.forEach(folder => {
+        if (!folder || folder.id == null) return;
+        folderById.set(String(folder.id), folder);
+      });
+    }
+
+    const addFolderChain = (folderId)=>{
+      const fid = folderId != null ? String(folderId) : "";
+      if (!fid) return;
+      if (openFolderIds.has(fid)) return;
+      openFolderIds.add(fid);
+      const folder = folderById.get(fid);
+      if (folder && folder.parent != null){
+        addFolderChain(folder.parent);
+      }
+    };
+
+    if (targetTask){
+      const seenTasks = new Set();
+      let walker = targetTask;
+      while (walker && !seenTasks.has(String(walker.id))){
+        const wid = String(walker.id);
+        seenTasks.add(wid);
+        openTaskIds.add(wid);
+        if (walker.cat != null) addFolderChain(walker.cat);
+        const parentId = walker.parentTask != null ? String(walker.parentTask) : "";
+        if (!parentId) break;
+        if (seenTasks.has(parentId)) break;
+        const parentTask = findTask ? findTask(parentId) : null;
+        if (!parentTask) break;
+        walker = parentTask;
+      }
+    }
+
+    if (openTaskIds.size === 0) openTaskIds.add(id);
+
+    const pending = {
+      taskIds: [id],
+      attempts: 0,
+      openTaskIds: Array.from(openTaskIds),
+      openFolderIds: Array.from(openFolderIds)
+    };
     window.pendingMaintenanceFocus = pending;
     const focusNow = typeof window.__focusMaintenanceTaskNow === "function"
       ? ()=> window.__focusMaintenanceTaskNow(pending)
@@ -4157,6 +4204,42 @@ function renderSettings(){
 
   function focusTasksForInventory(pending){
     if (!pending || !root) return false;
+
+    const ensureFolderOpen = (catId)=>{
+      const fid = String(catId || "");
+      if (!fid) return;
+      openFolderState.add(fid);
+      const selector = `[data-cat-id="${escapeAttr(fid)}"]`;
+      const el = root.querySelector(selector);
+      if (el instanceof HTMLDetailsElement && !el.open){
+        el.open = true;
+      }else if (el){
+        ensureDetailsChainOpen(el);
+      }
+    };
+
+    const ensureTaskOpen = (taskId)=>{
+      const tid = String(taskId || "");
+      if (!tid) return;
+      const selector = `[data-task-id="${escapeAttr(tid)}"]`;
+      const el = root.querySelector(selector);
+      if (!el) return;
+      ensureDetailsChainOpen(el);
+      if (el instanceof HTMLDetailsElement && !el.open){
+        el.open = true;
+      }
+    };
+
+    const folderIds = Array.isArray(pending.openFolderIds)
+      ? pending.openFolderIds.map(id => String(id)).filter(Boolean)
+      : [];
+    folderIds.forEach(ensureFolderOpen);
+
+    const openTaskIds = Array.isArray(pending.openTaskIds)
+      ? pending.openTaskIds.map(id => String(id)).filter(Boolean)
+      : [];
+    openTaskIds.forEach(ensureTaskOpen);
+
     const idsSource = Array.isArray(pending.taskIds)
       ? pending.taskIds
       : (Array.isArray(pending) ? pending : []);
