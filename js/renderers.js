@@ -333,6 +333,98 @@ async function filesToAttachments(fileList){
   return attachments;
 }
 
+function captureNewJobFormState(){
+  const form = document.getElementById("addJobForm");
+  if (!form) return null;
+
+  const captureField = (id)=>{
+    const el = document.getElementById(id);
+    if (!el) return "";
+    return typeof el.value === "string" ? el.value : "";
+  };
+
+  const activeEl = document.activeElement;
+  let activeState = null;
+  if (activeEl && form.contains(activeEl) && typeof activeEl.id === "string" && activeEl.id){
+    let selectionStart = null;
+    let selectionEnd = null;
+    let selectionDirection = null;
+    try {
+      selectionStart = activeEl.selectionStart;
+      selectionEnd = activeEl.selectionEnd;
+      selectionDirection = activeEl.selectionDirection || null;
+    } catch (_){
+      selectionStart = selectionEnd = null;
+      selectionDirection = null;
+    }
+    activeState = {
+      id: activeEl.id,
+      selectionStart,
+      selectionEnd,
+      selectionDirection
+    };
+  }
+
+  return {
+    fields: {
+      name: captureField("jobName"),
+      estimate: captureField("jobEst"),
+      material: captureField("jobMaterial"),
+      materialCost: captureField("jobMaterialCost"),
+      materialQty: captureField("jobMaterialQty"),
+      start: captureField("jobStart"),
+      due: captureField("jobDue")
+    },
+    active: activeState
+  };
+}
+
+function restoreNewJobFormState(state){
+  if (!state || typeof state !== "object" || !state.fields) return;
+
+  const assignField = (id, value)=>{
+    const el = document.getElementById(id);
+    if (!el) return;
+    try {
+      el.value = value ?? "";
+    } catch (_){
+      // Ignore assignment issues for unsupported input types
+    }
+  };
+
+  assignField("jobName", state.fields.name);
+  assignField("jobEst", state.fields.estimate);
+  assignField("jobMaterial", state.fields.material);
+  assignField("jobMaterialCost", state.fields.materialCost);
+  assignField("jobMaterialQty", state.fields.materialQty);
+  assignField("jobStart", state.fields.start);
+  assignField("jobDue", state.fields.due);
+
+  if (state.active && state.active.id){
+    const target = document.getElementById(state.active.id);
+    if (target){
+      try {
+        target.focus({ preventScroll: true });
+      } catch (_){
+        try {
+          target.focus();
+        } catch (_){ }
+      }
+      const hasSelection = typeof state.active.selectionStart === "number"
+        && typeof state.active.selectionEnd === "number";
+      if (hasSelection){
+        try {
+          target.setSelectionRange(
+            state.active.selectionStart,
+            state.active.selectionEnd,
+            state.active.selectionDirection || "none"
+          );
+        } catch (_){ }
+      }
+    }
+  }
+}
+
 function buildNextDuePreview({ includeNote = true, noteText = "Preview of tracked tasks — log machine hours to replace this with your live schedule." } = {}){
   const escapeHtml = (str)=> String(str || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const previewOffsets = [2, 6, 11, 19];
@@ -7234,12 +7326,17 @@ function renderJobs(){
   newFilesInput?.addEventListener("change", async (e)=>{
     const files = e.target.files;
     if (!files || !files.length) return;
+    const formState = captureNewJobFormState();
     const attachments = await filesToAttachments(files);
     e.target.value = "";
-    if (!attachments.length) return;
+    if (!attachments.length){
+      restoreNewJobFormState(formState);
+      return;
+    }
     pendingNewJobFiles.push(...attachments.map(a=>({ ...a })));
     toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
     renderJobs();
+    restoreNewJobFormState(formState);
   });
 
   // 2) Small, scoped helpers for manual log math + defaults
