@@ -2899,7 +2899,11 @@ function renderDashboard(){
     if (!name || !isFinite(est) || est <= 0 || !start || !due){ toast("Fill job fields."); return; }
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
-    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, notes:"", manualLogs:[] });
+    const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+      ? Number(DAILY_HOURS)
+      : 8;
+    const estimateDays = est / hoursPerDay;
+    cuttingJobs.push({ id: genId(name), name, estimateHours: est, estimateDays, startISO: start, dueISO: due, material, materialCost, materialQty, notes:"", manualLogs:[] });
     saveCloudDebounced();
     toast("Cutting job added");
     closeModal();
@@ -7354,6 +7358,7 @@ function renderJobs(){
         id: genId(entry.name || "job"),
         name: entry.name || "Cutting job",
         estimateHours,
+        estimateDays: estimateHours / hoursPerDay,
         startISO,
         dueISO,
         material: entry.material || "",
@@ -7417,7 +7422,9 @@ function renderJobs(){
       const field = (key)=> content.querySelector(`[data-history-field="${key}"][data-history-id="${id}"]`);
       const nameInput = field("name");
       const estimateInput = field("estimateHours");
+      const estimateDaysInput = field("estimateDays");
       const actualInput = field("actualHours");
+      const actualDaysInput = field("actualDays");
       const materialInput = field("material");
       const materialCostInput = field("materialCost");
       const materialQtyInput = field("materialQty");
@@ -7427,13 +7434,41 @@ function renderJobs(){
       const name = (nameInput?.value || entry.name || "").trim();
       if (!name){ toast("Enter a job name."); return; }
 
+      const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+        ? Number(DAILY_HOURS)
+        : 8;
+
       const estVal = estimateInput?.value;
       const estNum = estVal === "" || estVal == null ? null : Number(estVal);
-      const estimateHours = Number.isFinite(estNum) && estNum >= 0 ? estNum : Number(entry.estimateHours) || 0;
+      let estimateHours = Number.isFinite(estNum) && estNum >= 0 ? estNum : Number(entry.estimateHours) || 0;
+
+      const estDaysVal = estimateDaysInput?.value;
+      const estDaysNum = estDaysVal === "" || estDaysVal == null ? null : Number(estDaysVal);
+      let estimateDays = Number.isFinite(estDaysNum) && estDaysNum >= 0
+        ? estDaysNum
+        : (Number(entry.estimateDays));
+      if (!Number.isFinite(estimateDays) && Number.isFinite(estimateHours)){
+        estimateDays = estimateHours / hoursPerDay;
+      }
+      if (Number.isFinite(estimateDays) && (!Number.isFinite(estNum) || estNum == null)){
+        estimateHours = estimateDays * hoursPerDay;
+      }
 
       const actVal = actualInput?.value;
       const actualNum = actVal === "" || actVal == null ? null : Number(actVal);
-      const actualHours = Number.isFinite(actualNum) && actualNum >= 0 ? actualNum : null;
+      let actualHours = Number.isFinite(actualNum) && actualNum >= 0 ? actualNum : null;
+
+      const actDaysVal = actualDaysInput?.value;
+      const actDaysNum = actDaysVal === "" || actDaysVal == null ? null : Number(actDaysVal);
+      let actualDays = Number.isFinite(actDaysNum) && actDaysNum >= 0
+        ? actDaysNum
+        : (Number(entry.actualDays));
+      if (!Number.isFinite(actualDays) && Number.isFinite(actualHours)){
+        actualDays = actualHours / hoursPerDay;
+      }
+      if (!Number.isFinite(actualHours) && Number.isFinite(actualDays)){
+        actualHours = actualDays * hoursPerDay;
+      }
 
       const material = materialInput?.value ?? entry.material ?? "";
       const materialCostVal = materialCostInput?.value;
@@ -7453,25 +7488,37 @@ function renderJobs(){
       }
 
       entry.name = name;
-      entry.estimateHours = estimateHours;
       entry.material = material;
       entry.materialCost = materialCost;
       entry.materialQty = materialQty;
       entry.notes = notes;
+      entry.estimateHours = estimateHours;
+      entry.estimateDays = Number.isFinite(estimateDays) ? estimateDays : null;
       entry.actualHours = actualHours != null ? actualHours : null;
+      entry.actualDays = Number.isFinite(actualDays) ? actualDays : null;
 
       const rate = Number(entry.efficiency?.rate) || JOB_RATE_PER_HOUR;
-      const deltaHours = actualHours != null ? (estimateHours - actualHours) : (entry.efficiency?.deltaHours ?? null);
-      const gainLoss = deltaHours != null ? deltaHours * rate : (entry.efficiency?.gainLoss ?? null);
+      const deltaDays = (Number.isFinite(estimateDays) && Number.isFinite(actualDays))
+        ? (estimateDays - actualDays)
+        : (Number(entry.efficiency?.deltaDays));
+      const deltaHours = Number.isFinite(deltaDays)
+        ? deltaDays * hoursPerDay
+        : (actualHours != null ? (estimateHours - actualHours) : (entry.efficiency?.deltaHours ?? null));
+      const gainLoss = Number.isFinite(deltaHours) ? deltaHours * rate : (entry.efficiency?.gainLoss ?? null);
 
       entry.efficiency = {
         ...entry.efficiency,
         rate,
         expectedHours: estimateHours,
+        expectedDays: Number.isFinite(estimateDays) ? estimateDays : (entry.efficiency?.expectedDays ?? null),
         actualHours: entry.actualHours,
+        actualDays: Number.isFinite(actualDays) ? actualDays : (entry.efficiency?.actualDays ?? null),
         expectedRemaining: 0,
+        expectedRemainingDays: 0,
         actualRemaining: 0,
+        actualRemainingDays: 0,
         deltaHours,
+        deltaDays: Number.isFinite(deltaDays) ? deltaDays : (entry.efficiency?.deltaDays ?? null),
         gainLoss
       };
 
@@ -7551,21 +7598,35 @@ function renderJobs(){
       const eff = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
       const now = new Date();
       const completionISO = now.toISOString();
+      const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+        ? Number(DAILY_HOURS)
+        : 8;
+
       const efficiencySummary = eff ? {
         rate: eff.rate ?? JOB_RATE_PER_HOUR,
         expectedHours: eff.expectedHours ?? null,
+        expectedDays: eff.expectedDays ?? null,
         actualHours: eff.actualHours ?? null,
+        actualDays: eff.actualDays ?? null,
         expectedRemaining: eff.expectedRemaining ?? null,
+        expectedRemainingDays: eff.expectedRemainingDays ?? null,
         actualRemaining: eff.actualRemaining ?? null,
+        actualRemainingDays: eff.actualRemainingDays ?? null,
         deltaHours: eff.deltaHours ?? null,
+        deltaDays: eff.deltaDays ?? null,
         gainLoss: eff.gainLoss ?? null
       } : {
         rate: JOB_RATE_PER_HOUR,
         expectedHours: null,
+        expectedDays: null,
         actualHours: null,
+        actualDays: null,
         expectedRemaining: null,
+        expectedRemainingDays: null,
         actualRemaining: null,
+        actualRemainingDays: null,
         deltaHours: null,
+        deltaDays: null,
         gainLoss: null
       };
 
@@ -7573,6 +7634,7 @@ function renderJobs(){
         id: job.id,
         name: job.name,
         estimateHours: job.estimateHours,
+        estimateDays: job.estimateDays ?? (Number.isFinite(job.estimateHours) ? (job.estimateHours / hoursPerDay) : null),
         startISO: job.startISO,
         dueISO: job.dueISO,
         completedAtISO: completionISO,
@@ -7583,6 +7645,7 @@ function renderJobs(){
         manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
         files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
         actualHours: eff && Number.isFinite(eff.actualHours) ? eff.actualHours : null,
+        actualDays: eff && Number.isFinite(eff.actualDays) ? eff.actualDays : null,
         efficiency: efficiencySummary
       };
 
@@ -7600,8 +7663,12 @@ function renderJobs(){
       const id = sv.getAttribute("data-save-job");
       const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
       const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${id}"]`)?.value;
+      const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+        ? Number(DAILY_HOURS)
+        : 8;
       j.name = qs("name") || j.name;
       j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
+      j.estimateDays = j.estimateHours / hoursPerDay;
       j.material = qs("material") || j.material || "";
       j.materialCost = Math.max(0, Number(qs("materialCost")) || 0);
       j.materialQty = Math.max(0, Number(qs("materialQty")) || 0);
