@@ -1,6 +1,8 @@
 /* ================== CALENDAR & BUBBLES ===================== */
 let bubbleTimer = null;
 const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
+let calendarHoursEditing = false;
+let calendarHoursPending = new Map();
 if (typeof window !== "undefined"){
   if (typeof window.__calendarShowAllMonths !== "boolean"){
     window.__calendarShowAllMonths = false;
@@ -8,6 +10,126 @@ if (typeof window !== "undefined"){
   if (typeof window.__calendarAvailableMonths !== "number"){
     window.__calendarAvailableMonths = 3;
   }
+}
+
+function isCalendarHoursEditing(){
+  return calendarHoursEditing;
+}
+
+function formatCalendarDayHours(value){
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "0 hr";
+  const abs = Math.abs(num);
+  const decimals = abs >= 10 ? 0 : (Math.abs(num - Math.round(num)) < 0.05 ? 0 : 1);
+  return `${num.toFixed(decimals)} hr`;
+}
+
+function getCalendarPendingHours(dateISO){
+  if (!(calendarHoursPending instanceof Map)) return undefined;
+  const key = normalizeDateKey(dateISO);
+  if (!key) return undefined;
+  return calendarHoursPending.get(key);
+}
+
+function setCalendarPendingHours(dateISO, hours){
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  const value = clampDailyCutHours(hours);
+  if (!(calendarHoursPending instanceof Map)) calendarHoursPending = new Map();
+  const entry = typeof getDailyCutHoursEntry === "function" ? getDailyCutHoursEntry(key) : null;
+  const matchesExisting = entry && Math.abs(Number(entry.hours) - value) < 0.001;
+  if (matchesExisting){
+    if (calendarHoursPending.has(key)){
+      calendarHoursPending.delete(key);
+      return true;
+    }
+    return false;
+  }
+  const existing = calendarHoursPending.get(key);
+  if (existing != null && Math.abs(existing - value) < 0.001) return false;
+  calendarHoursPending.set(key, value);
+  return true;
+}
+
+function startCalendarHoursEditing(){
+  if (calendarHoursEditing) return false;
+  calendarHoursEditing = true;
+  calendarHoursPending = new Map();
+  renderCalendar();
+  if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
+  return true;
+}
+
+function cancelCalendarHoursEditing(){
+  if (!calendarHoursEditing) return false;
+  calendarHoursEditing = false;
+  calendarHoursPending = new Map();
+  renderCalendar();
+  if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
+  return true;
+}
+
+function commitCalendarHoursEditing(){
+  if (!calendarHoursEditing){
+    toast("Not editing hours");
+    return false;
+  }
+  let changed = false;
+  if (calendarHoursPending instanceof Map){
+    calendarHoursPending.forEach((value, key)=>{
+      if (typeof setDailyCutHoursEntry === "function"){
+        const updated = setDailyCutHoursEntry(key, value, { source: "manual" });
+        if (updated) changed = true;
+      }
+    });
+  }
+  calendarHoursPending = new Map();
+  calendarHoursEditing = false;
+  if (changed && typeof saveCloudDebounced === "function") saveCloudDebounced();
+  renderCalendar();
+  if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
+  if (changed){
+    if (typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
+    toast("Daily hours updated");
+  }else{
+    toast("No changes to save.");
+  }
+  return changed;
+}
+
+function promptCalendarDayHours(dateISO){
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  const entry = typeof getDailyCutHoursEntry === "function" ? getDailyCutHoursEntry(key) : null;
+  const pending = getCalendarPendingHours(key);
+  const current = pending != null ? pending : (entry && entry.hours != null ? Number(entry.hours) : 0);
+  const displayDate = (()=>{
+    try{
+      const parsed = parseDateLocal(key);
+      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) return parsed.toLocaleDateString();
+    }catch(_err){}
+    return key;
+  })();
+  const input = window.prompt(`Enter cutting hours for ${displayDate} (0-24):`, current != null ? String(current) : "");
+  if (input === null) return false;
+  const trimmed = input.trim();
+  const next = trimmed === "" ? 0 : Number(trimmed);
+  if (!Number.isFinite(next) || next < 0 || next > 24){
+    toast("Enter a value between 0 and 24 hours.");
+    return false;
+  }
+  const updated = setCalendarPendingHours(key, next);
+  if (updated){
+    renderCalendar();
+  }
+  return updated;
+}
+
+if (typeof window !== "undefined"){
+  window.isCalendarHoursEditing = isCalendarHoursEditing;
+  window.startCalendarHoursEditing = startCalendarHoursEditing;
+  window.cancelCalendarHoursEditing = cancelCalendarHoursEditing;
+  window.commitCalendarHoursEditing = commitCalendarHoursEditing;
 }
 function hideBubble(){
   if (bubbleTimer){
@@ -769,6 +891,7 @@ function wireCalendarBubbles(){
   };
 
   months.addEventListener("mouseover", (e)=>{
+    if (typeof isCalendarHoursEditing === "function" && isCalendarHoursEditing()) return;
     const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
     if (!el || el === hoverTarget) return;
     hoverTarget = el;
@@ -777,11 +900,13 @@ function wireCalendarBubbles(){
     if (el.dataset.calGarnet) showGarnetBubble(el.dataset.calGarnet, el);
   });
   months.addEventListener("mouseout", (e)=>{
+    if (typeof isCalendarHoursEditing === "function" && isCalendarHoursEditing()) return;
     const from = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
     const to   = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
     if (from && !to) { hoverTarget = null; hideBubbleSoon(); }
   });
   months.addEventListener("click", (e)=>{
+    if (typeof isCalendarHoursEditing === "function" && isCalendarHoursEditing()) return;
     const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
     if (!el) return;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
@@ -1007,8 +1132,13 @@ function renderCalendar(){
   const container = $("#months");
   if (!container) return;
   let showAll = Boolean(window.__calendarShowAllMonths);
+  const editingHours = isCalendarHoursEditing();
+  const hoursMap = typeof getDailyCutHoursMap === "function" ? getDailyCutHoursMap() : new Map();
   container.innerHTML = "";
   const block = container.closest(".calendar-block");
+  if (block){
+    block.classList.toggle("calendar-block--hours-editing", editingHours);
+  }
 
   const dueMap = {};
   function pushTaskEvent(task, iso, status){
@@ -1265,6 +1395,39 @@ function renderCalendar(){
       cell.innerHTML = `<div class="date">${day}</div>`;
       const key = ymd(date);
       cell.dataset.dateIso = key;
+      const pendingValue = getCalendarPendingHours(key);
+      const record = hoursMap.get(key);
+      const baseHours = record && record.hours != null ? clampDailyCutHours(record.hours) : 0;
+      const hoursValue = pendingValue != null ? pendingValue : baseHours;
+      const source = pendingValue != null ? "pending" : (record ? record.source : null);
+      const hoursEl = document.createElement("div");
+      hoursEl.className = "day-hours";
+      hoursEl.textContent = formatCalendarDayHours(hoursValue);
+      hoursEl.setAttribute("data-day-hours-value", String(hoursValue));
+      cell.appendChild(hoursEl);
+      if (source === "pending"){
+        cell.classList.add("day-hours-pending");
+        hoursEl.classList.add("is-pending");
+      }else if (source === "manual"){
+        cell.classList.add("day-hours-manual");
+        hoursEl.classList.add("is-manual");
+      }else{
+        cell.classList.add("day-hours-auto");
+      }
+      if (editingHours){
+        cell.classList.add("day--hours-editing");
+        hoursEl.classList.add("is-editing");
+        cell.addEventListener("click", (event)=>{
+          if (!isCalendarHoursEditing()) return;
+          if (event.target.closest(".day-add-bubble")) return;
+          if (event.target.closest("[data-cal-task]")) return;
+          if (event.target.closest("[data-cal-job]")) return;
+          if (event.target.closest("[data-cal-garnet]")) return;
+          event.preventDefault();
+          event.stopPropagation();
+          promptCalendarDayHours(key);
+        });
+      }
       if (downSet.has(key)){
         cell.classList.add("downtime");
         cell.dataset.calDown = key;
@@ -1330,6 +1493,9 @@ function renderCalendar(){
       addBtn.className = "day-add-bubble";
       addBtn.textContent = "+";
       addBtn.setAttribute("aria-label", `Add item on ${date.toDateString()}`);
+      if (editingHours){
+        addBtn.hidden = true;
+      }
       addBtn.addEventListener("click", (ev)=>{
         ev.stopPropagation();
         triggerDashboardAddPicker({ dateISO: key });
@@ -1352,6 +1518,7 @@ function renderCalendar(){
     container.appendChild(monthDiv);
   }
   wireCalendarBubbles();
+  if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
 }
 
 function toggleCalendarShowAllMonths(){

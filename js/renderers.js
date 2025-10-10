@@ -3,6 +3,11 @@ if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 const pendingNewJobFiles = window.pendingNewJobFiles;
 if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
 const orderPartialSelection = window.orderPartialSelection;
+const timeEfficiencyWidgets = [];
+const sharedTimeEfficiencyStarts = (typeof window !== "undefined" && window.__timeEfficiencyStartMap instanceof Map)
+  ? window.__timeEfficiencyStartMap
+  : new Map();
+if (typeof window !== "undefined"){ window.__timeEfficiencyStartMap = sharedTimeEfficiencyStarts; }
 
 function getCurrentMachineHours(){
   if (typeof RENDER_TOTAL === "number" && Number.isFinite(RENDER_TOTAL)){
@@ -1909,6 +1914,360 @@ function notifyCostLayoutContentChanged(){
   });
 }
 
+function formatTimeEfficiencyHours(value){
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "0 hr";
+  const abs = Math.abs(num);
+  const decimals = abs >= 100 ? 0 : (Math.abs(num - Math.round(num)) < 0.05 ? 0 : 1);
+  return `${num.toFixed(decimals)} hr`;
+}
+
+function formatTimeEfficiencyPercent(value){
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  const abs = Math.abs(num);
+  const decimals = abs >= 100 ? 0 : (Math.abs(num - Math.round(num)) < 0.05 ? 0 : 1);
+  return `${num.toFixed(decimals)}%`;
+}
+
+function formatTimeEfficiencyDiff(value, options = {}){
+  const {
+    zeroLabel = "On target",
+    aheadLabel = "Ahead",
+    behindLabel = "Behind",
+    fallback = "—"
+  } = options;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  if (Math.abs(num) < 0.05) return zeroLabel;
+  const abs = Math.abs(num);
+  const decimals = abs >= 100 ? 0 : (Math.abs(abs - Math.round(abs)) < 0.05 ? 0 : 1);
+  const formatted = abs.toFixed(decimals);
+  return num > 0 ? `${aheadLabel} +${formatted} hr` : `${behindLabel} -${formatted} hr`;
+}
+
+function determineTimeEfficiencyTrend(data){
+  if (!data) return "";
+  const diffToDate = Number(data.differenceToDateHours);
+  const target = Number(data.targetHoursToDate);
+  if (Number.isFinite(diffToDate)){
+    if (target > 0){
+      if (diffToDate >= 0.05) return "ahead";
+      const shortfall = Math.abs(diffToDate);
+      if (shortfall < 0.05) return "ahead";
+      const shortfallPct = (shortfall / target) * 100;
+      if (shortfallPct <= 10) return "slightly-behind";
+      return "behind";
+    }
+    if (diffToDate >= 0.05) return "ahead";
+    if (diffToDate <= -0.05) return "behind";
+    return "";
+  }
+  const diff = Number(data.differenceHours);
+  const baseline = Number(data.baselineHours);
+  if (!Number.isFinite(diff)) return "";
+  if (diff >= 0.05) return "ahead";
+  if (baseline <= 0 || !Number.isFinite(baseline)) return diff >= 0 ? "ahead" : "behind";
+  const shortfall = Math.abs(diff);
+  if (shortfall < 0.05) return "ahead";
+  const shortfallPct = (shortfall / baseline) * 100;
+  if (shortfallPct <= 10) return "slightly-behind";
+  return "behind";
+}
+
+function parseTimeEfficiencyInput(value){
+  if (!value) return null;
+  if (typeof parseDateLocal === "function"){
+    const parsed = parseDateLocal(value);
+    if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+      parsed.setHours(0,0,0,0);
+      return parsed;
+    }
+  }
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  dt.setHours(0,0,0,0);
+  return dt;
+}
+
+function formatISODate(date){
+  if (typeof ymd === "function") return ymd(date);
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const y = date.getFullYear();
+  const m = `${date.getMonth() + 1}`.padStart(2, "0");
+  const d = `${date.getDate()}`.padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function normalizeTimeEfficiencyStart(days, value){
+  const base = parseTimeEfficiencyInput(value);
+  if (!base) return null;
+  const normalizedDays = Math.max(1, Math.round(Number(days) || 0));
+  if (normalizedDays > 7 && normalizedDays <= 35){
+    base.setDate(1);
+  }
+  base.setHours(0,0,0,0);
+  return formatISODate(base);
+}
+
+function describeTimeEfficiencyEdit(days){
+  if (days === 7){
+    return "Weekly range automatically runs Monday through Sunday.";
+  }
+  if (days > 35){
+    return "Choose the start date you'd like to measure from.";
+  }
+  return "Choose a start date. It will snap to the first day of that month.";
+}
+
+function refreshTimeEfficiencyWidget(widget){
+  if (!widget || !widget.root || !widget.root.isConnected) return;
+  const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
+  const options = {};
+  const savedStart = widget.customStartByRange?.get(days);
+  if (savedStart){
+    options.startDate = savedStart;
+  }
+  const data = typeof computeTimeEfficiency === "function"
+    ? computeTimeEfficiency(days, options)
+    : null;
+  if (!data) return;
+  if (widget.metrics.actual) widget.metrics.actual.textContent = formatTimeEfficiencyHours(data.actualHours);
+  if (widget.metrics.target) widget.metrics.target.textContent = formatTimeEfficiencyHours(data.targetHoursToDate);
+  if (widget.metrics.goal) widget.metrics.goal.textContent = formatTimeEfficiencyHours(data.baselineHours);
+  if (widget.metrics.percent) widget.metrics.percent.textContent = formatTimeEfficiencyPercent(data.efficiencyPercent);
+  if (widget.metrics.percentGoal) widget.metrics.percentGoal.textContent = formatTimeEfficiencyPercent(data.efficiencyGoalPercent);
+  if (widget.metrics.diffTarget){
+    const zeroLabel = data && Number(data.targetHoursToDate) > 0 ? "On target" : "No target yet";
+    widget.metrics.diffTarget.textContent = formatTimeEfficiencyDiff(data.differenceToDateHours, {
+      zeroLabel,
+      fallback: zeroLabel
+    });
+  }
+  if (widget.metrics.diffGoal){
+    widget.metrics.diffGoal.textContent = formatTimeEfficiencyDiff(data.differenceHours, {
+      zeroLabel: "Goal met",
+      fallback: "Goal met"
+    });
+  }
+  if (widget.root){
+    const trend = determineTimeEfficiencyTrend(data);
+    if (trend){
+      widget.root.dataset.efficiencyTrend = trend;
+    } else {
+      delete widget.root.dataset.efficiencyTrend;
+    }
+    widget.currentTrend = trend || "";
+  }
+  if (widget.labelEl){
+    const labelText = widget.selectedLabel
+      || (data && data.description)
+      || widget.labelEl.textContent
+      || "";
+    widget.labelEl.textContent = labelText;
+  }
+  widget.lastStartISO = data.startISO || null;
+  widget.lastEndISO = data.endISO || null;
+  if (widget.editPanel && !widget.editPanel.hidden){
+    updateTimeEfficiencyEditPanel(widget);
+  }
+}
+
+function refreshTimeEfficiencyWidgets(){
+  for (let i = timeEfficiencyWidgets.length - 1; i >= 0; i--){
+    const widget = timeEfficiencyWidgets[i];
+    if (!widget || !widget.root || !widget.root.isConnected){
+      timeEfficiencyWidgets.splice(i, 1);
+      continue;
+    }
+    refreshTimeEfficiencyWidget(widget);
+  }
+}
+
+function selectTimeEfficiencyRange(widget, button){
+  if (!widget || !button) return;
+  const days = Number(button.dataset.efficiencyRange);
+  if (!Number.isFinite(days) || days <= 0) return;
+  widget.currentDays = Math.max(1, Math.round(days));
+  widget.selectedLabel = button.dataset.efficiencyRangeLabel || widget.selectedLabel || "";
+  widget.toggles.forEach(btn => {
+    const active = btn === button;
+    btn.classList.toggle("is-active", active);
+    if (btn.hasAttribute("aria-pressed")){
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    }
+  });
+  if (widget.editPanel && !widget.editPanel.hidden){
+    updateTimeEfficiencyEditPanel(widget);
+  }
+  refreshTimeEfficiencyWidget(widget);
+}
+
+function updateTimeEfficiencyEditPanel(widget){
+  if (!widget || !widget.editPanel) return;
+  const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
+  if (widget.editNote){
+    widget.editNote.textContent = describeTimeEfficiencyEdit(days);
+  }
+  if (widget.editInput){
+    widget.editInput.classList.remove("has-error");
+    if (days === 7){
+      widget.editInput.value = "";
+      widget.editInput.disabled = true;
+    } else {
+      const saved = widget.customStartByRange?.get(days) || widget.lastStartISO || "";
+      widget.editInput.disabled = false;
+      widget.editInput.value = saved;
+    }
+  }
+}
+
+function toggleTimeEfficiencyEditPanel(widget, show){
+  if (!widget || !widget.editPanel) return;
+  const shouldShow = show == null ? widget.editPanel.hidden : Boolean(show);
+  if (!shouldShow){
+    widget.editPanel.hidden = true;
+    widget.root?.classList.remove("time-efficiency-edit-open");
+    if (widget.editInput){
+      widget.editInput.classList.remove("has-error");
+    }
+    return;
+  }
+  widget.editPanel.hidden = false;
+  widget.root?.classList.add("time-efficiency-edit-open");
+  updateTimeEfficiencyEditPanel(widget);
+  if (widget.editInput && !widget.editInput.disabled){
+    widget.editInput.focus({ preventScroll: true });
+  }
+}
+
+function applyTimeEfficiencyEdit(widget){
+  if (!widget) return;
+  const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
+  if (!widget.editInput || widget.editInput.disabled){
+    toggleTimeEfficiencyEditPanel(widget, false);
+    return;
+  }
+  const raw = widget.editInput.value;
+  if (!raw){
+    widget.customStartByRange?.delete(days);
+    toggleTimeEfficiencyEditPanel(widget, false);
+    refreshTimeEfficiencyWidget(widget);
+    return;
+  }
+  const normalized = normalizeTimeEfficiencyStart(days, raw);
+  if (!normalized){
+    widget.editInput.classList.add("has-error");
+    return;
+  }
+  widget.editInput.classList.remove("has-error");
+  widget.editInput.value = normalized;
+  if (widget.customStartByRange){
+    widget.customStartByRange.set(days, normalized);
+  }
+  toggleTimeEfficiencyEditPanel(widget, false);
+  refreshTimeEfficiencyWidget(widget);
+}
+
+function setupTimeEfficiencyWidget(root){
+  if (!(root instanceof HTMLElement)) return;
+  if (root.dataset.timeEfficiencyBound === "1"){
+    refreshTimeEfficiencyWidgets();
+    return;
+  }
+  const toggles = Array.from(root.querySelectorAll("[data-efficiency-range]"));
+  if (!toggles.length) return;
+  const metrics = {
+    actual: root.querySelector("[data-efficiency-actual]"),
+    target: root.querySelector("[data-efficiency-target]"),
+    goal: root.querySelector("[data-efficiency-goal]"),
+    percent: root.querySelector("[data-efficiency-percent]"),
+    percentGoal: root.querySelector("[data-efficiency-goal-percent]"),
+    diffTarget: root.querySelector("[data-efficiency-gap-target]"),
+    diffGoal: root.querySelector("[data-efficiency-gap-goal]")
+  };
+  const labelEl = root.querySelector("[data-efficiency-window-label]");
+  const firstToggle = toggles[0];
+  const widget = {
+    root,
+    toggles,
+    metrics,
+    labelEl,
+    currentDays: Number(firstToggle?.dataset?.efficiencyRange) || 7,
+    defaultDays: Number(firstToggle?.dataset?.efficiencyRange) || 7,
+    selectedLabel: firstToggle?.dataset?.efficiencyRangeLabel || (labelEl ? labelEl.textContent : ""),
+    customStartByRange: sharedTimeEfficiencyStarts,
+    editBtn: root.querySelector("[data-efficiency-edit]"),
+    editPanel: root.querySelector("[data-efficiency-edit-panel]"),
+    editInput: root.querySelector("[data-efficiency-start-input]"),
+    applyBtn: root.querySelector("[data-efficiency-apply]") || root.querySelector("[data-efficiency-save]") || null,
+    cancelBtn: root.querySelector("[data-efficiency-cancel]") || null,
+    editNote: root.querySelector("[data-efficiency-edit-note]") || null
+  };
+  toggles.forEach(btn => {
+    btn.addEventListener("click", ()=> selectTimeEfficiencyRange(widget, btn));
+  });
+  if (widget.editBtn){
+    widget.editBtn.addEventListener("click", ()=> {
+      const shouldShow = widget.editPanel ? widget.editPanel.hidden : true;
+      toggleTimeEfficiencyEditPanel(widget, shouldShow);
+    });
+  }
+  if (widget.applyBtn){
+    widget.applyBtn.addEventListener("click", ()=> applyTimeEfficiencyEdit(widget));
+  }
+  if (widget.cancelBtn){
+    widget.cancelBtn.addEventListener("click", ()=> toggleTimeEfficiencyEditPanel(widget, false));
+  }
+  timeEfficiencyWidgets.push(widget);
+  root.dataset.timeEfficiencyBound = "1";
+  refreshTimeEfficiencyWidget(widget);
+}
+
+function updateCalendarHoursControls(){
+  const editBtn = document.getElementById("calendarHoursEditBtn");
+  const cancelBtn = document.getElementById("calendarHoursCancelBtn");
+  const editing = typeof isCalendarHoursEditing === "function" ? Boolean(isCalendarHoursEditing()) : false;
+  if (editBtn){
+    editBtn.textContent = editing ? "Save Hours" : "Edit Hours";
+    editBtn.dataset.mode = editing ? "save" : "edit";
+  }
+  if (cancelBtn){
+    cancelBtn.hidden = !editing;
+  }
+}
+
+function setupCalendarHoursControls(){
+  const editBtn = document.getElementById("calendarHoursEditBtn");
+  const cancelBtn = document.getElementById("calendarHoursCancelBtn");
+  if (editBtn && !editBtn.dataset.bound){
+    editBtn.dataset.bound = "1";
+    editBtn.addEventListener("click", ()=>{
+      const editing = typeof isCalendarHoursEditing === "function" ? Boolean(isCalendarHoursEditing()) : false;
+      if (editing){
+        const committed = typeof commitCalendarHoursEditing === "function"
+          ? commitCalendarHoursEditing()
+          : false;
+        updateCalendarHoursControls();
+        return;
+      }
+      const password = window.prompt("Enter password to edit daily cutting hours:");
+      if (password == null) return;
+      if (password !== "Matthew7:21"){ toast("Incorrect password"); return; }
+      if (typeof startCalendarHoursEditing === "function"){ startCalendarHoursEditing(); }
+      updateCalendarHoursControls();
+    });
+  }
+  if (cancelBtn && !cancelBtn.dataset.bound){
+    cancelBtn.dataset.bound = "1";
+    cancelBtn.addEventListener("click", ()=>{
+      if (typeof cancelCalendarHoursEditing === "function"){ cancelCalendarHoursEditing(); }
+      updateCalendarHoursControls();
+    });
+  }
+  updateCalendarHoursControls();
+}
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   content.innerHTML = viewDashboard();
@@ -1931,7 +2290,11 @@ function renderDashboard(){
     RENDER_DELTA = deltaSinceLast();
     window.RENDER_TOTAL = RENDER_TOTAL;
     window.RENDER_DELTA = RENDER_DELTA;
+    const updatedDaily = typeof syncDailyHoursFromTotals === "function"
+      ? syncDailyHoursFromTotals(todayISO)
+      : false;
     saveCloudDebounced(); toast("Hours logged");
+    if (updatedDaily && typeof refreshTimeEfficiencyWidgets === "function"){ refreshTimeEfficiencyWidgets(); }
     renderDashboard();
   });
 
@@ -3112,7 +3475,10 @@ function renderDashboard(){
 
   setupDashboardLayout();
   renderCalendar();
+  setupCalendarHoursControls();
+  setupTimeEfficiencyWidget(document.getElementById("dashboardTimeEfficiency"));
   renderPumpWidget();
+  refreshTimeEfficiencyWidgets();
   notifyDashboardLayoutContentChanged();
 }
 
@@ -6257,6 +6623,8 @@ function renderCosts(){
 
   setupCostInfoPanel();
   setupForecastBreakdownModal();
+  setupTimeEfficiencyWidget(document.getElementById("costTimeEfficiency"));
+  refreshTimeEfficiencyWidgets();
 
   function getHistoryMessageState(){
     const existing = window.__costHistoryMessageState;
@@ -6372,6 +6740,8 @@ function renderCosts(){
   const wireJobsHistoryShortcut = (element)=>{
     if (!element) return;
     const activateHistoryLink = (event)=>{
+      const origin = event?.target instanceof HTMLElement ? event.target : null;
+      if (origin && origin.closest(".time-efficiency-toggles")) return;
       event.preventDefault();
       event.stopPropagation();
       goToJobsHistory();

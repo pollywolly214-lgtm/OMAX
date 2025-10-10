@@ -1,5 +1,6 @@
 /* ========================= VIEWS ========================== */
 function viewDashboard(){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const cur   = RENDER_TOTAL ?? currentTotal();
   const prev  = previousTotal();
   const delta = RENDER_DELTA ?? deltaSinceLast();
@@ -7,6 +8,27 @@ function viewDashboard(){
   const lastUpdated = cur!=null && lastEntry && lastEntry.dateISO
     ? new Date(lastEntry.dateISO).toLocaleString()
     : "—";
+  const efficiencyWindows = (Array.isArray(TIME_EFFICIENCY_WINDOWS) && TIME_EFFICIENCY_WINDOWS.length)
+    ? TIME_EFFICIENCY_WINDOWS
+    : [
+        { key: "7d", label: "1W", days: 7, description: "Past 7 days" },
+        { key: "30d", label: "1M", days: 30, description: "Past 30 days" },
+        { key: "90d", label: "3M", days: 90, description: "Past 3 months" },
+        { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
+        { key: "365d", label: "1Y", days: 365, description: "Past year" }
+      ];
+  const efficiencyButtons = efficiencyWindows.map((win, index) => {
+    const days = Number(win?.days) || 0;
+    const label = esc(win?.label ?? `${days || ""}`);
+    const description = esc(win?.description ?? (days ? `Past ${days} days` : "Selected window"));
+    const isActive = index === 0;
+    return `
+      <button type="button" class="time-efficiency-toggle${isActive ? " is-active" : ""}" data-efficiency-range="${esc(String(days))}" data-efficiency-range-label="${description}" aria-pressed="${isActive ? "true" : "false"}" title="${description}">
+        ${label}
+      </button>
+    `;
+  }).join("");
+  const defaultEfficiencyDescription = esc(efficiencyWindows[0]?.description || "Past 7 days");
   return `
   <div class="container">
     <div class="dashboard-toolbar">
@@ -44,12 +66,69 @@ function viewDashboard(){
       <div class="dashboard-window" data-dashboard-window="pumpChart">
         <section id="pump-chart-widget" class="block pump-chart-block"></section>
       </div>
+
+      <div class="dashboard-window" data-dashboard-window="timeEfficiency">
+        <div class="block time-efficiency-block" id="dashboardTimeEfficiency">
+          <div class="time-efficiency-header">
+            <h3>Cutting Time Efficiency</h3>
+            <div class="time-efficiency-controls">
+              <div class="time-efficiency-toggles" role="tablist">
+                ${efficiencyButtons}
+              </div>
+              <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit range</button>
+            </div>
+          </div>
+          <div class="time-efficiency-edit" data-efficiency-edit-panel hidden>
+            <div class="time-efficiency-edit-row">
+              <label class="time-efficiency-edit-field">
+                <span class="time-efficiency-edit-label">Start date</span>
+                <input type="date" data-efficiency-start-input>
+              </label>
+              <div class="time-efficiency-edit-actions">
+                <button type="button" class="time-efficiency-edit-apply" data-efficiency-apply>Apply</button>
+                <button type="button" class="time-efficiency-edit-cancel" data-efficiency-cancel>Cancel</button>
+              </div>
+            </div>
+            <p class="small muted time-efficiency-edit-note" data-efficiency-edit-note></p>
+          </div>
+          <div class="time-efficiency-metrics" role="status" aria-live="polite">
+            <div class="time-efficiency-metric">
+              <span class="label">Actual hours</span>
+              <span class="value" data-efficiency-actual>—</span>
+            </div>
+            <div class="time-efficiency-metric">
+              <span class="label">Current target</span>
+              <span class="value" data-efficiency-target>—</span>
+            </div>
+            <div class="time-efficiency-metric">
+              <span class="label">Gap vs target</span>
+              <span class="value" data-efficiency-gap-target>—</span>
+            </div>
+            <div class="time-efficiency-metric">
+              <span class="label">End goal</span>
+              <span class="value" data-efficiency-goal>—</span>
+            </div>
+            <div class="time-efficiency-metric">
+              <span class="label">Gap vs goal</span>
+              <span class="value" data-efficiency-gap-goal>—</span>
+            </div>
+            <div class="time-efficiency-metric">
+              <span class="label">Efficiency (to date)</span>
+              <span class="value" data-efficiency-percent>—</span>
+            </div>
+          </div>
+          <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
+          <p class="small muted">Baseline assumes ${CUTTING_BASELINE_WEEKLY_HOURS} cutting hours per week.</p>
+        </div>
+      </div>
     </div>
 
     <div class="block calendar-block">
       <h3>Calendar</h3>
 
       <div class="calendar-toolbar">
+        <button type="button" class="calendar-hours-edit-btn" id="calendarHoursEditBtn">Edit Hours</button>
+        <button type="button" class="calendar-hours-cancel-btn" id="calendarHoursCancelBtn" hidden>Cancel</button>
         <button type="button" class="calendar-toggle-btn" id="calendarToggleBtn" aria-pressed="false" aria-controls="months">Show All Months</button>
         <button type="button" class="calendar-add-btn" id="calendarAddBtn" title="Add maintenance task, down time, or job">+</button>
       </div>
@@ -853,6 +932,27 @@ function ensureTaskCategories(){
 function viewCosts(model){
   const data = model || {};
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const efficiencyWindows = (Array.isArray(TIME_EFFICIENCY_WINDOWS) && TIME_EFFICIENCY_WINDOWS.length)
+    ? TIME_EFFICIENCY_WINDOWS
+    : [
+        { key: "7d", label: "1W", days: 7, description: "Past 7 days" },
+        { key: "30d", label: "1M", days: 30, description: "Past 30 days" },
+        { key: "90d", label: "3M", days: 90, description: "Past 3 months" },
+        { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
+        { key: "365d", label: "1Y", days: 365, description: "Past year" }
+      ];
+  const efficiencyButtons = efficiencyWindows.map((win, index) => {
+    const days = Number(win?.days) || 0;
+    const label = esc(win?.label ?? `${days || ""}`);
+    const description = esc(win?.description ?? (days ? `Past ${days} days` : "Selected window"));
+    const isActive = index === 0;
+    return `
+      <button type="button" class="time-efficiency-toggle${isActive ? " is-active" : ""}" data-efficiency-range="${esc(String(days))}" data-efficiency-range-label="${description}" aria-pressed="${isActive ? "true" : "false"}" title="${description}">
+        ${label}
+      </button>
+    `;
+  }).join("");
+  const defaultEfficiencyDescription = esc(efficiencyWindows[0]?.description || "Past 7 days");
 
   const cards = Array.isArray(data.summaryCards) ? data.summaryCards : [];
   const timeframeRows = Array.isArray(data.timeframeRows) ? data.timeframeRows : [];
@@ -1217,6 +1317,58 @@ function viewCosts(model){
       <div class="dashboard-window" data-cost-window="efficiency">
         <div class="block" data-cost-jobs-history role="link" tabindex="0">
           <h3>Cutting Job Efficiency Snapshot</h3>
+          <div class="time-efficiency-inline" id="costTimeEfficiency">
+            <div class="time-efficiency-inline-header">
+              <span class="time-efficiency-inline-title">Cutting time efficiency</span>
+              <div class="time-efficiency-controls">
+                <div class="time-efficiency-toggles" role="tablist">
+                  ${efficiencyButtons}
+                </div>
+                <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit range</button>
+              </div>
+            </div>
+            <div class="time-efficiency-edit" data-efficiency-edit-panel hidden>
+              <div class="time-efficiency-edit-row">
+                <label class="time-efficiency-edit-field">
+                  <span class="time-efficiency-edit-label">Start date</span>
+                  <input type="date" data-efficiency-start-input>
+                </label>
+                <div class="time-efficiency-edit-actions">
+                  <button type="button" class="time-efficiency-edit-apply" data-efficiency-apply>Apply</button>
+                  <button type="button" class="time-efficiency-edit-cancel" data-efficiency-cancel>Cancel</button>
+                </div>
+              </div>
+              <p class="small muted time-efficiency-edit-note" data-efficiency-edit-note></p>
+            </div>
+            <div class="time-efficiency-metrics" role="status" aria-live="polite">
+              <div class="time-efficiency-metric">
+                <span class="label">Actual hours</span>
+                <span class="value" data-efficiency-actual>—</span>
+              </div>
+              <div class="time-efficiency-metric">
+                <span class="label">Current target</span>
+                <span class="value" data-efficiency-target>—</span>
+              </div>
+              <div class="time-efficiency-metric">
+                <span class="label">Gap vs target</span>
+                <span class="value" data-efficiency-gap-target>—</span>
+              </div>
+              <div class="time-efficiency-metric">
+                <span class="label">End goal</span>
+                <span class="value" data-efficiency-goal>—</span>
+              </div>
+              <div class="time-efficiency-metric">
+                <span class="label">Gap vs goal</span>
+                <span class="value" data-efficiency-gap-goal>—</span>
+              </div>
+              <div class="time-efficiency-metric">
+                <span class="label">Efficiency (to date)</span>
+                <span class="value" data-efficiency-percent>—</span>
+              </div>
+            </div>
+            <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
+            <p class="small muted">Baseline assumes ${CUTTING_BASELINE_WEEKLY_HOURS} cutting hours per week.</p>
+          </div>
           <div class="cost-jobs-summary">
             <div><span class="label">Jobs tracked</span><span>—</span></div>
             <div><span class="label">Total gain / loss</span><span>—</span></div>
@@ -1227,7 +1379,7 @@ function viewCosts(model){
             <thead><tr><th>Job</th><th>Milestone</th><th>Status</th><th>Cost impact</th></tr></thead>
             <tbody>
               <tr>
-                <td colspan="4" class="cost-table-placeholder">new cost chart comming soon</td>
+                <td colspan="4" class="cost-table-placeholder">Job history visualization coming soon.</td>
               </tr>
             </tbody>
           </table>

@@ -16,6 +16,15 @@ const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
 const WORKSPACE_ID = "schreiner-robotics";
+const CUTTING_BASELINE_WEEKLY_HOURS = 56;
+const CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS / 7;
+const TIME_EFFICIENCY_WINDOWS = [
+  { key: "7d", label: "1W", days: 7, description: "Past 7 days" },
+  { key: "30d", label: "1M", days: 30, description: "Past 30 days" },
+  { key: "90d", label: "3M", days: 90, description: "Past 3 months" },
+  { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
+  { key: "365d", label: "1Y", days: 365, description: "Past year" }
+];
 
 const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
   ? window.CLEAR_DATA_PASSWORD
@@ -29,6 +38,13 @@ if (typeof window !== "undefined"){
   window.cloudCostLayout = {};
   window.cloudDashboardLayoutLoaded = false;
   window.cloudCostLayoutLoaded = false;
+  window.CUTTING_BASELINE_WEEKLY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS;
+  window.CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_DAILY_HOURS;
+  window.TIME_EFFICIENCY_WINDOWS = TIME_EFFICIENCY_WINDOWS;
+  window.setDailyCutHoursEntry = setDailyCutHoursEntry;
+  window.getDailyCutHoursEntry = getDailyCutHoursEntry;
+  window.normalizeDailyCutHours = normalizeDailyCutHours;
+  window.normalizeDateISO = normalizeDateISO;
 }
 
 /* Root helpers */
@@ -94,6 +110,33 @@ function ymd(d){
   const m = dt.getMonth()+1;
   const day = dt.getDate();
   return `${dt.getFullYear()}-${m<10?'0':''}${m}-${day<10?'0':''}${day}`;
+}
+
+function normalizeDateISO(value){
+  if (!value) return null;
+  if (value instanceof Date){
+    return ymd(value);
+  }
+  if (typeof value === "string"){
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    const parsed = parseDateLocal(trimmed);
+    if (parsed) return ymd(parsed);
+    return null;
+  }
+  try {
+    const parsed = parseDateLocal(value);
+    if (parsed) return ymd(parsed);
+  } catch (_err){}
+  return null;
+}
+
+function clampDailyCutHours(value){
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return 0;
+  if (num > 24) return 24;
+  return num;
 }
 
 function normalizeTimeString(value){
@@ -342,6 +385,7 @@ if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
 if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
@@ -359,6 +403,7 @@ let completedCuttingJobs = window.completedCuttingJobs;
 let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
+let dailyCutHours = window.dailyCutHours;
 
 function refreshGlobalCollections(){
   if (typeof window === "undefined") return;
@@ -386,6 +431,9 @@ function refreshGlobalCollections(){
 
   if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
   garnetCleanings = window.garnetCleanings;
+
+  if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+  dailyCutHours = window.dailyCutHours;
 }
 
 function resolveTaskVariant(task){
@@ -1072,6 +1120,9 @@ function snapshotState(){
     orderRequests,
     orderRequestTab,
     garnetCleanings,
+    dailyCutHours: Array.isArray(dailyCutHours)
+      ? dailyCutHours.map(entry => ({ ...entry }))
+      : [],
     pumpEff: safePumpEff,
     deletedItems: trashSnapshot,
     settingsFolders: foldersSnapshot,
@@ -1255,6 +1306,98 @@ function normalizeInventoryItem(raw){
   return item;
 }
 
+function normalizeDailyCutHours(list){
+  const map = new Map();
+  if (Array.isArray(list)){
+    list.forEach(raw => {
+      if (!raw || typeof raw !== "object") return;
+      const key = normalizeDateISO(raw.dateISO || raw.date || raw.dateIso);
+      if (!key) return;
+      const hours = clampDailyCutHours(raw.hours);
+      const source = raw.source === "manual" ? "manual" : "auto";
+      const updatedAt = typeof raw.updatedAtISO === "string"
+        ? raw.updatedAtISO
+        : (typeof raw.updatedAt === "string" ? raw.updatedAt : null);
+      const existing = map.get(key);
+      if (!existing){
+        map.set(key, {
+          dateISO: key,
+          hours,
+          source,
+          updatedAtISO: updatedAt || null
+        });
+        return;
+      }
+      if (existing.source === "manual" && source !== "manual"){
+        if (updatedAt && (!existing.updatedAtISO || existing.updatedAtISO < updatedAt)){
+          existing.updatedAtISO = updatedAt;
+        }
+        return;
+      }
+      if (source === "manual" && existing.source !== "manual"){
+        existing.source = "manual";
+      }
+      existing.hours = hours;
+      if (updatedAt && (!existing.updatedAtISO || existing.updatedAtISO < updatedAt)){
+        existing.updatedAtISO = updatedAt;
+      }
+    });
+  }
+  const normalized = Array.from(map.values());
+  normalized.sort((a, b)=> a.dateISO.localeCompare(b.dateISO));
+  return normalized;
+}
+
+function getDailyCutHoursEntry(dateISO){
+  const key = normalizeDateISO(dateISO);
+  if (!key || !Array.isArray(dailyCutHours)) return null;
+  return dailyCutHours.find(entry => entry && entry.dateISO === key) || null;
+}
+
+function setDailyCutHoursEntry(dateISO, hours, { source = "manual", preserveManual = false } = {}){
+  const key = normalizeDateISO(dateISO);
+  if (!key) return false;
+  if (!Array.isArray(dailyCutHours)){
+    dailyCutHours = [];
+    if (typeof window !== "undefined") window.dailyCutHours = dailyCutHours;
+  }
+  const value = clampDailyCutHours(hours);
+  const src = source === "manual" ? "manual" : "auto";
+  const idx = dailyCutHours.findIndex(entry => entry && entry.dateISO === key);
+  const nowISO = new Date().toISOString();
+  if (idx >= 0){
+    const existing = dailyCutHours[idx] || {};
+    if (preserveManual && existing.source === "manual" && src !== "manual"){
+      return false;
+    }
+    const nextSource = (src === "manual")
+      ? "manual"
+      : (existing.source === "manual" && src !== "manual" && preserveManual)
+        ? existing.source
+        : (existing.source === "manual" && src !== "manual" ? existing.source : src);
+    if (existing.hours === value && existing.source === nextSource){
+      existing.updatedAtISO = existing.updatedAtISO || nowISO;
+      return false;
+    }
+    dailyCutHours[idx] = {
+      dateISO: key,
+      hours: value,
+      source: nextSource,
+      updatedAtISO: nowISO
+    };
+  }else{
+    dailyCutHours.push({
+      dateISO: key,
+      hours: value,
+      source: src,
+      updatedAtISO: nowISO
+    });
+  }
+  dailyCutHours.sort((a, b)=> a.dateISO.localeCompare(b.dateISO));
+  if (typeof window !== "undefined") window.dailyCutHours = dailyCutHours;
+  return true;
+}
+
 function adoptState(doc){
   const data = doc || {};
 
@@ -1276,6 +1419,7 @@ function adoptState(doc){
     orderRequests.push(createOrderRequest());
   }
   garnetCleanings = Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [];
+  dailyCutHours = normalizeDailyCutHours(Array.isArray(data.dailyCutHours) ? data.dailyCutHours : []);
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -1285,6 +1429,7 @@ function adoptState(doc){
   window.completedCuttingJobs = completedCuttingJobs;
   window.orderRequests = orderRequests;
   window.garnetCleanings = garnetCleanings;
+  window.dailyCutHours = dailyCutHours;
   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
   window.deletedItems = deletedItems;
   purgeExpiredDeletedItems();
@@ -1446,6 +1591,7 @@ async function loadFromCloud(){
           garnetCleanings: Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [],
           orderRequests: Array.isArray(data.orderRequests) ? normalizeOrderRequests(data.orderRequests) : [createOrderRequest()],
           orderRequestTab: typeof data.orderRequestTab === "string" ? data.orderRequestTab : "active",
+          dailyCutHours: Array.isArray(data.dailyCutHours) ? normalizeDailyCutHours(data.dailyCutHours) : [],
           settingsFolders: seededFoldersPayload,
           folders: cloneFolders(seededFoldersPayload),
           pumpEff: pe,
@@ -1502,6 +1648,7 @@ async function loadFromCloud(){
         completedCuttingJobs: [],
         orderRequests: [createOrderRequest()],
         orderRequestTab: "active",
+        dailyCutHours: [],
         pumpEff: pe,
         settingsFolders: defaultFolders,
         folders: cloneFolders(defaultFolders),
@@ -1522,7 +1669,7 @@ async function loadFromCloud(){
     if (!Array.isArray(pe.entries)) pe.entries = [];
     if (!Array.isArray(pe.notes)) pe.notes = [];
     const fallbackFolders = defaultSettingsFolders();
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {} });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", dailyCutHours: [], pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {} });
     resetHistoryToCurrent();
   }
 }
@@ -1626,6 +1773,7 @@ const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes
     completedCuttingJobs: [],
     orderRequests: [createOrderRequest()],
     orderRequestTab: "active",
+    dailyCutHours: [],
     garnetCleanings: [],
     pumpEff: { ...pumpDefaults },
     deletedItems: [],
