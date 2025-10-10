@@ -1217,26 +1217,19 @@ function viewCosts(model){
         <div class="block" data-cost-jobs-history role="link" tabindex="0">
           <h3>Cutting Job Efficiency Snapshot</h3>
           <div class="cost-jobs-summary">
-            <div><span class="label">Jobs tracked</span><span>${esc(jobSummary.countLabel || "0")}</span></div>
-            <div><span class="label">Total gain / loss</span><span>${esc(jobSummary.totalLabel || "$0")}</span></div>
-            <div><span class="label">Avg per job</span><span>${esc(jobSummary.averageLabel || "$0")}</span></div>
-            <div><span class="label">Rolling avg (chart)</span><span>${esc(jobSummary.rollingLabel || "$0")}</span></div>
+            <div><span class="label">Jobs tracked</span><span>—</span></div>
+            <div><span class="label">Total gain / loss</span><span>—</span></div>
+            <div><span class="label">Avg per job</span><span>—</span></div>
+            <div><span class="label">Rolling avg (chart)</span><span>—</span></div>
           </div>
-          ${jobBreakdown.length ? `
-            <table class="cost-table">
-              <thead><tr><th>Job</th><th>Milestone</th><th>Status</th><th>Cost impact</th></tr></thead>
-              <tbody>
-                ${jobBreakdown.map(job => `
-                  <tr>
-                    <td>${esc(job.name || "")}</td>
-                    <td>${esc(job.dateLabel || "")}</td>
-                    <td>${esc(job.statusLabel || "")}</td>
-                    <td>${esc(job.costLabel || "")}</td>
-                  </tr>
-                `).join("")}
-              </tbody>
-            </table>
-          ` : `<p class="small muted">${esc(data.jobEmpty || "Add cutting jobs with estimates to build the efficiency tracker.")}</p>`}
+          <table class="cost-table">
+            <thead><tr><th>Job</th><th>Milestone</th><th>Status</th><th>Cost impact</th></tr></thead>
+            <tbody>
+              <tr>
+                <td colspan="4" class="cost-table-placeholder">new cost chart comming soon</td>
+              </tr>
+            </tbody>
+          </table>
           <div class="cost-window-insight">
             <div class="chart-info">
               <button type="button" class="chart-info-button" aria-describedby="costEfficiencyInsight" aria-label="Explain Cutting Job Efficiency Snapshot">
