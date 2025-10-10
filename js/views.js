@@ -1298,6 +1298,12 @@ function viewJobs(){
     const num = Number(value);
     return Number.isFinite(num) ? String(num) : "";
   };
+  const daysInputValue = (value)=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "";
+    const decimals = Math.abs(num) >= 100 ? 0 : 1;
+    return num.toFixed(decimals);
+  };
   const formatDateTimeLocal = (iso)=>{
     if (!iso) return "";
     const dt = new Date(iso);
@@ -1375,9 +1381,9 @@ function viewJobs(){
 
     const completedVal = formatDateTimeLocal(job?.completedAtISO);
     const actualVal = numberInputValue(actualHours);
-    const actualDaysVal = numberInputValue(actualDays);
+    const actualDaysVal = daysInputValue(actualDays);
     const estimateVal = numberInputValue(estHours);
-    const estimateDaysVal = numberInputValue(estDays);
+    const estimateDaysVal = daysInputValue(estDays);
     const materialCostVal = numberInputValue(job?.materialCost);
     const materialQtyVal = numberInputValue(job?.materialQty);
 
@@ -1390,8 +1396,8 @@ function viewJobs(){
               <label>Completed at<input type="datetime-local" data-history-field="completedAtISO" data-history-id="${job.id}" value="${completedVal}"></label>
               <label>Estimate (hrs)<input type="number" min="0" step="0.1" data-history-field="estimateHours" data-history-id="${job.id}" value="${estimateVal}"></label>
               <label>Actual (hrs)<input type="number" min="0" step="0.1" data-history-field="actualHours" data-history-id="${job.id}" value="${actualVal}"></label>
-              <label>Estimate (days)<input type="number" min="0" step="0.1" data-history-field="estimateDays" data-history-id="${job.id}" value="${estimateDaysVal}"></label>
-              <label>Actual (days)<input type="number" min="0" step="0.1" data-history-field="actualDays" data-history-id="${job.id}" value="${actualDaysVal}"></label>
+              <label>Estimate (days)<input type="number" min="0" step="0.1" data-history-field="estimateDays" data-history-derived="estimateDays" data-history-id="${job.id}" value="${estimateDaysVal}" readonly></label>
+              <label>Actual (days)<input type="number" min="0" step="0.1" data-history-field="actualDays" data-history-derived="actualDays" data-history-id="${job.id}" value="${actualDaysVal}" readonly></label>
               <label>Material<input type="text" data-history-field="material" data-history-id="${job.id}" value="${esc(job?.material || "")}"></label>
               <label>Material cost<input type="number" min="0" step="0.01" data-history-field="materialCost" data-history-id="${job.id}" value="${materialCostVal}"></label>
               <label>Material quantity<input type="number" min="0" step="0.01" data-history-field="materialQty" data-history-id="${job.id}" value="${materialQtyVal}"></label>

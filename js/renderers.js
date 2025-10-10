@@ -7240,7 +7240,11 @@ function renderJobs(){
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, notes:"", manualLogs:[], files:attachments });
+    const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+      ? Number(DAILY_HOURS)
+      : 8;
+    const estimateDays = est / hoursPerDay;
+    cuttingJobs.push({ id: genId(name), name, estimateHours:est, estimateDays, startISO:start, dueISO:due, material, materialCost, materialQty, notes:"", manualLogs:[], files:attachments });
     pendingNewJobFiles.length = 0;
     saveCloudDebounced(); renderJobs();
   });
@@ -7263,6 +7267,28 @@ function renderJobs(){
   });
 
   const historyBody = content.querySelector(".past-jobs-table tbody");
+  historyBody?.addEventListener("input", (e)=>{
+    const target = e.target;
+    if (!target || target.tagName !== "INPUT") return;
+    const fieldName = target.getAttribute("data-history-field");
+    if (fieldName !== "estimateHours" && fieldName !== "actualHours") return;
+    const id = target.getAttribute("data-history-id");
+    if (!id) return;
+    const raw = target.value;
+    const numeric = raw === "" || raw == null ? NaN : Number(raw);
+    const derivedField = fieldName === "estimateHours" ? "estimateDays" : "actualDays";
+    const derivedInput = content.querySelector(`input[data-history-derived="${derivedField}"][data-history-id="${id}"]`);
+    if (!derivedInput) return;
+    if (Number.isFinite(numeric) && numeric >= 0){
+      const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+        ? Number(DAILY_HOURS)
+        : 8;
+      const decimals = Math.abs(numeric / hoursPerDay) >= 100 ? 0 : 1;
+      derivedInput.value = (numeric / hoursPerDay).toFixed(decimals);
+    }else{
+      derivedInput.value = "";
+    }
+  });
   historyBody?.addEventListener("click", async (e)=>{
     const histEdit = e.target.closest("[data-history-edit]");
     const histCancel = e.target.closest("[data-history-cancel]");
@@ -7422,9 +7448,7 @@ function renderJobs(){
       const field = (key)=> content.querySelector(`[data-history-field="${key}"][data-history-id="${id}"]`);
       const nameInput = field("name");
       const estimateInput = field("estimateHours");
-      const estimateDaysInput = field("estimateDays");
       const actualInput = field("actualHours");
-      const actualDaysInput = field("actualDays");
       const materialInput = field("material");
       const materialCostInput = field("materialCost");
       const materialQtyInput = field("materialQty");
@@ -7441,33 +7465,27 @@ function renderJobs(){
       const estVal = estimateInput?.value;
       const estNum = estVal === "" || estVal == null ? null : Number(estVal);
       let estimateHours = Number.isFinite(estNum) && estNum >= 0 ? estNum : Number(entry.estimateHours) || 0;
-
-      const estDaysVal = estimateDaysInput?.value;
-      const estDaysNum = estDaysVal === "" || estDaysVal == null ? null : Number(estDaysVal);
-      let estimateDays = Number.isFinite(estDaysNum) && estDaysNum >= 0
-        ? estDaysNum
-        : (Number(entry.estimateDays));
-      if (!Number.isFinite(estimateDays) && Number.isFinite(estimateHours)){
+      let estimateDays;
+      if (Number.isFinite(estimateHours) && estimateHours >= 0){
         estimateDays = estimateHours / hoursPerDay;
-      }
-      if (Number.isFinite(estimateDays) && (!Number.isFinite(estNum) || estNum == null)){
-        estimateHours = estimateDays * hoursPerDay;
+      }else{
+        const existingEstimateDays = Number(entry.estimateDays);
+        estimateDays = Number.isFinite(existingEstimateDays) && existingEstimateDays >= 0 ? existingEstimateDays : null;
       }
 
       const actVal = actualInput?.value;
       const actualNum = actVal === "" || actVal == null ? null : Number(actVal);
-      let actualHours = Number.isFinite(actualNum) && actualNum >= 0 ? actualNum : null;
-
-      const actDaysVal = actualDaysInput?.value;
-      const actDaysNum = actDaysVal === "" || actDaysVal == null ? null : Number(actDaysVal);
-      let actualDays = Number.isFinite(actDaysNum) && actDaysNum >= 0
-        ? actDaysNum
-        : (Number(entry.actualDays));
-      if (!Number.isFinite(actualDays) && Number.isFinite(actualHours)){
+      const existingActual = Number(entry.actualHours);
+      let actualHours = Number.isFinite(actualNum) && actualNum >= 0
+        ? actualNum
+        : (Number.isFinite(existingActual) && existingActual >= 0 ? existingActual : null);
+      if (!Number.isFinite(actualHours) || actualHours < 0) actualHours = null;
+      let actualDays;
+      if (Number.isFinite(actualHours)){
         actualDays = actualHours / hoursPerDay;
-      }
-      if (!Number.isFinite(actualHours) && Number.isFinite(actualDays)){
-        actualHours = actualDays * hoursPerDay;
+      }else{
+        const existingActualDays = Number(entry.actualDays);
+        actualDays = Number.isFinite(existingActualDays) && existingActualDays >= 0 ? existingActualDays : null;
       }
 
       const material = materialInput?.value ?? entry.material ?? "";
