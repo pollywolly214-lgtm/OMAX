@@ -511,6 +511,20 @@ function showTaskBubble(taskId, anchor, options = {}){
 
 function showJobBubble(jobId, anchor){
   const b = makeBubble(anchor);
+  const formatRate = (value, { showPlus = false } = {}) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "—";
+    const abs = Math.abs(num);
+    const formatted = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: abs < 1000 ? 2 : 0,
+      maximumFractionDigits: abs < 1000 ? 2 : 0
+    }).format(abs);
+    if (num < 0) return `-${formatted}/hr`;
+    if (num > 0 && showPlus) return `+${formatted}/hr`;
+    return `${formatted}/hr`;
+  };
   try{
     const active = cuttingJobs.find(x => String(x.id) === String(jobId));
     const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
@@ -529,17 +543,29 @@ function showJobBubble(jobId, anchor){
       const materialText = completed.material ? escapeHtml(completed.material) : "—";
       const dueText = completed.dueISO ? (parseDateLocal(completed.dueISO)?.toDateString() || "—") : "—";
       const startText = completed.startISO ? (parseDateLocal(completed.startISO)?.toDateString() || "—") : "—";
-      const gainLossRaw = completed.efficiency && completed.efficiency.gainLoss != null ? Number(completed.efficiency.gainLoss) : null;
-      const gainLossText = Number.isFinite(gainLossRaw)
-        ? `${gainLossRaw >= 0 ? "+" : "−"}$${Math.abs(gainLossRaw).toFixed(2)}`
-        : "—";
-      const rateValRaw = completed && completed.efficiency ? completed.efficiency.rate : null;
-      const rateVal = Number(rateValRaw);
-      const rateText = Number.isFinite(rateVal) ? `$${rateVal.toFixed(2)}/hr` : "—";
+      const effData = completed && completed.efficiency ? completed.efficiency : {};
+      const chargeRateVal = Number.isFinite(Number(effData.chargeRate)) && Number(effData.chargeRate) >= 0
+        ? Number(effData.chargeRate)
+        : (Number.isFinite(Number(completed.chargeRate)) && Number(completed.chargeRate) >= 0 ? Number(completed.chargeRate) : JOB_RATE_PER_HOUR);
+      const materialTotalCompleted = Number(completed.materialCost || 0) * Number(completed.materialQty || 0);
+      const hoursForCost = Number.isFinite(Number(completed.actualHours)) && Number(completed.actualHours) > 0
+        ? Number(completed.actualHours)
+        : (Number.isFinite(Number(completed.estimateHours)) && Number(completed.estimateHours) > 0 ? Number(completed.estimateHours) : 0);
+      const fallbackCost = hoursForCost > 0 ? (materialTotalCompleted / hoursForCost) : 0;
+      const costRateVal = Number.isFinite(Number(effData.costRate))
+        ? Number(effData.costRate)
+        : JOB_BASE_COST_PER_HOUR + fallbackCost;
+      const netRateVal = Number.isFinite(Number(effData.netRate))
+        ? Number(effData.netRate)
+        : chargeRateVal - costRateVal;
+      const hoursForNet = hoursForCost > 0 ? hoursForCost : 0;
+      const netTotalVal = netRateVal * hoursForNet;
+      const rateText = formatRate(netRateVal, { showPlus: true });
       const notesHtml = completed.notes ? `<div class="bubble-kv"><span>Notes:</span><span>${escapeHtml(completed.notes)}</span></div>` : "";
-      const gainLossHtml = Number.isFinite(gainLossRaw)
-        ? `${escapeHtml(gainLossText)}${rateText !== "—" ? ` <span class="muted">@ ${escapeHtml(rateText)}</span>` : ""}`
+      const netTotalText = Number.isFinite(netTotalVal)
+        ? `${netTotalVal >= 0 ? "+" : "−"}$${Math.abs(netTotalVal).toFixed(2)}`
         : "—";
+      const netTotalHtml = `${escapeHtml(netTotalText)}${rateText !== "—" ? ` <span class="muted">@ ${escapeHtml(rateText)}</span>` : ""}`;
       b.innerHTML = `
         <div class="bubble-title">${escapeHtml(completed.name || "Completed job")}</div>
         <div class="bubble-kv"><span>Status:</span><span>Completed</span></div>
@@ -548,33 +574,52 @@ function showJobBubble(jobId, anchor){
         <div class="bubble-kv"><span>Estimate:</span><span>${escapeHtml(estimateText)}</span></div>
         <div class="bubble-kv"><span>Actual hours:</span><span>${escapeHtml(actualText)}</span></div>
         <div class="bubble-kv"><span>Material:</span><span>${materialText}</span></div>
-        <div class="bubble-kv"><span>Gain / loss:</span><span>${gainLossHtml}</span></div>
+        <div class="bubble-kv"><span>Charge rate:</span><span>${escapeHtml(formatRate(chargeRateVal))}</span></div>
+        <div class="bubble-kv"><span>Cost rate:</span><span>${escapeHtml(formatRate(costRateVal))}</span></div>
+        <div class="bubble-kv"><span>Net profit/hr:</span><span>${escapeHtml(formatRate(netRateVal, { showPlus: true }))}</span></div>
+        <div class="bubble-kv"><span>Net total:</span><span>${netTotalHtml}</span></div>
         ${notesHtml}`;
       return;
     }
     const j = active;
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
-    const baselineRemain = eff.expectedRemaining != null
-      ? eff.expectedRemaining
-      : Math.max(0, (Number(j.estimateHours)||0) - (eff.expectedHours||0));
     const actualRemain = eff.actualRemaining != null
       ? eff.actualRemaining
       : Math.max(0, (Number(j.estimateHours)||0) - (eff.actualHours||0));
-    const deltaRemain = baselineRemain - actualRemain;
-    const EPS = 0.05;
-    const ahead = deltaRemain > EPS;
-    const behind = deltaRemain < -EPS;
-    const deltaSummary = ahead ? "Ahead" : (behind ? "Behind" : "On pace");
-    const deltaDetail = (ahead || behind)
-      ? `${deltaRemain > 0 ? "+" : "−"}${Math.abs(deltaRemain).toFixed(1)} hr`
-      : "";
-    const showMoney = (ahead || behind) ? eff.gainLoss : 0;
-    const sign  = showMoney > 0 ? "+" : (showMoney < 0 ? "−" : "");
-    const money = Math.abs(showMoney).toFixed(2);
+    const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+      ? Number(DAILY_HOURS)
+      : 8;
+    const remainingHours = Number.isFinite(req.remainingHours) ? Math.max(0, req.remainingHours) : 0;
+    const remainingDays = Number.isFinite(req.remainingDays) ? Math.max(0, req.remainingDays) : 0;
+    const capacityRemaining = remainingDays * hoursPerDay;
+    const slackHours = req.requiredPerDay === Infinity
+      ? Number.NEGATIVE_INFINITY
+      : capacityRemaining - remainingHours;
+    const SLACK_EPS = 0.05;
+    const behindSchedule = req.requiredPerDay === Infinity || slackHours < -SLACK_EPS;
+    const aheadSchedule = !behindSchedule && slackHours > (hoursPerDay + SLACK_EPS);
+    const statusLabel = behindSchedule ? "Behind" : (aheadSchedule ? "Ahead" : "On pace");
+    let statusDetail = "";
+    if (req.requiredPerDay === Infinity){
+      statusDetail = "Past due";
+    } else if (behindSchedule){
+      statusDetail = `Needs ${req.requiredPerDay.toFixed(1)} hr/day`;
+    } else if (aheadSchedule){
+      statusDetail = `${slackHours.toFixed(1)} hr slack`;
+    } else if (remainingHours > 0){
+      statusDetail = `Needs ${req.requiredPerDay.toFixed(1)} hr/day`;
+    }
+    const daysLabel = remainingDays === 1 ? "day" : "days";
+    const remainingSummary = req.requiredPerDay === Infinity
+      ? `${actualRemain.toFixed(1)} hr remaining (past due)`
+      : `${actualRemain.toFixed(1)} hr remaining over ${remainingDays} ${daysLabel}`;
+    const slackSummary = req.requiredPerDay === Infinity
+      ? ""
+      : `${slackHours >= 0 ? "+" : "−"}${Math.abs(slackHours).toFixed(1)} hr capacity`;
     const reqCell = (req.requiredPerDay === Infinity)
       ? `<span class="danger">Past due / no days remaining</span>`
-      : `${req.requiredPerDay.toFixed(2)} hr/day needed to meet goal <span class="muted">(rem ${req.remainingHours.toFixed(1)} hr over ${req.remainingDays} day${req.remainingDays===1?"":"s"})</span>`;
+      : `${req.requiredPerDay.toFixed(2)} hr/day needed (capacity ${hoursPerDay.toFixed(1)} hr/day) <span class="muted">(${remainingHours.toFixed(1)} hr over ${remainingDays} ${daysLabel})</span>`;
     const noteAuto = eff.usedAutoFromManual
       ? `<div class="small"><strong>Auto from last manual</strong>: continuing at ${DAILY_HOURS} hr/day.</div>`
       : (eff.usedFromStartAuto ? `<div class="small"><strong>Auto</strong>: assuming ${DAILY_HOURS} hr/day from start.</div>` : ``);
@@ -582,13 +627,41 @@ function showJobBubble(jobId, anchor){
     const dueDate   = parseDateLocal(j.dueISO);
     const startTxt  = startDate ? startDate.toDateString() : "—";
     const dueTxt    = dueDate   ? dueDate.toDateString()   : "—";
+    const chargeRateVal = Number.isFinite(Number(eff.chargeRate)) && Number(eff.chargeRate) >= 0
+      ? Number(eff.chargeRate)
+      : (Number.isFinite(Number(j.chargeRate)) && Number(j.chargeRate) >= 0 ? Number(j.chargeRate) : JOB_RATE_PER_HOUR);
+    const matTotalActive = (Number(j.materialCost)||0) * (Number(j.materialQty)||0);
+    const estHoursActive = Number(j.estimateHours) || 0;
+    const fallbackCostRateActive = JOB_BASE_COST_PER_HOUR + (estHoursActive > 0 ? (matTotalActive / estHoursActive) : 0);
+    const costRateVal = Number.isFinite(Number(eff.costRate))
+      ? Number(eff.costRate)
+      : fallbackCostRateActive;
+    const netRateVal = Number.isFinite(Number(eff.netRate))
+      ? Number(eff.netRate)
+      : chargeRateVal - costRateVal;
+    const chargeRateText = formatRate(chargeRateVal);
+    const costRateText = formatRate(costRateVal);
+    const netRateText = formatRate(netRateVal, { showPlus: true });
+    const actualHoursActive = Number.isFinite(Number(eff.actualHours)) && Number(eff.actualHours) > 0
+      ? Number(eff.actualHours)
+      : 0;
+    const hoursForNetActive = estHoursActive > 0 ? estHoursActive : actualHoursActive;
+    const netTotalVal = hoursForNetActive > 0 ? (netRateVal * hoursForNetActive) : 0;
+    const netTotalText = Number.isFinite(netTotalVal)
+      ? `${netTotalVal >= 0 ? "+" : "−"}$${Math.abs(netTotalVal).toFixed(2)}`
+      : "—";
+    const netTotalHtml = `${escapeHtml(netTotalText)}${netRateText !== "—" ? ` <span class="muted">@ ${escapeHtml(netRateText)}</span>` : ""}`;
     b.innerHTML = `
       <div class="bubble-title">${j.name}</div>
       <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
       <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
       <div class="bubble-kv"><span>Schedule:</span><span>${startTxt} → ${dueTxt}</span></div>
-      <div class="bubble-kv"><span>Remaining:</span><span>${actualRemain.toFixed(1)} hr (baseline ${baselineRemain.toFixed(1)} hr)</span></div>
-      <div class="bubble-kv"><span>Cost impact:</span><span>${deltaSummary}${deltaDetail ? ` ${deltaDetail}` : ""} → ${sign}$${money} @ $${eff.rate}/hr</span></div>
+      <div class="bubble-kv"><span>Charge rate:</span><span>${escapeHtml(chargeRateText)}</span></div>
+      <div class="bubble-kv"><span>Cost rate:</span><span>${escapeHtml(costRateText)}</span></div>
+      <div class="bubble-kv"><span>Net profit/hr:</span><span>${escapeHtml(netRateText)}</span></div>
+      <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusLabel)}${statusDetail ? ` — ${escapeHtml(statusDetail)}` : ""}</span></div>
+      <div class="bubble-kv"><span>Remaining:</span><span>${escapeHtml(remainingSummary)}${slackSummary ? ` <span class="muted">(${escapeHtml(slackSummary)})</span>` : ""}</span></div>
+      <div class="bubble-kv"><span>Net total:</span><span>${netTotalHtml}</span></div>
       <div class="bubble-kv"><span>Required/day:</span><span>${reqCell}</span></div>
       <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
       ${noteAuto}
