@@ -14,6 +14,9 @@
 const APP_SCHEMA = 71;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr
+const DEFAULT_JOB_CATEGORY_ID = "jobcat_default";
+const DEFAULT_JOB_CATEGORY_NAME = "General";
+const JOB_CATEGORY_FILTER_STORAGE_KEY = "job_category_filter_v1";
 const WORKSPACE_ID = "schreiner-robotics";
 
 const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
@@ -331,6 +334,231 @@ const defaultAsReqTasks = [
   { id:"clean_rails",           name:"Clean X-rails & Y-bridge rails", condition:"If debris occurs", manualLink:"", storeLink:"" }
 ];
 
+function defaultJobCategories(){
+  return [
+    { id: DEFAULT_JOB_CATEGORY_ID, name: DEFAULT_JOB_CATEGORY_NAME, order: 0 }
+  ];
+}
+
+function cloneJobCategories(list){
+  if (!Array.isArray(list)) return [];
+  return list
+    .map(cat => {
+      if (!cat || cat.id == null) return null;
+      return {
+        id: String(cat.id),
+        name: typeof cat.name === "string" && cat.name.trim()
+          ? cat.name.trim()
+          : DEFAULT_JOB_CATEGORY_NAME,
+        order: Number.isFinite(Number(cat.order)) ? Number(cat.order) : 0
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeJobCategories(list){
+  const normalized = [];
+  const seen = new Set();
+  let insertion = 0;
+  let maxOrder = -1;
+
+  const pushEntry = (entry)=>{
+    if (!entry || entry.id == null) return;
+    const id = String(entry.id);
+    if (!id || seen.has(id)) return;
+    const name = typeof entry.name === "string" && entry.name.trim()
+      ? entry.name.trim()
+      : DEFAULT_JOB_CATEGORY_NAME;
+    const orderNum = Number(entry.order);
+    const hasOrder = Number.isFinite(orderNum);
+    if (hasOrder && orderNum > maxOrder) maxOrder = orderNum;
+    normalized.push({
+      id,
+      name,
+      order: hasOrder ? orderNum : null,
+      __index: insertion++
+    });
+    seen.add(id);
+  };
+
+  if (Array.isArray(list)){
+    list.forEach(entry => pushEntry(entry));
+  }
+
+  if (!seen.has(DEFAULT_JOB_CATEGORY_ID)){
+    pushEntry({ id: DEFAULT_JOB_CATEGORY_ID, name: DEFAULT_JOB_CATEGORY_NAME, order: maxOrder + 1 });
+  }
+
+  normalized.sort((a, b)=>{
+    const orderA = Number.isFinite(a.order) ? a.order : (maxOrder + 1 + a.__index);
+    const orderB = Number.isFinite(b.order) ? b.order : (maxOrder + 1 + b.__index);
+    if (orderA !== orderB) return orderA - orderB;
+    if (a.name !== b.name) return a.name.localeCompare(b.name);
+    return a.__index - b.__index;
+  });
+
+  return normalized.map((entry, idx)=>({
+    id: entry.id,
+    name: entry.name,
+    order: idx
+  }));
+}
+
+function ensureJobCategoryFilterValid(){
+  const list = cloneJobCategories(jobCategories);
+  const current = typeof window.jobCategoryFilter === "string" ? window.jobCategoryFilter : "all";
+  if (current === "all") return "all";
+  const match = list.some(cat => String(cat.id) === String(current));
+  if (match) return current;
+  const fallback = list.find(cat => cat.id === DEFAULT_JOB_CATEGORY_ID)?.id
+    ?? (list[0] ? list[0].id : null);
+  const next = fallback != null ? String(fallback) : "all";
+  window.jobCategoryFilter = next;
+  jobCategoryFilter = window.jobCategoryFilter;
+  try {
+    if (typeof window !== "undefined" && window.localStorage){
+      if (next && next !== "all") window.localStorage.setItem(JOB_CATEGORY_FILTER_STORAGE_KEY, next);
+      else window.localStorage.removeItem(JOB_CATEGORY_FILTER_STORAGE_KEY);
+    }
+  } catch (_){ /* ignore storage failures */ }
+  return window.jobCategoryFilter;
+}
+
+function getJobCategoryList(){
+  if (!Array.isArray(jobCategories) || !jobCategories.length){
+    jobCategories = defaultJobCategories();
+  }
+  return cloneJobCategories(jobCategories);
+}
+
+function getJobCategoryById(id){
+  if (!id) return null;
+  const target = String(id);
+  return getJobCategoryList().find(cat => String(cat.id) === target) || null;
+}
+
+function getDefaultJobCategoryId(){
+  const list = getJobCategoryList();
+  const preferred = list.find(cat => String(cat.id) === DEFAULT_JOB_CATEGORY_ID);
+  if (preferred) return preferred.id;
+  return list.length ? list[0].id : null;
+}
+
+function setJobCategories(raw){
+  const normalized = normalizeJobCategories(Array.isArray(raw) ? raw : jobCategories);
+  window.jobCategories = normalized;
+  jobCategories = window.jobCategories;
+  ensureJobCategoryFilterValid();
+  ensureJobCategoryAssignments();
+  return getJobCategoryList();
+}
+
+function setCurrentJobCategoryFilter(value){
+  const val = value == null ? "all" : String(value);
+  if (val && val !== "all"){
+    const list = getJobCategoryList();
+    const valid = list.some(cat => String(cat.id) === val);
+    if (!valid) return getCurrentJobCategoryFilter();
+  }
+  window.jobCategoryFilter = val || "all";
+  jobCategoryFilter = window.jobCategoryFilter;
+  try {
+    if (typeof window !== "undefined" && window.localStorage){
+      if (window.jobCategoryFilter && window.jobCategoryFilter !== "all"){
+        window.localStorage.setItem(JOB_CATEGORY_FILTER_STORAGE_KEY, window.jobCategoryFilter);
+      } else {
+        window.localStorage.removeItem(JOB_CATEGORY_FILTER_STORAGE_KEY);
+      }
+    }
+  } catch (_){ /* ignore storage failures */ }
+  return window.jobCategoryFilter;
+}
+
+function getCurrentJobCategoryFilter(){
+  return ensureJobCategoryFilterValid();
+}
+
+function addJobCategory(name){
+  const label = (name || "").trim();
+  if (!label) return null;
+  const list = getJobCategoryList();
+  const maxOrder = list.reduce((max, cat)=> Math.max(max, Number(cat.order) || 0), -1);
+  const newCat = { id: genId(label), name: label, order: maxOrder + 1 };
+  setJobCategories([...list, newCat]);
+  return newCat;
+}
+
+function renameJobCategory(id, name){
+  const label = (name || "").trim();
+  if (!label) return false;
+  const target = String(id || "");
+  if (!target) return false;
+  const list = getJobCategoryList();
+  const updated = list.map(cat => String(cat.id) === target ? { ...cat, name: label } : cat);
+  setJobCategories(updated);
+  return true;
+}
+
+function ensureJobCategoryAssignments(){
+  const list = getJobCategoryList();
+  const validIds = new Set(list.map(cat => String(cat.id)));
+  const fallback = getDefaultJobCategoryId();
+  const ensureList = (jobs)=>{
+    if (!Array.isArray(jobs)) return;
+    jobs.forEach(job => {
+      if (!job || typeof job !== "object") return;
+      const current = job.categoryId != null ? String(job.categoryId) : "";
+      if (!current || !validIds.has(current)){
+        job.categoryId = fallback || DEFAULT_JOB_CATEGORY_ID;
+      }
+    });
+  };
+  ensureList(cuttingJobs);
+  ensureList(completedCuttingJobs);
+}
+
+function jobCategoryUsage(id){
+  const target = String(id || "");
+  if (!target) return { active: cuttingJobs.length || 0, completed: completedCuttingJobs.length || 0 };
+  const countActive = Array.isArray(cuttingJobs)
+    ? cuttingJobs.filter(job => job && String(job.categoryId || getDefaultJobCategoryId()) === target).length
+    : 0;
+  const countCompleted = Array.isArray(completedCuttingJobs)
+    ? completedCuttingJobs.filter(job => job && String(job.categoryId || getDefaultJobCategoryId()) === target).length
+    : 0;
+  return { active: countActive, completed: countCompleted };
+}
+
+function removeJobCategory(id){
+  const target = String(id || "");
+  const list = getJobCategoryList();
+  if (!target || list.length <= 1) return { removed:false, fallbackId:null };
+  if (!list.some(cat => String(cat.id) === target)) return { removed:false, fallbackId:null };
+  const filtered = list.filter(cat => String(cat.id) !== target);
+  setJobCategories(filtered);
+  const fallback = getDefaultJobCategoryId();
+  const fallbackId = fallback != null ? String(fallback) : null;
+  const reassign = (jobs)=>{
+    if (!Array.isArray(jobs)) return;
+    jobs.forEach(job => {
+      if (!job || typeof job !== "object") return;
+      const current = job.categoryId != null ? String(job.categoryId) : "";
+      if (!current || current === target){
+        job.categoryId = fallbackId;
+      }
+    });
+  };
+  reassign(cuttingJobs);
+  reassign(completedCuttingJobs);
+  ensureJobCategoryAssignments();
+  const currentFilter = getCurrentJobCategoryFilter();
+  if (currentFilter === target){
+    setCurrentJobCategoryFilter(fallbackId || "all");
+  }
+  return { removed:true, fallbackId };
+}
+
+
 /* ===================== Persisted state ===================== */
 if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateISO, hours}]
 if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
@@ -342,6 +570,17 @@ if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
 if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
+if (!Array.isArray(window.jobCategories) || !window.jobCategories.length) window.jobCategories = defaultJobCategories();
+if (typeof window.jobCategoryFilter !== "string"){
+  let stored = "all";
+  try {
+    if (typeof window !== "undefined" && window.localStorage){
+      const raw = window.localStorage.getItem(JOB_CATEGORY_FILTER_STORAGE_KEY);
+      if (raw) stored = raw;
+    }
+  } catch (_){ stored = "all"; }
+  window.jobCategoryFilter = stored || "all";
+}
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
   window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
@@ -358,6 +597,8 @@ let completedCuttingJobs = window.completedCuttingJobs;
 let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
+let jobCategories = window.jobCategories;
+let jobCategoryFilter = window.jobCategoryFilter;
 
 function refreshGlobalCollections(){
   if (typeof window === "undefined") return;
@@ -385,6 +626,16 @@ function refreshGlobalCollections(){
 
   if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
   garnetCleanings = window.garnetCleanings;
+
+  if (!Array.isArray(window.jobCategories) || !window.jobCategories.length){
+    window.jobCategories = defaultJobCategories();
+  }
+  jobCategories = window.jobCategories;
+
+  if (typeof window.jobCategoryFilter !== "string"){
+    window.jobCategoryFilter = "all";
+  }
+  jobCategoryFilter = window.jobCategoryFilter;
 }
 
 function resolveTaskVariant(task){
@@ -1071,6 +1322,8 @@ function snapshotState(){
     orderRequests,
     orderRequestTab,
     garnetCleanings,
+    jobCategories: cloneJobCategories(jobCategories),
+    jobCategoryFilter: getCurrentJobCategoryFilter(),
     pumpEff: safePumpEff,
     deletedItems: trashSnapshot,
     settingsFolders: foldersSnapshot,
@@ -1284,6 +1537,14 @@ function adoptState(doc){
   window.completedCuttingJobs = completedCuttingJobs;
   window.orderRequests = orderRequests;
   window.garnetCleanings = garnetCleanings;
+  const rawJobCategories = Array.isArray(data.jobCategories)
+    ? data.jobCategories
+    : window.jobCategories;
+  setJobCategories(rawJobCategories);
+  if (typeof data.jobCategoryFilter === "string"){
+    window.jobCategoryFilter = data.jobCategoryFilter;
+  }
+  ensureJobCategoryFilterValid();
   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
   window.deletedItems = deletedItems;
   purgeExpiredDeletedItems();
@@ -1416,6 +1677,11 @@ function saveCloudDebounced(){
   } catch (err) {
     console.warn("Failed to normalize folders before save:", err);
   }
+  try {
+    setJobCategories(window.jobCategories);
+  } catch (err) {
+    console.warn("Failed to normalize job categories before save:", err);
+  }
   captureHistorySnapshot();
   saveCloudInternal();
 }
@@ -1434,6 +1700,9 @@ async function loadFromCloud(){
         if (!Array.isArray(pe.notes)) pe.notes = [];
         const seededFolders = normalizeSettingsFolders(data.settingsFolders || data.folders);
         const seededFoldersPayload = cloneFolders(seededFolders);
+        const seededJobCategories = normalizeJobCategories(Array.isArray(data.jobCategories)
+          ? data.jobCategories
+          : defaultJobCategories());
         const seeded = {
           schema:APP_SCHEMA,
           totalHistory: Array.isArray(data.totalHistory) ? data.totalHistory : [],
@@ -1447,6 +1716,8 @@ async function loadFromCloud(){
           orderRequestTab: typeof data.orderRequestTab === "string" ? data.orderRequestTab : "active",
           settingsFolders: seededFoldersPayload,
           folders: cloneFolders(seededFoldersPayload),
+          jobCategories: cloneJobCategories(seededJobCategories),
+          jobCategoryFilter: typeof data.jobCategoryFilter === "string" ? data.jobCategoryFilter : "all",
           pumpEff: pe,
           deletedItems: normalizeDeletedItems(data.deletedItems || data.deleted_items || []),
           dashboardLayout: cloneStructured(data.dashboardLayout && typeof data.dashboardLayout === "object" ? data.dashboardLayout : {}) || {},
@@ -1504,6 +1775,8 @@ async function loadFromCloud(){
         pumpEff: pe,
         settingsFolders: defaultFolders,
         folders: cloneFolders(defaultFolders),
+        jobCategories: cloneJobCategories(defaultJobCategories()),
+        jobCategoryFilter: "all",
         garnetCleanings: [],
         deletedItems: [],
         dashboardLayout: {},
@@ -1521,7 +1794,7 @@ async function loadFromCloud(){
     if (!Array.isArray(pe.entries)) pe.entries = [];
     if (!Array.isArray(pe.notes)) pe.notes = [];
     const fallbackFolders = defaultSettingsFolders();
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {} });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), jobCategories: cloneJobCategories(defaultJobCategories()), jobCategoryFilter: "all", garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {} });
     resetHistoryToCurrent();
   }
 }

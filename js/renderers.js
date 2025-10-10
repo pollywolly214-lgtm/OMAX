@@ -8119,6 +8119,9 @@ function renderJobs(){
   if (!content) return;
   setAppSettingsContext("default");
   wireDashboardSettingsMenu();
+  if (typeof ensureJobCategoryAssignments === "function"){
+    try { ensureJobCategoryAssignments(); } catch (_){ /* ignore */ }
+  }
 
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
@@ -8171,6 +8174,85 @@ function renderJobs(){
       focusPastJobs();
     });
   }
+
+  let draggingJobId = null;
+  const clearCategoryDrops = ()=>{
+    content.querySelectorAll(".job-category-item.drop-target").forEach(node => {
+      node.classList.remove("drop-target");
+    });
+  };
+
+  const jobTableRows = content.querySelectorAll(".job-table tbody tr[data-job-row]");
+  jobTableRows.forEach(row => {
+    if (row.classList.contains("editing")) return;
+    row.addEventListener("dragstart", event => {
+      draggingJobId = row.getAttribute("data-job-row");
+      row.classList.add("dragging");
+      try {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", draggingJobId || "");
+      } catch (_){ /* ignore */ }
+    });
+    row.addEventListener("dragend", ()=>{
+      row.classList.remove("dragging");
+      draggingJobId = null;
+      clearCategoryDrops();
+    });
+  });
+
+  const categoryDropTargets = content.querySelectorAll(".job-category-item");
+  categoryDropTargets.forEach(target => {
+    const dropKey = target.getAttribute("data-job-category-target") || "";
+    const isAllTarget = dropKey === "all";
+    const handleOver = (event)=>{
+      if (!draggingJobId) return;
+      event.preventDefault();
+      target.classList.add("drop-target");
+      try { event.dataTransfer.dropEffect = "move"; } catch (_){ /* ignore */ }
+    };
+    const handleLeave = ()=>{
+      target.classList.remove("drop-target");
+    };
+    const handleDrop = (event)=>{
+      if (!draggingJobId) return;
+      event.preventDefault();
+      target.classList.remove("drop-target");
+      const job = Array.isArray(cuttingJobs)
+        ? cuttingJobs.find(entry => entry && String(entry.id) === String(draggingJobId))
+        : null;
+      draggingJobId = null;
+      if (!job) return;
+      const fallbackId = typeof getDefaultJobCategoryId === "function"
+        ? getDefaultJobCategoryId()
+        : null;
+      const nextCategory = isAllTarget
+        ? (fallbackId != null ? String(fallbackId) : null)
+        : (dropKey ? String(dropKey) : null);
+      if (!nextCategory) return;
+      const currentCategory = job.categoryId != null ? String(job.categoryId) : "";
+      if (currentCategory === nextCategory) return;
+      job.categoryId = nextCategory;
+      if (typeof ensureJobCategoryAssignments === "function"){
+        try { ensureJobCategoryAssignments(); } catch (_){ }
+      }
+      if (typeof saveCloudDebounced === "function"){
+        try { saveCloudDebounced(); } catch (_){ }
+      }
+      const category = typeof getJobCategoryById === "function" ? getJobCategoryById(nextCategory) : null;
+      const fallbackLabel = typeof DEFAULT_JOB_CATEGORY_NAME === "string" ? DEFAULT_JOB_CATEGORY_NAME : "General";
+      const label = category?.name || fallbackLabel;
+      if (typeof toast === "function"){ toast(`Moved to ${label}`); }
+      const formState = typeof captureNewJobFormState === "function"
+        ? captureNewJobFormState()
+        : null;
+      clearCategoryDrops();
+      refreshJobs({ formState });
+    };
+    target.addEventListener("dragenter", handleOver);
+    target.addEventListener("dragover", handleOver);
+    target.addEventListener("dragleave", handleLeave);
+    target.addEventListener("drop", handleDrop);
+  });
 
   const categoryList = content.querySelector(".job-category-list");
   if (categoryList){
