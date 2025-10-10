@@ -4,6 +4,10 @@ const pendingNewJobFiles = window.pendingNewJobFiles;
 if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
 const orderPartialSelection = window.orderPartialSelection;
 const timeEfficiencyWidgets = [];
+const sharedTimeEfficiencyStarts = (typeof window !== "undefined" && window.__timeEfficiencyStartMap instanceof Map)
+  ? window.__timeEfficiencyStartMap
+  : new Map();
+if (typeof window !== "undefined"){ window.__timeEfficiencyStartMap = sharedTimeEfficiencyStarts; }
 
 function getCurrentMachineHours(){
   if (typeof RENDER_TOTAL === "number" && Number.isFinite(RENDER_TOTAL)){
@@ -1933,23 +1937,102 @@ function formatTimeEfficiencyDiff(value){
   return num > 0 ? `Ahead +${formatted} hr` : `Behind -${formatted} hr`;
 }
 
+function determineTimeEfficiencyTrend(data){
+  if (!data) return "";
+  const diff = Number(data.differenceHours);
+  const baseline = Number(data.baselineHours);
+  if (!Number.isFinite(diff)) return "";
+  if (diff >= 0.05) return "ahead";
+  if (baseline <= 0 || !Number.isFinite(baseline)) return diff >= 0 ? "ahead" : "behind";
+  const shortfall = Math.abs(diff);
+  if (shortfall < 0.05) return "ahead";
+  const shortfallPct = (shortfall / baseline) * 100;
+  if (shortfallPct <= 10) return "slightly-behind";
+  return "behind";
+}
+
+function parseTimeEfficiencyInput(value){
+  if (!value) return null;
+  if (typeof parseDateLocal === "function"){
+    const parsed = parseDateLocal(value);
+    if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+      parsed.setHours(0,0,0,0);
+      return parsed;
+    }
+  }
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  dt.setHours(0,0,0,0);
+  return dt;
+}
+
+function formatISODate(date){
+  if (typeof ymd === "function") return ymd(date);
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const y = date.getFullYear();
+  const m = `${date.getMonth() + 1}`.padStart(2, "0");
+  const d = `${date.getDate()}`.padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function normalizeTimeEfficiencyStart(days, value){
+  const base = parseTimeEfficiencyInput(value);
+  if (!base) return null;
+  if (days >= 365){
+    base.setMonth(0, 1);
+  } else if (days > 7){
+    base.setDate(1);
+  }
+  base.setHours(0,0,0,0);
+  return formatISODate(base);
+}
+
+function describeTimeEfficiencyEdit(days){
+  if (days === 7){
+    return "Weekly range automatically runs Monday through Sunday.";
+  }
+  if (days >= 365){
+    return "Choose a start date. It will snap to January 1 for yearly tracking.";
+  }
+  return "Choose a start date. It will snap to the first day of that month.";
+}
+
 function refreshTimeEfficiencyWidget(widget){
   if (!widget || !widget.root || !widget.root.isConnected) return;
   const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
+  const options = {};
+  const savedStart = widget.customStartByRange?.get(days);
+  if (savedStart){
+    options.startDate = savedStart;
+  }
   const data = typeof computeTimeEfficiency === "function"
-    ? computeTimeEfficiency(days)
+    ? computeTimeEfficiency(days, options)
     : null;
   if (!data) return;
   if (widget.metrics.actual) widget.metrics.actual.textContent = formatTimeEfficiencyHours(data.actualHours);
   if (widget.metrics.baseline) widget.metrics.baseline.textContent = formatTimeEfficiencyHours(data.baselineHours);
   if (widget.metrics.percent) widget.metrics.percent.textContent = formatTimeEfficiencyPercent(data.efficiencyPercent);
   if (widget.metrics.diff) widget.metrics.diff.textContent = formatTimeEfficiencyDiff(data.differenceHours);
+  if (widget.root){
+    const trend = determineTimeEfficiencyTrend(data);
+    if (trend){
+      widget.root.dataset.efficiencyTrend = trend;
+    } else {
+      delete widget.root.dataset.efficiencyTrend;
+    }
+    widget.currentTrend = trend || "";
+  }
   if (widget.labelEl){
     const labelText = widget.selectedLabel
       || (data && data.description)
       || widget.labelEl.textContent
       || "";
     widget.labelEl.textContent = labelText;
+  }
+  widget.lastStartISO = data.startISO || null;
+  widget.lastEndISO = data.endISO || null;
+  if (widget.editPanel && !widget.editPanel.hidden){
+    updateTimeEfficiencyEditPanel(widget);
   }
 }
 
@@ -1977,6 +2060,75 @@ function selectTimeEfficiencyRange(widget, button){
       btn.setAttribute("aria-pressed", active ? "true" : "false");
     }
   });
+  if (widget.editPanel && !widget.editPanel.hidden){
+    updateTimeEfficiencyEditPanel(widget);
+  }
+  refreshTimeEfficiencyWidget(widget);
+}
+
+function updateTimeEfficiencyEditPanel(widget){
+  if (!widget || !widget.editPanel) return;
+  const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
+  if (widget.editNote){
+    widget.editNote.textContent = describeTimeEfficiencyEdit(days);
+  }
+  if (widget.editInput){
+    widget.editInput.classList.remove("has-error");
+    if (days === 7){
+      widget.editInput.value = "";
+      widget.editInput.disabled = true;
+    } else {
+      const saved = widget.customStartByRange?.get(days) || widget.lastStartISO || "";
+      widget.editInput.disabled = false;
+      widget.editInput.value = saved;
+    }
+  }
+}
+
+function toggleTimeEfficiencyEditPanel(widget, show){
+  if (!widget || !widget.editPanel) return;
+  const shouldShow = show == null ? widget.editPanel.hidden : Boolean(show);
+  if (!shouldShow){
+    widget.editPanel.hidden = true;
+    widget.root?.classList.remove("time-efficiency-edit-open");
+    if (widget.editInput){
+      widget.editInput.classList.remove("has-error");
+    }
+    return;
+  }
+  widget.editPanel.hidden = false;
+  widget.root?.classList.add("time-efficiency-edit-open");
+  updateTimeEfficiencyEditPanel(widget);
+  if (widget.editInput && !widget.editInput.disabled){
+    widget.editInput.focus({ preventScroll: true });
+  }
+}
+
+function applyTimeEfficiencyEdit(widget){
+  if (!widget) return;
+  const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
+  if (!widget.editInput || widget.editInput.disabled){
+    toggleTimeEfficiencyEditPanel(widget, false);
+    return;
+  }
+  const raw = widget.editInput.value;
+  if (!raw){
+    widget.customStartByRange?.delete(days);
+    toggleTimeEfficiencyEditPanel(widget, false);
+    refreshTimeEfficiencyWidget(widget);
+    return;
+  }
+  const normalized = normalizeTimeEfficiencyStart(days, raw);
+  if (!normalized){
+    widget.editInput.classList.add("has-error");
+    return;
+  }
+  widget.editInput.classList.remove("has-error");
+  widget.editInput.value = normalized;
+  if (widget.customStartByRange){
+    widget.customStartByRange.set(days, normalized);
+  }
+  toggleTimeEfficiencyEditPanel(widget, false);
   refreshTimeEfficiencyWidget(widget);
 }
 
@@ -2003,11 +2155,30 @@ function setupTimeEfficiencyWidget(root){
     labelEl,
     currentDays: Number(firstToggle?.dataset?.efficiencyRange) || 7,
     defaultDays: Number(firstToggle?.dataset?.efficiencyRange) || 7,
-    selectedLabel: firstToggle?.dataset?.efficiencyRangeLabel || (labelEl ? labelEl.textContent : "")
+    selectedLabel: firstToggle?.dataset?.efficiencyRangeLabel || (labelEl ? labelEl.textContent : ""),
+    customStartByRange: sharedTimeEfficiencyStarts,
+    editBtn: root.querySelector("[data-efficiency-edit]"),
+    editPanel: root.querySelector("[data-efficiency-edit-panel]"),
+    editInput: root.querySelector("[data-efficiency-start-input]"),
+    applyBtn: root.querySelector("[data-efficiency-apply]") || root.querySelector("[data-efficiency-save]") || null,
+    cancelBtn: root.querySelector("[data-efficiency-cancel]") || null,
+    editNote: root.querySelector("[data-efficiency-edit-note]") || null
   };
   toggles.forEach(btn => {
     btn.addEventListener("click", ()=> selectTimeEfficiencyRange(widget, btn));
   });
+  if (widget.editBtn){
+    widget.editBtn.addEventListener("click", ()=> {
+      const shouldShow = widget.editPanel ? widget.editPanel.hidden : true;
+      toggleTimeEfficiencyEditPanel(widget, shouldShow);
+    });
+  }
+  if (widget.applyBtn){
+    widget.applyBtn.addEventListener("click", ()=> applyTimeEfficiencyEdit(widget));
+  }
+  if (widget.cancelBtn){
+    widget.cancelBtn.addEventListener("click", ()=> toggleTimeEfficiencyEditPanel(widget, false));
+  }
   timeEfficiencyWidgets.push(widget);
   root.dataset.timeEfficiencyBound = "1";
   refreshTimeEfficiencyWidget(widget);

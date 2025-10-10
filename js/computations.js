@@ -44,13 +44,37 @@ function computeTimeEfficiency(rangeDays, options = {}){
   const today = options.endDate
     ? (parseDateLocal(options.endDate) || new Date(options.endDate))
     : new Date();
-  const endDate = (today instanceof Date && !Number.isNaN(today.getTime()))
+  let endDate = (today instanceof Date && !Number.isNaN(today.getTime()))
     ? new Date(today.getFullYear(), today.getMonth(), today.getDate())
     : (()=>{ const d = new Date(); d.setHours(0,0,0,0); return d; })();
   endDate.setHours(0,0,0,0);
 
-  const startDate = new Date(endDate);
-  startDate.setDate(endDate.getDate() - (normalizedDays - 1));
+  let startDate = null;
+  if (options.startDate){
+    const startCandidate = parseDateLocal(options.startDate) || new Date(options.startDate);
+    if (startCandidate instanceof Date && !Number.isNaN(startCandidate.getTime())){
+      startDate = new Date(startCandidate.getFullYear(), startCandidate.getMonth(), startCandidate.getDate());
+      startDate.setHours(0,0,0,0);
+      endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + (normalizedDays - 1));
+    }
+  }
+
+  if (!startDate){
+    startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - (normalizedDays - 1));
+  }
+
+  if (normalizedDays === 7){
+    const monday = new Date(endDate);
+    const day = monday.getDay();
+    const offset = (day + 6) % 7; // 0 => Monday, 6 => Sunday
+    monday.setDate(monday.getDate() - offset);
+    monday.setHours(0,0,0,0);
+    startDate = monday;
+    endDate = new Date(monday);
+    endDate.setDate(monday.getDate() + 6);
+  }
 
   const map = getDailyCutHoursMap();
   let actual = 0;

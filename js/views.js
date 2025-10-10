@@ -71,9 +71,25 @@ function viewDashboard(){
         <div class="block time-efficiency-block" id="dashboardTimeEfficiency">
           <div class="time-efficiency-header">
             <h3>Cutting Time Efficiency</h3>
-            <div class="time-efficiency-toggles" role="tablist">
-              ${efficiencyButtons}
+            <div class="time-efficiency-controls">
+              <div class="time-efficiency-toggles" role="tablist">
+                ${efficiencyButtons}
+              </div>
+              <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit range</button>
             </div>
+          </div>
+          <div class="time-efficiency-edit" data-efficiency-edit-panel hidden>
+            <div class="time-efficiency-edit-row">
+              <label class="time-efficiency-edit-field">
+                <span class="time-efficiency-edit-label">Start date</span>
+                <input type="date" data-efficiency-start-input>
+              </label>
+              <div class="time-efficiency-edit-actions">
+                <button type="button" class="time-efficiency-edit-apply" data-efficiency-apply>Apply</button>
+                <button type="button" class="time-efficiency-edit-cancel" data-efficiency-cancel>Cancel</button>
+              </div>
+            </div>
+            <p class="small muted time-efficiency-edit-note" data-efficiency-edit-note></p>
           </div>
           <div class="time-efficiency-metrics" role="status" aria-live="polite">
             <div class="time-efficiency-metric">
@@ -1295,9 +1311,25 @@ function viewCosts(model){
           <div class="time-efficiency-inline" id="costTimeEfficiency">
             <div class="time-efficiency-inline-header">
               <span class="time-efficiency-inline-title">Cutting time efficiency</span>
-              <div class="time-efficiency-toggles" role="tablist">
-                ${efficiencyButtons}
+              <div class="time-efficiency-controls">
+                <div class="time-efficiency-toggles" role="tablist">
+                  ${efficiencyButtons}
+                </div>
+                <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit range</button>
               </div>
+            </div>
+            <div class="time-efficiency-edit" data-efficiency-edit-panel hidden>
+              <div class="time-efficiency-edit-row">
+                <label class="time-efficiency-edit-field">
+                  <span class="time-efficiency-edit-label">Start date</span>
+                  <input type="date" data-efficiency-start-input>
+                </label>
+                <div class="time-efficiency-edit-actions">
+                  <button type="button" class="time-efficiency-edit-apply" data-efficiency-apply>Apply</button>
+                  <button type="button" class="time-efficiency-edit-cancel" data-efficiency-cancel>Cancel</button>
+                </div>
+              </div>
+              <p class="small muted time-efficiency-edit-note" data-efficiency-edit-note></p>
             </div>
             <div class="time-efficiency-metrics" role="status" aria-live="polite">
               <div class="time-efficiency-metric">
