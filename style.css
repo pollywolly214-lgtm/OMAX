@@ -355,9 +355,9 @@ body.forecast-modal-open{ overflow:hidden; }
 
 .cost-history{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
 .cost-history li{
-  display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  gap:8px;
+  display:flex;
+  align-items:center;
+  gap:12px;
   padding:10px 12px;
   background:rgba(255, 255, 255, 0.75);
   border:1px solid rgba(255, 255, 255, 0.35);
@@ -367,6 +367,12 @@ body.forecast-modal-open{ overflow:hidden; }
   cursor:pointer;
   transition:transform .12s ease, box-shadow .12s ease;
 }
+.cost-history-main{
+  flex:1;
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+}
 .cost-history li:hover{ box-shadow:0 16px 28px rgba(6,24,64,0.24); transform:translateY(-1px); }
 .cost-history li:focus-visible{ outline:2px solid rgba(10,99,194,0.6); outline-offset:2px; }
 .cost-history li[data-task-missing]{ border-style:dashed; }
@@ -374,6 +380,30 @@ body.forecast-modal-open{ overflow:hidden; }
 .cost-history-hours{ text-align:center; }
 .cost-history-cost{ text-align:right; font-weight:600; color:var(--brand-blue-400); }
 .cost-history-task-label{ grid-column:1/-1; font-size:.82rem; color:#4f5d75; text-align:left; margin-top:4px; }
+.cost-history-delete{
+  flex:0 0 auto;
+  width:32px;
+  height:32px;
+  border:none;
+  border-radius:50%;
+  background:rgba(11, 32, 64, 0.06);
+  color:#183153;
+  font-size:20px;
+  line-height:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  transition:background-color .12s ease, color .12s ease, transform .12s ease;
+}
+.cost-history-delete:hover,
+.cost-history-delete:focus-visible{
+  background:rgba(10, 99, 194, 0.12);
+  color:#0a63c2;
+  outline:none;
+  transform:scale(1.04);
+}
+.cost-history-delete span[aria-hidden="true"]{ line-height:1; }
 .cost-history-popover{ position:fixed; z-index:12000; background:#0a63c2; color:#fff; padding:12px 16px; border-radius:12px; box-shadow:0 22px 44px rgba(15,35,72,0.35); max-width:min(320px,calc(100vw - 32px)); font-size:.9rem; line-height:1.4; pointer-events:none; opacity:0; transform:translateY(4px) scale(.98); transition:opacity .16s ease, transform .16s ease; }
 .cost-history-popover.is-visible{ opacity:1; transform:translateY(0) scale(1); }
 .cost-history-popover::after{ content:""; position:absolute; width:12px; height:12px; background:#0a63c2; transform:rotate(45deg); left:50%; margin-left:-6px; box-shadow:0 10px 24px rgba(15,35,72,0.25); }

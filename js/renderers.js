@@ -425,6 +425,102 @@ const DASHBOARD_WINDOW_MIN_HEIGHT  = 160;
 const COST_LAYOUT_STORAGE_KEY = "cost_layout_windows_v1";
 const COST_WINDOW_MIN_WIDTH   = 240;
 const COST_WINDOW_MIN_HEIGHT  = 160;
+const COST_HISTORY_SUPPRESS_KEY = "cost_history_suppressed_v1";
+
+function costHistoryStorage(){
+  try {
+    if (typeof localStorage !== "undefined") return localStorage;
+  } catch (err){
+    console.warn("localStorage unavailable for cost history suppressions", err);
+  }
+  return null;
+}
+
+function normalizeCostHistorySuppression(entry){
+  if (!entry) return null;
+  const key = entry.key != null ? String(entry.key) : null;
+  if (!key) return null;
+  const dateISO = entry.dateISO ? String(entry.dateISO) : null;
+  const hoursRaw = Number(entry.hours);
+  const hours = Number.isFinite(hoursRaw) && hoursRaw > 0 ? hoursRaw : 0;
+  return { key, dateISO, hours };
+}
+
+function loadCostHistorySuppressions(){
+  const storage = costHistoryStorage();
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(COST_HISTORY_SUPPRESS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeCostHistorySuppression).filter(Boolean);
+  } catch (err){
+    console.warn("Unable to load cost history suppressions", err);
+    return [];
+  }
+}
+
+function listCostHistorySuppressions(){
+  if (!Array.isArray(window.__costHistorySuppressions)){
+    window.__costHistorySuppressions = loadCostHistorySuppressions();
+  }
+  return window.__costHistorySuppressions.map(entry => ({ ...entry }));
+}
+
+function setCostHistorySuppressions(entries){
+  const normalized = Array.isArray(entries)
+    ? entries.map(normalizeCostHistorySuppression).filter(Boolean)
+    : [];
+  window.__costHistorySuppressions = normalized.map(entry => ({ ...entry }));
+  const storage = costHistoryStorage();
+  if (!storage) return window.__costHistorySuppressions;
+  try {
+    if (normalized.length){
+      storage.setItem(COST_HISTORY_SUPPRESS_KEY, JSON.stringify(normalized));
+    }else{
+      storage.removeItem(COST_HISTORY_SUPPRESS_KEY);
+    }
+  } catch (err){
+    console.warn("Unable to persist cost history suppressions", err);
+  }
+  return window.__costHistorySuppressions;
+}
+
+function suppressCostHistoryEntry(entry){
+  const current = listCostHistorySuppressions();
+  const normalized = normalizeCostHistorySuppression(entry);
+  if (!normalized) return;
+  const idx = current.findIndex(item => item.key === normalized.key);
+  if (idx >= 0){
+    current[idx] = normalized;
+  }else{
+    current.push(normalized);
+  }
+  setCostHistorySuppressions(current);
+}
+
+function costHistorySuppressionsEqual(a, b){
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  const map = new Map();
+  for (const entry of a){
+    if (!entry || !entry.key) return false;
+    map.set(entry.key, entry);
+  }
+  for (const entry of b){
+    if (!entry || !entry.key) return false;
+    const match = map.get(entry.key);
+    if (!match) return false;
+    const hoursA = Number(match.hours) || 0;
+    const hoursB = Number(entry.hours) || 0;
+    if (Math.abs(hoursA - hoursB) > 0.001) return false;
+    const dateA = match.dateISO || "";
+    const dateB = entry.dateISO || "";
+    if (dateA !== dateB) return false;
+  }
+  return true;
+}
 
 function cloneLayoutData(layout){
   if (!layout || typeof layout !== "object") return {};
@@ -6380,11 +6476,61 @@ function renderCosts(){
     }
   };
 
+  const handleHistoryItemDelete = async (element)=>{
+    if (!(element instanceof HTMLElement)) return;
+    const key = element.getAttribute("data-history-key");
+    if (!key) return;
+    const dateISO = element.getAttribute("data-history-date");
+    const hoursRaw = Number(element.getAttribute("data-history-hours"));
+    const hours = Number.isFinite(hoursRaw) && hoursRaw > 0 ? hoursRaw : 0;
+    const dateLabel = (()=>{
+      const labelEl = element.querySelector(".cost-history-date");
+      if (labelEl && labelEl.textContent) return labelEl.textContent.trim();
+      if (dateISO){
+        try {
+          const parsed = new Date(dateISO);
+          if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+            return parsed.toLocaleDateString();
+          }
+        } catch (_err){}
+      }
+      return "this maintenance event";
+    })();
+    let confirmed = true;
+    if (typeof showConfirmModal === "function"){
+      confirmed = await showConfirmModal({
+        title: "Remove maintenance event?",
+        message: `Remove the maintenance event recorded on ${dateLabel} from cost analysis?`,
+        confirmText: "Remove event",
+        confirmVariant: "danger",
+        cancelText: "Cancel"
+      });
+    }else if (typeof window !== "undefined" && typeof window.confirm === "function"){
+      confirmed = window.confirm(`Remove the maintenance event recorded on ${dateLabel}?`);
+    }
+    if (!confirmed) return;
+    suppressCostHistoryEntry({ key, dateISO, hours });
+    if (typeof toast === "function"){
+      toast("Maintenance event removed from cost analysis.");
+    }
+    renderCosts();
+  };
+
   const historyList = content.querySelector(".cost-history");
   if (historyList){
     const resolveItem = (target)=> (target instanceof HTMLElement) ? target.closest("[data-history-item]") : null;
     const activate = (item)=>{ if (item) handleHistoryItemActivation(item); };
+    const remove = (item)=>{ if (item) handleHistoryItemDelete(item); };
     historyList.addEventListener("click", (event)=>{
+      const deleteBtn = (event.target instanceof HTMLElement) ? event.target.closest("[data-history-delete]") : null;
+      if (deleteBtn){
+        const item = resolveItem(deleteBtn);
+        if (!item) return;
+        event.preventDefault();
+        event.stopPropagation();
+        remove(item);
+        return;
+      }
       const item = resolveItem(event.target);
       if (!item) return;
       event.preventDefault();
@@ -6609,6 +6755,24 @@ function computeCostModel(){
     .filter(Boolean)
     .sort((a,b)=> a.date - b.date);
 
+  const suppressionEntriesInitial = listCostHistorySuppressions();
+  const suppressionMap = new Map();
+  suppressionEntriesInitial.forEach(entry => {
+    if (!entry || !entry.key) return;
+    suppressionMap.set(entry.key, { ...entry });
+  });
+  let suppressedEntriesForUsage = suppressionEntriesInitial.map(entry => ({ ...entry }));
+
+  const makeHistoryEntryKey = (entry)=>{
+    if (!entry) return "";
+    const datePart = entry.dateISO ? String(entry.dateISO) : "";
+    const hoursVal = Number(entry.hours);
+    if (Number.isFinite(hoursVal)){
+      return `${datePart}__${hoursVal.toFixed(3)}`;
+    }
+    return `${datePart}__${String(entry.hours || "")}`;
+  };
+
   const currentHours = (typeof RENDER_TOTAL === "number" && isFinite(RENDER_TOTAL))
     ? Number(RENDER_TOTAL)
     : (typeof currentTotal === "function" ? Number(currentTotal() || 0) : 0);
@@ -6746,7 +6910,24 @@ function computeCostModel(){
     const baseline = parsedHistory[0];
     const compareHours = startHours != null ? startHours : (baseline ? baseline.hours : currentHours);
     if (compareHours == null || !isFinite(compareHours)) return 0;
-    return Math.max(0, Number(currentHours || 0) - Number(compareHours));
+    const rawUsage = Math.max(0, Number(currentHours || 0) - Number(compareHours));
+    if (!suppressedEntriesForUsage.length) return rawUsage;
+    const startTime = start.getTime();
+    const endTime = now.getTime();
+    let suppressedTotal = 0;
+    suppressedEntriesForUsage.forEach(entry => {
+      if (!entry || !entry.dateISO) return;
+      const entryDate = new Date(entry.dateISO);
+      if (!(entryDate instanceof Date) || Number.isNaN(entryDate.getTime())) return;
+      entryDate.setHours(0,0,0,0);
+      const time = entryDate.getTime();
+      if (time < startTime || time > endTime) return;
+      const hoursVal = Number(entry.hours);
+      if (!Number.isFinite(hoursVal) || hoursVal <= 0) return;
+      suppressedTotal += hoursVal;
+    });
+    const adjusted = rawUsage - suppressedTotal;
+    return adjusted > 0 ? adjusted : 0;
   };
 
   const determineBaselineDailyHours = ()=>{
@@ -6984,11 +7165,26 @@ function computeCostModel(){
   }
 
   const maintenanceHistory = [];
+  const maintenanceHistoryKeys = new Set();
   for (let i=1; i<parsedHistory.length; i++){
     const prev = parsedHistory[i-1];
     const curr = parsedHistory[i];
     const deltaHours = Number(curr.hours) - Number(prev.hours);
     if (!isFinite(deltaHours) || deltaHours <= 0) continue;
+    const entryKey = makeHistoryEntryKey(curr);
+    if (entryKey) maintenanceHistoryKeys.add(entryKey);
+    const suppression = entryKey ? suppressionMap.get(entryKey) : null;
+    const deltaSafe = deltaHours > 0 ? deltaHours : 0;
+    if (suppression){
+      const storedHours = Number(suppression.hours) || 0;
+      if (Math.abs(storedHours - deltaSafe) > 0.001){
+        suppression.hours = deltaSafe;
+      }
+      if (!suppression.dateISO && curr.dateISO){
+        suppression.dateISO = curr.dateISO;
+      }
+      continue;
+    }
     const dateKey = toHistoryDateKey(curr.dateISO);
     const linkedTasksRaw = dateKey ? taskEventsByDate.get(dateKey) : null;
     const linkedTasks = Array.isArray(linkedTasksRaw)
@@ -6997,12 +7193,29 @@ function computeCostModel(){
     maintenanceHistory.push({
       date: curr.date,
       dateISO: curr.dateISO,
-      hours: deltaHours,
+      hours: deltaSafe,
       cost: combinedCostPerHour > 0
-        ? deltaHours * combinedCostPerHour
-        : estimateIntervalCost(deltaHours),
-      tasks: linkedTasks
+        ? deltaSafe * combinedCostPerHour
+        : estimateIntervalCost(deltaSafe),
+      tasks: linkedTasks,
+      key: entryKey
     });
+  }
+
+  suppressionMap.forEach((entry, key) => {
+    if (!maintenanceHistoryKeys.has(key)){
+      suppressionMap.delete(key);
+    }
+  });
+
+  const suppressionArray = Array.from(suppressionMap.values())
+    .map(normalizeCostHistorySuppression)
+    .filter(Boolean);
+  suppressedEntriesForUsage = suppressionArray.map(entry => ({ ...entry }));
+  if (!costHistorySuppressionsEqual(suppressionArray, suppressionEntriesInitial)){
+    setCostHistorySuppressions(suppressionArray);
+  }else{
+    window.__costHistorySuppressions = suppressionArray.map(entry => ({ ...entry }));
   }
 
   const formatHoursLabel = (hours)=>{
@@ -7374,6 +7587,8 @@ function computeCostModel(){
       hoursLabel: formatHours(entry.hours),
       costLabel: formatterCurrency(entry.cost, { decimals: entry.cost < 1000 ? 2 : 0 }),
       dateISO: entry.dateISO,
+      key: entry.key || null,
+      hoursValue: Number(entry.hours) || 0,
       taskId: resolvedTaskId,
       originalTaskId,
       taskMode,

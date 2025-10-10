@@ -1172,21 +1172,29 @@ function viewCosts(model){
                 const attrs = [
                   'data-history-item="1"',
                   item.dateISO ? `data-history-date="${esc(item.dateISO)}"` : '',
+                  item.key ? `data-history-key="${esc(item.key)}"` : '',
                   item.taskId ? `data-task-id="${esc(item.taskId)}"` : '',
                   item.originalTaskId ? `data-original-task-id="${esc(item.originalTaskId)}"` : '',
                   item.taskMode ? `data-task-mode="${esc(item.taskMode)}"` : '',
                   item.taskName ? `data-task-name="${esc(item.taskName)}"` : '',
                   item.trashId ? `data-trash-id="${esc(item.trashId)}"` : '',
                   item.missingTask ? 'data-task-missing="true"' : '',
-                  !item.hasLinkedTasks ? 'data-task-empty="true"' : ''
+                  !item.hasLinkedTasks ? 'data-task-empty="true"' : '',
+                  Number.isFinite(item.hoursValue) ? `data-history-hours="${esc(String(item.hoursValue))}"` : ''
                 ].filter(Boolean).join(' ');
                 const titleAttr = item.tooltipLabel ? ` title="${esc(item.tooltipLabel)}"` : '';
                 return `
                 <li role="button" tabindex="0" ${attrs}${titleAttr}>
-                  <span class="cost-history-date">${esc(item.dateLabel || "")}</span>
-                  <span class="cost-history-hours">${esc(item.hoursLabel || "")}</span>
-                  <span class="cost-history-cost">${esc(item.costLabel || "")}</span>
-                  ${item.taskLabel ? `<span class="cost-history-task-label">${esc(item.taskLabel)}</span>` : ``}
+                  <div class="cost-history-main">
+                    <span class="cost-history-date">${esc(item.dateLabel || "")}</span>
+                    <span class="cost-history-hours">${esc(item.hoursLabel || "")}</span>
+                    <span class="cost-history-cost">${esc(item.costLabel || "")}</span>
+                    ${item.taskLabel ? `<span class="cost-history-task-label">${esc(item.taskLabel)}</span>` : ``}
+                  </div>
+                  <button type="button" class="cost-history-delete" data-history-delete aria-label="Remove maintenance event from ${esc(item.dateLabel || 'this date')}" title="Remove from cost analysis">
+                    <span aria-hidden="true">×</span>
+                    <span class="sr-only">Remove event</span>
+                  </button>
                 </li>`;
               }).join("")}
             </ul>
