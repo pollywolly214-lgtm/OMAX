@@ -1264,11 +1264,20 @@ function viewJobs(){
     if (safe > 0 && showPlus) return `+${formatted}`;
     return formatted;
   };
+  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+    ? Number(DAILY_HOURS)
+    : 8;
   const formatHours = (value)=>{
     const num = Number(value);
     if (!Number.isFinite(num)) return "—";
     const decimals = Math.abs(num) >= 100 ? 0 : 1;
     return `${num.toFixed(decimals)} hr`;
+  };
+  const formatDays = (value)=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "—";
+    const decimals = Math.abs(num) >= 100 ? 0 : 1;
+    return `${num.toFixed(decimals)} d`;
   };
   const formatQuantity = (value)=>{
     const num = Number(value);
@@ -1388,6 +1397,12 @@ function viewJobs(){
     const num = Number(value);
     return Number.isFinite(num) ? String(num) : "";
   };
+  const daysInputValue = (value)=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "";
+    const decimals = Math.abs(num) >= 100 ? 0 : 1;
+    return num.toFixed(decimals);
+  };
   const formatDateTimeLocal = (iso)=>{
     if (!iso) return "";
     const dt = new Date(iso);
@@ -1405,17 +1420,34 @@ function viewJobs(){
     .replace(/"/g, "&quot;");
   const completedRows = completedFiltered.map(job => {
     const eff = job && job.efficiency ? job.efficiency : {};
-    const delta = Number(eff.deltaHours);
+    const deltaHours = Number(eff.deltaHours);
+    const deltaDays = Number.isFinite(eff.deltaDays) ? Number(eff.deltaDays)
+      : (Number.isFinite(deltaHours) ? (deltaHours / hoursPerDay) : NaN);
     const gainLoss = Number(eff.gainLoss);
     const actualHours = Number(job.actualHours ?? eff.actualHours);
     const estHours = Number(job.estimateHours);
+    const storedActualDays = Number(job.actualDays ?? eff.actualDays);
+    let actualDays = Number.isFinite(storedActualDays) ? storedActualDays : NaN;
+    if (!Number.isFinite(actualDays) && Number.isFinite(actualHours)){
+      actualDays = actualHours / hoursPerDay;
+    }
+    const storedEstimateDays = Number(job.estimateDays ?? eff.expectedDays);
+    let estDays = Number.isFinite(storedEstimateDays) ? storedEstimateDays : NaN;
+    if (!Number.isFinite(estDays) && Number.isFinite(estHours)){
+      estDays = estHours / hoursPerDay;
+    }
     const editingHistory = editingCompletedJobsSet.has(String(job.id));
     let statusLabel = "Finished on estimate";
-    if (Number.isFinite(delta) && Math.abs(delta) > 0.1){
-      statusLabel = delta > 0 ? "Finished ahead" : "Finished behind";
+    if (Number.isFinite(deltaDays) && Math.abs(deltaDays) > 0.05){
+      statusLabel = deltaDays > 0 ? "Finished ahead" : "Finished behind";
     }
-    const statusDetail = Number.isFinite(delta) && Math.abs(delta) > 0.1
-      ? ` (${delta > 0 ? "+" : "−"}${Math.abs(delta).toFixed(1)} hr)`
+    const statusDetail = Number.isFinite(deltaDays) && Math.abs(deltaDays) > 0.05
+      ? (() => {
+          const absDays = Math.abs(deltaDays);
+          const roundedTenth = Math.round(absDays * 10) / 10;
+          const dayWord = Math.abs(roundedTenth - 1) < 0.05 ? "day" : "days";
+          return ` (${deltaDays > 0 ? "+" : "−"}${absDays.toFixed(1)} ${dayWord})`;
+        })()
       : "";
     const noteDisplay = job?.notes
       ? esc(String(job.notes)).replace(/\n/g, "<br>")
@@ -1430,7 +1462,7 @@ function viewJobs(){
             ${materialLine}
           </td>
           <td>${formatDate(job?.completedAtISO)}</td>
-          <td>${formatHours(actualHours)} / ${formatHours(estHours)}</td>
+          <td>${formatDays(actualDays)} / ${formatDays(estDays)}</td>
           <td>${esc(statusLabel)}${statusDetail}</td>
           <td>${formatCurrency(gainLoss)}</td>
           <td>${noteDisplay}</td>
@@ -1445,7 +1477,9 @@ function viewJobs(){
 
     const completedVal = formatDateTimeLocal(job?.completedAtISO);
     const actualVal = numberInputValue(actualHours);
+    const actualDaysVal = daysInputValue(actualDays);
     const estimateVal = numberInputValue(estHours);
+    const estimateDaysVal = daysInputValue(estDays);
     const materialCostVal = numberInputValue(job?.materialCost);
     const materialQtyVal = numberInputValue(job?.materialQty);
 
@@ -1458,6 +1492,8 @@ function viewJobs(){
               <label>Completed at<input type="datetime-local" data-history-field="completedAtISO" data-history-id="${job.id}" value="${completedVal}"></label>
               <label>Estimate (hrs)<input type="number" min="0" step="0.1" data-history-field="estimateHours" data-history-id="${job.id}" value="${estimateVal}"></label>
               <label>Actual (hrs)<input type="number" min="0" step="0.1" data-history-field="actualHours" data-history-id="${job.id}" value="${actualVal}"></label>
+              <label>Estimate (days)<input type="number" min="0" step="0.1" data-history-field="estimateDays" data-history-derived="estimateDays" data-history-id="${job.id}" value="${estimateDaysVal}" readonly></label>
+              <label>Actual (days)<input type="number" min="0" step="0.1" data-history-field="actualDays" data-history-derived="actualDays" data-history-id="${job.id}" value="${actualDaysVal}" readonly></label>
               <label>Material<input type="text" data-history-field="material" data-history-id="${job.id}" value="${esc(job?.material || "")}"></label>
               <label>Material cost<input type="number" min="0" step="0.01" data-history-field="materialCost" data-history-id="${job.id}" value="${materialCostVal}"></label>
               <label>Material quantity<input type="number" min="0" step="0.01" data-history-field="materialQty" data-history-id="${job.id}" value="${materialQtyVal}"></label>
@@ -1486,7 +1522,7 @@ function viewJobs(){
       </div>
       <table class="past-jobs-table">
         <thead>
-          <tr><th>Job</th><th>Completed</th><th>Actual vs estimate</th><th>Status</th><th>Cost impact</th><th>Note</th><th>Actions</th></tr>
+          <tr><th>Job</th><th>Completed</th><th>Actual vs estimate (days)</th><th>Status</th><th>Cost impact</th><th>Note</th><th>Actions</th></tr>
         </thead>
         <tbody>${completedRows}</tbody>
       </table>
