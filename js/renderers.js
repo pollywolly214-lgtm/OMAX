@@ -369,6 +369,7 @@ function captureNewJobFormState(){
     fields: {
       name: captureField("jobName"),
       estimate: captureField("jobEst"),
+      charge: captureField("jobCharge"),
       material: captureField("jobMaterial"),
       materialCost: captureField("jobMaterialCost"),
       materialQty: captureField("jobMaterialQty"),
@@ -394,6 +395,7 @@ function restoreNewJobFormState(state){
 
   assignField("jobName", state.fields.name);
   assignField("jobEst", state.fields.estimate);
+  assignField("jobCharge", state.fields.charge);
   assignField("jobMaterial", state.fields.material);
   assignField("jobMaterialCost", state.fields.materialCost);
   assignField("jobMaterialQty", state.fields.materialQty);
@@ -8245,17 +8247,20 @@ function renderJobs(){
     const name  = document.getElementById("jobName").value.trim();
     const est   = Number(document.getElementById("jobEst").value);
     const material = document.getElementById("jobMaterial")?.value.trim() || "";
+    const chargeRaw = document.getElementById("jobCharge")?.value ?? "";
     const materialCostRaw = document.getElementById("jobMaterialCost")?.value ?? "";
     const materialQtyRaw = document.getElementById("jobMaterialQty")?.value ?? "";
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
     const materialQty = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
+    const chargeRate = chargeRaw === "" ? JOB_RATE_PER_HOUR : Number(chargeRaw);
     if (!name || !isFinite(est) || est<=0 || !start || !due){ toast("Fill job fields."); return; }
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
+    if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, notes:"", manualLogs:[], files:attachments });
+    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[], files:attachments });
     pendingNewJobFiles.length = 0;
     saveCloudDebounced(); renderJobs();
   });
@@ -8378,6 +8383,9 @@ function renderJobs(){
         material: entry.material || "",
         materialCost: Number.isFinite(materialCost) ? materialCost : 0,
         materialQty: Number.isFinite(materialQty) ? materialQty : 0,
+        chargeRate: Number.isFinite(Number(entry.chargeRate)) && Number(entry.chargeRate) >= 0
+          ? Number(entry.chargeRate)
+          : JOB_RATE_PER_HOUR,
         notes: entry.notes || "",
         manualLogs: [],
         files: Array.isArray(entry.files) ? entry.files.map(f => ({ ...f })) : []
@@ -8570,8 +8578,14 @@ function renderJobs(){
       const eff = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
       const now = new Date();
       const completionISO = now.toISOString();
+      const existingChargeRate = Number.isFinite(Number(job.chargeRate)) && Number(job.chargeRate) >= 0
+        ? Number(job.chargeRate)
+        : JOB_RATE_PER_HOUR;
       const efficiencySummary = eff ? {
-        rate: eff.rate ?? JOB_RATE_PER_HOUR,
+        rate: eff.rate ?? (eff.netRate ?? (existingChargeRate - JOB_BASE_COST_PER_HOUR)),
+        chargeRate: eff.chargeRate ?? existingChargeRate,
+        costRate: eff.costRate ?? null,
+        netRate: eff.netRate ?? null,
         expectedHours: eff.expectedHours ?? null,
         actualHours: eff.actualHours ?? null,
         expectedRemaining: eff.expectedRemaining ?? null,
@@ -8579,7 +8593,10 @@ function renderJobs(){
         deltaHours: eff.deltaHours ?? null,
         gainLoss: eff.gainLoss ?? null
       } : {
-        rate: JOB_RATE_PER_HOUR,
+        rate: existingChargeRate - JOB_BASE_COST_PER_HOUR,
+        chargeRate: existingChargeRate,
+        costRate: null,
+        netRate: null,
         expectedHours: null,
         actualHours: null,
         expectedRemaining: null,
@@ -8599,6 +8616,9 @@ function renderJobs(){
         material: job.material || "",
         materialCost: Number(job.materialCost)||0,
         materialQty: Number(job.materialQty)||0,
+        chargeRate: Number.isFinite(Number(job.chargeRate)) && Number(job.chargeRate) >= 0
+          ? Number(job.chargeRate)
+          : JOB_RATE_PER_HOUR,
         manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
         files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
         actualHours: eff && Number.isFinite(eff.actualHours) ? eff.actualHours : null,
@@ -8619,6 +8639,13 @@ function renderJobs(){
       const id = sv.getAttribute("data-save-job");
       const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
       const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${id}"]`)?.value;
+      const chargeRaw = qs("chargeRate");
+      const chargeVal = chargeRaw === "" || chargeRaw == null ? null : Number(chargeRaw);
+      if (chargeVal != null && (!Number.isFinite(chargeVal) || chargeVal < 0)){ toast("Enter a valid charge rate."); return; }
+      const existingCharge = Number.isFinite(Number(j.chargeRate)) && Number(j.chargeRate) >= 0
+        ? Number(j.chargeRate)
+        : JOB_RATE_PER_HOUR;
+      const chargeToSet = chargeVal == null ? existingCharge : chargeVal;
       j.name = qs("name") || j.name;
       j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
       j.material = qs("material") || j.material || "";
@@ -8627,6 +8654,7 @@ function renderJobs(){
       j.startISO = qs("startISO") || j.startISO;
       j.dueISO   = qs("dueISO")   || j.dueISO;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
+      j.chargeRate = chargeToSet;
       editingJobs.delete(id);
       saveCloudDebounced(); renderJobs();
       return;
@@ -8654,7 +8682,7 @@ function renderJobs(){
       trForm.className = "manual-log-row";
       trForm.setAttribute("data-log-row", id);
       trForm.innerHTML = `
-        <td colspan="5">
+        <td colspan="14">
           <div class="mini-form" style="display:grid; gap:8px; align-items:end; grid-template-columns: repeat(6, minmax(0,1fr));">
             <div style="grid-column:1/7">
               <strong>Manual Log for: ${j.name}</strong>

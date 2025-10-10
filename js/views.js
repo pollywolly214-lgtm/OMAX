@@ -1271,6 +1271,20 @@ function viewJobs(){
     if (safe > 0 && showPlus) return `+${formatted}`;
     return formatted;
   };
+  const formatRate = (value, { showPlus = false } = {})=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "—";
+    const abs = Math.abs(num);
+    const formatted = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: abs < 1000 ? 2 : 0,
+      maximumFractionDigits: abs < 1000 ? 2 : 0
+    }).format(abs);
+    if (num < 0) return `-${formatted}/hr`;
+    if (num > 0 && showPlus) return `+${formatted}/hr`;
+    return `${formatted}/hr`;
+  };
   const formatHours = (value)=>{
     const num = Number(value);
     if (!Number.isFinite(num)) return "—";
@@ -1502,7 +1516,7 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
-  const activeColumnCount = 11;
+  const activeColumnCount = 14;
   const rows = cuttingJobs.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileLinks = jobFiles.length
@@ -1521,6 +1535,15 @@ function viewJobs(){
     const matCost = Number(j.materialCost||0);
     const matQty  = Number(j.materialQty||0);
     const matTotal = (matCost * matQty) || 0;
+    const estHours = Number(j.estimateHours) || 0;
+    const chargeRateRaw = Number(j.chargeRate);
+    const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
+    const costRate = JOB_BASE_COST_PER_HOUR + (estHours > 0 ? (matTotal / estHours) : 0);
+    const netRate = chargeRate - costRate;
+    const chargeDisplay = formatRate(chargeRate);
+    const costDisplay = formatRate(costRate);
+    const netDisplay = formatRate(netRate, { showPlus: true });
+    const netClass = netRate >= 0 ? "job-rate-net-positive" : "job-rate-net-negative";
 
     // Remaining & per-day
     const actualRemain = eff.actualRemaining != null ? eff.actualRemaining : (req.remainingHours || 0);
@@ -1589,12 +1612,15 @@ function viewJobs(){
           <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">${matCostDisplay}</td>
           <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">${matQtyDisplay}</td>
           <td class="job-col job-col-money">$${matTotal.toFixed(2)}</td>
+          <td class="job-col job-col-charge">${chargeDisplay}</td>
+          <td class="job-col job-col-cost">${costDisplay}</td>
+          <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
           <td class="job-col job-col-hours">${remainingDisplay}</td>
           <td class="job-col job-col-need">${needDisplay}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
           <td class="job-col job-col-impact">
             <span class="job-impact ${impactClass}">${impactDisplay}</span>
-            <div class="job-impact-note small muted">Log cutting hours to get accurate prediction</div>
+            <div class="job-impact-note small muted">Log cutting hours to get accurate profit prediction</div>
           </td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
@@ -1615,6 +1641,14 @@ function viewJobs(){
               </div>
               <div class="job-detail-meta">
                 <div class="job-detail-efficiency small muted">${efficiencyDetail}</div>
+                <div class="job-detail-cost">
+                  <span class="job-detail-label">Cost efficiency</span>
+                  <div class="job-detail-cost-grid">
+                    <div><span>Charge</span><strong>${chargeDisplay}</strong></div>
+                    <div><span>Cost</span><strong>${costDisplay}</strong></div>
+                    <div><span>Net/hr</span><strong class="${netClass}">${netDisplay}</strong></div>
+                  </div>
+                </div>
                 <div class="job-detail-files">
                   <span class="job-detail-label">Files</span>
                   ${fileLinks}
@@ -1628,20 +1662,33 @@ function viewJobs(){
       return `
         <tr data-job-row="${j.id}" class="job-row editing">
           <td colspan="${activeColumnCount}">
-            <div class="job-edit-card">
+              <div class="job-edit-card">
               <div class="job-edit-grid">
                 <label>Job name<input type="text" data-j="name" data-id="${j.id}" value="${j.name}"></label>
                 <label>Estimate (hrs)<input type="number" min="1" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></label>
                 <label>Material<input type="text" data-j="material" data-id="${j.id}" value="${j.material||""}"></label>
                 <label>Material cost ($)<input type="number" min="0" step="0.01" data-j="materialCost" data-id="${j.id}" value="${matCost}"></label>
                 <label>Material quantity<input type="number" min="0" step="0.01" data-j="materialQty" data-id="${j.id}" value="${matQty}"></label>
+                <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-j="chargeRate" data-id="${j.id}" value="${chargeRate}"></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
               </div>
               <div class="job-edit-summary">
-                <div class="job-metric">
+                <div class="job-metric job-metric-total">
                   <span class="job-metric-label">Material total</span>
                   <span class="job-metric-value">$${matTotal.toFixed(2)}</span>
+                </div>
+                <div class="job-metric">
+                  <span class="job-metric-label">Charge rate</span>
+                  <span class="job-metric-value">${chargeDisplay}</span>
+                </div>
+                <div class="job-metric">
+                  <span class="job-metric-label">Cost rate</span>
+                  <span class="job-metric-value">${costDisplay}</span>
+                </div>
+                <div class="job-metric">
+                  <span class="job-metric-label">Net profit / hr</span>
+                  <span class="job-metric-value ${netClass}">${netDisplay}</span>
                 </div>
                 <div class="job-metric">
                   <span class="job-metric-label">Schedule</span>
@@ -1681,6 +1728,7 @@ function viewJobs(){
       <form id="addJobForm" class="mini-form">
         <input type="text" id="jobName" placeholder="Job name" required>
         <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
+        <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01">
         <input type="text" id="jobMaterial" placeholder="Material">
         <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
         <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
@@ -1701,6 +1749,9 @@ function viewJobs(){
             <th>Cost / unit</th>
             <th>Quantity</th>
             <th>Material total</th>
+            <th>Charge rate</th>
+            <th>Cost rate</th>
+            <th>Net profit/hr</th>
             <th>Hours remaining</th>
             <th>Needed / day</th>
             <th>Status</th>

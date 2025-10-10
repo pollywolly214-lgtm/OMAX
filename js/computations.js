@@ -72,8 +72,19 @@ function computeJobEfficiency(job){
   // 2) Machine total hours since job start (if no manual logs)
   // 3) No trustworthy data → assume no progress yet (0 hr)
   const planned = (job && job.estimateHours > 0) ? Number(job.estimateHours) : 0;
+  const materialUnitCost = Number(job?.materialCost) || 0;
+  const materialQty = Number(job?.materialQty) || 0;
+  const materialTotal = materialUnitCost * materialQty;
+  const chargeRaw = Number(job?.chargeRate);
+  const chargeRate = Number.isFinite(chargeRaw) && chargeRaw >= 0 ? chargeRaw : JOB_RATE_PER_HOUR;
+  const variableCostRate = planned > 0 ? (materialTotal / planned) : 0;
+  const costRate = JOB_BASE_COST_PER_HOUR + variableCostRate;
+  const netRate = chargeRate - costRate;
   const result = {
-    rate: JOB_RATE_PER_HOUR,
+    rate: netRate,
+    chargeRate,
+    costRate,
+    netRate,
     expectedHours: 0,
     actualHours: 0,
     expectedRemaining: 0,

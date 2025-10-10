@@ -1792,7 +1792,10 @@ body.modal-open .auth-bar {
 .job-col-money,
 .job-col-hours,
 .job-col-need,
-.job-col-impact {
+.job-col-impact,
+.job-col-charge,
+.job-col-cost,
+.job-col-net {
   text-align: right;
   white-space: nowrap;
 }
@@ -1864,6 +1867,11 @@ body.modal-open .auth-bar {
 .job-impact-neutral { color: #1c2d4a; }
 .job-impact-ahead { color: #2e7d32; }
 .job-impact-behind { color: #b53939; }
+.job-rate-net { font-weight: 600; }
+.job-rate-net-positive,
+.job-metric-value.job-rate-net-positive { color: #2e7d32; }
+.job-rate-net-negative,
+.job-metric-value.job-rate-net-negative { color: #b53939; }
 .job-actions {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -1967,6 +1975,32 @@ body.modal-open .auth-bar {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.job-detail-cost {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.job-detail-cost-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  font-size: 13px;
+}
+.job-detail-cost-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.job-detail-cost-grid span {
+  color: #5a6b85;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.job-detail-cost-grid strong {
+  color: #1c2d4a;
+  font-weight: 700;
 }
 .job-detail-efficiency {
   font-size: 13px;
