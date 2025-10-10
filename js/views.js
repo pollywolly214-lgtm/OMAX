@@ -180,6 +180,7 @@ function viewDashboard(){
           <div class="modal-grid">
             <label>Job name<input id="dashJobName" required placeholder="Job"></label>
             <label>Estimate (hrs)<input type="number" min="1" step="0.1" id="dashJobEstimate" required placeholder="e.g. 12"></label>
+            <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCharge" placeholder="Optional"></label>
             <label>Material<input id="dashJobMaterial" placeholder="Material"></label>
             <label>Material cost ($)<input type="number" min="0" step="0.01" id="dashJobMaterialCost" placeholder="optional"></label>
             <label>Material quantity<input type="number" min="0" step="0.01" id="dashJobMaterialQty" placeholder="optional"></label>
@@ -1303,6 +1304,37 @@ function viewJobs(){
     if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "—";
     return dt.toLocaleDateString();
   };
+  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+    ? Number(DAILY_HOURS)
+    : 8;
+  const computeJobNetTotal = (job, eff, { preferActual = false } = {}) => {
+    if (!job) return 0;
+    const efficiency = eff || {};
+    const estimateHours = Number(job.estimateHours) || 0;
+    const chargeSource = efficiency.chargeRate != null ? Number(efficiency.chargeRate) : Number(job.chargeRate);
+    const chargeRate = Number.isFinite(chargeSource) && chargeSource >= 0 ? chargeSource : JOB_RATE_PER_HOUR;
+    const materialCost = Number(job.materialCost) || 0;
+    const materialQty = Number(job.materialQty) || 0;
+    const materialTotal = materialCost * materialQty;
+    const actualRaw = job.actualHours ?? efficiency.actualHours;
+    const actualHours = Number.isFinite(Number(actualRaw)) ? Number(actualRaw) : null;
+    const hoursFromEstimate = estimateHours > 0 ? estimateHours : 0;
+    const hoursFromActual = Number.isFinite(actualHours) && actualHours > 0 ? actualHours : 0;
+    const hoursForTotal = preferActual
+      ? (hoursFromActual || hoursFromEstimate)
+      : (hoursFromEstimate || hoursFromActual);
+    let costRate;
+    if (efficiency && efficiency.costRate != null && Number.isFinite(Number(efficiency.costRate))){
+      costRate = Number(efficiency.costRate);
+    } else {
+      const hoursBase = hoursForTotal > 0 ? hoursForTotal : hoursFromEstimate;
+      const variableRate = hoursBase > 0 ? (materialTotal / hoursBase) : 0;
+      costRate = JOB_BASE_COST_PER_HOUR + variableRate;
+    }
+    const netRate = chargeRate - costRate;
+    const totalHours = hoursForTotal > 0 ? hoursForTotal : 0;
+    return netRate * totalHours;
+  };
 
   const pendingFiles = Array.isArray(window.pendingNewJobFiles) ? window.pendingNewJobFiles : [];
   const pendingSummary = pendingFiles.length
@@ -1335,7 +1367,7 @@ function viewJobs(){
     if (editingCompletedJobsSet.has(String(job.id))) return true;
     const eff = job && job.efficiency ? job.efficiency : {};
     const delta = Number(eff.deltaHours);
-    const gainLoss = Number(eff.gainLoss);
+    const netTotal = computeJobNetTotal(job, eff, { preferActual: true });
     const actualHours = Number(job.actualHours ?? eff.actualHours);
     const estHours = Number(job.estimateHours);
     const statusLabel = Number.isFinite(delta) && Math.abs(delta) > 0.1
@@ -1361,7 +1393,7 @@ function viewJobs(){
       statusDetail,
       Number.isFinite(delta) ? delta.toFixed(1) : "",
       Number.isFinite(delta) ? (delta > 0 ? "ahead" : delta < 0 ? "behind" : "on pace") : "",
-      Number.isFinite(gainLoss) ? gainLoss.toString() : ""
+      Number.isFinite(netTotal) ? netTotal.toString() : ""
     ];
     [completedLabel, startLabel, dueLabel].forEach(label => {
       if (label && label !== "—") tokens.push(label);
@@ -1371,9 +1403,9 @@ function viewJobs(){
     if (actualLabel && estimateLabel && actualLabel !== "—" && estimateLabel !== "—"){
       tokens.push(`${actualLabel} / ${estimateLabel}`);
     }
-    if (Number.isFinite(gainLoss)){
-      tokens.push(formatCurrency(gainLoss));
-      tokens.push(formatCurrency(gainLoss, { showPlus: false }));
+    if (Number.isFinite(netTotal)){
+      tokens.push(formatCurrency(netTotal));
+      tokens.push(formatCurrency(netTotal, { showPlus: false }));
     }
     const numericFields = [
       job.materialCost,
@@ -1400,8 +1432,8 @@ function viewJobs(){
   const completedFiltered = completedSorted.filter(matchesHistorySearch);
   const completedStats = completedFiltered.reduce((acc, job)=>{
     const eff = job && job.efficiency ? job.efficiency : {};
-    const gain = Number(eff.gainLoss);
-    acc.total += Number.isFinite(gain) ? gain : 0;
+    const net = computeJobNetTotal(job, eff, { preferActual: true });
+    acc.total += Number.isFinite(net) ? net : 0;
     return acc;
   }, { total: 0 });
   const completedAverage = completedFiltered.length ? (completedStats.total / completedFiltered.length) : 0;
@@ -1427,7 +1459,7 @@ function viewJobs(){
   const completedRows = completedFiltered.map(job => {
     const eff = job && job.efficiency ? job.efficiency : {};
     const delta = Number(eff.deltaHours);
-    const gainLoss = Number(eff.gainLoss);
+    const netTotal = computeJobNetTotal(job, eff, { preferActual: true });
     const actualHours = Number(job.actualHours ?? eff.actualHours);
     const estHours = Number(job.estimateHours);
     const editingHistory = editingCompletedJobsSet.has(String(job.id));
@@ -1453,7 +1485,7 @@ function viewJobs(){
           <td>${formatDate(job?.completedAtISO)}</td>
           <td>${formatHours(actualHours)} / ${formatHours(estHours)}</td>
           <td>${esc(statusLabel)}${statusDetail}</td>
-          <td>${formatCurrency(gainLoss)}</td>
+          <td>${formatCurrency(netTotal)}</td>
           <td>${noteDisplay}</td>
           <td class="past-job-actions">
             <button type="button" data-history-activate="${job.id}">Make active copy</button>
@@ -1507,7 +1539,7 @@ function viewJobs(){
       </div>
       <table class="past-jobs-table">
         <thead>
-          <tr><th>Job</th><th>Completed</th><th>Actual vs estimate</th><th>Status</th><th>Cost impact</th><th>Note</th><th>Actions</th></tr>
+          <tr><th>Job</th><th>Completed</th><th>Actual vs estimate</th><th>Status</th><th>Net total</th><th>Note</th><th>Actions</th></tr>
         </thead>
         <tbody>${completedRows}</tbody>
       </table>
@@ -1544,45 +1576,55 @@ function viewJobs(){
     const costDisplay = formatRate(costRate);
     const netDisplay = formatRate(netRate, { showPlus: true });
     const netClass = netRate >= 0 ? "job-rate-net-positive" : "job-rate-net-negative";
+    const netTotal = computeJobNetTotal(j, eff, { preferActual: false });
+    const netTotalDisplay = formatCurrency(netTotal, { showPlus: true });
+    const impactClass = netTotal > 0 ? "job-impact-ahead" : (netTotal < 0 ? "job-impact-behind" : "job-impact-neutral");
 
     // Remaining & per-day
     const actualRemain = eff.actualRemaining != null ? eff.actualRemaining : (req.remainingHours || 0);
-    const baselineRemain = eff.expectedRemaining != null
-      ? eff.expectedRemaining
-      : Math.max(0, (Number(j.estimateHours)||0) - (eff.expectedHours||0));
     const remainHrs = actualRemain;
     const needPerDay = req.requiredPerDay === Infinity
       ? '∞'
       : (req.requiredPerDay||0).toFixed(2);
-
-    // Cost efficiency (baseline vs actual remaining hours)
-    const EPS = 0.05;
-    const deltaRemain = baselineRemain - actualRemain;
-    const ahead = deltaRemain > EPS;
-    const behind = deltaRemain < -EPS;
-    const nearPace = !ahead && !behind;
-    const rawMoney = eff.gainLoss || 0;
-    const money = nearPace ? 0 : rawMoney;
-    const impactClass = ahead
-      ? 'job-impact-ahead'
-      : (behind ? 'job-impact-behind' : 'job-impact-neutral');
-    const impactDisplay = formatCurrency(money, { showPlus: true });
-    const statusLabel = nearPace ? 'On pace' : (ahead ? 'Ahead' : 'Behind');
-    const statusDetail = nearPace
+    const remainingHours = Number.isFinite(req.remainingHours) ? Math.max(0, req.remainingHours) : 0;
+    const remainingDays = Number.isFinite(req.remainingDays) ? Math.max(0, req.remainingDays) : 0;
+    const capacityRemaining = remainingDays * hoursPerDay;
+    const slackHours = req.requiredPerDay === Infinity
+      ? Number.NEGATIVE_INFINITY
+      : capacityRemaining - remainingHours;
+    const SLACK_EPS = 0.05;
+    const behindSchedule = req.requiredPerDay === Infinity || slackHours < -SLACK_EPS;
+    const aheadSchedule = !behindSchedule && slackHours > (hoursPerDay + SLACK_EPS);
+    const statusLabel = behindSchedule ? 'Behind' : (aheadSchedule ? 'Ahead' : 'On pace');
+    let statusDetail = '';
+    if (req.requiredPerDay === Infinity){
+      statusDetail = 'Past due';
+    } else if (behindSchedule){
+      statusDetail = `Needs ${req.requiredPerDay.toFixed(1)} hr/day`;
+    } else if (aheadSchedule){
+      statusDetail = `${slackHours.toFixed(1)} hr slack`;
+    } else if (remainingHours > 0){
+      statusDetail = `Needs ${req.requiredPerDay.toFixed(1)} hr/day`;
+    }
+    const capacitySummary = req.requiredPerDay === Infinity
+      ? 'No remaining days on schedule'
+      : `${remainingHours.toFixed(1)} hr remaining over ${remainingDays} day${remainingDays===1?'':'s'} (${req.requiredPerDay.toFixed(2)} hr/day vs ${hoursPerDay.toFixed(1)} hr/day capacity)`;
+    const slackSummary = req.requiredPerDay === Infinity
       ? ''
-      : ` by ${Math.abs(deltaRemain).toFixed(1)} hr`;
-    const baselineDetail = `${baselineRemain.toFixed(1)}h baseline vs ${actualRemain.toFixed(1)}h remaining`;
-    const statusSummary = statusLabel + (statusDetail || '');
-    const efficiencyDetail = `${statusSummary}; ${baselineDetail}`;
+      : `${slackHours >= 0 ? '+' : '−'}${Math.abs(slackHours).toFixed(1)} hr capacity`;
+    const efficiencyDetail = slackSummary
+      ? `${statusLabel}; ${capacitySummary}; ${slackSummary}`
+      : `${statusLabel}; ${capacitySummary}`;
+    const impactDisplay = netTotalDisplay;
 
     const estimateDisplay = formatHours(j.estimateHours);
     const remainingDisplay = formatHours(remainHrs);
     const needDisplay = req.requiredPerDay === Infinity
       ? '<span class="job-badge job-badge-overdue">Past due</span>'
-      : `${needPerDay} hr/day needed to meet goal`;
+      : `${needPerDay} hr/day needed (capacity ${hoursPerDay.toFixed(1)} hr/day)`;
     const statusDisplay = [
-      `<div class="job-status ${ahead ? 'job-status-ahead' : (behind ? 'job-status-behind' : 'job-status-onpace')}">${statusLabel}</div>`,
-      statusDetail ? `<div class="job-status-detail">${statusDetail.trim()}</div>` : ''
+      `<div class="job-status ${aheadSchedule ? 'job-status-ahead' : (behindSchedule ? 'job-status-behind' : 'job-status-onpace')}">${esc(statusLabel)}</div>`,
+      statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : ''
     ].join('');
 
     // Dates (for display / edit row)
@@ -1620,7 +1662,7 @@ function viewJobs(){
           <td class="job-col job-col-status">${statusDisplay}</td>
           <td class="job-col job-col-impact">
             <span class="job-impact ${impactClass}">${impactDisplay}</span>
-            <div class="job-impact-note small muted">Log cutting hours to get accurate profit prediction</div>
+            <div class="job-impact-note small muted">Net total reflects estimated hours and material usage</div>
           </td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
@@ -1647,6 +1689,7 @@ function viewJobs(){
                     <div><span>Charge</span><strong>${chargeDisplay}</strong></div>
                     <div><span>Cost</span><strong>${costDisplay}</strong></div>
                     <div><span>Net/hr</span><strong class="${netClass}">${netDisplay}</strong></div>
+                    <div><span>Net total</span><strong class="${impactClass}">${netTotalDisplay}</strong></div>
                   </div>
                 </div>
                 <div class="job-detail-files">
@@ -1689,6 +1732,10 @@ function viewJobs(){
                 <div class="job-metric">
                   <span class="job-metric-label">Net profit / hr</span>
                   <span class="job-metric-value ${netClass}">${netDisplay}</span>
+                </div>
+                <div class="job-metric">
+                  <span class="job-metric-label">Net total</span>
+                  <span class="job-metric-value ${impactClass}">${netTotalDisplay}</span>
                 </div>
                 <div class="job-metric">
                   <span class="job-metric-label">Schedule</span>
@@ -1755,7 +1802,7 @@ function viewJobs(){
             <th>Hours remaining</th>
             <th>Needed / day</th>
             <th>Status</th>
-            <th>Projected impact</th>
+            <th>Net total</th>
             <th>Actions</th>
           </tr>
         </thead>

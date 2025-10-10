@@ -2109,6 +2109,7 @@ function renderDashboard(){
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
   const jobNameInput     = document.getElementById("dashJobName");
   const jobEstimateInput = document.getElementById("dashJobEstimate");
+  const jobChargeInput   = document.getElementById("dashJobCharge");
   const jobMaterialInput = document.getElementById("dashJobMaterial");
   const jobMaterialCostInput = document.getElementById("dashJobMaterialCost");
   const jobMaterialQtyInput = document.getElementById("dashJobMaterialQty");
@@ -3079,6 +3080,7 @@ function renderDashboard(){
     e.preventDefault();
     const name = (jobNameInput?.value || "").trim();
     const est  = Number(jobEstimateInput?.value);
+    const chargeRaw = jobChargeInput?.value ?? "";
     const material = (jobMaterialInput?.value || "").trim();
     const materialCostRaw = jobMaterialCostInput?.value ?? "";
     const materialQtyRaw  = jobMaterialQtyInput?.value ?? "";
@@ -3086,10 +3088,12 @@ function renderDashboard(){
     const due   = jobDueInput?.value;
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
     const materialQty  = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
+    const chargeRate = chargeRaw === "" ? JOB_RATE_PER_HOUR : Number(chargeRaw);
     if (!name || !isFinite(est) || est <= 0 || !start || !due){ toast("Fill job fields."); return; }
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
-    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, notes:"", manualLogs:[] });
+    if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
+    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[] });
     saveCloudDebounced();
     toast("Cutting job added");
     closeModal();
