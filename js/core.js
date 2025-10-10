@@ -11,7 +11,7 @@
    ========================================================= */
 
 /* =================== CONSTANTS / GLOBALS =================== */
-const APP_SCHEMA = 71;
+const APP_SCHEMA = 72;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr
 const WORKSPACE_ID = "schreiner-robotics";
@@ -22,6 +22,17 @@ const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEA
 if (typeof window !== "undefined") window.CLEAR_DATA_PASSWORD = CLEAR_DATA_PASSWORD;
 
 window.APP_SCHEMA = APP_SCHEMA;
+
+const JOB_ROOT_FOLDER_ID = "jobs_root";
+const DEFAULT_JOB_FOLDERS = [
+  { id: JOB_ROOT_FOLDER_ID, name: "All Cutting Jobs", parent: null, order: 0 }
+];
+if (typeof window !== "undefined"){
+  window.JOB_ROOT_FOLDER_ID = JOB_ROOT_FOLDER_ID;
+  if (!Array.isArray(window.jobFolders)){
+    window.jobFolders = DEFAULT_JOB_FOLDERS.map(folder => ({ ...folder }));
+  }
+}
 
 if (typeof window !== "undefined"){
   window.cloudDashboardLayout = {};
@@ -336,12 +347,13 @@ if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateIS
 if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
 if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
 if (!Array.isArray(window.inventory))    window.inventory    = [];
-if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
+if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}],cat}]
 if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
 if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
+if (!Array.isArray(window.jobFolders)) window.jobFolders = DEFAULT_JOB_FOLDERS.map(folder => ({ ...folder }));
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
   window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
@@ -358,6 +370,7 @@ let completedCuttingJobs = window.completedCuttingJobs;
 let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
+let jobFolders   = window.jobFolders;
 
 function refreshGlobalCollections(){
   if (typeof window === "undefined") return;
@@ -385,6 +398,9 @@ function refreshGlobalCollections(){
 
   if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
   garnetCleanings = window.garnetCleanings;
+
+  if (!Array.isArray(window.jobFolders)) window.jobFolders = DEFAULT_JOB_FOLDERS.map(folder => ({ ...folder }));
+  jobFolders = window.jobFolders;
 }
 
 function resolveTaskVariant(task){
@@ -750,6 +766,7 @@ function applyRestoreByType(entry, index){
       if (!Array.isArray(clone.manualLogs)) clone.manualLogs = [];
       if (!Array.isArray(clone.files)) clone.files = [];
       if (!clone.id) clone.id = genId(clone.name || "job");
+      clone.cat = ensureJobCategoryId(clone.cat);
       const existing = new Set(cuttingJobs.filter(Boolean).map(job => String(job.id)));
       while (existing.has(String(clone.id))){
         clone.id = genId(clone.name || "job");
@@ -763,6 +780,7 @@ function applyRestoreByType(entry, index){
       if (!Array.isArray(clone.manualLogs)) clone.manualLogs = [];
       if (!Array.isArray(clone.files)) clone.files = [];
       if (!clone.id) clone.id = genId(clone.name || "job");
+      clone.cat = ensureJobCategoryId(clone.cat);
       const existing = new Set(completedCuttingJobs.filter(Boolean).map(job => String(job.id)));
       while (existing.has(String(clone.id))){
         clone.id = genId(clone.name || "job");
@@ -1039,6 +1057,306 @@ function snapshotSettingsFolders(){
   return cloneFolders(normalized);
 }
 
+function defaultJobFolders(){
+  return DEFAULT_JOB_FOLDERS.map(folder => ({ ...folder }));
+}
+
+function cloneJobFolders(list){
+  if (!Array.isArray(list)) return [];
+  return list.map(folder => ({ ...folder }));
+}
+
+function syncJobFolderOrderCounter(folders){
+  if (typeof window._jobFolderOrderCounter !== "number" || !Number.isFinite(window._jobFolderOrderCounter)){
+    window._jobFolderOrderCounter = 0;
+  }
+  let max = window._jobFolderOrderCounter;
+  if (Array.isArray(folders)){
+    for (const folder of folders){
+      const orderVal = Number(folder?.order);
+      if (Number.isFinite(orderVal) && orderVal > max){
+        max = orderVal;
+      }
+    }
+  }
+  window._jobFolderOrderCounter = max;
+}
+
+function nextJobFolderOrder(){
+  if (typeof window._jobFolderOrderCounter !== "number" || !Number.isFinite(window._jobFolderOrderCounter)){
+    window._jobFolderOrderCounter = 0;
+  }
+  window._jobFolderOrderCounter += 1;
+  return window._jobFolderOrderCounter;
+}
+
+function normalizeJobFolders(raw){
+  const list = Array.isArray(raw) ? raw : [];
+  const normalized = [];
+  const seen = new Set();
+  let hasRoot = false;
+
+  for (const entry of list){
+    if (!entry || entry.id == null) continue;
+    const id = String(entry.id);
+    if (seen.has(id)) continue;
+    const isRoot = id === JOB_ROOT_FOLDER_ID;
+    const name = typeof entry.name === "string" && entry.name.trim()
+      ? entry.name.trim()
+      : (isRoot ? "All Cutting Jobs" : "New category");
+    const parent = entry.parent == null || entry.parent === ""
+      ? null
+      : String(entry.parent);
+    const orderVal = Number(entry.order);
+    const order = Number.isFinite(orderVal) ? orderVal : 0;
+    normalized.push({ id, name, parent, order });
+    seen.add(id);
+    if (isRoot) hasRoot = true;
+  }
+
+  if (!hasRoot){
+    normalized.push({ id: JOB_ROOT_FOLDER_ID, name: "All Cutting Jobs", parent: null, order: 0 });
+  }
+
+  const map = new Map(normalized.map(folder => [String(folder.id), folder]));
+  const validIds = new Set(map.keys());
+
+  for (const folder of normalized){
+    const idStr = String(folder.id);
+    if (idStr === JOB_ROOT_FOLDER_ID){
+      folder.parent = null;
+      folder.name = folder.name || "All Cutting Jobs";
+      continue;
+    }
+    folder.name = folder.name || "New category";
+    const parentId = folder.parent == null ? null : String(folder.parent);
+    if (!parentId || !validIds.has(parentId) || parentId === idStr){
+      folder.parent = JOB_ROOT_FOLDER_ID;
+    }else{
+      folder.parent = parentId;
+    }
+  }
+
+  for (const folder of normalized){
+    const idStr = String(folder.id);
+    if (idStr === JOB_ROOT_FOLDER_ID) continue;
+    let guard = 0;
+    let parent = folder.parent;
+    const visited = new Set([idStr]);
+    while (parent != null && guard++ < 1000){
+      const pid = String(parent);
+      if (!map.has(pid)){ folder.parent = JOB_ROOT_FOLDER_ID; break; }
+      if (visited.has(pid)){ folder.parent = JOB_ROOT_FOLDER_ID; break; }
+      visited.add(pid);
+      const next = map.get(pid);
+      parent = next ? next.parent : null;
+    }
+    if (folder.parent != null) folder.parent = String(folder.parent);
+  }
+
+  syncJobFolderOrderCounter(normalized);
+  return normalized;
+}
+
+function setJobFolders(raw){
+  const normalized = normalizeJobFolders(raw);
+  window.jobFolders = cloneJobFolders(normalized);
+  jobFolders = window.jobFolders;
+  ensureJobCategoryAssignments();
+  return window.jobFolders;
+}
+
+function getJobRootFolderId(source){
+  const list = Array.isArray(source) ? source : window.jobFolders;
+  if (Array.isArray(list)){
+    const match = list.find(folder => folder && (folder.parent == null || folder.parent === ""));
+    if (match && match.id != null) return String(match.id);
+  }
+  return JOB_ROOT_FOLDER_ID;
+}
+
+function ensureJobCategoryId(rawId){
+  const folders = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();
+  const target = rawId != null ? String(rawId) : "";
+  if (folders.some(folder => String(folder.id) === target)) return target;
+  return getJobRootFolderId(folders);
+}
+
+function ensureJobCategoryAssignments(){
+  const folders = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();
+  const valid = new Set(folders.map(folder => String(folder.id)));
+  const rootId = getJobRootFolderId(folders);
+
+  if (Array.isArray(window.cuttingJobs)){
+    for (const job of window.cuttingJobs){
+      if (!job) continue;
+      const raw = job.cat != null ? String(job.cat) : rootId;
+      job.cat = valid.has(raw) ? raw : rootId;
+    }
+  }
+
+  if (Array.isArray(window.completedCuttingJobs)){
+    for (const job of window.completedCuttingJobs){
+      if (!job) continue;
+      const raw = job.cat != null ? String(job.cat) : rootId;
+      job.cat = valid.has(raw) ? raw : rootId;
+    }
+  }
+}
+
+function jobFolderChildren(parentId){
+  const folders = Array.isArray(window.jobFolders) ? window.jobFolders : [];
+  const key = parentId == null ? null : String(parentId);
+  return folders.filter(folder => {
+    const parent = folder && folder.parent != null ? String(folder.parent) : null;
+    return parent === key;
+  });
+}
+
+function collectJobFolderDescendants(folderId, includeSelf = true){
+  const idStr = String(folderId);
+  const result = [];
+  if (includeSelf) result.push(idStr);
+  const children = jobFolderChildren(idStr);
+  for (const child of children){
+    result.push(...collectJobFolderDescendants(child.id, true));
+  }
+  return result;
+}
+
+function buildJobFolderTreeList(options = {}){
+  const includeRoot = options.includeRoot !== false;
+  const folders = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();
+  const rootId = getJobRootFolderId(folders);
+  const byParent = new Map();
+
+  for (const folder of folders){
+    const key = folder && folder.parent != null ? String(folder.parent) : "__root__";
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(folder);
+  }
+
+  const sortSiblings = (list)=>{
+    list.sort((a, b)=>{
+      const orderA = Number(a?.order) || 0;
+      const orderB = Number(b?.order) || 0;
+      if (orderA !== orderB) return orderB - orderA;
+      const nameA = String(a?.name || "");
+      const nameB = String(b?.name || "");
+      return nameA.localeCompare(nameB);
+    });
+  };
+
+  const result = [];
+  const visit = (parentId, depth)=>{
+    const key = parentId == null ? "__root__" : String(parentId);
+    const siblings = byParent.get(key);
+    if (!siblings || !siblings.length) return;
+    sortSiblings(siblings);
+    for (const folder of siblings){
+      const idStr = String(folder.id);
+      if (!includeRoot && idStr === rootId){
+        visit(folder.id, depth);
+        continue;
+      }
+      result.push({ id: idStr, folder, depth });
+      visit(folder.id, depth + 1);
+    }
+  };
+
+  visit(null, 0);
+  return result;
+}
+
+function createJobCategory(name, parentId){
+  const label = typeof name === "string" ? name.trim() : "";
+  if (!label) return null;
+  if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
+  const rootId = getJobRootFolderId(window.jobFolders);
+  const resolvedParent = parentId == null ? rootId : ensureJobCategoryId(parentId);
+  const newFolder = {
+    id: genId(label || "category"),
+    name: label,
+    parent: resolvedParent,
+    order: nextJobFolderOrder()
+  };
+  window.jobFolders.push(newFolder);
+  setJobFolders(window.jobFolders);
+  const latest = window.jobFolders.find(folder => String(folder.id) === String(newFolder.id));
+  return latest ? { ...latest } : { ...newFolder };
+}
+
+function renameJobCategory(folderId, name){
+  if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
+  const idStr = folderId != null ? String(folderId) : "";
+  if (!idStr) return null;
+  const label = typeof name === "string" ? name.trim() : "";
+  if (!label) return null;
+  const folders = window.jobFolders;
+  const idx = folders.findIndex(folder => String(folder?.id) === idStr);
+  if (idx < 0) return null;
+  const rootId = getJobRootFolderId(folders);
+  if (idStr === rootId){
+    // Do not allow renaming the implicit root container.
+    return { ...folders[idx] };
+  }
+  const updated = { ...folders[idx], name: label };
+  folders[idx] = updated;
+  setJobFolders(folders);
+  return { ...updated };
+}
+
+function removeJobCategory(folderId){
+  if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
+  const idStr = folderId != null ? String(folderId) : "";
+  if (!idStr) return { removed: false };
+  const folders = window.jobFolders;
+  const idx = folders.findIndex(folder => String(folder?.id) === idStr);
+  if (idx < 0) return { removed: false };
+  const target = folders[idx];
+  const rootId = getJobRootFolderId(folders);
+  if (idStr === rootId) return { removed: false, reason: "root" };
+  const parentId = target && target.parent != null ? String(target.parent) : rootId;
+  const descendants = typeof collectJobFolderDescendants === "function"
+    ? collectJobFolderDescendants(idStr, true).map(String)
+    : [idStr];
+  const reassignSet = new Set(descendants);
+  const updated = [];
+  for (const folder of folders){
+    if (!folder || folder.id == null) continue;
+    const fid = String(folder.id);
+    if (fid === idStr) continue;
+    if (folder.parent != null && String(folder.parent) === idStr){
+      updated.push({ ...folder, parent: parentId });
+    }else{
+      updated.push({ ...folder });
+    }
+  }
+  if (Array.isArray(window.cuttingJobs)){
+    for (const job of window.cuttingJobs){
+      if (!job) continue;
+      const catId = job.cat != null ? String(job.cat) : rootId;
+      if (reassignSet.has(catId)) job.cat = parentId;
+    }
+  }
+  if (Array.isArray(window.completedCuttingJobs)){
+    for (const job of window.completedCuttingJobs){
+      if (!job) continue;
+      const catId = job.cat != null ? String(job.cat) : rootId;
+      if (reassignSet.has(catId)) job.cat = parentId;
+    }
+  }
+  window.jobFolders = updated;
+  setJobFolders(window.jobFolders);
+  return { removed: true, parentId, folder: target ? { ...target } : null };
+}
+
+if (typeof window !== "undefined"){
+  window.createJobCategory = createJobCategory;
+  window.renameJobCategory = renameJobCategory;
+  window.removeJobCategory = removeJobCategory;
+}
+
 window.defaultAsReqTasks = defaultAsReqTasks;
 
 /* ==================== Cloud load / save ===================== */
@@ -1046,6 +1364,7 @@ function snapshotState(){
   refreshGlobalCollections();
   const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
   const foldersSnapshot = snapshotSettingsFolders();
+  const jobFolderSnapshot = cloneJobFolders(setJobFolders(window.jobFolders));
   const trashSnapshot = deletedItems.map(entry => ({
     id: entry.id,
     type: entry.type,
@@ -1074,6 +1393,7 @@ function snapshotState(){
     pumpEff: safePumpEff,
     deletedItems: trashSnapshot,
     settingsFolders: foldersSnapshot,
+    jobFolders: jobFolderSnapshot,
     folders: cloneFolders(window.settingsFolders),
     dashboardLayout: cloneStructured(dashLayoutSource) || {},
     costLayout: cloneStructured(costLayoutSource) || {}
@@ -1303,6 +1623,11 @@ function adoptState(doc){
     : (Array.isArray(data.folders) ? data.folders : null);
   setSettingsFolders(rawFolders);
 
+  const rawJobFolders = Array.isArray(data.jobFolders)
+    ? data.jobFolders
+    : window.jobFolders;
+  setJobFolders(rawJobFolders);
+
   const docDashboardLayout = (data.dashboardLayout && typeof data.dashboardLayout === "object")
     ? data.dashboardLayout
     : {};
@@ -1387,6 +1712,8 @@ function adoptState(doc){
   }
   window._maintOrderCounter = maxOrder;
 
+  syncJobFolderOrderCounter(window.jobFolders);
+
   // Pump efficiency (guard against reading an undefined identifier)
   const pe = (typeof window.pumpEff === "object" && window.pumpEff)
     ? window.pumpEff
@@ -1402,6 +1729,7 @@ function adoptState(doc){
   }
 
   ensureTaskCategories();
+  ensureJobCategoryAssignments();
   syncRenderTotalsFromHistory();
 }
 
@@ -1415,6 +1743,11 @@ function saveCloudDebounced(){
     setSettingsFolders(window.settingsFolders);
   } catch (err) {
     console.warn("Failed to normalize folders before save:", err);
+  }
+  try {
+    setJobFolders(window.jobFolders);
+  } catch (err) {
+    console.warn("Failed to normalize job folders before save:", err);
   }
   captureHistorySnapshot();
   saveCloudInternal();

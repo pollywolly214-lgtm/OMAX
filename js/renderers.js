@@ -373,7 +373,8 @@ function captureNewJobFormState(){
       materialCost: captureField("jobMaterialCost"),
       materialQty: captureField("jobMaterialQty"),
       start: captureField("jobStart"),
-      due: captureField("jobDue")
+      due: captureField("jobDue"),
+      category: captureField("jobCategory")
     },
     active: activeState
   };
@@ -399,6 +400,7 @@ function restoreNewJobFormState(state){
   assignField("jobMaterialQty", state.fields.materialQty);
   assignField("jobStart", state.fields.start);
   assignField("jobDue", state.fields.due);
+  assignField("jobCategory", state.fields.category);
 
   if (state.active && state.active.id){
     const target = document.getElementById(state.active.id);
@@ -422,6 +424,96 @@ function restoreNewJobFormState(state){
         } catch (_){ }
       }
     }
+  }
+}
+
+function getJobFolderList(){
+  if (Array.isArray(window.jobFolders) && window.jobFolders.length){
+    return window.jobFolders.slice();
+  }
+  if (typeof defaultJobFolders === "function"){
+    return defaultJobFolders();
+  }
+  const fallbackId = (typeof window !== "undefined" && typeof window.JOB_ROOT_FOLDER_ID === "string")
+    ? window.JOB_ROOT_FOLDER_ID
+    : "jobs_root";
+  return [{ id: fallbackId, name: "All Cutting Jobs", parent: null, order: 0 }];
+}
+
+function getJobRootCategoryId(){
+  const folders = getJobFolderList();
+  if (typeof getJobRootFolderId === "function"){
+    return getJobRootFolderId(folders);
+  }
+  return String(folders[0]?.id || (typeof window !== "undefined" && window.JOB_ROOT_FOLDER_ID) || "jobs_root");
+}
+
+function normalizeJobCategorySelection(rawId){
+  if (typeof ensureJobCategoryId === "function"){
+    return ensureJobCategoryId(rawId);
+  }
+  if (rawId != null && rawId !== "") return String(rawId);
+  return getJobRootCategoryId();
+}
+
+function promptForJobCategorySelection({ defaultCategory, parentHint } = {}){
+  const folders = getJobFolderList();
+  const rootId = getJobRootCategoryId();
+  const treeList = typeof buildJobFolderTreeList === "function"
+    ? buildJobFolderTreeList({ includeRoot: true })
+    : folders.map(folder => ({ id: String(folder.id), folder, depth: folder.parent == null ? 0 : 1 }));
+  if (!treeList.length){
+    return rootId;
+  }
+  const entries = treeList.map(entry => {
+    const folder = entry.folder || {};
+    const depth = Number(entry.depth) || 0;
+    const indent = depth > 0 ? `${"  ".repeat(depth)}› ` : "";
+    const name = folder.name || "All Cutting Jobs";
+    return {
+      id: String(entry.id),
+      label: `${indent}${name}`
+    };
+  });
+  const defaultTarget = defaultCategory ? normalizeJobCategorySelection(defaultCategory) : rootId;
+  let defaultIndex = entries.findIndex(entry => entry.id === defaultTarget);
+  if (defaultIndex < 0) defaultIndex = 0;
+
+  while (true){
+    const menu = entries.map((entry, idx)=> `${idx + 1}. ${entry.label}`).join("\n");
+    let message = `Select a job category:\n${menu}\n\nEnter the number of a category, or type "+" to create a new one.`;
+    if (parentHint){
+      const parentFolder = folders.find(f => String(f.id) === String(parentHint));
+      const parentName = parentFolder && parentFolder.name ? parentFolder.name : "parent";
+      message += `\nNew categories will be nested under ${parentName}.`;
+    }
+    const defaultValue = entries[defaultIndex] ? String(defaultIndex + 1) : "";
+    const input = window.prompt(message, defaultValue);
+    if (input == null) return null;
+    const trimmed = input.trim();
+    if (!trimmed){
+      if (entries[defaultIndex]) return entries[defaultIndex].id;
+      continue;
+    }
+    if (trimmed === "+"){
+      const parentId = parentHint ? normalizeJobCategorySelection(parentHint) : defaultTarget;
+      const name = window.prompt("New category name?", "");
+      if (!name) continue;
+      const created = typeof createJobCategory === "function"
+        ? createJobCategory(name, parentId)
+        : null;
+      if (!created || created.id == null){
+        toast("Unable to create category.");
+        continue;
+      }
+      if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+      return String(created.id);
+    }
+    const index = Number.parseInt(trimmed, 10);
+    if (Number.isFinite(index) && index >= 1 && index <= entries.length){
+      return entries[index - 1].id;
+    }
+    toast("Enter a valid option.");
   }
 }
 
@@ -3087,7 +3179,13 @@ function renderDashboard(){
     if (!name || !isFinite(est) || est <= 0 || !start || !due){ toast("Fill job fields."); return; }
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
-    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, notes:"", manualLogs:[] });
+    const defaultCategory = window.activeJobCategory || getJobRootCategoryId();
+    const chosenCategory = promptForJobCategorySelection({ defaultCategory });
+    if (!chosenCategory){ toast("Job creation cancelled."); return; }
+    const safeCategory = normalizeJobCategorySelection(chosenCategory);
+    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, notes:"", manualLogs:[], cat: safeCategory });
+    window.activeJobCategory = safeCategory;
+    window.pendingNewJobCategorySelect = safeCategory;
     saveCloudDebounced();
     toast("Cutting job added");
     closeModal();
@@ -8120,6 +8218,24 @@ function renderJobs(){
 
   const historySearchInput = document.getElementById("jobHistorySearch");
   const historySearchClear = document.getElementById("jobHistorySearchClear");
+  const rootCategoryId = getJobRootCategoryId();
+  const ensureCategoryIdLocal = normalizeJobCategorySelection;
+
+  const createCategoryInline = (parentId)=>{
+    const safeParent = ensureCategoryIdLocal(parentId);
+    const name = window.prompt("New category name?", "");
+    if (!name) return null;
+    const created = typeof createJobCategory === "function"
+      ? createJobCategory(name, safeParent)
+      : null;
+    if (!created || created.id == null){
+      toast("Unable to create category.");
+      return null;
+    }
+    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+    toast("Category created");
+    return String(created.id);
+  };
 
   const captureScrollPosition = ()=> ({
     x: window.scrollX || document.documentElement.scrollLeft || document.body.scrollLeft || 0,
@@ -8199,6 +8315,165 @@ function renderJobs(){
     restoreNewJobFormState(formState);
   });
 
+  const jobCategoryPanel = content.querySelector("[data-job-category-panel]");
+  jobCategoryPanel?.addEventListener("click", (event)=>{
+    const addRoot = event.target.closest("[data-job-cat-add-root]");
+    if (addRoot){
+      event.preventDefault();
+      const formState = captureNewJobFormState();
+      const newId = createCategoryInline(rootCategoryId);
+      if (!newId) return;
+      window.activeJobCategory = newId;
+      window.pendingNewJobCategorySelect = newId;
+      if (formState && formState.fields){
+        formState.fields.category = newId;
+      }
+      renderJobs();
+      restoreNewJobFormState(formState);
+      return;
+    }
+
+    const addChild = event.target.closest("[data-job-cat-add]");
+    if (addChild){
+      event.preventDefault();
+      const formState = captureNewJobFormState();
+      const parentId = addChild.getAttribute("data-job-cat-add");
+      const newId = createCategoryInline(parentId || rootCategoryId);
+      if (!newId) return;
+      window.activeJobCategory = newId;
+      window.pendingNewJobCategorySelect = newId;
+      if (formState && formState.fields){
+        formState.fields.category = newId;
+      }
+      renderJobs();
+      restoreNewJobFormState(formState);
+      return;
+    }
+
+    const renameBtn = event.target.closest("[data-job-cat-rename]");
+    if (renameBtn){
+      event.preventDefault();
+      const id = renameBtn.getAttribute("data-job-cat-rename");
+      const folders = getJobFolderList();
+      const folder = folders.find(f => String(f.id) === String(id));
+      if (!folder) return;
+      if (String(folder.id) === rootCategoryId){
+        toast("Cannot rename the root category.");
+        return;
+      }
+      const nextName = window.prompt("Rename category", folder.name || "");
+      if (!nextName) return;
+      const formState = captureNewJobFormState();
+      const updated = typeof renameJobCategory === "function"
+        ? renameJobCategory(id, nextName)
+        : null;
+      if (!updated){
+        toast("Unable to rename category.");
+        return;
+      }
+      if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+      toast("Category renamed");
+      renderJobs();
+      restoreNewJobFormState(formState);
+      return;
+    }
+
+    const removeBtn = event.target.closest("[data-job-cat-remove]");
+    if (removeBtn){
+      event.preventDefault();
+      const id = removeBtn.getAttribute("data-job-cat-remove");
+      const targetId = ensureCategoryIdLocal(id);
+      if (!targetId || targetId === rootCategoryId){
+        toast("Cannot remove this category.");
+        return;
+      }
+      const folders = getJobFolderList();
+      const folder = folders.find(f => String(f.id) === targetId);
+      if (!folder) return;
+      const descendants = typeof collectJobFolderDescendants === "function"
+        ? collectJobFolderDescendants(targetId, true).map(String)
+        : [targetId];
+      const set = new Set(descendants);
+      const activeCount = Array.isArray(cuttingJobs)
+        ? cuttingJobs.reduce((acc, job)=>{
+            const cat = ensureCategoryIdLocal(job?.cat);
+            return set.has(cat) ? acc + 1 : acc;
+          }, 0)
+        : 0;
+      const completedCount = Array.isArray(completedCuttingJobs)
+        ? completedCuttingJobs.reduce((acc, job)=>{
+            const cat = ensureCategoryIdLocal(job?.cat);
+            return set.has(cat) ? acc + 1 : acc;
+          }, 0)
+        : 0;
+      const totalCount = activeCount + completedCount;
+      const confirmMessage = totalCount > 0
+        ? `This category contains ${totalCount} job${totalCount === 1 ? "" : "s"}. They will move to the parent category. Remove it?`
+        : "Remove this category?";
+      if (!window.confirm(confirmMessage)) return;
+      try {
+        if (typeof recordDeletedItem === "function"){
+          recordDeletedItem("folder", folder, { parent: folder.parent ?? null });
+        }
+      } catch (err) {
+        console.warn("Failed to record deleted category", err);
+      }
+      const formState = captureNewJobFormState();
+      const result = typeof removeJobCategory === "function"
+        ? removeJobCategory(targetId)
+        : { removed: false };
+      if (!result || !result.removed){
+        toast("Unable to remove category.");
+        return;
+      }
+      const nextActive = ensureCategoryIdLocal(result.parentId || rootCategoryId);
+      if (String(window.activeJobCategory || "") === targetId){
+        window.activeJobCategory = nextActive;
+      }
+      window.pendingNewJobCategorySelect = nextActive;
+      if (formState && formState.fields){
+        formState.fields.category = nextActive;
+      }
+      if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+      toast("Category removed");
+      renderJobs();
+      restoreNewJobFormState(formState);
+      return;
+    }
+
+    const selectBtn = event.target.closest("[data-job-cat-select]");
+    if (selectBtn){
+      event.preventDefault();
+      const formState = captureNewJobFormState();
+      const id = ensureCategoryIdLocal(selectBtn.getAttribute("data-job-cat-select"));
+      window.activeJobCategory = id;
+      window.pendingNewJobCategorySelect = id;
+      if (formState && formState.fields){
+        formState.fields.category = id;
+      }
+      renderJobs();
+      restoreNewJobFormState(formState);
+    }
+  });
+
+  const newCategoryBtn = document.getElementById("jobCategoryNew");
+  if (newCategoryBtn){
+    newCategoryBtn.addEventListener("click", (event)=>{
+      event.preventDefault();
+      const parent = window.activeJobCategory ? ensureCategoryIdLocal(window.activeJobCategory) : rootCategoryId;
+      const formState = captureNewJobFormState();
+      const newId = createCategoryInline(parent);
+      if (!newId) return;
+      window.activeJobCategory = newId;
+      window.pendingNewJobCategorySelect = newId;
+      if (formState && formState.fields){
+        formState.fields.category = newId;
+      }
+      renderJobs();
+      restoreNewJobFormState(formState);
+    });
+  }
+
   // 2) Small, scoped helpers for manual log math + defaults
   const todayISO = (()=>{ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); })();
   const curTotal = ()=> (RENDER_TOTAL ?? currentTotal());
@@ -8239,7 +8514,7 @@ function renderJobs(){
   }
   const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
 
-  // 4) Add Job (unchanged)
+  // 4) Add Job
   document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name  = document.getElementById("jobName").value.trim();
@@ -8249,15 +8524,22 @@ function renderJobs(){
     const materialQtyRaw = document.getElementById("jobMaterialQty")?.value ?? "";
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
+    const categorySelect = document.getElementById("jobCategory");
+    const categoryValue = categorySelect?.value || "";
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
     const materialQty = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
     if (!name || !isFinite(est) || est<=0 || !start || !due){ toast("Fill job fields."); return; }
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
+    if (!categoryValue){ toast("Choose a category for this job."); return; }
+    const safeCategory = ensureCategoryIdLocal(categoryValue);
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, notes:"", manualLogs:[], files:attachments });
+    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, notes:"", manualLogs:[], files:attachments, cat: safeCategory });
     pendingNewJobFiles.length = 0;
-    saveCloudDebounced(); renderJobs();
+    window.activeJobCategory = safeCategory;
+    window.pendingNewJobCategorySelect = safeCategory;
+    saveCloudDebounced();
+    renderJobs();
   });
 
   // 5) Inline material $/qty (kept)
@@ -8383,8 +8665,16 @@ function renderJobs(){
         files: Array.isArray(entry.files) ? entry.files.map(f => ({ ...f })) : []
       };
 
+      const defaultCategory = entry && entry.cat != null ? entry.cat : (window.activeJobCategory || rootCategoryId);
+      const categorySelection = promptForJobCategorySelection({ defaultCategory });
+      if (!categorySelection){ toast("Job activation cancelled."); return; }
+      const safeCategory = ensureCategoryIdLocal(categorySelection);
+      newJob.cat = safeCategory;
+
       cuttingJobs.push(newJob);
       window.cuttingJobs = cuttingJobs;
+      window.activeJobCategory = safeCategory;
+      window.pendingNewJobCategorySelect = safeCategory;
       saveCloudDebounced();
       toast("Active cutting job created");
       renderJobs();
@@ -8601,6 +8891,7 @@ function renderJobs(){
         materialQty: Number(job.materialQty)||0,
         manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
         files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
+        cat: ensureCategoryIdLocal(job?.cat),
         actualHours: eff && Number.isFinite(eff.actualHours) ? eff.actualHours : null,
         efficiency: efficiencySummary
       };
@@ -8627,6 +8918,10 @@ function renderJobs(){
       j.startISO = qs("startISO") || j.startISO;
       j.dueISO   = qs("dueISO")   || j.dueISO;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
+      const catValue = qs("cat");
+      if (catValue != null){
+        j.cat = ensureCategoryIdLocal(catValue);
+      }
       editingJobs.delete(id);
       saveCloudDebounced(); renderJobs();
       return;
