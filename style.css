@@ -2467,6 +2467,153 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
 }
 .calendar-add-btn:active { transform: translateY(1px); }
 
+.calendar-hours-edit-btn,
+.calendar-hours-cancel-btn {
+  padding: 6px 14px;
+}
+
+.calendar-hours-cancel-btn {
+  background: #dce3f5;
+  color: #0a1f3f;
+  border: 1px solid #c5d3f0;
+  box-shadow: none;
+}
+
+.calendar-hours-cancel-btn:hover {
+  background: #c9d6f0;
+  transform: translateY(0);
+}
+
+.time-efficiency-block,
+.time-efficiency-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.time-efficiency-inline {
+  padding: 12px;
+  border: 1px solid #dbe3f6;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.time-efficiency-header,
+.time-efficiency-inline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.time-efficiency-inline-title {
+  font-weight: 600;
+  color: #0a1f3f;
+}
+
+.time-efficiency-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.time-efficiency-toggle {
+  border: 1px solid #cbd6ee;
+  background: #f5f8ff;
+  color: #0a1f3f;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.time-efficiency-toggle:is(:hover, :focus-visible) {
+  border-color: #0a63c2;
+  color: #0a63c2;
+}
+
+.time-efficiency-toggle.is-active {
+  background: #0a63c2;
+  border-color: #0a63c2;
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(10, 99, 194, 0.2);
+}
+
+.time-efficiency-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.time-efficiency-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-efficiency-metric .label {
+  color: #63708a;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.time-efficiency-metric .value {
+  font-weight: 700;
+  font-size: 16px;
+  color: #0a1f3f;
+}
+
+.time-efficiency-inline .time-efficiency-metric .value {
+  font-size: 14px;
+}
+
+.calendar-block--hours-editing {
+  border: 2px solid rgba(10, 99, 194, 0.28);
+  background: rgba(10, 99, 194, 0.04);
+}
+
+.day-hours {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f3a64;
+  display: inline-block;
+}
+
+.day-hours.is-manual,
+.day-hours-manual .day-hours {
+  color: #1f7a40;
+}
+
+.day-hours.is-pending,
+.day-hours-pending .day-hours {
+  color: #b45309;
+}
+
+.day-hours.is-editing {
+  background: rgba(10, 99, 194, 0.12);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.day--hours-editing {
+  cursor: pointer;
+}
+
+.day--hours-editing:hover {
+  outline: 1px dashed rgba(10, 99, 194, 0.35);
+  outline-offset: -2px;
+}
+
+.calendar-block--hours-editing .day-add-bubble {
+  display: none;
+}
+
 /* Calendar items — make the ENTIRE chip/bar interactive */
 .event, .job-bar, .cal-task, .cal-job {
   margin-top: 4px;

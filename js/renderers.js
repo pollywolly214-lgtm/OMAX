@@ -3,6 +3,7 @@ if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 const pendingNewJobFiles = window.pendingNewJobFiles;
 if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
 const orderPartialSelection = window.orderPartialSelection;
+const timeEfficiencyWidgets = [];
 
 function getCurrentMachineHours(){
   if (typeof RENDER_TOTAL === "number" && Number.isFinite(RENDER_TOTAL)){
@@ -1907,6 +1908,155 @@ function notifyCostLayoutContentChanged(){
   });
 }
 
+function formatTimeEfficiencyHours(value){
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "0 hr";
+  const abs = Math.abs(num);
+  const decimals = abs >= 100 ? 0 : (Math.abs(num - Math.round(num)) < 0.05 ? 0 : 1);
+  return `${num.toFixed(decimals)} hr`;
+}
+
+function formatTimeEfficiencyPercent(value){
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  const abs = Math.abs(num);
+  const decimals = abs >= 100 ? 0 : (Math.abs(num - Math.round(num)) < 0.05 ? 0 : 1);
+  return `${num.toFixed(decimals)}%`;
+}
+
+function formatTimeEfficiencyDiff(value){
+  const num = Number(value);
+  if (!Number.isFinite(num) || Math.abs(num) < 0.05) return "On target";
+  const abs = Math.abs(num);
+  const decimals = abs >= 100 ? 0 : (Math.abs(abs - Math.round(abs)) < 0.05 ? 0 : 1);
+  const formatted = abs.toFixed(decimals);
+  return num > 0 ? `Ahead +${formatted} hr` : `Behind -${formatted} hr`;
+}
+
+function refreshTimeEfficiencyWidget(widget){
+  if (!widget || !widget.root || !widget.root.isConnected) return;
+  const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
+  const data = typeof computeTimeEfficiency === "function"
+    ? computeTimeEfficiency(days)
+    : null;
+  if (!data) return;
+  if (widget.metrics.actual) widget.metrics.actual.textContent = formatTimeEfficiencyHours(data.actualHours);
+  if (widget.metrics.baseline) widget.metrics.baseline.textContent = formatTimeEfficiencyHours(data.baselineHours);
+  if (widget.metrics.percent) widget.metrics.percent.textContent = formatTimeEfficiencyPercent(data.efficiencyPercent);
+  if (widget.metrics.diff) widget.metrics.diff.textContent = formatTimeEfficiencyDiff(data.differenceHours);
+  if (widget.labelEl){
+    const labelText = widget.selectedLabel
+      || (data && data.description)
+      || widget.labelEl.textContent
+      || "";
+    widget.labelEl.textContent = labelText;
+  }
+}
+
+function refreshTimeEfficiencyWidgets(){
+  for (let i = timeEfficiencyWidgets.length - 1; i >= 0; i--){
+    const widget = timeEfficiencyWidgets[i];
+    if (!widget || !widget.root || !widget.root.isConnected){
+      timeEfficiencyWidgets.splice(i, 1);
+      continue;
+    }
+    refreshTimeEfficiencyWidget(widget);
+  }
+}
+
+function selectTimeEfficiencyRange(widget, button){
+  if (!widget || !button) return;
+  const days = Number(button.dataset.efficiencyRange);
+  if (!Number.isFinite(days) || days <= 0) return;
+  widget.currentDays = Math.max(1, Math.round(days));
+  widget.selectedLabel = button.dataset.efficiencyRangeLabel || widget.selectedLabel || "";
+  widget.toggles.forEach(btn => {
+    const active = btn === button;
+    btn.classList.toggle("is-active", active);
+    if (btn.hasAttribute("aria-pressed")){
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    }
+  });
+  refreshTimeEfficiencyWidget(widget);
+}
+
+function setupTimeEfficiencyWidget(root){
+  if (!(root instanceof HTMLElement)) return;
+  if (root.dataset.timeEfficiencyBound === "1"){
+    refreshTimeEfficiencyWidgets();
+    return;
+  }
+  const toggles = Array.from(root.querySelectorAll("[data-efficiency-range]"));
+  if (!toggles.length) return;
+  const metrics = {
+    actual: root.querySelector("[data-efficiency-actual]"),
+    baseline: root.querySelector("[data-efficiency-baseline]"),
+    percent: root.querySelector("[data-efficiency-percent]"),
+    diff: root.querySelector("[data-efficiency-diff]")
+  };
+  const labelEl = root.querySelector("[data-efficiency-window-label]");
+  const firstToggle = toggles[0];
+  const widget = {
+    root,
+    toggles,
+    metrics,
+    labelEl,
+    currentDays: Number(firstToggle?.dataset?.efficiencyRange) || 7,
+    defaultDays: Number(firstToggle?.dataset?.efficiencyRange) || 7,
+    selectedLabel: firstToggle?.dataset?.efficiencyRangeLabel || (labelEl ? labelEl.textContent : "")
+  };
+  toggles.forEach(btn => {
+    btn.addEventListener("click", ()=> selectTimeEfficiencyRange(widget, btn));
+  });
+  timeEfficiencyWidgets.push(widget);
+  root.dataset.timeEfficiencyBound = "1";
+  refreshTimeEfficiencyWidget(widget);
+}
+
+function updateCalendarHoursControls(){
+  const editBtn = document.getElementById("calendarHoursEditBtn");
+  const cancelBtn = document.getElementById("calendarHoursCancelBtn");
+  const editing = typeof isCalendarHoursEditing === "function" ? Boolean(isCalendarHoursEditing()) : false;
+  if (editBtn){
+    editBtn.textContent = editing ? "Save Hours" : "Edit Hours";
+    editBtn.dataset.mode = editing ? "save" : "edit";
+  }
+  if (cancelBtn){
+    cancelBtn.hidden = !editing;
+  }
+}
+
+function setupCalendarHoursControls(){
+  const editBtn = document.getElementById("calendarHoursEditBtn");
+  const cancelBtn = document.getElementById("calendarHoursCancelBtn");
+  if (editBtn && !editBtn.dataset.bound){
+    editBtn.dataset.bound = "1";
+    editBtn.addEventListener("click", ()=>{
+      const editing = typeof isCalendarHoursEditing === "function" ? Boolean(isCalendarHoursEditing()) : false;
+      if (editing){
+        const committed = typeof commitCalendarHoursEditing === "function"
+          ? commitCalendarHoursEditing()
+          : false;
+        updateCalendarHoursControls();
+        return;
+      }
+      const password = window.prompt("Enter password to edit daily cutting hours:");
+      if (password == null) return;
+      if (password !== "Matthew7:21"){ toast("Incorrect password"); return; }
+      if (typeof startCalendarHoursEditing === "function"){ startCalendarHoursEditing(); }
+      updateCalendarHoursControls();
+    });
+  }
+  if (cancelBtn && !cancelBtn.dataset.bound){
+    cancelBtn.dataset.bound = "1";
+    cancelBtn.addEventListener("click", ()=>{
+      if (typeof cancelCalendarHoursEditing === "function"){ cancelCalendarHoursEditing(); }
+      updateCalendarHoursControls();
+    });
+  }
+  updateCalendarHoursControls();
+}
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   content.innerHTML = viewDashboard();
@@ -1929,7 +2079,11 @@ function renderDashboard(){
     RENDER_DELTA = deltaSinceLast();
     window.RENDER_TOTAL = RENDER_TOTAL;
     window.RENDER_DELTA = RENDER_DELTA;
+    const updatedDaily = typeof syncDailyHoursFromTotals === "function"
+      ? syncDailyHoursFromTotals(todayISO)
+      : false;
     saveCloudDebounced(); toast("Hours logged");
+    if (updatedDaily && typeof refreshTimeEfficiencyWidgets === "function"){ refreshTimeEfficiencyWidgets(); }
     renderDashboard();
   });
 
@@ -3106,7 +3260,10 @@ function renderDashboard(){
 
   setupDashboardLayout();
   renderCalendar();
+  setupCalendarHoursControls();
+  setupTimeEfficiencyWidget(document.getElementById("dashboardTimeEfficiency"));
   renderPumpWidget();
+  refreshTimeEfficiencyWidgets();
   notifyDashboardLayoutContentChanged();
 }
 
@@ -6251,6 +6408,8 @@ function renderCosts(){
 
   setupCostInfoPanel();
   setupForecastBreakdownModal();
+  setupTimeEfficiencyWidget(document.getElementById("costTimeEfficiency"));
+  refreshTimeEfficiencyWidgets();
 
   function getHistoryMessageState(){
     const existing = window.__costHistoryMessageState;
@@ -6366,6 +6525,8 @@ function renderCosts(){
   const wireJobsHistoryShortcut = (element)=>{
     if (!element) return;
     const activateHistoryLink = (event)=>{
+      const origin = event?.target instanceof HTMLElement ? event.target : null;
+      if (origin && origin.closest(".time-efficiency-toggles")) return;
       event.preventDefault();
       event.stopPropagation();
       goToJobsHistory();

@@ -10,6 +10,106 @@ function deltaSinceLast(){
   return Math.max(0, cur - prev);
 }
 
+function getDailyCutHoursMap(){
+  const map = new Map();
+  const list = Array.isArray(dailyCutHours) ? dailyCutHours : [];
+  for (const entry of list){
+    if (!entry || !entry.dateISO) continue;
+    const key = normalizeDateISO(entry.dateISO);
+    if (!key) continue;
+    const hours = clampDailyCutHours(entry.hours);
+    const source = entry.source === "manual" ? "manual" : "auto";
+    map.set(key, { dateISO: key, hours, source });
+  }
+  return map;
+}
+
+function getTimeEfficiencyWindowMeta(days){
+  const normalized = Math.max(1, Math.round(Number(days) || 0));
+  const list = Array.isArray(TIME_EFFICIENCY_WINDOWS) ? TIME_EFFICIENCY_WINDOWS : [];
+  const match = list.find(win => Number(win?.days) === normalized);
+  if (match){
+    return { ...match, days: normalized };
+  }
+  const label = normalized === 7 ? "1W" : `${normalized}d`;
+  const description = normalized === 7
+    ? "Past 7 days"
+    : `Past ${normalized} day${normalized === 1 ? "" : "s"}`;
+  return { key: `${normalized}d`, label, days: normalized, description };
+}
+
+function computeTimeEfficiency(rangeDays, options = {}){
+  const normalizedDays = Math.max(1, Math.round(Number(rangeDays) || 0));
+  const meta = getTimeEfficiencyWindowMeta(normalizedDays);
+  const today = options.endDate
+    ? (parseDateLocal(options.endDate) || new Date(options.endDate))
+    : new Date();
+  const endDate = (today instanceof Date && !Number.isNaN(today.getTime()))
+    ? new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    : (()=>{ const d = new Date(); d.setHours(0,0,0,0); return d; })();
+  endDate.setHours(0,0,0,0);
+
+  const startDate = new Date(endDate);
+  startDate.setDate(endDate.getDate() - (normalizedDays - 1));
+
+  const map = getDailyCutHoursMap();
+  let actual = 0;
+  let coverage = 0;
+  const cursor = new Date(startDate);
+  for (let i = 0; i < normalizedDays; i++){
+    const key = ymd(cursor);
+    const record = map.get(key);
+    const value = record ? clampDailyCutHours(record.hours) : 0;
+    if (value > 0){
+      coverage += 1;
+    }
+    actual += value;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  const baseline = CUTTING_BASELINE_DAILY_HOURS * normalizedDays;
+  const difference = actual - baseline;
+  const percent = baseline > 0 ? (actual / baseline) * 100 : null;
+
+  return {
+    windowDays: normalizedDays,
+    actualHours: actual,
+    baselineHours: baseline,
+    differenceHours: difference,
+    efficiencyPercent: percent,
+    coverageDays: coverage,
+    startISO: ymd(startDate),
+    endISO: ymd(endDate),
+    description: meta.description,
+    label: meta.label,
+    key: meta.key
+  };
+}
+
+function syncDailyHoursFromTotals(dateISO){
+  const key = normalizeDateISO(dateISO);
+  if (!key || !Array.isArray(totalHistory) || !totalHistory.length) return false;
+  const sorted = totalHistory
+    .filter(entry => entry && entry.dateISO)
+    .slice()
+    .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+  const idx = sorted.findIndex(entry => entry && normalizeDateISO(entry.dateISO) === key);
+  if (idx < 0) return false;
+  const current = Number(sorted[idx].hours);
+  if (!Number.isFinite(current)) return false;
+  let prev = null;
+  for (let i = idx - 1; i >= 0; i--){
+    const candidate = Number(sorted[i].hours);
+    if (Number.isFinite(candidate)){
+      prev = candidate;
+      break;
+    }
+  }
+  if (prev == null) return false;
+  const delta = Math.max(0, current - prev);
+  return setDailyCutHoursEntry(key, delta, { source: "auto", preserveManual: true });
+}
+
 function liveSince(task){
   const cur = RENDER_TOTAL ?? currentTotal();
   const delta = RENDER_DELTA ?? deltaSinceLast();
@@ -187,5 +287,12 @@ function computeRequiredDaily(job){
 
   const requiredPerDay = remainingDays > 0 ? (remainingHours / remainingDays) : (remainingHours>0 ? Infinity : 0);
   return { remainingHours, remainingDays, requiredPerDay };
+}
+
+if (typeof window !== "undefined"){
+  window.computeTimeEfficiency = computeTimeEfficiency;
+  window.getTimeEfficiencyWindowMeta = getTimeEfficiencyWindowMeta;
+  window.syncDailyHoursFromTotals = syncDailyHoursFromTotals;
+  window.getDailyCutHoursMap = getDailyCutHoursMap;
 }
 
