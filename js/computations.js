@@ -93,9 +93,9 @@ function computeTimeEfficiency(rangeDays, options = {}){
 
   const baseline = CUTTING_BASELINE_DAILY_HOURS * normalizedDays;
 
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  let progressDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const todayLocal = new Date();
+  todayLocal.setHours(0,0,0,0);
+  let progressDate = new Date(todayLocal.getFullYear(), todayLocal.getMonth(), todayLocal.getDate());
   progressDate.setHours(0,0,0,0);
   let elapsedDays = 0;
   if (progressDate < startDate){
