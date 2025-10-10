@@ -8083,6 +8083,160 @@ function renderJobs(){
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
 
+  const noteBackdrop = content.querySelector("#jobNoteModal");
+  const noteTextarea = content.querySelector("#jobNoteModalInput");
+  const noteJobLabel = content.querySelector("#jobNoteModalJob");
+  const noteHistory = content.querySelector("#jobNoteModalHistory");
+  const noteSaveBtn = content.querySelector("[data-note-save]");
+  const noteSaveNewBtn = content.querySelector("[data-note-save-new]");
+  const noteCancelBtns = content.querySelectorAll("[data-note-cancel]");
+  const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  let activeNoteJobId = null;
+  let lastNoteTrigger = null;
+  let lastNoteTriggerSelector = "";
+
+  const renderNoteHistory = (value)=>{
+    if (!noteHistory) return;
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (!trimmed){
+      noteHistory.innerHTML = '<p class="job-note-history-empty">No previous notes saved.</p>';
+      return;
+    }
+    const entries = trimmed.split(/\n{2,}/).map(part => part.trim()).filter(Boolean);
+    if (!entries.length){
+      noteHistory.innerHTML = '<p class="job-note-history-empty">No previous notes saved.</p>';
+      return;
+    }
+    noteHistory.innerHTML = entries.map(entry => `<div class="job-note-history-entry">${escapeHtml(entry).replace(/\n/g, '<br>')}</div>`).join("\n");
+  };
+
+  const openJobNoteModal = (jobId, { appendBlank = false, trigger = null } = {})=>{
+    if (!noteBackdrop || !noteTextarea) return;
+    const id = jobId != null ? String(jobId) : "";
+    if (!id) return;
+    const job = cuttingJobs.find(x => String(x.id) === id);
+    if (!job) return;
+    activeNoteJobId = id;
+    const jobName = job.name ? String(job.name) : "Cutting job";
+    if (noteJobLabel) noteJobLabel.textContent = jobName;
+    const noteValue = typeof job.notes === "string" ? job.notes : "";
+    const normalized = noteValue.replace(/\s+$/, "");
+    const baseValue = appendBlank && normalized ? `${normalized}\n\n` : normalized;
+    noteTextarea.value = baseValue;
+    renderNoteHistory(normalized);
+    noteBackdrop.hidden = false;
+    noteBackdrop.classList.add("open");
+    const resolvedTrigger = trigger || content.querySelector(`[data-job-note="${id}"]`);
+    lastNoteTrigger = resolvedTrigger || null;
+    lastNoteTriggerSelector = `[data-job-note="${id}"]`;
+    requestAnimationFrame(()=>{
+      try {
+        noteTextarea.focus();
+        const len = noteTextarea.value.length;
+        noteTextarea.setSelectionRange(len, len);
+      } catch (_err) { }
+    });
+  };
+
+  const closeJobNoteModal = ()=>{
+    if (!noteBackdrop) return;
+    noteBackdrop.classList.remove("open");
+    noteBackdrop.hidden = true;
+    if (noteTextarea) noteTextarea.value = "";
+    activeNoteJobId = null;
+    const focusTarget = lastNoteTrigger && document.body.contains(lastNoteTrigger)
+      ? lastNoteTrigger
+      : (lastNoteTriggerSelector ? content.querySelector(lastNoteTriggerSelector) : null);
+    if (focusTarget){
+      try { focusTarget.focus(); } catch (_err) { }
+    }
+    lastNoteTrigger = null;
+    lastNoteTriggerSelector = "";
+  };
+
+  const handleJobNoteSave = ({ keepOpen = false, prepareNew = false } = {})=>{
+    if (!activeNoteJobId || !noteTextarea) return;
+    const job = cuttingJobs.find(x => String(x.id) === String(activeNoteJobId));
+    if (!job) return;
+    const raw = typeof noteTextarea.value === "string" ? noteTextarea.value : "";
+    const normalized = raw.replace(/\s+$/, "");
+    job.notes = normalized;
+    window.cuttingJobs = cuttingJobs;
+    saveCloudDebounced();
+    toast("Notes updated");
+    if (keepOpen){
+      window.__pendingJobNoteModal = { jobId: String(job.id), appendBlank: !!prepareNew };
+      window.__pendingJobNoteReturn = "";
+    } else {
+      window.__pendingJobNoteModal = null;
+      window.__pendingJobNoteReturn = String(job.id);
+    }
+    renderJobs();
+  };
+
+  noteSaveBtn?.addEventListener("click", ()=> handleJobNoteSave({ keepOpen: false, prepareNew: false }));
+  noteSaveNewBtn?.addEventListener("click", ()=> handleJobNoteSave({ keepOpen: true, prepareNew: true }));
+  noteCancelBtns.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      closeJobNoteModal();
+    });
+  });
+  if (noteBackdrop){
+    noteBackdrop.addEventListener("click", (event)=>{
+      if (event.target === noteBackdrop){
+        event.preventDefault();
+        closeJobNoteModal();
+      }
+    });
+    noteBackdrop.addEventListener("keydown", (event)=>{
+      if (event.key === "Escape" || event.key === "Esc"){
+        event.preventDefault();
+        closeJobNoteModal();
+      }
+    }, true);
+  }
+  noteTextarea?.addEventListener("keydown", (event)=>{
+    if (event.key === "Escape" || event.key === "Esc"){
+      event.preventDefault();
+      closeJobNoteModal();
+    }
+  });
+
+  content.querySelectorAll('[data-job-note]').forEach(el => {
+    if (el instanceof HTMLButtonElement) return;
+    el.addEventListener('keydown', (event)=>{
+      if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar'){
+        event.preventDefault();
+        const id = el.getAttribute('data-job-note');
+        openJobNoteModal(id, { appendBlank: false, trigger: el });
+      }
+    });
+  });
+
+  const pendingNoteModal = window.__pendingJobNoteModal && typeof window.__pendingJobNoteModal === "object"
+    ? window.__pendingJobNoteModal
+    : null;
+  const pendingNoteReturn = typeof window.__pendingJobNoteReturn === "string"
+    ? window.__pendingJobNoteReturn
+    : "";
+  if (pendingNoteModal && pendingNoteModal.jobId){
+    requestAnimationFrame(()=>{
+      openJobNoteModal(pendingNoteModal.jobId, {
+        appendBlank: !!pendingNoteModal.appendBlank,
+        trigger: content.querySelector(`[data-job-note="${pendingNoteModal.jobId}"]`)
+      });
+    });
+  } else if (pendingNoteReturn){
+    requestAnimationFrame(()=>{
+      const trigger = content.querySelector(`[data-job-note="${pendingNoteReturn}"]`);
+      if (trigger){
+        try { trigger.focus(); } catch (_err) { }
+      }
+    });
+  }
+  window.__pendingJobNoteModal = null;
+  window.__pendingJobNoteReturn = "";
+
   const focusPastJobs = ()=>{
     const target = document.getElementById("pastJobs");
     if (!target) return;
@@ -8270,7 +8424,7 @@ function renderJobs(){
   });
 
   // 5) Inline material $/qty (kept)
-  content.querySelector("tbody")?.addEventListener("change", async (e)=>{
+  content.querySelector(".job-table tbody")?.addEventListener("change", async (e)=>{
     if (e.target.matches("input[data-job-file-input]")){
       const id = e.target.getAttribute("data-job-file-input");
       const j = cuttingJobs.find(x=>x.id===id);
@@ -8514,7 +8668,16 @@ function renderJobs(){
   });
 
   // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
-  content.querySelector("tbody")?.addEventListener("click",(e)=>{
+  content.querySelector(".job-table tbody")?.addEventListener("click",(e)=>{
+    const noteTrigger = e.target.closest("[data-job-note]");
+    if (noteTrigger && (!noteBackdrop || !noteBackdrop.contains(noteTrigger))){
+      const id = noteTrigger.getAttribute("data-job-note");
+      if (id){
+        e.preventDefault();
+        openJobNoteModal(id, { appendBlank: false, trigger: noteTrigger });
+      }
+      return;
+    }
     const locked = e.target.closest("[data-requires-edit]");
     if (locked){
       const id = locked.getAttribute("data-requires-edit");
@@ -8685,8 +8848,9 @@ function renderJobs(){
       const trForm = document.createElement("tr");
       trForm.className = "manual-log-row";
       trForm.setAttribute("data-log-row", id);
+      const columnCount = content.querySelector(".job-table thead tr")?.children.length || 15;
       trForm.innerHTML = `
-        <td colspan="14">
+        <td colspan="${columnCount}">
           <div class="mini-form" style="display:grid; gap:8px; align-items:end; grid-template-columns: repeat(6, minmax(0,1fr));">
             <div style="grid-column:1/7">
               <strong>Manual Log for: ${j.name}</strong>

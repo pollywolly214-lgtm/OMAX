@@ -1541,7 +1541,7 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
-  const activeColumnCount = 14;
+  const activeColumnCount = 15;
   const rows = cuttingJobs.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileLinks = jobFiles.length
@@ -1631,9 +1631,19 @@ function viewJobs(){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
       const matQtyDisplay  = formatQuantity(matQty);
       const noteContent = (j.notes || "").trim();
+      const notePreviewText = noteContent
+        ? textEsc(noteContent.length > 90 ? `${noteContent.slice(0, 87)}…` : noteContent).replace(/\n/g, "<br>")
+        : '<span class="job-note-placeholder">Add a note</span>';
+      const noteLabel = esc(j.name || "Cutting job");
       const noteMarkup = noteContent
-        ? `<div id="jobNote_${j.id}" class="job-note-display" data-requires-edit="${j.id}">${textEsc(j.notes || "").replace(/\n/g, "<br>")}</div>`
-        : `<div id="jobNote_${j.id}" class="job-note-display job-note-empty" data-requires-edit="${j.id}">Add a note…</div>`;
+        ? `<div id="jobNote_${j.id}" class="job-note-display" data-job-note="${j.id}" data-job-note-detail="${j.id}" role="button" tabindex="0" aria-label="Notes for ${noteLabel}">${textEsc(j.notes || "").replace(/\n/g, "<br>")}</div>`
+        : `<div id="jobNote_${j.id}" class="job-note-display job-note-empty" data-job-note="${j.id}" data-job-note-detail="${j.id}" role="button" tabindex="0" aria-label="Add note for ${noteLabel}">Add a note…</div>`;
+      const noteColumn = `
+        <td class="job-col job-col-note">
+          <button type="button" class="job-note-trigger ${noteContent ? "has-note" : ""}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteLabel}">
+            <span class="job-note-trigger-text" data-job-note-display="${j.id}">${notePreviewText}</span>
+          </button>
+        </td>`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
           <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">
@@ -1653,6 +1663,7 @@ function viewJobs(){
           <td class="job-col job-col-hours">${remainingDisplay}</td>
           <td class="job-col job-col-need">${needDisplay}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
+          ${noteColumn}
           <td class="job-col job-col-impact">
             <span class="job-impact ${impactClass}">${impactDisplay}</span>
             <div class="job-impact-note small muted">Net total reflects estimated hours and material usage</div>
@@ -1795,6 +1806,7 @@ function viewJobs(){
             <th>Hours remaining</th>
             <th>Needed / day</th>
             <th>Status</th>
+            <th>Notes</th>
             <th>Net total</th>
             <th>Actions</th>
           </tr>
@@ -1802,6 +1814,26 @@ function viewJobs(){
         <tbody>${rows}</tbody>
       </table>
       <p class="small muted">Material cost and quantity update immediately when changed.</p>
+      <div class="job-note-modal-backdrop" id="jobNoteModal" hidden>
+        <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobNoteModalTitle">
+          <div class="job-note-modal-header">
+            <h4 id="jobNoteModalTitle">Job notes</h4>
+            <button type="button" class="job-note-modal-close" data-note-cancel aria-label="Close notes">×</button>
+          </div>
+          <div class="job-note-modal-body">
+            <div class="job-note-modal-field">
+              <label for="jobNoteModalInput">Notes for <span id="jobNoteModalJob"></span></label>
+              <textarea id="jobNoteModalInput" rows="6" placeholder="Add notes for this cutting job"></textarea>
+            </div>
+            <div class="job-note-modal-history" id="jobNoteModalHistory" aria-live="polite"></div>
+          </div>
+          <div class="job-note-modal-actions">
+            <button type="button" data-note-save class="job-note-modal-primary">Save</button>
+            <button type="button" data-note-save-new>Save &amp; New</button>
+            <button type="button" data-note-cancel class="job-note-modal-secondary">Cancel</button>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="block past-jobs-block" id="pastJobs">
       <h3>Past Cutting Jobs</h3>
