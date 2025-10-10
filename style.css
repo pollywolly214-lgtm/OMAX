@@ -1733,182 +1733,6 @@ body.modal-open .auth-bar {
   border-radius: 12px;
   overflow: hidden;
 }
-.job-page-layout {
-  display: grid;
-  grid-template-columns: minmax(220px, 260px) 1fr;
-  gap: 16px;
-  align-items: start;
-}
-.job-main-column {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1 1 auto;
-}
-.job-category-panel {
-  border: 1px solid #dfe5f4;
-  border-radius: 12px;
-  background: #fff;
-  padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  box-shadow: 0 6px 14px rgba(17, 44, 92, 0.06);
-}
-.job-category-panel h4 {
-  margin: 0;
-  font-size: 15px;
-  color: #13233f;
-}
-.job-category-panel button {
-  padding: 4px 10px;
-  border-radius: 8px;
-  border: 1px solid #c6d3ec;
-  background: #f5f7fc;
-  color: #1b2d4d;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: none;
-  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
-}
-.job-category-panel button:hover,
-.job-category-panel button:focus {
-  background: #e8edfb;
-  border-color: #b5c4e7;
-}
-.job-category-panel button.danger {
-  background: #fff5f5;
-  border-color: #f2c8c8;
-  color: #ad1f1f;
-}
-.job-category-panel button.danger:hover,
-.job-category-panel button.danger:focus {
-  background: #ffe9e9;
-  border-color: #e6abab;
-}
-.job-category-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.job-category-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.job-category-list[data-job-cat-depth] {
-  margin-top: 6px;
-}
-.job-category-list[data-job-cat-depth]:not([data-job-cat-depth="0"]) {
-  margin-left: 14px;
-  padding-left: 12px;
-  border-left: 1px dashed #d5def3;
-}
-.job-category-item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.job-category-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-.job-category-name {
-  flex: 1 1 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  background: #f3f6ff;
-  color: #1b2d4d;
-}
-.job-category-name.is-active {
-  background: #1f3b67;
-  color: #fff;
-  border-color: #1f3b67;
-}
-.job-category-label {
-  font-weight: 600;
-  text-align: left;
-}
-.job-category-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 24px;
-  padding: 0 6px;
-  border-radius: 999px;
-  font-size: 11px;
-  background: rgba(31, 59, 103, 0.12);
-  color: inherit;
-}
-.job-category-actions {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-.job-category-empty {
-  padding: 10px 0;
-}
-.job-category-active {
-  margin-top: -4px;
-}
-.job-add-form {
-  align-items: flex-end;
-}
-#jobCategoryNew {
-  background: #fff;
-  border: 1px dashed #9db3de;
-  color: #1f3b67;
-  box-shadow: none;
-}
-#jobCategoryNew:hover,
-#jobCategoryNew:focus {
-  background: #eef3ff;
-  border-color: #7d96cc;
-}
-.job-file-pill-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.job-file-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: #edf2ff;
-  color: #1f3b67;
-  border: 1px solid #cfd9f2;
-  font-size: 12px;
-  text-decoration: none;
-}
-.job-file-pill:hover,
-.job-file-pill:focus {
-  background: #dfe8ff;
-  border-color: #b8c7ed;
-}
-
-@media (max-width: 900px) {
-  .job-page-layout {
-    grid-template-columns: 1fr;
-  }
-  .job-category-panel {
-    order: -1;
-  }
-}
 .job-page-toolbar {
   margin-top: 6px;
   margin-bottom: 6px;
@@ -2153,6 +1977,27 @@ body.modal-open .auth-bar {
   flex-direction: column;
   gap: 6px;
 }
+.job-file-pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.job-file-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #cdd6ea;
+  color: #0a63c2;
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.job-file-pill:hover { background: #edf3fe; }
 .job-edit-card {
   display: flex;
   flex-direction: column;

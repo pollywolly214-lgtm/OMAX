@@ -1306,145 +1306,6 @@ function viewJobs(){
   const historySearchValue = String(historySearchRaw || "");
   const historyQuery = historySearchValue.trim().toLowerCase();
 
-  const fallbackJobRootId = (typeof window !== "undefined" && typeof window.JOB_ROOT_FOLDER_ID === "string")
-    ? window.JOB_ROOT_FOLDER_ID
-    : (typeof JOB_ROOT_FOLDER_ID === "string" ? JOB_ROOT_FOLDER_ID : "jobs_root");
-  const jobFolderFallback = typeof defaultJobFolders === "function"
-    ? defaultJobFolders()
-    : [{ id: fallbackJobRootId, name: "All Cutting Jobs", parent: null, order: 0 }];
-  const allJobFoldersRaw = Array.isArray(window.jobFolders) && window.jobFolders.length
-    ? window.jobFolders.slice()
-    : jobFolderFallback;
-  const jobFolderMap = new Map(allJobFoldersRaw.map(folder => [String(folder.id), folder]));
-  const jobRootId = typeof getJobRootFolderId === "function"
-    ? getJobRootFolderId(allJobFoldersRaw)
-    : (allJobFoldersRaw[0] ? String(allJobFoldersRaw[0].id) : fallbackJobRootId);
-  const ensureCategoryId = typeof ensureJobCategoryId === "function"
-    ? ensureJobCategoryId
-    : (value => (value ? String(value) : jobRootId));
-  const activeCategoryRaw = typeof window.activeJobCategory === "string" ? window.activeJobCategory : jobRootId;
-  const activeCategory = ensureCategoryId(activeCategoryRaw);
-  window.activeJobCategory = activeCategory;
-
-  const pendingNewCategorySelection = typeof window.pendingNewJobCategorySelect === "string"
-    ? window.pendingNewJobCategorySelect
-    : "";
-  delete window.pendingNewJobCategorySelect;
-  const defaultCategorySelection = pendingNewCategorySelection ? ensureCategoryId(pendingNewCategorySelection) : "";
-
-  const descendantHelper = typeof collectJobFolderDescendants === "function"
-    ? collectJobFolderDescendants
-    : (id => [String(id)]);
-  const activeDescendants = descendantHelper(activeCategory, true).map(String);
-  const activeCategorySet = new Set(activeDescendants);
-
-  const jobCounts = new Map();
-  for (const folder of allJobFoldersRaw){
-    if (!folder || folder.id == null) continue;
-    const idStr = String(folder.id);
-    const ids = descendantHelper(idStr, true).map(String);
-    const idSet = new Set(ids);
-    const count = cuttingJobs.reduce((acc, job)=>{
-      const cat = job && job.cat != null ? String(job.cat) : jobRootId;
-      return acc + (idSet.has(cat) ? 1 : 0);
-    }, 0);
-    jobCounts.set(idStr, count);
-  }
-
-  const visibleJobs = cuttingJobs.filter(job => {
-    const cat = job && job.cat != null ? String(job.cat) : jobRootId;
-    return activeCategorySet.has(cat);
-  });
-
-  const categoryTreeList = typeof buildJobFolderTreeList === "function"
-    ? buildJobFolderTreeList({ includeRoot: true })
-    : allJobFoldersRaw.map(folder => ({ id: String(folder.id), folder, depth: 0 }));
-
-  const renderCategoryOptionList = (selectedId)=>{
-    const target = selectedId ? ensureCategoryId(selectedId) : null;
-    return categoryTreeList.map(entry => {
-      if (!entry || entry.id == null) return "";
-      const id = String(entry.id);
-      const folder = entry.folder || {};
-      const depth = Number(entry.depth) || 0;
-      const indent = depth > 0 ? `${"—".repeat(depth)} ` : "";
-      const name = folder.name || "All Cutting Jobs";
-      const selected = target && id === target ? " selected" : "";
-      return `<option value="${esc(id)}"${selected}>${esc(indent + name)}</option>`;
-    }).join("\n");
-  };
-
-  const newJobCategoryOptions = renderCategoryOptionList(defaultCategorySelection);
-  const activeCategoryFolder = jobFolderMap.get(activeCategory) || null;
-  const activeCategoryLabel = activeCategoryFolder && activeCategoryFolder.name
-    ? activeCategoryFolder.name
-    : "All Cutting Jobs";
-
-  const getFolderChildren = (parentId)=>{
-    if (typeof jobFolderChildren === "function"){
-      const children = jobFolderChildren(parentId);
-      if (Array.isArray(children)) return children.slice();
-    }
-    const key = parentId == null ? null : String(parentId);
-    return allJobFoldersRaw.filter(folder => {
-      const parent = folder && folder.parent != null ? String(folder.parent) : null;
-      return parent === key;
-    });
-  };
-
-  const renderCategoryItems = (parentId, depth)=>{
-    const children = getFolderChildren(parentId);
-    if (!children.length) return depth === 0 ? "" : "";
-    children.sort((a, b)=>{
-      const orderA = Number(a?.order) || 0;
-      const orderB = Number(b?.order) || 0;
-      if (orderA !== orderB) return orderB - orderA;
-      const nameA = String(a?.name || "");
-      const nameB = String(b?.name || "");
-      return nameA.localeCompare(nameB);
-    });
-    const items = children.map(folder => {
-      if (!folder || folder.id == null) return "";
-      const idStr = String(folder.id);
-      const isRoot = idStr === jobRootId;
-      const isActive = idStr === activeCategory;
-      const count = jobCounts.get(idStr) || 0;
-      const childrenHtml = renderCategoryItems(folder.id, depth + 1);
-      const name = folder.name || "All Cutting Jobs";
-      const addButton = `<button type="button" class="job-category-action" data-job-cat-add="${esc(idStr)}">+ Sub</button>`;
-      const renameButton = `<button type="button" class="job-category-action" data-job-cat-rename="${esc(idStr)}">Rename</button>`;
-      const removeButton = `<button type="button" class="job-category-action danger" data-job-cat-remove="${esc(idStr)}">Remove</button>`;
-      return `
-        <li class="job-category-item" data-job-category="${esc(idStr)}">
-          <div class="job-category-row">
-            <button type="button" class="job-category-name${isActive ? " is-active" : ""}" data-job-cat-select="${esc(idStr)}">
-              <span class="job-category-label">${esc(name)}</span>
-              <span class="job-category-count">${count}</span>
-            </button>
-            <div class="job-category-actions">
-              ${addButton}
-              ${renameButton}
-              ${isRoot ? "" : removeButton}
-            </div>
-          </div>
-          ${childrenHtml}
-        </li>`;
-    }).join("");
-    return `<ul class="job-category-list" data-job-cat-depth="${depth}">${items}</ul>`;
-  };
-
-  const categoryTreeHtml = renderCategoryItems(null, 0);
-
-  const categoriesPanel = `
-    <aside class="job-category-panel" data-job-category-panel>
-      <div class="job-category-header">
-        <h4>Job Categories</h4>
-        <button type="button" class="job-category-add-root" data-job-cat-add-root>+ Category</button>
-      </div>
-      <p class="small muted">Select a category to filter jobs or create folders to stay organized.</p>
-      ${categoryTreeHtml || `<div class="job-category-empty small muted">No categories yet. Add one to get started.</div>`}
-    </aside>`;
-
   const editingCompletedJobsSet = typeof getEditingCompletedJobsSet === "function"
     ? getEditingCompletedJobsSet()
     : (()=>{
@@ -1641,8 +1502,8 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
-  const activeColumnCount = 12;
-  const rows = visibleJobs.length ? visibleJobs.map(j => {
+  const activeColumnCount = 11;
+  const rows = cuttingJobs.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileLinks = jobFiles.length
       ? `<ul class="job-file-pill-list">${jobFiles.map((f, idx) => {
@@ -1652,25 +1513,16 @@ function viewJobs(){
           return `<li><a href="${href}" download="${safeName}" class="job-file-pill">${safeName}</a></li>`;
         }).filter(Boolean).join("")}</ul>`
       : `<p class="small muted">No files attached. Edit the job to add files.</p>`;
-    const jobFileListItems = jobFiles.length
-      ? jobFiles.map((f, idx)=>{
-          const safeName = f.name || `file_${idx+1}`;
-          const href = f.dataUrl || f.url || "";
-          const link = href ? `<a href="${href}" download="${safeName}">${safeName}</a>` : safeName;
-          return `<li>${link} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
-        }).join("")
-      : `<li class="muted">No files attached</li>`;
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
-    const categoryId = ensureCategoryId(j && j.cat != null ? j.cat : jobRootId);
-    const categoryFolder = jobFolderMap.get(categoryId);
-    const categoryName = categoryFolder && categoryFolder.name ? categoryFolder.name : "All Cutting Jobs";
 
+    // Material totals
     const matCost = Number(j.materialCost||0);
     const matQty  = Number(j.materialQty||0);
     const matTotal = (matCost * matQty) || 0;
 
+    // Remaining & per-day
     const actualRemain = eff.actualRemaining != null ? eff.actualRemaining : (req.remainingHours || 0);
     const baselineRemain = eff.expectedRemaining != null
       ? eff.expectedRemaining
@@ -1680,6 +1532,7 @@ function viewJobs(){
       ? '∞'
       : (req.requiredPerDay||0).toFixed(2);
 
+    // Cost efficiency (baseline vs actual remaining hours)
     const EPS = 0.05;
     const deltaRemain = baselineRemain - actualRemain;
     const ahead = deltaRemain > EPS;
@@ -1709,6 +1562,7 @@ function viewJobs(){
       statusDetail ? `<div class="job-status-detail">${statusDetail.trim()}</div>` : ''
     ].join('');
 
+    // Dates (for display / edit row)
     const startDate = parseDateLocal(j.startISO);
     const dueDate   = parseDateLocal(j.dueISO);
     const startTxt  = startDate ? startDate.toDateString() : "—";
@@ -1720,8 +1574,7 @@ function viewJobs(){
       const matQtyDisplay  = formatQuantity(matQty);
       const noteContent = (j.notes || "").trim();
       const noteMarkup = noteContent
-        ? `<div id="jobNote_${j.id}" class="job-note-display" data-requires-edit="${j.id}">${textEsc(j.notes || "").replace(/
-/g, "<br>")}</div>`
+        ? `<div id="jobNote_${j.id}" class="job-note-display" data-requires-edit="${j.id}">${textEsc(j.notes || "").replace(/\n/g, "<br>")}</div>`
         : `<div id="jobNote_${j.id}" class="job-note-display job-note-empty" data-requires-edit="${j.id}">Add a note…</div>`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
@@ -1731,7 +1584,6 @@ function viewJobs(){
               <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
             </div>
           </td>
-          <td class="job-col job-col-category">${esc(categoryName)}</td>
           <td class="job-col job-col-estimate job-col-locked" data-requires-edit="${j.id}">${estimateDisplay}</td>
           <td class="job-col job-col-material job-col-locked" data-requires-edit="${j.id}">${j.material || '—'}</td>
           <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">${matCostDisplay}</td>
@@ -1772,7 +1624,7 @@ function viewJobs(){
           </td>
         </tr>`;
     } else {
-      const editCategoryOptions = renderCategoryOptionList(j && j.cat != null ? j.cat : categoryId);
+      // EDIT ROW
       return `
         <tr data-job-row="${j.id}" class="job-row editing">
           <td colspan="${activeColumnCount}">
@@ -1783,7 +1635,6 @@ function viewJobs(){
                 <label>Material<input type="text" data-j="material" data-id="${j.id}" value="${j.material||""}"></label>
                 <label>Material cost ($)<input type="number" min="0" step="0.01" data-j="materialCost" data-id="${j.id}" value="${matCost}"></label>
                 <label>Material quantity<input type="number" min="0" step="0.01" data-j="materialQty" data-id="${j.id}" value="${matQty}"></label>
-                <label>Category<select data-j="cat" data-id="${j.id}" required>${editCategoryOptions}</select></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
               </div>
@@ -1801,7 +1652,14 @@ function viewJobs(){
               <div class="job-edit-files">
                 <button type="button" data-upload-job="${j.id}">Add Files</button>
                 <input type="file" data-job-file-input="${j.id}" multiple style="display:none">
-                <ul class="job-file-list">${jobFileListItems}</ul>
+                <ul class="job-file-list">
+                  ${jobFiles.length ? jobFiles.map((f, idx)=>{
+                    const safeName = f.name || `file_${idx+1}`;
+                    const href = f.dataUrl || f.url || "";
+                    const link = href ? `<a href="${href}" download="${safeName}">${safeName}</a>` : safeName;
+                    return `<li>${link} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
+                  }).join("") : `<li class=\"muted\">No files attached</li>`}
+                </ul>
               </div>
               <div class="job-edit-actions">
                 <button data-save-job="${j.id}">Save</button>
@@ -1811,7 +1669,8 @@ function viewJobs(){
           </td>
         </tr>`;
     }
-  }).join("") : `<tr><td colspan="${activeColumnCount}" class="muted">No cutting jobs in this category yet.</td></tr>`;
+  }).join("");
+
   return `
   <div class="container">
     <div class="block" style="grid-column:1 / -1">
@@ -1819,51 +1678,39 @@ function viewJobs(){
       <div class="job-page-toolbar">
         <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
       </div>
-      <div class="job-page-layout">
-        ${categoriesPanel}
-        <div class="job-main-column">
-          <div class="job-category-active small muted">Showing jobs in <strong>${esc(activeCategoryLabel)}</strong></div>
-          <form id="addJobForm" class="mini-form job-add-form">
-            <input type="text" id="jobName" placeholder="Job name" required>
-            <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
-            <input type="text" id="jobMaterial" placeholder="Material">
-            <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
-            <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
-            <input type="date" id="jobStart" required>
-            <input type="date" id="jobDue" required>
-            <select id="jobCategory" required>
-              <option value="" disabled${defaultCategorySelection ? '' : ' selected'}>Choose category…</option>
-              ${newJobCategoryOptions}
-            </select>
-            <button type="button" id="jobCategoryNew">New Category</button>
-            <button type="button" id="jobFilesBtn">Attach Files</button>
-            <input type="file" id="jobFiles" multiple style="display:none">
-            <button type="submit">Add Job</button>
-          </form>
-          <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
+      <form id="addJobForm" class="mini-form">
+        <input type="text" id="jobName" placeholder="Job name" required>
+        <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
+        <input type="text" id="jobMaterial" placeholder="Material">
+        <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
+        <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
+        <input type="date" id="jobStart" required>
+        <input type="date" id="jobDue" required>
+        <button type="button" id="jobFilesBtn">Attach Files</button>
+        <input type="file" id="jobFiles" multiple style="display:none">
+        <button type="submit">Add Job</button>
+      </form>
+      <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
 
-          <table class="job-table">
-            <thead>
-              <tr>
-                <th>Job</th>
-                <th>Category</th>
-                <th>Estimate</th>
-                <th>Material</th>
-                <th>Cost / unit</th>
-                <th>Quantity</th>
-                <th>Material total</th>
-                <th>Hours remaining</th>
-                <th>Needed / day</th>
-                <th>Status</th>
-                <th>Projected impact</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-          <p class="small muted">Material cost and quantity update immediately when changed.</p>
-        </div>
-      </div>
+      <table class="job-table">
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Estimate</th>
+            <th>Material</th>
+            <th>Cost / unit</th>
+            <th>Quantity</th>
+            <th>Material total</th>
+            <th>Hours remaining</th>
+            <th>Needed / day</th>
+            <th>Status</th>
+            <th>Projected impact</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="small muted">Material cost and quantity update immediately when changed.</p>
     </div>
     <div class="block past-jobs-block" id="pastJobs">
       <h3>Past Cutting Jobs</h3>
