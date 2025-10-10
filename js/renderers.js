@@ -517,6 +517,102 @@ const DASHBOARD_WINDOW_MIN_HEIGHT  = 160;
 const COST_LAYOUT_STORAGE_KEY = "cost_layout_windows_v1";
 const COST_WINDOW_MIN_WIDTH   = 240;
 const COST_WINDOW_MIN_HEIGHT  = 160;
+const COST_HISTORY_SUPPRESS_KEY = "cost_history_suppressed_v1";
+
+function costHistoryStorage(){
+  try {
+    if (typeof localStorage !== "undefined") return localStorage;
+  } catch (err){
+    console.warn("localStorage unavailable for cost history suppressions", err);
+  }
+  return null;
+}
+
+function normalizeCostHistorySuppression(entry){
+  if (!entry) return null;
+  const key = entry.key != null ? String(entry.key) : null;
+  if (!key) return null;
+  const dateISO = entry.dateISO ? String(entry.dateISO) : null;
+  const hoursRaw = Number(entry.hours);
+  const hours = Number.isFinite(hoursRaw) && hoursRaw > 0 ? hoursRaw : 0;
+  return { key, dateISO, hours };
+}
+
+function loadCostHistorySuppressions(){
+  const storage = costHistoryStorage();
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(COST_HISTORY_SUPPRESS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeCostHistorySuppression).filter(Boolean);
+  } catch (err){
+    console.warn("Unable to load cost history suppressions", err);
+    return [];
+  }
+}
+
+function listCostHistorySuppressions(){
+  if (!Array.isArray(window.__costHistorySuppressions)){
+    window.__costHistorySuppressions = loadCostHistorySuppressions();
+  }
+  return window.__costHistorySuppressions.map(entry => ({ ...entry }));
+}
+
+function setCostHistorySuppressions(entries){
+  const normalized = Array.isArray(entries)
+    ? entries.map(normalizeCostHistorySuppression).filter(Boolean)
+    : [];
+  window.__costHistorySuppressions = normalized.map(entry => ({ ...entry }));
+  const storage = costHistoryStorage();
+  if (!storage) return window.__costHistorySuppressions;
+  try {
+    if (normalized.length){
+      storage.setItem(COST_HISTORY_SUPPRESS_KEY, JSON.stringify(normalized));
+    }else{
+      storage.removeItem(COST_HISTORY_SUPPRESS_KEY);
+    }
+  } catch (err){
+    console.warn("Unable to persist cost history suppressions", err);
+  }
+  return window.__costHistorySuppressions;
+}
+
+function suppressCostHistoryEntry(entry){
+  const current = listCostHistorySuppressions();
+  const normalized = normalizeCostHistorySuppression(entry);
+  if (!normalized) return;
+  const idx = current.findIndex(item => item.key === normalized.key);
+  if (idx >= 0){
+    current[idx] = normalized;
+  }else{
+    current.push(normalized);
+  }
+  setCostHistorySuppressions(current);
+}
+
+function costHistorySuppressionsEqual(a, b){
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  const map = new Map();
+  for (const entry of a){
+    if (!entry || !entry.key) return false;
+    map.set(entry.key, entry);
+  }
+  for (const entry of b){
+    if (!entry || !entry.key) return false;
+    const match = map.get(entry.key);
+    if (!match) return false;
+    const hoursA = Number(match.hours) || 0;
+    const hoursB = Number(entry.hours) || 0;
+    if (Math.abs(hoursA - hoursB) > 0.001) return false;
+    const dateA = match.dateISO || "";
+    const dateB = entry.dateISO || "";
+    if (dateA !== dateB) return false;
+  }
+  return true;
+}
 
 function cloneLayoutData(layout){
   if (!layout || typeof layout !== "object") return {};
@@ -3037,13 +3133,72 @@ function openSettingsAndReveal(taskId){
   if (!id) return;
   if (typeof window !== "undefined"){
     window.maintenanceSearchTerm = "";
-    window.pendingMaintenanceFocus = { taskIds: [id] };
-  }
-  const hash = (location.hash || "#").toLowerCase();
-  if (hash === "#/settings" || hash === "#settings"){
-    if (typeof renderSettings === "function") renderSettings();
-  }else{
-    location.hash = "#/settings";
+    const openTaskIds = new Set();
+    const openFolderIds = new Set();
+    const findTask = typeof findTaskByIdLocal === "function" ? findTaskByIdLocal : null;
+    const targetTask = findTask ? findTask(id) : null;
+    const folderById = new Map();
+    if (Array.isArray(window.settingsFolders)){
+      window.settingsFolders.forEach(folder => {
+        if (!folder || folder.id == null) return;
+        folderById.set(String(folder.id), folder);
+      });
+    }
+
+    const addFolderChain = (folderId)=>{
+      const fid = folderId != null ? String(folderId) : "";
+      if (!fid) return;
+      if (openFolderIds.has(fid)) return;
+      openFolderIds.add(fid);
+      const folder = folderById.get(fid);
+      if (folder && folder.parent != null){
+        addFolderChain(folder.parent);
+      }
+    };
+
+    if (targetTask){
+      const seenTasks = new Set();
+      let walker = targetTask;
+      while (walker && !seenTasks.has(String(walker.id))){
+        const wid = String(walker.id);
+        seenTasks.add(wid);
+        openTaskIds.add(wid);
+        if (walker.cat != null) addFolderChain(walker.cat);
+        const parentId = walker.parentTask != null ? String(walker.parentTask) : "";
+        if (!parentId) break;
+        if (seenTasks.has(parentId)) break;
+        const parentTask = findTask ? findTask(parentId) : null;
+        if (!parentTask) break;
+        walker = parentTask;
+      }
+    }
+
+    if (openTaskIds.size === 0) openTaskIds.add(id);
+
+    const pending = {
+      taskIds: [id],
+      attempts: 0,
+      openTaskIds: Array.from(openTaskIds),
+      openFolderIds: Array.from(openFolderIds)
+    };
+    window.pendingMaintenanceFocus = pending;
+    const focusNow = typeof window.__focusMaintenanceTaskNow === "function"
+      ? ()=> window.__focusMaintenanceTaskNow(pending)
+      : null;
+    const hash = (location.hash || "#").toLowerCase();
+    if (hash === "#/settings" || hash === "#settings"){
+      if (focusNow && focusNow()){
+        window.pendingMaintenanceFocus = null;
+        return;
+      }
+      if (typeof renderSettings === "function"){
+        renderSettings();
+      }else if (focusNow){
+        focusNow();
+      }
+    }else{
+      location.hash = "#/settings";
+    }
   }
 }
 
@@ -4236,24 +4391,73 @@ function renderSettings(){
   }
 
   function focusTasksForInventory(pending){
-    if (!pending || !root) return;
-    const ids = Array.isArray(pending.taskIds)
-      ? pending.taskIds.map(id => String(id)).filter(Boolean)
+    if (!pending || !root) return false;
+
+    const ensureFolderOpen = (catId)=>{
+      const fid = String(catId || "");
+      if (!fid) return;
+      openFolderState.add(fid);
+      const selector = `[data-cat-id="${escapeAttr(fid)}"]`;
+      const el = root.querySelector(selector);
+      if (el instanceof HTMLDetailsElement && !el.open){
+        el.open = true;
+      }else if (el){
+        ensureDetailsChainOpen(el);
+      }
+    };
+
+    const ensureTaskOpen = (taskId)=>{
+      const tid = String(taskId || "");
+      if (!tid) return;
+      const selector = `[data-task-id="${escapeAttr(tid)}"]`;
+      const el = root.querySelector(selector);
+      if (!el) return;
+      ensureDetailsChainOpen(el);
+      if (el instanceof HTMLDetailsElement && !el.open){
+        el.open = true;
+      }
+    };
+
+    const folderIds = Array.isArray(pending.openFolderIds)
+      ? pending.openFolderIds.map(id => String(id)).filter(Boolean)
       : [];
-    if (!ids.length) return;
+    folderIds.forEach(ensureFolderOpen);
+
+    const openTaskIds = Array.isArray(pending.openTaskIds)
+      ? pending.openTaskIds.map(id => String(id)).filter(Boolean)
+      : [];
+    openTaskIds.forEach(ensureTaskOpen);
+
+    const idsSource = Array.isArray(pending.taskIds)
+      ? pending.taskIds
+      : (Array.isArray(pending) ? pending : []);
+    const ids = idsSource.map(id => String(id)).filter(Boolean);
+    if (!ids.length) return false;
     const seen = new Set();
     let firstMatch = null;
+    let anyFound = false;
     ids.forEach(id => {
       const selector = `[data-task-id="${escapeAttr(id)}"]`;
       const el = root.querySelector(selector);
       if (!el || seen.has(el)) return;
       seen.add(el);
+      anyFound = true;
       ensureDetailsChainOpen(el);
       el.classList.add("task--focus");
       const target = el;
       window.setTimeout(()=>{ target.classList.remove("task--focus"); }, 2400);
       if (!firstMatch) firstMatch = el;
     });
+    if (!anyFound){
+      const attempt = Number(pending.attempts) || 0;
+      if (attempt < 6){
+        pending.attempts = attempt + 1;
+        const delay = 120 * (attempt + 1);
+        window.setTimeout(()=> focusTasksForInventory(pending), delay);
+      }
+      return false;
+    }
+    pending.attempts = 0;
     if (firstMatch){
       try {
         const summary = firstMatch.querySelector("summary");
@@ -4269,7 +4473,18 @@ function renderSettings(){
         catch(__){}
       }
     }
+    return true;
   }
+
+  window.__focusMaintenanceTaskNow = (input)=>{
+    if (!input) return false;
+    if (Array.isArray(input.taskIds) || Array.isArray(input)){
+      return focusTasksForInventory(input);
+    }
+    const value = String(input);
+    if (!value) return false;
+    return focusTasksForInventory({ taskIds: [value], attempts: 0 });
+  };
 
   // --- Helpers & derived collections ---
   const byIdFolder = (id)=> window.settingsFolders.find(f => String(f.id)===String(id)) || null;
@@ -6037,6 +6252,107 @@ function renderCosts(){
   setupCostInfoPanel();
   setupForecastBreakdownModal();
 
+  function getHistoryMessageState(){
+    const existing = window.__costHistoryMessageState;
+    if (existing && typeof existing === "object") return existing;
+    const state = { el: null, timer: null, listenersAttached: false, boundHide: null };
+    window.__costHistoryMessageState = state;
+    return state;
+  }
+
+  function hideHistoryMessage(){
+    const state = getHistoryMessageState();
+    if (state.timer){
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+    const el = state.el;
+    if (!el) return;
+    el.classList.remove("is-visible");
+    el.removeAttribute("data-placement");
+    el.style.visibility = "";
+  }
+
+  function ensureHistoryMessageEl(){
+    const state = getHistoryMessageState();
+    let el = state.el;
+    if (!el || !el.isConnected){
+      el = document.createElement("div");
+      el.className = "cost-history-popover";
+      el.setAttribute("role", "status");
+      el.setAttribute("aria-live", "polite");
+      const text = document.createElement("span");
+      text.className = "cost-history-popover__text";
+      el.appendChild(text);
+      document.body.appendChild(el);
+      state.el = el;
+    }
+    if (!state.listenersAttached){
+      const boundHide = ()=> hideHistoryMessage();
+      window.addEventListener("scroll", boundHide, true);
+      window.addEventListener("resize", boundHide);
+      window.addEventListener("hashchange", boundHide);
+      state.listenersAttached = true;
+      state.boundHide = boundHide;
+    }
+    return el;
+  }
+
+  function showHistoryMessage(trigger, message){
+    if (!(trigger instanceof HTMLElement) || !message) return;
+    const state = getHistoryMessageState();
+    const el = ensureHistoryMessageEl();
+    const text = el.querySelector(".cost-history-popover__text");
+    if (text) text.textContent = message;
+    if (state.timer){
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+    el.classList.remove("is-visible");
+    el.removeAttribute("data-placement");
+    el.style.visibility = "hidden";
+    el.style.left = "0px";
+    el.style.top = "0px";
+
+    const rect = trigger.getBoundingClientRect();
+    const bubbleRect = el.getBoundingClientRect();
+    const margin = 12;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || bubbleRect.width || 0;
+
+    let placement = "above";
+    let top = rect.top - bubbleRect.height - margin;
+    if (top < margin){
+      placement = "below";
+      top = rect.bottom + margin;
+    }
+
+    let left = rect.left + (rect.width / 2) - (bubbleRect.width / 2);
+    const maxLeft = viewportWidth - bubbleRect.width - margin;
+    if (maxLeft < margin){
+      left = Math.max(margin, Math.min(viewportWidth - margin, rect.left + (rect.width / 2) - (bubbleRect.width / 2)));
+    }else{
+      if (left < margin) left = margin;
+      if (left > maxLeft) left = maxLeft;
+    }
+
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top = `${Math.round(top)}px`;
+    el.dataset.placement = placement;
+    el.style.visibility = "";
+    requestAnimationFrame(()=> el.classList.add("is-visible"));
+
+    state.timer = window.setTimeout(()=> hideHistoryMessage(), 3400);
+  }
+
+  function notifyHistoryMessage(trigger, message){
+    if (!message) return;
+    if (trigger instanceof HTMLElement){
+      showHistoryMessage(trigger, message);
+    }else if (typeof toast === "function"){ toast(message); }
+  }
+
+  hideHistoryMessage();
+
   const goToJobsHistory = ()=>{
     window.pendingJobHistoryFocus = true;
     const targetHash = "#/jobs";
@@ -6066,6 +6382,261 @@ function renderCosts(){
   wireJobsHistoryShortcut(content.querySelector("[data-cost-jobs-history]"));
   wireJobsHistoryShortcut(content.querySelector("[data-cost-cutting-card]"));
   wireJobsHistoryShortcut(content.querySelector(".cost-chart-toggle-link"));
+
+  const normalizeHistoryDate = (value)=>{
+    if (!value) return null;
+    if (typeof normalizeDateKey === "function"){
+      try {
+        const normalized = normalizeDateKey(value);
+        if (normalized) return normalized;
+      } catch (_err){}
+    }
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return value.trim();
+    const parsed = new Date(value);
+    if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+      return parsed.toISOString().slice(0, 10);
+    }
+    return null;
+  };
+
+  const ensureMaintOrderCounter = ()=>{
+    if (typeof window._maintOrderCounter !== "number" || !Number.isFinite(window._maintOrderCounter)){
+      window._maintOrderCounter = 0;
+    }
+  };
+
+  const createTaskFromCostHistory = ({ name, mode, originalId, dateISO })=>{
+    const safeMode = mode === "asreq" ? "asreq" : "interval";
+    const desiredId = originalId ? String(originalId) : null;
+    const findTask = typeof findTaskByIdLocal === "function" ? findTaskByIdLocal : null;
+    if (desiredId && findTask){
+      const existing = findTask(desiredId);
+      if (existing) return existing;
+    }
+    ensureMaintOrderCounter();
+    const orderVal = ++window._maintOrderCounter;
+    const label = name && String(name).trim() ? String(name).trim() : "Maintenance task";
+    const list = safeMode === "asreq"
+      ? (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = []))
+      : (Array.isArray(window.tasksInterval) ? window.tasksInterval : (window.tasksInterval = []));
+    const makeId = ()=> typeof genId === "function" ? genId(label) : `task_${Date.now().toString(36)}`;
+    let id = desiredId && !(findTask && findTask(desiredId)) ? desiredId : makeId();
+    if (findTask){
+      while (findTask(id)) id = makeId();
+    }
+    const baseTask = safeMode === "asreq"
+      ? {
+          id,
+          mode: "asreq",
+          variant: "template",
+          name: label,
+          condition: "As required",
+          manualLink: "",
+          storeLink: "",
+          pn: "",
+          price: null,
+          note: "",
+          parentTask: null,
+          cat: null,
+          order: orderVal,
+          completedDates: [],
+          manualHistory: []
+        }
+      : {
+          id,
+          mode: "interval",
+          variant: "template",
+          name: label,
+          interval: 100,
+          manualLink: "",
+          storeLink: "",
+          pn: "",
+          price: null,
+          note: "",
+          parentTask: null,
+          cat: null,
+          order: orderVal,
+          sinceBase: 0,
+          anchorTotal: null,
+          calendarDateISO: null,
+          completedDates: [],
+          manualHistory: []
+        };
+    const dateKey = normalizeHistoryDate(dateISO);
+    if (dateKey){
+      if (!baseTask.completedDates.includes(dateKey)){
+        baseTask.completedDates.push(dateKey);
+        baseTask.completedDates.sort();
+      }
+      baseTask.manualHistory.push({
+        dateISO: dateKey,
+        status: "completed",
+        source: "history",
+        recordedAtISO: new Date().toISOString(),
+        hoursAtEntry: null,
+        estimatedDailyHours: null
+      });
+    }
+    list.push(baseTask);
+    if (safeMode === "asreq") window.tasksAsReq = list;
+    else window.tasksInterval = list;
+    try { if (typeof saveTasks === "function") saveTasks(); }
+    catch (err) { console.warn("Failed to save tasks after creating history link", err); }
+    try { if (typeof saveCloudDebounced === "function") saveCloudDebounced(); }
+    catch (err) { console.warn("Failed to sync cloud after creating history link", err); }
+    return baseTask;
+  };
+
+  const handleHistoryItemActivation = async (element)=>{
+    if (!(element instanceof HTMLElement)) return;
+    const taskId = element.getAttribute("data-task-id");
+    const originalTaskId = element.getAttribute("data-original-task-id");
+    const taskMode = element.getAttribute("data-task-mode") || "interval";
+    const taskName = element.getAttribute("data-task-name") || "Maintenance task";
+    const trashId = element.getAttribute("data-trash-id");
+    const dateISO = element.getAttribute("data-history-date");
+    const missing = element.hasAttribute("data-task-missing");
+    const hasAnyTask = !element.hasAttribute("data-task-empty");
+    const findTask = typeof findTaskByIdLocal === "function" ? findTaskByIdLocal : null;
+    if (taskId && findTask){
+      const existing = findTask(taskId);
+      if (existing){
+        element.blur?.();
+        if (typeof openSettingsAndReveal === "function"){ openSettingsAndReveal(taskId); }
+        else location.hash = "#/settings";
+        return;
+      }
+    }
+    if (!missing){
+      notifyHistoryMessage(element, hasAnyTask
+        ? "No linked maintenance task is available."
+        : "No maintenance task is linked to this event yet.");
+      return;
+    }
+    let shouldRestore = true;
+    if (typeof showConfirmModal === "function"){
+      shouldRestore = await showConfirmModal({
+        title: "Restore maintenance task?",
+        message: `The maintenance task "${taskName}" was deleted from Maintenance Settings. Restore it?`,
+        confirmText: "Restore task",
+        confirmVariant: "primary",
+        cancelText: "Cancel"
+      });
+    }
+    if (!shouldRestore) return;
+    let restoredId = null;
+    if (trashId && typeof restoreDeletedItem === "function"){
+      try {
+        const result = restoreDeletedItem(trashId);
+        if (result && result.ok && result.value && result.value.type === "task" && result.value.id != null){
+          restoredId = String(result.value.id);
+        }
+      } catch (err) {
+        console.warn("Failed to restore maintenance task from trash", err);
+      }
+    }
+    if (!restoredId && originalTaskId && typeof restoreDeletedItem === "function"){
+      try {
+        const deleted = typeof listDeletedItems === "function"
+          ? listDeletedItems()
+          : (Array.isArray(window.deletedItems) ? window.deletedItems : []);
+        const match = Array.isArray(deleted)
+          ? deleted.find(entry => entry && entry.type === "task" && String(entry.payload?.id || entry.meta?.originalId || "") === String(originalTaskId))
+          : null;
+        if (match){
+          const result = restoreDeletedItem(match.id);
+          if (result && result.ok && result.value && result.value.type === "task" && result.value.id != null){
+            restoredId = String(result.value.id);
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to locate deleted maintenance task", err);
+      }
+    }
+    if (!restoredId){
+      const created = createTaskFromCostHistory({ name: taskName, mode: taskMode, originalId: originalTaskId, dateISO });
+      if (created && created.id != null){
+        restoredId = String(created.id);
+      }
+    }
+    if (restoredId){
+      notifyHistoryMessage(element, "Maintenance task restored.");
+      if (typeof openSettingsAndReveal === "function") openSettingsAndReveal(restoredId);
+      else location.hash = "#/settings";
+    }else{
+      notifyHistoryMessage(element, "Unable to restore this maintenance task.");
+    }
+  };
+
+  const handleHistoryItemDelete = async (element)=>{
+    if (!(element instanceof HTMLElement)) return;
+    const key = element.getAttribute("data-history-key");
+    if (!key) return;
+    const dateISO = element.getAttribute("data-history-date");
+    const hoursRaw = Number(element.getAttribute("data-history-hours"));
+    const hours = Number.isFinite(hoursRaw) && hoursRaw > 0 ? hoursRaw : 0;
+    const dateLabel = (()=>{
+      const labelEl = element.querySelector(".cost-history-date");
+      if (labelEl && labelEl.textContent) return labelEl.textContent.trim();
+      if (dateISO){
+        try {
+          const parsed = new Date(dateISO);
+          if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+            return parsed.toLocaleDateString();
+          }
+        } catch (_err){}
+      }
+      return "this maintenance event";
+    })();
+    let confirmed = true;
+    if (typeof showConfirmModal === "function"){
+      confirmed = await showConfirmModal({
+        title: "Remove maintenance event?",
+        message: `Remove the maintenance event recorded on ${dateLabel} from cost analysis?`,
+        confirmText: "Remove event",
+        confirmVariant: "danger",
+        cancelText: "Cancel"
+      });
+    }else if (typeof window !== "undefined" && typeof window.confirm === "function"){
+      confirmed = window.confirm(`Remove the maintenance event recorded on ${dateLabel}?`);
+    }
+    if (!confirmed) return;
+    suppressCostHistoryEntry({ key, dateISO, hours });
+    if (typeof toast === "function"){
+      toast("Maintenance event removed from cost analysis.");
+    }
+    renderCosts();
+  };
+
+  const historyList = content.querySelector(".cost-history");
+  if (historyList){
+    const resolveItem = (target)=> (target instanceof HTMLElement) ? target.closest("[data-history-item]") : null;
+    const activate = (item)=>{ if (item) handleHistoryItemActivation(item); };
+    const remove = (item)=>{ if (item) handleHistoryItemDelete(item); };
+    historyList.addEventListener("click", (event)=>{
+      const deleteBtn = (event.target instanceof HTMLElement) ? event.target.closest("[data-history-delete]") : null;
+      if (deleteBtn){
+        const item = resolveItem(deleteBtn);
+        if (!item) return;
+        event.preventDefault();
+        event.stopPropagation();
+        remove(item);
+        return;
+      }
+      const item = resolveItem(event.target);
+      if (!item) return;
+      event.preventDefault();
+      activate(item);
+    });
+    historyList.addEventListener("keydown", (event)=>{
+      if (event.repeat) return;
+      if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
+      const item = resolveItem(event.target);
+      if (!item) return;
+      event.preventDefault();
+      activate(item);
+    });
+  }
 
   const canvas = document.getElementById("costChart");
   const toggleMaint = document.getElementById("toggleCostMaintenance");
@@ -6276,6 +6847,24 @@ function computeCostModel(){
     .filter(Boolean)
     .sort((a,b)=> a.date - b.date);
 
+  const suppressionEntriesInitial = listCostHistorySuppressions();
+  const suppressionMap = new Map();
+  suppressionEntriesInitial.forEach(entry => {
+    if (!entry || !entry.key) return;
+    suppressionMap.set(entry.key, { ...entry });
+  });
+  let suppressedEntriesForUsage = suppressionEntriesInitial.map(entry => ({ ...entry }));
+
+  const makeHistoryEntryKey = (entry)=>{
+    if (!entry) return "";
+    const datePart = entry.dateISO ? String(entry.dateISO) : "";
+    const hoursVal = Number(entry.hours);
+    if (Number.isFinite(hoursVal)){
+      return `${datePart}__${hoursVal.toFixed(3)}`;
+    }
+    return `${datePart}__${String(entry.hours || "")}`;
+  };
+
   const currentHours = (typeof RENDER_TOTAL === "number" && isFinite(RENDER_TOTAL))
     ? Number(RENDER_TOTAL)
     : (typeof currentTotal === "function" ? Number(currentTotal() || 0) : 0);
@@ -6413,7 +7002,24 @@ function computeCostModel(){
     const baseline = parsedHistory[0];
     const compareHours = startHours != null ? startHours : (baseline ? baseline.hours : currentHours);
     if (compareHours == null || !isFinite(compareHours)) return 0;
-    return Math.max(0, Number(currentHours || 0) - Number(compareHours));
+    const rawUsage = Math.max(0, Number(currentHours || 0) - Number(compareHours));
+    if (!suppressedEntriesForUsage.length) return rawUsage;
+    const startTime = start.getTime();
+    const endTime = now.getTime();
+    let suppressedTotal = 0;
+    suppressedEntriesForUsage.forEach(entry => {
+      if (!entry || !entry.dateISO) return;
+      const entryDate = new Date(entry.dateISO);
+      if (!(entryDate instanceof Date) || Number.isNaN(entryDate.getTime())) return;
+      entryDate.setHours(0,0,0,0);
+      const time = entryDate.getTime();
+      if (time < startTime || time > endTime) return;
+      const hoursVal = Number(entry.hours);
+      if (!Number.isFinite(hoursVal) || hoursVal <= 0) return;
+      suppressedTotal += hoursVal;
+    });
+    const adjusted = rawUsage - suppressedTotal;
+    return adjusted > 0 ? adjusted : 0;
   };
 
   const determineBaselineDailyHours = ()=>{
@@ -6476,20 +7082,232 @@ function computeCostModel(){
     };
   });
 
+  const toHistoryDateKey = (value)=>{
+    if (!value) return null;
+    if (typeof normalizeDateKey === "function"){
+      try {
+        const normalized = normalizeDateKey(value);
+        if (normalized) return normalized;
+      } catch (_err){}
+    }
+    if (value instanceof Date && !Number.isNaN(value.getTime())){
+      return value.toISOString().slice(0, 10);
+    }
+    if (typeof value === "string"){
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+      const parsed = new Date(trimmed);
+      if (!Number.isNaN(parsed.getTime())){
+        return parsed.toISOString().slice(0, 10);
+      }
+    }
+    return null;
+  };
+
+  const taskEventsByDate = new Map();
+
+  const addTaskEventForDate = (dateKey, info)=>{
+    if (!dateKey || !info || !info.originalId) return;
+    let list = taskEventsByDate.get(dateKey);
+    if (!list){
+      list = [];
+      taskEventsByDate.set(dateKey, list);
+    }
+    const existsAlready = list.some(existing => existing && existing.originalId === info.originalId);
+    if (!existsAlready){
+      list.push({ ...info });
+    }
+  };
+
+  const templateMetaById = new Map();
+  const registerTemplateMeta = (task)=>{
+    if (!task || task.id == null) return;
+    const id = String(task.id);
+    if (templateMetaById.has(id)) return;
+    const mode = task.mode === "asreq" ? "asreq" : "interval";
+    const name = task.name || "Maintenance task";
+    templateMetaById.set(id, { id, mode, name });
+  };
+
+  if (Array.isArray(tasksInterval)){
+    tasksInterval.forEach(task => {
+      if (!task) return;
+      const isInstance = typeof isInstanceTask === "function"
+        ? isInstanceTask(task)
+        : (task.variant === "instance");
+      if (!isInstance) registerTemplateMeta(task);
+    });
+  }
+  if (Array.isArray(tasksAsReq)){
+    tasksAsReq.forEach(task => {
+      if (!task) return;
+      const isInstance = typeof isInstanceTask === "function"
+        ? isInstanceTask(task)
+        : (task.variant === "instance");
+      if (!isInstance) registerTemplateMeta(task);
+    });
+  }
+
+  const deletedList = typeof listDeletedItems === "function"
+    ? listDeletedItems()
+    : (Array.isArray(window.deletedItems) ? window.deletedItems : []);
+  if (Array.isArray(deletedList)){
+    deletedList.forEach(entry => {
+      if (!entry || entry.type !== "task") return;
+      const payload = entry.payload || {};
+      const meta = entry.meta || {};
+      const payloadId = payload.id != null ? String(payload.id) : null;
+      if (!payloadId) return;
+      const mode = payload.mode === "asreq" || meta.list === "asreq" ? "asreq" : "interval";
+      const name = payload.name || entry.label || "Maintenance task";
+      const baseInfo = {
+        id: payloadId,
+        originalId: payloadId,
+        mode,
+        name,
+        exists: false,
+        trashId: entry.id != null ? String(entry.id) : null
+      };
+      const completedDates = Array.isArray(payload.completedDates) ? payload.completedDates : [];
+      completedDates.forEach(dateVal => {
+        const key = toHistoryDateKey(dateVal);
+        if (key) addTaskEventForDate(key, baseInfo);
+      });
+      const manualHistory = Array.isArray(payload.manualHistory) ? payload.manualHistory : [];
+      manualHistory.forEach(item => {
+        if (!item) return;
+        const statusRaw = typeof item.status === "string" ? item.status.toLowerCase() : "";
+        if (statusRaw === "scheduled") return;
+        const key = toHistoryDateKey(item.dateISO);
+        if (key) addTaskEventForDate(key, baseInfo);
+      });
+    });
+  }
+  const captureTaskHistory = (task, { exists = true, trashId = null } = {})=>{
+    if (!task) return;
+    const rawId = task.id != null ? String(task.id) : null;
+    if (!rawId) return;
+
+    let targetId = rawId;
+    let templateMeta = templateMetaById.get(rawId) || null;
+    const isInstance = typeof isInstanceTask === "function"
+      ? isInstanceTask(task)
+      : (task.variant === "instance");
+    if (isInstance){
+      const templateId = task.templateId != null ? String(task.templateId) : null;
+      if (templateId){
+        targetId = templateId;
+        templateMeta = templateMetaById.get(templateId) || templateMeta;
+      }
+    }else if (!templateMeta && task.templateId != null){
+      const templateId = String(task.templateId);
+      targetId = templateId;
+      templateMeta = templateMetaById.get(templateId) || templateMeta;
+    }
+
+    if (!templateMeta){
+      const mode = task.mode === "asreq" ? "asreq" : "interval";
+      const name = task.name || "Maintenance task";
+      templateMeta = { id: targetId, mode, name };
+      if (exists) templateMetaById.set(targetId, templateMeta);
+    }
+
+    const baseInfo = {
+      id: targetId,
+      originalId: targetId,
+      mode: templateMeta.mode,
+      name: templateMeta.name,
+      exists: Boolean(exists),
+      trashId: trashId != null ? String(trashId) : null
+    };
+
+    const pushHistory = (sourceTask)=>{
+      if (!sourceTask) return;
+      const completedDates = Array.isArray(sourceTask.completedDates) ? sourceTask.completedDates : [];
+      completedDates.forEach(dateVal => {
+        const key = toHistoryDateKey(dateVal);
+        if (key) addTaskEventForDate(key, baseInfo);
+      });
+      const manualHistory = Array.isArray(sourceTask.manualHistory) ? sourceTask.manualHistory : [];
+      manualHistory.forEach(entry => {
+        if (!entry) return;
+        const statusRaw = typeof entry.status === "string" ? entry.status.toLowerCase() : "";
+        if (statusRaw === "scheduled") return;
+        const key = toHistoryDateKey(entry.dateISO);
+        if (key) addTaskEventForDate(key, baseInfo);
+      });
+    };
+
+    pushHistory(task);
+    if (isInstance){
+      const templateId = task.templateId != null ? String(task.templateId) : null;
+      if (templateId && Array.isArray(tasksInterval)){
+        const templateTask = tasksInterval.find(item => item && String(item.id) === templateId);
+        if (templateTask) pushHistory(templateTask);
+      }
+    }
+  };
+
+  if (Array.isArray(tasksInterval)){
+    tasksInterval.forEach(task => captureTaskHistory(task, { exists: true }));
+  }
+  if (Array.isArray(tasksAsReq)){
+    tasksAsReq.forEach(task => captureTaskHistory(task, { exists: true }));
+  }
+
   const maintenanceHistory = [];
+  const maintenanceHistoryKeys = new Set();
   for (let i=1; i<parsedHistory.length; i++){
     const prev = parsedHistory[i-1];
     const curr = parsedHistory[i];
     const deltaHours = Number(curr.hours) - Number(prev.hours);
     if (!isFinite(deltaHours) || deltaHours <= 0) continue;
+    const entryKey = makeHistoryEntryKey(curr);
+    if (entryKey) maintenanceHistoryKeys.add(entryKey);
+    const suppression = entryKey ? suppressionMap.get(entryKey) : null;
+    const deltaSafe = deltaHours > 0 ? deltaHours : 0;
+    if (suppression){
+      const storedHours = Number(suppression.hours) || 0;
+      if (Math.abs(storedHours - deltaSafe) > 0.001){
+        suppression.hours = deltaSafe;
+      }
+      if (!suppression.dateISO && curr.dateISO){
+        suppression.dateISO = curr.dateISO;
+      }
+      continue;
+    }
+    const dateKey = toHistoryDateKey(curr.dateISO);
+    const linkedTasksRaw = dateKey ? taskEventsByDate.get(dateKey) : null;
+    const linkedTasks = Array.isArray(linkedTasksRaw)
+      ? linkedTasksRaw.map(task => task ? { ...task } : task).filter(Boolean)
+      : [];
     maintenanceHistory.push({
       date: curr.date,
       dateISO: curr.dateISO,
-      hours: deltaHours,
+      hours: deltaSafe,
       cost: combinedCostPerHour > 0
-        ? deltaHours * combinedCostPerHour
-        : estimateIntervalCost(deltaHours)
+        ? deltaSafe * combinedCostPerHour
+        : estimateIntervalCost(deltaSafe),
+      tasks: linkedTasks,
+      key: entryKey
     });
+  }
+
+  suppressionMap.forEach((entry, key) => {
+    if (!maintenanceHistoryKeys.has(key)){
+      suppressionMap.delete(key);
+    }
+  });
+
+  const suppressionArray = Array.from(suppressionMap.values())
+    .map(normalizeCostHistorySuppression)
+    .filter(Boolean);
+  suppressedEntriesForUsage = suppressionArray.map(entry => ({ ...entry }));
+  if (!costHistorySuppressionsEqual(suppressionArray, suppressionEntriesInitial)){
+    setCostHistorySuppressions(suppressionArray);
+  }else{
+    window.__costHistorySuppressions = suppressionArray.map(entry => ({ ...entry }));
   }
 
   const formatHoursLabel = (hours)=>{
@@ -6828,11 +7646,53 @@ function computeCostModel(){
     }
   };
 
-  const historyRows = maintenanceHistory.slice(-6).reverse().map(entry => ({
-    dateLabel: entry.date.toLocaleDateString(),
-    hoursLabel: formatHours(entry.hours),
-    costLabel: formatterCurrency(entry.cost, { decimals: entry.cost < 1000 ? 2 : 0 })
-  }));
+  const historyRows = maintenanceHistory.slice(-6).reverse().map(entry => {
+    const tasks = Array.isArray(entry.tasks) ? entry.tasks.filter(Boolean) : [];
+    const firstExisting = tasks.find(task => task && task.exists);
+    const fallbackTask = firstExisting || tasks[0] || null;
+    const extraCount = tasks.length > 1 ? tasks.length - 1 : 0;
+    const missingTask = Boolean(fallbackTask && !fallbackTask.exists);
+    const resolvedTaskId = firstExisting && firstExisting.id != null ? String(firstExisting.id) : null;
+    const originalTaskId = fallbackTask && fallbackTask.originalId != null
+      ? String(fallbackTask.originalId)
+      : (fallbackTask && fallbackTask.id != null ? String(fallbackTask.id) : null);
+    const taskMode = fallbackTask ? (fallbackTask.mode === "asreq" ? "asreq" : "interval") : null;
+    const taskName = fallbackTask ? fallbackTask.name : null;
+    const tooltipLabel = tasks.length > 1
+      ? tasks.map(task => task && task.name ? String(task.name) : null).filter(Boolean).join(" • ")
+      : (taskName || "");
+    let taskLabel = null;
+    if (fallbackTask){
+      if (missingTask){
+        taskLabel = `Restore deleted task: ${fallbackTask.name}`;
+      }else if (extraCount > 0){
+        taskLabel = `Linked task: ${fallbackTask.name} (+${extraCount} more)`;
+      }else{
+        taskLabel = `Linked task: ${fallbackTask.name}`;
+      }
+    }else if (tasks.length > 1){
+      taskLabel = `Linked tasks (${tasks.length})`;
+    }
+    const trashId = fallbackTask && fallbackTask.trashId != null ? String(fallbackTask.trashId) : null;
+    return {
+      dateLabel: entry.date.toLocaleDateString(),
+      hoursLabel: formatHours(entry.hours),
+      costLabel: formatterCurrency(entry.cost, { decimals: entry.cost < 1000 ? 2 : 0 }),
+      dateISO: entry.dateISO,
+      key: entry.key || null,
+      hoursValue: Number(entry.hours) || 0,
+      taskId: resolvedTaskId,
+      originalTaskId,
+      taskMode,
+      taskName,
+      taskLabel,
+      tooltipLabel: tooltipLabel || null,
+      missingTask,
+      taskCount: tasks.length,
+      hasLinkedTasks: tasks.length > 0,
+      trashId: missingTask ? trashId : null
+    };
+  });
 
   const jobBreakdown = jobsInfo
     .slice()
