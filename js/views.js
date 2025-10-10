@@ -97,16 +97,24 @@ function viewDashboard(){
               <span class="value" data-efficiency-actual>—</span>
             </div>
             <div class="time-efficiency-metric">
-              <span class="label">Baseline hours</span>
-              <span class="value" data-efficiency-baseline>—</span>
+              <span class="label">Current target</span>
+              <span class="value" data-efficiency-target>—</span>
             </div>
             <div class="time-efficiency-metric">
-              <span class="label">Efficiency</span>
+              <span class="label">Gap vs target</span>
+              <span class="value" data-efficiency-gap-target>—</span>
+            </div>
+            <div class="time-efficiency-metric">
+              <span class="label">End goal</span>
+              <span class="value" data-efficiency-goal>—</span>
+            </div>
+            <div class="time-efficiency-metric">
+              <span class="label">Gap vs goal</span>
+              <span class="value" data-efficiency-gap-goal>—</span>
+            </div>
+            <div class="time-efficiency-metric">
+              <span class="label">Efficiency (to date)</span>
               <span class="value" data-efficiency-percent>—</span>
-            </div>
-            <div class="time-efficiency-metric">
-              <span class="label">Ahead / behind</span>
-              <span class="value" data-efficiency-diff>—</span>
             </div>
           </div>
           <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
@@ -1337,16 +1345,24 @@ function viewCosts(model){
                 <span class="value" data-efficiency-actual>—</span>
               </div>
               <div class="time-efficiency-metric">
-                <span class="label">Baseline hours</span>
-                <span class="value" data-efficiency-baseline>—</span>
+                <span class="label">Current target</span>
+                <span class="value" data-efficiency-target>—</span>
               </div>
               <div class="time-efficiency-metric">
-                <span class="label">Efficiency</span>
+                <span class="label">Gap vs target</span>
+                <span class="value" data-efficiency-gap-target>—</span>
+              </div>
+              <div class="time-efficiency-metric">
+                <span class="label">End goal</span>
+                <span class="value" data-efficiency-goal>—</span>
+              </div>
+              <div class="time-efficiency-metric">
+                <span class="label">Gap vs goal</span>
+                <span class="value" data-efficiency-gap-goal>—</span>
+              </div>
+              <div class="time-efficiency-metric">
+                <span class="label">Efficiency (to date)</span>
                 <span class="value" data-efficiency-percent>—</span>
-              </div>
-              <div class="time-efficiency-metric">
-                <span class="label">Ahead / behind</span>
-                <span class="value" data-efficiency-diff>—</span>
               </div>
             </div>
             <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>

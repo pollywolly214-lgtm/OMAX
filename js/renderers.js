@@ -1928,17 +1928,39 @@ function formatTimeEfficiencyPercent(value){
   return `${num.toFixed(decimals)}%`;
 }
 
-function formatTimeEfficiencyDiff(value){
+function formatTimeEfficiencyDiff(value, options = {}){
+  const {
+    zeroLabel = "On target",
+    aheadLabel = "Ahead",
+    behindLabel = "Behind",
+    fallback = "—"
+  } = options;
   const num = Number(value);
-  if (!Number.isFinite(num) || Math.abs(num) < 0.05) return "On target";
+  if (!Number.isFinite(num)) return fallback;
+  if (Math.abs(num) < 0.05) return zeroLabel;
   const abs = Math.abs(num);
   const decimals = abs >= 100 ? 0 : (Math.abs(abs - Math.round(abs)) < 0.05 ? 0 : 1);
   const formatted = abs.toFixed(decimals);
-  return num > 0 ? `Ahead +${formatted} hr` : `Behind -${formatted} hr`;
+  return num > 0 ? `${aheadLabel} +${formatted} hr` : `${behindLabel} -${formatted} hr`;
 }
 
 function determineTimeEfficiencyTrend(data){
   if (!data) return "";
+  const diffToDate = Number(data.differenceToDateHours);
+  const target = Number(data.targetHoursToDate);
+  if (Number.isFinite(diffToDate)){
+    if (target > 0){
+      if (diffToDate >= 0.05) return "ahead";
+      const shortfall = Math.abs(diffToDate);
+      if (shortfall < 0.05) return "ahead";
+      const shortfallPct = (shortfall / target) * 100;
+      if (shortfallPct <= 10) return "slightly-behind";
+      return "behind";
+    }
+    if (diffToDate >= 0.05) return "ahead";
+    if (diffToDate <= -0.05) return "behind";
+    return "";
+  }
   const diff = Number(data.differenceHours);
   const baseline = Number(data.baselineHours);
   if (!Number.isFinite(diff)) return "";
@@ -2009,9 +2031,23 @@ function refreshTimeEfficiencyWidget(widget){
     : null;
   if (!data) return;
   if (widget.metrics.actual) widget.metrics.actual.textContent = formatTimeEfficiencyHours(data.actualHours);
-  if (widget.metrics.baseline) widget.metrics.baseline.textContent = formatTimeEfficiencyHours(data.baselineHours);
+  if (widget.metrics.target) widget.metrics.target.textContent = formatTimeEfficiencyHours(data.targetHoursToDate);
+  if (widget.metrics.goal) widget.metrics.goal.textContent = formatTimeEfficiencyHours(data.baselineHours);
   if (widget.metrics.percent) widget.metrics.percent.textContent = formatTimeEfficiencyPercent(data.efficiencyPercent);
-  if (widget.metrics.diff) widget.metrics.diff.textContent = formatTimeEfficiencyDiff(data.differenceHours);
+  if (widget.metrics.percentGoal) widget.metrics.percentGoal.textContent = formatTimeEfficiencyPercent(data.efficiencyGoalPercent);
+  if (widget.metrics.diffTarget){
+    const zeroLabel = data && Number(data.targetHoursToDate) > 0 ? "On target" : "No target yet";
+    widget.metrics.diffTarget.textContent = formatTimeEfficiencyDiff(data.differenceToDateHours, {
+      zeroLabel,
+      fallback: zeroLabel
+    });
+  }
+  if (widget.metrics.diffGoal){
+    widget.metrics.diffGoal.textContent = formatTimeEfficiencyDiff(data.differenceHours, {
+      zeroLabel: "Goal met",
+      fallback: "Goal met"
+    });
+  }
   if (widget.root){
     const trend = determineTimeEfficiencyTrend(data);
     if (trend){
@@ -2141,9 +2177,12 @@ function setupTimeEfficiencyWidget(root){
   if (!toggles.length) return;
   const metrics = {
     actual: root.querySelector("[data-efficiency-actual]"),
-    baseline: root.querySelector("[data-efficiency-baseline]"),
+    target: root.querySelector("[data-efficiency-target]"),
+    goal: root.querySelector("[data-efficiency-goal]"),
     percent: root.querySelector("[data-efficiency-percent]"),
-    diff: root.querySelector("[data-efficiency-diff]")
+    percentGoal: root.querySelector("[data-efficiency-goal-percent]"),
+    diffTarget: root.querySelector("[data-efficiency-gap-target]"),
+    diffGoal: root.querySelector("[data-efficiency-gap-goal]")
   };
   const labelEl = root.querySelector("[data-efficiency-window-label]");
   const firstToggle = toggles[0];

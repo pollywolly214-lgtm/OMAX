@@ -92,15 +92,42 @@ function computeTimeEfficiency(rangeDays, options = {}){
   }
 
   const baseline = CUTTING_BASELINE_DAILY_HOURS * normalizedDays;
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  let progressDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  progressDate.setHours(0,0,0,0);
+  let elapsedDays = 0;
+  if (progressDate < startDate){
+    elapsedDays = 0;
+    progressDate = new Date(startDate);
+  } else {
+    if (progressDate > endDate){
+      progressDate = new Date(endDate);
+    }
+    elapsedDays = inclusiveDayCount(startDate, progressDate);
+  }
+  if (!Number.isFinite(elapsedDays)) elapsedDays = 0;
+  elapsedDays = Math.max(0, Math.min(normalizedDays, Math.round(elapsedDays)));
+
+  const targetHours = CUTTING_BASELINE_DAILY_HOURS * elapsedDays;
+  const differenceToDate = actual - targetHours;
   const difference = actual - baseline;
-  const percent = baseline > 0 ? (actual / baseline) * 100 : null;
+  const percentToDate = targetHours > 0
+    ? (actual / targetHours) * 100
+    : (baseline > 0 ? (actual / baseline) * 100 : null);
+  const percentGoal = baseline > 0 ? (actual / baseline) * 100 : null;
 
   return {
     windowDays: normalizedDays,
     actualHours: actual,
     baselineHours: baseline,
     differenceHours: difference,
-    efficiencyPercent: percent,
+    targetHoursToDate: targetHours,
+    differenceToDateHours: differenceToDate,
+    targetDaysElapsed: elapsedDays,
+    efficiencyPercent: percentToDate,
+    efficiencyGoalPercent: percentGoal,
     coverageDays: coverage,
     startISO: ymd(startDate),
     endISO: ymd(endDate),
