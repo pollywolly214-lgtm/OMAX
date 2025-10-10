@@ -1978,9 +1978,8 @@ function formatISODate(date){
 function normalizeTimeEfficiencyStart(days, value){
   const base = parseTimeEfficiencyInput(value);
   if (!base) return null;
-  if (days >= 365){
-    base.setMonth(0, 1);
-  } else if (days > 7){
+  const normalizedDays = Math.max(1, Math.round(Number(days) || 0));
+  if (normalizedDays > 7 && normalizedDays <= 35){
     base.setDate(1);
   }
   base.setHours(0,0,0,0);
@@ -1991,8 +1990,8 @@ function describeTimeEfficiencyEdit(days){
   if (days === 7){
     return "Weekly range automatically runs Monday through Sunday.";
   }
-  if (days >= 365){
-    return "Choose a start date. It will snap to January 1 for yearly tracking.";
+  if (days > 35){
+    return "Choose the start date you'd like to measure from.";
   }
   return "Choose a start date. It will snap to the first day of that month.";
 }
