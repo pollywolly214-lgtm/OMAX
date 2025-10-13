@@ -733,6 +733,8 @@ function getDashboardLayoutState(){
       root: null,
       windows: [],
       editButton: null,
+      editPopup: null,
+      editPopupButton: null,
       settingsButton: null,
       settingsMenu: null,
       hintEl: null,
@@ -891,7 +893,7 @@ function applyDashboardLayout(state){
 
 function updateDashboardEditUi(state){
   if (state.editButton){
-    const label = state.editing ? "Done editing dashboard" : "Edit dashboard layout";
+    const label = state.editing ? "Done and Save" : "Edit dashboard layout";
     state.editButton.textContent = label;
     const pressed = state.editing ? "true" : "false";
     state.editButton.setAttribute("aria-pressed", pressed);
@@ -899,6 +901,24 @@ function updateDashboardEditUi(state){
   }
   if (state.hintEl){
     state.hintEl.hidden = !state.editing;
+  }
+  if (state.editPopup){
+    const hidden = !state.editing;
+    state.editPopup.hidden = hidden;
+    if (typeof state.editPopup.toggleAttribute === "function"){
+      state.editPopup.toggleAttribute("hidden", hidden);
+    } else if (hidden){
+      state.editPopup.setAttribute("hidden", "");
+    } else {
+      state.editPopup.removeAttribute("hidden");
+    }
+    state.editPopup.setAttribute("aria-hidden", hidden ? "true" : "false");
+  }
+  if (state.editPopupButton){
+    state.editPopupButton.disabled = !state.editing;
+    if (state.editing){
+      state.editPopupButton.textContent = "Done and Save";
+    }
   }
   if (state.settingsButton){
     state.settingsButton.classList.toggle("is-active", !!state.editing);
@@ -1407,8 +1427,34 @@ function setDashboardEditing(state, editing){
   }
   applyDashboardLayout(state);
   updateDashboardEditUi(state);
+  if (editing && state.editPopupButton){
+    try {
+      state.editPopupButton.focus({ preventScroll: true });
+    } catch (err){
+      state.editPopupButton.focus();
+    }
+  }
   closeDashboardSettingsMenu();
   if (!editing) persistDashboardLayout(state);
+}
+
+function finishDashboardLayoutEditing(){
+  const state = getDashboardLayoutState();
+  if (!state) return;
+  if (state.editing){
+    setDashboardEditing(state, false);
+  }else{
+    updateDashboardEditUi(state);
+  }
+  if (state.editPopup){
+    state.editPopup.hidden = true;
+    if (typeof state.editPopup.toggleAttribute === "function"){
+      state.editPopup.toggleAttribute("hidden", true);
+    } else {
+      state.editPopup.setAttribute("hidden", "");
+    }
+    state.editPopup.setAttribute("aria-hidden", "true");
+  }
 }
 
 function toggleDashboardEditing(){
@@ -1420,6 +1466,8 @@ function setupDashboardLayout(){
   const state = getDashboardLayoutState();
   state.root = document.getElementById("dashboardLayout") || null;
   state.editButton = document.getElementById("dashboardEditToggle") || null;
+  state.editPopup = document.getElementById("dashboardEditPopup") || null;
+  state.editPopupButton = document.getElementById("dashboardEditPopupButton") || null;
   state.settingsButton = document.getElementById("dashboardSettingsToggle") || null;
   state.settingsMenu = document.getElementById("dashboardSettingsMenu") || null;
   state.hintEl = document.getElementById("dashboardEditHint") || null;
@@ -1445,6 +1493,10 @@ function setupDashboardLayout(){
       toggleDashboardEditing();
       closeDashboardSettingsMenu();
     });
+  }
+  if (state.editPopupButton && !state.editPopupButton.dataset.bound){
+    state.editPopupButton.dataset.bound = "1";
+    state.editPopupButton.addEventListener("click", finishDashboardLayoutEditing);
   }
 }
 
@@ -1495,6 +1547,8 @@ function getCostLayoutState(){
       root: null,
       windows: [],
       editButton: null,
+      editPopup: null,
+      editPopupButton: null,
       settingsButton: null,
       settingsMenu: null,
       hintEl: null,
@@ -1658,7 +1712,7 @@ function applyCostLayout(state){
 
 function updateCostEditUi(state){
   if (state.editButton){
-    const label = state.editing ? "Done editing cost layout" : "Edit cost layout";
+    const label = state.editing ? "Done and Save" : "Edit cost layout";
     state.editButton.textContent = label;
     const pressed = state.editing ? "true" : "false";
     state.editButton.setAttribute("aria-pressed", pressed);
@@ -1666,6 +1720,24 @@ function updateCostEditUi(state){
   }
   if (state.hintEl){
     state.hintEl.hidden = !state.editing;
+  }
+  if (state.editPopup){
+    const hidden = !state.editing;
+    state.editPopup.hidden = hidden;
+    if (typeof state.editPopup.toggleAttribute === "function"){
+      state.editPopup.toggleAttribute("hidden", hidden);
+    } else if (hidden){
+      state.editPopup.setAttribute("hidden", "");
+    } else {
+      state.editPopup.removeAttribute("hidden");
+    }
+    state.editPopup.setAttribute("aria-hidden", hidden ? "true" : "false");
+  }
+  if (state.editPopupButton){
+    state.editPopupButton.disabled = !state.editing;
+    if (state.editing){
+      state.editPopupButton.textContent = "Done and Save";
+    }
   }
   if (state.settingsButton){
     state.settingsButton.classList.toggle("is-active", !!state.editing);
@@ -1865,6 +1937,13 @@ function setCostEditing(state, editing){
   }
   applyCostLayout(state);
   updateCostEditUi(state);
+  if (editing && state.editPopupButton){
+    try {
+      state.editPopupButton.focus({ preventScroll: true });
+    } catch (err){
+      state.editPopupButton.focus();
+    }
+  }
   closeCostSettingsMenu();
   if (!editing) persistCostLayout(state);
 }
@@ -1874,10 +1953,31 @@ function toggleCostEditing(){
   setCostEditing(state, !state.editing);
 }
 
+function finishCostLayoutEditing(){
+  const state = getCostLayoutState();
+  if (!state) return;
+  if (state.editing){
+    setCostEditing(state, false);
+  }else{
+    updateCostEditUi(state);
+  }
+  if (state.editPopup){
+    state.editPopup.hidden = true;
+    if (typeof state.editPopup.toggleAttribute === "function"){
+      state.editPopup.toggleAttribute("hidden", true);
+    } else {
+      state.editPopup.setAttribute("hidden", "");
+    }
+    state.editPopup.setAttribute("aria-hidden", "true");
+  }
+}
+
 function setupCostLayout(){
   const state = getCostLayoutState();
   state.root = document.getElementById("costLayout") || null;
   state.editButton = document.getElementById("costEditToggle") || null;
+  state.editPopup = document.getElementById("costEditPopup") || null;
+  state.editPopupButton = document.getElementById("costEditPopupButton") || null;
   state.settingsButton = document.getElementById("dashboardSettingsToggle") || null;
   state.settingsMenu = document.getElementById("dashboardSettingsMenu") || null;
   state.hintEl = document.getElementById("costEditHint") || null;
@@ -1903,6 +2003,10 @@ function setupCostLayout(){
       toggleCostEditing();
       closeCostSettingsMenu();
     });
+  }
+  if (state.editPopupButton && !state.editPopupButton.dataset.bound){
+    state.editPopupButton.dataset.bound = "1";
+    state.editPopupButton.addEventListener("click", finishCostLayoutEditing);
   }
 }
 
