@@ -1802,6 +1802,14 @@ body.modal-open .auth-bar {
 
 .job-col-impact {
   min-width: 110px;
+  width: 1%;
+  white-space: normal;
+}
+
+.job-col-impact .job-impact,
+.job-col-impact .job-impact-meta {
+  white-space: normal;
+  word-break: break-word;
 }
 
 .job-cell {
@@ -1852,7 +1860,6 @@ body.modal-open .auth-bar {
 .job-col-money,
 .job-col-hours,
 .job-col-need,
-.job-col-impact,
 .job-col-charge,
 .job-col-cost,
 .job-col-net {
