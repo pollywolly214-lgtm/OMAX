@@ -1895,15 +1895,31 @@ function viewJobs(){
     }
     return "Past due by less than 1 hr";
   };
-  const formatNoteLines = (noteText = "")=>{
+  const formatNoteContent = (noteText = "")=>{
     if (!noteText) return "";
-    const lines = noteText.split(/\r?\n/);
-    return lines.map(line => {
-      const trimmed = line.trim();
-      if (!trimmed){
-        return '<span class="job-note-line job-note-line-empty" aria-hidden="true">&nbsp;</span>';
+    const normalized = String(noteText ?? "").replace(/\r\n/g, "\n");
+    const encodeLine = (line)=>{
+      if (!line) return "";
+      const whitespaceMatch = line.match(/^[ \t]+/);
+      if (whitespaceMatch){
+        const prefix = whitespaceMatch[0]
+          .replace(/ /g, "&nbsp;")
+          .replace(/\t/g, "&nbsp;&nbsp;&nbsp;&nbsp;");
+        return `${prefix}${textEsc(line.slice(whitespaceMatch[0].length))}`;
       }
-      return `<span class="job-note-line">${textEsc(line)}</span>`;
+      return textEsc(line);
+    };
+    const paragraphBlocks = normalized.split(/\n{2,}/)
+      .map(block => block || "")
+      .map(block => block.replace(/^\n+/, "").replace(/\s+$/g, ""))
+      .filter(block => block.trim().length > 0);
+    if (!paragraphBlocks.length){
+      const fallbackLines = normalized.split(/\n/).map(encodeLine).join("<br>");
+      return `<p class="job-note-paragraph">${fallbackLines}</p>`;
+    }
+    return paragraphBlocks.map(block => {
+      const htmlLines = block.split(/\n/).map(encodeLine).join("<br>");
+      return `<p class="job-note-paragraph">${htmlLines}</p>`;
     }).join("");
   };
   const rows = jobsForCategory.map(j => {
@@ -1998,7 +2014,7 @@ function viewJobs(){
       const matQtyDisplay  = formatQuantity(matQty);
       const rawNote = j.notes || "";
       const noteContent = rawNote.trim();
-      const noteHtml = formatNoteLines(rawNote);
+      const noteHtml = formatNoteContent(rawNote);
       const notePreview = noteContent
         ? `<div class="job-note-preview">${noteHtml}</div>`
         : `<div class="job-note-preview job-note-preview-empty">Add a note…</div>`;
