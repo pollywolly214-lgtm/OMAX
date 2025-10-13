@@ -1721,10 +1721,10 @@ function viewJobs(){
     if (completedCount > 0) countParts.push(`${completedCount} archived`);
     const countLabel = countParts.length ? `<span class="job-folder-count">${countParts.join(" · ")}</span>` : "";
     const actions = [
-      `<button type="button" class="link" data-job-folder-add="${esc(id)}">+ Sub-category</button>`,
-      !isRoot ? `<button type="button" class="link" data-job-folder-rename="${esc(id)}">Rename</button>` : "",
-      !isRoot ? `<button type="button" class="link danger" data-job-folder-remove="${esc(id)}">Remove</button>` : ""
-    ].filter(Boolean).join("<span class=\"job-folder-action-sep\" aria-hidden=\"true\">·</span>");
+      `<button type="button" class="job-folder-action-btn" data-job-folder-add="${esc(id)}">+ Sub-category</button>`,
+      !isRoot ? `<button type="button" class="job-folder-action-btn" data-job-folder-rename="${esc(id)}">Rename</button>` : "",
+      !isRoot ? `<button type="button" class="job-folder-action-btn job-folder-action-danger" data-job-folder-remove="${esc(id)}">Remove</button>` : ""
+    ].filter(Boolean).join("");
     const childrenMarkup = childrenOf(folder.id).map(child => renderFolderTree(child)).join("");
     return `
       <div class="job-folder" data-job-folder="${esc(id)}">
