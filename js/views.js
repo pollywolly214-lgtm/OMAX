@@ -1613,14 +1613,6 @@ function viewJobs(){
     });
   };
 
-  const completedFiltered = completedForCategory.filter(matchesHistorySearch);
-  const completedStats = completedFiltered.reduce((acc, job)=>{
-    const eff = job && job.efficiency ? job.efficiency : {};
-    const net = computeJobNetTotal(job, eff, { preferActual: true });
-    acc.total += Number.isFinite(net) ? net : 0;
-    return acc;
-  }, { total: 0 });
-  const completedAverage = completedFiltered.length ? (completedStats.total / completedFiltered.length) : 0;
   const numberInputValue = (value)=>{
     const num = Number(value);
     return Number.isFinite(num) ? String(num) : "";
@@ -1756,6 +1748,15 @@ function viewJobs(){
     const normalized = normalizeCategory(job?.cat);
     return allowedCategories.has(normalized);
   });
+
+  const completedFiltered = completedForCategory.filter(matchesHistorySearch);
+  const completedStats = completedFiltered.reduce((acc, job)=>{
+    const eff = job && job.efficiency ? job.efficiency : {};
+    const net = computeJobNetTotal(job, eff, { preferActual: true });
+    acc.total += Number.isFinite(net) ? net : 0;
+    return acc;
+  }, { total: 0 });
+  const completedAverage = completedFiltered.length ? (completedStats.total / completedFiltered.length) : 0;
 
   const historyColumnCount = 7;
   const historySearchDisplay = historySearchValue
