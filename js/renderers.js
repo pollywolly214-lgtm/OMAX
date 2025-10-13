@@ -1471,6 +1471,9 @@ function setupDashboardLayout(){
     state.editPopupButton.addEventListener("click", ()=>{
       if (state.editing){
         setDashboardEditing(state, false);
+        if (state.editPopup){
+          state.editPopup.hidden = true;
+        }
       }
     });
   }
