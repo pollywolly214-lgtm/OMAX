@@ -1775,8 +1775,8 @@ body.modal-open .auth-bar {
   border-bottom: 1px solid #dfe5f4;
 }
 .job-table thead th:nth-child(11) {
-  width: 1%;
-  max-width: 64px;
+  min-width: 118px;
+  width: 118px;
   white-space: normal;
 }
 .job-table thead th:nth-child(15) {
@@ -1802,7 +1802,7 @@ body.modal-open .auth-bar {
 }
 
 .job-col-main {
-  width: 280px;
+  width: 210px;
 }
 
 .job-col-net {
@@ -1877,8 +1877,8 @@ body.modal-open .auth-bar {
 }
 
 .job-col-need {
-  width: 1%;
-  max-width: 48px;
+  min-width: 118px;
+  width: 118px;
   white-space: normal;
 }
 .job-col-need .job-cell-value {
