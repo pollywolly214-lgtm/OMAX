@@ -11,7 +11,7 @@
    ========================================================= */
 
 /* =================== CONSTANTS / GLOBALS =================== */
-const APP_SCHEMA = 71;
+const APP_SCHEMA = 72;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
@@ -386,6 +386,7 @@ if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
 if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
@@ -404,6 +405,7 @@ let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
 let dailyCutHours = window.dailyCutHours;
+let jobFolders = window.jobFolders;
 
 function refreshGlobalCollections(){
   if (typeof window === "undefined") return;
@@ -434,6 +436,9 @@ function refreshGlobalCollections(){
 
   if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
   dailyCutHours = window.dailyCutHours;
+
+  if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
+  jobFolders = window.jobFolders;
 }
 
 function resolveTaskVariant(task){
@@ -841,6 +846,32 @@ function applyRestoreByType(entry, index){
       catch (err) { console.warn("Failed to normalize folders after restore", err); }
       return { handledRemoval: false, value: { type: "folder", id: clone.id } };
     }
+    case "job-folder": {
+      const folders = ensureJobFolderState();
+      const existing = new Set(folders.map(f => String(f.id)));
+      if (!clone.id) clone.id = genId(clone.name || "category");
+      while (existing.has(String(clone.id))){
+        clone.id = genId(clone.name || "category");
+      }
+      if (typeof window._jobFolderOrderCounter !== "number" || !Number.isFinite(window._jobFolderOrderCounter)){
+        window._jobFolderOrderCounter = 0;
+      }
+      const orderVal = Number(clone.order);
+      if (Number.isFinite(orderVal)){
+        if (orderVal > window._jobFolderOrderCounter) window._jobFolderOrderCounter = orderVal;
+      } else {
+        clone.order = ++window._jobFolderOrderCounter;
+      }
+      folders.push({
+        id: clone.id,
+        name: typeof clone.name === "string" ? clone.name : "",
+        parent: clone.parent == null ? JOB_ROOT_FOLDER_ID : String(clone.parent),
+        order: clone.order
+      });
+      setJobFolders(folders);
+      ensureJobCategories();
+      return { handledRemoval: false, value: { type: "job-folder", id: clone.id } };
+    }
     case "garnet": {
       if (!Array.isArray(garnetCleanings)) garnetCleanings = [];
       if (!clone.id) clone.id = genId("garnet");
@@ -980,6 +1011,16 @@ const DEFAULT_SETTINGS_FOLDERS = [
   { id: "asreq",       name: "As Required",  parent: ROOT_FOLDER_ID, order: 1 }
 ];
 
+const JOB_ROOT_FOLDER_ID = "jobs_root";
+window.JOB_ROOT_FOLDER_ID = JOB_ROOT_FOLDER_ID;
+const DEFAULT_JOB_FOLDERS = [
+  { id: JOB_ROOT_FOLDER_ID, name: "All Jobs", parent: null, order: 1 }
+];
+
+function defaultJobFolders(){
+  return DEFAULT_JOB_FOLDERS.map(f => ({ ...f }));
+}
+
 function defaultSettingsFolders(){
   return DEFAULT_SETTINGS_FOLDERS.map(f => ({ ...f }));
 }
@@ -1037,6 +1078,75 @@ function setSettingsFolders(raw){
   window.settingsFolders = normalized;
   window.folders = cloneFolders(window.settingsFolders);
   return window.settingsFolders;
+}
+
+function cloneJobFolders(list){
+  if (!Array.isArray(list)) return [];
+  return list.map(folder => ({ ...folder }));
+}
+
+function normalizeJobFolders(raw){
+  const seen = new Set();
+  const normalized = [];
+  if (Array.isArray(raw)){
+    for (const entry of raw){
+      if (!entry || entry.id == null) continue;
+      const id = String(entry.id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const rawParent = entry.parent != null ? entry.parent : null;
+      let parent = null;
+      if (id === JOB_ROOT_FOLDER_ID){
+        parent = null;
+      }else if (rawParent == null || String(rawParent) === "" || String(rawParent) === id){
+        parent = JOB_ROOT_FOLDER_ID;
+      }else{
+        parent = String(rawParent);
+      }
+      const name = typeof entry.name === "string" ? entry.name : "";
+      const order = Number.isFinite(entry.order) ? Number(entry.order) : 0;
+      normalized.push({ id, name, parent, order });
+    }
+  }
+
+  if (!seen.has(JOB_ROOT_FOLDER_ID)){
+    normalized.push({ ...DEFAULT_JOB_FOLDERS[0] });
+  }
+
+  const validIds = new Set(normalized.map(folder => String(folder.id)));
+  normalized.forEach(folder => {
+    if (String(folder.id) === JOB_ROOT_FOLDER_ID){
+      folder.parent = null;
+      return;
+    }
+    if (!validIds.has(String(folder.parent))){
+      folder.parent = JOB_ROOT_FOLDER_ID;
+    }
+  });
+
+  return normalized;
+}
+
+function setJobFolders(raw){
+  const normalized = normalizeJobFolders(raw);
+  window.jobFolders = normalized;
+  if (typeof window._jobFolderOrderCounter !== "number" || !Number.isFinite(window._jobFolderOrderCounter)){
+    window._jobFolderOrderCounter = 0;
+  }
+  for (const folder of normalized){
+    const orderVal = Number(folder?.order);
+    if (Number.isFinite(orderVal) && orderVal > window._jobFolderOrderCounter){
+      window._jobFolderOrderCounter = orderVal;
+    }
+  }
+  return window.jobFolders;
+}
+
+function snapshotJobFolders(){
+  const source = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();
+  const normalized = normalizeJobFolders(source);
+  window.jobFolders = normalized;
+  return cloneJobFolders(normalized);
 }
 
 function cloneFolders(list){
@@ -1127,6 +1237,7 @@ function snapshotState(){
     deletedItems: trashSnapshot,
     settingsFolders: foldersSnapshot,
     folders: cloneFolders(window.settingsFolders),
+    jobFolders: snapshotJobFolders(),
     dashboardLayout: cloneStructured(dashLayoutSource) || {},
     costLayout: cloneStructured(costLayoutSource) || {}
   };
@@ -1283,6 +1394,97 @@ function ensureTaskCategories(){
     if (!Array.isArray(t.completedDates)) t.completedDates = [];
   });
   tasksAsReq.forEach(t =>    { if (t && !t.cat) t.cat = "asreq"; });
+}
+
+function ensureJobCategories(){
+  const folders = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();
+  const rootId = folders.find(f => String(f.id) === JOB_ROOT_FOLDER_ID)
+    ? JOB_ROOT_FOLDER_ID
+    : (folders[0] ? String(folders[0].id) : JOB_ROOT_FOLDER_ID);
+  const validIds = new Set(folders.map(f => String(f.id)));
+  const normalize = (cat)=>{
+    const key = cat != null ? String(cat) : rootId;
+    return validIds.has(key) ? key : rootId;
+  };
+  cuttingJobs.forEach(job => {
+    if (!job) return;
+    job.cat = normalize(job.cat);
+  });
+  completedCuttingJobs.forEach(job => {
+    if (!job) return;
+    job.cat = normalize(job.cat);
+  });
+}
+
+function ensureJobFolderState(){
+  if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
+  setJobFolders(window.jobFolders);
+  return window.jobFolders;
+}
+
+function jobFolderChildren(parentId){
+  const folders = ensureJobFolderState();
+  const key = parentId == null ? null : String(parentId);
+  return folders.filter(folder => {
+    const parentKey = folder.parent == null ? null : String(folder.parent);
+    return parentKey === key;
+  });
+}
+
+function addJobFolder(name, parentId){
+  const folders = ensureJobFolderState();
+  const label = (name || "").trim();
+  const parentKey = parentId != null ? String(parentId) : JOB_ROOT_FOLDER_ID;
+  const fallbackParent = folders.some(folder => String(folder.id) === parentKey)
+    ? parentKey
+    : JOB_ROOT_FOLDER_ID;
+  const orderBase = folders.reduce((max, folder)=>{
+    const val = Number(folder?.order);
+    return Number.isFinite(val) && val > max ? val : max;
+  }, (typeof window._jobFolderOrderCounter === "number" && Number.isFinite(window._jobFolderOrderCounter)) ? window._jobFolderOrderCounter : 0);
+  const id = genId(label || "category");
+  const folder = {
+    id,
+    name: label,
+    parent: fallbackParent === JOB_ROOT_FOLDER_ID ? JOB_ROOT_FOLDER_ID : fallbackParent,
+    order: orderBase + 1
+  };
+  folders.push(folder);
+  setJobFolders(folders);
+  ensureJobCategories();
+  return folder;
+}
+
+function renameJobFolder(id, name){
+  if (id == null) return null;
+  const folders = ensureJobFolderState();
+  const key = String(id);
+  const target = folders.find(folder => String(folder.id) === key);
+  if (!target) return null;
+  target.name = (name || "").trim();
+  setJobFolders(folders);
+  return target;
+}
+
+function removeJobFolder(id){
+  if (id == null) return false;
+  const folders = ensureJobFolderState();
+  const key = String(id);
+  if (key === JOB_ROOT_FOLDER_ID) return false;
+  const hasChildren = folders.some(folder => String(folder.parent ?? "") === key);
+  if (hasChildren) return false;
+  const remaining = folders.filter(folder => String(folder.id) !== key);
+  if (remaining.length === folders.length) return false;
+  window.jobFolders = remaining;
+  setJobFolders(window.jobFolders);
+  ensureJobCategories();
+  return true;
+}
+
+function jobFolderHasJobs(id){
+  const key = id != null ? String(id) : JOB_ROOT_FOLDER_ID;
+  return cuttingJobs.some(job => String(job?.cat ?? "") === key)
+    || completedCuttingJobs.some(job => String(job?.cat ?? "") === key);
 }
 
 function normalizeInventoryItem(raw){
@@ -1449,6 +1651,12 @@ function adoptState(doc){
     : (Array.isArray(data.folders) ? data.folders : null);
   setSettingsFolders(rawFolders);
 
+  const rawJobFolders = Array.isArray(data.jobFolders)
+    ? data.jobFolders
+    : null;
+  setJobFolders(rawJobFolders);
+  jobFolders = window.jobFolders;
+
   const docDashboardLayout = (data.dashboardLayout && typeof data.dashboardLayout === "object")
     ? data.dashboardLayout
     : {};
@@ -1548,6 +1756,7 @@ function adoptState(doc){
   }
 
   ensureTaskCategories();
+  ensureJobCategories();
   syncRenderTotalsFromHistory();
 }
 
@@ -1594,6 +1803,7 @@ async function loadFromCloud(){
           dailyCutHours: Array.isArray(data.dailyCutHours) ? normalizeDailyCutHours(data.dailyCutHours) : [],
           settingsFolders: seededFoldersPayload,
           folders: cloneFolders(seededFoldersPayload),
+          jobFolders: defaultJobFolders(),
           pumpEff: pe,
           deletedItems: normalizeDeletedItems(data.deletedItems || data.deleted_items || []),
           dashboardLayout: cloneStructured(data.dashboardLayout && typeof data.dashboardLayout === "object" ? data.dashboardLayout : {}) || {},
@@ -1649,6 +1859,7 @@ async function loadFromCloud(){
         orderRequests: [createOrderRequest()],
         orderRequestTab: "active",
         dailyCutHours: [],
+        jobFolders: defaultJobFolders(),
         pumpEff: pe,
         settingsFolders: defaultFolders,
         folders: cloneFolders(defaultFolders),
@@ -1669,7 +1880,7 @@ async function loadFromCloud(){
     if (!Array.isArray(pe.entries)) pe.entries = [];
     if (!Array.isArray(pe.notes)) pe.notes = [];
     const fallbackFolders = defaultSettingsFolders();
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", dailyCutHours: [], pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {} });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", dailyCutHours: [], jobFolders: defaultJobFolders(), pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {} });
     resetHistoryToCurrent();
   }
 }
@@ -1777,6 +1988,7 @@ const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes
     garnetCleanings: [],
     pumpEff: { ...pumpDefaults },
     deletedItems: [],
+    jobFolders: defaultJobFolders(),
     dashboardLayout: {},
     costLayout: {}
   };
@@ -1811,6 +2023,7 @@ async function clearAllAppData(){
   else window.settingsOpenFolders = new Set();
   window.maintenanceSearchTerm = "";
   window.pendingMaintenanceAddFromInventory = null;
+  window.jobFolders = defaultJobFolders();
 
   adoptState(defaults);
   resetHistoryToCurrent();
