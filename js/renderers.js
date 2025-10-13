@@ -8486,6 +8486,11 @@ function drawCostChart(canvas, model, show){
 function renderJobs(){
   const content = document.getElementById("content");
   if (!content) return;
+  try {
+    ensureJobCategories?.();
+  } catch (err){
+    console.warn("Failed to normalize job categories before render", err);
+  }
   setAppSettingsContext("default");
   wireDashboardSettingsMenu();
 
@@ -8787,6 +8792,20 @@ function renderJobs(){
     });
   }
 
+  const jobCategoryFilterSelect = document.getElementById("jobCategoryFilterSelect");
+  if (jobCategoryFilterSelect){
+    jobCategoryFilterSelect.addEventListener("change", (event)=>{
+      const rawValue = event?.target instanceof HTMLSelectElement ? event.target.value : jobCategoryFilterSelect.value;
+      const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+      const folders = ensureCategoryState();
+      const validIds = new Set(folders.map(folder => String(folder?.id)));
+      const nextId = validIds.has(String(rawValue)) ? String(rawValue) : rootId;
+      window.jobCategoryFilter = nextId;
+      jobCategoryFilterSelect.value = nextId;
+      rerenderPreservingState(nextId);
+    });
+  }
+
   content.querySelectorAll("[data-job-category-select]").forEach(select => {
     if (!(select instanceof HTMLSelectElement)) return;
     if (select.dataset.wiredCategory) return;
@@ -8799,20 +8818,53 @@ function renderJobs(){
     content.dataset.jobCategorySelectEvents = "1";
     content.addEventListener("change", (event)=>{
       const select = event.target.closest("[data-job-category-select]");
-      if (!select) return;
+      if (!(select instanceof HTMLSelectElement)) return;
+      const inlineIdRaw = select.getAttribute("data-job-category-inline");
+      const inlineId = inlineIdRaw != null ? String(inlineIdRaw) : "";
+      const isInline = inlineId.length > 0;
+      const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+      const previousValue = select.dataset.prevValue || (isInline ? String(select.value || rootId) : select.value || "");
+
       if (select.value === "__new__"){
-        const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
+        const parent = window.jobCategoryFilter || rootId;
         const folder = promptCreateCategory(parent);
         if (folder){
-          select.value = String(folder.id);
-          select.dataset.prevValue = String(folder.id);
-          rerenderPreservingState(String(folder.id));
+          const nextId = String(folder.id);
+          select.value = nextId;
+          select.dataset.prevValue = nextId;
+          if (isInline){
+            const job = cuttingJobs.find(j => String(j?.id) === inlineId);
+            if (job){
+              job.cat = nextId;
+              ensureJobCategories?.();
+              saveCloudDebounced();
+            }
+          }
+          window.jobCategoryFilter = nextId;
+          rerenderPreservingState(nextId);
         }else{
-          const fallback = select.dataset.prevValue || (window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"));
+          const fallback = previousValue || (window.jobCategoryFilter || rootId);
           select.value = fallback;
         }
-      }else{
-        select.dataset.prevValue = select.value;
+        return;
+      }
+
+      const nextSelection = String(select.value || rootId);
+      select.dataset.prevValue = nextSelection;
+
+      if (isInline){
+        const job = cuttingJobs.find(j => String(j?.id) === inlineId);
+        if (!job){
+          const fallback = previousValue || (window.jobCategoryFilter || rootId);
+          select.value = fallback;
+          select.dataset.prevValue = fallback;
+          return;
+        }
+        job.cat = nextSelection;
+        ensureJobCategories?.();
+        saveCloudDebounced();
+        const currentFilter = typeof window.jobCategoryFilter === "string" ? window.jobCategoryFilter : rootId;
+        rerenderPreservingState(currentFilter);
       }
     });
   }

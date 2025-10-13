@@ -1698,12 +1698,15 @@ function viewJobs(){
   const rootFolder = folderMap.get(rootCategoryId) || { id: rootCategoryId, name: "All Jobs", parent: null, order: 1 };
   ensureFolderEntry(rootFolder, 0);
 
-  const categoryOptionsMarkup = (selectedId)=>{
+  const categoryOptionsMarkup = (selectedId, { includeCreateOption = false, rootLabel } = {})=>{
     const target = normalizeCategory(selectedId);
-    return folderOptions.map(option => {
+    const optionsHtml = folderOptions.map(option => {
       const selectedAttr = option.id === target ? " selected" : "";
-      return `<option value="${esc(option.id)}"${selectedAttr}>${option.label}</option>`;
+      const label = option.id === rootCategoryId && rootLabel ? esc(rootLabel) : option.label;
+      return `<option value="${esc(option.id)}"${selectedAttr}>${label}</option>`;
     }).join("");
+    if (!includeCreateOption) return optionsHtml;
+    return `${optionsHtml}<option value="__new__">+ Create new category…</option>`;
   };
 
   const renderFolderTree = (folder)=>{
@@ -1826,8 +1829,7 @@ function viewJobs(){
               <label>Material cost<input type="number" min="0" step="0.01" data-history-field="materialCost" data-history-id="${job.id}" value="${materialCostVal}"></label>
               <label>Material quantity<input type="number" min="0" step="0.01" data-history-field="materialQty" data-history-id="${job.id}" value="${materialQtyVal}"></label>
               <label>Category<select data-history-field="cat" data-history-id="${job.id}" data-job-category-select>
-                ${categoryOptionsMarkup(job.cat)}
-                <option value="__new__">+ Create new category…</option>
+                ${categoryOptionsMarkup(job.cat, { includeCreateOption: true })}
               </select></label>
             </div>
             <label class="past-job-edit-notes">Notes<textarea data-history-field="notes" data-history-id="${job.id}" rows="3">${textEsc(job?.notes || "")}</textarea></label>
@@ -1963,7 +1965,12 @@ function viewJobs(){
           <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">
             <div class="job-main">
               <strong>${j.name}</strong>
-              <div class="job-main-category small muted">${esc(categoryName)}</div>
+              <div class="job-main-category small muted">Category: ${esc(categoryName)}</div>
+              <label class="job-main-category-picker small">Move to
+                <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(j.name || "Job")}">
+                  ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
+                </select>
+              </label>
               <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
             </div>
           </td>
@@ -2034,8 +2041,7 @@ function viewJobs(){
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
                 <label>Category<select data-j="cat" data-id="${j.id}" data-job-category-select>
-                  ${categoryOptionsMarkup(j.cat)}
-                  <option value="__new__">+ Create new category…</option>
+                  ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
                 </select></label>
               </div>
               <div class="job-edit-summary">
@@ -2102,6 +2108,12 @@ function viewJobs(){
     <div class="block job-main-block">
       <h3>Cutting Jobs</h3>
       <div class="job-page-toolbar">
+        <label class="job-category-filter">
+          <span>Show</span>
+          <select id="jobCategoryFilterSelect" aria-label="Filter cutting jobs by category">
+            ${categoryOptionsMarkup(selectedCategory)}
+          </select>
+        </label>
         <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
       </div>
       <form id="addJobForm" class="mini-form">
@@ -2114,8 +2126,7 @@ function viewJobs(){
         <input type="date" id="jobStart" required>
         <input type="date" id="jobDue" required>
         <select id="jobCategory" aria-label="Category" required>
-          ${categoryOptionsMarkup(selectedCategory)}
-          <option value="__new__">+ Create new category…</option>
+          ${categoryOptionsMarkup(selectedCategory, { includeCreateOption: true })}
         </select>
         <button type="button" id="jobFilesBtn">Attach Files</button>
         <input type="file" id="jobFiles" multiple style="display:none">
