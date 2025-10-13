@@ -1895,6 +1895,17 @@ function viewJobs(){
     }
     return "Past due by less than 1 hr";
   };
+  const formatNoteLines = (noteText = "")=>{
+    if (!noteText) return "";
+    const lines = noteText.split(/\r?\n/);
+    return lines.map(line => {
+      const trimmed = line.trim();
+      if (!trimmed){
+        return '<span class="job-note-line job-note-line-empty" aria-hidden="true">&nbsp;</span>';
+      }
+      return `<span class="job-note-line">${textEsc(line)}</span>`;
+    }).join("");
+  };
   const rows = jobsForCategory.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileLinks = jobFiles.length
@@ -1985,8 +1996,9 @@ function viewJobs(){
     if (!editing){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
       const matQtyDisplay  = formatQuantity(matQty);
-      const noteContent = (j.notes || "").trim();
-      const noteHtml = textEsc(j.notes || "").replace(/\n/g, "<br>");
+      const rawNote = j.notes || "";
+      const noteContent = rawNote.trim();
+      const noteHtml = formatNoteLines(rawNote);
       const notePreview = noteContent
         ? `<div class="job-note-preview">${noteHtml}</div>`
         : `<div class="job-note-preview job-note-preview-empty">Add a note…</div>`;

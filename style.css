@@ -1289,6 +1289,7 @@ body.modal-open .auth-bar {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  align-items: flex-start;
   z-index: 250;
   max-height: min(70vh, 420px);
   overflow-y: auto;
@@ -1801,9 +1802,15 @@ body.modal-open .auth-bar {
   border-bottom: 1px solid #dfe5f4;
 }
 .job-table thead th:nth-child(11) {
-  width: 1%;
-  max-width: 64px;
+  min-width: 132px;
+  width: 148px;
+  max-width: 180px;
   white-space: normal;
+}
+.job-table thead th:nth-child(14) {
+  min-width: 220px;
+  width: 240px;
+  max-width: 280px;
 }
 .job-table thead th:nth-child(15) {
   min-width: 180px;
@@ -1813,11 +1820,11 @@ body.modal-open .auth-bar {
   border-right: 1px solid var(--job-table-divider);
 }
 .job-table tbody td {
-  padding: 4px 6px;
+  padding: 6px 8px;
   border-bottom: 1px solid #e5ebf7;
   vertical-align: top;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 13px;
+  line-height: 1.45;
   color: #1c2d4a;
 }
 .job-table tbody td:not(:last-child) {
@@ -1828,7 +1835,8 @@ body.modal-open .auth-bar {
 }
 
 .job-col-main {
-  width: 280px;
+  width: 240px;
+  max-width: 260px;
 }
 
 .job-col-net {
@@ -1903,8 +1911,9 @@ body.modal-open .auth-bar {
 }
 
 .job-col-need {
-  width: 1%;
-  max-width: 48px;
+  min-width: 132px;
+  width: 148px;
+  max-width: 180px;
   white-space: normal;
 }
 .job-col-need .job-cell-value {
@@ -1912,19 +1921,28 @@ body.modal-open .auth-bar {
   line-height: 1.25;
 }
 .job-col-note {
-  min-width: 160px;
+  min-width: 220px;
+  width: 240px;
+  max-width: 280px;
   white-space: normal;
 }
 .job-note-preview {
-  display: block;
-  font-size: 12px;
-  line-height: 1.35;
-  color: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #13233f;
   white-space: normal;
   word-break: break-word;
+  align-items: flex-start;
 }
-.job-note-preview br {
+.job-note-line {
   display: block;
+}
+.job-note-line-empty {
+  line-height: 0.75;
+  min-height: 0.75rem;
 }
 .job-note-preview-empty {
   color: #7b88a4;
@@ -2199,8 +2217,12 @@ body.modal-open .auth-bar {
   padding: 5px 8px;
   border-radius: 8px;
   border: 1px solid #d6e0f3;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
   background: #fff;
   color: #1c2d4a;
   cursor: pointer;
