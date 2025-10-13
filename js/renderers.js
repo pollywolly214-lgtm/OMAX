@@ -8554,8 +8554,250 @@ function renderJobs(){
   setAppSettingsContext("default");
   wireDashboardSettingsMenu();
 
+  if (typeof window.__cleanupJobFileMenus === "function"){
+    try {
+      window.__cleanupJobFileMenus();
+    } catch (_err) {
+      // ignore cleanup errors
+    }
+    window.__cleanupJobFileMenus = null;
+  }
+
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
+
+  const noteBackdrop = content.querySelector("#jobNoteModal");
+  const noteTextarea = content.querySelector("#jobNoteModalInput");
+  const noteJobLabel = content.querySelector("#jobNoteModalJob");
+  const noteHistory = content.querySelector("#jobNoteModalHistory");
+  const noteSaveBtn = content.querySelector("[data-note-save]");
+  const noteSaveNewBtn = content.querySelector("[data-note-save-new]");
+  const noteCancelBtns = content.querySelectorAll("[data-note-cancel]");
+  const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  let activeNoteJobId = null;
+  let lastNoteTrigger = null;
+  let lastNoteTriggerSelector = "";
+  let openFileMenuId = null;
+  let openFileTrigger = null;
+  let fileMenuDocHandler = null;
+  let fileMenuKeyHandler = null;
+
+  const closeFileMenu = ()=>{
+    if (!openFileMenuId) return;
+    const menu = content.querySelector(`[data-job-file-menu="${openFileMenuId}"]`);
+    if (menu){
+      menu.setAttribute("hidden", "");
+      menu.classList.remove("open");
+    }
+    if (openFileTrigger){
+      openFileTrigger.setAttribute("aria-expanded", "false");
+      openFileTrigger.classList.remove("is-open");
+    }
+    if (fileMenuDocHandler){
+      document.removeEventListener("click", fileMenuDocHandler);
+      fileMenuDocHandler = null;
+    }
+    if (fileMenuKeyHandler){
+      document.removeEventListener("keydown", fileMenuKeyHandler);
+      fileMenuKeyHandler = null;
+    }
+    openFileMenuId = null;
+    openFileTrigger = null;
+  };
+
+  const openFileMenu = (jobId, trigger = null)=>{
+    const id = jobId != null ? String(jobId) : "";
+    if (!id) return;
+    if (openFileMenuId === id){
+      closeFileMenu();
+      return;
+    }
+    closeFileMenu();
+    const menu = content.querySelector(`[data-job-file-menu="${id}"]`);
+    if (!menu) return;
+    menu.removeAttribute("hidden");
+    menu.classList.add("open");
+    openFileMenuId = id;
+    openFileTrigger = trigger || content.querySelector(`[data-job-files="${id}"]`);
+    if (openFileTrigger){
+      openFileTrigger.setAttribute("aria-expanded", "true");
+      openFileTrigger.classList.add("is-open");
+    }
+
+    fileMenuDocHandler = (event)=>{
+      const target = event.target;
+      if (!openFileMenuId) return;
+      const currentMenu = content.querySelector(`[data-job-file-menu="${openFileMenuId}"]`);
+      const currentTrigger = openFileTrigger;
+      if (!currentMenu){
+        closeFileMenu();
+        return;
+      }
+      if (currentMenu.contains(target)){
+        if (target instanceof HTMLElement && target.closest("a")){
+          closeFileMenu();
+        }
+        return;
+      }
+      if (currentTrigger && currentTrigger.contains(target)) return;
+      closeFileMenu();
+    };
+    document.addEventListener("click", fileMenuDocHandler);
+
+    fileMenuKeyHandler = (event)=>{
+      if (event.key === "Escape" || event.key === "Esc"){
+        closeFileMenu();
+      }
+    };
+    document.addEventListener("keydown", fileMenuKeyHandler);
+  };
+
+  window.__cleanupJobFileMenus = ()=>{
+    closeFileMenu();
+    window.__cleanupJobFileMenus = null;
+  };
+
+  const renderNoteHistory = (value)=>{
+    if (!noteHistory) return;
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (!trimmed){
+      noteHistory.innerHTML = '<p class="job-note-history-empty">No previous notes saved.</p>';
+      return;
+    }
+    const entries = trimmed.split(/\n{2,}/).map(part => part.trim()).filter(Boolean);
+    if (!entries.length){
+      noteHistory.innerHTML = '<p class="job-note-history-empty">No previous notes saved.</p>';
+      return;
+    }
+    noteHistory.innerHTML = entries.map(entry => `<div class="job-note-history-entry">${escapeHtml(entry).replace(/\n/g, '<br>')}</div>`).join("\n");
+  };
+
+  const openJobNoteModal = (jobId, { appendBlank = false, trigger = null } = {})=>{
+    if (!noteBackdrop || !noteTextarea) return;
+    const id = jobId != null ? String(jobId) : "";
+    if (!id) return;
+    const job = cuttingJobs.find(x => String(x.id) === id);
+    if (!job) return;
+    activeNoteJobId = id;
+    const jobName = job.name ? String(job.name) : "Cutting job";
+    if (noteJobLabel) noteJobLabel.textContent = jobName;
+    const noteValue = typeof job.notes === "string" ? job.notes : "";
+    const normalized = noteValue.replace(/\s+$/, "");
+    const baseValue = appendBlank && normalized ? `${normalized}\n\n` : normalized;
+    noteTextarea.value = baseValue;
+    renderNoteHistory(normalized);
+    noteBackdrop.hidden = false;
+    noteBackdrop.classList.add("open");
+    const resolvedTrigger = trigger || content.querySelector(`[data-job-note="${id}"]`);
+    lastNoteTrigger = resolvedTrigger || null;
+    lastNoteTriggerSelector = `[data-job-note="${id}"]`;
+    requestAnimationFrame(()=>{
+      try {
+        noteTextarea.focus();
+        const len = noteTextarea.value.length;
+        noteTextarea.setSelectionRange(len, len);
+      } catch (_err) { }
+    });
+  };
+
+  const closeJobNoteModal = ()=>{
+    if (!noteBackdrop) return;
+    noteBackdrop.classList.remove("open");
+    noteBackdrop.hidden = true;
+    if (noteTextarea) noteTextarea.value = "";
+    activeNoteJobId = null;
+    const focusTarget = lastNoteTrigger && document.body.contains(lastNoteTrigger)
+      ? lastNoteTrigger
+      : (lastNoteTriggerSelector ? content.querySelector(lastNoteTriggerSelector) : null);
+    if (focusTarget){
+      try { focusTarget.focus(); } catch (_err) { }
+    }
+    lastNoteTrigger = null;
+    lastNoteTriggerSelector = "";
+  };
+
+  const handleJobNoteSave = ({ keepOpen = false, prepareNew = false } = {})=>{
+    if (!activeNoteJobId || !noteTextarea) return;
+    const job = cuttingJobs.find(x => String(x.id) === String(activeNoteJobId));
+    if (!job) return;
+    const raw = typeof noteTextarea.value === "string" ? noteTextarea.value : "";
+    const normalized = raw.replace(/\s+$/, "");
+    job.notes = normalized;
+    window.cuttingJobs = cuttingJobs;
+    saveCloudDebounced();
+    toast("Notes updated");
+    if (keepOpen){
+      window.__pendingJobNoteModal = { jobId: String(job.id), appendBlank: !!prepareNew };
+      window.__pendingJobNoteReturn = "";
+    } else {
+      window.__pendingJobNoteModal = null;
+      window.__pendingJobNoteReturn = String(job.id);
+    }
+    renderJobs();
+  };
+
+  noteSaveBtn?.addEventListener("click", ()=> handleJobNoteSave({ keepOpen: false, prepareNew: false }));
+  noteSaveNewBtn?.addEventListener("click", ()=> handleJobNoteSave({ keepOpen: true, prepareNew: true }));
+  noteCancelBtns.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      closeJobNoteModal();
+    });
+  });
+  if (noteBackdrop){
+    noteBackdrop.addEventListener("click", (event)=>{
+      if (event.target === noteBackdrop){
+        event.preventDefault();
+        closeJobNoteModal();
+      }
+    });
+    noteBackdrop.addEventListener("keydown", (event)=>{
+      if (event.key === "Escape" || event.key === "Esc"){
+        event.preventDefault();
+        closeJobNoteModal();
+      }
+    }, true);
+  }
+  noteTextarea?.addEventListener("keydown", (event)=>{
+    if (event.key === "Escape" || event.key === "Esc"){
+      event.preventDefault();
+      closeJobNoteModal();
+    }
+  });
+
+  content.querySelectorAll('[data-job-note]').forEach(el => {
+    if (el instanceof HTMLButtonElement) return;
+    el.addEventListener('keydown', (event)=>{
+      if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar'){
+        event.preventDefault();
+        const id = el.getAttribute('data-job-note');
+        openJobNoteModal(id, { appendBlank: false, trigger: el });
+      }
+    });
+  });
+
+  const pendingNoteModal = window.__pendingJobNoteModal && typeof window.__pendingJobNoteModal === "object"
+    ? window.__pendingJobNoteModal
+    : null;
+  const pendingNoteReturn = typeof window.__pendingJobNoteReturn === "string"
+    ? window.__pendingJobNoteReturn
+    : "";
+  if (pendingNoteModal && pendingNoteModal.jobId){
+    requestAnimationFrame(()=>{
+      openJobNoteModal(pendingNoteModal.jobId, {
+        appendBlank: !!pendingNoteModal.appendBlank,
+        trigger: content.querySelector(`[data-job-note="${pendingNoteModal.jobId}"]`)
+      });
+    });
+  } else if (pendingNoteReturn){
+    requestAnimationFrame(()=>{
+      const trigger = content.querySelector(`[data-job-note="${pendingNoteReturn}"]`);
+      if (trigger){
+        try { trigger.focus(); } catch (_err) { }
+      }
+    });
+  }
+  window.__pendingJobNoteModal = null;
+  window.__pendingJobNoteReturn = "";
 
   const focusPastJobs = ()=>{
     const target = document.getElementById("pastJobs");
@@ -8744,7 +8986,7 @@ function renderJobs(){
   });
 
   // 5) Inline material $/qty (kept)
-  content.querySelector("tbody")?.addEventListener("change", async (e)=>{
+  content.querySelector(".job-table tbody")?.addEventListener("change", async (e)=>{
     if (e.target.matches("input[data-job-file-input]")){
       const id = e.target.getAttribute("data-job-file-input");
       const j = cuttingJobs.find(x=>x.id===id);
@@ -8988,7 +9230,35 @@ function renderJobs(){
   });
 
   // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
-  content.querySelector("tbody")?.addEventListener("click",(e)=>{
+  content.querySelector(".job-table tbody")?.addEventListener("click",(e)=>{
+    const fileTrigger = e.target.closest("[data-job-files]");
+    if (fileTrigger){
+      const id = fileTrigger.getAttribute("data-job-files");
+      if (id){
+        e.preventDefault();
+        openFileMenu(id, fileTrigger);
+      }
+      return;
+    }
+
+    if (openFileMenuId){
+      const activeMenu = content.querySelector(`[data-job-file-menu="${openFileMenuId}"]`);
+      const activeTrigger = openFileTrigger;
+      if (activeMenu && !activeMenu.contains(e.target) && (!activeTrigger || !activeTrigger.contains(e.target))){
+        closeFileMenu();
+      }
+    }
+
+    const noteTrigger = e.target.closest("[data-job-note]");
+    if (noteTrigger && (!noteBackdrop || !noteBackdrop.contains(noteTrigger))){
+      const id = noteTrigger.getAttribute("data-job-note");
+      if (id){
+        e.preventDefault();
+        closeFileMenu();
+        openJobNoteModal(id, { appendBlank: false, trigger: noteTrigger });
+      }
+      return;
+    }
     const locked = e.target.closest("[data-requires-edit]");
     if (locked){
       const id = locked.getAttribute("data-requires-edit");
@@ -9001,6 +9271,7 @@ function renderJobs(){
     const upload = e.target.closest("[data-upload-job]");
     if (upload){
       const id = upload.getAttribute("data-upload-job");
+      closeFileMenu();
       content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
       return;
     }
@@ -9029,10 +9300,11 @@ function renderJobs(){
     const apRemain = e.target.closest("[data-log-apply-remain]");
 
     // Edit
-    if (ed){ editingJobs.add(ed.getAttribute("data-edit-job")); renderJobs(); return; }
+    if (ed){ closeFileMenu(); editingJobs.add(ed.getAttribute("data-edit-job")); renderJobs(); return; }
 
     // Remove
     if (rm){
+      closeFileMenu();
       const id = rm.getAttribute("data-remove-job");
       const job = cuttingJobs.find(x=>x.id===id);
       if (job){
@@ -9049,6 +9321,7 @@ function renderJobs(){
     }
 
     if (complete){
+      closeFileMenu();
       const id = complete.getAttribute("data-complete-job");
       const idx = cuttingJobs.findIndex(x=>x.id===id);
       if (idx < 0) return;
@@ -9114,6 +9387,7 @@ function renderJobs(){
 
     // Save (from edit row)
     if (sv){
+      closeFileMenu();
       const id = sv.getAttribute("data-save-job");
       const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
       const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${id}"]`)?.value;
@@ -9139,10 +9413,11 @@ function renderJobs(){
     }
 
     // Cancel edit
-    if (ca){ editingJobs.delete(ca.getAttribute("data-cancel-job")); renderJobs(); return; }
+    if (ca){ closeFileMenu(); editingJobs.delete(ca.getAttribute("data-cancel-job")); renderJobs(); return; }
 
     // Toggle inline Log panel (adds both "spent" and "remaining" controls)
     if (lg){
+      closeFileMenu();
       const id = lg.getAttribute("data-log-job");
       const anchor   = content.querySelector(`tr[data-job-row="${id}"]`);
       const existing = content.querySelector(`tr[data-log-row="${id}"]`);
@@ -9159,8 +9434,9 @@ function renderJobs(){
       const trForm = document.createElement("tr");
       trForm.className = "manual-log-row";
       trForm.setAttribute("data-log-row", id);
+      const columnCount = content.querySelector(".job-table thead tr")?.children.length || 16;
       trForm.innerHTML = `
-        <td colspan="14">
+        <td colspan="${columnCount}">
           <div class="mini-form" style="display:grid; gap:8px; align-items:end; grid-template-columns: repeat(6, minmax(0,1fr));">
             <div style="grid-column:1/7">
               <strong>Manual Log for: ${j.name}</strong>
@@ -9190,6 +9466,7 @@ function renderJobs(){
 
     // Apply "spent" (increment completedHours)
     if (apSpent){
+      closeFileMenu();
       const id = apSpent.getAttribute("data-log-apply-spent");
       const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
       const add = Number(content.querySelector(`#manSpent_${id}`)?.value);
@@ -9212,6 +9489,7 @@ function renderJobs(){
 
     // Apply "remaining" (set completedHours = estimate - remaining)
     if (apRemain){
+      closeFileMenu();
       const id = apRemain.getAttribute("data-log-apply-remain");
       const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
       const remain = Number(content.querySelector(`#manRemain_${id}`)?.value);

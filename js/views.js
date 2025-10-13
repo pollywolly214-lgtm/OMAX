@@ -1693,17 +1693,28 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
-  const activeColumnCount = 14;
+  const activeColumnCount = 16;
   const rows = cuttingJobs.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
-    const fileLinks = jobFiles.length
-      ? `<ul class="job-file-pill-list">${jobFiles.map((f, idx) => {
-          const safeName = f.name || `file_${idx+1}`;
-          const href = f.dataUrl || f.url || "";
-          if (!href) return "";
-          return `<li><a href="${href}" download="${safeName}" class="job-file-pill">${safeName}</a></li>`;
-        }).filter(Boolean).join("")}</ul>`
-      : `<p class="small muted">No files attached. Edit the job to add files.</p>`;
+    const fileCount = jobFiles.length;
+    const fileMenuId = `jobFileMenu_${j.id}`;
+    const fileLabel = fileCount
+      ? `${fileCount} file${fileCount === 1 ? "" : "s"}`
+      : "No files";
+    const fileMenuItems = fileCount
+      ? jobFiles.map((f, idx) => {
+          const safeName = esc(f?.name || `file_${idx + 1}`);
+          const hrefRaw = f?.dataUrl || f?.url || "";
+          const href = esc(hrefRaw);
+          if (!hrefRaw){
+            return `<li class="job-file-menu-item">${safeName}</li>`;
+          }
+          return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
+        }).join("")
+      : "";
+    const fileMenu = fileCount
+      ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
+      : `<p class="job-file-menu-empty small muted">No files attached</p>`;
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
@@ -1760,6 +1771,11 @@ function viewJobs(){
     const efficiencyDetail = slackSummary
       ? `${statusLabel}; ${capacitySummary}; ${slackSummary}`
       : `${statusLabel}; ${capacitySummary}`;
+    const efficiencySummary = efficiencyDetail
+      .split(';')
+      .map(part => part.trim())
+      .filter(Boolean)
+      .join(' • ');
     const impactDisplay = netTotalDisplay;
 
     const estimateDisplay = formatHours(j.estimateHours);
@@ -1777,72 +1793,147 @@ function viewJobs(){
     const dueDate   = parseDateLocal(j.dueISO);
     const startTxt  = startDate ? startDate.toDateString() : "—";
     const dueTxt    = dueDate ? dueDate.toDateString() : "—";
+    const startShort = startDate
+      ? startDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      : '—';
+    const dueShort = dueDate
+      ? dueDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      : '—';
+    const scheduleSummary = `${startShort} → ${dueShort}`;
     const dueVal    = dueDate ? ymd(dueDate) : (j.dueISO || "");
 
     if (!editing){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
       const matQtyDisplay  = formatQuantity(matQty);
       const noteContent = (j.notes || "").trim();
-      const noteMarkup = noteContent
-        ? `<div id="jobNote_${j.id}" class="job-note-display" data-requires-edit="${j.id}">${textEsc(j.notes || "").replace(/\n/g, "<br>")}</div>`
-        : `<div id="jobNote_${j.id}" class="job-note-display job-note-empty" data-requires-edit="${j.id}">Add a note…</div>`;
+      const notePreviewText = noteContent
+        ? textEsc(noteContent.length > 90 ? `${noteContent.slice(0, 87)}…` : noteContent).replace(/\n/g, "<br>")
+        : '<span class="job-note-placeholder">Add a note</span>';
+      const noteLabel = esc(j.name || "Cutting job");
+      const noteColumn = `
+        <td class="job-col job-col-note">
+          <div class="job-cell job-cell-stretch">
+            <span class="job-cell-label">Notes</span>
+            <button type="button" class="job-note-trigger ${noteContent ? "has-note" : ""}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteLabel}">
+              <span class="job-note-trigger-text" data-job-note-display="${j.id}">${notePreviewText}</span>
+            </button>
+          </div>
+        </td>`;
+      const filesColumn = `
+        <td class="job-col job-col-files">
+          <div class="job-cell job-cell-stretch">
+            <span class="job-cell-label">Files</span>
+            <div class="job-file-cell">
+              <button type="button" class="job-file-trigger ${fileCount ? "has-files" : ""}" data-job-files="${j.id}" aria-haspopup="true" aria-expanded="false" aria-controls="${fileMenuId}">
+                <span class="job-file-trigger-text">${fileLabel}</span>
+                <span class="job-file-trigger-icon" aria-hidden="true">▾</span>
+              </button>
+              <div class="job-file-dropdown" id="${fileMenuId}" data-job-file-menu="${j.id}" hidden>
+                ${fileMenu}
+                <div class="job-file-menu-hint small muted">Edit the job to add files.</div>
+              </div>
+            </div>
+          </div>
+        </td>`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
           <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">
-            <div class="job-main">
-              <strong>${j.name}</strong>
-              <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
+            <div class="job-cell job-cell-main">
+              <span class="job-cell-label">Job</span>
+              <div class="job-cell-value job-main">
+                <strong>${j.name}</strong>
+                <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
+              </div>
             </div>
           </td>
-          <td class="job-col job-col-estimate job-col-locked" data-requires-edit="${j.id}">${estimateDisplay}</td>
-          <td class="job-col job-col-material job-col-locked" data-requires-edit="${j.id}">${j.material || '—'}</td>
-          <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">${matCostDisplay}</td>
-          <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">${matQtyDisplay}</td>
-          <td class="job-col job-col-money">$${matTotal.toFixed(2)}</td>
-          <td class="job-col job-col-charge">${chargeDisplay}</td>
-          <td class="job-col job-col-cost">${costDisplay}</td>
-          <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
-          <td class="job-col job-col-hours">${remainingDisplay}</td>
-          <td class="job-col job-col-need">${needDisplay}</td>
-          <td class="job-col job-col-status">${statusDisplay}</td>
+          <td class="job-col job-col-estimate job-col-locked" data-requires-edit="${j.id}">
+            <div class="job-cell job-cell-right">
+              <span class="job-cell-label">Estimate</span>
+              <span class="job-cell-value">${estimateDisplay}</span>
+            </div>
+          </td>
+          <td class="job-col job-col-material job-col-locked" data-requires-edit="${j.id}">
+            <div class="job-cell">
+              <span class="job-cell-label">Material</span>
+              <span class="job-cell-value">${j.material || '—'}</span>
+            </div>
+          </td>
+          <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">
+            <div class="job-cell job-cell-right">
+              <span class="job-cell-label">Cost / unit</span>
+              <span class="job-cell-value">${matCostDisplay}</span>
+            </div>
+          </td>
+          <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">
+            <div class="job-cell job-cell-right">
+              <span class="job-cell-label">Quantity</span>
+              <span class="job-cell-value">${matQtyDisplay}</span>
+            </div>
+          </td>
+          <td class="job-col job-col-money">
+            <div class="job-cell job-cell-right">
+              <span class="job-cell-label">Material total</span>
+              <span class="job-cell-value">$${matTotal.toFixed(2)}</span>
+            </div>
+          </td>
+          <td class="job-col job-col-charge">
+            <div class="job-cell job-cell-right">
+              <span class="job-cell-label">Charge rate</span>
+              <span class="job-cell-value">${chargeDisplay}</span>
+            </div>
+          </td>
+          <td class="job-col job-col-cost">
+            <div class="job-cell job-cell-right">
+              <span class="job-cell-label">Cost rate</span>
+              <span class="job-cell-value">${costDisplay}</span>
+            </div>
+          </td>
+          <td class="job-col job-col-net">
+            <div class="job-cell job-cell-right">
+              <span class="job-cell-label">Net profit/hr</span>
+              <span class="job-cell-value job-rate-net ${netClass}">${netDisplay}</span>
+            </div>
+          </td>
+          <td class="job-col job-col-hours">
+            <div class="job-cell job-cell-right">
+              <span class="job-cell-label">Hours remaining</span>
+              <span class="job-cell-value">${remainingDisplay}</span>
+            </div>
+          </td>
+          <td class="job-col job-col-need">
+            <div class="job-cell job-cell-right">
+              <span class="job-cell-label">Needed / day</span>
+              <span class="job-cell-value">${needDisplay}</span>
+            </div>
+          </td>
+          <td class="job-col job-col-status">
+            <div class="job-cell">
+              <span class="job-cell-label">Status</span>
+              <div class="job-cell-value job-cell-status">${statusDisplay}</div>
+            </div>
+          </td>
+          ${noteColumn}
+          ${filesColumn}
           <td class="job-col job-col-impact">
-            <span class="job-impact ${impactClass}">${impactDisplay}</span>
-            <div class="job-impact-note small muted">Net total reflects estimated hours and material usage</div>
+            <div class="job-cell job-cell-right">
+              <span class="job-cell-label">Net total</span>
+              <span class="job-impact ${impactClass}">${impactDisplay}</span>
+              <div class="job-impact-meta">Charge ${chargeDisplay} • Cost ${costDisplay} • Net/hr <span class="job-rate-net ${netClass}">${netDisplay}</span></div>
+              <div class="job-impact-meta job-impact-dates">${scheduleSummary}</div>
+              <div class="job-impact-meta">${esc(efficiencySummary)}</div>
+            </div>
           </td>
           <td class="job-col job-col-actions">
-            <div class="job-actions">
-              <button data-log-job="${j.id}">Log time</button>
-              <button data-edit-job="${j.id}">Edit</button>
-              <button data-complete-job="${j.id}">Mark complete</button>
-              <button class="danger" data-remove-job="${j.id}">Remove</button>
+            <div class="job-cell job-cell-stretch">
+              <span class="job-cell-label">Actions</span>
+              <div class="job-actions">
+                <button data-log-job="${j.id}">Log time</button>
+                <button data-edit-job="${j.id}">Edit</button>
+                <button data-complete-job="${j.id}">Mark complete</button>
+                <button class="danger" data-remove-job="${j.id}">Remove</button>
+              </div>
             </div>
             <span data-log-job="${j.id}" style="display:none"></span>
-          </td>
-        </tr>
-        <tr class="job-detail-row">
-          <td colspan="${activeColumnCount}">
-            <div class="job-detail-card">
-              <div class="job-detail-note">
-                <label class="job-detail-label" for="jobNote_${j.id}">Notes</label>
-                ${noteMarkup}
-              </div>
-              <div class="job-detail-meta">
-                <div class="job-detail-efficiency small muted">${efficiencyDetail}</div>
-                <div class="job-detail-cost">
-                  <span class="job-detail-label">Cost efficiency</span>
-                  <div class="job-detail-cost-grid">
-                    <div><span>Charge</span><strong>${chargeDisplay}</strong></div>
-                    <div><span>Cost</span><strong>${costDisplay}</strong></div>
-                    <div><span>Net/hr</span><strong class="${netClass}">${netDisplay}</strong></div>
-                    <div><span>Net total</span><strong class="${impactClass}">${netTotalDisplay}</strong></div>
-                  </div>
-                </div>
-                <div class="job-detail-files">
-                  <span class="job-detail-label">Files</span>
-                  ${fileLinks}
-                </div>
-              </div>
-            </div>
           </td>
         </tr>`;
     } else {
@@ -1947,6 +2038,8 @@ function viewJobs(){
             <th>Hours remaining</th>
             <th>Needed / day</th>
             <th>Status</th>
+            <th>Notes</th>
+            <th>Files</th>
             <th>Net total</th>
             <th>Actions</th>
           </tr>
@@ -1954,6 +2047,26 @@ function viewJobs(){
         <tbody>${rows}</tbody>
       </table>
       <p class="small muted">Material cost and quantity update immediately when changed.</p>
+      <div class="job-note-modal-backdrop" id="jobNoteModal" hidden>
+        <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobNoteModalTitle">
+          <div class="job-note-modal-header">
+            <h4 id="jobNoteModalTitle">Job notes</h4>
+            <button type="button" class="job-note-modal-close" data-note-cancel aria-label="Close notes">×</button>
+          </div>
+          <div class="job-note-modal-body">
+            <div class="job-note-modal-field">
+              <label for="jobNoteModalInput">Notes for <span id="jobNoteModalJob"></span></label>
+              <textarea id="jobNoteModalInput" rows="6" placeholder="Add notes for this cutting job"></textarea>
+            </div>
+            <div class="job-note-modal-history" id="jobNoteModalHistory" aria-live="polite"></div>
+          </div>
+          <div class="job-note-modal-actions">
+            <button type="button" data-note-save class="job-note-modal-primary">Save</button>
+            <button type="button" data-note-save-new>Save &amp; New</button>
+            <button type="button" data-note-cancel class="job-note-modal-secondary">Cancel</button>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="block past-jobs-block" id="pastJobs">
       <h3>Past Cutting Jobs</h3>

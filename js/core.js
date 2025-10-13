@@ -957,6 +957,12 @@ if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
 if (!(window.editingCompletedJobs instanceof Set)) window.editingCompletedJobs = new Set();
 if (typeof window.RENDER_TOTAL !== "number") window.RENDER_TOTAL = null;
 if (typeof window.RENDER_DELTA !== "number") window.RENDER_DELTA = 0;
+if (typeof window.__pendingJobNoteModal !== "object" || window.__pendingJobNoteModal === null) {
+  window.__pendingJobNoteModal = null;
+}
+if (typeof window.__pendingJobNoteReturn !== "string") {
+  window.__pendingJobNoteReturn = "";
+}
 
 const editingJobs  = window.editingJobs;
 let   RENDER_TOTAL = window.RENDER_TOTAL;
