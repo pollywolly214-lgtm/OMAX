@@ -1289,6 +1289,7 @@ body.modal-open .auth-bar {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  align-items: flex-start;
   z-index: 250;
   max-height: min(70vh, 420px);
   overflow-y: auto;
@@ -1801,9 +1802,15 @@ body.modal-open .auth-bar {
   border-bottom: 1px solid #dfe5f4;
 }
 .job-table thead th:nth-child(11) {
-  width: 1%;
-  max-width: 64px;
+  min-width: 132px;
+  width: 148px;
+  max-width: 180px;
   white-space: normal;
+}
+.job-table thead th:nth-child(14) {
+  min-width: 240px;
+  width: 260px;
+  max-width: 320px;
 }
 .job-table thead th:nth-child(15) {
   min-width: 180px;
@@ -1813,12 +1820,12 @@ body.modal-open .auth-bar {
   border-right: 1px solid var(--job-table-divider);
 }
 .job-table tbody td {
-  padding: 4px 6px;
+  padding: 6px 8px;
   border-bottom: 1px solid #e5ebf7;
   vertical-align: top;
-  font-size: 12px;
-  line-height: 1.35;
-  color: #1c2d4a;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #172a4d;
 }
 .job-table tbody td:not(:last-child) {
   border-right: 1px solid var(--job-table-divider);
@@ -1828,7 +1835,8 @@ body.modal-open .auth-bar {
 }
 
 .job-col-main {
-  width: 280px;
+  width: 220px;
+  max-width: 240px;
 }
 
 .job-col-net {
@@ -1850,7 +1858,7 @@ body.modal-open .auth-bar {
 .job-cell {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .job-cell-label {
@@ -1862,7 +1870,7 @@ body.modal-open .auth-bar {
 
 .job-cell-value {
   display: block;
-  font-size: 12px;
+  font-size: 13px;
   color: inherit;
 }
 
@@ -1903,8 +1911,9 @@ body.modal-open .auth-bar {
 }
 
 .job-col-need {
-  width: 1%;
-  max-width: 48px;
+  min-width: 132px;
+  width: 148px;
+  max-width: 180px;
   white-space: normal;
 }
 .job-col-need .job-cell-value {
@@ -1912,7 +1921,43 @@ body.modal-open .auth-bar {
   line-height: 1.25;
 }
 .job-col-note {
-  min-width: 140px;
+  min-width: 240px;
+  width: 260px;
+  max-width: 320px;
+  white-space: normal;
+}
+.job-note-preview {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #d6e0f3;
+  background: #f9fbff;
+  color: #13233f;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: normal;
+  word-break: break-word;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  cursor: default;
+}
+.job-note-paragraph {
+  margin: 0;
+  width: 100%;
+  display: block;
+}
+.job-note-paragraph + .job-note-paragraph {
+  margin-top: 8px;
+}
+.job-note-preview .job-note-paragraph + .job-note-paragraph {
+  margin-top: 10px;
+}
+.job-note-preview-empty {
+  color: #6b7b94;
+  font-style: italic;
+  border-style: dashed;
+  border-color: #c4d1ea;
+  background: #f5f7fc;
+  box-shadow: none;
 }
 .job-main {
   display: flex;
@@ -2180,16 +2225,26 @@ body.modal-open .auth-bar {
 .job-note-display {
   width: 100%;
   min-height: 32px;
-  padding: 5px 8px;
+  padding: 6px 10px;
   border-radius: 8px;
   border: 1px solid #d6e0f3;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.6;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  align-items: flex-start;
   background: #fff;
   color: #1c2d4a;
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   text-align: left;
+}
+.job-note-display:not(.job-note-empty) {
+  background: #f9fbff;
+  border-color: #c4d1ea;
+  color: #13233f;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
 }
 .job-note-trigger {
   display: flex;
@@ -2209,6 +2264,13 @@ body.modal-open .auth-bar {
 .job-note-display.job-note-empty {
   color: #6b7b94;
   font-style: italic;
+}
+.job-note-display.job-note-empty {
+  background: #f8faff;
+  border-style: dashed;
+}
+.job-note-display .job-note-paragraph + .job-note-paragraph {
+  margin-top: 6px;
 }
 .job-note-trigger:hover,
 .job-note-trigger:focus-visible,

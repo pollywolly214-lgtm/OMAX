@@ -1926,7 +1926,63 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
-  const activeColumnCount = 14;
+  const activeColumnCount = 15;
+  const now = new Date();
+  const formatPastDueLabel = (dueISO)=>{
+    const dueDate = parseDateLocal(dueISO);
+    if (!dueDate) return "Past due";
+    dueDate.setHours(23, 59, 59, 999);
+    const diffMs = now.getTime() - dueDate.getTime();
+    if (diffMs <= 0) return "Past due";
+    const totalHours = diffMs / (1000 * 60 * 60);
+    if (totalHours >= 24){
+      const totalDays = Math.floor(totalHours / 24);
+      const remainingHours = Math.floor(totalHours % 24);
+      const parts = [];
+      if (totalDays > 0){
+        parts.push(`${totalDays} day${totalDays === 1 ? "" : "s"}`);
+      }
+      if (remainingHours > 0){
+        parts.push(`${remainingHours} hr${remainingHours === 1 ? "" : "s"}`);
+      }
+      if (!parts.length){
+        parts.push("1 day");
+      }
+      return `Past due by ${parts.join(" ")}`;
+    }
+    const wholeHours = Math.floor(totalHours);
+    if (wholeHours >= 1){
+      return `Past due by ${wholeHours} hr${wholeHours === 1 ? "" : "s"}`;
+    }
+    return "Past due by less than 1 hr";
+  };
+  const formatNoteContent = (noteText = "")=>{
+    if (!noteText) return "";
+    const normalized = String(noteText ?? "").replace(/\r\n/g, "\n");
+    const encodeLine = (line)=>{
+      if (!line) return "";
+      const whitespaceMatch = line.match(/^[ \t]+/);
+      if (whitespaceMatch){
+        const prefix = whitespaceMatch[0]
+          .replace(/ /g, "&nbsp;")
+          .replace(/\t/g, "&nbsp;&nbsp;&nbsp;&nbsp;");
+        return `${prefix}${textEsc(line.slice(whitespaceMatch[0].length))}`;
+      }
+      return textEsc(line);
+    };
+    const paragraphBlocks = normalized.split(/\n{2,}/)
+      .map(block => block || "")
+      .map(block => block.replace(/^\n+/, "").replace(/\s+$/g, ""))
+      .filter(block => block.trim().length > 0);
+    if (!paragraphBlocks.length){
+      const fallbackLines = normalized.split(/\n/).map(encodeLine).join("<br>");
+      return `<p class="job-note-paragraph">${fallbackLines}</p>`;
+    }
+    return paragraphBlocks.map(block => {
+      const htmlLines = block.split(/\n/).map(encodeLine).join("<br>");
+      return `<p class="job-note-paragraph">${htmlLines}</p>`;
+    }).join("");
+  };
   const rows = jobsForCategory.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileLinks = jobFiles.length
@@ -1978,7 +2034,7 @@ function viewJobs(){
     const statusLabel = behindSchedule ? 'Behind' : (aheadSchedule ? 'Ahead' : 'On pace');
     let statusDetail = '';
     if (req.requiredPerDay === Infinity){
-      statusDetail = 'Past due';
+      statusDetail = formatPastDueLabel(j.dueISO);
     } else if (behindSchedule){
       statusDetail = `Needs ${req.requiredPerDay.toFixed(1)} hr/day`;
     } else if (aheadSchedule){
@@ -2000,7 +2056,7 @@ function viewJobs(){
     const estimateDisplay = formatHours(j.estimateHours);
     const remainingDisplay = formatHours(remainHrs);
     const needDisplay = req.requiredPerDay === Infinity
-      ? '<span class="job-badge job-badge-overdue">Past due</span>'
+      ? `<span class="job-badge job-badge-overdue">${esc(formatPastDueLabel(j.dueISO))}</span>`
       : `${needPerDay} hr/day needed (capacity ${hoursPerDay.toFixed(1)} hr/day)`;
     const statusDisplay = [
       `<div class="job-status ${aheadSchedule ? 'job-status-ahead' : (behindSchedule ? 'job-status-behind' : 'job-status-onpace')}">${esc(statusLabel)}</div>`,
@@ -2017,9 +2073,14 @@ function viewJobs(){
     if (!editing){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
       const matQtyDisplay  = formatQuantity(matQty);
-      const noteContent = (j.notes || "").trim();
+      const rawNote = j.notes || "";
+      const noteContent = rawNote.trim();
+      const noteHtml = formatNoteContent(rawNote);
+      const notePreview = noteContent
+        ? `<div class="job-note-preview">${noteHtml}</div>`
+        : `<div class="job-note-preview job-note-preview-empty">Add a note…</div>`;
       const noteMarkup = noteContent
-        ? `<div id="jobNote_${j.id}" class="job-note-display" data-requires-edit="${j.id}">${textEsc(j.notes || "").replace(/\n/g, "<br>")}</div>`
+        ? `<div id="jobNote_${j.id}" class="job-note-display" data-requires-edit="${j.id}">${noteHtml}</div>`
         : `<div id="jobNote_${j.id}" class="job-note-display job-note-empty" data-requires-edit="${j.id}">Add a note…</div>`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
@@ -2050,6 +2111,7 @@ function viewJobs(){
             <span class="job-impact ${impactClass}">${impactDisplay}</span>
             <div class="job-impact-note small muted">Net total reflects estimated hours and material usage</div>
           </td>
+          <td class="job-col job-col-note job-col-locked" data-requires-edit="${j.id}">${notePreview}</td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
               <button data-log-job="${j.id}">Log time</button>
@@ -2211,6 +2273,7 @@ function viewJobs(){
             <th>Needed / day</th>
             <th>Status</th>
             <th>Net total</th>
+            <th>Note</th>
             <th>Actions</th>
           </tr>
         </thead>
