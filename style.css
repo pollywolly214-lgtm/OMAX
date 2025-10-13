@@ -1801,13 +1801,9 @@ body.modal-open .auth-bar {
   border-bottom: 1px solid #dfe5f4;
 }
 .job-table thead th:nth-child(11) {
-  min-width: 118px;
-  width: 118px;
-  max-width: 118px;
+  width: 1%;
+  max-width: 64px;
   white-space: normal;
-}
-.job-table thead th:nth-child(13) {
-  width: 140px;
 }
 .job-table thead th:nth-child(15) {
   min-width: 180px;
@@ -1832,8 +1828,7 @@ body.modal-open .auth-bar {
 }
 
 .job-col-main {
-  width: 210px;
-  max-width: 210px;
+  width: 280px;
 }
 
 .job-col-net {
@@ -1908,9 +1903,8 @@ body.modal-open .auth-bar {
 }
 
 .job-col-need {
-  min-width: 118px;
-  width: 118px;
-  max-width: 118px;
+  width: 1%;
+  max-width: 48px;
   white-space: normal;
 }
 .job-col-need .job-cell-value {
@@ -1918,9 +1912,23 @@ body.modal-open .auth-bar {
   line-height: 1.25;
 }
 .job-col-note {
-  min-width: 140px;
-  width: 140px;
-  max-width: 140px;
+  min-width: 160px;
+  white-space: normal;
+}
+.job-note-preview {
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  color: inherit;
+  white-space: normal;
+  word-break: break-word;
+}
+.job-note-preview br {
+  display: block;
+}
+.job-note-preview-empty {
+  color: #7b88a4;
+  font-style: italic;
 }
 .job-main {
   display: flex;

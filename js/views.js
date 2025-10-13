@@ -1865,7 +1865,7 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
-  const activeColumnCount = 16;
+  const activeColumnCount = 15;
   const now = new Date();
   const formatPastDueLabel = (dueISO)=>{
     const dueDate = parseDateLocal(dueISO);
@@ -1986,8 +1986,12 @@ function viewJobs(){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
       const matQtyDisplay  = formatQuantity(matQty);
       const noteContent = (j.notes || "").trim();
+      const noteHtml = textEsc(j.notes || "").replace(/\n/g, "<br>");
+      const notePreview = noteContent
+        ? `<div class="job-note-preview">${noteHtml}</div>`
+        : `<div class="job-note-preview job-note-preview-empty">Add a note…</div>`;
       const noteMarkup = noteContent
-        ? `<div id="jobNote_${j.id}" class="job-note-display" data-requires-edit="${j.id}">${textEsc(j.notes || "").replace(/\n/g, "<br>")}</div>`
+        ? `<div id="jobNote_${j.id}" class="job-note-display" data-requires-edit="${j.id}">${noteHtml}</div>`
         : `<div id="jobNote_${j.id}" class="job-note-display job-note-empty" data-requires-edit="${j.id}">Add a note…</div>`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
@@ -2018,6 +2022,7 @@ function viewJobs(){
             <span class="job-impact ${impactClass}">${impactDisplay}</span>
             <div class="job-impact-note small muted">Net total reflects estimated hours and material usage</div>
           </td>
+          <td class="job-col job-col-note job-col-locked" data-requires-edit="${j.id}">${notePreview}</td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
               <button data-log-job="${j.id}">Log time</button>
@@ -2179,6 +2184,7 @@ function viewJobs(){
             <th>Needed / day</th>
             <th>Status</th>
             <th>Net total</th>
+            <th>Note</th>
             <th>Actions</th>
           </tr>
         </thead>
