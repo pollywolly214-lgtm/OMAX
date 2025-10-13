@@ -1926,7 +1926,7 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
-  const activeColumnCount = 15;
+  const activeColumnCount = 16;
   const now = new Date();
   const formatPastDueLabel = (dueISO)=>{
     const dueDate = parseDateLocal(dueISO);
@@ -1977,14 +1977,6 @@ function viewJobs(){
     const fileMenu = fileCount
       ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
       : `<p class="job-file-menu-empty small muted">No files attached</p>`;
-    const fileLinks = fileCount
-      ? `<ul class="job-file-pill-list">${jobFiles.map((f, idx) => {
-          const safeName = esc(f?.name || `file_${idx + 1}`);
-          const href = esc(f?.dataUrl || f?.url || "");
-          if (!href) return "";
-          return `<li><a href="${href}" download="${safeName}" class="job-file-pill">${safeName}</a></li>`;
-        }).filter(Boolean).join("")}</ul>`
-      : `<p class="small muted">No files attached. Edit the job to add files.</p>`;
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
@@ -2043,6 +2035,12 @@ function viewJobs(){
     const efficiencyDetail = slackSummary
       ? `${statusLabel}; ${capacitySummary}; ${slackSummary}`
       : `${statusLabel}; ${capacitySummary}`;
+    const efficiencySummary = efficiencyDetail
+      .split(';')
+      .map(part => part.trim())
+      .filter(Boolean)
+      .join(' • ');
+    const efficiencySummaryText = efficiencySummary || 'Schedule data not available';
     const impactDisplay = netTotalDisplay;
 
     const estimateDisplay = formatHours(j.estimateHours);
@@ -2066,11 +2064,6 @@ function viewJobs(){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
       const matQtyDisplay  = formatQuantity(matQty);
       const noteContent = (j.notes || "").trim();
-      const notePreviewRaw = noteContent.replace(/\s+/g, " ").trim();
-      const notePreviewShort = notePreviewRaw.length > 90 ? `${notePreviewRaw.slice(0, 87)}…` : notePreviewRaw;
-      const notePreviewText = noteContent
-        ? textEsc(notePreviewShort)
-        : '<span class="job-note-placeholder">Add a note…</span>';
       const noteButtonLabel = esc(j.name || "Cutting job");
       return `
         <tr data-job-row="${j.id}" class="job-row">
@@ -2117,12 +2110,31 @@ function viewJobs(){
               <div class="job-impact-header">
                 <span class="job-impact ${impactClass}">${impactDisplay}</span>
               </div>
-              <div class="job-impact-note small muted">Net total reflects estimated hours and material usage</div>
-              <button type="button" class="job-note-trigger job-note-compact ${noteContent ? 'has-note' : ''}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
-                <span class="job-note-compact-label">Notes</span>
-                <span class="job-note-trigger-text" data-job-note-display="${j.id}">${notePreviewText}</span>
-              </button>
+              <div class="job-impact-meta">${esc(efficiencySummaryText)}</div>
+              <dl class="job-impact-metrics">
+                <div><dt>Charge</dt><dd>${chargeDisplay}</dd></div>
+                <div><dt>Cost</dt><dd>${costDisplay}</dd></div>
+                <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
+                <div><dt>Net total</dt><dd class="${impactClass}">${impactDisplay}</dd></div>
+              </dl>
+              <div class="job-impact-files">
+                <span class="job-impact-files-label">Files</span>
+                ${fileCount
+                  ? `<ul class="job-impact-files-list">${jobFiles.map((f, idx) => {
+                      const safeName = esc(f?.name || `file_${idx + 1}`);
+                      const href = esc(f?.dataUrl || f?.url || "");
+                      return href
+                        ? `<li><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`
+                        : `<li>${safeName}</li>`;
+                    }).join("")}</ul>`
+                  : '<span class="job-impact-files-empty small muted">No files attached</span>'}
+              </div>
             </div>
+          </td>
+          <td class="job-col job-col-note">
+            <button type="button" class="job-note-trigger job-note-button ${noteContent ? 'has-note' : ''}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
+              <span class="job-note-button-label">${noteContent ? 'View notes' : 'Add note'}</span>
+            </button>
           </td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
@@ -2134,28 +2146,7 @@ function viewJobs(){
             <span data-log-job="${j.id}" style="display:none"></span>
           </td>
         </tr>
-        <tr class="job-detail-row">
-          <td colspan="${activeColumnCount}">
-            <div class="job-detail-card">
-              <div class="job-detail-meta">
-                <div class="job-detail-efficiency small muted">${efficiencyDetail}</div>
-                <div class="job-detail-cost">
-                  <span class="job-detail-label">Cost efficiency</span>
-                  <div class="job-detail-cost-grid">
-                    <div><span>Charge</span><strong>${chargeDisplay}</strong></div>
-                    <div><span>Cost</span><strong>${costDisplay}</strong></div>
-                    <div><span>Net/hr</span><strong class="${netClass}">${netDisplay}</strong></div>
-                    <div><span>Net total</span><strong class="${impactClass}">${netTotalDisplay}</strong></div>
-                  </div>
-                </div>
-                <div class="job-detail-files">
-                  <span class="job-detail-label">Files</span>
-                  ${fileLinks}
-                </div>
-              </div>
-            </div>
-          </td>
-        </tr>`;
+        `;
     } else {
       // EDIT ROW
       return `
@@ -2281,7 +2272,8 @@ function viewJobs(){
             <th>Needed / day</th>
             <th>Status</th>
             <th>Files</th>
-            <th>Net total &amp; notes</th>
+            <th>Net total</th>
+            <th>Notes</th>
             <th>Actions</th>
           </tr>
         </thead>
