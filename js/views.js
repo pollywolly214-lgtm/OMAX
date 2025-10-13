@@ -1876,6 +1876,8 @@ function viewJobs(){
           return `<li><a href="${href}" download="${safeName}" class="job-file-pill">${safeName}</a></li>`;
         }).filter(Boolean).join("")}</ul>`
       : `<p class="small muted">No files attached. Edit the job to add files.</p>`;
+    const actionsMenuId = `jobActions_${j.id}`;
+    const actionsLabel = esc(j.name || "Job");
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
@@ -1991,10 +1993,16 @@ function viewJobs(){
           </td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
-              <button data-log-job="${j.id}">Log time</button>
-              <button data-edit-job="${j.id}">Edit</button>
-              <button data-complete-job="${j.id}">Mark complete</button>
-              <button class="danger" data-remove-job="${j.id}">Remove</button>
+              <button type="button" class="job-actions-toggle" data-job-actions-toggle="${j.id}" aria-haspopup="true" aria-expanded="false" aria-controls="${actionsMenuId}" aria-label="Actions for ${actionsLabel}">
+                <span class="job-actions-toggle-label">Actions</span>
+                <span class="job-actions-toggle-icon" aria-hidden="true">▾</span>
+              </button>
+              <div class="job-actions-menu" id="${actionsMenuId}" data-job-actions-menu="${j.id}" hidden>
+                <button type="button" data-log-job="${j.id}">Log time</button>
+                <button type="button" data-edit-job="${j.id}">Edit</button>
+                <button type="button" data-complete-job="${j.id}">Mark complete</button>
+                <button type="button" class="danger" data-remove-job="${j.id}">Remove</button>
+              </div>
             </div>
             <span data-log-job="${j.id}" style="display:none"></span>
           </td>
