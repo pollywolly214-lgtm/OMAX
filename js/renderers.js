@@ -733,6 +733,8 @@ function getDashboardLayoutState(){
       root: null,
       windows: [],
       editButton: null,
+      editPopup: null,
+      editPopupButton: null,
       settingsButton: null,
       settingsMenu: null,
       hintEl: null,
@@ -891,7 +893,7 @@ function applyDashboardLayout(state){
 
 function updateDashboardEditUi(state){
   if (state.editButton){
-    const label = state.editing ? "Done editing dashboard" : "Edit dashboard layout";
+    const label = state.editing ? "Done and Save" : "Edit dashboard layout";
     state.editButton.textContent = label;
     const pressed = state.editing ? "true" : "false";
     state.editButton.setAttribute("aria-pressed", pressed);
@@ -899,6 +901,15 @@ function updateDashboardEditUi(state){
   }
   if (state.hintEl){
     state.hintEl.hidden = !state.editing;
+  }
+  if (state.editPopup){
+    state.editPopup.hidden = !state.editing;
+  }
+  if (state.editPopupButton){
+    state.editPopupButton.disabled = !state.editing;
+    if (state.editing){
+      state.editPopupButton.textContent = "Done and Save";
+    }
   }
   if (state.settingsButton){
     state.settingsButton.classList.toggle("is-active", !!state.editing);
@@ -1407,6 +1418,13 @@ function setDashboardEditing(state, editing){
   }
   applyDashboardLayout(state);
   updateDashboardEditUi(state);
+  if (editing && state.editPopupButton){
+    try {
+      state.editPopupButton.focus({ preventScroll: true });
+    } catch (err){
+      state.editPopupButton.focus();
+    }
+  }
   closeDashboardSettingsMenu();
   if (!editing) persistDashboardLayout(state);
 }
@@ -1420,6 +1438,8 @@ function setupDashboardLayout(){
   const state = getDashboardLayoutState();
   state.root = document.getElementById("dashboardLayout") || null;
   state.editButton = document.getElementById("dashboardEditToggle") || null;
+  state.editPopup = document.getElementById("dashboardEditPopup") || null;
+  state.editPopupButton = document.getElementById("dashboardEditPopupButton") || null;
   state.settingsButton = document.getElementById("dashboardSettingsToggle") || null;
   state.settingsMenu = document.getElementById("dashboardSettingsMenu") || null;
   state.hintEl = document.getElementById("dashboardEditHint") || null;
@@ -1444,6 +1464,14 @@ function setupDashboardLayout(){
     state.editButton.addEventListener("click", ()=>{
       toggleDashboardEditing();
       closeDashboardSettingsMenu();
+    });
+  }
+  if (state.editPopupButton && !state.editPopupButton.dataset.bound){
+    state.editPopupButton.dataset.bound = "1";
+    state.editPopupButton.addEventListener("click", ()=>{
+      if (state.editing){
+        setDashboardEditing(state, false);
+      }
     });
   }
 }
