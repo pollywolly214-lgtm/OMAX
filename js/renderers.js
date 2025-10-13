@@ -9891,6 +9891,7 @@ function finalizeOrderRequest(mode){
     applyInventoryForApprovedItems(draft.items);
     draft.status = "approved";
     draft.resolvedAt = nowISO;
+    draft.code = buildOrderRequestCode(nowISO, { excludeId: draft.id });
     orderPartialSelection.clear();
     toast("Order approved");
   }else if (mode === "deny"){
@@ -9921,6 +9922,7 @@ function finalizeOrderRequest(mode){
     }
     draft.status = "partial";
     draft.resolvedAt = nowISO;
+    draft.code = buildOrderRequestCode(nowISO, { excludeId: draft.id });
     orderPartialSelection.clear();
     if (carryItems.length){
       const next = createOrderRequest(carryItems);

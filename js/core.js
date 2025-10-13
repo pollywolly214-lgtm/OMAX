@@ -1681,14 +1681,47 @@ function seedInventoryFromTasks(){
   ].filter(Boolean);
 }
 
-function buildOrderRequestCode(dateISO){
-  const base = parseDateLocal(dateISO) || new Date();
+function buildOrderRequestCode(dateISO, options){
+  const opts = options && typeof options === "object" ? options : {};
+  let base = null;
+  if (typeof parseDateLocal === "function"){
+    base = parseDateLocal(dateISO);
+  }
+  if (!(base instanceof Date) || Number.isNaN(base.getTime())){
+    const fallback = dateISO ? new Date(dateISO) : new Date();
+    base = (fallback instanceof Date && !Number.isNaN(fallback.getTime())) ? fallback : new Date();
+  }
   const y = base.getFullYear();
   const m = String(base.getMonth()+1).padStart(2, "0");
   const d = String(base.getDate()).padStart(2, "0");
   const hh = String(base.getHours()).padStart(2, "0");
   const mm = String(base.getMinutes()).padStart(2, "0");
-  return `ORD-${y}${m}${d}-${hh}${mm}`;
+  const ss = String(base.getSeconds()).padStart(2, "0");
+  const baseCode = `ORD-${y}${m}${d}-${hh}${mm}${ss}`;
+
+  let existingCodes;
+  if (opts.existingCodes instanceof Set){
+    existingCodes = opts.existingCodes;
+  }else{
+    existingCodes = new Set();
+    const list = Array.isArray(orderRequests)
+      ? orderRequests
+      : (Array.isArray(window.orderRequests) ? window.orderRequests : []);
+    list.forEach(req => {
+      if (!req || !req.code) return;
+      if (opts.excludeId && req.id === opts.excludeId) return;
+      existingCodes.add(String(req.code));
+    });
+  }
+
+  let code = baseCode;
+  let attempt = 1;
+  while(existingCodes.has(code)){
+    const suffix = attempt < 100 ? String(attempt).padStart(2, "0") : String(attempt);
+    code = `${baseCode}-${suffix}`;
+    attempt += 1;
+  }
+  return code;
 }
 
 function normalizeOrderItem(raw){
@@ -1727,6 +1760,7 @@ function normalizeOrderRequest(raw){
     id: raw.id || genId("order"),
     code: raw.code || buildOrderRequestCode(createdISO),
     createdAt: createdISO,
+    updatedAt: raw.updatedAt || null,
     status,
     resolvedAt: raw.resolvedAt || null,
     note: raw.note || "",
@@ -1736,6 +1770,20 @@ function normalizeOrderRequest(raw){
 
 function normalizeOrderRequests(list){
   const normalized = Array.isArray(list) ? list.map(normalizeOrderRequest).filter(Boolean) : [];
+  const seenCodes = new Set();
+  normalized.forEach(req => {
+    if (!req) return;
+    const preferredDate = req.resolvedAt || req.updatedAt || req.createdAt || new Date().toISOString();
+    let nextCode = req.code ? String(req.code) : "";
+    if (!nextCode){
+      nextCode = buildOrderRequestCode(preferredDate, { existingCodes: seenCodes });
+    }
+    while(seenCodes.has(nextCode)){
+      nextCode = buildOrderRequestCode(preferredDate, { existingCodes: seenCodes });
+    }
+    req.code = nextCode;
+    seenCodes.add(nextCode);
+  });
   normalized.sort((a,b)=>{
     const aTime = new Date(a.createdAt || 0).getTime();
     const bTime = new Date(b.createdAt || 0).getTime();
