@@ -905,6 +905,13 @@ function updateDashboardEditUi(state){
   if (state.editPopup){
     const hidden = !state.editing;
     state.editPopup.hidden = hidden;
+    if (typeof state.editPopup.toggleAttribute === "function"){
+      state.editPopup.toggleAttribute("hidden", hidden);
+    } else if (hidden){
+      state.editPopup.setAttribute("hidden", "");
+    } else {
+      state.editPopup.removeAttribute("hidden");
+    }
     state.editPopup.setAttribute("aria-hidden", hidden ? "true" : "false");
   }
   if (state.editPopupButton){
@@ -1441,6 +1448,11 @@ function finishDashboardLayoutEditing(){
   }
   if (state.editPopup){
     state.editPopup.hidden = true;
+    if (typeof state.editPopup.toggleAttribute === "function"){
+      state.editPopup.toggleAttribute("hidden", true);
+    } else {
+      state.editPopup.setAttribute("hidden", "");
+    }
     state.editPopup.setAttribute("aria-hidden", "true");
   }
 }
@@ -1712,6 +1724,13 @@ function updateCostEditUi(state){
   if (state.editPopup){
     const hidden = !state.editing;
     state.editPopup.hidden = hidden;
+    if (typeof state.editPopup.toggleAttribute === "function"){
+      state.editPopup.toggleAttribute("hidden", hidden);
+    } else if (hidden){
+      state.editPopup.setAttribute("hidden", "");
+    } else {
+      state.editPopup.removeAttribute("hidden");
+    }
     state.editPopup.setAttribute("aria-hidden", hidden ? "true" : "false");
   }
   if (state.editPopupButton){
@@ -1944,6 +1963,11 @@ function finishCostLayoutEditing(){
   }
   if (state.editPopup){
     state.editPopup.hidden = true;
+    if (typeof state.editPopup.toggleAttribute === "function"){
+      state.editPopup.toggleAttribute("hidden", true);
+    } else {
+      state.editPopup.setAttribute("hidden", "");
+    }
     state.editPopup.setAttribute("aria-hidden", "true");
   }
 }

@@ -3593,6 +3593,7 @@ tr.row-editing {
   pointer-events: none;
 }
 
+.dashboard-edit-popup[hidden],
 .dashboard-edit-popup[aria-hidden="true"] {
   display: none !important;
 }
