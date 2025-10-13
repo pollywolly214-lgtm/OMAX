@@ -1697,7 +1697,7 @@ function buildOrderRequestCode(dateISO, options){
   const hh = String(base.getHours()).padStart(2, "0");
   const mm = String(base.getMinutes()).padStart(2, "0");
   const ss = String(base.getSeconds()).padStart(2, "0");
-  const baseCode = `ORD-${y}${m}${d}-${hh}${mm}${ss}`;
+  const baseCode = `REQ-${y}-${m}-${d}-${hh}-${mm}-${ss}`;
 
   let existingCodes;
   if (opts.existingCodes instanceof Set){
@@ -1710,7 +1710,8 @@ function buildOrderRequestCode(dateISO, options){
     list.forEach(req => {
       if (!req || !req.code) return;
       if (opts.excludeId && req.id === opts.excludeId) return;
-      existingCodes.add(String(req.code));
+      const normalizedCode = upgradeLegacyOrderRequestCode(req.code);
+      if (normalizedCode) existingCodes.add(normalizedCode);
     });
   }
 
@@ -1722,6 +1723,22 @@ function buildOrderRequestCode(dateISO, options){
     attempt += 1;
   }
   return code;
+}
+
+function upgradeLegacyOrderRequestCode(code){
+  if (!code) return "";
+  const trimmed = String(code).trim();
+  if (!trimmed) return "";
+
+  const legacy = trimmed.match(/^ORD-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(?:-(\d+))?$/);
+  if (!legacy) return trimmed;
+
+  const [, y, m, d, hh, mm, ss, suffixRaw] = legacy;
+  const base = `REQ-${y}-${m}-${d}-${hh}-${mm}-${ss}`;
+  if (!suffixRaw) return base;
+
+  const suffix = suffixRaw.length >= 2 ? suffixRaw : suffixRaw.padStart(2, "0");
+  return `${base}-${suffix}`;
 }
 
 function normalizeOrderItem(raw){
@@ -1774,7 +1791,7 @@ function normalizeOrderRequests(list){
   normalized.forEach(req => {
     if (!req) return;
     const preferredDate = req.resolvedAt || req.updatedAt || req.createdAt || new Date().toISOString();
-    let nextCode = req.code ? String(req.code) : "";
+    let nextCode = req.code ? upgradeLegacyOrderRequestCode(req.code) : "";
     if (!nextCode){
       nextCode = buildOrderRequestCode(preferredDate, { existingCodes: seenCodes });
     }
