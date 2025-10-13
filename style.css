@@ -3593,6 +3593,10 @@ tr.row-editing {
   pointer-events: none;
 }
 
+.dashboard-edit-popup[aria-hidden="true"] {
+  display: none !important;
+}
+
 .dashboard-edit-popup-card {
   pointer-events: auto;
   background: linear-gradient(145deg, rgba(11, 53, 125, 0.96), rgba(26, 112, 206, 0.94));

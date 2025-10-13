@@ -903,7 +903,9 @@ function updateDashboardEditUi(state){
     state.hintEl.hidden = !state.editing;
   }
   if (state.editPopup){
-    state.editPopup.hidden = !state.editing;
+    const hidden = !state.editing;
+    state.editPopup.hidden = hidden;
+    state.editPopup.setAttribute("aria-hidden", hidden ? "true" : "false");
   }
   if (state.editPopupButton){
     state.editPopupButton.disabled = !state.editing;
@@ -1429,6 +1431,20 @@ function setDashboardEditing(state, editing){
   if (!editing) persistDashboardLayout(state);
 }
 
+function finishDashboardLayoutEditing(){
+  const state = getDashboardLayoutState();
+  if (!state) return;
+  if (state.editing){
+    setDashboardEditing(state, false);
+  }else{
+    updateDashboardEditUi(state);
+  }
+  if (state.editPopup){
+    state.editPopup.hidden = true;
+    state.editPopup.setAttribute("aria-hidden", "true");
+  }
+}
+
 function toggleDashboardEditing(){
   const state = getDashboardLayoutState();
   setDashboardEditing(state, !state.editing);
@@ -1468,14 +1484,7 @@ function setupDashboardLayout(){
   }
   if (state.editPopupButton && !state.editPopupButton.dataset.bound){
     state.editPopupButton.dataset.bound = "1";
-    state.editPopupButton.addEventListener("click", ()=>{
-      if (state.editing){
-        setDashboardEditing(state, false);
-        if (state.editPopup){
-          state.editPopup.hidden = true;
-        }
-      }
-    });
+    state.editPopupButton.addEventListener("click", finishDashboardLayoutEditing);
   }
 }
 
