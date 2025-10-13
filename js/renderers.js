@@ -8106,7 +8106,7 @@ function computeCostModel(){
       key: "maintenanceForecast",
       icon: "🛠️",
       title: "Maintenance forecast (interval + as-required)",
-      value: formatterCurrency(predictedAnnual, { decimals: 0 }),
+      value: formatterCurrency(-predictedAnnual, { decimals: 0, showPlus: true }),
       hint: maintenanceHint
     },
     {
@@ -8122,7 +8122,7 @@ function computeCostModel(){
       key: "combinedImpact",
       icon: "📊",
       title: "Combined estimated impact",
-      value: formatterCurrency(predictedAnnual + totalGainLoss, { decimals: 0, showPlus: true }),
+      value: formatterCurrency(totalGainLoss - predictedAnnual, { decimals: 0, showPlus: true }),
       hint: "Maintenance forecast plus cutting job efficiency impact."
     }
   ];
