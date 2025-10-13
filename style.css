@@ -1801,7 +1801,7 @@ body.modal-open .auth-bar {
 }
 
 .job-col-impact {
-  min-width: 110px;
+  min-width: 130px;
   width: 1%;
   white-space: normal;
 }
@@ -1865,6 +1865,10 @@ body.modal-open .auth-bar {
 .job-col-net {
   text-align: right;
   white-space: nowrap;
+}
+
+.job-col-need {
+  width: 70px;
 }
 .job-col-note {
   min-width: 140px;
