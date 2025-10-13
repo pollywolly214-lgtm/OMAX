@@ -47,6 +47,79 @@ if (typeof window !== "undefined"){
   window.normalizeDateISO = normalizeDateISO;
 }
 
+const DASHBOARD_LAYOUT_MIN_WIDTH = 240;
+const DASHBOARD_LAYOUT_MIN_HEIGHT = 160;
+const COST_LAYOUT_MIN_WIDTH = 240;
+const COST_LAYOUT_MIN_HEIGHT = 160;
+const LAYOUT_MAX_POSITION = 12000;
+const LAYOUT_MAX_DIMENSION = 16000;
+
+function sanitizeLayoutMap(layout, {
+  minWidth = 1,
+  minHeight = 1,
+  maxWidth = LAYOUT_MAX_DIMENSION,
+  maxHeight = LAYOUT_MAX_DIMENSION,
+  maxPosition = LAYOUT_MAX_POSITION
+} = {}){
+  const source = (layout && typeof layout === "object") ? layout : {};
+  const sanitized = {};
+  let changed = false;
+
+  const clampNumber = (value, { min = 0, max = maxPosition })=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return { value: min, changed: true };
+    let next = Math.round(num);
+    if (next < min){ next = min; return { value: next, changed: true }; }
+    if (next > max){ next = max; return { value: next, changed: true }; }
+    return { value: next, changed: next !== num };
+  };
+
+  const clampDimension = (value, min, max)=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return { value: min, changed: true };
+    let next = Math.round(num);
+    if (next < min){ next = min; return { value: next, changed: true }; }
+    if (next > max){ next = max; return { value: next, changed: true }; }
+    return { value: next, changed: next !== num };
+  };
+
+  for (const [id, rawBox] of Object.entries(source)){
+    if (!rawBox || typeof rawBox !== "object"){
+      changed = true;
+      continue;
+    }
+
+    const { value: xVal, changed: xChanged } = clampNumber(rawBox.x, { min: 0, max: maxPosition });
+    const { value: yVal, changed: yChanged } = clampNumber(rawBox.y, { min: 0, max: maxPosition });
+    const { value: widthVal, changed: wChanged } = clampDimension(rawBox.width, minWidth, maxWidth);
+    const { value: heightVal, changed: hChanged } = clampDimension(rawBox.height, minHeight, maxHeight);
+
+    sanitized[id] = { x: xVal, y: yVal, width: widthVal, height: heightVal };
+    if (xChanged || yChanged || wChanged || hChanged) changed = true;
+  }
+
+  return { layout: sanitized, changed };
+}
+
+function sanitizeDashboardLayout(layout){
+  return sanitizeLayoutMap(layout, {
+    minWidth: DASHBOARD_LAYOUT_MIN_WIDTH,
+    minHeight: DASHBOARD_LAYOUT_MIN_HEIGHT
+  });
+}
+
+function sanitizeCostLayout(layout){
+  return sanitizeLayoutMap(layout, {
+    minWidth: COST_LAYOUT_MIN_WIDTH,
+    minHeight: COST_LAYOUT_MIN_HEIGHT
+  });
+}
+
+if (typeof window !== "undefined"){
+  window.sanitizeDashboardLayout = sanitizeDashboardLayout;
+  window.sanitizeCostLayout = sanitizeCostLayout;
+}
+
 /* Root helpers */
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
@@ -1449,17 +1522,22 @@ function adoptState(doc){
     : (Array.isArray(data.folders) ? data.folders : null);
   setSettingsFolders(rawFolders);
 
-  const docDashboardLayout = (data.dashboardLayout && typeof data.dashboardLayout === "object")
+  const rawDashboardLayout = (data.dashboardLayout && typeof data.dashboardLayout === "object")
     ? data.dashboardLayout
     : {};
-  const docCostLayout = (data.costLayout && typeof data.costLayout === "object")
+  const rawCostLayout = (data.costLayout && typeof data.costLayout === "object")
     ? data.costLayout
     : {};
 
+  const dashSanitized = sanitizeDashboardLayout(rawDashboardLayout);
+  const costSanitized = sanitizeCostLayout(rawCostLayout);
+  const dashLayout = dashSanitized.layout;
+  const costLayout = costSanitized.layout;
+
   if (typeof window !== "undefined"){
-    window.cloudDashboardLayout = cloneStructured(docDashboardLayout) || {};
+    window.cloudDashboardLayout = cloneStructured(dashLayout) || {};
     window.cloudDashboardLayoutLoaded = true;
-    window.cloudCostLayout = cloneStructured(docCostLayout) || {};
+    window.cloudCostLayout = cloneStructured(costLayout) || {};
     window.cloudCostLayoutLoaded = true;
   }
 
@@ -1513,6 +1591,11 @@ function adoptState(doc){
         try { updateCostEditUi(costState); } catch (err) { console.warn("Failed to update cost layout UI", err); }
       }
     }
+  }
+
+  if ((dashSanitized.changed || costSanitized.changed) && typeof saveCloudDebounced === "function"){
+    try { saveCloudDebounced(); }
+    catch (err) { console.warn("Failed to resave sanitized layouts", err); }
   }
 
   if (typeof window._maintOrderCounter !== "number" || !Number.isFinite(window._maintOrderCounter)){
