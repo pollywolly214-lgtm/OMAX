@@ -8610,6 +8610,14 @@ function renderJobs(){
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
 
+  const readOpenFolderSet = ()=>{
+    const raw = Array.isArray(window.jobCategoryOpenFolders) ? window.jobCategoryOpenFolders : [];
+    return new Set(raw.map(id => String(id)));
+  };
+  const writeOpenFolderSet = (set)=>{
+    window.jobCategoryOpenFolders = Array.from(set);
+  };
+
   const noteBackdrop = content.querySelector("#jobNoteModal");
   const noteTextarea = content.querySelector("#jobNoteModalInput");
   const noteJobLabel = content.querySelector("#jobNoteModalJob");
@@ -9061,6 +9069,9 @@ function renderJobs(){
   addRootCategoryBtn?.addEventListener("click", ()=>{
     const folder = promptCreateCategory(typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
     if (folder){
+      const openSet = readOpenFolderSet();
+      openSet.add(String(folder.id));
+      writeOpenFolderSet(openSet);
       window.jobCategoryFilter = String(folder.id);
       rerenderPreservingState(String(folder.id));
     }
@@ -9075,6 +9086,9 @@ function renderJobs(){
         const parentId = addBtn.getAttribute("data-job-folder-add");
         const folder = promptCreateCategory(parentId);
         if (folder){
+          const openSet = readOpenFolderSet();
+          openSet.add(String(folder.id));
+          writeOpenFolderSet(openSet);
           window.jobCategoryFilter = String(folder.id);
           rerenderPreservingState(String(folder.id));
         }
@@ -9095,6 +9109,9 @@ function renderJobs(){
         event.preventDefault();
         const catId = removeBtn.getAttribute("data-job-folder-remove");
         if (attemptRemoveCategory(catId)){
+          const openSet = readOpenFolderSet();
+          openSet.delete(String(catId));
+          writeOpenFolderSet(openSet);
           const current = String(window.jobCategoryFilter || "");
           if (current === String(catId)){ window.jobCategoryFilter = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"; }
           rerenderPreservingState(window.jobCategoryFilter);
@@ -9106,10 +9123,34 @@ function renderJobs(){
         event.preventDefault();
         const id = selectBtn.getAttribute("data-job-folder-select");
         if (id){
-          window.jobCategoryFilter = String(id);
-          rerenderPreservingState(String(id));
+          const nextId = String(id);
+          const openSet = readOpenFolderSet();
+          const currentFilter = String(window.jobCategoryFilter || "");
+          if (currentFilter === nextId && openSet.has(nextId)){
+            openSet.delete(nextId);
+          } else {
+            openSet.add(nextId);
+          }
+          writeOpenFolderSet(openSet);
+          window.jobCategoryFilter = nextId;
+          rerenderPreservingState(nextId);
         }
       }
+    });
+    content.addEventListener("toggle", (event)=>{
+      const details = event.target;
+      if (!(details instanceof HTMLElement)) return;
+      if (!details.matches("[data-job-folder-jobs]")) return;
+      const id = details.getAttribute("data-job-folder-jobs");
+      if (!id) return;
+      const openSet = readOpenFolderSet();
+      const nextId = String(id);
+      if (details.open){
+        openSet.add(nextId);
+      } else {
+        openSet.delete(nextId);
+      }
+      writeOpenFolderSet(openSet);
     });
   }
 
@@ -9126,6 +9167,9 @@ function renderJobs(){
         if (folder){
           select.value = String(folder.id);
           select.dataset.prevValue = String(folder.id);
+          const openSet = readOpenFolderSet();
+          openSet.add(String(folder.id));
+          writeOpenFolderSet(openSet);
           window.jobCategoryFilter = String(folder.id);
           rerenderPreservingState(String(folder.id));
         }else{
@@ -9146,6 +9190,9 @@ function renderJobs(){
       const folders = ensureCategoryState();
       const validIds = new Set(folders.map(folder => String(folder?.id)));
       const nextId = validIds.has(String(rawValue)) ? String(rawValue) : rootId;
+      const openSet = readOpenFolderSet();
+      openSet.add(nextId);
+      writeOpenFolderSet(openSet);
       window.jobCategoryFilter = nextId;
       jobCategoryFilterSelect.value = nextId;
       rerenderPreservingState(nextId);
@@ -9186,6 +9233,9 @@ function renderJobs(){
               saveCloudDebounced();
             }
           }
+          const openSet = readOpenFolderSet();
+          openSet.add(nextId);
+          writeOpenFolderSet(openSet);
           window.jobCategoryFilter = nextId;
           rerenderPreservingState(nextId);
         }else{

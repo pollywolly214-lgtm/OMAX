@@ -1644,6 +1644,15 @@ function viewJobs(){
   const selectedCategory = folderMap.has(String(selectedCategoryRaw)) ? String(selectedCategoryRaw) : rootCategoryId;
   window.jobCategoryFilter = selectedCategory;
 
+  const initialOpenFolders = Array.isArray(window.jobCategoryOpenFolders)
+    ? window.jobCategoryOpenFolders.map(id => String(id))
+    : null;
+  const openFolderSet = new Set(initialOpenFolders || []);
+  if (!initialOpenFolders){
+    openFolderSet.add(selectedCategory);
+  }
+  window.jobCategoryOpenFolders = Array.from(openFolderSet);
+
   const sortFolders = (list)=> list.slice().sort((a, b)=>{
     const orderDiff = (Number(b?.order) || 0) - (Number(a?.order) || 0);
     if (orderDiff !== 0) return orderDiff;
@@ -1766,7 +1775,8 @@ function viewJobs(){
           return `<li><div class="job-folder-job-name">${esc(job?.name || "Untitled job")}</div>${metaLine}</li>`;
         }).join("")
       : `<li class="muted">Add jobs to this category to see them listed.</li>`;
-    const jobListMarkup = `<details class="job-folder-jobs" data-job-folder-jobs="${esc(id)}"${id === selectedCategory ? " open" : ""}>
+    const isOpen = openFolderSet.has(id);
+    const jobListMarkup = `<details class="job-folder-jobs" data-job-folder-jobs="${esc(id)}"${isOpen ? " open" : ""}>
         <summary><span class="job-folder-jobs-count">${esc(jobSummaryLabel)}</span></summary>
         <ul class="job-folder-joblist">${jobListItems}</ul>
       </details>`;
