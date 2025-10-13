@@ -1681,14 +1681,66 @@ function seedInventoryFromTasks(){
   ].filter(Boolean);
 }
 
-function buildOrderRequestCode(dateISO){
-  const base = parseDateLocal(dateISO) || new Date();
-  const y = base.getFullYear();
-  const m = String(base.getMonth()+1).padStart(2, "0");
-  const d = String(base.getDate()).padStart(2, "0");
-  const hh = String(base.getHours()).padStart(2, "0");
-  const mm = String(base.getMinutes()).padStart(2, "0");
-  return `ORD-${y}${m}${d}-${hh}${mm}`;
+function extractOrderRequestSequence(code){
+  if (!code) return null;
+  const trimmed = String(code).trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^REQ-(\d+)$/i);
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return value;
+}
+
+function formatOrderRequestSequence(sequence){
+  const numeric = Number(sequence);
+  const safe = Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 1;
+  return `REQ-${String(safe).padStart(4, "0")}`;
+}
+
+function buildOrderRequestCode(_dateISO, options){
+  const opts = options && typeof options === "object" ? options : {};
+  const list = Array.isArray(orderRequests)
+    ? orderRequests
+    : (Array.isArray(window.orderRequests) ? window.orderRequests : []);
+
+  const existingSequences = new Set();
+  if (opts.existingSequences instanceof Set){
+    opts.existingSequences.forEach(value => {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric) && numeric > 0){
+        existingSequences.add(Math.floor(numeric));
+      }
+    });
+  }else{
+    list.forEach(req => {
+      if (!req || (opts.excludeId && req.id === opts.excludeId)) return;
+      const seq = extractOrderRequestSequence(req.code);
+      if (seq != null) existingSequences.add(seq);
+    });
+  }
+
+  let totalCount = 0;
+  list.forEach(req => {
+    if (!req || (opts.excludeId && req.id === opts.excludeId)) return;
+    totalCount += 1;
+  });
+
+  let highestSequence = 0;
+  existingSequences.forEach(seq => {
+    const numeric = Number(seq);
+    if (Number.isFinite(numeric) && numeric > highestSequence) highestSequence = numeric;
+  });
+  if (Number.isFinite(opts.startAt) && opts.startAt > 0){
+    highestSequence = Math.max(highestSequence, Math.floor(opts.startAt) - 1);
+  }
+  highestSequence = Math.max(highestSequence, totalCount);
+
+  let candidate = highestSequence + 1;
+  while(existingSequences.has(candidate)){
+    candidate += 1;
+  }
+  return formatOrderRequestSequence(candidate);
 }
 
 function normalizeOrderItem(raw){
@@ -1723,10 +1775,15 @@ function normalizeOrderRequest(raw){
     ? raw.status
     : "draft";
   const items = Array.isArray(raw.items) ? raw.items.map(normalizeOrderItem).filter(Boolean) : [];
+  const sequence = extractOrderRequestSequence(raw.code);
+  const normalizedCode = sequence != null
+    ? formatOrderRequestSequence(sequence)
+    : (typeof raw.code === "string" ? raw.code.trim() : "");
   return {
     id: raw.id || genId("order"),
-    code: raw.code || buildOrderRequestCode(createdISO),
+    code: normalizedCode,
     createdAt: createdISO,
+    updatedAt: raw.updatedAt || null,
     status,
     resolvedAt: raw.resolvedAt || null,
     note: raw.note || "",
@@ -1737,9 +1794,18 @@ function normalizeOrderRequest(raw){
 function normalizeOrderRequests(list){
   const normalized = Array.isArray(list) ? list.map(normalizeOrderRequest).filter(Boolean) : [];
   normalized.sort((a,b)=>{
-    const aTime = new Date(a.createdAt || 0).getTime();
-    const bTime = new Date(b.createdAt || 0).getTime();
-    return aTime - bTime;
+    const aTime = new Date(a.resolvedAt || a.updatedAt || a.createdAt || 0).getTime();
+    const bTime = new Date(b.resolvedAt || b.updatedAt || b.createdAt || 0).getTime();
+    if (aTime !== bTime) return aTime - bTime;
+    const aSeq = extractOrderRequestSequence(a.code);
+    const bSeq = extractOrderRequestSequence(b.code);
+    if (aSeq != null && bSeq != null && aSeq !== bSeq) return aSeq - bSeq;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+  let sequence = 1;
+  normalized.forEach(req => {
+    req.code = formatOrderRequestSequence(sequence);
+    sequence += 1;
   });
   return normalized;
 }
