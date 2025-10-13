@@ -1926,7 +1926,7 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
-  const activeColumnCount = 14;
+  const activeColumnCount = 16;
   const now = new Date();
   const formatPastDueLabel = (dueISO)=>{
     const dueDate = parseDateLocal(dueISO);
@@ -1958,10 +1958,29 @@ function viewJobs(){
   };
   const rows = jobsForCategory.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
-    const fileLinks = jobFiles.length
+    const fileCount = jobFiles.length;
+    const fileMenuId = `jobFileMenu_${j.id}`;
+    const fileLabel = fileCount
+      ? `${fileCount} file${fileCount === 1 ? "" : "s"}`
+      : "No files";
+    const fileMenuItems = fileCount
+      ? jobFiles.map((f, idx) => {
+          const safeName = esc(f?.name || `file_${idx + 1}`);
+          const hrefRaw = f?.dataUrl || f?.url || "";
+          const href = esc(hrefRaw);
+          if (!hrefRaw){
+            return `<li class="job-file-menu-item">${safeName}</li>`;
+          }
+          return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
+        }).join("")
+      : "";
+    const fileMenu = fileCount
+      ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
+      : `<p class="job-file-menu-empty small muted">No files attached</p>`;
+    const fileLinks = fileCount
       ? `<ul class="job-file-pill-list">${jobFiles.map((f, idx) => {
-          const safeName = f.name || `file_${idx+1}`;
-          const href = f.dataUrl || f.url || "";
+          const safeName = esc(f?.name || `file_${idx + 1}`);
+          const href = esc(f?.dataUrl || f?.url || "");
           if (!href) return "";
           return `<li><a href="${href}" download="${safeName}" class="job-file-pill">${safeName}</a></li>`;
         }).filter(Boolean).join("")}</ul>`
@@ -2050,6 +2069,10 @@ function viewJobs(){
       const noteMarkup = noteContent
         ? `<div id="jobNote_${j.id}" class="job-note-display" data-requires-edit="${j.id}">${textEsc(j.notes || "").replace(/\n/g, "<br>")}</div>`
         : `<div id="jobNote_${j.id}" class="job-note-display job-note-empty" data-requires-edit="${j.id}">Add a note…</div>`;
+      const notePreviewText = noteContent
+        ? textEsc(noteContent.length > 90 ? `${noteContent.slice(0, 87)}…` : noteContent).replace(/\n/g, "<br>")
+        : '<span class="job-note-placeholder">Add a note…</span>';
+      const noteButtonLabel = esc(j.name || "Cutting job");
       return `
         <tr data-job-row="${j.id}" class="job-row">
           <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">
@@ -2075,6 +2098,29 @@ function viewJobs(){
           <td class="job-col job-col-hours">${remainingDisplay}</td>
           <td class="job-col job-col-need">${needDisplay}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
+          <td class="job-col job-col-note">
+            <div class="job-cell job-cell-stretch">
+              <span class="job-cell-label">Notes</span>
+              <button type="button" class="job-note-trigger ${noteContent ? 'has-note' : ''}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
+                <span class="job-note-trigger-text" data-job-note-display="${j.id}">${notePreviewText}</span>
+              </button>
+            </div>
+          </td>
+          <td class="job-col job-col-files">
+            <div class="job-cell job-cell-stretch">
+              <span class="job-cell-label">Files</span>
+              <div class="job-file-cell">
+                <button type="button" class="job-file-trigger ${fileCount ? 'has-files' : ''}" data-job-files="${j.id}" aria-haspopup="true" aria-expanded="false" aria-controls="${esc(fileMenuId)}">
+                  <span class="job-file-trigger-text">${esc(fileLabel)}</span>
+                  <span class="job-file-trigger-icon" aria-hidden="true">▾</span>
+                </button>
+                <div class="job-file-dropdown" id="${esc(fileMenuId)}" data-job-file-menu="${j.id}" hidden>
+                  ${fileMenu}
+                  <div class="job-file-menu-hint small muted">Edit the job to add files.</div>
+                </div>
+              </div>
+            </div>
+          </td>
           <td class="job-col job-col-impact">
             <span class="job-impact ${impactClass}">${impactDisplay}</span>
             <div class="job-impact-note small muted">Net total reflects estimated hours and material usage</div>
@@ -2239,6 +2285,8 @@ function viewJobs(){
             <th>Hours remaining</th>
             <th>Needed / day</th>
             <th>Status</th>
+            <th>Notes</th>
+            <th>Files</th>
             <th>Net total</th>
             <th>Actions</th>
           </tr>
@@ -2246,6 +2294,26 @@ function viewJobs(){
         <tbody>${rows}</tbody>
       </table>
       <p class="small muted">Material cost and quantity update immediately when changed.</p>
+      <div class="job-note-modal-backdrop" id="jobNoteModal" hidden>
+        <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobNoteModalTitle">
+          <div class="job-note-modal-header">
+            <h4 id="jobNoteModalTitle">Job notes</h4>
+            <button type="button" class="job-note-modal-close" data-note-cancel aria-label="Close notes">×</button>
+          </div>
+          <div class="job-note-modal-body">
+            <div class="job-note-modal-field">
+              <label for="jobNoteModalInput">Notes for <span id="jobNoteModalJob"></span></label>
+              <textarea id="jobNoteModalInput" rows="6" placeholder="Add notes for this cutting job"></textarea>
+            </div>
+            <div class="job-note-modal-history" id="jobNoteModalHistory" aria-live="polite"></div>
+          </div>
+          <div class="job-note-modal-actions">
+            <button type="button" class="job-note-modal-secondary" data-note-cancel>Cancel</button>
+            <button type="button" class="job-note-modal-secondary" data-note-save-new>Save &amp; add another</button>
+            <button type="button" class="job-note-modal-primary" data-note-save>Save notes</button>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="block past-jobs-block job-main-block" id="pastJobs">
       <h3>Past Cutting Jobs</h3>
