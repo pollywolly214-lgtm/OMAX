@@ -1801,9 +1801,13 @@ body.modal-open .auth-bar {
   border-bottom: 1px solid #dfe5f4;
 }
 .job-table thead th:nth-child(11) {
-  width: 1%;
-  max-width: 64px;
+  min-width: 118px;
+  width: 118px;
+  max-width: 118px;
   white-space: normal;
+}
+.job-table thead th:nth-child(13) {
+  width: 140px;
 }
 .job-table thead th:nth-child(15) {
   min-width: 180px;
@@ -1828,7 +1832,8 @@ body.modal-open .auth-bar {
 }
 
 .job-col-main {
-  width: 280px;
+  width: 210px;
+  max-width: 210px;
 }
 
 .job-col-net {
@@ -1903,8 +1908,9 @@ body.modal-open .auth-bar {
 }
 
 .job-col-need {
-  width: 1%;
-  max-width: 48px;
+  min-width: 118px;
+  width: 118px;
+  max-width: 118px;
   white-space: normal;
 }
 .job-col-need .job-cell-value {
@@ -1913,11 +1919,13 @@ body.modal-open .auth-bar {
 }
 .job-col-note {
   min-width: 140px;
+  width: 140px;
+  max-width: 140px;
 }
 .job-main {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
 }
 .job-main-category-picker {
   display: inline-flex;
@@ -1939,11 +1947,12 @@ body.modal-open .auth-bar {
   border-color: rgba(33, 150, 243, 0.55);
 }
 .job-main strong {
-  font-size: 16px;
+  font-size: 14px;
   color: #13233f;
+  line-height: 1.3;
 }
 .job-main-dates {
-  font-size: 13px;
+  font-size: 11px;
   color: #637192;
 }
 .job-col-material {
