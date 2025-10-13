@@ -1933,9 +1933,9 @@ body.modal-open .auth-bar {
   background: #f9fbff;
 }
 .job-detail-card {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  gap: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   padding: 12px;
   border: 1px solid #d6e0f3;
   border-radius: 10px;
@@ -1948,10 +1948,103 @@ body.modal-open .auth-bar {
 .job-col-locked:hover {
   background: #f1f4fb;
 }
-.job-detail-note {
+.job-col-files {
+  position: relative;
+}
+.job-file-trigger {
+  width: 100%;
+  min-height: 44px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid #d6e0f3;
+  background: #fff;
+  color: #1c2d4a;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.job-file-trigger-text {
+  flex: 1;
+  color: inherit;
+}
+.job-file-trigger-icon {
+  font-size: 11px;
+  color: #4a5973;
+  transition: transform 0.2s ease;
+}
+.job-file-trigger.is-open .job-file-trigger-icon {
+  transform: rotate(-180deg);
+}
+.job-file-trigger:not(.has-files) {
+  background: #f8faff;
+  border-color: #d6e2f5;
+  color: #6b7b94;
+  font-style: italic;
+}
+.job-file-trigger:hover,
+.job-file-trigger:focus-visible {
+  background: #f1f4fb;
+  border-color: #b9c6e0;
+  box-shadow: 0 0 0 2px rgba(46, 91, 173, 0.18);
+  outline: none;
+}
+.job-file-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  max-width: 320px;
+  background: #fff;
+  border: 1px solid #d6e0f3;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(13, 40, 84, 0.18);
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
+  z-index: 60;
+}
+.job-file-dropdown[hidden] {
+  display: none !important;
+}
+.job-file-menu-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.job-file-menu-item {
+  font-size: 13px;
+  color: #1c2d4a;
+  line-height: 1.4;
+}
+.job-file-menu-item a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #1f3b67;
+  font-weight: 600;
+  text-decoration: none;
+}
+.job-file-menu-item a:hover,
+.job-file-menu-item a:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+.job-file-menu-empty {
+  margin: 0;
+}
+.job-file-menu-hint {
+  margin: 0;
+  color: #5a6b85;
+  font-size: 12px;
 }
 .job-note-trigger,
 .job-note-display {
@@ -2039,11 +2132,6 @@ body.modal-open .auth-bar {
 .job-detail-efficiency {
   font-size: 13px;
   color: #51627d;
-}
-.job-detail-files {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 .job-note-modal-backdrop {
   position: fixed;
@@ -2184,27 +2272,6 @@ body.modal-open .auth-bar {
   background: #1f3b67;
   color: #fff;
 }
-.job-file-pill-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.job-file-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: #fff;
-  border: 1px solid #cdd6ea;
-  color: #0a63c2;
-  font-size: 13px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.job-file-pill:hover { background: #edf3fe; }
 .job-edit-card {
   display: flex;
   flex-direction: column;

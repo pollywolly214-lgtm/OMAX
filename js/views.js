@@ -1541,17 +1541,28 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
-  const activeColumnCount = 15;
+  const activeColumnCount = 16;
   const rows = cuttingJobs.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
-    const fileLinks = jobFiles.length
-      ? `<ul class="job-file-pill-list">${jobFiles.map((f, idx) => {
-          const safeName = f.name || `file_${idx+1}`;
-          const href = f.dataUrl || f.url || "";
-          if (!href) return "";
-          return `<li><a href="${href}" download="${safeName}" class="job-file-pill">${safeName}</a></li>`;
-        }).filter(Boolean).join("")}</ul>`
-      : `<p class="small muted">No files attached. Edit the job to add files.</p>`;
+    const fileCount = jobFiles.length;
+    const fileMenuId = `jobFileMenu_${j.id}`;
+    const fileLabel = fileCount
+      ? `${fileCount} file${fileCount === 1 ? "" : "s"}`
+      : "No files";
+    const fileMenuItems = fileCount
+      ? jobFiles.map((f, idx) => {
+          const safeName = esc(f?.name || `file_${idx + 1}`);
+          const hrefRaw = f?.dataUrl || f?.url || "";
+          const href = esc(hrefRaw);
+          if (!hrefRaw){
+            return `<li class="job-file-menu-item">${safeName}</li>`;
+          }
+          return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
+        }).join("")
+      : "";
+    const fileMenu = fileCount
+      ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
+      : `<p class="job-file-menu-empty small muted">No files attached</p>`;
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
@@ -1635,14 +1646,22 @@ function viewJobs(){
         ? textEsc(noteContent.length > 90 ? `${noteContent.slice(0, 87)}…` : noteContent).replace(/\n/g, "<br>")
         : '<span class="job-note-placeholder">Add a note</span>';
       const noteLabel = esc(j.name || "Cutting job");
-      const noteMarkup = noteContent
-        ? `<div id="jobNote_${j.id}" class="job-note-display" data-job-note="${j.id}" data-job-note-detail="${j.id}" role="button" tabindex="0" aria-label="Notes for ${noteLabel}">${textEsc(j.notes || "").replace(/\n/g, "<br>")}</div>`
-        : `<div id="jobNote_${j.id}" class="job-note-display job-note-empty" data-job-note="${j.id}" data-job-note-detail="${j.id}" role="button" tabindex="0" aria-label="Add note for ${noteLabel}">Add a note…</div>`;
       const noteColumn = `
         <td class="job-col job-col-note">
           <button type="button" class="job-note-trigger ${noteContent ? "has-note" : ""}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteLabel}">
             <span class="job-note-trigger-text" data-job-note-display="${j.id}">${notePreviewText}</span>
           </button>
+        </td>`;
+      const filesColumn = `
+        <td class="job-col job-col-files">
+          <button type="button" class="job-file-trigger ${fileCount ? "has-files" : ""}" data-job-files="${j.id}" aria-haspopup="true" aria-expanded="false" aria-controls="${fileMenuId}">
+            <span class="job-file-trigger-text">${fileLabel}</span>
+            <span class="job-file-trigger-icon" aria-hidden="true">▾</span>
+          </button>
+          <div class="job-file-dropdown" id="${fileMenuId}" data-job-file-menu="${j.id}" hidden>
+            ${fileMenu}
+            <div class="job-file-menu-hint small muted">Edit the job to add files.</div>
+          </div>
         </td>`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
@@ -1664,6 +1683,7 @@ function viewJobs(){
           <td class="job-col job-col-need">${needDisplay}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
           ${noteColumn}
+          ${filesColumn}
           <td class="job-col job-col-impact">
             <span class="job-impact ${impactClass}">${impactDisplay}</span>
             <div class="job-impact-note small muted">Net total reflects estimated hours and material usage</div>
@@ -1681,10 +1701,6 @@ function viewJobs(){
         <tr class="job-detail-row">
           <td colspan="${activeColumnCount}">
             <div class="job-detail-card">
-              <div class="job-detail-note">
-                <label class="job-detail-label" for="jobNote_${j.id}">Notes</label>
-                ${noteMarkup}
-              </div>
               <div class="job-detail-meta">
                 <div class="job-detail-efficiency small muted">${efficiencyDetail}</div>
                 <div class="job-detail-cost">
@@ -1695,10 +1711,6 @@ function viewJobs(){
                     <div><span>Net/hr</span><strong class="${netClass}">${netDisplay}</strong></div>
                     <div><span>Net total</span><strong class="${impactClass}">${netTotalDisplay}</strong></div>
                   </div>
-                </div>
-                <div class="job-detail-files">
-                  <span class="job-detail-label">Files</span>
-                  ${fileLinks}
                 </div>
               </div>
             </div>
@@ -1807,6 +1819,7 @@ function viewJobs(){
             <th>Needed / day</th>
             <th>Status</th>
             <th>Notes</th>
+            <th>Files</th>
             <th>Net total</th>
             <th>Actions</th>
           </tr>
