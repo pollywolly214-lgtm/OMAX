@@ -379,7 +379,8 @@ function captureNewJobFormState(){
       materialCost: captureField("jobMaterialCost"),
       materialQty: captureField("jobMaterialQty"),
       start: captureField("jobStart"),
-      due: captureField("jobDue")
+      due: captureField("jobDue"),
+      category: captureField("jobCategory")
     },
     active: activeState
   };
@@ -406,6 +407,7 @@ function restoreNewJobFormState(state){
   assignField("jobMaterialQty", state.fields.materialQty);
   assignField("jobStart", state.fields.start);
   assignField("jobDue", state.fields.due);
+  assignField("jobCategory", state.fields.category);
 
   if (state.active && state.active.id){
     const target = document.getElementById(state.active.id);
@@ -2582,6 +2584,7 @@ function renderDashboard(){
   const jobMaterialQtyInput = document.getElementById("dashJobMaterialQty");
   const jobStartInput    = document.getElementById("dashJobStart");
   const jobDueInput      = document.getElementById("dashJobDue");
+  const jobCategoryInput = document.getElementById("dashJobCategory");
   const garnetForm       = document.getElementById("dashGarnetForm");
   const garnetDateInput  = document.getElementById("dashGarnetDate");
   const garnetStartInput = document.getElementById("dashGarnetStart");
@@ -3553,6 +3556,7 @@ function renderDashboard(){
     const materialQtyRaw  = jobMaterialQtyInput?.value ?? "";
     const start = jobStartInput?.value;
     const due   = jobDueInput?.value;
+    let categoryId = jobCategoryInput?.value || "";
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
     const materialQty  = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
     const chargeRate = chargeRaw === "" ? JOB_RATE_PER_HOUR : Number(chargeRaw);
@@ -3560,12 +3564,47 @@ function renderDashboard(){
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
-    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[] });
+    if (!categoryId){ toast("Choose a category."); return; }
+    if (categoryId === "__new__"){
+      const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
+      const folder = promptCreateCategory(parent);
+      if (!folder){ toast("Category not created."); return; }
+      categoryId = String(folder.id);
+      window.jobCategoryFilter = categoryId;
+    }
+    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[], cat: categoryId });
+    ensureJobCategories?.();
     saveCloudDebounced();
     toast("Cutting job added");
     closeModal();
     renderDashboard();
   });
+
+  if (jobCategoryInput){
+    jobCategoryInput.dataset.prevValue = jobCategoryInput.value;
+    jobCategoryInput.addEventListener("focus", ()=>{ jobCategoryInput.dataset.prevValue = jobCategoryInput.value; });
+    jobCategoryInput.addEventListener("change", ()=>{
+      if (jobCategoryInput.value === "__new__"){
+        const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
+        const folder = promptCreateCategory(parent);
+        if (folder){
+          const newOption = document.createElement("option");
+          newOption.value = String(folder.id);
+          newOption.textContent = folder.name || "All Jobs";
+          const anchor = jobCategoryInput.querySelector('option[value="__new__"]');
+          jobCategoryInput.insertBefore(newOption, anchor);
+          jobCategoryInput.value = newOption.value;
+          jobCategoryInput.dataset.prevValue = newOption.value;
+          window.jobCategoryFilter = newOption.value;
+        }else{
+          const fallback = jobCategoryInput.dataset.prevValue || (window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"));
+          jobCategoryInput.value = fallback;
+        }
+      }else{
+        jobCategoryInput.dataset.prevValue = jobCategoryInput.value;
+      }
+    });
+  }
 
   refreshDownTimeList();
 
@@ -8551,6 +8590,11 @@ function drawCostChart(canvas, model, show){
 function renderJobs(){
   const content = document.getElementById("content");
   if (!content) return;
+  try {
+    ensureJobCategories?.();
+  } catch (err){
+    console.warn("Failed to normalize job categories before render", err);
+  }
   setAppSettingsContext("default");
   wireDashboardSettingsMenu();
 
@@ -8852,6 +8896,98 @@ function renderJobs(){
     window.scrollTo(pos.x, pos.y);
   };
 
+  const rerenderPreservingState = (categoryId)=>{
+    const formState = captureNewJobFormState();
+    if (formState && formState.fields && categoryId){
+      formState.fields.category = categoryId;
+    }
+    const scrollPosition = captureScrollPosition();
+    renderJobs();
+    requestAnimationFrame(()=>{
+      restoreScrollPosition(scrollPosition);
+      restoreNewJobFormState(formState);
+    });
+  };
+
+  const ensureCategoryState = ()=>{
+    try {
+      return typeof ensureJobFolderState === "function" ? ensureJobFolderState() : (Array.isArray(window.jobFolders) ? window.jobFolders : []);
+    } catch (_){
+      return Array.isArray(window.jobFolders) ? window.jobFolders : [];
+    }
+  };
+
+  const promptCreateCategory = (parentId)=>{
+    const name = window.prompt("New category name?");
+    if (!name) return null;
+    try {
+      const folder = typeof addJobFolder === "function" ? addJobFolder(name, parentId) : null;
+      if (folder){
+        ensureJobCategories?.();
+        saveCloudDebounced();
+      }
+      return folder;
+    } catch (err){
+      console.warn("Failed to create job category", err);
+      toast("Unable to create category.");
+      return null;
+    }
+  };
+
+  const promptRenameCategory = (categoryId)=>{
+    if (!categoryId) return null;
+    const folder = ensureCategoryState().find(f => String(f.id) === String(categoryId));
+    if (!folder){ toast("Category not found"); return null; }
+    const next = window.prompt("Rename category", folder.name || "");
+    if (!next) return null;
+    try {
+      const result = typeof renameJobFolder === "function" ? renameJobFolder(categoryId, next) : null;
+      if (result){
+        saveCloudDebounced();
+      }
+      return result;
+    } catch (err){
+      console.warn("Failed to rename job category", err);
+      toast("Unable to rename category.");
+      return null;
+    }
+  };
+
+  const attemptRemoveCategory = (categoryId)=>{
+    if (!categoryId) return false;
+    const idStr = String(categoryId);
+    if (idStr === (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root")){
+      toast("Cannot remove the root category.");
+      return false;
+    }
+    const hasJobs = typeof jobFolderHasJobs === "function" ? jobFolderHasJobs(idStr) : false;
+    const hasChildren = ensureCategoryState().some(folder => String(folder.parent ?? "") === idStr);
+    if (hasJobs){ toast("Move jobs to another category before removing this one."); return false; }
+    if (hasChildren){ toast("Remove or move sub-categories first."); return false; }
+    const confirmed = typeof window.confirm === "function"
+      ? window.confirm("Remove this category?")
+      : true;
+    if (!confirmed) return false;
+    try {
+      const folder = ensureCategoryState().find(f => String(f.id) === idStr);
+      if (folder && typeof recordDeletedItem === "function"){
+        try {
+          recordDeletedItem("job-folder", folder, { parent: folder.parent ?? null });
+        } catch (err){ console.warn("Failed to record deleted job folder", err); }
+      }
+      const removed = typeof removeJobFolder === "function" ? removeJobFolder(idStr) : false;
+      if (removed){
+        ensureJobCategories?.();
+        saveCloudDebounced();
+        return true;
+      }
+    } catch (err){
+      console.warn("Failed to remove job category", err);
+    }
+    toast("Unable to remove category.");
+    return false;
+  };
+
   if (historySearchInput){
     historySearchInput.addEventListener("input", (event)=>{
       jobHistorySearchTerm = event.target.value;
@@ -8921,6 +9057,164 @@ function renderJobs(){
     restoreNewJobFormState(formState);
   });
 
+  const addRootCategoryBtn = content.querySelector("[data-job-folder-add-root]");
+  addRootCategoryBtn?.addEventListener("click", ()=>{
+    const folder = promptCreateCategory(typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
+    if (folder){
+      window.jobCategoryFilter = String(folder.id);
+      rerenderPreservingState(String(folder.id));
+    }
+  });
+
+  if (!content.dataset.jobFolderEvents){
+    content.dataset.jobFolderEvents = "1";
+    content.addEventListener("click", (event)=>{
+      const addBtn = event.target.closest("[data-job-folder-add]");
+      if (addBtn){
+        event.preventDefault();
+        const parentId = addBtn.getAttribute("data-job-folder-add");
+        const folder = promptCreateCategory(parentId);
+        if (folder){
+          window.jobCategoryFilter = String(folder.id);
+          rerenderPreservingState(String(folder.id));
+        }
+        return;
+      }
+      const renameBtn = event.target.closest("[data-job-folder-rename]");
+      if (renameBtn){
+        event.preventDefault();
+        const catId = renameBtn.getAttribute("data-job-folder-rename");
+        const result = promptRenameCategory(catId);
+        if (result){
+          rerenderPreservingState(String(catId));
+        }
+        return;
+      }
+      const removeBtn = event.target.closest("[data-job-folder-remove]");
+      if (removeBtn){
+        event.preventDefault();
+        const catId = removeBtn.getAttribute("data-job-folder-remove");
+        if (attemptRemoveCategory(catId)){
+          const current = String(window.jobCategoryFilter || "");
+          if (current === String(catId)){ window.jobCategoryFilter = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"; }
+          rerenderPreservingState(window.jobCategoryFilter);
+        }
+        return;
+      }
+      const selectBtn = event.target.closest("[data-job-folder-select]");
+      if (selectBtn){
+        event.preventDefault();
+        const id = selectBtn.getAttribute("data-job-folder-select");
+        if (id){
+          window.jobCategoryFilter = String(id);
+          rerenderPreservingState(String(id));
+        }
+      }
+    });
+  }
+
+  const jobCategorySelect = document.getElementById("jobCategory");
+  if (jobCategorySelect){
+    jobCategorySelect.dataset.prevValue = jobCategorySelect.value;
+    jobCategorySelect.addEventListener("focus", ()=>{ jobCategorySelect.dataset.prevValue = jobCategorySelect.value; });
+    jobCategorySelect.addEventListener("change", (event)=>{
+      const select = event.target;
+      if (!select) return;
+      if (select.value === "__new__"){
+        const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
+        const folder = promptCreateCategory(parent);
+        if (folder){
+          select.value = String(folder.id);
+          select.dataset.prevValue = String(folder.id);
+          window.jobCategoryFilter = String(folder.id);
+          rerenderPreservingState(String(folder.id));
+        }else{
+          const fallback = select.dataset.prevValue || (window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"));
+          select.value = fallback;
+        }
+      }else{
+        select.dataset.prevValue = select.value;
+      }
+    });
+  }
+
+  const jobCategoryFilterSelect = document.getElementById("jobCategoryFilterSelect");
+  if (jobCategoryFilterSelect){
+    jobCategoryFilterSelect.addEventListener("change", (event)=>{
+      const rawValue = event?.target instanceof HTMLSelectElement ? event.target.value : jobCategoryFilterSelect.value;
+      const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+      const folders = ensureCategoryState();
+      const validIds = new Set(folders.map(folder => String(folder?.id)));
+      const nextId = validIds.has(String(rawValue)) ? String(rawValue) : rootId;
+      window.jobCategoryFilter = nextId;
+      jobCategoryFilterSelect.value = nextId;
+      rerenderPreservingState(nextId);
+    });
+  }
+
+  content.querySelectorAll("[data-job-category-select]").forEach(select => {
+    if (!(select instanceof HTMLSelectElement)) return;
+    if (select.dataset.wiredCategory) return;
+    select.dataset.wiredCategory = "1";
+    select.dataset.prevValue = select.value;
+    select.addEventListener("focus", ()=>{ select.dataset.prevValue = select.value; });
+  });
+
+  if (!content.dataset.jobCategorySelectEvents){
+    content.dataset.jobCategorySelectEvents = "1";
+    content.addEventListener("change", (event)=>{
+      const select = event.target.closest("[data-job-category-select]");
+      if (!(select instanceof HTMLSelectElement)) return;
+      const inlineIdRaw = select.getAttribute("data-job-category-inline");
+      const inlineId = inlineIdRaw != null ? String(inlineIdRaw) : "";
+      const isInline = inlineId.length > 0;
+      const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+      const previousValue = select.dataset.prevValue || (isInline ? String(select.value || rootId) : select.value || "");
+
+      if (select.value === "__new__"){
+        const parent = window.jobCategoryFilter || rootId;
+        const folder = promptCreateCategory(parent);
+        if (folder){
+          const nextId = String(folder.id);
+          select.value = nextId;
+          select.dataset.prevValue = nextId;
+          if (isInline){
+            const job = cuttingJobs.find(j => String(j?.id) === inlineId);
+            if (job){
+              job.cat = nextId;
+              ensureJobCategories?.();
+              saveCloudDebounced();
+            }
+          }
+          window.jobCategoryFilter = nextId;
+          rerenderPreservingState(nextId);
+        }else{
+          const fallback = previousValue || (window.jobCategoryFilter || rootId);
+          select.value = fallback;
+        }
+        return;
+      }
+
+      const nextSelection = String(select.value || rootId);
+      select.dataset.prevValue = nextSelection;
+
+      if (isInline){
+        const job = cuttingJobs.find(j => String(j?.id) === inlineId);
+        if (!job){
+          const fallback = previousValue || (window.jobCategoryFilter || rootId);
+          select.value = fallback;
+          select.dataset.prevValue = fallback;
+          return;
+        }
+        job.cat = nextSelection;
+        ensureJobCategories?.();
+        saveCloudDebounced();
+        const currentFilter = typeof window.jobCategoryFilter === "string" ? window.jobCategoryFilter : rootId;
+        rerenderPreservingState(currentFilter);
+      }
+    });
+  }
+
   // 2) Small, scoped helpers for manual log math + defaults
   const todayISO = (()=>{ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); })();
   const curTotal = ()=> (RENDER_TOTAL ?? currentTotal());
@@ -8972,6 +9266,8 @@ function renderJobs(){
     const materialQtyRaw = document.getElementById("jobMaterialQty")?.value ?? "";
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
+    const categorySelect = document.getElementById("jobCategory");
+    let categoryId = categorySelect?.value || "";
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
     const materialQty = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
     const chargeRate = chargeRaw === "" ? JOB_RATE_PER_HOUR : Number(chargeRaw);
@@ -8979,8 +9275,17 @@ function renderJobs(){
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
+    if (!categoryId){ toast("Choose a category."); return; }
+    if (categoryId === "__new__"){
+      const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
+      const folder = promptCreateCategory(parent);
+      if (!folder){ toast("Category not created."); return; }
+      categoryId = String(folder.id);
+      window.jobCategoryFilter = categoryId;
+    }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[], files:attachments });
+    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[], files:attachments, cat: categoryId });
+    ensureJobCategories?.();
     pendingNewJobFiles.length = 0;
     saveCloudDebounced(); renderJobs();
   });
@@ -9108,7 +9413,8 @@ function renderJobs(){
           : JOB_RATE_PER_HOUR,
         notes: entry.notes || "",
         manualLogs: [],
-        files: Array.isArray(entry.files) ? entry.files.map(f => ({ ...f })) : []
+        files: Array.isArray(entry.files) ? entry.files.map(f => ({ ...f })) : [],
+        cat: entry.cat != null ? entry.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root")
       };
 
       cuttingJobs.push(newJob);
@@ -9170,6 +9476,7 @@ function renderJobs(){
       const materialQtyInput = field("materialQty");
       const notesInput = field("notes");
       const completedInput = field("completedAtISO");
+      const categoryInput = field("cat");
 
       const name = (nameInput?.value || entry.name || "").trim();
       if (!name){ toast("Enter a job name."); return; }
@@ -9206,6 +9513,9 @@ function renderJobs(){
       entry.materialQty = materialQty;
       entry.notes = notes;
       entry.actualHours = actualHours != null ? actualHours : null;
+      if (categoryInput && categoryInput.value && categoryInput.value !== "__new__"){
+        entry.cat = categoryInput.value;
+      }
 
       const rate = Number(entry.efficiency?.rate) || JOB_RATE_PER_HOUR;
       const deltaHours = actualHours != null ? (estimateHours - actualHours) : (entry.efficiency?.deltaHours ?? null);
@@ -9372,6 +9682,7 @@ function renderJobs(){
           : JOB_RATE_PER_HOUR,
         manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
         files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
+        cat: job.cat != null ? job.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"),
         actualHours: eff && Number.isFinite(eff.actualHours) ? eff.actualHours : null,
         efficiency: efficiencySummary
       };
@@ -9398,6 +9709,7 @@ function renderJobs(){
         ? Number(j.chargeRate)
         : JOB_RATE_PER_HOUR;
       const chargeToSet = chargeVal == null ? existingCharge : chargeVal;
+      const catVal = qs("cat");
       j.name = qs("name") || j.name;
       j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
       j.material = qs("material") || j.material || "";
@@ -9407,6 +9719,7 @@ function renderJobs(){
       j.dueISO   = qs("dueISO")   || j.dueISO;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
       j.chargeRate = chargeToSet;
+      if (catVal && catVal !== "__new__") j.cat = catVal;
       editingJobs.delete(id);
       saveCloudDebounced(); renderJobs();
       return;

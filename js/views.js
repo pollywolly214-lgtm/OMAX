@@ -29,6 +29,39 @@ function viewDashboard(){
     `;
   }).join("");
   const defaultEfficiencyDescription = esc(efficiencyWindows[0]?.description || "Past 7 days");
+
+  const jobRootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+  const jobFolders = Array.isArray(window.jobFolders) && window.jobFolders.length
+    ? window.jobFolders.slice()
+    : defaultJobFolders();
+  if (!jobFolders.some(folder => String(folder.id) === jobRootId)){
+    jobFolders.push({ id: jobRootId, name: "All Jobs", parent: null, order: 1 });
+  }
+  const sortJobFolders = (list)=> list.slice().sort((a,b)=>{
+    const orderDiff = (Number(b?.order) || 0) - (Number(a?.order) || 0);
+    if (orderDiff !== 0) return orderDiff;
+    return String(a?.name || "").localeCompare(String(b?.name || ""));
+  });
+  const jobChildrenOf = (parentId)=>{
+    const key = parentId == null ? null : String(parentId);
+    return sortJobFolders(jobFolders.filter(folder => {
+      const parentKey = folder.parent == null ? null : String(folder.parent);
+      return parentKey === key;
+    }));
+  };
+  const jobFolderOptions = [];
+  const appendJobFolderOption = (folder, depth)=>{
+    if (!folder) return;
+    const indent = depth ? Array(depth).fill("&nbsp;&nbsp;").join("") : "";
+    const prefix = depth ? "↳ " : "";
+    const name = esc(folder.name || (String(folder.id) === jobRootId ? "All Jobs" : "Category"));
+    jobFolderOptions.push({ id: String(folder.id), label: `${indent}${prefix}${name}` });
+    jobChildrenOf(folder.id).forEach(child => appendJobFolderOption(child, depth + 1));
+  };
+  const jobRootFolder = jobFolders.find(folder => String(folder.id) === jobRootId) || { id: jobRootId, name: "All Jobs", parent: null, order: 1 };
+  appendJobFolderOption(jobRootFolder, 0);
+  const dashboardCategoryOptions = jobFolderOptions.map(option => `<option value="${esc(option.id)}">${option.label}</option>`).join("");
+
   return `
   <div class="container">
     <div class="dashboard-toolbar">
@@ -265,6 +298,10 @@ function viewDashboard(){
             <label>Material quantity<input type="number" min="0" step="0.01" id="dashJobMaterialQty" placeholder="optional"></label>
             <label>Start date<input type="date" id="dashJobStart" required></label>
             <label>Due date<input type="date" id="dashJobDue" required></label>
+            <label>Category<select id="dashJobCategory">
+              ${dashboardCategoryOptions}
+              <option value="__new__">+ Create new category…</option>
+            </select></label>
           </div>
           <div class="modal-actions">
             <button type="button" class="secondary" data-step-back>Back</button>
@@ -1524,6 +1561,7 @@ function viewJobs(){
     const completedLabel = formatDate(job?.completedAtISO);
     const startLabel = formatDate(job?.startISO);
     const dueLabel = formatDate(job?.dueISO);
+    const categoryLabel = folderMap.get(normalizeCategory(job?.cat))?.name || "";
     const actualLabel = formatHours(actualHours);
     const estimateLabel = formatHours(estHours);
     const tokens = [
@@ -1534,6 +1572,7 @@ function viewJobs(){
       job.completedAtISO,
       job.startISO,
       job.dueISO,
+      categoryLabel,
       statusLabel,
       statusDetail,
       Number.isFinite(delta) ? delta.toFixed(1) : "",
@@ -1574,14 +1613,6 @@ function viewJobs(){
     });
   };
 
-  const completedFiltered = completedSorted.filter(matchesHistorySearch);
-  const completedStats = completedFiltered.reduce((acc, job)=>{
-    const eff = job && job.efficiency ? job.efficiency : {};
-    const net = computeJobNetTotal(job, eff, { preferActual: true });
-    acc.total += Number.isFinite(net) ? net : 0;
-    return acc;
-  }, { total: 0 });
-  const completedAverage = completedFiltered.length ? (completedStats.total / completedFiltered.length) : 0;
   const numberInputValue = (value)=>{
     const num = Number(value);
     return Number.isFinite(num) ? String(num) : "";
@@ -1594,6 +1625,141 @@ function viewJobs(){
     const local = new Date(dt.getTime() - offset * 60000);
     return local.toISOString().slice(0,16);
   };
+
+  const rootCategoryId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+  const jobFolders = Array.isArray(window.jobFolders) && window.jobFolders.length
+    ? window.jobFolders.slice()
+    : defaultJobFolders();
+  if (!jobFolders.some(folder => String(folder.id) === rootCategoryId)){
+    jobFolders.push({ id: rootCategoryId, name: "All Jobs", parent: null, order: 1 });
+  }
+  const folderMap = new Map(jobFolders.map(folder => [String(folder.id), folder]));
+  const parentMap = new Map(jobFolders.map(folder => [String(folder.id), folder.parent == null ? null : String(folder.parent)]));
+  const normalizeCategory = (cat)=>{
+    const key = cat != null ? String(cat) : rootCategoryId;
+    if (folderMap.has(key)) return key;
+    return rootCategoryId;
+  };
+  const selectedCategoryRaw = typeof window.jobCategoryFilter === "string" ? window.jobCategoryFilter : rootCategoryId;
+  const selectedCategory = folderMap.has(String(selectedCategoryRaw)) ? String(selectedCategoryRaw) : rootCategoryId;
+  window.jobCategoryFilter = selectedCategory;
+
+  const sortFolders = (list)=> list.slice().sort((a, b)=>{
+    const orderDiff = (Number(b?.order) || 0) - (Number(a?.order) || 0);
+    if (orderDiff !== 0) return orderDiff;
+    return String(a?.name || "").localeCompare(String(b?.name || ""));
+  });
+
+  const childrenOf = (parentId)=>{
+    const key = parentId == null ? null : String(parentId);
+    return sortFolders(jobFolders.filter(folder => {
+      const parentKey = folder.parent == null ? null : String(folder.parent);
+      return parentKey === key;
+    }));
+  };
+
+  const includeDescendants = (categoryId, acc)=>{
+    const key = String(categoryId);
+    if (acc.has(key)) return;
+    acc.add(key);
+    const kids = childrenOf(categoryId);
+    kids.forEach(child => includeDescendants(child.id, acc));
+  };
+
+  const allowedCategories = new Set();
+  includeDescendants(selectedCategory, allowedCategories);
+
+  const activeCounts = new Map();
+  const completedCounts = new Map();
+  const incrementCounts = (map, catId)=>{
+    let current = normalizeCategory(catId);
+    while (current){
+      map.set(current, (map.get(current) || 0) + 1);
+      const parent = parentMap.get(current);
+      if (parent == null) break;
+      current = String(parent);
+    }
+  };
+
+  cuttingJobs.forEach(job => incrementCounts(activeCounts, job?.cat));
+  completedCuttingJobs.forEach(job => incrementCounts(completedCounts, job?.cat));
+
+  const folderOptions = [];
+  const ensureFolderEntry = (folder, depth)=>{
+    if (!folder) return;
+    const id = String(folder.id);
+    const indent = depth ? Array(depth).fill("&nbsp;&nbsp;").join("") : "";
+    const prefix = depth ? "↳ " : "";
+    const safeLabel = esc(folder.name || (id === rootCategoryId ? "All Jobs" : "Category"));
+    folderOptions.push({ id, label: `${indent}${prefix}${safeLabel}` });
+    const kids = childrenOf(folder.id);
+    kids.forEach(child => ensureFolderEntry(child, depth + 1));
+  };
+  const rootFolder = folderMap.get(rootCategoryId) || { id: rootCategoryId, name: "All Jobs", parent: null, order: 1 };
+  ensureFolderEntry(rootFolder, 0);
+
+  const categoryOptionsMarkup = (selectedId, { includeCreateOption = false, rootLabel } = {})=>{
+    const target = normalizeCategory(selectedId);
+    const optionsHtml = folderOptions.map(option => {
+      const selectedAttr = option.id === target ? " selected" : "";
+      const label = option.id === rootCategoryId && rootLabel ? esc(rootLabel) : option.label;
+      return `<option value="${esc(option.id)}"${selectedAttr}>${label}</option>`;
+    }).join("");
+    if (!includeCreateOption) return optionsHtml;
+    return `${optionsHtml}<option value="__new__">+ Create new category…</option>`;
+  };
+
+  const renderFolderTree = (folder)=>{
+    if (!folder) return "";
+    const id = String(folder.id);
+    const isRoot = id === rootCategoryId;
+    const selectedClass = id === selectedCategory ? " job-folder-row-selected" : "";
+    const activeCount = activeCounts.get(id) || 0;
+    const completedCount = completedCounts.get(id) || 0;
+    const countParts = [];
+    if (activeCount > 0) countParts.push(`${activeCount} active`);
+    if (completedCount > 0) countParts.push(`${completedCount} archived`);
+    const countLabel = countParts.length ? `<span class="job-folder-count">${countParts.join(" · ")}</span>` : "";
+    const actions = [
+      `<button type="button" class="link" data-job-folder-add="${esc(id)}">+ Sub-category</button>`,
+      !isRoot ? `<button type="button" class="link" data-job-folder-rename="${esc(id)}">Rename</button>` : "",
+      !isRoot ? `<button type="button" class="link danger" data-job-folder-remove="${esc(id)}">Remove</button>` : ""
+    ].filter(Boolean).join("<span class=\"job-folder-action-sep\" aria-hidden=\"true\">·</span>");
+    const childrenMarkup = childrenOf(folder.id).map(child => renderFolderTree(child)).join("");
+    return `
+      <div class="job-folder" data-job-folder="${esc(id)}">
+        <div class="job-folder-row${selectedClass}">
+          <button type="button" class="job-folder-select" data-job-folder-select="${esc(id)}" aria-current="${id === selectedCategory ? "true" : "false"}">
+            ${esc(folder.name || (isRoot ? "All Jobs" : "Category"))}
+          </button>
+          ${countLabel}
+        </div>
+        <div class="job-folder-actions">${actions || ""}</div>
+        ${childrenMarkup ? `<div class="job-folder-children">${childrenMarkup}</div>` : ""}
+      </div>
+    `;
+  };
+
+  const folderTreeMarkup = renderFolderTree(rootFolder);
+
+  const jobsForCategory = cuttingJobs.filter(job => {
+    const normalized = normalizeCategory(job?.cat);
+    return allowedCategories.has(normalized);
+  });
+
+  const completedForCategory = completedSorted.filter(job => {
+    const normalized = normalizeCategory(job?.cat);
+    return allowedCategories.has(normalized);
+  });
+
+  const completedFiltered = completedForCategory.filter(matchesHistorySearch);
+  const completedStats = completedFiltered.reduce((acc, job)=>{
+    const eff = job && job.efficiency ? job.efficiency : {};
+    const net = computeJobNetTotal(job, eff, { preferActual: true });
+    acc.total += Number.isFinite(net) ? net : 0;
+    return acc;
+  }, { total: 0 });
+  const completedAverage = completedFiltered.length ? (completedStats.total / completedFiltered.length) : 0;
 
   const historyColumnCount = 7;
   const historySearchDisplay = historySearchValue
@@ -1608,6 +1774,7 @@ function viewJobs(){
     const actualHours = Number(job.actualHours ?? eff.actualHours);
     const estHours = Number(job.estimateHours);
     const editingHistory = editingCompletedJobsSet.has(String(job.id));
+    const categoryFolder = folderMap.get(normalizeCategory(job?.cat));
     let statusLabel = "Finished on estimate";
     if (Number.isFinite(delta) && Math.abs(delta) > 0.1){
       statusLabel = delta > 0 ? "Finished ahead" : "Finished behind";
@@ -1619,12 +1786,14 @@ function viewJobs(){
       ? esc(String(job.notes)).replace(/\n/g, "<br>")
       : "<span class=\"muted\">—</span>";
     const materialLine = job?.material ? `<div class="small muted">${esc(job.material)}</div>` : "";
+    const categoryLine = categoryFolder ? `<div class="small muted">${esc(categoryFolder.name || "All Jobs")}</div>` : "";
 
     if (!editingHistory){
       return `
         <tr data-history-row="${job.id || ""}">
           <td>
             <div><strong>${esc(job?.name || "Job")}</strong></div>
+            ${categoryLine}
             ${materialLine}
           </td>
           <td>${formatDate(job?.completedAtISO)}</td>
@@ -1659,6 +1828,9 @@ function viewJobs(){
               <label>Material<input type="text" data-history-field="material" data-history-id="${job.id}" value="${esc(job?.material || "")}"></label>
               <label>Material cost<input type="number" min="0" step="0.01" data-history-field="materialCost" data-history-id="${job.id}" value="${materialCostVal}"></label>
               <label>Material quantity<input type="number" min="0" step="0.01" data-history-field="materialQty" data-history-id="${job.id}" value="${materialQtyVal}"></label>
+              <label>Category<select data-history-field="cat" data-history-id="${job.id}" data-job-category-select>
+                ${categoryOptionsMarkup(job.cat, { includeCreateOption: true })}
+              </select></label>
             </div>
             <label class="past-job-edit-notes">Notes<textarea data-history-field="notes" data-history-id="${job.id}" rows="3">${textEsc(job?.notes || "")}</textarea></label>
             <div class="past-job-edit-actions">
@@ -1671,7 +1843,7 @@ function viewJobs(){
     `;
   }).join("");
   const historySearchActive = historyQuery.length > 0;
-  const totalCompletedCount = completedSorted.length;
+  const totalCompletedCount = completedForCategory.length;
   const historyEmptyMessage = historySearchActive
     ? "No past cutting jobs match your search."
     : "Mark jobs complete to build a history of past cutting work.";
@@ -1693,31 +1865,22 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
-  const activeColumnCount = 16;
-  const rows = cuttingJobs.map(j => {
+  const activeColumnCount = 14;
+  const rows = jobsForCategory.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
-    const fileCount = jobFiles.length;
-    const fileMenuId = `jobFileMenu_${j.id}`;
-    const fileLabel = fileCount
-      ? `${fileCount} file${fileCount === 1 ? "" : "s"}`
-      : "No files";
-    const fileMenuItems = fileCount
-      ? jobFiles.map((f, idx) => {
-          const safeName = esc(f?.name || `file_${idx + 1}`);
-          const hrefRaw = f?.dataUrl || f?.url || "";
-          const href = esc(hrefRaw);
-          if (!hrefRaw){
-            return `<li class="job-file-menu-item">${safeName}</li>`;
-          }
-          return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
-        }).join("")
-      : "";
-    const fileMenu = fileCount
-      ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
-      : `<p class="job-file-menu-empty small muted">No files attached</p>`;
+    const fileLinks = jobFiles.length
+      ? `<ul class="job-file-pill-list">${jobFiles.map((f, idx) => {
+          const safeName = f.name || `file_${idx+1}`;
+          const href = f.dataUrl || f.url || "";
+          if (!href) return "";
+          return `<li><a href="${href}" download="${safeName}" class="job-file-pill">${safeName}</a></li>`;
+        }).filter(Boolean).join("")}</ul>`
+      : `<p class="small muted">No files attached. Edit the job to add files.</p>`;
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
+    const categoryFolder = folderMap.get(normalizeCategory(j.cat));
+    const categoryName = categoryFolder ? categoryFolder.name || "All Jobs" : "All Jobs";
 
     // Material totals
     const matCost = Number(j.materialCost||0);
@@ -1771,11 +1934,6 @@ function viewJobs(){
     const efficiencyDetail = slackSummary
       ? `${statusLabel}; ${capacitySummary}; ${slackSummary}`
       : `${statusLabel}; ${capacitySummary}`;
-    const efficiencySummary = efficiencyDetail
-      .split(';')
-      .map(part => part.trim())
-      .filter(Boolean)
-      .join(' • ');
     const impactDisplay = netTotalDisplay;
 
     const estimateDisplay = formatHours(j.estimateHours);
@@ -1793,147 +1951,78 @@ function viewJobs(){
     const dueDate   = parseDateLocal(j.dueISO);
     const startTxt  = startDate ? startDate.toDateString() : "—";
     const dueTxt    = dueDate ? dueDate.toDateString() : "—";
-    const startShort = startDate
-      ? startDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-      : '—';
-    const dueShort = dueDate
-      ? dueDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-      : '—';
-    const scheduleSummary = `${startShort} → ${dueShort}`;
     const dueVal    = dueDate ? ymd(dueDate) : (j.dueISO || "");
 
     if (!editing){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
       const matQtyDisplay  = formatQuantity(matQty);
       const noteContent = (j.notes || "").trim();
-      const notePreviewText = noteContent
-        ? textEsc(noteContent.length > 90 ? `${noteContent.slice(0, 87)}…` : noteContent).replace(/\n/g, "<br>")
-        : '<span class="job-note-placeholder">Add a note</span>';
-      const noteLabel = esc(j.name || "Cutting job");
-      const noteColumn = `
-        <td class="job-col job-col-note">
-          <div class="job-cell job-cell-stretch">
-            <span class="job-cell-label">Notes</span>
-            <button type="button" class="job-note-trigger ${noteContent ? "has-note" : ""}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteLabel}">
-              <span class="job-note-trigger-text" data-job-note-display="${j.id}">${notePreviewText}</span>
-            </button>
-          </div>
-        </td>`;
-      const filesColumn = `
-        <td class="job-col job-col-files">
-          <div class="job-cell job-cell-stretch">
-            <span class="job-cell-label">Files</span>
-            <div class="job-file-cell">
-              <button type="button" class="job-file-trigger ${fileCount ? "has-files" : ""}" data-job-files="${j.id}" aria-haspopup="true" aria-expanded="false" aria-controls="${fileMenuId}">
-                <span class="job-file-trigger-text">${fileLabel}</span>
-                <span class="job-file-trigger-icon" aria-hidden="true">▾</span>
-              </button>
-              <div class="job-file-dropdown" id="${fileMenuId}" data-job-file-menu="${j.id}" hidden>
-                ${fileMenu}
-                <div class="job-file-menu-hint small muted">Edit the job to add files.</div>
-              </div>
-            </div>
-          </div>
-        </td>`;
+      const noteMarkup = noteContent
+        ? `<div id="jobNote_${j.id}" class="job-note-display" data-requires-edit="${j.id}">${textEsc(j.notes || "").replace(/\n/g, "<br>")}</div>`
+        : `<div id="jobNote_${j.id}" class="job-note-display job-note-empty" data-requires-edit="${j.id}">Add a note…</div>`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
           <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">
-            <div class="job-cell job-cell-main">
-              <span class="job-cell-label">Job</span>
-              <div class="job-cell-value job-main">
-                <strong>${j.name}</strong>
-                <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
-              </div>
+            <div class="job-main">
+              <strong>${j.name}</strong>
+              <div class="job-main-category small muted">Category: ${esc(categoryName)}</div>
+              <label class="job-main-category-picker small">Move to
+                <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(j.name || "Job")}">
+                  ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
+                </select>
+              </label>
+              <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
             </div>
           </td>
-          <td class="job-col job-col-estimate job-col-locked" data-requires-edit="${j.id}">
-            <div class="job-cell job-cell-right">
-              <span class="job-cell-label">Estimate</span>
-              <span class="job-cell-value">${estimateDisplay}</span>
-            </div>
-          </td>
-          <td class="job-col job-col-material job-col-locked" data-requires-edit="${j.id}">
-            <div class="job-cell">
-              <span class="job-cell-label">Material</span>
-              <span class="job-cell-value">${j.material || '—'}</span>
-            </div>
-          </td>
-          <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">
-            <div class="job-cell job-cell-right">
-              <span class="job-cell-label">Cost / unit</span>
-              <span class="job-cell-value">${matCostDisplay}</span>
-            </div>
-          </td>
-          <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">
-            <div class="job-cell job-cell-right">
-              <span class="job-cell-label">Quantity</span>
-              <span class="job-cell-value">${matQtyDisplay}</span>
-            </div>
-          </td>
-          <td class="job-col job-col-money">
-            <div class="job-cell job-cell-right">
-              <span class="job-cell-label">Material total</span>
-              <span class="job-cell-value">$${matTotal.toFixed(2)}</span>
-            </div>
-          </td>
-          <td class="job-col job-col-charge">
-            <div class="job-cell job-cell-right">
-              <span class="job-cell-label">Charge rate</span>
-              <span class="job-cell-value">${chargeDisplay}</span>
-            </div>
-          </td>
-          <td class="job-col job-col-cost">
-            <div class="job-cell job-cell-right">
-              <span class="job-cell-label">Cost rate</span>
-              <span class="job-cell-value">${costDisplay}</span>
-            </div>
-          </td>
-          <td class="job-col job-col-net">
-            <div class="job-cell job-cell-right">
-              <span class="job-cell-label">Net profit/hr</span>
-              <span class="job-cell-value job-rate-net ${netClass}">${netDisplay}</span>
-            </div>
-          </td>
-          <td class="job-col job-col-hours">
-            <div class="job-cell job-cell-right">
-              <span class="job-cell-label">Hours remaining</span>
-              <span class="job-cell-value">${remainingDisplay}</span>
-            </div>
-          </td>
-          <td class="job-col job-col-need">
-            <div class="job-cell job-cell-right">
-              <span class="job-cell-label">Needed / day</span>
-              <span class="job-cell-value">${needDisplay}</span>
-            </div>
-          </td>
-          <td class="job-col job-col-status">
-            <div class="job-cell">
-              <span class="job-cell-label">Status</span>
-              <div class="job-cell-value job-cell-status">${statusDisplay}</div>
-            </div>
-          </td>
-          ${noteColumn}
-          ${filesColumn}
+          <td class="job-col job-col-estimate job-col-locked" data-requires-edit="${j.id}">${estimateDisplay}</td>
+          <td class="job-col job-col-material job-col-locked" data-requires-edit="${j.id}">${j.material || '—'}</td>
+          <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">${matCostDisplay}</td>
+          <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">${matQtyDisplay}</td>
+          <td class="job-col job-col-money">$${matTotal.toFixed(2)}</td>
+          <td class="job-col job-col-charge">${chargeDisplay}</td>
+          <td class="job-col job-col-cost">${costDisplay}</td>
+          <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
+          <td class="job-col job-col-hours">${remainingDisplay}</td>
+          <td class="job-col job-col-need">${needDisplay}</td>
+          <td class="job-col job-col-status">${statusDisplay}</td>
           <td class="job-col job-col-impact">
-            <div class="job-cell job-cell-right">
-              <span class="job-cell-label">Net total</span>
-              <span class="job-impact ${impactClass}">${impactDisplay}</span>
-              <div class="job-impact-meta">Charge ${chargeDisplay} • Cost ${costDisplay} • Net/hr <span class="job-rate-net ${netClass}">${netDisplay}</span></div>
-              <div class="job-impact-meta job-impact-dates">${scheduleSummary}</div>
-              <div class="job-impact-meta">${esc(efficiencySummary)}</div>
-            </div>
+            <span class="job-impact ${impactClass}">${impactDisplay}</span>
+            <div class="job-impact-note small muted">Net total reflects estimated hours and material usage</div>
           </td>
           <td class="job-col job-col-actions">
-            <div class="job-cell job-cell-stretch">
-              <span class="job-cell-label">Actions</span>
-              <div class="job-actions">
-                <button data-log-job="${j.id}">Log time</button>
-                <button data-edit-job="${j.id}">Edit</button>
-                <button data-complete-job="${j.id}">Mark complete</button>
-                <button class="danger" data-remove-job="${j.id}">Remove</button>
-              </div>
+            <div class="job-actions">
+              <button data-log-job="${j.id}">Log time</button>
+              <button data-edit-job="${j.id}">Edit</button>
+              <button data-complete-job="${j.id}">Mark complete</button>
+              <button class="danger" data-remove-job="${j.id}">Remove</button>
             </div>
             <span data-log-job="${j.id}" style="display:none"></span>
+          </td>
+        </tr>
+        <tr class="job-detail-row">
+          <td colspan="${activeColumnCount}">
+            <div class="job-detail-card">
+              <div class="job-detail-note">
+                <label class="job-detail-label" for="jobNote_${j.id}">Notes</label>
+                ${noteMarkup}
+              </div>
+              <div class="job-detail-meta">
+                <div class="job-detail-efficiency small muted">${efficiencyDetail}</div>
+                <div class="job-detail-cost">
+                  <span class="job-detail-label">Cost efficiency</span>
+                  <div class="job-detail-cost-grid">
+                    <div><span>Charge</span><strong>${chargeDisplay}</strong></div>
+                    <div><span>Cost</span><strong>${costDisplay}</strong></div>
+                    <div><span>Net/hr</span><strong class="${netClass}">${netDisplay}</strong></div>
+                    <div><span>Net total</span><strong class="${impactClass}">${netTotalDisplay}</strong></div>
+                  </div>
+                </div>
+                <div class="job-detail-files">
+                  <span class="job-detail-label">Files</span>
+                  ${fileLinks}
+                </div>
+              </div>
+            </div>
           </td>
         </tr>`;
     } else {
@@ -1951,6 +2040,9 @@ function viewJobs(){
                 <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-j="chargeRate" data-id="${j.id}" value="${chargeRate}"></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
+                <label>Category<select data-j="cat" data-id="${j.id}" data-job-category-select>
+                  ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
+                </select></label>
               </div>
               <div class="job-edit-summary">
                 <div class="job-metric job-metric-total">
@@ -2002,10 +2094,26 @@ function viewJobs(){
   }).join("");
 
   return `
-  <div class="container">
-    <div class="block" style="grid-column:1 / -1">
+  <div class="container job-page-container">
+    <div class="block job-category-panel" data-job-category-panel>
+      <div class="job-category-header">
+        <h3>Job Categories</h3>
+        <button type="button" class="small" data-job-folder-add-root>+ Add Category</button>
+      </div>
+      <div class="job-category-tree">
+        ${folderTreeMarkup}
+      </div>
+      <p class="small muted">Select a category to focus the job list or create sub-categories to organize further.</p>
+    </div>
+    <div class="block job-main-block">
       <h3>Cutting Jobs</h3>
       <div class="job-page-toolbar">
+        <label class="job-category-filter">
+          <span>Show</span>
+          <select id="jobCategoryFilterSelect" aria-label="Filter cutting jobs by category">
+            ${categoryOptionsMarkup(selectedCategory)}
+          </select>
+        </label>
         <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
       </div>
       <form id="addJobForm" class="mini-form">
@@ -2017,6 +2125,9 @@ function viewJobs(){
         <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
         <input type="date" id="jobStart" required>
         <input type="date" id="jobDue" required>
+        <select id="jobCategory" aria-label="Category" required>
+          ${categoryOptionsMarkup(selectedCategory, { includeCreateOption: true })}
+        </select>
         <button type="button" id="jobFilesBtn">Attach Files</button>
         <input type="file" id="jobFiles" multiple style="display:none">
         <button type="submit">Add Job</button>
@@ -2038,8 +2149,6 @@ function viewJobs(){
             <th>Hours remaining</th>
             <th>Needed / day</th>
             <th>Status</th>
-            <th>Notes</th>
-            <th>Files</th>
             <th>Net total</th>
             <th>Actions</th>
           </tr>
@@ -2047,28 +2156,8 @@ function viewJobs(){
         <tbody>${rows}</tbody>
       </table>
       <p class="small muted">Material cost and quantity update immediately when changed.</p>
-      <div class="job-note-modal-backdrop" id="jobNoteModal" hidden>
-        <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobNoteModalTitle">
-          <div class="job-note-modal-header">
-            <h4 id="jobNoteModalTitle">Job notes</h4>
-            <button type="button" class="job-note-modal-close" data-note-cancel aria-label="Close notes">×</button>
-          </div>
-          <div class="job-note-modal-body">
-            <div class="job-note-modal-field">
-              <label for="jobNoteModalInput">Notes for <span id="jobNoteModalJob"></span></label>
-              <textarea id="jobNoteModalInput" rows="6" placeholder="Add notes for this cutting job"></textarea>
-            </div>
-            <div class="job-note-modal-history" id="jobNoteModalHistory" aria-live="polite"></div>
-          </div>
-          <div class="job-note-modal-actions">
-            <button type="button" data-note-save class="job-note-modal-primary">Save</button>
-            <button type="button" data-note-save-new>Save &amp; New</button>
-            <button type="button" data-note-cancel class="job-note-modal-secondary">Cancel</button>
-          </div>
-        </div>
-      </div>
     </div>
-    <div class="block past-jobs-block" id="pastJobs">
+    <div class="block past-jobs-block job-main-block" id="pastJobs">
       <h3>Past Cutting Jobs</h3>
       <div class="past-jobs-toolbar">
         <div class="past-jobs-search mini-form">

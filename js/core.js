@@ -11,7 +11,7 @@
    ========================================================= */
 
 /* =================== CONSTANTS / GLOBALS =================== */
-const APP_SCHEMA = 71;
+const APP_SCHEMA = 72;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
@@ -374,67 +374,6 @@ const defaultAsReqTasks = [
   { id:"clean_lube_ballscrews", name:"Clean & lubricate ball screws", condition:"If debris occurs", manualLink:"", storeLink:"" },
   { id:"clean_rails",           name:"Clean X-rails & Y-bridge rails", condition:"If debris occurs", manualLink:"", storeLink:"" }
 ];
-
-/* ===================== Persisted state ===================== */
-if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateISO, hours}]
-if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
-if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
-if (!Array.isArray(window.inventory))    window.inventory    = [];
-if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,chargeRate,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
-if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
-if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
-if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
-if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
-if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
-if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
-
-if (typeof window.pumpEff !== "object" || !window.pumpEff){
-  window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
-}
-if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
-if (!Array.isArray(window.pumpEff.notes)) window.pumpEff.notes = [];
-
-let totalHistory = window.totalHistory;
-let tasksInterval = window.tasksInterval;
-let tasksAsReq    = window.tasksAsReq;
-let inventory     = window.inventory;
-let cuttingJobs   = window.cuttingJobs;
-let completedCuttingJobs = window.completedCuttingJobs;
-let orderRequests = window.orderRequests;
-let orderRequestTab = window.orderRequestTab;
-let garnetCleanings = window.garnetCleanings;
-let dailyCutHours = window.dailyCutHours;
-
-function refreshGlobalCollections(){
-  if (typeof window === "undefined") return;
-
-  if (!Array.isArray(window.totalHistory)) window.totalHistory = [];
-  totalHistory = window.totalHistory;
-
-  if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
-  tasksInterval = window.tasksInterval;
-
-  if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
-  tasksAsReq = window.tasksAsReq;
-
-  if (!Array.isArray(window.inventory)) window.inventory = [];
-  inventory = window.inventory;
-
-  if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
-  cuttingJobs = window.cuttingJobs;
-
-  if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
-  completedCuttingJobs = window.completedCuttingJobs;
-
-  if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
-  orderRequests = window.orderRequests;
-
-  if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
-  garnetCleanings = window.garnetCleanings;
-
-  if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
-  dailyCutHours = window.dailyCutHours;
-}
 
 function resolveTaskVariant(task){
   if (!task || typeof task !== "object") return null;
@@ -841,6 +780,32 @@ function applyRestoreByType(entry, index){
       catch (err) { console.warn("Failed to normalize folders after restore", err); }
       return { handledRemoval: false, value: { type: "folder", id: clone.id } };
     }
+    case "job-folder": {
+      const folders = ensureJobFolderState();
+      const existing = new Set(folders.map(f => String(f.id)));
+      if (!clone.id) clone.id = genId(clone.name || "category");
+      while (existing.has(String(clone.id))){
+        clone.id = genId(clone.name || "category");
+      }
+      if (typeof window._jobFolderOrderCounter !== "number" || !Number.isFinite(window._jobFolderOrderCounter)){
+        window._jobFolderOrderCounter = 0;
+      }
+      const orderVal = Number(clone.order);
+      if (Number.isFinite(orderVal)){
+        if (orderVal > window._jobFolderOrderCounter) window._jobFolderOrderCounter = orderVal;
+      } else {
+        clone.order = ++window._jobFolderOrderCounter;
+      }
+      folders.push({
+        id: clone.id,
+        name: typeof clone.name === "string" ? clone.name : "",
+        parent: clone.parent == null ? JOB_ROOT_FOLDER_ID : String(clone.parent),
+        order: clone.order
+      });
+      setJobFolders(folders);
+      ensureJobCategories();
+      return { handledRemoval: false, value: { type: "job-folder", id: clone.id } };
+    }
     case "garnet": {
       if (!Array.isArray(garnetCleanings)) garnetCleanings = [];
       if (!clone.id) clone.id = genId("garnet");
@@ -952,31 +917,6 @@ let inventorySearchTerm = window.inventorySearchTerm;
 if (typeof window.jobHistorySearchTerm !== "string") window.jobHistorySearchTerm = "";
 let jobHistorySearchTerm = window.jobHistorySearchTerm;
 
-/* ================ Jobs editing & render flags ================ */
-if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
-if (!(window.editingCompletedJobs instanceof Set)) window.editingCompletedJobs = new Set();
-if (typeof window.RENDER_TOTAL !== "number") window.RENDER_TOTAL = null;
-if (typeof window.RENDER_DELTA !== "number") window.RENDER_DELTA = 0;
-if (typeof window.__pendingJobNoteModal !== "object" || window.__pendingJobNoteModal === null) {
-  window.__pendingJobNoteModal = null;
-}
-if (typeof window.__pendingJobNoteReturn !== "string") {
-  window.__pendingJobNoteReturn = "";
-}
-
-const editingJobs  = window.editingJobs;
-let   RENDER_TOTAL = window.RENDER_TOTAL;
-let   RENDER_DELTA = window.RENDER_DELTA;
-
-function getEditingCompletedJobsSet(){
-  if (!(window.editingCompletedJobs instanceof Set)){
-    window.editingCompletedJobs = new Set();
-  }
-  return window.editingCompletedJobs;
-}
-
-window.getEditingCompletedJobsSet = getEditingCompletedJobsSet;
-
 window.defaultIntervalTasks = defaultIntervalTasks;
 const ROOT_FOLDER_ID = "root";
 window.ROOT_FOLDER_ID = ROOT_FOLDER_ID;
@@ -985,6 +925,16 @@ const DEFAULT_SETTINGS_FOLDERS = [
   { id: "interval",    name: "Per Interval", parent: ROOT_FOLDER_ID, order: 2 },
   { id: "asreq",       name: "As Required",  parent: ROOT_FOLDER_ID, order: 1 }
 ];
+
+const JOB_ROOT_FOLDER_ID = "jobs_root";
+window.JOB_ROOT_FOLDER_ID = JOB_ROOT_FOLDER_ID;
+const DEFAULT_JOB_FOLDERS = [
+  { id: JOB_ROOT_FOLDER_ID, name: "All Jobs", parent: null, order: 1 }
+];
+
+function defaultJobFolders(){
+  return DEFAULT_JOB_FOLDERS.map(f => ({ ...f }));
+}
 
 function defaultSettingsFolders(){
   return DEFAULT_SETTINGS_FOLDERS.map(f => ({ ...f }));
@@ -1044,6 +994,160 @@ function setSettingsFolders(raw){
   window.folders = cloneFolders(window.settingsFolders);
   return window.settingsFolders;
 }
+
+function cloneJobFolders(list){
+  if (!Array.isArray(list)) return [];
+  return list.map(folder => ({ ...folder }));
+}
+
+function normalizeJobFolders(raw){
+  const seen = new Set();
+  const normalized = [];
+  if (Array.isArray(raw)){
+    for (const entry of raw){
+      if (!entry || entry.id == null) continue;
+      const id = String(entry.id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const rawParent = entry.parent != null ? entry.parent : null;
+      let parent = null;
+      if (id === JOB_ROOT_FOLDER_ID){
+        parent = null;
+      }else if (rawParent == null || String(rawParent) === "" || String(rawParent) === id){
+        parent = JOB_ROOT_FOLDER_ID;
+      }else{
+        parent = String(rawParent);
+      }
+      const name = typeof entry.name === "string" ? entry.name : "";
+      const order = Number.isFinite(entry.order) ? Number(entry.order) : 0;
+      normalized.push({ id, name, parent, order });
+    }
+  }
+
+  if (!seen.has(JOB_ROOT_FOLDER_ID)){
+    normalized.push({ ...DEFAULT_JOB_FOLDERS[0] });
+  }
+
+  const validIds = new Set(normalized.map(folder => String(folder.id)));
+  normalized.forEach(folder => {
+    if (String(folder.id) === JOB_ROOT_FOLDER_ID){
+      folder.parent = null;
+      return;
+    }
+    if (!validIds.has(String(folder.parent))){
+      folder.parent = JOB_ROOT_FOLDER_ID;
+    }
+  });
+
+  return normalized;
+}
+
+function setJobFolders(raw){
+  const normalized = normalizeJobFolders(raw);
+  window.jobFolders = normalized;
+  if (typeof window._jobFolderOrderCounter !== "number" || !Number.isFinite(window._jobFolderOrderCounter)){
+    window._jobFolderOrderCounter = 0;
+  }
+  for (const folder of normalized){
+    const orderVal = Number(folder?.order);
+    if (Number.isFinite(orderVal) && orderVal > window._jobFolderOrderCounter){
+      window._jobFolderOrderCounter = orderVal;
+    }
+  }
+  return window.jobFolders;
+}
+
+function snapshotJobFolders(){
+  const source = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();
+  const normalized = normalizeJobFolders(source);
+  window.jobFolders = normalized;
+  return cloneJobFolders(normalized);
+}
+
+/* ===================== Persisted state ===================== */
+if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateISO, hours}]
+if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
+if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
+if (!Array.isArray(window.inventory))    window.inventory    = [];
+if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,chargeRate,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
+if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
+if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
+if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
+
+if (typeof window.pumpEff !== "object" || !window.pumpEff){
+  window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
+}
+if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
+if (!Array.isArray(window.pumpEff.notes)) window.pumpEff.notes = [];
+
+let totalHistory = window.totalHistory;
+let tasksInterval = window.tasksInterval;
+let tasksAsReq    = window.tasksAsReq;
+let inventory     = window.inventory;
+let cuttingJobs   = window.cuttingJobs;
+let completedCuttingJobs = window.completedCuttingJobs;
+let orderRequests = window.orderRequests;
+let orderRequestTab = window.orderRequestTab;
+let garnetCleanings = window.garnetCleanings;
+let dailyCutHours = window.dailyCutHours;
+let jobFolders = window.jobFolders;
+
+function refreshGlobalCollections(){
+  if (typeof window === "undefined") return;
+
+  if (!Array.isArray(window.totalHistory)) window.totalHistory = [];
+  totalHistory = window.totalHistory;
+
+  if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
+  tasksInterval = window.tasksInterval;
+
+  if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
+  tasksAsReq = window.tasksAsReq;
+
+  if (!Array.isArray(window.inventory)) window.inventory = [];
+  inventory = window.inventory;
+
+  if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
+  cuttingJobs = window.cuttingJobs;
+
+  if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+  completedCuttingJobs = window.completedCuttingJobs;
+
+  if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+  orderRequests = window.orderRequests;
+
+  if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+  garnetCleanings = window.garnetCleanings;
+
+  if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+  dailyCutHours = window.dailyCutHours;
+
+  if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
+  jobFolders = window.jobFolders;
+}
+
+/* ================ Jobs editing & render flags ================ */
+if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
+if (!(window.editingCompletedJobs instanceof Set)) window.editingCompletedJobs = new Set();
+if (typeof window.RENDER_TOTAL !== "number") window.RENDER_TOTAL = null;
+if (typeof window.RENDER_DELTA !== "number") window.RENDER_DELTA = 0;
+
+const editingJobs  = window.editingJobs;
+let   RENDER_TOTAL = window.RENDER_TOTAL;
+let   RENDER_DELTA = window.RENDER_DELTA;
+
+function getEditingCompletedJobsSet(){
+  if (!(window.editingCompletedJobs instanceof Set)){
+    window.editingCompletedJobs = new Set();
+  }
+  return window.editingCompletedJobs;
+}
+
+window.getEditingCompletedJobsSet = getEditingCompletedJobsSet;
 
 function cloneFolders(list){
   if (!Array.isArray(list)) return [];
@@ -1133,6 +1237,7 @@ function snapshotState(){
     deletedItems: trashSnapshot,
     settingsFolders: foldersSnapshot,
     folders: cloneFolders(window.settingsFolders),
+    jobFolders: snapshotJobFolders(),
     dashboardLayout: cloneStructured(dashLayoutSource) || {},
     costLayout: cloneStructured(costLayoutSource) || {}
   };
@@ -1289,6 +1394,97 @@ function ensureTaskCategories(){
     if (!Array.isArray(t.completedDates)) t.completedDates = [];
   });
   tasksAsReq.forEach(t =>    { if (t && !t.cat) t.cat = "asreq"; });
+}
+
+function ensureJobCategories(){
+  const folders = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();
+  const rootId = folders.find(f => String(f.id) === JOB_ROOT_FOLDER_ID)
+    ? JOB_ROOT_FOLDER_ID
+    : (folders[0] ? String(folders[0].id) : JOB_ROOT_FOLDER_ID);
+  const validIds = new Set(folders.map(f => String(f.id)));
+  const normalize = (cat)=>{
+    const key = cat != null ? String(cat) : rootId;
+    return validIds.has(key) ? key : rootId;
+  };
+  cuttingJobs.forEach(job => {
+    if (!job) return;
+    job.cat = normalize(job.cat);
+  });
+  completedCuttingJobs.forEach(job => {
+    if (!job) return;
+    job.cat = normalize(job.cat);
+  });
+}
+
+function ensureJobFolderState(){
+  if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
+  setJobFolders(window.jobFolders);
+  return window.jobFolders;
+}
+
+function jobFolderChildren(parentId){
+  const folders = ensureJobFolderState();
+  const key = parentId == null ? null : String(parentId);
+  return folders.filter(folder => {
+    const parentKey = folder.parent == null ? null : String(folder.parent);
+    return parentKey === key;
+  });
+}
+
+function addJobFolder(name, parentId){
+  const folders = ensureJobFolderState();
+  const label = (name || "").trim();
+  const parentKey = parentId != null ? String(parentId) : JOB_ROOT_FOLDER_ID;
+  const fallbackParent = folders.some(folder => String(folder.id) === parentKey)
+    ? parentKey
+    : JOB_ROOT_FOLDER_ID;
+  const orderBase = folders.reduce((max, folder)=>{
+    const val = Number(folder?.order);
+    return Number.isFinite(val) && val > max ? val : max;
+  }, (typeof window._jobFolderOrderCounter === "number" && Number.isFinite(window._jobFolderOrderCounter)) ? window._jobFolderOrderCounter : 0);
+  const id = genId(label || "category");
+  const folder = {
+    id,
+    name: label,
+    parent: fallbackParent === JOB_ROOT_FOLDER_ID ? JOB_ROOT_FOLDER_ID : fallbackParent,
+    order: orderBase + 1
+  };
+  folders.push(folder);
+  setJobFolders(folders);
+  ensureJobCategories();
+  return folder;
+}
+
+function renameJobFolder(id, name){
+  if (id == null) return null;
+  const folders = ensureJobFolderState();
+  const key = String(id);
+  const target = folders.find(folder => String(folder.id) === key);
+  if (!target) return null;
+  target.name = (name || "").trim();
+  setJobFolders(folders);
+  return target;
+}
+
+function removeJobFolder(id){
+  if (id == null) return false;
+  const folders = ensureJobFolderState();
+  const key = String(id);
+  if (key === JOB_ROOT_FOLDER_ID) return false;
+  const hasChildren = folders.some(folder => String(folder.parent ?? "") === key);
+  if (hasChildren) return false;
+  const remaining = folders.filter(folder => String(folder.id) !== key);
+  if (remaining.length === folders.length) return false;
+  window.jobFolders = remaining;
+  setJobFolders(window.jobFolders);
+  ensureJobCategories();
+  return true;
+}
+
+function jobFolderHasJobs(id){
+  const key = id != null ? String(id) : JOB_ROOT_FOLDER_ID;
+  return cuttingJobs.some(job => String(job?.cat ?? "") === key)
+    || completedCuttingJobs.some(job => String(job?.cat ?? "") === key);
 }
 
 function normalizeInventoryItem(raw){
@@ -1455,6 +1651,12 @@ function adoptState(doc){
     : (Array.isArray(data.folders) ? data.folders : null);
   setSettingsFolders(rawFolders);
 
+  const rawJobFolders = Array.isArray(data.jobFolders)
+    ? data.jobFolders
+    : null;
+  setJobFolders(rawJobFolders);
+  jobFolders = window.jobFolders;
+
   const docDashboardLayout = (data.dashboardLayout && typeof data.dashboardLayout === "object")
     ? data.dashboardLayout
     : {};
@@ -1554,6 +1756,7 @@ function adoptState(doc){
   }
 
   ensureTaskCategories();
+  ensureJobCategories();
   syncRenderTotalsFromHistory();
 }
 
@@ -1600,6 +1803,7 @@ async function loadFromCloud(){
           dailyCutHours: Array.isArray(data.dailyCutHours) ? normalizeDailyCutHours(data.dailyCutHours) : [],
           settingsFolders: seededFoldersPayload,
           folders: cloneFolders(seededFoldersPayload),
+          jobFolders: defaultJobFolders(),
           pumpEff: pe,
           deletedItems: normalizeDeletedItems(data.deletedItems || data.deleted_items || []),
           dashboardLayout: cloneStructured(data.dashboardLayout && typeof data.dashboardLayout === "object" ? data.dashboardLayout : {}) || {},
@@ -1655,6 +1859,7 @@ async function loadFromCloud(){
         orderRequests: [createOrderRequest()],
         orderRequestTab: "active",
         dailyCutHours: [],
+        jobFolders: defaultJobFolders(),
         pumpEff: pe,
         settingsFolders: defaultFolders,
         folders: cloneFolders(defaultFolders),
@@ -1675,7 +1880,7 @@ async function loadFromCloud(){
     if (!Array.isArray(pe.entries)) pe.entries = [];
     if (!Array.isArray(pe.notes)) pe.notes = [];
     const fallbackFolders = defaultSettingsFolders();
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", dailyCutHours: [], pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {} });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", dailyCutHours: [], jobFolders: defaultJobFolders(), pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {} });
     resetHistoryToCurrent();
   }
 }
@@ -1687,66 +1892,14 @@ function seedInventoryFromTasks(){
   ].filter(Boolean);
 }
 
-function extractOrderRequestSequence(code){
-  if (!code) return null;
-  const trimmed = String(code).trim();
-  if (!trimmed) return null;
-  const match = trimmed.match(/^REQ-(\d+)$/i);
-  if (!match) return null;
-  const value = Number(match[1]);
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return value;
-}
-
-function formatOrderRequestSequence(sequence){
-  const numeric = Number(sequence);
-  const safe = Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 1;
-  return `REQ-${String(safe).padStart(4, "0")}`;
-}
-
-function buildOrderRequestCode(_dateISO, options){
-  const opts = options && typeof options === "object" ? options : {};
-  const list = Array.isArray(orderRequests)
-    ? orderRequests
-    : (Array.isArray(window.orderRequests) ? window.orderRequests : []);
-
-  const existingSequences = new Set();
-  if (opts.existingSequences instanceof Set){
-    opts.existingSequences.forEach(value => {
-      const numeric = Number(value);
-      if (Number.isFinite(numeric) && numeric > 0){
-        existingSequences.add(Math.floor(numeric));
-      }
-    });
-  }else{
-    list.forEach(req => {
-      if (!req || (opts.excludeId && req.id === opts.excludeId)) return;
-      const seq = extractOrderRequestSequence(req.code);
-      if (seq != null) existingSequences.add(seq);
-    });
-  }
-
-  let totalCount = 0;
-  list.forEach(req => {
-    if (!req || (opts.excludeId && req.id === opts.excludeId)) return;
-    totalCount += 1;
-  });
-
-  let highestSequence = 0;
-  existingSequences.forEach(seq => {
-    const numeric = Number(seq);
-    if (Number.isFinite(numeric) && numeric > highestSequence) highestSequence = numeric;
-  });
-  if (Number.isFinite(opts.startAt) && opts.startAt > 0){
-    highestSequence = Math.max(highestSequence, Math.floor(opts.startAt) - 1);
-  }
-  highestSequence = Math.max(highestSequence, totalCount);
-
-  let candidate = highestSequence + 1;
-  while(existingSequences.has(candidate)){
-    candidate += 1;
-  }
-  return formatOrderRequestSequence(candidate);
+function buildOrderRequestCode(dateISO){
+  const base = parseDateLocal(dateISO) || new Date();
+  const y = base.getFullYear();
+  const m = String(base.getMonth()+1).padStart(2, "0");
+  const d = String(base.getDate()).padStart(2, "0");
+  const hh = String(base.getHours()).padStart(2, "0");
+  const mm = String(base.getMinutes()).padStart(2, "0");
+  return `ORD-${y}${m}${d}-${hh}${mm}`;
 }
 
 function normalizeOrderItem(raw){
@@ -1781,15 +1934,10 @@ function normalizeOrderRequest(raw){
     ? raw.status
     : "draft";
   const items = Array.isArray(raw.items) ? raw.items.map(normalizeOrderItem).filter(Boolean) : [];
-  const sequence = extractOrderRequestSequence(raw.code);
-  const normalizedCode = sequence != null
-    ? formatOrderRequestSequence(sequence)
-    : (typeof raw.code === "string" ? raw.code.trim() : "");
   return {
     id: raw.id || genId("order"),
-    code: normalizedCode,
+    code: raw.code || buildOrderRequestCode(createdISO),
     createdAt: createdISO,
-    updatedAt: raw.updatedAt || null,
     status,
     resolvedAt: raw.resolvedAt || null,
     note: raw.note || "",
@@ -1800,18 +1948,9 @@ function normalizeOrderRequest(raw){
 function normalizeOrderRequests(list){
   const normalized = Array.isArray(list) ? list.map(normalizeOrderRequest).filter(Boolean) : [];
   normalized.sort((a,b)=>{
-    const aTime = new Date(a.resolvedAt || a.updatedAt || a.createdAt || 0).getTime();
-    const bTime = new Date(b.resolvedAt || b.updatedAt || b.createdAt || 0).getTime();
-    if (aTime !== bTime) return aTime - bTime;
-    const aSeq = extractOrderRequestSequence(a.code);
-    const bSeq = extractOrderRequestSequence(b.code);
-    if (aSeq != null && bSeq != null && aSeq !== bSeq) return aSeq - bSeq;
-    return String(a.id || "").localeCompare(String(b.id || ""));
-  });
-  let sequence = 1;
-  normalized.forEach(req => {
-    req.code = formatOrderRequestSequence(sequence);
-    sequence += 1;
+    const aTime = new Date(a.createdAt || 0).getTime();
+    const bTime = new Date(b.createdAt || 0).getTime();
+    return aTime - bTime;
   });
   return normalized;
 }
@@ -1849,6 +1988,7 @@ const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes
     garnetCleanings: [],
     pumpEff: { ...pumpDefaults },
     deletedItems: [],
+    jobFolders: defaultJobFolders(),
     dashboardLayout: {},
     costLayout: {}
   };
@@ -1883,6 +2023,7 @@ async function clearAllAppData(){
   else window.settingsOpenFolders = new Set();
   window.maintenanceSearchTerm = "";
   window.pendingMaintenanceAddFromInventory = null;
+  window.jobFolders = defaultJobFolders();
 
   adoptState(defaults);
   resetHistoryToCurrent();
