@@ -8622,6 +8622,15 @@ function renderJobs(){
     if (!menu) return;
     menu.removeAttribute("hidden");
     menu.classList.add("open");
+    if (!menu.__actionsMenuCloseBound){
+      menu.addEventListener("click", (event)=>{
+        const targetEl = event.target instanceof Element ? event.target : null;
+        const actionButton = targetEl ? targetEl.closest("button") : null;
+        if (!actionButton) return;
+        closeActionsMenu();
+      });
+      menu.__actionsMenuCloseBound = true;
+    }
     openActionsMenuId = id;
     openActionsTrigger = trigger || content.querySelector(`[data-job-actions-toggle="${id}"]`);
     if (openActionsTrigger){

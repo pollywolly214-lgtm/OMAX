@@ -2039,6 +2039,9 @@ body.modal-open .auth-bar {
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
+.job-actions-menu[hidden] {
+  display: none !important;
+}
 .job-actions-menu button:hover,
 .job-actions-menu button:focus {
   background: #eef3fb;
