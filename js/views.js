@@ -1694,6 +1694,35 @@ function viewJobs(){
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
   const activeColumnCount = 16;
+  const now = new Date();
+  const formatPastDueLabel = (dueISO)=>{
+    const dueDate = parseDateLocal(dueISO);
+    if (!dueDate) return "Past due";
+    dueDate.setHours(23, 59, 59, 999);
+    const diffMs = now.getTime() - dueDate.getTime();
+    if (diffMs <= 0) return "Past due";
+    const totalHours = diffMs / (1000 * 60 * 60);
+    if (totalHours >= 24){
+      const totalDays = Math.floor(totalHours / 24);
+      const remainingHours = Math.floor(totalHours % 24);
+      const parts = [];
+      if (totalDays > 0){
+        parts.push(`${totalDays} day${totalDays === 1 ? "" : "s"}`);
+      }
+      if (remainingHours > 0){
+        parts.push(`${remainingHours} hr${remainingHours === 1 ? "" : "s"}`);
+      }
+      if (!parts.length){
+        parts.push("1 day");
+      }
+      return `Past due by ${parts.join(" ")}`;
+    }
+    const wholeHours = Math.floor(totalHours);
+    if (wholeHours >= 1){
+      return `Past due by ${wholeHours} hr${wholeHours === 1 ? "" : "s"}`;
+    }
+    return "Past due by less than 1 hr";
+  };
   const rows = cuttingJobs.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileCount = jobFiles.length;
@@ -1754,7 +1783,7 @@ function viewJobs(){
     const statusLabel = behindSchedule ? 'Behind' : (aheadSchedule ? 'Ahead' : 'On pace');
     let statusDetail = '';
     if (req.requiredPerDay === Infinity){
-      statusDetail = 'Past due';
+      statusDetail = formatPastDueLabel(j.dueISO);
     } else if (behindSchedule){
       statusDetail = `Needs ${req.requiredPerDay.toFixed(1)} hr/day`;
     } else if (aheadSchedule){
@@ -1781,7 +1810,7 @@ function viewJobs(){
     const estimateDisplay = formatHours(j.estimateHours);
     const remainingDisplay = formatHours(remainHrs);
     const needDisplay = req.requiredPerDay === Infinity
-      ? '<span class="job-badge job-badge-overdue">Past due</span>'
+      ? `<span class="job-badge job-badge-overdue">${esc(formatPastDueLabel(j.dueISO))}</span>`
       : `${needPerDay} hr/day needed (capacity ${hoursPerDay.toFixed(1)} hr/day)`;
     const statusDisplay = [
       `<div class="job-status ${aheadSchedule ? 'job-status-ahead' : (behindSchedule ? 'job-status-behind' : 'job-status-onpace')}">${esc(statusLabel)}</div>`,
