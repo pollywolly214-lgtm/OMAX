@@ -375,72 +375,6 @@ const defaultAsReqTasks = [
   { id:"clean_rails",           name:"Clean X-rails & Y-bridge rails", condition:"If debris occurs", manualLink:"", storeLink:"" }
 ];
 
-/* ===================== Persisted state ===================== */
-if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateISO, hours}]
-if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
-if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
-if (!Array.isArray(window.inventory))    window.inventory    = [];
-if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,chargeRate,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
-if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
-if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
-if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
-if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
-if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
-if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
-if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
-
-if (typeof window.pumpEff !== "object" || !window.pumpEff){
-  window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
-}
-if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
-if (!Array.isArray(window.pumpEff.notes)) window.pumpEff.notes = [];
-
-let totalHistory = window.totalHistory;
-let tasksInterval = window.tasksInterval;
-let tasksAsReq    = window.tasksAsReq;
-let inventory     = window.inventory;
-let cuttingJobs   = window.cuttingJobs;
-let completedCuttingJobs = window.completedCuttingJobs;
-let orderRequests = window.orderRequests;
-let orderRequestTab = window.orderRequestTab;
-let garnetCleanings = window.garnetCleanings;
-let dailyCutHours = window.dailyCutHours;
-let jobFolders = window.jobFolders;
-
-function refreshGlobalCollections(){
-  if (typeof window === "undefined") return;
-
-  if (!Array.isArray(window.totalHistory)) window.totalHistory = [];
-  totalHistory = window.totalHistory;
-
-  if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
-  tasksInterval = window.tasksInterval;
-
-  if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
-  tasksAsReq = window.tasksAsReq;
-
-  if (!Array.isArray(window.inventory)) window.inventory = [];
-  inventory = window.inventory;
-
-  if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
-  cuttingJobs = window.cuttingJobs;
-
-  if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
-  completedCuttingJobs = window.completedCuttingJobs;
-
-  if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
-  orderRequests = window.orderRequests;
-
-  if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
-  garnetCleanings = window.garnetCleanings;
-
-  if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
-  dailyCutHours = window.dailyCutHours;
-
-  if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
-  jobFolders = window.jobFolders;
-}
-
 function resolveTaskVariant(task){
   if (!task || typeof task !== "object") return null;
   const raw = typeof task.variant === "string" ? task.variant.toLowerCase() : "";
@@ -983,25 +917,6 @@ let inventorySearchTerm = window.inventorySearchTerm;
 if (typeof window.jobHistorySearchTerm !== "string") window.jobHistorySearchTerm = "";
 let jobHistorySearchTerm = window.jobHistorySearchTerm;
 
-/* ================ Jobs editing & render flags ================ */
-if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
-if (!(window.editingCompletedJobs instanceof Set)) window.editingCompletedJobs = new Set();
-if (typeof window.RENDER_TOTAL !== "number") window.RENDER_TOTAL = null;
-if (typeof window.RENDER_DELTA !== "number") window.RENDER_DELTA = 0;
-
-const editingJobs  = window.editingJobs;
-let   RENDER_TOTAL = window.RENDER_TOTAL;
-let   RENDER_DELTA = window.RENDER_DELTA;
-
-function getEditingCompletedJobsSet(){
-  if (!(window.editingCompletedJobs instanceof Set)){
-    window.editingCompletedJobs = new Set();
-  }
-  return window.editingCompletedJobs;
-}
-
-window.getEditingCompletedJobsSet = getEditingCompletedJobsSet;
-
 window.defaultIntervalTasks = defaultIntervalTasks;
 const ROOT_FOLDER_ID = "root";
 window.ROOT_FOLDER_ID = ROOT_FOLDER_ID;
@@ -1148,6 +1063,91 @@ function snapshotJobFolders(){
   window.jobFolders = normalized;
   return cloneJobFolders(normalized);
 }
+
+/* ===================== Persisted state ===================== */
+if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateISO, hours}]
+if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
+if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
+if (!Array.isArray(window.inventory))    window.inventory    = [];
+if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,chargeRate,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
+if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
+if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
+if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
+
+if (typeof window.pumpEff !== "object" || !window.pumpEff){
+  window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
+}
+if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
+if (!Array.isArray(window.pumpEff.notes)) window.pumpEff.notes = [];
+
+let totalHistory = window.totalHistory;
+let tasksInterval = window.tasksInterval;
+let tasksAsReq    = window.tasksAsReq;
+let inventory     = window.inventory;
+let cuttingJobs   = window.cuttingJobs;
+let completedCuttingJobs = window.completedCuttingJobs;
+let orderRequests = window.orderRequests;
+let orderRequestTab = window.orderRequestTab;
+let garnetCleanings = window.garnetCleanings;
+let dailyCutHours = window.dailyCutHours;
+let jobFolders = window.jobFolders;
+
+function refreshGlobalCollections(){
+  if (typeof window === "undefined") return;
+
+  if (!Array.isArray(window.totalHistory)) window.totalHistory = [];
+  totalHistory = window.totalHistory;
+
+  if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
+  tasksInterval = window.tasksInterval;
+
+  if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
+  tasksAsReq = window.tasksAsReq;
+
+  if (!Array.isArray(window.inventory)) window.inventory = [];
+  inventory = window.inventory;
+
+  if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
+  cuttingJobs = window.cuttingJobs;
+
+  if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+  completedCuttingJobs = window.completedCuttingJobs;
+
+  if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+  orderRequests = window.orderRequests;
+
+  if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+  garnetCleanings = window.garnetCleanings;
+
+  if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+  dailyCutHours = window.dailyCutHours;
+
+  if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
+  jobFolders = window.jobFolders;
+}
+
+/* ================ Jobs editing & render flags ================ */
+if (!(window.editingJobs instanceof Set)) window.editingJobs = new Set();
+if (!(window.editingCompletedJobs instanceof Set)) window.editingCompletedJobs = new Set();
+if (typeof window.RENDER_TOTAL !== "number") window.RENDER_TOTAL = null;
+if (typeof window.RENDER_DELTA !== "number") window.RENDER_DELTA = 0;
+
+const editingJobs  = window.editingJobs;
+let   RENDER_TOTAL = window.RENDER_TOTAL;
+let   RENDER_DELTA = window.RENDER_DELTA;
+
+function getEditingCompletedJobsSet(){
+  if (!(window.editingCompletedJobs instanceof Set)){
+    window.editingCompletedJobs = new Set();
+  }
+  return window.editingCompletedJobs;
+}
+
+window.getEditingCompletedJobsSet = getEditingCompletedJobsSet;
 
 function cloneFolders(list){
   if (!Array.isArray(list)) return [];
