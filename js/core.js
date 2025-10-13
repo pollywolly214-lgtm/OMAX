@@ -535,6 +535,14 @@ function removeJobCategory(id){
   if (!target || list.length <= 1) return { removed:false, fallbackId:null };
   if (!list.some(cat => String(cat.id) === target)) return { removed:false, fallbackId:null };
   const filtered = list.filter(cat => String(cat.id) !== target);
+  const filteredIds = new Set(filtered.map(cat => String(cat.id)));
+  const removedIds = new Set();
+  for (const cat of list){
+    if (!cat || cat.id == null) continue;
+    const catId = String(cat.id);
+    if (!filteredIds.has(catId)) removedIds.add(catId);
+  }
+  if (!removedIds.size && target) removedIds.add(target);
   setJobCategories(filtered);
   const fallback = getDefaultJobCategoryId();
   const fallbackId = fallback != null ? String(fallback) : null;
@@ -543,8 +551,12 @@ function removeJobCategory(id){
     jobs.forEach(job => {
       if (!job || typeof job !== "object") return;
       const current = job.categoryId != null ? String(job.categoryId) : "";
-      if (!current || current === target){
+      if (!current || removedIds.has(current)){
         job.categoryId = fallbackId;
+      }
+      if ("cat" in job){
+        const legacy = job.cat != null ? String(job.cat) : "";
+        if (removedIds.has(legacy)) job.cat = fallbackId;
       }
     });
   };
