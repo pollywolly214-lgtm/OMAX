@@ -3401,11 +3401,23 @@ body.modal-open {
 .job-folder-select{ background:none; border:none; padding:0; font-weight:600; font-size:14px; cursor:pointer; text-align:left; color:inherit; max-width:100%; }
 .job-folder-select:hover{ text-decoration:underline; }
 .job-folder-select:focus-visible{ outline:2px solid rgba(59,130,246,0.75); outline-offset:2px; border-radius:6px; }
-.job-folder-count{ font-size:12px; color:#5d6470; display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px; background:rgba(12, 37, 84, 0.08); line-height:1.3; white-space:nowrap; }
+.job-folder-count{ font-size:12px; color:#5d6470; display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px; background:rgba(12, 37, 84, 0.08); line-height:1.3; white-space:normal; text-align:left; flex-wrap:wrap; }
 .job-folder-actions{ margin-top:6px; display:flex; flex-wrap:wrap; gap:6px; font-size:12px; }
 .job-folder-actions .link{ font-size:12px; padding:0; }
 .job-folder-action-sep{ color:#b0b4bb; }
 .job-folder-children{ margin-top:8px; margin-left:12px; display:flex; flex-direction:column; gap:8px; }
+.job-folder-jobs{ margin-top:8px; border:1px solid #dce3f2; border-radius:10px; background:linear-gradient(180deg, #f8faff 0%, #eef3fb 100%); overflow:hidden; }
+.job-folder-jobs summary{ list-style:none; cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 12px; font-size:13px; font-weight:600; color:#0a2f63; }
+.job-folder-jobs summary::after{ content:"▾"; font-size:12px; color:#4a6bb1; transition:transform 0.18s ease; }
+.job-folder-jobs summary::-webkit-details-marker{ display:none; }
+.job-folder-jobs[open] summary{ background:#e4ecfb; border-bottom:1px solid #dce3f2; }
+.job-folder-jobs[open] summary::after{ transform:rotate(180deg); }
+.job-folder-jobs-count{ display:flex; align-items:center; gap:6px; }
+.job-folder-joblist{ list-style:none; margin:0; padding:10px 16px 12px 22px; display:flex; flex-direction:column; gap:10px; }
+.job-folder-joblist li{ position:relative; padding-left:14px; font-size:13px; color:#0f2c52; }
+.job-folder-joblist li::before{ content:"•"; position:absolute; left:0; color:#4a6bb1; font-size:18px; line-height:1; top:2px; }
+.job-folder-job-name{ font-weight:600; }
+.job-folder-job-meta{ font-size:12px; color:#5d6470; margin-top:2px; }
 .job-main-block{ grid-column:span 2; }
 .job-main-category{ font-size:12px; color:#5d6470; }
 @media (max-width:900px){ .job-main-block{ grid-column:span 1; } }

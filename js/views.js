@@ -1644,6 +1644,15 @@ function viewJobs(){
   const selectedCategory = folderMap.has(String(selectedCategoryRaw)) ? String(selectedCategoryRaw) : rootCategoryId;
   window.jobCategoryFilter = selectedCategory;
 
+  const initialOpenFolders = Array.isArray(window.jobCategoryOpenFolders)
+    ? window.jobCategoryOpenFolders.map(id => String(id))
+    : null;
+  const openFolderSet = new Set(initialOpenFolders || []);
+  if (!initialOpenFolders){
+    openFolderSet.add(selectedCategory);
+  }
+  window.jobCategoryOpenFolders = Array.from(openFolderSet);
+
   const sortFolders = (list)=> list.slice().sort((a, b)=>{
     const orderDiff = (Number(b?.order) || 0) - (Number(a?.order) || 0);
     if (orderDiff !== 0) return orderDiff;
@@ -1684,6 +1693,24 @@ function viewJobs(){
   cuttingJobs.forEach(job => incrementCounts(activeCounts, job?.cat));
   completedCuttingJobs.forEach(job => incrementCounts(completedCounts, job?.cat));
 
+  const jobsByCategory = new Map();
+  const registerJobForCategory = (catId, job)=>{
+    if (!job) return;
+    let current = normalizeCategory(catId);
+    if (!current) current = rootCategoryId;
+    const visited = new Set();
+    while (current && !visited.has(current)){
+      visited.add(current);
+      const list = jobsByCategory.get(current) || [];
+      list.push(job);
+      jobsByCategory.set(current, list);
+      const parent = parentMap.get(current);
+      if (parent == null) break;
+      current = String(parent);
+    }
+  };
+  cuttingJobs.forEach(job => registerJobForCategory(job?.cat, job));
+
   const folderOptions = [];
   const ensureFolderEntry = (folder, depth)=>{
     if (!folder) return;
@@ -1720,6 +1747,39 @@ function viewJobs(){
     if (activeCount > 0) countParts.push(`${activeCount} active`);
     if (completedCount > 0) countParts.push(`${completedCount} archived`);
     const countLabel = countParts.length ? `<span class="job-folder-count">${countParts.join(" · ")}</span>` : "";
+    const jobsForFolder = (jobsByCategory.get(id) || []).slice().sort((a, b)=>{
+      const dueTime = (job)=>{
+        if (!job || !job.dueISO) return Number.POSITIVE_INFINITY;
+        const parsed = Date.parse(job.dueISO);
+        return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+      };
+      const dueDiff = dueTime(a) - dueTime(b);
+      if (dueDiff !== 0) return dueDiff;
+      return String(a?.name || "").localeCompare(String(b?.name || ""), undefined, { sensitivity: "base" });
+    });
+    const jobSummaryLabel = jobsForFolder.length
+      ? `${jobsForFolder.length} active job${jobsForFolder.length === 1 ? "" : "s"}`
+      : "No active jobs yet";
+    const jobListItems = jobsForFolder.length
+      ? jobsForFolder.map(job => {
+          const metaParts = [];
+          const est = Number(job?.estimateHours);
+          if (Number.isFinite(est)) metaParts.push(`${formatHours(est)} est`);
+          if (job?.dueISO){
+            const due = formatDate(job.dueISO);
+            if (due && due !== "—") metaParts.push(`Due ${due}`);
+          }
+          const metaLine = metaParts.length
+            ? `<div class="job-folder-job-meta">${metaParts.map(part => esc(part)).join(" &middot; ")}</div>`
+            : "";
+          return `<li><div class="job-folder-job-name">${esc(job?.name || "Untitled job")}</div>${metaLine}</li>`;
+        }).join("")
+      : `<li class="muted">Add jobs to this category to see them listed.</li>`;
+    const isOpen = openFolderSet.has(id);
+    const jobListMarkup = `<details class="job-folder-jobs" data-job-folder-jobs="${esc(id)}"${isOpen ? " open" : ""}>
+        <summary><span class="job-folder-jobs-count">${esc(jobSummaryLabel)}</span></summary>
+        <ul class="job-folder-joblist">${jobListItems}</ul>
+      </details>`;
     const actions = [
       `<button type="button" class="link" data-job-folder-add="${esc(id)}">+ Sub-category</button>`,
       !isRoot ? `<button type="button" class="link" data-job-folder-rename="${esc(id)}">Rename</button>` : "",
@@ -1734,6 +1794,7 @@ function viewJobs(){
           </button>
           ${countLabel}
         </div>
+        ${jobListMarkup}
         <div class="job-folder-actions">${actions || ""}</div>
         ${childrenMarkup ? `<div class="job-folder-children">${childrenMarkup}</div>` : ""}
       </div>
