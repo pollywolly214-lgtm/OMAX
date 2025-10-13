@@ -1,0 +1,364 @@
+diff --git a/js/views.js b/js/views.js
+index 9bdd181..9335f8a 100644
+--- a/js/views.js
++++ b/js/views.js
+@@ -1926,7 +1926,7 @@ function viewJobs(){
+   const historyFilterStatus = historySearchActive
+     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
+     : "";
+-  const activeColumnCount = 15;
++  const activeColumnCount = 16;
+   const now = new Date();
+   const formatPastDueLabel = (dueISO)=>{
+     const dueDate = parseDateLocal(dueISO);
+@@ -1977,14 +1977,6 @@ function viewJobs(){
+     const fileMenu = fileCount
+       ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
+       : `<p class="job-file-menu-empty small muted">No files attached</p>`;
+-    const fileLinks = fileCount
+-      ? `<ul class="job-file-pill-list">${jobFiles.map((f, idx) => {
+-          const safeName = esc(f?.name || `file_${idx + 1}`);
+-          const href = esc(f?.dataUrl || f?.url || "");
+-          if (!href) return "";
+-          return `<li><a href="${href}" download="${safeName}" class="job-file-pill">${safeName}</a></li>`;
+-        }).filter(Boolean).join("")}</ul>`
+-      : `<p class="small muted">No files attached. Edit the job to add files.</p>`;
+     const eff = computeJobEfficiency(j);
+     const req = computeRequiredDaily(j);
+     const editing = editingJobs.has(j.id);
+@@ -2043,6 +2035,12 @@ function viewJobs(){
+     const efficiencyDetail = slackSummary
+       ? `${statusLabel}; ${capacitySummary}; ${slackSummary}`
+       : `${statusLabel}; ${capacitySummary}`;
++    const efficiencySummary = efficiencyDetail
++      .split(';')
++      .map(part => part.trim())
++      .filter(Boolean)
++      .join(' • ');
++    const efficiencySummaryText = efficiencySummary || 'Schedule data not available';
+     const impactDisplay = netTotalDisplay;
+ 
+     const estimateDisplay = formatHours(j.estimateHours);
+@@ -2066,11 +2064,6 @@ function viewJobs(){
+       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
+       const matQtyDisplay  = formatQuantity(matQty);
+       const noteContent = (j.notes || "").trim();
+-      const notePreviewRaw = noteContent.replace(/\s+/g, " ").trim();
+-      const notePreviewShort = notePreviewRaw.length > 90 ? `${notePreviewRaw.slice(0, 87)}…` : notePreviewRaw;
+-      const notePreviewText = noteContent
+-        ? textEsc(notePreviewShort)
+-        : '<span class="job-note-placeholder">Add a note…</span>';
+       const noteButtonLabel = esc(j.name || "Cutting job");
+       return `
+         <tr data-job-row="${j.id}" class="job-row">
+@@ -2117,13 +2110,32 @@ function viewJobs(){
+               <div class="job-impact-header">
+                 <span class="job-impact ${impactClass}">${impactDisplay}</span>
+               </div>
+-              <div class="job-impact-note small muted">Net total reflects estimated hours and material usage</div>
+-              <button type="button" class="job-note-trigger job-note-compact ${noteContent ? 'has-note' : ''}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
+-                <span class="job-note-compact-label">Notes</span>
+-                <span class="job-note-trigger-text" data-job-note-display="${j.id}">${notePreviewText}</span>
+-              </button>
++              <div class="job-impact-meta">${esc(efficiencySummaryText)}</div>
++              <dl class="job-impact-metrics">
++                <div><dt>Charge</dt><dd>${chargeDisplay}</dd></div>
++                <div><dt>Cost</dt><dd>${costDisplay}</dd></div>
++                <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
++                <div><dt>Net total</dt><dd class="${impactClass}">${impactDisplay}</dd></div>
++              </dl>
++              <div class="job-impact-files">
++                <span class="job-impact-files-label">Files</span>
++                ${fileCount
++                  ? `<ul class="job-impact-files-list">${jobFiles.map((f, idx) => {
++                      const safeName = esc(f?.name || `file_${idx + 1}`);
++                      const href = esc(f?.dataUrl || f?.url || "");
++                      return href
++                        ? `<li><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`
++                        : `<li>${safeName}</li>`;
++                    }).join("")}</ul>`
++                  : '<span class="job-impact-files-empty small muted">No files attached</span>'}
++              </div>
+             </div>
+           </td>
++          <td class="job-col job-col-note">
++            <button type="button" class="job-note-trigger job-note-button ${noteContent ? 'has-note' : ''}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
++              <span class="job-note-button-label">${noteContent ? 'View notes' : 'Add note'}</span>
++            </button>
++          </td>
+           <td class="job-col job-col-actions">
+             <div class="job-actions">
+               <button data-log-job="${j.id}">Log time</button>
+@@ -2134,28 +2146,7 @@ function viewJobs(){
+             <span data-log-job="${j.id}" style="display:none"></span>
+           </td>
+         </tr>
+-        <tr class="job-detail-row">
+-          <td colspan="${activeColumnCount}">
+-            <div class="job-detail-card">
+-              <div class="job-detail-meta">
+-                <div class="job-detail-efficiency small muted">${efficiencyDetail}</div>
+-                <div class="job-detail-cost">
+-                  <span class="job-detail-label">Cost efficiency</span>
+-                  <div class="job-detail-cost-grid">
+-                    <div><span>Charge</span><strong>${chargeDisplay}</strong></div>
+-                    <div><span>Cost</span><strong>${costDisplay}</strong></div>
+-                    <div><span>Net/hr</span><strong class="${netClass}">${netDisplay}</strong></div>
+-                    <div><span>Net total</span><strong class="${impactClass}">${netTotalDisplay}</strong></div>
+-                  </div>
+-                </div>
+-                <div class="job-detail-files">
+-                  <span class="job-detail-label">Files</span>
+-                  ${fileLinks}
+-                </div>
+-              </div>
+-            </div>
+-          </td>
+-        </tr>`;
++        `;
+     } else {
+       // EDIT ROW
+       return `
+@@ -2281,7 +2272,8 @@ function viewJobs(){
+             <th>Needed / day</th>
+             <th>Status</th>
+             <th>Files</th>
+-            <th>Net total &amp; notes</th>
++            <th>Net total</th>
++            <th>Notes</th>
+             <th>Actions</th>
+           </tr>
+         </thead>
+diff --git a/style.css b/style.css
+index 3f290c0..b73eb62 100644
+--- a/style.css
++++ b/style.css
+@@ -1810,14 +1810,17 @@ body.modal-open .auth-bar {
+   width: 140px;
+ }
+ .job-table thead th:nth-child(14) {
+-  min-width: 180px;
+-  width: 200px;
++  min-width: 220px;
++  width: 260px;
++}
++.job-table thead th:nth-child(15) {
++  width: 132px;
+ }
+ .job-table thead th:not(:last-child) {
+   border-right: 1px solid var(--job-table-divider);
+ }
+ .job-table tbody td {
+-  padding: 4px 6px;
++  padding: 3px 6px;
+   border-bottom: 1px solid #e5ebf7;
+   vertical-align: top;
+   font-size: 12px;
+@@ -1841,8 +1844,8 @@ body.modal-open .auth-bar {
+ }
+ 
+ .job-col-impact {
+-  min-width: 180px;
+-  width: 200px;
++  min-width: 220px;
++  width: 260px;
+   white-space: normal;
+ }
+ 
+@@ -1852,6 +1855,12 @@ body.modal-open .auth-bar {
+   word-break: break-word;
+ }
+ 
++.job-col-note {
++  min-width: 132px;
++  width: 132px;
++  max-width: 132px;
++}
++
+ .job-cell {
+   display: flex;
+   flex-direction: column;
+@@ -2009,7 +2018,7 @@ body.modal-open .auth-bar {
+ .job-impact-stack {
+   display: flex;
+   flex-direction: column;
+-  gap: 4px;
++  gap: 6px;
+ }
+ .job-impact-header {
+   display: flex;
+@@ -2019,13 +2028,69 @@ body.modal-open .auth-bar {
+ .job-rate-net { font-weight: 600; }
+ 
+ .job-impact-meta {
+-  font-size: 10px;
+-  color: #5a6b85;
+-  line-height: 1.3;
++  font-size: 11px;
++  color: #3b4a68;
++  line-height: 1.35;
+ }
+ 
+-.job-impact-meta + .job-impact-meta {
+-  margin-top: 2px;
++.job-impact-metrics {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 4px 12px;
++  margin: 0;
++  padding: 0;
++}
++.job-impact-metrics div {
++  display: flex;
++  justify-content: space-between;
++  align-items: center;
++  gap: 8px;
++  font-size: 11px;
++  color: #1c2d4a;
++}
++.job-impact-metrics dt {
++  font-weight: 600;
++  color: #4b5874;
++}
++.job-impact-metrics dd {
++  margin: 0;
++  font-weight: 600;
++}
++.job-impact-files {
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++}
++.job-impact-files-label {
++  font-size: 10px;
++  font-weight: 700;
++  letter-spacing: 0.05em;
++  text-transform: uppercase;
++  color: #4b5874;
++}
++.job-impact-files-list {
++  list-style: none;
++  margin: 0;
++  padding: 0;
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++}
++.job-impact-files-list li {
++  font-size: 11px;
++  color: #1c2d4a;
++}
++.job-impact-files-list li a {
++  color: #1f3b67;
++  text-decoration: none;
++  font-size: 11px;
++}
++.job-impact-files-list li a:hover,
++.job-impact-files-list li a:focus-visible {
++  text-decoration: underline;
++}
++.job-impact-files-empty {
++  font-size: 11px;
+ }
+ .job-rate-net-positive,
+ .job-metric-value.job-rate-net-positive { color: #2e7d32; }
+@@ -2193,87 +2258,40 @@ body.modal-open .auth-bar {
+ .job-note-trigger,
+ .job-note-display {
+   width: 100%;
+-  min-height: 32px;
+-  padding: 5px 8px;
++  min-height: 34px;
++  padding: 6px 10px;
+   border-radius: 8px;
+   border: 1px solid #d6e0f3;
+   font-size: 12px;
+   line-height: 1.45;
+-  background: #fff;
++  background: #f6f8fe;
+   color: #1c2d4a;
+   cursor: pointer;
+   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+-  text-align: left;
++  text-align: center;
++  font-weight: 600;
+ }
+ .job-note-trigger {
+-  display: flex;
++  display: inline-flex;
+   align-items: center;
+-  justify-content: flex-start;
++  justify-content: center;
+   gap: 6px;
+   font-family: inherit;
+   width: 100%;
+-  min-height: 32px;
+-  padding: 0;
+-}
+-.job-note-trigger.job-note-compact {
+-  width: auto;
+-  min-height: 0;
+-  padding: 4px 10px;
+-  border-radius: 999px;
+-  border-width: 1px;
+-  background: #f8faff;
+-  font-size: 11px;
+-  line-height: 1.3;
+ }
+-.job-note-trigger.job-note-compact.has-note {
++.job-note-trigger.has-note {
+   background: #fff;
+-  border-color: #c7d4ed;
+-}
+-.job-note-trigger.job-note-compact:hover,
+-.job-note-trigger.job-note-compact:focus-visible {
+-  background: #f1f4fb;
+-}
+-.job-note-compact-label {
+-  font-weight: 600;
+-  text-transform: uppercase;
+-  letter-spacing: 0.06em;
+-  font-size: 10px;
+-  color: #4b5874;
+-}
+-.job-note-trigger.job-note-compact .job-note-trigger-text {
+-  width: auto;
+-  max-width: 220px;
+-  white-space: nowrap;
+-  overflow: hidden;
+-  text-overflow: ellipsis;
+-  font-size: 11px;
+-}
+-.job-note-trigger.job-note-compact .job-note-placeholder {
+-  font-style: normal;
+-}
+-.job-note-trigger:not(.has-note) {
+-  background: #f8faff;
+-  border-color: #d6e2f5;
+-}
+-.job-note-trigger .job-note-placeholder,
+-.job-note-display.job-note-empty {
+-  color: #6b7b94;
+-  font-style: italic;
+ }
+ .job-note-trigger:hover,
+ .job-note-trigger:focus-visible,
+ .job-note-display:hover,
+ .job-note-display:focus-visible {
+-  background: #f1f4fb;
+-  border-color: #b9c6e0;
+-  box-shadow: 0 0 0 2px rgba(46, 91, 173, 0.18);
++  border-color: #91b7ff;
++  box-shadow: 0 0 0 3px rgba(145, 183, 255, 0.3);
+   outline: none;
+ }
+-.job-note-trigger-text {
+-  display: block;
+-  width: 100%;
+-  white-space: normal;
+-  color: inherit;
++.job-note-button-label {
++  font-size: 12px;
+ }
+ .job-note-modal-backdrop {
+   position: fixed;
