@@ -1926,7 +1926,7 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
-  const activeColumnCount = 16;
+  const activeColumnCount = 15;
   const now = new Date();
   const formatPastDueLabel = (dueISO)=>{
     const dueDate = parseDateLocal(dueISO);
@@ -2066,11 +2066,10 @@ function viewJobs(){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
       const matQtyDisplay  = formatQuantity(matQty);
       const noteContent = (j.notes || "").trim();
-      const noteMarkup = noteContent
-        ? `<div id="jobNote_${j.id}" class="job-note-display" data-requires-edit="${j.id}">${textEsc(j.notes || "").replace(/\n/g, "<br>")}</div>`
-        : `<div id="jobNote_${j.id}" class="job-note-display job-note-empty" data-requires-edit="${j.id}">Add a note…</div>`;
+      const notePreviewRaw = noteContent.replace(/\s+/g, " ").trim();
+      const notePreviewShort = notePreviewRaw.length > 90 ? `${notePreviewRaw.slice(0, 87)}…` : notePreviewRaw;
       const notePreviewText = noteContent
-        ? textEsc(noteContent.length > 90 ? `${noteContent.slice(0, 87)}…` : noteContent).replace(/\n/g, "<br>")
+        ? textEsc(notePreviewShort)
         : '<span class="job-note-placeholder">Add a note…</span>';
       const noteButtonLabel = esc(j.name || "Cutting job");
       return `
@@ -2098,14 +2097,6 @@ function viewJobs(){
           <td class="job-col job-col-hours">${remainingDisplay}</td>
           <td class="job-col job-col-need">${needDisplay}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
-          <td class="job-col job-col-note">
-            <div class="job-cell job-cell-stretch">
-              <span class="job-cell-label">Notes</span>
-              <button type="button" class="job-note-trigger ${noteContent ? 'has-note' : ''}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
-                <span class="job-note-trigger-text" data-job-note-display="${j.id}">${notePreviewText}</span>
-              </button>
-            </div>
-          </td>
           <td class="job-col job-col-files">
             <div class="job-cell job-cell-stretch">
               <span class="job-cell-label">Files</span>
@@ -2122,8 +2113,16 @@ function viewJobs(){
             </div>
           </td>
           <td class="job-col job-col-impact">
-            <span class="job-impact ${impactClass}">${impactDisplay}</span>
-            <div class="job-impact-note small muted">Net total reflects estimated hours and material usage</div>
+            <div class="job-impact-stack">
+              <div class="job-impact-header">
+                <span class="job-impact ${impactClass}">${impactDisplay}</span>
+              </div>
+              <div class="job-impact-note small muted">Net total reflects estimated hours and material usage</div>
+              <button type="button" class="job-note-trigger job-note-compact ${noteContent ? 'has-note' : ''}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
+                <span class="job-note-compact-label">Notes</span>
+                <span class="job-note-trigger-text" data-job-note-display="${j.id}">${notePreviewText}</span>
+              </button>
+            </div>
           </td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
@@ -2138,10 +2137,6 @@ function viewJobs(){
         <tr class="job-detail-row">
           <td colspan="${activeColumnCount}">
             <div class="job-detail-card">
-              <div class="job-detail-note">
-                <label class="job-detail-label" for="jobNote_${j.id}">Notes</label>
-                ${noteMarkup}
-              </div>
               <div class="job-detail-meta">
                 <div class="job-detail-efficiency small muted">${efficiencyDetail}</div>
                 <div class="job-detail-cost">
@@ -2285,9 +2280,8 @@ function viewJobs(){
             <th>Hours remaining</th>
             <th>Needed / day</th>
             <th>Status</th>
-            <th>Notes</th>
             <th>Files</th>
-            <th>Net total</th>
+            <th>Net total &amp; notes</th>
             <th>Actions</th>
           </tr>
         </thead>
