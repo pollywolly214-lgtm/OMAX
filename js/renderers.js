@@ -8598,6 +8598,15 @@ function renderJobs(){
   setAppSettingsContext("default");
   wireDashboardSettingsMenu();
 
+  if (typeof window.__cleanupJobActionMenus === "function"){
+    try {
+      window.__cleanupJobActionMenus();
+    } catch (_err) {
+      // ignore cleanup errors
+    }
+    window.__cleanupJobActionMenus = null;
+  }
+
   if (typeof window.__cleanupJobFileMenus === "function"){
     try {
       window.__cleanupJobFileMenus();
@@ -8633,6 +8642,10 @@ function renderJobs(){
   let openFileTrigger = null;
   let fileMenuDocHandler = null;
   let fileMenuKeyHandler = null;
+  let openActionMenuId = null;
+  let openActionTrigger = null;
+  let actionMenuDocHandler = null;
+  let actionMenuKeyHandler = null;
 
   const closeFileMenu = ()=>{
     if (!openFileMenuId) return;
@@ -8704,9 +8717,79 @@ function renderJobs(){
     document.addEventListener("keydown", fileMenuKeyHandler);
   };
 
+  const closeActionMenu = ()=>{
+    if (!openActionMenuId) return;
+    const menu = content.querySelector(`[data-job-actions-menu="${openActionMenuId}"]`);
+    if (menu){
+      menu.setAttribute("hidden", "");
+      menu.classList.remove("open");
+    }
+    if (openActionTrigger){
+      openActionTrigger.setAttribute("aria-expanded", "false");
+      openActionTrigger.classList.remove("is-open");
+    }
+    if (actionMenuDocHandler){
+      document.removeEventListener("click", actionMenuDocHandler);
+      actionMenuDocHandler = null;
+    }
+    if (actionMenuKeyHandler){
+      document.removeEventListener("keydown", actionMenuKeyHandler);
+      actionMenuKeyHandler = null;
+    }
+    openActionMenuId = null;
+    openActionTrigger = null;
+  };
+
+  const openActionMenu = (jobId, trigger = null)=>{
+    const id = jobId != null ? String(jobId) : "";
+    if (!id) return;
+    if (openActionMenuId === id){
+      closeActionMenu();
+      return;
+    }
+    closeActionMenu();
+    const menu = content.querySelector(`[data-job-actions-menu="${id}"]`);
+    if (!menu) return;
+    menu.removeAttribute("hidden");
+    menu.classList.add("open");
+    openActionMenuId = id;
+    openActionTrigger = trigger || content.querySelector(`[data-job-actions-toggle="${id}"]`);
+    if (openActionTrigger){
+      openActionTrigger.setAttribute("aria-expanded", "true");
+      openActionTrigger.classList.add("is-open");
+    }
+
+    actionMenuDocHandler = (event)=>{
+      if (!openActionMenuId) return;
+      const menuEl = content.querySelector(`[data-job-actions-menu="${openActionMenuId}"]`);
+      const triggerEl = openActionTrigger;
+      const target = event.target;
+      if (!menuEl){
+        closeActionMenu();
+        return;
+      }
+      if (menuEl.contains(target)) return;
+      if (triggerEl && triggerEl.contains(target)) return;
+      closeActionMenu();
+    };
+    document.addEventListener("click", actionMenuDocHandler);
+
+    actionMenuKeyHandler = (event)=>{
+      if (event.key === "Escape" || event.key === "Esc"){
+        closeActionMenu();
+      }
+    };
+    document.addEventListener("keydown", actionMenuKeyHandler);
+  };
+
   window.__cleanupJobFileMenus = ()=>{
     closeFileMenu();
     window.__cleanupJobFileMenus = null;
+  };
+
+  window.__cleanupJobActionMenus = ()=>{
+    closeActionMenu();
+    window.__cleanupJobActionMenus = null;
   };
 
   const renderNoteHistory = (value)=>{
@@ -9681,11 +9764,23 @@ function renderJobs(){
 
   // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
   content.querySelector(".job-table tbody")?.addEventListener("click",(e)=>{
+    const actionsTrigger = e.target.closest("[data-job-actions-toggle]");
+    if (actionsTrigger){
+      const id = actionsTrigger.getAttribute("data-job-actions-toggle");
+      if (id){
+        e.preventDefault();
+        closeFileMenu();
+        openActionMenu(id, actionsTrigger);
+      }
+      return;
+    }
+
     const fileTrigger = e.target.closest("[data-job-files]");
     if (fileTrigger){
       const id = fileTrigger.getAttribute("data-job-files");
       if (id){
         e.preventDefault();
+        closeActionMenu();
         openFileMenu(id, fileTrigger);
       }
       return;
@@ -9705,6 +9800,7 @@ function renderJobs(){
       if (id){
         e.preventDefault();
         closeFileMenu();
+        closeActionMenu();
         openJobNoteModal(id, { appendBlank: false, trigger: noteTrigger });
       }
       return;
@@ -9720,7 +9816,7 @@ function renderJobs(){
       const id = locked.getAttribute("data-requires-edit");
       if (!id) return;
       const proceed = window.confirm ? window.confirm("Open edit mode to update this job?") : true;
-      if (proceed){ editingJobs.add(id); renderJobs(); }
+      if (proceed){ closeActionMenu(); editingJobs.add(id); renderJobs(); }
       return;
     }
 
@@ -9728,6 +9824,7 @@ function renderJobs(){
     if (upload){
       const id = upload.getAttribute("data-upload-job");
       closeFileMenu();
+      closeActionMenu();
       content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
       return;
     }
@@ -9756,11 +9853,12 @@ function renderJobs(){
     const apRemain = e.target.closest("[data-log-apply-remain]");
 
     // Edit
-    if (ed){ closeFileMenu(); editingJobs.add(ed.getAttribute("data-edit-job")); renderJobs(); return; }
+    if (ed){ closeFileMenu(); closeActionMenu(); editingJobs.add(ed.getAttribute("data-edit-job")); renderJobs(); return; }
 
     // Remove
     if (rm){
       closeFileMenu();
+      closeActionMenu();
       const id = rm.getAttribute("data-remove-job");
       const job = cuttingJobs.find(x=>x.id===id);
       if (job){
@@ -9778,6 +9876,7 @@ function renderJobs(){
 
     if (complete){
       closeFileMenu();
+      closeActionMenu();
       const id = complete.getAttribute("data-complete-job");
       const idx = cuttingJobs.findIndex(x=>x.id===id);
       if (idx < 0) return;
@@ -9845,6 +9944,7 @@ function renderJobs(){
     // Save (from edit row)
     if (sv){
       closeFileMenu();
+      closeActionMenu();
       const id = sv.getAttribute("data-save-job");
       const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
       const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${id}"]`)?.value;
@@ -9872,11 +9972,12 @@ function renderJobs(){
     }
 
     // Cancel edit
-    if (ca){ closeFileMenu(); editingJobs.delete(ca.getAttribute("data-cancel-job")); renderJobs(); return; }
+    if (ca){ closeFileMenu(); closeActionMenu(); editingJobs.delete(ca.getAttribute("data-cancel-job")); renderJobs(); return; }
 
     // Toggle inline Log panel (adds both "spent" and "remaining" controls)
     if (lg){
       closeFileMenu();
+      closeActionMenu();
       const id = lg.getAttribute("data-log-job");
       const anchor   = content.querySelector(`tr[data-job-row="${id}"]`);
       const existing = content.querySelector(`tr[data-log-row="${id}"]`);
@@ -9926,6 +10027,7 @@ function renderJobs(){
     // Apply "spent" (increment completedHours)
     if (apSpent){
       closeFileMenu();
+      closeActionMenu();
       const id = apSpent.getAttribute("data-log-apply-spent");
       const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
       const add = Number(content.querySelector(`#manSpent_${id}`)?.value);
@@ -9949,6 +10051,7 @@ function renderJobs(){
     // Apply "remaining" (set completedHours = estimate - remaining)
     if (apRemain){
       closeFileMenu();
+      closeActionMenu();
       const id = apRemain.getAttribute("data-log-apply-remain");
       const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
       const remain = Number(content.querySelector(`#manRemain_${id}`)?.value);

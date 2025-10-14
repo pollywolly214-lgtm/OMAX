@@ -2068,6 +2068,7 @@ function viewJobs(){
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileCount = jobFiles.length;
     const fileMenuId = `jobFileMenu_${j.id}`;
+    const actionMenuId = `jobActionsMenu_${j.id}`;
     const fileLabel = fileCount
       ? `${fileCount} file${fileCount === 1 ? "" : "s"}`
       : "No files";
@@ -2250,15 +2251,22 @@ function viewJobs(){
           </td>
           <td class="job-col job-col-note">
             <button type="button" class="job-note-trigger job-note-button ${noteContent ? 'has-note' : ''}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
+              <span class="job-note-button-icon" aria-hidden="true">🗒</span>
               <span class="job-note-button-label">${noteContent ? 'View notes' : 'Add note'}</span>
             </button>
           </td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
-              <button data-log-job="${j.id}">Log time</button>
-              <button data-edit-job="${j.id}">Edit</button>
-              <button data-complete-job="${j.id}">Mark complete</button>
-              <button class="danger" data-remove-job="${j.id}">Remove</button>
+              <button type="button" class="job-actions-trigger" data-job-actions-toggle="${j.id}" aria-haspopup="true" aria-expanded="false" aria-controls="${esc(actionMenuId)}">
+                <span class="job-actions-trigger-label">Actions</span>
+                <span class="job-actions-trigger-caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="job-actions-menu" id="${esc(actionMenuId)}" data-job-actions-menu="${j.id}" hidden>
+                <button type="button" data-log-job="${j.id}">Log time</button>
+                <button type="button" data-edit-job="${j.id}">Edit</button>
+                <button type="button" data-complete-job="${j.id}">Mark complete</button>
+                <button type="button" class="danger" data-remove-job="${j.id}">Remove</button>
+              </div>
             </div>
             <span data-log-job="${j.id}" style="display:none"></span>
           </td>
