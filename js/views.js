@@ -2229,6 +2229,18 @@ function viewJobs(){
                   <div class="job-file-menu-hint small muted">Edit the job to add files.</div>
                 </div>
               </div>
+              <div class="job-impact-files">
+                <span class="job-impact-files-label">Attached files</span>
+                ${fileCount
+                  ? `<ul class="job-impact-files-list">${jobFiles.map((f, idx) => {
+                      const safeName = esc(f?.name || `file_${idx + 1}`);
+                      const href = esc(f?.dataUrl || f?.url || "");
+                      return href
+                        ? `<li><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`
+                        : `<li>${safeName}</li>`;
+                    }).join("")}</ul>`
+                  : '<span class="job-impact-files-empty small muted">No files attached</span>'}
+              </div>
             </div>
           </td>
           <td class="job-col job-col-impact">
@@ -2243,18 +2255,6 @@ function viewJobs(){
                 <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
                 <div><dt>Net total</dt><dd class="${impactClass}">${impactDisplay}</dd></div>
               </dl>
-              <div class="job-impact-files">
-                <span class="job-impact-files-label">Files</span>
-                ${fileCount
-                  ? `<ul class="job-impact-files-list">${jobFiles.map((f, idx) => {
-                      const safeName = esc(f?.name || `file_${idx + 1}`);
-                      const href = esc(f?.dataUrl || f?.url || "");
-                      return href
-                        ? `<li><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`
-                        : `<li>${safeName}</li>`;
-                    }).join("")}</ul>`
-                  : '<span class="job-impact-files-empty small muted">No files attached</span>'}
-              </div>
             </div>
           </td>
           <td class="job-col job-col-note">
