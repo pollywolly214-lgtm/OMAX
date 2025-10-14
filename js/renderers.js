@@ -9619,6 +9619,12 @@ function renderJobs(){
       }
       return;
     }
+    const categorySelect = e.target.closest("[data-job-category-select]");
+    if (categorySelect){
+      // Allow interacting with inline category selects without forcing edit mode
+      return;
+    }
+
     const locked = e.target.closest("[data-requires-edit]");
     if (locked){
       const id = locked.getAttribute("data-requires-edit");
