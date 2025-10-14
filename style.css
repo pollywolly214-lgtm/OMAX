@@ -1737,17 +1737,69 @@ body.modal-open .auth-bar {
 .job-page-topbar {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.job-page-topbar > h3 {
+  margin: 0;
+  color: #12325b;
+  font-size: 22px;
+  letter-spacing: 0.01em;
 }
 .job-page-toolbar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
+  padding: 16px 20px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(20, 58, 117, 0.92), rgba(32, 92, 170, 0.92));
+  border: 1px solid rgba(23, 64, 127, 0.6);
+  box-shadow: 0 14px 28px rgba(13, 46, 84, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  overflow: hidden;
 }
-.job-page-toolbar h3 {
-  margin: 0;
+.job-page-toolbar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at top left, rgba(119, 183, 255, 0.35), transparent 55%),
+    radial-gradient(circle at bottom right, rgba(19, 47, 92, 0.45), transparent 60%);
+  mix-blend-mode: screen;
+  opacity: 0.85;
+}
+.job-page-toolbar > * {
+  position: relative;
+  z-index: 1;
+}
+.job-page-toolbar .job-history-button {
+  border-color: rgba(255, 255, 255, 0.65);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05));
+  color: #f6f9ff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 6px 14px rgba(10, 26, 55, 0.35);
+  backdrop-filter: blur(6px);
+}
+.job-page-toolbar .job-history-button:hover,
+.job-page-toolbar .job-history-button:focus {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.12));
+  border-color: rgba(255, 255, 255, 0.75);
+}
+.job-page-toolbar .job-category-filter {
+  color: rgba(232, 240, 255, 0.85);
+}
+.job-page-toolbar .job-category-filter span {
+  color: inherit;
+}
+.job-page-toolbar .job-category-filter select {
+  background: rgba(6, 26, 59, 0.55);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #f6f9ff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+.job-page-toolbar .job-category-filter select:focus {
+  outline: 2px solid rgba(162, 205, 255, 0.5);
+  border-color: rgba(162, 205, 255, 0.7);
 }
 .job-toolbar-actions {
   display: flex;
@@ -1760,21 +1812,22 @@ body.modal-open .auth-bar {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 18px;
+  padding: 9px 20px;
   border-radius: 999px;
-  border: 1px solid #1f3b67;
-  background: linear-gradient(135deg, #2d62b5, #214a86);
-  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.05));
+  color: #f6f9ff;
   font-weight: 600;
   font-size: 14px;
   letter-spacing: 0.01em;
-  box-shadow: 0 6px 12px rgba(18, 52, 101, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 8px 18px rgba(11, 30, 64, 0.35);
+  backdrop-filter: blur(6px);
   transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.2s ease;
 }
 .job-add-button:hover,
 .job-add-button:focus {
-  background: linear-gradient(135deg, #2f6bd0, #2559a3);
-  box-shadow: 0 8px 16px rgba(18, 52, 101, 0.24);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.18));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 10px 22px rgba(11, 30, 64, 0.42);
   transform: translateY(-1px);
 }
 .job-add-button:focus-visible {
@@ -1782,8 +1835,9 @@ body.modal-open .auth-bar {
   outline-offset: 2px;
 }
 .job-add-button[aria-expanded="true"] {
-  background: linear-gradient(135deg, #17355f, #1f3b67);
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+  background: linear-gradient(135deg, rgba(17, 38, 76, 0.65), rgba(12, 31, 62, 0.85));
+  border-color: rgba(255, 255, 255, 0.45);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.25);
   transform: none;
 }
 .job-add-panel {
