@@ -6880,26 +6880,107 @@ function renderCosts(){
     }
   };
 
+  const selectionTools = (()=>{
+    const hasActiveTextSelection = ()=>{
+      if (typeof window === "undefined" || typeof window.getSelection !== "function") return false;
+      const selection = window.getSelection();
+      if (!selection) return false;
+      if (typeof selection.isCollapsed === "boolean"){
+        if (selection.isCollapsed) return false;
+        return true;
+      }
+      if (typeof selection.type === "string" && selection.type === "Range") return true;
+      if (typeof selection.toString === "function"){
+        const text = selection.toString();
+        if (text && text.length) return true;
+      }
+      if (typeof selection.rangeCount === "number" && selection.rangeCount > 0){
+        for (let i = 0; i < selection.rangeCount; i += 1){
+          const range = typeof selection.getRangeAt === "function" ? selection.getRangeAt(i) : null;
+          if (range && range.collapsed === false) return true;
+        }
+      }
+      return false;
+    };
+
+    const selectionTouchesElement = (element)=>{
+      if (!element) return false;
+      if (typeof Element === "function" && !(element instanceof Element)) return false;
+      if (!hasActiveTextSelection()) return false;
+      const selection = window.getSelection();
+      if (!selection) return false;
+      if (typeof selection.containsNode === "function"){
+        try {
+          if (selection.containsNode(element, true)) return true;
+        } catch (_err){}
+      }
+      const elementRect = (typeof element.getBoundingClientRect === "function") ? element.getBoundingClientRect() : null;
+      const rangeCount = typeof selection.rangeCount === "number" ? selection.rangeCount : 0;
+      for (let i = 0; i < rangeCount; i += 1){
+        const range = typeof selection.getRangeAt === "function" ? selection.getRangeAt(i) : null;
+        if (!range || range.collapsed) continue;
+        if (typeof range.intersectsNode === "function"){
+          try {
+            if (range.intersectsNode(element)) return true;
+          } catch (_err){}
+        }
+        const nodes = [range.startContainer, range.endContainer, range.commonAncestorContainer];
+        for (const node of nodes){
+          if (!node || typeof node !== "object") continue;
+          let current = node;
+          if (typeof Element === "function" && !(current instanceof Element)){
+            current = current.parentElement || null;
+          }
+          while (current){
+            if (current === element) return true;
+            current = current.parentElement || null;
+          }
+        }
+        if (elementRect && typeof range.getClientRects === "function"){
+          const rects = range.getClientRects();
+          for (let j = 0; j < rects.length; j += 1){
+            const rect = rects[j];
+            if (!rect || (rect.width === 0 && rect.height === 0)) continue;
+            const intersectsHorizontally = rect.left <= elementRect.right && rect.right >= elementRect.left;
+            const intersectsVertically = rect.top <= elementRect.bottom && rect.bottom >= elementRect.top;
+            if (intersectsHorizontally && intersectsVertically) return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    return { hasActiveTextSelection, selectionTouchesElement };
+  })();
+
+  if (typeof window === "object" && window){
+    const store = (typeof window.__selectionTools === "object" && window.__selectionTools) || {};
+    window.__selectionTools = store;
+    if (typeof store.hasActiveTextSelection !== "function"){
+      store.hasActiveTextSelection = selectionTools.hasActiveTextSelection;
+    }
+    if (typeof store.selectionTouchesElement !== "function"){
+      store.selectionTouchesElement = selectionTools.selectionTouchesElement;
+    }
+  }
+
   const wireJobsHistoryShortcut = (element)=>{
     if (!element) return;
+    const shouldDeferForSelection = (event)=>{
+      if (!event) return false;
+      if (event.type === "click") return selectionTools.selectionTouchesElement(element);
+      if (event.type === "keydown"){
+        const key = event.key;
+        if (key === "Enter" || key === " " || key === "Spacebar"){
+          return selectionTools.selectionTouchesElement(element);
+        }
+      }
+      return false;
+    };
     const activateHistoryLink = (event)=>{
       const origin = event?.target instanceof HTMLElement ? event.target : null;
       if (origin && origin.closest(".time-efficiency-toggles")) return;
-      const hasTextSelection = ()=>{
-        if (typeof window === "undefined" || typeof window.getSelection !== "function") return false;
-        const selection = window.getSelection();
-        if (!selection) return false;
-        if (typeof selection.isCollapsed === "boolean") return !selection.isCollapsed;
-        if (typeof selection.type === "string" && selection.type === "Range") return true;
-        if (typeof selection.rangeCount === "number" && selection.rangeCount > 0){
-          for (let i = 0; i < selection.rangeCount; i += 1){
-            const range = selection.getRangeAt ? selection.getRangeAt(i) : null;
-            if (range && range.collapsed === false) return true;
-          }
-        }
-        return false;
-      };
-      if (event?.type === "click" && hasTextSelection()) return;
+      if (shouldDeferForSelection(event)) return;
       event.preventDefault();
       event.stopPropagation();
       goToJobsHistory();
