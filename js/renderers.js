@@ -8904,16 +8904,52 @@ function renderJobs(){
     window.scrollTo(pos.x, pos.y);
   };
 
+  const captureEditingJobForms = ()=>{
+    if (!(editingJobs instanceof Set) || !editingJobs.size) return [];
+    const records = [];
+    editingJobs.forEach(id => {
+      const row = content.querySelector(`tr[data-job-row="${id}"]`);
+      if (!row) return;
+      const fields = {};
+      row.querySelectorAll('[data-j][data-id]').forEach(el => {
+        if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return;
+        const key = el.getAttribute('data-j');
+        const owner = el.getAttribute('data-id');
+        if (!key || owner !== String(id)) return;
+        fields[key] = el.value;
+      });
+      records.push({ id: String(id), fields });
+    });
+    return records;
+  };
+
+  const restoreEditingJobForms = (records)=>{
+    if (!Array.isArray(records) || !records.length) return;
+    records.forEach(entry => {
+      if (!entry || typeof entry !== 'object') return;
+      const row = content.querySelector(`tr[data-job-row="${entry.id}"]`);
+      if (!row || !entry.fields || typeof entry.fields !== 'object') return;
+      Object.entries(entry.fields).forEach(([key, value]) => {
+        const el = row.querySelector(`[data-j="${key}"][data-id="${entry.id}"]`);
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement){
+          el.value = value;
+        }
+      });
+    });
+  };
+
   const rerenderPreservingState = (categoryId)=>{
     const formState = captureNewJobFormState();
     if (formState && formState.fields && categoryId){
       formState.fields.category = categoryId;
     }
+    const editingState = captureEditingJobForms();
     const scrollPosition = captureScrollPosition();
     renderJobs();
     requestAnimationFrame(()=>{
       restoreScrollPosition(scrollPosition);
       restoreNewJobFormState(formState);
+      restoreEditingJobForms(editingState);
     });
   };
 
@@ -8923,6 +8959,26 @@ function renderJobs(){
     } catch (_){
       return Array.isArray(window.jobFolders) ? window.jobFolders : [];
     }
+  };
+
+  const rootCategoryId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+  const currentCategoryFilter = ()=> (typeof window.jobCategoryFilter === "string" && window.jobCategoryFilter) ? window.jobCategoryFilter : rootCategoryId;
+
+  const applyCategoryColorChange = (categoryId, value)=>{
+    if (!categoryId) return;
+    let changed = false;
+    try {
+      changed = typeof setJobFolderColor === "function" ? setJobFolderColor(categoryId, value) : false;
+    } catch (err){
+      console.warn("Failed to update job category color", err);
+      toast("Unable to update category color.");
+      return;
+    }
+    if (!changed) return;
+    try { ensureJobCategories?.(); }
+    catch (err){ console.warn("Failed to refresh job categories", err); }
+    saveCloudDebounced();
+    rerenderPreservingState(currentCategoryFilter());
   };
 
   const promptCreateCategory = (parentId)=>{
@@ -9154,6 +9210,38 @@ function renderJobs(){
     });
   }
 
+  if (!content.dataset.jobCategoryColorEvents){
+    content.dataset.jobCategoryColorEvents = "1";
+    content.addEventListener("change", (event)=>{
+      const folderInput = event.target.closest("[data-job-folder-color-input]");
+      if (folderInput instanceof HTMLInputElement){
+        const catId = folderInput.getAttribute("data-job-folder-color-input");
+        if (catId) applyCategoryColorChange(catId, folderInput.value || null);
+        return;
+      }
+      const jobInput = event.target.closest("[data-job-category-color-input]");
+      if (jobInput instanceof HTMLInputElement){
+        const catId = jobInput.getAttribute("data-job-category-color-cat");
+        if (catId) applyCategoryColorChange(catId, jobInput.value || null);
+      }
+    });
+    content.addEventListener("click", (event)=>{
+      const folderReset = event.target.closest("[data-job-folder-color-reset]");
+      if (folderReset){
+        event.preventDefault();
+        const catId = folderReset.getAttribute("data-job-folder-color-reset");
+        if (catId) applyCategoryColorChange(catId, null);
+        return;
+      }
+      const jobReset = event.target.closest("[data-job-category-color-reset]");
+      if (jobReset){
+        event.preventDefault();
+        const catId = jobReset.getAttribute("data-job-category-color-reset");
+        if (catId) applyCategoryColorChange(catId, null);
+      }
+    });
+  }
+
   const jobCategorySelect = document.getElementById("jobCategory");
   if (jobCategorySelect){
     jobCategorySelect.dataset.prevValue = jobCategorySelect.value;
@@ -9261,6 +9349,8 @@ function renderJobs(){
         saveCloudDebounced();
         const currentFilter = typeof window.jobCategoryFilter === "string" ? window.jobCategoryFilter : rootId;
         rerenderPreservingState(currentFilter);
+      } else if (select.hasAttribute("data-id")){
+        rerenderPreservingState(currentCategoryFilter());
       }
     });
   }
