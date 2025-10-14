@@ -2432,8 +2432,7 @@ body.modal-open .auth-bar {
   color: #5a6b85;
   font-size: 12px;
 }
-.job-note-display,
-button.job-note-trigger {
+.job-note-button {
   width: 100%;
   min-height: 34px;
   padding: 6px 10px;
@@ -2446,12 +2445,6 @@ button.job-note-trigger {
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   font-family: inherit;
-}
-.job-note-display {
-  text-align: center;
-  font-weight: 600;
-}
-button.job-note-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2459,26 +2452,8 @@ button.job-note-trigger {
   text-align: center;
   font-weight: 600;
 }
-button.job-note-trigger.job-note-preview {
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 4px;
-  text-align: left;
-  font-weight: 500;
-}
-button.job-note-trigger.has-note {
-  background: #ffffff;
-  color: #1c2d4a;
-  box-shadow: 0 0 0 2px rgba(145, 183, 255, 0.24);
-}
-button.job-note-trigger:not(.has-note) {
-  opacity: 0.92;
-}
-button.job-note-trigger:hover,
-button.job-note-trigger:focus-visible,
-.job-note-display:hover,
-.job-note-display:focus-visible {
+.job-note-button:hover,
+.job-note-button:focus-visible {
   border-color: #91b7ff;
   box-shadow: 0 0 0 3px rgba(145, 183, 255, 0.3);
   outline: none;
@@ -2491,33 +2466,45 @@ button.job-note-trigger:focus-visible,
   color: inherit;
   font-size: 12px;
 }
-.job-note-preview-header {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #5a6b85;
-}
-.job-note-preview-icon {
-  font-size: 14px;
-  line-height: 1;
-}
-.job-note-preview-label {
-  font-weight: 600;
-}
-.job-note-preview-text {
-  display: block;
+.job-note-inline {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
   width: 100%;
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  color: #1c2d4a;
   font-size: 12px;
   line-height: 1.45;
-  font-weight: 500;
-  color: #1c2d4a;
   text-align: left;
-  max-height: calc(1.45em * 3);
+  font-family: inherit;
+  cursor: pointer;
+}
+.job-note-inline:hover {
+  background: rgba(145, 183, 255, 0.08);
+}
+.job-note-inline:focus-visible {
+  outline: 2px solid rgba(145, 183, 255, 0.6);
+  outline-offset: 2px;
+  background: rgba(145, 183, 255, 0.08);
+}
+.job-note-inline-icon {
+  font-size: 13px;
+  line-height: 1;
+  color: #5a6b85;
+  margin-top: 2px;
+}
+.job-note-inline-text {
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
   word-break: break-word;
+  max-height: calc(1.45em * 3);
 }
 .job-note-modal-backdrop {
   position: fixed;

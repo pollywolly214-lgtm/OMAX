@@ -2275,14 +2275,11 @@ function viewJobs(){
           </td>
           <td class="job-col job-col-note">
             ${notePreview.preview
-              ? `<button type="button" class="job-note-trigger job-note-preview has-note" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}"${notePreviewTitleAttr}>
-                  <span class="job-note-preview-header">
-                    <span class="job-note-preview-icon" aria-hidden="true">🗒</span>
-                    <span class="job-note-preview-label">Notes</span>
-                  </span>
-                  <span class="job-note-preview-text">${textEsc(notePreview.preview)}</span>
+              ? `<button type="button" class="job-note-inline" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}"${notePreviewTitleAttr}>
+                  <span class="job-note-inline-icon" aria-hidden="true">🗒</span>
+                  <span class="job-note-inline-text">${textEsc(notePreview.preview)}</span>
                 </button>`
-              : `<button type="button" class="job-note-trigger job-note-button" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
+              : `<button type="button" class="job-note-button" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
                   <span class="job-note-button-icon" aria-hidden="true">🗒</span>
                   <span class="job-note-button-label">Add note</span>
                 </button>`}
