@@ -3032,6 +3032,58 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   font-size: 14px;
 }
 
+.time-efficiency-chart {
+  margin-top: 16px;
+}
+
+.time-efficiency-chart canvas {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px #e3e7f1;
+}
+
+.time-efficiency-chart-legend {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: #5b6271;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.time-efficiency-chart-legend .legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.legend-swatch--actual {
+  height: 10px;
+  background: rgba(37, 99, 235, 0.28);
+  border: 1px solid #2563eb;
+}
+
+.legend-swatch--target {
+  background: #f97316;
+  height: 3px;
+}
+
+.legend-swatch--profit {
+  background: #2e7d32;
+  height: 3px;
+}
+
 .time-efficiency-block[data-efficiency-trend="ahead"] .time-efficiency-metric .value,
 .time-efficiency-inline[data-efficiency-trend="ahead"] .time-efficiency-metric .value {
   color: #0f8a3c;
