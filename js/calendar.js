@@ -696,10 +696,11 @@ function showJobBubble(jobId, anchor){
         <div class="bubble-kv"><span>Estimate:</span><span>${escapeHtml(estimateText)}</span></div>
         <div class="bubble-kv"><span>Actual hours:</span><span>${escapeHtml(actualText)}</span></div>
         <div class="bubble-kv"><span>Material:</span><span>${materialText}</span></div>
-        <div class="bubble-kv"><span>Charge rate:</span><span>${escapeHtml(formatRate(chargeRateVal))}</span></div>
-        <div class="bubble-kv"><span>Cost rate:</span><span>${escapeHtml(formatRate(costRateVal))}</span></div>
-        <div class="bubble-kv"><span>Net profit/hr:</span><span>${escapeHtml(formatRate(netRateVal, { showPlus: true }))}</span></div>
+        <div class="bubble-kv"><span>Charge Rate:</span><span>${escapeHtml(formatRate(chargeRateVal))}</span></div>
+        <div class="bubble-kv"><span>Cost Rate (negative cost):</span><span>${escapeHtml(formatRate(costRateVal))}</span></div>
+        <div class="bubble-kv"><span>Net per hour:</span><span>${escapeHtml(formatRate(netRateVal, { showPlus: true }))}</span></div>
         <div class="bubble-kv"><span>Net total:</span><span>${netTotalHtml}</span></div>
+        <div class="bubble-note small muted">Cost Rate stays negative so Charge Rate + Cost Rate matches the spec's net-per-hour sum.</div>
         ${notesHtml}`;
       return;
     }
@@ -778,12 +779,13 @@ function showJobBubble(jobId, anchor){
       <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
       <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
       <div class="bubble-kv"><span>Schedule:</span><span>${startTxt} → ${dueTxt}</span></div>
-      <div class="bubble-kv"><span>Charge rate:</span><span>${escapeHtml(chargeRateText)}</span></div>
-      <div class="bubble-kv"><span>Cost rate:</span><span>${escapeHtml(costRateText)}</span></div>
-      <div class="bubble-kv"><span>Net profit/hr:</span><span>${escapeHtml(netRateText)}</span></div>
+      <div class="bubble-kv"><span>Charge Rate:</span><span>${escapeHtml(chargeRateText)}</span></div>
+      <div class="bubble-kv"><span>Cost Rate (negative cost):</span><span>${escapeHtml(costRateText)}</span></div>
+      <div class="bubble-kv"><span>Net per hour:</span><span>${escapeHtml(netRateText)}</span></div>
       <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusLabel)}${statusDetail ? ` — ${escapeHtml(statusDetail)}` : ""}</span></div>
       <div class="bubble-kv"><span>Remaining:</span><span>${escapeHtml(remainingSummary)}${slackSummary ? ` <span class="muted">(${escapeHtml(slackSummary)})</span>` : ""}</span></div>
       <div class="bubble-kv"><span>Net total:</span><span>${netTotalHtml}</span></div>
+      <div class="bubble-note small muted">Cost Rate stays negative so Charge Rate + Cost Rate matches the spec's net-per-hour sum.</div>
       <div class="bubble-kv"><span>Required/day:</span><span>${reqCell}</span></div>
       <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
       ${noteAuto}
