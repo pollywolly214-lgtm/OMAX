@@ -2064,6 +2064,28 @@ function viewJobs(){
     }
     return "Past due by less than 1 hr";
   };
+  const JOB_NOTE_PREVIEW_LIMIT = 100;
+  const buildJobNotePreview = (value)=>{
+    const raw = typeof value === "string" ? value : "";
+    const trimmed = raw.trim();
+    if (!trimmed){
+      return { preview: "", tooltip: "" };
+    }
+    const normalized = trimmed.replace(/\s+/g, " ").trim();
+    if (normalized.length <= JOB_NOTE_PREVIEW_LIMIT){
+      return { preview: normalized, tooltip: normalized };
+    }
+    let slice = normalized.slice(0, JOB_NOTE_PREVIEW_LIMIT);
+    const lastSpace = slice.lastIndexOf(" ");
+    if (lastSpace > Math.floor(JOB_NOTE_PREVIEW_LIMIT * 0.6)){
+      slice = slice.slice(0, lastSpace);
+    }
+    slice = slice.replace(/\s+$/, "");
+    return {
+      preview: `${slice}...`,
+      tooltip: normalized
+    };
+  };
   const rows = jobsForCategory.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileCount = jobFiles.length;
@@ -2176,7 +2198,9 @@ function viewJobs(){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
       const matQtyDisplay  = formatQuantity(matQty);
       const noteContent = (j.notes || "").trim();
+      const notePreview = buildJobNotePreview(noteContent);
       const noteButtonLabel = esc(j.name || "Cutting job");
+      const notePreviewTitleAttr = notePreview.tooltip ? ` title="${esc(notePreview.tooltip)}"` : "";
       return `
         <tr data-job-row="${j.id}" class="job-row">
           <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">
@@ -2250,10 +2274,18 @@ function viewJobs(){
             </div>
           </td>
           <td class="job-col job-col-note">
-            <button type="button" class="job-note-trigger job-note-button ${noteContent ? 'has-note' : ''}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
-              <span class="job-note-button-icon" aria-hidden="true">🗒</span>
-              <span class="job-note-button-label">${noteContent ? 'View notes' : 'Add note'}</span>
-            </button>
+            ${notePreview.preview
+              ? `<button type="button" class="job-note-trigger job-note-preview has-note" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}"${notePreviewTitleAttr}>
+                  <span class="job-note-preview-header">
+                    <span class="job-note-preview-icon" aria-hidden="true">🗒</span>
+                    <span class="job-note-preview-label">Notes</span>
+                  </span>
+                  <span class="job-note-preview-text">${textEsc(notePreview.preview)}</span>
+                </button>`
+              : `<button type="button" class="job-note-trigger job-note-button" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
+                  <span class="job-note-button-icon" aria-hidden="true">🗒</span>
+                  <span class="job-note-button-label">Add note</span>
+                </button>`}
           </td>
           <td class="job-col job-col-actions">
             <div class="job-actions">

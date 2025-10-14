@@ -2445,6 +2445,9 @@ button.job-note-trigger {
   color: #1c2d4a;
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  font-family: inherit;
+}
+.job-note-display {
   text-align: center;
   font-weight: 600;
 }
@@ -2453,7 +2456,16 @@ button.job-note-trigger {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  font-family: inherit;
+  text-align: center;
+  font-weight: 600;
+}
+button.job-note-trigger.job-note-preview {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  text-align: left;
+  font-weight: 500;
 }
 button.job-note-trigger.has-note {
   background: #ffffff;
@@ -2478,6 +2490,34 @@ button.job-note-trigger:focus-visible,
 .job-note-button-label {
   color: inherit;
   font-size: 12px;
+}
+.job-note-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5a6b85;
+}
+.job-note-preview-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+.job-note-preview-label {
+  font-weight: 600;
+}
+.job-note-preview-text {
+  display: block;
+  width: 100%;
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 500;
+  color: #1c2d4a;
+  text-align: left;
+  max-height: calc(1.45em * 3);
+  overflow: hidden;
+  word-break: break-word;
 }
 .job-note-modal-backdrop {
   position: fixed;
