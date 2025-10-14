@@ -375,6 +375,18 @@ const defaultAsReqTasks = [
   { id:"clean_rails",           name:"Clean X-rails & Y-bridge rails", condition:"If debris occurs", manualLink:"", storeLink:"" }
 ];
 
+function readTaskDowntimeHours(task){
+  if (!task || typeof task !== "object") return null;
+  const raw = task.downtimeHours ?? task.downTime ?? task.downtime;
+  const num = Number(raw);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return num;
+}
+
+if (typeof window !== "undefined"){
+  window.readTaskDowntimeHours = readTaskDowntimeHours;
+}
+
 function resolveTaskVariant(task){
   if (!task || typeof task !== "object") return null;
   const raw = typeof task.variant === "string" ? task.variant.toLowerCase() : "";
@@ -1096,6 +1108,9 @@ if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
 if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
+if (typeof window.downtimeBaseLossRate !== "number" || !Number.isFinite(window.downtimeBaseLossRate) || window.downtimeBaseLossRate < 0){
+  window.downtimeBaseLossRate = 150;
+}
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
   window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
@@ -1147,6 +1162,10 @@ function refreshGlobalCollections(){
 
   if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
   jobFolders = window.jobFolders;
+
+  if (typeof window.downtimeBaseLossRate !== "number" || !Number.isFinite(window.downtimeBaseLossRate) || window.downtimeBaseLossRate < 0){
+    window.downtimeBaseLossRate = 150;
+  }
 }
 
 /* ================ Jobs editing & render flags ================ */
@@ -1258,6 +1277,9 @@ function snapshotState(){
     folders: cloneFolders(window.settingsFolders),
     jobFolders: snapshotJobFolders(),
     dashboardLayout: cloneStructured(dashLayoutSource) || {},
+    downtimeBaseLossRate: (typeof window.downtimeBaseLossRate === "number" && Number.isFinite(window.downtimeBaseLossRate) && window.downtimeBaseLossRate >= 0)
+      ? Number(window.downtimeBaseLossRate)
+      : 150,
     costLayout: cloneStructured(costLayoutSource) || {}
   };
 }
@@ -1795,6 +1817,12 @@ function adoptState(doc){
     pe.baselineDateISO = (data.pumpEff.baselineDateISO ?? pe.baselineDateISO);
     pe.entries         = Array.isArray(data.pumpEff.entries) ? data.pumpEff.entries.slice() : pe.entries;
     pe.notes           = Array.isArray(data.pumpEff.notes) ? data.pumpEff.notes.slice() : pe.notes;
+  }
+
+  if (Number.isFinite(Number(data.downtimeBaseLossRate)) && Number(data.downtimeBaseLossRate) >= 0){
+    window.downtimeBaseLossRate = Number(data.downtimeBaseLossRate);
+  }else if (typeof window.downtimeBaseLossRate !== "number" || !Number.isFinite(window.downtimeBaseLossRate) || window.downtimeBaseLossRate < 0){
+    window.downtimeBaseLossRate = 150;
   }
 
   ensureTaskCategories();
