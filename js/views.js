@@ -1956,7 +1956,7 @@ function viewJobs(){
     }
     return "Past due by less than 1 hr";
   };
-  const formatNotePreview = (noteText = "", { maxLength = 260, maxLines = 3 } = {})=>{
+  const formatNotePreview = (noteText = "", { maxLength = 260, maxLines = 6 } = {})=>{
     if (!noteText) return { html: "", truncated: false };
     const normalized = String(noteText ?? "").replace(/\r\n/g, "\n");
     const trimmedTrailing = normalized.replace(/\s+$/g, "");

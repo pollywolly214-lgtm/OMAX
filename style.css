@@ -1879,8 +1879,8 @@ body.modal-open .auth-bar {
   word-break: break-word;
   cursor: pointer;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  max-height: calc(1.45em * 3);
+  -webkit-line-clamp: 6;
+  max-height: calc(1.45em * 6);
   text-overflow: ellipsis;
 }
 .job-note-text:hover,
