@@ -8607,6 +8607,15 @@ function renderJobs(){
     window.__cleanupJobActionMenus = null;
   }
 
+  if (typeof window.__cleanupHistoryActionMenus === "function"){
+    try {
+      window.__cleanupHistoryActionMenus();
+    } catch (_err) {
+      // ignore cleanup errors
+    }
+    window.__cleanupHistoryActionMenus = null;
+  }
+
   if (typeof window.__cleanupJobFileMenus === "function"){
     try {
       window.__cleanupJobFileMenus();
@@ -8664,6 +8673,10 @@ function renderJobs(){
   let openActionTrigger = null;
   let actionMenuDocHandler = null;
   let actionMenuKeyHandler = null;
+  let openHistoryActionMenuId = null;
+  let openHistoryActionTrigger = null;
+  let historyActionMenuDocHandler = null;
+  let historyActionMenuKeyHandler = null;
 
   const closeFileMenu = ()=>{
     if (!openFileMenuId) return;
@@ -8800,6 +8813,71 @@ function renderJobs(){
     document.addEventListener("keydown", actionMenuKeyHandler);
   };
 
+  const closeHistoryActionMenu = ()=>{
+    if (!openHistoryActionMenuId) return;
+    const menu = content.querySelector(`[data-history-actions-menu="${openHistoryActionMenuId}"]`);
+    if (menu){
+      menu.setAttribute("hidden", "");
+      menu.classList.remove("open");
+    }
+    if (openHistoryActionTrigger){
+      openHistoryActionTrigger.setAttribute("aria-expanded", "false");
+      openHistoryActionTrigger.classList.remove("is-open");
+    }
+    if (historyActionMenuDocHandler){
+      document.removeEventListener("click", historyActionMenuDocHandler);
+      historyActionMenuDocHandler = null;
+    }
+    if (historyActionMenuKeyHandler){
+      document.removeEventListener("keydown", historyActionMenuKeyHandler);
+      historyActionMenuKeyHandler = null;
+    }
+    openHistoryActionMenuId = null;
+    openHistoryActionTrigger = null;
+  };
+
+  const openHistoryActionMenu = (jobId, trigger = null)=>{
+    const id = jobId != null ? String(jobId) : "";
+    if (!id) return;
+    if (openHistoryActionMenuId === id){
+      closeHistoryActionMenu();
+      return;
+    }
+    closeHistoryActionMenu();
+    const menu = content.querySelector(`[data-history-actions-menu="${id}"]`);
+    if (!menu) return;
+    menu.removeAttribute("hidden");
+    menu.classList.add("open");
+    openHistoryActionMenuId = id;
+    openHistoryActionTrigger = trigger || content.querySelector(`[data-history-actions-toggle="${id}"]`);
+    if (openHistoryActionTrigger){
+      openHistoryActionTrigger.setAttribute("aria-expanded", "true");
+      openHistoryActionTrigger.classList.add("is-open");
+    }
+
+    historyActionMenuDocHandler = (event)=>{
+      if (!openHistoryActionMenuId) return;
+      const menuEl = content.querySelector(`[data-history-actions-menu="${openHistoryActionMenuId}"]`);
+      const triggerEl = openHistoryActionTrigger;
+      const target = event.target;
+      if (!menuEl){
+        closeHistoryActionMenu();
+        return;
+      }
+      if (menuEl.contains(target)) return;
+      if (triggerEl && triggerEl.contains(target)) return;
+      closeHistoryActionMenu();
+    };
+    document.addEventListener("click", historyActionMenuDocHandler);
+
+    historyActionMenuKeyHandler = (event)=>{
+      if (event.key === "Escape" || event.key === "Esc"){
+        closeHistoryActionMenu();
+      }
+    };
+    document.addEventListener("keydown", historyActionMenuKeyHandler);
+  };
+
   window.__cleanupJobFileMenus = ()=>{
     closeFileMenu();
     window.__cleanupJobFileMenus = null;
@@ -8808,6 +8886,11 @@ function renderJobs(){
   window.__cleanupJobActionMenus = ()=>{
     closeActionMenu();
     window.__cleanupJobActionMenus = null;
+  };
+
+  window.__cleanupHistoryActionMenus = ()=>{
+    closeHistoryActionMenu();
+    window.__cleanupHistoryActionMenus = null;
   };
 
   const renderNoteHistory = (value)=>{
@@ -8825,11 +8908,25 @@ function renderJobs(){
     noteHistory.innerHTML = entries.map(entry => `<div class="job-note-history-entry">${escapeHtml(entry).replace(/\n/g, '<br>')}</div>`).join("\n");
   };
 
+  const findJobRecord = (id)=>{
+    const idStr = id != null ? String(id) : "";
+    if (!idStr) return { job: null, source: null };
+    const activeJob = Array.isArray(cuttingJobs)
+      ? cuttingJobs.find(x => String(x?.id) === idStr)
+      : null;
+    if (activeJob) return { job: activeJob, source: "active" };
+    const completedJob = Array.isArray(completedCuttingJobs)
+      ? completedCuttingJobs.find(x => String(x?.id) === idStr)
+      : null;
+    if (completedJob) return { job: completedJob, source: "history" };
+    return { job: null, source: null };
+  };
+
   const openJobNoteModal = (jobId, { appendBlank = false, trigger = null } = {})=>{
     if (!noteBackdrop || !noteTextarea) return;
     const id = jobId != null ? String(jobId) : "";
     if (!id) return;
-    const job = cuttingJobs.find(x => String(x.id) === id);
+    const { job } = findJobRecord(id);
     if (!job) return;
     activeNoteJobId = id;
     const jobName = job.name ? String(job.name) : "Cutting job";
@@ -8871,12 +8968,16 @@ function renderJobs(){
 
   const handleJobNoteSave = ({ keepOpen = false, prepareNew = false } = {})=>{
     if (!activeNoteJobId || !noteTextarea) return;
-    const job = cuttingJobs.find(x => String(x.id) === String(activeNoteJobId));
+    const { job, source } = findJobRecord(activeNoteJobId);
     if (!job) return;
     const raw = typeof noteTextarea.value === "string" ? noteTextarea.value : "";
     const normalized = raw.replace(/\s+$/, "");
     job.notes = normalized;
-    window.cuttingJobs = cuttingJobs;
+    if (source === "history"){
+      window.completedCuttingJobs = completedCuttingJobs;
+    } else {
+      window.cuttingJobs = cuttingJobs;
+    }
     saveCloudDebounced();
     toast("Notes updated");
     if (keepOpen){
@@ -9594,6 +9695,59 @@ function renderJobs(){
 
   const historyBody = content.querySelector(".past-jobs-table tbody");
   historyBody?.addEventListener("click", async (e)=>{
+    const historyActionTrigger = e.target.closest("[data-history-actions-toggle]");
+    if (historyActionTrigger){
+      const id = historyActionTrigger.getAttribute("data-history-actions-toggle");
+      if (id){
+        e.preventDefault();
+        closeFileMenu();
+        closeActionMenu();
+        openHistoryActionMenu(id, historyActionTrigger);
+      }
+      return;
+    }
+
+    const historyFileTrigger = e.target.closest("[data-job-files]");
+    if (historyFileTrigger){
+      const id = historyFileTrigger.getAttribute("data-job-files");
+      if (id){
+        e.preventDefault();
+        closeHistoryActionMenu();
+        closeActionMenu();
+        openFileMenu(id, historyFileTrigger);
+      }
+      return;
+    }
+
+    const noteTrigger = e.target.closest("[data-job-note]");
+    if (noteTrigger && (!noteBackdrop || !noteBackdrop.contains(noteTrigger))){
+      const id = noteTrigger.getAttribute("data-job-note");
+      if (id){
+        e.preventDefault();
+        closeFileMenu();
+        closeHistoryActionMenu();
+        closeActionMenu();
+        openJobNoteModal(id, { appendBlank: false, trigger: noteTrigger });
+      }
+      return;
+    }
+
+    const lockedCell = e.target.closest("[data-history-requires-edit]");
+    if (lockedCell){
+      const id = lockedCell.getAttribute("data-history-requires-edit");
+      if (!id) return;
+      const proceed = typeof window.confirm === "function"
+        ? window.confirm("Open edit mode to update this job?")
+        : true;
+      if (proceed){
+        closeHistoryActionMenu();
+        closeActionMenu();
+        editingCompletedJobsSet().add(String(id));
+        renderJobs();
+      }
+      return;
+    }
+
     const histEdit = e.target.closest("[data-history-edit]");
     const histCancel = e.target.closest("[data-history-cancel]");
     const histSave = e.target.closest("[data-history-save]");
@@ -9601,6 +9755,8 @@ function renderJobs(){
     const histActivate = e.target.closest("[data-history-activate]");
 
     if (histActivate){
+      closeHistoryActionMenu();
+      closeFileMenu();
       const id = histActivate.getAttribute("data-history-activate");
       if (!id) return;
       const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
@@ -9711,18 +9867,22 @@ function renderJobs(){
     }
 
     if (histEdit){
+      closeHistoryActionMenu();
       const id = histEdit.getAttribute("data-history-edit");
       if (id != null){ editingCompletedJobsSet().add(String(id)); renderJobs(); }
       return;
     }
 
     if (histCancel){
+      closeHistoryActionMenu();
       const id = histCancel.getAttribute("data-history-cancel");
       if (id != null){ editingCompletedJobsSet().delete(String(id)); renderJobs(); }
       return;
     }
 
     if (histDelete){
+      closeHistoryActionMenu();
+      closeFileMenu();
       const id = histDelete.getAttribute("data-history-delete");
       if (!id) return;
       const proceed = typeof window.confirm === "function"
@@ -9748,6 +9908,7 @@ function renderJobs(){
     }
 
     if (histSave){
+      closeHistoryActionMenu();
       const id = histSave.getAttribute("data-history-save");
       if (!id) return;
       const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
@@ -9832,6 +9993,7 @@ function renderJobs(){
       if (id){
         e.preventDefault();
         closeFileMenu();
+        closeHistoryActionMenu();
         openActionMenu(id, actionsTrigger);
       }
       return;
@@ -9843,6 +10005,7 @@ function renderJobs(){
       if (id){
         e.preventDefault();
         closeActionMenu();
+        closeHistoryActionMenu();
         openFileMenu(id, fileTrigger);
       }
       return;
@@ -9877,6 +10040,7 @@ function renderJobs(){
         e.preventDefault();
         closeFileMenu();
         closeActionMenu();
+        closeHistoryActionMenu();
         openJobNoteModal(id, { appendBlank: false, trigger: noteTrigger });
       }
       return;
@@ -9892,7 +10056,7 @@ function renderJobs(){
       const id = locked.getAttribute("data-requires-edit");
       if (!id) return;
       const proceed = window.confirm ? window.confirm("Open edit mode to update this job?") : true;
-      if (proceed){ closeActionMenu(); editingJobs.add(id); renderJobs(); }
+      if (proceed){ closeActionMenu(); closeHistoryActionMenu(); editingJobs.add(id); renderJobs(); }
       return;
     }
 
@@ -9901,6 +10065,7 @@ function renderJobs(){
       const id = upload.getAttribute("data-upload-job");
       closeFileMenu();
       closeActionMenu();
+      closeHistoryActionMenu();
       content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
       return;
     }
@@ -9935,6 +10100,7 @@ function renderJobs(){
     if (rm){
       closeFileMenu();
       closeActionMenu();
+      closeHistoryActionMenu();
       const id = rm.getAttribute("data-remove-job");
       const job = cuttingJobs.find(x=>x.id===id);
       if (job){
@@ -9953,6 +10119,7 @@ function renderJobs(){
     if (complete){
       closeFileMenu();
       closeActionMenu();
+      closeHistoryActionMenu();
       const id = complete.getAttribute("data-complete-job");
       const idx = cuttingJobs.findIndex(x=>x.id===id);
       if (idx < 0) return;

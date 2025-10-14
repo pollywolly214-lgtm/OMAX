@@ -1734,6 +1734,10 @@ body.modal-open .auth-bar {
   overflow: hidden;
   --job-table-divider: #e0e6f2;
 }
+
+#pastJobs .job-table {
+  overflow: visible;
+}
 .job-page-topbar {
   display: flex;
   flex-direction: column;
