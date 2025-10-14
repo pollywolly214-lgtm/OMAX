@@ -79,6 +79,11 @@ function computeTimeEfficiency(rangeDays, options = {}){
   const map = getDailyCutHoursMap();
   let actual = 0;
   let coverage = 0;
+  let idleHoursTotal = 0;
+  const baselineDaily = Number(CUTTING_BASELINE_DAILY_HOURS) > 0
+    ? Number(CUTTING_BASELINE_DAILY_HOURS)
+    : 0;
+  const dailySeries = [];
   const cursor = new Date(startDate);
   for (let i = 0; i < normalizedDays; i++){
     const key = ymd(cursor);
@@ -87,11 +92,22 @@ function computeTimeEfficiency(rangeDays, options = {}){
     if (value > 0){
       coverage += 1;
     }
+    const dayDate = new Date(cursor);
+    const idleHours = baselineDaily > value ? baselineDaily - value : 0;
+    idleHoursTotal += idleHours;
     actual += value;
+    dailySeries.push({
+      dateISO: key,
+      date: dayDate,
+      actualHours: value,
+      baselineHours: baselineDaily,
+      idleHours,
+      efficiencyPercent: baselineDaily > 0 ? (value / baselineDaily) * 100 : null
+    });
     cursor.setDate(cursor.getDate() + 1);
   }
 
-  const baseline = CUTTING_BASELINE_DAILY_HOURS * normalizedDays;
+  const baseline = baselineDaily * normalizedDays;
 
   const todayLocal = new Date();
   todayLocal.setHours(0,0,0,0);
@@ -117,6 +133,8 @@ function computeTimeEfficiency(rangeDays, options = {}){
     ? (actual / targetHours) * 100
     : (baseline > 0 ? (actual / baseline) * 100 : null);
   const percentGoal = baseline > 0 ? (actual / baseline) * 100 : null;
+  const idlePercent = baseline > 0 ? (idleHoursTotal / baseline) * 100 : null;
+  const runPercent = baseline > 0 ? ((baseline - idleHoursTotal) / baseline) * 100 : null;
 
   return {
     windowDays: normalizedDays,
@@ -133,7 +151,11 @@ function computeTimeEfficiency(rangeDays, options = {}){
     endISO: ymd(endDate),
     description: meta.description,
     label: meta.label,
-    key: meta.key
+    key: meta.key,
+    idleHoursTotal,
+    idlePercent,
+    runPercent,
+    dailySeries
   };
 }
 
