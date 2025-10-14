@@ -1307,13 +1307,18 @@ function renderCalendar(){
   }
 
   const downSet = new Set();
-  if (Array.isArray(window.downTimes)){
-    window.downTimes.forEach(entry => {
+  const downEntries = (()=>{
+    if (typeof ensureDownTimeEvents === "function"){
+      try { return ensureDownTimeEvents().slice(); }
+      catch (err) { console.warn("Failed to normalize downtime events for calendar", err); }
+    }
+    return Array.isArray(window.downTimes) ? window.downTimes.slice() : [];
+  })();
+  downEntries.forEach(entry => {
       if (!entry) return;
       const iso = typeof entry === "string" ? entry : entry.dateISO;
       if (iso) downSet.add(String(iso));
-    });
-  }
+  });
 
   const today = new Date(); today.setHours(0,0,0,0);
   let maxMonthsNeeded = 3;
