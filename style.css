@@ -1734,14 +1734,90 @@ body.modal-open .auth-bar {
   overflow: hidden;
   --job-table-divider: #e0e6f2;
 }
-.job-page-toolbar {
-  margin-top: 6px;
-  margin-bottom: 6px;
+.job-page-topbar {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.job-page-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.job-page-toolbar h3 {
+  margin: 0;
+}
+.job-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  flex-wrap: wrap;
+  margin-left: auto;
+}
+.job-add-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1px solid #1f3b67;
+  background: linear-gradient(135deg, #2d62b5, #214a86);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  box-shadow: 0 6px 12px rgba(18, 52, 101, 0.18);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.2s ease;
+}
+.job-add-button:hover,
+.job-add-button:focus {
+  background: linear-gradient(135deg, #2f6bd0, #2559a3);
+  box-shadow: 0 8px 16px rgba(18, 52, 101, 0.24);
+  transform: translateY(-1px);
+}
+.job-add-button:focus-visible {
+  outline: 3px solid rgba(82, 144, 255, 0.45);
+  outline-offset: 2px;
+}
+.job-add-button[aria-expanded="true"] {
+  background: linear-gradient(135deg, #17355f, #1f3b67);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+  transform: none;
+}
+.job-add-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #dfe5f4;
+  background: #f7faff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+.job-add-panel[hidden] {
+  display: none;
+}
+.job-add-form {
+  align-items: flex-end;
+}
+.job-add-form input,
+.job-add-form select,
+.job-add-form button {
+  min-width: 120px;
+}
+.job-add-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #ecf3ff;
+  color: #1f3b67;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 .job-category-filter {
   display: inline-flex;
