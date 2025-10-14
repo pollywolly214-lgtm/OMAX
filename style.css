@@ -2621,8 +2621,7 @@ body.modal-open .auth-bar {
   color: #5a6b85;
   font-size: 12px;
 }
-.job-note-display,
-button.job-note-trigger {
+.job-note-button {
   width: 100%;
   min-height: 34px;
   padding: 6px 10px;
@@ -2634,28 +2633,16 @@ button.job-note-trigger {
   color: #1c2d4a;
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-  text-align: center;
-  font-weight: 600;
-}
-button.job-note-trigger {
+  font-family: inherit;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  font-family: inherit;
+  text-align: center;
+  font-weight: 600;
 }
-button.job-note-trigger.has-note {
-  background: #ffffff;
-  color: #1c2d4a;
-  box-shadow: 0 0 0 2px rgba(145, 183, 255, 0.24);
-}
-button.job-note-trigger:not(.has-note) {
-  opacity: 0.92;
-}
-button.job-note-trigger:hover,
-button.job-note-trigger:focus-visible,
-.job-note-display:hover,
-.job-note-display:focus-visible {
+.job-note-button:hover,
+.job-note-button:focus-visible {
   border-color: #91b7ff;
   box-shadow: 0 0 0 3px rgba(145, 183, 255, 0.3);
   outline: none;
@@ -2667,6 +2654,41 @@ button.job-note-trigger:focus-visible,
 .job-note-button-label {
   color: inherit;
   font-size: 12px;
+}
+.job-note-inline {
+  display: flex;
+  width: 100%;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #1c2d4a;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  min-height: calc(1.45em * 6);
+  align-items: flex-start;
+}
+.job-note-inline:hover {
+  border-color: rgba(145, 183, 255, 0.4);
+}
+.job-note-inline:focus-visible {
+  border-color: #91b7ff;
+  box-shadow: 0 0 0 2px rgba(145, 183, 255, 0.25);
+  outline: none;
+}
+.job-note-inline-text {
+  flex: 1 1 auto;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-word;
+  max-height: calc(1.45em * 6);
 }
 .job-note-modal-backdrop {
   position: fixed;
