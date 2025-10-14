@@ -1782,8 +1782,9 @@ body.modal-open .auth-bar {
 }
 .job-show-all-button:hover,
 .job-show-all-button:focus {
-  background: #ebf3ff;
-  border-color: #1f3b67;
+  background: #dce7ff;
+  border-color: #174073;
+  box-shadow: 0 6px 18px rgba(23, 64, 115, 0.18);
 }
 .job-show-all-button:focus-visible {
   outline: 2px solid #91b7ff;
