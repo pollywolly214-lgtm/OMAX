@@ -6885,6 +6885,21 @@ function renderCosts(){
     const activateHistoryLink = (event)=>{
       const origin = event?.target instanceof HTMLElement ? event.target : null;
       if (origin && origin.closest(".time-efficiency-toggles")) return;
+      const hasTextSelection = ()=>{
+        if (typeof window === "undefined" || typeof window.getSelection !== "function") return false;
+        const selection = window.getSelection();
+        if (!selection) return false;
+        if (typeof selection.isCollapsed === "boolean") return !selection.isCollapsed;
+        if (typeof selection.type === "string" && selection.type === "Range") return true;
+        if (typeof selection.rangeCount === "number" && selection.rangeCount > 0){
+          for (let i = 0; i < selection.rangeCount; i += 1){
+            const range = selection.getRangeAt ? selection.getRangeAt(i) : null;
+            if (range && range.collapsed === false) return true;
+          }
+        }
+        return false;
+      };
+      if (event?.type === "click" && hasTextSelection()) return;
       event.preventDefault();
       event.stopPropagation();
       goToJobsHistory();
