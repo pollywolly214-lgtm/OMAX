@@ -2134,6 +2134,7 @@ function viewJobs(){
           </td>
           <td class="job-col job-col-note">
             <button type="button" class="job-note-trigger job-note-button ${noteContent ? 'has-note' : ''}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
+              <span class="job-note-button-icon" aria-hidden="true">🗒</span>
               <span class="job-note-button-label">${noteContent ? 'View notes' : 'Add note'}</span>
             </button>
           </td>

@@ -2343,20 +2343,45 @@ body.modal-open .auth-bar {
   gap: 6px;
   font-family: inherit;
   width: 100%;
+  color: inherit;
+}
+.job-note-trigger:not(.has-note) {
+  background: #f6f8fe;
+  border-color: #d6e0f3;
+  color: #1c2d4a;
 }
 .job-note-trigger.has-note {
-  background: #fff;
+  background: #0a63c2;
+  border-color: #0a63c2;
+  color: #fff;
 }
-.job-note-trigger:hover,
-.job-note-trigger:focus-visible,
+.job-note-trigger:not(.has-note):hover,
+.job-note-trigger:not(.has-note):focus-visible {
+  background: #eef3ff;
+  border-color: #b3caf7;
+  box-shadow: 0 0 0 3px rgba(145, 183, 255, 0.3);
+  outline: none;
+}
+.job-note-trigger.has-note:hover,
+.job-note-trigger.has-note:focus-visible {
+  background: #084f9c;
+  border-color: #084f9c;
+  box-shadow: 0 0 0 3px rgba(10, 99, 194, 0.32);
+  outline: none;
+}
 .job-note-display:hover,
 .job-note-display:focus-visible {
   border-color: #91b7ff;
   box-shadow: 0 0 0 3px rgba(145, 183, 255, 0.3);
   outline: none;
 }
+.job-note-button-icon {
+  font-size: 14px;
+  line-height: 1;
+}
 .job-note-button-label {
   font-size: 12px;
+  color: inherit;
 }
 .job-note-modal-backdrop {
   position: fixed;
