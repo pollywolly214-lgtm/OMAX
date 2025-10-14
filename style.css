@@ -1766,6 +1766,32 @@ body.modal-open .auth-bar {
   outline: 2px solid rgba(33, 150, 243, 0.35);
   border-color: rgba(33, 150, 243, 0.55);
 }
+.job-show-all-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 54, 118, 0.45);
+  background: linear-gradient(135deg, #2f6df0, #1747c9);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  box-shadow: 0 8px 22px rgba(17, 46, 112, 0.24);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.job-show-all-button:hover,
+.job-show-all-button:focus {
+  transform: translateY(-1px);
+  background: linear-gradient(135deg, #2f6df0, #1747c9);
+  border-color: rgba(16, 54, 118, 0.45);
+  box-shadow: 0 8px 22px rgba(17, 46, 112, 0.24);
+}
+.job-show-all-button:focus-visible {
+  outline: 2px solid #91b7ff;
+  outline-offset: 2px;
+}
 .job-history-button {
   display: inline-flex;
   align-items: center;
@@ -2207,7 +2233,6 @@ body.modal-open .auth-bar {
   gap: 4px;
 }
 .job-actions-trigger,
-.job-note-trigger,
 .job-file-trigger {
   display: flex;
   align-items: center;
@@ -2225,16 +2250,8 @@ body.modal-open .auth-bar {
   width: 100%;
   text-align: left;
 }
-.job-note-trigger {
-  justify-content: center;
-  text-align: center;
-  font-family: inherit;
-  color: inherit;
-}
 .job-actions-trigger:hover,
 .job-actions-trigger:focus,
-.job-note-trigger:hover,
-.job-note-trigger:focus,
 .job-file-trigger:hover,
 .job-file-trigger:focus {
   background: #264b84;
@@ -2242,14 +2259,12 @@ body.modal-open .auth-bar {
   color: #fff;
 }
 .job-actions-trigger:focus-visible,
-.job-note-trigger:focus-visible,
 .job-file-trigger:focus-visible {
   outline: 2px solid #91b7ff;
   outline-offset: 1px;
 }
 .job-actions-trigger.is-open,
-.job-file-trigger.is-open,
-.job-note-trigger.is-open {
+.job-file-trigger.is-open {
   background: #264b84;
   box-shadow: 0 0 0 2px rgba(145, 183, 255, 0.4);
 }
@@ -2417,30 +2432,39 @@ body.modal-open .auth-bar {
   color: #5a6b85;
   font-size: 12px;
 }
-.job-note-trigger,
-.job-note-display {
+.job-note-display,
+button.job-note-trigger {
   width: 100%;
   min-height: 34px;
-  line-height: 1.45;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-}
-.job-note-display {
   padding: 6px 10px;
+  border-radius: 8px;
   border: 1px solid #d6e0f3;
+  font-size: 12px;
+  line-height: 1.45;
   background: #f6f8fe;
   color: #1c2d4a;
   cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   text-align: center;
+  font-weight: 600;
 }
-.job-note-trigger.has-note {
+button.job-note-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: inherit;
+}
+button.job-note-trigger.has-note {
+  background: #ffffff;
+  color: #1c2d4a;
   box-shadow: 0 0 0 2px rgba(145, 183, 255, 0.24);
 }
-.job-note-trigger:not(.has-note) {
+button.job-note-trigger:not(.has-note) {
   opacity: 0.92;
 }
+button.job-note-trigger:hover,
+button.job-note-trigger:focus-visible,
 .job-note-display:hover,
 .job-note-display:focus-visible {
   border-color: #91b7ff;
@@ -2452,8 +2476,8 @@ body.modal-open .auth-bar {
   line-height: 1;
 }
 .job-note-button-label {
-  font-size: 12px;
   color: inherit;
+  font-size: 12px;
 }
 .job-note-modal-backdrop {
   position: fixed;
