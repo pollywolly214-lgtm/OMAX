@@ -1772,19 +1772,20 @@ body.modal-open .auth-bar {
   gap: 6px;
   padding: 6px 14px;
   border-radius: 999px;
-  border: 1px solid rgba(15, 52, 104, 0.25);
-  background: #ffffff;
-  color: #1f3b67;
+  border: 1px solid rgba(15, 52, 104, 0.3);
+  background: linear-gradient(135deg, #d8e5ff, #c3d6ff);
+  color: #123a70;
   font-weight: 600;
   font-size: 13px;
   text-decoration: none;
+  box-shadow: 0 4px 14px rgba(23, 64, 115, 0.18);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .job-show-all-button:hover,
 .job-show-all-button:focus {
-  background: #dce7ff;
+  background: linear-gradient(135deg, #c0d3ff, #a8c4ff);
   border-color: #174073;
-  box-shadow: 0 6px 18px rgba(23, 64, 115, 0.18);
+  box-shadow: 0 8px 18px rgba(23, 64, 115, 0.22);
 }
 .job-show-all-button:focus-visible {
   outline: 2px solid #91b7ff;
