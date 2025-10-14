@@ -2502,6 +2502,8 @@ body.modal-open .auth-bar {
   flex-direction: column;
   gap: 4px;
   width: 100%;
+  position: relative;
+  align-items: flex-start;
 }
 
 .job-file-trigger {
@@ -2525,8 +2527,8 @@ body.modal-open .auth-bar {
 }
 .job-file-dropdown {
   position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
+  top: calc(100% + 4px);
+  left: 0;
   min-width: 220px;
   max-width: 320px;
   background: #fff;
@@ -2562,6 +2564,38 @@ body.modal-open .auth-bar {
   color: #1f3b67;
   font-weight: 600;
   text-decoration: none;
+}
+.job-file-menu-actions {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #e2e9f7;
+  width: 100%;
+}
+.job-file-menu-action {
+  width: 100%;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: #e8f1ff;
+  color: #124078;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.job-file-menu-action:hover,
+.job-file-menu-action:focus {
+  background: #d7e7ff;
+  border-color: #b6cef6;
+  outline: none;
+}
+.job-file-menu-action:focus-visible {
+  outline: 2px solid #4c8bf5;
+  outline-offset: 2px;
 }
 .job-file-menu-item a:hover,
 .job-file-menu-item a:focus-visible {

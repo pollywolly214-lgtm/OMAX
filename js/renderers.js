@@ -8619,6 +8619,24 @@ function renderJobs(){
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
 
+  const pendingJobFocus = window.pendingJobFocus;
+  if (pendingJobFocus){
+    window.pendingJobFocus = null;
+    if (pendingJobFocus.type === "jobAddFiles" && pendingJobFocus.id != null){
+      requestAnimationFrame(()=>{
+        const addButton = content.querySelector(`[data-upload-job="${pendingJobFocus.id}"]`);
+        if (addButton){
+          try {
+            addButton.focus({ preventScroll: true });
+          } catch (_err) {
+            addButton.focus();
+          }
+          addButton.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+        }
+      });
+    }
+  }
+
   const readOpenFolderSet = ()=>{
     const raw = Array.isArray(window.jobCategoryOpenFolders) ? window.jobCategoryOpenFolders : [];
     return new Set(raw.map(id => String(id)));
@@ -9826,6 +9844,20 @@ function renderJobs(){
         e.preventDefault();
         closeActionMenu();
         openFileMenu(id, fileTrigger);
+      }
+      return;
+    }
+
+    const fileMenuAdd = e.target.closest("[data-job-file-add]");
+    if (fileMenuAdd){
+      const id = fileMenuAdd.getAttribute("data-job-file-add");
+      if (id){
+        e.preventDefault();
+        window.pendingJobFocus = { type: "jobAddFiles", id };
+        closeFileMenu();
+        closeActionMenu();
+        editingJobs.add(id);
+        renderJobs();
       }
       return;
     }
