@@ -9185,8 +9185,34 @@ function renderJobs(){
     });
   }
 
+  const addFormToggle = content.querySelector("[data-job-add-toggle]");
   const newFilesBtn = document.getElementById("jobFilesBtn");
   const newFilesInput = document.getElementById("jobFiles");
+
+  addFormToggle?.addEventListener("click", ()=>{
+    const formState = captureNewJobFormState();
+    const scrollPosition = captureScrollPosition();
+    const current = typeof window.jobAddFormOpen === "boolean"
+      ? window.jobAddFormOpen
+      : Array.isArray(window.pendingNewJobFiles) && window.pendingNewJobFiles.length > 0;
+    window.jobAddFormOpen = !current;
+    renderJobs();
+    requestAnimationFrame(()=>{
+      restoreScrollPosition(scrollPosition);
+      restoreNewJobFormState(formState);
+      if (window.jobAddFormOpen){
+        const focusTarget = document.getElementById("jobName");
+        if (focusTarget){
+          try {
+            focusTarget.focus({ preventScroll: true });
+          } catch (_){
+            focusTarget.focus();
+          }
+        }
+      }
+    });
+  });
+
   newFilesBtn?.addEventListener("click", ()=>{ newFilesInput?.click(); });
   newFilesInput?.addEventListener("change", async (e)=>{
     const files = e.target.files;
