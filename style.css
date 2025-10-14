@@ -3737,7 +3737,7 @@ body.modal-open {
 .job-folder-row:not(.job-folder-row-selected) .category-color-control{ background:rgba(255,255,255,0.85); }
 .category-color-control .category-color-dot{ width:10px; height:10px; border-radius:50%; background:var(--job-category-accent, #3a5ba0); box-shadow:0 0 0 2px rgba(255,255,255,0.85); }
 .category-color-control-compact .category-color-dot{ width:8px; height:8px; }
-.category-color-picker{ -webkit-appearance:none; appearance:none; border:none; padding:0; width:28px; height:20px; border-radius:6px; cursor:pointer; background:transparent; box-shadow:inset 0 0 0 1px rgba(17,36,72,0.18); }
+.category-color-picker{ -webkit-appearance:none; appearance:none; border:none; padding:0; width:28px; height:20px; border-radius:6px; cursor:pointer; background:transparent; box-shadow:inset 0 0 0 3px rgba(17,36,72,0.24); }
 .category-color-picker::-webkit-color-swatch{ border-radius:6px; border:none; background:var(--category-color-picker-value, var(--job-category-accent, transparent)); }
 .category-color-picker::-moz-color-swatch{ border-radius:6px; border:none; background:var(--category-color-picker-value, var(--job-category-accent, transparent)); }
 .category-color-picker::-webkit-color-swatch-wrapper{ padding:0; }
