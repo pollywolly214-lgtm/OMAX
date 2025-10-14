@@ -2153,6 +2153,7 @@ function viewJobs(){
         <tr data-job-row="${j.id}" class="job-row editing">
           <td colspan="${activeColumnCount}">
               <div class="job-edit-card">
+              <div class="job-edit-layout">
               <div class="job-edit-grid">
                 <label>Job name<input type="text" data-j="name" data-id="${j.id}" value="${j.name}"></label>
                 <label>Estimate (hrs)<input type="number" min="1" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></label>
@@ -2166,32 +2167,36 @@ function viewJobs(){
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
                 </select></label>
               </div>
-              <div class="job-edit-summary">
-                <div class="job-metric job-metric-total">
-                  <span class="job-metric-label">Material total</span>
-                  <span class="job-metric-value">$${matTotal.toFixed(2)}</span>
+              <aside class="job-edit-summary" aria-label="Job impact summary">
+                <div class="job-edit-summary-title">Quick impact</div>
+                <div class="job-edit-summary-metrics">
+                  <div class="job-metric job-metric-total">
+                    <span class="job-metric-label">Material total</span>
+                    <span class="job-metric-value">$${matTotal.toFixed(2)}</span>
+                  </div>
+                  <div class="job-metric">
+                    <span class="job-metric-label">Charge rate</span>
+                    <span class="job-metric-value">${chargeDisplay}</span>
+                  </div>
+                  <div class="job-metric">
+                    <span class="job-metric-label">Cost rate</span>
+                    <span class="job-metric-value">${costDisplay}</span>
+                  </div>
+                  <div class="job-metric">
+                    <span class="job-metric-label">Net profit / hr</span>
+                    <span class="job-metric-value ${netClass}">${netDisplay}</span>
+                  </div>
+                  <div class="job-metric">
+                    <span class="job-metric-label">Net total</span>
+                    <span class="job-metric-value ${impactClass}">${netTotalDisplay}</span>
+                  </div>
+                  <div class="job-metric">
+                    <span class="job-metric-label">Schedule</span>
+                    <span class="job-metric-value small muted">${startTxt} → ${dueTxt}</span>
+                  </div>
                 </div>
-                <div class="job-metric">
-                  <span class="job-metric-label">Charge rate</span>
-                  <span class="job-metric-value">${chargeDisplay}</span>
-                </div>
-                <div class="job-metric">
-                  <span class="job-metric-label">Cost rate</span>
-                  <span class="job-metric-value">${costDisplay}</span>
-                </div>
-                <div class="job-metric">
-                  <span class="job-metric-label">Net profit / hr</span>
-                  <span class="job-metric-value ${netClass}">${netDisplay}</span>
-                </div>
-                <div class="job-metric">
-                  <span class="job-metric-label">Net total</span>
-                  <span class="job-metric-value ${impactClass}">${netTotalDisplay}</span>
-                </div>
-                <div class="job-metric">
-                  <span class="job-metric-label">Schedule</span>
-                  <span class="job-metric-value small muted">${startTxt} → ${dueTxt}</span>
-                </div>
-              </div>
+              </aside>
+            </div>
               <label class="job-edit-note">Notes<textarea data-j="notes" data-id="${j.id}" rows="3" placeholder="Notes...">${j.notes||""}</textarea></label>
               <div class="job-edit-files">
                 <button type="button" data-upload-job="${j.id}">Add Files</button>
