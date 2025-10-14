@@ -1889,7 +1889,10 @@ function viewJobs(){
     const colorControl = `
       <div class="category-color-control" data-category-color-control="${esc(id)}"${colorStyleAttr}>
         <span class="category-color-dot" aria-hidden="true"></span>
-        <input type="color" class="category-color-picker" value="${categoryAccentHex(id)}" data-job-folder-color-input="${esc(id)}" aria-label="Choose color for ${esc(folder.name || (isRoot ? "All Jobs" : "Category"))}">
+        <span class="category-color-preview">
+          <span class="category-color-bar" aria-hidden="true"></span>
+          <input type="color" class="category-color-picker" value="${categoryAccentHex(id)}" data-job-folder-color-input="${esc(id)}" aria-label="Choose color for ${esc(folder.name || (isRoot ? "All Jobs" : "Category"))}">
+        </span>
         <button type="button" class="category-color-reset${categoryHasCustomColor(id) ? "" : " is-hidden"}" data-job-folder-color-reset="${esc(id)}" title="Use automatic color">Auto</button>
       </div>`;
     return `
@@ -2486,7 +2489,10 @@ function viewJobs(){
                 <label>Category color
                   <div class="category-color-control category-color-control-compact" data-job-category-color-editor="${esc(j.id)}" data-category-color="1"${colorStyleAttr}>
                     <span class="category-color-dot" aria-hidden="true"></span>
-                    <input type="color" class="category-color-picker" value="${colorInfo.accentHex}" data-job-category-color-input="${esc(j.id)}" data-job-category-color-cat="${esc(normalizedCatId)}" aria-label="Choose color for ${esc(categoryName)}">
+                    <span class="category-color-preview">
+                      <span class="category-color-bar" aria-hidden="true"></span>
+                      <input type="color" class="category-color-picker" value="${colorInfo.accentHex}" data-job-category-color-input="${esc(j.id)}" data-job-category-color-cat="${esc(normalizedCatId)}" aria-label="Choose color for ${esc(categoryName)}">
+                    </span>
                     <button type="button" class="category-color-reset${colorInfo.isCustom ? "" : " is-hidden"}" data-job-category-color-reset="${esc(normalizedCatId)}" title="Use automatic color">Auto</button>
                   </div>
                 </label>
