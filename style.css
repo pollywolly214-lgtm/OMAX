@@ -2467,12 +2467,10 @@ body.modal-open .auth-bar {
   font-size: 12px;
 }
 .job-note-inline {
-  display: inline-flex;
-  align-items: flex-start;
-  gap: 6px;
+  display: block;
   width: 100%;
-  padding: 4px 0;
-  border: none;
+  padding: 0;
+  border: 1px solid transparent;
   background: transparent;
   color: #1c2d4a;
   font-size: 12px;
@@ -2480,23 +2478,17 @@ body.modal-open .auth-bar {
   text-align: left;
   font-family: inherit;
   cursor: pointer;
+  overflow: hidden;
 }
 .job-note-inline:hover {
-  background: rgba(145, 183, 255, 0.08);
+  border-color: rgba(145, 183, 255, 0.4);
 }
 .job-note-inline:focus-visible {
-  outline: 2px solid rgba(145, 183, 255, 0.6);
-  outline-offset: 2px;
-  background: rgba(145, 183, 255, 0.08);
-}
-.job-note-inline-icon {
-  font-size: 13px;
-  line-height: 1;
-  color: #5a6b85;
-  margin-top: 2px;
+  border-color: #91b7ff;
+  box-shadow: 0 0 0 2px rgba(145, 183, 255, 0.25);
+  outline: none;
 }
 .job-note-inline-text {
-  flex: 1;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
