@@ -6880,11 +6880,196 @@ function renderCosts(){
     }
   };
 
+  const selectionTools = (()=>{
+    const hasActiveTextSelection = ()=>{
+      if (typeof window === "undefined" || typeof window.getSelection !== "function") return false;
+      const selection = window.getSelection();
+      if (!selection) return false;
+      if (typeof selection.isCollapsed === "boolean"){
+        if (selection.isCollapsed) return false;
+        return true;
+      }
+      if (typeof selection.type === "string" && selection.type === "Range") return true;
+      if (typeof selection.toString === "function"){
+        const text = selection.toString();
+        if (text && text.length) return true;
+      }
+      if (typeof selection.rangeCount === "number" && selection.rangeCount > 0){
+        for (let i = 0; i < selection.rangeCount; i += 1){
+          const range = typeof selection.getRangeAt === "function" ? selection.getRangeAt(i) : null;
+          if (range && range.collapsed === false) return true;
+        }
+      }
+      return false;
+    };
+
+    const selectionTouchesElement = (element)=>{
+      if (!element) return false;
+      if (typeof Element === "function" && !(element instanceof Element)) return false;
+      if (!hasActiveTextSelection()) return false;
+      const selection = window.getSelection();
+      if (!selection) return false;
+      if (typeof selection.containsNode === "function"){
+        try {
+          if (selection.containsNode(element, true)) return true;
+        } catch (_err){}
+      }
+      const elementRect = (typeof element.getBoundingClientRect === "function") ? element.getBoundingClientRect() : null;
+      const rangeCount = typeof selection.rangeCount === "number" ? selection.rangeCount : 0;
+      for (let i = 0; i < rangeCount; i += 1){
+        const range = typeof selection.getRangeAt === "function" ? selection.getRangeAt(i) : null;
+        if (!range || range.collapsed) continue;
+        if (typeof range.intersectsNode === "function"){
+          try {
+            if (range.intersectsNode(element)) return true;
+          } catch (_err){}
+        }
+        const nodes = [range.startContainer, range.endContainer, range.commonAncestorContainer];
+        for (const node of nodes){
+          if (!node || typeof node !== "object") continue;
+          let current = node;
+          if (typeof Element === "function" && !(current instanceof Element)){
+            current = current.parentElement || null;
+          }
+          while (current){
+            if (current === element) return true;
+            current = current.parentElement || null;
+          }
+        }
+        if (elementRect && typeof range.getClientRects === "function"){
+          const rects = range.getClientRects();
+          for (let j = 0; j < rects.length; j += 1){
+            const rect = rects[j];
+            if (!rect || (rect.width === 0 && rect.height === 0)) continue;
+            const intersectsHorizontally = rect.left <= elementRect.right && rect.right >= elementRect.left;
+            const intersectsVertically = rect.top <= elementRect.bottom && rect.bottom >= elementRect.top;
+            if (intersectsHorizontally && intersectsVertically) return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    return { hasActiveTextSelection, selectionTouchesElement };
+  })();
+
+  if (typeof window === "object" && window){
+    const store = (typeof window.__selectionTools === "object" && window.__selectionTools) || {};
+    window.__selectionTools = store;
+    if (typeof store.hasActiveTextSelection !== "function"){
+      store.hasActiveTextSelection = selectionTools.hasActiveTextSelection;
+    }
+    if (typeof store.selectionTouchesElement !== "function"){
+      store.selectionTouchesElement = selectionTools.selectionTouchesElement;
+    }
+  }
+
+  const installGlobalSelectionClickShield = (()=>{
+    let installed = false;
+    const isElementNode = (value)=>{
+      if (!value || typeof value !== "object") return false;
+      if (typeof Element === "function") return value instanceof Element;
+      return value.nodeType === 1;
+    };
+
+    const textEntryInputTypes = new Set([
+      "",
+      "text",
+      "search",
+      "email",
+      "url",
+      "tel",
+      "password",
+      "number"
+    ]);
+
+    const findTextEntryAncestor = (node)=>{
+      let current = isElementNode(node) ? node : null;
+      while (current){
+        if (typeof current.isContentEditable === "boolean" && current.isContentEditable) return current;
+        if (typeof HTMLTextAreaElement === "function" && current instanceof HTMLTextAreaElement) return current;
+        if (typeof HTMLInputElement === "function" && current instanceof HTMLInputElement){
+          const type = typeof current.type === "string" ? current.type.toLowerCase() : "";
+          if (textEntryInputTypes.has(type)) return current;
+        }
+        current = current.parentElement || null;
+      }
+      return null;
+    };
+
+    const buildElementPath = (event)=>{
+      if (!event) return [];
+      if (typeof event.composedPath === "function"){
+        const path = event.composedPath();
+        if (Array.isArray(path)){
+          return path.filter(node => isElementNode(node));
+        }
+      }
+      const path = [];
+      let current = isElementNode(event.target) ? event.target : null;
+      if (!current && event.target && typeof event.target === "object" && "parentElement" in event.target){
+        current = event.target.parentElement || null;
+      }
+      while (current){
+        path.push(current);
+        current = current.parentElement || null;
+      }
+      return path;
+    };
+
+    const shouldSuppressClick = (event)=>{
+      if (!event || event.defaultPrevented) return false;
+      if (event.type !== "click") return false;
+      if (typeof event.button === "number" && event.button !== 0) return false;
+      if (!selectionTools.hasActiveTextSelection()) return false;
+
+      const path = buildElementPath(event);
+      for (const element of path){
+        if (!isElementNode(element)) continue;
+        if (typeof element.closest === "function" && element.closest("[data-allow-selection-click]") != null) return false;
+        if (!selectionTools.selectionTouchesElement(element)) continue;
+        if (findTextEntryAncestor(element)) return false;
+        return true;
+      }
+      return false;
+    };
+
+    const handleClickCapture = (event)=>{
+      if (!shouldSuppressClick(event)) return;
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      else event.stopPropagation();
+      event.preventDefault();
+    };
+
+    return ()=>{
+      if (installed) return;
+      installed = true;
+      if (typeof document !== "object" || !document || typeof document.addEventListener !== "function") return;
+      document.addEventListener("click", handleClickCapture, true);
+    };
+  })();
+
+  if (typeof window === "object" && window){
+    installGlobalSelectionClickShield();
+  }
+
   const wireJobsHistoryShortcut = (element)=>{
     if (!element) return;
+    const shouldDeferForSelection = (event)=>{
+      if (!event) return false;
+      if (event.type === "click") return selectionTools.selectionTouchesElement(element);
+      if (event.type === "keydown"){
+        const key = event.key;
+        if (key === "Enter" || key === " " || key === "Spacebar"){
+          return selectionTools.selectionTouchesElement(element);
+        }
+      }
+      return false;
+    };
     const activateHistoryLink = (event)=>{
       const origin = event?.target instanceof HTMLElement ? event.target : null;
       if (origin && origin.closest(".time-efficiency-toggles")) return;
+      if (shouldDeferForSelection(event)) return;
       event.preventDefault();
       event.stopPropagation();
       goToJobsHistory();
