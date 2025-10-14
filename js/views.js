@@ -1781,10 +1781,10 @@ function viewJobs(){
         <ul class="job-folder-joblist">${jobListItems}</ul>
       </details>`;
     const actions = [
-      `<button type="button" class="link" data-job-folder-add="${esc(id)}">+ Sub-category</button>`,
-      !isRoot ? `<button type="button" class="link" data-job-folder-rename="${esc(id)}">Rename</button>` : "",
-      !isRoot ? `<button type="button" class="link danger" data-job-folder-remove="${esc(id)}">Remove</button>` : ""
-    ].filter(Boolean).join("<span class=\"job-folder-action-sep\" aria-hidden=\"true\">·</span>");
+      `<button type="button" class="job-folder-action-btn" data-job-folder-add="${esc(id)}">+ Sub-category</button>`,
+      !isRoot ? `<button type="button" class="job-folder-action-btn" data-job-folder-rename="${esc(id)}">Rename</button>` : "",
+      !isRoot ? `<button type="button" class="job-folder-action-btn job-folder-action-danger" data-job-folder-remove="${esc(id)}">Remove</button>` : ""
+    ].filter(Boolean).join("");
     const childrenMarkup = childrenOf(folder.id).map(child => renderFolderTree(child)).join("");
     return `
       <div class="job-folder" data-job-folder="${esc(id)}">
@@ -1926,7 +1926,7 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
-  const activeColumnCount = 16;
+  const activeColumnCount = 15;
   const now = new Date();
   const formatPastDueLabel = (dueISO)=>{
     const dueDate = parseDateLocal(dueISO);
@@ -1956,27 +1956,50 @@ function viewJobs(){
     }
     return "Past due by less than 1 hr";
   };
+  const formatNotePreview = (noteText = "", { maxLength = 260 } = {})=>{
+    if (!noteText) return { html: "", truncated: false };
+    const normalized = String(noteText ?? "").replace(/\r\n/g, "\n");
+    const trimmedEnd = normalized.replace(/\s+$/g, "");
+    if (!trimmedEnd.trim()) return { html: "", truncated: false };
+    if (trimmedEnd.length <= maxLength){
+      return { html: textEsc(trimmedEnd), truncated: false };
+    }
+    const shortened = trimmedEnd.slice(0, maxLength).replace(/\s+$/g, "");
+    return {
+      html: `${textEsc(shortened)}&hellip;`,
+      truncated: true
+    };
+  };
+  const formatNoteContent = (noteText = "")=>{
+    if (!noteText) return "";
+    const normalized = String(noteText ?? "").replace(/\r\n/g, "\n");
+    const encodeLine = (line)=>{
+      if (!line) return "";
+      const whitespaceMatch = line.match(/^[ \t]+/);
+      if (whitespaceMatch){
+        const prefix = whitespaceMatch[0]
+          .replace(/ /g, "&nbsp;")
+          .replace(/\t/g, "&nbsp;&nbsp;&nbsp;&nbsp;");
+        return `${prefix}${textEsc(line.slice(whitespaceMatch[0].length))}`;
+      }
+      return textEsc(line);
+    };
+    const paragraphBlocks = normalized.split(/\n{2,}/)
+      .map(block => block || "")
+      .map(block => block.replace(/^\n+/, "").replace(/\s+$/g, ""))
+      .filter(block => block.trim().length > 0);
+    if (!paragraphBlocks.length){
+      const fallbackLines = normalized.split(/\n/).map(encodeLine).join("<br>");
+      return `<p class="job-note-paragraph">${fallbackLines}</p>`;
+    }
+    return paragraphBlocks.map(block => {
+      const htmlLines = block.split(/\n/).map(encodeLine).join("<br>");
+      return `<p class="job-note-paragraph">${htmlLines}</p>`;
+    }).join("");
+  };
   const rows = jobsForCategory.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileCount = jobFiles.length;
-    const fileMenuId = `jobFileMenu_${j.id}`;
-    const fileLabel = fileCount
-      ? `${fileCount} file${fileCount === 1 ? "" : "s"}`
-      : "No files";
-    const fileMenuItems = fileCount
-      ? jobFiles.map((f, idx) => {
-          const safeName = esc(f?.name || `file_${idx + 1}`);
-          const hrefRaw = f?.dataUrl || f?.url || "";
-          const href = esc(hrefRaw);
-          if (!hrefRaw){
-            return `<li class="job-file-menu-item">${safeName}</li>`;
-          }
-          return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
-        }).join("")
-      : "";
-    const fileMenu = fileCount
-      ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
-      : `<p class="job-file-menu-empty small muted">No files attached</p>`;
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
@@ -2063,8 +2086,20 @@ function viewJobs(){
     if (!editing){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
       const matQtyDisplay  = formatQuantity(matQty);
-      const noteContent = (j.notes || "").trim();
+      const rawNote = typeof j.notes === "string" ? j.notes : "";
+      const noteContent = rawNote.trim();
+      const noteHtml = formatNoteContent(rawNote);
+      const notePreviewInfo = formatNotePreview(rawNote);
       const noteButtonLabel = esc(j.name || "Cutting job");
+      const noteTriggerId = esc(String(j.id));
+      const notePreview = noteContent
+        ? [
+            '<div class="job-note-cell">',
+            `<div class="job-note-text" data-job-note="${noteTriggerId}" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="View notes for ${noteButtonLabel}">${notePreviewInfo.html}</div>`,
+            `<button type="button" class="job-note-cell-button" data-job-note="${noteTriggerId}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Edit notes for ${noteButtonLabel}">Notes</button>`,
+            '</div>'
+          ].join('')
+        : `<button type="button" class="job-note-cell-button job-note-cell-empty" data-job-note="${noteTriggerId}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Add note for ${noteButtonLabel}">Notes</button>`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
           <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">
@@ -2090,21 +2125,6 @@ function viewJobs(){
           <td class="job-col job-col-hours">${remainingDisplay}</td>
           <td class="job-col job-col-need">${needDisplay}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
-          <td class="job-col job-col-files">
-            <div class="job-cell job-cell-stretch">
-              <span class="job-cell-label">Files</span>
-              <div class="job-file-cell">
-                <button type="button" class="job-file-trigger ${fileCount ? 'has-files' : ''}" data-job-files="${j.id}" aria-haspopup="true" aria-expanded="false" aria-controls="${esc(fileMenuId)}">
-                  <span class="job-file-trigger-text">${esc(fileLabel)}</span>
-                  <span class="job-file-trigger-icon" aria-hidden="true">▾</span>
-                </button>
-                <div class="job-file-dropdown" id="${esc(fileMenuId)}" data-job-file-menu="${j.id}" hidden>
-                  ${fileMenu}
-                  <div class="job-file-menu-hint small muted">Edit the job to add files.</div>
-                </div>
-              </div>
-            </div>
-          </td>
           <td class="job-col job-col-impact">
             <div class="job-impact-stack">
               <div class="job-impact-header">
@@ -2131,11 +2151,7 @@ function viewJobs(){
               </div>
             </div>
           </td>
-          <td class="job-col job-col-note">
-            <button type="button" class="job-note-trigger job-note-button ${noteContent ? 'has-note' : ''}" data-job-note="${j.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
-              <span class="job-note-button-label">${noteContent ? 'View notes' : 'Add note'}</span>
-            </button>
-          </td>
+          <td class="job-col job-col-note job-col-locked" data-requires-edit="${j.id}">${notePreview}</td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
               <button data-log-job="${j.id}">Log time</button>
@@ -2276,9 +2292,8 @@ function viewJobs(){
             <th>Hours remaining</th>
             <th>Needed / day</th>
             <th>Status</th>
-            <th>Files</th>
             <th>Net total</th>
-            <th>Notes</th>
+            <th>Note</th>
             <th>Actions</th>
           </tr>
         </thead>
