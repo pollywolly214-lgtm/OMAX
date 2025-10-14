@@ -2155,6 +2155,9 @@ body.modal-open .auth-bar {
   box-shadow: 0 12px 28px rgba(19, 41, 75, 0.18);
   z-index: 5;
 }
+.job-actions-menu[hidden] {
+  display: none;
+}
 .job-actions-menu button {
   padding: 6px 10px;
   border-radius: 8px;
