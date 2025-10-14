@@ -3940,8 +3940,13 @@ body.modal-open {
 .category-color-reset:hover,
 .category-color-reset:focus-visible{ color:rgba(17,36,72,0.95); }
 .category-color-reset.is-hidden{ display:none; }
-.job-main-block{ grid-column:span 2; }
-@media (max-width:900px){ .job-main-block{ grid-column:span 1; } }
+.job-layout{ grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+.job-layout:not(.has-custom-layout) .dashboard-window[data-job-window="main"],
+.job-layout:not(.has-custom-layout) .dashboard-window[data-job-window="history"]{ grid-column:span 2; }
+@media (max-width:900px){
+  .job-layout:not(.has-custom-layout) .dashboard-window[data-job-window="main"],
+  .job-layout:not(.has-custom-layout) .dashboard-window[data-job-window="history"]{ grid-column:span 1; }
+}
 .modal-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

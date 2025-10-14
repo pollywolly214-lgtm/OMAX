@@ -528,6 +528,10 @@ const COST_WINDOW_MIN_WIDTH   = 240;
 const COST_WINDOW_MIN_HEIGHT  = 160;
 const COST_HISTORY_SUPPRESS_KEY = "cost_history_suppressed_v1";
 
+const JOB_LAYOUT_STORAGE_KEY = "job_layout_windows_v1";
+const JOB_WINDOW_MIN_WIDTH   = 320;
+const JOB_WINDOW_MIN_HEIGHT  = 200;
+
 function costHistoryStorage(){
   try {
     if (typeof localStorage !== "undefined") return localStorage;
@@ -660,10 +664,19 @@ function getCloudLayout(area){
       : {};
     return { loaded: !!window.cloudDashboardLayoutLoaded, layout };
   }
-  const layout = (window.cloudCostLayout && typeof window.cloudCostLayout === "object")
-    ? window.cloudCostLayout
-    : {};
-  return { loaded: !!window.cloudCostLayoutLoaded, layout };
+  if (area === "cost"){
+    const layout = (window.cloudCostLayout && typeof window.cloudCostLayout === "object")
+      ? window.cloudCostLayout
+      : {};
+    return { loaded: !!window.cloudCostLayoutLoaded, layout };
+  }
+  if (area === "jobs"){
+    const layout = (window.cloudJobLayout && typeof window.cloudJobLayout === "object")
+      ? window.cloudJobLayout
+      : {};
+    return { loaded: !!window.cloudJobLayoutLoaded, layout };
+  }
+  return { loaded:false, layout:{} };
 }
 
 function setCloudLayout(area, layout){
@@ -672,9 +685,12 @@ function setCloudLayout(area, layout){
   if (area === "dashboard"){
     window.cloudDashboardLayout = clone;
     window.cloudDashboardLayoutLoaded = true;
-  }else{
+  }else if (area === "cost"){
     window.cloudCostLayout = clone;
     window.cloudCostLayoutLoaded = true;
+  }else if (area === "jobs"){
+    window.cloudJobLayout = clone;
+    window.cloudJobLayoutLoaded = true;
   }
 }
 
@@ -2017,6 +2033,510 @@ function notifyCostLayoutContentChanged(){
   if (!state.root || !state.root.classList.contains("has-custom-layout")) return;
   requestAnimationFrame(()=>{
     applyCostLayout(state);
+  });
+}
+
+function jobLayoutStorage(){
+  try {
+    if (typeof localStorage !== "undefined") return localStorage;
+  } catch (err){
+    console.warn("localStorage unavailable", err);
+  }
+  return null;
+}
+
+function loadJobLayoutFromStorage(){
+  const cloud = getCloudLayout("jobs");
+  if (cloud.loaded){
+    const layout = cloneLayoutData(cloud.layout);
+    return { layout, stored: layoutHasEntries(layout) };
+  }
+  const storage = jobLayoutStorage();
+  if (!storage) return { layout:{}, stored:false };
+  try {
+    const raw = storage.getItem(JOB_LAYOUT_STORAGE_KEY);
+    if (!raw) return { layout:{}, stored:false };
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") return { layout: parsed, stored: layoutHasEntries(parsed) };
+  } catch (err){
+    console.warn("Unable to load jobs layout", err);
+  }
+  return { layout:{}, stored:false };
+}
+
+function getJobLayoutState(){
+  if (!window.jobLayoutState){
+    const loaded = loadJobLayoutFromStorage();
+    window.jobLayoutState = {
+      layoutById: loaded.layout,
+      layoutStored: layoutHasEntries(loaded.layout),
+      editing: false,
+      zCounter: 60,
+      root: null,
+      windows: [],
+      editButton: null,
+      editPopup: null,
+      editPopupButton: null,
+      settingsButton: null,
+      settingsMenu: null,
+      hintEl: null,
+      boundResize: false,
+      layoutNotifyPending: false,
+      onLayoutChange: null,
+      resizeHandler: null
+    };
+  }
+  return window.jobLayoutState;
+}
+
+function hasSavedJobLayout(state){
+  return !!(state && state.layoutStored);
+}
+
+function persistJobLayout(state){
+  if (!state) return;
+  const layoutSource = (state.layoutById && typeof state.layoutById === "object") ? state.layoutById : {};
+  const layoutClone = cloneLayoutData(layoutSource);
+  const hasLayout = layoutHasEntries(layoutClone);
+  const storage = jobLayoutStorage();
+  if (storage){
+    try {
+      if (hasLayout){
+        storage.setItem(JOB_LAYOUT_STORAGE_KEY, JSON.stringify(layoutClone));
+      }else{
+        storage.removeItem(JOB_LAYOUT_STORAGE_KEY);
+      }
+    } catch (err){
+      console.warn("Unable to persist jobs layout", err);
+    }
+  }
+  state.layoutStored = hasLayout;
+  if (state.root && state.root.classList){
+    state.root.classList.toggle("has-custom-layout", hasLayout);
+  }
+  const cloud = getCloudLayout("jobs");
+  let changed = !cloud.loaded || !layoutsEqual(cloud.layout, layoutClone);
+  if (!cloud.loaded || changed){
+    setCloudLayout("jobs", layoutClone);
+  }
+  if (!cloud.loaded) changed = true;
+  if (changed && typeof saveCloudDebounced === "function"){
+    try { saveCloudDebounced(); }
+    catch (err) { console.warn("Unable to schedule cloud save for jobs layout", err); }
+  }
+}
+
+function captureJobWindowRect(win, rootRect){
+  if (!win || !rootRect) return null;
+  const rect = win.getBoundingClientRect();
+  const width = Math.max(JOB_WINDOW_MIN_WIDTH, Math.round(rect.width) || JOB_WINDOW_MIN_WIDTH);
+  const height = Math.max(JOB_WINDOW_MIN_HEIGHT, Math.round(rect.height) || JOB_WINDOW_MIN_HEIGHT);
+  return {
+    x: Math.round(rect.left - rootRect.left),
+    y: Math.round(rect.top - rootRect.top),
+    width,
+    height
+  };
+}
+
+function jobLayoutMaxBottom(layout){
+  let maxBottom = 0;
+  if (layout){
+    Object.values(layout).forEach(box => {
+      if (!box) return;
+      const bottom = Number(box.y || 0) + Number(box.height || 0);
+      if (isFinite(bottom)) maxBottom = Math.max(maxBottom, bottom);
+    });
+  }
+  return maxBottom;
+}
+
+function syncJobLayoutEntries(state){
+  if (!state.root) return;
+  if (!state.layoutById || typeof state.layoutById !== "object") state.layoutById = {};
+  const layout = state.layoutById;
+  const rootRect = state.root.getBoundingClientRect();
+  const useExisting = state.root.classList.contains("has-custom-layout") && Object.keys(layout).length;
+  const seen = new Set();
+  state.windows.forEach(win => {
+    if (!win || !win.dataset) return;
+    const id = String(win.dataset.jobWindow || "");
+    if (!id) return;
+    seen.add(id);
+    if (!layout[id]){
+      if (useExisting){
+        const fallbackWidth = Math.max(JOB_WINDOW_MIN_WIDTH, Math.round(win.offsetWidth) || JOB_WINDOW_MIN_WIDTH);
+        const fallbackHeight = Math.max(JOB_WINDOW_MIN_HEIGHT, Math.round(win.offsetHeight) || JOB_WINDOW_MIN_HEIGHT);
+        const offsetY = jobLayoutMaxBottom(layout) + 24;
+        layout[id] = { x: 0, y: offsetY, width: fallbackWidth, height: fallbackHeight };
+      }else{
+        layout[id] = captureJobWindowRect(win, rootRect);
+      }
+    }
+  });
+  Object.keys(layout).forEach(id => { if (!seen.has(id)) delete layout[id]; });
+}
+
+function setJobWindowStyle(win, box){
+  if (!win || !box) return;
+  win.style.left = `${box.x}px`;
+  win.style.top = `${box.y}px`;
+  win.style.width = `${box.width}px`;
+  win.style.height = `${box.height}px`;
+}
+
+function scheduleJobLayoutRefresh(state){
+  if (!state) return;
+  if (state.layoutNotifyPending) return;
+  state.layoutNotifyPending = true;
+  requestAnimationFrame(()=>{
+    state.layoutNotifyPending = false;
+    if (typeof state.onLayoutChange === "function"){
+      try {
+        state.onLayoutChange();
+      } catch (err){
+        console.error(err);
+      }
+    }
+  });
+}
+
+function updateJobRootSize(state){
+  if (!state.root) return;
+  if (!state.root.classList.contains("has-custom-layout")){
+    state.root.style.minHeight = "";
+    state.root.style.paddingBottom = "";
+    return;
+  }
+  const maxBottom = jobLayoutMaxBottom(state.layoutById);
+  const extra = state.editing ? 160 : 60;
+  state.root.style.minHeight = `${Math.max(0, Math.ceil(maxBottom + extra))}px`;
+  state.root.style.paddingBottom = state.editing ? "120px" : "48px";
+}
+
+function applyJobLayout(state){
+  if (!state.root) return;
+  if (!state.root.classList.contains("has-custom-layout")){
+    state.windows.forEach(win => {
+      if (!win) return;
+      win.style.left = "";
+      win.style.top = "";
+      win.style.width = "";
+      win.style.height = "";
+    });
+    updateJobRootSize(state);
+    scheduleJobLayoutRefresh(state);
+    return;
+  }
+  state.windows.forEach(win => {
+    if (!win || !win.dataset) return;
+    const id = String(win.dataset.jobWindow || "");
+    const box = state.layoutById[id];
+    if (box){ setJobWindowStyle(win, box); }
+  });
+  updateJobRootSize(state);
+  scheduleJobLayoutRefresh(state);
+}
+
+function updateJobEditUi(state){
+  if (state.editButton){
+    const label = state.editing ? "Done and Save" : "Edit cutting jobs layout";
+    state.editButton.textContent = label;
+    const pressed = state.editing ? "true" : "false";
+    state.editButton.setAttribute("aria-pressed", pressed);
+    state.editButton.setAttribute("aria-checked", pressed);
+  }
+  if (state.hintEl){
+    state.hintEl.hidden = !state.editing;
+  }
+  if (state.editPopup){
+    const hidden = !state.editing;
+    state.editPopup.hidden = hidden;
+    if (typeof state.editPopup.toggleAttribute === "function"){
+      state.editPopup.toggleAttribute("hidden", hidden);
+    } else if (hidden){
+      state.editPopup.setAttribute("hidden", "");
+    } else {
+      state.editPopup.removeAttribute("hidden");
+    }
+    state.editPopup.setAttribute("aria-hidden", hidden ? "true" : "false");
+  }
+  if (state.editPopupButton){
+    state.editPopupButton.disabled = !state.editing;
+    if (state.editing){
+      state.editPopupButton.textContent = "Done and Save";
+    }
+  }
+  if (state.settingsButton){
+    state.settingsButton.classList.toggle("is-active", !!state.editing);
+  }
+}
+
+function bringJobWindowToFront(state, win){
+  if (!state) return;
+  state.zCounter = (state.zCounter || 60) + 1;
+  if (win) win.style.zIndex = String(state.zCounter);
+}
+
+function removeJobWindowElevation(win){
+  if (win) win.style.zIndex = "";
+}
+
+function addJobWindowHandles(state){
+  state.windows.forEach(win => {
+    if (!win) return;
+    const id = String(win.dataset.jobWindow || "");
+    if (!id) return;
+    if (!win.querySelector(":scope > .dashboard-drag-handle")){
+      const handle = document.createElement("div");
+      handle.className = "dashboard-drag-handle";
+      handle.title = "Drag to move";
+      handle.innerHTML = "<span>Drag</span>";
+      handle.setAttribute("aria-hidden", "true");
+      handle.addEventListener("pointerdown", (event)=> startJobWindowDrag(state, win, event));
+      win.appendChild(handle);
+    }
+    const resizeTypes = ["n","s","e","w","ne","nw","se","sw"];
+    resizeTypes.forEach(type => {
+      if (win.querySelector(`:scope > .dashboard-resize-${type}`)) return;
+      const handle = document.createElement("div");
+      handle.className = `dashboard-resize-handle dashboard-resize-${type}`;
+      handle.dataset.resize = type;
+      handle.title = "Drag to resize";
+      handle.setAttribute("aria-hidden", "true");
+      handle.addEventListener("pointerdown", (event)=> startJobWindowResize(state, win, type, event));
+      win.appendChild(handle);
+    });
+  });
+}
+
+function removeJobWindowHandles(state){
+  state.windows.forEach(win => {
+    if (!win) return;
+    win.querySelectorAll(":scope > .dashboard-drag-handle, :scope > .dashboard-resize-handle").forEach(el => el.remove());
+    removeJobWindowElevation(win);
+  });
+}
+
+function clampJobX(state, desiredX, width){
+  if (!state.root) return desiredX;
+  const rootWidth = state.root.clientWidth || state.root.getBoundingClientRect().width || width;
+  if (!isFinite(rootWidth) || rootWidth <= 0) return Math.max(0, desiredX);
+  const maxX = Math.max(0, rootWidth - width);
+  return Math.min(Math.max(0, desiredX), maxX);
+}
+
+function startJobWindowDrag(state, win, event){
+  if (!state || !win || !state.root) return;
+  const id = String(win.dataset.jobWindow || "");
+  if (!id) return;
+  const box = state.layoutById[id];
+  if (!box) return;
+  if (event.button !== 0 && event.pointerType !== "touch") return;
+  event.preventDefault();
+  bringJobWindowToFront(state, win);
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const baseX = box.x;
+  const baseY = box.y;
+  const pointerId = event.pointerId;
+  const move = (ev)=>{
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    const nextX = clampJobX(state, baseX + dx, box.width);
+    const nextY = Math.max(0, baseY + dy);
+    box.x = Math.round(nextX);
+    box.y = Math.round(nextY);
+    setJobWindowStyle(win, box);
+    updateJobRootSize(state);
+    scheduleJobLayoutRefresh(state);
+  };
+  const stop = ()=>{
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+    win.releasePointerCapture?.(pointerId);
+    persistJobLayout(state);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", stop);
+  window.addEventListener("pointercancel", stop);
+  win.setPointerCapture?.(pointerId);
+}
+
+function startJobWindowResize(state, win, direction, event){
+  if (!state || !win || !state.root) return;
+  const id = String(win.dataset.jobWindow || "");
+  if (!id) return;
+  const box = state.layoutById[id];
+  if (!box) return;
+  if (event.button !== 0 && event.pointerType !== "touch") return;
+  event.preventDefault();
+  bringJobWindowToFront(state, win);
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const startBox = { x: box.x, y: box.y, width: box.width, height: box.height };
+  const pointerId = event.pointerId;
+  const resize = (ev)=>{
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    let nextX = startBox.x;
+    let nextY = startBox.y;
+    let nextWidth = startBox.width;
+    let nextHeight = startBox.height;
+    if (direction.includes("e")){
+      nextWidth = Math.max(JOB_WINDOW_MIN_WIDTH, startBox.width + dx);
+      const maxWidth = (state.root.clientWidth || state.root.getBoundingClientRect().width || nextWidth) - startBox.x;
+      if (isFinite(maxWidth) && maxWidth > 0) nextWidth = Math.min(nextWidth, maxWidth);
+    }
+    if (direction.includes("s")){
+      nextHeight = Math.max(JOB_WINDOW_MIN_HEIGHT, startBox.height + dy);
+    }
+    if (direction.includes("w")){
+      const desiredX = startBox.x + dx;
+      const maxX = startBox.x + startBox.width - JOB_WINDOW_MIN_WIDTH;
+      nextX = Math.max(0, Math.min(desiredX, maxX));
+      nextWidth = Math.max(JOB_WINDOW_MIN_WIDTH, startBox.width + (startBox.x - nextX));
+    }
+    if (direction.includes("n")){
+      const desiredY = startBox.y + dy;
+      const maxY = startBox.y + startBox.height - JOB_WINDOW_MIN_HEIGHT;
+      nextY = Math.max(0, Math.min(desiredY, maxY));
+      nextHeight = Math.max(JOB_WINDOW_MIN_HEIGHT, startBox.height + (startBox.y - nextY));
+    }
+    nextX = clampJobX(state, nextX, nextWidth);
+    if (nextHeight < JOB_WINDOW_MIN_HEIGHT) nextHeight = JOB_WINDOW_MIN_HEIGHT;
+    box.x = Math.round(nextX);
+    box.y = Math.round(nextY);
+    box.width = Math.round(nextWidth);
+    box.height = Math.round(nextHeight);
+    setJobWindowStyle(win, box);
+    updateJobRootSize(state);
+    scheduleJobLayoutRefresh(state);
+    dispatchLayoutWindowResize("jobs", id, win, box);
+  };
+  const stop = ()=>{
+    window.removeEventListener("pointermove", resize);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+    win.releasePointerCapture?.(pointerId);
+    persistJobLayout(state);
+    dispatchLayoutWindowResize("jobs", id, win, box);
+  };
+  window.addEventListener("pointermove", resize);
+  window.addEventListener("pointerup", stop);
+  window.addEventListener("pointercancel", stop);
+  win.setPointerCapture?.(pointerId);
+}
+
+function ensureJobLayoutBoundResize(state){
+  if (!state || state.boundResize) return;
+  state.boundResize = true;
+  const onResize = ()=>{
+    if (!state.root) return;
+    state.windows = Array.from(state.root.querySelectorAll("[data-job-window]"));
+    syncJobLayoutEntries(state);
+    applyJobLayout(state);
+    persistJobLayout(state);
+  };
+  state.resizeHandler = onResize;
+  window.addEventListener("resize", onResize);
+}
+
+function setJobEditing(state, editing){
+  state.editing = !!editing;
+  if (!state.root) return;
+  if (editing){
+    if (!state.root.classList.contains("has-custom-layout")){
+      state.root.classList.add("has-custom-layout");
+      syncJobLayoutEntries(state);
+    }
+    addJobWindowHandles(state);
+    state.root.classList.add("is-editing");
+  }else{
+    state.root.classList.remove("is-editing");
+    removeJobWindowHandles(state);
+  }
+  applyJobLayout(state);
+  updateJobEditUi(state);
+  if (editing && state.editPopupButton){
+    try {
+      state.editPopupButton.focus({ preventScroll: true });
+    } catch (err){
+      state.editPopupButton.focus();
+    }
+  }
+  closeDashboardSettingsMenu();
+  if (!editing) persistJobLayout(state);
+}
+
+function toggleJobEditing(){
+  const state = getJobLayoutState();
+  setJobEditing(state, !state.editing);
+}
+
+function finishJobLayoutEditing(){
+  const state = getJobLayoutState();
+  if (!state) return;
+  if (state.editing){
+    setJobEditing(state, false);
+  }else{
+    updateJobEditUi(state);
+  }
+  if (state.editPopup){
+    state.editPopup.hidden = true;
+    if (typeof state.editPopup.toggleAttribute === "function"){
+      state.editPopup.toggleAttribute("hidden", true);
+    } else {
+      state.editPopup.setAttribute("hidden", "");
+    }
+    state.editPopup.setAttribute("aria-hidden", "true");
+  }
+}
+
+function setupJobLayout(){
+  const state = getJobLayoutState();
+  state.root = document.getElementById("jobLayout") || null;
+  state.editButton = document.getElementById("jobEditToggle") || null;
+  state.editPopup = document.getElementById("jobEditPopup") || null;
+  state.editPopupButton = document.getElementById("jobEditPopupButton") || null;
+  state.settingsButton = document.getElementById("dashboardSettingsToggle") || null;
+  state.settingsMenu = document.getElementById("dashboardSettingsMenu") || null;
+  state.hintEl = document.getElementById("jobEditHint") || null;
+  state.windows = state.root ? Array.from(state.root.querySelectorAll("[data-job-window]")) : [];
+  if (!state.root){
+    updateJobEditUi(state);
+    return;
+  }
+  ensureJobLayoutBoundResize(state);
+  if (hasSavedJobLayout(state)){
+    state.root.classList.add("has-custom-layout");
+  }
+  syncJobLayoutEntries(state);
+  applyJobLayout(state);
+  updateJobEditUi(state);
+  if (state.editing){
+    addJobWindowHandles(state);
+    state.root.classList.add("is-editing");
+  }
+  if (state.editButton && !state.editButton.dataset.bound){
+    state.editButton.dataset.bound = "1";
+    state.editButton.addEventListener("click", ()=>{
+      toggleJobEditing();
+      closeDashboardSettingsMenu();
+    });
+  }
+  if (state.editPopupButton && !state.editPopupButton.dataset.bound){
+    state.editPopupButton.dataset.bound = "1";
+    state.editPopupButton.addEventListener("click", finishJobLayoutEditing);
+  }
+}
+
+function notifyJobLayoutContentChanged(){
+  const state = getJobLayoutState();
+  if (!state.root || !state.root.classList.contains("has-custom-layout")) return;
+  requestAnimationFrame(()=>{
+    applyJobLayout(state);
   });
 }
 
@@ -8595,7 +9115,7 @@ function renderJobs(){
   } catch (err){
     console.warn("Failed to normalize job categories before render", err);
   }
-  setAppSettingsContext("default");
+  setAppSettingsContext("jobs");
   wireDashboardSettingsMenu();
 
   if (typeof window.__cleanupJobActionMenus === "function"){
@@ -8627,6 +9147,7 @@ function renderJobs(){
 
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
+  setupJobLayout();
 
   const pendingJobFocus = window.pendingJobFocus;
   if (pendingJobFocus){

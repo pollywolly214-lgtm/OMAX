@@ -2552,124 +2552,136 @@ function viewJobs(){
 
   return `
   <div class="container job-page-container">
-    <div class="block job-category-panel" data-job-category-panel>
-      <div class="job-category-header">
-        <h3>Job Categories</h3>
-        <button type="button" class="small" data-job-folder-add-root>+ Add Category</button>
-      </div>
-      <div class="job-category-tree">
-        ${folderTreeMarkup}
-      </div>
-      <p class="small muted">Select a category to focus the job list or create sub-categories to organize further.</p>
+    <div class="dashboard-toolbar">
+      <span class="dashboard-edit-hint" id="jobEditHint" hidden>Drag windows to rearrange and resize the cutting jobs workspace.</span>
     </div>
-    <div class="block job-main-block">
-      <div class="job-page-topbar">
-        <div class="job-page-toolbar">
-          <h3>Cutting Jobs</h3>
-          <div class="job-toolbar-actions">
-            <button type="button" class="job-show-all-button" data-job-show-all>Show all jobs</button>
-            <button
-              type="button"
-              class="job-add-button"
-              data-job-add-toggle
-              aria-expanded="${addFormOpen ? "true" : "false"}"
-              aria-controls="jobAddPanel"
-            >${addFormOpen ? "Hide add job form" : "+ New cutting job"}</button>
-            <label class="job-category-filter">
-              <span>Show</span>
-              <select id="jobCategoryFilterSelect" aria-label="Filter cutting jobs by category">
-                ${categoryOptionsMarkup(selectedCategory)}
-              </select>
-            </label>
-            <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
-          </div>
-        </div>
-        ${!addFormOpen && pendingFiles.length
-          ? `<div class="job-add-indicator" role="status" aria-live="polite">${pendingSummary}</div>`
-          : ""}
-      </div>
-      <section
-        class="job-add-panel${addFormOpen ? " is-open" : ""}"
-        data-job-add-panel
-        id="jobAddPanel"
-        ${addFormOpen ? "" : "hidden"}
-        aria-hidden="${addFormOpen ? "false" : "true"}"
-      >
-        <form id="addJobForm" class="mini-form job-add-form">
-          <input type="text" id="jobName" placeholder="Job name" required>
-          <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
-          <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01">
-          <input type="text" id="jobMaterial" placeholder="Material">
-          <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
-          <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
-          <input type="date" id="jobStart" required>
-          <input type="date" id="jobDue" required>
-          <select id="jobCategory" aria-label="Category" required>
-            ${categoryOptionsMarkup(selectedCategory, { includeCreateOption: true })}
-          </select>
-          <button type="button" id="jobFilesBtn">Attach Files</button>
-          <input type="file" id="jobFiles" multiple style="display:none">
-          <button type="submit">Add Job</button>
-        </form>
-        <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
-      </section>
 
-      <table class="job-table">
-        <thead>
-          <tr>
-            <th>Job</th>
-            <th>Estimate</th>
-            <th>Material</th>
-            <th>Cost / unit</th>
-            <th>Quantity</th>
-            <th>Material total</th>
-            <th>Charge rate</th>
-            <th>Cost rate</th>
-            <th>Net profit/hr</th>
-            <th>Hours remaining</th>
-            <th>Needed / day</th>
-            <th>Status</th>
-            <th>Files</th>
-            <th>Net total</th>
-            <th>Notes</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <p class="small muted">Material cost and quantity update immediately when changed.</p>
-      <div class="job-note-modal-backdrop" id="jobNoteModal" hidden>
-        <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobNoteModalTitle">
-          <div class="job-note-modal-header">
-            <h4 id="jobNoteModalTitle">Job notes</h4>
-            <button type="button" class="job-note-modal-close" data-note-cancel aria-label="Close notes">×</button>
+    <div class="dashboard-layout job-layout" id="jobLayout">
+      <div class="dashboard-window" data-job-window="categories">
+        <div class="block job-category-panel" data-job-category-panel>
+          <div class="job-category-header">
+            <h3>Job Categories</h3>
+            <button type="button" class="small" data-job-folder-add-root>+ Add Category</button>
           </div>
-          <div class="job-note-modal-body">
-            <div class="job-note-modal-field">
-              <label for="jobNoteModalInput">Notes for <span id="jobNoteModalJob"></span></label>
-              <textarea id="jobNoteModalInput" rows="6" placeholder="Add notes for this cutting job"></textarea>
+          <div class="job-category-tree">
+            ${folderTreeMarkup}
+          </div>
+          <p class="small muted">Select a category to focus the job list or create sub-categories to organize further.</p>
+        </div>
+      </div>
+      <div class="dashboard-window" data-job-window="main">
+        <div class="block job-main-block">
+          <div class="job-page-topbar">
+            <div class="job-page-toolbar">
+              <h3>Cutting Jobs</h3>
+              <div class="job-toolbar-actions">
+                <button type="button" class="job-show-all-button" data-job-show-all>Show all jobs</button>
+                <button
+                  type="button"
+                  class="job-add-button"
+                  data-job-add-toggle
+                  aria-expanded="${addFormOpen ? "true" : "false"}"
+                  aria-controls="jobAddPanel"
+                >${addFormOpen ? "Hide add job form" : "+ New cutting job"}</button>
+                <label class="job-category-filter">
+                  <span>Show</span>
+                  <select id="jobCategoryFilterSelect" aria-label="Filter cutting jobs by category">
+                    ${categoryOptionsMarkup(selectedCategory)}
+                  </select>
+                </label>
+                <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
+              </div>
             </div>
-            <div class="job-note-modal-history" id="jobNoteModalHistory" aria-live="polite"></div>
+            ${!addFormOpen && pendingFiles.length
+              ? `<div class="job-add-indicator" role="status" aria-live="polite">${pendingSummary}</div>`
+              : ""}
           </div>
-          <div class="job-note-modal-actions">
-            <button type="button" class="job-note-modal-secondary" data-note-cancel>Cancel</button>
-            <button type="button" class="job-note-modal-secondary" data-note-save-new>Save &amp; add another</button>
-            <button type="button" class="job-note-modal-primary" data-note-save>Save notes</button>
+          <section
+            class="job-add-panel${addFormOpen ? " is-open" : ""}"
+            data-job-add-panel
+            id="jobAddPanel"
+            ${addFormOpen ? "" : "hidden"}
+            aria-hidden="${addFormOpen ? "false" : "true"}"
+          >
+            <form id="addJobForm" class="mini-form job-add-form">
+              <input type="text" id="jobName" placeholder="Job name" required>
+              <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
+              <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01">
+              <input type="text" id="jobMaterial" placeholder="Material">
+              <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
+              <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
+              <input type="date" id="jobStart" required>
+              <input type="date" id="jobDue" required>
+              <select id="jobCategory" aria-label="Category" required>
+                ${categoryOptionsMarkup(selectedCategory, { includeCreateOption: true })}
+              </select>
+              <button type="button" id="jobFilesBtn">Attach Files</button>
+              <input type="file" id="jobFiles" multiple style="display:none">
+              <button type="submit">Add Job</button>
+            </form>
+            <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
+          </section>
+
+          <table class="job-table">
+            <thead>
+              <tr>
+                <th>Job</th>
+                <th>Estimate</th>
+                <th>Material</th>
+                <th>Cost / unit</th>
+                <th>Quantity</th>
+                <th>Material total</th>
+                <th>Charge rate</th>
+                <th>Cost rate</th>
+                <th>Net profit/hr</th>
+                <th>Hours remaining</th>
+                <th>Needed / day</th>
+                <th>Status</th>
+                <th>Files</th>
+                <th>Net total</th>
+                <th>Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <p class="small muted">Material cost and quantity update immediately when changed.</p>
+          <div class="job-note-modal-backdrop" id="jobNoteModal" hidden>
+            <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobNoteModalTitle">
+              <div class="job-note-modal-header">
+                <h4 id="jobNoteModalTitle">Job notes</h4>
+                <button type="button" class="job-note-modal-close" data-note-cancel aria-label="Close notes">×</button>
+              </div>
+              <div class="job-note-modal-body">
+                <div class="job-note-modal-field">
+                  <label for="jobNoteModalInput">Notes for <span id="jobNoteModalJob"></span></label>
+                  <textarea id="jobNoteModalInput" rows="6" placeholder="Add notes for this cutting job"></textarea>
+                </div>
+                <div class="job-note-modal-history" id="jobNoteModalHistory" aria-live="polite"></div>
+              </div>
+              <div class="job-note-modal-actions">
+                <button type="button" class="job-note-modal-secondary" data-note-cancel>Cancel</button>
+                <button type="button" class="job-note-modal-secondary" data-note-save-new>Save &amp; add another</button>
+                <button type="button" class="job-note-modal-primary" data-note-save>Save notes</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-    <div class="block past-jobs-block job-main-block" id="pastJobs">
-      <h3>Past Cutting Jobs</h3>
-      <div class="past-jobs-toolbar">
-        <div class="past-jobs-search mini-form">
-          <input type="search" id="jobHistorySearch" placeholder="Search past jobs by name, material, notes, or date" value="${historySearchDisplay}">
-          <button type="button" id="jobHistorySearchClear">Clear</button>
+      <div class="dashboard-window" data-job-window="history">
+        <div class="block past-jobs-block" id="pastJobs">
+          <h3>Past Cutting Jobs</h3>
+          <div class="past-jobs-toolbar">
+            <div class="past-jobs-search mini-form">
+              <input type="search" id="jobHistorySearch" placeholder="Search past jobs by name, material, notes, or date" value="${historySearchDisplay}">
+              <button type="button" id="jobHistorySearchClear">Clear</button>
+            </div>
+          </div>
+          <div class="small muted past-jobs-hint">Results update as you type.</div>
+          ${historyFilterStatus}
+          ${completedTable}
         </div>
       </div>
-      <div class="small muted past-jobs-hint">Results update as you type.</div>
-      ${historyFilterStatus}
-      ${completedTable}
     </div>
   </div>`;
 }
