@@ -2823,21 +2823,13 @@ function renderDashboard(){
     }
   }
 
-  function ensureDownTimeArray(){
-    if (!Array.isArray(window.downTimes)) window.downTimes = [];
-    const arr = window.downTimes;
-    for (let i = arr.length - 1; i >= 0; i--){
-      const entry = arr[i];
-      if (!entry){ arr.splice(i,1); continue; }
-      if (typeof entry === "string"){ arr[i] = { dateISO: entry }; continue; }
-      if (typeof entry.dateISO !== "string") arr.splice(i,1);
-    }
-    return arr;
-  }
-
   function refreshDownTimeList(){
     if (!downList) return;
-    const arr = ensureDownTimeArray().slice().sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+    const source = typeof getDowntimeEvents === "function"
+      ? getDowntimeEvents()
+      : (Array.isArray(window.downtimeEvents) ? window.downtimeEvents : []);
+    const arr = Array.isArray(source) ? source.slice() : [];
+    arr.sort((a,b)=> String(a.dateISO || "").localeCompare(String(b.dateISO || "")) || String(a.id || "").localeCompare(String(b.id || "")));
     if (!arr.length){
       downList.innerHTML = `<div class="small muted">No down time days yet.</div>`;
       return;
@@ -2848,23 +2840,47 @@ function renderDashboard(){
       row.className = "down-item";
       const label = document.createElement("span");
       const parsed = new Date(item.dateISO + "T00:00:00");
-      label.textContent = isNaN(parsed.getTime()) ? item.dateISO : parsed.toLocaleDateString();
+      const dateLabel = isNaN(parsed.getTime()) ? item.dateISO : parsed.toLocaleDateString();
+      const details = [];
+      const duration = Number(item.durationHours);
+      if (Number.isFinite(duration) && duration > 0){
+        const plural = Math.abs(duration - 1) < 0.01 ? "hr" : "hrs";
+        details.push(`${duration.toFixed(duration >= 10 ? 0 : 1)} ${plural}`);
+      }
+      if (item.reason){
+        details.push(item.reason);
+      }
+      const cost = Number(item.costImpact);
+      if (Number.isFinite(cost) && cost !== 0){
+        const absCost = Math.abs(cost);
+        const formatted = absCost >= 1000 ? absCost.toLocaleString(undefined, { maximumFractionDigits: 0 }) : absCost.toFixed(0);
+        const sign = cost < 0 ? "-" : "";
+        details.push(`Cost ${sign}$${formatted}`);
+      }
+      label.textContent = details.length ? `${dateLabel} · ${details.join(" · ")}` : dateLabel;
       row.appendChild(label);
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "down-remove-btn";
       btn.textContent = "Remove";
-      btn.addEventListener("click", ()=>{ removeDownTime(item.dateISO); });
+      btn.addEventListener("click", ()=>{ removeDownTime(item.id || item.dateISO); });
       row.appendChild(btn);
       downList.appendChild(row);
     });
   }
 
   function removeDownTime(dateISO){
-    const arr = ensureDownTimeArray();
-    const idx = arr.findIndex(dt => dt.dateISO === dateISO);
-    if (idx < 0) return;
-    arr.splice(idx,1);
+    const removed = typeof removeDowntimeEvent === "function"
+      ? removeDowntimeEvent(dateISO)
+      : (()=>{
+          if (!Array.isArray(window.downtimeEvents)) window.downtimeEvents = [];
+          const idx = window.downtimeEvents.findIndex(dt => (dt && (dt.id === dateISO || dt.dateISO === dateISO)));
+          if (idx < 0) return false;
+          window.downtimeEvents.splice(idx,1);
+          window.downTimes = window.downtimeEvents.map(entry => ({ dateISO: entry.dateISO }));
+          return true;
+        })();
+    if (!removed) return;
     saveCloudDebounced();
     toast("Down time removed");
     refreshDownTimeList();
@@ -3115,7 +3131,11 @@ function renderDashboard(){
 
   function showBackdrop(step){
     if (!modal) return;
-    ensureDownTimeArray();
+    if (typeof setDowntimeEvents === "function"){
+      setDowntimeEvents(getDowntimeEvents());
+    }else if (!Array.isArray(window.downtimeEvents)){
+      window.downtimeEvents = [];
+    }
     modal.classList.add("is-visible");
     modal.removeAttribute("hidden");
     modal.setAttribute("aria-hidden", "false");
@@ -3533,12 +3553,31 @@ function renderDashboard(){
 
   downForm?.addEventListener("submit", (e)=>{
     e.preventDefault();
-    const arr = ensureDownTimeArray();
     const dateISO = downDateInput?.value;
     if (!dateISO){ toast("Pick a date"); return; }
-    if (arr.some(dt => dt.dateISO === dateISO)){ toast("Day already marked as down time"); return; }
-    arr.push({ dateISO });
-    arr.sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+    const result = typeof addDowntimeEvent === "function"
+      ? addDowntimeEvent({ dateISO, durationHours: 0, reason: "", notes: "", costImpact: 0 })
+      : (()=>{
+          if (!Array.isArray(window.downtimeEvents)) window.downtimeEvents = [];
+          if (window.downtimeEvents.some(dt => dt && dt.dateISO === dateISO)){
+            return { added: false, reason: "duplicate-date" };
+          }
+          const idFactory = typeof genId === "function"
+            ? ()=> genId("downtime")
+            : ()=> `downtime_${Date.now().toString(36)}`;
+          window.downtimeEvents.push({ id: idFactory(), dateISO, durationHours: 0, reason: "", notes: "", costImpact: 0 });
+          window.downtimeEvents.sort((a,b)=> String(a.dateISO || "").localeCompare(String(b.dateISO || "")));
+          window.downTimes = window.downtimeEvents.map(entry => ({ dateISO: entry.dateISO }));
+          return { added: true };
+        })();
+    if (!result.added){
+      if (result.reason === "duplicate-date"){
+        toast("Day already marked as down time");
+      }else{
+        toast("Unable to save down time");
+      }
+      return;
+    }
     saveCloudDebounced();
     toast("Down time saved");
     if (downDateInput) downDateInput.value = "";
