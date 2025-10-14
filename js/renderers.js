@@ -159,6 +159,67 @@ function createIntervalTaskInstance(template){
   return copy;
 }
 
+async function ensureMaintenanceTaskReadyForCalendar(task){
+  const outcome = { proceed: true, missingCost: false, missingDowntime: false };
+  if (!task || typeof task !== "object") return outcome;
+
+  const totalCost = typeof readTaskMaintenanceCost === "function"
+    ? readTaskMaintenanceCost(task)
+    : Number(task?.price);
+  const downtimeVal = typeof readTaskDowntimeHours === "function"
+    ? readTaskDowntimeHours(task)
+    : Number(task?.downtimeHours);
+
+  const hasCost = Number.isFinite(totalCost) && totalCost > 0;
+  const hasDowntime = Number.isFinite(downtimeVal) && downtimeVal > 0;
+  outcome.missingCost = !hasCost;
+  outcome.missingDowntime = !hasDowntime;
+  if (hasCost && hasDowntime) return outcome;
+
+  const name = task && task.name ? `"${task.name}"` : "this maintenance task";
+  const summary = (!hasCost && !hasDowntime)
+    ? "a cost and downtime hours"
+    : (!hasCost ? "a cost" : "downtime hours");
+  const items = [];
+  if (!hasCost) items.push("Add a parts or labor cost greater than $0.");
+  if (!hasDowntime) items.push("Set downtime hours greater than 0.");
+
+  if (typeof showConfirmChoices === "function"){
+    const choice = await showConfirmChoices({
+      title: "Update maintenance task details",
+      message: `${name} is missing ${summary}. Update it before scheduling?`,
+      items,
+      cancelText: "Cancel",
+      confirmText: "Edit in settings",
+      confirmVariant: "primary",
+      secondaryText: "Schedule anyway",
+      secondaryVariant: "secondary"
+    });
+    if (choice === "cancel"){
+      return { ...outcome, proceed: false, cancelled: true };
+    }
+    if (choice === "confirm"){
+      const targetId = isTemplateTask(task)
+        ? (task.id != null ? task.id : task.templateId)
+        : (task.templateId != null ? task.templateId : task.id);
+      if (targetId != null && typeof openSettingsAndReveal === "function"){
+        try { openSettingsAndReveal(targetId); }
+        catch (err) { console.warn("Failed to open Maintenance Settings for task", err); }
+      }
+      return { ...outcome, proceed: false, redirected: true };
+    }
+    return outcome;
+  }
+
+  const fallback = window.confirm
+    ? window.confirm(`${name} is missing ${summary}. Continue scheduling without updating?`)
+    : true;
+  if (!fallback){
+    return { ...outcome, proceed: false, cancelled: true };
+  }
+  return outcome;
+}
+
 function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
   if (!task || task.mode !== "interval") return null;
   if (!Array.isArray(tasksInterval)){
@@ -3359,7 +3420,7 @@ function renderDashboard(){
     if (row) subtaskList?.appendChild(row);
   });
 
-  taskForm?.addEventListener("submit", (e)=>{
+  taskForm?.addEventListener("submit", async (e)=>{
     e.preventDefault();
     if (!taskForm) return;
     const name = (taskNameInput?.value || "").trim();
@@ -3397,6 +3458,61 @@ function renderDashboard(){
       calendarDateISO: null
     };
     let message = "Task added";
+
+    const applySubtasks = ()=>{
+      const parentInterval = Number(taskIntervalInput?.value);
+      const subRows = subtaskList ? Array.from(subtaskList.querySelectorAll("[data-subtask-row]")) : [];
+      subRows.forEach(row => {
+        const subName = (row.querySelector("[data-subtask-name]")?.value || "").trim();
+        if (!subName) return;
+        const subTypeSel = row.querySelector("[data-subtask-type]");
+        const subMode = subTypeSel && subTypeSel.value === "asreq" ? "asreq" : "interval";
+        const subBase = {
+          id: genId(subName),
+          name: subName,
+          manualLink: "",
+          storeLink: "",
+          pn: "",
+          price: null,
+          cat: catId,
+          parentTask: id,
+          order: ++window._maintOrderCounter,
+          calendarDateISO: null
+        };
+        if (subMode === "interval"){
+          const intervalField = row.querySelector("[data-subtask-interval]");
+          let subInterval = Number(intervalField?.value);
+          if (!isFinite(subInterval) || subInterval <= 0){
+            subInterval = isFinite(parentInterval) && parentInterval > 0 ? parentInterval : 8;
+          }
+          const subTask = Object.assign({}, subBase, {
+            mode:"interval",
+            interval: subInterval,
+            sinceBase:0,
+            anchorTotal:null,
+            completedDates: [],
+            manualHistory: [],
+            variant: "template",
+            templateId: subBase.id
+          });
+          const curHours = getCurrentMachineHours();
+          const lastField = row.querySelector("[data-subtask-last]");
+          const baselineHours = parseBaselineHours(lastField?.value);
+          applyIntervalBaseline(subTask, { baselineHours, currentHours: curHours });
+          tasksInterval.unshift(subTask);
+        }else{
+          const condInput = row.querySelector("[data-subtask-condition-input]");
+          const subTask = Object.assign({}, subBase, {
+            mode:"asreq",
+            condition: (condInput?.value || "").trim() || "As required",
+            variant: "template",
+            templateId: subBase.id
+          });
+          tasksAsReq.unshift(subTask);
+        }
+      });
+    };
+
     if (mode === "interval"){
       let interval = Number(taskIntervalInput?.value);
       if (!isFinite(interval) || interval <= 0) interval = 8;
@@ -3413,7 +3529,24 @@ function renderDashboard(){
       const curHours = getCurrentMachineHours();
       const baselineHours = parseBaselineHours(taskLastInput?.value);
       applyIntervalBaseline(template, { baselineHours, currentHours: curHours });
+      const readiness = await ensureMaintenanceTaskReadyForCalendar(template);
+      if (!readiness.proceed){
+        if (readiness.redirected){
+          tasksInterval.unshift(template);
+          applySubtasks();
+          try { if (typeof saveTasks === "function") saveTasks(); } catch (_){}
+          try { saveCloudDebounced(); } catch (_){ }
+          if (typeof broadcastMaintenanceTasksUpdated === "function"){
+            try { broadcastMaintenanceTasksUpdated({ source: "calendar-add-blocked" }); }
+            catch (err) { console.warn("Failed to broadcast maintenance update", err); }
+          }
+          toast("Update maintenance cost and downtime before scheduling.");
+          closeModal();
+        }
+        return;
+      }
       tasksInterval.unshift(template);
+      applySubtasks();
       const instance = scheduleExistingIntervalTask(template, { dateISO: targetISO }) || template;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
@@ -3433,60 +3566,9 @@ function renderDashboard(){
       const condition = (taskConditionInput?.value || "").trim() || "As required";
       const task = Object.assign({}, base, { mode:"asreq", condition, variant: "template", templateId: id });
       tasksAsReq.unshift(task);
+      applySubtasks();
       message = "As-required task added to Maintenance Settings";
     }
-
-    const parentInterval = Number(taskIntervalInput?.value);
-    const subRows = subtaskList ? Array.from(subtaskList.querySelectorAll("[data-subtask-row]")) : [];
-    subRows.forEach(row => {
-      const subName = (row.querySelector("[data-subtask-name]")?.value || "").trim();
-      if (!subName) return;
-      const subTypeSel = row.querySelector("[data-subtask-type]");
-      const subMode = subTypeSel && subTypeSel.value === "asreq" ? "asreq" : "interval";
-      const subBase = {
-        id: genId(subName),
-        name: subName,
-        manualLink: "",
-        storeLink: "",
-        pn: "",
-        price: null,
-        cat: catId,
-        parentTask: id,
-        order: ++window._maintOrderCounter,
-        calendarDateISO: null
-      };
-      if (subMode === "interval"){
-        const intervalField = row.querySelector("[data-subtask-interval]");
-        let subInterval = Number(intervalField?.value);
-        if (!isFinite(subInterval) || subInterval <= 0){
-          subInterval = isFinite(parentInterval) && parentInterval > 0 ? parentInterval : 8;
-        }
-        const subTask = Object.assign({}, subBase, {
-          mode:"interval",
-          interval: subInterval,
-          sinceBase:0,
-          anchorTotal:null,
-          completedDates: [],
-          manualHistory: [],
-          variant: "template",
-          templateId: subBase.id
-        });
-        const curHours = getCurrentMachineHours();
-        const lastField = row.querySelector("[data-subtask-last]");
-        const baselineHours = parseBaselineHours(lastField?.value);
-        applyIntervalBaseline(subTask, { baselineHours, currentHours: curHours });
-        tasksInterval.unshift(subTask);
-      }else{
-        const condInput = row.querySelector("[data-subtask-condition-input]");
-        const subTask = Object.assign({}, subBase, {
-          mode:"asreq",
-          condition: (condInput?.value || "").trim() || "As required",
-          variant: "template",
-          templateId: subBase.id
-        });
-        tasksAsReq.unshift(subTask);
-      }
-    });
 
     setContextDate(calendarDateISO);
     saveCloudDebounced();
@@ -3499,7 +3581,7 @@ function renderDashboard(){
     }
   });
 
-  taskExistingForm?.addEventListener("submit", (e)=>{
+  taskExistingForm?.addEventListener("submit", async (e)=>{
     e.preventDefault();
     const selectedId = existingTaskSelect?.value;
     if (!selectedId){ alert("Select a maintenance task to schedule."); return; }
@@ -3510,6 +3592,14 @@ function renderDashboard(){
       return;
     }
     const task = meta.task;
+    const readiness = await ensureMaintenanceTaskReadyForCalendar(task);
+    if (!readiness.proceed){
+      if (readiness.redirected){
+        closeModal();
+        toast("Update maintenance cost and downtime before scheduling.");
+      }
+      return;
+    }
     const targetISO = addContextDateISO || ymd(new Date());
     let message = "Maintenance task added";
     if (task.mode === "interval"){
@@ -4818,6 +4908,8 @@ function renderSettings(){
       #explorer .toolbar{display:flex;flex-direction:column;align-items:center;gap:.75rem;margin-bottom:.75rem}
       #explorer .toolbar-actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;width:100%}
       #explorer .toolbar-actions button{padding:.35rem .65rem;font-size:.92rem;border-radius:8px}
+      #explorer .toolbar-actions button.primary{background:#0a63c2;color:#fff}
+      #explorer .toolbar-actions button.primary:hover:not(:disabled){background:#084f9e}
       #explorer .toolbar-actions button.danger{background:#ffe7e7;color:#b00020}
       #explorer .toolbar-actions button.danger:hover:not(:disabled){background:#ffd1d1}
       #explorer .toolbar-actions button:disabled{opacity:.55;cursor:default}
@@ -5362,6 +5454,7 @@ function renderSettings(){
           <div class="toolbar-actions">
             <button id="btnAddCategory">+ Add Category</button>
             <button id="btnAddTask">+ Add Task</button>
+            <button id="saveMaintenanceTasksBtn" class="primary" title="Save maintenance tasks">Save changes</button>
             <button id="btnClearAllDataInline" class="danger" data-clear-all="1" title="Reset all maintenance data">🧹 Clear All Data</button>
           </div>
           <div class="toolbar-search">
@@ -5423,6 +5516,7 @@ function renderSettings(){
   const searchInput = document.getElementById("maintenanceSearch");
   const searchClear = document.getElementById("maintenanceSearchClear");
   const contextMenu = document.getElementById("maintenanceContextMenu");
+  const saveBtn = document.getElementById("saveMaintenanceTasksBtn");
   let contextTarget = null;
 
   const promptRemoveLinkedInventory = async (task, matches)=>{
@@ -5574,6 +5668,35 @@ function renderSettings(){
         const nextInput = document.getElementById("maintenanceSearch");
         nextInput?.focus();
       }, 0);
+    });
+  }
+
+  if (saveBtn){
+    saveBtn.addEventListener("click", ()=>{
+      persist();
+      let broadcasted = false;
+      if (typeof broadcastMaintenanceTasksUpdated === "function"){
+        try {
+          broadcastMaintenanceTasksUpdated({ source: "maintenance-settings-save" });
+          broadcasted = true;
+        } catch (err) {
+          console.warn("Failed to broadcast maintenance task save", err);
+        }
+      }
+      if (!broadcasted){
+        try { if (typeof renderCalendar === "function") renderCalendar(); }
+        catch (err) { console.warn("Failed to refresh calendar after save", err); }
+        try { if (typeof renderDashboard === "function") renderDashboard(); }
+        catch (err) { console.warn("Failed to refresh dashboard after save", err); }
+        if (typeof renderCosts === "function"){
+          const hash = (location.hash || "#").toLowerCase();
+          if (hash === "#/costs" || hash === "#costs"){
+            try { renderCosts(); }
+            catch (err) { console.warn("Failed to refresh costs after save", err); }
+          }
+        }
+      }
+      toast("Maintenance tasks saved");
     });
   }
 

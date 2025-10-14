@@ -406,6 +406,57 @@ if (typeof window !== "undefined"){
   window.readTaskMaintenanceCost = readTaskMaintenanceCost;
 }
 
+let maintenanceTasksVersion = typeof window !== "undefined" && Number.isFinite(Number(window.__maintenanceTasksVersion))
+  ? Number(window.__maintenanceTasksVersion)
+  : 0;
+
+function broadcastMaintenanceTasksUpdated(options = {}){
+  maintenanceTasksVersion += 1;
+  if (typeof window !== "undefined"){
+    window.__maintenanceTasksVersion = maintenanceTasksVersion;
+  }
+
+  const detail = { version: maintenanceTasksVersion, options: { ...options } };
+  if (typeof document !== "undefined" && typeof document.dispatchEvent === "function"){
+    try {
+      document.dispatchEvent(new CustomEvent("maintenanceTasksUpdated", { detail }));
+    } catch (err) {
+      console.warn("Failed to dispatch maintenanceTasksUpdated", err);
+    }
+  }
+
+  const refreshCalendar = options && options.refreshCalendar !== false;
+  const refreshDashboard = options && options.refreshDashboard !== false;
+  const refreshCosts = options && options.refreshCosts !== false;
+
+  if (refreshCalendar && typeof renderCalendar === "function"){
+    try { renderCalendar(); }
+    catch (err) { console.warn("Failed to refresh calendar after maintenance save", err); }
+  }
+
+  if (refreshDashboard && typeof renderDashboard === "function"){
+    try { renderDashboard(); }
+    catch (err) { console.warn("Failed to refresh dashboard after maintenance save", err); }
+  }
+
+  if (refreshCosts && typeof renderCosts === "function"){
+    try {
+      const hash = (typeof location !== "undefined" && typeof location.hash === "string")
+        ? location.hash.toLowerCase()
+        : "";
+      if (refreshCosts === true || hash === "#/costs" || hash === "#costs"){
+        renderCosts();
+      }
+    } catch (err) {
+      console.warn("Failed to refresh cost analysis after maintenance save", err);
+    }
+  }
+}
+
+if (typeof window !== "undefined"){
+  window.broadcastMaintenanceTasksUpdated = broadcastMaintenanceTasksUpdated;
+}
+
 function resolveTaskVariant(task){
   if (!task || typeof task !== "object") return null;
   const raw = typeof task.variant === "string" ? task.variant.toLowerCase() : "";
