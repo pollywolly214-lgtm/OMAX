@@ -1821,7 +1821,7 @@ function viewJobs(){
     const surfaceHex = mixHex(accentHex, "#FFFFFF", 0.86);
     const borderHex = mixHex(accentHex, "#FFFFFF", 0.7);
     const textHex = mixHex(accentHex, "#0B1223", 0.18);
-    const styleAttr = ` style="--job-category-surface:${rgbaFromHex(surfaceHex, 0.85)};--job-category-accent:${accentHex};--job-category-border:${rgbaFromHex(borderHex, 0.6)};--job-category-text:${textHex};"`;
+    const styleAttr = ` style="--job-category-surface:${rgbaFromHex(surfaceHex, 0.85)};--job-category-accent:${accentHex};--job-category-border:${rgbaFromHex(borderHex, 0.6)};--job-category-text:${textHex};--job-category-accent-soft:${rgbaFromHex(accentHex, 0.28)};"`;
     const data = { style: styleAttr, accentHex, isCustom: Boolean(custom), normalized };
     categoryColorDataCache.set(normalized, data);
     return data;
@@ -2036,8 +2036,8 @@ function viewJobs(){
                 <span class="job-title-chip-text">${esc(job?.name || "Job")}</span>
               </div>
               <div class="job-main-category small muted" data-category-color="1"${historyColorStyle}>
-                <span class="job-main-category-label">Category</span>
-                <span class="job-main-category-name">${esc(categoryName)}</span>
+                <span class="sr-only">Category</span>
+                <span class="job-main-category-name">Category:</span>
               </div>
               <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
               <div class="job-main-summary small muted">Actual ${actualDisplay} vs ${estimateDisplay}</div>
@@ -2378,14 +2378,14 @@ function viewJobs(){
                 <span class="job-title-chip-text">${esc(j.name || "Job")}</span>
               </div>
               <div class="job-main-category small muted" data-category-color="1"${colorStyleAttr}>
-                <span class="job-main-category-label">Category</span>
-                <span class="job-main-category-name">${esc(categoryName)}</span>
+                <span class="sr-only">Category</span>
+                <span class="job-main-category-name">Category:</span>
               </div>
-              <label class="job-main-category-picker small">Move to
+              <div class="job-main-category-picker small" data-category-color="1"${colorStyleAttr}>
                 <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(j.name || "Job")}">
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
                 </select>
-              </label>
+              </div>
               <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
             </div>
           </td>
