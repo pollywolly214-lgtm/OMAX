@@ -36,8 +36,10 @@ window.APP_SCHEMA = APP_SCHEMA;
 if (typeof window !== "undefined"){
   window.cloudDashboardLayout = {};
   window.cloudCostLayout = {};
+  window.cloudJobLayout = {};
   window.cloudDashboardLayoutLoaded = false;
   window.cloudCostLayoutLoaded = false;
+  window.cloudJobLayoutLoaded = false;
   window.CUTTING_BASELINE_WEEKLY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS;
   window.CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_DAILY_HOURS;
   window.TIME_EFFICIENCY_WINDOWS = TIME_EFFICIENCY_WINDOWS;
@@ -1238,6 +1240,9 @@ function snapshotState(){
   const costLayoutSource = window.cloudCostLayoutLoaded
     ? window.cloudCostLayout
     : (window.costLayoutState && window.costLayoutState.layoutById);
+  const jobLayoutSource = window.cloudJobLayoutLoaded
+    ? window.cloudJobLayout
+    : (window.jobLayoutState && window.jobLayoutState.layoutById);
   return {
     schema: window.APP_SCHEMA || APP_SCHEMA,
     totalHistory,
@@ -1258,7 +1263,8 @@ function snapshotState(){
     folders: cloneFolders(window.settingsFolders),
     jobFolders: snapshotJobFolders(),
     dashboardLayout: cloneStructured(dashLayoutSource) || {},
-    costLayout: cloneStructured(costLayoutSource) || {}
+    costLayout: cloneStructured(costLayoutSource) || {},
+    jobLayout: cloneStructured(jobLayoutSource) || {}
   };
 }
 
@@ -1705,12 +1711,17 @@ function adoptState(doc){
   const docCostLayout = (data.costLayout && typeof data.costLayout === "object")
     ? data.costLayout
     : {};
+  const docJobLayout = (data.jobLayout && typeof data.jobLayout === "object")
+    ? data.jobLayout
+    : {};
 
   if (typeof window !== "undefined"){
     window.cloudDashboardLayout = cloneStructured(docDashboardLayout) || {};
     window.cloudDashboardLayoutLoaded = true;
     window.cloudCostLayout = cloneStructured(docCostLayout) || {};
     window.cloudCostLayoutLoaded = true;
+    window.cloudJobLayout = cloneStructured(docJobLayout) || {};
+    window.cloudJobLayoutLoaded = true;
   }
 
   try {
@@ -1727,6 +1738,12 @@ function adoptState(doc){
         storage.setItem("cost_layout_windows_v1", JSON.stringify(window.cloudCostLayout));
       } else {
         storage.removeItem("cost_layout_windows_v1");
+      }
+      const jobKeys = Object.keys(window.cloudJobLayout || {});
+      if (jobKeys.length){
+        storage.setItem("job_layout_windows_v1", JSON.stringify(window.cloudJobLayout));
+      } else {
+        storage.removeItem("job_layout_windows_v1");
       }
     }
   } catch (err) {
@@ -1761,6 +1778,22 @@ function adoptState(doc){
       }
       if (typeof updateCostEditUi === "function"){
         try { updateCostEditUi(costState); } catch (err) { console.warn("Failed to update cost layout UI", err); }
+      }
+    }
+  }
+
+  const jobState = (typeof window !== "undefined") ? window.jobLayoutState : null;
+  if (jobState && typeof jobState === "object"){
+    jobState.layoutById = cloneStructured(window.cloudJobLayout) || {};
+    const hasLayout = jobState.layoutById && Object.keys(jobState.layoutById).length > 0;
+    jobState.layoutStored = hasLayout;
+    if (jobState.root && jobState.root.classList){
+      jobState.root.classList.toggle("has-custom-layout", hasLayout);
+      if (typeof applyJobLayout === "function"){
+        try { applyJobLayout(jobState); } catch (err) { console.warn("Failed to apply jobs layout", err); }
+      }
+      if (typeof updateJobEditUi === "function"){
+        try { updateJobEditUi(jobState); } catch (err) { console.warn("Failed to update jobs layout UI", err); }
       }
     }
   }
@@ -1849,7 +1882,8 @@ async function loadFromCloud(){
           pumpEff: pe,
           deletedItems: normalizeDeletedItems(data.deletedItems || data.deleted_items || []),
           dashboardLayout: cloneStructured(data.dashboardLayout && typeof data.dashboardLayout === "object" ? data.dashboardLayout : {}) || {},
-          costLayout: cloneStructured(data.costLayout && typeof data.costLayout === "object" ? data.costLayout : {}) || {}
+          costLayout: cloneStructured(data.costLayout && typeof data.costLayout === "object" ? data.costLayout : {}) || {},
+          jobLayout: cloneStructured(data.jobLayout && typeof data.jobLayout === "object" ? data.jobLayout : {}) || {}
         };
         adoptState(seeded);
         resetHistoryToCurrent();
@@ -1908,7 +1942,8 @@ async function loadFromCloud(){
         garnetCleanings: [],
         deletedItems: [],
         dashboardLayout: {},
-        costLayout: {}
+        costLayout: {},
+        jobLayout: {}
       };
       adoptState(seeded);
       resetHistoryToCurrent();
@@ -1922,7 +1957,7 @@ async function loadFromCloud(){
     if (!Array.isArray(pe.entries)) pe.entries = [];
     if (!Array.isArray(pe.notes)) pe.notes = [];
     const fallbackFolders = defaultSettingsFolders();
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", dailyCutHours: [], jobFolders: defaultJobFolders(), pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {} });
+    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", dailyCutHours: [], jobFolders: defaultJobFolders(), pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {}, jobLayout: {} });
     resetHistoryToCurrent();
   }
 }
@@ -2032,7 +2067,8 @@ const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes
     deletedItems: [],
     jobFolders: defaultJobFolders(),
     dashboardLayout: {},
-    costLayout: {}
+    costLayout: {},
+    jobLayout: {}
   };
 }
 
@@ -2076,6 +2112,7 @@ async function clearAllAppData(){
       [
         "dashboard_layout_windows_v1",
         "cost_layout_windows_v1",
+        "job_layout_windows_v1",
         "omax_tasks_interval_v6",
         "omax_tasks_asreq_v6"
       ].forEach(key => {
@@ -2088,6 +2125,7 @@ async function clearAllAppData(){
 
   try { if (window.dashboardLayoutState) delete window.dashboardLayoutState; } catch(_){ }
   try { if (window.costLayoutState) delete window.costLayoutState; } catch(_){ }
+  try { if (window.jobLayoutState) delete window.jobLayoutState; } catch(_){ }
   try {
     window.cloudDashboardLayout = {};
     window.cloudDashboardLayoutLoaded = true;
@@ -2095,6 +2133,10 @@ async function clearAllAppData(){
   try {
     window.cloudCostLayout = {};
     window.cloudCostLayoutLoaded = true;
+  } catch(_){ }
+  try {
+    window.cloudJobLayout = {};
+    window.cloudJobLayoutLoaded = true;
   } catch(_){ }
   try { if (Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles.length = 0; } catch(_){ }
   if (typeof window.inventorySearchTerm === "string") window.inventorySearchTerm = "";

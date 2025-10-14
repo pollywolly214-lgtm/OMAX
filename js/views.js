@@ -2580,16 +2580,25 @@ function viewJobs(){
 
   return `
   <div class="container job-page-container">
-    <div class="block job-category-panel" data-job-category-panel>
-      <div class="job-category-header">
-        <h3>Job Categories</h3>
-        <button type="button" class="small" data-job-folder-add-root>+ Add Category</button>
-      </div>
-      <div class="job-category-tree">
-        ${folderTreeMarkup}
-      </div>
-      <p class="small muted">Select a category to focus the job list or create sub-categories to organize further.</p>
+    <div class="dashboard-toolbar">
+      <span class="dashboard-edit-hint" id="jobEditHint" hidden>Drag the job categories window to reposition or resize it.</span>
     </div>
+
+    <div class="dashboard-layout job-layout" id="jobLayout">
+      <div class="dashboard-window" data-job-window="categories">
+        <div class="block job-category-panel" data-job-category-panel>
+          <div class="job-category-header">
+            <h3>Job Categories</h3>
+            <button type="button" class="small" data-job-folder-add-root>+ Add Category</button>
+          </div>
+          <div class="job-category-tree">
+            ${folderTreeMarkup}
+          </div>
+          <p class="small muted">Select a category to focus the job list or create sub-categories to organize further.</p>
+        </div>
+      </div>
+    </div>
+
     <div class="block job-main-block">
       <div class="job-page-topbar">
         <div class="job-page-toolbar">
@@ -2687,6 +2696,7 @@ function viewJobs(){
         </div>
       </div>
     </div>
+
     <div class="block past-jobs-block job-main-block" id="pastJobs">
       <h3>Past Cutting Jobs</h3>
       <div class="past-jobs-toolbar">
