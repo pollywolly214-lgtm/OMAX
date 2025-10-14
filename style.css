@@ -1868,22 +1868,20 @@ body.modal-open .auth-bar {
   max-width: 168px;
   white-space: normal;
 }
-.job-note-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-}
 .job-note-text {
-  display: block;
+  display: -webkit-box;
   width: 100%;
   color: #1b2d4f;
   font-size: 12px;
   line-height: 1.45;
-  white-space: pre-line;
+  white-space: pre-wrap;
   overflow: hidden;
   word-break: break-word;
   cursor: pointer;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  max-height: calc(1.45em * 3);
+  text-overflow: ellipsis;
 }
 .job-note-text:hover,
 .job-note-text:focus-visible {
@@ -1897,7 +1895,10 @@ body.modal-open .auth-bar {
   text-decoration: none;
 }
 .job-note-cell-button {
-  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
   padding: 4px 12px;
   border-radius: 999px;
   border: 1px solid rgba(49, 81, 138, 0.35);

@@ -1956,19 +1956,29 @@ function viewJobs(){
     }
     return "Past due by less than 1 hr";
   };
-  const formatNotePreview = (noteText = "", { maxLength = 260 } = {})=>{
+  const formatNotePreview = (noteText = "", { maxLength = 260, maxLines = 3 } = {})=>{
     if (!noteText) return { html: "", truncated: false };
     const normalized = String(noteText ?? "").replace(/\r\n/g, "\n");
-    const trimmedEnd = normalized.replace(/\s+$/g, "");
-    if (!trimmedEnd.trim()) return { html: "", truncated: false };
-    if (trimmedEnd.length <= maxLength){
-      return { html: textEsc(trimmedEnd), truncated: false };
+    const trimmedTrailing = normalized.replace(/\s+$/g, "");
+    const trimmed = trimmedTrailing.replace(/^\n+/, "");
+    if (!trimmed.trim()) return { html: "", truncated: false };
+    const lines = trimmed.split("\n");
+    let truncated = false;
+    let previewLines = lines;
+    if (lines.length > maxLines){
+      previewLines = lines.slice(0, maxLines);
+      truncated = true;
     }
-    const shortened = trimmedEnd.slice(0, maxLength).replace(/\s+$/g, "");
-    return {
-      html: `${textEsc(shortened)}&hellip;`,
-      truncated: true
-    };
+    let previewText = previewLines.join("\n");
+    if (previewText.length > maxLength){
+      previewText = previewText.slice(0, maxLength).replace(/\s+$/g, "");
+      truncated = true;
+    } else if (!truncated && trimmed.length > maxLength){
+      previewText = trimmed.slice(0, maxLength).replace(/\s+$/g, "");
+      truncated = true;
+    }
+    const html = truncated ? `${textEsc(previewText)}&hellip;` : textEsc(previewText);
+    return { html, truncated };
   };
   const formatNoteContent = (noteText = "")=>{
     if (!noteText) return "";
@@ -2093,12 +2103,7 @@ function viewJobs(){
       const noteButtonLabel = esc(j.name || "Cutting job");
       const noteTriggerId = esc(String(j.id));
       const notePreview = noteContent
-        ? [
-            '<div class="job-note-cell">',
-            `<div class="job-note-text" data-job-note="${noteTriggerId}" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="View notes for ${noteButtonLabel}">${notePreviewInfo.html}</div>`,
-            `<button type="button" class="job-note-cell-button" data-job-note="${noteTriggerId}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Edit notes for ${noteButtonLabel}">Notes</button>`,
-            '</div>'
-          ].join('')
+        ? `<div class="job-note-text" data-job-note="${noteTriggerId}" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="View notes for ${noteButtonLabel}">${notePreviewInfo.html}</div>`
         : `<button type="button" class="job-note-cell-button job-note-cell-empty" data-job-note="${noteTriggerId}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Add note for ${noteButtonLabel}">Notes</button>`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
