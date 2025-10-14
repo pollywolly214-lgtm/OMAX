@@ -2435,16 +2435,28 @@ body.modal-open .auth-bar {
 .job-edit-card {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px;
+  gap: 18px;
+  padding: 18px;
   background: #f8faff;
   border: 1px solid #dae2f3;
   border-radius: 12px;
+  max-width: 1040px;
+  margin: 0 auto;
+}
+.job-edit-layout {
+  display: grid;
+  gap: 18px;
+  align-items: flex-start;
+}
+@media (min-width: 960px) {
+  .job-edit-layout {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  }
 }
 .job-edit-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 .job-edit-grid label {
   display: flex;
@@ -2467,9 +2479,40 @@ body.modal-open .auth-bar {
   border-color: rgba(33, 150, 243, 0.55);
 }
 .job-edit-summary {
+  background: #fff;
+  border: 1px solid #cfd8eb;
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgba(19, 41, 74, 0.08);
+  padding: 16px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
+  flex-direction: column;
+  gap: 14px;
+  position: relative;
+}
+.job-edit-summary::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 10px;
+  pointer-events: none;
+  border: 1px dashed rgba(19, 41, 74, 0.08);
+}
+.job-edit-summary-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #526180;
+}
+.job-edit-summary-metrics {
+  display: grid;
+  gap: 12px;
+  position: relative;
+}
+@media (min-width: 600px) {
+  .job-edit-summary-metrics {
+    gap: 14px;
+  }
 }
 .job-edit-note {
   display: flex;
