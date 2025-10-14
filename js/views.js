@@ -1736,6 +1736,92 @@ function viewJobs(){
     return `${optionsHtml}<option value="__new__">+ Create new category…</option>`;
   };
 
+  const normalizeHexColor = (value)=>{
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const match = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(trimmed);
+    if (!match) return null;
+    let hex = match[1];
+    if (hex.length === 3){
+      hex = hex.split("").map(ch => `${ch}${ch}`).join("");
+    }
+    return `#${hex.toUpperCase()}`;
+  };
+
+  const clampChannel = (value)=> Math.max(0, Math.min(255, Math.round(value)));
+  const hexToRgb = (hex)=>{
+    const normalized = normalizeHexColor(hex);
+    if (!normalized) return null;
+    const raw = normalized.slice(1);
+    return {
+      r: parseInt(raw.slice(0, 2), 16),
+      g: parseInt(raw.slice(2, 4), 16),
+      b: parseInt(raw.slice(4, 6), 16)
+    };
+  };
+  const rgbToHex = (r, g, b)=> `#${clampChannel(r).toString(16).padStart(2, "0").toUpperCase()}${clampChannel(g).toString(16).padStart(2, "0").toUpperCase()}${clampChannel(b).toString(16).padStart(2, "0").toUpperCase()}`;
+  const mixHex = (base, blend, amount)=>{
+    const rgbBase = hexToRgb(base) || { r: 19, g: 35, b: 63 };
+    const rgbBlend = hexToRgb(blend) || { r: 255, g: 255, b: 255 };
+    const weight = Math.max(0, Math.min(1, Number(amount) || 0));
+    const r = (rgbBase.r * (1 - weight)) + (rgbBlend.r * weight);
+    const g = (rgbBase.g * (1 - weight)) + (rgbBlend.g * weight);
+    const b = (rgbBase.b * (1 - weight)) + (rgbBlend.b * weight);
+    return rgbToHex(r, g, b);
+  };
+  const rgbaFromHex = (hex, alpha)=>{
+    const rgb = hexToRgb(hex) || { r: 19, g: 35, b: 63 };
+    const a = Math.max(0, Math.min(1, Number(alpha) || 0));
+    return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${a})`;
+  };
+  const hslToHex = (h, s, l)=>{
+    const sat = Math.max(0, Math.min(100, s)) / 100;
+    const lig = Math.max(0, Math.min(100, l)) / 100;
+    const chroma = (1 - Math.abs((2 * lig) - 1)) * sat;
+    const huePrime = ((h % 360) + 360) % 360 / 60;
+    const x = chroma * (1 - Math.abs((huePrime % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if (huePrime >= 0 && huePrime < 1){ [r, g, b] = [chroma, x, 0]; }
+    else if (huePrime >= 1 && huePrime < 2){ [r, g, b] = [x, chroma, 0]; }
+    else if (huePrime >= 2 && huePrime < 3){ [r, g, b] = [0, chroma, x]; }
+    else if (huePrime >= 3 && huePrime < 4){ [r, g, b] = [0, x, chroma]; }
+    else if (huePrime >= 4 && huePrime < 5){ [r, g, b] = [x, 0, chroma]; }
+    else { [r, g, b] = [chroma, 0, x]; }
+    const m = lig - (chroma / 2);
+    return rgbToHex((r + m) * 255, (g + m) * 255, (b + m) * 255);
+  };
+
+  const categoryColorDataCache = new Map();
+  const categoryColorData = (catId)=>{
+    const normalized = normalizeCategory(catId);
+    if (categoryColorDataCache.has(normalized)) return categoryColorDataCache.get(normalized);
+    const folder = folderMap.get(normalized);
+    const custom = normalizeHexColor(folder?.color);
+    const accentHex = (()=>{
+      if (custom) return custom;
+      if (!normalized || normalized === rootCategoryId) return "#13233F";
+      let hash = 0;
+      const str = String(normalized);
+      for (let i = 0; i < str.length; i++){
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0;
+      }
+      const hue = Math.abs(hash) % 360;
+      return hslToHex(hue, 62, 55);
+    })();
+    const surfaceHex = mixHex(accentHex, "#FFFFFF", 0.86);
+    const borderHex = mixHex(accentHex, "#FFFFFF", 0.7);
+    const textHex = mixHex(accentHex, "#0B1223", 0.18);
+    const styleAttr = ` style="--job-category-surface:${rgbaFromHex(surfaceHex, 0.85)};--job-category-accent:${accentHex};--job-category-border:${rgbaFromHex(borderHex, 0.6)};--job-category-text:${textHex};"`;
+    const data = { style: styleAttr, accentHex, isCustom: Boolean(custom), normalized };
+    categoryColorDataCache.set(normalized, data);
+    return data;
+  };
+  const categoryColorStyle = (catId)=> categoryColorData(catId).style;
+  const categoryAccentHex = (catId)=> categoryColorData(catId).accentHex;
+  const categoryHasCustomColor = (catId)=> categoryColorData(catId).isCustom;
+
   const renderFolderTree = (folder)=>{
     if (!folder) return "";
     const id = String(folder.id);
@@ -1772,7 +1858,11 @@ function viewJobs(){
           const metaLine = metaParts.length
             ? `<div class="job-folder-job-meta">${metaParts.map(part => esc(part)).join(" &middot; ")}</div>`
             : "";
-          return `<li><div class="job-folder-job-name">${esc(job?.name || "Untitled job")}</div>${metaLine}</li>`;
+          const jobColorStyle = categoryColorStyle(job?.cat);
+          return `<li><div class="job-folder-job-chip job-title-chip job-title-chip-compact"${jobColorStyle}>
+              <span class="job-title-chip-dot" aria-hidden="true"></span>
+              <span class="job-title-chip-text">${esc(job?.name || "Untitled job")}</span>
+            </div>${metaLine}</li>`;
         }).join("")
       : `<li class="muted">Add jobs to this category to see them listed.</li>`;
     const isOpen = openFolderSet.has(id);
@@ -1780,19 +1870,30 @@ function viewJobs(){
         <summary><span class="job-folder-jobs-count">${esc(jobSummaryLabel)}</span></summary>
         <ul class="job-folder-joblist">${jobListItems}</ul>
       </details>`;
+    const colorData = categoryColorData(id);
+    const colorStyleAttr = colorData.style;
     const actions = [
       `<button type="button" class="link" data-job-folder-add="${esc(id)}">+ Sub-category</button>`,
       !isRoot ? `<button type="button" class="link" data-job-folder-rename="${esc(id)}">Rename</button>` : "",
       !isRoot ? `<button type="button" class="link danger" data-job-folder-remove="${esc(id)}">Remove</button>` : ""
     ].filter(Boolean).join("<span class=\"job-folder-action-sep\" aria-hidden=\"true\">·</span>");
     const childrenMarkup = childrenOf(folder.id).map(child => renderFolderTree(child)).join("");
+    const colorControl = `
+      <div class="category-color-control" data-category-color-control="${esc(id)}"${colorStyleAttr}>
+        <span class="category-color-dot" aria-hidden="true"></span>
+        <input type="color" class="category-color-picker" value="${categoryAccentHex(id)}" data-job-folder-color-input="${esc(id)}" aria-label="Choose color for ${esc(folder.name || (isRoot ? "All Jobs" : "Category"))}">
+        <button type="button" class="category-color-reset${categoryHasCustomColor(id) ? "" : " is-hidden"}" data-job-folder-color-reset="${esc(id)}" title="Use automatic color">Auto</button>
+      </div>`;
     return `
       <div class="job-folder" data-job-folder="${esc(id)}">
-        <div class="job-folder-row${selectedClass}">
-          <button type="button" class="job-folder-select" data-job-folder-select="${esc(id)}" aria-current="${id === selectedCategory ? "true" : "false"}">
-            ${esc(folder.name || (isRoot ? "All Jobs" : "Category"))}
-          </button>
-          ${countLabel}
+        <div class="job-folder-row${selectedClass}" data-category-color="1"${colorStyleAttr}>
+          <div class="job-folder-row-info">
+            <button type="button" class="job-folder-select" data-job-folder-select="${esc(id)}" aria-current="${id === selectedCategory ? "true" : "false"}">
+              ${esc(folder.name || (isRoot ? "All Jobs" : "Category"))}
+            </button>
+            ${countLabel}
+          </div>
+          ${colorControl}
         </div>
         ${jobListMarkup}
         <div class="job-folder-actions">${actions || ""}</div>
@@ -1846,14 +1947,21 @@ function viewJobs(){
     const noteDisplay = job?.notes
       ? esc(String(job.notes)).replace(/\n/g, "<br>")
       : "<span class=\"muted\">—</span>";
-    const materialLine = job?.material ? `<div class="small muted">${esc(job.material)}</div>` : "";
-    const categoryLine = categoryFolder ? `<div class="small muted">${esc(categoryFolder.name || "All Jobs")}</div>` : "";
+    const materialLine = job?.material ? `<div class="small muted job-history-material">${esc(job.material)}</div>` : "";
+    const historyColorStyle = categoryColorStyle(job?.cat);
+    const categoryLine = `<div class="job-main-category small muted job-main-category-compact" data-category-color="1"${historyColorStyle}>
+        <span class="job-main-category-label">Category</span>
+        <span class="job-main-category-name">${esc(categoryFolder?.name || "All Jobs")}</span>
+      </div>`;
 
     if (!editingHistory){
       return `
         <tr data-history-row="${job.id || ""}">
           <td>
-            <div><strong>${esc(job?.name || "Job")}</strong></div>
+            <div class="job-title-chip job-title-chip-compact"${historyColorStyle}>
+              <span class="job-title-chip-dot" aria-hidden="true"></span>
+              <span class="job-title-chip-text">${esc(job?.name || "Job")}</span>
+            </div>
             ${categoryLine}
             ${materialLine}
           </td>
@@ -1980,8 +2088,11 @@ function viewJobs(){
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
-    const categoryFolder = folderMap.get(normalizeCategory(j.cat));
+    const normalizedCatId = normalizeCategory(j.cat);
+    const categoryFolder = folderMap.get(normalizedCatId);
     const categoryName = categoryFolder ? categoryFolder.name || "All Jobs" : "All Jobs";
+    const colorInfo = categoryColorData(normalizedCatId);
+    const colorStyleAttr = colorInfo.style;
 
     // Material totals
     const matCost = Number(j.materialCost||0);
@@ -2069,8 +2180,14 @@ function viewJobs(){
         <tr data-job-row="${j.id}" class="job-row">
           <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">
             <div class="job-main">
-              <strong>${j.name}</strong>
-              <div class="job-main-category small muted">Category: ${esc(categoryName)}</div>
+              <div class="job-title-chip"${colorStyleAttr}>
+                <span class="job-title-chip-dot" aria-hidden="true"></span>
+                <span class="job-title-chip-text">${esc(j.name || "Job")}</span>
+              </div>
+              <div class="job-main-category small muted" data-category-color="1"${colorStyleAttr}>
+                <span class="job-main-category-label">Category</span>
+                <span class="job-main-category-name">${esc(categoryName)}</span>
+              </div>
               <label class="job-main-category-picker small">Move to
                 <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(j.name || "Job")}">
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
@@ -2166,6 +2283,13 @@ function viewJobs(){
                 <label>Category<select data-j="cat" data-id="${j.id}" data-job-category-select>
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
                 </select></label>
+                <label>Category color
+                  <div class="category-color-control category-color-control-compact" data-job-category-color-editor="${esc(j.id)}" data-category-color="1"${colorStyleAttr}>
+                    <span class="category-color-dot" aria-hidden="true"></span>
+                    <input type="color" class="category-color-picker" value="${colorInfo.accentHex}" data-job-category-color-input="${esc(j.id)}" data-job-category-color-cat="${esc(normalizedCatId)}" aria-label="Choose color for ${esc(categoryName)}">
+                    <button type="button" class="category-color-reset${colorInfo.isCustom ? "" : " is-hidden"}" data-job-category-color-reset="${esc(normalizedCatId)}" title="Use automatic color">Auto</button>
+                  </div>
+                </label>
               </div>
               <aside class="job-edit-summary" aria-label="Job impact summary">
                 <div class="job-edit-summary-title">Quick impact</div>

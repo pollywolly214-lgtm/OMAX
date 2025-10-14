@@ -800,7 +800,8 @@ function applyRestoreByType(entry, index){
         id: clone.id,
         name: typeof clone.name === "string" ? clone.name : "",
         parent: clone.parent == null ? JOB_ROOT_FOLDER_ID : String(clone.parent),
-        order: clone.order
+        order: clone.order,
+        ...(normalizeHexColor(clone.color) ? { color: normalizeHexColor(clone.color) } : {})
       });
       setJobFolders(folders);
       ensureJobCategories();
@@ -932,6 +933,21 @@ const DEFAULT_JOB_FOLDERS = [
   { id: JOB_ROOT_FOLDER_ID, name: "All Jobs", parent: null, order: 1 }
 ];
 
+const HEX_COLOR_RE = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+function normalizeHexColor(value){
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const match = HEX_COLOR_RE.exec(trimmed);
+  if (!match) return null;
+  let hex = match[1];
+  if (hex.length === 3){
+    hex = hex.split("").map(ch => `${ch}${ch}`).join("");
+  }
+  return `#${hex.toUpperCase()}`;
+}
+
 function defaultJobFolders(){
   return DEFAULT_JOB_FOLDERS.map(f => ({ ...f }));
 }
@@ -1020,7 +1036,10 @@ function normalizeJobFolders(raw){
       }
       const name = typeof entry.name === "string" ? entry.name : "";
       const order = Number.isFinite(entry.order) ? Number(entry.order) : 0;
-      normalized.push({ id, name, parent, order });
+      const color = normalizeHexColor(entry.color);
+      const folderEntry = { id, name, parent, order };
+      if (color) folderEntry.color = color;
+      normalized.push(folderEntry);
     }
   }
 
@@ -1431,7 +1450,7 @@ function jobFolderChildren(parentId){
   });
 }
 
-function addJobFolder(name, parentId){
+function addJobFolder(name, parentId, color){
   const folders = ensureJobFolderState();
   const label = (name || "").trim();
   const parentKey = parentId != null ? String(parentId) : JOB_ROOT_FOLDER_ID;
@@ -1449,6 +1468,8 @@ function addJobFolder(name, parentId){
     parent: fallbackParent === JOB_ROOT_FOLDER_ID ? JOB_ROOT_FOLDER_ID : fallbackParent,
     order: orderBase + 1
   };
+  const normalizedColor = normalizeHexColor(color);
+  if (normalizedColor) folder.color = normalizedColor;
   folders.push(folder);
   setJobFolders(folders);
   ensureJobCategories();
@@ -1464,6 +1485,27 @@ function renameJobFolder(id, name){
   target.name = (name || "").trim();
   setJobFolders(folders);
   return target;
+}
+
+function setJobFolderColor(id, color){
+  if (id == null) return false;
+  const folders = ensureJobFolderState();
+  const key = String(id);
+  const target = folders.find(folder => String(folder.id) === key);
+  if (!target) return false;
+  const normalized = normalizeHexColor(color);
+  const current = normalizeHexColor(target.color);
+  if (normalized === current){
+    if (!normalized && !target.color) return false;
+    if (normalized && target.color === normalized) return false;
+  }
+  if (normalized){
+    target.color = normalized;
+  } else if (Object.prototype.hasOwnProperty.call(target, "color")){
+    delete target.color;
+  }
+  setJobFolders(folders);
+  return true;
 }
 
 function removeJobFolder(id){
