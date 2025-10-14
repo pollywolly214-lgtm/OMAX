@@ -1736,6 +1736,43 @@ function viewJobs(){
     return `${optionsHtml}<option value="__new__">+ Create new category…</option>`;
   };
 
+  const categoryColorCache = new Map();
+  const categoryColorStyle = (catId)=>{
+    const normalized = normalizeCategory(catId);
+    if (categoryColorCache.has(normalized)) return categoryColorCache.get(normalized);
+    if (!normalized){
+      categoryColorCache.set(normalized, "");
+      return "";
+    }
+    const defaults = {
+      surface: "rgba(19,35,63,0.08)",
+      accent: "rgba(19,35,63,0.45)",
+      border: "rgba(19,35,63,0.18)",
+      text: "#13233f"
+    };
+    let colors;
+    if (normalized === rootCategoryId){
+      colors = defaults;
+    } else {
+      let hash = 0;
+      const str = String(normalized);
+      for (let i = 0; i < str.length; i++){
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0; // Force 32-bit
+      }
+      const hue = Math.abs(hash) % 360;
+      colors = {
+        surface: `hsla(${hue}, 82%, 92%, 0.8)`,
+        accent: `hsl(${hue}, 62%, 55%)`,
+        border: `hsla(${hue}, 68%, 75%, 0.55)`,
+        text: `hsl(${hue}, 32%, 28%)`
+      };
+    }
+    const styleAttr = ` style="--job-category-surface:${colors.surface};--job-category-accent:${colors.accent};--job-category-border:${colors.border};--job-category-text:${colors.text};"`;
+    categoryColorCache.set(normalized, styleAttr);
+    return styleAttr;
+  };
+
   const renderFolderTree = (folder)=>{
     if (!folder) return "";
     const id = String(folder.id);
@@ -1846,14 +1883,21 @@ function viewJobs(){
     const noteDisplay = job?.notes
       ? esc(String(job.notes)).replace(/\n/g, "<br>")
       : "<span class=\"muted\">—</span>";
-    const materialLine = job?.material ? `<div class="small muted">${esc(job.material)}</div>` : "";
-    const categoryLine = categoryFolder ? `<div class="small muted">${esc(categoryFolder.name || "All Jobs")}</div>` : "";
+    const materialLine = job?.material ? `<div class="small muted job-history-material">${esc(job.material)}</div>` : "";
+    const historyColorStyle = categoryColorStyle(job?.cat);
+    const categoryLine = `<div class="job-main-category small muted job-main-category-compact" data-category-color="1"${historyColorStyle}>
+        <span class="job-main-category-label">Category</span>
+        <span class="job-main-category-name">${esc(categoryFolder?.name || "All Jobs")}</span>
+      </div>`;
 
     if (!editingHistory){
       return `
         <tr data-history-row="${job.id || ""}">
           <td>
-            <div><strong>${esc(job?.name || "Job")}</strong></div>
+            <div class="job-title-chip job-title-chip-compact"${historyColorStyle}>
+              <span class="job-title-chip-dot" aria-hidden="true"></span>
+              <span class="job-title-chip-text">${esc(job?.name || "Job")}</span>
+            </div>
             ${categoryLine}
             ${materialLine}
           </td>
@@ -2065,12 +2109,19 @@ function viewJobs(){
       const matQtyDisplay  = formatQuantity(matQty);
       const noteContent = (j.notes || "").trim();
       const noteButtonLabel = esc(j.name || "Cutting job");
+      const colorStyleAttr = categoryColorStyle(j.cat);
       return `
         <tr data-job-row="${j.id}" class="job-row">
           <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">
             <div class="job-main">
-              <strong>${j.name}</strong>
-              <div class="job-main-category small muted">Category: ${esc(categoryName)}</div>
+              <div class="job-title-chip"${colorStyleAttr}>
+                <span class="job-title-chip-dot" aria-hidden="true"></span>
+                <span class="job-title-chip-text">${esc(j.name || "Job")}</span>
+              </div>
+              <div class="job-main-category small muted" data-category-color="1"${colorStyleAttr}>
+                <span class="job-main-category-label">Category</span>
+                <span class="job-main-category-name">${esc(categoryName)}</span>
+              </div>
               <label class="job-main-category-picker small">Move to
                 <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(j.name || "Job")}">
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
