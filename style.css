@@ -2467,7 +2467,7 @@ body.modal-open .auth-bar {
   font-size: 12px;
 }
 .job-note-inline {
-  display: block;
+  display: flex;
   width: 100%;
   padding: 0;
   border: 1px solid transparent;
@@ -2479,6 +2479,8 @@ body.modal-open .auth-bar {
   font-family: inherit;
   cursor: pointer;
   overflow: hidden;
+  min-height: calc(1.45em * 6);
+  align-items: flex-start;
 }
 .job-note-inline:hover {
   border-color: rgba(145, 183, 255, 0.4);
@@ -2489,14 +2491,15 @@ body.modal-open .auth-bar {
   outline: none;
 }
 .job-note-inline-text {
+  flex: 1 1 auto;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 6;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: normal;
   word-break: break-word;
-  max-height: calc(1.45em * 3);
+  max-height: calc(1.45em * 6);
 }
 .job-note-modal-backdrop {
   position: fixed;
