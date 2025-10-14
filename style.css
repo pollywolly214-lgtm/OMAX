@@ -1770,22 +1770,23 @@ body.modal-open .auth-bar {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 14px;
+  padding: 6px 16px;
   border-radius: 999px;
-  border: 1px solid rgba(15, 52, 104, 0.3);
-  background: linear-gradient(135deg, #d8e5ff, #c3d6ff);
-  color: #123a70;
+  border: 1px solid rgba(16, 54, 118, 0.45);
+  background: linear-gradient(135deg, #2f6df0, #1747c9);
+  color: #ffffff;
   font-weight: 600;
   font-size: 13px;
   text-decoration: none;
-  box-shadow: 0 4px 14px rgba(23, 64, 115, 0.18);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 8px 22px rgba(17, 46, 112, 0.24);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .job-show-all-button:hover,
 .job-show-all-button:focus {
-  background: linear-gradient(135deg, #c0d3ff, #a8c4ff);
-  border-color: #174073;
-  box-shadow: 0 8px 18px rgba(23, 64, 115, 0.22);
+  transform: translateY(-1px);
+  background: linear-gradient(135deg, #2558d6, #1239ad);
+  border-color: rgba(14, 46, 108, 0.65);
+  box-shadow: 0 12px 26px rgba(12, 40, 100, 0.32);
 }
 .job-show-all-button:focus-visible {
   outline: 2px solid #91b7ff;
@@ -2280,7 +2281,7 @@ body.modal-open .auth-bar {
   color: #5a6b85;
   font-size: 12px;
 }
-.job-note-trigger,
+button.job-note-trigger,
 .job-note-display {
   width: 100%;
   min-height: 34px;
@@ -2296,7 +2297,7 @@ body.modal-open .auth-bar {
   text-align: center;
   font-weight: 600;
 }
-.job-note-trigger {
+button.job-note-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2304,16 +2305,20 @@ body.modal-open .auth-bar {
   font-family: inherit;
   width: 100%;
 }
-.job-note-trigger.has-note {
-  background: #fff;
+button.job-note-trigger.has-note {
+  background: #ffffff;
+  color: #1c2d4a;
 }
-.job-note-trigger:hover,
-.job-note-trigger:focus-visible,
+button.job-note-trigger:hover,
+button.job-note-trigger:focus-visible,
 .job-note-display:hover,
 .job-note-display:focus-visible {
   border-color: #91b7ff;
   box-shadow: 0 0 0 3px rgba(145, 183, 255, 0.3);
   outline: none;
+}
+.job-note-button-label {
+  color: inherit;
 }
 .job-note-button-label {
   font-size: 12px;
