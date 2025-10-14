@@ -2845,13 +2845,16 @@ function renderDashboard(){
     { value: "other", label: "Other" }
   ];
 
-  const downtimeReasonLabels = new Map(downtimeReasonOptions.map(option => [option.value, option.label]));
+  const downtimeReasonLabels = new Map(
+    downtimeReasonOptions.map(option => [String(option.value || "").toLowerCase(), option.label])
+  );
 
   const escapeHtmlSafe = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
 
   const formatCurrencyValue = (value)=>{
+    if (value === null || value === undefined || value === "") return "—";
     const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return "—";
+    if (!Number.isFinite(num)) return "—";
     const abs = Math.abs(num);
     return new Intl.NumberFormat(undefined, {
       style: "currency",
@@ -2926,15 +2929,14 @@ function renderDashboard(){
       downMinutesInput.value = Number.isFinite(minutes) && minutes >= 0 ? String(Math.floor(minutes)) : "0";
     }
     if (downReasonSelect){
-      const reason = entry.reasonCode && downtimeReasonLabels.has(entry.reasonCode)
-        ? entry.reasonCode
-        : "unspecified";
+      const reasonKey = entry.reasonCode != null ? String(entry.reasonCode).toLowerCase() : "unspecified";
+      const reason = downtimeReasonLabels.has(reasonKey) ? reasonKey : "unspecified";
       downReasonSelect.value = reason;
     }
     if (downNotesInput) downNotesInput.value = entry.notes || "";
     if (downCostInput){
-      const costNum = Number(entry.costImpact);
-      if (Number.isFinite(costNum) && costNum > 0){
+      const costNum = entry.costImpact != null ? Number(entry.costImpact) : null;
+      if (Number.isFinite(costNum) && costNum >= 0){
         downCostInput.value = String(costNum);
       }else{
         downCostInput.value = "";
@@ -2973,7 +2975,8 @@ function renderDashboard(){
         dateLabel = parsedDate.toLocaleDateString();
       }
       const durationLabel = formatDowntimeDuration(item.durationHours, item.durationMinutes);
-      const reasonLabel = downtimeReasonLabels.get(item.reasonCode) || "Unspecified";
+      const reasonKey = item.reasonCode != null ? String(item.reasonCode).toLowerCase() : "unspecified";
+      const reasonLabel = downtimeReasonLabels.get(reasonKey) || "Unspecified";
       const costLabel = formatCurrencyValue(item.costImpact);
       const notes = typeof item.notes === "string" ? item.notes.trim() : "";
       row.innerHTML = `
@@ -7056,7 +7059,7 @@ function renderCosts(){
       ["staffing", "Staffing / scheduling"],
       ["external", "External dependency"],
       ["other", "Other"]
-    ]);
+    ].map(([key, label]) => [key.toLowerCase(), label]));
 
     const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
 
@@ -7068,8 +7071,9 @@ function renderCosts(){
     };
 
     const formatCurrency = (value)=>{
+      if (value === null || value === undefined || value === "") return "—";
       const num = Number(value);
-      if (!Number.isFinite(num) || num <= 0) return "—";
+      if (!Number.isFinite(num)) return "—";
       const abs = Math.abs(num);
       return new Intl.NumberFormat(undefined, {
         style: "currency",
@@ -7129,7 +7133,7 @@ function renderCosts(){
         if (Number.isFinite(cost) && cost > 0){
           bucket.totalCost += cost;
         }
-        const reasonCode = entry.reasonCode ? String(entry.reasonCode) : "unspecified";
+        const reasonCode = entry.reasonCode ? String(entry.reasonCode).toLowerCase() : "unspecified";
         const current = bucket.reasons.get(reasonCode) || { hours: 0, count: 0 };
         current.hours += totalHours;
         current.count += 1;

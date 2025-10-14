@@ -215,6 +215,14 @@ function deleteDownTimeEventsByDate(dateISO, opts = {}){
   }
   return removed;
 }
+
+if (typeof window !== "undefined"){
+  window.normalizeDownTimeEvent = normalizeDownTimeEvent;
+  window.ensureDownTimeEvents = ensureDownTimeEvents;
+  window.upsertDownTimeEvent = upsertDownTimeEvent;
+  window.deleteDownTimeEvent = deleteDownTimeEvent;
+  window.deleteDownTimeEventsByDate = deleteDownTimeEventsByDate;
+}
 function parseDateLocal(value){
   if (value == null) return null;
 
