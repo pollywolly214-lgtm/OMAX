@@ -9370,6 +9370,24 @@ function renderJobs(){
     });
   }
 
+  const showAllJobsBtn = content.querySelector("[data-job-show-all]");
+  if (showAllJobsBtn && !showAllJobsBtn.dataset.wired){
+    showAllJobsBtn.dataset.wired = "1";
+    showAllJobsBtn.addEventListener("click", (event)=>{
+      event.preventDefault();
+      const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+      const openSet = readOpenFolderSet();
+      openSet.add(rootId);
+      writeOpenFolderSet(openSet);
+      window.jobCategoryFilter = rootId;
+      const filterSelect = document.getElementById("jobCategoryFilterSelect");
+      if (filterSelect){
+        filterSelect.value = rootId;
+      }
+      rerenderPreservingState(rootId);
+    });
+  }
+
   content.querySelectorAll("[data-job-category-select]").forEach(select => {
     if (!(select instanceof HTMLSelectElement)) return;
     if (select.dataset.wiredCategory) return;

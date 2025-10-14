@@ -2367,6 +2367,7 @@ function viewJobs(){
     <div class="block job-main-block">
       <h3>Cutting Jobs</h3>
       <div class="job-page-toolbar">
+        <button type="button" class="job-show-all-button" data-job-show-all>Show all jobs</button>
         <label class="job-category-filter">
           <span>Show</span>
           <select id="jobCategoryFilterSelect" aria-label="Filter cutting jobs by category">
