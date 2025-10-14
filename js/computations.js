@@ -17,9 +17,10 @@ function getDailyCutHoursMap(){
     if (!entry || !entry.dateISO) continue;
     const key = normalizeDateISO(entry.dateISO);
     if (!key) continue;
-    const hours = clampDailyCutHours(entry.hours);
+    const run = clampDailyCutHours(entry.runHours != null ? entry.runHours : entry.hours);
+    const idle = clampDailyCutHours(entry.idleHours);
     const source = entry.source === "manual" ? "manual" : "auto";
-    map.set(key, { dateISO: key, hours, source });
+    map.set(key, { dateISO: key, runHours: run, idleHours: idle, source });
   }
   return map;
 }
@@ -78,16 +79,19 @@ function computeTimeEfficiency(rangeDays, options = {}){
 
   const map = getDailyCutHoursMap();
   let actual = 0;
+  let idleTotal = 0;
   let coverage = 0;
   const cursor = new Date(startDate);
   for (let i = 0; i < normalizedDays; i++){
     const key = ymd(cursor);
     const record = map.get(key);
-    const value = record ? clampDailyCutHours(record.hours) : 0;
-    if (value > 0){
+    const runValue = record ? clampDailyCutHours(record.runHours) : 0;
+    const idleValue = record ? clampDailyCutHours(record.idleHours) : 0;
+    if (runValue > 0){
       coverage += 1;
     }
-    actual += value;
+    actual += runValue;
+    idleTotal += idleValue;
     cursor.setDate(cursor.getDate() + 1);
   }
 
@@ -117,10 +121,16 @@ function computeTimeEfficiency(rangeDays, options = {}){
     ? (actual / targetHours) * 100
     : (baseline > 0 ? (actual / baseline) * 100 : null);
   const percentGoal = baseline > 0 ? (actual / baseline) * 100 : null;
+  const trackedHours = actual + idleTotal;
+  const runUtilPercent = trackedHours > 0 ? (actual / trackedHours) * 100 : null;
+  const idleUtilPercent = trackedHours > 0 ? (idleTotal / trackedHours) * 100 : null;
 
   return {
     windowDays: normalizedDays,
     actualHours: actual,
+    runHours: actual,
+    idleHours: idleTotal,
+    trackedHours,
     baselineHours: baseline,
     differenceHours: difference,
     targetHoursToDate: targetHours,
@@ -128,6 +138,8 @@ function computeTimeEfficiency(rangeDays, options = {}){
     targetDaysElapsed: elapsedDays,
     efficiencyPercent: percentToDate,
     efficiencyGoalPercent: percentGoal,
+    runUtilizationPercent: runUtilPercent,
+    idleUtilizationPercent: idleUtilPercent,
     coverageDays: coverage,
     startISO: ymd(startDate),
     endISO: ymd(endDate),
