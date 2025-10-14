@@ -1941,6 +1941,58 @@ function viewJobs(){
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+  const now = new Date();
+  const formatPastDueLabel = (dueISO)=>{
+    const dueDate = parseDateLocal(dueISO);
+    if (!dueDate) return "Past due";
+    dueDate.setHours(23, 59, 59, 999);
+    const diffMs = now.getTime() - dueDate.getTime();
+    if (diffMs <= 0) return "Past due";
+    const totalHours = diffMs / (1000 * 60 * 60);
+    if (totalHours >= 24){
+      const totalDays = Math.floor(totalHours / 24);
+      const remainingHours = Math.floor(totalHours % 24);
+      const parts = [];
+      if (totalDays > 0){
+        parts.push(`${totalDays} day${totalDays === 1 ? "" : "s"}`);
+      }
+      if (remainingHours > 0){
+        parts.push(`${remainingHours} hr${remainingHours === 1 ? "" : "s"}`);
+      }
+      if (!parts.length){
+        parts.push("1 day");
+      }
+      return `Past due by ${parts.join(" ")}`;
+    }
+    const wholeHours = Math.floor(totalHours);
+    if (wholeHours >= 1){
+      return `Past due by ${wholeHours} hr${wholeHours === 1 ? "" : "s"}`;
+    }
+    return "Past due by less than 1 hr";
+  };
+  const JOB_NOTE_PREVIEW_LIMIT = 100;
+  const buildJobNotePreview = (value)=>{
+    const raw = typeof value === "string" ? value : "";
+    const trimmed = raw.trim();
+    if (!trimmed){
+      return { preview: "", tooltip: "" };
+    }
+    const normalized = trimmed.replace(/\s+/g, " ").trim();
+    if (normalized.length <= JOB_NOTE_PREVIEW_LIMIT){
+      return { preview: normalized, tooltip: normalized };
+    }
+    let slice = normalized.slice(0, JOB_NOTE_PREVIEW_LIMIT);
+    const lastSpace = slice.lastIndexOf(" ");
+    if (lastSpace > Math.floor(JOB_NOTE_PREVIEW_LIMIT * 0.6)){
+      slice = slice.slice(0, lastSpace);
+    }
+    slice = slice.replace(/\s+$/, "");
+    return {
+      preview: `${slice}...`,
+      tooltip: normalized
+    };
+  };
+
   const completedRows = completedFiltered.map(job => {
     const eff = computeJobEfficiency(job);
     const req = computeRequiredDaily(job);
@@ -2241,57 +2293,6 @@ function viewJobs(){
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
   const activeColumnCount = jobColumnCount;
-  const now = new Date();
-  const formatPastDueLabel = (dueISO)=>{
-    const dueDate = parseDateLocal(dueISO);
-    if (!dueDate) return "Past due";
-    dueDate.setHours(23, 59, 59, 999);
-    const diffMs = now.getTime() - dueDate.getTime();
-    if (diffMs <= 0) return "Past due";
-    const totalHours = diffMs / (1000 * 60 * 60);
-    if (totalHours >= 24){
-      const totalDays = Math.floor(totalHours / 24);
-      const remainingHours = Math.floor(totalHours % 24);
-      const parts = [];
-      if (totalDays > 0){
-        parts.push(`${totalDays} day${totalDays === 1 ? "" : "s"}`);
-      }
-      if (remainingHours > 0){
-        parts.push(`${remainingHours} hr${remainingHours === 1 ? "" : "s"}`);
-      }
-      if (!parts.length){
-        parts.push("1 day");
-      }
-      return `Past due by ${parts.join(" ")}`;
-    }
-    const wholeHours = Math.floor(totalHours);
-    if (wholeHours >= 1){
-      return `Past due by ${wholeHours} hr${wholeHours === 1 ? "" : "s"}`;
-    }
-    return "Past due by less than 1 hr";
-  };
-  const JOB_NOTE_PREVIEW_LIMIT = 100;
-  const buildJobNotePreview = (value)=>{
-    const raw = typeof value === "string" ? value : "";
-    const trimmed = raw.trim();
-    if (!trimmed){
-      return { preview: "", tooltip: "" };
-    }
-    const normalized = trimmed.replace(/\s+/g, " ").trim();
-    if (normalized.length <= JOB_NOTE_PREVIEW_LIMIT){
-      return { preview: normalized, tooltip: normalized };
-    }
-    let slice = normalized.slice(0, JOB_NOTE_PREVIEW_LIMIT);
-    const lastSpace = slice.lastIndexOf(" ");
-    if (lastSpace > Math.floor(JOB_NOTE_PREVIEW_LIMIT * 0.6)){
-      slice = slice.slice(0, lastSpace);
-    }
-    slice = slice.replace(/\s+$/, "");
-    return {
-      preview: `${slice}...`,
-      tooltip: normalized
-    };
-  };
   const rows = jobsForCategory.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileCount = jobFiles.length;
