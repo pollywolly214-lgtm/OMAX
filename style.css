@@ -2209,22 +2209,29 @@ body.modal-open .auth-bar {
   gap: 6px;
   color: #5d6470;
   font-size: 12px;
+  margin-left: 16px;
 }
 .job-main-category-picker select {
   padding: 4px 6px;
   border-radius: 6px;
-  border: 1px solid rgba(15, 52, 104, 0.2);
+  border: 1px solid var(--job-category-border, rgba(15, 52, 104, 0.2));
   box-shadow: inset 0 1px 2px rgba(13, 36, 72, 0.08);
   font-size: 12px;
-  background-color: #fff;
-  width: min(140px, 100%);
+  background-color: var(--job-category-surface, #fff);
+  color: var(--job-category-text, #243656);
+  width: min(160px, 100%);
   max-width: 100%;
-  flex: 0 1 140px;
+  flex: 0 1 160px;
   min-width: 0;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+.job-main-category-picker select:hover {
+  border-color: var(--job-category-accent, rgba(19, 35, 63, 0.45));
 }
 .job-main-category-picker select:focus {
-  outline: 2px solid rgba(33, 150, 243, 0.35);
-  border-color: rgba(33, 150, 243, 0.55);
+  outline: 2px solid var(--job-category-accent-soft, rgba(19, 35, 63, 0.28));
+  border-color: var(--job-category-accent, rgba(19, 35, 63, 0.45));
+  box-shadow: 0 0 0 3px var(--job-category-accent-soft, rgba(19, 35, 63, 0.18));
 }
 .job-main strong {
   font-size: 14px;
