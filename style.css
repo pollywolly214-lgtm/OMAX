@@ -1879,10 +1879,10 @@ body.modal-open .auth-bar {
   width: 100%;
   color: #1b2d4f;
   font-size: 12px;
-  line-height: 1.35;
-  white-space: nowrap;
+  line-height: 1.45;
+  white-space: pre-line;
   overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-word;
   cursor: pointer;
 }
 .job-note-text:hover,

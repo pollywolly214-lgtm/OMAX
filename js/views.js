@@ -1956,22 +1956,15 @@ function viewJobs(){
     }
     return "Past due by less than 1 hr";
   };
-  const formatNotePreview = (noteText = "", { maxLength = 150 } = {})=>{
+  const formatNotePreview = (noteText = "", { maxLength = 260 } = {})=>{
     if (!noteText) return { html: "", truncated: false };
-    const normalized = String(noteText ?? "").replace(/\r\n/g, "\n").trim();
-    if (!normalized) return { html: "", truncated: false };
-    const condensed = normalized
-      .split(/\n+/)
-      .map(part => part.trim())
-      .filter(Boolean)
-      .join(" • ")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (!condensed) return { html: "", truncated: false };
-    if (condensed.length <= maxLength){
-      return { html: textEsc(condensed), truncated: false };
+    const normalized = String(noteText ?? "").replace(/\r\n/g, "\n");
+    const trimmedEnd = normalized.replace(/\s+$/g, "");
+    if (!trimmedEnd.trim()) return { html: "", truncated: false };
+    if (trimmedEnd.length <= maxLength){
+      return { html: textEsc(trimmedEnd), truncated: false };
     }
-    const shortened = condensed.slice(0, maxLength - 1).trimEnd();
+    const shortened = trimmedEnd.slice(0, maxLength).replace(/\s+$/g, "");
     return {
       html: `${textEsc(shortened)}&hellip;`,
       truncated: true
