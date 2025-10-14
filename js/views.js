@@ -2100,8 +2100,13 @@ function viewJobs(){
       const noteButtonLabel = esc(j.name || "Cutting job");
       const noteTriggerId = esc(String(j.id));
       const notePreview = noteContent
-        ? `<button type="button" class="job-note-cell job-note-cell-has-note" data-job-note="${noteTriggerId}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="View notes for ${noteButtonLabel}"><span class="job-note-cell-text">${notePreviewInfo.html}</span></button>`
-        : `<button type="button" class="job-note-cell job-note-cell-empty" data-job-note="${noteTriggerId}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Add note for ${noteButtonLabel}">Notes</button>`;
+        ? [
+            '<div class="job-note-cell">',
+            `<div class="job-note-text" data-job-note="${noteTriggerId}" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="View notes for ${noteButtonLabel}">${notePreviewInfo.html}</div>`,
+            `<button type="button" class="job-note-cell-button" data-job-note="${noteTriggerId}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Edit notes for ${noteButtonLabel}">Notes</button>`,
+            '</div>'
+          ].join('')
+        : `<button type="button" class="job-note-cell-button job-note-cell-empty" data-job-note="${noteTriggerId}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Add note for ${noteButtonLabel}">Notes</button>`;
       return `
         <tr data-job-row="${j.id}" class="job-row">
           <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">

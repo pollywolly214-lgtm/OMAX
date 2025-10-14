@@ -1869,44 +1869,63 @@ body.modal-open .auth-bar {
   white-space: normal;
 }
 .job-note-cell {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   width: 100%;
-  padding: 2px 0;
-  background: none;
-  border: none;
+}
+.job-note-text {
+  display: block;
+  width: 100%;
   color: #1b2d4f;
-  font: inherit;
   font-size: 12px;
   line-height: 1.35;
-  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
 }
-.job-note-cell:hover,
-.job-note-cell:focus-visible {
+.job-note-text:hover,
+.job-note-text:focus-visible {
   color: #0b2e6b;
   text-decoration: underline;
   outline: none;
 }
-.job-note-cell:focus-visible {
+.job-note-text:focus-visible {
   outline: 2px solid rgba(59, 130, 246, 0.65);
   outline-offset: 2px;
   text-decoration: none;
 }
-.job-note-cell-text {
-  display: block;
-  width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.job-note-cell-has-note {
-  color: #25385b;
-}
-.job-note-cell-empty {
-  color: #31518a;
+.job-note-cell-button {
+  align-self: flex-start;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(49, 81, 138, 0.35);
+  background: #f0f4ff;
+  color: #2b4c85;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+.job-note-cell-button:hover,
+.job-note-cell-button:focus-visible {
+  background: #dbe6ff;
+  border-color: rgba(49, 81, 138, 0.55);
+  color: #17376a;
+  box-shadow: 0 1px 3px rgba(24, 56, 112, 0.18);
+  outline: none;
+}
+.job-note-cell-button:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.65);
+  outline-offset: 2px;
+}
+.job-note-cell-button.job-note-cell-empty {
+  background: #e8efff;
+  border-color: rgba(49, 81, 138, 0.45);
+  color: #1c3a72;
 }
 .job-note-paragraph {
   margin: 0;
