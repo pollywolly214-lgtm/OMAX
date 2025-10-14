@@ -2104,7 +2104,9 @@ body.modal-open .auth-bar {
   width: 100%;
   gap: 4px;
 }
-.job-actions-trigger {
+.job-actions-trigger,
+.job-note-trigger,
+.job-file-trigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2119,17 +2121,33 @@ body.modal-open .auth-bar {
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   width: 100%;
+  text-align: left;
+}
+.job-note-trigger {
+  justify-content: center;
+  text-align: center;
+  font-family: inherit;
+  color: inherit;
 }
 .job-actions-trigger:hover,
-.job-actions-trigger:focus {
+.job-actions-trigger:focus,
+.job-note-trigger:hover,
+.job-note-trigger:focus,
+.job-file-trigger:hover,
+.job-file-trigger:focus {
   background: #264b84;
+  border-color: #1f3b67;
   color: #fff;
 }
-.job-actions-trigger:focus-visible {
+.job-actions-trigger:focus-visible,
+.job-note-trigger:focus-visible,
+.job-file-trigger:focus-visible {
   outline: 2px solid #91b7ff;
   outline-offset: 1px;
 }
-.job-actions-trigger.is-open {
+.job-actions-trigger.is-open,
+.job-file-trigger.is-open,
+.job-note-trigger.is-open {
   background: #264b84;
   box-shadow: 0 0 0 2px rgba(145, 183, 255, 0.4);
 }
@@ -2226,21 +2244,7 @@ body.modal-open .auth-bar {
 }
 
 .job-file-trigger {
-  width: 100%;
   min-height: 32px;
-  padding: 5px 8px;
-  border-radius: 8px;
-  border: 1px solid #d6e0f3;
-  background: #fff;
-  color: #1c2d4a;
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .job-file-trigger-text {
   flex: 1;
@@ -2248,24 +2252,15 @@ body.modal-open .auth-bar {
 }
 .job-file-trigger-icon {
   font-size: 11px;
-  color: #4a5973;
+  color: rgba(255, 255, 255, 0.78);
   transition: transform 0.2s ease;
 }
 .job-file-trigger.is-open .job-file-trigger-icon {
   transform: rotate(-180deg);
 }
 .job-file-trigger:not(.has-files) {
-  background: #f8faff;
-  border-color: #d6e2f5;
-  color: #6b7b94;
+  opacity: 0.92;
   font-style: italic;
-}
-.job-file-trigger:hover,
-.job-file-trigger:focus-visible {
-  background: #f1f4fb;
-  border-color: #b9c6e0;
-  box-shadow: 0 0 0 2px rgba(46, 91, 173, 0.18);
-  outline: none;
 }
 .job-file-dropdown {
   position: absolute;
@@ -2324,50 +2319,25 @@ body.modal-open .auth-bar {
 .job-note-display {
   width: 100%;
   min-height: 34px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid #d6e0f3;
-  font-size: 12px;
   line-height: 1.45;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.job-note-display {
+  padding: 6px 10px;
+  border: 1px solid #d6e0f3;
   background: #f6f8fe;
   color: #1c2d4a;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   text-align: center;
-  font-weight: 600;
-}
-.job-note-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-family: inherit;
-  width: 100%;
-  color: inherit;
-}
-.job-note-trigger:not(.has-note) {
-  background: #f6f8fe;
-  border-color: #d6e0f3;
-  color: #1c2d4a;
 }
 .job-note-trigger.has-note {
-  background: #0a63c2;
-  border-color: #0a63c2;
-  color: #fff;
+  box-shadow: 0 0 0 2px rgba(145, 183, 255, 0.24);
 }
-.job-note-trigger:not(.has-note):hover,
-.job-note-trigger:not(.has-note):focus-visible {
-  background: #eef3ff;
-  border-color: #b3caf7;
-  box-shadow: 0 0 0 3px rgba(145, 183, 255, 0.3);
-  outline: none;
-}
-.job-note-trigger.has-note:hover,
-.job-note-trigger.has-note:focus-visible {
-  background: #084f9c;
-  border-color: #084f9c;
-  box-shadow: 0 0 0 3px rgba(10, 99, 194, 0.32);
-  outline: none;
+.job-note-trigger:not(.has-note) {
+  opacity: 0.92;
 }
 .job-note-display:hover,
 .job-note-display:focus-visible {
