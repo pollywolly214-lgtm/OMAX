@@ -1959,7 +1959,7 @@ function viewJobs(){
     const historyColorStyle = categoryColorStyle(job?.cat);
     const categoryLine = `<div class="job-main-category small muted job-main-category-compact" data-category-color="1"${historyColorStyle}>
         <span class="sr-only">Category</span>
-        <span class="job-main-category-name">${esc(categoryFolder?.name || "All Jobs")}</span>
+        <span class="job-main-category-name">Category:</span>
       </div>`;
 
     if (!editingHistory){
@@ -2197,7 +2197,7 @@ function viewJobs(){
               </div>
               <div class="job-main-category small muted" data-category-color="1"${colorStyleAttr}>
                 <span class="sr-only">Category</span>
-                <span class="job-main-category-name">${esc(categoryName)}</span>
+                <span class="job-main-category-name">Category:</span>
               </div>
               <div class="job-main-category-picker small" data-category-color="1"${colorStyleAttr}>
                 <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(j.name || "Job")}">
