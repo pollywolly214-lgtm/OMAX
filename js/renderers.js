@@ -9299,11 +9299,19 @@ function renderJobs(){
       if (!(input instanceof HTMLInputElement)) return;
       if (input.type !== "color") return;
       const value = typeof input.value === "string" ? input.value.trim() : "";
-      if (value){
-        input.style.setProperty("--category-color-picker-value", value);
-      } else {
-        input.style.removeProperty("--category-color-picker-value");
-      }
+      const targets = [
+        input,
+        input.closest(".category-color-preview"),
+        input.closest(".category-color-control")
+      ].filter((el)=> el instanceof HTMLElement);
+      targets.forEach((el)=>{
+        if (!(el instanceof HTMLElement)) return;
+        if (value){
+          el.style.setProperty("--category-color-picker-value", value);
+        } else {
+          el.style.removeProperty("--category-color-picker-value");
+        }
+      });
     };
     const syncAllColorPickers = ()=>{
       content.querySelectorAll(".category-color-picker").forEach(el => {
