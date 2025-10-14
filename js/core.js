@@ -383,8 +383,27 @@ function readTaskDowntimeHours(task){
   return num;
 }
 
+function readTaskMaintenanceCost(task){
+  if (!task || typeof task !== "object") return 0;
+  let total = 0;
+  const direct = Number(task.price);
+  if (Number.isFinite(direct) && direct > 0){
+    total += direct;
+  }
+  if (Array.isArray(task.parts)){
+    for (const part of task.parts){
+      const partPrice = Number(part?.price);
+      if (Number.isFinite(partPrice) && partPrice > 0){
+        total += partPrice;
+      }
+    }
+  }
+  return total;
+}
+
 if (typeof window !== "undefined"){
   window.readTaskDowntimeHours = readTaskDowntimeHours;
+  window.readTaskMaintenanceCost = readTaskMaintenanceCost;
 }
 
 function resolveTaskVariant(task){

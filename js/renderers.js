@@ -6424,8 +6424,21 @@ function collectMaintenanceEventsForCost(options = {}){
   };
 
   const resolvePrice = (task)=>{
+    if (typeof readTaskMaintenanceCost === "function"){
+      const total = readTaskMaintenanceCost(task);
+      if (Number.isFinite(total) && total > 0) return total;
+    }
+    let total = 0;
     const raw = Number(task?.price);
-    return Number.isFinite(raw) && raw > 0 ? raw : 0;
+    if (Number.isFinite(raw) && raw > 0) total += raw;
+    const parts = Array.isArray(task?.parts) ? task.parts : [];
+    for (const part of parts){
+      const partPrice = Number(part?.price);
+      if (Number.isFinite(partPrice) && partPrice > 0){
+        total += partPrice;
+      }
+    }
+    return total;
   };
 
   const pushEvent = (task, iso, status)=>{
