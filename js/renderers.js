@@ -9295,6 +9295,32 @@ function renderJobs(){
 
   if (!content.dataset.jobCategoryColorEvents){
     content.dataset.jobCategoryColorEvents = "1";
+    const syncColorPickerPreview = (input)=>{
+      if (!(input instanceof HTMLInputElement)) return;
+      if (input.type !== "color") return;
+      const value = typeof input.value === "string" ? input.value.trim() : "";
+      if (value){
+        input.style.setProperty("--category-color-picker-value", value);
+      } else {
+        input.style.removeProperty("--category-color-picker-value");
+      }
+    };
+    const syncAllColorPickers = ()=>{
+      content.querySelectorAll(".category-color-picker").forEach(el => {
+        if (el instanceof HTMLInputElement) syncColorPickerPreview(el);
+      });
+    };
+    syncAllColorPickers();
+    content.addEventListener("input", (event)=>{
+      if (event.target instanceof HTMLInputElement && event.target.matches(".category-color-picker")){
+        syncColorPickerPreview(event.target);
+      }
+    });
+    content.addEventListener("focusin", (event)=>{
+      if (event.target instanceof HTMLInputElement && event.target.matches(".category-color-picker")){
+        syncColorPickerPreview(event.target);
+      }
+    });
     content.addEventListener("change", (event)=>{
       const folderInput = event.target.closest("[data-job-folder-color-input]");
       if (folderInput instanceof HTMLInputElement){
