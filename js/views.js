@@ -1927,7 +1927,7 @@ function viewJobs(){
 
   const completedFiltered = completedForCategory.filter(matchesHistorySearch);
   const completedStats = completedFiltered.reduce((acc, job)=>{
-    const eff = job && job.efficiency ? job.efficiency : {};
+    const eff = computeJobEfficiency(job);
     const net = computeJobNetTotal(job, eff, { preferActual: true });
     acc.total += Number.isFinite(net) ? net : 0;
     return acc;
@@ -1941,8 +1941,61 @@ function viewJobs(){
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+  const now = new Date();
+  const formatPastDueLabel = (dueISO)=>{
+    const dueDate = parseDateLocal(dueISO);
+    if (!dueDate) return "Past due";
+    dueDate.setHours(23, 59, 59, 999);
+    const diffMs = now.getTime() - dueDate.getTime();
+    if (diffMs <= 0) return "Past due";
+    const totalHours = diffMs / (1000 * 60 * 60);
+    if (totalHours >= 24){
+      const totalDays = Math.floor(totalHours / 24);
+      const remainingHours = Math.floor(totalHours % 24);
+      const parts = [];
+      if (totalDays > 0){
+        parts.push(`${totalDays} day${totalDays === 1 ? "" : "s"}`);
+      }
+      if (remainingHours > 0){
+        parts.push(`${remainingHours} hr${remainingHours === 1 ? "" : "s"}`);
+      }
+      if (!parts.length){
+        parts.push("1 day");
+      }
+      return `Past due by ${parts.join(" ")}`;
+    }
+    const wholeHours = Math.floor(totalHours);
+    if (wholeHours >= 1){
+      return `Past due by ${wholeHours} hr${wholeHours === 1 ? "" : "s"}`;
+    }
+    return "Past due by less than 1 hr";
+  };
+  const JOB_NOTE_PREVIEW_LIMIT = 100;
+  const buildJobNotePreview = (value)=>{
+    const raw = typeof value === "string" ? value : "";
+    const trimmed = raw.trim();
+    if (!trimmed){
+      return { preview: "", tooltip: "" };
+    }
+    const normalized = trimmed.replace(/\s+/g, " ").trim();
+    if (normalized.length <= JOB_NOTE_PREVIEW_LIMIT){
+      return { preview: normalized, tooltip: normalized };
+    }
+    let slice = normalized.slice(0, JOB_NOTE_PREVIEW_LIMIT);
+    const lastSpace = slice.lastIndexOf(" ");
+    if (lastSpace > Math.floor(JOB_NOTE_PREVIEW_LIMIT * 0.6)){
+      slice = slice.slice(0, lastSpace);
+    }
+    slice = slice.replace(/\s+$/, "");
+    return {
+      preview: `${slice}...`,
+      tooltip: normalized
+    };
+  };
+
   const completedRows = completedFiltered.map(job => {
-    const eff = job && job.efficiency ? job.efficiency : {};
+    const eff = computeJobEfficiency(job);
+    const req = computeRequiredDaily(job);
     const delta = Number(eff.deltaHours);
     const netTotal = computeJobNetTotal(job, eff, { preferActual: true });
     const actualHours = Number(job.actualHours ?? eff.actualHours);
@@ -2009,14 +2062,22 @@ function viewJobs(){
 
     const estimateDisplay = formatHours(estHours);
     const actualDisplay = formatHours(actualHours);
-    const remainingDisplay = formatHours(0);
-    const needDisplay = completedTxt === "—"
-      ? `<span class="job-badge job-badge-complete">Completed</span>`
-      : `<span class="job-badge job-badge-complete">Completed ${esc(completedTxt)}</span>`;
+    const remainingHours = Number.isFinite(req.remainingHours) ? Math.max(0, req.remainingHours) : 0;
+    const remainingDisplay = formatHours(remainingHours);
+    const needPerDay = req.requiredPerDay === Infinity
+      ? "∞"
+      : (req.requiredPerDay || 0).toFixed(2);
+    let needDisplay = req.requiredPerDay === Infinity
+      ? `<span class="job-badge job-badge-overdue">${esc(formatPastDueLabel(job?.dueISO))}</span>`
+      : `${needPerDay} hr/day needed (capacity ${hoursPerDay.toFixed(1)} hr/day)`;
+    if (completedTxt !== "—"){
+      needDisplay += `<div class="small muted">Completed ${esc(completedTxt)}</div>`;
+    }
 
     const noteContent = (job?.notes || "").trim();
     const noteButtonLabel = esc(job?.name || "Cutting job");
-    const noteButtonState = noteContent ? "has-note" : "";
+    const notePreview = buildJobNotePreview(noteContent);
+    const notePreviewTitleAttr = notePreview.tooltip ? ` title="${esc(notePreview.tooltip)}"` : "";
 
     const efficiencySummaryParts = [
       `${statusLabel}${statusDetail}`.trim(),
@@ -2054,7 +2115,7 @@ function viewJobs(){
           <td class="job-col job-col-charge">${chargeDisplay}</td>
           <td class="job-col job-col-cost">${costDisplay}</td>
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
-          <td class="job-col job-col-hours">${actualDisplay}</td>
+          <td class="job-col job-col-hours">${remainingDisplay}</td>
           <td class="job-col job-col-need">${needDisplay}</td>
           <td class="job-col job-col-status">
             <div class="job-status ${statusClass}">${esc(statusLabel)}</div>
@@ -2102,10 +2163,14 @@ function viewJobs(){
             </div>
           </td>
           <td class="job-col job-col-note">
-            <button type="button" class="job-note-trigger job-note-button ${noteButtonState}" data-job-note="${job.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
-              <span class="job-note-button-icon" aria-hidden="true">🗒</span>
-              <span class="job-note-button-label">${noteContent ? "View notes" : "Add note"}</span>
-            </button>
+            ${notePreview.preview
+              ? `<div class="job-note-inline" data-job-note="${job.id}" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}"${notePreviewTitleAttr}>
+                  <span class="job-note-inline-text">${textEsc(notePreview.preview)}</span>
+                </div>`
+              : `<button type="button" class="job-note-button" data-job-note="${job.id}" aria-haspopup="dialog" aria-controls="jobNoteModal" aria-label="Notes for ${noteButtonLabel}">
+                  <span class="job-note-button-icon" aria-hidden="true">🗒</span>
+                  <span class="job-note-button-label">Add note</span>
+                </button>`}
           </td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
@@ -2228,57 +2293,6 @@ function viewJobs(){
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
   const activeColumnCount = jobColumnCount;
-  const now = new Date();
-  const formatPastDueLabel = (dueISO)=>{
-    const dueDate = parseDateLocal(dueISO);
-    if (!dueDate) return "Past due";
-    dueDate.setHours(23, 59, 59, 999);
-    const diffMs = now.getTime() - dueDate.getTime();
-    if (diffMs <= 0) return "Past due";
-    const totalHours = diffMs / (1000 * 60 * 60);
-    if (totalHours >= 24){
-      const totalDays = Math.floor(totalHours / 24);
-      const remainingHours = Math.floor(totalHours % 24);
-      const parts = [];
-      if (totalDays > 0){
-        parts.push(`${totalDays} day${totalDays === 1 ? "" : "s"}`);
-      }
-      if (remainingHours > 0){
-        parts.push(`${remainingHours} hr${remainingHours === 1 ? "" : "s"}`);
-      }
-      if (!parts.length){
-        parts.push("1 day");
-      }
-      return `Past due by ${parts.join(" ")}`;
-    }
-    const wholeHours = Math.floor(totalHours);
-    if (wholeHours >= 1){
-      return `Past due by ${wholeHours} hr${wholeHours === 1 ? "" : "s"}`;
-    }
-    return "Past due by less than 1 hr";
-  };
-  const JOB_NOTE_PREVIEW_LIMIT = 100;
-  const buildJobNotePreview = (value)=>{
-    const raw = typeof value === "string" ? value : "";
-    const trimmed = raw.trim();
-    if (!trimmed){
-      return { preview: "", tooltip: "" };
-    }
-    const normalized = trimmed.replace(/\s+/g, " ").trim();
-    if (normalized.length <= JOB_NOTE_PREVIEW_LIMIT){
-      return { preview: normalized, tooltip: normalized };
-    }
-    let slice = normalized.slice(0, JOB_NOTE_PREVIEW_LIMIT);
-    const lastSpace = slice.lastIndexOf(" ");
-    if (lastSpace > Math.floor(JOB_NOTE_PREVIEW_LIMIT * 0.6)){
-      slice = slice.slice(0, lastSpace);
-    }
-    slice = slice.replace(/\s+$/, "");
-    return {
-      preview: `${slice}...`,
-      tooltip: normalized
-    };
-  };
   const rows = jobsForCategory.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileCount = jobFiles.length;
