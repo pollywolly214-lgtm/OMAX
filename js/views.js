@@ -1522,6 +1522,14 @@ function viewJobs(){
   const pendingSummary = pendingFiles.length
     ? `${pendingFiles.length} file${pendingFiles.length===1?"":"s"} ready to attach`
     : "No files selected";
+  let addFormOpenState = typeof window.jobAddFormOpen === "boolean"
+    ? window.jobAddFormOpen
+    : null;
+  if (addFormOpenState == null){
+    addFormOpenState = pendingFiles.length > 0;
+    window.jobAddFormOpen = addFormOpenState;
+  }
+  const addFormOpen = addFormOpenState;
   const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [];
   const completedSorted = completedJobs.sort((a,b)=>{
     const aTime = new Date(a.completedAtISO || a.dueISO || a.startISO || 0).getTime();
@@ -2365,33 +2373,55 @@ function viewJobs(){
       <p class="small muted">Select a category to focus the job list or create sub-categories to organize further.</p>
     </div>
     <div class="block job-main-block">
-      <h3>Cutting Jobs</h3>
-      <div class="job-page-toolbar">
-        <label class="job-category-filter">
-          <span>Show</span>
-          <select id="jobCategoryFilterSelect" aria-label="Filter cutting jobs by category">
-            ${categoryOptionsMarkup(selectedCategory)}
-          </select>
-        </label>
-        <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
+      <div class="job-page-topbar">
+        <h3>Cutting Jobs</h3>
+        <div class="job-page-toolbar">
+          <button
+            type="button"
+            class="job-add-button"
+            data-job-add-toggle
+            aria-expanded="${addFormOpen ? "true" : "false"}"
+            aria-controls="jobAddPanel"
+          >${addFormOpen ? "Hide add job form" : "+ New cutting job"}</button>
+          <div class="job-toolbar-actions">
+            <label class="job-category-filter">
+              <span>Show</span>
+              <select id="jobCategoryFilterSelect" aria-label="Filter cutting jobs by category">
+                ${categoryOptionsMarkup(selectedCategory)}
+              </select>
+            </label>
+            <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
+          </div>
+        </div>
+        ${!addFormOpen && pendingFiles.length
+          ? `<div class="job-add-indicator" role="status" aria-live="polite">${pendingSummary}</div>`
+          : ""}
       </div>
-      <form id="addJobForm" class="mini-form">
-        <input type="text" id="jobName" placeholder="Job name" required>
-        <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
-        <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01">
-        <input type="text" id="jobMaterial" placeholder="Material">
-        <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
-        <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
-        <input type="date" id="jobStart" required>
-        <input type="date" id="jobDue" required>
-        <select id="jobCategory" aria-label="Category" required>
-          ${categoryOptionsMarkup(selectedCategory, { includeCreateOption: true })}
-        </select>
-        <button type="button" id="jobFilesBtn">Attach Files</button>
-        <input type="file" id="jobFiles" multiple style="display:none">
-        <button type="submit">Add Job</button>
-      </form>
-      <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
+      <section
+        class="job-add-panel${addFormOpen ? " is-open" : ""}"
+        data-job-add-panel
+        id="jobAddPanel"
+        ${addFormOpen ? "" : "hidden"}
+        aria-hidden="${addFormOpen ? "false" : "true"}"
+      >
+        <form id="addJobForm" class="mini-form job-add-form">
+          <input type="text" id="jobName" placeholder="Job name" required>
+          <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
+          <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01">
+          <input type="text" id="jobMaterial" placeholder="Material">
+          <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
+          <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
+          <input type="date" id="jobStart" required>
+          <input type="date" id="jobDue" required>
+          <select id="jobCategory" aria-label="Category" required>
+            ${categoryOptionsMarkup(selectedCategory, { includeCreateOption: true })}
+          </select>
+          <button type="button" id="jobFilesBtn">Attach Files</button>
+          <input type="file" id="jobFiles" multiple style="display:none">
+          <button type="submit">Add Job</button>
+        </form>
+        <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
+      </section>
 
       <table class="job-table">
         <thead>
