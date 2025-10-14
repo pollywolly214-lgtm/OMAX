@@ -2091,9 +2091,11 @@ function viewJobs(){
           return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
         }).join("")
       : "";
-    const fileMenu = fileCount
+    const fileMenuActions = `<div class="job-file-menu-actions"><button type="button" class="job-file-menu-action" data-job-file-add="${j.id}">+ Add files</button></div>`;
+    const fileMenu = (fileCount
       ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
-      : `<p class="job-file-menu-empty small muted">No files attached</p>`;
+      : `<p class="job-file-menu-empty small muted">No files attached</p>`)
+      + fileMenuActions;
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
@@ -2226,7 +2228,7 @@ function viewJobs(){
                 </button>
                 <div class="job-file-dropdown" id="${esc(fileMenuId)}" data-job-file-menu="${j.id}" hidden>
                   ${fileMenu}
-                  <div class="job-file-menu-hint small muted">Edit the job to add files.</div>
+                  <div class="job-file-menu-hint small muted">Use Add files to open edit mode and attach documents.</div>
                 </div>
               </div>
             </div>
