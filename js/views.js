@@ -292,7 +292,7 @@ function viewDashboard(){
           <div class="modal-grid">
             <label>Job name<input id="dashJobName" required placeholder="Job"></label>
             <label>Estimate (hrs)<input type="number" min="1" step="0.1" id="dashJobEstimate" required placeholder="e.g. 12"></label>
-            <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCharge" placeholder="Optional"></label>
+            <label>Charge Rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCharge" placeholder="Optional"></label>
             <label>Material<input id="dashJobMaterial" placeholder="Material"></label>
             <label>Material cost ($)<input type="number" min="0" step="0.01" id="dashJobMaterialCost" placeholder="optional"></label>
             <label>Material quantity<input type="number" min="0" step="0.01" id="dashJobMaterialQty" placeholder="optional"></label>
@@ -2112,11 +2112,12 @@ function viewJobs(){
               </div>
               <div class="job-impact-meta">${esc(efficiencySummaryText)}</div>
               <dl class="job-impact-metrics">
-                <div><dt>Charge</dt><dd>${chargeDisplay}</dd></div>
-                <div><dt>Cost</dt><dd>${costDisplay}</dd></div>
-                <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
+                <div><dt>Charge Rate</dt><dd>${chargeDisplay}</dd></div>
+                <div><dt>Cost Rate (negative cost)</dt><dd>${costDisplay}</dd></div>
+                <div><dt>Net per hour</dt><dd class="${netClass}">${netDisplay}</dd></div>
                 <div><dt>Net total</dt><dd class="${impactClass}">${impactDisplay}</dd></div>
               </dl>
+              <p class="job-impact-helper small muted">Cost Rate is stored as a negative value so Charge Rate + Cost Rate matches the Net per hour sum from the spec.</p>
               <div class="job-impact-files">
                 <span class="job-impact-files-label">Files</span>
                 ${fileCount
@@ -2159,7 +2160,7 @@ function viewJobs(){
                 <label>Material<input type="text" data-j="material" data-id="${j.id}" value="${j.material||""}"></label>
                 <label>Material cost ($)<input type="number" min="0" step="0.01" data-j="materialCost" data-id="${j.id}" value="${matCost}"></label>
                 <label>Material quantity<input type="number" min="0" step="0.01" data-j="materialQty" data-id="${j.id}" value="${matQty}"></label>
-                <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-j="chargeRate" data-id="${j.id}" value="${chargeRate}"></label>
+                <label>Charge Rate ($/hr)<input type="number" min="0" step="0.01" data-j="chargeRate" data-id="${j.id}" value="${chargeRate}"></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
                 <label>Category<select data-j="cat" data-id="${j.id}" data-job-category-select>
@@ -2172,21 +2173,22 @@ function viewJobs(){
                   <span class="job-metric-value">$${matTotal.toFixed(2)}</span>
                 </div>
                 <div class="job-metric">
-                  <span class="job-metric-label">Charge rate</span>
+                  <span class="job-metric-label">Charge Rate</span>
                   <span class="job-metric-value">${chargeDisplay}</span>
                 </div>
                 <div class="job-metric">
-                  <span class="job-metric-label">Cost rate</span>
+                  <span class="job-metric-label">Cost Rate (negative cost)</span>
                   <span class="job-metric-value">${costDisplay}</span>
                 </div>
                 <div class="job-metric">
-                  <span class="job-metric-label">Net profit / hr</span>
+                  <span class="job-metric-label">Net per hour</span>
                   <span class="job-metric-value ${netClass}">${netDisplay}</span>
                 </div>
                 <div class="job-metric">
                   <span class="job-metric-label">Net total</span>
                   <span class="job-metric-value ${impactClass}">${netTotalDisplay}</span>
                 </div>
+                <p class="job-metric-note small muted">Cost Rate is stored as a negative value so Charge Rate + Cost Rate aligns with the spec's net-per-hour sum.</p>
                 <div class="job-metric">
                   <span class="job-metric-label">Schedule</span>
                   <span class="job-metric-value small muted">${startTxt} → ${dueTxt}</span>
@@ -2241,7 +2243,7 @@ function viewJobs(){
       <form id="addJobForm" class="mini-form">
         <input type="text" id="jobName" placeholder="Job name" required>
         <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
-        <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01">
+        <input type="number" id="jobCharge" placeholder="Charge Rate ($/hr)" min="0" step="0.01">
         <input type="text" id="jobMaterial" placeholder="Material">
         <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
         <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
@@ -2265,9 +2267,9 @@ function viewJobs(){
             <th>Cost / unit</th>
             <th>Quantity</th>
             <th>Material total</th>
-            <th>Charge rate</th>
-            <th>Cost rate</th>
-            <th>Net profit/hr</th>
+            <th>Charge Rate</th>
+            <th>Cost Rate (negative cost)</th>
+            <th>Net per hour</th>
             <th>Hours remaining</th>
             <th>Needed / day</th>
             <th>Status</th>
