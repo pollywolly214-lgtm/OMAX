@@ -2936,9 +2936,12 @@ function renderDashboard(){
 
   const getSettingsTargetId = (task)=>{
     if (!task || task.id == null) return "";
+    const findTask = typeof findTaskByIdLocal === "function" ? findTaskByIdLocal : null;
     const templateId = task.templateId != null ? String(task.templateId) : "";
     const taskId = String(task.id);
-    if (templateId && templateId !== taskId) return templateId;
+    if (templateId && templateId !== taskId){
+      if (!findTask || findTask(templateId)) return templateId;
+    }
     return taskId;
   };
 
@@ -3035,16 +3038,34 @@ function renderDashboard(){
     const findTaskButton = (target)=> target && target.closest ? target.closest("[data-next-due-task]") : null;
     const resolveSettingsTarget = (btn)=>{
       if (!btn || !btn.dataset) return "";
-      return btn.dataset.settingsTask || btn.dataset.taskId || btn.dataset.calTask || "";
+      const templateId = btn.dataset.settingsTask ? String(btn.dataset.settingsTask) : "";
+      const taskId = btn.dataset.taskId ? String(btn.dataset.taskId) : "";
+      const calTaskId = btn.dataset.calTask ? String(btn.dataset.calTask) : "";
+      const fallbacks = [];
+      const addFallback = (value)=>{
+        const id = value ? String(value) : "";
+        if (!id) return;
+        if ((templateId && id === templateId) || fallbacks.includes(id)) return;
+        fallbacks.push(id);
+      };
+      if (templateId){
+        addFallback(taskId);
+        addFallback(calTaskId);
+        return fallbacks.length ? { id: templateId, fallbackIds: fallbacks.slice() } : templateId;
+      }
+      const baseId = taskId || calTaskId;
+      if (!baseId) return "";
+      if (taskId && calTaskId && taskId !== calTaskId) fallbacks.push(calTaskId);
+      return fallbacks.length ? { id: String(baseId), fallbackIds: fallbacks.slice() } : String(baseId);
     };
 
     ndBox.addEventListener("click", (e)=>{
       const btn = findTaskButton(e.target);
       if (!btn) return;
-      const taskId = resolveSettingsTarget(btn);
-      if (!taskId) return;
+      const targetInfo = resolveSettingsTarget(btn);
+      if (!targetInfo) return;
       if (typeof hideBubble === "function") hideBubble();
-      if (typeof openSettingsAndReveal === "function") openSettingsAndReveal(taskId);
+      if (typeof openSettingsAndReveal === "function") openSettingsAndReveal(targetInfo);
     });
 
     const showBubbleFor = (btn)=>{
@@ -4178,29 +4199,88 @@ function openJobsEditor(jobId){
 
 
 
-function openSettingsAndReveal(taskId){
-  if (taskId == null) return;
-  let id = String(taskId);
-  if (!id) return;
+function openSettingsAndReveal(target){
+  if (target == null) return;
+  let primaryId = "";
+  const fallbackIds = [];
+  const addFallback = (value)=>{
+    const id = value != null ? String(value) : "";
+    if (!id) return;
+    if (id === primaryId || fallbackIds.includes(id)) return;
+    fallbackIds.push(id);
+  };
+  if (typeof target === "object" && !Array.isArray(target)){
+    if (target.id != null) primaryId = String(target.id);
+    else if (target.taskId != null) primaryId = String(target.taskId);
+    else if (target.targetId != null) primaryId = String(target.targetId);
+    else if (target.primary != null) primaryId = String(target.primary);
+    const rawFallbacks = Array.isArray(target.fallbackIds)
+      ? target.fallbackIds
+      : (target.fallbackId != null ? [target.fallbackId] : []);
+    rawFallbacks.forEach(addFallback);
+  }else if (Array.isArray(target)){
+    target.forEach(value => {
+      const id = value != null ? String(value) : "";
+      if (!id) return;
+      if (!primaryId) primaryId = id;
+      else addFallback(id);
+    });
+  }else{
+    primaryId = String(target);
+  }
+  if (!primaryId && !fallbackIds.length) return;
+  const candidateIds = [];
+  const registerCandidate = (value)=>{
+    const id = value != null ? String(value) : "";
+    if (!id) return;
+    if (candidateIds.includes(id)) return;
+    candidateIds.push(id);
+  };
+  registerCandidate(primaryId);
+  fallbackIds.forEach(registerCandidate);
+  if (!candidateIds.length) return;
   if (typeof window !== "undefined"){
     window.maintenanceSearchTerm = "";
-    const openTaskIds = new Set();
+    const openTaskIds = new Set(candidateIds);
     const openFolderIds = new Set();
     const findTask = typeof findTaskByIdLocal === "function" ? findTaskByIdLocal : null;
     const isInstance = typeof isInstanceTask === "function" ? isInstanceTask : null;
-    let targetTask = findTask ? findTask(id) : null;
-    if (targetTask && isInstance && isInstance(targetTask)){
-      const templateId = targetTask.templateId != null ? String(targetTask.templateId) : "";
-      if (templateId && templateId !== id){
-        const templateTask = findTask ? findTask(templateId) : null;
-        if (templateTask){
-          targetTask = templateTask;
-          id = templateId;
-        }else{
-          id = templateId;
-        }
+    let id = candidateIds[0];
+    let targetTask = null;
+    if (findTask){
+      for (const candidate of candidateIds){
+        const task = findTask(candidate);
+        if (!task) continue;
+        targetTask = task;
+        id = String(task.id);
+        break;
       }
     }
+    const promoteTemplate = (task, currentId)=>{
+      if (!task || !isInstance || !isInstance(task)) return { task, id: currentId };
+      const templateId = task.templateId != null ? String(task.templateId) : "";
+      if (!templateId || templateId === currentId) return { task, id: currentId };
+      const templateTask = findTask ? findTask(templateId) : null;
+      if (templateTask){
+        return { task: templateTask, id: templateId };
+      }
+      return { task, id: templateId };
+    };
+    if (targetTask){
+      const promoted = promoteTemplate(targetTask, id);
+      targetTask = promoted.task;
+      id = promoted.id || id;
+    }else if (findTask){
+      for (const candidate of candidateIds){
+        const task = findTask(candidate);
+        if (!task) continue;
+        const promoted = promoteTemplate(task, String(task.id));
+        targetTask = promoted.task;
+        id = promoted.id || promoted.task?.id || candidate;
+        if (targetTask || promoted.id) break;
+      }
+    }
+    if (!id) id = candidateIds[0];
     const folderById = new Map();
     if (Array.isArray(window.settingsFolders)){
       window.settingsFolders.forEach(folder => {
@@ -4237,10 +4317,18 @@ function openSettingsAndReveal(taskId){
       }
     }
 
-    if (openTaskIds.size === 0) openTaskIds.add(id);
+    openTaskIds.add(id);
+    const uniqueTaskIds = [];
+    const seen = new Set();
+    [id, ...candidateIds].forEach(value => {
+      const tid = value != null ? String(value) : "";
+      if (!tid || seen.has(tid)) return;
+      seen.add(tid);
+      uniqueTaskIds.push(tid);
+    });
 
     const pending = {
-      taskIds: [id],
+      taskIds: uniqueTaskIds,
       attempts: 0,
       openTaskIds: Array.from(openTaskIds),
       openFolderIds: Array.from(openFolderIds)
