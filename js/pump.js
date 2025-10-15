@@ -1,11 +1,12 @@
 /* =================== PUMP EFFICIENCY ======================= */
-window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] }; // [{dateISO:"yyyy-mm-dd", rpm:number}]
+window.pumpEff = window.pumpEff || { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] }; // [{dateISO:"yyyy-mm-dd", rpm:number, timeISO:"HH:MM"}]
 if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
 if (!Array.isArray(window.pumpEff.notes)) window.pumpEff.notes = [];
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 
 const PUMP_BASE_FONT_SCALE = 1.72;
+const PUMP_DEFAULT_MEASUREMENT_TIME = "12:00";
 const pumpViewportState = { bound:false, lastResponsiveScale:1 };
 let pumpLayoutObserver = null;
 let pumpObservedWrap = null;
@@ -24,6 +25,107 @@ let pumpNotesModalNode = null;
 let pumpNotesModalDialog = null;
 let pumpNotesModalState = null;
 let pumpNotesEscHandler = null;
+
+function pumpNormalizeTimeValue(timeValue, fallback){
+  const fallbackValue = typeof fallback === "string" ? fallback : "";
+  if (timeValue instanceof Date){
+    const hrs = String(timeValue.getHours()).padStart(2, "0");
+    const mins = String(timeValue.getMinutes()).padStart(2, "0");
+    return `${hrs}:${mins}`;
+  }
+  if (typeof timeValue === "number" && Number.isFinite(timeValue)){
+    return pumpNormalizeTimeValue(new Date(timeValue), fallbackValue || PUMP_DEFAULT_MEASUREMENT_TIME);
+  }
+  const raw = String(timeValue ?? "").trim();
+  if (!raw){
+    return fallbackValue || "";
+  }
+  const match = raw.match(/^(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?$/);
+  if (!match){
+    return fallbackValue || "";
+  }
+  const hours = Number(match[1]);
+  let minutes = match[2] != null ? Number(match[2]) : 0;
+  if (!Number.isFinite(hours) || hours < 0 || hours > 23){
+    return fallbackValue || "";
+  }
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes > 59){
+    minutes = 0;
+  }
+  const hrs = String(hours).padStart(2, "0");
+  const mins = String(minutes).padStart(2, "0");
+  return `${hrs}:${mins}`;
+}
+
+function pumpEnsureEntryTime(entry){
+  if (!entry || typeof entry !== "object") return entry;
+  const existing = entry.timeISO ?? entry.time ?? entry.loggedTime ?? "";
+  const normalized = pumpNormalizeTimeValue(existing, "");
+  entry.timeISO = normalized || PUMP_DEFAULT_MEASUREMENT_TIME;
+  return entry;
+}
+
+function pumpEnsureEntriesArray(){
+  if (!window.pumpEff || typeof window.pumpEff !== "object"){
+    window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
+  }
+  if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
+  window.pumpEff.entries.forEach(pumpEnsureEntryTime);
+  return window.pumpEff.entries;
+}
+
+function pumpGetEntryTimeISO(entry){
+  if (!entry || typeof entry !== "object") return "";
+  pumpEnsureEntryTime(entry);
+  return entry.timeISO || "";
+}
+
+function pumpFormatTimeLabel(timeISO){
+  const normalized = pumpNormalizeTimeValue(timeISO, "");
+  if (!normalized){
+    return "";
+  }
+  const parsed = new Date(`1970-01-01T${normalized}:00`);
+  if (!Number.isFinite(parsed.getTime())){
+    return normalized;
+  }
+  return parsed.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function pumpFormatDateWithTimeLabel(dateISO, timeISO){
+  if (!dateISO){
+    return "";
+  }
+  const normalizedTime = pumpNormalizeTimeValue(timeISO, PUMP_DEFAULT_MEASUREMENT_TIME);
+  const isoString = `${dateISO}T${normalizedTime}:00`;
+  const parsed = new Date(isoString);
+  if (Number.isFinite(parsed.getTime())){
+    return parsed.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+  return pumpFormatShortDate(dateISO);
+}
+
+function pumpFormatEntryTime(entry){
+  const iso = pumpGetEntryTimeISO(entry);
+  return iso ? pumpFormatTimeLabel(iso) : "";
+}
+
+function pumpFormatTimeForInput(date){
+  if (!(date instanceof Date) || !Number.isFinite(date.getTime())){
+    return PUMP_DEFAULT_MEASUREMENT_TIME;
+  }
+  const hrs = String(date.getHours()).padStart(2, "0");
+  const mins = String(date.getMinutes()).padStart(2, "0");
+  return `${hrs}:${mins}`;
+}
+
+pumpEnsureEntriesArray();
 
 function pumpGetViewportScale(){
   if (window.visualViewport && typeof window.visualViewport.scale === "number"){
@@ -377,12 +479,19 @@ function pumpSubtractMonths(date, months){
   return anchor;
 }
 
-function upsertPumpEntry(dateISO, rpm){
+function upsertPumpEntry(dateISO, rpm, timeValue){
   const d = String(dateISO);
   const r = Number(rpm);
-  if (!isFinite(r) || r <= 0) return false;
-  const i = pumpEff.entries.findIndex(e => e.dateISO === d);
-  if (i >= 0) pumpEff.entries[i].rpm = r; else pumpEff.entries.push({ dateISO:d, rpm:r });
+  if (!d || !isFinite(r) || r <= 0) return false;
+  const timeISO = pumpNormalizeTimeValue(timeValue, PUMP_DEFAULT_MEASUREMENT_TIME) || PUMP_DEFAULT_MEASUREMENT_TIME;
+  const i = pumpEff.entries.findIndex(e => e && e.dateISO === d);
+  if (i >= 0){
+    const existing = pumpEff.entries[i] || {};
+    pumpEff.entries[i] = { ...existing, dateISO: d, rpm: r, timeISO };
+  }else{
+    pumpEff.entries.push({ dateISO: d, rpm: r, timeISO });
+  }
+  pumpEff.entries.forEach(pumpEnsureEntryTime);
   pumpEff.entries.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
   return true;
 }
@@ -429,10 +538,7 @@ function pumpRangeCutoff(latestDate, range){
 }
 
 function pumpEnsureNotesArray(){
-  if (!window.pumpEff || typeof window.pumpEff !== "object"){
-    window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
-  }
-  if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
+  pumpEnsureEntriesArray();
   if (!Array.isArray(window.pumpEff.notes)) window.pumpEff.notes = [];
   return window.pumpEff.notes;
 }
@@ -704,12 +810,15 @@ function pumpRoundedRectPath(ctx, x, y, width, height, radius){
 }
 
 function viewPumpLogWidget(){
+  pumpEnsureEntriesArray();
   const latest = pumpLatest();
   const pct    = latest ? pumpPercentChange(latest.rpm) : null;
   const col    = pumpColorFor(pct);
   const baselineVal = pumpEff.baselineRPM ?? "";
   const todayISO    = new Date().toISOString().slice(0,10);
-  const latestTxt   = latest ? `${latest.rpm} RPM (${latest.dateISO})` : "—";
+  const nowTime     = pumpFormatTimeForInput(new Date());
+  const latestDateTimeLabel = latest ? pumpFormatDateWithTimeLabel(latest.dateISO, pumpGetEntryTimeISO(latest)) : "";
+  const latestTxt   = latest ? `${latest.rpm} RPM (${latestDateTimeLabel || latest.dateISO})` : "—";
   return `
   <details class="pump-card" open>
     <summary><b>Pump Efficiency</b> <span class="chip ${col.cls}">${col.label}</span></summary>
@@ -726,12 +835,13 @@ function viewPumpLogWidget(){
         <h4>Daily log</h4>
         <form id="pumpLogForm" class="mini-form">
           <input type="date" id="pumpLogDate" value="${todayISO}" required>
+          <input type="time" id="pumpLogTime" value="${nowTime}" required>
           <input type="number" id="pumpLogRPM" min="1" step="1" placeholder="RPM at 49 ksi" required>
           <button type="submit">Add / Update</button>
         </form>
       </div>
       <div class="pump-stats">
-        <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO})` : "—"}</span></div>
+        <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO || "—"})` : "—"}</span></div>
         <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
       </div>
     </div>
@@ -791,9 +901,10 @@ function renderPumpWidget(){
   document.getElementById("pumpLogForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const d   = document.getElementById("pumpLogDate").value;
+    const t   = document.getElementById("pumpLogTime")?.value;
     const rpm = Number(document.getElementById("pumpLogRPM").value);
     if (!d || !isFinite(rpm) || rpm <= 0) { toast("Enter date and valid RPM."); return; }
-    upsertPumpEntry(d, rpm); saveCloudDebounced(); toast("Log saved"); renderPumpWidget();
+    upsertPumpEntry(d, rpm, t); saveCloudDebounced(); toast("Log saved"); renderPumpWidget();
   });
   const card = chartHost?.querySelector(".pump-chart-card");
   ensurePumpViewportWatcher();
@@ -957,9 +1068,12 @@ function pumpRenderNotesModal(){
     const rpmSource = state.rpm != null ? state.rpm : (entry ? entry.rpm : null);
     const rpmLabel = Number.isFinite(Number(rpmSource)) ? `${Number(rpmSource).toLocaleString()} RPM` : "";
     const dateLabel = dateISO ? pumpFormatShortDate(dateISO) : "";
+    const entryTimeISO = state.timeISO || (entry ? pumpGetEntryTimeISO(entry) : "");
+    const timeLabel = entryTimeISO ? pumpFormatTimeLabel(entryTimeISO) : "";
     const headingId = "pumpNotesHeading";
     const subtitleParts = [];
     if (dateLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(dateLabel)}</span>`);
+    if (timeLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(timeLabel)}</span>`);
     if (rangeDisplay) subtitleParts.push(`<span>${pumpEscapeTooltipValue(rangeDisplay)}</span>`);
     if (rpmLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(rpmLabel)}</span>`);
     const subtitle = subtitleParts.length
@@ -1037,6 +1151,8 @@ function pumpRenderNotesModal(){
     const items = notes.map(note => {
       const dateLabel = pumpFormatShortDate(note.dateISO);
       const rangeDisplay = pumpFormatRangeDisplay(note.range);
+      const entryForNote = pumpEff.entries.find(entry => entry && entry.dateISO === note.dateISO) || null;
+      const timeLabel = entryForNote ? pumpFormatTimeLabel(pumpGetEntryTimeISO(entryForNote)) : "";
       let updatedLabel = "";
       if (note.updatedISO){
         const parsed = new Date(note.updatedISO);
@@ -1047,6 +1163,7 @@ function pumpRenderNotesModal(){
       const textHtml = pumpEscapeTooltipValue(note.text || "").replace(/\n/g, "<br>");
       const metaParts = [
         `<span class="pump-note-date">${pumpEscapeTooltipValue(dateLabel)}</span>`,
+        timeLabel ? `<span class="pump-note-time">${pumpEscapeTooltipValue(`Logged ${timeLabel}`)}</span>` : "",
         `<span class="pump-note-range">${pumpEscapeTooltipValue(rangeDisplay)}</span>`
       ];
       if (updatedLabel){
@@ -1106,8 +1223,9 @@ function pumpOpenNoteEditorForTarget(canvas, target){
   const rangeValue = target.rangeValue || (canvas && canvas.__pumpChartRange) || window.pumpChartRange || "3m";
   const entry = pumpEff.entries.find(e => e && e.dateISO === dateISO) || null;
   const rpm = target.rpm != null ? target.rpm : (entry ? entry.rpm : null);
+  const timeISO = target.timeISO || (entry ? pumpGetEntryTimeISO(entry) : "");
   const rangeDisplay = pumpFormatRangeDisplay(rangeValue);
-  pumpOpenNotesModal({ view:"edit", dateISO, range: rangeValue, rpm, rangeDisplay });
+  pumpOpenNotesModal({ view:"edit", dateISO, range: rangeValue, rpm, rangeDisplay, timeISO });
 }
 
 function pumpShowChartTooltip(canvas, tooltip, target, { scaleX, scaleY }){
@@ -1407,6 +1525,7 @@ function drawPumpChart(canvas, rangeValue){
   const dpr = window.devicePixelRatio || 1;
   const cssWidth = canvas.width / dpr;
   const cssHeight = canvas.height / dpr;
+  pumpEnsureEntriesArray();
   ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssWidth, cssHeight);
@@ -1633,11 +1752,16 @@ function drawPumpChart(canvas, rangeValue){
       const idxAll = indexByDate.get(entry.dateISO);
       const prevEntry = (idxAll != null && idxAll > 0) ? dataAll[idxAll - 1] : null;
       const pct = pumpPercentChange(entry.rpm);
-      const tooltipDate = pumpFormatShortDate(entry.dateISO);
+      const timeISO = pumpGetEntryTimeISO(entry);
+      const timeLabel = pumpFormatTimeLabel(timeISO);
+      const tooltipDate = pumpFormatDateWithTimeLabel(entry.dateISO, timeISO);
       const formattedRPM = Number.isFinite(entry.rpm)
         ? Number(entry.rpm).toLocaleString(undefined, { maximumFractionDigits: 0 })
         : String(entry.rpm ?? "");
       const detailParts = [];
+      if (timeLabel){
+        detailParts.push(`Logged at ${timeLabel}`);
+      }
       if (noteForEntry){
         const trimmedNote = String(noteForEntry.text || "").trim();
         if (trimmedNote){
@@ -1691,6 +1815,7 @@ function drawPumpChart(canvas, rangeValue){
         detailLines: detailParts,
         dateISO: entry.dateISO,
         rpm: entry.rpm,
+        timeISO,
         rangeValue: range,
         rangeLabel: pumpFormatRangeDisplay(range),
         hasNote: !!noteForEntry
@@ -1931,7 +2056,9 @@ function drawPumpChart(canvas, rangeValue){
   const pct = pumpPercentChange(latest?.rpm);
   const deltaClass = pumpColorFor(pct).cls;
   const deltaColor = PUMP_DELTA_CLASS_COLORS[deltaClass] || "#1f3a60";
-  const headerPrefix = `Latest: ${latest.rpm} RPM (${latest.dateISO})  Δ%=`;
+  const latestTimeISO = latest ? pumpGetEntryTimeISO(latest) : "";
+  const latestLabel = latest ? pumpFormatDateWithTimeLabel(latest.dateISO, latestTimeISO) : "";
+  const headerPrefix = `Latest: ${latest.rpm} RPM (${latestLabel || latest?.dateISO || ""})  Δ%=`;
   const deltaValue = pct != null ? `${pct.toFixed(1)}%` : "—";
   const headerX = axisX0 + scaled(2);
   ctx.font = fontPx(11.5);
