@@ -5353,10 +5353,24 @@ function renderSettings(){
       #explorer textarea{min-height:70px;resize:vertical}
       #explorer .task-note{grid-column:1/-1}
       #explorer .task-note textarea{min-height:90px}
+      #explorer .task-edit-hint{font-size:.78rem;color:#607196;margin-bottom:.45rem}
       #explorer .row-actions{display:flex;gap:.4rem;justify-content:flex-end;margin-top:.6rem;flex-wrap:wrap}
       #explorer .row-actions button{padding:.35rem .65rem;border-radius:6px;border:0;cursor:pointer;background:#eef3fb;color:#0a63c2}
+      #explorer .row-actions .btn-edit{margin-right:auto;background:#fff;color:#0f1e3a;border:1px solid #ccd4e0}
+      #explorer .row-actions .btn-edit:hover{background:#f3f5fb}
       #explorer .row-actions .danger{background:#e14b4b;color:#fff}
       #explorer .row-actions .btn-complete{background:#0a63c2;color:#fff}
+      #explorer [data-field]{position:relative}
+      #explorer .task[data-editing="0"] .task-edit-hint{display:block}
+      #explorer .task[data-editing="1"] .task-edit-hint{display:none}
+      #explorer .task[data-editing="0"] [data-field]{cursor:pointer}
+      #explorer .task[data-editing="0"] [data-field]::after{content:"Double-click to edit";position:absolute;left:0;right:0;bottom:-1.1rem;font-size:.7rem;color:#8a94a8;opacity:0;transition:opacity .2s ease}
+      #explorer .task[data-editing="0"] [data-field]:hover::after{opacity:1}
+      #explorer .task[data-editing="1"] [data-field]::after{content:""}
+      #explorer .task[data-editing="0"] input[readonly],
+      #explorer .task[data-editing="0"] textarea[readonly]{background:#f7f9fd;border-color:transparent;box-shadow:none;color:#10203a}
+      #explorer .task[data-editing="0"] select.is-locked-control{background:#f7f9fd;border-color:transparent;color:#10203a;opacity:1}
+      #explorer .task .is-locked-control{box-shadow:none}
       #maintenanceContextMenu{position:fixed;z-index:10000;background:#fff;border:1px solid #d0d7e4;border-radius:10px;box-shadow:0 14px 30px rgba(15,35,72,.16);display:flex;flex-direction:column;min-width:170px;padding:6px}
       #maintenanceContextMenu[hidden]{display:none}
       #maintenanceContextMenu button{background:none;border:0;text-align:left;padding:8px 12px;font-size:.9rem;color:#0f1e3a;border-radius:6px;cursor:pointer}
@@ -5725,7 +5739,7 @@ function renderSettings(){
       emptyAttrs: `data-empty-sub="${t.id}"`
     });
     return `
-      <details class="task task--${type}" data-task-id="${t.id}" data-owner="${type}">
+      <details class="task task--${type}" data-task-id="${t.id}" data-owner="${type}" data-editing="0">
         <summary draggable="true">
           <span class="task-name">${name}</span>
           <span class="chip">${type === "interval" ? "By Interval" : "As Required"}</span>
@@ -5733,21 +5747,25 @@ function renderSettings(){
           ${type === "interval" ? dueChip(t) : ""}
         </summary>
         <div class="body">
+          <div class="task-edit-hint" data-edit-hint>Double-click a field or use Edit to make changes.</div>
           <div class="grid">
-            <label>Task name<input data-k="name" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.name||"")}" placeholder="Name"></label>
-            <label>Type<select data-k="mode" data-id="${t.id}" data-list="${type}">
+            <label data-field="name">Task name<input data-k="name" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.name||"")}" placeholder="Name"></label>
+            <label data-field="mode">Type<select data-k="mode" data-id="${t.id}" data-list="${type}">
               <option value="interval" ${type==="interval"?"selected":""}>By interval</option>
               <option value="asreq" ${type==="asreq"?"selected":""}>As required</option>
             </select></label>
-            ${type === "interval" ? `<label>Frequency (hrs)<input type=\"number\" min=\"1\" step=\"1\" data-k=\"interval\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${t.interval!=null?t.interval:""}\" placeholder=\"Hours between service\"></label>` : `<label>Condition / trigger<input data-k=\"condition\" data-id=\"${t.id}\" data-list=\"asreq\" value=\"${escapeHtml(t.condition||"")}\" placeholder=\"When to perform\"></label>`}
-            ${type === "interval" ? `<label>Hours since last service<input type=\"number\" min=\"0\" step=\"0.01\" data-k=\"sinceBase\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${baselineVal!==""?baselineVal:""}\" placeholder=\"optional\"></label>` : ""}
-            <label>Manual link<input type="url" data-k="manualLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.manualLink||"")}" placeholder="https://..."></label>
-            <label>Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
-            <label>Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
-            <label>Price ($)<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${t.price!=null?t.price:""}" placeholder="optional"></label>
-            <label class="task-note">Note<textarea data-k="note" data-id="${t.id}" data-list="${type}" rows="2" placeholder="Optional note">${escapeHtml(t.note||"")}</textarea></label>
+            ${type === "interval"
+              ? `<label data-field="interval">Frequency (hrs)<input type=\"number\" min=\"1\" step=\"1\" data-k=\"interval\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${t.interval!=null?t.interval:""}\" placeholder=\"Hours between service\"></label>`
+              : `<label data-field="condition">Condition / trigger<input data-k=\"condition\" data-id=\"${t.id}\" data-list=\"asreq\" value=\"${escapeHtml(t.condition||"")}\" placeholder=\"When to perform\"></label>`}
+            ${type === "interval" ? `<label data-field="sinceBase">Hours since last service<input type=\"number\" min=\"0\" step=\"0.01\" data-k=\"sinceBase\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${baselineVal!==""?baselineVal:""}\" placeholder=\"optional\"></label>` : ""}
+            <label data-field="manualLink">Manual link<input type="url" data-k="manualLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.manualLink||"")}" placeholder="https://..."></label>
+            <label data-field="storeLink">Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
+            <label data-field="pn">Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
+            <label data-field="price">Price ($)<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${t.price!=null?t.price:""}" placeholder="optional"></label>
+            <label class="task-note" data-field="note">Note<textarea data-k="note" data-id="${t.id}" data-list="${type}" rows="2" placeholder="Optional note">${escapeHtml(t.note||"")}</textarea></label>
           </div>
           <div class="row-actions">
+            <button type="button" class="btn-edit" data-edit-task="${t.id}" aria-pressed="false">Edit</button>
             ${type === "interval" ? `<button class="btn-complete" data-complete="${t.id}">Mark completed now</button>` : ""}
             <button class="danger" data-remove="${t.id}" data-from="${type}">Remove</button>
           </div>
@@ -5931,6 +5949,95 @@ function renderSettings(){
   const searchClear = document.getElementById("maintenanceSearchClear");
   const contextMenu = document.getElementById("maintenanceContextMenu");
   let contextTarget = null;
+
+  const getTaskEditingState = (taskEl)=>{
+    if (!(taskEl instanceof HTMLElement)) return false;
+    return taskEl.getAttribute("data-editing") === "1";
+  };
+
+  const setTaskEditingState = (taskEl, editing)=>{
+    if (!(taskEl instanceof HTMLElement)) return;
+    const isEditing = !!editing;
+    taskEl.setAttribute("data-editing", isEditing ? "1" : "0");
+    taskEl.classList.toggle("is-editing", isEditing);
+    const controls = taskEl.querySelectorAll("input, textarea, select");
+    controls.forEach(ctrl => {
+      if (ctrl instanceof HTMLSelectElement){
+        ctrl.disabled = !isEditing;
+        ctrl.classList.toggle("is-locked-control", !isEditing);
+      }else if (ctrl instanceof HTMLTextAreaElement){
+        ctrl.readOnly = !isEditing;
+        ctrl.classList.toggle("is-locked-control", !isEditing);
+      }else if (ctrl instanceof HTMLInputElement){
+        if (ctrl.type === "checkbox" || ctrl.type === "radio" || ctrl.type === "button" || ctrl.type === "submit"){
+          ctrl.disabled = !isEditing;
+        }else{
+          ctrl.readOnly = !isEditing;
+        }
+        ctrl.classList.toggle("is-locked-control", !isEditing);
+      }
+      if (!isEditing && document.activeElement === ctrl){
+        ctrl.blur();
+      }
+    });
+    const hint = taskEl.querySelector("[data-edit-hint]");
+    if (hint) hint.hidden = isEditing;
+    const editBtn = taskEl.querySelector("[data-edit-task]");
+    if (editBtn){
+      editBtn.textContent = isEditing ? "Done" : "Edit";
+      editBtn.setAttribute("aria-pressed", isEditing ? "true" : "false");
+    }
+  };
+
+  const focusFirstEditableControl = (taskEl, preferredField)=>{
+    if (!(taskEl instanceof HTMLElement)) return;
+    let scope = null;
+    if (preferredField instanceof HTMLElement && taskEl.contains(preferredField)){
+      scope = preferredField;
+    }
+    const selector = "input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]), textarea, select";
+    let control = scope ? scope.querySelector(selector) : null;
+    if (!control){
+      control = taskEl.querySelector(selector);
+    }
+    if (control instanceof HTMLElement){
+      requestAnimationFrame(()=>{
+        control.focus();
+        if (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement){
+          if (typeof control.select === "function") control.select();
+        }
+      });
+    }
+  };
+
+  const lockAllTasks = ()=>{
+    if (!tree) return;
+    tree.querySelectorAll("details.task").forEach(task => setTaskEditingState(task, false));
+  };
+
+  lockAllTasks();
+
+  tree?.addEventListener("dblclick", (e)=>{
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    const field = target.closest("[data-field]");
+    if (!field) return;
+    const task = field.closest("details.task");
+    if (!task) return;
+    if (!getTaskEditingState(task)){
+      setTaskEditingState(task, true);
+    }
+    focusFirstEditableControl(task, field);
+  });
+
+  tree?.addEventListener("toggle", (e)=>{
+    const details = e.target;
+    if (!(details instanceof HTMLDetailsElement)) return;
+    if (!details.matches("details.task")) return;
+    if (!details.open){
+      setTaskEditingState(details, false);
+    }
+  });
 
   const promptRemoveLinkedInventory = async (task, matches)=>{
     const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
@@ -6470,6 +6577,7 @@ function renderSettings(){
     if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
     const holder = target.closest("[data-task-id]");
     if (!holder) return;
+    if (!getTaskEditingState(holder)) return;
     const id = holder.getAttribute("data-task-id");
     const meta = findTaskMeta(id);
     if (!meta) return;
@@ -6520,6 +6628,7 @@ function renderSettings(){
     if (!(target instanceof HTMLSelectElement)) return;
     const holder = target.closest("[data-task-id]");
     if (!holder) return;
+    if (!getTaskEditingState(holder)) return;
     const id = holder.getAttribute("data-task-id");
     const meta = findTaskMeta(id);
     if (!meta) return;
@@ -6550,6 +6659,17 @@ function renderSettings(){
   });
 
   tree?.addEventListener("click", async (e)=>{
+    const editBtn = e.target.closest('[data-edit-task]');
+    if (editBtn){
+      const holder = editBtn.closest('details.task');
+      if (!holder) return;
+      const nextState = !getTaskEditingState(holder);
+      setTaskEditingState(holder, nextState);
+      if (nextState){
+        focusFirstEditableControl(holder);
+      }
+      return;
+    }
     const removeBtn = e.target.closest('[data-remove]');
     if (removeBtn){
       const id = removeBtn.getAttribute('data-remove');
