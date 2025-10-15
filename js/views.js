@@ -298,10 +298,13 @@ function viewDashboard(){
             <label>Material quantity<input type="number" min="0" step="0.01" id="dashJobMaterialQty" placeholder="optional"></label>
             <label>Start date<input type="date" id="dashJobStart" required></label>
             <label>Due date<input type="date" id="dashJobDue" required></label>
-            <label>Category<select id="dashJobCategory">
+            <label>Category<select id="dashJobCategory" required>
               ${dashboardCategoryOptions}
               <option value="__new__">+ Create new category…</option>
-            </select></label>
+            </select>
+            <span class="small muted job-category-hint" id="dashJobCategoryHint" aria-live="polite">
+              Choose a category to keep jobs organized. We'll save it under All Jobs if you skip this step.
+            </span></label>
           </div>
           <div class="modal-actions">
             <button type="button" class="secondary" data-step-back>Back</button>
@@ -1650,6 +1653,7 @@ function viewJobs(){
   };
   const selectedCategoryRaw = typeof window.jobCategoryFilter === "string" ? window.jobCategoryFilter : rootCategoryId;
   const selectedCategory = folderMap.has(String(selectedCategoryRaw)) ? String(selectedCategoryRaw) : rootCategoryId;
+  const addJobDefaultCategory = rootCategoryId;
   window.jobCategoryFilter = selectedCategory;
 
   const initialOpenFolders = Array.isArray(window.jobCategoryOpenFolders)
@@ -2655,9 +2659,14 @@ function viewJobs(){
           <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
           <input type="date" id="jobStart" required>
           <input type="date" id="jobDue" required>
-          <select id="jobCategory" aria-label="Category" required>
-            ${categoryOptionsMarkup(selectedCategory, { includeCreateOption: true })}
-          </select>
+          <div class="job-category-field">
+            <select id="jobCategory" aria-label="Category" required>
+              ${categoryOptionsMarkup(addJobDefaultCategory, { includeCreateOption: true })}
+            </select>
+            <p class="small muted job-category-hint" id="jobCategoryHint" aria-live="polite">
+              Choose a category to keep jobs organized. We'll save it under All Jobs if you skip this step.
+            </p>
+          </div>
           <button type="button" id="jobFilesBtn">Attach Files</button>
           <input type="file" id="jobFiles" multiple style="display:none">
           <button type="submit">Add Job</button>
