@@ -1919,7 +1919,8 @@ body.modal-open .auth-bar {
   border: 1px solid rgba(16, 54, 118, 0.45);
   background: linear-gradient(135deg, #2f6df0, #1747c9);
   color: #ffffff;
-  font-weight: 600;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-weight: 700;
   font-size: 13px;
   text-decoration: none;
   box-shadow: 0 8px 22px rgba(17, 46, 112, 0.24);
