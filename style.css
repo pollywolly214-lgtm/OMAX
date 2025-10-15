@@ -4605,6 +4605,16 @@ tr.row-editing {
   box-shadow: 0 12px 20px rgba(6, 28, 76, 0.32);
 }
 
+.job-category-field {
+  display: flex;
+  flex-direction: column;
+}
+
+.job-category-hint {
+  display: block;
+  margin: 4px 0 0;
+}
+
 @media (max-width: 640px) {
   .dashboard-edit-popup {
     left: 16px;

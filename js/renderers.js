@@ -409,6 +409,14 @@ function restoreNewJobFormState(state){
   assignField("jobDue", state.fields.due);
   assignField("jobCategory", state.fields.category);
 
+  const categorySelect = document.getElementById("jobCategory");
+  const categoryHint = document.getElementById("jobCategoryHint");
+  if (categoryHint){
+    const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+    const current = categorySelect ? String(categorySelect.value || "") : "";
+    categoryHint.hidden = !!current && current !== rootId;
+  }
+
   if (state.active && state.active.id){
     const target = document.getElementById(state.active.id);
     if (target){
@@ -3142,6 +3150,13 @@ function renderDashboard(){
   const jobStartInput    = document.getElementById("dashJobStart");
   const jobDueInput      = document.getElementById("dashJobDue");
   const jobCategoryInput = document.getElementById("dashJobCategory");
+  const dashJobCategoryHint = document.getElementById("dashJobCategoryHint");
+  const dashRootCategoryId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+  const updateDashJobCategoryHint = ()=>{
+    if (!dashJobCategoryHint) return;
+    const current = jobCategoryInput ? String(jobCategoryInput.value || "") : "";
+    dashJobCategoryHint.hidden = !!current && current !== dashRootCategoryId;
+  };
   const garnetForm       = document.getElementById("dashGarnetForm");
   const garnetDateInput  = document.getElementById("dashGarnetDate");
   const garnetStartInput = document.getElementById("dashGarnetStart");
@@ -4103,6 +4118,8 @@ function renderDashboard(){
     renderCalendar();
   });
 
+  updateDashJobCategoryHint();
+
   jobForm?.addEventListener("submit", (e)=>{
     e.preventDefault();
     const name = (jobNameInput?.value || "").trim();
@@ -4131,6 +4148,11 @@ function renderDashboard(){
     }
     cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[], cat: categoryId });
     ensureJobCategories?.();
+    if (jobCategoryInput){
+      jobCategoryInput.value = dashRootCategoryId;
+      jobCategoryInput.dataset.prevValue = dashRootCategoryId;
+    }
+    updateDashJobCategoryHint();
     saveCloudDebounced();
     toast("Cutting job added");
     closeModal();
@@ -4153,12 +4175,15 @@ function renderDashboard(){
           jobCategoryInput.value = newOption.value;
           jobCategoryInput.dataset.prevValue = newOption.value;
           window.jobCategoryFilter = newOption.value;
+          updateDashJobCategoryHint();
         }else{
           const fallback = jobCategoryInput.dataset.prevValue || (window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"));
           jobCategoryInput.value = fallback;
+          updateDashJobCategoryHint();
         }
       }else{
         jobCategoryInput.dataset.prevValue = jobCategoryInput.value;
+        updateDashJobCategoryHint();
       }
     });
   }
@@ -10328,8 +10353,16 @@ function renderJobs(){
   }
 
   const jobCategorySelect = document.getElementById("jobCategory");
+  const jobCategoryHint = document.getElementById("jobCategoryHint");
+  const jobRootCategoryId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+  const updateJobCategoryHint = ()=>{
+    if (!jobCategoryHint) return;
+    const current = jobCategorySelect ? String(jobCategorySelect.value || "") : "";
+    jobCategoryHint.hidden = !!current && current !== jobRootCategoryId;
+  };
   if (jobCategorySelect){
     jobCategorySelect.dataset.prevValue = jobCategorySelect.value;
+    updateJobCategoryHint();
     jobCategorySelect.addEventListener("focus", ()=>{ jobCategorySelect.dataset.prevValue = jobCategorySelect.value; });
     jobCategorySelect.addEventListener("change", (event)=>{
       const select = event.target;
@@ -10352,6 +10385,7 @@ function renderJobs(){
       }else{
         select.dataset.prevValue = select.value;
       }
+      updateJobCategoryHint();
     });
   }
 
