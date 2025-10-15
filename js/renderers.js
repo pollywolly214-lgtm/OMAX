@@ -9,6 +9,18 @@ const sharedTimeEfficiencyStarts = (typeof window !== "undefined" && window.__ti
   : new Map();
 if (typeof window !== "undefined"){ window.__timeEfficiencyStartMap = sharedTimeEfficiencyStarts; }
 
+const EFFICIENCY_CHART_COLORS = {
+  background: "#ffffff",
+  grid: "#eef1f8",
+  axis: "#5b6271",
+  boundary: "#cbd2e3",
+  actualFill: "rgba(37, 99, 235, 0.28)",
+  actualStroke: "#2563eb",
+  target: "#f97316",
+  profit: "#2e7d32",
+  zero: "#aeb7cc"
+};
+
 function getCurrentMachineHours(){
   if (typeof RENDER_TOTAL === "number" && Number.isFinite(RENDER_TOTAL)){
     return Number(RENDER_TOTAL);
@@ -2654,6 +2666,466 @@ function describeTimeEfficiencyEdit(days){
   return "Choose a start date. It will snap to the first day of that month.";
 }
 
+function formatEfficiencyChartHours(value){
+  const num = Number(value);
+  if (!Number.isFinite(num) || Math.abs(num) < 1e-3) return "0";
+  const abs = Math.abs(num);
+  const decimals = abs >= 100 ? 0 : (abs >= 10 ? 1 : 2);
+  const rounded = Number(num.toFixed(decimals));
+  return rounded.toLocaleString(undefined, {
+    minimumFractionDigits: decimals > 0 ? Math.min(decimals, 1) : 0,
+    maximumFractionDigits: decimals > 0 ? Math.min(decimals, 1) : 0
+  });
+}
+
+function formatEfficiencyChartCurrency(value){
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  const abs = Math.abs(num);
+  const decimals = abs < 100 ? 2 : 0;
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  }).format(num);
+}
+
+function formatEfficiencyChartDate(iso){
+  if (!iso) return "";
+  const parsed = typeof parseDateLocal === "function"
+    ? parseDateLocal(iso)
+    : null;
+  const date = (parsed instanceof Date && !Number.isNaN(parsed))
+    ? parsed
+    : new Date(`${iso}T00:00:00`);
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return String(iso);
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function formatEfficiencyChartDateLong(iso){
+  if (!iso) return "";
+  const parsed = typeof parseDateLocal === "function"
+    ? parseDateLocal(iso)
+    : null;
+  const date = (parsed instanceof Date && !Number.isNaN(parsed))
+    ? parsed
+    : new Date(`${iso}T00:00:00`);
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return String(iso);
+  return date.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+}
+
+function computeNetProfitPerHourSeriesForRange(startISO, endISO){
+  if (!startISO || !endISO) return [];
+  const start = typeof parseDateLocal === "function"
+    ? parseDateLocal(startISO)
+    : null;
+  const end = typeof parseDateLocal === "function"
+    ? parseDateLocal(endISO)
+    : null;
+  const startDate = (start instanceof Date && !Number.isNaN(start)) ? start : new Date(`${startISO}T00:00:00`);
+  const endDate = (end instanceof Date && !Number.isNaN(end)) ? end : new Date(`${endISO}T00:00:00`);
+  if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) return [];
+  if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) return [];
+  startDate.setHours(0,0,0,0);
+  endDate.setHours(0,0,0,0);
+  if (endDate < startDate) return [];
+
+  const buckets = new Map();
+  const seenIds = new Set();
+
+  const ensureDateInRange = (iso)=>{
+    if (!iso) return null;
+    const parsed = typeof parseDateLocal === "function"
+      ? parseDateLocal(iso)
+      : null;
+    const base = (parsed instanceof Date && !Number.isNaN(parsed)) ? parsed : new Date(iso);
+    if (!(base instanceof Date) || Number.isNaN(base.getTime())) return null;
+    base.setHours(0,0,0,0);
+    if (base < startDate || base > endDate) return null;
+    return base;
+  };
+
+  const resolveJobDate = (job)=>{
+    if (!job) return null;
+    const candidates = [job.completedAtISO, job.dueISO, job.startISO];
+    for (const iso of candidates){
+      const date = ensureDateInRange(iso);
+      if (date) return date;
+    }
+    return null;
+  };
+
+  const addJob = (job)=>{
+    if (!job) return;
+    const id = job.id != null ? String(job.id) : null;
+    if (id && seenIds.has(id)) return;
+    const eff = (job.efficiency && typeof job.efficiency === "object")
+      ? job.efficiency
+      : (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
+    const rateCandidates = [
+      Number(eff?.netRate),
+      Number(eff?.rate)
+    ];
+    const rate = rateCandidates.find(val => Number.isFinite(val));
+    if (!Number.isFinite(rate)) return;
+    const date = resolveJobDate(job);
+    if (!date) return;
+    const key = typeof ymd === "function" ? ymd(date) : date.toISOString().slice(0, 10);
+    const bucket = buckets.get(key) || { total: 0, count: 0 };
+    bucket.total += rate;
+    bucket.count += 1;
+    buckets.set(key, bucket);
+    if (id) seenIds.add(id);
+  };
+
+  if (Array.isArray(completedCuttingJobs)){
+    completedCuttingJobs.forEach(addJob);
+  }
+  if (Array.isArray(cuttingJobs)){
+    cuttingJobs.forEach(addJob);
+  }
+
+  const series = Array.from(buckets.entries()).map(([iso, bucket])=>{
+    const date = typeof parseDateLocal === "function"
+      ? parseDateLocal(iso)
+      : null;
+    const parsed = (date instanceof Date && !Number.isNaN(date)) ? date : new Date(`${iso}T00:00:00`);
+    return {
+      dateISO: iso,
+      date: parsed,
+      value: bucket.count > 0 ? bucket.total / bucket.count : 0,
+      count: bucket.count
+    };
+  }).filter(entry => entry.date instanceof Date && !Number.isNaN(entry.date.getTime()));
+
+  series.sort((a,b)=> a.date - b.date);
+  return series;
+}
+
+function updateTimeEfficiencyChartAria(widget, data, hasProfit){
+  if (!widget || !(widget.chartCanvas instanceof HTMLCanvasElement) || !data) return;
+  const startLabel = formatEfficiencyChartDateLong(data.startISO);
+  const endLabel = formatEfficiencyChartDateLong(data.endISO);
+  const baselineDaily = Array.isArray(data.dailySeries) && data.dailySeries.length
+    ? Number(data.dailySeries[0].baselineHours)
+    : (Number(CUTTING_BASELINE_DAILY_HOURS) || 0);
+  const baselineLabel = baselineDaily > 0
+    ? `${baselineDaily.toFixed(baselineDaily >= 10 ? 0 : 1)} hr/day baseline`
+    : `no baseline target`;
+  let label = `Cutting time efficiency from ${startLabel} to ${endLabel}. Bars show actual run hours per day against a ${baselineLabel}.`;
+  if (hasProfit){
+    label += " Net profit per hour is overlaid as a line for correlation.";
+  }
+  widget.chartCanvas.setAttribute("aria-label", label);
+}
+
+function initializeTimeEfficiencyChart(widget){
+  if (!widget || widget.chartInit) return;
+  const root = widget.root instanceof HTMLElement ? widget.root : null;
+  if (!root) return;
+  const canvas = root.querySelector("[data-efficiency-chart-canvas]");
+  if (!(canvas instanceof HTMLCanvasElement)) return;
+  const wrap = canvas.closest("[data-efficiency-chart]") || canvas.parentElement;
+  widget.chartCanvas = canvas;
+  widget.chartWrap = wrap instanceof HTMLElement ? wrap : null;
+  widget.chartInit = true;
+  if (typeof ResizeObserver === "function"){
+    const observer = new ResizeObserver(()=> scheduleTimeEfficiencyChartDraw(widget));
+    widget.chartObserver = observer;
+    if (widget.chartWrap){
+      observer.observe(widget.chartWrap);
+    }else{
+      observer.observe(canvas);
+    }
+  }
+  if (!widget.chartResizeHandler && typeof window !== "undefined"){
+    const handler = ()=> scheduleTimeEfficiencyChartDraw(widget);
+    widget.chartResizeHandler = handler;
+    window.addEventListener("resize", handler);
+    window.addEventListener("layoutWindowResized", handler);
+  }
+}
+
+function scheduleTimeEfficiencyChartDraw(widget){
+  if (!widget) return;
+  widget.chartPending = true;
+  if (widget.chartRaf) return;
+  widget.chartRaf = requestAnimationFrame(()=>{
+    widget.chartRaf = null;
+    if (widget.chartPending){
+      widget.chartPending = false;
+      drawTimeEfficiencyChart(widget);
+    }
+  });
+}
+
+function drawTimeEfficiencyChart(widget){
+  if (!widget || !(widget.chartCanvas instanceof HTMLCanvasElement)) return;
+  const canvas = widget.chartCanvas;
+  const wrap = widget.chartWrap instanceof HTMLElement ? widget.chartWrap : canvas.parentElement;
+  const rect = wrap ? wrap.getBoundingClientRect() : null;
+  const fallbackWidth = canvas.clientWidth || 640;
+  let cssWidth = rect && rect.width ? rect.width : fallbackWidth;
+  if (!cssWidth || cssWidth < 320) cssWidth = 320;
+  let cssHeight = rect && rect.height ? rect.height : (cssWidth * 0.45);
+  if (!cssHeight || cssHeight < 220) cssHeight = 220;
+  const dpr = window.devicePixelRatio || 1;
+  const deviceWidth = Math.round(cssWidth * dpr);
+  const deviceHeight = Math.round(cssHeight * dpr);
+  if (canvas.width !== deviceWidth) canvas.width = deviceWidth;
+  if (canvas.height !== deviceHeight) canvas.height = deviceHeight;
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,deviceWidth,deviceHeight);
+  ctx.save();
+  ctx.scale(dpr, dpr);
+
+  const W = cssWidth;
+  const H = cssHeight;
+  ctx.fillStyle = EFFICIENCY_CHART_COLORS.background;
+  ctx.fillRect(0,0,W,H);
+
+  const data = widget.chartData;
+  const dailySeries = Array.isArray(data?.dailySeries) ? data.dailySeries : [];
+  if (!dailySeries.length){
+    ctx.fillStyle = "#9aa5b5";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("No cutting hours logged for this range.", W / 2, H / 2);
+    ctx.restore();
+    return;
+  }
+
+  const hasProfit = Array.isArray(widget.profitSeries) && widget.profitSeries.length > 0;
+  const rightMargin = hasProfit ? 96 : 56;
+  const top = 24;
+  const left = 64;
+  const right = Math.max(left + 120, W - rightMargin);
+  const bottom = Math.max(top + 140, H - 56);
+  const chartWidth = Math.max(1, right - left);
+  const chartHeight = Math.max(1, bottom - top);
+
+  let hoursMax = 0;
+  dailySeries.forEach(day => {
+    const actual = Number(day?.actualHours) || 0;
+    const baseline = Number(day?.baselineHours) || 0;
+    if (actual > hoursMax) hoursMax = actual;
+    if (baseline > hoursMax) hoursMax = baseline;
+  });
+  if (hoursMax <= 0) hoursMax = 1;
+  hoursMax += hoursMax * 0.1;
+
+  const mapDateToIndex = new Map();
+  dailySeries.forEach((day, index)=>{
+    if (day && typeof day.dateISO === "string"){
+      mapDateToIndex.set(day.dateISO, index);
+    }
+  });
+
+  const step = chartWidth / dailySeries.length;
+  const barWidth = Math.min(40, step * 0.6);
+  const barRadius = Math.max(2, Math.min(6, barWidth / 4));
+  const hourY = (value)=> bottom - ((Number(value) || 0) / hoursMax) * chartHeight;
+
+  const profitSeries = Array.isArray(widget.profitSeries) ? widget.profitSeries : [];
+  const profitPoints = profitSeries
+    .map(entry => {
+      const idx = mapDateToIndex.get(entry.dateISO);
+      if (idx == null) return null;
+      return { index: idx, value: Number(entry.value) || 0 };
+    })
+    .filter(Boolean)
+    .sort((a,b)=> a.index - b.index);
+
+  let profitMin = 0;
+  let profitMax = 0;
+  if (profitPoints.length){
+    profitPoints.forEach(pt => {
+      if (pt.value < profitMin) profitMin = pt.value;
+      if (pt.value > profitMax) profitMax = pt.value;
+    });
+    const range = profitMax - profitMin;
+    if (range < 1e-3){
+      const pad = Math.max(5, Math.abs(profitMax) || 10);
+      profitMin = profitMax - pad;
+      profitMax = profitMax + pad;
+    }else{
+      const pad = range * 0.1;
+      profitMin -= pad;
+      profitMax += pad;
+    }
+    if (profitMin > 0) profitMin = 0;
+    if (profitMax < 0) profitMax = 0;
+  }
+  const profitY = (value)=>{
+    if (!profitPoints.length) return bottom;
+    if (profitMax === profitMin) return bottom;
+    return bottom - ((Number(value) - profitMin) / (profitMax - profitMin)) * chartHeight;
+  };
+
+  const yTickCount = Math.min(6, Math.max(3, Math.round(chartHeight / 60)));
+  ctx.strokeStyle = EFFICIENCY_CHART_COLORS.boundary;
+  ctx.lineWidth = 1;
+  ctx.font = "12px sans-serif";
+  ctx.beginPath();
+  ctx.moveTo(left, top);
+  ctx.lineTo(left, bottom);
+  ctx.lineTo(right, bottom);
+  ctx.stroke();
+
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = EFFICIENCY_CHART_COLORS.axis;
+  ctx.font = "12px sans-serif";
+  for (let i = 0; i <= yTickCount; i++){
+    const value = (hoursMax / yTickCount) * i;
+    const y = hourY(value);
+    ctx.strokeStyle = i === 0 ? EFFICIENCY_CHART_COLORS.boundary : EFFICIENCY_CHART_COLORS.grid;
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+    ctx.stroke();
+    ctx.fillStyle = EFFICIENCY_CHART_COLORS.axis;
+    ctx.textAlign = "right";
+    ctx.fillText(formatEfficiencyChartHours(value), left - 10, y);
+  }
+
+  if (profitPoints.length){
+    const profitTickCount = Math.min(6, Math.max(3, Math.round(chartHeight / 70)));
+    ctx.textAlign = "left";
+    ctx.fillStyle = EFFICIENCY_CHART_COLORS.axis;
+    for (let i = 0; i <= profitTickCount; i++){
+      const ratio = (profitTickCount === 0) ? 0 : i / profitTickCount;
+      const value = profitMin + (profitMax - profitMin) * ratio;
+      const y = profitY(value);
+      ctx.fillText(formatEfficiencyChartCurrency(value), right + 10, y);
+    }
+    if (profitMin < 0 && profitMax > 0){
+      const zeroY = profitY(0);
+      ctx.strokeStyle = EFFICIENCY_CHART_COLORS.zero;
+      ctx.setLineDash([4, 6]);
+      ctx.beginPath();
+      ctx.moveTo(left, zeroY);
+      ctx.lineTo(right, zeroY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  const baselineValue = Number(dailySeries[0]?.baselineHours) || 0;
+  if (baselineValue > 0){
+    const baseY = hourY(baselineValue);
+    ctx.strokeStyle = EFFICIENCY_CHART_COLORS.target;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    ctx.moveTo(left, baseY);
+    ctx.lineTo(right, baseY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  dailySeries.forEach((day, index)=>{
+    const actual = Math.max(0, Number(day.actualHours) || 0);
+    const barHeight = (actual / hoursMax) * chartHeight;
+    const centerX = left + step * (index + 0.5);
+    const barX = centerX - (barWidth / 2);
+    const barY = bottom - barHeight;
+    ctx.fillStyle = EFFICIENCY_CHART_COLORS.actualFill;
+    ctx.strokeStyle = EFFICIENCY_CHART_COLORS.actualStroke;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(barX + barRadius, barY);
+    ctx.lineTo(barX + barWidth - barRadius, barY);
+    ctx.quadraticCurveTo(barX + barWidth, barY, barX + barWidth, barY + barRadius);
+    ctx.lineTo(barX + barWidth, bottom);
+    ctx.lineTo(barX, bottom);
+    ctx.lineTo(barX, barY + barRadius);
+    ctx.quadraticCurveTo(barX, barY, barX + barRadius, barY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  });
+
+  if (profitPoints.length){
+    ctx.strokeStyle = EFFICIENCY_CHART_COLORS.profit;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    profitPoints.forEach((pt, idx)=>{
+      const x = left + step * (pt.index + 0.5);
+      const y = profitY(pt.value);
+      if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.fillStyle = EFFICIENCY_CHART_COLORS.profit;
+    profitPoints.forEach(pt => {
+      const x = left + step * (pt.index + 0.5);
+      const y = profitY(pt.value);
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  const labelIndices = [];
+  const maxLabels = Math.min(8, Math.max(2, Math.round(chartWidth / 110)));
+  if (dailySeries.length <= maxLabels){
+    for (let i = 0; i < dailySeries.length; i++) labelIndices.push(i);
+  }else{
+    const stepSize = Math.ceil(dailySeries.length / (maxLabels - 1));
+    for (let i = 0; i < dailySeries.length; i += stepSize){
+      labelIndices.push(i);
+    }
+    if (labelIndices[labelIndices.length - 1] !== dailySeries.length - 1){
+      labelIndices.push(dailySeries.length - 1);
+    }
+  }
+
+  ctx.textBaseline = "top";
+  ctx.textAlign = "center";
+  ctx.fillStyle = EFFICIENCY_CHART_COLORS.axis;
+  labelIndices.forEach(idx => {
+    const day = dailySeries[idx];
+    const x = left + step * (idx + 0.5);
+    ctx.beginPath();
+    ctx.strokeStyle = EFFICIENCY_CHART_COLORS.grid;
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+    ctx.fillText(formatEfficiencyChartDate(day?.dateISO), x, bottom + 8);
+  });
+
+  ctx.restore();
+}
+
+function teardownTimeEfficiencyChart(widget){
+  if (!widget) return;
+  if (widget.chartObserver){
+    try {
+      widget.chartObserver.disconnect();
+    } catch (err){
+      console.warn(err);
+    }
+    widget.chartObserver = null;
+  }
+  if (widget.chartResizeHandler && typeof window !== "undefined"){
+    window.removeEventListener("resize", widget.chartResizeHandler);
+    window.removeEventListener("layoutWindowResized", widget.chartResizeHandler);
+    widget.chartResizeHandler = null;
+  }
+  if (widget.chartRaf && typeof cancelAnimationFrame === "function"){
+    cancelAnimationFrame(widget.chartRaf);
+  }
+  widget.chartRaf = null;
+  widget.chartPending = false;
+  widget.chartInit = false;
+}
+
 function refreshTimeEfficiencyWidget(widget){
   if (!widget || !widget.root || !widget.root.isConnected) return;
   const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
@@ -2684,6 +3156,9 @@ function refreshTimeEfficiencyWidget(widget){
       fallback: "Goal met"
     });
   }
+  if (widget.metrics.idle) widget.metrics.idle.textContent = formatTimeEfficiencyHours(data.idleHoursTotal);
+  if (widget.metrics.idlePercent) widget.metrics.idlePercent.textContent = formatTimeEfficiencyPercent(data.idlePercent);
+  if (widget.metrics.runPercent) widget.metrics.runPercent.textContent = formatTimeEfficiencyPercent(data.runPercent);
   if (widget.root){
     const trend = determineTimeEfficiencyTrend(data);
     if (trend){
@@ -2700,6 +3175,17 @@ function refreshTimeEfficiencyWidget(widget){
       || "";
     widget.labelEl.textContent = labelText;
   }
+  const shouldShowProfit = widget.profitMode === "jobs";
+  widget.profitSeries = shouldShowProfit
+    ? computeNetProfitPerHourSeriesForRange(data.startISO, data.endISO)
+    : [];
+  if (widget.legendProfit){
+    widget.legendProfit.hidden = !(Array.isArray(widget.profitSeries) && widget.profitSeries.length);
+  }
+  initializeTimeEfficiencyChart(widget);
+  widget.chartData = data;
+  updateTimeEfficiencyChartAria(widget, data, Array.isArray(widget.profitSeries) && widget.profitSeries.length > 0);
+  scheduleTimeEfficiencyChartDraw(widget);
   widget.lastStartISO = data.startISO || null;
   widget.lastEndISO = data.endISO || null;
   if (widget.editPanel && !widget.editPanel.hidden){
@@ -2711,6 +3197,7 @@ function refreshTimeEfficiencyWidgets(){
   for (let i = timeEfficiencyWidgets.length - 1; i >= 0; i--){
     const widget = timeEfficiencyWidgets[i];
     if (!widget || !widget.root || !widget.root.isConnected){
+      teardownTimeEfficiencyChart(widget);
       timeEfficiencyWidgets.splice(i, 1);
       continue;
     }
@@ -2818,7 +3305,10 @@ function setupTimeEfficiencyWidget(root){
     percent: root.querySelector("[data-efficiency-percent]"),
     percentGoal: root.querySelector("[data-efficiency-goal-percent]"),
     diffTarget: root.querySelector("[data-efficiency-gap-target]"),
-    diffGoal: root.querySelector("[data-efficiency-gap-goal]")
+    diffGoal: root.querySelector("[data-efficiency-gap-goal]"),
+    idle: root.querySelector("[data-efficiency-idle]"),
+    idlePercent: root.querySelector("[data-efficiency-idle-percent]"),
+    runPercent: root.querySelector("[data-efficiency-run-percent]")
   };
   const labelEl = root.querySelector("[data-efficiency-window-label]");
   const firstToggle = toggles[0];
@@ -2836,7 +3326,9 @@ function setupTimeEfficiencyWidget(root){
     editInput: root.querySelector("[data-efficiency-start-input]"),
     applyBtn: root.querySelector("[data-efficiency-apply]") || root.querySelector("[data-efficiency-save]") || null,
     cancelBtn: root.querySelector("[data-efficiency-cancel]") || null,
-    editNote: root.querySelector("[data-efficiency-edit-note]") || null
+    editNote: root.querySelector("[data-efficiency-edit-note]") || null,
+    legendProfit: root.querySelector("[data-efficiency-legend-profit]") || null,
+    profitMode: root.dataset.efficiencyProfit || ""
   };
   toggles.forEach(btn => {
     btn.addEventListener("click", ()=> selectTimeEfficiencyRange(widget, btn));
@@ -2853,6 +3345,7 @@ function setupTimeEfficiencyWidget(root){
   if (widget.cancelBtn){
     widget.cancelBtn.addEventListener("click", ()=> toggleTimeEfficiencyEditPanel(widget, false));
   }
+  initializeTimeEfficiencyChart(widget);
   timeEfficiencyWidgets.push(widget);
   root.dataset.timeEfficiencyBound = "1";
   refreshTimeEfficiencyWidget(widget);
