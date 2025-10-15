@@ -139,6 +139,9 @@ function createIntervalTaskInstance(template){
     storeLink: template.storeLink || "",
     pn: template.pn || "",
     price: template.price != null && Number.isFinite(Number(template.price)) ? Number(template.price) : null,
+    downtimeHours: typeof readTaskDowntimeHours === "function"
+      ? (readTaskDowntimeHours(template) ?? null)
+      : (Number.isFinite(Number(template?.downtimeHours)) && Number(template.downtimeHours) >= 0 ? Number(template.downtimeHours) : null),
     cat: template.cat ?? null,
     parentTask: template.parentTask ?? null,
     order: ++window._maintOrderCounter,
@@ -154,6 +157,67 @@ function createIntervalTaskInstance(template){
     copy.parts = template.parts.map(part => part ? { ...part } : part).filter(Boolean);
   }
   return copy;
+}
+
+async function ensureMaintenanceTaskReadyForCalendar(task){
+  const outcome = { proceed: true, missingCost: false, missingDowntime: false };
+  if (!task || typeof task !== "object") return outcome;
+
+  const totalCost = typeof readTaskMaintenanceCost === "function"
+    ? readTaskMaintenanceCost(task)
+    : Number(task?.price);
+  const downtimeVal = typeof readTaskDowntimeHours === "function"
+    ? readTaskDowntimeHours(task)
+    : Number(task?.downtimeHours);
+
+  const hasCost = Number.isFinite(totalCost) && totalCost > 0;
+  const hasDowntime = Number.isFinite(downtimeVal) && downtimeVal > 0;
+  outcome.missingCost = !hasCost;
+  outcome.missingDowntime = !hasDowntime;
+  if (hasCost && hasDowntime) return outcome;
+
+  const name = task && task.name ? `"${task.name}"` : "this maintenance task";
+  const summary = (!hasCost && !hasDowntime)
+    ? "a cost and downtime hours"
+    : (!hasCost ? "a cost" : "downtime hours");
+  const items = [];
+  if (!hasCost) items.push("Add a parts or labor cost greater than $0.");
+  if (!hasDowntime) items.push("Set downtime hours greater than 0.");
+
+  if (typeof showConfirmChoices === "function"){
+    const choice = await showConfirmChoices({
+      title: "Update maintenance task details",
+      message: `${name} is missing ${summary}. Update it before scheduling?`,
+      items,
+      cancelText: "Cancel",
+      confirmText: "Edit in settings",
+      confirmVariant: "primary",
+      secondaryText: "Schedule anyway",
+      secondaryVariant: "secondary"
+    });
+    if (choice === "cancel"){
+      return { ...outcome, proceed: false, cancelled: true };
+    }
+    if (choice === "confirm"){
+      const targetId = isTemplateTask(task)
+        ? (task.id != null ? task.id : task.templateId)
+        : (task.templateId != null ? task.templateId : task.id);
+      if (targetId != null && typeof openSettingsAndReveal === "function"){
+        try { openSettingsAndReveal(targetId); }
+        catch (err) { console.warn("Failed to open Maintenance Settings for task", err); }
+      }
+      return { ...outcome, proceed: false, redirected: true };
+    }
+    return outcome;
+  }
+
+  const fallback = window.confirm
+    ? window.confirm(`${name} is missing ${summary}. Continue scheduling without updating?`)
+    : true;
+  if (!fallback){
+    return { ...outcome, proceed: false, cancelled: true };
+  }
+  return outcome;
 }
 
 function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
@@ -3085,6 +3149,7 @@ function renderDashboard(){
   const taskStoreInput   = document.getElementById("dashTaskStore");
   const taskPNInput      = document.getElementById("dashTaskPN");
   const taskPriceInput   = document.getElementById("dashTaskPrice");
+  const taskDowntimeInput= document.getElementById("dashTaskDowntime");
   const categorySelect   = document.getElementById("dashTaskCategory");
   const taskDateInput    = document.getElementById("dashTaskDate");
   const subtaskList      = document.getElementById("dashSubtaskList");
@@ -3875,7 +3940,7 @@ function renderDashboard(){
     if (row) subtaskList?.appendChild(row);
   });
 
-  taskForm?.addEventListener("submit", (e)=>{
+  taskForm?.addEventListener("submit", async (e)=>{
     e.preventDefault();
     if (!taskForm) return;
     const name = (taskNameInput?.value || "").trim();
@@ -3886,6 +3951,13 @@ function renderDashboard(){
     const pn     = (taskPNInput?.value || "").trim();
     const priceVal = taskPriceInput?.value;
     const price  = priceVal === "" ? null : Number(priceVal);
+    const downtimeRaw = taskDowntimeInput?.value ?? "";
+    let downtimeHours = null;
+    if (downtimeRaw !== ""){
+      const parsedDowntime = Number(downtimeRaw);
+      if (!Number.isFinite(parsedDowntime) || parsedDowntime < 0){ toast("Enter a valid down time value."); return; }
+      downtimeHours = parsedDowntime;
+    }
     const catId  = (categorySelect?.value || "").trim() || null;
     const id     = genId(name);
     const rawDate = (taskDateInput?.value || "").trim();
@@ -3899,12 +3971,68 @@ function renderDashboard(){
       storeLink: store,
       pn,
       price: isFinite(price) ? price : null,
+      downtimeHours: downtimeHours,
       cat: catId,
       parentTask: null,
       order: ++window._maintOrderCounter,
       calendarDateISO: null
     };
     let message = "Task added";
+
+    const applySubtasks = ()=>{
+      const parentInterval = Number(taskIntervalInput?.value);
+      const subRows = subtaskList ? Array.from(subtaskList.querySelectorAll("[data-subtask-row]")) : [];
+      subRows.forEach(row => {
+        const subName = (row.querySelector("[data-subtask-name]")?.value || "").trim();
+        if (!subName) return;
+        const subTypeSel = row.querySelector("[data-subtask-type]");
+        const subMode = subTypeSel && subTypeSel.value === "asreq" ? "asreq" : "interval";
+        const subBase = {
+          id: genId(subName),
+          name: subName,
+          manualLink: "",
+          storeLink: "",
+          pn: "",
+          price: null,
+          cat: catId,
+          parentTask: id,
+          order: ++window._maintOrderCounter,
+          calendarDateISO: null
+        };
+        if (subMode === "interval"){
+          const intervalField = row.querySelector("[data-subtask-interval]");
+          let subInterval = Number(intervalField?.value);
+          if (!isFinite(subInterval) || subInterval <= 0){
+            subInterval = isFinite(parentInterval) && parentInterval > 0 ? parentInterval : 8;
+          }
+          const subTask = Object.assign({}, subBase, {
+            mode:"interval",
+            interval: subInterval,
+            sinceBase:0,
+            anchorTotal:null,
+            completedDates: [],
+            manualHistory: [],
+            variant: "template",
+            templateId: subBase.id
+          });
+          const curHours = getCurrentMachineHours();
+          const lastField = row.querySelector("[data-subtask-last]");
+          const baselineHours = parseBaselineHours(lastField?.value);
+          applyIntervalBaseline(subTask, { baselineHours, currentHours: curHours });
+          tasksInterval.unshift(subTask);
+        }else{
+          const condInput = row.querySelector("[data-subtask-condition-input]");
+          const subTask = Object.assign({}, subBase, {
+            mode:"asreq",
+            condition: (condInput?.value || "").trim() || "As required",
+            variant: "template",
+            templateId: subBase.id
+          });
+          tasksAsReq.unshift(subTask);
+        }
+      });
+    };
+
     if (mode === "interval"){
       let interval = Number(taskIntervalInput?.value);
       if (!isFinite(interval) || interval <= 0) interval = 8;
@@ -3921,7 +4049,24 @@ function renderDashboard(){
       const curHours = getCurrentMachineHours();
       const baselineHours = parseBaselineHours(taskLastInput?.value);
       applyIntervalBaseline(template, { baselineHours, currentHours: curHours });
+      const readiness = await ensureMaintenanceTaskReadyForCalendar(template);
+      if (!readiness.proceed){
+        if (readiness.redirected){
+          tasksInterval.unshift(template);
+          applySubtasks();
+          try { if (typeof saveTasks === "function") saveTasks(); } catch (_){}
+          try { saveCloudDebounced(); } catch (_){ }
+          if (typeof broadcastMaintenanceTasksUpdated === "function"){
+            try { broadcastMaintenanceTasksUpdated({ source: "calendar-add-blocked" }); }
+            catch (err) { console.warn("Failed to broadcast maintenance update", err); }
+          }
+          toast("Update maintenance cost and downtime before scheduling.");
+          closeModal();
+        }
+        return;
+      }
       tasksInterval.unshift(template);
+      applySubtasks();
       const instance = scheduleExistingIntervalTask(template, { dateISO: targetISO }) || template;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
@@ -3941,60 +4086,9 @@ function renderDashboard(){
       const condition = (taskConditionInput?.value || "").trim() || "As required";
       const task = Object.assign({}, base, { mode:"asreq", condition, variant: "template", templateId: id });
       tasksAsReq.unshift(task);
+      applySubtasks();
       message = "As-required task added to Maintenance Settings";
     }
-
-    const parentInterval = Number(taskIntervalInput?.value);
-    const subRows = subtaskList ? Array.from(subtaskList.querySelectorAll("[data-subtask-row]")) : [];
-    subRows.forEach(row => {
-      const subName = (row.querySelector("[data-subtask-name]")?.value || "").trim();
-      if (!subName) return;
-      const subTypeSel = row.querySelector("[data-subtask-type]");
-      const subMode = subTypeSel && subTypeSel.value === "asreq" ? "asreq" : "interval";
-      const subBase = {
-        id: genId(subName),
-        name: subName,
-        manualLink: "",
-        storeLink: "",
-        pn: "",
-        price: null,
-        cat: catId,
-        parentTask: id,
-        order: ++window._maintOrderCounter,
-        calendarDateISO: null
-      };
-      if (subMode === "interval"){
-        const intervalField = row.querySelector("[data-subtask-interval]");
-        let subInterval = Number(intervalField?.value);
-        if (!isFinite(subInterval) || subInterval <= 0){
-          subInterval = isFinite(parentInterval) && parentInterval > 0 ? parentInterval : 8;
-        }
-        const subTask = Object.assign({}, subBase, {
-          mode:"interval",
-          interval: subInterval,
-          sinceBase:0,
-          anchorTotal:null,
-          completedDates: [],
-          manualHistory: [],
-          variant: "template",
-          templateId: subBase.id
-        });
-        const curHours = getCurrentMachineHours();
-        const lastField = row.querySelector("[data-subtask-last]");
-        const baselineHours = parseBaselineHours(lastField?.value);
-        applyIntervalBaseline(subTask, { baselineHours, currentHours: curHours });
-        tasksInterval.unshift(subTask);
-      }else{
-        const condInput = row.querySelector("[data-subtask-condition-input]");
-        const subTask = Object.assign({}, subBase, {
-          mode:"asreq",
-          condition: (condInput?.value || "").trim() || "As required",
-          variant: "template",
-          templateId: subBase.id
-        });
-        tasksAsReq.unshift(subTask);
-      }
-    });
 
     setContextDate(calendarDateISO);
     saveCloudDebounced();
@@ -4007,7 +4101,7 @@ function renderDashboard(){
     }
   });
 
-  taskExistingForm?.addEventListener("submit", (e)=>{
+  taskExistingForm?.addEventListener("submit", async (e)=>{
     e.preventDefault();
     const selectedId = existingTaskSelect?.value;
     if (!selectedId){ alert("Select a maintenance task to schedule."); return; }
@@ -4018,6 +4112,14 @@ function renderDashboard(){
       return;
     }
     const task = meta.task;
+    const readiness = await ensureMaintenanceTaskReadyForCalendar(task);
+    if (!readiness.proceed){
+      if (readiness.redirected){
+        closeModal();
+        toast("Update maintenance cost and downtime before scheduling.");
+      }
+      return;
+    }
     const targetISO = addContextDateISO || ymd(new Date());
     let message = "Maintenance task added";
     if (task.mode === "interval"){
@@ -5326,6 +5428,8 @@ function renderSettings(){
       #explorer .toolbar{display:flex;flex-direction:column;align-items:center;gap:.75rem;margin-bottom:.75rem}
       #explorer .toolbar-actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;width:100%}
       #explorer .toolbar-actions button{padding:.35rem .65rem;font-size:.92rem;border-radius:8px}
+      #explorer .toolbar-actions button.primary{background:#0a63c2;color:#fff}
+      #explorer .toolbar-actions button.primary:hover:not(:disabled){background:#084f9e}
       #explorer .toolbar-actions button.danger{background:#ffe7e7;color:#b00020}
       #explorer .toolbar-actions button.danger:hover:not(:disabled){background:#ffd1d1}
       #explorer .toolbar-actions button:disabled{opacity:.55;cursor:default}
@@ -5745,6 +5849,7 @@ function renderSettings(){
             <label>Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
             <label>Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
             <label>Price ($)<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${t.price!=null?t.price:""}" placeholder="optional"></label>
+            <label>Down time (hrs)<input type="number" step="0.25" min="0" data-k="downtimeHours" data-id="${t.id}" data-list="${type}" value="${(typeof readTaskDowntimeHours === "function" ? (readTaskDowntimeHours(t) ?? "") : (Number.isFinite(Number(t?.downtimeHours)) && Number(t.downtimeHours) >= 0 ? Number(t.downtimeHours) : ""))}" placeholder="optional"></label>
             <label class="task-note">Note<textarea data-k="note" data-id="${t.id}" data-list="${type}" rows="2" placeholder="Optional note">${escapeHtml(t.note||"")}</textarea></label>
           </div>
           <div class="row-actions">
@@ -5869,6 +5974,7 @@ function renderSettings(){
           <div class="toolbar-actions">
             <button id="btnAddCategory">+ Add Category</button>
             <button id="btnAddTask">+ Add Task</button>
+            <button id="saveMaintenanceTasksBtn" class="primary" title="Save maintenance tasks">Save changes</button>
             <button id="btnClearAllDataInline" class="danger" data-clear-all="1" title="Reset all maintenance data">🧹 Clear All Data</button>
           </div>
           <div class="toolbar-search">
@@ -5930,6 +6036,7 @@ function renderSettings(){
   const searchInput = document.getElementById("maintenanceSearch");
   const searchClear = document.getElementById("maintenanceSearchClear");
   const contextMenu = document.getElementById("maintenanceContextMenu");
+  const saveBtn = document.getElementById("saveMaintenanceTasksBtn");
   let contextTarget = null;
 
   const promptRemoveLinkedInventory = async (task, matches)=>{
@@ -6081,6 +6188,35 @@ function renderSettings(){
         const nextInput = document.getElementById("maintenanceSearch");
         nextInput?.focus();
       }, 0);
+    });
+  }
+
+  if (saveBtn){
+    saveBtn.addEventListener("click", ()=>{
+      persist();
+      let broadcasted = false;
+      if (typeof broadcastMaintenanceTasksUpdated === "function"){
+        try {
+          broadcastMaintenanceTasksUpdated({ source: "maintenance-settings-save" });
+          broadcasted = true;
+        } catch (err) {
+          console.warn("Failed to broadcast maintenance task save", err);
+        }
+      }
+      if (!broadcasted){
+        try { if (typeof renderCalendar === "function") renderCalendar(); }
+        catch (err) { console.warn("Failed to refresh calendar after save", err); }
+        try { if (typeof renderDashboard === "function") renderDashboard(); }
+        catch (err) { console.warn("Failed to refresh dashboard after save", err); }
+        if (typeof renderCosts === "function"){
+          const hash = (location.hash || "#").toLowerCase();
+          if (hash === "#/costs" || hash === "#costs"){
+            try { renderCosts(); }
+            catch (err) { console.warn("Failed to refresh costs after save", err); }
+          }
+        }
+      }
+      toast("Maintenance tasks saved");
     });
   }
 
@@ -6476,7 +6612,7 @@ function renderSettings(){
     const key = target.getAttribute("data-k");
     if (!key || key === "mode") return;
     let value = target.value;
-    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase"){
+    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase" || key === "downtimeHours"){
       value = value === "" ? null : Number(value);
       if (value !== null && !isFinite(value)) return;
     }
@@ -6507,6 +6643,8 @@ function renderSettings(){
       updateDueChip(holder, meta.task);
     }else if (key === "price"){
       meta.task.price = value == null ? null : Number(value);
+    }else if (key === "downtimeHours"){
+      meta.task.downtimeHours = value == null ? null : Math.max(0, Number(value));
     }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
       meta.task[key] = target.value;
       if (key === "name"){ const label = holder.querySelector('.task-name'); if (label) label.textContent = target.value || "(unnamed task)"; }
@@ -6910,6 +7048,169 @@ const COST_CHART_COLORS = {
   maintenance: "#0a63c2",
   jobs: "#2e7d32"
 };
+
+function collectMaintenanceEventsForCost(options = {}){
+  const monthsAhead = Number.isFinite(Number(options.monthsAhead)) && Number(options.monthsAhead) > 0
+    ? Number(options.monthsAhead)
+    : 12;
+  const statusPriority = { completed: 3, manual: 2, due: 1 };
+  const eventsByDate = new Map();
+
+  const resolveDowntime = (task)=>{
+    if (typeof readTaskDowntimeHours === "function"){
+      const val = readTaskDowntimeHours(task);
+      if (val == null) return 0;
+      return Number.isFinite(val) && val >= 0 ? val : 0;
+    }
+    const raw = Number(task?.downtimeHours);
+    return Number.isFinite(raw) && raw >= 0 ? raw : 0;
+  };
+
+  const resolvePrice = (task)=>{
+    if (typeof readTaskMaintenanceCost === "function"){
+      const total = readTaskMaintenanceCost(task);
+      if (Number.isFinite(total) && total > 0) return total;
+    }
+    let total = 0;
+    const raw = Number(task?.price);
+    if (Number.isFinite(raw) && raw > 0) total += raw;
+    const parts = Array.isArray(task?.parts) ? task.parts : [];
+    for (const part of parts){
+      const partPrice = Number(part?.price);
+      if (Number.isFinite(partPrice) && partPrice > 0){
+        total += partPrice;
+      }
+    }
+    return total;
+  };
+
+  const pushEvent = (task, iso, status)=>{
+    if (!task || !iso) return;
+    const key = normalizeDateKey(iso);
+    if (!key) return;
+    const id = String(task.id);
+    if (!id) return;
+    const statusKey = status || "due";
+    const downtimeHours = resolveDowntime(task);
+    const price = resolvePrice(task);
+    const list = eventsByDate.get(key) || [];
+    const current = list.find(ev => ev.id === id);
+    if (current){
+      const existingPriority = statusPriority[current.status] || 1;
+      const nextPriority = statusPriority[statusKey] || 1;
+      if (nextPriority >= existingPriority){
+        current.status = statusKey;
+      }
+      current.downtimeHours = downtimeHours;
+      current.price = price;
+    }else{
+      list.push({
+        id,
+        status: statusKey,
+        mode: task && task.mode === "asreq" ? "asreq" : "interval",
+        downtimeHours,
+        price,
+        dateISO: key
+      });
+    }
+    eventsByDate.set(key, list);
+  };
+
+  const intervalTasks = Array.isArray(window.tasksInterval)
+    ? window.tasksInterval.filter(t => t && t.mode === "interval" && isInstanceTask(t))
+    : [];
+  const completedByTask = new Map();
+  intervalTasks.forEach(t => {
+    if (!t) return;
+    const rawDates = Array.isArray(t.completedDates) ? t.completedDates : [];
+    const set = new Set();
+    rawDates.map(normalizeDateKey).filter(Boolean).forEach(key => set.add(key));
+    completedByTask.set(String(t.id), set);
+  });
+  intervalTasks.forEach(t => {
+    if (!t) return;
+    const taskKey = String(t.id);
+    let completedKeys = completedByTask.get(taskKey);
+    if (!(completedKeys instanceof Set)){
+      completedKeys = new Set();
+      completedByTask.set(taskKey, completedKeys);
+    }
+    completedKeys.forEach(dateKey => {
+      if (!dateKey) return;
+      pushEvent(t, dateKey, "completed");
+    });
+
+    const manualHistory = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(t)
+      : (Array.isArray(t.manualHistory) ? t.manualHistory : []);
+    const manualDates = new Set();
+    manualHistory.forEach(entry => {
+      if (!entry) return;
+      const entryKey = normalizeDateKey(entry.dateISO);
+      if (!entryKey) return;
+      const entryStatus = entry.status || "logged";
+      if (entryStatus === "completed"){
+        if (!completedKeys.has(entryKey)){
+          completedKeys.add(entryKey);
+          pushEvent(t, entryKey, "completed");
+        }
+        return;
+      }
+      manualDates.add(entryKey);
+    });
+
+    const manualKey = normalizeDateKey(t.calendarDateISO);
+    if (manualKey) manualDates.add(manualKey);
+
+    manualDates.forEach(dateKey => {
+      if (!dateKey) return;
+      if (completedKeys.has(dateKey)) return;
+      pushEvent(t, dateKey, "manual");
+    });
+
+    const skipDates = new Set(completedKeys);
+    manualDates.forEach(dateKey => skipDates.add(dateKey));
+    const projections = projectIntervalDueDates(t, {
+      monthsAhead,
+      excludeDates: skipDates,
+      minOccurrences: 6
+    });
+    if (Array.isArray(projections) && projections.length){
+      projections.forEach(pred => {
+        const dueKey = normalizeDateKey(pred?.dateISO);
+        if (!dueKey) return;
+        if (completedKeys.has(dueKey)) return;
+        if (manualKey && manualKey === dueKey && !completedKeys.has(dueKey)) return;
+        pushEvent(t, dueKey, "due");
+      });
+      return;
+    }
+
+    const nd = nextDue(t);
+    if (!nd) return;
+    const dueKey = normalizeDateKey(nd.due);
+    if (!dueKey) return;
+    if (completedKeys.has(dueKey)) return;
+    if (!manualKey || manualKey !== dueKey){
+      pushEvent(t, dueKey, "due");
+    }
+  });
+
+  const asReqTasks = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  asReqTasks.forEach(t => {
+    if (!t) return;
+    const completedDates = new Set(Array.isArray(t.completedDates) ? t.completedDates.map(normalizeDateKey).filter(Boolean) : []);
+    completedDates.forEach(dateKey => {
+      if (dateKey) pushEvent(t, dateKey, "completed");
+    });
+    const manualKey = normalizeDateKey(t.calendarDateISO);
+    if (manualKey){
+      pushEvent(t, manualKey, completedDates.has(manualKey) ? "completed" : "manual");
+    }
+  });
+
+  return eventsByDate;
+}
 
 function resizeCostChartCanvas(canvas){
   if (!canvas) return;
@@ -7862,6 +8163,23 @@ function renderCosts(){
     });
   }
 
+  const downtimeRateBtn = content.querySelector("[data-edit-downtime-rate]");
+  if (downtimeRateBtn){
+    downtimeRateBtn.addEventListener("click", ()=>{
+      const current = Number(window.downtimeBaseLossRate);
+      const promptValue = window.prompt("Set fallback downtime loss rate ($/hr)", Number.isFinite(current) && current >= 0 ? String(current) : "150");
+      if (promptValue == null) return;
+      const parsed = Number(promptValue);
+      if (!Number.isFinite(parsed) || parsed < 0){
+        window.alert("Enter a non-negative loss rate.");
+        return;
+      }
+      window.downtimeBaseLossRate = parsed;
+      if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){} }
+      renderCosts();
+    });
+  }
+
   const canvas = document.getElementById("costChart");
   const toggleMaint = document.getElementById("toggleCostMaintenance");
   const toggleJobs  = document.getElementById("toggleCostJobs");
@@ -8685,6 +9003,99 @@ function computeCostModel(){
   const jobCount = completedCount;
   const averageGainLoss = jobCount ? (totalGainLoss / jobCount) : 0;
 
+  const downtimeBaseRateRaw = Number(window.downtimeBaseLossRate);
+  const downtimeBaseRate = Number.isFinite(downtimeBaseRateRaw) && downtimeBaseRateRaw >= 0 ? downtimeBaseRateRaw : 150;
+  const jobRateByDate = new Map();
+  if (Array.isArray(cuttingJobs)){
+    cuttingJobs.forEach(job => {
+      if (!job) return;
+      let netRate = null;
+      if (typeof computeJobEfficiency === "function"){
+        try {
+          const eff = computeJobEfficiency(job);
+          if (eff && typeof eff.netRate === "number") netRate = Number(eff.netRate);
+        } catch (err){
+          netRate = null;
+        }
+      }
+      if (!Number.isFinite(netRate)){
+        const fallbackRate = Number(job?.netRate);
+        if (Number.isFinite(fallbackRate)) netRate = fallbackRate;
+      }
+      if (!Number.isFinite(netRate) || netRate <= 0) return;
+      const start = parseDateLocal(job.startISO);
+      const end = parseDateLocal(job.dueISO);
+      if (!start || !end) return;
+      start.setHours(0,0,0,0);
+      end.setHours(0,0,0,0);
+      const cursor = new Date(start.getTime());
+      while (cursor <= end){
+        const key = ymd(cursor);
+        jobRateByDate.set(key, (jobRateByDate.get(key) || 0) + netRate);
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    });
+  }
+
+  const maintenanceEventsMap = typeof collectMaintenanceEventsForCost === "function"
+    ? collectMaintenanceEventsForCost({ monthsAhead: 12 })
+    : new Map();
+  const downtimeDailyRaw = [];
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  maintenanceEventsMap.forEach((events, dateISO) => {
+    if (!Array.isArray(events) || !events.length) return;
+    const parsed = parseDateLocal(dateISO) || new Date(`${dateISO}T00:00:00`);
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return;
+    parsed.setHours(0,0,0,0);
+    let actualTaskCost = 0;
+    let projectedTaskCost = 0;
+    let actualHours = 0;
+    let projectedHours = 0;
+    events.forEach(ev => {
+      const price = Number(ev?.price);
+      const downtimeHours = Number(ev?.downtimeHours);
+      const safePrice = Number.isFinite(price) && price > 0 ? price : 0;
+      const safeHours = Number.isFinite(downtimeHours) && downtimeHours > 0 ? downtimeHours : 0;
+      if (ev && ev.status === "completed"){
+        actualTaskCost += safePrice;
+        actualHours += safeHours;
+      }else{
+        projectedTaskCost += safePrice;
+        projectedHours += safeHours;
+      }
+    });
+    if (actualTaskCost === 0 && projectedTaskCost === 0 && actualHours === 0 && projectedHours === 0) return;
+    const dateKey = dateISO;
+    const jobRate = jobRateByDate.get(dateKey) || 0;
+    const rate = jobRate > 0 ? jobRate : downtimeBaseRate;
+    const actualDowntimeLoss = actualHours > 0 ? actualHours * rate : 0;
+    const projectedDowntimeLoss = projectedHours > 0 ? projectedHours * rate : 0;
+    downtimeDailyRaw.push({
+      dateISO: dateKey,
+      date: parsed,
+      rate,
+      actualTaskCost,
+      projectedTaskCost,
+      actualHours,
+      projectedHours,
+      actualDowntimeLoss,
+      projectedDowntimeLoss,
+      actualTotal: actualTaskCost + actualDowntimeLoss,
+      projectedTotal: projectedTaskCost + projectedDowntimeLoss
+    });
+  });
+  downtimeDailyRaw.sort((a,b)=> (a.date?.getTime() || 0) - (b.date?.getTime() || 0));
+
+  const downtimeTimeframes = [
+    { key: "day", label: "1 day", days: 1 },
+    { key: "week", label: "1 week", days: 7 },
+    { key: "month", label: "1 month", days: 30 },
+    { key: "quarter", label: "3 months", days: 90 },
+    { key: "half", label: "6 months", days: 182 },
+    { key: "year", label: "1 year", days: 365 }
+  ];
+
   const formatterCurrency = (value, { showPlus=false, decimals=null } = {})=>{
     const absVal = Math.abs(value);
     const fractionDigits = decimals != null ? decimals : (absVal < 1000 ? 2 : 0);
@@ -8736,6 +9147,82 @@ function computeCostModel(){
     hoursLabel: formatHours(row.hours),
     costLabel: formatterCurrency(row.costActual, { decimals: row.costActual < 1000 ? 2 : 0 }),
     projectedLabel: formatterCurrency(row.costProjected, { decimals: row.costProjected < 1000 ? 2 : 0 })
+  }));
+
+  const todayTime = today.getTime();
+  const downtimeRowsRaw = downtimeTimeframes.map(frame => {
+    const actualStart = new Date(today);
+    actualStart.setDate(today.getDate() - (frame.days - 1));
+    const projectedEnd = new Date(today);
+    projectedEnd.setDate(today.getDate() + (frame.days - 1));
+    const actualStartTime = actualStart.getTime();
+    const projectedEndTime = projectedEnd.getTime();
+    let actualTotal = 0;
+    let projectedTotal = 0;
+    let actualHours = 0;
+    let projectedHours = 0;
+    let actualTaskCost = 0;
+    let projectedTaskCost = 0;
+    let actualDowntimeLoss = 0;
+    let projectedDowntimeLoss = 0;
+    downtimeDailyRaw.forEach(entry => {
+      const entryTime = entry.date instanceof Date ? entry.date.getTime() : null;
+      if (entryTime == null) return;
+      if (entryTime >= actualStartTime && entryTime <= todayTime){
+        actualTotal += entry.actualTotal;
+        actualHours += Number(entry.actualHours) || 0;
+        actualTaskCost += Number(entry.actualTaskCost) || 0;
+        actualDowntimeLoss += Number(entry.actualDowntimeLoss) || 0;
+      }
+      if (entryTime >= todayTime && entryTime <= projectedEndTime){
+        projectedTotal += entry.projectedTotal;
+        projectedHours += Number(entry.projectedHours) || 0;
+        projectedTaskCost += Number(entry.projectedTaskCost) || 0;
+        projectedDowntimeLoss += Number(entry.projectedDowntimeLoss) || 0;
+      }
+    });
+    return {
+      key: frame.key,
+      label: frame.label,
+      days: frame.days,
+      actualTotal,
+      projectedTotal,
+      actualHours,
+      projectedHours,
+      actualTaskCost,
+      projectedTaskCost,
+      actualDowntimeLoss,
+      projectedDowntimeLoss
+    };
+  });
+
+  const downtimeRows = downtimeRowsRaw.map(row => ({
+    key: row.key,
+    label: row.label,
+    actualValue: row.actualTotal,
+    projectedValue: row.projectedTotal,
+    actualHours: row.actualHours,
+    projectedHours: row.projectedHours,
+    actualTaskCost: row.actualTaskCost,
+    projectedTaskCost: row.projectedTaskCost,
+    actualDowntimeLoss: row.actualDowntimeLoss,
+    projectedDowntimeLoss: row.projectedDowntimeLoss,
+    actualLabel: formatterCurrency(row.actualTotal, { decimals: row.actualTotal < 1000 ? 2 : 0 }),
+    projectedLabel: formatterCurrency(row.projectedTotal, { decimals: row.projectedTotal < 1000 ? 2 : 0 })
+  }));
+
+  const downtimeBaseRateLabel = `${formatterCurrency(downtimeBaseRate, { decimals: downtimeBaseRate < 1000 ? 2 : 0 })}/hr`;
+  const downtimeDailyEntries = downtimeDailyRaw.map(entry => ({
+    dateISO: entry.dateISO,
+    rate: entry.rate,
+    actualHours: entry.actualHours,
+    projectedHours: entry.projectedHours,
+    actualTaskCost: entry.actualTaskCost,
+    projectedTaskCost: entry.projectedTaskCost,
+    actualDowntimeLoss: entry.actualDowntimeLoss,
+    projectedDowntimeLoss: entry.projectedDowntimeLoss,
+    actualTotal: entry.actualTotal,
+    projectedTotal: entry.projectedTotal
   }));
 
   const intervalAnnualBasis = baselineAnnualHours > 0
@@ -9041,6 +9528,10 @@ function computeCostModel(){
     emptyMessage: orderRows.length ? "" : "Approve or deny order requests to build the spend log."
   };
 
+  const downtimeInsight = downtimeDailyRaw.length
+    ? "Downtime cost combines task spend with lost profit based on overlapping cutting jobs or the fallback loss rate when no jobs are scheduled."
+    : "Add down time hours to maintenance tasks to measure lost production alongside task cost.";
+
   return {
     summaryCards,
     timeframeRows,
@@ -9054,6 +9545,13 @@ function computeCostModel(){
     chartNote,
     chartInfo,
     orderRequestSummary,
+    downtimeSummary: {
+      baseRate: downtimeBaseRate,
+      baseRateLabel: downtimeBaseRateLabel,
+      rows: downtimeRows,
+      insight: downtimeInsight,
+      dailyEntries: downtimeDailyEntries
+    },
     chartColors: COST_CHART_COLORS,
     maintenanceSeries,
     jobSeries

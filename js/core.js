@@ -377,6 +377,88 @@ const defaultAsReqTasks = [
   { id:"clean_rails",           name:"Clean X-rails & Y-bridge rails", condition:"If debris occurs", manualLink:"", storeLink:"" }
 ];
 
+function readTaskDowntimeHours(task){
+  if (!task || typeof task !== "object") return null;
+  const raw = task.downtimeHours ?? task.downTime ?? task.downtime;
+  const num = Number(raw);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return num;
+}
+
+function readTaskMaintenanceCost(task){
+  if (!task || typeof task !== "object") return 0;
+  let total = 0;
+  const direct = Number(task.price);
+  if (Number.isFinite(direct) && direct > 0){
+    total += direct;
+  }
+  if (Array.isArray(task.parts)){
+    for (const part of task.parts){
+      const partPrice = Number(part?.price);
+      if (Number.isFinite(partPrice) && partPrice > 0){
+        total += partPrice;
+      }
+    }
+  }
+  return total;
+}
+
+if (typeof window !== "undefined"){
+  window.readTaskDowntimeHours = readTaskDowntimeHours;
+  window.readTaskMaintenanceCost = readTaskMaintenanceCost;
+}
+
+let maintenanceTasksVersion = typeof window !== "undefined" && Number.isFinite(Number(window.__maintenanceTasksVersion))
+  ? Number(window.__maintenanceTasksVersion)
+  : 0;
+
+function broadcastMaintenanceTasksUpdated(options = {}){
+  maintenanceTasksVersion += 1;
+  if (typeof window !== "undefined"){
+    window.__maintenanceTasksVersion = maintenanceTasksVersion;
+  }
+
+  const detail = { version: maintenanceTasksVersion, options: { ...options } };
+  if (typeof document !== "undefined" && typeof document.dispatchEvent === "function"){
+    try {
+      document.dispatchEvent(new CustomEvent("maintenanceTasksUpdated", { detail }));
+    } catch (err) {
+      console.warn("Failed to dispatch maintenanceTasksUpdated", err);
+    }
+  }
+
+  const refreshCalendar = options && options.refreshCalendar !== false;
+  const refreshDashboard = options && options.refreshDashboard !== false;
+  const refreshCosts = options && options.refreshCosts !== false;
+
+  if (refreshCalendar && typeof renderCalendar === "function"){
+    try { renderCalendar(); }
+    catch (err) { console.warn("Failed to refresh calendar after maintenance save", err); }
+  }
+
+  if (refreshDashboard && typeof renderDashboard === "function"){
+    try { renderDashboard(); }
+    catch (err) { console.warn("Failed to refresh dashboard after maintenance save", err); }
+  }
+
+  if (refreshCosts && typeof renderCosts === "function"){
+    try {
+      const hash = (typeof location !== "undefined" && typeof location.hash === "string")
+        ? location.hash.toLowerCase()
+        : "";
+      if (refreshCosts === true || hash === "#/costs" || hash === "#costs"){
+        renderCosts();
+      }
+    } catch (err) {
+      console.warn("Failed to refresh cost analysis after maintenance save", err);
+    }
+  }
+}
+
+if (typeof window !== "undefined"){
+  window.broadcastMaintenanceTasksUpdated = broadcastMaintenanceTasksUpdated;
+}
+
 function resolveTaskVariant(task){
   if (!task || typeof task !== "object") return null;
   const raw = typeof task.variant === "string" ? task.variant.toLowerCase() : "";
@@ -1098,6 +1180,9 @@ if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
 if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
+if (typeof window.downtimeBaseLossRate !== "number" || !Number.isFinite(window.downtimeBaseLossRate) || window.downtimeBaseLossRate < 0){
+  window.downtimeBaseLossRate = 150;
+}
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
   window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
@@ -1149,6 +1234,10 @@ function refreshGlobalCollections(){
 
   if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
   jobFolders = window.jobFolders;
+
+  if (typeof window.downtimeBaseLossRate !== "number" || !Number.isFinite(window.downtimeBaseLossRate) || window.downtimeBaseLossRate < 0){
+    window.downtimeBaseLossRate = 150;
+  }
 }
 
 /* ================ Jobs editing & render flags ================ */
@@ -1263,6 +1352,9 @@ function snapshotState(){
     folders: cloneFolders(window.settingsFolders),
     jobFolders: snapshotJobFolders(),
     dashboardLayout: cloneStructured(dashLayoutSource) || {},
+    downtimeBaseLossRate: (typeof window.downtimeBaseLossRate === "number" && Number.isFinite(window.downtimeBaseLossRate) && window.downtimeBaseLossRate >= 0)
+      ? Number(window.downtimeBaseLossRate)
+      : 150,
     costLayout: cloneStructured(costLayoutSource) || {},
     jobLayout: cloneStructured(jobLayoutSource) || {}
   };
@@ -1828,6 +1920,12 @@ function adoptState(doc){
     pe.baselineDateISO = (data.pumpEff.baselineDateISO ?? pe.baselineDateISO);
     pe.entries         = Array.isArray(data.pumpEff.entries) ? data.pumpEff.entries.slice() : pe.entries;
     pe.notes           = Array.isArray(data.pumpEff.notes) ? data.pumpEff.notes.slice() : pe.notes;
+  }
+
+  if (Number.isFinite(Number(data.downtimeBaseLossRate)) && Number(data.downtimeBaseLossRate) >= 0){
+    window.downtimeBaseLossRate = Number(data.downtimeBaseLossRate);
+  }else if (typeof window.downtimeBaseLossRate !== "number" || !Number.isFinite(window.downtimeBaseLossRate) || window.downtimeBaseLossRate < 0){
+    window.downtimeBaseLossRate = 150;
   }
 
   ensureTaskCategories();
