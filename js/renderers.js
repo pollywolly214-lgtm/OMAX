@@ -10131,6 +10131,16 @@ function renderJobs(){
     }
   };
 
+  const normalizeCategoryName = (value)=> typeof value === "string" ? value.trim().toLowerCase() : "";
+  const categoryNameExists = (name, excludeId)=>{
+    const normalized = normalizeCategoryName(name);
+    return ensureCategoryState().some(folder => {
+      if (!folder) return false;
+      if (excludeId != null && String(folder.id) === String(excludeId)) return false;
+      return normalizeCategoryName(folder.name) === normalized;
+    });
+  };
+
   const rootCategoryId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
   const currentCategoryFilter = ()=> (typeof window.jobCategoryFilter === "string" && window.jobCategoryFilter) ? window.jobCategoryFilter : rootCategoryId;
 
@@ -10154,8 +10164,14 @@ function renderJobs(){
   const promptCreateCategory = (parentId)=>{
     const name = window.prompt("New category name?");
     if (!name) return null;
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    if (categoryNameExists(trimmed)){
+      toast("Cannot complete. You already have a category with this name");
+      return null;
+    }
     try {
-      const folder = typeof addJobFolder === "function" ? addJobFolder(name, parentId) : null;
+      const folder = typeof addJobFolder === "function" ? addJobFolder(trimmed, parentId) : null;
       if (folder){
         ensureJobCategories?.();
         saveCloudDebounced();
@@ -10174,8 +10190,14 @@ function renderJobs(){
     if (!folder){ toast("Category not found"); return null; }
     const next = window.prompt("Rename category", folder.name || "");
     if (!next) return null;
+    const trimmed = next.trim();
+    if (!trimmed) return null;
+    if (categoryNameExists(trimmed, categoryId)){
+      toast("Cannot complete. You already have a category with this name");
+      return null;
+    }
     try {
-      const result = typeof renameJobFolder === "function" ? renameJobFolder(categoryId, next) : null;
+      const result = typeof renameJobFolder === "function" ? renameJobFolder(categoryId, trimmed) : null;
       if (result){
         saveCloudDebounced();
       }
