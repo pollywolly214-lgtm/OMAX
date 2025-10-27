@@ -2721,8 +2721,8 @@ function viewJobs(){
                 </ul>
               </div>
               <div class="job-edit-actions">
-                <button data-save-job="${j.id}">Save</button>
-                <button class="danger" data-cancel-job="${j.id}">Cancel</button>
+                <button type="button" data-save-job="${j.id}">Save</button>
+                <button type="button" class="danger" data-cancel-job="${j.id}">Cancel</button>
               </div>
             </div>
           </td>

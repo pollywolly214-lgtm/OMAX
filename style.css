@@ -3029,14 +3029,16 @@ body.modal-open .auth-bar {
   letter-spacing: 0.05em;
   color: #5a6b85;
 }
-.job-edit-grid input {
+.job-edit-grid input,
+.job-edit-grid select {
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid rgba(15, 52, 104, 0.2);
   font-size: 14px;
   background: #fff;
 }
-.job-edit-grid input:focus {
+.job-edit-grid input:focus,
+.job-edit-grid select:focus {
   outline: 2px solid rgba(33, 150, 243, 0.35);
   border-color: rgba(33, 150, 243, 0.55);
 }
