@@ -9596,6 +9596,29 @@ function renderJobs(){
   content.innerHTML = viewJobs();
   setupJobLayout();
 
+  const jobOverlapMessage = "Jobs might be overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
+  const jobTableEl = content.querySelector(".job-table");
+  const currentOverlapSignature = jobTableEl?.getAttribute("data-job-overlap-signature") || "";
+  if (typeof window !== "undefined"){
+    window.activeJobOverlapSignature = currentOverlapSignature;
+    if (!currentOverlapSignature){
+      window.dismissedJobOverlapSignature = "";
+    }
+  }
+  const overlapAlertEl = content.querySelector("[data-job-overlap-alert]");
+  if (overlapAlertEl){
+    const alertSignature = overlapAlertEl.getAttribute("data-job-overlap-signature") || currentOverlapSignature || "";
+    const dismissBtn = overlapAlertEl.querySelector("[data-job-overlap-dismiss]");
+    if (dismissBtn){
+      dismissBtn.addEventListener("click", ()=>{
+        overlapAlertEl.remove();
+        if (typeof window !== "undefined"){
+          window.dismissedJobOverlapSignature = alertSignature;
+        }
+      });
+    }
+  }
+
   const pendingJobFocus = window.pendingJobFocus;
   if (pendingJobFocus){
     window.pendingJobFocus = null;
@@ -10998,6 +11021,18 @@ function renderJobs(){
 
   // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
   content.querySelector(".job-table tbody")?.addEventListener("click",(e)=>{
+    const overlapTrigger = e.target.closest("[data-job-overlap-info]");
+    if (overlapTrigger){
+      e.preventDefault();
+      const message = overlapTrigger.getAttribute("data-job-overlap-message") || jobOverlapMessage;
+      if (typeof window !== "undefined" && typeof window.alert === "function"){
+        window.alert(message);
+      } else {
+        toast(message);
+      }
+      return;
+    }
+
     const actionsTrigger = e.target.closest("[data-job-actions-toggle]");
     if (actionsTrigger){
       const id = actionsTrigger.getAttribute("data-job-actions-toggle");

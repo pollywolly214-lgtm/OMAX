@@ -1938,6 +1938,66 @@ function viewJobs(){
   }, { total: 0 });
   const completedAverage = completedFiltered.length ? (completedStats.total / completedFiltered.length) : 0;
 
+  const jobOverlapNotice = "Jobs might be overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
+  const jobOverlapBannerText = "Two or more cutting jobs are overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
+  const jobOverlapNoticeEsc = esc(jobOverlapNotice);
+  const overlappingJobIds = (()=>{
+    if (!Array.isArray(cuttingJobs) || !cuttingJobs.length) return new Set();
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const ranges = cuttingJobs.map(job => {
+      if (!job || job.completedAtISO) return null;
+      const id = job?.id != null ? String(job.id) : "";
+      if (!id) return null;
+      const startDate = parseDateLocal(job.startISO);
+      if (!(startDate instanceof Date)) return null;
+      const startTime = startDate.getTime();
+      if (!Number.isFinite(startTime)) return null;
+      const dueDate = parseDateLocal(job.dueISO);
+      let endTime = dueDate instanceof Date ? dueDate.getTime() : startTime;
+      if (!Number.isFinite(endTime)) endTime = startTime;
+      if (endTime < startTime) endTime = startTime;
+      endTime += DAY_MS - 1;
+      return { id, start: startTime, end: endTime };
+    }).filter(Boolean).sort((a, b)=>{
+      if (a.start !== b.start) return a.start - b.start;
+      return a.end - b.end;
+    });
+    if (!ranges.length) return new Set();
+    const overlaps = new Set();
+    for (let i = 0; i < ranges.length; i++){
+      const current = ranges[i];
+      if (!current || !current.id) continue;
+      for (let j = i + 1; j < ranges.length; j++){
+        const next = ranges[j];
+        if (!next || !next.id) continue;
+        if (next.start > current.end) break;
+        overlaps.add(current.id);
+        overlaps.add(next.id);
+      }
+    }
+    return overlaps;
+  })();
+  const overlapSignature = overlappingJobIds.size >= 2
+    ? Array.from(overlappingJobIds).filter(Boolean).sort().join("|")
+    : "";
+  const dismissedOverlapSignature = typeof window !== "undefined" && typeof window.dismissedJobOverlapSignature === "string"
+    ? window.dismissedJobOverlapSignature
+    : "";
+  const showOverlapAlert = Boolean(overlapSignature && overlapSignature !== dismissedOverlapSignature);
+  const overlapAlertMarkup = showOverlapAlert
+    ? `<div class="job-overlap-alert" role="alert" data-job-overlap-alert data-job-overlap-signature="${esc(overlapSignature)}">
+        <span class="job-overlap-alert-icon" aria-hidden="true">!</span>
+        <div class="job-overlap-alert-body">
+          <div class="job-overlap-alert-title">Overlapping jobs detected</div>
+          <p class="job-overlap-alert-text">${esc(jobOverlapBannerText)}</p>
+        </div>
+        <button type="button" class="job-overlap-alert-close" data-job-overlap-dismiss aria-label="Dismiss overlap warning">×</button>
+      </div>`
+    : "";
+  const jobTableOverlapAttr = overlapSignature
+    ? ` data-job-overlap-signature="${esc(overlapSignature)}"`
+    : "";
+
   const jobColumnCount = 16;
   const historyColumnCount = jobColumnCount;
   const historySearchDisplay = historySearchValue
@@ -2324,6 +2384,12 @@ function viewJobs(){
     const eff = computeJobEfficiency(j);
     const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
+    const jobId = j?.id != null ? String(j.id) : "";
+    const jobHasOverlap = jobId && overlappingJobIds.has(jobId);
+    const overlapIndicatorButton = jobHasOverlap
+      ? `<button type="button" class="job-overlap-indicator" data-job-overlap-info data-job-overlap-message="${jobOverlapNoticeEsc}" aria-label="Job overlap warning" title="Jobs might be overlapping">!</button>`
+      : "";
+    const rowClass = `job-row${jobHasOverlap ? " job-row-overlap" : ""}`;
     const normalizedCatId = normalizeCategory(j.cat);
     const categoryFolder = folderMap.get(normalizedCatId);
     const categoryName = categoryFolder ? categoryFolder.name || "All Jobs" : "All Jobs";
@@ -2415,12 +2481,15 @@ function viewJobs(){
       const noteButtonLabel = esc(j.name || "Cutting job");
       const notePreviewTitleAttr = notePreview.tooltip ? ` title="${esc(notePreview.tooltip)}"` : "";
       return `
-        <tr data-job-row="${j.id}" class="job-row">
+        <tr data-job-row="${j.id}" class="${rowClass}">
           <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">
             <div class="job-main">
-              <div class="job-title-chip"${colorStyleAttr}>
-                <span class="job-title-chip-dot" aria-hidden="true"></span>
-                <span class="job-title-chip-text">${esc(j.name || "Job")}</span>
+              <div class="job-main-headline">
+                <div class="job-title-chip"${colorStyleAttr}>
+                  <span class="job-title-chip-dot" aria-hidden="true"></span>
+                  <span class="job-title-chip-text">${esc(j.name || "Job")}</span>
+                </div>
+                ${overlapIndicatorButton}
               </div>
               <div class="job-main-category small muted" data-category-color="1"${colorStyleAttr}>
                 <span class="sr-only">Category</span>
@@ -2516,10 +2585,11 @@ function viewJobs(){
     } else {
       // EDIT ROW
       return `
-        <tr data-job-row="${j.id}" class="job-row editing">
+        <tr data-job-row="${j.id}" class="${rowClass} editing">
           <td colspan="${activeColumnCount}">
               <div class="job-edit-card">
               <div class="job-edit-layout">
+              ${jobHasOverlap ? `<div class="job-edit-overlap-hint">${overlapIndicatorButton}<span>${jobOverlapNoticeEsc}</span></div>` : ""}
               <div class="job-edit-grid">
                 <label>Job name<input type="text" data-j="name" data-id="${j.id}" value="${j.name}"></label>
                 <label>Estimate (hrs)<input type="number" min="1" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></label>
@@ -2643,6 +2713,7 @@ function viewJobs(){
           ? `<div class="job-add-indicator" role="status" aria-live="polite">${pendingSummary}</div>`
           : ""}
       </div>
+      ${overlapAlertMarkup}
       <section
         class="job-add-panel${addFormOpen ? " is-open" : ""}"
         data-job-add-panel
@@ -2674,7 +2745,7 @@ function viewJobs(){
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
       </section>
 
-      <table class="job-table">
+      <table class="job-table"${jobTableOverlapAttr}>
         <thead>
           <tr>
             <th>Job</th>
