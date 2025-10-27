@@ -476,6 +476,8 @@ body.forecast-modal-open{ overflow:hidden; }
 .cost-table{ width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
 .cost-table th, .cost-table td{ padding:8px; border:1px solid #e1e5ee; text-align:left; }
 .cost-table th{ background:#f4f7fb; font-weight:600; color:#3b475f; }
+.downtime-rate{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+.downtime-rate-value{ font-weight:600; color:#0a1f3f; }
 
 .cost-history{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
 .cost-history li{

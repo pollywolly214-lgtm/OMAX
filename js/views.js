@@ -232,6 +232,7 @@ function viewDashboard(){
             <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
             <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
             <label>Price ($)<input type="number" min="0" step="0.01" id="dashTaskPrice" placeholder="optional"></label>
+            <label>Down time (hrs)<input type="number" min="0" step="0.25" id="dashTaskDowntime" placeholder="optional"></label>
             <label>Category<select id="dashTaskCategory"></select></label>
             <label>Calendar date<input type="date" id="dashTaskDate"></label>
           </div>
@@ -997,6 +998,8 @@ function viewCosts(model){
   const cards = Array.isArray(data.summaryCards) ? data.summaryCards : [];
   const timeframeRows = Array.isArray(data.timeframeRows) ? data.timeframeRows : [];
   const historyRows = Array.isArray(data.historyRows) ? data.historyRows : [];
+  const downtimeSummary = data.downtimeSummary || {};
+  const downtimeRows = Array.isArray(downtimeSummary.rows) ? downtimeSummary.rows : [];
   const jobBreakdown = Array.isArray(data.jobBreakdown) ? data.jobBreakdown : [];
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
@@ -1008,6 +1011,7 @@ function viewCosts(model){
   const timeframeInsight = data.timeframeInsight || "Usage windows combine logged machine hours with interval pricing to estimate what each upcoming maintenance window will cost.";
   const historyInsight = data.historyInsight || "Shows the latest completed maintenance, combining hours logged and reconciled spend to highlight cost spikes.";
   const efficiencyInsight = data.efficiencyInsight || "Summarizes cutting job profitability by tying revenue to labor, material, consumable, and overhead allocations so you can act on true margins.";
+  const downtimeInsight = downtimeSummary.insight || "Track how maintenance downtime combines lost production with task costs across common review windows.";
   const breakdown = data.forecastBreakdown || {};
   const breakdownSections = Array.isArray(breakdown.sections) ? breakdown.sections : [];
   const breakdownTotals = breakdown.totals || {};
@@ -1055,6 +1059,21 @@ function viewCosts(model){
   const summaryCardsHTML = cards.length
     ? cards.map(renderSummaryCard).join("")
     : `<p class="small muted">No cost metrics yet. Log machine hours and add pricing to interval tasks.</p>`;
+
+  const downtimeTableHTML = downtimeRows.length ? `
+    <table class="cost-table">
+      <thead><tr><th>Window</th><th>Current loss</th><th>Projected loss</th></tr></thead>
+      <tbody>
+        ${downtimeRows.map(row => `
+          <tr>
+            <td>${esc(row.label || "")}</td>
+            <td>${esc(row.actualLabel || "")}</td>
+            <td>${esc(row.projectedLabel || "")}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  ` : `<p class="small muted">Add down time hours to maintenance tasks to project opportunity cost.</p>`;
 
   const forecastTableHTML = (hasSections || hasTotals)
     ? `
@@ -1228,6 +1247,28 @@ function viewCosts(model){
               </button>
               <div class="chart-info-bubble" id="costChartInfo" role="tooltip">
                 <p>${esc(chartInfo)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dashboard-window" data-cost-window="downtime">
+        <div class="block">
+          <h3>Maintenance Downtime Impact</h3>
+          <div class="downtime-rate">
+            <span class="downtime-rate-value">Fallback loss rate: ${esc(downtimeSummary.baseRateLabel || "$150/hr")}</span>
+            <button type="button" class="time-efficiency-edit-btn" data-edit-downtime-rate>Edit</button>
+          </div>
+          ${downtimeTableHTML}
+          <div class="cost-window-insight">
+            <div class="chart-info">
+              <button type="button" class="chart-info-button" aria-describedby="costDowntimeInsight" aria-label="Explain Maintenance Downtime Impact table">
+                <span aria-hidden="true">?</span>
+                <span class="sr-only">Show how Maintenance Downtime Impact is calculated</span>
+              </button>
+              <div class="chart-info-bubble" id="costDowntimeInsight" role="tooltip">
+                <p>${esc(downtimeInsight)}</p>
               </div>
             </div>
           </div>
