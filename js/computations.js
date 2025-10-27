@@ -351,10 +351,227 @@ function computeRequiredDaily(job){
   return { remainingHours, remainingDays, requiredPerDay };
 }
 
+function getJobPriority(job){
+  const raw = job && job.priorityOrder != null ? Number(job.priorityOrder) : NaN;
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  return null;
+}
+
+function compareJobsByPriority(a, b){
+  const pa = getJobPriority(a);
+  const pb = getJobPriority(b);
+  if (pa != null && pb != null && pa !== pb) return pa - pb;
+  if (pa != null && pb == null) return -1;
+  if (pa == null && pb != null) return 1;
+
+  const normalizeJobDate = (value)=>{
+    if (!value) return null;
+    let parsed = null;
+    try {
+      parsed = parseDateLocal(value);
+    } catch (_err) {
+      parsed = null;
+    }
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())){
+      parsed = new Date(value);
+    }
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+    parsed.setHours(0,0,0,0);
+    return parsed;
+  };
+
+  const startA = normalizeJobDate(a && a.startISO);
+  const startB = normalizeJobDate(b && b.startISO);
+  if (startA && startB && startA.getTime() !== startB.getTime()) return startA - startB;
+  if (startA && !startB) return -1;
+  if (!startA && startB) return 1;
+
+  const nameA = (a && typeof a.name === "string") ? a.name.toLowerCase() : "";
+  const nameB = (b && typeof b.name === "string") ? b.name.toLowerCase() : "";
+  if (nameA < nameB) return -1;
+  if (nameA > nameB) return 1;
+  return String(a && a.id != null ? a.id : "").localeCompare(String(b && b.id != null ? b.id : ""));
+}
+
+function normalizeJobPriorityOrder(jobs){
+  const list = Array.isArray(jobs) ? jobs.filter(Boolean) : [];
+  const sorted = list.slice().sort(compareJobsByPriority);
+  let changed = false;
+  sorted.forEach((job, idx)=>{
+    const desired = idx + 1;
+    if (Number(job.priorityOrder) !== desired){
+      job.priorityOrder = desired;
+      changed = true;
+    }
+  });
+  return { sorted, changed };
+}
+
+function nextCuttingJobPriority(jobs){
+  const list = Array.isArray(jobs) ? jobs.filter(Boolean) : [];
+  let maxPriority = 0;
+  list.forEach(job => {
+    const value = getJobPriority(job);
+    if (value != null && Number.isFinite(value)){
+      maxPriority = Math.max(maxPriority, value);
+      return;
+    }
+    const fallback = Number(job && job.priorityOrder);
+    if (Number.isFinite(fallback)){
+      maxPriority = Math.max(maxPriority, fallback);
+    }
+  });
+  return maxPriority + 1;
+}
+
+function computeCuttingJobOverlaps(jobs){
+  const list = Array.isArray(jobs) ? jobs.filter(Boolean) : [];
+  const normalizeJobDate = (value)=>{
+    if (!value) return null;
+    let parsed = null;
+    try {
+      parsed = parseDateLocal(value);
+    } catch (_err) {
+      parsed = null;
+    }
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())){
+      parsed = new Date(value);
+    }
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+    parsed.setHours(0,0,0,0);
+    return parsed;
+  };
+
+  const intervals = [];
+  const byId = new Map();
+  list.forEach(job => {
+    const id = job && job.id != null ? String(job.id) : "";
+    if (!id) return;
+    byId.set(id, job);
+    const start = normalizeJobDate(job.startISO);
+    const due = normalizeJobDate(job.dueISO) || start;
+    if (!start || !due) return;
+    const end = due >= start ? due : start;
+    intervals.push({ jobId: id, start, end });
+  });
+
+  intervals.sort((a, b)=>{
+    if (a.start.getTime() !== b.start.getTime()) return a.start - b.start;
+    if (a.end.getTime() !== b.end.getTime()) return a.end - b.end;
+    return a.jobId.localeCompare(b.jobId);
+  });
+
+  const intervalById = new Map();
+  intervals.forEach(interval => intervalById.set(interval.jobId, interval));
+
+  const active = [];
+  const adjacency = new Map();
+
+  intervals.forEach(interval => {
+    for (let i = active.length - 1; i >= 0; i--){
+      if (active[i].end < interval.start){
+        active.splice(i, 1);
+      }
+    }
+    active.forEach(other => {
+      if (other.end >= interval.start){
+        if (!adjacency.has(interval.jobId)) adjacency.set(interval.jobId, new Set());
+        if (!adjacency.has(other.jobId)) adjacency.set(other.jobId, new Set());
+        adjacency.get(interval.jobId).add(other.jobId);
+        adjacency.get(other.jobId).add(interval.jobId);
+      }
+    });
+    active.push(interval);
+  });
+
+  const groups = [];
+  const jobMap = new Map();
+  const visited = new Set();
+  let counter = 1;
+
+  intervals.forEach(interval => {
+    const jobId = interval.jobId;
+    if (visited.has(jobId)) return;
+    const neighbors = adjacency.get(jobId);
+    if (!neighbors || !neighbors.size) return;
+
+    const stack = [jobId];
+    const groupJobIds = new Set();
+    while (stack.length){
+      const current = stack.pop();
+      if (visited.has(current)) continue;
+      visited.add(current);
+      groupJobIds.add(current);
+      const peers = adjacency.get(current);
+      if (!peers) continue;
+      peers.forEach(next => {
+        if (!visited.has(next)) stack.push(next);
+      });
+    }
+
+    if (groupJobIds.size <= 1) return;
+
+    let start = null;
+    let end = null;
+    groupJobIds.forEach(id => {
+      const intervalInfo = intervalById.get(id);
+      if (!intervalInfo) return;
+      if (!start || intervalInfo.start < start) start = intervalInfo.start;
+      if (!end || intervalInfo.end > end) end = intervalInfo.end;
+    });
+
+    const sortedIds = Array.from(groupJobIds).sort((aId, bId)=>{
+      const jobA = byId.get(aId);
+      const jobB = byId.get(bId);
+      return compareJobsByPriority(jobA, jobB);
+    });
+
+    const groupId = `overlap_${counter++}`;
+    const startISO = start ? start.toISOString().slice(0, 10) : null;
+    const endISO = end ? end.toISOString().slice(0, 10) : null;
+
+    groups.push({
+      id: groupId,
+      jobIds: Array.from(groupJobIds),
+      sortedIds,
+      size: groupJobIds.size,
+      startISO,
+      endISO
+    });
+
+    sortedIds.forEach(id => {
+      const peers = sortedIds.filter(otherId => otherId !== id);
+      jobMap.set(id, {
+        groupId,
+        peers,
+        sortedIds,
+        size: groupJobIds.size,
+        startISO,
+        endISO
+      });
+    });
+  });
+
+  groups.sort((a, b)=>{
+    if (a.startISO && b.startISO && a.startISO !== b.startISO) return a.startISO.localeCompare(b.startISO);
+    if (a.startISO && !b.startISO) return -1;
+    if (!a.startISO && b.startISO) return 1;
+    if (a.endISO && b.endISO && a.endISO !== b.endISO) return a.endISO.localeCompare(b.endISO);
+    return a.id.localeCompare(b.id);
+  });
+
+  return { groups, jobMap };
+}
+
 if (typeof window !== "undefined"){
   window.computeTimeEfficiency = computeTimeEfficiency;
   window.getTimeEfficiencyWindowMeta = getTimeEfficiencyWindowMeta;
   window.syncDailyHoursFromTotals = syncDailyHoursFromTotals;
   window.getDailyCutHoursMap = getDailyCutHoursMap;
+  window.getJobPriority = getJobPriority;
+  window.compareJobsByPriority = compareJobsByPriority;
+  window.normalizeJobPriorityOrder = normalizeJobPriorityOrder;
+  window.nextCuttingJobPriority = nextCuttingJobPriority;
+  window.computeCuttingJobOverlaps = computeCuttingJobOverlaps;
 }
 

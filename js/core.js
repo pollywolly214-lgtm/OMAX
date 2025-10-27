@@ -751,6 +751,17 @@ function applyRestoreByType(entry, index){
       while (existing.has(String(clone.id))){
         clone.id = genId(clone.name || "job");
       }
+      if (!Number.isFinite(Number(clone.priorityOrder)) || Number(clone.priorityOrder) <= 0){
+        const maxPriority = cuttingJobs.reduce((acc, job)=> Math.max(acc, Number(job && job.priorityOrder) || 0), 0);
+        clone.priorityOrder = maxPriority + 1;
+      }
+      if (!clone.createdAtISO){
+        try {
+          clone.createdAtISO = new Date().toISOString();
+        } catch (_err) {
+          clone.createdAtISO = null;
+        }
+      }
       cuttingJobs.push(clone);
       window.cuttingJobs = cuttingJobs;
       return { handledRemoval: false, value: { type: "job", id: clone.id } };
@@ -1097,7 +1108,7 @@ if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateIS
 if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
 if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
 if (!Array.isArray(window.inventory))    window.inventory    = [];
-if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,chargeRate,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
+if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,chargeRate,notes,startISO,dueISO,priorityOrder,createdAtISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
 if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
@@ -1105,6 +1116,7 @@ if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
 if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
+if (typeof window.activeCuttingJobId !== "string") window.activeCuttingJobId = "";
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
   window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
@@ -1257,6 +1269,7 @@ function snapshotState(){
     tasksAsReq,
     inventory,
     cuttingJobs,
+    activeCuttingJobId: typeof window.activeCuttingJobId === "string" ? window.activeCuttingJobId : "",
     completedCuttingJobs,
     orderRequests,
     orderRequestTab,
@@ -1687,6 +1700,11 @@ function adoptState(doc){
   window.orderRequests = orderRequests;
   window.garnetCleanings = garnetCleanings;
   window.dailyCutHours = dailyCutHours;
+  if (typeof data.activeCuttingJobId === "string"){
+    window.activeCuttingJobId = data.activeCuttingJobId;
+  } else if (typeof window.activeCuttingJobId !== "string"){
+    window.activeCuttingJobId = "";
+  }
   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
   window.deletedItems = deletedItems;
   purgeExpiredDeletedItems();
