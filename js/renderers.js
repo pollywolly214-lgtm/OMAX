@@ -11221,7 +11221,9 @@ function renderJobs(){
       j.chargeRate = chargeToSet;
       if (catVal && catVal !== "__new__") j.cat = catVal;
       editingJobs.delete(id);
-      saveCloudDebounced(); renderJobs();
+      saveCloudDebounced();
+      toast("saved");
+      renderJobs();
       return;
     }
 
@@ -11323,6 +11325,28 @@ function renderJobs(){
       return;
     }
   });
+
+  const jobTable = content.querySelector(".job-table");
+  if (jobTable && !jobTable.dataset.saveShortcutBound){
+    jobTable.dataset.saveShortcutBound = "1";
+    jobTable.addEventListener("keydown", (event)=>{
+      if (event.key !== "Enter" || event.isComposing || event.defaultPrevented) return;
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target instanceof HTMLTextAreaElement) return;
+      if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+      if (target.closest("[data-save-job]")) return;
+      const editCard = target.closest(".job-edit-card");
+      if (!editCard) return;
+      const editRow = editCard.closest("tr[data-job-row].editing");
+      if (!editRow) return;
+      const saveBtn = editRow.querySelector("[data-save-job]");
+      if (!(saveBtn instanceof HTMLElement)) return;
+      event.preventDefault();
+      saveBtn.click();
+    });
+  }
 }
 
 function renderInventory(){
