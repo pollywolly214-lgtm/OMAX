@@ -255,15 +255,48 @@ function viewDashboard(){
       <section class="dash-modal-step" data-step="downtime" hidden>
         <h4>Mark machine down time</h4>
         <form id="dashDownForm" class="modal-form">
-          <div class="modal-grid">
+          <input type="hidden" id="dashDownId">
+          <div class="modal-grid downtime-grid">
             <label>Down time date<input type="date" id="dashDownDate" required></label>
+            <label class="downtime-duration-label">Duration
+              <div class="downtime-duration-inputs">
+                <div class="downtime-duration-input">
+                  <span class="sr-only">Hours</span>
+                  <input type="number" id="dashDownHours" min="0" step="1" inputmode="numeric" aria-label="Duration hours" placeholder="0">
+                  <span class="downtime-duration-unit" aria-hidden="true">hr</span>
+                </div>
+                <div class="downtime-duration-input">
+                  <span class="sr-only">Minutes</span>
+                  <input type="number" id="dashDownMinutes" min="0" max="59" step="1" inputmode="numeric" aria-label="Duration minutes" placeholder="0">
+                  <span class="downtime-duration-unit" aria-hidden="true">min</span>
+                </div>
+              </div>
+            </label>
+            <label>Reason
+              <select id="dashDownReason">
+                <option value="unspecified">Unspecified</option>
+                <option value="mechanical">Mechanical failure</option>
+                <option value="electrical">Electrical issue</option>
+                <option value="software">Software / controls</option>
+                <option value="maintenance">Scheduled maintenance</option>
+                <option value="material">Material / consumables</option>
+                <option value="staffing">Staffing / scheduling</option>
+                <option value="external">External dependency</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label>Cost impact ($)<input type="number" id="dashDownCost" min="0" step="0.01" placeholder="optional"></label>
+            <label class="downtime-notes">Notes<textarea id="dashDownNotes" rows="2" placeholder="Add downtime notes"></textarea></label>
           </div>
-          <div class="modal-actions">
+          <div class="modal-actions downtime-actions">
             <button type="button" class="secondary" data-step-back>Back</button>
-            <button type="submit" class="primary">Save</button>
+            <div class="downtime-action-buttons">
+              <button type="button" class="secondary" id="dashDownCancel" hidden>Cancel edit</button>
+              <button type="submit" class="primary" id="dashDownSubmit">Save</button>
+            </div>
           </div>
         </form>
-        <div id="dashDownList" class="down-list"></div>
+        <div id="dashDownList" class="down-list" aria-live="polite"></div>
       </section>
 
       <section class="dash-modal-step" data-step="garnet" hidden>
@@ -1267,6 +1300,32 @@ function viewCosts(model){
                 <p>${esc(ordersInsight)}</p>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dashboard-window" data-cost-window="downtime">
+        <div class="block cost-downtime-block">
+          <div class="cost-downtime-header">
+            <h3>Downtime roll-ups</h3>
+            <div class="cost-downtime-badges" id="costDowntimeBadges" hidden></div>
+          </div>
+          <div class="cost-downtime-table">
+            <table class="cost-table" id="costDowntimeTable">
+              <thead>
+                <tr>
+                  <th scope="col" data-sort="month" aria-sort="descending" tabindex="0">Month</th>
+                  <th scope="col" data-sort="events" tabindex="0">Events</th>
+                  <th scope="col" data-sort="hours" tabindex="0">Downtime (hrs)</th>
+                  <th scope="col" data-sort="cost" tabindex="0">Cost impact</th>
+                </tr>
+              </thead>
+              <tbody id="costDowntimeTableBody">
+                <tr data-cost-downtime-empty>
+                  <td colspan="4" class="cost-table-placeholder">No downtime recorded yet. Log outages from the dashboard modal.</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

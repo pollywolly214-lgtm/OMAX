@@ -3121,6 +3121,15 @@ function renderDashboard(){
   const jobForm          = document.getElementById("dashJobForm");
   const downList         = document.getElementById("dashDownList");
   const downDateInput    = document.getElementById("dashDownDate");
+  const downIdInput      = document.getElementById("dashDownId");
+  const downHoursInput   = document.getElementById("dashDownHours");
+  const downMinutesInput = document.getElementById("dashDownMinutes");
+  const downReasonSelect = document.getElementById("dashDownReason");
+  const downNotesInput   = document.getElementById("dashDownNotes");
+  const downCostInput    = document.getElementById("dashDownCost");
+  const downSubmitBtn    = document.getElementById("dashDownSubmit");
+  const downCancelBtn    = document.getElementById("dashDownCancel");
+  const downSubmitDefaultLabel = downSubmitBtn?.textContent?.trim() || "Save";
   const taskTypeSelect   = document.getElementById("dashTaskType");
   const taskNameInput    = document.getElementById("dashTaskName");
   const taskIntervalInput= document.getElementById("dashTaskInterval");
@@ -3171,6 +3180,7 @@ function renderDashboard(){
   const taskConditionRow = taskForm?.querySelector("[data-task-condition]");
   const stepSections     = modal ? Array.from(modal.querySelectorAll("[data-step]")) : [];
   let addContextDateISO  = null;
+  let editingDownId      = null;
   let editingGarnetId    = null;
   let pendingGarnetEditId = null;
 
@@ -3379,7 +3389,7 @@ function renderDashboard(){
       }
     }
     syncTaskDateInput();
-    if (downDateInput){
+    if (downDateInput && !editingDownId){
       if (addContextDateISO){
         downDateInput.value = addContextDateISO;
       }else if (!modal || !modal.classList.contains("is-visible")){
@@ -3395,52 +3405,228 @@ function renderDashboard(){
     }
   }
 
-  function ensureDownTimeArray(){
-    if (!Array.isArray(window.downTimes)) window.downTimes = [];
-    const arr = window.downTimes;
-    for (let i = arr.length - 1; i >= 0; i--){
-      const entry = arr[i];
-      if (!entry){ arr.splice(i,1); continue; }
-      if (typeof entry === "string"){ arr[i] = { dateISO: entry }; continue; }
-      if (typeof entry.dateISO !== "string") arr.splice(i,1);
+  const downtimeReasonOptions = [
+    { value: "unspecified", label: "Unspecified" },
+    { value: "mechanical", label: "Mechanical failure" },
+    { value: "electrical", label: "Electrical issue" },
+    { value: "software", label: "Software / controls" },
+    { value: "maintenance", label: "Scheduled maintenance" },
+    { value: "material", label: "Material / consumables" },
+    { value: "staffing", label: "Staffing / scheduling" },
+    { value: "external", label: "External dependency" },
+    { value: "other", label: "Other" }
+  ];
+
+  const downtimeReasonLabels = new Map(
+    downtimeReasonOptions.map(option => [String(option.value || "").toLowerCase(), option.label])
+  );
+
+  const escapeHtmlSafe = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+
+  const formatCurrencyValue = (value)=>{
+    if (value === null || value === undefined || value === "") return "—";
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "—";
+    const abs = Math.abs(num);
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: abs < 1000 ? 2 : 0,
+      maximumFractionDigits: abs < 1000 ? 2 : 0
+    }).format(num);
+  };
+
+  const formatDowntimeDuration = (hours, minutes)=>{
+    const baseHours = Number.isFinite(Number(hours)) ? Math.max(0, Math.floor(Number(hours))) : 0;
+    const baseMinutes = Number.isFinite(Number(minutes)) ? Math.max(0, Math.floor(Number(minutes))) : 0;
+    const totalMinutes = (baseHours * 60) + baseMinutes;
+    if (totalMinutes <= 0) return "—";
+    const dispHours = Math.floor(totalMinutes / 60);
+    const dispMinutes = totalMinutes % 60;
+    const parts = [];
+    if (dispHours > 0){
+      parts.push(`${dispHours} hr${dispHours === 1 ? "" : "s"}`);
     }
-    return arr;
+    if (dispMinutes > 0){
+      parts.push(`${dispMinutes} min`);
+    }
+    return parts.join(" ") || "0 min";
+  };
+
+  function getDownTimeEvents(){
+    if (typeof ensureDownTimeEvents === "function"){
+      try { return ensureDownTimeEvents().slice(); }
+      catch (err) { console.warn("Failed to normalize downtime events", err); }
+    }
+    if (!Array.isArray(window.downTimes)) window.downTimes = [];
+    return window.downTimes.slice();
+  }
+
+  function findDownTimeById(id){
+    if (!id) return null;
+    const events = getDownTimeEvents();
+    return events.find(entry => entry && String(entry.id) === String(id)) || null;
+  }
+
+  function resetDownForm({ preserveContext = true } = {}){
+    editingDownId = null;
+    if (downForm) downForm.reset();
+    if (downIdInput) downIdInput.value = "";
+    if (downReasonSelect && !downReasonSelect.value){
+      downReasonSelect.value = "unspecified";
+    }
+    if (preserveContext){
+      if (addContextDateISO && downDateInput){
+        downDateInput.value = addContextDateISO;
+      }
+    }else if (downDateInput){
+      downDateInput.value = "";
+    }
+    if (downSubmitBtn) downSubmitBtn.textContent = downSubmitDefaultLabel;
+    if (downCancelBtn) downCancelBtn.hidden = true;
+  }
+
+  function beginEditDownTime(entry){
+    if (!entry) return;
+    const id = entry.id != null ? String(entry.id) : null;
+    editingDownId = id;
+    if (downIdInput) downIdInput.value = id || "";
+    if (downDateInput) downDateInput.value = entry.dateISO || "";
+    if (downHoursInput){
+      const hours = Number(entry.durationHours);
+      downHoursInput.value = Number.isFinite(hours) && hours >= 0 ? String(Math.floor(hours)) : "0";
+    }
+    if (downMinutesInput){
+      const minutes = Number(entry.durationMinutes);
+      downMinutesInput.value = Number.isFinite(minutes) && minutes >= 0 ? String(Math.floor(minutes)) : "0";
+    }
+    if (downReasonSelect){
+      const reasonKey = entry.reasonCode != null ? String(entry.reasonCode).toLowerCase() : "unspecified";
+      const reason = downtimeReasonLabels.has(reasonKey) ? reasonKey : "unspecified";
+      downReasonSelect.value = reason;
+    }
+    if (downNotesInput) downNotesInput.value = entry.notes || "";
+    if (downCostInput){
+      const costNum = entry.costImpact != null ? Number(entry.costImpact) : null;
+      if (Number.isFinite(costNum) && costNum >= 0){
+        downCostInput.value = String(costNum);
+      }else{
+        downCostInput.value = "";
+      }
+    }
+    if (downSubmitBtn) downSubmitBtn.textContent = "Update";
+    if (downCancelBtn) downCancelBtn.hidden = false;
+    if (entry.dateISO){
+      addContextDateISO = entry.dateISO;
+      if (modal) modal.setAttribute("data-context-date", entry.dateISO);
+    }
   }
 
   function refreshDownTimeList(){
     if (!downList) return;
-    const arr = ensureDownTimeArray().slice().sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
-    if (!arr.length){
-      downList.innerHTML = `<div class="small muted">No down time days yet.</div>`;
+    const events = getDownTimeEvents();
+    if (!events.length){
+      downList.innerHTML = `<div class="small muted">No downtime logged yet.</div>`;
       return;
     }
+    const items = events.slice().sort((a, b)=>{
+      const dateCompare = String(b.dateISO || "").localeCompare(String(a.dateISO || ""));
+      if (dateCompare !== 0) return dateCompare;
+      return String(b.id || "").localeCompare(String(a.id || ""));
+    });
     downList.innerHTML = "";
-    arr.forEach(item => {
-      const row = document.createElement("div");
+    items.forEach(item => {
+      const row = document.createElement("article");
       row.className = "down-item";
-      const label = document.createElement("span");
-      const parsed = new Date(item.dateISO + "T00:00:00");
-      label.textContent = isNaN(parsed.getTime()) ? item.dateISO : parsed.toLocaleDateString();
-      row.appendChild(label);
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "down-remove-btn";
-      btn.textContent = "Remove";
-      btn.addEventListener("click", ()=>{ removeDownTime(item.dateISO); });
-      row.appendChild(btn);
+      row.dataset.downId = item.id != null ? String(item.id) : "";
+      const parsedDate = typeof parseDateLocal === "function"
+        ? parseDateLocal(item.dateISO)
+        : new Date(`${item.dateISO || ""}T00:00:00`);
+      let dateLabel = item.dateISO || "—";
+      if (parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime())){
+        dateLabel = parsedDate.toLocaleDateString();
+      }
+      const durationLabel = formatDowntimeDuration(item.durationHours, item.durationMinutes);
+      const reasonKey = item.reasonCode != null ? String(item.reasonCode).toLowerCase() : "unspecified";
+      const reasonLabel = downtimeReasonLabels.get(reasonKey) || "Unspecified";
+      const costLabel = formatCurrencyValue(item.costImpact);
+      const notes = typeof item.notes === "string" ? item.notes.trim() : "";
+      row.innerHTML = `
+        <header class="down-item-header">
+          <span class="down-item-date">${escapeHtmlSafe(dateLabel)}</span>
+          <span class="down-item-duration">${escapeHtmlSafe(durationLabel)}</span>
+        </header>
+        <div class="down-item-meta">
+          <span class="down-item-reason"><strong>Reason:</strong> ${escapeHtmlSafe(reasonLabel)}</span>
+          <span class="down-item-cost"><strong>Cost:</strong> ${costLabel === "—" ? "—" : escapeHtmlSafe(costLabel)}</span>
+        </div>
+        ${notes ? `<p class="down-item-notes">${escapeHtmlSafe(notes)}</p>` : ""}
+        <div class="down-item-actions">
+          <button type="button" class="secondary" data-down-edit="${escapeHtmlSafe(String(item.id || ""))}">Edit</button>
+          <button type="button" class="danger" data-down-remove="${escapeHtmlSafe(String(item.id || ""))}">Delete</button>
+        </div>
+      `;
       downList.appendChild(row);
     });
   }
 
-  function removeDownTime(dateISO){
-    const arr = ensureDownTimeArray();
-    const idx = arr.findIndex(dt => dt.dateISO === dateISO);
-    if (idx < 0) return;
-    arr.splice(idx,1);
-    saveCloudDebounced();
+  function removeDownTimeEntry(id){
+    if (!id) return;
+    let removed = false;
+    if (typeof deleteDownTimeEvent === "function"){
+      try { removed = deleteDownTimeEvent(id) || false; }
+      catch (err) { console.warn("Failed to delete downtime event", err); removed = false; }
+    }else if (Array.isArray(window.downTimes)){
+      const arr = window.downTimes;
+      const idx = arr.findIndex(entry => entry && String(entry.id) === String(id));
+      if (idx >= 0){
+        arr.splice(idx, 1);
+        window.downTimes = arr;
+        removed = true;
+        try { saveCloudDebounced(); }
+        catch (err) { console.warn("Failed to schedule save after deleting downtime", err); }
+      }
+    }
+    if (!removed) return;
     toast("Down time removed");
+    resetDownForm({ preserveContext: true });
     refreshDownTimeList();
     renderCalendar();
+    const hash = (location.hash || "#").toLowerCase();
+    if (hash.startsWith("#/costs")){
+      renderCosts();
+    }
+  }
+
+  function removeDownTime(dateISO){
+    if (!dateISO) return;
+    let removedCount = 0;
+    if (typeof deleteDownTimeEventsByDate === "function"){
+      try { removedCount = deleteDownTimeEventsByDate(dateISO) || 0; }
+      catch (err) { console.warn("Failed to delete downtime by date", err); removedCount = 0; }
+    }else if (Array.isArray(window.downTimes)){
+      const arr = window.downTimes;
+      for (let i = arr.length - 1; i >= 0; i--){
+        if (arr[i] && String(arr[i].dateISO) === String(dateISO)){
+          arr.splice(i, 1);
+          removedCount++;
+        }
+      }
+      if (removedCount){
+        window.downTimes = arr;
+        try { saveCloudDebounced(); }
+        catch (err) { console.warn("Failed to schedule save after deleting downtime", err); }
+      }
+    }
+    if (!removedCount) return;
+    toast(removedCount > 1 ? "Down time entries removed" : "Down time removed");
+    resetDownForm({ preserveContext: true });
+    refreshDownTimeList();
+    renderCalendar();
+    const hash = (location.hash || "#").toLowerCase();
+    if (hash.startsWith("#/costs")){
+      renderCosts();
+    }
   }
 
   function formatTimeForDisplay(value){
@@ -3675,10 +3861,8 @@ function renderDashboard(){
       resetTaskForm();
     }
     if (step === "downtime"){
+      resetDownForm({ preserveContext: true });
       refreshDownTimeList();
-      if (addContextDateISO && downDateInput){
-        downDateInput.value = addContextDateISO;
-      }
     }
     if (step === "garnet"){
       prepareGarnetStep();
@@ -3687,7 +3871,7 @@ function renderDashboard(){
 
   function showBackdrop(step){
     if (!modal) return;
-    ensureDownTimeArray();
+    getDownTimeEvents();
     modal.classList.add("is-visible");
     modal.removeAttribute("hidden");
     modal.setAttribute("aria-hidden", "false");
@@ -3728,7 +3912,7 @@ function renderDashboard(){
     hideBackdrop();
     showStep("picker");
     resetTaskForm();
-    downForm?.reset();
+    resetDownForm({ preserveContext: false });
     jobForm?.reset();
     resetGarnetForm();
     setContextDate(null);
@@ -4105,17 +4289,103 @@ function renderDashboard(){
 
   downForm?.addEventListener("submit", (e)=>{
     e.preventDefault();
-    const arr = ensureDownTimeArray();
-    const dateISO = downDateInput?.value;
+    const dateISO = (downDateInput?.value || "").trim();
     if (!dateISO){ toast("Pick a date"); return; }
-    if (arr.some(dt => dt.dateISO === dateISO)){ toast("Day already marked as down time"); return; }
-    arr.push({ dateISO });
-    arr.sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
-    saveCloudDebounced();
-    toast("Down time saved");
-    if (downDateInput) downDateInput.value = "";
+    let hoursVal = Number(downHoursInput?.value);
+    let minutesVal = Number(downMinutesInput?.value);
+    if (!Number.isFinite(hoursVal) || hoursVal < 0) hoursVal = 0;
+    else hoursVal = Math.floor(hoursVal);
+    if (!Number.isFinite(minutesVal) || minutesVal < 0) minutesVal = 0;
+    else minutesVal = Math.floor(minutesVal);
+    if (minutesVal >= 60){
+      hoursVal += Math.floor(minutesVal / 60);
+      minutesVal = minutesVal % 60;
+    }
+    const totalMinutes = (hoursVal * 60) + minutesVal;
+    if (totalMinutes <= 0){ toast("Enter a downtime duration"); return; }
+    const reason = (downReasonSelect?.value || "unspecified").trim() || "unspecified";
+    const notes = (downNotesInput?.value || "").trim();
+    const costRaw = downCostInput?.value ?? "";
+    let costImpact = null;
+    if (costRaw !== ""){
+      const costNum = Number(costRaw);
+      if (!Number.isFinite(costNum) || costNum < 0){ toast("Enter a valid cost impact"); return; }
+      costImpact = costNum;
+    }
+    const payload = {
+      id: editingDownId || (downIdInput?.value || null),
+      dateISO,
+      durationHours: hoursVal,
+      durationMinutes: minutesVal,
+      reasonCode: reason,
+      notes,
+      costImpact
+    };
+    let saved = null;
+    if (typeof upsertDownTimeEvent === "function"){
+      try { saved = upsertDownTimeEvent(payload); }
+      catch (err) { console.warn("Failed to save downtime via helper", err); saved = null; }
+    }
+    if (!saved){
+      if (!Array.isArray(window.downTimes)) window.downTimes = [];
+      const arr = window.downTimes;
+      if (payload.id){
+        const idx = arr.findIndex(entry => entry && String(entry.id) === String(payload.id));
+        if (idx >= 0){
+          arr[idx] = { ...payload };
+          saved = arr[idx];
+        }
+      }
+      if (!saved){
+        const fallbackId = payload.id || (typeof genId === "function" ? genId(`down_${dateISO}`) : `down_${Date.now()}`);
+        saved = { ...payload, id: fallbackId };
+        arr.push(saved);
+      }
+      window.downTimes = arr;
+      try { saveCloudDebounced(); }
+      catch (err) { console.warn("Failed to schedule save after recording downtime", err); }
+    }
+    if (!saved){ toast("Unable to save down time"); return; }
+    toast(editingDownId ? "Down time updated" : "Down time saved");
+    addContextDateISO = dateISO;
+    if (modal) modal.setAttribute("data-context-date", dateISO);
+    resetDownForm({ preserveContext: true });
     refreshDownTimeList();
     renderCalendar();
+    const hash = (location.hash || "#").toLowerCase();
+    if (hash.startsWith("#/costs")){
+      renderCosts();
+    }
+  });
+
+  downCancelBtn?.addEventListener("click", ()=>{
+    resetDownForm({ preserveContext: true });
+  });
+
+  downList?.addEventListener("click", (event)=>{
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (!target) return;
+    const editBtn = target.closest("[data-down-edit]");
+    if (editBtn){
+      event.preventDefault();
+      const id = editBtn.getAttribute("data-down-edit");
+      const entry = findDownTimeById(id);
+      if (entry){
+        beginEditDownTime(entry);
+        downDateInput?.focus();
+      }else{
+        toast("Unable to locate this downtime entry");
+        refreshDownTimeList();
+      }
+      return;
+    }
+    const removeBtn = target.closest("[data-down-remove]");
+    if (removeBtn){
+      event.preventDefault();
+      const id = removeBtn.getAttribute("data-down-remove");
+      if (!id) return;
+      removeDownTimeEntry(id);
+    }
   });
 
   updateDashJobCategoryHint();
@@ -7550,6 +7820,238 @@ function renderCosts(){
   setupForecastBreakdownModal();
   setupTimeEfficiencyWidget(document.getElementById("costTimeEfficiency"));
   refreshTimeEfficiencyWidgets();
+  setupCostDowntimeSummary();
+
+  function setupCostDowntimeSummary(){
+    const table = document.getElementById("costDowntimeTable");
+    const tbody = document.getElementById("costDowntimeTableBody");
+    const badgesEl = document.getElementById("costDowntimeBadges");
+    if (!table || !tbody) return;
+
+    const headers = Array.from(table.querySelectorAll("th[data-sort]"));
+    const state = { sortKey: "month", sortDir: "desc" };
+
+    const reasonLabels = new Map([
+      ["unspecified", "Unspecified"],
+      ["mechanical", "Mechanical failure"],
+      ["electrical", "Electrical issue"],
+      ["software", "Software / controls"],
+      ["maintenance", "Scheduled maintenance"],
+      ["material", "Material / consumables"],
+      ["staffing", "Staffing / scheduling"],
+      ["external", "External dependency"],
+      ["other", "Other"]
+    ].map(([key, label]) => [key.toLowerCase(), label]));
+
+    const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+
+    const formatHours = (value)=>{
+      const num = Number(value);
+      if (!Number.isFinite(num) || num <= 0) return "—";
+      const decimals = Math.abs(num) >= 100 ? 0 : 1;
+      return num.toFixed(decimals);
+    };
+
+    const formatCurrency = (value)=>{
+      if (value === null || value === undefined || value === "") return "—";
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "—";
+      const abs = Math.abs(num);
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: abs < 1000 ? 2 : 0,
+        maximumFractionDigits: abs < 1000 ? 2 : 0
+      }).format(num);
+    };
+
+    const computeRollups = ()=>{
+      let events = [];
+      if (typeof ensureDownTimeEvents === "function"){
+        try { events = ensureDownTimeEvents().slice(); }
+        catch (err) { console.warn("Failed to normalize downtime events for cost summary", err); events = []; }
+      }else if (Array.isArray(window.downTimes)){
+        events = window.downTimes.slice();
+      }
+      const buckets = new Map();
+      events.forEach(entry => {
+        if (!entry || !entry.dateISO) return;
+        const parsed = typeof parseDateLocal === "function"
+          ? parseDateLocal(entry.dateISO)
+          : new Date(`${entry.dateISO}T00:00:00`);
+        if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return;
+        const year = parsed.getFullYear();
+        const monthIndex = parsed.getMonth();
+        const key = `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+        if (!buckets.has(key)){
+          buckets.set(key, {
+            key,
+            year,
+            monthIndex,
+            monthLabel: new Date(year, monthIndex, 1).toLocaleString(undefined, { month: "short", year: "numeric" }),
+            eventCount: 0,
+            totalHours: 0,
+            totalCost: 0,
+            reasons: new Map()
+          });
+        }
+        const bucket = buckets.get(key);
+        bucket.eventCount += 1;
+        let totalHours = 0;
+        const hours = Number(entry.durationHours);
+        if (Number.isFinite(hours) && hours > 0){
+          totalHours += hours;
+        }
+        const minutes = Number(entry.durationMinutes);
+        if (Number.isFinite(minutes) && minutes > 0){
+          totalHours += minutes / 60;
+        }
+        const totalMinutes = Number(entry.durationTotalMinutes);
+        if (!totalHours && Number.isFinite(totalMinutes) && totalMinutes > 0){
+          totalHours += totalMinutes / 60;
+        }
+        bucket.totalHours += totalHours;
+        const cost = Number(entry.costImpact);
+        if (Number.isFinite(cost) && cost > 0){
+          bucket.totalCost += cost;
+        }
+        const reasonCode = entry.reasonCode ? String(entry.reasonCode).toLowerCase() : "unspecified";
+        const current = bucket.reasons.get(reasonCode) || { hours: 0, count: 0 };
+        current.hours += totalHours;
+        current.count += 1;
+        bucket.reasons.set(reasonCode, current);
+      });
+      const rows = Array.from(buckets.values());
+      rows.forEach(row => {
+        let topReason = null;
+        row.reasons.forEach((stats, code) => {
+          if (!topReason || stats.hours > topReason.hours || (Math.abs(stats.hours - topReason.hours) < 0.01 && stats.count > topReason.count)){
+            topReason = { code, hours: stats.hours, count: stats.count };
+          }
+        });
+        row.reasonLabel = topReason ? (reasonLabels.get(topReason.code) || "Unspecified") : "Unspecified";
+      });
+      return rows;
+    };
+
+    const sortRows = (rows)=>{
+      const dir = state.sortDir === "asc" ? 1 : -1;
+      return rows.slice().sort((a, b)=>{
+        if (state.sortKey === "events"){
+          const diff = a.eventCount - b.eventCount;
+          if (diff !== 0) return diff * dir;
+        }else if (state.sortKey === "hours"){
+          const diff = a.totalHours - b.totalHours;
+          if (diff !== 0) return diff * dir;
+        }else if (state.sortKey === "cost"){
+          const diff = a.totalCost - b.totalCost;
+          if (diff !== 0) return diff * dir;
+        }else{
+          const diff = (a.year - b.year) || (a.monthIndex - b.monthIndex);
+          if (diff !== 0) return diff * dir;
+        }
+        const fallback = (a.year - b.year) || (a.monthIndex - b.monthIndex);
+        if (state.sortKey === "month"){
+          return fallback * dir;
+        }
+        return fallback * -1;
+      });
+    };
+
+    const updateBadges = (rows)=>{
+      if (!badgesEl) return;
+      const items = [];
+      const hoursCandidate = rows.filter(row => row.totalHours > 0).sort((a, b)=> b.totalHours - a.totalHours)[0] || null;
+      const costCandidate = rows.filter(row => row.totalCost > 0).sort((a, b)=> b.totalCost - a.totalCost)[0] || null;
+      const formatHoursBadge = (value)=>{
+        const label = formatHours(value);
+        return label === "—" ? "—" : `${label} hr`;
+      };
+      if (hoursCandidate){
+        items.push(`Longest downtime: ${escapeHtml(hoursCandidate.monthLabel)} (${escapeHtml(formatHoursBadge(hoursCandidate.totalHours))})`);
+      }
+      if (costCandidate){
+        const costLabel = formatCurrency(costCandidate.totalCost);
+        if (costLabel !== "—"){
+          items.push(`Highest cost impact: ${escapeHtml(costCandidate.monthLabel)} (${escapeHtml(costLabel)})`);
+        }
+      }
+      if (!items.length){
+        badgesEl.innerHTML = "";
+        badgesEl.setAttribute("hidden", "");
+        return;
+      }
+      badgesEl.innerHTML = items.map(text => `<span class="badge">${text}</span>`).join("");
+      badgesEl.removeAttribute("hidden");
+    };
+
+    const updateSortIndicators = ()=>{
+      headers.forEach(header => {
+        const key = header.getAttribute("data-sort");
+        if (!key) return;
+        if (key === state.sortKey){
+          header.setAttribute("aria-sort", state.sortDir === "asc" ? "ascending" : "descending");
+          header.classList.add("is-active-sort");
+        }else{
+          header.setAttribute("aria-sort", "none");
+          header.classList.remove("is-active-sort");
+        }
+      });
+    };
+
+    const renderTable = ()=>{
+      const rows = computeRollups();
+      if (!rows.length){
+        tbody.innerHTML = `<tr data-cost-downtime-empty><td colspan="4" class="cost-table-placeholder">No downtime recorded yet. Log outages from the dashboard modal.</td></tr>`;
+        if (badgesEl){
+          badgesEl.innerHTML = "";
+          badgesEl.setAttribute("hidden", "");
+        }
+        updateSortIndicators();
+        return;
+      }
+      const sorted = sortRows(rows);
+      tbody.innerHTML = "";
+      sorted.forEach(row => {
+        const tr = document.createElement("tr");
+        const reasonLine = row.reasonLabel ? `<div class="small muted">${escapeHtml(row.reasonLabel)}</div>` : "";
+        const hoursDisplay = formatHours(row.totalHours);
+        const costDisplay = formatCurrency(row.totalCost);
+        tr.innerHTML = `
+          <th scope="row">${escapeHtml(row.monthLabel)}${reasonLine}</th>
+          <td>${row.eventCount}</td>
+          <td>${hoursDisplay === "—" ? "—" : `${escapeHtml(hoursDisplay)} hr`}</td>
+          <td>${costDisplay === "—" ? "—" : escapeHtml(costDisplay)}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+      updateBadges(sorted);
+      updateSortIndicators();
+    };
+
+    const handleSortToggle = (key)=>{
+      if (!key) return;
+      if (state.sortKey === key){
+        state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+      }else{
+        state.sortKey = key;
+        state.sortDir = key === "month" ? "desc" : "desc";
+      }
+      renderTable();
+    };
+
+    headers.forEach(header => {
+      header.addEventListener("click", ()=> handleSortToggle(header.getAttribute("data-sort")));
+      header.addEventListener("keydown", (event)=>{
+        if (event.key === "Enter" || event.key === " "){
+          event.preventDefault();
+          handleSortToggle(header.getAttribute("data-sort"));
+        }
+      });
+    });
+
+    renderTable();
+  }
 
   function getHistoryMessageState(){
     const existing = window.__costHistoryMessageState;

@@ -54,6 +54,177 @@ const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
 function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
 function genId(name){ const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
+
+function normalizeDownTimeEvent(raw){
+  if (!raw) return null;
+  const base = typeof raw === "string" ? { dateISO: raw } : { ...raw };
+  const normalized = {};
+
+  const dateISO = typeof base.dateISO === "string"
+    ? base.dateISO.trim().slice(0, 10)
+    : null;
+  if (!dateISO){
+    return null;
+  }
+  normalized.dateISO = dateISO;
+
+  const idRaw = base.id != null ? String(base.id) : "";
+  normalized.id = idRaw;
+
+  let hours = Number(base.durationHours);
+  let minutes = Number(base.durationMinutes);
+  if (!Number.isFinite(hours) || hours < 0){
+    hours = 0;
+  }else{
+    hours = Math.floor(hours);
+  }
+  if (!Number.isFinite(minutes) || minutes < 0){
+    minutes = 0;
+  }else{
+    minutes = Math.floor(minutes);
+  }
+
+  if ((!base.durationMinutes || !Number.isFinite(Number(base.durationMinutes)))
+    && Number.isFinite(Number(base.durationHours))){
+    const totalHours = Number(base.durationHours);
+    const baseHours = Math.floor(Math.max(totalHours, 0));
+    const fractional = totalHours - baseHours;
+    if (fractional > 0){
+      minutes = Math.round(fractional * 60);
+    }
+    hours = baseHours;
+  }
+
+  if (Number.isFinite(Number(base.durationTotalMinutes))){
+    const totalMinutes = Math.max(0, Math.round(Number(base.durationTotalMinutes)));
+    hours = Math.floor(totalMinutes / 60);
+    minutes = totalMinutes % 60;
+  }
+
+  while (minutes >= 60){
+    hours += 1;
+    minutes -= 60;
+  }
+
+  normalized.durationHours = Math.max(0, hours);
+  normalized.durationMinutes = Math.max(0, minutes);
+
+  const reasonSource = typeof base.reasonCode === "string"
+    ? base.reasonCode
+    : (typeof base.reason === "string" ? base.reason : "");
+  const reason = reasonSource.trim() || "unspecified";
+  normalized.reasonCode = reason.toLowerCase();
+
+  const notes = typeof base.notes === "string" ? base.notes.trim() : "";
+  normalized.notes = notes.length > 2000 ? notes.slice(0, 2000) : notes;
+
+  const costRaw = base.costImpact === null ? null : Number(base.costImpact);
+  if (costRaw === null || Number.isNaN(costRaw)){
+    normalized.costImpact = null;
+  }else{
+    normalized.costImpact = Math.max(0, costRaw);
+  }
+
+  return normalized;
+}
+
+function ensureDownTimeEvents(){
+  const existing = Array.isArray(window.downTimes) ? window.downTimes.slice() : [];
+  const normalized = [];
+  const seenIds = new Set();
+  existing.forEach(entry => {
+    const normalizedEntry = normalizeDownTimeEvent(entry);
+    if (!normalizedEntry) return;
+    let id = normalizedEntry.id && String(normalizedEntry.id).trim();
+    if (!id){
+      id = genId(`down_${normalizedEntry.dateISO}`);
+    }
+    while (seenIds.has(id)){
+      id = genId(`down_${normalizedEntry.dateISO}`);
+    }
+    normalizedEntry.id = id;
+    seenIds.add(id);
+    normalized.push(normalizedEntry);
+  });
+  normalized.sort((a, b)=>{
+    const dateCompare = String(a.dateISO || "").localeCompare(String(b.dateISO || ""));
+    if (dateCompare !== 0) return dateCompare;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+  window.downTimes = normalized;
+  return window.downTimes;
+}
+
+function upsertDownTimeEvent(payload, opts = {}){
+  const { skipSave = false } = opts || {};
+  const arr = ensureDownTimeEvents();
+  const normalized = normalizeDownTimeEvent(payload);
+  if (!normalized) return null;
+  if (!normalized.id){
+    normalized.id = genId(`down_${normalized.dateISO}`);
+  }
+  let idx = arr.findIndex(item => item && String(item.id) === String(normalized.id));
+  if (idx >= 0){
+    arr[idx] = normalized;
+  }else{
+    arr.push(normalized);
+    arr.sort((a, b)=>{
+      const dateCompare = String(a.dateISO || "").localeCompare(String(b.dateISO || ""));
+      if (dateCompare !== 0) return dateCompare;
+      return String(a.id || "").localeCompare(String(b.id || ""));
+    });
+    idx = arr.findIndex(item => item && String(item.id) === String(normalized.id));
+  }
+  window.downTimes = arr;
+  if (!skipSave){
+    try { saveCloudDebounced(); }
+    catch (err) { console.warn("Failed to schedule save after updating downtime", err); }
+  }
+  return arr[idx] || normalized;
+}
+
+function deleteDownTimeEvent(id, opts = {}){
+  const { skipSave = false } = opts || {};
+  const arr = ensureDownTimeEvents();
+  const idx = arr.findIndex(item => item && String(item.id) === String(id));
+  if (idx < 0) return false;
+  arr.splice(idx, 1);
+  window.downTimes = arr;
+  if (!skipSave){
+    try { saveCloudDebounced(); }
+    catch (err) { console.warn("Failed to schedule save after deleting downtime", err); }
+  }
+  return true;
+}
+
+function deleteDownTimeEventsByDate(dateISO, opts = {}){
+  const { skipSave = false } = opts || {};
+  if (!dateISO) return 0;
+  const arr = ensureDownTimeEvents();
+  let removed = 0;
+  for (let i = arr.length - 1; i >= 0; i--){
+    if (arr[i] && String(arr[i].dateISO) === String(dateISO)){
+      arr.splice(i, 1);
+      removed++;
+    }
+  }
+  if (removed){
+    window.downTimes = arr;
+    if (!skipSave){
+      try { saveCloudDebounced(); }
+      catch (err) { console.warn("Failed to schedule save after deleting downtime by date", err); }
+    }
+  }
+  return removed;
+}
+
+if (typeof window !== "undefined"){
+  window.normalizeDownTimeEvent = normalizeDownTimeEvent;
+  window.ensureDownTimeEvents = ensureDownTimeEvents;
+  window.upsertDownTimeEvent = upsertDownTimeEvent;
+  window.deleteDownTimeEvent = deleteDownTimeEvent;
+  window.deleteDownTimeEventsByDate = deleteDownTimeEventsByDate;
+}
 function parseDateLocal(value){
   if (value == null) return null;
 
