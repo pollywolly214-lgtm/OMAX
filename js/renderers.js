@@ -374,6 +374,7 @@ function captureNewJobFormState(){
     fields: {
       name: captureField("jobName"),
       estimate: captureField("jobEst"),
+      priority: captureField("jobPriority"),
       charge: captureField("jobCharge"),
       material: captureField("jobMaterial"),
       materialCost: captureField("jobMaterialCost"),
@@ -401,6 +402,7 @@ function restoreNewJobFormState(state){
 
   assignField("jobName", state.fields.name);
   assignField("jobEst", state.fields.estimate);
+  assignField("jobPriority", state.fields.priority);
   assignField("jobCharge", state.fields.charge);
   assignField("jobMaterial", state.fields.material);
   assignField("jobMaterialCost", state.fields.materialCost);
@@ -4146,7 +4148,7 @@ function renderDashboard(){
       categoryId = String(folder.id);
       window.jobCategoryFilter = categoryId;
     }
-    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[], cat: categoryId });
+    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, priority: 1, notes:"", manualLogs:[], cat: categoryId });
     ensureJobCategories?.();
     if (jobCategoryInput){
       jobCategoryInput.value = dashRootCategoryId;
@@ -10686,6 +10688,9 @@ function renderJobs(){
     const materialQtyRaw = document.getElementById("jobMaterialQty")?.value ?? "";
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
+    const priorityRaw = document.getElementById("jobPriority")?.value ?? "1";
+    const priorityNum = Number(priorityRaw);
+    const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
     const categorySelect = document.getElementById("jobCategory");
     let categoryId = categorySelect?.value || "";
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
@@ -10704,7 +10709,7 @@ function renderJobs(){
       window.jobCategoryFilter = categoryId;
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[], files:attachments, cat: categoryId });
+    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId });
     ensureJobCategories?.();
     pendingNewJobFiles.length = 0;
     saveCloudDebounced(); renderJobs();
@@ -10886,6 +10891,11 @@ function renderJobs(){
         chargeRate: Number.isFinite(Number(entry.chargeRate)) && Number(entry.chargeRate) >= 0
           ? Number(entry.chargeRate)
           : JOB_RATE_PER_HOUR,
+        priority: typeof getJobPriority === "function"
+          ? getJobPriority(entry)
+          : (Number.isFinite(Number(entry.priority)) && Number(entry.priority) > 0
+            ? Math.max(1, Math.floor(Number(entry.priority)))
+            : 1),
         notes: entry.notes || "",
         manualLogs: [],
         files: Array.isArray(entry.files) ? entry.files.map(f => ({ ...f })) : [],
@@ -10957,6 +10967,7 @@ function renderJobs(){
       const notesInput = field("notes");
       const completedInput = field("completedAtISO");
       const categoryInput = field("cat");
+      const priorityInput = field("priority");
 
       const name = (nameInput?.value || entry.name || "").trim();
       if (!name){ toast("Enter a job name."); return; }
@@ -10984,6 +10995,21 @@ function renderJobs(){
       if (completedRaw){
         const dt = new Date(completedRaw);
         if (!Number.isNaN(dt.getTime())) entry.completedAtISO = dt.toISOString();
+      }
+
+      if (priorityInput){
+        const priorityVal = priorityInput.value;
+        if (priorityVal !== undefined){
+          const priorityNum = priorityVal === "" ? null : Number(priorityVal);
+          if (priorityNum != null){
+            entry.priority = Number.isFinite(priorityNum) && priorityNum > 0
+              ? Math.max(1, Math.floor(priorityNum))
+              : 1;
+          }
+        }
+      }
+      if (entry.priority == null){
+        entry.priority = 1;
       }
 
       entry.name = name;
@@ -11217,6 +11243,11 @@ function renderJobs(){
         manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
         files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
         cat: job.cat != null ? job.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"),
+        priority: typeof getJobPriority === "function"
+          ? getJobPriority(job)
+          : (Number.isFinite(Number(job.priority)) && Number(job.priority) > 0
+            ? Math.max(1, Math.floor(Number(job.priority)))
+            : 1),
         actualHours: eff && Number.isFinite(eff.actualHours) ? eff.actualHours : null,
         efficiency: efficiencySummary
       };
@@ -11254,6 +11285,20 @@ function renderJobs(){
       j.dueISO   = qs("dueISO")   || j.dueISO;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
       j.chargeRate = chargeToSet;
+      const priorityRaw = qs("priority");
+      if (priorityRaw != null){
+        const priorityNum = priorityRaw === "" ? null : Number(priorityRaw);
+        const normalizedPriority = priorityNum == null
+          ? null
+          : (Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1);
+        if (normalizedPriority != null){
+          j.priority = normalizedPriority;
+        } else if (j.priority == null){
+          j.priority = 1;
+        }
+      } else if (j.priority == null){
+        j.priority = 1;
+      }
       if (catVal && catVal !== "__new__") j.cat = catVal;
       editingJobs.delete(id);
       saveCloudDebounced();

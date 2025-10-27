@@ -651,6 +651,15 @@ function showJobBubble(jobId, anchor){
     const active = cuttingJobs.find(x => String(x.id) === String(jobId));
     const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
     const completed = completedJobs.find(x => String(x?.id) === String(jobId));
+    const prioritySchedule = typeof computePrioritySchedule === "function"
+      ? computePrioritySchedule(cuttingJobs)
+      : { backlog: new Map(), efficiencies: new Map() };
+    const backlogMap = prioritySchedule && prioritySchedule.backlog instanceof Map
+      ? prioritySchedule.backlog
+      : new Map();
+    const efficiencyCache = prioritySchedule && prioritySchedule.efficiencies instanceof Map
+      ? prioritySchedule.efficiencies
+      : new Map();
     if (!active && !completed){
       b.innerHTML = `<div class="bubble-title">Job</div><div class="bubble-kv"><span>Info:</span><span>Job not found (id: ${jobId})</span></div>`;
       return;
@@ -704,11 +713,26 @@ function showJobBubble(jobId, anchor){
       return;
     }
     const j = active;
-    const eff = computeJobEfficiency(j);
-    const req = computeRequiredDaily(j);
-    const actualRemain = eff.actualRemaining != null
-      ? eff.actualRemaining
-      : Math.max(0, (Number(j.estimateHours)||0) - (eff.actualHours||0));
+    const jobIdStr = j?.id != null ? String(j.id) : "";
+    const jobPriority = typeof getJobPriority === "function"
+      ? getJobPriority(j)
+      : (Number.isFinite(Number(j?.priority)) && Number(j.priority) > 0
+        ? Math.max(1, Math.floor(Number(j.priority)))
+        : 1);
+    const cachedEff = jobIdStr && efficiencyCache instanceof Map ? efficiencyCache.get(jobIdStr) : null;
+    const eff = cachedEff || computeJobEfficiency(j);
+    if (jobIdStr && efficiencyCache instanceof Map && !cachedEff){
+      efficiencyCache.set(jobIdStr, eff);
+    }
+    const backlogRaw = jobIdStr && backlogMap instanceof Map ? backlogMap.get(jobIdStr) : 0;
+    const backlogHours = Number.isFinite(Number(backlogRaw)) ? Math.max(0, Number(backlogRaw)) : 0;
+    const req = computeRequiredDaily(j, { backlogHours });
+    const jobRemainingHours = Number.isFinite(req.jobRemainingHours)
+      ? Math.max(0, req.jobRemainingHours)
+      : (eff.actualRemaining != null
+        ? Math.max(0, eff.actualRemaining)
+        : Math.max(0, (Number(j.estimateHours)||0) - (Number(eff.actualHours)||0)));
+    const actualRemain = jobRemainingHours;
     const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
       ? Number(DAILY_HOURS)
       : 8;
@@ -723,6 +747,7 @@ function showJobBubble(jobId, anchor){
     const aheadSchedule = !behindSchedule && slackHours > (hoursPerDay + SLACK_EPS);
     const statusLabel = behindSchedule ? "Behind" : (aheadSchedule ? "Ahead" : "On pace");
     let statusDetail = "";
+    const backlogSummary = backlogHours > 0 ? `${backlogHours.toFixed(1)} hr queued ahead` : "";
     if (req.requiredPerDay === Infinity){
       statusDetail = "Past due";
     } else if (behindSchedule){
@@ -732,16 +757,25 @@ function showJobBubble(jobId, anchor){
     } else if (remainingHours > 0){
       statusDetail = `Needs ${req.requiredPerDay.toFixed(1)} hr/day`;
     }
+    if (backlogSummary){
+      statusDetail = statusDetail ? `${statusDetail} (${backlogSummary})` : backlogSummary;
+    }
     const daysLabel = remainingDays === 1 ? "day" : "days";
-    const remainingSummary = req.requiredPerDay === Infinity
+    let remainingSummary = req.requiredPerDay === Infinity
       ? `${actualRemain.toFixed(1)} hr remaining (past due)`
       : `${actualRemain.toFixed(1)} hr remaining over ${remainingDays} ${daysLabel}`;
+    if (backlogHours > 0){
+      remainingSummary += ` • Queue total ${remainingHours.toFixed(1)} hr`;
+    }
     const slackSummary = req.requiredPerDay === Infinity
       ? ""
       : `${slackHours >= 0 ? "+" : "−"}${Math.abs(slackHours).toFixed(1)} hr capacity`;
-    const reqCell = (req.requiredPerDay === Infinity)
+    let reqCell = (req.requiredPerDay === Infinity)
       ? `<span class="danger">Past due / no days remaining</span>`
       : `${req.requiredPerDay.toFixed(2)} hr/day needed (capacity ${hoursPerDay.toFixed(1)} hr/day) <span class="muted">(${remainingHours.toFixed(1)} hr over ${remainingDays} ${daysLabel})</span>`;
+    if (backlogSummary){
+      reqCell += `<div class="small muted">Includes ${escapeHtml(backlogSummary)}</div>`;
+    }
     const noteAuto = eff.usedAutoFromManual
       ? `<div class="small"><strong>Auto from last manual</strong>: continuing at ${DAILY_HOURS} hr/day.</div>`
       : (eff.usedFromStartAuto ? `<div class="small"><strong>Auto</strong>: assuming ${DAILY_HOURS} hr/day from start.</div>` : ``);
@@ -778,6 +812,9 @@ function showJobBubble(jobId, anchor){
       <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
       <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
       <div class="bubble-kv"><span>Schedule:</span><span>${startTxt} → ${dueTxt}</span></div>
+      <div class="bubble-kv"><span>Priority:</span><span>Priority ${jobPriority}</span></div>
+      <div class="bubble-kv"><span>Queue ahead:</span><span>${backlogHours > 0 ? `${backlogHours.toFixed(1)} hr` : "None"}</span></div>
+      <div class="bubble-kv"><span>Queue total:</span><span>${remainingHours.toFixed(1)} hr</span></div>
       <div class="bubble-kv"><span>Charge rate:</span><span>${escapeHtml(chargeRateText)}</span></div>
       <div class="bubble-kv"><span>Cost rate:</span><span>${escapeHtml(costRateText)}</span></div>
       <div class="bubble-kv"><span>Net profit/hr:</span><span>${escapeHtml(netRateText)}</span></div>

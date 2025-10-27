@@ -331,16 +331,68 @@ function computeJobEfficiency(job){
 }
 
 /* ----------- Required hrs/day to hit due date ------------- */
-function computeRequiredDaily(job){
-  if (!job || !job.startISO || !job.dueISO) return { remainingHours:0, remainingDays:0, requiredPerDay:0 };
+function getJobPriority(job){
+  const raw = job && job.priority != null ? Number(job.priority) : 1;
+  if (!Number.isFinite(raw) || raw <= 0) return 1;
+  return Math.max(1, Math.floor(raw));
+}
+
+function computePrioritySchedule(jobs){
+  const backlog = new Map();
+  const efficiencies = new Map();
+  if (!Array.isArray(jobs) || !jobs.length){
+    return { backlog, efficiencies };
+  }
+
+  const groups = new Map();
+
+  jobs.forEach(job => {
+    if (!job || job.id == null) return;
+    const idStr = String(job.id);
+    const priority = getJobPriority(job);
+    const eff = computeJobEfficiency(job);
+    efficiencies.set(idStr, eff);
+    const planned = Number(job.estimateHours) || 0;
+    const actual = eff && Number.isFinite(eff.actualHours) ? Math.max(0, Number(eff.actualHours)) : 0;
+    const remaining = Math.max(0, eff && Number.isFinite(eff.actualRemaining)
+      ? Number(eff.actualRemaining)
+      : (planned - actual));
+    const list = groups.get(priority) || [];
+    list.push({ id: idStr, remaining });
+    groups.set(priority, list);
+  });
+
+  const priorities = Array.from(groups.keys()).sort((a, b) => a - b);
+  let carried = 0;
+  priorities.forEach(level => {
+    const entries = groups.get(level) || [];
+    entries.forEach(entry => {
+      backlog.set(entry.id, carried);
+    });
+    const totalForLevel = entries.reduce((sum, entry) => {
+      const value = Number(entry.remaining);
+      return Number.isFinite(value) ? sum + Math.max(0, value) : sum;
+    }, 0);
+    carried += totalForLevel;
+  });
+
+  return { backlog, efficiencies };
+}
+
+function computeRequiredDaily(job, options = {}){
+  if (!job || !job.startISO || !job.dueISO) return { remainingHours:0, remainingDays:0, requiredPerDay:0, backlogHours:0, jobRemainingHours:0 };
   const eff = computeJobEfficiency(job);
   const planned = Number(job.estimateHours) || 0;
   const actualForRequirement = eff.usedFromStartAuto ? 0 : eff.actualHours;
-  const remainingHours = Math.max(0, planned - actualForRequirement);
+  const jobRemainingHours = Math.max(0, planned - actualForRequirement);
+  const backlogHours = Number.isFinite(Number(options.backlogHours))
+    ? Math.max(0, Number(options.backlogHours))
+    : 0;
+  const remainingHours = jobRemainingHours + backlogHours;
 
   const today = new Date(); today.setHours(0,0,0,0);
   const due   = parseDateLocal(job.dueISO);
-  if (!due) return { remainingHours:0, remainingDays:0, requiredPerDay:0 };
+  if (!due) return { remainingHours:0, remainingDays:0, requiredPerDay:0, backlogHours, jobRemainingHours };
   due.setHours(0,0,0,0);
 
   let remainingDays;
@@ -348,7 +400,7 @@ function computeRequiredDaily(job){
   else remainingDays = Math.max(1, inclusiveDayCount(today, due));
 
   const requiredPerDay = remainingDays > 0 ? (remainingHours / remainingDays) : (remainingHours>0 ? Infinity : 0);
-  return { remainingHours, remainingDays, requiredPerDay };
+  return { remainingHours, remainingDays, requiredPerDay, backlogHours, jobRemainingHours };
 }
 
 if (typeof window !== "undefined"){
@@ -356,5 +408,7 @@ if (typeof window !== "undefined"){
   window.getTimeEfficiencyWindowMeta = getTimeEfficiencyWindowMeta;
   window.syncDailyHoursFromTotals = syncDailyHoursFromTotals;
   window.getDailyCutHoursMap = getDailyCutHoursMap;
+  window.getJobPriority = getJobPriority;
+  window.computePrioritySchedule = computePrioritySchedule;
 }
 
