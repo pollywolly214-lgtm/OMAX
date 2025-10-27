@@ -450,6 +450,28 @@ function formatGarnetRange(start, end){
   const endTxt = formatGarnetTime(end);
   return `${startTxt} – ${endTxt}`;
 }
+
+function formatDowntimeSummary(hours){
+  const value = Number(hours);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  let decimals = 0;
+  if (!Number.isInteger(value)){
+    decimals = value < 1 ? 2 : 1;
+  }
+  return `${value.toFixed(decimals)} hr down`;
+}
+
+function formatMaintenanceCost(cost){
+  const value = Number(cost);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  const decimals = value < 1000 ? 2 : 0;
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  }).format(value);
+}
 function makeBubble(anchor){
   clearTimeout(bubbleTimer);
   bubbleTimer = null;
@@ -1149,6 +1171,14 @@ function renderCalendar(){
     const id = String(task.id);
     const statusKey = status || "due";
     const statusPriority = { completed: 3, manual: 2, due: 1 };
+    const downtimeRaw = typeof readTaskDowntimeHours === "function"
+      ? (readTaskDowntimeHours(task) ?? 0)
+      : (Number.isFinite(Number(task?.downtimeHours)) ? Number(task.downtimeHours) : 0);
+    const downtimeHours = Number.isFinite(downtimeRaw) && downtimeRaw > 0 ? downtimeRaw : 0;
+    const priceRaw = typeof readTaskMaintenanceCost === "function"
+      ? readTaskMaintenanceCost(task)
+      : Number(task?.price);
+    const price = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw : 0;
     const existing = events.find(ev => ev.type === "task" && ev.id === id);
     if (existing){
       existing.name = task.name;
@@ -1160,9 +1190,11 @@ function renderCalendar(){
       }
       existing.mode = task && task.mode === "asreq" ? "asreq" : "interval";
       existing.dateISO = key;
+      existing.downtimeHours = downtimeHours;
+      existing.price = price;
       return;
     }
-    events.push({ type:"task", id, name:task.name, status: statusKey, mode: task && task.mode === "asreq" ? "asreq" : "interval", dateISO: key });
+    events.push({ type:"task", id, name:task.name, status: statusKey, mode: task && task.mode === "asreq" ? "asreq" : "interval", dateISO: key, downtimeHours, price });
   }
 
   const intervalTasks = Array.isArray(window.tasksInterval)
@@ -1467,6 +1499,10 @@ function renderCalendar(){
         if (ev.status === "completed") label += " (completed)";
         else if (ev.status === "manual") label += " (scheduled)";
         else label += " (due)";
+        const costText = formatMaintenanceCost(ev.price);
+        const downtimeText = formatDowntimeSummary(ev.downtimeHours);
+        if (costText) label += ` • ${costText}`;
+        if (downtimeText) label += ` • ${downtimeText}`;
         chip.textContent = label;
         cell.appendChild(chip);
       });
