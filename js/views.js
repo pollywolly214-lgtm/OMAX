@@ -1489,6 +1489,15 @@ function viewJobs(){
     if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "—";
     return dt.toLocaleDateString();
   };
+  const formatOverlapRange = (startISO, endISO)=>{
+    if (startISO && endISO){
+      if (startISO === endISO) return `on ${formatDate(startISO)}`;
+      return `${formatDate(startISO)} – ${formatDate(endISO)}`;
+    }
+    if (startISO) return `from ${formatDate(startISO)}`;
+    if (endISO) return `through ${formatDate(endISO)}`;
+    return "";
+  };
   const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
     ? Number(DAILY_HOURS)
     : 8;
@@ -1519,6 +1528,36 @@ function viewJobs(){
     const netRate = chargeRate - costRate;
     const totalHours = hoursForTotal > 0 ? hoursForTotal : 0;
     return netRate * totalHours;
+  };
+
+  const jobViewModel = (typeof window.__jobViewModel === "object" && window.__jobViewModel) ? window.__jobViewModel : {};
+  const prioritizedJobs = Array.isArray(jobViewModel.prioritizedJobs)
+    ? jobViewModel.prioritizedJobs
+    : (Array.isArray(window.cuttingJobs) ? window.cuttingJobs.slice() : []);
+  const jobById = new Map(prioritizedJobs.map(job => [String(job.id), job]));
+  const overlapState = jobViewModel.overlapState && typeof jobViewModel.overlapState === "object"
+    ? jobViewModel.overlapState
+    : (typeof computeCuttingJobOverlaps === "function" ? computeCuttingJobOverlaps(prioritizedJobs) : { groups: [], jobMap: new Map() });
+  const overlapJobMap = overlapState && overlapState.jobMap instanceof Map
+    ? overlapState.jobMap
+    : (overlapState && overlapState.jobMap && typeof overlapState.jobMap === "object"
+      ? new Map(Object.entries(overlapState.jobMap))
+      : new Map());
+  const activeJobId = typeof jobViewModel.activeJobId === "string"
+    ? jobViewModel.activeJobId
+    : (typeof window.activeCuttingJobId === "string" ? window.activeCuttingJobId : "");
+  const priorityCount = prioritizedJobs.length;
+  const priorityOptionsMarkup = (selected)=> {
+    if (!priorityCount){
+      const normalized = Number(selected) === 1 ? " selected" : "";
+      return `<option value="1"${normalized}>#1</option>`;
+    }
+    const normalized = Number(selected) || 0;
+    return Array.from({ length: priorityCount }, (_, idx) => {
+      const value = idx + 1;
+      const selectedAttr = value === normalized ? " selected" : "";
+      return `<option value="${value}"${selectedAttr}>#${value}</option>`;
+    }).join("");
   };
 
   const pendingFiles = Array.isArray(window.pendingNewJobFiles) ? window.pendingNewJobFiles : [];
@@ -1702,7 +1741,7 @@ function viewJobs(){
     }
   };
 
-  cuttingJobs.forEach(job => incrementCounts(activeCounts, job?.cat));
+  prioritizedJobs.forEach(job => incrementCounts(activeCounts, job?.cat));
   completedCuttingJobs.forEach(job => incrementCounts(completedCounts, job?.cat));
 
   const jobsByCategory = new Map();
@@ -1721,7 +1760,7 @@ function viewJobs(){
       current = String(parent);
     }
   };
-  cuttingJobs.forEach(job => registerJobForCategory(job?.cat, job));
+  prioritizedJobs.forEach(job => registerJobForCategory(job?.cat, job));
 
   const folderOptions = [];
   const ensureFolderEntry = (folder, depth)=>{
@@ -1736,6 +1775,51 @@ function viewJobs(){
   };
   const rootFolder = folderMap.get(rootCategoryId) || { id: rootCategoryId, name: "All Jobs", parent: null, order: 1 };
   ensureFolderEntry(rootFolder, 0);
+
+  const overlapGroupsRaw = Array.isArray(overlapState && overlapState.groups) ? overlapState.groups : [];
+  const overlappingGroups = overlapGroupsRaw.filter(group => Array.isArray(group?.jobIds) && group.jobIds.length > 1);
+  const overlapSummaryItems = overlappingGroups.map(group => {
+    const orderedIds = Array.isArray(group.sortedIds) && group.sortedIds.length ? group.sortedIds : group.jobIds;
+    const labels = orderedIds.map(id => {
+      const job = jobById.get(id);
+      if (!job) return null;
+      const category = folderMap.get(normalizeCategory(job.cat));
+      const categoryName = category ? (category.name || "All Jobs") : "All Jobs";
+      return `${job.name || "Cutting job"} (${categoryName})`;
+    }).filter(Boolean);
+    if (!labels.length) return null;
+    const rangeLabel = formatOverlapRange(group.startISO, group.endISO);
+    const rangeMarkup = rangeLabel ? `<span class="job-overlap-summary-range">(${esc(rangeLabel)})</span>` : "";
+    return `<li><span class="job-overlap-summary-line">${esc(labels.join(" ↔ "))}</span>${rangeMarkup}</li>`;
+  }).filter(Boolean).join("");
+  const overlapSummaryMarkup = overlapSummaryItems
+    ? `<div class="job-overlap-summary" role="alert"><div class="job-overlap-summary-icon" aria-hidden="true">⚠</div><div><strong>${overlappingGroups.length === 1 ? "Cutting jobs overlap" : "Multiple cutting job overlaps"}</strong><ul class="job-overlap-summary-list">${overlapSummaryItems}</ul><p class="job-overlap-summary-hint small">Adjust priority order or change the in-progress job so overlapping work runs one at a time.</p></div></div>`
+    : "";
+  const activeOptionsMarkup = prioritizedJobs.map(job => {
+    if (!job || job.id == null) return "";
+    const id = String(job.id);
+    const priorityValue = Number(job.priorityOrder) > 0 ? Number(job.priorityOrder) : (prioritizedJobs.indexOf(job) + 1);
+    const label = `#${priorityValue} — ${job.name || "Cutting job"}`;
+    const selectedAttr = activeJobId && String(activeJobId) === id ? " selected" : "";
+    return `<option value="${esc(id)}"${selectedAttr}>${esc(label)}</option>`;
+  }).filter(Boolean).join("");
+  const activeControlMarkup = prioritizedJobs.length
+    ? `<div class="job-active-control">
+         <label class="job-active-label" for="activeJobSelect">Job in progress</label>
+         <div class="job-active-inputs">
+           <select id="activeJobSelect" aria-describedby="jobActiveHelp">
+             <option value="">None selected</option>
+             ${activeOptionsMarkup}
+           </select>
+           <button type="button" id="clearActiveJob"${activeJobId ? "" : " disabled"}>Clear</button>
+         </div>
+         <p id="jobActiveHelp" class="job-active-hint small muted">Selecting a job pins it to the top of the queue and keeps scheduling accurate.</p>
+       </div>`
+    : `<div class="job-active-control job-active-control-empty"><span class="small muted">Add a cutting job to set one in progress.</span></div>`;
+  const queueControlMarkup = `<div class="job-queue-controls">
+      ${activeControlMarkup}
+      ${overlapSummaryMarkup}
+    </div>`;
 
   const categoryOptionsMarkup = (selectedId, { includeCreateOption = false, rootLabel } = {})=>{
     const target = normalizeCategory(selectedId);
@@ -1919,7 +2003,7 @@ function viewJobs(){
 
   const folderTreeMarkup = renderFolderTree(rootFolder);
 
-  const jobsForCategory = cuttingJobs.filter(job => {
+  const jobsForCategory = prioritizedJobs.filter(job => {
     const normalized = normalizeCategory(job?.cat);
     return allowedCategories.has(normalized);
   });
@@ -2395,17 +2479,74 @@ function viewJobs(){
     const needDisplay = req.requiredPerDay === Infinity
       ? `<span class="job-badge job-badge-overdue">${esc(formatPastDueLabel(j.dueISO))}</span>`
       : `${needPerDay} hr/day needed (capacity ${hoursPerDay.toFixed(1)} hr/day)`;
-    const statusDisplay = [
-      `<div class="job-status ${aheadSchedule ? 'job-status-ahead' : (behindSchedule ? 'job-status-behind' : 'job-status-onpace')}">${esc(statusLabel)}</div>`,
-      statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : ''
-    ].join('');
-
     // Dates (for display / edit row)
     const startDate = parseDateLocal(j.startISO);
     const dueDate   = parseDateLocal(j.dueISO);
     const startTxt  = startDate ? startDate.toDateString() : "—";
     const dueTxt    = dueDate ? dueDate.toDateString() : "—";
     const dueVal    = dueDate ? ymd(dueDate) : (j.dueISO || "");
+    const jobNameText = j.name || "Cutting job";
+    const jobNameEsc = esc(jobNameText);
+    const jobIdAttr = esc(j.id);
+    const fallbackPriority = prioritizedJobs.indexOf(j) >= 0 ? (prioritizedJobs.indexOf(j) + 1) : 1;
+    const globalPriority = Number(j.priorityOrder) > 0 ? Number(j.priorityOrder) : fallbackPriority;
+    const priorityUpDisabled = globalPriority <= 1 ? " disabled" : "";
+    const priorityDownDisabled = globalPriority >= prioritizedJobs.length ? " disabled" : "";
+    const isActive = activeJobId && String(j.id) === activeJobId;
+    const activePill = isActive ? `<span class="job-active-pill" aria-live="polite">In progress</span>` : "";
+    const activeButtonMarkup = isActive
+      ? `<button type="button" class="job-set-active-button is-active" data-job-clear-active="${jobIdAttr}" aria-pressed="true">Clear in-progress</button>`
+      : `<button type="button" class="job-set-active-button" data-job-set-active="${jobIdAttr}" aria-pressed="false">Set as in progress</button>`;
+    let queueDisplay = "";
+    let queuePosition = globalPriority;
+    let queueSize = null;
+    const overlapInfo = overlapJobMap instanceof Map ? overlapJobMap.get(String(j.id)) : null;
+    if (overlapInfo && Array.isArray(overlapInfo.sortedIds) && overlapInfo.sortedIds.length){
+      const idx = overlapInfo.sortedIds.indexOf(String(j.id));
+      if (idx >= 0) queuePosition = idx + 1;
+      queueSize = Number(overlapInfo.size) || overlapInfo.sortedIds.length;
+      if (queueSize > 1){
+        queueDisplay = `Queue #${queuePosition} of ${queueSize}`;
+      }
+    }
+    const overlapPeerSummary = overlapInfo ? overlapInfo.peers
+      .map(peerId => {
+        const peer = jobById.get(peerId);
+        if (!peer) return null;
+        const peerCategory = folderMap.get(normalizeCategory(peer.cat));
+        const peerCategoryName = peerCategory ? (peerCategory.name || "All Jobs") : "All Jobs";
+        return `${peer.name || "Cutting job"} (${peerCategoryName})`;
+      })
+      .filter(Boolean)
+      .join(", ") : "";
+    const overlapRangeLabel = overlapInfo ? formatOverlapRange(overlapInfo.startISO, overlapInfo.endISO) : "";
+    let overlapInline = "";
+    if (overlapInfo){
+      const summaryParts = [];
+      if (overlapPeerSummary) summaryParts.push(`Overlaps with ${overlapPeerSummary}`);
+      if (overlapRangeLabel) summaryParts.push(`Scheduled ${overlapRangeLabel}`);
+      if (queueSize && queueSize > 1) summaryParts.push(`Queue position #${queuePosition} of ${queueSize}`);
+      const messageCore = summaryParts.join(". ");
+      const guidance = "Use the priority arrows or change the in-progress job so work happens sequentially.";
+      const finalMessage = messageCore ? `${messageCore}. ${guidance}` : guidance;
+      overlapInline = `<div class="job-overlap-inline" role="alert" aria-live="polite"><span class="job-overlap-inline-icon" aria-hidden="true">⚠</span><span>${esc(finalMessage)}</span></div>`;
+    }
+    const priorityControlsMarkup = `
+      <div class="job-priority-controls" role="group" aria-label="Queue priority for ${jobNameEsc}">
+        <span class="job-priority-badge">Priority #${globalPriority}</span>
+        <div class="job-priority-buttons">
+          <button type="button" class="job-priority-btn" data-job-priority-up="${jobIdAttr}"${priorityUpDisabled} aria-label="Move ${jobNameEsc} earlier in the queue">▲</button>
+          <button type="button" class="job-priority-btn" data-job-priority-down="${jobIdAttr}"${priorityDownDisabled} aria-label="Move ${jobNameEsc} later in the queue">▼</button>
+        </div>
+        ${queueDisplay ? `<span class="job-queue-status">${esc(queueDisplay)}</span>` : ""}
+      </div>`;
+    const statusParts = [
+      `<div class="job-status ${aheadSchedule ? 'job-status-ahead' : (behindSchedule ? 'job-status-behind' : 'job-status-onpace')}">${esc(statusLabel)}</div>`
+    ];
+    if (statusDetail) statusParts.push(`<div class="job-status-detail">${esc(statusDetail.trim())}</div>`);
+    if (isActive) statusParts.push('<div class="job-status-active">In progress</div>');
+    else if (queueDisplay) statusParts.push(`<div class="job-status-queue">${esc(queueDisplay)}</div>`);
+    const statusDisplay = statusParts.join('');
 
     if (!editing){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
@@ -2415,7 +2556,7 @@ function viewJobs(){
       const noteButtonLabel = esc(j.name || "Cutting job");
       const notePreviewTitleAttr = notePreview.tooltip ? ` title="${esc(notePreview.tooltip)}"` : "";
       return `
-        <tr data-job-row="${j.id}" class="job-row">
+        <tr data-job-row="${j.id}" class="job-row${isActive ? ' is-active' : ''}">
           <td class="job-col job-col-main job-col-locked" data-requires-edit="${j.id}">
             <div class="job-main">
               <div class="job-title-chip"${colorStyleAttr}>
@@ -2432,6 +2573,14 @@ function viewJobs(){
                 </select>
               </div>
               <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
+              <div class="job-main-meta">
+                ${priorityControlsMarkup}
+                <div class="job-main-active">
+                  ${activePill}
+                  ${activeButtonMarkup}
+                </div>
+              </div>
+              ${overlapInline}
             </div>
           </td>
           <td class="job-col job-col-estimate job-col-locked" data-requires-edit="${j.id}">${estimateDisplay}</td>
@@ -2504,6 +2653,9 @@ function viewJobs(){
               </button>
               <div class="job-actions-menu" id="${esc(actionMenuId)}" data-job-actions-menu="${j.id}" hidden>
                 <button type="button" data-log-job="${j.id}">Log time</button>
+                ${isActive
+                  ? `<button type="button" data-job-clear-active="${jobIdAttr}">Clear in-progress</button>`
+                  : `<button type="button" data-job-set-active="${jobIdAttr}">Set as in progress</button>`}
                 <button type="button" data-edit-job="${j.id}">Edit</button>
                 <button type="button" data-complete-job="${j.id}">Mark complete</button>
                 <button type="button" class="danger" data-remove-job="${j.id}">Remove</button>
@@ -2542,6 +2694,17 @@ function viewJobs(){
                     <button type="button" class="category-color-reset${colorInfo.isCustom ? "" : " is-hidden"}" data-job-category-color-reset="${esc(normalizedCatId)}" title="Use automatic color">Auto</button>
                   </div>
                 </label>
+                <label>Queue priority<select class="job-priority-select" data-job-priority-select="${jobIdAttr}" aria-label="Priority for ${jobNameEsc}">
+                  ${priorityOptionsMarkup(globalPriority)}
+                </select></label>
+              </div>
+              <div class="job-edit-priority-actions">
+                ${priorityControlsMarkup}
+                <div class="job-edit-active-controls">
+                  ${activePill}
+                  ${activeButtonMarkup}
+                </div>
+                ${overlapInline}
               </div>
               <aside class="job-edit-summary" aria-label="Job impact summary">
                 <div class="job-edit-summary-title">Quick impact</div>
@@ -2643,6 +2806,7 @@ function viewJobs(){
           ? `<div class="job-add-indicator" role="status" aria-live="polite">${pendingSummary}</div>`
           : ""}
       </div>
+      ${queueControlMarkup}
       <section
         class="job-add-panel${addFormOpen ? " is-open" : ""}"
         data-job-add-panel

@@ -92,6 +92,46 @@ function hoursSnapshotOnOrBefore(dateISO){
   return best;
 }
 
+function computeNewCuttingJobMeta(){
+  const list = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : [];
+  let priorityOrder = 1;
+  if (typeof nextCuttingJobPriority === "function"){
+    try {
+      priorityOrder = nextCuttingJobPriority(list);
+    } catch (err){
+      console.warn("Failed to compute next cutting job priority", err);
+    }
+  }
+  if (!Number.isFinite(priorityOrder) || priorityOrder <= 0){
+    priorityOrder = list.reduce((acc, job)=>{
+      const value = Number(job && job.priorityOrder);
+      return Number.isFinite(value) && value > acc ? value : acc;
+    }, 0) + 1;
+  }
+  let createdAtISO = null;
+  try {
+    createdAtISO = new Date().toISOString();
+  } catch (_err) {
+    createdAtISO = null;
+  }
+  return { priorityOrder, createdAtISO };
+}
+
+function prepareNewCuttingJob(base){
+  const job = base ? { ...base } : {};
+  const meta = computeNewCuttingJobMeta();
+  const rawPriority = Number(job.priorityOrder);
+  if (!Number.isFinite(rawPriority) || rawPriority <= 0){
+    job.priorityOrder = meta.priorityOrder;
+  }
+  if (!job.createdAtISO){
+    job.createdAtISO = meta.createdAtISO;
+  }
+  if (!Array.isArray(job.manualLogs)) job.manualLogs = [];
+  if (!Array.isArray(job.files)) job.files = [];
+  return job;
+}
+
 function ensureTaskManualHistory(task){
   if (!task) return [];
   const normalized = [];
@@ -4146,7 +4186,23 @@ function renderDashboard(){
       categoryId = String(folder.id);
       window.jobCategoryFilter = categoryId;
     }
-    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[], cat: categoryId });
+    const baseJob = {
+      id: genId(name),
+      name,
+      estimateHours: est,
+      startISO: start,
+      dueISO: due,
+      material,
+      materialCost,
+      materialQty,
+      chargeRate,
+      notes: "",
+      manualLogs: [],
+      files: [],
+      cat: categoryId
+    };
+    const preparedJob = prepareNewCuttingJob(baseJob);
+    cuttingJobs.push(preparedJob);
     ensureJobCategories?.();
     if (jobCategoryInput){
       jobCategoryInput.value = dashRootCategoryId;
@@ -9592,6 +9648,132 @@ function renderJobs(){
     window.__cleanupJobFileMenus = null;
   }
 
+  const normalizePriorities = ()=>{
+    const base = typeof normalizeJobPriorityOrder === "function"
+      ? normalizeJobPriorityOrder(cuttingJobs)
+      : { sorted: Array.isArray(cuttingJobs) ? cuttingJobs.slice() : [], changed: false };
+    const sorted = Array.isArray(base.sorted) ? base.sorted.slice() : [];
+    if (typeof compareJobsByPriority === "function"){
+      sorted.sort(compareJobsByPriority);
+      cuttingJobs.sort(compareJobsByPriority);
+    } else {
+      sorted.sort((a, b)=> (Number(a?.priorityOrder) || 0) - (Number(b?.priorityOrder) || 0));
+      cuttingJobs.sort((a, b)=> (Number(a?.priorityOrder) || 0) - (Number(b?.priorityOrder) || 0));
+    }
+    window.cuttingJobs = cuttingJobs;
+    return { sorted, changed: base.changed };
+  };
+
+  const applyPrioritySequence = (orderedJobs)=>{
+    if (!Array.isArray(orderedJobs)) return;
+    orderedJobs.forEach((job, idx)=>{
+      if (job) job.priorityOrder = idx + 1;
+    });
+    if (typeof compareJobsByPriority === "function"){
+      cuttingJobs.sort(compareJobsByPriority);
+    } else {
+      cuttingJobs.sort((a, b)=> (Number(a?.priorityOrder) || 0) - (Number(b?.priorityOrder) || 0));
+    }
+    window.cuttingJobs = cuttingJobs;
+  };
+
+  const moveJobPriority = (jobId, offset)=>{
+    const id = jobId != null ? String(jobId) : "";
+    if (!id || !Number.isFinite(Number(offset)) || Number(offset) === 0) return false;
+    const { sorted } = normalizePriorities();
+    const arr = Array.isArray(sorted) ? sorted.slice() : [];
+    const index = arr.findIndex(job => String(job?.id) === id);
+    if (index < 0) return false;
+    const targetIndex = Math.max(0, Math.min(arr.length - 1, index + Number(offset)));
+    if (targetIndex === index) return false;
+    const [entry] = arr.splice(index, 1);
+    arr.splice(targetIndex, 0, entry);
+    applyPrioritySequence(arr);
+    return true;
+  };
+
+  const setJobPriorityPosition = (jobId, position)=>{
+    const id = jobId != null ? String(jobId) : "";
+    const pos = Number(position);
+    if (!id || !Number.isFinite(pos)) return false;
+    const { sorted } = normalizePriorities();
+    const arr = Array.isArray(sorted) ? sorted.slice() : [];
+    const index = arr.findIndex(job => String(job?.id) === id);
+    if (index < 0) return false;
+    let targetIndex = Math.round(pos) - 1;
+    targetIndex = Math.max(0, Math.min(arr.length - 1, targetIndex));
+    if (targetIndex === index) return false;
+    const [entry] = arr.splice(index, 1);
+    arr.splice(targetIndex, 0, entry);
+    applyPrioritySequence(arr);
+    return true;
+  };
+
+  const setActiveCuttingJobLocal = (jobId)=>{
+    const target = jobId ? String(jobId) : "";
+    const previous = typeof window.activeCuttingJobId === "string" ? window.activeCuttingJobId : "";
+    if (!target){
+      if (!previous) return false;
+      window.activeCuttingJobId = "";
+      return true;
+    }
+    const exists = cuttingJobs.some(job => String(job?.id) === target);
+    if (!exists){
+      if (!previous) return false;
+      window.activeCuttingJobId = "";
+      return true;
+    }
+    if (target === previous){
+      return false;
+    }
+    window.activeCuttingJobId = target;
+    const { sorted } = normalizePriorities();
+    const arr = Array.isArray(sorted) ? sorted.slice() : [];
+    const index = arr.findIndex(job => String(job?.id) === target);
+    if (index > 0){
+      const [entry] = arr.splice(index, 1);
+      arr.unshift(entry);
+      applyPrioritySequence(arr);
+    }
+    return true;
+  };
+
+  const clearActiveCuttingJobLocal = ()=> setActiveCuttingJobLocal("");
+
+  const prepareJobViewModel = ()=>{
+    const priorityState = normalizePriorities();
+    const prioritizedJobs = Array.isArray(priorityState.sorted) ? priorityState.sorted.slice() : [];
+    let activeJobId = typeof window.activeCuttingJobId === "string" ? window.activeCuttingJobId : "";
+    let activeChanged = false;
+    if (activeJobId){
+      const exists = prioritizedJobs.some(job => String(job?.id) === activeJobId);
+      if (!exists){
+        activeJobId = "";
+        window.activeCuttingJobId = "";
+        activeChanged = true;
+      }
+    }
+    const overlapState = typeof computeCuttingJobOverlaps === "function"
+      ? computeCuttingJobOverlaps(prioritizedJobs)
+      : { groups: [], jobMap: new Map() };
+    return { prioritizedJobs, overlapState, activeJobId, priorityChanged: priorityState.changed, activeChanged };
+  };
+
+  const ensurePriorityAndActiveSaved = (state)=>{
+    if (!state) return;
+    if (state.priorityChanged || state.activeChanged){
+      saveCloudDebounced();
+    }
+  };
+
+  const viewModelState = prepareJobViewModel();
+  window.__jobViewModel = {
+    prioritizedJobs: viewModelState.prioritizedJobs,
+    overlapState: viewModelState.overlapState,
+    activeJobId: viewModelState.activeJobId
+  };
+  ensurePriorityAndActiveSaved(viewModelState);
+
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
   setupJobLayout();
@@ -9612,6 +9794,42 @@ function renderJobs(){
         }
       });
     }
+  }
+
+  const activeJobSelect = content.querySelector("#activeJobSelect");
+  if (activeJobSelect){
+    activeJobSelect.addEventListener("change", (event)=>{
+      const value = activeJobSelect.value;
+      const changed = value ? setActiveCuttingJobLocal(value) : clearActiveCuttingJobLocal();
+      if (changed){
+        saveCloudDebounced();
+        toast(value ? "Job marked in progress" : "Active job cleared");
+        renderJobs();
+      } else {
+        const current = typeof window.activeCuttingJobId === "string" ? window.activeCuttingJobId : "";
+        if (activeJobSelect.value !== current){
+          activeJobSelect.value = current;
+        }
+      }
+    });
+  }
+
+  const clearActiveJobBtn = content.querySelector("#clearActiveJob");
+  if (clearActiveJobBtn){
+    clearActiveJobBtn.addEventListener("click", (event)=>{
+      event.preventDefault();
+      const changed = clearActiveCuttingJobLocal();
+      if (changed){
+        saveCloudDebounced();
+        toast("Active job cleared");
+        renderJobs();
+      } else if (activeJobSelect){
+        const current = typeof window.activeCuttingJobId === "string" ? window.activeCuttingJobId : "";
+        if (activeJobSelect.value !== current){
+          activeJobSelect.value = current;
+        }
+      }
+    });
   }
 
   const readOpenFolderSet = ()=>{
@@ -10681,7 +10899,23 @@ function renderJobs(){
       window.jobCategoryFilter = categoryId;
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[], files:attachments, cat: categoryId });
+    const baseJob = {
+      id: genId(name),
+      name,
+      estimateHours: est,
+      startISO: start,
+      dueISO: due,
+      material,
+      materialCost,
+      materialQty,
+      chargeRate,
+      notes: "",
+      manualLogs: [],
+      files: attachments,
+      cat: categoryId
+    };
+    const preparedJob = prepareNewCuttingJob(baseJob);
+    cuttingJobs.push(preparedJob);
     ensureJobCategories?.();
     pendingNewJobFiles.length = 0;
     saveCloudDebounced(); renderJobs();
@@ -10689,6 +10923,24 @@ function renderJobs(){
 
   // 5) Inline material $/qty (kept)
   content.querySelector(".job-table tbody")?.addEventListener("change", async (e)=>{
+    const prioritySelect = e.target.closest("[data-job-priority-select]");
+    if (prioritySelect){
+      const id = prioritySelect.getAttribute("data-job-priority-select");
+      const value = prioritySelect.value;
+      if (id){
+        const changed = setJobPriorityPosition(id, value);
+        if (changed){
+          saveCloudDebounced();
+          toast("Priority updated");
+          renderJobs();
+        } else {
+          const job = cuttingJobs.find(job => String(job?.id) === String(id));
+          const current = Number(job?.priorityOrder) || 1;
+          if (prioritySelect.value !== String(current)) prioritySelect.value = String(current);
+        }
+      }
+      return;
+    }
     if (e.target.matches("input[data-job-file-input]")){
       const id = e.target.getAttribute("data-job-file-input");
       const j = cuttingJobs.find(x=>x.id===id);
@@ -10851,7 +11103,7 @@ function renderJobs(){
       if (!Number.isFinite(estimateHours) || estimateHours <= 0){
         estimateHours = normalizedDays * hoursPerDay;
       }
-      const newJob = {
+      const baseJob = {
         id: genId(entry.name || "job"),
         name: entry.name || "Cutting job",
         estimateHours,
@@ -10869,6 +11121,7 @@ function renderJobs(){
         cat: entry.cat != null ? entry.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root")
       };
 
+      const newJob = prepareNewCuttingJob(baseJob);
       cuttingJobs.push(newJob);
       window.cuttingJobs = cuttingJobs;
       saveCloudDebounced();
@@ -11095,6 +11348,65 @@ function renderJobs(){
       return;
     }
 
+    const priorityUp = e.target.closest("[data-job-priority-up]");
+    if (priorityUp){
+      e.preventDefault();
+      const id = priorityUp.getAttribute("data-job-priority-up");
+      if (id){
+        const changed = moveJobPriority(id, -1);
+        if (changed){
+          saveCloudDebounced();
+          toast("Priority updated");
+          renderJobs();
+        }
+      }
+      return;
+    }
+
+    const priorityDown = e.target.closest("[data-job-priority-down]");
+    if (priorityDown){
+      e.preventDefault();
+      const id = priorityDown.getAttribute("data-job-priority-down");
+      if (id){
+        const changed = moveJobPriority(id, 1);
+        if (changed){
+          saveCloudDebounced();
+          toast("Priority updated");
+          renderJobs();
+        }
+      }
+      return;
+    }
+
+    const activateBtn = e.target.closest("[data-job-set-active]");
+    if (activateBtn){
+      e.preventDefault();
+      const id = activateBtn.getAttribute("data-job-set-active");
+      if (id){
+        const changed = setActiveCuttingJobLocal(id);
+        closeActionMenu();
+        if (changed){
+          saveCloudDebounced();
+          toast("Job marked in progress");
+          renderJobs();
+        }
+      }
+      return;
+    }
+
+    const clearActiveBtn = e.target.closest("[data-job-clear-active]");
+    if (clearActiveBtn){
+      e.preventDefault();
+      const changed = clearActiveCuttingJobLocal();
+      closeActionMenu();
+      if (changed){
+        saveCloudDebounced();
+        toast("Active job cleared");
+        renderJobs();
+      }
+      return;
+    }
+
     const ed = e.target.closest("[data-edit-job]");
     const rm = e.target.closest("[data-remove-job]");
     const sv = e.target.closest("[data-save-job]");
@@ -11123,7 +11435,12 @@ function renderJobs(){
       }
       cuttingJobs = cuttingJobs.filter(x=>x.id!==id);
       window.cuttingJobs = cuttingJobs;
-      saveCloudDebounced(); toast("Removed"); renderJobs();
+      normalizePriorities();
+      const wasActive = typeof window.activeCuttingJobId === "string" && window.activeCuttingJobId === String(id);
+      const activeCleared = wasActive ? clearActiveCuttingJobLocal() : false;
+      saveCloudDebounced();
+      toast(activeCleared ? "Removed and cleared active job" : "Removed");
+      renderJobs();
       return;
     }
 
@@ -11188,9 +11505,13 @@ function renderJobs(){
 
       completedCuttingJobs.push(completed);
       cuttingJobs.splice(idx, 1);
+      window.cuttingJobs = cuttingJobs;
+      normalizePriorities();
+      const wasActive = typeof window.activeCuttingJobId === "string" && window.activeCuttingJobId === String(id);
+      const activeCleared = wasActive ? clearActiveCuttingJobLocal() : false;
       editingJobs.delete(id);
       saveCloudDebounced();
-      toast("Job marked complete");
+      toast(activeCleared ? "Job marked complete and cleared active" : "Job marked complete");
       renderJobs();
       return;
     }
