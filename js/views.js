@@ -2508,7 +2508,7 @@ function viewJobs(){
     const estimateDisplay = formatHours(j.estimateHours);
     const queueTotalDisplay = formatHours(remainingHours);
     const remainingDisplay = formatHours(remainHrs);
-    const needDisplay = req.requiredPerDay === Infinity
+    let needDisplay = req.requiredPerDay === Infinity
       ? `<span class="job-badge job-badge-overdue">${esc(formatPastDueLabel(j.dueISO))}</span>`
       : `${needPerDay} hr/day needed (capacity ${hoursPerDay.toFixed(1)} hr/day)`;
     if (backlogSummary){
