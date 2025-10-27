@@ -163,9 +163,16 @@ function timeStringToMinutes(value){
 /* Toast */
 function toast(msg){
   const t = document.createElement("div");
-  t.className = "toast"; t.textContent = msg; document.body.appendChild(t);
-  setTimeout(()=>t.classList.add("show"),10);
-  setTimeout(()=>{ t.classList.remove("show"); setTimeout(()=>t.remove(),200); }, 1600);
+  t.className = "toast";
+  t.textContent = msg;
+  document.body.appendChild(t);
+  const fadeMs = 320;
+  const displayMs = 3000;
+  requestAnimationFrame(()=>{ t.classList.add("show"); });
+  setTimeout(()=>{
+    t.classList.remove("show");
+    setTimeout(()=>{ t.remove(); }, fadeMs);
+  }, displayMs);
 }
 
 /* ================ MINIMUM STYLE INJECTION ================== */

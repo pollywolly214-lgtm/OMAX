@@ -3762,12 +3762,24 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
 
 /* Toast */
 .toast {
-  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
-  background: #0a63c2; color: #fff; padding: 8px 12px; border-radius: 8px;
-  opacity: 0; pointer-events: none; transition: opacity .2s ease;
-  box-shadow: 0 4px 12px rgba(0,0,0,.15); font-size: 13px;
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translate(-50%, 12px);
+  background: #0a63c2;
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .28s ease, transform .28s ease;
+  box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  font-size: 12px;
 }
-.toast.show { opacity: 1; }
+.toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
 
 /* Settings search (kept) */
 .settings-search {
