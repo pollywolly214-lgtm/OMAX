@@ -1551,10 +1551,20 @@ function jobFolderChildren(parentId){
 function addJobFolder(name, parentId, color){
   const folders = ensureJobFolderState();
   const label = (name || "").trim();
+  if (!label) return null;
   const parentKey = parentId != null ? String(parentId) : JOB_ROOT_FOLDER_ID;
   const fallbackParent = folders.some(folder => String(folder.id) === parentKey)
     ? parentKey
     : JOB_ROOT_FOLDER_ID;
+  const normalizedParent = fallbackParent === JOB_ROOT_FOLDER_ID ? JOB_ROOT_FOLDER_ID : fallbackParent;
+  const normalizedLabel = label.toLowerCase();
+  const hasDuplicate = folders.some(folder => {
+    if (!folder || String(folder.id) === JOB_ROOT_FOLDER_ID) return false;
+    const folderParent = folder.parent == null ? JOB_ROOT_FOLDER_ID : String(folder.parent);
+    const folderLabel = (folder.name || "").trim().toLowerCase();
+    return folderParent === normalizedParent && folderLabel === normalizedLabel;
+  });
+  if (hasDuplicate) return null;
   const orderBase = folders.reduce((max, folder)=>{
     const val = Number(folder?.order);
     return Number.isFinite(val) && val > max ? val : max;
@@ -1563,7 +1573,7 @@ function addJobFolder(name, parentId, color){
   const folder = {
     id,
     name: label,
-    parent: fallbackParent === JOB_ROOT_FOLDER_ID ? JOB_ROOT_FOLDER_ID : fallbackParent,
+    parent: normalizedParent,
     order: orderBase + 1
   };
   const normalizedColor = normalizeHexColor(color);

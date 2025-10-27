@@ -4190,7 +4190,7 @@ function renderDashboard(){
     if (categoryId === "__new__"){
       const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
       const folder = promptCreateCategory(parent);
-      if (!folder){ toast("Category not created."); return; }
+      if (!folder) return;
       categoryId = String(folder.id);
       window.jobCategoryFilter = categoryId;
     }
@@ -10387,15 +10387,36 @@ function renderJobs(){
     rerenderPreservingState(currentCategoryFilter());
   };
 
+  const categoryNameExists = (name, parentId)=>{
+    const trimmed = (name || "").trim().toLowerCase();
+    if (!trimmed) return false;
+    const parentKey = parentId != null ? String(parentId) : rootCategoryId;
+    return ensureCategoryState().some(folder => {
+      if (!folder || String(folder.id) === rootCategoryId) return false;
+      const folderParent = folder.parent == null ? rootCategoryId : String(folder.parent);
+      const folderName = (folder.name || "").trim().toLowerCase();
+      return folderParent === parentKey && folderName === trimmed;
+    });
+  };
+
   const promptCreateCategory = (parentId)=>{
     const name = window.prompt("New category name?");
-    if (!name) return null;
+    const trimmed = (name || "").trim();
+    if (!trimmed) return null;
+    const parentKey = parentId != null ? String(parentId) : rootCategoryId;
+    if (categoryNameExists(trimmed, parentKey)){
+      toast("A category with that name already exists.");
+      return null;
+    }
     try {
-      const folder = typeof addJobFolder === "function" ? addJobFolder(name, parentId) : null;
-      if (folder){
-        ensureJobCategories?.();
-        saveCloudDebounced();
+      const folder = typeof addJobFolder === "function" ? addJobFolder(trimmed, parentKey) : null;
+      if (!folder){
+        const duplicate = categoryNameExists(trimmed, parentKey);
+        toast(duplicate ? "A category with that name already exists." : "Unable to create category.");
+        return null;
       }
+      ensureJobCategories?.();
+      saveCloudDebounced();
       return folder;
     } catch (err){
       console.warn("Failed to create job category", err);
