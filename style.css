@@ -290,6 +290,13 @@ body.pump-notes-open { overflow:hidden; }
 
 .cost-chart-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
 .cost-chart-title{ display:flex; align-items:center; gap:8px; }
+.cost-chart-actions{ display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-wrap:wrap; }
+.cost-chart-range{ display:flex; align-items:center; gap:6px; padding:4px; background:#f5f7fb; border-radius:999px; }
+.cost-chart-range button{ border:1px solid transparent; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.02em; color:#4a5568; background:transparent; cursor:pointer; transition:background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease; }
+.cost-chart-range button:hover{ background:#e4e9f5; }
+.cost-chart-range button[aria-pressed="true"],
+.cost-chart-range button.is-active{ background:#0a63c2; color:#fff; border-color:#0a63c2; box-shadow:0 0 0 1px #0a63c2 inset; }
+.cost-chart-range button:focus-visible{ outline:2px solid #0a63c2; outline-offset:2px; }
 .cost-chart-toggle{ display:flex; gap:12px; flex-wrap:wrap; font-size:13px; color:#333; }
 .cost-chart-toggle label{ display:flex; align-items:center; gap:6px; cursor:pointer; }
 .cost-chart-toggle-jobs{ gap:6px; }

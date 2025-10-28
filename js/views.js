@@ -1211,9 +1211,17 @@ function viewCosts(model){
             <div class="cost-chart-title">
               <h3>Estimated Cost Trends</h3>
             </div>
-            <div class="cost-chart-toggle">
-              <label><input type="checkbox" id="toggleCostMaintenance" checked> <span class="dot" style="background:${esc(chartColors.maintenance)}"></span> Maintenance</label>
-              <label class="cost-chart-toggle-jobs"><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> <span class="cost-chart-toggle-link" role="link" tabindex="0">Cutting jobs</span></label>
+            <div class="cost-chart-actions">
+              <div class="cost-chart-range" role="group" aria-label="Select cost trend timeline">
+                <button type="button" data-cost-range="1" aria-pressed="false">1 mo</button>
+                <button type="button" data-cost-range="3" aria-pressed="false">3 mo</button>
+                <button type="button" data-cost-range="6" aria-pressed="false">6 mo</button>
+                <button type="button" data-cost-range="12" aria-pressed="false">1 yr</button>
+              </div>
+              <div class="cost-chart-toggle">
+                <label><input type="checkbox" id="toggleCostMaintenance" checked> <span class="dot" style="background:${esc(chartColors.maintenance)}"></span> Maintenance</label>
+                <label class="cost-chart-toggle-jobs"><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> <span class="cost-chart-toggle-link" role="link" tabindex="0">Cutting jobs</span></label>
+              </div>
             </div>
           </div>
           <div class="cost-chart-canvas">

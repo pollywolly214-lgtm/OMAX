@@ -7542,6 +7542,12 @@ function renderCosts(){
   if (!content) return;
 
   const model = computeCostModel();
+  const maintenanceSeriesBase = Array.isArray(model.maintenanceSeries)
+    ? model.maintenanceSeries.slice()
+    : [];
+  const jobSeriesBase = Array.isArray(model.jobSeries)
+    ? model.jobSeries.slice()
+    : [];
   content.innerHTML = viewCosts(model);
   setAppSettingsContext("costs");
   wireCostSettingsMenu();
@@ -8129,6 +8135,74 @@ function renderCosts(){
   const toggleJobs  = document.getElementById("toggleCostJobs");
   const canvasWrap = content.querySelector(".cost-chart-canvas");
   let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
+  const rangeButtons = Array.from(content.querySelectorAll("[data-cost-range]"));
+  const allowedChartRanges = [1, 3, 6, 12];
+  const defaultChartRange = 6;
+
+  const normalizeChartRange = (value)=>{
+    const months = Number(value);
+    return allowedChartRanges.includes(months) ? months : defaultChartRange;
+  };
+
+  const getChartRangeState = ()=>{
+    if (typeof window !== "undefined" && window.__costChartRangeState && typeof window.__costChartRangeState === "object"){
+      const state = window.__costChartRangeState;
+      state.months = normalizeChartRange(state.months);
+      return state;
+    }
+    const state = { months: defaultChartRange };
+    if (typeof window !== "undefined"){
+      window.__costChartRangeState = state;
+    }
+    return state;
+  };
+
+  const setChartRangeMonths = (value)=>{
+    const state = getChartRangeState();
+    state.months = normalizeChartRange(value);
+    if (typeof window !== "undefined"){
+      window.__costChartRangeState = state;
+    }
+    return state.months;
+  };
+
+  const updateChartRangeButtons = ()=>{
+    const { months } = getChartRangeState();
+    rangeButtons.forEach(btn => {
+      const btnValue = normalizeChartRange(btn?.getAttribute("data-cost-range"));
+      const isActive = btnValue === months;
+      btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+      if (isActive){
+        btn.classList.add("is-active");
+      }else{
+        btn.classList.remove("is-active");
+      }
+    });
+  };
+
+  const limitChartSeries = (points)=>{
+    if (!Array.isArray(points)) return [];
+    const limit = 180;
+    if (points.length > limit){
+      return points.slice(-limit);
+    }
+    return points.slice();
+  };
+
+  const filterChartSeriesByRange = (points, rangeValue)=>{
+    if (!Array.isArray(points)) return [];
+    const normalizedRange = normalizeChartRange(rangeValue);
+    const sanitized = points.filter(pt => pt && pt.date instanceof Date && !Number.isNaN(pt.date.getTime()));
+    if (!allowedChartRanges.includes(normalizedRange)){
+      return limitChartSeries(sanitized);
+    }
+    const cutoff = new Date();
+    cutoff.setHours(0,0,0,0);
+    cutoff.setMonth(cutoff.getMonth() - normalizedRange);
+    const cutoffTime = cutoff.getTime();
+    const filtered = sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
+    return limitChartSeries(filtered);
+  };
 
   const escapeTooltip = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
     "&": "&amp;",
@@ -8287,10 +8361,17 @@ function renderCosts(){
   const state = getCostLayoutState();
 
   const redraw = ()=>{
+    const { months } = getChartRangeState();
+    const chartModel = {
+      ...model,
+      maintenanceSeries: filterChartSeriesByRange(maintenanceSeriesBase, months),
+      jobSeries: filterChartSeriesByRange(jobSeriesBase, months)
+    };
+    updateChartRangeButtons();
     if (canvas){
       hideTooltip();
       resizeCostChartCanvas(canvas);
-      drawCostChart(canvas, model, {
+      drawCostChart(canvas, chartModel, {
         maintenance: !toggleMaint || toggleMaint.checked,
         jobs: !toggleJobs || toggleJobs.checked
       });
@@ -8310,6 +8391,17 @@ function renderCosts(){
   state.resizeHandler = ()=> redraw();
   window.addEventListener("resize", state.resizeHandler);
 
+  rangeButtons.forEach(btn => {
+    btn.addEventListener("click", event => {
+      event.preventDefault();
+      const value = btn.getAttribute("data-cost-range");
+      const months = normalizeChartRange(value);
+      setChartRangeMonths(months);
+      redraw();
+    });
+  });
+
+  updateChartRangeButtons();
   redraw();
   toggleMaint?.addEventListener("change", redraw);
   toggleJobs?.addEventListener("change", redraw);
@@ -8809,7 +8901,7 @@ function computeCostModel(){
     });
   };
 
-  const maintenanceSeries = maintenanceHistory.slice(-16).map(entry => {
+  const maintenanceSeries = maintenanceHistory.map(entry => {
     const dateLabel = (entry.date instanceof Date && !Number.isNaN(entry.date.getTime()))
       ? entry.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
       : "the latest log";
