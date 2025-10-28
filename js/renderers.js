@@ -3,6 +3,19 @@ if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 const pendingNewJobFiles = window.pendingNewJobFiles;
 if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
 const orderPartialSelection = window.orderPartialSelection;
+const WORKSPACE_SCOPE_EVERYTHING = "everything";
+const WORKSPACE_SCOPE_TASKS_JOBS = "tasks-jobs";
+const WORKSPACE_SCOPE_TRACKING = "tracking";
+
+function describeWorkspaceScope(scope){
+  if (typeof window !== "undefined" && typeof window.describeWorkspaceScopeMeta === "function"){
+    return window.describeWorkspaceScopeMeta(scope);
+  }
+  const key = typeof scope === "string" ? scope.toLowerCase() : "";
+  if (key === WORKSPACE_SCOPE_TASKS_JOBS || key === "tasks" || key === "jobs") return "Tasks & jobs";
+  if (key === WORKSPACE_SCOPE_TRACKING || key === "data" || key === "tracking") return "Waterjet tracking data";
+  return "Full site";
+}
 const timeEfficiencyWidgets = [];
 const sharedTimeEfficiencyStarts = (typeof window !== "undefined" && window.__timeEfficiencyStartMap instanceof Map)
   ? window.__timeEfficiencyStartMap
@@ -1236,16 +1249,63 @@ async function promptClearAllData(trigger){
   const expected = (typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
     ? window.CLEAR_DATA_PASSWORD
     : "";
-  const attempt = prompt("Enter the admin password to clear all data:");
+  const attempt = prompt("Enter the admin password to clear data:");
   if (attempt === null) return;
   if (attempt !== expected){
     alert("Incorrect password. Data was not cleared.");
     return;
   }
+
+  const chooseScope = async ()=>{
+    const choice = await showConfirmChoices({
+      title: "What should be deleted?",
+      message: "Choose the data to remove. You can include both categories in the next step.",
+      confirmText: "Tasks & jobs",
+      confirmVariant: "danger",
+      secondaryText: "Waterjet tracking data",
+      secondaryVariant: "secondary",
+      cancelText: "Cancel"
+    });
+    if (choice === "cancel") return null;
+    if (choice === "confirm"){
+      const includeTracking = await showConfirmModal({
+        title: "Also remove tracking data?",
+        message: "Delete waterjet tracking data (efficiency metrics, pump history, and logged hours) as well?",
+        confirmText: "Delete both",
+        confirmVariant: "danger",
+        cancelText: "Tasks & jobs only"
+      });
+      return includeTracking ? WORKSPACE_SCOPE_EVERYTHING : WORKSPACE_SCOPE_TASKS_JOBS;
+    }
+    if (choice === "secondary"){
+      const includeTasks = await showConfirmModal({
+        title: "Also remove tasks & jobs?",
+        message: "Delete every maintenance task and cutting job along with tracking data?",
+        confirmText: "Delete both",
+        confirmVariant: "danger",
+        cancelText: "Tracking data only"
+      });
+      return includeTasks ? WORKSPACE_SCOPE_EVERYTHING : WORKSPACE_SCOPE_TRACKING;
+    }
+    return null;
+  };
+
+  const scope = await chooseScope();
+  if (!scope) return;
+
+  let confirmMessage = "";
+  if (scope === WORKSPACE_SCOPE_EVERYTHING){
+    confirmMessage = "This will erase maintenance tasks, jobs, orders, inventory history, and waterjet tracking data for every user. This cannot be undone without a site restore.";
+  } else if (scope === WORKSPACE_SCOPE_TASKS_JOBS){
+    confirmMessage = "This will delete every maintenance task and cutting job for every user. Waterjet tracking data will remain in place.";
+  } else {
+    confirmMessage = "This will delete all waterjet tracking data (efficiency metrics, pump logs, and machine hours) for every user. Maintenance tasks and jobs will remain.";
+  }
+
   const confirmed = await showConfirmModal({
-    title: "Clear all data?",
-    message: "This will erase history, maintenance tasks, jobs, inventory, and orders for every user. This cannot be undone.",
-    confirmText: "Yes, clear everything",
+    title: "Delete selected data?",
+    message: confirmMessage,
+    confirmText: "Delete data",
     confirmVariant: "danger",
     cancelText: "Keep data"
   });
@@ -1256,13 +1316,18 @@ async function promptClearAllData(trigger){
   if (trigger){
     restoreText = trigger.textContent;
     trigger.disabled = true;
-    trigger.textContent = "Clearing…";
+    trigger.textContent = "Deleting…";
   }
   try {
-    await handler();
-    toast("Workspace reset to defaults.");
+    await handler({ scope });
+    const scopeLabel = describeWorkspaceScope(scope);
+    if (scope === WORKSPACE_SCOPE_EVERYTHING){
+      toast("Workspace reset to defaults.");
+    } else {
+      toast(`${scopeLabel} cleared.`);
+    }
   } catch (err){
-    console.error("Failed to clear all data", err);
+    console.error("Failed to clear data", err);
     alert("Unable to clear data. Please try again.");
   } finally {
     if (trigger && trigger.isConnected){
@@ -12346,19 +12411,45 @@ function computeDeletedItemsModel(){
   const entries = typeof listDeletedItems === "function" ? listDeletedItems() : [];
   const searchRaw = typeof window.deletedItemsSearchTerm === "string" ? window.deletedItemsSearchTerm : "";
   const searchTerm = searchRaw.trim().toLowerCase();
-  const items = entries.map(entry => ({
-    id: entry.id,
-    icon: "🗑",
-    label: entry.label || describeDeletedType(entry.type),
-    typeLabel: describeDeletedType(entry.type),
-    deletedAt: formatTrashDate(entry.deletedAt),
-    deletedAtISO: entry.deletedAt || null,
-    expiresAt: entry.expiresAt ? formatTrashDate(entry.expiresAt) : "—",
-    expiresAtISO: entry.expiresAt || null
-  }));
+  const items = entries.map(entry => {
+    const scopeLabel = entry.type === "workspace" ? describeWorkspaceScope(entry.meta && entry.meta.scope) : null;
+    const reason = entry.meta && entry.meta.reason;
+    const relatedLabel = entry.meta && entry.meta.relatedLabel;
+    let notice = null;
+    if (entry.type === "workspace"){
+      if (reason === "pre-restore"){
+        notice = relatedLabel
+          ? `Captured automatically before restoring "${relatedLabel}".`
+          : "Captured automatically before restoring a site snapshot.";
+      } else if (reason === "clear-all"){
+        notice = "Captured before clearing the full site.";
+      } else if (reason === "clear-scope"){
+        notice = scopeLabel
+          ? `Captured before clearing ${scopeLabel.toLowerCase()}.`
+          : "Captured before clearing selected site data.";
+      }
+    }
+    const warning = entry.type === "workspace"
+      ? "Restoring this snapshot will revert the entire site. Use individual restores for single tasks, jobs, or data."
+      : null;
+    return {
+      id: entry.id,
+      icon: "🗑",
+      label: entry.label || describeDeletedType(entry.type),
+      typeLabel: describeDeletedType(entry.type),
+      deletedAt: formatTrashDate(entry.deletedAt),
+      deletedAtISO: entry.deletedAt || null,
+      expiresAt: entry.expiresAt ? formatTrashDate(entry.expiresAt) : "—",
+      expiresAtISO: entry.expiresAt || null,
+      type: entry.type,
+      scopeLabel,
+      notice,
+      warning
+    };
+  });
   const filtered = searchTerm
     ? items.filter(item => {
-        const fields = [item.label, item.typeLabel, item.deletedAt, item.expiresAt]
+        const fields = [item.label, item.typeLabel, item.deletedAt, item.expiresAt, item.scopeLabel, item.notice]
           .map(value => String(value || "").toLowerCase());
         return fields.some(text => text.includes(searchTerm));
       })
@@ -12382,13 +12473,52 @@ function renderDeletedItems(options){
   content.innerHTML = viewDeletedItems(model);
 
   content.querySelectorAll("[data-trash-restore]").forEach(btn => {
-    btn.addEventListener("click", ()=>{
+    btn.addEventListener("click", async ()=>{
       const id = btn.getAttribute("data-trash-restore");
       if (!id) return;
+      const entries = typeof listDeletedItems === "function" ? listDeletedItems() : [];
+      const entry = entries.find(item => item && item.id === id) || null;
+      if (entry && entry.type === "workspace"){
+        const scopeLabel = describeWorkspaceScope(entry.meta && entry.meta.scope);
+        const deletedAtLabel = entry.deletedAt ? formatTrashDate(entry.deletedAt) : null;
+        const confirmRestore = await showConfirmModal({
+          title: "Restore site snapshot?",
+          message: "Restoring this snapshot will revert the entire site to the saved point. Current data will be replaced.",
+          items: [
+            scopeLabel ? `Snapshot scope: ${scopeLabel}` : null,
+            deletedAtLabel ? `Deleted on ${deletedAtLabel}` : null,
+            "A fresh snapshot of the current site will be saved automatically before the restore."
+          ].filter(Boolean),
+          confirmText: "Restore site",
+          confirmVariant: "danger",
+          cancelText: "Cancel"
+        });
+        if (!confirmRestore) return;
+        try {
+          if (typeof recordDeletedItem === "function" && typeof snapshotWorkspaceForTrash === "function"){
+            const beforeLabel = scopeLabel
+              ? `Workspace snapshot (Before restoring ${scopeLabel})`
+              : "Workspace snapshot (Before site restore)";
+            recordDeletedItem("workspace", snapshotWorkspaceForTrash(), {
+              reason: "pre-restore",
+              scope: WORKSPACE_SCOPE_EVERYTHING,
+              relatedId: entry.id,
+              relatedLabel: entry.label || null,
+              relatedScope: entry.meta && entry.meta.scope ? entry.meta.scope : null,
+              label: beforeLabel
+            });
+          }
+        } catch (err) {
+          console.warn("Failed to snapshot current workspace before restore", err);
+        }
+      }
       try {
         const result = typeof restoreDeletedItem === "function" ? restoreDeletedItem(id) : { ok:false };
         if (result && result.ok){
-          toast("Item restored");
+          const toastMessage = entry && entry.type === "workspace"
+            ? "Site restored to saved snapshot."
+            : "Item restored";
+          toast(toastMessage);
           renderDeletedItems();
         } else {
           alert("Unable to restore this item.");

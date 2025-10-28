@@ -412,6 +412,36 @@ function ensureTaskVariant(task, type){
 }
 
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const WORKSPACE_SCOPE_EVERYTHING = "everything";
+const WORKSPACE_SCOPE_TASKS_JOBS = "tasks-jobs";
+const WORKSPACE_SCOPE_TRACKING = "tracking";
+
+function normalizeWorkspaceScope(scope){
+  const key = typeof scope === "string" ? scope.toLowerCase().trim() : "";
+  if (key === WORKSPACE_SCOPE_TASKS_JOBS || key === "tasks" || key === "jobs" || key === "tasks_jobs"){
+    return WORKSPACE_SCOPE_TASKS_JOBS;
+  }
+  if (key === WORKSPACE_SCOPE_TRACKING || key === "data" || key === "tracking-data" || key === "waterjet"){
+    return WORKSPACE_SCOPE_TRACKING;
+  }
+  if (key === WORKSPACE_SCOPE_EVERYTHING || key === "all" || key === "both" || key === "site"){
+    return WORKSPACE_SCOPE_EVERYTHING;
+  }
+  return WORKSPACE_SCOPE_EVERYTHING;
+}
+
+function describeWorkspaceScopeMeta(scope){
+  const normalized = normalizeWorkspaceScope(scope);
+  switch (normalized) {
+    case WORKSPACE_SCOPE_TASKS_JOBS:
+      return "Tasks & jobs";
+    case WORKSPACE_SCOPE_TRACKING:
+      return "Waterjet tracking data";
+    case WORKSPACE_SCOPE_EVERYTHING:
+    default:
+      return "Full site";
+  }
+}
 if (!Array.isArray(window.deletedItems)) window.deletedItems = [];
 
 function cloneStructured(value){
@@ -451,8 +481,13 @@ function buildTrashLabel(type, payload, meta){
       return `Order item: ${name || "(unnamed item)"}`;
     case "total-history":
       return `Machine hours entry (${safePayload.dateISO || "unknown date"})`;
-    case "workspace":
-      return "Workspace snapshot";
+    case "workspace": {
+      if (meta && typeof meta.label === "string" && meta.label.trim()){
+        return meta.label.trim();
+      }
+      const scopeLabel = describeWorkspaceScopeMeta(meta && meta.scope);
+      return scopeLabel ? `Workspace snapshot (${scopeLabel})` : "Workspace snapshot";
+    }
     default:
       if (meta && typeof meta.label === "string" && meta.label.trim()){
         return meta.label.trim();
@@ -2079,21 +2114,20 @@ const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes
   };
 }
 
-async function clearAllAppData(){
+async function clearAllAppData(options){
+  const opts = options && typeof options === "object" ? options : {};
+  const scope = normalizeWorkspaceScope(opts.scope);
+  const scopeLabel = describeWorkspaceScopeMeta(scope);
+  const reason = scope === WORKSPACE_SCOPE_EVERYTHING ? "clear-all" : "clear-scope";
   try {
-    const label = (()=>{
-      try {
-        return `Workspace snapshot (${new Date().toLocaleString()})`;
-      } catch (_){
-        return "Workspace snapshot";
-      }
-    })();
-    recordDeletedItem("workspace", snapshotWorkspaceForTrash(), { reason: "clear-all", label });
+    const label = scopeLabel ? `Workspace snapshot (${scopeLabel})` : "Workspace snapshot";
+    recordDeletedItem("workspace", snapshotWorkspaceForTrash(), { reason, scope, label });
   } catch (err) {
     console.warn("Failed to snapshot workspace before clearing", err);
   }
+
   const defaults = buildCleanState();
-  defaults.deletedItems = deletedItems.map(entry => ({
+  const trashSnapshot = deletedItems.map(entry => ({
     id: entry.id,
     type: entry.type,
     payload: cloneStructured(entry.payload),
@@ -2102,55 +2136,85 @@ async function clearAllAppData(){
     deletedAt: entry.deletedAt
   }));
 
+  let nextState;
+  if (scope === WORKSPACE_SCOPE_EVERYTHING){
+    nextState = defaults;
+  } else {
+    const currentState = snapshotState();
+    nextState = { ...currentState };
+    if (scope === WORKSPACE_SCOPE_TASKS_JOBS){
+      nextState.tasksInterval = defaults.tasksInterval.slice();
+      nextState.tasksAsReq = defaults.tasksAsReq.slice();
+      nextState.cuttingJobs = defaults.cuttingJobs.slice();
+      nextState.completedCuttingJobs = defaults.completedCuttingJobs.slice();
+    }
+    if (scope === WORKSPACE_SCOPE_TRACKING){
+      nextState.totalHistory = [];
+      nextState.dailyCutHours = [];
+      nextState.garnetCleanings = [];
+      nextState.pumpEff = cloneStructured(defaults.pumpEff);
+    }
+    nextState.schema = APP_SCHEMA;
+  }
+  nextState.deletedItems = trashSnapshot;
+
   if (Array.isArray(window.settingsFolders)) window.settingsFolders.length = 0;
   else window.settingsFolders = [];
   if (window.settingsOpenFolders instanceof Set) window.settingsOpenFolders.clear();
   else window.settingsOpenFolders = new Set();
   window.maintenanceSearchTerm = "";
   window.pendingMaintenanceAddFromInventory = null;
-  window.jobFolders = defaultJobFolders();
-
-  adoptState(defaults);
-  resetHistoryToCurrent();
-
-  try {
-    if (typeof window.localStorage !== "undefined" && window.localStorage){
-      const storage = window.localStorage;
-      [
-        "dashboard_layout_windows_v1",
-        "cost_layout_windows_v1",
-        "job_layout_windows_v1",
-        "omax_tasks_interval_v6",
-        "omax_tasks_asreq_v6"
-      ].forEach(key => {
-        try { storage.removeItem(key); } catch(_){ }
-      });
-    }
-  } catch (err) {
-    console.warn("Unable to clear layout storage", err);
+  if (scope === WORKSPACE_SCOPE_EVERYTHING){
+    window.jobFolders = defaultJobFolders();
   }
 
-  try { if (window.dashboardLayoutState) delete window.dashboardLayoutState; } catch(_){ }
-  try { if (window.costLayoutState) delete window.costLayoutState; } catch(_){ }
-  try { if (window.jobLayoutState) delete window.jobLayoutState; } catch(_){ }
-  try {
-    window.cloudDashboardLayout = {};
-    window.cloudDashboardLayoutLoaded = true;
-  } catch(_){ }
-  try {
-    window.cloudCostLayout = {};
-    window.cloudCostLayoutLoaded = true;
-  } catch(_){ }
-  try {
-    window.cloudJobLayout = {};
-    window.cloudJobLayoutLoaded = true;
-  } catch(_){ }
-  try { if (Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles.length = 0; } catch(_){ }
+  adoptState(nextState);
+  resetHistoryToCurrent();
+
+  if (scope === WORKSPACE_SCOPE_EVERYTHING){
+    try {
+      if (typeof window.localStorage !== "undefined" && window.localStorage){
+        const storage = window.localStorage;
+        [
+          "dashboard_layout_windows_v1",
+          "cost_layout_windows_v1",
+          "job_layout_windows_v1",
+          "omax_tasks_interval_v6",
+          "omax_tasks_asreq_v6"
+        ].forEach(key => {
+          try { storage.removeItem(key); } catch(_){ }
+        });
+      }
+    } catch (err) {
+      console.warn("Unable to clear layout storage", err);
+    }
+
+    try { if (window.dashboardLayoutState) delete window.dashboardLayoutState; } catch(_){ }
+    try { if (window.costLayoutState) delete window.costLayoutState; } catch(_){ }
+    try { if (window.jobLayoutState) delete window.jobLayoutState; } catch(_){ }
+    try {
+      window.cloudDashboardLayout = {};
+      window.cloudDashboardLayoutLoaded = true;
+    } catch(_){ }
+    try {
+      window.cloudCostLayout = {};
+      window.cloudCostLayoutLoaded = true;
+    } catch(_){ }
+    try {
+      window.cloudJobLayout = {};
+      window.cloudJobLayoutLoaded = true;
+    } catch(_){ }
+    if (window.orderPartialSelection instanceof Set) window.orderPartialSelection.clear();
+    try { if (Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles.length = 0; } catch(_){ }
+  } else if (scope === WORKSPACE_SCOPE_TASKS_JOBS){
+    if (window.orderPartialSelection instanceof Set) window.orderPartialSelection.clear();
+    try { if (Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles.length = 0; } catch(_){ }
+  }
+
   if (typeof window.inventorySearchTerm === "string") window.inventorySearchTerm = "";
   inventorySearchTerm = "";
   if (typeof window.jobHistorySearchTerm === "string") window.jobHistorySearchTerm = "";
   jobHistorySearchTerm = "";
-  if (window.orderPartialSelection instanceof Set) window.orderPartialSelection.clear();
 
   try { captureHistorySnapshot(); } catch(_){ }
 
@@ -2165,10 +2229,10 @@ async function clearAllAppData(){
   }
 
   if (typeof route === "function") route();
-  return defaults;
+  return nextState;
 }
 
-if (typeof window !== "undefined") window.clearAllAppData = clearAllAppData;
+if (typeof window !== "undefined"){ window.clearAllAppData = clearAllAppData; window.describeWorkspaceScopeMeta = describeWorkspaceScopeMeta; }
 
 function ensureActiveOrderRequest(){
   if (!Array.isArray(orderRequests)) orderRequests = [];
