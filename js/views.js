@@ -149,6 +149,35 @@ function viewDashboard(){
               <span class="label">Efficiency (to date)</span>
               <span class="value" data-efficiency-percent>—</span>
             </div>
+            <div class="time-efficiency-metric">
+              <span class="label">Idle hours</span>
+              <span class="value" data-efficiency-idle>—</span>
+            </div>
+            <div class="time-efficiency-metric">
+              <span class="label">Idle utilization</span>
+              <span class="value" data-efficiency-idle-percent>—</span>
+            </div>
+            <div class="time-efficiency-metric">
+              <span class="label">Run utilization</span>
+              <span class="value" data-efficiency-run-percent>—</span>
+            </div>
+          </div>
+          <div class="time-efficiency-chart" data-efficiency-chart>
+            <canvas data-efficiency-chart-canvas aria-label="Cutting time efficiency chart" height="280"></canvas>
+          </div>
+          <div class="time-efficiency-chart-legend" data-efficiency-legend>
+            <span class="legend-item">
+              <span class="legend-swatch legend-swatch--actual" aria-hidden="true"></span>
+              Actual run hours
+            </span>
+            <span class="legend-item">
+              <span class="legend-swatch legend-swatch--target" aria-hidden="true"></span>
+              Baseline target
+            </span>
+            <span class="legend-item" data-efficiency-legend-profit hidden>
+              <span class="legend-swatch legend-swatch--profit" aria-hidden="true"></span>
+              Net profit per hour
+            </span>
           </div>
           <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
           <p class="small muted">Baseline assumes ${CUTTING_BASELINE_WEEKLY_HOURS} cutting hours per week.</p>
@@ -1413,7 +1442,7 @@ function viewCosts(model){
       <div class="dashboard-window" data-cost-window="efficiency">
         <div class="block" data-cost-jobs-history role="link" tabindex="0">
           <h3>Cutting Job Efficiency Snapshot</h3>
-          <div class="time-efficiency-inline" id="costTimeEfficiency">
+          <div class="time-efficiency-inline" id="costTimeEfficiency" data-efficiency-profit="jobs">
             <div class="time-efficiency-inline-header">
               <span class="time-efficiency-inline-title">Cutting time efficiency</span>
               <div class="time-efficiency-controls">
@@ -1461,6 +1490,35 @@ function viewCosts(model){
                 <span class="label">Efficiency (to date)</span>
                 <span class="value" data-efficiency-percent>—</span>
               </div>
+              <div class="time-efficiency-metric">
+                <span class="label">Idle hours</span>
+                <span class="value" data-efficiency-idle>—</span>
+              </div>
+              <div class="time-efficiency-metric">
+                <span class="label">Idle utilization</span>
+                <span class="value" data-efficiency-idle-percent>—</span>
+              </div>
+              <div class="time-efficiency-metric">
+                <span class="label">Run utilization</span>
+                <span class="value" data-efficiency-run-percent>—</span>
+              </div>
+            </div>
+            <div class="time-efficiency-chart" data-efficiency-chart>
+              <canvas data-efficiency-chart-canvas aria-label="Cutting time efficiency chart" height="280"></canvas>
+            </div>
+            <div class="time-efficiency-chart-legend" data-efficiency-legend>
+              <span class="legend-item">
+                <span class="legend-swatch legend-swatch--actual" aria-hidden="true"></span>
+                Actual run hours
+              </span>
+              <span class="legend-item">
+                <span class="legend-swatch legend-swatch--target" aria-hidden="true"></span>
+                Baseline target
+              </span>
+              <span class="legend-item" data-efficiency-legend-profit hidden>
+                <span class="legend-swatch legend-swatch--profit" aria-hidden="true"></span>
+                Net profit per hour
+              </span>
             </div>
             <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
             <p class="small muted">Baseline assumes ${CUTTING_BASELINE_WEEKLY_HOURS} cutting hours per week.</p>
