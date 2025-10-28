@@ -10697,13 +10697,15 @@ function renderJobs(){
     }).filter(Boolean);
   };
 
-  const normalizeAllPriorities = (entries)=>{
+  const normalizeAllPriorities = (entries, { respectOrder = false } = {})=>{
     const list = Array.isArray(entries) ? entries.slice() : priorityEntries();
     if (!list.length) return list;
-    list.sort((a, b) => {
-      if (a.priority !== b.priority) return a.priority - b.priority;
-      return a.originalIndex - b.originalIndex;
-    });
+    if (!respectOrder){
+      list.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        return a.originalIndex - b.originalIndex;
+      });
+    }
     const orderMap = new Map();
     list.forEach((entry, idx) => {
       entry.job.priority = idx + 1;
@@ -10717,6 +10719,9 @@ function renderJobs(){
       if (orderA !== orderB) return orderA - orderB;
       return idA.localeCompare(idB);
     });
+    if (typeof window !== "undefined"){
+      window.cuttingJobs = cuttingJobs;
+    }
     return list;
   };
 
@@ -10741,7 +10746,7 @@ function renderJobs(){
     const normalizedDesired = normalizePriorityValue(desiredPriority);
     const insertIndex = Math.max(0, Math.min(normalizedDesired - 1, entries.length));
     entries.splice(insertIndex, 0, target);
-    normalizeAllPriorities(entries);
+    normalizeAllPriorities(entries, { respectOrder: true });
   };
 
   // 4) Add Job (unchanged)
@@ -10786,8 +10791,8 @@ function renderJobs(){
 
   // 5) Inline material $/qty (kept)
   content.querySelector(".job-table tbody")?.addEventListener("change", async (e)=>{
-    const prioritySelect = e.target instanceof HTMLSelectElement
-      ? e.target.closest("[data-job-priority-inline]")
+    const prioritySelect = e.target instanceof Element
+      ? e.target.closest("select[data-job-priority-inline]")
       : null;
     if (prioritySelect instanceof HTMLSelectElement){
       const id = prioritySelect.getAttribute("data-job-priority-inline");

@@ -2475,9 +2475,6 @@ function viewJobs(){
       : (Number.isFinite(eff.actualRemaining) ? Math.max(0, eff.actualRemaining) : Math.max(0, req.remainingHours || 0));
     const actualRemain = jobRemainingHours;
     const remainHrs = actualRemain;
-    const needPerDay = req.requiredPerDay === Infinity
-      ? '∞'
-      : (req.requiredPerDay||0).toFixed(2);
     const remainingHours = Number.isFinite(req.remainingHours) ? Math.max(0, req.remainingHours) : 0;
     const remainingDays = Number.isFinite(req.remainingDays) ? Math.max(0, req.remainingDays) : 0;
     const capacityRemaining = remainingDays * hoursPerDay;
@@ -2485,22 +2482,26 @@ function viewJobs(){
       ? Number.NEGATIVE_INFINITY
       : capacityRemaining - remainingHours;
     const SLACK_EPS = 0.05;
-    const behindSchedule = req.requiredPerDay === Infinity || slackHours < -SLACK_EPS;
+    const isPastDue = req.requiredPerDay === Infinity;
+    const behindSchedule = isPastDue || slackHours < -SLACK_EPS;
     const aheadSchedule = !behindSchedule && slackHours > (hoursPerDay + SLACK_EPS);
-    const statusLabel = behindSchedule ? 'Behind' : (aheadSchedule ? 'Ahead' : 'On pace');
-    let statusDetail = '';
+    const statusLabel = isPastDue ? 'Past due' : (behindSchedule ? 'Behind' : (aheadSchedule ? 'Ahead' : 'On pace'));
     const backlogSummary = backlogHours > 0 ? `${backlogHours.toFixed(1)} hr queued ahead` : '';
-    if (req.requiredPerDay === Infinity){
-      statusDetail = formatPastDueLabel(j.dueISO);
-    } else if (behindSchedule){
-      statusDetail = `Needs ${req.requiredPerDay.toFixed(1)} hr/day`;
-    } else if (aheadSchedule){
-      statusDetail = `${slackHours.toFixed(1)} hr slack`;
-    } else if (remainingHours > 0){
-      statusDetail = `Needs ${req.requiredPerDay.toFixed(1)} hr/day`;
-    }
-    if (backlogSummary){
-      statusDetail = statusDetail ? `${statusDetail} (${backlogSummary})` : backlogSummary;
+    const statusDetailParts = [];
+    if (isPastDue){
+      const pastDue = formatPastDueLabel(j.dueISO);
+      if (pastDue) statusDetailParts.push(pastDue);
+      if (backlogSummary) statusDetailParts.push(backlogSummary);
+    } else {
+      statusDetailParts.push(`${remainingHours.toFixed(1)} hr remaining over ${remainingDays} day${remainingDays===1?'':'s'}`);
+      statusDetailParts.push(`Needs ${req.requiredPerDay.toFixed(1)} hr/day (capacity ${hoursPerDay.toFixed(1)} hr/day)`);
+      if (Math.abs(slackHours) > SLACK_EPS){
+        const slackLabel = slackHours >= 0
+          ? `Slack ${slackHours.toFixed(1)} hr capacity`
+          : `Short ${Math.abs(slackHours).toFixed(1)} hr capacity`;
+        statusDetailParts.push(slackLabel);
+      }
+      if (backlogSummary) statusDetailParts.push(backlogSummary);
     }
     const capacitySummary = req.requiredPerDay === Infinity
       ? 'No remaining days on schedule'
@@ -2523,17 +2524,15 @@ function viewJobs(){
     const estimateDisplay = formatHours(j.estimateHours);
     const queueTotalDisplay = formatHours(remainingHours);
     const remainingDisplay = formatHours(remainHrs);
-    let needDisplay = req.requiredPerDay === Infinity
-      ? `<span class="job-badge job-badge-overdue">${esc(formatPastDueLabel(j.dueISO))}</span>`
-      : `${needPerDay} hr/day needed (capacity ${hoursPerDay.toFixed(1)} hr/day)`;
-    if (backlogSummary){
-      needDisplay += `<div class="small muted">Includes ${esc(backlogSummary)}</div>`;
-    }
-    const statusDisplay = [
-      `<div class="job-status ${aheadSchedule ? 'job-status-ahead' : (behindSchedule ? 'job-status-behind' : 'job-status-onpace')}">${esc(statusLabel)}</div>`,
-      statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : '',
-      needDisplay ? `<div class="job-status-need">${needDisplay}</div>` : ''
-    ].join('');
+    const statusDetailHtml = statusDetailParts.length
+      ? `<div class="job-status-detail">${statusDetailParts.map(part => `<div>${esc(part)}</div>`).join('')}</div>`
+      : '';
+    const statusClass = aheadSchedule
+      ? 'job-status-ahead'
+      : (behindSchedule ? 'job-status-behind' : 'job-status-onpace');
+    const statusDisplay = `
+      <div class="job-status ${statusClass}">${esc(statusLabel)}</div>
+      ${statusDetailHtml}`.trim();
 
     // Dates (for display / edit row)
     const startDate = parseDateLocal(j.startISO);
