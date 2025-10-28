@@ -1804,6 +1804,27 @@ function viewJobs(){
     return `${optionsHtml}<option value="__new__">+ Create new category…</option>`;
   };
 
+  const priorityLevels = [1, 2, 3, 4, 5];
+  const priorityOptionsMarkup = (selectedValue)=>{
+    const selected = Number.isFinite(Number(selectedValue)) ? Math.max(1, Math.floor(Number(selectedValue))) : 1;
+    const baseMax = priorityLevels[priorityLevels.length - 1] || 5;
+    const totalJobs = Array.isArray(cuttingJobs) ? cuttingJobs.length : baseMax;
+    const limit = Math.max(baseMax, totalJobs + 1, selected);
+    const options = [];
+    for (let level = 1; level <= limit; level += 1){
+      const selectedAttr = level === selected ? " selected" : "";
+      options.push(`<option value="${level}"${selectedAttr}>Priority ${level}</option>`);
+    }
+    return options.join("");
+  };
+
+  const priorityForJob = (job)=>{
+    if (typeof getJobPriority === "function") return getJobPriority(job);
+    const raw = job && job.priority != null ? Number(job.priority) : 1;
+    if (!Number.isFinite(raw) || raw <= 0) return 1;
+    return Math.max(1, Math.floor(raw));
+  };
+
   const normalizeHexColor = (value)=>{
     if (typeof value !== "string") return null;
     const trimmed = value.trim();
@@ -1980,6 +2001,17 @@ function viewJobs(){
     return allowedCategories.has(normalized);
   });
 
+  jobsForCategory.sort((a, b) => {
+    const priorityDiff = priorityForJob(a) - priorityForJob(b);
+    if (priorityDiff !== 0) return priorityDiff;
+    const dueA = parseDateLocal(a?.dueISO);
+    const dueB = parseDateLocal(b?.dueISO);
+    const dueTimeA = dueA instanceof Date && !Number.isNaN(dueA.getTime()) ? dueA.getTime() : Number.POSITIVE_INFINITY;
+    const dueTimeB = dueB instanceof Date && !Number.isNaN(dueB.getTime()) ? dueB.getTime() : Number.POSITIVE_INFINITY;
+    if (dueTimeA !== dueTimeB) return dueTimeA - dueTimeB;
+    return String(a?.name || "").localeCompare(String(b?.name || ""));
+  });
+
   const completedForCategory = completedSorted.filter(job => {
     const normalized = normalizeCategory(job?.cat);
     return allowedCategories.has(normalized);
@@ -1993,6 +2025,16 @@ function viewJobs(){
     return acc;
   }, { total: 0 });
   const completedAverage = completedFiltered.length ? (completedStats.total / completedFiltered.length) : 0;
+
+  const prioritySchedule = typeof computePrioritySchedule === "function"
+    ? computePrioritySchedule(cuttingJobs)
+    : { backlog: new Map(), efficiencies: new Map() };
+  const backlogById = prioritySchedule && prioritySchedule.backlog instanceof Map
+    ? prioritySchedule.backlog
+    : new Map();
+  const efficiencyCache = prioritySchedule && prioritySchedule.efficiencies instanceof Map
+    ? prioritySchedule.efficiencies
+    : new Map();
 
   const jobOverlapNotice = "Jobs might be overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
   const jobOverlapBannerText = "Two or more cutting jobs are overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
@@ -2054,7 +2096,7 @@ function viewJobs(){
     ? ` data-job-overlap-signature="${esc(overlapSignature)}"`
     : "";
 
-  const jobColumnCount = 16;
+  const jobColumnCount = 15;
   const historyColumnCount = jobColumnCount;
   const historySearchDisplay = historySearchValue
     .replace(/&/g, "&amp;")
@@ -2115,12 +2157,13 @@ function viewJobs(){
 
   const completedRows = completedFiltered.map(job => {
     const eff = computeJobEfficiency(job);
-    const req = computeRequiredDaily(job);
+    const req = computeRequiredDaily(job, { backlogHours: 0 });
     const delta = Number(eff.deltaHours);
     const netTotal = computeJobNetTotal(job, eff, { preferActual: true });
     const actualHours = Number(job.actualHours ?? eff.actualHours);
     const estHours = Number(job.estimateHours);
     const editingHistory = editingCompletedJobsSet.has(String(job.id));
+    const priorityValue = priorityForJob(job);
     const normalizedCatId = normalizeCategory(job?.cat);
     const categoryFolder = folderMap.get(normalizedCatId);
     const categoryName = categoryFolder ? categoryFolder.name || "All Jobs" : "All Jobs";
@@ -2215,13 +2258,19 @@ function viewJobs(){
         <tr data-history-row="${job.id || ""}" class="job-row">
           <td class="job-col job-col-main job-col-locked" data-history-requires-edit="${job.id}">
             <div class="job-main">
-              <div class="job-title-chip"${colorStyleAttr}>
-                <span class="job-title-chip-dot" aria-hidden="true"></span>
-                <span class="job-title-chip-text">${esc(job?.name || "Job")}</span>
+              <div class="job-main-headline">
+                <div class="job-title-chip"${colorStyleAttr}>
+                  <span class="job-title-chip-dot" aria-hidden="true"></span>
+                  <span class="job-title-chip-text">${esc(job?.name || "Job")}</span>
+                </div>
+                <div class="job-priority-inline job-priority-inline-static">
+                  <span class="job-priority-inline-label">Priority</span>
+                  <span class="job-priority-inline-value">Priority ${priorityValue}</span>
+                </div>
               </div>
               <div class="job-main-category small muted" data-category-color="1"${historyColorStyle}>
-                <span class="sr-only">Category</span>
-                <span class="job-main-category-name">Category:</span>
+                <span class="job-main-category-label">Category</span>
+                <span class="job-main-category-name">${esc(categoryName)}</span>
               </div>
               <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
               <div class="job-main-summary small muted">Actual ${actualDisplay} vs ${estimateDisplay}</div>
@@ -2236,10 +2285,10 @@ function viewJobs(){
           <td class="job-col job-col-cost">${costDisplay}</td>
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
           <td class="job-col job-col-hours">${remainingDisplay}</td>
-          <td class="job-col job-col-need">${needDisplay}</td>
           <td class="job-col job-col-status">
             <div class="job-status ${statusClass}">${esc(statusLabel)}</div>
             ${statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : ""}
+            ${needDisplay ? `<div class="job-status-need">${needDisplay}</div>` : ""}
           </td>
           <td class="job-col job-col-files">
             <div class="job-cell job-cell-stretch">
@@ -2325,6 +2374,7 @@ function viewJobs(){
                 <label>Completed at<input type="datetime-local" data-history-field="completedAtISO" data-history-id="${job.id}" value="${completedVal}"></label>
                 <label>Estimate (hrs)<input type="number" min="0" step="0.1" data-history-field="estimateHours" data-history-id="${job.id}" value="${estimateVal}"></label>
                 <label>Actual (hrs)<input type="number" min="0" step="0.1" data-history-field="actualHours" data-history-id="${job.id}" value="${actualVal}"></label>
+                <label>Priority<select data-history-field="priority" data-history-id="${job.id}">${priorityOptionsMarkup(priorityValue)}</select></label>
                 <label>Material<input type="text" data-history-field="material" data-history-id="${job.id}" value="${esc(job?.material || "")}"></label>
                 <label>Material cost<input type="number" min="0" step="0.01" data-history-field="materialCost" data-history-id="${job.id}" value="${materialCostVal}"></label>
                 <label>Material quantity<input type="number" min="0" step="0.01" data-history-field="materialQty" data-history-id="${job.id}" value="${materialQtyVal}"></label>
@@ -2397,7 +2447,6 @@ function viewJobs(){
             <th>Cost rate</th>
             <th>Net profit/hr</th>
             <th>Hours remaining</th>
-            <th>Needed / day</th>
             <th>Status</th>
             <th>Files</th>
             <th>Net total</th>
@@ -2413,6 +2462,9 @@ function viewJobs(){
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
   const activeColumnCount = jobColumnCount;
+  const priorityAnimationMap = (typeof window !== "undefined" && window.__priorityAnimationMap instanceof Map)
+    ? window.__priorityAnimationMap
+    : null;
   const rows = jobsForCategory.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileCount = jobFiles.length;
@@ -2437,15 +2489,24 @@ function viewJobs(){
       ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
       : `<p class="job-file-menu-empty small muted">No files attached</p>`)
       + fileMenuActions;
-    const eff = computeJobEfficiency(j);
-    const req = computeRequiredDaily(j);
     const editing = editingJobs.has(j.id);
     const jobId = j?.id != null ? String(j.id) : "";
+    const priorityValue = priorityForJob(j);
+    const cachedEff = jobId && efficiencyCache instanceof Map ? efficiencyCache.get(jobId) : null;
+    const eff = cachedEff || computeJobEfficiency(j);
+    if (jobId && efficiencyCache instanceof Map && !efficiencyCache.has(jobId)){
+      efficiencyCache.set(jobId, eff);
+    }
+    const backlogRaw = jobId && backlogById instanceof Map ? backlogById.get(jobId) : 0;
+    const backlogHours = Number.isFinite(Number(backlogRaw)) ? Math.max(0, Number(backlogRaw)) : 0;
+    const req = computeRequiredDaily(j, { backlogHours });
     const jobHasOverlap = jobId && overlappingJobIds.has(jobId);
     const overlapIndicatorButton = jobHasOverlap
       ? `<button type="button" class="job-overlap-indicator" data-job-overlap-info data-job-overlap-message="${jobOverlapNoticeEsc}" aria-label="Job overlap warning" title="Jobs might be overlapping">!</button>`
       : "";
-    const rowClass = `job-row${jobHasOverlap ? " job-row-overlap" : ""}`;
+    const highlightPriority = priorityAnimationMap ? priorityAnimationMap.has(jobId) : false;
+    const rowBaseClass = `job-row${jobHasOverlap ? " job-row-overlap" : ""}`;
+    const rowClass = highlightPriority ? `${rowBaseClass} job-row-priority-animate` : rowBaseClass;
     const normalizedCatId = normalizeCategory(j.cat);
     const categoryFolder = folderMap.get(normalizedCatId);
     const categoryName = categoryFolder ? categoryFolder.name || "All Jobs" : "All Jobs";
@@ -2470,11 +2531,11 @@ function viewJobs(){
     const impactClass = netTotal > 0 ? "job-impact-ahead" : (netTotal < 0 ? "job-impact-behind" : "job-impact-neutral");
 
     // Remaining & per-day
-    const actualRemain = eff.actualRemaining != null ? eff.actualRemaining : (req.remainingHours || 0);
+    const jobRemainingHours = Number.isFinite(req.jobRemainingHours)
+      ? Math.max(0, req.jobRemainingHours)
+      : (Number.isFinite(eff.actualRemaining) ? Math.max(0, eff.actualRemaining) : Math.max(0, req.remainingHours || 0));
+    const actualRemain = jobRemainingHours;
     const remainHrs = actualRemain;
-    const needPerDay = req.requiredPerDay === Infinity
-      ? '∞'
-      : (req.requiredPerDay||0).toFixed(2);
     const remainingHours = Number.isFinite(req.remainingHours) ? Math.max(0, req.remainingHours) : 0;
     const remainingDays = Number.isFinite(req.remainingDays) ? Math.max(0, req.remainingDays) : 0;
     const capacityRemaining = remainingDays * hoursPerDay;
@@ -2482,18 +2543,26 @@ function viewJobs(){
       ? Number.NEGATIVE_INFINITY
       : capacityRemaining - remainingHours;
     const SLACK_EPS = 0.05;
-    const behindSchedule = req.requiredPerDay === Infinity || slackHours < -SLACK_EPS;
+    const isPastDue = req.requiredPerDay === Infinity;
+    const behindSchedule = isPastDue || slackHours < -SLACK_EPS;
     const aheadSchedule = !behindSchedule && slackHours > (hoursPerDay + SLACK_EPS);
-    const statusLabel = behindSchedule ? 'Behind' : (aheadSchedule ? 'Ahead' : 'On pace');
-    let statusDetail = '';
-    if (req.requiredPerDay === Infinity){
-      statusDetail = formatPastDueLabel(j.dueISO);
-    } else if (behindSchedule){
-      statusDetail = `Needs ${req.requiredPerDay.toFixed(1)} hr/day`;
-    } else if (aheadSchedule){
-      statusDetail = `${slackHours.toFixed(1)} hr slack`;
-    } else if (remainingHours > 0){
-      statusDetail = `Needs ${req.requiredPerDay.toFixed(1)} hr/day`;
+    const statusLabel = isPastDue ? 'Past due' : (behindSchedule ? 'Behind' : (aheadSchedule ? 'Ahead' : 'On pace'));
+    const backlogSummary = backlogHours > 0 ? `${backlogHours.toFixed(1)} hr queued ahead` : '';
+    const statusDetailParts = [];
+    if (isPastDue){
+      const pastDue = formatPastDueLabel(j.dueISO);
+      if (pastDue) statusDetailParts.push(pastDue);
+      if (backlogSummary) statusDetailParts.push(backlogSummary);
+    } else {
+      statusDetailParts.push(`${remainingHours.toFixed(1)} hr remaining over ${remainingDays} day${remainingDays===1?'':'s'}`);
+      statusDetailParts.push(`Needs ${req.requiredPerDay.toFixed(1)} hr/day (capacity ${hoursPerDay.toFixed(1)} hr/day)`);
+      if (Math.abs(slackHours) > SLACK_EPS){
+        const slackLabel = slackHours >= 0
+          ? `Slack ${slackHours.toFixed(1)} hr capacity`
+          : `Short ${Math.abs(slackHours).toFixed(1)} hr capacity`;
+        statusDetailParts.push(slackLabel);
+      }
+      if (backlogSummary) statusDetailParts.push(backlogSummary);
     }
     const capacitySummary = req.requiredPerDay === Infinity
       ? 'No remaining days on schedule'
@@ -2501,9 +2570,10 @@ function viewJobs(){
     const slackSummary = req.requiredPerDay === Infinity
       ? ''
       : `${slackHours >= 0 ? '+' : '−'}${Math.abs(slackHours).toFixed(1)} hr capacity`;
-    const efficiencyDetail = slackSummary
-      ? `${statusLabel}; ${capacitySummary}; ${slackSummary}`
-      : `${statusLabel}; ${capacitySummary}`;
+    const efficiencyParts = [statusLabel, capacitySummary];
+    if (slackSummary) efficiencyParts.push(slackSummary);
+    if (backlogSummary) efficiencyParts.push(backlogSummary);
+    const efficiencyDetail = efficiencyParts.join('; ');
     const efficiencySummary = efficiencyDetail
       .split(';')
       .map(part => part.trim())
@@ -2513,14 +2583,17 @@ function viewJobs(){
     const impactDisplay = netTotalDisplay;
 
     const estimateDisplay = formatHours(j.estimateHours);
+    const queueTotalDisplay = formatHours(remainingHours);
     const remainingDisplay = formatHours(remainHrs);
-    const needDisplay = req.requiredPerDay === Infinity
-      ? `<span class="job-badge job-badge-overdue">${esc(formatPastDueLabel(j.dueISO))}</span>`
-      : `${needPerDay} hr/day needed (capacity ${hoursPerDay.toFixed(1)} hr/day)`;
-    const statusDisplay = [
-      `<div class="job-status ${aheadSchedule ? 'job-status-ahead' : (behindSchedule ? 'job-status-behind' : 'job-status-onpace')}">${esc(statusLabel)}</div>`,
-      statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : ''
-    ].join('');
+    const statusDetailHtml = statusDetailParts.length
+      ? `<div class="job-status-detail">${statusDetailParts.map(part => `<div>${esc(part)}</div>`).join('')}</div>`
+      : '';
+    const statusClass = aheadSchedule
+      ? 'job-status-ahead'
+      : (behindSchedule ? 'job-status-behind' : 'job-status-onpace');
+    const statusDisplay = `
+      <div class="job-status ${statusClass}">${esc(statusLabel)}</div>
+      ${statusDetailHtml}`.trim();
 
     // Dates (for display / edit row)
     const startDate = parseDateLocal(j.startISO);
@@ -2528,6 +2601,9 @@ function viewJobs(){
     const startTxt  = startDate ? startDate.toDateString() : "—";
     const dueTxt    = dueDate ? dueDate.toDateString() : "—";
     const dueVal    = dueDate ? ymd(dueDate) : (j.dueISO || "");
+
+    const prioritySelectId = `jobPriorityInline_${j.id}`;
+    const priorityAriaLabel = esc(`Priority for ${j.name || "Job"}`);
 
     if (!editing){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
@@ -2545,11 +2621,17 @@ function viewJobs(){
                   <span class="job-title-chip-dot" aria-hidden="true"></span>
                   <span class="job-title-chip-text">${esc(j.name || "Job")}</span>
                 </div>
+                <div class="job-priority-inline">
+                  <label class="job-priority-inline-label" for="${esc(prioritySelectId)}">Priority</label>
+                  <select id="${esc(prioritySelectId)}" data-job-priority-inline="${esc(j.id)}" aria-label="${priorityAriaLabel}">
+                    ${priorityOptionsMarkup(priorityValue)}
+                  </select>
+                </div>
                 ${overlapIndicatorButton}
               </div>
               <div class="job-main-category small muted" data-category-color="1"${colorStyleAttr}>
-                <span class="sr-only">Category</span>
-                <span class="job-main-category-name">Category:</span>
+                <span class="job-main-category-label">Category</span>
+                <span class="job-main-category-name">${esc(categoryName)}</span>
               </div>
               <div class="job-main-category-picker small" data-category-color="1"${colorStyleAttr}>
                 <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(j.name || "Job")}">
@@ -2567,8 +2649,7 @@ function viewJobs(){
           <td class="job-col job-col-charge">${chargeDisplay}</td>
           <td class="job-col job-col-cost">${costDisplay}</td>
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
-          <td class="job-col job-col-hours">${remainingDisplay}</td>
-          <td class="job-col job-col-need">${needDisplay}</td>
+          <td class="job-col job-col-hours">${remainingDisplay}${backlogHours > 0 ? `<div class="small muted">Queue total ${esc(queueTotalDisplay)}</div>` : ''}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
           <td class="job-col job-col-files">
             <div class="job-cell job-cell-stretch">
@@ -2608,6 +2689,7 @@ function viewJobs(){
                 <div><dt>Cost</dt><dd>${costDisplay}</dd></div>
                 <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
                 <div><dt>Net total</dt><dd class="${impactClass}">${impactDisplay}</dd></div>
+                <div><dt>Queue ahead</dt><dd>${backlogHours > 0 ? `${backlogHours.toFixed(1)} hr` : 'None'}</dd></div>
               </dl>
             </div>
           </td>
@@ -2655,6 +2737,7 @@ function viewJobs(){
                 <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-j="chargeRate" data-id="${j.id}" value="${chargeRate}"></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
+                <label>Priority<select data-j="priority" data-id="${j.id}">${priorityOptionsMarkup(priorityValue)}</select></label>
                 <label>Category<select data-j="cat" data-id="${j.id}" data-job-category-select>
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
                 </select></label>
@@ -2693,6 +2776,14 @@ function viewJobs(){
                     <span class="job-metric-value ${impactClass}">${netTotalDisplay}</span>
                   </div>
                   <div class="job-metric">
+                    <span class="job-metric-label">Queue ahead</span>
+                    <span class="job-metric-value">${backlogHours > 0 ? `${backlogHours.toFixed(1)} hr` : 'None'}</span>
+                  </div>
+                  <div class="job-metric">
+                    <span class="job-metric-label">Queue total</span>
+                    <span class="job-metric-value">${esc(queueTotalDisplay)}</span>
+                  </div>
+                  <div class="job-metric">
                     <span class="job-metric-label">Schedule</span>
                     <span class="job-metric-value small muted">${startTxt} → ${dueTxt}</span>
                   </div>
@@ -2713,8 +2804,8 @@ function viewJobs(){
                 </ul>
               </div>
               <div class="job-edit-actions">
-                <button data-save-job="${j.id}">Save</button>
-                <button class="danger" data-cancel-job="${j.id}">Cancel</button>
+                <button type="button" data-save-job="${j.id}">Save</button>
+                <button type="button" class="danger" data-cancel-job="${j.id}">Cancel</button>
               </div>
             </div>
           </td>
@@ -2780,6 +2871,10 @@ function viewJobs(){
         <form id="addJobForm" class="mini-form job-add-form">
           <input type="text" id="jobName" placeholder="Job name" required>
           <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
+          <select id="jobPriority" aria-label="Priority">
+            ${priorityOptionsMarkup(1)}
+          </select>
+          <p class="small muted job-priority-hint">Priority 1 runs before higher numbers.</p>
           <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01">
           <input type="text" id="jobMaterial" placeholder="Material">
           <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
@@ -2814,7 +2909,6 @@ function viewJobs(){
             <th>Cost rate</th>
             <th>Net profit/hr</th>
             <th>Hours remaining</th>
-            <th>Needed / day</th>
             <th>Status</th>
             <th>Files</th>
             <th>Net total</th>

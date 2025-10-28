@@ -9,6 +9,31 @@ const sharedTimeEfficiencyStarts = (typeof window !== "undefined" && window.__ti
   : new Map();
 if (typeof window !== "undefined"){ window.__timeEfficiencyStartMap = sharedTimeEfficiencyStarts; }
 
+const sharedPriorityAnimationMap = (typeof window !== "undefined" && window.__priorityAnimationMap instanceof Map)
+  ? window.__priorityAnimationMap
+  : new Map();
+if (typeof window !== "undefined"){ window.__priorityAnimationMap = sharedPriorityAnimationMap; }
+
+const schedulePriorityAnimation = (ids = [], { duration = 600 } = {}) => {
+  if (!Array.isArray(ids) || !ids.length) return;
+  const now = Date.now();
+  ids.forEach(id => {
+    if (id == null) return;
+    const key = String(id);
+    sharedPriorityAnimationMap.set(key, now);
+    const clearAnimation = () => {
+      if (sharedPriorityAnimationMap.get(key) === now){
+        sharedPriorityAnimationMap.delete(key);
+      }
+    };
+    if (typeof window !== "undefined" && typeof window.setTimeout === "function"){
+      window.setTimeout(clearAnimation, duration);
+    } else if (typeof setTimeout === "function"){
+      setTimeout(clearAnimation, duration);
+    }
+  });
+};
+
 function getCurrentMachineHours(){
   if (typeof RENDER_TOTAL === "number" && Number.isFinite(RENDER_TOTAL)){
     return Number(RENDER_TOTAL);
@@ -374,6 +399,7 @@ function captureNewJobFormState(){
     fields: {
       name: captureField("jobName"),
       estimate: captureField("jobEst"),
+      priority: captureField("jobPriority"),
       charge: captureField("jobCharge"),
       material: captureField("jobMaterial"),
       materialCost: captureField("jobMaterialCost"),
@@ -401,6 +427,7 @@ function restoreNewJobFormState(state){
 
   assignField("jobName", state.fields.name);
   assignField("jobEst", state.fields.estimate);
+  assignField("jobPriority", state.fields.priority);
   assignField("jobCharge", state.fields.charge);
   assignField("jobMaterial", state.fields.material);
   assignField("jobMaterialCost", state.fields.materialCost);
@@ -4146,7 +4173,9 @@ function renderDashboard(){
       categoryId = String(folder.id);
       window.jobCategoryFilter = categoryId;
     }
-    cuttingJobs.push({ id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[], cat: categoryId });
+    const newJob = { id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, priority: 1, notes:"", manualLogs:[], cat: categoryId };
+    cuttingJobs.push(newJob);
+    reorderPriorities(newJob.id, newJob.priority);
     ensureJobCategories?.();
     if (jobCategoryInput){
       jobCategoryInput.value = dashRootCategoryId;
@@ -11225,6 +11254,92 @@ function renderJobs(){
   }
   const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
 
+  const normalizePriorityValue = (value)=>{
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return 1;
+    return Math.max(1, Math.floor(num));
+  };
+
+  const priorityEntries = ()=>{
+    if (!Array.isArray(cuttingJobs)) return [];
+    return cuttingJobs.map((job, index) => {
+      if (!job || job.id == null) return null;
+      const id = String(job.id);
+      const priority = typeof getJobPriority === "function"
+        ? getJobPriority(job)
+        : normalizePriorityValue(job.priority);
+      return { job, id, priority, originalIndex: index };
+    }).filter(Boolean);
+  };
+
+  const normalizeAllPriorities = (entries, { respectOrder = false } = {})=>{
+    const list = Array.isArray(entries) ? entries.slice() : priorityEntries();
+    if (!list.length) return list;
+    if (!respectOrder){
+      list.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        return a.originalIndex - b.originalIndex;
+      });
+    }
+    const orderMap = new Map();
+    list.forEach((entry, idx) => {
+      entry.job.priority = idx + 1;
+      orderMap.set(entry.id, idx);
+    });
+    cuttingJobs.sort((a, b) => {
+      const idA = a && a.id != null ? String(a.id) : "";
+      const idB = b && b.id != null ? String(b.id) : "";
+      const orderA = orderMap.has(idA) ? orderMap.get(idA) : Number.MAX_SAFE_INTEGER;
+      const orderB = orderMap.has(idB) ? orderMap.get(idB) : Number.MAX_SAFE_INTEGER;
+      if (orderA !== orderB) return orderA - orderB;
+      return idA.localeCompare(idB);
+    });
+    if (typeof window !== "undefined"){
+      window.cuttingJobs = cuttingJobs;
+    }
+    return list;
+  };
+
+  const reorderPriorities = (jobId, desiredPriority)=>{
+    const entries = priorityEntries();
+    if (!entries.length) return;
+    entries.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      return a.originalIndex - b.originalIndex;
+    });
+    const originalOrder = entries.map(entry => entry.id);
+    if (jobId == null){
+      normalizeAllPriorities(entries);
+      return;
+    }
+    const id = String(jobId);
+    const targetIndex = entries.findIndex(entry => entry.id === id);
+    if (targetIndex < 0){
+      normalizeAllPriorities(entries);
+      return;
+    }
+    const [target] = entries.splice(targetIndex, 1);
+    const normalizedDesired = normalizePriorityValue(desiredPriority);
+    const insertIndex = Math.max(0, Math.min(normalizedDesired - 1, entries.length));
+    entries.splice(insertIndex, 0, target);
+    const normalizedEntries = normalizeAllPriorities(entries, { respectOrder: true });
+    const newOrder = normalizedEntries.map(entry => entry.id);
+    if (newOrder.length === originalOrder.length){
+      const changedIds = [];
+      for (let idx = 0; idx < newOrder.length; idx += 1){
+        if (newOrder[idx] !== originalOrder[idx]){
+          if (originalOrder[idx]) changedIds.push(originalOrder[idx]);
+          if (newOrder[idx]) changedIds.push(newOrder[idx]);
+        }
+      }
+      if (changedIds.length){
+        schedulePriorityAnimation(changedIds, { duration: 500 });
+      }
+    } else {
+      schedulePriorityAnimation([id], { duration: 500 });
+    }
+  };
+
   // 4) Add Job (unchanged)
   document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
@@ -11236,6 +11351,9 @@ function renderJobs(){
     const materialQtyRaw = document.getElementById("jobMaterialQty")?.value ?? "";
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
+    const priorityRaw = document.getElementById("jobPriority")?.value ?? "1";
+    const priorityNum = Number(priorityRaw);
+    const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
     const categorySelect = document.getElementById("jobCategory");
     let categoryId = categorySelect?.value || "";
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
@@ -11254,7 +11372,9 @@ function renderJobs(){
       window.jobCategoryFilter = categoryId;
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    cuttingJobs.push({ id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, notes:"", manualLogs:[], files:attachments, cat: categoryId });
+    const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
+    cuttingJobs.push(newJob);
+    reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
     pendingNewJobFiles.length = 0;
     saveCloudDebounced(); renderJobs();
@@ -11262,6 +11382,18 @@ function renderJobs(){
 
   // 5) Inline material $/qty (kept)
   content.querySelector(".job-table tbody")?.addEventListener("change", async (e)=>{
+    const prioritySelect = e.target instanceof Element
+      ? e.target.closest("select[data-job-priority-inline]")
+      : null;
+    if (prioritySelect instanceof HTMLSelectElement){
+      const id = prioritySelect.getAttribute("data-job-priority-inline");
+      if (id){
+        reorderPriorities(id, prioritySelect.value);
+        saveCloudDebounced();
+        renderJobs();
+      }
+      return;
+    }
     if (e.target.matches("input[data-job-file-input]")){
       const id = e.target.getAttribute("data-job-file-input");
       const j = cuttingJobs.find(x=>x.id===id);
@@ -11436,6 +11568,11 @@ function renderJobs(){
         chargeRate: Number.isFinite(Number(entry.chargeRate)) && Number(entry.chargeRate) >= 0
           ? Number(entry.chargeRate)
           : JOB_RATE_PER_HOUR,
+        priority: typeof getJobPriority === "function"
+          ? getJobPriority(entry)
+          : (Number.isFinite(Number(entry.priority)) && Number(entry.priority) > 0
+            ? Math.max(1, Math.floor(Number(entry.priority)))
+            : 1),
         notes: entry.notes || "",
         manualLogs: [],
         files: Array.isArray(entry.files) ? entry.files.map(f => ({ ...f })) : [],
@@ -11443,6 +11580,7 @@ function renderJobs(){
       };
 
       cuttingJobs.push(newJob);
+      reorderPriorities(newJob.id, newJob.priority);
       window.cuttingJobs = cuttingJobs;
       saveCloudDebounced();
       toast("Active cutting job created");
@@ -11507,6 +11645,7 @@ function renderJobs(){
       const notesInput = field("notes");
       const completedInput = field("completedAtISO");
       const categoryInput = field("cat");
+      const priorityInput = field("priority");
 
       const name = (nameInput?.value || entry.name || "").trim();
       if (!name){ toast("Enter a job name."); return; }
@@ -11534,6 +11673,21 @@ function renderJobs(){
       if (completedRaw){
         const dt = new Date(completedRaw);
         if (!Number.isNaN(dt.getTime())) entry.completedAtISO = dt.toISOString();
+      }
+
+      if (priorityInput){
+        const priorityVal = priorityInput.value;
+        if (priorityVal !== undefined){
+          const priorityNum = priorityVal === "" ? null : Number(priorityVal);
+          if (priorityNum != null){
+            entry.priority = Number.isFinite(priorityNum) && priorityNum > 0
+              ? Math.max(1, Math.floor(priorityNum))
+              : 1;
+          }
+        }
+      }
+      if (entry.priority == null){
+        entry.priority = 1;
       }
 
       entry.name = name;
@@ -11647,6 +11801,11 @@ function renderJobs(){
       return;
     }
 
+    const prioritySelectInline = e.target.closest("[data-job-priority-inline]");
+    if (prioritySelectInline){
+      return;
+    }
+
     const locked = e.target.closest("[data-requires-edit]");
     if (locked){
       const id = locked.getAttribute("data-requires-edit");
@@ -11708,6 +11867,7 @@ function renderJobs(){
       }
       cuttingJobs = cuttingJobs.filter(x=>x.id!==id);
       window.cuttingJobs = cuttingJobs;
+      normalizeAllPriorities();
       saveCloudDebounced(); toast("Removed"); renderJobs();
       return;
     }
@@ -11767,12 +11927,18 @@ function renderJobs(){
         manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
         files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
         cat: job.cat != null ? job.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"),
+        priority: typeof getJobPriority === "function"
+          ? getJobPriority(job)
+          : (Number.isFinite(Number(job.priority)) && Number(job.priority) > 0
+            ? Math.max(1, Math.floor(Number(job.priority)))
+            : 1),
         actualHours: eff && Number.isFinite(eff.actualHours) ? eff.actualHours : null,
         efficiency: efficiencySummary
       };
 
       completedCuttingJobs.push(completed);
       cuttingJobs.splice(idx, 1);
+      normalizeAllPriorities();
       editingJobs.delete(id);
       saveCloudDebounced();
       toast("Job marked complete");
@@ -11804,6 +11970,21 @@ function renderJobs(){
       j.dueISO   = qs("dueISO")   || j.dueISO;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
       j.chargeRate = chargeToSet;
+      const priorityRaw = qs("priority");
+      if (priorityRaw != null){
+        const priorityNum = priorityRaw === "" ? null : Number(priorityRaw);
+        const normalizedPriority = priorityNum == null
+          ? null
+          : (Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1);
+        if (normalizedPriority != null){
+          j.priority = normalizedPriority;
+        } else if (j.priority == null){
+          j.priority = 1;
+        }
+      } else if (j.priority == null){
+        j.priority = 1;
+      }
+      reorderPriorities(j.id, j.priority);
       if (catVal && catVal !== "__new__") j.cat = catVal;
       editingJobs.delete(id);
       saveCloudDebounced();
@@ -11835,7 +12016,7 @@ function renderJobs(){
       const trForm = document.createElement("tr");
       trForm.className = "manual-log-row";
       trForm.setAttribute("data-log-row", id);
-      const columnCount = content.querySelector(".job-table thead tr")?.children.length || 16;
+      const columnCount = content.querySelector(".job-table thead tr")?.children.length || 15;
       trForm.innerHTML = `
         <td colspan="${columnCount}">
           <div class="mini-form" style="display:grid; gap:8px; align-items:end; grid-template-columns: repeat(6, minmax(0,1fr));">
