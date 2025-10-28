@@ -10184,15 +10184,60 @@ function renderJobs(){
       window.dismissedJobOverlapSignature = "";
     }
   }
-  const overlapAlertEl = content.querySelector("[data-job-overlap-alert]");
-  if (overlapAlertEl){
-    const alertSignature = overlapAlertEl.getAttribute("data-job-overlap-signature") || currentOverlapSignature || "";
-    const dismissBtn = overlapAlertEl.querySelector("[data-job-overlap-dismiss]");
+  const overlapNoticeEl = content.querySelector("[data-job-overlap-notice]");
+  if (overlapNoticeEl){
+    const overlapAlertEl = overlapNoticeEl.querySelector("[data-job-overlap-alert]");
+    const dismissBtn = overlapNoticeEl.querySelector("[data-job-overlap-dismiss]");
+    const reminderBtn = overlapNoticeEl.querySelector("[data-job-overlap-reminder]");
+    const alertSignature = overlapNoticeEl.getAttribute("data-job-overlap-signature")
+      || overlapAlertEl?.getAttribute("data-job-overlap-signature")
+      || currentOverlapSignature
+      || "";
+    const hideOverlapAlert = ()=>{
+      if (overlapAlertEl){
+        overlapAlertEl.hidden = true;
+      }
+      if (reminderBtn){
+        reminderBtn.hidden = false;
+      }
+      if (typeof window !== "undefined"){
+        window.dismissedJobOverlapSignature = alertSignature;
+      }
+    };
+    const showOverlapAlert = ()=>{
+      if (overlapAlertEl){
+        overlapAlertEl.hidden = false;
+      }
+      if (reminderBtn){
+        reminderBtn.hidden = true;
+      }
+      if (typeof window !== "undefined"){
+        window.dismissedJobOverlapSignature = "";
+      }
+    };
     if (dismissBtn){
       dismissBtn.addEventListener("click", ()=>{
-        overlapAlertEl.remove();
-        if (typeof window !== "undefined"){
-          window.dismissedJobOverlapSignature = alertSignature;
+        hideOverlapAlert();
+        if (reminderBtn){
+          try {
+            reminderBtn.focus({ preventScroll: true });
+          } catch (_err) {
+            reminderBtn.focus();
+          }
+        }
+      });
+    }
+    if (reminderBtn){
+      reminderBtn.addEventListener("click", ()=>{
+        showOverlapAlert();
+        if (dismissBtn){
+          requestAnimationFrame(()=>{
+            try {
+              dismissBtn.focus({ preventScroll: true });
+            } catch (_err) {
+              dismissBtn.focus();
+            }
+          });
         }
       });
     }
