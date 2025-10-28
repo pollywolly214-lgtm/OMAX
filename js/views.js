@@ -1751,12 +1751,13 @@ function viewJobs(){
   const priorityLevels = [1, 2, 3, 4, 5];
   const priorityOptionsMarkup = (selectedValue)=>{
     const selected = Number.isFinite(Number(selectedValue)) ? Math.max(1, Math.floor(Number(selectedValue))) : 1;
-    const options = priorityLevels.map(level => {
+    const baseMax = priorityLevels[priorityLevels.length - 1] || 5;
+    const totalJobs = Array.isArray(cuttingJobs) ? cuttingJobs.length : baseMax;
+    const limit = Math.max(baseMax, totalJobs + 1, selected);
+    const options = [];
+    for (let level = 1; level <= limit; level += 1){
       const selectedAttr = level === selected ? " selected" : "";
-      return `<option value="${level}"${selectedAttr}>Priority ${level}</option>`;
-    });
-    if (!priorityLevels.includes(selected)){
-      options.push(`<option value="${selected}" selected>Priority ${selected}</option>`);
+      options.push(`<option value="${level}"${selectedAttr}>Priority ${level}</option>`);
     }
     return options.join("");
   };
@@ -1944,6 +1945,17 @@ function viewJobs(){
     return allowedCategories.has(normalized);
   });
 
+  jobsForCategory.sort((a, b) => {
+    const priorityDiff = priorityForJob(a) - priorityForJob(b);
+    if (priorityDiff !== 0) return priorityDiff;
+    const dueA = parseDateLocal(a?.dueISO);
+    const dueB = parseDateLocal(b?.dueISO);
+    const dueTimeA = dueA instanceof Date && !Number.isNaN(dueA.getTime()) ? dueA.getTime() : Number.POSITIVE_INFINITY;
+    const dueTimeB = dueB instanceof Date && !Number.isNaN(dueB.getTime()) ? dueB.getTime() : Number.POSITIVE_INFINITY;
+    if (dueTimeA !== dueTimeB) return dueTimeA - dueTimeB;
+    return String(a?.name || "").localeCompare(String(b?.name || ""));
+  });
+
   const completedForCategory = completedSorted.filter(job => {
     const normalized = normalizeCategory(job?.cat);
     return allowedCategories.has(normalized);
@@ -2028,7 +2040,7 @@ function viewJobs(){
     ? ` data-job-overlap-signature="${esc(overlapSignature)}"`
     : "";
 
-  const jobColumnCount = 17;
+  const jobColumnCount = 15;
   const historyColumnCount = jobColumnCount;
   const historySearchDisplay = historySearchValue
     .replace(/&/g, "&amp;")
@@ -2190,19 +2202,24 @@ function viewJobs(){
         <tr data-history-row="${job.id || ""}" class="job-row">
           <td class="job-col job-col-main job-col-locked" data-history-requires-edit="${job.id}">
             <div class="job-main">
-              <div class="job-title-chip"${colorStyleAttr}>
-                <span class="job-title-chip-dot" aria-hidden="true"></span>
-                <span class="job-title-chip-text">${esc(job?.name || "Job")}</span>
+              <div class="job-main-headline">
+                <div class="job-title-chip"${colorStyleAttr}>
+                  <span class="job-title-chip-dot" aria-hidden="true"></span>
+                  <span class="job-title-chip-text">${esc(job?.name || "Job")}</span>
+                </div>
+                <div class="job-priority-inline job-priority-inline-static">
+                  <span class="job-priority-inline-label">Priority</span>
+                  <span class="job-priority-inline-value">Priority ${priorityValue}</span>
+                </div>
               </div>
               <div class="job-main-category small muted" data-category-color="1"${historyColorStyle}>
-                <span class="sr-only">Category</span>
-                <span class="job-main-category-name">Category:</span>
+                <span class="job-main-category-label">Category</span>
+                <span class="job-main-category-name">${esc(categoryName)}</span>
               </div>
               <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
               <div class="job-main-summary small muted">Actual ${actualDisplay} vs ${estimateDisplay}</div>
             </div>
           </td>
-          <td class="job-col job-col-priority job-col-locked" data-history-requires-edit="${job.id}">Priority ${priorityValue}</td>
           <td class="job-col job-col-estimate job-col-locked" data-history-requires-edit="${job.id}">${estimateDisplay}</td>
           <td class="job-col job-col-material job-col-locked" data-history-requires-edit="${job.id}">${job?.material ? esc(job.material) : "—"}</td>
           <td class="job-col job-col-input job-col-locked" data-history-requires-edit="${job.id}">${matCostDisplay}</td>
@@ -2212,10 +2229,10 @@ function viewJobs(){
           <td class="job-col job-col-cost">${costDisplay}</td>
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
           <td class="job-col job-col-hours">${remainingDisplay}</td>
-          <td class="job-col job-col-need">${needDisplay}</td>
           <td class="job-col job-col-status">
             <div class="job-status ${statusClass}">${esc(statusLabel)}</div>
             ${statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : ""}
+            ${needDisplay ? `<div class="job-status-need">${needDisplay}</div>` : ""}
           </td>
           <td class="job-col job-col-files">
             <div class="job-cell job-cell-stretch">
@@ -2365,7 +2382,6 @@ function viewJobs(){
         <thead>
           <tr>
             <th>Job</th>
-            <th>Priority</th>
             <th>Estimate</th>
             <th>Material</th>
             <th>Cost / unit</th>
@@ -2375,7 +2391,6 @@ function viewJobs(){
             <th>Cost rate</th>
             <th>Net profit/hr</th>
             <th>Hours remaining</th>
-            <th>Needed / day</th>
             <th>Status</th>
             <th>Files</th>
             <th>Net total</th>
@@ -2516,7 +2531,8 @@ function viewJobs(){
     }
     const statusDisplay = [
       `<div class="job-status ${aheadSchedule ? 'job-status-ahead' : (behindSchedule ? 'job-status-behind' : 'job-status-onpace')}">${esc(statusLabel)}</div>`,
-      statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : ''
+      statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : '',
+      needDisplay ? `<div class="job-status-need">${needDisplay}</div>` : ''
     ].join('');
 
     // Dates (for display / edit row)
@@ -2525,6 +2541,9 @@ function viewJobs(){
     const startTxt  = startDate ? startDate.toDateString() : "—";
     const dueTxt    = dueDate ? dueDate.toDateString() : "—";
     const dueVal    = dueDate ? ymd(dueDate) : (j.dueISO || "");
+
+    const prioritySelectId = `jobPriorityInline_${j.id}`;
+    const priorityAriaLabel = esc(`Priority for ${j.name || "Job"}`);
 
     if (!editing){
       const matCostDisplay = formatCurrency(matCost, { showPlus: false });
@@ -2542,11 +2561,17 @@ function viewJobs(){
                   <span class="job-title-chip-dot" aria-hidden="true"></span>
                   <span class="job-title-chip-text">${esc(j.name || "Job")}</span>
                 </div>
+                <div class="job-priority-inline">
+                  <label class="job-priority-inline-label" for="${esc(prioritySelectId)}">Priority</label>
+                  <select id="${esc(prioritySelectId)}" data-job-priority-inline="${esc(j.id)}" aria-label="${priorityAriaLabel}">
+                    ${priorityOptionsMarkup(priorityValue)}
+                  </select>
+                </div>
                 ${overlapIndicatorButton}
               </div>
               <div class="job-main-category small muted" data-category-color="1"${colorStyleAttr}>
-                <span class="sr-only">Category</span>
-                <span class="job-main-category-name">Category:</span>
+                <span class="job-main-category-label">Category</span>
+                <span class="job-main-category-name">${esc(categoryName)}</span>
               </div>
               <div class="job-main-category-picker small" data-category-color="1"${colorStyleAttr}>
                 <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(j.name || "Job")}">
@@ -2556,7 +2581,6 @@ function viewJobs(){
               <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
             </div>
           </td>
-          <td class="job-col job-col-priority job-col-locked" data-requires-edit="${j.id}">Priority ${priorityValue}</td>
           <td class="job-col job-col-estimate job-col-locked" data-requires-edit="${j.id}">${estimateDisplay}</td>
           <td class="job-col job-col-material job-col-locked" data-requires-edit="${j.id}">${j.material || '—'}</td>
           <td class="job-col job-col-input job-col-locked" data-requires-edit="${j.id}">${matCostDisplay}</td>
@@ -2566,7 +2590,6 @@ function viewJobs(){
           <td class="job-col job-col-cost">${costDisplay}</td>
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
           <td class="job-col job-col-hours">${remainingDisplay}${backlogHours > 0 ? `<div class="small muted">Queue total ${esc(queueTotalDisplay)}</div>` : ''}</td>
-          <td class="job-col job-col-need">${needDisplay}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
           <td class="job-col job-col-files">
             <div class="job-cell job-cell-stretch">
@@ -2817,7 +2840,6 @@ function viewJobs(){
         <thead>
           <tr>
             <th>Job</th>
-            <th>Priority</th>
             <th>Estimate</th>
             <th>Material</th>
             <th>Cost / unit</th>
@@ -2827,7 +2849,6 @@ function viewJobs(){
             <th>Cost rate</th>
             <th>Net profit/hr</th>
             <th>Hours remaining</th>
-            <th>Needed / day</th>
             <th>Status</th>
             <th>Files</th>
             <th>Net total</th>
