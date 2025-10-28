@@ -9,6 +9,31 @@ const sharedTimeEfficiencyStarts = (typeof window !== "undefined" && window.__ti
   : new Map();
 if (typeof window !== "undefined"){ window.__timeEfficiencyStartMap = sharedTimeEfficiencyStarts; }
 
+const sharedPriorityAnimationMap = (typeof window !== "undefined" && window.__priorityAnimationMap instanceof Map)
+  ? window.__priorityAnimationMap
+  : new Map();
+if (typeof window !== "undefined"){ window.__priorityAnimationMap = sharedPriorityAnimationMap; }
+
+const schedulePriorityAnimation = (ids = [], { duration = 600 } = {}) => {
+  if (!Array.isArray(ids) || !ids.length) return;
+  const now = Date.now();
+  ids.forEach(id => {
+    if (id == null) return;
+    const key = String(id);
+    sharedPriorityAnimationMap.set(key, now);
+    const clearAnimation = () => {
+      if (sharedPriorityAnimationMap.get(key) === now){
+        sharedPriorityAnimationMap.delete(key);
+      }
+    };
+    if (typeof window !== "undefined" && typeof window.setTimeout === "function"){
+      window.setTimeout(clearAnimation, duration);
+    } else if (typeof setTimeout === "function"){
+      setTimeout(clearAnimation, duration);
+    }
+  });
+};
+
 function getCurrentMachineHours(){
   if (typeof RENDER_TOTAL === "number" && Number.isFinite(RENDER_TOTAL)){
     return Number(RENDER_TOTAL);
@@ -10732,6 +10757,7 @@ function renderJobs(){
       if (a.priority !== b.priority) return a.priority - b.priority;
       return a.originalIndex - b.originalIndex;
     });
+    const originalOrder = entries.map(entry => entry.id);
     if (jobId == null){
       normalizeAllPriorities(entries);
       return;
@@ -10746,7 +10772,22 @@ function renderJobs(){
     const normalizedDesired = normalizePriorityValue(desiredPriority);
     const insertIndex = Math.max(0, Math.min(normalizedDesired - 1, entries.length));
     entries.splice(insertIndex, 0, target);
-    normalizeAllPriorities(entries, { respectOrder: true });
+    const normalizedEntries = normalizeAllPriorities(entries, { respectOrder: true });
+    const newOrder = normalizedEntries.map(entry => entry.id);
+    if (newOrder.length === originalOrder.length){
+      const changedIds = [];
+      for (let idx = 0; idx < newOrder.length; idx += 1){
+        if (newOrder[idx] !== originalOrder[idx]){
+          if (originalOrder[idx]) changedIds.push(originalOrder[idx]);
+          if (newOrder[idx]) changedIds.push(newOrder[idx]);
+        }
+      }
+      if (changedIds.length){
+        schedulePriorityAnimation(changedIds, { duration: 500 });
+      }
+    } else {
+      schedulePriorityAnimation([id], { duration: 500 });
+    }
   };
 
   // 4) Add Job (unchanged)

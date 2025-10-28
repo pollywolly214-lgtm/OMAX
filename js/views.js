@@ -2406,6 +2406,9 @@ function viewJobs(){
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
   const activeColumnCount = jobColumnCount;
+  const priorityAnimationMap = (typeof window !== "undefined" && window.__priorityAnimationMap instanceof Map)
+    ? window.__priorityAnimationMap
+    : null;
   const rows = jobsForCategory.map(j => {
     const jobFiles = Array.isArray(j.files) ? j.files : [];
     const fileCount = jobFiles.length;
@@ -2445,7 +2448,9 @@ function viewJobs(){
     const overlapIndicatorButton = jobHasOverlap
       ? `<button type="button" class="job-overlap-indicator" data-job-overlap-info data-job-overlap-message="${jobOverlapNoticeEsc}" aria-label="Job overlap warning" title="Jobs might be overlapping">!</button>`
       : "";
-    const rowClass = `job-row${jobHasOverlap ? " job-row-overlap" : ""}`;
+    const highlightPriority = priorityAnimationMap ? priorityAnimationMap.has(jobId) : false;
+    const rowBaseClass = `job-row${jobHasOverlap ? " job-row-overlap" : ""}`;
+    const rowClass = highlightPriority ? `${rowBaseClass} job-row-priority-animate` : rowBaseClass;
     const normalizedCatId = normalizeCategory(j.cat);
     const categoryFolder = folderMap.get(normalizedCatId);
     const categoryName = categoryFolder ? categoryFolder.name || "All Jobs" : "All Jobs";
