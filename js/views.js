@@ -2096,7 +2096,7 @@ function viewJobs(){
     ? ` data-job-overlap-signature="${esc(overlapSignature)}"`
     : "";
 
-  const jobColumnCount = 15;
+  const jobColumnCount = 16;
   const historyColumnCount = jobColumnCount;
   const historySearchDisplay = historySearchValue
     .replace(/&/g, "&amp;")
@@ -2204,6 +2204,7 @@ function viewJobs(){
     const netClass = netRate >= 0 ? "job-rate-net-positive" : "job-rate-net-negative";
     const netTotalDisplay = formatCurrency(netTotal, { showPlus: true });
     const impactClass = netTotal > 0 ? "job-impact-ahead" : (netTotal < 0 ? "job-impact-behind" : "job-impact-neutral");
+    const jobOppCostDisplay = formatCurrency(0, { showPlus: false });
 
     let statusLabel = "Finished on estimate";
     if (Number.isFinite(delta) && Math.abs(delta) > 0.1){
@@ -2285,6 +2286,7 @@ function viewJobs(){
           <td class="job-col job-col-cost">${costDisplay}</td>
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
           <td class="job-col job-col-hours">${remainingDisplay}</td>
+          <td class="job-col job-col-opportunity">${jobOppCostDisplay}</td>
           <td class="job-col job-col-status">
             <div class="job-status ${statusClass}">${esc(statusLabel)}</div>
             ${statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : ""}
@@ -2328,6 +2330,7 @@ function viewJobs(){
                 <div><dt>Cost</dt><dd>${costDisplay}</dd></div>
                 <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
                 <div><dt>Net total</dt><dd class="${impactClass}">${netTotalDisplay}</dd></div>
+                <div><dt>Opp. cost</dt><dd>${jobOppCostDisplay}</dd></div>
               </dl>
             </div>
           </td>
@@ -2447,6 +2450,7 @@ function viewJobs(){
             <th>Cost rate</th>
             <th>Net profit/hr</th>
             <th>Hours remaining</th>
+            <th>Opp. Cost @ 8 hr/day</th>
             <th>Status</th>
             <th>Files</th>
             <th>Net total</th>
@@ -2500,6 +2504,12 @@ function viewJobs(){
     const backlogRaw = jobId && backlogById instanceof Map ? backlogById.get(jobId) : 0;
     const backlogHours = Number.isFinite(Number(backlogRaw)) ? Math.max(0, Number(backlogRaw)) : 0;
     const req = computeRequiredDaily(j, { backlogHours });
+    let oppRate = typeof window.getOpportunityLossRate === "function"
+      ? Number(window.getOpportunityLossRate())
+      : NaN;
+    if (!Number.isFinite(oppRate) || oppRate < 0) oppRate = 150;
+    const jobOppCost = Math.max(0, backlogHours) * oppRate;
+    const jobOppCostDisplay = formatCurrency(jobOppCost, { showPlus: false });
     const jobHasOverlap = jobId && overlappingJobIds.has(jobId);
     const overlapIndicatorButton = jobHasOverlap
       ? `<button type="button" class="job-overlap-indicator" data-job-overlap-info data-job-overlap-message="${jobOverlapNoticeEsc}" aria-label="Job overlap warning" title="Jobs might be overlapping">!</button>`
@@ -2650,6 +2660,7 @@ function viewJobs(){
           <td class="job-col job-col-cost">${costDisplay}</td>
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
           <td class="job-col job-col-hours">${remainingDisplay}${backlogHours > 0 ? `<div class="small muted">Queue total ${esc(queueTotalDisplay)}</div>` : ''}</td>
+          <td class="job-col job-col-opportunity">${jobOppCostDisplay}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
           <td class="job-col job-col-files">
             <div class="job-cell job-cell-stretch">
@@ -2690,6 +2701,7 @@ function viewJobs(){
                 <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
                 <div><dt>Net total</dt><dd class="${impactClass}">${impactDisplay}</dd></div>
                 <div><dt>Queue ahead</dt><dd>${backlogHours > 0 ? `${backlogHours.toFixed(1)} hr` : 'None'}</dd></div>
+                <div><dt>Opp. cost</dt><dd>${jobOppCostDisplay}</dd></div>
               </dl>
             </div>
           </td>
@@ -2778,6 +2790,10 @@ function viewJobs(){
                   <div class="job-metric">
                     <span class="job-metric-label">Queue ahead</span>
                     <span class="job-metric-value">${backlogHours > 0 ? `${backlogHours.toFixed(1)} hr` : 'None'}</span>
+                  </div>
+                  <div class="job-metric">
+                    <span class="job-metric-label">Opp. cost</span>
+                    <span class="job-metric-value">${jobOppCostDisplay}</span>
                   </div>
                   <div class="job-metric">
                     <span class="job-metric-label">Queue total</span>
@@ -2909,6 +2925,7 @@ function viewJobs(){
             <th>Cost rate</th>
             <th>Net profit/hr</th>
             <th>Hours remaining</th>
+            <th>Opp. Cost @ 8 hr/day</th>
             <th>Status</th>
             <th>Files</th>
             <th>Net total</th>
