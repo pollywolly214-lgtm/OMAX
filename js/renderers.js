@@ -8180,11 +8180,11 @@ function renderCosts(){
     });
   };
 
-  const limitChartSeries = (points)=>{
+  const limitChartSeries = (points, limit = 180)=>{
     if (!Array.isArray(points)) return [];
-    const limit = 180;
-    if (points.length > limit){
-      return points.slice(-limit);
+    const normalizedLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 180;
+    if (points.length > normalizedLimit){
+      return points.slice(-normalizedLimit);
     }
     return points.slice();
   };
@@ -8193,15 +8193,17 @@ function renderCosts(){
     if (!Array.isArray(points)) return [];
     const normalizedRange = normalizeChartRange(rangeValue);
     const sanitized = points.filter(pt => pt && pt.date instanceof Date && !Number.isNaN(pt.date.getTime()));
+    const approximateDaysPerMonth = 31;
+    const limit = Math.max(180, Math.ceil(normalizedRange * approximateDaysPerMonth));
     if (!allowedChartRanges.includes(normalizedRange)){
-      return limitChartSeries(sanitized);
+      return limitChartSeries(sanitized, limit);
     }
     const cutoff = new Date();
     cutoff.setHours(0,0,0,0);
     cutoff.setMonth(cutoff.getMonth() - normalizedRange);
     const cutoffTime = cutoff.getTime();
     const filtered = sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
-    return limitChartSeries(filtered);
+    return limitChartSeries(filtered, limit);
   };
 
   const escapeTooltip = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
