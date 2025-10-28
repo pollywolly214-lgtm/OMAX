@@ -1184,6 +1184,62 @@ function viewCosts(model){
       </div>
     </div>
 
+    <div class="cost-timeframe-modal" id="costTimeframeModal" role="dialog" aria-modal="true" aria-labelledby="costTimeframeModalTitle" aria-hidden="true" hidden>
+      <div class="cost-timeframe-backdrop" data-timeframe-close tabindex="-1" aria-label="Close maintenance window details"></div>
+      <div class="cost-timeframe-card" role="document">
+        <button type="button" class="cost-timeframe-close" data-timeframe-close aria-label="Close maintenance window details"><span aria-hidden="true">×</span></button>
+        <div class="cost-timeframe-card-body">
+          <h3 class="cost-timeframe-title" id="costTimeframeModalTitle" data-timeframe-title>Maintenance window</h3>
+          <p class="cost-timeframe-range" data-timeframe-range></p>
+
+          <section class="cost-timeframe-section">
+            <h4>Actual maintenance spend</h4>
+            <p class="small muted" data-timeframe-actual-empty hidden>No maintenance spend recorded in this window.</p>
+            <div class="cost-timeframe-table-wrap" data-timeframe-actual-table hidden>
+              <table class="cost-timeframe-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Maintenance part</th>
+                    <th scope="col">Part #</th>
+                    <th scope="col">Date replaced</th>
+                    <th scope="col">Unit cost</th>
+                    <th scope="col">Qty</th>
+                    <th scope="col">Total</th>
+                  </tr>
+                </thead>
+                <tbody data-timeframe-actual-rows></tbody>
+              </table>
+              <div class="cost-timeframe-total">
+                <span>Total actual spend</span>
+                <strong data-timeframe-actual-total>$0</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="cost-timeframe-section">
+            <h4>Projected maintenance cost</h4>
+            <p class="small muted" data-timeframe-projection-empty hidden>Add pricing to maintenance tasks to project this window.</p>
+            <div class="cost-timeframe-table-wrap" data-timeframe-projection-table hidden>
+              <table class="cost-timeframe-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Item</th>
+                    <th scope="col">Basis</th>
+                    <th scope="col">Projected cost</th>
+                  </tr>
+                </thead>
+                <tbody data-timeframe-projection-rows></tbody>
+              </table>
+              <div class="cost-timeframe-total">
+                <span>Total projected cost</span>
+                <strong data-timeframe-projection-total>$0</strong>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
     <div class="dashboard-layout cost-layout" id="costLayout">
       <div class="dashboard-window" data-cost-window="overview">
         <div class="block cost-overview-block">
@@ -1279,7 +1335,7 @@ function viewCosts(model){
               <thead><tr><th>Window</th><th>Usage</th><th>Estimated spend</th><th>Projected next window</th></tr></thead>
               <tbody>
                 ${timeframeRows.map(row => `
-                  <tr>
+                  <tr class="cost-timeframe-row" data-cost-timeframe="${esc(row.key || "")}" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="costTimeframeModal" aria-label="View maintenance cost breakdown for ${esc(row.label || "this window")}">
                     <td>${esc(row.label || "")}</td>
                     <td>${esc(row.hoursLabel || "")}</td>
                     <td>${esc(row.costLabel || "")}</td>
