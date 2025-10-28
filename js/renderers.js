@@ -7541,6 +7541,8 @@ function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
 
+  const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+
   const model = computeCostModel();
   content.innerHTML = viewCosts(model);
   setAppSettingsContext("costs");
@@ -7550,6 +7552,255 @@ function renderCosts(){
   setupForecastBreakdownModal();
   setupTimeEfficiencyWidget(document.getElementById("costTimeEfficiency"));
   refreshTimeEfficiencyWidgets();
+  setupCostTimeframeModal(model);
+
+  function setupCostTimeframeModal(currentModel){
+    if (typeof window.__cleanupCostTimeframeModal === "function"){
+      try { window.__cleanupCostTimeframeModal(); }
+      catch (_err){}
+      window.__cleanupCostTimeframeModal = null;
+    }
+
+    const detailList = Array.isArray(currentModel?.timeframeDetails)
+      ? currentModel.timeframeDetails
+      : [];
+    const detailMap = new Map();
+    detailList.forEach(detail => {
+      if (!detail || detail.key == null) return;
+      detailMap.set(String(detail.key), detail);
+    });
+
+    const modal = document.getElementById("costTimeframeModal");
+    if (!modal) return;
+
+    const tableRows = Array.from(content.querySelectorAll("[data-cost-timeframe]"));
+    if (!tableRows.length){
+      modal.classList.remove("is-visible");
+      modal.setAttribute("aria-hidden", "true");
+      if (!modal.hasAttribute("hidden")) modal.setAttribute("hidden", "");
+      return;
+    }
+
+    const titleEl = modal.querySelector("[data-timeframe-title]");
+    const rangeEl = modal.querySelector("[data-timeframe-range]");
+    const actualTableWrap = modal.querySelector("[data-timeframe-actual-table]");
+    const actualBody = modal.querySelector("[data-timeframe-actual-rows]");
+    const actualEmpty = modal.querySelector("[data-timeframe-actual-empty]");
+    const actualTotal = modal.querySelector("[data-timeframe-actual-total]");
+    const projectionTableWrap = modal.querySelector("[data-timeframe-projection-table]");
+    const projectionBody = modal.querySelector("[data-timeframe-projection-rows]");
+    const projectionEmpty = modal.querySelector("[data-timeframe-projection-empty]");
+    const projectionTotal = modal.querySelector("[data-timeframe-projection-total]");
+    const closeControls = Array.from(modal.querySelectorAll("[data-timeframe-close]"));
+
+    let keyHandler = null;
+    let lastFocused = null;
+
+    const focusableSelector = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
+    const trapFocus = (event)=>{
+      const focusables = Array.from(modal.querySelectorAll(focusableSelector))
+        .filter(el => el instanceof HTMLElement && !el.hasAttribute("disabled") && el.offsetParent !== null);
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (event.shiftKey){
+        if (document.activeElement === first){
+          event.preventDefault();
+          last.focus();
+        }
+      }else{
+        if (document.activeElement === last){
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    const renderActualRows = (detail)=>{
+      const rows = Array.isArray(detail?.actualRows) ? detail.actualRows : [];
+      if (actualBody){
+        const html = rows.map(row => {
+          if (!row) return "";
+          const name = escapeHtml(row.name || "");
+          const note = row.note ? `<div class=\"cost-timeframe-note\">${escapeHtml(row.note)}</div>` : "";
+          const pn = row.pn ? escapeHtml(row.pn) : "—";
+          const date = escapeHtml(row.dateLabel || "—");
+          const unit = escapeHtml(row.unitLabel || "—");
+          const qty = escapeHtml(row.quantityLabel || "—");
+          const total = escapeHtml(row.totalLabel || "$0");
+          return `<tr><td>${name}${note}</td><td>${pn}</td><td>${date}</td><td>${unit}</td><td>${qty}</td><td>${total}</td></tr>`;
+        }).join("");
+        actualBody.innerHTML = html;
+      }
+      if (actualTableWrap){
+        if (rows.length) actualTableWrap.removeAttribute("hidden");
+        else actualTableWrap.setAttribute("hidden", "");
+      }
+      if (actualEmpty){
+        if (!rows.length){
+          const message = detail?.actualEmptyMessage || "No maintenance spend recorded in this window.";
+          actualEmpty.textContent = message;
+          actualEmpty.removeAttribute("hidden");
+        }else{
+          actualEmpty.setAttribute("hidden", "");
+        }
+      }
+      if (actualTotal){
+        actualTotal.textContent = detail?.actualTotalLabel || "$0";
+      }
+    };
+
+    const renderProjectionRows = (detail)=>{
+      const rows = Array.isArray(detail?.projectionRows) ? detail.projectionRows : [];
+      const hasItems = rows.some(row => row && row.type === "item");
+      if (projectionBody){
+        const html = rows.map(row => {
+          if (!row) return "";
+          if (row.type === "group"){
+            const label = escapeHtml(row.label || "");
+            return `<tr class=\"cost-timeframe-group\"><th scope=\"colgroup\" colspan=\"3\">${label}</th></tr>`;
+          }
+          const label = escapeHtml(row.label || "");
+          const basis = escapeHtml(row.basis || "—");
+          const amount = escapeHtml(row.amountLabel || "$0");
+          return `<tr><td>${label}</td><td>${basis}</td><td>${amount}</td></tr>`;
+        }).join("");
+        projectionBody.innerHTML = html;
+      }
+      if (projectionTableWrap){
+        if (hasItems) projectionTableWrap.removeAttribute("hidden");
+        else projectionTableWrap.setAttribute("hidden", "");
+      }
+      if (projectionEmpty){
+        if (!hasItems){
+          const message = detail?.projectionEmptyMessage || "Add pricing to maintenance tasks to project this window.";
+          projectionEmpty.textContent = message;
+          projectionEmpty.removeAttribute("hidden");
+        }else{
+          projectionEmpty.setAttribute("hidden", "");
+        }
+      }
+      if (projectionTotal){
+        projectionTotal.textContent = detail?.projectionTotalLabel || "$0";
+      }
+    };
+
+    const closeModal = ()=>{
+      modal.classList.remove("is-visible");
+      modal.setAttribute("aria-hidden", "true");
+      if (!modal.hasAttribute("hidden")) modal.setAttribute("hidden", "");
+      document.body.classList.remove("cost-timeframe-modal-open");
+      if (keyHandler){
+        document.removeEventListener("keydown", keyHandler);
+        keyHandler = null;
+      }
+      if (lastFocused && typeof lastFocused.focus === "function"){
+        try { lastFocused.focus({ preventScroll: true }); }
+        catch (_err){ lastFocused.focus(); }
+      }
+    };
+
+    const openModal = (detail)=>{
+      if (!detail) return;
+      lastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+      if (titleEl) titleEl.textContent = detail.label || "Maintenance window";
+      if (rangeEl){
+        const rangeText = detail.rangeLabel || "";
+        rangeEl.textContent = rangeText;
+        rangeEl.hidden = !rangeText;
+      }
+      renderActualRows(detail);
+      renderProjectionRows(detail);
+
+      modal.classList.add("is-visible");
+      modal.removeAttribute("hidden");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.classList.add("cost-timeframe-modal-open");
+
+      const focusTarget = closeControls.find(el => el instanceof HTMLElement) || modal;
+      requestAnimationFrame(() => {
+        if (focusTarget && typeof focusTarget.focus === "function"){
+          try { focusTarget.focus({ preventScroll: true }); }
+          catch (_err){ focusTarget.focus(); }
+        }
+      });
+
+      keyHandler = (event)=>{
+        if (event.key === "Escape"){
+          event.preventDefault();
+          closeModal();
+        }else if (event.key === "Tab"){
+          trapFocus(event);
+        }
+      };
+      document.addEventListener("keydown", keyHandler);
+    };
+
+    const cleanupFns = [];
+
+    const backdropClick = (event)=>{
+      const target = event.target;
+      if (target && target.hasAttribute && target.hasAttribute("data-timeframe-close")){
+        event.preventDefault();
+        closeModal();
+      }
+    };
+    modal.addEventListener("click", backdropClick);
+    cleanupFns.push(()=> modal.removeEventListener("click", backdropClick));
+
+    closeControls.forEach(control => {
+      if (!(control instanceof HTMLElement)) return;
+      const onClick = (event)=>{ event.preventDefault(); closeModal(); };
+      const onKey = (event)=>{
+        if (event.key === "Enter" || event.key === " "){
+          event.preventDefault();
+          closeModal();
+        }
+      };
+      control.addEventListener("click", onClick);
+      control.addEventListener("keydown", onKey);
+      cleanupFns.push(()=> control.removeEventListener("click", onClick));
+      cleanupFns.push(()=> control.removeEventListener("keydown", onKey));
+    });
+
+    tableRows.forEach(row => {
+      if (!(row instanceof HTMLElement)) return;
+      const key = row.getAttribute("data-cost-timeframe") || "";
+      const handleClick = (event)=>{
+        event.preventDefault();
+        const detail = detailMap.get(key);
+        if (detail) openModal(detail);
+      };
+      const handleKey = (event)=>{
+        if (event.key === "Enter" || event.key === " "){
+          event.preventDefault();
+          const detail = detailMap.get(key);
+          if (detail) openModal(detail);
+        }
+      };
+      row.addEventListener("click", handleClick);
+      row.addEventListener("keydown", handleKey);
+      cleanupFns.push(()=> row.removeEventListener("click", handleClick));
+      cleanupFns.push(()=> row.removeEventListener("keydown", handleKey));
+    });
+
+    cleanupFns.push(()=> {
+      if (keyHandler){
+        document.removeEventListener("keydown", keyHandler);
+        keyHandler = null;
+      }
+      document.body.classList.remove("cost-timeframe-modal-open");
+    });
+
+    window.__cleanupCostTimeframeModal = ()=>{
+      cleanupFns.splice(0).forEach(fn => {
+        try { fn(); }
+        catch (_err){}
+      });
+    };
+  }
 
   function getHistoryMessageState(){
     const existing = window.__costHistoryMessageState;
@@ -8426,7 +8677,23 @@ function computeCostModel(){
       if (!approved) return;
       const amount = orderItemLineTotal(item);
       if (!isFinite(amount) || amount <= 0) return;
-      maintenanceOrderItems.push({ amount, time: resolvedTime });
+      const unitPrice = Number(item.price);
+      const qtyRaw = Number(item.qty);
+      const resolvedISO = resolved instanceof Date && !Number.isNaN(resolved.getTime())
+        ? resolved.toISOString()
+        : null;
+      maintenanceOrderItems.push({
+        amount,
+        time: resolvedTime,
+        resolvedAt: resolved,
+        resolvedISO,
+        name: item.name || "",
+        pn: item.pn || "",
+        unitPrice: Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice : null,
+        qty: Number.isFinite(qtyRaw) && qtyRaw > 0 ? qtyRaw : null,
+        requestCode: typeof req.code === "string" ? req.code : "",
+        requestId: req.id != null ? String(req.id) : null
+      });
     });
   });
 
@@ -8613,7 +8880,11 @@ function computeCostModel(){
     if (templateMetaById.has(id)) return;
     const mode = task.mode === "asreq" ? "asreq" : "interval";
     const name = task.name || "Maintenance task";
-    templateMetaById.set(id, { id, mode, name });
+    const priceRaw = Number(task?.price);
+    const unitPrice = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw : null;
+    const pnRaw = typeof task?.pn === "string" ? task.pn.trim() : "";
+    const partNumber = pnRaw ? pnRaw : null;
+    templateMetaById.set(id, { id, mode, name, price: unitPrice, pn: partNumber });
   };
 
   if (Array.isArray(tasksInterval)){
@@ -8699,13 +8970,37 @@ function computeCostModel(){
       if (exists) templateMetaById.set(targetId, templateMeta);
     }
 
+    const priceFromTask = Number(task?.price);
+    const priceFromMeta = Number(templateMeta?.price);
+    const unitPrice = Number.isFinite(priceFromTask) && priceFromTask > 0
+      ? priceFromTask
+      : (Number.isFinite(priceFromMeta) && priceFromMeta > 0 ? priceFromMeta : null);
+    const pnFromTask = typeof task?.pn === "string" ? task.pn.trim() : "";
+    const pnFromMeta = typeof templateMeta?.pn === "string" ? templateMeta.pn : "";
+    const partNumber = pnFromTask || pnFromMeta || null;
+
+    if (templateMeta && exists){
+      let updated = false;
+      if (unitPrice != null && templateMeta.price == null){
+        templateMeta.price = unitPrice;
+        updated = true;
+      }
+      if (partNumber && !templateMeta.pn){
+        templateMeta.pn = partNumber;
+        updated = true;
+      }
+      if (updated) templateMetaById.set(targetId, templateMeta);
+    }
+
     const baseInfo = {
       id: targetId,
       originalId: targetId,
       mode: templateMeta.mode,
       name: templateMeta.name,
       exists: Boolean(exists),
-      trashId: trashId != null ? String(trashId) : null
+      trashId: trashId != null ? String(trashId) : null,
+      unitPrice,
+      partNumber
     };
 
     const pushHistory = (sourceTask)=>{
@@ -9032,7 +9327,9 @@ function computeCostModel(){
       annualTotalLabel: hasPrice
         ? formatterCurrency(annualCost, { decimals: annualCost < 1000 ? 2 : 0 })
         : "—",
-      annualCost
+      annualCost,
+      partNumber: typeof task?.pn === "string" ? task.pn : "",
+      unitPrice: hasPrice ? price : null
     };
   });
 
@@ -9082,7 +9379,9 @@ function computeCostModel(){
       annualTotalLabel: hasPrice
         ? formatterCurrency(annualCost, { decimals: annualCost < 1000 ? 2 : 0 })
         : "—",
-      annualCost
+      annualCost,
+      partNumber: typeof task?.pn === "string" ? task.pn : "",
+      unitPrice: hasPrice ? price : null
     };
   });
 
@@ -9131,6 +9430,256 @@ function computeCostModel(){
       combinedLabel: formatTotalLabel(combinedForecastTotal)
     }
   };
+
+  const formatDateLabelShort = (value)=>{
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "—";
+    return value.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  };
+
+  const formatRangeLabel = (start, end)=>{
+    const hasStart = start instanceof Date && !Number.isNaN(start.getTime());
+    const hasEnd = end instanceof Date && !Number.isNaN(end.getTime());
+    if (hasStart && hasEnd){
+      return `${formatDateLabelShort(start)} – ${formatDateLabelShort(end)}`;
+    }
+    if (hasStart) return formatDateLabelShort(start);
+    if (hasEnd) return formatDateLabelShort(end);
+    return "Selected window";
+  };
+
+  const timeframeDetails = timeframeRowsRaw.map((row, rowIndex) => {
+    const windowEnd = new Date();
+    windowEnd.setHours(0, 0, 0, 0);
+    const windowStart = new Date(windowEnd);
+    const days = Number(row?.days) || 0;
+    if (days > 0){
+      windowStart.setDate(windowStart.getDate() - days);
+    }
+    const startTime = windowStart.getTime();
+    const endTime = windowEnd.getTime();
+
+    const actualRows = [];
+    let actualTotalRaw = 0;
+    const addActualRow = (info)=>{
+      if (!info) return;
+      actualRows.push(info);
+      if (Number.isFinite(info.totalValue)) actualTotalRaw += Number(info.totalValue);
+    };
+
+    maintenanceOrderItems.forEach((item, index) => {
+      if (!item) return;
+      const time = Number(item.time);
+      if (!Number.isFinite(time)) return;
+      if (time < startTime || time > endTime) return;
+      const total = Number(item.amount) || 0;
+      if (total <= 0) return;
+      const unitPrice = Number(item.unitPrice);
+      const qty = Number(item.qty);
+      const quantityLabel = Number.isFinite(qty) && qty > 0
+        ? qty.toLocaleString()
+        : "—";
+      const noteLabel = item.requestCode
+        ? `Order ${item.requestCode}`
+        : "Approved maintenance order";
+      addActualRow({
+        key: `order_${row.key}_${index}`,
+        name: item.name || "Maintenance part",
+        pn: item.pn || "",
+        dateLabel: formatDateLabelShort(item.resolvedAt instanceof Date ? item.resolvedAt : new Date(item.resolvedISO || time)),
+        dateISO: item.resolvedISO || null,
+        unitLabel: Number.isFinite(unitPrice) && unitPrice > 0
+          ? formatterCurrency(unitPrice, { decimals: unitPrice < 1000 ? 2 : 0 })
+          : "—",
+        quantityLabel,
+        totalLabel: formatterCurrency(total, { decimals: total < 1000 ? 2 : 0 }),
+        totalValue: total,
+        note: noteLabel,
+        sortTime: time
+      });
+    });
+
+    maintenanceHistory.forEach((entry, entryIndex) => {
+      if (!entry || !(entry.date instanceof Date) || Number.isNaN(entry.date.getTime())) return;
+      const entryTime = entry.date.getTime();
+      if (entryTime < startTime || entryTime > endTime) return;
+      const entryCost = Number(entry.cost) || 0;
+      if (entryCost <= 0) return;
+      const tasks = Array.isArray(entry.tasks) ? entry.tasks.filter(Boolean) : [];
+      if (tasks.length){
+        const pricedTotal = tasks.reduce((sum, task) => {
+          const price = Number(task?.unitPrice);
+          return sum + (Number.isFinite(price) && price > 0 ? price : 0);
+        }, 0);
+        const fallbackShare = 1 / tasks.length;
+        tasks.forEach((task, taskIndex) => {
+          const unitPrice = Number(task?.unitPrice);
+          const share = (pricedTotal > 0 && Number.isFinite(unitPrice) && unitPrice > 0)
+            ? unitPrice / pricedTotal
+            : fallbackShare;
+          const allocation = entryCost * share;
+          const safeAllocation = allocation > 0 ? allocation : 0;
+          const noteLabel = task && task.exists === false
+            ? "Estimated cost allocation (restore task to validate)"
+            : "Estimated cost allocation from logged machine hours";
+          addActualRow({
+            key: `usage_${row.key}_${entryIndex}_${taskIndex}`,
+            name: task?.name || (task?.mode === "asreq" ? "As-required task" : "Interval task"),
+            pn: task?.partNumber || "",
+            dateLabel: formatDateLabelShort(entry.date),
+            dateISO: entry.dateISO || null,
+            unitLabel: Number.isFinite(unitPrice) && unitPrice > 0
+              ? formatterCurrency(unitPrice, { decimals: unitPrice < 1000 ? 2 : 0 })
+              : "—",
+            quantityLabel: "—",
+            totalLabel: formatterCurrency(safeAllocation, { decimals: safeAllocation < 1000 ? 2 : 0 }),
+            totalValue: safeAllocation,
+            note: noteLabel,
+            sortTime: entryTime + (taskIndex / 1000)
+          });
+        });
+      }else{
+        const safeAllocation = entryCost > 0 ? entryCost : 0;
+        addActualRow({
+          key: `usage_${row.key}_${entryIndex}`,
+          name: "Maintenance allocation",
+          pn: "",
+          dateLabel: formatDateLabelShort(entry.date),
+          dateISO: entry.dateISO || null,
+          unitLabel: formatterCurrency(safeAllocation, { decimals: safeAllocation < 1000 ? 2 : 0 }),
+          quantityLabel: "—",
+          totalLabel: formatterCurrency(safeAllocation, { decimals: safeAllocation < 1000 ? 2 : 0 }),
+          totalValue: safeAllocation,
+          note: "Estimated cost allocation from logged machine hours",
+          sortTime: entryTime
+        });
+      }
+    });
+
+    let targetActual = Number(row.costActual);
+    if (!Number.isFinite(targetActual)) targetActual = actualRows.length ? actualTotalRaw : 0;
+    if (!Number.isFinite(targetActual) || targetActual < 0) targetActual = 0;
+    const diffActual = targetActual - actualTotalRaw;
+    if (actualRows.length && Math.abs(diffActual) >= 0.01){
+      const last = actualRows[actualRows.length - 1];
+      const updated = (Number(last.totalValue) || 0) + diffActual;
+      last.totalValue = updated;
+      last.totalLabel = formatterCurrency(updated, { decimals: Math.abs(updated) < 1000 ? 2 : 0 });
+      actualTotalRaw += diffActual;
+    }
+    if (actualRows.length) actualTotalRaw = targetActual;
+
+    const actualRowsFormatted = actualRows
+      .sort((a, b) => Number(b.sortTime || 0) - Number(a.sortTime || 0))
+      .map(({ sortTime, ...rest }) => rest);
+
+    const windowFraction = days > 0 ? days / 365 : 0;
+    const projectionRows = [];
+    const intervalProjectionRows = [];
+    intervalTaskRowsRaw.forEach((item, index) => {
+      const annualCost = Number(item?.annualCost) || 0;
+      if (annualCost <= 0 || windowFraction <= 0) return;
+      const projected = annualCost * windowFraction;
+      if (projected <= 0) return;
+      const unitPrice = Number(item?.unitPrice);
+      let basis = item?.cadenceLabel && item.cadenceLabel !== "—"
+        ? item.cadenceLabel
+        : "Interval task";
+      if (Number.isFinite(unitPrice) && unitPrice > 0){
+        const occurrences = projected / unitPrice;
+        if (occurrences > 0){
+          const decimals = occurrences >= 10 ? 0 : 1;
+          const rounded = Number(occurrences.toFixed(decimals));
+          const countLabel = rounded.toLocaleString(undefined, {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals
+          });
+          basis = basis
+            ? `${basis} · ~${countLabel} service${Math.abs(rounded - 1) < 1e-6 ? "" : "s"}`
+            : `~${countLabel} services`;
+        }
+      }
+      intervalProjectionRows.push({
+        type: "item",
+        key: item?.key || `interval_${rowIndex}_${index}`,
+        label: item?.name || `Interval task ${index + 1}`,
+        basis,
+        amountLabel: formatterCurrency(projected, { decimals: projected < 1000 ? 2 : 0 })
+      });
+    });
+    if (intervalProjectionRows.length){
+      projectionRows.push({ type: "group", label: "Interval tasks" });
+      projectionRows.push(...intervalProjectionRows);
+    }else if (row.intervalProjected > 0){
+      const amount = row.intervalProjected;
+      projectionRows.push({ type: "group", label: "Interval maintenance" });
+      projectionRows.push({
+        type: "item",
+        key: `interval_total_${row.key}`,
+        label: "Interval allocation",
+        basis: "Based on logged machine hours",
+        amountLabel: formatterCurrency(amount, { decimals: amount < 1000 ? 2 : 0 })
+      });
+    }
+
+    const asReqProjectionRows = [];
+    asReqTaskRowsRaw.forEach((item, index) => {
+      const annualCost = Number(item?.annualCost) || 0;
+      if (annualCost <= 0 || windowFraction <= 0) return;
+      const projected = annualCost * windowFraction;
+      if (projected <= 0) return;
+      const unitPrice = Number(item?.unitPrice);
+      let basis = item?.cadenceLabel || "As-required task";
+      if (Number.isFinite(unitPrice) && unitPrice > 0){
+        const occurrences = projected / unitPrice;
+        if (occurrences > 0){
+          const decimals = occurrences >= 10 ? 0 : 1;
+          const rounded = Number(occurrences.toFixed(decimals));
+          const countLabel = rounded.toLocaleString(undefined, {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals
+          });
+          basis = basis
+            ? `${basis} · ~${countLabel} service${Math.abs(rounded - 1) < 1e-6 ? "" : "s"}`
+            : `~${countLabel} services`;
+        }
+      }
+      asReqProjectionRows.push({
+        type: "item",
+        key: item?.key || `asreq_${rowIndex}_${index}`,
+        label: item?.name || `As-required task ${index + 1}`,
+        basis,
+        amountLabel: formatterCurrency(projected, { decimals: projected < 1000 ? 2 : 0 })
+      });
+    });
+    if (asReqProjectionRows.length){
+      projectionRows.push({ type: "group", label: "As-required tasks" });
+      projectionRows.push(...asReqProjectionRows);
+    }else if (row.asReqProjected > 0){
+      const amount = row.asReqProjected;
+      projectionRows.push({ type: "group", label: "As-required maintenance" });
+      projectionRows.push({
+        type: "item",
+        key: `asreq_total_${row.key}`,
+        label: "Approved maintenance orders",
+        basis: "Scaled from approved maintenance orders in the past 12 months",
+        amountLabel: formatterCurrency(amount, { decimals: amount < 1000 ? 2 : 0 })
+      });
+    }
+
+    const projectionHasItems = projectionRows.some(entry => entry && entry.type === "item");
+
+    return {
+      key: row.key,
+      label: row.label,
+      rangeLabel: formatRangeLabel(windowStart, windowEnd),
+      actualRows: actualRowsFormatted,
+      actualTotalLabel: formatterCurrency(targetActual, { decimals: targetActual < 1000 ? 2 : 0 }),
+      actualEmptyMessage: actualRowsFormatted.length ? "" : "No maintenance spend recorded in this window.",
+      projectionRows,
+      projectionTotalLabel: formatterCurrency(row.costProjected, { decimals: row.costProjected < 1000 ? 2 : 0 }),
+      projectionEmptyMessage: projectionHasItems ? "" : "Add pricing to maintenance tasks to project this window."
+    };
+  });
 
   const historyRows = maintenanceHistory.slice(-6).reverse().map(entry => {
     const tasks = Array.isArray(entry.tasks) ? entry.tasks.filter(Boolean) : [];
@@ -9306,6 +9855,7 @@ function computeCostModel(){
   return {
     summaryCards,
     timeframeRows,
+    timeframeDetails,
     forecastBreakdown,
     timeframeNote,
     historyRows,
