@@ -8190,29 +8190,49 @@ function renderCosts(){
   };
 
   const filterChartSeriesByRange = (points, rangeValue)=>{
-    if (!Array.isArray(points)) return [];
+    if (!Array.isArray(points)){
+      return { points: [], domainStart: null, domainEnd: null };
+    }
     const normalizedRange = normalizeChartRange(rangeValue);
-    const sanitized = points.filter(pt => pt && pt.date instanceof Date && !Number.isNaN(pt.date.getTime()));
-    if (!sanitized.length) return [];
+    const sanitized = points
+      .filter(pt => pt && pt.date instanceof Date && !Number.isNaN(pt.date.getTime()))
+      .sort((a, b) => a.date - b.date);
+    if (!sanitized.length){
+      return { points: [], domainStart: null, domainEnd: null };
+    }
+
     const approximateDaysPerMonth = 31;
     const limit = Math.max(180, Math.ceil(normalizedRange * approximateDaysPerMonth));
-    if (!allowedChartRanges.includes(normalizedRange)){
-      return limitChartSeries(sanitized, limit);
-    }
-    let latestTime = sanitized[0].date.getTime();
-    for (let i = 1; i < sanitized.length; i++){
-      const time = sanitized[i].date.getTime();
-      if (time > latestTime){
-        latestTime = time;
-      }
-    }
+
+    const latestPoint = sanitized[sanitized.length - 1];
+    const latestTime = latestPoint.date.getTime();
     const cutoff = new Date(latestTime);
-    cutoff.setHours(0,0,0,0);
+    cutoff.setHours(0, 0, 0, 0);
     cutoff.setMonth(cutoff.getMonth() - normalizedRange);
     const cutoffTime = cutoff.getTime();
-    const filtered = sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
-    const bounded = filtered.length ? filtered : sanitized;
-    return limitChartSeries(bounded, limit);
+
+    let filtered = sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
+
+    if (!filtered.length){
+      const fallback = sanitized[sanitized.length - 1];
+      const fallbackValue = fallback ? Number(fallback.value) : null;
+      if (fallback && Number.isFinite(fallbackValue)){
+        const endPoint = { ...fallback, date: new Date(latestTime), value: fallbackValue };
+        const startPoint = { ...endPoint, date: new Date(cutoffTime) };
+        filtered = [startPoint, endPoint];
+      }
+    }
+
+    const limited = limitChartSeries(filtered, limit);
+    if (!allowedChartRanges.includes(normalizedRange)){
+      return { points: limited, domainStart: null, domainEnd: null };
+    }
+
+    return {
+      points: limited,
+      domainStart: cutoffTime,
+      domainEnd: latestTime
+    };
   };
 
   const escapeTooltip = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
@@ -8373,10 +8393,23 @@ function renderCosts(){
 
   const redraw = ()=>{
     const { months } = getChartRangeState();
+    const maintenanceRange = filterChartSeriesByRange(maintenanceSeriesBase, months);
+    const jobRange = filterChartSeriesByRange(jobSeriesBase, months);
+
+    const domainStarts = [maintenanceRange.domainStart, jobRange.domainStart]
+      .map(value => Number.isFinite(value) ? Number(value) : null)
+      .filter(value => value != null);
+    const domainEnds = [maintenanceRange.domainEnd, jobRange.domainEnd]
+      .map(value => Number.isFinite(value) ? Number(value) : null)
+      .filter(value => value != null);
+
     const chartModel = {
       ...model,
-      maintenanceSeries: filterChartSeriesByRange(maintenanceSeriesBase, months),
-      jobSeries: filterChartSeriesByRange(jobSeriesBase, months)
+      maintenanceSeries: maintenanceRange.points,
+      jobSeries: jobRange.points,
+      chartDomain: (domainStarts.length && domainEnds.length)
+        ? { start: Math.min(...domainStarts), end: Math.max(...domainEnds) }
+        : null
     };
     updateChartRangeButtons();
     if (canvas){
@@ -9472,8 +9505,17 @@ function drawCostChart(canvas, model, show){
     return;
   }
 
+  const domainStart = model && model.chartDomain ? Number(model.chartDomain.start) : null;
+  const domainEnd = model && model.chartDomain ? Number(model.chartDomain.end) : null;
+
   let xMin = Math.min(...xs);
   let xMax = Math.max(...xs);
+
+  if (Number.isFinite(domainStart) && Number.isFinite(domainEnd) && domainEnd > domainStart){
+    xMin = domainStart;
+    xMax = domainEnd;
+  }
+
   if (xMax === xMin){
     xMin -= 24*60*60*1000;
     xMax += 24*60*60*1000;
