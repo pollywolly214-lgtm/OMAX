@@ -3,17 +3,23 @@ if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 const pendingNewJobFiles = window.pendingNewJobFiles;
 if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
 const orderPartialSelection = window.orderPartialSelection;
-const WORKSPACE_SCOPE_EVERYTHING = "everything";
-const WORKSPACE_SCOPE_TASKS_JOBS = "tasks-jobs";
-const WORKSPACE_SCOPE_TRACKING = "tracking";
+const SCOPE_EVERYTHING = (typeof WORKSPACE_SCOPE_EVERYTHING !== "undefined")
+  ? WORKSPACE_SCOPE_EVERYTHING
+  : "everything";
+const SCOPE_TASKS_JOBS = (typeof WORKSPACE_SCOPE_TASKS_JOBS !== "undefined")
+  ? WORKSPACE_SCOPE_TASKS_JOBS
+  : "tasks-jobs";
+const SCOPE_TRACKING = (typeof WORKSPACE_SCOPE_TRACKING !== "undefined")
+  ? WORKSPACE_SCOPE_TRACKING
+  : "tracking";
 
 function describeWorkspaceScope(scope){
   if (typeof window !== "undefined" && typeof window.describeWorkspaceScopeMeta === "function"){
     return window.describeWorkspaceScopeMeta(scope);
   }
   const key = typeof scope === "string" ? scope.toLowerCase() : "";
-  if (key === WORKSPACE_SCOPE_TASKS_JOBS || key === "tasks" || key === "jobs") return "Tasks & jobs";
-  if (key === WORKSPACE_SCOPE_TRACKING || key === "data" || key === "tracking") return "Waterjet tracking data";
+  if (key === SCOPE_TASKS_JOBS || key === "tasks" || key === "jobs") return "Tasks & jobs";
+  if (key === SCOPE_TRACKING || key === "data" || key === "tracking") return "Waterjet tracking data";
   return "Full site";
 }
 const timeEfficiencyWidgets = [];
@@ -1275,7 +1281,7 @@ async function promptClearAllData(trigger){
         confirmVariant: "danger",
         cancelText: "Tasks & jobs only"
       });
-      return includeTracking ? WORKSPACE_SCOPE_EVERYTHING : WORKSPACE_SCOPE_TASKS_JOBS;
+      return includeTracking ? SCOPE_EVERYTHING : SCOPE_TASKS_JOBS;
     }
     if (choice === "secondary"){
       const includeTasks = await showConfirmModal({
@@ -1285,7 +1291,7 @@ async function promptClearAllData(trigger){
         confirmVariant: "danger",
         cancelText: "Tracking data only"
       });
-      return includeTasks ? WORKSPACE_SCOPE_EVERYTHING : WORKSPACE_SCOPE_TRACKING;
+      return includeTasks ? SCOPE_EVERYTHING : SCOPE_TRACKING;
     }
     return null;
   };
@@ -1294,9 +1300,9 @@ async function promptClearAllData(trigger){
   if (!scope) return;
 
   let confirmMessage = "";
-  if (scope === WORKSPACE_SCOPE_EVERYTHING){
+  if (scope === SCOPE_EVERYTHING){
     confirmMessage = "This will erase maintenance tasks, jobs, orders, inventory history, and waterjet tracking data for every user. This cannot be undone without a site restore.";
-  } else if (scope === WORKSPACE_SCOPE_TASKS_JOBS){
+  } else if (scope === SCOPE_TASKS_JOBS){
     confirmMessage = "This will delete every maintenance task and cutting job for every user. Waterjet tracking data will remain in place.";
   } else {
     confirmMessage = "This will delete all waterjet tracking data (efficiency metrics, pump logs, and machine hours) for every user. Maintenance tasks and jobs will remain.";
@@ -1321,7 +1327,7 @@ async function promptClearAllData(trigger){
   try {
     await handler({ scope });
     const scopeLabel = describeWorkspaceScope(scope);
-    if (scope === WORKSPACE_SCOPE_EVERYTHING){
+    if (scope === SCOPE_EVERYTHING){
       toast("Workspace reset to defaults.");
     } else {
       toast(`${scopeLabel} cleared.`);
@@ -12501,7 +12507,7 @@ function renderDeletedItems(options){
               : "Workspace snapshot (Before site restore)";
             recordDeletedItem("workspace", snapshotWorkspaceForTrash(), {
               reason: "pre-restore",
-              scope: WORKSPACE_SCOPE_EVERYTHING,
+              scope: SCOPE_EVERYTHING,
               relatedId: entry.id,
               relatedLabel: entry.label || null,
               relatedScope: entry.meta && entry.meta.scope ? entry.meta.scope : null,
