@@ -1103,6 +1103,7 @@ if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
 if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+if (!Array.isArray(window.opportunityRollups)) window.opportunityRollups = [];
 if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
@@ -1118,6 +1119,7 @@ let tasksAsReq    = window.tasksAsReq;
 let inventory     = window.inventory;
 let cuttingJobs   = window.cuttingJobs;
 let completedCuttingJobs = window.completedCuttingJobs;
+let opportunityRollups = window.opportunityRollups;
 let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
@@ -1263,6 +1265,9 @@ function snapshotState(){
     garnetCleanings,
     dailyCutHours: Array.isArray(dailyCutHours)
       ? dailyCutHours.map(entry => ({ ...entry }))
+      : [],
+    opportunityRollups: Array.isArray(window.opportunityRollups)
+      ? window.opportunityRollups.map(entry => ({ ...entry }))
       : [],
     pumpEff: safePumpEff,
     deletedItems: trashSnapshot,
@@ -1677,6 +1682,7 @@ function adoptState(doc){
   }
   garnetCleanings = Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [];
   dailyCutHours = normalizeDailyCutHours(Array.isArray(data.dailyCutHours) ? data.dailyCutHours : []);
+  opportunityRollups = Array.isArray(data.opportunityRollups) ? data.opportunityRollups : [];
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -1687,6 +1693,7 @@ function adoptState(doc){
   window.orderRequests = orderRequests;
   window.garnetCleanings = garnetCleanings;
   window.dailyCutHours = dailyCutHours;
+  window.opportunityRollups = opportunityRollups;
   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
   window.deletedItems = deletedItems;
   purgeExpiredDeletedItems();
@@ -1840,6 +1847,14 @@ function adoptState(doc){
   ensureTaskCategories();
   ensureJobCategories();
   syncRenderTotalsFromHistory();
+
+  if (typeof window.scheduleOpportunityRecompute === "function"){
+    try {
+      window.scheduleOpportunityRecompute();
+    } catch (err) {
+      console.warn("Failed to schedule opportunity recompute", err);
+    }
+  }
 }
 
 
@@ -1883,6 +1898,7 @@ async function loadFromCloud(){
           orderRequests: Array.isArray(data.orderRequests) ? normalizeOrderRequests(data.orderRequests) : [createOrderRequest()],
           orderRequestTab: typeof data.orderRequestTab === "string" ? data.orderRequestTab : "active",
           dailyCutHours: Array.isArray(data.dailyCutHours) ? normalizeDailyCutHours(data.dailyCutHours) : [],
+          opportunityRollups: Array.isArray(data.opportunityRollups) ? data.opportunityRollups : [],
           settingsFolders: seededFoldersPayload,
           folders: cloneFolders(seededFoldersPayload),
           jobFolders: defaultJobFolders(),
@@ -1942,6 +1958,7 @@ async function loadFromCloud(){
         orderRequests: [createOrderRequest()],
         orderRequestTab: "active",
         dailyCutHours: [],
+        opportunityRollups: [],
         jobFolders: defaultJobFolders(),
         pumpEff: pe,
         settingsFolders: defaultFolders,
@@ -2069,6 +2086,7 @@ const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes
     orderRequests: [createOrderRequest()],
     orderRequestTab: "active",
     dailyCutHours: [],
+    opportunityRollups: [],
     garnetCleanings: [],
     pumpEff: { ...pumpDefaults },
     deletedItems: [],

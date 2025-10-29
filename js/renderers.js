@@ -7588,6 +7588,7 @@ function renderCosts(){
   setupTimeEfficiencyWidget(document.getElementById("costTimeEfficiency"));
   refreshTimeEfficiencyWidgets();
   setupCostTimeframeModal(model);
+  setupMaintenanceTaskCostToggles(model);
 
   function setupCostTimeframeModal(currentModel){
     if (typeof window.__cleanupCostTimeframeModal === "function"){
@@ -7830,6 +7831,98 @@ function renderCosts(){
     });
 
     window.__cleanupCostTimeframeModal = ()=>{
+      cleanupFns.splice(0).forEach(fn => {
+        try { fn(); }
+        catch (_err){}
+      });
+    };
+  }
+
+  function setupMaintenanceTaskCostToggles(currentModel){
+    if (typeof window.__cleanupMaintenanceTaskToggles === "function"){
+      try { window.__cleanupMaintenanceTaskToggles(); }
+      catch (_err){}
+      window.__cleanupMaintenanceTaskToggles = null;
+    }
+
+    const windows = Array.isArray(currentModel?.maintenanceTaskCostWindows)
+      ? currentModel.maintenanceTaskCostWindows
+      : [];
+    const container = content.querySelector("[data-maint-cost]");
+    if (!container || !windows.length) return;
+
+    const windowMap = new Map();
+    windows.forEach(win => {
+      if (!win || win.key == null) return;
+      windowMap.set(String(win.key), win);
+    });
+
+    const panels = new Map();
+    Array.from(container.querySelectorAll("[data-maint-panel]")).forEach(panel => {
+      if (!(panel instanceof HTMLElement)) return;
+      const key = panel.getAttribute("data-maint-panel");
+      if (!key) return;
+      panels.set(key, panel);
+    });
+
+    const buttons = Array.from(container.querySelectorAll("[data-maint-cost-toggle]"))
+      .filter(btn => btn instanceof HTMLElement);
+    if (!buttons.length) return;
+
+    const summaryCount = container.querySelector("[data-maint-summary-count]");
+    const summaryParts = container.querySelector("[data-maint-summary-parts]");
+    const summaryTime = container.querySelector("[data-maint-summary-time]");
+    const summaryTotal = container.querySelector("[data-maint-summary-total]");
+
+    const updateSummary = (key)=>{
+      const win = windowMap.get(key) || null;
+      const summary = win && win.summary ? win.summary : {};
+      if (summaryCount) summaryCount.textContent = summary.countLabel || "0";
+      if (summaryParts) summaryParts.textContent = summary.partsLabel || "$0.00";
+      if (summaryTime) summaryTime.textContent = summary.timeLabel || "$0.00";
+      if (summaryTotal) summaryTotal.textContent = summary.totalLabel || "$0.00";
+    };
+
+    const activate = (key)=>{
+      if (!key) return;
+      buttons.forEach(btn => {
+        const btnKey = btn.getAttribute("data-maint-cost-toggle") || "";
+        const isActive = btnKey === key;
+        if (isActive) btn.classList.add("is-active");
+        else btn.classList.remove("is-active");
+        btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+      panels.forEach((panel, panelKey) => {
+        if (panelKey === key) panel.removeAttribute("hidden");
+        else panel.setAttribute("hidden", "");
+      });
+      updateSummary(key);
+    };
+
+    const cleanupFns = [];
+    buttons.forEach(btn => {
+      const key = btn.getAttribute("data-maint-cost-toggle");
+      if (!key) return;
+      const onClick = (event)=>{ event.preventDefault(); activate(key); };
+      const onKey = (event)=>{
+        if (event.key === "Enter" || event.key === " "){
+          event.preventDefault();
+          activate(key);
+        }
+      };
+      btn.addEventListener("click", onClick);
+      btn.addEventListener("keydown", onKey);
+      cleanupFns.push(()=>{
+        btn.removeEventListener("click", onClick);
+        btn.removeEventListener("keydown", onKey);
+      });
+    });
+
+    const defaultKey = buttons.find(btn => btn.classList.contains("is-active"))?.getAttribute("data-maint-cost-toggle")
+      || (buttons[0] && buttons[0].getAttribute("data-maint-cost-toggle"));
+    if (defaultKey) activate(defaultKey);
+
+    window.__cleanupMaintenanceTaskToggles = ()=>{
       cleanupFns.splice(0).forEach(fn => {
         try { fn(); }
         catch (_err){}
@@ -8767,6 +8860,81 @@ function computeCostModel(){
     return `${datePart}__${String(entry.hours || "")}`;
   };
 
+  const readAppSetting = (key, fallback)=>{
+    try {
+      const sources = [window.__APP_SETTINGS__, window.APP_SETTINGS, window.appSettings];
+      for (const source of sources){
+        if (!source || typeof source !== "object") continue;
+        if (Object.prototype.hasOwnProperty.call(source, key)){
+          const value = source[key];
+          return value === undefined || value === null ? fallback : value;
+        }
+      }
+    } catch (_err){}
+    return fallback;
+  };
+
+  const maintenanceDurationSettingsRaw = readAppSetting("MAINTENANCE_TASK_DURATIONS_HOURS", {});
+  const maintenanceDurationSettings = (maintenanceDurationSettingsRaw && typeof maintenanceDurationSettingsRaw === "object")
+    ? maintenanceDurationSettingsRaw
+    : {};
+  const defaultMinMaintenanceHoursRaw = readAppSetting("DEFAULT_MIN_MAINT_HOURS", null);
+  const defaultMinMaintenanceHours = Number.isFinite(Number(defaultMinMaintenanceHoursRaw)) && Number(defaultMinMaintenanceHoursRaw) > 0
+    ? Number(defaultMinMaintenanceHoursRaw)
+    : 1;
+
+  const readOpportunityRate = ()=>{
+    try {
+      if (typeof window.getOpportunityLossRate === "function"){
+        const rate = Number(window.getOpportunityLossRate());
+        if (Number.isFinite(rate) && rate >= 0) return rate;
+      }
+    } catch (_err){}
+    const configured = readAppSetting("BILL_RATE_OPP", 150);
+    const rateNum = Number(configured);
+    return Number.isFinite(rateNum) && rateNum >= 0 ? rateNum : 150;
+  };
+
+  const opportunityLossRate = readOpportunityRate();
+
+  const resolveTaskDowntimeHours = (task)=>{
+    if (!task) return null;
+    try {
+      if (typeof window.readTaskDowntimeHours === "function"){
+        const val = window.readTaskDowntimeHours(task);
+        if (Number.isFinite(val) && val > 0) return val;
+      }
+    } catch (err){
+      console.warn("readTaskDowntimeHours failed", err);
+    }
+    const directKeys = ["downtimeHours", "downTime", "downtime", "laborHours"];
+    for (const key of directKeys){
+      const raw = Number(task && task[key]);
+      if (Number.isFinite(raw) && raw > 0) return raw;
+    }
+    const candidates = [];
+    if (task && task.templateId != null) candidates.push(String(task.templateId));
+    if (task && task.id != null) candidates.push(String(task.id));
+    if (task && typeof task.taskType === "string") candidates.push(task.taskType);
+    if (task && typeof task.type === "string") candidates.push(task.type);
+    if (task && typeof task.name === "string") candidates.push(task.name.trim());
+    for (const candidate of candidates){
+      if (!candidate) continue;
+      const key = String(candidate);
+      const direct = maintenanceDurationSettings && Object.prototype.hasOwnProperty.call(maintenanceDurationSettings, key)
+        ? maintenanceDurationSettings[key]
+        : undefined;
+      const directNum = Number(direct);
+      if (Number.isFinite(directNum) && directNum > 0) return directNum;
+      const lowerKey = key.toLowerCase();
+      if (lowerKey !== key && maintenanceDurationSettings && Object.prototype.hasOwnProperty.call(maintenanceDurationSettings, lowerKey)){
+        const lowerVal = Number(maintenanceDurationSettings[lowerKey]);
+        if (Number.isFinite(lowerVal) && lowerVal > 0) return lowerVal;
+      }
+    }
+    return null;
+  };
+
   const currentHours = (typeof RENDER_TOTAL === "number" && isFinite(RENDER_TOTAL))
     ? Number(RENDER_TOTAL)
     : (typeof currentTotal === "function" ? Number(currentTotal() || 0) : 0);
@@ -9049,7 +9217,9 @@ function computeCostModel(){
     const unitPrice = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw : null;
     const pnRaw = typeof task?.pn === "string" ? task.pn.trim() : "";
     const partNumber = pnRaw ? pnRaw : null;
-    templateMetaById.set(id, { id, mode, name, price: unitPrice, pn: partNumber });
+    const downtimeResolved = resolveTaskDowntimeHours(task);
+    const downtimeHours = Number.isFinite(downtimeResolved) && downtimeResolved > 0 ? downtimeResolved : null;
+    templateMetaById.set(id, { id, mode, name, price: unitPrice, pn: partNumber, downtimeHours });
   };
 
   if (Array.isArray(tasksInterval)){
@@ -9091,6 +9261,10 @@ function computeCostModel(){
         exists: false,
         trashId: entry.id != null ? String(entry.id) : null
       };
+      const deletedDowntime = resolveTaskDowntimeHours(payload);
+      if (Number.isFinite(deletedDowntime) && deletedDowntime > 0){
+        baseInfo.downtimeHours = deletedDowntime;
+      }
       const completedDates = Array.isArray(payload.completedDates) ? payload.completedDates : [];
       completedDates.forEach(dateVal => {
         const key = toHistoryDateKey(dateVal);
@@ -9128,10 +9302,16 @@ function computeCostModel(){
       templateMeta = templateMetaById.get(templateId) || templateMeta;
     }
 
+    const downtimeFromTaskResolved = resolveTaskDowntimeHours(task);
+    const downtimeFromTask = Number.isFinite(downtimeFromTaskResolved) && downtimeFromTaskResolved > 0
+      ? downtimeFromTaskResolved
+      : null;
+
     if (!templateMeta){
       const mode = task.mode === "asreq" ? "asreq" : "interval";
       const name = task.name || "Maintenance task";
       templateMeta = { id: targetId, mode, name };
+      if (downtimeFromTask != null) templateMeta.downtimeHours = downtimeFromTask;
       if (exists) templateMetaById.set(targetId, templateMeta);
     }
 
@@ -9154,6 +9334,10 @@ function computeCostModel(){
         templateMeta.pn = partNumber;
         updated = true;
       }
+      if (downtimeFromTask != null && (templateMeta.downtimeHours == null || templateMeta.downtimeHours <= 0)){
+        templateMeta.downtimeHours = downtimeFromTask;
+        updated = true;
+      }
       if (updated) templateMetaById.set(targetId, templateMeta);
     }
 
@@ -9167,13 +9351,28 @@ function computeCostModel(){
       unitPrice,
       partNumber
     };
+    if (downtimeFromTask != null) baseInfo.downtimeHours = downtimeFromTask;
+    else if (templateMeta && Number.isFinite(templateMeta.downtimeHours) && templateMeta.downtimeHours > 0) baseInfo.downtimeHours = templateMeta.downtimeHours;
 
     const pushHistory = (sourceTask)=>{
       if (!sourceTask) return;
+      const taskDowntimeResolved = resolveTaskDowntimeHours(sourceTask);
+      const taskDowntime = Number.isFinite(taskDowntimeResolved) && taskDowntimeResolved > 0
+        ? taskDowntimeResolved
+        : null;
+      const buildInfo = ()=>{
+        const info = { ...baseInfo };
+        if (taskDowntime != null){
+          info.downtimeHours = taskDowntime;
+        }else if (info.downtimeHours == null && templateMeta && Number.isFinite(templateMeta.downtimeHours) && templateMeta.downtimeHours > 0){
+          info.downtimeHours = templateMeta.downtimeHours;
+        }
+        return info;
+      };
       const completedDates = Array.isArray(sourceTask.completedDates) ? sourceTask.completedDates : [];
       completedDates.forEach(dateVal => {
         const key = toHistoryDateKey(dateVal);
-        if (key) addTaskEventForDate(key, baseInfo);
+        if (key) addTaskEventForDate(key, buildInfo());
       });
       const manualHistory = Array.isArray(sourceTask.manualHistory) ? sourceTask.manualHistory : [];
       manualHistory.forEach(entry => {
@@ -9181,7 +9380,7 @@ function computeCostModel(){
         const statusRaw = typeof entry.status === "string" ? entry.status.toLowerCase() : "";
         if (statusRaw === "scheduled") return;
         const key = toHistoryDateKey(entry.dateISO);
-        if (key) addTaskEventForDate(key, baseInfo);
+        if (key) addTaskEventForDate(key, buildInfo());
       });
     };
 
@@ -9243,6 +9442,53 @@ function computeCostModel(){
       key: entryKey
     });
   }
+
+  const maintenanceTaskCompletions = [];
+  maintenanceHistory.forEach(entry => {
+    if (!entry) return;
+    const tasks = Array.isArray(entry.tasks) ? entry.tasks : [];
+    let entryDate = null;
+    if (entry.date instanceof Date && !Number.isNaN(entry.date.getTime())){
+      entryDate = entry.date;
+    }else if (entry.dateISO){
+      const parsed = new Date(entry.dateISO);
+      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) entryDate = parsed;
+    }
+    const entryTime = entryDate instanceof Date && !Number.isNaN(entryDate.getTime()) ? entryDate.getTime() : 0;
+    tasks.forEach((taskInfo, index) => {
+      if (!taskInfo) return;
+      const name = taskInfo.name || "Maintenance task";
+      const unitPrice = Number(taskInfo.unitPrice);
+      const partsCost = Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice : 0;
+      let downtimeHours = Number(taskInfo.downtimeHours);
+      if (!Number.isFinite(downtimeHours) || downtimeHours <= 0){
+        const resolved = resolveTaskDowntimeHours(taskInfo);
+        if (Number.isFinite(resolved) && resolved > 0) downtimeHours = resolved;
+      }
+      if ((!Number.isFinite(downtimeHours) || downtimeHours <= 0) && taskInfo.originalId != null){
+        const meta = templateMetaById.get(String(taskInfo.originalId));
+        if (meta && Number.isFinite(meta.downtimeHours) && meta.downtimeHours > 0) downtimeHours = meta.downtimeHours;
+      }
+      if (!Number.isFinite(downtimeHours) || downtimeHours <= 0) downtimeHours = defaultMinMaintenanceHours;
+      const timeCost = downtimeHours * opportunityLossRate;
+      const totalCost = partsCost + timeCost;
+      const hoursLabel = `${downtimeHours.toFixed(downtimeHours >= 10 ? 0 : 2)} hr`;
+      const dateLabelDate = entryDate instanceof Date && !Number.isNaN(entryDate.getTime()) ? entryDate : null;
+      const completionKey = `${taskInfo.originalId != null ? String(taskInfo.originalId) : (taskInfo.id != null ? String(taskInfo.id) : "task")}_${entry.dateISO || entryTime || index}`;
+      maintenanceTaskCompletions.push({
+        key: completionKey,
+        name,
+        partsCost,
+        downtimeHours,
+        timeCost,
+        totalCost,
+        sortTime: entryTime || Date.now(),
+        date: dateLabelDate,
+        dateISO: entry.dateISO || (dateLabelDate ? dateLabelDate.toISOString() : null),
+        hoursLabel
+      });
+    });
+  });
 
   suppressionMap.forEach((entry, key) => {
     if (!maintenanceHistoryKeys.has(key)){
@@ -9455,6 +9701,73 @@ function computeCostModel(){
       maximumFractionDigits: decimals
     });
   };
+
+  const maintenanceWindowDefs = [
+    { key: "1m", label: "Past 1 month", months: 1, description: "Completed maintenance in the past month" },
+    { key: "3m", label: "Past 3 months", months: 3, description: "Completed maintenance in the past 3 months" },
+    { key: "6m", label: "Past 6 months", months: 6, description: "Completed maintenance in the past 6 months" },
+    { key: "12m", label: "Past year", months: 12, description: "Completed maintenance in the past year" }
+  ];
+
+  const monthsAgo = (base, months)=>{
+    const copy = new Date(base);
+    copy.setMonth(copy.getMonth() - months);
+    copy.setHours(0,0,0,0);
+    return copy;
+  };
+
+  const maintenanceCompletionsSorted = maintenanceTaskCompletions
+    .slice()
+    .sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0));
+  const maintenanceTaskCostWindows = maintenanceWindowDefs.map(def => {
+    const now = new Date();
+    const cutoffDate = monthsAgo(now, def.months || 0);
+    const cutoffTime = cutoffDate.getTime();
+    const rowsRaw = maintenanceCompletionsSorted.filter(entry => {
+      if (!entry) return false;
+      const time = Number(entry.sortTime) || 0;
+      return time >= cutoffTime;
+    });
+    const rows = rowsRaw.map(entry => {
+      const dateObj = entry.date instanceof Date && !Number.isNaN(entry.date.getTime())
+        ? entry.date
+        : (entry.dateISO ? new Date(entry.dateISO) : null);
+      const dateLabel = dateObj instanceof Date && !Number.isNaN(dateObj.getTime())
+        ? dateObj.toLocaleDateString()
+        : "—";
+      return {
+        key: entry.key,
+        task: entry.name,
+        partsLabel: formatterCurrency(entry.partsCost, { decimals: entry.partsCost < 1000 ? 2 : 0 }),
+        timeLabel: formatterCurrency(entry.timeCost, { decimals: entry.timeCost < 1000 ? 2 : 0 }),
+        hoursLabel: entry.hoursLabel || "",
+        dateLabel,
+        totalLabel: formatterCurrency(entry.totalCost, { decimals: entry.totalCost < 1000 ? 2 : 0 })
+      };
+    });
+    const partsTotal = rowsRaw.reduce((sum, entry) => sum + (Number(entry.partsCost) || 0), 0);
+    const timeTotal = rowsRaw.reduce((sum, entry) => sum + (Number(entry.timeCost) || 0), 0);
+    const totalCost = rowsRaw.reduce((sum, entry) => sum + (Number(entry.totalCost) || 0), 0);
+    const count = rowsRaw.length;
+    const countLabel = count
+      ? `${count} task${count === 1 ? "" : "s"}`
+      : "0";
+    return {
+      key: def.key,
+      label: def.label,
+      description: def.description || def.label,
+      months: def.months,
+      rows,
+      emptyMessage: def.emptyMessage || "No completed maintenance tasks in this window.",
+      summary: {
+        count,
+        countLabel,
+        partsLabel: formatterCurrency(partsTotal, { decimals: partsTotal < 1000 ? 2 : 0 }),
+        timeLabel: formatterCurrency(timeTotal, { decimals: timeTotal < 1000 ? 2 : 0 }),
+        totalLabel: formatterCurrency(totalCost, { decimals: totalCost < 1000 ? 2 : 0 })
+      }
+    };
+  });
 
   const timeframeRows = timeframeRowsRaw.map(row => ({
     key: row.key,
@@ -10044,6 +10357,7 @@ function computeCostModel(){
     historyRows,
     historyEmpty,
     jobSummary,
+    maintenanceTaskCostWindows,
     jobBreakdown,
     jobEmpty,
     chartNote,
