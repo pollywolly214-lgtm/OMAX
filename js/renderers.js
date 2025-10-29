@@ -7573,6 +7573,12 @@ function renderCosts(){
   const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 
   const model = computeCostModel();
+  const maintenanceSeriesBase = Array.isArray(model.maintenanceSeries)
+    ? model.maintenanceSeries.slice()
+    : [];
+  const jobSeriesBase = Array.isArray(model.jobSeries)
+    ? model.jobSeries.slice()
+    : [];
   content.innerHTML = viewCosts(model);
   setAppSettingsContext("costs");
   wireCostSettingsMenu();
@@ -8409,6 +8415,105 @@ function renderCosts(){
   const toggleJobs  = document.getElementById("toggleCostJobs");
   const canvasWrap = content.querySelector(".cost-chart-canvas");
   let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
+  const rangeButtons = Array.from(content.querySelectorAll("[data-cost-range]"));
+  const allowedChartRanges = [1, 3, 6, 12];
+  const defaultChartRange = 6;
+
+  const normalizeChartRange = (value)=>{
+    const months = Number(value);
+    return allowedChartRanges.includes(months) ? months : defaultChartRange;
+  };
+
+  const getChartRangeState = ()=>{
+    if (typeof window !== "undefined" && window.__costChartRangeState && typeof window.__costChartRangeState === "object"){
+      const state = window.__costChartRangeState;
+      state.months = normalizeChartRange(state.months);
+      return state;
+    }
+    const state = { months: defaultChartRange };
+    if (typeof window !== "undefined"){
+      window.__costChartRangeState = state;
+    }
+    return state;
+  };
+
+  const setChartRangeMonths = (value)=>{
+    const state = getChartRangeState();
+    state.months = normalizeChartRange(value);
+    if (typeof window !== "undefined"){
+      window.__costChartRangeState = state;
+    }
+    return state.months;
+  };
+
+  const updateChartRangeButtons = ()=>{
+    const { months } = getChartRangeState();
+    rangeButtons.forEach(btn => {
+      const btnValue = normalizeChartRange(btn?.getAttribute("data-cost-range"));
+      const isActive = btnValue === months;
+      btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+      if (isActive){
+        btn.classList.add("is-active");
+      }else{
+        btn.classList.remove("is-active");
+      }
+    });
+  };
+
+  const limitChartSeries = (points, limit = 180)=>{
+    if (!Array.isArray(points)) return [];
+    const normalizedLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 180;
+    if (points.length > normalizedLimit){
+      return points.slice(-normalizedLimit);
+    }
+    return points.slice();
+  };
+
+  const filterChartSeriesByRange = (points, rangeValue)=>{
+    if (!Array.isArray(points)){
+      return { points: [], domainStart: null, domainEnd: null };
+    }
+    const normalizedRange = normalizeChartRange(rangeValue);
+    const sanitized = points
+      .filter(pt => pt && pt.date instanceof Date && !Number.isNaN(pt.date.getTime()))
+      .sort((a, b) => a.date - b.date);
+    if (!sanitized.length){
+      return { points: [], domainStart: null, domainEnd: null };
+    }
+
+    const approximateDaysPerMonth = 31;
+    const limit = Math.max(180, Math.ceil(normalizedRange * approximateDaysPerMonth));
+
+    const latestPoint = sanitized[sanitized.length - 1];
+    const latestTime = latestPoint.date.getTime();
+    const cutoff = new Date(latestTime);
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setMonth(cutoff.getMonth() - normalizedRange);
+    const cutoffTime = cutoff.getTime();
+
+    let filtered = sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
+
+    if (!filtered.length){
+      const fallback = sanitized[sanitized.length - 1];
+      const fallbackValue = fallback ? Number(fallback.value) : null;
+      if (fallback && Number.isFinite(fallbackValue)){
+        const endPoint = { ...fallback, date: new Date(latestTime), value: fallbackValue };
+        const startPoint = { ...endPoint, date: new Date(cutoffTime) };
+        filtered = [startPoint, endPoint];
+      }
+    }
+
+    const limited = limitChartSeries(filtered, limit);
+    if (!allowedChartRanges.includes(normalizedRange)){
+      return { points: limited, domainStart: null, domainEnd: null };
+    }
+
+    return {
+      points: limited,
+      domainStart: cutoffTime,
+      domainEnd: latestTime
+    };
+  };
 
   const escapeTooltip = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
     "&": "&amp;",
@@ -8567,10 +8672,30 @@ function renderCosts(){
   const state = getCostLayoutState();
 
   const redraw = ()=>{
+    const { months } = getChartRangeState();
+    const maintenanceRange = filterChartSeriesByRange(maintenanceSeriesBase, months);
+    const jobRange = filterChartSeriesByRange(jobSeriesBase, months);
+
+    const domainStarts = [maintenanceRange.domainStart, jobRange.domainStart]
+      .map(value => Number.isFinite(value) ? Number(value) : null)
+      .filter(value => value != null);
+    const domainEnds = [maintenanceRange.domainEnd, jobRange.domainEnd]
+      .map(value => Number.isFinite(value) ? Number(value) : null)
+      .filter(value => value != null);
+
+    const chartModel = {
+      ...model,
+      maintenanceSeries: maintenanceRange.points,
+      jobSeries: jobRange.points,
+      chartDomain: (domainStarts.length && domainEnds.length)
+        ? { start: Math.min(...domainStarts), end: Math.max(...domainEnds) }
+        : null
+    };
+    updateChartRangeButtons();
     if (canvas){
       hideTooltip();
       resizeCostChartCanvas(canvas);
-      drawCostChart(canvas, model, {
+      drawCostChart(canvas, chartModel, {
         maintenance: !toggleMaint || toggleMaint.checked,
         jobs: !toggleJobs || toggleJobs.checked
       });
@@ -8590,6 +8715,17 @@ function renderCosts(){
   state.resizeHandler = ()=> redraw();
   window.addEventListener("resize", state.resizeHandler);
 
+  rangeButtons.forEach(btn => {
+    btn.addEventListener("click", event => {
+      event.preventDefault();
+      const value = btn.getAttribute("data-cost-range");
+      const months = normalizeChartRange(value);
+      setChartRangeMonths(months);
+      redraw();
+    });
+  });
+
+  updateChartRangeButtons();
   redraw();
   toggleMaint?.addEventListener("change", redraw);
   toggleJobs?.addEventListener("change", redraw);
@@ -9133,7 +9269,7 @@ function computeCostModel(){
     });
   };
 
-  const maintenanceSeries = maintenanceHistory.slice(-16).map(entry => {
+  const maintenanceSeries = maintenanceHistory.map(entry => {
     const dateLabel = (entry.date instanceof Date && !Number.isNaN(entry.date.getTime()))
       ? entry.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
       : "the latest log";
@@ -9948,8 +10084,17 @@ function drawCostChart(canvas, model, show){
     return;
   }
 
+  const domainStart = model && model.chartDomain ? Number(model.chartDomain.start) : null;
+  const domainEnd = model && model.chartDomain ? Number(model.chartDomain.end) : null;
+
   let xMin = Math.min(...xs);
   let xMax = Math.max(...xs);
+
+  if (Number.isFinite(domainStart) && Number.isFinite(domainEnd) && domainEnd > domainStart){
+    xMin = domainStart;
+    xMax = domainEnd;
+  }
+
   if (xMax === xMin){
     xMin -= 24*60*60*1000;
     xMax += 24*60*60*1000;
