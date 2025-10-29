@@ -3347,6 +3347,43 @@ body.modal-open .auth-bar {
   gap: 12px;
   margin-bottom: 12px;
 }
+.past-jobs-average-summary {
+  margin: 0 0 16px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #dbe2f2;
+  background: #f6f8fd;
+  color: #10294f;
+}
+.past-jobs-average-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #5a6b85;
+  margin-bottom: 12px;
+}
+.past-jobs-average-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.past-jobs-average-grid-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.past-jobs-average-grid-item .label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #5a6b85;
+}
+.past-jobs-average-grid-item strong {
+  font-size: 16px;
+  font-weight: 700;
+}
 .past-jobs-summary div {
   display: flex;
   flex-direction: column;

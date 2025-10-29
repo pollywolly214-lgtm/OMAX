@@ -2463,26 +2463,31 @@ function viewJobs(){
   const historyEmptyMessage = historySearchActive
     ? "No past cutting jobs match your search."
     : "Mark jobs complete to build a history of past cutting work.";
-  const completedAverageRow = completedAverageMetrics
-    ? `<tfoot>
-        <tr class="past-jobs-average-row">
-          <th scope="row">Averages</th>
-          <td><strong>${formatHours(completedAverageMetrics.estimate)}</strong></td>
-          <td>—</td>
-          <td><strong>${formatCurrency(completedAverageMetrics.materialCost, { showPlus: false })}</strong></td>
-          <td><strong>${formatQuantity(completedAverageMetrics.materialQty)}</strong></td>
-          <td><strong>${formatCurrency(completedAverageMetrics.materialTotal, { showPlus: false })}</strong></td>
-          <td><strong>${formatRate(completedAverageMetrics.chargeRate)}</strong></td>
-          <td><strong>${formatRate(completedAverageMetrics.costRate)}</strong></td>
-          <td><strong>${formatRate(completedAverageMetrics.netRate, { showPlus: true })}</strong></td>
-          <td>—</td>
-          <td>—</td>
-          <td>—</td>
-          <td><strong>${formatCurrency(completedAverageMetrics.netTotal, { showPlus: true })}</strong></td>
-          <td>—</td>
-          <td>—</td>
-        </tr>
-      </tfoot>`
+  const completedAverageSummary = completedAverageMetrics
+    ? (() => {
+        const averageItems = [
+          { label: "Estimate", value: formatHours(completedAverageMetrics.estimate) },
+          { label: "Cost / unit", value: formatCurrency(completedAverageMetrics.materialCost, { showPlus: false }) },
+          { label: "Quantity", value: formatQuantity(completedAverageMetrics.materialQty) },
+          { label: "Material total", value: formatCurrency(completedAverageMetrics.materialTotal, { showPlus: false }) },
+          { label: "Charge rate", value: formatRate(completedAverageMetrics.chargeRate) },
+          { label: "Cost rate", value: formatRate(completedAverageMetrics.costRate) },
+          { label: "Net profit/hr", value: formatRate(completedAverageMetrics.netRate, { showPlus: true }) },
+          { label: "Net total", value: formatCurrency(completedAverageMetrics.netTotal, { showPlus: true }) }
+        ];
+        const itemsHtml = averageItems.map(item => `
+          <div class="past-jobs-average-grid-item">
+            <span class="label">${item.label}</span>
+            <strong>${item.value}</strong>
+          </div>
+        `).join("");
+        return `
+          <div class="past-jobs-average-summary" role="status" aria-live="polite">
+            <div class="past-jobs-average-title">Average metrics per job</div>
+            <div class="past-jobs-average-grid">${itemsHtml}</div>
+          </div>
+        `;
+      })()
     : "";
   const completedTable = completedFiltered.length
     ? `
@@ -2512,7 +2517,6 @@ function viewJobs(){
           </tr>
         </thead>
         <tbody>${completedRows}</tbody>
-        ${completedAverageRow}
       </table>
     `
     : `<p class="small muted">${historyEmptyMessage}</p>`;
@@ -3008,6 +3012,7 @@ function viewJobs(){
         </div>
       </div>
       <div class="small muted past-jobs-hint">Results update as you type.</div>
+      ${completedAverageSummary}
       ${historyFilterStatus}
       ${completedTable}
     </div>
