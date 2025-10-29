@@ -8193,17 +8193,26 @@ function renderCosts(){
     if (!Array.isArray(points)) return [];
     const normalizedRange = normalizeChartRange(rangeValue);
     const sanitized = points.filter(pt => pt && pt.date instanceof Date && !Number.isNaN(pt.date.getTime()));
+    if (!sanitized.length) return [];
     const approximateDaysPerMonth = 31;
     const limit = Math.max(180, Math.ceil(normalizedRange * approximateDaysPerMonth));
     if (!allowedChartRanges.includes(normalizedRange)){
       return limitChartSeries(sanitized, limit);
     }
-    const cutoff = new Date();
+    let latestTime = sanitized[0].date.getTime();
+    for (let i = 1; i < sanitized.length; i++){
+      const time = sanitized[i].date.getTime();
+      if (time > latestTime){
+        latestTime = time;
+      }
+    }
+    const cutoff = new Date(latestTime);
     cutoff.setHours(0,0,0,0);
     cutoff.setMonth(cutoff.getMonth() - normalizedRange);
     const cutoffTime = cutoff.getTime();
     const filtered = sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
-    return limitChartSeries(filtered, limit);
+    const bounded = filtered.length ? filtered : sanitized;
+    return limitChartSeries(bounded, limit);
   };
 
   const escapeTooltip = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
