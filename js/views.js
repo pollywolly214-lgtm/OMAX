@@ -2090,7 +2090,7 @@ function viewJobs(){
           <div class="job-overlap-alert-title">Overlapping jobs detected</div>
           <p class="job-overlap-alert-text">${esc(jobOverlapBannerText)}</p>
         </div>
-        <button type="button" class="job-overlap-alert-close" data-job-overlap-dismiss aria-label="Dismiss overlap warning">×</button>
+        <button type="button" class="job-overlap-alert-close" data-job-overlap-dismiss aria-label="Dismiss overlap warning">dismiss</button>
       </div>`;
   const overlapNoticeMarkup = overlapSignature
     ? `<div class="job-overlap-notice" data-job-overlap-notice data-job-overlap-signature="${esc(overlapSignature)}">
