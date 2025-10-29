@@ -1391,7 +1391,10 @@ function viewCosts(model){
                 return `
                 <li role="button" tabindex="0" ${attrs}${titleAttr}>
                   <div class="cost-history-main">
-                    <span class="cost-history-date">${esc(item.dateLabel || "")}</span>
+                    <div class="cost-history-task-wrap">
+                      <span class="cost-history-task-name">${esc(item.titleLabel || "Maintenance event")}</span>
+                      <span class="cost-history-date">${esc(item.rangeLabel || item.dateLabel || "")}</span>
+                    </div>
                     <span class="cost-history-hours">${esc(item.hoursLabel || "")}</span>
                     <span class="cost-history-cost">${esc(item.costLabel || "")}</span>
                     ${item.taskLabel ? `<span class="cost-history-task-label">${esc(item.taskLabel)}</span>` : ``}

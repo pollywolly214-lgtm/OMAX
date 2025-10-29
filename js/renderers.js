@@ -9231,6 +9231,10 @@ function computeCostModel(){
     maintenanceHistory.push({
       date: curr.date,
       dateISO: curr.dateISO,
+      rangeStart: prev.date,
+      rangeStartISO: prev.dateISO,
+      rangeEnd: curr.date,
+      rangeEndISO: curr.dateISO,
       hours: deltaSafe,
       cost: combinedCostPerHour > 0
         ? deltaSafe * combinedCostPerHour
@@ -9861,19 +9865,31 @@ function computeCostModel(){
     const tooltipLabel = tasks.length > 1
       ? tasks.map(task => task && task.name ? String(task.name) : null).filter(Boolean).join(" • ")
       : (taskName || "");
+    let titleLabel = null;
+    if (fallbackTask && fallbackTask.name){
+      titleLabel = missingTask
+        ? `${fallbackTask.name} (deleted)`
+        : (extraCount > 0 ? `${fallbackTask.name} (+${extraCount} more)` : fallbackTask.name);
+    }else if (tasks.length > 1){
+      titleLabel = `Linked tasks (${tasks.length})`;
+    }
+
     let taskLabel = null;
     if (fallbackTask){
       if (missingTask){
         taskLabel = `Restore deleted task: ${fallbackTask.name}`;
       }else if (extraCount > 0){
         taskLabel = `Linked task: ${fallbackTask.name} (+${extraCount} more)`;
-      }else{
-        taskLabel = `Linked task: ${fallbackTask.name}`;
       }
     }else if (tasks.length > 1){
       taskLabel = `Linked tasks (${tasks.length})`;
+    }else{
+      taskLabel = "No linked maintenance task.";
     }
     const trashId = fallbackTask && fallbackTask.trashId != null ? String(fallbackTask.trashId) : null;
+    const rangeLabel = (entry.rangeStart instanceof Date || entry.rangeEnd instanceof Date)
+      ? formatRangeLabel(entry.rangeStart, entry.rangeEnd)
+      : null;
     return {
       dateLabel: entry.date.toLocaleDateString(),
       hoursLabel: formatHours(entry.hours),
@@ -9885,6 +9901,8 @@ function computeCostModel(){
       originalTaskId,
       taskMode,
       taskName,
+      titleLabel: titleLabel || (tasks.length ? "Maintenance task" : "Maintenance event"),
+      rangeLabel: rangeLabel || entry.date.toLocaleDateString(),
       taskLabel,
       tooltipLabel: tooltipLabel || null,
       missingTask,
