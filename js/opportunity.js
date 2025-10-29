@@ -315,44 +315,6 @@
     return addMonths(now, -months);
   }
 
-  async function loadOpenJobs(){
-    const jobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : [];
-    let backlogMap = null;
-    if (typeof window.computePrioritySchedule === "function"){
-      try {
-        const schedule = window.computePrioritySchedule(jobs);
-        if (schedule && schedule.backlog instanceof Map){
-          backlogMap = schedule.backlog;
-        }
-      } catch (err) {
-        console.warn("computePrioritySchedule failed", err);
-      }
-    }
-    return jobs.map(job => {
-      const id = job && job.id != null ? job.id : null;
-      const key = id != null ? String(id) : "";
-      const ahead = backlogMap && backlogMap.has(key) ? coerceNumber(backlogMap.get(key), 0) : 0;
-      return { id, status_ahead_hours: Math.max(0, ahead), ref: job };
-    });
-  }
-
-  function updateJob(id, payload){
-    if (id == null || !payload || typeof payload !== "object") return false;
-    const jobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : [];
-    const key = String(id);
-    const job = jobs.find(item => item && String(item.id) === key);
-    if (!job) return false;
-    let changed = false;
-    Object.keys(payload).forEach(k => {
-      const next = payload[k];
-      if (job[k] !== next){
-        job[k] = next;
-        changed = true;
-      }
-    });
-    return changed;
-  }
-
   function cloneRollupRows(rows){
     return rows.map(row => ({
       period: row.period,
@@ -361,8 +323,10 @@
       pumpRunHours: row.pumpRunHours,
       maintenanceHours: row.maintenanceHours,
       idleHours: row.idleHours,
+      opportunityHours: row.opportunityHours,
       utilization: row.utilization,
       maintenanceCost: row.maintenanceCost,
+      maintenanceOpportunityCost: row.maintenanceOpportunityCost,
       opportunityCost: row.opportunityCost,
       totalCost: row.totalCost
     }));
@@ -421,11 +385,12 @@
         const target = targetHours(period.start, period.end, holidaysSet);
         const run = sumPumpRunHours(pumpRuns, period.start, period.end);
         const maintenance = sumMaintenanceHoursFromCalendar(maintIntervals, period.start, period.end, holidaysSet);
+        const opportunityHours = Math.max(0, target - run);
         const idle = Math.max(0, target - run - maintenance);
         const utilization = target > 0 ? (run / target) : 0;
-        const maintenanceCost = maintenance * BILL_RATE_OPP;
-        const opportunityCost = idle * BILL_RATE_OPP;
-        const totalCost = maintenanceCost + opportunityCost;
+        const maintenanceOpportunityCost = maintenance * BILL_RATE_OPP;
+        const opportunityCost = opportunityHours * BILL_RATE_OPP;
+        const totalCost = maintenanceOpportunityCost + opportunityCost;
         return {
           period: period.label,
           businessDays: enumerateBusinessWindows(period.start, period.end, holidaysSet).length,
@@ -433,34 +398,16 @@
           pumpRunHours: +run.toFixed(2),
           maintenanceHours: +maintenance.toFixed(2),
           idleHours: +idle.toFixed(2),
+          opportunityHours: +opportunityHours.toFixed(2),
           utilization: +(utilization * 100).toFixed(1),
-          maintenanceCost: +maintenanceCost.toFixed(2),
+          maintenanceCost: +maintenanceOpportunityCost.toFixed(2),
+          maintenanceOpportunityCost: +maintenanceOpportunityCost.toFixed(2),
           opportunityCost: +opportunityCost.toFixed(2),
           totalCost: +totalCost.toFixed(2)
         };
       });
 
       await saveOpportunityRollups(rows);
-
-      const jobs = await loadOpenJobs();
-      let jobsChanged = false;
-      jobs.forEach(jobInfo => {
-        if (!jobInfo || jobInfo.id == null) return;
-        const delayHrs = Math.max(0, coerceNumber(jobInfo.status_ahead_hours, 0));
-        const oppCost = delayHrs * BILL_RATE_OPP;
-        const rounded = +oppCost.toFixed(2);
-        const changed = updateJob(jobInfo.id, { oppCostAt8hrDay: rounded });
-        if (changed) jobsChanged = true;
-      });
-
-      if (jobsChanged && originalSaveCloudDebounced){
-        opportunityInternalSave = true;
-        try {
-          originalSaveCloudDebounced();
-        } finally {
-          opportunityInternalSave = false;
-        }
-      }
     } catch (err) {
       console.error("Failed to recompute opportunity cost", err);
     } finally {

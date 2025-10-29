@@ -1008,6 +1008,67 @@ function viewCosts(model){
   const timeframeInsight = data.timeframeInsight || "Usage windows combine logged machine hours with interval pricing to estimate what each upcoming maintenance window will cost.";
   const historyInsight = data.historyInsight || "Shows the latest completed maintenance, combining hours logged and reconciled spend to highlight cost spikes.";
   const efficiencyInsight = data.efficiencyInsight || "Summarizes cutting job profitability by tying revenue to labor, material, consumable, and overhead allocations so you can act on true margins.";
+  const maintenanceTaskCostWindows = Array.isArray(data.maintenanceTaskCostWindows) ? data.maintenanceTaskCostWindows : [];
+  const maintenanceCostButtons = maintenanceTaskCostWindows.map((win, index) => {
+    const keyRaw = win && win.key != null ? String(win.key) : `window_${index}`;
+    const key = esc(keyRaw);
+    const label = esc(win && win.label ? win.label : `Window ${index + 1}`);
+    const title = esc((win && (win.description || win.rangeLabel)) || label);
+    const isActive = index === 0;
+    return `
+      <button type="button" class="time-efficiency-toggle${isActive ? " is-active" : ""}" data-maint-cost-toggle="${key}" aria-pressed="${isActive ? "true" : "false"}" title="${title}">
+        ${label}
+      </button>
+    `;
+  }).join("");
+  const initialMaintenanceSummary = maintenanceTaskCostWindows.length ? (maintenanceTaskCostWindows[0].summary || {}) : {};
+  const maintenanceCostTables = maintenanceTaskCostWindows.map((win, index) => {
+    const keyRaw = win && win.key != null ? String(win.key) : `window_${index}`;
+    const key = esc(keyRaw);
+    const rows = Array.isArray(win?.rows) ? win.rows : [];
+    const emptyMessage = esc(win && win.emptyMessage ? win.emptyMessage : "No completed maintenance tasks in this window.");
+    const rowsHtml = rows.length
+      ? rows.map(row => {
+          const task = esc(row && (row.task || row.name) ? (row.task || row.name) : "Maintenance task");
+          const partsLabel = esc(row && row.partsLabel ? row.partsLabel : "$0.00");
+          const timeLabel = esc(row && row.timeLabel ? row.timeLabel : "$0.00");
+          const hoursLabel = row && row.hoursLabel ? `<div class=\"small muted\">${esc(row.hoursLabel)}</div>` : "";
+          const dateLabel = esc(row && row.dateLabel ? row.dateLabel : "—");
+          const totalLabel = esc(row && row.totalLabel ? row.totalLabel : "$0.00");
+          return `<tr><td>${task}</td><td>${partsLabel}</td><td>${timeLabel}${hoursLabel}</td><td>${dateLabel}</td><td>${totalLabel}</td></tr>`;
+        }).join("")
+      : `<tr><td colspan=\"5\" class=\"cost-table-placeholder\">${emptyMessage}</td></tr>`;
+    const summary = win && win.summary ? win.summary : {};
+    const totalParts = esc(summary && summary.partsLabel ? summary.partsLabel : "$0.00");
+    const totalTime = esc(summary && summary.timeLabel ? summary.timeLabel : "$0.00");
+    const totalCount = esc(summary && summary.countLabel ? summary.countLabel : "0");
+    const totalTotal = esc(summary && summary.totalLabel ? summary.totalLabel : "$0.00");
+    return `
+      <table class=\"cost-table maintenance-task-cost-table\" data-maint-panel=\"${key}\"${index === 0 ? "" : " hidden"}>
+        <thead><tr><th>Maintenance task</th><th>Parts cost</th><th>Time cost</th><th>Completed</th><th>Total cost</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+        <tfoot><tr><th scope=\"row\">Window totals</th><td>${totalParts}</td><td>${totalTime}</td><td>${totalCount}</td><td>${totalTotal}</td></tr></tfoot>
+      </table>
+    `;
+  }).join("");
+  const maintenanceCostSection = maintenanceTaskCostWindows.length
+    ? `
+          <div class=\"maintenance-task-costs\" data-maint-cost>
+            <div class=\"maintenance-task-costs-header\">
+              <div class=\"maintenance-task-cost-toggles\" role=\"tablist\">
+                ${maintenanceCostButtons}
+              </div>
+            </div>
+            <div class=\"maintenance-task-cost-summary\" data-maint-summary>
+              <div><span class=\"label\">Tasks completed</span><span data-maint-summary-count>${esc((initialMaintenanceSummary && initialMaintenanceSummary.countLabel) ? initialMaintenanceSummary.countLabel : "0")}</span></div>
+              <div><span class=\"label\">Parts cost</span><span data-maint-summary-parts>${esc((initialMaintenanceSummary && initialMaintenanceSummary.partsLabel) ? initialMaintenanceSummary.partsLabel : "$0.00")}</span></div>
+              <div><span class=\"label\">Time cost</span><span data-maint-summary-time>${esc((initialMaintenanceSummary && initialMaintenanceSummary.timeLabel) ? initialMaintenanceSummary.timeLabel : "$0.00")}</span></div>
+              <div><span class=\"label\">Total cost</span><span data-maint-summary-total>${esc((initialMaintenanceSummary && initialMaintenanceSummary.totalLabel) ? initialMaintenanceSummary.totalLabel : "$0.00")}</span></div>
+            </div>
+            ${maintenanceCostTables}
+          </div>
+        `
+    : `<p class=\"small muted\">No completed maintenance tasks logged yet.</p>`;
   const breakdown = data.forecastBreakdown || {};
   const breakdownSections = Array.isArray(breakdown.sections) ? breakdown.sections : [];
   const breakdownTotals = breakdown.totals || {};
@@ -1471,14 +1532,7 @@ function viewCosts(model){
             <div><span class="label">Avg per job</span><span>—</span></div>
             <div><span class="label">Rolling avg (chart)</span><span>—</span></div>
           </div>
-          <table class="cost-table">
-            <thead><tr><th>Job</th><th>Milestone</th><th>Status</th><th>Cost impact</th></tr></thead>
-            <tbody>
-              <tr>
-                <td colspan="4" class="cost-table-placeholder">Job history visualization coming soon.</td>
-              </tr>
-            </tbody>
-          </table>
+          ${maintenanceCostSection}
           <div class="cost-window-insight">
             <div class="chart-info">
               <button type="button" class="chart-info-button" aria-describedby="costEfficiencyInsight" aria-label="Explain Cutting Job Efficiency Snapshot">
@@ -2204,7 +2258,6 @@ function viewJobs(){
     const netClass = netRate >= 0 ? "job-rate-net-positive" : "job-rate-net-negative";
     const netTotalDisplay = formatCurrency(netTotal, { showPlus: true });
     const impactClass = netTotal > 0 ? "job-impact-ahead" : (netTotal < 0 ? "job-impact-behind" : "job-impact-neutral");
-    const jobOppCostDisplay = formatCurrency(0, { showPlus: false });
 
     let statusLabel = "Finished on estimate";
     if (Number.isFinite(delta) && Math.abs(delta) > 0.1){
@@ -2286,7 +2339,6 @@ function viewJobs(){
           <td class="job-col job-col-cost">${costDisplay}</td>
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
           <td class="job-col job-col-hours">${remainingDisplay}</td>
-          <td class="job-col job-col-opportunity">${jobOppCostDisplay}</td>
           <td class="job-col job-col-status">
             <div class="job-status ${statusClass}">${esc(statusLabel)}</div>
             ${statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : ""}
@@ -2330,7 +2382,6 @@ function viewJobs(){
                 <div><dt>Cost</dt><dd>${costDisplay}</dd></div>
                 <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
                 <div><dt>Net total</dt><dd class="${impactClass}">${netTotalDisplay}</dd></div>
-                <div><dt>Opp. cost</dt><dd>${jobOppCostDisplay}</dd></div>
               </dl>
             </div>
           </td>
@@ -2450,7 +2501,6 @@ function viewJobs(){
             <th>Cost rate</th>
             <th>Net profit/hr</th>
             <th>Hours remaining</th>
-            <th>Opp. Cost @ 8 hr/day</th>
             <th>Status</th>
             <th>Files</th>
             <th>Net total</th>
@@ -2504,12 +2554,6 @@ function viewJobs(){
     const backlogRaw = jobId && backlogById instanceof Map ? backlogById.get(jobId) : 0;
     const backlogHours = Number.isFinite(Number(backlogRaw)) ? Math.max(0, Number(backlogRaw)) : 0;
     const req = computeRequiredDaily(j, { backlogHours });
-    let oppRate = typeof window.getOpportunityLossRate === "function"
-      ? Number(window.getOpportunityLossRate())
-      : NaN;
-    if (!Number.isFinite(oppRate) || oppRate < 0) oppRate = 150;
-    const jobOppCost = Math.max(0, backlogHours) * oppRate;
-    const jobOppCostDisplay = formatCurrency(jobOppCost, { showPlus: false });
     const jobHasOverlap = jobId && overlappingJobIds.has(jobId);
     const overlapIndicatorButton = jobHasOverlap
       ? `<button type="button" class="job-overlap-indicator" data-job-overlap-info data-job-overlap-message="${jobOverlapNoticeEsc}" aria-label="Job overlap warning" title="Jobs might be overlapping">!</button>`
@@ -2660,7 +2704,6 @@ function viewJobs(){
           <td class="job-col job-col-cost">${costDisplay}</td>
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
           <td class="job-col job-col-hours">${remainingDisplay}${backlogHours > 0 ? `<div class="small muted">Queue total ${esc(queueTotalDisplay)}</div>` : ''}</td>
-          <td class="job-col job-col-opportunity">${jobOppCostDisplay}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
           <td class="job-col job-col-files">
             <div class="job-cell job-cell-stretch">
@@ -2701,7 +2744,6 @@ function viewJobs(){
                 <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
                 <div><dt>Net total</dt><dd class="${impactClass}">${impactDisplay}</dd></div>
                 <div><dt>Queue ahead</dt><dd>${backlogHours > 0 ? `${backlogHours.toFixed(1)} hr` : 'None'}</dd></div>
-                <div><dt>Opp. cost</dt><dd>${jobOppCostDisplay}</dd></div>
               </dl>
             </div>
           </td>
@@ -2790,10 +2832,6 @@ function viewJobs(){
                   <div class="job-metric">
                     <span class="job-metric-label">Queue ahead</span>
                     <span class="job-metric-value">${backlogHours > 0 ? `${backlogHours.toFixed(1)} hr` : 'None'}</span>
-                  </div>
-                  <div class="job-metric">
-                    <span class="job-metric-label">Opp. cost</span>
-                    <span class="job-metric-value">${jobOppCostDisplay}</span>
                   </div>
                   <div class="job-metric">
                     <span class="job-metric-label">Queue total</span>
@@ -2925,7 +2963,6 @@ function viewJobs(){
             <th>Cost rate</th>
             <th>Net profit/hr</th>
             <th>Hours remaining</th>
-            <th>Opp. Cost @ 8 hr/day</th>
             <th>Status</th>
             <th>Files</th>
             <th>Net total</th>
