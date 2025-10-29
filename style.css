@@ -527,13 +527,27 @@ body.forecast-modal-open{ overflow:hidden; }
 .cost-history-main{
   flex:1;
   display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
+  grid-template-columns:minmax(0,1.8fr) minmax(0,0.9fr) minmax(0,1.1fr);
   gap:8px;
 }
+.cost-history-task-wrap{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.cost-history-task-name{
+  font-weight:600;
+  color:#0f1e3a;
+}
+
 .cost-history li:hover{ box-shadow:0 16px 28px rgba(6,24,64,0.24); transform:translateY(-1px); }
 .cost-history li:focus-visible{ outline:2px solid rgba(10,99,194,0.6); outline-offset:2px; }
 .cost-history li[data-task-missing]{ border-style:dashed; }
-.cost-history-date{ text-align:left; }
+.cost-history-date{
+  text-align:left;
+  font-size:.82rem;
+  color:#4f5d75;
+}
 .cost-history-hours{ text-align:center; }
 .cost-history-cost{ text-align:right; font-weight:600; color:var(--brand-blue-400); }
 .cost-history-task-label{ grid-column:1/-1; font-size:.82rem; color:#4f5d75; text-align:left; margin-top:4px; }
