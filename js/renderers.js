@@ -1252,16 +1252,6 @@ async function promptClearAllData(trigger){
     alert("Clearing data is not available right now.");
     return;
   }
-  const expected = (typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
-    ? window.CLEAR_DATA_PASSWORD
-    : "";
-  const attempt = prompt("Enter the admin password to clear data:");
-  if (attempt === null) return;
-  if (attempt !== expected){
-    alert("Incorrect password. Data was not cleared.");
-    return;
-  }
-
   const chooseScope = async ()=>{
     const choice = await showConfirmChoices({
       title: "What should be deleted?",
@@ -1299,6 +1289,20 @@ async function promptClearAllData(trigger){
   const scope = await chooseScope();
   if (!scope) return;
 
+  const expected = (typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
+    ? window.CLEAR_DATA_PASSWORD
+    : "";
+  const scopeLabel = describeWorkspaceScope(scope);
+  const passwordPrompt = scope === SCOPE_EVERYTHING
+    ? "Enter the admin password to delete the full site:"
+    : `Enter the admin password to delete ${scopeLabel.toLowerCase()}:`;
+  const attempt = prompt(passwordPrompt);
+  if (attempt === null) return;
+  if (attempt !== expected){
+    alert("Incorrect password. Data was not cleared.");
+    return;
+  }
+
   let confirmMessage = "";
   if (scope === SCOPE_EVERYTHING){
     confirmMessage = "This will erase maintenance tasks, jobs, orders, inventory history, and waterjet tracking data for every user. This cannot be undone without a site restore.";
@@ -1326,7 +1330,6 @@ async function promptClearAllData(trigger){
   }
   try {
     await handler({ scope });
-    const scopeLabel = describeWorkspaceScope(scope);
     if (scope === SCOPE_EVERYTHING){
       toast("Workspace reset to defaults.");
     } else {
