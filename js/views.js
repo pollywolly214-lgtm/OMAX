@@ -2497,10 +2497,12 @@ function viewJobs(){
     : "";
   const completedTable = completedFiltered.length
     ? `
-      <div class="past-jobs-summary">
-        <div><span class="label">Jobs logged</span><span>${completedFiltered.length}</span></div>
-        <div><span class="label">Total impact</span><span>${formatCurrency(completedStats.total)}</span></div>
-        <div><span class="label">Avg per job</span><span>${formatCurrency(completedAverage)}</span></div>
+      <div class="past-jobs-summary-wrap">
+        <div class="past-jobs-summary">
+          <div><span class="label">Jobs logged</span><span>${completedFiltered.length}</span></div>
+          <div><span class="label">Total impact</span><span>${formatCurrency(completedStats.total)}</span></div>
+          <div><span class="label">Avg per job</span><span>${formatCurrency(completedAverage)}</span></div>
+        </div>
       </div>
       <table class="past-jobs-table job-table">
         <thead>

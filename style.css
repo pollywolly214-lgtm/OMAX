@@ -3341,11 +3341,15 @@ body.modal-open .auth-bar {
     min-width: 0;
   }
 }
+.past-jobs-summary-wrap {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
 .past-jobs-summary {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 12px;
+  flex-wrap: nowrap;
+  gap: 10px;
 }
 .past-jobs-average-row {
   background: #f4f6fb;
@@ -3372,7 +3376,7 @@ body.modal-open .auth-bar {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: 10px;
   border: 1px solid #dbe2f2;
   background: #f6f8fd;
@@ -3388,6 +3392,14 @@ body.modal-open .auth-bar {
 .past-jobs-summary span:last-child {
   font-size: 15px;
   font-weight: 600;
+}
+@media (max-width: 720px) {
+  .past-jobs-summary-wrap {
+    justify-content: flex-start;
+  }
+  .past-jobs-summary {
+    flex-wrap: wrap;
+  }
 }
 .past-jobs-table {
   width: 100%;
