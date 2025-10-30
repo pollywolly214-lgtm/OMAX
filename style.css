@@ -513,9 +513,19 @@ body.forecast-modal-open{ overflow:hidden; }
 .maintenance-task-costs{ display:flex; flex-direction:column; gap:16px; margin-top:16px; }
 .maintenance-task-costs-header{ display:flex; flex-direction:column; gap:12px; }
 .maintenance-task-cost-rate{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.maintenance-task-cost-rate-input{ display:flex; align-items:center; gap:8px; font-weight:600; color:#0a1f3f; }
+.maintenance-task-cost-rate-input input{ width:110px; padding:4px 8px; border:1px solid #c8d1e1; border-radius:4px; font-weight:600; color:#0a1f3f; text-align:right; }
+.maintenance-task-cost-rate-input input:focus{ outline:2px solid rgba(39,109,209,.3); outline-offset:1px; border-color:#276dd1; }
 .maintenance-task-cost-rate-value{ font-weight:600; color:#0a1f3f; }
 .maintenance-task-cost-toggles{ display:flex; flex-wrap:wrap; gap:8px; }
-.maintenance-task-cost-summary{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; padding:12px; border:1px solid #e1e5ee; border-radius:8px; background:#f7f9fd; }
+.maintenance-task-cost-summary{ display:flex; flex-direction:column; gap:12px; padding:12px; border:1px solid #e1e5ee; border-radius:8px; background:#f7f9fd; }
+.maintenance-task-cost-summary-highlights{ display:flex; flex-direction:column; gap:4px; color:#0a1f3f; }
+.maintenance-task-cost-summary-highlights strong{ font-weight:700; }
+.maintenance-task-cost-summary-highlights [data-maint-summary-period]{ font-weight:600; color:#33415c; margin:0 2px; }
+@media (min-width: 640px){
+  .maintenance-task-cost-summary-highlights{ flex-direction:row; align-items:baseline; justify-content:space-between; gap:16px; }
+}
+.maintenance-task-cost-summary-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
 .maintenance-task-cost-summary .label{ display:block; font-size:12px; text-transform:uppercase; color:#5b6885; margin-bottom:4px; }
 .maintenance-task-cost-table{ margin-top:8px; }
 .maintenance-task-cost-table tbody td{ vertical-align:top; }

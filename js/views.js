@@ -228,6 +228,7 @@ function viewDashboard(){
             <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
             <label data-task-last>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
             <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
+            <label>Maintenance time (hrs)<input type="number" min="1" step="0.25" id="dashTaskDowntime" value="1"></label>
             <label>Manual link<input type="url" id="dashTaskManual" placeholder="https://..."></label>
             <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
             <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
@@ -1057,18 +1058,26 @@ function viewCosts(model){
           <div class=\"maintenance-task-costs\" data-maint-cost>
             <div class=\"maintenance-task-costs-header\">
               <div class=\"maintenance-task-cost-rate\">
-                <span class=\"maintenance-task-cost-rate-value\" data-maint-rate-value>Opportunity rate: ${esc(maintenanceRateInfo && maintenanceRateInfo.label ? maintenanceRateInfo.label : "$150.00/hr")}</span>
-                <button type=\"button\" class=\"time-efficiency-edit-btn\" data-edit-maint-rate>Edit</button>
+                <label class=\"maintenance-task-cost-rate-input\">
+                  <span>Opportunity rate ($/hr)</span>
+                  <input type=\"number\" min=\"0\" step=\"0.25\" data-maint-rate-input value=\"${esc((maintenanceRateInfo && maintenanceRateInfo.value != null) ? maintenanceRateInfo.value : 150)}\">
+                </label>
+                <span class=\"maintenance-task-cost-rate-value\" data-maint-rate-value>${esc(maintenanceRateInfo && maintenanceRateInfo.label ? maintenanceRateInfo.label : "$150.00/hr")}</span>
               </div>
               <div class=\"maintenance-task-cost-toggles\" role=\"tablist\">
                 ${maintenanceCostButtons}
               </div>
             </div>
             <div class=\"maintenance-task-cost-summary\" data-maint-summary>
-              <div><span class=\"label\">Tasks completed</span><span data-maint-summary-count>${esc((initialMaintenanceSummary && initialMaintenanceSummary.countLabel) ? initialMaintenanceSummary.countLabel : "0")}</span></div>
-              <div><span class=\"label\">Parts cost</span><span data-maint-summary-parts>${esc((initialMaintenanceSummary && initialMaintenanceSummary.partsLabel) ? initialMaintenanceSummary.partsLabel : "$0.00")}</span></div>
-              <div><span class=\"label\">Time cost</span><span data-maint-summary-time>${esc((initialMaintenanceSummary && initialMaintenanceSummary.timeLabel) ? initialMaintenanceSummary.timeLabel : "$0.00")}</span></div>
-              <div><span class=\"label\">Total cost</span><span data-maint-summary-total>${esc((initialMaintenanceSummary && initialMaintenanceSummary.totalLabel) ? initialMaintenanceSummary.totalLabel : "$0.00")}</span></div>
+              <div class=\"maintenance-task-cost-summary-highlights\">
+                <strong>Average per task: <span data-maint-summary-average>${esc((initialMaintenanceSummary && initialMaintenanceSummary.averageLabel) ? initialMaintenanceSummary.averageLabel : "$0.00")}</span></strong>
+                <strong>Total <span data-maint-summary-period>${esc((initialMaintenanceSummary && initialMaintenanceSummary.periodLabel) ? initialMaintenanceSummary.periodLabel : "(selected window)")}</span>: <span data-maint-summary-total>${esc((initialMaintenanceSummary && initialMaintenanceSummary.totalLabel) ? initialMaintenanceSummary.totalLabel : "$0.00")}</span></strong>
+              </div>
+              <div class=\"maintenance-task-cost-summary-grid\">
+                <div><span class=\"label\">Tasks completed</span><span data-maint-summary-count>${esc((initialMaintenanceSummary && initialMaintenanceSummary.countLabel) ? initialMaintenanceSummary.countLabel : "0")}</span></div>
+                <div><span class=\"label\">Parts cost</span><span data-maint-summary-parts>${esc((initialMaintenanceSummary && initialMaintenanceSummary.partsLabel) ? initialMaintenanceSummary.partsLabel : "$0.00")}</span></div>
+                <div><span class=\"label\">Time cost</span><span data-maint-summary-time>${esc((initialMaintenanceSummary && initialMaintenanceSummary.timeLabel) ? initialMaintenanceSummary.timeLabel : "$0.00")}</span></div>
+              </div>
             </div>
             ${maintenanceCostTables}
           </div>

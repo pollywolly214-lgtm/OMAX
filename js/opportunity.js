@@ -392,6 +392,29 @@
     }
   }
 
+  function notifyOpportunityListeners(payload){
+    if (typeof window === "undefined") return;
+    const detail = (payload && typeof payload === "object") ? { ...payload } : {};
+    try {
+      if (typeof window.CustomEvent === "function"){
+        window.dispatchEvent(new CustomEvent("opportunity:updated", { detail }));
+      } else if (window.document && typeof window.document.createEvent === "function"){
+        const evt = window.document.createEvent("CustomEvent");
+        evt.initCustomEvent("opportunity:updated", false, false, detail);
+        window.dispatchEvent(evt);
+      }
+    } catch (err){
+      console.warn("Dispatching opportunity update event failed", err);
+    }
+    try {
+      if (typeof window.onOpportunityDataUpdated === "function"){
+        window.onOpportunityDataUpdated(detail);
+      }
+    } catch (err){
+      console.warn("onOpportunityDataUpdated callback failed", err);
+    }
+  }
+
   let recomputePending = false;
   let recomputeActive = false;
 
@@ -455,6 +478,7 @@
       });
 
       await saveOpportunityRollups(rows);
+      notifyOpportunityListeners({ rollups: rows, updatedAt: new Date().toISOString() });
     } catch (err) {
       console.error("Failed to recompute opportunity cost", err);
     } finally {

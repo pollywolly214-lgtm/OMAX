@@ -173,7 +173,12 @@ function createIntervalTaskInstance(template){
     anchorTotal: null,
     completedDates: [],
     manualHistory: [],
-    note: template.note || ""
+    note: template.note || "",
+    downtimeHours: (()=>{
+      const raw = Number(template.downtimeHours);
+      if (Number.isFinite(raw) && raw > 0) return Math.max(1, Math.round(raw * 100) / 100);
+      return 1;
+    })()
   };
   if (Array.isArray(template.parts)){
     copy.parts = template.parts.map(part => part ? { ...part } : part).filter(Boolean);
@@ -215,6 +220,23 @@ function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
     if (template && template.templateId != null) instance.templateId = template.templateId;
     else if (template && template.id != null) instance.templateId = template.id;
     else instance.templateId = instance.id;
+  }
+
+  const resolveDowntime = ()=>{
+    const tplVal = template ? Number(template.downtimeHours) : NaN;
+    if (Number.isFinite(tplVal) && tplVal > 0) return tplVal;
+    const instVal = Number(instance.downtimeHours);
+    if (Number.isFinite(instVal) && instVal > 0) return instVal;
+    return 1;
+  };
+  let normalizedDowntime = resolveDowntime();
+  if (!Number.isFinite(normalizedDowntime) || normalizedDowntime <= 0){
+    normalizedDowntime = 1;
+  }
+  normalizedDowntime = Math.max(1, Math.round(normalizedDowntime * 100) / 100);
+  instance.downtimeHours = normalizedDowntime;
+  if (template){
+    template.downtimeHours = normalizedDowntime;
   }
 
   const interval = Number(instance.interval);
@@ -3157,6 +3179,7 @@ function renderDashboard(){
   const taskStoreInput   = document.getElementById("dashTaskStore");
   const taskPNInput      = document.getElementById("dashTaskPN");
   const taskPriceInput   = document.getElementById("dashTaskPrice");
+  const taskDowntimeInput= document.getElementById("dashTaskDowntime");
   const categorySelect   = document.getElementById("dashTaskCategory");
   const taskDateInput    = document.getElementById("dashTaskDate");
   const subtaskList      = document.getElementById("dashSubtaskList");
@@ -3685,6 +3708,9 @@ function renderDashboard(){
 
   function resetTaskForm(){
     taskForm?.reset();
+    if (taskDowntimeInput){
+      taskDowntimeInput.value = "1";
+    }
     subtaskList?.replaceChildren();
     resetExistingTaskForm();
     showTaskOptionStage();
@@ -3965,6 +3991,14 @@ function renderDashboard(){
     const pn     = (taskPNInput?.value || "").trim();
     const priceVal = taskPriceInput?.value;
     const price  = priceVal === "" ? null : Number(priceVal);
+    let downtimeVal = Number(taskDowntimeInput?.value);
+    if (!isFinite(downtimeVal) || downtimeVal <= 0){
+      downtimeVal = 1;
+    }
+    downtimeVal = Math.max(1, Math.round(downtimeVal * 100) / 100);
+    if (taskDowntimeInput){
+      taskDowntimeInput.value = String(downtimeVal);
+    }
     const catId  = (categorySelect?.value || "").trim() || null;
     const id     = genId(name);
     const rawDate = (taskDateInput?.value || "").trim();
@@ -3981,7 +4015,8 @@ function renderDashboard(){
       cat: catId,
       parentTask: null,
       order: ++window._maintOrderCounter,
-      calendarDateISO: null
+      calendarDateISO: null,
+      downtimeHours: downtimeVal
     };
     let message = "Task added";
     if (mode === "interval"){
@@ -3995,7 +4030,8 @@ function renderDashboard(){
         completedDates: [],
         manualHistory: [],
         variant: "template",
-        templateId: id
+        templateId: id,
+        downtimeHours: downtimeVal
       });
       const curHours = getCurrentMachineHours();
       const baselineHours = parseBaselineHours(taskLastInput?.value);
@@ -4040,7 +4076,8 @@ function renderDashboard(){
         cat: catId,
         parentTask: id,
         order: ++window._maintOrderCounter,
-        calendarDateISO: null
+        calendarDateISO: null,
+        downtimeHours: downtimeVal
       };
       if (subMode === "interval"){
         const intervalField = row.querySelector("[data-subtask-interval]");
@@ -4077,6 +4114,10 @@ function renderDashboard(){
 
     setContextDate(calendarDateISO);
     saveCloudDebounced();
+    if (typeof window.scheduleOpportunityRecompute === "function"){
+      try { window.scheduleOpportunityRecompute(); }
+      catch (_err){}
+    }
     toast(message);
     closeModal();
     renderDashboard();
@@ -4121,6 +4162,10 @@ function renderDashboard(){
     }
     setContextDate(targetISO);
     saveCloudDebounced();
+    if (typeof window.scheduleOpportunityRecompute === "function"){
+      try { window.scheduleOpportunityRecompute(); }
+      catch (_err){}
+    }
     toast(message);
     closeModal();
     renderDashboard();
@@ -5721,6 +5766,8 @@ function renderSettings(){
 
   const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 
+  let downtimeNormalized = false;
+
   function ensureTaskDefaults(task, type){
     ensureIdsOrder(task);
     task.mode = type;
@@ -5731,6 +5778,17 @@ function renderSettings(){
     if (typeof task.note !== "string") task.note = "";
     if ((type === "interval" || type === "asreq") && isTemplateTask(task)){
       if (task.templateId == null) task.templateId = task.id;
+    }
+    const rawDowntime = Number(task.downtimeHours);
+    if (!Number.isFinite(rawDowntime) || rawDowntime <= 0){
+      task.downtimeHours = 1;
+      downtimeNormalized = true;
+    }else{
+      const rounded = Math.max(1, Math.round(rawDowntime * 100) / 100);
+      if (Math.abs(rounded - rawDowntime) > 1e-4){
+        task.downtimeHours = rounded;
+        downtimeNormalized = true;
+      }
     }
   }
 
@@ -5747,6 +5805,10 @@ function renderSettings(){
     if (isInstanceTask(t)) return;
     taskEntries.push({ task:t, type:"asreq" });
   });
+
+  if (downtimeNormalized){
+    persist();
+  }
 
   const entryById = new Map();
   for (const entry of taskEntries){
@@ -5933,6 +5995,7 @@ function renderSettings(){
             <label data-field="storeLink">Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
             <label data-field="pn">Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
             <label data-field="price">Price ($)<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${t.price!=null?t.price:""}" placeholder="optional"></label>
+            <label data-field="downtimeHours">Maintenance time (hrs)<input type="number" step="0.25" min="1" data-k="downtimeHours" data-id="${t.id}" data-list="${type}" value="${t.downtimeHours!=null?t.downtimeHours:""}" placeholder="Hours to complete"></label>
             <label class="task-note" data-field="note">Note<textarea data-k="note" data-id="${t.id}" data-list="${type}" rows="2" placeholder="Optional note">${escapeHtml(t.note||"")}</textarea></label>
           </div>
           <div class="row-actions">
@@ -6093,6 +6156,7 @@ function renderSettings(){
             <label>Store link<input type="url" name="taskStore" placeholder="https://..."></label>
             <label>Part #<input name="taskPN" placeholder="Part number"></label>
             <label>Price ($)<input type="number" min="0" step="0.01" name="taskPrice" placeholder="optional"></label>
+            <label data-form-downtime>Maintenance time (hrs)<input type="number" min="1" step="0.25" name="taskDowntime" value="1"></label>
             <label class="task-note">Note<textarea name="taskNote" rows="2" placeholder="Optional note"></textarea></label>
             <label>Category<select name="taskCategory">${categoryOptions}</select></label>
           </div>
@@ -6116,6 +6180,7 @@ function renderSettings(){
   const freqRow = form?.querySelector('[data-form-frequency]');
   const lastRow = form?.querySelector('[data-form-last]');
   const conditionRow = form?.querySelector('[data-form-condition]');
+  const downtimeField = form?.querySelector('[name="taskDowntime"]');
   const searchInput = document.getElementById("maintenanceSearch");
   const searchClear = document.getElementById("maintenanceSearchClear");
   const contextMenu = document.getElementById("maintenanceContextMenu");
@@ -6502,6 +6567,9 @@ function renderSettings(){
   function showModal(){
     if (!modal || !form || !typeField) return;
     form.reset();
+    if (downtimeField){
+      downtimeField.value = "1";
+    }
     modal.classList.add("is-visible");
     modal.hidden = false;
     document.body?.classList.add("modal-open");
@@ -6596,10 +6664,19 @@ function renderSettings(){
     const pn = (data.get("taskPN")||"").toString().trim();
     const priceVal = data.get("taskPrice");
     const price = priceVal === null || priceVal === "" ? null : Number(priceVal);
+    const downtimeVal = data.get("taskDowntime");
+    let downtime = downtimeVal === null || downtimeVal === "" ? 1 : Number(downtimeVal);
+    if (!Number.isFinite(downtime) || downtime <= 0){
+      downtime = 1;
+    }
+    downtime = Math.max(1, Math.round(downtime * 100) / 100);
+    if (downtimeField){
+      downtimeField.value = String(downtime);
+    }
     const noteRaw = (data.get("taskNote")||"").toString();
     const note = noteRaw.trim() ? noteRaw : "";
     const id = genId(name);
-    const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, note, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
+    const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, note, cat: catId, parentTask:null, order: ++window._maintOrderCounter, downtimeHours: downtime };
 
     let createdTask = null;
     let autoLinkedInventory = false;
@@ -6651,6 +6728,10 @@ function renderSettings(){
     }
 
     persist();
+    if (typeof window.scheduleOpportunityRecompute === "function"){
+      try { window.scheduleOpportunityRecompute(); }
+      catch (_err){}
+    }
     hideModal();
     renderSettings();
     if (createdTask && !autoLinkedInventory){
@@ -6755,7 +6836,7 @@ function renderSettings(){
     const key = target.getAttribute("data-k");
     if (!key || key === "mode") return;
     let value = target.value;
-    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase"){
+    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase" || key === "downtimeHours"){
       value = value === "" ? null : Number(value);
       if (value !== null && !isFinite(value)) return;
     }
@@ -6786,12 +6867,26 @@ function renderSettings(){
       updateDueChip(holder, meta.task);
     }else if (key === "price"){
       meta.task.price = value == null ? null : Number(value);
+    }else if (key === "downtimeHours"){
+      let hours = value == null ? null : Number(value);
+      if (!Number.isFinite(hours) || hours <= 0){
+        hours = 1;
+      }
+      hours = Math.max(1, Math.round(hours * 100) / 100);
+      meta.task.downtimeHours = hours;
+      if (target instanceof HTMLInputElement){
+        target.value = String(hours);
+      }
     }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
       meta.task[key] = target.value;
       if (key === "name"){ const label = holder.querySelector('.task-name'); if (label) label.textContent = target.value || "(unnamed task)"; }
       if (key === "condition"){ const chip = holder.querySelector('[data-chip-condition]'); if (chip) chip.textContent = target.value || "As required"; }
     }
     persist();
+    if (key === "downtimeHours" && typeof window.scheduleOpportunityRecompute === "function"){
+      try { window.scheduleOpportunityRecompute(); }
+      catch (_err){}
+    }
   });
 
   tree?.addEventListener("change", (e)=>{
@@ -7867,7 +7962,10 @@ function renderCosts(){
     const summaryParts = container.querySelector("[data-maint-summary-parts]");
     const summaryTime = container.querySelector("[data-maint-summary-time]");
     const summaryTotal = container.querySelector("[data-maint-summary-total]");
+    const summaryAverage = container.querySelector("[data-maint-summary-average]");
+    const summaryPeriod = container.querySelector("[data-maint-summary-period]");
     const rateDisplay = container.querySelector("[data-maint-rate-value]");
+    const rateInput = container.querySelector("[data-maint-rate-input]");
     const rateInfo = currentModel && currentModel.maintenanceOpportunityRate
       ? currentModel.maintenanceOpportunityRate
       : {};
@@ -7895,12 +7993,63 @@ function renderCosts(){
       return Number.isFinite(modelRate) && modelRate >= 0 ? modelRate : 150;
     };
 
-    const updateRateLabel = (value)=>{
-      if (!rateDisplay) return;
-      rateDisplay.textContent = `Opportunity rate: ${formatRateLabel(value)}`;
+    const formatRateInputValue = (value)=>{
+      if (!Number.isFinite(value) || value < 0) return "";
+      const rounded = Math.round(value * 100) / 100;
+      const fixed = rounded.toFixed(2);
+      return fixed.replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
     };
 
-    updateRateLabel(readCurrentRate());
+    let committedRate = readCurrentRate();
+
+    const syncRateUI = (value, { forceInput = false } = {})=>{
+      if (rateDisplay) rateDisplay.textContent = formatRateLabel(value);
+      if (rateInput instanceof HTMLInputElement){
+        if (forceInput || document.activeElement !== rateInput){
+          rateInput.value = formatRateInputValue(value);
+        }
+      }
+    };
+
+    syncRateUI(committedRate);
+
+    const previewRate = ()=>{
+      if (!(rateInput instanceof HTMLInputElement)) return;
+      const raw = rateInput.value != null ? String(rateInput.value).trim() : "";
+      const preview = raw === "" ? NaN : Number(raw);
+      if (Number.isFinite(preview) && preview >= 0){
+        if (rateDisplay) rateDisplay.textContent = formatRateLabel(preview);
+      }else{
+        if (rateDisplay) rateDisplay.textContent = formatRateLabel(committedRate);
+      }
+    };
+
+    const commitRate = ()=>{
+      if (!(rateInput instanceof HTMLInputElement)) return;
+      const raw = rateInput.value != null ? String(rateInput.value).trim() : "";
+      let next = raw === "" ? NaN : Number(raw);
+      if (!Number.isFinite(next) || next < 0){
+        next = committedRate;
+      }
+      next = Math.max(0, Math.round(next * 100) / 100);
+      if (Math.abs(next - committedRate) < 1e-6){
+        syncRateUI(committedRate);
+        return;
+      }
+      committedRate = next;
+      syncRateUI(committedRate, { forceInput: true });
+      if (typeof window.setOpportunityLossRate === "function"){
+        window.setOpportunityLossRate(committedRate);
+      }
+      if (typeof window.scheduleOpportunityRecompute === "function"){
+        window.scheduleOpportunityRecompute();
+      }
+      window.requestAnimationFrame(()=>{
+        if (typeof renderCosts === "function"){
+          renderCosts();
+        }
+      });
+    };
 
     const updateSummary = (key)=>{
       const win = windowMap.get(key) || null;
@@ -7908,7 +8057,9 @@ function renderCosts(){
       if (summaryCount) summaryCount.textContent = summary.countLabel || "0";
       if (summaryParts) summaryParts.textContent = summary.partsLabel || "$0.00";
       if (summaryTime) summaryTime.textContent = summary.timeLabel || "$0.00";
+      if (summaryAverage) summaryAverage.textContent = summary.averageLabel || "$0.00";
       if (summaryTotal) summaryTotal.textContent = summary.totalLabel || "$0.00";
+      if (summaryPeriod) summaryPeriod.textContent = summary.periodLabel || "(selected window)";
     };
 
     const activate = (key)=>{
@@ -7928,6 +8079,31 @@ function renderCosts(){
     };
 
     const cleanupFns = [];
+
+    if (rateInput instanceof HTMLInputElement){
+      const handleInput = ()=> previewRate();
+      const handleChange = ()=> commitRate();
+      const handleBlur = ()=> commitRate();
+      const handleKeydown = (event)=>{
+        if (event.key === "Enter"){
+          event.preventDefault();
+          commitRate();
+          try { rateInput.blur(); }
+          catch (_err){}
+        }
+      };
+      rateInput.addEventListener("input", handleInput);
+      rateInput.addEventListener("change", handleChange);
+      rateInput.addEventListener("blur", handleBlur);
+      rateInput.addEventListener("keydown", handleKeydown);
+      cleanupFns.push(()=>{
+        rateInput.removeEventListener("input", handleInput);
+        rateInput.removeEventListener("change", handleChange);
+        rateInput.removeEventListener("blur", handleBlur);
+        rateInput.removeEventListener("keydown", handleKeydown);
+      });
+    }
+
     buttons.forEach(btn => {
       const key = btn.getAttribute("data-maint-cost-toggle");
       if (!key) return;
@@ -7945,35 +8121,6 @@ function renderCosts(){
         btn.removeEventListener("keydown", onKey);
       });
     });
-
-    const rateEditBtn = container.querySelector("[data-edit-maint-rate]");
-    if (rateEditBtn instanceof HTMLElement){
-      const handleEdit = (event)=>{
-        event.preventDefault();
-        const currentRate = readCurrentRate();
-        const promptValue = window.prompt("Set opportunity cost rate ($/hr)", String(currentRate));
-        if (promptValue == null) return;
-        const parsed = Number(promptValue);
-        if (!Number.isFinite(parsed) || parsed < 0){
-          window.alert?.("Enter a non-negative number for the opportunity cost rate.");
-          return;
-        }
-        if (typeof window.setOpportunityLossRate === "function"){
-          window.setOpportunityLossRate(parsed);
-        }
-        updateRateLabel(parsed);
-        if (typeof window.scheduleOpportunityRecompute === "function"){
-          window.scheduleOpportunityRecompute();
-        }
-        window.setTimeout(()=>{
-          if (typeof renderCosts === "function"){
-            renderCosts();
-          }
-        }, 0);
-      };
-      rateEditBtn.addEventListener("click", handleEdit);
-      cleanupFns.push(()=> rateEditBtn.removeEventListener("click", handleEdit));
-    }
 
     const defaultKey = buttons.find(btn => btn.classList.contains("is-active"))?.getAttribute("data-maint-cost-toggle")
       || (buttons[0] && buttons[0].getAttribute("data-maint-cost-toggle"));
@@ -8271,34 +8418,8 @@ function renderCosts(){
     installGlobalSelectionClickShield();
   }
 
-  const wireJobsHistoryShortcut = (element)=>{
-    if (!element) return;
-    const shouldDeferForSelection = (event)=>{
-      if (!event) return false;
-      if (event.type === "click") return selectionTools.selectionTouchesElement(element);
-      if (event.type === "keydown"){
-        const key = event.key;
-        if (key === "Enter" || key === " " || key === "Spacebar"){
-          return selectionTools.selectionTouchesElement(element);
-        }
-      }
-      return false;
-    };
-    const activateHistoryLink = (event)=>{
-      const origin = event?.target instanceof HTMLElement ? event.target : null;
-      if (origin && origin.closest(".time-efficiency-toggles")) return;
-      if (shouldDeferForSelection(event)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      goToJobsHistory();
-    };
-    element.addEventListener("click", activateHistoryLink);
-    element.addEventListener("keydown", (event)=>{
-      if (event.repeat) return;
-      if (event.key === "Enter" || event.key === " " || event.key === "Spacebar"){
-        activateHistoryLink(event);
-      }
-    });
+  const wireJobsHistoryShortcut = (_element)=>{
+    return;
   };
 
   wireJobsHistoryShortcut(content.querySelector("[data-cost-cutting-card]"));
@@ -8753,6 +8874,47 @@ function renderCosts(){
   if (typeof refreshCostTrainer === "function"){
     refreshCostTrainer();
   }
+}
+
+if (typeof window !== "undefined" && !window.__opportunityCostListenerInstalled){
+  window.__opportunityCostListenerInstalled = true;
+  let lastOpportunityEvent = 0;
+  const scheduleCostRefresh = ()=>{
+    const hashRaw = (window.location && typeof window.location.hash === "string")
+      ? window.location.hash
+      : "#";
+    const hash = hashRaw ? hashRaw.toLowerCase() : "#";
+    if (!hash.startsWith("#/costs")) return;
+    window.requestAnimationFrame(()=>{
+      try {
+        renderCosts();
+      } catch (err){
+        console.warn("Failed to refresh costs after opportunity update", err);
+      }
+    });
+  };
+
+  window.addEventListener("opportunity:updated", event => {
+    lastOpportunityEvent = Date.now();
+    scheduleCostRefresh();
+  });
+
+  const previousHandler = typeof window.onOpportunityDataUpdated === "function"
+    ? window.onOpportunityDataUpdated
+    : null;
+
+  window.onOpportunityDataUpdated = (payload)=>{
+    if (Date.now() - lastOpportunityEvent > 50){
+      scheduleCostRefresh();
+    }
+    if (previousHandler){
+      try {
+        previousHandler(payload);
+      } catch (err){
+        console.warn("Chained onOpportunityDataUpdated handler failed", err);
+      }
+    }
+  };
 }
 
 function computeCostModel(){
@@ -9365,6 +9527,38 @@ function computeCostModel(){
     });
   }
 
+  const resolvePartsCost = (info)=>{
+    if (!info || typeof info !== "object") return 0;
+    const candidateKeys = [
+      "partsCost","parts_cost","partsTotal","parts_total","totalPartsCost","total_parts_cost",
+      "partsAmount","parts_amount","partsValue","parts_value","partsPrice","parts_price",
+      "partsSubtotal","parts_subtotal","costParts","cost_parts","partCost","part_cost",
+      "unitPrice","unit_price","price","amount"
+    ];
+    for (const key of candidateKeys){
+      if (!(key in info)) continue;
+      const value = Number(info[key]);
+      if (Number.isFinite(value) && value > 0) return value;
+    }
+    if (Array.isArray(info.parts)){
+      let total = 0;
+      info.parts.forEach(part => {
+        if (!part || typeof part !== "object") return;
+        const priceCandidates = [part.price, part.unitPrice, part.cost, part.amount];
+        const priceValRaw = priceCandidates.find(val => Number.isFinite(Number(val)) && Number(val) > 0);
+        const priceVal = Number(priceValRaw);
+        if (!Number.isFinite(priceVal) || priceVal <= 0) return;
+        const qtyCandidates = [part.qty, part.quantity, part.count];
+        const qtyValRaw = qtyCandidates.find(val => Number.isFinite(Number(val)) && Number(val) > 0);
+        const qtyVal = Number(qtyValRaw);
+        const qty = Number.isFinite(qtyVal) && qtyVal > 0 ? qtyVal : 1;
+        total += priceVal * qty;
+      });
+      if (total > 0) return total;
+    }
+    return 0;
+  };
+
   const maintenanceTaskCompletions = [];
   maintenanceHistory.forEach(entry => {
     if (!entry) return;
@@ -9380,8 +9574,14 @@ function computeCostModel(){
     tasks.forEach((taskInfo, index) => {
       if (!taskInfo) return;
       const name = taskInfo.name || "Maintenance task";
-      const unitPrice = Number(taskInfo.unitPrice);
-      const partsCost = Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice : 0;
+      let partsCost = resolvePartsCost(taskInfo);
+      if (partsCost <= 0 && taskInfo.originalId != null){
+        const meta = templateMetaById.get(String(taskInfo.originalId));
+        if (meta){
+          const metaParts = resolvePartsCost(meta);
+          if (metaParts > 0) partsCost = metaParts;
+        }
+      }
       let downtimeHours = Number(taskInfo.downtimeHours);
       if (!Number.isFinite(downtimeHours) || downtimeHours <= 0){
         const resolved = resolveTaskDowntimeHours(taskInfo);
@@ -9429,9 +9629,14 @@ function computeCostModel(){
       const baseKey = `${info.originalId}_${dateKey || sortTime}`;
       if (completionKeys.has(baseKey)) return;
       const name = info.name || "Maintenance task";
-      const partsCost = Number.isFinite(Number(info.unitPrice)) && Number(info.unitPrice) > 0
-        ? Number(info.unitPrice)
-        : 0;
+      let partsCost = resolvePartsCost(info);
+      if (partsCost <= 0 && info.originalId != null){
+        const meta = templateMetaById.get(String(info.originalId));
+        if (meta){
+          const metaParts = resolvePartsCost(meta);
+          if (metaParts > 0) partsCost = metaParts;
+        }
+      }
       const downtimeResolved = Number(info.downtimeHours);
       const downtimeHours = Number.isFinite(downtimeResolved) && downtimeResolved > 0
         ? downtimeResolved
@@ -9722,6 +9927,7 @@ function computeCostModel(){
     const totalCost = rowsRaw.reduce((sum, entry) => sum + (Number(entry.totalCost) || 0), 0);
     const count = rowsRaw.length;
     const countLabel = `${count} task${count === 1 ? "" : "s"}`;
+    const averageCost = count ? (totalCost / count) : 0;
     return {
       key: def.key,
       label: def.label,
@@ -9735,7 +9941,9 @@ function computeCostModel(){
         countLabel,
         partsLabel: formatterCurrency(partsTotal, { decimals: partsTotal < 1000 ? 2 : 0 }),
         timeLabel: formatterCurrency(timeTotal, { decimals: timeTotal < 1000 ? 2 : 0 }),
-        totalLabel: formatterCurrency(totalCost, { decimals: totalCost < 1000 ? 2 : 0 })
+        totalLabel: formatterCurrency(totalCost, { decimals: totalCost < 1000 ? 2 : 0 }),
+        averageLabel: formatterCurrency(averageCost, { decimals: averageCost < 1000 ? 2 : 0 }),
+        periodLabel: def.label || (rangeLabel || "Selected window")
       }
     };
   });
@@ -10319,6 +10527,7 @@ function computeCostModel(){
     maintenanceTaskCostWindows,
     maintenanceOpportunityRate: {
       rate: opportunityLossRate,
+      value: opportunityLossRate,
       label: opportunityRateLabel
     },
     jobBreakdown,
