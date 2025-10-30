@@ -7867,6 +7867,40 @@ function renderCosts(){
     const summaryParts = container.querySelector("[data-maint-summary-parts]");
     const summaryTime = container.querySelector("[data-maint-summary-time]");
     const summaryTotal = container.querySelector("[data-maint-summary-total]");
+    const rateDisplay = container.querySelector("[data-maint-rate-value]");
+    const rateInfo = currentModel && currentModel.maintenanceOpportunityRate
+      ? currentModel.maintenanceOpportunityRate
+      : {};
+
+    const formatRateLabel = (value)=>{
+      const rate = Number(value);
+      if (!Number.isFinite(rate) || rate < 0){
+        return "$150.00/hr";
+      }
+      const decimals = rate < 1000 ? 2 : 0;
+      return `${new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
+      }).format(rate)}/hr`;
+    };
+
+    const readCurrentRate = ()=>{
+      if (typeof window.getOpportunityLossRate === "function"){
+        const existing = Number(window.getOpportunityLossRate());
+        if (Number.isFinite(existing) && existing >= 0) return existing;
+      }
+      const modelRate = Number(rateInfo?.rate);
+      return Number.isFinite(modelRate) && modelRate >= 0 ? modelRate : 150;
+    };
+
+    const updateRateLabel = (value)=>{
+      if (!rateDisplay) return;
+      rateDisplay.textContent = `Opportunity rate: ${formatRateLabel(value)}`;
+    };
+
+    updateRateLabel(readCurrentRate());
 
     const updateSummary = (key)=>{
       const win = windowMap.get(key) || null;
@@ -7911,6 +7945,35 @@ function renderCosts(){
         btn.removeEventListener("keydown", onKey);
       });
     });
+
+    const rateEditBtn = container.querySelector("[data-edit-maint-rate]");
+    if (rateEditBtn instanceof HTMLElement){
+      const handleEdit = (event)=>{
+        event.preventDefault();
+        const currentRate = readCurrentRate();
+        const promptValue = window.prompt("Set opportunity cost rate ($/hr)", String(currentRate));
+        if (promptValue == null) return;
+        const parsed = Number(promptValue);
+        if (!Number.isFinite(parsed) || parsed < 0){
+          window.alert?.("Enter a non-negative number for the opportunity cost rate.");
+          return;
+        }
+        if (typeof window.setOpportunityLossRate === "function"){
+          window.setOpportunityLossRate(parsed);
+        }
+        updateRateLabel(parsed);
+        if (typeof window.scheduleOpportunityRecompute === "function"){
+          window.scheduleOpportunityRecompute();
+        }
+        window.setTimeout(()=>{
+          if (typeof renderCosts === "function"){
+            renderCosts();
+          }
+        }, 0);
+      };
+      rateEditBtn.addEventListener("click", handleEdit);
+      cleanupFns.push(()=> rateEditBtn.removeEventListener("click", handleEdit));
+    }
 
     const defaultKey = buttons.find(btn => btn.classList.contains("is-active"))?.getAttribute("data-maint-cost-toggle")
       || (buttons[0] && buttons[0].getAttribute("data-maint-cost-toggle"));
@@ -8238,7 +8301,6 @@ function renderCosts(){
     });
   };
 
-  wireJobsHistoryShortcut(content.querySelector("[data-cost-jobs-history]"));
   wireJobsHistoryShortcut(content.querySelector("[data-cost-cutting-card]"));
   wireJobsHistoryShortcut(content.querySelector(".cost-chart-toggle-link"));
 
@@ -9350,6 +9412,49 @@ function computeCostModel(){
     });
   });
 
+  const completionKeys = new Set(
+    maintenanceTaskCompletions
+      .map(entry => (entry && entry.key != null) ? String(entry.key) : null)
+      .filter(Boolean)
+  );
+
+  taskEventsByDate.forEach((list, dateKey) => {
+    if (!Array.isArray(list) || !list.length) return;
+    const dateObj = dateKey ? new Date(`${dateKey}T00:00:00`) : null;
+    const sortTime = dateObj instanceof Date && !Number.isNaN(dateObj.getTime())
+      ? dateObj.getTime()
+      : Date.now();
+    list.forEach(info => {
+      if (!info || info.originalId == null) return;
+      const baseKey = `${info.originalId}_${dateKey || sortTime}`;
+      if (completionKeys.has(baseKey)) return;
+      const name = info.name || "Maintenance task";
+      const partsCost = Number.isFinite(Number(info.unitPrice)) && Number(info.unitPrice) > 0
+        ? Number(info.unitPrice)
+        : 0;
+      const downtimeResolved = Number(info.downtimeHours);
+      const downtimeHours = Number.isFinite(downtimeResolved) && downtimeResolved > 0
+        ? downtimeResolved
+        : defaultMinMaintenanceHours;
+      const timeCost = downtimeHours * opportunityLossRate;
+      const totalCost = partsCost + timeCost;
+      const hoursLabel = `${downtimeHours.toFixed(downtimeHours >= 10 ? 0 : 2)} hr`;
+      maintenanceTaskCompletions.push({
+        key: baseKey,
+        name,
+        partsCost,
+        downtimeHours,
+        timeCost,
+        totalCost,
+        sortTime,
+        date: dateObj instanceof Date && !Number.isNaN(dateObj.getTime()) ? dateObj : null,
+        dateISO: dateKey || (dateObj ? dateObj.toISOString() : null),
+        hoursLabel
+      });
+      completionKeys.add(baseKey);
+    });
+  });
+
   suppressionMap.forEach((entry, key) => {
     if (!maintenanceHistoryKeys.has(key)){
       suppressionMap.delete(key);
@@ -9588,6 +9693,13 @@ function computeCostModel(){
       const time = Number(entry.sortTime) || 0;
       return time >= cutoffTime;
     });
+    const cutoffLabel = cutoffDate instanceof Date && !Number.isNaN(cutoffDate.getTime())
+      ? cutoffDate.toLocaleDateString()
+      : null;
+    const nowLabel = now instanceof Date && !Number.isNaN(now.getTime())
+      ? now.toLocaleDateString()
+      : null;
+    const rangeLabel = cutoffLabel && nowLabel ? `${cutoffLabel} – ${nowLabel}` : null;
     const rows = rowsRaw.map(entry => {
       const dateObj = entry.date instanceof Date && !Number.isNaN(entry.date.getTime())
         ? entry.date
@@ -9609,15 +9721,14 @@ function computeCostModel(){
     const timeTotal = rowsRaw.reduce((sum, entry) => sum + (Number(entry.timeCost) || 0), 0);
     const totalCost = rowsRaw.reduce((sum, entry) => sum + (Number(entry.totalCost) || 0), 0);
     const count = rowsRaw.length;
-    const countLabel = count
-      ? `${count} task${count === 1 ? "" : "s"}`
-      : "0";
+    const countLabel = `${count} task${count === 1 ? "" : "s"}`;
     return {
       key: def.key,
       label: def.label,
       description: def.description || def.label,
       months: def.months,
       rows,
+      rangeLabel,
       emptyMessage: def.emptyMessage || "No completed maintenance tasks in this window.",
       summary: {
         count,
@@ -10194,6 +10305,8 @@ function computeCostModel(){
     emptyMessage: orderRows.length ? "" : "Approve or deny order requests to build the spend log."
   };
 
+  const opportunityRateLabel = `${formatterCurrency(opportunityLossRate, { decimals: opportunityLossRate < 1000 ? 2 : 0 })}/hr`;
+
   return {
     summaryCards,
     timeframeRows,
@@ -10204,6 +10317,10 @@ function computeCostModel(){
     historyEmpty,
     jobSummary,
     maintenanceTaskCostWindows,
+    maintenanceOpportunityRate: {
+      rate: opportunityLossRate,
+      label: opportunityRateLabel
+    },
     jobBreakdown,
     jobEmpty,
     chartNote,

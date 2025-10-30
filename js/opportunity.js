@@ -10,6 +10,46 @@
   const DEFAULT_MIN_MAINT_HOURS = 1;
   const DEFAULT_WORKDAY_START = 8;
 
+  function readStoredSetting(key){
+    try {
+      if (typeof window !== "undefined" && typeof window.localStorage !== "undefined"){
+        const stored = window.localStorage.getItem(`appSetting_${key}`);
+        if (stored != null){
+          try {
+            return JSON.parse(stored);
+          } catch (_err){
+            return stored;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("readStoredSetting failed", err);
+    }
+    return undefined;
+  }
+
+  function persistStoredSetting(key, value){
+    try {
+      if (typeof window !== "undefined" && typeof window.localStorage !== "undefined"){
+        window.localStorage.setItem(`appSetting_${key}`, JSON.stringify(value));
+      }
+    } catch (err) {
+      console.warn("persistStoredSetting failed", err);
+    }
+  }
+
+  function applySettingValue(key, value){
+    try {
+      if (!window.__APP_SETTINGS__ || typeof window.__APP_SETTINGS__ !== "object"){
+        window.__APP_SETTINGS__ = {};
+      }
+      window.__APP_SETTINGS__[key] = value;
+    } catch (err){
+      console.warn("applySettingValue failed", err);
+    }
+    persistStoredSetting(key, value);
+  }
+
   function getSetting(key, fallback){
     try {
       const settingsSources = [
@@ -26,6 +66,8 @@
     } catch (err) {
       console.warn("getSetting failed", err);
     }
+    const stored = readStoredSetting(key);
+    if (stored !== undefined) return stored === null ? fallback : stored;
     return fallback;
   }
 
@@ -38,7 +80,7 @@
     const raw = coerceNumber(getSetting("WORKDAY_HOURS", DEFAULT_WORKDAY_HOURS), DEFAULT_WORKDAY_HOURS);
     return raw > 0 ? raw : DEFAULT_WORKDAY_HOURS;
   })();
-  const BILL_RATE_OPP = (()=>{
+  let opportunityLossRate = (()=>{
     const raw = coerceNumber(getSetting("BILL_RATE_OPP", DEFAULT_RATE), DEFAULT_RATE);
     return raw >= 0 ? raw : DEFAULT_RATE;
   })();
@@ -381,6 +423,11 @@
       const holidaysSet = new Set(holidaysArray || []);
       const maintIntervals = calendarEventsToMaintIntervals(calendarEvents || []);
 
+      const rate = (typeof window.getOpportunityLossRate === "function")
+        ? Number(window.getOpportunityLossRate())
+        : opportunityLossRate;
+      const safeRate = Number.isFinite(rate) && rate >= 0 ? rate : opportunityLossRate;
+
       const rows = bounds.map(period => {
         const target = targetHours(period.start, period.end, holidaysSet);
         const run = sumPumpRunHours(pumpRuns, period.start, period.end);
@@ -388,8 +435,8 @@
         const opportunityHours = Math.max(0, target - run);
         const idle = Math.max(0, target - run - maintenance);
         const utilization = target > 0 ? (run / target) : 0;
-        const maintenanceOpportunityCost = maintenance * BILL_RATE_OPP;
-        const opportunityCost = opportunityHours * BILL_RATE_OPP;
+        const maintenanceOpportunityCost = maintenance * safeRate;
+        const opportunityCost = opportunityHours * safeRate;
         const totalCost = maintenanceOpportunityCost + opportunityCost;
         return {
           period: period.label,
@@ -442,10 +489,35 @@
     };
   }
 
-  window.getOpportunityLossRate = function(){ return BILL_RATE_OPP; };
+  function refreshOpportunityLossRate(){
+    const raw = coerceNumber(getSetting("BILL_RATE_OPP", DEFAULT_RATE), DEFAULT_RATE);
+    opportunityLossRate = raw >= 0 ? raw : DEFAULT_RATE;
+    return opportunityLossRate;
+  }
+
+  function setOpportunityLossRate(rate, { silent = false } = {}){
+    const value = coerceNumber(rate, opportunityLossRate);
+    if (!Number.isFinite(value) || value < 0) return opportunityLossRate;
+    if (Math.abs(value - opportunityLossRate) < 1e-6) return opportunityLossRate;
+    opportunityLossRate = value;
+    applySettingValue("BILL_RATE_OPP", value);
+    if (!silent && typeof scheduleOpportunityRecompute === "function"){
+      try {
+        scheduleOpportunityRecompute();
+      } catch (err){
+        console.warn("Failed to schedule opportunity recompute", err);
+      }
+    }
+    return opportunityLossRate;
+  }
+
+  window.getOpportunityLossRate = function(){ return opportunityLossRate; };
+  window.refreshOpportunityLossRate = refreshOpportunityLossRate;
+  window.setOpportunityLossRate = setOpportunityLossRate;
   window.getOpportunityWorkdayHours = function(){ return WORKDAY_HOURS; };
   window.recomputeOpportunityCost = recomputeOpportunityCost;
   window.scheduleOpportunityRecompute = scheduleOpportunityRecompute;
 
+  refreshOpportunityLossRate();
   scheduleOpportunityRecompute();
 })();

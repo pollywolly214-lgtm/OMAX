@@ -510,6 +510,16 @@ body.forecast-modal-open{ overflow:hidden; }
 .cost-table th, .cost-table td{ padding:8px; border:1px solid #e1e5ee; text-align:left; }
 .cost-table th{ background:#f4f7fb; font-weight:600; color:#3b475f; }
 
+.maintenance-task-costs{ display:flex; flex-direction:column; gap:16px; margin-top:16px; }
+.maintenance-task-costs-header{ display:flex; flex-direction:column; gap:12px; }
+.maintenance-task-cost-rate{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.maintenance-task-cost-rate-value{ font-weight:600; color:#0a1f3f; }
+.maintenance-task-cost-toggles{ display:flex; flex-wrap:wrap; gap:8px; }
+.maintenance-task-cost-summary{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; padding:12px; border:1px solid #e1e5ee; border-radius:8px; background:#f7f9fd; }
+.maintenance-task-cost-summary .label{ display:block; font-size:12px; text-transform:uppercase; color:#5b6885; margin-bottom:4px; }
+.maintenance-task-cost-table{ margin-top:8px; }
+.maintenance-task-cost-table tbody td{ vertical-align:top; }
+
 .cost-history{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
 .cost-history li{
   display:flex;

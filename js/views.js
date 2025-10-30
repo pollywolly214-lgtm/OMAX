@@ -1001,6 +1001,7 @@ function viewCosts(model){
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
   const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
+  const maintenanceRateInfo = data.maintenanceOpportunityRate || {};
   const orderSummary = data.orderRequestSummary || {};
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
   const overviewInsight = data.overviewInsight || "Totals blend the latest maintenance allocations, consumable burn rates, downtime burdens, and job margin data so you always see current cost exposure.";
@@ -1055,6 +1056,10 @@ function viewCosts(model){
     ? `
           <div class=\"maintenance-task-costs\" data-maint-cost>
             <div class=\"maintenance-task-costs-header\">
+              <div class=\"maintenance-task-cost-rate\">
+                <span class=\"maintenance-task-cost-rate-value\" data-maint-rate-value>Opportunity rate: ${esc(maintenanceRateInfo && maintenanceRateInfo.label ? maintenanceRateInfo.label : "$150.00/hr")}</span>
+                <button type=\"button\" class=\"time-efficiency-edit-btn\" data-edit-maint-rate>Edit</button>
+              </div>
               <div class=\"maintenance-task-cost-toggles\" role=\"tablist\">
                 ${maintenanceCostButtons}
               </div>
