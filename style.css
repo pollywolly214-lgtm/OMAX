@@ -3347,42 +3347,26 @@ body.modal-open .auth-bar {
   gap: 12px;
   margin-bottom: 12px;
 }
-.past-jobs-average-summary {
-  margin: 0 0 16px;
-  padding: 16px;
-  border-radius: 12px;
-  border: 1px solid #dbe2f2;
-  background: #f6f8fd;
+.past-jobs-average-row {
+  background: #f4f6fb;
+}
+.past-jobs-average-row td {
+  font-weight: 600;
+  border-bottom-color: #c9d4ef;
+  border-top-color: #c9d4ef;
+}
+.past-jobs-average-row td strong {
+  font-weight: 700;
   color: #10294f;
 }
-.past-jobs-average-title {
-  font-size: 12px;
+.past-jobs-average-label {
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  color: #10294f;
+  white-space: nowrap;
+}
+.past-jobs-average-empty {
   color: #5a6b85;
-  margin-bottom: 12px;
-}
-.past-jobs-average-grid {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-}
-.past-jobs-average-grid-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.past-jobs-average-grid-item .label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #5a6b85;
-}
-.past-jobs-average-grid-item strong {
-  font-size: 16px;
-  font-weight: 700;
+  font-weight: 500;
 }
 .past-jobs-summary div {
   display: flex;

@@ -2463,29 +2463,35 @@ function viewJobs(){
   const historyEmptyMessage = historySearchActive
     ? "No past cutting jobs match your search."
     : "Mark jobs complete to build a history of past cutting work.";
-  const completedAverageSummary = completedAverageMetrics
+  const completedAverageRow = completedAverageMetrics
     ? (() => {
-        const averageItems = [
-          { label: "Estimate", value: formatHours(completedAverageMetrics.estimate) },
-          { label: "Cost / unit", value: formatCurrency(completedAverageMetrics.materialCost, { showPlus: false }) },
-          { label: "Quantity", value: formatQuantity(completedAverageMetrics.materialQty) },
-          { label: "Material total", value: formatCurrency(completedAverageMetrics.materialTotal, { showPlus: false }) },
-          { label: "Charge rate", value: formatRate(completedAverageMetrics.chargeRate) },
-          { label: "Cost rate", value: formatRate(completedAverageMetrics.costRate) },
-          { label: "Net profit/hr", value: formatRate(completedAverageMetrics.netRate, { showPlus: true }) },
-          { label: "Net total", value: formatCurrency(completedAverageMetrics.netTotal, { showPlus: true }) }
-        ];
-        const itemsHtml = averageItems.map(item => `
-          <div class="past-jobs-average-grid-item">
-            <span class="label">${item.label}</span>
-            <strong>${item.value}</strong>
-          </div>
-        `).join("");
+        const estimateDisplay = formatHours(completedAverageMetrics.estimate);
+        const materialCostDisplay = formatCurrency(completedAverageMetrics.materialCost, { showPlus: false });
+        const materialQtyDisplay = formatQuantity(completedAverageMetrics.materialQty);
+        const materialTotalDisplay = formatCurrency(completedAverageMetrics.materialTotal, { showPlus: false });
+        const chargeRateDisplay = formatRate(completedAverageMetrics.chargeRate);
+        const costRateDisplay = formatRate(completedAverageMetrics.costRate);
+        const netRateDisplay = formatRate(completedAverageMetrics.netRate, { showPlus: true });
+        const netTotalDisplay = formatCurrency(completedAverageMetrics.netTotal, { showPlus: true });
+        const emptyCell = '<td class="past-jobs-average-empty">—</td>';
         return `
-          <div class="past-jobs-average-summary" role="status" aria-live="polite">
-            <div class="past-jobs-average-title">Average metrics per job</div>
-            <div class="past-jobs-average-grid">${itemsHtml}</div>
-          </div>
+          <tr class="past-jobs-average-row">
+            <td class="past-jobs-average-label">Average per job</td>
+            <td><strong>${estimateDisplay}</strong></td>
+            ${emptyCell}
+            <td><strong>${materialCostDisplay}</strong></td>
+            <td><strong>${materialQtyDisplay}</strong></td>
+            <td><strong>${materialTotalDisplay}</strong></td>
+            <td><strong>${chargeRateDisplay}</strong></td>
+            <td><strong>${costRateDisplay}</strong></td>
+            <td><strong>${netRateDisplay}</strong></td>
+            ${emptyCell}
+            ${emptyCell}
+            ${emptyCell}
+            <td><strong>${netTotalDisplay}</strong></td>
+            ${emptyCell}
+            ${emptyCell}
+          </tr>
         `;
       })()
     : "";
@@ -2516,7 +2522,7 @@ function viewJobs(){
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody>${completedRows}</tbody>
+        <tbody>${completedAverageRow}${completedRows}</tbody>
       </table>
     `
     : `<p class="small muted">${historyEmptyMessage}</p>`;
@@ -3012,7 +3018,6 @@ function viewJobs(){
         </div>
       </div>
       <div class="small muted past-jobs-hint">Results update as you type.</div>
-      ${completedAverageSummary}
       ${historyFilterStatus}
       ${completedTable}
     </div>
