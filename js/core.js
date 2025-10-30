@@ -47,6 +47,11 @@ if (typeof window !== "undefined"){
   window.getDailyCutHoursEntry = getDailyCutHoursEntry;
   window.normalizeDailyCutHours = normalizeDailyCutHours;
   window.normalizeDateISO = normalizeDateISO;
+  window.normalizeDowntimeEvents = normalizeDowntimeEvents;
+  window.getDowntimeEvents = getDowntimeEvents;
+  window.setDowntimeEvents = setDowntimeEvents;
+  window.addDowntimeEvent = addDowntimeEvent;
+  window.removeDowntimeEvent = removeDowntimeEvent;
 }
 
 /* Root helpers */
@@ -138,6 +143,13 @@ function clampDailyCutHours(value){
   const num = Number(value);
   if (!Number.isFinite(num) || num < 0) return 0;
   if (num > 24) return 24;
+  return num;
+}
+
+function clampNonNegativeNumber(value, max = null){
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return 0;
+  if (max != null && Number.isFinite(max) && num > max) return max;
   return num;
 }
 
@@ -1103,6 +1115,16 @@ if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
 if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+if (!Array.isArray(window.downtimeEvents)){
+  if (Array.isArray(window.downTimes)){
+    window.downtimeEvents = normalizeDowntimeEvents(window.downTimes);
+  }else{
+    window.downtimeEvents = [];
+  }
+}
+window.downTimes = Array.isArray(window.downtimeEvents)
+  ? window.downtimeEvents.map(entry => ({ dateISO: entry.dateISO }))
+  : [];
 if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
@@ -1122,6 +1144,7 @@ let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
 let dailyCutHours = window.dailyCutHours;
+let downtimeEvents = window.downtimeEvents;
 let jobFolders = window.jobFolders;
 
 function refreshGlobalCollections(){
@@ -1153,6 +1176,9 @@ function refreshGlobalCollections(){
 
   if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
   dailyCutHours = window.dailyCutHours;
+
+  if (!Array.isArray(window.downtimeEvents)) window.downtimeEvents = [];
+  downtimeEvents = window.downtimeEvents;
 
   if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
   jobFolders = window.jobFolders;
@@ -1263,6 +1289,9 @@ function snapshotState(){
     garnetCleanings,
     dailyCutHours: Array.isArray(dailyCutHours)
       ? dailyCutHours.map(entry => ({ ...entry }))
+      : [],
+    downtimeEvents: Array.isArray(downtimeEvents)
+      ? downtimeEvents.map(entry => ({ ...entry }))
       : [],
     pumpEff: safePumpEff,
     deletedItems: trashSnapshot,
@@ -1570,7 +1599,13 @@ function normalizeDailyCutHours(list){
       if (!raw || typeof raw !== "object") return;
       const key = normalizeDateISO(raw.dateISO || raw.date || raw.dateIso);
       if (!key) return;
-      const hours = clampDailyCutHours(raw.hours);
+      let runHours = raw.runHours;
+      let idleHours = raw.idleHours;
+      if (runHours == null && raw.hours != null){
+        runHours = raw.hours;
+      }
+      const run = clampDailyCutHours(runHours);
+      const idle = clampDailyCutHours(idleHours);
       const source = raw.source === "manual" ? "manual" : "auto";
       const updatedAt = typeof raw.updatedAtISO === "string"
         ? raw.updatedAtISO
@@ -1579,7 +1614,8 @@ function normalizeDailyCutHours(list){
       if (!existing){
         map.set(key, {
           dateISO: key,
-          hours,
+          runHours: run,
+          idleHours: idle,
           source,
           updatedAtISO: updatedAt || null
         });
@@ -1594,7 +1630,8 @@ function normalizeDailyCutHours(list){
       if (source === "manual" && existing.source !== "manual"){
         existing.source = "manual";
       }
-      existing.hours = hours;
+      existing.runHours = run;
+      existing.idleHours = idle;
       if (updatedAt && (!existing.updatedAtISO || existing.updatedAtISO < updatedAt)){
         existing.updatedAtISO = updatedAt;
       }
@@ -1611,15 +1648,28 @@ function getDailyCutHoursEntry(dateISO){
   return dailyCutHours.find(entry => entry && entry.dateISO === key) || null;
 }
 
-function setDailyCutHoursEntry(dateISO, hours, { source = "manual", preserveManual = false } = {}){
+function setDailyCutHoursEntry(dateISO, value, { source = "manual", preserveManual = false, runHours, idleHours } = {}){
   const key = normalizeDateISO(dateISO);
   if (!key) return false;
   if (!Array.isArray(dailyCutHours)){
     dailyCutHours = [];
     if (typeof window !== "undefined") window.dailyCutHours = dailyCutHours;
   }
-  const value = clampDailyCutHours(hours);
   const src = source === "manual" ? "manual" : "auto";
+  let runVal = runHours;
+  let idleVal = idleHours;
+  if (value != null && typeof value === "object" && !Array.isArray(value)){
+    if (value.runHours != null) runVal = value.runHours;
+    if (value.idleHours != null) idleVal = value.idleHours;
+    if (runVal == null && value.hours != null) runVal = value.hours;
+  }else if (runVal == null){
+    runVal = value;
+  }
+  if (idleVal == null && value != null && typeof value !== "object"){
+    idleVal = 0;
+  }
+  const run = clampDailyCutHours(runVal);
+  const idle = clampDailyCutHours(idleVal);
   const idx = dailyCutHours.findIndex(entry => entry && entry.dateISO === key);
   const nowISO = new Date().toISOString();
   if (idx >= 0){
@@ -1632,26 +1682,162 @@ function setDailyCutHoursEntry(dateISO, hours, { source = "manual", preserveManu
       : (existing.source === "manual" && src !== "manual" && preserveManual)
         ? existing.source
         : (existing.source === "manual" && src !== "manual" ? existing.source : src);
-    if (existing.hours === value && existing.source === nextSource){
+    if (existing.runHours === run && existing.idleHours === idle && existing.source === nextSource){
       existing.updatedAtISO = existing.updatedAtISO || nowISO;
       return false;
     }
     dailyCutHours[idx] = {
       dateISO: key,
-      hours: value,
+      runHours: run,
+      idleHours: idle,
       source: nextSource,
       updatedAtISO: nowISO
     };
   }else{
     dailyCutHours.push({
       dateISO: key,
-      hours: value,
+      runHours: run,
+      idleHours: idle,
       source: src,
       updatedAtISO: nowISO
     });
   }
   dailyCutHours.sort((a, b)=> a.dateISO.localeCompare(b.dateISO));
   if (typeof window !== "undefined") window.dailyCutHours = dailyCutHours;
+  return true;
+}
+
+function normalizeDowntimeEvents(list){
+  const normalized = [];
+  const seenIds = new Set();
+  if (Array.isArray(list)){
+    list.forEach(raw => {
+      if (!raw) return;
+      let entry = null;
+      if (typeof raw === "string"){
+        const dateISO = normalizeDateISO(raw);
+        if (!dateISO) return;
+        entry = {
+          id: genId("downtime"),
+          dateISO,
+          durationHours: 0,
+          reason: "",
+          notes: "",
+          costImpact: 0
+        };
+      }else if (typeof raw === "object"){
+        const dateISO = normalizeDateISO(raw.dateISO || raw.date || raw.dateIso);
+        if (!dateISO) return;
+        let id = raw.id != null ? String(raw.id) : "";
+        if (!id){
+          id = genId("downtime");
+        }
+        let duration = raw.durationHours;
+        if (duration == null && raw.duration != null) duration = raw.duration;
+        if (duration == null && raw.hours != null) duration = raw.hours;
+        const durationHours = clampNonNegativeNumber(duration);
+        const costNum = Number(raw.costImpact);
+        const costImpact = Number.isFinite(costNum) ? costNum : 0;
+        const reason = typeof raw.reason === "string" ? raw.reason.trim() : "";
+        const notes = typeof raw.notes === "string" ? raw.notes : "";
+        entry = {
+          id,
+          dateISO,
+          durationHours,
+          reason,
+          notes,
+          costImpact
+        };
+      }
+      if (!entry) return;
+      while (seenIds.has(entry.id)){
+        entry.id = genId(entry.id || "downtime");
+      }
+      seenIds.add(entry.id);
+      normalized.push(entry);
+    });
+  }
+  normalized.sort((a, b)=>{
+    const cmp = String(a.dateISO || "").localeCompare(String(b.dateISO || ""));
+    if (cmp !== 0) return cmp;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+  return normalized;
+}
+
+function syncDowntimeEventsState(){
+  if (!Array.isArray(downtimeEvents)) downtimeEvents = [];
+  downtimeEvents.sort((a, b)=>{
+    const cmp = String(a.dateISO || "").localeCompare(String(b.dateISO || ""));
+    if (cmp !== 0) return cmp;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+  if (typeof window !== "undefined"){
+    window.downtimeEvents = downtimeEvents;
+    window.downTimes = downtimeEvents.map(entry => ({ dateISO: entry.dateISO }));
+  }
+  return downtimeEvents;
+}
+
+function getDowntimeEvents(){
+  if (!Array.isArray(downtimeEvents)) downtimeEvents = [];
+  return downtimeEvents;
+}
+
+function setDowntimeEvents(list){
+  downtimeEvents = normalizeDowntimeEvents(list);
+  return syncDowntimeEventsState();
+}
+
+function addDowntimeEvent(partial, { replaceExisting = false } = {}){
+  const normalizedList = normalizeDowntimeEvents([partial]);
+  if (!normalizedList.length) return { added: false, reason: "invalid" };
+  const entry = normalizedList[0];
+  if (!Array.isArray(downtimeEvents)) downtimeEvents = [];
+  const idxById = downtimeEvents.findIndex(existing => existing && existing.id === entry.id);
+  if (idxById >= 0){
+    const merged = { ...downtimeEvents[idxById], ...entry, id: downtimeEvents[idxById].id };
+    downtimeEvents[idxById] = merged;
+    syncDowntimeEventsState();
+    return { added: true, updated: true, entry: merged };
+  }
+  const idxByDate = downtimeEvents.findIndex(existing => existing && existing.dateISO === entry.dateISO);
+  if (idxByDate >= 0 && !replaceExisting){
+    return { added: false, reason: "duplicate-date", entry: downtimeEvents[idxByDate] };
+  }
+  if (idxByDate >= 0){
+    const merged = { ...downtimeEvents[idxByDate], ...entry };
+    if (!merged.id) merged.id = downtimeEvents[idxByDate].id || entry.id;
+    downtimeEvents[idxByDate] = merged;
+    syncDowntimeEventsState();
+    return { added: true, replaced: true, entry: merged };
+  }
+  downtimeEvents.push(entry);
+  syncDowntimeEventsState();
+  return { added: true, entry };
+}
+
+function removeDowntimeEvent(identifier){
+  if (!Array.isArray(downtimeEvents) || !downtimeEvents.length) return false;
+  let id = null;
+  let dateISO = null;
+  if (identifier && typeof identifier === "object"){
+    if (identifier.id != null) id = String(identifier.id);
+    if (identifier.dateISO != null) dateISO = normalizeDateISO(identifier.dateISO);
+  }else if (typeof identifier === "string"){
+    id = identifier;
+    dateISO = normalizeDateISO(identifier);
+  }
+  let idx = -1;
+  if (id){
+    idx = downtimeEvents.findIndex(entry => entry && String(entry.id) === id);
+  }
+  if (idx < 0 && dateISO){
+    idx = downtimeEvents.findIndex(entry => entry && entry.dateISO === dateISO);
+  }
+  if (idx < 0) return false;
+  downtimeEvents.splice(idx, 1);
+  syncDowntimeEventsState();
   return true;
 }
 
@@ -1677,6 +1863,10 @@ function adoptState(doc){
   }
   garnetCleanings = Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [];
   dailyCutHours = normalizeDailyCutHours(Array.isArray(data.dailyCutHours) ? data.dailyCutHours : []);
+  const rawDowntime = Array.isArray(data.downtimeEvents)
+    ? data.downtimeEvents
+    : (Array.isArray(data.downTimes) ? data.downTimes : []);
+  downtimeEvents = normalizeDowntimeEvents(rawDowntime);
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -1687,6 +1877,8 @@ function adoptState(doc){
   window.orderRequests = orderRequests;
   window.garnetCleanings = garnetCleanings;
   window.dailyCutHours = dailyCutHours;
+  window.downtimeEvents = downtimeEvents;
+  syncDowntimeEventsState();
   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
   window.deletedItems = deletedItems;
   purgeExpiredDeletedItems();

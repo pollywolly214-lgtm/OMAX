@@ -37,7 +37,8 @@ function setCalendarPendingHours(dateISO, hours){
   const value = clampDailyCutHours(hours);
   if (!(calendarHoursPending instanceof Map)) calendarHoursPending = new Map();
   const entry = typeof getDailyCutHoursEntry === "function" ? getDailyCutHoursEntry(key) : null;
-  const matchesExisting = entry && Math.abs(Number(entry.hours) - value) < 0.001;
+  const existingRun = entry && entry.runHours != null ? Number(entry.runHours) : (entry && entry.hours != null ? Number(entry.hours) : null);
+  const matchesExisting = existingRun != null && Math.abs(existingRun - value) < 0.001;
   if (matchesExisting){
     if (calendarHoursPending.has(key)){
       calendarHoursPending.delete(key);
@@ -102,7 +103,8 @@ function promptCalendarDayHours(dateISO){
   if (!key) return false;
   const entry = typeof getDailyCutHoursEntry === "function" ? getDailyCutHoursEntry(key) : null;
   const pending = getCalendarPendingHours(key);
-  const current = pending != null ? pending : (entry && entry.hours != null ? Number(entry.hours) : 0);
+  const currentRun = entry && entry.runHours != null ? Number(entry.runHours) : (entry && entry.hours != null ? Number(entry.hours) : 0);
+  const current = pending != null ? pending : (Number.isFinite(currentRun) ? currentRun : 0);
   const displayDate = (()=>{
     try{
       const parsed = parseDateLocal(key);
@@ -1344,11 +1346,14 @@ function renderCalendar(){
   }
 
   const downSet = new Set();
-  if (Array.isArray(window.downTimes)){
-    window.downTimes.forEach(entry => {
+  const downtimeSource = typeof getDowntimeEvents === "function"
+    ? getDowntimeEvents()
+    : (Array.isArray(window.downtimeEvents) ? window.downtimeEvents : Array.isArray(window.downTimes) ? window.downTimes : []);
+  if (Array.isArray(downtimeSource)){
+    downtimeSource.forEach(entry => {
       if (!entry) return;
-      const iso = typeof entry === "string" ? entry : entry.dateISO;
-      if (iso) downSet.add(String(iso));
+      const iso = normalizeDateKey(entry.dateISO || (typeof entry === "string" ? entry : null));
+      if (iso) downSet.add(iso);
     });
   }
 
@@ -1434,7 +1439,9 @@ function renderCalendar(){
       cell.dataset.dateIso = key;
       const pendingValue = getCalendarPendingHours(key);
       const record = hoursMap.get(key);
-      const baseHours = record && record.hours != null ? clampDailyCutHours(record.hours) : 0;
+      const baseHours = record && record.runHours != null
+        ? clampDailyCutHours(record.runHours)
+        : (record && record.hours != null ? clampDailyCutHours(record.hours) : 0);
       const hoursValue = pendingValue != null ? pendingValue : baseHours;
       const source = pendingValue != null ? "pending" : (record ? record.source : null);
       const hoursEl = document.createElement("div");
