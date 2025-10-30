@@ -1252,42 +1252,11 @@ async function promptClearAllData(trigger){
     alert("Clearing data is not available right now.");
     return;
   }
-  const chooseScope = async ()=>{
-    const choice = await showConfirmChoices({
-      title: "What should be deleted?",
-      message: "Choose the data to remove. You can include both categories in the next step.",
-      confirmText: "Tasks & jobs",
-      confirmVariant: "danger",
-      secondaryText: "Waterjet tracking data",
-      secondaryVariant: "secondary",
-      cancelText: "Cancel"
-    });
-    if (choice === "cancel") return null;
-    if (choice === "confirm"){
-      const includeTracking = await showConfirmModal({
-        title: "Also remove tracking data?",
-        message: "Delete waterjet tracking data (efficiency metrics, pump history, and logged hours) as well?",
-        confirmText: "Delete both",
-        confirmVariant: "danger",
-        cancelText: "Tasks & jobs only"
-      });
-      return includeTracking ? SCOPE_EVERYTHING : SCOPE_TASKS_JOBS;
-    }
-    if (choice === "secondary"){
-      const includeTasks = await showConfirmModal({
-        title: "Also remove tasks & jobs?",
-        message: "Delete every maintenance task and cutting job along with tracking data?",
-        confirmText: "Delete both",
-        confirmVariant: "danger",
-        cancelText: "Tracking data only"
-      });
-      return includeTasks ? SCOPE_EVERYTHING : SCOPE_TRACKING;
-    }
-    return null;
-  };
 
-  const scope = await chooseScope();
-  if (!scope) return;
+  const selection = await showClearDataScopeModal();
+  if (!selection) return;
+
+  const { scope } = selection;
 
   const expected = (typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
     ? window.CLEAR_DATA_PASSWORD
@@ -5156,6 +5125,182 @@ function showConfirmChoices(options){
     if (focusTarget && typeof focusTarget.focus === "function"){
       requestAnimationFrame(()=> focusTarget.focus());
     }
+  });
+}
+
+const clearDataScopeModalState = {
+  root: null,
+  form: null,
+  tasksInput: null,
+  trackingInput: null,
+  warningEl: null,
+  cancelBtn: null,
+  closeBtn: null,
+  submitBtn: null
+};
+
+function ensureClearDataScopeModal(){
+  const template = `
+    <div class="modal-card dashboard-modal-card clear-data-modal-card" data-clear-scope-card>
+      <button type="button" class="modal-close" data-clear-scope-close>×</button>
+      <h4>Delete site data</h4>
+      <p class="confirm-modal-copy">Choose which data to delete. You can check more than one category.</p>
+      <form data-clear-scope-form>
+        <div class="clear-data-modal-options" data-clear-scope-options>
+          <label>
+            <input type="checkbox" data-clear-scope-tasks>
+            <span>Maintenance tasks &amp; cutting jobs</span>
+          </label>
+          <label>
+            <input type="checkbox" data-clear-scope-tracking>
+            <span>Waterjet tracking data (efficiency, pump logs, and machine hours)</span>
+          </label>
+        </div>
+        <p class="confirm-modal-copy" data-clear-scope-warning></p>
+        <div class="modal-actions">
+          <button type="button" class="secondary" data-clear-scope-cancel>Cancel</button>
+          <button type="submit" class="danger" data-clear-scope-submit disabled>Continue</button>
+        </div>
+      </form>
+    </div>
+  `.trim();
+
+  let root = clearDataScopeModalState.root;
+  if (!root || !root.isConnected){
+    root = document.getElementById("clearDataScopeModal");
+    if (!root){
+      root = document.createElement("div");
+      root.id = "clearDataScopeModal";
+      root.className = "modal-backdrop";
+      root.setAttribute("hidden", "");
+      const host = document.body || document.documentElement || document;
+      host.appendChild(root);
+    }
+    clearDataScopeModalState.root = root;
+  }
+
+  if (clearDataScopeModalState.root && clearDataScopeModalState.root.innerHTML.trim() === ""){
+    clearDataScopeModalState.root.innerHTML = template;
+  }
+
+  const ensureStructure = ()=>{
+    const host = clearDataScopeModalState.root;
+    if (!host) return;
+    if (!host.querySelector("[data-clear-scope-form]")){
+      host.innerHTML = template;
+    }
+    clearDataScopeModalState.form = host.querySelector("[data-clear-scope-form]");
+    clearDataScopeModalState.tasksInput = host.querySelector("[data-clear-scope-tasks]");
+    clearDataScopeModalState.trackingInput = host.querySelector("[data-clear-scope-tracking]");
+    clearDataScopeModalState.warningEl = host.querySelector("[data-clear-scope-warning]");
+    clearDataScopeModalState.cancelBtn = host.querySelector("[data-clear-scope-cancel]");
+    clearDataScopeModalState.closeBtn = host.querySelector("[data-clear-scope-close]");
+    clearDataScopeModalState.submitBtn = host.querySelector("[data-clear-scope-submit]");
+  };
+
+  ensureStructure();
+  return clearDataScopeModalState;
+}
+
+function showClearDataScopeModal(){
+  const state = ensureClearDataScopeModal();
+  const root = state.root;
+  const form = state.form;
+  const submitBtn = state.submitBtn;
+  const tasksInput = state.tasksInput;
+  const trackingInput = state.trackingInput;
+  const warningEl = state.warningEl;
+  if (!root || !form || !submitBtn || !tasksInput || !trackingInput || !warningEl){
+    return Promise.resolve(null);
+  }
+
+  const describeSelection = ()=>{
+    const hasTasks = !!tasksInput.checked;
+    const hasTracking = !!trackingInput.checked;
+    if (!hasTasks && !hasTracking){
+      warningEl.textContent = "Select at least one data category to continue.";
+      warningEl.setAttribute("data-warning", "empty");
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Continue";
+      return;
+    }
+    submitBtn.disabled = false;
+    submitBtn.textContent = hasTasks && hasTracking ? "Delete both" : "Continue";
+    warningEl.removeAttribute("data-warning");
+    if (hasTasks && hasTracking){
+      warningEl.textContent = "Full site restore point will be created before deleting tasks, jobs, orders, and tracking data.";
+    } else if (hasTasks){
+      warningEl.textContent = "All maintenance tasks and cutting jobs for every user will be deleted.";
+    } else {
+      warningEl.textContent = "All waterjet tracking data (efficiency metrics, pump logs, machine hours) will be deleted.";
+    }
+  };
+
+  tasksInput.checked = false;
+  trackingInput.checked = false;
+  describeSelection();
+
+  let resolved = false;
+
+  return new Promise(resolve => {
+    const finish = (value)=>{
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve(value);
+    };
+
+    const cleanup = ()=>{
+      root.classList.remove("is-visible");
+      root.setAttribute("hidden", "");
+      document.body?.classList.remove("modal-open");
+      form.removeEventListener("submit", onSubmit);
+      cancelBtn?.removeEventListener("click", onCancel);
+      closeBtn?.removeEventListener("click", onCancel);
+      root.removeEventListener("click", onBackdropClick);
+      document.removeEventListener("keydown", onKeyDown);
+      tasksInput.removeEventListener("change", onChange);
+      trackingInput.removeEventListener("change", onChange);
+    };
+
+    const cancelBtn = state.cancelBtn;
+    const closeBtn = state.closeBtn;
+
+    const onChange = ()=> describeSelection();
+    const onCancel = ()=> finish(null);
+    const onBackdropClick = (event)=>{ if (event.target === root) finish(null); };
+    const onKeyDown = (event)=>{ if (event.key === "Escape") finish(null); };
+
+    const onSubmit = (event)=>{
+      event.preventDefault();
+      const hasTasks = !!tasksInput.checked;
+      const hasTracking = !!trackingInput.checked;
+      if (!hasTasks && !hasTracking){
+        describeSelection();
+        return;
+      }
+      const scope = hasTasks && hasTracking
+        ? SCOPE_EVERYTHING
+        : hasTasks
+          ? SCOPE_TASKS_JOBS
+          : SCOPE_TRACKING;
+      finish({ scope, hasTasks, hasTracking });
+    };
+
+    form.addEventListener("submit", onSubmit);
+    tasksInput.addEventListener("change", onChange);
+    trackingInput.addEventListener("change", onChange);
+    cancelBtn?.addEventListener("click", onCancel);
+    closeBtn?.addEventListener("click", onCancel);
+    root.addEventListener("click", onBackdropClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    root.classList.add("is-visible");
+    root.removeAttribute("hidden");
+    document.body?.classList.add("modal-open");
+    requestAnimationFrame(()=>{
+      if (tasksInput && typeof tasksInput.focus === "function"){ tasksInput.focus(); }
+    });
   });
 }
 
