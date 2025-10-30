@@ -11056,6 +11056,23 @@ function renderJobs(){
 
   if (!content.dataset.jobOverlapEvents){
     content.dataset.jobOverlapEvents = "1";
+    const rerenderJobsView = ()=>{
+      const run = ()=>{
+        if (typeof renderJobs === "function"){
+          renderJobs();
+        } else if (typeof window !== "undefined" && typeof window.renderJobs === "function"){
+          window.renderJobs();
+        }
+      };
+      if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function"){
+        window.requestAnimationFrame(run);
+      } else if (typeof requestAnimationFrame === "function"){
+        requestAnimationFrame(run);
+      } else {
+        run();
+      }
+    };
+
     content.addEventListener("click", (event)=>{
       const dismissControl = event.target.closest("[data-job-overlap-dismiss]");
       if (dismissControl){
@@ -11070,25 +11087,23 @@ function renderJobs(){
             : "")
           || "";
         if (alert){
-          alert.hidden = true;
-          alert.setAttribute("aria-hidden", "true");
+          if (typeof alert.remove === "function"){
+            alert.remove();
+          } else {
+            alert.hidden = true;
+            alert.setAttribute("aria-hidden", "true");
+          }
         }
         if (reminder){
           reminder.hidden = false;
           reminder.removeAttribute("aria-hidden");
-          requestAnimationFrame(()=>{
-            try {
-              reminder.focus({ preventScroll: true });
-            } catch (_err) {
-              reminder.focus?.();
-            }
-          });
         }
         if (typeof window !== "undefined"){
           window.activeJobOverlapSignature = signature;
           window.dismissedJobOverlapSignature = signature;
-          window.pendingJobFocus = null;
+          window.pendingJobFocus = signature ? { type: "jobOverlapReminder" } : null;
         }
+        rerenderJobsView();
         return;
       }
 
@@ -11097,7 +11112,6 @@ function renderJobs(){
         event.preventDefault();
         const notice = reminderControl.closest("[data-job-overlap-notice]");
         const alert = notice?.querySelector("[data-job-overlap-alert]");
-        const dismissBtn = alert?.querySelector("[data-job-overlap-dismiss]");
         const signature = notice?.getAttribute("data-job-overlap-signature")
           || alert?.getAttribute("data-job-overlap-signature")
           || (typeof window !== "undefined" && typeof window.activeJobOverlapSignature === "string"
@@ -11106,23 +11120,12 @@ function renderJobs(){
           || "";
         reminderControl.hidden = true;
         reminderControl.setAttribute("aria-hidden", "true");
-        if (alert){
-          alert.hidden = false;
-          alert.removeAttribute("aria-hidden");
-          requestAnimationFrame(()=>{
-            if (!dismissBtn) return;
-            try {
-              dismissBtn.focus({ preventScroll: true });
-            } catch (_err) {
-              dismissBtn.focus();
-            }
-          });
-        }
         if (typeof window !== "undefined"){
           window.activeJobOverlapSignature = signature;
           window.dismissedJobOverlapSignature = "";
-          window.pendingJobFocus = null;
+          window.pendingJobFocus = { type: "jobOverlapDismiss" };
         }
+        rerenderJobsView();
       }
     });
   }
