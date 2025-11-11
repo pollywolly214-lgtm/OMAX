@@ -1862,7 +1862,25 @@ async function loadFromCloud(){
     const snap = await FB.docRef.get();
     if (snap.exists){
       const data = snap.data() || {};
-      const needsSeed = !Array.isArray(data.tasksInterval) || data.tasksInterval.length === 0;
+      const hasMeaningfulList = (value)=> Array.isArray(value) && value.length > 0;
+      const docHasSchema = Number.isFinite(Number(data.schema));
+      const docHasAnyData = (
+        hasMeaningfulList(data.totalHistory) ||
+        hasMeaningfulList(data.tasksInterval) ||
+        hasMeaningfulList(data.tasksAsReq) ||
+        hasMeaningfulList(data.inventory) ||
+        hasMeaningfulList(data.cuttingJobs) ||
+        hasMeaningfulList(data.completedCuttingJobs) ||
+        hasMeaningfulList(data.orderRequests) ||
+        hasMeaningfulList(data.dailyCutHours) ||
+        hasMeaningfulList(data.garnetCleanings) ||
+        hasMeaningfulList(data.jobFolders) ||
+        (data.pumpEff && (
+          hasMeaningfulList(data.pumpEff.entries) ||
+          hasMeaningfulList(data.pumpEff.notes)
+        ))
+      );
+      const needsSeed = !docHasSchema && !docHasAnyData;
       if (needsSeed){
         const pe = (typeof window.pumpEff === "object" && window.pumpEff)
           ? window.pumpEff
