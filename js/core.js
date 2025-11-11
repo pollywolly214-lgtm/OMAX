@@ -1862,25 +1862,16 @@ async function loadFromCloud(){
     const snap = await FB.docRef.get();
     if (snap.exists){
       const data = snap.data() || {};
-      const hasMeaningfulList = (value)=> Array.isArray(value) && value.length > 0;
-      const docHasSchema = Number.isFinite(Number(data.schema));
-      const docHasAnyData = (
-        hasMeaningfulList(data.totalHistory) ||
-        hasMeaningfulList(data.tasksInterval) ||
-        hasMeaningfulList(data.tasksAsReq) ||
-        hasMeaningfulList(data.inventory) ||
-        hasMeaningfulList(data.cuttingJobs) ||
-        hasMeaningfulList(data.completedCuttingJobs) ||
-        hasMeaningfulList(data.orderRequests) ||
-        hasMeaningfulList(data.dailyCutHours) ||
-        hasMeaningfulList(data.garnetCleanings) ||
-        hasMeaningfulList(data.jobFolders) ||
-        (data.pumpEff && (
-          hasMeaningfulList(data.pumpEff.entries) ||
-          hasMeaningfulList(data.pumpEff.notes)
-        ))
-      );
-      const needsSeed = !docHasSchema && !docHasAnyData;
+      const hasMeaningfulValue = (value)=>{
+        if (Array.isArray(value)) return value.length > 0;
+        if (value && typeof value === "object"){
+          return Object.keys(value).length > 0;
+        }
+        return value != null && value !== "";
+      };
+      const docKeys = Object.keys(data || {}).filter((key)=> key !== "__name__" && key !== "schema");
+      const docHasMeaningfulData = docKeys.some((key)=> hasMeaningfulValue(data[key]));
+      const needsSeed = !docHasMeaningfulData;
       if (needsSeed){
         const pe = (typeof window.pumpEff === "object" && window.pumpEff)
           ? window.pumpEff
