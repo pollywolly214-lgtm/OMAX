@@ -15,7 +15,24 @@ const APP_SCHEMA = 72;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
-const WORKSPACE_ID = "schreiner-robotics";
+const WORKSPACE_ID = (() => {
+  const fromEnv =
+    (typeof process !== "undefined" &&
+     process &&
+     typeof process.env === "object" &&
+     typeof process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID === "string" &&
+     process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID.trim())
+      ? process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID.trim()
+      : null;
+  if (fromEnv) return fromEnv;
+  return "github-prod";
+})();
+if (typeof window !== "undefined") {
+  window.WORKSPACE_ID = WORKSPACE_ID;
+}
+if (typeof window !== "undefined") {
+  window.workspaceRef = null;
+}
 const CUTTING_BASELINE_WEEKLY_HOURS = 56;
 const CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS / 7;
 const TIME_EFFICIENCY_WINDOWS = [
@@ -240,7 +257,7 @@ function toast(msg){
 })();
 
 /* ====================== FIREBASE =========================== */
-let FB = { app:null, auth:null, db:null, user:null, docRef:null, ready:false };
+let FB = { app:null, auth:null, db:null, user:null, docRef:null, workspaceRef:null, ready:false };
 
 async function initFirebase(){
   if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
@@ -334,12 +351,17 @@ async function initFirebase(){
       if (btnIn)  btnIn.style.display  = "none";
       if (btnOut) btnOut.style.display = "inline-block";
 
-      FB.docRef = FB.db.collection("workspaces").doc(WORKSPACE_ID).collection("app").doc("state");
+      FB.workspaceRef = FB.db.collection("workspaces").doc(WORKSPACE_ID);
+      if (typeof window !== "undefined") window.workspaceRef = FB.workspaceRef;
+      FB.docRef = FB.workspaceRef;
       FB.ready = true;
       await loadFromCloud();
       route();
     }else{
       FB.ready = false;
+      FB.workspaceRef = null;
+      FB.docRef = null;
+      if (typeof window !== "undefined") window.workspaceRef = null;
       if (statusEl) statusEl.textContent = "Not signed in";
       if (btnIn)  btnIn.style.display  = "inline-block";
       if (btnOut) btnOut.style.display = "none";
@@ -1862,66 +1884,32 @@ async function loadFromCloud(){
     const snap = await FB.docRef.get();
     if (snap.exists){
       const data = snap.data() || {};
-      const needsSeed = !Array.isArray(data.tasksInterval) || data.tasksInterval.length === 0;
-      if (needsSeed){
-        const pe = (typeof window.pumpEff === "object" && window.pumpEff)
-          ? window.pumpEff
-          : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
-        if (!Array.isArray(pe.entries)) pe.entries = [];
-        if (!Array.isArray(pe.notes)) pe.notes = [];
-        const seededFolders = normalizeSettingsFolders(data.settingsFolders || data.folders);
-        const seededFoldersPayload = cloneFolders(seededFolders);
-        const seeded = {
-          schema:APP_SCHEMA,
-          totalHistory: Array.isArray(data.totalHistory) ? data.totalHistory : [],
-          tasksInterval: defaultIntervalTasks.slice(),
-          tasksAsReq: Array.isArray(data.tasksAsReq) && data.tasksAsReq.length ? data.tasksAsReq : defaultAsReqTasks.slice(),
-          inventory: Array.isArray(data.inventory) && data.inventory.length ? data.inventory : seedInventoryFromTasks(),
-          cuttingJobs: Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [],
-          completedCuttingJobs: Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [],
-          garnetCleanings: Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [],
-          orderRequests: Array.isArray(data.orderRequests) ? normalizeOrderRequests(data.orderRequests) : [createOrderRequest()],
-          orderRequestTab: typeof data.orderRequestTab === "string" ? data.orderRequestTab : "active",
-          dailyCutHours: Array.isArray(data.dailyCutHours) ? normalizeDailyCutHours(data.dailyCutHours) : [],
-          settingsFolders: seededFoldersPayload,
-          folders: cloneFolders(seededFoldersPayload),
-          jobFolders: defaultJobFolders(),
-          pumpEff: pe,
-          deletedItems: normalizeDeletedItems(data.deletedItems || data.deleted_items || []),
-          dashboardLayout: cloneStructured(data.dashboardLayout && typeof data.dashboardLayout === "object" ? data.dashboardLayout : {}) || {},
-          costLayout: cloneStructured(data.costLayout && typeof data.costLayout === "object" ? data.costLayout : {}) || {},
-          jobLayout: cloneStructured(data.jobLayout && typeof data.jobLayout === "object" ? data.jobLayout : {}) || {}
-        };
-        adoptState(seeded);
-        resetHistoryToCurrent();
-        await FB.docRef.set(seeded, { merge:true });
-      }else{
-        const docHasSettingsFolders = Array.isArray(data.settingsFolders);
-        const docHasLegacyFolders = Array.isArray(data.folders);
-        const docFoldersRaw = docHasSettingsFolders
-          ? data.settingsFolders
-          : (docHasLegacyFolders ? data.folders : null);
-        const normalizedDocFolders = normalizeSettingsFolders(docFoldersRaw);
 
-        adoptState(data);
-        resetHistoryToCurrent();
+      const docHasSettingsFolders = Array.isArray(data.settingsFolders);
+      const docHasLegacyFolders = Array.isArray(data.folders);
+      const docFoldersRaw = docHasSettingsFolders
+        ? data.settingsFolders
+        : (docHasLegacyFolders ? data.folders : null);
+      const normalizedDocFolders = normalizeSettingsFolders(docFoldersRaw);
 
-        const localFoldersSnapshot = cloneFolders(window.settingsFolders);
-        let shouldSyncFolders = !docHasSettingsFolders || !docHasLegacyFolders;
-        if (!shouldSyncFolders){
-          shouldSyncFolders = !foldersEqual(normalizedDocFolders, localFoldersSnapshot);
-        }
+      adoptState(data);
+      resetHistoryToCurrent();
 
-        if (shouldSyncFolders){
-          try {
-            const payloadFolders = cloneFolders(localFoldersSnapshot);
-            await FB.docRef.set({
-              settingsFolders: payloadFolders,
-              folders: cloneFolders(payloadFolders)
-            }, { merge:true });
-          } catch (err) {
-            console.warn("Failed to sync folders to cloud:", err);
-          }
+      const localFoldersSnapshot = cloneFolders(window.settingsFolders);
+      let shouldSyncFolders = !docHasSettingsFolders || !docHasLegacyFolders;
+      if (!shouldSyncFolders){
+        shouldSyncFolders = !foldersEqual(normalizedDocFolders, localFoldersSnapshot);
+      }
+
+      if (shouldSyncFolders){
+        try {
+          const payloadFolders = cloneFolders(localFoldersSnapshot);
+          await FB.docRef.set({
+            settingsFolders: payloadFolders,
+            folders: cloneFolders(payloadFolders)
+          }, { merge:true });
+        } catch (err) {
+          console.warn("Failed to sync folders to cloud:", err);
         }
       }
     }else{
