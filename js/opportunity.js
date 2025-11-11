@@ -97,6 +97,32 @@
     return raw >= 0 && raw < 24 ? raw : DEFAULT_WORKDAY_START;
   })();
 
+  let opportunityDataReady = Boolean(window.__opportunityStateReady);
+  let recomputeDeferredUntilReady = !opportunityDataReady;
+  let recomputePending = false;
+  let recomputeActive = false;
+
+  function handleOpportunityStateReady(){
+    opportunityDataReady = true;
+    if (recomputeDeferredUntilReady){
+      recomputeDeferredUntilReady = false;
+      recomputePending = false;
+      try {
+        scheduleOpportunityRecompute();
+      } catch (err){
+        console.warn("Failed to trigger deferred opportunity recompute", err);
+      }
+    }
+  }
+
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function"){
+    try {
+      window.addEventListener("opportunity:data-ready", handleOpportunityStateReady);
+    } catch (err){
+      console.warn("Unable to listen for opportunity readiness", err);
+    }
+  }
+
   function startOfDay(d){ const x = new Date(d); x.setHours(0,0,0,0); return x; }
   function endOfDay(d){ const x = new Date(d); x.setHours(23,59,59,999); return x; }
   function addMonths(d, n){ const x = new Date(d); x.setMonth(x.getMonth()+n); return x; }
@@ -382,10 +408,13 @@
   async function saveOpportunityRollups(rows){
     const normalized = Array.isArray(rows) ? cloneRollupRows(rows) : [];
     window.opportunityRollups = normalized;
-    if (originalSaveCloudDebounced){
+    if (opportunityDataReady){
+      const saver = originalSaveCloudDebounced
+        || (typeof window.saveCloudDebounced === "function" ? window.saveCloudDebounced.bind(window) : null);
+      if (!saver) return;
       opportunityInternalSave = true;
       try {
-        originalSaveCloudDebounced();
+        saver();
       } finally {
         opportunityInternalSave = false;
       }
@@ -415,10 +444,12 @@
     }
   }
 
-  let recomputePending = false;
-  let recomputeActive = false;
-
   async function recomputeOpportunityCost(){
+    if (!opportunityDataReady){
+      recomputePending = true;
+      recomputeDeferredUntilReady = true;
+      return;
+    }
     if (recomputeActive){
       recomputePending = true;
       return;
@@ -490,6 +521,11 @@
   }
 
   function scheduleOpportunityRecompute(){
+    if (!opportunityDataReady){
+      recomputeDeferredUntilReady = true;
+      recomputePending = true;
+      return;
+    }
     if (recomputeActive){
       recomputePending = true;
       return;
@@ -497,7 +533,7 @@
     if (recomputePending) return;
     recomputePending = true;
     setTimeout(() => {
-      if (!recomputeActive){
+      if (!recomputeActive && opportunityDataReady){
         recomputeOpportunityCost();
       }
     }, 0);

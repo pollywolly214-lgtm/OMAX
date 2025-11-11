@@ -47,6 +47,7 @@ if (typeof window !== "undefined"){
   window.getDailyCutHoursEntry = getDailyCutHoursEntry;
   window.normalizeDailyCutHours = normalizeDailyCutHours;
   window.normalizeDateISO = normalizeDateISO;
+  window.__opportunityStateReady = false;
 }
 
 /* Root helpers */
@@ -1661,6 +1662,9 @@ function setDailyCutHoursEntry(dateISO, hours, { source = "manual", preserveManu
 }
 
 function adoptState(doc){
+  if (typeof window !== "undefined"){
+    window.__opportunityStateReady = false;
+  }
   const data = doc || {};
 
   // Core lists (fallback to defaults if empty/missing)
@@ -1847,6 +1851,23 @@ function adoptState(doc){
   ensureTaskCategories();
   ensureJobCategories();
   syncRenderTotalsFromHistory();
+
+  if (typeof window !== "undefined"){
+    window.__opportunityStateReady = true;
+    try {
+      if (typeof window.CustomEvent === "function"){
+        window.dispatchEvent(new CustomEvent("opportunity:data-ready", {
+          detail: { timestamp: Date.now() }
+        }));
+      } else if (window.document && typeof window.document.createEvent === "function"){
+        const evt = window.document.createEvent("CustomEvent");
+        evt.initCustomEvent("opportunity:data-ready", false, false, { timestamp: Date.now() });
+        window.dispatchEvent(evt);
+      }
+    } catch (err) {
+      console.warn("Failed to dispatch opportunity readiness event", err);
+    }
+  }
 
   if (typeof window.scheduleOpportunityRecompute === "function"){
     try {
