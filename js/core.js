@@ -1862,75 +1862,32 @@ async function loadFromCloud(){
     const snap = await FB.docRef.get();
     if (snap.exists){
       const data = snap.data() || {};
-      const hasMeaningfulValue = (value)=>{
-        if (Array.isArray(value)) return value.length > 0;
-        if (value && typeof value === "object"){
-          return Object.keys(value).length > 0;
-        }
-        return value != null && value !== "";
-      };
-      const docKeys = Object.keys(data || {}).filter((key)=> key !== "__name__" && key !== "schema");
-      const docHasMeaningfulData = docKeys.some((key)=> hasMeaningfulValue(data[key]));
-      const needsSeed = !docHasMeaningfulData;
-      if (needsSeed){
-        const pe = (typeof window.pumpEff === "object" && window.pumpEff)
-          ? window.pumpEff
-          : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
-        if (!Array.isArray(pe.entries)) pe.entries = [];
-        if (!Array.isArray(pe.notes)) pe.notes = [];
-        const seededFolders = normalizeSettingsFolders(data.settingsFolders || data.folders);
-        const seededFoldersPayload = cloneFolders(seededFolders);
-        const seeded = {
-          schema:APP_SCHEMA,
-          totalHistory: Array.isArray(data.totalHistory) ? data.totalHistory : [],
-          tasksInterval: defaultIntervalTasks.slice(),
-          tasksAsReq: Array.isArray(data.tasksAsReq) && data.tasksAsReq.length ? data.tasksAsReq : defaultAsReqTasks.slice(),
-          inventory: Array.isArray(data.inventory) && data.inventory.length ? data.inventory : seedInventoryFromTasks(),
-          cuttingJobs: Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [],
-          completedCuttingJobs: Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [],
-          garnetCleanings: Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [],
-          orderRequests: Array.isArray(data.orderRequests) ? normalizeOrderRequests(data.orderRequests) : [createOrderRequest()],
-          orderRequestTab: typeof data.orderRequestTab === "string" ? data.orderRequestTab : "active",
-          dailyCutHours: Array.isArray(data.dailyCutHours) ? normalizeDailyCutHours(data.dailyCutHours) : [],
-          settingsFolders: seededFoldersPayload,
-          folders: cloneFolders(seededFoldersPayload),
-          jobFolders: defaultJobFolders(),
-          pumpEff: pe,
-          deletedItems: normalizeDeletedItems(data.deletedItems || data.deleted_items || []),
-          dashboardLayout: cloneStructured(data.dashboardLayout && typeof data.dashboardLayout === "object" ? data.dashboardLayout : {}) || {},
-          costLayout: cloneStructured(data.costLayout && typeof data.costLayout === "object" ? data.costLayout : {}) || {},
-          jobLayout: cloneStructured(data.jobLayout && typeof data.jobLayout === "object" ? data.jobLayout : {}) || {}
-        };
-        adoptState(seeded);
-        resetHistoryToCurrent();
-        await FB.docRef.set(seeded, { merge:true });
-      }else{
-        const docHasSettingsFolders = Array.isArray(data.settingsFolders);
-        const docHasLegacyFolders = Array.isArray(data.folders);
-        const docFoldersRaw = docHasSettingsFolders
-          ? data.settingsFolders
-          : (docHasLegacyFolders ? data.folders : null);
-        const normalizedDocFolders = normalizeSettingsFolders(docFoldersRaw);
 
-        adoptState(data);
-        resetHistoryToCurrent();
+      const docHasSettingsFolders = Array.isArray(data.settingsFolders);
+      const docHasLegacyFolders = Array.isArray(data.folders);
+      const docFoldersRaw = docHasSettingsFolders
+        ? data.settingsFolders
+        : (docHasLegacyFolders ? data.folders : null);
+      const normalizedDocFolders = normalizeSettingsFolders(docFoldersRaw);
 
-        const localFoldersSnapshot = cloneFolders(window.settingsFolders);
-        let shouldSyncFolders = !docHasSettingsFolders || !docHasLegacyFolders;
-        if (!shouldSyncFolders){
-          shouldSyncFolders = !foldersEqual(normalizedDocFolders, localFoldersSnapshot);
-        }
+      adoptState(data);
+      resetHistoryToCurrent();
 
-        if (shouldSyncFolders){
-          try {
-            const payloadFolders = cloneFolders(localFoldersSnapshot);
-            await FB.docRef.set({
-              settingsFolders: payloadFolders,
-              folders: cloneFolders(payloadFolders)
-            }, { merge:true });
-          } catch (err) {
-            console.warn("Failed to sync folders to cloud:", err);
-          }
+      const localFoldersSnapshot = cloneFolders(window.settingsFolders);
+      let shouldSyncFolders = !docHasSettingsFolders || !docHasLegacyFolders;
+      if (!shouldSyncFolders){
+        shouldSyncFolders = !foldersEqual(normalizedDocFolders, localFoldersSnapshot);
+      }
+
+      if (shouldSyncFolders){
+        try {
+          const payloadFolders = cloneFolders(localFoldersSnapshot);
+          await FB.docRef.set({
+            settingsFolders: payloadFolders,
+            folders: cloneFolders(payloadFolders)
+          }, { merge:true });
+        } catch (err) {
+          console.warn("Failed to sync folders to cloud:", err);
         }
       }
     }else{
