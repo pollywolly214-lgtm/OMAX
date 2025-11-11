@@ -15,20 +15,7 @@ const APP_SCHEMA = 72;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
-const WORKSPACE_ID = (()=>{
-  const envValue = (()=>{
-    if (typeof process !== "undefined" && process && typeof process === "object" && process.env){
-      const raw = process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID;
-      if (typeof raw === "string" && raw.trim()) return raw.trim();
-    }
-    if (typeof window !== "undefined" && typeof window.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID === "string"){
-      const raw = window.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID;
-      if (raw && raw.trim()) return raw.trim();
-    }
-    return null;
-  })();
-  return envValue || "github-prod";
-})();
+const WORKSPACE_ID = (typeof process !== "undefined" && process.env && typeof process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID === "string" && process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID.trim() ? process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID.trim() : "github-prod");
 if (typeof window !== "undefined"){ window.WORKSPACE_ID = WORKSPACE_ID; window.workspaceRef = null; }
 const CUTTING_BASELINE_WEEKLY_HOURS = 56;
 const CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS / 7;
