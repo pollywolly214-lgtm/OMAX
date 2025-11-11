@@ -15,7 +15,21 @@ const APP_SCHEMA = 72;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
-const WORKSPACE_ID = "schreiner-robotics";
+const WORKSPACE_ID = (()=>{
+  const envValue = (()=>{
+    if (typeof process !== "undefined" && process && typeof process === "object" && process.env){
+      const raw = process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID;
+      if (typeof raw === "string" && raw.trim()) return raw.trim();
+    }
+    if (typeof window !== "undefined" && typeof window.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID === "string"){
+      const raw = window.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID;
+      if (raw && raw.trim()) return raw.trim();
+    }
+    return null;
+  })();
+  return envValue || "github-prod";
+})();
+if (typeof window !== "undefined"){ window.WORKSPACE_ID = WORKSPACE_ID; window.workspaceRef = null; }
 const CUTTING_BASELINE_WEEKLY_HOURS = 56;
 const CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS / 7;
 const TIME_EFFICIENCY_WINDOWS = [
@@ -240,7 +254,7 @@ function toast(msg){
 })();
 
 /* ====================== FIREBASE =========================== */
-let FB = { app:null, auth:null, db:null, user:null, docRef:null, ready:false };
+let FB = { app:null, auth:null, db:null, user:null, docRef:null, workspaceRef:null, ready:false };
 
 async function initFirebase(){
   if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
@@ -334,12 +348,17 @@ async function initFirebase(){
       if (btnIn)  btnIn.style.display  = "none";
       if (btnOut) btnOut.style.display = "inline-block";
 
-      FB.docRef = FB.db.collection("workspaces").doc(WORKSPACE_ID).collection("app").doc("state");
+      FB.workspaceRef = FB.db.collection("workspaces").doc(WORKSPACE_ID);
+      if (typeof window !== "undefined") window.workspaceRef = FB.workspaceRef;
+      FB.docRef = FB.workspaceRef;
       FB.ready = true;
       await loadFromCloud();
       route();
     }else{
       FB.ready = false;
+      FB.workspaceRef = null;
+      FB.docRef = null;
+      if (typeof window !== "undefined") window.workspaceRef = null;
       if (statusEl) statusEl.textContent = "Not signed in";
       if (btnIn)  btnIn.style.display  = "inline-block";
       if (btnOut) btnOut.style.display = "none";

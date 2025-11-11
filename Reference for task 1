@@ -16,7 +16,21 @@ js.calendar
 const APP_SCHEMA = 71;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr
-const WORKSPACE_ID = "schreiner-robotics";
+const WORKSPACE_ID = (()=>{
+  const envValue = (()=>{
+    if (typeof process !== "undefined" && process && typeof process === "object" && process.env){
+      const raw = process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID;
+      if (typeof raw === "string" && raw.trim()) return raw.trim();
+    }
+    if (typeof window !== "undefined" && typeof window.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID === "string"){
+      const raw = window.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID;
+      if (raw && raw.trim()) return raw.trim();
+    }
+    return null;
+  })();
+  return envValue || "github-prod";
+})();
+if (typeof window !== "undefined"){ window.WORKSPACE_ID = WORKSPACE_ID; window.workspaceRef = null; }
 
 window.APP_SCHEMA = APP_SCHEMA;
 
@@ -181,7 +195,7 @@ async function initFirebase(){
       if (btnIn)  btnIn.style.display  = "none";
       if (btnOut) btnOut.style.display = "inline-block";
 
-      FB.docRef = FB.db.collection("workspaces").doc(WORKSPACE_ID).collection("app").doc("state");
+      FB.docRef = FB.db.collection("workspaces").doc(WORKSPACE_ID);
       FB.ready = true;
       await loadFromCloud();
       route();
@@ -443,7 +457,21 @@ core.js
 const APP_SCHEMA = 71;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr
-const WORKSPACE_ID = "schreiner-robotics";
+const WORKSPACE_ID = (()=>{
+  const envValue = (()=>{
+    if (typeof process !== "undefined" && process && typeof process === "object" && process.env){
+      const raw = process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID;
+      if (typeof raw === "string" && raw.trim()) return raw.trim();
+    }
+    if (typeof window !== "undefined" && typeof window.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID === "string"){
+      const raw = window.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID;
+      if (raw && raw.trim()) return raw.trim();
+    }
+    return null;
+  })();
+  return envValue || "github-prod";
+})();
+if (typeof window !== "undefined"){ window.WORKSPACE_ID = WORKSPACE_ID; window.workspaceRef = null; }
 
 window.APP_SCHEMA = APP_SCHEMA;
 
@@ -608,7 +636,7 @@ async function initFirebase(){
       if (btnIn)  btnIn.style.display  = "none";
       if (btnOut) btnOut.style.display = "inline-block";
 
-      FB.docRef = FB.db.collection("workspaces").doc(WORKSPACE_ID).collection("app").doc("state");
+      FB.docRef = FB.db.collection("workspaces").doc(WORKSPACE_ID);
       FB.ready = true;
       await loadFromCloud();
       route();
@@ -1695,7 +1723,7 @@ function renderSettings(){
       let needAsReq    = window.tasksAsReq.length === 0;
       let filledAny    = false;
 
-      // 1) Try Firestore (workspaces/{WORKSPACE_ID}/app/state)
+      // 1) Try Firestore (workspaces/{WORKSPACE_ID})
       try{
         if (window.FB && FB.ready && FB.docRef && typeof FB.docRef.get === "function"){
           const snap = await FB.docRef.get();

@@ -5402,7 +5402,7 @@ function renderSettings(){
       let needAsReq    = window.tasksAsReq.length === 0;
       let filledAny    = false;
 
-      // 1) Try Firestore (workspaces/{WORKSPACE_ID}/app/state)
+      // 1) Try Firestore (workspaces/{WORKSPACE_ID})
       try{
         if (window.FB && FB.ready && FB.docRef && typeof FB.docRef.get === "function"){
           const snap = await FB.docRef.get();
