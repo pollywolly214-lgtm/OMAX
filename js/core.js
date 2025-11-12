@@ -39,11 +39,8 @@ const WORKSPACE_ID = (() => {
 })();
 if (typeof window !== "undefined") {
   window.WORKSPACE_ID = WORKSPACE_ID;
-}
-if (typeof window !== "undefined") {
   window.workspaceRef = null;
-}
-if (typeof window !== "undefined") {
+  window.workspaceDocRef = null;
   window.DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
 }
 const CUTTING_BASELINE_WEEKLY_HOURS = 56;
@@ -270,7 +267,16 @@ function toast(msg){
 })();
 
 /* ====================== FIREBASE =========================== */
-let FB = { app:null, auth:null, db:null, user:null, docRef:null, workspaceRef:null, ready:false };
+let FB = {
+  app: null,
+  auth: null,
+  db: null,
+  user: null,
+  docRef: null,
+  workspaceRef: null,
+  workspaceDoc: null,
+  ready: false
+};
 
 async function initFirebase(){
   if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
@@ -391,10 +397,14 @@ async function initFirebase(){
       if (btnIn)  btnIn.style.display  = "none";
       if (btnOut) btnOut.style.display = "inline-block";
 
-      // Store whole workspace in a single document:
-      FB.workspaceRef = FB.db.collection("workspaces").doc(WORKSPACE_ID);
-      if (typeof window !== "undefined") window.workspaceRef = FB.workspaceRef;
-      FB.docRef = FB.workspaceRef; // alias
+      // Store workspace state in workspaces/<id>/app/state
+      FB.workspaceDoc = FB.db.collection("workspaces").doc(WORKSPACE_ID);
+      FB.workspaceRef = FB.workspaceDoc.collection("app").doc("state");
+      FB.docRef = FB.workspaceRef;
+      if (typeof window !== "undefined") {
+        window.workspaceDocRef = FB.workspaceDoc;
+        window.workspaceRef = FB.workspaceRef;
+      }
       FB.ready = true;
       try { setupDebugPanel(); } catch (e) {}
       await loadFromCloud();
@@ -402,8 +412,12 @@ async function initFirebase(){
     }else{
       FB.ready = false;
       FB.workspaceRef = null;
+      FB.workspaceDoc = null;
       FB.docRef = null;
-      if (typeof window !== "undefined") window.workspaceRef = null;
+      if (typeof window !== "undefined") {
+        window.workspaceRef = null;
+        window.workspaceDocRef = null;
+      }
       if (statusEl) statusEl.textContent = "Not signed in";
       if (btnIn)  btnIn.style.display  = "inline-block";
       if (btnOut) btnOut.style.display = "none";
@@ -1370,6 +1384,35 @@ window.defaultAsReqTasks = defaultAsReqTasks;
 })();
 
 /* ==================== Cloud load / save ===================== */
+function stateHasMeaningfulData(data){
+  if (!data || typeof data !== "object") return false;
+  const keys = Object.keys(data);
+  if (keys.length === 0) return false;
+  if (keys.length === 1 && keys[0] === "schema") return false;
+  const meaningfulKeys = new Set([
+    "tasksInterval",
+    "tasksAsReq",
+    "inventory",
+    "cuttingJobs",
+    "completedCuttingJobs",
+    "dailyCutHours",
+    "orderRequests",
+    "totalHistory",
+    "garnetCleanings",
+    "deletedItems",
+    "dashboardLayout",
+    "costLayout",
+    "jobLayout",
+    "settingsFolders",
+    "folders",
+    "pumpEff",
+    "jobFolders",
+    "orderRequestTab",
+    "schema"
+  ]);
+  return keys.some(key => meaningfulKeys.has(key));
+}
+
 function snapshotState(){
   refreshGlobalCollections();
   const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
@@ -1994,6 +2037,16 @@ const saveCloudInternal = debounce(async ()=>{
       const el = document.getElementById("dbgSnap");
       if (el) el.value = JSON.stringify(snap, null, 2);
     }
+    if (FB.workspaceDoc){
+      try {
+        await FB.workspaceDoc.set({
+          workspaceId: WORKSPACE_ID,
+          lastTouchedAt: new Date().toISOString()
+        }, { merge:true });
+      } catch (metaErr) {
+        console.warn("Failed to update workspace metadata", metaErr);
+      }
+    }
   }catch(e){
     console.error("Cloud save failed:", e);
   }
@@ -2014,9 +2067,18 @@ function saveCloudDebounced(){
 async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
   try{
-    const snap = await FB.docRef.get();
-    if (snap.exists){
-      const data = typeof snap.data === "function" ? snap.data() : snap.data();
+    let snap = await FB.docRef.get();
+    let data = snap.exists ? (typeof snap.data === "function" ? snap.data() : snap.data()) : null;
+
+    if (!stateHasMeaningfulData(data)){
+      const migrated = await migrateLegacyWorkspaceDoc();
+      if (migrated){
+        data = migrated;
+        snap = { exists: true };
+      }
+    }
+
+    if (stateHasMeaningfulData(data)){
       adoptState(data || {});
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
     }else{
@@ -2049,12 +2111,54 @@ async function loadFromCloud(){
       adoptState(seeded);
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
       await FB.docRef.set(seeded, { merge:true });
+      if (FB.workspaceDoc){
+        try {
+          await FB.workspaceDoc.set({
+            workspaceId: WORKSPACE_ID,
+            lastTouchedAt: new Date().toISOString()
+          }, { merge:true });
+        } catch (metaErr) {
+          console.warn("Failed to update workspace metadata during seed", metaErr);
+        }
+      }
     }
     if (window.DEBUG_MODE){
       try { refreshDebugCloud(); } catch (err) { console.warn("Debug panel refresh failed", err); }
     }
   }catch(e){
     console.error("Cloud load failed:", e);
+  }
+}
+
+async function migrateLegacyWorkspaceDoc(){
+  if (!FB.workspaceDoc || !FB.docRef) return null;
+  try{
+    const workspaceSnap = await FB.workspaceDoc.get();
+    if (!workspaceSnap.exists) return null;
+    const raw = typeof workspaceSnap.data === "function" ? workspaceSnap.data() : workspaceSnap.data;
+    if (!stateHasMeaningfulData(raw)) return null;
+    const stateData = { ...(raw || {}) };
+    delete stateData.workspaceId;
+    delete stateData.lastTouchedAt;
+    delete stateData.createdAt;
+    delete stateData.lastStateMigrationAt;
+    delete stateData.lastStateDocPath;
+    await FB.docRef.set(stateData, { merge:true });
+    try {
+      const meta = {
+        workspaceId: WORKSPACE_ID,
+        lastStateMigrationAt: new Date().toISOString(),
+        lastStateDocPath: FB.docRef.path,
+        lastTouchedAt: new Date().toISOString()
+      };
+      await FB.workspaceDoc.set(meta, { merge:true });
+    } catch (metaErr) {
+      console.warn("Failed to record migration metadata", metaErr);
+    }
+    return stateData;
+  }catch(err){
+    console.warn("Failed to migrate workspace root document", err);
+    return null;
   }
 }
 
@@ -2065,7 +2169,7 @@ function setupDebugPanel(){
   if (!panel) return;
   panel.style.display = "block";
   const dbgWs = document.getElementById("dbgWs");
-  if (dbgWs) dbgWs.textContent = window.WORKSPACE_ID || "";
+  if (dbgWs) dbgWs.textContent = `${window.WORKSPACE_ID || ""}/app/state`;
   const btnCloud = document.getElementById("dbgRefreshCloud");
   const btnSnap  = document.getElementById("dbgRefreshSnapshot");
   if (btnCloud) btnCloud.onclick = ()=>refreshDebugCloud();
@@ -2079,6 +2183,17 @@ function setupDebugPanel(){
       if (el) el.value = "snapshotState() failed: " + (err && err.message || err);
     }
   };
+  // Prefill both columns on load so the panel is immediately useful.
+  if (btnSnap) {
+    try {
+      btnSnap.click();
+    } catch (e) {
+      if (typeof btnSnap.onclick === "function") btnSnap.onclick();
+    }
+  }
+  if (btnCloud) {
+    refreshDebugCloud();
+  }
 }
 async function refreshDebugCloud(){
   const out = document.getElementById("dbgCloud");
@@ -2086,7 +2201,7 @@ async function refreshDebugCloud(){
   try{
     const r = await window.workspaceRef?.get?.();
     if (!r?.exists){
-      out.value = "(no document at workspaces/" + (window.WORKSPACE_ID || "?") + ")";
+      out.value = "(no document at workspaces/" + (window.WORKSPACE_ID || "?") + "/app/state)";
       return;
     }
     const d = typeof r.data === "function" ? r.data() : r.data;
