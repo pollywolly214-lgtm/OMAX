@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta http-equiv="Cache-Control" content="no-store" />
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OMAX 1530 Maintenance Tracker</title>
@@ -8,10 +9,13 @@
   <!-- Your stylesheet -->
   <link rel="stylesheet" href="style.css" />
 
+</head>
+<body>
   <!-- Firebase SDKs (v8 CDN for static sites) -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <script>/* prevent bfcache for easier debug refresh */ window.onpageshow = e=>{ if(e.persisted) location.reload(); };</script>
 
   <!-- Firebase project config (correct values) -->
   <script>
@@ -24,8 +28,7 @@
       appId: "1:496764208080:web:43cdd192e462844f7b5335"
     };
   </script>
-</head>
-<body>
+
   <header>
     <div class="header-bar">
       <h1><span class="brand-emblem">OMAX</span> 1530 Maintenance Tracker</h1>
@@ -97,6 +100,27 @@
     <small>Cloud sync via Firestore. Assumes 8 hrs/day for scheduling.</small>
   </footer>
 
+  <!-- Lightweight in-app debug (no console required). Open with ?debug=1 -->
+  <div id="debugPanel" style="display:none; border:1px dashed #99b; border-radius:10px; margin:12px 8px; padding:10px; background:#f6f8ff">
+    <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px">
+      <strong>Debug Panel</strong>
+      <button type="button" id="dbgRefreshCloud">Refresh Cloud Doc</button>
+      <button type="button" id="dbgRefreshSnapshot">Show Local Snapshot</button>
+      <span id="dbgInfo" style="margin-left:auto; color:#445">WORKSPACE: <code id="dbgWs"></code></span>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px">
+      <div>
+        <div style="font-weight:600; margin-bottom:4px">Cloud (workspaces/&lt;WORKSPACE_ID&gt;)</div>
+        <textarea id="dbgCloud" style="width:100%; height:260px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace"></textarea>
+      </div>
+      <div>
+        <div style="font-weight:600; margin-bottom:4px">Local snapshotState()</div>
+        <textarea id="dbgSnap" style="width:100%; height:260px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace"></textarea>
+      </div>
+    </div>
+    <small style="color:#556">Tip: add, edit, or complete a task/job; press <em>Show Local Snapshot</em> to verify it will be saved; then <em>Refresh Cloud Doc</em> to confirm it is stored.</small>
+  </div>
+
   <!-- Auth toolbar + modal (NEW) -->
   <div id="authBar" class="auth-bar">
     <span id="authStatus">Not signed in</span>
@@ -127,5 +151,13 @@
   <script src="js/renderers.js"></script>
   <script src="js/trainer.js"></script>
   <script src="js/router.js"></script>
+  <script>
+    window.addEventListener('load', () => {
+      if (typeof initFirebase === 'function') {
+        try { localStorage.removeItem("_omax_last_render_cache"); } catch (e) {}
+        initFirebase();
+      }
+    });
+  </script>
 </body>
 </html>

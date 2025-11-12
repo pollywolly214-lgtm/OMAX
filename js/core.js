@@ -15,7 +15,37 @@ const APP_SCHEMA = 72;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
-const WORKSPACE_ID = "schreiner-robotics";
+// Decide workspace based on hostname:
+// - GitHub Pages (anything ending with .github.io) or the production Vercel host → "github-prod"
+// - Preview / branch URLs on Vercel (e.g. *.vercel.app) or everything else → "vercel-preview"
+const WORKSPACE_ID = (() => {
+  if (typeof window !== "undefined") {
+    const rawHost = window.location && typeof window.location.hostname === "string"
+      ? window.location.hostname
+      : "";
+    const host = rawHost.toLowerCase();
+
+    const isGithubPages = host.endsWith(".github.io");
+    const isProdVercel = host === "omax.vercel.app";
+    if (isGithubPages || isProdVercel) {
+      return "github-prod";
+    }
+
+    // Treat everything else (branch previews, localhost, custom staging domains) as preview data.
+    return "vercel-preview";
+  }
+  // Fallback for non-browser contexts so build-time scripts default to production doc
+  return "github-prod";
+})();
+if (typeof window !== "undefined") {
+  window.WORKSPACE_ID = WORKSPACE_ID;
+}
+if (typeof window !== "undefined") {
+  window.workspaceRef = null;
+}
+if (typeof window !== "undefined") {
+  window.DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
+}
 const CUTTING_BASELINE_WEEKLY_HOURS = 56;
 const CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS / 7;
 const TIME_EFFICIENCY_WINDOWS = [
@@ -240,7 +270,7 @@ function toast(msg){
 })();
 
 /* ====================== FIREBASE =========================== */
-let FB = { app:null, auth:null, db:null, user:null, docRef:null, ready:false };
+let FB = { app:null, auth:null, db:null, user:null, docRef:null, workspaceRef:null, ready:false };
 
 async function initFirebase(){
   if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
@@ -250,6 +280,11 @@ async function initFirebase(){
   FB.app  = firebase.initializeApp(window.FIREBASE_CONFIG);
   FB.auth = firebase.auth();
   FB.db   = firebase.firestore();
+  try {
+    FB.db.settings({ ignoreUndefinedProperties: true });
+  } catch (err) {
+    console.warn("Failed to enable ignoreUndefinedProperties", err);
+  }
 
   // Persist login across refreshes
   try {
@@ -271,6 +306,28 @@ async function initFirebase(){
   const AUTO_LOGIN_EMAIL = "ryder@candmprecast.com";
   const AUTO_LOGIN_PASSWORD = "Matthew7:21";
   let autoLoginInProgress = false;
+  let autoLoginAttempted = false;
+
+  const host = (typeof window !== "undefined" && window.location && typeof window.location.hostname === "string")
+    ? window.location.hostname
+    : "";
+  const autoLoginEnabled = host ? host !== "omax.vercel.app" : true;
+
+  const tryAutoLogin = async ()=>{
+    if (!autoLoginEnabled) return;
+    if (autoLoginAttempted) return;
+    if (FB.user) return;
+    if (!AUTO_LOGIN_EMAIL || !AUTO_LOGIN_PASSWORD) return;
+    autoLoginAttempted = true;
+    autoLoginInProgress = true;
+    try {
+      await ensureEmailPassword(AUTO_LOGIN_EMAIL, AUTO_LOGIN_PASSWORD);
+    } catch (err) {
+      console.warn("Automatic preview sign-in failed", err);
+    } finally {
+      autoLoginInProgress = false;
+    }
+  };
 
   const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
   const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
@@ -334,18 +391,28 @@ async function initFirebase(){
       if (btnIn)  btnIn.style.display  = "none";
       if (btnOut) btnOut.style.display = "inline-block";
 
-      FB.docRef = FB.db.collection("workspaces").doc(WORKSPACE_ID).collection("app").doc("state");
+      // Store whole workspace in a single document:
+      FB.workspaceRef = FB.db.collection("workspaces").doc(WORKSPACE_ID);
+      if (typeof window !== "undefined") window.workspaceRef = FB.workspaceRef;
+      FB.docRef = FB.workspaceRef; // alias
       FB.ready = true;
+      try { setupDebugPanel(); } catch (e) {}
       await loadFromCloud();
       route();
     }else{
       FB.ready = false;
+      FB.workspaceRef = null;
+      FB.docRef = null;
+      if (typeof window !== "undefined") window.workspaceRef = null;
       if (statusEl) statusEl.textContent = "Not signed in";
       if (btnIn)  btnIn.style.display  = "inline-block";
       if (btnOut) btnOut.style.display = "none";
       renderSignedOut();
+      tryAutoLogin();
     }
   });
+
+  tryAutoLogin();
 }
 
 
@@ -1228,6 +1295,80 @@ function snapshotSettingsFolders(){
 
 window.defaultAsReqTasks = defaultAsReqTasks;
 
+(function ensureSnapshotState(){
+  const orig = window.snapshotState;
+  window.snapshotState = function(){
+    const s = typeof orig === "function" ? orig() : {};
+    const copyArr = (key)=>{
+      if (!Array.isArray(s[key])){
+        if (Array.isArray(window[key])) s[key] = window[key].slice(); else s[key] = [];
+      }
+    };
+    const copyObj = (key)=>{
+      if (!s[key] || typeof s[key] !== "object"){
+        if (window[key] && typeof window[key] === "object") s[key] = { ...window[key] }; else s[key] = {};
+      }
+    };
+    copyArr("tasksInterval");
+    copyArr("tasksAsReq");
+    copyArr("cuttingJobs");
+    copyArr("completedCuttingJobs");
+    copyArr("dailyCutHours");
+    copyArr("orderRequests");
+    copyArr("garnetCleanings");
+    copyArr("totalHistory");
+    copyObj("settingsFolders");
+    copyObj("folders");
+    copyObj("dashboardLayout");
+    copyObj("costLayout");
+    copyObj("jobLayout");
+    copyObj("pumpEff");
+    if (typeof s.schema !== "number") s.schema = APP_SCHEMA;
+    return s;
+  };
+})();
+
+(function patchAdoptState(){
+  const orig = window.adoptState;
+  window.adoptState = function(data){
+    const sanitized = (data && typeof data === "object") ? { ...data } : {};
+    if (!Array.isArray(sanitized.tasksInterval) && Array.isArray(window.tasksInterval)) sanitized.tasksInterval = window.tasksInterval.slice();
+    if (!Array.isArray(sanitized.tasksAsReq) && Array.isArray(window.tasksAsReq)) sanitized.tasksAsReq = window.tasksAsReq.slice();
+    if (!Array.isArray(sanitized.cuttingJobs) && Array.isArray(window.cuttingJobs)) sanitized.cuttingJobs = window.cuttingJobs.slice();
+    if (!Array.isArray(sanitized.completedCuttingJobs) && Array.isArray(window.completedCuttingJobs)) sanitized.completedCuttingJobs = window.completedCuttingJobs.slice();
+    if (!Array.isArray(sanitized.dailyCutHours) && Array.isArray(window.dailyCutHours)) sanitized.dailyCutHours = window.dailyCutHours.slice();
+    if (!Array.isArray(sanitized.inventory) && Array.isArray(window.inventory)) sanitized.inventory = window.inventory.slice();
+    if (!Array.isArray(sanitized.orderRequests) && Array.isArray(window.orderRequests)) sanitized.orderRequests = window.orderRequests.slice();
+    if (!Array.isArray(sanitized.garnetCleanings) && Array.isArray(window.garnetCleanings)) sanitized.garnetCleanings = window.garnetCleanings.slice();
+    if (!Array.isArray(sanitized.totalHistory) && Array.isArray(window.totalHistory)) sanitized.totalHistory = window.totalHistory.slice();
+    if (!Array.isArray(sanitized.deletedItems) && Array.isArray(window.deletedItems)) sanitized.deletedItems = window.deletedItems.slice();
+    if (!Array.isArray(sanitized.jobFolders) && Array.isArray(window.jobFolders)) sanitized.jobFolders = window.jobFolders.slice();
+    if ((!sanitized.settingsFolders && !sanitized.folders) && Array.isArray(window.settingsFolders)) sanitized.settingsFolders = JSON.parse(JSON.stringify(window.settingsFolders));
+    if (!sanitized.dashboardLayout && window.dashboardLayout) sanitized.dashboardLayout = { ...window.dashboardLayout };
+    if (!sanitized.costLayout && window.costLayout) sanitized.costLayout = { ...window.costLayout };
+    if (!sanitized.jobLayout && window.jobLayout) sanitized.jobLayout = { ...window.jobLayout };
+    if (!sanitized.pumpEff && window.pumpEff) sanitized.pumpEff = { ...window.pumpEff };
+    if (typeof orig === "function") orig(sanitized);
+    if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
+    if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
+    if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
+    if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+    if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+    if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+    if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+    if (!Array.isArray(window.totalHistory)) window.totalHistory = [];
+    if (!window.settingsFolders || !Array.isArray(window.settingsFolders)) window.settingsFolders = typeof defaultSettingsFolders === "function" ? defaultSettingsFolders() : [];
+    if (!window.folders || typeof window.folders !== "object") window.folders = Array.isArray(window.settingsFolders) ? JSON.parse(JSON.stringify(window.settingsFolders)) : [];
+    if (!window.dashboardLayout || typeof window.dashboardLayout !== "object") window.dashboardLayout = {};
+    if (!window.costLayout || typeof window.costLayout !== "object") window.costLayout = {};
+    if (!window.jobLayout || typeof window.jobLayout !== "object") window.jobLayout = {};
+    if (!window.pumpEff || typeof window.pumpEff !== "object") window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
+    if (typeof window.ensureTaskCategories === "function") window.ensureTaskCategories();
+    if (typeof window.ensureJobCategories === "function") window.ensureJobCategories();
+    if (typeof window.syncRenderTotalsFromHistory === "function") window.syncRenderTotalsFromHistory();
+  };
+})();
+
 /* ==================== Cloud load / save ===================== */
 function snapshotState(){
   refreshGlobalCollections();
@@ -1845,15 +1986,29 @@ function adoptState(doc){
 
 const saveCloudInternal = debounce(async ()=>{
   if (!FB.ready || !FB.docRef) return;
-  try{ await FB.docRef.set(snapshotState(), { merge:true }); }catch(e){ console.error("Cloud save failed:", e); }
+  try{
+    const snap = snapshotState();
+    window.__lastSnapshot = snap;
+    await FB.docRef.set(snap, { merge:true });
+    if (window.DEBUG_MODE){
+      const el = document.getElementById("dbgSnap");
+      if (el) el.value = JSON.stringify(snap, null, 2);
+    }
+  }catch(e){
+    console.error("Cloud save failed:", e);
+  }
 }, 300);
 function saveCloudDebounced(){
   try {
-    setSettingsFolders(window.settingsFolders);
+    if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
     console.warn("Failed to normalize folders before save:", err);
   }
-  captureHistorySnapshot();
+  try {
+    if (typeof captureHistorySnapshot === "function") captureHistorySnapshot();
+  } catch (err) {
+    console.warn("History capture before save failed:", err);
+  }
   saveCloudInternal();
 }
 async function loadFromCloud(){
@@ -1861,111 +2016,83 @@ async function loadFromCloud(){
   try{
     const snap = await FB.docRef.get();
     if (snap.exists){
-      const data = snap.data() || {};
-      const needsSeed = !Array.isArray(data.tasksInterval) || data.tasksInterval.length === 0;
-      if (needsSeed){
-        const pe = (typeof window.pumpEff === "object" && window.pumpEff)
-          ? window.pumpEff
-          : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
-        if (!Array.isArray(pe.entries)) pe.entries = [];
-        if (!Array.isArray(pe.notes)) pe.notes = [];
-        const seededFolders = normalizeSettingsFolders(data.settingsFolders || data.folders);
-        const seededFoldersPayload = cloneFolders(seededFolders);
-        const seeded = {
-          schema:APP_SCHEMA,
-          totalHistory: Array.isArray(data.totalHistory) ? data.totalHistory : [],
-          tasksInterval: defaultIntervalTasks.slice(),
-          tasksAsReq: Array.isArray(data.tasksAsReq) && data.tasksAsReq.length ? data.tasksAsReq : defaultAsReqTasks.slice(),
-          inventory: Array.isArray(data.inventory) && data.inventory.length ? data.inventory : seedInventoryFromTasks(),
-          cuttingJobs: Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [],
-          completedCuttingJobs: Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [],
-          garnetCleanings: Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [],
-          orderRequests: Array.isArray(data.orderRequests) ? normalizeOrderRequests(data.orderRequests) : [createOrderRequest()],
-          orderRequestTab: typeof data.orderRequestTab === "string" ? data.orderRequestTab : "active",
-          dailyCutHours: Array.isArray(data.dailyCutHours) ? normalizeDailyCutHours(data.dailyCutHours) : [],
-          settingsFolders: seededFoldersPayload,
-          folders: cloneFolders(seededFoldersPayload),
-          jobFolders: defaultJobFolders(),
-          pumpEff: pe,
-          deletedItems: normalizeDeletedItems(data.deletedItems || data.deleted_items || []),
-          dashboardLayout: cloneStructured(data.dashboardLayout && typeof data.dashboardLayout === "object" ? data.dashboardLayout : {}) || {},
-          costLayout: cloneStructured(data.costLayout && typeof data.costLayout === "object" ? data.costLayout : {}) || {},
-          jobLayout: cloneStructured(data.jobLayout && typeof data.jobLayout === "object" ? data.jobLayout : {}) || {}
-        };
-        adoptState(seeded);
-        resetHistoryToCurrent();
-        await FB.docRef.set(seeded, { merge:true });
-      }else{
-        const docHasSettingsFolders = Array.isArray(data.settingsFolders);
-        const docHasLegacyFolders = Array.isArray(data.folders);
-        const docFoldersRaw = docHasSettingsFolders
-          ? data.settingsFolders
-          : (docHasLegacyFolders ? data.folders : null);
-        const normalizedDocFolders = normalizeSettingsFolders(docFoldersRaw);
-
-        adoptState(data);
-        resetHistoryToCurrent();
-
-        const localFoldersSnapshot = cloneFolders(window.settingsFolders);
-        let shouldSyncFolders = !docHasSettingsFolders || !docHasLegacyFolders;
-        if (!shouldSyncFolders){
-          shouldSyncFolders = !foldersEqual(normalizedDocFolders, localFoldersSnapshot);
-        }
-
-        if (shouldSyncFolders){
-          try {
-            const payloadFolders = cloneFolders(localFoldersSnapshot);
-            await FB.docRef.set({
-              settingsFolders: payloadFolders,
-              folders: cloneFolders(payloadFolders)
-            }, { merge:true });
-          } catch (err) {
-            console.warn("Failed to sync folders to cloud:", err);
-          }
-        }
-      }
+      const data = typeof snap.data === "function" ? snap.data() : snap.data();
+      adoptState(data || {});
+      if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
     }else{
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
       if (!Array.isArray(pe.entries)) pe.entries = [];
       if (!Array.isArray(pe.notes)) pe.notes = [];
-      const defaultFolders = defaultSettingsFolders();
+      const folders = (typeof defaultSettingsFolders === "function") ? defaultSettingsFolders() : [];
       const seeded = {
         schema: APP_SCHEMA,
         totalHistory: [],
-        tasksInterval: defaultIntervalTasks.slice(),
-        tasksAsReq: defaultAsReqTasks.slice(),
-        inventory: seedInventoryFromTasks(),
-        cuttingJobs: [],
-        completedCuttingJobs: [],
-        orderRequests: [createOrderRequest()],
-        orderRequestTab: "active",
-        dailyCutHours: [],
-        jobFolders: defaultJobFolders(),
+        tasksInterval: Array.isArray(window.tasksInterval) && window.tasksInterval.length ? window.tasksInterval.slice() : (Array.isArray(window.defaultIntervalTasks) ? window.defaultIntervalTasks.slice() : []),
+        tasksAsReq: Array.isArray(window.tasksAsReq) && window.tasksAsReq.length ? window.tasksAsReq.slice() : (Array.isArray(window.defaultAsReqTasks) ? window.defaultAsReqTasks.slice() : []),
+        inventory: Array.isArray(window.inventory) && window.inventory.length ? window.inventory.slice() : (typeof seedInventoryFromTasks === "function" ? seedInventoryFromTasks() : []),
+        cuttingJobs: Array.isArray(window.cuttingJobs) ? window.cuttingJobs.slice() : [],
+        completedCuttingJobs: Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [],
+        orderRequests: Array.isArray(window.orderRequests) && window.orderRequests.length ? window.orderRequests.slice() : [typeof createOrderRequest === "function" ? createOrderRequest() : { id:"req_"+Date.now(), items:[] }],
+        orderRequestTab: typeof window.orderRequestTab === "string" ? window.orderRequestTab : "active",
+        dailyCutHours: Array.isArray(window.dailyCutHours) ? window.dailyCutHours.slice() : [],
+        jobFolders: typeof defaultJobFolders === "function" ? defaultJobFolders() : [],
         pumpEff: pe,
-        settingsFolders: defaultFolders,
-        folders: cloneFolders(defaultFolders),
-        garnetCleanings: [],
-        deletedItems: [],
-        dashboardLayout: {},
-        costLayout: {},
-        jobLayout: {}
+        settingsFolders: folders,
+        folders: JSON.parse(JSON.stringify(folders)),
+        garnetCleanings: Array.isArray(window.garnetCleanings) ? window.garnetCleanings.slice() : [],
+        dashboardLayout: typeof window.dashboardLayout === "object" ? { ...window.dashboardLayout } : {},
+        costLayout: typeof window.costLayout === "object" ? { ...window.costLayout } : {},
+        jobLayout: typeof window.jobLayout === "object" ? { ...window.jobLayout } : {}
       };
       adoptState(seeded);
-      resetHistoryToCurrent();
-      await FB.docRef.set(seeded);
+      if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
+      await FB.docRef.set(seeded, { merge:true });
+    }
+    if (window.DEBUG_MODE){
+      try { refreshDebugCloud(); } catch (err) { console.warn("Debug panel refresh failed", err); }
     }
   }catch(e){
     console.error("Cloud load failed:", e);
-    const pe = (typeof window.pumpEff === "object" && window.pumpEff)
-      ? window.pumpEff
-      : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
-    if (!Array.isArray(pe.entries)) pe.entries = [];
-    if (!Array.isArray(pe.notes)) pe.notes = [];
-    const fallbackFolders = defaultSettingsFolders();
-    adoptState({ schema:APP_SCHEMA, totalHistory:[], tasksInterval:defaultIntervalTasks.slice(), tasksAsReq:defaultAsReqTasks.slice(), inventory:seedInventoryFromTasks(), cuttingJobs:[], completedCuttingJobs:[], orderRequests:[createOrderRequest()], orderRequestTab:"active", dailyCutHours: [], jobFolders: defaultJobFolders(), pumpEff: pe, settingsFolders: fallbackFolders, folders: cloneFolders(fallbackFolders), garnetCleanings: [], deletedItems: [], dashboardLayout: {}, costLayout: {}, jobLayout: {} });
-    resetHistoryToCurrent();
+  }
+}
+
+/* ===================== DEBUG PANEL HELPERS ===================== */
+function setupDebugPanel(){
+  if (!window.DEBUG_MODE) return;
+  const panel = document.getElementById("debugPanel");
+  if (!panel) return;
+  panel.style.display = "block";
+  const dbgWs = document.getElementById("dbgWs");
+  if (dbgWs) dbgWs.textContent = window.WORKSPACE_ID || "";
+  const btnCloud = document.getElementById("dbgRefreshCloud");
+  const btnSnap  = document.getElementById("dbgRefreshSnapshot");
+  if (btnCloud) btnCloud.onclick = ()=>refreshDebugCloud();
+  if (btnSnap)  btnSnap.onclick  = ()=>{
+    try{
+      const s = snapshotState();
+      const el = document.getElementById("dbgSnap");
+      if (el) el.value = JSON.stringify(s, null, 2);
+    }catch(err){
+      const el = document.getElementById("dbgSnap");
+      if (el) el.value = "snapshotState() failed: " + (err && err.message || err);
+    }
+  };
+}
+async function refreshDebugCloud(){
+  const out = document.getElementById("dbgCloud");
+  if (!out) return;
+  try{
+    const r = await window.workspaceRef?.get?.();
+    if (!r?.exists){
+      out.value = "(no document at workspaces/" + (window.WORKSPACE_ID || "?") + ")";
+      return;
+    }
+    const d = typeof r.data === "function" ? r.data() : r.data;
+    out.value = JSON.stringify(d, null, 2);
+  }catch(err){
+    out.value = "Failed to read cloud doc: " + (err && err.message || err);
   }
 }
 
