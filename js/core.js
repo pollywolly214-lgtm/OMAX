@@ -271,6 +271,85 @@ function toast(msg){
 
 /* ====================== FIREBASE =========================== */
 let FB = { app:null, auth:null, db:null, user:null, docRef:null, workspaceRef:null, ready:false };
+let permissionDeniedNotified = false;
+
+function getServerTimestamp(){
+  try {
+    if (typeof window !== "undefined" && window.firebase && firebase.firestore && firebase.firestore.FieldValue && typeof firebase.firestore.FieldValue.serverTimestamp === "function"){
+      return firebase.firestore.FieldValue.serverTimestamp();
+    }
+  } catch (_err){}
+  return null;
+}
+
+if (typeof window !== "undefined") {
+  window.WORKSPACE_DOC_PATH = null;
+}
+
+async function handlePermissionDenied(err){
+  if (!err || err.code !== "permission-denied") return;
+  console.error("Firestore permission denied", err);
+  if (!permissionDeniedNotified){
+    permissionDeniedNotified = true;
+    try {
+      alert("You do not have access to this workspace. Please sign in with an authorized account.");
+    } catch (_alertErr){}
+    try {
+      await FB.auth.signOut();
+    } catch (_signOutErr){}
+  }
+}
+
+async function configureWorkspaceForUser(user){
+  if (!user || !FB.db) return;
+  const usersCollection = FB.db.collection("users");
+  const userDocRef = usersCollection.doc(user.uid);
+  try {
+    const meta = {
+      email: user.email || null,
+      lastLoginAt: getServerTimestamp() || new Date().toISOString(),
+      lastWorkspace: WORKSPACE_ID
+    };
+    await userDocRef.set(meta, { merge: true });
+  } catch (err) {
+    console.warn("Failed to update user profile metadata", err);
+  }
+
+  FB.workspaceRef = userDocRef.collection("workspaces").doc(WORKSPACE_ID);
+  FB.docRef = FB.workspaceRef;
+  if (typeof window !== "undefined") {
+    window.workspaceRef = FB.workspaceRef;
+    window.WORKSPACE_DOC_PATH = `users/${user.uid}/workspaces/${WORKSPACE_ID}`;
+  }
+
+  await ensureWorkspaceDocument(user);
+}
+
+async function ensureWorkspaceDocument(user){
+  if (!user || !FB.workspaceRef) return;
+  const meta = {
+    workspaceId: WORKSPACE_ID
+  };
+  if (user && user.uid) {
+    meta.ownerUid = user.uid;
+  }
+  if (user && user.email) {
+    meta.ownerEmail = user.email;
+  }
+  const timestamp = getServerTimestamp();
+  if (timestamp) {
+    meta.updatedAt = timestamp;
+  } else {
+    meta.updatedAt = new Date().toISOString();
+  }
+  try {
+    await FB.workspaceRef.set(meta, { merge: true });
+  } catch (err) {
+    console.error("Failed to ensure workspace document", err);
+    await handlePermissionDenied(err);
+    throw err;
+  }
+}
 
 async function initFirebase(){
   if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
@@ -391,10 +470,13 @@ async function initFirebase(){
       if (btnIn)  btnIn.style.display  = "none";
       if (btnOut) btnOut.style.display = "inline-block";
 
-      // Store whole workspace in a single document:
-      FB.workspaceRef = FB.db.collection("workspaces").doc(WORKSPACE_ID);
-      if (typeof window !== "undefined") window.workspaceRef = FB.workspaceRef;
-      FB.docRef = FB.workspaceRef; // alias
+      permissionDeniedNotified = false;
+      try {
+        await configureWorkspaceForUser(user);
+      } catch (err) {
+        console.error("Workspace configuration failed", err);
+        return;
+      }
       FB.ready = true;
       try { setupDebugPanel(); } catch (e) {}
       await loadFromCloud();
@@ -403,7 +485,10 @@ async function initFirebase(){
       FB.ready = false;
       FB.workspaceRef = null;
       FB.docRef = null;
-      if (typeof window !== "undefined") window.workspaceRef = null;
+      if (typeof window !== "undefined") {
+        window.workspaceRef = null;
+        window.WORKSPACE_DOC_PATH = null;
+      }
       if (statusEl) statusEl.textContent = "Not signed in";
       if (btnIn)  btnIn.style.display  = "inline-block";
       if (btnOut) btnOut.style.display = "none";
@@ -1989,13 +2074,27 @@ const saveCloudInternal = debounce(async ()=>{
   try{
     const snap = snapshotState();
     window.__lastSnapshot = snap;
-    await FB.docRef.set(snap, { merge:true });
+    const meta = { workspaceId: WORKSPACE_ID };
+    if (FB.user && FB.user.uid) {
+      meta.ownerUid = FB.user.uid;
+    }
+    if (FB.user && FB.user.email) {
+      meta.ownerEmail = FB.user.email;
+    }
+    const timestamp = getServerTimestamp();
+    if (timestamp) {
+      meta.updatedAt = timestamp;
+    } else {
+      meta.updatedAt = new Date().toISOString();
+    }
+    await FB.docRef.set({ ...snap, ...meta }, { merge:true });
     if (window.DEBUG_MODE){
       const el = document.getElementById("dbgSnap");
       if (el) el.value = JSON.stringify(snap, null, 2);
     }
   }catch(e){
     console.error("Cloud save failed:", e);
+    await handlePermissionDenied(e);
   }
 }, 300);
 function saveCloudDebounced(){
@@ -2020,6 +2119,7 @@ async function loadFromCloud(){
       adoptState(data || {});
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
     }else{
+      const nowIso = new Date().toISOString();
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
@@ -2044,8 +2144,17 @@ async function loadFromCloud(){
         garnetCleanings: Array.isArray(window.garnetCleanings) ? window.garnetCleanings.slice() : [],
         dashboardLayout: typeof window.dashboardLayout === "object" ? { ...window.dashboardLayout } : {},
         costLayout: typeof window.costLayout === "object" ? { ...window.costLayout } : {},
-        jobLayout: typeof window.jobLayout === "object" ? { ...window.jobLayout } : {}
+        jobLayout: typeof window.jobLayout === "object" ? { ...window.jobLayout } : {},
+        workspaceId: WORKSPACE_ID,
+        createdAt: nowIso,
+        updatedAt: nowIso
       };
+      if (FB.user && FB.user.uid) {
+        seeded.ownerUid = FB.user.uid;
+      }
+      if (FB.user && FB.user.email) {
+        seeded.ownerEmail = FB.user.email;
+      }
       adoptState(seeded);
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
       await FB.docRef.set(seeded, { merge:true });
@@ -2055,6 +2164,7 @@ async function loadFromCloud(){
     }
   }catch(e){
     console.error("Cloud load failed:", e);
+    await handlePermissionDenied(e);
   }
 }
 
@@ -2066,6 +2176,11 @@ function setupDebugPanel(){
   panel.style.display = "block";
   const dbgWs = document.getElementById("dbgWs");
   if (dbgWs) dbgWs.textContent = window.WORKSPACE_ID || "";
+  const dbgCloudLabel = document.getElementById("dbgCloudLabel");
+  if (dbgCloudLabel){
+    const path = window.WORKSPACE_DOC_PATH || `users/<uid>/workspaces/${window.WORKSPACE_ID || "?"}`;
+    dbgCloudLabel.textContent = path;
+  }
   const btnCloud = document.getElementById("dbgRefreshCloud");
   const btnSnap  = document.getElementById("dbgRefreshSnapshot");
   if (btnCloud) btnCloud.onclick = ()=>refreshDebugCloud();
@@ -2086,13 +2201,15 @@ async function refreshDebugCloud(){
   try{
     const r = await window.workspaceRef?.get?.();
     if (!r?.exists){
-      out.value = "(no document at workspaces/" + (window.WORKSPACE_ID || "?") + ")";
+      const path = window.WORKSPACE_DOC_PATH || `users/<uid>/workspaces/${window.WORKSPACE_ID || "?"}`;
+      out.value = "(no document at " + path + ")";
       return;
     }
     const d = typeof r.data === "function" ? r.data() : r.data;
     out.value = JSON.stringify(d, null, 2);
   }catch(err){
     out.value = "Failed to read cloud doc: " + (err && err.message || err);
+    await handlePermissionDenied(err);
   }
 }
 
