@@ -8,6 +8,8 @@
   <!-- Your stylesheet -->
   <link rel="stylesheet" href="style.css" />
 
+</head>
+<body>
   <!-- Firebase SDKs (v8 CDN for static sites) -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
@@ -24,8 +26,7 @@
       appId: "1:496764208080:web:43cdd192e462844f7b5335"
     };
   </script>
-</head>
-<body>
+
   <header>
     <div class="header-bar">
       <h1><span class="brand-emblem">OMAX</span> 1530 Maintenance Tracker</h1>
@@ -127,5 +128,12 @@
   <script src="js/renderers.js"></script>
   <script src="js/trainer.js"></script>
   <script src="js/router.js"></script>
+  <script>
+    window.addEventListener('load', () => {
+      if (typeof initFirebase === 'function') {
+        initFirebase();
+      }
+    });
+  </script>
 </body>
 </html>
