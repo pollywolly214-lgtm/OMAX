@@ -271,6 +271,57 @@ function toast(msg){
 
 /* ====================== FIREBASE =========================== */
 let FB = { app:null, auth:null, db:null, user:null, docRef:null, workspaceRef:null, ready:false };
+let permissionDeniedNotified = false;
+
+function getServerTimestamp(){
+  try {
+    if (typeof window !== "undefined" && window.firebase && firebase.firestore && firebase.firestore.FieldValue && typeof firebase.firestore.FieldValue.serverTimestamp === "function"){
+      return firebase.firestore.FieldValue.serverTimestamp();
+    }
+  } catch (_err){}
+  return null;
+}
+
+if (typeof window !== "undefined") {
+  window.WORKSPACE_DOC_PATH = null;
+}
+
+async function handlePermissionDenied(err){
+  if (!err || err.code !== "permission-denied") return;
+  console.error("Firestore permission denied", err);
+  if (!permissionDeniedNotified){
+    permissionDeniedNotified = true;
+    try {
+      alert("You do not have access to this workspace. Please sign in with an authorized account.");
+    } catch (_alertErr){}
+    try {
+      await FB.auth.signOut();
+    } catch (_signOutErr){}
+  }
+}
+
+async function configureWorkspaceForUser(user){
+  if (!user || !FB.db) return;
+  const usersCollection = FB.db.collection("users");
+  const userDocRef = usersCollection.doc(user.uid);
+  try {
+    const meta = {
+      email: user.email || null,
+      lastLoginAt: getServerTimestamp() || new Date().toISOString(),
+      lastWorkspace: WORKSPACE_ID
+    };
+    await userDocRef.set(meta, { merge: true });
+  } catch (err) {
+    console.warn("Failed to update user profile metadata", err);
+  }
+
+  FB.workspaceRef = userDocRef.collection("workspaces").doc(WORKSPACE_ID);
+  FB.docRef = FB.workspaceRef;
+  if (typeof window !== "undefined") {
+    window.workspaceRef = FB.workspaceRef;
+    window.WORKSPACE_DOC_PATH = `users/${user.uid}/workspaces/${WORKSPACE_ID}`;
+  }
+}
 
 async function initFirebase(){
   if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
@@ -391,10 +442,8 @@ async function initFirebase(){
       if (btnIn)  btnIn.style.display  = "none";
       if (btnOut) btnOut.style.display = "inline-block";
 
-      // Store whole workspace in a single document:
-      FB.workspaceRef = FB.db.collection("workspaces").doc(WORKSPACE_ID);
-      if (typeof window !== "undefined") window.workspaceRef = FB.workspaceRef;
-      FB.docRef = FB.workspaceRef; // alias
+      permissionDeniedNotified = false;
+      await configureWorkspaceForUser(user);
       FB.ready = true;
       try { setupDebugPanel(); } catch (e) {}
       await loadFromCloud();
@@ -403,7 +452,10 @@ async function initFirebase(){
       FB.ready = false;
       FB.workspaceRef = null;
       FB.docRef = null;
-      if (typeof window !== "undefined") window.workspaceRef = null;
+      if (typeof window !== "undefined") {
+        window.workspaceRef = null;
+        window.WORKSPACE_DOC_PATH = null;
+      }
       if (statusEl) statusEl.textContent = "Not signed in";
       if (btnIn)  btnIn.style.display  = "inline-block";
       if (btnOut) btnOut.style.display = "none";
@@ -1996,6 +2048,7 @@ const saveCloudInternal = debounce(async ()=>{
     }
   }catch(e){
     console.error("Cloud save failed:", e);
+    await handlePermissionDenied(e);
   }
 }, 300);
 function saveCloudDebounced(){
@@ -2055,6 +2108,7 @@ async function loadFromCloud(){
     }
   }catch(e){
     console.error("Cloud load failed:", e);
+    await handlePermissionDenied(e);
   }
 }
 
@@ -2066,6 +2120,11 @@ function setupDebugPanel(){
   panel.style.display = "block";
   const dbgWs = document.getElementById("dbgWs");
   if (dbgWs) dbgWs.textContent = window.WORKSPACE_ID || "";
+  const dbgCloudLabel = document.getElementById("dbgCloudLabel");
+  if (dbgCloudLabel){
+    const path = window.WORKSPACE_DOC_PATH || `users/<uid>/workspaces/${window.WORKSPACE_ID || "?"}`;
+    dbgCloudLabel.textContent = path;
+  }
   const btnCloud = document.getElementById("dbgRefreshCloud");
   const btnSnap  = document.getElementById("dbgRefreshSnapshot");
   if (btnCloud) btnCloud.onclick = ()=>refreshDebugCloud();
@@ -2086,13 +2145,15 @@ async function refreshDebugCloud(){
   try{
     const r = await window.workspaceRef?.get?.();
     if (!r?.exists){
-      out.value = "(no document at workspaces/" + (window.WORKSPACE_ID || "?") + ")";
+      const path = window.WORKSPACE_DOC_PATH || `users/<uid>/workspaces/${window.WORKSPACE_ID || "?"}`;
+      out.value = "(no document at " + path + ")";
       return;
     }
     const d = typeof r.data === "function" ? r.data() : r.data;
     out.value = JSON.stringify(d, null, 2);
   }catch(err){
     out.value = "Failed to read cloud doc: " + (err && err.message || err);
+    await handlePermissionDenied(err);
   }
 }
 
