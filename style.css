@@ -590,6 +590,23 @@ body.forecast-modal-open{ overflow:hidden; }
 .cost-jobs-summary{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; margin-bottom:10px; font-variant-numeric:tabular-nums; }
 .cost-jobs-summary .label{ display:block; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#5a6478; margin-bottom:2px; }
 .cost-jobs-summary span:last-child{ font-weight:600; color:#1e2b45; }
+.cost-category-controls{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.cost-category-select-label{ display:flex; flex-direction:column; font-weight:600; color:#1e2b45; gap:4px; }
+.cost-category-select-label select{ min-width:200px; padding:6px 8px; border:1px solid #c8d0e0; border-radius:4px; font-size:14px; }
+.cost-category-selected-label{ color:#5a6478; font-size:13px; }
+.cost-category-overview{ margin-bottom:16px; }
+.cost-category-subheading{ margin:0 0 8px; font-size:14px; font-weight:600; color:#1e2b45; }
+.cost-category-overview-empty{ margin:0 0 16px; }
+.cost-category-summary-heading{ margin:0 0 6px; font-size:13px; color:#5a6478; }
+.cost-category-summary{ margin-bottom:16px; }
+.cost-category-summary-section .cost-category-summary{ margin-bottom:0; }
+.cost-category-summary-section{ display:flex; flex-direction:column; gap:12px; margin-bottom:16px; }
+.cost-category-summary--detail{ grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+.cost-category-name{ display:inline-block; padding-left:calc(var(--depth, 0) * 1.5rem); }
+.cost-category-jobs-table-wrap{ overflow-x:auto; }
+.cost-category-jobs-table th,
+.cost-category-jobs-table td{ white-space:nowrap; }
+.cost-category-job-name{ font-weight:600; }
 
 .order-cost-summary { margin-bottom:12px; }
 
