@@ -16,7 +16,22 @@ code = dedent(r'''
 const APP_SCHEMA = 71;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr
-const WORKSPACE_ID = "schreiner-robotics";
+// Decide workspace based on hostname:
+// - omax.vercel.app      → production workspace "github-prod"
+// - any other hostname   → preview workspace "vercel-preview"
+const WORKSPACE_ID = (()=>{
+  if (typeof window !== "undefined"){
+    const host = window.location.hostname || "";
+    if (host === "omax.vercel.app"){
+      return "github-prod";
+    } else {
+      return "vercel-preview";
+    }
+  }
+  // Fallback for non-browser contexts
+  return "github-prod";
+})();
+if (typeof window !== "undefined"){ window.WORKSPACE_ID = WORKSPACE_ID; window.workspaceRef = null; }
 
 /* Root helpers */
 const $  = (s, r=document) => r.querySelector(s);
@@ -144,7 +159,8 @@ async function initFirebase(){
       if (btnIn)  btnIn.style.display  = "none";
       if (btnOut) btnOut.style.display = "inline-block";
 
-      FB.docRef = FB.db.collection("workspaces").doc(WORKSPACE_ID).collection("app").doc("state");
+      FB.workspaceDoc = FB.db.collection("workspaces").doc(WORKSPACE_ID);
+      FB.docRef = FB.workspaceDoc.collection("app").doc("state");
       FB.ready = true;
       await loadFromCloud();
       route();
