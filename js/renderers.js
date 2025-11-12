@@ -7588,6 +7588,7 @@ function renderCosts(){
   setupTimeEfficiencyWidget(document.getElementById("costTimeEfficiency"));
   refreshTimeEfficiencyWidgets();
   setupCostTimeframeModal(model);
+  setupJobCategoryWindow(model);
 
   function setupCostTimeframeModal(currentModel){
     if (typeof window.__cleanupCostTimeframeModal === "function"){
@@ -7836,6 +7837,45 @@ function renderCosts(){
       });
     };
   }
+
+  function setupJobCategoryWindow(currentModel){
+    const panel = content.querySelector("[data-cost-job-categories]");
+    if (!panel) return;
+    const select = panel.querySelector("[data-cost-job-category-select]");
+    if (!(select instanceof HTMLSelectElement)) return;
+    const analytics = currentModel && typeof currentModel === "object"
+      ? currentModel.jobCategoryAnalytics
+      : null;
+    const optionIds = new Set();
+    if (analytics && Array.isArray(analytics.options)){
+      analytics.options.forEach(opt => {
+        if (opt && opt.id != null){
+          optionIds.add(String(opt.id));
+        }
+      });
+    }
+    const fallbackId = (analytics && typeof analytics.rootId === "string")
+      ? analytics.rootId
+      : (typeof JOB_ROOT_FOLDER_ID === "string" ? JOB_ROOT_FOLDER_ID : "jobs_root");
+    select.addEventListener("change", event => {
+      const rawValue = event && event.target instanceof HTMLSelectElement
+        ? event.target.value
+        : select.value;
+      let normalized = String(rawValue || "");
+      if (optionIds.size){
+        normalized = optionIds.has(normalized) ? normalized : String(fallbackId);
+      }else if (!normalized){
+        normalized = String(fallbackId);
+      }
+      if (typeof window !== "undefined"){
+        if (window.costJobCategoryFilter !== normalized){
+          window.costJobCategoryFilter = normalized;
+          renderCosts();
+        }
+      }
+    });
+  }
+
 
   function getHistoryMessageState(){
     const existing = window.__costHistoryMessageState;
@@ -9978,6 +10018,419 @@ function computeCostModel(){
       : formatterCurrency(0, { decimals: 0 })
   };
 
+  const jobCategoryAnalytics = (()=>{
+    const rootId = typeof JOB_ROOT_FOLDER_ID === "string" ? JOB_ROOT_FOLDER_ID : "jobs_root";
+    const emptyStats = ()=>({
+      jobCount: 0,
+      totalDurationHours: 0,
+      averageDurationHours: 0,
+      totalMaterialCost: 0,
+      averageMaterialCost: 0,
+      totalLaborCost: 0,
+      averageLaborCost: 0,
+      totalMachineCost: 0,
+      averageMachineCost: 0,
+      totalOverheadCost: 0,
+      averageOverheadCost: 0,
+      totalCost: 0,
+      averageCost: 0,
+      minCost: null,
+      maxCost: null,
+      percentile50: null,
+      percentile90: null,
+      throughputPerHour: 0
+    });
+
+    try {
+      const sourceFolders = Array.isArray(jobFolders) && jobFolders.length
+        ? jobFolders.slice()
+        : (typeof defaultJobFolders === "function" ? defaultJobFolders() : []);
+
+      const folderMap = new Map();
+      folderMap.set(rootId, { id: rootId, name: "All Jobs", parent: null, order: 1 });
+
+      sourceFolders.forEach(folder => {
+        if (!folder) return;
+        const rawId = folder.id != null ? String(folder.id) : "";
+        if (!rawId) return;
+        const name = folder.name || (rawId === rootId ? "All Jobs" : "Category");
+        let parentId = folder.parent == null ? rootId : String(folder.parent);
+        if (rawId === rootId){
+          parentId = null;
+        }
+        if (parentId === rawId) parentId = rootId;
+        const order = Number.isFinite(Number(folder.order)) ? Number(folder.order) : 0;
+        folderMap.set(rawId, { id: rawId, name, parent: parentId, order });
+      });
+
+      folderMap.forEach(folder => {
+        if (folder.id === rootId){
+          folder.parent = null;
+          return;
+        }
+        if (!folder.parent || !folderMap.has(folder.parent)){
+          folder.parent = rootId;
+        }
+      });
+
+      const parentMap = new Map();
+      const childrenMap = new Map();
+      folderMap.forEach(folder => {
+        const parentId = folder.parent == null ? null : String(folder.parent);
+        parentMap.set(folder.id, parentId);
+        if (folder.id === rootId) return;
+        const key = parentId == null ? rootId : parentId;
+        const list = childrenMap.get(key) || [];
+        list.push(folder);
+        childrenMap.set(key, list);
+      });
+
+      const sortFolders = (list)=> list.slice().sort((a, b)=>{
+        const orderDiff = (Number(b?.order) || 0) - (Number(a?.order) || 0);
+        if (orderDiff !== 0) return orderDiff;
+        return String(a?.name || "").localeCompare(String(b?.name || ""));
+      });
+
+      childrenMap.forEach((list, key) => {
+        childrenMap.set(key, sortFolders(list));
+      });
+
+      const orderedFolders = [];
+      const rootFolder = folderMap.get(rootId) || { id: rootId, name: "All Jobs", parent: null, order: 1 };
+      orderedFolders.push({ ...rootFolder, depth: 0 });
+
+      const appendChildren = (parentId, depth)=>{
+        const key = parentId == null ? rootId : parentId;
+        const kids = childrenMap.get(key) || [];
+        kids.forEach(child => {
+          orderedFolders.push({ ...child, depth });
+          appendChildren(child.id, depth + 1);
+        });
+      };
+      appendChildren(rootId, 1);
+
+      const normalizeCategoryId = (value)=>{
+        const key = value != null ? String(value) : rootId;
+        return folderMap.has(key) ? key : rootId;
+      };
+
+      const materialFromJob = (job)=>{
+        const overrides = [job?.materialTotal, job?.materialSpend, job?.totalMaterialCost, job?.materialCostTotal];
+        for (const entry of overrides){
+          const num = Number(entry);
+          if (Number.isFinite(num)) return Math.max(0, num);
+        }
+        const unit = Number(job?.materialCost);
+        const qty = Number(job?.materialQty);
+        const unitSafe = Number.isFinite(unit) ? unit : 0;
+        const qtySafe = Number.isFinite(qty) ? qty : 0;
+        return Math.max(0, unitSafe * qtySafe);
+      };
+
+      const laborFromJob = (job, durationHours)=>{
+        const overrides = [job?.laborCost, job?.laborTotal, job?.laborSpend, job?.totalLaborCost, job?.actualLaborCost];
+        for (const entry of overrides){
+          const num = Number(entry);
+          if (Number.isFinite(num)) return Math.max(0, num);
+        }
+        const hours = Number.isFinite(durationHours) && durationHours > 0 ? durationHours : 0;
+        return hours * JOB_BASE_COST_PER_HOUR;
+      };
+
+      const machineFromJob = (job)=>{
+        const overrides = [job?.machineCost, job?.machineTotal, job?.equipmentCost, job?.machinesCost, job?.machineSpend];
+        for (const entry of overrides){
+          const num = Number(entry);
+          if (Number.isFinite(num)) return Math.max(0, num);
+        }
+        return 0;
+      };
+
+      const overheadFromJob = (job)=>{
+        const overrides = [job?.overheadCost, job?.overheadTotal, job?.overheadSpend, job?.overhead];
+        for (const entry of overrides){
+          const num = Number(entry);
+          if (Number.isFinite(num)) return Math.max(0, num);
+        }
+        return 0;
+      };
+
+      const jobsByCategory = new Map();
+      const registerMetricsForCategory = (metrics)=>{
+        if (!metrics) return;
+        let current = normalizeCategoryId(metrics.categoryId);
+        if (!current) current = rootId;
+        const visited = new Set();
+        while (current && !visited.has(current)){
+          visited.add(current);
+          const list = jobsByCategory.get(current) || [];
+          list.push(metrics);
+          jobsByCategory.set(current, list);
+          const parent = parentMap.get(current);
+          if (parent == null) break;
+          current = parent;
+        }
+      };
+
+      let jobAutoId = 0;
+      const analyzeJob = (job, type)=>{
+        if (!job) return null;
+        jobAutoId += 1;
+        const eff = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
+        const actualCandidates = [job?.actualHours, eff?.actualHours];
+        let actualHours = actualCandidates.find(val => Number.isFinite(Number(val)) && Number(val) >= 0);
+        actualHours = Number.isFinite(actualHours) ? Number(actualHours) : 0;
+        const estimateHours = Number(job?.estimateHours);
+        const estimateSafe = Number.isFinite(estimateHours) && estimateHours > 0 ? estimateHours : 0;
+        const durationHours = actualHours > 0 ? actualHours : estimateSafe;
+        const materialCost = materialFromJob(job);
+        const laborCost = laborFromJob(job, durationHours);
+        const machineCost = machineFromJob(job);
+        const overheadCost = overheadFromJob(job);
+        const totalCost = materialCost + laborCost + machineCost + overheadCost;
+        const id = job && job.id != null ? String(job.id) : `job_${jobAutoId}`;
+        const name = job?.name || "Job";
+        const categoryId = normalizeCategoryId(job?.cat);
+        const chargeCandidates = [job?.chargeRate, eff?.chargeRate];
+        let chargeRate = chargeCandidates.find(val => Number.isFinite(Number(val)) && Number(val) >= 0);
+        if (!Number.isFinite(chargeRate)) chargeRate = JOB_RATE_PER_HOUR;
+        const deltaHours = Number(eff?.deltaHours);
+        let statusLabel = type === "completed" ? "Completed" : "On pace";
+        if (type === "active"){
+          if (Number.isFinite(deltaHours) && deltaHours > 0.1) statusLabel = "Ahead";
+          else if (Number.isFinite(deltaHours) && deltaHours < -0.1) statusLabel = "Behind";
+        }
+        let statusDetail = "";
+        if (Number.isFinite(deltaHours) && Math.abs(deltaHours) > 0.1){
+          statusDetail = `${deltaHours > 0 ? "+" : "−"}${Math.abs(deltaHours).toFixed(1)} hr`;
+        }
+        const startISO = job?.startISO || null;
+        const dueISO = job?.dueISO || null;
+        const completedISO = job?.completedAtISO || null;
+        const code = job?.code || job?.jobCode || job?.jobId || null;
+
+        const metrics = {
+          id,
+          name,
+          categoryId,
+          type,
+          status: statusLabel,
+          statusDetail,
+          durationHours: Number.isFinite(durationHours) && durationHours > 0 ? durationHours : 0,
+          estimateHours: estimateSafe,
+          actualHours: Number.isFinite(actualHours) && actualHours > 0 ? actualHours : 0,
+          materialCost,
+          laborCost,
+          machineCost,
+          overheadCost,
+          totalCost,
+          startISO,
+          dueISO,
+          completedISO,
+          chargeRate: Number.isFinite(chargeRate) ? chargeRate : JOB_RATE_PER_HOUR,
+          gainLoss: Number(eff?.gainLoss) || 0,
+          deltaHours: Number.isFinite(deltaHours) ? deltaHours : 0,
+          code
+        };
+
+        registerMetricsForCategory(metrics);
+        return metrics;
+      };
+
+      if (Array.isArray(cuttingJobs)){
+        cuttingJobs.forEach(job => analyzeJob(job, "active"));
+      }
+      if (Array.isArray(completedCuttingJobs)){
+        completedCuttingJobs.forEach(job => analyzeJob(job, "completed"));
+      }
+
+      const computeStatsForJobs = (list)=>{
+        const jobs = Array.isArray(list) ? list : [];
+        if (!jobs.length) return emptyStats();
+        let totalDuration = 0;
+        let totalMaterial = 0;
+        let totalLabor = 0;
+        let totalMachine = 0;
+        let totalOverhead = 0;
+        let totalCost = 0;
+        const costs = [];
+        jobs.forEach(job => {
+          const duration = Number(job?.durationHours);
+          if (Number.isFinite(duration) && duration > 0) totalDuration += duration;
+          const material = Number(job?.materialCost);
+          if (Number.isFinite(material)) totalMaterial += material;
+          const labor = Number(job?.laborCost);
+          if (Number.isFinite(labor)) totalLabor += labor;
+          const machine = Number(job?.machineCost);
+          if (Number.isFinite(machine)) totalMachine += machine;
+          const overhead = Number(job?.overheadCost);
+          if (Number.isFinite(overhead)) totalOverhead += overhead;
+          const combined = Number(job?.totalCost);
+          if (Number.isFinite(combined)){
+            totalCost += combined;
+            costs.push(combined);
+          }
+        });
+        costs.sort((a, b) => a - b);
+        const jobCountVal = jobs.length;
+        const average = jobCountVal ? (totalCost / jobCountVal) : 0;
+        const avgDuration = jobCountVal ? (totalDuration / jobCountVal) : 0;
+        const avgMaterial = jobCountVal ? (totalMaterial / jobCountVal) : 0;
+        const avgLabor = jobCountVal ? (totalLabor / jobCountVal) : 0;
+        const avgMachine = jobCountVal ? (totalMachine / jobCountVal) : 0;
+        const avgOverhead = jobCountVal ? (totalOverhead / jobCountVal) : 0;
+        const percentileAt = (values, ratio)=>{
+          if (!values.length) return null;
+          const pos = Math.max(0, Math.min(values.length - 1, ratio * (values.length - 1)));
+          const lower = Math.floor(pos);
+          const upper = Math.ceil(pos);
+          if (lower === upper) return values[lower];
+          const weight = pos - lower;
+          return values[lower] + ((values[upper] - values[lower]) * weight);
+        };
+        const minCost = costs.length ? costs[0] : null;
+        const maxCost = costs.length ? costs[costs.length - 1] : null;
+        const percentile50 = percentileAt(costs, 0.5);
+        const percentile90 = percentileAt(costs, 0.9);
+        const throughput = totalDuration > 0 ? (jobCountVal / totalDuration) : 0;
+        return {
+          jobCount: jobCountVal,
+          totalDurationHours: totalDuration,
+          averageDurationHours: avgDuration,
+          totalMaterialCost: totalMaterial,
+          averageMaterialCost: avgMaterial,
+          totalLaborCost: totalLabor,
+          averageLaborCost: avgLabor,
+          totalMachineCost: totalMachine,
+          averageMachineCost: avgMachine,
+          totalOverheadCost: totalOverhead,
+          averageOverheadCost: avgOverhead,
+          totalCost,
+          averageCost: average,
+          minCost,
+          maxCost,
+          percentile50,
+          percentile90,
+          throughputPerHour: throughput
+        };
+      };
+
+      const categoryStats = new Map();
+      orderedFolders.forEach(folder => {
+        const jobs = jobsByCategory.get(folder.id) || [];
+        categoryStats.set(folder.id, computeStatsForJobs(jobs));
+      });
+
+      const sortCategoryJobs = (jobs)=>{
+        const list = Array.isArray(jobs) ? jobs.slice() : [];
+        const jobSortTime = (job)=>{
+          const iso = job.type === "completed"
+            ? (job.completedISO || job.dueISO || job.startISO || "")
+            : (job.dueISO || job.startISO || "");
+          if (!iso) return job.type === "completed" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+          const parsed = typeof parseDateLocal === "function"
+            ? (parseDateLocal(iso) || new Date(iso))
+            : new Date(iso);
+          if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())){
+            return job.type === "completed" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+          }
+          const time = parsed.getTime();
+          return job.type === "completed" ? -time : time;
+        };
+        return list.sort((a, b)=>{
+          const typeRank = (a.type === "active" ? 0 : 1) - (b.type === "active" ? 0 : 1);
+          if (typeRank !== 0) return typeRank;
+          const timeDiff = jobSortTime(a) - jobSortTime(b);
+          if (timeDiff !== 0) return timeDiff;
+          return String(a?.name || "").localeCompare(String(b?.name || ""));
+        });
+      };
+
+      const jobsByCategoryPlain = {};
+      orderedFolders.forEach(folder => {
+        const jobs = jobsByCategory.get(folder.id) || [];
+        jobsByCategoryPlain[folder.id] = sortCategoryJobs(jobs).map(job => ({
+          id: job.id,
+          name: job.name,
+          status: job.status,
+          statusDetail: job.statusDetail,
+          durationHours: job.durationHours,
+          estimateHours: job.estimateHours,
+          actualHours: job.actualHours,
+          materialCost: job.materialCost,
+          laborCost: job.laborCost,
+          machineCost: job.machineCost,
+          overheadCost: job.overheadCost,
+          totalCost: job.totalCost,
+          startISO: job.startISO,
+          dueISO: job.dueISO,
+          completedISO: job.completedISO,
+          type: job.type,
+          categoryId: job.categoryId,
+          categoryName: (folderMap.get(job.categoryId) || {}).name || (job.categoryId === rootId ? "All Jobs" : "Category"),
+          chargeRate: job.chargeRate,
+          gainLoss: job.gainLoss,
+          deltaHours: job.deltaHours,
+          code: job.code
+        }));
+      });
+
+      let selectedId = rootId;
+      if (typeof window !== "undefined" && typeof window.costJobCategoryFilter === "string"){
+        const candidate = String(window.costJobCategoryFilter);
+        if (folderMap.has(candidate)) selectedId = candidate;
+      }
+      if (!folderMap.has(selectedId)) selectedId = rootId;
+      if (typeof window !== "undefined"){
+        window.costJobCategoryFilter = selectedId;
+      }
+
+      const selectedStats = categoryStats.get(selectedId) || emptyStats();
+      const selectedJobs = jobsByCategoryPlain[selectedId] || [];
+      const selectedFolder = folderMap.get(selectedId) || folderMap.get(rootId);
+
+      const categoriesDetailed = orderedFolders.map(folder => ({
+        id: folder.id,
+        name: folder.name,
+        depth: folder.depth || 0,
+        parentId: folder.parent == null ? null : String(folder.parent),
+        metrics: categoryStats.get(folder.id) || emptyStats()
+      }));
+
+      const categoryOptions = orderedFolders.map(folder => ({
+        id: folder.id,
+        name: folder.name,
+        depth: folder.depth || 0
+      }));
+
+      return {
+        rootId,
+        selectedId,
+        selectedName: selectedFolder ? selectedFolder.name : "All Jobs",
+        categories: categoriesDetailed,
+        options: categoryOptions,
+        selected: {
+          id: selectedId,
+          name: selectedFolder ? selectedFolder.name : "All Jobs",
+          metrics: selectedStats,
+          jobs: selectedJobs
+        },
+        jobsByCategory: jobsByCategoryPlain
+      };
+    } catch (err) {
+      console.warn("Failed to build job category analytics", err);
+      return {
+        rootId,
+        selectedId: rootId,
+        selectedName: "All Jobs",
+        categories: [{ id: rootId, name: "All Jobs", depth: 0, parentId: null, metrics: emptyStats() }],
+        options: [{ id: rootId, name: "All Jobs", depth: 0 }],
+        selected: { id: rootId, name: "All Jobs", metrics: emptyStats(), jobs: [] },
+        jobsByCategory: { [rootId]: [] }
+      };
+    }
+  })();
+
   let timeframeNote;
   if (maintenanceOrderItems.length){
     timeframeNote = "Actual spend combines interval allocations with approved maintenance orders matched to your task part numbers.";
@@ -10046,6 +10499,7 @@ function computeCostModel(){
     jobSummary,
     jobBreakdown,
     jobEmpty,
+    jobCategoryAnalytics,
     chartNote,
     chartInfo,
     orderRequestSummary,
