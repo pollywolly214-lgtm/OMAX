@@ -16,18 +16,25 @@ const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
 // Decide workspace based on hostname:
-// - omax.vercel.app      → production workspace "github-prod"
-// - any other hostname   → preview workspace "vercel-preview"
+// - GitHub Pages (anything ending with .github.io) or the production Vercel host → "github-prod"
+// - Preview / branch URLs on Vercel (e.g. *.vercel.app) or everything else → "vercel-preview"
 const WORKSPACE_ID = (() => {
   if (typeof window !== "undefined") {
-    const host = window.location.hostname || "";
-    if (host === "omax.vercel.app") {
+    const rawHost = window.location && typeof window.location.hostname === "string"
+      ? window.location.hostname
+      : "";
+    const host = rawHost.toLowerCase();
+
+    const isGithubPages = host.endsWith(".github.io");
+    const isProdVercel = host === "omax.vercel.app";
+    if (isGithubPages || isProdVercel) {
       return "github-prod";
-    } else {
-      return "vercel-preview";
     }
+
+    // Treat everything else (branch previews, localhost, custom staging domains) as preview data.
+    return "vercel-preview";
   }
-  // Fallback for non-browser contexts
+  // Fallback for non-browser contexts so build-time scripts default to production doc
   return "github-prod";
 })();
 if (typeof window !== "undefined") {
