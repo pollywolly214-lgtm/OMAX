@@ -16,19 +16,20 @@ js.calendar
 const APP_SCHEMA = 71;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr
+// Decide workspace based on hostname:
+// - omax.vercel.app      → production workspace "github-prod"
+// - any other hostname   → preview workspace "vercel-preview"
 const WORKSPACE_ID = (()=>{
-  const envValue = (()=>{
-    if (typeof process !== "undefined" && process && typeof process === "object" && process.env){
-      const raw = process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID;
-      if (typeof raw === "string" && raw.trim()) return raw.trim();
+  if (typeof window !== "undefined"){
+    const host = window.location.hostname || "";
+    if (host === "omax.vercel.app"){
+      return "github-prod";
+    } else {
+      return "vercel-preview";
     }
-    if (typeof window !== "undefined" && typeof window.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID === "string"){
-      const raw = window.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID;
-      if (raw && raw.trim()) return raw.trim();
-    }
-    return null;
-  })();
-  return envValue || "github-prod";
+  }
+  // Fallback for non-browser contexts
+  return "github-prod";
 })();
 if (typeof window !== "undefined"){ window.WORKSPACE_ID = WORKSPACE_ID; window.workspaceRef = null; }
 
@@ -457,19 +458,20 @@ core.js
 const APP_SCHEMA = 71;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr
+// Decide workspace based on hostname:
+// - omax.vercel.app      → production workspace "github-prod"
+// - any other hostname   → preview workspace "vercel-preview"
 const WORKSPACE_ID = (()=>{
-  const envValue = (()=>{
-    if (typeof process !== "undefined" && process && typeof process === "object" && process.env){
-      const raw = process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID;
-      if (typeof raw === "string" && raw.trim()) return raw.trim();
+  if (typeof window !== "undefined"){
+    const host = window.location.hostname || "";
+    if (host === "omax.vercel.app"){
+      return "github-prod";
+    } else {
+      return "vercel-preview";
     }
-    if (typeof window !== "undefined" && typeof window.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID === "string"){
-      const raw = window.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID;
-      if (raw && raw.trim()) return raw.trim();
-    }
-    return null;
-  })();
-  return envValue || "github-prod";
+  }
+  // Fallback for non-browser contexts
+  return "github-prod";
 })();
 if (typeof window !== "undefined"){ window.WORKSPACE_ID = WORKSPACE_ID; window.workspaceRef = null; }
 

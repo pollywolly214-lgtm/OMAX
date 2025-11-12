@@ -15,16 +15,19 @@ const APP_SCHEMA = 72;
 const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
+// Decide workspace based on hostname:
+// - omax.vercel.app      → production workspace "github-prod"
+// - any other hostname   → preview workspace "vercel-preview"
 const WORKSPACE_ID = (() => {
-  const fromEnv =
-    (typeof process !== "undefined" &&
-     process &&
-     typeof process.env === "object" &&
-     typeof process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID === "string" &&
-     process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID.trim())
-      ? process.env.NEXT_PUBLIC_FIREBASE_WORKSPACE_ID.trim()
-      : null;
-  if (fromEnv) return fromEnv;
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname || "";
+    if (host === "omax.vercel.app") {
+      return "github-prod";
+    } else {
+      return "vercel-preview";
+    }
+  }
+  // Fallback for non-browser contexts
   return "github-prod";
 })();
 if (typeof window !== "undefined") {
