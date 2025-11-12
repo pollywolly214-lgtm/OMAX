@@ -2065,7 +2065,7 @@ function setupDebugPanel(){
   if (!panel) return;
   panel.style.display = "block";
   const dbgWs = document.getElementById("dbgWs");
-  if (dbgWs) dbgWs.textContent = window.WORKSPACE_ID || "";
+  if (dbgWs) dbgWs.textContent = `${window.WORKSPACE_ID || ""}/app/state`;
   const btnCloud = document.getElementById("dbgRefreshCloud");
   const btnSnap  = document.getElementById("dbgRefreshSnapshot");
   if (btnCloud) btnCloud.onclick = ()=>refreshDebugCloud();
@@ -2079,6 +2079,17 @@ function setupDebugPanel(){
       if (el) el.value = "snapshotState() failed: " + (err && err.message || err);
     }
   };
+  // Prefill both columns on load so the panel is immediately useful.
+  if (btnSnap) {
+    try {
+      btnSnap.click();
+    } catch (e) {
+      if (typeof btnSnap.onclick === "function") btnSnap.onclick();
+    }
+  }
+  if (btnCloud) {
+    refreshDebugCloud();
+  }
 }
 async function refreshDebugCloud(){
   const out = document.getElementById("dbgCloud");
@@ -2086,7 +2097,7 @@ async function refreshDebugCloud(){
   try{
     const r = await window.workspaceRef?.get?.();
     if (!r?.exists){
-      out.value = "(no document at workspaces/" + (window.WORKSPACE_ID || "?") + ")";
+      out.value = "(no document at workspaces/" + (window.WORKSPACE_ID || "?") + "/app/state)";
       return;
     }
     const d = typeof r.data === "function" ? r.data() : r.data;
