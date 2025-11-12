@@ -321,6 +321,34 @@ async function configureWorkspaceForUser(user){
     window.workspaceRef = FB.workspaceRef;
     window.WORKSPACE_DOC_PATH = `users/${user.uid}/workspaces/${WORKSPACE_ID}`;
   }
+
+  await ensureWorkspaceDocument(user);
+}
+
+async function ensureWorkspaceDocument(user){
+  if (!user || !FB.workspaceRef) return;
+  const meta = {
+    workspaceId: WORKSPACE_ID
+  };
+  if (user && user.uid) {
+    meta.ownerUid = user.uid;
+  }
+  if (user && user.email) {
+    meta.ownerEmail = user.email;
+  }
+  const timestamp = getServerTimestamp();
+  if (timestamp) {
+    meta.updatedAt = timestamp;
+  } else {
+    meta.updatedAt = new Date().toISOString();
+  }
+  try {
+    await FB.workspaceRef.set(meta, { merge: true });
+  } catch (err) {
+    console.error("Failed to ensure workspace document", err);
+    await handlePermissionDenied(err);
+    throw err;
+  }
 }
 
 async function initFirebase(){
@@ -443,7 +471,12 @@ async function initFirebase(){
       if (btnOut) btnOut.style.display = "inline-block";
 
       permissionDeniedNotified = false;
-      await configureWorkspaceForUser(user);
+      try {
+        await configureWorkspaceForUser(user);
+      } catch (err) {
+        console.error("Workspace configuration failed", err);
+        return;
+      }
       FB.ready = true;
       try { setupDebugPanel(); } catch (e) {}
       await loadFromCloud();
@@ -2041,7 +2074,20 @@ const saveCloudInternal = debounce(async ()=>{
   try{
     const snap = snapshotState();
     window.__lastSnapshot = snap;
-    await FB.docRef.set(snap, { merge:true });
+    const meta = { workspaceId: WORKSPACE_ID };
+    if (FB.user && FB.user.uid) {
+      meta.ownerUid = FB.user.uid;
+    }
+    if (FB.user && FB.user.email) {
+      meta.ownerEmail = FB.user.email;
+    }
+    const timestamp = getServerTimestamp();
+    if (timestamp) {
+      meta.updatedAt = timestamp;
+    } else {
+      meta.updatedAt = new Date().toISOString();
+    }
+    await FB.docRef.set({ ...snap, ...meta }, { merge:true });
     if (window.DEBUG_MODE){
       const el = document.getElementById("dbgSnap");
       if (el) el.value = JSON.stringify(snap, null, 2);
@@ -2073,6 +2119,7 @@ async function loadFromCloud(){
       adoptState(data || {});
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
     }else{
+      const nowIso = new Date().toISOString();
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
@@ -2097,8 +2144,17 @@ async function loadFromCloud(){
         garnetCleanings: Array.isArray(window.garnetCleanings) ? window.garnetCleanings.slice() : [],
         dashboardLayout: typeof window.dashboardLayout === "object" ? { ...window.dashboardLayout } : {},
         costLayout: typeof window.costLayout === "object" ? { ...window.costLayout } : {},
-        jobLayout: typeof window.jobLayout === "object" ? { ...window.jobLayout } : {}
+        jobLayout: typeof window.jobLayout === "object" ? { ...window.jobLayout } : {},
+        workspaceId: WORKSPACE_ID,
+        createdAt: nowIso,
+        updatedAt: nowIso
       };
+      if (FB.user && FB.user.uid) {
+        seeded.ownerUid = FB.user.uid;
+      }
+      if (FB.user && FB.user.email) {
+        seeded.ownerEmail = FB.user.email;
+      }
       adoptState(seeded);
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
       await FB.docRef.set(seeded, { merge:true });
