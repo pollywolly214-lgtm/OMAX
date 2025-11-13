@@ -597,15 +597,28 @@ body.forecast-modal-open{ overflow:hidden; }
 .cost-category-overview{ margin-bottom:16px; }
 .cost-category-subheading{ margin:0 0 8px; font-size:14px; font-weight:600; color:#1e2b45; }
 .cost-category-overview-empty{ margin:0 0 16px; }
-.cost-category-summary-heading{ margin:0 0 6px; font-size:13px; color:#5a6478; }
-.cost-category-summary{ margin-bottom:16px; }
-.cost-category-summary-section .cost-category-summary{ margin-bottom:0; }
-.cost-category-summary-section{ display:flex; flex-direction:column; gap:12px; margin-bottom:16px; }
-.cost-category-summary--detail{ grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+.cost-category-summary-section{ margin-bottom:16px; }
+.cost-category-summary-header{ display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:8px; }
+.cost-category-metrics-label select{ min-width:180px; }
+.cost-category-summary-table{ width:100%; border-collapse:separate; border-spacing:0; border:1px solid #d9e2f2; border-radius:12px; overflow:hidden; font-variant-numeric:tabular-nums; }
+.cost-category-summary-table th,
+.cost-category-summary-table td{ padding:8px 12px; }
+.cost-category-summary-table th{ text-align:left; font-weight:600; color:#4f5d75; background:rgba(16,33,64,0.04); }
+.cost-category-summary-table td{ text-align:right; font-weight:600; color:#1e2b45; }
+.cost-category-summary-table tr:nth-child(even) th,
+.cost-category-summary-table tr:nth-child(even) td{ background:rgba(16,33,64,0.02); }
+.cost-category-summary-table tr:first-child th{ border-top-left-radius:12px; }
+.cost-category-summary-table tr:first-child td{ border-top-right-radius:12px; }
+.cost-category-summary-table tr:last-child th{ border-bottom-left-radius:12px; }
+.cost-category-summary-table tr:last-child td{ border-bottom-right-radius:12px; }
 .cost-category-name{ display:inline-block; padding-left:calc(var(--depth, 0) * 1.5rem); }
 .cost-category-jobs-table-wrap{ overflow-x:auto; }
 .cost-category-jobs-table th,
 .cost-category-jobs-table td{ white-space:nowrap; }
+.cost-category-jobs-table thead th{ background:#f6f8fc; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#5a6478; border-bottom:1px solid #dfe4ef; }
+.cost-category-jobs-table thead tr:last-child th{ font-size:13px; text-transform:none; letter-spacing:normal; }
+.cost-category-jobs-table thead th[rowspan]{ vertical-align:bottom; }
+.cost-category-jobs-table td:nth-child(n+4){ text-align:right; }
 .cost-category-job-name{ font-weight:600; }
 
 .order-cost-summary { margin-bottom:12px; }

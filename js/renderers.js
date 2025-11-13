@@ -7841,39 +7841,58 @@ function renderCosts(){
   function setupJobCategoryWindow(currentModel){
     const panel = content.querySelector("[data-cost-job-categories]");
     if (!panel) return;
-    const select = panel.querySelector("[data-cost-job-category-select]");
-    if (!(select instanceof HTMLSelectElement)) return;
     const analytics = currentModel && typeof currentModel === "object"
       ? currentModel.jobCategoryAnalytics
       : null;
-    const optionIds = new Set();
-    if (analytics && Array.isArray(analytics.options)){
-      analytics.options.forEach(opt => {
-        if (opt && opt.id != null){
-          optionIds.add(String(opt.id));
-        }
-      });
-    }
-    const fallbackId = (analytics && typeof analytics.rootId === "string")
-      ? analytics.rootId
-      : (typeof JOB_ROOT_FOLDER_ID === "string" ? JOB_ROOT_FOLDER_ID : "jobs_root");
-    select.addEventListener("change", event => {
-      const rawValue = event && event.target instanceof HTMLSelectElement
-        ? event.target.value
-        : select.value;
-      let normalized = String(rawValue || "");
-      if (optionIds.size){
-        normalized = optionIds.has(normalized) ? normalized : String(fallbackId);
-      }else if (!normalized){
-        normalized = String(fallbackId);
+    const categorySelect = panel.querySelector("[data-cost-job-category-select]");
+    if (categorySelect instanceof HTMLSelectElement){
+      const optionIds = new Set();
+      if (analytics && Array.isArray(analytics.options)){
+        analytics.options.forEach(opt => {
+          if (opt && opt.id != null){
+            optionIds.add(String(opt.id));
+          }
+        });
       }
-      if (typeof window !== "undefined"){
-        if (window.costJobCategoryFilter !== normalized){
+      const fallbackId = (analytics && typeof analytics.rootId === "string")
+        ? analytics.rootId
+        : (typeof JOB_ROOT_FOLDER_ID === "string" ? JOB_ROOT_FOLDER_ID : "jobs_root");
+      categorySelect.addEventListener("change", event => {
+        const rawValue = event && event.target instanceof HTMLSelectElement
+          ? event.target.value
+          : categorySelect.value;
+        let normalized = String(rawValue || "");
+        if (optionIds.size){
+          normalized = optionIds.has(normalized) ? normalized : String(fallbackId);
+        } else if (!normalized){
+          normalized = String(fallbackId);
+        }
+        if (typeof window !== "undefined" && window.costJobCategoryFilter !== normalized){
           window.costJobCategoryFilter = normalized;
           renderCosts();
         }
-      }
-    });
+      });
+    }
+
+    const summarySelect = panel.querySelector("[data-cost-job-category-summary]");
+    if (summarySelect instanceof HTMLSelectElement){
+      const viewIds = new Set(Array.from(summarySelect.options || []).map(opt => opt.value));
+      const fallbackView = summarySelect.options && summarySelect.options.length
+        ? summarySelect.options[0].value
+        : "general";
+      summarySelect.addEventListener("change", event => {
+        const rawValue = event && event.target instanceof HTMLSelectElement
+          ? event.target.value
+          : summarySelect.value;
+        const normalized = viewIds.size
+          ? (viewIds.has(rawValue) ? rawValue : fallbackView)
+          : (rawValue || fallbackView);
+        if (typeof window !== "undefined" && window.costJobCategorySummaryView !== normalized){
+          window.costJobCategorySummaryView = normalized;
+          renderCosts();
+        }
+      });
+    }
   }
 
 

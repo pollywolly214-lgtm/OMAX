@@ -1109,6 +1109,58 @@ function viewCosts(model){
     return `<option value="${esc(id)}"${selectedAttr}>${indent}${label}</option>`;
   }).join("");
 
+  const availableSummaryViews = [
+    { id: "general", label: "Overall metrics" },
+    { id: "totals", label: "Cost totals" },
+    { id: "averages", label: "Average costs" }
+  ];
+  const storedSummaryView = (typeof window !== "undefined" && typeof window.costJobCategorySummaryView === "string")
+    ? window.costJobCategorySummaryView
+    : (typeof jobCategoryAnalytics.summaryView === "string" ? jobCategoryAnalytics.summaryView : "general");
+  const summaryViewId = availableSummaryViews.some(view => view.id === storedSummaryView)
+    ? storedSummaryView
+    : "general";
+  const summaryRowsByView = {
+    general: [
+      { label: "Jobs", value: formatCountValue(selectedCategoryStats.jobCount) },
+      { label: "Total cost", value: formatCurrencyValue(selectedCategoryStats.totalCost) },
+      { label: "Avg cost", value: formatCurrencyValue(selectedCategoryStats.averageCost) },
+      { label: "Total duration", value: formatHoursValue(selectedCategoryStats.totalDurationHours) },
+      { label: "Avg duration", value: formatHoursValue(selectedCategoryStats.averageDurationHours) },
+      { label: "Throughput", value: formatThroughputValue(selectedCategoryStats.throughputPerHour) },
+      { label: "Cost range", value: (selectedCategoryStats.minCost != null && selectedCategoryStats.maxCost != null)
+          ? `${formatCurrencyValue(selectedCategoryStats.minCost)} – ${formatCurrencyValue(selectedCategoryStats.maxCost)}`
+          : "—" },
+      { label: "Median cost", value: selectedCategoryStats.percentile50 != null
+          ? formatCurrencyValue(selectedCategoryStats.percentile50)
+          : "—" },
+      { label: "P90 cost", value: selectedCategoryStats.percentile90 != null
+          ? formatCurrencyValue(selectedCategoryStats.percentile90)
+          : "—" }
+    ],
+    totals: [
+      { label: "Material", value: formatCurrencyValue(selectedCategoryStats.totalMaterialCost) },
+      { label: "Labor", value: formatCurrencyValue(selectedCategoryStats.totalLaborCost) },
+      { label: "Machine", value: formatCurrencyValue(selectedCategoryStats.totalMachineCost) },
+      { label: "Overhead", value: formatCurrencyValue(selectedCategoryStats.totalOverheadCost) },
+      { label: "All-in total", value: formatCurrencyValue(selectedCategoryStats.totalCost) }
+    ],
+    averages: [
+      { label: "Material", value: formatCurrencyValue(selectedCategoryStats.averageMaterialCost) },
+      { label: "Labor", value: formatCurrencyValue(selectedCategoryStats.averageLaborCost) },
+      { label: "Machine", value: formatCurrencyValue(selectedCategoryStats.averageMachineCost) },
+      { label: "Overhead", value: formatCurrencyValue(selectedCategoryStats.averageOverheadCost) },
+      { label: "Per-job total", value: formatCurrencyValue(selectedCategoryStats.averageCost) }
+    ]
+  };
+  const summarySelectOptions = availableSummaryViews.map(view => {
+    const selectedAttr = view.id === summaryViewId ? " selected" : "";
+    return `<option value="${esc(view.id)}"${selectedAttr}>${esc(view.label)}</option>`;
+  }).join("");
+  const summaryRowsMarkup = (summaryRowsByView[summaryViewId] || summaryRowsByView.general)
+    .map(row => `<tr><th scope="row">${esc(row.label)}</th><td>${esc(row.value)}</td></tr>`)
+    .join("");
+
   const categoryOverviewRows = categoriesOverview.map(category => {
     if (!category) return "";
     const stats = ensureCategoryStats(category.metrics);
@@ -1138,56 +1190,22 @@ function viewCosts(model){
       `
     : `<p class="small muted cost-category-overview-empty">No job categories defined yet. Add categories to compare performance.</p>`;
 
-  const costRangeLabel = (selectedCategoryStats.minCost != null && selectedCategoryStats.maxCost != null)
-    ? `${formatCurrencyValue(selectedCategoryStats.minCost)} – ${formatCurrencyValue(selectedCategoryStats.maxCost)}`
-    : "—";
-  const percentile50Label = selectedCategoryStats.percentile50 != null
-    ? formatCurrencyValue(selectedCategoryStats.percentile50)
-    : "—";
-  const percentile90Label = selectedCategoryStats.percentile90 != null
-    ? formatCurrencyValue(selectedCategoryStats.percentile90)
-    : "—";
-
-  const summaryGeneralMarkup = `
-      <div class="cost-category-summary-heading small muted">Summary for ${selectedCategoryNameSafe}</div>
-      <div class="cost-jobs-summary cost-category-summary">
-        <div><span class="label">Jobs</span><span>${formatCountValue(selectedCategoryStats.jobCount)}</span></div>
-        <div><span class="label">Total cost</span><span>${formatCurrencyValue(selectedCategoryStats.totalCost)}</span></div>
-        <div><span class="label">Avg cost</span><span>${formatCurrencyValue(selectedCategoryStats.averageCost)}</span></div>
-        <div><span class="label">Total duration</span><span>${formatHoursValue(selectedCategoryStats.totalDurationHours)}</span></div>
-        <div><span class="label">Avg duration</span><span>${formatHoursValue(selectedCategoryStats.averageDurationHours)}</span></div>
-        <div><span class="label">Throughput</span><span>${formatThroughputValue(selectedCategoryStats.throughputPerHour)}</span></div>
-        <div><span class="label">Cost range</span><span>${costRangeLabel}</span></div>
-        <div><span class="label">Median cost</span><span>${percentile50Label}</span></div>
-        <div><span class="label">P90 cost</span><span>${percentile90Label}</span></div>
-      </div>
-    `;
-
-  const summaryTotalsMarkup = `
-      <div class="cost-category-summary-heading small muted">Cost totals</div>
-      <div class="cost-jobs-summary cost-category-summary cost-category-summary--detail">
-        <div><span class="label">Material total</span><span>${formatCurrencyValue(selectedCategoryStats.totalMaterialCost)}</span></div>
-        <div><span class="label">Labor total</span><span>${formatCurrencyValue(selectedCategoryStats.totalLaborCost)}</span></div>
-        <div><span class="label">Machine total</span><span>${formatCurrencyValue(selectedCategoryStats.totalMachineCost)}</span></div>
-        <div><span class="label">Overhead total</span><span>${formatCurrencyValue(selectedCategoryStats.totalOverheadCost)}</span></div>
-      </div>
-    `;
-
-  const summaryAveragesMarkup = `
-      <div class="cost-category-summary-heading small muted">Average costs</div>
-      <div class="cost-jobs-summary cost-category-summary cost-category-summary--detail">
-        <div><span class="label">Material avg</span><span>${formatCurrencyValue(selectedCategoryStats.averageMaterialCost)}</span></div>
-        <div><span class="label">Labor avg</span><span>${formatCurrencyValue(selectedCategoryStats.averageLaborCost)}</span></div>
-        <div><span class="label">Machine avg</span><span>${formatCurrencyValue(selectedCategoryStats.averageMachineCost)}</span></div>
-        <div><span class="label">Overhead avg</span><span>${formatCurrencyValue(selectedCategoryStats.averageOverheadCost)}</span></div>
-      </div>
-    `;
-
   const summaryMarkup = `
     <div class="cost-category-summary-section">
-      ${summaryGeneralMarkup}
-      ${summaryTotalsMarkup}
-      ${summaryAveragesMarkup}
+      <div class="cost-category-summary-header">
+        <span class="small muted cost-category-selected-label">Summary for ${selectedCategoryNameSafe}</span>
+        <label class="cost-category-select-label cost-category-metrics-label">
+          <span class="cost-category-select-label-text">Summary view</span>
+          <select data-cost-job-category-summary aria-label="Choose which summary metrics to show">
+            ${summarySelectOptions}
+          </select>
+        </label>
+      </div>
+      <table class="cost-table cost-category-summary-table">
+        <tbody>
+          ${summaryRowsMarkup}
+        </tbody>
+      </table>
     </div>
   `;
 
@@ -1650,7 +1668,6 @@ function viewCosts(model){
                 ${categoryOptionsMarkup}
               </select>
             </label>
-            <span class="small muted cost-category-selected-label">Viewing ${selectedCategoryNameSafe}</span>
           </div>
           ${categoryOverviewTable}
           ${summaryMarkup}
@@ -1658,16 +1675,20 @@ function viewCosts(model){
             <table class="cost-table cost-category-jobs-table">
               <thead>
                 <tr>
-                  <th scope="col">Job</th>
-                  <th scope="col">Job ID</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Actual hrs</th>
-                  <th scope="col">Est. hrs</th>
-                  <th scope="col">Material cost</th>
-                  <th scope="col">Labor cost</th>
-                  <th scope="col">Machine cost</th>
-                  <th scope="col">Overhead cost</th>
-                  <th scope="col">Total cost</th>
+                  <th scope="col" rowspan="2">Job</th>
+                  <th scope="col" rowspan="2">Job ID</th>
+                  <th scope="col" rowspan="2">Status</th>
+                  <th scope="col" colspan="2">Hours</th>
+                  <th scope="col" colspan="5">Costs</th>
+                </tr>
+                <tr>
+                  <th scope="col">Actual</th>
+                  <th scope="col">Estimate</th>
+                  <th scope="col">Material</th>
+                  <th scope="col">Labor</th>
+                  <th scope="col">Machine</th>
+                  <th scope="col">Overhead</th>
+                  <th scope="col">Total</th>
                 </tr>
               </thead>
               <tbody>
