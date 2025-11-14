@@ -7893,6 +7893,61 @@ function renderCosts(){
         }
       });
     }
+
+    const resolveExpandedStore = ()=>{
+      if (typeof window === "undefined") return null;
+      const existing = window.costJobCategoryExpanded;
+      if (existing && typeof existing === "object") return existing;
+      const fresh = {};
+      window.costJobCategoryExpanded = fresh;
+      return fresh;
+    };
+    const expandedStore = resolveExpandedStore() || {};
+
+    const setGroupExpansion = (group, expand)=>{
+      if (!(group instanceof HTMLElement)) return;
+      group.classList.toggle("is-expanded", expand);
+      const jobsRow = group.querySelector("[data-cost-category-jobs-row]");
+      if (jobsRow instanceof HTMLElement){
+        jobsRow.hidden = !expand;
+      }
+      const toggleBtn = group.querySelector("[data-cost-category-toggle]");
+      if (toggleBtn instanceof HTMLElement){
+        toggleBtn.setAttribute("aria-expanded", expand ? "true" : "false");
+      }
+    };
+
+    const toggleCategoryGroup = (categoryId, force)=>{
+      if (!categoryId) return;
+      const id = String(categoryId);
+      const groups = panel.querySelectorAll("[data-cost-category-group]");
+      let targetGroup = null;
+      groups.forEach(group => {
+        if (!(group instanceof HTMLElement)) return;
+        if (String(group.getAttribute("data-cost-category-group") || "") === id){
+          targetGroup = group;
+        }
+      });
+      if (!targetGroup) return;
+      const shouldExpand = force != null ? Boolean(force) : !targetGroup.classList.contains("is-expanded");
+      setGroupExpansion(targetGroup, shouldExpand);
+      if (expandedStore){
+        expandedStore[id] = shouldExpand;
+      }
+    };
+
+    const handleToggleActivation = event => {
+      const trigger = event.target instanceof Element
+        ? event.target.closest("[data-cost-category-toggle]")
+        : null;
+      if (!trigger || !panel.contains(trigger)) return;
+      event.preventDefault();
+      const catId = trigger.getAttribute("data-cost-category-toggle");
+      if (!catId) return;
+      toggleCategoryGroup(catId);
+    };
+
+    panel.addEventListener("click", handleToggleActivation);
   }
 
 

@@ -597,6 +597,16 @@ body.forecast-modal-open{ overflow:hidden; }
 .cost-category-overview{ margin-bottom:16px; }
 .cost-category-subheading{ margin:0 0 8px; font-size:14px; font-weight:600; color:#1e2b45; }
 .cost-category-overview-empty{ margin:0 0 16px; }
+.cost-category-overview-table tbody.cost-category-overview-group > tr:first-child th,
+.cost-category-overview-table tbody.cost-category-overview-group > tr:first-child td{ vertical-align:middle; }
+.cost-category-overview-toggle{ display:flex; align-items:center; gap:8px; width:100%; border:0; background:none; padding:6px 0; font:inherit; color:inherit; text-align:left; cursor:pointer; }
+.cost-category-overview-toggle:hover .cost-category-name{ text-decoration:underline; }
+.cost-category-overview-toggle:focus-visible{ outline:2px solid #3d6bcb; outline-offset:2px; }
+.cost-category-overview-toggle .cost-category-name{ flex:1; padding-left:calc(var(--depth, 0) * 1.5rem); }
+.cost-category-toggle-icon{ display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:#e5ecf8; color:#1e2b45; font-size:12px; line-height:1; transition:transform .2s ease, background .2s ease; }
+.cost-category-toggle-icon::before{ content:"▸"; transform:translateX(1px); }
+.cost-category-overview-group.is-expanded .cost-category-toggle-icon{ background:#d6e1f9; }
+.cost-category-overview-group.is-expanded .cost-category-toggle-icon::before{ transform:rotate(90deg); }
 .cost-category-summary-section{ margin-bottom:16px; }
 .cost-category-summary-header{ display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:8px; }
 .cost-category-metrics-label select{ min-width:180px; }
@@ -611,7 +621,9 @@ body.forecast-modal-open{ overflow:hidden; }
 .cost-category-summary-table tr:first-child td{ border-top-right-radius:12px; }
 .cost-category-summary-table tr:last-child th{ border-bottom-left-radius:12px; }
 .cost-category-summary-table tr:last-child td{ border-bottom-right-radius:12px; }
-.cost-category-name{ display:inline-block; padding-left:calc(var(--depth, 0) * 1.5rem); }
+.cost-category-name{ display:inline-block; }
+.cost-category-overview-jobs>td{ padding:0; border-top:none; }
+.cost-category-overview-jobs-inner{ padding:12px 16px 16px; background:#f7f9fd; border-top:1px solid #e1e5ee; }
 .cost-category-jobs-table-wrap{ overflow-x:auto; }
 .cost-category-jobs-table th,
 .cost-category-jobs-table td{ white-space:nowrap; }

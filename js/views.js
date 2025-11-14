@@ -1086,18 +1086,31 @@ function viewCosts(model){
   };
 
   const jobCategoryAnalytics = data.jobCategoryAnalytics || {};
+  const rootCategoryId = jobCategoryAnalytics.rootId || "jobs_root";
   const selectedCategoryRaw = jobCategoryAnalytics.selected || {};
   const selectedCategoryStats = ensureCategoryStats(selectedCategoryRaw.metrics);
-  const selectedJobs = Array.isArray(selectedCategoryRaw.jobs) ? selectedCategoryRaw.jobs : [];
   const selectedCategoryName = selectedCategoryRaw.name || jobCategoryAnalytics.selectedName || "All Jobs";
   const selectedCategoryNameSafe = esc(selectedCategoryName);
   const optionsListRaw = Array.isArray(jobCategoryAnalytics.options) && jobCategoryAnalytics.options.length
     ? jobCategoryAnalytics.options
-    : [{ id: jobCategoryAnalytics.rootId || "jobs_root", name: "All Jobs", depth: 0 }];
+    : [{ id: rootCategoryId, name: "All Jobs", depth: 0 }];
   const categoriesOverview = Array.isArray(jobCategoryAnalytics.categories) ? jobCategoryAnalytics.categories : [];
-  const selectedCategoryId = jobCategoryAnalytics.selectedId
+  const selectedCategoryIdRaw = jobCategoryAnalytics.selectedId
     || selectedCategoryRaw.id
-    || (optionsListRaw[0] ? String(optionsListRaw[0].id) : (jobCategoryAnalytics.rootId || "jobs_root"));
+    || (optionsListRaw[0] ? String(optionsListRaw[0].id) : rootCategoryId);
+  const selectedCategoryId = String(selectedCategoryIdRaw || rootCategoryId);
+  const jobsByCategory = (jobCategoryAnalytics && jobCategoryAnalytics.jobsByCategory && typeof jobCategoryAnalytics.jobsByCategory === "object")
+    ? jobCategoryAnalytics.jobsByCategory
+    : {};
+  const expandedState = (typeof window !== "undefined" && window.costJobCategoryExpanded && typeof window.costJobCategoryExpanded === "object")
+    ? window.costJobCategoryExpanded
+    : {};
+  if (typeof window !== "undefined" && window.costJobCategoryExpanded !== expandedState){
+    window.costJobCategoryExpanded = expandedState;
+  }
+  if (!Object.prototype.hasOwnProperty.call(expandedState, selectedCategoryId)){
+    expandedState[selectedCategoryId] = true;
+  }
 
   const categoryOptionsMarkup = optionsListRaw.map(option => {
     if (!option || option.id == null) return "";
@@ -1161,20 +1174,104 @@ function viewCosts(model){
     .map(row => `<tr><th scope="row">${esc(row.label)}</th><td>${esc(row.value)}</td></tr>`)
     .join("");
 
+  const renderJobTableForCategory = (jobs)=>{
+    const jobRowsMarkup = Array.isArray(jobs) && jobs.length
+      ? jobs.map(job => {
+          if (!job) return "";
+          const jobName = esc(job.name || "Job");
+          const jobId = job.code || job.id;
+          const jobIdSafe = jobId ? esc(jobId) : "—";
+          const statusLabel = esc(job.status || "—");
+          const statusDetail = job.statusDetail ? `<div class=\"small muted\">${esc(job.statusDetail)}</div>` : "";
+          const milestoneISO = job.type === "completed" ? job.completedISO : job.dueISO;
+          const milestoneTitle = job.type === "completed" ? "Completed" : "Due";
+          const milestoneLabel = formatDateLabel(milestoneISO);
+          const milestoneMarkup = milestoneLabel !== "—" ? `<div class=\"small muted\">${esc(milestoneTitle)}: ${esc(milestoneLabel)}</div>` : "";
+          const actualHours = Number(job.actualHours) > 0 ? Number(job.actualHours) : Number(job.durationHours);
+          const jobActualLabel = formatHoursValue(actualHours);
+          const jobEstimateLabel = formatHoursValue(job.estimateHours);
+          const materialLabel = formatCurrencyValue(job.materialCost);
+          const laborLabel = formatCurrencyValue(job.laborCost);
+          const machineLabel = formatCurrencyValue(job.machineCost);
+          const overheadLabel = formatCurrencyValue(job.overheadCost);
+          const totalLabel = formatCurrencyValue(job.totalCost);
+          return `
+            <tr>
+              <th scope="row"><div class=\"cost-category-job-name\">${jobName}</div>${milestoneMarkup}</th>
+              <td>${jobIdSafe}</td>
+              <td>${statusLabel}${statusDetail}</td>
+              <td>${jobActualLabel}</td>
+              <td>${jobEstimateLabel}</td>
+              <td>${materialLabel}</td>
+              <td>${laborLabel}</td>
+              <td>${machineLabel}</td>
+              <td>${overheadLabel}</td>
+              <td>${totalLabel}</td>
+            </tr>
+          `;
+        }).join("")
+      : `<tr><td colspan="10" class="cost-table-placeholder">No jobs in this category.</td></tr>`;
+    return `
+      <div class="cost-category-jobs-table-wrap">
+        <table class="cost-table cost-category-jobs-table">
+          <thead>
+            <tr>
+              <th scope="col" rowspan="2">Job</th>
+              <th scope="col" rowspan="2">Job ID</th>
+              <th scope="col" rowspan="2">Status</th>
+              <th scope="col" colspan="2">Hours</th>
+              <th scope="col" colspan="5">Costs</th>
+            </tr>
+            <tr>
+              <th scope="col">Actual</th>
+              <th scope="col">Estimate</th>
+              <th scope="col">Material</th>
+              <th scope="col">Labor</th>
+              <th scope="col">Machine</th>
+              <th scope="col">Overhead</th>
+              <th scope="col">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${jobRowsMarkup}
+          </tbody>
+        </table>
+      </div>
+    `;
+  };
+
   const categoryOverviewRows = categoriesOverview.map(category => {
     if (!category) return "";
     const stats = ensureCategoryStats(category.metrics);
     const depth = Number(category.depth) || 0;
     const depthAttr = ` style="--depth:${Math.max(0, depth)}"`;
     const nameSafe = esc(category.name || "Category");
+    const categoryId = category.id != null ? String(category.id) : rootCategoryId;
+    const jobs = jobsByCategory && Array.isArray(jobsByCategory[categoryId]) ? jobsByCategory[categoryId] : [];
+    const isExpanded = Boolean(expandedState[categoryId]);
+    const toggleButton = `
+      <button type="button" class="cost-category-overview-toggle" data-cost-category-toggle="${esc(categoryId)}" aria-expanded="${isExpanded ? "true" : "false"}">
+        <span class="cost-category-toggle-icon" aria-hidden="true"></span>
+        <span class="cost-category-name"${depthAttr}>${nameSafe}</span>
+      </button>
+    `;
     return `
-      <tr>
-        <th scope="row"><span class="cost-category-name"${depthAttr}>${nameSafe}</span></th>
-        <td>${formatCountValue(stats.jobCount)}</td>
-        <td>${formatCurrencyValue(stats.totalCost)}</td>
-        <td>${formatCurrencyValue(stats.averageCost)}</td>
-        <td>${formatHoursValue(stats.averageDurationHours)}</td>
-      </tr>
+      <tbody class="cost-category-overview-group${isExpanded ? " is-expanded" : ""}" data-cost-category-group="${esc(categoryId)}">
+        <tr>
+          <th scope="row">${toggleButton}</th>
+          <td>${formatCountValue(stats.jobCount)}</td>
+          <td>${formatCurrencyValue(stats.totalCost)}</td>
+          <td>${formatCurrencyValue(stats.averageCost)}</td>
+          <td>${formatHoursValue(stats.averageDurationHours)}</td>
+        </tr>
+        <tr class="cost-category-overview-jobs" data-cost-category-jobs-row${isExpanded ? "" : " hidden"}>
+          <td colspan="5">
+            <div class="cost-category-overview-jobs-inner">
+              ${renderJobTableForCategory(jobs)}
+            </div>
+          </td>
+        </tr>
+      </tbody>
     `;
   }).join("");
 
@@ -1184,7 +1281,7 @@ function viewCosts(model){
           <h4 class="cost-category-subheading">Category overview</h4>
           <table class="cost-table cost-category-overview-table">
             <thead><tr><th scope="col">Category</th><th scope="col">Jobs</th><th scope="col">Total cost</th><th scope="col">Avg cost</th><th scope="col">Avg duration</th></tr></thead>
-            <tbody>${categoryOverviewRows}</tbody>
+            ${categoryOverviewRows}
           </table>
         </div>
       `
@@ -1209,42 +1306,6 @@ function viewCosts(model){
     </div>
   `;
 
-  const jobRowsMarkup = selectedJobs.length
-    ? selectedJobs.map(job => {
-        if (!job) return "";
-        const jobName = esc(job.name || "Job");
-        const jobId = job.code || job.id;
-        const jobIdSafe = jobId ? esc(jobId) : "—";
-        const statusLabel = esc(job.status || "—");
-        const statusDetail = job.statusDetail ? `<div class=\"small muted\">${esc(job.statusDetail)}</div>` : "";
-        const milestoneISO = job.type === "completed" ? job.completedISO : job.dueISO;
-        const milestoneTitle = job.type === "completed" ? "Completed" : "Due";
-        const milestoneLabel = formatDateLabel(milestoneISO);
-        const milestoneMarkup = milestoneLabel !== "—" ? `<div class=\"small muted\">${esc(milestoneTitle)}: ${esc(milestoneLabel)}</div>` : "";
-        const actualHours = Number(job.actualHours) > 0 ? Number(job.actualHours) : Number(job.durationHours);
-        const jobActualLabel = formatHoursValue(actualHours);
-        const jobEstimateLabel = formatHoursValue(job.estimateHours);
-        const materialLabel = formatCurrencyValue(job.materialCost);
-        const laborLabel = formatCurrencyValue(job.laborCost);
-        const machineLabel = formatCurrencyValue(job.machineCost);
-        const overheadLabel = formatCurrencyValue(job.overheadCost);
-        const totalLabel = formatCurrencyValue(job.totalCost);
-        return `
-          <tr>
-            <th scope="row"><div class="cost-category-job-name">${jobName}</div>${milestoneMarkup}</th>
-            <td>${jobIdSafe}</td>
-            <td>${statusLabel}${statusDetail}</td>
-            <td>${jobActualLabel}</td>
-            <td>${jobEstimateLabel}</td>
-            <td>${materialLabel}</td>
-            <td>${laborLabel}</td>
-            <td>${machineLabel}</td>
-            <td>${overheadLabel}</td>
-            <td>${totalLabel}</td>
-          </tr>
-        `;
-      }).join("")
-    : `<tr><td colspan="10" class="cost-table-placeholder">No jobs in this category.</td></tr>`;
   const breakdown = data.forecastBreakdown || {};
   const breakdownSections = Array.isArray(breakdown.sections) ? breakdown.sections : [];
   const breakdownTotals = breakdown.totals || {};
@@ -1671,31 +1732,6 @@ function viewCosts(model){
           </div>
           ${categoryOverviewTable}
           ${summaryMarkup}
-          <div class="cost-category-jobs-table-wrap">
-            <table class="cost-table cost-category-jobs-table">
-              <thead>
-                <tr>
-                  <th scope="col" rowspan="2">Job</th>
-                  <th scope="col" rowspan="2">Job ID</th>
-                  <th scope="col" rowspan="2">Status</th>
-                  <th scope="col" colspan="2">Hours</th>
-                  <th scope="col" colspan="5">Costs</th>
-                </tr>
-                <tr>
-                  <th scope="col">Actual</th>
-                  <th scope="col">Estimate</th>
-                  <th scope="col">Material</th>
-                  <th scope="col">Labor</th>
-                  <th scope="col">Machine</th>
-                  <th scope="col">Overhead</th>
-                  <th scope="col">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${jobRowsMarkup}
-              </tbody>
-            </table>
-          </div>
         </div>
       </div>
 
