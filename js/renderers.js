@@ -3163,6 +3163,7 @@ function renderDashboard(){
   const addSubtaskBtn    = document.getElementById("dashAddSubtask");
   const taskOptionStage  = modal?.querySelector('[data-task-option-stage]');
   const taskOptionButtons= Array.from(modal?.querySelectorAll('[data-task-option]') || []);
+  const taskOptionPages  = Array.from(modal?.querySelectorAll('[data-task-page]') || []);
   const taskExistingSearchInput = document.getElementById("dashTaskExistingSearch");
   const taskExistingSearchWrapper = taskExistingForm?.querySelector(".task-existing-search");
   const existingTaskSelect = document.getElementById("dashTaskExistingSelect");
@@ -3285,6 +3286,14 @@ function renderDashboard(){
 
   let activeTaskVariant = null;
 
+  function setTaskOptionPage(target){
+    const choice = target === "existing" ? "existing" : target === "new" ? "new" : null;
+    taskOptionPages.forEach(page => {
+      const variant = page.getAttribute("data-task-page") || "";
+      page.hidden = !choice || variant !== choice;
+    });
+  }
+
   function refreshExistingTaskOptions(searchTerm = ""){
     const metas = gatherMaintenanceTaskMetas();
     const hasExisting = metas.length > 0;
@@ -3354,6 +3363,7 @@ function renderDashboard(){
   function showTaskOptionStage(){
     activeTaskVariant = null;
     if (taskOptionStage) taskOptionStage.hidden = false;
+    setTaskOptionPage(null);
     if (taskExistingForm) taskExistingForm.hidden = true;
     if (taskForm) taskForm.hidden = true;
   }
@@ -3362,6 +3372,7 @@ function renderDashboard(){
     const choice = variant === "existing" ? "existing" : "new";
     activeTaskVariant = choice;
     if (taskOptionStage) taskOptionStage.hidden = true;
+    setTaskOptionPage(choice);
     if (taskExistingForm) taskExistingForm.hidden = choice !== "existing";
     if (taskForm) taskForm.hidden = choice !== "new";
     if (choice === "existing"){
