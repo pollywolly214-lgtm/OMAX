@@ -3176,8 +3176,8 @@ function renderDashboard(){
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
   const modal            = document.getElementById("dashboardAddModal");
-  const modalCard        = modal?.querySelector(".dashboard-modal-card");
-  const closeBtn         = document.getElementById("dashboardModalClose");
+  const modalCardMain    = modal?.querySelector('[data-modal-card="main"]');
+  const closeButtons     = Array.from(modal?.querySelectorAll('[data-close-modal]') || []);
   const taskForm         = document.getElementById("dashTaskForm");
   const taskExistingForm = document.getElementById("dashTaskExistingForm");
   const downForm         = document.getElementById("dashDownForm");
@@ -3200,12 +3200,13 @@ function renderDashboard(){
   const addSubtaskBtn    = document.getElementById("dashAddSubtask");
   const taskOptionStage  = modal?.querySelector('[data-task-option-stage]');
   const taskOptionButtons= Array.from(modal?.querySelectorAll('[data-task-option]') || []);
-  const taskOptionPages  = Array.from(modal?.querySelectorAll('[data-task-page]') || []);
+  const taskCards        = Array.from(modal?.querySelectorAll('[data-task-card]') || []);
   const taskExistingSearchInput = document.getElementById("dashTaskExistingSearch");
   const taskExistingSearchWrapper = taskExistingForm?.querySelector(".task-existing-search");
   const existingTaskResults = taskExistingForm?.querySelector('[data-task-existing-results]');
   const existingTaskEmpty  = taskExistingForm?.querySelector('[data-task-existing-empty]');
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
+  const taskCardBackButtons = Array.from(modal?.querySelectorAll('[data-task-card-back]') || []);
   const oneTimeForm      = document.getElementById("dashOneTimeForm");
   const oneTimeNameInput = document.getElementById("dashOneTimeName");
   const oneTimeDateInput = document.getElementById("dashOneTimeDate");
@@ -3345,25 +3346,31 @@ function renderDashboard(){
     activeTaskVariant = choice;
 
     if (taskOptionStage) taskOptionStage.hidden = !!choice;
-    if (taskExistingForm) taskExistingForm.hidden = choice !== "existing";
-    if (taskForm) taskForm.hidden = choice !== "new";
-    if (oneTimeForm) oneTimeForm.hidden = choice !== "one-time";
+    if (modalCardMain) modalCardMain.hidden = !!choice;
+
+    taskCards.forEach(card => {
+      const variant = card.getAttribute("data-task-card") || "";
+      const show = !!choice && variant === choice;
+      card.hidden = !show;
+      card.setAttribute("aria-hidden", show ? "false" : "true");
+      if (show){
+        card.scrollTop = 0;
+      }
+    });
 
     if (choice){
       modal?.setAttribute("data-task-page", choice);
-      modalCard?.setAttribute("data-task-page", choice);
-      if (modalCard){
-        modalCard.scrollTop = 0;
-      }
     }else{
       modal?.removeAttribute("data-task-page");
-      modalCard?.removeAttribute("data-task-page");
+      if (modalCardMain){
+        modalCardMain.hidden = false;
+        modalCardMain.scrollTop = 0;
+      }
+      taskCards.forEach(card => {
+        card.hidden = true;
+        card.setAttribute("aria-hidden", "true");
+      });
     }
-
-    taskOptionPages.forEach(page => {
-      const variant = page.getAttribute("data-task-page") || "";
-      page.hidden = !choice || variant !== choice;
-    });
   }
 
   function refreshExistingTaskOptions(searchTerm = ""){
@@ -3785,6 +3792,9 @@ function renderDashboard(){
       if (!section) return;
       section.hidden = section.dataset.step !== step;
     });
+    if (step !== "task"){
+      setTaskOptionPage(null);
+    }
     if (step === "task"){
       populateCategoryOptions();
       resetTaskForm();
@@ -3992,7 +4002,7 @@ function renderDashboard(){
     return row;
   }
 
-  closeBtn?.addEventListener("click", closeModal);
+  closeButtons.forEach(btn => btn?.addEventListener("click", closeModal));
   modal?.addEventListener("click", (e)=>{ if (e.target === modal) closeModal(); });
 
   modal?.querySelectorAll("[data-choice]")?.forEach(btn => {
@@ -4018,6 +4028,13 @@ function renderDashboard(){
         return;
       }
       showStep("picker");
+    });
+  });
+
+  taskCardBackButtons.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      showTaskOptionStage();
+      showStep("task");
     });
   });
 

@@ -4631,30 +4631,6 @@ body.modal-open {
   margin: 0;
 }
 
-.dashboard-modal-card[data-task-page] [data-task-option-stage] {
-  display: none;
-}
-
-.dashboard-modal-card:not([data-task-page]) [data-task-page] {
-  display: none;
-}
-
-.dashboard-modal-card[data-task-page="existing"] [data-task-page="existing"] {
-  display: flex;
-}
-
-.dashboard-modal-card[data-task-page="existing"] [data-task-page="new"] {
-  display: none;
-}
-
-.dashboard-modal-card[data-task-page="new"] [data-task-page="new"] {
-  display: flex;
-}
-
-.dashboard-modal-card[data-task-page="new"] [data-task-page="existing"] {
-  display: none;
-}
-
 .task-option-page-header {
   display: flex;
   align-items: flex-start;
