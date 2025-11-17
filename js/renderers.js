@@ -282,6 +282,7 @@ function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
   if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
     targetDate.setHours(0,0,0,0);
     targetISO = ymd(targetDate);
+    instance.calendarDateISO = targetISO;
     const isPastOrToday = targetDate.getTime() <= today.getTime();
     const hoursAtTarget = hoursSnapshotOnOrBefore(targetISO);
     let consumedHours;
