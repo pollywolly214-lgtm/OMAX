@@ -3141,6 +3141,7 @@ function renderDashboard(){
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
   const modal            = document.getElementById("dashboardAddModal");
+  const modalCard        = modal?.querySelector(".dashboard-modal-card");
   const closeBtn         = document.getElementById("dashboardModalClose");
   const taskForm         = document.getElementById("dashTaskForm");
   const taskExistingForm = document.getElementById("dashTaskExistingForm");
@@ -3296,8 +3297,13 @@ function renderDashboard(){
 
     if (choice){
       modal?.setAttribute("data-task-page", choice);
+      modalCard?.setAttribute("data-task-page", choice);
+      if (modalCard){
+        modalCard.scrollTop = 0;
+      }
     }else{
       modal?.removeAttribute("data-task-page");
+      modalCard?.removeAttribute("data-task-page");
     }
 
     taskOptionPages.forEach(page => {
