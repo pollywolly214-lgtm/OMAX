@@ -5145,6 +5145,7 @@ const sharedConfirmModalState = {
   titleEl: null,
   messageEl: null,
   listEl: null,
+  extraEl: null,
   confirmBtn: null,
   cancelBtn: null,
   closeBtn: null
@@ -5157,6 +5158,7 @@ function ensureSharedConfirmModal(){
       <h4 data-confirm-title>Confirm</h4>
       <p class="confirm-modal-copy" data-confirm-message></p>
       <ul class="confirm-modal-list" data-confirm-list hidden></ul>
+      <div class="confirm-modal-extra" data-confirm-extra hidden></div>
       <div class="modal-actions confirm-modal-actions">
         <button type="button" class="secondary" data-confirm-cancel>Cancel</button>
         <button type="button" class="secondary" data-confirm-secondary hidden>Secondary</button>
@@ -5192,6 +5194,7 @@ function ensureSharedConfirmModal(){
     sharedConfirmModalState.titleEl = host.querySelector("[data-confirm-title]");
     sharedConfirmModalState.messageEl = host.querySelector("[data-confirm-message]");
     sharedConfirmModalState.listEl = host.querySelector("[data-confirm-list]");
+    sharedConfirmModalState.extraEl = host.querySelector("[data-confirm-extra]");
     sharedConfirmModalState.confirmBtn = host.querySelector("[data-confirm-confirm]");
     sharedConfirmModalState.cancelBtn = host.querySelector("[data-confirm-cancel]");
     sharedConfirmModalState.secondaryBtn = host.querySelector("[data-confirm-secondary]");
@@ -5230,6 +5233,19 @@ function showConfirmModal(options){
     }
   }
 
+  if (state.extraEl){
+    state.extraEl.innerHTML = "";
+    state.extraEl.setAttribute("hidden", "");
+    if (opts.extraHTML){
+      state.extraEl.innerHTML = opts.extraHTML;
+      state.extraEl.removeAttribute("hidden");
+    } else if (typeof opts.renderExtra === "function"){
+      opts.renderExtra(state.extraEl);
+      const hasContent = state.extraEl.children.length || state.extraEl.textContent.trim();
+      if (hasContent) state.extraEl.removeAttribute("hidden");
+    }
+  }
+
   if (state.cancelBtn) state.cancelBtn.textContent = opts.cancelText || "Cancel";
   if (state.secondaryBtn){
     state.secondaryBtn.textContent = opts.secondaryText || "";
@@ -5258,11 +5274,32 @@ function showConfirmModal(options){
       document.removeEventListener("keydown", onKeyDown);
     };
 
-    const onConfirm = ()=>{ cleanup(); resolve(true); };
+    if (typeof opts.onShow === "function"){
+      try { opts.onShow({ root, state }); } catch (err) {
+        console.warn("Confirm modal onShow failed", err);
+      }
+    }
+
     const onSecondary = ()=>{ cleanup(); resolve(true); };
     const onCancel = ()=>{ cleanup(); resolve(false); };
     const onBackdropClick = (evt)=>{ if (evt.target === root) onCancel(); };
     const onKeyDown = (evt)=>{ if (evt.key === "Escape") onCancel(); };
+
+    const onConfirm = ()=>{
+      if (typeof opts.onConfirm === "function"){
+        try {
+          const result = opts.onConfirm({ root, state });
+          if (result === false) return;
+          cleanup();
+          resolve(result);
+          return;
+        } catch (err){
+          console.warn("Confirm modal onConfirm failed", err);
+        }
+      }
+      cleanup();
+      resolve(true);
+    };
 
     if (state.confirmBtn) state.confirmBtn.addEventListener("click", onConfirm);
     if (state.secondaryBtn) state.secondaryBtn.addEventListener("click", onSecondary);
@@ -6639,6 +6676,14 @@ function renderSettings(){
     const label = task.name ? `"${task.name}"` : "this task";
     const matchesRaw = findInventoryMatchesForTask(task);
     const matches = Array.isArray(matchesRaw) ? matchesRaw.slice() : [];
+    const defaultQtyNew = Number.isFinite(Number(task.qtyNew)) && Number(task.qtyNew) >= 0
+      ? Number(task.qtyNew)
+      : 1;
+    const defaultQtyOld = Number.isFinite(Number(task.qtyOld)) && Number(task.qtyOld) >= 0
+      ? Number(task.qtyOld)
+      : 0;
+    let chosenQtyNew = defaultQtyNew;
+    let chosenQtyOld = defaultQtyOld;
     matches.sort((a, b)=>{
       const aScore = (a && String(a.id) === String(task.inventoryId)) ? 3
         : (a && String(a.linkedTaskId || "") === String(task.id)) ? 2
@@ -6662,7 +6707,27 @@ function renderSettings(){
       items: hasMatches ? matches.map(item => item && item.name ? item.name : "Unnamed inventory item") : [],
       cancelText: "Not now",
       confirmText,
-      confirmVariant: "primary"
+      confirmVariant: "primary",
+      extraHTML: hasMatches ? "" : `
+        <div class="mini-form inventory-qty-prompt">
+          <label>New quantity<input type="number" min="0" step="1" value="${defaultQtyNew}" data-add-inventory-qty-new></label>
+          <label>Old quantity<input type="number" min="0" step="1" value="${defaultQtyOld}" data-add-inventory-qty-old></label>
+        </div>`,
+      onShow: ({ state })=>{
+        if (hasMatches || !state?.extraEl) return;
+        const input = state.extraEl.querySelector("[data-add-inventory-qty-new]");
+        if (input && typeof input.focus === "function"){ setTimeout(()=> input.focus(), 0); }
+      },
+      onConfirm: ({ state })=>{
+        if (hasMatches || !state?.extraEl) return true;
+        const newInput = state.extraEl.querySelector("[data-add-inventory-qty-new]");
+        const oldInput = state.extraEl.querySelector("[data-add-inventory-qty-old]");
+        const newVal = Number(newInput?.value);
+        const oldVal = Number(oldInput?.value);
+        chosenQtyNew = Number.isFinite(newVal) && newVal >= 0 ? newVal : defaultQtyNew;
+        chosenQtyOld = Number.isFinite(oldVal) && oldVal >= 0 ? oldVal : defaultQtyOld;
+        return true;
+      }
     });
     if (!confirmed) return;
 
@@ -6694,8 +6759,8 @@ function renderSettings(){
     const baseItem = {
       id: newId,
       name: task.name || "",
-      qtyNew: 1,
-      qtyOld: 0,
+      qtyNew: chosenQtyNew,
+      qtyOld: chosenQtyOld,
       unit: "pcs",
       pn: task.pn || "",
       link: task.storeLink || "",

@@ -4329,6 +4329,26 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   margin-bottom: 0;
 }
 
+.confirm-modal-extra {
+  margin-bottom: 16px;
+}
+
+.inventory-qty-prompt {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.inventory-qty-prompt label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inventory-qty-prompt input[type="number"] {
+  width: 100%;
+}
+
 .confirm-modal-actions {
   flex-wrap: wrap;
   gap: 10px;
