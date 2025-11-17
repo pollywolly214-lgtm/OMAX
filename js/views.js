@@ -188,15 +188,21 @@ function viewDashboard(){
       <section class="dash-modal-step" data-step="task" hidden>
         <h4>Add maintenance task</h4>
         <div class="task-option-stage" data-task-option-stage>
-          <p class="small muted">Choose how you'd like to add this maintenance task.</p>
+          <div class="task-option-stage-header">
+            <p class="task-option-kicker">Step 1</p>
+            <div>
+              <p class="small muted">Choose how you'd like to add this maintenance task.</p>
+              <p class="task-option-stage-title">We&rsquo;ll open a focused page in this popup for your selection.</p>
+            </div>
+          </div>
           <div class="task-option-grid">
             <button type="button" class="task-option" data-task-option="existing">
-              <span class="task-option-title">Select from current tasks</span>
-              <span class="task-option-sub">Place a saved task onto the calendar.</span>
+              <span class="task-option-title">Use an existing task</span>
+              <span class="task-option-sub">Search saved maintenance work and place it on the calendar.</span>
             </button>
             <button type="button" class="task-option" data-task-option="new">
-              <span class="task-option-title">Create new task</span>
-              <span class="task-option-sub">Add a brand-new maintenance task.</span>
+              <span class="task-option-title">Create a new task</span>
+              <span class="task-option-sub">Start a new maintenance task and schedule it instantly.</span>
             </button>
           </div>
           <div class="task-option-actions">
@@ -204,52 +210,72 @@ function viewDashboard(){
           </div>
         </div>
 
-        <form id="dashTaskExistingForm" class="modal-form" data-task-variant="existing" hidden>
-          <div class="task-existing-search">
-            <label>Search tasks<input type="search" id="dashTaskExistingSearch" placeholder="Search saved maintenance tasks" autocomplete="off"></label>
-          </div>
-          <label>Maintenance task<select id="dashTaskExistingSelect"></select></label>
-          <p class="small muted">Pick a task saved in Maintenance Settings to schedule it on the calendar.</p>
-          <p class="small muted" data-task-existing-empty hidden>No maintenance tasks yet. Create one below to get started.</p>
-          <p class="small muted" data-task-existing-search-empty hidden>No tasks match your search. Try a different name.</p>
-          <div class="modal-actions">
-            <button type="button" class="secondary" data-step-back>Back</button>
-            <button type="submit" class="primary">Add to Calendar</button>
-          </div>
-        </form>
-
-        <form id="dashTaskForm" class="modal-form" data-task-variant="new" hidden>
-          <div class="modal-grid">
-            <label>Task name<input id="dashTaskName" required placeholder="Task"></label>
-            <label>Type<select id="dashTaskType">
-              <option value="interval">Per interval</option>
-              <option value="asreq">As required</option>
-            </select></label>
-            <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
-            <label data-task-last>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
-            <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
-            <label>Manual link<input type="url" id="dashTaskManual" placeholder="https://..."></label>
-            <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
-            <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
-            <label>Price ($)<input type="number" min="0" step="0.01" id="dashTaskPrice" placeholder="optional"></label>
-            <label>Category<select id="dashTaskCategory"></select></label>
-            <label>Calendar date<input type="date" id="dashTaskDate"></label>
-          </div>
-
-          <div class="subtask-section">
-            <div class="subtask-header">
-              <h5>Sub-tasks</h5>
-              <button type="button" id="dashAddSubtask" class="subtask-add-btn">+ Add sub-task</button>
+        <div class="task-option-page" data-task-page="existing" hidden>
+          <div class="task-option-page-header">
+            <button type="button" class="task-option-back" data-step-back aria-label="Go back to task picker">← Back</button>
+            <div>
+              <p class="task-option-kicker">Use current task</p>
+              <p class="task-option-stage-title">Select a saved maintenance task</p>
+              <p class="small muted">Search what you already track and place it on the calendar.</p>
             </div>
-            <div id="dashSubtaskList" class="subtask-list"></div>
-            <p class="small muted">Sub-tasks inherit the calendar display and live under the main task.</p>
           </div>
+          <form id="dashTaskExistingForm" class="modal-form task-option-body" data-task-variant="existing" hidden>
+            <div class="task-existing-search">
+              <label>Search tasks<input type="search" id="dashTaskExistingSearch" placeholder="Search saved maintenance tasks" autocomplete="off"></label>
+            </div>
+            <label>Maintenance task<select id="dashTaskExistingSelect"></select></label>
+            <p class="small muted">Pick a task saved in Maintenance Settings to schedule it on the calendar.</p>
+            <p class="small muted" data-task-existing-empty hidden>No maintenance tasks yet. Create one below to get started.</p>
+            <p class="small muted" data-task-existing-search-empty hidden>No tasks match your search. Try a different name.</p>
+            <div class="modal-actions">
+              <button type="button" class="secondary" data-step-back>Back</button>
+              <button type="submit" class="primary">Add to Calendar</button>
+            </div>
+          </form>
+        </div>
 
-          <div class="modal-actions">
-            <button type="button" class="secondary" data-step-back>Back</button>
-            <button type="submit" class="primary" data-task-submit>Create Task</button>
+        <div class="task-option-page" data-task-page="new" hidden>
+          <div class="task-option-page-header">
+            <button type="button" class="task-option-back" data-step-back aria-label="Go back to task picker">← Back</button>
+            <div>
+              <p class="task-option-kicker">Create new task</p>
+              <p class="task-option-stage-title">Build a new maintenance task</p>
+              <p class="small muted">Enter task details and we&rsquo;ll drop it into your schedule.</p>
+            </div>
           </div>
-        </form>
+          <form id="dashTaskForm" class="modal-form task-option-body" data-task-variant="new" hidden>
+            <div class="modal-grid">
+              <label>Task name<input id="dashTaskName" required placeholder="Task"></label>
+              <label>Type<select id="dashTaskType">
+                <option value="interval">Per interval</option>
+                <option value="asreq">As required</option>
+              </select></label>
+              <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
+              <label data-task-last>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
+              <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
+              <label>Manual link<input type="url" id="dashTaskManual" placeholder="https://..."></label>
+              <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
+              <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
+              <label>Price ($)<input type="number" min="0" step="0.01" id="dashTaskPrice" placeholder="optional"></label>
+              <label>Category<select id="dashTaskCategory"></select></label>
+              <label>Calendar date<input type="date" id="dashTaskDate"></label>
+            </div>
+
+            <div class="subtask-section">
+              <div class="subtask-header">
+                <h5>Sub-tasks</h5>
+                <button type="button" id="dashAddSubtask" class="subtask-add-btn">+ Add sub-task</button>
+              </div>
+              <div id="dashSubtaskList" class="subtask-list"></div>
+              <p class="small muted">Sub-tasks inherit the calendar display and live under the main task.</p>
+            </div>
+
+            <div class="modal-actions">
+              <button type="button" class="secondary" data-step-back>Back</button>
+              <button type="submit" class="primary" data-task-submit>Create Task</button>
+            </div>
+          </form>
+        </div>
       </section>
 
       <section class="dash-modal-step" data-step="downtime" hidden>

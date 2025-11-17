@@ -3141,6 +3141,7 @@ function renderDashboard(){
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
   const modal            = document.getElementById("dashboardAddModal");
+  const modalCard        = modal?.querySelector(".dashboard-modal-card");
   const closeBtn         = document.getElementById("dashboardModalClose");
   const taskForm         = document.getElementById("dashTaskForm");
   const taskExistingForm = document.getElementById("dashTaskExistingForm");
@@ -3163,6 +3164,7 @@ function renderDashboard(){
   const addSubtaskBtn    = document.getElementById("dashAddSubtask");
   const taskOptionStage  = modal?.querySelector('[data-task-option-stage]');
   const taskOptionButtons= Array.from(modal?.querySelectorAll('[data-task-option]') || []);
+  const taskOptionPages  = Array.from(modal?.querySelectorAll('[data-task-page]') || []);
   const taskExistingSearchInput = document.getElementById("dashTaskExistingSearch");
   const taskExistingSearchWrapper = taskExistingForm?.querySelector(".task-existing-search");
   const existingTaskSelect = document.getElementById("dashTaskExistingSelect");
@@ -3285,6 +3287,31 @@ function renderDashboard(){
 
   let activeTaskVariant = null;
 
+  function setTaskOptionPage(target){
+    const choice = target === "existing" ? "existing" : target === "new" ? "new" : null;
+    activeTaskVariant = choice;
+
+    if (taskOptionStage) taskOptionStage.hidden = !!choice;
+    if (taskExistingForm) taskExistingForm.hidden = choice !== "existing";
+    if (taskForm) taskForm.hidden = choice !== "new";
+
+    if (choice){
+      modal?.setAttribute("data-task-page", choice);
+      modalCard?.setAttribute("data-task-page", choice);
+      if (modalCard){
+        modalCard.scrollTop = 0;
+      }
+    }else{
+      modal?.removeAttribute("data-task-page");
+      modalCard?.removeAttribute("data-task-page");
+    }
+
+    taskOptionPages.forEach(page => {
+      const variant = page.getAttribute("data-task-page") || "";
+      page.hidden = !choice || variant !== choice;
+    });
+  }
+
   function refreshExistingTaskOptions(searchTerm = ""){
     const metas = gatherMaintenanceTaskMetas();
     const hasExisting = metas.length > 0;
@@ -3352,18 +3379,12 @@ function renderDashboard(){
   }
 
   function showTaskOptionStage(){
-    activeTaskVariant = null;
-    if (taskOptionStage) taskOptionStage.hidden = false;
-    if (taskExistingForm) taskExistingForm.hidden = true;
-    if (taskForm) taskForm.hidden = true;
+    setTaskOptionPage(null);
   }
 
   function activateTaskVariant(variant){
     const choice = variant === "existing" ? "existing" : "new";
-    activeTaskVariant = choice;
-    if (taskOptionStage) taskOptionStage.hidden = true;
-    if (taskExistingForm) taskExistingForm.hidden = choice !== "existing";
-    if (taskForm) taskForm.hidden = choice !== "new";
+    setTaskOptionPage(choice);
     if (choice === "existing"){
       const term = taskExistingSearchInput?.value || "";
       refreshExistingTaskOptions(term);

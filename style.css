@@ -4469,6 +4469,31 @@ body.modal-open {
   margin-bottom: 18px;
 }
 
+.task-option-stage-header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px;
+  background: #f8fbff;
+  border: 1px solid #d4ddf0;
+  border-radius: 12px;
+}
+
+.task-option-stage-title {
+  font-weight: 700;
+  color: #0b1120;
+  margin: 2px 0 0;
+}
+
+.task-option-kicker {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #3b4861;
+  margin: 0;
+}
+
 .task-option-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -4529,6 +4554,68 @@ body.modal-open {
 .task-option-actions .secondary:focus-visible {
   background: #e1e9f9;
   outline: none;
+}
+
+.task-option-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dashboard-modal-card[data-task-page] [data-task-option-stage] {
+  display: none;
+}
+
+.dashboard-modal-card:not([data-task-page]) [data-task-page] {
+  display: none;
+}
+
+.dashboard-modal-card[data-task-page="existing"] [data-task-page="existing"] {
+  display: flex;
+}
+
+.dashboard-modal-card[data-task-page="existing"] [data-task-page="new"] {
+  display: none;
+}
+
+.dashboard-modal-card[data-task-page="new"] [data-task-page="new"] {
+  display: flex;
+}
+
+.dashboard-modal-card[data-task-page="new"] [data-task-page="existing"] {
+  display: none;
+}
+
+.task-option-page-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: #f4f7ff;
+  border: 1px solid #d4ddf0;
+  border-radius: 12px;
+}
+
+.task-option-back {
+  border: 1px solid #cdd4e1;
+  background: #fff;
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
+  color: #0a63c2;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.task-option-back:hover,
+.task-option-back:focus-visible {
+  background: #eef3fb;
+  outline: none;
+}
+
+.task-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .task-existing-search {
