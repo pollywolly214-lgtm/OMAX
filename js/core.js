@@ -295,10 +295,23 @@ function applyFirestoreSettings(db){
 
   const mergedSettings = { ...currentSettings, ignoreUndefinedProperties: true };
   try {
-    db.settings(mergedSettings);
+    // Newer SDKs support a merge flag to avoid host override warnings when settings were already applied.
+    if (db.settings.length >= 2){
+      db.settings(mergedSettings, { merge: true });
+    } else {
+      db.settings(mergedSettings);
+    }
     firebaseSettingsApplied = true;
   } catch (err) {
-    console.warn("Failed to enable ignoreUndefinedProperties", err);
+    // If merge=true is not supported, fall back to a standard settings call once.
+    if (!firebaseSettingsApplied){
+      try {
+        db.settings(mergedSettings);
+        firebaseSettingsApplied = true;
+      } catch (fallbackErr) {
+        console.warn("Failed to enable ignoreUndefinedProperties", fallbackErr);
+      }
+    }
   }
 }
 
