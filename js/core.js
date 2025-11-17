@@ -278,18 +278,29 @@ let FB = {
   ready: false
 };
 
+let firebaseInitStarted = false;
+let firebaseSettingsApplied = false;
+
 async function initFirebase(){
   if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
   if (!window.FIREBASE_CONFIG){ console.warn("Missing FIREBASE_CONFIG."); return; }
 
-  // Initialize
-  FB.app  = firebase.initializeApp(window.FIREBASE_CONFIG);
+  if (FB.ready) return;
+  if (firebaseInitStarted) return;
+  firebaseInitStarted = true;
+
+  // Initialize or reuse existing app to avoid duplicate-app errors
+  const existingApp = firebase.apps && firebase.apps.length ? firebase.apps[0] : null;
+  FB.app  = existingApp || firebase.initializeApp(window.FIREBASE_CONFIG);
   FB.auth = firebase.auth();
   FB.db   = firebase.firestore();
-  try {
-    FB.db.settings({ ignoreUndefinedProperties: true });
-  } catch (err) {
-    console.warn("Failed to enable ignoreUndefinedProperties", err);
+  if (!firebaseSettingsApplied){
+    try {
+      FB.db.settings({ ignoreUndefinedProperties: true });
+      firebaseSettingsApplied = true;
+    } catch (err) {
+      console.warn("Failed to enable ignoreUndefinedProperties", err);
+    }
   }
 
   // Persist login across refreshes

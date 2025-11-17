@@ -3315,12 +3315,13 @@ function viewJobs(){
       </table>
       <p class="small muted">Material cost and quantity update immediately when changed.</p>
       <div class="job-note-modal-backdrop" id="jobNoteModal" hidden>
-        <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobNoteModalTitle">
+        <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobNoteModalTitle" aria-describedby="jobNoteModalDescription">
           <div class="job-note-modal-header">
             <h4 id="jobNoteModalTitle">Job notes</h4>
             <button type="button" class="job-note-modal-close" data-note-cancel aria-label="Close notes">×</button>
           </div>
           <div class="job-note-modal-body">
+            <p id="jobNoteModalDescription" class="job-note-modal-description small muted">Add or review notes for the selected cutting job; they stay linked to the job record for future reference.</p>
             <div class="job-note-modal-field">
               <label for="jobNoteModalInput">Notes for <span id="jobNoteModalJob"></span></label>
               <textarea id="jobNoteModalInput" rows="6" placeholder="Add notes for this cutting job"></textarea>
