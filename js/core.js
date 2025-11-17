@@ -355,6 +355,21 @@ async function initFirebase(){
     };
   }
 
+  const handleLoginShortcut = (event)=>{
+    if (!(event && (event.ctrlKey || event.metaKey))) return;
+    const key = (event.key || "").toLowerCase();
+    if (key !== "s") return;
+    if (FB.user) return;
+    event.preventDefault();
+    showModal();
+    if (emailEl) {
+      emailEl.focus();
+      emailEl.select();
+    }
+  };
+
+  window.addEventListener("keydown", handleLoginShortcut);
+
   FB.auth.onAuthStateChanged(async (user)=>{
     FB.user = user || null;
     if (user){
