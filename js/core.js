@@ -287,30 +287,35 @@ function applyFirestoreSettings(db){
   if (!db || firebaseSettingsApplied) return;
 
   // Respect any existing settings (including emulator hosts) so we avoid override warnings.
-  const currentSettings = typeof db._settings === "object" && db._settings ? { ...db._settings } : {};
+  const currentSettings = typeof db._getSettings === "function"
+    ? { ...db._getSettings() }
+    : (typeof db._settings === "object" && db._settings ? { ...db._settings } : {});
+  const settingsFrozen = Boolean(db._settingsFrozen);
+
   if (currentSettings.ignoreUndefinedProperties === true){
+    firebaseSettingsApplied = true;
+    return;
+  }
+
+  if (settingsFrozen){
+    console.warn("Firestore settings already frozen; skipping additional overrides to avoid host warnings.");
     firebaseSettingsApplied = true;
     return;
   }
 
   const mergedSettings = { ...currentSettings, ignoreUndefinedProperties: true };
   try {
-    // Newer SDKs support a merge flag to avoid host override warnings when settings were already applied.
-    if (db.settings.length >= 2){
-      db.settings(mergedSettings, { merge: true });
-    } else {
-      db.settings(mergedSettings);
-    }
+    db.settings(mergedSettings, { merge: true });
     firebaseSettingsApplied = true;
+    return;
   } catch (err) {
     // If merge=true is not supported, fall back to a standard settings call once.
-    if (!firebaseSettingsApplied){
-      try {
-        db.settings(mergedSettings);
-        firebaseSettingsApplied = true;
-      } catch (fallbackErr) {
-        console.warn("Failed to enable ignoreUndefinedProperties", fallbackErr);
-      }
+    try {
+      db.settings(mergedSettings);
+      firebaseSettingsApplied = true;
+      return;
+    } catch (fallbackErr) {
+      console.warn("Failed to enable ignoreUndefinedProperties", fallbackErr);
     }
   }
 }
@@ -329,25 +334,25 @@ async function initFirebase(){
   FB.db   = firebase.firestore();
   applyFirestoreSettings(FB.db);
 
-    // Persist login across refreshes
-    try {
-      await FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-    } catch (e) {
-      console.warn("Could not set auth persistence to LOCAL:", e);
-    }
+  // Persist login across refreshes
+  try {
+    await FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  } catch (e) {
+    console.warn("Could not set auth persistence to LOCAL:", e);
+  }
 
-    // UI bits
-    const statusEl = $("#authStatus");
-    const btnIn    = $("#btnSignIn");
-    const btnOut   = $("#btnSignOut");
-    const modal    = $("#authModal");
-    const form     = $("#authForm");
-    const emailEl  = $("#authEmail");
-    const passEl   = $("#authPass");
-    const btnClose = $("#authClose");
+  // UI bits
+  const statusEl = $("#authStatus");
+  const btnIn    = $("#btnSignIn");
+  const btnOut   = $("#btnSignOut");
+  const modal    = $("#authModal");
+  const form     = $("#authForm");
+  const emailEl  = $("#authEmail");
+  const passEl   = $("#authPass");
+  const btnClose = $("#authClose");
 
-    const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
-    const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
+  const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
+  const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
 
   async function ensureEmailPassword(email, password){
     if (!email || !password) throw new Error("Email and password required.");
