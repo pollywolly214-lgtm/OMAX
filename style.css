@@ -1009,7 +1009,7 @@ header::after {
 main {
   position: relative;
   z-index: 1;
-  padding: 26px 18px 80px;
+  padding: 14px 18px 68px;
   color: #0a1f3f;
   overflow: visible;
 }
@@ -1044,7 +1044,7 @@ main::after {
 
 @media (min-width: 960px) {
   main {
-    padding: 38px 40px 100px;
+    padding: 24px 40px 96px;
   }
 }
 
