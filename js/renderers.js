@@ -34,6 +34,19 @@ const schedulePriorityAnimation = (ids = [], { duration = 600 } = {}) => {
   });
 };
 
+function ensureJobCategoryFolderOpen(categoryId){
+  if (typeof window === "undefined") return;
+  if (categoryId == null) return;
+  const id = String(categoryId);
+  if (!id) return;
+  const existing = Array.isArray(window.jobCategoryOpenFolders)
+    ? window.jobCategoryOpenFolders.map(value => String(value))
+    : [];
+  if (existing.includes(id)) return;
+  existing.push(id);
+  window.jobCategoryOpenFolders = existing;
+}
+
 function getCurrentMachineHours(){
   if (typeof RENDER_TOTAL === "number" && Number.isFinite(RENDER_TOTAL)){
     return Number(RENDER_TOTAL);
@@ -4179,6 +4192,9 @@ function renderDashboard(){
     const start = jobStartInput?.value;
     const due   = jobDueInput?.value;
     let categoryId = jobCategoryInput?.value || "";
+    const previousCategoryFilter = typeof window.jobCategoryFilter === "string" && window.jobCategoryFilter
+      ? window.jobCategoryFilter
+      : dashRootCategoryId;
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
     const materialQty  = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
     const chargeRate = chargeRaw === "" ? JOB_RATE_PER_HOUR : Number(chargeRaw);
@@ -4192,7 +4208,7 @@ function renderDashboard(){
       const folder = promptCreateCategory(parent);
       if (!folder){ toast("Category not created."); return; }
       categoryId = String(folder.id);
-      window.jobCategoryFilter = categoryId;
+      ensureJobCategoryFolderOpen(categoryId);
     }
     const newJob = { id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, priority: 1, notes:"", manualLogs:[], cat: categoryId };
     cuttingJobs.push(newJob);
@@ -4203,6 +4219,7 @@ function renderDashboard(){
       jobCategoryInput.dataset.prevValue = dashRootCategoryId;
     }
     updateDashJobCategoryHint();
+    window.jobCategoryFilter = previousCategoryFilter;
     saveCloudDebounced();
     toast("Cutting job added");
     closeModal();
@@ -4224,7 +4241,7 @@ function renderDashboard(){
           jobCategoryInput.insertBefore(newOption, anchor);
           jobCategoryInput.value = newOption.value;
           jobCategoryInput.dataset.prevValue = newOption.value;
-          window.jobCategoryFilter = newOption.value;
+          ensureJobCategoryFolderOpen(newOption.value);
           updateDashJobCategoryHint();
         }else{
           const fallback = jobCategoryInput.dataset.prevValue || (window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"));
@@ -11810,8 +11827,7 @@ function renderJobs(){
           const openSet = readOpenFolderSet();
           openSet.add(String(folder.id));
           writeOpenFolderSet(openSet);
-          window.jobCategoryFilter = String(folder.id);
-          rerenderPreservingState(String(folder.id));
+          rerenderPreservingState(currentCategoryFilter());
         }else{
           const fallback = select.dataset.prevValue || (window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"));
           select.value = fallback;
@@ -12068,6 +12084,9 @@ function renderJobs(){
     const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
     const categorySelect = document.getElementById("jobCategory");
     let categoryId = categorySelect?.value || "";
+    const previousCategoryFilter = typeof window.jobCategoryFilter === "string" && window.jobCategoryFilter
+      ? window.jobCategoryFilter
+      : jobRootCategoryId;
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
     const materialQty = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
     const chargeRate = chargeRaw === "" ? JOB_RATE_PER_HOUR : Number(chargeRaw);
@@ -12081,7 +12100,7 @@ function renderJobs(){
       const folder = promptCreateCategory(parent);
       if (!folder){ toast("Category not created."); return; }
       categoryId = String(folder.id);
-      window.jobCategoryFilter = categoryId;
+      ensureJobCategoryFolderOpen(categoryId);
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
     const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
@@ -12089,6 +12108,7 @@ function renderJobs(){
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
     pendingNewJobFiles.length = 0;
+    window.jobCategoryFilter = previousCategoryFilter;
     saveCloudDebounced(); renderJobs();
   });
 

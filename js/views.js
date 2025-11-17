@@ -2060,6 +2060,10 @@ function viewJobs(){
   };
   const selectedCategoryRaw = typeof window.jobCategoryFilter === "string" ? window.jobCategoryFilter : rootCategoryId;
   const selectedCategory = folderMap.has(String(selectedCategoryRaw)) ? String(selectedCategoryRaw) : rootCategoryId;
+  const selectedCategoryFolder = folderMap.get(selectedCategory);
+  const selectedCategoryName = selectedCategoryFolder?.name
+    ? String(selectedCategoryFolder.name)
+    : (selectedCategory === rootCategoryId ? "All Jobs" : "Category");
   const addJobDefaultCategory = rootCategoryId;
   window.jobCategoryFilter = selectedCategory;
 
@@ -2482,6 +2486,8 @@ function viewJobs(){
   const jobTableOverlapAttr = overlapSignature
     ? ` data-job-overlap-signature="${esc(overlapSignature)}"`
     : "";
+  const selectedCategoryColorStyle = categoryColorStyle(selectedCategory);
+  const categoryFilterAriaLabel = `Change cutting jobs category (currently ${selectedCategoryName || "All Jobs"})`;
 
   const jobColumnCount = 15;
   const historyColumnCount = jobColumnCount;
@@ -3268,12 +3274,6 @@ function viewJobs(){
               aria-expanded="${addFormOpen ? "true" : "false"}"
               aria-controls="jobAddPanel"
             >${addFormOpen ? "Hide add job form" : "+ New cutting job"}</button>
-            <label class="job-category-filter">
-              <span>Show</span>
-              <select id="jobCategoryFilterSelect" aria-label="Filter cutting jobs by category">
-                ${categoryOptionsMarkup(selectedCategory)}
-              </select>
-            </label>
             <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
           </div>
         </div>
@@ -3316,6 +3316,23 @@ function viewJobs(){
         </form>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
       </section>
+
+      <div class="job-category-indicator-wrapper">
+        <div class="job-main-category job-category-indicator" data-category-color="1"${selectedCategoryColorStyle}>
+          <span class="job-main-category-label">Viewing</span>
+          <div class="job-category-indicator-selectwrap">
+            <label class="sr-only" for="jobCategoryFilterSelect">Viewing cutting jobs category</label>
+            <select
+              id="jobCategoryFilterSelect"
+              class="job-category-indicator-select job-main-category-name"
+              aria-label="${esc(categoryFilterAriaLabel)}"
+              title="${esc(categoryFilterAriaLabel)}"
+            >
+              ${categoryOptionsMarkup(selectedCategory)}
+            </select>
+          </div>
+        </div>
+      </div>
 
       <table class="job-table"${jobTableOverlapAttr}>
         <thead>
