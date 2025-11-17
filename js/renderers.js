@@ -4102,7 +4102,7 @@ function renderDashboard(){
     if (!isFinite(downtimeVal) || downtimeVal <= 0){
       downtimeVal = 1;
     }
-    downtimeVal = Math.max(1, Math.round(downtimeVal * 100) / 100);
+    downtimeVal = Math.max(0.25, Math.round(downtimeVal * 100) / 100);
     if (taskDowntimeInput){
       taskDowntimeInput.value = String(downtimeVal);
     }
@@ -6120,6 +6120,7 @@ function renderSettings(){
             <label data-field="storeLink">Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
             <label data-field="pn">Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
             <label data-field="price">Price ($)<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${t.price!=null?t.price:""}" placeholder="optional"></label>
+            <label data-field="downtimeHours">Time to complete (hrs)<input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${t.id}" data-list="${type}" value="${t.downtimeHours!=null?t.downtimeHours:""}" placeholder="e.g. 1"></label>
             <label class="task-note" data-field="note">Note<textarea data-k="note" data-id="${t.id}" data-list="${type}" rows="2" placeholder="Optional note">${escapeHtml(t.note||"")}</textarea></label>
           </div>
           <div class="row-actions">
@@ -6942,7 +6943,7 @@ function renderSettings(){
     const key = target.getAttribute("data-k");
     if (!key || key === "mode") return;
     let value = target.value;
-    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase"){
+    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase" || key === "downtimeHours"){
       value = value === "" ? null : Number(value);
       if (value !== null && !isFinite(value)) return;
     }
@@ -6973,6 +6974,14 @@ function renderSettings(){
       updateDueChip(holder, meta.task);
     }else if (key === "price"){
       meta.task.price = value == null ? null : Number(value);
+    }else if (key === "downtimeHours"){
+      if (value == null){
+        meta.task.downtimeHours = null;
+      }else{
+        const normalized = Math.max(0.25, Math.round(Number(value) * 100) / 100);
+        meta.task.downtimeHours = normalized;
+        target.value = String(normalized);
+      }
     }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
       meta.task[key] = target.value;
       if (key === "name"){ const label = holder.querySelector('.task-name'); if (label) label.textContent = target.value || "(unnamed task)"; }
