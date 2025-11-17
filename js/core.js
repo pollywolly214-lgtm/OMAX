@@ -286,43 +286,29 @@ let workspaceMetadataWritesBlocked = false;
 function applyFirestoreSettings(db){
   if (!db || firebaseSettingsApplied) return;
 
-  // Respect any existing settings (including emulator hosts) so we avoid override warnings.
+  // Respect existing settings (including emulator hosts) so we avoid override warnings.
   const currentSettings = typeof db._getSettings === "function"
     ? { ...db._getSettings() }
     : (typeof db._settings === "object" && db._settings ? { ...db._settings } : {});
   const settingsFrozen = Boolean(db._settingsFrozen);
   const hasHostSetting = typeof currentSettings.host === "string" && currentSettings.host.length > 0;
 
-  if (currentSettings.ignoreUndefinedProperties === true){
-    firebaseSettingsApplied = true;
-    return;
-  }
-
-  if (settingsFrozen){
-    console.warn("Firestore settings already frozen; skipping additional overrides to avoid host warnings.");
+  if (currentSettings.ignoreUndefinedProperties === true || settingsFrozen || hasHostSetting){
+    if (settingsFrozen){
+      console.warn("Firestore settings already frozen; skipping extra configuration to avoid host overrides.");
+    } else if (hasHostSetting){
+      console.warn("Firestore host/emulator already configured; leaving settings untouched to prevent override warnings.");
+    }
     firebaseSettingsApplied = true;
     return;
   }
 
   const mergedSettings = { ...currentSettings, ignoreUndefinedProperties: true };
   try {
-    db.settings(mergedSettings, { merge: true });
+    db.settings(mergedSettings);
     firebaseSettingsApplied = true;
-    return;
   } catch (err) {
-    if (hasHostSetting){
-      console.warn("Firestore host already configured; skipping settings override to avoid host warnings.", err);
-      firebaseSettingsApplied = true;
-      return;
-    }
-    // If merge=true is not supported, fall back to a standard settings call once.
-    try {
-      db.settings(mergedSettings);
-      firebaseSettingsApplied = true;
-      return;
-    } catch (fallbackErr) {
-      console.warn("Failed to enable ignoreUndefinedProperties", fallbackErr);
-    }
+    console.warn("Failed to enable ignoreUndefinedProperties", err);
   }
 }
 
