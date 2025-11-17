@@ -281,62 +281,73 @@ let FB = {
 async function initFirebase(){
   if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
   if (!window.FIREBASE_CONFIG){ console.warn("Missing FIREBASE_CONFIG."); return; }
-
-  // Initialize
-  FB.app  = firebase.initializeApp(window.FIREBASE_CONFIG);
-  FB.auth = firebase.auth();
-  FB.db   = firebase.firestore();
-  try {
-    FB.db.settings({ ignoreUndefinedProperties: true });
-  } catch (err) {
-    console.warn("Failed to enable ignoreUndefinedProperties", err);
+  if (initFirebase._initializing || initFirebase._initialized){
+    return;
   }
 
-  // Persist login across refreshes
+  initFirebase._initializing = true;
+
   try {
-    await FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-  } catch (e) {
-    console.warn("Could not set auth persistence to LOCAL:", e);
-  }
 
-  // UI bits
-  const statusEl = $("#authStatus");
-  const btnIn    = $("#btnSignIn");
-  const btnOut   = $("#btnSignOut");
-  const modal    = $("#authModal");
-  const form     = $("#authForm");
-  const emailEl  = $("#authEmail");
-  const passEl   = $("#authPass");
-  const btnClose = $("#authClose");
+    // Initialize
+    const existingApp = (firebase.apps && firebase.apps.length)
+      ? firebase.app()
+      : firebase.initializeApp(window.FIREBASE_CONFIG);
 
-  const AUTO_LOGIN_EMAIL = "ryder@candmprecast.com";
-  const AUTO_LOGIN_PASSWORD = "Matthew7:21";
-  let autoLoginInProgress = false;
-  let autoLoginAttempted = false;
-
-  const host = (typeof window !== "undefined" && window.location && typeof window.location.hostname === "string")
-    ? window.location.hostname
-    : "";
-  const autoLoginEnabled = host ? host !== "omax.vercel.app" : true;
-
-  const tryAutoLogin = async ()=>{
-    if (!autoLoginEnabled) return;
-    if (autoLoginAttempted) return;
-    if (FB.user) return;
-    if (!AUTO_LOGIN_EMAIL || !AUTO_LOGIN_PASSWORD) return;
-    autoLoginAttempted = true;
-    autoLoginInProgress = true;
+    FB.app  = existingApp;
+    FB.auth = firebase.auth();
+    FB.db   = firebase.firestore();
     try {
-      await ensureEmailPassword(AUTO_LOGIN_EMAIL, AUTO_LOGIN_PASSWORD);
+      FB.db.settings({ ignoreUndefinedProperties: true });
     } catch (err) {
-      console.warn("Automatic preview sign-in failed", err);
-    } finally {
-      autoLoginInProgress = false;
+      console.warn("Failed to enable ignoreUndefinedProperties", err);
     }
-  };
 
-  const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
-  const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
+    // Persist login across refreshes
+    try {
+      await FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    } catch (e) {
+      console.warn("Could not set auth persistence to LOCAL:", e);
+    }
+
+    // UI bits
+    const statusEl = $("#authStatus");
+    const btnIn    = $("#btnSignIn");
+    const btnOut   = $("#btnSignOut");
+    const modal    = $("#authModal");
+    const form     = $("#authForm");
+    const emailEl  = $("#authEmail");
+    const passEl   = $("#authPass");
+    const btnClose = $("#authClose");
+
+    const AUTO_LOGIN_EMAIL = "ryder@candmprecast.com";
+    const AUTO_LOGIN_PASSWORD = "Matthew7:21";
+    let autoLoginInProgress = false;
+    let autoLoginAttempted = false;
+
+    const host = (typeof window !== "undefined" && window.location && typeof window.location.hostname === "string")
+      ? window.location.hostname
+      : "";
+    const autoLoginEnabled = host ? host !== "omax.vercel.app" : true;
+
+    const tryAutoLogin = async ()=>{
+      if (!autoLoginEnabled) return;
+      if (autoLoginAttempted) return;
+      if (FB.user) return;
+      if (!AUTO_LOGIN_EMAIL || !AUTO_LOGIN_PASSWORD) return;
+      autoLoginAttempted = true;
+      autoLoginInProgress = true;
+      try {
+        await ensureEmailPassword(AUTO_LOGIN_EMAIL, AUTO_LOGIN_PASSWORD);
+      } catch (err) {
+        console.warn("Automatic preview sign-in failed", err);
+      } finally {
+        autoLoginInProgress = false;
+      }
+    };
+
+    const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
+    const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
 
   async function ensureEmailPassword(email, password){
     if (!email || !password) throw new Error("Email and password required.");
@@ -427,6 +438,10 @@ async function initFirebase(){
   });
 
   tryAutoLogin();
+  initFirebase._initialized = true;
+  } finally {
+    initFirebase._initializing = false;
+  }
 }
 
 
