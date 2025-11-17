@@ -284,9 +284,18 @@ let firebaseSettingsApplied = false;
 let workspaceMetadataWritesBlocked = false;
 
 function applyFirestoreSettings(db){
-  if (firebaseSettingsApplied) return;
+  if (!db || firebaseSettingsApplied) return;
+
+  // Respect any existing settings (including emulator hosts) so we avoid override warnings.
+  const currentSettings = typeof db._settings === "object" && db._settings ? { ...db._settings } : {};
+  if (currentSettings.ignoreUndefinedProperties === true){
+    firebaseSettingsApplied = true;
+    return;
+  }
+
+  const mergedSettings = { ...currentSettings, ignoreUndefinedProperties: true };
   try {
-    db.settings({ ignoreUndefinedProperties: true }, { merge: true });
+    db.settings(mergedSettings);
     firebaseSettingsApplied = true;
   } catch (err) {
     console.warn("Failed to enable ignoreUndefinedProperties", err);
@@ -399,6 +408,7 @@ async function initFirebase(){
 
   FB.auth.onAuthStateChanged(async (user)=>{
     FB.user = user || null;
+    workspaceMetadataWritesBlocked = false;
     if (user){
       if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
       if (btnIn)  btnIn.style.display  = "none";
