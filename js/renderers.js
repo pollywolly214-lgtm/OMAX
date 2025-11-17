@@ -199,7 +199,7 @@ function createIntervalTaskInstance(template){
   return copy;
 }
 
-function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
+function scheduleExistingIntervalTask(task, { dateISO = null, refreshDashboard = true } = {}){
   if (!task || task.mode !== "interval") return null;
   if (!Array.isArray(tasksInterval)){
     if (Array.isArray(window.tasksInterval)){
@@ -344,6 +344,9 @@ function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
   if (template && template.variant !== "template"){
     ensureTaskVariant(template, "interval");
     if (template.templateId == null) template.templateId = template.id;
+  }
+  if (refreshDashboard && typeof refreshDashboardWidgets === "function"){
+    refreshDashboardWidgets();
   }
   return instance;
 }
@@ -4230,7 +4233,7 @@ function renderDashboard(){
       const baselineHours = parseBaselineHours(taskLastInput?.value);
       applyIntervalBaseline(template, { baselineHours, currentHours: curHours });
       tasksInterval.unshift(template);
-      const instance = scheduleExistingIntervalTask(template, { dateISO: targetISO }) || template;
+      const instance = scheduleExistingIntervalTask(template, { dateISO: targetISO, refreshDashboard: false }) || template;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
       let dateLabel = targetISO;
@@ -4369,7 +4372,7 @@ function renderDashboard(){
     const targetISO = addContextDateISO || ymd(new Date());
     let message = "Maintenance task added";
     if (task.mode === "interval"){
-      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO }) || task;
+      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO, refreshDashboard: false }) || task;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
       let dateLabel = targetISO;
