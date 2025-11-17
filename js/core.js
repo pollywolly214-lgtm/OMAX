@@ -303,6 +303,15 @@ function applyFirestoreSettings(db){
     return;
   }
 
+  // Avoid touching host/SSL in non-development environments when a host is
+  // already configured; calling `settings` again in that scenario triggers the
+  // override warning we are trying to prevent.
+  if (!isDevEnv && hasHostSetting){
+    console.info("Existing Firestore host settings detected; skipping reconfiguration to prevent overrides.");
+    firebaseSettingsApplied = true;
+    return;
+  }
+
   const mergedSettings = { ...currentSettings };
   mergedSettings.ignoreUndefinedProperties = true;
 
@@ -314,13 +323,8 @@ function applyFirestoreSettings(db){
     } else {
       console.info("Firestore emulator already configured; leaving settings untouched to prevent override warnings.");
     }
-  } else {
-    // In preview/prod we must not apply emulator host settings.
-    delete mergedSettings.host;
-    delete mergedSettings.ssl;
-    if (!ignoreAlreadyEnabled) {
-      console.info("Firestore is connected to the Production/Vercel host.");
-    }
+  } else if (!ignoreAlreadyEnabled) {
+    console.info("Firestore is connected to the Production/Vercel host.");
   }
 
   try {
