@@ -312,10 +312,17 @@ function applyFirestoreSettings(db){
     return;
   }
 
-  const mergedSettings = { ...currentSettings };
-  mergedSettings.ignoreUndefinedProperties = true;
+    if (!isDevEnv){
+      // In preview/production environments, leave Firestore settings untouched to
+      // avoid host override warnings. The default host from FIREBASE_CONFIG will
+      // be used.
+      firebaseSettingsApplied = true;
+      return;
+    }
 
-  if (isDevEnv){
+    const mergedSettings = { ...currentSettings };
+    mergedSettings.ignoreUndefinedProperties = true;
+
     if (!hasHostSetting){
       mergedSettings.host = emulatorHost;
       mergedSettings.ssl = false;
@@ -323,16 +330,13 @@ function applyFirestoreSettings(db){
     } else {
       console.info("Firestore emulator already configured; leaving settings untouched to prevent override warnings.");
     }
-  } else if (!ignoreAlreadyEnabled) {
-    console.info("Firestore is connected to the Production/Vercel host.");
-  }
 
-  try {
-    db.settings(mergedSettings);
-    firebaseSettingsApplied = true;
-  } catch (err) {
-    console.warn("Failed to enable ignoreUndefinedProperties", err);
-  }
+    try {
+      db.settings(mergedSettings);
+      firebaseSettingsApplied = true;
+    } catch (err) {
+      console.warn("Failed to enable ignoreUndefinedProperties", err);
+    }
 }
 
 async function initFirebase(){
