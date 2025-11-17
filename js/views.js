@@ -2346,10 +2346,46 @@ function viewJobs(){
   const completedStats = completedFiltered.reduce((acc, job)=>{
     const eff = computeJobEfficiency(job);
     const net = computeJobNetTotal(job, eff, { preferActual: true });
+    const estHours = Number(job?.estimateHours);
+    const matCost = Number(job?.materialCost || 0);
+    const matQty = Number(job?.materialQty || 0);
+    const matTotal = (matCost * matQty) || 0;
+    const chargeRateRaw = Number(job?.chargeRate);
+    const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
+    const costRate = JOB_BASE_COST_PER_HOUR + ((Number.isFinite(estHours) && estHours > 0) ? (matTotal / estHours) : 0);
+    const netRate = chargeRate - costRate;
+
     acc.total += Number.isFinite(net) ? net : 0;
+    acc.estimate += Number.isFinite(estHours) ? estHours : 0;
+    acc.materialCost += Number.isFinite(matCost) ? matCost : 0;
+    acc.materialQty += Number.isFinite(matQty) ? matQty : 0;
+    acc.materialTotal += Number.isFinite(matTotal) ? matTotal : 0;
+    acc.chargeRate += Number.isFinite(chargeRate) ? chargeRate : 0;
+    acc.costRate += Number.isFinite(costRate) ? costRate : 0;
+    acc.netRate += Number.isFinite(netRate) ? netRate : 0;
     return acc;
-  }, { total: 0 });
-  const completedAverage = completedFiltered.length ? (completedStats.total / completedFiltered.length) : 0;
+  }, {
+    total: 0,
+    estimate: 0,
+    materialCost: 0,
+    materialQty: 0,
+    materialTotal: 0,
+    chargeRate: 0,
+    costRate: 0,
+    netRate: 0
+  });
+  const completedCount = completedFiltered.length;
+  const completedAverage = completedCount ? (completedStats.total / completedCount) : 0;
+  const completedAverageMetrics = completedCount ? {
+    estimate: completedStats.estimate / completedCount,
+    materialCost: completedStats.materialCost / completedCount,
+    materialQty: completedStats.materialQty / completedCount,
+    materialTotal: completedStats.materialTotal / completedCount,
+    chargeRate: completedStats.chargeRate / completedCount,
+    costRate: completedStats.costRate / completedCount,
+    netRate: completedStats.netRate / completedCount,
+    netTotal: completedAverage
+  } : null;
 
   const prioritySchedule = typeof computePrioritySchedule === "function"
     ? computePrioritySchedule(cuttingJobs)
@@ -2752,12 +2788,46 @@ function viewJobs(){
   const historyEmptyMessage = historySearchActive
     ? "No past cutting jobs match your search."
     : "Mark jobs complete to build a history of past cutting work.";
+  const completedAverageRow = completedAverageMetrics
+    ? (() => {
+        const estimateDisplay = formatHours(completedAverageMetrics.estimate);
+        const materialCostDisplay = formatCurrency(completedAverageMetrics.materialCost, { showPlus: false });
+        const materialQtyDisplay = formatQuantity(completedAverageMetrics.materialQty);
+        const materialTotalDisplay = formatCurrency(completedAverageMetrics.materialTotal, { showPlus: false });
+        const chargeRateDisplay = formatRate(completedAverageMetrics.chargeRate);
+        const costRateDisplay = formatRate(completedAverageMetrics.costRate);
+        const netRateDisplay = formatRate(completedAverageMetrics.netRate, { showPlus: true });
+        const netTotalDisplay = formatCurrency(completedAverageMetrics.netTotal, { showPlus: true });
+        const emptyCell = '<td class="past-jobs-average-empty">—</td>';
+        return `
+          <tr class="past-jobs-average-row">
+            <td class="past-jobs-average-label">Average per job</td>
+            <td><strong>${estimateDisplay}</strong></td>
+            ${emptyCell}
+            <td><strong>${materialCostDisplay}</strong></td>
+            <td><strong>${materialQtyDisplay}</strong></td>
+            <td><strong>${materialTotalDisplay}</strong></td>
+            <td><strong>${chargeRateDisplay}</strong></td>
+            <td><strong>${costRateDisplay}</strong></td>
+            <td><strong>${netRateDisplay}</strong></td>
+            ${emptyCell}
+            ${emptyCell}
+            ${emptyCell}
+            <td><strong>${netTotalDisplay}</strong></td>
+            ${emptyCell}
+            ${emptyCell}
+          </tr>
+        `;
+      })()
+    : "";
   const completedTable = completedFiltered.length
     ? `
-      <div class="past-jobs-summary">
-        <div><span class="label">Jobs logged</span><span>${completedFiltered.length}</span></div>
-        <div><span class="label">Total impact</span><span>${formatCurrency(completedStats.total)}</span></div>
-        <div><span class="label">Avg per job</span><span>${formatCurrency(completedAverage)}</span></div>
+      <div class="past-jobs-summary-wrap">
+        <div class="past-jobs-summary">
+          <div><span class="label">Jobs logged</span><span>${completedFiltered.length}</span></div>
+          <div><span class="label">Total impact</span><span>${formatCurrency(completedStats.total)}</span></div>
+          <div><span class="label">Avg per job</span><span>${formatCurrency(completedAverage)}</span></div>
+        </div>
       </div>
       <table class="past-jobs-table job-table">
         <thead>
@@ -2779,7 +2849,7 @@ function viewJobs(){
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody>${completedRows}</tbody>
+        <tbody>${completedAverageRow}${completedRows}</tbody>
       </table>
     `
     : `<p class="small muted">${historyEmptyMessage}</p>`;

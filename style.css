@@ -1070,7 +1070,7 @@ header::after {
 main {
   position: relative;
   z-index: 1;
-  padding: 26px 18px 80px;
+  padding: 8px 16px 54px;
   color: #0a1f3f;
   overflow: visible;
 }
@@ -1105,7 +1105,7 @@ main::after {
 
 @media (min-width: 960px) {
   main {
-    padding: 38px 40px 100px;
+    padding: 16px 32px 78px;
   }
 }
 
@@ -1114,7 +1114,7 @@ main::after {
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 18px;
 }
 
 footer {
@@ -3377,7 +3377,7 @@ body.modal-open .auth-bar {
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .past-jobs-search {
   flex: 1 1 auto;
@@ -3388,7 +3388,7 @@ body.modal-open .auth-bar {
   max-width: 420px;
 }
 .past-jobs-hint {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
 }
 .past-jobs-filter-status {
   margin: -6px 0 12px;
@@ -3402,17 +3402,42 @@ body.modal-open .auth-bar {
     min-width: 0;
   }
 }
+.past-jobs-summary-wrap {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
 .past-jobs-summary {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 12px;
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+.past-jobs-average-row {
+  background: #f4f6fb;
+}
+.past-jobs-average-row td {
+  font-weight: 600;
+  border-bottom-color: #c9d4ef;
+  border-top-color: #c9d4ef;
+}
+.past-jobs-average-row td strong {
+  font-weight: 700;
+  color: #10294f;
+}
+.past-jobs-average-label {
+  font-weight: 700;
+  color: #10294f;
+  white-space: nowrap;
+}
+.past-jobs-average-empty {
+  color: #5a6b85;
+  font-weight: 500;
 }
 .past-jobs-summary div {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: 10px;
   border: 1px solid #dbe2f2;
   background: #f6f8fd;
@@ -3428,6 +3453,14 @@ body.modal-open .auth-bar {
 .past-jobs-summary span:last-child {
   font-size: 15px;
   font-weight: 600;
+}
+@media (max-width: 720px) {
+  .past-jobs-summary-wrap {
+    justify-content: flex-start;
+  }
+  .past-jobs-summary {
+    flex-wrap: wrap;
+  }
 }
 .past-jobs-table {
   width: 100%;
