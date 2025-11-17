@@ -297,10 +297,13 @@ async function initFirebase(){
     FB.app  = existingApp;
     FB.auth = firebase.auth();
     FB.db   = firebase.firestore();
-    try {
-      FB.db.settings({ ignoreUndefinedProperties: true });
-    } catch (err) {
-      console.warn("Failed to enable ignoreUndefinedProperties", err);
+    if (!initFirebase._settingsApplied) {
+      try {
+        FB.db.settings({ ignoreUndefinedProperties: true, merge: true });
+        initFirebase._settingsApplied = true;
+      } catch (err) {
+        console.warn("Failed to enable ignoreUndefinedProperties", err);
+      }
     }
 
     // Persist login across refreshes
@@ -319,32 +322,6 @@ async function initFirebase(){
     const emailEl  = $("#authEmail");
     const passEl   = $("#authPass");
     const btnClose = $("#authClose");
-
-    const AUTO_LOGIN_EMAIL = "ryder@candmprecast.com";
-    const AUTO_LOGIN_PASSWORD = "Matthew7:21";
-    let autoLoginInProgress = false;
-    let autoLoginAttempted = false;
-
-    const host = (typeof window !== "undefined" && window.location && typeof window.location.hostname === "string")
-      ? window.location.hostname
-      : "";
-    const autoLoginEnabled = host ? host !== "omax.vercel.app" : true;
-
-    const tryAutoLogin = async ()=>{
-      if (!autoLoginEnabled) return;
-      if (autoLoginAttempted) return;
-      if (FB.user) return;
-      if (!AUTO_LOGIN_EMAIL || !AUTO_LOGIN_PASSWORD) return;
-      autoLoginAttempted = true;
-      autoLoginInProgress = true;
-      try {
-        await ensureEmailPassword(AUTO_LOGIN_EMAIL, AUTO_LOGIN_PASSWORD);
-      } catch (err) {
-        console.warn("Automatic preview sign-in failed", err);
-      } finally {
-        autoLoginInProgress = false;
-      }
-    };
 
     const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
     const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
@@ -378,29 +355,6 @@ async function initFirebase(){
     };
   }
 
-  const handleAutoLoginShortcut = async (event)=>{
-    if (!(event && (event.ctrlKey || event.metaKey))) return;
-    const key = (event.key || "").toLowerCase();
-    if (key !== "s") return;
-    if (FB.user || autoLoginInProgress) return;
-    event.preventDefault();
-    autoLoginInProgress = true;
-    try {
-      if (emailEl) emailEl.value = AUTO_LOGIN_EMAIL;
-      if (passEl) passEl.value = AUTO_LOGIN_PASSWORD;
-      showModal();
-      await ensureEmailPassword(AUTO_LOGIN_EMAIL, AUTO_LOGIN_PASSWORD);
-      hideModal();
-    } catch (err) {
-      console.error("Auto sign-in failed", err);
-      alert(err && err.message ? err.message : "Automatic sign-in failed");
-    } finally {
-      autoLoginInProgress = false;
-    }
-  };
-
-  window.addEventListener("keydown", handleAutoLoginShortcut);
-
   FB.auth.onAuthStateChanged(async (user)=>{
     FB.user = user || null;
     if (user){
@@ -433,11 +387,9 @@ async function initFirebase(){
       if (btnIn)  btnIn.style.display  = "inline-block";
       if (btnOut) btnOut.style.display = "none";
       renderSignedOut();
-      tryAutoLogin();
     }
   });
-
-  tryAutoLogin();
+  
   initFirebase._initialized = true;
   } finally {
     initFirebase._initializing = false;
