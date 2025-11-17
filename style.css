@@ -2450,7 +2450,8 @@ body.modal-open .auth-bar {
 
 .job-category-indicator {
   gap: 10px;
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 600;
   flex-wrap: wrap;
 }
 
@@ -2467,7 +2468,7 @@ body.modal-open .auth-bar {
   background: none;
   padding: 0 18px 0 0;
   font: inherit;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--job-category-accent, #243656);
   text-decoration: underline;
   cursor: pointer;
@@ -2518,11 +2519,11 @@ body.modal-open .auth-bar {
 }
 
 .job-main-category-label {
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 10px;
-  color: #3b4b6b;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+  color: #2b3a58;
 }
 
 .job-main-category-label::after {
