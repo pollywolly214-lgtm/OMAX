@@ -282,6 +282,7 @@ function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
   if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
     targetDate.setHours(0,0,0,0);
     targetISO = ymd(targetDate);
+    instance.calendarDateISO = targetISO;
     const isPastOrToday = targetDate.getTime() <= today.getTime();
     const hoursAtTarget = hoursSnapshotOnOrBefore(targetISO);
     let consumedHours;
@@ -4177,7 +4178,7 @@ function renderDashboard(){
     if (!isFinite(downtimeVal) || downtimeVal <= 0){
       downtimeVal = 1;
     }
-    downtimeVal = Math.max(1, Math.round(downtimeVal * 100) / 100);
+    downtimeVal = Math.max(0.25, Math.round(downtimeVal * 100) / 100);
     if (taskDowntimeInput){
       taskDowntimeInput.value = String(downtimeVal);
     }
@@ -4298,6 +4299,9 @@ function renderDashboard(){
     toast(message);
     closeModal();
     renderDashboard();
+    if (typeof renderCalendar === "function"){
+      renderCalendar();
+    }
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -4338,6 +4342,9 @@ function renderDashboard(){
     toast("One-time task added to the calendar");
     closeModal();
     renderDashboard();
+    if (typeof renderCalendar === "function"){
+      renderCalendar();
+    }
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -4382,6 +4389,9 @@ function renderDashboard(){
     toast(message);
     closeModal();
     renderDashboard();
+    if (typeof renderCalendar === "function"){
+      renderCalendar();
+    }
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -4481,7 +4491,13 @@ function renderDashboard(){
 
   refreshDownTimeList();
 
-  document.getElementById("calendarAddBtn")?.addEventListener("click", ()=> openModal("picker"));
+  document.getElementById("calendarAddBtn")?.addEventListener("click", ()=>{
+    if (typeof triggerDashboardAddPicker === "function"){
+      triggerDashboardAddPicker({});
+      return;
+    }
+    openModal("picker");
+  });
   document.getElementById("calendarToggleBtn")?.addEventListener("click", (event)=>{
     toggleCalendarShowAllMonths();
     if (event?.currentTarget instanceof HTMLElement){
@@ -6232,6 +6248,7 @@ function renderSettings(){
             <label data-field="storeLink">Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
             <label data-field="pn">Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
             <label data-field="price">Price ($)<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${t.price!=null?t.price:""}" placeholder="optional"></label>
+            <label data-field="downtimeHours">Time to complete (hrs)<input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${t.id}" data-list="${type}" value="${t.downtimeHours!=null?t.downtimeHours:1}" placeholder="e.g. 1"></label>
             <label class="task-note" data-field="note">Note<textarea data-k="note" data-id="${t.id}" data-list="${type}" rows="2" placeholder="Optional note">${escapeHtml(t.note||"")}</textarea></label>
           </div>
           <div class="row-actions">
@@ -7082,7 +7099,7 @@ function renderSettings(){
     const key = target.getAttribute("data-k");
     if (!key || key === "mode") return;
     let value = target.value;
-    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase"){
+    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase" || key === "downtimeHours"){
       value = value === "" ? null : Number(value);
       if (value !== null && !isFinite(value)) return;
     }
@@ -7113,6 +7130,14 @@ function renderSettings(){
       updateDueChip(holder, meta.task);
     }else if (key === "price"){
       meta.task.price = value == null ? null : Number(value);
+    }else if (key === "downtimeHours"){
+      if (value == null){
+        meta.task.downtimeHours = null;
+      }else{
+        const normalized = Math.max(0.25, Math.round(Number(value) * 100) / 100);
+        meta.task.downtimeHours = normalized;
+        target.value = String(normalized);
+      }
     }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
       meta.task[key] = target.value;
       if (key === "name"){ const label = holder.querySelector('.task-name'); if (label) label.textContent = target.value || "(unnamed task)"; }
@@ -9212,8 +9237,47 @@ function computeCostModel(){
     ? Number(RENDER_TOTAL)
     : (typeof currentTotal === "function" ? Number(currentTotal() || 0) : 0);
 
-  const intervalTasks = Array.isArray(tasksInterval) ? tasksInterval : [];
-  const asReqTasks = Array.isArray(tasksAsReq) ? tasksAsReq : [];
+  const intervalTasksAll = Array.isArray(tasksInterval) ? tasksInterval : [];
+  const asReqTasksAll = Array.isArray(tasksAsReq) ? tasksAsReq : [];
+
+  const toHistoryDateKey = (value)=>{
+    if (!value) return null;
+    if (typeof normalizeDateKey === "function"){
+      try {
+        const normalized = normalizeDateKey(value);
+        if (normalized) return normalized;
+      } catch (_err){}
+    }
+    if (value instanceof Date && !Number.isNaN(value.getTime())){
+      return value.toISOString().slice(0, 10);
+    }
+    if (typeof value === "string"){
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+      const parsed = new Date(trimmed);
+      if (!Number.isNaN(parsed.getTime())){
+        return parsed.toISOString().slice(0, 10);
+      }
+    }
+    return null;
+  };
+
+  const hasDateKey = (value)=> Boolean(toHistoryDateKey(value));
+  const hasAnyDatedEntry = (list, selector)=>{
+    if (!Array.isArray(list)) return false;
+    return list.some(entry => selector ? hasDateKey(selector(entry)) : hasDateKey(entry));
+  };
+  const isTaskActive = (task)=>{
+    if (!task) return false;
+    if (hasDateKey(task.calendarDateISO)) return true;
+    if (hasAnyDatedEntry(task.completedDates)) return true;
+    if (hasAnyDatedEntry(task.manualHistory, entry => entry && entry.dateISO)) return true;
+    return false;
+  };
+
+  const intervalTasks = intervalTasksAll.filter(isTaskActive);
+  const asReqTasks = asReqTasksAll.filter(isTaskActive);
 
   const cleanPartNumber = (pn)=> String(pn || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
   const maintenancePartNumbers = new Set();
@@ -9441,29 +9505,6 @@ function computeCostModel(){
     };
   });
 
-  const toHistoryDateKey = (value)=>{
-    if (!value) return null;
-    if (typeof normalizeDateKey === "function"){
-      try {
-        const normalized = normalizeDateKey(value);
-        if (normalized) return normalized;
-      } catch (_err){}
-    }
-    if (value instanceof Date && !Number.isNaN(value.getTime())){
-      return value.toISOString().slice(0, 10);
-    }
-    if (typeof value === "string"){
-      const trimmed = value.trim();
-      if (!trimmed) return null;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-      const parsed = new Date(trimmed);
-      if (!Number.isNaN(parsed.getTime())){
-        return parsed.toISOString().slice(0, 10);
-      }
-    }
-    return null;
-  };
-
   const taskEventsByDate = new Map();
 
   const addTaskEventForDate = (dateKey, info)=>{
@@ -9493,8 +9534,8 @@ function computeCostModel(){
     templateMetaById.set(id, { id, mode, name, price: unitPrice, pn: partNumber });
   };
 
-  if (Array.isArray(tasksInterval)){
-    tasksInterval.forEach(task => {
+  if (Array.isArray(intervalTasks)){
+    intervalTasks.forEach(task => {
       if (!task) return;
       const isInstance = typeof isInstanceTask === "function"
         ? isInstanceTask(task)
@@ -9502,8 +9543,8 @@ function computeCostModel(){
       if (!isInstance) registerTemplateMeta(task);
     });
   }
-  if (Array.isArray(tasksAsReq)){
-    tasksAsReq.forEach(task => {
+  if (Array.isArray(asReqTasks)){
+    asReqTasks.forEach(task => {
       if (!task) return;
       const isInstance = typeof isInstanceTask === "function"
         ? isInstanceTask(task)
@@ -9629,18 +9670,18 @@ function computeCostModel(){
     pushHistory(task);
     if (isInstance){
       const templateId = task.templateId != null ? String(task.templateId) : null;
-      if (templateId && Array.isArray(tasksInterval)){
-        const templateTask = tasksInterval.find(item => item && String(item.id) === templateId);
+      if (templateId && Array.isArray(intervalTasksAll)){
+        const templateTask = intervalTasksAll.find(item => item && String(item.id) === templateId);
         if (templateTask) pushHistory(templateTask);
       }
     }
   };
 
-  if (Array.isArray(tasksInterval)){
-    tasksInterval.forEach(task => captureTaskHistory(task, { exists: true }));
+  if (Array.isArray(intervalTasks)){
+    intervalTasks.forEach(task => captureTaskHistory(task, { exists: true }));
   }
-  if (Array.isArray(tasksAsReq)){
-    tasksAsReq.forEach(task => captureTaskHistory(task, { exists: true }));
+  if (Array.isArray(asReqTasks)){
+    asReqTasks.forEach(task => captureTaskHistory(task, { exists: true }));
   }
 
   const maintenanceHistory = [];

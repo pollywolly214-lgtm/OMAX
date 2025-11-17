@@ -322,6 +322,7 @@ function viewDashboard(){
             <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
             <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
             <label>Price ($)<input type="number" min="0" step="0.01" id="dashTaskPrice" placeholder="optional"></label>
+            <label>Time to complete (hrs)<input type="number" min="0.25" step="0.25" id="dashTaskDowntime" placeholder="e.g. 1"></label>
             <label>Category<select id="dashTaskCategory"></select></label>
             <label>Calendar date<input type="date" id="dashTaskDate"></label>
           </div>
@@ -403,6 +404,9 @@ function taskDetailsInterval(task){
     <div class="row"><label>Price:</label>
       <div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="interval" value="${task.price != null ? task.price : ""}" /></div>
     </div>
+    <div class="row"><label>Time to complete (hrs):</label>
+      <div><input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${task.id}" data-list="interval" value="${task.downtimeHours != null ? task.downtimeHours : 1}" /></div>
+    </div>
     <div class="row"><label>Actions:</label>
       <div>
         <button class="btn-complete" data-complete="${task.id}">Mark Completed Now</button>
@@ -434,6 +438,9 @@ function taskDetailsAsReq(task){
     <div class="row"><label>Price:</label>
       <div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="asreq" value="${task.price != null ? task.price : ""}" /></div>
     </div>
+    <div class="row"><label>Time to complete (hrs):</label>
+      <div><input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${task.id}" data-list="asreq" value="${task.downtimeHours != null ? task.downtimeHours : 1}" /></div>
+    </div>
     <div class="row"><label>Actions:</label>
       <div><button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button></div>
     </div>
@@ -444,6 +451,27 @@ function viewSettings(){
   // ------- Folder store (nesting via parent=null|folderId). Back-compat if older entries lack "parent".
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
   for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
+
+  const ensureDowntimeDefault = (task)=>{
+    if (!task || typeof task !== "object") return false;
+    const val = Number(task.downtimeHours);
+    if (!Number.isFinite(val) || val <= 0){
+      task.downtimeHours = 1;
+      return true;
+    }
+    return false;
+  };
+
+  let normalizedDowntime = false;
+  if (Array.isArray(window.tasksInterval)){
+    window.tasksInterval.forEach(task => { if (ensureDowntimeDefault(task)) normalizedDowntime = true; });
+  }
+  if (Array.isArray(window.tasksAsReq)){
+    window.tasksAsReq.forEach(task => { if (ensureDowntimeDefault(task)) normalizedDowntime = true; });
+  }
+  if (normalizedDowntime && typeof saveCloudDebounced === "function"){
+    saveCloudDebounced();
+  }
 
   // ------- Small helpers (IDs/data-* kept the same so existing handlers work) -------
    
@@ -501,6 +529,7 @@ function viewSettings(){
         <label>Store link: <input type="url" data-k="storeLink" data-id="${t.id}" data-list="${listType}" value="${t.storeLink||""}" placeholder="Where to buy"></label>
         <label>Part # (primary): <input type="text" data-k="pn" data-id="${t.id}" data-list="${listType}" value="${t.pn||""}"></label>
         <label>Price (primary): <input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${listType}" value="${t.price!=null?t.price:""}"></label>
+        <label>Time to complete (hrs): <input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${t.id}" data-list="${listType}" value="${t.downtimeHours!=null?t.downtimeHours:""}" placeholder="e.g., 1"></label>
 
         <div>
           <button class="btn-complete" data-complete="${t.id}">Mark Completed Now</button>
