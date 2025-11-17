@@ -9090,6 +9090,29 @@ function computeCostModel(){
   const intervalTasksAll = Array.isArray(tasksInterval) ? tasksInterval : [];
   const asReqTasksAll = Array.isArray(tasksAsReq) ? tasksAsReq : [];
 
+  const toHistoryDateKey = (value)=>{
+    if (!value) return null;
+    if (typeof normalizeDateKey === "function"){
+      try {
+        const normalized = normalizeDateKey(value);
+        if (normalized) return normalized;
+      } catch (_err){}
+    }
+    if (value instanceof Date && !Number.isNaN(value.getTime())){
+      return value.toISOString().slice(0, 10);
+    }
+    if (typeof value === "string"){
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+      const parsed = new Date(trimmed);
+      if (!Number.isNaN(parsed.getTime())){
+        return parsed.toISOString().slice(0, 10);
+      }
+    }
+    return null;
+  };
+
   const hasDateKey = (value)=> Boolean(toHistoryDateKey(value));
   const hasAnyDatedEntry = (list, selector)=>{
     if (!Array.isArray(list)) return false;
@@ -9331,29 +9354,6 @@ function computeCostModel(){
       costProjected: intervalProjected + asReqProjected
     };
   });
-
-  const toHistoryDateKey = (value)=>{
-    if (!value) return null;
-    if (typeof normalizeDateKey === "function"){
-      try {
-        const normalized = normalizeDateKey(value);
-        if (normalized) return normalized;
-      } catch (_err){}
-    }
-    if (value instanceof Date && !Number.isNaN(value.getTime())){
-      return value.toISOString().slice(0, 10);
-    }
-    if (typeof value === "string"){
-      const trimmed = value.trim();
-      if (!trimmed) return null;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-      const parsed = new Date(trimmed);
-      if (!Number.isNaN(parsed.getTime())){
-        return parsed.toISOString().slice(0, 10);
-      }
-    }
-    return null;
-  };
 
   const taskEventsByDate = new Map();
 
