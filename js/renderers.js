@@ -4224,6 +4224,9 @@ function renderDashboard(){
     toast(message);
     closeModal();
     renderDashboard();
+    if (typeof renderCalendar === "function"){
+      renderCalendar();
+    }
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -4264,6 +4267,9 @@ function renderDashboard(){
     toast("One-time task added to the calendar");
     closeModal();
     renderDashboard();
+    if (typeof renderCalendar === "function"){
+      renderCalendar();
+    }
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -4308,6 +4314,9 @@ function renderDashboard(){
     toast(message);
     closeModal();
     renderDashboard();
+    if (typeof renderCalendar === "function"){
+      renderCalendar();
+    }
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
