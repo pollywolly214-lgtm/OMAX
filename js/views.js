@@ -228,6 +228,7 @@ function viewDashboard(){
             <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
             <label data-task-last>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
             <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
+            <label>Maintenance time (hrs)<input type="number" min="1" step="0.25" id="dashTaskDowntime" value="1"></label>
             <label>Manual link<input type="url" id="dashTaskManual" placeholder="https://..."></label>
             <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
             <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
@@ -1001,6 +1002,7 @@ function viewCosts(model){
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
   const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
+  const maintenanceRateInfo = data.maintenanceOpportunityRate || {};
   const orderSummary = data.orderRequestSummary || {};
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
   const overviewInsight = data.overviewInsight || "Totals blend the latest maintenance allocations, consumable burn rates, downtime burdens, and job margin data so you always see current cost exposure.";
@@ -1306,6 +1308,79 @@ function viewCosts(model){
     </div>
   `;
 
+  const maintenanceTaskCostWindows = Array.isArray(data.maintenanceTaskCostWindows) ? data.maintenanceTaskCostWindows : [];
+  const maintenanceCostButtons = maintenanceTaskCostWindows.map((win, index) => {
+    const keyRaw = win && win.key != null ? String(win.key) : `window_${index}`;
+    const key = esc(keyRaw);
+    const label = esc(win && win.label ? win.label : `Window ${index + 1}`);
+    const title = esc((win && (win.description || win.rangeLabel)) || label);
+    const isActive = index === 0;
+    return `
+      <button type="button" class="time-efficiency-toggle${isActive ? " is-active" : ""}" data-maint-cost-toggle="${key}" aria-pressed="${isActive ? "true" : "false"}" title="${title}">
+        ${label}
+      </button>
+    `;
+  }).join("");
+  const initialMaintenanceSummary = maintenanceTaskCostWindows.length ? (maintenanceTaskCostWindows[0].summary || {}) : {};
+  const maintenanceCostTables = maintenanceTaskCostWindows.map((win, index) => {
+    const keyRaw = win && win.key != null ? String(win.key) : `window_${index}`;
+    const key = esc(keyRaw);
+    const rows = Array.isArray(win?.rows) ? win.rows : [];
+    const emptyMessage = esc(win && win.emptyMessage ? win.emptyMessage : "No completed maintenance tasks in this window.");
+    const rowsHtml = rows.length
+      ? rows.map(row => {
+          const task = esc(row && (row.task || row.name) ? (row.task || row.name) : "Maintenance task");
+          const partsLabel = esc(row && row.partsLabel ? row.partsLabel : "$0.00");
+          const timeLabel = esc(row && row.timeLabel ? row.timeLabel : "$0.00");
+          const hoursLabel = row && row.hoursLabel ? `<div class=\"small muted\">${esc(row.hoursLabel)}</div>` : "";
+          const dateLabel = esc(row && row.dateLabel ? row.dateLabel : "—");
+          const totalLabel = esc(row && row.totalLabel ? row.totalLabel : "$0.00");
+          return `<tr><td>${task}</td><td>${partsLabel}</td><td>${timeLabel}${hoursLabel}</td><td>${dateLabel}</td><td>${totalLabel}</td></tr>`;
+        }).join("")
+      : `<tr><td colspan=\"5\" class=\"cost-table-placeholder\">${emptyMessage}</td></tr>`;
+    const summary = win && win.summary ? win.summary : {};
+    const totalParts = esc(summary && summary.partsLabel ? summary.partsLabel : "$0.00");
+    const totalTime = esc(summary && summary.timeLabel ? summary.timeLabel : "$0.00");
+    const totalCount = esc(summary && summary.countLabel ? summary.countLabel : "0");
+    const totalTotal = esc(summary && summary.totalLabel ? summary.totalLabel : "$0.00");
+    return `
+      <table class=\"cost-table maintenance-task-cost-table\" data-maint-panel=\"${key}\"${index === 0 ? "" : " hidden"}>
+        <thead><tr><th>Maintenance task</th><th>Parts cost</th><th>Time cost</th><th>Completed</th><th>Total cost</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+        <tfoot><tr><th scope=\"row\">Window totals</th><td>${totalParts}</td><td>${totalTime}</td><td>${totalCount}</td><td>${totalTotal}</td></tr></tfoot>
+      </table>
+    `;
+  }).join("");
+  const maintenanceCostSection = maintenanceTaskCostWindows.length
+    ? `
+          <div class=\"maintenance-task-costs\" data-maint-cost>
+            <div class=\"maintenance-task-costs-header\">
+              <div class=\"maintenance-task-cost-rate\">
+                <label class=\"maintenance-task-cost-rate-input\">
+                  <span>Opportunity rate ($/hr)</span>
+                  <input type=\"number\" min=\"0\" step=\"0.25\" data-maint-rate-input value=\"${esc((maintenanceRateInfo && maintenanceRateInfo.value != null) ? maintenanceRateInfo.value : 150)}\">
+                </label>
+                <span class=\"maintenance-task-cost-rate-value\" data-maint-rate-value>${esc(maintenanceRateInfo && maintenanceRateInfo.label ? maintenanceRateInfo.label : "$150.00/hr")}</span>
+              </div>
+              <div class=\"maintenance-task-cost-toggles\" role=\"tablist\">
+                ${maintenanceCostButtons}
+              </div>
+            </div>
+            <div class=\"maintenance-task-cost-summary\" data-maint-summary>
+              <div class=\"maintenance-task-cost-summary-highlights\">
+                <strong>Average per task: <span data-maint-summary-average>${esc((initialMaintenanceSummary && initialMaintenanceSummary.averageLabel) ? initialMaintenanceSummary.averageLabel : "$0.00")}</span></strong>
+                <strong>Total <span data-maint-summary-period>${esc((initialMaintenanceSummary && initialMaintenanceSummary.periodLabel) ? initialMaintenanceSummary.periodLabel : "(selected window)")}</span>: <span data-maint-summary-total>${esc((initialMaintenanceSummary && initialMaintenanceSummary.totalLabel) ? initialMaintenanceSummary.totalLabel : "$0.00")}</span></strong>
+              </div>
+              <div class=\"maintenance-task-cost-summary-grid\">
+                <div><span class=\"label\">Tasks completed</span><span data-maint-summary-count>${esc((initialMaintenanceSummary && initialMaintenanceSummary.countLabel) ? initialMaintenanceSummary.countLabel : "0")}</span></div>
+                <div><span class=\"label\">Parts cost</span><span data-maint-summary-parts>${esc((initialMaintenanceSummary && initialMaintenanceSummary.partsLabel) ? initialMaintenanceSummary.partsLabel : "$0.00")}</span></div>
+                <div><span class=\"label\">Time cost</span><span data-maint-summary-time>${esc((initialMaintenanceSummary && initialMaintenanceSummary.timeLabel) ? initialMaintenanceSummary.timeLabel : "$0.00")}</span></div>
+              </div>
+            </div>
+            ${maintenanceCostTables}
+          </div>
+        `
+    : `<p class=\"small muted\">No completed maintenance tasks logged yet.</p>`;
   const breakdown = data.forecastBreakdown || {};
   const breakdownSections = Array.isArray(breakdown.sections) ? breakdown.sections : [];
   const breakdownTotals = breakdown.totals || {};
@@ -1796,14 +1871,7 @@ function viewCosts(model){
             <div><span class="label">Avg per job</span><span>—</span></div>
             <div><span class="label">Rolling avg (chart)</span><span>—</span></div>
           </div>
-          <table class="cost-table">
-            <thead><tr><th>Job</th><th>Milestone</th><th>Status</th><th>Cost impact</th></tr></thead>
-            <tbody>
-              <tr>
-                <td colspan="4" class="cost-table-placeholder">Job history visualization coming soon.</td>
-              </tr>
-            </tbody>
-          </table>
+          ${maintenanceCostSection}
           <div class="cost-window-insight">
             <div class="chart-info">
               <button type="button" class="chart-info-button" aria-describedby="costEfficiencyInsight" aria-label="Explain Cutting Job Efficiency Snapshot">
@@ -2457,7 +2525,7 @@ function viewJobs(){
     ? ` data-job-overlap-signature="${esc(overlapSignature)}"`
     : "";
 
-  const jobColumnCount = 15;
+  const jobColumnCount = 16;
   const historyColumnCount = jobColumnCount;
   const historySearchDisplay = historySearchValue
     .replace(/&/g, "&amp;")
