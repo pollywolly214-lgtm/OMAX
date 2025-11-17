@@ -34,6 +34,13 @@ After the server is running, open the site in your browser and edits to the file
 under `js/`, `index.html`, or `style.css` will be reflected on refresh. No build
 step is required.
 
+### Binary files are not supported
+
+The project must remain text-only for the hosting environment. Before opening a
+pull request, run `scripts/check_binaries.py` to confirm no tracked files contain
+binary content and replace any offending assets with text-based alternatives
+(for example, SVG instead of ICO).
+
 ## Previewing on Vercel
 
 This project can be deployed as a static site on [Vercel](https://vercel.com)

@@ -1,0 +1,33 @@
+Task overview:
+- Resolve Firebase initialization warnings (duplicate app and unintended host override) while keeping the static Vercel settings unchanged.
+- Fix accessibility notices for dialog content by ensuring titles and descriptions are present or intentionally hidden.
+- Replace any binary assets (like .ico) with text-based alternatives (such as SVG) and keep the repo binary-free.
+- Update the favicon reference so the file loads successfully in static deployments.
+- Confirm the pull request builds a working preview.
+
+Steps to implement:
+1) Firebase setup
+- In the Firebase initialization module, reuse an existing app if one already exists instead of creating a new default app.
+- Apply emulator or host settings only once (or with merge semantics) so Firestore logs do not show host override warnings.
+
+2) Dialog accessibility
+- For every dialog content component, ensure a visible or visually hidden title is present so `DialogContent` is paired with a `DialogTitle`.
+- Provide either a description block or explicitly wire `aria-describedby` to avoid missing description warnings.
+
+3) Binary-free assets
+- Remove binary files from the repo and replace them with text-based equivalents (for example, SVG icons instead of ICOs or PNGs).
+- Add or run a simple check that fails if any tracked file appears to be binary.
+
+4) Favicon handling
+- Point the HTML head to the new text-based favicon file that lives in the repository.
+- Verify the referenced path is correct so the favicon is served (no 404s in the browser console).
+
+5) Vercel/static deploy settings
+- Keep `vercel.json` exactly as `{ "cleanUrls": true }` with no additional sections.
+- Ensure the project deploys as a static site (no build command, output directory is `.`) so previews work.
+
+Verification before opening the pull request
+- Run the binary-file check and confirm it passes.
+- Open the app locally, check the browser console for the resolved Firebase warnings, and confirm dialogs show accessible labeling.
+- Reload the page to confirm the favicon loads without 404s.
+- After committing, open a pull request and verify the Vercel preview succeeds.

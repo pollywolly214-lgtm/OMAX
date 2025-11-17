@@ -1071,6 +1071,7 @@ function pumpRenderNotesModal(){
     const entryTimeISO = state.timeISO || (entry ? pumpGetEntryTimeISO(entry) : "");
     const timeLabel = entryTimeISO ? pumpFormatTimeLabel(entryTimeISO) : "";
     const headingId = "pumpNotesHeading";
+    const descriptionId = "pumpNotesDescription";
     const subtitleParts = [];
     if (dateLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(dateLabel)}</span>`);
     if (timeLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(timeLabel)}</span>`);
@@ -1087,6 +1088,7 @@ function pumpRenderNotesModal(){
         </div>
         <button type="button" class="pump-notes-close" data-pump-notes-close aria-label="Close notes">×</button>
       </header>
+      <p class="pump-notes-description small muted" id="${descriptionId}">Notes stay tied to the selected date, range, and RPM so you can track how settings change performance.</p>
       <div class="pump-notes-body">
         <div class="pump-notes-links">
           <button type="button" class="pump-notes-link" data-pump-notes-show-list>View saved notes</button>
@@ -1105,6 +1107,7 @@ function pumpRenderNotesModal(){
       <footer class="pump-notes-footer small muted">Notes are stored per range selection so you can track how settings impact performance.</footer>
     `;
     pumpNotesModalDialog.setAttribute("aria-labelledby", headingId);
+    pumpNotesModalDialog.setAttribute("aria-describedby", descriptionId);
     const closeBtn = pumpNotesModalDialog.querySelector("[data-pump-notes-close]");
     closeBtn?.addEventListener("click", pumpCloseNotesModal);
     const cancelBtn = pumpNotesModalDialog.querySelector("[data-pump-notes-cancel]");
@@ -1147,6 +1150,7 @@ function pumpRenderNotesModal(){
     });
   }else{
     const headingId = "pumpNotesHeading";
+    const descriptionId = "pumpNotesDescription";
     const notes = pumpGetNotesSorted();
     const items = notes.map(note => {
       const dateLabel = pumpFormatShortDate(note.dateISO);
@@ -1184,12 +1188,14 @@ function pumpRenderNotesModal(){
         <h3 id="${headingId}" data-pump-notes-heading>Pump notes</h3>
         <button type="button" class="pump-notes-close" data-pump-notes-close aria-label="Close notes">×</button>
       </header>
+      <p class="pump-notes-description small muted" id="${descriptionId}">Each note keeps the day, range, and RPM that were active when it was created.</p>
       <div class="pump-notes-body">
         ${notes.length ? `<div class="pump-notes-list">${items}</div>` : `<p class="pump-notes-empty">No notes yet. Click a chart point to add a note for that day and range.</p>`}
       </div>
       <footer class="pump-notes-footer small muted">Notes are labelled with the day and chart range so you can see which settings were active.</footer>
     `;
     pumpNotesModalDialog.setAttribute("aria-labelledby", headingId);
+    pumpNotesModalDialog.setAttribute("aria-describedby", descriptionId);
     const closeBtn = pumpNotesModalDialog.querySelector("[data-pump-notes-close]");
     closeBtn?.addEventListener("click", pumpCloseNotesModal);
     pumpNotesModalDialog.querySelectorAll("[data-pump-note-edit]").forEach(btn => {

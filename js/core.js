@@ -279,53 +279,99 @@ let FB = {
   ready: false
 };
 
-async function initFirebase(){
-  if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
-  if (!window.FIREBASE_CONFIG){ console.warn("Missing FIREBASE_CONFIG."); return; }
-  if (initFirebase._initializing || initFirebase._initialized){
+let firebaseInitStarted = false;
+let firebaseSettingsApplied = false;
+let workspaceMetadataWritesBlocked = false;
+
+function applyFirestoreSettings(db){
+  if (!db || firebaseSettingsApplied) return;
+
+  const isDevEnv = typeof process !== "undefined" && process?.env?.NODE_ENV === "development";
+  const emulatorHost = "localhost:8080";
+
+  // Respect existing settings (including emulator hosts) so we avoid override warnings.
+  const currentSettings = typeof db._getSettings === "function"
+    ? { ...db._getSettings() }
+    : (typeof db._settings === "object" && db._settings ? { ...db._settings } : {});
+  const settingsFrozen = Boolean(db._settingsFrozen);
+  const hasHostSetting = typeof currentSettings.host === "string" && currentSettings.host.length > 0;
+  const ignoreAlreadyEnabled = currentSettings.ignoreUndefinedProperties === true;
+
+  if (settingsFrozen){
+    console.warn("Firestore settings already frozen; skipping extra configuration to avoid host overrides.");
+    firebaseSettingsApplied = true;
     return;
   }
 
-  initFirebase._initializing = true;
+  // Avoid touching host/SSL in non-development environments when a host is
+  // already configured; calling `settings` again in that scenario triggers the
+  // override warning we are trying to prevent.
+  if (!isDevEnv && hasHostSetting){
+    console.info("Existing Firestore host settings detected; skipping reconfiguration to prevent overrides.");
+    firebaseSettingsApplied = true;
+    return;
+  }
 
-  try {
-
-    // Initialize
-    const existingApp = (firebase.apps && firebase.apps.length)
-      ? firebase.app()
-      : firebase.initializeApp(window.FIREBASE_CONFIG);
-
-    FB.app  = existingApp;
-    FB.auth = firebase.auth();
-    FB.db   = firebase.firestore();
-    if (!initFirebase._settingsApplied) {
-      try {
-        FB.db.settings({ ignoreUndefinedProperties: true, merge: true });
-        initFirebase._settingsApplied = true;
-      } catch (err) {
-        console.warn("Failed to enable ignoreUndefinedProperties", err);
-      }
+    if (!isDevEnv){
+      // In preview/production environments, leave Firestore settings untouched to
+      // avoid host override warnings. The default host from FIREBASE_CONFIG will
+      // be used.
+      firebaseSettingsApplied = true;
+      return;
     }
 
-    // Persist login across refreshes
+    const mergedSettings = { ...currentSettings };
+    mergedSettings.ignoreUndefinedProperties = true;
+
+    if (!hasHostSetting){
+      mergedSettings.host = emulatorHost;
+      mergedSettings.ssl = false;
+      console.info("Firestore is connected to the Local Emulator.");
+    } else {
+      console.info("Firestore emulator already configured; leaving settings untouched to prevent override warnings.");
+    }
+
     try {
-      await FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-    } catch (e) {
-      console.warn("Could not set auth persistence to LOCAL:", e);
+      db.settings(mergedSettings);
+      firebaseSettingsApplied = true;
+    } catch (err) {
+      console.warn("Failed to enable ignoreUndefinedProperties", err);
     }
+}
 
-    // UI bits
-    const statusEl = $("#authStatus");
-    const btnIn    = $("#btnSignIn");
-    const btnOut   = $("#btnSignOut");
-    const modal    = $("#authModal");
-    const form     = $("#authForm");
-    const emailEl  = $("#authEmail");
-    const passEl   = $("#authPass");
-    const btnClose = $("#authClose");
+async function initFirebase(){
+  if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
+  if (!window.FIREBASE_CONFIG){ console.warn("Missing FIREBASE_CONFIG."); return; }
+  if (FB.ready) return;
+  if (firebaseInitStarted) return;
+  firebaseInitStarted = true;
 
-    const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
-    const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
+  // Initialize or reuse existing app to avoid duplicate-app errors
+  const existingApp = firebase.apps && firebase.apps.length ? firebase.apps[0] : null;
+  FB.app  = existingApp || firebase.initializeApp(window.FIREBASE_CONFIG);
+  FB.auth = firebase.auth();
+  FB.db   = firebase.firestore();
+  applyFirestoreSettings(FB.db);
+
+  // Persist login across refreshes
+  try {
+    await FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  } catch (e) {
+    console.warn("Could not set auth persistence to LOCAL:", e);
+  }
+
+  // UI bits
+  const statusEl = $("#authStatus");
+  const btnIn    = $("#btnSignIn");
+  const btnOut   = $("#btnSignOut");
+  const modal    = $("#authModal");
+  const form     = $("#authForm");
+  const emailEl  = $("#authEmail");
+  const passEl   = $("#authPass");
+  const btnClose = $("#authClose");
+
+  const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
+  const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
 
   async function ensureEmailPassword(email, password){
     if (!email || !password) throw new Error("Email and password required.");
@@ -399,6 +445,7 @@ async function initFirebase(){
 
   FB.auth.onAuthStateChanged(async (user)=>{
     FB.user = user || null;
+    workspaceMetadataWritesBlocked = false;
     if (user){
       if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
       if (btnIn)  btnIn.style.display  = "none";
@@ -431,11 +478,6 @@ async function initFirebase(){
       renderSignedOut();
     }
   });
-  
-  initFirebase._initialized = true;
-  } finally {
-    initFirebase._initializing = false;
-  }
 }
 
 
@@ -2085,14 +2127,10 @@ const saveCloudInternal = debounce(async ()=>{
       if (el) el.value = JSON.stringify(snap, null, 2);
     }
     if (FB.workspaceDoc){
-      try {
-        await FB.workspaceDoc.set({
-          workspaceId: WORKSPACE_ID,
-          lastTouchedAt: new Date().toISOString()
-        }, { merge:true });
-      } catch (metaErr) {
-        console.warn("Failed to update workspace metadata", metaErr);
-      }
+      await updateWorkspaceMetadata({
+        workspaceId: WORKSPACE_ID,
+        lastTouchedAt: new Date().toISOString()
+      });
     }
   }catch(e){
     console.error("Cloud save failed:", e);
@@ -2160,14 +2198,10 @@ async function loadFromCloud(){
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
       await FB.docRef.set(seeded, { merge:true });
       if (FB.workspaceDoc){
-        try {
-          await FB.workspaceDoc.set({
-            workspaceId: WORKSPACE_ID,
-            lastTouchedAt: new Date().toISOString()
-          }, { merge:true });
-        } catch (metaErr) {
-          console.warn("Failed to update workspace metadata during seed", metaErr);
-        }
+        await updateWorkspaceMetadata({
+          workspaceId: WORKSPACE_ID,
+          lastTouchedAt: new Date().toISOString()
+        });
       }
     }
     if (window.DEBUG_MODE){
@@ -2192,21 +2226,36 @@ async function migrateLegacyWorkspaceDoc(){
     delete stateData.lastStateMigrationAt;
     delete stateData.lastStateDocPath;
     await FB.docRef.set(stateData, { merge:true });
-    try {
-      const meta = {
-        workspaceId: WORKSPACE_ID,
-        lastStateMigrationAt: new Date().toISOString(),
-        lastStateDocPath: FB.docRef.path,
-        lastTouchedAt: new Date().toISOString()
-      };
-      await FB.workspaceDoc.set(meta, { merge:true });
-    } catch (metaErr) {
-      console.warn("Failed to record migration metadata", metaErr);
-    }
+    const meta = {
+      workspaceId: WORKSPACE_ID,
+      lastStateMigrationAt: new Date().toISOString(),
+      lastStateDocPath: FB.docRef.path,
+      lastTouchedAt: new Date().toISOString()
+    };
+    await updateWorkspaceMetadata(meta);
     return stateData;
   }catch(err){
     console.warn("Failed to migrate workspace root document", err);
     return null;
+  }
+}
+
+async function updateWorkspaceMetadata(meta){
+  if (!FB.workspaceDoc || workspaceMetadataWritesBlocked) return;
+  try {
+    await FB.workspaceDoc.set(meta, { merge:true });
+  } catch (err) {
+    const code = err?.code || err?.error?.code;
+    const permissionDenied = code === "permission-denied"
+      || (typeof err?.message === "string" && err.message.toLowerCase().includes("permission"));
+    if (permissionDenied){
+      workspaceMetadataWritesBlocked = true;
+      if (window.DEBUG_MODE){
+        console.info("Workspace metadata update skipped after permission denial.");
+      }
+      return;
+    }
+    console.warn("Failed to update workspace metadata", err);
   }
 }
 

@@ -119,4 +119,8 @@ function route(){
 }
 
 window.addEventListener("hashchange", route);
-window.addEventListener("load", ()=>{ initFirebase(); route(); });
+window.addEventListener("load", ()=>{
+  try { localStorage.removeItem("_omax_last_render_cache"); } catch (e) {}
+  initFirebase();
+  route();
+});
