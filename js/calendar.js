@@ -142,14 +142,34 @@ function hideBubble(){
 function hideBubbleSoon(){ clearTimeout(bubbleTimer); bubbleTimer = setTimeout(hideBubble, 180); }
 function triggerDashboardAddPicker(opts){
   const detail = (opts && typeof opts === "object") ? { ...opts } : {};
+  const enqueueRequest = ()=>{
+    if (!Array.isArray(window.__pendingDashboardAddRequests)){
+      window.__pendingDashboardAddRequests = [];
+    }
+    window.__pendingDashboardAddRequests.push(detail);
+  };
+
   if (typeof window.openDashboardAddPicker === "function"){
     window.openDashboardAddPicker(detail);
     return;
   }
-  if (!Array.isArray(window.__pendingDashboardAddRequests)){
-    window.__pendingDashboardAddRequests = [];
-  }
-  window.__pendingDashboardAddRequests.push(detail);
+
+  enqueueRequest();
+
+  const ensureDashboardVisible = ()=>{
+    const hash = (location.hash || "#").toLowerCase();
+    const isDashboard = hash === "#/" || hash === "#dashboard" || hash === "#/dashboard";
+    if (!isDashboard){
+      location.hash = "#/";
+      return;
+    }
+    if (typeof route === "function"){
+      try { route(); }
+      catch (err){ console.warn("Failed to render dashboard for add picker", err); }
+    }
+  };
+
+  ensureDashboardVisible();
 }
 
 function escapeHtml(str){

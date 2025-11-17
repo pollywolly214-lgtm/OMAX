@@ -4406,7 +4406,13 @@ function renderDashboard(){
 
   refreshDownTimeList();
 
-  document.getElementById("calendarAddBtn")?.addEventListener("click", ()=> openModal("picker"));
+  document.getElementById("calendarAddBtn")?.addEventListener("click", ()=>{
+    if (typeof triggerDashboardAddPicker === "function"){
+      triggerDashboardAddPicker({});
+      return;
+    }
+    openModal("picker");
+  });
   document.getElementById("calendarToggleBtn")?.addEventListener("click", (event)=>{
     toggleCalendarShowAllMonths();
     if (event?.currentTarget instanceof HTMLElement){
