@@ -291,6 +291,7 @@ function applyFirestoreSettings(db){
     ? { ...db._getSettings() }
     : (typeof db._settings === "object" && db._settings ? { ...db._settings } : {});
   const settingsFrozen = Boolean(db._settingsFrozen);
+  const hasHostSetting = typeof currentSettings.host === "string" && currentSettings.host.length > 0;
 
   if (currentSettings.ignoreUndefinedProperties === true){
     firebaseSettingsApplied = true;
@@ -309,6 +310,11 @@ function applyFirestoreSettings(db){
     firebaseSettingsApplied = true;
     return;
   } catch (err) {
+    if (hasHostSetting){
+      console.warn("Firestore host already configured; skipping settings override to avoid host warnings.", err);
+      firebaseSettingsApplied = true;
+      return;
+    }
     // If merge=true is not supported, fall back to a standard settings call once.
     try {
       db.settings(mergedSettings);
