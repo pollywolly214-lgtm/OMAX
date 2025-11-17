@@ -289,6 +289,7 @@ function viewDashboard(){
           <p class="small muted">Pick a task saved in Maintenance Settings to schedule it on the calendar.</p>
           <p class="small muted" data-task-existing-empty hidden>No maintenance tasks yet. Create one below to get started.</p>
           <p class="small muted" data-task-existing-search-empty hidden>No tasks match your search. Try a different name.</p>
+          <label>Occurrence note<textarea id="dashTaskExistingNote" rows="3" placeholder="Optional note for this calendar date"></textarea></label>
           <div class="modal-actions">
             <button type="button" class="secondary" data-task-card-back>Back</button>
             <button type="submit" class="primary">Add to Calendar</button>

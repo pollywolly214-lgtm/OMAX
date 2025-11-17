@@ -186,6 +186,7 @@ function createIntervalTaskInstance(template){
     anchorTotal: null,
     completedDates: [],
     manualHistory: [],
+    occurrenceNotes: {},
     note: template.note || "",
     downtimeHours: (()=>{
       const raw = Number(template.downtimeHours);
@@ -199,7 +200,7 @@ function createIntervalTaskInstance(template){
   return copy;
 }
 
-function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
+function scheduleExistingIntervalTask(task, { dateISO = null, note = "" } = {}){
   if (!task || task.mode !== "interval") return null;
   if (!Array.isArray(tasksInterval)){
     if (Array.isArray(window.tasksInterval)){
@@ -341,6 +342,9 @@ function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
   }
 
   instance.calendarDateISO = targetISO || null;
+  if (note){
+    try { setOccurrenceNoteForTask(instance, targetISO, note); } catch (err) { /* noop */ }
+  }
   if (template && template.variant !== "template"){
     ensureTaskVariant(template, "interval");
     if (template.templateId == null) template.templateId = template.id;
@@ -3281,6 +3285,7 @@ function renderDashboard(){
   const existingTaskResults = taskExistingForm?.querySelector('[data-task-existing-results]');
   const existingTaskEmpty  = taskExistingForm?.querySelector('[data-task-existing-empty]');
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
+  const taskExistingNoteInput = document.getElementById("dashTaskExistingNote");
   const taskCardBackButtons = Array.from(modal?.querySelectorAll('[data-task-card-back]') || []);
   const oneTimeForm      = document.getElementById("dashOneTimeForm");
   const oneTimeNameInput = document.getElementById("dashOneTimeName");
@@ -3499,6 +3504,7 @@ function renderDashboard(){
 
   function resetExistingTaskForm(){
     if (taskExistingSearchInput) taskExistingSearchInput.value = "";
+    if (taskExistingNoteInput) taskExistingNoteInput.value = "";
     setSelectedExistingTask(null);
     refreshExistingTaskOptions("");
   }
@@ -4356,9 +4362,10 @@ function renderDashboard(){
     }
     const task = meta.task;
     const targetISO = addContextDateISO || ymd(new Date());
+    const occurrenceNote = (taskExistingNoteInput?.value || "").trim();
     let message = "Maintenance task added";
     if (task.mode === "interval"){
-      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO }) || task;
+      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO, note: occurrenceNote }) || task;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
       let dateLabel = targetISO;
@@ -4375,6 +4382,9 @@ function renderDashboard(){
         : `Scheduled "${instance.name || "Task"}" for ${dateLabel}`;
     }else{
       task.calendarDateISO = targetISO || null;
+      if (occurrenceNote){
+        setOccurrenceNoteForTask(task, targetISO, occurrenceNote);
+      }
       message = "As-required task linked from Maintenance Settings";
     }
     setContextDate(targetISO);

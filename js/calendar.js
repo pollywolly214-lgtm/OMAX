@@ -191,6 +191,52 @@ function normalizeDateKey(value){
   return null;
 }
 
+function normalizeOccurrenceNotes(task){
+  if (!task || typeof task !== "object") return {};
+  const result = {};
+  const raw = task.occurrenceNotes;
+  if (raw && typeof raw === "object"){
+    Object.entries(raw).forEach(([maybeDate, maybeNote]) => {
+      const key = normalizeDateKey(maybeDate);
+      if (!key) return;
+      const text = typeof maybeNote === "string" ? maybeNote.trim() : "";
+      if (text) result[key] = text;
+    });
+  }
+  task.occurrenceNotes = result;
+  return result;
+}
+
+function getOccurrenceNoteForTask(task, dateISO){
+  const key = normalizeDateKey(dateISO);
+  if (!key) return "";
+  const notes = normalizeOccurrenceNotes(task);
+  return notes[key] || "";
+}
+
+function setOccurrenceNoteForTask(task, dateISO, noteText){
+  if (!task || typeof task !== "object") return false;
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  const notes = normalizeOccurrenceNotes(task);
+  const text = typeof noteText === "string" ? noteText.trim() : "";
+  const existing = notes[key] || "";
+  let changed = false;
+  if (text){
+    if (existing !== text){
+      notes[key] = text;
+      changed = true;
+    }
+  }else if (existing){
+    delete notes[key];
+    changed = true;
+  }
+  if (changed){
+    task.occurrenceNotes = notes;
+  }
+  return changed;
+}
+
 function markCalendarTaskComplete(meta, dateISO){
   if (!meta || !meta.task) return false;
   const key = normalizeDateKey(dateISO || new Date());
@@ -367,12 +413,18 @@ function removeCalendarTaskOccurrence(meta, dateISO){
       task.calendarDateISO = null;
       changed = true;
     }
+    if (setOccurrenceNoteForTask(task, key, "")){
+      changed = true;
+    }
     if (changed){
       applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
     }
   }else{
     if (normalizeDateKey(task.calendarDateISO) === key){
       task.calendarDateISO = null;
+      changed = true;
+    }
+    if (setOccurrenceNoteForTask(task, key, "")){
       changed = true;
     }
     if (Array.isArray(task.completedDates)){
@@ -514,6 +566,8 @@ function showTaskBubble(taskId, anchor, options = {}){
     ? "Completed"
     : (normalizedStatus === "manual" ? "Scheduled" : normalizedStatus === "due" ? "Projected" : "Scheduled");
 
+  const occurrenceNote = dateKey ? getOccurrenceNoteForTask(task, dateKey) : "";
+
   const infoParts = [];
   infoParts.push(`<div class="bubble-title">${escapeHtml(task.name || "Task")}</div>`);
   if (displayDate){
@@ -538,7 +592,15 @@ function showTaskBubble(taskId, anchor, options = {}){
     infoParts.push(`<div class="bubble-kv"><span>Links:</span><span>${links.join(" · ")}</span></div>`);
   }
 
+  if (occurrenceNote){
+    infoParts.push(`<div class="bubble-kv"><span>Note:</span><span>${escapeHtml(occurrenceNote)}</span></div>`);
+  }
+
   const actions = [];
+  if (dateKey){
+    const noteLabel = occurrenceNote ? "Edit occurrence note" : "Add occurrence note";
+    actions.push(`<button data-bbl-occurrence-note>${escapeHtml(noteLabel)}</button>`);
+  }
   if (canMarkComplete){
     actions.push(`<button data-bbl-complete>Mark complete</button>`);
   }
@@ -555,6 +617,20 @@ function showTaskBubble(taskId, anchor, options = {}){
   b.innerHTML = `${infoParts.join("")}<div class="bubble-actions">${actions.join("")}</div>`;
 
   const targetKey = dateKey || normalizeDateKey(new Date());
+
+  b.querySelector("[data-bbl-occurrence-note]")?.addEventListener("click", ()=>{
+    const existing = occurrenceNote;
+    const promptText = "Add a note for this calendar occurrence. It won't change other intervals.";
+    const next = typeof window.prompt === "function" ? window.prompt(promptText, existing) : "";
+    if (next === null || next === undefined) return;
+    const changed = setOccurrenceNoteForTask(task, targetKey, next);
+    if (changed){
+      saveCloudDebounced();
+      toast((next || "").trim() ? "Occurrence note saved" : "Occurrence note removed");
+      hideBubble();
+      route();
+    }
+  });
 
   b.querySelector("[data-bbl-complete]")?.addEventListener("click", ()=>{
     const changed = markCalendarTaskComplete(meta, targetKey);
