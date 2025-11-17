@@ -3176,8 +3176,8 @@ function renderDashboard(){
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
   const modal            = document.getElementById("dashboardAddModal");
-  const modalCard        = modal?.querySelector(".dashboard-modal-card");
-  const closeBtn         = document.getElementById("dashboardModalClose");
+  const modalCardMain    = modal?.querySelector('[data-modal-card="main"]');
+  const closeButtons     = Array.from(modal?.querySelectorAll('[data-close-modal]') || []);
   const taskForm         = document.getElementById("dashTaskForm");
   const taskExistingForm = document.getElementById("dashTaskExistingForm");
   const downForm         = document.getElementById("dashDownForm");
@@ -3200,12 +3200,17 @@ function renderDashboard(){
   const addSubtaskBtn    = document.getElementById("dashAddSubtask");
   const taskOptionStage  = modal?.querySelector('[data-task-option-stage]');
   const taskOptionButtons= Array.from(modal?.querySelectorAll('[data-task-option]') || []);
-  const taskOptionPages  = Array.from(modal?.querySelectorAll('[data-task-page]') || []);
+  const taskCards        = Array.from(modal?.querySelectorAll('[data-task-card]') || []);
   const taskExistingSearchInput = document.getElementById("dashTaskExistingSearch");
   const taskExistingSearchWrapper = taskExistingForm?.querySelector(".task-existing-search");
-  const existingTaskSelect = document.getElementById("dashTaskExistingSelect");
+  const existingTaskResults = taskExistingForm?.querySelector('[data-task-existing-results]');
   const existingTaskEmpty  = taskExistingForm?.querySelector('[data-task-existing-empty]');
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
+  const taskCardBackButtons = Array.from(modal?.querySelectorAll('[data-task-card-back]') || []);
+  const oneTimeForm      = document.getElementById("dashOneTimeForm");
+  const oneTimeNameInput = document.getElementById("dashOneTimeName");
+  const oneTimeDateInput = document.getElementById("dashOneTimeDate");
+  const oneTimeNoteInput = document.getElementById("dashOneTimeNote");
   const jobNameInput     = document.getElementById("dashJobName");
   const jobEstimateInput = document.getElementById("dashJobEstimate");
   const jobChargeInput   = document.getElementById("dashJobCharge");
@@ -3322,30 +3327,50 @@ function renderDashboard(){
   }
 
   let activeTaskVariant = null;
+  let selectedExistingTaskId = null;
+
+  function setSelectedExistingTask(id){
+    selectedExistingTaskId = id || null;
+    if (!existingTaskResults) return;
+    const buttons = Array.from(existingTaskResults.querySelectorAll('[data-task-id]'));
+    buttons.forEach(btn => {
+      const isMatch = btn.getAttribute("data-task-id") === String(selectedExistingTaskId);
+      btn.classList.toggle("is-active", isMatch);
+      btn.setAttribute("aria-pressed", isMatch ? "true" : "false");
+    });
+  }
 
   function setTaskOptionPage(target){
-    const choice = target === "existing" ? "existing" : target === "new" ? "new" : null;
+    const allowed = ["existing", "new", "one-time"];
+    const choice = allowed.includes(target) ? target : null;
     activeTaskVariant = choice;
 
     if (taskOptionStage) taskOptionStage.hidden = !!choice;
-    if (taskExistingForm) taskExistingForm.hidden = choice !== "existing";
-    if (taskForm) taskForm.hidden = choice !== "new";
+    if (modalCardMain) modalCardMain.hidden = !!choice;
+
+    taskCards.forEach(card => {
+      const variant = card.getAttribute("data-task-card") || "";
+      const show = !!choice && variant === choice;
+      card.hidden = !show;
+      card.setAttribute("aria-hidden", show ? "false" : "true");
+      if (show){
+        card.scrollTop = 0;
+      }
+    });
 
     if (choice){
       modal?.setAttribute("data-task-page", choice);
-      modalCard?.setAttribute("data-task-page", choice);
-      if (modalCard){
-        modalCard.scrollTop = 0;
-      }
     }else{
       modal?.removeAttribute("data-task-page");
-      modalCard?.removeAttribute("data-task-page");
+      if (modalCardMain){
+        modalCardMain.hidden = false;
+        modalCardMain.scrollTop = 0;
+      }
+      taskCards.forEach(card => {
+        card.hidden = true;
+        card.setAttribute("aria-hidden", "true");
+      });
     }
-
-    taskOptionPages.forEach(page => {
-      const variant = page.getAttribute("data-task-page") || "";
-      page.hidden = !choice || variant !== choice;
-    });
   }
 
   function refreshExistingTaskOptions(searchTerm = ""){
@@ -3356,40 +3381,28 @@ function renderDashboard(){
       ? metas.filter(meta => meta.label.toLowerCase().includes(normalized))
       : metas;
 
-    if (existingTaskSelect){
-      existingTaskSelect.innerHTML = "";
-      if (!hasExisting){
-        existingTaskSelect.disabled = true;
-        const opt = document.createElement("option");
-        opt.value = "";
-        opt.textContent = "No maintenance tasks saved yet";
-        opt.disabled = true;
-        opt.selected = true;
-        existingTaskSelect.appendChild(opt);
-      }else if (!filtered.length){
-        existingTaskSelect.disabled = true;
-        const opt = document.createElement("option");
-        opt.value = "";
-        opt.textContent = "No tasks match your search";
-        opt.disabled = true;
-        opt.selected = true;
-        existingTaskSelect.appendChild(opt);
-      }else{
-        existingTaskSelect.disabled = false;
-        const placeholder = document.createElement("option");
-        placeholder.value = "";
-        placeholder.textContent = "Select a maintenance task…";
-        placeholder.disabled = true;
-        placeholder.selected = true;
-        existingTaskSelect.appendChild(placeholder);
+    if (existingTaskResults){
+      existingTaskResults.innerHTML = "";
+      const shouldShowList = hasExisting && filtered.length > 0 && (
+        document.activeElement === taskExistingSearchInput || normalized.length > 0
+      );
+      if (shouldShowList){
         filtered.forEach(meta => {
-          const opt = document.createElement("option");
-          opt.value = String(meta.task.id);
-          opt.textContent = meta.label;
-          opt.dataset.list = meta.list;
-          opt.dataset.mode = meta.task.mode;
-          existingTaskSelect.appendChild(opt);
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "task-existing-result";
+          btn.textContent = meta.label;
+          btn.dataset.taskId = String(meta.task.id);
+          btn.dataset.list = meta.list;
+          btn.dataset.mode = meta.task.mode;
+          btn.addEventListener("click", ()=>{
+            setSelectedExistingTask(btn.dataset.taskId || "");
+          });
+          existingTaskResults.appendChild(btn);
         });
+        existingTaskResults.hidden = false;
+      }else{
+        existingTaskResults.hidden = true;
       }
     }
 
@@ -3404,33 +3417,42 @@ function renderDashboard(){
     if (taskExistingSearchInput){
       taskExistingSearchInput.disabled = !hasExisting;
     }
+    if (selectedExistingTaskId && !filtered.some(meta => String(meta.task.id) === String(selectedExistingTaskId))){
+      setSelectedExistingTask(null);
+    }
   }
 
   function resetExistingTaskForm(){
     if (taskExistingSearchInput) taskExistingSearchInput.value = "";
+    setSelectedExistingTask(null);
     refreshExistingTaskOptions("");
-    if (existingTaskSelect){
-      existingTaskSelect.selectedIndex = 0;
-    }
+  }
+
+  function resetOneTimeTaskForm(){
+    if (oneTimeForm) oneTimeForm.reset();
+    syncOneTimeDateInput();
   }
 
   function showTaskOptionStage(){
+    resetExistingTaskForm();
+    resetOneTimeTaskForm();
     setTaskOptionPage(null);
   }
 
   function activateTaskVariant(variant){
-    const choice = variant === "existing" ? "existing" : "new";
+    const allowed = ["existing", "new", "one-time"];
+    const choice = allowed.includes(variant) ? variant : "new";
     setTaskOptionPage(choice);
     if (choice === "existing"){
       const term = taskExistingSearchInput?.value || "";
       refreshExistingTaskOptions(term);
-      if (existingTaskSelect){
-        existingTaskSelect.selectedIndex = 0;
-      }
       if (taskExistingSearchInput && !taskExistingSearchInput.disabled){
         taskExistingSearchInput.focus();
-      }else if (existingTaskSelect && !existingTaskSelect.disabled){
-        existingTaskSelect.focus();
+      }
+    }else if (choice === "one-time"){
+      syncOneTimeDateInput();
+      if (oneTimeNameInput){
+        oneTimeNameInput.focus();
       }
     }else{
       syncTaskMode(taskTypeSelect?.value || "interval");
@@ -3453,6 +3475,18 @@ function renderDashboard(){
     }
   }
 
+  function syncOneTimeDateInput(){
+    if (!oneTimeDateInput) return;
+    if (addContextDateISO){
+      oneTimeDateInput.value = addContextDateISO;
+      return;
+    }
+    const modalVisible = modal?.classList.contains("is-visible");
+    if (!modalVisible || !oneTimeDateInput.value){
+      oneTimeDateInput.value = ymd(new Date());
+    }
+  }
+
   function setContextDate(dateISO){
     addContextDateISO = dateISO || null;
     if (modal){
@@ -3463,6 +3497,7 @@ function renderDashboard(){
       }
     }
     syncTaskDateInput();
+    syncOneTimeDateInput();
     if (downDateInput){
       if (addContextDateISO){
         downDateInput.value = addContextDateISO;
@@ -3757,6 +3792,9 @@ function renderDashboard(){
       if (!section) return;
       section.hidden = section.dataset.step !== step;
     });
+    if (step !== "task"){
+      setTaskOptionPage(null);
+    }
     if (step === "task"){
       populateCategoryOptions();
       resetTaskForm();
@@ -3818,6 +3856,8 @@ function renderDashboard(){
     downForm?.reset();
     jobForm?.reset();
     resetGarnetForm();
+    resetOneTimeTaskForm();
+    collapseExistingTaskDropdown();
     setContextDate(null);
     pendingGarnetEditId = null;
   }
@@ -3962,7 +4002,7 @@ function renderDashboard(){
     return row;
   }
 
-  closeBtn?.addEventListener("click", closeModal);
+  closeButtons.forEach(btn => btn?.addEventListener("click", closeModal));
   modal?.addEventListener("click", (e)=>{ if (e.target === modal) closeModal(); });
 
   modal?.querySelectorAll("[data-choice]")?.forEach(btn => {
@@ -3991,10 +4031,17 @@ function renderDashboard(){
     });
   });
 
+  taskCardBackButtons.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      showTaskOptionStage();
+      showStep("task");
+    });
+  });
+
   taskOptionButtons.forEach(btn => {
     btn.addEventListener("click", ()=>{
       const variant = btn.getAttribute("data-task-option");
-      activateTaskVariant(variant === "existing" ? "existing" : "new");
+      activateTaskVariant(variant);
     });
   });
 
@@ -4002,11 +4049,37 @@ function renderDashboard(){
     refreshExistingTaskOptions(taskExistingSearchInput.value);
   });
 
+  taskExistingSearchInput?.addEventListener("focus", ()=>{
+    refreshExistingTaskOptions(taskExistingSearchInput.value);
+    setSelectedExistingTask(selectedExistingTaskId);
+  });
+
+  taskExistingSearchInput?.addEventListener("blur", ()=>{
+    window.setTimeout(()=>{
+      if (existingTaskResults && existingTaskResults.contains(document.activeElement)) return;
+      if (existingTaskResults) existingTaskResults.hidden = true;
+    }, 120);
+  });
+
+  existingTaskResults?.addEventListener("focusin", ()=>{
+    if (existingTaskResults) existingTaskResults.hidden = false;
+  });
+
+  existingTaskResults?.addEventListener("focusout", ()=>{
+    window.setTimeout(()=>{
+      if (document.activeElement === taskExistingSearchInput) return;
+      if (existingTaskResults && existingTaskResults.contains(document.activeElement)) return;
+      if (existingTaskResults) existingTaskResults.hidden = true;
+    }, 80);
+  });
+
   taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
   syncTaskMode(taskTypeSelect?.value || "interval");
   syncTaskDateInput();
+  syncOneTimeDateInput();
   populateCategoryOptions();
   resetExistingTaskForm();
+  resetOneTimeTaskForm();
   showTaskOptionStage();
 
   addSubtaskBtn?.addEventListener("click", ()=>{
@@ -4156,9 +4229,49 @@ function renderDashboard(){
     }
   });
 
+  oneTimeForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    const name = (oneTimeNameInput?.value || "").trim();
+    if (!name){ alert("Task name is required."); return; }
+    const note = (oneTimeNoteInput?.value || "").trim();
+    const rawDate = (oneTimeDateInput?.value || "").trim();
+    const targetISO = rawDate ? ymd(rawDate) : (addContextDateISO || ymd(new Date()));
+    const condition = note || "One-time maintenance task";
+    const task = {
+      id: genId(name),
+      name,
+      mode: "asreq",
+      condition,
+      manualLink: "",
+      storeLink: "",
+      pn: "",
+      price: null,
+      cat: null,
+      parentTask: null,
+      order: ++window._maintOrderCounter,
+      calendarDateISO: targetISO || null,
+      completedDates: [],
+      variant: "instance",
+      templateId: null,
+      note,
+      downtimeHours: 1
+    };
+    const list = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = []);
+    list.unshift(task);
+    setContextDate(targetISO);
+    saveCloudDebounced();
+    toast("One-time task added to the calendar");
+    closeModal();
+    renderDashboard();
+    const hash = (location.hash || "#").toLowerCase();
+    if (hash.startsWith("#/costs")){
+      renderCosts();
+    }
+  });
+
   taskExistingForm?.addEventListener("submit", (e)=>{
     e.preventDefault();
-    const selectedId = existingTaskSelect?.value;
+    const selectedId = selectedExistingTaskId;
     if (!selectedId){ alert("Select a maintenance task to schedule."); return; }
     const meta = findMaintenanceTaskById(selectedId);
     if (!meta || !meta.task){

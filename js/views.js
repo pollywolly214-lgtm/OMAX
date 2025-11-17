@@ -172,8 +172,8 @@ function viewDashboard(){
   </div>
 
   <div class="modal-backdrop" id="dashboardAddModal" hidden>
-    <div class="modal-card dashboard-modal-card">
-      <button type="button" class="modal-close" id="dashboardModalClose">×</button>
+    <div class="modal-card dashboard-modal-card" data-modal-card="main">
+      <button type="button" class="modal-close" id="dashboardModalClose" data-close-modal>×</button>
 
       <section class="dash-modal-step" data-step="picker">
         <h4>What would you like to add?</h4>
@@ -188,13 +188,6 @@ function viewDashboard(){
       <section class="dash-modal-step" data-step="task" hidden>
         <h4>Add maintenance task</h4>
         <div class="task-option-stage" data-task-option-stage>
-          <div class="task-option-stage-header">
-            <p class="task-option-kicker">Step 1</p>
-            <div>
-              <p class="small muted">Choose how you'd like to add this maintenance task.</p>
-              <p class="task-option-stage-title">We&rsquo;ll open a focused page in this popup for your selection.</p>
-            </div>
-          </div>
           <div class="task-option-grid">
             <button type="button" class="task-option" data-task-option="existing">
               <span class="task-option-title">Use an existing task</span>
@@ -204,77 +197,14 @@ function viewDashboard(){
               <span class="task-option-title">Create a new task</span>
               <span class="task-option-sub">Start a new maintenance task and schedule it instantly.</span>
             </button>
+            <button type="button" class="task-option" data-task-option="one-time">
+              <span class="task-option-title">Add a one-time task</span>
+              <span class="task-option-sub">Create a single occurrence that won't appear in Maintenance Settings.</span>
+            </button>
           </div>
           <div class="task-option-actions">
             <button type="button" class="secondary" data-step-back>Back</button>
           </div>
-        </div>
-
-        <div class="task-option-page" data-task-page="existing" hidden>
-          <div class="task-option-page-header">
-            <button type="button" class="task-option-back" data-step-back aria-label="Go back to task picker">← Back</button>
-            <div>
-              <p class="task-option-kicker">Use current task</p>
-              <p class="task-option-stage-title">Select a saved maintenance task</p>
-              <p class="small muted">Search what you already track and place it on the calendar.</p>
-            </div>
-          </div>
-          <form id="dashTaskExistingForm" class="modal-form task-option-body" data-task-variant="existing" hidden>
-            <div class="task-existing-search">
-              <label>Search tasks<input type="search" id="dashTaskExistingSearch" placeholder="Search saved maintenance tasks" autocomplete="off"></label>
-            </div>
-            <label>Maintenance task<select id="dashTaskExistingSelect"></select></label>
-            <p class="small muted">Pick a task saved in Maintenance Settings to schedule it on the calendar.</p>
-            <p class="small muted" data-task-existing-empty hidden>No maintenance tasks yet. Create one below to get started.</p>
-            <p class="small muted" data-task-existing-search-empty hidden>No tasks match your search. Try a different name.</p>
-            <div class="modal-actions">
-              <button type="button" class="secondary" data-step-back>Back</button>
-              <button type="submit" class="primary">Add to Calendar</button>
-            </div>
-          </form>
-        </div>
-
-        <div class="task-option-page" data-task-page="new" hidden>
-          <div class="task-option-page-header">
-            <button type="button" class="task-option-back" data-step-back aria-label="Go back to task picker">← Back</button>
-            <div>
-              <p class="task-option-kicker">Create new task</p>
-              <p class="task-option-stage-title">Build a new maintenance task</p>
-              <p class="small muted">Enter task details and we&rsquo;ll drop it into your schedule.</p>
-            </div>
-          </div>
-          <form id="dashTaskForm" class="modal-form task-option-body" data-task-variant="new" hidden>
-            <div class="modal-grid">
-              <label>Task name<input id="dashTaskName" required placeholder="Task"></label>
-              <label>Type<select id="dashTaskType">
-                <option value="interval">Per interval</option>
-                <option value="asreq">As required</option>
-              </select></label>
-              <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
-              <label data-task-last>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
-              <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
-              <label>Manual link<input type="url" id="dashTaskManual" placeholder="https://..."></label>
-              <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
-              <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
-              <label>Price ($)<input type="number" min="0" step="0.01" id="dashTaskPrice" placeholder="optional"></label>
-              <label>Category<select id="dashTaskCategory"></select></label>
-              <label>Calendar date<input type="date" id="dashTaskDate"></label>
-            </div>
-
-            <div class="subtask-section">
-              <div class="subtask-header">
-                <h5>Sub-tasks</h5>
-                <button type="button" id="dashAddSubtask" class="subtask-add-btn">+ Add sub-task</button>
-              </div>
-              <div id="dashSubtaskList" class="subtask-list"></div>
-              <p class="small muted">Sub-tasks inherit the calendar display and live under the main task.</p>
-            </div>
-
-            <div class="modal-actions">
-              <button type="button" class="secondary" data-step-back>Back</button>
-              <button type="submit" class="primary" data-task-submit>Create Task</button>
-            </div>
-          </form>
         </div>
       </section>
 
@@ -338,6 +268,105 @@ function viewDashboard(){
           </div>
         </form>
       </section>
+    </div>
+
+    <div class="modal-card dashboard-modal-card task-option-card" data-task-card="existing" hidden aria-hidden="true">
+      <button type="button" class="modal-close" data-close-modal>×</button>
+      <div class="task-option-page">
+        <div class="task-option-page-header">
+          <button type="button" class="task-option-back" data-task-card-back aria-label="Go back to task picker">← Back</button>
+          <div>
+            <p class="task-option-kicker">Use current task</p>
+            <p class="task-option-stage-title">Select a saved maintenance task</p>
+            <p class="small muted">Search what you already track and place it on the calendar.</p>
+          </div>
+        </div>
+        <form id="dashTaskExistingForm" class="modal-form task-option-body" data-task-variant="existing">
+          <div class="task-existing-search">
+            <label>Search tasks<input type="search" id="dashTaskExistingSearch" placeholder="Search saved maintenance tasks" autocomplete="off"></label>
+            <div class="task-existing-results" data-task-existing-results hidden></div>
+          </div>
+          <p class="small muted">Pick a task saved in Maintenance Settings to schedule it on the calendar.</p>
+          <p class="small muted" data-task-existing-empty hidden>No maintenance tasks yet. Create one below to get started.</p>
+          <p class="small muted" data-task-existing-search-empty hidden>No tasks match your search. Try a different name.</p>
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-task-card-back>Back</button>
+            <button type="submit" class="primary">Add to Calendar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-card dashboard-modal-card task-option-card" data-task-card="new" hidden aria-hidden="true">
+      <button type="button" class="modal-close" data-close-modal>×</button>
+      <div class="task-option-page">
+        <div class="task-option-page-header">
+          <button type="button" class="task-option-back" data-task-card-back aria-label="Go back to task picker">← Back</button>
+          <div>
+            <p class="task-option-kicker">Create new task</p>
+            <p class="task-option-stage-title">Build a new maintenance task</p>
+            <p class="small muted">Enter task details and we&rsquo;ll drop it into your schedule.</p>
+          </div>
+        </div>
+        <form id="dashTaskForm" class="modal-form task-option-body" data-task-variant="new">
+          <div class="modal-grid">
+            <label>Task name<input id="dashTaskName" required placeholder="Task"></label>
+            <label>Type<select id="dashTaskType">
+              <option value="interval">Per interval</option>
+              <option value="asreq">As required</option>
+            </select></label>
+            <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
+            <label data-task-last>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
+            <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
+            <label>Manual link<input type="url" id="dashTaskManual" placeholder="https://..."></label>
+            <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
+            <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
+            <label>Price ($)<input type="number" min="0" step="0.01" id="dashTaskPrice" placeholder="optional"></label>
+            <label>Category<select id="dashTaskCategory"></select></label>
+            <label>Calendar date<input type="date" id="dashTaskDate"></label>
+          </div>
+
+          <div class="subtask-section">
+            <div class="subtask-header">
+              <h5>Sub-tasks</h5>
+              <button type="button" id="dashAddSubtask" class="subtask-add-btn">+ Add sub-task</button>
+            </div>
+            <div id="dashSubtaskList" class="subtask-list"></div>
+            <p class="small muted">Sub-tasks inherit the calendar display and live under the main task.</p>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-task-card-back>Back</button>
+            <button type="submit" class="primary" data-task-submit>Create Task</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-card dashboard-modal-card task-option-card" data-task-card="one-time" hidden aria-hidden="true">
+      <button type="button" class="modal-close" data-close-modal>×</button>
+      <div class="task-option-page">
+        <div class="task-option-page-header">
+          <button type="button" class="task-option-back" data-task-card-back aria-label="Go back to task picker">← Back</button>
+          <div>
+            <p class="task-option-kicker">One-time task</p>
+            <p class="task-option-stage-title">Schedule a single maintenance task</p>
+            <p class="small muted">One-time tasks are placed on the calendar only and are not added to Maintenance Settings.</p>
+          </div>
+        </div>
+        <form id="dashOneTimeForm" class="modal-form task-option-body" data-task-variant="one-time">
+          <div class="modal-grid">
+            <label>Task name<input id="dashOneTimeName" required placeholder="Task"></label>
+            <label>Calendar date<input type="date" id="dashOneTimeDate" required></label>
+            <label>Notes<textarea id="dashOneTimeNote" rows="3" placeholder="Optional note"></textarea></label>
+          </div>
+          <p class="small muted task-one-time-hint">One-time tasks stay on the calendar only—they won't be added to Maintenance Settings.</p>
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-task-card-back>Back</button>
+            <button type="submit" class="primary">Add One-time Task</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>`;
 }
