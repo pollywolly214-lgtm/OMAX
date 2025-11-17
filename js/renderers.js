@@ -722,6 +722,72 @@ function cloneLayoutData(layout){
   }
 }
 
+function getLayoutRootWidth(state){
+  if (!state || !state.root) return null;
+  const rect = state.root.getBoundingClientRect();
+  if (rect && typeof rect.width === "number" && isFinite(rect.width) && rect.width > 0){
+    return rect.width;
+  }
+  const client = state.root.clientWidth;
+  if (typeof client === "number" && isFinite(client) && client > 0) return client;
+  return null;
+}
+
+function clampLayoutBox(box, rootWidth, minWidth, minHeight){
+  if (!box || typeof box !== "object") return null;
+  const safeMinWidth = Math.max(0, Number(minWidth) || 0);
+  const safeMinHeight = Math.max(0, Number(minHeight) || 0);
+  let width = Math.max(safeMinWidth, Math.round(Number(box.width) || safeMinWidth));
+  let height = Math.max(safeMinHeight, Math.round(Number(box.height) || safeMinHeight));
+  if (isFinite(rootWidth) && rootWidth > 0){
+    const maxWidth = Math.round(rootWidth);
+    width = Math.min(width, maxWidth);
+  }
+  const maxX = (isFinite(rootWidth) && rootWidth > 0) ? Math.max(0, Math.round(rootWidth - width)) : null;
+  let x = Math.round(Number(box.x) || 0);
+  if (maxX != null) x = Math.min(Math.max(0, x), maxX);
+  const y = Math.max(0, Math.round(Number(box.y) || 0));
+  return { x, y, width, height };
+}
+
+function layoutScaleFactor(layout, availableWidth){
+  if (!layout || !availableWidth || !isFinite(availableWidth) || availableWidth <= 0) return 1;
+  let maxRight = 0;
+  Object.values(layout).forEach(box => {
+    if (!box || typeof box !== "object") return;
+    const right = Number(box.x) + Number(box.width);
+    if (isFinite(right)) maxRight = Math.max(maxRight, right);
+  });
+  if (maxRight <= 0) return 1;
+  const scale = availableWidth / maxRight;
+  return scale < 1 ? scale : 1;
+}
+
+function scaleLayoutBox(box, scale){
+  if (!box || typeof box !== "object") return null;
+  const factor = (scale && isFinite(scale) && scale > 0) ? scale : 1;
+  return {
+    x: Math.round((Number(box.x) || 0) * factor),
+    y: Math.round((Number(box.y) || 0) * factor),
+    width: Math.round((Number(box.width) || 0) * factor),
+    height: Math.round((Number(box.height) || 0) * factor)
+  };
+}
+
+function getResponsiveLayout(state, minWidth, minHeight){
+  const layout = {};
+  const rootWidth = getLayoutRootWidth(state);
+  const scale = layoutScaleFactor(state?.layoutById, rootWidth);
+  const scaledMinWidth = Math.max(1, Math.round((Number(minWidth) || 0) * scale));
+  const scaledMinHeight = Math.max(1, Math.round((Number(minHeight) || 0) * scale));
+  Object.entries(state?.layoutById || {}).forEach(([id, box]) => {
+    const scaled = scaleLayoutBox(box, scale);
+    const adjusted = clampLayoutBox(scaled, rootWidth, scaledMinWidth, scaledMinHeight);
+    if (adjusted) layout[id] = adjusted;
+  });
+  return layout;
+}
+
 function layoutHasEntries(layout){
   return !!(layout && typeof layout === "object" && Object.keys(layout).length);
 }
@@ -815,6 +881,7 @@ function getDashboardLayoutState(){
     const loaded = loadDashboardLayoutFromStorage();
     window.dashboardLayoutState = {
       layoutById: loaded.layout,
+      activeLayoutById: {},
       layoutStored: layoutHasEntries(loaded.layout),
       editing: false,
       zCounter: 50,
@@ -944,14 +1011,15 @@ function setDashboardWindowStyle(win, box){
   win.style.height = `${box.height}px`;
 }
 
-function updateDashboardRootSize(state){
+function updateDashboardRootSize(state, layoutOverride){
   if (!state.root) return;
   if (!state.root.classList.contains("has-custom-layout")){
     state.root.style.minHeight = "";
     state.root.style.paddingBottom = "";
     return;
   }
-  const maxBottom = dashboardLayoutMaxBottom(state.layoutById);
+  const layout = layoutOverride || state.activeLayoutById || state.layoutById;
+  const maxBottom = dashboardLayoutMaxBottom(layout);
   const extra = state.editing ? 160 : 60;
   state.root.style.minHeight = `${Math.max(0, Math.ceil(maxBottom + extra))}px`;
   state.root.style.paddingBottom = state.editing ? "120px" : "48px";
@@ -970,13 +1038,15 @@ function applyDashboardLayout(state){
     updateDashboardRootSize(state);
     return;
   }
+  const responsiveLayout = getResponsiveLayout(state, DASHBOARD_WINDOW_MIN_WIDTH, DASHBOARD_WINDOW_MIN_HEIGHT);
+  state.activeLayoutById = responsiveLayout;
   state.windows.forEach(win => {
     if (!win || !win.dataset) return;
     const id = String(win.dataset.dashboardWindow || "");
-    const box = state.layoutById[id];
+    const box = responsiveLayout[id];
     if (box){ setDashboardWindowStyle(win, box); }
   });
-  updateDashboardRootSize(state);
+  updateDashboardRootSize(state, responsiveLayout);
 }
 
 function updateDashboardEditUi(state){
@@ -1071,7 +1141,7 @@ function startDashboardWindowDrag(state, win, event){
   if (!state || !win || !state.root) return;
   const id = String(win.dataset.dashboardWindow || "");
   if (!id) return;
-  const box = state.layoutById[id];
+  const box = state.activeLayoutById[id] || state.layoutById[id];
   if (!box) return;
   if (event.button !== 0 && event.pointerType !== "touch") return;
   event.preventDefault();
@@ -1089,7 +1159,9 @@ function startDashboardWindowDrag(state, win, event){
     box.x = Math.round(nextX);
     box.y = Math.round(nextY);
     setDashboardWindowStyle(win, box);
-    updateDashboardRootSize(state);
+    state.layoutById[id] = { ...(state.layoutById[id] || {}), ...box };
+    state.activeLayoutById[id] = box;
+    updateDashboardRootSize(state, state.activeLayoutById);
   };
   const stop = ()=>{
     window.removeEventListener("pointermove", move);
@@ -1097,6 +1169,7 @@ function startDashboardWindowDrag(state, win, event){
     window.removeEventListener("pointercancel", stop);
     win.releasePointerCapture?.(pointerId);
     persistDashboardLayout(state);
+    applyDashboardLayout(state);
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", stop);
@@ -1108,7 +1181,7 @@ function startDashboardWindowResize(state, win, direction, event){
   if (!state || !win || !state.root) return;
   const id = String(win.dataset.dashboardWindow || "");
   if (!id) return;
-  const box = state.layoutById[id];
+  const box = state.activeLayoutById[id] || state.layoutById[id];
   if (!box) return;
   if (event.button !== 0 && event.pointerType !== "touch") return;
   event.preventDefault();
@@ -1151,7 +1224,9 @@ function startDashboardWindowResize(state, win, direction, event){
     box.width = Math.round(nextWidth);
     box.height = Math.round(nextHeight);
     setDashboardWindowStyle(win, box);
-    updateDashboardRootSize(state);
+    state.layoutById[id] = { ...(state.layoutById[id] || {}), ...box };
+    state.activeLayoutById[id] = box;
+    updateDashboardRootSize(state, state.activeLayoutById);
     dispatchLayoutWindowResize("dashboard", id, win, box);
   };
   const stop = ()=>{
@@ -1161,6 +1236,7 @@ function startDashboardWindowResize(state, win, direction, event){
     win.releasePointerCapture?.(pointerId);
     persistDashboardLayout(state);
     dispatchLayoutWindowResize("dashboard", id, win, box);
+    applyDashboardLayout(state);
   };
   window.addEventListener("pointermove", resize);
   window.addEventListener("pointerup", stop);
@@ -1174,17 +1250,7 @@ function ensureDashboardLayoutBoundResize(state){
   window.addEventListener("resize", ()=>{
     const curState = getDashboardLayoutState();
     if (!curState.root || !curState.root.classList.contains("has-custom-layout")) return;
-    const rootWidth = curState.root.clientWidth || curState.root.getBoundingClientRect().width;
-    let changed = false;
-    Object.entries(curState.layoutById || {}).forEach(([id, box]) => {
-      if (!box) return;
-      const maxX = Math.max(0, (rootWidth || box.width) - box.width);
-      if (box.x > maxX){ box.x = Math.max(0, Math.round(maxX)); changed = true; }
-    });
-    if (changed){
-      applyDashboardLayout(curState);
-      persistDashboardLayout(curState);
-    }
+    applyDashboardLayout(curState);
   });
 }
 
@@ -1629,6 +1695,7 @@ function getCostLayoutState(){
     const loaded = loadCostLayoutFromStorage();
     window.costLayoutState = {
       layoutById: loaded.layout,
+      activeLayoutById: {},
       layoutStored: layoutHasEntries(loaded.layout),
       editing: false,
       zCounter: 40,
@@ -1761,14 +1828,15 @@ function scheduleCostLayoutRefresh(state){
   });
 }
 
-function updateCostRootSize(state){
+function updateCostRootSize(state, layoutOverride){
   if (!state.root) return;
   if (!state.root.classList.contains("has-custom-layout")){
     state.root.style.minHeight = "";
     state.root.style.paddingBottom = "";
     return;
   }
-  const maxBottom = costLayoutMaxBottom(state.layoutById);
+  const layout = layoutOverride || state.activeLayoutById || state.layoutById;
+  const maxBottom = costLayoutMaxBottom(layout);
   const extra = state.editing ? 160 : 60;
   state.root.style.minHeight = `${Math.max(0, Math.ceil(maxBottom + extra))}px`;
   state.root.style.paddingBottom = state.editing ? "120px" : "48px";
@@ -1788,13 +1856,15 @@ function applyCostLayout(state){
     scheduleCostLayoutRefresh(state);
     return;
   }
+  const responsiveLayout = getResponsiveLayout(state, COST_WINDOW_MIN_WIDTH, COST_WINDOW_MIN_HEIGHT);
+  state.activeLayoutById = responsiveLayout;
   state.windows.forEach(win => {
     if (!win || !win.dataset) return;
     const id = String(win.dataset.costWindow || "");
-    const box = state.layoutById[id];
+    const box = responsiveLayout[id];
     if (box){ setCostWindowStyle(win, box); }
   });
-  updateCostRootSize(state);
+  updateCostRootSize(state, responsiveLayout);
   scheduleCostLayoutRefresh(state);
 }
 
@@ -1890,7 +1960,7 @@ function startCostWindowDrag(state, win, event){
   if (!state || !win || !state.root) return;
   const id = String(win.dataset.costWindow || "");
   if (!id) return;
-  const box = state.layoutById[id];
+  const box = state.activeLayoutById[id] || state.layoutById[id];
   if (!box) return;
   if (event.button !== 0 && event.pointerType !== "touch") return;
   event.preventDefault();
@@ -1908,7 +1978,9 @@ function startCostWindowDrag(state, win, event){
     box.x = Math.round(nextX);
     box.y = Math.round(nextY);
     setCostWindowStyle(win, box);
-    updateCostRootSize(state);
+    state.layoutById[id] = { ...(state.layoutById[id] || {}), ...box };
+    state.activeLayoutById[id] = box;
+    updateCostRootSize(state, state.activeLayoutById);
     scheduleCostLayoutRefresh(state);
   };
   const stop = ()=>{
@@ -1917,6 +1989,7 @@ function startCostWindowDrag(state, win, event){
     window.removeEventListener("pointercancel", stop);
     win.releasePointerCapture?.(pointerId);
     persistCostLayout(state);
+    applyCostLayout(state);
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", stop);
@@ -1928,7 +2001,7 @@ function startCostWindowResize(state, win, direction, event){
   if (!state || !win || !state.root) return;
   const id = String(win.dataset.costWindow || "");
   if (!id) return;
-  const box = state.layoutById[id];
+  const box = state.activeLayoutById[id] || state.layoutById[id];
   if (!box) return;
   if (event.button !== 0 && event.pointerType !== "touch") return;
   event.preventDefault();
@@ -1971,7 +2044,9 @@ function startCostWindowResize(state, win, direction, event){
     box.width = Math.round(nextWidth);
     box.height = Math.round(nextHeight);
     setCostWindowStyle(win, box);
-    updateCostRootSize(state);
+    state.layoutById[id] = { ...(state.layoutById[id] || {}), ...box };
+    state.activeLayoutById[id] = box;
+    updateCostRootSize(state, state.activeLayoutById);
     scheduleCostLayoutRefresh(state);
     dispatchLayoutWindowResize("cost", id, win, box);
   };
@@ -1982,6 +2057,7 @@ function startCostWindowResize(state, win, direction, event){
     win.releasePointerCapture?.(pointerId);
     persistCostLayout(state);
     dispatchLayoutWindowResize("cost", id, win, box);
+    applyCostLayout(state);
   };
   window.addEventListener("pointermove", resize);
   window.addEventListener("pointerup", stop);
@@ -1995,17 +2071,7 @@ function ensureCostLayoutBoundResize(state){
   window.addEventListener("resize", ()=>{
     const curState = getCostLayoutState();
     if (!curState.root || !curState.root.classList.contains("has-custom-layout")) return;
-    const rootWidth = curState.root.clientWidth || curState.root.getBoundingClientRect().width;
-    let changed = false;
-    Object.entries(curState.layoutById || {}).forEach(([id, box]) => {
-      if (!box) return;
-      const maxX = Math.max(0, (rootWidth || box.width) - box.width);
-      if (box.x > maxX){ box.x = Math.max(0, Math.round(maxX)); changed = true; }
-    });
-    if (changed){
-      applyCostLayout(curState);
-      persistCostLayout(curState);
-    }
+    applyCostLayout(curState);
   });
 }
 
@@ -2139,6 +2205,7 @@ function getJobLayoutState(){
     const loaded = loadJobLayoutFromStorage();
     window.jobLayoutState = {
       layoutById: loaded.layout,
+      activeLayoutById: {},
       layoutStored: layoutHasEntries(loaded.layout),
       editing: false,
       zCounter: 60,
@@ -2271,14 +2338,15 @@ function scheduleJobLayoutRefresh(state){
   });
 }
 
-function updateJobRootSize(state){
+function updateJobRootSize(state, layoutOverride){
   if (!state.root) return;
   if (!state.root.classList.contains("has-custom-layout")){
     state.root.style.minHeight = "";
     state.root.style.paddingBottom = "";
     return;
   }
-  const maxBottom = jobLayoutMaxBottom(state.layoutById);
+  const layout = layoutOverride || state.activeLayoutById || state.layoutById;
+  const maxBottom = jobLayoutMaxBottom(layout);
   const extra = state.editing ? 160 : 60;
   state.root.style.minHeight = `${Math.max(0, Math.ceil(maxBottom + extra))}px`;
   state.root.style.paddingBottom = state.editing ? "120px" : "48px";
@@ -2298,13 +2366,15 @@ function applyJobLayout(state){
     scheduleJobLayoutRefresh(state);
     return;
   }
+  const responsiveLayout = getResponsiveLayout(state, JOB_WINDOW_MIN_WIDTH, JOB_WINDOW_MIN_HEIGHT);
+  state.activeLayoutById = responsiveLayout;
   state.windows.forEach(win => {
     if (!win || !win.dataset) return;
     const id = String(win.dataset.jobWindow || "");
-    const box = state.layoutById[id];
+    const box = responsiveLayout[id];
     if (box){ setJobWindowStyle(win, box); }
   });
-  updateJobRootSize(state);
+  updateJobRootSize(state, responsiveLayout);
   scheduleJobLayoutRefresh(state);
 }
 
@@ -2400,7 +2470,7 @@ function startJobWindowDrag(state, win, event){
   if (!state || !win || !state.root) return;
   const id = String(win.dataset.jobWindow || "");
   if (!id) return;
-  const box = state.layoutById[id];
+  const box = state.activeLayoutById[id] || state.layoutById[id];
   if (!box) return;
   if (event.button !== 0 && event.pointerType !== "touch") return;
   event.preventDefault();
@@ -2418,7 +2488,9 @@ function startJobWindowDrag(state, win, event){
     box.x = Math.round(nextX);
     box.y = Math.round(nextY);
     setJobWindowStyle(win, box);
-    updateJobRootSize(state);
+    state.layoutById[id] = { ...(state.layoutById[id] || {}), ...box };
+    state.activeLayoutById[id] = box;
+    updateJobRootSize(state, state.activeLayoutById);
     scheduleJobLayoutRefresh(state);
   };
   const stop = ()=>{
@@ -2427,6 +2499,7 @@ function startJobWindowDrag(state, win, event){
     window.removeEventListener("pointercancel", stop);
     win.releasePointerCapture?.(pointerId);
     persistJobLayout(state);
+    applyJobLayout(state);
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", stop);
@@ -2438,7 +2511,7 @@ function startJobWindowResize(state, win, direction, event){
   if (!state || !win || !state.root) return;
   const id = String(win.dataset.jobWindow || "");
   if (!id) return;
-  const box = state.layoutById[id];
+  const box = state.activeLayoutById[id] || state.layoutById[id];
   if (!box) return;
   if (event.button !== 0 && event.pointerType !== "touch") return;
   event.preventDefault();
@@ -2481,7 +2554,9 @@ function startJobWindowResize(state, win, direction, event){
     box.width = Math.round(nextWidth);
     box.height = Math.round(nextHeight);
     setJobWindowStyle(win, box);
-    updateJobRootSize(state);
+    state.layoutById[id] = { ...(state.layoutById[id] || {}), ...box };
+    state.activeLayoutById[id] = box;
+    updateJobRootSize(state, state.activeLayoutById);
     scheduleJobLayoutRefresh(state);
     dispatchLayoutWindowResize("jobs", id, win, box);
   };
@@ -2492,6 +2567,7 @@ function startJobWindowResize(state, win, direction, event){
     win.releasePointerCapture?.(pointerId);
     persistJobLayout(state);
     dispatchLayoutWindowResize("jobs", id, win, box);
+    applyJobLayout(state);
   };
   window.addEventListener("pointermove", resize);
   window.addEventListener("pointerup", stop);
@@ -2507,7 +2583,6 @@ function ensureJobLayoutBoundResize(state){
     state.windows = Array.from(state.root.querySelectorAll("[data-job-window]"));
     syncJobLayoutEntries(state);
     applyJobLayout(state);
-    persistJobLayout(state);
   };
   state.resizeHandler = onResize;
   window.addEventListener("resize", onResize);
