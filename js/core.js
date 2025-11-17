@@ -286,24 +286,48 @@ let workspaceMetadataWritesBlocked = false;
 function applyFirestoreSettings(db){
   if (!db || firebaseSettingsApplied) return;
 
+  const isDevEnv = typeof process !== "undefined" && process?.env?.NODE_ENV === "development";
+  const emulatorHost = "localhost:8080";
+
   // Respect existing settings (including emulator hosts) so we avoid override warnings.
   const currentSettings = typeof db._getSettings === "function"
     ? { ...db._getSettings() }
     : (typeof db._settings === "object" && db._settings ? { ...db._settings } : {});
   const settingsFrozen = Boolean(db._settingsFrozen);
   const hasHostSetting = typeof currentSettings.host === "string" && currentSettings.host.length > 0;
+  const ignoreAlreadyEnabled = currentSettings.ignoreUndefinedProperties === true;
 
-  if (currentSettings.ignoreUndefinedProperties === true || settingsFrozen || hasHostSetting){
-    if (settingsFrozen){
-      console.warn("Firestore settings already frozen; skipping extra configuration to avoid host overrides.");
-    } else if (hasHostSetting){
-      console.warn("Firestore host/emulator already configured; leaving settings untouched to prevent override warnings.");
-    }
+  if (settingsFrozen){
+    console.warn("Firestore settings already frozen; skipping extra configuration to avoid host overrides.");
     firebaseSettingsApplied = true;
     return;
   }
 
+  if (!isDevEnv && hasHostSetting){
+    firebaseSettingsApplied = true;
+    console.info("Firestore is connected to the Production/Vercel host.");
+    return;
+  }
+
   const mergedSettings = { ...currentSettings, ignoreUndefinedProperties: true };
+  if (ignoreAlreadyEnabled && (!isDevEnv || hasHostSetting)){
+    firebaseSettingsApplied = true;
+    if (!isDevEnv) console.info("Firestore is connected to the Production/Vercel host.");
+    return;
+  }
+
+  if (isDevEnv && !hasHostSetting){
+    mergedSettings.host = emulatorHost;
+    mergedSettings.ssl = false;
+    console.info("Firestore is connected to the Local Emulator.");
+  } else if (isDevEnv && hasHostSetting){
+    console.info("Firestore emulator already configured; leaving settings untouched to prevent override warnings.");
+    firebaseSettingsApplied = true;
+    return;
+  } else if (!isDevEnv) {
+    console.info("Firestore is connected to the Production/Vercel host.");
+  }
+
   try {
     db.settings(mergedSettings);
     firebaseSettingsApplied = true;
@@ -2219,9 +2243,13 @@ async function updateWorkspaceMetadata(meta){
     await FB.workspaceDoc.set(meta, { merge:true });
   } catch (err) {
     const code = err?.code || err?.error?.code;
-    if (code === "permission-denied"){
+    const permissionDenied = code === "permission-denied"
+      || (typeof err?.message === "string" && err.message.toLowerCase().includes("permission"));
+    if (permissionDenied){
       workspaceMetadataWritesBlocked = true;
-      console.info("Workspace metadata updates skipped after permission denial.");
+      if (window.DEBUG_MODE){
+        console.info("Workspace metadata update skipped after permission denial.");
+      }
       return;
     }
     console.warn("Failed to update workspace metadata", err);
