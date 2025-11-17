@@ -1009,7 +1009,7 @@ header::after {
 main {
   position: relative;
   z-index: 1;
-  padding: 14px 18px 68px;
+  padding: 8px 16px 54px;
   color: #0a1f3f;
   overflow: visible;
 }
@@ -1044,7 +1044,7 @@ main::after {
 
 @media (min-width: 960px) {
   main {
-    padding: 24px 40px 96px;
+    padding: 16px 32px 78px;
   }
 }
 
@@ -1053,7 +1053,7 @@ main::after {
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 18px;
 }
 
 footer {
@@ -3316,7 +3316,7 @@ body.modal-open .auth-bar {
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .past-jobs-search {
   flex: 1 1 auto;
@@ -3327,7 +3327,7 @@ body.modal-open .auth-bar {
   max-width: 420px;
 }
 .past-jobs-hint {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
 }
 .past-jobs-filter-status {
   margin: -6px 0 12px;
@@ -3344,7 +3344,7 @@ body.modal-open .auth-bar {
 .past-jobs-summary-wrap {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 .past-jobs-summary {
   display: flex;
