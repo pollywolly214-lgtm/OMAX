@@ -750,11 +750,37 @@ function clampLayoutBox(box, rootWidth, minWidth, minHeight){
   return { x, y, width, height };
 }
 
+function layoutScaleFactor(layout, availableWidth){
+  if (!layout || !availableWidth || !isFinite(availableWidth) || availableWidth <= 0) return 1;
+  let maxRight = 0;
+  Object.values(layout).forEach(box => {
+    if (!box || typeof box !== "object") return;
+    const right = Number(box.x) + Number(box.width);
+    if (isFinite(right)) maxRight = Math.max(maxRight, right);
+  });
+  if (maxRight <= 0) return 1;
+  const scale = availableWidth / maxRight;
+  return scale < 1 ? scale : 1;
+}
+
+function scaleLayoutBox(box, scale){
+  if (!box || typeof box !== "object") return null;
+  const factor = (scale && isFinite(scale) && scale > 0) ? scale : 1;
+  return {
+    x: Math.round((Number(box.x) || 0) * factor),
+    y: Math.round((Number(box.y) || 0) * factor),
+    width: Math.round((Number(box.width) || 0) * factor),
+    height: Math.round((Number(box.height) || 0) * factor)
+  };
+}
+
 function getResponsiveLayout(state, minWidth, minHeight){
   const layout = {};
   const rootWidth = getLayoutRootWidth(state);
+  const scale = layoutScaleFactor(state?.layoutById, rootWidth);
   Object.entries(state?.layoutById || {}).forEach(([id, box]) => {
-    const adjusted = clampLayoutBox(box, rootWidth, minWidth, minHeight);
+    const scaled = scaleLayoutBox(box, scale);
+    const adjusted = clampLayoutBox(scaled, rootWidth, minWidth, minHeight);
     if (adjusted) layout[id] = adjusted;
   });
   return layout;
