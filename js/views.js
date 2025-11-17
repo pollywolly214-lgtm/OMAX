@@ -189,11 +189,8 @@ function viewDashboard(){
         <h4>Add maintenance task</h4>
         <div class="task-option-stage" data-task-option-stage>
           <div class="task-option-stage-header">
-            <p class="task-option-kicker">Step 1</p>
-            <div>
-              <p class="small muted">Choose how you'd like to add this maintenance task.</p>
-              <p class="task-option-stage-title">We&rsquo;ll open a focused page in this popup for your selection.</p>
-            </div>
+            <p class="task-option-stage-title">Choose how you'd like to add this maintenance task.</p>
+            <p class="small muted">Pick an option below to jump straight into the right form.</p>
           </div>
           <div class="task-option-grid">
             <button type="button" class="task-option" data-task-option="existing">
@@ -203,6 +200,10 @@ function viewDashboard(){
             <button type="button" class="task-option" data-task-option="new">
               <span class="task-option-title">Create a new task</span>
               <span class="task-option-sub">Start a new maintenance task and schedule it instantly.</span>
+            </button>
+            <button type="button" class="task-option" data-task-option="one-time">
+              <span class="task-option-title">Add a one-time task</span>
+              <span class="task-option-sub">Create a single occurrence that won't appear in Maintenance Settings.</span>
             </button>
           </div>
           <div class="task-option-actions">
@@ -223,7 +224,7 @@ function viewDashboard(){
             <div class="task-existing-search">
               <label>Search tasks<input type="search" id="dashTaskExistingSearch" placeholder="Search saved maintenance tasks" autocomplete="off"></label>
             </div>
-            <label>Maintenance task<select id="dashTaskExistingSelect"></select></label>
+            <label>Maintenance task<select id="dashTaskExistingSelect" class="task-existing-select"></select></label>
             <p class="small muted">Pick a task saved in Maintenance Settings to schedule it on the calendar.</p>
             <p class="small muted" data-task-existing-empty hidden>No maintenance tasks yet. Create one below to get started.</p>
             <p class="small muted" data-task-existing-search-empty hidden>No tasks match your search. Try a different name.</p>
@@ -273,6 +274,29 @@ function viewDashboard(){
             <div class="modal-actions">
               <button type="button" class="secondary" data-step-back>Back</button>
               <button type="submit" class="primary" data-task-submit>Create Task</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="task-option-page" data-task-page="one-time" hidden>
+          <div class="task-option-page-header">
+            <button type="button" class="task-option-back" data-step-back aria-label="Go back to task picker">← Back</button>
+            <div>
+              <p class="task-option-kicker">One-time task</p>
+              <p class="task-option-stage-title">Schedule a single maintenance task</p>
+              <p class="small muted">One-time tasks are placed on the calendar only and are not added to Maintenance Settings.</p>
+            </div>
+          </div>
+          <form id="dashOneTimeForm" class="modal-form task-option-body" data-task-variant="one-time" hidden>
+            <div class="modal-grid">
+              <label>Task name<input id="dashOneTimeName" required placeholder="Task"></label>
+              <label>Calendar date<input type="date" id="dashOneTimeDate" required></label>
+              <label>Notes<textarea id="dashOneTimeNote" rows="3" placeholder="Optional note"></textarea></label>
+            </div>
+            <p class="small muted task-one-time-hint">One-time tasks stay on the calendar only—they won't be added to Maintenance Settings.</p>
+            <div class="modal-actions">
+              <button type="button" class="secondary" data-step-back>Back</button>
+              <button type="submit" class="primary">Add One-time Task</button>
             </div>
           </form>
         </div>

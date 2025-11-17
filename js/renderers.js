@@ -3206,6 +3206,10 @@ function renderDashboard(){
   const existingTaskSelect = document.getElementById("dashTaskExistingSelect");
   const existingTaskEmpty  = taskExistingForm?.querySelector('[data-task-existing-empty]');
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
+  const oneTimeForm      = document.getElementById("dashOneTimeForm");
+  const oneTimeNameInput = document.getElementById("dashOneTimeName");
+  const oneTimeDateInput = document.getElementById("dashOneTimeDate");
+  const oneTimeNoteInput = document.getElementById("dashOneTimeNote");
   const jobNameInput     = document.getElementById("dashJobName");
   const jobEstimateInput = document.getElementById("dashJobEstimate");
   const jobChargeInput   = document.getElementById("dashJobCharge");
@@ -3323,13 +3327,41 @@ function renderDashboard(){
 
   let activeTaskVariant = null;
 
+  function collapseExistingTaskDropdown(){
+    if (!existingTaskSelect) return;
+    existingTaskSelect.removeAttribute("size");
+    existingTaskSelect.removeAttribute("data-dropdown-open");
+  }
+
+  function expandExistingTaskDropdown(searchTerm = ""){
+    if (!existingTaskSelect || existingTaskSelect.disabled){
+      collapseExistingTaskDropdown();
+      return;
+    }
+    const options = Array.from(existingTaskSelect.options || []).filter(opt => !opt.disabled);
+    if (!options.length){
+      collapseExistingTaskDropdown();
+      return;
+    }
+    const size = Math.min(Math.max(options.length, 3), 8);
+    existingTaskSelect.size = size;
+    existingTaskSelect.setAttribute("data-dropdown-open", "true");
+    const normalized = (searchTerm || "").trim();
+    if (taskExistingSearchInput && document.activeElement === taskExistingSearchInput && normalized.length >= 0){
+      try { existingTaskSelect.focus({ preventScroll: true }); }
+      catch (_){ existingTaskSelect.focus(); }
+    }
+  }
+
   function setTaskOptionPage(target){
-    const choice = target === "existing" ? "existing" : target === "new" ? "new" : null;
+    const allowed = ["existing", "new", "one-time"];
+    const choice = allowed.includes(target) ? target : null;
     activeTaskVariant = choice;
 
     if (taskOptionStage) taskOptionStage.hidden = !!choice;
     if (taskExistingForm) taskExistingForm.hidden = choice !== "existing";
     if (taskForm) taskForm.hidden = choice !== "new";
+    if (oneTimeForm) oneTimeForm.hidden = choice !== "one-time";
 
     if (choice){
       modal?.setAttribute("data-task-page", choice);
@@ -3340,6 +3372,12 @@ function renderDashboard(){
     }else{
       modal?.removeAttribute("data-task-page");
       modalCard?.removeAttribute("data-task-page");
+    }
+
+    if (choice === "existing"){
+      expandExistingTaskDropdown(taskExistingSearchInput?.value || "");
+    }else{
+      collapseExistingTaskDropdown();
     }
 
     taskOptionPages.forEach(page => {
@@ -3404,6 +3442,15 @@ function renderDashboard(){
     if (taskExistingSearchInput){
       taskExistingSearchInput.disabled = !hasExisting;
     }
+
+    const shouldExpand = hasExisting && (
+      (document.activeElement === taskExistingSearchInput) || ((searchTerm || "").trim().length > 0)
+    );
+    if (shouldExpand){
+      expandExistingTaskDropdown(searchTerm);
+    }else{
+      collapseExistingTaskDropdown();
+    }
   }
 
   function resetExistingTaskForm(){
@@ -3414,12 +3461,20 @@ function renderDashboard(){
     }
   }
 
+  function resetOneTimeTaskForm(){
+    if (oneTimeForm) oneTimeForm.reset();
+    syncOneTimeDateInput();
+  }
+
   function showTaskOptionStage(){
+    resetExistingTaskForm();
+    resetOneTimeTaskForm();
     setTaskOptionPage(null);
   }
 
   function activateTaskVariant(variant){
-    const choice = variant === "existing" ? "existing" : "new";
+    const allowed = ["existing", "new", "one-time"];
+    const choice = allowed.includes(variant) ? variant : "new";
     setTaskOptionPage(choice);
     if (choice === "existing"){
       const term = taskExistingSearchInput?.value || "";
@@ -3431,6 +3486,11 @@ function renderDashboard(){
         taskExistingSearchInput.focus();
       }else if (existingTaskSelect && !existingTaskSelect.disabled){
         existingTaskSelect.focus();
+      }
+    }else if (choice === "one-time"){
+      syncOneTimeDateInput();
+      if (oneTimeNameInput){
+        oneTimeNameInput.focus();
       }
     }else{
       syncTaskMode(taskTypeSelect?.value || "interval");
@@ -3453,6 +3513,18 @@ function renderDashboard(){
     }
   }
 
+  function syncOneTimeDateInput(){
+    if (!oneTimeDateInput) return;
+    if (addContextDateISO){
+      oneTimeDateInput.value = addContextDateISO;
+      return;
+    }
+    const modalVisible = modal?.classList.contains("is-visible");
+    if (!modalVisible || !oneTimeDateInput.value){
+      oneTimeDateInput.value = ymd(new Date());
+    }
+  }
+
   function setContextDate(dateISO){
     addContextDateISO = dateISO || null;
     if (modal){
@@ -3463,6 +3535,7 @@ function renderDashboard(){
       }
     }
     syncTaskDateInput();
+    syncOneTimeDateInput();
     if (downDateInput){
       if (addContextDateISO){
         downDateInput.value = addContextDateISO;
@@ -3818,6 +3891,8 @@ function renderDashboard(){
     downForm?.reset();
     jobForm?.reset();
     resetGarnetForm();
+    resetOneTimeTaskForm();
+    collapseExistingTaskDropdown();
     setContextDate(null);
     pendingGarnetEditId = null;
   }
@@ -3994,7 +4069,7 @@ function renderDashboard(){
   taskOptionButtons.forEach(btn => {
     btn.addEventListener("click", ()=>{
       const variant = btn.getAttribute("data-task-option");
-      activateTaskVariant(variant === "existing" ? "existing" : "new");
+      activateTaskVariant(variant);
     });
   });
 
@@ -4002,11 +4077,37 @@ function renderDashboard(){
     refreshExistingTaskOptions(taskExistingSearchInput.value);
   });
 
+  taskExistingSearchInput?.addEventListener("focus", ()=>{
+    expandExistingTaskDropdown(taskExistingSearchInput.value);
+  });
+
+  taskExistingSearchInput?.addEventListener("blur", ()=>{
+    window.setTimeout(()=>{
+      if (document.activeElement !== existingTaskSelect){
+        collapseExistingTaskDropdown();
+      }
+    }, 80);
+  });
+
+  existingTaskSelect?.addEventListener("focus", ()=>{
+    expandExistingTaskDropdown(taskExistingSearchInput?.value || "");
+  });
+
+  existingTaskSelect?.addEventListener("blur", ()=>{
+    window.setTimeout(()=>{
+      if (document.activeElement !== taskExistingSearchInput){
+        collapseExistingTaskDropdown();
+      }
+    }, 120);
+  });
+
   taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
   syncTaskMode(taskTypeSelect?.value || "interval");
   syncTaskDateInput();
+  syncOneTimeDateInput();
   populateCategoryOptions();
   resetExistingTaskForm();
+  resetOneTimeTaskForm();
   showTaskOptionStage();
 
   addSubtaskBtn?.addEventListener("click", ()=>{
@@ -4148,6 +4249,46 @@ function renderDashboard(){
     setContextDate(calendarDateISO);
     saveCloudDebounced();
     toast(message);
+    closeModal();
+    renderDashboard();
+    const hash = (location.hash || "#").toLowerCase();
+    if (hash.startsWith("#/costs")){
+      renderCosts();
+    }
+  });
+
+  oneTimeForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    const name = (oneTimeNameInput?.value || "").trim();
+    if (!name){ alert("Task name is required."); return; }
+    const note = (oneTimeNoteInput?.value || "").trim();
+    const rawDate = (oneTimeDateInput?.value || "").trim();
+    const targetISO = rawDate ? ymd(rawDate) : (addContextDateISO || ymd(new Date()));
+    const condition = note || "One-time maintenance task";
+    const task = {
+      id: genId(name),
+      name,
+      mode: "asreq",
+      condition,
+      manualLink: "",
+      storeLink: "",
+      pn: "",
+      price: null,
+      cat: null,
+      parentTask: null,
+      order: ++window._maintOrderCounter,
+      calendarDateISO: targetISO || null,
+      completedDates: [],
+      variant: "instance",
+      templateId: null,
+      note,
+      downtimeHours: 1
+    };
+    const list = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = []);
+    list.unshift(task);
+    setContextDate(targetISO);
+    saveCloudDebounced();
+    toast("One-time task added to the calendar");
     closeModal();
     renderDashboard();
     const hash = (location.hash || "#").toLowerCase();

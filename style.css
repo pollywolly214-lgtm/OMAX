@@ -4512,13 +4512,19 @@ body.modal-open {
 }
 
 .modal-grid input,
-.modal-grid select {
+.modal-grid select,
+.modal-grid textarea {
   padding: 0.45rem 0.55rem;
   border: 1px solid #cdd4e1;
   border-radius: 6px;
   font-size: 0.95rem;
   color: #0b1120;
   background: #fff;
+}
+
+.modal-grid textarea {
+  resize: vertical;
+  min-height: 92px;
 }
 
 .task-option-stage {
@@ -4530,8 +4536,8 @@ body.modal-open {
 
 .task-option-stage-header {
   display: flex;
+  flex-direction: column;
   gap: 12px;
-  align-items: flex-start;
   padding: 12px;
   background: #f8fbff;
   border: 1px solid #d4ddf0;
@@ -4619,6 +4625,22 @@ body.modal-open {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.task-existing-select {
+  width: 100%;
+}
+
+.task-existing-select[data-dropdown-open] {
+  display: block;
+  max-height: 240px;
+  overflow: auto;
+  border-color: #0a63c2;
+  box-shadow: 0 8px 18px rgba(15, 35, 72, 0.16);
+}
+
+.task-one-time-hint {
+  margin: 0;
 }
 
 .dashboard-modal-card[data-task-page] [data-task-option-stage] {
