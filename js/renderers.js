@@ -186,7 +186,12 @@ function createIntervalTaskInstance(template){
     anchorTotal: null,
     completedDates: [],
     manualHistory: [],
-    note: template.note || ""
+    note: template.note || "",
+    downtimeHours: (()=>{
+      const raw = Number(template.downtimeHours);
+      if (Number.isFinite(raw) && raw > 0) return Math.max(1, Math.round(raw * 100) / 100);
+      return 1;
+    })()
   };
   if (Array.isArray(template.parts)){
     copy.parts = template.parts.map(part => part ? { ...part } : part).filter(Boolean);
@@ -228,6 +233,23 @@ function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
     if (template && template.templateId != null) instance.templateId = template.templateId;
     else if (template && template.id != null) instance.templateId = template.id;
     else instance.templateId = instance.id;
+  }
+
+  const resolveDowntime = ()=>{
+    const tplVal = template ? Number(template.downtimeHours) : NaN;
+    if (Number.isFinite(tplVal) && tplVal > 0) return tplVal;
+    const instVal = Number(instance.downtimeHours);
+    if (Number.isFinite(instVal) && instVal > 0) return instVal;
+    return 1;
+  };
+  let normalizedDowntime = resolveDowntime();
+  if (!Number.isFinite(normalizedDowntime) || normalizedDowntime <= 0){
+    normalizedDowntime = 1;
+  }
+  normalizedDowntime = Math.max(1, Math.round(normalizedDowntime * 100) / 100);
+  instance.downtimeHours = normalizedDowntime;
+  if (template){
+    template.downtimeHours = normalizedDowntime;
   }
 
   const interval = Number(instance.interval);
@@ -3171,6 +3193,7 @@ function renderDashboard(){
   const taskStoreInput   = document.getElementById("dashTaskStore");
   const taskPNInput      = document.getElementById("dashTaskPN");
   const taskPriceInput   = document.getElementById("dashTaskPrice");
+  const taskDowntimeInput= document.getElementById("dashTaskDowntime");
   const categorySelect   = document.getElementById("dashTaskCategory");
   const taskDateInput    = document.getElementById("dashTaskDate");
   const subtaskList      = document.getElementById("dashSubtaskList");
@@ -3719,6 +3742,9 @@ function renderDashboard(){
 
   function resetTaskForm(){
     taskForm?.reset();
+    if (taskDowntimeInput){
+      taskDowntimeInput.value = "1";
+    }
     subtaskList?.replaceChildren();
     resetExistingTaskForm();
     showTaskOptionStage();
@@ -3999,6 +4025,14 @@ function renderDashboard(){
     const pn     = (taskPNInput?.value || "").trim();
     const priceVal = taskPriceInput?.value;
     const price  = priceVal === "" ? null : Number(priceVal);
+    let downtimeVal = Number(taskDowntimeInput?.value);
+    if (!isFinite(downtimeVal) || downtimeVal <= 0){
+      downtimeVal = 1;
+    }
+    downtimeVal = Math.max(1, Math.round(downtimeVal * 100) / 100);
+    if (taskDowntimeInput){
+      taskDowntimeInput.value = String(downtimeVal);
+    }
     const catId  = (categorySelect?.value || "").trim() || null;
     const id     = genId(name);
     const rawDate = (taskDateInput?.value || "").trim();
@@ -4015,7 +4049,8 @@ function renderDashboard(){
       cat: catId,
       parentTask: null,
       order: ++window._maintOrderCounter,
-      calendarDateISO: null
+      calendarDateISO: null,
+      downtimeHours: downtimeVal
     };
     let message = "Task added";
     if (mode === "interval"){
@@ -4029,7 +4064,8 @@ function renderDashboard(){
         completedDates: [],
         manualHistory: [],
         variant: "template",
-        templateId: id
+        templateId: id,
+        downtimeHours: downtimeVal
       });
       const curHours = getCurrentMachineHours();
       const baselineHours = parseBaselineHours(taskLastInput?.value);
