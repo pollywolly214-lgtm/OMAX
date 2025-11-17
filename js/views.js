@@ -405,7 +405,7 @@ function taskDetailsInterval(task){
       <div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="interval" value="${task.price != null ? task.price : ""}" /></div>
     </div>
     <div class="row"><label>Time to complete (hrs):</label>
-      <div><input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${task.id}" data-list="interval" value="${task.downtimeHours != null ? task.downtimeHours : ""}" /></div>
+      <div><input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${task.id}" data-list="interval" value="${task.downtimeHours != null ? task.downtimeHours : 1}" /></div>
     </div>
     <div class="row"><label>Actions:</label>
       <div>
@@ -439,7 +439,7 @@ function taskDetailsAsReq(task){
       <div><input type="number" step="0.01" min="0" data-k="price" data-id="${task.id}" data-list="asreq" value="${task.price != null ? task.price : ""}" /></div>
     </div>
     <div class="row"><label>Time to complete (hrs):</label>
-      <div><input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${task.id}" data-list="asreq" value="${task.downtimeHours != null ? task.downtimeHours : ""}" /></div>
+      <div><input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${task.id}" data-list="asreq" value="${task.downtimeHours != null ? task.downtimeHours : 1}" /></div>
     </div>
     <div class="row"><label>Actions:</label>
       <div><button class="danger" data-remove="${task.id}" data-from="asreq">Remove</button></div>
@@ -451,6 +451,27 @@ function viewSettings(){
   // ------- Folder store (nesting via parent=null|folderId). Back-compat if older entries lack "parent".
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
   for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
+
+  const ensureDowntimeDefault = (task)=>{
+    if (!task || typeof task !== "object") return false;
+    const val = Number(task.downtimeHours);
+    if (!Number.isFinite(val) || val <= 0){
+      task.downtimeHours = 1;
+      return true;
+    }
+    return false;
+  };
+
+  let normalizedDowntime = false;
+  if (Array.isArray(window.tasksInterval)){
+    window.tasksInterval.forEach(task => { if (ensureDowntimeDefault(task)) normalizedDowntime = true; });
+  }
+  if (Array.isArray(window.tasksAsReq)){
+    window.tasksAsReq.forEach(task => { if (ensureDowntimeDefault(task)) normalizedDowntime = true; });
+  }
+  if (normalizedDowntime && typeof saveCloudDebounced === "function"){
+    saveCloudDebounced();
+  }
 
   // ------- Small helpers (IDs/data-* kept the same so existing handlers work) -------
    
