@@ -74,6 +74,7 @@ if (typeof window !== "undefined"){
   window.getDailyCutHoursEntry = getDailyCutHoursEntry;
   window.normalizeDailyCutHours = normalizeDailyCutHours;
   window.normalizeDateISO = normalizeDateISO;
+  window.__opportunityStateReady = false;
 }
 
 /* Root helpers */
@@ -1184,6 +1185,7 @@ if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
 if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+if (!Array.isArray(window.opportunityRollups)) window.opportunityRollups = [];
 if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
@@ -1199,6 +1201,7 @@ let tasksAsReq    = window.tasksAsReq;
 let inventory     = window.inventory;
 let cuttingJobs   = window.cuttingJobs;
 let completedCuttingJobs = window.completedCuttingJobs;
+let opportunityRollups = window.opportunityRollups;
 let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
@@ -1447,6 +1450,9 @@ function snapshotState(){
     garnetCleanings,
     dailyCutHours: Array.isArray(dailyCutHours)
       ? dailyCutHours.map(entry => ({ ...entry }))
+      : [],
+    opportunityRollups: Array.isArray(window.opportunityRollups)
+      ? window.opportunityRollups.map(entry => ({ ...entry }))
       : [],
     pumpEff: safePumpEff,
     deletedItems: trashSnapshot,
@@ -1840,6 +1846,9 @@ function setDailyCutHoursEntry(dateISO, hours, { source = "manual", preserveManu
 }
 
 function adoptState(doc){
+  if (typeof window !== "undefined"){
+    window.__opportunityStateReady = false;
+  }
   const data = doc || {};
 
   // Core lists (fallback to defaults if empty/missing)
@@ -1861,6 +1870,7 @@ function adoptState(doc){
   }
   garnetCleanings = Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [];
   dailyCutHours = normalizeDailyCutHours(Array.isArray(data.dailyCutHours) ? data.dailyCutHours : []);
+  opportunityRollups = Array.isArray(data.opportunityRollups) ? data.opportunityRollups : [];
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -1871,6 +1881,7 @@ function adoptState(doc){
   window.orderRequests = orderRequests;
   window.garnetCleanings = garnetCleanings;
   window.dailyCutHours = dailyCutHours;
+  window.opportunityRollups = opportunityRollups;
   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
   window.deletedItems = deletedItems;
   purgeExpiredDeletedItems();
@@ -2024,6 +2035,31 @@ function adoptState(doc){
   ensureTaskCategories();
   ensureJobCategories();
   syncRenderTotalsFromHistory();
+
+  if (typeof window !== "undefined"){
+    window.__opportunityStateReady = true;
+    try {
+      if (typeof window.CustomEvent === "function"){
+        window.dispatchEvent(new CustomEvent("opportunity:data-ready", {
+          detail: { timestamp: Date.now() }
+        }));
+      } else if (window.document && typeof window.document.createEvent === "function"){
+        const evt = window.document.createEvent("CustomEvent");
+        evt.initCustomEvent("opportunity:data-ready", false, false, { timestamp: Date.now() });
+        window.dispatchEvent(evt);
+      }
+    } catch (err) {
+      console.warn("Failed to dispatch opportunity readiness event", err);
+    }
+  }
+
+  if (typeof window.scheduleOpportunityRecompute === "function"){
+    try {
+      window.scheduleOpportunityRecompute();
+    } catch (err) {
+      console.warn("Failed to schedule opportunity recompute", err);
+    }
+  }
 }
 
 
@@ -2070,6 +2106,10 @@ async function loadFromCloud(){
     let snap = await FB.docRef.get();
     let data = snap.exists ? (typeof snap.data === "function" ? snap.data() : snap.data()) : null;
 
+    if (snap.exists && data && typeof data === "object" && !Array.isArray(data.opportunityRollups)){
+      data.opportunityRollups = [];
+    }
+
     if (!stateHasMeaningfulData(data)){
       const migrated = await migrateLegacyWorkspaceDoc();
       if (migrated){
@@ -2099,6 +2139,7 @@ async function loadFromCloud(){
         orderRequests: Array.isArray(window.orderRequests) && window.orderRequests.length ? window.orderRequests.slice() : [typeof createOrderRequest === "function" ? createOrderRequest() : { id:"req_"+Date.now(), items:[] }],
         orderRequestTab: typeof window.orderRequestTab === "string" ? window.orderRequestTab : "active",
         dailyCutHours: Array.isArray(window.dailyCutHours) ? window.dailyCutHours.slice() : [],
+        opportunityRollups: Array.isArray(window.opportunityRollups) ? window.opportunityRollups.slice() : [],
         jobFolders: typeof defaultJobFolders === "function" ? defaultJobFolders() : [],
         pumpEff: pe,
         settingsFolders: folders,
@@ -2311,6 +2352,7 @@ const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes
     orderRequests: [createOrderRequest()],
     orderRequestTab: "active",
     dailyCutHours: [],
+    opportunityRollups: [],
     garnetCleanings: [],
     pumpEff: { ...pumpDefaults },
     deletedItems: [],
