@@ -303,29 +303,24 @@ function applyFirestoreSettings(db){
     return;
   }
 
-  if (!isDevEnv && hasHostSetting){
-    firebaseSettingsApplied = true;
-    console.info("Firestore is connected to the Production/Vercel host.");
-    return;
-  }
+  const mergedSettings = { ...currentSettings };
+  mergedSettings.ignoreUndefinedProperties = true;
 
-  const mergedSettings = { ...currentSettings, ignoreUndefinedProperties: true };
-  if (ignoreAlreadyEnabled && (!isDevEnv || hasHostSetting)){
-    firebaseSettingsApplied = true;
-    if (!isDevEnv) console.info("Firestore is connected to the Production/Vercel host.");
-    return;
-  }
-
-  if (isDevEnv && !hasHostSetting){
-    mergedSettings.host = emulatorHost;
-    mergedSettings.ssl = false;
-    console.info("Firestore is connected to the Local Emulator.");
-  } else if (isDevEnv && hasHostSetting){
-    console.info("Firestore emulator already configured; leaving settings untouched to prevent override warnings.");
-    firebaseSettingsApplied = true;
-    return;
-  } else if (!isDevEnv) {
-    console.info("Firestore is connected to the Production/Vercel host.");
+  if (isDevEnv){
+    if (!hasHostSetting){
+      mergedSettings.host = emulatorHost;
+      mergedSettings.ssl = false;
+      console.info("Firestore is connected to the Local Emulator.");
+    } else {
+      console.info("Firestore emulator already configured; leaving settings untouched to prevent override warnings.");
+    }
+  } else {
+    // In preview/prod we must not apply emulator host settings.
+    delete mergedSettings.host;
+    delete mergedSettings.ssl;
+    if (!ignoreAlreadyEnabled) {
+      console.info("Firestore is connected to the Production/Vercel host.");
+    }
   }
 
   try {
