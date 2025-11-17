@@ -778,9 +778,11 @@ function getResponsiveLayout(state, minWidth, minHeight){
   const layout = {};
   const rootWidth = getLayoutRootWidth(state);
   const scale = layoutScaleFactor(state?.layoutById, rootWidth);
+  const scaledMinWidth = Math.max(1, Math.round((Number(minWidth) || 0) * scale));
+  const scaledMinHeight = Math.max(1, Math.round((Number(minHeight) || 0) * scale));
   Object.entries(state?.layoutById || {}).forEach(([id, box]) => {
     const scaled = scaleLayoutBox(box, scale);
-    const adjusted = clampLayoutBox(scaled, rootWidth, minWidth, minHeight);
+    const adjusted = clampLayoutBox(scaled, rootWidth, scaledMinWidth, scaledMinHeight);
     if (adjusted) layout[id] = adjusted;
   });
   return layout;
