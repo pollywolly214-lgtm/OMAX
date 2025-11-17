@@ -188,10 +188,6 @@ function viewDashboard(){
       <section class="dash-modal-step" data-step="task" hidden>
         <h4>Add maintenance task</h4>
         <div class="task-option-stage" data-task-option-stage>
-          <div class="task-option-stage-header">
-            <p class="task-option-stage-title">Choose how you'd like to add this maintenance task.</p>
-            <p class="small muted">Pick an option below to jump straight into the right form.</p>
-          </div>
           <div class="task-option-grid">
             <button type="button" class="task-option" data-task-option="existing">
               <span class="task-option-title">Use an existing task</span>
@@ -223,8 +219,8 @@ function viewDashboard(){
           <form id="dashTaskExistingForm" class="modal-form task-option-body" data-task-variant="existing" hidden>
             <div class="task-existing-search">
               <label>Search tasks<input type="search" id="dashTaskExistingSearch" placeholder="Search saved maintenance tasks" autocomplete="off"></label>
+              <div class="task-existing-results" data-task-existing-results hidden></div>
             </div>
-            <label>Maintenance task<select id="dashTaskExistingSelect" class="task-existing-select"></select></label>
             <p class="small muted">Pick a task saved in Maintenance Settings to schedule it on the calendar.</p>
             <p class="small muted" data-task-existing-empty hidden>No maintenance tasks yet. Create one below to get started.</p>
             <p class="small muted" data-task-existing-search-empty hidden>No tasks match your search. Try a different name.</p>

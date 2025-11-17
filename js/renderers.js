@@ -3203,7 +3203,7 @@ function renderDashboard(){
   const taskOptionPages  = Array.from(modal?.querySelectorAll('[data-task-page]') || []);
   const taskExistingSearchInput = document.getElementById("dashTaskExistingSearch");
   const taskExistingSearchWrapper = taskExistingForm?.querySelector(".task-existing-search");
-  const existingTaskSelect = document.getElementById("dashTaskExistingSelect");
+  const existingTaskResults = taskExistingForm?.querySelector('[data-task-existing-results]');
   const existingTaskEmpty  = taskExistingForm?.querySelector('[data-task-existing-empty]');
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
   const oneTimeForm      = document.getElementById("dashOneTimeForm");
@@ -3326,31 +3326,17 @@ function renderDashboard(){
   }
 
   let activeTaskVariant = null;
+  let selectedExistingTaskId = null;
 
-  function collapseExistingTaskDropdown(){
-    if (!existingTaskSelect) return;
-    existingTaskSelect.removeAttribute("size");
-    existingTaskSelect.removeAttribute("data-dropdown-open");
-  }
-
-  function expandExistingTaskDropdown(searchTerm = ""){
-    if (!existingTaskSelect || existingTaskSelect.disabled){
-      collapseExistingTaskDropdown();
-      return;
-    }
-    const options = Array.from(existingTaskSelect.options || []).filter(opt => !opt.disabled);
-    if (!options.length){
-      collapseExistingTaskDropdown();
-      return;
-    }
-    const size = Math.min(Math.max(options.length, 3), 8);
-    existingTaskSelect.size = size;
-    existingTaskSelect.setAttribute("data-dropdown-open", "true");
-    const normalized = (searchTerm || "").trim();
-    if (taskExistingSearchInput && document.activeElement === taskExistingSearchInput && normalized.length >= 0){
-      try { existingTaskSelect.focus({ preventScroll: true }); }
-      catch (_){ existingTaskSelect.focus(); }
-    }
+  function setSelectedExistingTask(id){
+    selectedExistingTaskId = id || null;
+    if (!existingTaskResults) return;
+    const buttons = Array.from(existingTaskResults.querySelectorAll('[data-task-id]'));
+    buttons.forEach(btn => {
+      const isMatch = btn.getAttribute("data-task-id") === String(selectedExistingTaskId);
+      btn.classList.toggle("is-active", isMatch);
+      btn.setAttribute("aria-pressed", isMatch ? "true" : "false");
+    });
   }
 
   function setTaskOptionPage(target){
@@ -3374,12 +3360,6 @@ function renderDashboard(){
       modalCard?.removeAttribute("data-task-page");
     }
 
-    if (choice === "existing"){
-      expandExistingTaskDropdown(taskExistingSearchInput?.value || "");
-    }else{
-      collapseExistingTaskDropdown();
-    }
-
     taskOptionPages.forEach(page => {
       const variant = page.getAttribute("data-task-page") || "";
       page.hidden = !choice || variant !== choice;
@@ -3394,40 +3374,28 @@ function renderDashboard(){
       ? metas.filter(meta => meta.label.toLowerCase().includes(normalized))
       : metas;
 
-    if (existingTaskSelect){
-      existingTaskSelect.innerHTML = "";
-      if (!hasExisting){
-        existingTaskSelect.disabled = true;
-        const opt = document.createElement("option");
-        opt.value = "";
-        opt.textContent = "No maintenance tasks saved yet";
-        opt.disabled = true;
-        opt.selected = true;
-        existingTaskSelect.appendChild(opt);
-      }else if (!filtered.length){
-        existingTaskSelect.disabled = true;
-        const opt = document.createElement("option");
-        opt.value = "";
-        opt.textContent = "No tasks match your search";
-        opt.disabled = true;
-        opt.selected = true;
-        existingTaskSelect.appendChild(opt);
-      }else{
-        existingTaskSelect.disabled = false;
-        const placeholder = document.createElement("option");
-        placeholder.value = "";
-        placeholder.textContent = "Select a maintenance task…";
-        placeholder.disabled = true;
-        placeholder.selected = true;
-        existingTaskSelect.appendChild(placeholder);
+    if (existingTaskResults){
+      existingTaskResults.innerHTML = "";
+      const shouldShowList = hasExisting && filtered.length > 0 && (
+        document.activeElement === taskExistingSearchInput || normalized.length > 0
+      );
+      if (shouldShowList){
         filtered.forEach(meta => {
-          const opt = document.createElement("option");
-          opt.value = String(meta.task.id);
-          opt.textContent = meta.label;
-          opt.dataset.list = meta.list;
-          opt.dataset.mode = meta.task.mode;
-          existingTaskSelect.appendChild(opt);
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "task-existing-result";
+          btn.textContent = meta.label;
+          btn.dataset.taskId = String(meta.task.id);
+          btn.dataset.list = meta.list;
+          btn.dataset.mode = meta.task.mode;
+          btn.addEventListener("click", ()=>{
+            setSelectedExistingTask(btn.dataset.taskId || "");
+          });
+          existingTaskResults.appendChild(btn);
         });
+        existingTaskResults.hidden = false;
+      }else{
+        existingTaskResults.hidden = true;
       }
     }
 
@@ -3442,23 +3410,15 @@ function renderDashboard(){
     if (taskExistingSearchInput){
       taskExistingSearchInput.disabled = !hasExisting;
     }
-
-    const shouldExpand = hasExisting && (
-      (document.activeElement === taskExistingSearchInput) || ((searchTerm || "").trim().length > 0)
-    );
-    if (shouldExpand){
-      expandExistingTaskDropdown(searchTerm);
-    }else{
-      collapseExistingTaskDropdown();
+    if (selectedExistingTaskId && !filtered.some(meta => String(meta.task.id) === String(selectedExistingTaskId))){
+      setSelectedExistingTask(null);
     }
   }
 
   function resetExistingTaskForm(){
     if (taskExistingSearchInput) taskExistingSearchInput.value = "";
+    setSelectedExistingTask(null);
     refreshExistingTaskOptions("");
-    if (existingTaskSelect){
-      existingTaskSelect.selectedIndex = 0;
-    }
   }
 
   function resetOneTimeTaskForm(){
@@ -3479,13 +3439,8 @@ function renderDashboard(){
     if (choice === "existing"){
       const term = taskExistingSearchInput?.value || "";
       refreshExistingTaskOptions(term);
-      if (existingTaskSelect){
-        existingTaskSelect.selectedIndex = 0;
-      }
       if (taskExistingSearchInput && !taskExistingSearchInput.disabled){
         taskExistingSearchInput.focus();
-      }else if (existingTaskSelect && !existingTaskSelect.disabled){
-        existingTaskSelect.focus();
       }
     }else if (choice === "one-time"){
       syncOneTimeDateInput();
@@ -4078,27 +4033,27 @@ function renderDashboard(){
   });
 
   taskExistingSearchInput?.addEventListener("focus", ()=>{
-    expandExistingTaskDropdown(taskExistingSearchInput.value);
+    refreshExistingTaskOptions(taskExistingSearchInput.value);
+    setSelectedExistingTask(selectedExistingTaskId);
   });
 
   taskExistingSearchInput?.addEventListener("blur", ()=>{
     window.setTimeout(()=>{
-      if (document.activeElement !== existingTaskSelect){
-        collapseExistingTaskDropdown();
-      }
-    }, 80);
-  });
-
-  existingTaskSelect?.addEventListener("focus", ()=>{
-    expandExistingTaskDropdown(taskExistingSearchInput?.value || "");
-  });
-
-  existingTaskSelect?.addEventListener("blur", ()=>{
-    window.setTimeout(()=>{
-      if (document.activeElement !== taskExistingSearchInput){
-        collapseExistingTaskDropdown();
-      }
+      if (existingTaskResults && existingTaskResults.contains(document.activeElement)) return;
+      if (existingTaskResults) existingTaskResults.hidden = true;
     }, 120);
+  });
+
+  existingTaskResults?.addEventListener("focusin", ()=>{
+    if (existingTaskResults) existingTaskResults.hidden = false;
+  });
+
+  existingTaskResults?.addEventListener("focusout", ()=>{
+    window.setTimeout(()=>{
+      if (document.activeElement === taskExistingSearchInput) return;
+      if (existingTaskResults && existingTaskResults.contains(document.activeElement)) return;
+      if (existingTaskResults) existingTaskResults.hidden = true;
+    }, 80);
   });
 
   taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
@@ -4299,7 +4254,7 @@ function renderDashboard(){
 
   taskExistingForm?.addEventListener("submit", (e)=>{
     e.preventDefault();
-    const selectedId = existingTaskSelect?.value;
+    const selectedId = selectedExistingTaskId;
     if (!selectedId){ alert("Select a maintenance task to schedule."); return; }
     const meta = findMaintenanceTaskById(selectedId);
     if (!meta || !meta.task){

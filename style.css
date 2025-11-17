@@ -4627,18 +4627,6 @@ body.modal-open {
   gap: 12px;
 }
 
-.task-existing-select {
-  width: 100%;
-}
-
-.task-existing-select[data-dropdown-open] {
-  display: block;
-  max-height: 240px;
-  overflow: auto;
-  border-color: #0a63c2;
-  box-shadow: 0 8px 18px rgba(15, 35, 72, 0.16);
-}
-
 .task-one-time-hint {
   margin: 0;
 }
@@ -4726,25 +4714,40 @@ form[data-task-variant="existing"] {
   gap: 12px;
 }
 
-form[data-task-variant="existing"] label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 0.9rem;
-  color: inherit;
-}
 
-form[data-task-variant="existing"] select {
-  padding: 0.45rem 0.55rem;
-  border: 1px solid #cdd4e1;
-  border-radius: 6px;
-  font-size: 0.95rem;
-  color: #0b1120;
+.task-existing-results {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+  width: min(440px, 100%);
+  padding: 8px;
   background: #fff;
+  border: 1px solid #cdd4e1;
+  border-radius: 10px;
+  box-shadow: 0 8px 18px rgba(15, 35, 72, 0.12);
 }
 
-form[data-task-variant="existing"] select:disabled {
-  opacity: 0.65;
+.task-existing-result {
+  text-align: left;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid #d8deed;
+  background: #f7f9ff;
+  color: inherit;
+  cursor: pointer;
+}
+
+.task-existing-result:hover,
+.task-existing-result:focus-visible {
+  outline: none;
+  border-color: #0a63c2;
+  background: #eef3fb;
+}
+
+.task-existing-result.is-active {
+  border-color: #084cba;
+  background: #e7efff;
+  box-shadow: 0 0 0 3px rgba(8, 76, 186, 0.2);
 }
 
 .modal-actions {
