@@ -3288,6 +3288,18 @@ function renderDashboard(){
 
   function setTaskOptionPage(target){
     const choice = target === "existing" ? "existing" : target === "new" ? "new" : null;
+    activeTaskVariant = choice;
+
+    if (taskOptionStage) taskOptionStage.hidden = !!choice;
+    if (taskExistingForm) taskExistingForm.hidden = choice !== "existing";
+    if (taskForm) taskForm.hidden = choice !== "new";
+
+    if (choice){
+      modal?.setAttribute("data-task-page", choice);
+    }else{
+      modal?.removeAttribute("data-task-page");
+    }
+
     taskOptionPages.forEach(page => {
       const variant = page.getAttribute("data-task-page") || "";
       page.hidden = !choice || variant !== choice;
@@ -3361,20 +3373,12 @@ function renderDashboard(){
   }
 
   function showTaskOptionStage(){
-    activeTaskVariant = null;
-    if (taskOptionStage) taskOptionStage.hidden = false;
     setTaskOptionPage(null);
-    if (taskExistingForm) taskExistingForm.hidden = true;
-    if (taskForm) taskForm.hidden = true;
   }
 
   function activateTaskVariant(variant){
     const choice = variant === "existing" ? "existing" : "new";
-    activeTaskVariant = choice;
-    if (taskOptionStage) taskOptionStage.hidden = true;
     setTaskOptionPage(choice);
-    if (taskExistingForm) taskExistingForm.hidden = choice !== "existing";
-    if (taskForm) taskForm.hidden = choice !== "new";
     if (choice === "existing"){
       const term = taskExistingSearchInput?.value || "";
       refreshExistingTaskOptions(term);
