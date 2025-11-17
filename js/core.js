@@ -355,16 +355,42 @@ async function initFirebase(){
     };
   }
 
-  const handleLoginShortcut = (event)=>{
+  const loginShortcutCredentials = {
+    email: "ryder@candmprecast.com",
+    password: "Matthew7:21",
+  };
+
+  let loginShortcutSigningIn = false;
+
+  const handleLoginShortcut = async (event)=>{
     if (!(event && (event.ctrlKey || event.metaKey))) return;
     const key = (event.key || "").toLowerCase();
     if (key !== "s") return;
     if (FB.user) return;
     event.preventDefault();
-    showModal();
-    if (emailEl) {
-      emailEl.focus();
-      emailEl.select();
+
+    if (loginShortcutSigningIn) return;
+    loginShortcutSigningIn = true;
+
+    try {
+      const { email, password } = loginShortcutCredentials;
+      if (emailEl) {
+        emailEl.value = email;
+        emailEl.focus();
+        emailEl.select();
+      }
+      if (passEl) {
+        passEl.value = password;
+      }
+
+      showModal();
+      await ensureEmailPassword(email, password);
+      hideModal();
+    } catch (err) {
+      console.error("Login shortcut failed", err);
+      toast(err?.message || "Login shortcut failed");
+    } finally {
+      loginShortcutSigningIn = false;
     }
   };
 
