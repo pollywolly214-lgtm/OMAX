@@ -186,6 +186,7 @@ function createIntervalTaskInstance(template){
     anchorTotal: null,
     completedDates: [],
     manualHistory: [],
+    occurrenceNotes: {},
     note: template.note || "",
     downtimeHours: (()=>{
       const raw = Number(template.downtimeHours);
@@ -199,7 +200,7 @@ function createIntervalTaskInstance(template){
   return copy;
 }
 
-function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
+function scheduleExistingIntervalTask(task, { dateISO = null, note = "" } = {}){
   if (!task || task.mode !== "interval") return null;
   if (!Array.isArray(tasksInterval)){
     if (Array.isArray(window.tasksInterval)){
@@ -246,7 +247,7 @@ function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
   if (!Number.isFinite(normalizedDowntime) || normalizedDowntime <= 0){
     normalizedDowntime = 1;
   }
-  normalizedDowntime = Math.max(1, Math.round(normalizedDowntime * 100) / 100);
+  normalizedDowntime = Math.max(0.25, Math.round(normalizedDowntime * 100) / 100);
   instance.downtimeHours = normalizedDowntime;
   if (template){
     template.downtimeHours = normalizedDowntime;
@@ -282,6 +283,7 @@ function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
   if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
     targetDate.setHours(0,0,0,0);
     targetISO = ymd(targetDate);
+    instance.calendarDateISO = targetISO;
     const isPastOrToday = targetDate.getTime() <= today.getTime();
     const hoursAtTarget = hoursSnapshotOnOrBefore(targetISO);
     let consumedHours;
@@ -341,6 +343,9 @@ function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
   }
 
   instance.calendarDateISO = targetISO || null;
+  if (note){
+    try { setOccurrenceNoteForTask(instance, targetISO, note); } catch (err) { /* noop */ }
+  }
   if (template && template.variant !== "template"){
     ensureTaskVariant(template, "interval");
     if (template.templateId == null) template.templateId = template.id;
@@ -3281,6 +3286,7 @@ function renderDashboard(){
   const existingTaskResults = taskExistingForm?.querySelector('[data-task-existing-results]');
   const existingTaskEmpty  = taskExistingForm?.querySelector('[data-task-existing-empty]');
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
+  const taskExistingNoteInput = document.getElementById("dashTaskExistingNote");
   const taskCardBackButtons = Array.from(modal?.querySelectorAll('[data-task-card-back]') || []);
   const oneTimeForm      = document.getElementById("dashOneTimeForm");
   const oneTimeNameInput = document.getElementById("dashOneTimeName");
@@ -3499,6 +3505,7 @@ function renderDashboard(){
 
   function resetExistingTaskForm(){
     if (taskExistingSearchInput) taskExistingSearchInput.value = "";
+    if (taskExistingNoteInput) taskExistingNoteInput.value = "";
     setSelectedExistingTask(null);
     refreshExistingTaskOptions("");
   }
@@ -4177,7 +4184,7 @@ function renderDashboard(){
     if (!isFinite(downtimeVal) || downtimeVal <= 0){
       downtimeVal = 1;
     }
-    downtimeVal = Math.max(1, Math.round(downtimeVal * 100) / 100);
+    downtimeVal = Math.max(0.25, Math.round(downtimeVal * 100) / 100);
     if (taskDowntimeInput){
       taskDowntimeInput.value = String(downtimeVal);
     }
@@ -4298,6 +4305,9 @@ function renderDashboard(){
     toast(message);
     closeModal();
     renderDashboard();
+    if (typeof renderCalendar === "function"){
+      renderCalendar();
+    }
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -4338,6 +4348,9 @@ function renderDashboard(){
     toast("One-time task added to the calendar");
     closeModal();
     renderDashboard();
+    if (typeof renderCalendar === "function"){
+      renderCalendar();
+    }
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -4356,9 +4369,10 @@ function renderDashboard(){
     }
     const task = meta.task;
     const targetISO = addContextDateISO || ymd(new Date());
+    const occurrenceNote = (taskExistingNoteInput?.value || "").trim();
     let message = "Maintenance task added";
     if (task.mode === "interval"){
-      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO }) || task;
+      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO, note: occurrenceNote }) || task;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
       let dateLabel = targetISO;
@@ -4375,6 +4389,9 @@ function renderDashboard(){
         : `Scheduled "${instance.name || "Task"}" for ${dateLabel}`;
     }else{
       task.calendarDateISO = targetISO || null;
+      if (occurrenceNote){
+        setOccurrenceNoteForTask(task, targetISO, occurrenceNote);
+      }
       message = "As-required task linked from Maintenance Settings";
     }
     setContextDate(targetISO);
@@ -4382,6 +4399,9 @@ function renderDashboard(){
     toast(message);
     closeModal();
     renderDashboard();
+    if (typeof renderCalendar === "function"){
+      renderCalendar();
+    }
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -4481,7 +4501,13 @@ function renderDashboard(){
 
   refreshDownTimeList();
 
-  document.getElementById("calendarAddBtn")?.addEventListener("click", ()=> openModal("picker"));
+  document.getElementById("calendarAddBtn")?.addEventListener("click", ()=>{
+    if (typeof triggerDashboardAddPicker === "function"){
+      triggerDashboardAddPicker({});
+      return;
+    }
+    openModal("picker");
+  });
   document.getElementById("calendarToggleBtn")?.addEventListener("click", (event)=>{
     toggleCalendarShowAllMonths();
     if (event?.currentTarget instanceof HTMLElement){
@@ -5779,6 +5805,7 @@ function renderSettings(){
       #explorer details.cat>summary{font-weight:700;background:#f4f6fb}
       #explorer .task-name{flex:1;min-width:0}
       #explorer summary .chip{font-size:.72rem;border:1px solid #bbb;border-radius:999px;padding:.05rem .45rem;background:#fff}
+      #explorer summary .chip.chip-note{background:#eef3fb;border-color:#c8d7f4;color:#0a63c2;display:inline-flex;align-items:center;gap:4px}
       #explorer .body{padding:8px 10px;background:#fff;border-top:1px dashed #e5e5e5}
       #explorer .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.5rem}
       #explorer label{font-size:.85rem;display:flex;flex-direction:column;gap:4px}
@@ -5791,6 +5818,7 @@ function renderSettings(){
       #explorer .row-actions button{padding:.35rem .65rem;border-radius:6px;border:0;cursor:pointer;background:#eef3fb;color:#0a63c2}
       #explorer .row-actions .btn-edit{margin-right:auto;background:#fff;color:#0f1e3a;border:1px solid #ccd4e0}
       #explorer .row-actions .btn-edit:hover{background:#f3f5fb}
+      #explorer .row-actions .btn-notes{background:#fff;border:1px solid #ccd4e0;color:#0a63c2}
       #explorer .row-actions .danger{background:#e14b4b;color:#fff}
       #explorer .row-actions .btn-complete{background:#0a63c2;color:#fff}
       #explorer [data-field]{position:relative}
@@ -5849,6 +5877,12 @@ function renderSettings(){
       .modal-actions button{padding:.45rem .85rem;border-radius:6px;border:0;cursor:pointer;font-weight:600}
       .modal-actions .secondary{background:#eef3fb;color:#0a63c2}
       .modal-actions .primary{background:#0a63c2;color:#fff}
+      .occurrence-notes-card{min-width:min(520px,92vw)}
+      .occurrence-notes-body{max-height:60vh;overflow:auto}
+      .occurrence-notes-table{width:100%;border-collapse:collapse;font-size:.9rem}
+      .occurrence-notes-table th,.occurrence-notes-table td{border:1px solid #e5e7ed;padding:6px 8px;text-align:left;vertical-align:top}
+      .occurrence-notes-table th{background:#f7f9fd;font-weight:700}
+      .occurrence-notes-empty{color:#607196;font-size:.9rem}
       .modal-close{position:absolute;top:10px;right:10px;background:none;border:0;font-size:1.4rem;cursor:pointer;color:#666;line-height:1}
     `;
     document.head.appendChild(st);
@@ -6158,6 +6192,9 @@ function renderSettings(){
     const condition = escapeHtml(t.condition || "As required");
     const freq = t.interval ? `${t.interval} hrs` : "Set frequency";
     const baselineVal = baselineInputValue(t);
+    const occurrenceNoteMap = (typeof normalizeOccurrenceNotes === "function") ? normalizeOccurrenceNotes(t) : (t.occurrenceNotes || {});
+    const occurrenceNoteCount = occurrenceNoteMap && typeof occurrenceNoteMap === "object" ? Object.keys(occurrenceNoteMap).length : 0;
+    const notesChip = occurrenceNoteCount > 0 ? `<span class="chip chip-note" title="Occurrence notes">🗒️ ${occurrenceNoteCount}</span>` : "";
     const children = childrenByParent.get(String(t.id)) || [];
     const emptySubMsg = searchActive
       ? "No sub-tasks match your search."
@@ -6177,6 +6214,7 @@ function renderSettings(){
           <span class="task-name">${name}</span>
           <span class="chip">${type === "interval" ? "By Interval" : "As Required"}</span>
           ${type === "interval" ? `<span class=\"chip\" data-chip-frequency="${t.id}">${escapeHtml(freq)}</span>` : `<span class=\"chip\" data-chip-condition="${t.id}">${condition}</span>`}
+          ${notesChip}
           ${type === "interval" ? dueChip(t) : ""}
         </summary>
         <div class="body">
@@ -6195,10 +6233,12 @@ function renderSettings(){
             <label data-field="storeLink">Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
             <label data-field="pn">Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
             <label data-field="price">Price ($)<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${t.price!=null?t.price:""}" placeholder="optional"></label>
+            <label data-field="downtimeHours">Time to complete (hrs)<input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${t.id}" data-list="${type}" value="${t.downtimeHours!=null?t.downtimeHours:1}" placeholder="e.g. 1"></label>
             <label class="task-note" data-field="note">Note<textarea data-k="note" data-id="${t.id}" data-list="${type}" rows="2" placeholder="Optional note">${escapeHtml(t.note||"")}</textarea></label>
           </div>
           <div class="row-actions">
             <button type="button" class="btn-edit" data-edit-task="${t.id}" aria-pressed="false">Edit</button>
+            <button type="button" class="btn-notes" data-occurrence-notes="${t.id}" aria-haspopup="dialog">Occurrence notes</button>
             ${type === "interval" ? `<button class="btn-complete" data-complete="${t.id}">Mark completed now</button>` : ""}
             <button class="danger" data-remove="${t.id}" data-from="${type}">Remove</button>
           </div>
@@ -6365,6 +6405,13 @@ function renderSettings(){
         </form>
       </div>
     </div>
+    <div class="modal-backdrop" id="occurrenceNotesModal" hidden>
+      <div class="modal-card occurrence-notes-card">
+        <button type="button" class="modal-close" data-close-occurrence-notes>×</button>
+        <h4>Occurrence notes</h4>
+        <div id="occurrenceNotesBody" class="occurrence-notes-body"></div>
+      </div>
+    </div>
     <div id="maintenanceContextMenu" class="context-menu" hidden>
       <button type="button" data-action="edit">Edit</button>
       <button type="button" class="danger" data-action="delete">Delete</button>
@@ -6380,8 +6427,11 @@ function renderSettings(){
   const conditionRow = form?.querySelector('[data-form-condition]');
   const searchInput = document.getElementById("maintenanceSearch");
   const searchClear = document.getElementById("maintenanceSearchClear");
+  const occurrenceNotesModal = document.getElementById("occurrenceNotesModal");
+  const occurrenceNotesBody = document.getElementById("occurrenceNotesBody");
   const contextMenu = document.getElementById("maintenanceContextMenu");
   let contextTarget = null;
+  let occurrenceNotesTaskId = null;
 
   const getTaskEditingState = (taskEl)=>{
     if (!(taskEl instanceof HTMLElement)) return false;
@@ -6446,6 +6496,50 @@ function renderSettings(){
   const lockAllTasks = ()=>{
     if (!tree) return;
     tree.querySelectorAll("details.task").forEach(task => setTaskEditingState(task, false));
+  };
+
+  const closeOccurrenceNotes = ()=>{
+    if (!occurrenceNotesModal) return;
+    occurrenceNotesTaskId = null;
+    occurrenceNotesModal.hidden = true;
+  };
+
+  const renderOccurrenceNotesTable = (task)=>{
+    if (!occurrenceNotesBody) return;
+    const noteEntries = [];
+    const rawNotes = (typeof normalizeOccurrenceNotes === "function") ? normalizeOccurrenceNotes(task) : (task?.occurrenceNotes || {});
+    if (rawNotes && typeof rawNotes === "object"){
+      Object.entries(rawNotes).forEach(([dateISO, noteText])=>{
+        const key = typeof normalizeDateKey === "function" ? normalizeDateKey(dateISO) : String(dateISO || "");
+        const text = typeof noteText === "string" ? noteText.trim() : "";
+        if (!key || !text) return;
+        noteEntries.push({ dateISO: key, note: text });
+      });
+    }
+    noteEntries.sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+    if (!noteEntries.length){
+      occurrenceNotesBody.innerHTML = `<p class="occurrence-notes-empty">No occurrence notes yet. Add notes from the calendar to see them here.</p>`;
+      return;
+    }
+    const rows = noteEntries.map(entry => {
+      const parsed = typeof parseDateLocal === "function" ? parseDateLocal(entry.dateISO) : null;
+      const label = parsed instanceof Date && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleDateString() : entry.dateISO;
+      return `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(entry.note)}</td></tr>`;
+    }).join("");
+    occurrenceNotesBody.innerHTML = `
+      <table class="occurrence-notes-table">
+        <thead><tr><th>Date</th><th>Occurrence note</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  };
+
+  const openOccurrenceNotes = (taskId)=>{
+    if (!occurrenceNotesModal || !occurrenceNotesBody) return;
+    const meta = typeof findTaskMeta === "function" ? findTaskMeta(taskId) : null;
+    if (!meta || !meta.task) return;
+    occurrenceNotesTaskId = String(taskId || "");
+    renderOccurrenceNotesTable(meta.task);
+    occurrenceNotesModal.hidden = false;
   };
 
   lockAllTasks();
@@ -6792,6 +6886,15 @@ function renderSettings(){
   document.getElementById("cancelTaskModal")?.addEventListener("click", hideModal);
   document.getElementById("closeTaskModal")?.addEventListener("click", hideModal);
   modal?.addEventListener("click", (e)=>{ if (e.target === modal) hideModal(); });
+  occurrenceNotesModal?.addEventListener("click", (e)=>{
+    if (e.target === occurrenceNotesModal) closeOccurrenceNotes();
+    if (e.target instanceof HTMLElement && e.target.hasAttribute("data-close-occurrence-notes")) closeOccurrenceNotes();
+  });
+  document.addEventListener("keydown", (e)=>{
+    if (e.key === "Escape" && occurrenceNotesModal && !occurrenceNotesModal.hidden){
+      closeOccurrenceNotes();
+    }
+  });
   typeField?.addEventListener("change", ()=> syncFormMode(typeField.value));
   syncFormMode(typeField?.value || "interval");
 
@@ -7017,7 +7120,7 @@ function renderSettings(){
     const key = target.getAttribute("data-k");
     if (!key || key === "mode") return;
     let value = target.value;
-    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase"){
+    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase" || key === "downtimeHours"){
       value = value === "" ? null : Number(value);
       if (value !== null && !isFinite(value)) return;
     }
@@ -7048,6 +7151,14 @@ function renderSettings(){
       updateDueChip(holder, meta.task);
     }else if (key === "price"){
       meta.task.price = value == null ? null : Number(value);
+    }else if (key === "downtimeHours"){
+      if (value == null){
+        meta.task.downtimeHours = null;
+      }else{
+        const normalized = Math.max(0.25, Math.round(Number(value) * 100) / 100);
+        meta.task.downtimeHours = normalized;
+        target.value = String(normalized);
+      }
     }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
       meta.task[key] = target.value;
       if (key === "name"){ const label = holder.querySelector('.task-name'); if (label) label.textContent = target.value || "(unnamed task)"; }
@@ -7101,6 +7212,12 @@ function renderSettings(){
       if (nextState){
         focusFirstEditableControl(holder);
       }
+      return;
+    }
+    const notesBtn = e.target.closest('[data-occurrence-notes]');
+    if (notesBtn){
+      const id = notesBtn.getAttribute('data-occurrence-notes');
+      if (id) openOccurrenceNotes(id);
       return;
     }
     const removeBtn = e.target.closest('[data-remove]');
@@ -9147,8 +9264,47 @@ function computeCostModel(){
     ? Number(RENDER_TOTAL)
     : (typeof currentTotal === "function" ? Number(currentTotal() || 0) : 0);
 
-  const intervalTasks = Array.isArray(tasksInterval) ? tasksInterval : [];
-  const asReqTasks = Array.isArray(tasksAsReq) ? tasksAsReq : [];
+  const intervalTasksAll = Array.isArray(tasksInterval) ? tasksInterval : [];
+  const asReqTasksAll = Array.isArray(tasksAsReq) ? tasksAsReq : [];
+
+  const toHistoryDateKey = (value)=>{
+    if (!value) return null;
+    if (typeof normalizeDateKey === "function"){
+      try {
+        const normalized = normalizeDateKey(value);
+        if (normalized) return normalized;
+      } catch (_err){}
+    }
+    if (value instanceof Date && !Number.isNaN(value.getTime())){
+      return value.toISOString().slice(0, 10);
+    }
+    if (typeof value === "string"){
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+      const parsed = new Date(trimmed);
+      if (!Number.isNaN(parsed.getTime())){
+        return parsed.toISOString().slice(0, 10);
+      }
+    }
+    return null;
+  };
+
+  const hasDateKey = (value)=> Boolean(toHistoryDateKey(value));
+  const hasAnyDatedEntry = (list, selector)=>{
+    if (!Array.isArray(list)) return false;
+    return list.some(entry => selector ? hasDateKey(selector(entry)) : hasDateKey(entry));
+  };
+  const isTaskActive = (task)=>{
+    if (!task) return false;
+    if (hasDateKey(task.calendarDateISO)) return true;
+    if (hasAnyDatedEntry(task.completedDates)) return true;
+    if (hasAnyDatedEntry(task.manualHistory, entry => entry && entry.dateISO)) return true;
+    return false;
+  };
+
+  const intervalTasks = intervalTasksAll.filter(isTaskActive);
+  const asReqTasks = asReqTasksAll.filter(isTaskActive);
 
   const cleanPartNumber = (pn)=> String(pn || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
   const maintenancePartNumbers = new Set();
@@ -9428,8 +9584,8 @@ function computeCostModel(){
     templateMetaById.set(id, { id, mode, name, price: unitPrice, pn: partNumber });
   };
 
-  if (Array.isArray(tasksInterval)){
-    tasksInterval.forEach(task => {
+  if (Array.isArray(intervalTasks)){
+    intervalTasks.forEach(task => {
       if (!task) return;
       const isInstance = typeof isInstanceTask === "function"
         ? isInstanceTask(task)
@@ -9437,8 +9593,8 @@ function computeCostModel(){
       if (!isInstance) registerTemplateMeta(task);
     });
   }
-  if (Array.isArray(tasksAsReq)){
-    tasksAsReq.forEach(task => {
+  if (Array.isArray(asReqTasks)){
+    asReqTasks.forEach(task => {
       if (!task) return;
       const isInstance = typeof isInstanceTask === "function"
         ? isInstanceTask(task)
@@ -9564,18 +9720,18 @@ function computeCostModel(){
     pushHistory(task);
     if (isInstance){
       const templateId = task.templateId != null ? String(task.templateId) : null;
-      if (templateId && Array.isArray(tasksInterval)){
-        const templateTask = tasksInterval.find(item => item && String(item.id) === templateId);
+      if (templateId && Array.isArray(intervalTasksAll)){
+        const templateTask = intervalTasksAll.find(item => item && String(item.id) === templateId);
         if (templateTask) pushHistory(templateTask);
       }
     }
   };
 
-  if (Array.isArray(tasksInterval)){
-    tasksInterval.forEach(task => captureTaskHistory(task, { exists: true }));
+  if (Array.isArray(intervalTasks)){
+    intervalTasks.forEach(task => captureTaskHistory(task, { exists: true }));
   }
-  if (Array.isArray(tasksAsReq)){
-    tasksAsReq.forEach(task => captureTaskHistory(task, { exists: true }));
+  if (Array.isArray(asReqTasks)){
+    asReqTasks.forEach(task => captureTaskHistory(task, { exists: true }));
   }
 
   const maintenanceHistory = [];
