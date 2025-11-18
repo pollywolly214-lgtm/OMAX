@@ -142,14 +142,34 @@ function hideBubble(){
 function hideBubbleSoon(){ clearTimeout(bubbleTimer); bubbleTimer = setTimeout(hideBubble, 180); }
 function triggerDashboardAddPicker(opts){
   const detail = (opts && typeof opts === "object") ? { ...opts } : {};
+  const enqueueRequest = ()=>{
+    if (!Array.isArray(window.__pendingDashboardAddRequests)){
+      window.__pendingDashboardAddRequests = [];
+    }
+    window.__pendingDashboardAddRequests.push(detail);
+  };
+
   if (typeof window.openDashboardAddPicker === "function"){
     window.openDashboardAddPicker(detail);
     return;
   }
-  if (!Array.isArray(window.__pendingDashboardAddRequests)){
-    window.__pendingDashboardAddRequests = [];
-  }
-  window.__pendingDashboardAddRequests.push(detail);
+
+  enqueueRequest();
+
+  const ensureDashboardVisible = ()=>{
+    const hash = (location.hash || "#").toLowerCase();
+    const isDashboard = hash === "#/" || hash === "#dashboard" || hash === "#/dashboard";
+    if (!isDashboard){
+      location.hash = "#/";
+      return;
+    }
+    if (typeof route === "function"){
+      try { route(); }
+      catch (err){ console.warn("Failed to render dashboard for add picker", err); }
+    }
+  };
+
+  ensureDashboardVisible();
 }
 
 function escapeHtml(str){
@@ -189,6 +209,102 @@ function normalizeDateKey(value){
     }
   }
   return null;
+}
+
+function normalizeOccurrenceNotes(task){
+  if (!task || typeof task !== "object") return {};
+  const result = {};
+  const raw = task.occurrenceNotes;
+  if (raw && typeof raw === "object"){
+    Object.entries(raw).forEach(([maybeDate, maybeNote]) => {
+      const key = normalizeDateKey(maybeDate);
+      if (!key) return;
+      const text = typeof maybeNote === "string" ? maybeNote.trim() : "";
+      if (text) result[key] = text;
+    });
+  }
+  task.occurrenceNotes = result;
+  return result;
+}
+
+function normalizeOccurrenceHours(task){
+  if (!task || typeof task !== "object") return {};
+  const result = {};
+  const raw = task.occurrenceHours;
+  if (raw && typeof raw === "object"){
+    Object.entries(raw).forEach(([maybeDate, maybeHours]) => {
+      const key = normalizeDateKey(maybeDate);
+      if (!key) return;
+      const num = Number(maybeHours);
+      if (!Number.isFinite(num) || num <= 0) return;
+      const normalized = Math.max(0.25, Math.round(num * 100) / 100);
+      result[key] = normalized;
+    });
+  }
+  task.occurrenceHours = result;
+  return result;
+}
+
+function getOccurrenceNoteForTask(task, dateISO){
+  const key = normalizeDateKey(dateISO);
+  if (!key) return "";
+  const notes = normalizeOccurrenceNotes(task);
+  return notes[key] || "";
+}
+
+function getOccurrenceHoursForTask(task, dateISO){
+  const key = normalizeDateKey(dateISO);
+  if (!key) return null;
+  const map = normalizeOccurrenceHours(task);
+  const val = map[key];
+  return Number.isFinite(val) && val > 0 ? val : null;
+}
+
+function setOccurrenceNoteForTask(task, dateISO, noteText){
+  if (!task || typeof task !== "object") return false;
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  const notes = normalizeOccurrenceNotes(task);
+  const text = typeof noteText === "string" ? noteText.trim() : "";
+  const existing = notes[key] || "";
+  let changed = false;
+  if (text){
+    if (existing !== text){
+      notes[key] = text;
+      changed = true;
+    }
+  }else if (existing){
+    delete notes[key];
+    changed = true;
+  }
+  if (changed){
+    task.occurrenceNotes = notes;
+  }
+  return changed;
+}
+
+function setOccurrenceHoursForTask(task, dateISO, hours){
+  if (!task || typeof task !== "object") return false;
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  const map = normalizeOccurrenceHours(task);
+  const current = map[key];
+  let changed = false;
+  const num = Number(hours);
+  if (Number.isFinite(num) && num > 0){
+    const normalized = Math.max(0.25, Math.round(num * 100) / 100);
+    if (current !== normalized){
+      map[key] = normalized;
+      changed = true;
+    }
+  }else if (current != null){
+    delete map[key];
+    changed = true;
+  }
+  if (changed){
+    task.occurrenceHours = map;
+  }
+  return changed;
 }
 
 function markCalendarTaskComplete(meta, dateISO){
@@ -367,12 +483,24 @@ function removeCalendarTaskOccurrence(meta, dateISO){
       task.calendarDateISO = null;
       changed = true;
     }
+    if (setOccurrenceNoteForTask(task, key, "")){
+      changed = true;
+    }
+    if (setOccurrenceHoursForTask(task, key, null)){
+      changed = true;
+    }
     if (changed){
       applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
     }
   }else{
     if (normalizeDateKey(task.calendarDateISO) === key){
       task.calendarDateISO = null;
+      changed = true;
+    }
+    if (setOccurrenceNoteForTask(task, key, "")){
+      changed = true;
+    }
+    if (setOccurrenceHoursForTask(task, key, null)){
       changed = true;
     }
     if (Array.isArray(task.completedDates)){
@@ -514,6 +642,19 @@ function showTaskBubble(taskId, anchor, options = {}){
     ? "Completed"
     : (normalizedStatus === "manual" ? "Scheduled" : normalizedStatus === "due" ? "Projected" : "Scheduled");
 
+  const occurrenceNote = dateKey ? getOccurrenceNoteForTask(task, dateKey) : "";
+
+  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+    ? Number(DAILY_HOURS)
+    : 8;
+  const occurrenceHours = dateKey ? getOccurrenceHoursForTask(task, dateKey) : null;
+  
+  const downtimeHours = (()=>{
+    const raw = Number(task.downtimeHours);
+    return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) / 100 : null;
+  })();
+  const effectiveHours = occurrenceHours != null ? occurrenceHours : downtimeHours;
+
   const infoParts = [];
   infoParts.push(`<div class="bubble-title">${escapeHtml(task.name || "Task")}</div>`);
   if (displayDate){
@@ -531,6 +672,15 @@ function showTaskBubble(taskId, anchor, options = {}){
     infoParts.push(`<div class="bubble-kv"><span>Condition:</span><span>${escapeHtml(task.condition || "As required")}</span></div>`);
   }
 
+  if (effectiveHours != null){
+    const days = Math.max(1, Math.ceil(effectiveHours / hoursPerDay));
+    infoParts.push(`<div class="bubble-kv"><span>${occurrenceHours != null ? "Occurrence time:" : "Time to complete:"}</span><span>${escapeHtml(formatCalendarDayHours(effectiveHours))} (${days} ${days === 1 ? "day" : "days"})</span></div>`);
+    if (occurrenceHours != null && downtimeHours != null){
+      const baseDays = Math.max(1, Math.ceil(downtimeHours / hoursPerDay));
+      infoParts.push(`<div class="bubble-kv"><span>Default time:</span><span>${escapeHtml(formatCalendarDayHours(downtimeHours))} (${baseDays} ${baseDays === 1 ? "day" : "days"})</span></div>`);
+    }
+  }
+
   if (task.manualLink || task.storeLink){
     const links = [];
     if (task.manualLink) links.push(`<a href="${task.manualLink}" target="_blank" rel="noopener">Manual</a>`);
@@ -538,7 +688,17 @@ function showTaskBubble(taskId, anchor, options = {}){
     infoParts.push(`<div class="bubble-kv"><span>Links:</span><span>${links.join(" · ")}</span></div>`);
   }
 
+  if (occurrenceNote){
+    infoParts.push(`<div class="bubble-kv"><span>Note:</span><span>${escapeHtml(occurrenceNote)}</span></div>`);
+  }
+
   const actions = [];
+  if (dateKey){
+    const noteLabel = occurrenceNote ? "Edit occurrence note" : "Add occurrence note";
+    const hoursLabel = occurrenceHours != null ? "Edit occurrence time" : "Add occurrence time";
+    actions.push(`<button data-bbl-occurrence-hours>${escapeHtml(hoursLabel)}</button>`);
+    actions.push(`<button data-bbl-occurrence-note>${escapeHtml(noteLabel)}</button>`);
+  }
   if (canMarkComplete){
     actions.push(`<button data-bbl-complete>Mark complete</button>`);
   }
@@ -555,6 +715,35 @@ function showTaskBubble(taskId, anchor, options = {}){
   b.innerHTML = `${infoParts.join("")}<div class="bubble-actions">${actions.join("")}</div>`;
 
   const targetKey = dateKey || normalizeDateKey(new Date());
+
+  b.querySelector("[data-bbl-occurrence-hours]")?.addEventListener("click", ()=>{
+    const existing = occurrenceHours != null ? occurrenceHours : "";
+    const promptText = "Set time to complete for this occurrence (hours). Leave blank to use the default.";
+    const nextRaw = typeof window.prompt === "function" ? window.prompt(promptText, existing === "" ? "" : String(existing)) : "";
+    if (nextRaw === null || nextRaw === undefined) return;
+    const parsed = Number(nextRaw);
+    const changed = setOccurrenceHoursForTask(task, targetKey, Number.isFinite(parsed) && parsed > 0 ? parsed : null);
+    if (changed){
+      saveCloudDebounced();
+      toast((Number.isFinite(parsed) && parsed > 0) ? "Occurrence time saved" : "Occurrence time removed");
+      hideBubble();
+      route();
+    }
+  });
+
+  b.querySelector("[data-bbl-occurrence-note]")?.addEventListener("click", ()=>{
+    const existing = occurrenceNote;
+    const promptText = "Add a note for this calendar occurrence. It won't change other intervals.";
+    const next = typeof window.prompt === "function" ? window.prompt(promptText, existing) : "";
+    if (next === null || next === undefined) return;
+    const changed = setOccurrenceNoteForTask(task, targetKey, next);
+    if (changed){
+      saveCloudDebounced();
+      toast((next || "").trim() ? "Occurrence note saved" : "Occurrence note removed");
+      hideBubble();
+      route();
+    }
+  });
 
   b.querySelector("[data-bbl-complete]")?.addEventListener("click", ()=>{
     const changed = markCalendarTaskComplete(meta, targetKey);
@@ -1170,6 +1359,9 @@ function renderCalendar(){
   if (!container) return;
   let showAll = Boolean(window.__calendarShowAllMonths);
   const editingHours = isCalendarHoursEditing();
+  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+    ? Number(DAILY_HOURS)
+    : 8;
   const hoursMap = typeof getDailyCutHoursMap === "function" ? getDailyCutHoursMap() : new Map();
   container.innerHTML = "";
   const block = container.closest(".calendar-block");
@@ -1178,28 +1370,88 @@ function renderCalendar(){
   }
 
   const dueMap = {};
+  const splitTaskDuration = (startKey, hours)=>{
+    const baseKey = normalizeDateKey(startKey);
+    if (!baseKey) return [];
+    const totalHours = Number.isFinite(hours) && hours > 0 ? hours : null;
+    const startDate = parseDateLocal(baseKey);
+    if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())){
+      return [{ dateISO: baseKey, hours: totalHours, index: 0, count: 1 }];
+    }
+    if (totalHours == null){
+      return [{ dateISO: baseKey, hours: null, index: 0, count: 1 }];
+    }
+    let remaining = totalHours;
+    const segments = [];
+    const cursor = new Date(startDate.getTime());
+    const safetyMax = 365;
+    for (let i = 0; i < safetyMax && remaining > 0.0001; i++){
+      const allocation = Math.min(hoursPerDay, remaining);
+      segments.push({ dateISO: ymd(cursor), hours: allocation, index: i, count: 0 });
+      remaining -= allocation;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    const count = Math.max(1, segments.length);
+    segments.forEach(seg => { seg.count = count; });
+    if (!segments.length){
+      segments.push({ dateISO: baseKey, hours: totalHours, index: 0, count: 1 });
+    }
+    return segments;
+  };
+  function resolveTaskDowntimeHours(task, startDateKey){
+    const occurrenceOverride = startDateKey ? getOccurrenceHoursForTask(task, startDateKey) : null;
+    if (occurrenceOverride != null) return occurrenceOverride;
+    const raw = Number(task?.downtimeHours);
+    return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) / 100 : null;
+  }
   function pushTaskEvent(task, iso, status){
     if (!task || !iso) return;
     const key = normalizeDateKey(iso);
     if (!key) return;
-    const events = dueMap[key] ||= [];
-    const id = String(task.id);
+    const downtimeHours = resolveTaskDowntimeHours(task, key);
+    const segments = splitTaskDuration(key, downtimeHours);
     const statusKey = status || "due";
     const statusPriority = { completed: 3, manual: 2, due: 1 };
-    const existing = events.find(ev => ev.type === "task" && ev.id === id);
-    if (existing){
-      existing.name = task.name;
-      const existingStatus = existing.status || "due";
-      const existingPriority = statusPriority[existingStatus] || 1;
-      const nextPriority = statusPriority[statusKey] || 1;
-      if (nextPriority >= existingPriority){
-        existing.status = statusKey;
+    segments.forEach(seg => {
+      const segKey = seg.dateISO;
+      if (!segKey) return;
+      const events = dueMap[segKey] ||= [];
+      const baseId = String(task.id);
+      const compositeId = seg.count > 1 ? `${baseId}__seg${seg.index}` : baseId;
+      const existing = events.find(ev => ev.type === "task" && ev.id === compositeId);
+      if (existing){
+        existing.name = task.name;
+        const existingStatus = existing.status || "due";
+        const existingPriority = statusPriority[existingStatus] || 1;
+        const nextPriority = statusPriority[statusKey] || 1;
+        if (nextPriority >= existingPriority){
+          existing.status = statusKey;
+        }
+        existing.mode = task && task.mode === "asreq" ? "asreq" : "interval";
+        existing.dateISO = segKey;
+        existing.durationHours = seg.hours;
+        existing.segmentIndex = seg.index;
+        existing.segmentCount = seg.count;
+        existing.totalDowntimeHours = downtimeHours;
+        existing.taskId = baseId;
+        existing.taskStartsOn = key;
+        return;
       }
-      existing.mode = task && task.mode === "asreq" ? "asreq" : "interval";
-      existing.dateISO = key;
-      return;
-    }
-    events.push({ type:"task", id, name:task.name, status: statusKey, mode: task && task.mode === "asreq" ? "asreq" : "interval", dateISO: key });
+      events.push({
+        type: "task",
+        id: compositeId,
+        taskId: baseId,
+        name: task.name,
+        status: statusKey,
+        mode: task && task.mode === "asreq" ? "asreq" : "interval",
+        dateISO: segKey,
+        durationHours: seg.hours,
+        segmentIndex: seg.index,
+        segmentCount: seg.count,
+        totalDowntimeHours: downtimeHours,
+        taskStartsOn: key
+      });
+    });
   }
 
   const intervalTasks = Array.isArray(window.tasksInterval)
@@ -1496,11 +1748,26 @@ function renderCalendar(){
         let cls = "event generic cal-task";
         if (ev.status === "completed") cls += " is-complete";
         chip.className = cls;
-        chip.dataset.calTask = ev.id;
+        const baseTaskId = ev.taskId || ev.id;
+        chip.dataset.calTask = baseTaskId;
         chip.dataset.calStatus = ev.status || "due";
         if (ev.mode) chip.dataset.calMode = ev.mode;
         chip.dataset.calDate = ev.dateISO || key;
+        if (ev.taskStartsOn) chip.dataset.calStart = ev.taskStartsOn;
+
+        const hasDuration = Number.isFinite(ev.durationHours) && ev.durationHours > 0;
+        const segCount = Number.isFinite(ev.segmentCount) && ev.segmentCount > 0 ? Number(ev.segmentCount) : 1;
+        const segIndex = Number.isFinite(ev.segmentIndex) && ev.segmentIndex >= 0 ? Number(ev.segmentIndex) : 0;
+        const durationLabel = hasDuration ? formatCalendarDayHours(ev.durationHours) : null;
+
         let label = ev.name;
+        if (segCount > 1){
+          const dayLabel = `Day ${segIndex + 1}/${segCount}`;
+          label += durationLabel ? ` (${dayLabel} · ${durationLabel})` : ` (${dayLabel})`;
+        }else if (durationLabel){
+          label += ` (${durationLabel})`;
+        }
+
         if (ev.status === "completed") label += " (completed)";
         else if (ev.status === "manual") label += " (scheduled)";
         else label += " (due)";

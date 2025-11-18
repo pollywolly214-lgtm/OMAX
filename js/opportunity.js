@@ -486,16 +486,17 @@
         const target = targetHours(period.start, period.end, holidaysSet);
         const run = sumPumpRunHours(pumpRuns, period.start, period.end);
         const maintenance = sumMaintenanceHoursFromCalendar(maintIntervals, period.start, period.end, holidaysSet);
-        const opportunityHours = Math.max(0, target - run);
-        const idle = Math.max(0, target - run - maintenance);
-        const utilization = target > 0 ? (run / target) : 0;
+        const cuttingPotential = Math.max(0, target - maintenance);
+        const opportunityHours = Math.max(0, cuttingPotential - run);
+        const idle = opportunityHours;
+        const utilization = cuttingPotential > 0 ? (run / cuttingPotential) : 0;
         const maintenanceOpportunityCost = maintenance * safeRate;
         const opportunityCost = opportunityHours * safeRate;
         const totalCost = maintenanceOpportunityCost + opportunityCost;
         return {
           period: period.label,
           businessDays: enumerateBusinessWindows(period.start, period.end, holidaysSet).length,
-          targetHours: +target.toFixed(2),
+          targetHours: +cuttingPotential.toFixed(2),
           pumpRunHours: +run.toFixed(2),
           maintenanceHours: +maintenance.toFixed(2),
           idleHours: +idle.toFixed(2),
