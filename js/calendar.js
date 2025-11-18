@@ -24,6 +24,15 @@ function formatCalendarDayHours(value){
   return `${num.toFixed(decimals)} hr`;
 }
 
+function configuredDailyHours(){
+  if (typeof getConfiguredDailyHours === "function") return getConfiguredDailyHours();
+  if (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0) return Number(DAILY_HOURS);
+  if (typeof DEFAULT_DAILY_HOURS === "number" && Number.isFinite(DEFAULT_DAILY_HOURS) && DEFAULT_DAILY_HOURS > 0){
+    return Number(DEFAULT_DAILY_HOURS);
+  }
+  return 8;
+}
+
 function getCalendarPendingHours(dateISO){
   if (!(calendarHoursPending instanceof Map)) return undefined;
   const key = normalizeDateKey(dateISO);
@@ -333,9 +342,7 @@ function markCalendarTaskComplete(meta, dateISO){
     const history = typeof ensureTaskManualHistory === "function"
       ? ensureTaskManualHistory(task)
       : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
-    const defaultDaily = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-      ? Number(DAILY_HOURS)
-      : 8;
+    const defaultDaily = configuredDailyHours();
     let entry = history.find(item => item && normalizeDateKey(item.dateISO) === key);
     if (!entry){
       entry = {
@@ -402,9 +409,7 @@ function unmarkCalendarTaskComplete(meta, dateISO){
   }
 
   if (mode === "interval"){
-    const defaultDaily = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-      ? Number(DAILY_HOURS)
-      : 8;
+    const defaultDaily = configuredDailyHours();
     const history = typeof ensureTaskManualHistory === "function"
       ? ensureTaskManualHistory(task)
       : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
@@ -644,9 +649,7 @@ function showTaskBubble(taskId, anchor, options = {}){
 
   const occurrenceNote = dateKey ? getOccurrenceNoteForTask(task, dateKey) : "";
 
-  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-    ? Number(DAILY_HOURS)
-    : 8;
+  const hoursPerDay = configuredDailyHours();
   const occurrenceHours = dateKey ? getOccurrenceHoursForTask(task, dateKey) : null;
   
   const downtimeHours = (()=>{
@@ -922,9 +925,7 @@ function showJobBubble(jobId, anchor){
         ? Math.max(0, eff.actualRemaining)
         : Math.max(0, (Number(j.estimateHours)||0) - (Number(eff.actualHours)||0)));
     const actualRemain = jobRemainingHours;
-    const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-      ? Number(DAILY_HOURS)
-      : 8;
+    const hoursPerDay = configuredDailyHours();
     const remainingHours = Number.isFinite(req.remainingHours) ? Math.max(0, req.remainingHours) : 0;
     const remainingDays = Number.isFinite(req.remainingDays) ? Math.max(0, req.remainingDays) : 0;
     const capacityRemaining = remainingDays * hoursPerDay;
@@ -966,8 +967,8 @@ function showJobBubble(jobId, anchor){
       reqCell += `<div class="small muted">Includes ${escapeHtml(backlogSummary)}</div>`;
     }
     const noteAuto = eff.usedAutoFromManual
-      ? `<div class="small"><strong>Auto from last manual</strong>: continuing at ${DAILY_HOURS} hr/day.</div>`
-      : (eff.usedFromStartAuto ? `<div class="small"><strong>Auto</strong>: assuming ${DAILY_HOURS} hr/day from start.</div>` : ``);
+      ? `<div class="small"><strong>Auto from last manual</strong>: continuing at ${configuredDailyHours()} hr/day.</div>`
+      : (eff.usedFromStartAuto ? `<div class="small"><strong>Auto</strong>: assuming ${configuredDailyHours()} hr/day from start.</div>` : ``);
     const startDate = parseDateLocal(j.startISO);
     const dueDate   = parseDateLocal(j.dueISO);
     const startTxt  = startDate ? startDate.toDateString() : "—";
@@ -1142,9 +1143,7 @@ function wireCalendarBubbles(){
 }
 
 function estimateIntervalDailyHours(task, baselineEntry, today){
-  const defaultHours = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-    ? Number(DAILY_HOURS)
-    : 8;
+  const defaultHours = configuredDailyHours();
   if (!baselineEntry) return defaultHours;
   const baseDate = baselineEntry.dateISO ? parseDateLocal(baselineEntry.dateISO) : null;
   const baseHours = baselineEntry.hoursAtEntry != null ? Number(baselineEntry.hoursAtEntry) : null;
@@ -1359,9 +1358,7 @@ function renderCalendar(){
   if (!container) return;
   let showAll = Boolean(window.__calendarShowAllMonths);
   const editingHours = isCalendarHoursEditing();
-  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-    ? Number(DAILY_HOURS)
-    : 8;
+  const hoursPerDay = configuredDailyHours();
   const hoursMap = typeof getDailyCutHoursMap === "function" ? getDailyCutHoursMap() : new Map();
   container.innerHTML = "";
   const block = container.closest(".calendar-block");

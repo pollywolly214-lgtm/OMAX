@@ -1955,9 +1955,11 @@ function viewJobs(){
     if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "—";
     return dt.toLocaleDateString();
   };
-  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-    ? Number(DAILY_HOURS)
-    : 8;
+  const hoursPerDay = typeof getConfiguredDailyHours === "function"
+    ? getConfiguredDailyHours()
+    : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+      ? Number(DAILY_HOURS)
+      : 8);
   const computeJobNetTotal = (job, eff, { preferActual = false } = {}) => {
     if (!job) return 0;
     const efficiency = eff || {};

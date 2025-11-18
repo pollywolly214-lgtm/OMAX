@@ -258,9 +258,11 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "" } = {}){
   if (!Number.isFinite(interval) || interval <= 0) return null;
   ensureTaskManualHistory(instance);
 
-  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-    ? Number(DAILY_HOURS)
-    : 8;
+  const hoursPerDay = typeof getConfiguredDailyHours === "function"
+    ? getConfiguredDailyHours()
+    : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+      ? Number(DAILY_HOURS)
+      : 8);
 
   let targetISO = dateISO || ymd(new Date());
   const today = new Date(); today.setHours(0,0,0,0);
@@ -533,7 +535,10 @@ function buildNextDuePreview({ includeNote = true, noteText = "Preview of tracke
     return `Due in ${offset} days · ${dueText}`;
   };
   const formatRemain = (offset)=>{
-    const hours = Math.max(0, Math.round((typeof DAILY_HOURS === "number" ? DAILY_HOURS : 8) * offset));
+    const perDay = typeof getConfiguredDailyHours === "function"
+      ? getConfiguredDailyHours()
+      : (typeof DAILY_HOURS === "number" ? DAILY_HOURS : 8);
+    const hours = Math.max(0, Math.round(perDay * offset));
     return `${hours.toLocaleString()} hrs estimate`;
   };
   const statusClass = (offset)=>{
@@ -1421,6 +1426,122 @@ function ensureClearAllDataHandlers(){
   });
 }
 
+function getConfigurationElements(){
+  const modal = document.getElementById("configModal");
+  const form = document.getElementById("configForm");
+  const hoursInput = document.getElementById("configDailyHours");
+  const excludeWeekends = document.getElementById("configExcludeWeekends");
+  const cancel = document.getElementById("configCancel");
+  return { modal, form, hoursInput, excludeWeekends, cancel };
+}
+
+function currentAppConfiguration(){
+  if (typeof normalizeAppConfig === "function") return normalizeAppConfig(window.appConfig);
+  const fallbackDaily = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8;
+  return { excludeWeekends: false, dailyHours: fallbackDaily };
+}
+
+function closeConfigurationModal(){
+  const { modal } = getConfigurationElements();
+  if (!modal) return;
+  modal.classList.remove("is-open");
+  modal.setAttribute("aria-hidden", "true");
+  modal.setAttribute("hidden", "");
+  const triggerId = modal.dataset.triggerId;
+  if (triggerId){
+    const trigger = document.getElementById(triggerId);
+    if (trigger && typeof trigger.focus === "function"){
+      try { trigger.focus({ preventScroll:true }); }
+      catch (_){ trigger.focus(); }
+    }
+    modal.dataset.triggerId = "";
+  }
+}
+
+function openConfigurationModal(trigger){
+  const { modal, hoursInput, excludeWeekends } = getConfigurationElements();
+  if (!modal) return;
+  const cfg = currentAppConfiguration();
+  if (hoursInput){
+    const value = cfg.dailyHours != null ? cfg.dailyHours : (typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8);
+    hoursInput.value = value;
+  }
+  if (excludeWeekends){
+    excludeWeekends.checked = !!cfg.excludeWeekends;
+  }
+  modal.removeAttribute("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  modal.classList.add("is-open");
+  if (trigger && trigger.id) modal.dataset.triggerId = trigger.id;
+  const focusTarget = hoursInput || excludeWeekends || modal.querySelector("button, input");
+  if (focusTarget && typeof focusTarget.focus === "function"){
+    try { focusTarget.focus({ preventScroll:true }); }
+    catch (_){ focusTarget.focus(); }
+  }
+}
+
+function applyConfigurationForm(){
+  const { hoursInput, excludeWeekends } = getConfigurationElements();
+  const nextDaily = hoursInput ? Number(hoursInput.value) : null;
+  const nextConfig = { dailyHours: nextDaily, excludeWeekends: !!(excludeWeekends && excludeWeekends.checked) };
+  if (typeof setAppConfig === "function") setAppConfig(nextConfig);
+  else {
+    window.appConfig = typeof normalizeAppConfig === "function" ? normalizeAppConfig(nextConfig) : nextConfig;
+    if (typeof refreshDerivedDailyHours === "function") refreshDerivedDailyHours();
+  }
+  if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+  if (typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
+  if (typeof renderCalendar === "function") renderCalendar();
+  if (typeof renderDashboard === "function") renderDashboard();
+  if (typeof renderJobs === "function") renderJobs();
+  if (typeof renderCosts === "function") renderCosts();
+  if (typeof route === "function"){
+    try { route(); }
+    catch (err){ console.warn("Failed to rerender after config change", err); }
+  }
+  toast("Configuration updated");
+}
+
+function wireConfigurationModal(){
+  const { modal, form, cancel } = getConfigurationElements();
+  const trigger = document.getElementById("dashboardConfigLaunch");
+  if (trigger && trigger.dataset.boundConfig !== "1"){
+    trigger.dataset.boundConfig = "1";
+    trigger.addEventListener("click", (event)=>{
+      event.preventDefault();
+      closeDashboardSettingsMenu();
+      openConfigurationModal(trigger);
+    });
+  }
+  if (form && form.dataset.boundConfig !== "1"){
+    form.dataset.boundConfig = "1";
+    form.addEventListener("submit", (event)=>{
+      event.preventDefault();
+      applyConfigurationForm();
+      closeConfigurationModal();
+    });
+  }
+  if (cancel && cancel.dataset.boundConfig !== "1"){
+    cancel.dataset.boundConfig = "1";
+    cancel.addEventListener("click", (event)=>{
+      event.preventDefault();
+      closeConfigurationModal();
+    });
+  }
+  if (modal && modal.dataset.boundConfig !== "1"){
+    modal.dataset.boundConfig = "1";
+    modal.addEventListener("click", (event)=>{
+      if (event.target === modal) closeConfigurationModal();
+    });
+    modal.addEventListener("keydown", (event)=>{
+      if (event.key === "Escape"){
+        event.preventDefault();
+        closeConfigurationModal();
+      }
+    });
+  }
+}
+
 function closeDashboardSettingsMenu(){
   const { button, menu } = getAppSettingsElements();
   if (menu && !menu.hidden){
@@ -1536,6 +1657,7 @@ function wireDashboardSettingsMenu(){
     });
   }
   ensureClearAllDataHandlers();
+  wireConfigurationModal();
 }
 
 function wireCostSettingsMenu(){
@@ -12452,13 +12574,14 @@ function renderJobs(){
     return Math.max(0, nowH - startH);
   }
   function suggestSpent(job){
-    // Suggest “spent since last manual” using 8 hrs/day; if no manual, 0
+    // Suggest “spent since last manual” using configured hrs/day; if no manual, 0
     const lm = lastManual(job);
     if (lm){
       const last = new Date(lm.dateISO + "T00:00:00");
       const today = new Date(todayISO + "T00:00:00");
       const days = Math.max(0, Math.floor((today - last)/(24*60*60*1000)));
-      return days * DAILY_HOURS;
+      const perDay = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : DAILY_HOURS;
+      return days * perDay;
     }
     return 0;
   }
@@ -12692,7 +12815,9 @@ function renderJobs(){
       const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
       if (!entry){ toast("Unable to locate completed job."); return; }
 
-      const hoursPerDay = (typeof DAILY_HOURS === "number" && isFinite(DAILY_HOURS) && DAILY_HOURS > 0) ? DAILY_HOURS : 8;
+      const hoursPerDay = typeof getConfiguredDailyHours === "function"
+        ? getConfiguredDailyHours()
+        : ((typeof DAILY_HOURS === "number" && isFinite(DAILY_HOURS) && DAILY_HOURS > 0) ? DAILY_HOURS : 8);
       const safeToday = (() => {
         const parsed = parseJobDate(todayISO) || parseJobDate(new Date());
         if (parsed){
