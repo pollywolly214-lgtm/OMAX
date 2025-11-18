@@ -1128,7 +1128,11 @@ function renderNextDueWidget(ndBox){
   if (!ndBox) return;
 
   const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-  const upcoming = tasksInterval
+  const liveIntervalTasks = Array.isArray(window.tasksInterval)
+    ? window.tasksInterval
+    : (Array.isArray(tasksInterval) ? tasksInterval : []);
+
+  const upcoming = liveIntervalTasks
     .filter(task => task && task.mode === "interval" && isInstanceTask(task))
     .map(t => ({ t, nd: nextDue(t) }))
     .filter(x => x.nd)
@@ -1236,6 +1240,10 @@ function renderNextDueWidget(ndBox){
 
 let pendingDashboardRefresh = null;
 function refreshDashboardWidgets(){
+  if (typeof refreshGlobalCollections === "function"){
+    refreshGlobalCollections();
+  }
+
   const runRefresh = ()=>{
     pendingDashboardRefresh = null;
     renderNextDueWidget(document.getElementById("nextDueBox"));
