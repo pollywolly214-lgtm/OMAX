@@ -5873,6 +5873,10 @@ function renderSettings(){
       #explorer .chip.due-warn{border-color:#f2e4a3;background:#fff7d1;color:#8a6d00}
       #explorer .chip.due-soon{border-color:#ffd0b5;background:#ffe6d6;color:#a14d00}
       #explorer .chip.due-late{border-color:#ffc9c9;background:#ffe1e1;color:#c62828}
+      #explorer .cat-add-row{padding:0 10px 10px}
+      #explorer .cat-add-row button{width:100%;border-radius:8px;border:1px dashed #9fb7d7;background:#f0f4fb;color:#0a63c2;font-weight:600;padding:.45rem .65rem;cursor:pointer;transition:background .2s ease,border-color .2s ease}
+      #explorer .cat-add-row button:hover{background:#e4ecf8;border-color:#0a63c2}
+      #explorer details:not([open]) .cat-add-row{display:none}
       .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999;padding:12px}
       .modal-backdrop[hidden]{display:none}
       .modal-card{background:#fff;border-radius:12px;padding:18px 20px;box-shadow:0 18px 36px rgba(0,0,0,.25);min-width:min(480px,90vw);max-height:90vh;overflow:auto;position:relative}
@@ -6326,6 +6330,9 @@ function renderSettings(){
         <div class="dz" data-drop-into-cat="${folder.id}" data-label="Move task here"></div>
         <div class="children">
           ${mixedHtml}
+        </div>
+        <div class="cat-add-row">
+          <button type="button" data-add-task-cat="${folder.id}" data-cat-name="${escapeAttr(folder.name)}">+ Add task to ${escapeHtml(folder.name)}</button>
         </div>
       </details>
     `;
@@ -6826,9 +6833,20 @@ function renderSettings(){
     }
   }
 
-  function showModal(){
+  function showModal(options){
     if (!modal || !form || !typeField) return;
+    const opts = options && typeof options === "object" ? options : {};
+    const categoryId = opts.categoryId != null ? String(opts.categoryId) : "";
     form.reset();
+    const categoryField = form.querySelector('[name="taskCategory"]');
+    if (categoryField instanceof HTMLSelectElement){
+      if (categoryId){
+        categoryField.value = categoryId;
+      }
+      if (!categoryField.value){
+        categoryField.value = categoryField.options.length ? categoryField.options[0].value : "";
+      }
+    }
     modal.classList.add("is-visible");
     modal.hidden = false;
     document.body?.classList.add("modal-open");
@@ -6840,6 +6858,19 @@ function renderSettings(){
     modal.hidden = true;
     document.body?.classList.remove("modal-open");
   }
+
+  tree?.addEventListener("click", (e)=>{
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    const btn = target.closest("[data-add-task-cat]");
+    if (!btn || !tree.contains(btn)) return;
+    const catId = btn.getAttribute("data-add-task-cat") || "";
+    showModal({ categoryId: catId });
+    const nameInput = form?.querySelector('[name="taskName"]');
+    if (nameInput instanceof HTMLElement){
+      requestAnimationFrame(()=> nameInput.focus());
+    }
+  });
 
   ensureClearAllDataHandlers();
 
