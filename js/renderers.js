@@ -1237,7 +1237,6 @@ function renderNextDueWidget(ndBox){
 let pendingDashboardRefresh = null;
 function refreshDashboardWidgets(){
   const runRefresh = ()=>{
-    pendingDashboardRefresh = null;
     renderNextDueWidget(document.getElementById("nextDueBox"));
     renderCalendar();
   };
@@ -1248,14 +1247,24 @@ function refreshDashboardWidgets(){
     }else if (typeof clearTimeout === "function"){
       clearTimeout(pendingDashboardRefresh);
     }
+    pendingDashboardRefresh = null;
   }
 
+  // Run once immediately so the dashboard updates even if scheduling fails,
+  // then schedule a follow-up to catch async state changes.
+  runRefresh();
+
+  const followUp = ()=>{
+    pendingDashboardRefresh = null;
+    runRefresh();
+  };
+
   if (typeof requestAnimationFrame === "function"){
-    pendingDashboardRefresh = requestAnimationFrame(runRefresh);
+    pendingDashboardRefresh = requestAnimationFrame(followUp);
     return;
   }
 
-  pendingDashboardRefresh = setTimeout(runRefresh, 0);
+  pendingDashboardRefresh = setTimeout(followUp, 0);
 }
 
 function removeDashboardWindowHandles(state){
@@ -4064,7 +4073,7 @@ function renderDashboard(){
     setContextDate(dateISO);
     saveCloudDebounced();
     toast(message);
-    renderCalendar();
+    refreshDashboardWidgets();
     refreshGarnetList();
     pendingGarnetEditId = null;
     resetGarnetForm();
@@ -4433,7 +4442,7 @@ function renderDashboard(){
     toast("Down time saved");
     if (downDateInput) downDateInput.value = "";
     refreshDownTimeList();
-    renderCalendar();
+    refreshDashboardWidgets();
   });
 
   updateDashJobCategoryHint();
