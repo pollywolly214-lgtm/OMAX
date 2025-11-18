@@ -5880,8 +5880,8 @@ function renderSettings(){
       .occurrence-notes-card{min-width:min(520px,92vw)}
       .occurrence-notes-body{max-height:60vh;overflow:auto}
       .occurrence-notes-table{width:100%;border-collapse:collapse;font-size:.9rem}
-      .occurrence-notes-table th,.occurrence-notes-table td{border:1px solid #e5e7ed;padding:6px 8px;text-align:left;vertical-align:top}
-      .occurrence-notes-table th{background:#f7f9fd;font-weight:700}
+      .occurrence-notes-table th,.occurrence-notes-table td{border:1px solid #cbd4e2;padding:6px 8px;text-align:left;vertical-align:top;color:#1f2937}
+      .occurrence-notes-table th{background:#e2e8f8;font-weight:700;color:#111827}
       .occurrence-notes-empty{color:#607196;font-size:.9rem}
       .modal-close{position:absolute;top:10px;right:10px;background:none;border:0;font-size:1.4rem;cursor:pointer;color:#666;line-height:1}
     `;
