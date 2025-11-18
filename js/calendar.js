@@ -227,11 +227,37 @@ function normalizeOccurrenceNotes(task){
   return result;
 }
 
+function normalizeOccurrenceHours(task){
+  if (!task || typeof task !== "object") return {};
+  const result = {};
+  const raw = task.occurrenceHours;
+  if (raw && typeof raw === "object"){
+    Object.entries(raw).forEach(([maybeDate, maybeHours]) => {
+      const key = normalizeDateKey(maybeDate);
+      if (!key) return;
+      const num = Number(maybeHours);
+      if (!Number.isFinite(num) || num <= 0) return;
+      const normalized = Math.max(0.25, Math.round(num * 100) / 100);
+      result[key] = normalized;
+    });
+  }
+  task.occurrenceHours = result;
+  return result;
+}
+
 function getOccurrenceNoteForTask(task, dateISO){
   const key = normalizeDateKey(dateISO);
   if (!key) return "";
   const notes = normalizeOccurrenceNotes(task);
   return notes[key] || "";
+}
+
+function getOccurrenceHoursForTask(task, dateISO){
+  const key = normalizeDateKey(dateISO);
+  if (!key) return null;
+  const map = normalizeOccurrenceHours(task);
+  const val = map[key];
+  return Number.isFinite(val) && val > 0 ? val : null;
 }
 
 function setOccurrenceNoteForTask(task, dateISO, noteText){
@@ -253,6 +279,30 @@ function setOccurrenceNoteForTask(task, dateISO, noteText){
   }
   if (changed){
     task.occurrenceNotes = notes;
+  }
+  return changed;
+}
+
+function setOccurrenceHoursForTask(task, dateISO, hours){
+  if (!task || typeof task !== "object") return false;
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  const map = normalizeOccurrenceHours(task);
+  const current = map[key];
+  let changed = false;
+  const num = Number(hours);
+  if (Number.isFinite(num) && num > 0){
+    const normalized = Math.max(0.25, Math.round(num * 100) / 100);
+    if (current !== normalized){
+      map[key] = normalized;
+      changed = true;
+    }
+  }else if (current != null){
+    delete map[key];
+    changed = true;
+  }
+  if (changed){
+    task.occurrenceHours = map;
   }
   return changed;
 }
@@ -436,6 +486,9 @@ function removeCalendarTaskOccurrence(meta, dateISO){
     if (setOccurrenceNoteForTask(task, key, "")){
       changed = true;
     }
+    if (setOccurrenceHoursForTask(task, key, null)){
+      changed = true;
+    }
     if (changed){
       applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
     }
@@ -445,6 +498,9 @@ function removeCalendarTaskOccurrence(meta, dateISO){
       changed = true;
     }
     if (setOccurrenceNoteForTask(task, key, "")){
+      changed = true;
+    }
+    if (setOccurrenceHoursForTask(task, key, null)){
       changed = true;
     }
     if (Array.isArray(task.completedDates)){
@@ -591,10 +647,13 @@ function showTaskBubble(taskId, anchor, options = {}){
   const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
     ? Number(DAILY_HOURS)
     : 8;
+  const occurrenceHours = dateKey ? getOccurrenceHoursForTask(task, dateKey) : null;
+  
   const downtimeHours = (()=>{
     const raw = Number(task.downtimeHours);
     return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) / 100 : null;
   })();
+  const effectiveHours = occurrenceHours != null ? occurrenceHours : downtimeHours;
 
   const infoParts = [];
   infoParts.push(`<div class="bubble-title">${escapeHtml(task.name || "Task")}</div>`);
@@ -613,9 +672,13 @@ function showTaskBubble(taskId, anchor, options = {}){
     infoParts.push(`<div class="bubble-kv"><span>Condition:</span><span>${escapeHtml(task.condition || "As required")}</span></div>`);
   }
 
-  if (downtimeHours != null){
-    const days = Math.max(1, Math.ceil(downtimeHours / hoursPerDay));
-    infoParts.push(`<div class="bubble-kv"><span>Time to complete:</span><span>${escapeHtml(formatCalendarDayHours(downtimeHours))} (${days} ${days === 1 ? "day" : "days"})</span></div>`);
+  if (effectiveHours != null){
+    const days = Math.max(1, Math.ceil(effectiveHours / hoursPerDay));
+    infoParts.push(`<div class="bubble-kv"><span>${occurrenceHours != null ? "Occurrence time:" : "Time to complete:"}</span><span>${escapeHtml(formatCalendarDayHours(effectiveHours))} (${days} ${days === 1 ? "day" : "days"})</span></div>`);
+    if (occurrenceHours != null && downtimeHours != null){
+      const baseDays = Math.max(1, Math.ceil(downtimeHours / hoursPerDay));
+      infoParts.push(`<div class="bubble-kv"><span>Default time:</span><span>${escapeHtml(formatCalendarDayHours(downtimeHours))} (${baseDays} ${baseDays === 1 ? "day" : "days"})</span></div>`);
+    }
   }
 
   if (task.manualLink || task.storeLink){
@@ -632,6 +695,8 @@ function showTaskBubble(taskId, anchor, options = {}){
   const actions = [];
   if (dateKey){
     const noteLabel = occurrenceNote ? "Edit occurrence note" : "Add occurrence note";
+    const hoursLabel = occurrenceHours != null ? "Edit occurrence time" : "Add occurrence time";
+    actions.push(`<button data-bbl-occurrence-hours>${escapeHtml(hoursLabel)}</button>`);
     actions.push(`<button data-bbl-occurrence-note>${escapeHtml(noteLabel)}</button>`);
   }
   if (canMarkComplete){
@@ -650,6 +715,21 @@ function showTaskBubble(taskId, anchor, options = {}){
   b.innerHTML = `${infoParts.join("")}<div class="bubble-actions">${actions.join("")}</div>`;
 
   const targetKey = dateKey || normalizeDateKey(new Date());
+
+  b.querySelector("[data-bbl-occurrence-hours]")?.addEventListener("click", ()=>{
+    const existing = occurrenceHours != null ? occurrenceHours : "";
+    const promptText = "Set time to complete for this occurrence (hours). Leave blank to use the default.";
+    const nextRaw = typeof window.prompt === "function" ? window.prompt(promptText, existing === "" ? "" : String(existing)) : "";
+    if (nextRaw === null || nextRaw === undefined) return;
+    const parsed = Number(nextRaw);
+    const changed = setOccurrenceHoursForTask(task, targetKey, Number.isFinite(parsed) && parsed > 0 ? parsed : null);
+    if (changed){
+      saveCloudDebounced();
+      toast((Number.isFinite(parsed) && parsed > 0) ? "Occurrence time saved" : "Occurrence time removed");
+      hideBubble();
+      route();
+    }
+  });
 
   b.querySelector("[data-bbl-occurrence-note]")?.addEventListener("click", ()=>{
     const existing = occurrenceNote;
@@ -1318,7 +1398,9 @@ function renderCalendar(){
     }
     return segments;
   };
-  function resolveTaskDowntimeHours(task){
+  function resolveTaskDowntimeHours(task, startDateKey){
+    const occurrenceOverride = startDateKey ? getOccurrenceHoursForTask(task, startDateKey) : null;
+    if (occurrenceOverride != null) return occurrenceOverride;
     const raw = Number(task?.downtimeHours);
     return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) / 100 : null;
   }
@@ -1326,7 +1408,7 @@ function renderCalendar(){
     if (!task || !iso) return;
     const key = normalizeDateKey(iso);
     if (!key) return;
-    const downtimeHours = resolveTaskDowntimeHours(task);
+    const downtimeHours = resolveTaskDowntimeHours(task, key);
     const segments = splitTaskDuration(key, downtimeHours);
     const statusKey = status || "due";
     const statusPriority = { completed: 3, manual: 2, due: 1 };

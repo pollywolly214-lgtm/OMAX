@@ -187,6 +187,7 @@ function createIntervalTaskInstance(template){
     completedDates: [],
     manualHistory: [],
     occurrenceNotes: {},
+    occurrenceHours: {},
     note: template.note || "",
     downtimeHours: (()=>{
       const raw = Number(template.downtimeHours);
@@ -6193,8 +6194,13 @@ function renderSettings(){
     const freq = t.interval ? `${t.interval} hrs` : "Set frequency";
     const baselineVal = baselineInputValue(t);
     const occurrenceNoteMap = (typeof normalizeOccurrenceNotes === "function") ? normalizeOccurrenceNotes(t) : (t.occurrenceNotes || {});
-    const occurrenceNoteCount = occurrenceNoteMap && typeof occurrenceNoteMap === "object" ? Object.keys(occurrenceNoteMap).length : 0;
-    const notesChip = occurrenceNoteCount > 0 ? `<span class="chip chip-note" title="Occurrence notes">🗒️ ${occurrenceNoteCount}</span>` : "";
+    const occurrenceHoursMap = (typeof normalizeOccurrenceHours === "function") ? normalizeOccurrenceHours(t) : (t.occurrenceHours || {});
+    const occurrenceKeys = new Set([
+      ...Object.keys(occurrenceNoteMap || {}),
+      ...Object.keys(occurrenceHoursMap || {})
+    ].filter(Boolean));
+    const occurrenceCount = occurrenceKeys.size;
+    const notesChip = occurrenceCount > 0 ? `<span class="chip chip-note" title="Occurrence notes">🗒️ ${occurrenceCount}</span>` : "";
     const children = childrenByParent.get(String(t.id)) || [];
     const emptySubMsg = searchActive
       ? "No sub-tasks match your search."
@@ -6506,29 +6512,52 @@ function renderSettings(){
 
   const renderOccurrenceNotesTable = (task)=>{
     if (!occurrenceNotesBody) return;
-    const noteEntries = [];
+    const entryMap = new Map();
     const rawNotes = (typeof normalizeOccurrenceNotes === "function") ? normalizeOccurrenceNotes(task) : (task?.occurrenceNotes || {});
+    const rawHours = (typeof normalizeOccurrenceHours === "function") ? normalizeOccurrenceHours(task) : (task?.occurrenceHours || {});
+
+    const ensureEntry = (key)=>{
+      if (!key) return null;
+      if (!entryMap.has(key)) entryMap.set(key, { dateISO: key, note: "", hours: null });
+      return entryMap.get(key);
+    };
+
     if (rawNotes && typeof rawNotes === "object"){
       Object.entries(rawNotes).forEach(([dateISO, noteText])=>{
         const key = typeof normalizeDateKey === "function" ? normalizeDateKey(dateISO) : String(dateISO || "");
         const text = typeof noteText === "string" ? noteText.trim() : "";
         if (!key || !text) return;
-        noteEntries.push({ dateISO: key, note: text });
+        const entry = ensureEntry(key);
+        if (entry) entry.note = text;
       });
     }
+    if (rawHours && typeof rawHours === "object"){
+      Object.entries(rawHours).forEach(([dateISO, hoursVal])=>{
+        const key = typeof normalizeDateKey === "function" ? normalizeDateKey(dateISO) : String(dateISO || "");
+        const num = Number(hoursVal);
+        if (!key || !Number.isFinite(num) || num <= 0) return;
+        const entry = ensureEntry(key);
+        if (entry) entry.hours = num;
+      });
+    }
+
+    const noteEntries = Array.from(entryMap.values());
     noteEntries.sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
     if (!noteEntries.length){
-      occurrenceNotesBody.innerHTML = `<p class="occurrence-notes-empty">No occurrence notes yet. Add notes from the calendar to see them here.</p>`;
+      occurrenceNotesBody.innerHTML = `<p class="occurrence-notes-empty">No occurrence history yet. Add notes or times from the calendar to see them here.</p>`;
       return;
     }
     const rows = noteEntries.map(entry => {
       const parsed = typeof parseDateLocal === "function" ? parseDateLocal(entry.dateISO) : null;
       const label = parsed instanceof Date && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleDateString() : entry.dateISO;
-      return `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(entry.note)}</td></tr>`;
+      const hoursLabel = Number.isFinite(entry.hours) && entry.hours > 0
+        ? (typeof formatCalendarDayHours === "function" ? formatCalendarDayHours(entry.hours) : `${entry.hours} hrs`)
+        : "—";
+      return `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(hoursLabel)}</td><td>${escapeHtml(entry.note || "")}</td></tr>`;
     }).join("");
     occurrenceNotesBody.innerHTML = `
       <table class="occurrence-notes-table">
-        <thead><tr><th>Date</th><th>Occurrence note</th></tr></thead>
+        <thead><tr><th>Date</th><th>Occurrence time</th><th>Occurrence note</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
   };
