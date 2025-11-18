@@ -199,7 +199,7 @@ function createIntervalTaskInstance(template){
   return copy;
 }
 
-function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
+function scheduleExistingIntervalTask(task, { dateISO = null, refreshDashboard = true } = {}){
   if (!task || task.mode !== "interval") return null;
   if (!Array.isArray(tasksInterval)){
     if (Array.isArray(window.tasksInterval)){
@@ -344,6 +344,9 @@ function scheduleExistingIntervalTask(task, { dateISO = null } = {}){
   if (template && template.variant !== "template"){
     ensureTaskVariant(template, "interval");
     if (template.templateId == null) template.templateId = template.id;
+  }
+  if (refreshDashboard && typeof refreshDashboardWidgets === "function"){
+    refreshDashboardWidgets();
   }
   return instance;
 }
@@ -1119,6 +1122,140 @@ function addDashboardWindowHandles(state){
       win.appendChild(handle);
     });
   });
+}
+
+function renderNextDueWidget(ndBox){
+  if (!ndBox) return;
+
+  const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const upcoming = tasksInterval
+    .filter(task => task && task.mode === "interval" && isInstanceTask(task))
+    .map(t => ({ t, nd: nextDue(t) }))
+    .filter(x => x.nd)
+    .sort((a,b)=> a.nd.due - b.nd.due)
+    .slice(0,8);
+
+  const getSettingsTargetId = (task)=>{
+    if (!task || task.id == null) return "";
+    const findTask = typeof findTaskByIdLocal === "function" ? findTaskByIdLocal : null;
+    const templateId = task.templateId != null ? String(task.templateId) : "";
+    const taskId = String(task.id);
+    if (templateId && templateId !== taskId){
+      if (!findTask || findTask(templateId)) return templateId;
+    }
+    return taskId;
+  };
+
+  if (upcoming.length){
+    const formatDate = (date)=> date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    const formatDueLine = (days, dueText)=>{
+      if (days <= 0) return `Due today · ${dueText}`;
+      if (days === 1) return `Due tomorrow · ${dueText}`;
+      return `Due in ${days} days · ${dueText}`;
+    };
+    const formatRemain = (remain)=>{
+      const hours = Math.max(0, Math.round(remain ?? 0));
+      return `${hours.toLocaleString()} hrs left`;
+    };
+    const statusClass = (days)=>{
+      if (days <= 0) return "is-due-now";
+      if (days <= 3) return "is-due-soon";
+      return "is-due-later";
+    };
+    const buildMetaHtml = (nd)=>{
+      const dueLine = formatDueLine(Math.max(0, nd.days ?? 0), formatDate(nd.due));
+      const remainLine = formatRemain(nd.remain);
+      return `
+        <span class="next-due-meta-line">${escapeHtml(dueLine)}</span>
+        <span class="next-due-meta-line next-due-meta-hours">${escapeHtml(remainLine)}</span>
+      `.trim();
+    };
+    const buildAriaLabel = (name, nd)=>{
+      const dueLine = formatDueLine(Math.max(0, nd.days ?? 0), formatDate(nd.due));
+      const remainLine = formatRemain(nd.remain);
+      return `${name} — ${dueLine}, ${remainLine}`;
+    };
+
+    const featured = upcoming[0];
+    const featuredId = String(featured.t.id);
+    const featuredSettingsId = getSettingsTargetId(featured.t);
+    const featuredSettingsAttr = featuredSettingsId ? ` data-settings-task="${escapeHtml(featuredSettingsId)}"` : "";
+    const featuredMeta = buildMetaHtml(featured.nd);
+    const featuredStatus = statusClass(featured.nd.days);
+    const countdownNumber = featured.nd.days <= 0
+      ? "Due"
+      : Math.max(0, featured.nd.days).toLocaleString();
+    const countdownLabel = featured.nd.days <= 0
+      ? "today"
+      : (featured.nd.days === 1 ? "day left" : "days left");
+    const eyebrow = featured.nd.days <= 0 ? "Due now" : "Next due";
+    const featuredButton = `
+      <button type="button" class="next-due-task next-due-featured ${featuredStatus} cal-task"
+        data-next-due-task="1" data-task-id="${escapeHtml(featuredId)}" data-cal-task="${escapeHtml(featuredId)}"${featuredSettingsAttr}
+        aria-label="${escapeHtml(buildAriaLabel(featured.t.name, featured.nd))}">
+        <span class="next-due-featured-copy">
+          <span class="next-due-eyebrow">${escapeHtml(eyebrow)}</span>
+          <span class="next-due-name">${escapeHtml(featured.t.name)}</span>
+          <span class="next-due-meta">${featuredMeta}</span>
+        </span>
+        <span class="next-due-countdown" aria-hidden="true">
+          <span class="next-due-count">${escapeHtml(countdownNumber)}</span>
+          <span class="next-due-count-label">${escapeHtml(countdownLabel)}</span>
+        </span>
+      </button>
+    `;
+
+    const rest = upcoming.slice(1);
+    const listHtml = rest.map(x => {
+      const id = String(x.t.id);
+      const settingsId = getSettingsTargetId(x.t);
+      const settingsAttr = settingsId ? ` data-settings-task="${escapeHtml(settingsId)}"` : "";
+      const metaHtml = buildMetaHtml(x.nd);
+      const status = statusClass(x.nd.days);
+      return `<li>
+        <button type="button" class="next-due-task ${status} cal-task" data-next-due-task="1" data-task-id="${escapeHtml(id)}" data-cal-task="${escapeHtml(id)}"${settingsAttr}>
+          <span class="next-due-name">${escapeHtml(x.t.name)}</span>
+          <span class="next-due-meta">${metaHtml}</span>
+        </button>
+      </li>`;
+    }).join("");
+
+    const restSection = rest.length
+      ? `<div class="next-due-subtitle">Coming up</div><ul class="next-due-list">${listHtml}</ul>`
+      : `<p class="next-due-empty">No other tasks are scheduled yet.</p>`;
+
+    ndBox.innerHTML = `<div class="next-due-window">${featuredButton}${restSection}</div>`;
+    ndBox.classList.remove("next-due-preview-mode");
+    delete ndBox.dataset.preview;
+  }else{
+    ndBox.innerHTML = buildNextDuePreview();
+    ndBox.classList.add("next-due-preview-mode");
+    ndBox.dataset.preview = "1";
+  }
+}
+
+let pendingDashboardRefresh = null;
+function refreshDashboardWidgets(){
+  const runRefresh = ()=>{
+    pendingDashboardRefresh = null;
+    renderNextDueWidget(document.getElementById("nextDueBox"));
+    renderCalendar();
+  };
+
+  // Refresh immediately so newly added tasks appear without needing a reload.
+  runRefresh();
+
+  // Queue a follow-up refresh to catch any late DOM/layout changes.
+  if (pendingDashboardRefresh != null){
+    return;
+  }
+
+  if (typeof requestAnimationFrame === "function"){
+    pendingDashboardRefresh = requestAnimationFrame(runRefresh);
+    return;
+  }
+
+  pendingDashboardRefresh = setTimeout(runRefresh, 0);
 }
 
 function removeDashboardWindowHandles(state){
@@ -3071,111 +3208,7 @@ function renderDashboard(){
 
   // Next due summary
   const ndBox = document.getElementById("nextDueBox");
-  const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-  const upcoming = tasksInterval
-    .filter(task => task && task.mode === "interval" && isInstanceTask(task))
-    .map(t => ({ t, nd: nextDue(t) }))
-    .filter(x => x.nd)
-    .sort((a,b)=> a.nd.due - b.nd.due)
-    .slice(0,8);
-
-  const getSettingsTargetId = (task)=>{
-    if (!task || task.id == null) return "";
-    const findTask = typeof findTaskByIdLocal === "function" ? findTaskByIdLocal : null;
-    const templateId = task.templateId != null ? String(task.templateId) : "";
-    const taskId = String(task.id);
-    if (templateId && templateId !== taskId){
-      if (!findTask || findTask(templateId)) return templateId;
-    }
-    return taskId;
-  };
-
-  if (upcoming.length){
-    const formatDate = (date)=> date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-    const formatDueLine = (days, dueText)=>{
-      if (days <= 0) return `Due today · ${dueText}`;
-      if (days === 1) return `Due tomorrow · ${dueText}`;
-      return `Due in ${days} days · ${dueText}`;
-    };
-    const formatRemain = (remain)=>{
-      const hours = Math.max(0, Math.round(remain ?? 0));
-      return `${hours.toLocaleString()} hrs left`;
-    };
-    const statusClass = (days)=>{
-      if (days <= 0) return "is-due-now";
-      if (days <= 3) return "is-due-soon";
-      return "is-due-later";
-    };
-    const buildMetaHtml = (nd)=>{
-      const dueLine = formatDueLine(Math.max(0, nd.days ?? 0), formatDate(nd.due));
-      const remainLine = formatRemain(nd.remain);
-      return `
-        <span class="next-due-meta-line">${escapeHtml(dueLine)}</span>
-        <span class="next-due-meta-line next-due-meta-hours">${escapeHtml(remainLine)}</span>
-      `.trim();
-    };
-    const buildAriaLabel = (name, nd)=>{
-      const dueLine = formatDueLine(Math.max(0, nd.days ?? 0), formatDate(nd.due));
-      const remainLine = formatRemain(nd.remain);
-      return `${name} — ${dueLine}, ${remainLine}`;
-    };
-
-    const featured = upcoming[0];
-    const featuredId = String(featured.t.id);
-    const featuredSettingsId = getSettingsTargetId(featured.t);
-    const featuredSettingsAttr = featuredSettingsId ? ` data-settings-task="${escapeHtml(featuredSettingsId)}"` : "";
-    const featuredMeta = buildMetaHtml(featured.nd);
-    const featuredStatus = statusClass(featured.nd.days);
-    const countdownNumber = featured.nd.days <= 0
-      ? "Due"
-      : Math.max(0, featured.nd.days).toLocaleString();
-    const countdownLabel = featured.nd.days <= 0
-      ? "today"
-      : (featured.nd.days === 1 ? "day left" : "days left");
-    const eyebrow = featured.nd.days <= 0 ? "Due now" : "Next due";
-    const featuredButton = `
-      <button type="button" class="next-due-task next-due-featured ${featuredStatus} cal-task"
-        data-next-due-task="1" data-task-id="${escapeHtml(featuredId)}" data-cal-task="${escapeHtml(featuredId)}"${featuredSettingsAttr}
-        aria-label="${escapeHtml(buildAriaLabel(featured.t.name, featured.nd))}">
-        <span class="next-due-featured-copy">
-          <span class="next-due-eyebrow">${escapeHtml(eyebrow)}</span>
-          <span class="next-due-name">${escapeHtml(featured.t.name)}</span>
-          <span class="next-due-meta">${featuredMeta}</span>
-        </span>
-        <span class="next-due-countdown" aria-hidden="true">
-          <span class="next-due-count">${escapeHtml(countdownNumber)}</span>
-          <span class="next-due-count-label">${escapeHtml(countdownLabel)}</span>
-        </span>
-      </button>
-    `;
-
-    const rest = upcoming.slice(1);
-    const listHtml = rest.map(x => {
-      const id = String(x.t.id);
-      const settingsId = getSettingsTargetId(x.t);
-      const settingsAttr = settingsId ? ` data-settings-task="${escapeHtml(settingsId)}"` : "";
-      const metaHtml = buildMetaHtml(x.nd);
-      const status = statusClass(x.nd.days);
-      return `<li>
-        <button type="button" class="next-due-task ${status} cal-task" data-next-due-task="1" data-task-id="${escapeHtml(id)}" data-cal-task="${escapeHtml(id)}"${settingsAttr}>
-          <span class="next-due-name">${escapeHtml(x.t.name)}</span>
-          <span class="next-due-meta">${metaHtml}</span>
-        </button>
-      </li>`;
-    }).join("");
-
-    const restSection = rest.length
-      ? `<div class="next-due-subtitle">Coming up</div><ul class="next-due-list">${listHtml}</ul>`
-      : `<p class="next-due-empty">No other tasks are scheduled yet.</p>`;
-
-    ndBox.innerHTML = `<div class="next-due-window">${featuredButton}${restSection}</div>`;
-    ndBox.classList.remove("next-due-preview-mode");
-    delete ndBox.dataset.preview;
-  }else{
-    ndBox.innerHTML = buildNextDuePreview();
-    ndBox.classList.add("next-due-preview-mode");
-    ndBox.dataset.preview = "1";
-  }
+  renderNextDueWidget(ndBox);
 
   if (!ndBox.dataset.wired){
     ndBox.dataset.wired = "1";
@@ -4219,7 +4252,7 @@ function renderDashboard(){
       const baselineHours = parseBaselineHours(taskLastInput?.value);
       applyIntervalBaseline(template, { baselineHours, currentHours: curHours });
       tasksInterval.unshift(template);
-      const instance = scheduleExistingIntervalTask(template, { dateISO: targetISO }) || template;
+      const instance = scheduleExistingIntervalTask(template, { dateISO: targetISO, refreshDashboard: false }) || template;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
       let dateLabel = targetISO;
@@ -4297,7 +4330,7 @@ function renderDashboard(){
     saveCloudDebounced();
     toast(message);
     closeModal();
-    renderDashboard();
+    refreshDashboardWidgets();
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -4337,7 +4370,7 @@ function renderDashboard(){
     saveCloudDebounced();
     toast("One-time task added to the calendar");
     closeModal();
-    renderDashboard();
+    refreshDashboardWidgets();
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -4358,7 +4391,7 @@ function renderDashboard(){
     const targetISO = addContextDateISO || ymd(new Date());
     let message = "Maintenance task added";
     if (task.mode === "interval"){
-      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO }) || task;
+      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO, refreshDashboard: false }) || task;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
       let dateLabel = targetISO;
@@ -4381,7 +4414,7 @@ function renderDashboard(){
     saveCloudDebounced();
     toast(message);
     closeModal();
-    renderDashboard();
+    refreshDashboardWidgets();
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
