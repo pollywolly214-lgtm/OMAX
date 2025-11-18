@@ -1706,9 +1706,23 @@ function jobFolderChildren(parentId){
   });
 }
 
+function normalizeJobFolderName(value){
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function jobFolderNameExists(folders, name, excludeId){
+  const normalized = normalizeJobFolderName(name);
+  return folders.some(folder => {
+    if (!folder) return false;
+    if (excludeId != null && String(folder.id) === String(excludeId)) return false;
+    return normalizeJobFolderName(folder.name) === normalized;
+  });
+}
+
 function addJobFolder(name, parentId, color){
   const folders = ensureJobFolderState();
   const label = (name || "").trim();
+  if (jobFolderNameExists(folders, label)) return null;
   const parentKey = parentId != null ? String(parentId) : JOB_ROOT_FOLDER_ID;
   const fallbackParent = folders.some(folder => String(folder.id) === parentKey)
     ? parentKey
@@ -1738,7 +1752,9 @@ function renameJobFolder(id, name){
   const key = String(id);
   const target = folders.find(folder => String(folder.id) === key);
   if (!target) return null;
-  target.name = (name || "").trim();
+  const label = (name || "").trim();
+  if (jobFolderNameExists(folders, label, key)) return null;
+  target.name = label;
   setJobFolders(folders);
   return target;
 }
