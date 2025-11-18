@@ -4400,7 +4400,7 @@ function renderDashboard(){
     const targetISO = addContextDateISO || ymd(new Date());
     let message = "Maintenance task added";
     if (task.mode === "interval"){
-      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO, refreshDashboard: false }) || task;
+      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO, refreshDashboard: true }) || task;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
       let dateLabel = targetISO;
