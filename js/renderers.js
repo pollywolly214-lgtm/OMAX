@@ -1234,9 +1234,24 @@ function renderNextDueWidget(ndBox){
   }
 }
 
+let pendingDashboardRefresh = null;
 function refreshDashboardWidgets(){
-  renderNextDueWidget(document.getElementById("nextDueBox"));
-  renderCalendar();
+  const runRefresh = ()=>{
+    pendingDashboardRefresh = null;
+    renderNextDueWidget(document.getElementById("nextDueBox"));
+    renderCalendar();
+  };
+
+  if (pendingDashboardRefresh != null){
+    return;
+  }
+
+  if (typeof requestAnimationFrame === "function"){
+    pendingDashboardRefresh = requestAnimationFrame(runRefresh);
+    return;
+  }
+
+  pendingDashboardRefresh = setTimeout(runRefresh, 0);
 }
 
 function removeDashboardWindowHandles(state){
