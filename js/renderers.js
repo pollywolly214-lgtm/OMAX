@@ -5789,6 +5789,7 @@ function renderSettings(){
       #explorer details.cat>summary{font-weight:700;background:#f4f6fb}
       #explorer .task-name{flex:1;min-width:0}
       #explorer summary .chip{font-size:.72rem;border:1px solid #bbb;border-radius:999px;padding:.05rem .45rem;background:#fff}
+      #explorer summary .chip.chip-note{background:#eef3fb;border-color:#c8d7f4;color:#0a63c2;display:inline-flex;align-items:center;gap:4px}
       #explorer .body{padding:8px 10px;background:#fff;border-top:1px dashed #e5e5e5}
       #explorer .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.5rem}
       #explorer label{font-size:.85rem;display:flex;flex-direction:column;gap:4px}
@@ -5801,6 +5802,7 @@ function renderSettings(){
       #explorer .row-actions button{padding:.35rem .65rem;border-radius:6px;border:0;cursor:pointer;background:#eef3fb;color:#0a63c2}
       #explorer .row-actions .btn-edit{margin-right:auto;background:#fff;color:#0f1e3a;border:1px solid #ccd4e0}
       #explorer .row-actions .btn-edit:hover{background:#f3f5fb}
+      #explorer .row-actions .btn-notes{background:#fff;border:1px solid #ccd4e0;color:#0a63c2}
       #explorer .row-actions .danger{background:#e14b4b;color:#fff}
       #explorer .row-actions .btn-complete{background:#0a63c2;color:#fff}
       #explorer [data-field]{position:relative}
@@ -5859,6 +5861,12 @@ function renderSettings(){
       .modal-actions button{padding:.45rem .85rem;border-radius:6px;border:0;cursor:pointer;font-weight:600}
       .modal-actions .secondary{background:#eef3fb;color:#0a63c2}
       .modal-actions .primary{background:#0a63c2;color:#fff}
+      .occurrence-notes-card{min-width:min(520px,92vw)}
+      .occurrence-notes-body{max-height:60vh;overflow:auto}
+      .occurrence-notes-table{width:100%;border-collapse:collapse;font-size:.9rem}
+      .occurrence-notes-table th,.occurrence-notes-table td{border:1px solid #e5e7ed;padding:6px 8px;text-align:left;vertical-align:top}
+      .occurrence-notes-table th{background:#f7f9fd;font-weight:700}
+      .occurrence-notes-empty{color:#607196;font-size:.9rem}
       .modal-close{position:absolute;top:10px;right:10px;background:none;border:0;font-size:1.4rem;cursor:pointer;color:#666;line-height:1}
     `;
     document.head.appendChild(st);
@@ -6168,6 +6176,9 @@ function renderSettings(){
     const condition = escapeHtml(t.condition || "As required");
     const freq = t.interval ? `${t.interval} hrs` : "Set frequency";
     const baselineVal = baselineInputValue(t);
+    const occurrenceNoteMap = (typeof normalizeOccurrenceNotes === "function") ? normalizeOccurrenceNotes(t) : (t.occurrenceNotes || {});
+    const occurrenceNoteCount = occurrenceNoteMap && typeof occurrenceNoteMap === "object" ? Object.keys(occurrenceNoteMap).length : 0;
+    const notesChip = occurrenceNoteCount > 0 ? `<span class="chip chip-note" title="Occurrence notes">🗒️ ${occurrenceNoteCount}</span>` : "";
     const children = childrenByParent.get(String(t.id)) || [];
     const emptySubMsg = searchActive
       ? "No sub-tasks match your search."
@@ -6187,6 +6198,7 @@ function renderSettings(){
           <span class="task-name">${name}</span>
           <span class="chip">${type === "interval" ? "By Interval" : "As Required"}</span>
           ${type === "interval" ? `<span class=\"chip\" data-chip-frequency="${t.id}">${escapeHtml(freq)}</span>` : `<span class=\"chip\" data-chip-condition="${t.id}">${condition}</span>`}
+          ${notesChip}
           ${type === "interval" ? dueChip(t) : ""}
         </summary>
         <div class="body">
@@ -6209,6 +6221,7 @@ function renderSettings(){
           </div>
           <div class="row-actions">
             <button type="button" class="btn-edit" data-edit-task="${t.id}" aria-pressed="false">Edit</button>
+            <button type="button" class="btn-notes" data-occurrence-notes="${t.id}" aria-haspopup="dialog">Occurrence notes</button>
             ${type === "interval" ? `<button class="btn-complete" data-complete="${t.id}">Mark completed now</button>` : ""}
             <button class="danger" data-remove="${t.id}" data-from="${type}">Remove</button>
           </div>
@@ -6375,6 +6388,13 @@ function renderSettings(){
         </form>
       </div>
     </div>
+    <div class="modal-backdrop" id="occurrenceNotesModal" hidden>
+      <div class="modal-card occurrence-notes-card">
+        <button type="button" class="modal-close" data-close-occurrence-notes>×</button>
+        <h4>Occurrence notes</h4>
+        <div id="occurrenceNotesBody" class="occurrence-notes-body"></div>
+      </div>
+    </div>
     <div id="maintenanceContextMenu" class="context-menu" hidden>
       <button type="button" data-action="edit">Edit</button>
       <button type="button" class="danger" data-action="delete">Delete</button>
@@ -6390,8 +6410,11 @@ function renderSettings(){
   const conditionRow = form?.querySelector('[data-form-condition]');
   const searchInput = document.getElementById("maintenanceSearch");
   const searchClear = document.getElementById("maintenanceSearchClear");
+  const occurrenceNotesModal = document.getElementById("occurrenceNotesModal");
+  const occurrenceNotesBody = document.getElementById("occurrenceNotesBody");
   const contextMenu = document.getElementById("maintenanceContextMenu");
   let contextTarget = null;
+  let occurrenceNotesTaskId = null;
 
   const getTaskEditingState = (taskEl)=>{
     if (!(taskEl instanceof HTMLElement)) return false;
@@ -6456,6 +6479,50 @@ function renderSettings(){
   const lockAllTasks = ()=>{
     if (!tree) return;
     tree.querySelectorAll("details.task").forEach(task => setTaskEditingState(task, false));
+  };
+
+  const closeOccurrenceNotes = ()=>{
+    if (!occurrenceNotesModal) return;
+    occurrenceNotesTaskId = null;
+    occurrenceNotesModal.hidden = true;
+  };
+
+  const renderOccurrenceNotesTable = (task)=>{
+    if (!occurrenceNotesBody) return;
+    const noteEntries = [];
+    const rawNotes = (typeof normalizeOccurrenceNotes === "function") ? normalizeOccurrenceNotes(task) : (task?.occurrenceNotes || {});
+    if (rawNotes && typeof rawNotes === "object"){
+      Object.entries(rawNotes).forEach(([dateISO, noteText])=>{
+        const key = typeof normalizeDateKey === "function" ? normalizeDateKey(dateISO) : String(dateISO || "");
+        const text = typeof noteText === "string" ? noteText.trim() : "";
+        if (!key || !text) return;
+        noteEntries.push({ dateISO: key, note: text });
+      });
+    }
+    noteEntries.sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+    if (!noteEntries.length){
+      occurrenceNotesBody.innerHTML = `<p class="occurrence-notes-empty">No occurrence notes yet. Add notes from the calendar to see them here.</p>`;
+      return;
+    }
+    const rows = noteEntries.map(entry => {
+      const parsed = typeof parseDateLocal === "function" ? parseDateLocal(entry.dateISO) : null;
+      const label = parsed instanceof Date && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleDateString() : entry.dateISO;
+      return `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(entry.note)}</td></tr>`;
+    }).join("");
+    occurrenceNotesBody.innerHTML = `
+      <table class="occurrence-notes-table">
+        <thead><tr><th>Date</th><th>Occurrence note</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  };
+
+  const openOccurrenceNotes = (taskId)=>{
+    if (!occurrenceNotesModal || !occurrenceNotesBody) return;
+    const meta = typeof findTaskMeta === "function" ? findTaskMeta(taskId) : null;
+    if (!meta || !meta.task) return;
+    occurrenceNotesTaskId = String(taskId || "");
+    renderOccurrenceNotesTable(meta.task);
+    occurrenceNotesModal.hidden = false;
   };
 
   lockAllTasks();
@@ -6802,6 +6869,15 @@ function renderSettings(){
   document.getElementById("cancelTaskModal")?.addEventListener("click", hideModal);
   document.getElementById("closeTaskModal")?.addEventListener("click", hideModal);
   modal?.addEventListener("click", (e)=>{ if (e.target === modal) hideModal(); });
+  occurrenceNotesModal?.addEventListener("click", (e)=>{
+    if (e.target === occurrenceNotesModal) closeOccurrenceNotes();
+    if (e.target instanceof HTMLElement && e.target.hasAttribute("data-close-occurrence-notes")) closeOccurrenceNotes();
+  });
+  document.addEventListener("keydown", (e)=>{
+    if (e.key === "Escape" && occurrenceNotesModal && !occurrenceNotesModal.hidden){
+      closeOccurrenceNotes();
+    }
+  });
   typeField?.addEventListener("change", ()=> syncFormMode(typeField.value));
   syncFormMode(typeField?.value || "interval");
 
@@ -7111,6 +7187,12 @@ function renderSettings(){
       if (nextState){
         focusFirstEditableControl(holder);
       }
+      return;
+    }
+    const notesBtn = e.target.closest('[data-occurrence-notes]');
+    if (notesBtn){
+      const id = notesBtn.getAttribute('data-occurrence-notes');
+      if (id) openOccurrenceNotes(id);
       return;
     }
     const removeBtn = e.target.closest('[data-remove]');
