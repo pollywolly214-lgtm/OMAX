@@ -759,6 +759,8 @@ function showTaskBubble(taskId, anchor, options = {}){
     infoParts.push(`<div class="bubble-kv"><span>Note:</span><span>${escapeHtml(occurrenceNote)}</span></div>`);
   }
 
+  const targetKey = dateKey || normalizeDateKey(new Date());
+
   const actions = [];
   if (dateKey){
     const noteLabel = occurrenceNote ? "Edit occurrence note" : "Add occurrence note";
@@ -793,8 +795,6 @@ function showTaskBubble(taskId, anchor, options = {}){
 
   const b  = makeBubble(anchor);
   b.innerHTML = `${infoParts.join("")}<div class="bubble-actions">${actions.join("")}</div>`;
-
-  const targetKey = dateKey || normalizeDateKey(new Date());
 
   b.querySelector("[data-bbl-occurrence-hours]")?.addEventListener("click", ()=>{
     const existing = occurrenceHours != null ? occurrenceHours : "";
