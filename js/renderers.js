@@ -7374,6 +7374,17 @@ function renderSettings(){
       }
       const changedDowntime = prevDowntime !== meta.task.downtimeHours;
       if (changedDowntime){
+        const templateId = isInstanceTask(meta.task) ? meta.task.templateId : meta.task.id;
+        if (templateId != null && Array.isArray(window.tasksInterval)){
+          window.tasksInterval.forEach(task => {
+            if (!task || !isInstanceTask(task)) return;
+            if (String(task.templateId) !== String(templateId)) return;
+            const hasCustomDowntime = task.downtimeHours != null && task.downtimeHours !== prevDowntime;
+            if (!hasCustomDowntime){
+              task.downtimeHours = meta.task.downtimeHours;
+            }
+          });
+        }
         if (typeof refreshDashboardWidgets === "function"){
           refreshDashboardWidgets();
         }else if (typeof renderCalendar === "function"){
