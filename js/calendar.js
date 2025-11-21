@@ -548,13 +548,16 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     const normalized = normalizeDateKey(value);
     if (!normalized) return false;
     if (normalizedScope === "all") return true;
-    if (normalizedScope === "future"){ 
+    if (normalizedScope === "future"){
       if (targetTime == null) return normalized >= key;
       const compareDate = toDayStart(normalized);
       const compareTime = compareDate instanceof Date && !Number.isNaN(compareDate.getTime()) ? compareDate.getTime() : null;
       return compareTime != null ? compareTime >= targetTime : normalized >= key;
     }
-    return normalized === key;
+    if (targetTime == null) return normalized === key;
+    const compareDate = toDayStart(normalized);
+    const compareTime = compareDate instanceof Date && !Number.isNaN(compareDate.getTime()) ? compareDate.getTime() : null;
+    return compareTime != null ? compareTime === targetTime : normalized === key;
   };
 
   const pruneOccurrenceObject = (obj)=>{
