@@ -1243,12 +1243,14 @@ function renderNextDueWidget(ndBox){
 let pendingDashboardRefresh = null;
 function refreshDashboardWidgets(options = {}){
   const { full = false } = options || {};
+  if (full && typeof renderDashboard === "function"){
+    renderDashboard();
+    return;
+  }
+
   const runRefresh = ()=>{
     renderNextDueWidget(document.getElementById("nextDueBox"));
     renderCalendar();
-    if (full && typeof renderDashboard === "function"){
-      scheduleDashboardRender();
-    }
   };
 
   if (pendingDashboardRefresh != null){
@@ -1275,30 +1277,6 @@ function refreshDashboardWidgets(options = {}){
   }
 
   pendingDashboardRefresh = setTimeout(followUp, 0);
-}
-
-let pendingDashboardRender = null;
-function scheduleDashboardRender(){
-  if (pendingDashboardRender != null){
-    if (typeof cancelAnimationFrame === "function"){
-      cancelAnimationFrame(pendingDashboardRender);
-    }else if (typeof clearTimeout === "function"){
-      clearTimeout(pendingDashboardRender);
-    }
-    pendingDashboardRender = null;
-  }
-
-  const doRender = ()=>{
-    pendingDashboardRender = null;
-    renderDashboard();
-  };
-
-  if (typeof requestAnimationFrame === "function"){
-    pendingDashboardRender = requestAnimationFrame(doRender);
-    return;
-  }
-
-  pendingDashboardRender = setTimeout(doRender, 0);
 }
 
 function removeDashboardWindowHandles(state){
