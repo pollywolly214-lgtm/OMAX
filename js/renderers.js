@@ -357,8 +357,49 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
   return instance;
 }
 
+function scheduleExistingAsReqTask(task, { dateISO = null, note = "", refreshDashboard = true } = {}){
+  if (!task || task.mode !== "asreq") return null;
+  if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
+
+  const templateId = task.templateId != null ? task.templateId : task.id;
+  const normalizeDate = (raw)=>{
+    if (!raw) return null;
+    const parsed = parseDateLocal(raw);
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+    return ymd(parsed);
+  };
+
+  const instance = {
+    ...task,
+    id: genId(task.name || "task"),
+    variant: "instance",
+    templateId: templateId != null ? templateId : null,
+    calendarDateISO: normalizeDate(dateISO)
+  };
+
+  if (Array.isArray(task.parts)) instance.parts = task.parts.map(part => part ? { ...part } : part).filter(Boolean);
+  if (Array.isArray(task.completedDates)) instance.completedDates = task.completedDates.slice();
+  if (task.occurrenceNotes && typeof task.occurrenceNotes === "object"){
+    instance.occurrenceNotes = { ...task.occurrenceNotes };
+  }
+  if (task.occurrenceHours && typeof task.occurrenceHours === "object"){
+    instance.occurrenceHours = { ...task.occurrenceHours };
+  }
+
+  if (note){
+    try { setOccurrenceNoteForTask(instance, instance.calendarDateISO, note); } catch (err) { /* noop */ }
+  }
+
+  window.tasksAsReq.unshift(instance);
+  if (refreshDashboard && typeof refreshDashboardWidgets === "function"){
+    refreshDashboardWidgets({ full: true });
+  }
+  return instance;
+}
+
 if (typeof window !== "undefined"){
   window.scheduleExistingIntervalTask = scheduleExistingIntervalTask;
+  window.scheduleExistingAsReqTask = scheduleExistingAsReqTask;
   window.createIntervalTaskInstance = createIntervalTaskInstance;
 }
 
@@ -4437,10 +4478,7 @@ function renderDashboard(){
         ? `Logged "${instance.name || "Task"}" as completed on ${dateLabel}`
         : `Scheduled "${instance.name || "Task"}" for ${dateLabel}`;
     }else{
-      task.calendarDateISO = targetISO || null;
-      if (occurrenceNote){
-        setOccurrenceNoteForTask(task, targetISO, occurrenceNote);
-      }
+      const instance = scheduleExistingAsReqTask(task, { dateISO: targetISO, note: occurrenceNote, refreshDashboard: true }) || task;
       message = "As-required task linked from Maintenance Settings";
     }
     setContextDate(targetISO);
