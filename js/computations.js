@@ -91,7 +91,8 @@ function computeTimeEfficiency(rangeDays, options = {}){
     cursor.setDate(cursor.getDate() + 1);
   }
 
-  const baseline = CUTTING_BASELINE_DAILY_HOURS * normalizedDays;
+  const workingDays = inclusiveDayCount(startDate, endDate) || 0;
+  const baseline = CUTTING_BASELINE_DAILY_HOURS * workingDays;
 
   const todayLocal = new Date();
   todayLocal.setHours(0,0,0,0);
