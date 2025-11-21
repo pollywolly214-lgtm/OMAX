@@ -211,6 +211,15 @@ function normalizeDateKey(value){
   return null;
 }
 
+function toDayStart(value){
+  const key = normalizeDateKey(value);
+  if (!key) return null;
+  const parsed = parseDateLocal(key);
+  if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+  parsed.setHours(0,0,0,0);
+  return parsed;
+}
+
 function normalizeOccurrenceNotes(task){
   if (!task || typeof task !== "object") return {};
   const result = {};
