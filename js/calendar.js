@@ -517,25 +517,25 @@ function removeCalendarTaskOccurrence(meta, dateISO){
 
 function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
   const normalizedScope = scope === "future" ? "future" : (scope === "all" ? "all" : "single");
-  if (normalizedScope === "single") return removeCalendarTaskOccurrence(meta, dateISO);
   if (!meta || !meta.task) return false;
 
   const key = normalizeDateKey(dateISO);
-  if (normalizedScope === "future" && !key) return false;
+  if (!key) return false;
 
   const task = meta.task;
   const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
   let changed = false;
 
   if (isInstanceTask(task)){
-    return removeCalendarTaskOccurrence(meta, dateISO);
+    return removeCalendarTaskOccurrence(meta, key);
   }
 
   const matchesScope = (value)=>{
-    if (normalizedScope === "all") return true;
     const normalized = normalizeDateKey(value);
     if (!normalized) return false;
-    return normalizedScope === "future" ? normalized >= key : normalized === key;
+    if (normalizedScope === "all") return true;
+    if (normalizedScope === "future") return normalized >= key;
+    return normalized === key;
   };
 
   const pruneOccurrenceObject = (obj)=>{
@@ -556,7 +556,7 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
   }
 
   if (Array.isArray(task.completedDates)){
-    const next = task.completedDates.filter(date => !matchesScope(date));
+    const next = task.completedDates.filter(value => !matchesScope(value));
     if (next.length !== task.completedDates.length){
       task.completedDates = next;
       changed = true;
