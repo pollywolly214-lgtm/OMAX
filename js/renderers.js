@@ -352,7 +352,7 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
     if (template.templateId == null) template.templateId = template.id;
   }
   if (refreshDashboard && typeof refreshDashboardWidgets === "function"){
-    refreshDashboardWidgets();
+    refreshDashboardWidgets({ full: true });
   }
   return instance;
 }
@@ -1241,10 +1241,14 @@ function renderNextDueWidget(ndBox){
 }
 
 let pendingDashboardRefresh = null;
-function refreshDashboardWidgets(){
+function refreshDashboardWidgets(options = {}){
+  const { full = false } = options || {};
   const runRefresh = ()=>{
     renderNextDueWidget(document.getElementById("nextDueBox"));
     renderCalendar();
+    if (full && typeof renderDashboard === "function"){
+      scheduleDashboardRender();
+    }
   };
 
   if (pendingDashboardRefresh != null){
@@ -1271,6 +1275,30 @@ function refreshDashboardWidgets(){
   }
 
   pendingDashboardRefresh = setTimeout(followUp, 0);
+}
+
+let pendingDashboardRender = null;
+function scheduleDashboardRender(){
+  if (pendingDashboardRender != null){
+    if (typeof cancelAnimationFrame === "function"){
+      cancelAnimationFrame(pendingDashboardRender);
+    }else if (typeof clearTimeout === "function"){
+      clearTimeout(pendingDashboardRender);
+    }
+    pendingDashboardRender = null;
+  }
+
+  const doRender = ()=>{
+    pendingDashboardRender = null;
+    renderDashboard();
+  };
+
+  if (typeof requestAnimationFrame === "function"){
+    pendingDashboardRender = requestAnimationFrame(doRender);
+    return;
+  }
+
+  pendingDashboardRender = setTimeout(doRender, 0);
 }
 
 function removeDashboardWindowHandles(state){
@@ -4082,7 +4110,7 @@ function renderDashboard(){
     saveCloudDebounced();
     toast(message);
     if (typeof refreshDashboardWidgets === "function"){
-      refreshDashboardWidgets();
+      refreshDashboardWidgets({ full: true });
     }
     refreshGarnetList();
     pendingGarnetEditId = null;
@@ -4350,7 +4378,7 @@ function renderDashboard(){
     toast(message);
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
-      refreshDashboardWidgets();
+      refreshDashboardWidgets({ full: true });
     }
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
@@ -4392,7 +4420,7 @@ function renderDashboard(){
     toast("One-time task added to the calendar");
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
-      refreshDashboardWidgets();
+      refreshDashboardWidgets({ full: true });
     }
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
@@ -4442,7 +4470,7 @@ function renderDashboard(){
     toast(message);
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
-      refreshDashboardWidgets();
+      refreshDashboardWidgets({ full: true });
     }
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
@@ -4463,7 +4491,7 @@ function renderDashboard(){
     if (downDateInput) downDateInput.value = "";
     refreshDownTimeList();
     if (typeof refreshDashboardWidgets === "function"){
-      refreshDashboardWidgets();
+      refreshDashboardWidgets({ full: true });
     }
   });
 
