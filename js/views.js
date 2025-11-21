@@ -1009,6 +1009,19 @@ function ensureTaskCategories(){
       }
 
       if (targetMenu === "asreq" && live.list === "interval"){
+        let removeOccurrences = false;
+        if (typeof window.confirm === "function"){
+          removeOccurrences = window.confirm("Remove this task's current and future calendar occurrences?");
+        }
+        if (removeOccurrences){
+          try {
+            if (typeof pruneCurrentAndFutureIntervalOccurrences === "function"){
+              pruneCurrentAndFutureIntervalOccurrences(live.ref.id);
+            }
+          } catch (err) {
+            console.warn("Failed to clear interval occurrences during mode switch", err);
+          }
+        }
         // Convert to As-Required (condition optional)
         const cond = prompt("Condition/Notes (optional):", live.ref.condition||"As required") || "As required";
         window.tasksInterval = window.tasksInterval.filter(x => String(x.id)!==String(live.ref.id));

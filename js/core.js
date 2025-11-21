@@ -543,6 +543,62 @@ function ensureTaskVariant(task, type){
   }
 }
 
+function pruneCurrentAndFutureIntervalOccurrences(templateId){
+  const tid = templateId != null ? String(templateId) : null;
+  if (!tid || !Array.isArray(window.tasksInterval)) return;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayKey = ymd(today);
+
+  const normalizeKey = (value)=>{
+    if (!value) return null;
+    if (value instanceof Date) return ymd(value);
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    const parsed = parseDateLocal(value);
+    return parsed ? ymd(parsed) : null;
+  };
+
+  const isCurrentOrFuture = (value)=>{
+    const key = normalizeKey(value);
+    if (!key || !todayKey) return false;
+    return key >= todayKey;
+  };
+
+  const trimOccurrenceMaps = (task)=>{
+    if (!task || typeof task !== "object") return;
+    if (task.calendarDateISO && isCurrentOrFuture(task.calendarDateISO)){
+      task.calendarDateISO = null;
+    }
+    if (Array.isArray(task.manualHistory)){
+      task.manualHistory = task.manualHistory.filter(entry => !isCurrentOrFuture(entry?.dateISO));
+    }
+    if (Array.isArray(task.completedDates)){
+      task.completedDates = task.completedDates.filter(dateISO => !isCurrentOrFuture(dateISO));
+    }
+    if (task.occurrenceNotes && typeof task.occurrenceNotes === "object"){
+      Object.keys(task.occurrenceNotes).forEach(key => {
+        if (isCurrentOrFuture(key)) delete task.occurrenceNotes[key];
+      });
+    }
+    if (task.occurrenceHours && typeof task.occurrenceHours === "object"){
+      Object.keys(task.occurrenceHours).forEach(key => {
+        if (isCurrentOrFuture(key)) delete task.occurrenceHours[key];
+      });
+    }
+  };
+
+  window.tasksInterval = window.tasksInterval.filter(task => {
+    if (!task) return true;
+    const belongsToTemplate = String(task.id) === tid || (isInstanceTask(task) && String(task.templateId) === tid);
+    if (!belongsToTemplate) return true;
+    trimOccurrenceMaps(task);
+    if (isInstanceTask(task)){
+      return !(isCurrentOrFuture(task.calendarDateISO)
+        || (Array.isArray(task.manualHistory) && task.manualHistory.some(entry => isCurrentOrFuture(entry?.dateISO))));
+    }
+    return true;
+  });
+}
+
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 if (!Array.isArray(window.deletedItems)) window.deletedItems = [];
 
