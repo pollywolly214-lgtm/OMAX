@@ -7315,6 +7315,19 @@ function renderSettings(){
         delete meta.task.condition;
         window.tasksInterval.unshift(meta.task);
       }else{
+        let removeOccurrences = false;
+        if (typeof window.confirm === "function"){
+          removeOccurrences = window.confirm("Remove this task's current and future calendar occurrences?");
+        }
+        if (removeOccurrences){
+          try {
+            if (typeof pruneCurrentAndFutureIntervalOccurrences === "function"){
+              pruneCurrentAndFutureIntervalOccurrences(meta.task.id);
+            }
+          } catch (err) {
+            console.warn("Failed to clear interval occurrences during mode switch", err);
+          }
+        }
         meta.task.mode = "asreq";
         meta.task.condition = meta.task.condition || "As required";
         delete meta.task.interval;
