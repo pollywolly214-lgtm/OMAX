@@ -515,6 +515,73 @@ function removeCalendarTaskOccurrence(meta, dateISO){
   return changed;
 }
 
+function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
+  const normalizedScope = scope === "future" ? "future" : (scope === "all" ? "all" : "single");
+  if (normalizedScope === "single") return removeCalendarTaskOccurrence(meta, dateISO);
+  if (!meta || !meta.task) return false;
+
+  const key = normalizeDateKey(dateISO);
+  if (normalizedScope === "future" && !key) return false;
+
+  const task = meta.task;
+  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
+  let changed = false;
+
+  if (isInstanceTask(task)){
+    return removeCalendarTaskOccurrence(meta, dateISO);
+  }
+
+  const matchesScope = (value)=>{
+    if (normalizedScope === "all") return true;
+    const normalized = normalizeDateKey(value);
+    if (!normalized) return false;
+    return normalizedScope === "future" ? normalized >= key : normalized === key;
+  };
+
+  const pruneOccurrenceObject = (obj)=>{
+    if (!obj || typeof obj !== "object") return false;
+    let mutated = false;
+    Object.keys(obj).forEach(k => {
+      if (matchesScope(k)){
+        delete obj[k];
+        mutated = true;
+      }
+    });
+    return mutated;
+  };
+
+  if (matchesScope(task.calendarDateISO)){
+    task.calendarDateISO = null;
+    changed = true;
+  }
+
+  if (Array.isArray(task.completedDates)){
+    const next = task.completedDates.filter(date => !matchesScope(date));
+    if (next.length !== task.completedDates.length){
+      task.completedDates = next;
+      changed = true;
+    }
+  }
+
+  if (pruneOccurrenceObject(task.occurrenceNotes)) changed = true;
+  if (pruneOccurrenceObject(task.occurrenceHours)) changed = true;
+
+  if (mode === "interval"){
+    if (Array.isArray(task.manualHistory)){
+      const nextHistory = task.manualHistory.filter(entry => !matchesScope(entry?.dateISO));
+      if (nextHistory.length !== task.manualHistory.length){
+        task.manualHistory = nextHistory;
+        changed = true;
+      }
+    }
+    if (changed){
+      applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
+    }
+  }
+
+  return changed;
+}
+
 function removeCalendarTaskEverywhere(meta){
   if (!meta || !meta.list || typeof meta.index !== "number" || meta.index < 0) return false;
   const list = meta.list;
@@ -706,7 +773,20 @@ function showTaskBubble(taskId, anchor, options = {}){
     actions.push(`<button data-bbl-uncomplete>Unmark complete</button>`);
   }
   if (canRemoveOccurrence){
-    actions.push(`<button class="secondary" data-bbl-remove-occurrence>Remove occurrence</button>`);
+    const removeSelectId = `bubbleRemoveScope-${taskId}-${targetKey || "na"}`;
+    actions.push(`
+      <div class="bubble-remove-group">
+        <label for="${removeSelectId}">Remove:</label>
+        <div class="bubble-remove-row">
+          <select id="${removeSelectId}" data-bbl-remove-scope>
+            <option value="single">This occurrence only</option>
+            <option value="future">This and future occurrences</option>
+            <option value="all">All occurrences (past & future)</option>
+          </select>
+          <button class="secondary" data-bbl-remove-occurrence>Remove</button>
+        </div>
+      </div>
+    `);
   }
   actions.push(`<button data-bbl-edit>Edit settings</button>`);
   actions.push(`<button class="danger" data-bbl-remove-task>Remove task</button>`);
@@ -766,12 +846,23 @@ function showTaskBubble(taskId, anchor, options = {}){
   });
 
   b.querySelector("[data-bbl-remove-occurrence]")?.addEventListener("click", ()=>{
-    const shouldRemove = window.confirm ? window.confirm("Remove this occurrence from the calendar?") : true;
+    const scope = b.querySelector("[data-bbl-remove-scope]")?.value || "single";
+    const confirmText = scope === "future"
+      ? "Remove this occurrence and all future occurrences from the calendar?"
+      : scope === "all"
+        ? "Remove all calendar occurrences for this task (past and future)?"
+        : "Remove this occurrence from the calendar?";
+    const shouldRemove = window.confirm ? window.confirm(confirmText) : true;
     if (!shouldRemove) return;
-    const changed = removeCalendarTaskOccurrence(meta, targetKey);
+    const changed = removeCalendarTaskOccurrences(meta, targetKey, scope);
     if (changed){
       saveCloudDebounced();
-      toast("Removed from calendar");
+      const toastMessage = scope === "future"
+        ? "Current and future occurrences removed"
+        : scope === "all"
+          ? "All occurrences removed"
+          : "Removed from calendar";
+      toast(toastMessage);
       hideBubble();
       route();
     }
