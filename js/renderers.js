@@ -6758,6 +6758,32 @@ function renderSettings(){
     tree.querySelectorAll("details.task").forEach(task => setTaskEditingState(task, false));
   };
 
+  const restorePendingTaskEdit = ()=>{
+    const pending = window.pendingMaintenanceEdit;
+    if (!pending || !pending.taskId || !tree) return;
+    const holder = tree.querySelector(`[data-task-id="${pending.taskId}"]`);
+    if (!holder) return;
+    if (pending.open){
+      holder.setAttribute("open", "open");
+    }
+    if (pending.editing){
+      setTaskEditingState(holder, true);
+    }
+    if (pending.focusField){
+      let selector = "";
+      if (pending.focusField === "condition"){ selector = '[data-k="condition"]'; }
+      else if (pending.focusField === "interval"){ selector = '[data-k="interval"]'; }
+      if (selector){
+        const ctrl = holder.querySelector(selector);
+        if (ctrl instanceof HTMLElement){
+          ctrl.focus();
+          if (ctrl instanceof HTMLInputElement && typeof ctrl.select === "function"){ ctrl.select(); }
+        }
+      }
+    }
+    window.pendingMaintenanceEdit = null;
+  };
+
   const closeOccurrenceNotes = ()=>{
     if (!occurrenceNotesModal) return;
     occurrenceNotesTaskId = null;
@@ -6826,6 +6852,7 @@ function renderSettings(){
   };
 
   lockAllTasks();
+  restorePendingTaskEdit();
 
   tree?.addEventListener("dblclick", (e)=>{
     const target = e.target;
@@ -7534,6 +7561,8 @@ function renderSettings(){
     if (target.getAttribute("data-k") === "mode"){
       const nextMode = target.value;
       if (nextMode === meta.mode) return;
+      const wasOpen = holder instanceof HTMLDetailsElement ? holder.open : false;
+      const wasEditing = getTaskEditingState(holder);
       meta.list.splice(meta.index,1);
       if (nextMode === "interval"){
         meta.task.mode = "interval";
@@ -7564,6 +7593,14 @@ function renderSettings(){
         delete meta.task.sinceBase;
         delete meta.task.anchorTotal;
         window.tasksAsReq.unshift(meta.task);
+      }
+      if (wasEditing){
+        window.pendingMaintenanceEdit = {
+          taskId: meta.task.id,
+          open: wasOpen || wasEditing,
+          editing: true,
+          focusField: nextMode === "asreq" ? "condition" : "interval"
+        };
       }
       persist();
       renderSettings();
