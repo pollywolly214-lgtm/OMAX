@@ -7364,12 +7364,32 @@ function renderSettings(){
     }else if (key === "price"){
       meta.task.price = value == null ? null : Number(value);
     }else if (key === "downtimeHours"){
+      const prevDowntime = meta.task.downtimeHours;
       if (value == null){
         meta.task.downtimeHours = null;
       }else{
         const normalized = Math.max(0.25, Math.round(Number(value) * 100) / 100);
         meta.task.downtimeHours = normalized;
         target.value = String(normalized);
+      }
+      const changedDowntime = prevDowntime !== meta.task.downtimeHours;
+      if (changedDowntime){
+        const templateId = isInstanceTask(meta.task) ? meta.task.templateId : meta.task.id;
+        if (templateId != null && Array.isArray(window.tasksInterval)){
+          window.tasksInterval.forEach(task => {
+            if (!task || !isInstanceTask(task)) return;
+            if (String(task.templateId) !== String(templateId)) return;
+            const hasCustomDowntime = task.downtimeHours != null && task.downtimeHours !== prevDowntime;
+            if (!hasCustomDowntime){
+              task.downtimeHours = meta.task.downtimeHours;
+            }
+          });
+        }
+        if (typeof refreshDashboardWidgets === "function"){
+          refreshDashboardWidgets();
+        }else if (typeof renderCalendar === "function"){
+          renderCalendar();
+        }
       }
     }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
       meta.task[key] = target.value;
