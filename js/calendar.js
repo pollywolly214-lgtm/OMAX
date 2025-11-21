@@ -700,8 +700,7 @@ function showTaskBubble(taskId, anchor, options = {}){
     ? ensureTaskManualHistory(task)
     : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
   const hasHistoryEntry = !!(dateKey && history.some(entry => entry && normalizeDateKey(entry.dateISO) === dateKey));
-  const manualDateMatches = dateKey && normalizeDateKey(task.calendarDateISO) === dateKey;
-  const canRemoveOccurrence = !!dateKey && (manualDateMatches || isCompleted || hasHistoryEntry);
+  const canRemoveOccurrence = !!dateKey;
   const canMarkComplete = !!dateKey && !isCompleted;
   const canUnmarkComplete = !!dateKey && isCompleted;
 
