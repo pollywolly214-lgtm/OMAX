@@ -91,7 +91,8 @@ function computeTimeEfficiency(rangeDays, options = {}){
     cursor.setDate(cursor.getDate() + 1);
   }
 
-  const baseline = CUTTING_BASELINE_DAILY_HOURS * normalizedDays;
+  const workingDays = inclusiveDayCount(startDate, endDate) || 0;
+  const baseline = CUTTING_BASELINE_DAILY_HOURS * workingDays;
 
   const todayLocal = new Date();
   todayLocal.setHours(0,0,0,0);
@@ -176,12 +177,24 @@ function nextDue(task){
   const since = Math.max(0, Number(sinceRaw) || 0);
   const interval = Number(task.interval);
   if (!Number.isFinite(interval) || interval <= 0) return null;
-  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-    ? Number(DAILY_HOURS)
-    : 8;
+  const hoursPerDay = typeof getConfiguredDailyHours === "function"
+    ? getConfiguredDailyHours()
+    : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+      ? Number(DAILY_HOURS)
+      : 8);
   const remain = Math.max(0, interval - since);
-  const days = remain <= 0 ? 0 : Math.ceil(remain / hoursPerDay);
-  const due = new Date(); due.setHours(0,0,0,0); due.setDate(due.getDate() + days);
+  let days = remain <= 0 ? 0 : Math.ceil(remain / hoursPerDay);
+  const due = new Date();
+  due.setHours(0,0,0,0);
+  if (typeof shouldExcludeWeekends === "function" && shouldExcludeWeekends()){
+    while (days > 0){
+      due.setDate(due.getDate() + 1);
+      if (typeof isWeekendDate === "function" && isWeekendDate(due)) continue;
+      days -= 1;
+    }
+  } else {
+    due.setDate(due.getDate() + days);
+  }
   const lastServicedAt = (typeof RENDER_TOTAL === "number" && Number.isFinite(RENDER_TOTAL))
     ? Math.max(0, Number(RENDER_TOTAL) - since)
     : null;
@@ -214,7 +227,18 @@ function daysBetweenUTC(startDate, endDate){
 function inclusiveDayCount(startDate, endDate){
   const diff = daysBetweenUTC(startDate, endDate);
   if (diff == null) return 0;
-  return diff < 0 ? 0 : diff + 1;
+  if (diff < 0) return 0;
+  if (typeof shouldExcludeWeekends === "function" && shouldExcludeWeekends()){
+    const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+    const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+    let count = 0;
+    for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)){
+      if (typeof isWeekendDate === "function" && isWeekendDate(cursor)) continue;
+      count += 1;
+    }
+    return count;
+  }
+  return diff + 1;
 }
 
 function computeJobEfficiency(job){
@@ -260,9 +284,11 @@ function computeJobEfficiency(job){
   due.setHours(0,0,0,0);
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-    ? Number(DAILY_HOURS)
-    : 8;
+  const hoursPerDay = typeof getConfiguredDailyHours === "function"
+    ? getConfiguredDailyHours()
+    : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+      ? Number(DAILY_HOURS)
+      : 8);
 
   const totalDays = Math.max(1, inclusiveDayCount(start, due));
   result.totalDays = totalDays;
@@ -271,7 +297,8 @@ function computeJobEfficiency(job){
   if (today > due) {
     daysElapsed = totalDays;
   }else if (today > start){
-    daysElapsed = Math.min(totalDays, Math.max(0, daysBetweenUTC(start, today)));
+    const elapsed = inclusiveDayCount(start, today) - 1;
+    daysElapsed = Math.min(totalDays, Math.max(0, elapsed));
   }
   result.daysElapsed = daysElapsed;
 

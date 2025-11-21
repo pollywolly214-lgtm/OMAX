@@ -12,7 +12,8 @@
 
 /* =================== CONSTANTS / GLOBALS =================== */
 const APP_SCHEMA = 72;
-const DAILY_HOURS = 8;
+const DEFAULT_DAILY_HOURS = 8;
+let DAILY_HOURS = DEFAULT_DAILY_HOURS;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
 // Decide workspace based on hostname:
@@ -43,8 +44,8 @@ if (typeof window !== "undefined") {
   window.workspaceDocRef = null;
   window.DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
 }
-const CUTTING_BASELINE_WEEKLY_HOURS = 56;
-const CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS / 7;
+let CUTTING_BASELINE_WEEKLY_HOURS = 56;
+let CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS / 7;
 const TIME_EFFICIENCY_WINDOWS = [
   { key: "7d", label: "1W", days: 7, description: "Past 7 days" },
   { key: "30d", label: "1M", days: 30, description: "Past 30 days" },
@@ -52,6 +53,8 @@ const TIME_EFFICIENCY_WINDOWS = [
   { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
   { key: "365d", label: "1Y", days: 365, description: "Past year" }
 ];
+const DEFAULT_APP_CONFIG = { excludeWeekends: false, dailyHours: DEFAULT_DAILY_HOURS };
+let appConfig = { ...DEFAULT_APP_CONFIG };
 
 const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
   ? window.CLEAR_DATA_PASSWORD
@@ -70,6 +73,11 @@ if (typeof window !== "undefined"){
   window.CUTTING_BASELINE_WEEKLY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS;
   window.CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_DAILY_HOURS;
   window.TIME_EFFICIENCY_WINDOWS = TIME_EFFICIENCY_WINDOWS;
+  window.appConfig = appConfig;
+  window.getConfiguredDailyHours = getConfiguredDailyHours;
+  window.shouldExcludeWeekends = shouldExcludeWeekends;
+  window.setAppConfig = setAppConfig;
+  window.normalizeAppConfig = normalizeAppConfig;
   window.setDailyCutHoursEntry = setDailyCutHoursEntry;
   window.getDailyCutHoursEntry = getDailyCutHoursEntry;
   window.normalizeDailyCutHours = normalizeDailyCutHours;
@@ -142,6 +150,12 @@ function ymd(d){
   return `${dt.getFullYear()}-${m<10?'0':''}${m}-${day<10?'0':''}${day}`;
 }
 
+function isWeekendDate(d){
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return false;
+  const day = d.getDay();
+  return day === 0 || day === 6;
+}
+
 function normalizeDateISO(value){
   if (!value) return null;
   if (value instanceof Date){
@@ -168,6 +182,59 @@ function clampDailyCutHours(value){
   if (num > 24) return 24;
   return num;
 }
+
+function normalizeAppConfig(config){
+  const normalized = { ...DEFAULT_APP_CONFIG };
+  if (config && typeof config === "object"){
+    if (typeof config.excludeWeekends === "boolean") normalized.excludeWeekends = config.excludeWeekends;
+    if (config.dailyHours != null){
+      const clamped = clampDailyCutHours(config.dailyHours);
+      if (clamped > 0) normalized.dailyHours = clamped;
+    }
+  }
+  return normalized;
+}
+
+function shouldExcludeWeekends(){
+  try {
+    return Boolean((appConfig || {}).excludeWeekends);
+  } catch (_err){
+    return false;
+  }
+}
+
+function getConfiguredDailyHours(){
+  try {
+    const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
+    const clamped = clampDailyCutHours(cfg.dailyHours);
+    if (clamped > 0) return clamped;
+  } catch (_err){ /* ignore */ }
+  return DEFAULT_DAILY_HOURS;
+}
+
+function refreshDerivedDailyHours(){
+  DAILY_HOURS = getConfiguredDailyHours();
+  const daysPerWeek = shouldExcludeWeekends() ? 5 : 7;
+  CUTTING_BASELINE_DAILY_HOURS = DAILY_HOURS;
+  CUTTING_BASELINE_WEEKLY_HOURS = DAILY_HOURS * daysPerWeek;
+  if (typeof window !== "undefined"){
+    window.DAILY_HOURS = DAILY_HOURS;
+    window.CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_DAILY_HOURS;
+    window.CUTTING_BASELINE_WEEKLY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS;
+  }
+  return DAILY_HOURS;
+}
+
+function setAppConfig(config){
+  appConfig = normalizeAppConfig(config);
+  if (typeof window !== "undefined"){
+    window.appConfig = appConfig;
+  }
+  return refreshDerivedDailyHours();
+}
+
+appConfig = normalizeAppConfig((typeof window !== "undefined" && window.appConfig) ? window.appConfig : appConfig);
+refreshDerivedDailyHours();
 
 function normalizeTimeString(value){
   if (typeof value !== "string") return null;
@@ -1443,6 +1510,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     copyArr("orderRequests");
     copyArr("garnetCleanings");
     copyArr("totalHistory");
+    copyObj("appConfig");
     copyObj("settingsFolders");
     copyObj("folders");
     copyObj("dashboardLayout");
@@ -1469,6 +1537,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(sanitized.totalHistory) && Array.isArray(window.totalHistory)) sanitized.totalHistory = window.totalHistory.slice();
     if (!Array.isArray(sanitized.deletedItems) && Array.isArray(window.deletedItems)) sanitized.deletedItems = window.deletedItems.slice();
     if (!Array.isArray(sanitized.jobFolders) && Array.isArray(window.jobFolders)) sanitized.jobFolders = window.jobFolders.slice();
+    if (!sanitized.appConfig || typeof sanitized.appConfig !== "object") sanitized.appConfig = normalizeAppConfig(appConfig);
     if ((!sanitized.settingsFolders && !sanitized.folders) && Array.isArray(window.settingsFolders)) sanitized.settingsFolders = JSON.parse(JSON.stringify(window.settingsFolders));
     if (!sanitized.dashboardLayout && window.dashboardLayout) sanitized.dashboardLayout = { ...window.dashboardLayout };
     if (!sanitized.costLayout && window.costLayout) sanitized.costLayout = { ...window.costLayout };
@@ -1480,6 +1549,9 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
     if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
     if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+    appConfig = normalizeAppConfig(sanitized.appConfig);
+    window.appConfig = appConfig;
+    refreshDerivedDailyHours();
     if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
     if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
     if (!Array.isArray(window.totalHistory)) window.totalHistory = [];
@@ -1515,6 +1587,7 @@ function stateHasMeaningfulData(data){
     "dashboardLayout",
     "costLayout",
     "jobLayout",
+    "appConfig",
     "settingsFolders",
     "folders",
     "pumpEff",
@@ -1563,6 +1636,7 @@ function snapshotState(){
     opportunityRollups: Array.isArray(window.opportunityRollups)
       ? window.opportunityRollups.map(entry => ({ ...entry }))
       : [],
+    appConfig: normalizeAppConfig(window.appConfig),
     pumpEff: safePumpEff,
     deletedItems: trashSnapshot,
     settingsFolders: foldersSnapshot,
@@ -2243,6 +2317,7 @@ async function loadFromCloud(){
         opportunityRollups: Array.isArray(window.opportunityRollups) ? window.opportunityRollups.slice() : [],
         jobFolders: typeof defaultJobFolders === "function" ? defaultJobFolders() : [],
         pumpEff: pe,
+        appConfig: normalizeAppConfig(window.appConfig),
         settingsFolders: folders,
         folders: JSON.parse(JSON.stringify(folders)),
         garnetCleanings: Array.isArray(window.garnetCleanings) ? window.garnetCleanings.slice() : [],

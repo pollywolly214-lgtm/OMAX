@@ -5193,6 +5193,105 @@ tr.row-editing {
   box-shadow: 0 12px 20px rgba(6, 28, 76, 0.32);
 }
 
+.config-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(22, 33, 52, 0.45);
+  backdrop-filter: blur(4px);
+  z-index: 1200;
+}
+
+.config-modal[hidden] {
+  display: none;
+}
+
+.config-dialog {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.18);
+  width: min(520px, 90vw);
+  padding: 20px;
+}
+
+.config-description {
+  margin-top: 4px;
+  margin-bottom: 16px;
+  color: #4a4f59;
+}
+
+.config-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+  color: #1d2533;
+}
+
+.config-label {
+  font-weight: 700;
+}
+
+.config-help {
+  color: #5a6478;
+  font-weight: 400;
+}
+
+.config-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: #1d2533;
+}
+
+.config-note {
+  margin: 0;
+  color: #4a4f59;
+  font-size: 14px;
+}
+
+.config-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.config-button {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.config-button-primary {
+  background: #0a63c2;
+  color: #fff;
+}
+
+.config-button-primary:hover {
+  background: #084f9a;
+}
+
+.config-button-secondary {
+  background: #eef1f7;
+  color: #1d2533;
+}
+
+.config-button-secondary:hover {
+  background: #e1e5ef;
+}
+
 .job-category-field {
   display: flex;
   flex-direction: column;

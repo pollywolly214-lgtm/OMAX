@@ -258,9 +258,11 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
   if (!Number.isFinite(interval) || interval <= 0) return null;
   ensureTaskManualHistory(instance);
 
-  const hoursPerDay = (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-    ? Number(DAILY_HOURS)
-    : 8;
+  const hoursPerDay = typeof getConfiguredDailyHours === "function"
+    ? getConfiguredDailyHours()
+    : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+      ? Number(DAILY_HOURS)
+      : 8);
 
   let targetISO = dateISO || ymd(new Date());
   const today = new Date(); today.setHours(0,0,0,0);
@@ -577,7 +579,10 @@ function buildNextDuePreview({ includeNote = true, noteText = "Preview of tracke
     return `Due in ${offset} days · ${dueText}`;
   };
   const formatRemain = (offset)=>{
-    const hours = Math.max(0, Math.round((typeof DAILY_HOURS === "number" ? DAILY_HOURS : 8) * offset));
+    const perDay = typeof getConfiguredDailyHours === "function"
+      ? getConfiguredDailyHours()
+      : (typeof DAILY_HOURS === "number" ? DAILY_HOURS : 8);
+    const hours = Math.max(0, Math.round(perDay * offset));
     return `${hours.toLocaleString()} hrs estimate`;
   };
   const statusClass = (offset)=>{
@@ -1614,6 +1619,123 @@ function ensureClearAllDataHandlers(){
   });
 }
 
+function getConfigurationElements(){
+  const modal = document.getElementById("configModal");
+  const form = document.getElementById("configForm");
+  const hoursInput = document.getElementById("configDailyHours");
+  const excludeWeekends = document.getElementById("configExcludeWeekends");
+  const cancel = document.getElementById("configCancel");
+  return { modal, form, hoursInput, excludeWeekends, cancel };
+}
+
+function currentAppConfiguration(){
+  if (typeof normalizeAppConfig === "function") return normalizeAppConfig(window.appConfig);
+  const fallbackDaily = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8;
+  return { excludeWeekends: false, dailyHours: fallbackDaily };
+}
+
+function closeConfigurationModal(){
+  const { modal } = getConfigurationElements();
+  if (!modal) return;
+  modal.classList.remove("is-open");
+  modal.setAttribute("aria-hidden", "true");
+  modal.setAttribute("hidden", "");
+  const triggerId = modal.dataset.triggerId;
+  if (triggerId){
+    const trigger = document.getElementById(triggerId);
+    if (trigger && typeof trigger.focus === "function"){
+      try { trigger.focus({ preventScroll:true }); }
+      catch (_){ trigger.focus(); }
+    }
+    modal.dataset.triggerId = "";
+  }
+}
+
+function openConfigurationModal(trigger){
+  const { modal, hoursInput, excludeWeekends } = getConfigurationElements();
+  if (!modal) return;
+  const cfg = currentAppConfiguration();
+  if (hoursInput){
+    const value = cfg.dailyHours != null ? cfg.dailyHours : (typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8);
+    hoursInput.value = value;
+  }
+  if (excludeWeekends){
+    excludeWeekends.checked = !!cfg.excludeWeekends;
+  }
+  modal.removeAttribute("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  modal.classList.add("is-open");
+  if (trigger && trigger.id) modal.dataset.triggerId = trigger.id;
+  const focusTarget = hoursInput || excludeWeekends || modal.querySelector("button, input");
+  if (focusTarget && typeof focusTarget.focus === "function"){
+    try { focusTarget.focus({ preventScroll:true }); }
+    catch (_){ focusTarget.focus(); }
+  }
+}
+
+function applyConfigurationForm(){
+  const { hoursInput, excludeWeekends } = getConfigurationElements();
+  const nextDaily = hoursInput ? Number(hoursInput.value) : null;
+  const nextConfig = { dailyHours: nextDaily, excludeWeekends: !!(excludeWeekends && excludeWeekends.checked) };
+  if (typeof setAppConfig === "function") setAppConfig(nextConfig);
+  else {
+    window.appConfig = typeof normalizeAppConfig === "function" ? normalizeAppConfig(nextConfig) : nextConfig;
+    if (typeof refreshDerivedDailyHours === "function") refreshDerivedDailyHours();
+  }
+  if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+  if (typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
+  if (typeof renderCalendar === "function") renderCalendar();
+  if (typeof renderDashboard === "function") renderDashboard();
+  if (typeof renderJobs === "function") renderJobs();
+  if (typeof renderCosts === "function") renderCosts();
+  if (typeof scheduleOpportunityRecompute === "function") scheduleOpportunityRecompute();
+  if (typeof route === "function"){
+    try { route(); }
+    catch (err){ console.warn("Failed to rerender after config change", err); }
+  }
+  toast("Configuration updated");
+}
+
+function wireConfigurationModal(){
+  const { modal, form, cancel } = getConfigurationElements();
+  const trigger = document.getElementById("dashboardConfigLaunch");
+  if (trigger && trigger.dataset.boundConfig !== "1"){
+    trigger.dataset.boundConfig = "1";
+    trigger.addEventListener("click", (event)=>{
+      event.preventDefault();
+      closeDashboardSettingsMenu();
+      openConfigurationModal(trigger);
+    });
+  }
+  if (form && form.dataset.boundConfig !== "1"){
+    form.dataset.boundConfig = "1";
+    form.addEventListener("submit", (event)=>{
+      event.preventDefault();
+      applyConfigurationForm();
+      closeConfigurationModal();
+    });
+  }
+  if (cancel && cancel.dataset.boundConfig !== "1"){
+    cancel.dataset.boundConfig = "1";
+    cancel.addEventListener("click", (event)=>{
+      event.preventDefault();
+      closeConfigurationModal();
+    });
+  }
+  if (modal && modal.dataset.boundConfig !== "1"){
+    modal.dataset.boundConfig = "1";
+    modal.addEventListener("click", (event)=>{
+      if (event.target === modal) closeConfigurationModal();
+    });
+    modal.addEventListener("keydown", (event)=>{
+      if (event.key === "Escape"){
+        event.preventDefault();
+        closeConfigurationModal();
+      }
+    });
+  }
+}
+
 function closeDashboardSettingsMenu(){
   const { button, menu } = getAppSettingsElements();
   if (menu && !menu.hidden){
@@ -1729,6 +1851,7 @@ function wireDashboardSettingsMenu(){
     });
   }
   ensureClearAllDataHandlers();
+  wireConfigurationModal();
 }
 
 function wireCostSettingsMenu(){
@@ -9687,6 +9810,29 @@ function computeCostModel(){
     return best ? Number(best.hours) : null;
   };
 
+  const workingDaysForWindow = (calendarDays)=>{
+    const normalized = Math.max(0, Math.round(Number(calendarDays) || 0));
+    const now = new Date();
+    now.setHours(0,0,0,0);
+    const start = new Date(now);
+    start.setDate(start.getDate() - normalized);
+    if (typeof inclusiveDayCount === "function"){
+      const count = inclusiveDayCount(start, now);
+      if (Number.isFinite(count) && count > 0) return count;
+    }
+    return normalized;
+  };
+
+  const daysPerYear = (()=>{
+    const excludeWeekends = typeof shouldExcludeWeekends === "function" && shouldExcludeWeekends();
+    const computed = excludeWeekends ? Math.round(365 * (5/7)) : 365;
+    return computed > 0 ? computed : 365;
+  })();
+
+  const configuredDailyHours = (typeof getConfiguredDailyHours === "function")
+    ? Number(getConfiguredDailyHours())
+    : null;
+
   const usageSinceDays = (days)=>{
     if (!isFinite(days) || days <= 0 || !parsedHistory.length) return 0;
     const now = new Date();
@@ -9721,14 +9867,21 @@ function computeCostModel(){
     const windows = [30, 90, 180, 365];
     for (const days of windows){
       const usage = usageSinceDays(days);
-      if (usage > 0) return usage / days;
+      if (usage > 0){
+        const divisor = workingDaysForWindow(days) || days;
+        if (divisor > 0) return usage / divisor;
+      }
     }
     return 0;
   };
 
-  const baselineDailyHours = determineBaselineDailyHours();
+  let baselineDailyHours = determineBaselineDailyHours();
+  if ((!Number.isFinite(baselineDailyHours) || baselineDailyHours <= 0)
+    && Number.isFinite(configuredDailyHours) && configuredDailyHours > 0){
+    baselineDailyHours = configuredDailyHours;
+  }
   const hoursYear = usageSinceDays(365);
-  const baselineAnnualHours = baselineDailyHours * 365;
+  const baselineAnnualHours = baselineDailyHours > 0 ? baselineDailyHours * daysPerYear : 0;
   const hoursForRate = hoursYear > 0 ? hoursYear : (baselineAnnualHours > 0 ? baselineAnnualHours : 0);
   const asReqCostPerHour = (asReqAnnualProjection > 0 && hoursForRate > 0)
     ? asReqAnnualProjection / hoursForRate
@@ -9757,16 +9910,19 @@ function computeCostModel(){
     const hours = usageSinceDays(def.days);
     const intervalActual = estimateIntervalCost(hours);
     const asReqActual = maintenanceSpendSince(def.days);
+    const windowWorkingDays = workingDaysForWindow(def.days);
+    const projectionDays = windowWorkingDays > 0 ? windowWorkingDays : def.days;
     const intervalProjected = (baselineDailyHours > 0 && intervalCostPerHour > 0)
-      ? intervalCostPerHour * baselineDailyHours * def.days
+      ? intervalCostPerHour * baselineDailyHours * projectionDays
       : 0;
     const asReqProjected = asReqAnnualProjection > 0
-      ? (asReqAnnualProjection / 365) * def.days
+      ? (asReqAnnualProjection / daysPerYear) * projectionDays
       : 0;
     return {
       key: def.key,
       label: def.label,
-      days: def.days,
+      days: windowWorkingDays,
+      calendarDays: def.days,
       hours,
       intervalActual,
       asReqActual,
@@ -10374,10 +10530,11 @@ function computeCostModel(){
     const windowEnd = new Date();
     windowEnd.setHours(0, 0, 0, 0);
     const windowStart = new Date(windowEnd);
-    const days = Number(row?.days) || 0;
-    if (days > 0){
-      windowStart.setDate(windowStart.getDate() - days);
+    const calendarDays = Number(row?.calendarDays || row?.days) || 0;
+    if (calendarDays > 0){
+      windowStart.setDate(windowStart.getDate() - calendarDays);
     }
+    const days = Number(row?.days) || 0;
     const startTime = windowStart.getTime();
     const endTime = windowEnd.getTime();
 
@@ -10495,7 +10652,7 @@ function computeCostModel(){
       .sort((a, b) => Number(b.sortTime || 0) - Number(a.sortTime || 0))
       .map(({ sortTime, ...rest }) => rest);
 
-    const windowFraction = days > 0 ? days / 365 : 0;
+    const windowFraction = days > 0 ? days / daysPerYear : 0;
     const projectionRows = [];
     const intervalProjectionRows = [];
     intervalTaskRowsRaw.forEach((item, index) => {
@@ -12572,13 +12729,14 @@ function renderJobs(){
     return Math.max(0, nowH - startH);
   }
   function suggestSpent(job){
-    // Suggest “spent since last manual” using 8 hrs/day; if no manual, 0
+    // Suggest “spent since last manual” using configured hrs/day; if no manual, 0
     const lm = lastManual(job);
     if (lm){
       const last = new Date(lm.dateISO + "T00:00:00");
       const today = new Date(todayISO + "T00:00:00");
       const days = Math.max(0, Math.floor((today - last)/(24*60*60*1000)));
-      return days * DAILY_HOURS;
+      const perDay = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : DAILY_HOURS;
+      return days * perDay;
     }
     return 0;
   }
@@ -12812,7 +12970,9 @@ function renderJobs(){
       const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
       if (!entry){ toast("Unable to locate completed job."); return; }
 
-      const hoursPerDay = (typeof DAILY_HOURS === "number" && isFinite(DAILY_HOURS) && DAILY_HOURS > 0) ? DAILY_HOURS : 8;
+      const hoursPerDay = typeof getConfiguredDailyHours === "function"
+        ? getConfiguredDailyHours()
+        : ((typeof DAILY_HOURS === "number" && isFinite(DAILY_HOURS) && DAILY_HOURS > 0) ? DAILY_HOURS : 8);
       const safeToday = (() => {
         const parsed = parseJobDate(todayISO) || parseJobDate(new Date());
         if (parsed){

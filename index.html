@@ -50,6 +50,7 @@
           </button>
           <div class="dashboard-settings-menu" id="dashboardSettingsMenu" role="menu" hidden>
             <div class="dashboard-settings-section" data-app-settings-context="dashboard">
+              <button type="button" class="dashboard-settings-item" id="dashboardConfigLaunch" role="menuitem" data-settings-focus>Configuration</button>
               <button type="button" class="dashboard-settings-item" id="dashboardEditToggle" role="menuitemcheckbox" aria-checked="false" aria-pressed="false" data-settings-focus>Edit dashboard layout</button>
             </div>
             <div class="dashboard-settings-section" data-app-settings-context="costs">
@@ -100,7 +101,7 @@
   <main id="content"></main>
 
   <footer>
-    <small>Cloud sync via Firestore. Assumes 8 hrs/day for scheduling.</small>
+    <small>Cloud sync via Firestore. Scheduling hours/day is configurable.</small>
   </footer>
 
   <!-- Lightweight in-app debug (no console required). Open with ?debug=1 -->
@@ -142,6 +143,29 @@
         <button type="button" id="authClose" class="auth-button auth-button-secondary">Cancel</button>
       </form>
       <small class="auth-modal-hint">First time with an email? The account will be created automatically.</small>
+    </div>
+  </div>
+
+  <div id="configModal" class="config-modal" hidden aria-hidden="true">
+    <div class="config-dialog" role="dialog" aria-modal="true" aria-labelledby="configTitle">
+      <h3 id="configTitle">Workspace configuration</h3>
+      <p class="config-description">Tune scheduling defaults for cutting work.</p>
+      <form id="configForm" class="config-form">
+        <label class="config-field" for="configDailyHours">
+          <span class="config-label">Daily cutting hours</span>
+          <input type="number" id="configDailyHours" name="configDailyHours" min="0.25" max="24" step="0.25" required />
+          <small class="config-help">Updates every calculation that uses hours/day.</small>
+        </label>
+        <label class="config-toggle" for="configExcludeWeekends">
+          <input type="checkbox" id="configExcludeWeekends" name="configExcludeWeekends" />
+          <span>Ignore weekends in scheduling</span>
+        </label>
+        <p class="config-note">Weekend work counts as bonus time when ignored.</p>
+        <div class="config-actions">
+          <button type="submit" class="config-button config-button-primary" id="configSave">Save changes</button>
+          <button type="button" class="config-button config-button-secondary" id="configCancel">Cancel</button>
+        </div>
+      </form>
     </div>
   </div>
 

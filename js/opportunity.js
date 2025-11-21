@@ -76,7 +76,7 @@
     return Number.isFinite(num) ? num : fallback;
   }
 
-  const WORKDAY_HOURS = (()=>{
+  const STORED_WORKDAY_HOURS = (()=>{
     const raw = coerceNumber(getSetting("WORKDAY_HOURS", DEFAULT_WORKDAY_HOURS), DEFAULT_WORKDAY_HOURS);
     return raw > 0 ? raw : DEFAULT_WORKDAY_HOURS;
   })();
@@ -155,9 +155,23 @@
     return null;
   }
 
+  function getWorkdayHours(){
+    if (typeof getConfiguredDailyHours === "function"){
+      const configured = Number(getConfiguredDailyHours());
+      if (Number.isFinite(configured) && configured > 0) return configured;
+    }
+    return STORED_WORKDAY_HOURS > 0 ? STORED_WORKDAY_HOURS : DEFAULT_WORKDAY_HOURS;
+  }
+
+  function getBusinessDays(){
+    const excludesWeekends = (typeof shouldExcludeWeekends === "function") ? shouldExcludeWeekends() : false;
+    if (excludesWeekends) return [1, 2, 3, 4, 5];
+    return BUSINESS_DAYS.length ? BUSINESS_DAYS : DEFAULT_BUSINESS_DAYS.slice();
+  }
+
   function isBusinessDay(date, holidays){
     const day = ((date.getDay() + 6) % 7) + 1; // Mon=1..Sun=7
-    if (!BUSINESS_DAYS.includes(day)) return false;
+    if (!getBusinessDays().includes(day)) return false;
     const iso = toISODate(date);
     return !holidays.has(iso);
   }
@@ -166,12 +180,13 @@
     const windows = [];
     let cursor = startOfDay(from);
     const stop = endOfDay(to);
+    const hoursPerDay = getWorkdayHours();
     while (cursor <= stop){
       if (isBusinessDay(cursor, holidays)){
         const start = new Date(cursor);
         start.setHours(workdayStartHour, 0, 0, 0);
         const end = new Date(start);
-        end.setHours(start.getHours() + WORKDAY_HOURS);
+        end.setHours(start.getHours() + hoursPerDay);
         const clampedStart = clampDate(start, from, to);
         const clampedEnd = clampDate(end, from, to);
         if (clampedEnd > clampedStart){
@@ -368,7 +383,10 @@
 
   function targetHours(from, to, holidays){
     const windows = enumerateBusinessWindows(from, to, holidays);
-    return windows.length * WORKDAY_HOURS;
+    return windows.reduce((sum, window) => {
+      const duration = (window.end.getTime() - window.start.getTime()) / 3600000;
+      return sum + (duration > 0 ? duration : 0);
+    }, 0);
   }
 
   function sumPumpRunHours(pumpRuns, from, to){
@@ -575,7 +593,7 @@
   window.getOpportunityLossRate = function(){ return opportunityLossRate; };
   window.refreshOpportunityLossRate = refreshOpportunityLossRate;
   window.setOpportunityLossRate = setOpportunityLossRate;
-  window.getOpportunityWorkdayHours = function(){ return WORKDAY_HOURS; };
+  window.getOpportunityWorkdayHours = function(){ return getWorkdayHours(); };
   window.recomputeOpportunityCost = recomputeOpportunityCost;
   window.scheduleOpportunityRecompute = scheduleOpportunityRecompute;
 
