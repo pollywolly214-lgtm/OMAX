@@ -522,6 +522,11 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
   const key = normalizeDateKey(dateISO);
   if (!key) return false;
 
+  const targetTime = (()=>{
+    const targetDate = toDayStart(key);
+    return targetDate instanceof Date && !Number.isNaN(targetDate.getTime()) ? targetDate.getTime() : null;
+  })();
+
   const task = meta.task;
   const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
   let changed = false;
@@ -534,7 +539,12 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     const normalized = normalizeDateKey(value);
     if (!normalized) return false;
     if (normalizedScope === "all") return true;
-    if (normalizedScope === "future") return normalized >= key;
+    if (normalizedScope === "future"){ 
+      if (targetTime == null) return normalized >= key;
+      const compareDate = toDayStart(normalized);
+      const compareTime = compareDate instanceof Date && !Number.isNaN(compareDate.getTime()) ? compareDate.getTime() : null;
+      return compareTime != null ? compareTime >= targetTime : normalized >= key;
+    }
     return normalized === key;
   };
 
