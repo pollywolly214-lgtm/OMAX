@@ -220,6 +220,15 @@ function normalizeDateKey(value){
   return null;
 }
 
+function toDayStart(value){
+  const key = normalizeDateKey(value);
+  if (!key) return null;
+  const parsed = parseDateLocal(key);
+  if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+  parsed.setHours(0,0,0,0);
+  return parsed;
+}
+
 function normalizeOccurrenceNotes(task){
   if (!task || typeof task !== "object") return {};
   const result = {};
@@ -251,6 +260,21 @@ function normalizeOccurrenceHours(task){
     });
   }
   task.occurrenceHours = result;
+  return result;
+}
+
+function normalizeCancelledOccurrences(task){
+  if (!task || typeof task !== "object") return {};
+  const result = {};
+  const raw = task.cancelledOccurrences;
+  if (raw && typeof raw === "object"){
+    Object.keys(raw).forEach(maybeDate => {
+      const key = normalizeDateKey(maybeDate);
+      if (!key) return;
+      result[key] = true;
+    });
+  }
+  task.cancelledOccurrences = result;
   return result;
 }
 
@@ -312,6 +336,33 @@ function setOccurrenceHoursForTask(task, dateISO, hours){
   }
   if (changed){
     task.occurrenceHours = map;
+  }
+  return changed;
+}
+
+function cancelOccurrenceForTask(task, dateISO){
+  if (!task || typeof task !== "object") return false;
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  const map = normalizeCancelledOccurrences(task);
+  if (map[key]) return false;
+  map[key] = true;
+  task.cancelledOccurrences = map;
+  return true;
+}
+
+function clearCancelledOccurrences(task, predicate){
+  if (!task || typeof task !== "object") return false;
+  const map = normalizeCancelledOccurrences(task);
+  let changed = false;
+  Object.keys(map).forEach(k => {
+    if (!predicate || predicate(k)){
+      delete map[k];
+      changed = true;
+    }
+  });
+  if (changed){
+    task.cancelledOccurrences = map;
   }
   return changed;
 }
@@ -520,6 +571,106 @@ function removeCalendarTaskOccurrence(meta, dateISO){
   return changed;
 }
 
+function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
+  const normalizedScope = scope === "future" ? "future" : (scope === "all" ? "all" : "single");
+  if (!meta || !meta.task) return false;
+
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+
+  const targetDate = toDayStart(key);
+  const targetTime = targetDate instanceof Date && !Number.isNaN(targetDate.getTime()) ? targetDate.getTime() : null;
+
+  const task = meta.task;
+  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
+  let changed = false;
+
+  if (isInstanceTask(task)){
+    return removeCalendarTaskOccurrence(meta, key);
+  }
+
+  const matchedDates = new Set([key]);
+
+  const matchesScope = (value)=>{
+    const normalized = normalizeDateKey(value);
+    if (!normalized) return false;
+
+    const compareDate = toDayStart(normalized);
+    const compareTime = (compareDate instanceof Date && !Number.isNaN(compareDate.getTime()))
+      ? compareDate.getTime()
+      : null;
+
+    if (normalizedScope === "all") return true;
+
+    if (normalizedScope === "future"){
+      if (targetTime != null && compareTime != null) return compareTime >= targetTime;
+      return normalized >= key;
+    }
+
+    if (targetTime != null && compareTime != null) return compareTime === targetTime;
+    return normalized === key;
+  };
+
+  const matchesAndStore = (value)=>{
+    const didMatch = matchesScope(value);
+    if (didMatch){
+      const normalized = normalizeDateKey(value);
+      if (normalized) matchedDates.add(normalized);
+    }
+    return didMatch;
+  };
+
+  const pruneOccurrenceObject = (obj)=>{
+    if (!obj || typeof obj !== "object") return false;
+    let mutated = false;
+    Object.keys(obj).forEach(k => {
+      if (matchesAndStore(k)){
+        delete obj[k];
+        mutated = true;
+      }
+    });
+    return mutated;
+  };
+
+  if (matchesAndStore(task.calendarDateISO)){
+    task.calendarDateISO = null;
+    changed = true;
+  }
+
+  if (Array.isArray(task.completedDates)){
+    const next = task.completedDates.filter(value => !matchesAndStore(value));
+    if (next.length !== task.completedDates.length){
+      task.completedDates = next;
+      changed = true;
+    }
+  }
+
+  if (pruneOccurrenceObject(task.occurrenceNotes)) changed = true;
+  if (pruneOccurrenceObject(task.occurrenceHours)) changed = true;
+
+  if (mode === "interval"){
+    if (Array.isArray(task.manualHistory)){
+      const nextHistory = task.manualHistory.filter(entry => !matchesAndStore(entry?.dateISO));
+      if (nextHistory.length !== task.manualHistory.length){
+        task.manualHistory = nextHistory;
+        changed = true;
+      }
+    }
+    if (changed){
+      applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
+    }
+  }
+
+  if (matchedDates.size){
+    const cancelled = normalizeCancelledOccurrences(task);
+    matchedDates.forEach(k => { cancelled[k] = true; });
+    task.cancelledOccurrences = cancelled;
+    changed = true;
+  }
+
+  return changed;
+}
+
 function removeCalendarTaskEverywhere(meta){
   if (!meta || !meta.list || typeof meta.index !== "number" || meta.index < 0) return false;
   const list = meta.list;
@@ -638,8 +789,7 @@ function showTaskBubble(taskId, anchor, options = {}){
     ? ensureTaskManualHistory(task)
     : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
   const hasHistoryEntry = !!(dateKey && history.some(entry => entry && normalizeDateKey(entry.dateISO) === dateKey));
-  const manualDateMatches = dateKey && normalizeDateKey(task.calendarDateISO) === dateKey;
-  const canRemoveOccurrence = !!dateKey && (manualDateMatches || isCompleted || hasHistoryEntry);
+  const canRemoveOccurrence = !!dateKey;
   const canMarkComplete = !!dateKey && !isCompleted;
   const canUnmarkComplete = !!dateKey && isCompleted;
 
@@ -695,6 +845,8 @@ function showTaskBubble(taskId, anchor, options = {}){
     infoParts.push(`<div class="bubble-kv"><span>Note:</span><span>${escapeHtml(occurrenceNote)}</span></div>`);
   }
 
+  const targetKey = dateKey || normalizeDateKey(new Date());
+
   const actions = [];
   if (dateKey){
     const noteLabel = occurrenceNote ? "Edit occurrence note" : "Add occurrence note";
@@ -709,15 +861,26 @@ function showTaskBubble(taskId, anchor, options = {}){
     actions.push(`<button data-bbl-uncomplete>Unmark complete</button>`);
   }
   if (canRemoveOccurrence){
-    actions.push(`<button class="secondary" data-bbl-remove-occurrence>Remove occurrence</button>`);
+    const removeSelectId = `bubbleRemoveScope-${taskId}-${targetKey || "na"}`;
+    actions.push(`
+      <div class="bubble-remove-group">
+        <label for="${removeSelectId}">Remove:</label>
+        <div class="bubble-remove-row">
+          <select id="${removeSelectId}" data-bbl-remove-scope>
+            <option value="single">This occurrence only</option>
+            <option value="future">This and future occurrences</option>
+            <option value="all">All occurrences (past & future)</option>
+          </select>
+          <button class="secondary" data-bbl-remove-occurrence>Remove</button>
+        </div>
+      </div>
+    `);
   }
   actions.push(`<button data-bbl-edit>Edit settings</button>`);
   actions.push(`<button class="danger" data-bbl-remove-task>Remove task</button>`);
 
   const b  = makeBubble(anchor);
   b.innerHTML = `${infoParts.join("")}<div class="bubble-actions">${actions.join("")}</div>`;
-
-  const targetKey = dateKey || normalizeDateKey(new Date());
 
   b.querySelector("[data-bbl-occurrence-hours]")?.addEventListener("click", ()=>{
     const existing = occurrenceHours != null ? occurrenceHours : "";
@@ -769,12 +932,23 @@ function showTaskBubble(taskId, anchor, options = {}){
   });
 
   b.querySelector("[data-bbl-remove-occurrence]")?.addEventListener("click", ()=>{
-    const shouldRemove = window.confirm ? window.confirm("Remove this occurrence from the calendar?") : true;
+    const scope = b.querySelector("[data-bbl-remove-scope]")?.value || "single";
+    const confirmText = scope === "future"
+      ? "Remove this occurrence and all future occurrences from the calendar?"
+      : scope === "all"
+        ? "Remove all calendar occurrences for this task (past and future)?"
+        : "Remove this occurrence from the calendar?";
+    const shouldRemove = window.confirm ? window.confirm(confirmText) : true;
     if (!shouldRemove) return;
-    const changed = removeCalendarTaskOccurrence(meta, targetKey);
+    const changed = removeCalendarTaskOccurrences(meta, targetKey, scope);
     if (changed){
       saveCloudDebounced();
-      toast("Removed from calendar");
+      const toastMessage = scope === "future"
+        ? "Current and future occurrences removed"
+        : scope === "all"
+          ? "All occurrences removed"
+          : "Removed from calendar";
+      toast(toastMessage);
       hideBubble();
       route();
     }
@@ -1205,6 +1379,9 @@ function projectIntervalDueDates(task, options = {}){
     Object.keys(excludeListRaw).forEach(key => addExclude(key));
   }
 
+  const cancelledMap = normalizeCancelledOccurrences(task);
+  Object.keys(cancelledMap).forEach(addExclude);
+
   const minOccurrencesRaw = Number(options.minOccurrences);
   const minOccurrences = Number.isFinite(minOccurrencesRaw) && minOccurrencesRaw > 0
     ? Math.floor(minOccurrencesRaw)
@@ -1255,7 +1432,9 @@ function projectIntervalDueDates(task, options = {}){
 
   const hasBaseline = baselineEntry
     || (typeof task.calendarDateISO === "string" && task.calendarDateISO)
-    || (Array.isArray(task.completedDates) && task.completedDates.length > 0);
+    || (Array.isArray(task.completedDates) && task.completedDates.length > 0)
+    || (Number.isFinite(Number(task.sinceBase)) && Number(task.sinceBase) >= 0)
+    || (Number.isFinite(Number(task.anchorTotal)) && Number(task.anchorTotal) >= 0);
   if (!hasBaseline) return [];
 
   const pickBaselineDate = (values)=>{
