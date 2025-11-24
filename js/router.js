@@ -3,6 +3,7 @@ function nav(){
   return `<div class="topnav">
     <button data-go="#/">Dashboard</button>
     <button data-go="#/settings">Settings</button>
+    <button data-go="#/tolerance">Tolerance</button>
     <button data-go="#/jobs">Jobs</button>
     <button data-go="#/costs">Costs</button>
     <button data-go="#/inventory">Inventory</button>
@@ -79,6 +80,7 @@ function route(){
     const raw = (h || "#/").toLowerCase();
     if (raw === "#dashboard" || raw === "#/dashboard" || raw === "#/") return "#/";
     if (raw === "#settings"  || raw === "#/settings")  return "#/settings";
+    if (raw === "#tolerance" || raw === "#/tolerance") return "#/tolerance";
     if (raw === "#jobs"      || raw === "#/jobs")      return "#/jobs";
     if (raw === "#costs"     || raw === "#/costs")     return "#/costs";
     if (raw === "#inventory" || raw === "#/inventory") return "#/inventory";
@@ -109,6 +111,7 @@ function route(){
       catch (err){ console.warn(err); }
     }
     if (norm === "#/settings")      { renderSettings();   return; }
+    if (norm === "#/tolerance")     { renderTolerance();  return; }
     if (norm === "#/jobs")          { renderJobs();       return; }
     if (norm === "#/costs")         { renderCosts();      return; }
     if (norm === "#/inventory")     { renderInventory();  return; }

@@ -47,6 +47,135 @@ function ensureJobCategoryFolderOpen(categoryId){
   window.jobCategoryOpenFolders = existing;
 }
 
+function renderTolerance(){
+  const root = document.getElementById("content");
+  if (!root) return;
+
+  setAppSettingsContext("default");
+  wireDashboardSettingsMenu();
+
+  const storageKey = "toleranceThicknessTable";
+  const defaultRows = [
+    { fit: "Very loose fit", quality: "", tolerance: "", slotted: "", slideIn: "" },
+    { fit: "Loose fit", quality: "", tolerance: "", slotted: "", slideIn: "" },
+    { fit: "Snug fit", quality: "", tolerance: "", slotted: "", slideIn: "" },
+    { fit: "Tight fit", quality: "", tolerance: "", slotted: "", slideIn: "" },
+    { fit: "Press fit", quality: "", tolerance: "", slotted: "", slideIn: "" }
+  ];
+
+  const normalizeRow = (row)=>({
+    fit: String(row && row.fit ? row.fit : ""),
+    quality: String(row && row.quality ? row.quality : ""),
+    tolerance: String(row && row.tolerance ? row.tolerance : ""),
+    slotted: String(row && row.slotted ? row.slotted : ""),
+    slideIn: String(row && row.slideIn ? row.slideIn : "")
+  });
+
+  let savedRows = null;
+  try {
+    const raw = localStorage.getItem(storageKey);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed) && parsed.length){
+      savedRows = parsed.map(normalizeRow);
+    }
+  } catch (err) {
+    console.warn("Failed to load tolerance table", err);
+  }
+
+  const rows = defaultRows.map((row, idx)=>{
+    if (Array.isArray(savedRows) && savedRows[idx]){
+      return { ...row, ...normalizeRow(savedRows[idx]) };
+    }
+    return { ...row };
+  });
+
+  const renderTableBody = ()=> rows.map((row, idx)=>`
+      <tr data-row="${idx}">
+        <th scope="row">${escapeHtml(row.fit)}</th>
+        <td contenteditable="true" data-field="quality">${escapeHtml(row.quality)}</td>
+        <td contenteditable="true" data-field="tolerance">${escapeHtml(row.tolerance)}</td>
+        <td contenteditable="true" data-field="slotted">${escapeHtml(row.slotted)}</td>
+        <td contenteditable="true" data-field="slideIn">${escapeHtml(row.slideIn)}</td>
+      </tr>
+    `).join("");
+
+  root.innerHTML = `
+    <div class="container tolerance-container">
+      <div class="block" style="grid-column:1/-1">
+        <div class="tolerance-header">
+          <h3>Tolerance</h3>
+          <div class="tolerance-actions">
+            <button type="button" id="toleranceReset">Reset table</button>
+            <button type="button" class="primary" id="toleranceSave">Save changes</button>
+          </div>
+        </div>
+        <p class="small muted">Organize tolerance references using the same dropdown layout as Maintenance Settings. Edit the cells directly to capture the fits you rely on.</p>
+
+        <details class="block tolerance-card" open>
+          <summary>Thickness</summary>
+          <div class="tolerance-table-wrap">
+            <table class="tolerance-table">
+              <thead>
+                <tr>
+                  <th scope="col">Fit</th>
+                  <th scope="col">Quality</th>
+                  <th scope="col">Tolerance</th>
+                  <th scope="col">Slotted</th>
+                  <th scope="col">Slide in</th>
+                </tr>
+              </thead>
+              <tbody id="toleranceThicknessBody">${renderTableBody()}</tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </div>`;
+
+  const tableBody = root.querySelector("#toleranceThicknessBody");
+  const saveBtn = root.querySelector("#toleranceSave");
+  const resetBtn = root.querySelector("#toleranceReset");
+
+  const notify = (msg)=>{
+    if (typeof toast === "function") toast(msg);
+    else alert(msg);
+  };
+
+  if (tableBody && !tableBody.__wired){
+    tableBody.__wired = true;
+    tableBody.addEventListener("input", (e)=>{
+      const cell = e.target.closest("[data-field]");
+      const rowEl = e.target.closest("tr[data-row]");
+      if (!cell || !rowEl) return;
+      const idx = Number(rowEl.getAttribute("data-row"));
+      const field = cell.getAttribute("data-field");
+      if (!Number.isFinite(idx) || !field) return;
+      if (!rows[idx]) return;
+      rows[idx][field] = cell.textContent.trim();
+    });
+  }
+
+  if (saveBtn && !saveBtn.dataset.wired){
+    saveBtn.dataset.wired = "1";
+    saveBtn.addEventListener("click", ()=>{
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(rows));
+        notify("Tolerance table saved.");
+      } catch (err) {
+        console.warn("Failed to save tolerance table", err);
+        notify("Could not save the tolerance table.");
+      }
+    });
+  }
+
+  if (resetBtn && !resetBtn.dataset.wired){
+    resetBtn.dataset.wired = "1";
+    resetBtn.addEventListener("click", ()=>{
+      try { localStorage.removeItem(storageKey); } catch (_){ }
+      renderTolerance();
+    });
+  }
+}
+
 function getCurrentMachineHours(){
   if (typeof RENDER_TOTAL === "number" && Number.isFinite(RENDER_TOTAL)){
     return Number(RENDER_TOTAL);

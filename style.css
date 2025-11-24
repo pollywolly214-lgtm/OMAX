@@ -5318,3 +5318,19 @@ tr.row-editing {
     text-align: center;
   }
 }
+
+/* --- Tolerance page --- */
+.tolerance-container .tolerance-header{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tolerance-container .tolerance-header h3{margin:0}
+.tolerance-actions{margin-left:auto;display:flex;gap:8px}
+.tolerance-actions .primary{background:#0a63c2;color:#fff;border:0;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer}
+.tolerance-actions button{border:1px solid #cfd8e3;background:#f4f7fb;border-radius:8px;padding:8px 12px;font-weight:600;cursor:pointer}
+.tolerance-actions button:hover{background:#e7edf7}
+.tolerance-card summary{font-weight:700;cursor:pointer}
+.tolerance-table{width:100%;border-collapse:collapse;font-size:.95rem}
+.tolerance-table th,.tolerance-table td{border:1px solid #d4dde9;padding:8px 10px;text-align:left;vertical-align:top}
+.tolerance-table th{background:#edf2fb;color:#0f172a}
+.tolerance-table td[contenteditable="true"]{background:#fffef7;outline:none;min-width:120px}
+.tolerance-table td[contenteditable="true"]:focus{box-shadow:0 0 0 2px #0a63c2 inset;background:#f0f7ff}
+.tolerance-table tr th:first-child{width:160px;font-weight:700;color:#111827}
+.tolerance-table-wrap{overflow:auto;border:1px solid #e2e8f0;border-radius:10px}
