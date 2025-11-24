@@ -589,7 +589,7 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     return normalized === key;
   };
 
-  if (isInstanceTask(task)){
+  if (isInstanceTask(task) && mode === "asreq"){
     return removeCalendarTaskOccurrence(meta, key);
   }
 
