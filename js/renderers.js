@@ -348,6 +348,9 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
   instance.calendarDateISO = targetISO || null;
   if (note){
     try { setOccurrenceNoteForTask(instance, targetISO, note); } catch (err) { /* noop */ }
+    if (template && template !== instance){
+      try { setOccurrenceNoteForTask(template, targetISO, note); } catch (err) { /* noop */ }
+    }
   }
   if (template && template.variant !== "template"){
     ensureTaskVariant(template, "interval");
@@ -363,6 +366,7 @@ function scheduleExistingAsReqTask(task, { dateISO = null, note = "", refreshDas
   if (!task || task.mode !== "asreq") return null;
   if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
 
+  const template = task;
   const templateId = task.templateId != null ? task.templateId : task.id;
   const normalizeDate = (raw)=>{
     if (!raw) return null;
@@ -390,6 +394,9 @@ function scheduleExistingAsReqTask(task, { dateISO = null, note = "", refreshDas
 
   if (note){
     try { setOccurrenceNoteForTask(instance, instance.calendarDateISO, note); } catch (err) { /* noop */ }
+    if (template && template !== instance){
+      try { setOccurrenceNoteForTask(template, instance.calendarDateISO, note); } catch (err) { /* noop */ }
+    }
   }
 
   window.tasksAsReq.unshift(instance);
