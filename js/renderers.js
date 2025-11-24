@@ -64,7 +64,12 @@ function renderTolerance(){
     { fit: "Press fit", quality: "", tolerance: "", slotted: "", slideIn: "" }
   ];
 
-  const thicknessOptions = ["0.25 in", "0.375 in", "0.5 in", "0.75 in", "1 in", "2 in"];
+  const thicknessOptions = [
+    "1/16 in", "1/8 in", "3/16 in", "1/4 in", "5/16 in", "3/8 in", "7/16 in", "1/2 in",
+    "9/16 in", "5/8 in", "11/16 in", "3/4 in", "13/16 in", "7/8 in", "15/16 in", "1 in",
+    "1 1/16 in", "1 1/8 in", "1 3/16 in", "1 1/4 in", "1 5/16 in", "1 3/8 in", "1 7/16 in", "1 1/2 in",
+    "1 9/16 in", "1 5/8 in", "1 11/16 in", "1 3/4 in", "1 13/16 in", "1 7/8 in", "1 15/16 in", "2 in"
+  ];
   const materialOptions = ["Aluminum", "Mild steel", "Stainless steel", "Titanium", "Brass", "Plastic"];
 
   const normalizeRow = (row)=>({
@@ -184,7 +189,7 @@ function renderTolerance(){
             <button type="button" class="primary" id="toleranceSave">Save changes</button>
           </div>
         </div>
-        <p class="small muted">Use dropdowns to group tolerance references. Create as many tables as you need by selecting a thickness and material; your selection becomes the table name.</p>
+        <p class="small muted">Use dropdowns to group tolerance references. Create as many tables as you need by selecting a thickness and material; your selection becomes the table name. Thickness suggestions now go down to 1/16&quot;, and you can always type a custom value.</p>
 
         <div class="tolerance-builder">
           <div class="tolerance-builder-field">
