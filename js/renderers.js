@@ -47,6 +47,282 @@ function ensureJobCategoryFolderOpen(categoryId){
   window.jobCategoryOpenFolders = existing;
 }
 
+function renderTolerance(){
+  const root = document.getElementById("content");
+  if (!root) return;
+
+  setAppSettingsContext("default");
+  wireDashboardSettingsMenu();
+
+  const storageKey = "toleranceTables";
+  const legacyStorageKey = "toleranceThicknessTable";
+  const defaultRows = [
+    { fit: "Very loose fit", quality: "", tolerance: "", slotted: "", slideIn: "" },
+    { fit: "Loose fit", quality: "", tolerance: "", slotted: "", slideIn: "" },
+    { fit: "Snug fit", quality: "", tolerance: "", slotted: "", slideIn: "" },
+    { fit: "Tight fit", quality: "", tolerance: "", slotted: "", slideIn: "" },
+    { fit: "Press fit", quality: "", tolerance: "", slotted: "", slideIn: "" }
+  ];
+
+  const thicknessOptions = [
+    "1/16 in", "1/8 in", "3/16 in", "1/4 in", "5/16 in", "3/8 in", "7/16 in", "1/2 in",
+    "9/16 in", "5/8 in", "11/16 in", "3/4 in", "13/16 in", "7/8 in", "15/16 in", "1 in",
+    "1 1/16 in", "1 1/8 in", "1 3/16 in", "1 1/4 in", "1 5/16 in", "1 3/8 in", "1 7/16 in", "1 1/2 in",
+    "1 9/16 in", "1 5/8 in", "1 11/16 in", "1 3/4 in", "1 13/16 in", "1 7/8 in", "1 15/16 in", "2 in"
+  ];
+  const materialOptions = ["Aluminum", "Mild steel", "Stainless steel", "Titanium", "Brass", "Plastic"];
+
+  const normalizeRow = (row)=>({
+    fit: String(row && row.fit ? row.fit : ""),
+    quality: String(row && row.quality ? row.quality : ""),
+    tolerance: String(row && row.tolerance ? row.tolerance : ""),
+    slotted: String(row && row.slotted ? row.slotted : ""),
+    slideIn: String(row && row.slideIn ? row.slideIn : "")
+  });
+
+  const normalizeTable = (table)=>{
+    if (!table) return null;
+    const rows = Array.isArray(table.rows) && table.rows.length
+      ? table.rows.map(normalizeRow)
+      : defaultRows.map(row => ({ ...row }));
+    return {
+      id: table.id || String(Date.now() + Math.random()),
+      title: String(table.title || ""),
+      thickness: table.thickness ? String(table.thickness) : "",
+      material: table.material ? String(table.material) : "",
+      rows: rows.map((row, idx)=> ({ ...defaultRows[idx], ...row }))
+    };
+  };
+
+  const loadTables = ()=>{
+    let tables = [];
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed)){
+        tables = parsed.map(normalizeTable).filter(Boolean);
+      }
+    } catch (err) {
+      console.warn("Failed to load tolerance tables", err);
+    }
+
+    if (!tables.length){
+      try {
+        const legacyRaw = localStorage.getItem(legacyStorageKey);
+        const parsed = legacyRaw ? JSON.parse(legacyRaw) : null;
+        if (Array.isArray(parsed) && parsed.length){
+          tables = [{
+            id: String(Date.now()),
+            title: "Thickness · General",
+            thickness: "Thickness",
+            material: "General",
+            rows: parsed.map(normalizeRow)
+          }];
+        }
+      } catch (err) {
+        console.warn("Failed to migrate legacy tolerance table", err);
+      }
+    }
+    return tables;
+  };
+
+  const tablesContainerId = "toleranceTables";
+
+  const renderTableCards = (tables)=>{
+    if (!Array.isArray(tables) || !tables.length){
+      return `<div class="tolerance-empty">Add a tolerance table to get started.</div>`;
+    }
+    return tables.map((table, idx)=>{
+      const body = table.rows.map((row, rowIdx)=>`
+        <tr data-row="${rowIdx}">
+          <th scope="row">${escapeHtml(row.fit)}</th>
+          <td contenteditable="true" data-field="quality">${escapeHtml(row.quality)}</td>
+          <td contenteditable="true" data-field="tolerance">${escapeHtml(row.tolerance)}</td>
+          <td contenteditable="true" data-field="slotted">${escapeHtml(row.slotted)}</td>
+          <td contenteditable="true" data-field="slideIn">${escapeHtml(row.slideIn)}</td>
+        </tr>
+      `).join("");
+
+      return `
+        <details class="block tolerance-card" data-table-id="${table.id}" ${idx === 0 ? "open" : ""}>
+          <summary>
+            <span class="tolerance-title">${escapeHtml(table.title || "Tolerance table")}</span>
+            <button type="button" class="ghost" data-remove-table="${table.id}" aria-label="Remove tolerance table">Remove</button>
+          </summary>
+          <div class="tolerance-table-wrap">
+            <table class="tolerance-table">
+              <thead>
+                <tr>
+                  <th scope="col">Fit</th>
+                  <th scope="col">Quality</th>
+                  <th scope="col">Tolerance</th>
+                  <th scope="col">Slotted</th>
+                  <th scope="col">Slide in</th>
+                </tr>
+              </thead>
+              <tbody data-table-body="${table.id}">${body}</tbody>
+            </table>
+          </div>
+        </details>`;
+    }).join("");
+  };
+
+  const buildTableName = (thickness, material)=>{
+    const cleanThickness = (thickness || "").trim();
+    const cleanMaterial = (material || "").trim();
+    if (cleanThickness && cleanMaterial) return `${cleanThickness} · ${cleanMaterial}`;
+    return cleanThickness || cleanMaterial || "Tolerance table";
+  };
+
+  const renderTablesInto = (container, tables)=>{
+    if (!container) return;
+    container.innerHTML = renderTableCards(tables);
+  };
+
+  root.innerHTML = `
+    <div class="container tolerance-container">
+      <div class="block" style="grid-column:1/-1">
+        <div class="tolerance-header">
+          <h3>Tolerance</h3>
+          <div class="tolerance-actions">
+            <button type="button" id="toleranceReset">Reset tables</button>
+            <button type="button" class="primary" id="toleranceSave">Save changes</button>
+          </div>
+        </div>
+        <p class="small muted">Use dropdowns to group tolerance references. Create as many tables as you need by selecting a thickness and material; your selection becomes the table name. Thickness suggestions now go down to 1/16&quot;, and you can always type a custom value.</p>
+
+        <div class="tolerance-builder">
+          <div class="tolerance-builder-field">
+            <label for="toleranceThickness">Thickness</label>
+            <input id="toleranceThickness" list="toleranceThicknessOptions" placeholder="Select thickness" autocomplete="off">
+            <datalist id="toleranceThicknessOptions">
+              ${thicknessOptions.map(opt => `<option value="${escapeHtml(opt)}"></option>`).join("")}
+            </datalist>
+          </div>
+          <div class="tolerance-builder-field">
+            <label for="toleranceMaterial">Material</label>
+            <input id="toleranceMaterial" list="toleranceMaterialOptions" placeholder="Select material" autocomplete="off">
+            <datalist id="toleranceMaterialOptions">
+              ${materialOptions.map(opt => `<option value="${escapeHtml(opt)}"></option>`).join("")}
+            </datalist>
+          </div>
+          <div class="tolerance-builder-actions">
+            <button type="button" id="toleranceAdd">Add new tolerance table</button>
+          </div>
+        </div>
+
+        <div id="${tablesContainerId}"></div>
+      </div>
+    </div>`;
+
+  const tablesContainer = root.querySelector(`#${tablesContainerId}`);
+  const saveBtn = root.querySelector("#toleranceSave");
+  const resetBtn = root.querySelector("#toleranceReset");
+  const addBtn = root.querySelector("#toleranceAdd");
+  const thicknessInput = root.querySelector("#toleranceThickness");
+  const materialInput = root.querySelector("#toleranceMaterial");
+
+  const notify = (msg)=>{
+    if (typeof toast === "function") toast(msg);
+    else alert(msg);
+  };
+
+  let tables = loadTables();
+  renderTablesInto(tablesContainer, tables);
+
+  const persistTables = ()=>{
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(tables));
+      notify("Tolerance tables saved.");
+    } catch (err) {
+      console.warn("Failed to save tolerance tables", err);
+      notify("Could not save the tolerance tables.");
+    }
+  };
+
+  if (tablesContainer && !tablesContainer.__wired){
+    tablesContainer.__wired = true;
+    tablesContainer.addEventListener("input", (e)=>{
+      const cell = e.target.closest("[data-field]");
+      const rowEl = e.target.closest("tr[data-row]");
+      const tableEl = e.target.closest("[data-table-id]");
+      if (!cell || !rowEl || !tableEl) return;
+      const idx = Number(rowEl.getAttribute("data-row"));
+      const field = cell.getAttribute("data-field");
+      const tableId = tableEl.getAttribute("data-table-id");
+      if (!Number.isFinite(idx) || !field || !tableId) return;
+      const table = tables.find(t=> t.id === tableId);
+      if (!table || !table.rows[idx]) return;
+      table.rows[idx][field] = cell.textContent.trim();
+    });
+
+    tablesContainer.addEventListener("click", (e)=>{
+      const removeBtn = e.target.closest("[data-remove-table]");
+      if (removeBtn){
+        const tableId = removeBtn.getAttribute("data-remove-table");
+        const before = tables.length;
+        tables = tables.filter(t=> t.id !== tableId);
+        renderTablesInto(tablesContainer, tables);
+        if (tables.length < before) notify("Removed tolerance table.");
+        return;
+      }
+    });
+  }
+
+  if (addBtn && !addBtn.dataset.wired){
+    addBtn.dataset.wired = "1";
+    addBtn.addEventListener("click", ()=>{
+      const thickness = thicknessInput ? thicknessInput.value.trim() : "";
+      const material = materialInput ? materialInput.value.trim() : "";
+      if (!thickness || !material){
+        notify("Select both a thickness and material to name the table.");
+        return;
+      }
+      const title = buildTableName(thickness, material);
+      const existing = tables.find(t=> (t.title || "").toLowerCase() === title.toLowerCase());
+      if (existing){
+        notify("That tolerance table already exists.");
+        const detail = tablesContainer ? tablesContainer.querySelector(`[data-table-id="${existing.id}"]`) : null;
+        if (detail) detail.open = true;
+        return;
+      }
+
+      const newTable = normalizeTable({
+        id: String(Date.now() + Math.random()),
+        title,
+        thickness,
+        material,
+        rows: defaultRows.map(row => ({ ...row }))
+      });
+
+      tables.push(newTable);
+      renderTablesInto(tablesContainer, tables);
+      const newDetail = tablesContainer ? tablesContainer.querySelector(`[data-table-id="${newTable.id}"]`) : null;
+      if (newDetail) newDetail.open = true;
+      if (thicknessInput) thicknessInput.value = "";
+      if (materialInput) materialInput.value = "";
+      notify("Added new tolerance table.");
+    });
+  }
+
+  if (saveBtn && !saveBtn.dataset.wired){
+    saveBtn.dataset.wired = "1";
+    saveBtn.addEventListener("click", persistTables);
+  }
+
+  if (resetBtn && !resetBtn.dataset.wired){
+    resetBtn.dataset.wired = "1";
+    resetBtn.addEventListener("click", ()=>{
+      try {
+        localStorage.removeItem(storageKey);
+        localStorage.removeItem(legacyStorageKey);
+      } catch (_){ }
+      tables = [];
+      renderTablesInto(tablesContainer, tables);
+    });
+  }
+}
+
 function getCurrentMachineHours(){
   if (typeof RENDER_TOTAL === "number" && Number.isFinite(RENDER_TOTAL)){
     return Number(RENDER_TOTAL);
