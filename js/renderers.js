@@ -4172,6 +4172,15 @@ function renderDashboard(){
     if (!taskFreqRow || !taskLastRow || !taskConditionRow) return;
     const normalizedMode = mode === "interval" ? "interval" : (mode === "asreq" ? "asreq" : "");
     const trackingChoice = taskTrackingSelect ? (taskTrackingSelect.value === "calendar" ? "calendar" : (taskTrackingSelect.value === "pump" ? "pump" : "")) : "";
+    const clearHourlyFields = ()=>{
+      if (taskIntervalInput) taskIntervalInput.value = "";
+      if (taskLastInput) taskLastInput.value = "";
+      if (taskDailyHoursInput) taskDailyHoursInput.value = "";
+    };
+    const resetCalendarRepeat = ()=>{
+      if (taskRepeatSelect) taskRepeatSelect.value = "none";
+      if (taskRepeatEveryInput) taskRepeatEveryInput.value = "1";
+    };
     if (normalizedMode !== "interval"){
       taskFreqRow.hidden = true;
       taskLastRow.hidden = true;
@@ -4181,6 +4190,8 @@ function renderDashboard(){
       if (taskCalendarRow) taskCalendarRow.hidden = normalizedMode !== "asreq";
       if (taskRepeatRow) taskRepeatRow.hidden = true;
       if (taskTrackingSelect && normalizedMode !== "interval") taskTrackingSelect.value = "";
+      clearHourlyFields();
+      resetCalendarRepeat();
       return;
     }
 
@@ -4192,15 +4203,26 @@ function renderDashboard(){
       if (taskDailyHoursRow) taskDailyHoursRow.hidden = true;
       if (taskCalendarRow) taskCalendarRow.hidden = true;
       if (taskRepeatRow) taskRepeatRow.hidden = true;
+      clearHourlyFields();
+      resetCalendarRepeat();
       return;
     }
 
     taskFreqRow.hidden = trackingChoice === "calendar";
     taskLastRow.hidden = trackingChoice === "calendar";
     taskConditionRow.hidden = true;
-    if (taskDailyHoursRow) taskDailyHoursRow.hidden = trackingChoice === "calendar";
-    if (taskCalendarRow) taskCalendarRow.hidden = trackingChoice !== "calendar";
-    if (taskRepeatRow) taskRepeatRow.hidden = trackingChoice !== "calendar";
+    if (taskDailyHoursRow){
+      taskDailyHoursRow.hidden = trackingChoice === "calendar";
+      if (trackingChoice === "calendar") taskDailyHoursInput && (taskDailyHoursInput.value = "");
+    }
+    if (taskCalendarRow){
+      taskCalendarRow.hidden = trackingChoice !== "calendar";
+      if (trackingChoice !== "calendar") taskDateInput && (taskDateInput.value = "");
+    }
+    if (taskRepeatRow){
+      taskRepeatRow.hidden = trackingChoice !== "calendar";
+      if (trackingChoice !== "calendar") resetCalendarRepeat();
+    }
   }
 
   function resetTaskForm(){
@@ -7393,6 +7415,20 @@ function renderSettings(){
     if (!freqRow || !lastRow || !conditionRow) return;
     const normalizedMode = mode === "interval" ? "interval" : (mode === "asreq" ? "asreq" : "");
     const trackingChoice = trackingField ? (trackingField.value === "calendar" ? "calendar" : (trackingField.value === "pump" ? "pump" : "")) : "";
+    const clearHourlyFields = ()=>{
+      const intervalInput = form?.querySelector('[name="taskInterval"]');
+      const lastInput = form?.querySelector('[name="taskLastServiced"]');
+      const dailyInput = form?.querySelector('[name="taskEstimatedDailyHours"]');
+      if (intervalInput instanceof HTMLInputElement) intervalInput.value = "";
+      if (lastInput instanceof HTMLInputElement) lastInput.value = "";
+      if (dailyInput instanceof HTMLInputElement) dailyInput.value = "";
+    };
+    const resetCalendarRepeat = ()=>{
+      const repeatField = form?.querySelector('[name="taskCalendarRepeat"]');
+      const repeatEveryField = form?.querySelector('[name="taskCalendarRepeatEvery"]');
+      if (repeatField instanceof HTMLSelectElement) repeatField.value = "none";
+      if (repeatEveryField instanceof HTMLInputElement) repeatEveryField.value = "1";
+    };
     if (normalizedMode !== "interval"){
       freqRow.hidden = true;
       lastRow.hidden = true;
@@ -7402,6 +7438,8 @@ function renderSettings(){
       if (calendarRow) calendarRow.hidden = normalizedMode !== "asreq";
       if (repeatRow) repeatRow.hidden = true;
       if (trackingField && normalizedMode !== "interval") trackingField.value = "";
+      clearHourlyFields();
+      resetCalendarRepeat();
       return;
     }
 
@@ -7413,15 +7451,32 @@ function renderSettings(){
       if (dailyHoursRow) dailyHoursRow.hidden = true;
       if (calendarRow) calendarRow.hidden = true;
       if (repeatRow) repeatRow.hidden = true;
+      clearHourlyFields();
+      resetCalendarRepeat();
       return;
     }
 
     freqRow.hidden = trackingChoice === "calendar";
     lastRow.hidden = trackingChoice === "calendar";
     conditionRow.hidden = true;
-    if (dailyHoursRow) dailyHoursRow.hidden = trackingChoice === "calendar";
-    if (calendarRow) calendarRow.hidden = trackingChoice !== "calendar";
-    if (repeatRow) repeatRow.hidden = trackingChoice !== "calendar";
+    if (dailyHoursRow){
+      dailyHoursRow.hidden = trackingChoice === "calendar";
+      if (trackingChoice === "calendar"){
+        const dailyInput = form?.querySelector('[name="taskEstimatedDailyHours"]');
+        if (dailyInput instanceof HTMLInputElement) dailyInput.value = "";
+      }
+    }
+    if (calendarRow){
+      calendarRow.hidden = trackingChoice !== "calendar";
+      if (trackingChoice !== "calendar"){
+        const startInput = form?.querySelector('[name="taskCalendarStart"]');
+        if (startInput instanceof HTMLInputElement) startInput.value = "";
+      }
+    }
+    if (repeatRow){
+      repeatRow.hidden = trackingChoice !== "calendar";
+      if (trackingChoice !== "calendar") resetCalendarRepeat();
+    }
   }
 
   function showModal(options){
