@@ -7443,6 +7443,52 @@ function renderSettings(){
     else chip.classList.add("due-ok");
   }
 
+  function syncLinkedInventoryFromTask(task, updates){
+    if (!task) return false;
+    const taskId = task.id != null ? String(task.id) : null;
+    const invId = task.inventoryId != null ? String(task.inventoryId) : null;
+    if (!Array.isArray(inventory) || (!taskId && !invId)) return false;
+    const item = inventory.find(entry => {
+      if (!entry) return false;
+      const entryId = entry.id != null ? String(entry.id) : null;
+      const linkedId = entry.linkedTaskId != null ? String(entry.linkedTaskId) : null;
+      return (invId && entryId === invId) || (taskId && linkedId === taskId);
+    });
+    if (!item) return false;
+
+    let changed = false;
+    if (Object.prototype.hasOwnProperty.call(updates, "pn") && item.pn !== updates.pn){
+      item.pn = updates.pn;
+      changed = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, "link") && item.link !== updates.link){
+      item.link = updates.link;
+      changed = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, "price")){
+      if (updates.price === null){
+        if (item.price != null){ item.price = null; changed = true; }
+      }else if (item.price !== updates.price){
+        item.price = updates.price;
+        changed = true;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, "name") && updates.name && item.name !== updates.name){
+      item.name = updates.name;
+      changed = true;
+    }
+
+    if (changed){
+      window.inventory = inventory;
+      try{ if (typeof saveCloudDebounced === "function") saveCloudDebounced(); }catch(_){ }
+      const hash = (location.hash || "#").toLowerCase();
+      if (typeof renderInventory === "function" && (hash === "#/inventory" || hash === "#inventory")){
+        renderInventory();
+      }
+    }
+    return changed;
+  }
+
   tree?.addEventListener("input", (e)=>{
     const target = e.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
@@ -7486,6 +7532,7 @@ function renderSettings(){
       updateDueChip(holder, meta.task);
     }else if (key === "price"){
       meta.task.price = value == null ? null : Number(value);
+      syncLinkedInventoryFromTask(meta.task, { price: meta.task.price });
     }else if (key === "downtimeHours"){
       const prevDowntime = meta.task.downtimeHours;
       if (value == null){
@@ -7518,6 +7565,9 @@ function renderSettings(){
       meta.task[key] = target.value;
       if (key === "name"){ const label = holder.querySelector('.task-name'); if (label) label.textContent = target.value || "(unnamed task)"; }
       if (key === "condition"){ const chip = holder.querySelector('[data-chip-condition]'); if (chip) chip.textContent = target.value || "As required"; }
+      if (key === "storeLink"){ syncLinkedInventoryFromTask(meta.task, { link: meta.task.storeLink || "" }); }
+      if (key === "pn"){ syncLinkedInventoryFromTask(meta.task, { pn: meta.task.pn || "" }); }
+      if (key === "name"){ syncLinkedInventoryFromTask(meta.task, { name: meta.task.name || "" }); }
     }
     persist();
   });
