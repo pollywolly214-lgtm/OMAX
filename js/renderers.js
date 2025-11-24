@@ -144,7 +144,7 @@ function ensureTaskManualHistory(task){
       clone.hoursAtEntry = null;
     }
     if (typeof clone.recordedAtISO !== "string") clone.recordedAtISO = null;
-    if (clone.status !== "completed" && clone.status !== "scheduled" && clone.status !== "logged"){
+    if (clone.status !== "completed" && clone.status !== "scheduled" && clone.status !== "logged" && clone.status !== "removed"){
       clone.status = "logged";
     }
     if (clone.source !== "machine" && clone.source !== "estimate"){
