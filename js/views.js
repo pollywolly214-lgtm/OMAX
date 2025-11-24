@@ -729,8 +729,17 @@ function ensureTaskCategories(){
   }
 }
 
-   
+
   const byIdFolder = id => window.settingsFolders.find(f => String(f.id)===String(id)) || null;
+  const normalizeCategoryName = (value)=> typeof value === "string" ? value.trim().toLowerCase() : "";
+  const categoryNameExists = (name, excludeId)=>{
+    const normalized = normalizeCategoryName(name);
+    return window.settingsFolders.some(folder => {
+      if (!folder) return false;
+      if (excludeId != null && String(folder.id) === String(excludeId)) return false;
+      return normalizeCategoryName(folder.name) === normalized;
+    });
+  };
   const normalizeFolderOrder = (parentId) => {
     const siblings = window.settingsFolders
       .filter(f => String(f.parent||"") === String(parentId||""))
@@ -758,8 +767,14 @@ function ensureTaskCategories(){
     addBtn.addEventListener("click", ()=>{
       const name = prompt("New category (folder) name?");
       if (!name) return;
-      const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Math.random().toString(36).slice(2,7));
-      window.settingsFolders.push({ id, name, parent: (typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root"), order:(++window._maintOrderCounter) });
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      if (categoryNameExists(trimmed)){
+        alert("A category with that name already exists.");
+        return;
+      }
+      const id = (trimmed.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Math.random().toString(36).slice(2,7));
+      window.settingsFolders.push({ id, name: trimmed, parent: (typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root"), order:(++window._maintOrderCounter) });
       persist();
       // Re-render full Settings so the new folder appears in both menus.
       if (typeof renderSettings === "function") renderSettings();
@@ -775,8 +790,14 @@ function ensureTaskCategories(){
       if (!byIdFolder(parent)) { alert("Folder not found."); return; }
       const name = prompt("Sub-category name?");
       if (!name) return;
-      const id = (name.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Math.random().toString(36).slice(2,7));
-      window.settingsFolders.push({ id, name, parent, order:(++window._maintOrderCounter) });
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      if (categoryNameExists(trimmed)){
+        alert("A category with that name already exists.");
+        return;
+      }
+      const id = (trimmed.toLowerCase().replace(/[^a-z0-9]+/g,"_") + "_" + Math.random().toString(36).slice(2,7));
+      window.settingsFolders.push({ id, name: trimmed, parent, order:(++window._maintOrderCounter) });
       persist();
       if (typeof renderSettings === "function") renderSettings();
     });
@@ -790,7 +811,13 @@ function ensureTaskCategories(){
       const f = byIdFolder(id); if (!f) return;
       const name = prompt("New folder name:", f.name || "");
       if (!name) return;
-      f.name = name;
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      if (categoryNameExists(trimmed, id)){
+        alert("A category with that name already exists.");
+        return;
+      }
+      f.name = trimmed;
       persist();
       if (typeof renderSettings === "function") renderSettings();
     });
