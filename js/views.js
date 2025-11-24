@@ -312,26 +312,28 @@ function viewDashboard(){
         <form id="dashTaskForm" class="modal-form task-option-body" data-task-variant="new">
           <div class="modal-grid">
             <label>Task name<input id="dashTaskName" required placeholder="Task"></label>
-            <label>Type<select id="dashTaskType">
+            <label>Type<select id="dashTaskType" required>
+              <option value="" disabled selected>Select scheduling type</option>
               <option value="interval">Per interval</option>
               <option value="asreq">As required</option>
             </select></label>
-            <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
-            <label data-task-last>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
+            <label data-task-frequency hidden>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
+            <label data-task-last hidden>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
             <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
-            <label data-task-tracking>Tracking<select id="dashTaskTracking">
-              <option value="pump">Pump hours (log hours + est./day)</option>
+            <label data-task-tracking hidden>Tracking<select id="dashTaskTracking" required>
+              <option value="" disabled selected>Select tracking method</option>
+              <option value="pump">Usage hours (log hours + est./day)</option>
               <option value="calendar">Calendar day / repeating</option>
             </select></label>
-            <label data-task-daily-hours>Estimated hours per day<input type="number" min="0.25" step="0.25" id="dashTaskDailyHours" placeholder="e.g. 8"></label>
+            <label data-task-daily-hours hidden>Estimated hours per day<input type="number" min="0.25" step="0.25" id="dashTaskDailyHours" placeholder="e.g. 8"></label>
             <label>Manual link<input type="url" id="dashTaskManual" placeholder="https://..."></label>
             <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
             <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
             <label>Price ($)<input type="number" min="0" step="0.01" id="dashTaskPrice" placeholder="optional"></label>
             <label>Time to complete (hrs)<input type="number" min="0.25" step="0.25" id="dashTaskDowntime" placeholder="e.g. 1"></label>
             <label>Category<select id="dashTaskCategory"></select></label>
-            <label data-task-calendar>Calendar start date<input type="date" id="dashTaskDate"></label>
-            <div class="calendar-repeat" data-task-repeat>
+            <label data-task-calendar hidden>Calendar start date<input type="date" id="dashTaskDate"></label>
+            <div class="calendar-repeat" data-task-repeat hidden>
               <label>Repeats<select id="dashTaskRepeat">
                 <option value="none">Does not repeat</option>
                 <option value="daily">Daily</option>

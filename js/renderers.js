@@ -4170,25 +4170,37 @@ function renderDashboard(){
 
   function syncTaskMode(mode){
     if (!taskFreqRow || !taskLastRow || !taskConditionRow) return;
-    const trackingMode = taskTrackingSelect?.value === "calendar" ? "calendar" : "pump";
-    if (mode === "asreq"){
+    const normalizedMode = mode === "interval" ? "interval" : (mode === "asreq" ? "asreq" : "");
+    const trackingChoice = taskTrackingSelect ? (taskTrackingSelect.value === "calendar" ? "calendar" : (taskTrackingSelect.value === "pump" ? "pump" : "")) : "";
+    if (normalizedMode !== "interval"){
       taskFreqRow.hidden = true;
       taskLastRow.hidden = true;
-      taskConditionRow.hidden = false;
+      taskConditionRow.hidden = normalizedMode === "interval" ? true : (normalizedMode === "asreq" ? false : true);
       if (taskTrackingRow) taskTrackingRow.hidden = true;
-      if (taskTrackingSelect) taskTrackingSelect.value = "pump";
       if (taskDailyHoursRow) taskDailyHoursRow.hidden = true;
       if (taskCalendarRow) taskCalendarRow.hidden = true;
       if (taskRepeatRow) taskRepeatRow.hidden = true;
-    }else{
-      if (taskTrackingRow) taskTrackingRow.hidden = false;
-      taskFreqRow.hidden = trackingMode === "calendar";
-      taskLastRow.hidden = trackingMode === "calendar";
-      taskConditionRow.hidden = true;
-      if (taskDailyHoursRow) taskDailyHoursRow.hidden = trackingMode === "calendar";
-      if (taskCalendarRow) taskCalendarRow.hidden = trackingMode !== "calendar";
-      if (taskRepeatRow) taskRepeatRow.hidden = trackingMode !== "calendar";
+      if (taskTrackingSelect && normalizedMode !== "interval") taskTrackingSelect.value = "";
+      return;
     }
+
+    if (taskTrackingRow) taskTrackingRow.hidden = false;
+    if (!trackingChoice){
+      taskFreqRow.hidden = true;
+      taskLastRow.hidden = true;
+      taskConditionRow.hidden = true;
+      if (taskDailyHoursRow) taskDailyHoursRow.hidden = true;
+      if (taskCalendarRow) taskCalendarRow.hidden = true;
+      if (taskRepeatRow) taskRepeatRow.hidden = true;
+      return;
+    }
+
+    taskFreqRow.hidden = trackingChoice === "calendar";
+    taskLastRow.hidden = trackingChoice === "calendar";
+    taskConditionRow.hidden = true;
+    if (taskDailyHoursRow) taskDailyHoursRow.hidden = trackingChoice === "calendar";
+    if (taskCalendarRow) taskCalendarRow.hidden = trackingChoice !== "calendar";
+    if (taskRepeatRow) taskRepeatRow.hidden = trackingChoice !== "calendar";
   }
 
   function resetTaskForm(){
@@ -4196,14 +4208,15 @@ function renderDashboard(){
     if (taskDowntimeInput){
       taskDowntimeInput.value = "1";
     }
-    if (taskTrackingSelect){ taskTrackingSelect.value = "pump"; }
+    if (taskTypeSelect){ taskTypeSelect.value = ""; }
+    if (taskTrackingSelect){ taskTrackingSelect.value = ""; }
     if (taskDailyHoursInput){ taskDailyHoursInput.value = "8"; }
     if (taskRepeatSelect){ taskRepeatSelect.value = "none"; }
     if (taskRepeatEveryInput){ taskRepeatEveryInput.value = "1"; }
     subtaskList?.replaceChildren();
     resetExistingTaskForm();
     showTaskOptionStage();
-    syncTaskMode(taskTypeSelect?.value || "interval");
+    syncTaskMode(taskTypeSelect?.value || "");
     syncTaskDateInput();
   }
 
@@ -4495,9 +4508,14 @@ function renderDashboard(){
     }, 80);
   });
 
-  taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
-  taskTrackingSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect?.value || "interval"));
-  syncTaskMode(taskTypeSelect?.value || "interval");
+  taskTypeSelect?.addEventListener("change", ()=>{
+    if (taskTypeSelect.value !== "interval" && taskTrackingSelect){
+      taskTrackingSelect.value = "";
+    }
+    syncTaskMode(taskTypeSelect.value);
+  });
+  taskTrackingSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect?.value || ""));
+  syncTaskMode(taskTypeSelect?.value || "");
   syncTaskDateInput();
   syncOneTimeDateInput();
   populateCategoryOptions();
@@ -4506,7 +4524,12 @@ function renderDashboard(){
   showTaskOptionStage();
 
   addSubtaskBtn?.addEventListener("click", ()=>{
-    const row = createSubtaskRow(taskTypeSelect?.value || "interval");
+    const baseMode = taskTypeSelect?.value || "";
+    if (!baseMode){
+      alert("Choose whether the task is per interval or as required before adding sub-tasks.");
+      return;
+    }
+    const row = createSubtaskRow(baseMode);
     if (row) subtaskList?.appendChild(row);
   });
 
@@ -4515,8 +4538,12 @@ function renderDashboard(){
     if (!taskForm) return;
     const name = (taskNameInput?.value || "").trim();
     if (!name){ alert("Task name is required."); return; }
-    const mode = (taskTypeSelect?.value === "asreq") ? "asreq" : "interval";
-    const trackingMode = (mode === "interval" && taskTrackingSelect?.value === "calendar") ? "calendar" : "pump";
+    const rawMode = taskTypeSelect?.value || "";
+    if (!rawMode){ alert("Select whether the task is per interval or as required."); return; }
+    const mode = (rawMode === "asreq") ? "asreq" : "interval";
+    const rawTracking = taskTrackingSelect?.value || "";
+    if (mode === "interval" && !rawTracking){ alert("Select whether to track by usage hours or on a calendar."); return; }
+    const trackingMode = (mode === "interval" && rawTracking === "calendar") ? "calendar" : "pump";
     const manual = (taskManualInput?.value || "").trim();
     const store  = (taskStoreInput?.value || "").trim();
     const pn     = (taskPNInput?.value || "").trim();
@@ -6825,13 +6852,30 @@ function renderSettings(){
         <form id="taskForm" class="modal-form">
           <div class="modal-grid">
             <label>Task name<input name="taskName" required placeholder="Task"></label>
-            <label>Type<select name="taskType" id="taskTypeSelect">
-              <option value="interval">By interval</option>
+            <label>Type<select name="taskType" id="taskTypeSelect" required>
+              <option value="" disabled selected>Select scheduling type</option>
+              <option value="interval">Per interval</option>
               <option value="asreq">As required</option>
             </select></label>
-            <label data-form-frequency>Frequency (hrs)<input type="number" min="1" step="1" name="taskInterval" placeholder="e.g. 40"></label>
-            <label data-form-last>Hours since last service<input type="number" min="0" step="0.01" name="taskLastServiced" placeholder="optional"></label>
+            <label data-form-tracking hidden>Tracking<select name="taskTracking" required>
+              <option value="" disabled selected>Select tracking method</option>
+              <option value="pump">Usage hours (log hours + est./day)</option>
+              <option value="calendar">Calendar day / repeating</option>
+            </select></label>
+            <label data-form-frequency hidden>Frequency (hrs)<input type="number" min="1" step="1" name="taskInterval" placeholder="e.g. 40"></label>
+            <label data-form-last hidden>Hours since last service<input type="number" min="0" step="0.01" name="taskLastServiced" placeholder="optional"></label>
             <label data-form-condition hidden>Condition / trigger<input name="taskCondition" placeholder="e.g. When clogged"></label>
+            <label data-form-daily-hours hidden>Estimated hours per day<input type="number" min="0.25" step="0.25" name="taskEstimatedDailyHours" placeholder="e.g. 8"></label>
+            <label data-form-calendar hidden>Calendar start date<input type="date" name="taskCalendarStart"></label>
+            <div class="calendar-repeat" data-form-repeat hidden>
+              <label>Repeats<select name="taskCalendarRepeat">
+                <option value="none">Does not repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select></label>
+              <label>Repeat every<input type="number" min="1" step="1" name="taskCalendarRepeatEvery" value="1"></label>
+            </div>
             <label>Manual link<input type="url" name="taskManual" placeholder="https://..."></label>
             <label>Store link<input type="url" name="taskStore" placeholder="https://..."></label>
             <label>Part #<input name="taskPN" placeholder="Part number"></label>
@@ -6863,9 +6907,14 @@ function renderSettings(){
   const modal = document.getElementById("taskModal");
   const form = document.getElementById("taskForm");
   const typeField = document.getElementById("taskTypeSelect");
+  const trackingField = form?.querySelector('[name="taskTracking"]');
   const freqRow = form?.querySelector('[data-form-frequency]');
   const lastRow = form?.querySelector('[data-form-last]');
   const conditionRow = form?.querySelector('[data-form-condition]');
+  const trackingRow = form?.querySelector('[data-form-tracking]');
+  const dailyHoursRow = form?.querySelector('[data-form-daily-hours]');
+  const calendarRow = form?.querySelector('[data-form-calendar]');
+  const repeatRow = form?.querySelector('[data-form-repeat]');
   const searchInput = document.getElementById("maintenanceSearch");
   const searchClear = document.getElementById("maintenanceSearchClear");
   const occurrenceNotesModal = document.getElementById("occurrenceNotesModal");
@@ -7336,22 +7385,37 @@ function renderSettings(){
 
   function syncFormMode(mode){
     if (!freqRow || !lastRow || !conditionRow) return;
-    const trackingMode = taskTrackingSelect?.value === "calendar" ? "calendar" : "pump";
-    if (mode === "interval"){
-      freqRow.hidden = trackingMode === "calendar";
-      lastRow.hidden = trackingMode === "calendar";
-      conditionRow.hidden = true;
-      if (taskDailyHoursRow) taskDailyHoursRow.hidden = trackingMode === "calendar";
-      if (taskCalendarRow) taskCalendarRow.hidden = false;
-      if (taskRepeatRow) taskRepeatRow.hidden = trackingMode !== "calendar";
-    }else{
+    const normalizedMode = mode === "interval" ? "interval" : (mode === "asreq" ? "asreq" : "");
+    const trackingChoice = trackingField ? (trackingField.value === "calendar" ? "calendar" : (trackingField.value === "pump" ? "pump" : "")) : "";
+    if (normalizedMode !== "interval"){
       freqRow.hidden = true;
       lastRow.hidden = true;
-      conditionRow.hidden = false;
-      if (taskDailyHoursRow) taskDailyHoursRow.hidden = true;
-      if (taskCalendarRow) taskCalendarRow.hidden = false;
-      if (taskRepeatRow) taskRepeatRow.hidden = true;
+      conditionRow.hidden = normalizedMode === "asreq" ? false : true;
+      if (trackingRow) trackingRow.hidden = true;
+      if (dailyHoursRow) dailyHoursRow.hidden = true;
+      if (calendarRow) calendarRow.hidden = true;
+      if (repeatRow) repeatRow.hidden = true;
+      if (trackingField && normalizedMode !== "interval") trackingField.value = "";
+      return;
     }
+
+    if (trackingRow) trackingRow.hidden = false;
+    if (!trackingChoice){
+      freqRow.hidden = true;
+      lastRow.hidden = true;
+      conditionRow.hidden = true;
+      if (dailyHoursRow) dailyHoursRow.hidden = true;
+      if (calendarRow) calendarRow.hidden = true;
+      if (repeatRow) repeatRow.hidden = true;
+      return;
+    }
+
+    freqRow.hidden = trackingChoice === "calendar";
+    lastRow.hidden = trackingChoice === "calendar";
+    conditionRow.hidden = true;
+    if (dailyHoursRow) dailyHoursRow.hidden = trackingChoice === "calendar";
+    if (calendarRow) calendarRow.hidden = trackingChoice !== "calendar";
+    if (repeatRow) repeatRow.hidden = trackingChoice !== "calendar";
   }
 
   function showModal(options){
@@ -7359,6 +7423,16 @@ function renderSettings(){
     const opts = options && typeof options === "object" ? options : {};
     const categoryId = opts.categoryId != null ? String(opts.categoryId) : "";
     form.reset();
+    if (typeField) typeField.value = "";
+    if (trackingField) trackingField.value = "";
+    const repeatField = form.querySelector('[name="taskCalendarRepeat"]');
+    if (repeatField instanceof HTMLSelectElement){
+      repeatField.value = "none";
+    }
+    const repeatEveryField = form.querySelector('[name="taskCalendarRepeatEvery"]');
+    if (repeatEveryField instanceof HTMLInputElement){
+      repeatEveryField.value = "1";
+    }
     const categoryField = form.querySelector('[name="taskCategory"]');
     if (categoryField instanceof HTMLSelectElement){
       if (categoryId){
@@ -7418,8 +7492,14 @@ function renderSettings(){
       closeOccurrenceNotes();
     }
   });
-  typeField?.addEventListener("change", ()=> syncFormMode(typeField.value));
-  syncFormMode(typeField?.value || "interval");
+  typeField?.addEventListener("change", ()=>{
+    if (typeField.value !== "interval" && trackingField){
+      trackingField.value = "";
+    }
+    syncFormMode(typeField.value);
+  });
+  trackingField?.addEventListener("change", ()=> syncFormMode(typeField?.value || ""));
+  syncFormMode(typeField?.value || "");
 
   let pendingInventoryIdForNewTask = null;
   let pendingInventoryNameForNewTask = null;
@@ -7474,8 +7554,13 @@ function renderSettings(){
     if (!form) return;
     const data = new FormData(form);
     const name = (data.get("taskName")||"").toString().trim();
-    const mode = (data.get("taskType")||"interval").toString();
+    const rawMode = (data.get("taskType")||"").toString();
     if (!name){ alert("Task name is required."); return; }
+    if (!rawMode){ alert("Select whether the task is per interval or as required."); return; }
+    const mode = rawMode === "asreq" ? "asreq" : "interval";
+    const rawTracking = (data.get("taskTracking")||"").toString();
+    if (mode === "interval" && !rawTracking){ alert("Select whether to track by usage hours or on a calendar."); return; }
+    const trackingMode = mode === "interval" && rawTracking === "calendar" ? "calendar" : "pump";
     const rootId = (typeof window !== "undefined" && typeof window.ROOT_FOLDER_ID === "string") ? window.ROOT_FOLDER_ID : "root";
     const catRaw = (data.get("taskCategory")||"").toString().trim();
     const catId = catRaw ? catRaw : rootId;
@@ -7486,6 +7571,17 @@ function renderSettings(){
     const price = priceVal === null || priceVal === "" ? null : Number(priceVal);
     const noteRaw = (data.get("taskNote")||"").toString();
     const note = noteRaw.trim() ? noteRaw : "";
+    const estDailyRaw = Number(data.get("taskEstimatedDailyHours"));
+    const estimatedDailyHours = (mode === "interval" && trackingMode === "pump" && Number.isFinite(estDailyRaw) && estDailyRaw > 0)
+      ? Math.max(0.25, Math.round(estDailyRaw * 100) / 100)
+      : null;
+    const calendarStart = (data.get("taskCalendarStart") || "").toString().trim();
+    const calendarRepeat = (data.get("taskCalendarRepeat") || "none").toString();
+    const calendarRepeatEveryVal = Number(data.get("taskCalendarRepeatEvery"));
+    const calendarRepeatEvery = Number.isFinite(calendarRepeatEveryVal) && calendarRepeatEveryVal > 0 ? Math.round(calendarRepeatEveryVal) : 1;
+    const normalizedPlan = trackingMode === "calendar"
+      ? normalizeCalendarPlan({ startDateISO: calendarStart ? ymd(calendarStart) : null, repeat: calendarRepeat, repeatEvery: calendarRepeatEvery }, null)
+      : null;
     const id = genId(name);
     const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, note, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
 
@@ -7497,6 +7593,10 @@ function renderSettings(){
       const task = Object.assign(base, {
         mode:"interval",
         interval: isFinite(interval) && interval>0 ? interval : 8,
+        trackingMode,
+        estimatedDailyHours,
+        calendarPlan: normalizedPlan,
+        calendarDateISO: normalizedPlan?.startDateISO || null,
         sinceBase:0,
         anchorTotal:null,
         completedDates: [],
