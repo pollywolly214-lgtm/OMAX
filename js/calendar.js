@@ -2051,60 +2051,9 @@ function renderCalendar(){
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
 }
 
-function toggleCalendarShowAllMonths(){
-  const next = !Boolean(window.__calendarShowAllMonths);
-  window.__calendarShowAllMonths = next;
-  renderCalendar();
-}
-
-  if (mode === "interval" && normalizedScope === "single"){
-    if (markOccurrenceRemoved(task, key)) changed = true;
-
-    const nowIso = new Date().toISOString();
-    const history = Array.isArray(task.manualHistory) ? task.manualHistory : [];
-    let hasEntry = false;
-    history.forEach(entry => {
-      if (matchesSingle(entry?.dateISO)){
-        hasEntry = true;
-        if (entry.status !== "removed"){ entry.status = "removed"; changed = true; }
-        if (!entry.recordedAtISO) entry.recordedAtISO = nowIso;
-      }
-    });
-    if (!hasEntry){
-      history.push({ dateISO: key, status: "removed", recordedAtISO: nowIso, source: "calendar" });
-      changed = true;
-    }
-    task.manualHistory = history;
-
-    const pruneSingle = (obj)=>{
-      if (!obj || typeof obj !== "object") return false;
-      let mutated = false;
-      Object.keys(obj).forEach(k => {
-        if (matchesSingle(k)){
-          delete obj[k];
-          mutated = true;
-        }
-      });
-      return mutated;
-    };
-
-    if (matchesSingle(task.calendarDateISO)){
-      task.calendarDateISO = null;
-      changed = true;
-    }
-    if (Array.isArray(task.completedDates)){
-      const idx = task.completedDates.findIndex(v => matchesSingle(v));
-      if (idx >= 0){
-        task.completedDates.splice(idx,1);
-        changed = true;
-      }
-    }
-    if (pruneSingle(task.occurrenceNotes)) changed = true;
-    if (pruneSingle(task.occurrenceHours)) changed = true;
-
-    return changed;
+  function toggleCalendarShowAllMonths(){
+    const next = !Boolean(window.__calendarShowAllMonths);
+    window.__calendarShowAllMonths = next;
+    renderCalendar();
   }
-
-  const removedChanged = clearRemovedOccurrences(task, matchesScope);
-  if (removedChanged) changed = true;
 
