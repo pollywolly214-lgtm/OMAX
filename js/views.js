@@ -319,7 +319,7 @@ function viewDashboard(){
             <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
             <label data-task-last>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
             <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
-            <label>Tracking<select id="dashTaskTracking">
+            <label data-task-tracking>Tracking<select id="dashTaskTracking">
               <option value="pump">Pump hours (log hours + est./day)</option>
               <option value="calendar">Calendar day / repeating</option>
             </select></label>

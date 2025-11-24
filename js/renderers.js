@@ -3596,6 +3596,7 @@ function renderDashboard(){
   const taskDowntimeInput= document.getElementById("dashTaskDowntime");
   const categorySelect   = document.getElementById("dashTaskCategory");
   const taskDateInput    = document.getElementById("dashTaskDate");
+  const taskTrackingRow  = taskForm?.querySelector("[data-task-tracking]");
   const taskDailyHoursRow = taskForm?.querySelector("[data-task-daily-hours]");
   const taskCalendarRow = taskForm?.querySelector("[data-task-calendar]");
   const taskRepeatRow = taskForm?.querySelector("[data-task-repeat]");
@@ -4174,10 +4175,13 @@ function renderDashboard(){
       taskFreqRow.hidden = true;
       taskLastRow.hidden = true;
       taskConditionRow.hidden = false;
+      if (taskTrackingRow) taskTrackingRow.hidden = true;
+      if (taskTrackingSelect) taskTrackingSelect.value = "pump";
       if (taskDailyHoursRow) taskDailyHoursRow.hidden = true;
       if (taskCalendarRow) taskCalendarRow.hidden = true;
       if (taskRepeatRow) taskRepeatRow.hidden = true;
     }else{
+      if (taskTrackingRow) taskTrackingRow.hidden = false;
       taskFreqRow.hidden = trackingMode === "calendar";
       taskLastRow.hidden = trackingMode === "calendar";
       taskConditionRow.hidden = true;
@@ -4512,14 +4516,14 @@ function renderDashboard(){
     const name = (taskNameInput?.value || "").trim();
     if (!name){ alert("Task name is required."); return; }
     const mode = (taskTypeSelect?.value === "asreq") ? "asreq" : "interval";
-    const trackingMode = (taskTrackingSelect?.value === "calendar") ? "calendar" : "pump";
+    const trackingMode = (mode === "interval" && taskTrackingSelect?.value === "calendar") ? "calendar" : "pump";
     const manual = (taskManualInput?.value || "").trim();
     const store  = (taskStoreInput?.value || "").trim();
     const pn     = (taskPNInput?.value || "").trim();
     const priceVal = taskPriceInput?.value;
     const price  = priceVal === "" ? null : Number(priceVal);
     const estDailyRaw = Number(taskDailyHoursInput?.value);
-    const estimatedDailyHours = (trackingMode === "pump" && Number.isFinite(estDailyRaw) && estDailyRaw > 0)
+    const estimatedDailyHours = (mode === "interval" && trackingMode === "pump" && Number.isFinite(estDailyRaw) && estDailyRaw > 0)
       ? Math.max(0.25, Math.round(estDailyRaw * 100) / 100)
       : null;
     const repeatChoice = taskRepeatSelect?.value || "none";
@@ -4551,9 +4555,9 @@ function renderDashboard(){
       order: ++window._maintOrderCounter,
       calendarDateISO: null,
       downtimeHours: downtimeVal,
-      trackingMode,
+      trackingMode: mode === "interval" ? trackingMode : "pump",
       estimatedDailyHours,
-      calendarPlan: trackingMode === "calendar" ? normalizeCalendarPlan({
+      calendarPlan: mode === "interval" && trackingMode === "calendar" ? normalizeCalendarPlan({
         startDateISO: targetISO || null,
         repeat: repeatChoice,
         repeatEvery
