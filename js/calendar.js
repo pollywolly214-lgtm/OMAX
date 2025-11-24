@@ -542,6 +542,10 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     return removeCalendarTaskOccurrence(meta, key);
   }
 
+  if (normalizedScope === "single"){
+    return removeCalendarTaskOccurrence(meta, key);
+  }
+
   const matchesScope = (value)=>{
     const normalized = normalizeDateKey(value);
     if (!normalized) return false;
