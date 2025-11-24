@@ -4203,14 +4203,19 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
 /* Bubble (hover popover) */
 .bubble {
   position: absolute; z-index: 9999; background: #fff; border: 1px solid #d8deea; border-radius: 10px;
-  padding: 10px; min-width: 260px; box-shadow: 0 8px 16px rgba(0,0,0,.12);
+  padding: 10px; min-width: 320px; max-width: 440px; box-shadow: 0 8px 16px rgba(0,0,0,.12);
   color: #142544;
 }
 .bubble-title { font-weight: 700; margin-bottom: 6px; color: #0b1f3d; }
 .bubble-kv { display: grid; grid-template-columns: 120px 1fr; gap: 6px; font-size: 13px; margin: 3px 0; }
 .bubble-kv span:first-child { color: #3d4a63; font-weight: 600; }
 .bubble-kv span:last-child { color: #0b4c99; font-weight: 600; }
-.bubble-actions { margin-top: 8px; display:flex; gap:8px; flex-wrap: wrap; }
+.bubble-actions { margin-top: 8px; display:flex; gap:8px; flex-wrap: wrap; align-items: flex-start; }
+.bubble-remove-group { display:flex; flex-direction: column; gap:4px; min-width: 240px; flex: 1 1 100%; }
+.bubble-remove-group label { font-size: 12px; color: #3d4a63; font-weight: 600; }
+.bubble-remove-row { display:flex; gap:8px; align-items: center; flex-wrap: wrap; }
+.bubble-remove-row select { flex:1; padding: 6px 8px; border-radius: 6px; border:1px solid #d8deea; font-size: 13px; color: #142544; }
+.bubble-remove-row button { white-space: nowrap; }
 
 /* Toast */
 .toast {
