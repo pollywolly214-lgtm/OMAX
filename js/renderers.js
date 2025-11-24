@@ -4178,7 +4178,7 @@ function renderDashboard(){
       taskConditionRow.hidden = normalizedMode === "interval" ? true : (normalizedMode === "asreq" ? false : true);
       if (taskTrackingRow) taskTrackingRow.hidden = true;
       if (taskDailyHoursRow) taskDailyHoursRow.hidden = true;
-      if (taskCalendarRow) taskCalendarRow.hidden = true;
+      if (taskCalendarRow) taskCalendarRow.hidden = normalizedMode !== "asreq";
       if (taskRepeatRow) taskRepeatRow.hidden = true;
       if (taskTrackingSelect && normalizedMode !== "interval") taskTrackingSelect.value = "";
       return;
@@ -4553,7 +4553,7 @@ function renderDashboard(){
     const estimatedDailyHours = (mode === "interval" && trackingMode === "pump" && Number.isFinite(estDailyRaw) && estDailyRaw > 0)
       ? Math.max(0.25, Math.round(estDailyRaw * 100) / 100)
       : null;
-    const repeatChoice = taskRepeatSelect?.value || "none";
+    const repeatChoice = (mode === "interval" && trackingMode === "calendar") ? (taskRepeatSelect?.value || "none") : "none";
     const repeatEveryVal = Number(taskRepeatEveryInput?.value);
     const repeatEvery = Number.isFinite(repeatEveryVal) && repeatEveryVal > 0 ? Math.round(repeatEveryVal) : 1;
     let downtimeVal = Number(taskDowntimeInput?.value);
@@ -4567,9 +4567,24 @@ function renderDashboard(){
     const catId  = (categorySelect?.value || "").trim() || null;
     const id     = genId(name);
     const rawDate = (taskDateInput?.value || "").trim();
+    if (mode === "asreq" && !rawDate && !addContextDateISO){
+      alert("Select the calendar date for this as-required task.");
+      return;
+    }
     const dateISO = rawDate ? ymd(rawDate) : "";
     const targetISO = dateISO || addContextDateISO || ymd(new Date());
-    const calendarDateISO = targetISO || null;
+    const calendarDateISO = mode === "asreq" ? (targetISO || null) : (trackingMode === "calendar" ? (targetISO || null) : null);
+    const parsed = parseDateLocal(targetISO);
+    const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+    let dateLabel = targetISO;
+    let completed = false;
+    if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+      const display = new Date(parsed.getTime());
+      dateLabel = display.toLocaleDateString();
+      const compare = new Date(parsed.getTime());
+      compare.setHours(0,0,0,0);
+      completed = compare.getTime() <= todayMidnight.getTime();
+    }
     const base = {
       id,
       name,
@@ -4580,7 +4595,7 @@ function renderDashboard(){
       cat: catId,
       parentTask: null,
       order: ++window._maintOrderCounter,
-      calendarDateISO: null,
+      calendarDateISO,
       downtimeHours: downtimeVal,
       trackingMode: mode === "interval" ? trackingMode : "pump",
       estimatedDailyHours,
@@ -4613,17 +4628,6 @@ function renderDashboard(){
       applyIntervalBaseline(template, { baselineHours, currentHours: curHours });
       tasksInterval.unshift(template);
       const instance = scheduleExistingIntervalTask(template, { dateISO: targetISO, refreshDashboard: false }) || template;
-      const parsed = parseDateLocal(targetISO);
-      const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
-      let dateLabel = targetISO;
-      let completed = false;
-      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
-        const display = new Date(parsed.getTime());
-        dateLabel = display.toLocaleDateString();
-        const compare = new Date(parsed.getTime());
-        compare.setHours(0,0,0,0);
-        completed = compare.getTime() <= todayMidnight.getTime();
-      }
       if (trackingMode === "calendar"){
         const repeatLabel = repeatChoice === "none" ? "" : ` (${repeatChoice} every ${repeatEvery} interval${repeatEvery === 1 ? "" : "s"})`;
         message = `Scheduled "${instance.name || "Task"}" for ${dateLabel}${repeatLabel}`;
@@ -4634,9 +4638,11 @@ function renderDashboard(){
       }
     }else{
       const condition = (taskConditionInput?.value || "").trim() || "As required";
-      const task = Object.assign({}, base, { mode:"asreq", condition, variant: "template", templateId: id });
+      const task = Object.assign({}, base, { mode:"asreq", condition, variant: "template", templateId: id, calendarDateISO });
       tasksAsReq.unshift(task);
-      message = "As-required task added to Maintenance Settings";
+      message = calendarDateISO
+        ? `Scheduled "${task.name || "Task"}" for ${dateLabel}`
+        : "As-required task added to Maintenance Settings";
     }
 
     const parentInterval = Number(taskIntervalInput?.value);
@@ -7393,7 +7399,7 @@ function renderSettings(){
       conditionRow.hidden = normalizedMode === "asreq" ? false : true;
       if (trackingRow) trackingRow.hidden = true;
       if (dailyHoursRow) dailyHoursRow.hidden = true;
-      if (calendarRow) calendarRow.hidden = true;
+      if (calendarRow) calendarRow.hidden = normalizedMode !== "asreq";
       if (repeatRow) repeatRow.hidden = true;
       if (trackingField && normalizedMode !== "interval") trackingField.value = "";
       return;
@@ -7576,14 +7582,19 @@ function renderSettings(){
       ? Math.max(0.25, Math.round(estDailyRaw * 100) / 100)
       : null;
     const calendarStart = (data.get("taskCalendarStart") || "").toString().trim();
-    const calendarRepeat = (data.get("taskCalendarRepeat") || "none").toString();
+    const normalizedStart = calendarStart ? ymd(calendarStart) : "";
+    if (mode === "asreq" && !normalizedStart){
+      alert("Select the maintenance date for as-required tasks.");
+      return;
+    }
+    const calendarRepeat = (mode === "interval" && trackingMode === "calendar") ? (data.get("taskCalendarRepeat") || "none").toString() : "none";
     const calendarRepeatEveryVal = Number(data.get("taskCalendarRepeatEvery"));
     const calendarRepeatEvery = Number.isFinite(calendarRepeatEveryVal) && calendarRepeatEveryVal > 0 ? Math.round(calendarRepeatEveryVal) : 1;
     const normalizedPlan = trackingMode === "calendar"
-      ? normalizeCalendarPlan({ startDateISO: calendarStart ? ymd(calendarStart) : null, repeat: calendarRepeat, repeatEvery: calendarRepeatEvery }, null)
+      ? normalizeCalendarPlan({ startDateISO: normalizedStart || null, repeat: calendarRepeat, repeatEvery: calendarRepeatEvery }, null)
       : null;
     const id = genId(name);
-    const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, note, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
+    const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, note, cat: catId, parentTask:null, order: ++window._maintOrderCounter, calendarDateISO: mode === "asreq" ? (normalizedStart || null) : (trackingMode === "calendar" ? (normalizedStart || null) : null) };
 
     let createdTask = null;
     let autoLinkedInventory = false;
