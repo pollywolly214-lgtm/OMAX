@@ -4181,6 +4181,8 @@ function renderDashboard(){
       if (taskRepeatSelect) taskRepeatSelect.value = "none";
       if (taskRepeatEveryInput) taskRepeatEveryInput.value = "1";
     };
+    if (taskTrackingSelect) taskTrackingSelect.disabled = normalizedMode !== "interval";
+
     if (normalizedMode !== "interval"){
       taskFreqRow.hidden = true;
       taskLastRow.hidden = true;
@@ -7429,6 +7431,7 @@ function renderSettings(){
       if (repeatField instanceof HTMLSelectElement) repeatField.value = "none";
       if (repeatEveryField instanceof HTMLInputElement) repeatEveryField.value = "1";
     };
+    if (trackingField) trackingField.disabled = normalizedMode !== "interval";
     if (normalizedMode !== "interval"){
       freqRow.hidden = true;
       lastRow.hidden = true;
