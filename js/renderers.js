@@ -285,6 +285,15 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "" } = {}){
     targetDate.setHours(0,0,0,0);
     targetISO = ymd(targetDate);
     instance.calendarDateISO = targetISO;
+    try {
+      const cancelled = typeof normalizeCancelledOccurrences === "function"
+        ? normalizeCancelledOccurrences(instance)
+        : (instance.cancelledOccurrences || {});
+      if (cancelled && cancelled[targetISO]){
+        delete cancelled[targetISO];
+        instance.cancelledOccurrences = cancelled;
+      }
+    } catch (err){ /* noop */ }
     const isPastOrToday = targetDate.getTime() <= today.getTime();
     const hoursAtTarget = hoursSnapshotOnOrBefore(targetISO);
     let consumedHours;

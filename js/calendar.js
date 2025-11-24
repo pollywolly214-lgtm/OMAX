@@ -254,6 +254,21 @@ function normalizeOccurrenceHours(task){
   return result;
 }
 
+function normalizeCancelledOccurrences(task){
+  if (!task || typeof task !== "object") return {};
+  const result = {};
+  const raw = task.cancelledOccurrences;
+  if (raw && typeof raw === "object"){
+    Object.keys(raw).forEach(maybeDate => {
+      const key = normalizeDateKey(maybeDate);
+      if (!key) return;
+      result[key] = true;
+    });
+  }
+  task.cancelledOccurrences = result;
+  return result;
+}
+
 function getOccurrenceNoteForTask(task, dateISO){
   const key = normalizeDateKey(dateISO);
   if (!key) return "";
@@ -312,6 +327,33 @@ function setOccurrenceHoursForTask(task, dateISO, hours){
   }
   if (changed){
     task.occurrenceHours = map;
+  }
+  return changed;
+}
+
+function cancelOccurrenceForTask(task, dateISO){
+  if (!task || typeof task !== "object") return false;
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  const map = normalizeCancelledOccurrences(task);
+  if (map[key]) return false;
+  map[key] = true;
+  task.cancelledOccurrences = map;
+  return true;
+}
+
+function clearCancelledOccurrences(task, predicate){
+  if (!task || typeof task !== "object") return false;
+  const map = normalizeCancelledOccurrences(task);
+  let changed = false;
+  Object.keys(map).forEach(k => {
+    if (!predicate || predicate(k)){
+      delete map[k];
+      changed = true;
+    }
+  });
+  if (changed){
+    task.cancelledOccurrences = map;
   }
   return changed;
 }
@@ -542,6 +584,8 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     return removeCalendarTaskOccurrence(meta, key);
   }
 
+  const matchedDates = new Set([key]);
+
   const matchesScope = (value)=>{
     const normalized = normalizeDateKey(value);
     if (!normalized) return false;
@@ -562,11 +606,20 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     return normalized === key;
   };
 
+  const matchesAndStore = (value)=>{
+    const didMatch = matchesScope(value);
+    if (didMatch){
+      const normalized = normalizeDateKey(value);
+      if (normalized) matchedDates.add(normalized);
+    }
+    return didMatch;
+  };
+
   const pruneOccurrenceObject = (obj)=>{
     if (!obj || typeof obj !== "object") return false;
     let mutated = false;
     Object.keys(obj).forEach(k => {
-      if (matchesScope(k)){
+      if (matchesAndStore(k)){
         delete obj[k];
         mutated = true;
       }
@@ -574,13 +627,13 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     return mutated;
   };
 
-  if (matchesScope(task.calendarDateISO)){
+  if (matchesAndStore(task.calendarDateISO)){
     task.calendarDateISO = null;
     changed = true;
   }
 
   if (Array.isArray(task.completedDates)){
-    const next = task.completedDates.filter(value => !matchesScope(value));
+    const next = task.completedDates.filter(value => !matchesAndStore(value));
     if (next.length !== task.completedDates.length){
       task.completedDates = next;
       changed = true;
@@ -592,7 +645,7 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
 
   if (mode === "interval"){
     if (Array.isArray(task.manualHistory)){
-      const nextHistory = task.manualHistory.filter(entry => !matchesScope(entry?.dateISO));
+      const nextHistory = task.manualHistory.filter(entry => !matchesAndStore(entry?.dateISO));
       if (nextHistory.length !== task.manualHistory.length){
         task.manualHistory = nextHistory;
         changed = true;
@@ -601,6 +654,13 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     if (changed){
       applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
     }
+  }
+
+  if (matchedDates.size){
+    const cancelled = normalizeCancelledOccurrences(task);
+    matchedDates.forEach(k => { cancelled[k] = true; });
+    task.cancelledOccurrences = cancelled;
+    changed = true;
   }
 
   return changed;
@@ -1320,6 +1380,9 @@ function projectIntervalDueDates(task, options = {}){
     Object.keys(excludeListRaw).forEach(key => addExclude(key));
   }
 
+  const cancelledMap = normalizeCancelledOccurrences(task);
+  Object.keys(cancelledMap).forEach(addExclude);
+
   const minOccurrencesRaw = Number(options.minOccurrences);
   const minOccurrences = Number.isFinite(minOccurrencesRaw) && minOccurrencesRaw > 0
     ? Math.floor(minOccurrencesRaw)
@@ -1370,7 +1433,9 @@ function projectIntervalDueDates(task, options = {}){
 
   const hasBaseline = baselineEntry
     || (typeof task.calendarDateISO === "string" && task.calendarDateISO)
-    || (Array.isArray(task.completedDates) && task.completedDates.length > 0);
+    || (Array.isArray(task.completedDates) && task.completedDates.length > 0)
+    || (Number.isFinite(Number(task.sinceBase)) && Number(task.sinceBase) >= 0)
+    || (Number.isFinite(Number(task.anchorTotal)) && Number(task.anchorTotal) >= 0);
   if (!hasBaseline) return [];
 
   const pickBaselineDate = (values)=>{
