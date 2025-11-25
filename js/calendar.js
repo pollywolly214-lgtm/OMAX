@@ -569,48 +569,36 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
   const key = normalizeDateKey(dateISO);
   if (!key) return false;
 
-  const targetDate = toDayStart(key);
-  const targetTime = targetDate instanceof Date && !Number.isNaN(targetDate.getTime()) ? targetDate.getTime() : null;
-
   const task = meta.task;
   const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
   let changed = false;
 
-  const matchesSingle = (value)=>{
-    const normalized = normalizeDateKey(value);
-    if (!normalized) return false;
-
-    const compareDate = toDayStart(normalized);
-    const compareTime = (compareDate instanceof Date && !Number.isNaN(compareDate.getTime()))
-      ? compareDate.getTime()
-      : null;
-
-    if (targetTime != null && compareTime != null) return compareTime === targetTime;
-    return normalized === key;
-  };
+  const isSameDay = (value)=> normalizeDateKey(value) === key;
 
   if (isInstanceTask(task) && mode === "asreq"){
     return removeCalendarTaskOccurrence(meta, key);
   }
 
+  const targetTime = (()=>{
+    const targetDate = toDayStart(key);
+    return targetDate instanceof Date && !Number.isNaN(targetDate.getTime())
+      ? targetDate.getTime()
+      : null;
+  })();
+
   const matchesScope = (value)=>{
     const normalized = normalizeDateKey(value);
     if (!normalized) return false;
+
+    if (normalizedScope === "all") return true;
+    if (normalizedScope === "single") return normalized === key;
 
     const compareDate = toDayStart(normalized);
     const compareTime = (compareDate instanceof Date && !Number.isNaN(compareDate.getTime()))
       ? compareDate.getTime()
       : null;
-
-    if (normalizedScope === "all") return true;
-
-    if (normalizedScope === "future"){
-      if (targetTime != null && compareTime != null) return compareTime >= targetTime;
-      return normalized >= key;
-    }
-
-    if (targetTime != null && compareTime != null) return compareTime === targetTime;
-    return normalized === key;
+    if (targetTime != null && compareTime != null) return compareTime >= targetTime;
+    return normalized >= key;
   };
 
   if (mode === "interval" && normalizedScope === "single"){
@@ -620,7 +608,7 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     const history = Array.isArray(task.manualHistory) ? task.manualHistory : [];
     let hasEntry = false;
     history.forEach(entry => {
-      if (matchesSingle(entry?.dateISO)){
+      if (isSameDay(entry?.dateISO)){
         hasEntry = true;
         if (entry.status !== "removed"){ entry.status = "removed"; changed = true; }
         if (!entry.recordedAtISO) entry.recordedAtISO = nowIso;
@@ -636,7 +624,7 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
       if (!obj || typeof obj !== "object") return false;
       let mutated = false;
       Object.keys(obj).forEach(k => {
-        if (matchesSingle(k)){
+        if (isSameDay(k)){
           delete obj[k];
           mutated = true;
         }
@@ -644,12 +632,12 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
       return mutated;
     };
 
-    if (matchesSingle(task.calendarDateISO)){
+    if (isSameDay(task.calendarDateISO)){
       task.calendarDateISO = null;
       changed = true;
     }
     if (Array.isArray(task.completedDates)){
-      const idx = task.completedDates.findIndex(v => matchesSingle(v));
+      const idx = task.completedDates.findIndex(v => isSameDay(v));
       if (idx >= 0){
         task.completedDates.splice(idx,1);
         changed = true;
