@@ -13121,6 +13121,12 @@ function renderJobs(){
   };
 
   const createCompletedJobFromNew = (job, completionDate)=>{
+    if (!Array.isArray(completedCuttingJobs)){
+      completedCuttingJobs = [];
+    }
+    if (!Array.isArray(window.completedCuttingJobs)){
+      window.completedCuttingJobs = completedCuttingJobs;
+    }
     const completion = parseJobDate(completionDate || job.dueISO);
     const completionISO = completion ? completion.toISOString() : null;
     const completed = {
