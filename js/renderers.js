@@ -4942,15 +4942,24 @@ function renderDashboard(){
       ensureJobCategoryFolderOpen(categoryId);
     }
     const newJob = { id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, priority: 1, notes:"", manualLogs:[], cat: categoryId };
-    cuttingJobs.push(newJob);
-    reorderPriorities(newJob.id, newJob.priority);
-    ensureJobCategories?.();
     if (jobCategoryInput){
       jobCategoryInput.value = dashRootCategoryId;
       jobCategoryInput.dataset.prevValue = dashRootCategoryId;
     }
     updateDashJobCategoryHint();
     window.jobCategoryFilter = previousCategoryFilter;
+    if (shouldArchiveJobImmediately(due)){
+      createCompletedJobFromNew(newJob, due);
+      ensureJobCategories?.();
+      saveCloudDebounced();
+      toast("Cutting job logged to history");
+      closeModal();
+      renderDashboard();
+      return;
+    }
+    cuttingJobs.push(newJob);
+    reorderPriorities(newJob.id, newJob.priority);
+    ensureJobCategories?.();
     saveCloudDebounced();
     toast("Cutting job added");
     closeModal();
@@ -13104,6 +13113,45 @@ function renderJobs(){
     }
   };
 
+  const shouldArchiveJobImmediately = (dueISO)=>{
+    const dueDate = parseJobDate(dueISO);
+    const today = parseJobDate(ymd(new Date()));
+    if (!dueDate || !today) return false;
+    return dueDate < today;
+  };
+
+  const createCompletedJobFromNew = (job, completionDate)=>{
+    const completion = parseJobDate(completionDate || job.dueISO);
+    const completionISO = completion ? completion.toISOString() : null;
+    const completed = {
+      id: job.id,
+      name: job.name,
+      estimateHours: job.estimateHours,
+      startISO: job.startISO,
+      dueISO: job.dueISO,
+      completedAtISO: completionISO,
+      notes: job.notes || "",
+      material: job.material || "",
+      materialCost: Number(job.materialCost) || 0,
+      materialQty: Number(job.materialQty) || 0,
+      chargeRate: Number.isFinite(Number(job.chargeRate)) && Number(job.chargeRate) >= 0
+        ? Number(job.chargeRate)
+        : JOB_RATE_PER_HOUR,
+      manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
+      files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
+      cat: job.cat != null ? job.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"),
+      priority: typeof getJobPriority === "function"
+        ? getJobPriority(job)
+        : normalizePriorityValue(job.priority),
+      actualHours: null,
+      efficiency: null
+    };
+
+    completedCuttingJobs.push(completed);
+    window.completedCuttingJobs = completedCuttingJobs;
+    return completed;
+  };
+
   // 4) Add Job (unchanged)
   document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
@@ -13140,6 +13188,14 @@ function renderJobs(){
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
     const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
+    if (shouldArchiveJobImmediately(due)){
+      createCompletedJobFromNew(newJob, due);
+      ensureJobCategories?.();
+      pendingNewJobFiles.length = 0;
+      window.jobCategoryFilter = previousCategoryFilter;
+      saveCloudDebounced(); renderJobs();
+      return;
+    }
     cuttingJobs.push(newJob);
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
