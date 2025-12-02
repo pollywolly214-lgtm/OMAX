@@ -7485,6 +7485,11 @@ function renderSettings(){
       if (typeof persist === "function"){
         try{ persist(); }catch(_){ }
       }
+      try{
+        if (typeof window.__refreshInventoryRows === "function"){
+          window.__refreshInventoryRows();
+        }
+      }catch(_){ }
       const hash = (location.hash || "#").toLowerCase();
       if (typeof renderInventory === "function" && (hash === "#/inventory" || hash === "#inventory")){
         renderInventory();
@@ -13731,6 +13736,10 @@ function renderInventory(){
     const filtered = filterInventoryItems(inventorySearchTerm);
     rowsTarget.innerHTML = inventoryRowsHTML(filtered);
   };
+
+  try{
+    window.__refreshInventoryRows = refreshRows;
+  }catch(_){ }
 
   if (searchInput){
     searchInput.addEventListener("input", ()=>{
