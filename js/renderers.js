@@ -7447,8 +7447,9 @@ function renderSettings(){
     if (!task) return false;
     const taskId = task.id != null ? String(task.id) : null;
     const invId = task.inventoryId != null ? String(task.inventoryId) : null;
-    if (!Array.isArray(inventory) || (!taskId && !invId)) return false;
-    const item = inventory.find(entry => {
+    const list = Array.isArray(window.inventory) ? window.inventory : [];
+    if (!list.length || (!taskId && !invId)) return false;
+    const item = list.find(entry => {
       if (!entry) return false;
       const entryId = entry.id != null ? String(entry.id) : null;
       const linkedId = entry.linkedTaskId != null ? String(entry.linkedTaskId) : null;
@@ -7479,8 +7480,11 @@ function renderSettings(){
     }
 
     if (changed){
-      window.inventory = inventory;
+      window.inventory = list;
       try{ if (typeof saveCloudDebounced === "function") saveCloudDebounced(); }catch(_){ }
+      if (typeof persist === "function"){
+        try{ persist(); }catch(_){ }
+      }
       const hash = (location.hash || "#").toLowerCase();
       if (typeof renderInventory === "function" && (hash === "#/inventory" || hash === "#inventory")){
         renderInventory();
