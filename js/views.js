@@ -2673,6 +2673,13 @@ function viewJobs(){
     const netTotalDisplay = formatCurrency(netTotal, { showPlus: true });
     const impactClass = netTotal > 0 ? "job-impact-ahead" : (netTotal < 0 ? "job-impact-behind" : "job-impact-neutral");
 
+    const startDate = parseDateLocal(job?.startISO);
+    const dueDate = parseDateLocal(job?.dueISO);
+    const completedDate = parseDateLocal(job?.completedAtISO);
+    const startTxt = startDate ? startDate.toDateString() : "—";
+    const dueTxt = dueDate ? dueDate.toDateString() : "—";
+    const completedTxt = completedDate ? completedDate.toDateString() : "—";
+
     let statusLabel = "Finished on estimate";
     if (Number.isFinite(delta) && Math.abs(delta) > 0.1){
       statusLabel = delta > 0 ? "Finished ahead" : "Finished behind";
@@ -2681,13 +2688,6 @@ function viewJobs(){
     const statusClass = statusLabel.toLowerCase().includes("ahead")
       ? "job-status-ahead"
       : (statusLabel.toLowerCase().includes("behind") ? "job-status-behind" : "job-status-onpace");
-
-    const startDate = parseDateLocal(job?.startISO);
-    const dueDate = parseDateLocal(job?.dueISO);
-    const completedDate = parseDateLocal(job?.completedAtISO);
-    const startTxt = startDate ? startDate.toDateString() : "—";
-    const dueTxt = dueDate ? dueDate.toDateString() : "—";
-    const completedTxt = completedDate ? completedDate.toDateString() : "—";
 
     const estimateDisplay = formatHours(estHours);
     const actualDisplay = hasActualHours ? formatHours(actualHours) : "—";
