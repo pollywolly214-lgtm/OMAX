@@ -2624,10 +2624,11 @@ function viewJobs(){
 
   const completedRows = completedFiltered.map(job => {
     const eff = computeJobEfficiency(job);
-    const req = computeRequiredDaily(job, { backlogHours: 0 });
     const delta = Number(eff.deltaHours);
     const netTotal = computeJobNetTotal(job, eff, { preferActual: true });
-    const actualHours = Number(job.actualHours ?? eff.actualHours);
+    const actualHoursRaw = job.actualHours ?? eff.actualHours;
+    const actualHours = Number(actualHoursRaw);
+    const hasActualHours = Number.isFinite(actualHours) && actualHours >= 0;
     const estHours = Number(job.estimateHours);
     const editingHistory = editingCompletedJobsSet.has(String(job.id));
     const priorityValue = priorityForJob(job);
@@ -2676,9 +2677,7 @@ function viewJobs(){
     if (Number.isFinite(delta) && Math.abs(delta) > 0.1){
       statusLabel = delta > 0 ? "Finished ahead" : "Finished behind";
     }
-    const statusDetail = Number.isFinite(delta) && Math.abs(delta) > 0.1
-      ? ` (${delta > 0 ? "+" : "−"}${Math.abs(delta).toFixed(1)} hr)`
-      : "";
+    const statusDetail = completedTxt !== "—" ? `Completed ${completedTxt}` : "";
     const statusClass = statusLabel.toLowerCase().includes("ahead")
       ? "job-status-ahead"
       : (statusLabel.toLowerCase().includes("behind") ? "job-status-behind" : "job-status-onpace");
@@ -2691,18 +2690,8 @@ function viewJobs(){
     const completedTxt = completedDate ? completedDate.toDateString() : "—";
 
     const estimateDisplay = formatHours(estHours);
-    const actualDisplay = formatHours(actualHours);
-    const remainingHours = Number.isFinite(req.remainingHours) ? Math.max(0, req.remainingHours) : 0;
-    const remainingDisplay = formatHours(remainingHours);
-    const needPerDay = req.requiredPerDay === Infinity
-      ? "∞"
-      : (req.requiredPerDay || 0).toFixed(2);
-    let needDisplay = req.requiredPerDay === Infinity
-      ? `<span class="job-badge job-badge-overdue">${esc(formatPastDueLabel(job?.dueISO))}</span>`
-      : `${needPerDay} hr/day needed (capacity ${hoursPerDay.toFixed(1)} hr/day)`;
-    if (completedTxt !== "—"){
-      needDisplay += `<div class="small muted">Completed ${esc(completedTxt)}</div>`;
-    }
+    const actualDisplay = hasActualHours ? formatHours(actualHours) : "—";
+    const needDisplay = "";
 
     const noteContent = (job?.notes || "").trim();
     const noteButtonLabel = esc(job?.name || "Cutting job");
@@ -2710,7 +2699,7 @@ function viewJobs(){
     const notePreviewTitleAttr = notePreview.tooltip ? ` title="${esc(notePreview.tooltip)}"` : "";
 
     const efficiencySummaryParts = [
-      `${statusLabel}${statusDetail}`.trim(),
+      statusLabel,
       `Actual ${actualDisplay} vs ${estimateDisplay}`.trim(),
       completedTxt !== "—" ? `Completed ${completedTxt}` : ""
     ].filter(Boolean);
@@ -2751,7 +2740,7 @@ function viewJobs(){
           <td class="job-col job-col-charge">${chargeDisplay}</td>
           <td class="job-col job-col-cost">${costDisplay}</td>
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
-          <td class="job-col job-col-hours">${remainingDisplay}</td>
+          <td class="job-col job-col-hours">${actualDisplay}</td>
           <td class="job-col job-col-status">
             <div class="job-status ${statusClass}">${esc(statusLabel)}</div>
             ${statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : ""}
@@ -2947,7 +2936,7 @@ function viewJobs(){
             <th>Charge rate</th>
             <th>Cost rate</th>
             <th>Net profit/hr</th>
-            <th>Hours remaining</th>
+            <th>Hours taken</th>
             <th>Status</th>
             <th>Files</th>
             <th>Net total</th>
