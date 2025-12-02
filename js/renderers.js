@@ -13685,6 +13685,47 @@ function renderInventory(){
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
   let addToMaintenance = false;
 
+  function syncLinkedTasksFromInventory(item, updates){
+    if (!item) return false;
+    const linkedTasks = findTasksLinkedToInventoryItem(item);
+    if (!linkedTasks.length) return false;
+
+    let changed = false;
+    linkedTasks.forEach(task => {
+      if (!task) return;
+      if (Object.prototype.hasOwnProperty.call(updates, "price")){
+        const nextPrice = updates.price == null ? null : Number(updates.price);
+        if (task.price !== nextPrice){
+          task.price = nextPrice;
+          changed = true;
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, "pn") && task.pn !== updates.pn){
+        task.pn = updates.pn || "";
+        changed = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, "link") && task.storeLink !== updates.link){
+        task.storeLink = updates.link || "";
+        changed = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, "name") && updates.name && task.name !== updates.name){
+        task.name = updates.name;
+        changed = true;
+      }
+    });
+
+    if (changed){
+      try{ if (typeof saveTasks === "function") saveTasks(); }catch(_){ }
+      try{ if (typeof saveCloudDebounced === "function") saveCloudDebounced(); }catch(_){ }
+      const hash = (location.hash || "#").toLowerCase();
+      if (typeof renderSettings === "function" && (hash === "#/settings" || hash === "#settings")){
+        renderSettings();
+      }
+    }
+
+    return changed;
+  }
+
   const refreshRows = ()=>{
     if (!rowsTarget) return;
     const filtered = filterInventoryItems(inventorySearchTerm);
@@ -13732,6 +13773,9 @@ function renderInventory(){
       const newVal = Number(item.qtyNew);
       const oldVal = Number(item.qtyOld);
       item.qty = (Number.isFinite(newVal) ? newVal : 0) + (Number.isFinite(oldVal) ? oldVal : 0);
+    }
+    if (k === "price"){
+      syncLinkedTasksFromInventory(item, { price: item.price });
     }
     saveCloudDebounced();
   });
