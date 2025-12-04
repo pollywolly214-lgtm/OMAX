@@ -5989,6 +5989,138 @@ function parseJobDate(value){
   return null;
 }
 
+const normalizePriorityValue = (value)=>{
+  if (value == null) return 1;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return 1;
+  return Math.max(1, Math.floor(num));
+};
+
+const priorityEntries = ()=>{
+  const source = Array.isArray(cuttingJobs) ? cuttingJobs : [];
+  return source.map((job, index) => {
+    if (!job || job.id == null) return null;
+    const id = String(job.id);
+    const priority = typeof getJobPriority === "function"
+      ? getJobPriority(job)
+      : normalizePriorityValue(job.priority);
+    return { job, id, priority, originalIndex: index };
+  }).filter(Boolean);
+};
+
+const normalizeAllPriorities = (entries, { respectOrder = false } = {})=>{
+  const list = Array.isArray(entries) ? entries.slice() : priorityEntries();
+  if (!list.length) return list;
+  if (!respectOrder){
+    list.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      return a.originalIndex - b.originalIndex;
+    });
+  }
+  const orderMap = new Map();
+  list.forEach((entry, idx) => {
+    entry.job.priority = idx + 1;
+    orderMap.set(entry.id, idx);
+  });
+  cuttingJobs.sort((a, b) => {
+    const idA = a && a.id != null ? String(a.id) : "";
+    const idB = b && b.id != null ? String(b.id) : "";
+    const orderA = orderMap.has(idA) ? orderMap.get(idA) : Number.MAX_SAFE_INTEGER;
+    const orderB = orderMap.has(idB) ? orderMap.get(idB) : Number.MAX_SAFE_INTEGER;
+    if (orderA !== orderB) return orderA - orderB;
+    return idA.localeCompare(idB);
+  });
+  if (typeof window !== "undefined"){
+    window.cuttingJobs = cuttingJobs;
+  }
+  return list;
+};
+
+const reorderPriorities = (jobId, desiredPriority)=>{
+  const entries = priorityEntries();
+  if (!entries.length) return;
+  entries.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    return a.originalIndex - b.originalIndex;
+  });
+  const originalOrder = entries.map(entry => entry.id);
+  if (jobId == null){
+    normalizeAllPriorities(entries);
+    return;
+  }
+  const id = String(jobId);
+  const targetIndex = entries.findIndex(entry => entry.id === id);
+  if (targetIndex < 0){
+    normalizeAllPriorities(entries);
+    return;
+  }
+  const [target] = entries.splice(targetIndex, 1);
+  const normalizedDesired = normalizePriorityValue(desiredPriority);
+  const insertIndex = Math.max(0, Math.min(normalizedDesired - 1, entries.length));
+  entries.splice(insertIndex, 0, target);
+  const normalizedEntries = normalizeAllPriorities(entries, { respectOrder: true });
+  const newOrder = normalizedEntries.map(entry => entry.id);
+  if (newOrder.length === originalOrder.length){
+    const changedIds = [];
+    for (let idx = 0; idx < newOrder.length; idx += 1){
+      if (newOrder[idx] !== originalOrder[idx]){
+        if (originalOrder[idx]) changedIds.push(originalOrder[idx]);
+        if (newOrder[idx]) changedIds.push(newOrder[idx]);
+      }
+    }
+    if (changedIds.length){
+      schedulePriorityAnimation(changedIds, { duration: 500 });
+    }
+  } else {
+    schedulePriorityAnimation([id], { duration: 500 });
+  }
+};
+
+const shouldArchiveJobImmediately = (dueISO)=>{
+  const dueDate = parseJobDate(dueISO);
+  const today = parseJobDate(ymd(new Date()));
+  if (!dueDate || !today) return false;
+  return dueDate < today;
+};
+
+const createCompletedJobFromNew = (job, completionDate)=>{
+  if (!Array.isArray(completedCuttingJobs)){
+    completedCuttingJobs = [];
+  }
+  if (!Array.isArray(window.completedCuttingJobs)){
+    window.completedCuttingJobs = completedCuttingJobs;
+  }
+  const completion = parseJobDate(completionDate || job.dueISO);
+  const completionISO = completion ? completion.toISOString() : null;
+  const completed = {
+    id: job.id,
+    name: job.name,
+    estimateHours: job.estimateHours,
+    startISO: job.startISO,
+    dueISO: job.dueISO,
+    completedAtISO: completionISO,
+    notes: job.notes || "",
+    material: job.material || "",
+    materialCost: Number(job.materialCost) || 0,
+    materialQty: Number(job.materialQty) || 0,
+    chargeRate: Number.isFinite(Number(job.chargeRate)) && Number(job.chargeRate) >= 0
+      ? Number(job.chargeRate)
+      : JOB_RATE_PER_HOUR,
+    manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
+    files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
+    cat: job.cat != null ? job.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"),
+    priority: typeof getJobPriority === "function"
+      ? getJobPriority(job)
+      : normalizePriorityValue(job.priority),
+    actualHours: null,
+    efficiency: null
+  };
+
+  completedCuttingJobs.push(completed);
+  window.completedCuttingJobs = completedCuttingJobs;
+  return completed;
+};
+
 function toDateInputValue(date){
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
   const normalized = new Date(date.getTime());
@@ -13026,137 +13158,6 @@ function renderJobs(){
     return 0;
   }
   const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
-
-  const normalizePriorityValue = (value)=>{
-    const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return 1;
-    return Math.max(1, Math.floor(num));
-  };
-
-  const priorityEntries = ()=>{
-    if (!Array.isArray(cuttingJobs)) return [];
-    return cuttingJobs.map((job, index) => {
-      if (!job || job.id == null) return null;
-      const id = String(job.id);
-      const priority = typeof getJobPriority === "function"
-        ? getJobPriority(job)
-        : normalizePriorityValue(job.priority);
-      return { job, id, priority, originalIndex: index };
-    }).filter(Boolean);
-  };
-
-  const normalizeAllPriorities = (entries, { respectOrder = false } = {})=>{
-    const list = Array.isArray(entries) ? entries.slice() : priorityEntries();
-    if (!list.length) return list;
-    if (!respectOrder){
-      list.sort((a, b) => {
-        if (a.priority !== b.priority) return a.priority - b.priority;
-        return a.originalIndex - b.originalIndex;
-      });
-    }
-    const orderMap = new Map();
-    list.forEach((entry, idx) => {
-      entry.job.priority = idx + 1;
-      orderMap.set(entry.id, idx);
-    });
-    cuttingJobs.sort((a, b) => {
-      const idA = a && a.id != null ? String(a.id) : "";
-      const idB = b && b.id != null ? String(b.id) : "";
-      const orderA = orderMap.has(idA) ? orderMap.get(idA) : Number.MAX_SAFE_INTEGER;
-      const orderB = orderMap.has(idB) ? orderMap.get(idB) : Number.MAX_SAFE_INTEGER;
-      if (orderA !== orderB) return orderA - orderB;
-      return idA.localeCompare(idB);
-    });
-    if (typeof window !== "undefined"){
-      window.cuttingJobs = cuttingJobs;
-    }
-    return list;
-  };
-
-  const reorderPriorities = (jobId, desiredPriority)=>{
-    const entries = priorityEntries();
-    if (!entries.length) return;
-    entries.sort((a, b) => {
-      if (a.priority !== b.priority) return a.priority - b.priority;
-      return a.originalIndex - b.originalIndex;
-    });
-    const originalOrder = entries.map(entry => entry.id);
-    if (jobId == null){
-      normalizeAllPriorities(entries);
-      return;
-    }
-    const id = String(jobId);
-    const targetIndex = entries.findIndex(entry => entry.id === id);
-    if (targetIndex < 0){
-      normalizeAllPriorities(entries);
-      return;
-    }
-    const [target] = entries.splice(targetIndex, 1);
-    const normalizedDesired = normalizePriorityValue(desiredPriority);
-    const insertIndex = Math.max(0, Math.min(normalizedDesired - 1, entries.length));
-    entries.splice(insertIndex, 0, target);
-    const normalizedEntries = normalizeAllPriorities(entries, { respectOrder: true });
-    const newOrder = normalizedEntries.map(entry => entry.id);
-    if (newOrder.length === originalOrder.length){
-      const changedIds = [];
-      for (let idx = 0; idx < newOrder.length; idx += 1){
-        if (newOrder[idx] !== originalOrder[idx]){
-          if (originalOrder[idx]) changedIds.push(originalOrder[idx]);
-          if (newOrder[idx]) changedIds.push(newOrder[idx]);
-        }
-      }
-      if (changedIds.length){
-        schedulePriorityAnimation(changedIds, { duration: 500 });
-      }
-    } else {
-      schedulePriorityAnimation([id], { duration: 500 });
-    }
-  };
-
-  const shouldArchiveJobImmediately = (dueISO)=>{
-    const dueDate = parseJobDate(dueISO);
-    const today = parseJobDate(ymd(new Date()));
-    if (!dueDate || !today) return false;
-    return dueDate < today;
-  };
-
-  const createCompletedJobFromNew = (job, completionDate)=>{
-    if (!Array.isArray(completedCuttingJobs)){
-      completedCuttingJobs = [];
-    }
-    if (!Array.isArray(window.completedCuttingJobs)){
-      window.completedCuttingJobs = completedCuttingJobs;
-    }
-    const completion = parseJobDate(completionDate || job.dueISO);
-    const completionISO = completion ? completion.toISOString() : null;
-    const completed = {
-      id: job.id,
-      name: job.name,
-      estimateHours: job.estimateHours,
-      startISO: job.startISO,
-      dueISO: job.dueISO,
-      completedAtISO: completionISO,
-      notes: job.notes || "",
-      material: job.material || "",
-      materialCost: Number(job.materialCost) || 0,
-      materialQty: Number(job.materialQty) || 0,
-      chargeRate: Number.isFinite(Number(job.chargeRate)) && Number(job.chargeRate) >= 0
-        ? Number(job.chargeRate)
-        : JOB_RATE_PER_HOUR,
-      manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
-      files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
-      cat: job.cat != null ? job.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"),
-      priority: typeof getJobPriority === "function"
-        ? getJobPriority(job)
-        : normalizePriorityValue(job.priority),
-      actualHours: null,
-      efficiency: null
-    };
-
-    completedCuttingJobs.push(completed);
-    window.completedCuttingJobs = completedCuttingJobs;
-    return completed;
-  };
 
   // 4) Add Job (unchanged)
   document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
