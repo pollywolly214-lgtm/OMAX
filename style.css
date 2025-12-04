@@ -4,6 +4,19 @@
 .pump-log-panel { display:grid; gap:14px; }
 .pump-log-section { display:grid; gap:8px; }
 .pump-log-section h4 { margin:0; }
+.pump-editing-banner { display:flex; align-items:center; gap:8px; padding:8px 10px; background:#f0f6ff; border:1px solid #cfdcf5; border-radius:8px; font-weight:600; color:#1f2d4a; }
+.pump-edit-cancel { margin-left:auto; border:0; background:transparent; color:#0a63c2; cursor:pointer; font-weight:600; }
+.pump-edit-cancel:hover { color:#084a9f; }
+.pump-log-history { border-top:1px solid #e5e7eb; padding-top:8px; }
+.pump-log-history-header { display:flex; flex-direction:column; gap:2px; }
+.pump-log-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:8px; }
+.pump-log-item { border:1px solid #d9e3f7; background:#f8faff; border-radius:10px; padding:10px 12px; display:grid; gap:6px; }
+.pump-log-item-meta { font-weight:600; color:#4b5b7a; font-size:13px; }
+.pump-log-item-main { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.pump-log-rpm { font-weight:700; color:#0a63c2; }
+.pump-log-edit-btn { border:0; background:linear-gradient(135deg, rgba(10, 99, 194, 0.95), rgba(61, 165, 245, 0.95)); color:#fff; font-weight:700; padding:6px 12px; border-radius:8px; cursor:pointer; box-shadow:0 4px 10px rgba(12, 37, 84, 0.24); }
+.pump-log-edit-btn:hover { box-shadow:0 6px 12px rgba(12, 37, 84, 0.28); transform:translateY(-1px); }
+.pump-log-empty { padding:10px 0; color:#6b7280; }
 .pump-stats { margin-top:6px; display:grid; gap:4px; }
 .pump-stats .lbl { color:#666; display:inline-block; width:80px; }
 .pump-chart-block { display:flex; flex-direction:column; gap:12px; }

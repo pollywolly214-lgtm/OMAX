@@ -4,6 +4,7 @@ if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
 if (!Array.isArray(window.pumpEff.notes)) window.pumpEff.notes = [];
 window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
+let pumpEditingDateISO = (typeof window !== "undefined" && window.pumpEditingDateISO != null) ? window.pumpEditingDateISO : null;
 
 const PUMP_BASE_FONT_SCALE = 1.72;
 const PUMP_DEFAULT_MEASUREMENT_TIME = "12:00";
@@ -78,6 +79,30 @@ function pumpGetEntryTimeISO(entry){
   if (!entry || typeof entry !== "object") return "";
   pumpEnsureEntryTime(entry);
   return entry.timeISO || "";
+}
+
+function pumpCompareEntriesDesc(a, b){
+  const dateA = (a && a.dateISO) || "";
+  const dateB = (b && b.dateISO) || "";
+  if (dateA === dateB){
+    const timeA = pumpGetEntryTimeISO(a);
+    const timeB = pumpGetEntryTimeISO(b);
+    return timeB.localeCompare(timeA);
+  }
+  return dateB.localeCompare(dateA);
+}
+
+function pumpGetRecentEntries(limit = 5){
+  const entries = pumpEnsureEntriesArray().slice().sort(pumpCompareEntriesDesc);
+  if (!isFinite(limit) || limit <= 0) return entries;
+  return entries.slice(0, limit);
+}
+
+function pumpSetEditingDate(dateISO){
+  pumpEditingDateISO = dateISO || null;
+  if (typeof window !== "undefined"){
+    window.pumpEditingDateISO = pumpEditingDateISO;
+  }
 }
 
 function pumpFormatTimeLabel(timeISO){
@@ -817,8 +842,32 @@ function viewPumpLogWidget(){
   const baselineVal = pumpEff.baselineRPM ?? "";
   const todayISO    = new Date().toISOString().slice(0,10);
   const nowTime     = pumpFormatTimeForInput(new Date());
+  const editingEntry = pumpEditingDateISO ? pumpEff.entries.find(e => e && e.dateISO === pumpEditingDateISO) || null : null;
+  const logDateValue = editingEntry ? editingEntry.dateISO : todayISO;
+  const logTimeValue = editingEntry ? pumpGetEntryTimeISO(editingEntry) || nowTime : nowTime;
+  const logRpmValue = editingEntry && Number.isFinite(editingEntry.rpm) ? editingEntry.rpm : "";
+  const logCtaLabel = editingEntry ? "Save changes" : "Add / Update";
+  const editingLabel = editingEntry
+    ? `Editing log for ${pumpFormatShortDate(editingEntry.dateISO)}${pumpFormatEntryTime(editingEntry) ? ` at ${pumpFormatEntryTime(editingEntry)}` : ""}`
+    : "";
   const latestDateTimeLabel = latest ? pumpFormatDateWithTimeLabel(latest.dateISO, pumpGetEntryTimeISO(latest)) : "";
   const latestTxt   = latest ? `${latest.rpm} RPM (${latestDateTimeLabel || latest.dateISO})` : "—";
+  const recentEntries = pumpGetRecentEntries(5);
+  const recentList = recentEntries.length
+    ? `<ul class="pump-log-list">${recentEntries.map(entry => {
+        const timeLabel = pumpFormatEntryTime(entry);
+        const dateLabel = pumpFormatShortDate(entry.dateISO);
+        const rpmLabel = Number.isFinite(entry.rpm) ? `${Number(entry.rpm).toLocaleString()} RPM` : "—";
+        const detail = [dateLabel, timeLabel].filter(Boolean).join(" · ");
+        return `<li class="pump-log-item">${
+          `<div class="pump-log-item-meta">${pumpEscapeTooltipValue(detail)}</div>` +
+          `<div class="pump-log-item-main">` +
+            `<span class="pump-log-rpm">${pumpEscapeTooltipValue(rpmLabel)}</span>` +
+            `<button type="button" class="pump-log-edit-btn" data-pump-edit-date="${entry.dateISO}">Edit</button>` +
+          `</div>` +
+        `</li>`;
+      }).join("")}</ul>`
+    : `<div class="pump-log-empty">No pump logs yet to edit.</div>`;
   return `
   <details class="pump-card" open>
     <summary><b>Pump Efficiency</b> <span class="chip ${col.cls}">${col.label}</span></summary>
@@ -833,12 +882,20 @@ function viewPumpLogWidget(){
       </div>
       <div class="pump-log-section">
         <h4>Daily log</h4>
+        ${editingEntry ? `<div class="pump-editing-banner">${pumpEscapeTooltipValue(editingLabel)}<button type="button" class="pump-edit-cancel" data-pump-edit-cancel aria-label="Cancel editing pump log">Cancel</button></div>` : ""}
         <form id="pumpLogForm" class="mini-form">
-          <input type="date" id="pumpLogDate" value="${todayISO}" required>
-          <input type="time" id="pumpLogTime" value="${nowTime}" required>
-          <input type="number" id="pumpLogRPM" min="1" step="1" placeholder="RPM at 49 ksi" required>
-          <button type="submit">Add / Update</button>
+          <input type="date" id="pumpLogDate" value="${logDateValue}" required>
+          <input type="time" id="pumpLogTime" value="${logTimeValue}" required>
+          <input type="number" id="pumpLogRPM" min="1" step="1" placeholder="RPM at 49 ksi" value="${logRpmValue}" required>
+          <button type="submit">${logCtaLabel}</button>
         </form>
+      </div>
+      <div class="pump-log-section pump-log-history">
+        <div class="pump-log-history-header">
+          <h4>Recent logs</h4>
+          <p class="small muted">Tap edit to fix a mistyped RPM without losing history.</p>
+        </div>
+        ${recentList}
       </div>
       <div class="pump-stats">
         <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO || "—"})` : "—"}</span></div>
@@ -904,7 +961,22 @@ function renderPumpWidget(){
     const t   = document.getElementById("pumpLogTime")?.value;
     const rpm = Number(document.getElementById("pumpLogRPM").value);
     if (!d || !isFinite(rpm) || rpm <= 0) { toast("Enter date and valid RPM."); return; }
-    upsertPumpEntry(d, rpm, t); saveCloudDebounced(); toast("Log saved"); renderPumpWidget();
+    const saved = upsertPumpEntry(d, rpm, t);
+    if (!saved){ toast("Enter date and valid RPM."); return; }
+    pumpSetEditingDate(null);
+    saveCloudDebounced(); toast("Log saved"); renderPumpWidget();
+  });
+  document.querySelectorAll("[data-pump-edit-date]").forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const dateISO = btn.getAttribute("data-pump-edit-date") || "";
+      if (!dateISO) return;
+      pumpSetEditingDate(dateISO);
+      renderPumpWidget();
+    });
+  });
+  document.querySelector("[data-pump-edit-cancel]")?.addEventListener("click", ()=>{
+    pumpSetEditingDate(null);
+    renderPumpWidget();
   });
   const card = chartHost?.querySelector(".pump-chart-card");
   ensurePumpViewportWatcher();
