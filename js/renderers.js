@@ -4942,18 +4942,37 @@ function renderDashboard(){
       ensureJobCategoryFolderOpen(categoryId);
     }
     const refreshAfterAdd = ()=>{
+      let refreshed = false;
       if (typeof route === "function"){
         try {
           route();
-          return;
+          refreshed = true;
         } catch (err){
           console.warn("Failed to route after adding job", err);
         }
       }
-      try {
-        renderDashboard();
-      } catch (err){
-        console.warn("Failed to render dashboard after adding job", err);
+      if (!refreshed && typeof renderDashboard === "function"){
+        try {
+          renderDashboard();
+          refreshed = true;
+        } catch (err){
+          console.warn("Failed to render dashboard after adding job", err);
+        }
+      }
+      if (!refreshed && typeof renderCalendar === "function"){
+        try {
+          renderCalendar();
+          refreshed = true;
+        } catch (err){
+          console.warn("Failed to render calendar after adding job", err);
+        }
+      }
+      if (typeof refreshDashboardWidgets === "function"){
+        try {
+          refreshDashboardWidgets({ full: true });
+        } catch (err){
+          console.warn("Failed to refresh dashboard widgets after adding job", err);
+        }
       }
     };
 
@@ -4974,6 +4993,9 @@ function renderDashboard(){
       return;
     }
     cuttingJobs.push(newJob);
+    if (typeof window !== "undefined"){
+      window.cuttingJobs = cuttingJobs;
+    }
     reorderPriorities(newJob.id, newJob.priority);
     ensureJobCategories?.();
     saveCloudDebounced();
