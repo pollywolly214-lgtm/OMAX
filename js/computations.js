@@ -261,10 +261,23 @@ function computeJobEfficiency(job){
   const materialUnitCost = Number(job?.materialCost) || 0;
   const materialQty = Number(job?.materialQty) || 0;
   const materialTotal = materialUnitCost * materialQty;
-  const chargeRaw = Number(job?.chargeRate);
-  const chargeRate = Number.isFinite(chargeRaw) && chargeRaw >= 0 ? chargeRaw : JOB_RATE_PER_HOUR;
+  const chargeOverrideRaw = job?.chargeRate;
+  const chargeOverrideNum = Number(chargeOverrideRaw);
+  const chargeEffRaw = job?.efficiency?.chargeRate;
+  const chargeEffNum = Number(chargeEffRaw);
+  const chargeRate = Number.isFinite(chargeOverrideNum) && chargeOverrideNum >= 0
+    ? chargeOverrideNum
+    : (Number.isFinite(chargeEffNum) && chargeEffNum >= 0 ? chargeEffNum : JOB_RATE_PER_HOUR);
+  const costOverrideRaw = job?.costRate;
+  const costOverrideNum = Number(costOverrideRaw);
+  const costEffRaw = job?.efficiency?.costRate;
+  const costEffNum = Number(costEffRaw);
   const variableCostRate = planned > 0 ? (materialTotal / planned) : 0;
-  const costRate = JOB_BASE_COST_PER_HOUR + variableCostRate;
+  const costRate = Number.isFinite(costOverrideNum) && costOverrideNum >= 0
+    ? costOverrideNum
+    : (Number.isFinite(costEffNum) && costEffNum >= 0
+      ? costEffNum
+      : JOB_BASE_COST_PER_HOUR + variableCostRate);
   const netRate = chargeRate - costRate;
   const result = {
     rate: netRate,
