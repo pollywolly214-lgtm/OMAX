@@ -247,9 +247,12 @@ function computeJobEfficiency(job){
   // 2) Machine total hours since job start (if no manual logs)
   // 3) No trustworthy data → assume no progress yet (0 hr)
   const planned = (job && job.estimateHours > 0) ? Number(job.estimateHours) : 0;
+  const completionRaw = job?.completedAtISO ? (parseDateLocal(job.completedAtISO) || new Date(job.completedAtISO)) : null;
+  const completionDate = (completionRaw instanceof Date && !Number.isNaN(completionRaw.getTime())) ? completionRaw : null;
   const actualOverrideRaw = Number(job?.actualHours);
   const hasActualOverride = Number.isFinite(actualOverrideRaw) && actualOverrideRaw >= 0;
   const actualOverride = hasActualOverride ? actualOverrideRaw : null;
+  const completionFallbackActual = (!hasActualOverride && completionDate) ? planned : null;
   const materialUnitCost = Number(job?.materialCost) || 0;
   const materialQty = Number(job?.materialQty) || 0;
   const materialTotal = materialUnitCost * materialQty;
@@ -286,8 +289,6 @@ function computeJobEfficiency(job){
   const due = (dueRaw && dueRaw >= start) ? dueRaw : new Date(start);
   due.setHours(0,0,0,0);
 
-  const completionRaw = job?.completedAtISO ? (parseDateLocal(job.completedAtISO) || new Date(job.completedAtISO)) : null;
-  const completionDate = (completionRaw instanceof Date && !Number.isNaN(completionRaw.getTime())) ? completionRaw : null;
   const today = new Date(); today.setHours(0,0,0,0);
   let evaluationDay = completionDate ? new Date(completionDate) : today;
   evaluationDay.setHours(0,0,0,0);
@@ -343,6 +344,9 @@ function computeJobEfficiency(job){
   if (hasActualOverride){
     result.actualHours = Math.max(0, actualOverride);
     result.usedManualOverride = true;
+  }else if (completionFallbackActual != null){
+    result.actualHours = Math.max(0, completionFallbackActual);
+    result.usedCompletionEstimate = true;
   }else if (manualUpTo.length){
     const last = manualUpTo[manualUpTo.length-1];
     const val = Number(last.completedHours);
