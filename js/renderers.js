@@ -7719,6 +7719,71 @@ function renderSettings(){
     else chip.classList.add("due-ok");
   }
 
+  function syncLinkedInventoryFromTask(task, updates){
+    if (!task) return false;
+    const taskId = task.id != null ? String(task.id) : null;
+    const list = Array.isArray(window.inventory) ? window.inventory : [];
+    if (!list.length) return false;
+
+    const matches = typeof findInventoryMatchesForTask === "function"
+      ? findInventoryMatchesForTask(task)
+      : [];
+    if (!matches.length){
+      return false;
+    }
+
+    let changed = false;
+    matches.forEach(item => {
+      if (!item) return;
+      if (Object.prototype.hasOwnProperty.call(updates, "pn") && item.pn !== updates.pn){
+        item.pn = updates.pn;
+        changed = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, "link") && item.link !== updates.link){
+        item.link = updates.link;
+        changed = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, "price")){
+        if (updates.price === null){
+          if (item.price != null){ item.price = null; changed = true; }
+        }else if (item.price !== updates.price){
+          item.price = updates.price;
+          changed = true;
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, "name") && updates.name && item.name !== updates.name){
+        item.name = updates.name;
+        changed = true;
+      }
+      if (taskId && !item.linkedTaskId){
+        item.linkedTaskId = taskId;
+        changed = true;
+      }
+      if (item.id != null && (task.inventoryId == null || String(task.inventoryId) === "")){
+        task.inventoryId = item.id;
+        changed = true;
+      }
+    });
+
+    if (changed){
+      window.inventory = list;
+      try{ if (typeof saveCloudDebounced === "function") saveCloudDebounced(); }catch(_){ }
+      if (typeof persist === "function"){
+        try{ persist(); }catch(_){ }
+      }
+      try{
+        if (typeof window.__refreshInventoryRows === "function"){
+          window.__refreshInventoryRows();
+        }
+      }catch(_){ }
+      const hash = (location.hash || "#").toLowerCase();
+      if (typeof renderInventory === "function" && (hash === "#/inventory" || hash === "#inventory")){
+        renderInventory();
+      }
+    }
+    return changed;
+  }
+
   tree?.addEventListener("input", (e)=>{
     const target = e.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
@@ -7762,6 +7827,7 @@ function renderSettings(){
       updateDueChip(holder, meta.task);
     }else if (key === "price"){
       meta.task.price = value == null ? null : Number(value);
+      syncLinkedInventoryFromTask(meta.task, { price: meta.task.price });
     }else if (key === "downtimeHours"){
       const prevDowntime = meta.task.downtimeHours;
       if (value == null){
@@ -7794,6 +7860,9 @@ function renderSettings(){
       meta.task[key] = target.value;
       if (key === "name"){ const label = holder.querySelector('.task-name'); if (label) label.textContent = target.value || "(unnamed task)"; }
       if (key === "condition"){ const chip = holder.querySelector('[data-chip-condition]'); if (chip) chip.textContent = target.value || "As required"; }
+      if (key === "storeLink"){ syncLinkedInventoryFromTask(meta.task, { link: meta.task.storeLink || "" }); }
+      if (key === "pn"){ syncLinkedInventoryFromTask(meta.task, { pn: meta.task.pn || "" }); }
+      if (key === "name"){ syncLinkedInventoryFromTask(meta.task, { name: meta.task.name || "" }); }
     }
     persist();
   });
@@ -13907,11 +13976,64 @@ function renderInventory(){
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
   let addToMaintenance = false;
 
+  function syncLinkedTasksFromInventory(item, updates){
+    if (!item) return false;
+    const linkedTasks = findTasksLinkedToInventoryItem(item);
+    if (!linkedTasks.length) return false;
+
+    let changed = false;
+    linkedTasks.forEach(task => {
+      if (!task) return;
+      if (item.id != null && (task.inventoryId == null || String(task.inventoryId) === "")){
+        task.inventoryId = item.id;
+        changed = true;
+      }
+      if (task.id != null && (item.linkedTaskId == null || String(item.linkedTaskId) === "")){
+        item.linkedTaskId = String(task.id);
+        changed = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, "price")){
+        const nextPrice = updates.price == null ? null : Number(updates.price);
+        if (task.price !== nextPrice){
+          task.price = nextPrice;
+          changed = true;
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, "pn") && task.pn !== updates.pn){
+        task.pn = updates.pn || "";
+        changed = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, "link") && task.storeLink !== updates.link){
+        task.storeLink = updates.link || "";
+        changed = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, "name") && updates.name && task.name !== updates.name){
+        task.name = updates.name;
+        changed = true;
+      }
+    });
+
+    if (changed){
+      try{ if (typeof saveTasks === "function") saveTasks(); }catch(_){ }
+      try{ if (typeof saveCloudDebounced === "function") saveCloudDebounced(); }catch(_){ }
+      const hash = (location.hash || "#").toLowerCase();
+      if (typeof renderSettings === "function" && (hash === "#/settings" || hash === "#settings")){
+        renderSettings();
+      }
+    }
+
+    return changed;
+  }
+
   const refreshRows = ()=>{
     if (!rowsTarget) return;
     const filtered = filterInventoryItems(inventorySearchTerm);
     rowsTarget.innerHTML = inventoryRowsHTML(filtered);
   };
+
+  try{
+    window.__refreshInventoryRows = refreshRows;
+  }catch(_){ }
 
   if (searchInput){
     searchInput.addEventListener("input", ()=>{
@@ -13954,6 +14076,9 @@ function renderInventory(){
       const newVal = Number(item.qtyNew);
       const oldVal = Number(item.qtyOld);
       item.qty = (Number.isFinite(newVal) ? newVal : 0) + (Number.isFinite(oldVal) ? oldVal : 0);
+    }
+    if (k === "price"){
+      syncLinkedTasksFromInventory(item, { price: item.price });
     }
     saveCloudDebounced();
   });
