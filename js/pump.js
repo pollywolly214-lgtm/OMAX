@@ -859,13 +859,15 @@ function viewPumpLogWidget(){
         const dateLabel = pumpFormatShortDate(entry.dateISO);
         const rpmLabel = Number.isFinite(entry.rpm) ? `${Number(entry.rpm).toLocaleString()} RPM` : "—";
         const detail = [dateLabel, timeLabel].filter(Boolean).join(" · ");
-        return `<li class="pump-log-item">${
-          `<div class="pump-log-item-meta">${pumpEscapeTooltipValue(detail)}</div>` +
-          `<div class="pump-log-item-main">` +
-            `<span class="pump-log-rpm">${pumpEscapeTooltipValue(rpmLabel)}</span>` +
-            `<button type="button" class="pump-log-edit-btn" data-pump-edit-date="${entry.dateISO}">Edit</button>` +
-          `</div>` +
-        `</li>`;
+        return [
+          `<li class="pump-log-item">`,
+            `<div class="pump-log-item-meta">${pumpEscapeTooltipValue(detail)}</div>`,
+            `<div class="pump-log-item-main">`,
+              `<span class="pump-log-rpm">${pumpEscapeTooltipValue(rpmLabel)}</span>`,
+              `<button type="button" class="pump-log-edit-btn" data-pump-edit-date="${entry.dateISO}">Edit</button>`,
+            `</div>`,
+          `</li>`
+        ].join("");
       }).join("")}</ul>`
     : `<div class="pump-log-empty">No pump logs yet to edit.</div>`;
   return `
