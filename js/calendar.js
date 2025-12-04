@@ -1015,9 +1015,20 @@ function showJobBubble(jobId, anchor){
       <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
       ${noteAuto}
       <div class="bubble-actions">
+        <button type="button" data-bbl-complete-job="${j.id}">Mark complete</button>
         <button type="button" data-bbl-edit-job="${j.id}">Edit</button>
         <button type="button" class="danger" data-bbl-remove-job="${j.id}">Remove</button>
       </div>`;
+    b.querySelector("[data-bbl-complete-job]")?.addEventListener("click", ()=>{
+      const completed = typeof completeCuttingJobById === "function"
+        ? completeCuttingJobById(j.id)
+        : null;
+      if (completed){
+        hideBubble();
+        renderCalendar();
+        route();
+      }
+    });
     b.querySelector("[data-bbl-remove-job]")?.addEventListener("click", ()=>{
       try {
         if (typeof recordDeletedItem === "function"){
