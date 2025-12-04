@@ -13481,6 +13481,8 @@ function renderJobs(){
       const materialInput = field("material");
       const materialCostInput = field("materialCost");
       const materialQtyInput = field("materialQty");
+      const chargeRateInput = field("chargeRate");
+      const costRateInput = field("costRate");
       const notesInput = field("notes");
       const completedInput = field("completedAtISO");
       const categoryInput = field("cat");
@@ -13506,6 +13508,14 @@ function renderJobs(){
       const materialQtyNum = materialQtyVal === "" || materialQtyVal == null ? null : Number(materialQtyVal);
       const materialQty = Number.isFinite(materialQtyNum) && materialQtyNum >= 0 ? materialQtyNum : Number(entry.materialQty) || 0;
 
+      const chargeRateVal = chargeRateInput?.value;
+      const chargeRateNum = chargeRateVal === "" || chargeRateVal == null ? null : Number(chargeRateVal);
+      if (chargeRateNum != null && (!Number.isFinite(chargeRateNum) || chargeRateNum < 0)){ toast("Enter a valid charge rate."); return; }
+
+      const costRateVal = costRateInput?.value;
+      const costRateNum = costRateVal === "" || costRateVal == null ? null : Number(costRateVal);
+      if (costRateNum != null && (!Number.isFinite(costRateNum) || costRateNum < 0)){ toast("Enter a valid cost rate."); return; }
+
       const notes = notesInput?.value ?? entry.notes ?? "";
 
       const completedRaw = completedInput?.value;
@@ -13529,24 +13539,46 @@ function renderJobs(){
         entry.priority = 1;
       }
 
+      const fallbackCharge = Number.isFinite(Number(entry.chargeRate)) && Number(entry.chargeRate) >= 0
+        ? Number(entry.chargeRate)
+        : (Number.isFinite(Number(entry.efficiency?.chargeRate)) && Number(entry.efficiency.chargeRate) >= 0
+          ? Number(entry.efficiency.chargeRate)
+          : JOB_RATE_PER_HOUR);
+      const chargeRate = Number.isFinite(chargeRateNum) && chargeRateNum >= 0 ? chargeRateNum : fallbackCharge;
+
+      const fallbackCost = (() => {
+        const existingCost = Number(entry.costRate);
+        if (Number.isFinite(existingCost) && existingCost >= 0) return existingCost;
+        const effCost = Number(entry.efficiency?.costRate);
+        if (Number.isFinite(effCost) && effCost >= 0) return effCost;
+        return estimateHours > 0 ? JOB_BASE_COST_PER_HOUR + ((materialCost * materialQty) / estimateHours) : JOB_BASE_COST_PER_HOUR;
+      })();
+      const costRate = Number.isFinite(costRateNum) && costRateNum >= 0 ? costRateNum : fallbackCost;
+      const netRate = chargeRate - costRate;
+
       entry.name = name;
       entry.estimateHours = estimateHours;
       entry.material = material;
       entry.materialCost = materialCost;
       entry.materialQty = materialQty;
+      entry.chargeRate = chargeRate;
+      entry.costRate = costRate;
       entry.notes = notes;
       entry.actualHours = actualHours != null ? actualHours : null;
       if (categoryInput && categoryInput.value && categoryInput.value !== "__new__"){
         entry.cat = categoryInput.value;
       }
 
-      const rate = Number(entry.efficiency?.rate) || JOB_RATE_PER_HOUR;
+      const rate = Number.isFinite(netRate) ? netRate : (Number(entry.efficiency?.rate) || JOB_RATE_PER_HOUR);
       const deltaHours = actualHours != null ? (estimateHours - actualHours) : (entry.efficiency?.deltaHours ?? null);
       const gainLoss = deltaHours != null ? deltaHours * rate : (entry.efficiency?.gainLoss ?? null);
 
       entry.efficiency = {
         ...entry.efficiency,
         rate,
+        chargeRate,
+        costRate,
+        netRate,
         expectedHours: estimateHours,
         actualHours: entry.actualHours,
         expectedRemaining: 0,

@@ -2459,6 +2459,26 @@ function viewJobs(){
   });
 
   const completedFiltered = completedForCategory.filter(matchesHistorySearch);
+  const resolveChargeRate = (job) => {
+    const chargeRaw = job?.chargeRate;
+    const chargeNum = Number(chargeRaw);
+    if (Number.isFinite(chargeNum) && chargeNum >= 0) return chargeNum;
+    const efficiencyCharge = Number(job?.efficiency?.chargeRate);
+    return (Number.isFinite(efficiencyCharge) && efficiencyCharge >= 0)
+      ? efficiencyCharge
+      : JOB_RATE_PER_HOUR;
+  };
+  const resolveCostRate = (job, estHours, matTotal) => {
+    const costRaw = job?.costRate;
+    const costNum = Number(costRaw);
+    if (Number.isFinite(costNum) && costNum >= 0) return costNum;
+    const efficiencyCost = Number(job?.efficiency?.costRate);
+    if (Number.isFinite(efficiencyCost) && efficiencyCost >= 0) return efficiencyCost;
+    const hoursVal = Number(estHours);
+    return (Number.isFinite(hoursVal) && hoursVal > 0)
+      ? JOB_BASE_COST_PER_HOUR + (matTotal / hoursVal)
+      : JOB_BASE_COST_PER_HOUR;
+  };
   const completedStats = completedFiltered.reduce((acc, job)=>{
     const eff = computeJobEfficiency(job);
     const net = computeJobNetTotal(job, eff, { preferActual: true });
@@ -2466,9 +2486,8 @@ function viewJobs(){
     const matCost = Number(job?.materialCost || 0);
     const matQty = Number(job?.materialQty || 0);
     const matTotal = (matCost * matQty) || 0;
-    const chargeRateRaw = Number(job?.chargeRate);
-    const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
-    const costRate = JOB_BASE_COST_PER_HOUR + ((Number.isFinite(estHours) && estHours > 0) ? (matTotal / estHours) : 0);
+    const chargeRate = resolveChargeRate(job);
+    const costRate = resolveCostRate(job, estHours, matTotal);
     const netRate = chargeRate - costRate;
 
     acc.total += Number.isFinite(net) ? net : 0;
@@ -2673,10 +2692,9 @@ function viewJobs(){
     const matCost = Number(job?.materialCost || 0);
     const matQty = Number(job?.materialQty || 0);
     const matTotal = (matCost * matQty) || 0;
-    const chargeRateRaw = Number(job?.chargeRate);
-    const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
+    const chargeRate = resolveChargeRate(job);
     const chargeDisplay = formatRate(chargeRate);
-    const costRate = JOB_BASE_COST_PER_HOUR + (estHours > 0 ? (matTotal / estHours) : 0);
+    const costRate = resolveCostRate(job, estHours, matTotal);
     const costDisplay = formatRate(costRate);
     const netRate = chargeRate - costRate;
     const netDisplay = formatRate(netRate, { showPlus: true });
@@ -2830,6 +2848,8 @@ function viewJobs(){
     const estimateVal = numberInputValue(estHours);
     const materialCostVal = numberInputValue(job?.materialCost);
     const materialQtyVal = numberInputValue(job?.materialQty);
+    const chargeRateVal = numberInputValue(job?.chargeRate ?? job?.efficiency?.chargeRate ?? chargeRate);
+    const costRateVal = numberInputValue(job?.costRate ?? job?.efficiency?.costRate ?? costRate);
 
     return `
       <tr data-history-row="${job.id || ""}" class="job-row editing">
@@ -2845,6 +2865,8 @@ function viewJobs(){
                 <label>Material<input type="text" data-history-field="material" data-history-id="${job.id}" value="${esc(job?.material || "")}"></label>
                 <label>Material cost<input type="number" min="0" step="0.01" data-history-field="materialCost" data-history-id="${job.id}" value="${materialCostVal}"></label>
                 <label>Material quantity<input type="number" min="0" step="0.01" data-history-field="materialQty" data-history-id="${job.id}" value="${materialQtyVal}"></label>
+                <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-history-field="chargeRate" data-history-id="${job.id}" value="${chargeRateVal}"></label>
+                <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" data-history-field="costRate" data-history-id="${job.id}" value="${costRateVal}"></label>
                 <label>Category<select data-history-field="cat" data-history-id="${job.id}" data-job-category-select>
                   ${categoryOptionsMarkup(job.cat, { includeCreateOption: true })}
                 </select></label>
