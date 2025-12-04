@@ -7446,38 +7446,48 @@ function renderSettings(){
   function syncLinkedInventoryFromTask(task, updates){
     if (!task) return false;
     const taskId = task.id != null ? String(task.id) : null;
-    const invId = task.inventoryId != null ? String(task.inventoryId) : null;
     const list = Array.isArray(window.inventory) ? window.inventory : [];
-    if (!list.length || (!taskId && !invId)) return false;
-    const item = list.find(entry => {
-      if (!entry) return false;
-      const entryId = entry.id != null ? String(entry.id) : null;
-      const linkedId = entry.linkedTaskId != null ? String(entry.linkedTaskId) : null;
-      return (invId && entryId === invId) || (taskId && linkedId === taskId);
-    });
-    if (!item) return false;
+    if (!list.length) return false;
+
+    const matches = typeof findInventoryMatchesForTask === "function"
+      ? findInventoryMatchesForTask(task)
+      : [];
+    if (!matches.length){
+      return false;
+    }
 
     let changed = false;
-    if (Object.prototype.hasOwnProperty.call(updates, "pn") && item.pn !== updates.pn){
-      item.pn = updates.pn;
-      changed = true;
-    }
-    if (Object.prototype.hasOwnProperty.call(updates, "link") && item.link !== updates.link){
-      item.link = updates.link;
-      changed = true;
-    }
-    if (Object.prototype.hasOwnProperty.call(updates, "price")){
-      if (updates.price === null){
-        if (item.price != null){ item.price = null; changed = true; }
-      }else if (item.price !== updates.price){
-        item.price = updates.price;
+    matches.forEach(item => {
+      if (!item) return;
+      if (Object.prototype.hasOwnProperty.call(updates, "pn") && item.pn !== updates.pn){
+        item.pn = updates.pn;
         changed = true;
       }
-    }
-    if (Object.prototype.hasOwnProperty.call(updates, "name") && updates.name && item.name !== updates.name){
-      item.name = updates.name;
-      changed = true;
-    }
+      if (Object.prototype.hasOwnProperty.call(updates, "link") && item.link !== updates.link){
+        item.link = updates.link;
+        changed = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, "price")){
+        if (updates.price === null){
+          if (item.price != null){ item.price = null; changed = true; }
+        }else if (item.price !== updates.price){
+          item.price = updates.price;
+          changed = true;
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, "name") && updates.name && item.name !== updates.name){
+        item.name = updates.name;
+        changed = true;
+      }
+      if (taskId && !item.linkedTaskId){
+        item.linkedTaskId = taskId;
+        changed = true;
+      }
+      if (item.id != null && (task.inventoryId == null || String(task.inventoryId) === "")){
+        task.inventoryId = item.id;
+        changed = true;
+      }
+    });
 
     if (changed){
       window.inventory = list;
@@ -13698,6 +13708,14 @@ function renderInventory(){
     let changed = false;
     linkedTasks.forEach(task => {
       if (!task) return;
+      if (item.id != null && (task.inventoryId == null || String(task.inventoryId) === "")){
+        task.inventoryId = item.id;
+        changed = true;
+      }
+      if (task.id != null && (item.linkedTaskId == null || String(item.linkedTaskId) === "")){
+        item.linkedTaskId = String(task.id);
+        changed = true;
+      }
       if (Object.prototype.hasOwnProperty.call(updates, "price")){
         const nextPrice = updates.price == null ? null : Number(updates.price);
         if (task.price !== nextPrice){
