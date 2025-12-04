@@ -4942,37 +4942,69 @@ function renderDashboard(){
       ensureJobCategoryFolderOpen(categoryId);
     }
     const refreshAfterAdd = ()=>{
-      let refreshed = false;
-      if (typeof route === "function"){
-        try {
-          route();
-          refreshed = true;
-        } catch (err){
-          console.warn("Failed to route after adding job", err);
+      const runRefresh = ()=>{
+        if (typeof refreshGlobalCollections === "function"){
+          try {
+            refreshGlobalCollections();
+          } catch (err){
+            console.warn("Failed to sync collections after adding job", err);
+          }
         }
-      }
-      if (!refreshed && typeof renderDashboard === "function"){
-        try {
-          renderDashboard();
-          refreshed = true;
-        } catch (err){
-          console.warn("Failed to render dashboard after adding job", err);
+
+        let refreshed = false;
+        if (typeof renderDashboard === "function"){
+          try {
+            renderDashboard();
+            refreshed = true;
+          } catch (err){
+            console.warn("Failed to render dashboard after adding job", err);
+          }
         }
-      }
-      if (!refreshed && typeof renderCalendar === "function"){
-        try {
-          renderCalendar();
-          refreshed = true;
-        } catch (err){
-          console.warn("Failed to render calendar after adding job", err);
+        if (!refreshed && typeof route === "function"){
+          try {
+            route();
+            refreshed = true;
+          } catch (err){
+            console.warn("Failed to route after adding job", err);
+          }
         }
-      }
-      if (typeof refreshDashboardWidgets === "function"){
-        try {
-          refreshDashboardWidgets({ full: true });
-        } catch (err){
-          console.warn("Failed to refresh dashboard widgets after adding job", err);
+        if (typeof renderCalendar === "function"){
+          try {
+            renderCalendar();
+            refreshed = true;
+          } catch (err){
+            console.warn("Failed to render calendar after adding job", err);
+          }
         }
+        if (typeof refreshDashboardWidgets === "function"){
+          try {
+            refreshDashboardWidgets({ full: true });
+          } catch (err){
+            console.warn("Failed to refresh dashboard widgets after adding job", err);
+          }
+        }
+        if (typeof renderNextDueWidget === "function"){
+          try {
+            renderNextDueWidget(document.getElementById("nextDueBox"));
+          } catch (err){
+            console.warn("Failed to refresh next-due widget after adding job", err);
+          }
+        }
+        if (typeof notifyDashboardLayoutContentChanged === "function"){
+          try {
+            notifyDashboardLayoutContentChanged();
+          } catch (err){
+            console.warn("Failed to notify layout change after adding job", err);
+          }
+        }
+      };
+
+      if (typeof requestAnimationFrame === "function"){
+        requestAnimationFrame(()=> requestAnimationFrame(runRefresh));
+      } else if (typeof setTimeout === "function"){
+        setTimeout(runRefresh, 0);
+      } else {
+        runRefresh();
       }
     };
 
