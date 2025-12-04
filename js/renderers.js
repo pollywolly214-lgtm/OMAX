@@ -4941,6 +4941,22 @@ function renderDashboard(){
       categoryId = String(folder.id);
       ensureJobCategoryFolderOpen(categoryId);
     }
+    const refreshAfterAdd = ()=>{
+      if (typeof route === "function"){
+        try {
+          route();
+          return;
+        } catch (err){
+          console.warn("Failed to route after adding job", err);
+        }
+      }
+      try {
+        renderDashboard();
+      } catch (err){
+        console.warn("Failed to render dashboard after adding job", err);
+      }
+    };
+
     const newJob = { id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, priority: 1, notes:"", manualLogs:[], cat: categoryId };
     if (jobCategoryInput){
       jobCategoryInput.value = dashRootCategoryId;
@@ -4954,7 +4970,7 @@ function renderDashboard(){
       saveCloudDebounced();
       toast("Cutting job logged to history");
       closeModal();
-      renderDashboard();
+      refreshAfterAdd();
       return;
     }
     cuttingJobs.push(newJob);
@@ -4963,7 +4979,7 @@ function renderDashboard(){
     saveCloudDebounced();
     toast("Cutting job added");
     closeModal();
-    renderDashboard();
+    refreshAfterAdd();
   });
 
   if (jobCategoryInput){
