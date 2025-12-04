@@ -249,9 +249,14 @@ function computeJobEfficiency(job){
   const planned = (job && job.estimateHours > 0) ? Number(job.estimateHours) : 0;
   const completionRaw = job?.completedAtISO ? (parseDateLocal(job.completedAtISO) || new Date(job.completedAtISO)) : null;
   const completionDate = (completionRaw instanceof Date && !Number.isNaN(completionRaw.getTime())) ? completionRaw : null;
-  const actualOverrideRaw = Number(job?.actualHours);
-  const hasActualOverride = Number.isFinite(actualOverrideRaw) && actualOverrideRaw >= 0;
-  const actualOverride = hasActualOverride ? actualOverrideRaw : null;
+  const actualOverrideRaw = job?.actualHours;
+  const actualOverrideNum = Number(actualOverrideRaw);
+  const hasActualOverride = actualOverrideRaw !== undefined
+    && actualOverrideRaw !== null
+    && actualOverrideRaw !== ""
+    && Number.isFinite(actualOverrideNum)
+    && actualOverrideNum >= 0;
+  const actualOverride = hasActualOverride ? actualOverrideNum : null;
   const completionFallbackActual = (!hasActualOverride && completionDate) ? planned : null;
   const materialUnitCost = Number(job?.materialCost) || 0;
   const materialQty = Number(job?.materialQty) || 0;

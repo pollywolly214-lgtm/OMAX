@@ -1973,6 +1973,19 @@ function viewJobs(){
     : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
       ? Number(DAILY_HOURS)
       : 8);
+  const resolveActualHours = (job, eff = {}) => {
+    const actualRaw = job?.actualHours;
+    const actualNum = Number(actualRaw);
+    if (actualRaw !== undefined && actualRaw !== null && actualRaw !== "" && Number.isFinite(actualNum) && actualNum >= 0){
+      return actualNum;
+    }
+    const effRaw = eff?.actualHours;
+    const effNum = Number(effRaw);
+    return (effRaw !== undefined && effRaw !== null && effRaw !== "" && Number.isFinite(effNum) && effNum >= 0)
+      ? effNum
+      : null;
+  };
+
   const computeJobNetTotal = (job, eff, { preferActual = false } = {}) => {
     if (!job) return 0;
     const efficiency = eff || {};
@@ -1982,8 +1995,7 @@ function viewJobs(){
     const materialCost = Number(job.materialCost) || 0;
     const materialQty = Number(job.materialQty) || 0;
     const materialTotal = materialCost * materialQty;
-    const actualRaw = job.actualHours ?? efficiency.actualHours;
-    const actualHours = Number.isFinite(Number(actualRaw)) ? Number(actualRaw) : null;
+    const actualHours = resolveActualHours(job, efficiency);
     const hoursFromEstimate = estimateHours > 0 ? estimateHours : 0;
     const hoursFromActual = Number.isFinite(actualHours) && actualHours > 0 ? actualHours : 0;
     const hoursForTotal = preferActual
@@ -2042,7 +2054,7 @@ function viewJobs(){
     const eff = job && job.efficiency ? job.efficiency : {};
     const delta = Number(eff.deltaHours);
     const netTotal = computeJobNetTotal(job, eff, { preferActual: true });
-    const actualHours = Number(job.actualHours ?? eff.actualHours);
+    const actualHours = resolveActualHours(job, eff);
     const estHours = Number(job.estimateHours);
     const statusLabel = Number.isFinite(delta) && Math.abs(delta) > 0.1
       ? (delta > 0 ? "Finished ahead" : "Finished behind")
@@ -2626,8 +2638,7 @@ function viewJobs(){
     const eff = computeJobEfficiency(job);
     const delta = Number(eff.deltaHours);
     const netTotal = computeJobNetTotal(job, eff, { preferActual: true });
-    const actualHoursRaw = job.actualHours ?? eff.actualHours;
-    const actualHours = Number(actualHoursRaw);
+    const actualHours = resolveActualHours(job, eff);
     const hasActualHours = Number.isFinite(actualHours) && actualHours >= 0;
     const estHours = Number(job.estimateHours);
     const editingHistory = editingCompletedJobsSet.has(String(job.id));
