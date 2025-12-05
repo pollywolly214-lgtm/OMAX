@@ -316,6 +316,39 @@ function setOccurrenceHoursForTask(task, dateISO, hours){
   return changed;
 }
 
+function visitTaskFamily(task, fn){
+  if (!task || typeof fn !== "function") return;
+  const templateId = task.templateId != null ? String(task.templateId) : String(task.id);
+  if (!templateId) return;
+  const intervalList = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  const asReqList = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  [intervalList, asReqList].forEach(list => {
+    list.forEach(item => {
+      if (!item) return;
+      const candidateTemplateId = item.templateId != null ? String(item.templateId) : String(item.id);
+      if (String(candidateTemplateId) !== templateId) return;
+      if (!isTemplateTask(item) && !isInstanceTask(item)) return;
+      fn(item);
+    });
+  });
+}
+
+function setFamilyOccurrenceNote(task, dateISO, noteText){
+  let changed = false;
+  visitTaskFamily(task, member => {
+    if (setOccurrenceNoteForTask(member, dateISO, noteText)) changed = true;
+  });
+  return changed;
+}
+
+function setFamilyOccurrenceHours(task, dateISO, hours){
+  let changed = false;
+  visitTaskFamily(task, member => {
+    if (setOccurrenceHoursForTask(member, dateISO, hours)) changed = true;
+  });
+  return changed;
+}
+
 function markCalendarTaskComplete(meta, dateISO){
   if (!meta || !meta.task) return false;
   const key = normalizeDateKey(dateISO || new Date());
@@ -488,10 +521,10 @@ function removeCalendarTaskOccurrence(meta, dateISO){
       task.calendarDateISO = null;
       changed = true;
     }
-    if (setOccurrenceNoteForTask(task, key, "")){
+    if (setFamilyOccurrenceNote(task, key, "")){
       changed = true;
     }
-    if (setOccurrenceHoursForTask(task, key, null)){
+    if (setFamilyOccurrenceHours(task, key, null)){
       changed = true;
     }
     if (changed){
@@ -502,10 +535,10 @@ function removeCalendarTaskOccurrence(meta, dateISO){
       task.calendarDateISO = null;
       changed = true;
     }
-    if (setOccurrenceNoteForTask(task, key, "")){
+    if (setFamilyOccurrenceNote(task, key, "")){
       changed = true;
     }
-    if (setOccurrenceHoursForTask(task, key, null)){
+    if (setFamilyOccurrenceHours(task, key, null)){
       changed = true;
     }
     if (Array.isArray(task.completedDates)){
@@ -725,7 +758,7 @@ function showTaskBubble(taskId, anchor, options = {}){
     const nextRaw = typeof window.prompt === "function" ? window.prompt(promptText, existing === "" ? "" : String(existing)) : "";
     if (nextRaw === null || nextRaw === undefined) return;
     const parsed = Number(nextRaw);
-    const changed = setOccurrenceHoursForTask(task, targetKey, Number.isFinite(parsed) && parsed > 0 ? parsed : null);
+    const changed = setFamilyOccurrenceHours(task, targetKey, Number.isFinite(parsed) && parsed > 0 ? parsed : null);
     if (changed){
       saveCloudDebounced();
       toast((Number.isFinite(parsed) && parsed > 0) ? "Occurrence time saved" : "Occurrence time removed");
@@ -739,7 +772,7 @@ function showTaskBubble(taskId, anchor, options = {}){
     const promptText = "Add a note for this calendar occurrence. It won't change other intervals.";
     const next = typeof window.prompt === "function" ? window.prompt(promptText, existing) : "";
     if (next === null || next === undefined) return;
-    const changed = setOccurrenceNoteForTask(task, targetKey, next);
+    const changed = setFamilyOccurrenceNote(task, targetKey, next);
     if (changed){
       saveCloudDebounced();
       toast((next || "").trim() ? "Occurrence note saved" : "Occurrence note removed");
