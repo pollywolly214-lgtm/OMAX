@@ -160,6 +160,11 @@ function viewDashboard(){
       <h3>Calendar</h3>
 
       <div class="calendar-toolbar">
+        <div class="calendar-month-nav" aria-label="Month navigation">
+          <button type="button" class="calendar-nav-btn" id="calendarPrevMonthBtn" aria-label="Show previous months">‹</button>
+          <span class="calendar-range-label" id="calendarRangeLabel">This month</span>
+          <button type="button" class="calendar-nav-btn" id="calendarNextMonthBtn" aria-label="Show upcoming months">›</button>
+        </div>
         <button type="button" class="calendar-hours-edit-btn" id="calendarHoursEditBtn">Edit Hours</button>
         <button type="button" class="calendar-hours-cancel-btn" id="calendarHoursCancelBtn" hidden>Cancel</button>
         <button type="button" class="calendar-toggle-btn" id="calendarToggleBtn" aria-pressed="false" aria-controls="months">Show All Months</button>
@@ -167,7 +172,7 @@ function viewDashboard(){
       </div>
 
       <div id="months"></div>
-      <div class="small">Hover a due item for actions. Click to pin the bubble. Toggle “Show All Months” to scroll through the schedule.</div>
+      <div class="small">Hover a due item for actions. Click to pin the bubble. Use the arrows to browse months and toggle “Show All Months” to scroll through the schedule.</div>
     </div>
   </div>
 

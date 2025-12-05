@@ -3737,6 +3737,34 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
 .day.downtime { background: #ffe5e5; }
 .day.downtime .date { color: #b71c1c; }
 .calendar-toolbar { margin-bottom: 10px; display:flex; justify-content:flex-end; align-items:center; gap:8px; }
+.calendar-month-nav { display:flex; align-items:center; gap:8px; margin-right:auto; }
+.calendar-range-label { font-weight: 700; color: #0a1f3f; min-width: 150px; text-align: center; }
+.calendar-nav-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(10, 63, 155, 0.28);
+  background: rgba(255, 255, 255, 0.85);
+  color: #0a3f9b;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.calendar-nav-btn:hover:not(:disabled) {
+  background: #e5eeff;
+  border-color: rgba(10, 63, 155, 0.45);
+  color: #073177;
+}
+.calendar-nav-btn:focus-visible { outline: 2px solid #0a63c2; outline-offset: 2px; }
+.calendar-nav-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
 .calendar-block--compact #months { overflow: visible; max-height: none; }
 .calendar-block--expanded #months {
   max-height: 65vh;

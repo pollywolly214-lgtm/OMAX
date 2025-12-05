@@ -5043,6 +5043,14 @@ function renderDashboard(){
     }
     openModal("picker");
   });
+  document.getElementById("calendarPrevMonthBtn")?.addEventListener("click", (event)=>{
+    shiftCalendarMonthOffset(-1);
+    if (event?.currentTarget instanceof HTMLElement) event.currentTarget.blur();
+  });
+  document.getElementById("calendarNextMonthBtn")?.addEventListener("click", (event)=>{
+    shiftCalendarMonthOffset(1);
+    if (event?.currentTarget instanceof HTMLElement) event.currentTarget.blur();
+  });
   document.getElementById("calendarToggleBtn")?.addEventListener("click", (event)=>{
     toggleCalendarShowAllMonths();
     if (event?.currentTarget instanceof HTMLElement){
