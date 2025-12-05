@@ -10,6 +10,9 @@ if (typeof window !== "undefined"){
   if (typeof window.__calendarAvailableMonths !== "number"){
     window.__calendarAvailableMonths = 3;
   }
+  if (typeof window.__calendarMonthOffset !== "number"){
+    window.__calendarMonthOffset = 0;
+  }
 }
 
 function isCalendarHoursEditing(){
@@ -1662,6 +1665,9 @@ function renderCalendar(){
   const container = $("#months");
   if (!container) return;
   let showAll = Boolean(window.__calendarShowAllMonths);
+  const monthOffsetRaw = Number(window.__calendarMonthOffset);
+  const monthOffset = Number.isFinite(monthOffsetRaw) ? Math.min(12, Math.max(-12, Math.round(monthOffsetRaw))) : 0;
+  window.__calendarMonthOffset = monthOffset;
   const editingHours = isCalendarHoursEditing();
   const hoursPerDay = configuredDailyHours();
   const hoursMap = typeof getDailyCutHoursMap === "function" ? getDailyCutHoursMap() : new Map();
@@ -1917,7 +1923,8 @@ function renderCalendar(){
   }
 
   const today = new Date(); today.setHours(0,0,0,0);
-  let maxMonthsNeeded = 3;
+  const anchorMonth = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
+  let maxMonthsNeeded = 12;
   const dueKeys = Object.keys(dueMap);
   if (dueKeys.length){
     let latest = null;
@@ -1932,8 +1939,8 @@ function renderCalendar(){
       const latestDate = parseDateLocal(latest);
       if (latestDate instanceof Date && !Number.isNaN(latestDate.getTime())){
         latestDate.setHours(0,0,0,0);
-        const diffMonths = (latestDate.getFullYear() - today.getFullYear()) * 12
-          + (latestDate.getMonth() - today.getMonth());
+        const diffMonths = (latestDate.getFullYear() - anchorMonth.getFullYear()) * 12
+          + (latestDate.getMonth() - anchorMonth.getMonth());
         const required = diffMonths + 1;
         if (Number.isFinite(required)){
           const limited = Math.min(Math.max(Math.round(required), 1), 12);
@@ -1960,16 +1967,28 @@ function renderCalendar(){
     toggleBtn.textContent = expanded ? "Show 3 Months" : "Show All Months";
     toggleBtn.setAttribute("aria-pressed", expanded ? "true" : "false");
     toggleBtn.title = expanded
-      ? "Collapse to show only the current and next two months"
+      ? "Collapse to show a 3-month window"
       : `Expand to view all ${expandedMonths} months`;
   }
+
+  const rangeLabel = document.getElementById("calendarRangeLabel");
+  if (rangeLabel){
+    const endOfRange = new Date(anchorMonth.getFullYear(), anchorMonth.getMonth() + (expanded ? expandedMonths : 3) - 1, 1);
+    const startLabel = anchorMonth.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+    const endLabel = endOfRange.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+    rangeLabel.textContent = startLabel === endLabel ? startLabel : `${startLabel} – ${endLabel}`;
+  }
+  const prevBtn = document.getElementById("calendarPrevMonthBtn");
+  const nextBtn = document.getElementById("calendarNextMonthBtn");
+  if (prevBtn) prevBtn.disabled = monthOffset <= -12;
+  if (nextBtn) nextBtn.disabled = monthOffset >= 12;
 
   let monthsToRender = expanded ? expandedMonths : 3;
   monthsToRender = Math.max(1, Math.round(monthsToRender));
 
   for (let m=0; m<monthsToRender; m++){
-    const first = new Date(today.getFullYear(), today.getMonth()+m, 1);
-    const last  = new Date(today.getFullYear(), today.getMonth()+m+1, 0);
+    const first = new Date(anchorMonth.getFullYear(), anchorMonth.getMonth()+m, 1);
+    const last  = new Date(anchorMonth.getFullYear(), anchorMonth.getMonth()+m+1, 0);
 
     const monthDiv = document.createElement("div");
     monthDiv.className = "month";
@@ -2137,9 +2156,25 @@ function renderCalendar(){
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
 }
 
-  function toggleCalendarShowAllMonths(){
-    const next = !Boolean(window.__calendarShowAllMonths);
-    window.__calendarShowAllMonths = next;
-    renderCalendar();
-  }
+function shiftCalendarMonthOffset(delta){
+  const current = Number(window.__calendarMonthOffset) || 0;
+  const next = Math.min(12, Math.max(-12, Math.round(current + delta)));
+  if (next === current) return false;
+  window.__calendarMonthOffset = next;
+  renderCalendar();
+  return true;
+}
+
+function resetCalendarMonthOffset(){
+  if ((Number(window.__calendarMonthOffset) || 0) === 0) return false;
+  window.__calendarMonthOffset = 0;
+  renderCalendar();
+  return true;
+}
+
+function toggleCalendarShowAllMonths(){
+  const next = !Boolean(window.__calendarShowAllMonths);
+  window.__calendarShowAllMonths = next;
+  renderCalendar();
+}
 
