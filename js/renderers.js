@@ -4941,20 +4941,100 @@ function renderDashboard(){
       categoryId = String(folder.id);
       ensureJobCategoryFolderOpen(categoryId);
     }
+    const refreshAfterAdd = ()=>{
+      const runRefresh = ()=>{
+        if (typeof refreshGlobalCollections === "function"){
+          try {
+            refreshGlobalCollections();
+          } catch (err){
+            console.warn("Failed to sync collections after adding job", err);
+          }
+        }
+
+        let refreshed = false;
+        if (typeof renderDashboard === "function"){
+          try {
+            renderDashboard();
+            refreshed = true;
+          } catch (err){
+            console.warn("Failed to render dashboard after adding job", err);
+          }
+        }
+        if (!refreshed && typeof route === "function"){
+          try {
+            route();
+            refreshed = true;
+          } catch (err){
+            console.warn("Failed to route after adding job", err);
+          }
+        }
+        if (typeof renderCalendar === "function"){
+          try {
+            renderCalendar();
+            refreshed = true;
+          } catch (err){
+            console.warn("Failed to render calendar after adding job", err);
+          }
+        }
+        if (typeof refreshDashboardWidgets === "function"){
+          try {
+            refreshDashboardWidgets({ full: true });
+          } catch (err){
+            console.warn("Failed to refresh dashboard widgets after adding job", err);
+          }
+        }
+        if (typeof renderNextDueWidget === "function"){
+          try {
+            renderNextDueWidget(document.getElementById("nextDueBox"));
+          } catch (err){
+            console.warn("Failed to refresh next-due widget after adding job", err);
+          }
+        }
+        if (typeof notifyDashboardLayoutContentChanged === "function"){
+          try {
+            notifyDashboardLayoutContentChanged();
+          } catch (err){
+            console.warn("Failed to notify layout change after adding job", err);
+          }
+        }
+      };
+
+      // Run immediately so the calendar and widgets update without waiting for a repaint
+      runRefresh();
+
+      if (typeof requestAnimationFrame === "function"){
+        requestAnimationFrame(()=> runRefresh());
+      } else if (typeof setTimeout === "function"){
+        setTimeout(runRefresh, 0);
+      }
+    };
+
     const newJob = { id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, priority: 1, notes:"", manualLogs:[], cat: categoryId };
-    cuttingJobs.push(newJob);
-    reorderPriorities(newJob.id, newJob.priority);
-    ensureJobCategories?.();
     if (jobCategoryInput){
       jobCategoryInput.value = dashRootCategoryId;
       jobCategoryInput.dataset.prevValue = dashRootCategoryId;
     }
     updateDashJobCategoryHint();
     window.jobCategoryFilter = previousCategoryFilter;
+    if (shouldArchiveJobImmediately(due)){
+      createCompletedJobFromNew(newJob, due);
+      ensureJobCategories?.();
+      saveCloudDebounced();
+      toast("Cutting job logged to history");
+      closeModal();
+      refreshAfterAdd();
+      return;
+    }
+    cuttingJobs.push(newJob);
+    if (typeof window !== "undefined"){
+      window.cuttingJobs = cuttingJobs;
+    }
+    reorderPriorities(newJob.id, newJob.priority);
+    ensureJobCategories?.();
     saveCloudDebounced();
     toast("Cutting job added");
     closeModal();
-    renderDashboard();
+    refreshAfterAdd();
   });
 
   if (jobCategoryInput){
@@ -5979,6 +6059,138 @@ function parseJobDate(value){
   }
   return null;
 }
+
+const normalizePriorityValue = (value)=>{
+  if (value == null) return 1;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return 1;
+  return Math.max(1, Math.floor(num));
+};
+
+const priorityEntries = ()=>{
+  const source = Array.isArray(cuttingJobs) ? cuttingJobs : [];
+  return source.map((job, index) => {
+    if (!job || job.id == null) return null;
+    const id = String(job.id);
+    const priority = typeof getJobPriority === "function"
+      ? getJobPriority(job)
+      : normalizePriorityValue(job.priority);
+    return { job, id, priority, originalIndex: index };
+  }).filter(Boolean);
+};
+
+const normalizeAllPriorities = (entries, { respectOrder = false } = {})=>{
+  const list = Array.isArray(entries) ? entries.slice() : priorityEntries();
+  if (!list.length) return list;
+  if (!respectOrder){
+    list.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      return a.originalIndex - b.originalIndex;
+    });
+  }
+  const orderMap = new Map();
+  list.forEach((entry, idx) => {
+    entry.job.priority = idx + 1;
+    orderMap.set(entry.id, idx);
+  });
+  cuttingJobs.sort((a, b) => {
+    const idA = a && a.id != null ? String(a.id) : "";
+    const idB = b && b.id != null ? String(b.id) : "";
+    const orderA = orderMap.has(idA) ? orderMap.get(idA) : Number.MAX_SAFE_INTEGER;
+    const orderB = orderMap.has(idB) ? orderMap.get(idB) : Number.MAX_SAFE_INTEGER;
+    if (orderA !== orderB) return orderA - orderB;
+    return idA.localeCompare(idB);
+  });
+  if (typeof window !== "undefined"){
+    window.cuttingJobs = cuttingJobs;
+  }
+  return list;
+};
+
+const reorderPriorities = (jobId, desiredPriority)=>{
+  const entries = priorityEntries();
+  if (!entries.length) return;
+  entries.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    return a.originalIndex - b.originalIndex;
+  });
+  const originalOrder = entries.map(entry => entry.id);
+  if (jobId == null){
+    normalizeAllPriorities(entries);
+    return;
+  }
+  const id = String(jobId);
+  const targetIndex = entries.findIndex(entry => entry.id === id);
+  if (targetIndex < 0){
+    normalizeAllPriorities(entries);
+    return;
+  }
+  const [target] = entries.splice(targetIndex, 1);
+  const normalizedDesired = normalizePriorityValue(desiredPriority);
+  const insertIndex = Math.max(0, Math.min(normalizedDesired - 1, entries.length));
+  entries.splice(insertIndex, 0, target);
+  const normalizedEntries = normalizeAllPriorities(entries, { respectOrder: true });
+  const newOrder = normalizedEntries.map(entry => entry.id);
+  if (newOrder.length === originalOrder.length){
+    const changedIds = [];
+    for (let idx = 0; idx < newOrder.length; idx += 1){
+      if (newOrder[idx] !== originalOrder[idx]){
+        if (originalOrder[idx]) changedIds.push(originalOrder[idx]);
+        if (newOrder[idx]) changedIds.push(newOrder[idx]);
+      }
+    }
+    if (changedIds.length){
+      schedulePriorityAnimation(changedIds, { duration: 500 });
+    }
+  } else {
+    schedulePriorityAnimation([id], { duration: 500 });
+  }
+};
+
+const shouldArchiveJobImmediately = (dueISO)=>{
+  const dueDate = parseJobDate(dueISO);
+  const today = parseJobDate(ymd(new Date()));
+  if (!dueDate || !today) return false;
+  return dueDate < today;
+};
+
+const createCompletedJobFromNew = (job, completionDate)=>{
+  if (!Array.isArray(completedCuttingJobs)){
+    completedCuttingJobs = [];
+  }
+  if (!Array.isArray(window.completedCuttingJobs)){
+    window.completedCuttingJobs = completedCuttingJobs;
+  }
+  const completion = parseJobDate(completionDate || job.dueISO);
+  const completionISO = completion ? completion.toISOString() : null;
+  const completed = {
+    id: job.id,
+    name: job.name,
+    estimateHours: job.estimateHours,
+    startISO: job.startISO,
+    dueISO: job.dueISO,
+    completedAtISO: completionISO,
+    notes: job.notes || "",
+    material: job.material || "",
+    materialCost: Number(job.materialCost) || 0,
+    materialQty: Number(job.materialQty) || 0,
+    chargeRate: Number.isFinite(Number(job.chargeRate)) && Number(job.chargeRate) >= 0
+      ? Number(job.chargeRate)
+      : JOB_RATE_PER_HOUR,
+    manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
+    files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
+    cat: job.cat != null ? job.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"),
+    priority: typeof getJobPriority === "function"
+      ? getJobPriority(job)
+      : normalizePriorityValue(job.priority),
+    actualHours: null,
+    efficiency: null
+  };
+
+  completedCuttingJobs.push(completed);
+  window.completedCuttingJobs = completedCuttingJobs;
+  return completed;
+};
 
 function toDateInputValue(date){
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
@@ -13018,92 +13230,6 @@ function renderJobs(){
   }
   const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
 
-  const normalizePriorityValue = (value)=>{
-    const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return 1;
-    return Math.max(1, Math.floor(num));
-  };
-
-  const priorityEntries = ()=>{
-    if (!Array.isArray(cuttingJobs)) return [];
-    return cuttingJobs.map((job, index) => {
-      if (!job || job.id == null) return null;
-      const id = String(job.id);
-      const priority = typeof getJobPriority === "function"
-        ? getJobPriority(job)
-        : normalizePriorityValue(job.priority);
-      return { job, id, priority, originalIndex: index };
-    }).filter(Boolean);
-  };
-
-  const normalizeAllPriorities = (entries, { respectOrder = false } = {})=>{
-    const list = Array.isArray(entries) ? entries.slice() : priorityEntries();
-    if (!list.length) return list;
-    if (!respectOrder){
-      list.sort((a, b) => {
-        if (a.priority !== b.priority) return a.priority - b.priority;
-        return a.originalIndex - b.originalIndex;
-      });
-    }
-    const orderMap = new Map();
-    list.forEach((entry, idx) => {
-      entry.job.priority = idx + 1;
-      orderMap.set(entry.id, idx);
-    });
-    cuttingJobs.sort((a, b) => {
-      const idA = a && a.id != null ? String(a.id) : "";
-      const idB = b && b.id != null ? String(b.id) : "";
-      const orderA = orderMap.has(idA) ? orderMap.get(idA) : Number.MAX_SAFE_INTEGER;
-      const orderB = orderMap.has(idB) ? orderMap.get(idB) : Number.MAX_SAFE_INTEGER;
-      if (orderA !== orderB) return orderA - orderB;
-      return idA.localeCompare(idB);
-    });
-    if (typeof window !== "undefined"){
-      window.cuttingJobs = cuttingJobs;
-    }
-    return list;
-  };
-
-  const reorderPriorities = (jobId, desiredPriority)=>{
-    const entries = priorityEntries();
-    if (!entries.length) return;
-    entries.sort((a, b) => {
-      if (a.priority !== b.priority) return a.priority - b.priority;
-      return a.originalIndex - b.originalIndex;
-    });
-    const originalOrder = entries.map(entry => entry.id);
-    if (jobId == null){
-      normalizeAllPriorities(entries);
-      return;
-    }
-    const id = String(jobId);
-    const targetIndex = entries.findIndex(entry => entry.id === id);
-    if (targetIndex < 0){
-      normalizeAllPriorities(entries);
-      return;
-    }
-    const [target] = entries.splice(targetIndex, 1);
-    const normalizedDesired = normalizePriorityValue(desiredPriority);
-    const insertIndex = Math.max(0, Math.min(normalizedDesired - 1, entries.length));
-    entries.splice(insertIndex, 0, target);
-    const normalizedEntries = normalizeAllPriorities(entries, { respectOrder: true });
-    const newOrder = normalizedEntries.map(entry => entry.id);
-    if (newOrder.length === originalOrder.length){
-      const changedIds = [];
-      for (let idx = 0; idx < newOrder.length; idx += 1){
-        if (newOrder[idx] !== originalOrder[idx]){
-          if (originalOrder[idx]) changedIds.push(originalOrder[idx]);
-          if (newOrder[idx]) changedIds.push(newOrder[idx]);
-        }
-      }
-      if (changedIds.length){
-        schedulePriorityAnimation(changedIds, { duration: 500 });
-      }
-    } else {
-      schedulePriorityAnimation([id], { duration: 500 });
-    }
-  };
-
   // 4) Add Job (unchanged)
   document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
@@ -13140,6 +13266,14 @@ function renderJobs(){
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
     const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
+    if (shouldArchiveJobImmediately(due)){
+      createCompletedJobFromNew(newJob, due);
+      ensureJobCategories?.();
+      pendingNewJobFiles.length = 0;
+      window.jobCategoryFilter = previousCategoryFilter;
+      saveCloudDebounced(); renderJobs();
+      return;
+    }
     cuttingJobs.push(newJob);
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
