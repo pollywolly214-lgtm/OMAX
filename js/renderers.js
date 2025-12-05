@@ -13249,6 +13249,8 @@ function renderJobs(){
     if (typeof saveCloudDebounced === "function") saveCloudDebounced();
     if (!skipToast && typeof toast === "function") toast(toastMessage);
     if (!skipRender && typeof renderJobs === "function") renderJobs();
+    if (!skipRender && typeof renderCalendar === "function") renderCalendar();
+    if (!skipRender && typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
     if (typeof onComplete === "function") onComplete(completed);
     return completed;
   };

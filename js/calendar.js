@@ -1020,13 +1020,13 @@ function showJobBubble(jobId, anchor){
         <button type="button" class="danger" data-bbl-remove-job="${j.id}">Remove</button>
       </div>`;
     b.querySelector("[data-bbl-complete-job]")?.addEventListener("click", ()=>{
-      const completed = typeof completeCuttingJobById === "function"
-        ? completeCuttingJobById(j.id)
-        : null;
-      if (completed){
-        hideBubble();
-        renderCalendar();
-        route();
+      if (typeof completeCuttingJobById === "function"){
+        completeCuttingJobById(j.id, {
+          onComplete: ()=>{
+            hideBubble();
+            route();
+          }
+        });
       }
     });
     b.querySelector("[data-bbl-remove-job]")?.addEventListener("click", ()=>{
