@@ -4315,7 +4315,16 @@ function renderDashboard(){
       taskForm.setAttribute("data-task-tracking", normalizedMode === "interval" ? (trackingChoice || "none") : "none");
     }
 
-    if (taskTrackingSelect) taskTrackingSelect.disabled = normalizedMode !== "interval" || lockTrackingSelect;
+    if (taskTrackingRow){
+      taskTrackingRow.hidden = true;
+      taskTrackingRow.setAttribute("aria-hidden", "true");
+    }
+    if (taskTypeRow){
+      taskTypeRow.hidden = true;
+      taskTypeRow.setAttribute("aria-hidden", "true");
+    }
+
+    if (taskTrackingSelect) taskTrackingSelect.disabled = true;
 
     if (normalizedMode !== "interval"){
       taskFreqRow.hidden = true;
@@ -4339,7 +4348,6 @@ function renderDashboard(){
       return;
     }
 
-    if (taskTrackingRow) taskTrackingRow.hidden = false;
     if (!trackingChoice){
       taskFreqRow.hidden = true;
       taskLastRow.hidden = true;
@@ -4349,7 +4357,6 @@ function renderDashboard(){
       if (taskRepeatRow) taskRepeatRow.hidden = true;
       [taskIntervalInput, taskLastInput, taskDailyHoursInput, taskRepeatSelect, taskRepeatEveryInput]
         .forEach(ctrl => { if (ctrl) ctrl.disabled = true; });
-      if (taskTrackingSelect) taskTrackingSelect.disabled = false;
       clearHourlyFields();
       resetCalendarRepeat();
       return;
