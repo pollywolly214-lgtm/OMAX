@@ -347,6 +347,7 @@ let FB = {
 };
 
 let firebaseInitStarted = false;
+let firebaseInitPromise = null;
 let firebaseSettingsApplied = false;
 let workspaceMetadataWritesBlocked = false;
 
@@ -407,144 +408,150 @@ function applyFirestoreSettings(db){
 }
 
 async function initFirebase(){
-  if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
-  if (!window.FIREBASE_CONFIG){ console.warn("Missing FIREBASE_CONFIG."); return; }
-  if (FB.ready) return;
-  if (firebaseInitStarted) return;
+  if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return null; }
+  if (!window.FIREBASE_CONFIG){ console.warn("Missing FIREBASE_CONFIG."); return null; }
+  if (FB.ready) return firebaseInitPromise;
+  if (firebaseInitStarted) return firebaseInitPromise;
   firebaseInitStarted = true;
 
-  // Initialize or reuse existing app to avoid duplicate-app errors
-  const existingApp = firebase.apps && firebase.apps.length ? firebase.apps[0] : null;
-  FB.app  = existingApp || firebase.initializeApp(window.FIREBASE_CONFIG);
-  FB.auth = firebase.auth();
-  FB.db   = firebase.firestore();
-  applyFirestoreSettings(FB.db);
+  firebaseInitPromise = (async ()=>{
+    // Initialize or reuse existing app to avoid duplicate-app errors
+    const existingApp = firebase.apps && firebase.apps.length ? firebase.apps[0] : null;
+    FB.app  = existingApp || firebase.initializeApp(window.FIREBASE_CONFIG);
+    FB.auth = firebase.auth();
+    FB.db   = firebase.firestore();
+    applyFirestoreSettings(FB.db);
 
-  // Persist login across refreshes
-  try {
-    await FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-  } catch (e) {
-    console.warn("Could not set auth persistence to LOCAL:", e);
-  }
+    // Persist login across refreshes
+    try {
+      await FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    } catch (e) {
+      console.warn("Could not set auth persistence to LOCAL:", e);
+    }
 
-  // UI bits
-  const statusEl = $("#authStatus");
-  const btnIn    = $("#btnSignIn");
-  const btnOut   = $("#btnSignOut");
-  const modal    = $("#authModal");
-  const form     = $("#authForm");
-  const emailEl  = $("#authEmail");
-  const passEl   = $("#authPass");
-  const btnClose = $("#authClose");
+    // UI bits
+    const statusEl = $("#authStatus");
+    const btnIn    = $("#btnSignIn");
+    const btnOut   = $("#btnSignOut");
+    const modal    = $("#authModal");
+    const form     = $("#authForm");
+    const emailEl  = $("#authEmail");
+    const passEl   = $("#authPass");
+    const btnClose = $("#authClose");
 
-  const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
-  const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
+    const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
+    const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
 
-  async function ensureEmailPassword(email, password){
-    if (!email || !password) throw new Error("Email and password required.");
-    try{
-      const cred = await FB.auth.signInWithEmailAndPassword(email,password);
-      return cred.user;
-    }catch(e){
-      if (e && e.code === "auth/user-not-found"){
-        await FB.auth.createUserWithEmailAndPassword(email,password);
+    async function ensureEmailPassword(email, password){
+      await initFirebase();
+      if (!FB.auth) throw new Error("Firebase is unavailable. Please check your connection and try again.");
+      if (!email || !password) throw new Error("Email and password required.");
+      try{
         const cred = await FB.auth.signInWithEmailAndPassword(email,password);
         return cred.user;
+      }catch(e){
+        if (e && e.code === "auth/user-not-found"){
+          await FB.auth.createUserWithEmailAndPassword(email,password);
+          const cred = await FB.auth.signInWithEmailAndPassword(email,password);
+          return cred.user;
+        }
+        throw e;
       }
-      throw e;
     }
-  }
 
-  if (btnIn)  btnIn.onclick  = showModal;
-  if (btnOut) btnOut.onclick = async ()=>{ await FB.auth.signOut(); };
-  if (btnClose) btnClose.onclick = hideModal;
+    if (btnIn)  btnIn.onclick  = ()=>{ initFirebase(); showModal(); };
+    if (btnOut) btnOut.onclick = async ()=>{ await FB.auth?.signOut(); };
+    if (btnClose) btnClose.onclick = hideModal;
 
-  if (form){
-    form.onsubmit = async (e)=>{
-      e.preventDefault();
-      try{
-        await ensureEmailPassword((emailEl.value||"").trim(), (passEl.value||"").trim());
-        hideModal();
-      }catch(err){ console.error(err); alert(err.message || "Sign-in failed"); }
+    if (form){
+      form.onsubmit = async (e)=>{
+        e.preventDefault();
+        try{
+          await ensureEmailPassword((emailEl.value||"").trim(), (passEl.value||"").trim());
+          hideModal();
+        }catch(err){ console.error(err); alert(err.message || "Sign-in failed"); }
+      };
+    }
+
+    const loginShortcutCredentials = {
+      email: "ryder@candmprecast.com",
+      password: "Matthew7:21",
     };
-  }
 
-  const loginShortcutCredentials = {
-    email: "ryder@candmprecast.com",
-    password: "Matthew7:21",
-  };
+    let loginShortcutSigningIn = false;
 
-  let loginShortcutSigningIn = false;
+    const handleLoginShortcut = async (event)=>{
+      if (!(event && (event.ctrlKey || event.metaKey))) return;
+      const key = (event.key || "").toLowerCase();
+      if (key !== "s") return;
+      if (FB.user) return;
+      event.preventDefault();
 
-  const handleLoginShortcut = async (event)=>{
-    if (!(event && (event.ctrlKey || event.metaKey))) return;
-    const key = (event.key || "").toLowerCase();
-    if (key !== "s") return;
-    if (FB.user) return;
-    event.preventDefault();
+      if (loginShortcutSigningIn) return;
+      loginShortcutSigningIn = true;
 
-    if (loginShortcutSigningIn) return;
-    loginShortcutSigningIn = true;
+      try {
+        const { email, password } = loginShortcutCredentials;
+        if (emailEl) {
+          emailEl.value = email;
+          emailEl.focus();
+          emailEl.select();
+        }
+        if (passEl) {
+          passEl.value = password;
+        }
 
-    try {
-      const { email, password } = loginShortcutCredentials;
-      if (emailEl) {
-        emailEl.value = email;
-        emailEl.focus();
-        emailEl.select();
+        showModal();
+        await ensureEmailPassword(email, password);
+        hideModal();
+      } catch (err) {
+        console.error("Login shortcut failed", err);
+        toast(err?.message || "Login shortcut failed");
+      } finally {
+        loginShortcutSigningIn = false;
       }
-      if (passEl) {
-        passEl.value = password;
+    };
+
+    window.addEventListener("keydown", handleLoginShortcut);
+
+    FB.auth.onAuthStateChanged(async (user)=>{
+      FB.user = user || null;
+      workspaceMetadataWritesBlocked = false;
+      if (user){
+        if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
+        if (btnIn)  btnIn.style.display  = "none";
+        if (btnOut) btnOut.style.display = "inline-block";
+
+        // Store workspace state in workspaces/<id>/app/state
+        FB.workspaceDoc = FB.db.collection("workspaces").doc(WORKSPACE_ID);
+        FB.workspaceRef = FB.workspaceDoc.collection("app").doc("state");
+        FB.docRef = FB.workspaceRef;
+        if (typeof window !== "undefined") {
+          window.workspaceDocRef = FB.workspaceDoc;
+          window.workspaceRef = FB.workspaceRef;
+        }
+        FB.ready = true;
+        try { setupDebugPanel(); } catch (e) {}
+        await loadFromCloud();
+        route();
+      }else{
+        FB.ready = false;
+        FB.workspaceRef = null;
+        FB.workspaceDoc = null;
+        FB.docRef = null;
+        if (typeof window !== "undefined") {
+          window.workspaceRef = null;
+          window.workspaceDocRef = null;
+        }
+        if (statusEl) statusEl.textContent = "Not signed in";
+        if (btnIn)  btnIn.style.display  = "inline-block";
+        if (btnOut) btnOut.style.display = "none";
+        renderSignedOut();
       }
+    });
+  })();
 
-      showModal();
-      await ensureEmailPassword(email, password);
-      hideModal();
-    } catch (err) {
-      console.error("Login shortcut failed", err);
-      toast(err?.message || "Login shortcut failed");
-    } finally {
-      loginShortcutSigningIn = false;
-    }
-  };
-
-  window.addEventListener("keydown", handleLoginShortcut);
-
-  FB.auth.onAuthStateChanged(async (user)=>{
-    FB.user = user || null;
-    workspaceMetadataWritesBlocked = false;
-    if (user){
-      if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
-      if (btnIn)  btnIn.style.display  = "none";
-      if (btnOut) btnOut.style.display = "inline-block";
-
-      // Store workspace state in workspaces/<id>/app/state
-      FB.workspaceDoc = FB.db.collection("workspaces").doc(WORKSPACE_ID);
-      FB.workspaceRef = FB.workspaceDoc.collection("app").doc("state");
-      FB.docRef = FB.workspaceRef;
-      if (typeof window !== "undefined") {
-        window.workspaceDocRef = FB.workspaceDoc;
-        window.workspaceRef = FB.workspaceRef;
-      }
-      FB.ready = true;
-      try { setupDebugPanel(); } catch (e) {}
-      await loadFromCloud();
-      route();
-    }else{
-      FB.ready = false;
-      FB.workspaceRef = null;
-      FB.workspaceDoc = null;
-      FB.docRef = null;
-      if (typeof window !== "undefined") {
-        window.workspaceRef = null;
-        window.workspaceDocRef = null;
-      }
-      if (statusEl) statusEl.textContent = "Not signed in";
-      if (btnIn)  btnIn.style.display  = "inline-block";
-      if (btnOut) btnOut.style.display = "none";
-      renderSignedOut();
-    }
-  });
+  return firebaseInitPromise;
 }
 
 
