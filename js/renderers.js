@@ -4979,12 +4979,49 @@ function renderDashboard(){
         }
       };
 
+      const forceCalendarHydration = (attempt = 0)=>{
+        const maxAttempts = 3;
+        const rerenderCalendarOnly = ()=>{
+          if (typeof refreshGlobalCollections === "function"){
+            try { refreshGlobalCollections(); }
+            catch (err){ console.warn("Failed to sync collections before calendar hydration", err); }
+          }
+          if (typeof renderCalendar === "function"){
+            try { renderCalendar(); }
+            catch (err){ console.warn("Failed to hydrate calendar after adding job", err); }
+          }
+          if (typeof setupCalendarHoursControls === "function"){
+            try { setupCalendarHoursControls(); }
+            catch (err){ console.warn("Failed to refresh calendar controls after adding job", err); }
+          }
+        };
+
+        const monthsContainer = document.getElementById("months");
+        if (monthsContainer){
+          rerenderCalendarOnly();
+          return;
+        }
+
+        if (attempt >= maxAttempts) return;
+
+        const scheduleNext = ()=>forceCalendarHydration(attempt + 1);
+        if (typeof requestAnimationFrame === "function"){
+          requestAnimationFrame(scheduleNext);
+        } else if (typeof setTimeout === "function"){
+          setTimeout(scheduleNext, 80 * (attempt + 1));
+        } else {
+          scheduleNext();
+        }
+      };
+
       // Run immediately so the calendar updates without waiting for the next frame
       rerenderDashboardAndCalendar();
+      forceCalendarHydration();
 
       // Also schedule a follow-up render in case routing or async work resets the view
       const scheduledRefresh = ()=>{
         rerenderDashboardAndCalendar();
+        forceCalendarHydration();
         if (typeof route === "function"){
           try { route(); }
           catch (err){ console.warn("Failed to route after adding job", err); }
@@ -5004,7 +5041,10 @@ function renderDashboard(){
       }
 
       if (typeof setTimeout === "function"){
-        setTimeout(rerenderDashboardAndCalendar, 120);
+        setTimeout(()=>{
+          rerenderDashboardAndCalendar();
+          forceCalendarHydration();
+        }, 120);
       }
     };
 
