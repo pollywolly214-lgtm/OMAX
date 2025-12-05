@@ -4951,27 +4951,24 @@ function renderDashboard(){
           }
         }
 
-        let refreshed = false;
+        if (typeof route === "function"){
+          try {
+            route();
+          } catch (err){
+            console.warn("Failed to route after adding job", err);
+          }
+        }
+
         if (typeof renderDashboard === "function"){
           try {
             renderDashboard();
-            refreshed = true;
           } catch (err){
             console.warn("Failed to render dashboard after adding job", err);
-          }
-        }
-        if (!refreshed && typeof route === "function"){
-          try {
-            route();
-            refreshed = true;
-          } catch (err){
-            console.warn("Failed to route after adding job", err);
           }
         }
         if (typeof renderCalendar === "function"){
           try {
             renderCalendar();
-            refreshed = true;
           } catch (err){
             console.warn("Failed to render calendar after adding job", err);
           }
