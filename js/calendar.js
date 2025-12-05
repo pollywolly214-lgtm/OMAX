@@ -649,8 +649,44 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     return changed;
   }
 
-  const removedChanged = clearRemovedOccurrences(task, matchesScope);
-  if (removedChanged) changed = true;
+  if (mode === "interval"){
+    const removedSet = normalizeRemovedOccurrences(task);
+    const removedBefore = removedSet.size;
+    const addRemoved = (value)=>{
+      const normalized = normalizeDateKey(value);
+      if (!normalized) return;
+      if (!matchesScope(normalized)) return;
+      removedSet.add(normalized);
+    };
+
+    if (normalizedScope === "single"){
+      if (markOccurrenceRemoved(task, key)) changed = true;
+    }else{
+      addRemoved(key);
+      const addObjectKeys = (obj)=>{
+        if (!obj || typeof obj !== "object") return;
+        Object.keys(obj).forEach(addRemoved);
+      };
+      const addArrayValues = (arr)=>{
+        if (!Array.isArray(arr)) return;
+        arr.forEach(addRemoved);
+      };
+
+      addArrayValues(task.completedDates);
+      addObjectKeys(task.occurrenceNotes);
+      addObjectKeys(task.occurrenceHours);
+      addArrayValues(Array.isArray(task.manualHistory) ? task.manualHistory.map(entry => entry?.dateISO) : []);
+      addRemoved(task.calendarDateISO);
+
+      if (removedSet.size !== removedBefore){
+        task.removedOccurrences = Array.from(removedSet);
+        changed = true;
+      }
+    }
+  }else{
+    const removedChanged = clearRemovedOccurrences(task, matchesScope);
+    if (removedChanged) changed = true;
+  }
 
   const pruneOccurrenceObject = (obj)=>{
     if (!obj || typeof obj !== "object") return false;
