@@ -96,12 +96,6 @@ function pumpCompareEntriesDesc(a, b){
   return dateB.localeCompare(dateA);
 }
 
-function pumpGetRecentEntries(limit = 5){
-  const entries = pumpEnsureEntriesArray().slice().sort(pumpCompareEntriesDesc);
-  if (!isFinite(limit) || limit <= 0) return entries;
-  return entries.slice(0, limit);
-}
-
 function pumpSetEditingDate(dateISO){
   pumpEditingDateISO = dateISO || null;
   if (typeof window !== "undefined"){
@@ -852,23 +846,10 @@ function viewPumpLogWidget(){
   const logCtaLabel = "Add / Update";
   const latestDateTimeLabel = latest ? pumpFormatDateWithTimeLabel(latest.dateISO, pumpGetEntryTimeISO(latest)) : "";
   const latestTxt   = latest ? `${latest.rpm} RPM (${latestDateTimeLabel || latest.dateISO})` : "—";
-  const recentEntries = pumpGetRecentEntries(5);
-  const recentList = recentEntries.length
-    ? `<ul class="pump-log-list">${recentEntries.map(entry => {
-        const timeLabel = pumpFormatEntryTime(entry);
-        const dateLabel = pumpFormatShortDate(entry.dateISO);
-        const rpmLabel = Number.isFinite(entry.rpm) ? `${Number(entry.rpm).toLocaleString()} RPM` : "—";
-        const detail = [dateLabel, timeLabel].filter(Boolean).join(" · ");
-        return [
-          `<li class="pump-log-item">`,
-            `<div class="pump-log-item-meta">${pumpEscapeTooltipValue(detail)}</div>`,
-            `<div class="pump-log-item-main">`,
-              `<span class="pump-log-rpm">${pumpEscapeTooltipValue(rpmLabel)}</span>`,
-            `</div>`,
-          `</li>`
-        ].join("");
-      }).join("")}</ul>`
-    : `<div class="pump-log-empty">No pump logs yet to edit.</div>`;
+  const hasLogs = pumpEff.entries.length > 0;
+  const editHelp = hasLogs
+    ? "Open the table to review past logs and correct any RPMs."
+    : "Add a log to enable editing past entries.";
   return `
   <details class="pump-card" open>
     <summary><b>Pump Efficiency</b> <span class="chip ${col.cls}">${col.label}</span></summary>
@@ -894,13 +875,12 @@ function viewPumpLogWidget(){
         <div class="pump-log-history-header">
           <div class="pump-log-history-actions">
             <div>
-              <h4>Recent logs</h4>
-              <p class="small muted">Open all logs to correct any RPMs and keep trends accurate.</p>
+              <h4>Edit logs</h4>
+              <p class="small muted">${editHelp}</p>
             </div>
-            ${pumpEff.entries.length ? `<button type="button" class="pump-log-edit-all-btn" id="pumpEditAllBtn">Edit logs</button>` : ""}
+            ${hasLogs ? `<button type="button" class="pump-log-edit-all-btn" id="pumpEditAllBtn">Edit logs</button>` : ""}
           </div>
         </div>
-        ${recentList}
       </div>
       <div class="pump-stats">
         <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO || "—"})` : "—"}</span></div>
