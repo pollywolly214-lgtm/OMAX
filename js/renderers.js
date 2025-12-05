@@ -1457,10 +1457,54 @@ function renderNextDueWidget(ndBox){
   if (!ndBox) return;
 
   const escapeHtml = (str)=> String(str||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const dayMs = 24 * 60 * 60 * 1000;
+  const normalizeKey = typeof normalizeDateKey === "function"
+    ? normalizeDateKey
+    : (value)=> (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) ? value : null;
+  const parseLocal = typeof parseDateLocal === "function"
+    ? parseDateLocal
+    : (value)=> new Date(value);
+  const toDayStart = (value)=>{
+    const key = normalizeKey(value);
+    if (!key) return null;
+    const parsed = parseLocal(key);
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+    parsed.setHours(0,0,0,0);
+    return parsed;
+  };
+  const completedDatesFor = (task)=> new Set(
+    Array.isArray(task?.completedDates)
+      ? task.completedDates.map(normalizeKey).filter(Boolean)
+      : []
+  );
+
   const upcoming = tasksInterval
     .filter(task => task && task.mode === "interval" && isInstanceTask(task))
-    .map(t => ({ t, nd: nextDue(t) }))
-    .filter(x => x.nd)
+    .map(t => {
+      const nd = nextDue(t);
+      if (!nd || !(nd.due instanceof Date)) return null;
+
+      const completedSet = completedDatesFor(t);
+      const manualKey = normalizeKey(t.calendarDateISO);
+      const manualDate = manualKey ? toDayStart(manualKey) : null;
+      let dueDate = nd.due;
+      let days = nd.days;
+
+      if (manualDate && !completedSet.has(manualKey)){
+        const manualDays = Math.round((manualDate.getTime() - today.getTime()) / dayMs);
+        const manualIsEarlier = manualDate.getTime() < dueDate.getTime();
+        const manualIsPast = manualDate.getTime() < today.getTime();
+        if (manualIsEarlier || manualIsPast){
+          dueDate = manualDate;
+          days = manualDays;
+        }
+      }
+
+      return { t, nd: { ...nd, due: dueDate, days } };
+    })
+    .filter(x => x && x.nd)
     .sort((a,b)=> a.nd.due - b.nd.due)
     .slice(0,8);
 
@@ -1478,7 +1522,8 @@ function renderNextDueWidget(ndBox){
   if (upcoming.length){
     const formatDate = (date)=> date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
     const formatDueLine = (days, dueText)=>{
-      if (days <= 0) return `Due today · ${dueText}`;
+      if (days < 0) return `Past due · ${dueText}`;
+      if (days === 0) return `Due today · ${dueText}`;
       if (days === 1) return `Due tomorrow · ${dueText}`;
       return `Due in ${days} days · ${dueText}`;
     };
@@ -1492,7 +1537,8 @@ function renderNextDueWidget(ndBox){
       return "is-due-later";
     };
     const buildMetaHtml = (nd)=>{
-      const dueLine = formatDueLine(Math.max(0, nd.days ?? 0), formatDate(nd.due));
+      const daysValue = Number.isFinite(nd.days) ? nd.days : 0;
+      const dueLine = formatDueLine(daysValue, formatDate(nd.due));
       const remainLine = formatRemain(nd.remain);
       return `
         <span class="next-due-meta-line">${escapeHtml(dueLine)}</span>
@@ -1500,7 +1546,8 @@ function renderNextDueWidget(ndBox){
       `.trim();
     };
     const buildAriaLabel = (name, nd)=>{
-      const dueLine = formatDueLine(Math.max(0, nd.days ?? 0), formatDate(nd.due));
+      const daysValue = Number.isFinite(nd.days) ? nd.days : 0;
+      const dueLine = formatDueLine(daysValue, formatDate(nd.due));
       const remainLine = formatRemain(nd.remain);
       return `${name} — ${dueLine}, ${remainLine}`;
     };
@@ -1511,12 +1558,12 @@ function renderNextDueWidget(ndBox){
     const featuredSettingsAttr = featuredSettingsId ? ` data-settings-task="${escapeHtml(featuredSettingsId)}"` : "";
     const featuredMeta = buildMetaHtml(featured.nd);
     const featuredStatus = statusClass(featured.nd.days);
-    const countdownNumber = featured.nd.days <= 0
-      ? "Due"
-      : Math.max(0, featured.nd.days).toLocaleString();
-    const countdownLabel = featured.nd.days <= 0
-      ? "today"
-      : (featured.nd.days === 1 ? "day left" : "days left");
+    const countdownNumber = featured.nd.days < 0
+      ? Math.abs(featured.nd.days).toLocaleString()
+      : (featured.nd.days <= 0 ? "Due" : Math.max(0, featured.nd.days).toLocaleString());
+    const countdownLabel = featured.nd.days < 0
+      ? "days late"
+      : (featured.nd.days <= 0 ? "today" : (featured.nd.days === 1 ? "day left" : "days left"));
     const eyebrow = featured.nd.days <= 0 ? "Due now" : "Next due";
     const featuredButton = `
       <button type="button" class="next-due-task next-due-featured ${featuredStatus} cal-task"
