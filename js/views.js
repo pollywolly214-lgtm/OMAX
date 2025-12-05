@@ -309,7 +309,12 @@ function viewDashboard(){
             <p class="small muted">Enter task details and we&rsquo;ll drop it into your schedule.</p>
           </div>
         </div>
-        <div class="task-option-body" data-new-task-stage="mode">
+        <div class="task-option-body task-stage" data-new-task-stage="mode">
+          <div>
+            <p class="task-option-kicker">Scheduling type</p>
+            <p class="task-option-stage-title">How should this be scheduled?</p>
+            <p class="small muted">Pick one path to continue.</p>
+          </div>
           <div class="task-option-grid">
             <button type="button" class="task-option" data-new-task-mode="interval">
               <span class="task-option-title">Per interval</span>
@@ -325,10 +330,12 @@ function viewDashboard(){
           </div>
         </div>
 
-        <div class="task-option-body" data-new-task-stage="tracking" hidden aria-hidden="true">
-          <p class="task-option-kicker">Per interval</p>
-          <p class="task-option-stage-title">How should this repeat?</p>
-          <p class="small muted">Choose one tracking path to continue.</p>
+        <div class="task-option-body task-stage" data-new-task-stage="tracking" hidden aria-hidden="true">
+          <div>
+            <p class="task-option-kicker">Per interval</p>
+            <p class="task-option-stage-title">Choose a single tracking method</p>
+            <p class="small muted">Calendar intervals and machine hours are separate paths.</p>
+          </div>
           <div class="task-option-grid">
             <button type="button" class="task-option" data-new-task-tracking="calendar">
               <span class="task-option-title">Calendar days</span>
@@ -344,7 +351,7 @@ function viewDashboard(){
           </div>
         </div>
 
-        <form id="dashTaskForm" class="modal-form task-option-body" data-task-variant="new" data-new-task-stage="form" hidden aria-hidden="true">
+        <form id="dashTaskForm" class="modal-form task-option-body task-stage" data-task-variant="new" data-new-task-stage="form" hidden aria-hidden="true">
           <div class="task-mode-summary" data-new-task-summary hidden aria-hidden="true">
             <div class="task-mode-summary-text" data-new-task-summary-text></div>
             <button type="button" class="secondary" data-new-task-change>Change selection</button>

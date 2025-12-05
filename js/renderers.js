@@ -3743,6 +3743,7 @@ function renderDashboard(){
   let selectedExistingTaskId = null;
   let newTaskModeChoice = null;
   let newTaskTrackingChoice = null;
+  let newTaskStage = "mode";
   let lockTrackingSelect = false;
 
   function setSelectedExistingTask(id){
@@ -3760,7 +3761,7 @@ function renderDashboard(){
     if (!newTaskSummary || !newTaskSummaryText){
       return;
     }
-    if (!newTaskModeChoice){
+    if (!newTaskModeChoice || newTaskStage !== "form"){
       newTaskSummary.hidden = true;
       newTaskSummary.setAttribute("aria-hidden", "true");
       return;
@@ -3776,6 +3777,7 @@ function renderDashboard(){
   function setNewTaskStage(stage){
     const allowed = ["mode", "tracking", "form"];
     const next = allowed.includes(stage) ? stage : "mode";
+    newTaskStage = next;
     newTaskStages.forEach(section => {
       if (!section) return;
       const match = section.getAttribute("data-new-task-stage") === next;
@@ -3788,6 +3790,7 @@ function renderDashboard(){
       taskForm.setAttribute("aria-hidden", showForm ? "false" : "true");
     }
     modal?.setAttribute("data-new-task-stage", next);
+    updateNewTaskSummary();
     if (next === "mode" && newTaskModeButtons[0]) newTaskModeButtons[0].focus();
     if (next === "tracking" && newTaskTrackingButtons[0]) newTaskTrackingButtons[0].focus();
     if (next === "form" && taskNameInput) taskNameInput.focus();
@@ -3987,7 +3990,7 @@ function renderDashboard(){
       }
     }else{
       resetNewTaskSelections();
-      syncTaskMode(taskTypeSelect?.value || "interval");
+      syncTaskMode("");
       syncTaskDateInput();
       if (taskNameInput){
         taskNameInput.focus();
