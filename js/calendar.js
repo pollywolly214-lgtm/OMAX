@@ -139,7 +139,22 @@ function hideBubble(){
   const b = document.getElementById("bubble");
   if (b) b.remove();
 }
-function hideBubbleSoon(){ clearTimeout(bubbleTimer); bubbleTimer = setTimeout(hideBubble, 180); }
+function hideBubbleSoon(){
+  clearTimeout(bubbleTimer);
+  bubbleTimer = setTimeout(()=>{
+    const b = document.getElementById("bubble");
+    if (!b){
+      hideBubble();
+      return;
+    }
+    const activeEl = document.activeElement;
+    if (b.matches(":hover") || (activeEl && b.contains(activeEl))){
+      hideBubbleSoon();
+      return;
+    }
+    hideBubble();
+  }, 180);
+}
 function triggerDashboardAddPicker(opts){
   const detail = (opts && typeof opts === "object") ? { ...opts } : {};
   const enqueueRequest = ()=>{
@@ -677,6 +692,23 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
       addObjectKeys(task.occurrenceHours);
       addArrayValues(Array.isArray(task.manualHistory) ? task.manualHistory.map(entry => entry?.dateISO) : []);
       addRemoved(task.calendarDateISO);
+
+      const projected = projectIntervalDueDates(task, { monthsAhead: 12, minOccurrences: 12 });
+      projected.forEach(pred => {
+        const projectedKey = normalizeDateKey(pred?.dateISO);
+        if (!projectedKey) return;
+        if (normalizedScope === "all"){
+          removedSet.add(projectedKey);
+          return;
+        }
+        const projectedDate = toDayStart(projectedKey);
+        const projectedTime = (projectedDate instanceof Date && !Number.isNaN(projectedDate.getTime()))
+          ? projectedDate.getTime()
+          : null;
+        if (targetTime != null && projectedTime != null && projectedTime >= targetTime){
+          removedSet.add(projectedKey);
+        }
+      });
 
       if (removedSet.size !== removedBefore){
         task.removedOccurrences = Array.from(removedSet);
