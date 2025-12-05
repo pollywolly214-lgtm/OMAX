@@ -216,7 +216,7 @@ function normalizeCalendarPlan(plan, defaultStart = null){
   };
 }
 
-function buildCalendarOccurrences(plan, { maxOccurrences = 12 } = {}){
+function buildCalendarOccurrences(plan, { maxOccurrences = 52 } = {}){
   const normalized = normalizeCalendarPlan(plan);
   const occurrences = [];
   if (!normalized.startDateISO || typeof ymd !== "function") return occurrences;
@@ -3596,6 +3596,7 @@ function renderDashboard(){
   const taskDowntimeInput= document.getElementById("dashTaskDowntime");
   const categorySelect   = document.getElementById("dashTaskCategory");
   const taskDateInput    = document.getElementById("dashTaskDate");
+  const taskTypeRow      = taskForm?.querySelector("[data-task-type-row]");
   const taskTrackingRow  = taskForm?.querySelector("[data-task-tracking]");
   const taskDailyHoursRow = taskForm?.querySelector("[data-task-daily-hours]");
   const taskCalendarRow = taskForm?.querySelector("[data-task-calendar]");
@@ -3612,6 +3613,13 @@ function renderDashboard(){
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
   const taskExistingNoteInput = document.getElementById("dashTaskExistingNote");
   const taskCardBackButtons = Array.from(modal?.querySelectorAll('[data-task-card-back]') || []);
+  const newTaskStages = Array.from(modal?.querySelectorAll('[data-new-task-stage]') || []);
+  const newTaskModeButtons = Array.from(modal?.querySelectorAll('[data-new-task-mode]') || []);
+  const newTaskTrackingButtons = Array.from(modal?.querySelectorAll('[data-new-task-tracking]') || []);
+  const newTaskBackButtons = Array.from(modal?.querySelectorAll('[data-new-task-back]') || []);
+  const newTaskSummary = modal?.querySelector('[data-new-task-summary]');
+  const newTaskSummaryText = modal?.querySelector('[data-new-task-summary-text]');
+  const newTaskChangeButton = modal?.querySelector('[data-new-task-change]');
   const oneTimeForm      = document.getElementById("dashOneTimeForm");
   const oneTimeNameInput = document.getElementById("dashOneTimeName");
   const oneTimeDateInput = document.getElementById("dashOneTimeDate");
@@ -3733,6 +3741,9 @@ function renderDashboard(){
 
   let activeTaskVariant = null;
   let selectedExistingTaskId = null;
+  let newTaskModeChoice = null;
+  let newTaskTrackingChoice = null;
+  let lockTrackingSelect = false;
 
   function setSelectedExistingTask(id){
     selectedExistingTaskId = id || null;
@@ -3743,6 +3754,120 @@ function renderDashboard(){
       btn.classList.toggle("is-active", isMatch);
       btn.setAttribute("aria-pressed", isMatch ? "true" : "false");
     });
+  }
+
+  function updateNewTaskSummary(){
+    if (!newTaskSummary || !newTaskSummaryText){
+      return;
+    }
+    if (!newTaskModeChoice){
+      newTaskSummary.hidden = true;
+      newTaskSummary.setAttribute("aria-hidden", "true");
+      return;
+    }
+    const label = newTaskModeChoice === "asreq"
+      ? "As required — single calendar date"
+      : `Per interval — ${newTaskTrackingChoice === "calendar" ? "Calendar days" : "Machine run time hours"}`;
+    newTaskSummaryText.textContent = label;
+    newTaskSummary.hidden = false;
+    newTaskSummary.setAttribute("aria-hidden", "false");
+  }
+
+  function setNewTaskStage(stage){
+    const allowed = ["mode", "tracking", "form"];
+    const next = allowed.includes(stage) ? stage : "mode";
+    newTaskStages.forEach(section => {
+      if (!section) return;
+      const match = section.getAttribute("data-new-task-stage") === next;
+      section.hidden = !match;
+      section.setAttribute("aria-hidden", match ? "false" : "true");
+    });
+    if (taskForm){
+      const showForm = next === "form";
+      taskForm.hidden = !showForm;
+      taskForm.setAttribute("aria-hidden", showForm ? "false" : "true");
+    }
+    modal?.setAttribute("data-new-task-stage", next);
+    if (next === "mode" && newTaskModeButtons[0]) newTaskModeButtons[0].focus();
+    if (next === "tracking" && newTaskTrackingButtons[0]) newTaskTrackingButtons[0].focus();
+    if (next === "form" && taskNameInput) taskNameInput.focus();
+  }
+
+  function resetNewTaskSchedulingFields(){
+    [taskIntervalInput, taskLastInput, taskDailyHoursInput, taskDateInput]
+      .forEach(ctrl => { if (ctrl) ctrl.value = ""; });
+    if (taskRepeatSelect){ taskRepeatSelect.value = "none"; }
+    if (taskRepeatEveryInput){ taskRepeatEveryInput.value = "1"; }
+  }
+
+  function resetNewTaskSelections(){
+    newTaskModeChoice = null;
+    newTaskTrackingChoice = null;
+    lockTrackingSelect = false;
+    if (taskTypeSelect){
+      taskTypeSelect.disabled = false;
+      taskTypeSelect.value = "";
+    }
+    if (taskTrackingSelect){
+      taskTrackingSelect.disabled = true;
+      taskTrackingSelect.value = "";
+    }
+    if (taskTrackingRow) taskTrackingRow.hidden = true;
+    if (taskTypeRow){
+      taskTypeRow.hidden = true;
+      taskTypeRow.setAttribute("aria-hidden", "true");
+    }
+    resetNewTaskSchedulingFields();
+    setNewTaskStage("mode");
+    updateNewTaskSummary();
+    syncTaskMode("");
+  }
+
+  function applyNewTaskMode(mode){
+    const normalized = mode === "interval" ? "interval" : "asreq";
+    newTaskModeChoice = normalized;
+    newTaskTrackingChoice = null;
+    lockTrackingSelect = true;
+    if (taskTypeSelect){
+      taskTypeSelect.value = normalized;
+      taskTypeSelect.disabled = true;
+    }
+    if (taskTrackingSelect){
+      taskTrackingSelect.value = "";
+      taskTrackingSelect.disabled = true;
+    }
+    if (taskTrackingRow) taskTrackingRow.hidden = true;
+    if (taskTypeRow){
+      taskTypeRow.hidden = true;
+      taskTypeRow.setAttribute("aria-hidden", "true");
+    }
+    resetNewTaskSchedulingFields();
+    syncTaskMode(taskTypeSelect?.value || normalized);
+    updateNewTaskSummary();
+    if (normalized === "interval"){ setNewTaskStage("tracking"); }
+    else {
+      setNewTaskStage("form");
+      syncTaskDateInput();
+    }
+  }
+
+  function applyNewTaskTracking(tracking){
+    if (!newTaskModeChoice) return;
+    newTaskTrackingChoice = tracking === "calendar" ? "calendar" : "pump";
+    lockTrackingSelect = true;
+    if (taskTypeSelect){
+      taskTypeSelect.value = newTaskModeChoice;
+      taskTypeSelect.disabled = true;
+    }
+    if (taskTrackingSelect){
+      taskTrackingSelect.value = newTaskTrackingChoice;
+      taskTrackingSelect.disabled = true;
+    }
+    if (taskTrackingRow) taskTrackingRow.hidden = true;
+    syncTaskMode(taskTypeSelect?.value || newTaskModeChoice);
+    updateNewTaskSummary();
+    setNewTaskStage("form");
+    syncTaskDateInput();
   }
 
   function setTaskOptionPage(target){
@@ -3861,6 +3986,7 @@ function renderDashboard(){
         oneTimeNameInput.focus();
       }
     }else{
+      resetNewTaskSelections();
       syncTaskMode(taskTypeSelect?.value || "interval");
       syncTaskDateInput();
       if (taskNameInput){
@@ -4186,7 +4312,7 @@ function renderDashboard(){
       taskForm.setAttribute("data-task-tracking", normalizedMode === "interval" ? (trackingChoice || "none") : "none");
     }
 
-    if (taskTrackingSelect) taskTrackingSelect.disabled = normalizedMode !== "interval";
+    if (taskTrackingSelect) taskTrackingSelect.disabled = normalizedMode !== "interval" || lockTrackingSelect;
 
     if (normalizedMode !== "interval"){
       taskFreqRow.hidden = true;
@@ -4254,15 +4380,13 @@ function renderDashboard(){
     if (taskDowntimeInput){
       taskDowntimeInput.value = "1";
     }
-    if (taskTypeSelect){ taskTypeSelect.value = ""; }
-    if (taskTrackingSelect){ taskTrackingSelect.value = ""; }
     if (taskDailyHoursInput){ taskDailyHoursInput.value = "8"; }
     if (taskRepeatSelect){ taskRepeatSelect.value = "none"; }
     if (taskRepeatEveryInput){ taskRepeatEveryInput.value = "1"; }
     subtaskList?.replaceChildren();
     resetExistingTaskForm();
+    resetNewTaskSelections();
     showTaskOptionStage();
-    syncTaskMode(taskTypeSelect?.value || "");
     syncTaskDateInput();
   }
 
@@ -4514,6 +4638,7 @@ function renderDashboard(){
 
   taskCardBackButtons.forEach(btn => {
     btn.addEventListener("click", ()=>{
+      resetNewTaskSelections();
       showTaskOptionStage();
       showStep("task");
     });
@@ -4524,6 +4649,33 @@ function renderDashboard(){
       const variant = btn.getAttribute("data-task-option");
       activateTaskVariant(variant);
     });
+  });
+
+  newTaskModeButtons.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const choice = btn.getAttribute("data-new-task-mode") || "";
+      applyNewTaskMode(choice);
+    });
+  });
+
+  newTaskTrackingButtons.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const choice = btn.getAttribute("data-new-task-tracking") || "";
+      applyNewTaskTracking(choice);
+    });
+  });
+
+  newTaskBackButtons.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const target = btn.getAttribute("data-new-task-back") || "mode";
+      if (target === "mode"){ resetNewTaskSelections(); }
+      else { setNewTaskStage(target); }
+    });
+  });
+
+  newTaskChangeButton?.addEventListener("click", ()=>{
+    resetNewTaskSelections();
+    setTaskOptionPage("new");
   });
 
   taskExistingSearchInput?.addEventListener("input", ()=>{

@@ -309,10 +309,49 @@ function viewDashboard(){
             <p class="small muted">Enter task details and we&rsquo;ll drop it into your schedule.</p>
           </div>
         </div>
-        <form id="dashTaskForm" class="modal-form task-option-body" data-task-variant="new">
+        <div class="task-option-body" data-new-task-stage="mode">
+          <div class="task-option-grid">
+            <button type="button" class="task-option" data-new-task-mode="interval">
+              <span class="task-option-title">Per interval</span>
+              <span class="task-option-sub">Set cadence by usage hours or calendar dates.</span>
+            </button>
+            <button type="button" class="task-option" data-new-task-mode="asreq">
+              <span class="task-option-title">As required</span>
+              <span class="task-option-sub">Pick a single date without repeats.</span>
+            </button>
+          </div>
+          <div class="task-option-actions">
+            <button type="button" class="secondary" data-task-card-back>Back</button>
+          </div>
+        </div>
+
+        <div class="task-option-body" data-new-task-stage="tracking" hidden aria-hidden="true">
+          <p class="task-option-kicker">Per interval</p>
+          <p class="task-option-stage-title">How should this repeat?</p>
+          <p class="small muted">Choose one tracking path to continue.</p>
+          <div class="task-option-grid">
+            <button type="button" class="task-option" data-new-task-tracking="calendar">
+              <span class="task-option-title">Calendar days</span>
+              <span class="task-option-sub">Place occurrences on specific dates (e.g., every Monday).</span>
+            </button>
+            <button type="button" class="task-option" data-new-task-tracking="pump">
+              <span class="task-option-title">Machine run time</span>
+              <span class="task-option-sub">Track by logged hours with estimated hours per day.</span>
+            </button>
+          </div>
+          <div class="task-option-actions">
+            <button type="button" class="secondary" data-new-task-back="mode">Back</button>
+          </div>
+        </div>
+
+        <form id="dashTaskForm" class="modal-form task-option-body" data-task-variant="new" data-new-task-stage="form" hidden aria-hidden="true">
+          <div class="task-mode-summary" data-new-task-summary hidden aria-hidden="true">
+            <div class="task-mode-summary-text" data-new-task-summary-text></div>
+            <button type="button" class="secondary" data-new-task-change>Change selection</button>
+          </div>
           <div class="modal-grid">
             <label>Task name<input id="dashTaskName" required placeholder="Task"></label>
-            <label>Type<select id="dashTaskType" required>
+            <label data-task-type-row hidden aria-hidden="true">Type<select id="dashTaskType" required>
               <option value="" disabled selected>Select scheduling type</option>
               <option value="interval">Per interval</option>
               <option value="asreq">As required</option>
@@ -320,7 +359,7 @@ function viewDashboard(){
             <label data-task-frequency hidden>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
             <label data-task-last hidden>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
             <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
-            <label data-task-tracking hidden>Tracking<select id="dashTaskTracking" required>
+            <label data-task-tracking hidden aria-hidden="true">Tracking<select id="dashTaskTracking" required>
               <option value="" disabled selected>Select tracking method</option>
               <option value="pump">Usage hours (log hours + est./day)</option>
               <option value="calendar">Calendar day / repeating</option>
