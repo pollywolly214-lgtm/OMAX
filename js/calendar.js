@@ -1020,14 +1020,12 @@ function showJobBubble(jobId, anchor){
         <button type="button" class="danger" data-bbl-remove-job="${j.id}">Remove</button>
       </div>`;
     b.querySelector("[data-bbl-complete-job]")?.addEventListener("click", ()=>{
-      if (typeof completeCuttingJobById === "function"){
-        completeCuttingJobById(j.id, {
-          onComplete: ()=>{
-            hideBubble();
-            route();
-          }
-        });
-      }
+      completeCalendarJob(j.id, {
+        onComplete: ()=>{
+          hideBubble();
+          route();
+        }
+      });
     });
     b.querySelector("[data-bbl-remove-job]")?.addEventListener("click", ()=>{
       try {
@@ -1044,6 +1042,25 @@ function showJobBubble(jobId, anchor){
     console.error(err);
     b.innerHTML = `<div class="bubble-title">Error</div><div class="bubble-kv"><span>Details:</span><span>${err.message||err}</span></div>`;
   }
+}
+
+function completeCalendarJob(jobId, opts = {}){
+  const id = jobId != null ? String(jobId) : "";
+  if (!id) return false;
+
+  const { onComplete = null } = opts || {};
+  const completeFn = (typeof window !== "undefined" && typeof window.completeCuttingJobById === "function")
+    ? window.completeCuttingJobById
+    : (typeof completeCuttingJobById === "function" ? completeCuttingJobById : null);
+
+  if (typeof completeFn === "function"){
+    completeFn(id, { onComplete });
+    return true;
+  }
+
+  if (!Array.isArray(window.__pendingJobCompletions)) window.__pendingJobCompletions = [];
+  window.__pendingJobCompletions.push({ id, onComplete });
+  return true;
 }
 
 function toggleGarnetComplete(id){

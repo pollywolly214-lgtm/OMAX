@@ -12046,10 +12046,30 @@ const completeCuttingJobById = (jobId, { toastMessage = "Job marked complete", s
   if (!skipRender && typeof renderJobs === "function") renderJobs();
   if (!skipRender && typeof renderCalendar === "function") renderCalendar();
   if (!skipRender && typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
+  if (typeof window !== "undefined"){
+    try {
+      window.dispatchEvent(new CustomEvent("cuttingjob:completed", { detail: { job: completed } }));
+    } catch (err) {
+      console.warn("Unable to broadcast cutting job completion", err);
+    }
+  }
   if (typeof onComplete === "function") onComplete(completed);
   return completed;
 };
 window.completeCuttingJobById = completeCuttingJobById;
+
+const processPendingJobCompletions = ()=>{
+  const queue = Array.isArray(window.__pendingJobCompletions) ? window.__pendingJobCompletions : [];
+  if (!queue.length) return;
+  window.__pendingJobCompletions = [];
+  queue.forEach(entry => {
+    const id = entry?.id != null ? String(entry.id) : "";
+    if (!id) return;
+    completeCuttingJobById(id, { onComplete: entry?.onComplete || null });
+  });
+};
+window.processPendingJobCompletions = processPendingJobCompletions;
+processPendingJobCompletions();
 
 
 function renderJobs(){
