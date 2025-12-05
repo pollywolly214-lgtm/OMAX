@@ -1323,9 +1323,18 @@ function showJobBubble(jobId, anchor){
       <div class="bubble-kv"><span>Notes:</span><span>${j.notes || "—"}</span></div>
       ${noteAuto}
       <div class="bubble-actions">
+        <button type="button" data-bbl-complete-job="${j.id}">Mark complete</button>
         <button type="button" data-bbl-edit-job="${j.id}">Edit</button>
         <button type="button" class="danger" data-bbl-remove-job="${j.id}">Remove</button>
       </div>`;
+    b.querySelector("[data-bbl-complete-job]")?.addEventListener("click", ()=>{
+      completeCalendarJob(j.id, {
+        onComplete: ()=>{
+          hideBubble();
+          route();
+        }
+      });
+    });
     b.querySelector("[data-bbl-remove-job]")?.addEventListener("click", ()=>{
       try {
         if (typeof recordDeletedItem === "function"){
@@ -1341,6 +1350,25 @@ function showJobBubble(jobId, anchor){
     console.error(err);
     b.innerHTML = `<div class="bubble-title">Error</div><div class="bubble-kv"><span>Details:</span><span>${err.message||err}</span></div>`;
   }
+}
+
+function completeCalendarJob(jobId, opts = {}){
+  const id = jobId != null ? String(jobId) : "";
+  if (!id) return false;
+
+  const { onComplete = null } = opts || {};
+  const completeFn = (typeof window !== "undefined" && typeof window.completeCuttingJobById === "function")
+    ? window.completeCuttingJobById
+    : (typeof completeCuttingJobById === "function" ? completeCuttingJobById : null);
+
+  if (typeof completeFn === "function"){
+    completeFn(id, { onComplete });
+    return true;
+  }
+
+  if (!Array.isArray(window.__pendingJobCompletions)) window.__pendingJobCompletions = [];
+  window.__pendingJobCompletions.push({ id, onComplete });
+  return true;
 }
 
 function toggleGarnetComplete(id){
