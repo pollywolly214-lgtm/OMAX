@@ -3,6 +3,25 @@ if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 const pendingNewJobFiles = window.pendingNewJobFiles;
 if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
 const orderPartialSelection = window.orderPartialSelection;
+const SCOPE_EVERYTHING = (typeof WORKSPACE_SCOPE_EVERYTHING !== "undefined")
+  ? WORKSPACE_SCOPE_EVERYTHING
+  : "everything";
+const SCOPE_TASKS_JOBS = (typeof WORKSPACE_SCOPE_TASKS_JOBS !== "undefined")
+  ? WORKSPACE_SCOPE_TASKS_JOBS
+  : "tasks-jobs";
+const SCOPE_TRACKING = (typeof WORKSPACE_SCOPE_TRACKING !== "undefined")
+  ? WORKSPACE_SCOPE_TRACKING
+  : "tracking";
+
+function describeWorkspaceScope(scope){
+  if (typeof window !== "undefined" && typeof window.describeWorkspaceScopeMeta === "function"){
+    return window.describeWorkspaceScopeMeta(scope);
+  }
+  const key = typeof scope === "string" ? scope.toLowerCase() : "";
+  if (key === SCOPE_TASKS_JOBS || key === "tasks" || key === "jobs") return "Tasks & jobs";
+  if (key === SCOPE_TRACKING || key === "data" || key === "tracking") return "Waterjet tracking data";
+  return "Full site";
+}
 const timeEfficiencyWidgets = [];
 const sharedTimeEfficiencyStarts = (typeof window !== "undefined" && window.__timeEfficiencyStartMap instanceof Map)
   ? window.__timeEfficiencyStartMap
@@ -1889,19 +1908,39 @@ async function promptClearAllData(trigger){
     alert("Clearing data is not available right now.");
     return;
   }
+
+  const selection = await showClearDataScopeModal();
+  if (!selection) return;
+
+  const { scope } = selection;
+
   const expected = (typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
     ? window.CLEAR_DATA_PASSWORD
     : "";
-  const attempt = prompt("Enter the admin password to clear all data:");
+  const scopeLabel = describeWorkspaceScope(scope);
+  const passwordPrompt = scope === SCOPE_EVERYTHING
+    ? "Enter the admin password to delete the full site:"
+    : `Enter the admin password to delete ${scopeLabel.toLowerCase()}:`;
+  const attempt = prompt(passwordPrompt);
   if (attempt === null) return;
   if (attempt !== expected){
     alert("Incorrect password. Data was not cleared.");
     return;
   }
+
+  let confirmMessage = "";
+  if (scope === SCOPE_EVERYTHING){
+    confirmMessage = "This will erase maintenance tasks, jobs, orders, inventory history, and waterjet tracking data for every user. This cannot be undone without a site restore.";
+  } else if (scope === SCOPE_TASKS_JOBS){
+    confirmMessage = "This will delete every maintenance task and cutting job for every user. Waterjet tracking data will remain in place.";
+  } else {
+    confirmMessage = "This will delete all waterjet tracking data (efficiency metrics, pump logs, and machine hours) for every user. Maintenance tasks and jobs will remain.";
+  }
+
   const confirmed = await showConfirmModal({
-    title: "Clear all data?",
-    message: "This will erase history, maintenance tasks, jobs, inventory, and orders for every user. This cannot be undone.",
-    confirmText: "Yes, clear everything",
+    title: "Delete selected data?",
+    message: confirmMessage,
+    confirmText: "Delete data",
     confirmVariant: "danger",
     cancelText: "Keep data"
   });
@@ -1912,13 +1951,17 @@ async function promptClearAllData(trigger){
   if (trigger){
     restoreText = trigger.textContent;
     trigger.disabled = true;
-    trigger.textContent = "Clearing…";
+    trigger.textContent = "Deleting…";
   }
   try {
-    await handler();
-    toast("Workspace reset to defaults.");
+    await handler({ scope });
+    if (scope === SCOPE_EVERYTHING){
+      toast("Workspace reset to defaults.");
+    } else {
+      toast(`${scopeLabel} cleared.`);
+    }
   } catch (err){
-    console.error("Failed to clear all data", err);
+    console.error("Failed to clear data", err);
     alert("Unable to clear data. Please try again.");
   } finally {
     if (trigger && trigger.isConnected){
@@ -5979,6 +6022,182 @@ function showConfirmChoices(options){
     if (focusTarget && typeof focusTarget.focus === "function"){
       requestAnimationFrame(()=> focusTarget.focus());
     }
+  });
+}
+
+const clearDataScopeModalState = {
+  root: null,
+  form: null,
+  tasksInput: null,
+  trackingInput: null,
+  warningEl: null,
+  cancelBtn: null,
+  closeBtn: null,
+  submitBtn: null
+};
+
+function ensureClearDataScopeModal(){
+  const template = `
+    <div class="modal-card dashboard-modal-card clear-data-modal-card" data-clear-scope-card>
+      <button type="button" class="modal-close" data-clear-scope-close>×</button>
+      <h4>Delete site data</h4>
+      <p class="confirm-modal-copy">Choose which data to delete. You can check more than one category.</p>
+      <form data-clear-scope-form>
+        <div class="clear-data-modal-options" data-clear-scope-options>
+          <label>
+            <input type="checkbox" data-clear-scope-tasks>
+            <span>Maintenance tasks &amp; cutting jobs</span>
+          </label>
+          <label>
+            <input type="checkbox" data-clear-scope-tracking>
+            <span>Waterjet tracking data (efficiency, pump logs, and machine hours)</span>
+          </label>
+        </div>
+        <p class="confirm-modal-copy" data-clear-scope-warning></p>
+        <div class="modal-actions">
+          <button type="button" class="secondary" data-clear-scope-cancel>Cancel</button>
+          <button type="submit" class="danger" data-clear-scope-submit disabled>Continue</button>
+        </div>
+      </form>
+    </div>
+  `.trim();
+
+  let root = clearDataScopeModalState.root;
+  if (!root || !root.isConnected){
+    root = document.getElementById("clearDataScopeModal");
+    if (!root){
+      root = document.createElement("div");
+      root.id = "clearDataScopeModal";
+      root.className = "modal-backdrop";
+      root.setAttribute("hidden", "");
+      const host = document.body || document.documentElement || document;
+      host.appendChild(root);
+    }
+    clearDataScopeModalState.root = root;
+  }
+
+  if (clearDataScopeModalState.root && clearDataScopeModalState.root.innerHTML.trim() === ""){
+    clearDataScopeModalState.root.innerHTML = template;
+  }
+
+  const ensureStructure = ()=>{
+    const host = clearDataScopeModalState.root;
+    if (!host) return;
+    if (!host.querySelector("[data-clear-scope-form]")){
+      host.innerHTML = template;
+    }
+    clearDataScopeModalState.form = host.querySelector("[data-clear-scope-form]");
+    clearDataScopeModalState.tasksInput = host.querySelector("[data-clear-scope-tasks]");
+    clearDataScopeModalState.trackingInput = host.querySelector("[data-clear-scope-tracking]");
+    clearDataScopeModalState.warningEl = host.querySelector("[data-clear-scope-warning]");
+    clearDataScopeModalState.cancelBtn = host.querySelector("[data-clear-scope-cancel]");
+    clearDataScopeModalState.closeBtn = host.querySelector("[data-clear-scope-close]");
+    clearDataScopeModalState.submitBtn = host.querySelector("[data-clear-scope-submit]");
+  };
+
+  ensureStructure();
+  return clearDataScopeModalState;
+}
+
+function showClearDataScopeModal(){
+  const state = ensureClearDataScopeModal();
+  const root = state.root;
+  const form = state.form;
+  const submitBtn = state.submitBtn;
+  const tasksInput = state.tasksInput;
+  const trackingInput = state.trackingInput;
+  const warningEl = state.warningEl;
+  if (!root || !form || !submitBtn || !tasksInput || !trackingInput || !warningEl){
+    return Promise.resolve(null);
+  }
+
+  const describeSelection = ()=>{
+    const hasTasks = !!tasksInput.checked;
+    const hasTracking = !!trackingInput.checked;
+    if (!hasTasks && !hasTracking){
+      warningEl.textContent = "Select at least one data category to continue.";
+      warningEl.setAttribute("data-warning", "empty");
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Continue";
+      return;
+    }
+    submitBtn.disabled = false;
+    submitBtn.textContent = hasTasks && hasTracking ? "Delete both" : "Continue";
+    warningEl.removeAttribute("data-warning");
+    if (hasTasks && hasTracking){
+      warningEl.textContent = "Full site restore point will be created before deleting tasks, jobs, orders, and tracking data.";
+    } else if (hasTasks){
+      warningEl.textContent = "All maintenance tasks and cutting jobs for every user will be deleted.";
+    } else {
+      warningEl.textContent = "All waterjet tracking data (efficiency metrics, pump logs, machine hours) will be deleted.";
+    }
+  };
+
+  tasksInput.checked = false;
+  trackingInput.checked = false;
+  describeSelection();
+
+  let resolved = false;
+
+  return new Promise(resolve => {
+    const finish = (value)=>{
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve(value);
+    };
+
+    const cleanup = ()=>{
+      root.classList.remove("is-visible");
+      root.setAttribute("hidden", "");
+      document.body?.classList.remove("modal-open");
+      form.removeEventListener("submit", onSubmit);
+      cancelBtn?.removeEventListener("click", onCancel);
+      closeBtn?.removeEventListener("click", onCancel);
+      root.removeEventListener("click", onBackdropClick);
+      document.removeEventListener("keydown", onKeyDown);
+      tasksInput.removeEventListener("change", onChange);
+      trackingInput.removeEventListener("change", onChange);
+    };
+
+    const cancelBtn = state.cancelBtn;
+    const closeBtn = state.closeBtn;
+
+    const onChange = ()=> describeSelection();
+    const onCancel = ()=> finish(null);
+    const onBackdropClick = (event)=>{ if (event.target === root) finish(null); };
+    const onKeyDown = (event)=>{ if (event.key === "Escape") finish(null); };
+
+    const onSubmit = (event)=>{
+      event.preventDefault();
+      const hasTasks = !!tasksInput.checked;
+      const hasTracking = !!trackingInput.checked;
+      if (!hasTasks && !hasTracking){
+        describeSelection();
+        return;
+      }
+      const scope = hasTasks && hasTracking
+        ? SCOPE_EVERYTHING
+        : hasTasks
+          ? SCOPE_TASKS_JOBS
+          : SCOPE_TRACKING;
+      finish({ scope, hasTasks, hasTracking });
+    };
+
+    form.addEventListener("submit", onSubmit);
+    tasksInput.addEventListener("change", onChange);
+    trackingInput.addEventListener("change", onChange);
+    cancelBtn?.addEventListener("click", onCancel);
+    closeBtn?.addEventListener("click", onCancel);
+    root.addEventListener("click", onBackdropClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    root.classList.add("is-visible");
+    root.removeAttribute("hidden");
+    document.body?.classList.add("modal-open");
+    requestAnimationFrame(()=>{
+      if (tasksInput && typeof tasksInput.focus === "function"){ tasksInput.focus(); }
+    });
   });
 }
 
@@ -15060,19 +15279,45 @@ function computeDeletedItemsModel(){
   const entries = typeof listDeletedItems === "function" ? listDeletedItems() : [];
   const searchRaw = typeof window.deletedItemsSearchTerm === "string" ? window.deletedItemsSearchTerm : "";
   const searchTerm = searchRaw.trim().toLowerCase();
-  const items = entries.map(entry => ({
-    id: entry.id,
-    icon: "🗑",
-    label: entry.label || describeDeletedType(entry.type),
-    typeLabel: describeDeletedType(entry.type),
-    deletedAt: formatTrashDate(entry.deletedAt),
-    deletedAtISO: entry.deletedAt || null,
-    expiresAt: entry.expiresAt ? formatTrashDate(entry.expiresAt) : "—",
-    expiresAtISO: entry.expiresAt || null
-  }));
+  const items = entries.map(entry => {
+    const scopeLabel = entry.type === "workspace" ? describeWorkspaceScope(entry.meta && entry.meta.scope) : null;
+    const reason = entry.meta && entry.meta.reason;
+    const relatedLabel = entry.meta && entry.meta.relatedLabel;
+    let notice = null;
+    if (entry.type === "workspace"){
+      if (reason === "pre-restore"){
+        notice = relatedLabel
+          ? `Captured automatically before restoring "${relatedLabel}".`
+          : "Captured automatically before restoring a site snapshot.";
+      } else if (reason === "clear-all"){
+        notice = "Captured before clearing the full site.";
+      } else if (reason === "clear-scope"){
+        notice = scopeLabel
+          ? `Captured before clearing ${scopeLabel.toLowerCase()}.`
+          : "Captured before clearing selected site data.";
+      }
+    }
+    const warning = entry.type === "workspace"
+      ? "Restoring this snapshot will revert the entire site. Use individual restores for single tasks, jobs, or data."
+      : null;
+    return {
+      id: entry.id,
+      icon: "🗑",
+      label: entry.label || describeDeletedType(entry.type),
+      typeLabel: describeDeletedType(entry.type),
+      deletedAt: formatTrashDate(entry.deletedAt),
+      deletedAtISO: entry.deletedAt || null,
+      expiresAt: entry.expiresAt ? formatTrashDate(entry.expiresAt) : "—",
+      expiresAtISO: entry.expiresAt || null,
+      type: entry.type,
+      scopeLabel,
+      notice,
+      warning
+    };
+  });
   const filtered = searchTerm
     ? items.filter(item => {
-        const fields = [item.label, item.typeLabel, item.deletedAt, item.expiresAt]
+        const fields = [item.label, item.typeLabel, item.deletedAt, item.expiresAt, item.scopeLabel, item.notice]
           .map(value => String(value || "").toLowerCase());
         return fields.some(text => text.includes(searchTerm));
       })
@@ -15096,13 +15341,52 @@ function renderDeletedItems(options){
   content.innerHTML = viewDeletedItems(model);
 
   content.querySelectorAll("[data-trash-restore]").forEach(btn => {
-    btn.addEventListener("click", ()=>{
+    btn.addEventListener("click", async ()=>{
       const id = btn.getAttribute("data-trash-restore");
       if (!id) return;
+      const entries = typeof listDeletedItems === "function" ? listDeletedItems() : [];
+      const entry = entries.find(item => item && item.id === id) || null;
+      if (entry && entry.type === "workspace"){
+        const scopeLabel = describeWorkspaceScope(entry.meta && entry.meta.scope);
+        const deletedAtLabel = entry.deletedAt ? formatTrashDate(entry.deletedAt) : null;
+        const confirmRestore = await showConfirmModal({
+          title: "Restore site snapshot?",
+          message: "Restoring this snapshot will revert the entire site to the saved point. Current data will be replaced.",
+          items: [
+            scopeLabel ? `Snapshot scope: ${scopeLabel}` : null,
+            deletedAtLabel ? `Deleted on ${deletedAtLabel}` : null,
+            "A fresh snapshot of the current site will be saved automatically before the restore."
+          ].filter(Boolean),
+          confirmText: "Restore site",
+          confirmVariant: "danger",
+          cancelText: "Cancel"
+        });
+        if (!confirmRestore) return;
+        try {
+          if (typeof recordDeletedItem === "function" && typeof snapshotWorkspaceForTrash === "function"){
+            const beforeLabel = scopeLabel
+              ? `Workspace snapshot (Before restoring ${scopeLabel})`
+              : "Workspace snapshot (Before site restore)";
+            recordDeletedItem("workspace", snapshotWorkspaceForTrash(), {
+              reason: "pre-restore",
+              scope: SCOPE_EVERYTHING,
+              relatedId: entry.id,
+              relatedLabel: entry.label || null,
+              relatedScope: entry.meta && entry.meta.scope ? entry.meta.scope : null,
+              label: beforeLabel
+            });
+          }
+        } catch (err) {
+          console.warn("Failed to snapshot current workspace before restore", err);
+        }
+      }
       try {
         const result = typeof restoreDeletedItem === "function" ? restoreDeletedItem(id) : { ok:false };
         if (result && result.ok){
-          toast("Item restored");
+          const toastMessage = entry && entry.type === "workspace"
+            ? "Site restored to saved snapshot."
+            : "Item restored";
+          toast(toastMessage);
           renderDeletedItems();
         } else {
           alert("Unable to restore this item.");

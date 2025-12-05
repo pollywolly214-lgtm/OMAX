@@ -4393,6 +4393,30 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   color: #111827;
 }
 
+.clear-data-modal-card .confirm-modal-copy[data-warning="empty"] {
+  color: #b91c1c;
+}
+
+.clear-data-modal-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.clear-data-modal-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: #111827;
+}
+
+.clear-data-modal-options input[type="checkbox"] {
+  margin-top: 4px;
+}
+
 .confirm-modal-list {
   margin: 0 0 18px 0;
   padding: 0 0 0 20px;

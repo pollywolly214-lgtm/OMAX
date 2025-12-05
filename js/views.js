@@ -3755,6 +3755,7 @@ function viewDeletedItems(model){
   const totalCount = typeof data.totalCount === "number" ? data.totalCount : items.length;
   const searchValue = String(data.searchTerm || "");
   const searchDisabled = totalCount === 0 && !searchValue;
+  const hasWorkspaceSnapshots = items.some(item => item && item.type === "workspace");
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const rows = items.map(item => `
     <tr>
@@ -3762,6 +3763,9 @@ function viewDeletedItems(model){
       <td class="deleted-main">
         <div class="deleted-label">${esc(item.label || "Deleted item")}</div>
         <div class="deleted-meta small muted">${esc(item.typeLabel || "Item type unknown")}</div>
+        ${item.scopeLabel ? `<div class="deleted-scope small">Scope: ${esc(item.scopeLabel)}</div>` : ""}
+        ${item.notice ? `<div class="deleted-note small muted">${esc(item.notice)}</div>` : ""}
+        ${item.warning ? `<div class="deleted-warning small"><strong>${esc(item.warning)}</strong></div>` : ""}
       </td>
       <td class="deleted-when">
         <div><strong>Deleted:</strong> ${esc(item.deletedAt || "—")}</div>
@@ -3794,6 +3798,7 @@ function viewDeletedItems(model){
     <div class="container deleted-container">
       <div class="block" style="grid-column:1 / -1">
         <h3>Deleted items</h3>
+        ${hasWorkspaceSnapshots ? `<p class="small"><strong>Note:</strong> Restoring a workspace snapshot will restore the entire site to that point. Use individual item restores for single tasks, jobs, or data.</p>` : ""}
         <p class="small muted">Items remain here for 30 days after deletion. Restore them or delete forever.</p>
         <div class="deleted-search">
           <label class="sr-only" for="deletedItemsSearch">Search deleted items</label>
