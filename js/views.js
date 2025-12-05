@@ -2583,14 +2583,20 @@ function viewJobs(){
     ? window.dismissedJobOverlapSignature
     : "";
   const showOverlapAlert = Boolean(overlapSignature && overlapSignature !== dismissedOverlapSignature);
-  const overlapAlertMarkup = showOverlapAlert
-    ? `<div class="job-overlap-alert" role="alert" data-job-overlap-alert data-job-overlap-signature="${esc(overlapSignature)}">
+  const overlapAlertHiddenAttr = showOverlapAlert ? "" : " hidden";
+  const overlapReminderHiddenAttr = showOverlapAlert ? " hidden" : "";
+  const overlapAlertMarkup = `<div class="job-overlap-alert" role="alert" data-job-overlap-alert data-job-overlap-signature="${esc(overlapSignature)}"${overlapAlertHiddenAttr}>
         <span class="job-overlap-alert-icon" aria-hidden="true">!</span>
         <div class="job-overlap-alert-body">
           <div class="job-overlap-alert-title">Overlapping jobs detected</div>
           <p class="job-overlap-alert-text">${esc(jobOverlapBannerText)}</p>
         </div>
-        <button type="button" class="job-overlap-alert-close" data-job-overlap-dismiss aria-label="Dismiss overlap warning">×</button>
+        <button type="button" class="job-overlap-alert-close" data-job-overlap-dismiss aria-label="Dismiss overlap warning">dismiss</button>
+      </div>`;
+  const overlapNoticeMarkup = overlapSignature
+    ? `<div class="job-overlap-notice" data-job-overlap-notice data-job-overlap-signature="${esc(overlapSignature)}">
+        ${overlapAlertMarkup}
+        <button type="button" class="job-overlap-reminder" data-job-overlap-reminder aria-label="Show overlap warning" title="Show overlap warning"${overlapReminderHiddenAttr}>!</button>
       </div>`
     : "";
   const jobTableOverlapAttr = overlapSignature
@@ -3382,7 +3388,7 @@ function viewJobs(){
           ? `<div class="job-add-indicator" role="status" aria-live="polite">${pendingSummary}</div>`
           : ""}
       </div>
-      ${overlapAlertMarkup}
+      ${overlapNoticeMarkup}
       <section
         class="job-add-panel${addFormOpen ? " is-open" : ""}"
         data-job-add-panel
