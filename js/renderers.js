@@ -4942,56 +4942,69 @@ function renderDashboard(){
       ensureJobCategoryFolderOpen(categoryId);
     }
     const refreshAfterAdd = ()=>{
-      const runRefresh = ()=>{
+      const rerenderDashboardAndCalendar = ()=>{
         if (typeof refreshGlobalCollections === "function"){
-          try {
-            refreshGlobalCollections();
-          } catch (err){
-            console.warn("Failed to sync collections after adding job", err);
-          }
+          try { refreshGlobalCollections(); }
+          catch (err){ console.warn("Failed to sync collections after adding job", err); }
         }
 
-        const rerender = ()=>{
-          if (typeof renderDashboard === "function"){
-            try { renderDashboard(); }
-            catch (err){ console.warn("Failed to render dashboard after adding job", err); }
-          }
-          if (typeof renderCalendar === "function"){
-            try { renderCalendar(); }
-            catch (err){ console.warn("Failed to render calendar after adding job", err); }
-          }
-          if (typeof refreshDashboardWidgets === "function"){
-            try { refreshDashboardWidgets({ full: true }); }
-            catch (err){ console.warn("Failed to refresh dashboard widgets after adding job", err); }
-          }
-          if (typeof renderNextDueWidget === "function"){
-            try { renderNextDueWidget(document.getElementById("nextDueBox")); }
-            catch (err){ console.warn("Failed to refresh next-due widget after adding job", err); }
-          }
-          if (typeof notifyDashboardLayoutContentChanged === "function"){
-            try { notifyDashboardLayoutContentChanged(); }
-            catch (err){ console.warn("Failed to notify layout change after adding job", err); }
-          }
-        };
+        if (typeof renderDashboard === "function"){
+          try { renderDashboard(); }
+          catch (err){ console.warn("Failed to render dashboard after adding job", err); }
+        }
 
-        rerender();
+        if (typeof renderCalendar === "function"){
+          try { renderCalendar(); }
+          catch (err){ console.warn("Failed to render calendar after adding job", err); }
+        }
 
+        if (typeof setupCalendarHoursControls === "function"){
+          try { setupCalendarHoursControls(); }
+          catch (err){ console.warn("Failed to sync calendar controls after adding job", err); }
+        }
+
+        if (typeof refreshDashboardWidgets === "function"){
+          try { refreshDashboardWidgets({ full: true }); }
+          catch (err){ console.warn("Failed to refresh dashboard widgets after adding job", err); }
+        }
+
+        if (typeof renderNextDueWidget === "function"){
+          try { renderNextDueWidget(document.getElementById("nextDueBox")); }
+          catch (err){ console.warn("Failed to refresh next-due widget after adding job", err); }
+        }
+
+        if (typeof notifyDashboardLayoutContentChanged === "function"){
+          try { notifyDashboardLayoutContentChanged(); }
+          catch (err){ console.warn("Failed to notify layout change after adding job", err); }
+        }
+      };
+
+      // Run immediately so the calendar updates without waiting for the next frame
+      rerenderDashboardAndCalendar();
+
+      // Also schedule a follow-up render in case routing or async work resets the view
+      const scheduledRefresh = ()=>{
+        rerenderDashboardAndCalendar();
         if (typeof route === "function"){
           try { route(); }
           catch (err){ console.warn("Failed to route after adding job", err); }
         }
-
-        if (typeof setTimeout === "function"){
-          setTimeout(rerender, 80);
+        if (typeof refreshTimeEfficiencyWidgets === "function"){
+          try { refreshTimeEfficiencyWidgets(); }
+          catch (err){ console.warn("Failed to refresh time-efficiency widgets after adding job", err); }
         }
       };
 
       if (typeof requestAnimationFrame === "function"){
-        requestAnimationFrame(runRefresh);
+        requestAnimationFrame(scheduledRefresh);
       } else if (typeof setTimeout === "function"){
-        setTimeout(runRefresh, 0);
+        setTimeout(scheduledRefresh, 0);
       } else {
-        runRefresh();
+        scheduledRefresh();
+      }
+
+      if (typeof setTimeout === "function"){
+        setTimeout(rerenderDashboardAndCalendar, 120);
       }
     };
 
