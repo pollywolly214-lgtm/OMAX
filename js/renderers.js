@@ -4181,6 +4181,11 @@ function renderDashboard(){
       if (taskRepeatSelect) taskRepeatSelect.value = "none";
       if (taskRepeatEveryInput) taskRepeatEveryInput.value = "1";
     };
+    if (taskForm){
+      taskForm.setAttribute("data-task-mode", normalizedMode || "none");
+      taskForm.setAttribute("data-task-tracking", normalizedMode === "interval" ? (trackingChoice || "none") : "none");
+    }
+
     if (taskTrackingSelect) taskTrackingSelect.disabled = normalizedMode !== "interval";
 
     if (normalizedMode !== "interval"){
@@ -4189,9 +4194,17 @@ function renderDashboard(){
       taskConditionRow.hidden = normalizedMode === "interval" ? true : (normalizedMode === "asreq" ? false : true);
       if (taskTrackingRow) taskTrackingRow.hidden = true;
       if (taskDailyHoursRow) taskDailyHoursRow.hidden = true;
-      if (taskCalendarRow) taskCalendarRow.hidden = normalizedMode !== "asreq";
+      if (taskCalendarRow){
+        taskCalendarRow.hidden = normalizedMode !== "asreq";
+        const calendarInput = taskCalendarRow.querySelector("input");
+        if (calendarInput instanceof HTMLInputElement) calendarInput.disabled = normalizedMode !== "asreq";
+      }
       if (taskRepeatRow) taskRepeatRow.hidden = true;
       if (taskTrackingSelect && normalizedMode !== "interval") taskTrackingSelect.value = "";
+      [taskIntervalInput, taskLastInput, taskDailyHoursInput, taskRepeatSelect, taskRepeatEveryInput]
+        .forEach(ctrl => { if (ctrl) ctrl.disabled = true; });
+      const conditionInput = taskConditionRow.querySelector("input, textarea");
+      if (conditionInput instanceof HTMLElement) conditionInput.toggleAttribute("disabled", normalizedMode !== "asreq");
       clearHourlyFields();
       resetCalendarRepeat();
       return;
@@ -4205,6 +4218,9 @@ function renderDashboard(){
       if (taskDailyHoursRow) taskDailyHoursRow.hidden = true;
       if (taskCalendarRow) taskCalendarRow.hidden = true;
       if (taskRepeatRow) taskRepeatRow.hidden = true;
+      [taskIntervalInput, taskLastInput, taskDailyHoursInput, taskRepeatSelect, taskRepeatEveryInput]
+        .forEach(ctrl => { if (ctrl) ctrl.disabled = true; });
+      if (taskTrackingSelect) taskTrackingSelect.disabled = false;
       clearHourlyFields();
       resetCalendarRepeat();
       return;
@@ -4213,16 +4229,22 @@ function renderDashboard(){
     taskFreqRow.hidden = trackingChoice === "calendar";
     taskLastRow.hidden = trackingChoice === "calendar";
     taskConditionRow.hidden = true;
+    const hourlyDisabled = trackingChoice === "calendar";
+    [taskIntervalInput, taskLastInput, taskDailyHoursInput]
+      .forEach(ctrl => { if (ctrl) ctrl.disabled = hourlyDisabled; });
     if (taskDailyHoursRow){
       taskDailyHoursRow.hidden = trackingChoice === "calendar";
       if (trackingChoice === "calendar") taskDailyHoursInput && (taskDailyHoursInput.value = "");
     }
     if (taskCalendarRow){
       taskCalendarRow.hidden = trackingChoice !== "calendar";
+      const calendarInput = taskCalendarRow.querySelector("input");
+      if (calendarInput instanceof HTMLInputElement) calendarInput.disabled = trackingChoice !== "calendar";
       if (trackingChoice !== "calendar") taskDateInput && (taskDateInput.value = "");
     }
     if (taskRepeatRow){
       taskRepeatRow.hidden = trackingChoice !== "calendar";
+      [taskRepeatSelect, taskRepeatEveryInput].forEach(ctrl => { if (ctrl) ctrl.disabled = trackingChoice !== "calendar"; });
       if (trackingChoice !== "calendar") resetCalendarRepeat();
     }
   }
@@ -7431,6 +7453,10 @@ function renderSettings(){
       if (repeatField instanceof HTMLSelectElement) repeatField.value = "none";
       if (repeatEveryField instanceof HTMLInputElement) repeatEveryField.value = "1";
     };
+    if (form){
+      form.setAttribute("data-task-mode", normalizedMode || "none");
+      form.setAttribute("data-task-tracking", normalizedMode === "interval" ? (trackingChoice || "none") : "none");
+    }
     if (trackingField) trackingField.disabled = normalizedMode !== "interval";
     if (normalizedMode !== "interval"){
       freqRow.hidden = true;
@@ -7438,9 +7464,17 @@ function renderSettings(){
       conditionRow.hidden = normalizedMode === "asreq" ? false : true;
       if (trackingRow) trackingRow.hidden = true;
       if (dailyHoursRow) dailyHoursRow.hidden = true;
-      if (calendarRow) calendarRow.hidden = normalizedMode !== "asreq";
+      if (calendarRow){
+        calendarRow.hidden = normalizedMode !== "asreq";
+        const calendarInput = calendarRow.querySelector("input");
+        if (calendarInput instanceof HTMLInputElement) calendarInput.disabled = normalizedMode !== "asreq";
+      }
       if (repeatRow) repeatRow.hidden = true;
       if (trackingField && normalizedMode !== "interval") trackingField.value = "";
+      [form?.querySelector('[name="taskInterval"]'), form?.querySelector('[name="taskLastServiced"]'), form?.querySelector('[name="taskEstimatedDailyHours"]'), form?.querySelector('[name="taskCalendarRepeat"]'), form?.querySelector('[name="taskCalendarRepeatEvery"]')]
+        .forEach(ctrl => { if (ctrl instanceof HTMLInputElement || ctrl instanceof HTMLSelectElement) ctrl.disabled = true; });
+      const conditionInput = conditionRow.querySelector("input, textarea");
+      if (conditionInput instanceof HTMLElement) conditionInput.toggleAttribute("disabled", normalizedMode !== "asreq");
       clearHourlyFields();
       resetCalendarRepeat();
       return;
@@ -7454,6 +7488,9 @@ function renderSettings(){
       if (dailyHoursRow) dailyHoursRow.hidden = true;
       if (calendarRow) calendarRow.hidden = true;
       if (repeatRow) repeatRow.hidden = true;
+      [form?.querySelector('[name="taskInterval"]'), form?.querySelector('[name="taskLastServiced"]'), form?.querySelector('[name="taskEstimatedDailyHours"]'), form?.querySelector('[name="taskCalendarRepeat"]'), form?.querySelector('[name="taskCalendarRepeatEvery"]')]
+        .forEach(ctrl => { if (ctrl instanceof HTMLInputElement || ctrl instanceof HTMLSelectElement) ctrl.disabled = true; });
+      if (trackingField) trackingField.disabled = false;
       clearHourlyFields();
       resetCalendarRepeat();
       return;
@@ -7462,6 +7499,9 @@ function renderSettings(){
     freqRow.hidden = trackingChoice === "calendar";
     lastRow.hidden = trackingChoice === "calendar";
     conditionRow.hidden = true;
+    const hourlyDisabled = trackingChoice === "calendar";
+    [form?.querySelector('[name="taskInterval"]'), form?.querySelector('[name="taskLastServiced"]'), form?.querySelector('[name="taskEstimatedDailyHours"]')]
+      .forEach(ctrl => { if (ctrl instanceof HTMLInputElement) ctrl.disabled = hourlyDisabled; });
     if (dailyHoursRow){
       dailyHoursRow.hidden = trackingChoice === "calendar";
       if (trackingChoice === "calendar"){
@@ -7471,13 +7511,14 @@ function renderSettings(){
     }
     if (calendarRow){
       calendarRow.hidden = trackingChoice !== "calendar";
-      if (trackingChoice !== "calendar"){
-        const startInput = form?.querySelector('[name="taskCalendarStart"]');
-        if (startInput instanceof HTMLInputElement) startInput.value = "";
-      }
+      const startInput = form?.querySelector('[name="taskCalendarStart"]');
+      if (startInput instanceof HTMLInputElement) startInput.disabled = trackingChoice !== "calendar";
+      if (trackingChoice !== "calendar" && startInput instanceof HTMLInputElement) startInput.value = "";
     }
     if (repeatRow){
       repeatRow.hidden = trackingChoice !== "calendar";
+      [form?.querySelector('[name="taskCalendarRepeat"]'), form?.querySelector('[name="taskCalendarRepeatEvery"]')]
+        .forEach(ctrl => { if (ctrl instanceof HTMLInputElement || ctrl instanceof HTMLSelectElement) ctrl.disabled = trackingChoice !== "calendar"; });
       if (trackingChoice !== "calendar") resetCalendarRepeat();
     }
   }
