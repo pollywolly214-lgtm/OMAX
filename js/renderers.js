@@ -3606,6 +3606,7 @@ function renderDashboard(){
   const taskOptionStage  = modal?.querySelector('[data-task-option-stage]');
   const taskOptionButtons= Array.from(modal?.querySelectorAll('[data-task-option]') || []);
   const taskCards        = Array.from(modal?.querySelectorAll('[data-task-card]') || []);
+  const newTaskCard      = modal?.querySelector('[data-task-card="new"]');
   const taskExistingSearchInput = document.getElementById("dashTaskExistingSearch");
   const taskExistingSearchWrapper = taskExistingForm?.querySelector(".task-existing-search");
   const existingTaskResults = taskExistingForm?.querySelector('[data-task-existing-results]');
@@ -3778,6 +3779,9 @@ function renderDashboard(){
     const allowed = ["mode", "tracking", "form"];
     const next = allowed.includes(stage) ? stage : "mode";
     newTaskStage = next;
+    if (newTaskCard){
+      newTaskCard.setAttribute("data-new-task-stage", next);
+    }
     newTaskStages.forEach(section => {
       if (!section) return;
       const match = section.getAttribute("data-new-task-stage") === next;
