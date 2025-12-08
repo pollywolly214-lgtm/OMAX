@@ -196,6 +196,21 @@ function getCuttingJobsList(){
   return latest;
 }
 
+if (typeof window !== "undefined"){
+  window.addEventListener("cutting-jobs-updated", ()=>{
+    try {
+      refreshGlobalCollections?.();
+    } catch (err){
+      console.warn("Failed to sync collections after cutting jobs update", err);
+    }
+    try {
+      renderCalendar();
+    } catch (err){
+      console.warn("Failed to rerender calendar after cutting jobs update", err);
+    }
+  });
+}
+
 function escapeHtml(str){
   return String(str || "").replace(/[&<>"']/g, c => ({
     "&": "&amp;",

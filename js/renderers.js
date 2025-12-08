@@ -4941,6 +4941,15 @@ function renderDashboard(){
       categoryId = String(folder.id);
       ensureJobCategoryFolderOpen(categoryId);
     }
+    const notifyCuttingJobsUpdated = ()=>{
+      if (typeof window === "undefined") return;
+      try {
+        window.dispatchEvent(new CustomEvent("cutting-jobs-updated"));
+      } catch (err){
+        console.warn("Failed to broadcast cutting jobs update", err);
+      }
+    };
+
     const refreshAfterAdd = ()=>{
       const rerenderDashboardAndCalendar = ()=>{
         if (typeof refreshGlobalCollections === "function"){
@@ -5066,6 +5075,7 @@ function renderDashboard(){
       saveCloudDebounced();
       toast("Cutting job logged to history");
       closeModal();
+      notifyCuttingJobsUpdated();
       refreshAfterAdd();
       return;
     }
@@ -5077,6 +5087,7 @@ function renderDashboard(){
     saveCloudDebounced();
     toast("Cutting job added");
     closeModal();
+    notifyCuttingJobsUpdated();
     refreshAfterAdd();
   });
 
