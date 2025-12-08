@@ -199,6 +199,36 @@ function triggerDashboardAddPicker(opts){
   ensureDashboardVisible();
 }
 
+function getCuttingJobsList(){
+  if (typeof refreshGlobalCollections === "function"){
+    try {
+      refreshGlobalCollections();
+    } catch (err){
+      console.warn("Failed to sync collections before reading cutting jobs", err);
+    }
+  }
+  const latest = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : [];
+  if (latest !== cuttingJobs){
+    cuttingJobs = latest;
+  }
+  return latest;
+}
+
+if (typeof window !== "undefined"){
+  window.addEventListener("cutting-jobs-updated", ()=>{
+    try {
+      refreshGlobalCollections?.();
+    } catch (err){
+      console.warn("Failed to sync collections after cutting jobs update", err);
+    }
+    try {
+      renderCalendar();
+    } catch (err){
+      console.warn("Failed to rerender calendar after cutting jobs update", err);
+    }
+  });
+}
+
 function escapeHtml(str){
   return String(str || "").replace(/[&<>"']/g, c => ({
     "&": "&amp;",
@@ -1148,11 +1178,12 @@ function showJobBubble(jobId, anchor){
     return `${formatted}/hr`;
   };
   try{
-    const active = cuttingJobs.find(x => String(x.id) === String(jobId));
+    const jobs = getCuttingJobsList();
+    const active = jobs.find(x => String(x.id) === String(jobId));
     const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
     const completed = completedJobs.find(x => String(x?.id) === String(jobId));
     const prioritySchedule = typeof computePrioritySchedule === "function"
-      ? computePrioritySchedule(cuttingJobs)
+      ? computePrioritySchedule(jobs)
       : { backlog: new Map(), efficiencies: new Map() };
     const backlogMap = prioritySchedule && prioritySchedule.backlog instanceof Map
       ? prioritySchedule.backlog
@@ -1334,7 +1365,13 @@ function showJobBubble(jobId, anchor){
       } catch (err) {
         console.warn("Failed to record deleted job from calendar", err);
       }
-      cuttingJobs = cuttingJobs.filter(x=>String(x.id)!==String(j.id)); window.cuttingJobs = cuttingJobs; saveCloudDebounced(); toast("Removed"); hideBubble(); route();
+      const nextJobs = getCuttingJobsList().filter(x => String(x.id) !== String(j.id));
+      cuttingJobs = nextJobs;
+      window.cuttingJobs = nextJobs;
+      if (typeof refreshGlobalCollections === "function"){
+        refreshGlobalCollections();
+      }
+      saveCloudDebounced(); toast("Removed"); hideBubble(); route();
     });
     b.querySelector("[data-bbl-edit-job]")?.addEventListener("click", ()=>{ hideBubble(); openJobsEditor(j.id); });
   }catch(err){
@@ -1896,7 +1933,8 @@ function renderCalendar(){
   });
 
   const jobsMap = {};
-  cuttingJobs.forEach(j => {
+  const jobs = getCuttingJobsList();
+  jobs.forEach(j => {
     const start = parseDateLocal(j.startISO);
     const end   = parseDateLocal(j.dueISO);
     if (!start || !end) return;
