@@ -1049,18 +1049,63 @@ function completeCalendarJob(jobId, opts = {}){
   if (!id) return false;
 
   const { onComplete = null } = opts || {};
+  const flagJobCompleted = ()=>{
+    if (typeof renderCalendar === "function") renderCalendar();
+    markCalendarJobElementComplete(id);
+  };
   const completeFn = (typeof window !== "undefined" && typeof window.completeCuttingJobById === "function")
     ? window.completeCuttingJobById
     : (typeof completeCuttingJobById === "function" ? completeCuttingJobById : null);
 
   if (typeof completeFn === "function"){
-    completeFn(id, { onComplete });
+    completeFn(id, {
+      onComplete: (job)=>{
+        flagJobCompleted();
+        if (typeof onComplete === "function") onComplete(job);
+      }
+    });
     return true;
   }
 
   if (!Array.isArray(window.__pendingJobCompletions)) window.__pendingJobCompletions = [];
-  window.__pendingJobCompletions.push({ id, onComplete });
+  window.__pendingJobCompletions.push({
+    id,
+    onComplete: (job)=>{
+      flagJobCompleted();
+      if (typeof onComplete === "function") onComplete(job);
+    }
+  });
   return true;
+}
+
+function markCalendarJobElementComplete(jobId){
+  if (typeof document === "undefined") return;
+  const id = jobId != null ? String(jobId) : "";
+  if (!id) return;
+  const esc = (value)=>{
+    if (typeof CSS !== "undefined" && CSS.escape){
+      try { return CSS.escape(String(value)); }
+      catch (_err){}
+    }
+    return String(value).replace(/[^a-zA-Z0-9_\-]/g, "\\$&");
+  };
+  const selector = `[data-cal-job="${esc(id)}"]`;
+  document.querySelectorAll(selector).forEach(el => {
+    el.classList.add("is-complete");
+    el.dataset.calStatus = "completed";
+    const label = (el.textContent || "").trim();
+    if (label && !/\(completed\)$/i.test(label)){
+      el.textContent = `${label} (completed)`;
+    }
+  });
+}
+
+if (typeof window !== "undefined"){
+  window.addEventListener("cuttingjob:completed", (event)=>{
+    const jobId = event?.detail?.job?.id ?? event?.detail?.id ?? null;
+    markCalendarJobElementComplete(jobId);
+    if (typeof renderCalendar === "function") renderCalendar();
+  });
 }
 
 function toggleGarnetComplete(id){
@@ -1814,6 +1859,7 @@ function renderCalendar(){
         if (ev.status === "completed") cls += " is-complete";
         bar.className = cls;
         bar.dataset.calJob = ev.id;
+        if (ev.status) bar.dataset.calStatus = ev.status;
         bar.textContent = ev.status === "completed" ? `${ev.name} (completed)` : ev.name;
         cell.appendChild(bar);
       });
