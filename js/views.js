@@ -314,23 +314,85 @@ function viewDashboard(){
             <p class="small muted">Enter task details and we&rsquo;ll drop it into your schedule.</p>
           </div>
         </div>
-        <form id="dashTaskForm" class="modal-form task-option-body" data-task-variant="new">
+        <div class="task-option-body task-stage" data-new-task-stage="mode">
+          <div>
+            <p class="task-option-kicker">Scheduling type</p>
+            <p class="task-option-stage-title">How should this be scheduled?</p>
+            <p class="small muted">Pick one path to continue.</p>
+          </div>
+          <div class="task-option-grid">
+            <button type="button" class="task-option" data-new-task-mode="interval">
+              <span class="task-option-title">Per interval</span>
+              <span class="task-option-sub">Set cadence by usage hours or calendar dates.</span>
+            </button>
+            <button type="button" class="task-option" data-new-task-mode="asreq">
+              <span class="task-option-title">As required</span>
+              <span class="task-option-sub">Pick a single date without repeats.</span>
+            </button>
+          </div>
+          <div class="task-option-actions">
+            <button type="button" class="secondary" data-task-card-back>Back</button>
+          </div>
+        </div>
+
+        <div class="task-option-body task-stage" data-new-task-stage="tracking" hidden aria-hidden="true">
+          <div>
+            <p class="task-option-kicker">Per interval</p>
+            <p class="task-option-stage-title">Choose a single tracking method</p>
+            <p class="small muted">Calendar intervals and machine hours are separate paths.</p>
+          </div>
+          <div class="task-option-grid">
+            <button type="button" class="task-option" data-new-task-tracking="calendar">
+              <span class="task-option-title">Calendar days</span>
+              <span class="task-option-sub">Place occurrences on specific dates (e.g., every Monday).</span>
+            </button>
+            <button type="button" class="task-option" data-new-task-tracking="pump">
+              <span class="task-option-title">Machine run time</span>
+              <span class="task-option-sub">Track by logged hours with estimated hours per day.</span>
+            </button>
+          </div>
+          <div class="task-option-actions">
+            <button type="button" class="secondary" data-new-task-back="mode">Back</button>
+          </div>
+        </div>
+
+        <form id="dashTaskForm" class="modal-form task-option-body task-stage" data-task-variant="new" data-new-task-stage="form" hidden aria-hidden="true">
+          <div class="task-mode-summary" data-new-task-summary hidden aria-hidden="true">
+            <div class="task-mode-summary-text" data-new-task-summary-text></div>
+            <button type="button" class="secondary" data-new-task-change>Change selection</button>
+          </div>
           <div class="modal-grid">
             <label>Task name<input id="dashTaskName" required placeholder="Task"></label>
-            <label>Type<select id="dashTaskType">
+            <label data-task-type-row hidden aria-hidden="true">Type<select id="dashTaskType" required>
+              <option value="" disabled selected>Select scheduling type</option>
               <option value="interval">Per interval</option>
               <option value="asreq">As required</option>
             </select></label>
-            <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
-            <label data-task-last>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
+            <label data-task-frequency hidden>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
+            <label data-task-last hidden>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
             <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
+            <label data-task-tracking hidden aria-hidden="true">Tracking<select id="dashTaskTracking" required>
+              <option value="" disabled selected>Select tracking method</option>
+              <option value="pump">Usage hours (log hours + est./day)</option>
+              <option value="calendar">Calendar day / repeating</option>
+            </select></label>
+            <label data-task-daily-hours hidden>Estimated hours per day<input type="number" min="0.25" step="0.25" id="dashTaskDailyHours" placeholder="e.g. 8"></label>
             <label>Manual link<input type="url" id="dashTaskManual" placeholder="https://..."></label>
             <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
             <label>Part #<input id="dashTaskPN" placeholder="Part number"></label>
             <label>Price ($)<input type="number" min="0" step="0.01" id="dashTaskPrice" placeholder="optional"></label>
             <label>Time to complete (hrs)<input type="number" min="0.25" step="0.25" id="dashTaskDowntime" placeholder="e.g. 1"></label>
             <label>Category<select id="dashTaskCategory"></select></label>
-            <label>Calendar date<input type="date" id="dashTaskDate"></label>
+            <label data-task-calendar hidden>Calendar start date<input type="date" id="dashTaskDate"></label>
+            <div class="calendar-repeat" data-task-repeat hidden>
+              <label>Repeats<select id="dashTaskRepeat">
+                <option value="none">Does not repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select></label>
+              <label>Repeat every<input type="number" min="1" step="1" id="dashTaskRepeatEvery" value="1"></label>
+            </div>
           </div>
 
           <div class="subtask-section">
@@ -394,6 +456,9 @@ function taskDetailsInterval(task){
     </div>
     <div class="row"><label>Baseline “since last” (hrs):</label>
       <div><input type="number" min="0" data-k="sinceBase" data-id="${task.id}" data-list="interval" value="${task.sinceBase != null ? task.sinceBase : ""}" /></div>
+    </div>
+    <div class="row"><label>Condition/Notes:</label>
+      <div><input type="text" data-k="condition" data-id="${task.id}" data-list="interval" value="${task.condition || ""}" placeholder="e.g., when clogged / visual check" /></div>
     </div>
     <div class="row"><label>When last serviced (hrs):</label>
       <div>${lastServ}</div>

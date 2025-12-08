@@ -4773,6 +4773,17 @@ body.modal-open {
   gap: 12px;
 }
 
+/* Dashboard new-task staging: only one major question/page visible at a time */
+.dashboard-modal-card[data-task-card="new"][data-new-task-stage] .task-stage {
+  display: none;
+}
+
+.dashboard-modal-card[data-task-card="new"][data-new-task-stage="mode"] [data-new-task-stage="mode"],
+.dashboard-modal-card[data-task-card="new"][data-new-task-stage="tracking"] [data-new-task-stage="tracking"],
+.dashboard-modal-card[data-task-card="new"][data-new-task-stage="form"] [data-new-task-stage="form"] {
+  display: flex;
+}
+
 .task-existing-search {
   margin-bottom: 12px;
 }

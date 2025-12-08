@@ -456,6 +456,7 @@ function createIntervalTaskInstance(template){
     cat: template.cat ?? null,
     parentTask: template.parentTask ?? null,
     order: ++window._maintOrderCounter,
+    condition: template.condition || "",
     interval: Number.isFinite(intervalVal) && intervalVal > 0 ? intervalVal : 8,
     calendarDateISO: null,
     sinceBase: 0,
@@ -475,6 +476,87 @@ function createIntervalTaskInstance(template){
     copy.parts = template.parts.map(part => part ? { ...part } : part).filter(Boolean);
   }
   return copy;
+}
+
+function normalizeCalendarPlan(plan, defaultStart = null){
+  const start = (plan && typeof plan.startDateISO === "string" && plan.startDateISO.trim())
+    ? plan.startDateISO.trim()
+    : (defaultStart || "");
+  const repeatRaw = plan && typeof plan.repeat === "string" ? plan.repeat : "none";
+  const repeat = ["daily", "weekly", "monthly"].includes(repeatRaw) ? repeatRaw : "none";
+  const everyRaw = plan && Number.isFinite(Number(plan.repeatEvery)) ? Number(plan.repeatEvery) : 1;
+  const repeatEvery = everyRaw > 0 ? Math.round(everyRaw) : 1;
+  return {
+    startDateISO: start || null,
+    repeat,
+    repeatEvery
+  };
+}
+
+function buildCalendarOccurrences(plan, { maxOccurrences = 52 } = {}){
+  const normalized = normalizeCalendarPlan(plan);
+  const occurrences = [];
+  if (!normalized.startDateISO || typeof ymd !== "function") return occurrences;
+  const startDate = parseDateLocal(normalized.startDateISO);
+  if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) return occurrences;
+  const max = Math.max(1, maxOccurrences);
+  const repeatEvery = Math.max(1, normalized.repeatEvery || 1);
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  for (let i = 0; i < max; i++){
+    const next = new Date(startDate.getTime());
+    if (normalized.repeat === "daily"){
+      next.setDate(next.getDate() + (i * repeatEvery));
+    }else if (normalized.repeat === "weekly"){
+      next.setDate(next.getDate() + (7 * repeatEvery * i));
+    }else if (normalized.repeat === "monthly"){
+      next.setMonth(next.getMonth() + (repeatEvery * i));
+    }else if (i > 0){
+      break;
+    }
+    next.setHours(0,0,0,0);
+    const key = ymd(next);
+    const status = next.getTime() <= today.getTime() ? "completed" : "scheduled";
+    occurrences.push({
+      dateISO: key,
+      status,
+      source: "calendar",
+      recordedAtISO: new Date().toISOString(),
+      hoursAtEntry: null,
+      estimatedDailyHours: null
+    });
+  }
+  return occurrences;
+}
+
+function applyCalendarPlanToTask(task, { plan, overrideStart = null, refreshDashboard = true } = {}){
+  if (!task) return null;
+  const normalizedPlan = normalizeCalendarPlan(plan, overrideStart || (task.calendarDateISO || null));
+  task.calendarPlan = normalizedPlan;
+  const occurrences = buildCalendarOccurrences(normalizedPlan);
+  if (!occurrences.length) return normalizedPlan;
+  const history = ensureTaskManualHistory(task);
+  occurrences.forEach(occ => {
+    const idx = history.findIndex(entry => entry && entry.dateISO === occ.dateISO);
+    if (idx >= 0){
+      history[idx] = { ...history[idx], ...occ };
+    }else{
+      history.push(occ);
+    }
+    if (occ.status === "completed"){
+      if (!Array.isArray(task.completedDates)) task.completedDates = [];
+      if (!task.completedDates.includes(occ.dateISO)) task.completedDates.push(occ.dateISO);
+    }
+  });
+  history.sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+  task.manualHistory = history;
+  const startDate = normalizedPlan.startDateISO || occurrences[0]?.dateISO || null;
+  task.calendarDateISO = startDate;
+  if (refreshDashboard && typeof refreshDashboardWidgets === "function"){
+    try { refreshDashboardWidgets({ full: true }); }
+    catch (err){ console.warn("Failed to refresh dashboard after calendar plan update", err); }
+  }
+  return normalizedPlan;
 }
 
 function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refreshDashboard = true } = {}){
@@ -534,11 +616,33 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
   if (!Number.isFinite(interval) || interval <= 0) return null;
   ensureTaskManualHistory(instance);
 
-  const hoursPerDay = typeof getConfiguredDailyHours === "function"
-    ? getConfiguredDailyHours()
-    : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
-      ? Number(DAILY_HOURS)
-      : 8);
+  const trackingMode = task.trackingMode === "calendar" ? "calendar" : "pump";
+  instance.trackingMode = trackingMode;
+  const estimatedDailyHours = (task.estimatedDailyHours != null && Number.isFinite(Number(task.estimatedDailyHours)) && Number(task.estimatedDailyHours) > 0)
+    ? Number(task.estimatedDailyHours)
+    : null;
+  instance.estimatedDailyHours = estimatedDailyHours;
+  if (template) template.estimatedDailyHours = estimatedDailyHours;
+  const calendarPlan = trackingMode === "calendar"
+    ? normalizeCalendarPlan(instance.calendarPlan || template.calendarPlan, dateISO || instance.calendarDateISO || template.calendarDateISO || null)
+    : null;
+  if (trackingMode === "calendar"){
+    instance.calendarPlan = calendarPlan;
+    if (template) template.calendarPlan = calendarPlan;
+    applyCalendarPlanToTask(instance, { plan: calendarPlan, overrideStart: dateISO || calendarPlan?.startDateISO || null, refreshDashboard });
+    if (template){
+      template.trackingMode = trackingMode;
+    }
+    return instance;
+  }
+
+  const hoursPerDay = estimatedDailyHours && estimatedDailyHours > 0
+    ? estimatedDailyHours
+    : (typeof getConfiguredDailyHours === "function"
+      ? getConfiguredDailyHours()
+      : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
+        ? Number(DAILY_HOURS)
+        : 8));
 
   let targetISO = dateISO || ymd(new Date());
   const today = new Date(); today.setHours(0,0,0,0);
@@ -3806,6 +3910,10 @@ function renderDashboard(){
   const taskIntervalInput= document.getElementById("dashTaskInterval");
   const taskLastInput    = document.getElementById("dashTaskLast");
   const taskConditionInput = document.getElementById("dashTaskCondition");
+  const taskTrackingSelect = document.getElementById("dashTaskTracking");
+  const taskDailyHoursInput = document.getElementById("dashTaskDailyHours");
+  const taskRepeatSelect = document.getElementById("dashTaskRepeat");
+  const taskRepeatEveryInput = document.getElementById("dashTaskRepeatEvery");
   const taskManualInput  = document.getElementById("dashTaskManual");
   const taskStoreInput   = document.getElementById("dashTaskStore");
   const taskPNInput      = document.getElementById("dashTaskPN");
@@ -3813,11 +3921,17 @@ function renderDashboard(){
   const taskDowntimeInput= document.getElementById("dashTaskDowntime");
   const categorySelect   = document.getElementById("dashTaskCategory");
   const taskDateInput    = document.getElementById("dashTaskDate");
+  const taskTypeRow      = taskForm?.querySelector("[data-task-type-row]");
+  const taskTrackingRow  = taskForm?.querySelector("[data-task-tracking]");
+  const taskDailyHoursRow = taskForm?.querySelector("[data-task-daily-hours]");
+  const taskCalendarRow = taskForm?.querySelector("[data-task-calendar]");
+  const taskRepeatRow = taskForm?.querySelector("[data-task-repeat]");
   const subtaskList      = document.getElementById("dashSubtaskList");
   const addSubtaskBtn    = document.getElementById("dashAddSubtask");
   const taskOptionStage  = modal?.querySelector('[data-task-option-stage]');
   const taskOptionButtons= Array.from(modal?.querySelectorAll('[data-task-option]') || []);
   const taskCards        = Array.from(modal?.querySelectorAll('[data-task-card]') || []);
+  const newTaskCard      = modal?.querySelector('[data-task-card="new"]');
   const taskExistingSearchInput = document.getElementById("dashTaskExistingSearch");
   const taskExistingSearchWrapper = taskExistingForm?.querySelector(".task-existing-search");
   const existingTaskResults = taskExistingForm?.querySelector('[data-task-existing-results]');
@@ -3825,6 +3939,13 @@ function renderDashboard(){
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
   const taskExistingNoteInput = document.getElementById("dashTaskExistingNote");
   const taskCardBackButtons = Array.from(modal?.querySelectorAll('[data-task-card-back]') || []);
+  const newTaskStages = Array.from(modal?.querySelectorAll('[data-new-task-stage]') || []);
+  const newTaskModeButtons = Array.from(modal?.querySelectorAll('[data-new-task-mode]') || []);
+  const newTaskTrackingButtons = Array.from(modal?.querySelectorAll('[data-new-task-tracking]') || []);
+  const newTaskBackButtons = Array.from(modal?.querySelectorAll('[data-new-task-back]') || []);
+  const newTaskSummary = modal?.querySelector('[data-new-task-summary]');
+  const newTaskSummaryText = modal?.querySelector('[data-new-task-summary-text]');
+  const newTaskChangeButton = modal?.querySelector('[data-new-task-change]');
   const oneTimeForm      = document.getElementById("dashOneTimeForm");
   const oneTimeNameInput = document.getElementById("dashOneTimeName");
   const oneTimeDateInput = document.getElementById("dashOneTimeDate");
@@ -3946,6 +4067,10 @@ function renderDashboard(){
 
   let activeTaskVariant = null;
   let selectedExistingTaskId = null;
+  let newTaskModeChoice = null;
+  let newTaskTrackingChoice = null;
+  let newTaskStage = "mode";
+  let lockTrackingSelect = false;
 
   function setSelectedExistingTask(id){
     selectedExistingTaskId = id || null;
@@ -3956,6 +4081,125 @@ function renderDashboard(){
       btn.classList.toggle("is-active", isMatch);
       btn.setAttribute("aria-pressed", isMatch ? "true" : "false");
     });
+  }
+
+  function updateNewTaskSummary(){
+    if (!newTaskSummary || !newTaskSummaryText){
+      return;
+    }
+    if (!newTaskModeChoice || newTaskStage !== "form"){
+      newTaskSummary.hidden = true;
+      newTaskSummary.setAttribute("aria-hidden", "true");
+      return;
+    }
+    const label = newTaskModeChoice === "asreq"
+      ? "As required — single calendar date"
+      : `Per interval — ${newTaskTrackingChoice === "calendar" ? "Calendar days" : "Machine run time hours"}`;
+    newTaskSummaryText.textContent = label;
+    newTaskSummary.hidden = false;
+    newTaskSummary.setAttribute("aria-hidden", "false");
+  }
+
+  function setNewTaskStage(stage){
+    const allowed = ["mode", "tracking", "form"];
+    const next = allowed.includes(stage) ? stage : "mode";
+    newTaskStage = next;
+    if (newTaskCard){
+      newTaskCard.setAttribute("data-new-task-stage", next);
+    }
+    newTaskStages.forEach(section => {
+      if (!section) return;
+      const match = section.getAttribute("data-new-task-stage") === next;
+      section.hidden = !match;
+      section.setAttribute("aria-hidden", match ? "false" : "true");
+    });
+    if (taskForm){
+      const showForm = next === "form";
+      taskForm.hidden = !showForm;
+      taskForm.setAttribute("aria-hidden", showForm ? "false" : "true");
+    }
+    modal?.setAttribute("data-new-task-stage", next);
+    updateNewTaskSummary();
+    if (next === "mode" && newTaskModeButtons[0]) newTaskModeButtons[0].focus();
+    if (next === "tracking" && newTaskTrackingButtons[0]) newTaskTrackingButtons[0].focus();
+    if (next === "form" && taskNameInput) taskNameInput.focus();
+  }
+
+  function resetNewTaskSchedulingFields(){
+    [taskIntervalInput, taskLastInput, taskDailyHoursInput, taskDateInput]
+      .forEach(ctrl => { if (ctrl) ctrl.value = ""; });
+    if (taskRepeatSelect){ taskRepeatSelect.value = "none"; }
+    if (taskRepeatEveryInput){ taskRepeatEveryInput.value = "1"; }
+  }
+
+  function resetNewTaskSelections(){
+    newTaskModeChoice = null;
+    newTaskTrackingChoice = null;
+    lockTrackingSelect = false;
+    if (taskTypeSelect){
+      taskTypeSelect.disabled = false;
+      taskTypeSelect.value = "";
+    }
+    if (taskTrackingSelect){
+      taskTrackingSelect.disabled = true;
+      taskTrackingSelect.value = "";
+    }
+    if (taskTrackingRow) taskTrackingRow.hidden = true;
+    if (taskTypeRow){
+      taskTypeRow.hidden = true;
+      taskTypeRow.setAttribute("aria-hidden", "true");
+    }
+    resetNewTaskSchedulingFields();
+    setNewTaskStage("mode");
+    updateNewTaskSummary();
+    syncTaskMode("");
+  }
+
+  function applyNewTaskMode(mode){
+    const normalized = mode === "interval" ? "interval" : "asreq";
+    newTaskModeChoice = normalized;
+    newTaskTrackingChoice = null;
+    lockTrackingSelect = true;
+    if (taskTypeSelect){
+      taskTypeSelect.value = normalized;
+      taskTypeSelect.disabled = true;
+    }
+    if (taskTrackingSelect){
+      taskTrackingSelect.value = "";
+      taskTrackingSelect.disabled = true;
+    }
+    if (taskTrackingRow) taskTrackingRow.hidden = true;
+    if (taskTypeRow){
+      taskTypeRow.hidden = true;
+      taskTypeRow.setAttribute("aria-hidden", "true");
+    }
+    resetNewTaskSchedulingFields();
+    syncTaskMode(taskTypeSelect?.value || normalized);
+    updateNewTaskSummary();
+    if (normalized === "interval"){ setNewTaskStage("tracking"); }
+    else {
+      setNewTaskStage("form");
+      syncTaskDateInput();
+    }
+  }
+
+  function applyNewTaskTracking(tracking){
+    if (!newTaskModeChoice) return;
+    newTaskTrackingChoice = tracking === "calendar" ? "calendar" : "pump";
+    lockTrackingSelect = true;
+    if (taskTypeSelect){
+      taskTypeSelect.value = newTaskModeChoice;
+      taskTypeSelect.disabled = true;
+    }
+    if (taskTrackingSelect){
+      taskTrackingSelect.value = newTaskTrackingChoice;
+      taskTrackingSelect.disabled = true;
+    }
+    if (taskTrackingRow) taskTrackingRow.hidden = true;
+    syncTaskMode(taskTypeSelect?.value || newTaskModeChoice);
+    updateNewTaskSummary();
+    setNewTaskStage("form");
+    syncTaskDateInput();
   }
 
   function setTaskOptionPage(target){
@@ -4074,7 +4318,8 @@ function renderDashboard(){
         oneTimeNameInput.focus();
       }
     }else{
-      syncTaskMode(taskTypeSelect?.value || "interval");
+      resetNewTaskSelections();
+      syncTaskMode("");
       syncTaskDateInput();
       if (taskNameInput){
         taskNameInput.focus();
@@ -4383,14 +4628,90 @@ function renderDashboard(){
 
   function syncTaskMode(mode){
     if (!taskFreqRow || !taskLastRow || !taskConditionRow) return;
-    if (mode === "asreq"){
+    const normalizedMode = mode === "interval" ? "interval" : (mode === "asreq" ? "asreq" : "");
+    const trackingChoice = taskTrackingSelect ? (taskTrackingSelect.value === "calendar" ? "calendar" : (taskTrackingSelect.value === "pump" ? "pump" : "")) : "";
+    const conditionInput = taskConditionRow.querySelector("input, textarea");
+    const clearHourlyFields = ()=>{
+      if (taskIntervalInput) taskIntervalInput.value = "";
+      if (taskLastInput) taskLastInput.value = "";
+      if (taskDailyHoursInput) taskDailyHoursInput.value = "";
+    };
+    const resetCalendarRepeat = ()=>{
+      if (taskRepeatSelect) taskRepeatSelect.value = "none";
+      if (taskRepeatEveryInput) taskRepeatEveryInput.value = "1";
+    };
+    if (taskForm){
+      taskForm.setAttribute("data-task-mode", normalizedMode || "none");
+      taskForm.setAttribute("data-task-tracking", normalizedMode === "interval" ? (trackingChoice || "none") : "none");
+    }
+
+    if (taskTrackingRow){
+      taskTrackingRow.hidden = true;
+      taskTrackingRow.setAttribute("aria-hidden", "true");
+    }
+    if (taskTypeRow){
+      taskTypeRow.hidden = true;
+      taskTypeRow.setAttribute("aria-hidden", "true");
+    }
+
+    if (taskTrackingSelect) taskTrackingSelect.disabled = true;
+
+    if (normalizedMode !== "interval"){
       taskFreqRow.hidden = true;
       taskLastRow.hidden = true;
-      taskConditionRow.hidden = false;
-    }else{
-      taskFreqRow.hidden = false;
-      taskLastRow.hidden = false;
+      taskConditionRow.hidden = normalizedMode === "asreq" ? false : true;
+      if (taskTrackingRow) taskTrackingRow.hidden = true;
+      if (taskDailyHoursRow) taskDailyHoursRow.hidden = true;
+      if (taskCalendarRow){
+        taskCalendarRow.hidden = normalizedMode !== "asreq";
+        const calendarInput = taskCalendarRow.querySelector("input");
+        if (calendarInput instanceof HTMLInputElement) calendarInput.disabled = normalizedMode !== "asreq";
+      }
+      if (taskRepeatRow) taskRepeatRow.hidden = true;
+      if (taskTrackingSelect && normalizedMode !== "interval") taskTrackingSelect.value = "";
+      [taskIntervalInput, taskLastInput, taskDailyHoursInput, taskRepeatSelect, taskRepeatEveryInput]
+        .forEach(ctrl => { if (ctrl) ctrl.disabled = true; });
+      if (conditionInput instanceof HTMLElement) conditionInput.toggleAttribute("disabled", normalizedMode !== "asreq");
+      clearHourlyFields();
+      resetCalendarRepeat();
+      return;
+    }
+
+    if (!trackingChoice){
+      taskFreqRow.hidden = true;
+      taskLastRow.hidden = true;
       taskConditionRow.hidden = true;
+      if (taskDailyHoursRow) taskDailyHoursRow.hidden = true;
+      if (taskCalendarRow) taskCalendarRow.hidden = true;
+      if (taskRepeatRow) taskRepeatRow.hidden = true;
+      [taskIntervalInput, taskLastInput, taskDailyHoursInput, taskRepeatSelect, taskRepeatEveryInput]
+        .forEach(ctrl => { if (ctrl) ctrl.disabled = true; });
+      clearHourlyFields();
+      resetCalendarRepeat();
+      return;
+    }
+
+    taskFreqRow.hidden = trackingChoice === "calendar";
+    taskLastRow.hidden = trackingChoice === "calendar";
+    taskConditionRow.hidden = false;
+    if (conditionInput instanceof HTMLElement) conditionInput.toggleAttribute("disabled", false);
+    const hourlyDisabled = trackingChoice === "calendar";
+    [taskIntervalInput, taskLastInput, taskDailyHoursInput]
+      .forEach(ctrl => { if (ctrl) ctrl.disabled = hourlyDisabled; });
+    if (taskDailyHoursRow){
+      taskDailyHoursRow.hidden = trackingChoice === "calendar";
+      if (trackingChoice === "calendar") taskDailyHoursInput && (taskDailyHoursInput.value = "");
+    }
+    if (taskCalendarRow){
+      taskCalendarRow.hidden = trackingChoice !== "calendar";
+      const calendarInput = taskCalendarRow.querySelector("input");
+      if (calendarInput instanceof HTMLInputElement) calendarInput.disabled = trackingChoice !== "calendar";
+      if (trackingChoice !== "calendar") taskDateInput && (taskDateInput.value = "");
+    }
+    if (taskRepeatRow){
+      taskRepeatRow.hidden = trackingChoice !== "calendar";
+      [taskRepeatSelect, taskRepeatEveryInput].forEach(ctrl => { if (ctrl) ctrl.disabled = trackingChoice !== "calendar"; });
+      if (trackingChoice !== "calendar") resetCalendarRepeat();
     }
   }
 
@@ -4399,10 +4720,13 @@ function renderDashboard(){
     if (taskDowntimeInput){
       taskDowntimeInput.value = "1";
     }
+    if (taskDailyHoursInput){ taskDailyHoursInput.value = "8"; }
+    if (taskRepeatSelect){ taskRepeatSelect.value = "none"; }
+    if (taskRepeatEveryInput){ taskRepeatEveryInput.value = "1"; }
     subtaskList?.replaceChildren();
     resetExistingTaskForm();
+    resetNewTaskSelections();
     showTaskOptionStage();
-    syncTaskMode(taskTypeSelect?.value || "interval");
     syncTaskDateInput();
   }
 
@@ -4615,7 +4939,7 @@ function renderDashboard(){
       const mode = typeSel.value === "asreq" ? "asreq" : "interval";
       if (freqRow) freqRow.hidden = mode !== "interval";
       if (lastRow) lastRow.hidden = mode !== "interval";
-      if (condRow) condRow.hidden = mode !== "asreq";
+      if (condRow) condRow.hidden = false;
     };
     typeSel?.addEventListener("change", sync);
     sync();
@@ -4654,6 +4978,7 @@ function renderDashboard(){
 
   taskCardBackButtons.forEach(btn => {
     btn.addEventListener("click", ()=>{
+      resetNewTaskSelections();
       showTaskOptionStage();
       showStep("task");
     });
@@ -4664,6 +4989,33 @@ function renderDashboard(){
       const variant = btn.getAttribute("data-task-option");
       activateTaskVariant(variant);
     });
+  });
+
+  newTaskModeButtons.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const choice = btn.getAttribute("data-new-task-mode") || "";
+      applyNewTaskMode(choice);
+    });
+  });
+
+  newTaskTrackingButtons.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const choice = btn.getAttribute("data-new-task-tracking") || "";
+      applyNewTaskTracking(choice);
+    });
+  });
+
+  newTaskBackButtons.forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const target = btn.getAttribute("data-new-task-back") || "mode";
+      if (target === "mode"){ resetNewTaskSelections(); }
+      else { setNewTaskStage(target); }
+    });
+  });
+
+  newTaskChangeButton?.addEventListener("click", ()=>{
+    resetNewTaskSelections();
+    setTaskOptionPage("new");
   });
 
   taskExistingSearchInput?.addEventListener("input", ()=>{
@@ -4694,8 +5046,14 @@ function renderDashboard(){
     }, 80);
   });
 
-  taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
-  syncTaskMode(taskTypeSelect?.value || "interval");
+  taskTypeSelect?.addEventListener("change", ()=>{
+    if (taskTypeSelect.value !== "interval" && taskTrackingSelect){
+      taskTrackingSelect.value = "";
+    }
+    syncTaskMode(taskTypeSelect.value);
+  });
+  taskTrackingSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect?.value || ""));
+  syncTaskMode(taskTypeSelect?.value || "");
   syncTaskDateInput();
   syncOneTimeDateInput();
   populateCategoryOptions();
@@ -4704,7 +5062,12 @@ function renderDashboard(){
   showTaskOptionStage();
 
   addSubtaskBtn?.addEventListener("click", ()=>{
-    const row = createSubtaskRow(taskTypeSelect?.value || "interval");
+    const baseMode = taskTypeSelect?.value || "";
+    if (!baseMode){
+      alert("Choose whether the task is per interval or as required before adding sub-tasks.");
+      return;
+    }
+    const row = createSubtaskRow(baseMode);
     if (row) subtaskList?.appendChild(row);
   });
 
@@ -4713,12 +5076,26 @@ function renderDashboard(){
     if (!taskForm) return;
     const name = (taskNameInput?.value || "").trim();
     if (!name){ alert("Task name is required."); return; }
-    const mode = (taskTypeSelect?.value === "asreq") ? "asreq" : "interval";
+    const rawMode = taskTypeSelect?.value || "";
+    if (!rawMode){ alert("Select whether the task is per interval or as required."); return; }
+    const mode = (rawMode === "asreq") ? "asreq" : "interval";
+    const rawTracking = taskTrackingSelect?.value || "";
+    if (mode === "interval" && !rawTracking){ alert("Select whether to track by usage hours or on a calendar."); return; }
+    const trackingMode = (mode === "interval" && rawTracking === "calendar") ? "calendar" : "pump";
+    const rawCondition = (taskConditionInput?.value || "").trim();
+    const condition = rawCondition || (mode === "asreq" ? "As required" : "");
     const manual = (taskManualInput?.value || "").trim();
     const store  = (taskStoreInput?.value || "").trim();
     const pn     = (taskPNInput?.value || "").trim();
     const priceVal = taskPriceInput?.value;
     const price  = priceVal === "" ? null : Number(priceVal);
+    const estDailyRaw = Number(taskDailyHoursInput?.value);
+    const estimatedDailyHours = (mode === "interval" && trackingMode === "pump" && Number.isFinite(estDailyRaw) && estDailyRaw > 0)
+      ? Math.max(0.25, Math.round(estDailyRaw * 100) / 100)
+      : null;
+    const repeatChoice = (mode === "interval" && trackingMode === "calendar") ? (taskRepeatSelect?.value || "none") : "none";
+    const repeatEveryVal = Number(taskRepeatEveryInput?.value);
+    const repeatEvery = Number.isFinite(repeatEveryVal) && repeatEveryVal > 0 ? Math.round(repeatEveryVal) : 1;
     let downtimeVal = Number(taskDowntimeInput?.value);
     if (!isFinite(downtimeVal) || downtimeVal <= 0){
       downtimeVal = 1;
@@ -4730,9 +5107,24 @@ function renderDashboard(){
     const catId  = (categorySelect?.value || "").trim() || null;
     const id     = genId(name);
     const rawDate = (taskDateInput?.value || "").trim();
+    if (mode === "asreq" && !rawDate && !addContextDateISO){
+      alert("Select the calendar date for this as-required task.");
+      return;
+    }
     const dateISO = rawDate ? ymd(rawDate) : "";
     const targetISO = dateISO || addContextDateISO || ymd(new Date());
-    const calendarDateISO = targetISO || null;
+    const calendarDateISO = mode === "asreq" ? (targetISO || null) : (trackingMode === "calendar" ? (targetISO || null) : null);
+    const parsed = parseDateLocal(targetISO);
+    const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+    let dateLabel = targetISO;
+    let completed = false;
+    if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+      const display = new Date(parsed.getTime());
+      dateLabel = display.toLocaleDateString();
+      const compare = new Date(parsed.getTime());
+      compare.setHours(0,0,0,0);
+      completed = compare.getTime() <= todayMidnight.getTime();
+    }
     const base = {
       id,
       name,
@@ -4743,8 +5135,16 @@ function renderDashboard(){
       cat: catId,
       parentTask: null,
       order: ++window._maintOrderCounter,
-      calendarDateISO: null,
-      downtimeHours: downtimeVal
+      calendarDateISO,
+      downtimeHours: downtimeVal,
+      trackingMode: mode === "interval" ? trackingMode : "pump",
+      estimatedDailyHours,
+      condition,
+      calendarPlan: mode === "interval" && trackingMode === "calendar" ? normalizeCalendarPlan({
+        startDateISO: targetISO || null,
+        repeat: repeatChoice,
+        repeatEvery
+      }) : null
     };
     let message = "Task added";
     if (mode === "interval"){
@@ -4759,32 +5159,30 @@ function renderDashboard(){
         manualHistory: [],
         variant: "template",
         templateId: id,
-        downtimeHours: downtimeVal
+        downtimeHours: downtimeVal,
+        trackingMode,
+        estimatedDailyHours,
+        calendarPlan: base.calendarPlan
       });
       const curHours = getCurrentMachineHours();
       const baselineHours = parseBaselineHours(taskLastInput?.value);
       applyIntervalBaseline(template, { baselineHours, currentHours: curHours });
       tasksInterval.unshift(template);
       const instance = scheduleExistingIntervalTask(template, { dateISO: targetISO, refreshDashboard: false }) || template;
-      const parsed = parseDateLocal(targetISO);
-      const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
-      let dateLabel = targetISO;
-      let completed = false;
-      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
-        const display = new Date(parsed.getTime());
-        dateLabel = display.toLocaleDateString();
-        const compare = new Date(parsed.getTime());
-        compare.setHours(0,0,0,0);
-        completed = compare.getTime() <= todayMidnight.getTime();
+      if (trackingMode === "calendar"){
+        const repeatLabel = repeatChoice === "none" ? "" : ` (${repeatChoice} every ${repeatEvery} interval${repeatEvery === 1 ? "" : "s"})`;
+        message = `Scheduled "${instance.name || "Task"}" for ${dateLabel}${repeatLabel}`;
+      }else{
+        message = completed
+          ? `Logged "${instance.name || "Task"}" as completed on ${dateLabel}`
+          : `Scheduled "${instance.name || "Task"}" for ${dateLabel}`;
       }
-      message = completed
-        ? `Logged "${instance.name || "Task"}" as completed on ${dateLabel}`
-        : `Scheduled "${instance.name || "Task"}" for ${dateLabel}`;
     }else{
-      const condition = (taskConditionInput?.value || "").trim() || "As required";
-      const task = Object.assign({}, base, { mode:"asreq", condition, variant: "template", templateId: id });
+      const task = Object.assign({}, base, { mode:"asreq", condition, variant: "template", templateId: id, calendarDateISO });
       tasksAsReq.unshift(task);
-      message = "As-required task added to Maintenance Settings";
+      message = calendarDateISO
+        ? `Scheduled "${task.name || "Task"}" for ${dateLabel}`
+        : "As-required task added to Maintenance Settings";
     }
 
     const parentInterval = Number(taskIntervalInput?.value);
@@ -4794,6 +5192,8 @@ function renderDashboard(){
       if (!subName) return;
       const subTypeSel = row.querySelector("[data-subtask-type]");
       const subMode = subTypeSel && subTypeSel.value === "asreq" ? "asreq" : "interval";
+      const condInput = row.querySelector("[data-subtask-condition-input]");
+      const subCondition = (condInput?.value || "").trim();
       const subBase = {
         id: genId(subName),
         name: subName,
@@ -4804,7 +5204,11 @@ function renderDashboard(){
         cat: catId,
         parentTask: id,
         order: ++window._maintOrderCounter,
-        calendarDateISO: null
+        calendarDateISO: null,
+        trackingMode,
+        estimatedDailyHours,
+        condition: subCondition,
+        calendarPlan: base.calendarPlan
       };
       if (subMode === "interval"){
         const intervalField = row.querySelector("[data-subtask-interval]");
@@ -4828,10 +5232,9 @@ function renderDashboard(){
         applyIntervalBaseline(subTask, { baselineHours, currentHours: curHours });
         tasksInterval.unshift(subTask);
       }else{
-        const condInput = row.querySelector("[data-subtask-condition-input]");
         const subTask = Object.assign({}, subBase, {
           mode:"asreq",
-          condition: (condInput?.value || "").trim() || "As required",
+          condition: subCondition || "As required",
           variant: "template",
           templateId: subBase.id
         });
@@ -6609,6 +7012,19 @@ function renderSettings(){
     if (task.cat == null) task.cat = task.cat ?? null;
     if (!Array.isArray(task.completedDates)) task.completedDates = [];
     if (typeof task.note !== "string") task.note = "";
+    const normalizedTracking = task.trackingMode === "calendar" ? "calendar" : "pump";
+    task.trackingMode = normalizedTracking;
+    if (normalizedTracking === "calendar"){
+      task.calendarPlan = normalizeCalendarPlan(task.calendarPlan || {}, task.calendarDateISO || null);
+    }else{
+      task.calendarPlan = null;
+      if (task.estimatedDailyHours != null){
+        const num = Number(task.estimatedDailyHours);
+        task.estimatedDailyHours = Number.isFinite(num) && num > 0 ? num : null;
+      }else{
+        task.estimatedDailyHours = null;
+      }
+    }
     if ((type === "interval" || type === "asreq") && isTemplateTask(task)){
       if (task.templateId == null) task.templateId = task.id;
     }
@@ -6773,9 +7189,11 @@ function renderSettings(){
     const t = entry.task;
     const type = entry.type;
     const name = escapeHtml(t.name || "(unnamed task)");
-    const condition = escapeHtml(t.condition || "As required");
+    const condition = escapeHtml(t.condition || (type === "asreq" ? "As required" : ""));
     const freq = t.interval ? `${t.interval} hrs` : "Set frequency";
     const baselineVal = baselineInputValue(t);
+    const plan = normalizeCalendarPlan(t.calendarPlan || {}, t.calendarDateISO || null);
+    const trackingLabel = t.trackingMode === "calendar" ? "Calendar" : "Pump hours";
     const occurrenceNoteMap = (typeof normalizeOccurrenceNotes === "function") ? normalizeOccurrenceNotes(t) : (t.occurrenceNotes || {});
     const occurrenceHoursMap = (typeof normalizeOccurrenceHours === "function") ? normalizeOccurrenceHours(t) : (t.occurrenceHours || {});
     const occurrenceKeys = new Set([
@@ -6802,6 +7220,7 @@ function renderSettings(){
         <summary draggable="true">
           <span class="task-name">${name}</span>
           <span class="chip">${type === "interval" ? "By Interval" : "As Required"}</span>
+          ${type === "interval" ? `<span class=\"chip\">${escapeHtml(trackingLabel)}</span>` : ""}
           ${type === "interval" ? `<span class=\"chip\" data-chip-frequency="${t.id}">${escapeHtml(freq)}</span>` : `<span class=\"chip\" data-chip-condition="${t.id}">${condition}</span>`}
           ${notesChip}
           ${type === "interval" ? dueChip(t) : ""}
@@ -6814,10 +7233,24 @@ function renderSettings(){
               <option value="interval" ${type==="interval"?"selected":""}>By interval</option>
               <option value="asreq" ${type==="asreq"?"selected":""}>As required</option>
             </select></label>
+            ${type === "interval" ? `<label data-field="trackingMode">Tracking<select data-k=\"trackingMode\" data-id=\"${t.id}\" data-list=\"${type}\">${["pump","calendar"].map(val => {
+                  const label = val === "calendar" ? "Calendar day / repeating" : "Pump hours";
+                  const selected = (t.trackingMode === "calendar" ? "calendar" : "pump") === val ? "selected" : "";
+                  return `<option value="${val}" ${selected}>${escapeHtml(label)}</option>`;
+                }).join("")}</select></label>` : ""}
             ${type === "interval"
-              ? `<label data-field="interval">Frequency (hrs)<input type=\"number\" min=\"1\" step=\"1\" data-k=\"interval\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${t.interval!=null?t.interval:""}\" placeholder=\"Hours between service\"></label>`
+              ? `<label data-field="interval" data-track=\"pump\" ${t.trackingMode === "calendar" ? "hidden" : ""}>Frequency (hrs)<input type=\"number\" min=\"1\" step=\"1\" data-k=\"interval\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${t.interval!=null?t.interval:""}\" placeholder=\"Hours between service\"></label>`
               : `<label data-field="condition">Condition / trigger<input data-k=\"condition\" data-id=\"${t.id}\" data-list=\"asreq\" value=\"${escapeHtml(t.condition||"")}\" placeholder=\"When to perform\"></label>`}
-            ${type === "interval" ? `<label data-field="sinceBase">Hours since last service<input type=\"number\" min=\"0\" step=\"0.01\" data-k=\"sinceBase\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${baselineVal!==""?baselineVal:""}\" placeholder=\"optional\"></label>` : ""}
+            ${type === "interval" ? `<label data-field="condition">Condition / trigger<input data-k=\"condition\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${escapeHtml(t.condition||"")}\" placeholder=\"When to perform\"></label>` : ""}
+            ${type === "interval" ? `<label data-field="sinceBase" data-track=\"pump\" ${t.trackingMode === "calendar" ? "hidden" : ""}>Hours since last service<input type=\"number\" min=\"0\" step=\"0.01\" data-k=\"sinceBase\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${baselineVal!==""?baselineVal:""}\" placeholder=\"optional\"></label>` : ""}
+            ${type === "interval" ? `<label data-field="estimatedDailyHours" data-track="pump" ${t.trackingMode === "calendar" ? "hidden" : ""}>Estimated hours per day<input type=\"number\" step=\"0.25\" min=\"0.25\" data-k=\"estimatedDailyHours\" data-id=\"${t.id}\" data-list=\"${type}\" value=\"${t.estimatedDailyHours!=null?t.estimatedDailyHours:""}\" placeholder=\"e.g. 8\"></label>` : ""}
+            ${type === "interval" ? `<label data-field="calendarStart" data-track="calendar" ${t.trackingMode === "calendar" ? "" : "hidden"}>Calendar start<input type=\"date\" data-k=\"calendarStart\" data-id=\"${t.id}\" data-list=\"${type}\" value=\"${plan.startDateISO || ""}\"></label>` : ""}
+            ${type === "interval" ? `<label data-field="calendarRepeat" data-track="calendar" ${t.trackingMode === "calendar" ? "" : "hidden"}>Repeats<select data-k=\"calendarRepeat\" data-id=\"${t.id}\" data-list=\"${type}\">${["none","daily","weekly","monthly"].map(opt => {
+                  const label = opt === "none" ? "Does not repeat" : opt.charAt(0).toUpperCase()+opt.slice(1);
+                  const selected = plan.repeat === opt ? "selected" : "";
+                  return `<option value="${opt}" ${selected}>${escapeHtml(label)}</option>`;
+                }).join("")}</select></label>` : ""}
+            ${type === "interval" ? `<label data-field="calendarRepeatEvery" data-track="calendar" ${t.trackingMode === "calendar" ? "" : "hidden"}>Repeat every<input type=\"number\" min=\"1\" step=\"1\" data-k=\"calendarRepeatEvery\" data-id=\"${t.id}\" data-list=\"${type}\" value=\"${plan.repeatEvery || 1}\"></label>` : ""}
             <label data-field="manualLink">Manual link<input type="url" data-k="manualLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.manualLink||"")}" placeholder="https://..."></label>
             <label data-field="storeLink">Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
             <label data-field="pn">Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
@@ -6976,13 +7409,30 @@ function renderSettings(){
         <form id="taskForm" class="modal-form">
           <div class="modal-grid">
             <label>Task name<input name="taskName" required placeholder="Task"></label>
-            <label>Type<select name="taskType" id="taskTypeSelect">
-              <option value="interval">By interval</option>
+            <label>Type<select name="taskType" id="taskTypeSelect" required>
+              <option value="" disabled selected>Select scheduling type</option>
+              <option value="interval">Per interval</option>
               <option value="asreq">As required</option>
             </select></label>
-            <label data-form-frequency>Frequency (hrs)<input type="number" min="1" step="1" name="taskInterval" placeholder="e.g. 40"></label>
-            <label data-form-last>Hours since last service<input type="number" min="0" step="0.01" name="taskLastServiced" placeholder="optional"></label>
+            <label data-form-tracking hidden>Tracking<select name="taskTracking" required>
+              <option value="" disabled selected>Select tracking method</option>
+              <option value="pump">Usage hours (log hours + est./day)</option>
+              <option value="calendar">Calendar day / repeating</option>
+            </select></label>
+            <label data-form-frequency hidden>Frequency (hrs)<input type="number" min="1" step="1" name="taskInterval" placeholder="e.g. 40"></label>
+            <label data-form-last hidden>Hours since last service<input type="number" min="0" step="0.01" name="taskLastServiced" placeholder="optional"></label>
             <label data-form-condition hidden>Condition / trigger<input name="taskCondition" placeholder="e.g. When clogged"></label>
+            <label data-form-daily-hours hidden>Estimated hours per day<input type="number" min="0.25" step="0.25" name="taskEstimatedDailyHours" placeholder="e.g. 8"></label>
+            <label data-form-calendar hidden>Calendar start date<input type="date" name="taskCalendarStart"></label>
+            <div class="calendar-repeat" data-form-repeat hidden>
+              <label>Repeats<select name="taskCalendarRepeat">
+                <option value="none">Does not repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select></label>
+              <label>Repeat every<input type="number" min="1" step="1" name="taskCalendarRepeatEvery" value="1"></label>
+            </div>
             <label>Manual link<input type="url" name="taskManual" placeholder="https://..."></label>
             <label>Store link<input type="url" name="taskStore" placeholder="https://..."></label>
             <label>Part #<input name="taskPN" placeholder="Part number"></label>
@@ -7014,9 +7464,14 @@ function renderSettings(){
   const modal = document.getElementById("taskModal");
   const form = document.getElementById("taskForm");
   const typeField = document.getElementById("taskTypeSelect");
+  const trackingField = form?.querySelector('[name="taskTracking"]');
   const freqRow = form?.querySelector('[data-form-frequency]');
   const lastRow = form?.querySelector('[data-form-last]');
   const conditionRow = form?.querySelector('[data-form-condition]');
+  const trackingRow = form?.querySelector('[data-form-tracking]');
+  const dailyHoursRow = form?.querySelector('[data-form-daily-hours]');
+  const calendarRow = form?.querySelector('[data-form-calendar]');
+  const repeatRow = form?.querySelector('[data-form-repeat]');
   const searchInput = document.getElementById("maintenanceSearch");
   const searchClear = document.getElementById("maintenanceSearchClear");
   const occurrenceNotesModal = document.getElementById("occurrenceNotesModal");
@@ -7487,14 +7942,90 @@ function renderSettings(){
 
   function syncFormMode(mode){
     if (!freqRow || !lastRow || !conditionRow) return;
-    if (mode === "interval"){
-      freqRow.hidden = false;
-      lastRow.hidden = false;
-      conditionRow.hidden = true;
-    }else{
+    const normalizedMode = mode === "interval" ? "interval" : (mode === "asreq" ? "asreq" : "");
+    const trackingChoice = trackingField ? (trackingField.value === "calendar" ? "calendar" : (trackingField.value === "pump" ? "pump" : "")) : "";
+    const conditionInput = conditionRow.querySelector("input, textarea");
+    const clearHourlyFields = ()=>{
+      const intervalInput = form?.querySelector('[name="taskInterval"]');
+      const lastInput = form?.querySelector('[name="taskLastServiced"]');
+      const dailyInput = form?.querySelector('[name="taskEstimatedDailyHours"]');
+      if (intervalInput instanceof HTMLInputElement) intervalInput.value = "";
+      if (lastInput instanceof HTMLInputElement) lastInput.value = "";
+      if (dailyInput instanceof HTMLInputElement) dailyInput.value = "";
+    };
+    const resetCalendarRepeat = ()=>{
+      const repeatField = form?.querySelector('[name="taskCalendarRepeat"]');
+      const repeatEveryField = form?.querySelector('[name="taskCalendarRepeatEvery"]');
+      if (repeatField instanceof HTMLSelectElement) repeatField.value = "none";
+      if (repeatEveryField instanceof HTMLInputElement) repeatEveryField.value = "1";
+    };
+    if (form){
+      form.setAttribute("data-task-mode", normalizedMode || "none");
+      form.setAttribute("data-task-tracking", normalizedMode === "interval" ? (trackingChoice || "none") : "none");
+    }
+    if (trackingField) trackingField.disabled = normalizedMode !== "interval";
+    if (normalizedMode !== "interval"){
       freqRow.hidden = true;
       lastRow.hidden = true;
-      conditionRow.hidden = false;
+      conditionRow.hidden = normalizedMode === "asreq" ? false : true;
+      if (trackingRow) trackingRow.hidden = true;
+      if (dailyHoursRow) dailyHoursRow.hidden = true;
+      if (calendarRow){
+        calendarRow.hidden = normalizedMode !== "asreq";
+        const calendarInput = calendarRow.querySelector("input");
+        if (calendarInput instanceof HTMLInputElement) calendarInput.disabled = normalizedMode !== "asreq";
+      }
+      if (repeatRow) repeatRow.hidden = true;
+      if (trackingField && normalizedMode !== "interval") trackingField.value = "";
+      [form?.querySelector('[name="taskInterval"]'), form?.querySelector('[name="taskLastServiced"]'), form?.querySelector('[name="taskEstimatedDailyHours"]'), form?.querySelector('[name="taskCalendarRepeat"]'), form?.querySelector('[name="taskCalendarRepeatEvery"]')]
+        .forEach(ctrl => { if (ctrl instanceof HTMLInputElement || ctrl instanceof HTMLSelectElement) ctrl.disabled = true; });
+      if (conditionInput instanceof HTMLElement) conditionInput.toggleAttribute("disabled", normalizedMode !== "asreq");
+      clearHourlyFields();
+      resetCalendarRepeat();
+      return;
+    }
+
+    if (trackingRow) trackingRow.hidden = false;
+    if (!trackingChoice){
+      freqRow.hidden = true;
+      lastRow.hidden = true;
+      conditionRow.hidden = true;
+      if (dailyHoursRow) dailyHoursRow.hidden = true;
+      if (calendarRow) calendarRow.hidden = true;
+      if (repeatRow) repeatRow.hidden = true;
+      [form?.querySelector('[name="taskInterval"]'), form?.querySelector('[name="taskLastServiced"]'), form?.querySelector('[name="taskEstimatedDailyHours"]'), form?.querySelector('[name="taskCalendarRepeat"]'), form?.querySelector('[name="taskCalendarRepeatEvery"]')]
+        .forEach(ctrl => { if (ctrl instanceof HTMLInputElement || ctrl instanceof HTMLSelectElement) ctrl.disabled = true; });
+      if (trackingField) trackingField.disabled = false;
+      clearHourlyFields();
+      resetCalendarRepeat();
+      return;
+    }
+
+    freqRow.hidden = trackingChoice === "calendar";
+    lastRow.hidden = trackingChoice === "calendar";
+    conditionRow.hidden = !trackingChoice ? true : false;
+    if (conditionInput instanceof HTMLElement) conditionInput.toggleAttribute("disabled", !trackingChoice ? true : false);
+    const hourlyDisabled = trackingChoice === "calendar";
+    [form?.querySelector('[name="taskInterval"]'), form?.querySelector('[name="taskLastServiced"]'), form?.querySelector('[name="taskEstimatedDailyHours"]')]
+      .forEach(ctrl => { if (ctrl instanceof HTMLInputElement) ctrl.disabled = hourlyDisabled; });
+    if (dailyHoursRow){
+      dailyHoursRow.hidden = trackingChoice === "calendar";
+      if (trackingChoice === "calendar"){
+        const dailyInput = form?.querySelector('[name="taskEstimatedDailyHours"]');
+        if (dailyInput instanceof HTMLInputElement) dailyInput.value = "";
+      }
+    }
+    if (calendarRow){
+      calendarRow.hidden = trackingChoice !== "calendar";
+      const startInput = form?.querySelector('[name="taskCalendarStart"]');
+      if (startInput instanceof HTMLInputElement) startInput.disabled = trackingChoice !== "calendar";
+      if (trackingChoice !== "calendar" && startInput instanceof HTMLInputElement) startInput.value = "";
+    }
+    if (repeatRow){
+      repeatRow.hidden = trackingChoice !== "calendar";
+      [form?.querySelector('[name="taskCalendarRepeat"]'), form?.querySelector('[name="taskCalendarRepeatEvery"]')]
+        .forEach(ctrl => { if (ctrl instanceof HTMLInputElement || ctrl instanceof HTMLSelectElement) ctrl.disabled = trackingChoice !== "calendar"; });
+      if (trackingChoice !== "calendar") resetCalendarRepeat();
     }
   }
 
@@ -7503,6 +8034,16 @@ function renderSettings(){
     const opts = options && typeof options === "object" ? options : {};
     const categoryId = opts.categoryId != null ? String(opts.categoryId) : "";
     form.reset();
+    if (typeField) typeField.value = "";
+    if (trackingField) trackingField.value = "";
+    const repeatField = form.querySelector('[name="taskCalendarRepeat"]');
+    if (repeatField instanceof HTMLSelectElement){
+      repeatField.value = "none";
+    }
+    const repeatEveryField = form.querySelector('[name="taskCalendarRepeatEvery"]');
+    if (repeatEveryField instanceof HTMLInputElement){
+      repeatEveryField.value = "1";
+    }
     const categoryField = form.querySelector('[name="taskCategory"]');
     if (categoryField instanceof HTMLSelectElement){
       if (categoryId){
@@ -7562,8 +8103,14 @@ function renderSettings(){
       closeOccurrenceNotes();
     }
   });
-  typeField?.addEventListener("change", ()=> syncFormMode(typeField.value));
-  syncFormMode(typeField?.value || "interval");
+  typeField?.addEventListener("change", ()=>{
+    if (typeField.value !== "interval" && trackingField){
+      trackingField.value = "";
+    }
+    syncFormMode(typeField.value);
+  });
+  trackingField?.addEventListener("change", ()=> syncFormMode(typeField?.value || ""));
+  syncFormMode(typeField?.value || "");
 
   let pendingInventoryIdForNewTask = null;
   let pendingInventoryNameForNewTask = null;
@@ -7618,8 +8165,13 @@ function renderSettings(){
     if (!form) return;
     const data = new FormData(form);
     const name = (data.get("taskName")||"").toString().trim();
-    const mode = (data.get("taskType")||"interval").toString();
+    const rawMode = (data.get("taskType")||"").toString();
     if (!name){ alert("Task name is required."); return; }
+    if (!rawMode){ alert("Select whether the task is per interval or as required."); return; }
+    const mode = rawMode === "asreq" ? "asreq" : "interval";
+    const rawTracking = (data.get("taskTracking")||"").toString();
+    if (mode === "interval" && !rawTracking){ alert("Select whether to track by usage hours or on a calendar."); return; }
+    const trackingMode = mode === "interval" && rawTracking === "calendar" ? "calendar" : "pump";
     const rootId = (typeof window !== "undefined" && typeof window.ROOT_FOLDER_ID === "string") ? window.ROOT_FOLDER_ID : "root";
     const catRaw = (data.get("taskCategory")||"").toString().trim();
     const catId = catRaw ? catRaw : rootId;
@@ -7630,8 +8182,24 @@ function renderSettings(){
     const price = priceVal === null || priceVal === "" ? null : Number(priceVal);
     const noteRaw = (data.get("taskNote")||"").toString();
     const note = noteRaw.trim() ? noteRaw : "";
+    const estDailyRaw = Number(data.get("taskEstimatedDailyHours"));
+    const estimatedDailyHours = (mode === "interval" && trackingMode === "pump" && Number.isFinite(estDailyRaw) && estDailyRaw > 0)
+      ? Math.max(0.25, Math.round(estDailyRaw * 100) / 100)
+      : null;
+    const calendarStart = (data.get("taskCalendarStart") || "").toString().trim();
+    const normalizedStart = calendarStart ? ymd(calendarStart) : "";
+    if (mode === "asreq" && !normalizedStart){
+      alert("Select the maintenance date for as-required tasks.");
+      return;
+    }
+    const calendarRepeat = (mode === "interval" && trackingMode === "calendar") ? (data.get("taskCalendarRepeat") || "none").toString() : "none";
+    const calendarRepeatEveryVal = Number(data.get("taskCalendarRepeatEvery"));
+    const calendarRepeatEvery = Number.isFinite(calendarRepeatEveryVal) && calendarRepeatEveryVal > 0 ? Math.round(calendarRepeatEveryVal) : 1;
+    const normalizedPlan = trackingMode === "calendar"
+      ? normalizeCalendarPlan({ startDateISO: normalizedStart || null, repeat: calendarRepeat, repeatEvery: calendarRepeatEvery }, null)
+      : null;
     const id = genId(name);
-    const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, note, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
+    const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, note, cat: catId, parentTask:null, order: ++window._maintOrderCounter, calendarDateISO: mode === "asreq" ? (normalizedStart || null) : (trackingMode === "calendar" ? (normalizedStart || null) : null) };
 
     let createdTask = null;
     let autoLinkedInventory = false;
@@ -7641,6 +8209,10 @@ function renderSettings(){
       const task = Object.assign(base, {
         mode:"interval",
         interval: isFinite(interval) && interval>0 ? interval : 8,
+        trackingMode,
+        estimatedDailyHours,
+        calendarPlan: normalizedPlan,
+        calendarDateISO: normalizedPlan?.startDateISO || null,
         sinceBase:0,
         anchorTotal:null,
         completedDates: [],
@@ -7912,6 +8484,16 @@ function renderSettings(){
           renderCalendar();
         }
       }
+    }else if (key === "estimatedDailyHours"){
+      const normalized = value === null || value === ""
+        ? null
+        : (Number.isFinite(Number(value)) && Number(value) > 0 ? Math.max(0.25, Math.round(Number(value) * 100) / 100) : null);
+      if (normalized != null){
+        meta.task.estimatedDailyHours = normalized;
+        target.value = String(normalized);
+      }else{
+        meta.task.estimatedDailyHours = null;
+      }
     }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
       meta.task[key] = target.value;
       if (key === "name"){ const label = holder.querySelector('.task-name'); if (label) label.textContent = target.value || "(unnamed task)"; }
@@ -7923,7 +8505,27 @@ function renderSettings(){
     persist();
   });
 
-  tree?.addEventListener("change", (e)=>{
+  const syncTaskTrackingDisplay = (holder, trackingMode)=>{
+    if (!holder) return;
+    const isCalendar = trackingMode === "calendar";
+    holder.querySelectorAll('[data-track="pump"]').forEach(el => { el.hidden = isCalendar; });
+    holder.querySelectorAll('[data-track="calendar"]').forEach(el => { el.hidden = !isCalendar; });
+  };
+
+  const earliestHistoryDate = (task)=>{
+    const history = Array.isArray(task?.manualHistory) ? task.manualHistory : [];
+    let best = null;
+    history.forEach(entry => {
+      if (!entry || typeof entry.dateISO !== "string") return;
+      const dateStr = entry.dateISO;
+      if (best == null || String(dateStr).localeCompare(String(best)) < 0){
+        best = dateStr;
+      }
+    });
+    return best;
+  };
+
+  tree?.addEventListener("change", async (e)=>{
     const target = e.target;
     if (!(target instanceof HTMLSelectElement)) return;
     const holder = target.closest("[data-task-id]");
@@ -7932,7 +8534,8 @@ function renderSettings(){
     const id = holder.getAttribute("data-task-id");
     const meta = findTaskMeta(id);
     if (!meta) return;
-    if (target.getAttribute("data-k") === "mode"){
+    const dataKey = target.getAttribute("data-k");
+    if (dataKey === "mode"){
       const nextMode = target.value;
       if (nextMode === meta.mode) return;
       meta.list.splice(meta.index,1);
@@ -7965,6 +8568,91 @@ function renderSettings(){
         delete meta.task.sinceBase;
         delete meta.task.anchorTotal;
         window.tasksAsReq.unshift(meta.task);
+      }
+      persist();
+      renderSettings();
+    }else if (dataKey === "trackingMode"){
+      const prevMode = meta.task.trackingMode === "calendar" ? "calendar" : "pump";
+      const nextMode = target.value === "calendar" ? "calendar" : "pump";
+      if (prevMode === nextMode){ target.value = prevMode; return; }
+      const history = Array.isArray(meta.task.manualHistory) ? meta.task.manualHistory : [];
+      const hasOccurrences = history.length > 0;
+      if (hasOccurrences){
+        let proceed = true;
+        if (typeof showConfirmModal === "function"){
+          proceed = await showConfirmModal({
+            title: "Update tracking method?",
+            message: "Changing tracking might alter existing calendar occurrences.",
+            confirmText: "Continue",
+            cancelText: "Cancel",
+            confirmVariant: "primary"
+          });
+        }else if (typeof window.confirm === "function"){
+          proceed = window.confirm("Changing tracking might alter existing calendar occurrences. Continue?");
+        }
+        if (!proceed){ target.value = prevMode; return; }
+        let option = "convert";
+        if (typeof window.prompt === "function"){
+          const choice = window.prompt(
+            "Choose how to handle current occurrences:\n"+
+            "1) Delete all occurrences from calendar\n"+
+            "2) Convert existing occurrences to calendar interval style\n"+
+            "3) Create new copy and leave current tasks",
+            "2"
+          );
+          const trimmed = (choice || "").trim();
+          if (trimmed === "1") option = "delete";
+          else if (trimmed === "3") option = "copy";
+          else option = "convert";
+        }
+        if (option === "delete"){
+          meta.task.manualHistory = [];
+          meta.task.completedDates = [];
+          meta.task.occurrenceNotes = {};
+          meta.task.occurrenceHours = {};
+        }else if (option === "copy"){
+          const clone = JSON.parse(JSON.stringify(meta.task));
+          clone.id = genId(clone.name || "task_copy");
+          clone.templateId = clone.id;
+          clone.trackingMode = nextMode;
+          clone.calendarPlan = nextMode === "calendar"
+            ? normalizeCalendarPlan(clone.calendarPlan || {}, earliestHistoryDate(clone) || clone.calendarDateISO || null)
+            : null;
+          if (nextMode !== "calendar") clone.calendarPlan = null;
+          if (meta.list === "interval") window.tasksInterval.unshift(clone);
+          else window.tasksAsReq.unshift(clone);
+          target.value = prevMode;
+          persist();
+          renderSettings();
+          return;
+        }
+      }
+      meta.task.trackingMode = nextMode;
+      if (nextMode === "calendar"){
+        meta.task.calendarPlan = normalizeCalendarPlan(meta.task.calendarPlan || {}, earliestHistoryDate(meta.task) || meta.task.calendarDateISO || null);
+        applyCalendarPlanToTask(meta.task, { plan: meta.task.calendarPlan, refreshDashboard: false });
+      }else{
+        meta.task.calendarPlan = null;
+      }
+      syncTaskTrackingDisplay(holder, nextMode);
+      persist();
+      renderSettings();
+    }else if (dataKey === "calendarRepeat" || dataKey === "calendarRepeatEvery" || dataKey === "calendarStart"){
+      const plan = normalizeCalendarPlan(meta.task.calendarPlan || {}, meta.task.calendarDateISO || null);
+      if (dataKey === "calendarRepeat"){
+        plan.repeat = ["daily","weekly","monthly"].includes(target.value) ? target.value : "none";
+      }
+      if (dataKey === "calendarRepeatEvery"){
+        const val = Number(target.value);
+        plan.repeatEvery = Number.isFinite(val) && val > 0 ? Math.round(val) : 1;
+        target.value = String(plan.repeatEvery);
+      }
+      if (dataKey === "calendarStart"){
+        plan.startDateISO = target.value || null;
+      }
+      meta.task.calendarPlan = plan;
+      if (meta.task.trackingMode === "calendar"){
+        applyCalendarPlanToTask(meta.task, { plan, refreshDashboard: false });
       }
       persist();
       renderSettings();
