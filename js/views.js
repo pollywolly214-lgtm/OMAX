@@ -452,6 +452,9 @@ function taskDetailsInterval(task){
     <div class="row"><label>Baseline “since last” (hrs):</label>
       <div><input type="number" min="0" data-k="sinceBase" data-id="${task.id}" data-list="interval" value="${task.sinceBase != null ? task.sinceBase : ""}" /></div>
     </div>
+    <div class="row"><label>Condition/Notes:</label>
+      <div><input type="text" data-k="condition" data-id="${task.id}" data-list="interval" value="${task.condition || ""}" placeholder="e.g., when clogged / visual check" /></div>
+    </div>
     <div class="row"><label>When last serviced (hrs):</label>
       <div>${lastServ}</div>
     </div>
