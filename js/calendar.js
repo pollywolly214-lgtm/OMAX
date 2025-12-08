@@ -182,6 +182,13 @@ function triggerDashboardAddPicker(opts){
 }
 
 function getCuttingJobsList(){
+  if (typeof refreshGlobalCollections === "function"){
+    try {
+      refreshGlobalCollections();
+    } catch (err){
+      console.warn("Failed to sync collections before reading cutting jobs", err);
+    }
+  }
   const latest = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : [];
   if (latest !== cuttingJobs){
     cuttingJobs = latest;

@@ -4948,6 +4948,11 @@ function renderDashboard(){
           catch (err){ console.warn("Failed to sync collections after adding job", err); }
         }
 
+        if (typeof route === "function"){
+          try { route(); }
+          catch (err){ console.warn("Failed to reroute after adding job", err); }
+        }
+
         if (typeof renderDashboard === "function"){
           try { renderDashboard(); }
           catch (err){ console.warn("Failed to render dashboard after adding job", err); }
