@@ -1678,6 +1678,36 @@ function renderCalendar(){
   }
 
   const dueMap = {};
+  const pumpMap = {};
+  const normalizeTime = (value)=> typeof pumpNormalizeTimeValue === "function"
+    ? pumpNormalizeTimeValue(value, "")
+    : (typeof normalizeTimeString === "function" ? normalizeTimeString(value) : (value || ""));
+  const formatPumpTime = (value)=> typeof pumpFormatTimeLabel === "function"
+    ? pumpFormatTimeLabel(value)
+    : value;
+  const pumpEntries = typeof pumpEnsureEntriesArray === "function"
+    ? pumpEnsureEntriesArray()
+    : (Array.isArray(window?.pumpEff?.entries) ? window.pumpEff.entries : []);
+  pumpEntries.forEach(entry => {
+    if (!entry) return;
+    const key = normalizeDateKey(entry.dateISO);
+    if (!key) return;
+    const rpmVal = Number(entry.rpm);
+    const rpmLabel = Number.isFinite(rpmVal) ? `${rpmVal.toLocaleString()} RPM` : null;
+    const normalizedTime = normalizeTime(entry.timeISO || entry.time || "");
+    const timeLabel = normalizedTime ? formatPumpTime(normalizedTime) : "";
+    const labelParts = [];
+    if (rpmLabel) labelParts.push(rpmLabel);
+    if (timeLabel) labelParts.push(timeLabel);
+    const label = labelParts.join(" @ ") || "Pump log";
+    const timeMinutes = typeof timeStringToMinutes === "function"
+      ? (timeStringToMinutes(normalizedTime) ?? 0)
+      : 0;
+    (pumpMap[key] ||= []).push({ type:"pump", name: label, rpm: rpmVal, timeISO: normalizedTime, timeMinutes, dateISO: key });
+  });
+  Object.keys(pumpMap).forEach(key => {
+    pumpMap[key].sort((a,b)=> (a.timeMinutes ?? 0) - (b.timeMinutes ?? 0));
+  });
   const splitTaskDuration = (startKey, hours)=>{
     const baseKey = normalizeDateKey(startKey);
     if (!baseKey) return [];
@@ -1925,10 +1955,10 @@ function renderCalendar(){
   const today = new Date(); today.setHours(0,0,0,0);
   const anchorMonth = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
   let maxMonthsNeeded = 12;
-  const dueKeys = Object.keys(dueMap);
-  if (dueKeys.length){
+  const scheduleKeys = [...Object.keys(dueMap), ...Object.keys(pumpMap)];
+  if (scheduleKeys.length){
     let latest = null;
-    dueKeys.forEach(key => {
+    scheduleKeys.forEach(key => {
       const normalized = normalizeDateKey(key);
       if (!normalized) return;
       if (!latest || normalized > latest){
@@ -2103,6 +2133,13 @@ function renderCalendar(){
         else if (ev.status === "manual") label += " (scheduled)";
         else label += " (due)";
         chip.textContent = label;
+        cell.appendChild(chip);
+      });
+      (pumpMap[key]||[]).forEach(ev=>{
+        const chip = document.createElement("div");
+        chip.className = "event pump cal-pump";
+        chip.dataset.calPump = ev.dateISO || key;
+        chip.textContent = ev.name || "Pump log";
         cell.appendChild(chip);
       });
       (garnetMap[key]||[]).forEach(ev=>{
