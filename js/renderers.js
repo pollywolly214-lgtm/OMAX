@@ -7699,6 +7699,37 @@ function renderSettings(){
     requestAnimationFrame(()=> focusTasksForInventory(pendingFocus));
   }
 
+  function relinkTaskInventory(task, nextIdRaw){
+    if (!task) return false;
+    const list = Array.isArray(window.inventory) ? window.inventory : [];
+    const nextId = nextIdRaw ? String(nextIdRaw) : "";
+    const prevId = task.inventoryId != null ? String(task.inventoryId) : "";
+    if (nextId === prevId) return false;
+
+    if (prevId){
+      list.forEach(item => {
+        if (!item || item.id == null) return;
+        if (String(item.id) === prevId && String(item.linkedTaskId || "") === String(task.id)){
+          item.linkedTaskId = null;
+        }
+      });
+    }
+
+    task.inventoryId = nextId || null;
+
+    if (nextId){
+      const target = list.find(item => item && String(item.id) === nextId);
+      if (target && task.id != null){
+        target.linkedTaskId = task.id;
+      }
+    }
+
+    window.inventory = list;
+    try { if (typeof saveCloudDebounced === "function") saveCloudDebounced(); } catch (_) {}
+    try { if (typeof window.__refreshInventoryRows === "function") window.__refreshInventoryRows(); } catch (_) {}
+    return true;
+  }
+
   function findTaskMeta(id){
     const tid = String(id);
     let idx = window.tasksInterval.findIndex(t => String(t.id)===tid);
@@ -7721,42 +7752,51 @@ function renderSettings(){
     }
     const taskPN = typeof task.pn === "string" ? task.pn.trim().toLowerCase() : "";
     const taskLink = typeof task.storeLink === "string" ? task.storeLink.trim() : "";
-    const taskName = typeof task.name === "string" ? task.name.trim() : "";
-    const fallbackId = `${task.name || ""}-${task.pn || ""}-${task.storeLink || ""}`;
     const registerMatch = (item, key)=>{
       const itemId = item && item.id != null ? String(item.id) : "";
-      const itemName = item && typeof item.name === "string" ? item.name.trim() : "";
-      let dedupeKey = itemId || key || (itemName ? `name:${itemName}` : "");
-      if (!dedupeKey){
-        const extra = key ? String(key) : fallbackId;
-        dedupeKey = extra ? `fallback:${extra}` : `auto:${matches.length}`;
-      }
+      let dedupeKey = itemId || key || `auto:${matches.length}`;
       if (seen.has(dedupeKey)) return false;
       seen.add(dedupeKey);
       matches.push(item);
       return true;
     };
+
+    const pnCandidates = [];
+    const linkCandidates = [];
+
     inventory.forEach(item => {
       if (!item) return;
       const itemId = item.id != null ? String(item.id) : "";
       const itemLinkedTask = item.linkedTaskId != null ? String(item.linkedTaskId) : "";
-      const itemName = typeof item.name === "string" ? item.name.trim() : "";
-      if (itemId && candidateIds.has(itemId) && registerMatch(item, itemId)){
+      const itemPN = item.pn != null ? String(item.pn).trim().toLowerCase() : "";
+      const itemLink = item.link != null ? String(item.link).trim() : "";
+
+      if (itemId && candidateIds.has(itemId)){
+        registerMatch(item, itemId);
         return;
       }
-      if (itemLinkedTask && itemLinkedTask === String(task.id) && registerMatch(item, itemLinkedTask)){
+      if (itemLinkedTask && itemLinkedTask === String(task.id)){
+        registerMatch(item, itemLinkedTask);
         return;
       }
-      if (taskName && itemName && itemName === taskName && registerMatch(item, `name:${itemName}`)){
+      if (taskPN && itemPN && itemPN === taskPN){
+        pnCandidates.push({ item, key: itemId || `pn:${itemPN}` });
         return;
       }
-      if (taskPN && item.pn && String(item.pn).trim().toLowerCase() === taskPN && registerMatch(item, itemId || `pn:${taskPN}`)){
-        return;
-      }
-      if (taskLink && item.link && String(item.link).trim() === taskLink){
-        registerMatch(item, itemId || `link:${taskLink}`);
+      if (taskLink && itemLink && itemLink === taskLink){
+        linkCandidates.push({ item, key: itemId || `link:${itemLink}` });
       }
     });
+
+    if (!matches.length){
+      if (pnCandidates.length === 1){
+        registerMatch(pnCandidates[0].item, pnCandidates[0].key);
+      }
+      if (linkCandidates.length === 1){
+        registerMatch(linkCandidates[0].item, linkCandidates[0].key);
+      }
+    }
+
     return matches;
   }
 
@@ -7932,6 +7972,11 @@ function renderSettings(){
     const id = holder.getAttribute("data-task-id");
     const meta = findTaskMeta(id);
     if (!meta) return;
+    if (target.hasAttribute("data-task-inventory")){
+      relinkTaskInventory(meta.task, target.value || "");
+      persist();
+      return;
+    }
     if (target.getAttribute("data-k") === "mode"){
       const nextMode = target.value;
       if (nextMode === meta.mode) return;
@@ -14575,46 +14620,59 @@ function findTasksLinkedToInventoryItem(item){
   const itemId = item.id != null ? String(item.id) : "";
   const itemPN = item.pn != null ? String(item.pn).trim().toLowerCase() : "";
   const itemLink = item.link != null ? String(item.link).trim() : "";
-  const itemName = item.name != null && typeof item.name === "string" ? item.name.trim() : "";
   const seen = new Set();
 
-  const tryAdd = (task, keyOverride)=>{
+  const addMatch = (task, key)=>{
     if (!task) return;
-    const fallbackId = `${task.name || ""}-${task.pn || ""}-${task.storeLink || ""}`;
-    const inventoryKey = task.inventoryId != null ? String(task.inventoryId) : null;
-    const taskId = task.id != null ? String(task.id) : null;
-    const override = keyOverride != null ? String(keyOverride) : null;
-    const tid = inventoryKey || taskId || override || fallbackId;
-    if (seen.has(tid)) return;
-    seen.add(tid);
+    const dedupeKey = key || (task.id != null ? String(task.id) : `auto:${matches.length}`);
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
     matches.push(task);
   };
 
   const lists = [window.tasksInterval, window.tasksAsReq];
+  const explicit = [];
+  const pnCandidates = [];
+  const linkCandidates = [];
+
   lists.forEach(list => {
     if (!Array.isArray(list)) return;
     list.forEach(task => {
       if (!task) return;
       const tid = task.id != null ? String(task.id) : "";
       const taskInventoryId = task.inventoryId != null ? String(task.inventoryId) : "";
-      const taskName = typeof task.name === "string" ? task.name.trim() : "";
+      const taskPN = typeof task.pn === "string" ? task.pn.trim().toLowerCase() : "";
+      const taskLink = typeof task.storeLink === "string" ? task.storeLink.trim() : "";
+
       if (itemId && (taskInventoryId === itemId || (tid && `inv_${tid}` === itemId))){
-        tryAdd(task, taskInventoryId || itemId);
+        explicit.push({ task, key: taskInventoryId || itemId });
         return;
       }
-      if (itemName && taskName && taskName === itemName){
-        tryAdd(task, `name:${taskName}`);
+      if (tid && item.linkedTaskId != null && String(item.linkedTaskId) === tid){
+        explicit.push({ task, key: `linked:${tid}` });
         return;
       }
-      if (itemPN && task.pn && String(task.pn).trim().toLowerCase() === itemPN){
-        tryAdd(task, taskInventoryId || `pn:${itemPN}`);
+      if (itemPN && taskPN && taskPN === itemPN){
+        pnCandidates.push({ task, key: `pn:${itemPN}` });
         return;
       }
-      if (itemLink && task.storeLink && String(task.storeLink).trim() === itemLink){
-        tryAdd(task, taskInventoryId || `link:${itemLink}`);
+      if (itemLink && taskLink && taskLink === itemLink){
+        linkCandidates.push({ task, key: `link:${itemLink}` });
       }
     });
   });
+
+  if (explicit.length){
+    explicit.forEach(({ task, key }) => addMatch(task, key));
+    return matches;
+  }
+
+  if (pnCandidates.length === 1){
+    addMatch(pnCandidates[0].task, pnCandidates[0].key);
+  }
+  if (linkCandidates.length === 1){
+    addMatch(linkCandidates[0].task, linkCandidates[0].key);
+  }
 
   return matches;
 }

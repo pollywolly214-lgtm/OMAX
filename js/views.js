@@ -458,6 +458,9 @@ function viewSettings(){
   window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
   for (const f of window.settingsFolders) if (!("parent" in f)) f.parent = null;
 
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const inventoryList = Array.isArray(window.inventory) ? window.inventory : [];
+
   const ensureDowntimeDefault = (task)=>{
     if (!task || typeof task !== "object") return false;
     const val = Number(task.downtimeHours);
@@ -488,6 +491,21 @@ function viewSettings(){
     let cls = "green";
     if (d <= 1) cls = "red"; else if (d <= 3) cls = "orange"; else if (d <= 7) cls = "yellow";
     return `<span class="chip ${cls}">${d}d → ${nd.due.toDateString()}</span>`;
+  };
+
+  const inventoryOptionsMarkup = (selectedId)=>{
+    const selectedStr = selectedId != null ? String(selectedId) : "";
+    const options = inventoryList
+      .filter(Boolean)
+      .map(item => {
+        const id = item.id != null ? String(item.id) : "";
+        const parts = [item.name ? esc(item.name) : "Unnamed item"];
+        if (item.pn) parts.push(`#${esc(item.pn)}`);
+        return `<option value="${esc(id)}" ${id === selectedStr ? "selected" : ""}>${parts.join(" · ")}</option>`;
+      })
+      .sort((a, b)=> a.localeCompare(b));
+    options.unshift(`<option value="" ${selectedStr ? "" : "selected"}>No inventory link</option>`);
+    return options.join("");
   };
 
   const partRow = (p, parentId, listType) => `
@@ -533,6 +551,11 @@ function viewSettings(){
 
         <label>Manual link: <input type="url" data-k="manualLink" data-id="${t.id}" data-list="${listType}" value="${t.manualLink||""}" placeholder="PDF / guide URL"></label>
         <label>Store link: <input type="url" data-k="storeLink" data-id="${t.id}" data-list="${listType}" value="${t.storeLink||""}" placeholder="Where to buy"></label>
+        <label>Inventory link:
+          <select data-task-inventory="${t.id}" data-list="${listType}">
+            ${inventoryOptionsMarkup(t.inventoryId)}
+          </select>
+        </label>
         <label>Part # (primary): <input type="text" data-k="pn" data-id="${t.id}" data-list="${listType}" value="${t.pn||""}"></label>
         <label>Price (primary): <input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${listType}" value="${t.price!=null?t.price:""}"></label>
         <label>Time to complete (hrs): <input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${t.id}" data-list="${listType}" value="${t.downtimeHours!=null?t.downtimeHours:""}" placeholder="e.g., 1"></label>
