@@ -14047,10 +14047,11 @@ function renderInventory(){
   setAppSettingsContext("default");
   wireDashboardSettingsMenu();
   content.innerHTML = viewInventory();
-  const rowsTarget = content.querySelector("[data-inventory-rows]");
+  const rowsTarget = content.querySelector("[data-inventory-groups]");
   const searchInput = content.querySelector("#inventorySearch");
   const clearBtn = content.querySelector("#inventorySearchClear");
   const addBtn = content.querySelector("#inventoryAddBtn");
+  const addCategoryBtn = content.querySelector("#inventoryAddCategory");
   const modal = content.querySelector("#inventoryAddModal");
   const form = content.querySelector("#inventoryAddForm");
   const closeBtn = modal?.querySelector("[data-close]");
@@ -14062,6 +14063,7 @@ function renderInventory(){
   const nameField = modal?.querySelector("[name=\"inventoryName\"]");
   const qtyNewField = modal?.querySelector("[name=\"inventoryQtyNew\"]");
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
+  const categoryField = modal?.querySelector("[name=\"inventoryCategory\"]");
   let addToMaintenance = false;
 
   function syncLinkedTasksFromInventory(item, updates){
@@ -14113,15 +14115,30 @@ function renderInventory(){
     return changed;
   }
 
+  const refreshCategoryFieldOptions = ()=>{
+    if (!(categoryField instanceof HTMLSelectElement)) return;
+    const current = categoryField.value;
+    if (typeof inventoryCategoryOptionsMarkup === "function"){
+      categoryField.innerHTML = inventoryCategoryOptionsMarkup(current);
+      const escaped = (typeof CSS !== "undefined" && CSS.escape) ? CSS.escape(current) : current;
+      if (current && categoryField.querySelector(`option[value="${escaped}"]`)){
+        categoryField.value = current;
+      }
+    }
+  };
+
   const refreshRows = ()=>{
     if (!rowsTarget) return;
     const filtered = filterInventoryItems(inventorySearchTerm);
-    rowsTarget.innerHTML = inventoryRowsHTML(filtered);
+    rowsTarget.innerHTML = inventoryGroupsHTML(filtered);
+    refreshCategoryFieldOptions();
   };
 
   try{
     window.__refreshInventoryRows = refreshRows;
   }catch(_){ }
+
+  refreshCategoryFieldOptions();
 
   if (searchInput){
     searchInput.addEventListener("input", ()=>{
@@ -14130,6 +14147,19 @@ function renderInventory(){
       refreshRows();
     });
   }
+
+  addCategoryBtn?.addEventListener("click", ()=>{
+    const name = prompt("Category name", "New category");
+    if (name == null) return;
+    const trimmed = name.trim();
+    if (!trimmed){ toast("Enter a category name."); return; }
+    const created = typeof addInventoryCategory === "function" ? addInventoryCategory(trimmed) : null;
+    if (created){
+      if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
+      refreshRows();
+      toast("Category added");
+    }
+  });
 
   if (clearBtn){
     clearBtn.addEventListener("click", ()=>{
@@ -14141,6 +14171,21 @@ function renderInventory(){
       searchInput?.focus();
     });
   }
+
+  rowsTarget?.addEventListener("change", (e)=>{
+    const select = e.target.closest("[data-inventory-category-select]");
+    if (select instanceof HTMLSelectElement){
+      const id = select.getAttribute("data-id");
+      if (!id) return;
+      const item = inventory.find(entry => entry && String(entry.id) === String(id));
+      if (!item) return;
+      const val = select.value || "";
+      item.categoryId = val ? val : null;
+      if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
+      refreshRows();
+      return;
+    }
+  });
 
   rowsTarget?.addEventListener("input",(e)=>{
     const input = e.target;
@@ -14172,6 +14217,49 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("click", async (e)=>{
+    const renameBtn = e.target.closest("[data-rename-category]");
+    if (renameBtn){
+      const id = renameBtn.getAttribute("data-rename-category");
+      const cats = typeof ensureInventoryCategories === "function"
+        ? ensureInventoryCategories()
+        : (Array.isArray(window.inventoryCategories) ? window.inventoryCategories : []);
+      const currentCat = cats.find(cat => cat && String(cat.id) === String(id)) || null;
+      const nextName = prompt("Rename category", currentCat?.name || "Category");
+      if (nextName == null) return;
+      const trimmed = nextName.trim();
+      if (!trimmed){ toast("Enter a category name."); return; }
+      const renamed = typeof renameInventoryCategory === "function"
+        ? renameInventoryCategory(id, trimmed)
+        : false;
+      if (renamed){
+        if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
+        refreshRows();
+        toast("Category renamed");
+      }
+      return;
+    }
+
+    const removeCatBtn = e.target.closest("[data-delete-category]");
+    if (removeCatBtn){
+      const id = removeCatBtn.getAttribute("data-delete-category");
+      if (!id) return;
+      const confirmed = await showConfirmModal({
+        title: "Remove category?",
+        message: "Items in this category will be moved to Uncategorized.",
+        confirmText: "Remove",
+        confirmVariant: "danger",
+        cancelText: "Cancel"
+      });
+      if (!confirmed) return;
+      const removed = typeof deleteInventoryCategory === "function" && deleteInventoryCategory(id);
+      if (removed){
+        if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
+        refreshRows();
+        toast("Category removed");
+      }
+      return;
+    }
+
     const nameBtn = e.target.closest("[data-inventory-maintenance]");
     if (nameBtn){
       const id = nameBtn.getAttribute("data-inventory-maintenance");
@@ -14255,28 +14343,35 @@ function renderInventory(){
     }
   }
 
-  function openInventoryModal(){
-    if (!modal) return;
-    addToMaintenance = false;
-    setInventoryModalStep("prompt");
-    modal.classList.add("is-visible");
-    modal.removeAttribute("hidden");
-    document.body?.classList.add("modal-open");
-    form?.reset();
-    if (qtyNewField) qtyNewField.value = qtyNewField.defaultValue || "1";
-    if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
-  }
+    function openInventoryModal(){
+      if (!modal) return;
+      addToMaintenance = false;
+      setInventoryModalStep("prompt");
+      modal.classList.add("is-visible");
+      modal.removeAttribute("hidden");
+      document.body?.classList.add("modal-open");
+      form?.reset();
+      if (qtyNewField) qtyNewField.value = qtyNewField.defaultValue || "1";
+      if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
+      if (categoryField instanceof HTMLSelectElement){
+        refreshCategoryFieldOptions();
+        categoryField.value = categoryField.options.length ? categoryField.options[0].value : "";
+      }
+    }
 
   function closeInventoryModal(){
     if (!modal) return;
-    modal.classList.remove("is-visible");
-    modal.setAttribute("hidden", "");
-    document.body?.classList.remove("modal-open");
-    addToMaintenance = false;
-    form?.reset();
-    if (qtyNewField) qtyNewField.value = qtyNewField.defaultValue || "1";
-    if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
-  }
+      modal.classList.remove("is-visible");
+      modal.setAttribute("hidden", "");
+      document.body?.classList.remove("modal-open");
+      addToMaintenance = false;
+      form?.reset();
+      if (qtyNewField) qtyNewField.value = qtyNewField.defaultValue || "1";
+      if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
+      if (categoryField instanceof HTMLSelectElement){
+        categoryField.value = categoryField.options.length ? categoryField.options[0].value : "";
+      }
+    }
 
   addBtn?.addEventListener("click", openInventoryModal);
   closeBtn?.addEventListener("click", closeInventoryModal);
@@ -14315,6 +14410,8 @@ function renderInventory(){
     const pn = (data.get("inventoryPN") || "").toString().trim();
     const link = (data.get("inventoryLink") || "").toString().trim();
     const priceRaw = data.get("inventoryPrice");
+    const categoryIdRaw = data.get("inventoryCategory");
+    const categoryId = typeof categoryIdRaw === "string" ? categoryIdRaw.trim() : "";
     let price = null;
     if (priceRaw !== null && priceRaw !== ""){
       const num = Number(priceRaw);
@@ -14332,7 +14429,8 @@ function renderInventory(){
       pn,
       link,
       price,
-      note
+      note,
+      categoryId: categoryId || null
     };
     const item = typeof normalizeInventoryItem === "function"
       ? normalizeInventoryItem(baseItem)

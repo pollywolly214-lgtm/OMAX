@@ -892,9 +892,12 @@ body.cost-info-visible{
 .status-pending{ background:#f0f3fa; color:#4a566d; }
 .order-history-body table.order-table{ margin:0; }
 .inventory-toolbar{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:12px; }
+.inventory-toolbar-actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .inventory-add-trigger{ padding:8px 14px; border-radius:10px; border:1px solid #3b82f6; background:#e0edff; color:#0f3c91; font-weight:600; cursor:pointer; transition:background .2s ease, transform .2s ease; }
 .inventory-add-trigger:hover{ background:#cfe1ff; transform:translateY(-1px); }
 .inventory-add-trigger:focus-visible{ outline:3px solid rgba(59,130,246,.45); outline-offset:2px; }
+.inventory-add-category{ border-color:#3aa665; background:#e7f6ed; color:#205c39; }
+.inventory-add-category:hover{ background:#d6eddf; }
 .inventory-search{ flex:1 1 260px; }
 .inventory-hint{ margin-bottom:12px; }
 .inventory-name-btn{ background:none; border:0; padding:0; font:inherit; color:#0a63c2; cursor:pointer; text-decoration:underline; }
@@ -910,12 +913,24 @@ body.cost-info-visible{
 .inventory-table td{ padding:8px 10px; border-bottom:1px solid rgba(10,31,63,0.18); }
 .inventory-table th{ text-align:left; font-weight:600; color:#0a1f3f; background:rgba(224,237,255,0.42); }
 .inventory-table td{ vertical-align:middle; }
-.inventory-table th:nth-child(2),
-.inventory-table td:nth-child(2),
 .inventory-table th:nth-child(3),
-.inventory-table td:nth-child(3){ width:110px; text-align:center; }
-.inventory-table td:nth-child(2) input,
-.inventory-table td:nth-child(3) input{ width:72px; padding:4px 6px; }
+.inventory-table td:nth-child(3),
+.inventory-table th:nth-child(4),
+.inventory-table td:nth-child(4){ width:110px; text-align:center; }
+.inventory-table td:nth-child(3) input,
+.inventory-table td:nth-child(4) input{ width:72px; padding:4px 6px; }
+
+.inventory-category-grid{ display:flex; flex-direction:column; gap:16px; }
+.inventory-category{ border:1px solid #d6e2f5; border-radius:12px; overflow:hidden; background:#fff; box-shadow:0 4px 18px rgba(16,39,89,0.06); }
+.inventory-category-header{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:12px 14px; background:linear-gradient(120deg, rgba(224,237,255,0.72), rgba(244,248,255,0.8)); }
+.inventory-category-title{ margin:0; }
+.inventory-category-actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.inventory-category-action{ padding:6px 10px; border-radius:8px; border:1px solid #c7d2e8; background:#f5f7fb; color:#0f1f40; font-weight:600; cursor:pointer; transition:background .2s ease, transform .2s ease; }
+.inventory-category-action:hover{ background:#e7edf8; transform:translateY(-1px); }
+.inventory-category-action.danger{ border-color:#f0b6b6; background:#fff4f4; color:#b3261e; }
+.inventory-category-table{ padding:0 14px 14px; overflow-x:auto; }
+.inventory-category-empty{ padding:12px; border:1px dashed #ced8ec; border-radius:10px; background:#f7f9fd; color:#536074; }
+.inventory-category select[data-inventory-category-select]{ min-width:140px; }
 
 
 /* Calendar chip/bar are fully interactive */

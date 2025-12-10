@@ -1181,6 +1181,7 @@ if (typeof window.inventorySearchTerm !== "string") window.inventorySearchTerm =
 let inventorySearchTerm = window.inventorySearchTerm;
 if (typeof window.jobHistorySearchTerm !== "string") window.jobHistorySearchTerm = "";
 let jobHistorySearchTerm = window.jobHistorySearchTerm;
+if (!Array.isArray(window.inventoryCategories)) window.inventoryCategories = [];
 
 window.defaultIntervalTasks = defaultIntervalTasks;
 const ROOT_FOLDER_ID = "root";
@@ -1352,6 +1353,7 @@ if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateIS
 if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
 if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
 if (!Array.isArray(window.inventory))    window.inventory    = [];
+if (!Array.isArray(window.inventoryCategories)) window.inventoryCategories = [];
 if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,chargeRate,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
 if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
@@ -1372,6 +1374,7 @@ let totalHistory = window.totalHistory;
 let tasksInterval = window.tasksInterval;
 let tasksAsReq    = window.tasksAsReq;
 let inventory     = window.inventory;
+let inventoryCategories = window.inventoryCategories;
 let cuttingJobs   = window.cuttingJobs;
 let completedCuttingJobs = window.completedCuttingJobs;
 let opportunityRollups = window.opportunityRollups;
@@ -1395,6 +1398,9 @@ function refreshGlobalCollections(){
 
   if (!Array.isArray(window.inventory)) window.inventory = [];
   inventory = window.inventory;
+
+  if (!Array.isArray(window.inventoryCategories)) window.inventoryCategories = [];
+  inventoryCategories = window.inventoryCategories;
 
   if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
   cuttingJobs = window.cuttingJobs;
@@ -1577,6 +1583,7 @@ function stateHasMeaningfulData(data){
     "tasksInterval",
     "tasksAsReq",
     "inventory",
+    "inventoryCategories",
     "cuttingJobs",
     "completedCuttingJobs",
     "dailyCutHours",
@@ -1625,6 +1632,7 @@ function snapshotState(){
     tasksInterval,
     tasksAsReq,
     inventory,
+    inventoryCategories: snapshotInventoryCategories(),
     cuttingJobs,
     completedCuttingJobs,
     orderRequests,
@@ -1933,7 +1941,90 @@ function normalizeInventoryItem(raw){
   item.qtyOld = qtyOld;
   item.qty = qtyNew + qtyOld;
   if (!item.unit){ item.unit = "pcs"; }
+  const catId = item.categoryId != null ? String(item.categoryId).trim() : "";
+  item.categoryId = catId || null;
   return item;
+}
+
+function normalizeInventoryCategory(raw, fallbackOrder){
+  if (!raw || typeof raw !== "object") return null;
+  const name = typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : "Category";
+  const id = raw.id != null ? String(raw.id) : genId(name);
+  const order = Number.isFinite(Number(raw.order)) ? Number(raw.order) : (Number(fallbackOrder) || 0);
+  const parentRaw = raw.parent != null ? String(raw.parent).trim() : "";
+  const parent = parentRaw ? parentRaw : null;
+  return { id, name, order, parent };
+}
+
+function normalizeInventoryCategories(list){
+  const source = Array.isArray(list) ? list : [];
+  let orderCounter = 0;
+  const normalized = source
+    .map(entry => normalizeInventoryCategory(entry, ++orderCounter))
+    .filter(Boolean);
+  if (!normalized.length){
+    return [];
+  }
+  const hasOrder = normalized.some(cat => Number.isFinite(Number(cat.order)));
+  if (!hasOrder){
+    normalized.forEach((cat, idx)=>{ cat.order = idx + 1; });
+  }
+  normalized.sort((a, b)=>{
+    const orderDiff = Number(a.order || 0) - Number(b.order || 0);
+    if (orderDiff !== 0) return orderDiff;
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+  return normalized;
+}
+
+function ensureInventoryCategories(){
+  const normalized = normalizeInventoryCategories(window.inventoryCategories);
+  window.inventoryCategories = normalized;
+  return normalized;
+}
+
+function snapshotInventoryCategories(){
+  return ensureInventoryCategories().map(cat => ({ ...cat }));
+}
+
+function addInventoryCategory(name){
+  const label = (name || "").trim() || "New category";
+  const categories = ensureInventoryCategories();
+  const nextOrder = categories.reduce((max, cat)=> Math.max(max, Number(cat.order) || 0), 0) + 1;
+  const cat = normalizeInventoryCategory({ id: genId(label), name: label, order: nextOrder }, nextOrder);
+  categories.push(cat);
+  window.inventoryCategories = normalizeInventoryCategories(categories);
+  return cat;
+}
+
+function renameInventoryCategory(id, name){
+  if (id == null) return false;
+  const label = (name || "").trim();
+  if (!label) return false;
+  const categories = ensureInventoryCategories();
+  const idx = categories.findIndex(cat => String(cat.id) === String(id));
+  if (idx < 0) return false;
+  categories[idx].name = label;
+  window.inventoryCategories = normalizeInventoryCategories(categories);
+  return true;
+}
+
+function deleteInventoryCategory(id){
+  if (id == null) return false;
+  const categories = ensureInventoryCategories();
+  const key = String(id);
+  const remaining = categories.filter(cat => String(cat.id) !== key);
+  if (remaining.length === categories.length) return false;
+  window.inventoryCategories = normalizeInventoryCategories(remaining);
+  if (Array.isArray(window.inventory)){
+    window.inventory.forEach(item => {
+      if (!item) return;
+      if (String(item.categoryId || "") === key){
+        item.categoryId = null;
+      }
+    });
+  }
+  return true;
 }
 
 function normalizeDailyCutHours(list){
@@ -2045,6 +2136,7 @@ function adoptState(doc){
   inventory = Array.isArray(data.inventory)
     ? data.inventory.map(normalizeInventoryItem).filter(Boolean)
     : seedInventoryFromTasks();
+  inventoryCategories = normalizeInventoryCategories(data.inventoryCategories);
   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
   completedCuttingJobs = Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [];
   orderRequests = normalizeOrderRequests(Array.isArray(data.orderRequests) ? data.orderRequests : []);
@@ -2059,6 +2151,7 @@ function adoptState(doc){
   window.tasksInterval = tasksInterval;
   window.tasksAsReq = tasksAsReq;
   window.inventory = inventory;
+  window.inventoryCategories = inventoryCategories;
   window.cuttingJobs = cuttingJobs;
   window.completedCuttingJobs = completedCuttingJobs;
   window.orderRequests = orderRequests;
@@ -2309,6 +2402,7 @@ async function loadFromCloud(){
         tasksInterval: Array.isArray(window.tasksInterval) && window.tasksInterval.length ? window.tasksInterval.slice() : (Array.isArray(window.defaultIntervalTasks) ? window.defaultIntervalTasks.slice() : []),
         tasksAsReq: Array.isArray(window.tasksAsReq) && window.tasksAsReq.length ? window.tasksAsReq.slice() : (Array.isArray(window.defaultAsReqTasks) ? window.defaultAsReqTasks.slice() : []),
         inventory: Array.isArray(window.inventory) && window.inventory.length ? window.inventory.slice() : (typeof seedInventoryFromTasks === "function" ? seedInventoryFromTasks() : []),
+        inventoryCategories: Array.isArray(window.inventoryCategories) ? window.inventoryCategories.slice() : [],
         cuttingJobs: Array.isArray(window.cuttingJobs) ? window.cuttingJobs.slice() : [],
         completedCuttingJobs: Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [],
         orderRequests: Array.isArray(window.orderRequests) && window.orderRequests.length ? window.orderRequests.slice() : [typeof createOrderRequest === "function" ? createOrderRequest() : { id:"req_"+Date.now(), items:[] }],
@@ -2534,6 +2628,7 @@ const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes
     tasksInterval: defaultIntervalTasks.slice(),
     tasksAsReq: defaultAsReqTasks.slice(),
     inventory: seedInventoryFromTasks(),
+    inventoryCategories: [],
     cuttingJobs: [],
     completedCuttingJobs: [],
     orderRequests: [createOrderRequest()],
