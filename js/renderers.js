@@ -13016,6 +13016,20 @@ function renderJobs(){
     });
   }
 
+  const jobHistoryCategoryFilter = document.getElementById("jobHistoryCategoryFilter");
+  if (jobHistoryCategoryFilter){
+    jobHistoryCategoryFilter.addEventListener("change", (event)=>{
+      const rawValue = event?.target instanceof HTMLSelectElement ? event.target.value : jobHistoryCategoryFilter.value;
+      const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+      const folders = ensureCategoryState();
+      const validIds = new Set(folders.map(folder => String(folder?.id)));
+      const nextId = validIds.has(String(rawValue)) ? String(rawValue) : rootId;
+      window.jobHistoryCategoryFilter = nextId;
+      jobHistoryCategoryFilter.value = nextId;
+      rerenderPreservingState(currentCategoryFilter());
+    });
+  }
+
   const showAllJobsBtn = content.querySelector("[data-job-show-all]");
   if (showAllJobsBtn && !showAllJobsBtn.dataset.wired){
     showAllJobsBtn.dataset.wired = "1";
