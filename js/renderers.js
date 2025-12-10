@@ -14216,10 +14216,27 @@ function renderInventory(){
     saveCloudDebounced();
   });
 
-  rowsTarget?.addEventListener("click", async (e)=>{
-    const renameBtn = e.target.closest("[data-rename-category]");
-    if (renameBtn){
-      const id = renameBtn.getAttribute("data-rename-category");
+    rowsTarget?.addEventListener("click", async (e)=>{
+      const toggleBtn = e.target.closest("[data-inventory-category-toggle]");
+      if (toggleBtn){
+        const key = toggleBtn.getAttribute("data-inventory-category-toggle") || "__uncategorized";
+        const state = (typeof window.inventoryCategoryCollapse === "object" && window.inventoryCategoryCollapse !== null)
+          ? window.inventoryCategoryCollapse
+          : (window.inventoryCategoryCollapse = {});
+        const shouldCollapse = toggleBtn.getAttribute("aria-expanded") === "true";
+        state[key] = shouldCollapse;
+        const safeKey = (typeof CSS !== "undefined" && CSS.escape) ? CSS.escape(key) : key;
+        const section = rowsTarget.querySelector(`[data-inventory-category-key="${safeKey}"]`);
+        if (section instanceof HTMLElement){
+          section.classList.toggle("is-collapsed", shouldCollapse);
+        }
+        toggleBtn.setAttribute("aria-expanded", shouldCollapse ? "false" : "true");
+        return;
+      }
+
+      const renameBtn = e.target.closest("[data-rename-category]");
+      if (renameBtn){
+        const id = renameBtn.getAttribute("data-rename-category");
       const cats = typeof ensureInventoryCategories === "function"
         ? ensureInventoryCategories()
         : (Array.isArray(window.inventoryCategories) ? window.inventoryCategories : []);
@@ -14243,19 +14260,22 @@ function renderInventory(){
     if (removeCatBtn){
       const id = removeCatBtn.getAttribute("data-delete-category");
       if (!id) return;
-      const confirmed = await showConfirmModal({
-        title: "Remove category?",
-        message: "Items in this category will be moved to Uncategorized.",
+        const confirmed = await showConfirmModal({
+          title: "Remove category?",
+          message: "Items in this category will be moved to Uncategorized.",
         confirmText: "Remove",
         confirmVariant: "danger",
         cancelText: "Cancel"
-      });
-      if (!confirmed) return;
-      const removed = typeof deleteInventoryCategory === "function" && deleteInventoryCategory(id);
-      if (removed){
-        if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
-        refreshRows();
-        toast("Category removed");
+        });
+        if (!confirmed) return;
+        const removed = typeof deleteInventoryCategory === "function" && deleteInventoryCategory(id);
+        if (removed){
+          if (typeof window.inventoryCategoryCollapse === "object" && window.inventoryCategoryCollapse !== null){
+            delete window.inventoryCategoryCollapse[id];
+          }
+          if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
+          refreshRows();
+          toast("Category removed");
       }
       return;
     }

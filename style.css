@@ -922,13 +922,20 @@ body.cost-info-visible{
 
 .inventory-category-grid{ display:flex; flex-direction:column; gap:16px; }
 .inventory-category{ border:1px solid #d6e2f5; border-radius:12px; overflow:hidden; background:#fff; box-shadow:0 4px 18px rgba(16,39,89,0.06); }
-.inventory-category-header{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:12px 14px; background:linear-gradient(120deg, rgba(224,237,255,0.72), rgba(244,248,255,0.8)); }
-.inventory-category-title{ margin:0; }
+.inventory-category-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; background:linear-gradient(120deg, rgba(224,237,255,0.72), rgba(244,248,255,0.8)); }
+.inventory-category-toggle{ display:inline-flex; align-items:center; gap:10px; border:none; background:none; padding:0; margin:0; cursor:pointer; text-align:left; color:inherit; flex:1; min-width:0; }
+.inventory-category-toggle:focus-visible{ outline:2px solid #0a63c2; outline-offset:2px; border-radius:10px; }
+.inventory-category-toggle-icon{ display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:#e5ecf8; color:#1e2b45; font-size:12px; line-height:1; transition:transform .18s ease, background .18s ease; }
+.inventory-category-toggle-icon::before{ content:"▸"; transform:translateX(1px); }
+.inventory-category:not(.is-collapsed) .inventory-category-toggle-icon{ transform:rotate(90deg); background:#d6e1f9; }
+.inventory-category-toggle-label{ display:flex; flex-direction:column; gap:2px; align-items:flex-start; min-width:0; }
+.inventory-category-title{ margin:0; font-size:18px; font-weight:700; line-height:1.25; }
 .inventory-category-actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .inventory-category-action{ padding:6px 10px; border-radius:8px; border:1px solid #c7d2e8; background:#f5f7fb; color:#0f1f40; font-weight:600; cursor:pointer; transition:background .2s ease, transform .2s ease; }
 .inventory-category-action:hover{ background:#e7edf8; transform:translateY(-1px); }
 .inventory-category-action.danger{ border-color:#f0b6b6; background:#fff4f4; color:#b3261e; }
 .inventory-category-table{ padding:0 14px 14px; overflow-x:auto; }
+.inventory-category.is-collapsed .inventory-category-table{ display:none; }
 .inventory-category-empty{ padding:12px; border:1px dashed #ced8ec; border-radius:10px; background:#f7f9fd; color:#536074; }
 .inventory-category select[data-inventory-category-select]{ min-width:140px; }
 

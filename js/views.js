@@ -3581,11 +3581,14 @@ function inventoryRowsHTML(list){
   }).join("");
 }
 
-function inventoryGroupsHTML(list){
-  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-  const categories = typeof ensureInventoryCategories === "function"
-    ? ensureInventoryCategories()
-    : (Array.isArray(window.inventoryCategories) ? window.inventoryCategories : []);
+  function inventoryGroupsHTML(list){
+    const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    const collapseState = (typeof window.inventoryCategoryCollapse === "object" && window.inventoryCategoryCollapse !== null)
+      ? window.inventoryCategoryCollapse
+      : (window.inventoryCategoryCollapse = {});
+    const categories = typeof ensureInventoryCategories === "function"
+      ? ensureInventoryCategories()
+      : (Array.isArray(window.inventoryCategories) ? window.inventoryCategories : []);
   const sorted = categories.slice().sort((a, b)=>{
     const orderDiff = Number(a.order || 0) - Number(b.order || 0);
     if (orderDiff !== 0) return orderDiff;
@@ -3600,32 +3603,37 @@ function inventoryGroupsHTML(list){
     grouped.get(key).push(item);
   });
 
-  const buildSection = (id, name)=>{
-    const items = grouped.get(id) || [];
-    const rows = inventoryRowsHTML(items);
-    const actions = id
+    const buildSection = (id, name)=>{
+      const key = id ? String(id) : "__uncategorized";
+      const isCollapsed = Boolean(collapseState[key]);
+      const items = grouped.get(id) || [];
+      const rows = inventoryRowsHTML(items);
+      const actions = id
       ? `<div class="inventory-category-actions">
            <button type="button" class="inventory-category-action" data-rename-category="${esc(id)}">Rename</button>
            <button type="button" class="inventory-category-action danger" data-delete-category="${esc(id)}">Remove</button>
          </div>`
       : `<div class="small muted">Items without a category appear here.</div>`;
-    return `
-      <section class="inventory-category" data-inventory-category="${esc(id)}">
-        <div class="inventory-category-header">
-          <div>
-            <h4 class="inventory-category-title">${esc(name || "Category")}</h4>
-            <p class="small muted">${items.length} item${items.length===1?"":"s"}</p>
+      return `
+        <section class="inventory-category${isCollapsed ? " is-collapsed" : ""}" data-inventory-category="${esc(id)}" data-inventory-category-key="${esc(key)}">
+          <div class="inventory-category-header">
+            <button type="button" class="inventory-category-toggle" data-inventory-category-toggle="${esc(key)}" aria-expanded="${isCollapsed ? "false" : "true"}">
+              <span class="inventory-category-toggle-icon" aria-hidden="true"></span>
+              <span class="inventory-category-toggle-label">
+                <span class="inventory-category-title">${esc(name || "Category")}</span>
+                <span class="small muted">${items.length} item${items.length===1?"":"s"}</span>
+              </span>
+            </button>
+            ${actions}
           </div>
-          ${actions}
-        </div>
-        <div class="inventory-category-table">
-          <table class="inventory-table">
-            <thead><tr><th>Category</th><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-      </section>`;
-  };
+          <div class="inventory-category-table">
+            <table class="inventory-table">
+              <thead><tr><th>Category</th><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </section>`;
+    };
 
   const sections = sorted.map(cat => buildSection(cat.id, cat.name || "Category"));
   const used = new Set(sorted.map(cat => String(cat.id)));
