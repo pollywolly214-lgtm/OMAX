@@ -3500,14 +3500,17 @@ function viewJobs(){
       <div class="past-jobs-toolbar">
         <div class="past-jobs-category">
           <label class="sr-only" for="jobHistoryCategoryFilter">Viewing past jobs category</label>
-          <select
-            id="jobHistoryCategoryFilter"
-            class="job-category-indicator-select"
-            aria-label="${esc(historyCategoryFilterAriaLabel)}"
-            title="${esc(historyCategoryFilterAriaLabel)}"
-          >
-            ${categoryOptionsMarkup(historyCategory)}
-          </select>
+          <div class="past-jobs-category-control">
+            <select
+              id="jobHistoryCategoryFilter"
+              class="job-category-indicator-select"
+              aria-label="${esc(historyCategoryFilterAriaLabel)}"
+              title="${esc(historyCategoryFilterAriaLabel)}"
+            >
+              ${categoryOptionsMarkup(historyCategory)}
+            </select>
+            <span aria-hidden="true" class="past-jobs-category-caret">▾</span>
+          </div>
         </div>
         <div class="past-jobs-search mini-form">
           <input type="search" id="jobHistorySearch" placeholder="Search past jobs by name, material, notes, or date" value="${historySearchDisplay}">
