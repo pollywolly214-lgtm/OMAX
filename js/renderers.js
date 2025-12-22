@@ -1556,6 +1556,8 @@ function renderNextDueWidget(ndBox){
     const featuredId = String(featured.t.id);
     const featuredSettingsId = getSettingsTargetId(featured.t);
     const featuredSettingsAttr = featuredSettingsId ? ` data-settings-task="${escapeHtml(featuredSettingsId)}"` : "";
+    const featuredDueISO = ymd(featured.nd.due);
+    const featuredDueAttr = featuredDueISO ? ` data-due-iso="${escapeHtml(featuredDueISO)}"` : "";
     const featuredMeta = buildMetaHtml(featured.nd);
     const featuredStatus = statusClass(featured.nd.days);
     const countdownNumber = featured.nd.days < 0
@@ -1567,7 +1569,7 @@ function renderNextDueWidget(ndBox){
     const eyebrow = featured.nd.days <= 0 ? "Due now" : "Next due";
     const featuredButton = `
       <button type="button" class="next-due-task next-due-featured ${featuredStatus} cal-task"
-        data-next-due-task="1" data-task-id="${escapeHtml(featuredId)}" data-cal-task="${escapeHtml(featuredId)}"${featuredSettingsAttr}
+        data-next-due-task="1" data-task-id="${escapeHtml(featuredId)}" data-cal-task="${escapeHtml(featuredId)}"${featuredSettingsAttr}${featuredDueAttr}
         aria-label="${escapeHtml(buildAriaLabel(featured.t.name, featured.nd))}">
         <span class="next-due-featured-copy">
           <span class="next-due-eyebrow">${escapeHtml(eyebrow)}</span>
@@ -1586,10 +1588,12 @@ function renderNextDueWidget(ndBox){
       const id = String(x.t.id);
       const settingsId = getSettingsTargetId(x.t);
       const settingsAttr = settingsId ? ` data-settings-task="${escapeHtml(settingsId)}"` : "";
+      const dueISO = ymd(x.nd.due);
+      const dueAttr = dueISO ? ` data-due-iso="${escapeHtml(dueISO)}"` : "";
       const metaHtml = buildMetaHtml(x.nd);
       const status = statusClass(x.nd.days);
       return `<li>
-        <button type="button" class="next-due-task ${status} cal-task" data-next-due-task="1" data-task-id="${escapeHtml(id)}" data-cal-task="${escapeHtml(id)}"${settingsAttr}>
+        <button type="button" class="next-due-task ${status} cal-task" data-next-due-task="1" data-task-id="${escapeHtml(id)}" data-cal-task="${escapeHtml(id)}"${settingsAttr}${dueAttr}>
           <span class="next-due-name">${escapeHtml(x.t.name)}</span>
           <span class="next-due-meta">${metaHtml}</span>
         </button>
@@ -3723,36 +3727,37 @@ function renderDashboard(){
     ndBox.dataset.wired = "1";
 
     const findTaskButton = (target)=> target && target.closest ? target.closest("[data-next-due-task]") : null;
-    const resolveSettingsTarget = (btn)=>{
-      if (!btn || !btn.dataset) return "";
-      const templateId = btn.dataset.settingsTask ? String(btn.dataset.settingsTask) : "";
-      const taskId = btn.dataset.taskId ? String(btn.dataset.taskId) : "";
-      const calTaskId = btn.dataset.calTask ? String(btn.dataset.calTask) : "";
-      const fallbacks = [];
-      const addFallback = (value)=>{
-        const id = value ? String(value) : "";
-        if (!id) return;
-        if ((templateId && id === templateId) || fallbacks.includes(id)) return;
-        fallbacks.push(id);
-      };
-      if (templateId){
-        addFallback(taskId);
-        addFallback(calTaskId);
-        return fallbacks.length ? { id: templateId, fallbackIds: fallbacks.slice() } : templateId;
+    const focusCalendarForTask = (btn)=>{
+      if (!btn || !btn.dataset) return;
+      const taskId = btn.dataset.taskId ? String(btn.dataset.taskId) : (btn.dataset.calTask ? String(btn.dataset.calTask) : "");
+      const dueISO = btn.dataset.dueIso ? String(btn.dataset.dueIso) : "";
+      const parsedDue = dueISO && typeof parseDateLocal === "function" ? parseDateLocal(dueISO) : (dueISO ? new Date(dueISO) : null);
+      if (parsedDue instanceof Date && !Number.isNaN(parsedDue.getTime())){
+        parsedDue.setHours(0,0,0,0);
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        const diffMonths = (parsedDue.getFullYear() - today.getFullYear()) * 12 + (parsedDue.getMonth() - today.getMonth());
+        const clamped = Math.min(12, Math.max(-12, Math.round(diffMonths)));
+        window.__calendarMonthOffset = clamped;
       }
-      const baseId = taskId || calTaskId;
-      if (!baseId) return "";
-      if (taskId && calTaskId && taskId !== calTaskId) fallbacks.push(calTaskId);
-      return fallbacks.length ? { id: String(baseId), fallbackIds: fallbacks.slice() } : String(baseId);
+      if (typeof hideBubble === "function") hideBubble();
+      if (location.hash !== "#/"){
+        location.hash = "#/";
+      }
+      if (typeof renderCalendar === "function") renderCalendar();
+      const months = document.getElementById("months");
+      const cell = dueISO ? months?.querySelector(`[data-date-iso="${dueISO}"]`) : null;
+      if (cell){
+        cell.scrollIntoView({ behavior: "smooth", block: "center" });
+        const anchor = taskId ? (cell.querySelector(`[data-cal-task="${taskId}"]`) || cell) : cell;
+        if (taskId && typeof showTaskBubble === "function") showTaskBubble(String(taskId), anchor);
+      }
     };
 
     ndBox.addEventListener("click", (e)=>{
       const btn = findTaskButton(e.target);
       if (!btn) return;
-      const targetInfo = resolveSettingsTarget(btn);
-      if (!targetInfo) return;
-      if (typeof hideBubble === "function") hideBubble();
-      if (typeof openSettingsAndReveal === "function") openSettingsAndReveal(targetInfo);
+      focusCalendarForTask(btn);
     });
 
     const showBubbleFor = (btn)=>{
