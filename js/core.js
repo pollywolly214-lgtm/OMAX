@@ -176,10 +176,10 @@ function normalizeDateISO(value){
   return null;
 }
 
-function clampDailyCutHours(value){
+function clampDailyCutHours(value, { allowExceedDailyCap = false } = {}){
   const num = Number(value);
   if (!Number.isFinite(num) || num < 0) return 0;
-  if (num > 24) return 24;
+  if (!allowExceedDailyCap && num > 24) return 24;
   return num;
 }
 
@@ -1984,14 +1984,14 @@ function getDailyCutHoursEntry(dateISO){
   return dailyCutHours.find(entry => entry && entry.dateISO === key) || null;
 }
 
-function setDailyCutHoursEntry(dateISO, hours, { source = "manual", preserveManual = false } = {}){
+function setDailyCutHoursEntry(dateISO, hours, { source = "manual", preserveManual = false, allowExceedDailyCap = false } = {}){
   const key = normalizeDateISO(dateISO);
   if (!key) return false;
   if (!Array.isArray(dailyCutHours)){
     dailyCutHours = [];
     if (typeof window !== "undefined") window.dailyCutHours = dailyCutHours;
   }
-  const value = clampDailyCutHours(hours);
+  const value = clampDailyCutHours(hours, { allowExceedDailyCap });
   const src = source === "manual" ? "manual" : "auto";
   const idx = dailyCutHours.findIndex(entry => entry && entry.dateISO === key);
   const nowISO = new Date().toISOString();
@@ -2680,4 +2680,3 @@ window.addEventListener("keydown", (e)=>{
 
 window.undoLastChange = undoLastChange;
 window.redoLastUndo = redoLastUndo;
-

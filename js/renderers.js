@@ -3719,7 +3719,7 @@ function appendLogHistoryRow(tbody, entry){
   tbody.appendChild(row);
 }
 
-function recomputeDailyCutHoursFromTotalHistory(history){
+function recomputeDailyCutHoursFromTotalHistory(history, { allowExceedDailyCap = false } = {}){
   if (typeof setDailyCutHoursEntry !== "function" || !Array.isArray(history)) return false;
   const valid = history
     .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
@@ -3734,11 +3734,46 @@ function recomputeDailyCutHoursFromTotalHistory(history){
       continue;
     }
     const delta = Math.max(0, currentHours - prevHours);
-    const updated = setDailyCutHoursEntry(valid[idx].dateISO, delta, { source: "auto", preserveManual: true });
+    const updated = setDailyCutHoursEntry(valid[idx].dateISO, delta, { source: "auto", preserveManual: true, allowExceedDailyCap });
     if (updated) changed = true;
     prevHours = currentHours;
   }
   return changed;
+}
+
+function findExcessiveLogGap(entries){
+  if (!Array.isArray(entries) || entries.length < 2) return null;
+  const normalized = entries
+    .map(entry => ({ ...entry, dateISO: normalizeDateISO(entry?.dateISO), hours: Number(entry?.hours) }))
+    .filter(entry => entry.dateISO && Number.isFinite(entry.hours))
+    .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+  let largest = null;
+  for (let i = 1; i < normalized.length; i += 1){
+    const prev = normalized[i - 1];
+    const cur = normalized[i];
+    const delta = cur.hours - prev.hours;
+    if (delta > 24 && (!largest || delta > largest.delta)){
+      largest = {
+        delta,
+        fromDate: prev.dateISO,
+        toDate: cur.dateISO,
+        fromHours: prev.hours,
+        toHours: cur.hours
+      };
+    }
+  }
+  return largest;
+}
+
+function confirmExcessiveLogGap(gap){
+  if (!gap) return { confirmed: true, allowExceedDailyCap: false };
+  const deltaLabel = gap.delta.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  const message = [
+    `The change from ${gap.fromDate || "previous log"} (${gap.fromHours} hrs) to ${gap.toDate || "this log"} (${gap.toHours} hrs) adds ${deltaLabel} hours in one step, exceeding the 24 hr/day limit.`,
+    "Proceed and apply the full amount to that day?"
+  ].join(" ");
+  const confirmed = window.confirm(message);
+  return { confirmed, allowExceedDailyCap: confirmed };
 }
 
 function openLogHistoryModal(){
@@ -3824,13 +3859,18 @@ function openLogHistoryModal(){
       entries.push({ dateISO: dateVal, hours: hoursVal });
     }
     entries.sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+
+    const gap = findExcessiveLogGap(entries);
+    const { confirmed, allowExceedDailyCap } = confirmExcessiveLogGap(gap);
+    if (!confirmed) return;
+
     window.totalHistory = entries;
     totalHistory = window.totalHistory;
     RENDER_TOTAL = currentTotal();
     RENDER_DELTA = deltaSinceLast();
     window.RENDER_TOTAL = RENDER_TOTAL;
     window.RENDER_DELTA = RENDER_DELTA;
-    const dailyUpdated = recomputeDailyCutHoursFromTotalHistory(entries);
+    const dailyUpdated = recomputeDailyCutHoursFromTotalHistory(entries, { allowExceedDailyCap });
     saveCloudDebounced();
     toast("Logged hours updated");
     closeLogHistoryModal();
@@ -3853,6 +3893,22 @@ function renderDashboard(){
     if (!isFinite(v) || v < 0){ toast("Enter valid hours."); return; }
     const todayISO = new Date().toISOString().slice(0,10);
     const last = totalHistory[totalHistory.length-1];
+    const lastHours = Number(last?.hours);
+    let allowExceedDailyCap = false;
+    if (Number.isFinite(lastHours)){
+      const delta = v - lastHours;
+      if (delta > 24){
+        const { confirmed, allowExceedDailyCap: allow } = confirmExcessiveLogGap({
+          delta,
+          fromDate: last?.dateISO || "previous log",
+          toDate: todayISO,
+          fromHours: lastHours,
+          toHours: v
+        });
+        if (!confirmed) return;
+        allowExceedDailyCap = allow;
+      }
+    }
     if (last && last.dateISO === todayISO){
       last.hours = v;
     }else{
@@ -3863,7 +3919,7 @@ function renderDashboard(){
     window.RENDER_TOTAL = RENDER_TOTAL;
     window.RENDER_DELTA = RENDER_DELTA;
     const updatedDaily = typeof syncDailyHoursFromTotals === "function"
-      ? syncDailyHoursFromTotals(todayISO)
+      ? syncDailyHoursFromTotals(todayISO, { allowExceedDailyCap })
       : false;
     saveCloudDebounced(); toast("Hours logged");
     if (updatedDaily && typeof refreshTimeEfficiencyWidgets === "function"){ refreshTimeEfficiencyWidgets(); }
@@ -15329,4 +15385,3 @@ function renderDeletedItems(options){
     }
   }
 }
-
