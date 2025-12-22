@@ -6769,6 +6769,50 @@ function renderSettings(){
     return pieces.join("");
   }
 
+  function getInventoryLinkInfo(task){
+    const list = Array.isArray(window.inventory) ? window.inventory : [];
+    const targetId = task && task.inventoryId != null ? String(task.inventoryId) : "";
+    const linked = list.find(item => item && item.id != null && String(item.id) === targetId);
+    if (linked){
+      const parts = [];
+      if (linked.name){ parts.push(linked.name); }
+      if (linked.pn){ parts.push(`#${linked.pn}`); }
+      const label = parts.length ? `Linked to ${parts.join(" · ")}` : "Linked to inventory item";
+      return { label, item: linked };
+    }
+    return { label: "No inventory link", item: null };
+  }
+
+  function inventoryOptionsMarkup(selectedId){
+    const target = selectedId != null ? String(selectedId) : "";
+    const list = Array.isArray(window.inventory) ? window.inventory : [];
+    const options = list
+      .filter(Boolean)
+      .map(item => {
+        const id = item.id != null ? String(item.id) : "";
+        const parts = [escapeHtml(item.name || "Unnamed item")];
+        if (item.pn) parts.push(`#${escapeHtml(item.pn)}`);
+        const selected = id === target ? "selected" : "";
+        return `<option value="${escapeAttr(id)}" ${selected}>${parts.join(" · ")}</option>`;
+      })
+      .sort((a, b)=> a.localeCompare(b));
+    options.unshift(`<option value="" ${target ? "" : "selected"}>No inventory link</option>`);
+    return options.join("");
+  }
+
+  function updateInventoryLinkLabel(task){
+    if (!task) return;
+    const info = getInventoryLinkInfo(task);
+    const label = document.querySelector(`[data-inventory-link-label="${task.id}"]`);
+    if (label) label.textContent = info.label;
+    const modal = document.getElementById("inventoryLinkModal");
+    const current = modal?.querySelector("[data-inventory-link-current]");
+    if (modal && current && modal.getAttribute("data-task-id") === String(task.id)){
+      current.textContent = info.label;
+    }
+    return info;
+  }
+
   function renderTask(entry){
     const t = entry.task;
     const type = entry.type;
@@ -6797,6 +6841,7 @@ function renderSettings(){
       emptyClass: "sub-empty",
       emptyAttrs: `data-empty-sub="${t.id}"`
     });
+    const inventoryInfo = getInventoryLinkInfo(t);
     return `
       <details class="task task--${type}" data-task-id="${t.id}" data-owner="${type}" data-editing="0">
         <summary draggable="true">
@@ -6824,6 +6869,10 @@ function renderSettings(){
             <label data-field="price">Price ($)<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${t.price!=null?t.price:""}" placeholder="optional"></label>
             <label data-field="downtimeHours">Time to complete (hrs)<input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${t.id}" data-list="${type}" value="${t.downtimeHours!=null?t.downtimeHours:1}" placeholder="e.g. 1"></label>
             <label class="task-note" data-field="note">Note<textarea data-k="note" data-id="${t.id}" data-list="${type}" rows="2" placeholder="Optional note">${escapeHtml(t.note||"")}</textarea></label>
+          </div>
+          <div class="inventory-link-row" data-inventory-link-row="${t.id}">
+            <div class="small muted" data-inventory-link-label="${t.id}">${escapeHtml(inventoryInfo.label)}</div>
+            <button type="button" class="secondary" data-inventory-link-open="${t.id}" data-list="${type}" aria-haspopup="dialog" disabled>Edit inventory link</button>
           </div>
           <div class="row-actions">
             <button type="button" class="btn-edit" data-edit-task="${t.id}" aria-pressed="false">Edit</button>
@@ -7004,6 +7053,18 @@ function renderSettings(){
         <div id="occurrenceNotesBody" class="occurrence-notes-body"></div>
       </div>
     </div>
+    <div class="modal-backdrop" id="inventoryLinkModal" hidden>
+      <div class="modal-card inventory-link-card">
+        <button type="button" class="modal-close" data-close-inventory-link>×</button>
+        <h4>Edit inventory link</h4>
+        <p class="small" data-inventory-link-current>No inventory link</p>
+        <label>Inventory item<select id="inventoryLinkSelect">${inventoryOptionsMarkup()}</select></label>
+        <div class="modal-actions">
+          <button type="button" class="secondary" data-remove-inventory-link>Remove link</button>
+          <button type="button" class="primary" data-save-inventory-link>Save</button>
+        </div>
+      </div>
+    </div>
     <div id="maintenanceContextMenu" class="context-menu" hidden>
       <button type="button" data-action="edit">Edit</button>
       <button type="button" class="danger" data-action="delete">Delete</button>
@@ -7021,9 +7082,16 @@ function renderSettings(){
   const searchClear = document.getElementById("maintenanceSearchClear");
   const occurrenceNotesModal = document.getElementById("occurrenceNotesModal");
   const occurrenceNotesBody = document.getElementById("occurrenceNotesBody");
+  const inventoryLinkModal = document.getElementById("inventoryLinkModal");
+  const inventoryLinkSelect = document.getElementById("inventoryLinkSelect");
+  const inventoryLinkCurrent = inventoryLinkModal?.querySelector("[data-inventory-link-current]");
+  const removeInventoryLinkBtn = inventoryLinkModal?.querySelector("[data-remove-inventory-link]");
+  const saveInventoryLinkBtn = inventoryLinkModal?.querySelector("[data-save-inventory-link]");
+  const closeInventoryLinkBtn = inventoryLinkModal?.querySelector("[data-close-inventory-link]");
   const contextMenu = document.getElementById("maintenanceContextMenu");
   let contextTarget = null;
   let occurrenceNotesTaskId = null;
+  let inventoryLinkTask = null;
 
   const getTaskEditingState = (taskEl)=>{
     if (!(taskEl instanceof HTMLElement)) return false;
@@ -7062,6 +7130,34 @@ function renderSettings(){
       editBtn.textContent = isEditing ? "Done" : "Edit";
       editBtn.setAttribute("aria-pressed", isEditing ? "true" : "false");
     }
+    const linkBtn = taskEl.querySelector("[data-inventory-link-open]");
+    if (linkBtn instanceof HTMLButtonElement){
+      linkBtn.disabled = !isEditing;
+      linkBtn.classList.toggle("is-locked-control", !isEditing);
+    }
+  };
+
+  const closeInventoryLinkModal = ()=>{
+    inventoryLinkTask = null;
+    if (!inventoryLinkModal) return;
+    inventoryLinkModal.hidden = true;
+    inventoryLinkModal.removeAttribute("data-task-id");
+  };
+
+  const openInventoryLinkModal = (task)=>{
+    if (!inventoryLinkModal || !task) return;
+    inventoryLinkTask = task;
+    inventoryLinkModal.setAttribute("data-task-id", String(task.id ?? ""));
+    const info = updateInventoryLinkLabel(task);
+    if (inventoryLinkCurrent){
+      inventoryLinkCurrent.textContent = info?.label || "No inventory link";
+    }
+    if (inventoryLinkSelect){
+      inventoryLinkSelect.innerHTML = inventoryOptionsMarkup(task.inventoryId);
+      inventoryLinkSelect.value = task.inventoryId != null ? String(task.inventoryId) : "";
+    }
+    inventoryLinkModal.hidden = false;
+    requestAnimationFrame(()=> inventoryLinkSelect?.focus());
   };
 
   const focusFirstEditableControl = (taskEl, preferredField)=>{
@@ -7557,9 +7653,38 @@ function renderSettings(){
     if (e.target === occurrenceNotesModal) closeOccurrenceNotes();
     if (e.target instanceof HTMLElement && e.target.hasAttribute("data-close-occurrence-notes")) closeOccurrenceNotes();
   });
+  inventoryLinkModal?.addEventListener("click", (e)=>{
+    if (e.target === inventoryLinkModal) closeInventoryLinkModal();
+    if (e.target instanceof HTMLElement && e.target.hasAttribute("data-close-inventory-link")) closeInventoryLinkModal();
+  });
+  closeInventoryLinkBtn?.addEventListener("click", closeInventoryLinkModal);
+  removeInventoryLinkBtn?.addEventListener("click", ()=>{
+    if (!inventoryLinkTask){
+      closeInventoryLinkModal();
+      return;
+    }
+    relinkTaskInventory(inventoryLinkTask, "");
+    updateInventoryLinkLabel(inventoryLinkTask);
+    persist();
+    closeInventoryLinkModal();
+  });
+  saveInventoryLinkBtn?.addEventListener("click", ()=>{
+    if (!inventoryLinkTask){
+      closeInventoryLinkModal();
+      return;
+    }
+    const value = inventoryLinkSelect ? inventoryLinkSelect.value : "";
+    relinkTaskInventory(inventoryLinkTask, value || "");
+    updateInventoryLinkLabel(inventoryLinkTask);
+    persist();
+    closeInventoryLinkModal();
+  });
   document.addEventListener("keydown", (e)=>{
     if (e.key === "Escape" && occurrenceNotesModal && !occurrenceNotesModal.hidden){
       closeOccurrenceNotes();
+    }
+    if (e.key === "Escape" && inventoryLinkModal && !inventoryLinkModal.hidden){
+      closeInventoryLinkModal();
     }
   });
   typeField?.addEventListener("change", ()=> syncFormMode(typeField.value));
@@ -7702,6 +7827,9 @@ function renderSettings(){
   function relinkTaskInventory(task, nextIdRaw){
     if (!task) return false;
     const list = Array.isArray(window.inventory) ? window.inventory : [];
+    const allTasks = [];
+    if (Array.isArray(window.tasksInterval)) allTasks.push(...window.tasksInterval);
+    if (Array.isArray(window.tasksAsReq)) allTasks.push(...window.tasksAsReq);
     const nextId = nextIdRaw ? String(nextIdRaw) : "";
     const prevId = task.inventoryId != null ? String(task.inventoryId) : "";
     if (nextId === prevId) return false;
@@ -7717,14 +7845,32 @@ function renderSettings(){
 
     task.inventoryId = nextId || null;
 
+    const clearedTasks = [];
     if (nextId){
       const target = list.find(item => item && String(item.id) === nextId);
       if (target && task.id != null){
+        const previousLinkedTaskId = target.linkedTaskId != null ? String(target.linkedTaskId) : "";
+        if (previousLinkedTaskId && previousLinkedTaskId !== String(task.id)){
+          const prevLinkedTask = allTasks.find(t => t && String(t.id) === previousLinkedTaskId);
+          if (prevLinkedTask){
+            prevLinkedTask.inventoryId = null;
+            clearedTasks.push(prevLinkedTask);
+          }
+        }
         target.linkedTaskId = task.id;
       }
+      allTasks.forEach(other => {
+        if (!other || other === task) return;
+        if (String(other.inventoryId ?? "") === nextId){
+          other.inventoryId = null;
+          clearedTasks.push(other);
+        }
+      });
     }
 
     window.inventory = list;
+    clearedTasks.forEach(updateInventoryLinkLabel);
+    updateInventoryLinkLabel(task);
     try { if (typeof saveCloudDebounced === "function") saveCloudDebounced(); } catch (_) {}
     try { if (typeof window.__refreshInventoryRows === "function") window.__refreshInventoryRows(); } catch (_) {}
     return true;
@@ -8025,6 +8171,20 @@ function renderSettings(){
       setTaskEditingState(holder, nextState);
       if (nextState){
         focusFirstEditableControl(holder);
+      }
+      return;
+    }
+    const inventoryBtn = e.target.closest('[data-inventory-link-open]');
+    if (inventoryBtn){
+      const holder = inventoryBtn.closest('details.task');
+      if (!holder) return;
+      if (!getTaskEditingState(holder)){
+        setTaskEditingState(holder, true);
+      }
+      const id = holder.getAttribute('data-task-id');
+      const meta = id ? findTaskMeta(id) : null;
+      if (meta){
+        openInventoryLinkModal(meta.task);
       }
       return;
     }
