@@ -2181,6 +2181,16 @@ function viewJobs(){
   const selectedCategoryName = selectedCategoryFolder?.name
     ? String(selectedCategoryFolder.name)
     : (selectedCategory === rootCategoryId ? "All Jobs" : "Category");
+
+  const historyCategoryRaw = typeof window.jobHistoryCategoryFilter === "string"
+    ? window.jobHistoryCategoryFilter
+    : selectedCategory;
+  const historyCategory = folderMap.has(String(historyCategoryRaw)) ? String(historyCategoryRaw) : rootCategoryId;
+  const historyCategoryFolder = folderMap.get(historyCategory);
+  const historyCategoryName = historyCategoryFolder?.name
+    ? String(historyCategoryFolder.name)
+    : (historyCategory === rootCategoryId ? "All Jobs" : "Category");
+  window.jobHistoryCategoryFilter = historyCategory;
   const addJobDefaultCategory = rootCategoryId;
   window.jobCategoryFilter = selectedCategory;
 
@@ -2215,8 +2225,11 @@ function viewJobs(){
     kids.forEach(child => includeDescendants(child.id, acc));
   };
 
-  const allowedCategories = new Set();
-  includeDescendants(selectedCategory, allowedCategories);
+  const activeAllowedCategories = new Set();
+  includeDescendants(selectedCategory, activeAllowedCategories);
+
+  const historyAllowedCategories = new Set();
+  includeDescendants(historyCategory, historyAllowedCategories);
 
   const activeCounts = new Map();
   const completedCounts = new Map();
@@ -2470,7 +2483,7 @@ function viewJobs(){
 
   const jobsForCategory = cuttingJobs.filter(job => {
     const normalized = normalizeCategory(job?.cat);
-    return allowedCategories.has(normalized);
+    return activeAllowedCategories.has(normalized);
   });
 
   jobsForCategory.sort((a, b) => {
@@ -2486,7 +2499,7 @@ function viewJobs(){
 
   const completedForCategory = completedSorted.filter(job => {
     const normalized = normalizeCategory(job?.cat);
-    return allowedCategories.has(normalized);
+    return historyAllowedCategories.has(normalized);
   });
 
   const completedFiltered = completedForCategory.filter(matchesHistorySearch);
@@ -2624,6 +2637,7 @@ function viewJobs(){
     : "";
   const selectedCategoryColorStyle = categoryColorStyle(selectedCategory);
   const categoryFilterAriaLabel = `Change cutting jobs category (currently ${selectedCategoryName || "All Jobs"})`;
+  const historyCategoryFilterAriaLabel = `Change past jobs category (currently ${historyCategoryName || "All Jobs"})`;
 
   const jobColumnCount = 15;
   const historyColumnCount = jobColumnCount;
@@ -3510,6 +3524,20 @@ function viewJobs(){
     <div class="block past-jobs-block job-main-block" id="pastJobs">
       <h3>Past Cutting Jobs</h3>
       <div class="past-jobs-toolbar">
+        <div class="past-jobs-category">
+          <label class="sr-only" for="jobHistoryCategoryFilter">Viewing past jobs category</label>
+          <div class="past-jobs-category-control">
+            <select
+              id="jobHistoryCategoryFilter"
+              class="job-category-indicator-select"
+              aria-label="${esc(historyCategoryFilterAriaLabel)}"
+              title="${esc(historyCategoryFilterAriaLabel)}"
+            >
+              ${categoryOptionsMarkup(historyCategory)}
+            </select>
+            <span aria-hidden="true" class="past-jobs-category-caret">▾</span>
+          </div>
+        </div>
         <div class="past-jobs-search mini-form">
           <input type="search" id="jobHistorySearch" placeholder="Search past jobs by name, material, notes, or date" value="${historySearchDisplay}">
           <button type="button" id="jobHistorySearchClear">Clear</button>
