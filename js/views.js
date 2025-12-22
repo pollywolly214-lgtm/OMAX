@@ -4,6 +4,9 @@ function viewDashboard(){
   const cur   = RENDER_TOTAL ?? currentTotal();
   const prev  = previousTotal();
   const delta = RENDER_DELTA ?? deltaSinceLast();
+  const maintenanceRate = typeof getMaintenanceHourlyRate === "function"
+    ? getMaintenanceHourlyRate()
+    : (window.appConfig && Number(window.appConfig.maintenanceHourlyRate)) || 0;
   const lastEntry = totalHistory.length ? totalHistory[totalHistory.length - 1] : null;
   const lastUpdated = cur!=null && lastEntry && lastEntry.dateISO
     ? new Date(lastEntry.dateISO).toLocaleString()
@@ -81,6 +84,10 @@ function viewDashboard(){
           <div class="total-hours-meta" aria-live="polite">
             <span class="hint">Last updated: ${lastUpdated}</span>
             <span class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</span>
+            <div class="maintenance-rate-inline">
+              <span>Maintenance labor rate: <strong>$${esc(String((maintenanceRate || 0).toFixed ? maintenanceRate.toFixed(2) : maintenanceRate))}/hr</strong></span>
+              <button type="button" data-config-open-inline>Update</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1100,6 +1107,7 @@ function viewCosts(model){
   const cards = Array.isArray(data.summaryCards) ? data.summaryCards : [];
   const timeframeRows = Array.isArray(data.timeframeRows) ? data.timeframeRows : [];
   const historyRows = Array.isArray(data.historyRows) ? data.historyRows : [];
+  const forecastEntries = Array.isArray(data.forecastEntries) ? data.forecastEntries : [];
   const jobBreakdown = Array.isArray(data.jobBreakdown) ? data.jobBreakdown : [];
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
@@ -1457,65 +1465,63 @@ function viewCosts(model){
     ? cards.map(renderSummaryCard).join("")
     : `<p class="small muted">No cost metrics yet. Log machine hours and add pricing to interval tasks.</p>`;
 
-  const forecastTableHTML = (hasSections || hasTotals)
+  const forecastTableHTML = forecastEntries.length
     ? `
       <div class="forecast-table-wrap">
-        <table class="forecast-table">
+        <table class="forecast-table editable-forecast-table">
           <thead>
             <tr>
+              <th scope="col">Date / period</th>
               <th scope="col">Task</th>
-              <th scope="col">Cadence</th>
-              <th scope="col">Unit cost</th>
-              <th scope="col">Annual estimate</th>
+              <th scope="col">Est. hours</th>
+              <th scope="col">Hourly rate</th>
+              <th scope="col">Est. labor</th>
+              <th scope="col">Part cost</th>
+              <th scope="col">Total</th>
+              <th scope="col">Type</th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
-            ${breakdownSections.map(section => {
-              const rows = Array.isArray(section.rows) ? section.rows : [];
-              const headerRow = `
-              <tr class="forecast-section-row">
-                <th scope="rowgroup" colspan="4">
-                  <span class="forecast-section-header">
-                    <span class="forecast-section-title">${esc(section.label || "")}</span>
-                    ${section.totalLabel ? `<span class="forecast-section-total">${esc(section.totalLabel)}</span>` : ""}
-                  </span>
-                </th>
-              </tr>`;
-              const rowsHtml = rows.length
-                ? rows.map(row => `
-              <tr>
-                <th scope="row">${esc(row.name || "")}</th>
-                <td>${esc(row.cadenceLabel || "—")}</td>
-                <td>${esc(row.unitCostLabel || "—")}</td>
-                <td>${esc(row.annualTotalLabel || "—")}</td>
+            ${forecastEntries.map(entry => `
+              <tr data-maint-forecast-row="${esc(entry.id || entry.taskName || '')}">
+                <td><input type="date" value="${esc(entry.dateISO || '')}" data-maint-forecast-field="dateISO"></td>
+                <td><input type="text" value="${esc(entry.taskName || '')}" data-maint-forecast-field="taskName" placeholder="Task"></td>
+                <td><input type="number" step="0.1" min="0" value="${entry.estimatedHours != null ? esc(String(entry.estimatedHours)) : ''}" data-maint-forecast-field="estimatedHours"></td>
+                <td><input type="number" step="0.01" min="0" value="${entry.hourlyRate != null ? esc(String(entry.hourlyRate)) : ''}" data-maint-forecast-field="hourlyRate"></td>
+                <td><input type="number" step="0.01" min="0" value="${entry.estimatedLaborCost != null ? esc(String(entry.estimatedLaborCost)) : ''}" data-maint-forecast-field="estimatedLaborCost"></td>
+                <td><input type="number" step="0.01" min="0" value="${entry.estimatedPartCost != null ? esc(String(entry.estimatedPartCost)) : ''}" data-maint-forecast-field="estimatedPartCost"></td>
+                <td><input type="number" step="0.01" min="0" value="${entry.estimatedTotalCost != null ? esc(String(entry.estimatedTotalCost)) : ''}" data-maint-forecast-field="estimatedTotalCost"></td>
+                <td>
+                  <select data-maint-forecast-field="kind">
+                    <option value="interval" ${String(entry.kind||"interval").toLowerCase()==="interval"?"selected":""}>Interval</option>
+                    <option value="asreq" ${String(entry.kind||"interval").toLowerCase()!=="interval"?"selected":""}>As-required</option>
+                  </select>
+                </td>
+                <td><button type="button" data-maint-forecast-delete>×</button></td>
               </tr>
-            `).join("")
-                : `
-              <tr class="forecast-empty-row">
-                <td colspan="4">${esc(section.emptyMessage || "No tasks yet.")}</td>
-              </tr>`;
-              return `${headerRow}${rowsHtml}`;
-            }).join("")}
+            `).join("")}
           </tbody>
           ${hasTotals ? `
           <tfoot>
             <tr class="forecast-total-row">
               <th scope="row">Interval total</th>
-              <td colspan="2"></td>
-              <td>${esc(breakdownTotals.intervalLabel || "—")}</td>
+              <td colspan="6"></td>
+              <td colspan="2">${esc(breakdownTotals.intervalLabel || "—")}</td>
             </tr>
             <tr class="forecast-total-row">
               <th scope="row">As-required total</th>
-              <td colspan="2"></td>
-              <td>${esc(breakdownTotals.asReqLabel || "—")}</td>
+              <td colspan="6"></td>
+              <td colspan="2">${esc(breakdownTotals.asReqLabel || "—")}</td>
             </tr>
             <tr class="forecast-grand-total-row">
               <th scope="row">Combined total</th>
-              <td colspan="2"></td>
-              <td>${esc(breakdownTotals.combinedLabel || "—")}</td>
+              <td colspan="6"></td>
+              <td colspan="2">${esc(breakdownTotals.combinedLabel || "—")}</td>
             </tr>
           </tfoot>` : ""}
         </table>
+        <button type="button" class="forecast-add-row" data-maint-forecast-add>Add forecast row</button>
       </div>
     `
     : `<p class="small muted">Add maintenance intervals, pricing, and expected frequency to project spend.</p>`;
@@ -1580,6 +1586,7 @@ function viewCosts(model){
         <button type="button" class="forecast-modal-close" data-forecast-close aria-label="Close maintenance forecast breakdown">×</button>
         <h2 id="forecastModalTitle">Maintenance forecast breakdown</h2>
         <p class="forecast-modal-subtitle">Interval and as-required tasks with annualized totals.</p>
+        <p class="maintenance-rate-inline">Maintenance labor rate: <strong>$${esc(String((maintenanceRate || 0).toFixed ? maintenanceRate.toFixed(2) : maintenanceRate))}/hr</strong> <button type="button" data-config-open-inline>Update</button></p>
         ${forecastTableHTML}
         <p class="forecast-table-note">${esc(forecastNote)}</p>
       </div>
@@ -1773,40 +1780,36 @@ function viewCosts(model){
         <div class="block">
           <h3>Recent Maintenance Events</h3>
           ${historyRows.length ? `
-            <ul class="cost-history">
-              ${historyRows.map(item => {
-                const attrs = [
-                  'data-history-item="1"',
-                  item.dateISO ? `data-history-date="${esc(item.dateISO)}"` : '',
-                  item.key ? `data-history-key="${esc(item.key)}"` : '',
-                  item.taskId ? `data-task-id="${esc(item.taskId)}"` : '',
-                  item.originalTaskId ? `data-original-task-id="${esc(item.originalTaskId)}"` : '',
-                  item.taskMode ? `data-task-mode="${esc(item.taskMode)}"` : '',
-                  item.taskName ? `data-task-name="${esc(item.taskName)}"` : '',
-                  item.trashId ? `data-trash-id="${esc(item.trashId)}"` : '',
-                  item.missingTask ? 'data-task-missing="true"' : '',
-                  !item.hasLinkedTasks ? 'data-task-empty="true"' : '',
-                  Number.isFinite(item.hoursValue) ? `data-history-hours="${esc(String(item.hoursValue))}"` : ''
-                ].filter(Boolean).join(' ');
-                const titleAttr = item.tooltipLabel ? ` title="${esc(item.tooltipLabel)}"` : '';
-                return `
-                <li role="button" tabindex="0" ${attrs}${titleAttr}>
-                  <div class="cost-history-main">
-                    <div class="cost-history-task-wrap">
-                      <span class="cost-history-task-name">${esc(item.titleLabel || "Maintenance event")}</span>
-                      <span class="cost-history-date">${esc(item.rangeLabel || item.dateLabel || "")}</span>
-                    </div>
-                    <span class="cost-history-hours">${esc(item.hoursLabel || "")}</span>
-                    <span class="cost-history-cost">${esc(item.costLabel || "")}</span>
-                    ${item.taskLabel ? `<span class="cost-history-task-label">${esc(item.taskLabel)}</span>` : ``}
-                  </div>
-                  <button type="button" class="cost-history-delete" data-history-delete aria-label="Remove maintenance event from ${esc(item.dateLabel || 'this date')}" title="Remove from cost analysis">
-                    <span aria-hidden="true">×</span>
-                    <span class="sr-only">Remove event</span>
-                  </button>
-                </li>`;
-              }).join("")}
-            </ul>
+            <div class="maintenance-history-table-wrap">
+              <table class="maintenance-history-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col">Task</th>
+                    <th scope="col">Hours</th>
+                    <th scope="col">Hourly rate</th>
+                    <th scope="col">Labor cost</th>
+                    <th scope="col">Part cost</th>
+                    <th scope="col">Total cost</th>
+                    <th scope="col">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${historyRows.map(item => `
+                    <tr data-maint-history-row="${esc(item.key || item.dateISO || item.titleLabel || '')}" data-history-date="${esc(item.dateISO || '')}" ${item.taskId ? `data-task-id="${esc(item.taskId)}"` : ''}>
+                      <td><input type="date" value="${esc(item.dateISO || '')}" data-maint-history-field="dateISO"></td>
+                      <td><input type="text" value="${esc(item.titleLabel || item.taskName || '')}" data-maint-history-field="taskName" placeholder="Task name"></td>
+                      <td><input type="number" step="0.1" min="0" value="${esc(String(item.hoursValue ?? ''))}" data-maint-history-field="hoursSpent"></td>
+                      <td><input type="number" step="0.01" min="0" value="${item.hourlyRateValue != null ? esc(String(item.hourlyRateValue)) : ''}" data-maint-history-field="hourlyRateUsed"></td>
+                      <td><input type="number" step="0.01" min="0" value="${item.laborCostValue != null ? esc(String(item.laborCostValue)) : ''}" data-maint-history-field="laborCost"></td>
+                      <td><input type="number" step="0.01" min="0" value="${item.partCostValue != null ? esc(String(item.partCostValue)) : ''}" data-maint-history-field="partCost"></td>
+                      <td><input type="number" step="0.01" min="0" value="${item.totalCostValue != null ? esc(String(item.totalCostValue)) : ''}" data-maint-history-field="totalCost"></td>
+                      <td><button type="button" class="cost-history-delete" data-maint-history-delete aria-label="Remove maintenance row">×</button></td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
           ` : `<p class="small muted">${esc(data.historyEmpty || "No usage history yet. Log machine hours to estimate maintenance spend.")}</p>`}
           <div class="cost-window-insight">
             <div class="chart-info">
