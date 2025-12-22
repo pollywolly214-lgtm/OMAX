@@ -3685,6 +3685,161 @@ function setupCalendarHoursControls(){
   updateCalendarHoursControls();
 }
 
+let logHistoryModal = null;
+
+function closeLogHistoryModal(){
+  if (logHistoryModal){
+    logHistoryModal.remove();
+    logHistoryModal = null;
+  }
+  document.body.classList.remove("log-history-open");
+}
+
+function appendLogHistoryRow(tbody, entry){
+  if (!tbody) return;
+  const dateISO = normalizeDateISO(entry?.dateISO) || "";
+  const hours = Number(entry?.hours);
+  const safeHours = Number.isFinite(hours) ? hours : "";
+  const emptyRow = tbody.querySelector(".log-history-empty");
+  if (emptyRow) emptyRow.remove();
+
+  const row = document.createElement("tr");
+  row.setAttribute("data-log-history-row", "1");
+  row.innerHTML = `
+    <td><input type="date" data-log-history-date value="${escapeHtml(dateISO)}" required></td>
+    <td><input type="number" data-log-history-hours min="0" step="0.1" value="${escapeHtml(String(safeHours))}" required aria-label="Logged hours for ${escapeHtml(dateISO || "entry")}"></td>
+    <td><button type="button" class="log-history-remove" data-log-history-remove>Remove</button></td>
+  `;
+  row.querySelector("[data-log-history-remove]")?.addEventListener("click", ()=>{
+    row.remove();
+    if (!tbody.querySelector("[data-log-history-row]")){
+      tbody.innerHTML = `<tr class="log-history-empty"><td colspan="3">No logged hours yet.</td></tr>`;
+    }
+  });
+  tbody.appendChild(row);
+}
+
+function recomputeDailyCutHoursFromTotalHistory(history){
+  if (typeof setDailyCutHoursEntry !== "function" || !Array.isArray(history)) return false;
+  const valid = history
+    .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
+    .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+  if (valid.length < 2) return false;
+  let prevHours = Number(valid[0].hours);
+  let changed = false;
+  for (let idx = 1; idx < valid.length; idx += 1){
+    const currentHours = Number(valid[idx].hours);
+    if (!Number.isFinite(prevHours) || !Number.isFinite(currentHours)){
+      prevHours = currentHours;
+      continue;
+    }
+    const delta = Math.max(0, currentHours - prevHours);
+    const updated = setDailyCutHoursEntry(valid[idx].dateISO, delta, { source: "auto", preserveManual: true });
+    if (updated) changed = true;
+    prevHours = currentHours;
+  }
+  return changed;
+}
+
+function openLogHistoryModal(){
+  if (logHistoryModal){
+    logHistoryModal.querySelector("input")?.focus();
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.className = "log-history-overlay";
+  overlay.innerHTML = `
+    <div class="log-history-backdrop" data-log-history-close tabindex="-1" aria-label="Close edit log history"></div>
+    <div class="log-history-dialog" role="dialog" aria-modal="true" aria-labelledby="logHistoryTitle">
+      <header class="log-history-header">
+        <div>
+          <h3 id="logHistoryTitle">Edit logged hours</h3>
+          <p class="small">Update past readings to keep totals, daily hours, and job windows aligned.</p>
+        </div>
+        <button type="button" class="log-history-close" data-log-history-close aria-label="Close">×</button>
+      </header>
+      <form class="log-history-form" data-log-history-form aria-describedby="logHistoryTitle">
+        <div class="log-history-table-wrap">
+          <table class="log-history-table">
+            <thead><tr><th>Date</th><th>Logged hours</th><th></th></tr></thead>
+            <tbody data-log-history-tbody>
+              <tr class="log-history-empty"><td colspan="3">No logged hours yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="log-history-actions">
+          <button type="button" class="log-history-add" data-log-history-add>Add entry</button>
+          <span class="log-history-actions-spacer"></span>
+          <button type="button" class="log-history-cancel" data-log-history-close>Cancel</button>
+          <button type="submit" class="log-history-save">Save changes</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.body.classList.add("log-history-open");
+  logHistoryModal = overlay;
+
+  const tbody = overlay.querySelector("[data-log-history-tbody]");
+  const sorted = Array.isArray(totalHistory)
+    ? totalHistory.filter(entry => entry && entry.dateISO).slice().sort((a, b)=> String(b.dateISO).localeCompare(String(a.dateISO)))
+    : [];
+  if (sorted.length){
+    sorted.forEach(entry => appendLogHistoryRow(tbody, entry));
+  }
+
+  const addBtn = overlay.querySelector("[data-log-history-add]");
+  addBtn?.addEventListener("click", ()=>{
+    const todayISO = new Date().toISOString().slice(0,10);
+    const currentRows = Array.from(tbody.querySelectorAll("[data-log-history-row]"));
+    const latestDate = currentRows.length
+      ? currentRows[0].querySelector("[data-log-history-date]")?.value
+      : (sorted[0]?.dateISO || todayISO);
+    const latestHours = currentRows.length
+      ? currentRows[0].querySelector("[data-log-history-hours]")?.value
+      : sorted[0]?.hours;
+    const defaultDate = normalizeDateISO(latestDate) || todayISO;
+    const defaultHours = Number.isFinite(Number(latestHours)) ? Number(latestHours) : (RENDER_TOTAL ?? currentTotal() ?? "");
+    appendLogHistoryRow(tbody, { dateISO: defaultDate, hours: defaultHours });
+  });
+
+  overlay.querySelectorAll("[data-log-history-close]").forEach(btn => {
+    btn.addEventListener("click", closeLogHistoryModal);
+  });
+
+  const form = overlay.querySelector("[data-log-history-form]");
+  form?.addEventListener("submit", (event)=>{
+    event.preventDefault();
+    const rows = Array.from(form.querySelectorAll("[data-log-history-row]"));
+    if (!rows.length){ toast("Add at least one log entry."); return; }
+    const seen = new Set();
+    const entries = [];
+    for (const row of rows){
+      const dateVal = normalizeDateISO(row.querySelector("[data-log-history-date]")?.value);
+      const hoursVal = Number(row.querySelector("[data-log-history-hours]")?.value);
+      if (!dateVal){ toast("Enter a valid date for each log."); return; }
+      if (!Number.isFinite(hoursVal) || hoursVal < 0){ toast("Hours must be zero or more."); return; }
+      if (seen.has(dateVal)){ toast("Use unique dates for each log entry."); return; }
+      seen.add(dateVal);
+      entries.push({ dateISO: dateVal, hours: hoursVal });
+    }
+    entries.sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+    window.totalHistory = entries;
+    totalHistory = window.totalHistory;
+    RENDER_TOTAL = currentTotal();
+    RENDER_DELTA = deltaSinceLast();
+    window.RENDER_TOTAL = RENDER_TOTAL;
+    window.RENDER_DELTA = RENDER_DELTA;
+    const dailyUpdated = recomputeDailyCutHoursFromTotalHistory(entries);
+    saveCloudDebounced();
+    toast("Logged hours updated");
+    closeLogHistoryModal();
+    renderDashboard();
+    if (typeof refreshTimeEfficiencyWidgets === "function"){ refreshTimeEfficiencyWidgets(); }
+    if (dailyUpdated && typeof renderCalendar === "function"){ renderCalendar(); }
+  });
+}
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   content.innerHTML = viewDashboard();
@@ -3714,6 +3869,8 @@ function renderDashboard(){
     if (updatedDaily && typeof refreshTimeEfficiencyWidgets === "function"){ refreshTimeEfficiencyWidgets(); }
     renderDashboard();
   });
+
+  document.getElementById("editLogHistoryBtn")?.addEventListener("click", openLogHistoryModal);
 
   // Next due summary
   const ndBox = document.getElementById("nextDueBox");

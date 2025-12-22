@@ -1854,7 +1854,10 @@ body.modal-open .auth-bar {
 .total-hours-label { display: flex; align-items: flex-end; gap: 6px; margin: 0; font-weight: 600; flex: 1 1 auto; font-size: 13px; line-height: 1.2; }
 .total-hours-label span { white-space: nowrap; }
 .total-hours-label input { width: 120px; padding: 5px 6px; }
-.total-hours-controls button { align-self: flex-end; padding: 5px 10px; }
+.total-hours-actions { display: flex; gap: 6px; align-items: center; }
+.total-hours-actions button { align-self: flex-end; padding: 5px 10px; }
+.total-hours-actions .ghost { background: #f5f7fb; color: #1f3a60; border: 1px solid #d8e1ec; }
+.total-hours-actions .ghost:hover { background: #e8eef6; }
 .total-hours-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin: 2px 0 0; }
 .total-hours-meta span { display: inline-flex; align-items: baseline; line-height: 1.2; }
 .total-hours-meta span + span::before { content: "•"; margin-right: 6px; color: #9aa4b2; }
@@ -5434,3 +5437,31 @@ tr.row-editing {
 .tolerance-table td[contenteditable="true"]:focus{box-shadow:0 0 0 2px #0a63c2 inset;background:#f0f7ff}
 .tolerance-table tr th:first-child{width:160px;font-weight:700;color:#111827}
 .tolerance-table-wrap{overflow:auto;border:1px solid #e2e8f0;border-radius:10px}
+
+/* Logged hours history modal */
+body.log-history-open { overflow: hidden; }
+.log-history-overlay { position: fixed; inset: 0; z-index: 1050; display: grid; place-items: center; background: rgba(17,27,39,0.32); }
+.log-history-backdrop { position: absolute; inset: 0; background: transparent; }
+.log-history-dialog { position: relative; background: #fff; border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.22); width: min(720px, 92vw); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #dfe7f2; }
+.log-history-header { padding: 16px 18px 10px; display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; border-bottom: 1px solid #e8edf5; }
+.log-history-header h3 { margin: 0 0 4px; font-size: 1.1rem; }
+.log-history-header p { margin: 0; color: #4b5b7a; line-height: 1.4; }
+.log-history-close { border: none; background: transparent; font-size: 20px; color: #5b6780; cursor: pointer; padding: 4px 6px; }
+.log-history-close:hover { color: #1f3a60; }
+.log-history-form { display: flex; flex-direction: column; gap: 12px; padding: 0 18px 16px; }
+.log-history-table-wrap { overflow: auto; max-height: 50vh; border: 1px solid #e6edf7; border-radius: 8px; }
+.log-history-table { width: 100%; border-collapse: collapse; min-width: 540px; }
+.log-history-table th { position: sticky; top: 0; background: #f7f9fc; text-align: left; padding: 10px 12px; font-size: 13px; color: #50607a; border-bottom: 1px solid #e2e9f3; }
+.log-history-table td { padding: 10px 12px; border-bottom: 1px solid #eef2f9; }
+.log-history-table input[type="date"] { padding: 6px 8px; }
+.log-history-table input[type="number"] { width: 110px; padding: 6px 8px; }
+.log-history-table .log-history-remove { background: none; border: 1px solid #e3e9f3; color: #8a94a5; padding: 5px 10px; border-radius: 6px; cursor: pointer; }
+.log-history-table .log-history-remove:hover { color: #b04545; border-color: #f1c6c6; background: #fff5f5; }
+.log-history-table .log-history-empty td { text-align: center; color: #6b7381; font-style: italic; }
+.log-history-actions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 4px; }
+.log-history-actions .log-history-add { border: 1px dashed #c7d4e5; background: #f8fbff; color: #1f3a60; padding: 7px 12px; border-radius: 8px; }
+.log-history-actions .log-history-add:hover { background: #edf4ff; }
+.log-history-actions .log-history-cancel { border: 1px solid #d6dfea; background: #fff; color: #1f3a60; padding: 7px 12px; border-radius: 8px; }
+.log-history-actions .log-history-save { border: none; background: #1f3a60; color: #fff; padding: 8px 14px; border-radius: 9px; font-weight: 600; box-shadow: 0 2px 6px rgba(31,58,96,0.22); }
+.log-history-actions .log-history-save:hover { background: #254674; }
+.log-history-actions-spacer { flex: 1 1 auto; }

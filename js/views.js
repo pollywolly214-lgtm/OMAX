@@ -76,7 +76,10 @@ function viewDashboard(){
             <label class="total-hours-label"><span>Enter total hours now:</span>
               <input type="number" id="totalInput" value="${cur!=null?cur:""}" />
             </label>
-            <button id="logBtn">Log Hours</button>
+            <div class="total-hours-actions">
+              <button id="logBtn">Log Hours</button>
+              <button type="button" id="editLogHistoryBtn" class="ghost">Edit past logs</button>
+            </div>
           </div>
           <div class="total-hours-meta" aria-live="polite">
             <span class="hint">Last updated: ${lastUpdated}</span>
