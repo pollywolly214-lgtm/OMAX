@@ -1381,6 +1381,128 @@ let garnetCleanings = window.garnetCleanings;
 let dailyCutHours = window.dailyCutHours;
 let jobFolders = window.jobFolders;
 
+function normalizeJobPriorityOrder(list){
+  if (!Array.isArray(list)) return list;
+  const entries = list.map((job, index) => {
+    if (!job || job.id == null) return null;
+    const priority = typeof getJobPriority === "function"
+      ? getJobPriority(job)
+      : (Number.isFinite(Number(job?.priority)) && Number(job.priority) > 0
+        ? Math.max(1, Math.floor(Number(job.priority)))
+        : (index + 1));
+    return { job, priority, originalIndex: index };
+  }).filter(Boolean);
+
+  entries.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    return a.originalIndex - b.originalIndex;
+  });
+
+  entries.forEach((entry, idx) => {
+    entry.job.priority = idx + 1;
+  });
+
+  return list;
+}
+
+function buildCompletedJob(job, completionISO){
+  if (!job) return null;
+  const eff = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
+  const existingChargeRate = Number.isFinite(Number(job?.chargeRate)) && Number(job.chargeRate) >= 0
+    ? Number(job.chargeRate)
+    : JOB_RATE_PER_HOUR;
+  const efficiencySummary = eff ? {
+    rate: eff.rate ?? (eff.netRate ?? (existingChargeRate - JOB_BASE_COST_PER_HOUR)),
+    chargeRate: eff.chargeRate ?? existingChargeRate,
+    costRate: eff.costRate ?? null,
+    netRate: eff.netRate ?? null,
+    expectedHours: eff.expectedHours ?? null,
+    actualHours: eff.actualHours ?? null,
+    expectedRemaining: eff.expectedRemaining ?? null,
+    actualRemaining: eff.actualRemaining ?? null,
+    deltaHours: eff.deltaHours ?? null,
+    gainLoss: eff.gainLoss ?? null
+  } : {
+    rate: existingChargeRate - JOB_BASE_COST_PER_HOUR,
+    chargeRate: existingChargeRate,
+    costRate: null,
+    netRate: null,
+    expectedHours: null,
+    actualHours: null,
+    expectedRemaining: null,
+    actualRemaining: null,
+    deltaHours: null,
+    gainLoss: null
+  };
+
+  return {
+    id: job.id,
+    name: job.name,
+    estimateHours: job.estimateHours,
+    startISO: job.startISO,
+    dueISO: job.dueISO,
+    completedAtISO: completionISO,
+    notes: job.notes || "",
+    material: job.material || "",
+    materialCost: Number(job.materialCost) || 0,
+    materialQty: Number(job.materialQty) || 0,
+    chargeRate: existingChargeRate,
+    manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
+    files: Array.isArray(job.files) ? job.files.map(f => ({ ...f })) : [],
+    cat: job.cat != null ? job.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"),
+    priority: typeof getJobPriority === "function"
+      ? getJobPriority(job)
+      : (Number.isFinite(Number(job.priority)) && Number(job.priority) > 0
+        ? Math.max(1, Math.floor(Number(job.priority)))
+        : 1),
+    actualHours: eff && Number.isFinite(eff.actualHours) ? eff.actualHours : null,
+    efficiency: efficiencySummary
+  };
+}
+
+function completeCuttingJob(jobId, { completedAtISO = null, normalizePriorities = null } = {}){
+  const idStr = jobId != null ? String(jobId) : "";
+  if (!idStr) return null;
+
+  if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
+  if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+
+  cuttingJobs = window.cuttingJobs;
+  completedCuttingJobs = window.completedCuttingJobs;
+
+  const idx = cuttingJobs.findIndex(job => job && String(job.id) === idStr);
+  if (idx < 0) return null;
+
+  const job = cuttingJobs[idx];
+  const completionISO = typeof completedAtISO === "string" && completedAtISO
+    ? completedAtISO
+    : new Date().toISOString();
+  const completed = buildCompletedJob(job, completionISO);
+  if (!completed) return null;
+
+  cuttingJobs.splice(idx, 1);
+
+  if (typeof normalizePriorities === "function"){
+    try {
+      normalizePriorities(cuttingJobs);
+    } catch (err){
+      console.warn("Failed to apply custom job priority normalization", err);
+      normalizeJobPriorityOrder(cuttingJobs);
+    }
+  } else {
+    normalizeJobPriorityOrder(cuttingJobs);
+  }
+
+  window.cuttingJobs = cuttingJobs;
+
+  completedCuttingJobs.push(completed);
+  window.completedCuttingJobs = completedCuttingJobs;
+
+  return completed;
+}
+
+window.completeCuttingJob = completeCuttingJob;
+
 function refreshGlobalCollections(){
   if (typeof window === "undefined") return;
 
@@ -2680,4 +2802,3 @@ window.addEventListener("keydown", (e)=>{
 
 window.undoLastChange = undoLastChange;
 window.redoLastUndo = redoLastUndo;
-

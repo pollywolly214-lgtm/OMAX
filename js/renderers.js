@@ -13804,68 +13804,14 @@ function renderJobs(){
       closeActionMenu();
       closeHistoryActionMenu();
       const id = complete.getAttribute("data-complete-job");
-      const idx = cuttingJobs.findIndex(x=>x.id===id);
-      if (idx < 0) return;
-      const job = cuttingJobs[idx];
-      const eff = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
       const now = new Date();
       const completionISO = now.toISOString();
-      const existingChargeRate = Number.isFinite(Number(job.chargeRate)) && Number(job.chargeRate) >= 0
-        ? Number(job.chargeRate)
-        : JOB_RATE_PER_HOUR;
-      const efficiencySummary = eff ? {
-        rate: eff.rate ?? (eff.netRate ?? (existingChargeRate - JOB_BASE_COST_PER_HOUR)),
-        chargeRate: eff.chargeRate ?? existingChargeRate,
-        costRate: eff.costRate ?? null,
-        netRate: eff.netRate ?? null,
-        expectedHours: eff.expectedHours ?? null,
-        actualHours: eff.actualHours ?? null,
-        expectedRemaining: eff.expectedRemaining ?? null,
-        actualRemaining: eff.actualRemaining ?? null,
-        deltaHours: eff.deltaHours ?? null,
-        gainLoss: eff.gainLoss ?? null
-      } : {
-        rate: existingChargeRate - JOB_BASE_COST_PER_HOUR,
-        chargeRate: existingChargeRate,
-        costRate: null,
-        netRate: null,
-        expectedHours: null,
-        actualHours: null,
-        expectedRemaining: null,
-        actualRemaining: null,
-        deltaHours: null,
-        gainLoss: null
-      };
-
-      const completed = {
-        id: job.id,
-        name: job.name,
-        estimateHours: job.estimateHours,
-        startISO: job.startISO,
-        dueISO: job.dueISO,
-        completedAtISO: completionISO,
-        notes: job.notes || "",
-        material: job.material || "",
-        materialCost: Number(job.materialCost)||0,
-        materialQty: Number(job.materialQty)||0,
-        chargeRate: Number.isFinite(Number(job.chargeRate)) && Number(job.chargeRate) >= 0
-          ? Number(job.chargeRate)
-          : JOB_RATE_PER_HOUR,
-        manualLogs: Array.isArray(job.manualLogs) ? job.manualLogs.slice() : [],
-        files: Array.isArray(job.files) ? job.files.map(f=>({ ...f })) : [],
-        cat: job.cat != null ? job.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"),
-        priority: typeof getJobPriority === "function"
-          ? getJobPriority(job)
-          : (Number.isFinite(Number(job.priority)) && Number(job.priority) > 0
-            ? Math.max(1, Math.floor(Number(job.priority)))
-            : 1),
-        actualHours: eff && Number.isFinite(eff.actualHours) ? eff.actualHours : null,
-        efficiency: efficiencySummary
-      };
-
-      completedCuttingJobs.push(completed);
-      cuttingJobs.splice(idx, 1);
-      normalizeAllPriorities();
+      const completed = typeof completeCuttingJob === "function"
+        ? completeCuttingJob(id, { completedAtISO: completionISO, normalizePriorities: () => normalizeAllPriorities() })
+        : null;
+      if (!completed){ toast("Unable to mark job complete"); return; }
+      cuttingJobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : cuttingJobs;
+      completedCuttingJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : completedCuttingJobs;
       editingJobs.delete(id);
       saveCloudDebounced();
       toast("Job marked complete");
@@ -15172,4 +15118,3 @@ function renderDeletedItems(options){
     }
   }
 }
-
