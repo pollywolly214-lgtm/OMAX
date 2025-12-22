@@ -3392,7 +3392,7 @@ function viewJobs(){
       >
         <form id="addJobForm" class="mini-form job-add-form">
           <input type="text" id="jobName" placeholder="Job name" required>
-          <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="1">
+          <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="0.01" step="0.01">
           <select id="jobPriority" aria-label="Priority">
             ${priorityOptionsMarkup(1)}
           </select>
