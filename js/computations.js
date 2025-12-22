@@ -182,15 +182,22 @@ function nextDue(task){
     : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
       ? Number(DAILY_HOURS)
       : 8);
-  const remain = Math.max(0, interval - since);
-  let days = remain <= 0 ? 0 : Math.ceil(remain / hoursPerDay);
+  const remain = interval - since;
+  let days = 0;
+  if (remain >= 0){
+    days = Math.ceil(remain / hoursPerDay);
+  } else {
+    days = Math.floor(remain / hoursPerDay);
+  }
   const due = new Date();
   due.setHours(0,0,0,0);
   if (typeof shouldExcludeWeekends === "function" && shouldExcludeWeekends()){
-    while (days > 0){
-      due.setDate(due.getDate() + 1);
+    let steps = Math.abs(days);
+    const direction = days >= 0 ? 1 : -1;
+    while (steps > 0){
+      due.setDate(due.getDate() + direction);
       if (typeof isWeekendDate === "function" && isWeekendDate(due)) continue;
-      days -= 1;
+      steps -= 1;
     }
   } else {
     due.setDate(due.getDate() + days);
