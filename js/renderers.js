@@ -5436,7 +5436,7 @@ function repairMaintenanceGraph(){
 
     if (!window.settingsFolders.some(f => f && String(f.id) === ROOT_ID)){
       const fallbackOrder = Number(window._maintOrderCounter) || 0;
-      window.settingsFolders.push({ id: ROOT_ID, name: "All Tasks", parent: null, order: fallbackOrder + 1 });
+      window.settingsFolders.push({ id: ROOT_ID, name: "", parent: null, order: fallbackOrder + 1 });
       window._maintOrderCounter = Math.max(Number(window._maintOrderCounter) || 0, fallbackOrder + 1);
     }
 
