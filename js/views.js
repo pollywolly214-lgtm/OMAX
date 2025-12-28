@@ -3550,11 +3550,51 @@ function viewJobs(){
   </div>`;
 }
 
+function inventoryCategoryNameMap(){
+  const categories = typeof ensureInventoryCategories === "function"
+    ? ensureInventoryCategories()
+    : (Array.isArray(window.inventoryCategories) ? window.inventoryCategories : []);
+  const map = new Map();
+  categories.forEach(cat => {
+    if (!cat || cat.id == null) return;
+    map.set(String(cat.id), cat.name || "");
+  });
+  return map;
+}
+
+function inventoryCategoryOptionsMarkup(selectedId){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const categories = typeof ensureInventoryCategories === "function"
+    ? ensureInventoryCategories()
+    : (Array.isArray(window.inventoryCategories) ? window.inventoryCategories : []);
+  const sorted = categories.slice().sort((a, b)=>{
+    const orderDiff = Number(a.order || 0) - Number(b.order || 0);
+    if (orderDiff !== 0) return orderDiff;
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+  const value = selectedId != null ? String(selectedId) : "";
+  const options = [`<option value=""${value==="" ? " selected" : ""}>Uncategorized</option>`];
+  let hasSelected = value === "";
+  sorted.forEach(cat => {
+    const cid = cat.id != null ? String(cat.id) : "";
+    const label = cat.name || "Category";
+    const isSelected = value === cid;
+    options.push(`<option value="${esc(cid)}"${isSelected ? " selected" : ""}>${esc(label)}</option>`);
+    if (isSelected) hasSelected = true;
+  });
+  if (value && !hasSelected){
+    options.push(`<option value="${esc(value)}" selected>Unknown category (${esc(value)})</option>`);
+  }
+  return options.join("");
+}
+
 function filterInventoryItems(term){
   const query = (term || "").trim().toLowerCase();
   if (!query) return inventory.slice();
+  const categoryNames = inventoryCategoryNameMap();
   return inventory.filter(item => {
-    const fields = [item.name, item.unit, item.pn, item.note, item.link];
+    const categoryName = item && item.categoryId != null ? categoryNames.get(String(item.categoryId)) : "";
+    const fields = [item.name, item.unit, item.pn, item.note, item.link, categoryName];
     return fields.some(f => {
       if (f == null) return false;
       const text = String(f).toLowerCase();
@@ -3565,7 +3605,7 @@ function filterInventoryItems(term){
 
 function inventoryRowsHTML(list){
   if (!Array.isArray(list) || !list.length){
-    return `<tr><td colspan="9" class="muted">No inventory items match your search.</td></tr>`;
+    return `<tr><td colspan="10" class="muted">No items in this category match your search.</td></tr>`;
   }
   return list.map(i => {
     const priceVal = i.price != null && i.price !== "" ? Number(i.price) : "";
@@ -3575,8 +3615,10 @@ function inventoryRowsHTML(list){
     const qtyOldNum = Number(i.qtyOld);
     const qtyNewDisplay = Number.isFinite(qtyNewNum) && qtyNewNum >= 0 ? qtyNewNum : 0;
     const qtyOldDisplay = Number.isFinite(qtyOldNum) && qtyOldNum >= 0 ? qtyOldNum : 0;
+    const categorySelect = `<select data-inventory-category-select data-id="${i.id}">${inventoryCategoryOptionsMarkup(i.categoryId)}</select>`;
     return `
     <tr>
+      <td>${categorySelect}</td>
       <td><button type="button" class="inventory-name-btn" data-inventory-maintenance="${i.id}">${nameDisplay}</button></td>
       <td><input type="number" min="0" step="1" data-inv="qtyNew" data-id="${i.id}" value="${qtyNewDisplay}"></td>
       <td><input type="number" min="0" step="1" data-inv="qtyOld" data-id="${i.id}" value="${qtyOldDisplay}"></td>
@@ -3593,9 +3635,75 @@ function inventoryRowsHTML(list){
   }).join("");
 }
 
+  function inventoryGroupsHTML(list){
+    const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    const collapseState = (typeof window.inventoryCategoryCollapse === "object" && window.inventoryCategoryCollapse !== null)
+      ? window.inventoryCategoryCollapse
+      : (window.inventoryCategoryCollapse = {});
+    const categories = typeof ensureInventoryCategories === "function"
+      ? ensureInventoryCategories()
+      : (Array.isArray(window.inventoryCategories) ? window.inventoryCategories : []);
+  const sorted = categories.slice().sort((a, b)=>{
+    const orderDiff = Number(a.order || 0) - Number(b.order || 0);
+    if (orderDiff !== 0) return orderDiff;
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+  const categoryNames = new Map(sorted.map(cat => [String(cat.id), cat.name || "Category"]));
+  const grouped = new Map();
+  list.forEach(item => {
+    if (!item) return;
+    const key = item.categoryId != null ? String(item.categoryId) : "";
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(item);
+  });
+
+    const buildSection = (id, name)=>{
+      const key = id ? String(id) : "__uncategorized";
+      const isCollapsed = Boolean(collapseState[key]);
+      const items = grouped.get(id) || [];
+      const rows = inventoryRowsHTML(items);
+      const actions = id
+      ? `<div class="inventory-category-actions">
+           <button type="button" class="inventory-category-action" data-rename-category="${esc(id)}">Rename</button>
+           <button type="button" class="inventory-category-action danger" data-delete-category="${esc(id)}">Remove</button>
+         </div>`
+      : `<div class="small muted">Items without a category appear here.</div>`;
+      return `
+        <section class="inventory-category${isCollapsed ? " is-collapsed" : ""}" data-inventory-category="${esc(id)}" data-inventory-category-key="${esc(key)}">
+          <div class="inventory-category-header">
+            <button type="button" class="inventory-category-toggle" data-inventory-category-toggle="${esc(key)}" aria-expanded="${isCollapsed ? "false" : "true"}">
+              <span class="inventory-category-toggle-icon" aria-hidden="true"></span>
+              <span class="inventory-category-toggle-label">
+                <span class="inventory-category-title">${esc(name || "Category")}</span>
+                <span class="small muted">${items.length} item${items.length===1?"":"s"}</span>
+              </span>
+            </button>
+            ${actions}
+          </div>
+          <div class="inventory-category-table">
+            <table class="inventory-table">
+              <thead><tr><th>Category</th><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </section>`;
+    };
+
+  const sections = sorted.map(cat => buildSection(cat.id, cat.name || "Category"));
+  const used = new Set(sorted.map(cat => String(cat.id)));
+  grouped.forEach((items, key)=>{
+    const norm = key == null ? "" : String(key);
+    if (used.has(norm) || norm === "") return;
+    sections.push(buildSection(norm, categoryNames.get(norm) || "Category"));
+  });
+  if (grouped.has("") || (!sections.length && grouped.size === 0)){
+    sections.push(buildSection("", "Uncategorized"));
+  }
+  return sections.join("") || `<div class="inventory-category-empty">No inventory items match your search.</div>`;
+}
+
 function viewInventory(){
   const filtered = filterInventoryItems(inventorySearchTerm);
-  const rows = inventoryRowsHTML(filtered);
   const searchValue = String(inventorySearchTerm || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -3606,17 +3714,17 @@ function viewInventory(){
     <div class="block" style="grid-column:1 / -1">
       <h3>Inventory</h3>
       <div class="inventory-toolbar">
-        <button type="button" class="inventory-add-trigger" id="inventoryAddBtn">+ Add inventory item</button>
+        <div class="inventory-toolbar-actions">
+          <button type="button" class="inventory-add-trigger" id="inventoryAddBtn">+ Add inventory item</button>
+          <button type="button" class="inventory-add-trigger inventory-add-category" id="inventoryAddCategory">+ Add category</button>
+        </div>
         <div class="inventory-search mini-form">
           <input type="search" id="inventorySearch" placeholder="Search items, part numbers, notes, or links" value="${searchValue}">
           <button type="button" id="inventorySearchClear">Clear</button>
         </div>
       </div>
-      <div class="small muted inventory-hint">Results update as you type.</div>
-      <table class="inventory-table">
-        <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
-        <tbody data-inventory-rows>${rows}</tbody>
-      </table>
+      <div class="small muted inventory-hint">Results update as you type. Organize items by category to mirror your maintenance workflow.</div>
+      <div class="inventory-category-grid" data-inventory-groups>${inventoryGroupsHTML(filtered)}</div>
     </div>
   </div>
 
@@ -3642,6 +3750,7 @@ function viewInventory(){
             <label>New quantity<input type="number" min="0" step="1" name="inventoryQtyNew" value="1"></label>
             <label>Old quantity<input type="number" min="0" step="1" name="inventoryQtyOld" value="0"></label>
             <label>Unit<input name="inventoryUnit" placeholder="pcs" value="pcs"></label>
+            <label>Category<select name="inventoryCategory">${inventoryCategoryOptionsMarkup()}</select></label>
             <label>Part #<input name="inventoryPN" placeholder="Part number"></label>
             <label>Store link<input type="url" name="inventoryLink" placeholder="https://..."></label>
             <label>Price ($)<input type="number" min="0" step="0.01" name="inventoryPrice" placeholder="optional"></label>
