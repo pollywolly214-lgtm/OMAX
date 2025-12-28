@@ -53,7 +53,8 @@ const TIME_EFFICIENCY_WINDOWS = [
   { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
   { key: "365d", label: "1Y", days: 365, description: "Past year" }
 ];
-const DEFAULT_APP_CONFIG = { excludeWeekends: false, dailyHours: DEFAULT_DAILY_HOURS };
+const DEFAULT_MAINTENANCE_RATE = 90;
+const DEFAULT_APP_CONFIG = { excludeWeekends: false, dailyHours: DEFAULT_DAILY_HOURS, maintenanceHourlyRate: DEFAULT_MAINTENANCE_RATE };
 let appConfig = { ...DEFAULT_APP_CONFIG };
 
 const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
@@ -78,6 +79,12 @@ if (typeof window !== "undefined"){
   window.shouldExcludeWeekends = shouldExcludeWeekends;
   window.setAppConfig = setAppConfig;
   window.normalizeAppConfig = normalizeAppConfig;
+  window.normalizeMaintenanceHistoryEntry = normalizeMaintenanceHistoryEntry;
+  window.normalizeMaintenanceForecastEntry = normalizeMaintenanceForecastEntry;
+  window.setMaintenanceCostHistory = setMaintenanceCostHistory;
+  window.setMaintenanceForecastEntries = setMaintenanceForecastEntries;
+  window.upsertMaintenanceHistoryEntry = upsertMaintenanceHistoryEntry;
+  window.removeMaintenanceHistoryEntry = removeMaintenanceHistoryEntry;
   window.setDailyCutHoursEntry = setDailyCutHoursEntry;
   window.getDailyCutHoursEntry = getDailyCutHoursEntry;
   window.normalizeDailyCutHours = normalizeDailyCutHours;
@@ -191,6 +198,10 @@ function normalizeAppConfig(config){
       const clamped = clampDailyCutHours(config.dailyHours);
       if (clamped > 0) normalized.dailyHours = clamped;
     }
+    if (config.maintenanceHourlyRate != null){
+      const rate = Number(config.maintenanceHourlyRate);
+      if (Number.isFinite(rate) && rate > 0) normalized.maintenanceHourlyRate = Math.round(rate * 100) / 100;
+    }
   }
   return normalized;
 }
@@ -223,6 +234,126 @@ function refreshDerivedDailyHours(){
     window.CUTTING_BASELINE_WEEKLY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS;
   }
   return DAILY_HOURS;
+}
+
+function getMaintenanceHourlyRate(){
+  try {
+    const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
+    const rate = Number(cfg.maintenanceHourlyRate);
+    if (Number.isFinite(rate) && rate > 0) return rate;
+  } catch (_err){ /* ignore */ }
+  return DEFAULT_MAINTENANCE_RATE;
+}
+
+function normalizeMaintenanceHistoryEntry(entry){
+  if (!entry || typeof entry !== "object") return null;
+  const id = entry.id || genId("maint_hist");
+  const dateISO = normalizeDateISO(entry.dateISO || entry.date || entry.completionDateISO);
+  const hours = Number(entry.hoursSpent != null ? entry.hoursSpent : entry.hours);
+  const hourlyRate = Number(entry.hourlyRateUsed != null ? entry.hourlyRateUsed : entry.hourlyRate);
+  const partCost = Number(entry.partCost);
+  const laborCost = Number.isFinite(hours) && hours > 0 && Number.isFinite(hourlyRate) && hourlyRate > 0
+    ? hours * hourlyRate
+    : Number(entry.laborCost);
+  const totalCost = Number.isFinite(entry.totalCost) ? Number(entry.totalCost) : (Number.isFinite(laborCost) ? laborCost : 0) + (Number.isFinite(partCost) ? partCost : 0);
+  return {
+    id,
+    dateISO: dateISO || null,
+    taskId: entry.taskId != null ? String(entry.taskId) : (entry.originalTaskId != null ? String(entry.originalTaskId) : null),
+    taskName: typeof entry.taskName === "string" ? entry.taskName : (typeof entry.name === "string" ? entry.name : "Maintenance task"),
+    hoursSpent: Number.isFinite(hours) && hours > 0 ? Math.round(hours * 100) / 100 : 0,
+    hourlyRateUsed: Number.isFinite(hourlyRate) && hourlyRate > 0 ? Math.round(hourlyRate * 100) / 100 : getMaintenanceHourlyRate(),
+    partCost: Number.isFinite(partCost) && partCost > 0 ? Math.round(partCost * 100) / 100 : 0,
+    laborCost: Number.isFinite(laborCost) && laborCost > 0 ? Math.round(laborCost * 100) / 100 : 0,
+    totalCost: Number.isFinite(totalCost) && totalCost > 0 ? Math.round(totalCost * 100) / 100 : Math.max(0, (Number.isFinite(laborCost) ? laborCost : 0) + (Number.isFinite(partCost) ? partCost : 0)),
+    source: entry.source || "history",
+    recordedAtISO: entry.recordedAtISO || entry.updatedAtISO || new Date().toISOString(),
+    notes: typeof entry.notes === "string" ? entry.notes : ""
+  };
+}
+
+function normalizeMaintenanceForecastEntry(entry){
+  if (!entry || typeof entry !== "object") return null;
+  const id = entry.id || genId("maint_forecast");
+  const hours = Number(entry.estimatedHours != null ? entry.estimatedHours : entry.hours);
+  const hourlyRate = Number(entry.hourlyRate != null ? entry.hourlyRate : getMaintenanceHourlyRate());
+  const partCost = Number(entry.estimatedPartCost != null ? entry.estimatedPartCost : entry.partCost);
+  const laborCost = Number.isFinite(hours) && hours > 0 && Number.isFinite(hourlyRate) && hourlyRate > 0
+    ? hours * hourlyRate
+    : Number(entry.estimatedLaborCost);
+  const totalCost = Number.isFinite(entry.estimatedTotalCost)
+    ? Number(entry.estimatedTotalCost)
+    : (Number.isFinite(laborCost) ? laborCost : 0) + (Number.isFinite(partCost) ? partCost : 0);
+  return {
+    id,
+    dateISO: normalizeDateISO(entry.dateISO || entry.date || entry.period) || null,
+    taskName: typeof entry.taskName === "string" ? entry.taskName : (typeof entry.name === "string" ? entry.name : "Forecast task"),
+    estimatedHours: Number.isFinite(hours) && hours > 0 ? Math.round(hours * 100) / 100 : 0,
+    hourlyRate: Number.isFinite(hourlyRate) && hourlyRate > 0 ? Math.round(hourlyRate * 100) / 100 : getMaintenanceHourlyRate(),
+    estimatedLaborCost: Number.isFinite(laborCost) && laborCost > 0 ? Math.round(laborCost * 100) / 100 : 0,
+    estimatedPartCost: Number.isFinite(partCost) && partCost > 0 ? Math.round(partCost * 100) / 100 : 0,
+    estimatedTotalCost: Number.isFinite(totalCost) && totalCost > 0 ? Math.round(totalCost * 100) / 100 : Math.max(0, (Number.isFinite(laborCost) ? laborCost : 0) + (Number.isFinite(partCost) ? partCost : 0)),
+    kind: entry.kind || entry.type || "interval"
+  };
+}
+
+function setMaintenanceCostHistory(entries){
+  const normalized = Array.isArray(entries)
+    ? entries.map(normalizeMaintenanceHistoryEntry).filter(Boolean)
+    : [];
+  maintenanceCostHistory = normalized;
+  if (typeof window !== "undefined"){
+    window.maintenanceCostHistory = maintenanceCostHistory;
+  }
+  return maintenanceCostHistory;
+}
+
+function setMaintenanceForecastEntries(entries){
+  const normalized = Array.isArray(entries)
+    ? entries.map(normalizeMaintenanceForecastEntry).filter(Boolean)
+    : [];
+  maintenanceForecastEntries = normalized;
+  if (typeof window !== "undefined"){
+    window.maintenanceForecastEntries = maintenanceForecastEntries;
+  }
+  return maintenanceForecastEntries;
+}
+
+function upsertMaintenanceHistoryEntry(entry){
+  const normalized = normalizeMaintenanceHistoryEntry(entry);
+  if (!normalized) return maintenanceCostHistory;
+  const list = Array.isArray(maintenanceCostHistory) ? maintenanceCostHistory.slice() : [];
+  const idx = list.findIndex(item => item && ((normalized.id && item.id === normalized.id) || (normalized.dateISO && item.dateISO === normalized.dateISO && normalized.taskId && item.taskId === normalized.taskId)));
+  if (idx >= 0){
+    const merged = { ...list[idx], ...normalized, id: list[idx].id || normalized.id };
+    merged.laborCost = Number.isFinite(merged.hoursSpent) && Number.isFinite(merged.hourlyRateUsed)
+      ? Math.round(merged.hoursSpent * merged.hourlyRateUsed * 100) / 100
+      : merged.laborCost;
+    merged.totalCost = Number.isFinite(merged.laborCost) || Number.isFinite(merged.partCost)
+      ? Math.max(0, Math.round(((Number(merged.laborCost) || 0) + (Number(merged.partCost) || 0)) * 100) / 100)
+      : merged.totalCost;
+    list[idx] = merged;
+  }else{
+    list.push(normalized);
+  }
+  list.sort((a,b)=> String(a?.dateISO||"").localeCompare(String(b?.dateISO||"")));
+  return setMaintenanceCostHistory(list);
+}
+
+function removeMaintenanceHistoryEntry(match){
+  if (!Array.isArray(maintenanceCostHistory)) return maintenanceCostHistory;
+  const predicate = typeof match === "function"
+    ? match
+    : (entry)=>{
+        if (!entry) return false;
+        if (match && typeof match === "object"){
+          if (match.id && entry.id === match.id) return true;
+          if (match.dateISO && entry.dateISO === normalizeDateISO(match.dateISO) && match.taskId && entry.taskId === String(match.taskId)) return true;
+        }
+        return false;
+      };
+  const next = maintenanceCostHistory.filter(entry => !predicate(entry));
+  return setMaintenanceCostHistory(next);
 }
 
 function setAppConfig(config){
@@ -1360,6 +1491,8 @@ if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
 if (!Array.isArray(window.opportunityRollups)) window.opportunityRollups = [];
 if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
+if (!Array.isArray(window.maintenanceCostHistory)) window.maintenanceCostHistory = [];
+if (!Array.isArray(window.maintenanceForecastEntries)) window.maintenanceForecastEntries = [];
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
 if (typeof window.pumpEff !== "object" || !window.pumpEff){
@@ -1380,6 +1513,8 @@ let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
 let dailyCutHours = window.dailyCutHours;
 let jobFolders = window.jobFolders;
+let maintenanceCostHistory = window.maintenanceCostHistory;
+let maintenanceForecastEntries = window.maintenanceForecastEntries;
 
 function normalizeJobPriorityOrder(list){
   if (!Array.isArray(list)) return list;
@@ -1527,6 +1662,12 @@ function refreshGlobalCollections(){
   if (!Array.isArray(window.opportunityRollups)) window.opportunityRollups = [];
   opportunityRollups = window.opportunityRollups;
 
+  if (!Array.isArray(window.maintenanceCostHistory)) window.maintenanceCostHistory = [];
+  maintenanceCostHistory = window.maintenanceCostHistory;
+
+  if (!Array.isArray(window.maintenanceForecastEntries)) window.maintenanceForecastEntries = [];
+  maintenanceForecastEntries = window.maintenanceForecastEntries;
+
   if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
   orderRequests = window.orderRequests;
 
@@ -1657,6 +1798,8 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(sanitized.orderRequests) && Array.isArray(window.orderRequests)) sanitized.orderRequests = window.orderRequests.slice();
     if (!Array.isArray(sanitized.garnetCleanings) && Array.isArray(window.garnetCleanings)) sanitized.garnetCleanings = window.garnetCleanings.slice();
     if (!Array.isArray(sanitized.totalHistory) && Array.isArray(window.totalHistory)) sanitized.totalHistory = window.totalHistory.slice();
+    if (!Array.isArray(sanitized.maintenanceCostHistory) && Array.isArray(window.maintenanceCostHistory)) sanitized.maintenanceCostHistory = window.maintenanceCostHistory.slice();
+    if (!Array.isArray(sanitized.maintenanceForecastEntries) && Array.isArray(window.maintenanceForecastEntries)) sanitized.maintenanceForecastEntries = window.maintenanceForecastEntries.slice();
     if (!Array.isArray(sanitized.deletedItems) && Array.isArray(window.deletedItems)) sanitized.deletedItems = window.deletedItems.slice();
     if (!Array.isArray(sanitized.jobFolders) && Array.isArray(window.jobFolders)) sanitized.jobFolders = window.jobFolders.slice();
     if (!sanitized.appConfig || typeof sanitized.appConfig !== "object") sanitized.appConfig = normalizeAppConfig(appConfig);
@@ -1672,7 +1815,8 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
     if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
     appConfig = normalizeAppConfig(sanitized.appConfig);
-    window.appConfig = appConfig;
+  window.appConfig = appConfig;
+  window.getMaintenanceHourlyRate = getMaintenanceHourlyRate;
     refreshDerivedDailyHours();
     if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
     if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
@@ -1714,6 +1858,8 @@ function stateHasMeaningfulData(data){
     "folders",
     "pumpEff",
     "jobFolders",
+    "maintenanceCostHistory",
+    "maintenanceForecastEntries",
     "orderRequestTab",
     "schema"
   ]);
@@ -1757,6 +1903,12 @@ function snapshotState(){
       : [],
     opportunityRollups: Array.isArray(window.opportunityRollups)
       ? window.opportunityRollups.map(entry => ({ ...entry }))
+      : [],
+    maintenanceCostHistory: Array.isArray(window.maintenanceCostHistory)
+      ? window.maintenanceCostHistory.map(entry => ({ ...entry }))
+      : [],
+    maintenanceForecastEntries: Array.isArray(window.maintenanceForecastEntries)
+      ? window.maintenanceForecastEntries.map(entry => ({ ...entry }))
       : [],
     appConfig: normalizeAppConfig(window.appConfig),
     pumpEff: safePumpEff,
@@ -2176,6 +2328,8 @@ function adoptState(doc){
   garnetCleanings = Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [];
   dailyCutHours = normalizeDailyCutHours(Array.isArray(data.dailyCutHours) ? data.dailyCutHours : []);
   opportunityRollups = Array.isArray(data.opportunityRollups) ? data.opportunityRollups : [];
+  maintenanceCostHistory = setMaintenanceCostHistory(Array.isArray(data.maintenanceCostHistory) ? data.maintenanceCostHistory : maintenanceCostHistory);
+  maintenanceForecastEntries = setMaintenanceForecastEntries(Array.isArray(data.maintenanceForecastEntries) ? data.maintenanceForecastEntries : maintenanceForecastEntries);
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -2187,6 +2341,8 @@ function adoptState(doc){
   window.garnetCleanings = garnetCleanings;
   window.dailyCutHours = dailyCutHours;
   window.opportunityRollups = opportunityRollups;
+  window.maintenanceCostHistory = maintenanceCostHistory;
+  window.maintenanceForecastEntries = maintenanceForecastEntries;
   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
   window.deletedItems = deletedItems;
   purgeExpiredDeletedItems();

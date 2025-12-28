@@ -421,6 +421,15 @@ function markCalendarTaskComplete(meta, dateISO){
   const task = meta.task;
   const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
   let changed = false;
+  const hoursForDate = (()=>{
+    const occurrenceHours = getOccurrenceHoursForTask(task, key);
+    if (occurrenceHours != null) return occurrenceHours;
+    if (typeof resolveTaskDowntimeHours === "function") return resolveTaskDowntimeHours(task, key);
+    return null;
+  })();
+  const partCostVal = Number(task?.price);
+  const partCost = Number.isFinite(partCostVal) && partCostVal > 0 ? Math.round(partCostVal * 100) / 100 : 0;
+  const hourlyRate = typeof getMaintenanceHourlyRate === "function" ? getMaintenanceHourlyRate() : null;
 
   if (mode === "interval"){
     const currentHoursRaw = typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : null;
@@ -487,6 +496,18 @@ function markCalendarTaskComplete(meta, dateISO){
     }
   }
 
+  if (typeof upsertMaintenanceHistoryEntry === "function"){
+    upsertMaintenanceHistoryEntry({
+      dateISO: key,
+      taskId: task.id,
+      taskName: task.name,
+      hoursSpent: hoursForDate != null ? hoursForDate : 0,
+      hourlyRateUsed: hourlyRate,
+      partCost,
+      source: "calendar"
+    });
+  }
+
   return changed;
 }
 
@@ -535,6 +556,10 @@ function unmarkCalendarTaskComplete(meta, dateISO){
     history.sort((a,b)=> String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")));
     task.manualHistory = history;
     applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
+  }
+
+  if (typeof removeMaintenanceHistoryEntry === "function"){
+    removeMaintenanceHistoryEntry({ dateISO: key, taskId: task.id });
   }
 
   return changed;

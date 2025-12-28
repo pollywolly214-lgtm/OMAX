@@ -1971,15 +1971,16 @@ function getConfigurationElements(){
   const modal = document.getElementById("configModal");
   const form = document.getElementById("configForm");
   const hoursInput = document.getElementById("configDailyHours");
+  const maintenanceRate = document.getElementById("configMaintenanceRate");
   const excludeWeekends = document.getElementById("configExcludeWeekends");
   const cancel = document.getElementById("configCancel");
-  return { modal, form, hoursInput, excludeWeekends, cancel };
+  return { modal, form, hoursInput, maintenanceRate, excludeWeekends, cancel };
 }
 
 function currentAppConfiguration(){
   if (typeof normalizeAppConfig === "function") return normalizeAppConfig(window.appConfig);
   const fallbackDaily = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8;
-  return { excludeWeekends: false, dailyHours: fallbackDaily };
+  return { excludeWeekends: false, dailyHours: fallbackDaily, maintenanceHourlyRate: typeof getMaintenanceHourlyRate === "function" ? getMaintenanceHourlyRate() : undefined };
 }
 
 function closeConfigurationModal(){
@@ -2000,12 +2001,16 @@ function closeConfigurationModal(){
 }
 
 function openConfigurationModal(trigger){
-  const { modal, hoursInput, excludeWeekends } = getConfigurationElements();
+  const { modal, hoursInput, maintenanceRate, excludeWeekends } = getConfigurationElements();
   if (!modal) return;
   const cfg = currentAppConfiguration();
   if (hoursInput){
     const value = cfg.dailyHours != null ? cfg.dailyHours : (typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8);
     hoursInput.value = value;
+  }
+  if (maintenanceRate){
+    const rate = cfg.maintenanceHourlyRate != null ? cfg.maintenanceHourlyRate : (typeof getMaintenanceHourlyRate === "function" ? getMaintenanceHourlyRate() : "");
+    maintenanceRate.value = rate;
   }
   if (excludeWeekends){
     excludeWeekends.checked = !!cfg.excludeWeekends;
@@ -2022,9 +2027,10 @@ function openConfigurationModal(trigger){
 }
 
 function applyConfigurationForm(){
-  const { hoursInput, excludeWeekends } = getConfigurationElements();
+  const { hoursInput, maintenanceRate, excludeWeekends } = getConfigurationElements();
   const nextDaily = hoursInput ? Number(hoursInput.value) : null;
-  const nextConfig = { dailyHours: nextDaily, excludeWeekends: !!(excludeWeekends && excludeWeekends.checked) };
+  const nextRate = maintenanceRate ? Number(maintenanceRate.value) : null;
+  const nextConfig = { dailyHours: nextDaily, maintenanceHourlyRate: nextRate, excludeWeekends: !!(excludeWeekends && excludeWeekends.checked) };
   if (typeof setAppConfig === "function") setAppConfig(nextConfig);
   else {
     window.appConfig = typeof normalizeAppConfig === "function" ? normalizeAppConfig(nextConfig) : nextConfig;
@@ -3869,6 +3875,16 @@ function renderDashboard(){
   content.innerHTML = viewDashboard();
   setAppSettingsContext("dashboard");
   wireDashboardSettingsMenu();
+
+  content.querySelectorAll("[data-config-open-inline]").forEach(btn => {
+    if (btn.dataset.boundConfigInline === "1") return;
+    btn.dataset.boundConfigInline = "1";
+    btn.addEventListener("click", (event)=>{
+      event.preventDefault();
+      closeDashboardSettingsMenu();
+      if (typeof openConfigurationModal === "function") openConfigurationModal(btn);
+    });
+  });
 
   // Log hours
   document.getElementById("logBtn")?.addEventListener("click", ()=>{
@@ -9116,6 +9132,16 @@ function renderCosts(){
     ? model.jobSeries.slice()
     : [];
   content.innerHTML = viewCosts(model);
+
+  content.querySelectorAll("[data-config-open-inline]").forEach(btn => {
+    if (btn.dataset.boundConfigInline === "1") return;
+    btn.dataset.boundConfigInline = "1";
+    btn.addEventListener("click", (event)=>{
+      event.preventDefault();
+      closeDashboardSettingsMenu();
+      if (typeof openConfigurationModal === "function") openConfigurationModal(btn);
+    });
+  });
   setAppSettingsContext("costs");
   wireCostSettingsMenu();
 
@@ -10030,33 +10056,116 @@ function renderCosts(){
     renderCosts();
   };
 
-  const historyList = content.querySelector(".cost-history");
-  if (historyList){
-    const resolveItem = (target)=> (target instanceof HTMLElement) ? target.closest("[data-history-item]") : null;
-    const activate = (item)=>{ if (item) handleHistoryItemActivation(item); };
-    const remove = (item)=>{ if (item) handleHistoryItemDelete(item); };
-    historyList.addEventListener("click", (event)=>{
-      const deleteBtn = (event.target instanceof HTMLElement) ? event.target.closest("[data-history-delete]") : null;
-      if (deleteBtn){
-        const item = resolveItem(deleteBtn);
-        if (!item) return;
-        event.preventDefault();
-        event.stopPropagation();
-        remove(item);
-        return;
+  const historyTable = content.querySelector(".maintenance-history-table tbody");
+  if (historyTable){
+    const resolveId = (row)=> row?.getAttribute("data-maint-history-row") || row?.getAttribute("data-history-date") || "";
+    const pullEntry = (id)=>{
+      if (!id) return null;
+      const list = Array.isArray(window.maintenanceCostHistory) ? window.maintenanceCostHistory : [];
+      return list.find(entry => entry && (entry.id === id || String(entry.dateISO||"") === String(id)));
+    };
+    const applyUpdate = (id, changes)=>{
+      const base = pullEntry(id) || {};
+      const merged = { ...base, ...changes, id };
+      const hours = Number(merged.hoursSpent);
+      const rate = Number(merged.hourlyRateUsed);
+      if (Number.isFinite(hours) && hours >= 0 && Number.isFinite(rate) && rate >= 0){
+        merged.laborCost = Math.round(hours * rate * 100) / 100;
       }
-      const item = resolveItem(event.target);
-      if (!item) return;
-      event.preventDefault();
-      activate(item);
+      const part = Number(merged.partCost);
+      if (Number.isFinite(part) && part >= 0 && Number.isFinite(merged.laborCost)){
+        merged.totalCost = Math.round((Number(merged.laborCost) + part) * 100) / 100;
+      }else if (Number.isFinite(merged.totalCost) && Number.isFinite(part) && part >= 0 && Number.isFinite(hours) && Number.isFinite(rate)){
+        merged.laborCost = Math.max(0, merged.totalCost - part);
+      }
+      if (typeof upsertMaintenanceHistoryEntry === "function"){
+        upsertMaintenanceHistoryEntry(merged);
+      }
+      if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+      renderCosts();
+    };
+    historyTable.addEventListener("input", (event)=>{
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      const row = target.closest("[data-maint-history-row]");
+      if (!row) return;
+      const id = resolveId(row);
+      const field = target.getAttribute("data-maint-history-field");
+      if (!field) return;
+      const value = target.type === "number" ? Number(target.value) : target.value;
+      applyUpdate(id, { [field]: value });
     });
-    historyList.addEventListener("keydown", (event)=>{
-      if (event.repeat) return;
-      if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
-      const item = resolveItem(event.target);
-      if (!item) return;
-      event.preventDefault();
-      activate(item);
+    historyTable.addEventListener("click", (event)=>{
+      const btn = (event.target instanceof HTMLElement) ? event.target.closest("[data-maint-history-delete]") : null;
+      if (!btn) return;
+      const row = btn.closest("[data-maint-history-row]");
+      if (!row) return;
+      const id = resolveId(row);
+      if (typeof removeMaintenanceHistoryEntry === "function"){
+        removeMaintenanceHistoryEntry({ id });
+      }
+      if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+      renderCosts();
+    });
+  }
+
+  const forecastTable = content.querySelector(".editable-forecast-table tbody");
+  if (forecastTable){
+    const resolveId = (row)=> row?.getAttribute("data-maint-forecast-row") || "";
+    const getEntries = ()=> Array.isArray(window.maintenanceForecastEntries) ? window.maintenanceForecastEntries : [];
+    const pullEntry = (id)=> getEntries().find(entry => entry && (entry.id === id || (!entry.id && (entry.taskName === id))));
+    const applyForecastUpdate = (id, changes)=>{
+      const base = pullEntry(id) || {};
+      const merged = { ...base, ...changes, id: base.id || id || genId("forecast") };
+      const hours = Number(merged.estimatedHours);
+      const rate = Number(merged.hourlyRate);
+      if (Number.isFinite(hours) && hours >= 0 && Number.isFinite(rate) && rate >= 0){
+        merged.estimatedLaborCost = Math.round(hours * rate * 100) / 100;
+      }
+      const part = Number(merged.estimatedPartCost);
+      if (Number.isFinite(part) && part >= 0 && Number.isFinite(merged.estimatedLaborCost)){
+        merged.estimatedTotalCost = Math.round(((Number(merged.estimatedLaborCost) || 0) + part) * 100) / 100;
+      }
+      if (typeof setMaintenanceForecastEntries === "function"){
+        setMaintenanceForecastEntries(getEntries().map(entry => entry && (entry.id === merged.id ? merged : entry)).filter(Boolean));
+      }
+      if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+      renderCosts();
+    };
+    forecastTable.addEventListener("input", (event)=>{
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLSelectElement)) return;
+      const row = target.closest("[data-maint-forecast-row]");
+      if (!row) return;
+      const id = resolveId(row);
+      const field = target.getAttribute("data-maint-forecast-field");
+      if (!field) return;
+      const value = target instanceof HTMLSelectElement
+        ? target.value
+        : (target.type === "number" ? Number(target.value) : target.value);
+      applyForecastUpdate(id, { [field]: value });
+    });
+    forecastTable.addEventListener("click", (event)=>{
+      const btn = (event.target instanceof HTMLElement) ? event.target.closest("[data-maint-forecast-delete]") : null;
+      if (!btn) return;
+      const row = btn.closest("[data-maint-forecast-row]");
+      if (!row) return;
+      const id = resolveId(row);
+      const remaining = getEntries().filter(entry => entry && (entry.id !== id));
+      if (typeof setMaintenanceForecastEntries === "function") setMaintenanceForecastEntries(remaining);
+      if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+      renderCosts();
+    });
+  }
+
+  const forecastAddBtn = content.querySelector("[data-maint-forecast-add]");
+  if (forecastAddBtn){
+    forecastAddBtn.addEventListener("click", ()=>{
+      const entries = Array.isArray(window.maintenanceForecastEntries) ? window.maintenanceForecastEntries.slice() : [];
+      const next = { id: genId("forecast"), taskName: "New task", estimatedHours: 0, hourlyRate: getMaintenanceHourlyRate(), estimatedLaborCost: 0, estimatedPartCost: 0, estimatedTotalCost: 0, kind: "interval" };
+      if (typeof setMaintenanceForecastEntries === "function") setMaintenanceForecastEntries([...entries, next]);
+      if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+      renderCosts();
     });
   }
 
@@ -10901,62 +11010,89 @@ function computeCostModel(){
     asReqTasks.forEach(task => captureTaskHistory(task, { exists: true }));
   }
 
-  const maintenanceHistory = [];
-  const maintenanceHistoryKeys = new Set();
-  for (let i=1; i<parsedHistory.length; i++){
-    const prev = parsedHistory[i-1];
-    const curr = parsedHistory[i];
-    const deltaHours = Number(curr.hours) - Number(prev.hours);
-    if (!isFinite(deltaHours) || deltaHours <= 0) continue;
-    const entryKey = makeHistoryEntryKey(curr);
-    if (entryKey) maintenanceHistoryKeys.add(entryKey);
-    const suppression = entryKey ? suppressionMap.get(entryKey) : null;
-    const deltaSafe = deltaHours > 0 ? deltaHours : 0;
-    if (suppression){
-      const storedHours = Number(suppression.hours) || 0;
-      if (Math.abs(storedHours - deltaSafe) > 0.001){
-        suppression.hours = deltaSafe;
-      }
-      if (!suppression.dateISO && curr.dateISO){
-        suppression.dateISO = curr.dateISO;
-      }
-      continue;
-    }
-    const dateKey = toHistoryDateKey(curr.dateISO);
-    const linkedTasksRaw = dateKey ? taskEventsByDate.get(dateKey) : null;
-    const linkedTasks = Array.isArray(linkedTasksRaw)
-      ? linkedTasksRaw.map(task => task ? { ...task } : task).filter(Boolean)
-      : [];
-    maintenanceHistory.push({
-      date: curr.date,
-      dateISO: curr.dateISO,
-      rangeStart: prev.date,
-      rangeStartISO: prev.dateISO,
-      rangeEnd: curr.date,
-      rangeEndISO: curr.dateISO,
-      hours: deltaSafe,
-      cost: combinedCostPerHour > 0
-        ? deltaSafe * combinedCostPerHour
-        : estimateIntervalCost(deltaSafe),
-      tasks: linkedTasks,
-      key: entryKey
-    });
-  }
+  const manualMaintenanceHistoryRaw = Array.isArray(window.maintenanceCostHistory)
+    ? window.maintenanceCostHistory
+    : [];
+  const manualMaintenanceHistory = manualMaintenanceHistoryRaw.map(entry => {
+    if (typeof normalizeMaintenanceHistoryEntry === "function") return normalizeMaintenanceHistoryEntry(entry);
+    return entry;
+  }).filter(Boolean);
 
-  suppressionMap.forEach((entry, key) => {
-    if (!maintenanceHistoryKeys.has(key)){
-      suppressionMap.delete(key);
-    }
-  });
-
-  const suppressionArray = Array.from(suppressionMap.values())
-    .map(normalizeCostHistorySuppression)
-    .filter(Boolean);
-  suppressedEntriesForUsage = suppressionArray.map(entry => ({ ...entry }));
-  if (!costHistorySuppressionsEqual(suppressionArray, suppressionEntriesInitial)){
-    setCostHistorySuppressions(suppressionArray);
+  let maintenanceHistory = [];
+  if (manualMaintenanceHistory.length){
+    maintenanceHistory = manualMaintenanceHistory.map(entry => ({
+      date: parseDateLocal(entry.dateISO) || new Date(entry.dateISO || Date.now()),
+      dateISO: entry.dateISO,
+      rangeStart: null,
+      rangeStartISO: null,
+      rangeEnd: null,
+      rangeEndISO: null,
+      hours: Number(entry.hoursSpent) || 0,
+      cost: Number(entry.totalCost) || 0,
+      laborCost: Number(entry.laborCost) || 0,
+      partCost: Number(entry.partCost) || 0,
+      hourlyRate: Number(entry.hourlyRateUsed) || null,
+      taskName: entry.taskName,
+      tasks: [],
+      key: entry.id || entry.dateISO
+    })).sort((a,b)=> String(a?.dateISO||"").localeCompare(String(b?.dateISO||"")));
   }else{
-    window.__costHistorySuppressions = suppressionArray.map(entry => ({ ...entry }));
+    const maintenanceHistoryKeys = new Set();
+    for (let i=1; i<parsedHistory.length; i++){
+      const prev = parsedHistory[i-1];
+      const curr = parsedHistory[i];
+      const deltaHours = Number(curr.hours) - Number(prev.hours);
+      if (!isFinite(deltaHours) || deltaHours <= 0) continue;
+      const entryKey = makeHistoryEntryKey(curr);
+      if (entryKey) maintenanceHistoryKeys.add(entryKey);
+      const suppression = entryKey ? suppressionMap.get(entryKey) : null;
+      const deltaSafe = deltaHours > 0 ? deltaHours : 0;
+      if (suppression){
+        const storedHours = Number(suppression.hours) || 0;
+        if (Math.abs(storedHours - deltaSafe) > 0.001){
+          suppression.hours = deltaSafe;
+        }
+        if (!suppression.dateISO && curr.dateISO){
+          suppression.dateISO = curr.dateISO;
+        }
+        continue;
+      }
+      const dateKey = toHistoryDateKey(curr.dateISO);
+      const linkedTasksRaw = dateKey ? taskEventsByDate.get(dateKey) : null;
+      const linkedTasks = Array.isArray(linkedTasksRaw)
+        ? linkedTasksRaw.map(task => task ? { ...task } : task).filter(Boolean)
+        : [];
+      maintenanceHistory.push({
+        date: curr.date,
+        dateISO: curr.dateISO,
+        rangeStart: prev.date,
+        rangeStartISO: prev.dateISO,
+        rangeEnd: curr.date,
+        rangeEndISO: curr.dateISO,
+        hours: deltaSafe,
+        cost: combinedCostPerHour > 0
+          ? deltaSafe * combinedCostPerHour
+          : estimateIntervalCost(deltaSafe),
+        tasks: linkedTasks,
+        key: entryKey
+      });
+    }
+
+    suppressionMap.forEach((entry, key) => {
+      if (!maintenanceHistoryKeys.has(key)){
+        suppressionMap.delete(key);
+      }
+    });
+
+    const suppressionArray = Array.from(suppressionMap.values())
+      .map(normalizeCostHistorySuppression)
+      .filter(Boolean);
+    suppressedEntriesForUsage = suppressionArray.map(entry => ({ ...entry }));
+    if (!costHistorySuppressionsEqual(suppressionArray, suppressionEntriesInitial)){
+      setCostHistorySuppressions(suppressionArray);
+    }else{
+      window.__costHistorySuppressions = suppressionArray.map(entry => ({ ...entry }));
+    }
   }
 
   const formatHoursLabel = (hours)=>{
@@ -10972,18 +11108,47 @@ function computeCostModel(){
     });
   };
 
+  const maintenanceCostSince = (days)=>{
+    if (!maintenanceHistory.length || !Number.isFinite(days) || days <= 0) return 0;
+    const cutoff = new Date();
+    cutoff.setHours(0,0,0,0);
+    cutoff.setDate(cutoff.getDate() - days);
+    const startTime = cutoff.getTime();
+    return maintenanceHistory.reduce((sum, entry)=>{
+      const time = entry.date instanceof Date ? entry.date.getTime() : Date.parse(entry.dateISO || "");
+      if (!Number.isFinite(time)) return sum;
+      if (time < startTime) return sum;
+      const total = Number(entry.cost);
+      return sum + (Number.isFinite(total) ? total : 0);
+    }, 0);
+  };
+
+  if (maintenanceHistory.length){
+    timeframeRows = timeframeRowsRaw.map(row => {
+      const days = Number(row.calendarDays || row.days) || 0;
+      const actualTotal = maintenanceCostSince(days);
+      return {
+        key: row.key,
+        label: row.label,
+        hoursLabel: formatHours(row.hours),
+        costLabel: formatterCurrency(actualTotal, { decimals: actualTotal < 1000 ? 2 : 0 }),
+        projectedLabel: formatterCurrency(row.costProjected, { decimals: row.costProjected < 1000 ? 2 : 0 })
+      };
+    });
+  }
+
   const maintenanceSeries = maintenanceHistory.map(entry => {
     const dateLabel = (entry.date instanceof Date && !Number.isNaN(entry.date.getTime()))
       ? entry.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
       : "the latest log";
     const hoursLabel = formatHoursLabel(entry.hours);
     const hoursFragment = hoursLabel
-      ? `${hoursLabel} machine ${Math.abs(entry.hours - 1) < 0.01 ? "hour" : "hours"}`
-      : "recent machine usage";
+      ? `${hoursLabel} hour${Math.abs(entry.hours - 1) < 0.01 ? "" : "s"}`
+      : "maintenance session";
     return {
       date: entry.date,
       value: entry.cost,
-      detail: `Estimated maintenance dollars allocated to ${hoursFragment} logged on ${dateLabel}.`
+      detail: `Actual maintenance cost for ${hoursFragment} recorded on ${dateLabel}.`
     };
   });
 
@@ -11155,7 +11320,7 @@ function computeCostModel(){
     });
   };
 
-  const timeframeRows = timeframeRowsRaw.map(row => ({
+  let timeframeRows = timeframeRowsRaw.map(row => ({
     key: row.key,
     label: row.label,
     hoursLabel: formatHours(row.hours),
@@ -11253,8 +11418,25 @@ function computeCostModel(){
     };
   });
 
-  const intervalAnnualTotal = intervalTaskRowsRaw.reduce((sum, row) => sum + (Number(row.annualCost) || 0), 0);
-  const asReqAnnualTotal = asReqTaskRowsRaw.reduce((sum, row) => sum + (Number(row.annualCost) || 0), 0);
+  let forecastEntries = Array.isArray(window.maintenanceForecastEntries)
+    ? window.maintenanceForecastEntries.slice()
+    : [];
+  if (typeof setMaintenanceForecastEntries === "function"){
+    forecastEntries = setMaintenanceForecastEntries(forecastEntries);
+  }
+  if (!forecastEntries.length){
+    const seeded = [];
+    intervalTaskRowsRaw.forEach(row => seeded.push({ taskName: row.name, estimatedTotalCost: row.annualCost, estimatedPartCost: Number(row.unitPrice) || row.annualCost, estimatedHours: null, hourlyRate: getMaintenanceHourlyRate(), kind: "interval" }));
+    asReqTaskRowsRaw.forEach(row => seeded.push({ taskName: row.name, estimatedTotalCost: row.annualCost, estimatedPartCost: Number(row.unitPrice) || row.annualCost, estimatedHours: null, hourlyRate: getMaintenanceHourlyRate(), kind: "asreq" }));
+    if (seeded.length){
+      forecastEntries = typeof setMaintenanceForecastEntries === "function" ? setMaintenanceForecastEntries(seeded) : seeded;
+    }
+  }
+  const intervalForecast = forecastEntries.filter(entry => (entry && (entry.kind || "interval").toLowerCase()) === "interval");
+  const asReqForecast = forecastEntries.filter(entry => entry && (entry.kind || "asreq").toLowerCase() !== "interval");
+
+  const intervalAnnualTotal = intervalForecast.reduce((sum, row) => sum + (Number(row.estimatedTotalCost) || 0), 0);
+  const asReqAnnualTotal = asReqForecast.reduce((sum, row) => sum + (Number(row.estimatedTotalCost) || 0), 0);
   const combinedForecastTotal = intervalAnnualTotal + asReqAnnualTotal;
 
   const formatTotalLabel = (value)=> formatterCurrency(value, { decimals: value < 1000 ? 2 : 0 });
@@ -11264,30 +11446,46 @@ function computeCostModel(){
       {
         key: "interval",
         label: "Interval tasks",
-        rows: intervalTaskRowsRaw.map(row => ({
-          key: row.key,
-          name: row.name,
-          cadenceLabel: row.cadenceLabel,
-          unitCostLabel: row.unitCostLabel,
-          annualTotalLabel: row.annualTotalLabel
-        })),
+        rows: intervalForecast.map(row => {
+          const laborLabel = Number.isFinite(row.estimatedHours) && Number.isFinite(row.hourlyRate)
+            ? formatterCurrency(row.estimatedHours * row.hourlyRate, { decimals: 2 })
+            : null;
+          const unitLabel = Number.isFinite(row.estimatedPartCost)
+            ? formatterCurrency(row.estimatedPartCost, { decimals: row.estimatedPartCost < 1000 ? 2 : 0 })
+            : laborLabel || "—";
+          return {
+            key: row.id || row.taskName,
+            name: row.taskName || "Interval task",
+            cadenceLabel: row.dateISO || row.period || "Scheduled",
+            unitCostLabel: unitLabel,
+            annualTotalLabel: formatTotalLabel(Number(row.estimatedTotalCost) || 0)
+          };
+        }),
         totalLabel: formatTotalLabel(intervalAnnualTotal),
-        emptyMessage: intervalTaskRowsRaw.length
+        emptyMessage: intervalForecast.length
           ? ""
           : "Add interval tasks to project maintenance spend."
       },
       {
         key: "asRequired",
         label: "As-required tasks",
-        rows: asReqTaskRowsRaw.map(row => ({
-          key: row.key,
-          name: row.name,
-          cadenceLabel: row.cadenceLabel,
-          unitCostLabel: row.unitCostLabel,
-          annualTotalLabel: row.annualTotalLabel
-        })),
+        rows: asReqForecast.map(row => {
+          const laborLabel = Number.isFinite(row.estimatedHours) && Number.isFinite(row.hourlyRate)
+            ? formatterCurrency(row.estimatedHours * row.hourlyRate, { decimals: 2 })
+            : null;
+          const unitLabel = Number.isFinite(row.estimatedPartCost)
+            ? formatterCurrency(row.estimatedPartCost, { decimals: row.estimatedPartCost < 1000 ? 2 : 0 })
+            : laborLabel || "—";
+          return {
+            key: row.id || row.taskName,
+            name: row.taskName || "As-required task",
+            cadenceLabel: row.dateISO || row.period || "As required",
+            unitCostLabel: unitLabel,
+            annualTotalLabel: formatTotalLabel(Number(row.estimatedTotalCost) || 0)
+          };
+        }),
         totalLabel: formatTotalLabel(asReqAnnualTotal),
-        emptyMessage: asReqTaskRowsRaw.length
+        emptyMessage: asReqForecast.length
           ? ""
           : "Add as-required tasks with expected frequency to estimate spend."
       }
@@ -11443,99 +11641,62 @@ function computeCostModel(){
 
     const windowFraction = days > 0 ? days / daysPerYear : 0;
     const projectionRows = [];
-    const intervalProjectionRows = [];
-    intervalTaskRowsRaw.forEach((item, index) => {
-      const annualCost = Number(item?.annualCost) || 0;
-      if (annualCost <= 0 || windowFraction <= 0) return;
-      const projected = annualCost * windowFraction;
-      if (projected <= 0) return;
-      const unitPrice = Number(item?.unitPrice);
-      let basis = item?.cadenceLabel && item.cadenceLabel !== "—"
-        ? item.cadenceLabel
-        : "Interval task";
-      if (Number.isFinite(unitPrice) && unitPrice > 0){
-        const occurrences = projected / unitPrice;
-        if (occurrences > 0){
-          const decimals = occurrences >= 10 ? 0 : 1;
-          const rounded = Number(occurrences.toFixed(decimals));
-          const countLabel = rounded.toLocaleString(undefined, {
-            minimumFractionDigits: decimals,
-            maximumFractionDigits: decimals
-          });
-          basis = basis
-            ? `${basis} · ~${countLabel} service${Math.abs(rounded - 1) < 1e-6 ? "" : "s"}`
-            : `~${countLabel} services`;
-        }
+    const projectionGroups = new Map();
+    const addProjectionRow = (kind, rowData)=>{
+      const key = typeof kind === "string" && kind.toLowerCase() === "interval" ? "interval" : "asRequired";
+      if (!projectionGroups.has(key)) projectionGroups.set(key, []);
+      projectionGroups.get(key).push(rowData);
+    };
+
+    let projectionTotalRaw = 0;
+    forecastEntries.forEach((entry, index) => {
+      if (!entry) return;
+      const entryDate = parseDateLocal(entry.dateISO || entry.date || entry.period);
+      const hasDate = entryDate instanceof Date && !Number.isNaN(entryDate.getTime());
+      const time = hasDate ? entryDate.getTime() : null;
+      if (hasDate && (time < startTime || time > endTime)) return;
+      if (!hasDate && windowFraction <= 0) return;
+
+      const hours = Number(entry.estimatedHours);
+      const rate = Number(entry.hourlyRate);
+      const laborCost = Number.isFinite(hours) && Number.isFinite(rate) ? hours * rate : Number(entry.estimatedLaborCost) || 0;
+      const partCost = Number(entry.estimatedPartCost) || 0;
+      let total = Number(entry.estimatedTotalCost);
+      if (!Number.isFinite(total) || total <= 0){
+        total = (Number.isFinite(laborCost) ? laborCost : 0) + (Number.isFinite(partCost) ? partCost : 0);
       }
-      intervalProjectionRows.push({
+      if (!Number.isFinite(total) || total <= 0) return;
+      const projected = hasDate ? total : total * windowFraction;
+      if (!Number.isFinite(projected) || projected <= 0) return;
+
+      projectionTotalRaw += projected;
+      const kind = (entry.kind || "interval").toLowerCase();
+      const label = entry.taskName || (kind === "interval" ? `Interval task ${index + 1}` : `As-required task ${index + 1}`);
+      const basis = hasDate
+        ? formatDateLabelShort(entryDate)
+        : `Scaled to ${row.label}`;
+      addProjectionRow(kind, {
         type: "item",
-        key: item?.key || `interval_${rowIndex}_${index}`,
-        label: item?.name || `Interval task ${index + 1}`,
+        key: entry.id || `${kind}_${rowIndex}_${index}`,
+        label,
         basis,
         amountLabel: formatterCurrency(projected, { decimals: projected < 1000 ? 2 : 0 })
       });
     });
+
+    const intervalProjectionRows = projectionGroups.get("interval") || [];
+    const asReqProjectionRows = projectionGroups.get("asRequired") || [];
     if (intervalProjectionRows.length){
       projectionRows.push({ type: "group", label: "Interval tasks" });
       projectionRows.push(...intervalProjectionRows);
-    }else if (row.intervalProjected > 0){
-      const amount = row.intervalProjected;
-      projectionRows.push({ type: "group", label: "Interval maintenance" });
-      projectionRows.push({
-        type: "item",
-        key: `interval_total_${row.key}`,
-        label: "Interval allocation",
-        basis: "Based on logged machine hours",
-        amountLabel: formatterCurrency(amount, { decimals: amount < 1000 ? 2 : 0 })
-      });
     }
-
-    const asReqProjectionRows = [];
-    asReqTaskRowsRaw.forEach((item, index) => {
-      const annualCost = Number(item?.annualCost) || 0;
-      if (annualCost <= 0 || windowFraction <= 0) return;
-      const projected = annualCost * windowFraction;
-      if (projected <= 0) return;
-      const unitPrice = Number(item?.unitPrice);
-      let basis = item?.cadenceLabel || "As-required task";
-      if (Number.isFinite(unitPrice) && unitPrice > 0){
-        const occurrences = projected / unitPrice;
-        if (occurrences > 0){
-          const decimals = occurrences >= 10 ? 0 : 1;
-          const rounded = Number(occurrences.toFixed(decimals));
-          const countLabel = rounded.toLocaleString(undefined, {
-            minimumFractionDigits: decimals,
-            maximumFractionDigits: decimals
-          });
-          basis = basis
-            ? `${basis} · ~${countLabel} service${Math.abs(rounded - 1) < 1e-6 ? "" : "s"}`
-            : `~${countLabel} services`;
-        }
-      }
-      asReqProjectionRows.push({
-        type: "item",
-        key: item?.key || `asreq_${rowIndex}_${index}`,
-        label: item?.name || `As-required task ${index + 1}`,
-        basis,
-        amountLabel: formatterCurrency(projected, { decimals: projected < 1000 ? 2 : 0 })
-      });
-    });
     if (asReqProjectionRows.length){
       projectionRows.push({ type: "group", label: "As-required tasks" });
       projectionRows.push(...asReqProjectionRows);
-    }else if (row.asReqProjected > 0){
-      const amount = row.asReqProjected;
-      projectionRows.push({ type: "group", label: "As-required maintenance" });
-      projectionRows.push({
-        type: "item",
-        key: `asreq_total_${row.key}`,
-        label: "Approved maintenance orders",
-        basis: "Scaled from approved maintenance orders in the past 12 months",
-        amountLabel: formatterCurrency(amount, { decimals: amount < 1000 ? 2 : 0 })
-      });
     }
 
     const projectionHasItems = projectionRows.some(entry => entry && entry.type === "item");
+    const projectionTotal = projectionHasItems ? projectionTotalRaw : (Number(row.costProjected) || 0);
 
     return {
       key: row.key,
@@ -11545,8 +11706,8 @@ function computeCostModel(){
       actualTotalLabel: formatterCurrency(targetActual, { decimals: targetActual < 1000 ? 2 : 0 }),
       actualEmptyMessage: actualRowsFormatted.length ? "" : "No maintenance spend recorded in this window.",
       projectionRows,
-      projectionTotalLabel: formatterCurrency(row.costProjected, { decimals: row.costProjected < 1000 ? 2 : 0 }),
-      projectionEmptyMessage: projectionHasItems ? "" : "Add pricing to maintenance tasks to project this window."
+      projectionTotalLabel: formatterCurrency(projectionTotal, { decimals: projectionTotal < 1000 ? 2 : 0 }),
+      projectionEmptyMessage: projectionHasItems ? "" : "Add forecast entries to project this window."
     };
   });
 
@@ -11590,6 +11751,9 @@ function computeCostModel(){
     const rangeLabel = (entry.rangeStart instanceof Date || entry.rangeEnd instanceof Date)
       ? formatRangeLabel(entry.rangeStart, entry.rangeEnd)
       : null;
+    const laborCost = Number(entry.laborCost);
+    const partCost = Number(entry.partCost);
+    const hourlyRateUsed = Number(entry.hourlyRate);
     return {
       dateLabel: entry.date.toLocaleDateString(),
       hoursLabel: formatHours(entry.hours),
@@ -11597,6 +11761,10 @@ function computeCostModel(){
       dateISO: entry.dateISO,
       key: entry.key || null,
       hoursValue: Number(entry.hours) || 0,
+      hourlyRateValue: Number.isFinite(hourlyRateUsed) ? hourlyRateUsed : null,
+      laborCostValue: Number.isFinite(laborCost) ? laborCost : (Number(entry.hours) && Number(entry.hourlyRate) ? Number(entry.hours) * Number(entry.hourlyRate) : null),
+      partCostValue: Number.isFinite(partCost) ? partCost : null,
+      totalCostValue: Number(entry.cost) || 0,
       taskId: resolvedTaskId,
       originalTaskId,
       taskMode,
@@ -12153,6 +12321,7 @@ function computeCostModel(){
     timeframeRows,
     timeframeDetails,
     forecastBreakdown,
+    forecastEntries,
     timeframeNote,
     historyRows,
     historyEmpty,
