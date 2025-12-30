@@ -243,7 +243,7 @@ function getConfiguredDailyHours(){
 }
 
 function getAverageDailyCutHours(){
-  const list = Array.isArray(dailyCutHours) ? dailyCutHours : [];
+  const list = Array.isArray(window.dailyCutHours) ? window.dailyCutHours : [];
   let total = 0;
   let count = 0;
   for (const entry of list){
