@@ -3695,8 +3695,9 @@ function inventoryRowsHTML(list, emptyMessage){
 
 function inventoryGroupsHTML(list){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-  const { byParent, categories, rootId } = inventoryCategoryTreeData();
-  const categoryMap = new Map(categories.map(cat => [String(cat.id), cat.name || "Category"]));
+  const { rootId } = inventoryCategoryTreeData();
+  const folders = maintenanceInventoryCategories();
+  const categoryMap = new Map(folders.map(cat => [String(cat.id), cat.name || "Category"]));
   const grouped = new Map();
   list.forEach(item => {
     if (!item) return;
@@ -3706,69 +3707,82 @@ function inventoryGroupsHTML(list){
     grouped.get(key).push(item);
   });
 
-  const buildCategorySection = (cat, depth)=>{
-    const id = cat.id != null ? String(cat.id) : "";
-    const name = categoryMap.get(id) || "Category";
-    const items = grouped.get(id) || [];
-    const safeName = esc(name);
-    const count = items.length;
-    const rows = inventoryRowsHTML(items, `Drag items here to assign them to ${safeName}.`);
-    const children = (byParent.get(id) || []).map(child => buildCategorySection(child, depth + 1)).join("");
-    const dropBefore = `<div class="inventory-category-drop" data-inventory-drop-before-category="${esc(id)}" data-inventory-drop-parent="${esc(cat.parent ?? "")}">Drop category here</div>`;
-    const dropInto = `<div class="inventory-category-drop inventory-category-drop-into" data-inventory-drop-into-category="${esc(id)}">Drop category to nest inside ${safeName}</div>`;
-    const subcategoryAction = `<button type="button" class="inventory-category-action" data-inventory-add-subcategory="${esc(id)}">+ Sub-category</button>`;
-    const renameAction = `<button type="button" class="inventory-category-action" data-inventory-rename-category="${esc(id)}">Rename</button>`;
-    const removeAction = `<button type="button" class="inventory-category-action danger" data-inventory-remove-category="${esc(id)}">Remove</button>`;
+  const kidsOf = (parentId)=> folders.filter(f => String(f.parent ?? "") === String(parentId ?? ""));
+
+  const renderFolder = (folder)=>{
+    const subFolderList = kidsOf(folder.id);
+    const subFolders = subFolderList.map(sf => `
+      <div class="folder-dropzone folder-dropzone-line small muted" data-drop-before-folder="${sf.id}"
+           style="border:1px dashed #bbb; padding:6px; margin:4px 0; border-radius:8px;">
+        Drag categories here to place before <b>${esc(sf.name)}</b>
+      </div>
+      ${renderFolder(sf)}
+    `).join("");
+    const subFolderTail = subFolderList.length ? `
+      <div class="folder-dropzone folder-dropzone-line small muted" data-drop-folder-tail="${folder.id}"
+           style="border:1px dashed #bbb; padding:6px; margin:4px 0 6px; border-radius:8px;">
+        Drag categories here to place at the end of <b>${esc(folder.name)}</b>
+      </div>` : "";
+    const items = grouped.get(String(folder.id)) || [];
+    const rows = inventoryRowsHTML(items, `Drag items here to assign them to ${esc(folder.name)}.`);
     return `
-      ${dropBefore}
-      <section class="inventory-category" data-inventory-drop-item-category="${esc(id)}" data-inventory-category="${esc(id)}">
-        <div class="inventory-category-header" draggable="true" data-inventory-category-drag="${esc(id)}" data-inventory-drop-into-category="${esc(id)}">
-          <div>
-            <div class="inventory-category-title">${safeName}</div>
-            <div class="small muted">${count} item${count === 1 ? "" : "s"}</div>
-          </div>
-          <div class="inventory-category-actions">
-            ${subcategoryAction}
-            ${renameAction}
-            ${removeAction}
+      <details class="folder block" data-folder-id="${esc(folder.id)}" open>
+        <summary class="folder-title" style="display:flex;align-items:center;gap:10px;font-weight:700;" draggable="true">
+          <span class="folder-name">${esc(folder.name)}</span>
+          <span style="flex:1"></span>
+          <button class="small" data-inventory-add-subcategory="${esc(folder.id)}">+ Sub-category</button>
+          <button class="small" data-inventory-rename-category="${esc(folder.id)}">Rename</button>
+          <button class="danger small" data-inventory-remove-category="${esc(folder.id)}">Remove</button>
+        </summary>
+
+        <div class="folder-dropzone small muted" data-drop-folder="${esc(folder.id)}"
+             style="border:1px dashed #bbb; padding:6px; margin:6px 0; border-radius:8px;">
+          Drag inventory items here to move into <b>${esc(folder.name)}</b>
+        </div>
+
+        <div class="folder-children" data-folder-children="${esc(folder.id)}">
+          ${subFolders}
+          ${subFolderTail}
+          <div class="inventory-category-table">
+            <table class="inventory-table">
+              <thead><tr><th>Category</th><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
           </div>
         </div>
-        <div class="inventory-category-table">
-          ${dropInto}
-          <table class="inventory-table">
-            <thead><tr><th>Category</th><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-        <div class="inventory-category-children" data-inventory-category-children="${esc(id)}">${children}</div>
-      </section>
-    `;
+      </details>`;
   };
 
-  const rootCategories = byParent.get(null) || [];
-  const sections = rootCategories.map(cat => buildCategorySection(cat, 0)).join("");
-  const rootTail = `<div class="inventory-category-drop" data-inventory-drop-category-tail="${esc(rootId)}">Drop category here to move to top level</div>`;
+  const rootFolders = kidsOf(null);
+  const rootFolderTail = `
+    <div class="folder-dropzone folder-dropzone-line small muted" data-drop-folder-tail=""
+         style="border:1px dashed #bbb; padding:6px; margin:4px 0 6px; border-radius:8px;">
+      Drag categories here to place at the end of root categories
+    </div>`;
+  const folderSections = rootFolders.map(f => `
+    <div class="folder-dropzone folder-dropzone-line small muted" data-drop-before-folder="${esc(f.id)}"
+         style="border:1px dashed #bbb; padding:6px; margin:4px 0; border-radius:8px;">
+      Drag categories here to place before <b>${esc(f.name)}</b>
+    </div>
+    ${renderFolder(f)}
+  `).join("");
 
   const uncategorizedItems = grouped.get("") || [];
   const uncategorizedRows = inventoryRowsHTML(uncategorizedItems, "Unlinked items appear here.");
   const uncategorizedSection = `
-    <section class="inventory-category inventory-category-uncategorized" data-inventory-drop-item-category="__uncategorized">
-      <div class="inventory-category-header">
-        <div>
-          <div class="inventory-category-title">Uncategorized</div>
-          <div class="small muted">${uncategorizedItems.length} item${uncategorizedItems.length === 1 ? "" : "s"}</div>
-        </div>
-      </div>
-      <div class="inventory-category-table">
+    <div class="block inventory-uncategorized" data-inventory-drop-uncategorized>
+      <h4 style="margin:0 0 6px 0;">Uncategorized</h4>
+      <div class="small muted">${uncategorizedItems.length} item${uncategorizedItems.length === 1 ? "" : "s"} without a maintenance category.</div>
+      <div class="inventory-category-table" style="margin-top:8px;">
         <table class="inventory-table">
           <thead><tr><th>Category</th><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
           <tbody>${uncategorizedRows}</tbody>
         </table>
       </div>
-    </section>
+    </div>
   `;
 
-  return `${sections}${rootTail}${uncategorizedSection}` || `<div class="inventory-category-empty">No inventory items match your search.</div>`;
+  return `${folderSections}${rootFolderTail}${uncategorizedSection}`;
 }
 
 function viewInventory(){

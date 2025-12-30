@@ -1188,7 +1188,10 @@ window.ROOT_FOLDER_ID = ROOT_FOLDER_ID;
 const DEFAULT_SETTINGS_FOLDERS = [
   { id: ROOT_FOLDER_ID, name: "All Tasks",    parent: null,           order: 3 },
   { id: "interval",    name: "Per Interval", parent: ROOT_FOLDER_ID, order: 2 },
-  { id: "asreq",       name: "As Required",  parent: ROOT_FOLDER_ID, order: 1 }
+  { id: "asreq",       name: "As Required",  parent: ROOT_FOLDER_ID, order: 1 },
+  { id: "table",       name: "Table",        parent: ROOT_FOLDER_ID, order: 4 },
+  { id: "ro",          name: "RO",           parent: ROOT_FOLDER_ID, order: 5 },
+  { id: "pump",        name: "Pump",         parent: ROOT_FOLDER_ID, order: 6 }
 ];
 
 const JOB_ROOT_FOLDER_ID = "jobs_root";

@@ -14607,46 +14607,63 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("dragstart", (e)=>{
-    const header = e.target.closest("[data-inventory-category-drag]");
-    if (!(header instanceof HTMLElement)) return;
-    const id = header.getAttribute("data-inventory-category-drag");
+    const summary = e.target.closest("details.folder > summary");
+    if (!(summary instanceof HTMLElement)) return;
+    const holder = summary.closest("details.folder");
+    const id = holder?.getAttribute("data-folder-id");
     if (!id) return;
     e.dataTransfer?.setData("text/plain", `category:${id}`);
     if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-    header.classList.add("inventory-category-dragging");
+    summary.classList.add("drop-hint");
   });
 
   rowsTarget?.addEventListener("dragend", (e)=>{
     const row = e.target.closest("tr");
     row?.classList.remove("inventory-dragging");
-    const header = e.target.closest("[data-inventory-category-drag]");
-    header?.classList.remove("inventory-category-dragging");
+    const summary = e.target.closest("details.folder > summary");
+    summary?.classList.remove("drop-hint");
   });
 
   rowsTarget?.addEventListener("dragover", (e)=>{
-    const zone = e.target.closest("[data-inventory-drop-item-category],[data-inventory-drop-before-category],[data-inventory-drop-category-tail],[data-inventory-drop-into-category]");
+    const zone = e.target.closest("[data-drop-folder],[data-drop-before-folder],[data-drop-folder-tail],[data-inventory-drop-uncategorized]");
     if (!zone) return;
     const payload = e.dataTransfer?.getData("text/plain") || "";
     if (!payload.startsWith("inventory:") && !payload.startsWith("category:")) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    zone.classList.add("is-dragover");
+    zone.classList.add("dragover");
+  });
+
+  rowsTarget?.addEventListener("dragover", (e)=>{
+    const summary = e.target.closest("details.folder > summary");
+    if (!(summary instanceof HTMLElement)) return;
+    const payload = e.dataTransfer?.getData("text/plain") || "";
+    if (!payload.startsWith("inventory:")) return;
+    e.preventDefault();
+    summary.classList.add("drop-hint");
   });
 
   rowsTarget?.addEventListener("dragleave", (e)=>{
-    const zone = e.target.closest("[data-inventory-drop-item-category],[data-inventory-drop-before-category],[data-inventory-drop-category-tail],[data-inventory-drop-into-category]");
+    const zone = e.target.closest("[data-drop-folder],[data-drop-before-folder],[data-drop-folder-tail],[data-inventory-drop-uncategorized]");
     if (!zone) return;
     if (zone.contains(e.relatedTarget)) return;
-    zone.classList.remove("is-dragover");
+    zone.classList.remove("dragover");
+  });
+
+  rowsTarget?.addEventListener("dragleave", (e)=>{
+    const summary = e.target.closest("details.folder > summary");
+    if (!(summary instanceof HTMLElement)) return;
+    if (summary.contains(e.relatedTarget)) return;
+    summary.classList.remove("drop-hint");
   });
 
   rowsTarget?.addEventListener("drop", (e)=>{
-    const zone = e.target.closest("[data-inventory-drop-item-category],[data-inventory-drop-before-category],[data-inventory-drop-category-tail],[data-inventory-drop-into-category]");
+    const zone = e.target.closest("[data-drop-folder],[data-drop-before-folder],[data-drop-folder-tail],[data-inventory-drop-uncategorized]");
     if (!zone) return;
     const payload = e.dataTransfer?.getData("text/plain") || "";
     if (!payload.startsWith("inventory:") && !payload.startsWith("category:")) return;
     e.preventDefault();
-    zone.classList.remove("is-dragover");
+    zone.classList.remove("dragover");
     if (payload.startsWith("inventory:")){
       const id = payload.split(":")[1];
       if (!id) return;
@@ -14670,9 +14687,15 @@ function renderInventory(){
         }
         return;
       }
-      const targetKey = zone.getAttribute("data-inventory-drop-item-category") || "";
-      const categoryId = targetKey === "__uncategorized" ? null : targetKey;
-      item.categoryId = categoryId && categoryId !== "__uncategorized" ? categoryId : null;
+      if (!zone.hasAttribute("data-drop-folder") && !zone.hasAttribute("data-inventory-drop-uncategorized")){
+        return;
+      }
+      let categoryId = null;
+      if (zone.hasAttribute("data-drop-folder")){
+        const targetKey = zone.getAttribute("data-drop-folder") || "";
+        categoryId = targetKey ? targetKey : null;
+      }
+      item.categoryId = categoryId ? categoryId : null;
       if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
       refreshRows();
       return;
@@ -14682,9 +14705,9 @@ function renderInventory(){
       ensureMaintenanceFoldersState();
       const id = payload.split(":")[1];
       if (!id) return;
-      const beforeId = zone.getAttribute("data-inventory-drop-before-category");
-      const intoId = zone.getAttribute("data-inventory-drop-into-category");
-      const tailParent = zone.getAttribute("data-inventory-drop-category-tail");
+      const beforeId = zone.getAttribute("data-drop-before-folder");
+      const intoId = zone.getAttribute("data-drop-folder");
+      const tailParent = zone.getAttribute("data-drop-folder-tail");
       let moved = false;
       if (beforeId && typeof moveNodeSafely === "function"){
         moved = moveNodeSafely("category", id, { beforeCat: { id: beforeId } });
@@ -14699,6 +14722,42 @@ function renderInventory(){
         refreshRows();
       }
     }
+  });
+
+  rowsTarget?.addEventListener("drop", (e)=>{
+    const summary = e.target.closest("details.folder > summary");
+    if (!(summary instanceof HTMLElement)) return;
+    const payload = e.dataTransfer?.getData("text/plain") || "";
+    if (!payload.startsWith("inventory:")) return;
+    e.preventDefault();
+    summary.classList.remove("drop-hint");
+    const id = payload.split(":")[1];
+    if (!id) return;
+    const item = inventory.find(entry => entry && String(entry.id) === String(id));
+    if (!item) return;
+    const linkedTasks = typeof findTasksLinkedToInventoryItem === "function"
+      ? findTasksLinkedToInventoryItem(item)
+      : [];
+    if (linkedTasks.length){
+      if (typeof showConfirmModal === "function"){
+        showConfirmModal({
+          title: "Linked items stay with maintenance",
+          message: "This inventory item is linked to a maintenance task, so its category is managed by Maintenance Settings.",
+          cancelText: "OK",
+          confirmText: "Open Maintenance Settings"
+        }).then(confirmed => {
+          if (confirmed) location.hash = "#/settings";
+        });
+      }else{
+        alert("Linked items stay with Maintenance Settings categories.");
+      }
+      return;
+    }
+    const holder = summary.closest("details.folder");
+    const folderId = holder?.getAttribute("data-folder-id");
+    item.categoryId = folderId ? folderId : null;
+    if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
+    refreshRows();
   });
 
   rowsTarget?.addEventListener("click", async (e)=>{
