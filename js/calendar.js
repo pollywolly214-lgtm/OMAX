@@ -334,6 +334,22 @@ function getOccurrenceHoursForTask(task, dateISO){
   return Number.isFinite(val) && val > 0 ? val : null;
 }
 
+function computeTaskPartCost(task){
+  if (!task || typeof task !== "object") return 0;
+  let total = 0;
+  if (Array.isArray(task.parts)){
+    task.parts.forEach(part => {
+      const price = Number(part?.price);
+      if (Number.isFinite(price) && price > 0) total += price;
+    });
+  }
+  const unitPrice = Number(task.price);
+  if (Number.isFinite(unitPrice) && unitPrice > 0){
+    total = Math.max(total, unitPrice);
+  }
+  return total;
+}
+
 function setOccurrenceNoteForTask(task, dateISO, noteText){
   if (!task || typeof task !== "object") return false;
   const key = normalizeDateKey(dateISO);
@@ -459,6 +475,22 @@ function markCalendarTaskComplete(meta, dateISO){
       if (entry.estimatedDailyHours == null) entry.estimatedDailyHours = defaultDaily;
     }
 
+    const occurrenceHours = getOccurrenceHoursForTask(task, key);
+    const downtimeHours = Number(task.downtimeHours);
+    const hoursSpent = Number.isFinite(occurrenceHours) && occurrenceHours > 0
+      ? occurrenceHours
+      : (Number.isFinite(downtimeHours) && downtimeHours > 0 ? downtimeHours : null);
+    const hourlyRateUsed = typeof getMaintenanceHourlyRate === "function"
+      ? getMaintenanceHourlyRate()
+      : (DEFAULT_APP_CONFIG && Number.isFinite(Number(DEFAULT_APP_CONFIG.maintenanceHourlyRate)) ? Number(DEFAULT_APP_CONFIG.maintenanceHourlyRate) : 0);
+    const partCost = computeTaskPartCost(task);
+    if (hoursSpent != null) entry.hoursSpent = hoursSpent;
+    entry.hourlyRateUsed = hourlyRateUsed;
+    entry.partCost = partCost;
+    const laborCost = hoursSpent != null ? hoursSpent * hourlyRateUsed : 0;
+    entry.laborCost = laborCost;
+    entry.totalCost = laborCost + (Number.isFinite(partCost) ? partCost : 0);
+
     const snapshotHours = typeof hoursSnapshotOnOrBefore === "function" ? hoursSnapshotOnOrBefore(key) : null;
     if (snapshotHours != null && Number.isFinite(Number(snapshotHours))){
       entry.hoursAtEntry = Number(snapshotHours);
@@ -485,6 +517,39 @@ function markCalendarTaskComplete(meta, dateISO){
       task.calendarDateISO = key;
       changed = true;
     }
+    const history = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(task)
+      : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
+    let entry = history.find(item => item && normalizeDateKey(item.dateISO) === key);
+    if (!entry){
+      entry = {
+        dateISO: key,
+        recordedAtISO: new Date().toISOString(),
+        status: "completed",
+        source: "estimate"
+      };
+      history.push(entry);
+    }else{
+      entry.recordedAtISO = new Date().toISOString();
+      entry.status = "completed";
+    }
+    const occurrenceHours = getOccurrenceHoursForTask(task, key);
+    const downtimeHours = Number(task.downtimeHours);
+    const hoursSpent = Number.isFinite(occurrenceHours) && occurrenceHours > 0
+      ? occurrenceHours
+      : (Number.isFinite(downtimeHours) && downtimeHours > 0 ? downtimeHours : null);
+    const hourlyRateUsed = typeof getMaintenanceHourlyRate === "function"
+      ? getMaintenanceHourlyRate()
+      : (DEFAULT_APP_CONFIG && Number.isFinite(Number(DEFAULT_APP_CONFIG.maintenanceHourlyRate)) ? Number(DEFAULT_APP_CONFIG.maintenanceHourlyRate) : 0);
+    const partCost = computeTaskPartCost(task);
+    if (hoursSpent != null) entry.hoursSpent = hoursSpent;
+    entry.hourlyRateUsed = hourlyRateUsed;
+    entry.partCost = partCost;
+    const laborCost = hoursSpent != null ? hoursSpent * hourlyRateUsed : 0;
+    entry.laborCost = laborCost;
+    entry.totalCost = laborCost + (Number.isFinite(partCost) ? partCost : 0);
+    history.sort((a,b)=> String(a.dateISO || "").localeCompare(String(b.dateISO || "")));
+    task.manualHistory = history;
   }
 
   return changed;

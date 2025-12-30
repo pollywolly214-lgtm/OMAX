@@ -53,7 +53,7 @@ const TIME_EFFICIENCY_WINDOWS = [
   { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
   { key: "365d", label: "1Y", days: 365, description: "Past year" }
 ];
-const DEFAULT_APP_CONFIG = { excludeWeekends: false, dailyHours: DEFAULT_DAILY_HOURS };
+const DEFAULT_APP_CONFIG = { excludeWeekends: false, dailyHours: DEFAULT_DAILY_HOURS, maintenanceHourlyRate: 125, maintenanceForecastEntries: [] };
 let appConfig = { ...DEFAULT_APP_CONFIG };
 
 const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
@@ -75,9 +75,11 @@ if (typeof window !== "undefined"){
   window.TIME_EFFICIENCY_WINDOWS = TIME_EFFICIENCY_WINDOWS;
   window.appConfig = appConfig;
   window.getConfiguredDailyHours = getConfiguredDailyHours;
+  window.getMaintenanceHourlyRate = getMaintenanceHourlyRate;
   window.shouldExcludeWeekends = shouldExcludeWeekends;
   window.setAppConfig = setAppConfig;
   window.normalizeAppConfig = normalizeAppConfig;
+  window.normalizeMaintenanceForecastEntries = normalizeMaintenanceForecastEntries;
   window.setDailyCutHoursEntry = setDailyCutHoursEntry;
   window.getDailyCutHoursEntry = getDailyCutHoursEntry;
   window.normalizeDailyCutHours = normalizeDailyCutHours;
@@ -191,6 +193,13 @@ function normalizeAppConfig(config){
       const clamped = clampDailyCutHours(config.dailyHours);
       if (clamped > 0) normalized.dailyHours = clamped;
     }
+    if (config.maintenanceHourlyRate != null){
+      const rate = Number(config.maintenanceHourlyRate);
+      if (Number.isFinite(rate) && rate >= 0) normalized.maintenanceHourlyRate = rate;
+    }
+    if (Array.isArray(config.maintenanceForecastEntries)){
+      normalized.maintenanceForecastEntries = config.maintenanceForecastEntries.slice();
+    }
   }
   return normalized;
 }
@@ -212,6 +221,34 @@ function getConfiguredDailyHours(){
   return DEFAULT_DAILY_HOURS;
 }
 
+function getMaintenanceHourlyRate(){
+  try {
+    const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
+    const rate = Number(cfg.maintenanceHourlyRate);
+    if (Number.isFinite(rate) && rate >= 0) return rate;
+  } catch (_err){ /* ignore */ }
+  return DEFAULT_APP_CONFIG.maintenanceHourlyRate;
+}
+
+function normalizeMaintenanceForecastEntries(entries){
+  if (!Array.isArray(entries)) return [];
+  return entries.map(entry => {
+    const normalized = { ...entry };
+    if (!normalized.id) normalized.id = genId("maint_forecast");
+    normalized.taskName = typeof normalized.taskName === "string" ? normalized.taskName.trim() : "";
+    normalized.dateISO = normalizeDateISO(normalized.dateISO) || null;
+    const hours = Number(normalized.estimatedHours);
+    normalized.estimatedHours = Number.isFinite(hours) && hours >= 0 ? hours : 0;
+    const rate = Number(normalized.hourlyRate);
+    normalized.hourlyRate = Number.isFinite(rate) && rate >= 0 ? rate : getMaintenanceHourlyRate();
+    const partCost = Number(normalized.estimatedPartCost);
+    normalized.estimatedPartCost = Number.isFinite(partCost) && partCost >= 0 ? partCost : 0;
+    normalized.estimatedLaborCost = normalized.estimatedHours * normalized.hourlyRate;
+    normalized.estimatedTotalCost = normalized.estimatedLaborCost + normalized.estimatedPartCost;
+    return normalized;
+  });
+}
+
 function refreshDerivedDailyHours(){
   DAILY_HOURS = getConfiguredDailyHours();
   const daysPerWeek = shouldExcludeWeekends() ? 5 : 7;
@@ -227,6 +264,7 @@ function refreshDerivedDailyHours(){
 
 function setAppConfig(config){
   appConfig = normalizeAppConfig(config);
+  appConfig.maintenanceForecastEntries = normalizeMaintenanceForecastEntries(appConfig.maintenanceForecastEntries);
   if (typeof window !== "undefined"){
     window.appConfig = appConfig;
   }
@@ -234,6 +272,7 @@ function setAppConfig(config){
 }
 
 appConfig = normalizeAppConfig((typeof window !== "undefined" && window.appConfig) ? window.appConfig : appConfig);
+appConfig.maintenanceForecastEntries = normalizeMaintenanceForecastEntries(appConfig.maintenanceForecastEntries);
 refreshDerivedDailyHours();
 
 function normalizeTimeString(value){
@@ -1672,6 +1711,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
     if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
     appConfig = normalizeAppConfig(sanitized.appConfig);
+    appConfig.maintenanceForecastEntries = normalizeMaintenanceForecastEntries(appConfig.maintenanceForecastEntries);
     window.appConfig = appConfig;
     refreshDerivedDailyHours();
     if (!Array.isArray(window.orderRequests)) window.orderRequests = [];

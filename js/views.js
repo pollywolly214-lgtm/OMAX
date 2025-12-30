@@ -1131,6 +1131,9 @@ function viewCosts(model){
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
   const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
   const orderSummary = data.orderRequestSummary || {};
+  const maintenanceHistoryTable = Array.isArray(data.maintenanceHistoryTable) ? data.maintenanceHistoryTable : [];
+  const maintenanceHourlyRate = Number(data.maintenanceHourlyRate) || 0;
+  const maintenanceForecastEntries = Array.isArray(data.maintenanceForecastEntries) ? data.maintenanceForecastEntries : [];
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
   const overviewInsight = data.overviewInsight || "Totals blend the latest maintenance allocations, consumable burn rates, downtime burdens, and job margin data so you always see current cost exposure.";
   const ordersInsight = data.ordersInsight || "Tracks every waterjet part request from submission through approval so finance can confirm spend and spot stalled orders.";
@@ -1169,6 +1172,99 @@ function viewCosts(model){
     if (!Number.isFinite(num) || num <= 0) return "—";
     return `${num.toFixed(2)} jobs/hr`;
   };
+  const formatCurrencyValueLoose = (value)=> formatCurrencyValue(value);
+
+  const maintenanceRateConfig = `
+    <div class="maintenance-rate-config">
+      <label for="maintenanceRateInput" class="config-field">
+        <span class="config-label">Maintenance labor rate ($/hr)</span>
+        <input type="number" id="maintenanceRateInput" data-maint-rate min="0" step="0.01" value="${esc(maintenanceHourlyRate)}" />
+      </label>
+      <p class="small muted">Applied when tasks are marked complete; future updates won't change past entries.</p>
+    </div>
+  `;
+
+  const maintenanceHistoryRows = maintenanceHistoryTable.map(entry => {
+    const hoursVal = Number(entry.hoursSpent);
+    const rateVal = Number(entry.hourlyRateUsed);
+    const partVal = Number(entry.partCost);
+    const totalVal = Number(entry.totalCost);
+    return `
+      <tr data-maint-history-row="${esc(entry.id)}" data-history-task="${esc(entry.taskId || entry.originalTaskId || "")}" data-history-original-date="${esc(entry.completionDate || "")}">
+        <td><input type="date" data-maint-history-input data-history-id="${esc(entry.id)}" data-history-field="completionDate" value="${esc(entry.completionDate || "")}" /></td>
+        <td>${esc(entry.taskName || "Maintenance task")}</td>
+        <td><input type="number" min="0" step="0.25" data-maint-history-input data-history-id="${esc(entry.id)}" data-history-field="hoursSpent" value="${Number.isFinite(hoursVal) ? esc(String(hoursVal)) : ""}" /></td>
+        <td><input type="number" min="0" step="0.01" data-maint-history-input data-history-id="${esc(entry.id)}" data-history-field="hourlyRateUsed" value="${Number.isFinite(rateVal) ? esc(String(rateVal)) : ""}" /></td>
+        <td data-maint-history-labor="${esc(entry.id)}">${esc(formatCurrencyValueLoose(entry.laborCost))}</td>
+        <td><input type="number" min="0" step="0.01" data-maint-history-input data-history-id="${esc(entry.id)}" data-history-field="partCost" value="${Number.isFinite(partVal) ? esc(String(partVal)) : ""}" /></td>
+        <td><input type="number" min="0" step="0.01" data-maint-history-input data-history-id="${esc(entry.id)}" data-history-field="totalCost" value="${Number.isFinite(totalVal) ? esc(String(totalVal)) : ""}" /></td>
+      </tr>
+    `;
+  }).join("");
+
+  const maintenanceHistoryTableHTML = maintenanceHistoryTable.length ? `
+    <table class="cost-table" data-maint-history-table>
+      <thead>
+        <tr>
+          <th scope="col">Completion date</th>
+          <th scope="col">Task</th>
+          <th scope="col">Hours spent</th>
+          <th scope="col">Hourly rate used</th>
+          <th scope="col">Labor cost</th>
+          <th scope="col">Part cost</th>
+          <th scope="col">Total cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${maintenanceHistoryRows}
+      </tbody>
+    </table>
+  ` : `<p class="small muted">No maintenance history recorded yet. Complete tasks on the calendar to log costs.</p>`;
+
+  const forecastRows = maintenanceForecastEntries.map(entry => {
+    const hoursVal = Number(entry.estimatedHours);
+    const rateVal = Number(entry.hourlyRate);
+    const partVal = Number(entry.estimatedPartCost);
+    const laborVal = Number(entry.estimatedLaborCost);
+    const totalVal = Number(entry.estimatedTotalCost);
+    return `
+      <tr data-forecast-row="${esc(entry.id)}">
+        <td><input type="date" data-forecast-input data-forecast-id="${esc(entry.id)}" data-forecast-field="dateISO" value="${esc(entry.dateISO || "")}" /></td>
+        <td><input type="text" data-forecast-input data-forecast-id="${esc(entry.id)}" data-forecast-field="taskName" value="${esc(entry.taskName || "")}" placeholder="Task name" /></td>
+        <td><input type="number" min="0" step="0.25" data-forecast-input data-forecast-id="${esc(entry.id)}" data-forecast-field="estimatedHours" value="${Number.isFinite(hoursVal) ? esc(String(hoursVal)) : ""}" /></td>
+        <td><input type="number" min="0" step="0.01" data-forecast-input data-forecast-id="${esc(entry.id)}" data-forecast-field="hourlyRate" value="${Number.isFinite(rateVal) ? esc(String(rateVal)) : ""}" /></td>
+        <td data-forecast-labor="${esc(entry.id)}">${esc(formatCurrencyValueLoose(laborVal))}</td>
+        <td><input type="number" min="0" step="0.01" data-forecast-input data-forecast-id="${esc(entry.id)}" data-forecast-field="estimatedPartCost" value="${Number.isFinite(partVal) ? esc(String(partVal)) : ""}" /></td>
+        <td data-forecast-total="${esc(entry.id)}">${esc(formatCurrencyValueLoose(totalVal))}</td>
+        <td><button type="button" class="secondary" data-forecast-remove data-forecast-id="${esc(entry.id)}" aria-label="Remove forecast entry">×</button></td>
+      </tr>
+    `;
+  }).join("");
+
+  const forecastTableEditable = `
+    <div class="forecast-table-wrap" data-forecast-edit>
+      <table class="forecast-table forecast-table--editable">
+        <thead>
+          <tr>
+            <th scope="col">Date/period</th>
+            <th scope="col">Task</th>
+            <th scope="col">Est. hours</th>
+            <th scope="col">Hourly rate</th>
+            <th scope="col">Est. labor</th>
+            <th scope="col">Est. parts</th>
+            <th scope="col">Est. total</th>
+            <th scope="col"></th>
+          </tr>
+        </thead>
+        <tbody data-forecast-body>
+          ${forecastRows || `<tr><td colspan="8" class="forecast-empty-row">No forecast entries yet. Add one below.</td></tr>`}
+        </tbody>
+      </table>
+      <div class="forecast-actions">
+        <button type="button" class="primary" data-forecast-add>Add forecast entry</button>
+      </div>
+    </div>
+  `;
 
   const formatDateLabel = (iso)=>{
     if (!iso) return "—";
@@ -1797,6 +1893,11 @@ function viewCosts(model){
 
       <div class="dashboard-window" data-cost-window="history">
         <div class="block">
+          <h3>Maintenance History</h3>
+          ${maintenanceRateConfig}
+          ${maintenanceHistoryTableHTML}
+          <h3>Maintenance Forecast Breakdown</h3>
+          ${forecastTableEditable}
           <h3>Recent Maintenance Events</h3>
           ${historyRows.length ? `
             <ul class="cost-history">
@@ -3859,4 +3960,3 @@ function viewDeletedItems(model){
     </div>
   `;
 }
-
