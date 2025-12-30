@@ -92,7 +92,30 @@ if (typeof window !== "undefined"){
 /* Root helpers */
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
-function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
+function debounce(fn, ms=250){
+  let t;
+  let lastArgs;
+  const debounced = (...a)=>{
+    lastArgs = a;
+    clearTimeout(t);
+    t = setTimeout(()=>{
+      t = null;
+      fn(...(lastArgs || []));
+    }, ms);
+  };
+  debounced.flush = ()=>{
+    if (!t) return;
+    clearTimeout(t);
+    t = null;
+    fn(...(lastArgs || []));
+  };
+  debounced.cancel = ()=>{
+    if (!t) return;
+    clearTimeout(t);
+    t = null;
+  };
+  return debounced;
+}
 function genId(name){ const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
 function parseDateLocal(value){
   if (value == null) return null;
@@ -2404,6 +2427,32 @@ function saveCloudDebounced(){
     console.warn("History capture before save failed:", err);
   }
   saveCloudInternal();
+}
+function saveCloudNow(){
+  try {
+    if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
+  } catch (err) {
+    console.warn("Failed to normalize folders before save:", err);
+  }
+  try {
+    if (typeof captureHistorySnapshot === "function") captureHistorySnapshot();
+  } catch (err) {
+    console.warn("History capture before save failed:", err);
+  }
+  if (typeof saveCloudInternal.flush === "function"){
+    saveCloudInternal.flush();
+  }else{
+    saveCloudInternal();
+  }
+}
+
+if (typeof window !== "undefined"){
+  window.addEventListener("visibilitychange", ()=>{
+    if (document.visibilityState === "hidden"){
+      saveCloudNow();
+    }
+  });
+  window.addEventListener("pagehide", ()=>saveCloudNow());
 }
 async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
