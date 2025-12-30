@@ -3634,16 +3634,18 @@ function inventoryItemCategoryInfo(item, categoryMap){
   };
 }
 
-function inventoryCategoryOptionsMarkup(selectedId){
+function inventoryCategoryOptionsMarkup(selectedId, scope){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const { byParent } = inventoryCategoryTreeData();
   const value = selectedId != null ? String(selectedId) : "";
   const options = [`<option value=""${value==="" ? " selected" : ""}>Uncategorized</option>`];
+  const scopeKey = scope === "interval" || scope === "asreq" ? scope : null;
   const appendOptions = (parentKey, depth)=>{
     const list = byParent.get(parentKey) || [];
     list.forEach(cat => {
       if (!cat) return;
       const id = cat.id != null ? String(cat.id) : "";
+      if (scopeKey && id === scopeKey) return;
       const label = cat.name || "Category";
       const indent = depth > 0 ? `${"—".repeat(depth)} ` : "";
       const isSelected = value === id;
@@ -3651,7 +3653,14 @@ function inventoryCategoryOptionsMarkup(selectedId){
       appendOptions(id, depth + 1);
     });
   };
-  appendOptions(null, 0);
+  if (scopeKey){
+    appendOptions(scopeKey, 0);
+  } else {
+    appendOptions(null, 0);
+  }
+  if (value && !options.some(opt => opt.includes(`value="${esc(value)}"`))){
+    options.push(`<option value="${esc(value)}" selected>Unknown category (${esc(value)})</option>`);
+  }
   return options.join("");
 }
 
@@ -3685,8 +3694,11 @@ function inventoryRowsHTML(list, emptyMessage){
     const qtyOldNum = Number(i.qtyOld);
     const qtyNewDisplay = Number.isFinite(qtyNewNum) && qtyNewNum >= 0 ? qtyNewNum : 0;
     const qtyOldDisplay = Number.isFinite(qtyOldNum) && qtyOldNum >= 0 ? qtyOldNum : 0;
-    const { categoryId, isLinked } = inventoryItemCategoryInfo(i, categoryMap);
-    const categorySelect = `<select data-inventory-category-select data-id="${i.id}"${isLinked ? " disabled" : ""}>${inventoryCategoryOptionsMarkup(categoryId)}</select>`;
+    const info = inventoryItemCategoryInfo(i, categoryMap);
+    const scope = info.isLinked
+      ? (info.listType || null)
+      : (i.categoryScope === "interval" || i.categoryScope === "asreq" ? i.categoryScope : null);
+    const categorySelect = `<select data-inventory-category-select data-id="${i.id}"${info.isLinked ? " disabled" : ""}>${inventoryCategoryOptionsMarkup(info.categoryId, scope)}</select>`;
     const dragHandle = isLinked
       ? ""
       : `<button type="button" class="inventory-drag-handle" draggable="true" data-inventory-drag-handle data-id="${i.id}" aria-label="Drag to move item">⋮⋮</button>`;
@@ -3780,18 +3792,19 @@ function inventoryGroupsHTML(list){
       </details>`;
   };
 
-  const rootFolders = kidsOf(null);
   const buildMenu = (listType, title)=>{
+    const parentId = listType;
     const menuDrop = `
       <div class="folder-dropzone small muted" data-inventory-drop-menu="${listType}"
            style="border:1px dashed #bbb; padding:6px; margin:6px 8px 10px 8px; border-radius:8px;">
         Drag inventory items here to move into <b>${title}</b>
       </div>`;
     const rootFolderTail = `
-      <div class="folder-dropzone folder-dropzone-line small muted" data-drop-folder-tail=""
+      <div class="folder-dropzone folder-dropzone-line small muted" data-drop-folder-tail="${esc(parentId)}"
            style="border:1px dashed #bbb; padding:6px; margin:4px 0 6px; border-radius:8px;">
         Drag categories here to place at the end of root categories
       </div>`;
+    const rootFolders = kidsOf(parentId);
     const folderSections = rootFolders.map(f => `
       <div class="folder-dropzone folder-dropzone-line small muted" data-drop-before-folder="${esc(f.id)}"
            style="border:1px dashed #bbb; padding:6px; margin:4px 0;">
@@ -3830,9 +3843,15 @@ function inventoryGroupsHTML(list){
   `;
 
   return `
-    ${buildMenu("interval", "Per Interval Inventory")}
-    ${buildMenu("asreq", "As-Required Inventory")}
-    ${uncategorizedSection}
+    <details class="block" open data-inventory-root>
+      <summary style="display:flex;align-items:center;gap:10px;font-weight:700;">
+        <span>All Items</span>
+        <span style="flex:1"></span>
+      </summary>
+      ${buildMenu("interval", "Per Interval")}
+      ${buildMenu("asreq", "As Required")}
+      ${uncategorizedSection}
+    </details>
   `;
 }
 
@@ -3891,7 +3910,7 @@ function viewInventory(){
                 <option value="asreq">As Required</option>
               </select>
             </label>
-            <label>Category<select name="inventoryCategory">${inventoryCategoryOptionsMarkup()}</select></label>
+            <label>Category<select name="inventoryCategory">${inventoryCategoryOptionsMarkup("", "")}</select></label>
             <label>Part #<input name="inventoryPN" placeholder="Part number"></label>
             <label>Store link<input type="url" name="inventoryLink" placeholder="https://..."></label>
             <label>Price ($)<input type="number" min="0" step="0.01" name="inventoryPrice" placeholder="optional"></label>

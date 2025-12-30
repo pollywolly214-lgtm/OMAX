@@ -14481,7 +14481,8 @@ function renderInventory(){
     if (!(categoryField instanceof HTMLSelectElement)) return;
     const current = categoryField.value;
     if (typeof inventoryCategoryOptionsMarkup === "function"){
-      categoryField.innerHTML = inventoryCategoryOptionsMarkup(current);
+      const scope = categoryScopeField instanceof HTMLSelectElement ? categoryScopeField.value : "";
+      categoryField.innerHTML = inventoryCategoryOptionsMarkup(current, scope);
       const escaped = (typeof CSS !== "undefined" && CSS.escape) ? CSS.escape(current) : current;
       if (current && categoryField.querySelector(`option[value="${escaped}"]`)){
         categoryField.value = current;
@@ -14510,15 +14511,25 @@ function renderInventory(){
     });
   }
 
+  categoryScopeField?.addEventListener("change", ()=>{
+    refreshCategoryFieldOptions();
+  });
+
   addCategoryBtn?.addEventListener("click", ()=>{
     ensureMaintenanceFoldersState();
+    const scope = prompt("Add category to which group? Enter \"interval\" or \"asreq\".", "interval");
+    if (scope == null) return;
+    const normalizedScope = scope.trim().toLowerCase();
+    if (normalizedScope !== "interval" && normalizedScope !== "asreq"){
+      toast("Enter \"interval\" or \"asreq\".");
+      return;
+    }
     const name = prompt("New category name?");
     if (!name) return;
     const trimmed = name.trim();
     if (!trimmed){ toast("Enter a category name."); return; }
     const id = `${trimmed.toLowerCase().replace(/[^a-z0-9]+/g,"_")}_${Math.random().toString(36).slice(2,7)}`;
-    const parent = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
-    window.settingsFolders.push({ id, name: trimmed, parent, order: (++window._maintOrderCounter) });
+    window.settingsFolders.push({ id, name: trimmed, parent: normalizedScope, order: (++window._maintOrderCounter) });
     persistMaintenanceFolders();
     refreshRows();
     toast("Category added");
