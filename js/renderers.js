@@ -3719,7 +3719,7 @@ function appendLogHistoryRow(tbody, entry){
   tbody.appendChild(row);
 }
 
-function recomputeDailyCutHoursFromTotalHistory(history, { allowExceedDailyCap = false } = {}){
+function recomputeDailyCutHoursFromTotalHistory(history){
   if (typeof setDailyCutHoursEntry !== "function" || !Array.isArray(history)) return false;
   const valid = history
     .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
@@ -3727,6 +3727,7 @@ function recomputeDailyCutHoursFromTotalHistory(history, { allowExceedDailyCap =
   if (valid.length < 2) return false;
   let prevHours = Number(valid[0].hours);
   let changed = false;
+  let warned = false;
   for (let idx = 1; idx < valid.length; idx += 1){
     const currentHours = Number(valid[idx].hours);
     if (!Number.isFinite(prevHours) || !Number.isFinite(currentHours)){
@@ -3734,7 +3735,11 @@ function recomputeDailyCutHoursFromTotalHistory(history, { allowExceedDailyCap =
       continue;
     }
     const delta = Math.max(0, currentHours - prevHours);
-    const updated = setDailyCutHoursEntry(valid[idx].dateISO, delta, { source: "auto", preserveManual: true, allowExceedDailyCap });
+    if (delta > 24 && !warned){
+      toast("Only 24 hrs can be applied per day. Edit past logs to spread hours across multiple days.");
+      warned = true;
+    }
+    const updated = setDailyCutHoursEntry(valid[idx].dateISO, delta, { source: "auto", preserveManual: true });
     if (updated) changed = true;
     prevHours = currentHours;
   }
@@ -3747,13 +3752,12 @@ function findExcessiveLogGap(entries){
     .map(entry => ({ ...entry, dateISO: normalizeDateISO(entry?.dateISO), hours: Number(entry?.hours) }))
     .filter(entry => entry.dateISO && Number.isFinite(entry.hours))
     .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
-  let largest = null;
   for (let i = 1; i < normalized.length; i += 1){
     const prev = normalized[i - 1];
     const cur = normalized[i];
     const delta = cur.hours - prev.hours;
-    if (delta > 24 && (!largest || delta > largest.delta)){
-      largest = {
+    if (delta > 24){
+      return {
         delta,
         fromDate: prev.dateISO,
         toDate: cur.dateISO,
@@ -3762,18 +3766,18 @@ function findExcessiveLogGap(entries){
       };
     }
   }
-  return largest;
+  return null;
 }
 
-function confirmExcessiveLogGap(gap){
-  if (!gap) return { confirmed: true, allowExceedDailyCap: false };
+function warnExcessiveLogGap(gap){
+  if (!gap) return true;
   const deltaLabel = gap.delta.toLocaleString(undefined, { maximumFractionDigits: 1 });
   const message = [
-    `The change from ${gap.fromDate || "previous log"} (${gap.fromHours} hrs) to ${gap.toDate || "this log"} (${gap.toHours} hrs) adds ${deltaLabel} hours in one step, exceeding the 24 hr/day limit.`,
-    "Proceed and apply the full amount to that day?"
+    `Adding ${deltaLabel} hours between ${gap.fromDate || "previous log"} and ${gap.toDate || "this log"} exceeds the 24 hr/day limit.`,
+    "Only 24 hrs will be applied for that day. Use Edit past logs to spread hours across multiple days.",
+    "Continue?"
   ].join(" ");
-  const confirmed = window.confirm(message);
-  return { confirmed, allowExceedDailyCap: confirmed };
+  return window.confirm(message);
 }
 
 function openLogHistoryModal(){
@@ -3861,8 +3865,7 @@ function openLogHistoryModal(){
     entries.sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
 
     const gap = findExcessiveLogGap(entries);
-    const { confirmed, allowExceedDailyCap } = confirmExcessiveLogGap(gap);
-    if (!confirmed) return;
+    if (!warnExcessiveLogGap(gap)) return;
 
     window.totalHistory = entries;
     totalHistory = window.totalHistory;
@@ -3870,7 +3873,7 @@ function openLogHistoryModal(){
     RENDER_DELTA = deltaSinceLast();
     window.RENDER_TOTAL = RENDER_TOTAL;
     window.RENDER_DELTA = RENDER_DELTA;
-    const dailyUpdated = recomputeDailyCutHoursFromTotalHistory(entries, { allowExceedDailyCap });
+    const dailyUpdated = recomputeDailyCutHoursFromTotalHistory(entries);
     saveCloudDebounced();
     toast("Logged hours updated");
     closeLogHistoryModal();
@@ -3894,21 +3897,14 @@ function renderDashboard(){
     const todayISO = new Date().toISOString().slice(0,10);
     const last = totalHistory[totalHistory.length-1];
     const lastHours = Number(last?.hours);
-    let allowExceedDailyCap = false;
+    let allowEntry = true;
     if (Number.isFinite(lastHours)){
       const delta = v - lastHours;
       if (delta > 24){
-        const { confirmed, allowExceedDailyCap: allow } = confirmExcessiveLogGap({
-          delta,
-          fromDate: last?.dateISO || "previous log",
-          toDate: todayISO,
-          fromHours: lastHours,
-          toHours: v
-        });
-        if (!confirmed) return;
-        allowExceedDailyCap = allow;
+        allowEntry = window.confirm("Only 24 hrs will be applied for today. Use Edit past logs to spread hours across multiple days. Continue?");
       }
     }
+    if (!allowEntry) return;
     if (last && last.dateISO === todayISO){
       last.hours = v;
     }else{
@@ -3919,14 +3915,19 @@ function renderDashboard(){
     window.RENDER_TOTAL = RENDER_TOTAL;
     window.RENDER_DELTA = RENDER_DELTA;
     const updatedDaily = typeof syncDailyHoursFromTotals === "function"
-      ? syncDailyHoursFromTotals(todayISO, { allowExceedDailyCap })
+      ? syncDailyHoursFromTotals(todayISO)
       : false;
     saveCloudDebounced(); toast("Hours logged");
     if (updatedDaily && typeof refreshTimeEfficiencyWidgets === "function"){ refreshTimeEfficiencyWidgets(); }
     renderDashboard();
   });
 
-  document.getElementById("editLogHistoryBtn")?.addEventListener("click", openLogHistoryModal);
+  document.getElementById("editLogHistoryBtn")?.addEventListener("click", ()=>{
+    const password = window.prompt("Enter password to edit logged hours:");
+    if (password === null) return;
+    if (password !== "Matthew7:21"){ toast("Incorrect password"); return; }
+    openLogHistoryModal();
+  });
 
   // Next due summary
   const ndBox = document.getElementById("nextDueBox");

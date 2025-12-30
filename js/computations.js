@@ -138,7 +138,7 @@ function computeTimeEfficiency(rangeDays, options = {}){
   };
 }
 
-function syncDailyHoursFromTotals(dateISO, { allowExceedDailyCap = false } = {}){
+function syncDailyHoursFromTotals(dateISO){
   const key = normalizeDateISO(dateISO);
   if (!key || !Array.isArray(totalHistory) || !totalHistory.length) return false;
   const sorted = totalHistory
@@ -159,7 +159,7 @@ function syncDailyHoursFromTotals(dateISO, { allowExceedDailyCap = false } = {})
   }
   if (prev == null) return false;
   const delta = Math.max(0, current - prev);
-  return setDailyCutHoursEntry(key, delta, { source: "auto", preserveManual: true, allowExceedDailyCap });
+  return setDailyCutHoursEntry(key, delta, { source: "auto", preserveManual: true });
 }
 
 function liveSince(task){
