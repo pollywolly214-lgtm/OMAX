@@ -18,7 +18,8 @@ const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set it
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
 // Decide workspace based on hostname:
 // - GitHub Pages (anything ending with .github.io) or the production Vercel host → "github-prod"
-// - Preview / branch URLs on Vercel (e.g. *.vercel.app) or everything else → "vercel-preview"
+// - Preview / branch URLs on Vercel (e.g. *.vercel.app), localhost → "vercel-preview"
+// - Any other custom domain defaults to production.
 const WORKSPACE_ID = (() => {
   if (typeof window !== "undefined") {
     const rawHost = window.location && typeof window.location.hostname === "string"
@@ -28,11 +29,14 @@ const WORKSPACE_ID = (() => {
 
     const isGithubPages = host.endsWith(".github.io");
     const isProdVercel = host === "omax.vercel.app";
-    if (isGithubPages || isProdVercel) {
+    const isLocalhost = host === "localhost" || host === "127.0.0.1";
+    const isVercelPreview = host.endsWith(".vercel.app") && !isProdVercel;
+    const isPreviewHost = isLocalhost || isVercelPreview;
+    if (isGithubPages || isProdVercel || (host && !isPreviewHost)) {
       return "github-prod";
     }
 
-    // Treat everything else (branch previews, localhost, custom staging domains) as preview data.
+    // Treat preview hosts (branch previews, localhost) as preview data.
     return "vercel-preview";
   }
   // Fallback for non-browser contexts so build-time scripts default to production doc
@@ -88,7 +92,30 @@ if (typeof window !== "undefined"){
 /* Root helpers */
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
-function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
+function debounce(fn, ms=250){
+  let t;
+  let lastArgs;
+  const debounced = (...a)=>{
+    lastArgs = a;
+    clearTimeout(t);
+    t = setTimeout(()=>{
+      t = null;
+      fn(...(lastArgs || []));
+    }, ms);
+  };
+  debounced.flush = ()=>{
+    if (!t) return;
+    clearTimeout(t);
+    t = null;
+    fn(...(lastArgs || []));
+  };
+  debounced.cancel = ()=>{
+    if (!t) return;
+    clearTimeout(t);
+    t = null;
+  };
+  return debounced;
+}
 function genId(name){ const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
 function parseDateLocal(value){
   if (value == null) return null;
@@ -2400,6 +2427,32 @@ function saveCloudDebounced(){
     console.warn("History capture before save failed:", err);
   }
   saveCloudInternal();
+}
+function saveCloudNow(){
+  try {
+    if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
+  } catch (err) {
+    console.warn("Failed to normalize folders before save:", err);
+  }
+  try {
+    if (typeof captureHistorySnapshot === "function") captureHistorySnapshot();
+  } catch (err) {
+    console.warn("History capture before save failed:", err);
+  }
+  if (typeof saveCloudInternal.flush === "function"){
+    saveCloudInternal.flush();
+  }else{
+    saveCloudInternal();
+  }
+}
+
+if (typeof window !== "undefined"){
+  window.addEventListener("visibilitychange", ()=>{
+    if (document.visibilityState === "hidden"){
+      saveCloudNow();
+    }
+  });
+  window.addEventListener("pagehide", ()=>saveCloudNow());
 }
 async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
