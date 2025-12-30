@@ -14395,7 +14395,7 @@ function renderInventory(){
   setAppSettingsContext("default");
   wireDashboardSettingsMenu();
   content.innerHTML = viewInventory();
-  const rowsTarget = content.querySelector("[data-inventory-rows]");
+  const rowsTarget = content.querySelector("[data-inventory-groups]");
   const searchInput = content.querySelector("#inventorySearch");
   const clearBtn = content.querySelector("#inventorySearchClear");
   const addBtn = content.querySelector("#inventoryAddBtn");
@@ -14410,6 +14410,7 @@ function renderInventory(){
   const nameField = modal?.querySelector("[name=\"inventoryName\"]");
   const qtyNewField = modal?.querySelector("[name=\"inventoryQtyNew\"]");
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
+  const categoryField = modal?.querySelector("[name=\"inventoryCategory\"]");
   let addToMaintenance = false;
 
   function syncLinkedTasksFromInventory(item, updates){
@@ -14461,15 +14462,30 @@ function renderInventory(){
     return changed;
   }
 
+  const refreshCategoryFieldOptions = ()=>{
+    if (!(categoryField instanceof HTMLSelectElement)) return;
+    const current = categoryField.value;
+    if (typeof inventoryCategoryOptionsMarkup === "function"){
+      categoryField.innerHTML = inventoryCategoryOptionsMarkup(current);
+      const escaped = (typeof CSS !== "undefined" && CSS.escape) ? CSS.escape(current) : current;
+      if (current && categoryField.querySelector(`option[value="${escaped}"]`)){
+        categoryField.value = current;
+      }
+    }
+  };
+
   const refreshRows = ()=>{
     if (!rowsTarget) return;
     const filtered = filterInventoryItems(inventorySearchTerm);
-    rowsTarget.innerHTML = inventoryRowsHTML(filtered);
+    rowsTarget.innerHTML = inventoryGroupsHTML(filtered);
+    refreshCategoryFieldOptions();
   };
 
   try{
     window.__refreshInventoryRows = refreshRows;
   }catch(_){ }
+
+  refreshCategoryFieldOptions();
 
   if (searchInput){
     searchInput.addEventListener("input", ()=>{
@@ -14489,6 +14505,19 @@ function renderInventory(){
       searchInput?.focus();
     });
   }
+
+  rowsTarget?.addEventListener("change", (e)=>{
+    const select = e.target.closest("[data-inventory-category-select]");
+    if (!(select instanceof HTMLSelectElement) || select.disabled) return;
+    const id = select.getAttribute("data-id");
+    if (!id) return;
+    const item = inventory.find(entry => entry && String(entry.id) === String(id));
+    if (!item) return;
+    const next = select.value || "";
+    item.categoryId = next ? next : null;
+    if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
+    refreshRows();
+  });
 
   rowsTarget?.addEventListener("input",(e)=>{
     const input = e.target;
@@ -14517,6 +14546,64 @@ function renderInventory(){
       syncLinkedTasksFromInventory(item, { price: item.price });
     }
     saveCloudDebounced();
+  });
+
+  rowsTarget?.addEventListener("dragstart", (e)=>{
+    const handle = e.target.closest("[data-inventory-drag-handle]");
+    if (!(handle instanceof HTMLElement)) return;
+    const id = handle.getAttribute("data-id");
+    if (!id) return;
+    e.dataTransfer?.setData("text/plain", `inventory:${id}`);
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+    const row = handle.closest("tr");
+    row?.classList.add("inventory-dragging");
+  });
+
+  rowsTarget?.addEventListener("dragend", (e)=>{
+    const row = e.target.closest("tr");
+    row?.classList.remove("inventory-dragging");
+  });
+
+  rowsTarget?.addEventListener("dragover", (e)=>{
+    const zone = e.target.closest("[data-inventory-drop-category]");
+    if (!zone) return;
+    const payload = e.dataTransfer?.getData("text/plain") || "";
+    if (!payload.startsWith("inventory:")) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    zone.classList.add("is-dragover");
+  });
+
+  rowsTarget?.addEventListener("dragleave", (e)=>{
+    const zone = e.target.closest("[data-inventory-drop-category]");
+    if (!zone) return;
+    if (zone.contains(e.relatedTarget)) return;
+    zone.classList.remove("is-dragover");
+  });
+
+  rowsTarget?.addEventListener("drop", (e)=>{
+    const zone = e.target.closest("[data-inventory-drop-category]");
+    if (!zone) return;
+    const payload = e.dataTransfer?.getData("text/plain") || "";
+    if (!payload.startsWith("inventory:")) return;
+    e.preventDefault();
+    zone.classList.remove("is-dragover");
+    const id = payload.split(":")[1];
+    if (!id) return;
+    const item = inventory.find(entry => entry && String(entry.id) === String(id));
+    if (!item) return;
+    const linkedTasks = typeof findTasksLinkedToInventoryItem === "function"
+      ? findTasksLinkedToInventoryItem(item)
+      : [];
+    if (linkedTasks.length){
+      toast("Linked inventory items stay with their maintenance category.");
+      return;
+    }
+    const targetKey = zone.getAttribute("data-inventory-drop-category") || "";
+    const categoryId = targetKey === "__uncategorized" ? null : targetKey;
+    item.categoryId = categoryId && categoryId !== "__uncategorized" ? categoryId : null;
+    if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
+    refreshRows();
   });
 
   rowsTarget?.addEventListener("click", async (e)=>{
@@ -14613,6 +14700,10 @@ function renderInventory(){
     form?.reset();
     if (qtyNewField) qtyNewField.value = qtyNewField.defaultValue || "1";
     if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
+    if (categoryField instanceof HTMLSelectElement){
+      refreshCategoryFieldOptions();
+      categoryField.value = categoryField.options.length ? categoryField.options[0].value : "";
+    }
   }
 
   function closeInventoryModal(){
@@ -14624,6 +14715,9 @@ function renderInventory(){
     form?.reset();
     if (qtyNewField) qtyNewField.value = qtyNewField.defaultValue || "1";
     if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
+    if (categoryField instanceof HTMLSelectElement){
+      categoryField.value = categoryField.options.length ? categoryField.options[0].value : "";
+    }
   }
 
   addBtn?.addEventListener("click", openInventoryModal);
@@ -14663,6 +14757,8 @@ function renderInventory(){
     const pn = (data.get("inventoryPN") || "").toString().trim();
     const link = (data.get("inventoryLink") || "").toString().trim();
     const priceRaw = data.get("inventoryPrice");
+    const categoryIdRaw = data.get("inventoryCategory");
+    const categoryId = typeof categoryIdRaw === "string" ? categoryIdRaw.trim() : "";
     let price = null;
     if (priceRaw !== null && priceRaw !== ""){
       const num = Number(priceRaw);
@@ -14680,7 +14776,8 @@ function renderInventory(){
       pn,
       link,
       price,
-      note
+      note,
+      categoryId: categoryId || null
     };
     const item = typeof normalizeInventoryItem === "function"
       ? normalizeInventoryItem(baseItem)

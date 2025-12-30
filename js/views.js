@@ -3550,11 +3550,83 @@ function viewJobs(){
   </div>`;
 }
 
+function maintenanceInventoryCategories(){
+  const source = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  const normalized = typeof normalizeSettingsFolders === "function"
+    ? normalizeSettingsFolders(source)
+    : source;
+  const seen = new Set();
+  const categories = [];
+  normalized.forEach(folder => {
+    if (!folder || folder.id == null) return;
+    const id = String(folder.id);
+    if (seen.has(id)) return;
+    seen.add(id);
+    categories.push({
+      id,
+      name: typeof folder.name === "string" && folder.name.trim() ? folder.name.trim() : "Category",
+      order: Number(folder.order) || 0,
+      parent: folder.parent != null ? String(folder.parent) : null
+    });
+  });
+  return categories;
+}
+
+function inventoryCategoryNameMap(){
+  const map = new Map();
+  maintenanceInventoryCategories().forEach(cat => {
+    if (!cat || cat.id == null) return;
+    map.set(String(cat.id), cat.name || "Category");
+  });
+  return map;
+}
+
+function inventoryItemCategoryInfo(item, categoryMap){
+  const categories = categoryMap instanceof Map ? categoryMap : inventoryCategoryNameMap();
+  const linkedTasks = typeof findTasksLinkedToInventoryItem === "function"
+    ? findTasksLinkedToInventoryItem(item)
+    : [];
+  let linkedCategoryId = "";
+  if (linkedTasks.length){
+    const linkedTask = linkedTasks.find(task => task && task.cat != null);
+    if (linkedTask && linkedTask.cat != null){
+      linkedCategoryId = String(linkedTask.cat);
+    }
+  }
+  const isLinked = linkedTasks.length > 0;
+  const rawCategoryId = item && item.categoryId != null ? String(item.categoryId) : "";
+  let categoryId = "";
+  if (linkedCategoryId && categories.has(linkedCategoryId)){
+    categoryId = linkedCategoryId;
+  } else if (!isLinked && rawCategoryId && categories.has(rawCategoryId)){
+    categoryId = rawCategoryId;
+  }
+  return { categoryId, isLinked, linkedCategoryId };
+}
+
+function inventoryCategoryOptionsMarkup(selectedId){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const categories = maintenanceInventoryCategories();
+  const value = selectedId != null ? String(selectedId) : "";
+  const options = [`<option value=""${value==="" ? " selected" : ""}>Uncategorized</option>`];
+  categories.forEach(cat => {
+    if (!cat) return;
+    const id = cat.id != null ? String(cat.id) : "";
+    const label = cat.name || "Category";
+    const isSelected = value === id;
+    options.push(`<option value="${esc(id)}"${isSelected ? " selected" : ""}>${esc(label)}</option>`);
+  });
+  return options.join("");
+}
+
 function filterInventoryItems(term){
   const query = (term || "").trim().toLowerCase();
   if (!query) return inventory.slice();
+  const categoryMap = inventoryCategoryNameMap();
   return inventory.filter(item => {
-    const fields = [item.name, item.unit, item.pn, item.note, item.link];
+    const info = inventoryItemCategoryInfo(item, categoryMap);
+    const categoryName = info.categoryId ? categoryMap.get(info.categoryId) : "Uncategorized";
+    const fields = [item.name, item.unit, item.pn, item.note, item.link, categoryName];
     return fields.some(f => {
       if (f == null) return false;
       const text = String(f).toLowerCase();
@@ -3563,9 +3635,11 @@ function filterInventoryItems(term){
   });
 }
 
-function inventoryRowsHTML(list){
+function inventoryRowsHTML(list, emptyMessage){
+  const categoryMap = inventoryCategoryNameMap();
   if (!Array.isArray(list) || !list.length){
-    return `<tr><td colspan="9" class="muted">No inventory items match your search.</td></tr>`;
+    const message = emptyMessage || "No items in this category match your search.";
+    return `<tr><td colspan="10" class="muted">${message}</td></tr>`;
   }
   return list.map(i => {
     const priceVal = i.price != null && i.price !== "" ? Number(i.price) : "";
@@ -3575,9 +3649,15 @@ function inventoryRowsHTML(list){
     const qtyOldNum = Number(i.qtyOld);
     const qtyNewDisplay = Number.isFinite(qtyNewNum) && qtyNewNum >= 0 ? qtyNewNum : 0;
     const qtyOldDisplay = Number.isFinite(qtyOldNum) && qtyOldNum >= 0 ? qtyOldNum : 0;
+    const { categoryId, isLinked } = inventoryItemCategoryInfo(i, categoryMap);
+    const categorySelect = `<select data-inventory-category-select data-id="${i.id}"${isLinked ? " disabled" : ""}>${inventoryCategoryOptionsMarkup(categoryId)}</select>`;
+    const dragHandle = isLinked
+      ? ""
+      : `<button type="button" class="inventory-drag-handle" draggable="true" data-inventory-drag-handle data-id="${i.id}" aria-label="Drag to move item">⋮⋮</button>`;
     return `
-    <tr>
-      <td><button type="button" class="inventory-name-btn" data-inventory-maintenance="${i.id}">${nameDisplay}</button></td>
+    <tr data-inventory-row="${i.id}">
+      <td>${categorySelect}</td>
+      <td class="inventory-item-cell">${dragHandle}<button type="button" class="inventory-name-btn" data-inventory-maintenance="${i.id}">${nameDisplay}</button></td>
       <td><input type="number" min="0" step="1" data-inv="qtyNew" data-id="${i.id}" value="${qtyNewDisplay}"></td>
       <td><input type="number" min="0" step="1" data-inv="qtyOld" data-id="${i.id}" value="${qtyOldDisplay}"></td>
       <td>${i.unit||"pcs"}</td>
@@ -3593,9 +3673,60 @@ function inventoryRowsHTML(list){
   }).join("");
 }
 
+function inventoryGroupsHTML(list){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const categories = maintenanceInventoryCategories();
+  const categoryMap = new Map(categories.map(cat => [String(cat.id), cat.name || "Category"]));
+  const grouped = new Map();
+  list.forEach(item => {
+    if (!item) return;
+    const info = inventoryItemCategoryInfo(item, categoryMap);
+    const key = info.categoryId || "";
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(item);
+  });
+
+  const buildSection = (id, name, items, { isUncategorized = false } = {})=>{
+    const key = id ? String(id) : "__uncategorized";
+    const safeId = esc(id || "");
+    const safeName = esc(name || "Category");
+    const count = items.length;
+    const rows = inventoryRowsHTML(
+      items,
+      isUncategorized
+        ? "Unlinked items appear here."
+        : `Drag items here to assign them to ${safeName}.`
+    );
+    return `
+      <section class="inventory-category" data-inventory-drop-category="${esc(key)}" data-inventory-category="${safeId}">
+        <div class="inventory-category-header">
+          <div>
+            <div class="inventory-category-title">${safeName}</div>
+            <div class="small muted">${count} item${count === 1 ? "" : "s"}</div>
+          </div>
+        </div>
+        <div class="inventory-category-table">
+          <table class="inventory-table">
+            <thead><tr><th>Category</th><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </section>`;
+  };
+
+  const sections = categories.map(cat => {
+    const items = grouped.get(String(cat.id)) || [];
+    return buildSection(String(cat.id), categoryMap.get(String(cat.id)) || "Category", items);
+  });
+
+  const uncategorizedItems = grouped.get("") || [];
+  sections.push(buildSection("", "Uncategorized", uncategorizedItems, { isUncategorized: true }));
+
+  return sections.join("") || `<div class="inventory-category-empty">No inventory items match your search.</div>`;
+}
+
 function viewInventory(){
   const filtered = filterInventoryItems(inventorySearchTerm);
-  const rows = inventoryRowsHTML(filtered);
   const searchValue = String(inventorySearchTerm || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -3612,11 +3743,8 @@ function viewInventory(){
           <button type="button" id="inventorySearchClear">Clear</button>
         </div>
       </div>
-      <div class="small muted inventory-hint">Results update as you type.</div>
-      <table class="inventory-table">
-        <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
-        <tbody data-inventory-rows>${rows}</tbody>
-      </table>
+      <div class="small muted inventory-hint">Categories mirror Maintenance Settings. Drag uncategorized items into a category to organize them.</div>
+      <div class="inventory-category-grid" data-inventory-groups>${inventoryGroupsHTML(filtered)}</div>
     </div>
   </div>
 
@@ -3642,6 +3770,7 @@ function viewInventory(){
             <label>New quantity<input type="number" min="0" step="1" name="inventoryQtyNew" value="1"></label>
             <label>Old quantity<input type="number" min="0" step="1" name="inventoryQtyOld" value="0"></label>
             <label>Unit<input name="inventoryUnit" placeholder="pcs" value="pcs"></label>
+            <label>Category<select name="inventoryCategory">${inventoryCategoryOptionsMarkup()}</select></label>
             <label>Part #<input name="inventoryPN" placeholder="Part number"></label>
             <label>Store link<input type="url" name="inventoryLink" placeholder="https://..."></label>
             <label>Price ($)<input type="number" min="0" step="0.01" name="inventoryPrice" placeholder="optional"></label>
@@ -3859,4 +3988,3 @@ function viewDeletedItems(model){
     </div>
   `;
 }
-

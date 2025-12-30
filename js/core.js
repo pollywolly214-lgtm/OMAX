@@ -2055,6 +2055,8 @@ function normalizeInventoryItem(raw){
   item.qtyOld = qtyOld;
   item.qty = qtyNew + qtyOld;
   if (!item.unit){ item.unit = "pcs"; }
+  const catId = item.categoryId != null ? String(item.categoryId).trim() : "";
+  item.categoryId = catId || null;
   return item;
 }
 
