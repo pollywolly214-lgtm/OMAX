@@ -16,27 +16,10 @@ const DEFAULT_DAILY_HOURS = 8;
 let DAILY_HOURS = DEFAULT_DAILY_HOURS;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
-// Decide workspace based on hostname:
-// - GitHub Pages (anything ending with .github.io), the production Vercel host, or any custom
-//   production domain → "github-prod"
-// - Localhost/dev hosts → "vercel-preview"
+// Decide workspace based on hostname (all hosts write to production).
 const WORKSPACE_ID = (() => {
   if (typeof window !== "undefined") {
-    const rawHost = window.location && typeof window.location.hostname === "string"
-      ? window.location.hostname
-      : "";
-    const host = rawHost.toLowerCase();
-
-    const isGithubPages = host.endsWith(".github.io");
-    const isLocalHost = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
-    const isVercelHost = host.endsWith(".vercel.app");
-    const isProdHost = (isGithubPages || isVercelHost || (!isLocalHost && host));
-    if (isProdHost) {
-      return "github-prod";
-    }
-
-    // Treat local/dev hosts as preview data.
-    return "vercel-preview";
+    return "github-prod";
   }
   // Fallback for non-browser contexts so build-time scripts default to production doc
   return "github-prod";

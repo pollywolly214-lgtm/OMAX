@@ -115,7 +115,10 @@ function pumpRemoveEntry(dateISO){
 }
 
 function pumpApplyEntryUpdates(message){
-  if (typeof saveCloudDebounced === "function"){
+  if (typeof saveCloudNow === "function"){
+    try { saveCloudNow(); }
+    catch (err) { console.warn("Failed to persist pump logs", err); }
+  } else if (typeof saveCloudDebounced === "function"){
     try { saveCloudDebounced(); }
     catch (err) { console.warn("Failed to persist pump logs", err); }
   }
