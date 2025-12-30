@@ -10846,6 +10846,8 @@ function computeCostModel(){
     return total;
   };
 
+  const manualMaintenanceEvents = [];
+
   const manualMaintenanceCostSince = (days)=>{
     if (!isFinite(days) || days <= 0 || !manualMaintenanceEvents.length) return 0;
     const cutoff = Date.now() - (days * JOB_DAY_MS);
@@ -11089,8 +11091,6 @@ function computeCostModel(){
       if (!isInstance) registerTemplateMeta(task);
     });
   }
-
-  const manualMaintenanceEvents = [];
 
   const pushManualEvent = (task, entry, { exists = true, trashId = null } = {})=>{
     if (!task || !entry) return;
