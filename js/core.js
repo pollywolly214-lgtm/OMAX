@@ -244,26 +244,39 @@ function getConfiguredDailyHours(){
 
 function getAverageDailyCutHours(){
   const list = Array.isArray(window.totalHistory) ? window.totalHistory : [];
-  if (list.length < 2) return null;
   const sorted = list
     .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
     .slice()
     .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
   if (sorted.length < 2) return null;
-  const first = sorted[0];
-  const last = sorted[sorted.length - 1];
-  const start = parseDateLocal(first.dateISO);
-  const end = parseDateLocal(last.dateISO);
-  if (!(start instanceof Date) || Number.isNaN(start.getTime())) return null;
-  if (!(end instanceof Date) || Number.isNaN(end.getTime())) return null;
-  const startUTC = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
-  const endUTC = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
-  const diffDays = Math.floor((endUTC - startUTC) / (24 * 60 * 60 * 1000));
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const monthStart = new Date(today);
+  monthStart.setDate(monthStart.getDate() - 30);
+
+  const monthStartTime = monthStart.getTime();
+  const todayTime = today.getTime();
+
+  let startEntry = null;
+  let endEntry = null;
+  for (const entry of sorted){
+    const entryDate = parseDateLocal(entry.dateISO);
+    if (!(entryDate instanceof Date) || Number.isNaN(entryDate.getTime())) continue;
+    entryDate.setHours(0,0,0,0);
+    const entryTime = entryDate.getTime();
+    if (entryTime < monthStartTime) continue;
+    if (entryTime > todayTime) break;
+    if (!startEntry) startEntry = { entry, time: entryTime };
+    endEntry = { entry, time: entryTime };
+  }
+
+  if (!startEntry || !endEntry || startEntry.time === endEntry.time) return null;
+  const diffHours = Math.max(0, Number(endEntry.entry.hours) - Number(startEntry.entry.hours));
+  const diffDays = Math.floor((endEntry.time - startEntry.time) / (24 * 60 * 60 * 1000));
   if (diffDays <= 0) return null;
-  const diffHours = Math.max(0, Number(last.hours) - Number(first.hours));
   const rate = diffHours / diffDays;
-  if (!Number.isFinite(rate) || rate <= 0) return null;
-  return rate;
+  return (Number.isFinite(rate) && rate > 0) ? rate : null;
 }
 
 function refreshDerivedDailyHours(){
