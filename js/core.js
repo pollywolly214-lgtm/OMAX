@@ -243,18 +243,27 @@ function getConfiguredDailyHours(){
 }
 
 function getAverageDailyCutHours(){
-  const list = Array.isArray(window.dailyCutHours) ? window.dailyCutHours : [];
-  let total = 0;
-  let count = 0;
-  for (const entry of list){
-    if (!entry || !entry.dateISO) continue;
-    const hours = clampDailyCutHours(entry.hours);
-    if (!Number.isFinite(hours)) continue;
-    total += hours;
-    count += 1;
-  }
-  if (!count) return null;
-  return total / count;
+  const list = Array.isArray(window.totalHistory) ? window.totalHistory : [];
+  if (list.length < 2) return null;
+  const sorted = list
+    .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
+    .slice()
+    .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+  if (sorted.length < 2) return null;
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const start = parseDateLocal(first.dateISO);
+  const end = parseDateLocal(last.dateISO);
+  if (!(start instanceof Date) || Number.isNaN(start.getTime())) return null;
+  if (!(end instanceof Date) || Number.isNaN(end.getTime())) return null;
+  const startUTC = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+  const endUTC = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+  const diffDays = Math.floor((endUTC - startUTC) / (24 * 60 * 60 * 1000));
+  if (diffDays <= 0) return null;
+  const diffHours = Math.max(0, Number(last.hours) - Number(first.hours));
+  const rate = diffHours / diffDays;
+  if (!Number.isFinite(rate) || rate <= 0) return null;
+  return rate;
 }
 
 function refreshDerivedDailyHours(){

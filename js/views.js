@@ -145,7 +145,7 @@ function viewDashboard(){
               <span class="value" data-efficiency-goal>—</span>
             </div>
             <div class="time-efficiency-metric">
-              <span class="label">Avg hrs/day</span>
+              <span class="label">Avg usage/day</span>
               <span class="value" data-efficiency-average>—</span>
             </div>
             <div class="time-efficiency-metric">
@@ -1912,7 +1912,7 @@ function viewCosts(model){
                 <span class="value" data-efficiency-goal>—</span>
               </div>
               <div class="time-efficiency-metric">
-                <span class="label">Avg hrs/day</span>
+              <span class="label">Avg usage/day</span>
                 <span class="value" data-efficiency-average>—</span>
               </div>
               <div class="time-efficiency-metric">
