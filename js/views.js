@@ -3726,6 +3726,11 @@ function inventoryGroupsHTML(list){
   const { rootId } = inventoryCategoryTreeData();
   const folders = maintenanceInventoryCategories();
   const categoryMap = new Map(folders.map(cat => [String(cat.id), cat.name || "Category"]));
+  const intervalCats = new Set((Array.isArray(window.tasksInterval) ? window.tasksInterval : []).map(task => String(task?.cat ?? "")));
+  const asreqCats = new Set((Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []).map(task => String(task?.cat ?? "")));
+  const inferredScope = new Map();
+  intervalCats.forEach(id => { if (id) inferredScope.set(id, "interval"); });
+  asreqCats.forEach(id => { if (id && !inferredScope.has(id)) inferredScope.set(id, "asreq"); });
   const groupedByType = {
     interval: new Map(),
     asreq: new Map()
@@ -3746,7 +3751,17 @@ function inventoryGroupsHTML(list){
     groupedByType[scope].get(key).push(item);
   });
 
-  const kidsOf = (parentId)=> folders.filter(f => String(f.parent ?? "") === String(parentId ?? ""));
+  const kidsOf = (parentId)=>{
+    const parentKey = String(parentId ?? "");
+    return folders.filter(folder => {
+      const rawParent = String(folder.parent ?? "");
+      if (rawParent === parentKey) return true;
+      if ((parentKey === "interval" || parentKey === "asreq") && rawParent === String(rootId)){
+        return inferredScope.get(String(folder.id)) === parentKey;
+      }
+      return false;
+    });
+  };
 
   const renderFolder = (folder, listType)=>{
     const subFolderList = kidsOf(folder.id);
