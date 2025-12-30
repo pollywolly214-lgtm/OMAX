@@ -11125,6 +11125,7 @@ function computeCostModel(){
       laborCost,
       partCost,
       totalCost,
+      cost: totalCost,
       tasks: [{
         id: templateId || taskId,
         originalId: originalId,
@@ -11378,7 +11379,7 @@ function computeCostModel(){
       : "recent machine usage";
     return {
       date: entry.date,
-      value: entry.cost,
+      value: (entry.totalCost ?? entry.cost) || 0,
       detail: `Estimated maintenance dollars allocated to ${hoursFragment} logged on ${dateLabel}.`
     };
   });
