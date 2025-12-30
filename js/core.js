@@ -80,22 +80,28 @@ function debounce(fn, ms=250){
   const debounced = (...a)=>{
     lastArgs = a;
     clearTimeout(t);
+    debounced.pending = true;
     t = setTimeout(()=>{
       t = null;
+      debounced.pending = false;
       fn(...(lastArgs || []));
     }, ms);
   };
   debounced.flush = ()=>{
-    if (!t) return;
+    if (!t) return false;
     clearTimeout(t);
     t = null;
+    debounced.pending = false;
     fn(...(lastArgs || []));
+    return true;
   };
   debounced.cancel = ()=>{
     if (!t) return;
     clearTimeout(t);
     t = null;
+    debounced.pending = false;
   };
+  debounced.pending = false;
   return debounced;
 }
 function genId(name){ const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
@@ -2422,10 +2428,13 @@ function saveCloudNow(){
     console.warn("History capture before save failed:", err);
   }
   if (typeof saveCloudInternal.flush === "function"){
-    saveCloudInternal.flush();
-  }else{
-    saveCloudInternal();
+    const flushed = saveCloudInternal.flush();
+    if (!flushed){
+      saveCloudInternal();
+    }
+    return;
   }
+  saveCloudInternal();
 }
 
 if (typeof window !== "undefined"){
