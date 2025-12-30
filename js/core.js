@@ -16,27 +16,10 @@ const DEFAULT_DAILY_HOURS = 8;
 let DAILY_HOURS = DEFAULT_DAILY_HOURS;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
-// Decide workspace based on hostname:
-// - GitHub Pages (anything ending with .github.io), the production Vercel host, or any custom
-//   production domain → "github-prod"
-// - Localhost/dev hosts → "vercel-preview"
+// Decide workspace based on hostname (all hosts write to production).
 const WORKSPACE_ID = (() => {
   if (typeof window !== "undefined") {
-    const rawHost = window.location && typeof window.location.hostname === "string"
-      ? window.location.hostname
-      : "";
-    const host = rawHost.toLowerCase();
-
-    const isGithubPages = host.endsWith(".github.io");
-    const isLocalHost = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
-    const isVercelHost = host.endsWith(".vercel.app");
-    const isProdHost = (isGithubPages || isVercelHost || (!isLocalHost && host));
-    if (isProdHost) {
-      return "github-prod";
-    }
-
-    // Treat local/dev hosts as preview data.
-    return "vercel-preview";
+    return "github-prod";
   }
   // Fallback for non-browser contexts so build-time scripts default to production doc
   return "github-prod";
@@ -97,22 +80,28 @@ function debounce(fn, ms=250){
   const debounced = (...a)=>{
     lastArgs = a;
     clearTimeout(t);
+    debounced.pending = true;
     t = setTimeout(()=>{
       t = null;
+      debounced.pending = false;
       fn(...(lastArgs || []));
     }, ms);
   };
   debounced.flush = ()=>{
-    if (!t) return;
+    if (!t) return false;
     clearTimeout(t);
     t = null;
+    debounced.pending = false;
     fn(...(lastArgs || []));
+    return true;
   };
   debounced.cancel = ()=>{
     if (!t) return;
     clearTimeout(t);
     t = null;
+    debounced.pending = false;
   };
+  debounced.pending = false;
   return debounced;
 }
 function genId(name){ const b=(name||"item").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,""); return `${b}_${Date.now().toString(36)}`; }
@@ -2439,10 +2428,13 @@ function saveCloudNow(){
     console.warn("History capture before save failed:", err);
   }
   if (typeof saveCloudInternal.flush === "function"){
-    saveCloudInternal.flush();
-  }else{
-    saveCloudInternal();
+    const flushed = saveCloudInternal.flush();
+    if (!flushed){
+      saveCloudInternal();
+    }
+    return;
   }
+  saveCloudInternal();
 }
 
 if (typeof window !== "undefined"){
