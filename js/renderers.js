@@ -11144,7 +11144,8 @@ function computeCostModel(){
     const oppCostRaw = entry.opportunityCost != null ? Number(entry.opportunityCost) : null;
     const opportunityCost = Number.isFinite(oppCostRaw) && oppCostRaw >= 0 ? oppCostRaw : (hoursSpent * opportunityRateUsed);
     const totalCostRaw = entry.totalCost != null ? Number(entry.totalCost) : null;
-    const totalCost = Number.isFinite(totalCostRaw) && totalCostRaw >= 0 ? totalCostRaw : (laborCost + partCost + opportunityCost);
+    const fallbackTotal = laborCost + partCost + opportunityCost;
+    const totalCost = Number.isFinite(totalCostRaw) && totalCostRaw > 0 ? totalCostRaw : fallbackTotal;
     manualMaintenanceEvents.push({
       key: `${originalId || "task"}__${dateKey}__${manualMaintenanceEvents.length}`,
       date,
@@ -11411,9 +11412,13 @@ function computeCostModel(){
     const hoursFragment = hoursLabel
       ? `${hoursLabel} machine ${Math.abs(entry.hours - 1) < 0.01 ? "hour" : "hours"}`
       : "recent machine usage";
+    const totalValueRaw = entry.totalCost ?? entry.cost;
+    const totalValue = Number.isFinite(Number(totalValueRaw))
+      ? Number(totalValueRaw)
+      : ((Number(entry.laborCost) || 0) + (Number(entry.partCost) || 0) + (Number(entry.opportunityCost) || 0));
     return {
       date: entry.date,
-      value: (entry.totalCost ?? entry.cost) || 0,
+      value: totalValue,
       detail: `Estimated maintenance dollars allocated to ${hoursFragment} logged on ${dateLabel}.`
     };
   });
@@ -12035,7 +12040,9 @@ function computeCostModel(){
       const oppRaw = Number(entry.opportunityCost);
       const opportunityCost = Number.isFinite(oppRaw) && oppRaw >= 0 ? oppRaw : hours * opportunityRateUsed;
       const totalRaw = Number(entry.totalCost ?? entry.cost);
-      const totalCost = Number.isFinite(totalRaw) && totalRaw >= 0 ? totalRaw : (laborCost + partCost + opportunityCost);
+      const totalCost = Number.isFinite(totalRaw) && totalRaw > 0
+        ? totalRaw
+        : (laborCost + partCost + opportunityCost);
       return {
         id: entry.key || `maint_${index}`,
         completionDate: entry.dateISO || null,
