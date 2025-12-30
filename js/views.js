@@ -1187,6 +1187,7 @@ function viewCosts(model){
   const maintenanceHistoryRows = maintenanceHistoryTable.map(entry => {
     const hoursVal = Number(entry.hoursSpent);
     const rateVal = Number(entry.hourlyRateUsed);
+    const oppRateVal = Number(entry.opportunityRateUsed);
     const partVal = Number(entry.partCost);
     const totalVal = Number(entry.totalCost);
     return `
@@ -1196,6 +1197,8 @@ function viewCosts(model){
         <td><input type="number" min="0" step="0.25" data-maint-history-input data-history-id="${esc(entry.id)}" data-history-field="hoursSpent" value="${Number.isFinite(hoursVal) ? esc(String(hoursVal)) : ""}" /></td>
         <td><input type="number" min="0" step="0.01" data-maint-history-input data-history-id="${esc(entry.id)}" data-history-field="hourlyRateUsed" value="${Number.isFinite(rateVal) ? esc(String(rateVal)) : ""}" /></td>
         <td data-maint-history-labor="${esc(entry.id)}">${esc(formatCurrencyValueLoose(entry.laborCost))}</td>
+        <td>${Number.isFinite(oppRateVal) ? esc(formatCurrencyValueLoose(oppRateVal)) : "—"}</td>
+        <td>${esc(formatCurrencyValueLoose(entry.opportunityCost))}</td>
         <td><input type="number" min="0" step="0.01" data-maint-history-input data-history-id="${esc(entry.id)}" data-history-field="partCost" value="${Number.isFinite(partVal) ? esc(String(partVal)) : ""}" /></td>
         <td><input type="number" min="0" step="0.01" data-maint-history-input data-history-id="${esc(entry.id)}" data-history-field="totalCost" value="${Number.isFinite(totalVal) ? esc(String(totalVal)) : ""}" /></td>
       </tr>
@@ -1211,6 +1214,8 @@ function viewCosts(model){
           <th scope="col">Hours spent</th>
           <th scope="col">Hourly rate used</th>
           <th scope="col">Labor cost</th>
+          <th scope="col">Opportunity rate</th>
+          <th scope="col">Opportunity cost</th>
           <th scope="col">Part cost</th>
           <th scope="col">Total cost</th>
         </tr>

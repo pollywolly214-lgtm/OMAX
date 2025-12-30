@@ -450,6 +450,18 @@ function ensureTaskManualHistory(task){
     } else {
       clone.partCost = null;
     }
+    if (clone.opportunityRateUsed != null){
+      const rate = Number(clone.opportunityRateUsed);
+      clone.opportunityRateUsed = Number.isFinite(rate) && rate >= 0 ? rate : null;
+    } else {
+      clone.opportunityRateUsed = null;
+    }
+    if (clone.opportunityCost != null){
+      const opp = Number(clone.opportunityCost);
+      clone.opportunityCost = Number.isFinite(opp) && opp >= 0 ? opp : null;
+    } else {
+      clone.opportunityCost = null;
+    }
     if (clone.laborCost != null){
       const labor = Number(clone.laborCost);
       clone.laborCost = Number.isFinite(labor) && labor >= 0 ? labor : null;
@@ -9569,6 +9581,9 @@ function renderCosts(){
     if (update.hourlyRateUsed != null){
       target.hourlyRateUsed = update.hourlyRateUsed;
     }
+    if (update.opportunityRateUsed != null){
+      target.opportunityRateUsed = update.opportunityRateUsed;
+    }
     if (update.partCost != null){
       target.partCost = update.partCost;
     }
@@ -9583,9 +9598,17 @@ function renderCosts(){
     if (Number.isFinite(hours) && Number.isFinite(rate)){
       target.laborCost = Math.max(0, hours * rate);
     }
+    const oppRate = Number(target.opportunityRateUsed);
+    if (Number.isFinite(hours) && Number.isFinite(oppRate)){
+      target.opportunityCost = Math.max(0, hours * oppRate);
+    }
     if (update.totalCost == null){
       const part = Number(target.partCost);
-      target.totalCost = Math.max(0, (Number.isFinite(target.laborCost) ? target.laborCost : 0) + (Number.isFinite(part) ? part : 0));
+      target.totalCost = Math.max(0,
+        (Number.isFinite(target.laborCost) ? target.laborCost : 0)
+        + (Number.isFinite(part) ? part : 0)
+        + (Number.isFinite(target.opportunityCost) ? target.opportunityCost : 0)
+      );
     }
     if (typeof ensureTaskManualHistory === "function") ensureTaskManualHistory(task);
     if (typeof saveCloudDebounced === "function") saveCloudDebounced();
@@ -9619,11 +9642,14 @@ function renderCosts(){
       // recompute dependent values locally before persisting
       const hours = (field === "hoursSpent" ? update.hoursSpent : entry.hoursSpent) ?? entry.hoursSpent ?? 0;
       const rate = (field === "hourlyRateUsed" ? update.hourlyRateUsed : entry.hourlyRateUsed) ?? entry.hourlyRateUsed ?? maintenanceHourlyRate;
+      const oppRate = entry.opportunityRateUsed ?? (typeof getOpportunityLossRate === "function" ? getOpportunityLossRate() : 0);
       const part = (field === "partCost" ? update.partCost : entry.partCost) ?? entry.partCost ?? 0;
       const labor = Math.max(0, Number(hours) * Number(rate));
+      const opportunity = Math.max(0, Number(hours) * Number(oppRate));
       update.laborCost = labor;
+      update.opportunityCost = opportunity;
       if (field !== "totalCost"){
-        update.totalCost = Math.max(0, labor + Number(part));
+        update.totalCost = Math.max(0, labor + Number(part) + opportunity);
       }
       persistMaintenanceHistoryEntry(update);
     };
@@ -11107,12 +11133,18 @@ function computeCostModel(){
     const hoursSpent = Number.isFinite(hoursRaw) && hoursRaw >= 0 ? hoursRaw : 0;
     const rateRaw = entry.hourlyRateUsed != null ? Number(entry.hourlyRateUsed) : null;
     const hourlyRateUsed = Number.isFinite(rateRaw) && rateRaw >= 0 ? rateRaw : maintenanceRate;
+    const opportunityRateRaw = entry.opportunityRateUsed != null ? Number(entry.opportunityRateUsed) : null;
+    const opportunityRateUsed = Number.isFinite(opportunityRateRaw) && opportunityRateRaw >= 0
+      ? opportunityRateRaw
+      : (typeof getOpportunityLossRate === "function" ? getOpportunityLossRate() : 0);
     const partCostRaw = entry.partCost != null ? Number(entry.partCost) : null;
     const partCost = Number.isFinite(partCostRaw) && partCostRaw >= 0 ? partCostRaw : computeTaskPartCost(task);
     const laborCostRaw = entry.laborCost != null ? Number(entry.laborCost) : null;
     const laborCost = Number.isFinite(laborCostRaw) && laborCostRaw >= 0 ? laborCostRaw : (hoursSpent * hourlyRateUsed);
+    const oppCostRaw = entry.opportunityCost != null ? Number(entry.opportunityCost) : null;
+    const opportunityCost = Number.isFinite(oppCostRaw) && oppCostRaw >= 0 ? oppCostRaw : (hoursSpent * opportunityRateUsed);
     const totalCostRaw = entry.totalCost != null ? Number(entry.totalCost) : null;
-    const totalCost = Number.isFinite(totalCostRaw) && totalCostRaw >= 0 ? totalCostRaw : (laborCost + partCost);
+    const totalCost = Number.isFinite(totalCostRaw) && totalCostRaw >= 0 ? totalCostRaw : (laborCost + partCost + opportunityCost);
     manualMaintenanceEvents.push({
       key: `${originalId || "task"}__${dateKey}__${manualMaintenanceEvents.length}`,
       date,
@@ -11122,7 +11154,9 @@ function computeCostModel(){
       hours: hoursSpent,
       hoursSpent,
       hourlyRateUsed,
+      opportunityRateUsed,
       laborCost,
+      opportunityCost,
       partCost,
       totalCost,
       cost: totalCost,
@@ -11992,19 +12026,25 @@ function computeCostModel(){
       const hours = Number.isFinite(hoursVal) && hoursVal >= 0 ? hoursVal : 0;
       const rateVal = Number(entry.hourlyRateUsed);
       const hourlyRateUsed = Number.isFinite(rateVal) && rateVal >= 0 ? rateVal : maintenanceRate;
+      const oppRateVal = Number(entry.opportunityRateUsed);
+      const opportunityRateUsed = Number.isFinite(oppRateVal) && oppRateVal >= 0 ? oppRateVal : (typeof getOpportunityLossRate === "function" ? getOpportunityLossRate() : 0);
       const partRaw = Number(entry.partCost ?? (firstTask && firstTask.unitPrice));
       const partCost = Number.isFinite(partRaw) && partRaw >= 0 ? partRaw : 0;
       const laborRaw = Number(entry.laborCost);
       const laborCost = Number.isFinite(laborRaw) && laborRaw >= 0 ? laborRaw : hours * hourlyRateUsed;
+      const oppRaw = Number(entry.opportunityCost);
+      const opportunityCost = Number.isFinite(oppRaw) && oppRaw >= 0 ? oppRaw : hours * opportunityRateUsed;
       const totalRaw = Number(entry.totalCost ?? entry.cost);
-      const totalCost = Number.isFinite(totalRaw) && totalRaw >= 0 ? totalRaw : (laborCost + partCost);
+      const totalCost = Number.isFinite(totalRaw) && totalRaw >= 0 ? totalRaw : (laborCost + partCost + opportunityCost);
       return {
         id: entry.key || `maint_${index}`,
         completionDate: entry.dateISO || null,
         taskName: entry.taskName || (firstTask && firstTask.name) || "Maintenance task",
         hoursSpent: hours,
         hourlyRateUsed,
+        opportunityRateUsed,
         laborCost,
+        opportunityCost,
         partCost,
         totalCost,
         taskId: entry.taskId || (firstTask && firstTask.id) || null,

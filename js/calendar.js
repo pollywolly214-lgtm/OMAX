@@ -483,13 +483,19 @@ function markCalendarTaskComplete(meta, dateISO){
     const hourlyRateUsed = typeof getMaintenanceHourlyRate === "function"
       ? getMaintenanceHourlyRate()
       : (DEFAULT_APP_CONFIG && Number.isFinite(Number(DEFAULT_APP_CONFIG.maintenanceHourlyRate)) ? Number(DEFAULT_APP_CONFIG.maintenanceHourlyRate) : 0);
+    const opportunityRateUsed = typeof getOpportunityLossRate === "function"
+      ? getOpportunityLossRate()
+      : 0;
     const partCost = computeTaskPartCost(task);
     if (hoursSpent != null) entry.hoursSpent = hoursSpent;
     entry.hourlyRateUsed = hourlyRateUsed;
+    entry.opportunityRateUsed = opportunityRateUsed;
     entry.partCost = partCost;
     const laborCost = hoursSpent != null ? hoursSpent * hourlyRateUsed : 0;
+    const opportunityCost = hoursSpent != null ? hoursSpent * opportunityRateUsed : 0;
     entry.laborCost = laborCost;
-    entry.totalCost = laborCost + (Number.isFinite(partCost) ? partCost : 0);
+    entry.opportunityCost = opportunityCost;
+    entry.totalCost = laborCost + (Number.isFinite(partCost) ? partCost : 0) + opportunityCost;
 
     const snapshotHours = typeof hoursSnapshotOnOrBefore === "function" ? hoursSnapshotOnOrBefore(key) : null;
     if (snapshotHours != null && Number.isFinite(Number(snapshotHours))){
@@ -541,13 +547,19 @@ function markCalendarTaskComplete(meta, dateISO){
     const hourlyRateUsed = typeof getMaintenanceHourlyRate === "function"
       ? getMaintenanceHourlyRate()
       : (DEFAULT_APP_CONFIG && Number.isFinite(Number(DEFAULT_APP_CONFIG.maintenanceHourlyRate)) ? Number(DEFAULT_APP_CONFIG.maintenanceHourlyRate) : 0);
+    const opportunityRateUsed = typeof getOpportunityLossRate === "function"
+      ? getOpportunityLossRate()
+      : 0;
     const partCost = computeTaskPartCost(task);
     if (hoursSpent != null) entry.hoursSpent = hoursSpent;
     entry.hourlyRateUsed = hourlyRateUsed;
+    entry.opportunityRateUsed = opportunityRateUsed;
     entry.partCost = partCost;
     const laborCost = hoursSpent != null ? hoursSpent * hourlyRateUsed : 0;
+    const opportunityCost = hoursSpent != null ? hoursSpent * opportunityRateUsed : 0;
     entry.laborCost = laborCost;
-    entry.totalCost = laborCost + (Number.isFinite(partCost) ? partCost : 0);
+    entry.opportunityCost = opportunityCost;
+    entry.totalCost = laborCost + (Number.isFinite(partCost) ? partCost : 0) + opportunityCost;
     history.sort((a,b)=> String(a.dateISO || "").localeCompare(String(b.dateISO || "")));
     task.manualHistory = history;
   }
