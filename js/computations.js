@@ -77,6 +77,15 @@ function computeTimeEfficiency(rangeDays, options = {}){
   }
 
   const map = getDailyCutHoursMap();
+  const baselineDailyHoursRaw = (typeof getConfiguredDailyHours === "function")
+    ? Number(getConfiguredDailyHours())
+    : Number(CUTTING_BASELINE_DAILY_HOURS);
+  const baselineDailyHours = (Number.isFinite(baselineDailyHoursRaw) && baselineDailyHoursRaw > 0)
+    ? baselineDailyHoursRaw
+    : CUTTING_BASELINE_DAILY_HOURS;
+  const averageDailyHours = (typeof getAverageDailyCutHours === "function")
+    ? getAverageDailyCutHours()
+    : null;
   let actual = 0;
   let coverage = 0;
   const cursor = new Date(startDate);
@@ -92,7 +101,7 @@ function computeTimeEfficiency(rangeDays, options = {}){
   }
 
   const workingDays = inclusiveDayCount(startDate, endDate) || 0;
-  const baseline = CUTTING_BASELINE_DAILY_HOURS * workingDays;
+  const baseline = baselineDailyHours * workingDays;
 
   const todayLocal = new Date();
   todayLocal.setHours(0,0,0,0);
@@ -111,7 +120,7 @@ function computeTimeEfficiency(rangeDays, options = {}){
   if (!Number.isFinite(elapsedDays)) elapsedDays = 0;
   elapsedDays = Math.max(0, Math.min(normalizedDays, Math.round(elapsedDays)));
 
-  const targetHours = CUTTING_BASELINE_DAILY_HOURS * elapsedDays;
+  const targetHours = baselineDailyHours * elapsedDays;
   const differenceToDate = actual - targetHours;
   const difference = actual - baseline;
   const percentToDate = targetHours > 0
@@ -130,6 +139,7 @@ function computeTimeEfficiency(rangeDays, options = {}){
     efficiencyPercent: percentToDate,
     efficiencyGoalPercent: percentGoal,
     coverageDays: coverage,
+    averageDailyHours,
     startISO: ymd(startDate),
     endISO: ymd(endDate),
     description: meta.description,

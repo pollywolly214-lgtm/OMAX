@@ -79,6 +79,7 @@ if (typeof window !== "undefined"){
   window.TIME_EFFICIENCY_WINDOWS = TIME_EFFICIENCY_WINDOWS;
   window.appConfig = appConfig;
   window.getConfiguredDailyHours = getConfiguredDailyHours;
+  window.getAverageDailyCutHours = getAverageDailyCutHours;
   window.shouldExcludeWeekends = shouldExcludeWeekends;
   window.setAppConfig = setAppConfig;
   window.normalizeAppConfig = normalizeAppConfig;
@@ -231,12 +232,29 @@ function shouldExcludeWeekends(){
 }
 
 function getConfiguredDailyHours(){
+  const avg = getAverageDailyCutHours();
+  if (avg != null && Number.isFinite(avg) && avg > 0) return avg;
   try {
     const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
     const clamped = clampDailyCutHours(cfg.dailyHours);
     if (clamped > 0) return clamped;
   } catch (_err){ /* ignore */ }
   return DEFAULT_DAILY_HOURS;
+}
+
+function getAverageDailyCutHours(){
+  const list = Array.isArray(dailyCutHours) ? dailyCutHours : [];
+  let total = 0;
+  let count = 0;
+  for (const entry of list){
+    if (!entry || !entry.dateISO) continue;
+    const hours = clampDailyCutHours(entry.hours);
+    if (!Number.isFinite(hours)) continue;
+    total += hours;
+    count += 1;
+  }
+  if (!count) return null;
+  return total / count;
 }
 
 function refreshDerivedDailyHours(){
