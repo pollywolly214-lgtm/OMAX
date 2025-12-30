@@ -17,8 +17,9 @@ let DAILY_HOURS = DEFAULT_DAILY_HOURS;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
 // Decide workspace based on hostname:
-// - GitHub Pages (anything ending with .github.io) or the production Vercel host → "github-prod"
-// - Preview / branch URLs on Vercel (e.g. *.vercel.app) or everything else → "vercel-preview"
+// - GitHub Pages (anything ending with .github.io), the production Vercel host, or any custom
+//   production domain → "github-prod"
+// - Preview / branch URLs on Vercel (e.g. *.vercel.app) plus localhost/dev hosts → "vercel-preview"
 const WORKSPACE_ID = (() => {
   if (typeof window !== "undefined") {
     const rawHost = window.location && typeof window.location.hostname === "string"
@@ -28,11 +29,14 @@ const WORKSPACE_ID = (() => {
 
     const isGithubPages = host.endsWith(".github.io");
     const isProdVercel = host === "omax.vercel.app";
-    if (isGithubPages || isProdVercel) {
+    const isLocalHost = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
+    const isVercelPreview = host.endsWith(".vercel.app") && !isProdVercel;
+    const isProdHost = (isGithubPages || isProdVercel || (!isVercelPreview && !isLocalHost && host));
+    if (isProdHost) {
       return "github-prod";
     }
 
-    // Treat everything else (branch previews, localhost, custom staging domains) as preview data.
+    // Treat previews and local/dev hosts as preview data.
     return "vercel-preview";
   }
   // Fallback for non-browser contexts so build-time scripts default to production doc
