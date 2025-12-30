@@ -252,8 +252,9 @@ function getAverageDailyCutHours(){
 
   const today = new Date();
   today.setHours(0,0,0,0);
+  const windowDays = (typeof shouldExcludeWeekends === "function" && shouldExcludeWeekends()) ? 22 : 30;
   const monthStart = new Date(today);
-  monthStart.setDate(monthStart.getDate() - 30);
+  monthStart.setDate(monthStart.getDate() - windowDays);
 
   const monthStartTime = monthStart.getTime();
   const todayTime = today.getTime();
