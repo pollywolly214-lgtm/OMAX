@@ -3572,6 +3572,18 @@ function maintenanceInventoryCategories(){
   return categories;
 }
 
+function inventoryCategoryTreeData(){
+  const rootId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
+  const categories = maintenanceInventoryCategories();
+  const byParent = new Map();
+  categories.forEach(cat => {
+    const parentKey = cat.parent != null ? String(cat.parent) : null;
+    if (!byParent.has(parentKey)) byParent.set(parentKey, []);
+    byParent.get(parentKey).push(cat);
+  });
+  return { rootId, categories, byParent };
+}
+
 function inventoryCategoryNameMap(){
   const map = new Map();
   maintenanceInventoryCategories().forEach(cat => {
@@ -3598,6 +3610,8 @@ function inventoryItemCategoryInfo(item, categoryMap){
   let categoryId = "";
   if (linkedCategoryId && categories.has(linkedCategoryId)){
     categoryId = linkedCategoryId;
+  } else if (linkedCategoryId && !categories.has(linkedCategoryId)){
+    categoryId = "";
   } else if (!isLinked && rawCategoryId && categories.has(rawCategoryId)){
     categoryId = rawCategoryId;
   }
@@ -3606,16 +3620,22 @@ function inventoryItemCategoryInfo(item, categoryMap){
 
 function inventoryCategoryOptionsMarkup(selectedId){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-  const categories = maintenanceInventoryCategories();
+  const { byParent } = inventoryCategoryTreeData();
   const value = selectedId != null ? String(selectedId) : "";
   const options = [`<option value=""${value==="" ? " selected" : ""}>Uncategorized</option>`];
-  categories.forEach(cat => {
-    if (!cat) return;
-    const id = cat.id != null ? String(cat.id) : "";
-    const label = cat.name || "Category";
-    const isSelected = value === id;
-    options.push(`<option value="${esc(id)}"${isSelected ? " selected" : ""}>${esc(label)}</option>`);
-  });
+  const appendOptions = (parentKey, depth)=>{
+    const list = byParent.get(parentKey) || [];
+    list.forEach(cat => {
+      if (!cat) return;
+      const id = cat.id != null ? String(cat.id) : "";
+      const label = cat.name || "Category";
+      const indent = depth > 0 ? `${"—".repeat(depth)} ` : "";
+      const isSelected = value === id;
+      options.push(`<option value="${esc(id)}"${isSelected ? " selected" : ""}>${esc(indent + label)}</option>`);
+      appendOptions(id, depth + 1);
+    });
+  };
+  appendOptions(null, 0);
   return options.join("");
 }
 
@@ -3675,7 +3695,7 @@ function inventoryRowsHTML(list, emptyMessage){
 
 function inventoryGroupsHTML(list){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-  const categories = maintenanceInventoryCategories();
+  const { byParent, categories, rootId } = inventoryCategoryTreeData();
   const categoryMap = new Map(categories.map(cat => [String(cat.id), cat.name || "Category"]));
   const grouped = new Map();
   list.forEach(item => {
@@ -3686,43 +3706,69 @@ function inventoryGroupsHTML(list){
     grouped.get(key).push(item);
   });
 
-  const buildSection = (id, name, items, { isUncategorized = false } = {})=>{
-    const key = id ? String(id) : "__uncategorized";
-    const safeId = esc(id || "");
-    const safeName = esc(name || "Category");
+  const buildCategorySection = (cat, depth)=>{
+    const id = cat.id != null ? String(cat.id) : "";
+    const name = categoryMap.get(id) || "Category";
+    const items = grouped.get(id) || [];
+    const safeName = esc(name);
     const count = items.length;
-    const rows = inventoryRowsHTML(
-      items,
-      isUncategorized
-        ? "Unlinked items appear here."
-        : `Drag items here to assign them to ${safeName}.`
-    );
+    const rows = inventoryRowsHTML(items, `Drag items here to assign them to ${safeName}.`);
+    const children = (byParent.get(id) || []).map(child => buildCategorySection(child, depth + 1)).join("");
+    const dropBefore = `<div class="inventory-category-drop" data-inventory-drop-before-category="${esc(id)}" data-inventory-drop-parent="${esc(cat.parent ?? "")}">Drop category here</div>`;
+    const dropInto = `<div class="inventory-category-drop inventory-category-drop-into" data-inventory-drop-into-category="${esc(id)}">Drop category to nest inside ${safeName}</div>`;
+    const subcategoryAction = `<button type="button" class="inventory-category-action" data-inventory-add-subcategory="${esc(id)}">+ Sub-category</button>`;
+    const renameAction = `<button type="button" class="inventory-category-action" data-inventory-rename-category="${esc(id)}">Rename</button>`;
+    const removeAction = `<button type="button" class="inventory-category-action danger" data-inventory-remove-category="${esc(id)}">Remove</button>`;
     return `
-      <section class="inventory-category" data-inventory-drop-category="${esc(key)}" data-inventory-category="${safeId}">
-        <div class="inventory-category-header">
+      ${dropBefore}
+      <section class="inventory-category" data-inventory-drop-item-category="${esc(id)}" data-inventory-category="${esc(id)}">
+        <div class="inventory-category-header" draggable="true" data-inventory-category-drag="${esc(id)}" data-inventory-drop-into-category="${esc(id)}">
           <div>
             <div class="inventory-category-title">${safeName}</div>
             <div class="small muted">${count} item${count === 1 ? "" : "s"}</div>
           </div>
+          <div class="inventory-category-actions">
+            ${subcategoryAction}
+            ${renameAction}
+            ${removeAction}
+          </div>
         </div>
         <div class="inventory-category-table">
+          ${dropInto}
           <table class="inventory-table">
             <thead><tr><th>Category</th><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
-      </section>`;
+        <div class="inventory-category-children" data-inventory-category-children="${esc(id)}">${children}</div>
+      </section>
+    `;
   };
 
-  const sections = categories.map(cat => {
-    const items = grouped.get(String(cat.id)) || [];
-    return buildSection(String(cat.id), categoryMap.get(String(cat.id)) || "Category", items);
-  });
+  const rootCategories = byParent.get(null) || [];
+  const sections = rootCategories.map(cat => buildCategorySection(cat, 0)).join("");
+  const rootTail = `<div class="inventory-category-drop" data-inventory-drop-category-tail="${esc(rootId)}">Drop category here to move to top level</div>`;
 
   const uncategorizedItems = grouped.get("") || [];
-  sections.push(buildSection("", "Uncategorized", uncategorizedItems, { isUncategorized: true }));
+  const uncategorizedRows = inventoryRowsHTML(uncategorizedItems, "Unlinked items appear here.");
+  const uncategorizedSection = `
+    <section class="inventory-category inventory-category-uncategorized" data-inventory-drop-item-category="__uncategorized">
+      <div class="inventory-category-header">
+        <div>
+          <div class="inventory-category-title">Uncategorized</div>
+          <div class="small muted">${uncategorizedItems.length} item${uncategorizedItems.length === 1 ? "" : "s"}</div>
+        </div>
+      </div>
+      <div class="inventory-category-table">
+        <table class="inventory-table">
+          <thead><tr><th>Category</th><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
+          <tbody>${uncategorizedRows}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
 
-  return sections.join("") || `<div class="inventory-category-empty">No inventory items match your search.</div>`;
+  return `${sections}${rootTail}${uncategorizedSection}` || `<div class="inventory-category-empty">No inventory items match your search.</div>`;
 }
 
 function viewInventory(){
@@ -3737,7 +3783,10 @@ function viewInventory(){
     <div class="block" style="grid-column:1 / -1">
       <h3>Inventory</h3>
       <div class="inventory-toolbar">
-        <button type="button" class="inventory-add-trigger" id="inventoryAddBtn">+ Add inventory item</button>
+        <div class="inventory-toolbar-actions">
+          <button type="button" class="inventory-add-trigger" id="inventoryAddBtn">+ Add inventory item</button>
+          <button type="button" class="inventory-add-trigger inventory-add-category" id="inventoryAddCategory">+ Add category</button>
+        </div>
         <div class="inventory-search mini-form">
           <input type="search" id="inventorySearch" placeholder="Search items, part numbers, notes, or links" value="${searchValue}">
           <button type="button" id="inventorySearchClear">Clear</button>
