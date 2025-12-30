@@ -18,14 +18,14 @@ const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr
 // Decide workspace based on hostname:
 // - omax.vercel.app      → production workspace "github-prod"
-// - any other hostname   → preview workspace "vercel-preview"
+// - any other hostname   → production workspace "github-prod"
 const WORKSPACE_ID = (()=>{
   if (typeof window !== "undefined"){
     const host = window.location.hostname || "";
     if (host === "omax.vercel.app"){
       return "github-prod";
     } else {
-      return "vercel-preview";
+      return "github-prod";
     }
   }
   // Fallback for non-browser contexts
@@ -460,14 +460,14 @@ const DAILY_HOURS = 8;
 const JOB_RATE_PER_HOUR = 250; // $/hr
 // Decide workspace based on hostname:
 // - omax.vercel.app      → production workspace "github-prod"
-// - any other hostname   → preview workspace "vercel-preview"
+// - any other hostname   → production workspace "github-prod"
 const WORKSPACE_ID = (()=>{
   if (typeof window !== "undefined"){
     const host = window.location.hostname || "";
     if (host === "omax.vercel.app"){
       return "github-prod";
     } else {
-      return "vercel-preview";
+      return "github-prod";
     }
   }
   // Fallback for non-browser contexts
@@ -4013,5 +4013,4 @@ body.modal-open {
 }
 
 .down-remove-btn:hover { background: #c43d3d; }
-
 
