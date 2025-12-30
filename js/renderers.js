@@ -14452,10 +14452,11 @@ function renderInventory(){
   setAppSettingsContext("default");
   wireDashboardSettingsMenu();
   content.innerHTML = viewInventory();
-  const rowsTarget = content.querySelector("[data-inventory-rows]");
+  const rowsTarget = content.querySelector("[data-inventory-groups]");
   const searchInput = content.querySelector("#inventorySearch");
   const clearBtn = content.querySelector("#inventorySearchClear");
   const addBtn = content.querySelector("#inventoryAddBtn");
+  const addCategoryBtn = content.querySelector("#inventoryAddCategory");
   const modal = content.querySelector("#inventoryAddModal");
   const form = content.querySelector("#inventoryAddForm");
   const closeBtn = modal?.querySelector("[data-close]");
@@ -14467,7 +14468,22 @@ function renderInventory(){
   const nameField = modal?.querySelector("[name=\"inventoryName\"]");
   const qtyNewField = modal?.querySelector("[name=\"inventoryQtyNew\"]");
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
+  const categoryScopeField = modal?.querySelector("[name=\"inventoryCategoryScope\"]");
+  const categoryField = modal?.querySelector("[name=\"inventoryCategory\"]");
   let addToMaintenance = false;
+
+  const persistMaintenanceFolders = ()=>{
+    if (typeof setSettingsFolders === "function"){
+      try { setSettingsFolders(window.settingsFolders); } catch (err){ console.warn("Failed to sync folders before save", err); }
+    }
+    if (typeof saveTasks === "function"){ try { saveTasks(); } catch(_){} }
+    if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){} }
+  };
+
+  const ensureMaintenanceFoldersState = ()=>{
+    window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+    if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+  };
 
   function syncLinkedTasksFromInventory(item, updates){
     if (!item) return false;
@@ -14518,15 +14534,31 @@ function renderInventory(){
     return changed;
   }
 
+  const refreshCategoryFieldOptions = ()=>{
+    if (!(categoryField instanceof HTMLSelectElement)) return;
+    const current = categoryField.value;
+    if (typeof inventoryCategoryOptionsMarkup === "function"){
+      const scope = categoryScopeField instanceof HTMLSelectElement ? categoryScopeField.value : "";
+      categoryField.innerHTML = inventoryCategoryOptionsMarkup(current, scope);
+      const escaped = (typeof CSS !== "undefined" && CSS.escape) ? CSS.escape(current) : current;
+      if (current && categoryField.querySelector(`option[value="${escaped}"]`)){
+        categoryField.value = current;
+      }
+    }
+  };
+
   const refreshRows = ()=>{
     if (!rowsTarget) return;
     const filtered = filterInventoryItems(inventorySearchTerm);
-    rowsTarget.innerHTML = inventoryRowsHTML(filtered);
+    rowsTarget.innerHTML = inventoryGroupsHTML(filtered);
+    refreshCategoryFieldOptions();
   };
 
   try{
     window.__refreshInventoryRows = refreshRows;
   }catch(_){ }
+
+  refreshCategoryFieldOptions();
 
   if (searchInput){
     searchInput.addEventListener("input", ()=>{
@@ -14535,6 +14567,30 @@ function renderInventory(){
       refreshRows();
     });
   }
+
+  categoryScopeField?.addEventListener("change", ()=>{
+    refreshCategoryFieldOptions();
+  });
+
+  addCategoryBtn?.addEventListener("click", ()=>{
+    ensureMaintenanceFoldersState();
+    const scope = prompt("Add category to which group? Enter \"interval\" or \"asreq\".", "interval");
+    if (scope == null) return;
+    const normalizedScope = scope.trim().toLowerCase();
+    if (normalizedScope !== "interval" && normalizedScope !== "asreq"){
+      toast("Enter \"interval\" or \"asreq\".");
+      return;
+    }
+    const name = prompt("New category name?");
+    if (!name) return;
+    const trimmed = name.trim();
+    if (!trimmed){ toast("Enter a category name."); return; }
+    const id = `${trimmed.toLowerCase().replace(/[^a-z0-9]+/g,"_")}_${Math.random().toString(36).slice(2,7)}`;
+    window.settingsFolders.push({ id, name: trimmed, parent: normalizedScope, order: (++window._maintOrderCounter) });
+    persistMaintenanceFolders();
+    refreshRows();
+    toast("Category added");
+  });
 
   if (clearBtn){
     clearBtn.addEventListener("click", ()=>{
@@ -14546,6 +14602,53 @@ function renderInventory(){
       searchInput?.focus();
     });
   }
+
+  rowsTarget?.addEventListener("change", (e)=>{
+    const select = e.target.closest("[data-inventory-category-select]");
+    if (!(select instanceof HTMLSelectElement) || select.disabled) return;
+    const id = select.getAttribute("data-id");
+    if (!id) return;
+    const item = inventory.find(entry => entry && String(entry.id) === String(id));
+    if (!item) return;
+    const next = select.value || "";
+    const linkedTasks = typeof findTasksLinkedToInventoryItem === "function"
+      ? findTasksLinkedToInventoryItem(item)
+      : [];
+    if (linkedTasks.length){
+      if (typeof showConfirmModal === "function"){
+        showConfirmModal({
+          title: "Linked items stay with maintenance",
+          message: "This inventory item is linked to a maintenance task, so its category is managed by Maintenance Settings.",
+          cancelText: "OK",
+          confirmText: "Open Maintenance Settings"
+        }).then(confirmed => {
+          if (confirmed) location.hash = "#/settings";
+        });
+      }else{
+        alert("Linked items stay with Maintenance Settings categories.");
+      }
+      refreshRows();
+      return;
+    }
+    const scope = select.closest("[data-inventory-scope]")?.getAttribute("data-inventory-scope") || "";
+    if (scope !== "interval" && scope !== "asreq"){
+      if (typeof showConfirmModal === "function"){
+        showConfirmModal({
+          title: "Choose a maintenance type",
+          message: "Uncategorized items need to be dropped into Per Interval or As-Required before assigning a category.",
+          cancelText: "OK"
+        });
+      }else{
+        alert("Drop this item into Per Interval or As-Required before assigning a category.");
+      }
+      refreshRows();
+      return;
+    }
+    item.categoryScope = scope;
+    item.categoryId = next ? next : null;
+    if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
+    refreshRows();
+  });
 
   rowsTarget?.addEventListener("input",(e)=>{
     const input = e.target;
@@ -14576,7 +14679,235 @@ function renderInventory(){
     saveCloudDebounced();
   });
 
+  rowsTarget?.addEventListener("dragstart", (e)=>{
+    const handle = e.target.closest("[data-inventory-drag-handle]");
+    if (!(handle instanceof HTMLElement)) return;
+    const id = handle.getAttribute("data-id");
+    if (!id) return;
+    e.dataTransfer?.setData("text/plain", `inventory:${id}`);
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+    const row = handle.closest("tr");
+    row?.classList.add("inventory-dragging");
+  });
+
+  rowsTarget?.addEventListener("dragstart", (e)=>{
+    const summary = e.target.closest("details.folder > summary");
+    if (!(summary instanceof HTMLElement)) return;
+    const holder = summary.closest("details.folder");
+    const id = holder?.getAttribute("data-folder-id");
+    if (!id) return;
+    e.dataTransfer?.setData("text/plain", `category:${id}`);
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+    summary.classList.add("drop-hint");
+  });
+
+  rowsTarget?.addEventListener("dragend", (e)=>{
+    const row = e.target.closest("tr");
+    row?.classList.remove("inventory-dragging");
+    const summary = e.target.closest("details.folder > summary");
+    summary?.classList.remove("drop-hint");
+  });
+
+  rowsTarget?.addEventListener("dragover", (e)=>{
+    const zone = e.target.closest("[data-drop-folder],[data-drop-before-folder],[data-drop-folder-tail],[data-inventory-drop-uncategorized],[data-inventory-drop-menu]");
+    if (!zone) return;
+    const payload = e.dataTransfer?.getData("text/plain") || "";
+    if (!payload.startsWith("inventory:") && !payload.startsWith("category:")) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    zone.classList.add("dragover");
+  });
+
+  rowsTarget?.addEventListener("dragover", (e)=>{
+    const summary = e.target.closest("details.folder > summary");
+    if (!(summary instanceof HTMLElement)) return;
+    const payload = e.dataTransfer?.getData("text/plain") || "";
+    if (!payload.startsWith("inventory:")) return;
+    e.preventDefault();
+    summary.classList.add("drop-hint");
+  });
+
+  rowsTarget?.addEventListener("dragleave", (e)=>{
+    const zone = e.target.closest("[data-drop-folder],[data-drop-before-folder],[data-drop-folder-tail],[data-inventory-drop-uncategorized],[data-inventory-drop-menu]");
+    if (!zone) return;
+    if (zone.contains(e.relatedTarget)) return;
+    zone.classList.remove("dragover");
+  });
+
+  rowsTarget?.addEventListener("dragleave", (e)=>{
+    const summary = e.target.closest("details.folder > summary");
+    if (!(summary instanceof HTMLElement)) return;
+    if (summary.contains(e.relatedTarget)) return;
+    summary.classList.remove("drop-hint");
+  });
+
+  rowsTarget?.addEventListener("drop", (e)=>{
+    const zone = e.target.closest("[data-drop-folder],[data-drop-before-folder],[data-drop-folder-tail],[data-inventory-drop-uncategorized],[data-inventory-drop-menu]");
+    if (!zone) return;
+    const payload = e.dataTransfer?.getData("text/plain") || "";
+    if (!payload.startsWith("inventory:") && !payload.startsWith("category:")) return;
+    e.preventDefault();
+    zone.classList.remove("dragover");
+    if (payload.startsWith("inventory:")){
+      const id = payload.split(":")[1];
+      if (!id) return;
+      const item = inventory.find(entry => entry && String(entry.id) === String(id));
+      if (!item) return;
+      const linkedTasks = typeof findTasksLinkedToInventoryItem === "function"
+        ? findTasksLinkedToInventoryItem(item)
+        : [];
+      if (linkedTasks.length){
+        if (typeof showConfirmModal === "function"){
+          showConfirmModal({
+            title: "Linked items stay with maintenance",
+            message: "This inventory item is linked to a maintenance task, so its category is managed by Maintenance Settings.",
+            cancelText: "OK",
+            confirmText: "Open Maintenance Settings"
+          }).then(confirmed => {
+            if (confirmed) location.hash = "#/settings";
+          });
+        }else{
+          alert("Linked items stay with Maintenance Settings categories.");
+        }
+        return;
+      }
+      if (!zone.hasAttribute("data-drop-folder")
+          && !zone.hasAttribute("data-inventory-drop-uncategorized")
+          && !zone.hasAttribute("data-inventory-drop-menu")){
+        return;
+      }
+      let categoryId = null;
+      if (zone.hasAttribute("data-drop-folder")){
+        const targetKey = zone.getAttribute("data-drop-folder") || "";
+        categoryId = targetKey ? targetKey : null;
+        const scope = zone.closest("[data-inventory-scope]")?.getAttribute("data-inventory-scope") || "";
+        item.categoryScope = scope === "interval" || scope === "asreq" ? scope : null;
+      } else if (zone.hasAttribute("data-inventory-drop-menu")){
+        const scope = zone.getAttribute("data-inventory-drop-menu") || "";
+        item.categoryScope = scope === "interval" || scope === "asreq" ? scope : null;
+        categoryId = null;
+      } else if (zone.hasAttribute("data-inventory-drop-uncategorized")){
+        item.categoryScope = null;
+      }
+      item.categoryId = categoryId ? categoryId : null;
+      if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
+      refreshRows();
+      return;
+    }
+
+    if (payload.startsWith("category:")){
+      ensureMaintenanceFoldersState();
+      const id = payload.split(":")[1];
+      if (!id) return;
+      const beforeId = zone.getAttribute("data-drop-before-folder");
+      const intoId = zone.getAttribute("data-drop-folder");
+      const tailParent = zone.getAttribute("data-drop-folder-tail");
+      let moved = false;
+      if (beforeId && typeof moveNodeSafely === "function"){
+        moved = moveNodeSafely("category", id, { beforeCat: { id: beforeId } });
+      }else if (intoId && typeof moveNodeSafely === "function"){
+        moved = moveNodeSafely("category", id, { intoCat: intoId, position: "end" });
+      }else if (tailParent != null && typeof moveNodeSafely === "function"){
+        const parentId = tailParent === "" ? null : tailParent;
+        moved = moveNodeSafely("category", id, { intoCat: parentId, position: "end" });
+      }
+      if (moved){
+        persistMaintenanceFolders();
+        refreshRows();
+      }
+    }
+  });
+
+  rowsTarget?.addEventListener("drop", (e)=>{
+    const summary = e.target.closest("details.folder > summary");
+    if (!(summary instanceof HTMLElement)) return;
+    const payload = e.dataTransfer?.getData("text/plain") || "";
+    if (!payload.startsWith("inventory:")) return;
+    e.preventDefault();
+    summary.classList.remove("drop-hint");
+    const id = payload.split(":")[1];
+    if (!id) return;
+    const item = inventory.find(entry => entry && String(entry.id) === String(id));
+    if (!item) return;
+    const linkedTasks = typeof findTasksLinkedToInventoryItem === "function"
+      ? findTasksLinkedToInventoryItem(item)
+      : [];
+    if (linkedTasks.length){
+      if (typeof showConfirmModal === "function"){
+        showConfirmModal({
+          title: "Linked items stay with maintenance",
+          message: "This inventory item is linked to a maintenance task, so its category is managed by Maintenance Settings.",
+          cancelText: "OK",
+          confirmText: "Open Maintenance Settings"
+        }).then(confirmed => {
+          if (confirmed) location.hash = "#/settings";
+        });
+      }else{
+        alert("Linked items stay with Maintenance Settings categories.");
+      }
+      return;
+    }
+    const holder = summary.closest("details.folder");
+    const folderId = holder?.getAttribute("data-folder-id");
+    const scope = summary.closest("[data-inventory-scope]")?.getAttribute("data-inventory-scope") || "";
+    item.categoryScope = scope === "interval" || scope === "asreq" ? scope : null;
+    item.categoryId = folderId ? folderId : null;
+    if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
+    refreshRows();
+  });
+
   rowsTarget?.addEventListener("click", async (e)=>{
+    const addSub = e.target.closest("[data-inventory-add-subcategory]");
+    if (addSub){
+      ensureMaintenanceFoldersState();
+      const parent = addSub.getAttribute("data-inventory-add-subcategory");
+      const name = prompt("Sub-category name?");
+      if (!name) return;
+      const trimmed = name.trim();
+      if (!trimmed){ toast("Enter a category name."); return; }
+      const id = `${trimmed.toLowerCase().replace(/[^a-z0-9]+/g,"_")}_${Math.random().toString(36).slice(2,7)}`;
+      window.settingsFolders.push({ id, name: trimmed, parent, order: (++window._maintOrderCounter) });
+      persistMaintenanceFolders();
+      refreshRows();
+      toast("Sub-category added");
+      return;
+    }
+
+    const renameBtn = e.target.closest("[data-inventory-rename-category]");
+    if (renameBtn){
+      ensureMaintenanceFoldersState();
+      const id = renameBtn.getAttribute("data-inventory-rename-category");
+      const folder = window.settingsFolders.find(f => f && String(f.id) === String(id));
+      if (!folder) return;
+      const name = prompt("Rename category:", folder.name || "");
+      if (!name) return;
+      const trimmed = name.trim();
+      if (!trimmed){ toast("Enter a category name."); return; }
+      folder.name = trimmed;
+      persistMaintenanceFolders();
+      refreshRows();
+      toast("Category renamed");
+      return;
+    }
+
+    const removeBtn = e.target.closest("[data-inventory-remove-category]");
+    if (removeBtn){
+      const id = removeBtn.getAttribute("data-inventory-remove-category");
+      if (!id) return;
+      if (typeof showConfirmModal === "function"){
+        const confirmed = await showConfirmModal({
+          title: "Remove category in Maintenance Settings",
+          message: "Categories are shared with Maintenance Settings. Remove it there to keep inventory and maintenance in sync.",
+          cancelText: "OK",
+          confirmText: "Open Maintenance Settings"
+        });
+        if (confirmed){ location.hash = "#/settings"; }
+      }else{
+        alert("Remove categories from Maintenance Settings to keep everything in sync.");
+      }
+      return;
+    }
+
     const nameBtn = e.target.closest("[data-inventory-maintenance]");
     if (nameBtn){
       const id = nameBtn.getAttribute("data-inventory-maintenance");
@@ -14670,6 +15001,13 @@ function renderInventory(){
     form?.reset();
     if (qtyNewField) qtyNewField.value = qtyNewField.defaultValue || "1";
     if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
+    if (categoryScopeField instanceof HTMLSelectElement){
+      categoryScopeField.value = "";
+    }
+    if (categoryField instanceof HTMLSelectElement){
+      refreshCategoryFieldOptions();
+      categoryField.value = categoryField.options.length ? categoryField.options[0].value : "";
+    }
   }
 
   function closeInventoryModal(){
@@ -14681,6 +15019,12 @@ function renderInventory(){
     form?.reset();
     if (qtyNewField) qtyNewField.value = qtyNewField.defaultValue || "1";
     if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
+    if (categoryScopeField instanceof HTMLSelectElement){
+      categoryScopeField.value = "";
+    }
+    if (categoryField instanceof HTMLSelectElement){
+      categoryField.value = categoryField.options.length ? categoryField.options[0].value : "";
+    }
   }
 
   addBtn?.addEventListener("click", openInventoryModal);
@@ -14720,6 +15064,10 @@ function renderInventory(){
     const pn = (data.get("inventoryPN") || "").toString().trim();
     const link = (data.get("inventoryLink") || "").toString().trim();
     const priceRaw = data.get("inventoryPrice");
+    const categoryIdRaw = data.get("inventoryCategory");
+    const categoryId = typeof categoryIdRaw === "string" ? categoryIdRaw.trim() : "";
+    const categoryScopeRaw = data.get("inventoryCategoryScope");
+    const categoryScope = typeof categoryScopeRaw === "string" ? categoryScopeRaw.trim() : "";
     let price = null;
     if (priceRaw !== null && priceRaw !== ""){
       const num = Number(priceRaw);
@@ -14737,7 +15085,9 @@ function renderInventory(){
       pn,
       link,
       price,
-      note
+      note,
+      categoryId: categoryId || null,
+      categoryScope: categoryScope || null
     };
     const item = typeof normalizeInventoryItem === "function"
       ? normalizeInventoryItem(baseItem)
