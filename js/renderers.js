@@ -14411,6 +14411,7 @@ function renderInventory(){
   const nameField = modal?.querySelector("[name=\"inventoryName\"]");
   const qtyNewField = modal?.querySelector("[name=\"inventoryQtyNew\"]");
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
+  const categoryScopeField = modal?.querySelector("[name=\"inventoryCategoryScope\"]");
   const categoryField = modal?.querySelector("[name=\"inventoryCategory\"]");
   let addToMaintenance = false;
 
@@ -14561,6 +14562,21 @@ function renderInventory(){
       refreshRows();
       return;
     }
+    const scope = select.closest("[data-inventory-scope]")?.getAttribute("data-inventory-scope") || "";
+    if (scope !== "interval" && scope !== "asreq"){
+      if (typeof showConfirmModal === "function"){
+        showConfirmModal({
+          title: "Choose a maintenance type",
+          message: "Uncategorized items need to be dropped into Per Interval or As-Required before assigning a category.",
+          cancelText: "OK"
+        });
+      }else{
+        alert("Drop this item into Per Interval or As-Required before assigning a category.");
+      }
+      refreshRows();
+      return;
+    }
+    item.categoryScope = scope;
     item.categoryId = next ? next : null;
     if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
     refreshRows();
@@ -14625,7 +14641,7 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("dragover", (e)=>{
-    const zone = e.target.closest("[data-drop-folder],[data-drop-before-folder],[data-drop-folder-tail],[data-inventory-drop-uncategorized]");
+    const zone = e.target.closest("[data-drop-folder],[data-drop-before-folder],[data-drop-folder-tail],[data-inventory-drop-uncategorized],[data-inventory-drop-menu]");
     if (!zone) return;
     const payload = e.dataTransfer?.getData("text/plain") || "";
     if (!payload.startsWith("inventory:") && !payload.startsWith("category:")) return;
@@ -14644,7 +14660,7 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("dragleave", (e)=>{
-    const zone = e.target.closest("[data-drop-folder],[data-drop-before-folder],[data-drop-folder-tail],[data-inventory-drop-uncategorized]");
+    const zone = e.target.closest("[data-drop-folder],[data-drop-before-folder],[data-drop-folder-tail],[data-inventory-drop-uncategorized],[data-inventory-drop-menu]");
     if (!zone) return;
     if (zone.contains(e.relatedTarget)) return;
     zone.classList.remove("dragover");
@@ -14658,7 +14674,7 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("drop", (e)=>{
-    const zone = e.target.closest("[data-drop-folder],[data-drop-before-folder],[data-drop-folder-tail],[data-inventory-drop-uncategorized]");
+    const zone = e.target.closest("[data-drop-folder],[data-drop-before-folder],[data-drop-folder-tail],[data-inventory-drop-uncategorized],[data-inventory-drop-menu]");
     if (!zone) return;
     const payload = e.dataTransfer?.getData("text/plain") || "";
     if (!payload.startsWith("inventory:") && !payload.startsWith("category:")) return;
@@ -14687,13 +14703,23 @@ function renderInventory(){
         }
         return;
       }
-      if (!zone.hasAttribute("data-drop-folder") && !zone.hasAttribute("data-inventory-drop-uncategorized")){
+      if (!zone.hasAttribute("data-drop-folder")
+          && !zone.hasAttribute("data-inventory-drop-uncategorized")
+          && !zone.hasAttribute("data-inventory-drop-menu")){
         return;
       }
       let categoryId = null;
       if (zone.hasAttribute("data-drop-folder")){
         const targetKey = zone.getAttribute("data-drop-folder") || "";
         categoryId = targetKey ? targetKey : null;
+        const scope = zone.closest("[data-inventory-scope]")?.getAttribute("data-inventory-scope") || "";
+        item.categoryScope = scope === "interval" || scope === "asreq" ? scope : null;
+      } else if (zone.hasAttribute("data-inventory-drop-menu")){
+        const scope = zone.getAttribute("data-inventory-drop-menu") || "";
+        item.categoryScope = scope === "interval" || scope === "asreq" ? scope : null;
+        categoryId = null;
+      } else if (zone.hasAttribute("data-inventory-drop-uncategorized")){
+        item.categoryScope = null;
       }
       item.categoryId = categoryId ? categoryId : null;
       if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
@@ -14755,6 +14781,8 @@ function renderInventory(){
     }
     const holder = summary.closest("details.folder");
     const folderId = holder?.getAttribute("data-folder-id");
+    const scope = summary.closest("[data-inventory-scope]")?.getAttribute("data-inventory-scope") || "";
+    item.categoryScope = scope === "interval" || scope === "asreq" ? scope : null;
     item.categoryId = folderId ? folderId : null;
     if (typeof saveCloudDebounced === "function"){ try { saveCloudDebounced(); } catch(_){ } }
     refreshRows();
@@ -14905,6 +14933,9 @@ function renderInventory(){
     form?.reset();
     if (qtyNewField) qtyNewField.value = qtyNewField.defaultValue || "1";
     if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
+    if (categoryScopeField instanceof HTMLSelectElement){
+      categoryScopeField.value = "";
+    }
     if (categoryField instanceof HTMLSelectElement){
       refreshCategoryFieldOptions();
       categoryField.value = categoryField.options.length ? categoryField.options[0].value : "";
@@ -14920,6 +14951,9 @@ function renderInventory(){
     form?.reset();
     if (qtyNewField) qtyNewField.value = qtyNewField.defaultValue || "1";
     if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
+    if (categoryScopeField instanceof HTMLSelectElement){
+      categoryScopeField.value = "";
+    }
     if (categoryField instanceof HTMLSelectElement){
       categoryField.value = categoryField.options.length ? categoryField.options[0].value : "";
     }
@@ -14964,6 +14998,8 @@ function renderInventory(){
     const priceRaw = data.get("inventoryPrice");
     const categoryIdRaw = data.get("inventoryCategory");
     const categoryId = typeof categoryIdRaw === "string" ? categoryIdRaw.trim() : "";
+    const categoryScopeRaw = data.get("inventoryCategoryScope");
+    const categoryScope = typeof categoryScopeRaw === "string" ? categoryScopeRaw.trim() : "";
     let price = null;
     if (priceRaw !== null && priceRaw !== ""){
       const num = Number(priceRaw);
@@ -14982,7 +15018,8 @@ function renderInventory(){
       link,
       price,
       note,
-      categoryId: categoryId || null
+      categoryId: categoryId || null,
+      categoryScope: categoryScope || null
     };
     const item = typeof normalizeInventoryItem === "function"
       ? normalizeInventoryItem(baseItem)

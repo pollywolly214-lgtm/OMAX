@@ -3593,29 +3593,45 @@ function inventoryCategoryNameMap(){
   return map;
 }
 
-function inventoryItemCategoryInfo(item, categoryMap){
-  const categories = categoryMap instanceof Map ? categoryMap : inventoryCategoryNameMap();
+function inventoryItemLinkInfo(item){
   const linkedTasks = typeof findTasksLinkedToInventoryItem === "function"
     ? findTasksLinkedToInventoryItem(item)
     : [];
+  const intervalIds = new Set((Array.isArray(window.tasksInterval) ? window.tasksInterval : []).map(task => String(task?.id ?? "")));
+  const asreqIds = new Set((Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []).map(task => String(task?.id ?? "")));
   let linkedCategoryId = "";
+  let listType = null;
   if (linkedTasks.length){
-    const linkedTask = linkedTasks.find(task => task && task.cat != null);
+    const linkedTask = linkedTasks.find(task => task && task.id != null) || linkedTasks[0];
     if (linkedTask && linkedTask.cat != null){
       linkedCategoryId = String(linkedTask.cat);
     }
+    const linkedId = linkedTask && linkedTask.id != null ? String(linkedTask.id) : "";
+    if (linkedId && intervalIds.has(linkedId)){
+      listType = "interval";
+    } else if (linkedId && asreqIds.has(linkedId)){
+      listType = "asreq";
+    }
   }
-  const isLinked = linkedTasks.length > 0;
+  return { linkedTasks, linkedCategoryId, listType, isLinked: linkedTasks.length > 0 };
+}
+
+function inventoryItemCategoryInfo(item, categoryMap){
+  const categories = categoryMap instanceof Map ? categoryMap : inventoryCategoryNameMap();
+  const linkInfo = inventoryItemLinkInfo(item);
   const rawCategoryId = item && item.categoryId != null ? String(item.categoryId) : "";
   let categoryId = "";
-  if (linkedCategoryId && categories.has(linkedCategoryId)){
-    categoryId = linkedCategoryId;
-  } else if (linkedCategoryId && !categories.has(linkedCategoryId)){
-    categoryId = "";
-  } else if (!isLinked && rawCategoryId && categories.has(rawCategoryId)){
+  if (linkInfo.linkedCategoryId && categories.has(linkInfo.linkedCategoryId)){
+    categoryId = linkInfo.linkedCategoryId;
+  } else if (!linkInfo.isLinked && rawCategoryId && categories.has(rawCategoryId)){
     categoryId = rawCategoryId;
   }
-  return { categoryId, isLinked, linkedCategoryId };
+  return {
+    categoryId,
+    isLinked: linkInfo.isLinked,
+    linkedCategoryId: linkInfo.linkedCategoryId,
+    listType: linkInfo.listType
+  };
 }
 
 function inventoryCategoryOptionsMarkup(selectedId){
@@ -3698,32 +3714,43 @@ function inventoryGroupsHTML(list){
   const { rootId } = inventoryCategoryTreeData();
   const folders = maintenanceInventoryCategories();
   const categoryMap = new Map(folders.map(cat => [String(cat.id), cat.name || "Category"]));
-  const grouped = new Map();
+  const groupedByType = {
+    interval: new Map(),
+    asreq: new Map()
+  };
+  const uncategorized = [];
   list.forEach(item => {
     if (!item) return;
     const info = inventoryItemCategoryInfo(item, categoryMap);
+    const scope = info.isLinked
+      ? (info.listType || null)
+      : (item.categoryScope === "interval" || item.categoryScope === "asreq" ? item.categoryScope : null);
+    if (!scope){
+      uncategorized.push(item);
+      return;
+    }
     const key = info.categoryId || "";
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key).push(item);
+    if (!groupedByType[scope].has(key)) groupedByType[scope].set(key, []);
+    groupedByType[scope].get(key).push(item);
   });
 
   const kidsOf = (parentId)=> folders.filter(f => String(f.parent ?? "") === String(parentId ?? ""));
 
-  const renderFolder = (folder)=>{
+  const renderFolder = (folder, listType)=>{
     const subFolderList = kidsOf(folder.id);
     const subFolders = subFolderList.map(sf => `
       <div class="folder-dropzone folder-dropzone-line small muted" data-drop-before-folder="${sf.id}"
            style="border:1px dashed #bbb; padding:6px; margin:4px 0; border-radius:8px;">
         Drag categories here to place before <b>${esc(sf.name)}</b>
       </div>
-      ${renderFolder(sf)}
+      ${renderFolder(sf, listType)}
     `).join("");
     const subFolderTail = subFolderList.length ? `
       <div class="folder-dropzone folder-dropzone-line small muted" data-drop-folder-tail="${folder.id}"
            style="border:1px dashed #bbb; padding:6px; margin:4px 0 6px; border-radius:8px;">
         Drag categories here to place at the end of <b>${esc(folder.name)}</b>
       </div>` : "";
-    const items = grouped.get(String(folder.id)) || [];
+    const items = groupedByType[listType].get(String(folder.id)) || [];
     const rows = inventoryRowsHTML(items, `Drag items here to assign them to ${esc(folder.name)}.`);
     return `
       <details class="folder block" data-folder-id="${esc(folder.id)}" open>
@@ -3754,23 +3781,43 @@ function inventoryGroupsHTML(list){
   };
 
   const rootFolders = kidsOf(null);
-  const rootFolderTail = `
-    <div class="folder-dropzone folder-dropzone-line small muted" data-drop-folder-tail=""
-         style="border:1px dashed #bbb; padding:6px; margin:4px 0 6px; border-radius:8px;">
-      Drag categories here to place at the end of root categories
-    </div>`;
-  const folderSections = rootFolders.map(f => `
-    <div class="folder-dropzone folder-dropzone-line small muted" data-drop-before-folder="${esc(f.id)}"
-         style="border:1px dashed #bbb; padding:6px; margin:4px 0; border-radius:8px;">
-      Drag categories here to place before <b>${esc(f.name)}</b>
-    </div>
-    ${renderFolder(f)}
-  `).join("");
+  const buildMenu = (listType, title)=>{
+    const menuDrop = `
+      <div class="folder-dropzone small muted" data-inventory-drop-menu="${listType}"
+           style="border:1px dashed #bbb; padding:6px; margin:6px 8px 10px 8px; border-radius:8px;">
+        Drag inventory items here to move into <b>${title}</b>
+      </div>`;
+    const rootFolderTail = `
+      <div class="folder-dropzone folder-dropzone-line small muted" data-drop-folder-tail=""
+           style="border:1px dashed #bbb; padding:6px; margin:4px 0 6px; border-radius:8px;">
+        Drag categories here to place at the end of root categories
+      </div>`;
+    const folderSections = rootFolders.map(f => `
+      <div class="folder-dropzone folder-dropzone-line small muted" data-drop-before-folder="${esc(f.id)}"
+           style="border:1px dashed #bbb; padding:6px; margin:4px 0;">
+        Drag categories here to place before <b>${esc(f.name)}</b>
+      </div>
+      ${renderFolder(f, listType)}
+    `).join("");
+    return `
+      <details class="block" open data-inventory-scope="${listType}">
+        <summary style="display:flex;align-items:center;gap:10px;font-weight:700;">
+          <span>${title}</span>
+          <span style="flex:1"></span>
+        </summary>
+        ${menuDrop}
+        <div class="folder-list" data-inventory-scope="${listType}">
+          ${folderSections}
+          ${rootFolderTail}
+        </div>
+      </details>
+    `;
+  };
 
-  const uncategorizedItems = grouped.get("") || [];
+  const uncategorizedItems = uncategorized;
   const uncategorizedRows = inventoryRowsHTML(uncategorizedItems, "Unlinked items appear here.");
   const uncategorizedSection = `
-    <div class="block inventory-uncategorized" data-inventory-drop-uncategorized>
+    <div class="block inventory-uncategorized" data-inventory-drop-uncategorized data-inventory-scope="uncategorized">
       <h4 style="margin:0 0 6px 0;">Uncategorized</h4>
       <div class="small muted">${uncategorizedItems.length} item${uncategorizedItems.length === 1 ? "" : "s"} without a maintenance category.</div>
       <div class="inventory-category-table" style="margin-top:8px;">
@@ -3782,7 +3829,11 @@ function inventoryGroupsHTML(list){
     </div>
   `;
 
-  return `${folderSections}${rootFolderTail}${uncategorizedSection}`;
+  return `
+    ${buildMenu("interval", "Per Interval Inventory")}
+    ${buildMenu("asreq", "As-Required Inventory")}
+    ${uncategorizedSection}
+  `;
 }
 
 function viewInventory(){
@@ -3833,6 +3884,13 @@ function viewInventory(){
             <label>New quantity<input type="number" min="0" step="1" name="inventoryQtyNew" value="1"></label>
             <label>Old quantity<input type="number" min="0" step="1" name="inventoryQtyOld" value="0"></label>
             <label>Unit<input name="inventoryUnit" placeholder="pcs" value="pcs"></label>
+            <label>Maintenance type
+              <select name="inventoryCategoryScope">
+                <option value="" selected>Uncategorized</option>
+                <option value="interval">Per Interval</option>
+                <option value="asreq">As Required</option>
+              </select>
+            </label>
             <label>Category<select name="inventoryCategory">${inventoryCategoryOptionsMarkup()}</select></label>
             <label>Part #<input name="inventoryPN" placeholder="Part number"></label>
             <label>Store link<input type="url" name="inventoryLink" placeholder="https://..."></label>
