@@ -483,4 +483,3 @@ if (typeof window !== "undefined"){
   window.getJobPriority = getJobPriority;
   window.computePrioritySchedule = computePrioritySchedule;
 }
-

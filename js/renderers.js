@@ -3751,6 +3751,7 @@ function recomputeDailyCutHoursFromTotalHistory(history){
   if (valid.length < 2) return false;
   let prevHours = Number(valid[0].hours);
   let changed = false;
+  let warned = false;
   for (let idx = 1; idx < valid.length; idx += 1){
     const currentHours = Number(valid[idx].hours);
     if (!Number.isFinite(prevHours) || !Number.isFinite(currentHours)){
@@ -3758,11 +3759,49 @@ function recomputeDailyCutHoursFromTotalHistory(history){
       continue;
     }
     const delta = Math.max(0, currentHours - prevHours);
+    if (delta > 24 && !warned){
+      toast("Only 24 hrs can be applied per day. Edit past logs to spread hours across multiple days.");
+      warned = true;
+    }
     const updated = setDailyCutHoursEntry(valid[idx].dateISO, delta, { source: "auto", preserveManual: true });
     if (updated) changed = true;
     prevHours = currentHours;
   }
   return changed;
+}
+
+function findExcessiveLogGap(entries){
+  if (!Array.isArray(entries) || entries.length < 2) return null;
+  const normalized = entries
+    .map(entry => ({ ...entry, dateISO: normalizeDateISO(entry?.dateISO), hours: Number(entry?.hours) }))
+    .filter(entry => entry.dateISO && Number.isFinite(entry.hours))
+    .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+  for (let i = 1; i < normalized.length; i += 1){
+    const prev = normalized[i - 1];
+    const cur = normalized[i];
+    const delta = cur.hours - prev.hours;
+    if (delta > 24){
+      return {
+        delta,
+        fromDate: prev.dateISO,
+        toDate: cur.dateISO,
+        fromHours: prev.hours,
+        toHours: cur.hours
+      };
+    }
+  }
+  return null;
+}
+
+function warnExcessiveLogGap(gap){
+  if (!gap) return true;
+  const deltaLabel = gap.delta.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  const message = [
+    `Adding ${deltaLabel} hours between ${gap.fromDate || "previous log"} and ${gap.toDate || "this log"} exceeds the 24 hr/day limit.`,
+    "Only 24 hrs will be applied for that day. Use Edit past logs to spread hours across multiple days.",
+    "Continue?"
+  ].join(" ");
+  return window.confirm(message);
 }
 
 function openLogHistoryModal(){
@@ -3848,6 +3887,10 @@ function openLogHistoryModal(){
       entries.push({ dateISO: dateVal, hours: hoursVal });
     }
     entries.sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+
+    const gap = findExcessiveLogGap(entries);
+    if (!warnExcessiveLogGap(gap)) return;
+
     window.totalHistory = entries;
     totalHistory = window.totalHistory;
     RENDER_TOTAL = currentTotal();
@@ -3877,6 +3920,15 @@ function renderDashboard(){
     if (!isFinite(v) || v < 0){ toast("Enter valid hours."); return; }
     const todayISO = new Date().toISOString().slice(0,10);
     const last = totalHistory[totalHistory.length-1];
+    const lastHours = Number(last?.hours);
+    let allowEntry = true;
+    if (Number.isFinite(lastHours)){
+      const delta = v - lastHours;
+      if (delta > 24){
+        allowEntry = window.confirm("Only 24 hrs will be applied for today. Use Edit past logs to spread hours across multiple days. Continue?");
+      }
+    }
+    if (!allowEntry) return;
     if (last && last.dateISO === todayISO){
       last.hours = v;
     }else{
@@ -3894,7 +3946,12 @@ function renderDashboard(){
     renderDashboard();
   });
 
-  document.getElementById("editLogHistoryBtn")?.addEventListener("click", openLogHistoryModal);
+  document.getElementById("editLogHistoryBtn")?.addEventListener("click", ()=>{
+    const password = window.prompt("Enter password to edit logged hours:");
+    if (password === null) return;
+    if (password !== "Matthew7:21"){ toast("Incorrect password"); return; }
+    openLogHistoryModal();
+  });
 
   // Next due summary
   const ndBox = document.getElementById("nextDueBox");
