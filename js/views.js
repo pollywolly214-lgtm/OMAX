@@ -3754,10 +3754,12 @@ function inventoryGroupsHTML(list){
   const kidsOf = (parentId)=>{
     const parentKey = String(parentId ?? "");
     return folders.filter(folder => {
+      const folderId = String(folder.id ?? "");
+      if (folderId && folderId === parentKey) return false;
       const rawParent = String(folder.parent ?? "");
       if (rawParent === parentKey) return true;
       if ((parentKey === "interval" || parentKey === "asreq") && rawParent === String(rootId)){
-        return inferredScope.get(String(folder.id)) === parentKey;
+        return inferredScope.get(folderId) === parentKey;
       }
       return false;
     });
