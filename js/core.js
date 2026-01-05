@@ -36,11 +36,15 @@ const WORKSPACE_ID = (() => {
   const isGithubHost = host.endsWith(".github.io");
   const isLocalHost = ["localhost", "127.0.0.1", "::1"].includes(host);
 
-  if (isLocalHost || isGithubHost || (isVercelHost && !isProdHost)) {
+  if (isLocalHost || isGithubHost) {
     return "github-preview";
   }
 
-  return "github-prod";
+  if (isProdHost || isVercelHost) {
+    return "github-prod";
+  }
+
+  return "github-preview";
 })();
 if (typeof window !== "undefined") {
   window.WORKSPACE_ID = WORKSPACE_ID;
