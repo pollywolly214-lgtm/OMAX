@@ -1694,6 +1694,12 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!window.pumpEff || typeof window.pumpEff !== "object") window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
     if (typeof window.ensureTaskCategories === "function") window.ensureTaskCategories();
     if (typeof window.ensureJobCategories === "function") window.ensureJobCategories();
+    const jobFileCache = readJobFileCache();
+    syncJobFileCacheFromJobs(window.cuttingJobs, jobFileCache);
+    syncJobFileCacheFromJobs(window.completedCuttingJobs, jobFileCache);
+    applyJobFileCacheToJobs(window.cuttingJobs, jobFileCache);
+    applyJobFileCacheToJobs(window.completedCuttingJobs, jobFileCache);
+    writeJobFileCache(jobFileCache);
     if (typeof window.syncRenderTotalsFromHistory === "function") window.syncRenderTotalsFromHistory();
   };
 })();
@@ -1729,8 +1735,77 @@ function stateHasMeaningfulData(data){
   return keys.some(key => meaningfulKeys.has(key));
 }
 
+const JOB_FILE_CACHE_KEY = "cutting_job_files_v1";
+
+function readJobFileCache(){
+  if (typeof window === "undefined" || !window.localStorage) return {};
+  try {
+    const raw = window.localStorage.getItem(JOB_FILE_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (err){
+    console.warn("Unable to read job file cache", err);
+    return {};
+  }
+}
+
+function writeJobFileCache(cache){
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(JOB_FILE_CACHE_KEY, JSON.stringify(cache || {}));
+  } catch (err){
+    console.warn("Unable to persist job file cache", err);
+  }
+}
+
+function syncJobFileCacheFromJobs(jobs, cache){
+  if (!Array.isArray(jobs)) return;
+  jobs.forEach(job => {
+    const files = Array.isArray(job?.files) ? job.files : [];
+    files.forEach(file => {
+      if (!file || !file.id) return;
+      if (typeof file.dataUrl === "string" && file.dataUrl){
+        cache[file.id] = file.dataUrl;
+      }
+    });
+  });
+}
+
+function applyJobFileCacheToJobs(jobs, cache){
+  if (!Array.isArray(jobs)) return;
+  jobs.forEach(job => {
+    const files = Array.isArray(job?.files) ? job.files : [];
+    files.forEach(file => {
+      if (!file || !file.id) return;
+      if (!file.dataUrl && cache[file.id]){
+        file.dataUrl = cache[file.id];
+      }
+    });
+  });
+}
+
+function stripJobFileDataUrls(jobs){
+  if (!Array.isArray(jobs)) return [];
+  return jobs.map(job => {
+    if (!job || typeof job !== "object") return job;
+    const files = Array.isArray(job.files)
+      ? job.files.map(file => {
+          if (!file || typeof file !== "object") return file;
+          const { dataUrl, ...rest } = file;
+          return rest;
+        })
+      : [];
+    return { ...job, files };
+  });
+}
+
 function snapshotState(){
   refreshGlobalCollections();
+  const jobFileCache = readJobFileCache();
+  syncJobFileCacheFromJobs(cuttingJobs, jobFileCache);
+  syncJobFileCacheFromJobs(completedCuttingJobs, jobFileCache);
+  writeJobFileCache(jobFileCache);
   const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
   const foldersSnapshot = snapshotSettingsFolders();
   const trashSnapshot = deletedItems.map(entry => ({
@@ -1756,8 +1831,8 @@ function snapshotState(){
     tasksInterval,
     tasksAsReq,
     inventory,
-    cuttingJobs,
-    completedCuttingJobs,
+    cuttingJobs: stripJobFileDataUrls(cuttingJobs),
+    completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs),
     orderRequests,
     orderRequestTab,
     garnetCleanings,
