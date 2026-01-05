@@ -40,11 +40,15 @@ const WORKSPACE_ID = (() => {
     return "github-preview";
   }
 
-  if (isProdHost || isVercelHost) {
+  if (isProdHost) {
     return "github-prod";
   }
 
-  return "github-preview";
+  if (isVercelHost) {
+    return "github-preview";
+  }
+
+  return "github-prod";
 })();
 if (typeof window !== "undefined") {
   window.WORKSPACE_ID = WORKSPACE_ID;
