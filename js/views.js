@@ -3756,6 +3756,7 @@ function inventoryGroupsHTML(list){
     return folders.filter(folder => {
       const folderId = String(folder.id ?? "");
       if (folderId && folderId === parentKey) return false;
+      if (folderId === String(rootId)) return false;
       const rawParent = String(folder.parent ?? "");
       if (rawParent === parentKey) return true;
       if ((parentKey === "interval" || parentKey === "asreq") && rawParent === String(rootId)){
@@ -3765,7 +3766,12 @@ function inventoryGroupsHTML(list){
     });
   };
 
+  const visited = new Set();
   const renderFolder = (folder, listType)=>{
+    if (!folder || folder.id == null) return "";
+    const folderId = String(folder.id);
+    if (visited.has(folderId)) return "";
+    visited.add(folderId);
     const subFolderList = kidsOf(folder.id);
     const subFolders = subFolderList.map(sf => `
       <div class="folder-dropzone folder-dropzone-line small muted" data-drop-before-folder="${sf.id}"
