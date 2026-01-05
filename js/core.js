@@ -16,12 +16,30 @@ const DEFAULT_DAILY_HOURS = 8;
 let DAILY_HOURS = DEFAULT_DAILY_HOURS;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
-// Decide workspace based on hostname (all hosts write to production).
+// Decide workspace based on hostname (preview vs production).
 const WORKSPACE_ID = (() => {
-  if (typeof window !== "undefined") {
+  if (typeof window === "undefined") {
+    // Fallback for non-browser contexts so build-time scripts default to production doc
     return "github-prod";
   }
-  // Fallback for non-browser contexts so build-time scripts default to production doc
+
+  const host = window.location.hostname.toLowerCase();
+  const search = new URLSearchParams(window.location.search);
+  const forcedWorkspace = search.get("workspace");
+  if (forcedWorkspace) return forcedWorkspace;
+
+  const prodHosts = Array.isArray(window.OMAX_PROD_HOSTS) && window.OMAX_PROD_HOSTS.length
+    ? window.OMAX_PROD_HOSTS.map((value)=>String(value).toLowerCase())
+    : ["omax.vercel.app"];
+  const isProdHost = prodHosts.includes(host);
+  const isVercelHost = host.endsWith(".vercel.app");
+  const isGithubHost = host.endsWith(".github.io");
+  const isLocalHost = ["localhost", "127.0.0.1", "::1"].includes(host);
+
+  if (isLocalHost || isGithubHost || (isVercelHost && !isProdHost)) {
+    return "github-preview";
+  }
+
   return "github-prod";
 })();
 if (typeof window !== "undefined") {
