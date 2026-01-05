@@ -254,6 +254,17 @@ function computeJobEfficiency(job){
   // 2) Machine total hours since job start (if no manual logs)
   // 3) No trustworthy data → assume no progress yet (0 hr)
   const planned = (job && job.estimateHours > 0) ? Number(job.estimateHours) : 0;
+  const completionRaw = job?.completedAtISO ? (parseDateLocal(job.completedAtISO) || new Date(job.completedAtISO)) : null;
+  const completionDate = (completionRaw instanceof Date && !Number.isNaN(completionRaw.getTime())) ? completionRaw : null;
+  const actualOverrideRaw = job?.actualHours;
+  const actualOverrideNum = Number(actualOverrideRaw);
+  const hasActualOverride = actualOverrideRaw !== undefined
+    && actualOverrideRaw !== null
+    && actualOverrideRaw !== ""
+    && Number.isFinite(actualOverrideNum)
+    && actualOverrideNum >= 0;
+  const actualOverride = hasActualOverride ? actualOverrideNum : null;
+  const completionFallbackActual = (!hasActualOverride && completionDate) ? planned : null;
   const materialUnitCost = Number(job?.materialCost) || 0;
   const materialQty = Number(job?.materialQty) || 0;
   const materialTotal = materialUnitCost * materialQty;
@@ -304,6 +315,9 @@ function computeJobEfficiency(job){
   due.setHours(0,0,0,0);
 
   const today = new Date(); today.setHours(0,0,0,0);
+  let evaluationDay = completionDate ? new Date(completionDate) : today;
+  evaluationDay.setHours(0,0,0,0);
+  if (evaluationDay < start) evaluationDay = new Date(start);
   const hoursPerDay = typeof getConfiguredDailyHours === "function"
     ? getConfiguredDailyHours()
     : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
@@ -314,10 +328,10 @@ function computeJobEfficiency(job){
   result.totalDays = totalDays;
 
   let daysElapsed = 0;
-  if (today > due) {
+  if (evaluationDay > due) {
     daysElapsed = totalDays;
-  }else if (today > start){
-    const elapsed = inclusiveDayCount(start, today) - 1;
+  }else if (evaluationDay > start){
+    const elapsed = inclusiveDayCount(start, evaluationDay) - 1;
     daysElapsed = Math.min(totalDays, Math.max(0, elapsed));
   }
   result.daysElapsed = daysElapsed;
@@ -349,10 +363,16 @@ function computeJobEfficiency(job){
   // 1) If there is any manual log on/before today, use the latest one EXACTLY (no auto add-on).
   const manualLogs = Array.isArray(job.manualLogs) ? job.manualLogs : [];
   const manualUpTo = manualLogs
-    .filter(m => m && m.dateISO && new Date(m.dateISO+"T00:00:00") <= today)
+    .filter(m => m && m.dateISO && new Date(m.dateISO+"T00:00:00") <= evaluationDay)
     .sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
 
-  if (manualUpTo.length){
+  if (hasActualOverride){
+    result.actualHours = Math.max(0, actualOverride);
+    result.usedManualOverride = true;
+  }else if (completionFallbackActual != null){
+    result.actualHours = Math.max(0, completionFallbackActual);
+    result.usedCompletionEstimate = true;
+  }else if (manualUpTo.length){
     const last = manualUpTo[manualUpTo.length-1];
     const val = Number(last.completedHours);
     result.actualHours = Math.min(planned, Math.max(0, isFinite(val) ? val : 0));
@@ -370,8 +390,13 @@ function computeJobEfficiency(job){
     }
   }
 
-  result.actualRemaining = Math.max(0, planned - result.actualHours);
-  result.deltaHours      = result.expectedRemaining - result.actualRemaining;   // + ahead / − behind
+  const remainingGap = planned - result.actualHours;
+  result.actualRemaining = Math.max(0, remainingGap);
+  if (completionDate){
+    result.deltaHours = result.expectedRemaining + remainingGap;   // + ahead / − behind
+  }else{
+    result.deltaHours = result.expectedRemaining - result.actualRemaining;   // + ahead / − behind
+  }
   result.gainLoss        = result.deltaHours * result.rate;
 
   return result;
