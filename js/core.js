@@ -382,19 +382,25 @@ function applyFirestoreSettings(db){
   // Avoid touching host/SSL in non-development environments when a host is
   // already configured; calling `settings` again in that scenario triggers the
   // override warning we are trying to prevent.
-  if (!isDevEnv && hasHostSetting){
+  if (!isDevEnv && hasHostSetting && ignoreAlreadyEnabled){
     console.info("Existing Firestore host settings detected; skipping reconfiguration to prevent overrides.");
     firebaseSettingsApplied = true;
     return;
   }
 
-    if (!isDevEnv){
-      // In preview/production environments, leave Firestore settings untouched to
-      // avoid host override warnings. The default host from FIREBASE_CONFIG will
-      // be used.
+  if (!isDevEnv){
+    if (ignoreAlreadyEnabled){
       firebaseSettingsApplied = true;
       return;
     }
+    try {
+      db.settings({ ...currentSettings, ignoreUndefinedProperties: true });
+      firebaseSettingsApplied = true;
+    } catch (err) {
+      console.warn("Failed to enable ignoreUndefinedProperties", err);
+    }
+    return;
+  }
 
     const mergedSettings = { ...currentSettings };
     mergedSettings.ignoreUndefinedProperties = true;
