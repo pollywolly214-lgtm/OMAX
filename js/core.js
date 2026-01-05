@@ -86,10 +86,11 @@ function debounce(fn, ms=250){
     }, ms);
   };
   debounced.flush = ()=>{
-    if (!t) return;
+    if (!t) return false;
     clearTimeout(t);
     t = null;
     fn(...(lastArgs || []));
+    return true;
   };
   debounced.cancel = ()=>{
     if (!t) return;
@@ -2503,7 +2504,10 @@ function saveCloudNow(){
     console.warn("History capture before save failed:", err);
   }
   if (typeof saveCloudInternal.flush === "function"){
-    saveCloudInternal.flush();
+    const flushed = saveCloudInternal.flush();
+    if (!flushed){
+      saveCloudInternal();
+    }
   }else{
     saveCloudInternal();
   }
