@@ -10889,6 +10889,37 @@ function computeCostModel(){
 
   calendarMaintenanceHistory = buildCalendarMaintenanceHistory();
   const calendarActualYear = calendarSpendSince(365);
+  const calendarCostByTemplateId = new Map();
+  calendarMaintenanceHistory.forEach(entry => {
+    if (!entry) return;
+    const cost = Number(entry.cost);
+    if (!Number.isFinite(cost) || cost <= 0) return;
+    const tasks = Array.isArray(entry.tasks) ? entry.tasks : [];
+    const firstTask = tasks.find(task => task && (task.originalId || task.id));
+    const templateId = firstTask?.originalId != null ? String(firstTask.originalId) : null;
+    if (!templateId) return;
+    const current = calendarCostByTemplateId.get(templateId) || { total: 0, count: 0, latest: null };
+    current.total += cost;
+    current.count += 1;
+    const time = entry.date instanceof Date ? entry.date.getTime() : null;
+    if (time != null && (!current.latest || time > current.latest.time)){
+      current.latest = { time, cost };
+    }
+    calendarCostByTemplateId.set(templateId, current);
+  });
+
+  const resolveCalendarUnitCost = (task)=>{
+    if (!task) return null;
+    const key = resolveTaskTemplateKey(task);
+    if (!key) return null;
+    const stats = calendarCostByTemplateId.get(key);
+    if (!stats || stats.count <= 0) return null;
+    if (stats.latest && Number.isFinite(stats.latest.cost) && stats.latest.cost > 0){
+      return stats.latest.cost;
+    }
+    const avg = stats.total / stats.count;
+    return Number.isFinite(avg) && avg > 0 ? avg : null;
+  };
 
   const asReqAnnualActual = maintenanceSpendSince(365);
   const asReqAnnualProjection = asReqAnnualActual > 0 ? asReqAnnualActual : expectedAsReqAnnualFromTasks;
@@ -11485,7 +11516,11 @@ function computeCostModel(){
     const name = task?.name || `Interval task ${index + 1}`;
     const intervalHours = Number(task?.interval);
     const price = Number(task?.price);
-    const hasPrice = Number.isFinite(price) && price > 0;
+    const calendarPrice = resolveCalendarUnitCost(task);
+    const unitPrice = Number.isFinite(price) && price > 0
+      ? price
+      : (Number.isFinite(calendarPrice) && calendarPrice > 0 ? calendarPrice : null);
+    const hasPrice = Number.isFinite(unitPrice) && unitPrice > 0;
     const hasInterval = Number.isFinite(intervalHours) && intervalHours > 0;
     const historyStats = getTaskHistoryStats(task);
     const historyCount = historyStats.count;
@@ -11509,27 +11544,31 @@ function computeCostModel(){
     if (!cadenceParts.length && task?.condition){
       cadenceParts.push(String(task.condition));
     }
-    const annualCost = hasPrice ? Math.max(0, price * Math.max(0, servicesPerYear)) : 0;
+    const annualCost = hasPrice ? Math.max(0, unitPrice * Math.max(0, servicesPerYear)) : 0;
     return {
       key: task?.id || `interval_${index}`,
       name,
       cadenceLabel: cadenceParts.length ? cadenceParts.join(" · ") : "—",
       unitCostLabel: hasPrice
-        ? formatterCurrency(price, { decimals: price < 1000 ? 2 : 0 })
+        ? formatterCurrency(unitPrice, { decimals: unitPrice < 1000 ? 2 : 0 })
         : "—",
       annualTotalLabel: hasPrice
         ? formatterCurrency(annualCost, { decimals: annualCost < 1000 ? 2 : 0 })
         : "—",
       annualCost,
       partNumber: typeof task?.pn === "string" ? task.pn : "",
-      unitPrice: hasPrice ? price : null
+      unitPrice: hasPrice ? unitPrice : null
     };
   });
 
   const asReqTaskRowsRaw = asReqTasks.map((task, index) => {
     const name = task?.name || `As-required task ${index + 1}`;
     const price = Number(task?.price);
-    const hasPrice = Number.isFinite(price) && price > 0;
+    const calendarPrice = resolveCalendarUnitCost(task);
+    const unitPrice = Number.isFinite(price) && price > 0
+      ? price
+      : (Number.isFinite(calendarPrice) && calendarPrice > 0 ? calendarPrice : null);
+    const hasPrice = Number.isFinite(unitPrice) && unitPrice > 0;
     const historyStats = getTaskHistoryStats(task);
     const historyCount = historyStats.count;
     const expectedPerYear = historyCount > 0 ? historyCount : expectedAnnualFromTask(task);
@@ -11553,20 +11592,20 @@ function computeCostModel(){
     if (!cadenceParts.length){
       cadenceParts.push("As required");
     }
-    const annualCost = hasPrice ? Math.max(0, price * Math.max(0, expectedPerYear)) : 0;
+    const annualCost = hasPrice ? Math.max(0, unitPrice * Math.max(0, expectedPerYear)) : 0;
     return {
       key: task?.id || `asreq_${index}`,
       name,
       cadenceLabel: cadenceParts.join(" · "),
       unitCostLabel: hasPrice
-        ? formatterCurrency(price, { decimals: price < 1000 ? 2 : 0 })
+        ? formatterCurrency(unitPrice, { decimals: unitPrice < 1000 ? 2 : 0 })
         : "—",
       annualTotalLabel: hasPrice
         ? formatterCurrency(annualCost, { decimals: annualCost < 1000 ? 2 : 0 })
         : "—",
       annualCost,
       partNumber: typeof task?.pn === "string" ? task.pn : "",
-      unitPrice: hasPrice ? price : null
+      unitPrice: hasPrice ? unitPrice : null
     };
   });
 
