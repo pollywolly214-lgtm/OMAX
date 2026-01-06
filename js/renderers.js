@@ -10509,11 +10509,37 @@ function computeCostModel(){
     if (!Array.isArray(list)) return false;
     return list.some(entry => selector ? hasDateKey(selector(entry)) : hasDateKey(entry));
   };
+  const hasOccurrenceDates = (task)=>{
+    if (!task) return false;
+    const removed = typeof normalizeRemovedOccurrences === "function"
+      ? normalizeRemovedOccurrences(task)
+      : new Set(Array.isArray(task.removedOccurrences) ? task.removedOccurrences : []);
+    const noteMap = typeof normalizeOccurrenceNotes === "function"
+      ? normalizeOccurrenceNotes(task)
+      : (task.occurrenceNotes || {});
+    if (noteMap && typeof noteMap === "object"){
+      for (const key of Object.keys(noteMap)){
+        const dateKey = toHistoryDateKey(key);
+        if (dateKey && !removed.has(dateKey)) return true;
+      }
+    }
+    const hoursMap = typeof normalizeOccurrenceHours === "function"
+      ? normalizeOccurrenceHours(task)
+      : (task.occurrenceHours || {});
+    if (hoursMap && typeof hoursMap === "object"){
+      for (const key of Object.keys(hoursMap)){
+        const dateKey = toHistoryDateKey(key);
+        if (dateKey && !removed.has(dateKey)) return true;
+      }
+    }
+    return false;
+  };
   const isTaskActive = (task)=>{
     if (!task) return false;
     if (hasDateKey(task.calendarDateISO)) return true;
     if (hasAnyDatedEntry(task.completedDates)) return true;
     if (hasAnyDatedEntry(task.manualHistory, entry => entry && entry.dateISO)) return true;
+    if (hasOccurrenceDates(task)) return true;
     return false;
   };
 
