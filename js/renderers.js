@@ -10522,10 +10522,14 @@ function computeCostModel(){
 
   const historyCutoff = new Date();
   historyCutoff.setHours(0, 0, 0, 0);
-  const historyCutoffTime = historyCutoff.getTime() - (365 * JOB_DAY_MS);
+  const historyNowTime = historyCutoff.getTime();
+  const historyCutoffTime = historyNowTime - (365 * JOB_DAY_MS);
 
   const parseHistoryDate = (value)=>{
     if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())){
+      return value;
+    }
     if (typeof parseDateLocal === "function"){
       const parsed = parseDateLocal(value);
       if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) return parsed;
@@ -10534,7 +10538,7 @@ function computeCostModel(){
     return fallback instanceof Date && !Number.isNaN(fallback.getTime()) ? fallback : null;
   };
 
-  const taskHistoryCountCache = new Map();
+  const taskHistoryStatsCache = new Map();
   const taskHistoryDatesCache = new Map();
   const collectTaskHistoryDates = (task)=>{
     if (!task) return [];
@@ -10553,24 +10557,69 @@ function computeCostModel(){
       const key = toHistoryDateKey(entry.dateISO || entry.date);
       if (key) keys.add(key);
     });
+    const noteMap = (typeof normalizeOccurrenceNotes === "function")
+      ? normalizeOccurrenceNotes(task)
+      : (task.occurrenceNotes || {});
+    if (noteMap && typeof noteMap === "object"){
+      Object.keys(noteMap).forEach(key => {
+        const dateKey = toHistoryDateKey(key);
+        if (dateKey) keys.add(dateKey);
+      });
+    }
+    const hoursMap = (typeof normalizeOccurrenceHours === "function")
+      ? normalizeOccurrenceHours(task)
+      : (task.occurrenceHours || {});
+    if (hoursMap && typeof hoursMap === "object"){
+      Object.keys(hoursMap).forEach(key => {
+        const dateKey = toHistoryDateKey(key);
+        if (dateKey) keys.add(dateKey);
+      });
+    }
+    const calendarKey = toHistoryDateKey(task.calendarDateISO);
+    if (calendarKey) keys.add(calendarKey);
+    const removedSet = typeof normalizeRemovedOccurrences === "function"
+      ? normalizeRemovedOccurrences(task)
+      : (Array.isArray(task.removedOccurrences) ? task.removedOccurrences : []);
+    if (Array.isArray(removedSet) && removedSet.length){
+      removedSet.forEach(entry => {
+        const dateKey = toHistoryDateKey(entry);
+        if (dateKey) keys.delete(dateKey);
+      });
+    }
     const dates = Array.from(keys);
     taskHistoryDatesCache.set(task, dates);
     return dates;
   };
 
-  const countTaskHistoryInWindow = (task)=>{
-    if (!task) return 0;
-    if (taskHistoryCountCache.has(task)) return taskHistoryCountCache.get(task);
+  const formatHistoryDateLabel = (value)=>{
+    const parsed = parseHistoryDate(value);
+    if (!parsed) return null;
+    return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  };
+
+  const getTaskHistoryStats = (task)=>{
+    if (!task) return { count: 0, latestLabel: null };
+    if (taskHistoryStatsCache.has(task)) return taskHistoryStatsCache.get(task);
     const dates = collectTaskHistoryDates(task);
     let count = 0;
+    let latestTime = null;
+    let latestLabel = null;
     dates.forEach(key => {
       const parsed = parseHistoryDate(key);
       if (!parsed) return;
       parsed.setHours(0, 0, 0, 0);
-      if (parsed.getTime() >= historyCutoffTime) count += 1;
+      const time = parsed.getTime();
+      if (time >= historyCutoffTime && time <= historyNowTime){
+        count += 1;
+        if (latestTime == null || time > latestTime){
+          latestTime = time;
+          latestLabel = formatHistoryDateLabel(parsed);
+        }
+      }
     });
-    taskHistoryCountCache.set(task, count);
-    return count;
+    const stats = { count, latestLabel };
+    taskHistoryStatsCache.set(task, stats);
+    return stats;
   };
 
   const cleanPartNumber = (pn)=> String(pn || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
@@ -10694,7 +10743,8 @@ function computeCostModel(){
   const expectedAsReqAnnualFromTasks = asReqTasks.reduce((sum, task)=>{
     const price = Number(task?.price);
     if (!isFinite(price) || price <= 0) return sum;
-    const historyCount = countTaskHistoryInWindow(task);
+    const historyStats = getTaskHistoryStats(task);
+    const historyCount = historyStats.count;
     const expected = historyCount > 0 ? historyCount : expectedAnnualFromTask(task);
     if (!isFinite(expected) || expected <= 0) return sum;
     return sum + (price * expected);
@@ -11289,17 +11339,22 @@ function computeCostModel(){
     const price = Number(task?.price);
     const hasPrice = Number.isFinite(price) && price > 0;
     const hasInterval = Number.isFinite(intervalHours) && intervalHours > 0;
-    const historyCount = countTaskHistoryInWindow(task);
+    const historyStats = getTaskHistoryStats(task);
+    const historyCount = historyStats.count;
     const servicesPerYear = historyCount > 0
       ? historyCount
       : ((intervalAnnualBasis > 0 && hasInterval) ? intervalAnnualBasis / intervalHours : 0);
     const intervalLabel = hasInterval ? formatHoursValue(intervalHours) : null;
     const servicesLabel = formatCount(servicesPerYear);
     const historyLabel = historyCount > 0 ? formatCount(historyCount) : null;
+    const latestHistoryLabel = historyStats.latestLabel;
     const cadenceParts = [];
     if (intervalLabel) cadenceParts.push(`Every ${intervalLabel} hr`);
     if (historyLabel){
       cadenceParts.push(`Logged ${historyLabel}× last 12 mo`);
+      if (latestHistoryLabel){
+        cadenceParts.push(`Last ${latestHistoryLabel}`);
+      }
     }else if (servicesLabel){
       cadenceParts.push(`~${servicesLabel}×/yr`);
     }
@@ -11327,12 +11382,17 @@ function computeCostModel(){
     const name = task?.name || `As-required task ${index + 1}`;
     const price = Number(task?.price);
     const hasPrice = Number.isFinite(price) && price > 0;
-    const historyCount = countTaskHistoryInWindow(task);
+    const historyStats = getTaskHistoryStats(task);
+    const historyCount = historyStats.count;
     const expectedPerYear = historyCount > 0 ? historyCount : expectedAnnualFromTask(task);
     const frequencyLabel = formatCount(expectedPerYear);
+    const latestHistoryLabel = historyStats.latestLabel;
     const cadenceParts = [];
     if (historyCount > 0 && frequencyLabel){
       cadenceParts.push(`Logged ${frequencyLabel}× last 12 mo`);
+      if (latestHistoryLabel){
+        cadenceParts.push(`Last ${latestHistoryLabel}`);
+      }
     }else if (frequencyLabel){
       cadenceParts.push(`Expected ${frequencyLabel}×/yr`);
     }
