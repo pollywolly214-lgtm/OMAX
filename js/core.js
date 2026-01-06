@@ -17,6 +17,11 @@ let DAILY_HOURS = DEFAULT_DAILY_HOURS;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
 // Decide workspace based on hostname (preview vs production).
+const WORKSPACE_OVERRIDE = (() => {
+  if (typeof window === "undefined") return null;
+  const search = new URLSearchParams(window.location.search);
+  return search.get("workspace");
+})();
 const WORKSPACE_ID = (() => {
   if (typeof window === "undefined") {
     // Fallback for non-browser contexts so build-time scripts default to production doc
@@ -24,9 +29,7 @@ const WORKSPACE_ID = (() => {
   }
 
   const host = window.location.hostname.toLowerCase();
-  const search = new URLSearchParams(window.location.search);
-  const forcedWorkspace = search.get("workspace");
-  if (forcedWorkspace) return forcedWorkspace;
+  if (WORKSPACE_OVERRIDE) return WORKSPACE_OVERRIDE;
 
   const prodHosts = Array.isArray(window.OMAX_PROD_HOSTS) && window.OMAX_PROD_HOSTS.length
     ? window.OMAX_PROD_HOSTS.map((value)=>String(value).toLowerCase())
@@ -52,6 +55,7 @@ const WORKSPACE_ID = (() => {
 })();
 if (typeof window !== "undefined") {
   window.WORKSPACE_ID = WORKSPACE_ID;
+  window.WORKSPACE_OVERRIDE = WORKSPACE_OVERRIDE;
   window.workspaceRef = null;
   window.workspaceDocRef = null;
   window.DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
@@ -416,16 +420,7 @@ function applyFirestoreSettings(db){
   }
 
   if (!isDevEnv){
-    if (ignoreAlreadyEnabled){
-      firebaseSettingsApplied = true;
-      return;
-    }
-    try {
-      db.settings({ ...currentSettings, ignoreUndefinedProperties: true });
-      firebaseSettingsApplied = true;
-    } catch (err) {
-      console.warn("Failed to enable ignoreUndefinedProperties", err);
-    }
+    firebaseSettingsApplied = true;
     return;
   }
 
@@ -2565,6 +2560,31 @@ async function loadFromCloud(){
       adoptState(data || {});
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
     }else{
+      const isPreviewWorkspace = WORKSPACE_ID === "github-preview";
+      if (isPreviewWorkspace && !WORKSPACE_OVERRIDE){
+        try {
+          const prodRef = FB.db
+            .collection("workspaces")
+            .doc("github-prod")
+            .collection("app")
+            .doc("state");
+          const prodSnap = await prodRef.get();
+          const prodData = prodSnap.exists
+            ? (typeof prodSnap.data === "function" ? prodSnap.data() : prodSnap.data())
+            : null;
+          if (stateHasMeaningfulData(prodData)){
+            adoptState(prodData || {});
+            if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
+            if (window.DEBUG_MODE){
+              console.info("Loaded production workspace data as preview fallback.");
+            }
+            return;
+          }
+        } catch (err) {
+          console.warn("Preview fallback to production workspace failed", err);
+        }
+      }
+
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
