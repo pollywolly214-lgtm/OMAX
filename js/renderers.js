@@ -10520,6 +10520,59 @@ function computeCostModel(){
   const intervalTasks = intervalTasksAll.filter(isTaskActive);
   const asReqTasks = asReqTasksAll.filter(isTaskActive);
 
+  const historyCutoff = new Date();
+  historyCutoff.setHours(0, 0, 0, 0);
+  const historyCutoffTime = historyCutoff.getTime() - (365 * JOB_DAY_MS);
+
+  const parseHistoryDate = (value)=>{
+    if (!value) return null;
+    if (typeof parseDateLocal === "function"){
+      const parsed = parseDateLocal(value);
+      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) return parsed;
+    }
+    const fallback = new Date(value);
+    return fallback instanceof Date && !Number.isNaN(fallback.getTime()) ? fallback : null;
+  };
+
+  const taskHistoryCountCache = new Map();
+  const taskHistoryDatesCache = new Map();
+  const collectTaskHistoryDates = (task)=>{
+    if (!task) return [];
+    if (taskHistoryDatesCache.has(task)) return taskHistoryDatesCache.get(task);
+    const keys = new Set();
+    const completed = Array.isArray(task.completedDates) ? task.completedDates : [];
+    completed.forEach(entry => {
+      const key = toHistoryDateKey(entry);
+      if (key) keys.add(key);
+    });
+    const manualHistory = Array.isArray(task.manualHistory) ? task.manualHistory : [];
+    manualHistory.forEach(entry => {
+      if (!entry) return;
+      const status = typeof entry.status === "string" ? entry.status.toLowerCase() : "";
+      if (status === "scheduled") return;
+      const key = toHistoryDateKey(entry.dateISO || entry.date);
+      if (key) keys.add(key);
+    });
+    const dates = Array.from(keys);
+    taskHistoryDatesCache.set(task, dates);
+    return dates;
+  };
+
+  const countTaskHistoryInWindow = (task)=>{
+    if (!task) return 0;
+    if (taskHistoryCountCache.has(task)) return taskHistoryCountCache.get(task);
+    const dates = collectTaskHistoryDates(task);
+    let count = 0;
+    dates.forEach(key => {
+      const parsed = parseHistoryDate(key);
+      if (!parsed) return;
+      parsed.setHours(0, 0, 0, 0);
+      if (parsed.getTime() >= historyCutoffTime) count += 1;
+    });
+    taskHistoryCountCache.set(task, count);
+    return count;
+  };
+
   const cleanPartNumber = (pn)=> String(pn || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
   const maintenancePartNumbers = new Set();
   intervalTasks.forEach(task => {
@@ -10620,9 +10673,7 @@ function computeCostModel(){
     return total;
   };
 
-  const expectedAsReqAnnualFromTasks = asReqTasks.reduce((sum, task)=>{
-    const price = Number(task?.price);
-    if (!isFinite(price) || price <= 0) return sum;
+  const expectedAnnualFromTask = (task)=>{
     const candidates = [
       Number(task?.expectedAnnual),
       Number(task?.expectedPerYear),
@@ -10637,6 +10688,14 @@ function computeCostModel(){
       const perQuarter = Number(task?.expectedPerQuarter);
       if (isFinite(perQuarter) && perQuarter > 0) expected = perQuarter * 4;
     }
+    return isFinite(expected) && expected > 0 ? expected : 0;
+  };
+
+  const expectedAsReqAnnualFromTasks = asReqTasks.reduce((sum, task)=>{
+    const price = Number(task?.price);
+    if (!isFinite(price) || price <= 0) return sum;
+    const historyCount = countTaskHistoryInWindow(task);
+    const expected = historyCount > 0 ? historyCount : expectedAnnualFromTask(task);
     if (!isFinite(expected) || expected <= 0) return sum;
     return sum + (price * expected);
   }, 0);
@@ -11230,14 +11289,20 @@ function computeCostModel(){
     const price = Number(task?.price);
     const hasPrice = Number.isFinite(price) && price > 0;
     const hasInterval = Number.isFinite(intervalHours) && intervalHours > 0;
-    const servicesPerYear = (intervalAnnualBasis > 0 && hasInterval)
-      ? intervalAnnualBasis / intervalHours
-      : 0;
+    const historyCount = countTaskHistoryInWindow(task);
+    const servicesPerYear = historyCount > 0
+      ? historyCount
+      : ((intervalAnnualBasis > 0 && hasInterval) ? intervalAnnualBasis / intervalHours : 0);
     const intervalLabel = hasInterval ? formatHoursValue(intervalHours) : null;
     const servicesLabel = formatCount(servicesPerYear);
+    const historyLabel = historyCount > 0 ? formatCount(historyCount) : null;
     const cadenceParts = [];
     if (intervalLabel) cadenceParts.push(`Every ${intervalLabel} hr`);
-    if (servicesLabel) cadenceParts.push(`~${servicesLabel}×/yr`);
+    if (historyLabel){
+      cadenceParts.push(`Logged ${historyLabel}× last 12 mo`);
+    }else if (servicesLabel){
+      cadenceParts.push(`~${servicesLabel}×/yr`);
+    }
     if (!cadenceParts.length && task?.condition){
       cadenceParts.push(String(task.condition));
     }
@@ -11258,32 +11323,19 @@ function computeCostModel(){
     };
   });
 
-  const expectedAnnualFromTask = (task)=>{
-    const candidates = [
-      Number(task?.expectedAnnual),
-      Number(task?.expectedPerYear),
-      Number(task?.expected_per_year)
-    ];
-    let expected = candidates.find(val => Number.isFinite(val) && val > 0);
-    if (!Number.isFinite(expected) || expected <= 0){
-      const perMonth = Number(task?.expectedPerMonth);
-      if (Number.isFinite(perMonth) && perMonth > 0) expected = perMonth * 12;
-    }
-    if (!Number.isFinite(expected) || expected <= 0){
-      const perQuarter = Number(task?.expectedPerQuarter);
-      if (Number.isFinite(perQuarter) && perQuarter > 0) expected = perQuarter * 4;
-    }
-    return Number.isFinite(expected) && expected > 0 ? expected : 0;
-  };
-
   const asReqTaskRowsRaw = asReqTasks.map((task, index) => {
     const name = task?.name || `As-required task ${index + 1}`;
     const price = Number(task?.price);
     const hasPrice = Number.isFinite(price) && price > 0;
-    const expectedPerYear = expectedAnnualFromTask(task);
+    const historyCount = countTaskHistoryInWindow(task);
+    const expectedPerYear = historyCount > 0 ? historyCount : expectedAnnualFromTask(task);
     const frequencyLabel = formatCount(expectedPerYear);
     const cadenceParts = [];
-    if (frequencyLabel) cadenceParts.push(`Expected ${frequencyLabel}×/yr`);
+    if (historyCount > 0 && frequencyLabel){
+      cadenceParts.push(`Logged ${frequencyLabel}× last 12 mo`);
+    }else if (frequencyLabel){
+      cadenceParts.push(`Expected ${frequencyLabel}×/yr`);
+    }
     const condition = String(task?.condition || "").trim();
     if (condition){
       if (!cadenceParts.length || condition.toLowerCase() !== "as required"){
