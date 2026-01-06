@@ -2545,14 +2545,42 @@ if (typeof window !== "undefined"){
 async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
   try{
-    let snap = await FB.docRef.get();
-    let data = snap.exists ? (typeof snap.data === "function" ? snap.data() : snap.data()) : null;
+    async function fetchWorkspaceState(workspaceId){
+      const workspaceDoc = FB.db.collection("workspaces").doc(workspaceId);
+      const stateRef = workspaceDoc.collection("app").doc("state");
+      const stateSnap = await stateRef.get();
+      const stateData = stateSnap.exists
+        ? (typeof stateSnap.data === "function" ? stateSnap.data() : stateSnap.data())
+        : null;
+      if (stateHasMeaningfulData(stateData)){
+        return { data: stateData, workspaceDoc, stateRef, legacy: false };
+      }
+      const rootSnap = await workspaceDoc.get();
+      const rootData = rootSnap.exists
+        ? (typeof rootSnap.data === "function" ? rootSnap.data() : rootSnap.data())
+        : null;
+      if (stateHasMeaningfulData(rootData)){
+        return { data: rootData, workspaceDoc, stateRef, legacy: true };
+      }
+      return { data: null, workspaceDoc, stateRef, legacy: false };
+    }
 
-    if (!stateHasMeaningfulData(data)){
-      const migrated = await migrateLegacyWorkspaceDoc();
-      if (migrated){
-        data = migrated;
-        snap = { exists: true };
+    let { data, legacy } = await fetchWorkspaceState(WORKSPACE_ID);
+
+    if (legacy && stateHasMeaningfulData(data)){
+      try {
+        await FB.docRef.set(data, { merge:true });
+        if (FB.workspaceDoc){
+          await updateWorkspaceMetadata({
+            workspaceId: WORKSPACE_ID,
+            lastStateMigrationAt: new Date().toISOString(),
+            lastStateDocPath: FB.docRef.path,
+            lastTouchedAt: new Date().toISOString()
+          });
+        }
+        legacy = false;
+      } catch (err) {
+        console.warn("Failed to migrate legacy workspace document", err);
       }
     }
 
@@ -2563,15 +2591,8 @@ async function loadFromCloud(){
       const isPreviewWorkspace = WORKSPACE_ID === "github-preview";
       if (isPreviewWorkspace && !WORKSPACE_OVERRIDE){
         try {
-          const prodRef = FB.db
-            .collection("workspaces")
-            .doc("github-prod")
-            .collection("app")
-            .doc("state");
-          const prodSnap = await prodRef.get();
-          const prodData = prodSnap.exists
-            ? (typeof prodSnap.data === "function" ? prodSnap.data() : prodSnap.data())
-            : null;
+          const prodFetch = await fetchWorkspaceState("github-prod");
+          const prodData = prodFetch.data;
           if (stateHasMeaningfulData(prodData)){
             adoptState(prodData || {});
             if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
