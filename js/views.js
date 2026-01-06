@@ -3640,7 +3640,11 @@ function inventoryCategoryOptionsMarkup(selectedId, scope){
   const value = selectedId != null ? String(selectedId) : "";
   const options = [`<option value=""${value==="" ? " selected" : ""}>Uncategorized</option>`];
   const scopeKey = scope === "interval" || scope === "asreq" ? scope : null;
+  const visited = new Set();
   const appendOptions = (parentKey, depth)=>{
+    const key = parentKey == null ? "__root__" : String(parentKey);
+    if (visited.has(key)) return;
+    visited.add(key);
     const list = byParent.get(parentKey) || [];
     list.forEach(cat => {
       if (!cat) return;
