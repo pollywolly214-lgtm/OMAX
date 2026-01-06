@@ -61,6 +61,7 @@ if (typeof window !== "undefined"){
   window.TIME_EFFICIENCY_WINDOWS = TIME_EFFICIENCY_WINDOWS;
   window.appConfig = appConfig;
   window.getConfiguredDailyHours = getConfiguredDailyHours;
+  window.getAverageDailyCutHours = getAverageDailyCutHours;
   window.shouldExcludeWeekends = shouldExcludeWeekends;
   window.setAppConfig = setAppConfig;
   window.normalizeAppConfig = normalizeAppConfig;
@@ -214,12 +215,54 @@ function shouldExcludeWeekends(){
 }
 
 function getConfiguredDailyHours(){
+  const avg = getAverageDailyCutHours();
+  if (avg != null && Number.isFinite(avg) && avg > 0) return avg;
   try {
     const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
     const clamped = clampDailyCutHours(cfg.dailyHours);
     if (clamped > 0) return clamped;
   } catch (_err){ /* ignore */ }
   return DEFAULT_DAILY_HOURS;
+}
+
+function getAverageDailyCutHours(){
+  const list = Array.isArray(window.totalHistory) ? window.totalHistory : [];
+  const sorted = list
+    .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
+    .slice()
+    .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+  if (sorted.length < 2) return null;
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const windowDays = (typeof shouldExcludeWeekends === "function" && shouldExcludeWeekends()) ? 22 : 30;
+  const monthStart = new Date(today);
+  monthStart.setDate(monthStart.getDate() - windowDays);
+
+  const monthStartTime = monthStart.getTime();
+  const todayTime = today.getTime();
+
+  let startHours = null;
+  let endHours = null;
+  for (const entry of sorted){
+    const entryDate = parseDateLocal(entry.dateISO);
+    if (!(entryDate instanceof Date) || Number.isNaN(entryDate.getTime())) continue;
+    entryDate.setHours(0,0,0,0);
+    const entryTime = entryDate.getTime();
+    if (entryTime <= monthStartTime){
+      startHours = Number(entry.hours);
+    }
+    if (entryTime <= todayTime){
+      endHours = Number(entry.hours);
+    }
+    if (entryTime > todayTime) break;
+  }
+
+  if (!Number.isFinite(startHours) || !Number.isFinite(endHours)) return null;
+  const diffHours = Math.max(0, endHours - startHours);
+  if (!Number.isFinite(diffHours)) return null;
+  const rate = diffHours / windowDays;
+  return (Number.isFinite(rate) && rate > 0) ? rate : null;
 }
 
 function refreshDerivedDailyHours(){
