@@ -259,24 +259,26 @@ function getAverageDailyCutHours(){
   const monthStartTime = monthStart.getTime();
   const todayTime = today.getTime();
 
-  let startEntry = null;
-  let endEntry = null;
+  let startHours = null;
+  let endHours = null;
   for (const entry of sorted){
     const entryDate = parseDateLocal(entry.dateISO);
     if (!(entryDate instanceof Date) || Number.isNaN(entryDate.getTime())) continue;
     entryDate.setHours(0,0,0,0);
     const entryTime = entryDate.getTime();
-    if (entryTime < monthStartTime) continue;
+    if (entryTime <= monthStartTime){
+      startHours = Number(entry.hours);
+    }
+    if (entryTime <= todayTime){
+      endHours = Number(entry.hours);
+    }
     if (entryTime > todayTime) break;
-    if (!startEntry) startEntry = { entry, time: entryTime };
-    endEntry = { entry, time: entryTime };
   }
 
-  if (!startEntry || !endEntry || startEntry.time === endEntry.time) return null;
-  const diffHours = Math.max(0, Number(endEntry.entry.hours) - Number(startEntry.entry.hours));
-  const diffDays = Math.floor((endEntry.time - startEntry.time) / (24 * 60 * 60 * 1000));
-  if (diffDays <= 0) return null;
-  const rate = diffHours / diffDays;
+  if (!Number.isFinite(startHours) || !Number.isFinite(endHours)) return null;
+  const diffHours = Math.max(0, endHours - startHours);
+  if (!Number.isFinite(diffHours)) return null;
+  const rate = diffHours / windowDays;
   return (Number.isFinite(rate) && rate > 0) ? rate : null;
 }
 
