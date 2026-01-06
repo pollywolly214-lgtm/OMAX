@@ -892,9 +892,12 @@ body.cost-info-visible{
 .status-pending{ background:#f0f3fa; color:#4a566d; }
 .order-history-body table.order-table{ margin:0; }
 .inventory-toolbar{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:12px; }
+.inventory-toolbar-actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .inventory-add-trigger{ padding:8px 14px; border-radius:10px; border:1px solid #3b82f6; background:#e0edff; color:#0f3c91; font-weight:600; cursor:pointer; transition:background .2s ease, transform .2s ease; }
 .inventory-add-trigger:hover{ background:#cfe1ff; transform:translateY(-1px); }
 .inventory-add-trigger:focus-visible{ outline:3px solid rgba(59,130,246,.45); outline-offset:2px; }
+.inventory-add-category{ border-color:#3aa665; background:#e7f6ed; color:#205c39; }
+.inventory-add-category:hover{ background:#d6eddf; }
 .inventory-search{ flex:1 1 260px; }
 .inventory-hint{ margin-bottom:12px; }
 .inventory-name-btn{ background:none; border:0; padding:0; font:inherit; color:#0a63c2; cursor:pointer; text-decoration:underline; }
@@ -910,12 +913,19 @@ body.cost-info-visible{
 .inventory-table td{ padding:8px 10px; border-bottom:1px solid rgba(10,31,63,0.18); }
 .inventory-table th{ text-align:left; font-weight:600; color:#0a1f3f; background:rgba(224,237,255,0.42); }
 .inventory-table td{ vertical-align:middle; }
-.inventory-table th:nth-child(2),
-.inventory-table td:nth-child(2),
 .inventory-table th:nth-child(3),
-.inventory-table td:nth-child(3){ width:110px; text-align:center; }
-.inventory-table td:nth-child(2) input,
-.inventory-table td:nth-child(3) input{ width:72px; padding:4px 6px; }
+.inventory-table td:nth-child(3),
+.inventory-table th:nth-child(4),
+.inventory-table td:nth-child(4){ width:110px; text-align:center; }
+.inventory-table td:nth-child(3) input,
+.inventory-table td:nth-child(4) input{ width:72px; padding:4px 6px; }
+.inventory-category-grid{ display:flex; flex-direction:column; gap:14px; }
+.inventory-category-table{ padding:0 0 12px; overflow-x:auto; }
+.inventory-uncategorized{ margin-top:16px; }
+.inventory-item-cell{ display:flex; align-items:center; gap:8px; }
+.inventory-drag-handle{ border:1px solid #c7d2e8; background:#fff; border-radius:6px; padding:2px 6px; cursor:grab; font-weight:700; color:#5a6478; }
+.inventory-drag-handle:active{ cursor:grabbing; }
+.inventory-dragging{ opacity:0.6; }
 
 
 /* Calendar chip/bar are fully interactive */
@@ -1193,6 +1203,10 @@ body.modal-open footer {
 
 .folder-dropzone-line {
   display: block;
+}
+.folder summary.drop-hint{
+  outline:2px solid #0a63c2;
+  border-radius:6px;
 }
 h1 { margin: 0 0 10px; font-size: 22px; }
 .auth-bar {

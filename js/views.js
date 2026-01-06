@@ -3550,11 +3550,132 @@ function viewJobs(){
   </div>`;
 }
 
+function maintenanceInventoryCategories(){
+  const source = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  const normalized = typeof normalizeSettingsFolders === "function"
+    ? normalizeSettingsFolders(source)
+    : source;
+  const seen = new Set();
+  const categories = [];
+  normalized.forEach(folder => {
+    if (!folder || folder.id == null) return;
+    const id = String(folder.id);
+    if (seen.has(id)) return;
+    seen.add(id);
+    categories.push({
+      id,
+      name: typeof folder.name === "string" && folder.name.trim() ? folder.name.trim() : "Category",
+      order: Number(folder.order) || 0,
+      parent: folder.parent != null ? String(folder.parent) : null
+    });
+  });
+  return categories;
+}
+
+function inventoryCategoryTreeData(){
+  const rootId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
+  const categories = maintenanceInventoryCategories();
+  const byParent = new Map();
+  categories.forEach(cat => {
+    const parentKey = cat.parent != null ? String(cat.parent) : null;
+    if (!byParent.has(parentKey)) byParent.set(parentKey, []);
+    byParent.get(parentKey).push(cat);
+  });
+  return { rootId, categories, byParent };
+}
+
+function inventoryCategoryNameMap(){
+  const map = new Map();
+  maintenanceInventoryCategories().forEach(cat => {
+    if (!cat || cat.id == null) return;
+    map.set(String(cat.id), cat.name || "Category");
+  });
+  return map;
+}
+
+function inventoryItemLinkInfo(item){
+  const linkedTasks = typeof findTasksLinkedToInventoryItem === "function"
+    ? findTasksLinkedToInventoryItem(item)
+    : [];
+  const intervalIds = new Set((Array.isArray(window.tasksInterval) ? window.tasksInterval : []).map(task => String(task?.id ?? "")));
+  const asreqIds = new Set((Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []).map(task => String(task?.id ?? "")));
+  let linkedCategoryId = "";
+  let listType = null;
+  if (linkedTasks.length){
+    const linkedTask = linkedTasks.find(task => task && task.id != null) || linkedTasks[0];
+    if (linkedTask && linkedTask.cat != null){
+      linkedCategoryId = String(linkedTask.cat);
+    }
+    const linkedId = linkedTask && linkedTask.id != null ? String(linkedTask.id) : "";
+    if (linkedId && intervalIds.has(linkedId)){
+      listType = "interval";
+    } else if (linkedId && asreqIds.has(linkedId)){
+      listType = "asreq";
+    }
+  }
+  return { linkedTasks, linkedCategoryId, listType, isLinked: linkedTasks.length > 0 };
+}
+
+function inventoryItemCategoryInfo(item, categoryMap){
+  const categories = categoryMap instanceof Map ? categoryMap : inventoryCategoryNameMap();
+  const linkInfo = inventoryItemLinkInfo(item);
+  const rawCategoryId = item && item.categoryId != null ? String(item.categoryId) : "";
+  let categoryId = "";
+  if (linkInfo.linkedCategoryId && categories.has(linkInfo.linkedCategoryId)){
+    categoryId = linkInfo.linkedCategoryId;
+  } else if (!linkInfo.isLinked && rawCategoryId && categories.has(rawCategoryId)){
+    categoryId = rawCategoryId;
+  }
+  return {
+    categoryId,
+    isLinked: linkInfo.isLinked,
+    linkedCategoryId: linkInfo.linkedCategoryId,
+    listType: linkInfo.listType
+  };
+}
+
+function inventoryCategoryOptionsMarkup(selectedId, scope){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const { byParent } = inventoryCategoryTreeData();
+  const value = selectedId != null ? String(selectedId) : "";
+  const options = [`<option value=""${value==="" ? " selected" : ""}>Uncategorized</option>`];
+  const scopeKey = scope === "interval" || scope === "asreq" ? scope : null;
+  const visited = new Set();
+  const appendOptions = (parentKey, depth)=>{
+    const key = parentKey == null ? "__root__" : String(parentKey);
+    if (visited.has(key)) return;
+    visited.add(key);
+    const list = byParent.get(parentKey) || [];
+    list.forEach(cat => {
+      if (!cat) return;
+      const id = cat.id != null ? String(cat.id) : "";
+      if (scopeKey && id === scopeKey) return;
+      const label = cat.name || "Category";
+      const indent = depth > 0 ? `${"—".repeat(depth)} ` : "";
+      const isSelected = value === id;
+      options.push(`<option value="${esc(id)}"${isSelected ? " selected" : ""}>${esc(indent + label)}</option>`);
+      appendOptions(id, depth + 1);
+    });
+  };
+  if (scopeKey){
+    appendOptions(scopeKey, 0);
+  } else {
+    appendOptions(null, 0);
+  }
+  if (value && !options.some(opt => opt.includes(`value="${esc(value)}"`))){
+    options.push(`<option value="${esc(value)}" selected>Unknown category (${esc(value)})</option>`);
+  }
+  return options.join("");
+}
+
 function filterInventoryItems(term){
   const query = (term || "").trim().toLowerCase();
   if (!query) return inventory.slice();
+  const categoryMap = inventoryCategoryNameMap();
   return inventory.filter(item => {
-    const fields = [item.name, item.unit, item.pn, item.note, item.link];
+    const info = inventoryItemCategoryInfo(item, categoryMap);
+    const categoryName = info.categoryId ? categoryMap.get(info.categoryId) : "Uncategorized";
+    const fields = [item.name, item.unit, item.pn, item.note, item.link, categoryName];
     return fields.some(f => {
       if (f == null) return false;
       const text = String(f).toLowerCase();
@@ -3563,9 +3684,11 @@ function filterInventoryItems(term){
   });
 }
 
-function inventoryRowsHTML(list){
+function inventoryRowsHTML(list, emptyMessage){
+  const categoryMap = inventoryCategoryNameMap();
   if (!Array.isArray(list) || !list.length){
-    return `<tr><td colspan="9" class="muted">No inventory items match your search.</td></tr>`;
+    const message = emptyMessage || "No items in this category match your search.";
+    return `<tr><td colspan="10" class="muted">${message}</td></tr>`;
   }
   return list.map(i => {
     const priceVal = i.price != null && i.price !== "" ? Number(i.price) : "";
@@ -3575,9 +3698,18 @@ function inventoryRowsHTML(list){
     const qtyOldNum = Number(i.qtyOld);
     const qtyNewDisplay = Number.isFinite(qtyNewNum) && qtyNewNum >= 0 ? qtyNewNum : 0;
     const qtyOldDisplay = Number.isFinite(qtyOldNum) && qtyOldNum >= 0 ? qtyOldNum : 0;
+    const info = inventoryItemCategoryInfo(i, categoryMap);
+    const scope = info.isLinked
+      ? (info.listType || null)
+      : (i.categoryScope === "interval" || i.categoryScope === "asreq" ? i.categoryScope : null);
+    const categorySelect = `<select data-inventory-category-select data-id="${i.id}"${info.isLinked ? " disabled" : ""}>${inventoryCategoryOptionsMarkup(info.categoryId, scope)}</select>`;
+    const dragHandle = isLinked
+      ? ""
+      : `<button type="button" class="inventory-drag-handle" draggable="true" data-inventory-drag-handle data-id="${i.id}" aria-label="Drag to move item">⋮⋮</button>`;
     return `
-    <tr>
-      <td><button type="button" class="inventory-name-btn" data-inventory-maintenance="${i.id}">${nameDisplay}</button></td>
+    <tr data-inventory-row="${i.id}">
+      <td>${categorySelect}</td>
+      <td class="inventory-item-cell">${dragHandle}<button type="button" class="inventory-name-btn" data-inventory-maintenance="${i.id}">${nameDisplay}</button></td>
       <td><input type="number" min="0" step="1" data-inv="qtyNew" data-id="${i.id}" value="${qtyNewDisplay}"></td>
       <td><input type="number" min="0" step="1" data-inv="qtyOld" data-id="${i.id}" value="${qtyOldDisplay}"></td>
       <td>${i.unit||"pcs"}</td>
@@ -3593,9 +3725,165 @@ function inventoryRowsHTML(list){
   }).join("");
 }
 
+function inventoryGroupsHTML(list){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const { rootId } = inventoryCategoryTreeData();
+  const folders = maintenanceInventoryCategories();
+  const categoryMap = new Map(folders.map(cat => [String(cat.id), cat.name || "Category"]));
+  const intervalCats = new Set((Array.isArray(window.tasksInterval) ? window.tasksInterval : []).map(task => String(task?.cat ?? "")));
+  const asreqCats = new Set((Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []).map(task => String(task?.cat ?? "")));
+  const inferredScope = new Map();
+  intervalCats.forEach(id => { if (id) inferredScope.set(id, "interval"); });
+  asreqCats.forEach(id => { if (id && !inferredScope.has(id)) inferredScope.set(id, "asreq"); });
+  const groupedByType = {
+    interval: new Map(),
+    asreq: new Map()
+  };
+  const uncategorized = [];
+  list.forEach(item => {
+    if (!item) return;
+    const info = inventoryItemCategoryInfo(item, categoryMap);
+    const scope = info.isLinked
+      ? (info.listType || null)
+      : (item.categoryScope === "interval" || item.categoryScope === "asreq" ? item.categoryScope : null);
+    if (!scope){
+      uncategorized.push(item);
+      return;
+    }
+    const key = info.categoryId || "";
+    if (!groupedByType[scope].has(key)) groupedByType[scope].set(key, []);
+    groupedByType[scope].get(key).push(item);
+  });
+
+  const kidsOf = (parentId)=>{
+    const parentKey = String(parentId ?? "");
+    return folders.filter(folder => {
+      const folderId = String(folder.id ?? "");
+      if (folderId && folderId === parentKey) return false;
+      if (folderId === String(rootId)) return false;
+      const rawParent = String(folder.parent ?? "");
+      if (rawParent === parentKey) return true;
+      if ((parentKey === "interval" || parentKey === "asreq") && rawParent === String(rootId)){
+        return inferredScope.get(folderId) === parentKey;
+      }
+      return false;
+    });
+  };
+
+  const visited = new Set();
+  const renderFolder = (folder, listType)=>{
+    if (!folder || folder.id == null) return "";
+    const folderId = String(folder.id);
+    if (visited.has(folderId)) return "";
+    visited.add(folderId);
+    const subFolderList = kidsOf(folder.id);
+    const subFolders = subFolderList.map(sf => `
+      <div class="folder-dropzone folder-dropzone-line small muted" data-drop-before-folder="${sf.id}"
+           style="border:1px dashed #bbb; padding:6px; margin:4px 0; border-radius:8px;">
+        Drag categories here to place before <b>${esc(sf.name)}</b>
+      </div>
+      ${renderFolder(sf, listType)}
+    `).join("");
+    const subFolderTail = subFolderList.length ? `
+      <div class="folder-dropzone folder-dropzone-line small muted" data-drop-folder-tail="${folder.id}"
+           style="border:1px dashed #bbb; padding:6px; margin:4px 0 6px; border-radius:8px;">
+        Drag categories here to place at the end of <b>${esc(folder.name)}</b>
+      </div>` : "";
+    const items = groupedByType[listType].get(String(folder.id)) || [];
+    const rows = inventoryRowsHTML(items, `Drag items here to assign them to ${esc(folder.name)}.`);
+    return `
+      <details class="folder block" data-folder-id="${esc(folder.id)}" open>
+        <summary class="folder-title" style="display:flex;align-items:center;gap:10px;font-weight:700;" draggable="true">
+          <span class="folder-name">${esc(folder.name)}</span>
+          <span style="flex:1"></span>
+          <button class="small" data-inventory-add-subcategory="${esc(folder.id)}">+ Sub-category</button>
+          <button class="small" data-inventory-rename-category="${esc(folder.id)}">Rename</button>
+          <button class="danger small" data-inventory-remove-category="${esc(folder.id)}">Remove</button>
+        </summary>
+
+        <div class="folder-dropzone small muted" data-drop-folder="${esc(folder.id)}"
+             style="border:1px dashed #bbb; padding:6px; margin:6px 0; border-radius:8px;">
+          Drag inventory items here to move into <b>${esc(folder.name)}</b>
+        </div>
+
+        <div class="folder-children" data-folder-children="${esc(folder.id)}">
+          ${subFolders}
+          ${subFolderTail}
+          <div class="inventory-category-table">
+            <table class="inventory-table">
+              <thead><tr><th>Category</th><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      </details>`;
+  };
+
+  const buildMenu = (listType, title)=>{
+    const parentId = listType;
+    const menuDrop = `
+      <div class="folder-dropzone small muted" data-inventory-drop-menu="${listType}"
+           style="border:1px dashed #bbb; padding:6px; margin:6px 8px 10px 8px; border-radius:8px;">
+        Drag inventory items here to move into <b>${title}</b>
+      </div>`;
+    const rootFolderTail = `
+      <div class="folder-dropzone folder-dropzone-line small muted" data-drop-folder-tail="${esc(parentId)}"
+           style="border:1px dashed #bbb; padding:6px; margin:4px 0 6px; border-radius:8px;">
+        Drag categories here to place at the end of root categories
+      </div>`;
+    const rootFolders = kidsOf(parentId);
+    const folderSections = rootFolders.map(f => `
+      <div class="folder-dropzone folder-dropzone-line small muted" data-drop-before-folder="${esc(f.id)}"
+           style="border:1px dashed #bbb; padding:6px; margin:4px 0;">
+        Drag categories here to place before <b>${esc(f.name)}</b>
+      </div>
+      ${renderFolder(f, listType)}
+    `).join("");
+    return `
+      <details class="block" open data-inventory-scope="${listType}">
+        <summary style="display:flex;align-items:center;gap:10px;font-weight:700;">
+          <span>${title}</span>
+          <span style="flex:1"></span>
+        </summary>
+        ${menuDrop}
+        <div class="folder-list" data-inventory-scope="${listType}">
+          ${folderSections}
+          ${rootFolderTail}
+        </div>
+      </details>
+    `;
+  };
+
+  const uncategorizedItems = uncategorized;
+  const uncategorizedRows = inventoryRowsHTML(uncategorizedItems, "Unlinked items appear here.");
+  const uncategorizedSection = `
+    <div class="block inventory-uncategorized" data-inventory-drop-uncategorized data-inventory-scope="uncategorized">
+      <h4 style="margin:0 0 6px 0;">Uncategorized</h4>
+      <div class="small muted">${uncategorizedItems.length} item${uncategorizedItems.length === 1 ? "" : "s"} without a maintenance category.</div>
+      <div class="inventory-category-table" style="margin-top:8px;">
+        <table class="inventory-table">
+          <thead><tr><th>Category</th><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
+          <tbody>${uncategorizedRows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  return `
+    <details class="block" open data-inventory-root>
+      <summary style="display:flex;align-items:center;gap:10px;font-weight:700;">
+        <span>All Items</span>
+        <span style="flex:1"></span>
+      </summary>
+      ${buildMenu("interval", "Per Interval")}
+      ${buildMenu("asreq", "As Required")}
+      ${uncategorizedSection}
+    </details>
+  `;
+}
+
 function viewInventory(){
   const filtered = filterInventoryItems(inventorySearchTerm);
-  const rows = inventoryRowsHTML(filtered);
   const searchValue = String(inventorySearchTerm || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -3606,17 +3894,17 @@ function viewInventory(){
     <div class="block" style="grid-column:1 / -1">
       <h3>Inventory</h3>
       <div class="inventory-toolbar">
-        <button type="button" class="inventory-add-trigger" id="inventoryAddBtn">+ Add inventory item</button>
+        <div class="inventory-toolbar-actions">
+          <button type="button" class="inventory-add-trigger" id="inventoryAddBtn">+ Add inventory item</button>
+          <button type="button" class="inventory-add-trigger inventory-add-category" id="inventoryAddCategory">+ Add category</button>
+        </div>
         <div class="inventory-search mini-form">
           <input type="search" id="inventorySearch" placeholder="Search items, part numbers, notes, or links" value="${searchValue}">
           <button type="button" id="inventorySearchClear">Clear</button>
         </div>
       </div>
-      <div class="small muted inventory-hint">Results update as you type.</div>
-      <table class="inventory-table">
-        <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
-        <tbody data-inventory-rows>${rows}</tbody>
-      </table>
+      <div class="small muted inventory-hint">Categories mirror Maintenance Settings. Drag uncategorized items into a category to organize them.</div>
+      <div class="inventory-category-grid" data-inventory-groups>${inventoryGroupsHTML(filtered)}</div>
     </div>
   </div>
 
@@ -3642,6 +3930,14 @@ function viewInventory(){
             <label>New quantity<input type="number" min="0" step="1" name="inventoryQtyNew" value="1"></label>
             <label>Old quantity<input type="number" min="0" step="1" name="inventoryQtyOld" value="0"></label>
             <label>Unit<input name="inventoryUnit" placeholder="pcs" value="pcs"></label>
+            <label>Maintenance type
+              <select name="inventoryCategoryScope">
+                <option value="" selected>Uncategorized</option>
+                <option value="interval">Per Interval</option>
+                <option value="asreq">As Required</option>
+              </select>
+            </label>
+            <label>Category<select name="inventoryCategory">${inventoryCategoryOptionsMarkup("", "")}</select></label>
             <label>Part #<input name="inventoryPN" placeholder="Part number"></label>
             <label>Store link<input type="url" name="inventoryLink" placeholder="https://..."></label>
             <label>Price ($)<input type="number" min="0" step="0.01" name="inventoryPrice" placeholder="optional"></label>
@@ -3859,4 +4155,3 @@ function viewDeletedItems(model){
     </div>
   `;
 }
-

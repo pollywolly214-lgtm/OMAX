@@ -2146,6 +2146,10 @@ function normalizeInventoryItem(raw){
   item.qtyOld = qtyOld;
   item.qty = qtyNew + qtyOld;
   if (!item.unit){ item.unit = "pcs"; }
+  const catId = item.categoryId != null ? String(item.categoryId).trim() : "";
+  item.categoryId = catId || null;
+  const scope = typeof item.categoryScope === "string" ? item.categoryScope.trim() : "";
+  item.categoryScope = scope || null;
   return item;
 }
 
