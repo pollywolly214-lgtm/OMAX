@@ -209,6 +209,116 @@ function escapeHtml(str){
   })[c] || c);
 }
 
+function normalizeHexColor(value){
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const hex = trimmed.startsWith("#") ? trimmed.slice(1) : trimmed;
+  if (![3, 6].includes(hex.length)) return null;
+  if (!/^[0-9a-fA-F]+$/.test(hex)) return null;
+  if (hex.length === 3){
+    return `#${hex.split("").map(ch => `${ch}${ch}`).join("").toUpperCase()}`;
+  }
+  return `#${hex.toUpperCase()}`;
+}
+
+function hexToRgb(hex){
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return null;
+  const raw = normalized.slice(1);
+  return {
+    r: parseInt(raw.slice(0, 2), 16),
+    g: parseInt(raw.slice(2, 4), 16),
+    b: parseInt(raw.slice(4, 6), 16)
+  };
+}
+
+function rgbaFromHex(hex, alpha){
+  const rgb = hexToRgb(hex) || { r: 19, g: 35, b: 63 };
+  const a = Math.max(0, Math.min(1, Number(alpha) || 0));
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${a})`;
+}
+
+function mixHex(base, blend, amount){
+  const rgbBase = hexToRgb(base) || { r: 19, g: 35, b: 63 };
+  const rgbBlend = hexToRgb(blend) || { r: 255, g: 255, b: 255 };
+  const weight = Math.max(0, Math.min(1, Number(amount) || 0));
+  const r = (rgbBase.r * (1 - weight)) + (rgbBlend.r * weight);
+  const g = (rgbBase.g * (1 - weight)) + (rgbBlend.g * weight);
+  const b = (rgbBase.b * (1 - weight)) + (rgbBlend.b * weight);
+  const toHex = (value)=> Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, "0").toUpperCase();
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function hslToHex(h, s, l){
+  const sat = Math.max(0, Math.min(100, s)) / 100;
+  const lig = Math.max(0, Math.min(100, l)) / 100;
+  const chroma = (1 - Math.abs((2 * lig) - 1)) * sat;
+  const huePrime = ((h % 360) + 360) % 360 / 60;
+  const x = chroma * (1 - Math.abs((huePrime % 2) - 1));
+  let r = 0, g = 0, b = 0;
+  if (huePrime >= 0 && huePrime < 1){ [r, g, b] = [chroma, x, 0]; }
+  else if (huePrime >= 1 && huePrime < 2){ [r, g, b] = [x, chroma, 0]; }
+  else if (huePrime >= 2 && huePrime < 3){ [r, g, b] = [0, chroma, x]; }
+  else if (huePrime >= 3 && huePrime < 4){ [r, g, b] = [0, x, chroma]; }
+  else if (huePrime >= 4 && huePrime < 5){ [r, g, b] = [x, 0, chroma]; }
+  else { [r, g, b] = [chroma, 0, x]; }
+  const m = lig - (chroma / 2);
+  const toHex = (value)=> Math.max(0, Math.min(255, Math.round(value * 255))).toString(16).padStart(2, "0").toUpperCase();
+  return `#${toHex(r + m)}${toHex(g + m)}${toHex(b + m)}`;
+}
+
+function getJobCategoryColorData(catId){
+  const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+  const jobFolders = Array.isArray(window.jobFolders)
+    ? window.jobFolders
+    : (typeof defaultJobFolders === "function" ? defaultJobFolders() : []);
+  const folderMap = new Map();
+  jobFolders.forEach(folder => {
+    if (!folder || folder.id == null) return;
+    folderMap.set(String(folder.id), folder);
+  });
+  if (!folderMap.has(rootId)){
+    folderMap.set(rootId, { id: rootId, name: "All Jobs", parent: null, order: 1 });
+  }
+  const rawKey = catId != null ? String(catId) : rootId;
+  const normalized = folderMap.has(rawKey) ? rawKey : rootId;
+  const folder = folderMap.get(normalized);
+  const custom = normalizeHexColor(folder?.color);
+  const accentHex = (()=>{
+    if (custom) return custom;
+    if (!normalized || normalized === rootId) return "#13233F";
+    let hash = 0;
+    const str = String(normalized);
+    for (let i = 0; i < str.length; i++){
+      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash |= 0;
+    }
+    const hue = Math.abs(hash) % 360;
+    return hslToHex(hue, 62, 55);
+  })();
+  const surfaceHex = mixHex(accentHex, "#FFFFFF", 0.86);
+  const borderHex = mixHex(accentHex, "#FFFFFF", 0.7);
+  const textHex = mixHex(accentHex, "#0B1223", 0.18);
+  return {
+    accentHex,
+    surfaceHex,
+    borderHex,
+    textHex
+  };
+}
+
+function applyJobCategoryStyles(el, catId){
+  if (!el) return;
+  const colors = getJobCategoryColorData(catId);
+  el.dataset.categoryColor = "1";
+  el.style.setProperty("--job-category-surface", rgbaFromHex(colors.surfaceHex, 0.85));
+  el.style.setProperty("--job-category-accent", colors.accentHex);
+  el.style.setProperty("--job-category-border", rgbaFromHex(colors.borderHex, 0.6));
+  el.style.setProperty("--job-category-text", colors.textHex);
+  el.style.setProperty("--job-category-accent-soft", rgbaFromHex(colors.accentHex, 0.28));
+}
+
 function findCalendarTaskMeta(taskId){
   const tid = String(taskId);
   const intervalList = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
@@ -1916,7 +2026,7 @@ function renderCalendar(){
     const cur = new Date(start.getTime());
     while (cur <= end){
       const key = ymd(cur);
-      (jobsMap[key] ||= []).push({ type:"job", id:String(j.id), name:j.name, status:"active" });
+      (jobsMap[key] ||= []).push({ type:"job", id:String(j.id), name:j.name, status:"active", cat:j.cat });
       cur.setDate(cur.getDate()+1);
     }
   });
@@ -1926,7 +2036,7 @@ function renderCalendar(){
     if (!job) return;
     const completionKey = job.completedAtISO ? ymd(job.completedAtISO) : (job.dueISO ? ymd(job.dueISO) : null);
     if (!completionKey) return;
-    (jobsMap[completionKey] ||= []).push({ type:"job", id:String(job.id), name:job.name, status:"completed" });
+    (jobsMap[completionKey] ||= []).push({ type:"job", id:String(job.id), name:job.name, status:"completed", cat:job.cat });
   });
 
   const garnetMap = {};
@@ -2169,6 +2279,9 @@ function renderCalendar(){
         if (ev.status === "completed") cls += " is-complete";
         bar.className = cls;
         bar.dataset.calJob = ev.id;
+        if (ev.status === "completed"){
+          applyJobCategoryStyles(bar, ev.cat);
+        }
         bar.textContent = ev.status === "completed" ? `${ev.name} (completed)` : ev.name;
         cell.appendChild(bar);
       });
