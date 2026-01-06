@@ -13086,9 +13086,12 @@ function renderJobs(){
     saveCloudDebounced();
     rerenderPreservingState(currentCategoryFilter());
     if (typeof refreshDashboardWidgets === "function"){
-      refreshDashboardWidgets({ full: true });
+      refreshDashboardWidgets();
     } else if (typeof renderCalendar === "function"){
       renderCalendar();
+    }
+    if (typeof updateCalendarJobCategoryStyles === "function"){
+      updateCalendarJobCategoryStyles(categoryId);
     }
   };
 

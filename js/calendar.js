@@ -301,6 +301,7 @@ function getJobCategoryColorData(catId){
   const borderHex = mixHex(accentHex, "#FFFFFF", 0.7);
   const textHex = mixHex(accentHex, "#0B1223", 0.18);
   return {
+    normalized,
     accentHex,
     surfaceHex,
     borderHex,
@@ -317,6 +318,22 @@ function applyJobCategoryStyles(el, catId){
   el.style.setProperty("--job-category-border", rgbaFromHex(colors.borderHex, 0.6));
   el.style.setProperty("--job-category-text", colors.textHex);
   el.style.setProperty("--job-category-accent-soft", rgbaFromHex(colors.accentHex, 0.28));
+}
+
+function updateCalendarJobCategoryStyles(categoryId){
+  const normalized = getJobCategoryColorData(categoryId).normalized;
+  const escapeFn = (value)=>{
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(value);
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+  };
+  const selector = `.cal-job.is-complete[data-cal-job-category="${escapeFn(normalized)}"]`;
+  document.querySelectorAll(selector).forEach(el => {
+    applyJobCategoryStyles(el, normalized);
+  });
+}
+
+if (typeof window !== "undefined"){
+  window.updateCalendarJobCategoryStyles = updateCalendarJobCategoryStyles;
 }
 
 function findCalendarTaskMeta(taskId){
@@ -2279,8 +2296,10 @@ function renderCalendar(){
         if (ev.status === "completed") cls += " is-complete";
         bar.className = cls;
         bar.dataset.calJob = ev.id;
+        const categoryData = getJobCategoryColorData(ev.cat);
+        bar.dataset.calJobCategory = categoryData.normalized;
         if (ev.status === "completed"){
-          applyJobCategoryStyles(bar, ev.cat);
+          applyJobCategoryStyles(bar, categoryData.normalized);
         }
         bar.textContent = ev.status === "completed" ? `${ev.name} (completed)` : ev.name;
         cell.appendChild(bar);
