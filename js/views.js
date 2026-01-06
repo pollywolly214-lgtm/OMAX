@@ -118,7 +118,7 @@ function viewDashboard(){
             <div class="time-efficiency-edit-row">
               <label class="time-efficiency-edit-field">
                 <span class="time-efficiency-edit-label">Start date</span>
-                <input type="date" data-efficiency-start-input>
+                <input type="date" name="efficiencyStartDate" data-efficiency-start-input>
               </label>
               <div class="time-efficiency-edit-actions">
                 <button type="button" class="time-efficiency-edit-apply" data-efficiency-apply>Apply</button>
@@ -1881,7 +1881,7 @@ function viewCosts(model){
               <div class="time-efficiency-edit-row">
                 <label class="time-efficiency-edit-field">
                   <span class="time-efficiency-edit-label">Start date</span>
-                  <input type="date" data-efficiency-start-input>
+                  <input type="date" name="efficiencyStartDate" data-efficiency-start-input>
                 </label>
                 <div class="time-efficiency-edit-actions">
                   <button type="button" class="time-efficiency-edit-apply" data-efficiency-apply>Apply</button>
@@ -3859,4 +3859,3 @@ function viewDeletedItems(model){
     </div>
   `;
 }
-
