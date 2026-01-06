@@ -16,16 +16,46 @@ const DEFAULT_DAILY_HOURS = 8;
 let DAILY_HOURS = DEFAULT_DAILY_HOURS;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
-// Decide workspace based on hostname (all hosts write to production).
+// Decide workspace based on hostname (preview vs production).
+const WORKSPACE_OVERRIDE = (() => {
+  if (typeof window === "undefined") return null;
+  const search = new URLSearchParams(window.location.search);
+  return search.get("workspace");
+})();
 const WORKSPACE_ID = (() => {
-  if (typeof window !== "undefined") {
+  if (typeof window === "undefined") {
+    // Fallback for non-browser contexts so build-time scripts default to production doc
     return "github-prod";
   }
-  // Fallback for non-browser contexts so build-time scripts default to production doc
+
+  const host = window.location.hostname.toLowerCase();
+  if (WORKSPACE_OVERRIDE) return WORKSPACE_OVERRIDE;
+
+  const prodHosts = Array.isArray(window.OMAX_PROD_HOSTS) && window.OMAX_PROD_HOSTS.length
+    ? window.OMAX_PROD_HOSTS.map((value)=>String(value).toLowerCase())
+    : ["omax.vercel.app"];
+  const isProdHost = prodHosts.includes(host);
+  const isVercelHost = host.endsWith(".vercel.app");
+  const isGithubHost = host.endsWith(".github.io");
+  const isLocalHost = ["localhost", "127.0.0.1", "::1"].includes(host);
+
+  if (isLocalHost || isGithubHost) {
+    return "github-preview";
+  }
+
+  if (isProdHost) {
+    return "github-prod";
+  }
+
+  if (isVercelHost) {
+    return "github-preview";
+  }
+
   return "github-prod";
 })();
 if (typeof window !== "undefined") {
   window.WORKSPACE_ID = WORKSPACE_ID;
+  window.WORKSPACE_OVERRIDE = WORKSPACE_OVERRIDE;
   window.workspaceRef = null;
   window.workspaceDocRef = null;
   window.DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
@@ -390,16 +420,7 @@ function applyFirestoreSettings(db){
   }
 
   if (!isDevEnv){
-    if (ignoreAlreadyEnabled){
-      firebaseSettingsApplied = true;
-      return;
-    }
-    try {
-      db.settings({ ...currentSettings, ignoreUndefinedProperties: true });
-      firebaseSettingsApplied = true;
-    } catch (err) {
-      console.warn("Failed to enable ignoreUndefinedProperties", err);
-    }
+    firebaseSettingsApplied = true;
     return;
   }
 
@@ -2524,14 +2545,42 @@ if (typeof window !== "undefined"){
 async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
   try{
-    let snap = await FB.docRef.get();
-    let data = snap.exists ? (typeof snap.data === "function" ? snap.data() : snap.data()) : null;
+    async function fetchWorkspaceState(workspaceId){
+      const workspaceDoc = FB.db.collection("workspaces").doc(workspaceId);
+      const stateRef = workspaceDoc.collection("app").doc("state");
+      const stateSnap = await stateRef.get();
+      const stateData = stateSnap.exists
+        ? (typeof stateSnap.data === "function" ? stateSnap.data() : stateSnap.data())
+        : null;
+      if (stateHasMeaningfulData(stateData)){
+        return { data: stateData, workspaceDoc, stateRef, legacy: false };
+      }
+      const rootSnap = await workspaceDoc.get();
+      const rootData = rootSnap.exists
+        ? (typeof rootSnap.data === "function" ? rootSnap.data() : rootSnap.data())
+        : null;
+      if (stateHasMeaningfulData(rootData)){
+        return { data: rootData, workspaceDoc, stateRef, legacy: true };
+      }
+      return { data: null, workspaceDoc, stateRef, legacy: false };
+    }
 
-    if (!stateHasMeaningfulData(data)){
-      const migrated = await migrateLegacyWorkspaceDoc();
-      if (migrated){
-        data = migrated;
-        snap = { exists: true };
+    let { data, legacy } = await fetchWorkspaceState(WORKSPACE_ID);
+
+    if (legacy && stateHasMeaningfulData(data)){
+      try {
+        await FB.docRef.set(data, { merge:true });
+        if (FB.workspaceDoc){
+          await updateWorkspaceMetadata({
+            workspaceId: WORKSPACE_ID,
+            lastStateMigrationAt: new Date().toISOString(),
+            lastStateDocPath: FB.docRef.path,
+            lastTouchedAt: new Date().toISOString()
+          });
+        }
+        legacy = false;
+      } catch (err) {
+        console.warn("Failed to migrate legacy workspace document", err);
       }
     }
 
@@ -2539,6 +2588,36 @@ async function loadFromCloud(){
       adoptState(data || {});
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
     }else{
+      const isPreviewWorkspace = WORKSPACE_ID === "github-preview";
+      if (isPreviewWorkspace && !WORKSPACE_OVERRIDE){
+        try {
+          const prodFetch = await fetchWorkspaceState("github-prod");
+          const prodData = prodFetch.data;
+          if (stateHasMeaningfulData(prodData)){
+            adoptState(prodData || {});
+            if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
+            try {
+              await FB.docRef.set(prodData, { merge:true });
+              if (FB.workspaceDoc){
+                await updateWorkspaceMetadata({
+                  workspaceId: WORKSPACE_ID,
+                  lastTouchedAt: new Date().toISOString(),
+                  lastSeededFrom: "github-prod"
+                });
+              }
+            } catch (err) {
+              console.warn("Failed to seed preview workspace from production", err);
+            }
+            if (window.DEBUG_MODE){
+              console.info("Loaded production workspace data as preview fallback.");
+            }
+            return;
+          }
+        } catch (err) {
+          console.warn("Preview fallback to production workspace failed", err);
+        }
+      }
+
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
