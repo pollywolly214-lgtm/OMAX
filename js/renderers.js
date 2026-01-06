@@ -10688,6 +10688,9 @@ function computeCostModel(){
   const maintenanceRate = (typeof getMaintenanceHourlyRate === "function")
     ? getMaintenanceHourlyRate()
     : (Number(DEFAULT_APP_CONFIG?.maintenanceHourlyRate) || 0);
+  const opportunityRate = (typeof getOpportunityLossRate === "function")
+    ? getOpportunityLossRate()
+    : 0;
   const maintenanceForecastEntries = (typeof normalizeMaintenanceForecastEntries === "function")
     ? normalizeMaintenanceForecastEntries((appConfig || {}).maintenanceForecastEntries || [])
     : [];
@@ -11603,11 +11606,25 @@ function computeCostModel(){
     ? baselineAnnualHours
     : (hoursYear > 0 ? hoursYear : 0);
 
+  const resolveForecastUnitCost = (task)=>{
+    if (!task) return 0;
+    const partCost = computeTaskPartCost(task);
+    const downtimeHours = Number(task?.downtimeHours);
+    const hours = Number.isFinite(downtimeHours) && downtimeHours > 0 ? downtimeHours : 0;
+    const laborCost = hours * maintenanceRate;
+    const opportunityCost = hours * opportunityRate;
+    const derivedTotal = partCost + laborCost + opportunityCost;
+    const price = Number(task?.price);
+    if (Number.isFinite(derivedTotal) && derivedTotal > 0) return derivedTotal;
+    if (Number.isFinite(price) && price > 0) return price;
+    return 0;
+  };
+
   const intervalTaskRowsRaw = intervalTasks.map((task, index) => {
     const name = task?.name || `Interval task ${index + 1}`;
     const intervalHours = Number(task?.interval);
-    const price = Number(task?.price);
-    const hasPrice = Number.isFinite(price) && price > 0;
+    const unitCost = resolveForecastUnitCost(task);
+    const hasPrice = Number.isFinite(unitCost) && unitCost > 0;
     const hasInterval = Number.isFinite(intervalHours) && intervalHours > 0;
     const servicesPerYear = (intervalAnnualBasis > 0 && hasInterval)
       ? intervalAnnualBasis / intervalHours
@@ -11620,20 +11637,20 @@ function computeCostModel(){
     if (!cadenceParts.length && task?.condition){
       cadenceParts.push(String(task.condition));
     }
-    const annualCost = hasPrice ? Math.max(0, price * Math.max(0, servicesPerYear)) : 0;
+    const annualCost = hasPrice ? Math.max(0, unitCost * Math.max(0, servicesPerYear)) : 0;
     return {
       key: task?.id || `interval_${index}`,
       name,
       cadenceLabel: cadenceParts.length ? cadenceParts.join(" · ") : "—",
       unitCostLabel: hasPrice
-        ? formatterCurrency(price, { decimals: price < 1000 ? 2 : 0 })
+        ? formatterCurrency(unitCost, { decimals: unitCost < 1000 ? 2 : 0 })
         : "—",
       annualTotalLabel: hasPrice
         ? formatterCurrency(annualCost, { decimals: annualCost < 1000 ? 2 : 0 })
         : "—",
       annualCost,
       partNumber: typeof task?.pn === "string" ? task.pn : "",
-      unitPrice: hasPrice ? price : null
+      unitPrice: hasPrice ? unitCost : null
     };
   });
 
@@ -11657,8 +11674,8 @@ function computeCostModel(){
 
   const asReqTaskRowsRaw = asReqTasks.map((task, index) => {
     const name = task?.name || `As-required task ${index + 1}`;
-    const price = Number(task?.price);
-    const hasPrice = Number.isFinite(price) && price > 0;
+    const unitCost = resolveForecastUnitCost(task);
+    const hasPrice = Number.isFinite(unitCost) && unitCost > 0;
     const expectedPerYear = expectedAnnualFromTask(task);
     const frequencyLabel = formatCount(expectedPerYear);
     const cadenceParts = [];
@@ -11672,20 +11689,20 @@ function computeCostModel(){
     if (!cadenceParts.length){
       cadenceParts.push("As required");
     }
-    const annualCost = hasPrice ? Math.max(0, price * Math.max(0, expectedPerYear)) : 0;
+    const annualCost = hasPrice ? Math.max(0, unitCost * Math.max(0, expectedPerYear)) : 0;
     return {
       key: task?.id || `asreq_${index}`,
       name,
       cadenceLabel: cadenceParts.join(" · "),
       unitCostLabel: hasPrice
-        ? formatterCurrency(price, { decimals: price < 1000 ? 2 : 0 })
+        ? formatterCurrency(unitCost, { decimals: unitCost < 1000 ? 2 : 0 })
         : "—",
       annualTotalLabel: hasPrice
         ? formatterCurrency(annualCost, { decimals: annualCost < 1000 ? 2 : 0 })
         : "—",
       annualCost,
       partNumber: typeof task?.pn === "string" ? task.pn : "",
-      unitPrice: hasPrice ? price : null
+      unitPrice: hasPrice ? unitCost : null
     };
   });
 
