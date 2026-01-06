@@ -2575,6 +2575,18 @@ async function loadFromCloud(){
           if (stateHasMeaningfulData(prodData)){
             adoptState(prodData || {});
             if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
+            try {
+              await FB.docRef.set(prodData, { merge:true });
+              if (FB.workspaceDoc){
+                await updateWorkspaceMetadata({
+                  workspaceId: WORKSPACE_ID,
+                  lastTouchedAt: new Date().toISOString(),
+                  lastSeededFrom: "github-prod"
+                });
+              }
+            } catch (err) {
+              console.warn("Failed to seed preview workspace from production", err);
+            }
             if (window.DEBUG_MODE){
               console.info("Loaded production workspace data as preview fallback.");
             }
