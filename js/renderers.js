@@ -10622,6 +10622,102 @@ function computeCostModel(){
     return stats;
   };
 
+  const formatOccurrenceHoursLabel = (hours)=>{
+    if (!Number.isFinite(hours) || hours <= 0) return null;
+    const decimals = hours >= 10 ? 0 : 1;
+    return `${hours.toFixed(decimals)} hr`;
+  };
+
+  const resolveTaskMeta = (task)=>{
+    const fallbackName = task?.name || "Maintenance task";
+    const templateId = task?.templateId != null ? String(task.templateId) : (task?.id != null ? String(task.id) : null);
+    const name = task?.name || fallbackName;
+    const priceRaw = Number(task?.price);
+    const unitPrice = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw : null;
+    const pn = (typeof task?.pn === "string" && task.pn.trim()) ? task.pn.trim() : "";
+    const mode = task?.mode === "asreq" ? "asreq" : "interval";
+    return { name, unitPrice, pn, mode, templateId };
+  };
+
+  const calendarActualEntries = [];
+  const calendarActualEntryKeys = new Set();
+  const addCalendarActualEntry = (task, dateKey)=>{
+    if (!task || !dateKey) return;
+    const parsed = parseHistoryDate(dateKey);
+    if (!parsed) return;
+    parsed.setHours(0, 0, 0, 0);
+    const time = parsed.getTime();
+    const compositeKey = `${String(task?.id || "")}_${dateKey}`;
+    if (calendarActualEntryKeys.has(compositeKey)) return;
+    calendarActualEntryKeys.add(compositeKey);
+
+    const notesMap = (typeof normalizeOccurrenceNotes === "function")
+      ? normalizeOccurrenceNotes(task)
+      : (task?.occurrenceNotes || {});
+    const hoursMap = (typeof normalizeOccurrenceHours === "function")
+      ? normalizeOccurrenceHours(task)
+      : (task?.occurrenceHours || {});
+    const rawNote = notesMap && typeof notesMap === "object" ? String(notesMap[dateKey] || "").trim() : "";
+    const occurrenceHoursRaw = hoursMap && typeof hoursMap === "object"
+      ? Number(hoursMap[dateKey])
+      : null;
+    const occurrenceHours = Number.isFinite(occurrenceHoursRaw) && occurrenceHoursRaw > 0
+      ? Math.round(occurrenceHoursRaw * 100) / 100
+      : null;
+    const hoursLabel = formatOccurrenceHoursLabel(occurrenceHours);
+    const noteParts = [];
+    if (rawNote) noteParts.push(rawNote);
+    if (hoursLabel) noteParts.push(`Occurrence time: ${hoursLabel}`);
+    if (!noteParts.length) noteParts.push("Calendar completion");
+
+    const meta = resolveTaskMeta(task);
+    const unitPrice = meta.unitPrice;
+    const totalValue = Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice : 0;
+
+    calendarActualEntries.push({
+      key: `calendar_${meta.mode}_${task?.id || meta.templateId || meta.name}_${dateKey}`,
+      taskId: task?.id != null ? String(task.id) : null,
+      templateId: meta.templateId || null,
+      taskMode: meta.mode,
+      name: meta.name,
+      pn: meta.pn || "",
+      date: parsed,
+      dateISO: dateKey,
+      time,
+      unitPrice,
+      totalValue,
+      occurrenceHours,
+      note: noteParts.join(" · ")
+    });
+  };
+
+  const collectCalendarActualEntries = (taskList)=>{
+    if (!Array.isArray(taskList)) return;
+    taskList.forEach(task => {
+      if (!task) return;
+      const dates = collectTaskHistoryDates(task);
+      if (!dates.length) return;
+      dates.forEach(dateKey => addCalendarActualEntry(task, dateKey));
+    });
+  };
+  collectCalendarActualEntries(intervalTasksAll);
+  collectCalendarActualEntries(asReqTasksAll);
+
+  const calendarActualSpendSince = (days, hourlyRate = 0)=>{
+    if (!Number.isFinite(days) || days <= 0 || !calendarActualEntries.length) return 0;
+    const cutoff = Date.now() - (days * JOB_DAY_MS);
+    let total = 0;
+    for (const entry of calendarActualEntries){
+      if (entry.time < cutoff) continue;
+      if (Number.isFinite(entry.unitPrice) && entry.unitPrice > 0){
+        total += entry.unitPrice;
+      }else if (Number.isFinite(entry.occurrenceHours) && entry.occurrenceHours > 0 && hourlyRate > 0){
+        total += entry.occurrenceHours * hourlyRate;
+      }
+    }
+    return total;
+  };
+
   const cleanPartNumber = (pn)=> String(pn || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
   const maintenancePartNumbers = new Set();
   intervalTasks.forEach(task => {
@@ -10852,7 +10948,8 @@ function computeCostModel(){
   const predictedAnnual = predictedIntervalAnnual + predictedAsReqAnnual;
 
   const intervalActualYear = estimateIntervalCost(hoursYear);
-  const combinedActualYear = intervalActualYear + asReqAnnualActual;
+  const calendarAnnualActual = calendarActualSpendSince(365, combinedCostPerHour);
+  const combinedActualYear = intervalActualYear + asReqAnnualActual + calendarAnnualActual;
 
   const timeframeDefs = [
     { key: "year",   label: "Past 12 months", days: 365 },
@@ -10865,6 +10962,7 @@ function computeCostModel(){
     const hours = usageSinceDays(def.days);
     const intervalActual = estimateIntervalCost(hours);
     const asReqActual = maintenanceSpendSince(def.days);
+    const calendarActual = calendarActualSpendSince(def.days, combinedCostPerHour);
     const windowWorkingDays = workingDaysForWindow(def.days);
     const projectionDays = windowWorkingDays > 0 ? windowWorkingDays : def.days;
     const intervalProjected = (baselineDailyHours > 0 && intervalCostPerHour > 0)
@@ -10883,7 +10981,8 @@ function computeCostModel(){
       asReqActual,
       intervalProjected,
       asReqProjected,
-      costActual: intervalActual + asReqActual,
+      costActual: intervalActual + asReqActual + calendarActual,
+      calendarActual,
       costProjected: intervalProjected + asReqProjected
     };
   });
@@ -11591,6 +11690,39 @@ function computeCostModel(){
           sortTime: entryTime
         });
       }
+    });
+
+    calendarActualEntries.forEach((entry, entryIndex) => {
+      if (!entry || !(entry.date instanceof Date) || Number.isNaN(entry.date.getTime())) return;
+      const entryTime = entry.date.getTime();
+      if (entryTime < startTime || entryTime > endTime) return;
+      const hoursLabel = formatOccurrenceHoursLabel(entry.occurrenceHours);
+      let unitLabel = "—";
+      let quantityLabel = "1";
+      let totalValue = Number(entry.totalValue) || 0;
+      if (Number.isFinite(entry.unitPrice) && entry.unitPrice > 0){
+        unitLabel = formatterCurrency(entry.unitPrice, { decimals: entry.unitPrice < 1000 ? 2 : 0 });
+      }else if (Number.isFinite(entry.occurrenceHours) && entry.occurrenceHours > 0 && combinedCostPerHour > 0){
+        unitLabel = `${formatterCurrency(combinedCostPerHour, { decimals: 2 })}/hr`;
+        quantityLabel = hoursLabel || quantityLabel;
+        totalValue = entry.occurrenceHours * combinedCostPerHour;
+      }
+      if (hoursLabel && quantityLabel === "1"){
+        quantityLabel = "1";
+      }
+      addActualRow({
+        key: `calendar_${row.key}_${entryIndex}_${entry.taskId || entry.templateId || "task"}`,
+        name: entry.name || "Maintenance task",
+        pn: entry.pn || "",
+        dateLabel: formatDateLabelShort(entry.date),
+        dateISO: entry.dateISO || null,
+        unitLabel,
+        quantityLabel,
+        totalLabel: formatterCurrency(totalValue, { decimals: totalValue < 1000 ? 2 : 0 }),
+        totalValue,
+        note: entry.note || "Calendar completion",
+        sortTime: entryTime + 0.2
+      });
     });
 
     let targetActual = Number(row.costActual);
