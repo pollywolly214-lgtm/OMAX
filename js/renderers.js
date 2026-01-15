@@ -10450,6 +10450,87 @@ function renderCosts(){
   }
 }
 
+function resolveTaskTemplateKey(task){
+  if (!task) return "";
+  const templateId = task.templateId != null ? String(task.templateId) : "";
+  if (templateId) return templateId;
+  const id = task.id != null ? String(task.id) : "";
+  return id;
+}
+
+function resolveCalendarUnitCost(task, calendarCostByTemplateId){
+  if (!task || !(calendarCostByTemplateId instanceof Map)) return null;
+  const key = resolveTaskTemplateKey(task);
+  if (!key) return null;
+  const raw = calendarCostByTemplateId.get(key);
+  const price = Number(raw);
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+function buildCalendarMaintenanceHistory({ intervalTasks = [], asReqTasks = [] } = {}){
+  const taskList = [
+    ...(Array.isArray(intervalTasks) ? intervalTasks : []),
+    ...(Array.isArray(asReqTasks) ? asReqTasks : [])
+  ];
+  const instanceToTemplateId = new Map();
+  taskList.forEach(task => {
+    if (!task || task.id == null || task.templateId == null) return;
+    const taskId = String(task.id);
+    const templateId = String(task.templateId);
+    if (!taskId || !templateId) return;
+    instanceToTemplateId.set(taskId, templateId);
+  });
+
+  const calendarCostByTemplateId = new Map();
+  const shouldLogKeys = typeof window !== "undefined" && window.__calendarCostKeyDebug;
+  const logCalendarKey = (detail)=>{
+    if (!shouldLogKeys) return;
+    try {
+      console.debug("calendarCostByTemplateId key", detail);
+    } catch (_err){
+      /* no-op */
+    }
+  };
+
+  const resolveTemplateKey = (rawId)=>{
+    if (rawId == null) return "";
+    const rawKey = String(rawId);
+    if (!rawKey) return "";
+    return instanceToTemplateId.get(rawKey) || rawKey;
+  };
+
+  const registerCalendarCost = ({ task, price, source })=>{
+    if (!task) return;
+    const rawKey = resolveTaskTemplateKey(task);
+    const mappedKey = resolveTemplateKey(rawKey);
+    if (!mappedKey) return;
+    calendarCostByTemplateId.set(mappedKey, price);
+    logCalendarKey({
+      source,
+      rawKey,
+      mappedKey,
+      taskId: task.id != null ? String(task.id) : null,
+      templateId: task.templateId != null ? String(task.templateId) : null
+    });
+  };
+
+  taskList.forEach(task => {
+    if (!task) return;
+    const calendarPriceRaw = Number(task?.calendarPrice);
+    if (Number.isFinite(calendarPriceRaw) && calendarPriceRaw > 0){
+      registerCalendarCost({ task, price: calendarPriceRaw, source: "task.calendarPrice" });
+    }
+    const history = Array.isArray(task.manualHistory) ? task.manualHistory : [];
+    history.forEach(entry => {
+      const historyPrice = Number(entry?.calendarPrice);
+      if (!Number.isFinite(historyPrice) || historyPrice <= 0) return;
+      registerCalendarCost({ task, price: historyPrice, source: "manualHistory.calendarPrice" });
+    });
+  });
+
+  return { calendarCostByTemplateId };
+}
+
 function computeCostModel(){
   const safeHistory = Array.isArray(totalHistory) ? totalHistory.slice() : [];
   const parsedHistory = safeHistory
@@ -10487,6 +10568,16 @@ function computeCostModel(){
 
   const intervalTasksAll = Array.isArray(tasksInterval) ? tasksInterval : [];
   const asReqTasksAll = Array.isArray(tasksAsReq) ? tasksAsReq : [];
+  const { calendarCostByTemplateId } = buildCalendarMaintenanceHistory({
+    intervalTasks: intervalTasksAll,
+    asReqTasks: asReqTasksAll
+  });
+
+  const resolveMaintenanceUnitCost = (task)=>{
+    const directPrice = Number(task?.price);
+    if (Number.isFinite(directPrice) && directPrice > 0) return directPrice;
+    return resolveCalendarUnitCost(task, calendarCostByTemplateId);
+  };
 
   const toHistoryDateKey = (value)=>{
     if (!value) return null;
@@ -10539,7 +10630,7 @@ function computeCostModel(){
   });
 
   const intervalCostPerHour = intervalTasks.reduce((sum, task)=>{
-    const price = Number(task?.price);
+    const price = resolveMaintenanceUnitCost(task);
     const interval = Number(task?.interval);
     if (!isFinite(price) || !isFinite(interval) || interval <= 0 || price <= 0) return sum;
     return sum + (price / interval);
@@ -10628,7 +10719,7 @@ function computeCostModel(){
   };
 
   const expectedAsReqAnnualFromTasks = asReqTasks.reduce((sum, task)=>{
-    const price = Number(task?.price);
+    const price = resolveMaintenanceUnitCost(task);
     if (!isFinite(price) || price <= 0) return sum;
     const candidates = [
       Number(task?.expectedAnnual),
@@ -11234,7 +11325,7 @@ function computeCostModel(){
   const intervalTaskRowsRaw = intervalTasks.map((task, index) => {
     const name = task?.name || `Interval task ${index + 1}`;
     const intervalHours = Number(task?.interval);
-    const price = Number(task?.price);
+    const price = resolveMaintenanceUnitCost(task);
     const hasPrice = Number.isFinite(price) && price > 0;
     const hasInterval = Number.isFinite(intervalHours) && intervalHours > 0;
     const servicesPerYear = (intervalAnnualBasis > 0 && hasInterval)
@@ -11285,7 +11376,7 @@ function computeCostModel(){
 
   const asReqTaskRowsRaw = asReqTasks.map((task, index) => {
     const name = task?.name || `As-required task ${index + 1}`;
-    const price = Number(task?.price);
+    const price = resolveMaintenanceUnitCost(task);
     const hasPrice = Number.isFinite(price) && price > 0;
     const expectedPerYear = expectedAnnualFromTask(task);
     const frequencyLabel = formatCount(expectedPerYear);
