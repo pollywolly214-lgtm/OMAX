@@ -13085,6 +13085,14 @@ function renderJobs(){
     catch (err){ console.warn("Failed to refresh job categories", err); }
     saveCloudDebounced();
     rerenderPreservingState(currentCategoryFilter());
+    if (typeof refreshDashboardWidgets === "function"){
+      refreshDashboardWidgets();
+    } else if (typeof renderCalendar === "function"){
+      renderCalendar();
+    }
+    if (typeof updateCalendarJobCategoryStyles === "function"){
+      updateCalendarJobCategoryStyles(categoryId);
+    }
   };
 
   const promptCreateCategory = (parentId)=>{
