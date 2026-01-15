@@ -3476,6 +3476,12 @@ function refreshTimeEfficiencyWidget(widget){
   if (widget.metrics.actual) widget.metrics.actual.textContent = formatTimeEfficiencyHours(data.actualHours);
   if (widget.metrics.target) widget.metrics.target.textContent = formatTimeEfficiencyHours(data.targetHoursToDate);
   if (widget.metrics.goal) widget.metrics.goal.textContent = formatTimeEfficiencyHours(data.baselineHours);
+  if (widget.metrics.average){
+    const avg = data.averageDailyHours;
+    widget.metrics.average.textContent = (avg != null && Number.isFinite(avg) && avg > 0)
+      ? formatTimeEfficiencyHours(avg)
+      : "—";
+  }
   if (widget.metrics.percent) widget.metrics.percent.textContent = formatTimeEfficiencyPercent(data.efficiencyPercent);
   if (widget.metrics.percentGoal) widget.metrics.percentGoal.textContent = formatTimeEfficiencyPercent(data.efficiencyGoalPercent);
   if (widget.metrics.diffTarget){
@@ -3622,6 +3628,7 @@ function setupTimeEfficiencyWidget(root){
     actual: root.querySelector("[data-efficiency-actual]"),
     target: root.querySelector("[data-efficiency-target]"),
     goal: root.querySelector("[data-efficiency-goal]"),
+    average: root.querySelector("[data-efficiency-average]"),
     percent: root.querySelector("[data-efficiency-percent]"),
     percentGoal: root.querySelector("[data-efficiency-goal-percent]"),
     diffTarget: root.querySelector("[data-efficiency-gap-target]"),

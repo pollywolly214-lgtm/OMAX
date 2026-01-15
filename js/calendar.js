@@ -102,6 +102,7 @@ function commitCalendarHoursEditing(){
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
   if (changed){
     if (typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
+    if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets();
     toast("Daily hours updated");
   }else{
     toast("No changes to save.");
@@ -1464,6 +1465,30 @@ function wireCalendarBubbles(){
 
 function estimateIntervalDailyHours(task, baselineEntry, today){
   const defaultHours = configuredDailyHours();
+  const history = Array.isArray(task?.manualHistory) ? task.manualHistory : [];
+  const historyWithHours = history
+    .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hoursAtEntry)) && Number(entry.hoursAtEntry) >= 0)
+    .map(entry => ({
+      date: parseDateLocal(entry.dateISO),
+      hours: Number(entry.hoursAtEntry)
+    }))
+    .filter(entry => entry.date instanceof Date && !Number.isNaN(entry.date.getTime()));
+  historyWithHours.sort((a,b)=> a.date.getTime() - b.date.getTime());
+  if (historyWithHours.length >= 2){
+    const last = historyWithHours[historyWithHours.length - 1];
+    const prev = historyWithHours[historyWithHours.length - 2];
+    last.date.setHours(0,0,0,0);
+    prev.date.setHours(0,0,0,0);
+    const diffMs = last.date.getTime() - prev.date.getTime();
+    if (diffMs > 0){
+      const diffDays = diffMs / CALENDAR_DAY_MS;
+      const diffHours = Math.max(0, last.hours - prev.hours);
+      const rate = diffHours / diffDays;
+      if (Number.isFinite(rate) && rate > 0){
+        return rate;
+      }
+    }
+  }
   if (!baselineEntry) return defaultHours;
   const baseDate = baselineEntry.dateISO ? parseDateLocal(baselineEntry.dateISO) : null;
   const baseHours = baselineEntry.hoursAtEntry != null ? Number(baselineEntry.hoursAtEntry) : null;

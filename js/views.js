@@ -145,6 +145,10 @@ function viewDashboard(){
               <span class="value" data-efficiency-goal>—</span>
             </div>
             <div class="time-efficiency-metric">
+              <span class="label">Avg usage/day</span>
+              <span class="value" data-efficiency-average>—</span>
+            </div>
+            <div class="time-efficiency-metric">
               <span class="label">Gap vs goal</span>
               <span class="value" data-efficiency-gap-goal>—</span>
             </div>
@@ -154,7 +158,7 @@ function viewDashboard(){
             </div>
           </div>
           <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
-          <p class="small muted">Baseline assumes ${CUTTING_BASELINE_WEEKLY_HOURS} cutting hours per week.</p>
+          <p class="small muted">Baseline adapts to your average logged hours per day.</p>
         </div>
       </div>
     </div>
@@ -1908,6 +1912,10 @@ function viewCosts(model){
                 <span class="value" data-efficiency-goal>—</span>
               </div>
               <div class="time-efficiency-metric">
+              <span class="label">Avg usage/day</span>
+                <span class="value" data-efficiency-average>—</span>
+              </div>
+              <div class="time-efficiency-metric">
                 <span class="label">Gap vs goal</span>
                 <span class="value" data-efficiency-gap-goal>—</span>
               </div>
@@ -1917,7 +1925,7 @@ function viewCosts(model){
               </div>
             </div>
             <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
-            <p class="small muted">Baseline assumes ${CUTTING_BASELINE_WEEKLY_HOURS} cutting hours per week.</p>
+            <p class="small muted">Baseline adapts to your average logged hours per day.</p>
           </div>
           <div class="cost-jobs-summary">
             <div><span class="label">Jobs tracked</span><span>—</span></div>
@@ -3859,4 +3867,3 @@ function viewDeletedItems(model){
     </div>
   `;
 }
-
