@@ -1830,10 +1830,11 @@ function viewCosts(model){
                     <span class="cost-history-cost">${esc(item.costLabel || "")}</span>
                     ${item.taskLabel ? `<span class="cost-history-task-label">${esc(item.taskLabel)}</span>` : ``}
                   </div>
+                  ${item.allowDelete === false ? "" : `
                   <button type="button" class="cost-history-delete" data-history-delete aria-label="Remove maintenance event from ${esc(item.dateLabel || 'this date')}" title="Remove from cost analysis">
                     <span aria-hidden="true">×</span>
                     <span class="sr-only">Remove event</span>
-                  </button>
+                  </button>`}
                 </li>`;
               }).join("")}
             </ul>
