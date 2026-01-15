@@ -1143,6 +1143,37 @@ function costHistorySuppressionsEqual(a, b){
   return true;
 }
 
+function parseOccurrenceCost(noteText){
+  if (typeof noteText !== "string") return null;
+  const text = noteText.trim();
+  if (!text) return null;
+  const lines = text.split(/\r?\n/);
+  const parseValue = (raw)=>{
+    if (!raw) return null;
+    const cleaned = raw.replace(/,/g, "");
+    const value = Number(cleaned);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return value;
+  };
+  const currencyPattern = /\$\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/;
+  const labeledPattern = /\b[a-z][\w\s-]{0,40}:\s*\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/i;
+  for (const line of lines){
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const currencyMatch = trimmed.match(currencyPattern);
+    if (currencyMatch){
+      const value = parseValue(currencyMatch[1]);
+      if (value != null) return value;
+    }
+    const labeledMatch = trimmed.match(labeledPattern);
+    if (labeledMatch){
+      const value = parseValue(labeledMatch[1]);
+      if (value != null) return value;
+    }
+  }
+  return null;
+}
+
 function cloneLayoutData(layout){
   if (!layout || typeof layout !== "object") return {};
   if (typeof cloneStructured === "function"){
@@ -10731,11 +10762,57 @@ function computeCostModel(){
 
   maintenanceOrderItems.sort((a,b)=> a.time - b.time);
 
+  const occurrenceCostItems = [];
+  const parseOccurrenceDate = (value)=>{
+    const key = toHistoryDateKey(value);
+    if (!key) return null;
+    if (typeof parseDateLocal === "function"){
+      const parsed = parseDateLocal(key);
+      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) return parsed;
+    }
+    const fallback = new Date(key);
+    return fallback instanceof Date && !Number.isNaN(fallback.getTime()) ? fallback : null;
+  };
+  const addOccurrenceCostsFromTask = (task)=>{
+    if (!task) return;
+    const rawNotes = (typeof normalizeOccurrenceNotes === "function")
+      ? normalizeOccurrenceNotes(task)
+      : (task?.occurrenceNotes || {});
+    if (!rawNotes || typeof rawNotes !== "object") return;
+    Object.entries(rawNotes).forEach(([dateKey, note]) => {
+      if (!note) return;
+      const cost = parseOccurrenceCost(note);
+      if (!Number.isFinite(cost) || cost <= 0) return;
+      const resolved = parseOccurrenceDate(dateKey);
+      if (!resolved) return;
+      const resolvedTime = resolved.getTime();
+      const resolvedISO = resolved instanceof Date && !Number.isNaN(resolved.getTime())
+        ? resolved.toISOString()
+        : null;
+      occurrenceCostItems.push({
+        amount: cost,
+        time: resolvedTime,
+        resolvedAt: resolved,
+        resolvedISO,
+        name: task?.name || "Occurrence cost",
+        pn: task?.pn || "",
+        note: typeof note === "string" ? note.trim() : "",
+        taskId: task.id != null ? String(task.id) : null
+      });
+    });
+  };
+  intervalTasks.forEach(task => addOccurrenceCostsFromTask(task));
+  asReqTasks.forEach(task => addOccurrenceCostsFromTask(task));
+  occurrenceCostItems.sort((a, b) => a.time - b.time);
+
   const maintenanceSpendSince = (days)=>{
-    if (!isFinite(days) || days <= 0 || !maintenanceOrderItems.length) return 0;
+    if (!isFinite(days) || days <= 0) return 0;
     const cutoff = Date.now() - (days * JOB_DAY_MS);
     let total = 0;
     for (const entry of maintenanceOrderItems){
+      if (entry.time >= cutoff) total += entry.amount;
+    }
+    for (const entry of occurrenceCostItems){
       if (entry.time >= cutoff) total += entry.amount;
     }
     return total;
@@ -11544,6 +11621,31 @@ function computeCostModel(){
         totalValue: total,
         note: noteLabel,
         sortTime: time
+      });
+    });
+
+    occurrenceCostItems.forEach((item, index) => {
+      if (!item) return;
+      const time = Number(item.time);
+      if (!Number.isFinite(time)) return;
+      if (time < startTime || time > endTime) return;
+      const total = Number(item.amount) || 0;
+      if (total <= 0) return;
+      const noteLabel = item.note
+        ? `Occurrence note · ${item.note}`
+        : "Occurrence note";
+      addActualRow({
+        key: `occurrence_${row.key}_${index}`,
+        name: item.name || "Occurrence cost",
+        pn: item.pn || "",
+        dateLabel: formatDateLabelShort(item.resolvedAt instanceof Date ? item.resolvedAt : new Date(item.resolvedISO || time)),
+        dateISO: item.resolvedISO || null,
+        unitLabel: "—",
+        quantityLabel: "—",
+        totalLabel: formatterCurrency(total, { decimals: total < 1000 ? 2 : 0 }),
+        totalValue: total,
+        note: noteLabel,
+        sortTime: time + 0.0005
       });
     });
 
