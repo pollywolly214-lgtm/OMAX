@@ -10767,6 +10767,26 @@ function computeCostModel(){
   maintenanceOrderItems.sort((a,b)=> a.time - b.time);
 
   let calendarMaintenanceHistory = [];
+  const orderCostByPart = new Map();
+
+  maintenanceOrderItems.forEach(item => {
+    if (!item) return;
+    const pn = cleanPartNumber(item.pn);
+    if (!pn) return;
+    let unitCost = Number(item.unitPrice);
+    if (!Number.isFinite(unitCost) || unitCost <= 0){
+      const qty = Number(item.qty);
+      const total = Number(item.amount);
+      if (Number.isFinite(qty) && qty > 0 && Number.isFinite(total) && total > 0){
+        unitCost = total / qty;
+      }
+    }
+    if (!Number.isFinite(unitCost) || unitCost <= 0) return;
+    const current = orderCostByPart.get(pn);
+    if (!current || (item.time != null && item.time > current.time)){
+      orderCostByPart.set(pn, { cost: unitCost, time: item.time || 0 });
+    }
+  });
 
   const maintenanceSpendSince = (days)=>{
     if (!isFinite(days) || days <= 0 || !maintenanceOrderItems.length) return 0;
@@ -10790,6 +10810,27 @@ function computeCostModel(){
       }
     });
     return total;
+  };
+
+  const resolveOrderUnitCost = (task)=>{
+    if (!task) return null;
+    const candidateParts = new Set();
+    if (typeof task.pn === "string"){
+      const pn = cleanPartNumber(task.pn);
+      if (pn) candidateParts.add(pn);
+    }
+    if (Array.isArray(task.parts)){
+      task.parts.forEach(part => {
+        if (!part) return;
+        const pn = cleanPartNumber(part.pn);
+        if (pn) candidateParts.add(pn);
+      });
+    }
+    for (const pn of candidateParts){
+      const entry = orderCostByPart.get(pn);
+      if (entry && Number.isFinite(entry.cost) && entry.cost > 0) return entry.cost;
+    }
+    return null;
   };
 
   const buildCalendarMaintenanceHistory = ()=>{
@@ -10824,9 +10865,15 @@ function computeCostModel(){
         : (Number.isFinite(downtimeRaw) && downtimeRaw > 0 ? downtimeRaw : 0);
       const priceRaw = Number(task?.price);
       const partsCost = computeTaskPartsCost(task);
+      const calendarPrice = resolveCalendarUnitCost(task);
+      const orderPrice = resolveOrderUnitCost(task);
       const fallbackPrice = Number.isFinite(priceRaw) && priceRaw > 0
         ? priceRaw
-        : (Number.isFinite(partsCost) && partsCost > 0 ? partsCost : 0);
+        : (Number.isFinite(partsCost) && partsCost > 0
+          ? partsCost
+          : (Number.isFinite(calendarPrice) && calendarPrice > 0
+            ? calendarPrice
+            : (Number.isFinite(orderPrice) && orderPrice > 0 ? orderPrice : 0)));
       const costOverride = parseOccurrenceCost(noteText);
       const cost = costOverride != null ? costOverride : fallbackPrice;
 
@@ -10893,9 +10940,15 @@ function computeCostModel(){
   const expectedAsReqAnnualFromTasks = asReqTasks.reduce((sum, task)=>{
     const price = Number(task?.price);
     const partsCost = computeTaskPartsCost(task);
+    const calendarPrice = resolveCalendarUnitCost(task);
+    const orderPrice = resolveOrderUnitCost(task);
     const unitPrice = Number.isFinite(price) && price > 0
       ? price
-      : (Number.isFinite(partsCost) && partsCost > 0 ? partsCost : null);
+      : (Number.isFinite(partsCost) && partsCost > 0
+        ? partsCost
+        : (Number.isFinite(calendarPrice) && calendarPrice > 0
+          ? calendarPrice
+          : (Number.isFinite(orderPrice) && orderPrice > 0 ? orderPrice : null)));
     if (!Number.isFinite(unitPrice) || unitPrice <= 0) return sum;
     const historyStats = getTaskHistoryStats(task);
     const historyCount = historyStats.count;
@@ -11535,11 +11588,14 @@ function computeCostModel(){
     const price = Number(task?.price);
     const partsCost = computeTaskPartsCost(task);
     const calendarPrice = resolveCalendarUnitCost(task);
+    const orderPrice = resolveOrderUnitCost(task);
     const unitPrice = Number.isFinite(price) && price > 0
       ? price
       : (Number.isFinite(partsCost) && partsCost > 0
         ? partsCost
-        : (Number.isFinite(calendarPrice) && calendarPrice > 0 ? calendarPrice : null));
+        : (Number.isFinite(calendarPrice) && calendarPrice > 0
+          ? calendarPrice
+          : (Number.isFinite(orderPrice) && orderPrice > 0 ? orderPrice : null)));
     const hasPrice = Number.isFinite(unitPrice) && unitPrice > 0;
     const hasInterval = Number.isFinite(intervalHours) && intervalHours > 0;
     const historyStats = getTaskHistoryStats(task);
@@ -11586,11 +11642,14 @@ function computeCostModel(){
     const price = Number(task?.price);
     const partsCost = computeTaskPartsCost(task);
     const calendarPrice = resolveCalendarUnitCost(task);
+    const orderPrice = resolveOrderUnitCost(task);
     const unitPrice = Number.isFinite(price) && price > 0
       ? price
       : (Number.isFinite(partsCost) && partsCost > 0
         ? partsCost
-        : (Number.isFinite(calendarPrice) && calendarPrice > 0 ? calendarPrice : null));
+        : (Number.isFinite(calendarPrice) && calendarPrice > 0
+          ? calendarPrice
+          : (Number.isFinite(orderPrice) && orderPrice > 0 ? orderPrice : null)));
     const hasPrice = Number.isFinite(unitPrice) && unitPrice > 0;
     const historyStats = getTaskHistoryStats(task);
     const historyCount = historyStats.count;
