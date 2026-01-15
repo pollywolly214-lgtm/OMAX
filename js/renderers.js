@@ -420,7 +420,7 @@ function ensureTaskManualHistory(task){
       clone.hoursAtEntry = null;
     }
     if (typeof clone.recordedAtISO !== "string") clone.recordedAtISO = null;
-    if (clone.status !== "completed" && clone.status !== "scheduled" && clone.status !== "logged"){
+    if (clone.status !== "completed" && clone.status !== "scheduled" && clone.status !== "logged" && clone.status !== "removed"){
       clone.status = "logged";
     }
     if (clone.source !== "machine" && clone.source !== "estimate"){
@@ -437,6 +437,120 @@ function ensureTaskManualHistory(task){
   normalized.sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
   task.manualHistory = normalized;
   return task.manualHistory;
+}
+
+function collectTaskHistoryDates(task){
+  if (!task) return [];
+  const resolved = new Set();
+  const toKey = (value)=>{
+    if (!value) return null;
+    if (typeof normalizeDateKey === "function"){
+      const normalized = normalizeDateKey(value);
+      if (normalized) return normalized;
+    }
+    if (value instanceof Date && !Number.isNaN(value.getTime())){
+      return value.toISOString().slice(0, 10);
+    }
+    if (typeof value === "string"){
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+      const parsed = typeof parseDateLocal === "function" ? parseDateLocal(trimmed) : new Date(trimmed);
+      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+        return parsed.toISOString().slice(0, 10);
+      }
+    }
+    return null;
+  };
+  const formatDateKey = (value)=>{
+    if (value instanceof Date && !Number.isNaN(value.getTime())){
+      if (typeof ymd === "function") return ymd(value);
+      return value.toISOString().slice(0, 10);
+    }
+    return null;
+  };
+  const dailyHours = (()=> {
+    const configured = typeof getConfiguredDailyHours === "function"
+      ? Number(getConfiguredDailyHours())
+      : null;
+    return Number.isFinite(configured) && configured > 0 ? configured : 8;
+  })();
+  const resolveOccurrenceHours = (dateKey)=>{
+    if (!dateKey) return null;
+    if (typeof getOccurrenceHoursForTask === "function"){
+      const override = getOccurrenceHoursForTask(task, dateKey);
+      if (override != null) return override;
+    }
+    if (task?.occurrenceHours && typeof task.occurrenceHours === "object"){
+      const raw = Number(task.occurrenceHours[dateKey]);
+      if (Number.isFinite(raw) && raw > 0) return raw;
+    }
+    const fallback = Number(task?.downtimeHours);
+    return Number.isFinite(fallback) && fallback > 0 ? fallback : null;
+  };
+  const addKey = (key)=>{ if (key) resolved.add(key); };
+  const addMultiDayKeys = (key)=>{
+    if (!key){
+      return;
+    }
+    const totalHours = resolveOccurrenceHours(key);
+    if (!Number.isFinite(totalHours) || totalHours <= 0 || dailyHours <= 0){
+      addKey(key);
+      return;
+    }
+    const baseDate = typeof parseDateLocal === "function"
+      ? parseDateLocal(key)
+      : new Date(`${key}T00:00:00`);
+    if (!(baseDate instanceof Date) || Number.isNaN(baseDate.getTime())){
+      addKey(key);
+      return;
+    }
+    const days = Math.max(1, Math.ceil(totalHours / dailyHours));
+    for (let i = 0; i < days; i++){
+      const cursor = new Date(baseDate.getTime());
+      cursor.setDate(cursor.getDate() + i);
+      addKey(formatDateKey(cursor));
+    }
+  };
+  const completedDates = Array.isArray(task.completedDates) ? task.completedDates : [];
+  completedDates.forEach(dateVal => {
+    const key = toKey(dateVal);
+    addMultiDayKeys(key);
+  });
+  const manualHistory = Array.isArray(task.manualHistory) ? task.manualHistory : [];
+  manualHistory.forEach(entry => {
+    if (!entry) return;
+    const status = typeof entry.status === "string" ? entry.status.toLowerCase() : "";
+    if (status === "scheduled" || status === "removed") return;
+    const key = toKey(entry.dateISO);
+    addMultiDayKeys(key);
+  });
+  return Array.from(resolved).filter(Boolean).sort();
+}
+
+function getTaskHistoryStats(task, { windowDays = 365 } = {}){
+  const historyDates = collectTaskHistoryDates(task);
+  const totalCount = historyDates.length;
+  if (!totalCount || !Number.isFinite(windowDays) || windowDays <= 0){
+    return { totalCount, windowCount: 0, windowDays, servicesPerYear: 0, historyDates };
+  }
+  const windowEnd = new Date();
+  windowEnd.setHours(0,0,0,0);
+  const windowStart = new Date(windowEnd.getTime());
+  windowStart.setDate(windowStart.getDate() - Math.round(windowDays));
+  const startTime = windowStart.getTime();
+  const endTime = windowEnd.getTime();
+  let windowCount = 0;
+  historyDates.forEach(key => {
+    const date = typeof parseDateLocal === "function" ? parseDateLocal(key) : new Date(`${key}T00:00:00`);
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return;
+    const time = date.getTime();
+    if (time >= startTime && time <= endTime) windowCount += 1;
+  });
+  const servicesPerYear = windowCount > 0
+    ? (windowCount * (365 / windowDays))
+    : 0;
+  return { totalCount, windowCount, windowDays, servicesPerYear, historyDates };
 }
 
 function createIntervalTaskInstance(template){
@@ -11237,9 +11351,11 @@ function computeCostModel(){
     const price = Number(task?.price);
     const hasPrice = Number.isFinite(price) && price > 0;
     const hasInterval = Number.isFinite(intervalHours) && intervalHours > 0;
+    const historyStats = getTaskHistoryStats(task, { windowDays: 365 });
+    const historyServicesPerYear = Number(historyStats?.servicesPerYear) || 0;
     const servicesPerYear = (intervalAnnualBasis > 0 && hasInterval)
       ? intervalAnnualBasis / intervalHours
-      : 0;
+      : (historyServicesPerYear > 0 ? historyServicesPerYear : 0);
     const intervalLabel = hasInterval ? formatHoursValue(intervalHours) : null;
     const servicesLabel = formatCount(servicesPerYear);
     const cadenceParts = [];
