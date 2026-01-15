@@ -8787,6 +8787,64 @@ function renderSettings(){
       }
     }
   });
+
+  editForm?.addEventListener("submit", (e)=>{
+    e.preventDefault();
+    if (!editingInventoryId){
+      closeInventoryEditModal();
+      return;
+    }
+    const item = inventory.find(entry => entry && String(entry.id) === String(editingInventoryId));
+    if (!item){
+      toast("Inventory item not found.");
+      closeInventoryEditModal();
+      return;
+    }
+    if (!editForm) return;
+    const data = new FormData(editForm);
+    const name = (data.get("inventoryEditName") || "").toString().trim();
+    if (!name){
+      toast("Item name is required.");
+      editNameField?.focus();
+      return;
+    }
+    const qtyNew = Math.max(0, Number(data.get("inventoryEditQtyNew")) || 0);
+    const qtyOld = Math.max(0, Number(data.get("inventoryEditQtyOld")) || 0);
+    const unit = (data.get("inventoryEditUnit") || "").toString().trim() || "pcs";
+    const pn = (data.get("inventoryEditPN") || "").toString().trim();
+    const link = (data.get("inventoryEditLink") || "").toString().trim();
+    const priceRaw = data.get("inventoryEditPrice");
+    const priceText = priceRaw == null ? "" : String(priceRaw).trim();
+    const price = priceText === "" ? null : Math.max(0, Number(priceText) || 0);
+    const note = (data.get("inventoryEditNote") || "").toString().trim();
+    const updated = normalizeInventoryItem({
+      ...item,
+      name,
+      qtyNew,
+      qtyOld,
+      unit,
+      pn,
+      link,
+      price,
+      note
+    });
+    if (!updated){
+      toast("Unable to update inventory item.");
+      return;
+    }
+    Object.assign(item, updated);
+    syncLinkedTasksFromInventory(item, {
+      price: item.price,
+      pn: item.pn,
+      link: item.link,
+      name: item.name
+    });
+    window.inventory = inventory;
+    saveCloudDebounced();
+    refreshRows();
+    toast("Inventory item updated");
+    closeInventoryEditModal();
+  });
 }
 
 // ---- Costs page ----
@@ -14452,7 +14510,6 @@ function renderInventory(){
   setAppSettingsContext("default");
   wireDashboardSettingsMenu();
   content.innerHTML = viewInventory();
-  const rowsTarget = content.querySelector("[data-inventory-rows]");
   const searchInput = content.querySelector("#inventorySearch");
   const clearBtn = content.querySelector("#inventorySearchClear");
   const addBtn = content.querySelector("#inventoryAddBtn");
@@ -14467,7 +14524,27 @@ function renderInventory(){
   const nameField = modal?.querySelector("[name=\"inventoryName\"]");
   const qtyNewField = modal?.querySelector("[name=\"inventoryQtyNew\"]");
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
+  const editModal = content.querySelector("#inventoryEditModal");
+  const editForm = content.querySelector("#inventoryEditForm");
+  const editCloseBtn = editModal?.querySelector("[data-close]");
+  const editCancelBtn = editModal?.querySelector("[data-edit-cancel]");
+  const editNameField = editModal?.querySelector("[name=\"inventoryEditName\"]");
+  const editQtyNewField = editModal?.querySelector("[name=\"inventoryEditQtyNew\"]");
+  const editQtyOldField = editModal?.querySelector("[name=\"inventoryEditQtyOld\"]");
+  const editUnitField = editModal?.querySelector("[name=\"inventoryEditUnit\"]");
+  const editPnField = editModal?.querySelector("[name=\"inventoryEditPN\"]");
+  const editLinkField = editModal?.querySelector("[name=\"inventoryEditLink\"]");
+  const editPriceField = editModal?.querySelector("[name=\"inventoryEditPrice\"]");
+  const editNoteField = editModal?.querySelector("[name=\"inventoryEditNote\"]");
   let addToMaintenance = false;
+  let editingInventoryId = null;
+  const inventoryCategoriesPanel = content.querySelector("[data-inventory-categories]");
+  const inventoryCategoryExpanded = (typeof window !== "undefined" && window.inventoryCategoryExpanded && typeof window.inventoryCategoryExpanded === "object")
+    ? window.inventoryCategoryExpanded
+    : {};
+  if (typeof window !== "undefined" && window.inventoryCategoryExpanded !== inventoryCategoryExpanded){
+    window.inventoryCategoryExpanded = inventoryCategoryExpanded;
+  }
 
   function syncLinkedTasksFromInventory(item, updates){
     if (!item) return false;
@@ -14518,10 +14595,68 @@ function renderInventory(){
     return changed;
   }
 
+  const refreshCategorySummaries = ()=>{
+    if (typeof buildInventoryCategoryData !== "function") return;
+    const data = buildInventoryCategoryData({ searchTerm: inventorySearchTerm });
+    content.querySelectorAll("[data-inventory-category-summary]").forEach(row => {
+      const id = row.getAttribute("data-inventory-category-summary") || "";
+      const stats = data.categoryStats && data.categoryStats[id]
+        ? data.categoryStats[id]
+        : { itemCount: 0, qtyNew: 0, qtyOld: 0, totalValue: 0 };
+      const formatCount = (value)=>{
+        const num = Number(value);
+        return Number.isFinite(num) ? num.toLocaleString() : "0";
+      };
+      const formatCurrency = (value)=>{
+        const num = Number(value);
+        if (!Number.isFinite(num)) return "—";
+        return num.toLocaleString(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      };
+      const itemsCell = row.querySelector("[data-summary-items]");
+      const qtyNewCell = row.querySelector("[data-summary-qty-new]");
+      const qtyOldCell = row.querySelector("[data-summary-qty-old]");
+      const valueCell = row.querySelector("[data-summary-value]");
+      if (itemsCell) itemsCell.textContent = formatCount(stats.itemCount);
+      if (qtyNewCell) qtyNewCell.textContent = formatCount(stats.qtyNew);
+      if (qtyOldCell) qtyOldCell.textContent = formatCount(stats.qtyOld);
+      if (valueCell) valueCell.textContent = formatCurrency(stats.totalValue);
+    });
+  };
+
   const refreshRows = ()=>{
-    if (!rowsTarget) return;
-    const filtered = filterInventoryItems(inventorySearchTerm);
-    rowsTarget.innerHTML = inventoryRowsHTML(filtered);
+    if (typeof buildInventoryCategoryData !== "function") return;
+    const data = buildInventoryCategoryData({ searchTerm: inventorySearchTerm });
+    const emptyMessage = inventorySearchTerm
+      ? "No inventory items match your search."
+      : "No inventory items in this category.";
+    content.querySelectorAll("[data-inventory-rows]").forEach(body => {
+      const id = body.getAttribute("data-inventory-rows") || "";
+      const items = data.categoryItems && data.categoryItems[id] ? data.categoryItems[id] : [];
+      body.innerHTML = inventoryRowsHTML(items, { emptyMessage });
+    });
+    refreshCategorySummaries();
+  };
+
+  const toggleInventoryCategoryGroup = (categoryId, force)=>{
+    if (!inventoryCategoriesPanel) return;
+    const selector = (value)=>{
+      if (typeof CSS !== "undefined" && CSS && typeof CSS.escape === "function"){
+        return CSS.escape(value);
+      }
+      return value.replace(/"/g, "\\\"");
+    };
+    const safeId = selector(categoryId);
+    const group = inventoryCategoriesPanel.querySelector(`[data-inventory-category-group="${safeId}"]`);
+    const row = inventoryCategoriesPanel.querySelector(`[data-inventory-category-items-row="${safeId}"]`);
+    const toggleBtn = inventoryCategoriesPanel.querySelector(`[data-inventory-category-toggle="${safeId}"]`);
+    if (!group) return;
+    const next = typeof force === "boolean" ? force : !group.classList.contains("is-expanded");
+    group.classList.toggle("is-expanded", next);
+    if (row) row.hidden = !next;
+    if (toggleBtn) toggleBtn.setAttribute("aria-expanded", next ? "true" : "false");
+    if (categoryId){
+      inventoryCategoryExpanded[String(categoryId)] = next;
+    }
   };
 
   try{
@@ -14547,8 +14682,18 @@ function renderInventory(){
     });
   }
 
-  rowsTarget?.addEventListener("input",(e)=>{
+  inventoryCategoriesPanel?.addEventListener("click", (event)=>{
+    const trigger = event.target.closest("[data-inventory-category-toggle]");
+    if (!trigger) return;
+    const catId = trigger.getAttribute("data-inventory-category-toggle");
+    if (!catId) return;
+    toggleInventoryCategoryGroup(catId);
+  });
+
+  inventoryCategoriesPanel?.addEventListener("input",(e)=>{
     const input = e.target;
+    if (!(input instanceof HTMLElement)) return;
+    if (!input.hasAttribute("data-inv")) return;
     const id = input.getAttribute("data-id");
     const k  = input.getAttribute("data-inv");
     const item = inventory.find(x=>x.id===id); if (!item) return;
@@ -14574,9 +14719,10 @@ function renderInventory(){
       syncLinkedTasksFromInventory(item, { price: item.price });
     }
     saveCloudDebounced();
+    refreshCategorySummaries();
   });
 
-  rowsTarget?.addEventListener("click", async (e)=>{
+  inventoryCategoriesPanel?.addEventListener("click", async (e)=>{
     const nameBtn = e.target.closest("[data-inventory-maintenance]");
     if (nameBtn){
       const id = nameBtn.getAttribute("data-inventory-maintenance");
@@ -14636,6 +14782,16 @@ function renderInventory(){
       return;
     }
 
+    const editBtn = e.target.closest("[data-inventory-edit]");
+    if (editBtn){
+      const id = editBtn.getAttribute("data-inventory-edit");
+      if (!id) return;
+      const item = inventory.find(entry => entry && String(entry.id) === String(id));
+      if (!item){ toast("Inventory item not found."); return; }
+      openInventoryEditModal(item);
+      return;
+    }
+
     const addBtn = e.target.closest("[data-order-add]");
     if (!addBtn) return;
     const id = addBtn.getAttribute("data-order-add");
@@ -14683,10 +14839,41 @@ function renderInventory(){
     if (qtyOldField) qtyOldField.value = qtyOldField.defaultValue || "0";
   }
 
+  function openInventoryEditModal(item){
+    if (!editModal || !item) return;
+    editingInventoryId = item.id;
+    if (editNameField) editNameField.value = item.name || "";
+    if (editQtyNewField) editQtyNewField.value = Number.isFinite(Number(item.qtyNew)) ? Number(item.qtyNew) : 0;
+    if (editQtyOldField) editQtyOldField.value = Number.isFinite(Number(item.qtyOld)) ? Number(item.qtyOld) : 0;
+    if (editUnitField) editUnitField.value = item.unit || "pcs";
+    if (editPnField) editPnField.value = item.pn || "";
+    if (editLinkField) editLinkField.value = item.link || "";
+    if (editPriceField){
+      const priceVal = item.price != null && item.price !== "" ? Number(item.price) : "";
+      editPriceField.value = Number.isFinite(priceVal) ? priceVal : "";
+    }
+    if (editNoteField) editNoteField.value = item.note || "";
+    editModal.classList.add("is-visible");
+    editModal.removeAttribute("hidden");
+    document.body?.classList.add("modal-open");
+    requestAnimationFrame(()=> editNameField?.focus());
+  }
+
+  function closeInventoryEditModal(){
+    if (!editModal) return;
+    editModal.classList.remove("is-visible");
+    editModal.setAttribute("hidden", "");
+    document.body?.classList.remove("modal-open");
+    editingInventoryId = null;
+  }
+
   addBtn?.addEventListener("click", openInventoryModal);
   closeBtn?.addEventListener("click", closeInventoryModal);
   backBtn?.addEventListener("click", ()=> setInventoryModalStep("prompt"));
   modal?.addEventListener("click", (e)=>{ if (e.target === modal) closeInventoryModal(); });
+  editCloseBtn?.addEventListener("click", closeInventoryEditModal);
+  editCancelBtn?.addEventListener("click", closeInventoryEditModal);
+  editModal?.addEventListener("click", (e)=>{ if (e.target === editModal) closeInventoryEditModal(); });
 
   chooseMaintenance?.addEventListener("click", ()=>{
     addToMaintenance = true;
