@@ -31,21 +31,7 @@ const WORKSPACE_ID = (() => {
   const host = window.location.hostname.toLowerCase();
   if (WORKSPACE_OVERRIDE) return WORKSPACE_OVERRIDE;
 
-  const prodHosts = Array.isArray(window.OMAX_PROD_HOSTS) && window.OMAX_PROD_HOSTS.length
-    ? window.OMAX_PROD_HOSTS.map((value)=>String(value).toLowerCase())
-    : ["omax.vercel.app"];
-  const isProdHost = prodHosts.includes(host);
   const isVercelHost = host.endsWith(".vercel.app");
-  const isGithubHost = host.endsWith(".github.io");
-  const isLocalHost = ["localhost", "127.0.0.1", "::1"].includes(host);
-
-  if (isLocalHost || isGithubHost) {
-    return "github-preview";
-  }
-
-  if (isProdHost) {
-    return "github-prod";
-  }
 
   if (isVercelHost) {
     return "github-preview";
@@ -56,6 +42,12 @@ const WORKSPACE_ID = (() => {
 if (typeof window !== "undefined") {
   window.WORKSPACE_ID = WORKSPACE_ID;
   window.WORKSPACE_OVERRIDE = WORKSPACE_OVERRIDE;
+  window.WORKSPACE_DIAGNOSTICS = {
+    host: window.location.hostname,
+    workspaceId: WORKSPACE_ID,
+    override: WORKSPACE_OVERRIDE,
+    docPath: `workspaces/${WORKSPACE_ID}/app/state`
+  };
   window.workspaceRef = null;
   window.workspaceDocRef = null;
   window.DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
@@ -99,6 +91,36 @@ if (typeof window !== "undefined"){
   window.normalizeDailyCutHours = normalizeDailyCutHours;
   window.normalizeDateISO = normalizeDateISO;
   window.__opportunityStateReady = false;
+}
+
+let workspaceReadLogged = false;
+let workspaceWriteLogged = false;
+function logWorkspaceDiagnostics(phase, authState){
+  if (typeof window === "undefined") return;
+  const diagnostics = window.WORKSPACE_DIAGNOSTICS || {};
+  const host = diagnostics.host || window.location.hostname;
+  const workspaceId = diagnostics.workspaceId || window.WORKSPACE_ID;
+  const override = diagnostics.override || null;
+  const docPath = diagnostics.docPath || `workspaces/${workspaceId}/app/state`;
+  const overrideUsed = Boolean(override);
+  console.info("[workspace]", {
+    phase,
+    host,
+    workspaceId,
+    override,
+    overrideUsed,
+    docPath,
+    authState
+  });
+  const dbgWs = document.getElementById("dbgWs");
+  if (dbgWs){
+    const label = `${workspaceId}/app/state @ ${host}${overrideUsed ? " (override)" : ""}`;
+    dbgWs.textContent = label;
+    dbgWs.title = `Host: ${host}\nWorkspace: ${workspaceId}\nOverride: ${override || "none"}\nDoc: ${docPath}\nAuth: ${authState || "unknown"}\nPhase: ${phase}`;
+  }
+  if (window.DEBUG_MODE && host.endsWith(".vercel.app") && override === "github-prod"){
+    console.warn("Debug: preview host is overriding to github-prod.");
+  }
 }
 
 /* Root helpers */
@@ -551,6 +573,7 @@ async function initFirebase(){
     FB.user = user || null;
     workspaceMetadataWritesBlocked = false;
     if (user){
+      logWorkspaceDiagnostics("auth-ready", "signed-in");
       if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
       if (btnIn)  btnIn.style.display  = "none";
       if (btnOut) btnOut.style.display = "inline-block";
@@ -568,6 +591,7 @@ async function initFirebase(){
       await loadFromCloud();
       route();
     }else{
+      logWorkspaceDiagnostics("auth-ready", "signed-out");
       FB.ready = false;
       FB.workspaceRef = null;
       FB.workspaceDoc = null;
@@ -2483,6 +2507,10 @@ function adoptState(doc){
 const saveCloudInternal = debounce(async ()=>{
   if (!FB.ready || !FB.docRef) return;
   try{
+    if (!workspaceWriteLogged){
+      workspaceWriteLogged = true;
+      logWorkspaceDiagnostics("firestore-write", FB.user ? "signed-in" : "signed-out");
+    }
     const snap = snapshotState();
     window.__lastSnapshot = snap;
     await FB.docRef.set(snap, { merge:true });
@@ -2545,6 +2573,10 @@ if (typeof window !== "undefined"){
 async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
   try{
+    if (!workspaceReadLogged){
+      workspaceReadLogged = true;
+      logWorkspaceDiagnostics("firestore-read", FB.user ? "signed-in" : "signed-out");
+    }
     async function fetchWorkspaceState(workspaceId){
       const workspaceDoc = FB.db.collection("workspaces").doc(workspaceId);
       const stateRef = workspaceDoc.collection("app").doc("state");
@@ -2588,36 +2620,6 @@ async function loadFromCloud(){
       adoptState(data || {});
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
     }else{
-      const isPreviewWorkspace = WORKSPACE_ID === "github-preview";
-      if (isPreviewWorkspace && !WORKSPACE_OVERRIDE){
-        try {
-          const prodFetch = await fetchWorkspaceState("github-prod");
-          const prodData = prodFetch.data;
-          if (stateHasMeaningfulData(prodData)){
-            adoptState(prodData || {});
-            if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
-            try {
-              await FB.docRef.set(prodData, { merge:true });
-              if (FB.workspaceDoc){
-                await updateWorkspaceMetadata({
-                  workspaceId: WORKSPACE_ID,
-                  lastTouchedAt: new Date().toISOString(),
-                  lastSeededFrom: "github-prod"
-                });
-              }
-            } catch (err) {
-              console.warn("Failed to seed preview workspace from production", err);
-            }
-            if (window.DEBUG_MODE){
-              console.info("Loaded production workspace data as preview fallback.");
-            }
-            return;
-          }
-        } catch (err) {
-          console.warn("Preview fallback to production workspace failed", err);
-        }
-      }
-
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
@@ -2717,8 +2719,7 @@ function setupDebugPanel(){
   const panel = document.getElementById("debugPanel");
   if (!panel) return;
   panel.style.display = "block";
-  const dbgWs = document.getElementById("dbgWs");
-  if (dbgWs) dbgWs.textContent = `${window.WORKSPACE_ID || ""}/app/state`;
+  logWorkspaceDiagnostics("debug-panel", FB.user ? "signed-in" : "signed-out");
   const btnCloud = document.getElementById("dbgRefreshCloud");
   const btnSnap  = document.getElementById("dbgRefreshSnapshot");
   if (btnCloud) btnCloud.onclick = ()=>refreshDebugCloud();
