@@ -11744,18 +11744,24 @@ function computeCostModel(){
       const templateTask = resolveTemplateTaskForKey(templateKey) || task;
       const unitCost = resolveMaintenanceUnitCost(templateTask);
       const defaultHours = resolveDefaultDowntimeHours(templateTask);
+      const completedYear = Number(stats.completedYear) || 0;
+      const completedTwoMonth = Number(stats.completedTwoMonth) || 0;
       const totalHoursYear = Number(stats.hoursYear) || 0;
       const totalHoursTwoMonth = Number(stats.hoursTwoMonth) || 0;
-      const completedTwoMonth = Number(stats.completedTwoMonth) || 0;
-      const timeCostTotal = totalHoursYear * safeMaintenanceLaborRate;
+      const timeCostTotalYear = totalHoursYear * safeMaintenanceLaborRate;
+      const timeCostTotalTwoMonth = totalHoursTwoMonth * safeMaintenanceLaborRate;
       const avgHoursTwoMonth = completedTwoMonth > 0 ? totalHoursTwoMonth / completedTwoMonth : 0;
       const avgTimeCost = avgHoursTwoMonth * safeMaintenanceLaborRate;
       const unitCostSafe = Number.isFinite(unitCost) && unitCost > 0 ? unitCost : 0;
-      const totalCostTwoMonth = (totalHoursTwoMonth * safeMaintenanceLaborRate) + (completedTwoMonth * unitCostSafe);
+      const partsCostYear = unitCostSafe * completedYear;
+      const partsCostTwoMonth = unitCostSafe * completedTwoMonth;
+      const totalCostYear = partsCostYear + timeCostTotalYear;
+      const totalCostTwoMonth = partsCostTwoMonth + timeCostTotalTwoMonth;
       rows.push({
         key: templateKey || `${modeLabel || "task"}_${index}`,
         name: templateTask?.name || task?.name || `${modeLabel || "Task"} ${index + 1}`,
-        completedYearLabel: stats.completedYear.toLocaleString(),
+        completedYearLabel: completedYear.toLocaleString(),
+        completedTwoMonthLabel: completedTwoMonth.toLocaleString(),
         unitCostLabel: unitCostSafe > 0
           ? formatterCurrency(unitCostSafe, { decimals: unitCostSafe < 1000 ? 2 : 0 })
           : "—",
@@ -11764,9 +11770,20 @@ function computeCostModel(){
           ? formatterCurrency(defaultHours * safeMaintenanceLaborRate, { decimals: defaultHours * safeMaintenanceLaborRate < 1000 ? 2 : 0 })
           : "—",
         totalTimeYearLabel: formatHours(totalHoursYear),
-        timeCostTotalLabel: formatterCurrency(timeCostTotal, { decimals: timeCostTotal < 1000 ? 2 : 0 }),
+        totalTimeTwoMonthLabel: formatHours(totalHoursTwoMonth),
+        timeCostTotalYearLabel: formatterCurrency(timeCostTotalYear, { decimals: timeCostTotalYear < 1000 ? 2 : 0 }),
+        timeCostTotalTwoMonthLabel: formatterCurrency(timeCostTotalTwoMonth, { decimals: timeCostTotalTwoMonth < 1000 ? 2 : 0 }),
         avgTimeCostLabel: completedTwoMonth > 0
           ? formatterCurrency(avgTimeCost, { decimals: avgTimeCost < 1000 ? 2 : 0 })
+          : "—",
+        partsCostYearLabel: completedYear > 0
+          ? formatterCurrency(partsCostYear, { decimals: partsCostYear < 1000 ? 2 : 0 })
+          : "—",
+        partsCostTwoMonthLabel: completedTwoMonth > 0
+          ? formatterCurrency(partsCostTwoMonth, { decimals: partsCostTwoMonth < 1000 ? 2 : 0 })
+          : "—",
+        totalCostYearLabel: completedYear > 0
+          ? formatterCurrency(totalCostYear, { decimals: totalCostYear < 1000 ? 2 : 0 })
           : "—",
         totalCostTwoMonthLabel: completedTwoMonth > 0
           ? formatterCurrency(totalCostTwoMonth, { decimals: totalCostTwoMonth < 1000 ? 2 : 0 })
@@ -11788,12 +11805,18 @@ function computeCostModel(){
           key: row.key,
           name: row.name,
           completedYearLabel: row.completedYearLabel,
+          completedTwoMonthLabel: row.completedTwoMonthLabel,
           unitCostLabel: row.unitCostLabel,
           defaultTimeLabel: row.defaultTimeLabel,
           defaultTimeCostLabel: row.defaultTimeCostLabel,
           totalTimeYearLabel: row.totalTimeYearLabel,
-          timeCostTotalLabel: row.timeCostTotalLabel,
+          totalTimeTwoMonthLabel: row.totalTimeTwoMonthLabel,
+          timeCostTotalYearLabel: row.timeCostTotalYearLabel,
+          timeCostTotalTwoMonthLabel: row.timeCostTotalTwoMonthLabel,
           avgTimeCostLabel: row.avgTimeCostLabel,
+          partsCostYearLabel: row.partsCostYearLabel,
+          partsCostTwoMonthLabel: row.partsCostTwoMonthLabel,
+          totalCostYearLabel: row.totalCostYearLabel,
           totalCostTwoMonthLabel: row.totalCostTwoMonthLabel
         })),
         totalLabel: "",
@@ -11808,12 +11831,18 @@ function computeCostModel(){
           key: row.key,
           name: row.name,
           completedYearLabel: row.completedYearLabel,
+          completedTwoMonthLabel: row.completedTwoMonthLabel,
           unitCostLabel: row.unitCostLabel,
           defaultTimeLabel: row.defaultTimeLabel,
           defaultTimeCostLabel: row.defaultTimeCostLabel,
           totalTimeYearLabel: row.totalTimeYearLabel,
-          timeCostTotalLabel: row.timeCostTotalLabel,
+          totalTimeTwoMonthLabel: row.totalTimeTwoMonthLabel,
+          timeCostTotalYearLabel: row.timeCostTotalYearLabel,
+          timeCostTotalTwoMonthLabel: row.timeCostTotalTwoMonthLabel,
           avgTimeCostLabel: row.avgTimeCostLabel,
+          partsCostYearLabel: row.partsCostYearLabel,
+          partsCostTwoMonthLabel: row.partsCostTwoMonthLabel,
+          totalCostYearLabel: row.totalCostYearLabel,
           totalCostTwoMonthLabel: row.totalCostTwoMonthLabel
         })),
         totalLabel: "",

@@ -1495,12 +1495,18 @@ function viewCosts(model){
             <tr>
               <th scope="col">Task</th>
               <th scope="col">Completed (12 mo)</th>
+              <th scope="col">Completed (2 mo)</th>
               <th scope="col">Unit cost</th>
               <th scope="col">Default time (hrs)</th>
               <th scope="col">Default time cost</th>
               <th scope="col">Total time (12 mo)</th>
+              <th scope="col">Total time (2 mo)</th>
               <th scope="col">Time cost total (12 mo)</th>
+              <th scope="col">Time cost total (2 mo)</th>
               <th scope="col">Avg time cost (2 mo)</th>
+              <th scope="col">Parts cost (12 mo)</th>
+              <th scope="col">Parts cost (2 mo)</th>
+              <th scope="col">Total cost (12 mo)</th>
               <th scope="col">Total cost (2 mo)</th>
             </tr>
           </thead>
@@ -1509,7 +1515,7 @@ function viewCosts(model){
               const rows = Array.isArray(section.rows) ? section.rows : [];
               const headerRow = `
               <tr class="forecast-section-row">
-                <th scope="rowgroup" colspan="9">
+                <th scope="rowgroup" colspan="14">
                   <span class="forecast-section-header">
                     <span class="forecast-section-title">${esc(section.label || "")}</span>
                     ${section.totalLabel ? `<span class="forecast-section-total">${esc(section.totalLabel)}</span>` : ""}
@@ -1521,18 +1527,24 @@ function viewCosts(model){
               <tr>
                 <th scope="row">${esc(row.name || "")}</th>
                 <td>${esc(row.completedYearLabel || "0")}</td>
+                <td>${esc(row.completedTwoMonthLabel || "0")}</td>
                 <td>${esc(row.unitCostLabel || "—")}</td>
                 <td>${esc(row.defaultTimeLabel || "—")}</td>
                 <td>${esc(row.defaultTimeCostLabel || "—")}</td>
                 <td>${esc(row.totalTimeYearLabel || "0 hr")}</td>
-                <td>${esc(row.timeCostTotalLabel || "—")}</td>
+                <td>${esc(row.totalTimeTwoMonthLabel || "0 hr")}</td>
+                <td>${esc(row.timeCostTotalYearLabel || "—")}</td>
+                <td>${esc(row.timeCostTotalTwoMonthLabel || "—")}</td>
                 <td>${esc(row.avgTimeCostLabel || "—")}</td>
+                <td>${esc(row.partsCostYearLabel || "—")}</td>
+                <td>${esc(row.partsCostTwoMonthLabel || "—")}</td>
+                <td>${esc(row.totalCostYearLabel || "—")}</td>
                 <td>${esc(row.totalCostTwoMonthLabel || "—")}</td>
               </tr>
             `).join("")
                 : `
               <tr class="forecast-empty-row">
-                <td colspan="9">${esc(section.emptyMessage || "No tasks yet.")}</td>
+                <td colspan="14">${esc(section.emptyMessage || "No tasks yet.")}</td>
               </tr>`;
               return `${headerRow}${rowsHtml}`;
             }).join("")}
