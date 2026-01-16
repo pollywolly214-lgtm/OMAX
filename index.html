@@ -18,6 +18,7 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
   <script>/* prevent bfcache for easier debug refresh */ window.onpageshow = e=>{ if(e.persisted) location.reload(); };</script>
 
   <!-- Firebase project config (correct values) -->
@@ -162,6 +163,33 @@
           <span>Ignore weekends in scheduling</span>
         </label>
         <p class="config-note">Weekend work counts as bonus time when ignored.</p>
+        <fieldset class="config-section">
+          <legend>OneDrive file storage</legend>
+          <label class="config-toggle" for="configOneDriveEnabled">
+            <input type="checkbox" id="configOneDriveEnabled" name="configOneDriveEnabled" />
+            <span>Save cutting job files to OneDrive</span>
+          </label>
+          <label class="config-field" for="configOneDriveClientId">
+            <span class="config-label">Microsoft Entra app (client) ID</span>
+            <input type="text" id="configOneDriveClientId" name="configOneDriveClientId" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" />
+            <small class="config-help">Use the client ID from your Azure app registration with Files.ReadWrite permissions.</small>
+          </label>
+          <label class="config-field" for="configOneDriveTenantId">
+            <span class="config-label">Tenant</span>
+            <input type="text" id="configOneDriveTenantId" name="configOneDriveTenantId" placeholder="consumers" autocomplete="off" />
+            <small class="config-help">Use <strong>consumers</strong> for personal accounts, <strong>organizations</strong> for work accounts.</small>
+          </label>
+          <label class="config-field" for="configOneDriveFolder">
+            <span class="config-label">Water jet parts folder path</span>
+            <input type="text" id="configOneDriveFolder" name="configOneDriveFolder" placeholder="Water Jet Parts" autocomplete="off" />
+            <small class="config-help">Files will be uploaded into this folder path inside your OneDrive.</small>
+          </label>
+          <div class="config-actions config-actions-inline">
+            <button type="button" class="config-button config-button-secondary" id="configOneDriveConnect">Connect OneDrive</button>
+            <button type="button" class="config-button config-button-secondary" id="configOneDriveDisconnect">Sign out</button>
+          </div>
+          <p class="config-note" id="configOneDriveStatus">Not connected</p>
+        </fieldset>
         <div class="config-actions">
           <button type="submit" class="config-button config-button-primary" id="configSave">Save changes</button>
           <button type="button" class="config-button config-button-secondary" id="configCancel">Cancel</button>

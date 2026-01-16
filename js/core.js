@@ -16,6 +16,12 @@ const DEFAULT_DAILY_HOURS = 8;
 let DAILY_HOURS = DEFAULT_DAILY_HOURS;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
+const DEFAULT_ONEDRIVE_CONFIG = {
+  enabled: false,
+  clientId: "",
+  tenantId: "consumers",
+  folderPath: "Water Jet Parts"
+};
 // Decide workspace based on hostname (all hosts write to production).
 const WORKSPACE_ID = (() => {
   if (typeof window !== "undefined") {
@@ -39,7 +45,7 @@ const TIME_EFFICIENCY_WINDOWS = [
   { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
   { key: "365d", label: "1Y", days: 365, description: "Past year" }
 ];
-const DEFAULT_APP_CONFIG = { excludeWeekends: false, dailyHours: DEFAULT_DAILY_HOURS };
+const DEFAULT_APP_CONFIG = { excludeWeekends: false, dailyHours: DEFAULT_DAILY_HOURS, onedrive: { ...DEFAULT_ONEDRIVE_CONFIG } };
 let appConfig = { ...DEFAULT_APP_CONFIG };
 
 const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
@@ -64,6 +70,11 @@ if (typeof window !== "undefined"){
   window.shouldExcludeWeekends = shouldExcludeWeekends;
   window.setAppConfig = setAppConfig;
   window.normalizeAppConfig = normalizeAppConfig;
+  window.getOneDriveConfig = getOneDriveConfig;
+  window.connectOneDrive = connectOneDrive;
+  window.disconnectOneDrive = disconnectOneDrive;
+  window.getOneDriveStatus = getOneDriveStatus;
+  window.uploadFileToOneDrive = uploadFileToOneDrive;
   window.setDailyCutHoursEntry = setDailyCutHoursEntry;
   window.getDailyCutHoursEntry = getDailyCutHoursEntry;
   window.normalizeDailyCutHours = normalizeDailyCutHours;
@@ -194,12 +205,28 @@ function clampDailyCutHours(value){
 }
 
 function normalizeAppConfig(config){
-  const normalized = { ...DEFAULT_APP_CONFIG };
+  const normalized = { ...DEFAULT_APP_CONFIG, onedrive: { ...DEFAULT_ONEDRIVE_CONFIG } };
   if (config && typeof config === "object"){
     if (typeof config.excludeWeekends === "boolean") normalized.excludeWeekends = config.excludeWeekends;
     if (config.dailyHours != null){
       const clamped = clampDailyCutHours(config.dailyHours);
       if (clamped > 0) normalized.dailyHours = clamped;
+    }
+    normalized.onedrive = normalizeOneDriveConfig(config.onedrive);
+  }
+  return normalized;
+}
+
+function normalizeOneDriveConfig(config){
+  const normalized = { ...DEFAULT_ONEDRIVE_CONFIG };
+  if (config && typeof config === "object"){
+    if (typeof config.enabled === "boolean") normalized.enabled = config.enabled;
+    if (typeof config.clientId === "string") normalized.clientId = config.clientId.trim();
+    if (typeof config.tenantId === "string" && config.tenantId.trim()){
+      normalized.tenantId = config.tenantId.trim();
+    }
+    if (typeof config.folderPath === "string"){
+      normalized.folderPath = config.folderPath.trim();
     }
   }
   return normalized;
@@ -245,6 +272,236 @@ function setAppConfig(config){
 
 appConfig = normalizeAppConfig((typeof window !== "undefined" && window.appConfig) ? window.appConfig : appConfig);
 refreshDerivedDailyHours();
+
+function getOneDriveConfig(){
+  const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
+  return normalizeOneDriveConfig(cfg.onedrive);
+}
+
+const onedriveState = {
+  msalApp: null,
+  account: null,
+  clientId: "",
+  tenantId: ""
+};
+
+function getOneDriveAuthority(tenantId){
+  const clean = (tenantId || "").trim() || DEFAULT_ONEDRIVE_CONFIG.tenantId;
+  return `https://login.microsoftonline.com/${clean}`;
+}
+
+function ensureOneDriveClient(){
+  const cfg = getOneDriveConfig();
+  if (!cfg.clientId){
+    throw new Error("OneDrive client ID is missing.");
+  }
+  if (typeof window === "undefined" || !window.msal || !window.msal.PublicClientApplication){
+    throw new Error("Microsoft authentication library is unavailable.");
+  }
+  if (!onedriveState.msalApp || onedriveState.clientId !== cfg.clientId || onedriveState.tenantId !== cfg.tenantId){
+    onedriveState.msalApp = new window.msal.PublicClientApplication({
+      auth: {
+        clientId: cfg.clientId,
+        authority: getOneDriveAuthority(cfg.tenantId)
+      },
+      cache: {
+        cacheLocation: "localStorage",
+        storeAuthStateInCookie: false
+      }
+    });
+    onedriveState.clientId = cfg.clientId;
+    onedriveState.tenantId = cfg.tenantId;
+    onedriveState.account = null;
+  }
+  return onedriveState.msalApp;
+}
+
+function getOneDriveScopes(){
+  return ["Files.ReadWrite", "User.Read"];
+}
+
+async function acquireOneDriveToken({ interactive = true } = {}){
+  const client = ensureOneDriveClient();
+  const scopes = getOneDriveScopes();
+  let account = client.getActiveAccount() || client.getAllAccounts()[0] || null;
+  if (!account && interactive){
+    const loginResult = await client.loginPopup({ scopes });
+    account = loginResult?.account || null;
+    if (account) client.setActiveAccount(account);
+  }
+  if (!account) throw new Error("Please sign in to OneDrive.");
+  try {
+    const tokenResult = await client.acquireTokenSilent({ scopes, account });
+    onedriveState.account = account;
+    return { token: tokenResult.accessToken, account };
+  } catch (err){
+    if (!interactive) throw err;
+    const tokenResult = await client.acquireTokenPopup({ scopes, account });
+    const nextAccount = tokenResult?.account || account;
+    if (nextAccount) client.setActiveAccount(nextAccount);
+    onedriveState.account = nextAccount || account;
+    return { token: tokenResult.accessToken, account: nextAccount || account };
+  }
+}
+
+async function connectOneDrive(){
+  const result = await acquireOneDriveToken({ interactive: true });
+  return result.account;
+}
+
+async function disconnectOneDrive(){
+  const client = ensureOneDriveClient();
+  const account = client.getActiveAccount() || client.getAllAccounts()[0];
+  if (account){
+    try {
+      await client.logoutPopup({ account });
+    } catch (_err){
+      await client.logoutRedirect({ account });
+    }
+  }
+  onedriveState.account = null;
+}
+
+function getOneDriveStatus(){
+  const client = onedriveState.msalApp;
+  const account = onedriveState.account || client?.getActiveAccount() || client?.getAllAccounts?.()[0] || null;
+  return {
+    connected: !!account,
+    accountName: account?.username || account?.name || ""
+  };
+}
+
+function sanitizeOneDrivePath(path){
+  const raw = typeof path === "string" ? path.trim() : "";
+  const trimmed = raw.replace(/^\/+|\/+$/g, "");
+  return trimmed;
+}
+
+function encodeGraphPath(path){
+  return path.split("/").map(segment => encodeURIComponent(segment)).join("/");
+}
+
+async function onedriveApiRequest(path, options = {}){
+  const { token } = await acquireOneDriveToken({ interactive: true });
+  const headers = { ...(options.headers || {}), Authorization: `Bearer ${token}` };
+  if (options.body && !headers["Content-Type"] && !(options.body instanceof FormData)){
+    headers["Content-Type"] = "application/json";
+  }
+  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    method: options.method || "GET",
+    headers,
+    body: options.body
+  });
+  if (!res.ok){
+    const errorText = await res.text();
+    const error = new Error(errorText || res.statusText);
+    error.status = res.status;
+    throw error;
+  }
+  if (options.raw) return res;
+  return res.json();
+}
+
+async function ensureOneDriveFolderPath(folderPath){
+  const cleaned = sanitizeOneDrivePath(folderPath);
+  if (!cleaned) return "";
+  const segments = cleaned.split("/").filter(Boolean);
+  let currentPath = "";
+  for (const segment of segments){
+    const nextPath = currentPath ? `${currentPath}/${segment}` : segment;
+    const encoded = encodeGraphPath(nextPath);
+    let exists = true;
+    try {
+      await onedriveApiRequest(`/me/drive/root:/${encoded}`);
+    } catch (err){
+      if (err.status === 404){
+        exists = false;
+      } else {
+        throw err;
+      }
+    }
+    if (!exists){
+      const parentPath = currentPath ? `/me/drive/root:/${encodeGraphPath(currentPath)}:/children` : "/me/drive/root/children";
+      try {
+        await onedriveApiRequest(parentPath, {
+          method: "POST",
+          body: JSON.stringify({
+            name: segment,
+            folder: {},
+            "@microsoft.graph.conflictBehavior": "fail"
+          })
+        });
+      } catch (err){
+        if (err.status !== 409) throw err;
+      }
+    }
+    currentPath = nextPath;
+  }
+  return currentPath;
+}
+
+async function uploadFileToOneDrive(file){
+  if (!file) throw new Error("Missing file.");
+  const cfg = getOneDriveConfig();
+  if (!cfg.enabled) throw new Error("OneDrive uploads are disabled.");
+  const folderPath = sanitizeOneDrivePath(cfg.folderPath);
+  const safeName = file.name || "attachment";
+  const targetPath = folderPath ? `${folderPath}/${safeName}` : safeName;
+  await ensureOneDriveFolderPath(folderPath);
+  const encodedTarget = encodeGraphPath(targetPath);
+  const session = await onedriveApiRequest(`/me/drive/root:/${encodedTarget}:/createUploadSession`, {
+    method: "POST",
+    body: JSON.stringify({
+      item: {
+        "@microsoft.graph.conflictBehavior": "rename",
+        name: safeName
+      }
+    })
+  });
+  const uploadUrl = session?.uploadUrl;
+  if (!uploadUrl) throw new Error("Unable to start OneDrive upload.");
+
+  const chunkSize = 5 * 1024 * 1024;
+  let start = 0;
+  let result = null;
+  while (start < file.size){
+    const end = Math.min(start + chunkSize, file.size);
+    const chunk = file.slice(start, end);
+    const res = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Length": `${end - start}`,
+        "Content-Range": `bytes ${start}-${end - 1}/${file.size}`
+      },
+      body: chunk
+    });
+    if (res.status === 202){
+      start = end;
+      continue;
+    }
+    if (res.ok){
+      result = await res.json();
+      break;
+    }
+    const errorText = await res.text();
+    throw new Error(errorText || "Upload failed.");
+  }
+
+  if (!result){
+    throw new Error("Upload incomplete.");
+  }
+
+  return {
+    id: genId(safeName),
+    name: result?.name || safeName,
+    type: file.type || "",
+    size: typeof file.size === "number" ? file.size : null,
+    url: result?.webUrl || "",
+    source: "onedrive",
+    driveItemId: result?.id || null,
+    addedAt: new Date().toISOString()
+  };
+}
 
 function normalizeTimeString(value){
   if (typeof value !== "string") return null;

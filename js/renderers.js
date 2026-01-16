@@ -708,8 +708,20 @@ function readFileAsDataUrl(file){
 async function filesToAttachments(fileList){
   const files = Array.from(fileList || []);
   const attachments = [];
+  const oneDriveConfig = (typeof window.getOneDriveConfig === "function") ? window.getOneDriveConfig() : null;
+  const shouldUploadToOneDrive = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.clientId && typeof window.uploadFileToOneDrive === "function");
   for (const file of files){
     try {
+      if (shouldUploadToOneDrive){
+        try {
+          const uploaded = await window.uploadFileToOneDrive(file);
+          attachments.push({ ...uploaded });
+          continue;
+        } catch (err){
+          console.error("Unable to upload to OneDrive", err);
+          toast("OneDrive upload failed; saving a local copy instead.");
+        }
+      }
       const dataUrl = await readFileAsDataUrl(file);
       attachments.push({
         id: genId(file.name || "job_file"),
@@ -1972,14 +1984,34 @@ function getConfigurationElements(){
   const form = document.getElementById("configForm");
   const hoursInput = document.getElementById("configDailyHours");
   const excludeWeekends = document.getElementById("configExcludeWeekends");
+  const oneDriveEnabled = document.getElementById("configOneDriveEnabled");
+  const oneDriveClientId = document.getElementById("configOneDriveClientId");
+  const oneDriveTenantId = document.getElementById("configOneDriveTenantId");
+  const oneDriveFolder = document.getElementById("configOneDriveFolder");
+  const oneDriveConnect = document.getElementById("configOneDriveConnect");
+  const oneDriveDisconnect = document.getElementById("configOneDriveDisconnect");
+  const oneDriveStatus = document.getElementById("configOneDriveStatus");
   const cancel = document.getElementById("configCancel");
-  return { modal, form, hoursInput, excludeWeekends, cancel };
+  return {
+    modal,
+    form,
+    hoursInput,
+    excludeWeekends,
+    oneDriveEnabled,
+    oneDriveClientId,
+    oneDriveTenantId,
+    oneDriveFolder,
+    oneDriveConnect,
+    oneDriveDisconnect,
+    oneDriveStatus,
+    cancel
+  };
 }
 
 function currentAppConfiguration(){
   if (typeof normalizeAppConfig === "function") return normalizeAppConfig(window.appConfig);
   const fallbackDaily = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8;
-  return { excludeWeekends: false, dailyHours: fallbackDaily };
+  return { excludeWeekends: false, dailyHours: fallbackDaily, onedrive: {} };
 }
 
 function closeConfigurationModal(){
@@ -2000,7 +2032,7 @@ function closeConfigurationModal(){
 }
 
 function openConfigurationModal(trigger){
-  const { modal, hoursInput, excludeWeekends } = getConfigurationElements();
+  const { modal, hoursInput, excludeWeekends, oneDriveEnabled, oneDriveClientId, oneDriveTenantId, oneDriveFolder } = getConfigurationElements();
   if (!modal) return;
   const cfg = currentAppConfiguration();
   if (hoursInput){
@@ -2010,9 +2042,22 @@ function openConfigurationModal(trigger){
   if (excludeWeekends){
     excludeWeekends.checked = !!cfg.excludeWeekends;
   }
+  if (oneDriveEnabled){
+    oneDriveEnabled.checked = !!cfg?.onedrive?.enabled;
+  }
+  if (oneDriveClientId){
+    oneDriveClientId.value = cfg?.onedrive?.clientId || "";
+  }
+  if (oneDriveTenantId){
+    oneDriveTenantId.value = cfg?.onedrive?.tenantId || "";
+  }
+  if (oneDriveFolder){
+    oneDriveFolder.value = cfg?.onedrive?.folderPath || "";
+  }
   modal.removeAttribute("hidden");
   modal.setAttribute("aria-hidden", "false");
   modal.classList.add("is-open");
+  refreshOneDriveStatus();
   if (trigger && trigger.id) modal.dataset.triggerId = trigger.id;
   const focusTarget = hoursInput || excludeWeekends || modal.querySelector("button, input");
   if (focusTarget && typeof focusTarget.focus === "function"){
@@ -2022,9 +2067,25 @@ function openConfigurationModal(trigger){
 }
 
 function applyConfigurationForm(){
-  const { hoursInput, excludeWeekends } = getConfigurationElements();
+  const {
+    hoursInput,
+    excludeWeekends,
+    oneDriveEnabled,
+    oneDriveClientId,
+    oneDriveTenantId,
+    oneDriveFolder
+  } = getConfigurationElements();
   const nextDaily = hoursInput ? Number(hoursInput.value) : null;
-  const nextConfig = { dailyHours: nextDaily, excludeWeekends: !!(excludeWeekends && excludeWeekends.checked) };
+  const nextConfig = {
+    dailyHours: nextDaily,
+    excludeWeekends: !!(excludeWeekends && excludeWeekends.checked),
+    onedrive: {
+      enabled: !!(oneDriveEnabled && oneDriveEnabled.checked),
+      clientId: oneDriveClientId ? oneDriveClientId.value : "",
+      tenantId: oneDriveTenantId ? oneDriveTenantId.value : "",
+      folderPath: oneDriveFolder ? oneDriveFolder.value : ""
+    }
+  };
   if (typeof setAppConfig === "function") setAppConfig(nextConfig);
   else {
     window.appConfig = typeof normalizeAppConfig === "function" ? normalizeAppConfig(nextConfig) : nextConfig;
@@ -2044,8 +2105,28 @@ function applyConfigurationForm(){
   toast("Configuration updated");
 }
 
+function refreshOneDriveStatus(){
+  const { oneDriveStatus, oneDriveConnect, oneDriveDisconnect } = getConfigurationElements();
+  const status = typeof window.getOneDriveStatus === "function" ? window.getOneDriveStatus() : { connected: false };
+  const config = typeof window.getOneDriveConfig === "function" ? window.getOneDriveConfig() : null;
+  if (oneDriveStatus){
+    if (status.connected){
+      const label = status.accountName ? `Connected as ${status.accountName}` : "Connected";
+      oneDriveStatus.textContent = label;
+    } else {
+      oneDriveStatus.textContent = "Not connected";
+    }
+  }
+  if (oneDriveConnect){
+    oneDriveConnect.disabled = !(config && config.clientId);
+  }
+  if (oneDriveDisconnect){
+    oneDriveDisconnect.disabled = !status.connected;
+  }
+}
+
 function wireConfigurationModal(){
-  const { modal, form, cancel } = getConfigurationElements();
+  const { modal, form, cancel, oneDriveConnect, oneDriveDisconnect } = getConfigurationElements();
   const trigger = document.getElementById("dashboardConfigLaunch");
   if (trigger && trigger.dataset.boundConfig !== "1"){
     trigger.dataset.boundConfig = "1";
@@ -2053,6 +2134,7 @@ function wireConfigurationModal(){
       event.preventDefault();
       closeDashboardSettingsMenu();
       openConfigurationModal(trigger);
+      refreshOneDriveStatus();
     });
   }
   if (form && form.dataset.boundConfig !== "1"){
@@ -2061,6 +2143,34 @@ function wireConfigurationModal(){
       event.preventDefault();
       applyConfigurationForm();
       closeConfigurationModal();
+    });
+  }
+  if (oneDriveConnect && oneDriveConnect.dataset.boundOneDrive !== "1"){
+    oneDriveConnect.dataset.boundOneDrive = "1";
+    oneDriveConnect.addEventListener("click", async (event)=>{
+      event.preventDefault();
+      try {
+        await window.connectOneDrive?.();
+        refreshOneDriveStatus();
+        toast("OneDrive connected.");
+      } catch (err){
+        console.error("OneDrive connection failed", err);
+        toast("Unable to connect to OneDrive.");
+      }
+    });
+  }
+  if (oneDriveDisconnect && oneDriveDisconnect.dataset.boundOneDrive !== "1"){
+    oneDriveDisconnect.dataset.boundOneDrive = "1";
+    oneDriveDisconnect.addEventListener("click", async (event)=>{
+      event.preventDefault();
+      try {
+        await window.disconnectOneDrive?.();
+        refreshOneDriveStatus();
+        toast("Signed out of OneDrive.");
+      } catch (err){
+        console.error("OneDrive sign-out failed", err);
+        toast("Unable to sign out of OneDrive.");
+      }
     });
   }
   if (cancel && cancel.dataset.boundConfig !== "1"){
