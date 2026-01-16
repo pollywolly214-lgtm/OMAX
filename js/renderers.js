@@ -5559,6 +5559,26 @@ function repairMaintenanceGraph(){
     const fMap = Object.create(null);
     for (const f of window.settingsFolders){ if (f && f.id!=null) fMap[String(f.id)] = f; }
 
+    let defaultCategoryId = null;
+    const hasVisibleCategory = window.settingsFolders.some(folder => {
+      if (!folder || folder.id == null) return false;
+      return String(folder.id) !== ROOT_ID;
+    });
+    if (!hasVisibleCategory){
+      const baseId = "general";
+      let candidate = baseId;
+      let suffix = 1;
+      while (fMap[candidate]){
+        candidate = `${baseId}_${suffix++}`;
+      }
+      const fallbackOrder = Number(window._maintOrderCounter) || 0;
+      const category = { id: candidate, name: "General", parent: ROOT_ID, order: fallbackOrder + 1 };
+      window.settingsFolders.push(category);
+      fMap[String(candidate)] = category;
+      window._maintOrderCounter = Math.max(Number(window._maintOrderCounter) || 0, fallbackOrder + 1);
+      defaultCategoryId = String(candidate);
+    }
+
     // --- Fix bad folder parents & cycles ---
     for (const f of window.settingsFolders){
       if (!f || f.id == null) continue;
@@ -5603,9 +5623,8 @@ function repairMaintenanceGraph(){
         if (pid === String(t.id) || !tMap[pid]) t.parentTask = null;
       }
       // folder ref to nowhere → clear
-      if (t.cat != null && legacyFolderIds.has(String(t.cat))) t.cat = ROOT_ID;
-      if (t.cat != null && !fMap[String(t.cat)]) t.cat = ROOT_ID;
-      if (t.cat == null) t.cat = ROOT_ID;
+      if (t.cat != null && legacyFolderIds.has(String(t.cat))) t.cat = null;
+      if (t.cat != null && !fMap[String(t.cat)]) t.cat = null;
 
       // break cycles: follow parentTask chain and cut if we loop
       if (t.parentTask != null){
@@ -5629,8 +5648,13 @@ function repairMaintenanceGraph(){
         }
       }
 
-      if (t.parentTask == null && (t.cat == null || !fMap[String(t.cat)])){
-        t.cat = ROOT_ID;
+      if (t.parentTask == null){
+        if (defaultCategoryId && (t.cat == null || String(t.cat) === ROOT_ID)){
+          t.cat = defaultCategoryId;
+        }
+        if (t.cat == null || !fMap[String(t.cat)]){
+          t.cat = ROOT_ID;
+        }
       }
 
       // numeric 'order' normalization (optional but stabilizes rendering)
