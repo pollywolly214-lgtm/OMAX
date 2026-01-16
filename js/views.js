@@ -1961,6 +1961,12 @@ function viewCosts(model){
 function viewJobs(){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const textEsc = (str)=> String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const fileLinkMarkup = (file, safeName)=>{
+    const hrefRaw = file?.dataUrl || file?.url || "";
+    if (!hrefRaw) return safeName;
+    const downloadAttr = file?.dataUrl ? ` download="${safeName}"` : "";
+    return `<a href="${esc(hrefRaw)}"${downloadAttr} target="_blank" rel="noopener">${safeName}</a>`;
+  };
   const formatCurrency = (value, { showPlus = true } = {})=>{
     const num = Number(value);
     const safe = Number.isFinite(num) ? num : 0;
@@ -2730,12 +2736,8 @@ function viewJobs(){
     const fileMenuItems = fileCount
       ? jobFiles.map((f, idx) => {
           const safeName = esc(f?.name || `file_${idx + 1}`);
-          const hrefRaw = f?.dataUrl || f?.url || "";
-          const href = esc(hrefRaw);
-          if (!hrefRaw){
-            return `<li class="job-file-menu-item">${safeName}</li>`;
-          }
-          return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
+          const link = fileLinkMarkup(f, safeName);
+          return `<li class="job-file-menu-item">${link}</li>`;
         }).join("")
       : "";
     const fileMenu = fileCount
@@ -2846,10 +2848,8 @@ function viewJobs(){
                 ${fileCount
                   ? `<ul class="job-impact-files-list">${jobFiles.map((f, idx) => {
                       const safeName = esc(f?.name || `file_${idx + 1}`);
-                      const href = esc(f?.dataUrl || f?.url || "");
-                      return href
-                        ? `<li><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`
-                        : `<li>${safeName}</li>`;
+                      const link = fileLinkMarkup(f, safeName);
+                      return `<li>${link}</li>`;
                     }).join("")}</ul>`
                   : '<span class="job-impact-files-empty small muted">No files attached</span>'}
               </div>
@@ -3052,12 +3052,8 @@ function viewJobs(){
     const fileMenuItems = fileCount
       ? jobFiles.map((f, idx) => {
           const safeName = esc(f?.name || `file_${idx + 1}`);
-          const hrefRaw = f?.dataUrl || f?.url || "";
-          const href = esc(hrefRaw);
-          if (!hrefRaw){
-            return `<li class="job-file-menu-item">${safeName}</li>`;
-          }
-          return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
+          const link = fileLinkMarkup(f, safeName);
+          return `<li class="job-file-menu-item">${link}</li>`;
         }).join("")
       : "";
     const fileMenuActions = `<div class="job-file-menu-actions"><button type="button" class="job-file-menu-action" data-job-file-add="${j.id}">+ Add files</button></div>`;
@@ -3373,8 +3369,7 @@ function viewJobs(){
                 <ul class="job-file-list">
                   ${jobFiles.length ? jobFiles.map((f, idx)=>{
                     const safeName = f.name || `file_${idx+1}`;
-                    const href = f.dataUrl || f.url || "";
-                    const link = href ? `<a href="${href}" download="${safeName}">${safeName}</a>` : safeName;
+                    const link = fileLinkMarkup(f, esc(safeName));
                     return `<li>${link} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
                   }).join("") : `<li class=\"muted\">No files attached</li>`}
                 </ul>
