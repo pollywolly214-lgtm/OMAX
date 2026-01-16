@@ -150,12 +150,17 @@
   <div id="configModal" class="config-modal" hidden aria-hidden="true">
     <div class="config-dialog" role="dialog" aria-modal="true" aria-labelledby="configTitle">
       <h3 id="configTitle">Workspace configuration</h3>
-      <p class="config-description">Tune scheduling defaults for cutting work.</p>
+      <p class="config-description">Tune scheduling defaults and maintenance labor rates.</p>
       <form id="configForm" class="config-form">
         <label class="config-field" for="configDailyHours">
           <span class="config-label">Daily cutting hours</span>
           <input type="number" id="configDailyHours" name="configDailyHours" min="0.25" max="24" step="0.25" required />
           <small class="config-help">Updates every calculation that uses hours/day.</small>
+        </label>
+        <label class="config-field" for="configMaintenanceRate">
+          <span class="config-label">Maintenance labor rate ($/hr)</span>
+          <input type="number" id="configMaintenanceRate" name="configMaintenanceRate" min="0" step="0.01" />
+          <small class="config-help">Used for all maintenance time cost calculations.</small>
         </label>
         <label class="config-toggle" for="configExcludeWeekends">
           <input type="checkbox" id="configExcludeWeekends" name="configExcludeWeekends" />
