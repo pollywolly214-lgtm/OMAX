@@ -10854,6 +10854,9 @@ function computeCostModel(){
   maintenanceOrderItems.sort((a,b)=> a.time - b.time);
 
   const occurrenceCostItems = [];
+  const occurrenceLaborRate = (Number.isFinite(JOB_BASE_COST_PER_HOUR) && JOB_BASE_COST_PER_HOUR > 0)
+    ? JOB_BASE_COST_PER_HOUR
+    : 30;
   const parseOccurrenceDate = (value)=>{
     const key = toHistoryDateKey(value);
     if (!key) return null;
@@ -10864,32 +10867,130 @@ function computeCostModel(){
     const fallback = new Date(key);
     return fallback instanceof Date && !Number.isNaN(fallback.getTime()) ? fallback : null;
   };
+  const normalizeOccurrenceNotesLocal = (task)=>{
+    if (!task || typeof task !== "object") return {};
+    if (typeof normalizeOccurrenceNotes === "function"){
+      return normalizeOccurrenceNotes(task);
+    }
+    const result = {};
+    const raw = task.occurrenceNotes;
+    if (raw && typeof raw === "object"){
+      Object.entries(raw).forEach(([maybeDate, maybeNote]) => {
+        const key = toHistoryDateKey(maybeDate);
+        if (!key) return;
+        const text = typeof maybeNote === "string" ? maybeNote.trim() : "";
+        if (text) result[key] = text;
+      });
+    }
+    return result;
+  };
+  const normalizeOccurrenceHoursLocal = (task)=>{
+    if (!task || typeof task !== "object") return {};
+    if (typeof normalizeOccurrenceHours === "function"){
+      return normalizeOccurrenceHours(task);
+    }
+    const result = {};
+    const raw = task.occurrenceHours;
+    if (raw && typeof raw === "object"){
+      Object.entries(raw).forEach(([maybeDate, maybeHours]) => {
+        const key = toHistoryDateKey(maybeDate);
+        if (!key) return;
+        const num = Number(maybeHours);
+        if (!Number.isFinite(num) || num <= 0) return;
+        const normalized = Math.max(0.25, Math.round(num * 100) / 100);
+        result[key] = normalized;
+      });
+    }
+    return result;
+  };
+  const taskLookup = new Map();
+  [...intervalTasksAll, ...asReqTasksAll].forEach(task => {
+    if (!task || task.id == null) return;
+    taskLookup.set(String(task.id), task);
+  });
+  const resolveTemplateTask = (task)=>{
+    if (!task || task.templateId == null) return null;
+    const templateId = String(task.templateId);
+    return taskLookup.get(templateId) || null;
+  };
+  const resolveOccurrenceHoursForTask = (task, dateKey)=>{
+    if (!task || !dateKey) return null;
+    const directMap = normalizeOccurrenceHoursLocal(task);
+    const directVal = Number(directMap[dateKey]);
+    if (Number.isFinite(directVal) && directVal > 0) return directVal;
+    const templateTask = resolveTemplateTask(task);
+    if (templateTask){
+      const templateMap = normalizeOccurrenceHoursLocal(templateTask);
+      const templateVal = Number(templateMap[dateKey]);
+      if (Number.isFinite(templateVal) && templateVal > 0) return templateVal;
+    }
+    const downtimeCandidates = [task?.downtimeHours, templateTask?.downtimeHours];
+    for (const candidate of downtimeCandidates){
+      const raw = Number(candidate);
+      if (Number.isFinite(raw) && raw > 0) return Math.round(raw * 100) / 100;
+    }
+    return null;
+  };
+  const occurrenceCostKeys = new Set();
   const addOccurrenceCostsFromTask = (task)=>{
     if (!task) return;
-    const rawNotes = (typeof normalizeOccurrenceNotes === "function")
-      ? normalizeOccurrenceNotes(task)
-      : (task?.occurrenceNotes || {});
-    if (!rawNotes || typeof rawNotes !== "object") return;
-    Object.entries(rawNotes).forEach(([dateKey, note]) => {
-      if (!note) return;
-      const cost = parseOccurrenceCost(note);
-      if (!Number.isFinite(cost) || cost <= 0) return;
+    const notesMap = normalizeOccurrenceNotesLocal(task);
+    const hoursMap = normalizeOccurrenceHoursLocal(task);
+    const occurrenceDates = new Set([
+      ...Object.keys(notesMap || {}),
+      ...Object.keys(hoursMap || {})
+    ]);
+    const completedDates = Array.isArray(task.completedDates) ? task.completedDates : [];
+    completedDates.forEach(dateVal => {
+      const key = toHistoryDateKey(dateVal);
+      if (key) occurrenceDates.add(key);
+    });
+    const manualHistory = Array.isArray(task.manualHistory) ? task.manualHistory : [];
+    manualHistory.forEach(entry => {
+      if (!entry) return;
+      const statusRaw = typeof entry.status === "string" ? entry.status.toLowerCase() : "";
+      if (statusRaw === "scheduled" || statusRaw === "removed") return;
+      const key = toHistoryDateKey(entry.dateISO);
+      if (key) occurrenceDates.add(key);
+    });
+    if (!occurrenceDates.size) return;
+    const templateKey = resolveTaskTemplateKey(task) || (task.id != null ? String(task.id) : "");
+    occurrenceDates.forEach(dateKey => {
+      const compositeKey = `${templateKey}__${dateKey}`;
+      if (!templateKey || occurrenceCostKeys.has(compositeKey)) return;
       const resolved = parseOccurrenceDate(dateKey);
       if (!resolved) return;
+      const noteText = typeof notesMap[dateKey] === "string" ? notesMap[dateKey].trim() : "";
+      const noteCost = parseOccurrenceCost(noteText);
+      const unitPrice = resolveMaintenanceUnitCost(task);
+      const rebuildCost = Number.isFinite(noteCost) && noteCost > 0
+        ? noteCost
+        : (Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice : 0);
+      const hours = resolveOccurrenceHoursForTask(task, dateKey);
+      const timeCost = Number.isFinite(hours) && hours > 0
+        ? hours * occurrenceLaborRate
+        : 0;
+      const amount = rebuildCost + timeCost;
+      if (!Number.isFinite(amount) || amount <= 0) return;
       const resolvedTime = resolved.getTime();
       const resolvedISO = resolved instanceof Date && !Number.isNaN(resolved.getTime())
         ? resolved.toISOString()
         : null;
       occurrenceCostItems.push({
-        amount: cost,
+        amount,
         time: resolvedTime,
         resolvedAt: resolved,
         resolvedISO,
         name: task?.name || "Occurrence cost",
         pn: task?.pn || "",
-        note: typeof note === "string" ? note.trim() : "",
-        taskId: task.id != null ? String(task.id) : null
+        note: noteText,
+        taskId: task.id != null ? String(task.id) : null,
+        baseCost: rebuildCost,
+        timeCost,
+        hours,
+        rate: occurrenceLaborRate
       });
+      occurrenceCostKeys.add(compositeKey);
     });
   };
   intervalTasks.forEach(task => addOccurrenceCostsFromTask(task));
@@ -11722,9 +11823,25 @@ function computeCostModel(){
       if (time < startTime || time > endTime) return;
       const total = Number(item.amount) || 0;
       if (total <= 0) return;
-      const noteLabel = item.note
-        ? `Occurrence note · ${item.note}`
-        : "Occurrence note";
+      const baseCost = Number(item.baseCost) || 0;
+      const timeCost = Number(item.timeCost) || 0;
+      const hoursVal = Number(item.hours);
+      const rateVal = Number(item.rate) || occurrenceLaborRate;
+      const noteParts = [];
+      if (baseCost > 0){
+        noteParts.push(`Rebuild ${formatterCurrency(baseCost, { decimals: baseCost < 1000 ? 2 : 0 })}`);
+      }
+      if (timeCost > 0){
+        const hoursLabel = Number.isFinite(hoursVal) && hoursVal > 0
+          ? `${formatHoursValue(hoursVal)} hr`
+          : "";
+        const rateLabel = formatterCurrency(rateVal, { decimals: 2 });
+        noteParts.push(`Labor ${hoursLabel ? `${hoursLabel} @ ${rateLabel}/hr` : `@ ${rateLabel}/hr`}`);
+      }
+      if (item.note){
+        noteParts.push(`Note: ${item.note}`);
+      }
+      const noteLabel = noteParts.length ? noteParts.join(" · ") : "Occurrence cost";
       addActualRow({
         key: `occurrence_${row.key}_${index}`,
         name: item.name || "Occurrence cost",
