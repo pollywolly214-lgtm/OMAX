@@ -39,7 +39,11 @@ const TIME_EFFICIENCY_WINDOWS = [
   { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
   { key: "365d", label: "1Y", days: 365, description: "Past year" }
 ];
-const DEFAULT_APP_CONFIG = { excludeWeekends: false, dailyHours: DEFAULT_DAILY_HOURS };
+const DEFAULT_APP_CONFIG = {
+  excludeWeekends: false,
+  dailyHours: DEFAULT_DAILY_HOURS,
+  maintenanceLaborRate: JOB_BASE_COST_PER_HOUR
+};
 let appConfig = { ...DEFAULT_APP_CONFIG };
 
 const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
@@ -194,6 +198,13 @@ function clampDailyCutHours(value){
   return num;
 }
 
+function clampMaintenanceLaborRate(value){
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return 0;
+  if (num > 10000) return 10000;
+  return Math.round(num * 100) / 100;
+}
+
 function normalizeAppConfig(config){
   const normalized = { ...DEFAULT_APP_CONFIG };
   if (config && typeof config === "object"){
@@ -201,6 +212,10 @@ function normalizeAppConfig(config){
     if (config.dailyHours != null){
       const clamped = clampDailyCutHours(config.dailyHours);
       if (clamped > 0) normalized.dailyHours = clamped;
+    }
+    if (config.maintenanceLaborRate != null){
+      const clamped = clampMaintenanceLaborRate(config.maintenanceLaborRate);
+      if (clamped > 0) normalized.maintenanceLaborRate = clamped;
     }
   }
   return normalized;
@@ -263,6 +278,15 @@ function getAverageDailyCutHours(){
   if (!Number.isFinite(diffHours)) return null;
   const rate = diffHours / windowDays;
   return (Number.isFinite(rate) && rate > 0) ? rate : null;
+}
+
+function getMaintenanceLaborRate(){
+  try {
+    const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
+    const clamped = clampMaintenanceLaborRate(cfg.maintenanceLaborRate);
+    if (clamped > 0) return clamped;
+  } catch (_err){ /* ignore */ }
+  return JOB_BASE_COST_PER_HOUR;
 }
 
 function refreshDerivedDailyHours(){

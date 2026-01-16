@@ -1442,6 +1442,7 @@ function viewCosts(model){
   const breakdown = data.forecastBreakdown || {};
   const breakdownSections = Array.isArray(breakdown.sections) ? breakdown.sections : [];
   const breakdownTotals = breakdown.totals || {};
+  const breakdownColumns = Array.isArray(breakdown.columns) ? breakdown.columns : null;
   const hasSections = breakdownSections.length > 0;
   const hasTotals = Boolean(
     breakdownTotals && (
@@ -1487,68 +1488,114 @@ function viewCosts(model){
     ? cards.map(renderSummaryCard).join("")
     : `<p class="small muted">No cost metrics yet. Log machine hours and add pricing to interval tasks.</p>`;
 
-  const forecastTableHTML = (hasSections || hasTotals)
-    ? `
-      <div class="forecast-table-wrap">
-        <table class="forecast-table">
-          <thead>
-            <tr>
-              <th scope="col">Task</th>
-              <th scope="col">Cadence</th>
-              <th scope="col">Unit cost</th>
-              <th scope="col">Annual estimate</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${breakdownSections.map(section => {
-              const rows = Array.isArray(section.rows) ? section.rows : [];
-              const headerRow = `
-              <tr class="forecast-section-row">
-                <th scope="rowgroup" colspan="4">
-                  <span class="forecast-section-header">
-                    <span class="forecast-section-title">${esc(section.label || "")}</span>
-                    ${section.totalLabel ? `<span class="forecast-section-total">${esc(section.totalLabel)}</span>` : ""}
-                  </span>
-                </th>
-              </tr>`;
-              const rowsHtml = rows.length
-                ? rows.map(row => `
+  const renderForecastTable = ()=>{
+    if (breakdownColumns && breakdownColumns.length){
+      const colCount = breakdownColumns.length;
+      return `
+        <div class="forecast-table-wrap">
+          <table class="forecast-table">
+            <thead>
               <tr>
-                <th scope="row">${esc(row.name || "")}</th>
-                <td>${esc(row.cadenceLabel || "—")}</td>
-                <td>${esc(row.unitCostLabel || "—")}</td>
-                <td>${esc(row.annualTotalLabel || "—")}</td>
+                ${breakdownColumns.map(col => `<th scope="col">${esc(col.label || "")}</th>`).join("")}
               </tr>
-            `).join("")
-                : `
-              <tr class="forecast-empty-row">
-                <td colspan="4">${esc(section.emptyMessage || "No tasks yet.")}</td>
-              </tr>`;
-              return `${headerRow}${rowsHtml}`;
-            }).join("")}
-          </tbody>
-          ${hasTotals ? `
-          <tfoot>
-            <tr class="forecast-total-row">
-              <th scope="row">Interval total</th>
-              <td colspan="2"></td>
-              <td>${esc(breakdownTotals.intervalLabel || "—")}</td>
-            </tr>
-            <tr class="forecast-total-row">
-              <th scope="row">As-required total</th>
-              <td colspan="2"></td>
-              <td>${esc(breakdownTotals.asReqLabel || "—")}</td>
-            </tr>
-            <tr class="forecast-grand-total-row">
-              <th scope="row">Combined total</th>
-              <td colspan="2"></td>
-              <td>${esc(breakdownTotals.combinedLabel || "—")}</td>
-            </tr>
-          </tfoot>` : ""}
-        </table>
-      </div>
-    `
-    : `<p class="small muted">Add maintenance intervals, pricing, and expected frequency to project spend.</p>`;
+            </thead>
+            <tbody>
+              ${breakdownSections.map(section => {
+                const rows = Array.isArray(section.rows) ? section.rows : [];
+                const headerRow = `
+                <tr class="forecast-section-row">
+                  <th scope="rowgroup" colspan="${colCount}">
+                    <span class="forecast-section-header">
+                      <span class="forecast-section-title">${esc(section.label || "")}</span>
+                    </span>
+                  </th>
+                </tr>`;
+                const rowsHtml = rows.length
+                  ? rows.map(row => `
+                <tr>
+                  ${breakdownColumns.map(col => {
+                    const cell = row?.cells?.[col.key];
+                    return `<td>${esc(cell != null && cell !== "" ? cell : "—")}</td>`;
+                  }).join("")}
+                </tr>
+              `).join("")
+                  : `
+                <tr class="forecast-empty-row">
+                  <td colspan="${colCount}">${esc(section.emptyMessage || "No tasks yet.")}</td>
+                </tr>`;
+                return `${headerRow}${rowsHtml}`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+    if (hasSections || hasTotals){
+      return `
+        <div class="forecast-table-wrap">
+          <table class="forecast-table">
+            <thead>
+              <tr>
+                <th scope="col">Task</th>
+                <th scope="col">Cadence</th>
+                <th scope="col">Unit cost</th>
+                <th scope="col">Annual estimate</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${breakdownSections.map(section => {
+                const rows = Array.isArray(section.rows) ? section.rows : [];
+                const headerRow = `
+                <tr class="forecast-section-row">
+                  <th scope="rowgroup" colspan="4">
+                    <span class="forecast-section-header">
+                      <span class="forecast-section-title">${esc(section.label || "")}</span>
+                      ${section.totalLabel ? `<span class="forecast-section-total">${esc(section.totalLabel)}</span>` : ""}
+                    </span>
+                  </th>
+                </tr>`;
+                const rowsHtml = rows.length
+                  ? rows.map(row => `
+                <tr>
+                  <th scope="row">${esc(row.name || "")}</th>
+                  <td>${esc(row.cadenceLabel || "—")}</td>
+                  <td>${esc(row.unitCostLabel || "—")}</td>
+                  <td>${esc(row.annualTotalLabel || "—")}</td>
+                </tr>
+              `).join("")
+                  : `
+                <tr class="forecast-empty-row">
+                  <td colspan="4">${esc(section.emptyMessage || "No tasks yet.")}</td>
+                </tr>`;
+                return `${headerRow}${rowsHtml}`;
+              }).join("")}
+            </tbody>
+            ${hasTotals ? `
+            <tfoot>
+              <tr class="forecast-total-row">
+                <th scope="row">Interval total</th>
+                <td colspan="2"></td>
+                <td>${esc(breakdownTotals.intervalLabel || "—")}</td>
+              </tr>
+              <tr class="forecast-total-row">
+                <th scope="row">As-required total</th>
+                <td colspan="2"></td>
+                <td>${esc(breakdownTotals.asReqLabel || "—")}</td>
+              </tr>
+              <tr class="forecast-grand-total-row">
+                <th scope="row">Combined total</th>
+                <td colspan="2"></td>
+                <td>${esc(breakdownTotals.combinedLabel || "—")}</td>
+              </tr>
+            </tfoot>` : ""}
+          </table>
+        </div>
+      `;
+    }
+    return `<p class="small muted">Add maintenance intervals, pricing, and expected frequency to project spend.</p>`;
+  };
+
+  const forecastTableHTML = renderForecastTable();
 
   return `
   <div class="container cost-container">
@@ -1609,7 +1656,7 @@ function viewCosts(model){
       <div class="forecast-modal-card" role="document" tabindex="-1" data-forecast-initial>
         <button type="button" class="forecast-modal-close" data-forecast-close aria-label="Close maintenance forecast breakdown">×</button>
         <h2 id="forecastModalTitle">Maintenance forecast breakdown</h2>
-        <p class="forecast-modal-subtitle">Interval and as-required tasks with annualized totals.</p>
+        <p class="forecast-modal-subtitle">Completed maintenance with labor time and cost rollups from the calendar.</p>
         ${forecastTableHTML}
         <p class="forecast-table-note">${esc(forecastNote)}</p>
       </div>
