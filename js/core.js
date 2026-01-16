@@ -39,7 +39,11 @@ const TIME_EFFICIENCY_WINDOWS = [
   { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
   { key: "365d", label: "1Y", days: 365, description: "Past year" }
 ];
-const DEFAULT_APP_CONFIG = { excludeWeekends: false, dailyHours: DEFAULT_DAILY_HOURS };
+const DEFAULT_APP_CONFIG = {
+  excludeWeekends: false,
+  dailyHours: DEFAULT_DAILY_HOURS,
+  maintenanceLaborRate: JOB_BASE_COST_PER_HOUR
+};
 let appConfig = { ...DEFAULT_APP_CONFIG };
 
 const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
@@ -202,6 +206,10 @@ function normalizeAppConfig(config){
       const clamped = clampDailyCutHours(config.dailyHours);
       if (clamped > 0) normalized.dailyHours = clamped;
     }
+    if (config.maintenanceLaborRate != null){
+      const rate = Number(config.maintenanceLaborRate);
+      if (Number.isFinite(rate) && rate >= 0) normalized.maintenanceLaborRate = rate;
+    }
   }
   return normalized;
 }
@@ -223,6 +231,15 @@ function getConfiguredDailyHours(){
     if (clamped > 0) return clamped;
   } catch (_err){ /* ignore */ }
   return DEFAULT_DAILY_HOURS;
+}
+
+function getMaintenanceLaborRate(){
+  try {
+    const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
+    const rate = Number(cfg.maintenanceLaborRate);
+    if (Number.isFinite(rate) && rate >= 0) return rate;
+  } catch (_err){ /* ignore */ }
+  return JOB_BASE_COST_PER_HOUR;
 }
 
 function getAverageDailyCutHours(){
