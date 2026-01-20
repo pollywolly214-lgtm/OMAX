@@ -514,13 +514,6 @@ async function initFirebase(){
   FB.db   = firebase.firestore();
   applyFirestoreSettings(FB.db);
 
-  // Persist login across refreshes
-  try {
-    await FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-  } catch (e) {
-    console.warn("Could not set auth persistence to LOCAL:", e);
-  }
-
   // UI bits
   const statusEl = $("#authStatus");
   const btnIn    = $("#btnSignIn");
@@ -531,8 +524,14 @@ async function initFirebase(){
   const passEl   = $("#authPass");
   const btnClose = $("#authClose");
 
-  const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
-  const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
+  const showModal = ()=>{
+    if (modal) modal.style.display = "flex";
+    document.body?.classList.add("modal-open");
+  };
+  const hideModal = ()=>{
+    if (modal) modal.style.display = "none";
+    document.body?.classList.remove("modal-open");
+  };
 
   async function ensureEmailPassword(email, password){
     if (!email || !password) throw new Error("Email and password required.");
@@ -552,6 +551,12 @@ async function initFirebase(){
   if (btnIn)  btnIn.onclick  = showModal;
   if (btnOut) btnOut.onclick = async ()=>{ await FB.auth.signOut(); };
   if (btnClose) btnClose.onclick = hideModal;
+  if (modal && modal.dataset.boundClose !== "1"){
+    modal.dataset.boundClose = "1";
+    modal.addEventListener("click", (event)=>{
+      if (event.target === modal) hideModal();
+    });
+  }
 
   if (form){
     form.onsubmit = async (e)=>{
@@ -603,6 +608,10 @@ async function initFirebase(){
   };
 
   window.addEventListener("keydown", handleLoginShortcut);
+
+  // Persist login across refreshes (non-blocking for UI)
+  FB.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+    .catch((e)=> console.warn("Could not set auth persistence to LOCAL:", e));
 
   FB.auth.onAuthStateChanged(async (user)=>{
     FB.user = user || null;
