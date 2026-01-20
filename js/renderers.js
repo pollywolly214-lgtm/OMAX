@@ -11782,12 +11782,8 @@ function computeCostModel(){
         avgTimeCostLabel: completedTwoMonth > 0
           ? formatterCurrency(avgTimeCost, { decimals: avgTimeCost < 1000 ? 2 : 0 })
           : "—",
-        totalCostYearLabel: completedYear > 0
-          ? formatterCurrency(totalCostYear, { decimals: totalCostYear < 1000 ? 2 : 0 })
-          : "—",
-        totalCostTwoMonthLabel: completedTwoMonth > 0
-          ? formatterCurrency(totalCostTwoMonth, { decimals: totalCostTwoMonth < 1000 ? 2 : 0 })
-          : "—"
+        totalCostYearLabel: formatterCurrency(totalCostYear, { decimals: totalCostYear < 1000 ? 2 : 0 }),
+        totalCostTwoMonthLabel: formatterCurrency(totalCostTwoMonth, { decimals: totalCostTwoMonth < 1000 ? 2 : 0 })
       });
     });
     return rows;
