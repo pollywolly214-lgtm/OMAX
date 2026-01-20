@@ -10842,7 +10842,8 @@ function computeCostModel(){
 
   const resolveDefaultDowntimeHours = (task)=>{
     const raw = Number(task?.downtimeHours);
-    return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) / 100 : 0;
+    if (Number.isFinite(raw) && raw > 0) return Math.round(raw * 100) / 100;
+    return 1;
   };
 
   const occurrenceHoursByTemplateDate = new Map();
@@ -10862,29 +10863,45 @@ function computeCostModel(){
   });
 
   const completionStatsByTemplate = new Map();
-  const completionSeen = new Set();
+  const completionPresenceByDate = new Map();
   const today = new Date();
   today.setHours(0,0,0,0);
   const yearCutoff = new Date(today);
   yearCutoff.setDate(yearCutoff.getDate() - 365);
-  const twoMonthCutoff = new Date(today);
-  twoMonthCutoff.setMonth(twoMonthCutoff.getMonth() - 2);
+  const subtractMonthsExact = (date, months)=>{
+    const target = new Date(date);
+    const year = target.getFullYear();
+    const monthIndex = target.getMonth();
+    const day = target.getDate();
+    const targetMonthIndex = monthIndex - months;
+    const targetYear = year + Math.floor(targetMonthIndex / 12);
+    const normalizedMonth = ((targetMonthIndex % 12) + 12) % 12;
+    const lastDay = new Date(targetYear, normalizedMonth + 1, 0).getDate();
+    target.setFullYear(targetYear, normalizedMonth, Math.min(day, lastDay));
+    return target;
+  };
+  const twoMonthCutoff = subtractMonthsExact(today, 2);
 
-  const registerCompletion = (templateKey, dateKey, task)=>{
+  const registerCompletion = (templateKey, dateKey, task, { sourceId = "", isInstance = false } = {})=>{
     if (!templateKey || !dateKey) return;
-    const compositeKey = `${templateKey}__${dateKey}`;
-    if (completionSeen.has(compositeKey)) return;
-    const parsedDate = typeof parseDateLocal === "function" ? parseDateLocal(dateKey) : new Date(dateKey);
+    const dateKeyNormalized = String(dateKey);
+    const presenceKey = `${templateKey}__${dateKeyNormalized}`;
+    const presence = completionPresenceByDate.get(presenceKey) || { instancePresent: false, sources: new Set() };
+    if (sourceId && presence.sources.has(sourceId)) return;
+    if (!isInstance && presence.instancePresent) return;
+    const parsedDate = typeof parseDateLocal === "function" ? parseDateLocal(dateKeyNormalized) : new Date(dateKeyNormalized);
     if (!(parsedDate instanceof Date) || Number.isNaN(parsedDate.getTime())) return;
     parsedDate.setHours(0,0,0,0);
     if (parsedDate.getTime() > today.getTime()) return;
     const templateTask = resolveTemplateTaskForKey(templateKey) || task;
     const defaultHours = resolveDefaultDowntimeHours(templateTask);
-    const occurrenceHours = occurrenceHoursByTemplateDate.get(compositeKey);
+    const occurrenceHours = occurrenceHoursByTemplateDate.get(presenceKey);
     const resolvedHours = Number.isFinite(Number(occurrenceHours)) && Number(occurrenceHours) > 0
       ? Number(occurrenceHours)
       : defaultHours;
-    const hoursValue = Number.isFinite(resolvedHours) && resolvedHours > 0 ? resolvedHours : 0;
+    const hoursValue = Number.isFinite(resolvedHours) && resolvedHours > 0
+      ? resolvedHours
+      : (defaultHours > 0 ? defaultHours : 0.25);
     const stats = completionStatsByTemplate.get(templateKey) || {
       completedYear: 0,
       hoursYear: 0,
@@ -10900,17 +10917,31 @@ function computeCostModel(){
       stats.hoursTwoMonth += hoursValue;
     }
     completionStatsByTemplate.set(templateKey, stats);
-    completionSeen.add(compositeKey);
+    presence.sources.add(sourceId);
+    if (isInstance) presence.instancePresent = true;
+    completionPresenceByDate.set(presenceKey, presence);
   };
 
-  maintenanceTasksAll.forEach(task => {
+  const isInstanceEntry = (task)=>{
+    if (!task) return false;
+    return typeof isInstanceTask === "function" ? isInstanceTask(task) : task.variant === "instance";
+  };
+
+  const orderedTasks = [
+    ...maintenanceTasksAll.filter(task => isInstanceEntry(task)),
+    ...maintenanceTasksAll.filter(task => !isInstanceEntry(task))
+  ];
+
+  orderedTasks.forEach(task => {
     if (!task) return;
     const templateKey = resolveTaskTemplateKey(task);
     if (!templateKey) return;
+    const sourceId = task.id != null ? String(task.id) : templateKey;
+    const isInstance = isInstanceEntry(task);
     const completedDates = Array.isArray(task.completedDates) ? task.completedDates : [];
     completedDates.forEach(dateVal => {
       const key = toHistoryDateKey(dateVal);
-      if (key) registerCompletion(templateKey, key, task);
+      if (key) registerCompletion(templateKey, key, task, { sourceId, isInstance });
     });
     const manualHistory = Array.isArray(task.manualHistory) ? task.manualHistory : [];
     manualHistory.forEach(entry => {
@@ -10918,7 +10949,7 @@ function computeCostModel(){
       const statusRaw = typeof entry.status === "string" ? entry.status.toLowerCase() : "";
       if (statusRaw !== "completed") return;
       const key = toHistoryDateKey(entry.dateISO);
-      if (key) registerCompletion(templateKey, key, task);
+      if (key) registerCompletion(templateKey, key, task, { sourceId, isInstance });
     });
   });
 
