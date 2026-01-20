@@ -226,6 +226,42 @@ function getConfiguredDailyHours(){
 }
 
 function getAverageDailyCutHours(){
+  const logs = Array.isArray(window.dailyCutHours)
+    ? window.dailyCutHours
+    : (Array.isArray(dailyCutHours) ? dailyCutHours : []);
+  const excludeWeekends = (typeof shouldExcludeWeekends === "function" && shouldExcludeWeekends());
+  const windowDays = excludeWeekends ? 22 : 30;
+  const logMap = new Map();
+  for (const entry of logs){
+    if (!entry) continue;
+    const key = normalizeDateISO(entry.dateISO || entry.date || entry.dateIso);
+    if (!key) continue;
+    logMap.set(key, clampDailyCutHours(entry.hours));
+  }
+
+  if (logMap.size){
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const cursor = new Date(today);
+    let total = 0;
+    let counted = 0;
+
+    while (counted < windowDays){
+      if (!excludeWeekends || !(typeof isWeekendDate === "function" && isWeekendDate(cursor))){
+        const key = ymd(cursor);
+        const hours = logMap.has(key) ? logMap.get(key) : 0;
+        total += clampDailyCutHours(hours);
+        counted += 1;
+      }
+      cursor.setDate(cursor.getDate() - 1);
+    }
+
+    if (counted > 0){
+      const rate = total / counted;
+      if (Number.isFinite(rate) && rate > 0) return rate;
+    }
+  }
+
   const list = Array.isArray(window.totalHistory) ? window.totalHistory : [];
   const sorted = list
     .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
@@ -235,7 +271,6 @@ function getAverageDailyCutHours(){
 
   const today = new Date();
   today.setHours(0,0,0,0);
-  const windowDays = (typeof shouldExcludeWeekends === "function" && shouldExcludeWeekends()) ? 22 : 30;
   const monthStart = new Date(today);
   monthStart.setDate(monthStart.getDate() - windowDays);
 
@@ -2281,6 +2316,7 @@ function setDailyCutHoursEntry(dateISO, hours, { source = "manual", preserveManu
   }
   dailyCutHours.sort((a, b)=> a.dateISO.localeCompare(b.dateISO));
   if (typeof window !== "undefined") window.dailyCutHours = dailyCutHours;
+  if (typeof refreshDerivedDailyHours === "function") refreshDerivedDailyHours();
   return true;
 }
 
