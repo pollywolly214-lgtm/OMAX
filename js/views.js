@@ -3571,9 +3571,10 @@ function filterInventoryItems(term){
   });
 }
 
-function inventoryRowsHTML(list){
+function inventoryRowsHTML(list, options = {}){
+  const emptyMessage = options.emptyMessage || "No inventory items match your search.";
   if (!Array.isArray(list) || !list.length){
-    return `<tr><td colspan="9" class="muted">No inventory items match your search.</td></tr>`;
+    return `<tr><td colspan="9" class="muted">${emptyMessage}</td></tr>`;
   }
   return list.map(i => {
     const priceVal = i.price != null && i.price !== "" ? Number(i.price) : "";
@@ -3594,6 +3595,7 @@ function inventoryRowsHTML(list){
       <td><input type="number" step="0.01" min="0" data-inv="price" data-id="${i.id}" value="${priceDisplay}"></td>
       <td><input type="text" data-inv="note" data-id="${i.id}" value="${i.note||""}"></td>
       <td class="inventory-actions">
+        <button type="button" class="inventory-edit" data-inventory-edit="${i.id}">Edit</button>
         <button type="button" class="inventory-add" data-order-add="${i.id}">Add to order request</button>
         <button type="button" class="inventory-delete" data-inventory-delete="${i.id}">Delete</button>
       </td>
@@ -3601,14 +3603,211 @@ function inventoryRowsHTML(list){
   }).join("");
 }
 
+function inventoryCategoriesHTML(list){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const rootId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
+  const foldersRaw = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  const folders = foldersRaw.filter(folder => folder && folder.id != null);
+  const folderIds = new Set(folders.map(folder => String(folder.id)));
+  folderIds.add(String(rootId));
+  const notLinkedId = "inventory_not_linked";
+  const notLinkedLabel = "Not linked";
+
+  const rootFolder = folders.find(folder => String(folder.id) === String(rootId));
+  const rootName = rootFolder && rootFolder.name ? rootFolder.name : "All Tasks";
+
+  const normalizeOrder = (a, b)=> (Number(b.order || 0) - Number(a.order || 0))
+    || String(a.name || "").localeCompare(String(b.name || ""));
+
+  const childrenOf = (parentId)=> folders
+    .filter(folder => String(folder.parent ?? "") === String(parentId ?? ""))
+    .sort(normalizeOrder);
+
+  const orderedCategories = [];
+  const addFolder = (folder, depth)=>{
+    if (!folder || folder.id == null) return;
+    orderedCategories.push({
+      id: String(folder.id),
+      name: folder.name || "Category",
+      depth: Math.max(0, depth || 0)
+    });
+    childrenOf(folder.id).forEach(child => addFolder(child, (depth || 0) + 1));
+  };
+
+  if (rootFolder){
+    addFolder(rootFolder, 0);
+  } else if (folders.length){
+    childrenOf(null).forEach(child => addFolder(child, 0));
+  } else {
+    orderedCategories.push({ id: String(rootId), name: rootName, depth: 0 });
+  }
+
+  const categoryItemsMap = new Map();
+  const categoryItemIds = new Map();
+  const ensureCategoryBucket = (id)=>{
+    const key = String(id);
+    if (!categoryItemsMap.has(key)) categoryItemsMap.set(key, []);
+    if (!categoryItemIds.has(key)) categoryItemIds.set(key, new Set());
+    return key;
+  };
+  const addItemToCategory = (id, item)=>{
+    const key = ensureCategoryBucket(id);
+    const idSet = categoryItemIds.get(key);
+    const itemId = item && item.id != null ? String(item.id) : null;
+    if (itemId && idSet && idSet.has(itemId)) return;
+    if (itemId && idSet) idSet.add(itemId);
+    categoryItemsMap.get(key).push(item);
+  };
+
+  const inventoryList = Array.isArray(list) ? list : [];
+  inventoryList.forEach(item => {
+    if (!item) return;
+    const linkedTasks = typeof findTasksLinkedToInventoryItem === "function"
+      ? findTasksLinkedToInventoryItem(item)
+      : [];
+    const categoryIds = new Set();
+    if (Array.isArray(linkedTasks) && linkedTasks.length){
+      linkedTasks.forEach(task => {
+        if (!task) return;
+        let catId = task.cat != null ? String(task.cat) : String(rootId);
+        if (!folderIds.has(catId)) catId = String(rootId);
+        categoryIds.add(catId);
+      });
+    }
+    if (!categoryIds.size){
+      addItemToCategory(notLinkedId, item);
+      return;
+    }
+    categoryIds.forEach(catId => addItemToCategory(catId, item));
+  });
+
+  const metricsFor = (items)=>{
+    const metrics = { count: 0, qtyNew: 0, qtyOld: 0, totalValue: 0 };
+    if (!Array.isArray(items)) return metrics;
+    items.forEach(entry => {
+      if (!entry) return;
+      metrics.count += 1;
+      const qtyNew = Number(entry.qtyNew);
+      const qtyOld = Number(entry.qtyOld);
+      const price = Number(entry.price);
+      const safeNew = Number.isFinite(qtyNew) ? qtyNew : 0;
+      const safeOld = Number.isFinite(qtyOld) ? qtyOld : 0;
+      metrics.qtyNew += safeNew;
+      metrics.qtyOld += safeOld;
+      if (Number.isFinite(price)){
+        metrics.totalValue += price * (safeNew + safeOld);
+      }
+    });
+    return metrics;
+  };
+
+  const formatNumber = (value)=> {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "0";
+    return num.toLocaleString();
+  };
+  const formatCurrency = (value)=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "—";
+    return num.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+  };
+
+  const expandedState = (typeof window !== "undefined" && window.inventoryCategoryExpanded && typeof window.inventoryCategoryExpanded === "object")
+    ? window.inventoryCategoryExpanded
+    : {};
+  if (typeof window !== "undefined" && window.inventoryCategoryExpanded !== expandedState){
+    window.inventoryCategoryExpanded = expandedState;
+  }
+  const defaultExpandedId = orderedCategories.length ? orderedCategories[0].id : String(rootId);
+  if (!Object.prototype.hasOwnProperty.call(expandedState, defaultExpandedId)){
+    expandedState[defaultExpandedId] = true;
+  }
+
+  const categoryRows = orderedCategories.concat([{ id: notLinkedId, name: notLinkedLabel, depth: 0 }])
+    .map(category => {
+      const categoryId = String(category.id);
+      const categoryIdSafe = esc(categoryId);
+      const categoryNameSafe = esc(category.name || "Category");
+      const items = categoryItemsMap.get(categoryId) || [];
+      const stats = metricsFor(items);
+      const depthAttr = ` style="--depth:${Math.max(0, Number(category.depth) || 0)}"`;
+      const isExpanded = Boolean(expandedState[categoryId]);
+      const toggleButton = `
+        <button type="button" class="cost-category-overview-toggle" data-inventory-category-toggle="${categoryIdSafe}" aria-expanded="${isExpanded ? "true" : "false"}">
+          <span class="cost-category-toggle-icon" aria-hidden="true"></span>
+          <span class="cost-category-name"${depthAttr}>${categoryNameSafe}</span>
+        </button>
+      `;
+      const rowsMarkup = inventoryRowsHTML(items, { emptyMessage: "No inventory items in this category." });
+      return `
+        <tbody class="cost-category-overview-group${isExpanded ? " is-expanded" : ""}" data-inventory-category-group="${categoryIdSafe}">
+          <tr>
+            <th scope="row">${toggleButton}</th>
+            <td>${formatNumber(stats.count)}</td>
+            <td>${formatNumber(stats.qtyNew)}</td>
+            <td>${formatNumber(stats.qtyOld)}</td>
+            <td>${formatCurrency(stats.totalValue)}</td>
+          </tr>
+          <tr class="cost-category-overview-jobs" data-inventory-category-items-row${isExpanded ? "" : " hidden"}>
+            <td colspan="5">
+              <div class="cost-category-overview-jobs-inner">
+                <div class="inventory-category-table-wrap">
+                  <table class="inventory-table inventory-category-table">
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th>Qty (New)</th>
+                        <th>Qty (Old)</th>
+                        <th>Unit</th>
+                        <th>PN</th>
+                        <th>Link</th>
+                        <th>Price</th>
+                        <th>Note</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody data-inventory-rows data-inventory-category-rows="${categoryIdSafe}">
+                      ${rowsMarkup}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      `;
+    }).join("");
+
+  return `
+    <div class="cost-category-overview inventory-category-overview">
+      <h4 class="cost-category-subheading">Inventory categories</h4>
+      <table class="cost-table cost-category-overview-table inventory-category-overview-table">
+        <thead>
+          <tr>
+            <th scope="col">Category</th>
+            <th scope="col">Items</th>
+            <th scope="col">New qty</th>
+            <th scope="col">Old qty</th>
+            <th scope="col">Est. value</th>
+          </tr>
+        </thead>
+        ${categoryRows}
+      </table>
+    </div>
+  `;
+}
+
 function viewInventory(){
   const filtered = filterInventoryItems(inventorySearchTerm);
-  const rows = inventoryRowsHTML(filtered);
   const searchValue = String(inventorySearchTerm || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+  const categoriesMarkup = inventoryCategoriesHTML(filtered);
+  const emptySearchMarkup = inventorySearchTerm && !filtered.length
+    ? `<p class="small muted inventory-empty-search">No inventory items match your search.</p>`
+    : "";
   return `
   <div class="container">
     <div class="block" style="grid-column:1 / -1">
@@ -3621,10 +3820,10 @@ function viewInventory(){
         </div>
       </div>
       <div class="small muted inventory-hint">Results update as you type.</div>
-      <table class="inventory-table">
-        <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
-        <tbody data-inventory-rows>${rows}</tbody>
-      </table>
+      ${emptySearchMarkup}
+      <div data-inventory-categories>
+        ${categoriesMarkup}
+      </div>
     </div>
   </div>
 
@@ -3658,6 +3857,32 @@ function viewInventory(){
           <div class="modal-actions inventory-modal-actions">
             <button type="button" class="secondary" data-back>Back</button>
             <button type="submit" class="primary">Add item</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="inventoryEditModal" hidden>
+    <div class="modal-card inventory-modal-card">
+      <button type="button" class="modal-close" data-close>&times;</button>
+
+      <section class="inventory-modal-step">
+        <h4>Edit inventory item</h4>
+        <form id="inventoryEditForm" class="modal-form">
+          <div class="modal-grid">
+            <label>Item name<input name="inventoryEditName" required placeholder="Item"></label>
+            <label>New quantity<input type="number" min="0" step="1" name="inventoryEditQtyNew" value="1"></label>
+            <label>Old quantity<input type="number" min="0" step="1" name="inventoryEditQtyOld" value="0"></label>
+            <label>Unit<input name="inventoryEditUnit" placeholder="pcs" value="pcs"></label>
+            <label>Part #<input name="inventoryEditPN" placeholder="Part number"></label>
+            <label>Store link<input type="url" name="inventoryEditLink" placeholder="https://..."></label>
+            <label>Price ($)<input type="number" min="0" step="0.01" name="inventoryEditPrice" placeholder="optional"></label>
+            <label>Notes<input name="inventoryEditNote" placeholder="Optional note"></label>
+          </div>
+          <div class="modal-actions inventory-modal-actions">
+            <button type="button" class="secondary" data-edit-cancel>Cancel</button>
+            <button type="submit" class="primary">Save changes</button>
           </div>
         </form>
       </section>

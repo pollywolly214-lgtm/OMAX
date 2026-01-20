@@ -682,6 +682,10 @@ body.forecast-modal-open{ overflow:hidden; }
 .cost-category-jobs-table thead th[rowspan]{ vertical-align:bottom; }
 .cost-category-jobs-table td:nth-child(n+4){ text-align:right; }
 .cost-category-job-name{ font-weight:600; }
+.inventory-category-overview-table td:nth-child(n+2){ text-align:right; }
+.inventory-category-table-wrap{ overflow-x:auto; }
+.inventory-category-table thead th{ background:rgba(224,237,255,0.42); }
+.inventory-empty-search{ margin:8px 0 0; }
 
 .order-cost-summary { margin-bottom:12px; }
 
@@ -902,6 +906,8 @@ body.cost-info-visible{
 .inventory-name-btn:focus-visible{ outline:3px solid rgba(10,99,194,.35); outline-offset:2px; }
 .inventory-add{ padding:6px 10px; border-radius:8px; border:1px solid #ccd5e6; background:#f4f7fb; cursor:pointer; font-weight:600; }
 .inventory-add:hover{ background:#e4ebf8; }
+.inventory-edit{ padding:6px 10px; border-radius:8px; border:1px solid #b7c5e6; background:#f0f4ff; color:#1f3c88; cursor:pointer; font-weight:600; }
+.inventory-edit:hover{ background:#e0e8ff; }
 .inventory-actions{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .inventory-delete{ padding:6px 10px; border-radius:8px; border:1px solid #f0b6b6; background:#fff4f4; color:#b3261e; cursor:pointer; font-weight:600; }
 .inventory-delete:hover{ background:#ffe4e4; }
