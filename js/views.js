@@ -3423,6 +3423,7 @@ function viewJobs(){
               aria-expanded="${addFormOpen ? "true" : "false"}"
               aria-controls="jobAddPanel"
             >${addFormOpen ? "Hide add job form" : "+ New cutting job"}</button>
+            <button type="button" class="job-history-button" data-job-naming-open>Open Naming Widget</button>
             <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
           </div>
         </div>
@@ -3506,6 +3507,17 @@ function viewJobs(){
         <tbody>${rows}</tbody>
       </table>
       <p class="small muted">Material cost and quantity update immediately when changed.</p>
+      <div class="job-naming-modal-backdrop" id="jobNamingModal" hidden>
+        <div class="job-naming-modal" role="dialog" aria-modal="true" aria-labelledby="jobNamingModalTitle">
+          <div class="job-note-modal-header">
+            <h4 id="jobNamingModalTitle">File Naming Widget</h4>
+            <button type="button" class="job-note-modal-close" data-naming-close aria-label="Close naming widget">×</button>
+          </div>
+          <div class="job-naming-modal-body">
+            <iframe src="naming-widget.html" title="File naming widget" loading="lazy"></iframe>
+          </div>
+        </div>
+      </div>
       <div class="job-note-modal-backdrop" id="jobNoteModal" hidden>
         <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobNoteModalTitle" aria-describedby="jobNoteModalDescription">
           <div class="job-note-modal-header">

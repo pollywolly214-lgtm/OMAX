@@ -12875,6 +12875,7 @@ function renderJobs(){
   };
 
   const noteBackdrop = content.querySelector("#jobNoteModal");
+  const namingBackdrop = content.querySelector("#jobNamingModal");
   const noteTextarea = content.querySelector("#jobNoteModalInput");
   const noteJobLabel = content.querySelector("#jobNoteModalJob");
   const noteHistory = content.querySelector("#jobNoteModalHistory");
@@ -13169,6 +13170,42 @@ function renderJobs(){
       } catch (_err) { }
     });
   };
+
+  const closeNamingModal = ()=>{
+    if (!namingBackdrop) return;
+    namingBackdrop.classList.remove("open");
+    namingBackdrop.hidden = true;
+  };
+
+  const openNamingModal = ()=>{
+    if (!namingBackdrop) return;
+    namingBackdrop.hidden = false;
+    namingBackdrop.classList.add("open");
+  };
+
+  content.querySelector("[data-job-naming-open]")?.addEventListener("click", (event)=>{
+    event.preventDefault();
+    openNamingModal();
+  });
+
+  content.querySelectorAll("[data-naming-close]").forEach(btn => {
+    btn.addEventListener("click", ()=> closeNamingModal());
+  });
+
+  if (namingBackdrop){
+    namingBackdrop.addEventListener("click", (event)=>{
+      if (event.target === namingBackdrop){
+        event.preventDefault();
+        closeNamingModal();
+      }
+    });
+    namingBackdrop.addEventListener("keydown", (event)=>{
+      if (event.key === "Escape" || event.key === "Esc"){
+        event.preventDefault();
+        closeNamingModal();
+      }
+    }, true);
+  }
 
   const closeJobNoteModal = ()=>{
     if (!noteBackdrop) return;
