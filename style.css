@@ -902,6 +902,8 @@ body.cost-info-visible{
 .inventory-name-btn:focus-visible{ outline:3px solid rgba(10,99,194,.35); outline-offset:2px; }
 .inventory-add{ padding:6px 10px; border-radius:8px; border:1px solid #ccd5e6; background:#f4f7fb; cursor:pointer; font-weight:600; }
 .inventory-add:hover{ background:#e4ebf8; }
+.inventory-edit{ padding:6px 10px; border-radius:8px; border:1px solid #b7c5e6; background:#f0f4ff; color:#1f3c88; cursor:pointer; font-weight:600; }
+.inventory-edit:hover{ background:#e0e8ff; }
 .inventory-actions{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .inventory-delete{ padding:6px 10px; border-radius:8px; border:1px solid #f0b6b6; background:#fff4f4; color:#b3261e; cursor:pointer; font-weight:600; }
 .inventory-delete:hover{ background:#ffe4e4; }
@@ -916,6 +918,7 @@ body.cost-info-visible{
 .inventory-table td:nth-child(3){ width:110px; text-align:center; }
 .inventory-table td:nth-child(2) input,
 .inventory-table td:nth-child(3) input{ width:72px; padding:4px 6px; }
+.inventory-category-table-wrap{ overflow-x:auto; }
 
 
 /* Calendar chip/bar are fully interactive */

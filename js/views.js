@@ -3558,10 +3558,11 @@ function viewJobs(){
   </div>`;
 }
 
-function filterInventoryItems(term){
+function filterInventoryItems(term, listOverride){
   const query = (term || "").trim().toLowerCase();
-  if (!query) return inventory.slice();
-  return inventory.filter(item => {
+  const source = Array.isArray(listOverride) ? listOverride : inventory;
+  if (!query) return source.slice();
+  return source.filter(item => {
     const fields = [item.name, item.unit, item.pn, item.note, item.link];
     return fields.some(f => {
       if (f == null) return false;
@@ -3571,9 +3572,10 @@ function filterInventoryItems(term){
   });
 }
 
-function inventoryRowsHTML(list){
+function inventoryRowsHTML(list, options = {}){
+  const emptyMessage = options.emptyMessage || "No inventory items found.";
   if (!Array.isArray(list) || !list.length){
-    return `<tr><td colspan="9" class="muted">No inventory items match your search.</td></tr>`;
+    return `<tr><td colspan="9" class="muted">${emptyMessage}</td></tr>`;
   }
   return list.map(i => {
     const priceVal = i.price != null && i.price !== "" ? Number(i.price) : "";
@@ -3594,6 +3596,7 @@ function inventoryRowsHTML(list){
       <td><input type="number" step="0.01" min="0" data-inv="price" data-id="${i.id}" value="${priceDisplay}"></td>
       <td><input type="text" data-inv="note" data-id="${i.id}" value="${i.note||""}"></td>
       <td class="inventory-actions">
+        <button type="button" class="inventory-edit" data-inventory-edit="${i.id}">Edit</button>
         <button type="button" class="inventory-add" data-order-add="${i.id}">Add to order request</button>
         <button type="button" class="inventory-delete" data-inventory-delete="${i.id}">Delete</button>
       </td>
@@ -3601,14 +3604,230 @@ function inventoryRowsHTML(list){
   }).join("");
 }
 
+function buildInventoryCategoryData(options = {}){
+  const searchTerm = typeof options.searchTerm === "string" ? options.searchTerm : "";
+  const inventoryList = Array.isArray(window.inventory) ? window.inventory : [];
+  const tasksInterval = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  const tasksAsReq = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  const folders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
+  const rootFolderId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
+  const rootFolder = folders.find(folder => folder && String(folder.id) === String(rootFolderId));
+  const tasksById = new Map();
+  tasksInterval.forEach(task => { if (task && task.id != null) tasksById.set(String(task.id), task); });
+  tasksAsReq.forEach(task => { if (task && task.id != null) tasksById.set(String(task.id), task); });
+
+  const sortFolders = (list)=> list
+    .slice()
+    .sort((a, b)=> (Number(b.order || 0) - Number(a.order || 0)) || String(a.name || "").localeCompare(String(b.name || "")));
+  const childrenOf = (parentId)=> folders.filter(folder => String(folder?.parent ?? "") === String(parentId ?? ""));
+  const categories = [];
+  const walk = (parentId, depth)=>{
+    const children = sortFolders(childrenOf(parentId));
+    children.forEach(child => {
+      if (!child) return;
+      categories.push({
+        id: String(child.id),
+        name: child.name || "Category",
+        depth: Math.max(0, depth),
+        parentId: parentId == null ? null : String(parentId)
+      });
+      walk(child.id, depth + 1);
+    });
+  };
+  if (rootFolder){
+    categories.push({
+      id: String(rootFolder.id),
+      name: rootFolder.name || "All Tasks",
+      depth: 0,
+      parentId: null
+    });
+    walk(rootFolder.id, 1);
+  }else{
+    walk(null, 0);
+  }
+
+  const notLinkedId = "inventory_not_linked";
+  categories.push({
+    id: notLinkedId,
+    name: "Not linked",
+    depth: 0,
+    parentId: null,
+    isSpecial: true
+  });
+
+  const filteredInventory = filterInventoryItems(searchTerm, inventoryList);
+  const categoryItems = {};
+  const categoryStats = {};
+  categories.forEach(category => {
+    categoryItems[category.id] = [];
+    categoryStats[category.id] = { itemCount: 0, qtyNew: 0, qtyOld: 0, totalValue: 0 };
+  });
+
+  const resolveLinkedTasks = (item)=>{
+    if (typeof findTasksLinkedToInventoryItem === "function"){
+      return findTasksLinkedToInventoryItem(item);
+    }
+    const linkedId = item && item.linkedTaskId != null ? String(item.linkedTaskId) : "";
+    if (!linkedId) return [];
+    const task = tasksById.get(linkedId);
+    return task ? [task] : [];
+  };
+
+  filteredInventory.forEach(item => {
+    if (!item) return;
+    const linkedTasks = resolveLinkedTasks(item).filter(Boolean);
+    const categoryIds = new Set();
+    if (linkedTasks.length){
+      linkedTasks.forEach(task => {
+        const rawCat = task && task.cat != null ? String(task.cat) : "";
+        let categoryId = rawCat;
+        if (!categoryId){
+          if (tasksInterval.includes(task)) categoryId = "interval";
+          else if (tasksAsReq.includes(task)) categoryId = "asreq";
+        }
+        if (!categoryId || !Object.prototype.hasOwnProperty.call(categoryItems, categoryId)){
+          categoryId = Object.prototype.hasOwnProperty.call(categoryItems, rootFolderId)
+            ? rootFolderId
+            : notLinkedId;
+        }
+        categoryIds.add(categoryId);
+      });
+    }
+    if (!categoryIds.size){
+      categoryIds.add(notLinkedId);
+    }
+    categoryIds.forEach(categoryId => {
+      if (!Object.prototype.hasOwnProperty.call(categoryItems, categoryId)){
+        categoryItems[categoryId] = [];
+        categoryStats[categoryId] = { itemCount: 0, qtyNew: 0, qtyOld: 0, totalValue: 0 };
+      }
+      categoryItems[categoryId].push(item);
+    });
+  });
+
+  Object.keys(categoryItems).forEach(categoryId => {
+    const stats = categoryStats[categoryId];
+    categoryItems[categoryId].forEach(item => {
+      const qtyNew = Number(item.qtyNew);
+      const qtyOld = Number(item.qtyOld);
+      const qtyNewSafe = Number.isFinite(qtyNew) ? qtyNew : 0;
+      const qtyOldSafe = Number.isFinite(qtyOld) ? qtyOld : 0;
+      const price = Number(item.price);
+      const qtyTotal = qtyNewSafe + qtyOldSafe;
+      stats.itemCount += 1;
+      stats.qtyNew += qtyNewSafe;
+      stats.qtyOld += qtyOldSafe;
+      if (Number.isFinite(price)){
+        stats.totalValue += price * qtyTotal;
+      }
+    });
+  });
+
+  return {
+    categories,
+    categoryItems,
+    categoryStats,
+    rootFolderId,
+    notLinkedId,
+    searchTerm
+  };
+}
+
 function viewInventory(){
-  const filtered = filterInventoryItems(inventorySearchTerm);
-  const rows = inventoryRowsHTML(filtered);
+  const categoryData = buildInventoryCategoryData({ searchTerm: inventorySearchTerm });
+  const categories = categoryData.categories;
+  const categoryItems = categoryData.categoryItems;
+  const categoryStats = categoryData.categoryStats;
+  const emptyMessage = inventorySearchTerm
+    ? "No inventory items match your search."
+    : "No inventory items in this category.";
   const searchValue = String(inventorySearchTerm || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+  const formatCount = (value)=>{
+    const num = Number(value);
+    return Number.isFinite(num) ? num.toLocaleString() : "0";
+  };
+  const formatCurrency = (value)=>{
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "—";
+    return num.toLocaleString(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const escapeAttr = (value)=> String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const expandedState = (typeof window !== "undefined" && window.inventoryCategoryExpanded && typeof window.inventoryCategoryExpanded === "object")
+    ? window.inventoryCategoryExpanded
+    : {};
+  if (typeof window !== "undefined" && window.inventoryCategoryExpanded !== expandedState){
+    window.inventoryCategoryExpanded = expandedState;
+  }
+  categories.forEach(category => {
+    if (!Object.prototype.hasOwnProperty.call(expandedState, category.id)){
+      const hasItems = categoryItems[category.id] && categoryItems[category.id].length > 0;
+      expandedState[category.id] = hasItems && category.depth === 0;
+    }
+  });
+  const categoryOverviewRows = categories.map(category => {
+    if (!category) return "";
+    const stats = categoryStats[category.id] || { itemCount: 0, qtyNew: 0, qtyOld: 0, totalValue: 0 };
+    const depth = Number(category.depth) || 0;
+    const depthAttr = ` style="--depth:${Math.max(0, depth)}"`;
+    const nameSafe = String(category.name || "Category")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+    const isExpanded = Boolean(expandedState[category.id]);
+    const rows = inventoryRowsHTML(categoryItems[category.id] || [], { emptyMessage });
+    const safeCategoryId = escapeAttr(category.id);
+    const toggleButton = `
+      <button type="button" class="cost-category-overview-toggle" data-inventory-category-toggle="${safeCategoryId}" aria-expanded="${isExpanded ? "true" : "false"}">
+        <span class="cost-category-toggle-icon" aria-hidden="true"></span>
+        <span class="cost-category-name"${depthAttr}>${nameSafe}</span>
+      </button>
+    `;
+    return `
+      <tbody class="cost-category-overview-group${isExpanded ? " is-expanded" : ""}" data-inventory-category-group="${safeCategoryId}">
+        <tr data-inventory-category-summary="${safeCategoryId}">
+          <th scope="row">${toggleButton}</th>
+          <td data-summary-items>${formatCount(stats.itemCount)}</td>
+          <td data-summary-qty-new>${formatCount(stats.qtyNew)}</td>
+          <td data-summary-qty-old>${formatCount(stats.qtyOld)}</td>
+          <td data-summary-value>${formatCurrency(stats.totalValue)}</td>
+        </tr>
+        <tr class="cost-category-overview-jobs" data-inventory-category-items-row="${safeCategoryId}"${isExpanded ? "" : " hidden"}>
+          <td colspan="5">
+            <div class="cost-category-overview-jobs-inner">
+              <div class="inventory-category-table-wrap">
+                <table class="inventory-table inventory-category-table">
+                  <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
+                  <tbody data-inventory-rows="${safeCategoryId}">${rows}</tbody>
+                </table>
+              </div>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    `;
+  }).join("");
+  const categoryOverviewTable = categories.length
+    ? `
+        <div class="cost-category-overview inventory-category-overview" data-inventory-categories>
+          <h4 class="cost-category-subheading">Inventory by maintenance category</h4>
+          <table class="cost-table cost-category-overview-table inventory-category-overview-table">
+            <thead>
+              <tr><th scope="col">Category</th><th scope="col">Items</th><th scope="col">Qty (New)</th><th scope="col">Qty (Old)</th><th scope="col">Est. value</th></tr>
+            </thead>
+            ${categoryOverviewRows}
+          </table>
+        </div>
+      `
+    : `<p class="small muted inventory-category-overview-empty">No maintenance categories defined yet. Add categories in Maintenance Settings to group inventory.</p>`;
   return `
   <div class="container">
     <div class="block" style="grid-column:1 / -1">
@@ -3621,10 +3840,7 @@ function viewInventory(){
         </div>
       </div>
       <div class="small muted inventory-hint">Results update as you type.</div>
-      <table class="inventory-table">
-        <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
-        <tbody data-inventory-rows>${rows}</tbody>
-      </table>
+      ${categoryOverviewTable}
     </div>
   </div>
 
@@ -3658,6 +3874,32 @@ function viewInventory(){
           <div class="modal-actions inventory-modal-actions">
             <button type="button" class="secondary" data-back>Back</button>
             <button type="submit" class="primary">Add item</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="inventoryEditModal" hidden>
+    <div class="modal-card inventory-modal-card">
+      <button type="button" class="modal-close" data-close>&times;</button>
+
+      <section class="inventory-modal-step">
+        <h4>Edit inventory item</h4>
+        <form id="inventoryEditForm" class="modal-form">
+          <div class="modal-grid">
+            <label>Item name<input name="inventoryEditName" required placeholder="Item"></label>
+            <label>New quantity<input type="number" min="0" step="1" name="inventoryEditQtyNew" value="1"></label>
+            <label>Old quantity<input type="number" min="0" step="1" name="inventoryEditQtyOld" value="0"></label>
+            <label>Unit<input name="inventoryEditUnit" placeholder="pcs" value="pcs"></label>
+            <label>Part #<input name="inventoryEditPN" placeholder="Part number"></label>
+            <label>Store link<input type="url" name="inventoryEditLink" placeholder="https://..."></label>
+            <label>Price ($)<input type="number" min="0" step="0.01" name="inventoryEditPrice" placeholder="optional"></label>
+            <label>Notes<input name="inventoryEditNote" placeholder="Optional note"></label>
+          </div>
+          <div class="modal-actions inventory-modal-actions">
+            <button type="button" class="secondary" data-edit-cancel>Cancel</button>
+            <button type="submit" class="primary">Save changes</button>
           </div>
         </form>
       </section>
