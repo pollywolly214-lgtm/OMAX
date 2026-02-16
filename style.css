@@ -3145,6 +3145,10 @@ body.modal-open .auth-bar {
   word-break: break-word;
   max-height: calc(1.45em * 6);
 }
+.job-main-block--naming-open {
+  position: relative;
+  z-index: 20000;
+}
 .job-naming-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -3153,7 +3157,10 @@ body.modal-open .auth-bar {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  z-index: 1200;
+  z-index: 20001;
+}
+body.job-naming-open {
+  overflow: hidden;
 }
 .job-naming-modal-backdrop[hidden] {
   display: none !important;

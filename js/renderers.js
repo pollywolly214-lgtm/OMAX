@@ -12786,6 +12786,7 @@ function drawCostChart(canvas, model, show){
 function renderJobs(){
   const content = document.getElementById("content");
   if (!content) return;
+  document.body.classList.remove("job-naming-open");
   try {
     ensureJobCategories?.();
   } catch (err){
@@ -13171,16 +13172,22 @@ function renderJobs(){
     });
   };
 
+  const namingHostBlock = namingBackdrop ? namingBackdrop.closest(".job-main-block") : null;
+
   const closeNamingModal = ()=>{
     if (!namingBackdrop) return;
     namingBackdrop.classList.remove("open");
     namingBackdrop.hidden = true;
+    namingHostBlock?.classList.remove("job-main-block--naming-open");
+    document.body.classList.remove("job-naming-open");
   };
 
   const openNamingModal = ()=>{
     if (!namingBackdrop) return;
     namingBackdrop.hidden = false;
     namingBackdrop.classList.add("open");
+    namingHostBlock?.classList.add("job-main-block--naming-open");
+    document.body.classList.add("job-naming-open");
   };
 
   content.querySelector("[data-job-naming-open]")?.addEventListener("click", (event)=>{
