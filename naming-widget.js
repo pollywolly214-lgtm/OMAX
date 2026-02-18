@@ -676,43 +676,105 @@ function renderCadToSvgDataUrl(text) {
 }
 
 function renderCoordinateCloudToSvgDataUrl(text) {
-  const matches = String(text || '').match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/g) || [];
-  if (matches.length < 4) return '';
+  const lines = String(text || '').split(/\r?\n/).slice(0, 6000);
+  if (!lines.length) return '';
 
-  const nums = matches.map(Number.parseFloat).filter(Number.isFinite);
-  if (nums.length < 4) return '';
+  const path = [];
+  const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+  let current = { x: 0, y: 0 };
+  let hasCurrent = false;
+  let relativeMode = inferRelativeMode(lines);
 
-  const points = [];
-  for (let i = 0; i < nums.length - 1; i += 2) {
-    points.push({ x: nums[i], y: nums[i + 1] });
-    if (points.length >= 3000) break;
-  }
+  lines.forEach(line => {
+    const upper = line.toUpperCase();
+    if (!upper.trim()) return;
 
-  if (points.length < 2) return '';
+    if (/(?:\bG90\b|\bABS(?:OLUTE)?\b)/.test(upper)) relativeMode = false;
+    if (/(?:\bG91\b|\bREL(?:ATIVE)?\b|\bINCR(?:EMENTAL)?\b|\bDELTA\b|\bOFFSET\b)/.test(upper)) relativeMode = true;
 
-  const segments = [];
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    if (![p1.x, p1.y, p2.x, p2.y].every(Number.isFinite)) continue;
-    const span = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-    if (span === 0 || span > 1e6) continue;
-    segments.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y });
-  }
+    const penUp = /(?:\bRAPID\b|\bPEN\s*UP\b|\bPU\b|\bG0\b|\bG00\b|\bJUMP\b|\bTRAVEL\b)/.test(upper);
+    const forceDraw = /(?:\bDRAW\b|\bPEN\s*DOWN\b|\bPD\b|\bCUT\b|\bG1\b|\bG01\b)/.test(upper);
 
-  if (!segments.length) return '';
-  return buildSegmentsSvgDataUrl(segments);
+    const points = extractLinePoints(line);
+    points.forEach(point => {
+      const next = relativeMode
+        ? { x: current.x + point.x, y: current.y + point.y }
+        : { x: point.x, y: point.y };
+
+      if (![next.x, next.y].every(Number.isFinite)) return;
+
+      if (!hasCurrent) {
+        path.push(`M ${next.x} ${-next.y}`);
+      } else if (penUp && !forceDraw) {
+        path.push(`M ${next.x} ${-next.y}`);
+      } else {
+        const span = Math.hypot(next.x - current.x, next.y - current.y);
+        if (span > 0 && span < 1e6) path.push(`L ${next.x} ${-next.y}`);
+      }
+
+      bounds.minX = Math.min(bounds.minX, next.x);
+      bounds.maxX = Math.max(bounds.maxX, next.x);
+      bounds.minY = Math.min(bounds.minY, next.y);
+      bounds.maxY = Math.max(bounds.maxY, next.y);
+      current = next;
+      hasCurrent = true;
+    });
+  });
+
+  if (path.length < 2) return '';
+  return buildPathSvgDataUrl(path, bounds);
 }
 
-function buildSegmentsSvgDataUrl(segments) {
-  const bounds = segments.reduce((acc, item) => {
-    acc.minX = Math.min(acc.minX, item.x1, item.x2);
-    acc.maxX = Math.max(acc.maxX, item.x1, item.x2);
-    acc.minY = Math.min(acc.minY, item.y1, item.y2);
-    acc.maxY = Math.max(acc.maxY, item.y1, item.y2);
-    return acc;
-  }, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+function inferRelativeMode(lines) {
+  const sample = lines.slice(0, 150).join('\n').toUpperCase();
+  if (/(?:\bG90\b|\bABS(?:OLUTE)?\b)/.test(sample)) return false;
+  if (/(?:\bG91\b|\bREL(?:ATIVE)?\b|\bINCR(?:EMENTAL)?\b|\bDELTA\b|\bOFFSET\b)/.test(sample)) return true;
 
+  const points = lines
+    .slice(0, 250)
+    .flatMap(extractLinePoints)
+    .slice(0, 300);
+
+  if (points.length < 8) return false;
+
+  const maxAbs = points.reduce((acc, p) => Math.max(acc, Math.abs(p.x), Math.abs(p.y)), 0);
+  const avgDelta = points.slice(1).reduce((acc, p, i) => {
+    const prev = points[i];
+    return acc + Math.hypot(p.x - prev.x, p.y - prev.y);
+  }, 0) / Math.max(1, points.length - 1);
+
+  return maxAbs > 0 && avgDelta > 0 && avgDelta < (maxAbs * 0.45);
+}
+
+function extractLinePoints(line) {
+  const text = String(line || '');
+  const labelled = [];
+  const xParts = [...text.matchAll(/\bX\s*[:=]?\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/gi)];
+  const yParts = [...text.matchAll(/\bY\s*[:=]?\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/gi)];
+  if (xParts.length && yParts.length) {
+    const pairCount = Math.min(xParts.length, yParts.length, 40);
+    for (let i = 0; i < pairCount; i += 1) {
+      const x = Number.parseFloat(xParts[i][1]);
+      const y = Number.parseFloat(yParts[i][1]);
+      if ([x, y].every(Number.isFinite)) labelled.push({ x, y });
+    }
+  }
+  if (labelled.length) return labelled;
+
+  const numbers = [...text.matchAll(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/g)]
+    .map(match => Number.parseFloat(match[0]))
+    .filter(Number.isFinite);
+
+  if (numbers.length < 2) return [];
+  const out = [];
+  const maxPairs = Math.min(40, Math.floor(numbers.length / 2));
+  for (let i = 0; i < maxPairs * 2; i += 2) {
+    out.push({ x: numbers[i], y: numbers[i + 1] });
+  }
+  return out;
+}
+
+function buildPathSvgDataUrl(path, bounds) {
   const width = Math.max(1, bounds.maxX - bounds.minX);
   const height = Math.max(1, bounds.maxY - bounds.minY);
   const pad = Math.max(width, height) * 0.08;
@@ -721,12 +783,26 @@ function buildSegmentsSvgDataUrl(segments) {
   const vbW = width + (pad * 2);
   const vbH = height + (pad * 2);
 
-  const paths = segments
-    .map(item => `<line x1="${item.x1}" y1="${-item.y1}" x2="${item.x2}" y2="${-item.y2}"/>`)
-    .join('');
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${-(vbY + vbH)} ${vbW} ${vbH}"><rect x="${vbX}" y="${-(vbY + vbH)}" width="${vbW}" height="${vbH}" fill="#ffffff"/><g stroke="#32407a" stroke-width="${Math.max(vbW, vbH) / 450}" fill="none" stroke-linecap="round">${paths}</g></svg>`;
+  const d = path.join(' ');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${-(vbY + vbH)} ${vbW} ${vbH}"><rect x="${vbX}" y="${-(vbY + vbH)}" width="${vbW}" height="${vbH}" fill="#ffffff"/><path d="${d}" stroke="#32407a" stroke-width="${Math.max(vbW, vbH) / 450}" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function buildSegmentsSvgDataUrl(segments) {
+  const path = [];
+  const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+
+  segments.forEach(segment => {
+    if (![segment.x1, segment.y1, segment.x2, segment.y2].every(Number.isFinite)) return;
+    path.push(`M ${segment.x1} ${-segment.y1} L ${segment.x2} ${-segment.y2}`);
+    bounds.minX = Math.min(bounds.minX, segment.x1, segment.x2);
+    bounds.maxX = Math.max(bounds.maxX, segment.x1, segment.x2);
+    bounds.minY = Math.min(bounds.minY, segment.y1, segment.y2);
+    bounds.maxY = Math.max(bounds.maxY, segment.y1, segment.y2);
+  });
+
+  if (!path.length) return '';
+  return buildPathSvgDataUrl(path, bounds);
 }
 
 function parseCadSegments(text) {
