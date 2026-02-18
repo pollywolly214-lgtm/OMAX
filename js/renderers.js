@@ -13619,6 +13619,13 @@ function renderJobs(){
             focusTarget.focus();
           }
         }
+        if (!Array.isArray(window.pendingNewJobFiles) || window.pendingNewJobFiles.length === 0){
+          const fileInput = document.getElementById("jobFiles");
+          if (fileInput){
+            toast("Select a file first. Naming must begin with NS.");
+            fileInput.click();
+          }
+        }
       }
     });
   });

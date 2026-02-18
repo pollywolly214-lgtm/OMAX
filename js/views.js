@@ -3460,10 +3460,11 @@ function viewJobs(){
               Choose a category to keep jobs organized. We'll save it under All Jobs if you skip this step.
             </p>
           </div>
-          <button type="button" id="jobFilesBtn">Attach Files</button>
+          <button type="button" id="jobFilesBtn">Step 1: Select file</button>
           <input type="file" id="jobFiles" multiple style="display:none">
           <button type="submit">Add Job</button>
         </form>
+        <div class="job-add-step-hint" role="status" aria-live="polite">Select a file first using the naming rules (must start with <strong>NS</strong>). Then fill out job details.</div>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
       </section>
 
