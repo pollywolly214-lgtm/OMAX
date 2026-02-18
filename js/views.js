@@ -2705,6 +2705,25 @@ function viewJobs(){
       tooltip: normalized
     };
   };
+  const flowFilters = (typeof window !== "undefined" && window.jobFlowFilters && typeof window.jobFlowFilters === "object")
+    ? window.jobFlowFilters
+    : { project: "all", material: "all", date: "all", length: "all" };
+  const PROJECT_PREVIEWABLE_EXTENSIONS = new Set([".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]);
+  const fileExtension = (name = "")=>{
+    const idx = String(name).lastIndexOf(".");
+    return idx >= 0 ? String(name).slice(idx).toLowerCase() : "";
+  };
+  const makeFilePreview = (file)=>{
+    const fileName = file?.name || "Attachment";
+    const type = (file?.type || "").toLowerCase();
+    const dataUrl = file?.dataUrl || file?.url || "";
+    const ext = fileExtension(fileName);
+    const isImage = type.startsWith("image/") || PROJECT_PREVIEWABLE_EXTENSIONS.has(ext);
+    if (isImage && dataUrl){
+      return `<img src="${esc(dataUrl)}" alt="Preview of ${esc(fileName)}" loading="lazy" />`;
+    }
+    return `<span class="project-flow-preview-fallback small muted">Preview unavailable</span>`;
+  };
 
   const completedRows = completedFiltered.map(job => {
     const eff = computeJobEfficiency(job);
@@ -2718,6 +2737,7 @@ function viewJobs(){
     const normalizedCatId = normalizeCategory(job?.cat);
     const categoryFolder = folderMap.get(normalizedCatId);
     const categoryName = categoryFolder ? categoryFolder.name || "All Jobs" : "All Jobs";
+    const projectNumber = String(job?.projectNumber || "").trim() || "Unassigned";
     const historyColorStyle = categoryColorStyle(job?.cat);
     const colorInfo = categoryColorData(normalizedCatId);
     const colorStyleAttr = colorInfo.style;
@@ -2809,6 +2829,10 @@ function viewJobs(){
               <div class="job-main-category small muted" data-category-color="1"${historyColorStyle}>
                 <span class="job-main-category-label">Category</span>
                 <span class="job-main-category-name">${esc(categoryName)}</span>
+              </div>
+              <div class="job-main-project small muted">
+                <span class="job-main-category-label">Project #</span>
+                <span class="job-main-category-name">${esc(projectNumber)}</span>
               </div>
               <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
               <div class="job-main-summary small muted">Actual ${actualDisplay} vs ${estimateDisplay}</div>
@@ -3086,6 +3110,7 @@ function viewJobs(){
     const normalizedCatId = normalizeCategory(j.cat);
     const categoryFolder = folderMap.get(normalizedCatId);
     const categoryName = categoryFolder ? categoryFolder.name || "All Jobs" : "All Jobs";
+    const projectNumber = String(j?.projectNumber || "").trim() || "Unassigned";
     const colorInfo = categoryColorData(normalizedCatId);
     const colorStyleAttr = colorInfo.style;
 
@@ -3209,6 +3234,10 @@ function viewJobs(){
                 <span class="job-main-category-label">Category</span>
                 <span class="job-main-category-name">${esc(categoryName)}</span>
               </div>
+              <div class="job-main-project small muted">
+                <span class="job-main-category-label">Project #</span>
+                <span class="job-main-category-name">${esc(projectNumber)}</span>
+              </div>
               <div class="job-main-category-picker small" data-category-color="1"${colorStyleAttr}>
                 <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(j.name || "Job")}">
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
@@ -3314,6 +3343,7 @@ function viewJobs(){
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
                 <label>Priority<select data-j="priority" data-id="${j.id}">${priorityOptionsMarkup(priorityValue)}</select></label>
+                <label>Project #<input type="text" inputmode="numeric" pattern="[0-9]*" data-j="projectNumber" data-id="${j.id}" value="${esc(String(j.projectNumber || ""))}" placeholder="Required" maxlength="12"></label>
                 <label>Category<select data-j="cat" data-id="${j.id}" data-job-category-select>
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
                 </select></label>
@@ -3389,6 +3419,56 @@ function viewJobs(){
     }
   }).join("");
 
+  const allJobsForFlow = [...jobsForCategory, ...completedForCategory];
+  const materialFilterOptions = Array.from(new Set(allJobsForFlow.map(job => String(job?.material || "").trim()).filter(Boolean))).sort((a, b)=>a.localeCompare(b));
+  const dateFilterOptions = Array.from(new Set(allJobsForFlow.map(job => String(job?.dueISO || job?.startISO || "").trim()).filter(Boolean))).sort((a, b)=>a.localeCompare(b));
+  const filteredFlowJobs = allJobsForFlow.filter(job => {
+    const proj = String(job?.projectNumber || "").trim() || "unassigned";
+    if (flowFilters.project !== "all" && proj !== flowFilters.project) return false;
+    if (flowFilters.material !== "all" && String(job?.material || "").trim() !== flowFilters.material) return false;
+    const dateVal = String(job?.dueISO || job?.startISO || "").trim();
+    if (flowFilters.date !== "all" && dateVal !== flowFilters.date) return false;
+    const est = Number(job?.estimateHours || 0);
+    if (flowFilters.length === "under_4" && !(est < 4)) return false;
+    if (flowFilters.length === "4_to_8" && !(est >= 4 && est <= 8)) return false;
+    if (flowFilters.length === "over_8" && !(est > 8)) return false;
+    return true;
+  });
+  const projectMap = new Map();
+  filteredFlowJobs.forEach(job => {
+    const projectNumber = String(job?.projectNumber || "").trim() || "Unassigned";
+    const catId = normalizeCategory(job?.cat);
+    const catName = folderMap.get(catId)?.name || "All Jobs";
+    const key = `${projectNumber}||${catId}`;
+    if (!projectMap.has(key)){
+      projectMap.set(key, { projectNumber, catName, catId, jobs: [] });
+    }
+    projectMap.get(key).jobs.push(job);
+  });
+  const projectFlowMarkup = projectMap.size
+    ? Array.from(projectMap.values()).sort((a, b)=> String(a.projectNumber).localeCompare(String(b.projectNumber))).map(group => {
+        const color = categoryColorData(group.catId).style;
+        const jobCards = group.jobs.map(job => {
+          const files = Array.isArray(job?.files) ? job.files : [];
+          return `<article class="project-flow-card">
+            <header>
+              <h5>${esc(job?.name || "Job")}</h5>
+              <p class="small muted">${esc(group.catName)} · ${esc(job?.startISO || "No start")} → ${esc(job?.dueISO || "No due")}</p>
+              <p class="small muted">Estimate ${esc(formatHours(job?.estimateHours || 0))} · ${esc(job?.material || "No material")}</p>
+            </header>
+            ${files.length ? `<div class="project-flow-preview-grid" data-project-preview-grid="${esc(String(job?.id || ""))}">${files.map(file => `<figure class="project-flow-preview-item">${makeFilePreview(file)}<figcaption>${esc(file?.name || "Attachment")}</figcaption></figure>`).join("")}</div><button type="button" class="project-flow-preview-toggle" data-project-preview-toggle="${esc(String(job?.id || ""))}" aria-expanded="true">Hide previews</button>` : '<p class="small muted">No files attached.</p>'}
+          </article>`;
+        }).join("");
+        return `<details class="project-flow-group" open>
+          <summary>
+            <span class="job-title-chip" ${color}><span class="job-title-chip-dot" aria-hidden="true"></span><span class="job-title-chip-text">Project #${esc(group.projectNumber)}</span></span>
+            <span class="small muted">${esc(group.catName)} · ${group.jobs.length} job${group.jobs.length === 1 ? "" : "s"}</span>
+          </summary>
+          <div class="project-flow-lane">${jobCards}</div>
+        </details>`;
+      }).join("")
+    : '<p class="small muted">No projects match these filters.</p>';
+
   return `
   <div class="container job-page-container">
     <div class="dashboard-toolbar">
@@ -3424,6 +3504,7 @@ function viewJobs(){
               aria-controls="jobAddPanel"
             >${addFormOpen ? "Hide add job form" : "+ New cutting job"}</button>
             <button type="button" class="job-history-button" data-job-naming-open>Open Naming Widget</button>
+            <button type="button" class="job-history-button" data-job-flow-open>Project Flow Chart</button>
             <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
           </div>
         </div>
@@ -3452,6 +3533,7 @@ function viewJobs(){
           <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
           <input type="date" id="jobStart" required>
           <input type="date" id="jobDue" required>
+          <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" pattern="[0-9]*" maxlength="12" required>
           <div class="job-category-field">
             <select id="jobCategory" aria-label="Category" required>
               ${categoryOptionsMarkup(addJobDefaultCategory, { includeCreateOption: true })}
@@ -3516,6 +3598,43 @@ function viewJobs(){
           <div class="job-naming-modal-body">
             <iframe src="naming-widget.html" title="File naming widget" loading="lazy"></iframe>
           </div>
+        </div>
+      </div>
+      <div class="job-flow-modal-backdrop${window.jobFlowModalOpen ? " open" : ""}" id="jobFlowModal" ${window.jobFlowModalOpen ? "" : "hidden"}>
+        <div class="job-flow-modal" role="dialog" aria-modal="true" aria-labelledby="jobFlowModalTitle">
+          <div class="job-note-modal-header">
+            <h4 id="jobFlowModalTitle">Project Flow Chart</h4>
+            <button type="button" class="job-note-modal-close" data-job-flow-close aria-label="Close project flow chart">×</button>
+          </div>
+          <div class="job-flow-filters">
+            <label>Project
+              <select data-job-flow-filter="project">
+                <option value="all">All projects</option>
+                ${Array.from(new Set(allJobsForFlow.map(job => String(job?.projectNumber || "").trim() || "unassigned"))).sort((a,b)=>a.localeCompare(b)).map(project => `<option value="${esc(project)}" ${flowFilters.project === project ? "selected" : ""}>${esc(project === "unassigned" ? "Unassigned" : `Project #${project}`)}</option>`).join("")}
+              </select>
+            </label>
+            <label>Material
+              <select data-job-flow-filter="material">
+                <option value="all">All materials</option>
+                ${materialFilterOptions.map(material => `<option value="${esc(material)}" ${flowFilters.material === material ? "selected" : ""}>${esc(material)}</option>`).join("")}
+              </select>
+            </label>
+            <label>Date
+              <select data-job-flow-filter="date">
+                <option value="all">All dates</option>
+                ${dateFilterOptions.map(date => `<option value="${esc(date)}" ${flowFilters.date === date ? "selected" : ""}>${esc(date)}</option>`).join("")}
+              </select>
+            </label>
+            <label>Length
+              <select data-job-flow-filter="length">
+                <option value="all" ${flowFilters.length === "all" ? "selected" : ""}>All cuts</option>
+                <option value="under_4" ${flowFilters.length === "under_4" ? "selected" : ""}>Under 4 hrs</option>
+                <option value="4_to_8" ${flowFilters.length === "4_to_8" ? "selected" : ""}>4 to 8 hrs</option>
+                <option value="over_8" ${flowFilters.length === "over_8" ? "selected" : ""}>Over 8 hrs</option>
+              </select>
+            </label>
+          </div>
+          <div class="job-flow-chart-wrap">${projectFlowMarkup}</div>
         </div>
       </div>
       <div class="job-note-modal-backdrop" id="jobNoteModal" hidden>
