@@ -619,13 +619,13 @@ async function preparePreviewData(file) {
     return;
   }
 
-  const content = await file.text();
+  const content = await readFileAsText(file);
   if (looksLikeSvg(content)) {
     file.preview = { mode: 'svg', content: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}` };
     return;
   }
 
-  const previewSvg = renderCadToSvgDataUrl(content);
+  const previewSvg = renderCadToSvgDataUrl(content) || renderCoordinateCloudToSvgDataUrl(content);
   file.preview = previewSvg
     ? { mode: 'svg', content: previewSvg }
     : { mode: 'message', content: '2D preview unavailable for this file.' };
@@ -634,6 +634,16 @@ async function preparePreviewData(file) {
 function looksLikeSvg(text) {
   const normalized = String(text || '').trimStart().toLowerCase();
   return normalized.startsWith('<svg') || (normalized.startsWith('<?xml') && normalized.includes('<svg'));
+}
+
+async function readFileAsText(file) {
+  const buffer = await file.arrayBuffer();
+  const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
+  const cleanedUtf8 = utf8.replaceAll('\u0000', '');
+  if (cleanedUtf8.trim()) return cleanedUtf8;
+
+  const latin1 = new TextDecoder('iso-8859-1', { fatal: false }).decode(buffer);
+  return latin1.replaceAll('\u0000', '');
 }
 
 function renderCadToSvgDataUrl(text) {
@@ -662,6 +672,60 @@ function renderCadToSvgDataUrl(text) {
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${-(vbY + vbH)} ${vbW} ${vbH}"><rect x="${vbX}" y="${-(vbY + vbH)}" width="${vbW}" height="${vbH}" fill="#ffffff"/><g stroke="#32407a" stroke-width="${Math.max(vbW, vbH) / 450}" fill="none" stroke-linecap="round">${paths}</g></svg>`;
 
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function renderCoordinateCloudToSvgDataUrl(text) {
+  const matches = String(text || '').match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/g) || [];
+  if (matches.length < 4) return '';
+
+  const nums = matches.map(Number.parseFloat).filter(Number.isFinite);
+  if (nums.length < 4) return '';
+
+  const points = [];
+  for (let i = 0; i < nums.length - 1; i += 2) {
+    points.push({ x: nums[i], y: nums[i + 1] });
+    if (points.length >= 3000) break;
+  }
+
+  if (points.length < 2) return '';
+
+  const segments = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    if (![p1.x, p1.y, p2.x, p2.y].every(Number.isFinite)) continue;
+    const span = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    if (span === 0 || span > 1e6) continue;
+    segments.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y });
+  }
+
+  if (!segments.length) return '';
+  return buildSegmentsSvgDataUrl(segments);
+}
+
+function buildSegmentsSvgDataUrl(segments) {
+  const bounds = segments.reduce((acc, item) => {
+    acc.minX = Math.min(acc.minX, item.x1, item.x2);
+    acc.maxX = Math.max(acc.maxX, item.x1, item.x2);
+    acc.minY = Math.min(acc.minY, item.y1, item.y2);
+    acc.maxY = Math.max(acc.maxY, item.y1, item.y2);
+    return acc;
+  }, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+
+  const width = Math.max(1, bounds.maxX - bounds.minX);
+  const height = Math.max(1, bounds.maxY - bounds.minY);
+  const pad = Math.max(width, height) * 0.08;
+  const vbX = bounds.minX - pad;
+  const vbY = bounds.minY - pad;
+  const vbW = width + (pad * 2);
+  const vbH = height + (pad * 2);
+
+  const paths = segments
+    .map(item => `<line x1="${item.x1}" y1="${-item.y1}" x2="${item.x2}" y2="${-item.y2}"/>`)
+    .join('');
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${-(vbY + vbH)} ${vbW} ${vbH}"><rect x="${vbX}" y="${-(vbY + vbH)}" width="${vbW}" height="${vbH}" fill="#ffffff"/><g stroke="#32407a" stroke-width="${Math.max(vbW, vbH) / 450}" fill="none" stroke-linecap="round">${paths}</g></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
