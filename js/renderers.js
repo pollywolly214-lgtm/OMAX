@@ -13055,6 +13055,62 @@ function renderJobs(){
   const flowHidePreviews = content.querySelector("#jobFlowHidePreviews");
 
   const normalizeProjectNumber = (value)=> String(value || "").replace(/[^0-9]/g, "").slice(0, 8);
+  const normalizeHexColor = (value)=> {
+    const text = String(value || "").trim();
+    const match = text.match(/^#?([0-9a-f]{6})$/i);
+    return match ? `#${match[1].toUpperCase()}` : "";
+  };
+  const hexToRgb = (hex)=>{
+    const normalized = normalizeHexColor(hex);
+    if (!normalized) return null;
+    const value = normalized.slice(1);
+    const int = Number.parseInt(value, 16);
+    if (!Number.isFinite(int)) return null;
+    return {
+      r: (int >> 16) & 255,
+      g: (int >> 8) & 255,
+      b: int & 255
+    };
+  };
+  const rgbaFromHex = (hex, alpha)=>{
+    const rgb = hexToRgb(hex) || { r: 19, g: 35, b: 63 };
+    const a = Math.max(0, Math.min(1, Number(alpha) || 0));
+    return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${a})`;
+  };
+  const hslToHex = (h, s, l)=>{
+    const sat = Math.max(0, Math.min(100, s)) / 100;
+    const lig = Math.max(0, Math.min(100, l)) / 100;
+    const chroma = (1 - Math.abs((2 * lig) - 1)) * sat;
+    const huePrime = ((h % 360) + 360) % 360 / 60;
+    const x = chroma * (1 - Math.abs((huePrime % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if (huePrime >= 0 && huePrime < 1){ [r, g, b] = [chroma, x, 0]; }
+    else if (huePrime >= 1 && huePrime < 2){ [r, g, b] = [x, chroma, 0]; }
+    else if (huePrime >= 2 && huePrime < 3){ [r, g, b] = [0, chroma, x]; }
+    else if (huePrime >= 3 && huePrime < 4){ [r, g, b] = [0, x, chroma]; }
+    else if (huePrime >= 4 && huePrime < 5){ [r, g, b] = [x, 0, chroma]; }
+    else { [r, g, b] = [chroma, 0, x]; }
+    const m = lig - (chroma / 2);
+    const toHex = (value)=> Math.round(Math.max(0, Math.min(255, value))).toString(16).padStart(2, "0");
+    return `#${toHex((r + m) * 255)}${toHex((g + m) * 255)}${toHex((b + m) * 255)}`.toUpperCase();
+  };
+  const categoryAccent = (catId, folderMap, rootId)=>{
+    const normalized = catId != null ? String(catId) : rootId;
+    const folder = folderMap.get(normalized);
+    const custom = normalizeHexColor(folder?.color);
+    if (custom) return custom;
+    if (!normalized || normalized === rootId) return "#13233F";
+    let hash = 0;
+    for (let i = 0; i < normalized.length; i += 1){
+      hash = ((hash << 5) - hash) + normalized.charCodeAt(i);
+      hash |= 0;
+    }
+    return hslToHex(Math.abs(hash) % 360, 62, 55);
+  };
+  const categoryStyleAttr = (catId, folderMap, rootId)=>{
+    const accentHex = categoryAccent(catId, folderMap, rootId);
+    return ` style="--job-category-accent:${accentHex};--job-category-surface:${rgbaFromHex(accentHex, 0.1)};--job-category-border:${rgbaFromHex(accentHex, 0.45)};"`;
+  };
   const previewCardMarkup = (file)=>{
     const preview = file?.preview;
     if (preview?.mode === "image" && preview.content){
@@ -13067,11 +13123,29 @@ function renderJobs(){
   const renderFlowChart = ()=>{
     if (!flowChart) return;
     const query = String(flowFilterInput?.value || "").trim().toLowerCase();
-    const grouping = String(flowGroupingSelect?.value || "project");
+    const grouping = String(flowGroupingSelect?.value || "categoryTree");
     const hidePreviews = Boolean(flowHidePreviews?.checked);
     const jobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : [];
     const completed = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
     const list = jobs.concat(completed).filter(Boolean);
+    const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
+    const folders = Array.isArray(window.jobFolders) && window.jobFolders.length
+      ? window.jobFolders.slice()
+      : [{ id: rootId, name: "All Jobs", parent: null, order: 1 }];
+    if (!folders.some(folder => String(folder?.id) === String(rootId))){
+      folders.push({ id: rootId, name: "All Jobs", parent: null, order: 1 });
+    }
+    const folderMap = new Map(folders.map(folder => [String(folder.id), folder]));
+    const normalizeCategory = (cat)=> {
+      const key = cat != null ? String(cat) : rootId;
+      return folderMap.has(key) ? key : rootId;
+    };
+    const childrenOf = (parentId)=> {
+      const key = parentId == null ? null : String(parentId);
+      return folders
+        .filter(folder => (folder.parent == null ? null : String(folder.parent)) === key)
+        .sort((a, b)=> String(a?.name || "").localeCompare(String(b?.name || "")));
+    };
     const filtered = list.filter(job => {
       const project = normalizeProjectNumber(job?.projectNumber);
       const material = String(job?.material || "");
@@ -13082,34 +13156,73 @@ function renderJobs(){
       return !query || token.includes(query);
     });
 
-    const groups = new Map();
-    filtered.forEach(job => {
-      const key = grouping === "job"
-        ? String(job?.name || "Untitled job")
-        : (normalizeProjectNumber(job?.projectNumber) || "Unassigned");
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(job);
-    });
+    const renderJobCard = (job)=>{
+      const files = Array.isArray(job?.files) ? job.files : [];
+      const fileList = files.length
+        ? files.map(file => `<li><span class="job-flow-file-name">${escapeHtml(file?.name || "Attachment")}</span>${hidePreviews ? "" : previewCardMarkup(file)}</li>`).join("")
+        : '<li class="small muted">No attached files</li>';
+      const style = categoryStyleAttr(normalizeCategory(job?.cat), folderMap, rootId);
+      return `<article class="job-flow-job-card"${style}>
+        <header>
+          <div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")}</div>
+          <div class="small muted">Project #${escapeHtml(normalizeProjectNumber(job?.projectNumber) || "Unassigned")}</div>
+          <div class="small muted">Material: ${escapeHtml(job?.material || "—")}</div>
+          <div class="small muted">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div>
+          <div class="small muted">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div>
+        </header>
+        <ul class="job-flow-file-list">${fileList}</ul>
+      </article>`;
+    };
 
-    const html = Array.from(groups.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([key, groupJobs])=>{
-      const cards = groupJobs.map(job => {
-        const files = Array.isArray(job?.files) ? job.files : [];
-        const fileList = files.length
-          ? files.map(file => `<li><span class="job-flow-file-name">${escapeHtml(file?.name || "Attachment")}</span>${hidePreviews ? "" : previewCardMarkup(file)}</li>`).join("")
-          : '<li class="small muted">No attached files</li>';
-        return `<article class="job-flow-job-card">
-          <header>
-            <div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")}</div>
-            <div class="small muted">Project #${escapeHtml(normalizeProjectNumber(job?.projectNumber) || "Unassigned")}</div>
-            <div class="small muted">Material: ${escapeHtml(job?.material || "—")}</div>
-            <div class="small muted">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div>
-            <div class="small muted">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div>
-          </header>
-          <ul class="job-flow-file-list">${fileList}</ul>
-        </article>`;
+    let html = "";
+    if (grouping === "categoryTree"){
+      const byCategory = new Map();
+      filtered.forEach(job => {
+        const cat = normalizeCategory(job?.cat);
+        if (!byCategory.has(cat)) byCategory.set(cat, []);
+        byCategory.get(cat).push(job);
+      });
+      const hasDescendantJobs = (categoryId)=>{
+        const key = String(categoryId);
+        if ((byCategory.get(key) || []).length > 0) return true;
+        return childrenOf(key).some(child => hasDescendantJobs(String(child.id)));
+      };
+      const renderCategoryNode = (categoryId, depth = 0)=>{
+        const key = String(categoryId);
+        if (!hasDescendantJobs(key)) return "";
+        const folder = folderMap.get(key) || { id: key, name: "Category" };
+        const projects = new Map();
+        (byCategory.get(key) || []).forEach(job => {
+          const project = normalizeProjectNumber(job?.projectNumber) || "Unassigned";
+          if (!projects.has(project)) projects.set(project, []);
+          projects.get(project).push(job);
+        });
+        const projectMarkup = Array.from(projects.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([project, projectJobs])=>{
+          const jobsMarkup = projectJobs.map(renderJobCard).join("");
+          return `<section class="job-flow-project-group"><h6>Project ${escapeHtml(project)}</h6><div class="job-flow-group-grid">${jobsMarkup}</div></section>`;
+        }).join("");
+        const childMarkup = childrenOf(key).map(child => renderCategoryNode(String(child.id), depth + 1)).join("");
+        const style = categoryStyleAttr(key, folderMap, rootId);
+        return `<div class="job-flow-tree-node" data-depth="${depth}">
+          <div class="job-flow-tree-title"${style}>${escapeHtml(folder?.name || "Category")}</div>
+          <div class="job-flow-tree-body">${projectMarkup || '<p class="small muted">No direct jobs in this category.</p>'}${childMarkup}</div>
+        </div>`;
+      };
+      html = `<section class="job-flow-group"><h5>Category tree</h5>${renderCategoryNode(rootId)}</section>`;
+    } else {
+      const groups = new Map();
+      filtered.forEach(job => {
+        const key = grouping === "job"
+          ? String(job?.name || "Untitled job")
+          : (normalizeProjectNumber(job?.projectNumber) || "Unassigned");
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(job);
+      });
+      html = Array.from(groups.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([key, groupJobs])=>{
+        const cards = groupJobs.map(renderJobCard).join("");
+        return `<section class="job-flow-group"><h5>${escapeHtml(grouping === "job" ? "Job" : "Project")} ${escapeHtml(key)}</h5><div class="job-flow-group-grid">${cards}</div></section>`;
       }).join("");
-      return `<section class="job-flow-group"><h5>${escapeHtml(grouping === "job" ? "Job" : "Project")} ${escapeHtml(key)}</h5><div class="job-flow-group-grid">${cards}</div></section>`;
-    }).join("");
+    }
 
     flowChart.innerHTML = html || '<p class="small muted">No projects match this filter.</p>';
     if (flowChart) flowChart.classList.toggle("hide-previews", hidePreviews);

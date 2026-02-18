@@ -3528,6 +3528,7 @@ function viewJobs(){
           </div>
           <div class="job-flow-toolbar">
             <select id="jobFlowGrouping" aria-label="Group flow chart by">
+              <option value="categoryTree">Category tree</option>
               <option value="project">Projects</option>
               <option value="job">Jobs</option>
             </select>

@@ -5639,7 +5639,33 @@ body.log-history-open { overflow: hidden; }
   border-left: 4px solid var(--job-category-accent, #4f46e5);
   border-radius: 10px;
   padding: 10px;
-  background: #fafcff;
+  background: var(--job-category-surface, #fafcff);
+}
+.job-flow-project-group h6 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #334155;
+}
+.job-flow-tree-node {
+  margin: 10px 0;
+  padding-left: 14px;
+  border-left: 2px solid #d9e2f0;
+}
+.job-flow-tree-title {
+  display: inline-block;
+  border-left: 4px solid var(--job-category-accent, #4f46e5);
+  border: 1px solid var(--job-category-border, #d9e1f0);
+  background: var(--job-category-surface, #f8fbff);
+  border-radius: 8px;
+  font-weight: 700;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+}
+.job-flow-tree-body {
+  display: grid;
+  gap: 10px;
 }
 .job-flow-file-list { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 8px; }
 .job-flow-file-name { display: block; font-size: 12px; margin-bottom: 4px; overflow-wrap: anywhere; }
