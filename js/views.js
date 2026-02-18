@@ -2101,15 +2101,24 @@ function viewJobs(){
     const name = String(file?.name || "Attached file");
     const href = String(file?.dataUrl || file?.url || "");
     const ext = extractFileExtension(name);
+    const savedPreview = file && typeof file === "object" ? file.preview : null;
+    if (savedPreview && typeof savedPreview === "object"){
+      const mode = savedPreview.mode === "image" ? "image" : "message";
+      const content = String(savedPreview.content || "").trim();
+      if (content) return { name, href, mode, content };
+    }
     if (!href) return { name, href: "", mode: "message", content: "Preview unavailable" };
     if (ext === ".svg") return { name, href, mode: "image", content: href };
     if (/^data:image\//i.test(href)) return { name, href, mode: "image", content: href };
+    if (/^https?:\/\//i.test(href) && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"].includes(ext)){
+      return { name, href, mode: "image", content: href };
+    }
     if ([".dxf", ".ord", ".omx"].includes(ext)) {
       const text = decodeDataUrlText(href);
       const cadSvg = text ? renderCadToSvgDataUrl(text) : "";
       return cadSvg
         ? { name, href, mode: "image", content: cadSvg }
-        : { name, href, mode: "message", content: "2D preview unavailable for this file." };
+        : { name, href, mode: "message", content: "2D preview unavailable. Add a OneDrive direct file URL or re-upload to refresh preview." };
     }
     return { name, href, mode: "message", content: "Preview unavailable for this file type." };
   };
