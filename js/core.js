@@ -1413,6 +1413,7 @@ if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
 if (!Array.isArray(window.inventory))    window.inventory    = [];
 if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,chargeRate,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
 if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+if (!window.cuttingJobDatabase || typeof window.cuttingJobDatabase !== "object") window.cuttingJobDatabase = { projects: {}, updatedAtISO: null };
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
 if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
@@ -1433,6 +1434,7 @@ let tasksAsReq    = window.tasksAsReq;
 let inventory     = window.inventory;
 let cuttingJobs   = window.cuttingJobs;
 let completedCuttingJobs = window.completedCuttingJobs;
+let cuttingJobDatabase = window.cuttingJobDatabase;
 let opportunityRollups = window.opportunityRollups;
 let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
@@ -1462,6 +1464,75 @@ function normalizeJobPriorityOrder(list){
   });
 
   return list;
+}
+
+function normalizeCuttingJobDatabase(raw){
+  const source = raw && typeof raw === "object" ? raw : {};
+  const normalized = { projects: {}, updatedAtISO: null };
+  const projects = source.projects && typeof source.projects === "object" ? source.projects : {};
+  Object.keys(projects).forEach(projectKey => {
+    const projectId = String(projectKey || "").trim();
+    if (!projectId) return;
+    const projectRecord = projects[projectKey] && typeof projects[projectKey] === "object"
+      ? projects[projectKey]
+      : {};
+    const asyMap = projectRecord.asy && typeof projectRecord.asy === "object" ? projectRecord.asy : {};
+    const normalizedAsy = {};
+    Object.keys(asyMap).forEach(asyKey => {
+      const asyId = String(asyKey || "").trim();
+      if (!asyId) return;
+      const entry = asyMap[asyKey] && typeof asyMap[asyKey] === "object" ? asyMap[asyKey] : {};
+      const cut = typeof entry.cut === "string" ? entry.cut.trim().toUpperCase() : "";
+      if (!/^C\d{3}$/.test(cut)) return;
+      normalizedAsy[asyId] = {
+        cut,
+        fileName: typeof entry.fileName === "string" ? entry.fileName : "",
+        jobId: typeof entry.jobId === "string" ? entry.jobId : "",
+        updatedAtISO: typeof entry.updatedAtISO === "string" ? entry.updatedAtISO : null
+      };
+    });
+    if (Object.keys(normalizedAsy).length){
+      normalized.projects[projectId] = {
+        asy: normalizedAsy,
+        updatedAtISO: typeof projectRecord.updatedAtISO === "string" ? projectRecord.updatedAtISO : null
+      };
+    }
+  });
+  normalized.updatedAtISO = typeof source.updatedAtISO === "string" ? source.updatedAtISO : null;
+  return normalized;
+}
+
+function registerCuttingJobDbEntry(entry){
+  if (!entry || typeof entry !== "object") return false;
+  const project = String(entry.project || "").trim();
+  const asy = String(entry.asy || "").trim();
+  const cut = String(entry.cut || "").trim().toUpperCase();
+  if (!project || !asy || !/^C\d{3}$/.test(cut)) return false;
+  if (!cuttingJobDatabase || typeof cuttingJobDatabase !== "object"){
+    cuttingJobDatabase = { projects: {}, updatedAtISO: null };
+  }
+  if (!cuttingJobDatabase.projects || typeof cuttingJobDatabase.projects !== "object"){
+    cuttingJobDatabase.projects = {};
+  }
+  if (!cuttingJobDatabase.projects[project]){
+    cuttingJobDatabase.projects[project] = { asy: {}, updatedAtISO: null };
+  }
+  const nowISO = new Date().toISOString();
+  cuttingJobDatabase.projects[project].asy[asy] = {
+    cut,
+    fileName: typeof entry.fileName === "string" ? entry.fileName : "",
+    jobId: typeof entry.jobId === "string" ? entry.jobId : "",
+    updatedAtISO: nowISO
+  };
+  cuttingJobDatabase.projects[project].updatedAtISO = nowISO;
+  cuttingJobDatabase.updatedAtISO = nowISO;
+  if (typeof window !== "undefined"){
+    window.cuttingJobDatabase = cuttingJobDatabase;
+  }
+  return true;
+}
+if (typeof window !== "undefined"){
+  window.registerCuttingJobDbEntry = registerCuttingJobDbEntry;
 }
 
 function buildCompletedJob(job, completionISO){
@@ -1766,6 +1837,7 @@ function stateHasMeaningfulData(data){
     "inventory",
     "cuttingJobs",
     "completedCuttingJobs",
+    "cuttingJobDatabase",
     "dailyCutHours",
     "orderRequests",
     "totalHistory",
@@ -1883,6 +1955,7 @@ function snapshotState(){
     inventory,
     cuttingJobs: stripJobFileDataUrls(cuttingJobs),
     completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs),
+    cuttingJobDatabase: normalizeCuttingJobDatabase(cuttingJobDatabase),
     orderRequests,
     orderRequestTab,
     garnetCleanings,
@@ -2303,6 +2376,7 @@ function adoptState(doc){
     : seedInventoryFromTasks();
   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
   completedCuttingJobs = Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [];
+  cuttingJobDatabase = normalizeCuttingJobDatabase(data.cuttingJobDatabase);
   orderRequests = normalizeOrderRequests(Array.isArray(data.orderRequests) ? data.orderRequests : []);
   if (!orderRequests.some(req => req && req.status === "draft")){
     orderRequests.push(createOrderRequest());
@@ -2317,6 +2391,7 @@ function adoptState(doc){
   window.inventory = inventory;
   window.cuttingJobs = cuttingJobs;
   window.completedCuttingJobs = completedCuttingJobs;
+  window.cuttingJobDatabase = cuttingJobDatabase;
   window.orderRequests = orderRequests;
   window.garnetCleanings = garnetCleanings;
   window.dailyCutHours = dailyCutHours;
@@ -2596,6 +2671,7 @@ async function loadFromCloud(){
         inventory: Array.isArray(window.inventory) && window.inventory.length ? window.inventory.slice() : (typeof seedInventoryFromTasks === "function" ? seedInventoryFromTasks() : []),
         cuttingJobs: Array.isArray(window.cuttingJobs) ? window.cuttingJobs.slice() : [],
         completedCuttingJobs: Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [],
+        cuttingJobDatabase: normalizeCuttingJobDatabase(window.cuttingJobDatabase),
         orderRequests: Array.isArray(window.orderRequests) && window.orderRequests.length ? window.orderRequests.slice() : [typeof createOrderRequest === "function" ? createOrderRequest() : { id:"req_"+Date.now(), items:[] }],
         orderRequestTab: typeof window.orderRequestTab === "string" ? window.orderRequestTab : "active",
         dailyCutHours: Array.isArray(window.dailyCutHours) ? window.dailyCutHours.slice() : [],
@@ -2821,6 +2897,7 @@ const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes
     inventory: seedInventoryFromTasks(),
     cuttingJobs: [],
     completedCuttingJobs: [],
+    cuttingJobDatabase: { projects: {}, updatedAtISO: null },
     orderRequests: [createOrderRequest()],
     orderRequestTab: "active",
     dailyCutHours: [],
