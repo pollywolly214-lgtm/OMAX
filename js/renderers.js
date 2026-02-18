@@ -14102,6 +14102,20 @@ function renderJobs(){
 
   // 5) Inline material $/qty (kept)
   content.querySelector(".job-table tbody")?.addEventListener("change", async (e)=>{
+    const previewSelect = e.target instanceof Element
+      ? e.target.closest("select[data-file-preview-select]")
+      : null;
+    if (previewSelect instanceof HTMLSelectElement){
+      const previewRoot = previewSelect.closest("[data-file-preview]");
+      if (!previewRoot) return;
+      const selected = String(previewSelect.value ?? "0");
+      previewRoot.querySelectorAll("[data-file-preview-pane]").forEach((pane)=>{
+        const key = pane.getAttribute("data-file-preview-pane") || "";
+        pane.hidden = key !== selected;
+      });
+      return;
+    }
+
     const prioritySelect = e.target instanceof Element
       ? e.target.closest("select[data-job-priority-inline]")
       : null;
@@ -14130,6 +14144,20 @@ function renderJobs(){
   });
 
   const historyBody = content.querySelector(".past-jobs-table tbody");
+  historyBody?.addEventListener("change", (e)=>{
+    const previewSelect = e.target instanceof Element
+      ? e.target.closest("select[data-file-preview-select]")
+      : null;
+    if (!(previewSelect instanceof HTMLSelectElement)) return;
+    const previewRoot = previewSelect.closest("[data-file-preview]");
+    if (!previewRoot) return;
+    const selected = String(previewSelect.value ?? "0");
+    previewRoot.querySelectorAll("[data-file-preview-pane]").forEach((pane)=>{
+      const key = pane.getAttribute("data-file-preview-pane") || "";
+      pane.hidden = key !== selected;
+    });
+  });
+
   historyBody?.addEventListener("click", async (e)=>{
     const historyActionTrigger = e.target.closest("[data-history-actions-toggle]");
     if (historyActionTrigger){

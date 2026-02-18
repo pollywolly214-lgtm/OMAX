@@ -2007,6 +2007,136 @@ function viewJobs(){
     if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "—";
     return dt.toLocaleDateString();
   };
+  const extractFileExtension = (filename)=>{
+    const name = String(filename || "");
+    const dot = name.lastIndexOf(".");
+    if (dot <= 0 || dot === name.length - 1) return "";
+    return name.slice(dot).toLowerCase();
+  };
+  const decodeDataUrlText = (dataUrl)=>{
+    const raw = String(dataUrl || "");
+    const match = raw.match(/^data:([^,]*?),(.*)$/i);
+    if (!match) return "";
+    const meta = match[1] || "";
+    const payload = match[2] || "";
+    try {
+      if (/;base64/i.test(meta)) return atob(payload);
+      return decodeURIComponent(payload);
+    } catch (_err){
+      return "";
+    }
+  };
+  const parseCadSegments = (text)=>{
+    const lines = String(text || "").split(/\r?\n/);
+    const pairs = [];
+    for (let i = 0; i < lines.length; i += 2) {
+      const code = Number.parseInt(String(lines[i] || "").trim(), 10);
+      if (!Number.isFinite(code)) continue;
+      pairs.push({ code, value: String(lines[i + 1] || "").trim() });
+    }
+    const entities = [];
+    let section = "";
+    let current = null;
+    for (let i = 0; i < pairs.length; i += 1) {
+      const pair = pairs[i];
+      if (pair.code !== 0) {
+        if (current) current.data.push(pair);
+        continue;
+      }
+      const marker = pair.value.toUpperCase();
+      if (marker === "SECTION") {
+        const namePair = pairs[i + 1];
+        if (namePair?.code === 2) {
+          section = namePair.value.toUpperCase();
+          i += 1;
+        }
+        continue;
+      }
+      if (marker === "ENDSEC") {
+        section = "";
+        current = null;
+        continue;
+      }
+      if (section !== "ENTITIES") continue;
+      if (current) entities.push(current);
+      current = { type: marker, data: [] };
+    }
+    if (current) entities.push(current);
+    const segments = [];
+    entities.forEach(entity => {
+      const fields = new Map();
+      entity.data.forEach(item => fields.set(item.code, Number.parseFloat(item.value)));
+      if (entity.type === "LINE") {
+        const x1 = fields.get(10); const y1 = fields.get(20);
+        const x2 = fields.get(11); const y2 = fields.get(21);
+        if ([x1, y1, x2, y2].every(Number.isFinite)) segments.push({ x1, y1, x2, y2 });
+      }
+    });
+    return segments;
+  };
+  const renderCadToSvgDataUrl = (text)=>{
+    const segments = parseCadSegments(text);
+    if (!segments.length) return "";
+    const bounds = segments.reduce((acc, item) => {
+      acc.minX = Math.min(acc.minX, item.x1, item.x2);
+      acc.maxX = Math.max(acc.maxX, item.x1, item.x2);
+      acc.minY = Math.min(acc.minY, item.y1, item.y2);
+      acc.maxY = Math.max(acc.maxY, item.y1, item.y2);
+      return acc;
+    }, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+    const width = Math.max(1, bounds.maxX - bounds.minX);
+    const height = Math.max(1, bounds.maxY - bounds.minY);
+    const pad = Math.max(width, height) * 0.08;
+    const vbX = bounds.minX - pad;
+    const vbY = bounds.minY - pad;
+    const vbW = width + (pad * 2);
+    const vbH = height + (pad * 2);
+    const paths = segments
+      .map(item => `<line x1="${item.x1}" y1="${-item.y1}" x2="${item.x2}" y2="${-item.y2}"/>`)
+      .join("");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${-(vbY + vbH)} ${vbW} ${vbH}"><rect x="${vbX}" y="${-(vbY + vbH)}" width="${vbW}" height="${vbH}" fill="#ffffff"/><g stroke="#32407a" stroke-width="${Math.max(vbW, vbH) / 450}" fill="none" stroke-linecap="round">${paths}</g></svg>`;
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  };
+  const filePreviewModel = (file)=>{
+    const name = String(file?.name || "Attached file");
+    const href = String(file?.dataUrl || file?.url || "");
+    const ext = extractFileExtension(name);
+    if (!href) return { name, href: "", mode: "message", content: "Preview unavailable" };
+    if (ext === ".svg") return { name, href, mode: "image", content: href };
+    if (/^data:image\//i.test(href)) return { name, href, mode: "image", content: href };
+    if ([".dxf", ".ord", ".omx"].includes(ext)) {
+      const text = decodeDataUrlText(href);
+      const cadSvg = text ? renderCadToSvgDataUrl(text) : "";
+      return cadSvg
+        ? { name, href, mode: "image", content: cadSvg }
+        : { name, href, mode: "message", content: "2D preview unavailable for this file." };
+    }
+    return { name, href, mode: "message", content: "Preview unavailable for this file type." };
+  };
+  const buildFileCellMarkup = (jobId, files)=>{
+    const previews = (Array.isArray(files) ? files : []).map(filePreviewModel);
+    if (!previews.length) return '<div class="job-file-preview-empty small muted">No files attached</div>';
+    const selectId = `jobFileSelect_${esc(jobId)}`;
+    return `
+      <div class="job-file-preview" data-file-preview data-file-preview-job="${esc(jobId)}">
+        ${previews.length > 1
+          ? `<label class="sr-only" for="${selectId}">Choose file preview</label><select id="${selectId}" class="job-file-preview-select" data-file-preview-select="${esc(jobId)}">${previews.map((f, idx)=>`<option value="${idx}">${esc(f.name)}</option>`).join("")}</select>`
+          : ""}
+        <div class="job-file-preview-panes">
+          ${previews.map((preview, idx) => `
+            <div class="job-file-preview-pane" data-file-preview-pane="${idx}" ${idx === 0 ? "" : "hidden"}>
+              <div class="job-file-preview-name" title="${esc(preview.name)}">${esc(preview.name)}</div>
+              <div class="job-file-preview-frame">
+                ${preview.mode === "image"
+                  ? `<img src="${esc(preview.content)}" alt="Preview of ${esc(preview.name)}" class="job-file-preview-image">`
+                  : `<span class="job-file-preview-message small muted">${esc(preview.content)}</span>`}
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  };
   const hoursPerDay = typeof getConfiguredDailyHours === "function"
     ? getConfiguredDailyHours()
     : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
@@ -2828,33 +2958,7 @@ function viewJobs(){
             ${statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : ""}
             ${needDisplay ? `<div class="job-status-need">${needDisplay}</div>` : ""}
           </td>
-          <td class="job-col job-col-files">
-            <div class="job-cell job-cell-stretch">
-              <span class="job-cell-label">Files</span>
-              <div class="job-file-cell">
-                <button type="button" class="job-file-trigger ${fileCount ? "has-files" : ""}" data-job-files="${job.id}" aria-haspopup="true" aria-expanded="false" aria-controls="${esc(fileMenuId)}">
-                  <span class="job-file-trigger-text">${esc(fileLabel)}</span>
-                  <span class="job-file-trigger-icon" aria-hidden="true">▾</span>
-                </button>
-                <div class="job-file-dropdown" id="${esc(fileMenuId)}" data-job-file-menu="${job.id}" hidden>
-                  ${fileMenu}
-                  <div class="job-file-menu-hint small muted">Edit the job to manage files.</div>
-                </div>
-              </div>
-              <div class="job-impact-files">
-                <span class="job-impact-files-label">Attached files</span>
-                ${fileCount
-                  ? `<ul class="job-impact-files-list">${jobFiles.map((f, idx) => {
-                      const safeName = esc(f?.name || `file_${idx + 1}`);
-                      const href = esc(f?.dataUrl || f?.url || "");
-                      return href
-                        ? `<li><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`
-                        : `<li>${safeName}</li>`;
-                    }).join("")}</ul>`
-                  : '<span class="job-impact-files-empty small muted">No files attached</span>'}
-              </div>
-            </div>
-          </td>
+          <td class="job-col job-col-files">${buildFileCellMarkup(job.id, jobFiles)}</td>
           <td class="job-col job-col-impact">
             <div class="job-impact-stack">
               <div class="job-impact-header">
@@ -3227,33 +3331,7 @@ function viewJobs(){
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
           <td class="job-col job-col-hours">${remainingDisplay}${backlogHours > 0 ? `<div class="small muted">Queue total ${esc(queueTotalDisplay)}</div>` : ''}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
-          <td class="job-col job-col-files">
-            <div class="job-cell job-cell-stretch">
-              <span class="job-cell-label">Files</span>
-              <div class="job-file-cell">
-                <button type="button" class="job-file-trigger ${fileCount ? 'has-files' : ''}" data-job-files="${j.id}" aria-haspopup="true" aria-expanded="false" aria-controls="${esc(fileMenuId)}">
-                  <span class="job-file-trigger-text">${esc(fileLabel)}</span>
-                  <span class="job-file-trigger-icon" aria-hidden="true">▾</span>
-                </button>
-                <div class="job-file-dropdown" id="${esc(fileMenuId)}" data-job-file-menu="${j.id}" hidden>
-                  ${fileMenu}
-                  <div class="job-file-menu-hint small muted">Use Add files to open edit mode and attach documents.</div>
-                </div>
-              </div>
-              <div class="job-impact-files">
-                <span class="job-impact-files-label">Attached files</span>
-                ${fileCount
-                  ? `<ul class="job-impact-files-list">${jobFiles.map((f, idx) => {
-                      const safeName = esc(f?.name || `file_${idx + 1}`);
-                      const href = esc(f?.dataUrl || f?.url || "");
-                      return href
-                        ? `<li><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`
-                        : `<li>${safeName}</li>`;
-                    }).join("")}</ul>`
-                  : '<span class="job-impact-files-empty small muted">No files attached</span>'}
-              </div>
-            </div>
-          </td>
+          <td class="job-col job-col-files">${buildFileCellMarkup(j.id, jobFiles)}</td>
           <td class="job-col job-col-impact">
             <div class="job-impact-stack">
               <div class="job-impact-header">
