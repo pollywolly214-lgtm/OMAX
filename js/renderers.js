@@ -884,6 +884,7 @@ function captureNewJobFormState(){
       materialQty: captureField("jobMaterialQty"),
       start: captureField("jobStart"),
       due: captureField("jobDue"),
+      projectNumber: captureField("jobProjectNumber"),
       category: captureField("jobCategory")
     },
     active: activeState
@@ -912,6 +913,7 @@ function restoreNewJobFormState(state){
   assignField("jobMaterialQty", state.fields.materialQty);
   assignField("jobStart", state.fields.start);
   assignField("jobDue", state.fields.due);
+  assignField("jobProjectNumber", state.fields.projectNumber);
   assignField("jobCategory", state.fields.category);
 
   const categorySelect = document.getElementById("jobCategory");
@@ -12877,6 +12879,7 @@ function renderJobs(){
 
   const noteBackdrop = content.querySelector("#jobNoteModal");
   const namingBackdrop = content.querySelector("#jobNamingModal");
+  const flowBackdrop = content.querySelector("#jobFlowModal");
   const noteTextarea = content.querySelector("#jobNoteModalInput");
   const noteJobLabel = content.querySelector("#jobNoteModalJob");
   const noteHistory = content.querySelector("#jobNoteModalHistory");
@@ -13190,6 +13193,22 @@ function renderJobs(){
     document.body.classList.add("job-naming-open");
   };
 
+  const closeFlowModal = ()=>{
+    if (!flowBackdrop) return;
+    window.jobFlowModalOpen = false;
+    flowBackdrop.classList.remove("open");
+    flowBackdrop.hidden = true;
+    document.body.classList.remove("job-flow-open");
+  };
+
+  const openFlowModal = ()=>{
+    if (!flowBackdrop) return;
+    window.jobFlowModalOpen = true;
+    flowBackdrop.hidden = false;
+    flowBackdrop.classList.add("open");
+    document.body.classList.add("job-flow-open");
+  };
+
   content.querySelector("[data-job-naming-open]")?.addEventListener("click", (event)=>{
     event.preventDefault();
     openNamingModal();
@@ -13197,6 +13216,13 @@ function renderJobs(){
 
   content.querySelectorAll("[data-naming-close]").forEach(btn => {
     btn.addEventListener("click", ()=> closeNamingModal());
+  });
+  content.querySelector("[data-job-flow-open]")?.addEventListener("click", (event)=>{
+    event.preventDefault();
+    openFlowModal();
+  });
+  content.querySelectorAll("[data-job-flow-close]").forEach(btn => {
+    btn.addEventListener("click", ()=> closeFlowModal());
   });
 
   if (namingBackdrop){
@@ -13213,6 +13239,64 @@ function renderJobs(){
       }
     }, true);
   }
+
+  if (flowBackdrop){
+    flowBackdrop.addEventListener("click", (event)=>{
+      if (event.target === flowBackdrop){
+        event.preventDefault();
+        closeFlowModal();
+      }
+    });
+    flowBackdrop.addEventListener("keydown", (event)=>{
+      if (event.key === "Escape" || event.key === "Esc"){
+        event.preventDefault();
+        closeFlowModal();
+      }
+    }, true);
+  }
+  flowBackdrop?.querySelectorAll("[data-job-flow-filter]").forEach(select => {
+    select.addEventListener("change", (event)=>{
+      const target = event.target;
+      if (!(target instanceof HTMLSelectElement)) return;
+      const key = target.getAttribute("data-job-flow-filter");
+      if (!key) return;
+      window.jobFlowFilters = {
+        ...(window.jobFlowFilters && typeof window.jobFlowFilters === "object" ? window.jobFlowFilters : {}),
+        [key]: target.value
+      };
+      const scrollPosition = captureScrollPosition();
+      window.jobFlowModalOpen = true;
+      renderJobs();
+      requestAnimationFrame(()=>{
+        restoreScrollPosition(scrollPosition);
+        const nextBackdrop = document.querySelector("#jobFlowModal");
+        if (nextBackdrop){
+          nextBackdrop.hidden = false;
+          nextBackdrop.classList.add("open");
+        }
+      });
+    });
+  });
+  flowBackdrop?.querySelectorAll("[data-project-preview-toggle]").forEach(toggle => {
+    toggle.addEventListener("click", (event)=>{
+      const btn = event.currentTarget;
+      if (!(btn instanceof HTMLButtonElement)) return;
+      const jobId = btn.getAttribute("data-project-preview-toggle");
+      if (!jobId) return;
+      const grid = flowBackdrop.querySelector(`[data-project-preview-grid="${jobId}"]`);
+      if (!grid) return;
+      const isHidden = grid.hasAttribute("hidden");
+      if (isHidden){
+        grid.removeAttribute("hidden");
+        btn.textContent = "Hide previews";
+        btn.setAttribute("aria-expanded", "true");
+      } else {
+        grid.setAttribute("hidden", "");
+        btn.textContent = "Show previews";
+        btn.setAttribute("aria-expanded", "false");
+      }
+    });
+  });
 
   const closeJobNoteModal = ()=>{
     if (!noteBackdrop) return;
@@ -14067,6 +14151,7 @@ function renderJobs(){
     const materialQtyRaw = document.getElementById("jobMaterialQty")?.value ?? "";
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
+    const projectNumber = (document.getElementById("jobProjectNumber")?.value || "").replace(/\D/g, "").slice(0, 12);
     const priorityRaw = document.getElementById("jobPriority")?.value ?? "1";
     const priorityNum = Number(priorityRaw);
     const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
@@ -14079,6 +14164,7 @@ function renderJobs(){
     const materialQty = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
     const chargeRate = chargeRaw === "" ? JOB_RATE_PER_HOUR : Number(chargeRaw);
     if (!name || !isFinite(est) || est<=0 || !start || !due){ toast("Fill job fields."); return; }
+    if (!projectNumber){ toast("Project number is required."); return; }
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
@@ -14091,7 +14177,7 @@ function renderJobs(){
       ensureJobCategoryFolderOpen(categoryId);
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
+    const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material, materialCost, materialQty, chargeRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
     cuttingJobs.push(newJob);
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
@@ -14661,6 +14747,8 @@ function renderJobs(){
         : JOB_RATE_PER_HOUR;
       const chargeToSet = chargeVal == null ? existingCharge : chargeVal;
       const catVal = qs("cat");
+      const projectNumber = String(qs("projectNumber") || "").replace(/\D/g, "").slice(0, 12);
+      if (!projectNumber){ toast("Project number is required."); return; }
       j.name = qs("name") || j.name;
       j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
       j.material = qs("material") || j.material || "";
@@ -14670,6 +14758,7 @@ function renderJobs(){
       j.dueISO   = qs("dueISO")   || j.dueISO;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
       j.chargeRate = chargeToSet;
+      j.projectNumber = projectNumber;
       const priorityRaw = qs("priority");
       if (priorityRaw != null){
         const priorityNum = priorityRaw === "" ? null : Number(priorityRaw);
