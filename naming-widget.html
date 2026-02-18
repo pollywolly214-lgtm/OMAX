@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Naming Widget</title>
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, sans-serif; margin: 0; background: #f5f7fc; color: #13233f; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 20px; }
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 8px 24px rgba(20,40,80,.12); padding: 16px; }
+    .tiny { font-size: 12px; color: #586682; }
+    label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; margin-bottom: 10px; }
+    input, select, button { font: inherit; padding: 9px 10px; border-radius: 8px; border: 1px solid #c8d3ea; }
+    .choice-group { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+    .choice { background: #fff; cursor: pointer; }
+    .choice.active { border-color: #1f5fbf; background: #e9f0ff; }
+    .row { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; }
+    .secondary { background: #f1f4fb; }
+    .ghost { opacity: .5; }
+    .hidden { display: none !important; }
+    ul { padding-left: 18px; }
+    .file-preview-pop img { max-width: 100%; max-height: 220px; object-fit: contain; border: 1px solid #d6def0; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <p id="progressText" class="tiny"></p>
+      <div id="stepContainer"></div>
+      <p id="inlineError" class="tiny" style="color:#c43d3d;"></p>
+      <hr>
+      <p><strong>Final name:</strong> <span id="finalName">—</span></p>
+      <p class="tiny"><strong>Save path:</strong> <span id="finalPath">—</span></p>
+      <button id="downloadBtn" class="hidden" type="button">Download renamed file</button>
+      <h4>Recent history</h4>
+      <ul id="history"></ul>
+    </div>
+  </div>
+  <script src="naming-widget.js"></script>
+</body>
+</html>

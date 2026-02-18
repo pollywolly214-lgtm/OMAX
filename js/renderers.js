@@ -12786,6 +12786,7 @@ function drawCostChart(canvas, model, show){
 function renderJobs(){
   const content = document.getElementById("content");
   if (!content) return;
+  document.body.classList.remove("job-naming-open");
   try {
     ensureJobCategories?.();
   } catch (err){
@@ -12875,6 +12876,7 @@ function renderJobs(){
   };
 
   const noteBackdrop = content.querySelector("#jobNoteModal");
+  const namingBackdrop = content.querySelector("#jobNamingModal");
   const noteTextarea = content.querySelector("#jobNoteModalInput");
   const noteJobLabel = content.querySelector("#jobNoteModalJob");
   const noteHistory = content.querySelector("#jobNoteModalHistory");
@@ -13169,6 +13171,48 @@ function renderJobs(){
       } catch (_err) { }
     });
   };
+
+  const namingHostBlock = namingBackdrop ? namingBackdrop.closest(".job-main-block") : null;
+
+  const closeNamingModal = ()=>{
+    if (!namingBackdrop) return;
+    namingBackdrop.classList.remove("open");
+    namingBackdrop.hidden = true;
+    namingHostBlock?.classList.remove("job-main-block--naming-open");
+    document.body.classList.remove("job-naming-open");
+  };
+
+  const openNamingModal = ()=>{
+    if (!namingBackdrop) return;
+    namingBackdrop.hidden = false;
+    namingBackdrop.classList.add("open");
+    namingHostBlock?.classList.add("job-main-block--naming-open");
+    document.body.classList.add("job-naming-open");
+  };
+
+  content.querySelector("[data-job-naming-open]")?.addEventListener("click", (event)=>{
+    event.preventDefault();
+    openNamingModal();
+  });
+
+  content.querySelectorAll("[data-naming-close]").forEach(btn => {
+    btn.addEventListener("click", ()=> closeNamingModal());
+  });
+
+  if (namingBackdrop){
+    namingBackdrop.addEventListener("click", (event)=>{
+      if (event.target === namingBackdrop){
+        event.preventDefault();
+        closeNamingModal();
+      }
+    });
+    namingBackdrop.addEventListener("keydown", (event)=>{
+      if (event.key === "Escape" || event.key === "Esc"){
+        event.preventDefault();
+        closeNamingModal();
+      }
+    }, true);
+  }
 
   const closeJobNoteModal = ()=>{
     if (!noteBackdrop) return;

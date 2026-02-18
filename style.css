@@ -3145,6 +3145,48 @@ body.modal-open .auth-bar {
   word-break: break-word;
   max-height: calc(1.45em * 6);
 }
+.job-main-block--naming-open {
+  position: relative;
+  z-index: 20000;
+}
+.job-naming-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(19, 35, 63, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 20001;
+}
+body.job-naming-open {
+  overflow: hidden;
+}
+.job-naming-modal-backdrop[hidden] {
+  display: none !important;
+}
+.job-naming-modal {
+  width: min(980px, 100%);
+  height: min(760px, 92vh);
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 18px 42px rgba(18, 32, 59, 0.32);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.job-naming-modal-body {
+  flex: 1;
+  min-height: 0;
+}
+.job-naming-modal-body iframe {
+  width: 100%;
+  height: 100%;
+  border: 1px solid #d8e0f0;
+  border-radius: 10px;
+  background: #f6f8fc;
+}
 .job-note-modal-backdrop {
   position: fixed;
   inset: 0;
