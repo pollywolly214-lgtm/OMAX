@@ -819,18 +819,188 @@ function readFileAsDataUrl(file){
   });
 }
 
+function fileExtFromName(name){
+  const text = String(name || "");
+  const idx = text.lastIndexOf(".");
+  if (idx <= 0 || idx === text.length - 1) return "";
+  return text.slice(idx).toLowerCase();
+}
+
+function cadNumberCode(pairs, code){
+  const pair = pairs.find(item => Number(item?.code) === Number(code));
+  if (!pair) return null;
+  const n = Number.parseFloat(String(pair.value ?? "").trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+function cadPointsToSegments(points, closed){
+  const cleaned = Array.isArray(points) ? points.filter(Boolean) : [];
+  if (cleaned.length < 2) return [];
+  const segments = [];
+  for (let i = 1; i < cleaned.length; i += 1){
+    const prev = cleaned[i - 1];
+    const next = cleaned[i];
+    if ([prev?.x, prev?.y, next?.x, next?.y].every(Number.isFinite)){
+      segments.push({ x1: prev.x, y1: prev.y, x2: next.x, y2: next.y });
+    }
+  }
+  if (closed && cleaned.length > 2){
+    const first = cleaned[0];
+    const last = cleaned[cleaned.length - 1];
+    if ([first?.x, first?.y, last?.x, last?.y].every(Number.isFinite)){
+      segments.push({ x1: last.x, y1: last.y, x2: first.x, y2: first.y });
+    }
+  }
+  return segments;
+}
+
+function parseCadSegments(text){
+  const lines = String(text || "").split(/\r?\n/);
+  const pairs = [];
+  for (let i = 0; i < lines.length; i += 2){
+    const code = Number.parseInt(String(lines[i] || "").trim(), 10);
+    if (!Number.isFinite(code)) continue;
+    pairs.push({ code, value: String(lines[i + 1] || "").trim() });
+  }
+
+  const entities = [];
+  let section = "";
+  let current = null;
+  for (let i = 0; i < pairs.length; i += 1){
+    const pair = pairs[i];
+    if (pair.code !== 0){
+      if (current) current.data.push(pair);
+      continue;
+    }
+    const marker = String(pair.value || "").toUpperCase();
+    if (marker === "SECTION"){
+      const namePair = pairs[i + 1];
+      if (namePair?.code === 2){
+        section = String(namePair.value || "").toUpperCase();
+        i += 1;
+      }
+      continue;
+    }
+    if (marker === "ENDSEC"){
+      section = "";
+      current = null;
+      continue;
+    }
+    if (section !== "ENTITIES") continue;
+    if (current) entities.push(current);
+    current = { type: marker, data: [] };
+  }
+  if (current) entities.push(current);
+
+  const segments = [];
+  entities.forEach(entity => {
+    if (!entity) return;
+    if (entity.type === "LINE"){
+      const x1 = cadNumberCode(entity.data, 10);
+      const y1 = cadNumberCode(entity.data, 20);
+      const x2 = cadNumberCode(entity.data, 11);
+      const y2 = cadNumberCode(entity.data, 21);
+      if ([x1, y1, x2, y2].every(Number.isFinite)) segments.push({ x1, y1, x2, y2 });
+      return;
+    }
+    if (entity.type === "LWPOLYLINE"){
+      const points = [];
+      for (let i = 0; i < entity.data.length; i += 1){
+        const pair = entity.data[i];
+        if (Number(pair?.code) !== 10) continue;
+        const x = Number.parseFloat(pair.value);
+        const next = entity.data[i + 1];
+        if (!next || Number(next.code) !== 20) continue;
+        const y = Number.parseFloat(next.value);
+        if ([x, y].every(Number.isFinite)) points.push({ x, y });
+      }
+      const closedRaw = cadNumberCode(entity.data, 70);
+      const closed = Number.isFinite(closedRaw) ? (Math.round(closedRaw) & 1) === 1 : false;
+      segments.push(...cadPointsToSegments(points, closed));
+      return;
+    }
+    if (entity.type === "POLYLINE"){
+      const points = [];
+      let closed = false;
+      const closedRaw = cadNumberCode(entity.data, 70);
+      if (Number.isFinite(closedRaw)) closed = (Math.round(closedRaw) & 1) === 1;
+      entities.forEach((child)=>{
+        if (child?.type !== "VERTEX") return;
+        const x = cadNumberCode(child.data, 10);
+        const y = cadNumberCode(child.data, 20);
+        if ([x, y].every(Number.isFinite)) points.push({ x, y });
+      });
+      segments.push(...cadPointsToSegments(points, closed));
+    }
+  });
+  return segments;
+}
+
+function renderCadToSvgDataUrl(text){
+  const segments = parseCadSegments(text);
+  if (!segments.length) return "";
+  const bounds = segments.reduce((acc, item)=>{
+    acc.minX = Math.min(acc.minX, item.x1, item.x2);
+    acc.maxX = Math.max(acc.maxX, item.x1, item.x2);
+    acc.minY = Math.min(acc.minY, item.y1, item.y2);
+    acc.maxY = Math.max(acc.maxY, item.y1, item.y2);
+    return acc;
+  }, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+  const width = Math.max(1, bounds.maxX - bounds.minX);
+  const height = Math.max(1, bounds.maxY - bounds.minY);
+  const pad = Math.max(width, height) * 0.08;
+  const vbX = bounds.minX - pad;
+  const vbY = bounds.minY - pad;
+  const vbW = width + (pad * 2);
+  const vbH = height + (pad * 2);
+  const paths = segments
+    .map(item => `<line x1="${item.x1}" y1="${-item.y1}" x2="${item.x2}" y2="${-item.y2}"/>`)
+    .join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${-(vbY + vbH)} ${vbW} ${vbH}"><rect x="${vbX}" y="${-(vbY + vbH)}" width="${vbW}" height="${vbH}" fill="#ffffff"/><g stroke="#32407a" stroke-width="${Math.max(vbW, vbH) / 450}" fill="none" stroke-linecap="round">${paths}</g></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+async function buildAttachmentPreview(file){
+  if (!file) return null;
+  const type = String(file.type || "").toLowerCase();
+  const ext = fileExtFromName(file.name);
+  if (type.startsWith("image/")){
+    const dataUrl = await readFileAsDataUrl(file);
+    return { mode: "image", content: dataUrl };
+  }
+  if (ext === ".svg"){
+    const dataUrl = await readFileAsDataUrl(file);
+    return { mode: "image", content: dataUrl };
+  }
+  if ([".dxf", ".ord", ".omx"].includes(ext)){
+    try {
+      const text = await file.text();
+      const svgData = renderCadToSvgDataUrl(text);
+      if (svgData){
+        return { mode: "image", content: svgData };
+      }
+      return { mode: "message", content: "Preview unavailable for this CAD file." };
+    } catch (_err){
+      return { mode: "message", content: "File preview could not be loaded." };
+    }
+  }
+  return null;
+}
+
 async function filesToAttachments(fileList){
   const files = Array.from(fileList || []);
   const attachments = [];
   for (const file of files){
     try {
       const dataUrl = await readFileAsDataUrl(file);
+      const preview = await buildAttachmentPreview(file);
       attachments.push({
         id: genId(file.name || "job_file"),
         name: file.name || "Attachment",
         type: file.type || "",
         size: typeof file.size === "number" ? file.size : null,
         dataUrl,
+        preview,
         addedAt: new Date().toISOString()
       });
     } catch (err){
@@ -884,6 +1054,7 @@ function captureNewJobFormState(){
       materialQty: captureField("jobMaterialQty"),
       start: captureField("jobStart"),
       due: captureField("jobDue"),
+      projectNumber: captureField("jobProjectNumber"),
       category: captureField("jobCategory")
     },
     active: activeState
@@ -12877,6 +13048,72 @@ function renderJobs(){
 
   const noteBackdrop = content.querySelector("#jobNoteModal");
   const namingBackdrop = content.querySelector("#jobNamingModal");
+  const flowBackdrop = content.querySelector("#jobFlowModal");
+  const flowChart = content.querySelector("#jobFlowChart");
+  const flowFilterInput = content.querySelector("#jobFlowFilter");
+  const flowGroupingSelect = content.querySelector("#jobFlowGrouping");
+  const flowHidePreviews = content.querySelector("#jobFlowHidePreviews");
+
+  const normalizeProjectNumber = (value)=> String(value || "").replace(/[^0-9]/g, "").slice(0, 8);
+  const previewCardMarkup = (file)=>{
+    const preview = file?.preview;
+    if (preview?.mode === "image" && preview.content){
+      return `<div class="job-flow-preview"><img src="${escapeHtml(preview.content)}" alt="Preview of ${escapeHtml(file?.name || "file")}" loading="lazy"></div>`;
+    }
+    const fallback = preview?.content || "Preview unavailable";
+    return `<div class="job-flow-preview is-empty small muted">${escapeHtml(fallback)}</div>`;
+  };
+
+  const renderFlowChart = ()=>{
+    if (!flowChart) return;
+    const query = String(flowFilterInput?.value || "").trim().toLowerCase();
+    const grouping = String(flowGroupingSelect?.value || "project");
+    const hidePreviews = Boolean(flowHidePreviews?.checked);
+    const jobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : [];
+    const completed = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
+    const list = jobs.concat(completed).filter(Boolean);
+    const filtered = list.filter(job => {
+      const project = normalizeProjectNumber(job?.projectNumber);
+      const material = String(job?.material || "");
+      const est = Number(job?.estimateHours);
+      const dateTokens = [job?.startISO, job?.dueISO, job?.completedAtISO].filter(Boolean).join(" ");
+      const fileNames = (Array.isArray(job?.files) ? job.files : []).map(file => file?.name || "").join(" ");
+      const token = `${project} ${job?.name || ""} ${material} ${Number.isFinite(est) ? est : ""} ${dateTokens} ${fileNames}`.toLowerCase();
+      return !query || token.includes(query);
+    });
+
+    const groups = new Map();
+    filtered.forEach(job => {
+      const key = grouping === "job"
+        ? String(job?.name || "Untitled job")
+        : (normalizeProjectNumber(job?.projectNumber) || "Unassigned");
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(job);
+    });
+
+    const html = Array.from(groups.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([key, groupJobs])=>{
+      const cards = groupJobs.map(job => {
+        const files = Array.isArray(job?.files) ? job.files : [];
+        const fileList = files.length
+          ? files.map(file => `<li><span class="job-flow-file-name">${escapeHtml(file?.name || "Attachment")}</span>${hidePreviews ? "" : previewCardMarkup(file)}</li>`).join("")
+          : '<li class="small muted">No attached files</li>';
+        return `<article class="job-flow-job-card">
+          <header>
+            <div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")}</div>
+            <div class="small muted">Project #${escapeHtml(normalizeProjectNumber(job?.projectNumber) || "Unassigned")}</div>
+            <div class="small muted">Material: ${escapeHtml(job?.material || "—")}</div>
+            <div class="small muted">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div>
+            <div class="small muted">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div>
+          </header>
+          <ul class="job-flow-file-list">${fileList}</ul>
+        </article>`;
+      }).join("");
+      return `<section class="job-flow-group"><h5>${escapeHtml(grouping === "job" ? "Job" : "Project")} ${escapeHtml(key)}</h5><div class="job-flow-group-grid">${cards}</div></section>`;
+    }).join("");
+
+    flowChart.innerHTML = html || '<p class="small muted">No projects match this filter.</p>';
+    if (flowChart) flowChart.classList.toggle("hide-previews", hidePreviews);
+  };
   const noteTextarea = content.querySelector("#jobNoteModalInput");
   const noteJobLabel = content.querySelector("#jobNoteModalJob");
   const noteHistory = content.querySelector("#jobNoteModalHistory");
@@ -13212,6 +13449,35 @@ function renderJobs(){
         closeNamingModal();
       }
     }, true);
+  }
+
+  const closeFlowModal = ()=>{
+    if (!flowBackdrop) return;
+    flowBackdrop.classList.remove("open");
+    flowBackdrop.hidden = true;
+  };
+
+  const openFlowModal = ()=>{
+    if (!flowBackdrop) return;
+    renderFlowChart();
+    flowBackdrop.hidden = false;
+    flowBackdrop.classList.add("open");
+  };
+
+  content.querySelector("[data-job-flow-open]")?.addEventListener("click", (event)=>{
+    event.preventDefault();
+    openFlowModal();
+  });
+  content.querySelectorAll("[data-job-flow-close]").forEach(btn => {
+    btn.addEventListener("click", ()=> closeFlowModal());
+  });
+  flowFilterInput?.addEventListener("input", renderFlowChart);
+  flowGroupingSelect?.addEventListener("change", renderFlowChart);
+  flowHidePreviews?.addEventListener("change", renderFlowChart);
+  if (flowBackdrop){
+    flowBackdrop.addEventListener("click", (event)=>{
+      if (event.target === flowBackdrop) closeFlowModal();
+    });
   }
 
   const closeJobNoteModal = ()=>{
@@ -14067,6 +14333,8 @@ function renderJobs(){
     const materialQtyRaw = document.getElementById("jobMaterialQty")?.value ?? "";
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
+    const projectNumberRaw = document.getElementById("jobProjectNumber")?.value ?? "";
+    const projectNumber = String(projectNumberRaw).replace(/[^0-9]/g, "").slice(0, 8);
     const priorityRaw = document.getElementById("jobPriority")?.value ?? "1";
     const priorityNum = Number(priorityRaw);
     const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
@@ -14078,7 +14346,7 @@ function renderJobs(){
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
     const materialQty = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
     const chargeRate = chargeRaw === "" ? JOB_RATE_PER_HOUR : Number(chargeRaw);
-    if (!name || !isFinite(est) || est<=0 || !start || !due){ toast("Fill job fields."); return; }
+    if (!name || !isFinite(est) || est<=0 || !start || !due || !projectNumber){ toast("Fill job fields, including project #."); return; }
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
@@ -14091,7 +14359,7 @@ function renderJobs(){
       ensureJobCategoryFolderOpen(categoryId);
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
+    const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material, materialCost, materialQty, chargeRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
     cuttingJobs.push(newJob);
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
@@ -14668,6 +14936,8 @@ function renderJobs(){
       j.materialQty = Math.max(0, Number(qs("materialQty")) || 0);
       j.startISO = qs("startISO") || j.startISO;
       j.dueISO   = qs("dueISO")   || j.dueISO;
+      const projectInput = String(qs("projectNumber") || "").replace(/[^0-9]/g, "").slice(0, 8);
+      if (projectInput) j.projectNumber = projectInput;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
       j.chargeRate = chargeToSet;
       const priorityRaw = qs("priority");
