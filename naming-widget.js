@@ -32,7 +32,6 @@ const scopeChoices = ['single', 'multi'];
 const assemblyModeChoices = ['2D', '3D'];
 const commonThicknessLabels = ['1/8in', '3/16in', '1/4in', '3/8in', '1/2in'];
 const allThicknessChoices = buildThicknessChoices();
-const previewableExtensions = new Set(['.dxf', '.ord', '.omx', '.svg']);
 const previewState = {
   objectUrl: null
 };
@@ -607,22 +606,34 @@ function filePreviewMarkup(file) {
 
 async function preparePreviewData(file) {
   const ext = extractExtension(file.name).toLowerCase();
-  if (!previewableExtensions.has(ext)) {
-    file.preview = null;
+
+  if (ext === '.svg' || file.type === 'image/svg+xml') {
+    previewState.objectUrl = URL.createObjectURL(file);
+    file.preview = { mode: 'svg', content: previewState.objectUrl };
     return;
   }
 
-  if (ext === '.svg') {
+  if (file.type.startsWith('image/')) {
     previewState.objectUrl = URL.createObjectURL(file);
     file.preview = { mode: 'svg', content: previewState.objectUrl };
     return;
   }
 
   const content = await file.text();
+  if (looksLikeSvg(content)) {
+    file.preview = { mode: 'svg', content: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}` };
+    return;
+  }
+
   const previewSvg = renderCadToSvgDataUrl(content);
   file.preview = previewSvg
     ? { mode: 'svg', content: previewSvg }
     : { mode: 'message', content: '2D preview unavailable for this file.' };
+}
+
+function looksLikeSvg(text) {
+  const normalized = String(text || '').trimStart().toLowerCase();
+  return normalized.startsWith('<svg') || (normalized.startsWith('<?xml') && normalized.includes('<svg'));
 }
 
 function renderCadToSvgDataUrl(text) {
