@@ -807,6 +807,69 @@ function editingCompletedJobsSet(){
 }
 
 const CAD_PREVIEWABLE_EXTENSIONS = new Set([".dxf", ".ord", ".omx"]);
+const JOB_ONEDRIVE_CONFIG_KEY = "cutting_job_onedrive_config_v1";
+
+function normalizeOneDriveJobConfig(config){
+  const source = config && typeof config === "object" ? config : {};
+  return {
+    enabled: source.enabled === true,
+    baseUrl: typeof source.baseUrl === "string" ? source.baseUrl.trim() : "",
+    folderHint: typeof source.folderHint === "string" ? source.folderHint.trim() : "",
+    lastLinkedAt: typeof source.lastLinkedAt === "string" ? source.lastLinkedAt : ""
+  };
+}
+
+function readOneDriveJobConfig(){
+  if (typeof window === "undefined" || !window.localStorage) return normalizeOneDriveJobConfig(null);
+  try {
+    const raw = window.localStorage.getItem(JOB_ONEDRIVE_CONFIG_KEY);
+    if (!raw) return normalizeOneDriveJobConfig(null);
+    return normalizeOneDriveJobConfig(JSON.parse(raw));
+  } catch (_err){
+    return normalizeOneDriveJobConfig(null);
+  }
+}
+
+function writeOneDriveJobConfig(config){
+  const normalized = normalizeOneDriveJobConfig(config);
+  if (typeof window !== "undefined") window.oneDriveJobConfig = normalized;
+  if (typeof window === "undefined" || !window.localStorage) return normalized;
+  try {
+    window.localStorage.setItem(JOB_ONEDRIVE_CONFIG_KEY, JSON.stringify(normalized));
+  } catch (_err){ }
+  return normalized;
+}
+
+if (typeof window !== "undefined"){
+  window.getOneDriveJobConfig = ()=> normalizeOneDriveJobConfig(window.oneDriveJobConfig || readOneDriveJobConfig());
+  if (!window.oneDriveJobConfig) window.oneDriveJobConfig = readOneDriveJobConfig();
+}
+
+function suggestedOneDriveFileUrl(fileName){
+  const cfg = (typeof window !== "undefined" && typeof window.getOneDriveJobConfig === "function")
+    ? window.getOneDriveJobConfig()
+    : normalizeOneDriveJobConfig(null);
+  const base = String(cfg.baseUrl || "").trim();
+  if (!base) return "";
+  const slash = base.endsWith("/") ? "" : "/";
+  return `${base}${slash}${encodeURIComponent(String(fileName || "attachment"))}`;
+}
+
+function promptOneDriveLinkForFile(fileName, existingUrl = ""){
+  const suggestion = suggestedOneDriveFileUrl(fileName);
+  const initial = String(existingUrl || suggestion || "");
+  const next = window.prompt
+    ? window.prompt(`Paste a secure OneDrive URL for "${fileName || "attachment"}"`, initial)
+    : initial;
+  if (next == null) return null;
+  const url = String(next).trim();
+  if (!url) return "";
+  if (!/^https:\/\//i.test(url)){
+    toast("Please provide a full https:// OneDrive URL.");
+    return null;
+  }
+  return url;
+}
 
 function extractAttachmentExtension(filename){
   const name = String(filename || "");
@@ -928,6 +991,7 @@ async function filesToAttachments(fileList){
         size: typeof file.size === "number" ? file.size : null,
         dataUrl,
         preview,
+        source: "upload",
         addedAt: new Date().toISOString()
       });
     } catch (err){
@@ -13675,7 +13739,52 @@ function renderJobs(){
 
   const addFormToggle = content.querySelector("[data-job-add-toggle]");
   const newFilesBtn = document.getElementById("jobFilesBtn");
+  const newOneDriveLinkBtn = document.getElementById("jobOneDriveLinkBtn");
   const newFilesInput = document.getElementById("jobFiles");
+  const oneDriveSetupBtn = content.querySelector("[data-job-onedrive-setup]");
+  const oneDriveModal = content.querySelector("#jobOneDriveModal");
+  const oneDriveBaseUrlInput = content.querySelector("#jobOneDriveBaseUrl");
+  const oneDriveFolderHintInput = content.querySelector("#jobOneDriveFolderHint");
+  const oneDriveEnabledInput = content.querySelector("#jobOneDriveEnabled");
+  const oneDriveSaveBtn = content.querySelector("[data-onedrive-save]");
+  const oneDriveCancelBtns = Array.from(content.querySelectorAll("[data-onedrive-cancel]"));
+
+  const closeOneDriveModal = ()=>{
+    if (!oneDriveModal) return;
+    oneDriveModal.setAttribute("hidden", "");
+    document.body.classList.remove("modal-open");
+  };
+  const openOneDriveModal = ()=>{
+    if (!oneDriveModal) return;
+    oneDriveModal.removeAttribute("hidden");
+    document.body.classList.add("modal-open");
+    try {
+      oneDriveBaseUrlInput?.focus({ preventScroll: true });
+    } catch (_err){
+      oneDriveBaseUrlInput?.focus();
+    }
+  };
+  oneDriveSetupBtn?.addEventListener("click", ()=>{
+    closeFileMenu();
+    closeActionMenu();
+    closeHistoryActionMenu();
+    openOneDriveModal();
+  });
+  oneDriveCancelBtns.forEach(btn => btn.addEventListener("click", closeOneDriveModal));
+  oneDriveModal?.addEventListener("click", (event)=>{
+    if (event.target === oneDriveModal) closeOneDriveModal();
+  });
+  oneDriveSaveBtn?.addEventListener("click", ()=>{
+    const next = writeOneDriveJobConfig({
+      enabled: !!oneDriveEnabledInput?.checked,
+      baseUrl: oneDriveBaseUrlInput?.value || "",
+      folderHint: oneDriveFolderHintInput?.value || "",
+      lastLinkedAt: new Date().toISOString()
+    });
+    closeOneDriveModal();
+    toast(next.enabled ? "OneDrive setup saved" : "OneDrive setup saved (disabled)");
+    renderJobs();
+  });
 
   addFormToggle?.addEventListener("click", ()=>{
     const formState = captureNewJobFormState();
@@ -13702,6 +13811,23 @@ function renderJobs(){
   });
 
   newFilesBtn?.addEventListener("click", ()=>{ newFilesInput?.click(); });
+  newOneDriveLinkBtn?.addEventListener("click", ()=>{
+    const defaultName = window.prompt ? window.prompt("File name for this OneDrive link", "Drawing.dxf") : "Drawing.dxf";
+    if (!defaultName) return;
+    const url = promptOneDriveLinkForFile(defaultName);
+    if (url == null) return;
+    pendingNewJobFiles.push({
+      id: genId(defaultName || "job_file"),
+      name: String(defaultName || "Attachment").trim() || "Attachment",
+      type: "",
+      size: null,
+      url,
+      source: "onedrive",
+      addedAt: new Date().toISOString()
+    });
+    toast("OneDrive file link added");
+    renderJobs();
+  });
   newFilesInput?.addEventListener("change", async (e)=>{
     const files = e.target.files;
     if (!files || !files.length) return;
@@ -14701,6 +14827,48 @@ function renderJobs(){
       closeActionMenu();
       closeHistoryActionMenu();
       content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
+      return;
+    }
+
+    const linkJobFile = e.target.closest("[data-link-job-file]");
+    if (linkJobFile){
+      const id = linkJobFile.getAttribute("data-link-job-file");
+      const j = cuttingJobs.find(x=>x.id===id);
+      if (!j) return;
+      const defaultName = window.prompt ? window.prompt("File name for this OneDrive link", "Drawing.dxf") : "Drawing.dxf";
+      if (!defaultName) return;
+      const url = promptOneDriveLinkForFile(defaultName);
+      if (url == null) return;
+      j.files = Array.isArray(j.files) ? j.files : [];
+      j.files.push({
+        id: genId(defaultName || "job_file"),
+        name: String(defaultName || "Attachment").trim() || "Attachment",
+        type: "",
+        size: null,
+        url,
+        source: "onedrive",
+        addedAt: new Date().toISOString()
+      });
+      saveCloudDebounced();
+      toast("OneDrive file link added");
+      renderJobs();
+      return;
+    }
+
+    const editFileLink = e.target.closest("[data-edit-file-link]");
+    if (editFileLink){
+      const id = editFileLink.getAttribute("data-edit-file-link");
+      const idx = Number(editFileLink.getAttribute("data-file-index"));
+      const j = cuttingJobs.find(x=>x.id===id);
+      const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null;
+      if (!file) return;
+      const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || "");
+      if (url == null) return;
+      file.url = url;
+      file.source = "onedrive";
+      saveCloudDebounced();
+      toast(url ? "File link updated" : "File link cleared");
+      renderJobs();
       return;
     }
 

@@ -2007,6 +2007,13 @@ function viewJobs(){
     if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "—";
     return dt.toLocaleDateString();
   };
+  const oneDriveConfig = (typeof window.getOneDriveJobConfig === "function")
+    ? window.getOneDriveJobConfig()
+    : { enabled: false, baseUrl: "", folderHint: "", lastLinkedAt: "" };
+  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.baseUrl);
+  const oneDriveStatusLabel = oneDriveReady
+    ? `OneDrive linked${oneDriveConfig.folderHint ? ` · ${oneDriveConfig.folderHint}` : ""}`
+    : "OneDrive not linked";
   const extractFileExtension = (filename)=>{
     const name = String(filename || "");
     const dot = name.lastIndexOf(".");
@@ -2140,6 +2147,7 @@ function viewJobs(){
                   ? `<img src="${esc(preview.content)}" alt="Preview of ${esc(preview.name)}" class="job-file-preview-image">`
                   : `<span class="job-file-preview-message small muted">${esc(preview.content)}</span>`}
               </div>
+              ${preview.href ? `<a class="job-file-preview-open small" href="${esc(preview.href)}" target="_blank" rel="noopener">Open file</a>` : ""}
             </div>
           `).join("")}
         </div>
@@ -3455,14 +3463,15 @@ function viewJobs(){
             </div>
               <label class="job-edit-note">Notes<textarea data-j="notes" data-id="${j.id}" rows="3" placeholder="Notes...">${j.notes||""}</textarea></label>
               <div class="job-edit-files">
-                <button type="button" data-upload-job="${j.id}">Add Files</button>
+                <div class="job-edit-files-actions"><button type="button" data-upload-job="${j.id}">Add Files</button><button type="button" data-link-job-file="${j.id}">Link OneDrive URL</button></div>
                 <input type="file" data-job-file-input="${j.id}" multiple style="display:none">
                 <ul class="job-file-list">
                   ${jobFiles.length ? jobFiles.map((f, idx)=>{
                     const safeName = f.name || `file_${idx+1}`;
                     const href = f.dataUrl || f.url || "";
-                    const link = href ? `<a href="${href}" download="${safeName}">${safeName}</a>` : safeName;
-                    return `<li>${link} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
+                    const link = href ? `<a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a>` : safeName;
+                    const sourceTag = f?.source === "onedrive" ? `<span class="job-file-source-badge">OneDrive</span>` : "";
+                    return `<li>${link} ${sourceTag} <button type="button" class="link" data-edit-file-link="${j.id}" data-file-index="${idx}">Link</button> <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
                   }).join("") : `<li class=\"muted\">No files attached</li>`}
                 </ul>
               </div>
@@ -3510,10 +3519,12 @@ function viewJobs(){
               aria-expanded="${addFormOpen ? "true" : "false"}"
               aria-controls="jobAddPanel"
             >${addFormOpen ? "Hide add job form" : "+ New cutting job"}</button>
+            <button type="button" class="job-history-button" data-job-onedrive-setup>OneDrive setup</button>
             <button type="button" class="job-history-button" data-job-naming-open>Open Naming Widget</button>
             <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
           </div>
         </div>
+        <div class="job-onedrive-status small muted">${esc(oneDriveStatusLabel)}</div>
         ${!addFormOpen && pendingFiles.length
           ? `<div class="job-add-indicator" role="status" aria-live="polite">${pendingSummary}</div>`
           : ""}
@@ -3548,6 +3559,7 @@ function viewJobs(){
             </p>
           </div>
           <button type="button" id="jobFilesBtn">Attach Files</button>
+          <button type="button" id="jobOneDriveLinkBtn">Attach OneDrive Link</button>
           <input type="file" id="jobFiles" multiple style="display:none">
           <button type="submit">Add Job</button>
         </form>
@@ -3594,6 +3606,31 @@ function viewJobs(){
         <tbody>${rows}</tbody>
       </table>
       <p class="small muted">Material cost and quantity update immediately when changed.</p>
+      <div class="job-note-modal-backdrop" id="jobOneDriveModal" hidden>
+        <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobOneDriveModalTitle" aria-describedby="jobOneDriveModalDescription">
+          <div class="job-note-modal-header">
+            <h4 id="jobOneDriveModalTitle">OneDrive setup wizard</h4>
+            <button type="button" class="job-note-modal-close" data-onedrive-cancel aria-label="Close OneDrive setup">×</button>
+          </div>
+          <div class="job-note-modal-body">
+            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Link cutting-job files to secure OneDrive URLs. Paste your base folder URL once, then quickly attach direct file links to jobs.</p>
+            <label class="job-edit-note">Base folder URL
+              <input type="url" id="jobOneDriveBaseUrl" placeholder="https://.../Documents/CuttingJobs/" value="${esc(oneDriveConfig.baseUrl || "")}">
+            </label>
+            <label class="job-edit-note">Folder label (optional)
+              <input type="text" id="jobOneDriveFolderHint" placeholder="Shop drawings" value="${esc(oneDriveConfig.folderHint || "")}">
+            </label>
+            <label class="job-edit-note">
+              <input type="checkbox" id="jobOneDriveEnabled" ${oneDriveConfig.enabled ? "checked" : ""}> Enable OneDrive linking for cutting jobs
+            </label>
+            <p class="small muted">Tip: use direct, authenticated OneDrive links for each file when prompted (Link OneDrive URL in edit mode).</p>
+          </div>
+          <div class="job-note-modal-actions">
+            <button type="button" class="job-note-modal-secondary" data-onedrive-cancel>Cancel</button>
+            <button type="button" class="job-note-modal-primary" data-onedrive-save>Save setup</button>
+          </div>
+        </div>
+      </div>
       <div class="job-naming-modal-backdrop" id="jobNamingModal" hidden>
         <div class="job-naming-modal" role="dialog" aria-modal="true" aria-labelledby="jobNamingModalTitle">
           <div class="job-note-modal-header">
