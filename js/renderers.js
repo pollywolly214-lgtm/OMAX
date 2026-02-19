@@ -13048,6 +13048,7 @@ function renderJobs(){
 
   const noteBackdrop = content.querySelector("#jobNoteModal");
   const namingBackdrop = content.querySelector("#jobNamingModal");
+  const namingDialog = namingBackdrop?.querySelector(".job-naming-modal") || null;
   const flowBackdrop = content.querySelector("#jobFlowModal");
   const flowChart = content.querySelector("#jobFlowChart");
   const flowFilterInput = content.querySelector("#jobFlowFilter");
@@ -13525,20 +13526,45 @@ function renderJobs(){
 
   const namingHostBlock = namingBackdrop ? namingBackdrop.closest(".job-main-block") : null;
 
+  const lockNamingScroll = ()=>{
+    if (document.body.classList.contains("job-naming-lock-scroll")) return;
+    const scrollY = window.scrollY || window.pageYOffset || 0;
+    document.body.dataset.namingScrollY = String(scrollY);
+    document.body.style.top = `-${scrollY}px`;
+    document.body.classList.add("job-naming-lock-scroll");
+  };
+
+  const unlockNamingScroll = ()=>{
+    if (!document.body.classList.contains("job-naming-lock-scroll")) return;
+    const y = Number.parseInt(document.body.dataset.namingScrollY || "0", 10);
+    document.body.classList.remove("job-naming-lock-scroll");
+    document.body.style.top = "";
+    delete document.body.dataset.namingScrollY;
+    if (Number.isFinite(y)) window.scrollTo(0, y);
+  };
+
   const closeNamingModal = ()=>{
     if (!namingBackdrop) return;
     namingBackdrop.classList.remove("open");
     namingBackdrop.hidden = true;
     namingHostBlock?.classList.remove("job-main-block--naming-open");
     document.body.classList.remove("job-naming-open");
+    unlockNamingScroll();
   };
 
   const openNamingModal = ()=>{
     if (!namingBackdrop) return;
+    if (namingBackdrop.parentElement !== document.body){
+      document.body.appendChild(namingBackdrop);
+    }
+    lockNamingScroll();
     namingBackdrop.hidden = false;
     namingBackdrop.classList.add("open");
     namingHostBlock?.classList.add("job-main-block--naming-open");
     document.body.classList.add("job-naming-open");
+    if (namingDialog){
+      try { namingDialog.focus({ preventScroll: true }); } catch (_err) { }
+    }
   };
 
   content.querySelector("[data-job-naming-open]")?.addEventListener("click", (event)=>{

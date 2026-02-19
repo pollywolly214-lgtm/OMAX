@@ -3149,15 +3149,23 @@ body.modal-open .auth-bar {
   position: relative;
   z-index: 20000;
 }
+body.job-naming-lock-scroll {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  overflow: hidden;
+}
 .job-naming-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(19, 35, 63, 0.45);
+  background: rgba(0, 0, 0, 0.72);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
-  z-index: 20001;
+  z-index: 120000;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 body.job-naming-open {
   overflow: hidden;
@@ -3167,7 +3175,7 @@ body.job-naming-open {
 }
 .job-naming-modal {
   width: min(980px, 100%);
-  height: min(760px, 92vh);
+  height: min(760px, calc(100vh - 48px));
   background: #fff;
   border-radius: 14px;
   box-shadow: 0 18px 42px rgba(18, 32, 59, 0.32);

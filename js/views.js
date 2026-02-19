@@ -3539,7 +3539,7 @@ function viewJobs(){
         </div>
       </div>
       <div class="job-naming-modal-backdrop" id="jobNamingModal" hidden>
-        <div class="job-naming-modal" role="dialog" aria-modal="true" aria-labelledby="jobNamingModalTitle">
+        <div class="job-naming-modal" role="dialog" aria-modal="true" aria-labelledby="jobNamingModalTitle" tabindex="-1">
           <div class="job-note-modal-header">
             <h4 id="jobNamingModalTitle">File Naming Widget</h4>
             <button type="button" class="job-note-modal-close" data-naming-close aria-label="Close naming widget">×</button>
