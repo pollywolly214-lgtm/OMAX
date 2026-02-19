@@ -808,6 +808,7 @@ function editingCompletedJobsSet(){
 
 const CAD_PREVIEWABLE_EXTENSIONS = new Set([".dxf", ".ord", ".omx"]);
 const JOB_ONEDRIVE_CONFIG_KEY = "cutting_job_onedrive_config_v1";
+const JOB_ONEDRIVE_LIBRARY_KEY = "cutting_job_onedrive_library_v1";
 
 function normalizeOneDriveJobConfig(config){
   const source = config && typeof config === "object" ? config : {};
@@ -843,6 +844,47 @@ function writeOneDriveJobConfig(config){
 if (typeof window !== "undefined"){
   window.getOneDriveJobConfig = ()=> normalizeOneDriveJobConfig(window.oneDriveJobConfig || readOneDriveJobConfig());
   if (!window.oneDriveJobConfig) window.oneDriveJobConfig = readOneDriveJobConfig();
+}
+
+function normalizeOneDriveLibraryEntry(entry){
+  const source = entry && typeof entry === "object" ? entry : {};
+  const id = typeof source.id === "string" && source.id ? source.id : genId(source.name || source.fileName || "onedrive_file");
+  const name = typeof source.name === "string" && source.name.trim()
+    ? source.name.trim()
+    : (typeof source.fileName === "string" ? source.fileName.trim() : "Linked file");
+  const url = typeof source.url === "string" ? source.url.trim() : "";
+  const previewUrl = typeof source.previewUrl === "string" ? source.previewUrl.trim() : "";
+  return { id, name, fileName: name, url, previewUrl, source: "onedrive", addedAt: typeof source.addedAt === "string" ? source.addedAt : new Date().toISOString() };
+}
+
+function readOneDriveJobLibrary(){
+  if (typeof window === "undefined" || !window.localStorage) return [];
+  try {
+    const raw = window.localStorage.getItem(JOB_ONEDRIVE_LIBRARY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeOneDriveLibraryEntry).filter(item => item.url);
+  } catch (_err){
+    return [];
+  }
+}
+
+function writeOneDriveJobLibrary(list){
+  const normalized = Array.isArray(list) ? list.map(normalizeOneDriveLibraryEntry).filter(item => item.url) : [];
+  if (typeof window !== "undefined") window.oneDriveJobLibrary = normalized;
+  if (typeof window === "undefined" || !window.localStorage) return normalized;
+  try {
+    window.localStorage.setItem(JOB_ONEDRIVE_LIBRARY_KEY, JSON.stringify(normalized));
+  } catch (_err){ }
+  return normalized;
+}
+
+if (typeof window !== "undefined"){
+  window.getOneDriveJobLibrary = ()=> Array.isArray(window.oneDriveJobLibrary)
+    ? window.oneDriveJobLibrary.map(normalizeOneDriveLibraryEntry)
+    : readOneDriveJobLibrary();
+  if (!Array.isArray(window.oneDriveJobLibrary)) window.oneDriveJobLibrary = readOneDriveJobLibrary();
 }
 
 function suggestedOneDriveFileUrl(fileName){
@@ -13748,6 +13790,13 @@ function renderJobs(){
   const oneDriveEnabledInput = content.querySelector("#jobOneDriveEnabled");
   const oneDriveSaveBtn = content.querySelector("[data-onedrive-save]");
   const oneDriveCancelBtns = Array.from(content.querySelectorAll("[data-onedrive-cancel]"));
+  const oneDriveLibraryNameInput = content.querySelector("#jobOneDriveFileName");
+  const oneDriveLibraryUrlInput = content.querySelector("#jobOneDriveFileUrl");
+  const oneDriveLibraryPreviewInput = content.querySelector("#jobOneDrivePreviewUrl");
+  const oneDriveLibraryAddBtn = content.querySelector("[data-onedrive-library-add]");
+  const oneDriveLibraryList = content.querySelector("#jobOneDriveLibraryList");
+  const oneDriveLibrarySelect = document.getElementById("jobOneDriveLibrarySelect");
+  const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
 
   const closeOneDriveModal = ()=>{
     if (!oneDriveModal) return;
@@ -13783,6 +13832,51 @@ function renderJobs(){
     });
     closeOneDriveModal();
     toast(next.enabled ? "OneDrive setup saved" : "OneDrive setup saved (disabled)");
+    renderJobs();
+  });
+
+  oneDriveLibraryAddBtn?.addEventListener("click", ()=>{
+    const name = String(oneDriveLibraryNameInput?.value || "").trim();
+    const url = String(oneDriveLibraryUrlInput?.value || "").trim();
+    const previewUrl = String(oneDriveLibraryPreviewInput?.value || "").trim();
+    if (!name){ toast("Enter a file name."); return; }
+    if (!/^https:\/\//i.test(url)){ toast("Enter a valid https:// OneDrive file URL."); return; }
+    if (previewUrl && !/^https:\/\//i.test(previewUrl)){ toast("Preview URL must start with https://"); return; }
+    const list = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
+    list.push({ id: genId(name), name, fileName: name, url, previewUrl, source: "onedrive", addedAt: new Date().toISOString() });
+    writeOneDriveJobLibrary(list);
+    toast("OneDrive file reference added");
+    renderJobs();
+  });
+
+  oneDriveLibraryList?.addEventListener("click", (event)=>{
+    const removeBtn = event.target instanceof HTMLElement ? event.target.closest("[data-onedrive-library-remove]") : null;
+    if (!removeBtn) return;
+    const id = removeBtn.getAttribute("data-onedrive-library-remove") || "";
+    const list = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
+    const next = list.filter(item => String(item?.id) !== String(id));
+    writeOneDriveJobLibrary(next);
+    toast("OneDrive file reference removed");
+    renderJobs();
+  });
+
+  oneDriveLibraryAddToJobBtn?.addEventListener("click", ()=>{
+    const id = oneDriveLibrarySelect?.value || "";
+    if (!id){ toast("Choose a OneDrive file from the library first."); return; }
+    const list = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
+    const entry = list.find(item => String(item?.id) === String(id));
+    if (!entry){ toast("Selected library file not found."); return; }
+    pendingNewJobFiles.push({
+      id: genId(entry.name || "job_file"),
+      name: entry.name || entry.fileName || "Linked file",
+      type: "",
+      size: null,
+      url: entry.url,
+      preview: entry.previewUrl ? { mode: "image", content: entry.previewUrl } : null,
+      source: "onedrive",
+      addedAt: new Date().toISOString()
+    });
+    toast("OneDrive library file added to job");
     renderJobs();
   });
 
@@ -14331,11 +14425,33 @@ function renderJobs(){
     if (previewSelect instanceof HTMLSelectElement){
       const previewRoot = previewSelect.closest("[data-file-preview]");
       if (!previewRoot) return;
-      const selected = String(previewSelect.value ?? "0");
-      previewRoot.querySelectorAll("[data-file-preview-pane]").forEach((pane)=>{
-        const key = pane.getAttribute("data-file-preview-pane") || "";
-        pane.hidden = key !== selected;
-      });
+      const option = previewSelect.selectedOptions?.[0];
+      if (!option) return;
+      const name = option.getAttribute("data-preview-name") || option.textContent || "Attached file";
+      const mode = option.getAttribute("data-preview-mode") || "message";
+      const contentValue = option.getAttribute("data-preview-content") || "";
+      const href = option.getAttribute("data-preview-href") || "";
+      const nameEl = previewRoot.querySelector("[data-preview-name]");
+      const imgEl = previewRoot.querySelector("[data-preview-image]");
+      const msgEl = previewRoot.querySelector("[data-preview-message]");
+      const openEl = previewRoot.querySelector("[data-preview-open]");
+      if (nameEl){
+        nameEl.textContent = name;
+        nameEl.setAttribute("title", name);
+      }
+      if (imgEl instanceof HTMLImageElement){
+        imgEl.src = mode === "image" ? contentValue : "";
+        imgEl.alt = `Preview of ${name}`;
+        imgEl.hidden = mode !== "image";
+      }
+      if (msgEl){
+        msgEl.textContent = mode === "message" ? contentValue : "";
+        msgEl.hidden = mode !== "message";
+      }
+      if (openEl instanceof HTMLAnchorElement){
+        openEl.href = href;
+        openEl.hidden = !href;
+      }
       return;
     }
 
@@ -14374,11 +14490,33 @@ function renderJobs(){
     if (!(previewSelect instanceof HTMLSelectElement)) return;
     const previewRoot = previewSelect.closest("[data-file-preview]");
     if (!previewRoot) return;
-    const selected = String(previewSelect.value ?? "0");
-    previewRoot.querySelectorAll("[data-file-preview-pane]").forEach((pane)=>{
-      const key = pane.getAttribute("data-file-preview-pane") || "";
-      pane.hidden = key !== selected;
-    });
+    const option = previewSelect.selectedOptions?.[0];
+    if (!option) return;
+    const name = option.getAttribute("data-preview-name") || option.textContent || "Attached file";
+    const mode = option.getAttribute("data-preview-mode") || "message";
+    const contentValue = option.getAttribute("data-preview-content") || "";
+    const href = option.getAttribute("data-preview-href") || "";
+    const nameEl = previewRoot.querySelector("[data-preview-name]");
+    const imgEl = previewRoot.querySelector("[data-preview-image]");
+    const msgEl = previewRoot.querySelector("[data-preview-message]");
+    const openEl = previewRoot.querySelector("[data-preview-open]");
+    if (nameEl){
+      nameEl.textContent = name;
+      nameEl.setAttribute("title", name);
+    }
+    if (imgEl instanceof HTMLImageElement){
+      imgEl.src = mode === "image" ? contentValue : "";
+      imgEl.alt = `Preview of ${name}`;
+      imgEl.hidden = mode !== "image";
+    }
+    if (msgEl){
+      msgEl.textContent = mode === "message" ? contentValue : "";
+      msgEl.hidden = mode !== "message";
+    }
+    if (openEl instanceof HTMLAnchorElement){
+      openEl.href = href;
+      openEl.hidden = !href;
+    }
   });
 
   historyBody?.addEventListener("click", async (e)=>{

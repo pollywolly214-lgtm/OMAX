@@ -3043,6 +3043,24 @@ body.modal-open .auth-bar {
 .job-onedrive-status {
   margin-top: 4px;
 }
+.job-onedrive-library {
+  margin-top: 12px;
+  border-top: 1px solid #dbe5f7;
+  padding-top: 10px;
+}
+.job-onedrive-library-add {
+  display: grid;
+  gap: 8px;
+}
+.job-onedrive-library-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  max-height: 150px;
+  overflow: auto;
+}
+.job-onedrive-library-list li {
+  margin: 3px 0;
+}
 .job-file-cell {
   display: flex;
   flex-direction: column;

@@ -2010,6 +2010,9 @@ function viewJobs(){
   const oneDriveConfig = (typeof window.getOneDriveJobConfig === "function")
     ? window.getOneDriveJobConfig()
     : { enabled: false, baseUrl: "", folderHint: "", lastLinkedAt: "" };
+  const oneDriveLibrary = (typeof window.getOneDriveJobLibrary === "function")
+    ? window.getOneDriveJobLibrary()
+    : [];
   const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.baseUrl);
   const oneDriveStatusLabel = oneDriveReady
     ? `OneDrive linked${oneDriveConfig.folderHint ? ` · ${oneDriveConfig.folderHint}` : ""}`
@@ -2107,6 +2110,7 @@ function viewJobs(){
   const filePreviewModel = (file)=>{
     const name = String(file?.name || "Attached file");
     const href = String(file?.dataUrl || file?.url || "");
+    const previewUrl = String(file?.previewUrl || "");
     const ext = extractFileExtension(name);
     const savedPreview = file && typeof file === "object" ? file.preview : null;
     if (savedPreview && typeof savedPreview === "object"){
@@ -2114,6 +2118,7 @@ function viewJobs(){
       const content = String(savedPreview.content || "").trim();
       if (content) return { name, href, mode, content };
     }
+    if (/^https?:\/\//i.test(previewUrl)) return { name, href: href || previewUrl, mode: "image", content: previewUrl };
     if (!href) return { name, href: "", mode: "message", content: "Preview unavailable" };
     if (ext === ".svg") return { name, href, mode: "image", content: href };
     if (/^data:image\//i.test(href)) return { name, href, mode: "image", content: href };
@@ -2132,24 +2137,22 @@ function viewJobs(){
   const buildFileCellMarkup = (jobId, files)=>{
     const previews = (Array.isArray(files) ? files : []).map(filePreviewModel);
     if (!previews.length) return '<div class="job-file-preview-empty small muted">No files attached</div>';
+    const first = previews[0] || { name: "Attached file", mode: "message", content: "Preview unavailable", href: "" };
     const selectId = `jobFileSelect_${esc(jobId)}`;
     return `
       <div class="job-file-preview" data-file-preview data-file-preview-job="${esc(jobId)}">
         ${previews.length > 1
-          ? `<label class="sr-only" for="${selectId}">Choose file preview</label><select id="${selectId}" class="job-file-preview-select" data-file-preview-select="${esc(jobId)}">${previews.map((f, idx)=>`<option value="${idx}">${esc(f.name)}</option>`).join("")}</select>`
+          ? `<label class="sr-only" for="${selectId}">Choose file preview</label><select id="${selectId}" class="job-file-preview-select" data-file-preview-select="${esc(jobId)}">${previews.map((f, idx)=>`<option value="${idx}" data-preview-name="${esc(f.name)}" data-preview-mode="${esc(f.mode)}" data-preview-content="${esc(f.content)}" data-preview-href="${esc(f.href || "")}">${esc(f.name)}</option>`).join("")}</select>`
           : ""}
-        <div class="job-file-preview-panes">
-          ${previews.map((preview, idx) => `
-            <div class="job-file-preview-pane" data-file-preview-pane="${idx}" ${idx === 0 ? "" : "hidden"}>
-              <div class="job-file-preview-name" title="${esc(preview.name)}">${esc(preview.name)}</div>
-              <div class="job-file-preview-frame">
-                ${preview.mode === "image"
-                  ? `<img src="${esc(preview.content)}" alt="Preview of ${esc(preview.name)}" class="job-file-preview-image">`
-                  : `<span class="job-file-preview-message small muted">${esc(preview.content)}</span>`}
-              </div>
-              ${preview.href ? `<a class="job-file-preview-open small" href="${esc(preview.href)}" target="_blank" rel="noopener">Open file</a>` : ""}
+        <div class="job-file-preview-panes" data-file-preview-panes>
+          <div class="job-file-preview-pane" data-file-preview-pane>
+            <div class="job-file-preview-name" data-preview-name title="${esc(first.name)}">${esc(first.name)}</div>
+            <div class="job-file-preview-frame">
+              <img src="${first.mode === "image" ? esc(first.content) : ""}" alt="Preview of ${esc(first.name)}" class="job-file-preview-image" data-preview-image ${first.mode === "image" ? "" : "hidden"}>
+              <span class="job-file-preview-message small muted" data-preview-message ${first.mode === "message" ? "" : "hidden"}>${first.mode === "message" ? esc(first.content) : ""}</span>
             </div>
-          `).join("")}
+            <a class="job-file-preview-open small" data-preview-open href="${esc(first.href || "")}" target="_blank" rel="noopener" ${first.href ? "" : "hidden"}>Open file</a>
+          </div>
         </div>
       </div>
     `;
@@ -3560,6 +3563,11 @@ function viewJobs(){
           </div>
           <button type="button" id="jobFilesBtn">Attach Files</button>
           <button type="button" id="jobOneDriveLinkBtn">Attach OneDrive Link</button>
+          <select id="jobOneDriveLibrarySelect" aria-label="OneDrive library file">
+            <option value="">Select from OneDrive library…</option>
+            ${oneDriveLibrary.map(item => `<option value="${esc(item.id)}">${esc(item.name || item.fileName || "Linked file")}</option>`).join("")}
+          </select>
+          <button type="button" id="jobOneDriveLibraryAddBtn">Add from OneDrive library</button>
           <input type="file" id="jobFiles" multiple style="display:none">
           <button type="submit">Add Job</button>
         </form>
@@ -3624,6 +3632,20 @@ function viewJobs(){
               <input type="checkbox" id="jobOneDriveEnabled" ${oneDriveConfig.enabled ? "checked" : ""}> Enable OneDrive linking for cutting jobs
             </label>
             <p class="small muted">Tip: use direct, authenticated OneDrive links for each file when prompted (Link OneDrive URL in edit mode).</p>
+            <div class="job-onedrive-library">
+              <h5>OneDrive file library</h5>
+              <div class="job-onedrive-library-add">
+                <input type="text" id="jobOneDriveFileName" placeholder="File name (e.g. bracket-01.dxf)">
+                <input type="url" id="jobOneDriveFileUrl" placeholder="Direct OneDrive file URL">
+                <input type="url" id="jobOneDrivePreviewUrl" placeholder="Optional preview image URL">
+                <button type="button" data-onedrive-library-add>Add file reference</button>
+              </div>
+              <ul class="job-onedrive-library-list" id="jobOneDriveLibraryList">
+                ${oneDriveLibrary.length
+                  ? oneDriveLibrary.map(item => `<li><span>${esc(item.name || item.fileName || "Linked file")}</span> <button type="button" class="link" data-onedrive-library-remove="${esc(item.id)}">Remove</button></li>`).join("")
+                  : `<li class="muted">No OneDrive file references yet.</li>`}
+              </ul>
+            </div>
           </div>
           <div class="job-note-modal-actions">
             <button type="button" class="job-note-modal-secondary" data-onedrive-cancel>Cancel</button>
