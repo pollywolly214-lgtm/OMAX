@@ -3563,6 +3563,7 @@ function viewJobs(){
           </div>
           <button type="button" id="jobFilesBtn">Attach Files</button>
           <button type="button" id="jobOneDriveLinkBtn">Attach OneDrive Link</button>
+          <button type="button" id="jobOneDriveBrowseBtn">Browse OneDrive Folder</button>
           <select id="jobOneDriveLibrarySelect" aria-label="OneDrive library file">
             <option value="">Select from OneDrive library…</option>
             ${oneDriveLibrary.map(item => `<option value="${esc(item.id)}">${esc(item.name || item.fileName || "Linked file")}</option>`).join("")}
@@ -3632,6 +3633,9 @@ function viewJobs(){
               <input type="checkbox" id="jobOneDriveEnabled" ${oneDriveConfig.enabled ? "checked" : ""}> Enable OneDrive linking for cutting jobs
             </label>
             <p class="small muted">Tip: use direct, authenticated OneDrive links for each file when prompted (Link OneDrive URL in edit mode).</p>
+            <div class="job-onedrive-sync-actions">
+              <button type="button" class="job-note-modal-secondary" data-onedrive-sync-library>Sync library from OneDrive folder</button>
+            </div>
             <div class="job-onedrive-library">
               <h5>OneDrive file library</h5>
               <div class="job-onedrive-library-add">

@@ -3048,6 +3048,9 @@ body.modal-open .auth-bar {
   border-top: 1px solid #dbe5f7;
   padding-top: 10px;
 }
+.job-onedrive-sync-actions {
+  margin-top: 8px;
+}
 .job-onedrive-library-add {
   display: grid;
   gap: 8px;

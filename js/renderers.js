@@ -913,6 +913,42 @@ function promptOneDriveLinkForFile(fileName, existingUrl = ""){
   return url;
 }
 
+function encodeOneDriveShareToken(url){
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  try {
+    const encoded = btoa(unescape(encodeURIComponent(raw)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+    return `u!${encoded}`;
+  } catch (_err){
+    return "";
+  }
+}
+
+async function fetchOneDriveFolderLibrary(baseUrl){
+  const token = encodeOneDriveShareToken(baseUrl);
+  if (!token) throw new Error("Invalid OneDrive folder URL.");
+  const endpoint = `https://graph.microsoft.com/v1.0/shares/${token}/driveItem/children?$top=200&$select=id,name,webUrl,file,folder,@microsoft.graph.downloadUrl`;
+  const res = await fetch(endpoint, { method: "GET" });
+  if (!res.ok){
+    throw new Error(`Unable to open OneDrive folder (${res.status}). Ensure the folder link is shared and accessible.`);
+  }
+  const payload = await res.json();
+  const items = Array.isArray(payload?.value) ? payload.value : [];
+  const files = items.filter(item => item && !item.folder && item.file);
+  return files.map(item => ({
+    id: String(item.id || genId(item.name || "onedrive_file")),
+    name: String(item.name || "Linked file"),
+    fileName: String(item.name || "Linked file"),
+    url: String(item["@microsoft.graph.downloadUrl"] || item.webUrl || "").trim(),
+    previewUrl: "",
+    source: "onedrive",
+    addedAt: new Date().toISOString()
+  })).filter(entry => entry.url);
+}
+
 function extractAttachmentExtension(filename){
   const name = String(filename || "");
   const dot = name.lastIndexOf(".");
@@ -13794,9 +13830,35 @@ function renderJobs(){
   const oneDriveLibraryUrlInput = content.querySelector("#jobOneDriveFileUrl");
   const oneDriveLibraryPreviewInput = content.querySelector("#jobOneDrivePreviewUrl");
   const oneDriveLibraryAddBtn = content.querySelector("[data-onedrive-library-add]");
+  const oneDriveSyncBtn = content.querySelector("[data-onedrive-sync-library]");
   const oneDriveLibraryList = content.querySelector("#jobOneDriveLibraryList");
   const oneDriveLibrarySelect = document.getElementById("jobOneDriveLibrarySelect");
   const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
+  const oneDriveBrowseBtn = document.getElementById("jobOneDriveBrowseBtn");
+
+  const syncOneDriveLibraryFromConfig = async ()=>{
+    const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
+    const baseUrl = String(cfg?.baseUrl || "").trim();
+    if (!baseUrl){
+      toast("Set your OneDrive folder URL first.");
+      openOneDriveModal();
+      return { ok: false, count: 0 };
+    }
+    try {
+      const fetched = await fetchOneDriveFolderLibrary(baseUrl);
+      if (!fetched.length){
+        toast("No files found in the OneDrive folder.");
+        return { ok: true, count: 0 };
+      }
+      writeOneDriveJobLibrary(fetched);
+      toast(`Synced ${fetched.length} OneDrive file${fetched.length === 1 ? "" : "s"}`);
+      renderJobs();
+      return { ok: true, count: fetched.length };
+    } catch (err){
+      toast(err?.message || "Unable to sync OneDrive folder.");
+      return { ok: false, count: 0 };
+    }
+  };
 
   const closeOneDriveModal = ()=>{
     if (!oneDriveModal) return;
@@ -13835,6 +13897,12 @@ function renderJobs(){
     renderJobs();
   });
 
+  oneDriveSyncBtn?.addEventListener("click", async ()=>{
+    if (oneDriveSyncBtn instanceof HTMLButtonElement) oneDriveSyncBtn.disabled = true;
+    await syncOneDriveLibraryFromConfig();
+    if (oneDriveSyncBtn instanceof HTMLButtonElement) oneDriveSyncBtn.disabled = false;
+  });
+
   oneDriveLibraryAddBtn?.addEventListener("click", ()=>{
     const name = String(oneDriveLibraryNameInput?.value || "").trim();
     const url = String(oneDriveLibraryUrlInput?.value || "").trim();
@@ -13860,10 +13928,16 @@ function renderJobs(){
     renderJobs();
   });
 
-  oneDriveLibraryAddToJobBtn?.addEventListener("click", ()=>{
-    const id = oneDriveLibrarySelect?.value || "";
+  oneDriveLibraryAddToJobBtn?.addEventListener("click", async ()=>{
+    let id = oneDriveLibrarySelect?.value || "";
+    let list = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
+    if (!id && !list.length){
+      const synced = await syncOneDriveLibraryFromConfig();
+      if (!synced.ok || synced.count <= 0) return;
+      list = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
+      id = list[0]?.id ? String(list[0].id) : "";
+    }
     if (!id){ toast("Choose a OneDrive file from the library first."); return; }
-    const list = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
     const entry = list.find(item => String(item?.id) === String(id));
     if (!entry){ toast("Selected library file not found."); return; }
     pendingNewJobFiles.push({
@@ -13878,6 +13952,20 @@ function renderJobs(){
     });
     toast("OneDrive library file added to job");
     renderJobs();
+  });
+
+  oneDriveBrowseBtn?.addEventListener("click", async ()=>{
+    const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
+    const baseUrl = String(cfg?.baseUrl || "").trim();
+    if (!baseUrl){
+      toast("Set your OneDrive folder URL first.");
+      openOneDriveModal();
+      return;
+    }
+    window.open(baseUrl, "_blank", "noopener");
+    if (!oneDriveLibrarySelect?.value){
+      await syncOneDriveLibraryFromConfig();
+    }
   });
 
   addFormToggle?.addEventListener("click", ()=>{
