@@ -814,8 +814,12 @@ function normalizeOneDriveJobConfig(config){
   const source = config && typeof config === "object" ? config : {};
   return {
     enabled: source.enabled === true,
-    baseUrl: typeof source.baseUrl === "string" ? source.baseUrl.trim() : "",
+    clientId: typeof source.clientId === "string" ? source.clientId.trim() : "",
+    tenantId: typeof source.tenantId === "string" && source.tenantId.trim() ? source.tenantId.trim() : "common",
+    folderPath: typeof source.folderPath === "string" ? source.folderPath.trim().replace(/^\/+|\/+$/g, "") : "",
     folderHint: typeof source.folderHint === "string" ? source.folderHint.trim() : "",
+    accessToken: typeof source.accessToken === "string" ? source.accessToken : "",
+    accessTokenExpiresAt: typeof source.accessTokenExpiresAt === "string" ? source.accessTokenExpiresAt : "",
     lastLinkedAt: typeof source.lastLinkedAt === "string" ? source.lastLinkedAt : ""
   };
 }
@@ -891,7 +895,7 @@ function suggestedOneDriveFileUrl(fileName){
   const cfg = (typeof window !== "undefined" && typeof window.getOneDriveJobConfig === "function")
     ? window.getOneDriveJobConfig()
     : normalizeOneDriveJobConfig(null);
-  const base = String(cfg.baseUrl || "").trim();
+  const base = "";
   if (!base) return "";
   const slash = base.endsWith("/") ? "" : "/";
   return `${base}${slash}${encodeURIComponent(String(fileName || "attachment"))}`;
@@ -913,25 +917,62 @@ function promptOneDriveLinkForFile(fileName, existingUrl = ""){
   return url;
 }
 
-function encodeOneDriveShareToken(url){
-  const raw = String(url || "").trim();
-  if (!raw) return "";
-  try {
-    const encoded = btoa(unescape(encodeURIComponent(raw)))
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/g, "");
-    return `u!${encoded}`;
-  } catch (_err){
-    return "";
-  }
+async function connectOneDriveInteractive(config){
+  const cfg = normalizeOneDriveJobConfig(config);
+  if (!cfg.clientId) throw new Error("Enter Azure App (client) ID first.");
+  const tenant = cfg.tenantId || "common";
+  const redirectUri = `${window.location.origin}${window.location.pathname}`;
+  const state = genId("od_state");
+  const authUrl = `https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/authorize?client_id=${encodeURIComponent(cfg.clientId)}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&response_mode=fragment&scope=${encodeURIComponent("Files.Read User.Read")}&state=${encodeURIComponent(state)}`;
+  const popup = window.open(authUrl, "onedriveAuth", "width=520,height=720");
+  if (!popup) throw new Error("Popup blocked. Allow popups and try again.");
+  return new Promise((resolve, reject)=>{
+    const started = Date.now();
+    const timer = setInterval(()=>{
+      if (!popup || popup.closed){ clearInterval(timer); reject(new Error("OneDrive sign-in cancelled.")); return; }
+      if (Date.now() - started > 120000){ clearInterval(timer); try { popup.close(); } catch (_err) {} reject(new Error("OneDrive sign-in timed out.")); return; }
+      let hash = "";
+      try {
+        const href = popup.location.href;
+        if (!href.startsWith(redirectUri)) return;
+        hash = popup.location.hash || "";
+      } catch (_err){ return; }
+      if (!hash) return;
+      const params = new URLSearchParams(hash.replace(/^#/, ""));
+      const err = params.get("error_description") || params.get("error");
+      if (err){ clearInterval(timer); try { popup.close(); } catch (_err) {} reject(new Error(err)); return; }
+      const token = params.get("access_token") || "";
+      const expiresIn = Number(params.get("expires_in") || "3600");
+      clearInterval(timer);
+      try { popup.close(); } catch (_err) {}
+      if (!token) { reject(new Error("No access token returned by OneDrive.")); return; }
+      const expIso = new Date(Date.now() + (Math.max(60, expiresIn - 60) * 1000)).toISOString();
+      resolve({ accessToken: token, accessTokenExpiresAt: expIso });
+    }, 400);
+  });
 }
 
-async function fetchOneDriveFolderLibrary(baseUrl){
-  const token = encodeOneDriveShareToken(baseUrl);
-  if (!token) throw new Error("Invalid OneDrive folder URL.");
-  const endpoint = `https://graph.microsoft.com/v1.0/shares/${token}/driveItem/children?$top=200&$select=id,name,webUrl,file,folder,@microsoft.graph.downloadUrl`;
-  const res = await fetch(endpoint, { method: "GET" });
+function oneDriveTokenValid(config){
+  const token = String(config?.accessToken || "");
+  const exp = Date.parse(String(config?.accessTokenExpiresAt || ""));
+  if (!token) return false;
+  if (!Number.isFinite(exp)) return true;
+  return exp > Date.now();
+}
+
+function encodeGraphPath(path){
+  const clean = String(path || "").trim().replace(/^\/+|\/+$/g, "");
+  if (!clean) return "";
+  return clean.split("/").map(part => encodeURIComponent(part)).join("/");
+}
+
+async function fetchOneDriveFolderLibrary(config){
+  const cfg = normalizeOneDriveJobConfig(config);
+  if (!oneDriveTokenValid(cfg)) throw new Error("Connect OneDrive first.");
+  if (!cfg.folderPath) throw new Error("Set OneDrive folder path first.");
+  const path = encodeGraphPath(cfg.folderPath);
+  const endpoint = `https://graph.microsoft.com/v1.0/me/drive/root:/${path}:/children?$top=200&$select=id,name,webUrl,file,folder,@microsoft.graph.downloadUrl`;
+  const res = await fetch(endpoint, { method: "GET", headers: { Authorization: `Bearer ${cfg.accessToken}` } });
   if (!res.ok){
     throw new Error(`Unable to open OneDrive folder (${res.status}). Ensure the folder link is shared and accessible.`);
   }
@@ -13821,7 +13862,9 @@ function renderJobs(){
   const newFilesInput = document.getElementById("jobFiles");
   const oneDriveSetupBtn = content.querySelector("[data-job-onedrive-setup]");
   const oneDriveModal = content.querySelector("#jobOneDriveModal");
-  const oneDriveBaseUrlInput = content.querySelector("#jobOneDriveBaseUrl");
+  const oneDriveClientIdInput = content.querySelector("#jobOneDriveClientId");
+  const oneDriveTenantIdInput = content.querySelector("#jobOneDriveTenantId");
+  const oneDriveFolderPathInput = content.querySelector("#jobOneDriveFolderPath");
   const oneDriveFolderHintInput = content.querySelector("#jobOneDriveFolderHint");
   const oneDriveEnabledInput = content.querySelector("#jobOneDriveEnabled");
   const oneDriveSaveBtn = content.querySelector("[data-onedrive-save]");
@@ -13834,18 +13877,22 @@ function renderJobs(){
   const oneDriveLibraryList = content.querySelector("#jobOneDriveLibraryList");
   const oneDriveLibrarySelect = document.getElementById("jobOneDriveLibrarySelect");
   const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
-  const oneDriveBrowseBtn = document.getElementById("jobOneDriveBrowseBtn");
+  const oneDriveConnectBtn = content.querySelector("[data-onedrive-connect]");
 
   const syncOneDriveLibraryFromConfig = async ()=>{
     const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
-    const baseUrl = String(cfg?.baseUrl || "").trim();
-    if (!baseUrl){
-      toast("Set your OneDrive folder URL first.");
+    if (!cfg?.folderPath){
+      toast("Set your OneDrive folder path first.");
+      openOneDriveModal();
+      return { ok: false, count: 0 };
+    }
+    if (!oneDriveTokenValid(cfg)){
+      toast("Connect OneDrive first.");
       openOneDriveModal();
       return { ok: false, count: 0 };
     }
     try {
-      const fetched = await fetchOneDriveFolderLibrary(baseUrl);
+      const fetched = await fetchOneDriveFolderLibrary(cfg);
       if (!fetched.length){
         toast("No files found in the OneDrive folder.");
         return { ok: true, count: 0 };
@@ -13870,9 +13917,9 @@ function renderJobs(){
     oneDriveModal.removeAttribute("hidden");
     document.body.classList.add("modal-open");
     try {
-      oneDriveBaseUrlInput?.focus({ preventScroll: true });
+      oneDriveClientIdInput?.focus({ preventScroll: true });
     } catch (_err){
-      oneDriveBaseUrlInput?.focus();
+      oneDriveClientIdInput?.focus();
     }
   };
   oneDriveSetupBtn?.addEventListener("click", ()=>{
@@ -13886,10 +13933,15 @@ function renderJobs(){
     if (event.target === oneDriveModal) closeOneDriveModal();
   });
   oneDriveSaveBtn?.addEventListener("click", ()=>{
+    const currentCfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
     const next = writeOneDriveJobConfig({
       enabled: !!oneDriveEnabledInput?.checked,
-      baseUrl: oneDriveBaseUrlInput?.value || "",
+      clientId: oneDriveClientIdInput?.value || "",
+      tenantId: oneDriveTenantIdInput?.value || "common",
+      folderPath: oneDriveFolderPathInput?.value || "",
       folderHint: oneDriveFolderHintInput?.value || "",
+      accessToken: currentCfg?.accessToken || "",
+      accessTokenExpiresAt: currentCfg?.accessTokenExpiresAt || "",
       lastLinkedAt: new Date().toISOString()
     });
     closeOneDriveModal();
@@ -13901,6 +13953,30 @@ function renderJobs(){
     if (oneDriveSyncBtn instanceof HTMLButtonElement) oneDriveSyncBtn.disabled = true;
     await syncOneDriveLibraryFromConfig();
     if (oneDriveSyncBtn instanceof HTMLButtonElement) oneDriveSyncBtn.disabled = false;
+  });
+
+  oneDriveConnectBtn?.addEventListener("click", async ()=>{
+    const currentCfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
+    const draft = {
+      enabled: !!oneDriveEnabledInput?.checked,
+      clientId: oneDriveClientIdInput?.value || currentCfg?.clientId || "",
+      tenantId: oneDriveTenantIdInput?.value || currentCfg?.tenantId || "common",
+      folderPath: oneDriveFolderPathInput?.value || currentCfg?.folderPath || "",
+      folderHint: oneDriveFolderHintInput?.value || currentCfg?.folderHint || "",
+      accessToken: currentCfg?.accessToken || "",
+      accessTokenExpiresAt: currentCfg?.accessTokenExpiresAt || ""
+    };
+    try {
+      if (oneDriveConnectBtn instanceof HTMLButtonElement) oneDriveConnectBtn.disabled = true;
+      const tokenInfo = await connectOneDriveInteractive(draft);
+      const saved = writeOneDriveJobConfig({ ...draft, ...tokenInfo, lastLinkedAt: new Date().toISOString() });
+      toast(saved.enabled ? "OneDrive connected" : "OneDrive connected (enable it to use in jobs)");
+      renderJobs();
+    } catch (err){
+      toast(err?.message || "OneDrive connect failed.");
+    } finally {
+      if (oneDriveConnectBtn instanceof HTMLButtonElement) oneDriveConnectBtn.disabled = false;
+    }
   });
 
   oneDriveLibraryAddBtn?.addEventListener("click", ()=>{
@@ -13952,20 +14028,6 @@ function renderJobs(){
     });
     toast("OneDrive library file added to job");
     renderJobs();
-  });
-
-  oneDriveBrowseBtn?.addEventListener("click", async ()=>{
-    const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
-    const baseUrl = String(cfg?.baseUrl || "").trim();
-    if (!baseUrl){
-      toast("Set your OneDrive folder URL first.");
-      openOneDriveModal();
-      return;
-    }
-    window.open(baseUrl, "_blank", "noopener");
-    if (!oneDriveLibrarySelect?.value){
-      await syncOneDriveLibraryFromConfig();
-    }
   });
 
   addFormToggle?.addEventListener("click", ()=>{

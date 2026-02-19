@@ -2009,11 +2009,11 @@ function viewJobs(){
   };
   const oneDriveConfig = (typeof window.getOneDriveJobConfig === "function")
     ? window.getOneDriveJobConfig()
-    : { enabled: false, baseUrl: "", folderHint: "", lastLinkedAt: "" };
+    : { enabled: false, clientId: "", tenantId: "common", folderPath: "", folderHint: "", accessToken: "", accessTokenExpiresAt: "", lastLinkedAt: "" };
   const oneDriveLibrary = (typeof window.getOneDriveJobLibrary === "function")
     ? window.getOneDriveJobLibrary()
     : [];
-  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.baseUrl);
+  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.folderPath && oneDriveConfig.accessToken);
   const oneDriveStatusLabel = oneDriveReady
     ? `OneDrive linked${oneDriveConfig.folderHint ? ` · ${oneDriveConfig.folderHint}` : ""}`
     : "OneDrive not linked";
@@ -3563,7 +3563,6 @@ function viewJobs(){
           </div>
           <button type="button" id="jobFilesBtn">Attach Files</button>
           <button type="button" id="jobOneDriveLinkBtn">Attach OneDrive Link</button>
-          <button type="button" id="jobOneDriveBrowseBtn">Browse OneDrive Folder</button>
           <select id="jobOneDriveLibrarySelect" aria-label="OneDrive library file">
             <option value="">Select from OneDrive library…</option>
             ${oneDriveLibrary.map(item => `<option value="${esc(item.id)}">${esc(item.name || item.fileName || "Linked file")}</option>`).join("")}
@@ -3622,9 +3621,15 @@ function viewJobs(){
             <button type="button" class="job-note-modal-close" data-onedrive-cancel aria-label="Close OneDrive setup">×</button>
           </div>
           <div class="job-note-modal-body">
-            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Link cutting-job files to secure OneDrive URLs. Paste your base folder URL once, then quickly attach direct file links to jobs.</p>
-            <label class="job-edit-note">Base folder URL
-              <input type="url" id="jobOneDriveBaseUrl" placeholder="https://.../Documents/CuttingJobs/" value="${esc(oneDriveConfig.baseUrl || "")}">
+            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Connect to OneDrive, set a folder path, then sync and add files directly from the app.</p>
+            <label class="job-edit-note">Azure App (client) ID
+              <input type="text" id="jobOneDriveClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${esc(oneDriveConfig.clientId || "")}">
+            </label>
+            <label class="job-edit-note">Tenant ID (or "common")
+              <input type="text" id="jobOneDriveTenantId" placeholder="common" value="${esc(oneDriveConfig.tenantId || "common")}">
+            </label>
+            <label class="job-edit-note">OneDrive folder path
+              <input type="text" id="jobOneDriveFolderPath" placeholder="Drawings/Cutting Jobs" value="${esc(oneDriveConfig.folderPath || "")}">
             </label>
             <label class="job-edit-note">Folder label (optional)
               <input type="text" id="jobOneDriveFolderHint" placeholder="Shop drawings" value="${esc(oneDriveConfig.folderHint || "")}">
@@ -3632,8 +3637,9 @@ function viewJobs(){
             <label class="job-edit-note">
               <input type="checkbox" id="jobOneDriveEnabled" ${oneDriveConfig.enabled ? "checked" : ""}> Enable OneDrive linking for cutting jobs
             </label>
-            <p class="small muted">Tip: use direct, authenticated OneDrive links for each file when prompted (Link OneDrive URL in edit mode).</p>
+            <p class="small muted">Authenticate once, then sync files directly from OneDrive folder in-app.</p>
             <div class="job-onedrive-sync-actions">
+              <button type="button" class="job-note-modal-secondary" data-onedrive-connect>Connect OneDrive</button>
               <button type="button" class="job-note-modal-secondary" data-onedrive-sync-library>Sync library from OneDrive folder</button>
             </div>
             <div class="job-onedrive-library">
