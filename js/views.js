@@ -3521,7 +3521,7 @@ function viewJobs(){
       </table>
       <p class="small muted">Material cost and quantity update immediately when changed.</p>
       <div class="job-flow-modal-backdrop" id="jobFlowModal" hidden>
-        <div class="job-flow-modal" role="dialog" aria-modal="true" aria-labelledby="jobFlowModalTitle">
+        <div class="job-flow-modal" role="dialog" aria-modal="true" aria-labelledby="jobFlowModalTitle" tabindex="-1">
           <div class="job-note-modal-header">
             <h4 id="jobFlowModalTitle">Cutting Project Flow Chart</h4>
             <button type="button" class="job-note-modal-close" data-job-flow-close aria-label="Close flow chart">×</button>

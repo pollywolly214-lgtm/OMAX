@@ -13053,6 +13053,7 @@ function renderJobs(){
   const flowFilterInput = content.querySelector("#jobFlowFilter");
   const flowGroupingSelect = content.querySelector("#jobFlowGrouping");
   const flowHidePreviews = content.querySelector("#jobFlowHidePreviews");
+  const flowDialog = flowBackdrop?.querySelector(".job-flow-modal") || null;
 
   const normalizeProjectNumber = (value)=> String(value || "").replace(/[^0-9]/g, "").slice(0, 8);
   const normalizeHexColor = (value)=> {
@@ -13568,6 +13569,7 @@ function renderJobs(){
     if (!flowBackdrop) return;
     flowBackdrop.classList.remove("open");
     flowBackdrop.hidden = true;
+    document.body.classList.remove("job-flow-open");
   };
 
   const openFlowModal = ()=>{
@@ -13575,6 +13577,10 @@ function renderJobs(){
     renderFlowChart();
     flowBackdrop.hidden = false;
     flowBackdrop.classList.add("open");
+    document.body.classList.add("job-flow-open");
+    if (flowDialog){
+      try { flowDialog.focus({ preventScroll: true }); } catch (_err) { }
+    }
   };
 
   content.querySelector("[data-job-flow-open]")?.addEventListener("click", (event)=>{
@@ -13591,6 +13597,19 @@ function renderJobs(){
     flowBackdrop.addEventListener("click", (event)=>{
       if (event.target === flowBackdrop) closeFlowModal();
     });
+    flowBackdrop.addEventListener("wheel", (event)=>{
+      if (!flowDialog) return;
+      const insideDialog = flowDialog.contains(event.target instanceof Node ? event.target : null);
+      if (insideDialog) return;
+      event.preventDefault();
+      flowDialog.scrollTop += event.deltaY;
+    }, { passive: false });
+    flowBackdrop.addEventListener("keydown", (event)=>{
+      if (event.key === "Escape" || event.key === "Esc"){
+        event.preventDefault();
+        closeFlowModal();
+      }
+    }, true);
   }
 
   const closeJobNoteModal = ()=>{
