@@ -683,6 +683,7 @@ function renderCoordinateCloudToSvgDataUrl(text) {
   if (!lines.length) return '';
 
   const path = [];
+  const pointsSeen = [];
   const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
   let current = { x: 0, y: 0 };
   let hasCurrent = false;
@@ -715,6 +716,7 @@ function renderCoordinateCloudToSvgDataUrl(text) {
         if (span > 0 && span < 1e6) path.push(`L ${next.x} ${-next.y}`);
       }
 
+      pointsSeen.push(next);
       bounds.minX = Math.min(bounds.minX, next.x);
       bounds.maxX = Math.max(bounds.maxX, next.x);
       bounds.minY = Math.min(bounds.minY, next.y);
@@ -725,7 +727,7 @@ function renderCoordinateCloudToSvgDataUrl(text) {
   });
 
   if (path.length < 2) return '';
-  return buildPathSvgDataUrl(path, bounds);
+  return buildPathSvgDataUrl(path, normalizePreviewBounds(pointsSeen, bounds));
 }
 
 function inferRelativeMode(lines) {
@@ -789,9 +791,47 @@ function buildPathSvgDataUrl(path, bounds) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
+
+function normalizePreviewBounds(points, fallbackBounds) {
+  if (!Array.isArray(points) || points.length < 20) return fallbackBounds;
+
+  const xs = points.map(point => point.x).filter(Number.isFinite).sort((a, b) => a - b);
+  const ys = points.map(point => point.y).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!xs.length || !ys.length) return fallbackBounds;
+
+  const trimmed = {
+    minX: quantile(xs, 0.02),
+    maxX: quantile(xs, 0.98),
+    minY: quantile(ys, 0.02),
+    maxY: quantile(ys, 0.98)
+  };
+
+  const rawW = Math.max(1, fallbackBounds.maxX - fallbackBounds.minX);
+  const rawH = Math.max(1, fallbackBounds.maxY - fallbackBounds.minY);
+  const trimW = Math.max(1, trimmed.maxX - trimmed.minX);
+  const trimH = Math.max(1, trimmed.maxY - trimmed.minY);
+
+  const rawSpan = Math.max(rawW, rawH);
+  const trimSpan = Math.max(trimW, trimH);
+  if (rawSpan / trimSpan > 20) return trimmed;
+
+  return fallbackBounds;
+}
+
+function quantile(sorted, q) {
+  if (!sorted.length) return 0;
+  const index = (sorted.length - 1) * q;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sorted[lower];
+  const ratio = index - lower;
+  return sorted[lower] + ((sorted[upper] - sorted[lower]) * ratio);
+}
+
 function renderBinaryFloatPairsToSvgDataUrl(buffer) {
   const view = new DataView(buffer);
   const path = [];
+  const pointsSeen = [];
   const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
   let prev = null;
 
@@ -804,6 +844,7 @@ function renderBinaryFloatPairsToSvgDataUrl(buffer) {
     const next = { x, y };
     if (!prev) {
       path.push(`M ${next.x} ${-next.y}`);
+      pointsSeen.push(next);
       prev = next;
       bounds.minX = Math.min(bounds.minX, next.x);
       bounds.maxX = Math.max(bounds.maxX, next.x);
@@ -820,6 +861,7 @@ function renderBinaryFloatPairsToSvgDataUrl(buffer) {
       path.push(`L ${next.x} ${-next.y}`);
     }
 
+    pointsSeen.push(next);
     bounds.minX = Math.min(bounds.minX, next.x);
     bounds.maxX = Math.max(bounds.maxX, next.x);
     bounds.minY = Math.min(bounds.minY, next.y);
@@ -828,11 +870,12 @@ function renderBinaryFloatPairsToSvgDataUrl(buffer) {
   }
 
   if (path.length < 3) return '';
-  return buildPathSvgDataUrl(path, bounds);
+  return buildPathSvgDataUrl(path, normalizePreviewBounds(pointsSeen, bounds));
 }
 
 function buildSegmentsSvgDataUrl(segments) {
   const path = [];
+  const pointsSeen = [];
   const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
 
   segments.forEach(segment => {
