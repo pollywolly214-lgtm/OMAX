@@ -774,8 +774,10 @@ function extractLinePoints(line) {
     .map(match => Number.parseFloat(match[0]))
     .filter(Number.isFinite);
 
-  if (numbers.length !== 2) return [];
-  return [{ x: numbers[0], y: numbers[1] }];
+  if (numbers.length < 2) return [];
+  const x = numbers[numbers.length - 2];
+  const y = numbers[numbers.length - 1];
+  return [{ x, y }];
 }
 
 function buildPathSvgDataUrl(path, bounds) {
@@ -842,42 +844,77 @@ function quantile(sorted, q) {
   return sorted[lower] + ((sorted[upper] - sorted[lower]) * ratio);
 }
 
-function renderBinaryFloatPairsToSvgDataUrl(buffer) {
+
+function bestBinaryPointStream(buffer) {
   const view = new DataView(buffer);
+  const candidates = [];
+
+  for (let offset = 0; offset < 8; offset += 1) {
+    const points = [];
+    for (let i = offset; i + 8 <= view.byteLength && points.length < 5000; i += 8) {
+      const x = view.getFloat32(i, true);
+      const y = view.getFloat32(i + 4, true);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (Math.abs(x) > 100000 || Math.abs(y) > 100000) continue;
+      points.push({ x, y });
+    }
+
+    const score = scoreBinaryStream(points);
+    if (score > 0) candidates.push({ points, score });
+  }
+
+  if (!candidates.length) return [];
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0].points;
+}
+
+function scoreBinaryStream(points) {
+  if (points.length < 3) return 0;
+
+  let connected = 0;
+  let tiny = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const jump = Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    if (jump > 0 && jump < 20000) connected += 1;
+    if (jump > 0 && jump < 0.0001) tiny += 1;
+  }
+
+  const bounds = boundsFromPoints(points);
+  if (!Number.isFinite(bounds.minX) || !Number.isFinite(bounds.maxX) || !Number.isFinite(bounds.minY) || !Number.isFinite(bounds.maxY)) return 0;
+  const span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, 1);
+
+  const tinyPenalty = tiny / Math.max(1, points.length - 1);
+  return (connected / Math.max(1, points.length - 1)) * 100 - (tinyPenalty * 20) + Math.log10(span + 1);
+}
+
+function renderBinaryFloatPairsToSvgDataUrl(buffer) {
+  const points = bestBinaryPointStream(buffer);
+  if (points.length < 3) return '';
+
   const path = [];
-  const pointsSeen = [];
   const pointsDrawn = [];
   let prev = null;
 
-  for (let i = 0; i + 8 <= view.byteLength && path.length < 5000; i += 4) {
-    const x = view.getFloat32(i, true);
-    const y = view.getFloat32(i + 4, true);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    if (Math.abs(x) > 100000 || Math.abs(y) > 100000) continue;
-
-    const next = { x, y };
-    pointsSeen.push(next);
-
+  points.forEach(next => {
     if (!prev) {
       path.push(`M ${next.x} ${-next.y}`);
       prev = next;
-      continue;
+      return;
     }
 
     const jump = Math.hypot(next.x - prev.x, next.y - prev.y);
-    if (jump === 0) continue;
+    if (jump === 0) return;
     if (jump > 20000) {
       path.push(`M ${next.x} ${-next.y}`);
     } else {
       path.push(`L ${next.x} ${-next.y}`);
       pointsDrawn.push(prev, next);
     }
-
     prev = next;
-  }
+  });
 
   if (path.length < 3) return '';
-  const focusPoints = pointsDrawn.length >= 2 ? pointsDrawn : pointsSeen;
+  const focusPoints = pointsDrawn.length >= 2 ? pointsDrawn : points;
   const bounds = normalizePreviewBounds(focusPoints, boundsFromPoints(focusPoints));
   return buildPathSvgDataUrl(path, bounds);
 }
