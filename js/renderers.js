@@ -13948,6 +13948,17 @@ function renderJobs(){
   const oneDriveLibrarySelect = document.getElementById("jobOneDriveLibrarySelect");
   const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
   const oneDriveConnectBtn = content.querySelector("[data-onedrive-connect]");
+  const oneDriveConnStatus = content.querySelector("[data-onedrive-connection-status]");
+  const oneDriveFolderStatus = content.querySelector("[data-onedrive-folder-status]");
+  const oneDriveLibraryStatus = content.querySelector("[data-onedrive-library-status]");
+
+  const updateOneDriveWizardStatus = ()=>{
+    const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
+    const lib = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
+    if (oneDriveConnStatus) oneDriveConnStatus.textContent = oneDriveTokenValid(cfg) ? "Connected" : "Not connected";
+    if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = cfg?.folderPath ? cfg.folderPath : "Not set";
+    if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = String(Array.isArray(lib) ? lib.length : 0);
+  };
 
   const syncOneDriveLibraryFromConfig = async ()=>{
     const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
@@ -13991,6 +14002,7 @@ function renderJobs(){
     } catch (_err){
       oneDriveClientIdInput?.focus();
     }
+    updateOneDriveWizardStatus();
   };
   oneDriveSetupBtn?.addEventListener("click", ()=>{
     closeFileMenu();
@@ -14023,6 +14035,7 @@ function renderJobs(){
     if (oneDriveSyncBtn instanceof HTMLButtonElement) oneDriveSyncBtn.disabled = true;
     await syncOneDriveLibraryFromConfig();
     if (oneDriveSyncBtn instanceof HTMLButtonElement) oneDriveSyncBtn.disabled = false;
+    updateOneDriveWizardStatus();
   });
 
   oneDriveConnectBtn?.addEventListener("click", async ()=>{
@@ -14041,6 +14054,7 @@ function renderJobs(){
       const tokenInfo = await connectOneDriveInteractive(draft);
       const saved = writeOneDriveJobConfig({ ...draft, ...tokenInfo, lastLinkedAt: new Date().toISOString() });
       toast(saved.enabled ? "OneDrive connected" : "OneDrive connected (enable it to use in jobs)");
+      updateOneDriveWizardStatus();
       renderJobs();
     } catch (err){
       toast(err?.message || "OneDrive connect failed.");
@@ -14071,10 +14085,32 @@ function renderJobs(){
     const next = list.filter(item => String(item?.id) !== String(id));
     writeOneDriveJobLibrary(next);
     toast("OneDrive file reference removed");
+    updateOneDriveWizardStatus();
     renderJobs();
   });
 
+  const ensureOneDriveReadyForAttach = ()=>{
+    const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
+    if (!cfg?.clientId){
+      toast("OneDrive setup required: add Azure Client ID, Tenant ID, and folder path.");
+      openOneDriveModal();
+      return false;
+    }
+    if (!cfg?.folderPath){
+      toast("OneDrive setup required: add your OneDrive folder path.");
+      openOneDriveModal();
+      return false;
+    }
+    if (!oneDriveTokenValid(cfg)){
+      toast("Connect OneDrive first in the setup wizard.");
+      openOneDriveModal();
+      return false;
+    }
+    return true;
+  };
+
   oneDriveLibraryAddToJobBtn?.addEventListener("click", async ()=>{
+    if (!ensureOneDriveReadyForAttach()) return;
     try {
       const picked = await window.oneDrivePicker.openOneDriveDxfPicker();
       if (!picked) return;
@@ -14108,11 +14144,14 @@ function renderJobs(){
       });
       writeOneDriveJobLibrary(list);
       toast("OneDrive DXF attached to job");
+      updateOneDriveWizardStatus();
       renderJobs();
     } catch (err){
       toast(err?.message || "Unable to add DXF from OneDrive.");
     }
   });
+
+  updateOneDriveWizardStatus();
 
   addFormToggle?.addEventListener("click", ()=>{
     const formState = captureNewJobFormState();
