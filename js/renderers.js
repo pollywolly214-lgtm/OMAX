@@ -858,7 +858,12 @@ function normalizeOneDriveLibraryEntry(entry){
     : (typeof source.fileName === "string" ? source.fileName.trim() : "Linked file");
   const url = typeof source.url === "string" ? source.url.trim() : "";
   const previewUrl = typeof source.previewUrl === "string" ? source.previewUrl.trim() : "";
-  return { id, name, fileName: name, url, previewUrl, source: "onedrive", addedAt: typeof source.addedAt === "string" ? source.addedAt : new Date().toISOString() };
+  const driveId = typeof source.driveId === "string" ? source.driveId : "";
+  const itemId = typeof source.itemId === "string" ? source.itemId : "";
+  const eTag = typeof source.eTag === "string" ? source.eTag : "";
+  const lastModifiedDateTime = typeof source.lastModifiedDateTime === "string" ? source.lastModifiedDateTime : "";
+  const webUrl = typeof source.webUrl === "string" ? source.webUrl : "";
+  return { id, name, fileName: name, url, previewUrl, source: "onedrive", driveId, itemId, eTag, lastModifiedDateTime, webUrl, addedAt: typeof source.addedAt === "string" ? source.addedAt : new Date().toISOString() };
 }
 
 function readOneDriveJobLibrary(){
@@ -920,36 +925,12 @@ function promptOneDriveLinkForFile(fileName, existingUrl = ""){
 async function connectOneDriveInteractive(config){
   const cfg = normalizeOneDriveJobConfig(config);
   if (!cfg.clientId) throw new Error("Enter Azure App (client) ID first.");
-  const tenant = cfg.tenantId || "common";
-  const redirectUri = `${window.location.origin}${window.location.pathname}`;
-  const state = genId("od_state");
-  const authUrl = `https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/authorize?client_id=${encodeURIComponent(cfg.clientId)}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&response_mode=fragment&scope=${encodeURIComponent("Files.Read User.Read")}&state=${encodeURIComponent(state)}`;
-  const popup = window.open(authUrl, "onedriveAuth", "width=520,height=720");
-  if (!popup) throw new Error("Popup blocked. Allow popups and try again.");
-  return new Promise((resolve, reject)=>{
-    const started = Date.now();
-    const timer = setInterval(()=>{
-      if (!popup || popup.closed){ clearInterval(timer); reject(new Error("OneDrive sign-in cancelled.")); return; }
-      if (Date.now() - started > 120000){ clearInterval(timer); try { popup.close(); } catch (_err) {} reject(new Error("OneDrive sign-in timed out.")); return; }
-      let hash = "";
-      try {
-        const href = popup.location.href;
-        if (!href.startsWith(redirectUri)) return;
-        hash = popup.location.hash || "";
-      } catch (_err){ return; }
-      if (!hash) return;
-      const params = new URLSearchParams(hash.replace(/^#/, ""));
-      const err = params.get("error_description") || params.get("error");
-      if (err){ clearInterval(timer); try { popup.close(); } catch (_err) {} reject(new Error(err)); return; }
-      const token = params.get("access_token") || "";
-      const expiresIn = Number(params.get("expires_in") || "3600");
-      clearInterval(timer);
-      try { popup.close(); } catch (_err) {}
-      if (!token) { reject(new Error("No access token returned by OneDrive.")); return; }
-      const expIso = new Date(Date.now() + (Math.max(60, expiresIn - 60) * 1000)).toISOString();
-      resolve({ accessToken: token, accessTokenExpiresAt: expIso });
-    }, 400);
-  });
+  await window.oneDriveAuth.signIn(["User.Read", "Files.Read"]);
+  const accessToken = await window.oneDriveAuth.getAccessToken(["User.Read", "Files.Read"]);
+  return {
+    accessToken,
+    accessTokenExpiresAt: new Date(Date.now() + (55 * 60 * 1000)).toISOString()
+  };
 }
 
 function oneDriveTokenValid(config){
@@ -1119,6 +1100,78 @@ async function filesToAttachments(fileList){
     }
   }
   return attachments;
+}
+
+const JOB_ONEDRIVE_PREVIEW_CACHE_KEY = "cutting_job_onedrive_preview_cache_v1";
+const oneDrivePreviewInFlight = new Map();
+
+function readOneDrivePreviewCache(){
+  if (typeof window === "undefined" || !window.localStorage) return {};
+  try {
+    const raw = window.localStorage.getItem(JOB_ONEDRIVE_PREVIEW_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_err){ return {}; }
+}
+
+function writeOneDrivePreviewCache(cache){
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try { window.localStorage.setItem(JOB_ONEDRIVE_PREVIEW_CACHE_KEY, JSON.stringify(cache || {})); } catch (_err){ }
+}
+
+function previewCacheKey(file){
+  const driveId = String(file?.driveId || "");
+  const itemId = String(file?.itemId || "");
+  const eTag = String(file?.eTag || "");
+  if (!driveId || !itemId) return "";
+  return `${driveId}:${itemId}:${eTag}`;
+}
+
+async function resolveOneDriveAttachmentPreview(file){
+  if (!file || !file.driveId || !file.itemId) return false;
+  if (file.preview && file.preview.mode === "image" && file.preview.content) return true;
+  const inFlightKey = `${file.driveId}:${file.itemId}`;
+  if (oneDrivePreviewInFlight.has(inFlightKey)) return oneDrivePreviewInFlight.get(inFlightKey);
+
+  const task = (async ()=>{
+    try {
+      const metadata = await window.oneDriveGraph.getDriveItemMetadata(file.driveId, file.itemId);
+      if (metadata){
+        file.eTag = metadata.eTag || file.eTag || "";
+        file.lastModifiedDateTime = metadata.lastModifiedDateTime || file.lastModifiedDateTime || "";
+        file.webUrl = metadata.webUrl || file.webUrl || "";
+        file.url = file.url || metadata.webUrl || "";
+      }
+      const cache = readOneDrivePreviewCache();
+      const key = previewCacheKey(file);
+      if (key && cache[key]){
+        file.preview = { mode: "image", content: cache[key] };
+        return true;
+      }
+      const bytes = await window.oneDriveGraph.getDriveItemContentArrayBuffer(file.driveId, file.itemId);
+      const text = window.dxfPreview.arrayBufferToText(bytes);
+      const svg = window.dxfPreview.renderCadToSvgDataUrl(text);
+      if (!svg){
+        file.preview = { mode: "message", content: "2D preview unavailable for this file." };
+        return false;
+      }
+      file.preview = { mode: "image", content: svg };
+      if (key){
+        cache[key] = svg;
+        writeOneDrivePreviewCache(cache);
+      }
+      return true;
+    } catch (_err){
+      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this OneDrive file." };
+      return false;
+    } finally {
+      oneDrivePreviewInFlight.delete(inFlightKey);
+    }
+  })();
+
+  oneDrivePreviewInFlight.set(inFlightKey, task);
+  return task;
 }
 
 function captureNewJobFormState(){
@@ -13106,6 +13159,23 @@ function renderJobs(){
   content.innerHTML = viewJobs();
   setupJobLayout();
 
+  const queueOneDrivePreviewHydration = ()=>{
+    const allJobs = [];
+    if (Array.isArray(cuttingJobs)) allJobs.push(...cuttingJobs);
+    if (Array.isArray(completedCuttingJobs)) allJobs.push(...completedCuttingJobs);
+    const files = allJobs.flatMap(job => Array.isArray(job?.files) ? job.files : []);
+    const targets = files.filter(file => file && file.source === "onedrive" && file.driveId && file.itemId && !(file.preview && file.preview.content));
+    if (!targets.length) return;
+    Promise.allSettled(targets.map(resolveOneDriveAttachmentPreview)).then((results)=>{
+      const changed = results.some(r => r.status === "fulfilled" && r.value === true);
+      if (changed){
+        saveCloudDebounced();
+        renderJobs();
+      }
+    });
+  };
+  queueOneDrivePreviewHydration();
+
   const jobOverlapMessage = "Jobs might be overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
   const jobTableEl = content.querySelector(".job-table");
   const currentOverlapSignature = jobTableEl?.getAttribute("data-job-overlap-signature") || "";
@@ -14005,29 +14075,43 @@ function renderJobs(){
   });
 
   oneDriveLibraryAddToJobBtn?.addEventListener("click", async ()=>{
-    let id = oneDriveLibrarySelect?.value || "";
-    let list = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
-    if (!id && !list.length){
-      const synced = await syncOneDriveLibraryFromConfig();
-      if (!synced.ok || synced.count <= 0) return;
-      list = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
-      id = list[0]?.id ? String(list[0].id) : "";
+    try {
+      const picked = await window.oneDrivePicker.openOneDriveDxfPicker();
+      if (!picked) return;
+      pendingNewJobFiles.push({
+        id: genId(picked.fileName || "job_file"),
+        name: picked.fileName || "Linked file",
+        type: "",
+        size: null,
+        source: "onedrive",
+        driveId: picked.driveId || "",
+        itemId: picked.itemId || "",
+        eTag: picked.eTag || "",
+        lastModifiedDateTime: picked.lastModifiedDateTime || "",
+        webUrl: picked.webUrl || "",
+        url: picked.webUrl || "",
+        addedAt: new Date().toISOString()
+      });
+      const list = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
+      list.push({
+        id: `${picked.driveId}:${picked.itemId}`,
+        name: picked.fileName || "Linked file",
+        fileName: picked.fileName || "Linked file",
+        source: "onedrive",
+        driveId: picked.driveId || "",
+        itemId: picked.itemId || "",
+        eTag: picked.eTag || "",
+        lastModifiedDateTime: picked.lastModifiedDateTime || "",
+        webUrl: picked.webUrl || "",
+        url: picked.webUrl || "",
+        addedAt: new Date().toISOString()
+      });
+      writeOneDriveJobLibrary(list);
+      toast("OneDrive DXF attached to job");
+      renderJobs();
+    } catch (err){
+      toast(err?.message || "Unable to add DXF from OneDrive.");
     }
-    if (!id){ toast("Choose a OneDrive file from the library first."); return; }
-    const entry = list.find(item => String(item?.id) === String(id));
-    if (!entry){ toast("Selected library file not found."); return; }
-    pendingNewJobFiles.push({
-      id: genId(entry.name || "job_file"),
-      name: entry.name || entry.fileName || "Linked file",
-      type: "",
-      size: null,
-      url: entry.url,
-      preview: entry.previewUrl ? { mode: "image", content: entry.previewUrl } : null,
-      source: "onedrive",
-      addedAt: new Date().toISOString()
-    });
-    toast("OneDrive library file added to job");
-    renderJobs();
   });
 
   addFormToggle?.addEventListener("click", ()=>{
@@ -15017,7 +15101,7 @@ function renderJobs(){
   });
 
   // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
-  content.querySelector(".job-table tbody")?.addEventListener("click",(e)=>{
+  content.querySelector(".job-table tbody")?.addEventListener("click", async (e)=>{
     const overlapTrigger = e.target.closest("[data-job-overlap-info]");
     if (overlapTrigger){
       e.preventDefault();
@@ -15123,23 +15207,30 @@ function renderJobs(){
       const id = linkJobFile.getAttribute("data-link-job-file");
       const j = cuttingJobs.find(x=>x.id===id);
       if (!j) return;
-      const defaultName = window.prompt ? window.prompt("File name for this OneDrive link", "Drawing.dxf") : "Drawing.dxf";
-      if (!defaultName) return;
-      const url = promptOneDriveLinkForFile(defaultName);
-      if (url == null) return;
-      j.files = Array.isArray(j.files) ? j.files : [];
-      j.files.push({
-        id: genId(defaultName || "job_file"),
-        name: String(defaultName || "Attachment").trim() || "Attachment",
-        type: "",
-        size: null,
-        url,
-        source: "onedrive",
-        addedAt: new Date().toISOString()
-      });
-      saveCloudDebounced();
-      toast("OneDrive file link added");
-      renderJobs();
+      try {
+        const picked = await window.oneDrivePicker.openOneDriveDxfPicker();
+        if (!picked) return;
+        j.files = Array.isArray(j.files) ? j.files : [];
+        j.files.push({
+          id: genId(picked.fileName || "job_file"),
+          name: picked.fileName || "Linked file",
+          type: "",
+          size: null,
+          source: "onedrive",
+          driveId: picked.driveId || "",
+          itemId: picked.itemId || "",
+          eTag: picked.eTag || "",
+          lastModifiedDateTime: picked.lastModifiedDateTime || "",
+          webUrl: picked.webUrl || "",
+          url: picked.webUrl || "",
+          addedAt: new Date().toISOString()
+        });
+        saveCloudDebounced();
+        toast("OneDrive DXF linked");
+        renderJobs();
+      } catch (err){
+        toast(err?.message || "Unable to link OneDrive DXF.");
+      }
       return;
     }
 
