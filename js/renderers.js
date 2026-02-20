@@ -13162,15 +13162,15 @@ function renderJobs(){
       const files = Array.isArray(job?.files) ? job.files : [];
       const fileList = files.length
         ? files.map(file => `<li><span class="job-flow-file-name">${escapeHtml(file?.name || "Attachment")}</span>${hidePreviews ? "" : previewCardMarkup(file)}</li>`).join("")
-        : '<li class="small muted">No attached files</li>';
+        : '<li class="small job-flow-empty">No attached files</li>';
       const style = categoryStyleAttr(normalizeCategory(job?.cat), folderMap, rootId);
       return `<article class="job-flow-job-card"${style}>
         <header>
           <div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")}</div>
-          <div class="small muted">Project #${escapeHtml(normalizeProjectNumber(job?.projectNumber) || "Unassigned")}</div>
-          <div class="small muted">Material: ${escapeHtml(job?.material || "—")}</div>
-          <div class="small muted">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div>
-          <div class="small muted">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div>
+          <div class="small job-flow-meta">Project #${escapeHtml(normalizeProjectNumber(job?.projectNumber) || "Unassigned")}</div>
+          <div class="small job-flow-meta">Material: ${escapeHtml(job?.material || "—")}</div>
+          <div class="small job-flow-meta">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div>
+          <div class="small job-flow-meta">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div>
         </header>
         <ul class="job-flow-file-list">${fileList}</ul>
       </article>`;
@@ -13207,7 +13207,7 @@ function renderJobs(){
         const style = categoryStyleAttr(key, folderMap, rootId);
         return `<div class="job-flow-tree-node" data-depth="${depth}">
           <div class="job-flow-tree-title"${style}>${escapeHtml(folder?.name || "Category")}</div>
-          <div class="job-flow-tree-body">${projectMarkup || '<p class="small muted">No direct jobs in this category.</p>'}${childMarkup}</div>
+          <div class="job-flow-tree-body">${projectMarkup || '<p class="small job-flow-empty">No direct jobs in this category.</p>'}${childMarkup}</div>
         </div>`;
       };
       html = `<section class="job-flow-group"><h5>Category tree</h5>${renderCategoryNode(rootId)}</section>`;
@@ -13226,7 +13226,7 @@ function renderJobs(){
       }).join("");
     }
 
-    flowChart.innerHTML = html || '<p class="small muted">No projects match this filter.</p>';
+    flowChart.innerHTML = html || '<p class="small job-flow-empty">No projects match this filter.</p>';
     if (flowChart) flowChart.classList.toggle("hide-previews", hidePreviews);
   };
   const noteTextarea = content.querySelector("#jobNoteModalInput");

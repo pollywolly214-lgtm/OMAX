@@ -5652,7 +5652,34 @@ body.job-flow-lock-scroll {
 .job-flow-toolbar input[type="search"] { min-width: 260px; flex: 1; }
 .job-flow-chart { padding: 14px 16px 18px; }
 .job-flow-group { margin-bottom: 16px; }
-.job-flow-group h5 { margin: 0 0 8px; }
+.job-flow-group h5 {
+  margin: 0 0 8px;
+  color: #0f2747;
+  font-weight: 700;
+}
+.job-flow-job-title {
+  color: #0f2747;
+  font-weight: 700;
+  font-size: 1.05rem;
+  line-height: 1.25;
+  margin-bottom: 4px;
+}
+.job-flow-meta {
+  color: #243b57;
+  font-weight: 500;
+}
+.job-flow-file-name {
+  color: #0f2747;
+  font-weight: 600;
+}
+.job-flow-empty,
+.job-flow-preview.is-empty,
+.job-flow-preview-empty {
+  color: #334155;
+}
+.job-flow-tree-title {
+  color: #0f2747;
+}
 .job-flow-group-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
