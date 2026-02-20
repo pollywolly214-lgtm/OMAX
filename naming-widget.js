@@ -684,7 +684,7 @@ function renderCoordinateCloudToSvgDataUrl(text) {
 
   const path = [];
   const pointsSeen = [];
-  const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+  const pointsDrawn = [];
   let current = { x: 0, y: 0 };
   let hasCurrent = false;
   let relativeMode = inferRelativeMode(lines);
@@ -713,21 +713,22 @@ function renderCoordinateCloudToSvgDataUrl(text) {
         path.push(`M ${next.x} ${-next.y}`);
       } else {
         const span = Math.hypot(next.x - current.x, next.y - current.y);
-        if (span > 0 && span < 1e6) path.push(`L ${next.x} ${-next.y}`);
+        if (span > 0 && span < 1e6) {
+          path.push(`L ${next.x} ${-next.y}`);
+          pointsDrawn.push(current, next);
+        }
       }
 
       pointsSeen.push(next);
-      bounds.minX = Math.min(bounds.minX, next.x);
-      bounds.maxX = Math.max(bounds.maxX, next.x);
-      bounds.minY = Math.min(bounds.minY, next.y);
-      bounds.maxY = Math.max(bounds.maxY, next.y);
       current = next;
       hasCurrent = true;
     });
   });
 
   if (path.length < 2) return '';
-  return buildPathSvgDataUrl(path, normalizePreviewBounds(pointsSeen, bounds));
+  const focusPoints = pointsDrawn.length >= 2 ? pointsDrawn : pointsSeen;
+  const bounds = normalizePreviewBounds(focusPoints, boundsFromPoints(focusPoints));
+  return buildPathSvgDataUrl(path, bounds);
 }
 
 function inferRelativeMode(lines) {
@@ -792,6 +793,17 @@ function buildPathSvgDataUrl(path, bounds) {
 }
 
 
+
+function boundsFromPoints(points) {
+  return points.reduce((acc, point) => {
+    acc.minX = Math.min(acc.minX, point.x);
+    acc.maxX = Math.max(acc.maxX, point.x);
+    acc.minY = Math.min(acc.minY, point.y);
+    acc.maxY = Math.max(acc.maxY, point.y);
+    return acc;
+  }, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+}
+
 function normalizePreviewBounds(points, fallbackBounds) {
   if (!Array.isArray(points) || points.length < 20) return fallbackBounds;
 
@@ -805,6 +817,8 @@ function normalizePreviewBounds(points, fallbackBounds) {
     minY: quantile(ys, 0.02),
     maxY: quantile(ys, 0.98)
   };
+
+  if (!Number.isFinite(fallbackBounds.minX) || !Number.isFinite(fallbackBounds.maxX) || !Number.isFinite(fallbackBounds.minY) || !Number.isFinite(fallbackBounds.maxY)) return trimmed;
 
   const rawW = Math.max(1, fallbackBounds.maxX - fallbackBounds.minX);
   const rawH = Math.max(1, fallbackBounds.maxY - fallbackBounds.minY);
@@ -832,7 +846,7 @@ function renderBinaryFloatPairsToSvgDataUrl(buffer) {
   const view = new DataView(buffer);
   const path = [];
   const pointsSeen = [];
-  const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+  const pointsDrawn = [];
   let prev = null;
 
   for (let i = 0; i + 8 <= view.byteLength && path.length < 5000; i += 4) {
@@ -842,14 +856,11 @@ function renderBinaryFloatPairsToSvgDataUrl(buffer) {
     if (Math.abs(x) > 100000 || Math.abs(y) > 100000) continue;
 
     const next = { x, y };
+    pointsSeen.push(next);
+
     if (!prev) {
       path.push(`M ${next.x} ${-next.y}`);
-      pointsSeen.push(next);
       prev = next;
-      bounds.minX = Math.min(bounds.minX, next.x);
-      bounds.maxX = Math.max(bounds.maxX, next.x);
-      bounds.minY = Math.min(bounds.minY, next.y);
-      bounds.maxY = Math.max(bounds.maxY, next.y);
       continue;
     }
 
@@ -859,23 +870,20 @@ function renderBinaryFloatPairsToSvgDataUrl(buffer) {
       path.push(`M ${next.x} ${-next.y}`);
     } else {
       path.push(`L ${next.x} ${-next.y}`);
+      pointsDrawn.push(prev, next);
     }
 
-    pointsSeen.push(next);
-    bounds.minX = Math.min(bounds.minX, next.x);
-    bounds.maxX = Math.max(bounds.maxX, next.x);
-    bounds.minY = Math.min(bounds.minY, next.y);
-    bounds.maxY = Math.max(bounds.maxY, next.y);
     prev = next;
   }
 
   if (path.length < 3) return '';
-  return buildPathSvgDataUrl(path, normalizePreviewBounds(pointsSeen, bounds));
+  const focusPoints = pointsDrawn.length >= 2 ? pointsDrawn : pointsSeen;
+  const bounds = normalizePreviewBounds(focusPoints, boundsFromPoints(focusPoints));
+  return buildPathSvgDataUrl(path, bounds);
 }
 
 function buildSegmentsSvgDataUrl(segments) {
   const path = [];
-  const pointsSeen = [];
   const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
 
   segments.forEach(segment => {
