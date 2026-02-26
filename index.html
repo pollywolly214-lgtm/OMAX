@@ -157,6 +157,11 @@
           <input type="number" id="configDailyHours" name="configDailyHours" min="0.25" max="24" step="0.25" required />
           <small class="config-help">Updates every calculation that uses hours/day.</small>
         </label>
+        <label class="config-field" for="configMaintenanceRate">
+          <span class="config-label">Maintenance hourly rate ($/hr)</span>
+          <input type="number" id="configMaintenanceRate" name="configMaintenanceRate" min="0" step="0.01" required />
+          <small class="config-help">Used when logging completed maintenance.</small>
+        </label>
         <label class="config-toggle" for="configExcludeWeekends">
           <input type="checkbox" id="configExcludeWeekends" name="configExcludeWeekends" />
           <span>Ignore weekends in scheduling</span>
