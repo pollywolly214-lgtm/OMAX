@@ -1494,9 +1494,14 @@ function viewCosts(model){
           <thead>
             <tr>
               <th scope="col">Task</th>
-              <th scope="col">Cadence</th>
+              <th scope="col">Completed (12 mo)</th>
               <th scope="col">Unit cost</th>
-              <th scope="col">Annual estimate</th>
+              <th scope="col">Std time (hrs)</th>
+              <th scope="col">Std time cost</th>
+              <th scope="col">Total hours (12 mo)</th>
+              <th scope="col">Time cost (12 mo)</th>
+              <th scope="col">Avg time cost (2 mo)</th>
+              <th scope="col">Total cost (2 mo)</th>
             </tr>
           </thead>
           <tbody>
@@ -1504,7 +1509,7 @@ function viewCosts(model){
               const rows = Array.isArray(section.rows) ? section.rows : [];
               const headerRow = `
               <tr class="forecast-section-row">
-                <th scope="rowgroup" colspan="4">
+                <th scope="rowgroup" colspan="9">
                   <span class="forecast-section-header">
                     <span class="forecast-section-title">${esc(section.label || "")}</span>
                     ${section.totalLabel ? `<span class="forecast-section-total">${esc(section.totalLabel)}</span>` : ""}
@@ -1515,36 +1520,23 @@ function viewCosts(model){
                 ? rows.map(row => `
               <tr>
                 <th scope="row">${esc(row.name || "")}</th>
-                <td>${esc(row.cadenceLabel || "—")}</td>
+                <td>${esc(row.completedYearLabel || "—")}</td>
                 <td>${esc(row.unitCostLabel || "—")}</td>
-                <td>${esc(row.annualTotalLabel || "—")}</td>
+                <td>${esc(row.defaultHoursLabel || "—")}</td>
+                <td>${esc(row.defaultTimeCostLabel || "—")}</td>
+                <td>${esc(row.totalHoursYearLabel || "—")}</td>
+                <td>${esc(row.timeCostYearLabel || "—")}</td>
+                <td>${esc(row.avgTimeCostTwoMonthLabel || "—")}</td>
+                <td>${esc(row.totalCostTwoMonthLabel || "—")}</td>
               </tr>
             `).join("")
                 : `
               <tr class="forecast-empty-row">
-                <td colspan="4">${esc(section.emptyMessage || "No tasks yet.")}</td>
+                <td colspan="9">${esc(section.emptyMessage || "No tasks yet.")}</td>
               </tr>`;
               return `${headerRow}${rowsHtml}`;
             }).join("")}
           </tbody>
-          ${hasTotals ? `
-          <tfoot>
-            <tr class="forecast-total-row">
-              <th scope="row">Interval total</th>
-              <td colspan="2"></td>
-              <td>${esc(breakdownTotals.intervalLabel || "—")}</td>
-            </tr>
-            <tr class="forecast-total-row">
-              <th scope="row">As-required total</th>
-              <td colspan="2"></td>
-              <td>${esc(breakdownTotals.asReqLabel || "—")}</td>
-            </tr>
-            <tr class="forecast-grand-total-row">
-              <th scope="row">Combined total</th>
-              <td colspan="2"></td>
-              <td>${esc(breakdownTotals.combinedLabel || "—")}</td>
-            </tr>
-          </tfoot>` : ""}
         </table>
       </div>
     `
@@ -1609,7 +1601,7 @@ function viewCosts(model){
       <div class="forecast-modal-card" role="document" tabindex="-1" data-forecast-initial>
         <button type="button" class="forecast-modal-close" data-forecast-close aria-label="Close maintenance forecast breakdown">×</button>
         <h2 id="forecastModalTitle">Maintenance forecast breakdown</h2>
-        <p class="forecast-modal-subtitle">Interval and as-required tasks with annualized totals.</p>
+        <p class="forecast-modal-subtitle">Completed maintenance with time and cost rollups.</p>
         ${forecastTableHTML}
         <p class="forecast-table-note">${esc(forecastNote)}</p>
       </div>

@@ -2116,15 +2116,17 @@ function getConfigurationElements(){
   const modal = document.getElementById("configModal");
   const form = document.getElementById("configForm");
   const hoursInput = document.getElementById("configDailyHours");
+  const maintenanceRateInput = document.getElementById("configMaintenanceRate");
   const excludeWeekends = document.getElementById("configExcludeWeekends");
   const cancel = document.getElementById("configCancel");
-  return { modal, form, hoursInput, excludeWeekends, cancel };
+  return { modal, form, hoursInput, maintenanceRateInput, excludeWeekends, cancel };
 }
 
 function currentAppConfiguration(){
   if (typeof normalizeAppConfig === "function") return normalizeAppConfig(window.appConfig);
   const fallbackDaily = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8;
-  return { excludeWeekends: false, dailyHours: fallbackDaily };
+  const fallbackRate = typeof getMaintenanceLaborRate === "function" ? getMaintenanceLaborRate() : JOB_BASE_COST_PER_HOUR;
+  return { excludeWeekends: false, dailyHours: fallbackDaily, maintenanceLaborRate: fallbackRate };
 }
 
 function closeConfigurationModal(){
@@ -2145,12 +2147,18 @@ function closeConfigurationModal(){
 }
 
 function openConfigurationModal(trigger){
-  const { modal, hoursInput, excludeWeekends } = getConfigurationElements();
+  const { modal, hoursInput, maintenanceRateInput, excludeWeekends } = getConfigurationElements();
   if (!modal) return;
   const cfg = currentAppConfiguration();
   if (hoursInput){
     const value = cfg.dailyHours != null ? cfg.dailyHours : (typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8);
     hoursInput.value = value;
+  }
+  if (maintenanceRateInput){
+    const rate = cfg.maintenanceLaborRate != null
+      ? cfg.maintenanceLaborRate
+      : (typeof getMaintenanceLaborRate === "function" ? getMaintenanceLaborRate() : JOB_BASE_COST_PER_HOUR);
+    maintenanceRateInput.value = rate;
   }
   if (excludeWeekends){
     excludeWeekends.checked = !!cfg.excludeWeekends;
@@ -2167,9 +2175,14 @@ function openConfigurationModal(trigger){
 }
 
 function applyConfigurationForm(){
-  const { hoursInput, excludeWeekends } = getConfigurationElements();
+  const { hoursInput, maintenanceRateInput, excludeWeekends } = getConfigurationElements();
   const nextDaily = hoursInput ? Number(hoursInput.value) : null;
-  const nextConfig = { dailyHours: nextDaily, excludeWeekends: !!(excludeWeekends && excludeWeekends.checked) };
+  const nextMaintenanceRate = maintenanceRateInput ? Number(maintenanceRateInput.value) : null;
+  const nextConfig = {
+    dailyHours: nextDaily,
+    maintenanceLaborRate: nextMaintenanceRate,
+    excludeWeekends: !!(excludeWeekends && excludeWeekends.checked)
+  };
   if (typeof setAppConfig === "function") setAppConfig(nextConfig);
   else {
     window.appConfig = typeof normalizeAppConfig === "function" ? normalizeAppConfig(nextConfig) : nextConfig;
@@ -10854,6 +10867,11 @@ function computeCostModel(){
   maintenanceOrderItems.sort((a,b)=> a.time - b.time);
 
   const occurrenceCostItems = [];
+  const occurrenceLaborRate = (typeof getMaintenanceLaborRate === "function")
+    ? getMaintenanceLaborRate()
+    : ((Number.isFinite(JOB_BASE_COST_PER_HOUR) && JOB_BASE_COST_PER_HOUR > 0)
+      ? JOB_BASE_COST_PER_HOUR
+      : 30);
   const parseOccurrenceDate = (value)=>{
     const key = toHistoryDateKey(value);
     if (!key) return null;
@@ -10864,32 +10882,130 @@ function computeCostModel(){
     const fallback = new Date(key);
     return fallback instanceof Date && !Number.isNaN(fallback.getTime()) ? fallback : null;
   };
+  const normalizeOccurrenceNotesLocal = (task)=>{
+    if (!task || typeof task !== "object") return {};
+    if (typeof normalizeOccurrenceNotes === "function"){
+      return normalizeOccurrenceNotes(task);
+    }
+    const result = {};
+    const raw = task.occurrenceNotes;
+    if (raw && typeof raw === "object"){
+      Object.entries(raw).forEach(([maybeDate, maybeNote]) => {
+        const key = toHistoryDateKey(maybeDate);
+        if (!key) return;
+        const text = typeof maybeNote === "string" ? maybeNote.trim() : "";
+        if (text) result[key] = text;
+      });
+    }
+    return result;
+  };
+  const normalizeOccurrenceHoursLocal = (task)=>{
+    if (!task || typeof task !== "object") return {};
+    if (typeof normalizeOccurrenceHours === "function"){
+      return normalizeOccurrenceHours(task);
+    }
+    const result = {};
+    const raw = task.occurrenceHours;
+    if (raw && typeof raw === "object"){
+      Object.entries(raw).forEach(([maybeDate, maybeHours]) => {
+        const key = toHistoryDateKey(maybeDate);
+        if (!key) return;
+        const num = Number(maybeHours);
+        if (!Number.isFinite(num) || num <= 0) return;
+        const normalized = Math.max(0.25, Math.round(num * 100) / 100);
+        result[key] = normalized;
+      });
+    }
+    return result;
+  };
+  const taskLookup = new Map();
+  [...intervalTasksAll, ...asReqTasksAll].forEach(task => {
+    if (!task || task.id == null) return;
+    taskLookup.set(String(task.id), task);
+  });
+  const resolveTemplateTask = (task)=>{
+    if (!task || task.templateId == null) return null;
+    const templateId = String(task.templateId);
+    return taskLookup.get(templateId) || null;
+  };
+  const resolveOccurrenceHoursForTask = (task, dateKey)=>{
+    if (!task || !dateKey) return null;
+    const directMap = normalizeOccurrenceHoursLocal(task);
+    const directVal = Number(directMap[dateKey]);
+    if (Number.isFinite(directVal) && directVal > 0) return directVal;
+    const templateTask = resolveTemplateTask(task);
+    if (templateTask){
+      const templateMap = normalizeOccurrenceHoursLocal(templateTask);
+      const templateVal = Number(templateMap[dateKey]);
+      if (Number.isFinite(templateVal) && templateVal > 0) return templateVal;
+    }
+    const downtimeCandidates = [task?.downtimeHours, templateTask?.downtimeHours];
+    for (const candidate of downtimeCandidates){
+      const raw = Number(candidate);
+      if (Number.isFinite(raw) && raw > 0) return Math.round(raw * 100) / 100;
+    }
+    return null;
+  };
+  const occurrenceCostKeys = new Set();
   const addOccurrenceCostsFromTask = (task)=>{
     if (!task) return;
-    const rawNotes = (typeof normalizeOccurrenceNotes === "function")
-      ? normalizeOccurrenceNotes(task)
-      : (task?.occurrenceNotes || {});
-    if (!rawNotes || typeof rawNotes !== "object") return;
-    Object.entries(rawNotes).forEach(([dateKey, note]) => {
-      if (!note) return;
-      const cost = parseOccurrenceCost(note);
-      if (!Number.isFinite(cost) || cost <= 0) return;
+    const notesMap = normalizeOccurrenceNotesLocal(task);
+    const hoursMap = normalizeOccurrenceHoursLocal(task);
+    const occurrenceDates = new Set([
+      ...Object.keys(notesMap || {}),
+      ...Object.keys(hoursMap || {})
+    ]);
+    const completedDates = Array.isArray(task.completedDates) ? task.completedDates : [];
+    completedDates.forEach(dateVal => {
+      const key = toHistoryDateKey(dateVal);
+      if (key) occurrenceDates.add(key);
+    });
+    const manualHistory = Array.isArray(task.manualHistory) ? task.manualHistory : [];
+    manualHistory.forEach(entry => {
+      if (!entry) return;
+      const statusRaw = typeof entry.status === "string" ? entry.status.toLowerCase() : "";
+      if (statusRaw === "scheduled" || statusRaw === "removed") return;
+      const key = toHistoryDateKey(entry.dateISO);
+      if (key) occurrenceDates.add(key);
+    });
+    if (!occurrenceDates.size) return;
+    const templateKey = resolveTaskTemplateKey(task) || (task.id != null ? String(task.id) : "");
+    occurrenceDates.forEach(dateKey => {
+      const compositeKey = `${templateKey}__${dateKey}`;
+      if (!templateKey || occurrenceCostKeys.has(compositeKey)) return;
       const resolved = parseOccurrenceDate(dateKey);
       if (!resolved) return;
+      const noteText = typeof notesMap[dateKey] === "string" ? notesMap[dateKey].trim() : "";
+      const noteCost = parseOccurrenceCost(noteText);
+      const unitPrice = resolveMaintenanceUnitCost(task);
+      const rebuildCost = Number.isFinite(noteCost) && noteCost > 0
+        ? noteCost
+        : (Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice : 0);
+      const hours = resolveOccurrenceHoursForTask(task, dateKey);
+      const timeCost = Number.isFinite(hours) && hours > 0
+        ? hours * occurrenceLaborRate
+        : 0;
+      const amount = rebuildCost + timeCost;
+      if (!Number.isFinite(amount) || amount <= 0) return;
       const resolvedTime = resolved.getTime();
       const resolvedISO = resolved instanceof Date && !Number.isNaN(resolved.getTime())
         ? resolved.toISOString()
         : null;
       occurrenceCostItems.push({
-        amount: cost,
+        amount,
         time: resolvedTime,
         resolvedAt: resolved,
         resolvedISO,
         name: task?.name || "Occurrence cost",
         pn: task?.pn || "",
-        note: typeof note === "string" ? note.trim() : "",
-        taskId: task.id != null ? String(task.id) : null
+        note: noteText,
+        taskId: task.id != null ? String(task.id) : null,
+        baseCost: rebuildCost,
+        timeCost,
+        hours,
+        rate: occurrenceLaborRate
       });
+      occurrenceCostKeys.add(compositeKey);
     });
   };
   intervalTasks.forEach(task => addOccurrenceCostsFromTask(task));
@@ -11513,7 +11629,7 @@ function computeCostModel(){
     ? baselineAnnualHours
     : (hoursYear > 0 ? hoursYear : 0);
 
-  const intervalTaskRowsRaw = intervalTasks.map((task, index) => {
+  const intervalProjectionRowsRaw = intervalTasks.map((task, index) => {
     const name = task?.name || `Interval task ${index + 1}`;
     const intervalHours = Number(task?.interval);
     const price = resolveMaintenanceUnitCost(task);
@@ -11537,14 +11653,7 @@ function computeCostModel(){
       key: task?.id || `interval_${index}`,
       name,
       cadenceLabel: cadenceParts.length ? cadenceParts.join(" · ") : "—",
-      unitCostLabel: hasPrice
-        ? formatterCurrency(price, { decimals: price < 1000 ? 2 : 0 })
-        : "—",
-      annualTotalLabel: hasPrice
-        ? formatterCurrency(annualCost, { decimals: annualCost < 1000 ? 2 : 0 })
-        : "—",
       annualCost,
-      partNumber: typeof task?.pn === "string" ? task.pn : "",
       unitPrice: hasPrice ? price : null
     };
   });
@@ -11567,7 +11676,7 @@ function computeCostModel(){
     return Number.isFinite(expected) && expected > 0 ? expected : 0;
   };
 
-  const asReqTaskRowsRaw = asReqTasks.map((task, index) => {
+  const asReqProjectionRowsRaw = asReqTasks.map((task, index) => {
     const name = task?.name || `As-required task ${index + 1}`;
     const price = resolveMaintenanceUnitCost(task);
     const hasPrice = Number.isFinite(price) && price > 0;
@@ -11589,62 +11698,180 @@ function computeCostModel(){
       key: task?.id || `asreq_${index}`,
       name,
       cadenceLabel: cadenceParts.join(" · "),
-      unitCostLabel: hasPrice
-        ? formatterCurrency(price, { decimals: price < 1000 ? 2 : 0 })
-        : "—",
-      annualTotalLabel: hasPrice
-        ? formatterCurrency(annualCost, { decimals: annualCost < 1000 ? 2 : 0 })
-        : "—",
       annualCost,
-      partNumber: typeof task?.pn === "string" ? task.pn : "",
       unitPrice: hasPrice ? price : null
     };
   });
 
-  const intervalAnnualTotal = intervalTaskRowsRaw.reduce((sum, row) => sum + (Number(row.annualCost) || 0), 0);
-  const asReqAnnualTotal = asReqTaskRowsRaw.reduce((sum, row) => sum + (Number(row.annualCost) || 0), 0);
-  const combinedForecastTotal = intervalAnnualTotal + asReqAnnualTotal;
+  const maintenanceLaborRate = (typeof getMaintenanceLaborRate === "function")
+    ? getMaintenanceLaborRate()
+    : occurrenceLaborRate;
 
-  const formatTotalLabel = (value)=> formatterCurrency(value, { decimals: value < 1000 ? 2 : 0 });
+  const resolveDefaultDowntime = (task, templateTask)=>{
+    const candidates = [task?.downtimeHours, templateTask?.downtimeHours];
+    for (const candidate of candidates){
+      const raw = Number(candidate);
+      if (Number.isFinite(raw) && raw > 0) return Math.round(raw * 100) / 100;
+    }
+    return null;
+  };
+
+  const completionEntriesByTemplate = new Map();
+  const displayTaskByTemplate = new Map();
+  const allActiveTasks = [...intervalTasks, ...asReqTasks];
+  const isTaskInstance = (task)=> typeof isInstanceTask === "function"
+    ? isInstanceTask(task)
+    : (task && task.variant === "instance");
+
+  const registerDisplayTask = (task, templateTask, templateKey)=>{
+    if (!task || !templateKey) return;
+    const candidate = (!isTaskInstance(task) && task) ? task : templateTask || task;
+    if (!candidate) return;
+    const existing = displayTaskByTemplate.get(templateKey);
+    if (!existing || (isTaskInstance(existing) && !isTaskInstance(candidate))){
+      displayTaskByTemplate.set(templateKey, candidate);
+    }
+  };
+
+  const addCompletionEntry = (templateKey, entry)=>{
+    if (!templateKey || !entry) return;
+    const list = completionEntriesByTemplate.get(templateKey) || [];
+    list.push(entry);
+    completionEntriesByTemplate.set(templateKey, list);
+  };
+
+  allActiveTasks.forEach(task => {
+    if (!task) return;
+    const templateKey = resolveTaskTemplateKey(task);
+    if (!templateKey) return;
+    const templateTask = resolveTemplateTask(task) || null;
+    registerDisplayTask(task, templateTask, templateKey);
+
+    const seenDates = new Set();
+    const addCompletion = (dateVal)=>{
+      const dateKey = toHistoryDateKey(dateVal);
+      if (!dateKey) return;
+      const dedupeKey = `${task.id != null ? String(task.id) : templateKey}__${dateKey}`;
+      if (seenDates.has(dedupeKey)) return;
+      seenDates.add(dedupeKey);
+      const resolved = parseOccurrenceDate(dateKey);
+      if (!resolved) return;
+      const occurrenceHours = resolveOccurrenceHoursForTask(task, dateKey);
+      const fallbackHours = resolveDefaultDowntime(task, templateTask);
+      const hoursUsed = Number.isFinite(occurrenceHours) && occurrenceHours > 0
+        ? occurrenceHours
+        : (Number.isFinite(fallbackHours) && fallbackHours > 0 ? fallbackHours : 0);
+      addCompletionEntry(templateKey, {
+        date: resolved,
+        dateKey,
+        taskId: task.id != null ? String(task.id) : null,
+        hours: hoursUsed
+      });
+    };
+
+    const completedDates = Array.isArray(task.completedDates) ? task.completedDates : [];
+    completedDates.forEach(addCompletion);
+    const manualHistory = Array.isArray(task.manualHistory) ? task.manualHistory : [];
+    manualHistory.forEach(entry => {
+      if (!entry) return;
+      const statusRaw = typeof entry.status === "string" ? entry.status.toLowerCase() : "";
+      if (statusRaw !== "completed") return;
+      addCompletion(entry.dateISO);
+    });
+  });
+
+  const now = new Date();
+  now.setHours(0,0,0,0);
+  const yearStart = new Date(now);
+  yearStart.setDate(yearStart.getDate() - 365);
+  const twoMonthStart = new Date(now);
+  twoMonthStart.setMonth(twoMonthStart.getMonth() - 2);
+
+  const formatHoursLabel = (value)=>{
+    const safe = Number(value);
+    if (!Number.isFinite(safe) || safe < 0) return "—";
+    const formatted = formatHoursValue(safe);
+    return formatted ? `${formatted} hr` : "0 hr";
+  };
+
+  const buildTaskRow = (task)=>{
+    if (!task) return null;
+    const templateKey = resolveTaskTemplateKey(task);
+    if (!templateKey) return null;
+    const completions = completionEntriesByTemplate.get(templateKey) || [];
+    const yearEntries = completions.filter(entry => entry.date >= yearStart && entry.date <= now);
+    const twoMonthEntries = completions.filter(entry => entry.date >= twoMonthStart && entry.date <= now);
+    const yearCount = yearEntries.length;
+    if (!yearCount) return null;
+    const yearHours = yearEntries.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
+    const twoMonthCount = twoMonthEntries.length;
+    const twoMonthHours = twoMonthEntries.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
+    const avgHoursTwoMonth = twoMonthCount ? (twoMonthHours / twoMonthCount) : 0;
+    const unitCost = resolveMaintenanceUnitCost(task);
+    const unitCostSafe = Number.isFinite(unitCost) && unitCost > 0 ? unitCost : 0;
+    const templateTask = resolveTemplateTask(task) || (isTaskInstance(task) ? null : task);
+    const defaultHours = resolveDefaultDowntime(task, templateTask);
+    const defaultHoursSafe = Number.isFinite(defaultHours) && defaultHours > 0 ? defaultHours : 0;
+    const defaultTimeCost = defaultHoursSafe * maintenanceLaborRate;
+    const timeCostYear = yearHours * maintenanceLaborRate;
+    const avgTimeCostTwoMonth = avgHoursTwoMonth * maintenanceLaborRate;
+    const totalCostTwoMonth = (unitCostSafe * twoMonthCount) + (twoMonthHours * maintenanceLaborRate);
+    return {
+      key: task.id != null ? String(task.id) : templateKey,
+      name: task.name || "Maintenance task",
+      completedYearLabel: yearCount.toLocaleString(),
+      unitCostLabel: unitCostSafe > 0
+        ? formatterCurrency(unitCostSafe, { decimals: unitCostSafe < 1000 ? 2 : 0 })
+        : "—",
+      defaultHoursLabel: defaultHoursSafe > 0 ? formatHoursLabel(defaultHoursSafe) : "—",
+      defaultTimeCostLabel: defaultHoursSafe > 0
+        ? formatterCurrency(defaultTimeCost, { decimals: defaultTimeCost < 1000 ? 2 : 0 })
+        : "—",
+      totalHoursYearLabel: formatHoursLabel(yearHours),
+      timeCostYearLabel: yearCount > 0
+        ? formatterCurrency(timeCostYear, { decimals: timeCostYear < 1000 ? 2 : 0 })
+        : "—",
+      avgTimeCostTwoMonthLabel: twoMonthCount > 0
+        ? formatterCurrency(avgTimeCostTwoMonth, { decimals: avgTimeCostTwoMonth < 1000 ? 2 : 0 })
+        : "—",
+      totalCostTwoMonthLabel: twoMonthCount > 0
+        ? formatterCurrency(totalCostTwoMonth, { decimals: totalCostTwoMonth < 1000 ? 2 : 0 })
+        : "—"
+    };
+  };
+
+  const intervalTaskRowsRaw = Array.from(displayTaskByTemplate.values())
+    .filter(task => task && task.mode !== "asreq")
+    .map(buildTaskRow)
+    .filter(Boolean);
+
+  const asReqTaskRowsRaw = Array.from(displayTaskByTemplate.values())
+    .filter(task => task && task.mode === "asreq")
+    .map(buildTaskRow)
+    .filter(Boolean);
 
   const forecastBreakdown = {
     sections: [
       {
         key: "interval",
         label: "Interval tasks",
-        rows: intervalTaskRowsRaw.map(row => ({
-          key: row.key,
-          name: row.name,
-          cadenceLabel: row.cadenceLabel,
-          unitCostLabel: row.unitCostLabel,
-          annualTotalLabel: row.annualTotalLabel
-        })),
-        totalLabel: formatTotalLabel(intervalAnnualTotal),
+        rows: intervalTaskRowsRaw,
+        totalLabel: "",
         emptyMessage: intervalTaskRowsRaw.length
           ? ""
-          : "Add interval tasks to project maintenance spend."
+          : "No completed interval maintenance in the past 12 months."
       },
       {
         key: "asRequired",
         label: "As-required tasks",
-        rows: asReqTaskRowsRaw.map(row => ({
-          key: row.key,
-          name: row.name,
-          cadenceLabel: row.cadenceLabel,
-          unitCostLabel: row.unitCostLabel,
-          annualTotalLabel: row.annualTotalLabel
-        })),
-        totalLabel: formatTotalLabel(asReqAnnualTotal),
+        rows: asReqTaskRowsRaw,
+        totalLabel: "",
         emptyMessage: asReqTaskRowsRaw.length
           ? ""
-          : "Add as-required tasks with expected frequency to estimate spend."
+          : "No completed as-required maintenance in the past 12 months."
       }
     ],
-    totals: {
-      intervalLabel: formatTotalLabel(intervalAnnualTotal),
-      asReqLabel: formatTotalLabel(asReqAnnualTotal),
-      combinedLabel: formatTotalLabel(combinedForecastTotal)
-    }
+    totals: null
   };
 
   const formatDateLabelShort = (value)=>{
@@ -11722,9 +11949,25 @@ function computeCostModel(){
       if (time < startTime || time > endTime) return;
       const total = Number(item.amount) || 0;
       if (total <= 0) return;
-      const noteLabel = item.note
-        ? `Occurrence note · ${item.note}`
-        : "Occurrence note";
+      const baseCost = Number(item.baseCost) || 0;
+      const timeCost = Number(item.timeCost) || 0;
+      const hoursVal = Number(item.hours);
+      const rateVal = Number(item.rate) || occurrenceLaborRate;
+      const noteParts = [];
+      if (baseCost > 0){
+        noteParts.push(`Rebuild ${formatterCurrency(baseCost, { decimals: baseCost < 1000 ? 2 : 0 })}`);
+      }
+      if (timeCost > 0){
+        const hoursLabel = Number.isFinite(hoursVal) && hoursVal > 0
+          ? `${formatHoursValue(hoursVal)} hr`
+          : "";
+        const rateLabel = formatterCurrency(rateVal, { decimals: 2 });
+        noteParts.push(`Labor ${hoursLabel ? `${hoursLabel} @ ${rateLabel}/hr` : `@ ${rateLabel}/hr`}`);
+      }
+      if (item.note){
+        noteParts.push(`Note: ${item.note}`);
+      }
+      const noteLabel = noteParts.length ? noteParts.join(" · ") : "Occurrence cost";
       addActualRow({
         key: `occurrence_${row.key}_${index}`,
         name: item.name || "Occurrence cost",
@@ -11817,7 +12060,7 @@ function computeCostModel(){
     const windowFraction = days > 0 ? days / daysPerYear : 0;
     const projectionRows = [];
     const intervalProjectionRows = [];
-    intervalTaskRowsRaw.forEach((item, index) => {
+    intervalProjectionRowsRaw.forEach((item, index) => {
       const annualCost = Number(item?.annualCost) || 0;
       if (annualCost <= 0 || windowFraction <= 0) return;
       const projected = annualCost * windowFraction;
@@ -11864,7 +12107,7 @@ function computeCostModel(){
     }
 
     const asReqProjectionRows = [];
-    asReqTaskRowsRaw.forEach((item, index) => {
+    asReqProjectionRowsRaw.forEach((item, index) => {
       const annualCost = Number(item?.annualCost) || 0;
       if (annualCost <= 0 || windowFraction <= 0) return;
       const projected = annualCost * windowFraction;
@@ -12464,14 +12707,7 @@ function computeCostModel(){
     }
   })();
 
-  let timeframeNote;
-  if (maintenanceOrderItems.length){
-    timeframeNote = "Actual spend combines interval allocations with approved maintenance orders matched to your task part numbers.";
-  }else if (asReqAnnualProjection > 0 && expectedAsReqAnnualFromTasks > 0){
-    timeframeNote = "Projections include interval pricing plus expected as-required frequency captured on task settings. Add approved orders to validate the forecast.";
-  }else{
-    timeframeNote = "Add prices, part numbers, or expected frequency to interval/as-required tasks to build the combined maintenance forecast.";
-  }
+  let timeframeNote = "Completed maintenance rolls up calendar completions with default or occurrence time to estimate labor and total spend.";
   if (forecastBreakdown){
     forecastBreakdown.note = timeframeNote || "Add pricing to maintenance tasks and approve order requests to enrich the forecast.";
   }
