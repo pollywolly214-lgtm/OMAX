@@ -3633,8 +3633,59 @@ function inventoryRowsHTML(list){
   }).join("");
 }
 
+
+function materialThicknessRowsHTML(model, typeId){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const rows = model?.rows?.[typeId] || {};
+  const thicknesses = Array.isArray(model?.thicknesses) ? model.thicknesses : [];
+  return thicknesses.map(th => {
+    const pairs = Array.isArray(rows[th.key]) ? rows[th.key] : [{ size:'', amount:'' }];
+    const pairCells = pairs.map((pair, idx)=>`
+      <div class="material-pair" data-material-pair="${esc(typeId)}" data-thickness="${esc(th.key)}" data-pair-index="${idx}">
+        <input type="text" data-material-size="${esc(typeId)}" data-thickness="${esc(th.key)}" data-pair-index="${idx}" value="${esc(pair.size || '')}" placeholder="Size">
+        <input type="text" data-material-amount="${esc(typeId)}" data-thickness="${esc(th.key)}" data-pair-index="${idx}" value="${esc(pair.amount || '')}" placeholder="Amount">
+      </div>
+    `).join('');
+    return `
+      <tr>
+        <td>${esc(th.label)}</td>
+        <td>
+          <div class="material-pairs">${pairCells}</div>
+          <button type="button" class="small" data-material-add-pair="${esc(typeId)}" data-thickness="${esc(th.key)}">+ Pair</button>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+function viewInventoryMaterial(model){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const activeType = String(model?.activeType || '');
+  const types = Array.isArray(model?.types) ? model.types : [];
+  const activeRows = activeType === "__all"
+    ? types.map(type => `<tr><td colspan="2"><strong>${esc(type.name)}</strong></td></tr>${materialThicknessRowsHTML(model, type.id)}`).join("")
+    : materialThicknessRowsHTML(model, activeType);
+  return `
+    <div class="inventory-material-view">
+      <div class="inventory-toolbar">
+        <button type="button" class="inventory-add-trigger" id="materialAddTypeBtn">+ Add material type</button>
+      </div>
+      <div class="inventory-material-tabs">
+        ${types.map(type => `<button type="button" data-material-type="${esc(type.id)}" class="${String(type.id)===activeType?'active':''}">${esc(type.name)}</button>`).join('')}
+        <button type="button" data-material-view-all="1" class="${activeType === "__all" ? "active" : ""}">View all</button>
+      </div>
+      <div class="material-table-wrap">
+        <table class="inventory-table material-table">
+          <thead><tr><th>Thickness</th><th>Size / Amount pairs</th></tr></thead>
+          <tbody>${activeRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
 function viewInventory(){
   const filtered = filterInventoryItems(inventorySearchTerm);
+  const section = String(window.inventorySection || "items") === "material" ? "material" : "items";
+  const materialModel = normalizeInventoryMaterials(window.inventoryMaterials);
   const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const childrenOf = (parentId)=>{
@@ -3683,6 +3734,11 @@ function viewInventory(){
   <div class="container">
     <div class="block" style="grid-column:1 / -1">
       <h3>Inventory</h3>
+      <div class="inventory-section-tabs">
+        <button type="button" data-inventory-section="material" class="${section === "material" ? "active" : ""}">Material</button>
+        <button type="button" data-inventory-section="items" class="${section === "items" ? "active" : ""}">Items</button>
+      </div>
+      ${section === "material" ? viewInventoryMaterial(materialModel) : `
       <div class="inventory-toolbar">
         <button type="button" class="inventory-add-trigger" id="inventoryAddBtn">+ Add inventory item</button>
         <button type="button" class="inventory-add-trigger" id="inventoryAddFolderBtn">+ Add folder</button>
@@ -3702,7 +3758,7 @@ function viewInventory(){
           <div class="small muted">Drop parts here to move to root</div>
           <div class="inventory-folder-children">${rootFolders}</div>
         </details>
-      </div>
+      </div>`}
     </div>
   </div>
 

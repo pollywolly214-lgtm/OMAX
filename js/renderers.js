@@ -14844,6 +14844,11 @@ function renderInventory(){
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
   let addToMaintenance = false;
 
+  const persistInventoryMaterials = ()=>{
+    window.inventoryMaterials = normalizeInventoryMaterials(window.inventoryMaterials);
+    saveCloudDebounced();
+  };
+
   const isFolderDescendant = (folderId, maybeAncestorId)=>{
     if (!folderId || !maybeAncestorId) return false;
     const folderKey = String(folderId);
@@ -14933,6 +14938,91 @@ function renderInventory(){
   try{
     window.__refreshInventoryRows = refreshRows;
   }catch(_){ }
+
+  content.querySelectorAll("[data-inventory-section]").forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const section = btn.getAttribute("data-inventory-section") === "material" ? "material" : "items";
+      if (window.inventorySection === section) return;
+      window.inventorySection = section;
+      saveCloudDebounced();
+      renderInventory();
+    });
+  });
+
+  content.querySelectorAll("[data-material-type]").forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const typeId = btn.getAttribute("data-material-type") || "";
+      const model = normalizeInventoryMaterials(window.inventoryMaterials);
+      if (!model.types.some(t => String(t.id) === String(typeId))) return;
+      model.activeType = String(typeId);
+      window.inventoryMaterials = model;
+      saveCloudDebounced();
+      renderInventory();
+    });
+  });
+
+  content.querySelectorAll("[data-material-view-all]").forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const model = normalizeInventoryMaterials(window.inventoryMaterials);
+      model.activeType = "__all";
+      window.inventoryMaterials = model;
+      saveCloudDebounced();
+      renderInventory();
+    });
+  });
+
+  const materialAddTypeBtn = content.querySelector("#materialAddTypeBtn");
+  materialAddTypeBtn?.addEventListener("click", ()=>{
+    const raw = window.prompt("Material type name:", "Titanium");
+    if (!raw) return;
+    const model = normalizeInventoryMaterials(window.inventoryMaterials);
+    const name = raw.trim();
+    if (!name) return;
+    let id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    if (!id) id = `material_${Date.now()}`;
+    let counter = 1;
+    const used = new Set(model.types.map(t => String(t.id)));
+    while (used.has(id)){ id = `${id}_${counter++}`; }
+    model.types.push({ id, name });
+    const thicknesses = buildMaterialThicknessList();
+    model.rows[id] = {};
+    thicknesses.forEach(t => { model.rows[id][t.key] = [{ size:"", amount:"" }]; });
+    model.activeType = id;
+    window.inventoryMaterials = model;
+    saveCloudDebounced();
+    renderInventory();
+  });
+
+  content.addEventListener("click", (e)=>{
+    const addPair = e.target.closest("[data-material-add-pair]");
+    if (!addPair) return;
+    const typeId = addPair.getAttribute("data-material-add-pair") || "";
+    const thickness = addPair.getAttribute("data-thickness") || "";
+    const model = normalizeInventoryMaterials(window.inventoryMaterials);
+    if (!model.rows[typeId] || !Array.isArray(model.rows[typeId][thickness])) return;
+    model.rows[typeId][thickness].push({ size:"", amount:"" });
+    window.inventoryMaterials = model;
+    saveCloudDebounced();
+    renderInventory();
+  });
+
+  content.addEventListener("input", (e)=>{
+    const sizeInput = e.target.closest("[data-material-size]");
+    const amountInput = e.target.closest("[data-material-amount]");
+    const target = sizeInput || amountInput;
+    if (!target) return;
+    const typeId = target.getAttribute(sizeInput ? "data-material-size" : "data-material-amount") || "";
+    const thickness = target.getAttribute("data-thickness") || "";
+    const pairIndex = Number(target.getAttribute("data-pair-index"));
+    const model = normalizeInventoryMaterials(window.inventoryMaterials);
+    if (!model.rows[typeId] || !Array.isArray(model.rows[typeId][thickness])) return;
+    const pair = model.rows[typeId][thickness][pairIndex];
+    if (!pair) return;
+    if (sizeInput) pair.size = target.value;
+    if (amountInput) pair.amount = target.value;
+    window.inventoryMaterials = model;
+    persistInventoryMaterials();
+  });
 
   if (searchInput){
     searchInput.addEventListener("input", ()=>{

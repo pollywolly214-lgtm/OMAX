@@ -1882,6 +1882,8 @@ function snapshotState(){
     tasksAsReq,
     inventory,
     inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.map(folder => ({ ...folder })) : [],
+    inventoryMaterials: normalizeInventoryMaterials(window.inventoryMaterials),
+    inventorySection: String(window.inventorySection || "items") === "material" ? "material" : "items",
     cuttingJobs: stripJobFileDataUrls(cuttingJobs),
     completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs),
     orderRequests,
@@ -2172,6 +2174,85 @@ function jobFolderHasJobs(id){
     || completedCuttingJobs.some(job => String(job?.cat ?? "") === key);
 }
 
+
+function gcd(a,b){
+  let x = Math.abs(Number(a) || 0);
+  let y = Math.abs(Number(b) || 0);
+  while (y){
+    const t = y;
+    y = x % y;
+    x = t;
+  }
+  return x || 1;
+}
+
+function formatThicknessSixteenths(parts){
+  const n = Number(parts) || 0;
+  if (n <= 0) return "0";
+  const whole = Math.floor(n / 16);
+  const rem = n % 16;
+  if (!rem) return `${whole}`;
+  const d = gcd(rem, 16);
+  const top = rem / d;
+  const bot = 16 / d;
+  return whole ? `${whole} ${top}/${bot}` : `${top}/${bot}`;
+}
+
+function buildMaterialThicknessList(){
+  const out = [];
+  for (let i = 1; i <= 32; i++){
+    out.push({ key: `t_${i}`, sixteenths: i, label: formatThicknessSixteenths(i) + '"' });
+  }
+  return out;
+}
+
+function defaultInventoryMaterials(){
+  return {
+    activeType: "aluminum",
+    types: [
+      { id: "aluminum", name: "Aluminum" },
+      { id: "steel", name: "Steel" },
+      { id: "stainless_steel", name: "Stainless Steel" }
+    ],
+    rows: {}
+  };
+}
+
+function normalizeInventoryMaterials(raw){
+  const base = defaultInventoryMaterials();
+  const data = raw && typeof raw === "object" ? raw : {};
+  const typesRaw = Array.isArray(data.types) ? data.types : base.types;
+  const used = new Set();
+  const types = typesRaw
+    .filter(Boolean)
+    .map((entry, idx) => {
+      let id = String(entry.id || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      if (!id) id = `material_${idx+1}`;
+      while (used.has(id)) id = `${id}_${idx+1}`;
+      used.add(id);
+      return { id, name: String(entry.name || id).trim() || id };
+    });
+  const thicknesses = buildMaterialThicknessList();
+  const rows = {};
+  const rowsRaw = data.rows && typeof data.rows === "object" ? data.rows : {};
+  types.forEach(type => {
+    const typeRaw = rowsRaw[type.id] && typeof rowsRaw[type.id] === 'object' ? rowsRaw[type.id] : {};
+    const typeRows = {};
+    thicknesses.forEach(t => {
+      const pairsRaw = Array.isArray(typeRaw[t.key]) ? typeRaw[t.key] : [{ size:'', amount:'' }];
+      const pairs = pairsRaw.map(pair => ({
+        size: String(pair?.size || ''),
+        amount: String(pair?.amount || '')
+      }));
+      typeRows[t.key] = pairs.length ? pairs : [{ size:'', amount:'' }];
+    });
+    rows[type.id] = typeRows;
+  });
+  const activeCandidate = String(data.activeType || base.activeType || (types[0] && types[0].id) || '');
+  const activeType = types.some(t => t.id === activeCandidate) ? activeCandidate : (types[0] ? types[0].id : '');
+  return { activeType, types, rows, thicknesses };
+}
+
 function normalizeInventoryItem(raw){
   if (!raw || typeof raw !== "object") return null;
   const item = { ...raw };
@@ -2363,6 +2444,8 @@ function adoptState(doc){
     }))
     : (Array.isArray(window.inventoryFolders) ? window.inventoryFolders : []);
   ensureInventoryForAllMaintenanceTasks();
+  window.inventoryMaterials = normalizeInventoryMaterials(data.inventoryMaterials);
+  window.inventorySection = String(data.inventorySection || window.inventorySection || "items") === "material" ? "material" : "items";
   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
   completedCuttingJobs = Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [];
   orderRequests = normalizeOrderRequests(Array.isArray(data.orderRequests) ? data.orderRequests : []);
@@ -2657,6 +2740,8 @@ async function loadFromCloud(){
         tasksAsReq: Array.isArray(window.tasksAsReq) && window.tasksAsReq.length ? window.tasksAsReq.slice() : (Array.isArray(window.defaultAsReqTasks) ? window.defaultAsReqTasks.slice() : []),
         inventory: Array.isArray(window.inventory) && window.inventory.length ? window.inventory.slice() : (typeof seedInventoryFromTasks === "function" ? seedInventoryFromTasks() : []),
         inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.map(folder => ({ ...folder })) : [],
+        inventoryMaterials: normalizeInventoryMaterials(window.inventoryMaterials),
+        inventorySection: String(window.inventorySection || "items") === "material" ? "material" : "items",
         cuttingJobs: Array.isArray(window.cuttingJobs) ? window.cuttingJobs.slice() : [],
         completedCuttingJobs: Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [],
         orderRequests: Array.isArray(window.orderRequests) && window.orderRequests.length ? window.orderRequests.slice() : [typeof createOrderRequest === "function" ? createOrderRequest() : { id:"req_"+Date.now(), items:[] }],
