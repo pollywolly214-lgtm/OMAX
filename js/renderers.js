@@ -14844,6 +14844,23 @@ function renderInventory(){
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
   let addToMaintenance = false;
 
+  const isFolderDescendant = (folderId, maybeAncestorId)=>{
+    if (!folderId || !maybeAncestorId) return false;
+    const folderKey = String(folderId);
+    const ancestorKey = String(maybeAncestorId);
+    const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
+    let cursor = folders.find(f => f && String(f.id) === folderKey) || null;
+    const seen = new Set();
+    while (cursor && cursor.parent != null){
+      const parentKey = String(cursor.parent);
+      if (parentKey === ancestorKey) return true;
+      if (seen.has(parentKey)) break;
+      seen.add(parentKey);
+      cursor = folders.find(f => f && String(f.id) === parentKey) || null;
+    }
+    return false;
+  };
+
   window.inventoryFolders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
   window.inventoryFolders = window.inventoryFolders.filter(folder => folder && folder.id != null).map(folder => ({
     ...folder,
@@ -14983,6 +15000,11 @@ function renderInventory(){
       if (!folder) return;
       const nextParent = folderParentSelect.value ? String(folderParentSelect.value) : null;
       if (nextParent === folder.id){ toast("Folder cannot be moved into itself."); refreshRows(); return; }
+      if (nextParent && isFolderDescendant(nextParent, folder.id)){
+        toast("Folder cannot be moved inside a child folder.");
+        refreshRows();
+        return;
+      }
       folder.parent = nextParent;
       saveCloudDebounced();
       refreshRows();
@@ -14990,6 +15012,7 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("dragstart", (e)=>{
+    if (e.target.closest("input,select,button,a,textarea")) return;
     const row = e.target.closest("[data-inventory-item-row]");
     if (!row) return;
     const itemId = row.getAttribute("data-inventory-item-row");
@@ -15009,6 +15032,9 @@ function renderInventory(){
     const target = e.target.closest("[data-folder-drop-target]");
     if (!target) return;
     e.preventDefault();
+    rowsTarget.querySelectorAll("[data-folder-drop-target].drop-active").forEach(el => {
+      if (el !== target) el.classList.remove("drop-active");
+    });
     target.classList.add("drop-active");
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
   });
@@ -15039,6 +15065,8 @@ function renderInventory(){
   rowsTarget?.addEventListener("click", async (e)=>{
     const addSubFolderBtn = e.target.closest("[data-inventory-subfolder]");
     if (addSubFolderBtn){
+      e.preventDefault();
+      e.stopPropagation();
       const parentId = addSubFolderBtn.getAttribute("data-inventory-subfolder") || null;
       const name = window.prompt("Folder name:", "New Folder");
       if (!name) return;
@@ -15050,6 +15078,8 @@ function renderInventory(){
 
     const renameFolderBtn = e.target.closest("[data-inventory-folder-rename]");
     if (renameFolderBtn){
+      e.preventDefault();
+      e.stopPropagation();
       const folderId = renameFolderBtn.getAttribute("data-inventory-folder-rename");
       const folder = window.inventoryFolders.find(f => f && String(f.id) === String(folderId));
       if (!folder) return;
@@ -15063,6 +15093,8 @@ function renderInventory(){
 
     const deleteFolderBtn = e.target.closest("[data-inventory-folder-delete]");
     if (deleteFolderBtn){
+      e.preventDefault();
+      e.stopPropagation();
       const folderId = deleteFolderBtn.getAttribute("data-inventory-folder-delete");
       if (!folderId) return;
       const idsToMove = new Set([String(folderId)]);

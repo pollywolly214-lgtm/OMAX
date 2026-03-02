@@ -3635,7 +3635,6 @@ function inventoryRowsHTML(list){
 
 function viewInventory(){
   const filtered = filterInventoryItems(inventorySearchTerm);
-  const rows = inventoryRowsHTML(filtered);
   const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const childrenOf = (parentId)=>{
@@ -3652,7 +3651,7 @@ function viewInventory(){
     const subFolders = childrenOf(folderId).map(renderFolder).join("");
     const folderItems = itemsIn(folderId).map(i => inventoryRowsHTML([i])).join("");
     return `
-      <details class="inventory-folder" open>
+      <details class="inventory-folder" data-folder-drop-target="${esc(folderId)}" open>
         <summary>
           <span>📁 ${esc(folder.name || "Unnamed folder")}</span>
           <span class="inventory-folder-controls">
@@ -3667,7 +3666,7 @@ function viewInventory(){
           </label>
         </div>
         <table class="inventory-table"><tbody>${folderItems || `<tr><td colspan="10" class="muted">No parts in this folder.</td></tr>`}</tbody></table>
-        <div class="small muted" data-folder-drop-target="${esc(folderId)}">Drop parts here to move into this folder</div>
+        <div class="small muted">Drop parts here to move into this folder</div>
         <div class="inventory-folder-children">${subFolders}</div>
       </details>`;
   };
@@ -3694,13 +3693,13 @@ function viewInventory(){
       </div>
       <div class="small muted inventory-hint">Results update as you type. Organize folders like a file explorer.</div>
       <div class="inventory-explorer" data-inventory-rows>
-        <details class="inventory-folder" open>
+        <details class="inventory-folder" data-folder-drop-target="" open>
           <summary><span>🗂️ Root</span></summary>
           <table class="inventory-table">
             <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Folder</th><th>Actions</th></tr></thead>
             <tbody>${rootItemsRows}</tbody>
           </table>
-          <div class="small muted" data-folder-drop-target="">Drop parts here to move to root</div>
+          <div class="small muted">Drop parts here to move to root</div>
           <div class="inventory-folder-children">${rootFolders}</div>
         </details>
       </div>
