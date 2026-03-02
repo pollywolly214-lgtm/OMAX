@@ -6744,6 +6744,12 @@ function renderSettings(){
   if (typeof repairMaintenanceGraph === "function") {
     repairMaintenanceGraph();
   }
+  if (typeof ensureInventoryForAllMaintenanceTasks === "function") {
+    const inventoryChanged = ensureInventoryForAllMaintenanceTasks();
+    if (inventoryChanged && typeof saveCloudDebounced === "function") {
+      try { saveCloudDebounced(); } catch(_){}
+    }
+  }
 
   const searchValueRaw = window.maintenanceSearchTerm || "";
   const searchTerm = searchValueRaw.trim().toLowerCase();
@@ -14824,6 +14830,7 @@ function renderInventory(){
   const searchInput = content.querySelector("#inventorySearch");
   const clearBtn = content.querySelector("#inventorySearchClear");
   const addBtn = content.querySelector("#inventoryAddBtn");
+  const addFolderBtn = content.querySelector("#inventoryAddFolderBtn");
   const modal = content.querySelector("#inventoryAddModal");
   const form = content.querySelector("#inventoryAddForm");
   const closeBtn = modal?.querySelector("[data-close]");
@@ -14836,6 +14843,18 @@ function renderInventory(){
   const qtyNewField = modal?.querySelector("[name=\"inventoryQtyNew\"]");
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
   let addToMaintenance = false;
+
+  window.inventoryFolders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
+  window.inventoryFolders = window.inventoryFolders.filter(folder => folder && folder.id != null).map(folder => ({
+    ...folder,
+    id: String(folder.id),
+    parent: folder.parent != null ? String(folder.parent) : null,
+    name: String(folder.name || "Folder")
+  }));
+  inventory.forEach(item => {
+    if (!item || typeof item !== "object") return;
+    if (item.folderId != null) item.folderId = String(item.folderId);
+  });
 
   function syncLinkedTasksFromInventory(item, updates){
     if (!item) return false;
@@ -14888,8 +14907,10 @@ function renderInventory(){
 
   const refreshRows = ()=>{
     if (!rowsTarget) return;
-    const filtered = filterInventoryItems(inventorySearchTerm);
-    rowsTarget.innerHTML = inventoryRowsHTML(filtered);
+    const shell = document.createElement("div");
+    shell.innerHTML = viewInventory();
+    const fresh = shell.querySelector("[data-inventory-rows]");
+    rowsTarget.innerHTML = fresh ? fresh.innerHTML : "";
   };
 
   try{
@@ -14944,7 +14965,77 @@ function renderInventory(){
     saveCloudDebounced();
   });
 
+  rowsTarget?.addEventListener("change", (e)=>{
+    const folderSelect = e.target.closest("[data-item-folder]");
+    if (folderSelect){
+      const id = folderSelect.getAttribute("data-item-folder");
+      const item = inventory.find(x => x && String(x.id) === String(id));
+      if (!item) return;
+      item.folderId = folderSelect.value ? String(folderSelect.value) : null;
+      saveCloudDebounced();
+      refreshRows();
+      return;
+    }
+    const folderParentSelect = e.target.closest("[data-folder-parent]");
+    if (folderParentSelect){
+      const folderId = folderParentSelect.getAttribute("data-folder-parent");
+      const folder = window.inventoryFolders.find(f => f && String(f.id) === String(folderId));
+      if (!folder) return;
+      const nextParent = folderParentSelect.value ? String(folderParentSelect.value) : null;
+      if (nextParent === folder.id){ toast("Folder cannot be moved into itself."); refreshRows(); return; }
+      folder.parent = nextParent;
+      saveCloudDebounced();
+      refreshRows();
+    }
+  });
+
   rowsTarget?.addEventListener("click", async (e)=>{
+    const addSubFolderBtn = e.target.closest("[data-inventory-subfolder]");
+    if (addSubFolderBtn){
+      const parentId = addSubFolderBtn.getAttribute("data-inventory-subfolder") || null;
+      const name = window.prompt("Folder name:", "New Folder");
+      if (!name) return;
+      window.inventoryFolders.push({ id: genId("inv_folder"), name: name.trim(), parent: parentId || null });
+      saveCloudDebounced();
+      refreshRows();
+      return;
+    }
+
+    const renameFolderBtn = e.target.closest("[data-inventory-folder-rename]");
+    if (renameFolderBtn){
+      const folderId = renameFolderBtn.getAttribute("data-inventory-folder-rename");
+      const folder = window.inventoryFolders.find(f => f && String(f.id) === String(folderId));
+      if (!folder) return;
+      const name = window.prompt("Rename folder:", folder.name || "");
+      if (!name) return;
+      folder.name = name.trim() || folder.name;
+      saveCloudDebounced();
+      refreshRows();
+      return;
+    }
+
+    const deleteFolderBtn = e.target.closest("[data-inventory-folder-delete]");
+    if (deleteFolderBtn){
+      const folderId = deleteFolderBtn.getAttribute("data-inventory-folder-delete");
+      if (!folderId) return;
+      const idsToMove = new Set([String(folderId)]);
+      let changed = true;
+      while (changed){
+        changed = false;
+        window.inventoryFolders.forEach(folder => {
+          if (!folder) return;
+          if (idsToMove.has(String(folder.id))) return;
+          const parent = folder.parent != null ? String(folder.parent) : "";
+          if (idsToMove.has(parent)){ idsToMove.add(String(folder.id)); changed = true; }
+        });
+      }
+      inventory.forEach(item => { if (item && idsToMove.has(String(item.folderId || ""))) item.folderId = null; });
+      window.inventoryFolders = window.inventoryFolders.filter(folder => !idsToMove.has(String(folder?.id)));
+      saveCloudDebounced();
+      refreshRows();
+      return;
+    }
+
     const nameBtn = e.target.closest("[data-inventory-maintenance]");
     if (nameBtn){
       const id = nameBtn.getAttribute("data-inventory-maintenance");
@@ -15052,6 +15143,13 @@ function renderInventory(){
   }
 
   addBtn?.addEventListener("click", openInventoryModal);
+  addFolderBtn?.addEventListener("click", ()=>{
+    const name = window.prompt("Folder name:", "New Folder");
+    if (!name) return;
+    window.inventoryFolders.push({ id: genId("inv_folder"), name: name.trim(), parent: null });
+    saveCloudDebounced();
+    refreshRows();
+  });
   closeBtn?.addEventListener("click", closeInventoryModal);
   backBtn?.addEventListener("click", ()=> setInventoryModalStep("prompt"));
   modal?.addEventListener("click", (e)=>{ if (e.target === modal) closeInventoryModal(); });
@@ -15095,6 +15193,7 @@ function renderInventory(){
       price = num;
     }
     const note = (data.get("inventoryNote") || "").toString().trim();
+    const folderIdRaw = (data.get("inventoryFolderId") || "").toString().trim();
 
     const baseItem = {
       id: genId("inventory"),
@@ -15105,7 +15204,8 @@ function renderInventory(){
       pn,
       link,
       price,
-      note
+      note,
+      folderId: folderIdRaw || null
     };
     const item = typeof normalizeInventoryItem === "function"
       ? normalizeInventoryItem(baseItem)

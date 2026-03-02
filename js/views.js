@@ -3583,9 +3583,28 @@ function filterInventoryItems(term){
   });
 }
 
+function inventoryFolderOptionsMarkup(selectedId, { includeCurrent = null, allowRoot = true } = {}){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
+  const selected = selectedId != null ? String(selectedId) : "";
+  const current = includeCurrent != null ? String(includeCurrent) : null;
+  const options = [];
+  if (allowRoot){
+    options.push(`<option value="" ${selected ? "" : "selected"}>Root</option>`);
+  }
+  folders
+    .filter(folder => folder && folder.id != null && (current == null || String(folder.id) !== current))
+    .sort((a, b)=> String(a.name || "").localeCompare(String(b.name || "")))
+    .forEach(folder => {
+      const id = String(folder.id);
+      options.push(`<option value="${esc(id)}" ${id === selected ? "selected" : ""}>${esc(folder.name || "Unnamed folder")}</option>`);
+    });
+  return options.join("");
+}
+
 function inventoryRowsHTML(list){
   if (!Array.isArray(list) || !list.length){
-    return `<tr><td colspan="9" class="muted">No inventory items match your search.</td></tr>`;
+    return `<tr><td colspan="10" class="muted">No inventory items match your search.</td></tr>`;
   }
   return list.map(i => {
     const priceVal = i.price != null && i.price !== "" ? Number(i.price) : "";
@@ -3605,6 +3624,7 @@ function inventoryRowsHTML(list){
       <td>${i.link ? `<a href="${i.link}" target="_blank" rel="noopener">link</a>` : "—"}</td>
       <td><input type="number" step="0.01" min="0" data-inv="price" data-id="${i.id}" value="${priceDisplay}"></td>
       <td><input type="text" data-inv="note" data-id="${i.id}" value="${i.note||""}"></td>
+      <td><select data-item-folder="${i.id}">${inventoryFolderOptionsMarkup(i.folderId)}</select></td>
       <td class="inventory-actions">
         <button type="button" class="inventory-add" data-order-add="${i.id}">Add to order request</button>
         <button type="button" class="inventory-delete" data-inventory-delete="${i.id}">Delete</button>
@@ -3616,6 +3636,44 @@ function inventoryRowsHTML(list){
 function viewInventory(){
   const filtered = filterInventoryItems(inventorySearchTerm);
   const rows = inventoryRowsHTML(filtered);
+  const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const childrenOf = (parentId)=>{
+    const target = parentId == null ? "" : String(parentId);
+    return folders.filter(folder => String(folder?.parent ?? "") === target);
+  };
+  const itemsIn = (folderId)=>{
+    const target = folderId == null ? "" : String(folderId);
+    return filtered.filter(item => String(item?.folderId ?? "") === target);
+  };
+
+  const renderFolder = (folder)=>{
+    const folderId = String(folder.id);
+    const subFolders = childrenOf(folderId).map(renderFolder).join("");
+    const folderItems = itemsIn(folderId).map(i => inventoryRowsHTML([i])).join("");
+    return `
+      <details class="inventory-folder" open>
+        <summary>
+          <span>📁 ${esc(folder.name || "Unnamed folder")}</span>
+          <span class="inventory-folder-controls">
+            <button type="button" data-inventory-subfolder="${esc(folderId)}">+ Folder</button>
+            <button type="button" data-inventory-folder-rename="${esc(folderId)}">Rename</button>
+            <button type="button" class="danger" data-inventory-folder-delete="${esc(folderId)}">Delete</button>
+          </span>
+        </summary>
+        <div class="mini-form inventory-folder-move-row">
+          <label>Move folder to
+            <select data-folder-parent="${esc(folderId)}">${inventoryFolderOptionsMarkup(folder.parent, { includeCurrent: folderId })}</select>
+          </label>
+        </div>
+        <table class="inventory-table"><tbody>${folderItems || `<tr><td colspan="10" class="muted">No parts in this folder.</td></tr>`}</tbody></table>
+        <div class="inventory-folder-children">${subFolders}</div>
+      </details>`;
+  };
+
+  const rootFolders = childrenOf(null).map(renderFolder).join("");
+  const rootItems = itemsIn(null);
+  const rootItemsRows = inventoryRowsHTML(rootItems);
   const searchValue = String(inventorySearchTerm || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -3627,16 +3685,23 @@ function viewInventory(){
       <h3>Inventory</h3>
       <div class="inventory-toolbar">
         <button type="button" class="inventory-add-trigger" id="inventoryAddBtn">+ Add inventory item</button>
+        <button type="button" class="inventory-add-trigger" id="inventoryAddFolderBtn">+ Add folder</button>
         <div class="inventory-search mini-form">
           <input type="search" id="inventorySearch" placeholder="Search items, part numbers, notes, or links" value="${searchValue}">
           <button type="button" id="inventorySearchClear">Clear</button>
         </div>
       </div>
-      <div class="small muted inventory-hint">Results update as you type.</div>
-      <table class="inventory-table">
-        <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
-        <tbody data-inventory-rows>${rows}</tbody>
-      </table>
+      <div class="small muted inventory-hint">Results update as you type. Organize folders like a file explorer.</div>
+      <div class="inventory-explorer" data-inventory-rows>
+        <details class="inventory-folder" open>
+          <summary><span>🗂️ Root</span></summary>
+          <table class="inventory-table">
+            <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Folder</th><th>Actions</th></tr></thead>
+            <tbody>${rootItemsRows}</tbody>
+          </table>
+          <div class="inventory-folder-children">${rootFolders}</div>
+        </details>
+      </div>
     </div>
   </div>
 
@@ -3663,6 +3728,7 @@ function viewInventory(){
             <label>Old quantity<input type="number" min="0" step="1" name="inventoryQtyOld" value="0"></label>
             <label>Unit<input name="inventoryUnit" placeholder="pcs" value="pcs"></label>
             <label>Part #<input name="inventoryPN" placeholder="Part number"></label>
+            <label>Folder<select name="inventoryFolderId">${inventoryFolderOptionsMarkup(null)}</select></label>
             <label>Store link<input type="url" name="inventoryLink" placeholder="https://..."></label>
             <label>Price ($)<input type="number" min="0" step="0.01" name="inventoryPrice" placeholder="optional"></label>
             <label>Notes<input name="inventoryNote" placeholder="Optional note"></label>

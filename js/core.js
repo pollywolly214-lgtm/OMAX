@@ -1881,6 +1881,7 @@ function snapshotState(){
     tasksInterval,
     tasksAsReq,
     inventory,
+    inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.map(folder => ({ ...folder })) : [],
     cuttingJobs: stripJobFileDataUrls(cuttingJobs),
     completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs),
     orderRequests,
@@ -2192,6 +2193,58 @@ function normalizeInventoryItem(raw){
   return item;
 }
 
+
+function ensureInventoryForAllMaintenanceTasks(){
+  if (!Array.isArray(inventory)) inventory = [];
+  const lists = [Array.isArray(tasksInterval) ? tasksInterval : [], Array.isArray(tasksAsReq) ? tasksAsReq : []];
+  let changed = false;
+  lists.forEach(list => {
+    list.forEach(task => {
+      if (!task || typeof task !== "object") return;
+      const taskId = task.id != null ? String(task.id) : "";
+      if (!taskId) return;
+      let linked = null;
+      const invId = task.inventoryId != null ? String(task.inventoryId) : "";
+      if (invId){
+        linked = inventory.find(item => item && String(item.id) === invId) || null;
+      }
+      if (!linked){
+        linked = inventory.find(item => item && String(item.linkedTaskId || "") === taskId) || null;
+      }
+      if (!linked){
+        linked = normalizeInventoryItem({
+          id: genId("inventory"),
+          name: task.name || "Maintenance part",
+          qtyNew: 0,
+          qtyOld: 0,
+          unit: "pcs",
+          note: task.condition || "",
+          pn: task.pn || "",
+          link: task.storeLink || "",
+          price: task.price != null ? Number(task.price) : null,
+          linkedTaskId: taskId,
+          folderId: null
+        });
+        if (linked){
+          inventory.unshift(linked);
+          changed = true;
+        }
+      }
+      if (!linked) return;
+      if (String(task.inventoryId || "") !== String(linked.id)){
+        task.inventoryId = linked.id;
+        changed = true;
+      }
+      if (String(linked.linkedTaskId || "") !== taskId){
+        linked.linkedTaskId = taskId;
+        changed = true;
+      }
+    });
+  });
+  window.inventory = inventory;
+  return changed;
+}
+
 function normalizeDailyCutHours(list){
   const map = new Map();
   if (Array.isArray(list)){
@@ -2301,6 +2354,15 @@ function adoptState(doc){
   inventory = Array.isArray(data.inventory)
     ? data.inventory.map(normalizeInventoryItem).filter(Boolean)
     : seedInventoryFromTasks();
+  window.inventoryFolders = Array.isArray(data.inventoryFolders)
+    ? data.inventoryFolders.filter(folder => folder && folder.id != null).map(folder => ({
+      ...folder,
+      id: String(folder.id),
+      parent: folder.parent != null ? String(folder.parent) : null,
+      name: String(folder.name || "Folder")
+    }))
+    : (Array.isArray(window.inventoryFolders) ? window.inventoryFolders : []);
+  ensureInventoryForAllMaintenanceTasks();
   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
   completedCuttingJobs = Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [];
   orderRequests = normalizeOrderRequests(Array.isArray(data.orderRequests) ? data.orderRequests : []);
@@ -2594,6 +2656,7 @@ async function loadFromCloud(){
         tasksInterval: Array.isArray(window.tasksInterval) && window.tasksInterval.length ? window.tasksInterval.slice() : (Array.isArray(window.defaultIntervalTasks) ? window.defaultIntervalTasks.slice() : []),
         tasksAsReq: Array.isArray(window.tasksAsReq) && window.tasksAsReq.length ? window.tasksAsReq.slice() : (Array.isArray(window.defaultAsReqTasks) ? window.defaultAsReqTasks.slice() : []),
         inventory: Array.isArray(window.inventory) && window.inventory.length ? window.inventory.slice() : (typeof seedInventoryFromTasks === "function" ? seedInventoryFromTasks() : []),
+        inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.map(folder => ({ ...folder })) : [],
         cuttingJobs: Array.isArray(window.cuttingJobs) ? window.cuttingJobs.slice() : [],
         completedCuttingJobs: Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [],
         orderRequests: Array.isArray(window.orderRequests) && window.orderRequests.length ? window.orderRequests.slice() : [typeof createOrderRequest === "function" ? createOrderRequest() : { id:"req_"+Date.now(), items:[] }],
