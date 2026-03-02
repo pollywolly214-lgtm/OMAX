@@ -13155,9 +13155,20 @@ function renderJobs(){
     window.__cleanupJobFileMenus = null;
   }
 
+  const floatingOneDriveModal = document.body?.querySelector("#jobOneDriveModal[data-floating='1']");
+  if (floatingOneDriveModal){
+    try { floatingOneDriveModal.remove(); } catch (_err) { /* noop */ }
+  }
+
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
   setupJobLayout();
+
+  const inlineOneDriveModal = content.querySelector("#jobOneDriveModal");
+  if (inlineOneDriveModal && inlineOneDriveModal.parentElement !== document.body){
+    inlineOneDriveModal.dataset.floating = "1";
+    document.body.appendChild(inlineOneDriveModal);
+  }
 
   const queueOneDrivePreviewHydration = ()=>{
     const allJobs = [];
@@ -13931,26 +13942,26 @@ function renderJobs(){
   const newOneDriveLinkBtn = document.getElementById("jobOneDriveLinkBtn");
   const newFilesInput = document.getElementById("jobFiles");
   const oneDriveSetupBtn = content.querySelector("[data-job-onedrive-setup]");
-  const oneDriveModal = content.querySelector("#jobOneDriveModal");
-  const oneDriveClientIdInput = content.querySelector("#jobOneDriveClientId");
-  const oneDriveTenantIdInput = content.querySelector("#jobOneDriveTenantId");
-  const oneDriveFolderPathInput = content.querySelector("#jobOneDriveFolderPath");
-  const oneDriveFolderHintInput = content.querySelector("#jobOneDriveFolderHint");
-  const oneDriveEnabledInput = content.querySelector("#jobOneDriveEnabled");
-  const oneDriveSaveBtn = content.querySelector("[data-onedrive-save]");
-  const oneDriveCancelBtns = Array.from(content.querySelectorAll("[data-onedrive-cancel]"));
-  const oneDriveLibraryNameInput = content.querySelector("#jobOneDriveFileName");
-  const oneDriveLibraryUrlInput = content.querySelector("#jobOneDriveFileUrl");
-  const oneDriveLibraryPreviewInput = content.querySelector("#jobOneDrivePreviewUrl");
-  const oneDriveLibraryAddBtn = content.querySelector("[data-onedrive-library-add]");
-  const oneDriveSyncBtn = content.querySelector("[data-onedrive-sync-library]");
-  const oneDriveLibraryList = content.querySelector("#jobOneDriveLibraryList");
+  const oneDriveModal = document.querySelector("#jobOneDriveModal");
+  const oneDriveClientIdInput = document.querySelector("#jobOneDriveClientId");
+  const oneDriveTenantIdInput = document.querySelector("#jobOneDriveTenantId");
+  const oneDriveFolderPathInput = document.querySelector("#jobOneDriveFolderPath");
+  const oneDriveFolderHintInput = document.querySelector("#jobOneDriveFolderHint");
+  const oneDriveEnabledInput = document.querySelector("#jobOneDriveEnabled");
+  const oneDriveSaveBtn = document.querySelector("[data-onedrive-save]");
+  const oneDriveCancelBtns = Array.from(document.querySelectorAll("[data-onedrive-cancel]"));
+  const oneDriveLibraryNameInput = document.querySelector("#jobOneDriveFileName");
+  const oneDriveLibraryUrlInput = document.querySelector("#jobOneDriveFileUrl");
+  const oneDriveLibraryPreviewInput = document.querySelector("#jobOneDrivePreviewUrl");
+  const oneDriveLibraryAddBtn = document.querySelector("[data-onedrive-library-add]");
+  const oneDriveSyncBtn = document.querySelector("[data-onedrive-sync-library]");
+  const oneDriveLibraryList = document.querySelector("#jobOneDriveLibraryList");
   const oneDriveLibrarySelect = document.getElementById("jobOneDriveLibrarySelect");
   const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
-  const oneDriveConnectBtn = content.querySelector("[data-onedrive-connect]");
-  const oneDriveConnStatus = content.querySelector("[data-onedrive-connection-status]");
-  const oneDriveFolderStatus = content.querySelector("[data-onedrive-folder-status]");
-  const oneDriveLibraryStatus = content.querySelector("[data-onedrive-library-status]");
+  const oneDriveConnectBtn = document.querySelector("[data-onedrive-connect]");
+  const oneDriveConnStatus = document.querySelector("[data-onedrive-connection-status]");
+  const oneDriveFolderStatus = document.querySelector("[data-onedrive-folder-status]");
+  const oneDriveLibraryStatus = document.querySelector("[data-onedrive-library-status]");
 
   const updateOneDriveWizardStatus = ()=>{
     const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
