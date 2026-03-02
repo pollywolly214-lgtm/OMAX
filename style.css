@@ -3078,6 +3078,12 @@ body.modal-open .auth-bar {
 .job-onedrive-library-list li {
   margin: 3px 0;
 }
+.job-onedrive-filter-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
 .job-file-cell {
   display: flex;
   flex-direction: column;

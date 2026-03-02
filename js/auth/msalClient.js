@@ -5,7 +5,6 @@
   let appClientId = "";
 
   function currentConfig(){
-    if (typeof window.getOneDriveJobConfig === "function") return window.getOneDriveJobConfig();
     return { clientId: (window.ONE_DRIVE_CLIENT_ID || "").trim() };
   }
 

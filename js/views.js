@@ -2009,11 +2009,11 @@ function viewJobs(){
   };
   const oneDriveConfig = (typeof window.getOneDriveJobConfig === "function")
     ? window.getOneDriveJobConfig()
-    : { enabled: false, clientId: "", tenantId: "common", folderPath: "", folderHint: "", accessToken: "", accessTokenExpiresAt: "", lastLinkedAt: "" };
+    : { enabled: false, sharedFolderUrl: "", shareToken: "", folderHint: "", accessToken: "", accessTokenExpiresAt: "", lastLinkedAt: "" };
   const oneDriveLibrary = (typeof window.getOneDriveJobLibrary === "function")
     ? window.getOneDriveJobLibrary()
     : [];
-  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.folderPath && oneDriveConfig.accessToken);
+  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.sharedFolderUrl && oneDriveConfig.accessToken);
   const oneDriveStatusLabel = oneDriveReady
     ? `OneDrive linked${oneDriveConfig.folderHint ? ` · ${oneDriveConfig.folderHint}` : ""}`
     : "OneDrive not linked";
@@ -3623,10 +3623,10 @@ function viewJobs(){
           <div class="job-note-modal-body">
             <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Connect to OneDrive, set a folder path, then sync and add files directly from the app.</p>
             <ol class="job-onedrive-steps small">
-              <li><strong>Step 1:</strong> Enter your Azure app <em>Client ID</em> and <em>Tenant ID</em>.</li>
-              <li><strong>Step 2:</strong> Enter the OneDrive folder path that contains your DXF files (example: <code>Drawings/Cutting Jobs</code>).</li>
-              <li><strong>Step 3:</strong> Click <strong>Connect OneDrive</strong> and complete sign-in.</li>
-              <li><strong>Step 4:</strong> Click <strong>Sync library from OneDrive folder</strong> to load files.</li>
+              <li><strong>Step 1:</strong> Paste your OneDrive <em>Shared Folder Link</em> (folder-level share URL).</li>
+              <li><strong>Step 2:</strong> Click <strong>Sign in to Microsoft</strong> to grant delegated file access.</li>
+              <li><strong>Step 3:</strong> Click <strong>Sync library from shared folder</strong> to crawl folders and files.</li>
+              <li><strong>Step 4:</strong> Use <strong>Add from OneDrive library</strong> to open the file explorer.</li>
               <li><strong>Step 5:</strong> Return to the job form and click <strong>Add from OneDrive library</strong>.</li>
             </ol>
             <div class="job-onedrive-status-grid small muted" data-onedrive-status-grid>
@@ -3634,14 +3634,8 @@ function viewJobs(){
               <div>Folder path: <span data-onedrive-folder-status>Not set</span></div>
               <div>Library files: <span data-onedrive-library-status>0</span></div>
             </div>
-            <label class="job-edit-note">Azure App (client) ID
-              <input type="text" id="jobOneDriveClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value="${esc(oneDriveConfig.clientId || "")}">
-            </label>
-            <label class="job-edit-note">Tenant ID (or "common")
-              <input type="text" id="jobOneDriveTenantId" placeholder="common" value="${esc(oneDriveConfig.tenantId || "common")}">
-            </label>
-            <label class="job-edit-note">OneDrive folder path
-              <input type="text" id="jobOneDriveFolderPath" placeholder="Drawings/Cutting Jobs" value="${esc(oneDriveConfig.folderPath || "")}">
+            <label class="job-edit-note">OneDrive shared folder link
+              <input type="url" id="jobOneDriveSharedLink" placeholder="https://... (shared folder URL)" value="${esc(oneDriveConfig.sharedFolderUrl || "")}">
             </label>
             <label class="job-edit-note">Folder label (optional)
               <input type="text" id="jobOneDriveFolderHint" placeholder="Shop drawings" value="${esc(oneDriveConfig.folderHint || "")}">
@@ -3651,8 +3645,8 @@ function viewJobs(){
             </label>
             <p class="small muted">Authenticate once, then sync files directly from OneDrive folder in-app.</p>
             <div class="job-onedrive-sync-actions">
-              <button type="button" class="job-note-modal-secondary" data-onedrive-connect>Connect OneDrive</button>
-              <button type="button" class="job-note-modal-secondary" data-onedrive-sync-library>Sync library from OneDrive folder</button>
+              <button type="button" class="job-note-modal-secondary" data-onedrive-connect>Sign in to Microsoft</button>
+              <button type="button" class="job-note-modal-secondary" data-onedrive-sync-library>Sync library from shared folder</button>
             </div>
             <div class="job-onedrive-library">
               <h5>OneDrive file library</h5>
@@ -3672,6 +3666,29 @@ function viewJobs(){
           <div class="job-note-modal-actions">
             <button type="button" class="job-note-modal-secondary" data-onedrive-cancel>Cancel</button>
             <button type="button" class="job-note-modal-primary" data-onedrive-save>Save setup</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="job-note-modal-backdrop" id="jobOneDriveExplorerModal" hidden>
+        <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobOneDriveExplorerTitle">
+          <div class="job-note-modal-header">
+            <h4 id="jobOneDriveExplorerTitle">OneDrive File Explorer</h4>
+            <button type="button" class="job-note-modal-close" data-onedrive-explorer-cancel aria-label="Close file explorer">×</button>
+          </div>
+          <div class="job-note-modal-body">
+            <div class="small muted" id="jobOneDriveBreadcrumb">/</div>
+            <input type="search" id="jobOneDriveSearch" placeholder="Search files...">
+            <div class="job-onedrive-filter-row">
+              <button type="button" class="job-note-modal-secondary" data-od-filter="all">All</button>
+              <button type="button" class="job-note-modal-secondary" data-od-filter=".dxf">DXF</button>
+              <button type="button" class="job-note-modal-secondary" data-od-filter=".ord">ORD</button>
+              <button type="button" class="job-note-modal-secondary" data-od-filter=".omx">OMX</button>
+            </div>
+            <ul class="job-onedrive-library-list" id="jobOneDriveExplorerList"></ul>
+          </div>
+          <div class="job-note-modal-actions">
+            <button type="button" class="job-note-modal-secondary" data-onedrive-explorer-cancel>Cancel</button>
           </div>
         </div>
       </div>
