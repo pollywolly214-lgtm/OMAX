@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Iterable
 import zlib
 
+from preview_omx import preview_omx_to_polylines
+
 
 MAX_BYTES_READ = 8 * 1024 * 1024
 MAX_OMX_POINTS = 25000
@@ -112,16 +114,15 @@ def preview_omx(file_path: str | Path, output_path: str | Path | None = None) ->
         return render_placeholder(target, "OMX preview requires matplotlib", output)
 
     try:
-        data = target.read_bytes()[:MAX_BYTES_READ]
+        polylines = preview_omx_to_polylines(target)
     except Exception as exc:
-        return render_placeholder(target, f"OMX read failed: {exc}", output)
+        return render_placeholder(target, f"OMX parse failed: {exc}", output)
 
-    points = _extract_float32_xy_pairs(data)
-    if len(points) < 10:
-        return render_placeholder(target, "OMX geometry not extractable", output)
+    if not polylines:
+        return render_placeholder(target, "OMX XY geometry not found", output)
 
-    _plot_path_png(points, output, plt)
-    return PreviewResult(output, mode="omx", reason="heuristic")
+    _plot_polylines_png(polylines, output, plt)
+    return PreviewResult(output, mode="omx", reason="xy-toolpath")
 
 
 def preview_ord(file_path: str | Path, output_path: str | Path | None = None, _visited: set[Path] | None = None) -> PreviewResult:
@@ -254,6 +255,33 @@ def _plot_segments_png(segments: list[tuple[float, float, float, float]], output
     fig.savefig(output_path, bbox_inches="tight", pad_inches=0.1)
     plt.close(fig)
 
+
+
+
+def _plot_polylines_png(polylines: list[list[tuple[float, float]]], output_path: Path, plt) -> None:
+    fig, ax = plt.subplots(figsize=(7, 5), dpi=120)
+
+    segments: list[tuple[float, float, float, float]] = []
+    for poly in polylines:
+        if len(poly) < 2:
+            continue
+        xs = [p[0] for p in poly]
+        ys = [p[1] for p in poly]
+        ax.plot(xs, ys, color="#264653", linewidth=0.8)
+        for i in range(len(poly) - 1):
+            x1, y1 = poly[i]
+            x2, y2 = poly[i + 1]
+            segments.append((x1, y1, x2, y2))
+
+    if not segments:
+        plt.close(fig)
+        raise RuntimeError("No drawable OMX polylines")
+
+    ax.set_aspect("equal", adjustable="box")
+    ax.axis("off")
+    _tight_bounds(ax, segments)
+    fig.savefig(output_path, bbox_inches="tight", pad_inches=0.1)
+    plt.close(fig)
 
 def _plot_path_png(points: list[tuple[float, float]], output_path: Path, plt) -> None:
     fig, ax = plt.subplots(figsize=(7, 5), dpi=120)
