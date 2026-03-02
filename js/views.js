@@ -3615,7 +3615,7 @@ function inventoryRowsHTML(list){
     const qtyNewDisplay = Number.isFinite(qtyNewNum) && qtyNewNum >= 0 ? qtyNewNum : 0;
     const qtyOldDisplay = Number.isFinite(qtyOldNum) && qtyOldNum >= 0 ? qtyOldNum : 0;
     return `
-    <tr>
+    <tr draggable="true" data-inventory-item-row="${i.id}">
       <td><button type="button" class="inventory-name-btn" data-inventory-maintenance="${i.id}">${nameDisplay}</button></td>
       <td><input type="number" min="0" step="1" data-inv="qtyNew" data-id="${i.id}" value="${qtyNewDisplay}"></td>
       <td><input type="number" min="0" step="1" data-inv="qtyOld" data-id="${i.id}" value="${qtyOldDisplay}"></td>
@@ -3667,6 +3667,7 @@ function viewInventory(){
           </label>
         </div>
         <table class="inventory-table"><tbody>${folderItems || `<tr><td colspan="10" class="muted">No parts in this folder.</td></tr>`}</tbody></table>
+        <div class="small muted" data-folder-drop-target="${esc(folderId)}">Drop parts here to move into this folder</div>
         <div class="inventory-folder-children">${subFolders}</div>
       </details>`;
   };
@@ -3699,6 +3700,7 @@ function viewInventory(){
             <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Folder</th><th>Actions</th></tr></thead>
             <tbody>${rootItemsRows}</tbody>
           </table>
+          <div class="small muted" data-folder-drop-target="">Drop parts here to move to root</div>
           <div class="inventory-folder-children">${rootFolders}</div>
         </details>
       </div>

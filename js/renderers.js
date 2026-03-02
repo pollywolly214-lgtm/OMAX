@@ -14989,6 +14989,53 @@ function renderInventory(){
     }
   });
 
+  rowsTarget?.addEventListener("dragstart", (e)=>{
+    const row = e.target.closest("[data-inventory-item-row]");
+    if (!row) return;
+    const itemId = row.getAttribute("data-inventory-item-row");
+    if (!itemId) return;
+    e.dataTransfer?.setData("text/plain", String(itemId));
+    e.dataTransfer.effectAllowed = "move";
+    row.classList.add("dragging");
+  });
+
+  rowsTarget?.addEventListener("dragend", (e)=>{
+    const row = e.target.closest("[data-inventory-item-row]");
+    if (row) row.classList.remove("dragging");
+    rowsTarget.querySelectorAll("[data-folder-drop-target].drop-active").forEach(el => el.classList.remove("drop-active"));
+  });
+
+  rowsTarget?.addEventListener("dragover", (e)=>{
+    const target = e.target.closest("[data-folder-drop-target]");
+    if (!target) return;
+    e.preventDefault();
+    target.classList.add("drop-active");
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  });
+
+  rowsTarget?.addEventListener("dragleave", (e)=>{
+    const target = e.target.closest("[data-folder-drop-target]");
+    if (!target) return;
+    const next = e.relatedTarget;
+    if (next instanceof Node && target.contains(next)) return;
+    target.classList.remove("drop-active");
+  });
+
+  rowsTarget?.addEventListener("drop", (e)=>{
+    const target = e.target.closest("[data-folder-drop-target]");
+    if (!target) return;
+    e.preventDefault();
+    target.classList.remove("drop-active");
+    const itemId = e.dataTransfer?.getData("text/plain") || "";
+    if (!itemId) return;
+    const item = inventory.find(entry => entry && String(entry.id) === String(itemId));
+    if (!item) return;
+    const folderId = target.getAttribute("data-folder-drop-target") || "";
+    item.folderId = folderId ? String(folderId) : null;
+    saveCloudDebounced();
+    refreshRows();
+  });
+
   rowsTarget?.addEventListener("click", async (e)=>{
     const addSubFolderBtn = e.target.closest("[data-inventory-subfolder]");
     if (addSubFolderBtn){
