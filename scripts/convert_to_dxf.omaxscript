@@ -1,0 +1,21 @@
+# OMAX LAYOUT script template (placeholder)
+#
+# IMPORTANT:
+# - Do not assume command names in this template are valid for your version.
+# - Open this in OMAX Script Editor and replace placeholders with exact commands
+#   from your installed command list.
+#
+# Expected input (JSON file path is passed as argv[1]):
+# {
+#   "input_path": "C:/.../file.ord",
+#   "output_dxf_path": "C:/.../output.dxf"
+# }
+#
+# Required workflow:
+# 1) File > Open (for ORD/OMX/DXF created by OMAX software)
+# 2) Set Open dialog file filter to include ORD/OMX or All Files (*.*)
+# 3) Open input_path
+# 4) Save/Export as DXF to output_dxf_path
+#
+# Fallback only if Open fails on that installation/version:
+# - Import from Other CAD
