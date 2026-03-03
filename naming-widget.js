@@ -627,6 +627,7 @@ async function preparePreviewData(file) {
   }
 
   const previewSvg = renderCadToSvgDataUrl(content)
+    || renderOmaxToolpathToSvgDataUrl(content, ext)
     || renderCoordinateCloudToSvgDataUrl(content)
     || renderBinaryFloatPairsToSvgDataUrl(buffer);
 
@@ -676,6 +677,116 @@ function renderCadToSvgDataUrl(text) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${-(vbY + vbH)} ${vbW} ${vbH}"><rect x="${vbX}" y="${-(vbY + vbH)}" width="${vbW}" height="${vbH}" fill="#ffffff"/><g stroke="#32407a" stroke-width="${Math.max(vbW, vbH) / 450}" fill="none" stroke-linecap="round">${paths}</g></svg>`;
 
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+
+function renderOmaxToolpathToSvgDataUrl(content, ext) {
+  if (ext !== '.omx' && ext !== '.ord') return '';
+
+  const rows = parseOmaxRows(content);
+  if (rows.length < 2) return '';
+
+  const path = [];
+  const pointsSeen = [];
+  const pointsDrawn = [];
+  let prev = null;
+
+  rows.forEach(row => {
+    const cur = { x: row.x, y: row.y };
+    pointsSeen.push(cur);
+
+    if (!prev) {
+      path.push(`M ${cur.x} ${-cur.y}`);
+      prev = cur;
+      return;
+    }
+
+    const span = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+    if (span < 1e-9) {
+      prev = cur;
+      return;
+    }
+
+    if (Math.abs(row.bow) < 1e-8) {
+      path.push(`L ${cur.x} ${-cur.y}`);
+      pointsDrawn.push(prev, cur);
+    } else {
+      const arcPoints = bulgeArcPolyline(prev, cur, row.bow, 24);
+      if (arcPoints.length > 1) {
+        for (let i = 1; i < arcPoints.length; i += 1) {
+          const pt = arcPoints[i];
+          path.push(`L ${pt.x} ${-pt.y}`);
+          pointsDrawn.push(arcPoints[i - 1], pt);
+        }
+      } else {
+        path.push(`L ${cur.x} ${-cur.y}`);
+        pointsDrawn.push(prev, cur);
+      }
+    }
+
+    prev = cur;
+  });
+
+  if (path.length < 2) return '';
+  const focusPoints = pointsDrawn.length >= 2 ? pointsDrawn : pointsSeen;
+  const bounds = normalizePreviewBounds(focusPoints, boundsFromPoints(focusPoints));
+  return buildPathSvgDataUrl(path, bounds);
+}
+
+function parseOmaxRows(content) {
+  const rows = [];
+  String(content || '').split(/\r?\n/).forEach(raw => {
+    const line = raw.trim();
+    if (!line || line.startsWith('//') || !line.startsWith('[0]')) return;
+
+    let after = line.split(']', 1)[1] || '';
+    after = after.trimStart();
+    if (after.startsWith(',')) after = after.slice(1);
+    const tokens = after.split(',').map(token => token.trim());
+    if (tokens.length < 8) return;
+
+    const x = Number.parseFloat(tokens[0]);
+    const y = Number.parseFloat(tokens[1]);
+    const bow = Number.parseFloat(tokens[5]);
+    const q = Number.parseInt(tokens[6], 10);
+    const side = Number.parseInt(tokens[7], 10);
+    if (![x, y, bow].every(Number.isFinite)) return;
+
+    rows.push({ x, y, bow, q: Number.isFinite(q) ? q : 0, side: Number.isFinite(side) ? side : 0 });
+  });
+  return rows;
+}
+
+function bulgeArcPolyline(p0, p1, bulge, steps = 24) {
+  if (Math.abs(bulge) < 1e-9) return [p0, p1];
+
+  const chord = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+  if (!Number.isFinite(chord) || chord < 1e-9) return [p0];
+
+  const theta = 4 * Math.atan(bulge);
+  const sinHalf = Math.sin(Math.abs(theta) / 2);
+  if (Math.abs(sinHalf) < 1e-9) return [p0, p1];
+
+  const r = chord / (2 * sinHalf);
+  const mx = (p0.x + p1.x) / 2;
+  const my = (p0.y + p1.y) / 2;
+  const ux = (p1.x - p0.x) / chord;
+  const uy = (p1.y - p0.y) / chord;
+  const nx = -uy;
+  const ny = ux;
+  const h = r * Math.cos(Math.abs(theta) / 2);
+  const cx = mx + ((bulge > 0 ? 1 : -1) * h * nx);
+  const cy = my + ((bulge > 0 ? 1 : -1) * h * ny);
+  const a0 = Math.atan2(p0.y - cy, p0.x - cx);
+
+  const out = [];
+  const n = Math.max(8, Math.min(96, steps));
+  for (let i = 0; i <= n; i += 1) {
+    const t = i / n;
+    const a = a0 + (t * theta);
+    out.push({ x: cx + (r * Math.cos(a)), y: cy + (r * Math.sin(a)) });
+  }
+  return out;
 }
 
 function renderCoordinateCloudToSvgDataUrl(text) {
