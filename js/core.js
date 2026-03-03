@@ -2301,6 +2301,26 @@ function normalizeInventoryMaterials(raw){
       thickness: String(row.thickness || ""),
       values: columns.map((_, idx) => String(Array.isArray(row.values) ? (row.values[idx] ?? "") : ""))
     }));
+    const parseThicknessValue = (raw)=>{
+      const txt = String(raw || "").replace(/"/g, "").trim();
+      if (!txt) return Number.POSITIVE_INFINITY;
+      const mixed = txt.match(/^(\d+)\s+(\d+)\/(\d+)$/);
+      if (mixed){
+        const whole = Number(mixed[1]);
+        const top = Number(mixed[2]);
+        const bot = Number(mixed[3]);
+        if (Number.isFinite(whole) && Number.isFinite(top) && Number.isFinite(bot) && bot > 0) return whole + (top / bot);
+      }
+      const frac = txt.match(/^(\d+)\/(\d+)$/);
+      if (frac){
+        const top = Number(frac[1]);
+        const bot = Number(frac[2]);
+        if (Number.isFinite(top) && Number.isFinite(bot) && bot > 0) return top / bot;
+      }
+      const num = Number(txt);
+      return Number.isFinite(num) ? num : Number.POSITIVE_INFINITY;
+    };
+    rows.sort((a,b)=> parseThicknessValue(a.thickness) - parseThicknessValue(b.thickness));
 
     sheets[type.id] = { columns, rows };
   });

@@ -3634,6 +3634,37 @@ function inventoryRowsHTML(list){
 }
 
 
+function formatMaterialThicknessDisplay(raw){
+  const txt = String(raw ?? "").trim();
+  if (!txt) return "";
+  const cleaned = txt.replace(/"/g, "").trim();
+  const mixed = cleaned.match(/^(\d+)\s+(\d+)\/(\d+)$/);
+  if (mixed){
+    const whole = Number(mixed[1]);
+    const top = Number(mixed[2]);
+    const bot = Number(mixed[3]);
+    if (Number.isFinite(whole) && Number.isFinite(top) && Number.isFinite(bot) && bot > 0){
+      const six = Math.round((whole + (top / bot)) * 16);
+      if (typeof formatThicknessSixteenths === "function") return `${formatThicknessSixteenths(six)}"`;
+    }
+  }
+  const frac = cleaned.match(/^(\d+)\/(\d+)$/);
+  if (frac){
+    const top = Number(frac[1]);
+    const bot = Number(frac[2]);
+    if (Number.isFinite(top) && Number.isFinite(bot) && bot > 0){
+      const six = Math.round((top / bot) * 16);
+      if (typeof formatThicknessSixteenths === "function") return `${formatThicknessSixteenths(six)}"`;
+    }
+  }
+  const num = Number(cleaned);
+  if (Number.isFinite(num) && num > 0){
+    const six = Math.round(num * 16);
+    if (typeof formatThicknessSixteenths === "function") return `${formatThicknessSixteenths(six)}"`;
+  }
+  return txt;
+}
+
 function materialSheetTableHTML(model, typeId){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const type = (Array.isArray(model?.types) ? model.types : []).find(t => String(t.id) === String(typeId));
@@ -3646,25 +3677,26 @@ function materialSheetTableHTML(model, typeId){
       <table class="inventory-table material-grid-table">
         <thead>
           <tr>
-            <th><input type="text" data-material-name="${esc(typeId)}" value="${esc(type.name || "Material")}" aria-label="Material name"></th>
-            ${columns.map((col, idx)=>`<th><input type="text" data-material-col="${esc(typeId)}" data-col-index="${idx}" value="${esc(col || "")}" aria-label="Column heading"></th>`).join("")}
-            <th class="material-col-actions"><button type="button" class="small" data-material-col-add="${esc(typeId)}">+ Col</button></th>
+            <th class="material-header material-editable" data-material-editable="1" data-edit-kind="material-name" data-type-id="${esc(typeId)}">${esc(type.name || "Material")}</th>
+            ${columns.map((col, idx)=>`<th class="material-header material-editable" data-material-editable="1" data-edit-kind="column" data-type-id="${esc(typeId)}" data-col-index="${idx}">${esc(col || "")}</th>`).join("")}
+            <th class="material-col-actions"><button type="button" class="small" data-material-col-add="${esc(typeId)}">+C</button></th>
           </tr>
         </thead>
         <tbody>
           ${rows.map((row, rowIdx)=>`
             <tr>
-              <td><input type="text" data-material-thickness="${esc(typeId)}" data-row-index="${rowIdx}" value="${esc(row.thickness || "")}" aria-label="Thickness"></td>
-              ${columns.map((_, colIdx)=>`<td><input type="text" data-material-cell="${esc(typeId)}" data-row-index="${rowIdx}" data-col-index="${colIdx}" value="${esc((row.values && row.values[colIdx]) || "")}" aria-label="Cell"></td>`).join("")}
-              <td class="material-row-actions"><button type="button" class="small danger" data-material-row-delete="${esc(typeId)}" data-row-index="${rowIdx}">− Row</button></td>
+              <td class="material-editable" data-material-editable="1" data-edit-kind="thickness" data-type-id="${esc(typeId)}" data-row-index="${rowIdx}">${esc(formatMaterialThicknessDisplay(row.thickness || ""))}</td>
+              ${columns.map((_, colIdx)=>`<td class="material-editable" data-material-editable="1" data-edit-kind="cell" data-type-id="${esc(typeId)}" data-row-index="${rowIdx}" data-col-index="${colIdx}">${esc((row.values && row.values[colIdx]) || "")}</td>`).join("")}
+              <td class="material-row-actions"><button type="button" class="small danger" data-material-row-delete="${esc(typeId)}" data-row-index="${rowIdx}">−R</button></td>
             </tr>
           `).join("")}
         </tbody>
       </table>
       <div class="material-grid-actions">
         <button type="button" class="small" data-material-row-add="${esc(typeId)}">+ Row</button>
-        <button type="button" class="small" data-material-col-delete="${esc(typeId)}">− Last Col</button>
+        <button type="button" class="small" data-material-col-delete="${esc(typeId)}">− Col</button>
       </div>
+      <div class="small muted">Double-click any table cell/header to edit.</div>
     </div>`;
 }
 

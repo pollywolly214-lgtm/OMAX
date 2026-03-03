@@ -15051,55 +15051,90 @@ function renderInventory(){
     }
   });
 
-  content.addEventListener("input", (e)=>{
+  const parseThicknessToStored = (raw)=>{
+    const txt = String(raw ?? "").replace(/"/g, "").trim();
+    if (!txt) return "";
+    const mixed = txt.match(/^(\d+)\s+(\d+)\/(\d+)$/);
+    if (mixed){
+      const whole = Number(mixed[1]);
+      const top = Number(mixed[2]);
+      const bot = Number(mixed[3]);
+      if (Number.isFinite(whole) && Number.isFinite(top) && Number.isFinite(bot) && bot > 0){
+        return String(whole + (top / bot));
+      }
+    }
+    const frac = txt.match(/^(\d+)\/(\d+)$/);
+    if (frac){
+      const top = Number(frac[1]);
+      const bot = Number(frac[2]);
+      if (Number.isFinite(top) && Number.isFinite(bot) && bot > 0){
+        return String(top / bot);
+      }
+    }
+    const num = Number(txt);
+    return Number.isFinite(num) ? String(num) : txt;
+  };
+
+  const updateMaterialCellValue = (cell, value)=>{
+    const kind = cell.getAttribute("data-edit-kind") || "";
+    const typeId = cell.getAttribute("data-type-id") || "";
     const model = getMaterialModel();
-    const nameInput = e.target.closest("[data-material-name]");
-    if (nameInput){
-      const typeId = nameInput.getAttribute("data-material-name") || "";
+    const sheet = model.sheets[typeId];
+    if (!sheet) return;
+
+    if (kind === "material-name"){
       const type = model.types.find(t => String(t.id) === String(typeId));
       if (!type) return;
-      type.name = nameInput.value || type.name;
-      window.inventoryMaterials = model;
-      persistInventoryMaterials();
-      return;
-    }
-
-    const colInput = e.target.closest("[data-material-col]");
-    if (colInput){
-      const typeId = colInput.getAttribute("data-material-col") || "";
-      const colIndex = Number(colInput.getAttribute("data-col-index"));
-      const sheet = model.sheets[typeId];
-      if (!sheet || !Number.isFinite(colIndex) || colIndex < 0 || colIndex >= sheet.columns.length) return;
-      sheet.columns[colIndex] = colInput.value;
-      window.inventoryMaterials = model;
-      persistInventoryMaterials();
-      return;
-    }
-
-    const thicknessInput = e.target.closest("[data-material-thickness]");
-    if (thicknessInput){
-      const typeId = thicknessInput.getAttribute("data-material-thickness") || "";
-      const rowIndex = Number(thicknessInput.getAttribute("data-row-index"));
-      const sheet = model.sheets[typeId];
-      if (!sheet || !Number.isFinite(rowIndex) || rowIndex < 0 || rowIndex >= sheet.rows.length) return;
-      sheet.rows[rowIndex].thickness = thicknessInput.value;
-      window.inventoryMaterials = model;
-      persistInventoryMaterials();
-      return;
-    }
-
-    const cellInput = e.target.closest("[data-material-cell]");
-    if (cellInput){
-      const typeId = cellInput.getAttribute("data-material-cell") || "";
-      const rowIndex = Number(cellInput.getAttribute("data-row-index"));
-      const colIndex = Number(cellInput.getAttribute("data-col-index"));
-      const sheet = model.sheets[typeId];
-      if (!sheet || !Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) return;
+      type.name = value || type.name;
+    } else if (kind === "column"){
+      const colIndex = Number(cell.getAttribute("data-col-index"));
+      if (!Number.isFinite(colIndex) || colIndex < 0 || colIndex >= sheet.columns.length) return;
+      sheet.columns[colIndex] = value;
+    } else if (kind === "thickness"){
+      const rowIndex = Number(cell.getAttribute("data-row-index"));
+      if (!Number.isFinite(rowIndex) || rowIndex < 0 || rowIndex >= sheet.rows.length) return;
+      sheet.rows[rowIndex].thickness = parseThicknessToStored(value);
+    } else if (kind === "cell"){
+      const rowIndex = Number(cell.getAttribute("data-row-index"));
+      const colIndex = Number(cell.getAttribute("data-col-index"));
+      if (!Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) return;
       if (rowIndex < 0 || rowIndex >= sheet.rows.length || colIndex < 0 || colIndex >= sheet.columns.length) return;
-      sheet.rows[rowIndex].values[colIndex] = cellInput.value;
-      window.inventoryMaterials = model;
-      persistInventoryMaterials();
+      sheet.rows[rowIndex].values[colIndex] = value;
+    } else {
+      return;
     }
+
+    window.inventoryMaterials = model;
+    persistInventoryMaterials();
+    renderInventory();
+  };
+
+  content.addEventListener("dblclick", (e)=>{
+    const cell = e.target.closest("[data-material-editable]");
+    if (!cell || cell.querySelector("input")) return;
+    const original = (cell.textContent || "").trim();
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = original;
+    input.className = "material-inline-editor";
+    cell.textContent = "";
+    cell.appendChild(input);
+    input.focus();
+    input.select();
+
+    const commit = ()=> updateMaterialCellValue(cell, input.value.trim());
+    const cancel = ()=> renderInventory();
+
+    input.addEventListener("keydown", (evt)=>{
+      if (evt.key === "Enter"){
+        evt.preventDefault();
+        commit();
+      } else if (evt.key === "Escape"){
+        evt.preventDefault();
+        cancel();
+      }
+    });
+    input.addEventListener("blur", commit, { once:true });
   });
 
   if (searchInput){
