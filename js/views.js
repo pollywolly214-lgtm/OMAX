@@ -3678,7 +3678,10 @@ function materialSheetTableHTML(model, typeId){
         <thead>
           <tr>
             <th class="material-header material-editable" data-material-editable="1" data-edit-kind="material-name" data-type-id="${esc(typeId)}">${esc(type.name || "Material")}</th>
-            ${columns.map((col, idx)=>`<th class="material-header material-editable" data-material-editable="1" data-edit-kind="column" data-type-id="${esc(typeId)}" data-col-index="${idx}">${esc(col || "")}</th>`).join("")}
+            ${columns.map((col, idx)=>`<th class="material-header material-editable" data-material-editable="1" data-edit-kind="column" data-type-id="${esc(typeId)}" data-col-index="${idx}">
+              <span>${esc(col || "")}</span>
+              <button type="button" class="tiny danger" data-material-col-delete-index="${esc(typeId)}" data-col-index="${idx}" title="Delete this column">×</button>
+            </th>`).join("")}
             <th class="material-col-actions"><button type="button" class="small" data-material-col-add="${esc(typeId)}">+C</button></th>
           </tr>
         </thead>
@@ -3687,14 +3690,16 @@ function materialSheetTableHTML(model, typeId){
             <tr>
               <td class="material-editable" data-material-editable="1" data-edit-kind="thickness" data-type-id="${esc(typeId)}" data-row-index="${rowIdx}">${esc(formatMaterialThicknessDisplay(row.thickness || ""))}</td>
               ${columns.map((_, colIdx)=>`<td class="material-editable" data-material-editable="1" data-edit-kind="cell" data-type-id="${esc(typeId)}" data-row-index="${rowIdx}" data-col-index="${colIdx}">${esc((row.values && row.values[colIdx]) || "")}</td>`).join("")}
-              <td class="material-row-actions"><button type="button" class="small danger" data-material-row-delete="${esc(typeId)}" data-row-index="${rowIdx}">−R</button></td>
+              <td class="material-row-actions">
+                <button type="button" class="tiny" data-material-row-add-after="${esc(typeId)}" data-row-index="${rowIdx}" title="Insert row below">+R</button>
+                <button type="button" class="tiny danger" data-material-row-delete="${esc(typeId)}" data-row-index="${rowIdx}" title="Delete this row">−R</button>
+              </td>
             </tr>
           `).join("")}
         </tbody>
       </table>
       <div class="material-grid-actions">
         <button type="button" class="small" data-material-row-add="${esc(typeId)}">+ Row</button>
-        <button type="button" class="small" data-material-col-delete="${esc(typeId)}">− Col</button>
       </div>
       <div class="small muted">Double-click any table cell/header to edit.</div>
     </div>`;
