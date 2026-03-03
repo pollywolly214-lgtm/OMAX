@@ -14949,10 +14949,12 @@ function renderInventory(){
     });
   });
 
+  const getMaterialModel = ()=> normalizeInventoryMaterials(window.inventoryMaterials);
+
   content.querySelectorAll("[data-material-type]").forEach(btn => {
     btn.addEventListener("click", ()=>{
       const typeId = btn.getAttribute("data-material-type") || "";
-      const model = normalizeInventoryMaterials(window.inventoryMaterials);
+      const model = getMaterialModel();
       if (!model.types.some(t => String(t.id) === String(typeId))) return;
       model.activeType = String(typeId);
       window.inventoryMaterials = model;
@@ -14963,7 +14965,7 @@ function renderInventory(){
 
   content.querySelectorAll("[data-material-view-all]").forEach(btn => {
     btn.addEventListener("click", ()=>{
-      const model = normalizeInventoryMaterials(window.inventoryMaterials);
+      const model = getMaterialModel();
       model.activeType = "__all";
       window.inventoryMaterials = model;
       saveCloudDebounced();
@@ -14975,7 +14977,7 @@ function renderInventory(){
   materialAddTypeBtn?.addEventListener("click", ()=>{
     const raw = window.prompt("Material type name:", "Titanium");
     if (!raw) return;
-    const model = normalizeInventoryMaterials(window.inventoryMaterials);
+    const model = getMaterialModel();
     const name = raw.trim();
     if (!name) return;
     let id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
@@ -14984,9 +14986,7 @@ function renderInventory(){
     const used = new Set(model.types.map(t => String(t.id)));
     while (used.has(id)){ id = `${id}_${counter++}`; }
     model.types.push({ id, name });
-    const thicknesses = buildMaterialThicknessList();
-    model.rows[id] = {};
-    thicknesses.forEach(t => { model.rows[id][t.key] = [{ size:"", amount:"" }]; });
+    model.sheets[id] = { columns: ["qty 5x10", "qty 5x11"], rows: [{ thickness: "0.0625", values: ["", ""] }] };
     model.activeType = id;
     window.inventoryMaterials = model;
     saveCloudDebounced();
@@ -14994,34 +14994,112 @@ function renderInventory(){
   });
 
   content.addEventListener("click", (e)=>{
-    const addPair = e.target.closest("[data-material-add-pair]");
-    if (!addPair) return;
-    const typeId = addPair.getAttribute("data-material-add-pair") || "";
-    const thickness = addPair.getAttribute("data-thickness") || "";
-    const model = normalizeInventoryMaterials(window.inventoryMaterials);
-    if (!model.rows[typeId] || !Array.isArray(model.rows[typeId][thickness])) return;
-    model.rows[typeId][thickness].push({ size:"", amount:"" });
-    window.inventoryMaterials = model;
-    saveCloudDebounced();
-    renderInventory();
+    const addRow = e.target.closest("[data-material-row-add]");
+    if (addRow){
+      const typeId = addRow.getAttribute("data-material-row-add") || "";
+      const model = getMaterialModel();
+      const sheet = model.sheets[typeId];
+      if (!sheet) return;
+      sheet.rows.push({ thickness: "", values: sheet.columns.map(()=>"") });
+      window.inventoryMaterials = model;
+      saveCloudDebounced();
+      renderInventory();
+      return;
+    }
+
+    const delRow = e.target.closest("[data-material-row-delete]");
+    if (delRow){
+      const typeId = delRow.getAttribute("data-material-row-delete") || "";
+      const rowIndex = Number(delRow.getAttribute("data-row-index"));
+      const model = getMaterialModel();
+      const sheet = model.sheets[typeId];
+      if (!sheet || !Number.isFinite(rowIndex)) return;
+      if (sheet.rows.length <= 1) return;
+      sheet.rows.splice(rowIndex, 1);
+      window.inventoryMaterials = model;
+      saveCloudDebounced();
+      renderInventory();
+      return;
+    }
+
+    const addCol = e.target.closest("[data-material-col-add]");
+    if (addCol){
+      const typeId = addCol.getAttribute("data-material-col-add") || "";
+      const model = getMaterialModel();
+      const sheet = model.sheets[typeId];
+      if (!sheet) return;
+      sheet.columns.push(`qty ${sheet.columns.length + 1}`);
+      sheet.rows.forEach(row => row.values.push(""));
+      window.inventoryMaterials = model;
+      saveCloudDebounced();
+      renderInventory();
+      return;
+    }
+
+    const delCol = e.target.closest("[data-material-col-delete]");
+    if (delCol){
+      const typeId = delCol.getAttribute("data-material-col-delete") || "";
+      const model = getMaterialModel();
+      const sheet = model.sheets[typeId];
+      if (!sheet || sheet.columns.length <= 1) return;
+      sheet.columns.pop();
+      sheet.rows.forEach(row => { if (row.values.length) row.values.pop(); });
+      window.inventoryMaterials = model;
+      saveCloudDebounced();
+      renderInventory();
+      return;
+    }
   });
 
   content.addEventListener("input", (e)=>{
-    const sizeInput = e.target.closest("[data-material-size]");
-    const amountInput = e.target.closest("[data-material-amount]");
-    const target = sizeInput || amountInput;
-    if (!target) return;
-    const typeId = target.getAttribute(sizeInput ? "data-material-size" : "data-material-amount") || "";
-    const thickness = target.getAttribute("data-thickness") || "";
-    const pairIndex = Number(target.getAttribute("data-pair-index"));
-    const model = normalizeInventoryMaterials(window.inventoryMaterials);
-    if (!model.rows[typeId] || !Array.isArray(model.rows[typeId][thickness])) return;
-    const pair = model.rows[typeId][thickness][pairIndex];
-    if (!pair) return;
-    if (sizeInput) pair.size = target.value;
-    if (amountInput) pair.amount = target.value;
-    window.inventoryMaterials = model;
-    persistInventoryMaterials();
+    const model = getMaterialModel();
+    const nameInput = e.target.closest("[data-material-name]");
+    if (nameInput){
+      const typeId = nameInput.getAttribute("data-material-name") || "";
+      const type = model.types.find(t => String(t.id) === String(typeId));
+      if (!type) return;
+      type.name = nameInput.value || type.name;
+      window.inventoryMaterials = model;
+      persistInventoryMaterials();
+      return;
+    }
+
+    const colInput = e.target.closest("[data-material-col]");
+    if (colInput){
+      const typeId = colInput.getAttribute("data-material-col") || "";
+      const colIndex = Number(colInput.getAttribute("data-col-index"));
+      const sheet = model.sheets[typeId];
+      if (!sheet || !Number.isFinite(colIndex) || colIndex < 0 || colIndex >= sheet.columns.length) return;
+      sheet.columns[colIndex] = colInput.value;
+      window.inventoryMaterials = model;
+      persistInventoryMaterials();
+      return;
+    }
+
+    const thicknessInput = e.target.closest("[data-material-thickness]");
+    if (thicknessInput){
+      const typeId = thicknessInput.getAttribute("data-material-thickness") || "";
+      const rowIndex = Number(thicknessInput.getAttribute("data-row-index"));
+      const sheet = model.sheets[typeId];
+      if (!sheet || !Number.isFinite(rowIndex) || rowIndex < 0 || rowIndex >= sheet.rows.length) return;
+      sheet.rows[rowIndex].thickness = thicknessInput.value;
+      window.inventoryMaterials = model;
+      persistInventoryMaterials();
+      return;
+    }
+
+    const cellInput = e.target.closest("[data-material-cell]");
+    if (cellInput){
+      const typeId = cellInput.getAttribute("data-material-cell") || "";
+      const rowIndex = Number(cellInput.getAttribute("data-row-index"));
+      const colIndex = Number(cellInput.getAttribute("data-col-index"));
+      const sheet = model.sheets[typeId];
+      if (!sheet || !Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) return;
+      if (rowIndex < 0 || rowIndex >= sheet.rows.length || colIndex < 0 || colIndex >= sheet.columns.length) return;
+      sheet.rows[rowIndex].values[colIndex] = cellInput.value;
+      window.inventoryMaterials = model;
+      persistInventoryMaterials();
+    }
   });
 
   if (searchInput){

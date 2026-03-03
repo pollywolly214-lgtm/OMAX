@@ -2207,6 +2207,14 @@ function buildMaterialThicknessList(){
 }
 
 function defaultInventoryMaterials(){
+  const thicknesses = buildMaterialThicknessList();
+  const makeSheet = ()=>({
+    columns: ["qty 5x10", "qty 5x11", "qty 5x12", "qty 5x13"],
+    rows: thicknesses.map(t => ({
+      thickness: (t.sixteenths / 16).toFixed(4).replace(/0+$/, "").replace(/\.$/, ""),
+      values: ["", "", "", ""]
+    }))
+  });
   return {
     activeType: "aluminum",
     types: [
@@ -2214,7 +2222,11 @@ function defaultInventoryMaterials(){
       { id: "steel", name: "Steel" },
       { id: "stainless_steel", name: "Stainless Steel" }
     ],
-    rows: {}
+    sheets: {
+      aluminum: makeSheet(),
+      steel: makeSheet(),
+      stainless_steel: makeSheet()
+    }
   };
 }
 
@@ -2232,25 +2244,73 @@ function normalizeInventoryMaterials(raw){
       used.add(id);
       return { id, name: String(entry.name || id).trim() || id };
     });
-  const thicknesses = buildMaterialThicknessList();
-  const rows = {};
-  const rowsRaw = data.rows && typeof data.rows === "object" ? data.rows : {};
+
+  const sheetsRaw = data.sheets && typeof data.sheets === "object" ? data.sheets : {};
+  const legacyRowsRaw = data.rows && typeof data.rows === "object" ? data.rows : {};
+  const sheets = {};
+
   types.forEach(type => {
-    const typeRaw = rowsRaw[type.id] && typeof rowsRaw[type.id] === 'object' ? rowsRaw[type.id] : {};
-    const typeRows = {};
-    thicknesses.forEach(t => {
-      const pairsRaw = Array.isArray(typeRaw[t.key]) ? typeRaw[t.key] : [{ size:'', amount:'' }];
-      const pairs = pairsRaw.map(pair => ({
-        size: String(pair?.size || ''),
-        amount: String(pair?.amount || '')
-      }));
-      typeRows[t.key] = pairs.length ? pairs : [{ size:'', amount:'' }];
-    });
-    rows[type.id] = typeRows;
+    const rawSheet = sheetsRaw[type.id] && typeof sheetsRaw[type.id] === "object" ? sheetsRaw[type.id] : null;
+    let columns = Array.isArray(rawSheet?.columns)
+      ? rawSheet.columns.map(c => String(c || "").trim() || "qty").slice(0, 24)
+      : [];
+    let rows = Array.isArray(rawSheet?.rows)
+      ? rawSheet.rows.map(row => {
+        const values = Array.isArray(row?.values) ? row.values.map(v => String(v ?? "")) : [];
+        return {
+          thickness: String(row?.thickness || ""),
+          values
+        };
+      })
+      : [];
+
+    if (!columns.length || !rows.length){
+      const baseSheet = base.sheets[type.id] || base.sheets.aluminum;
+      columns = Array.isArray(baseSheet?.columns) ? baseSheet.columns.slice() : ["qty"];
+      rows = Array.isArray(baseSheet?.rows)
+        ? baseSheet.rows.map(r => ({ thickness: String(r.thickness || ""), values: Array.isArray(r.values) ? r.values.map(v => String(v ?? "")) : [] }))
+        : [];
+    }
+
+    const legacyType = legacyRowsRaw[type.id] && typeof legacyRowsRaw[type.id] === "object" ? legacyRowsRaw[type.id] : null;
+    if (legacyType && (!rawSheet || !Array.isArray(rawSheet.rows) || !rawSheet.rows.length)){
+      const allSizes = [];
+      Object.values(legacyType).forEach(pairs => {
+        if (!Array.isArray(pairs)) return;
+        pairs.forEach(pair => {
+          const size = String(pair?.size || "").trim();
+          if (size && !allSizes.includes(size)) allSizes.push(size);
+        });
+      });
+      if (allSizes.length) columns = allSizes.map(size => `qty ${size}`);
+      rows = Object.entries(legacyType).map(([key, pairs]) => {
+        const six = Number(String(key).replace(/^t_/, ""));
+        const thickness = Number.isFinite(six) && six > 0 ? (six / 16).toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : String(key || "");
+        const values = columns.map(col => {
+          const size = String(col || "").replace(/^qty\s*/i, "").trim();
+          const hit = Array.isArray(pairs) ? pairs.find(pair => String(pair?.size || "").trim() === size) : null;
+          return String(hit?.amount ?? "");
+        });
+        return { thickness, values };
+      });
+    }
+
+    columns = columns.length ? columns : ["qty"];
+    rows = rows.length ? rows : [{ thickness: "", values: columns.map(() => "") }];
+    rows = rows.map(row => ({
+      thickness: String(row.thickness || ""),
+      values: columns.map((_, idx) => String(Array.isArray(row.values) ? (row.values[idx] ?? "") : ""))
+    }));
+
+    sheets[type.id] = { columns, rows };
   });
+
   const activeCandidate = String(data.activeType || base.activeType || (types[0] && types[0].id) || '');
-  const activeType = types.some(t => t.id === activeCandidate) ? activeCandidate : (types[0] ? types[0].id : '');
-  return { activeType, types, rows, thicknesses };
+  const activeType = activeCandidate === "__all" || types.some(t => t.id === activeCandidate)
+    ? activeCandidate
+    : (types[0] ? types[0].id : '');
+
+  return { activeType, types, sheets };
 }
 
 function normalizeInventoryItem(raw){

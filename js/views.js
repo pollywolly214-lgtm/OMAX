@@ -3634,36 +3634,47 @@ function inventoryRowsHTML(list){
 }
 
 
-function materialThicknessRowsHTML(model, typeId){
+function materialSheetTableHTML(model, typeId){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-  const rows = model?.rows?.[typeId] || {};
-  const thicknesses = Array.isArray(model?.thicknesses) ? model.thicknesses : [];
-  return thicknesses.map(th => {
-    const pairs = Array.isArray(rows[th.key]) ? rows[th.key] : [{ size:'', amount:'' }];
-    const pairCells = pairs.map((pair, idx)=>`
-      <div class="material-pair" data-material-pair="${esc(typeId)}" data-thickness="${esc(th.key)}" data-pair-index="${idx}">
-        <input type="text" data-material-size="${esc(typeId)}" data-thickness="${esc(th.key)}" data-pair-index="${idx}" value="${esc(pair.size || '')}" placeholder="Size">
-        <input type="text" data-material-amount="${esc(typeId)}" data-thickness="${esc(th.key)}" data-pair-index="${idx}" value="${esc(pair.amount || '')}" placeholder="Amount">
+  const type = (Array.isArray(model?.types) ? model.types : []).find(t => String(t.id) === String(typeId));
+  if (!type) return "";
+  const sheet = model?.sheets?.[typeId] || { columns:["qty"], rows:[{ thickness:"", values:[""] }] };
+  const columns = Array.isArray(sheet.columns) && sheet.columns.length ? sheet.columns : ["qty"];
+  const rows = Array.isArray(sheet.rows) && sheet.rows.length ? sheet.rows : [{ thickness:"", values: columns.map(()=>"") }];
+  return `
+    <div class="material-sheet-wrap">
+      <table class="inventory-table material-grid-table">
+        <thead>
+          <tr>
+            <th><input type="text" data-material-name="${esc(typeId)}" value="${esc(type.name || "Material")}" aria-label="Material name"></th>
+            ${columns.map((col, idx)=>`<th><input type="text" data-material-col="${esc(typeId)}" data-col-index="${idx}" value="${esc(col || "")}" aria-label="Column heading"></th>`).join("")}
+            <th class="material-col-actions"><button type="button" class="small" data-material-col-add="${esc(typeId)}">+ Col</button></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row, rowIdx)=>`
+            <tr>
+              <td><input type="text" data-material-thickness="${esc(typeId)}" data-row-index="${rowIdx}" value="${esc(row.thickness || "")}" aria-label="Thickness"></td>
+              ${columns.map((_, colIdx)=>`<td><input type="text" data-material-cell="${esc(typeId)}" data-row-index="${rowIdx}" data-col-index="${colIdx}" value="${esc((row.values && row.values[colIdx]) || "")}" aria-label="Cell"></td>`).join("")}
+              <td class="material-row-actions"><button type="button" class="small danger" data-material-row-delete="${esc(typeId)}" data-row-index="${rowIdx}">− Row</button></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+      <div class="material-grid-actions">
+        <button type="button" class="small" data-material-row-add="${esc(typeId)}">+ Row</button>
+        <button type="button" class="small" data-material-col-delete="${esc(typeId)}">− Last Col</button>
       </div>
-    `).join('');
-    return `
-      <tr>
-        <td>${esc(th.label)}</td>
-        <td>
-          <div class="material-pairs">${pairCells}</div>
-          <button type="button" class="small" data-material-add-pair="${esc(typeId)}" data-thickness="${esc(th.key)}">+ Pair</button>
-        </td>
-      </tr>`;
-  }).join('');
+    </div>`;
 }
 
 function viewInventoryMaterial(model){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const activeType = String(model?.activeType || '');
   const types = Array.isArray(model?.types) ? model.types : [];
-  const activeRows = activeType === "__all"
-    ? types.map(type => `<tr><td colspan="2"><strong>${esc(type.name)}</strong></td></tr>${materialThicknessRowsHTML(model, type.id)}`).join("")
-    : materialThicknessRowsHTML(model, activeType);
+  const body = activeType === "__all"
+    ? types.map(type => materialSheetTableHTML(model, type.id)).join("")
+    : materialSheetTableHTML(model, activeType);
   return `
     <div class="inventory-material-view">
       <div class="inventory-toolbar">
@@ -3673,12 +3684,7 @@ function viewInventoryMaterial(model){
         ${types.map(type => `<button type="button" data-material-type="${esc(type.id)}" class="${String(type.id)===activeType?'active':''}">${esc(type.name)}</button>`).join('')}
         <button type="button" data-material-view-all="1" class="${activeType === "__all" ? "active" : ""}">View all</button>
       </div>
-      <div class="material-table-wrap">
-        <table class="inventory-table material-table">
-          <thead><tr><th>Thickness</th><th>Size / Amount pairs</th></tr></thead>
-          <tbody>${activeRows}</tbody>
-        </table>
-      </div>
+      <div class="material-table-wrap">${body}</div>
     </div>`;
 }
 
