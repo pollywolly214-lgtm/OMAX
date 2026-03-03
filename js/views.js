@@ -2013,7 +2013,7 @@ function viewJobs(){
   const oneDriveLibrary = (typeof window.getOneDriveJobLibrary === "function")
     ? window.getOneDriveJobLibrary()
     : [];
-  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.sharedFolderUrl && oneDriveConfig.accessToken);
+  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.sharedFolderUrl);
   const oneDriveStatusLabel = oneDriveReady
     ? `OneDrive linked${oneDriveConfig.folderHint ? ` · ${oneDriveConfig.folderHint}` : ""}`
     : "OneDrive not linked";
@@ -3621,17 +3621,16 @@ function viewJobs(){
             <button type="button" class="job-note-modal-close" data-onedrive-cancel aria-label="Close OneDrive setup">×</button>
           </div>
           <div class="job-note-modal-body">
-            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Connect to OneDrive, set a folder path, then sync and add files directly from the app.</p>
+            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Paste a OneDrive shared-folder link, sync it, then pick files directly from the in-app library explorer.</p>
             <ol class="job-onedrive-steps small">
               <li><strong>Step 1:</strong> Paste your OneDrive <em>Shared Folder Link</em> (folder-level share URL).</li>
-              <li><strong>Step 2:</strong> Click <strong>Sign in to Microsoft</strong> to grant delegated file access.</li>
-              <li><strong>Step 3:</strong> Click <strong>Sync library from shared folder</strong> to crawl folders and files.</li>
-              <li><strong>Step 4:</strong> Use <strong>Add from OneDrive library</strong> to open the file explorer.</li>
-              <li><strong>Step 5:</strong> Return to the job form and click <strong>Add from OneDrive library</strong>.</li>
+              <li><strong>Step 2:</strong> Click <strong>Sync library from shared folder</strong> to crawl folders and files.</li>
+              <li><strong>Step 3:</strong> Use <strong>Add from OneDrive library</strong> in the job form to open the file explorer.</li>
+              <li><strong>Step 4:</strong> Click a file in the explorer to attach it to the cutting job.</li>
             </ol>
             <div class="job-onedrive-status-grid small muted" data-onedrive-status-grid>
-              <div>Connection: <span data-onedrive-connection-status>Not connected</span></div>
-              <div>Folder path: <span data-onedrive-folder-status>Not set</span></div>
+              <div>Shared link: <span data-onedrive-connection-status>Not set</span></div>
+              <div>Folder status: <span data-onedrive-folder-status>Not ready</span></div>
               <div>Library files: <span data-onedrive-library-status>0</span></div>
             </div>
             <label class="job-edit-note">OneDrive shared folder link
@@ -3643,9 +3642,8 @@ function viewJobs(){
             <label class="job-edit-note">
               <input type="checkbox" id="jobOneDriveEnabled" ${oneDriveConfig.enabled ? "checked" : ""}> Enable OneDrive linking for cutting jobs
             </label>
-            <p class="small muted">Authenticate once, then sync files directly from OneDrive folder in-app.</p>
+            <p class="small muted">Use a folder sharing link (example: https://onedrive.live.com/...) and sync before opening the file explorer.</p>
             <div class="job-onedrive-sync-actions">
-              <button type="button" class="job-note-modal-secondary" data-onedrive-connect>Sign in to Microsoft</button>
               <button type="button" class="job-note-modal-secondary" data-onedrive-sync-library>Sync library from shared folder</button>
             </div>
             <div class="job-onedrive-library">

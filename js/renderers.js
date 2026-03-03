@@ -950,7 +950,6 @@ function encodeGraphPath(path){
 
 async function fetchOneDriveFolderLibrary(config){
   const cfg = normalizeOneDriveJobConfig(config);
-  if (!oneDriveTokenValid(cfg)) throw new Error("Connect OneDrive first.");
   if (!cfg.folderPath) throw new Error("Set OneDrive folder path first.");
   const path = encodeGraphPath(cfg.folderPath);
   const endpoint = `https://graph.microsoft.com/v1.0/me/drive/root:/${path}:/children?$top=200&$select=id,name,webUrl,file,folder,@microsoft.graph.downloadUrl`;
@@ -13971,8 +13970,8 @@ function renderJobs(){
   const updateOneDriveWizardStatus = ()=>{
     const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
     const lib = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
-    if (oneDriveConnStatus) oneDriveConnStatus.textContent = oneDriveTokenValid(cfg) ? "Connected" : "Not connected";
-    if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = cfg?.sharedFolderUrl ? "Configured" : "Not set";
+    if (oneDriveConnStatus) oneDriveConnStatus.textContent = cfg?.sharedFolderUrl ? "Configured" : "Not set";
+    if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = cfg?.sharedFolderUrl ? "Ready to sync" : "Not ready";
     if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = String(Array.isArray(lib) ? lib.length : 0);
   };
 
@@ -13980,11 +13979,6 @@ function renderJobs(){
     const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
     if (!cfg?.sharedFolderUrl){
       toast("Set your OneDrive shared folder link first.");
-      openOneDriveModal();
-      return { ok: false, count: 0 };
-    }
-    if (!oneDriveTokenValid(cfg)){
-      toast("Connect OneDrive first.");
       openOneDriveModal();
       return { ok: false, count: 0 };
     }
@@ -14057,31 +14051,7 @@ function renderJobs(){
     updateOneDriveWizardStatus();
   });
 
-  oneDriveConnectBtn?.addEventListener("click", async ()=>{
-    const currentCfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
-    const draft = {
-      enabled: !!oneDriveEnabledInput?.checked,
-      sharedFolderUrl: oneDriveSharedLinkInput?.value || currentCfg?.sharedFolderUrl || "",
-      shareToken: (window.oneDriveSharedLibrary && typeof window.oneDriveSharedLibrary.encodeSharingUrlToToken === "function")
-        ? window.oneDriveSharedLibrary.encodeSharingUrlToToken(oneDriveSharedLinkInput?.value || currentCfg?.sharedFolderUrl || "")
-        : "",
-      folderHint: oneDriveFolderHintInput?.value || currentCfg?.folderHint || "",
-      accessToken: currentCfg?.accessToken || "",
-      accessTokenExpiresAt: currentCfg?.accessTokenExpiresAt || ""
-    };
-    try {
-      if (oneDriveConnectBtn instanceof HTMLButtonElement) oneDriveConnectBtn.disabled = true;
-      const tokenInfo = await connectOneDriveInteractive(draft);
-      const saved = writeOneDriveJobConfig({ ...draft, ...tokenInfo, lastLinkedAt: new Date().toISOString() });
-      toast(saved.enabled ? "OneDrive connected" : "OneDrive connected (enable it to use in jobs)");
-      updateOneDriveWizardStatus();
-      renderJobs();
-    } catch (err){
-      toast(err?.message || "OneDrive connect failed.");
-    } finally {
-      if (oneDriveConnectBtn instanceof HTMLButtonElement) oneDriveConnectBtn.disabled = false;
-    }
-  });
+  // Shared-link flow does not require Microsoft sign-in for sync.
 
   oneDriveLibraryAddBtn?.addEventListener("click", ()=>{
     const name = String(oneDriveLibraryNameInput?.value || "").trim();
@@ -14113,11 +14083,6 @@ function renderJobs(){
     const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
     if (!cfg?.sharedFolderUrl){
       toast("OneDrive setup required: paste a shared folder link.");
-      openOneDriveModal();
-      return false;
-    }
-        if (!oneDriveTokenValid(cfg)){
-      toast("Connect OneDrive first in the setup wizard.");
       openOneDriveModal();
       return false;
     }

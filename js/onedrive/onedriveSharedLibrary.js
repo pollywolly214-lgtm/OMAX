@@ -11,8 +11,23 @@
     return `u!${b64}`;
   }
 
-  async function graphGet(path){
-    return window.oneDriveGraph.graphFetch(path, { method: "GET" });
+  async function requestJson(url, token){
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const res = await fetch(url, { method: "GET", headers });
+    if (!res.ok) throw new Error(`OneDrive request failed (${res.status})`);
+    return res.json();
+  }
+
+  async function graphOrShareGet(path, token){
+    const graphUrl = `https://graph.microsoft.com/v1.0${path}`;
+    try {
+      return await requestJson(graphUrl, token || "");
+    } catch (graphErr){
+      if (token) throw graphErr;
+      const shareApiPath = path.replace(/^\/shares\//, "/shares/");
+      const oneDriveApiUrl = `https://api.onedrive.com/v1.0${shareApiPath}`;
+      return requestJson(oneDriveApiUrl, "");
+    }
   }
 
   function extOf(name){
@@ -21,13 +36,14 @@
     return dot >= 0 ? n.slice(dot).toLowerCase() : "";
   }
 
-  async function crawlSharedFolder(sharedUrl){
+  async function crawlSharedFolder(sharedUrl, options = {}){
     const shareToken = encodeSharingUrlToToken(sharedUrl);
     if (!shareToken) throw new Error("Enter a valid OneDrive shared folder link.");
 
-    const rootItem = await graphGet(`/shares/${encodeURIComponent(shareToken)}/driveItem?$select=id,name,webUrl,parentReference,folder`);
+    const accessToken = String(options?.accessToken || "");
+    const rootItem = await graphOrShareGet(`/shares/${encodeURIComponent(shareToken)}/driveItem?$select=id,name,webUrl,parentReference,remoteItem,folder`, accessToken);
     const rootDriveId = rootItem?.parentReference?.driveId || rootItem?.remoteItem?.parentReference?.driveId || "";
-    if (!rootItem?.id || !rootDriveId) throw new Error("Unable to resolve shared folder root.");
+    if (!rootItem?.id || !rootDriveId) throw new Error("Unable to read this shared folder. Confirm the link grants access.");
 
     const folders = {};
     const files = {};
@@ -36,9 +52,17 @@
     async function walkFolder(driveId, folderId, path, parentId){
       const folderPath = path || "/";
       if (!folders[folderId]){
-        folders[folderId] = { id: folderId, name: folderPath === "/" ? (rootItem.name || "Shared Folder") : folderPath.split("/").pop(), parentId: parentId || null, path: folderPath, childFolderIds: [], childFileIds: [] };
+        folders[folderId] = {
+          id: folderId,
+          name: folderPath === "/" ? (rootItem.name || "Shared Folder") : folderPath.split("/").pop(),
+          parentId: parentId || null,
+          path: folderPath,
+          childFolderIds: [],
+          childFileIds: []
+        };
       }
-      const payload = await graphGet(`/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(folderId)}/children?$top=200&$select=id,name,eTag,lastModifiedDateTime,webUrl,parentReference,file,folder,size`);
+
+      const payload = await graphOrShareGet(`/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(folderId)}/children?$top=200&$select=id,name,eTag,lastModifiedDateTime,webUrl,parentReference,file,folder,size`, accessToken);
       const items = Array.isArray(payload?.value) ? payload.value : [];
       for (const item of items){
         const itemName = String(item?.name || "");
@@ -98,7 +122,6 @@
 
   window.oneDriveSharedLibrary = {
     encodeSharingUrlToToken,
-    graphGet,
     crawlSharedFolder,
     writeSharedLibraryCache,
     readSharedLibraryCache
