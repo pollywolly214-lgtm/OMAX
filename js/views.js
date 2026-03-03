@@ -3568,6 +3568,7 @@ function viewJobs(){
             ${oneDriveLibrary.map(item => `<option value="${esc(item.id)}">${esc(item.name || item.fileName || "Linked file")}</option>`).join("")}
           </select>
           <button type="button" id="jobOneDriveLibraryAddBtn">Add from OneDrive library</button>
+          <button type="button" id="jobRootLibraryAddBtn">Add from shared root folder</button>
           <input type="file" id="jobFiles" multiple style="display:none">
           <button type="submit">Add Job</button>
         </form>
@@ -3632,6 +3633,7 @@ function viewJobs(){
               <div>Shared link: <span data-onedrive-connection-status>Not set</span></div>
               <div>Folder status: <span data-onedrive-folder-status>Not ready</span></div>
               <div>Library files: <span data-onedrive-library-status>0</span></div>
+              <div>Computer root folder: <span data-local-root-status>Not linked</span></div>
             </div>
             <label class="job-edit-note">OneDrive shared folder link
               <input type="url" id="jobOneDriveSharedLink" placeholder="https://... (shared folder URL)" value="${esc(oneDriveConfig.sharedFolderUrl || "")}">
@@ -3645,6 +3647,7 @@ function viewJobs(){
             <p class="small muted">Use a folder sharing link (example: https://onedrive.live.com/...) and sync before opening the file explorer.</p>
             <div class="job-onedrive-sync-actions">
               <button type="button" class="job-note-modal-secondary" data-onedrive-sync-library>Sync library from shared folder</button>
+              <button type="button" class="job-note-modal-secondary" data-local-root-pick>Set this computer root folder</button>
             </div>
             <div class="job-onedrive-library">
               <h5>OneDrive file library</h5>
