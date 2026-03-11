@@ -13057,6 +13057,27 @@ function renderJobs(){
   const flowDialog = flowBackdrop?.querySelector(".job-flow-modal") || null;
 
   const normalizeProjectNumber = (value)=> String(value || "").replace(/[^0-9]/g, "").slice(0, 8);
+  const normalizeCategoryKey = (value)=> String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const categoryProjectMap = new Map([
+    ["colin", "1208"],
+    ["lady bird", "1241"],
+    ["brazos", "1247"],
+    ["cable trough at t", "1249"],
+    ["cable trough att", "1249"],
+    ["at t", "1249"],
+    ["atm", "1251"],
+    ["alamo", "0000"],
+    ["all jobs", "0000"]
+  ]);
+  const categoryProjectNumber = (name)=>{
+    const key = normalizeCategoryKey(name);
+    if (!key) return "";
+    if (categoryProjectMap.has(key)) return categoryProjectMap.get(key) || "";
+    for (const [alias, project] of categoryProjectMap.entries()){
+      if (key.includes(alias)) return project;
+    }
+    return "";
+  };
   const normalizeHexColor = (value)=> {
     const text = String(value || "").trim();
     const match = text.match(/^#?([0-9a-f]{6})$/i);
@@ -13156,6 +13177,15 @@ function renderJobs(){
         .filter(folder => (folder.parent == null ? null : String(folder.parent)) === key)
         .sort((a, b)=> String(a?.name || "").localeCompare(String(b?.name || "")));
     };
+    const categoryOrder = [];
+    const walkCategory = (id)=>{
+      const key = String(id);
+      categoryOrder.push(key);
+      childrenOf(key).forEach(child => walkCategory(child.id));
+    };
+    walkCategory(rootId);
+    const categoryCutMap = new Map(categoryOrder.map((id, idx)=> [id, `CAT-${String(idx + 1).padStart(3, "0")}`]));
+    const categoryCutLabel = (catId)=> categoryCutMap.get(String(catId || rootId)) || "CAT-000";
     const filtered = list.filter(job => {
       const project = normalizeProjectNumber(job?.projectNumber);
       const material = String(job?.material || "");
@@ -13166,6 +13196,19 @@ function renderJobs(){
       return !query || token.includes(query);
     });
 
+    const jobCutOrder = list.slice().sort((a,b)=>{
+      const catA = normalizeCategory(a?.cat);
+      const catB = normalizeCategory(b?.cat);
+      const catDiff = (categoryOrder.indexOf(catA)) - (categoryOrder.indexOf(catB));
+      if (catDiff !== 0) return catDiff;
+      const startA = Date.parse(a?.startISO || "") || Number.MAX_SAFE_INTEGER;
+      const startB = Date.parse(b?.startISO || "") || Number.MAX_SAFE_INTEGER;
+      if (startA !== startB) return startA - startB;
+      return String(a?.name || "").localeCompare(String(b?.name || ""));
+    });
+    const jobCutMap = new Map(jobCutOrder.map((job, idx)=> [String(job?.id || `${job?.name || "job"}_${idx}`), `C${String(idx + 1).padStart(3, "0")}`]));
+    const jobCutLabel = (job)=> jobCutMap.get(String(job?.id || "")) || "C000";
+
     const renderJobCard = (job)=>{
       const files = Array.isArray(job?.files) ? job.files : [];
       const fileList = files.length
@@ -13174,7 +13217,7 @@ function renderJobs(){
       const style = categoryStyleAttr(normalizeCategory(job?.cat), folderMap, rootId);
       return `<article class="job-flow-job-card"${style}>
         <header>
-          <div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")}</div>
+          <div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")} · ${escapeHtml(jobCutLabel(job))}</div>
           <div class="small job-flow-meta">Project #${escapeHtml(normalizeProjectNumber(job?.projectNumber) || "Unassigned")}</div>
           <div class="small job-flow-meta">Material: ${escapeHtml(job?.material || "—")}</div>
           <div class="small job-flow-meta">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div>
@@ -13217,7 +13260,7 @@ function renderJobs(){
         const collapsed = collapsedSet.has(key);
         return `<div class="job-flow-tree-node" data-depth="${depth}">
           <div class="job-flow-tree-title-row">
-            <button type="button" class="job-flow-tree-title job-flow-tree-title-toggle" data-job-flow-tree-toggle="${escapeHtml(key)}" aria-expanded="${collapsed ? "false" : "true"}"${style}>${escapeHtml(folder?.name || "Category")}</button>
+            <button type="button" class="job-flow-tree-title job-flow-tree-title-toggle" data-job-flow-tree-toggle="${escapeHtml(key)}" aria-expanded="${collapsed ? "false" : "true"}"${style}>${escapeHtml(folder?.name || "Category")} · ${escapeHtml(categoryProjectNumber(folder?.name) || "----")} · ${escapeHtml(categoryCutLabel(key))}</button>
           </div>
           <div class="job-flow-tree-body${collapsed ? " is-collapsed" : ""}">${projectMarkup || '<p class="small job-flow-empty">No direct jobs in this category.</p>'}${childMarkup}</div>
         </div>`;

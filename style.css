@@ -5650,6 +5650,13 @@ body.job-flow-lock-scroll {
   flex-wrap: wrap;
 }
 .job-flow-toolbar input[type="search"] { min-width: 260px; flex: 1; }
+.job-flow-toolbar label {
+  color: #111827;
+  font-weight: 600;
+}
+.job-flow-toolbar input[type="checkbox"] {
+  accent-color: #1d4ed8;
+}
 .job-flow-chart { padding: 14px 16px 18px; }
 .job-flow-group { margin-bottom: 16px; }
 .job-flow-group h5 {

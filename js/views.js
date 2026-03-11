@@ -2071,6 +2071,19 @@ function viewJobs(){
     const bTime = new Date(b.completedAtISO || b.dueISO || b.startISO || 0).getTime();
     return bTime - aTime;
   });
+  const allJobsForCutNumbers = (Array.isArray(cuttingJobs) ? cuttingJobs : []).concat(completedJobs).filter(Boolean);
+  const cutOrder = allJobsForCutNumbers.slice().sort((a, b)=>{
+    const catA = String(a?.cat || "");
+    const catB = String(b?.cat || "");
+    if (catA !== catB) return catA.localeCompare(catB);
+    const aStart = Date.parse(a?.startISO || "") || Number.MAX_SAFE_INTEGER;
+    const bStart = Date.parse(b?.startISO || "") || Number.MAX_SAFE_INTEGER;
+    if (aStart !== bStart) return aStart - bStart;
+    return String(a?.name || "").localeCompare(String(b?.name || ""));
+  });
+  const jobCutMap = new Map(cutOrder.map((job, idx)=> [String(job?.id || `${job?.name || "job"}_${idx}`), `C${String(idx + 1).padStart(3, "0")}`]));
+  const jobCutLabel = (job)=> jobCutMap.get(String(job?.id || "")) || "C000";
+  const jobNameWithCut = (job, fallback = "Job")=> `${String(job?.name || fallback)} · ${jobCutLabel(job)}`;
   const historySearchRaw = typeof jobHistorySearchTerm === "string"
     ? jobHistorySearchTerm
     : (typeof window.jobHistorySearchTerm === "string" ? window.jobHistorySearchTerm : "");
@@ -2449,7 +2462,7 @@ function viewJobs(){
           const jobColorStyle = categoryColorStyle(job?.cat);
           return `<li><div class="job-folder-job-chip job-title-chip job-title-chip-compact"${jobColorStyle}>
               <span class="job-title-chip-dot" aria-hidden="true"></span>
-              <span class="job-title-chip-text">${esc(job?.name || "Untitled job")}</span>
+              <span class="job-title-chip-text">${esc(jobNameWithCut(job, "Untitled job"))}</span>
             </div>${metaLine}</li>`;
         }).join("")
       : `<li class="muted">Add jobs to this category to see them listed.</li>`;
@@ -2805,7 +2818,7 @@ function viewJobs(){
               <div class="job-main-headline">
                 <div class="job-title-chip"${colorStyleAttr}>
                   <span class="job-title-chip-dot" aria-hidden="true"></span>
-                  <span class="job-title-chip-text">${esc(job?.name || "Job")}</span>
+                  <span class="job-title-chip-text">${esc(jobNameWithCut(job, "Job"))}</span>
                 </div>
                 <div class="job-priority-inline job-priority-inline-static">
                   <span class="job-priority-inline-label">Priority</span>
