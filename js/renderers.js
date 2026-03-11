@@ -1194,7 +1194,9 @@ async function buildAttachmentPreview(file){
   if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)) return null;
   try {
     const text = await file.text();
-    const previewSvg = renderCadPreviewDataUrl(text);
+    const previewSvg = (window.dxfPreview && typeof window.dxfPreview.renderFilePreviewDataUrl === "function")
+      ? window.dxfPreview.renderFilePreviewDataUrl(text, ext)
+      : renderCadPreviewDataUrl(text);
     if (!previewSvg) return { mode: "message", content: "2D preview unavailable for this file." };
     return { mode: "image", content: previewSvg };
   } catch (_err){
@@ -1289,7 +1291,10 @@ async function resolveOneDriveAttachmentPreview(file){
       }
       const bytes = await window.oneDriveGraph.getDriveItemContentArrayBuffer(file.driveId, file.itemId);
       const text = window.dxfPreview.arrayBufferToText(bytes);
-      const svg = window.dxfPreview.renderCadToSvgDataUrl(text);
+      const ext = extractAttachmentExtension(file?.name);
+      const svg = (window.dxfPreview && typeof window.dxfPreview.renderFilePreviewDataUrl === "function")
+        ? window.dxfPreview.renderFilePreviewDataUrl(text, ext)
+        : window.dxfPreview.renderCadToSvgDataUrl(text);
       if (!svg){
         file.preview = { mode: "message", content: "2D preview unavailable for this file." };
         return false;
@@ -13328,7 +13333,7 @@ function renderJobs(){
     if (Array.isArray(cuttingJobs)) allJobs.push(...cuttingJobs);
     if (Array.isArray(completedCuttingJobs)) allJobs.push(...completedCuttingJobs);
     const files = allJobs.flatMap(job => Array.isArray(job?.files) ? job.files : []);
-    const targets = files.filter(file => file && file.source === "onedrive" && file.driveId && file.itemId && !(file.preview && file.preview.content));
+    const targets = files.filter(file => file && file.source === "onedrive" && file.driveId && file.itemId && !(file.preview && file.preview.mode === "image" && file.preview.content));
     if (!targets.length) return;
     Promise.allSettled(targets.map(resolveOneDriveAttachmentPreview)).then((results)=>{
       const changed = results.some(r => r.status === "fulfilled" && r.value === true);
