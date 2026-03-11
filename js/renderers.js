@@ -841,6 +841,25 @@ async function filesToAttachments(fileList){
   return attachments;
 }
 
+function parseNamingWidgetNsFileName(fileName){
+  const rawName = String(fileName || "").trim();
+  if (!rawName) return null;
+  const stem = rawName.replace(/\.[^.]+$/, "");
+  const tokens = stem.split("-").map(part => part.trim()).filter(Boolean);
+  if (!tokens.length) return null;
+  if (tokens[0].toUpperCase() !== "NS") return null;
+  const project = tokens[1] || "";
+  const asy = tokens[2] || "";
+  const cut = tokens.find(token => /^C\d{3}$/i.test(token)) || "";
+  if (!project || !asy || !cut) return null;
+  return {
+    type: "NS",
+    project,
+    asy,
+    cut: cut.toUpperCase()
+  };
+}
+
 function captureNewJobFormState(){
   const form = document.getElementById("addJobForm");
   if (!form) return null;
@@ -13600,6 +13619,13 @@ function renderJobs(){
             focusTarget.focus();
           }
         }
+        if (!Array.isArray(window.pendingNewJobFiles) || window.pendingNewJobFiles.length === 0){
+          const fileInput = document.getElementById("jobFiles");
+          if (fileInput){
+            toast("Select a file first. Naming must begin with NS.");
+            fileInput.click();
+          }
+        }
       }
     });
   });
@@ -14091,8 +14117,45 @@ function renderJobs(){
       ensureJobCategoryFolderOpen(categoryId);
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
+    if (!attachments.length){
+      toast("Select a file before creating a cutting job.");
+      openNamingModal();
+      return;
+    }
+    const parsedNsMeta = parseNamingWidgetNsFileName(attachments[0]?.name || "");
+    if (!parsedNsMeta){
+      toast("Cutting job files must start with NS. Use the naming widget to rename the file.");
+      openNamingModal();
+      return;
+    }
+    const duplicateCut = (()=>{
+      const existingDb = window.cuttingJobDatabase;
+      const projectDb = existingDb && existingDb.projects ? existingDb.projects[parsedNsMeta.project] : null;
+      const asyDb = projectDb && projectDb.asy ? projectDb.asy[parsedNsMeta.asy] : null;
+      if (!asyDb || !asyDb.cut) return null;
+      return String(asyDb.cut).toUpperCase() === parsedNsMeta.cut.toUpperCase() ? asyDb : null;
+    })();
+    if (duplicateCut){
+      toast(`Project ${parsedNsMeta.project} ASY ${parsedNsMeta.asy} already uses ${parsedNsMeta.cut}.`);
+      return;
+    }
     const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, material, materialCost, materialQty, chargeRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
+    newJob.fileNaming = {
+      project: parsedNsMeta.project,
+      asy: parsedNsMeta.asy,
+      cut: parsedNsMeta.cut,
+      sourceFile: attachments[0].name || ""
+    };
     cuttingJobs.push(newJob);
+    if (typeof window.registerCuttingJobDbEntry === "function"){
+      window.registerCuttingJobDbEntry({
+        project: parsedNsMeta.project,
+        asy: parsedNsMeta.asy,
+        cut: parsedNsMeta.cut,
+        fileName: attachments[0].name || "",
+        jobId: String(newJob.id)
+      });
+    }
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
     pendingNewJobFiles.length = 0;

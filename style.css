@@ -2094,6 +2094,17 @@ body.modal-open .auth-bar {
 .job-add-form button {
   min-width: 120px;
 }
+
+.job-add-step-hint {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(30, 76, 141, 0.24);
+  background: rgba(30, 76, 141, 0.08);
+  color: #1f365a;
+  font-size: 0.9rem;
+}
+
 .job-add-indicator {
   display: inline-flex;
   align-items: center;
