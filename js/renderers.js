@@ -13111,7 +13111,7 @@ function renderJobs(){
   };
   const categoryStyleAttr = (catId, folderMap, rootId)=>{
     const accentHex = categoryAccent(catId, folderMap, rootId);
-    return ` style="--job-category-accent:${accentHex};--job-category-surface:${rgbaFromHex(accentHex, 0.1)};--job-category-border:${rgbaFromHex(accentHex, 0.45)};"`;
+    return ` style="--job-category-accent:${accentHex};--job-category-surface:#FFFFFF;--job-category-border:${rgbaFromHex(accentHex, 0.55)};--job-category-text:#0F172A;--job-category-meta:#1F2937;"`;
   };
   const previewCardMarkup = (file)=>{
     const preview = file?.preview;

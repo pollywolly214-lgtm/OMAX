@@ -5658,27 +5658,27 @@ body.job-flow-lock-scroll {
   font-weight: 700;
 }
 .job-flow-job-title {
-  color: #0f2747;
+  color: var(--job-category-text, #0F172A);
   font-weight: 700;
   font-size: 1.05rem;
   line-height: 1.25;
   margin-bottom: 4px;
 }
 .job-flow-meta {
-  color: #243b57;
+  color: var(--job-category-meta, #1F2937);
   font-weight: 500;
 }
 .job-flow-file-name {
-  color: #0f2747;
+  color: #111827;
   font-weight: 600;
 }
 .job-flow-empty,
 .job-flow-preview.is-empty,
 .job-flow-preview-empty {
-  color: #334155;
+  color: #374151;
 }
 .job-flow-tree-title {
-  color: #0f2747;
+  color: var(--job-category-text, #0F172A);
 }
 .job-flow-group-grid {
   display: grid;
@@ -5686,18 +5686,20 @@ body.job-flow-lock-scroll {
   gap: 10px;
 }
 .job-flow-job-card {
-  border: 1px solid #d9e1f0;
+  border: 1px solid #d1d5db;
   border-left: 4px solid var(--job-category-accent, #4f46e5);
   border-radius: 10px;
   padding: 10px;
-  background: var(--job-category-surface, #fafcff);
+  background: var(--job-category-surface, #FFFFFF);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
 }
 .job-flow-project-group h6 {
   margin: 0 0 8px;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #334155;
+  color: #111827;
+  font-weight: 700;
 }
 .job-flow-tree-node {
   margin: 10px 0;
@@ -5708,7 +5710,7 @@ body.job-flow-lock-scroll {
   display: inline-block;
   border-left: 4px solid var(--job-category-accent, #4f46e5);
   border: 1px solid var(--job-category-border, #d9e1f0);
-  background: var(--job-category-surface, #f8fbff);
+  background: #FFFFFF;
   border-radius: 8px;
   font-weight: 700;
   padding: 6px 10px;
