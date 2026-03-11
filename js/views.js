@@ -3583,9 +3583,28 @@ function filterInventoryItems(term){
   });
 }
 
+function inventoryFolderOptionsMarkup(selectedId, { includeCurrent = null, allowRoot = true } = {}){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
+  const selected = selectedId != null ? String(selectedId) : "";
+  const current = includeCurrent != null ? String(includeCurrent) : null;
+  const options = [];
+  if (allowRoot){
+    options.push(`<option value="" ${selected ? "" : "selected"}>Root</option>`);
+  }
+  folders
+    .filter(folder => folder && folder.id != null && (current == null || String(folder.id) !== current))
+    .sort((a, b)=> String(a.name || "").localeCompare(String(b.name || "")))
+    .forEach(folder => {
+      const id = String(folder.id);
+      options.push(`<option value="${esc(id)}" ${id === selected ? "selected" : ""}>${esc(folder.name || "Unnamed folder")}</option>`);
+    });
+  return options.join("");
+}
+
 function inventoryRowsHTML(list){
   if (!Array.isArray(list) || !list.length){
-    return `<tr><td colspan="9" class="muted">No inventory items match your search.</td></tr>`;
+    return `<tr><td colspan="10" class="muted">No inventory items match your search.</td></tr>`;
   }
   return list.map(i => {
     const priceVal = i.price != null && i.price !== "" ? Number(i.price) : "";
@@ -3596,7 +3615,7 @@ function inventoryRowsHTML(list){
     const qtyNewDisplay = Number.isFinite(qtyNewNum) && qtyNewNum >= 0 ? qtyNewNum : 0;
     const qtyOldDisplay = Number.isFinite(qtyOldNum) && qtyOldNum >= 0 ? qtyOldNum : 0;
     return `
-    <tr>
+    <tr draggable="true" data-inventory-item-row="${i.id}">
       <td><button type="button" class="inventory-name-btn" data-inventory-maintenance="${i.id}">${nameDisplay}</button></td>
       <td><input type="number" min="0" step="1" data-inv="qtyNew" data-id="${i.id}" value="${qtyNewDisplay}"></td>
       <td><input type="number" min="0" step="1" data-inv="qtyOld" data-id="${i.id}" value="${qtyOldDisplay}"></td>
@@ -3605,6 +3624,7 @@ function inventoryRowsHTML(list){
       <td>${i.link ? `<a href="${i.link}" target="_blank" rel="noopener">link</a>` : "—"}</td>
       <td><input type="number" step="0.01" min="0" data-inv="price" data-id="${i.id}" value="${priceDisplay}"></td>
       <td><input type="text" data-inv="note" data-id="${i.id}" value="${i.note||""}"></td>
+      <td><select data-item-folder="${i.id}">${inventoryFolderOptionsMarkup(i.folderId)}</select></td>
       <td class="inventory-actions">
         <button type="button" class="inventory-add" data-order-add="${i.id}">Add to order request</button>
         <button type="button" class="inventory-delete" data-inventory-delete="${i.id}">Delete</button>
@@ -3613,9 +3633,147 @@ function inventoryRowsHTML(list){
   }).join("");
 }
 
+
+function formatMaterialThicknessDisplay(raw){
+  const txt = String(raw ?? "").trim();
+  if (!txt) return "";
+  const cleaned = txt.replace(/"/g, "").trim();
+  const mixed = cleaned.match(/^(\d+)\s+(\d+)\/(\d+)$/);
+  if (mixed){
+    const whole = Number(mixed[1]);
+    const top = Number(mixed[2]);
+    const bot = Number(mixed[3]);
+    if (Number.isFinite(whole) && Number.isFinite(top) && Number.isFinite(bot) && bot > 0){
+      const six = Math.round((whole + (top / bot)) * 16);
+      if (typeof formatThicknessSixteenths === "function") return `${formatThicknessSixteenths(six)}"`;
+    }
+  }
+  const frac = cleaned.match(/^(\d+)\/(\d+)$/);
+  if (frac){
+    const top = Number(frac[1]);
+    const bot = Number(frac[2]);
+    if (Number.isFinite(top) && Number.isFinite(bot) && bot > 0){
+      const six = Math.round((top / bot) * 16);
+      if (typeof formatThicknessSixteenths === "function") return `${formatThicknessSixteenths(six)}"`;
+    }
+  }
+  const num = Number(cleaned);
+  if (Number.isFinite(num) && num > 0){
+    const six = Math.round(num * 16);
+    if (typeof formatThicknessSixteenths === "function") return `${formatThicknessSixteenths(six)}"`;
+  }
+  return txt;
+}
+
+function materialSheetTableHTML(model, typeId){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const type = (Array.isArray(model?.types) ? model.types : []).find(t => String(t.id) === String(typeId));
+  if (!type) return "";
+  const sheet = model?.sheets?.[typeId] || { columns:["qty"], rows:[{ thickness:"", values:[""] }] };
+  const columns = Array.isArray(sheet.columns) && sheet.columns.length ? sheet.columns : ["qty"];
+  const rows = Array.isArray(sheet.rows) && sheet.rows.length ? sheet.rows : [{ thickness:"", values: columns.map(()=>"") }];
+  return `
+    <div class="material-sheet-wrap">
+      <table class="inventory-table material-grid-table">
+        <thead>
+          <tr>
+            <th class="material-header material-editable" data-material-editable="1" data-edit-kind="material-name" data-type-id="${esc(typeId)}">${esc(type.name || "Material")}</th>
+            ${columns.map((col, idx)=>`<th class="material-header material-editable" data-material-editable="1" data-edit-kind="column" data-type-id="${esc(typeId)}" data-col-index="${idx}">${esc(col || "")}</th>`).join("")}
+            <th class="material-col-actions"><button type="button" class="small" data-material-col-add="${esc(typeId)}">+C</button></th>
+          </tr>
+          <tr class="material-col-control-row material-edit-controls ${window.inventoryMaterialEditMode ? "" : "is-hidden"}">
+            <th>Actions</th>
+            ${columns.map((_, idx)=>`<th>
+              <button type="button" class="tiny" data-material-col-add-after="${esc(typeId)}" data-col-index="${idx}" title="Insert column after this">+C</button>
+              <button type="button" class="tiny danger" data-material-col-delete-index="${esc(typeId)}" data-col-index="${idx}" title="Delete this column">−C</button>
+            </th>`).join("")}
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row, rowIdx)=>`
+            <tr>
+              <td class="material-editable" data-material-editable="1" data-edit-kind="thickness" data-type-id="${esc(typeId)}" data-row-index="${rowIdx}">${esc(formatMaterialThicknessDisplay(row.thickness || ""))}</td>
+              ${columns.map((_, colIdx)=>`<td class="material-editable" data-material-editable="1" data-edit-kind="cell" data-type-id="${esc(typeId)}" data-row-index="${rowIdx}" data-col-index="${colIdx}">${esc((row.values && row.values[colIdx]) || "")}</td>`).join("")}
+              <td class="material-row-actions material-edit-controls ${window.inventoryMaterialEditMode ? "" : "is-hidden"}">
+                <button type="button" class="tiny" data-material-row-add-after="${esc(typeId)}" data-row-index="${rowIdx}" title="Insert row below">+R</button>
+                <button type="button" class="tiny danger" data-material-row-delete="${esc(typeId)}" data-row-index="${rowIdx}" title="Delete this row">−R</button>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+      <div class="material-grid-actions material-edit-controls ${window.inventoryMaterialEditMode ? "" : "is-hidden"}">
+        <button type="button" class="small" data-material-row-add="${esc(typeId)}">+ Row</button>
+      </div>
+      <div class="small muted">Double-click any table cell/header to edit.</div>
+    </div>`;
+}
+
+function viewInventoryMaterial(model){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const activeType = String(model?.activeType || '');
+  const types = Array.isArray(model?.types) ? model.types : [];
+  const body = activeType === "__all"
+    ? types.map(type => materialSheetTableHTML(model, type.id)).join("")
+    : materialSheetTableHTML(model, activeType);
+  return `
+    <div class="inventory-material-view">
+      <div class="inventory-toolbar">
+        <button type="button" class="inventory-add-trigger" id="materialEditModeBtn">${window.inventoryMaterialEditMode ? "✓ Editing table" : "Edit table"}</button>
+        <button type="button" class="inventory-add-trigger" id="materialAddTypeBtn">+ Add material type</button>
+      </div>
+      <div class="inventory-material-tabs">
+        ${types.map(type => `<button type="button" data-material-type="${esc(type.id)}" class="${String(type.id)===activeType?'active':''}">${esc(type.name)}</button>`).join('')}
+        <button type="button" data-material-view-all="1" class="${activeType === "__all" ? "active" : ""}">View all</button>
+      </div>
+      <div class="material-table-wrap">${body}</div>
+    </div>`;
+}
+
 function viewInventory(){
   const filtered = filterInventoryItems(inventorySearchTerm);
-  const rows = inventoryRowsHTML(filtered);
+  const section = String(window.inventorySection || "items") === "material" ? "material" : "items";
+  const materialModel = normalizeInventoryMaterials(window.inventoryMaterials);
+  const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const childrenOf = (parentId)=>{
+    const target = parentId == null ? "" : String(parentId);
+    return folders.filter(folder => String(folder?.parent ?? "") === target);
+  };
+  const itemsIn = (folderId)=>{
+    const target = folderId == null ? "" : String(folderId);
+    return filtered.filter(item => String(item?.folderId ?? "") === target);
+  };
+
+  const renderFolder = (folder)=>{
+    const folderId = String(folder.id);
+    const subFolders = childrenOf(folderId).map(renderFolder).join("");
+    const folderItems = itemsIn(folderId).map(i => inventoryRowsHTML([i])).join("");
+    return `
+      <details class="inventory-folder" data-folder-drop-target="${esc(folderId)}" open>
+        <summary>
+          <span>📁 ${esc(folder.name || "Unnamed folder")}</span>
+          <span class="inventory-folder-controls">
+            <button type="button" data-inventory-subfolder="${esc(folderId)}">+ Folder</button>
+            <button type="button" data-inventory-folder-rename="${esc(folderId)}">Rename</button>
+            <button type="button" class="danger" data-inventory-folder-delete="${esc(folderId)}">Delete</button>
+          </span>
+        </summary>
+        <div class="mini-form inventory-folder-move-row">
+          <label>Move folder to
+            <select data-folder-parent="${esc(folderId)}">${inventoryFolderOptionsMarkup(folder.parent, { includeCurrent: folderId })}</select>
+          </label>
+        </div>
+        <table class="inventory-table"><tbody>${folderItems || `<tr><td colspan="10" class="muted">No parts in this folder.</td></tr>`}</tbody></table>
+        <div class="small muted">Drop parts here to move into this folder</div>
+        <div class="inventory-folder-children">${subFolders}</div>
+      </details>`;
+  };
+
+  const rootFolders = childrenOf(null).map(renderFolder).join("");
+  const rootItems = itemsIn(null);
+  const rootItemsRows = inventoryRowsHTML(rootItems);
   const searchValue = String(inventorySearchTerm || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -3625,18 +3783,31 @@ function viewInventory(){
   <div class="container">
     <div class="block" style="grid-column:1 / -1">
       <h3>Inventory</h3>
+      <div class="inventory-section-tabs">
+        <button type="button" data-inventory-section="material" class="${section === "material" ? "active" : ""}">Material</button>
+        <button type="button" data-inventory-section="items" class="${section === "items" ? "active" : ""}">Items</button>
+      </div>
+      ${section === "material" ? viewInventoryMaterial(materialModel) : `
       <div class="inventory-toolbar">
         <button type="button" class="inventory-add-trigger" id="inventoryAddBtn">+ Add inventory item</button>
+        <button type="button" class="inventory-add-trigger" id="inventoryAddFolderBtn">+ Add folder</button>
         <div class="inventory-search mini-form">
           <input type="search" id="inventorySearch" placeholder="Search items, part numbers, notes, or links" value="${searchValue}">
           <button type="button" id="inventorySearchClear">Clear</button>
         </div>
       </div>
-      <div class="small muted inventory-hint">Results update as you type.</div>
-      <table class="inventory-table">
-        <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Actions</th></tr></thead>
-        <tbody data-inventory-rows>${rows}</tbody>
-      </table>
+      <div class="small muted inventory-hint">Results update as you type. Organize folders like a file explorer.</div>
+      <div class="inventory-explorer" data-inventory-rows>
+        <details class="inventory-folder" data-folder-drop-target="" open>
+          <summary><span>🗂️ Root</span></summary>
+          <table class="inventory-table">
+            <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Folder</th><th>Actions</th></tr></thead>
+            <tbody>${rootItemsRows}</tbody>
+          </table>
+          <div class="small muted">Drop parts here to move to root</div>
+          <div class="inventory-folder-children">${rootFolders}</div>
+        </details>
+      </div>`}
     </div>
   </div>
 
@@ -3663,6 +3834,7 @@ function viewInventory(){
             <label>Old quantity<input type="number" min="0" step="1" name="inventoryQtyOld" value="0"></label>
             <label>Unit<input name="inventoryUnit" placeholder="pcs" value="pcs"></label>
             <label>Part #<input name="inventoryPN" placeholder="Part number"></label>
+            <label>Folder<select name="inventoryFolderId">${inventoryFolderOptionsMarkup(null)}</select></label>
             <label>Store link<input type="url" name="inventoryLink" placeholder="https://..."></label>
             <label>Price ($)<input type="number" min="0" step="0.01" name="inventoryPrice" placeholder="optional"></label>
             <label>Notes<input name="inventoryNote" placeholder="Optional note"></label>
