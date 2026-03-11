@@ -2013,7 +2013,7 @@ function viewJobs(){
   const oneDriveLibrary = (typeof window.getOneDriveJobLibrary === "function")
     ? window.getOneDriveJobLibrary()
     : [];
-  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.rootDriveId && oneDriveConfig.rootFolderItemId);
+  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.sharedFolderUrl);
   const oneDriveStatusLabel = oneDriveReady
     ? `OneDrive linked${oneDriveConfig.folderHint ? ` · ${oneDriveConfig.folderHint}` : ""}`
     : "OneDrive not linked";
@@ -3612,32 +3612,30 @@ function viewJobs(){
       <div class="job-note-modal-backdrop" id="jobOneDriveModal" hidden>
         <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobOneDriveModalTitle" aria-describedby="jobOneDriveModalDescription">
           <div class="job-note-modal-header">
-            <h4 id="jobOneDriveModalTitle">OneDrive root-folder setup</h4>
+            <h4 id="jobOneDriveModalTitle">OneDrive shared-folder setup</h4>
             <button type="button" class="job-note-modal-close" data-onedrive-cancel aria-label="Close OneDrive setup">×</button>
           </div>
           <div class="job-note-modal-body">
-            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Sign in to Microsoft, select the OneDrive root folder for this account, then add files from that root in the cutting job form.</p>
+            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Paste a public OneDrive folder link. The website will open that folder in an in-app explorer so users can pick files and save cloud references.</p>
             <ol class="job-onedrive-steps small">
-              <li><strong>Step 1:</strong> Sign in to Microsoft.</li>
-              <li><strong>Step 2:</strong> Select OneDrive root folder.</li>
-              <li><strong>Step 3:</strong> Click <strong>Add from OneDrive library</strong> in Add Cutting Job.</li>
+              <li><strong>Step 1:</strong> Paste the OneDrive folder share link.</li>
+              <li><strong>Step 2:</strong> Save setup and click <strong>Add from OneDrive library</strong>.</li>
+              <li><strong>Step 3:</strong> Select a file in the explorer popup to attach it.</li>
             </ol>
             <div class="job-onedrive-status-grid small muted" data-onedrive-status-grid>
-              <div>Connection: <span data-onedrive-connection-status>Not connected</span></div>
-              <div>Root folder: <span data-onedrive-folder-status>Not set</span></div>
-              <div>Current folder: <span data-onedrive-library-status>—</span></div>
+              <div>Shared link: <span data-onedrive-connection-status>Not set</span></div>
+              <div>Folder status: <span data-onedrive-folder-status>Not ready</span></div>
+              <div>Indexed files: <span data-onedrive-library-status>0</span></div>
             </div>
-            <label class="job-edit-note">Root folder label (optional)
+            <label class="job-edit-note">OneDrive shared folder link
+              <input type="url" id="jobOneDriveSharedLink" placeholder="https://... (shared folder URL)" value="${esc(oneDriveConfig.sharedFolderUrl || "")}">
+            </label>
+            <label class="job-edit-note">Folder label (optional)
               <input type="text" id="jobOneDriveFolderHint" placeholder="Shop drawings" value="${esc(oneDriveConfig.folderHint || "")}">
             </label>
             <label class="job-edit-note">
               <input type="checkbox" id="jobOneDriveEnabled" ${oneDriveConfig.enabled ? "checked" : ""}> Enable OneDrive linking for cutting jobs
             </label>
-            <div class="job-onedrive-sync-actions">
-              <button type="button" class="job-note-modal-secondary" data-onedrive-connect>Sign in to Microsoft</button>
-              <button type="button" class="job-note-modal-secondary" data-onedrive-select-root>Select OneDrive root folder</button>
-              <button type="button" class="job-note-modal-secondary" data-onedrive-change-root>Change root</button>
-            </div>
           </div>
           <div class="job-note-modal-actions">
             <button type="button" class="job-note-modal-secondary" data-onedrive-cancel>Cancel</button>
