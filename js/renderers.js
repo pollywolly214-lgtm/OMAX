@@ -14103,17 +14103,31 @@ function renderJobs(){
       openOneDriveModal();
       return;
     }
+
+    explorerState = { folderId: null, filter: "all", query: "" };
+    if (oneDriveExplorerSearch){ oneDriveExplorerSearch.value = ""; }
+    if (oneDriveEmbeddedFrame){ oneDriveEmbeddedFrame.src = cfg.sharedFolderUrl; }
+    if (oneDriveExplorerModal){ oneDriveExplorerModal.removeAttribute("hidden"); document.body.classList.add("modal-open"); }
+
+    const existingCache = window.oneDriveLibrary?.readCache?.() || null;
+    if (existingCache?.rootFolderId){
+      explorerState.folderId = existingCache.rootFolderId;
+      renderExplorer();
+    } else if (oneDriveExplorerList){
+      oneDriveExplorerList.innerHTML = '<li class="muted">Loading files from OneDrive shared folder…</li>';
+    }
+
     try {
       const cache = await window.oneDriveLibrary.crawlSharedFolder(cfg.sharedFolderUrl);
       window.oneDriveLibrary.writeCache(cache);
-      explorerState = { folderId: cache.rootFolderId || null, filter: "all", query: "" };
-      if (oneDriveEmbeddedFrame){ oneDriveEmbeddedFrame.src = cfg.sharedFolderUrl; }
-      if (oneDriveExplorerModal){ oneDriveExplorerModal.removeAttribute("hidden"); document.body.classList.add("modal-open"); }
+      explorerState.folderId = cache.rootFolderId || null;
       renderExplorer();
       updateOneDriveWizardStatus();
     } catch (err){
-      toast(err?.message || "Unable to open OneDrive shared folder.");
-      openOneDriveModal();
+      if (oneDriveExplorerList){
+        oneDriveExplorerList.innerHTML = '<li class="muted">Unable to load selectable files from the shared folder. Check the link and make sure files are shared.</li>';
+      }
+      toast(err?.message || "Unable to load OneDrive shared folder files.");
     }
   });
 
