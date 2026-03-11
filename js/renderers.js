@@ -13196,18 +13196,42 @@ function renderJobs(){
       return !query || token.includes(query);
     });
 
+    const addedOrderFromId = (job)=>{
+      const id = String(job?.id || "");
+      const token = id.includes("_") ? id.slice(id.lastIndexOf("_") + 1) : "";
+      const parsed = Number.parseInt(token, 36);
+      return Number.isFinite(parsed) ? parsed : Number.NaN;
+    };
+    const fallbackOrderTime = (job)=>{
+      const val = Date.parse(job?.startISO || job?.createdAt || job?.completedAtISO || "");
+      return Number.isFinite(val) ? val : Number.MAX_SAFE_INTEGER;
+    };
     const jobCutOrder = list.slice().sort((a,b)=>{
-      const catA = normalizeCategory(a?.cat);
-      const catB = normalizeCategory(b?.cat);
-      const catDiff = (categoryOrder.indexOf(catA)) - (categoryOrder.indexOf(catB));
-      if (catDiff !== 0) return catDiff;
-      const startA = Date.parse(a?.startISO || "") || Number.MAX_SAFE_INTEGER;
-      const startB = Date.parse(b?.startISO || "") || Number.MAX_SAFE_INTEGER;
-      if (startA !== startB) return startA - startB;
-      return String(a?.name || "").localeCompare(String(b?.name || ""));
+      const aAdded = addedOrderFromId(a);
+      const bAdded = addedOrderFromId(b);
+      if (Number.isFinite(aAdded) || Number.isFinite(bAdded)){
+        if (!Number.isFinite(aAdded)) return 1;
+        if (!Number.isFinite(bAdded)) return -1;
+        if (aAdded !== bAdded) return aAdded - bAdded;
+      }
+      const aTime = fallbackOrderTime(a);
+      const bTime = fallbackOrderTime(b);
+      if (aTime !== bTime) return aTime - bTime;
+      return String(a?.id || "").localeCompare(String(b?.id || ""));
     });
-    const jobCutMap = new Map(jobCutOrder.map((job, idx)=> [String(job?.id || `${job?.name || "job"}_${idx}`), `C${String(idx + 1).padStart(3, "0")}`]));
+    const jobCutMap = new Map();
+    const jobCategoryCutMap = new Map();
+    const categoryCounts = new Map();
+    jobCutOrder.forEach((job, idx)=>{
+      const key = String(job?.id || `${job?.name || "job"}_${idx}`);
+      jobCutMap.set(key, `C${String(idx + 1).padStart(3, "0")}`);
+      const catKey = normalizeCategory(job?.cat);
+      const catNext = (categoryCounts.get(catKey) || 0) + 1;
+      categoryCounts.set(catKey, catNext);
+      jobCategoryCutMap.set(key, String(catNext));
+    });
     const jobCutLabel = (job)=> jobCutMap.get(String(job?.id || "")) || "C000";
+    const jobCategoryCutLabel = (job)=> jobCategoryCutMap.get(String(job?.id || "")) || "0";
 
     const renderJobCard = (job)=>{
       const files = Array.isArray(job?.files) ? job.files : [];
@@ -13217,7 +13241,7 @@ function renderJobs(){
       const style = categoryStyleAttr(normalizeCategory(job?.cat), folderMap, rootId);
       return `<article class="job-flow-job-card"${style}>
         <header>
-          <div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")} · ${escapeHtml(jobCutLabel(job))}</div>
+          <div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")} · ${escapeHtml(jobCutLabel(job))} · ${escapeHtml(jobCategoryCutLabel(job))}</div>
           <div class="small job-flow-meta">Project #${escapeHtml(normalizeProjectNumber(job?.projectNumber) || "Unassigned")}</div>
           <div class="small job-flow-meta">Material: ${escapeHtml(job?.material || "—")}</div>
           <div class="small job-flow-meta">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div>

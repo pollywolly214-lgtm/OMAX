@@ -2072,18 +2072,43 @@ function viewJobs(){
     return bTime - aTime;
   });
   const allJobsForCutNumbers = (Array.isArray(cuttingJobs) ? cuttingJobs : []).concat(completedJobs).filter(Boolean);
+  const addedOrderFromId = (job)=>{
+    const id = String(job?.id || "");
+    const token = id.includes("_") ? id.slice(id.lastIndexOf("_") + 1) : "";
+    const parsed = Number.parseInt(token, 36);
+    return Number.isFinite(parsed) ? parsed : Number.NaN;
+  };
+  const fallbackOrderTime = (job)=>{
+    const val = Date.parse(job?.startISO || job?.createdAt || job?.completedAtISO || "");
+    return Number.isFinite(val) ? val : Number.MAX_SAFE_INTEGER;
+  };
   const cutOrder = allJobsForCutNumbers.slice().sort((a, b)=>{
-    const catA = String(a?.cat || "");
-    const catB = String(b?.cat || "");
-    if (catA !== catB) return catA.localeCompare(catB);
-    const aStart = Date.parse(a?.startISO || "") || Number.MAX_SAFE_INTEGER;
-    const bStart = Date.parse(b?.startISO || "") || Number.MAX_SAFE_INTEGER;
-    if (aStart !== bStart) return aStart - bStart;
-    return String(a?.name || "").localeCompare(String(b?.name || ""));
+    const aAdded = addedOrderFromId(a);
+    const bAdded = addedOrderFromId(b);
+    if (Number.isFinite(aAdded) || Number.isFinite(bAdded)){
+      if (!Number.isFinite(aAdded)) return 1;
+      if (!Number.isFinite(bAdded)) return -1;
+      if (aAdded !== bAdded) return aAdded - bAdded;
+    }
+    const aTime = fallbackOrderTime(a);
+    const bTime = fallbackOrderTime(b);
+    if (aTime !== bTime) return aTime - bTime;
+    return String(a?.id || "").localeCompare(String(b?.id || ""));
   });
-  const jobCutMap = new Map(cutOrder.map((job, idx)=> [String(job?.id || `${job?.name || "job"}_${idx}`), `C${String(idx + 1).padStart(3, "0")}`]));
+  const jobCutMap = new Map();
+  const jobCategoryCutMap = new Map();
+  const categoryCounts = new Map();
+  cutOrder.forEach((job, idx)=>{
+    const key = String(job?.id || `${job?.name || "job"}_${idx}`);
+    jobCutMap.set(key, `C${String(idx + 1).padStart(3, "0")}`);
+    const catKey = String(job?.cat || rootCategoryId);
+    const nextCat = (categoryCounts.get(catKey) || 0) + 1;
+    categoryCounts.set(catKey, nextCat);
+    jobCategoryCutMap.set(key, String(nextCat));
+  });
   const jobCutLabel = (job)=> jobCutMap.get(String(job?.id || "")) || "C000";
-  const jobNameWithCut = (job, fallback = "Job")=> `${String(job?.name || fallback)} · ${jobCutLabel(job)}`;
+  const jobCategoryCutLabel = (job)=> jobCategoryCutMap.get(String(job?.id || "")) || "0";
+  const jobNameWithCut = (job, fallback = "Job")=> `${String(job?.name || fallback)} · ${jobCutLabel(job)} · ${jobCategoryCutLabel(job)}`;
   const historySearchRaw = typeof jobHistorySearchTerm === "string"
     ? jobHistorySearchTerm
     : (typeof window.jobHistorySearchTerm === "string" ? window.jobHistorySearchTerm : "");
@@ -3214,7 +3239,7 @@ function viewJobs(){
               <div class="job-main-headline">
                 <div class="job-title-chip"${colorStyleAttr}>
                   <span class="job-title-chip-dot" aria-hidden="true"></span>
-                  <span class="job-title-chip-text">${esc(j.name || "Job")}</span>
+                  <span class="job-title-chip-text">${esc(jobNameWithCut(j, "Job"))}</span>
                 </div>
                 <div class="job-priority-inline">
                   <label class="job-priority-inline-label" for="${esc(prioritySelectId)}">Priority</label>
