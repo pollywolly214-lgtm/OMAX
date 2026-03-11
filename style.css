@@ -5720,6 +5720,38 @@ body.job-flow-lock-scroll {
   display: grid;
   gap: 10px;
 }
+
+.job-flow-tree-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.job-flow-tree-toggle {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #1e293b;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.job-flow-tree-toggle:hover {
+  background: #f8fafc;
+}
+.job-flow-tree-body.is-collapsed {
+  display: none;
+}
+.job-flow-job-card header {
+  background: none;
+  color: inherit;
+  padding: 0;
+  box-shadow: none;
+}
+.job-flow-job-card header::after {
+  display: none;
+}
 .job-flow-file-list { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 8px; }
 .job-flow-file-name { display: block; font-size: 12px; margin-bottom: 4px; overflow-wrap: anywhere; }
 .job-flow-preview {

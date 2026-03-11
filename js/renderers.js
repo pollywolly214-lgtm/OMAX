@@ -13122,6 +13122,14 @@ function renderJobs(){
     return `<div class="job-flow-preview is-empty small muted">${escapeHtml(fallback)}</div>`;
   };
 
+  const readFlowCollapsedCategories = ()=>{
+    const raw = Array.isArray(window.jobFlowCollapsedCategories) ? window.jobFlowCollapsedCategories : [];
+    return new Set(raw.map(id => String(id)));
+  };
+  const writeFlowCollapsedCategories = (set)=>{
+    window.jobFlowCollapsedCategories = Array.from(set).map(id => String(id));
+  };
+
   const renderFlowChart = ()=>{
     if (!flowChart) return;
     const query = String(flowFilterInput?.value || "").trim().toLowerCase();
@@ -13189,6 +13197,7 @@ function renderJobs(){
         if ((byCategory.get(key) || []).length > 0) return true;
         return childrenOf(key).some(child => hasDescendantJobs(String(child.id)));
       };
+      const collapsedSet = readFlowCollapsedCategories();
       const renderCategoryNode = (categoryId, depth = 0)=>{
         const key = String(categoryId);
         if (!hasDescendantJobs(key)) return "";
@@ -13205,9 +13214,13 @@ function renderJobs(){
         }).join("");
         const childMarkup = childrenOf(key).map(child => renderCategoryNode(String(child.id), depth + 1)).join("");
         const style = categoryStyleAttr(key, folderMap, rootId);
+        const collapsed = collapsedSet.has(key);
         return `<div class="job-flow-tree-node" data-depth="${depth}">
-          <div class="job-flow-tree-title"${style}>${escapeHtml(folder?.name || "Category")}</div>
-          <div class="job-flow-tree-body">${projectMarkup || '<p class="small job-flow-empty">No direct jobs in this category.</p>'}${childMarkup}</div>
+          <div class="job-flow-tree-title-row">
+            <div class="job-flow-tree-title"${style}>${escapeHtml(folder?.name || "Category")}</div>
+            <button type="button" class="job-flow-tree-toggle" data-job-flow-tree-toggle="${escapeHtml(key)}" aria-expanded="${collapsed ? "false" : "true"}">${collapsed ? "Show" : "Hide"}</button>
+          </div>
+          <div class="job-flow-tree-body${collapsed ? " is-collapsed" : ""}">${projectMarkup || '<p class="small job-flow-empty">No direct jobs in this category.</p>'}${childMarkup}</div>
         </div>`;
       };
       html = `<section class="job-flow-group"><h5>Category tree</h5>${renderCategoryNode(rootId)}</section>`;
@@ -13641,6 +13654,17 @@ function renderJobs(){
   flowFilterInput?.addEventListener("input", renderFlowChart);
   flowGroupingSelect?.addEventListener("change", renderFlowChart);
   flowHidePreviews?.addEventListener("change", renderFlowChart);
+  flowChart?.addEventListener("click", (event)=>{
+    const target = event.target instanceof Element ? event.target.closest("[data-job-flow-tree-toggle]") : null;
+    if (!target) return;
+    const id = target.getAttribute("data-job-flow-tree-toggle");
+    if (!id) return;
+    const set = readFlowCollapsedCategories();
+    if (set.has(id)) set.delete(id);
+    else set.add(id);
+    writeFlowCollapsedCategories(set);
+    renderFlowChart();
+  });
   if (flowBackdrop){
     flowBackdrop.addEventListener("click", (event)=>{
       if (event.target === flowBackdrop) closeFlowModal();
