@@ -809,18 +809,18 @@ function editingCompletedJobsSet(){
 const CAD_PREVIEWABLE_EXTENSIONS = new Set([".dxf", ".ord", ".omx"]);
 const JOB_ONEDRIVE_CONFIG_KEY = "cutting_job_onedrive_config_v1";
 const JOB_ONEDRIVE_LIBRARY_KEY = "cutting_job_onedrive_library_v1";
-const JOB_LOCAL_ROOT_CONFIG_KEY = "cutting_job_local_root_config_v1";
-const JOB_LOCAL_ROOT_LIBRARY_KEY = "cutting_job_local_root_library_v1";
-const JOB_LOCAL_ROOT_DB = "cutting_job_local_root_db";
-const JOB_LOCAL_ROOT_STORE = "handles";
 
 function normalizeOneDriveJobConfig(config){
   const source = config && typeof config === "object" ? config : {};
   return {
     enabled: source.enabled === true,
+    folderHint: typeof source.folderHint === "string" ? source.folderHint.trim() : "",
+    rootDriveId: typeof source.rootDriveId === "string" ? source.rootDriveId : "",
+    rootFolderItemId: typeof source.rootFolderItemId === "string" ? source.rootFolderItemId : "",
+    rootName: typeof source.rootName === "string" ? source.rootName : "",
+    rootWebUrl: typeof source.rootWebUrl === "string" ? source.rootWebUrl : "",
     sharedFolderUrl: typeof source.sharedFolderUrl === "string" ? source.sharedFolderUrl.trim() : "",
     shareToken: typeof source.shareToken === "string" ? source.shareToken : "",
-    folderHint: typeof source.folderHint === "string" ? source.folderHint.trim() : "",
     accessToken: typeof source.accessToken === "string" ? source.accessToken : "",
     accessTokenExpiresAt: typeof source.accessTokenExpiresAt === "string" ? source.accessTokenExpiresAt : "",
     lastLinkedAt: typeof source.lastLinkedAt === "string" ? source.lastLinkedAt : ""
@@ -897,93 +897,6 @@ if (typeof window !== "undefined"){
     ? window.oneDriveJobLibrary.map(normalizeOneDriveLibraryEntry)
     : readOneDriveJobLibrary();
   if (!Array.isArray(window.oneDriveJobLibrary)) window.oneDriveJobLibrary = readOneDriveJobLibrary();
-}
-
-function normalizeLocalRootConfig(config){
-  const source = config && typeof config === "object" ? config : {};
-  return {
-    linked: source.linked === true,
-    name: typeof source.name === "string" ? source.name : "",
-    lastLinkedAt: typeof source.lastLinkedAt === "string" ? source.lastLinkedAt : ""
-  };
-}
-
-function readLocalRootConfig(){
-  if (typeof window === "undefined" || !window.localStorage) return normalizeLocalRootConfig(null);
-  try {
-    const raw = window.localStorage.getItem(JOB_LOCAL_ROOT_CONFIG_KEY);
-    return normalizeLocalRootConfig(raw ? JSON.parse(raw) : null);
-  } catch (_err){ return normalizeLocalRootConfig(null); }
-}
-
-function writeLocalRootConfig(config){
-  const normalized = normalizeLocalRootConfig(config);
-  if (typeof window !== "undefined") window.localRootConfig = normalized;
-  if (typeof window !== "undefined" && window.localStorage){
-    try { window.localStorage.setItem(JOB_LOCAL_ROOT_CONFIG_KEY, JSON.stringify(normalized)); } catch (_err){}
-  }
-  return normalized;
-}
-
-function readLocalRootLibrary(){
-  if (typeof window === "undefined" || !window.localStorage) return [];
-  try {
-    const raw = window.localStorage.getItem(JOB_LOCAL_ROOT_LIBRARY_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (_err){ return []; }
-}
-
-function writeLocalRootLibrary(list){
-  const normalized = Array.isArray(list) ? list : [];
-  if (typeof window !== "undefined") window.localRootLibrary = normalized;
-  if (typeof window !== "undefined" && window.localStorage){
-    try { window.localStorage.setItem(JOB_LOCAL_ROOT_LIBRARY_KEY, JSON.stringify(normalized)); } catch (_err){}
-  }
-  return normalized;
-}
-
-function openLocalRootDb(){
-  return new Promise((resolve, reject)=>{
-    if (!(window.indexedDB)) return reject(new Error("IndexedDB unavailable"));
-    const req = window.indexedDB.open(JOB_LOCAL_ROOT_DB, 1);
-    req.onupgradeneeded = ()=>{
-      const db = req.result;
-      if (!db.objectStoreNames.contains(JOB_LOCAL_ROOT_STORE)) db.createObjectStore(JOB_LOCAL_ROOT_STORE);
-    };
-    req.onsuccess = ()=> resolve(req.result);
-    req.onerror = ()=> reject(req.error || new Error("Failed to open local DB"));
-  });
-}
-
-async function saveLocalRootHandle(handle){
-  const db = await openLocalRootDb();
-  await new Promise((resolve, reject)=>{
-    const tx = db.transaction(JOB_LOCAL_ROOT_STORE, "readwrite");
-    tx.objectStore(JOB_LOCAL_ROOT_STORE).put(handle, "root");
-    tx.oncomplete = ()=> resolve();
-    tx.onerror = ()=> reject(tx.error || new Error("Failed to save folder handle"));
-  });
-  db.close();
-}
-
-async function readLocalRootHandle(){
-  const db = await openLocalRootDb();
-  const handle = await new Promise((resolve, reject)=>{
-    const tx = db.transaction(JOB_LOCAL_ROOT_STORE, "readonly");
-    const req = tx.objectStore(JOB_LOCAL_ROOT_STORE).get("root");
-    req.onsuccess = ()=> resolve(req.result || null);
-    req.onerror = ()=> reject(req.error || new Error("Failed to read folder handle"));
-  });
-  db.close();
-  return handle;
-}
-
-if (typeof window !== "undefined"){
-  window.getLocalRootConfig = ()=> normalizeLocalRootConfig(window.localRootConfig || readLocalRootConfig());
-  if (!window.localRootConfig) window.localRootConfig = readLocalRootConfig();
-  window.getLocalRootLibrary = ()=> Array.isArray(window.localRootLibrary) ? window.localRootLibrary : readLocalRootLibrary();
-  if (!Array.isArray(window.localRootLibrary)) window.localRootLibrary = readLocalRootLibrary();
 }
 
 function suggestedOneDriveFileUrl(fileName){
@@ -14039,30 +13952,21 @@ function renderJobs(){
 
   const addFormToggle = content.querySelector("[data-job-add-toggle]");
   const newFilesBtn = document.getElementById("jobFilesBtn");
-  const newOneDriveLinkBtn = document.getElementById("jobOneDriveLinkBtn");
   const newFilesInput = document.getElementById("jobFiles");
   const oneDriveSetupBtn = content.querySelector("[data-job-onedrive-setup]");
   const oneDriveModal = document.querySelector("#jobOneDriveModal");
-  const oneDriveSharedLinkInput = document.querySelector("#jobOneDriveSharedLink");
   const oneDriveFolderHintInput = document.querySelector("#jobOneDriveFolderHint");
   const oneDriveEnabledInput = document.querySelector("#jobOneDriveEnabled");
   const oneDriveSaveBtn = document.querySelector("[data-onedrive-save]");
   const oneDriveCancelBtns = Array.from(document.querySelectorAll("[data-onedrive-cancel]"));
-  const oneDriveLibraryNameInput = document.querySelector("#jobOneDriveFileName");
-  const oneDriveLibraryUrlInput = document.querySelector("#jobOneDriveFileUrl");
-  const oneDriveLibraryPreviewInput = document.querySelector("#jobOneDrivePreviewUrl");
-  const oneDriveLibraryAddBtn = document.querySelector("[data-onedrive-library-add]");
-  const oneDriveSyncBtn = document.querySelector("[data-onedrive-sync-library]");
-  const oneDriveLibraryList = document.querySelector("#jobOneDriveLibraryList");
-  const oneDriveLibrarySelect = document.getElementById("jobOneDriveLibrarySelect");
-  const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
-  const localRootAddToJobBtn = document.getElementById("jobRootLibraryAddBtn");
   const oneDriveConnectBtn = document.querySelector("[data-onedrive-connect]");
+  const oneDriveSelectRootBtn = document.querySelector("[data-onedrive-select-root]");
+  const oneDriveChangeRootBtn = document.querySelector("[data-onedrive-change-root]");
   const oneDriveConnStatus = document.querySelector("[data-onedrive-connection-status]");
   const oneDriveFolderStatus = document.querySelector("[data-onedrive-folder-status]");
   const oneDriveLibraryStatus = document.querySelector("[data-onedrive-library-status]");
-  const localRootStatus = document.querySelector("[data-local-root-status]");
-  const localRootPickBtn = document.querySelector("[data-local-root-pick]");
+  const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
+
   const oneDriveExplorerModal = document.querySelector("#jobOneDriveExplorerModal");
   const oneDriveExplorerList = document.querySelector("#jobOneDriveExplorerList");
   const oneDriveExplorerSearch = document.querySelector("#jobOneDriveSearch");
@@ -14070,126 +13974,35 @@ function renderJobs(){
   const oneDriveExplorerCancelBtns = Array.from(document.querySelectorAll("[data-onedrive-explorer-cancel]"));
   const oneDriveFilterBtns = Array.from(document.querySelectorAll("[data-od-filter]"));
 
+  const getOneDriveRootConfig = ()=>{
+    const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : normalizeOneDriveJobConfig(null);
+    return {
+      enabled: !!cfg?.enabled,
+      folderHint: String(cfg?.folderHint || ""),
+      rootDriveId: String(cfg?.rootDriveId || ""),
+      rootFolderItemId: String(cfg?.rootFolderItemId || ""),
+      rootName: String(cfg?.rootName || ""),
+      rootWebUrl: String(cfg?.rootWebUrl || "")
+    };
+  };
+
+  const updateOneDriveRootConfig = (patch)=>{
+    const current = getOneDriveRootConfig();
+    return writeOneDriveJobConfig({
+      ...current,
+      ...patch
+    });
+  };
+
+  const oneDriveSignedIn = ()=>{
+    try { return !!window.oneDriveAuth?.getAccount?.(); } catch (_err){ return false; }
+  };
+
   const updateOneDriveWizardStatus = ()=>{
-    const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
-    const lib = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
-    if (oneDriveConnStatus) oneDriveConnStatus.textContent = cfg?.sharedFolderUrl ? "Configured" : "Not set";
-    if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = cfg?.sharedFolderUrl ? "Ready to sync" : "Not ready";
-    if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = String(Array.isArray(lib) ? lib.length : 0);
-    const localCfg = (typeof window.getLocalRootConfig === "function") ? window.getLocalRootConfig() : null;
-    if (localRootStatus) localRootStatus.textContent = localCfg?.linked ? (localCfg.name || "Linked") : "Not linked";
-  };
-
-  const syncOneDriveLibraryFromConfig = async ()=>{
-    const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
-    if (!cfg?.sharedFolderUrl){
-      toast("Set your OneDrive shared folder link first.");
-      openOneDriveModal();
-      return { ok: false, count: 0 };
-    }
-    try {
-      const synced = await window.oneDriveSharedLibrary.crawlSharedFolder(cfg.sharedFolderUrl);
-      const fetched = Array.isArray(synced?.flat) ? synced.flat : [];
-      if (!fetched.length){
-        toast("No supported files found in the shared folder.");
-        return { ok: true, count: 0 };
-      }
-      writeOneDriveJobLibrary(fetched);
-      window.oneDriveSharedLibrary.writeSharedLibraryCache(synced);
-      toast(`Synced ${fetched.length} OneDrive file${fetched.length === 1 ? "" : "s"}`);
-      renderJobs();
-      return { ok: true, count: fetched.length };
-    } catch (err){
-      toast(err?.message || "Unable to sync OneDrive folder.");
-      return { ok: false, count: 0 };
-    }
-  };
-
-  const syncLocalRootLibrary = async ()=>{
-    try {
-      const rootHandle = await readLocalRootHandle();
-      if (!rootHandle) throw new Error("Set this computer root folder first.");
-      const results = [];
-      async function walk(dirHandle, parts){
-        for await (const entry of dirHandle.values()){
-          if (entry.kind === "directory"){
-            await walk(entry, parts.concat(entry.name));
-            continue;
-          }
-          if (entry.kind !== "file") continue;
-          const ext = extractAttachmentExtension(entry.name);
-          if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)) continue;
-          results.push({
-            id: parts.concat(entry.name).join("/"),
-            name: entry.name,
-            ext,
-            parentPath: `/${parts.join("/")}`,
-            localRelativePath: parts.concat(entry.name).join("/"),
-            source: "localroot"
-          });
-        }
-      }
-      await walk(rootHandle, []);
-      writeLocalRootLibrary(results);
-      return { ok: true, count: results.length };
-    } catch (err){
-      toast(err?.message || "Unable to index local root folder.");
-      return { ok: false, count: 0 };
-    }
-  };
-
-  const pickLocalRootFolder = async ()=>{
-    if (!(window.showDirectoryPicker)){
-      toast("This browser does not support folder linking. Use a Chromium-based browser.");
-      return;
-    }
-    try {
-      const handle = await window.showDirectoryPicker({ mode: "read" });
-      await saveLocalRootHandle(handle);
-      writeLocalRootConfig({ linked: true, name: handle?.name || "Root folder", lastLinkedAt: new Date().toISOString() });
-      toast("Root folder linked for this computer");
-      await syncLocalRootLibrary();
-      updateOneDriveWizardStatus();
-    } catch (_err){
-      toast("Root folder setup cancelled.");
-    }
-  };
-
-  const addFromLocalRoot = async ()=>{
-    try {
-      const rootHandle = await readLocalRootHandle();
-      if (!rootHandle){
-        openOneDriveModal();
-        toast("Set this computer root folder first.");
-        return;
-      }
-      const [fileHandle] = await window.showOpenFilePicker({
-        multiple: false,
-        startIn: rootHandle,
-        types: [{ description: "CAD files", accept: { "application/octet-stream": [".dxf", ".ord", ".omx"] } }]
-      });
-      const relativeParts = await rootHandle.resolve(fileHandle);
-      if (!Array.isArray(relativeParts) || !relativeParts.length){
-        toast("Select a file inside the configured root folder.");
-        return;
-      }
-      const file = await fileHandle.getFile();
-      const preview = await buildAttachmentPreview(file);
-      pendingNewJobFiles.push({
-        id: genId(file.name || "job_file"),
-        name: file.name || "Attachment",
-        type: file.type || "",
-        size: typeof file.size === "number" ? file.size : null,
-        source: "localroot",
-        localRelativePath: relativeParts.join("/"),
-        preview,
-        addedAt: new Date().toISOString()
-      });
-      toast("File attached from shared root folder");
-      renderJobs();
-    } catch (_err){
-      toast("No file selected from shared root folder.");
-    }
+    const cfg = getOneDriveRootConfig();
+    if (oneDriveConnStatus) oneDriveConnStatus.textContent = oneDriveSignedIn() ? "Connected" : "Not connected";
+    if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = cfg.rootFolderItemId ? `${cfg.rootName || "Folder"}` : "Not set";
+    if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = cfg.rootFolderItemId ? "Root configured" : "—";
   };
 
   const closeOneDriveModal = ()=>{
@@ -14201,89 +14014,65 @@ function renderJobs(){
     if (!oneDriveModal) return;
     oneDriveModal.removeAttribute("hidden");
     document.body.classList.add("modal-open");
-    try {
-      oneDriveSharedLinkInput?.focus({ preventScroll: true });
-    } catch (_err){
-      oneDriveSharedLinkInput?.focus();
-    }
     updateOneDriveWizardStatus();
   };
+
   oneDriveSetupBtn?.addEventListener("click", ()=>{
-    closeFileMenu();
-    closeActionMenu();
-    closeHistoryActionMenu();
-    openOneDriveModal();
+    closeFileMenu(); closeActionMenu(); closeHistoryActionMenu(); openOneDriveModal();
   });
   oneDriveCancelBtns.forEach(btn => btn.addEventListener("click", closeOneDriveModal));
-  oneDriveModal?.addEventListener("click", (event)=>{
-    if (event.target === oneDriveModal) closeOneDriveModal();
-  });
+  oneDriveModal?.addEventListener("click", (event)=>{ if (event.target === oneDriveModal) closeOneDriveModal(); });
+
   oneDriveSaveBtn?.addEventListener("click", ()=>{
-    const currentCfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
-    const next = writeOneDriveJobConfig({
+    const current = getOneDriveRootConfig();
+    const next = updateOneDriveRootConfig({
       enabled: !!oneDriveEnabledInput?.checked,
-      sharedFolderUrl: oneDriveSharedLinkInput?.value || "",
-      shareToken: (window.oneDriveSharedLibrary && typeof window.oneDriveSharedLibrary.encodeSharingUrlToToken === "function")
-        ? window.oneDriveSharedLibrary.encodeSharingUrlToToken(oneDriveSharedLinkInput?.value || "")
-        : "",
-      folderHint: oneDriveFolderHintInput?.value || "",
-      accessToken: currentCfg?.accessToken || "",
-      accessTokenExpiresAt: currentCfg?.accessTokenExpiresAt || "",
-      lastLinkedAt: new Date().toISOString()
+      folderHint: String(oneDriveFolderHintInput?.value || current.folderHint || "")
     });
     closeOneDriveModal();
     toast(next.enabled ? "OneDrive setup saved" : "OneDrive setup saved (disabled)");
     renderJobs();
   });
 
-  localRootPickBtn?.addEventListener("click", pickLocalRootFolder);
-
-  oneDriveSyncBtn?.addEventListener("click", async ()=>{
-    if (oneDriveSyncBtn instanceof HTMLButtonElement) oneDriveSyncBtn.disabled = true;
-    await syncOneDriveLibraryFromConfig();
-    if (oneDriveSyncBtn instanceof HTMLButtonElement) oneDriveSyncBtn.disabled = false;
-    updateOneDriveWizardStatus();
-  });
-
-  // Shared-link flow does not require Microsoft sign-in for sync.
-
-  oneDriveLibraryAddBtn?.addEventListener("click", ()=>{
-    const name = String(oneDriveLibraryNameInput?.value || "").trim();
-    const url = String(oneDriveLibraryUrlInput?.value || "").trim();
-    const previewUrl = String(oneDriveLibraryPreviewInput?.value || "").trim();
-    if (!name){ toast("Enter a file name."); return; }
-    if (!/^https:\/\//i.test(url)){ toast("Enter a valid https:// OneDrive file URL."); return; }
-    if (previewUrl && !/^https:\/\//i.test(previewUrl)){ toast("Preview URL must start with https://"); return; }
-    const list = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
-    list.push({ id: genId(name), name, fileName: name, url, previewUrl, source: "onedrive", addedAt: new Date().toISOString() });
-    writeOneDriveJobLibrary(list);
-    toast("OneDrive file reference added");
-    renderJobs();
-  });
-
-  oneDriveLibraryList?.addEventListener("click", (event)=>{
-    const removeBtn = event.target instanceof HTMLElement ? event.target.closest("[data-onedrive-library-remove]") : null;
-    if (!removeBtn) return;
-    const id = removeBtn.getAttribute("data-onedrive-library-remove") || "";
-    const list = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
-    const next = list.filter(item => String(item?.id) !== String(id));
-    writeOneDriveJobLibrary(next);
-    toast("OneDrive file reference removed");
-    updateOneDriveWizardStatus();
-    renderJobs();
-  });
-
-  const ensureOneDriveReadyForAttach = ()=>{
-    const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : null;
-    if (!cfg?.sharedFolderUrl){
-      toast("OneDrive setup required: paste a shared folder link.");
-      openOneDriveModal();
-      return false;
+  oneDriveConnectBtn?.addEventListener("click", async ()=>{
+    try {
+      await window.oneDriveAuth.signIn(["User.Read", "Files.Read", "offline_access"]);
+      toast("Connected to Microsoft");
+      updateOneDriveWizardStatus();
+    } catch (err){
+      toast(err?.message || "Unable to sign in to Microsoft");
     }
-    return true;
+  });
+
+  const pickRootFolder = async ()=>{
+    if (!window.oneDriveLibrary || !window.oneDriveAuth){
+      toast("OneDrive modules are not available.");
+      return;
+    }
+    try {
+      await window.oneDriveAuth.getAccessToken(["User.Read", "Files.Read", "offline_access"]);
+      const root = await window.oneDriveLibrary.getMyDriveRoot();
+      const cfg = getOneDriveRootConfig();
+      updateOneDriveRootConfig({
+        enabled: true,
+        folderHint: String(oneDriveFolderHintInput?.value || cfg.folderHint || ""),
+        rootDriveId: String(root?.parentReference?.driveId || root?.driveId || ""),
+        rootFolderItemId: String(root?.id || ""),
+        rootName: String(root?.name || "Root"),
+        rootWebUrl: String(root?.webUrl || "")
+      });
+      toast("OneDrive root folder selected");
+      updateOneDriveWizardStatus();
+      renderJobs();
+    } catch (err){
+      toast(err?.message || "Unable to select OneDrive root folder.");
+    }
   };
 
-  let explorerState = { folderId: null, filter: "all", query: "" };
+  oneDriveSelectRootBtn?.addEventListener("click", pickRootFolder);
+  oneDriveChangeRootBtn?.addEventListener("click", pickRootFolder);
+
+  let explorerState = { driveId: "", folderId: "", folderPath: "/", query: "", filter: "all", stack: [] };
 
   const closeOneDriveExplorer = ()=>{
     if (!oneDriveExplorerModal) return;
@@ -14291,53 +14080,80 @@ function renderJobs(){
     document.body.classList.remove("modal-open");
   };
 
-  const renderExplorer = ()=>{
+  const renderExplorer = async ()=>{
     if (!oneDriveExplorerList) return;
-    const cache = window.oneDriveSharedLibrary.readSharedLibraryCache() || {};
-    const tree = cache.tree || { folders:{}, files:{}, rootFolderId:null };
-    if (!explorerState.folderId) explorerState.folderId = tree.rootFolderId || null;
-    const folder = explorerState.folderId ? tree.folders?.[explorerState.folderId] : null;
-    const childFolders = folder ? (folder.childFolderIds||[]).map(id=>tree.folders?.[id]).filter(Boolean) : [];
-    const childFiles = folder ? (folder.childFileIds||[]).map(id=>tree.files?.[id]).filter(Boolean) : (Array.isArray(cache.flat)?cache.flat:[]);
-    const q = explorerState.query.toLowerCase();
-    const extFilter = explorerState.filter;
-    const files = childFiles.filter(f => (!q || String(f.name||"").toLowerCase().includes(q)) && (extFilter==="all" || String(f.ext||"").toLowerCase()===extFilter));
-    if (oneDriveBreadcrumb) oneDriveBreadcrumb.textContent = folder?.path || "/";
-    oneDriveExplorerList.innerHTML = '';
-    const upLi = document.createElement('li');
-    upLi.innerHTML = '<button type="button" class="link" data-od-up="1">⬆ Up</button>';
-    oneDriveExplorerList.appendChild(upLi);
-    childFolders.forEach(f=>{ const li=document.createElement('li'); li.innerHTML=`<button type="button" class="link" data-od-open-folder="${f.id}">📁 ${f.name}</button>`; oneDriveExplorerList.appendChild(li); });
-    files.forEach(file=>{ const li=document.createElement('li'); li.innerHTML=`<button type="button" class="link" data-od-select-file="${file.id}">📄 ${file.name}</button>`; oneDriveExplorerList.appendChild(li); });
-    if (!childFolders.length && !files.length){ const li=document.createElement('li'); li.className='muted'; li.textContent='No matching files in this folder.'; oneDriveExplorerList.appendChild(li); }
+    oneDriveExplorerList.innerHTML = '<li class="muted">Loading…</li>';
+    try {
+      const payload = await window.oneDriveLibrary.listChildren(explorerState.driveId, explorerState.folderId);
+      const values = Array.isArray(payload?.value) ? payload.value : [];
+      const q = explorerState.query.toLowerCase();
+      const folders = values.filter(item => item?.folder && (!q || String(item.name||"").toLowerCase().includes(q)));
+      const files = values
+        .filter(item => item?.file)
+        .map(window.oneDriveLibrary.mapFileRef)
+        .filter(file => [".dxf", ".ord", ".omx"].includes(file.ext))
+        .filter(file => (!q || String(file.name||"").toLowerCase().includes(q)) && (explorerState.filter === "all" || file.ext === explorerState.filter));
+      if (oneDriveBreadcrumb) oneDriveBreadcrumb.textContent = explorerState.folderPath || "/";
+      oneDriveExplorerList.innerHTML = "";
+      const upLi = document.createElement("li");
+      upLi.innerHTML = '<button type="button" class="link" data-od-up="1">⬆ Up</button>';
+      oneDriveExplorerList.appendChild(upLi);
+      folders.forEach(folder=>{
+        const li = document.createElement("li");
+        li.innerHTML = `<button type="button" class="link" data-od-open-folder="${folder.id}" data-od-open-name="${String(folder.name||"").replace(/"/g,'&quot;')}">📁 ${folder.name}</button>`;
+        oneDriveExplorerList.appendChild(li);
+      });
+      files.forEach(file=>{
+        const li = document.createElement("li");
+        li.innerHTML = `<button type="button" class="link" data-od-select-file="${file.itemId}">📄 ${file.name}</button>`;
+        li.dataset.file = JSON.stringify(file);
+        oneDriveExplorerList.appendChild(li);
+      });
+      if (!folders.length && !files.length){
+        const li = document.createElement("li"); li.className = "muted"; li.textContent = "No matching files in this folder."; oneDriveExplorerList.appendChild(li);
+      }
+    } catch (err){
+      oneDriveExplorerList.innerHTML = "";
+      const li = document.createElement("li");
+      li.className = "muted";
+      li.textContent = err?.message || "Unable to open folder";
+      oneDriveExplorerList.appendChild(li);
+    }
   };
 
-  oneDriveExplorerList?.addEventListener('click', (event)=>{
+  oneDriveExplorerList?.addEventListener("click", (event)=>{
     const target = event.target instanceof HTMLElement ? event.target : null;
-    const openFolder = target?.closest('[data-od-open-folder]');
-    if (openFolder){ explorerState.folderId = openFolder.getAttribute('data-od-open-folder'); renderExplorer(); return; }
-    const up = target?.closest('[data-od-up]');
-    if (up){
-      const cache = window.oneDriveSharedLibrary.readSharedLibraryCache() || {}; const tree=cache.tree||{}; const cur=tree.folders?.[explorerState.folderId]; explorerState.folderId = cur?.parentId || cache.rootFolderId || tree.rootFolderId || explorerState.folderId; renderExplorer(); return;
+    const openFolder = target?.closest("[data-od-open-folder]");
+    if (openFolder){
+      const id = openFolder.getAttribute("data-od-open-folder") || "";
+      const name = openFolder.getAttribute("data-od-open-name") || "Folder";
+      explorerState.stack.push({ folderId: explorerState.folderId, folderPath: explorerState.folderPath });
+      explorerState.folderId = id;
+      explorerState.folderPath = explorerState.folderPath === "/" ? `/${name}` : `${explorerState.folderPath}/${name}`;
+      renderExplorer();
+      return;
     }
-    const selectFile = target?.closest('[data-od-select-file]');
+    const up = target?.closest("[data-od-up]");
+    if (up){
+      const prev = explorerState.stack.pop();
+      if (prev){ explorerState.folderId = prev.folderId; explorerState.folderPath = prev.folderPath; renderExplorer(); }
+      return;
+    }
+    const selectFile = target?.closest("[data-od-select-file]");
     if (selectFile){
-      const fileId = selectFile.getAttribute('data-od-select-file') || '';
-      const cache = window.oneDriveSharedLibrary.readSharedLibraryCache() || {}; const tree=cache.tree||{}; const picked = tree.files?.[fileId] || (Array.isArray(cache.flat)?cache.flat.find(f=>String(f.id)===String(fileId)):null);
-      if (!picked) return;
+      const li = selectFile.closest("li");
+      let file = null;
+      try { file = JSON.parse(li?.dataset?.file || "null"); } catch (_err){ file = null; }
+      if (!file) return;
       pendingNewJobFiles.push({
-        id: genId(picked.name || "job_file"),
-        name: picked.name || "Linked file",
-        type: "",
-        size: Number(picked.size || 0),
+        id: genId(file.name || "job_file"),
+        name: file.name || "Linked file",
         source: "onedrive",
-        driveId: picked.driveId || "",
-        itemId: picked.itemId || picked.id || "",
-        eTag: picked.eTag || "",
-        lastModifiedDateTime: picked.lastModifiedDateTime || "",
-        webUrl: picked.webUrl || "",
-        url: picked.webUrl || "",
-        path: picked.parentPath || "",
+        driveId: file.driveId || explorerState.driveId,
+        itemId: file.itemId || "",
+        webUrl: file.webUrl || "",
+        path: file.parentPath || explorerState.folderPath,
+        selectedAt: new Date().toISOString(),
         addedAt: new Date().toISOString()
       });
       toast("OneDrive file attached to job");
@@ -14346,32 +14162,28 @@ function renderJobs(){
     }
   });
 
-  oneDriveExplorerSearch?.addEventListener('input', ()=>{ explorerState.query = String(oneDriveExplorerSearch.value||''); renderExplorer(); });
-  oneDriveFilterBtns.forEach(btn=>btn.addEventListener('click', ()=>{ explorerState.filter = btn.getAttribute('data-od-filter') || 'all'; renderExplorer(); }));
-  oneDriveExplorerCancelBtns.forEach(btn=>btn.addEventListener('click', closeOneDriveExplorer));
+  oneDriveExplorerSearch?.addEventListener("input", ()=>{ explorerState.query = String(oneDriveExplorerSearch.value || ""); renderExplorer(); });
+  oneDriveFilterBtns.forEach(btn=>btn.addEventListener("click", ()=>{ explorerState.filter = btn.getAttribute("data-od-filter") || "all"; renderExplorer(); }));
+  oneDriveExplorerCancelBtns.forEach(btn=>btn.addEventListener("click", closeOneDriveExplorer));
 
   oneDriveLibraryAddToJobBtn?.addEventListener("click", async ()=>{
-    if (!ensureOneDriveReadyForAttach()) return;
-    explorerState = { folderId: null, filter: "all", query: "" };
-    if (oneDriveExplorerModal){
-      oneDriveExplorerModal.removeAttribute('hidden');
-      document.body.classList.add('modal-open');
-    }
-    renderExplorer();
-
-    const sync = await syncOneDriveLibraryFromConfig();
-    if (sync.ok){
-      renderExplorer();
+    const cfg = getOneDriveRootConfig();
+    if (!cfg.rootDriveId || !cfg.rootFolderItemId){
+      toast("Configure OneDrive root folder first.");
+      openOneDriveModal();
       return;
     }
-
-    const cachedLibrary = (typeof window.getOneDriveJobLibrary === "function") ? window.getOneDriveJobLibrary() : [];
-    if (!Array.isArray(cachedLibrary) || !cachedLibrary.length){
-      toast("Unable to sync shared folder right now. Update the shared link in setup and try again.");
+    try {
+      await window.oneDriveAuth.getAccessToken(["User.Read", "Files.Read", "offline_access"]);
+    } catch (_err){
+      toast("Sign in to Microsoft first.");
+      openOneDriveModal();
+      return;
     }
+    explorerState = { driveId: cfg.rootDriveId, folderId: cfg.rootFolderItemId, folderPath: `/${cfg.rootName || "Root"}`, query: "", filter: "all", stack: [] };
+    if (oneDriveExplorerModal){ oneDriveExplorerModal.removeAttribute("hidden"); document.body.classList.add("modal-open"); }
+    renderExplorer();
   });
-
-  localRootAddToJobBtn?.addEventListener("click", addFromLocalRoot);
 
   updateOneDriveWizardStatus();
 
@@ -14400,23 +14212,6 @@ function renderJobs(){
   });
 
   newFilesBtn?.addEventListener("click", ()=>{ newFilesInput?.click(); });
-  newOneDriveLinkBtn?.addEventListener("click", ()=>{
-    const defaultName = window.prompt ? window.prompt("File name for this OneDrive link", "Drawing.dxf") : "Drawing.dxf";
-    if (!defaultName) return;
-    const url = promptOneDriveLinkForFile(defaultName);
-    if (url == null) return;
-    pendingNewJobFiles.push({
-      id: genId(defaultName || "job_file"),
-      name: String(defaultName || "Attachment").trim() || "Attachment",
-      type: "",
-      size: null,
-      url,
-      source: "onedrive",
-      addedAt: new Date().toISOString()
-    });
-    toast("OneDrive file link added");
-    renderJobs();
-  });
   newFilesInput?.addEventListener("change", async (e)=>{
     const files = e.target.files;
     if (!files || !files.length) return;

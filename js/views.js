@@ -2009,11 +2009,11 @@ function viewJobs(){
   };
   const oneDriveConfig = (typeof window.getOneDriveJobConfig === "function")
     ? window.getOneDriveJobConfig()
-    : { enabled: false, sharedFolderUrl: "", shareToken: "", folderHint: "", accessToken: "", accessTokenExpiresAt: "", lastLinkedAt: "" };
+    : { enabled: false, rootDriveId: "", rootFolderItemId: "", rootName: "", rootWebUrl: "", folderHint: "", sharedFolderUrl: "", shareToken: "", accessToken: "", accessTokenExpiresAt: "", lastLinkedAt: "" };
   const oneDriveLibrary = (typeof window.getOneDriveJobLibrary === "function")
     ? window.getOneDriveJobLibrary()
     : [];
-  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.sharedFolderUrl);
+  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.rootDriveId && oneDriveConfig.rootFolderItemId);
   const oneDriveStatusLabel = oneDriveReady
     ? `OneDrive linked${oneDriveConfig.folderHint ? ` · ${oneDriveConfig.folderHint}` : ""}`
     : "OneDrive not linked";
@@ -3562,13 +3562,7 @@ function viewJobs(){
             </p>
           </div>
           <button type="button" id="jobFilesBtn">Attach Files</button>
-          <button type="button" id="jobOneDriveLinkBtn">Attach OneDrive Link</button>
-          <select id="jobOneDriveLibrarySelect" aria-label="OneDrive library file">
-            <option value="">Select from OneDrive library…</option>
-            ${oneDriveLibrary.map(item => `<option value="${esc(item.id)}">${esc(item.name || item.fileName || "Linked file")}</option>`).join("")}
-          </select>
           <button type="button" id="jobOneDriveLibraryAddBtn">Add from OneDrive library</button>
-          <button type="button" id="jobRootLibraryAddBtn">Add from shared root folder</button>
           <input type="file" id="jobFiles" multiple style="display:none">
           <button type="submit">Add Job</button>
         </form>
@@ -3618,50 +3612,31 @@ function viewJobs(){
       <div class="job-note-modal-backdrop" id="jobOneDriveModal" hidden>
         <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobOneDriveModalTitle" aria-describedby="jobOneDriveModalDescription">
           <div class="job-note-modal-header">
-            <h4 id="jobOneDriveModalTitle">OneDrive setup wizard</h4>
+            <h4 id="jobOneDriveModalTitle">OneDrive root-folder setup</h4>
             <button type="button" class="job-note-modal-close" data-onedrive-cancel aria-label="Close OneDrive setup">×</button>
           </div>
           <div class="job-note-modal-body">
-            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Paste a OneDrive shared-folder link, sync it, then pick files directly from the in-app library explorer.</p>
+            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Sign in to Microsoft, select the OneDrive root folder for this account, then add files from that root in the cutting job form.</p>
             <ol class="job-onedrive-steps small">
-              <li><strong>Step 1:</strong> Paste your OneDrive <em>Shared Folder Link</em> (folder-level share URL).</li>
-              <li><strong>Step 2:</strong> Click <strong>Sync library from shared folder</strong> to crawl folders and files.</li>
-              <li><strong>Step 3:</strong> Use <strong>Add from OneDrive library</strong> in the job form to open the file explorer.</li>
-              <li><strong>Step 4:</strong> Click a file in the explorer to attach it to the cutting job.</li>
+              <li><strong>Step 1:</strong> Sign in to Microsoft.</li>
+              <li><strong>Step 2:</strong> Select OneDrive root folder.</li>
+              <li><strong>Step 3:</strong> Click <strong>Add from OneDrive library</strong> in Add Cutting Job.</li>
             </ol>
             <div class="job-onedrive-status-grid small muted" data-onedrive-status-grid>
-              <div>Shared link: <span data-onedrive-connection-status>Not set</span></div>
-              <div>Folder status: <span data-onedrive-folder-status>Not ready</span></div>
-              <div>Library files: <span data-onedrive-library-status>0</span></div>
-              <div>Computer root folder: <span data-local-root-status>Not linked</span></div>
+              <div>Connection: <span data-onedrive-connection-status>Not connected</span></div>
+              <div>Root folder: <span data-onedrive-folder-status>Not set</span></div>
+              <div>Current folder: <span data-onedrive-library-status>—</span></div>
             </div>
-            <label class="job-edit-note">OneDrive shared folder link
-              <input type="url" id="jobOneDriveSharedLink" placeholder="https://... (shared folder URL)" value="${esc(oneDriveConfig.sharedFolderUrl || "")}">
-            </label>
-            <label class="job-edit-note">Folder label (optional)
+            <label class="job-edit-note">Root folder label (optional)
               <input type="text" id="jobOneDriveFolderHint" placeholder="Shop drawings" value="${esc(oneDriveConfig.folderHint || "")}">
             </label>
             <label class="job-edit-note">
               <input type="checkbox" id="jobOneDriveEnabled" ${oneDriveConfig.enabled ? "checked" : ""}> Enable OneDrive linking for cutting jobs
             </label>
-            <p class="small muted">Use a folder sharing link (example: https://onedrive.live.com/...) and sync before opening the file explorer.</p>
             <div class="job-onedrive-sync-actions">
-              <button type="button" class="job-note-modal-secondary" data-onedrive-sync-library>Sync library from shared folder</button>
-              <button type="button" class="job-note-modal-secondary" data-local-root-pick>Set this computer root folder</button>
-            </div>
-            <div class="job-onedrive-library">
-              <h5>OneDrive file library</h5>
-              <div class="job-onedrive-library-add">
-                <input type="text" id="jobOneDriveFileName" placeholder="File name (e.g. bracket-01.dxf)">
-                <input type="url" id="jobOneDriveFileUrl" placeholder="Direct OneDrive file URL">
-                <input type="url" id="jobOneDrivePreviewUrl" placeholder="Optional preview image URL">
-                <button type="button" data-onedrive-library-add>Add file reference</button>
-              </div>
-              <ul class="job-onedrive-library-list" id="jobOneDriveLibraryList">
-                ${oneDriveLibrary.length
-                  ? oneDriveLibrary.map(item => `<li><span>${esc(item.name || item.fileName || "Linked file")}</span> <button type="button" class="link" data-onedrive-library-remove="${esc(item.id)}">Remove</button></li>`).join("")
-                  : `<li class="muted">No OneDrive file references yet.</li>`}
-              </ul>
+              <button type="button" class="job-note-modal-secondary" data-onedrive-connect>Sign in to Microsoft</button>
+              <button type="button" class="job-note-modal-secondary" data-onedrive-select-root>Select OneDrive root folder</button>
+              <button type="button" class="job-note-modal-secondary" data-onedrive-change-root>Change root</button>
             </div>
           </div>
           <div class="job-note-modal-actions">

@@ -12,7 +12,7 @@
   }
 
   async function getDriveItemMetadata(driveId, itemId){
-    return graphFetch(`/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}?$select=id,name,eTag,lastModifiedDateTime,webUrl,parentReference,file`);
+    return graphFetch(`/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}?$select=id,name,eTag,lastModifiedDateTime,webUrl,parentReference,file,@microsoft.graph.downloadUrl`);
   }
 
   async function getDriveItemContentArrayBuffer(driveId, itemId){
