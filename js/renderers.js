@@ -15010,7 +15010,7 @@ function renderInventory(){
     });
   };
 
-  content.addEventListener("keydown", (e)=>{
+  const materialKeydownHandler = (e)=>{
     if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
     if (String(e.key || "").toLowerCase() !== "z") return;
     if (String(window.inventorySection || "") !== "material") return;
@@ -15022,7 +15022,12 @@ function renderInventory(){
     window.inventoryMaterials = normalizeInventoryMaterials(prev);
     saveCloudDebounced();
     renderInventory();
-  });
+  };
+  if (window.__inventoryMaterialKeydownHandler){
+    content.removeEventListener("keydown", window.__inventoryMaterialKeydownHandler);
+  }
+  window.__inventoryMaterialKeydownHandler = materialKeydownHandler;
+  content.addEventListener("keydown", materialKeydownHandler);
 
   const materialEditModeBtn = content.querySelector("#materialEditModeBtn");
   materialEditModeBtn?.addEventListener("click", ()=>{
@@ -15081,7 +15086,7 @@ function renderInventory(){
     renderInventory();
   });
 
-  content.addEventListener("click", (e)=>{
+  const materialClickHandler = (e)=>{
     if (String(window.inventorySection || "") !== "material") return;
     const addRow = e.target.closest("[data-material-row-add]");
     if (addRow){
@@ -15236,7 +15241,12 @@ function renderInventory(){
       return;
     }
 
-  });
+  };
+  if (window.__inventoryMaterialClickHandler){
+    content.removeEventListener("click", window.__inventoryMaterialClickHandler);
+  }
+  window.__inventoryMaterialClickHandler = materialClickHandler;
+  content.addEventListener("click", materialClickHandler);
 
   const parseThicknessToStored = (raw)=>{
     const txt = String(raw ?? "").replace(/"/g, "").trim();
@@ -15307,7 +15317,7 @@ function renderInventory(){
     renderInventory();
   };
 
-  content.addEventListener("dblclick", (e)=>{
+  const materialDblClickHandler = (e)=>{
     const cell = e.target.closest("[data-material-editable]");
     if (!cell || cell.querySelector("input")) return;
     const kind = cell.getAttribute("data-edit-kind") || "";
@@ -15335,7 +15345,12 @@ function renderInventory(){
       }
     });
     input.addEventListener("blur", commit, { once:true });
-  });
+  };
+  if (window.__inventoryMaterialDblClickHandler){
+    content.removeEventListener("dblclick", window.__inventoryMaterialDblClickHandler);
+  }
+  window.__inventoryMaterialDblClickHandler = materialDblClickHandler;
+  content.addEventListener("dblclick", materialDblClickHandler);
 
   if (searchInput){
     searchInput.addEventListener("input", ()=>{
