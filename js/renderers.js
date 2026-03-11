@@ -1193,12 +1193,36 @@ async function buildAttachmentPreview(file){
   const ext = extractAttachmentExtension(file?.name);
   if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)) return null;
   try {
-    const text = await file.text();
-    const previewSvg = renderCadPreviewDataUrl(text);
+    const bytes = await file.arrayBuffer();
+    const previewSvg = window.dxfPreview?.renderAnyToSvgDataUrl
+      ? window.dxfPreview.renderAnyToSvgDataUrl(bytes, file?.name || "")
+      : renderCadPreviewDataUrl(await file.text());
     if (!previewSvg) return { mode: "message", content: "2D preview unavailable for this file." };
     return { mode: "image", content: previewSvg };
   } catch (_err){
     return { mode: "message", content: "2D preview unavailable for this file." };
+  }
+}
+
+async function resolvePreviewFromReadableSource(file){
+  const ext = extractAttachmentExtension(file?.name);
+  const dataUrl = String(file?.dataUrl || "");
+  const url = String(file?.url || "");
+  const src = dataUrl || url;
+  if (!src) return false;
+  if (/^data:image\//i.test(src) || (/^https?:\/\//i.test(src) && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"].includes(ext))){
+    file.preview = { mode: "image", content: src };
+    return true;
+  }
+  if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)) return false;
+  try {
+    const bytes = await fetch(src).then(r => r.arrayBuffer());
+    const svg = window.dxfPreview.renderAnyToSvgDataUrl(bytes, file.name || "");
+    if (!svg) return false;
+    file.preview = { mode: "image", content: svg };
+    return true;
+  } catch (_err){
+    return false;
   }
 }
 
@@ -1288,8 +1312,7 @@ async function resolveOneDriveAttachmentPreview(file){
         return true;
       }
       const bytes = await window.oneDriveGraph.getDriveItemContentArrayBuffer(file.driveId, file.itemId);
-      const text = window.dxfPreview.arrayBufferToText(bytes);
-      const svg = window.dxfPreview.renderCadToSvgDataUrl(text);
+      const svg = window.dxfPreview.renderAnyToSvgDataUrl(bytes, file.name || "");
       if (!svg){
         file.preview = { mode: "message", content: "2D preview unavailable for this file." };
         return false;
@@ -1310,6 +1333,38 @@ async function resolveOneDriveAttachmentPreview(file){
 
   oneDrivePreviewInFlight.set(inFlightKey, task);
   return task;
+}
+
+async function resolveLocalRootAttachmentPreview(file){
+  if (!file || file.source !== "onedrive_local_root" || !file.localRelativePath) return false;
+  if (file.preview && file.preview.mode === "image" && file.preview.content) return true;
+  try {
+    const cfg = readOneDriveJobConfig();
+    const signaturesMatch = cfg?.localRootSignature
+      && (!file.localRootSignature || cfg.localRootSignature === file.localRootSignature);
+    if (signaturesMatch){
+      const localFile = await resolveLocalFileFromRelativePath(file.localRelativePath);
+      if (localFile){
+        const bytes = await localFile.arrayBuffer();
+        const svg = window.dxfPreview.renderAnyToSvgDataUrl(bytes, file.name || localFile.name || "");
+        if (svg){
+          file.preview = { mode: "image", content: svg };
+          return true;
+        }
+      }
+    }
+    if (await resolvePreviewFromReadableSource(file)) return true;
+    if (file.driveId && file.itemId){
+      const remoteResolved = await resolveOneDriveAttachmentPreview(file);
+      if (remoteResolved) return true;
+    }
+    file.preview = file.preview || { mode: "message", content: "2D preview unavailable for this file." };
+    return false;
+  } catch (_err){
+    if (await resolvePreviewFromReadableSource(file)) return true;
+    if (file.driveId && file.itemId) return resolveOneDriveAttachmentPreview(file);
+    return false;
+  }
 }
 
 function captureNewJobFormState(){
@@ -13328,9 +13383,25 @@ function renderJobs(){
     if (Array.isArray(cuttingJobs)) allJobs.push(...cuttingJobs);
     if (Array.isArray(completedCuttingJobs)) allJobs.push(...completedCuttingJobs);
     const files = allJobs.flatMap(job => Array.isArray(job?.files) ? job.files : []);
-    const targets = files.filter(file => file && file.source === "onedrive" && file.driveId && file.itemId && !(file.preview && file.preview.content));
-    if (!targets.length) return;
-    Promise.allSettled(targets.map(resolveOneDriveAttachmentPreview)).then((results)=>{
+    const oneDriveTargets = files.filter(file => file && file.source === "onedrive" && file.driveId && file.itemId && !(file.preview && file.preview.content));
+    const localRootTargets = files.filter(file => file && file.source === "onedrive_local_root" && file.localRelativePath && !(file.preview && file.preview.content));
+    const readableTargets = files.filter(file => {
+      if (!file || (file.preview && file.preview.content)) return false;
+      const ext = extractAttachmentExtension(file.name || "");
+      if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)) return false;
+      const hasSource = !!(file.dataUrl || file.url);
+      if (!hasSource) return false;
+      const isOneDrive = file.source === "onedrive" && file.driveId && file.itemId;
+      const isLocalRoot = file.source === "onedrive_local_root" && file.localRelativePath;
+      return !isOneDrive && !isLocalRoot;
+    });
+    const tasks = [
+      ...oneDriveTargets.map(resolveOneDriveAttachmentPreview),
+      ...localRootTargets.map(resolveLocalRootAttachmentPreview),
+      ...readableTargets.map(resolvePreviewFromReadableSource)
+    ];
+    if (!tasks.length) return;
+    Promise.allSettled(tasks).then((results)=>{
       const changed = results.some(r => r.status === "fulfilled" && r.value === true);
       if (changed){
         saveCloudDebounced();
@@ -14227,6 +14298,8 @@ function renderJobs(){
         return false;
       }
       const file = await fileHandle.getFile();
+      const fileBytes = await file.arrayBuffer();
+      const previewSvg = window.dxfPreview.renderAnyToSvgDataUrl(fileBytes, file.name || "");
       const ext = extractAttachmentExtension(file.name || "");
       if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)){
         toast("Only DXF, ORD, or OMX files can be attached from OneDrive root.");
@@ -14243,8 +14316,100 @@ function renderJobs(){
         localRootName: getSharedConfig().localRootName || rootHandle.name || "",
         localRootSignature: signature,
         localDeviceId: getLocalDeviceId(),
+        preview: previewSvg ? { mode: "image", content: previewSvg } : null,
         addedAt: new Date().toISOString()
       });
+      toast("File attached from this computer OneDrive root.");
+      const formState = captureNewJobFormState();
+      const scrollPosition = captureScrollPosition();
+      renderJobs();
+      requestAnimationFrame(()=>{
+        restoreScrollPosition(scrollPosition);
+        restoreNewJobFormState(formState);
+      });
+      return true;
+    } catch (err){
+      if (err?.name !== "AbortError"){
+        toast(err?.message || "Unable to attach from this computer root folder.");
+      }
+      return false;
+    }
+  };
+
+  const attachFromLocalOneDriveRootToJob = async (jobId, { completed = false } = {})=>{
+    const source = completed ? completedJobs : cuttingJobs;
+    const target = Array.isArray(source)
+      ? source.find(job => String(job?.id || "") === String(jobId || ""))
+      : null;
+    if (!target) return false;
+    if (!supportsLocalRootPicker()){
+      toast("This browser does not support local root folder attach.");
+      return false;
+    }
+    const rootHandle = await readLocalRootHandle();
+    if (!rootHandle){
+      toast("Root folder is not set on this computer. Open OneDrive setup and choose the root folder first.");
+      openOneDriveModal();
+      return false;
+    }
+    try {
+      const cfg = getSharedConfig();
+      const signature = cfg.localRootSignature || await computeLocalRootSignature(rootHandle);
+      if (!signature){
+        toast("Unable to verify local OneDrive root folder.");
+        return false;
+      }
+      const match = verifyRootSignatureMatches(signature);
+      if (!match.ok){
+        toast("Local root folder mismatch. Please pick the same shared root as other computers.");
+        return false;
+      }
+      const perm = await rootHandle.requestPermission({ mode: "read" });
+      if (perm !== "granted"){
+        toast("Root folder permission is required to attach from this computer.");
+        return false;
+      }
+      const pickedHandles = await window.showOpenFilePicker({
+        multiple: false,
+        startIn: rootHandle,
+        types: [{
+          description: "CAD files",
+          accept: {
+            "application/octet-stream": [".dxf", ".ord", ".omx"],
+            "text/plain": [".dxf", ".ord", ".omx"]
+          }
+        }]
+      });
+      const fileHandle = Array.isArray(pickedHandles) ? pickedHandles[0] : null;
+      if (!fileHandle) return false;
+      const rel = await rootHandle.resolve(fileHandle);
+      if (!Array.isArray(rel)){
+        toast("Selected file must come from the configured root folder.");
+        return false;
+      }
+      const file = await fileHandle.getFile();
+      const fileBytes = await file.arrayBuffer();
+      const previewSvg = window.dxfPreview.renderAnyToSvgDataUrl(fileBytes, file.name || "");
+      const ext = extractAttachmentExtension(file.name || "");
+      if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)){
+        toast("Only DXF, ORD, or OMX files can be attached from OneDrive root.");
+        return false;
+      }
+      target.files = Array.isArray(target.files) ? target.files : [];
+      target.files.push({
+        id: genId(file.name || "job_file"),
+        name: file.name || "Attachment",
+        type: file.type || "",
+        size: typeof file.size === "number" ? file.size : null,
+        source: "onedrive_local_root",
+        localRelativePath: `/${rel.join("/")}`,
+        localRootName: getSharedConfig().localRootName || rootHandle.name || "",
+        localRootSignature: signature,
+        localDeviceId: getLocalDeviceId(),
+        preview: previewSvg ? { mode: "image", content: previewSvg } : null,
+        addedAt: new Date().toISOString()
+      });
+      saveCloudDebounced();
       toast("File attached from this computer OneDrive root.");
       renderJobs();
       return true;
@@ -14879,6 +15044,21 @@ function renderJobs(){
       saveCloudDebounced();
       toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
       renderJobs();
+      return;
+    }
+
+    if (e.target.matches("input[data-history-file-input]")){
+      const id = e.target.getAttribute("data-history-file-input");
+      const j = completedJobs.find(x=>x.id===id);
+      if (!j){ e.target.value = ""; return; }
+      const attachments = await filesToAttachments(e.target.files);
+      e.target.value = "";
+      if (!attachments.length) return;
+      j.files = Array.isArray(j.files) ? j.files : [];
+      attachments.forEach(att=> j.files.push({ ...att }));
+      saveCloudDebounced();
+      toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
+      renderJobs();
     }
   });
 
@@ -15418,6 +15598,36 @@ function renderJobs(){
       closeActionMenu();
       closeHistoryActionMenu();
       content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
+      return;
+    }
+
+    const uploadRoot = e.target.closest("[data-upload-job-root]");
+    if (uploadRoot){
+      const id = uploadRoot.getAttribute("data-upload-job-root");
+      closeFileMenu();
+      closeActionMenu();
+      closeHistoryActionMenu();
+      if (id) await attachFromLocalOneDriveRootToJob(id, { completed: false });
+      return;
+    }
+
+    const uploadHistory = e.target.closest("[data-upload-history]");
+    if (uploadHistory){
+      const id = uploadHistory.getAttribute("data-upload-history");
+      closeFileMenu();
+      closeActionMenu();
+      closeHistoryActionMenu();
+      content.querySelector(`input[data-history-file-input="${id}"]`)?.click();
+      return;
+    }
+
+    const uploadHistoryRoot = e.target.closest("[data-upload-history-root]");
+    if (uploadHistoryRoot){
+      const id = uploadHistoryRoot.getAttribute("data-upload-history-root");
+      closeFileMenu();
+      closeActionMenu();
+      closeHistoryActionMenu();
+      if (id) await attachFromLocalOneDriveRootToJob(id, { completed: true });
       return;
     }
 
