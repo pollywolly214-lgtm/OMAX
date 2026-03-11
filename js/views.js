@@ -3679,7 +3679,7 @@ function materialSheetTableHTML(model, typeId){
           <tr>
             <th class="material-header material-editable" data-material-editable="1" data-edit-kind="material-name" data-type-id="${esc(typeId)}">${esc(type.name || "Material")}</th>
             ${columns.map((col, idx)=>`<th class="material-header material-editable" data-material-editable="1" data-edit-kind="column" data-type-id="${esc(typeId)}" data-col-index="${idx}">${esc(col || "")}</th>`).join("")}
-            <th class="material-col-actions"><button type="button" class="small" data-material-col-add="${esc(typeId)}">+C</button></th>
+            <th class="material-col-actions material-edit-controls ${window.inventoryMaterialEditMode ? "" : "is-hidden"}"><button type="button" class="small" data-material-col-add="${esc(typeId)}">+C</button></th>
           </tr>
           <tr class="material-col-control-row material-edit-controls ${window.inventoryMaterialEditMode ? "" : "is-hidden"}">
             <th>Actions</th>

@@ -15000,6 +15000,15 @@ function renderInventory(){
       if (row.values.length > sheet.columns.length) row.values = row.values.slice(0, sheet.columns.length);
     });
   };
+  const normalizeAllSheets = (model)=>{
+    if (!model || !Array.isArray(model.types)) return;
+    model.types.forEach(type => {
+      const key = String(type?.id || "");
+      if (!key) return;
+      if (!model.sheets[key]) model.sheets[key] = { columns: ["QTY 4x8"], rows: [{ thickness: "0.0625", values: [""] }] };
+      normalizeSheetShape(model.sheets[key]);
+    });
+  };
 
   content.addEventListener("keydown", (e)=>{
     if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
@@ -15148,10 +15157,19 @@ function renderInventory(){
       const model = getMaterialModel();
       const sheet = model.sheets[typeId];
       if (!sheet) return;
-      normalizeSheetShape(sheet);
+      normalizeAllSheets(model);
+      const sharedColumns = Array.isArray(sheet.columns) ? sheet.columns.slice() : ["QTY 4x8"];
       pushMaterialUndo();
-      sheet.columns.push(formatQtyHeading("4x8"));
-      sheet.rows.forEach(row => row.values.push(""));
+      sharedColumns.push(formatQtyHeading("4x8"));
+      model.types.forEach(type => {
+        const s = model.sheets[String(type.id)];
+        if (!s) return;
+        s.columns = sharedColumns.slice();
+        s.rows.forEach(row => {
+          if (!Array.isArray(row.values)) row.values = [];
+          row.values.push("");
+        });
+      });
       window.inventoryMaterials = model;
       saveCloudDebounced();
       renderInventory();
@@ -15168,12 +15186,19 @@ function renderInventory(){
       const model = getMaterialModel();
       const sheet = model.sheets[typeId];
       if (!sheet || !Number.isFinite(colIndex)) return;
-      normalizeSheetShape(sheet);
+      normalizeAllSheets(model);
+      const sharedColumns = Array.isArray(sheet.columns) ? sheet.columns.slice() : ["QTY 4x8"];
       pushMaterialUndo();
-      sheet.columns.splice(Math.max(0, colIndex + 1), 0, formatQtyHeading("4x8"));
-      sheet.rows.forEach(row => {
-        if (!Array.isArray(row.values)) row.values = [];
-        row.values.splice(Math.max(0, colIndex + 1), 0, "");
+      const insertAt = Math.max(0, colIndex + 1);
+      sharedColumns.splice(insertAt, 0, formatQtyHeading("4x8"));
+      model.types.forEach(type => {
+        const s = model.sheets[String(type.id)];
+        if (!s) return;
+        s.columns = sharedColumns.slice();
+        s.rows.forEach(row => {
+          if (!Array.isArray(row.values)) row.values = [];
+          row.values.splice(insertAt, 0, "");
+        });
       });
       window.inventoryMaterials = model;
       saveCloudDebounced();
@@ -15192,11 +15217,18 @@ function renderInventory(){
       const sheet = model.sheets[typeId];
       if (!sheet || !Number.isFinite(colIndex) || colIndex < 0 || colIndex >= sheet.columns.length) return;
       if (sheet.columns.length <= 1) return;
+      normalizeAllSheets(model);
+      const sharedColumns = Array.isArray(sheet.columns) ? sheet.columns.slice() : ["QTY 4x8"];
       pushMaterialUndo();
-      sheet.columns.splice(colIndex, 1);
-      sheet.rows.forEach(row => {
-        if (!Array.isArray(row.values)) row.values = [];
-        row.values.splice(colIndex, 1);
+      sharedColumns.splice(colIndex, 1);
+      model.types.forEach(type => {
+        const s = model.sheets[String(type.id)];
+        if (!s) return;
+        s.columns = sharedColumns.slice();
+        s.rows.forEach(row => {
+          if (!Array.isArray(row.values)) row.values = [];
+          row.values.splice(colIndex, 1);
+        });
       });
       window.inventoryMaterials = model;
       saveCloudDebounced();
@@ -15247,7 +15279,12 @@ function renderInventory(){
       const colIndex = Number(cell.getAttribute("data-col-index"));
       if (!Number.isFinite(colIndex) || colIndex < 0 || colIndex >= sheet.columns.length) return;
       const bodyOnly = String(value || "").replace(/^qty\s*/i, "").trim();
-      sheet.columns[colIndex] = formatQtyHeading(bodyOnly);
+      const heading = formatQtyHeading(bodyOnly);
+      model.types.forEach(type => {
+        const s = model.sheets[String(type.id)];
+        if (!s || !Array.isArray(s.columns) || colIndex < 0 || colIndex >= s.columns.length) return;
+        s.columns[colIndex] = heading;
+      });
     } else if (kind === "thickness"){
       const rowIndex = Number(cell.getAttribute("data-row-index"));
       if (!Number.isFinite(rowIndex) || rowIndex < 0 || rowIndex >= sheet.rows.length) return;

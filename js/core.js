@@ -2339,6 +2339,27 @@ function normalizeInventoryMaterials(raw){
     sheets[type.id] = { columns, rows };
   });
 
+  let sharedColumns = [];
+  if (types.length){
+    const firstId = String(types[0].id);
+    const firstCols = Array.isArray(sheets[firstId]?.columns) ? sheets[firstId].columns : [];
+    sharedColumns = firstCols.length ? firstCols.map(formatQtyHeading) : ["QTY 4x8"];
+  }
+  if (!sharedColumns.length) sharedColumns = ["QTY 4x8"];
+  types.forEach(type => {
+    const sheet = sheets[type.id];
+    if (!sheet) return;
+    sheet.columns = sharedColumns.slice();
+    if (!Array.isArray(sheet.rows) || !sheet.rows.length){
+      sheet.rows = [{ thickness: "0.0625", values: sharedColumns.map(() => "") }];
+    }
+    sheet.rows.forEach(row => {
+      if (!Array.isArray(row.values)) row.values = [];
+      while (row.values.length < sharedColumns.length) row.values.push("");
+      if (row.values.length > sharedColumns.length) row.values = row.values.slice(0, sharedColumns.length);
+    });
+  });
+
   const activeCandidate = String(data.activeType || base.activeType || (types[0] && types[0].id) || '');
   const activeType = activeCandidate === "__all" || types.some(t => t.id === activeCandidate)
     ? activeCandidate
