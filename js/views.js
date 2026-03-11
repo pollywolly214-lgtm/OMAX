@@ -2127,7 +2127,11 @@ function viewJobs(){
     }
     if ([".dxf", ".ord", ".omx"].includes(ext)) {
       const text = decodeDataUrlText(href);
-      const cadSvg = text ? renderCadToSvgDataUrl(text) : "";
+      const cadSvg = text
+        ? (window.dxfPreview?.renderAnyToSvgDataUrl
+          ? window.dxfPreview.renderAnyToSvgDataUrl(text, name)
+          : renderCadToSvgDataUrl(text))
+        : "";
       return cadSvg
         ? { name, href, mode: "image", content: cadSvg }
         : { name, href, mode: "message", content: "2D preview unavailable. Add a OneDrive direct file URL or re-upload to refresh preview." };

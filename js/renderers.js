@@ -1288,8 +1288,7 @@ async function resolveOneDriveAttachmentPreview(file){
         return true;
       }
       const bytes = await window.oneDriveGraph.getDriveItemContentArrayBuffer(file.driveId, file.itemId);
-      const text = window.dxfPreview.arrayBufferToText(bytes);
-      const svg = window.dxfPreview.renderCadToSvgDataUrl(text);
+      const svg = window.dxfPreview.renderAnyToSvgDataUrl(bytes, file.name || "");
       if (!svg){
         file.preview = { mode: "message", content: "2D preview unavailable for this file." };
         return false;
@@ -1310,6 +1309,30 @@ async function resolveOneDriveAttachmentPreview(file){
 
   oneDrivePreviewInFlight.set(inFlightKey, task);
   return task;
+}
+
+async function resolveLocalRootAttachmentPreview(file){
+  if (!file || file.source !== "onedrive_local_root" || !file.localRelativePath) return false;
+  if (file.preview && file.preview.mode === "image" && file.preview.content) return true;
+  try {
+    const cfg = readOneDriveJobConfig();
+    if (!cfg?.localRootSignature) return false;
+    if (file.localRootSignature && cfg.localRootSignature && file.localRootSignature !== cfg.localRootSignature){
+      return false;
+    }
+    const localFile = await resolveLocalFileFromRelativePath(file.localRelativePath);
+    if (!localFile) return false;
+    const bytes = await localFile.arrayBuffer();
+    const svg = window.dxfPreview.renderAnyToSvgDataUrl(bytes, file.name || localFile.name || "");
+    if (!svg){
+      file.preview = file.preview || { mode: "message", content: "2D preview unavailable for this file." };
+      return false;
+    }
+    file.preview = { mode: "image", content: svg };
+    return true;
+  } catch (_err){
+    return false;
+  }
 }
 
 function captureNewJobFormState(){
@@ -13328,9 +13351,14 @@ function renderJobs(){
     if (Array.isArray(cuttingJobs)) allJobs.push(...cuttingJobs);
     if (Array.isArray(completedCuttingJobs)) allJobs.push(...completedCuttingJobs);
     const files = allJobs.flatMap(job => Array.isArray(job?.files) ? job.files : []);
-    const targets = files.filter(file => file && file.source === "onedrive" && file.driveId && file.itemId && !(file.preview && file.preview.content));
-    if (!targets.length) return;
-    Promise.allSettled(targets.map(resolveOneDriveAttachmentPreview)).then((results)=>{
+    const oneDriveTargets = files.filter(file => file && file.source === "onedrive" && file.driveId && file.itemId && !(file.preview && file.preview.content));
+    const localRootTargets = files.filter(file => file && file.source === "onedrive_local_root" && file.localRelativePath && !(file.preview && file.preview.content));
+    const tasks = [
+      ...oneDriveTargets.map(resolveOneDriveAttachmentPreview),
+      ...localRootTargets.map(resolveLocalRootAttachmentPreview)
+    ];
+    if (!tasks.length) return;
+    Promise.allSettled(tasks).then((results)=>{
       const changed = results.some(r => r.status === "fulfilled" && r.value === true);
       if (changed){
         saveCloudDebounced();
