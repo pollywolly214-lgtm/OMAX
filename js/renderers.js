@@ -13171,6 +13171,14 @@ function renderJobs(){
       const key = cat != null ? String(cat) : rootId;
       return folderMap.has(key) ? key : rootId;
     };
+    const projectNumberForJob = (job)=>{
+      const direct = normalizeProjectNumber(job?.projectNumber);
+      if (direct) return direct;
+      const catKey = normalizeCategory(job?.cat);
+      const folderName = folderMap.get(catKey)?.name || "";
+      const mapped = categoryProjectNumber(folderName);
+      return mapped || "0000";
+    };
     const childrenOf = (parentId)=> {
       const key = parentId == null ? null : String(parentId);
       return folders
@@ -13187,7 +13195,7 @@ function renderJobs(){
     const categoryCutMap = new Map(categoryOrder.map((id, idx)=> [id, `CAT-${String(idx + 1).padStart(3, "0")}`]));
     const categoryCutLabel = (catId)=> categoryCutMap.get(String(catId || rootId)) || "CAT-000";
     const filtered = list.filter(job => {
-      const project = normalizeProjectNumber(job?.projectNumber);
+      const project = projectNumberForJob(job);
       const material = String(job?.material || "");
       const est = Number(job?.estimateHours);
       const dateTokens = [job?.startISO, job?.dueISO, job?.completedAtISO].filter(Boolean).join(" ");
@@ -13242,7 +13250,7 @@ function renderJobs(){
       return `<article class="job-flow-job-card"${style}>
         <header>
           <div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")} · ${escapeHtml(jobCutLabel(job))} · ${escapeHtml(jobCategoryCutLabel(job))}</div>
-          <div class="small job-flow-meta">Project #${escapeHtml(normalizeProjectNumber(job?.projectNumber) || "Unassigned")}</div>
+          <div class="small job-flow-meta">Project #${escapeHtml(projectNumberForJob(job))}</div>
           <div class="small job-flow-meta">Material: ${escapeHtml(job?.material || "—")}</div>
           <div class="small job-flow-meta">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div>
           <div class="small job-flow-meta">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div>
@@ -13271,7 +13279,7 @@ function renderJobs(){
         const folder = folderMap.get(key) || { id: key, name: "Category" };
         const projects = new Map();
         (byCategory.get(key) || []).forEach(job => {
-          const project = normalizeProjectNumber(job?.projectNumber) || "Unassigned";
+          const project = projectNumberForJob(job);
           if (!projects.has(project)) projects.set(project, []);
           projects.get(project).push(job);
         });
@@ -13295,7 +13303,7 @@ function renderJobs(){
       filtered.forEach(job => {
         const key = grouping === "job"
           ? String(job?.name || "Untitled job")
-          : (normalizeProjectNumber(job?.projectNumber) || "Unassigned");
+          : projectNumberForJob(job);
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(job);
       });
