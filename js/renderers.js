@@ -1193,12 +1193,36 @@ async function buildAttachmentPreview(file){
   const ext = extractAttachmentExtension(file?.name);
   if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)) return null;
   try {
-    const text = await file.text();
-    const previewSvg = renderCadPreviewDataUrl(text);
+    const bytes = await file.arrayBuffer();
+    const previewSvg = window.dxfPreview?.renderAnyToSvgDataUrl
+      ? window.dxfPreview.renderAnyToSvgDataUrl(bytes, file?.name || "")
+      : renderCadPreviewDataUrl(await file.text());
     if (!previewSvg) return { mode: "message", content: "2D preview unavailable for this file." };
     return { mode: "image", content: previewSvg };
   } catch (_err){
     return { mode: "message", content: "2D preview unavailable for this file." };
+  }
+}
+
+async function resolvePreviewFromReadableSource(file){
+  const ext = extractAttachmentExtension(file?.name);
+  const dataUrl = String(file?.dataUrl || "");
+  const url = String(file?.url || "");
+  const src = dataUrl || url;
+  if (!src) return false;
+  if (/^data:image\//i.test(src) || (/^https?:\/\//i.test(src) && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"].includes(ext))){
+    file.preview = { mode: "image", content: src };
+    return true;
+  }
+  if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)) return false;
+  try {
+    const bytes = await fetch(src).then(r => r.arrayBuffer());
+    const svg = window.dxfPreview.renderAnyToSvgDataUrl(bytes, file.name || "");
+    if (!svg) return false;
+    file.preview = { mode: "image", content: svg };
+    return true;
+  } catch (_err){
+    return false;
   }
 }
 
@@ -1316,21 +1340,29 @@ async function resolveLocalRootAttachmentPreview(file){
   if (file.preview && file.preview.mode === "image" && file.preview.content) return true;
   try {
     const cfg = readOneDriveJobConfig();
-    if (!cfg?.localRootSignature) return false;
-    if (file.localRootSignature && cfg.localRootSignature && file.localRootSignature !== cfg.localRootSignature){
-      return false;
+    const signaturesMatch = cfg?.localRootSignature
+      && (!file.localRootSignature || cfg.localRootSignature === file.localRootSignature);
+    if (signaturesMatch){
+      const localFile = await resolveLocalFileFromRelativePath(file.localRelativePath);
+      if (localFile){
+        const bytes = await localFile.arrayBuffer();
+        const svg = window.dxfPreview.renderAnyToSvgDataUrl(bytes, file.name || localFile.name || "");
+        if (svg){
+          file.preview = { mode: "image", content: svg };
+          return true;
+        }
+      }
     }
-    const localFile = await resolveLocalFileFromRelativePath(file.localRelativePath);
-    if (!localFile) return false;
-    const bytes = await localFile.arrayBuffer();
-    const svg = window.dxfPreview.renderAnyToSvgDataUrl(bytes, file.name || localFile.name || "");
-    if (!svg){
-      file.preview = file.preview || { mode: "message", content: "2D preview unavailable for this file." };
-      return false;
+    if (await resolvePreviewFromReadableSource(file)) return true;
+    if (file.driveId && file.itemId){
+      const remoteResolved = await resolveOneDriveAttachmentPreview(file);
+      if (remoteResolved) return true;
     }
-    file.preview = { mode: "image", content: svg };
-    return true;
+    file.preview = file.preview || { mode: "message", content: "2D preview unavailable for this file." };
+    return false;
   } catch (_err){
+    if (await resolvePreviewFromReadableSource(file)) return true;
+    if (file.driveId && file.itemId) return resolveOneDriveAttachmentPreview(file);
     return false;
   }
 }
@@ -14255,6 +14287,8 @@ function renderJobs(){
         return false;
       }
       const file = await fileHandle.getFile();
+      const fileBytes = await file.arrayBuffer();
+      const previewSvg = window.dxfPreview.renderAnyToSvgDataUrl(fileBytes, file.name || "");
       const ext = extractAttachmentExtension(file.name || "");
       if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)){
         toast("Only DXF, ORD, or OMX files can be attached from OneDrive root.");
@@ -14271,6 +14305,7 @@ function renderJobs(){
         localRootName: getSharedConfig().localRootName || rootHandle.name || "",
         localRootSignature: signature,
         localDeviceId: getLocalDeviceId(),
+        preview: previewSvg ? { mode: "image", content: previewSvg } : null,
         addedAt: new Date().toISOString()
       });
       toast("File attached from this computer OneDrive root.");
@@ -14342,6 +14377,8 @@ function renderJobs(){
         return false;
       }
       const file = await fileHandle.getFile();
+      const fileBytes = await file.arrayBuffer();
+      const previewSvg = window.dxfPreview.renderAnyToSvgDataUrl(fileBytes, file.name || "");
       const ext = extractAttachmentExtension(file.name || "");
       if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)){
         toast("Only DXF, ORD, or OMX files can be attached from OneDrive root.");
@@ -14358,6 +14395,7 @@ function renderJobs(){
         localRootName: getSharedConfig().localRootName || rootHandle.name || "",
         localRootSignature: signature,
         localDeviceId: getLocalDeviceId(),
+        preview: previewSvg ? { mode: "image", content: previewSvg } : null,
         addedAt: new Date().toISOString()
       });
       saveCloudDebounced();
