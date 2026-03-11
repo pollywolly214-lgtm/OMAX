@@ -806,6 +806,402 @@ function editingCompletedJobsSet(){
   return window.editingCompletedJobs;
 }
 
+const CAD_PREVIEWABLE_EXTENSIONS = new Set([".dxf", ".ord", ".omx"]);
+const JOB_ONEDRIVE_CONFIG_KEY = "cutting_job_onedrive_config_v1";
+const JOB_ONEDRIVE_LIBRARY_KEY = "cutting_job_onedrive_library_v1";
+const JOB_ONEDRIVE_LOCAL_ROOT_DB = "cutting_job_onedrive_local_root_db";
+const JOB_ONEDRIVE_LOCAL_ROOT_STORE = "handles";
+const JOB_ONEDRIVE_LOCAL_ROOT_KEY = "root";
+const JOB_ONEDRIVE_DEVICE_ID_KEY = "cutting_job_onedrive_device_id_v1";
+
+
+function getLocalDeviceId(){
+  if (typeof window === "undefined" || !window.localStorage) return "";
+  let id = String(window.localStorage.getItem(JOB_ONEDRIVE_DEVICE_ID_KEY) || "").trim();
+  if (id) return id;
+  id = `device_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  try { window.localStorage.setItem(JOB_ONEDRIVE_DEVICE_ID_KEY, id); } catch (_err){ }
+  return id;
+}
+
+function supportsLocalRootPicker(){
+  return typeof window !== "undefined"
+    && typeof window.showDirectoryPicker === "function"
+    && typeof window.showOpenFilePicker === "function"
+    && typeof window.indexedDB !== "undefined";
+}
+
+function openOneDriveRootDb(){
+  return new Promise((resolve, reject)=>{
+    try {
+      const req = window.indexedDB.open(JOB_ONEDRIVE_LOCAL_ROOT_DB, 1);
+      req.onupgradeneeded = ()=>{
+        const db = req.result;
+        if (!db.objectStoreNames.contains(JOB_ONEDRIVE_LOCAL_ROOT_STORE)){
+          db.createObjectStore(JOB_ONEDRIVE_LOCAL_ROOT_STORE);
+        }
+      };
+      req.onsuccess = ()=> resolve(req.result);
+      req.onerror = ()=> reject(req.error || new Error("Failed opening local root database"));
+    } catch (err){ reject(err); }
+  });
+}
+
+async function saveLocalRootHandle(handle){
+  if (!supportsLocalRootPicker()) return false;
+  const db = await openOneDriveRootDb();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(JOB_ONEDRIVE_LOCAL_ROOT_STORE, "readwrite");
+    tx.objectStore(JOB_ONEDRIVE_LOCAL_ROOT_STORE).put(handle, JOB_ONEDRIVE_LOCAL_ROOT_KEY);
+    tx.oncomplete = ()=>{ db.close(); resolve(true); };
+    tx.onerror = ()=>{ db.close(); reject(tx.error || new Error("Failed saving local root handle")); };
+  });
+}
+
+async function readLocalRootHandle(){
+  if (!supportsLocalRootPicker()) return null;
+  const db = await openOneDriveRootDb();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(JOB_ONEDRIVE_LOCAL_ROOT_STORE, "readonly");
+    const req = tx.objectStore(JOB_ONEDRIVE_LOCAL_ROOT_STORE).get(JOB_ONEDRIVE_LOCAL_ROOT_KEY);
+    req.onsuccess = ()=>{ db.close(); resolve(req.result || null); };
+    req.onerror = ()=>{ db.close(); reject(req.error || new Error("Failed reading local root handle")); };
+  });
+}
+
+async function computeLocalRootSignature(handle){
+  if (!handle || typeof handle.entries !== "function") return "";
+  const parts = [];
+  let count = 0;
+  try {
+    for await (const [name, entry] of handle.entries()){
+      parts.push(`${entry.kind}:${String(name || "").toLowerCase()}`);
+      count += 1;
+      if (count >= 200) break;
+    }
+  } catch (_err){
+    return "";
+  }
+  parts.sort();
+  const seed = `${String(handle.name || "")}|${parts.join("|")}`;
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1){
+    hash ^= seed.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return `root_${(hash >>> 0).toString(16)}`;
+}
+
+function expectedRootSignatureFromJobs(){
+  const signatures = new Set();
+  const take = list=>{
+    if (!Array.isArray(list)) return;
+    list.forEach(job=>{
+      const files = Array.isArray(job?.files) ? job.files : [];
+      files.forEach(file=>{
+        const sig = String(file?.localRootSignature || "").trim();
+        if (sig) signatures.add(sig);
+      });
+    });
+  };
+  take(window.cuttingJobs);
+  take(window.completedJobs);
+  return signatures.size ? Array.from(signatures)[0] : "";
+}
+
+function verifyRootSignatureMatches(signature){
+  const expected = expectedRootSignatureFromJobs();
+  if (!expected || !signature) return { ok: true, expected };
+  return { ok: expected === signature, expected };
+}
+
+async function resolveLocalFileFromRelativePath(relativePath){
+  const rootHandle = await readLocalRootHandle();
+  if (!rootHandle) return null;
+  const rel = String(relativePath || "").replace(/^\/+/, "");
+  if (!rel) return null;
+  const segments = rel.split("/").filter(Boolean);
+  if (!segments.length) return null;
+  let dir = rootHandle;
+  for (let idx = 0; idx < segments.length - 1; idx += 1){
+    dir = await dir.getDirectoryHandle(segments[idx]);
+  }
+  const fileHandle = await dir.getFileHandle(segments[segments.length - 1]);
+  return fileHandle.getFile();
+}
+
+function triggerFileDownload(file, fileName){
+  const blob = new Blob([file], { type: file.type || "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName || file.name || "download";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=> URL.revokeObjectURL(url), 5000);
+}
+
+function normalizeOneDriveJobConfig(config){
+  const source = config && typeof config === "object" ? config : {};
+  return {
+    enabled: source.enabled === true,
+    folderHint: typeof source.folderHint === "string" ? source.folderHint.trim() : "",
+    rootDriveId: typeof source.rootDriveId === "string" ? source.rootDriveId : "",
+    rootFolderItemId: typeof source.rootFolderItemId === "string" ? source.rootFolderItemId : "",
+    rootName: typeof source.rootName === "string" ? source.rootName : "",
+    rootWebUrl: typeof source.rootWebUrl === "string" ? source.rootWebUrl : "",
+    localRootName: typeof source.localRootName === "string" ? source.localRootName : "",
+    localRootSignature: typeof source.localRootSignature === "string" ? source.localRootSignature : "",
+    sharedFolderUrl: typeof source.sharedFolderUrl === "string" ? source.sharedFolderUrl.trim() : "",
+    shareToken: typeof source.shareToken === "string" ? source.shareToken : "",
+    accessToken: typeof source.accessToken === "string" ? source.accessToken : "",
+    accessTokenExpiresAt: typeof source.accessTokenExpiresAt === "string" ? source.accessTokenExpiresAt : "",
+    lastLinkedAt: typeof source.lastLinkedAt === "string" ? source.lastLinkedAt : ""
+  };
+}
+
+function readOneDriveJobConfig(){
+  if (typeof window === "undefined" || !window.localStorage) return normalizeOneDriveJobConfig(null);
+  try {
+    const raw = window.localStorage.getItem(JOB_ONEDRIVE_CONFIG_KEY);
+    if (!raw) return normalizeOneDriveJobConfig(null);
+    return normalizeOneDriveJobConfig(JSON.parse(raw));
+  } catch (_err){
+    return normalizeOneDriveJobConfig(null);
+  }
+}
+
+function writeOneDriveJobConfig(config){
+  const normalized = normalizeOneDriveJobConfig(config);
+  if (typeof window !== "undefined") window.oneDriveJobConfig = normalized;
+  if (typeof window === "undefined" || !window.localStorage) return normalized;
+  try {
+    window.localStorage.setItem(JOB_ONEDRIVE_CONFIG_KEY, JSON.stringify(normalized));
+  } catch (_err){ }
+  return normalized;
+}
+
+if (typeof window !== "undefined"){
+  window.getOneDriveJobConfig = ()=> normalizeOneDriveJobConfig(window.oneDriveJobConfig || readOneDriveJobConfig());
+  if (!window.oneDriveJobConfig) window.oneDriveJobConfig = readOneDriveJobConfig();
+}
+
+function normalizeOneDriveLibraryEntry(entry){
+  const source = entry && typeof entry === "object" ? entry : {};
+  const id = typeof source.id === "string" && source.id ? source.id : genId(source.name || source.fileName || "onedrive_file");
+  const name = typeof source.name === "string" && source.name.trim()
+    ? source.name.trim()
+    : (typeof source.fileName === "string" ? source.fileName.trim() : "Linked file");
+  const url = typeof source.url === "string" ? source.url.trim() : "";
+  const previewUrl = typeof source.previewUrl === "string" ? source.previewUrl.trim() : "";
+  const driveId = typeof source.driveId === "string" ? source.driveId : "";
+  const itemId = typeof source.itemId === "string" ? source.itemId : "";
+  const eTag = typeof source.eTag === "string" ? source.eTag : "";
+  const lastModifiedDateTime = typeof source.lastModifiedDateTime === "string" ? source.lastModifiedDateTime : "";
+  const webUrl = typeof source.webUrl === "string" ? source.webUrl : "";
+  return { id, name, fileName: name, url, previewUrl, source: "onedrive", driveId, itemId, eTag, lastModifiedDateTime, webUrl, addedAt: typeof source.addedAt === "string" ? source.addedAt : new Date().toISOString() };
+}
+
+function readOneDriveJobLibrary(){
+  if (typeof window === "undefined" || !window.localStorage) return [];
+  try {
+    const raw = window.localStorage.getItem(JOB_ONEDRIVE_LIBRARY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeOneDriveLibraryEntry).filter(item => item.url);
+  } catch (_err){
+    return [];
+  }
+}
+
+function writeOneDriveJobLibrary(list){
+  const normalized = Array.isArray(list) ? list.map(normalizeOneDriveLibraryEntry).filter(item => item.url) : [];
+  if (typeof window !== "undefined") window.oneDriveJobLibrary = normalized;
+  if (typeof window === "undefined" || !window.localStorage) return normalized;
+  try {
+    window.localStorage.setItem(JOB_ONEDRIVE_LIBRARY_KEY, JSON.stringify(normalized));
+  } catch (_err){ }
+  return normalized;
+}
+
+if (typeof window !== "undefined"){
+  window.getOneDriveJobLibrary = ()=> Array.isArray(window.oneDriveJobLibrary)
+    ? window.oneDriveJobLibrary.map(normalizeOneDriveLibraryEntry)
+    : readOneDriveJobLibrary();
+  if (!Array.isArray(window.oneDriveJobLibrary)) window.oneDriveJobLibrary = readOneDriveJobLibrary();
+}
+
+function suggestedOneDriveFileUrl(fileName){
+  const cfg = (typeof window !== "undefined" && typeof window.getOneDriveJobConfig === "function")
+    ? window.getOneDriveJobConfig()
+    : normalizeOneDriveJobConfig(null);
+  const base = "";
+  if (!base) return "";
+  const slash = base.endsWith("/") ? "" : "/";
+  return `${base}${slash}${encodeURIComponent(String(fileName || "attachment"))}`;
+}
+
+function promptOneDriveLinkForFile(fileName, existingUrl = ""){
+  const suggestion = suggestedOneDriveFileUrl(fileName);
+  const initial = String(existingUrl || suggestion || "");
+  const next = window.prompt
+    ? window.prompt(`Paste a secure OneDrive URL for "${fileName || "attachment"}"`, initial)
+    : initial;
+  if (next == null) return null;
+  const url = String(next).trim();
+  if (!url) return "";
+  if (!/^https:\/\//i.test(url)){
+    toast("Please provide a full https:// OneDrive URL.");
+    return null;
+  }
+  return url;
+}
+
+async function connectOneDriveInteractive(config){
+  const cfg = normalizeOneDriveJobConfig(config);
+  if (!(window.ONE_DRIVE_CLIENT_ID && String(window.ONE_DRIVE_CLIENT_ID).trim())){
+    throw new Error("Missing ONE_DRIVE_CLIENT_ID in app configuration.");
+  }
+  await window.oneDriveAuth.signIn(["User.Read", "Files.Read"]);
+  const accessToken = await window.oneDriveAuth.getAccessToken(["User.Read", "Files.Read"]);
+  return {
+    accessToken,
+    accessTokenExpiresAt: new Date(Date.now() + (55 * 60 * 1000)).toISOString()
+  };
+}
+
+function oneDriveTokenValid(config){
+  const token = String(config?.accessToken || "");
+  const exp = Date.parse(String(config?.accessTokenExpiresAt || ""));
+  if (!token) return false;
+  if (!Number.isFinite(exp)) return true;
+  return exp > Date.now();
+}
+
+function encodeGraphPath(path){
+  const clean = String(path || "").trim().replace(/^\/+|\/+$/g, "");
+  if (!clean) return "";
+  return clean.split("/").map(part => encodeURIComponent(part)).join("/");
+}
+
+async function fetchOneDriveFolderLibrary(config){
+  const cfg = normalizeOneDriveJobConfig(config);
+  if (!cfg.folderPath) throw new Error("Set OneDrive folder path first.");
+  const path = encodeGraphPath(cfg.folderPath);
+  const endpoint = `https://graph.microsoft.com/v1.0/me/drive/root:/${path}:/children?$top=200&$select=id,name,webUrl,file,folder,@microsoft.graph.downloadUrl`;
+  const res = await fetch(endpoint, { method: "GET", headers: { Authorization: `Bearer ${cfg.accessToken}` } });
+  if (!res.ok){
+    throw new Error(`Unable to open OneDrive folder (${res.status}). Ensure the folder link is shared and accessible.`);
+  }
+  const payload = await res.json();
+  const items = Array.isArray(payload?.value) ? payload.value : [];
+  const files = items.filter(item => item && !item.folder && item.file);
+  return files.map(item => ({
+    id: String(item.id || genId(item.name || "onedrive_file")),
+    name: String(item.name || "Linked file"),
+    fileName: String(item.name || "Linked file"),
+    url: String(item["@microsoft.graph.downloadUrl"] || item.webUrl || "").trim(),
+    previewUrl: "",
+    source: "onedrive",
+    addedAt: new Date().toISOString()
+  })).filter(entry => entry.url);
+}
+
+function extractAttachmentExtension(filename){
+  const name = String(filename || "");
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0 || dot === name.length - 1) return "";
+  return name.slice(dot).toLowerCase();
+}
+
+function parseCadSegmentsForPreview(text){
+  const lines = String(text || "").split(/\r?\n/);
+  const pairs = [];
+  for (let i = 0; i < lines.length; i += 2){
+    const code = Number.parseInt(String(lines[i] || "").trim(), 10);
+    if (!Number.isFinite(code)) continue;
+    pairs.push({ code, value: String(lines[i + 1] || "").trim() });
+  }
+  const entities = [];
+  let section = "";
+  let current = null;
+  for (let i = 0; i < pairs.length; i += 1){
+    const pair = pairs[i];
+    if (pair.code !== 0){
+      if (current) current.data.push(pair);
+      continue;
+    }
+    const marker = pair.value.toUpperCase();
+    if (marker === "SECTION"){
+      const namePair = pairs[i + 1];
+      if (namePair?.code === 2){
+        section = namePair.value.toUpperCase();
+        i += 1;
+      }
+      continue;
+    }
+    if (marker === "ENDSEC"){
+      section = "";
+      current = null;
+      continue;
+    }
+    if (section !== "ENTITIES") continue;
+    if (current) entities.push(current);
+    current = { type: marker, data: [] };
+  }
+  if (current) entities.push(current);
+  const segments = [];
+  entities.forEach(entity => {
+    const fields = new Map();
+    entity.data.forEach(item => fields.set(item.code, Number.parseFloat(item.value)));
+    if (entity.type === "LINE"){
+      const x1 = fields.get(10); const y1 = fields.get(20);
+      const x2 = fields.get(11); const y2 = fields.get(21);
+      if ([x1, y1, x2, y2].every(Number.isFinite)) segments.push({ x1, y1, x2, y2 });
+    }
+  });
+  return segments;
+}
+
+function renderCadPreviewDataUrl(text){
+  const segments = parseCadSegmentsForPreview(text);
+  if (!segments.length) return "";
+  const bounds = segments.reduce((acc, item) => {
+    acc.minX = Math.min(acc.minX, item.x1, item.x2);
+    acc.maxX = Math.max(acc.maxX, item.x1, item.x2);
+    acc.minY = Math.min(acc.minY, item.y1, item.y2);
+    acc.maxY = Math.max(acc.maxY, item.y1, item.y2);
+    return acc;
+  }, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+  const width = Math.max(1, bounds.maxX - bounds.minX);
+  const height = Math.max(1, bounds.maxY - bounds.minY);
+  const pad = Math.max(width, height) * 0.08;
+  const vbX = bounds.minX - pad;
+  const vbY = bounds.minY - pad;
+  const vbW = width + (pad * 2);
+  const vbH = height + (pad * 2);
+  const paths = segments
+    .map(item => `<line x1="${item.x1}" y1="${-item.y1}" x2="${item.x2}" y2="${-item.y2}"/>`)
+    .join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${-(vbY + vbH)} ${vbW} ${vbH}"><rect x="${vbX}" y="${-(vbY + vbH)}" width="${vbW}" height="${vbH}" fill="#ffffff"/><g stroke="#32407a" stroke-width="${Math.max(vbW, vbH) / 450}" fill="none" stroke-linecap="round">${paths}</g></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+async function buildAttachmentPreview(file){
+  const ext = extractAttachmentExtension(file?.name);
+  if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)) return null;
+  try {
+    const text = await file.text();
+    const previewSvg = renderCadPreviewDataUrl(text);
+    if (!previewSvg) return { mode: "message", content: "2D preview unavailable for this file." };
+    return { mode: "image", content: previewSvg };
+  } catch (_err){
+    return { mode: "message", content: "2D preview unavailable for this file." };
+  }
+}
+
 function readFileAsDataUrl(file){
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
@@ -825,12 +1221,15 @@ async function filesToAttachments(fileList){
   for (const file of files){
     try {
       const dataUrl = await readFileAsDataUrl(file);
+      const preview = await buildAttachmentPreview(file);
       attachments.push({
         id: genId(file.name || "job_file"),
         name: file.name || "Attachment",
         type: file.type || "",
         size: typeof file.size === "number" ? file.size : null,
         dataUrl,
+        preview,
+        source: "upload",
         addedAt: new Date().toISOString()
       });
     } catch (err){
@@ -839,6 +1238,78 @@ async function filesToAttachments(fileList){
     }
   }
   return attachments;
+}
+
+const JOB_ONEDRIVE_PREVIEW_CACHE_KEY = "cutting_job_onedrive_preview_cache_v1";
+const oneDrivePreviewInFlight = new Map();
+
+function readOneDrivePreviewCache(){
+  if (typeof window === "undefined" || !window.localStorage) return {};
+  try {
+    const raw = window.localStorage.getItem(JOB_ONEDRIVE_PREVIEW_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_err){ return {}; }
+}
+
+function writeOneDrivePreviewCache(cache){
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try { window.localStorage.setItem(JOB_ONEDRIVE_PREVIEW_CACHE_KEY, JSON.stringify(cache || {})); } catch (_err){ }
+}
+
+function previewCacheKey(file){
+  const driveId = String(file?.driveId || "");
+  const itemId = String(file?.itemId || "");
+  const eTag = String(file?.eTag || "");
+  if (!driveId || !itemId) return "";
+  return `${driveId}:${itemId}:${eTag}`;
+}
+
+async function resolveOneDriveAttachmentPreview(file){
+  if (!file || !file.driveId || !file.itemId) return false;
+  if (file.preview && file.preview.mode === "image" && file.preview.content) return true;
+  const inFlightKey = `${file.driveId}:${file.itemId}`;
+  if (oneDrivePreviewInFlight.has(inFlightKey)) return oneDrivePreviewInFlight.get(inFlightKey);
+
+  const task = (async ()=>{
+    try {
+      const metadata = await window.oneDriveGraph.getDriveItemMetadata(file.driveId, file.itemId);
+      if (metadata){
+        file.eTag = metadata.eTag || file.eTag || "";
+        file.lastModifiedDateTime = metadata.lastModifiedDateTime || file.lastModifiedDateTime || "";
+        file.webUrl = metadata.webUrl || file.webUrl || "";
+        file.url = file.url || metadata.webUrl || "";
+      }
+      const cache = readOneDrivePreviewCache();
+      const key = previewCacheKey(file);
+      if (key && cache[key]){
+        file.preview = { mode: "image", content: cache[key] };
+        return true;
+      }
+      const bytes = await window.oneDriveGraph.getDriveItemContentArrayBuffer(file.driveId, file.itemId);
+      const text = window.dxfPreview.arrayBufferToText(bytes);
+      const svg = window.dxfPreview.renderCadToSvgDataUrl(text);
+      if (!svg){
+        file.preview = { mode: "message", content: "2D preview unavailable for this file." };
+        return false;
+      }
+      file.preview = { mode: "image", content: svg };
+      if (key){
+        cache[key] = svg;
+        writeOneDrivePreviewCache(cache);
+      }
+      return true;
+    } catch (_err){
+      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this OneDrive file." };
+      return false;
+    } finally {
+      oneDrivePreviewInFlight.delete(inFlightKey);
+    }
+  })();
+
+  oneDrivePreviewInFlight.set(inFlightKey, task);
+  return task;
 }
 
 function captureNewJobFormState(){
@@ -12828,9 +13299,46 @@ function renderJobs(){
     window.__cleanupJobFileMenus = null;
   }
 
+  const floatingOneDriveModal = document.body?.querySelector("#jobOneDriveModal[data-floating='1']");
+  if (floatingOneDriveModal){
+    try { floatingOneDriveModal.remove(); } catch (_err) { /* noop */ }
+  }
+  const floatingOneDriveExplorerModal = document.body?.querySelector("#jobOneDriveExplorerModal[data-floating='1']");
+  if (floatingOneDriveExplorerModal){
+    try { floatingOneDriveExplorerModal.remove(); } catch (_err) { /* noop */ }
+  }
+
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
   setupJobLayout();
+
+  const inlineOneDriveModal = content.querySelector("#jobOneDriveModal");
+  if (inlineOneDriveModal && inlineOneDriveModal.parentElement !== document.body){
+    inlineOneDriveModal.dataset.floating = "1";
+    document.body.appendChild(inlineOneDriveModal);
+  }
+  const inlineOneDriveExplorerModal = content.querySelector("#jobOneDriveExplorerModal");
+  if (inlineOneDriveExplorerModal && inlineOneDriveExplorerModal.parentElement !== document.body){
+    inlineOneDriveExplorerModal.dataset.floating = "1";
+    document.body.appendChild(inlineOneDriveExplorerModal);
+  }
+
+  const queueOneDrivePreviewHydration = ()=>{
+    const allJobs = [];
+    if (Array.isArray(cuttingJobs)) allJobs.push(...cuttingJobs);
+    if (Array.isArray(completedCuttingJobs)) allJobs.push(...completedCuttingJobs);
+    const files = allJobs.flatMap(job => Array.isArray(job?.files) ? job.files : []);
+    const targets = files.filter(file => file && file.source === "onedrive" && file.driveId && file.itemId && !(file.preview && file.preview.content));
+    if (!targets.length) return;
+    Promise.allSettled(targets.map(resolveOneDriveAttachmentPreview)).then((results)=>{
+      const changed = results.some(r => r.status === "fulfilled" && r.value === true);
+      if (changed){
+        saveCloudDebounced();
+        renderJobs();
+      }
+    });
+  };
+  queueOneDrivePreviewHydration();
 
   const jobOverlapMessage = "Jobs might be overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
   const jobTableEl = content.querySelector(".job-table");
@@ -13585,6 +14093,209 @@ function renderJobs(){
   const addFormToggle = content.querySelector("[data-job-add-toggle]");
   const newFilesBtn = document.getElementById("jobFilesBtn");
   const newFilesInput = document.getElementById("jobFiles");
+  const oneDriveSetupBtn = content.querySelector("[data-job-onedrive-setup]");
+  const oneDriveModal = document.querySelector("#jobOneDriveModal");
+  const oneDriveFolderHintInput = document.querySelector("#jobOneDriveFolderHint");
+  const oneDriveEnabledInput = document.querySelector("#jobOneDriveEnabled");
+  const oneDriveSaveBtn = document.querySelector("[data-onedrive-save]");
+  const oneDriveCancelBtns = Array.from(document.querySelectorAll("[data-onedrive-cancel]"));
+  const oneDriveConnStatus = document.querySelector("[data-onedrive-connection-status]");
+  const oneDriveFolderStatus = document.querySelector("[data-onedrive-folder-status]");
+  const oneDriveLibraryStatus = document.querySelector("[data-onedrive-library-status]");
+  const oneDriveRootStatus = document.querySelector("[data-onedrive-root-status]");
+  const oneDriveDeviceStatus = document.querySelector("[data-onedrive-device-status]");
+  const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
+  const oneDriveRootPickerBtn = document.getElementById("jobOneDriveRootPickerBtn");
+
+
+  const getSharedConfig = ()=>{
+    const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : normalizeOneDriveJobConfig(null);
+    return {
+      enabled: !!cfg?.enabled,
+      folderHint: String(cfg?.folderHint || ""),
+      localRootName: String(cfg?.localRootName || ""),
+      localRootSignature: String(cfg?.localRootSignature || "")
+    };
+  };
+
+  const updateSharedConfig = (patch)=>{
+    const cfg = getSharedConfig();
+    return writeOneDriveJobConfig({ ...cfg, ...patch });
+  };
+
+  const updateOneDriveWizardStatus = async ()=>{
+    const cfg = getSharedConfig();
+    if (oneDriveConnStatus) oneDriveConnStatus.textContent = cfg.localRootSignature ? "Configured" : "Not set";
+    if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = cfg.localRootSignature ? "Verified" : "Not ready";
+    if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = cfg.localRootSignature ? "Ready" : "Setup required";
+    if (oneDriveRootStatus){
+      oneDriveRootStatus.textContent = cfg.localRootName || "Not set";
+    }
+    if (oneDriveDeviceStatus){
+      oneDriveDeviceStatus.textContent = getLocalDeviceId() || "Unavailable";
+    }
+  };
+
+  const chooseLocalOneDriveRoot = async ()=>{
+    if (!supportsLocalRootPicker()){
+      toast("This browser does not support saved OneDrive root folder access.");
+      return false;
+    }
+    try {
+      const handle = await window.showDirectoryPicker({ mode: "read" });
+      const perm = await handle.requestPermission({ mode: "read" });
+      if (perm !== "granted"){
+        toast("Folder access was not granted.");
+        return false;
+      }
+      const signature = await computeLocalRootSignature(handle);
+      if (!signature){
+        toast("Unable to verify the selected folder.");
+        return false;
+      }
+      const match = verifyRootSignatureMatches(signature);
+      if (!match.ok){
+        toast("This folder does not match files already attached by other computers. Select the same shared root folder.");
+        return false;
+      }
+      await saveLocalRootHandle(handle);
+      const cfg = getSharedConfig();
+      updateSharedConfig({
+        localRootName: String(handle.name || cfg.localRootName || "Configured"),
+        localRootSignature: signature
+      });
+      await updateOneDriveWizardStatus();
+      toast("This computer OneDrive root folder saved and verified.");
+      return true;
+    } catch (err){
+      if (err?.name !== "AbortError"){
+        toast(err?.message || "Unable to save local OneDrive root folder.");
+      }
+      return false;
+    }
+  };
+
+  const attachFromLocalOneDriveRoot = async ()=>{
+    if (!supportsLocalRootPicker()){
+      toast("This browser does not support local root folder attach.");
+      return false;
+    }
+    const rootHandle = await readLocalRootHandle();
+    if (!rootHandle){
+      toast("Root folder is not set on this computer. Open OneDrive setup and choose the root folder first.");
+      openOneDriveModal();
+      return false;
+    }
+
+    try {
+      const cfg = getSharedConfig();
+      const signature = cfg.localRootSignature || await computeLocalRootSignature(rootHandle);
+      if (!signature){
+        toast("Unable to verify local OneDrive root folder.");
+        return false;
+      }
+      const match = verifyRootSignatureMatches(signature);
+      if (!match.ok){
+        toast("Local root folder mismatch. Please pick the same shared root as other computers.");
+        return false;
+      }
+      if (!cfg.localRootSignature || cfg.localRootSignature !== signature){
+        updateSharedConfig({ localRootSignature: signature, localRootName: cfg.localRootName || String(rootHandle.name || "") });
+      }
+
+      const perm = await rootHandle.requestPermission({ mode: "read" });
+      if (perm !== "granted"){
+        toast("Root folder permission is required to attach from this computer.");
+        return false;
+      }
+      const pickedHandles = await window.showOpenFilePicker({
+        multiple: false,
+        startIn: rootHandle,
+        types: [{
+          description: "CAD files",
+          accept: {
+            "application/octet-stream": [".dxf", ".ord", ".omx"],
+            "text/plain": [".dxf", ".ord", ".omx"]
+          }
+        }]
+      });
+      const fileHandle = Array.isArray(pickedHandles) ? pickedHandles[0] : null;
+      if (!fileHandle) return false;
+      const rel = await rootHandle.resolve(fileHandle);
+      if (!Array.isArray(rel)){
+        toast("Selected file must come from the configured root folder.");
+        return false;
+      }
+      const file = await fileHandle.getFile();
+      const ext = extractAttachmentExtension(file.name || "");
+      if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)){
+        toast("Only DXF, ORD, or OMX files can be attached from OneDrive root.");
+        return false;
+      }
+      const relPath = `/${rel.join("/")}`;
+      pendingNewJobFiles.push({
+        id: genId(file.name || "job_file"),
+        name: file.name || "Attachment",
+        type: file.type || "",
+        size: typeof file.size === "number" ? file.size : null,
+        source: "onedrive_local_root",
+        localRelativePath: relPath,
+        localRootName: getSharedConfig().localRootName || rootHandle.name || "",
+        localRootSignature: signature,
+        localDeviceId: getLocalDeviceId(),
+        addedAt: new Date().toISOString()
+      });
+      toast("File attached from this computer OneDrive root.");
+      renderJobs();
+      return true;
+    } catch (err){
+      if (err?.name !== "AbortError"){
+        toast(err?.message || "Unable to attach from this computer root folder.");
+      }
+      return false;
+    }
+  };
+
+  const closeOneDriveModal = ()=>{
+    if (!oneDriveModal) return;
+    oneDriveModal.setAttribute("hidden", "");
+    document.body.classList.remove("modal-open");
+  };
+  const openOneDriveModal = ()=>{
+    if (!oneDriveModal) return;
+    oneDriveModal.removeAttribute("hidden");
+    document.body.classList.add("modal-open");
+    updateOneDriveWizardStatus();
+  };
+
+  oneDriveSetupBtn?.addEventListener("click", ()=>{
+    closeFileMenu(); closeActionMenu(); closeHistoryActionMenu(); openOneDriveModal();
+  });
+  oneDriveRootPickerBtn?.addEventListener("click", async ()=>{
+    await chooseLocalOneDriveRoot();
+  });
+  oneDriveCancelBtns.forEach(btn => btn.addEventListener("click", closeOneDriveModal));
+  oneDriveModal?.addEventListener("click", (event)=>{ if (event.target === oneDriveModal) closeOneDriveModal(); });
+
+  oneDriveSaveBtn?.addEventListener("click", ()=>{
+    const cfg = getSharedConfig();
+    const next = updateSharedConfig({
+      enabled: !!oneDriveEnabledInput?.checked,
+      folderHint: String(oneDriveFolderHintInput?.value || cfg.folderHint || "")
+    });
+    closeOneDriveModal();
+    toast(next.enabled ? "OneDrive root setup saved for this computer" : "OneDrive setup saved (disabled)");
+    renderJobs();
+  });
+
+  oneDriveLibraryAddToJobBtn?.addEventListener("click", async ()=>{
+    const attached = await attachFromLocalOneDriveRoot();
+    if (!attached){
+      openOneDriveModal();
+    }
+  });
+
+  updateOneDriveWizardStatus();
 
   addFormToggle?.addEventListener("click", ()=>{
     const formState = captureNewJobFormState();
@@ -14108,6 +14819,42 @@ function renderJobs(){
 
   // 5) Inline material $/qty (kept)
   content.querySelector(".job-table tbody")?.addEventListener("change", async (e)=>{
+    const previewSelect = e.target instanceof Element
+      ? e.target.closest("select[data-file-preview-select]")
+      : null;
+    if (previewSelect instanceof HTMLSelectElement){
+      const previewRoot = previewSelect.closest("[data-file-preview]");
+      if (!previewRoot) return;
+      const option = previewSelect.selectedOptions?.[0];
+      if (!option) return;
+      const name = option.getAttribute("data-preview-name") || option.textContent || "Attached file";
+      const mode = option.getAttribute("data-preview-mode") || "message";
+      const contentValue = option.getAttribute("data-preview-content") || "";
+      const href = option.getAttribute("data-preview-href") || "";
+      const nameEl = previewRoot.querySelector("[data-preview-name]");
+      const imgEl = previewRoot.querySelector("[data-preview-image]");
+      const msgEl = previewRoot.querySelector("[data-preview-message]");
+      const openEl = previewRoot.querySelector("[data-preview-open]");
+      if (nameEl){
+        nameEl.textContent = name;
+        nameEl.setAttribute("title", name);
+      }
+      if (imgEl instanceof HTMLImageElement){
+        imgEl.src = mode === "image" ? contentValue : "";
+        imgEl.alt = `Preview of ${name}`;
+        imgEl.hidden = mode !== "image";
+      }
+      if (msgEl){
+        msgEl.textContent = mode === "message" ? contentValue : "";
+        msgEl.hidden = mode !== "message";
+      }
+      if (openEl instanceof HTMLAnchorElement){
+        openEl.href = href;
+        openEl.hidden = !href;
+      }
+      return;
+    }
+
     const prioritySelect = e.target instanceof Element
       ? e.target.closest("select[data-job-priority-inline]")
       : null;
@@ -14136,6 +14883,81 @@ function renderJobs(){
   });
 
   const historyBody = content.querySelector(".past-jobs-table tbody");
+  historyBody?.addEventListener("change", (e)=>{
+    const previewSelect = e.target instanceof Element
+      ? e.target.closest("select[data-file-preview-select]")
+      : null;
+    if (!(previewSelect instanceof HTMLSelectElement)) return;
+    const previewRoot = previewSelect.closest("[data-file-preview]");
+    if (!previewRoot) return;
+    const option = previewSelect.selectedOptions?.[0];
+    if (!option) return;
+    const name = option.getAttribute("data-preview-name") || option.textContent || "Attached file";
+    const mode = option.getAttribute("data-preview-mode") || "message";
+    const contentValue = option.getAttribute("data-preview-content") || "";
+    const href = option.getAttribute("data-preview-href") || "";
+    const nameEl = previewRoot.querySelector("[data-preview-name]");
+    const imgEl = previewRoot.querySelector("[data-preview-image]");
+    const msgEl = previewRoot.querySelector("[data-preview-message]");
+    const openEl = previewRoot.querySelector("[data-preview-open]");
+    if (nameEl){
+      nameEl.textContent = name;
+      nameEl.setAttribute("title", name);
+    }
+    if (imgEl instanceof HTMLImageElement){
+      imgEl.src = mode === "image" ? contentValue : "";
+      imgEl.alt = `Preview of ${name}`;
+      imgEl.hidden = mode !== "image";
+    }
+    if (msgEl){
+      msgEl.textContent = mode === "message" ? contentValue : "";
+      msgEl.hidden = mode !== "message";
+    }
+    if (openEl instanceof HTMLAnchorElement){
+      openEl.href = href;
+      openEl.hidden = !href;
+    }
+  });
+
+  const openLocalRootAttachment = async (jobId, fileIndex)=>{
+    const id = String(jobId || "");
+    const idx = Number(fileIndex);
+    if (!id || !Number.isInteger(idx) || idx < 0) return false;
+    const sources = [Array.isArray(cuttingJobs) ? cuttingJobs : [], Array.isArray(completedJobs) ? completedJobs : []];
+    let file = null;
+    for (const list of sources){
+      const job = list.find(item => String(item?.id || "") === id);
+      if (!job) continue;
+      const files = Array.isArray(job.files) ? job.files : [];
+      file = files[idx] || null;
+      if (file) break;
+    }
+    if (!file || file.source !== "onedrive_local_root" || !file.localRelativePath){
+      toast("Local OneDrive reference not found for this file.");
+      return false;
+    }
+    try {
+      const cfg = getSharedConfig();
+      const currentSignature = cfg.localRootSignature;
+      if (file.localRootSignature && currentSignature && file.localRootSignature !== currentSignature){
+        toast("This computer is linked to a different root folder. Reconfigure this computer root folder.");
+        openOneDriveModal();
+        return false;
+      }
+      const fileBlob = await resolveLocalFileFromRelativePath(file.localRelativePath);
+      if (!fileBlob){
+        toast("Local root is missing or incorrect on this computer. Re-run OneDrive setup.");
+        openOneDriveModal();
+        return false;
+      }
+      triggerFileDownload(fileBlob, file.name || fileBlob.name || "attachment");
+      return true;
+    } catch (err){
+      toast(err?.message || "Unable to open file from local root folder.");
+      return false;
+    }
+  };
+
   historyBody?.addEventListener("click", async (e)=>{
     const historyActionTrigger = e.target.closest("[data-history-actions-toggle]");
     if (historyActionTrigger){
@@ -14158,6 +14980,13 @@ function renderJobs(){
         closeActionMenu();
         openFileMenu(id, historyFileTrigger);
       }
+      return;
+    }
+
+    const localFileBtn = e.target.closest("[data-open-local-file]");
+    if (localFileBtn){
+      e.preventDefault();
+      await openLocalRootAttachment(localFileBtn.getAttribute("data-job-id"), localFileBtn.getAttribute("data-file-index"));
       return;
     }
 
@@ -14484,7 +15313,7 @@ function renderJobs(){
   });
 
   // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
-  content.querySelector(".job-table tbody")?.addEventListener("click",(e)=>{
+  content.querySelector(".job-table tbody")?.addEventListener("click", async (e)=>{
     const overlapTrigger = e.target.closest("[data-job-overlap-info]");
     if (overlapTrigger){
       e.preventDefault();
@@ -14535,6 +15364,13 @@ function renderJobs(){
       return;
     }
 
+    const localFileBtn = e.target.closest("[data-open-local-file]");
+    if (localFileBtn){
+      e.preventDefault();
+      await openLocalRootAttachment(localFileBtn.getAttribute("data-job-id"), localFileBtn.getAttribute("data-file-index"));
+      return;
+    }
+
     if (openFileMenuId){
       const activeMenu = content.querySelector(`[data-job-file-menu="${openFileMenuId}"]`);
       const activeTrigger = openFileTrigger;
@@ -14582,6 +15418,55 @@ function renderJobs(){
       closeActionMenu();
       closeHistoryActionMenu();
       content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
+      return;
+    }
+
+    const linkJobFile = e.target.closest("[data-link-job-file]");
+    if (linkJobFile){
+      const id = linkJobFile.getAttribute("data-link-job-file");
+      const j = cuttingJobs.find(x=>x.id===id);
+      if (!j) return;
+      try {
+        const picked = await window.oneDrivePicker.openOneDriveDxfPicker();
+        if (!picked) return;
+        j.files = Array.isArray(j.files) ? j.files : [];
+        j.files.push({
+          id: genId(picked.fileName || "job_file"),
+          name: picked.fileName || "Linked file",
+          type: "",
+          size: null,
+          source: "onedrive",
+          driveId: picked.driveId || "",
+          itemId: picked.itemId || "",
+          eTag: picked.eTag || "",
+          lastModifiedDateTime: picked.lastModifiedDateTime || "",
+          webUrl: picked.webUrl || "",
+          url: picked.webUrl || "",
+          addedAt: new Date().toISOString()
+        });
+        saveCloudDebounced();
+        toast("OneDrive DXF linked");
+        renderJobs();
+      } catch (err){
+        toast(err?.message || "Unable to link OneDrive DXF.");
+      }
+      return;
+    }
+
+    const editFileLink = e.target.closest("[data-edit-file-link]");
+    if (editFileLink){
+      const id = editFileLink.getAttribute("data-edit-file-link");
+      const idx = Number(editFileLink.getAttribute("data-file-index"));
+      const j = cuttingJobs.find(x=>x.id===id);
+      const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null;
+      if (!file) return;
+      const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || "");
+      if (url == null) return;
+      file.url = url;
+      file.source = "onedrive";
+      saveCloudDebounced();
+      toast(url ? "File link updated" : "File link cleared");
+      renderJobs();
       return;
     }
 
