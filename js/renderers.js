@@ -812,6 +812,17 @@ const JOB_ONEDRIVE_LIBRARY_KEY = "cutting_job_onedrive_library_v1";
 const JOB_ONEDRIVE_LOCAL_ROOT_DB = "cutting_job_onedrive_local_root_db";
 const JOB_ONEDRIVE_LOCAL_ROOT_STORE = "handles";
 const JOB_ONEDRIVE_LOCAL_ROOT_KEY = "root";
+const JOB_ONEDRIVE_DEVICE_ID_KEY = "cutting_job_onedrive_device_id_v1";
+
+
+function getLocalDeviceId(){
+  if (typeof window === "undefined" || !window.localStorage) return "";
+  let id = String(window.localStorage.getItem(JOB_ONEDRIVE_DEVICE_ID_KEY) || "").trim();
+  if (id) return id;
+  id = `device_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  try { window.localStorage.setItem(JOB_ONEDRIVE_DEVICE_ID_KEY, id); } catch (_err){ }
+  return id;
+}
 
 function supportsLocalRootPicker(){
   return typeof window !== "undefined"
@@ -858,6 +869,79 @@ async function readLocalRootHandle(){
   });
 }
 
+async function computeLocalRootSignature(handle){
+  if (!handle || typeof handle.entries !== "function") return "";
+  const parts = [];
+  let count = 0;
+  try {
+    for await (const [name, entry] of handle.entries()){
+      parts.push(`${entry.kind}:${String(name || "").toLowerCase()}`);
+      count += 1;
+      if (count >= 200) break;
+    }
+  } catch (_err){
+    return "";
+  }
+  parts.sort();
+  const seed = `${String(handle.name || "")}|${parts.join("|")}`;
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1){
+    hash ^= seed.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return `root_${(hash >>> 0).toString(16)}`;
+}
+
+function expectedRootSignatureFromJobs(){
+  const signatures = new Set();
+  const take = list=>{
+    if (!Array.isArray(list)) return;
+    list.forEach(job=>{
+      const files = Array.isArray(job?.files) ? job.files : [];
+      files.forEach(file=>{
+        const sig = String(file?.localRootSignature || "").trim();
+        if (sig) signatures.add(sig);
+      });
+    });
+  };
+  take(window.cuttingJobs);
+  take(window.completedJobs);
+  return signatures.size ? Array.from(signatures)[0] : "";
+}
+
+function verifyRootSignatureMatches(signature){
+  const expected = expectedRootSignatureFromJobs();
+  if (!expected || !signature) return { ok: true, expected };
+  return { ok: expected === signature, expected };
+}
+
+async function resolveLocalFileFromRelativePath(relativePath){
+  const rootHandle = await readLocalRootHandle();
+  if (!rootHandle) return null;
+  const rel = String(relativePath || "").replace(/^\/+/, "");
+  if (!rel) return null;
+  const segments = rel.split("/").filter(Boolean);
+  if (!segments.length) return null;
+  let dir = rootHandle;
+  for (let idx = 0; idx < segments.length - 1; idx += 1){
+    dir = await dir.getDirectoryHandle(segments[idx]);
+  }
+  const fileHandle = await dir.getFileHandle(segments[segments.length - 1]);
+  return fileHandle.getFile();
+}
+
+function triggerFileDownload(file, fileName){
+  const blob = new Blob([file], { type: file.type || "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName || file.name || "download";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=> URL.revokeObjectURL(url), 5000);
+}
+
 function normalizeOneDriveJobConfig(config){
   const source = config && typeof config === "object" ? config : {};
   return {
@@ -868,6 +952,7 @@ function normalizeOneDriveJobConfig(config){
     rootName: typeof source.rootName === "string" ? source.rootName : "",
     rootWebUrl: typeof source.rootWebUrl === "string" ? source.rootWebUrl : "",
     localRootName: typeof source.localRootName === "string" ? source.localRootName : "",
+    localRootSignature: typeof source.localRootSignature === "string" ? source.localRootSignature : "",
     sharedFolderUrl: typeof source.sharedFolderUrl === "string" ? source.sharedFolderUrl.trim() : "",
     shareToken: typeof source.shareToken === "string" ? source.shareToken : "",
     accessToken: typeof source.accessToken === "string" ? source.accessToken : "",
@@ -14013,8 +14098,8 @@ function renderJobs(){
   const oneDriveFolderStatus = document.querySelector("[data-onedrive-folder-status]");
   const oneDriveLibraryStatus = document.querySelector("[data-onedrive-library-status]");
   const oneDriveRootStatus = document.querySelector("[data-onedrive-root-status]");
+  const oneDriveDeviceStatus = document.querySelector("[data-onedrive-device-status]");
   const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
-  const oneDriveLocalRootAddBtn = document.getElementById("jobOneDriveLocalRootBtn");
   const oneDriveRootPickerBtn = document.getElementById("jobOneDriveRootPickerBtn");
 
   const oneDriveExplorerModal = document.querySelector("#jobOneDriveExplorerModal");
@@ -14032,7 +14117,8 @@ function renderJobs(){
       enabled: !!cfg?.enabled,
       sharedFolderUrl: String(cfg?.sharedFolderUrl || ""),
       folderHint: String(cfg?.folderHint || ""),
-      localRootName: String(cfg?.localRootName || "")
+      localRootName: String(cfg?.localRootName || ""),
+      localRootSignature: String(cfg?.localRootSignature || "")
     };
   };
 
@@ -14043,12 +14129,14 @@ function renderJobs(){
 
   const updateOneDriveWizardStatus = async ()=>{
     const cfg = getSharedConfig();
-    const cache = window.oneDriveLibrary?.readCache?.() || null;
-    if (oneDriveConnStatus) oneDriveConnStatus.textContent = cfg.sharedFolderUrl ? "Configured" : "Not set";
-    if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = cache?.rootName || "Not ready";
-    if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = String(Array.isArray(cache?.flat) ? cache.flat.length : 0);
+    if (oneDriveConnStatus) oneDriveConnStatus.textContent = cfg.sharedFolderUrl ? "Configured" : "Optional";
+    if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = cfg.localRootSignature ? "Verified" : "Not ready";
+    if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = "Local mode";
     if (oneDriveRootStatus){
       oneDriveRootStatus.textContent = cfg.localRootName || "Not set";
+    }
+    if (oneDriveDeviceStatus){
+      oneDriveDeviceStatus.textContent = getLocalDeviceId() || "Unavailable";
     }
   };
 
@@ -14064,11 +14152,24 @@ function renderJobs(){
         toast("Folder access was not granted.");
         return false;
       }
+      const signature = await computeLocalRootSignature(handle);
+      if (!signature){
+        toast("Unable to verify the selected folder.");
+        return false;
+      }
+      const match = verifyRootSignatureMatches(signature);
+      if (!match.ok){
+        toast("This folder does not match files already attached by other computers. Select the same shared root folder.");
+        return false;
+      }
       await saveLocalRootHandle(handle);
       const cfg = getSharedConfig();
-      updateSharedConfig({ localRootName: String(handle.name || cfg.localRootName || "Configured") });
+      updateSharedConfig({
+        localRootName: String(handle.name || cfg.localRootName || "Configured"),
+        localRootSignature: signature
+      });
       await updateOneDriveWizardStatus();
-      toast("This computer OneDrive root folder saved.");
+      toast("This computer OneDrive root folder saved and verified.");
       return true;
     } catch (err){
       if (err?.name !== "AbortError"){
@@ -14092,6 +14193,21 @@ function renderJobs(){
     }
 
     try {
+      const cfg = getSharedConfig();
+      const signature = cfg.localRootSignature || await computeLocalRootSignature(rootHandle);
+      if (!signature){
+        toast("Unable to verify local OneDrive root folder.");
+        return false;
+      }
+      const match = verifyRootSignatureMatches(signature);
+      if (!match.ok){
+        toast("Local root folder mismatch. Please pick the same shared root as other computers.");
+        return false;
+      }
+      if (!cfg.localRootSignature || cfg.localRootSignature !== signature){
+        updateSharedConfig({ localRootSignature: signature, localRootName: cfg.localRootName || String(rootHandle.name || "") });
+      }
+
       const perm = await rootHandle.requestPermission({ mode: "read" });
       if (perm !== "granted"){
         toast("Root folder permission is required to attach from this computer.");
@@ -14116,10 +14232,24 @@ function renderJobs(){
         return false;
       }
       const file = await fileHandle.getFile();
-      const attachments = await filesToAttachments([file]);
-      if (!attachments.length) return false;
+      const ext = extractAttachmentExtension(file.name || "");
+      if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)){
+        toast("Only DXF, ORD, or OMX files can be attached from OneDrive root.");
+        return false;
+      }
       const relPath = `/${rel.join("/")}`;
-      pendingNewJobFiles.push(...attachments.map(item=>({ ...item, source: "onedrive_local_root", localRelativePath: relPath, localRootName: getSharedConfig().localRootName || rootHandle.name || "" })));
+      pendingNewJobFiles.push({
+        id: genId(file.name || "job_file"),
+        name: file.name || "Attachment",
+        type: file.type || "",
+        size: typeof file.size === "number" ? file.size : null,
+        source: "onedrive_local_root",
+        localRelativePath: relPath,
+        localRootName: getSharedConfig().localRootName || rootHandle.name || "",
+        localRootSignature: signature,
+        localDeviceId: getLocalDeviceId(),
+        addedAt: new Date().toISOString()
+      });
       toast("File attached from this computer OneDrive root.");
       renderJobs();
       return true;
@@ -14148,9 +14278,6 @@ function renderJobs(){
   });
   oneDriveRootPickerBtn?.addEventListener("click", async ()=>{
     await chooseLocalOneDriveRoot();
-  });
-  oneDriveLocalRootAddBtn?.addEventListener("click", async ()=>{
-    await attachFromLocalOneDriveRoot();
   });
   oneDriveCancelBtns.forEach(btn => btn.addEventListener("click", closeOneDriveModal));
   oneDriveModal?.addEventListener("click", (event)=>{ if (event.target === oneDriveModal) closeOneDriveModal(); });
@@ -14240,42 +14367,9 @@ function renderJobs(){
   oneDriveExplorerCancelBtns.forEach(btn=>btn.addEventListener("click", closeOneDriveExplorer));
 
   oneDriveLibraryAddToJobBtn?.addEventListener("click", async ()=>{
-    const cfg = getSharedConfig();
-    if (!cfg.sharedFolderUrl){
-      toast("Set OneDrive shared folder link in setup first.");
+    const attached = await attachFromLocalOneDriveRoot();
+    if (!attached){
       openOneDriveModal();
-      return;
-    }
-
-    explorerState = { folderId: null, filter: "all", query: "" };
-    if (oneDriveExplorerSearch){ oneDriveExplorerSearch.value = ""; }
-    if (oneDriveEmbeddedFrame){ oneDriveEmbeddedFrame.src = cfg.sharedFolderUrl; }
-    if (oneDriveEmbeddedLink){ oneDriveEmbeddedLink.href = cfg.sharedFolderUrl; }
-    if (oneDriveExplorerModal){ oneDriveExplorerModal.removeAttribute("hidden"); document.body.classList.add("modal-open"); }
-
-    const existingCache = window.oneDriveLibrary?.readCache?.() || null;
-    if (existingCache?.rootFolderId){
-      explorerState.folderId = existingCache.rootFolderId;
-      renderExplorer();
-    } else if (oneDriveExplorerList){
-      oneDriveExplorerList.innerHTML = '<li class="muted">Loading files from OneDrive shared folder…</li>';
-    }
-
-    try {
-      const cache = await window.oneDriveLibrary.crawlSharedFolder(cfg.sharedFolderUrl);
-      window.oneDriveLibrary.writeCache(cache);
-      explorerState.folderId = cache.rootFolderId || null;
-      renderExplorer();
-      updateOneDriveWizardStatus();
-    } catch (err){
-      if (oneDriveExplorerList){
-        oneDriveExplorerList.innerHTML = '<li class="muted">Unable to load selectable files from the shared folder. Check the link and make sure files are shared.</li>';
-      }
-      toast(err?.message || "Unable to load OneDrive shared folder files.");
-      if (getSharedConfig().localRootName){
-        toast("Falling back to this computer OneDrive root picker.");
-        await attachFromLocalOneDriveRoot();
-      }
     }
   });
 
@@ -14903,6 +14997,44 @@ function renderJobs(){
     }
   });
 
+  const openLocalRootAttachment = async (jobId, fileIndex)=>{
+    const id = String(jobId || "");
+    const idx = Number(fileIndex);
+    if (!id || !Number.isInteger(idx) || idx < 0) return false;
+    const sources = [Array.isArray(cuttingJobs) ? cuttingJobs : [], Array.isArray(completedJobs) ? completedJobs : []];
+    let file = null;
+    for (const list of sources){
+      const job = list.find(item => String(item?.id || "") === id);
+      if (!job) continue;
+      const files = Array.isArray(job.files) ? job.files : [];
+      file = files[idx] || null;
+      if (file) break;
+    }
+    if (!file || file.source !== "onedrive_local_root" || !file.localRelativePath){
+      toast("Local OneDrive reference not found for this file.");
+      return false;
+    }
+    try {
+      const cfg = getSharedConfig();
+      const currentSignature = cfg.localRootSignature;
+      if (file.localRootSignature && currentSignature && file.localRootSignature !== currentSignature){
+        toast("This computer is linked to a different root folder. Reconfigure this computer root folder.");
+        openOneDriveModal();
+        return false;
+      }
+      const fileBlob = await resolveLocalFileFromRelativePath(file.localRelativePath);
+      if (!fileBlob){
+        toast("Unable to locate this file in the configured local root folder.");
+        return false;
+      }
+      triggerFileDownload(fileBlob, file.name || fileBlob.name || "attachment");
+      return true;
+    } catch (err){
+      toast(err?.message || "Unable to open file from local root folder.");
+      return false;
+    }
+  };
+
   historyBody?.addEventListener("click", async (e)=>{
     const historyActionTrigger = e.target.closest("[data-history-actions-toggle]");
     if (historyActionTrigger){
@@ -14925,6 +15057,13 @@ function renderJobs(){
         closeActionMenu();
         openFileMenu(id, historyFileTrigger);
       }
+      return;
+    }
+
+    const localFileBtn = e.target.closest("[data-open-local-file]");
+    if (localFileBtn){
+      e.preventDefault();
+      await openLocalRootAttachment(localFileBtn.getAttribute("data-job-id"), localFileBtn.getAttribute("data-file-index"));
       return;
     }
 
@@ -15299,6 +15438,13 @@ function renderJobs(){
         editingJobs.add(id);
         renderJobs();
       }
+      return;
+    }
+
+    const localFileBtn = e.target.closest("[data-open-local-file]");
+    if (localFileBtn){
+      e.preventDefault();
+      await openLocalRootAttachment(localFileBtn.getAttribute("data-job-id"), localFileBtn.getAttribute("data-file-index"));
       return;
     }
 

@@ -2880,6 +2880,9 @@ function viewJobs(){
     const fileMenuItems = fileCount
       ? jobFiles.map((f, idx) => {
           const safeName = esc(f?.name || `file_${idx + 1}`);
+          if (f?.source === "onedrive_local_root" && f?.localRelativePath){
+            return `<li class="job-file-menu-item"><button type="button" class="link" data-open-local-file data-job-id="${esc(String(job.id || ""))}" data-file-index="${idx}">${safeName}</button></li>`;
+          }
           const hrefRaw = f?.dataUrl || f?.url || "";
           const href = esc(hrefRaw);
           if (!hrefRaw){
@@ -3176,6 +3179,9 @@ function viewJobs(){
     const fileMenuItems = fileCount
       ? jobFiles.map((f, idx) => {
           const safeName = esc(f?.name || `file_${idx + 1}`);
+          if (f?.source === "onedrive_local_root" && f?.localRelativePath){
+            return `<li class="job-file-menu-item"><button type="button" class="link" data-open-local-file data-job-id="${esc(String(j.id || ""))}" data-file-index="${idx}">${safeName}</button></li>`;
+          }
           const hrefRaw = f?.dataUrl || f?.url || "";
           const href = esc(hrefRaw);
           if (!hrefRaw){
@@ -3562,8 +3568,7 @@ function viewJobs(){
             </p>
           </div>
           <button type="button" id="jobFilesBtn">Attach Files</button>
-          <button type="button" id="jobOneDriveLibraryAddBtn">Add from OneDrive library</button>
-          <button type="button" id="jobOneDriveLocalRootBtn">Add from this computer OneDrive folder</button>
+          <button type="button" id="jobOneDriveLibraryAddBtn">Add from this computer OneDrive folder</button>
           <input type="file" id="jobFiles" multiple style="display:none">
           <button type="submit">Add Job</button>
         </form>
@@ -3617,16 +3622,17 @@ function viewJobs(){
             <button type="button" class="job-note-modal-close" data-onedrive-cancel aria-label="Close OneDrive setup">×</button>
           </div>
           <div class="job-note-modal-body">
-            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Paste a public OneDrive folder link. The website will open that folder in an in-app explorer so users can pick files and save cloud references.</p>
+            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Attach files from this computer's synced OneDrive root folder. Each computer can map a different local path to the same shared folder and the app will verify folder identity.</p>
             <ol class="job-onedrive-steps small">
               <li><strong>Step 1:</strong> Paste the OneDrive folder share link.</li>
               <li><strong>Step 2:</strong> Save setup and click <strong>Add from OneDrive library</strong>.</li>
-              <li><strong>Step 3:</strong> Select a file in the explorer popup to attach it.</li>
+              <li><strong>Step 3:</strong> Set this computer root folder and use local OneDrive attach.</li>
             </ol>
             <div class="job-onedrive-status-grid small muted" data-onedrive-status-grid>
               <div>Shared link: <span data-onedrive-connection-status>Not set</span></div>
               <div>Folder status: <span data-onedrive-folder-status>Not ready</span></div>
               <div>This computer root: <span data-onedrive-root-status>Not set</span></div>
+              <div>This computer ID: <span data-onedrive-device-status>Not set</span></div>
               <div>Indexed files: <span data-onedrive-library-status>0</span></div>
             </div>
             <label class="job-edit-note">OneDrive shared folder link
