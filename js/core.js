@@ -1881,6 +1881,9 @@ function snapshotState(){
     tasksInterval,
     tasksAsReq,
     inventory,
+    inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.map(folder => ({ ...folder })) : [],
+    inventoryMaterials: normalizeInventoryMaterials(window.inventoryMaterials),
+    inventorySection: String(window.inventorySection || "items") === "material" ? "material" : "items",
     cuttingJobs: stripJobFileDataUrls(cuttingJobs),
     completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs),
     orderRequests,
@@ -2171,6 +2174,179 @@ function jobFolderHasJobs(id){
     || completedCuttingJobs.some(job => String(job?.cat ?? "") === key);
 }
 
+
+function gcd(a,b){
+  let x = Math.abs(Number(a) || 0);
+  let y = Math.abs(Number(b) || 0);
+  while (y){
+    const t = y;
+    y = x % y;
+    x = t;
+  }
+  return x || 1;
+}
+
+function formatThicknessSixteenths(parts){
+  const n = Number(parts) || 0;
+  if (n <= 0) return "0";
+  const whole = Math.floor(n / 16);
+  const rem = n % 16;
+  if (!rem) return `${whole}`;
+  const d = gcd(rem, 16);
+  const top = rem / d;
+  const bot = 16 / d;
+  return whole ? `${whole} ${top}/${bot}` : `${top}/${bot}`;
+}
+
+function buildMaterialThicknessList(){
+  const out = [];
+  for (let i = 1; i <= 32; i++){
+    out.push({ key: `t_${i}`, sixteenths: i, label: formatThicknessSixteenths(i) + '"' });
+  }
+  return out;
+}
+
+function defaultInventoryMaterials(){
+  const thicknesses = buildMaterialThicknessList();
+  const makeSheet = ()=>({
+    columns: ["QTY 4x8", "QTY 4x10", "QTY 5x10", "QTY 5x12"],
+    rows: thicknesses.map(t => ({
+      thickness: (t.sixteenths / 16).toFixed(4).replace(/0+$/, "").replace(/\.$/, ""),
+      values: ["", "", "", ""]
+    }))
+  });
+  return {
+    activeType: "aluminum",
+    types: [
+      { id: "aluminum", name: "Aluminum" },
+      { id: "steel", name: "Steel" },
+      { id: "stainless_steel", name: "Stainless Steel" }
+    ],
+    sheets: {
+      aluminum: makeSheet(),
+      steel: makeSheet(),
+      stainless_steel: makeSheet()
+    }
+  };
+}
+
+function normalizeInventoryMaterials(raw){
+  const base = defaultInventoryMaterials();
+  const data = raw && typeof raw === "object" ? raw : {};
+  const typesRaw = Array.isArray(data.types) ? data.types : base.types;
+  const used = new Set();
+  const types = typesRaw
+    .filter(Boolean)
+    .map((entry, idx) => {
+      let id = String(entry.id || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      if (!id) id = `material_${idx+1}`;
+      while (used.has(id)) id = `${id}_${idx+1}`;
+      used.add(id);
+      return { id, name: String(entry.name || id).trim() || id };
+    });
+
+  const sheetsRaw = data.sheets && typeof data.sheets === "object" ? data.sheets : {};
+  const legacyRowsRaw = data.rows && typeof data.rows === "object" ? data.rows : {};
+  const sheets = {};
+  const formatQtyHeading = (raw)=>{
+    const txt = String(raw || "").trim();
+    if (!txt) return "QTY 4x8";
+    const body = txt.replace(/^qty\s*/i, "").trim();
+    return `QTY ${body || "4x8"}`;
+  };
+
+  types.forEach(type => {
+    const rawSheet = sheetsRaw[type.id] && typeof sheetsRaw[type.id] === "object" ? sheetsRaw[type.id] : null;
+    let columns = Array.isArray(rawSheet?.columns)
+      ? rawSheet.columns.map(c => formatQtyHeading(c)).slice(0, 24)
+      : [];
+    let rows = Array.isArray(rawSheet?.rows)
+      ? rawSheet.rows.map(row => {
+        const values = Array.isArray(row?.values) ? row.values.map(v => String(v ?? "")) : [];
+        return {
+          thickness: String(row?.thickness || ""),
+          values
+        };
+      })
+      : [];
+
+    if (!columns.length || !rows.length){
+      const baseSheet = base.sheets[type.id] || base.sheets.aluminum;
+      columns = Array.isArray(baseSheet?.columns) ? baseSheet.columns.slice() : ["qty"];
+      columns = columns.map(c => formatQtyHeading(c));
+      rows = Array.isArray(baseSheet?.rows)
+        ? baseSheet.rows.map(r => ({ thickness: String(r.thickness || ""), values: Array.isArray(r.values) ? r.values.map(v => String(v ?? "")) : [] }))
+        : [];
+    }
+
+    const legacyType = legacyRowsRaw[type.id] && typeof legacyRowsRaw[type.id] === "object" ? legacyRowsRaw[type.id] : null;
+    if (legacyType && (!rawSheet || !Array.isArray(rawSheet.rows) || !rawSheet.rows.length)){
+      const allSizes = [];
+      Object.values(legacyType).forEach(pairs => {
+        if (!Array.isArray(pairs)) return;
+        pairs.forEach(pair => {
+          const size = String(pair?.size || "").trim();
+          if (size && !allSizes.includes(size)) allSizes.push(size);
+        });
+      });
+      if (allSizes.length) columns = allSizes.map(size => `qty ${size}`);
+      rows = Object.entries(legacyType).map(([key, pairs]) => {
+        const six = Number(String(key).replace(/^t_/, ""));
+        const thickness = Number.isFinite(six) && six > 0 ? (six / 16).toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : String(key || "");
+        const values = columns.map(col => {
+          const size = String(col || "").replace(/^qty\s*/i, "").trim();
+          const hit = Array.isArray(pairs) ? pairs.find(pair => String(pair?.size || "").trim() === size) : null;
+          return String(hit?.amount ?? "");
+        });
+        return { thickness, values };
+      });
+    }
+
+    columns = columns.length ? columns : ["qty"];
+    rows = rows.length ? rows : [{ thickness: "", values: columns.map(() => "") }];
+    rows = rows.map(row => ({
+      thickness: String(row.thickness || ""),
+      values: columns.map((_, idx) => String(Array.isArray(row.values) ? (row.values[idx] ?? "") : ""))
+    }));
+    rows = rows.filter(row => String(row.thickness || "").trim() !== "");
+    if (!rows.length){
+      rows = [{ thickness: "0.0625", values: columns.map(() => "") }];
+    }
+    const parseThicknessValue = (raw)=>{
+      const txt = String(raw || "").replace(/"/g, "").trim();
+      if (!txt) return Number.POSITIVE_INFINITY;
+      const mixed = txt.match(/^(\d+)\s+(\d+)\/(\d+)$/);
+      if (mixed){
+        const whole = Number(mixed[1]);
+        const top = Number(mixed[2]);
+        const bot = Number(mixed[3]);
+        if (Number.isFinite(whole) && Number.isFinite(top) && Number.isFinite(bot) && bot > 0) return whole + (top / bot);
+      }
+      const frac = txt.match(/^(\d+)\/(\d+)$/);
+      if (frac){
+        const top = Number(frac[1]);
+        const bot = Number(frac[2]);
+        if (Number.isFinite(top) && Number.isFinite(bot) && bot > 0) return top / bot;
+      }
+      const num = Number(txt);
+      return Number.isFinite(num) ? num : Number.POSITIVE_INFINITY;
+    };
+    if (!rows.some(row => Math.abs(parseThicknessValue(row.thickness) - 0.0625) < 1e-6)){
+      rows.push({ thickness: "0.0625", values: columns.map(() => "") });
+    }
+    rows.sort((a,b)=> parseThicknessValue(a.thickness) - parseThicknessValue(b.thickness));
+
+    sheets[type.id] = { columns, rows };
+  });
+
+  const activeCandidate = String(data.activeType || base.activeType || (types[0] && types[0].id) || '');
+  const activeType = activeCandidate === "__all" || types.some(t => t.id === activeCandidate)
+    ? activeCandidate
+    : (types[0] ? types[0].id : '');
+
+  return { activeType, types, sheets };
+}
+
 function normalizeInventoryItem(raw){
   if (!raw || typeof raw !== "object") return null;
   const item = { ...raw };
@@ -2190,6 +2366,58 @@ function normalizeInventoryItem(raw){
   item.qty = qtyNew + qtyOld;
   if (!item.unit){ item.unit = "pcs"; }
   return item;
+}
+
+
+function ensureInventoryForAllMaintenanceTasks(){
+  if (!Array.isArray(inventory)) inventory = [];
+  const lists = [Array.isArray(tasksInterval) ? tasksInterval : [], Array.isArray(tasksAsReq) ? tasksAsReq : []];
+  let changed = false;
+  lists.forEach(list => {
+    list.forEach(task => {
+      if (!task || typeof task !== "object") return;
+      const taskId = task.id != null ? String(task.id) : "";
+      if (!taskId) return;
+      let linked = null;
+      const invId = task.inventoryId != null ? String(task.inventoryId) : "";
+      if (invId){
+        linked = inventory.find(item => item && String(item.id) === invId) || null;
+      }
+      if (!linked){
+        linked = inventory.find(item => item && String(item.linkedTaskId || "") === taskId) || null;
+      }
+      if (!linked){
+        linked = normalizeInventoryItem({
+          id: genId("inventory"),
+          name: task.name || "Maintenance part",
+          qtyNew: 0,
+          qtyOld: 0,
+          unit: "pcs",
+          note: task.condition || "",
+          pn: task.pn || "",
+          link: task.storeLink || "",
+          price: task.price != null ? Number(task.price) : null,
+          linkedTaskId: taskId,
+          folderId: null
+        });
+        if (linked){
+          inventory.unshift(linked);
+          changed = true;
+        }
+      }
+      if (!linked) return;
+      if (String(task.inventoryId || "") !== String(linked.id)){
+        task.inventoryId = linked.id;
+        changed = true;
+      }
+      if (String(linked.linkedTaskId || "") !== taskId){
+        linked.linkedTaskId = taskId;
+        changed = true;
+      }
+    });
+  });
+  window.inventory = inventory;
+  return changed;
 }
 
 function normalizeDailyCutHours(list){
@@ -2301,6 +2529,17 @@ function adoptState(doc){
   inventory = Array.isArray(data.inventory)
     ? data.inventory.map(normalizeInventoryItem).filter(Boolean)
     : seedInventoryFromTasks();
+  window.inventoryFolders = Array.isArray(data.inventoryFolders)
+    ? data.inventoryFolders.filter(folder => folder && folder.id != null).map(folder => ({
+      ...folder,
+      id: String(folder.id),
+      parent: folder.parent != null ? String(folder.parent) : null,
+      name: String(folder.name || "Folder")
+    }))
+    : (Array.isArray(window.inventoryFolders) ? window.inventoryFolders : []);
+  ensureInventoryForAllMaintenanceTasks();
+  window.inventoryMaterials = normalizeInventoryMaterials(data.inventoryMaterials);
+  window.inventorySection = String(data.inventorySection || window.inventorySection || "items") === "material" ? "material" : "items";
   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
   completedCuttingJobs = Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [];
   orderRequests = normalizeOrderRequests(Array.isArray(data.orderRequests) ? data.orderRequests : []);
@@ -2594,6 +2833,9 @@ async function loadFromCloud(){
         tasksInterval: Array.isArray(window.tasksInterval) && window.tasksInterval.length ? window.tasksInterval.slice() : (Array.isArray(window.defaultIntervalTasks) ? window.defaultIntervalTasks.slice() : []),
         tasksAsReq: Array.isArray(window.tasksAsReq) && window.tasksAsReq.length ? window.tasksAsReq.slice() : (Array.isArray(window.defaultAsReqTasks) ? window.defaultAsReqTasks.slice() : []),
         inventory: Array.isArray(window.inventory) && window.inventory.length ? window.inventory.slice() : (typeof seedInventoryFromTasks === "function" ? seedInventoryFromTasks() : []),
+        inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.map(folder => ({ ...folder })) : [],
+        inventoryMaterials: normalizeInventoryMaterials(window.inventoryMaterials),
+        inventorySection: String(window.inventorySection || "items") === "material" ? "material" : "items",
         cuttingJobs: Array.isArray(window.cuttingJobs) ? window.cuttingJobs.slice() : [],
         completedCuttingJobs: Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [],
         orderRequests: Array.isArray(window.orderRequests) && window.orderRequests.length ? window.orderRequests.slice() : [typeof createOrderRequest === "function" ? createOrderRequest() : { id:"req_"+Date.now(), items:[] }],
