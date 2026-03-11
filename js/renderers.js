@@ -13968,6 +13968,7 @@ function renderJobs(){
   const oneDriveExplorerModal = document.querySelector("#jobOneDriveExplorerModal");
   const oneDriveExplorerList = document.querySelector("#jobOneDriveExplorerList");
   const oneDriveExplorerSearch = document.querySelector("#jobOneDriveSearch");
+  const oneDriveEmbeddedFrame = document.querySelector("#jobOneDriveEmbeddedFrame");
   const oneDriveBreadcrumb = document.querySelector("#jobOneDriveBreadcrumb");
   const oneDriveExplorerCancelBtns = Array.from(document.querySelectorAll("[data-onedrive-explorer-cancel]"));
   const oneDriveFilterBtns = Array.from(document.querySelectorAll("[data-od-filter]"));
@@ -14030,6 +14031,7 @@ function renderJobs(){
   const closeOneDriveExplorer = ()=>{
     if (!oneDriveExplorerModal) return;
     oneDriveExplorerModal.setAttribute("hidden", "");
+    if (oneDriveEmbeddedFrame){ oneDriveEmbeddedFrame.src = "about:blank"; }
     document.body.classList.remove("modal-open");
   };
 
@@ -14105,6 +14107,7 @@ function renderJobs(){
       const cache = await window.oneDriveLibrary.crawlSharedFolder(cfg.sharedFolderUrl);
       window.oneDriveLibrary.writeCache(cache);
       explorerState = { folderId: cache.rootFolderId || null, filter: "all", query: "" };
+      if (oneDriveEmbeddedFrame){ oneDriveEmbeddedFrame.src = cfg.sharedFolderUrl; }
       if (oneDriveExplorerModal){ oneDriveExplorerModal.removeAttribute("hidden"); document.body.classList.add("modal-open"); }
       renderExplorer();
       updateOneDriveWizardStatus();

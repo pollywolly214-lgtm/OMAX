@@ -3651,6 +3651,8 @@ function viewJobs(){
             <button type="button" class="job-note-modal-close" data-onedrive-explorer-cancel aria-label="Close file explorer">×</button>
           </div>
           <div class="job-note-modal-body">
+            <p class="small muted">OneDrive shared folder (embedded):</p>
+            <iframe id="jobOneDriveEmbeddedFrame" title="OneDrive folder" style="width:100%;height:280px;border:1px solid rgba(255,255,255,.18);border-radius:8px;background:#0b1220"></iframe>
             <div class="small muted" id="jobOneDriveBreadcrumb">/</div>
             <input type="search" id="jobOneDriveSearch" placeholder="Search files...">
             <div class="job-onedrive-filter-row">
