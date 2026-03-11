@@ -2114,7 +2114,8 @@ function viewJobs(){
     const ext = extractFileExtension(name);
     const savedPreview = file && typeof file === "object" ? file.preview : null;
     if (savedPreview && typeof savedPreview === "object"){
-      const mode = savedPreview.mode === "image" ? "image" : "message";
+      const normalizedMode = String(savedPreview.mode || "").toLowerCase();
+      const mode = (normalizedMode === "image" || normalizedMode === "svg") ? "image" : "message";
       const content = String(savedPreview.content || "").trim();
       if (content) return { name, href, mode, content };
     }

@@ -25,14 +25,20 @@
       let after = line.slice(endBracket + 1).trimStart();
       if (after.startsWith(",")) after = after.slice(1);
       const tokens = after.split(",").map(token => token.trim());
-      if (tokens.length < 8) return;
+      if (tokens.length < 2) return;
       const x = Number.parseFloat(tokens[0]);
       const y = Number.parseFloat(tokens[1]);
       const bow = Number.parseFloat(tokens[5]);
       const q = Number.parseInt(tokens[6], 10);
       const side = Number.parseInt(tokens[7], 10);
-      if (![x, y, bow].every(Number.isFinite)) return;
-      rows.push({ x, y, bow, q: Number.isFinite(q) ? q : 0, side: Number.isFinite(side) ? side : 0 });
+      if (![x, y].every(Number.isFinite)) return;
+      rows.push({
+        x,
+        y,
+        bow: Number.isFinite(bow) ? bow : 0,
+        q: Number.isFinite(q) ? q : 0,
+        side: Number.isFinite(side) ? side : 0
+      });
     });
     return rows;
   }

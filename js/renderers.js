@@ -13385,9 +13385,20 @@ function renderJobs(){
     const files = allJobs.flatMap(job => Array.isArray(job?.files) ? job.files : []);
     const oneDriveTargets = files.filter(file => file && file.source === "onedrive" && file.driveId && file.itemId && !(file.preview && file.preview.content));
     const localRootTargets = files.filter(file => file && file.source === "onedrive_local_root" && file.localRelativePath && !(file.preview && file.preview.content));
+    const readableTargets = files.filter(file => {
+      if (!file || (file.preview && file.preview.content)) return false;
+      const ext = extractAttachmentExtension(file.name || "");
+      if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)) return false;
+      const hasSource = !!(file.dataUrl || file.url);
+      if (!hasSource) return false;
+      const isOneDrive = file.source === "onedrive" && file.driveId && file.itemId;
+      const isLocalRoot = file.source === "onedrive_local_root" && file.localRelativePath;
+      return !isOneDrive && !isLocalRoot;
+    });
     const tasks = [
       ...oneDriveTargets.map(resolveOneDriveAttachmentPreview),
-      ...localRootTargets.map(resolveLocalRootAttachmentPreview)
+      ...localRootTargets.map(resolveLocalRootAttachmentPreview),
+      ...readableTargets.map(resolvePreviewFromReadableSource)
     ];
     if (!tasks.length) return;
     Promise.allSettled(tasks).then((results)=>{
