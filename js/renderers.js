@@ -14950,6 +14950,74 @@ function renderInventory(){
   });
 
   const getMaterialModel = ()=> normalizeInventoryMaterials(window.inventoryMaterials);
+  window.inventoryMaterialEditMode = !!window.inventoryMaterialEditMode;
+  if (!Array.isArray(window.inventoryMaterialUndoStack)) window.inventoryMaterialUndoStack = [];
+  const pushMaterialUndo = ()=>{
+    window.inventoryMaterialUndoStack.push(cloneStructured(getMaterialModel()));
+    if (window.inventoryMaterialUndoStack.length > 20){
+      window.inventoryMaterialUndoStack.splice(0, window.inventoryMaterialUndoStack.length - 20);
+    }
+  };
+  const popMaterialUndo = ()=>{
+    if (!Array.isArray(window.inventoryMaterialUndoStack) || !window.inventoryMaterialUndoStack.length) return null;
+    return window.inventoryMaterialUndoStack.pop();
+  };
+  const formatQtyHeading = (raw)=>{
+    const txt = String(raw || "").trim();
+    if (!txt) return "QTY 4x8";
+    const body = txt.replace(/^qty\s*/i, "").trim();
+    return `QTY ${body || "4x8"}`;
+  };
+  const parseThicknessNumber = (raw)=>{
+    const txt = String(raw ?? "").replace(/"/g, "").trim();
+    if (!txt) return NaN;
+    const mixed = txt.match(/^(\d+)\s+(\d+)\/(\d+)$/);
+    if (mixed){
+      const whole = Number(mixed[1]);
+      const top = Number(mixed[2]);
+      const bot = Number(mixed[3]);
+      if (Number.isFinite(whole) && Number.isFinite(top) && Number.isFinite(bot) && bot > 0) return whole + (top / bot);
+    }
+    const frac = txt.match(/^(\d+)\/(\d+)$/);
+    if (frac){
+      const top = Number(frac[1]);
+      const bot = Number(frac[2]);
+      if (Number.isFinite(top) && Number.isFinite(bot) && bot > 0) return top / bot;
+    }
+    const num = Number(txt);
+    return Number.isFinite(num) ? num : NaN;
+  };
+  const normalizeSheetShape = (sheet)=>{
+    if (!sheet) return;
+    if (!Array.isArray(sheet.columns) || !sheet.columns.length) sheet.columns = ["QTY 4x8"];
+    sheet.columns = sheet.columns.map(formatQtyHeading);
+    if (!Array.isArray(sheet.rows) || !sheet.rows.length) sheet.rows = [{ thickness: "0.0625", values: sheet.columns.map(()=>"") }];
+    sheet.rows.forEach(row => {
+      if (!Array.isArray(row.values)) row.values = [];
+      while (row.values.length < sheet.columns.length) row.values.push("");
+      if (row.values.length > sheet.columns.length) row.values = row.values.slice(0, sheet.columns.length);
+    });
+  };
+
+  content.addEventListener("keydown", (e)=>{
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+    if (String(e.key || "").toLowerCase() !== "z") return;
+    if (String(window.inventorySection || "") !== "material") return;
+    const target = e.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+    const prev = popMaterialUndo();
+    if (!prev) return;
+    e.preventDefault();
+    window.inventoryMaterials = normalizeInventoryMaterials(prev);
+    saveCloudDebounced();
+    renderInventory();
+  });
+
+  const materialEditModeBtn = content.querySelector("#materialEditModeBtn");
+  materialEditModeBtn?.addEventListener("click", ()=>{
+    window.inventoryMaterialEditMode = !window.inventoryMaterialEditMode;
+    renderInventory();
+  });
 
   content.querySelectorAll("[data-material-type]").forEach(btn => {
     btn.addEventListener("click", ()=>{
@@ -14985,6 +15053,7 @@ function renderInventory(){
     let counter = 1;
     const used = new Set(model.types.map(t => String(t.id)));
     while (used.has(id)){ id = `${id}_${counter++}`; }
+    pushMaterialUndo();
     model.types.push({ id, name });
     const baseRows = (typeof buildMaterialThicknessList === "function" ? buildMaterialThicknessList() : [])
       .map(t => ({
@@ -14992,7 +15061,7 @@ function renderInventory(){
         values: ["", ""]
       }));
     model.sheets[id] = {
-      columns: ["qty 5x10", "qty 5x11"],
+      columns: ["QTY 4x8", "QTY 4x10"],
       rows: baseRows.length ? baseRows : [{ thickness: "0.0625", values: ["", ""] }]
     };
     model.activeType = id;
@@ -15002,13 +15071,20 @@ function renderInventory(){
   });
 
   content.addEventListener("click", (e)=>{
+    if (String(window.inventorySection || "") !== "material") return;
     const addRow = e.target.closest("[data-material-row-add]");
     if (addRow){
+      if (!window.inventoryMaterialEditMode) return;
       const typeId = addRow.getAttribute("data-material-row-add") || "";
       const model = getMaterialModel();
       const sheet = model.sheets[typeId];
       if (!sheet) return;
-      sheet.rows.push({ thickness: "", values: sheet.columns.map(()=>"") });
+      normalizeSheetShape(sheet);
+      pushMaterialUndo();
+      const last = sheet.rows[sheet.rows.length - 1];
+      const lastVal = parseThicknessNumber(last?.thickness);
+      const predicted = Number.isFinite(lastVal) ? (lastVal + (1/16)) : (1/16);
+      sheet.rows.push({ thickness: String(predicted), values: sheet.columns.map(()=>"") });
       window.inventoryMaterials = model;
       saveCloudDebounced();
       renderInventory();
@@ -15017,12 +15093,14 @@ function renderInventory(){
 
     const delRow = e.target.closest("[data-material-row-delete]");
     if (delRow){
+      if (!window.inventoryMaterialEditMode) return;
       const typeId = delRow.getAttribute("data-material-row-delete") || "";
       const rowIndex = Number(delRow.getAttribute("data-row-index"));
       const model = getMaterialModel();
       const sheet = model.sheets[typeId];
       if (!sheet || !Number.isFinite(rowIndex)) return;
       if (sheet.rows.length <= 1) return;
+      pushMaterialUndo();
       sheet.rows.splice(rowIndex, 1);
       window.inventoryMaterials = model;
       saveCloudDebounced();
@@ -15032,12 +15110,21 @@ function renderInventory(){
 
     const addAfterRow = e.target.closest("[data-material-row-add-after]");
     if (addAfterRow){
+      if (!window.inventoryMaterialEditMode) return;
       const typeId = addAfterRow.getAttribute("data-material-row-add-after") || "";
       const rowIndex = Number(addAfterRow.getAttribute("data-row-index"));
       const model = getMaterialModel();
       const sheet = model.sheets[typeId];
       if (!sheet || !Number.isFinite(rowIndex)) return;
-      sheet.rows.splice(Math.max(0, rowIndex + 1), 0, { thickness: "", values: sheet.columns.map(()=>"") });
+      normalizeSheetShape(sheet);
+      pushMaterialUndo();
+      const current = parseThicknessNumber(sheet.rows[rowIndex]?.thickness);
+      const next = parseThicknessNumber(sheet.rows[rowIndex + 1]?.thickness);
+      let predicted = Number.isFinite(current) ? current + (1/16) : (1/16);
+      if (Number.isFinite(current) && Number.isFinite(next) && next > current){
+        predicted = current + ((next - current) / 2);
+      }
+      sheet.rows.splice(Math.max(0, rowIndex + 1), 0, { thickness: String(predicted), values: sheet.columns.map(()=>"") });
       window.inventoryMaterials = model;
       saveCloudDebounced();
       renderInventory();
@@ -15046,11 +15133,14 @@ function renderInventory(){
 
     const addCol = e.target.closest("[data-material-col-add]");
     if (addCol){
+      if (!window.inventoryMaterialEditMode) return;
       const typeId = addCol.getAttribute("data-material-col-add") || "";
       const model = getMaterialModel();
       const sheet = model.sheets[typeId];
       if (!sheet) return;
-      sheet.columns.push(`qty ${sheet.columns.length + 1}`);
+      normalizeSheetShape(sheet);
+      pushMaterialUndo();
+      sheet.columns.push(formatQtyHeading("4x8"));
       sheet.rows.forEach(row => row.values.push(""));
       window.inventoryMaterials = model;
       saveCloudDebounced();
@@ -15060,12 +15150,15 @@ function renderInventory(){
 
     const addAfterCol = e.target.closest("[data-material-col-add-after]");
     if (addAfterCol){
+      if (!window.inventoryMaterialEditMode) return;
       const typeId = addAfterCol.getAttribute("data-material-col-add-after") || "";
       const colIndex = Number(addAfterCol.getAttribute("data-col-index"));
       const model = getMaterialModel();
       const sheet = model.sheets[typeId];
       if (!sheet || !Number.isFinite(colIndex)) return;
-      sheet.columns.splice(Math.max(0, colIndex + 1), 0, `qty ${sheet.columns.length + 1}`);
+      normalizeSheetShape(sheet);
+      pushMaterialUndo();
+      sheet.columns.splice(Math.max(0, colIndex + 1), 0, formatQtyHeading("4x8"));
       sheet.rows.forEach(row => {
         if (!Array.isArray(row.values)) row.values = [];
         row.values.splice(Math.max(0, colIndex + 1), 0, "");
@@ -15078,12 +15171,14 @@ function renderInventory(){
 
     const delColByIndex = e.target.closest("[data-material-col-delete-index]");
     if (delColByIndex){
+      if (!window.inventoryMaterialEditMode) return;
       const typeId = delColByIndex.getAttribute("data-material-col-delete-index") || "";
       const colIndex = Number(delColByIndex.getAttribute("data-col-index"));
       const model = getMaterialModel();
       const sheet = model.sheets[typeId];
       if (!sheet || !Number.isFinite(colIndex) || colIndex < 0 || colIndex >= sheet.columns.length) return;
       if (sheet.columns.length <= 1) return;
+      pushMaterialUndo();
       sheet.columns.splice(colIndex, 1);
       sheet.rows.forEach(row => {
         if (!Array.isArray(row.values)) row.values = [];
@@ -15122,11 +15217,13 @@ function renderInventory(){
   };
 
   const updateMaterialCellValue = (cell, value)=>{
+    if (!window.inventoryMaterialEditMode) return;
     const kind = cell.getAttribute("data-edit-kind") || "";
     const typeId = cell.getAttribute("data-type-id") || "";
     const model = getMaterialModel();
     const sheet = model.sheets[typeId];
     if (!sheet) return;
+    pushMaterialUndo();
 
     if (kind === "material-name"){
       const type = model.types.find(t => String(t.id) === String(typeId));
@@ -15135,7 +15232,7 @@ function renderInventory(){
     } else if (kind === "column"){
       const colIndex = Number(cell.getAttribute("data-col-index"));
       if (!Number.isFinite(colIndex) || colIndex < 0 || colIndex >= sheet.columns.length) return;
-      sheet.columns[colIndex] = value;
+      sheet.columns[colIndex] = formatQtyHeading(value);
     } else if (kind === "thickness"){
       const rowIndex = Number(cell.getAttribute("data-row-index"));
       if (!Number.isFinite(rowIndex) || rowIndex < 0 || rowIndex >= sheet.rows.length) return;
@@ -15150,12 +15247,14 @@ function renderInventory(){
       return;
     }
 
+    normalizeSheetShape(sheet);
     window.inventoryMaterials = model;
     persistInventoryMaterials();
     renderInventory();
   };
 
   content.addEventListener("dblclick", (e)=>{
+    if (!window.inventoryMaterialEditMode) return;
     const cell = e.target.closest("[data-material-editable]");
     if (!cell || cell.querySelector("input")) return;
     const original = (cell.textContent || "").trim();

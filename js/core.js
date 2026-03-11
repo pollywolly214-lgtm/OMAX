@@ -2209,7 +2209,7 @@ function buildMaterialThicknessList(){
 function defaultInventoryMaterials(){
   const thicknesses = buildMaterialThicknessList();
   const makeSheet = ()=>({
-    columns: ["qty 5x10", "qty 5x11", "qty 5x12", "qty 5x13"],
+    columns: ["QTY 4x8", "QTY 4x10", "QTY 5x10", "QTY 5x12"],
     rows: thicknesses.map(t => ({
       thickness: (t.sixteenths / 16).toFixed(4).replace(/0+$/, "").replace(/\.$/, ""),
       values: ["", "", "", ""]
@@ -2248,11 +2248,17 @@ function normalizeInventoryMaterials(raw){
   const sheetsRaw = data.sheets && typeof data.sheets === "object" ? data.sheets : {};
   const legacyRowsRaw = data.rows && typeof data.rows === "object" ? data.rows : {};
   const sheets = {};
+  const formatQtyHeading = (raw)=>{
+    const txt = String(raw || "").trim();
+    if (!txt) return "QTY 4x8";
+    const body = txt.replace(/^qty\s*/i, "").trim();
+    return `QTY ${body || "4x8"}`;
+  };
 
   types.forEach(type => {
     const rawSheet = sheetsRaw[type.id] && typeof sheetsRaw[type.id] === "object" ? sheetsRaw[type.id] : null;
     let columns = Array.isArray(rawSheet?.columns)
-      ? rawSheet.columns.map(c => String(c || "").trim() || "qty").slice(0, 24)
+      ? rawSheet.columns.map(c => formatQtyHeading(c)).slice(0, 24)
       : [];
     let rows = Array.isArray(rawSheet?.rows)
       ? rawSheet.rows.map(row => {
@@ -2267,6 +2273,7 @@ function normalizeInventoryMaterials(raw){
     if (!columns.length || !rows.length){
       const baseSheet = base.sheets[type.id] || base.sheets.aluminum;
       columns = Array.isArray(baseSheet?.columns) ? baseSheet.columns.slice() : ["qty"];
+      columns = columns.map(c => formatQtyHeading(c));
       rows = Array.isArray(baseSheet?.rows)
         ? baseSheet.rows.map(r => ({ thickness: String(r.thickness || ""), values: Array.isArray(r.values) ? r.values.map(v => String(v ?? "")) : [] }))
         : [];

@@ -5608,3 +5608,4 @@ body.log-history-open { overflow: hidden; }
 .material-grid-table .tiny{padding:1px 4px;font-size:10px;line-height:1;border:1px solid #b9c2d1;border-radius:4px;background:#f8f9fc}
 .material-grid-table .tiny.danger{color:#8d1e1e;border-color:#d8a5a5;background:#fff6f6}
 .material-inline-editor{width:100%;min-width:60px;border:1px solid #4a79b8;padding:1px 3px;font-size:12px;line-height:1.2}
+.material-edit-controls.is-hidden{display:none !important}
