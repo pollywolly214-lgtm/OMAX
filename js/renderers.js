@@ -6744,6 +6744,12 @@ function renderSettings(){
   if (typeof repairMaintenanceGraph === "function") {
     repairMaintenanceGraph();
   }
+  if (typeof ensureInventoryForAllMaintenanceTasks === "function") {
+    const inventoryChanged = ensureInventoryForAllMaintenanceTasks();
+    if (inventoryChanged && typeof saveCloudDebounced === "function") {
+      try { saveCloudDebounced(); } catch(_){}
+    }
+  }
 
   const searchValueRaw = window.maintenanceSearchTerm || "";
   const searchTerm = searchValueRaw.trim().toLowerCase();
@@ -14824,6 +14830,7 @@ function renderInventory(){
   const searchInput = content.querySelector("#inventorySearch");
   const clearBtn = content.querySelector("#inventorySearchClear");
   const addBtn = content.querySelector("#inventoryAddBtn");
+  const addFolderBtn = content.querySelector("#inventoryAddFolderBtn");
   const modal = content.querySelector("#inventoryAddModal");
   const form = content.querySelector("#inventoryAddForm");
   const closeBtn = modal?.querySelector("[data-close]");
@@ -14836,6 +14843,40 @@ function renderInventory(){
   const qtyNewField = modal?.querySelector("[name=\"inventoryQtyNew\"]");
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
   let addToMaintenance = false;
+
+  const persistInventoryMaterials = ()=>{
+    window.inventoryMaterials = normalizeInventoryMaterials(window.inventoryMaterials);
+    saveCloudDebounced();
+  };
+
+  const isFolderDescendant = (folderId, maybeAncestorId)=>{
+    if (!folderId || !maybeAncestorId) return false;
+    const folderKey = String(folderId);
+    const ancestorKey = String(maybeAncestorId);
+    const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
+    let cursor = folders.find(f => f && String(f.id) === folderKey) || null;
+    const seen = new Set();
+    while (cursor && cursor.parent != null){
+      const parentKey = String(cursor.parent);
+      if (parentKey === ancestorKey) return true;
+      if (seen.has(parentKey)) break;
+      seen.add(parentKey);
+      cursor = folders.find(f => f && String(f.id) === parentKey) || null;
+    }
+    return false;
+  };
+
+  window.inventoryFolders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
+  window.inventoryFolders = window.inventoryFolders.filter(folder => folder && folder.id != null).map(folder => ({
+    ...folder,
+    id: String(folder.id),
+    parent: folder.parent != null ? String(folder.parent) : null,
+    name: String(folder.name || "Folder")
+  }));
+  inventory.forEach(item => {
+    if (!item || typeof item !== "object") return;
+    if (item.folderId != null) item.folderId = String(item.folderId);
+  });
 
   function syncLinkedTasksFromInventory(item, updates){
     if (!item) return false;
@@ -14888,13 +14929,417 @@ function renderInventory(){
 
   const refreshRows = ()=>{
     if (!rowsTarget) return;
-    const filtered = filterInventoryItems(inventorySearchTerm);
-    rowsTarget.innerHTML = inventoryRowsHTML(filtered);
+    const shell = document.createElement("div");
+    shell.innerHTML = viewInventory();
+    const fresh = shell.querySelector("[data-inventory-rows]");
+    rowsTarget.innerHTML = fresh ? fresh.innerHTML : "";
   };
 
   try{
     window.__refreshInventoryRows = refreshRows;
   }catch(_){ }
+
+  content.querySelectorAll("[data-inventory-section]").forEach(btn => {
+    btn.addEventListener("click", ()=>{
+      const section = btn.getAttribute("data-inventory-section") === "material" ? "material" : "items";
+      if (window.inventorySection === section) return;
+      window.inventorySection = section;
+      saveCloudDebounced();
+      renderInventory();
+    });
+  });
+
+  const getMaterialModel = ()=> normalizeInventoryMaterials(window.inventoryMaterials);
+  window.inventoryMaterialEditMode = !!window.inventoryMaterialEditMode;
+  if (!Array.isArray(window.inventoryMaterialUndoStack)) window.inventoryMaterialUndoStack = [];
+  const pushMaterialUndo = ()=>{
+    window.inventoryMaterialUndoStack.push(cloneStructured(getMaterialModel()));
+    if (window.inventoryMaterialUndoStack.length > 20){
+      window.inventoryMaterialUndoStack.splice(0, window.inventoryMaterialUndoStack.length - 20);
+    }
+  };
+  const popMaterialUndo = ()=>{
+    if (!Array.isArray(window.inventoryMaterialUndoStack) || !window.inventoryMaterialUndoStack.length) return null;
+    return window.inventoryMaterialUndoStack.pop();
+  };
+  const formatQtyHeading = (raw)=>{
+    const txt = String(raw || "").trim();
+    if (!txt) return "QTY 4x8";
+    const body = txt.replace(/^qty\s*/i, "").trim();
+    return `QTY ${body || "4x8"}`;
+  };
+  const parseThicknessNumber = (raw)=>{
+    const txt = String(raw ?? "").replace(/"/g, "").trim();
+    if (!txt) return NaN;
+    const mixed = txt.match(/^(\d+)\s+(\d+)\/(\d+)$/);
+    if (mixed){
+      const whole = Number(mixed[1]);
+      const top = Number(mixed[2]);
+      const bot = Number(mixed[3]);
+      if (Number.isFinite(whole) && Number.isFinite(top) && Number.isFinite(bot) && bot > 0) return whole + (top / bot);
+    }
+    const frac = txt.match(/^(\d+)\/(\d+)$/);
+    if (frac){
+      const top = Number(frac[1]);
+      const bot = Number(frac[2]);
+      if (Number.isFinite(top) && Number.isFinite(bot) && bot > 0) return top / bot;
+    }
+    const num = Number(txt);
+    return Number.isFinite(num) ? num : NaN;
+  };
+  const normalizeSheetShape = (sheet)=>{
+    if (!sheet) return;
+    if (!Array.isArray(sheet.columns) || !sheet.columns.length) sheet.columns = ["QTY 4x8"];
+    sheet.columns = sheet.columns.map(formatQtyHeading);
+    if (!Array.isArray(sheet.rows) || !sheet.rows.length) sheet.rows = [{ thickness: "0.0625", values: sheet.columns.map(()=>"") }];
+    sheet.rows = sheet.rows.filter(row => String(row?.thickness || "").trim() !== "");
+    if (!sheet.rows.length) sheet.rows = [{ thickness: "0.0625", values: sheet.columns.map(()=>"") }];
+    sheet.rows.forEach(row => {
+      if (!Array.isArray(row.values)) row.values = [];
+      while (row.values.length < sheet.columns.length) row.values.push("");
+      if (row.values.length > sheet.columns.length) row.values = row.values.slice(0, sheet.columns.length);
+    });
+  };
+  const normalizeAllSheets = (model)=>{
+    if (!model || !Array.isArray(model.types)) return;
+    model.types.forEach(type => {
+      const key = String(type?.id || "");
+      if (!key) return;
+      if (!model.sheets[key]) model.sheets[key] = { columns: ["QTY 4x8"], rows: [{ thickness: "0.0625", values: [""] }] };
+      normalizeSheetShape(model.sheets[key]);
+    });
+  };
+
+  const materialKeydownHandler = (e)=>{
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+    if (String(e.key || "").toLowerCase() !== "z") return;
+    if (String(window.inventorySection || "") !== "material") return;
+    const target = e.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+    const prev = popMaterialUndo();
+    if (!prev) return;
+    e.preventDefault();
+    window.inventoryMaterials = normalizeInventoryMaterials(prev);
+    saveCloudDebounced();
+    renderInventory();
+  };
+  if (window.__inventoryMaterialKeydownHandler){
+    content.removeEventListener("keydown", window.__inventoryMaterialKeydownHandler);
+  }
+  window.__inventoryMaterialKeydownHandler = materialKeydownHandler;
+  content.addEventListener("keydown", materialKeydownHandler);
+
+  const materialEditModeBtn = content.querySelector("#materialEditModeBtn");
+  materialEditModeBtn?.addEventListener("click", ()=>{
+    window.inventoryMaterialEditMode = !window.inventoryMaterialEditMode;
+    renderInventory();
+  });
+
+  const materialTypeSelect = content.querySelector("#materialTypeSelect");
+  materialTypeSelect?.addEventListener("change", ()=>{
+    const model = getMaterialModel();
+    const selected = String(materialTypeSelect.value || "__all");
+    const valid = selected === "__all" || model.types.some(t => String(t.id) === selected);
+    model.activeType = valid ? selected : "__all";
+    window.inventoryMaterials = model;
+    saveCloudDebounced();
+    renderInventory();
+  });
+
+  const materialAddTypeBtn = content.querySelector("#materialAddTypeBtn");
+  materialAddTypeBtn?.addEventListener("click", ()=>{
+    const raw = window.prompt("Material type name:", "Titanium");
+    if (!raw) return;
+    const model = getMaterialModel();
+    const name = raw.trim();
+    if (!name) return;
+    let id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    if (!id) id = `material_${Date.now()}`;
+    let counter = 1;
+    const used = new Set(model.types.map(t => String(t.id)));
+    while (used.has(id)){ id = `${id}_${counter++}`; }
+    pushMaterialUndo();
+    model.types.push({ id, name });
+    const baseRows = (typeof buildMaterialThicknessList === "function" ? buildMaterialThicknessList() : [])
+      .map(t => ({
+        thickness: (Number(t.sixteenths) / 16).toFixed(4).replace(/0+$/, "").replace(/\.$/, ""),
+        values: ["", ""]
+      }));
+    model.sheets[id] = {
+      columns: ["QTY 4x8", "QTY 4x10"],
+      rows: baseRows.length ? baseRows : [{ thickness: "0.0625", values: ["", ""] }]
+    };
+    model.activeType = id;
+    window.inventoryMaterials = model;
+    saveCloudDebounced();
+    renderInventory();
+  });
+
+  const materialClickHandler = (e)=>{
+    if (String(window.inventorySection || "") !== "material") return;
+    const addRow = e.target.closest("[data-material-row-add]");
+    if (addRow){
+      e.preventDefault();
+      e.stopPropagation();
+      if (!window.inventoryMaterialEditMode) return;
+      const typeId = addRow.getAttribute("data-material-row-add") || "";
+      const model = getMaterialModel();
+      const sheet = model.sheets[typeId];
+      if (!sheet) return;
+      normalizeSheetShape(sheet);
+      pushMaterialUndo();
+      const last = sheet.rows[sheet.rows.length - 1];
+      const lastVal = parseThicknessNumber(last?.thickness);
+      const predicted = Number.isFinite(lastVal) ? (lastVal + (1/16)) : (1/16);
+      sheet.rows.push({ thickness: String(predicted), values: sheet.columns.map(()=>"") });
+      window.inventoryMaterials = model;
+      saveCloudDebounced();
+      renderInventory();
+      return;
+    }
+
+    const delRow = e.target.closest("[data-material-row-delete]");
+    if (delRow){
+      e.preventDefault();
+      e.stopPropagation();
+      if (!window.inventoryMaterialEditMode) return;
+      const typeId = delRow.getAttribute("data-material-row-delete") || "";
+      const rowIndex = Number(delRow.getAttribute("data-row-index"));
+      const model = getMaterialModel();
+      const sheet = model.sheets[typeId];
+      if (!sheet || !Number.isFinite(rowIndex)) return;
+      if (sheet.rows.length <= 1) return;
+      pushMaterialUndo();
+      sheet.rows.splice(rowIndex, 1);
+      window.inventoryMaterials = model;
+      saveCloudDebounced();
+      renderInventory();
+      return;
+    }
+
+    const addAfterRow = e.target.closest("[data-material-row-add-after]");
+    if (addAfterRow){
+      e.preventDefault();
+      e.stopPropagation();
+      if (!window.inventoryMaterialEditMode) return;
+      const typeId = addAfterRow.getAttribute("data-material-row-add-after") || "";
+      const rowIndex = Number(addAfterRow.getAttribute("data-row-index"));
+      const model = getMaterialModel();
+      const sheet = model.sheets[typeId];
+      if (!sheet || !Number.isFinite(rowIndex)) return;
+      normalizeSheetShape(sheet);
+      pushMaterialUndo();
+      const current = parseThicknessNumber(sheet.rows[rowIndex]?.thickness);
+      const next = parseThicknessNumber(sheet.rows[rowIndex + 1]?.thickness);
+      let predicted = Number.isFinite(current) ? current + (1/16) : (1/16);
+      if (Number.isFinite(current) && Number.isFinite(next) && next > current){
+        predicted = current + ((next - current) / 2);
+      }
+      sheet.rows.splice(Math.max(0, rowIndex + 1), 0, { thickness: String(predicted), values: sheet.columns.map(()=>"") });
+      window.inventoryMaterials = model;
+      saveCloudDebounced();
+      renderInventory();
+      return;
+    }
+
+    const addCol = e.target.closest("[data-material-col-add]");
+    if (addCol){
+      e.preventDefault();
+      e.stopPropagation();
+      if (!window.inventoryMaterialEditMode) return;
+      const typeId = addCol.getAttribute("data-material-col-add") || "";
+      const model = getMaterialModel();
+      const sheet = model.sheets[typeId];
+      if (!sheet) return;
+      normalizeAllSheets(model);
+      const sharedColumns = Array.isArray(sheet.columns) ? sheet.columns.slice() : ["QTY 4x8"];
+      pushMaterialUndo();
+      sharedColumns.push(formatQtyHeading("4x8"));
+      model.types.forEach(type => {
+        const s = model.sheets[String(type.id)];
+        if (!s) return;
+        s.columns = sharedColumns.slice();
+        s.rows.forEach(row => {
+          if (!Array.isArray(row.values)) row.values = [];
+          row.values.push("");
+        });
+      });
+      window.inventoryMaterials = model;
+      saveCloudDebounced();
+      renderInventory();
+      return;
+    }
+
+    const addAfterCol = e.target.closest("[data-material-col-add-after]");
+    if (addAfterCol){
+      e.preventDefault();
+      e.stopPropagation();
+      if (!window.inventoryMaterialEditMode) return;
+      const typeId = addAfterCol.getAttribute("data-material-col-add-after") || "";
+      const colIndex = Number(addAfterCol.getAttribute("data-col-index"));
+      const model = getMaterialModel();
+      const sheet = model.sheets[typeId];
+      if (!sheet || !Number.isFinite(colIndex)) return;
+      normalizeAllSheets(model);
+      const sharedColumns = Array.isArray(sheet.columns) ? sheet.columns.slice() : ["QTY 4x8"];
+      pushMaterialUndo();
+      const insertAt = Math.max(0, colIndex + 1);
+      sharedColumns.splice(insertAt, 0, formatQtyHeading("4x8"));
+      model.types.forEach(type => {
+        const s = model.sheets[String(type.id)];
+        if (!s) return;
+        s.columns = sharedColumns.slice();
+        s.rows.forEach(row => {
+          if (!Array.isArray(row.values)) row.values = [];
+          row.values.splice(insertAt, 0, "");
+        });
+      });
+      window.inventoryMaterials = model;
+      saveCloudDebounced();
+      renderInventory();
+      return;
+    }
+
+    const delColByIndex = e.target.closest("[data-material-col-delete-index]");
+    if (delColByIndex){
+      e.preventDefault();
+      e.stopPropagation();
+      if (!window.inventoryMaterialEditMode) return;
+      const typeId = delColByIndex.getAttribute("data-material-col-delete-index") || "";
+      const colIndex = Number(delColByIndex.getAttribute("data-col-index"));
+      const model = getMaterialModel();
+      const sheet = model.sheets[typeId];
+      if (!sheet || !Number.isFinite(colIndex) || colIndex < 0 || colIndex >= sheet.columns.length) return;
+      if (sheet.columns.length <= 1) return;
+      normalizeAllSheets(model);
+      const sharedColumns = Array.isArray(sheet.columns) ? sheet.columns.slice() : ["QTY 4x8"];
+      pushMaterialUndo();
+      sharedColumns.splice(colIndex, 1);
+      model.types.forEach(type => {
+        const s = model.sheets[String(type.id)];
+        if (!s) return;
+        s.columns = sharedColumns.slice();
+        s.rows.forEach(row => {
+          if (!Array.isArray(row.values)) row.values = [];
+          row.values.splice(colIndex, 1);
+        });
+      });
+      window.inventoryMaterials = model;
+      saveCloudDebounced();
+      renderInventory();
+      return;
+    }
+
+  };
+  if (window.__inventoryMaterialClickHandler){
+    content.removeEventListener("click", window.__inventoryMaterialClickHandler);
+  }
+  window.__inventoryMaterialClickHandler = materialClickHandler;
+  content.addEventListener("click", materialClickHandler);
+
+  const parseThicknessToStored = (raw)=>{
+    const txt = String(raw ?? "").replace(/"/g, "").trim();
+    if (!txt) return "";
+    const mixed = txt.match(/^(\d+)\s+(\d+)\/(\d+)$/);
+    if (mixed){
+      const whole = Number(mixed[1]);
+      const top = Number(mixed[2]);
+      const bot = Number(mixed[3]);
+      if (Number.isFinite(whole) && Number.isFinite(top) && Number.isFinite(bot) && bot > 0){
+        return String(whole + (top / bot));
+      }
+    }
+    const frac = txt.match(/^(\d+)\/(\d+)$/);
+    if (frac){
+      const top = Number(frac[1]);
+      const bot = Number(frac[2]);
+      if (Number.isFinite(top) && Number.isFinite(bot) && bot > 0){
+        return String(top / bot);
+      }
+    }
+    return null;
+  };
+
+  const updateMaterialCellValue = (cell, value)=>{
+    const kind = cell.getAttribute("data-edit-kind") || "";
+    const typeId = cell.getAttribute("data-type-id") || "";
+    const model = getMaterialModel();
+    const sheet = model.sheets[typeId];
+    if (!sheet) return;
+    pushMaterialUndo();
+
+    if ((kind === "material-name" || kind === "column" || kind === "thickness") && !window.inventoryMaterialEditMode) return;
+
+    if (kind === "material-name"){
+      const type = model.types.find(t => String(t.id) === String(typeId));
+      if (!type) return;
+      type.name = value || type.name;
+    } else if (kind === "column"){
+      const colIndex = Number(cell.getAttribute("data-col-index"));
+      if (!Number.isFinite(colIndex) || colIndex < 0 || colIndex >= sheet.columns.length) return;
+      const bodyOnly = String(value || "").replace(/^qty\s*/i, "").trim();
+      const heading = formatQtyHeading(bodyOnly);
+      model.types.forEach(type => {
+        const s = model.sheets[String(type.id)];
+        if (!s || !Array.isArray(s.columns) || colIndex < 0 || colIndex >= s.columns.length) return;
+        s.columns[colIndex] = heading;
+      });
+    } else if (kind === "thickness"){
+      const rowIndex = Number(cell.getAttribute("data-row-index"));
+      if (!Number.isFinite(rowIndex) || rowIndex < 0 || rowIndex >= sheet.rows.length) return;
+      const parsed = parseThicknessToStored(value);
+      if (!parsed){ toast("Thickness must be a fraction like 1/16 or 1 1/2."); return; }
+      sheet.rows[rowIndex].thickness = parsed;
+    } else if (kind === "cell"){
+      const rowIndex = Number(cell.getAttribute("data-row-index"));
+      const colIndex = Number(cell.getAttribute("data-col-index"));
+      if (!Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) return;
+      if (rowIndex < 0 || rowIndex >= sheet.rows.length || colIndex < 0 || colIndex >= sheet.columns.length) return;
+      sheet.rows[rowIndex].values[colIndex] = value;
+    } else {
+      return;
+    }
+
+    normalizeSheetShape(sheet);
+    window.inventoryMaterials = model;
+    persistInventoryMaterials();
+    renderInventory();
+  };
+
+  const materialDblClickHandler = (e)=>{
+    const cell = e.target.closest("[data-material-editable]");
+    if (!cell || cell.querySelector("input")) return;
+    const kind = cell.getAttribute("data-edit-kind") || "";
+    if ((kind === "material-name" || kind === "column" || kind === "thickness") && !window.inventoryMaterialEditMode) return;
+    const original = (cell.textContent || "").trim();
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = kind === "column" ? original.replace(/^qty\s*/i, "") : original;
+    input.className = "material-inline-editor";
+    cell.textContent = "";
+    cell.appendChild(input);
+    input.focus();
+    input.select();
+
+    const commit = ()=> updateMaterialCellValue(cell, input.value.trim());
+    const cancel = ()=> renderInventory();
+
+    input.addEventListener("keydown", (evt)=>{
+      if (evt.key === "Enter"){
+        evt.preventDefault();
+        commit();
+      } else if (evt.key === "Escape"){
+        evt.preventDefault();
+        cancel();
+      }
+    });
+    input.addEventListener("blur", commit, { once:true });
+  };
+  if (window.__inventoryMaterialDblClickHandler){
+    content.removeEventListener("dblclick", window.__inventoryMaterialDblClickHandler);
+  }
+  window.__inventoryMaterialDblClickHandler = materialDblClickHandler;
+  content.addEventListener("dblclick", materialDblClickHandler);
 
   if (searchInput){
     searchInput.addEventListener("input", ()=>{
@@ -14944,7 +15389,139 @@ function renderInventory(){
     saveCloudDebounced();
   });
 
+  rowsTarget?.addEventListener("change", (e)=>{
+    const folderSelect = e.target.closest("[data-item-folder]");
+    if (folderSelect){
+      const id = folderSelect.getAttribute("data-item-folder");
+      const item = inventory.find(x => x && String(x.id) === String(id));
+      if (!item) return;
+      item.folderId = folderSelect.value ? String(folderSelect.value) : null;
+      saveCloudDebounced();
+      refreshRows();
+      return;
+    }
+    const folderParentSelect = e.target.closest("[data-folder-parent]");
+    if (folderParentSelect){
+      const folderId = folderParentSelect.getAttribute("data-folder-parent");
+      const folder = window.inventoryFolders.find(f => f && String(f.id) === String(folderId));
+      if (!folder) return;
+      const nextParent = folderParentSelect.value ? String(folderParentSelect.value) : null;
+      if (nextParent === folder.id){ toast("Folder cannot be moved into itself."); refreshRows(); return; }
+      if (nextParent && isFolderDescendant(nextParent, folder.id)){
+        toast("Folder cannot be moved inside a child folder.");
+        refreshRows();
+        return;
+      }
+      folder.parent = nextParent;
+      saveCloudDebounced();
+      refreshRows();
+    }
+  });
+
+  rowsTarget?.addEventListener("dragstart", (e)=>{
+    if (e.target.closest("input,select,button,a,textarea")) return;
+    const row = e.target.closest("[data-inventory-item-row]");
+    if (!row) return;
+    const itemId = row.getAttribute("data-inventory-item-row");
+    if (!itemId) return;
+    e.dataTransfer?.setData("text/plain", String(itemId));
+    e.dataTransfer.effectAllowed = "move";
+    row.classList.add("dragging");
+  });
+
+  rowsTarget?.addEventListener("dragend", (e)=>{
+    const row = e.target.closest("[data-inventory-item-row]");
+    if (row) row.classList.remove("dragging");
+    rowsTarget.querySelectorAll("[data-folder-drop-target].drop-active").forEach(el => el.classList.remove("drop-active"));
+  });
+
+  rowsTarget?.addEventListener("dragover", (e)=>{
+    const target = e.target.closest("[data-folder-drop-target]");
+    if (!target) return;
+    e.preventDefault();
+    rowsTarget.querySelectorAll("[data-folder-drop-target].drop-active").forEach(el => {
+      if (el !== target) el.classList.remove("drop-active");
+    });
+    target.classList.add("drop-active");
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  });
+
+  rowsTarget?.addEventListener("dragleave", (e)=>{
+    const target = e.target.closest("[data-folder-drop-target]");
+    if (!target) return;
+    const next = e.relatedTarget;
+    if (next instanceof Node && target.contains(next)) return;
+    target.classList.remove("drop-active");
+  });
+
+  rowsTarget?.addEventListener("drop", (e)=>{
+    const target = e.target.closest("[data-folder-drop-target]");
+    if (!target) return;
+    e.preventDefault();
+    target.classList.remove("drop-active");
+    const itemId = e.dataTransfer?.getData("text/plain") || "";
+    if (!itemId) return;
+    const item = inventory.find(entry => entry && String(entry.id) === String(itemId));
+    if (!item) return;
+    const folderId = target.getAttribute("data-folder-drop-target") || "";
+    item.folderId = folderId ? String(folderId) : null;
+    saveCloudDebounced();
+    refreshRows();
+  });
+
   rowsTarget?.addEventListener("click", async (e)=>{
+    const addSubFolderBtn = e.target.closest("[data-inventory-subfolder]");
+    if (addSubFolderBtn){
+      e.preventDefault();
+      e.stopPropagation();
+      const parentId = addSubFolderBtn.getAttribute("data-inventory-subfolder") || null;
+      const name = window.prompt("Folder name:", "New Folder");
+      if (!name) return;
+      window.inventoryFolders.push({ id: genId("inv_folder"), name: name.trim(), parent: parentId || null });
+      saveCloudDebounced();
+      refreshRows();
+      return;
+    }
+
+    const renameFolderBtn = e.target.closest("[data-inventory-folder-rename]");
+    if (renameFolderBtn){
+      e.preventDefault();
+      e.stopPropagation();
+      const folderId = renameFolderBtn.getAttribute("data-inventory-folder-rename");
+      const folder = window.inventoryFolders.find(f => f && String(f.id) === String(folderId));
+      if (!folder) return;
+      const name = window.prompt("Rename folder:", folder.name || "");
+      if (!name) return;
+      folder.name = name.trim() || folder.name;
+      saveCloudDebounced();
+      refreshRows();
+      return;
+    }
+
+    const deleteFolderBtn = e.target.closest("[data-inventory-folder-delete]");
+    if (deleteFolderBtn){
+      e.preventDefault();
+      e.stopPropagation();
+      const folderId = deleteFolderBtn.getAttribute("data-inventory-folder-delete");
+      if (!folderId) return;
+      const idsToMove = new Set([String(folderId)]);
+      let changed = true;
+      while (changed){
+        changed = false;
+        window.inventoryFolders.forEach(folder => {
+          if (!folder) return;
+          if (idsToMove.has(String(folder.id))) return;
+          const parent = folder.parent != null ? String(folder.parent) : "";
+          if (idsToMove.has(parent)){ idsToMove.add(String(folder.id)); changed = true; }
+        });
+      }
+      inventory.forEach(item => { if (item && idsToMove.has(String(item.folderId || ""))) item.folderId = null; });
+      window.inventoryFolders = window.inventoryFolders.filter(folder => !idsToMove.has(String(folder?.id)));
+      saveCloudDebounced();
+      refreshRows();
+      return;
+    }
+
     const nameBtn = e.target.closest("[data-inventory-maintenance]");
     if (nameBtn){
       const id = nameBtn.getAttribute("data-inventory-maintenance");
@@ -15052,6 +15629,13 @@ function renderInventory(){
   }
 
   addBtn?.addEventListener("click", openInventoryModal);
+  addFolderBtn?.addEventListener("click", ()=>{
+    const name = window.prompt("Folder name:", "New Folder");
+    if (!name) return;
+    window.inventoryFolders.push({ id: genId("inv_folder"), name: name.trim(), parent: null });
+    saveCloudDebounced();
+    refreshRows();
+  });
   closeBtn?.addEventListener("click", closeInventoryModal);
   backBtn?.addEventListener("click", ()=> setInventoryModalStep("prompt"));
   modal?.addEventListener("click", (e)=>{ if (e.target === modal) closeInventoryModal(); });
@@ -15095,6 +15679,7 @@ function renderInventory(){
       price = num;
     }
     const note = (data.get("inventoryNote") || "").toString().trim();
+    const folderIdRaw = (data.get("inventoryFolderId") || "").toString().trim();
 
     const baseItem = {
       id: genId("inventory"),
@@ -15105,7 +15690,8 @@ function renderInventory(){
       pn,
       link,
       price,
-      note
+      note,
+      folderId: folderIdRaw || null
     };
     const item = typeof normalizeInventoryItem === "function"
       ? normalizeInventoryItem(baseItem)
