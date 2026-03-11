@@ -5715,6 +5715,7 @@ body.job-flow-lock-scroll {
   font-weight: 700;
   padding: 6px 10px;
   margin-bottom: 8px;
+  color: var(--job-category-text, #0F172A);
 }
 .job-flow-tree-body {
   display: grid;
@@ -5727,18 +5728,19 @@ body.job-flow-lock-scroll {
   gap: 10px;
   margin-bottom: 8px;
 }
-.job-flow-tree-toggle {
-  border: 1px solid #cbd5e1;
-  background: #ffffff;
-  color: #1e293b;
-  border-radius: 8px;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 600;
+.job-flow-tree-title-toggle {
+  appearance: none;
   cursor: pointer;
+  text-align: left;
+  margin-bottom: 0;
+  border: 1px solid var(--job-category-border, #d9e1f0);
 }
-.job-flow-tree-toggle:hover {
-  background: #f8fafc;
+.job-flow-tree-title-toggle:hover {
+  filter: brightness(0.98);
+}
+.job-flow-tree-title-toggle:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
 }
 .job-flow-tree-body.is-collapsed {
   display: none;

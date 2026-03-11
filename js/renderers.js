@@ -13217,8 +13217,7 @@ function renderJobs(){
         const collapsed = collapsedSet.has(key);
         return `<div class="job-flow-tree-node" data-depth="${depth}">
           <div class="job-flow-tree-title-row">
-            <div class="job-flow-tree-title"${style}>${escapeHtml(folder?.name || "Category")}</div>
-            <button type="button" class="job-flow-tree-toggle" data-job-flow-tree-toggle="${escapeHtml(key)}" aria-expanded="${collapsed ? "false" : "true"}">${collapsed ? "Show" : "Hide"}</button>
+            <button type="button" class="job-flow-tree-title job-flow-tree-title-toggle" data-job-flow-tree-toggle="${escapeHtml(key)}" aria-expanded="${collapsed ? "false" : "true"}"${style}>${escapeHtml(folder?.name || "Category")}</button>
           </div>
           <div class="job-flow-tree-body${collapsed ? " is-collapsed" : ""}">${projectMarkup || '<p class="small job-flow-empty">No direct jobs in this category.</p>'}${childMarkup}</div>
         </div>`;
