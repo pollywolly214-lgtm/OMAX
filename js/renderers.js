@@ -14274,6 +14274,94 @@ function renderJobs(){
         addedAt: new Date().toISOString()
       });
       toast("File attached from this computer OneDrive root.");
+      const formState = captureNewJobFormState();
+      const scrollPosition = captureScrollPosition();
+      renderJobs();
+      requestAnimationFrame(()=>{
+        restoreScrollPosition(scrollPosition);
+        restoreNewJobFormState(formState);
+      });
+      return true;
+    } catch (err){
+      if (err?.name !== "AbortError"){
+        toast(err?.message || "Unable to attach from this computer root folder.");
+      }
+      return false;
+    }
+  };
+
+  const attachFromLocalOneDriveRootToJob = async (jobId, { completed = false } = {})=>{
+    const source = completed ? completedJobs : cuttingJobs;
+    const target = Array.isArray(source)
+      ? source.find(job => String(job?.id || "") === String(jobId || ""))
+      : null;
+    if (!target) return false;
+    if (!supportsLocalRootPicker()){
+      toast("This browser does not support local root folder attach.");
+      return false;
+    }
+    const rootHandle = await readLocalRootHandle();
+    if (!rootHandle){
+      toast("Root folder is not set on this computer. Open OneDrive setup and choose the root folder first.");
+      openOneDriveModal();
+      return false;
+    }
+    try {
+      const cfg = getSharedConfig();
+      const signature = cfg.localRootSignature || await computeLocalRootSignature(rootHandle);
+      if (!signature){
+        toast("Unable to verify local OneDrive root folder.");
+        return false;
+      }
+      const match = verifyRootSignatureMatches(signature);
+      if (!match.ok){
+        toast("Local root folder mismatch. Please pick the same shared root as other computers.");
+        return false;
+      }
+      const perm = await rootHandle.requestPermission({ mode: "read" });
+      if (perm !== "granted"){
+        toast("Root folder permission is required to attach from this computer.");
+        return false;
+      }
+      const pickedHandles = await window.showOpenFilePicker({
+        multiple: false,
+        startIn: rootHandle,
+        types: [{
+          description: "CAD files",
+          accept: {
+            "application/octet-stream": [".dxf", ".ord", ".omx"],
+            "text/plain": [".dxf", ".ord", ".omx"]
+          }
+        }]
+      });
+      const fileHandle = Array.isArray(pickedHandles) ? pickedHandles[0] : null;
+      if (!fileHandle) return false;
+      const rel = await rootHandle.resolve(fileHandle);
+      if (!Array.isArray(rel)){
+        toast("Selected file must come from the configured root folder.");
+        return false;
+      }
+      const file = await fileHandle.getFile();
+      const ext = extractAttachmentExtension(file.name || "");
+      if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)){
+        toast("Only DXF, ORD, or OMX files can be attached from OneDrive root.");
+        return false;
+      }
+      target.files = Array.isArray(target.files) ? target.files : [];
+      target.files.push({
+        id: genId(file.name || "job_file"),
+        name: file.name || "Attachment",
+        type: file.type || "",
+        size: typeof file.size === "number" ? file.size : null,
+        source: "onedrive_local_root",
+        localRelativePath: `/${rel.join("/")}`,
+        localRootName: getSharedConfig().localRootName || rootHandle.name || "",
+        localRootSignature: signature,
+        localDeviceId: getLocalDeviceId(),
+        addedAt: new Date().toISOString()
+      });
+      saveCloudDebounced();
+      toast("File attached from this computer OneDrive root.");
       renderJobs();
       return true;
     } catch (err){
@@ -14907,6 +14995,21 @@ function renderJobs(){
       saveCloudDebounced();
       toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
       renderJobs();
+      return;
+    }
+
+    if (e.target.matches("input[data-history-file-input]")){
+      const id = e.target.getAttribute("data-history-file-input");
+      const j = completedJobs.find(x=>x.id===id);
+      if (!j){ e.target.value = ""; return; }
+      const attachments = await filesToAttachments(e.target.files);
+      e.target.value = "";
+      if (!attachments.length) return;
+      j.files = Array.isArray(j.files) ? j.files : [];
+      attachments.forEach(att=> j.files.push({ ...att }));
+      saveCloudDebounced();
+      toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
+      renderJobs();
     }
   });
 
@@ -15446,6 +15549,36 @@ function renderJobs(){
       closeActionMenu();
       closeHistoryActionMenu();
       content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
+      return;
+    }
+
+    const uploadRoot = e.target.closest("[data-upload-job-root]");
+    if (uploadRoot){
+      const id = uploadRoot.getAttribute("data-upload-job-root");
+      closeFileMenu();
+      closeActionMenu();
+      closeHistoryActionMenu();
+      if (id) await attachFromLocalOneDriveRootToJob(id, { completed: false });
+      return;
+    }
+
+    const uploadHistory = e.target.closest("[data-upload-history]");
+    if (uploadHistory){
+      const id = uploadHistory.getAttribute("data-upload-history");
+      closeFileMenu();
+      closeActionMenu();
+      closeHistoryActionMenu();
+      content.querySelector(`input[data-history-file-input="${id}"]`)?.click();
+      return;
+    }
+
+    const uploadHistoryRoot = e.target.closest("[data-upload-history-root]");
+    if (uploadHistoryRoot){
+      const id = uploadHistoryRoot.getAttribute("data-upload-history-root");
+      closeFileMenu();
+      closeActionMenu();
+      closeHistoryActionMenu();
+      if (id) await attachFromLocalOneDriveRootToJob(id, { completed: true });
       return;
     }
 

@@ -3086,6 +3086,18 @@ function viewJobs(){
               </aside>
             </div>
             <label class="job-edit-note">Notes<textarea data-history-field="notes" data-history-id="${job.id}" rows="3" placeholder="Notes...">${textEsc(job?.notes || "")}</textarea></label>
+            <div class="job-edit-files">
+              <div class="job-edit-files-actions"><button type="button" data-upload-history="${job.id}">Add Files</button><button type="button" data-upload-history-root="${job.id}">Add from OneDrive root</button></div>
+              <input type="file" data-history-file-input="${job.id}" multiple style="display:none">
+              <ul class="job-file-list">
+                ${jobFiles.length ? jobFiles.map((f, idx)=>{
+                  const safeName = f.name || `file_${idx+1}`;
+                  const href = f.dataUrl || f.url || "";
+                  const link = href ? `<a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a>` : safeName;
+                  return `<li>${link}</li>`;
+                }).join("") : `<li class="muted">No files attached</li>`}
+              </ul>
+            </div>
             <div class="job-edit-actions">
               <button type="button" data-history-save="${job.id}">Save</button>
               <button type="button" class="danger" data-history-cancel="${job.id}">Cancel</button>
@@ -3476,7 +3488,7 @@ function viewJobs(){
             </div>
               <label class="job-edit-note">Notes<textarea data-j="notes" data-id="${j.id}" rows="3" placeholder="Notes...">${j.notes||""}</textarea></label>
               <div class="job-edit-files">
-                <div class="job-edit-files-actions"><button type="button" data-upload-job="${j.id}">Add Files</button><button type="button" data-link-job-file="${j.id}">Link OneDrive URL</button></div>
+                <div class="job-edit-files-actions"><button type="button" data-upload-job="${j.id}">Add Files</button><button type="button" data-upload-job-root="${j.id}">Add from OneDrive root</button><button type="button" data-link-job-file="${j.id}">Link OneDrive URL</button></div>
                 <input type="file" data-job-file-input="${j.id}" multiple style="display:none">
                 <ul class="job-file-list">
                   ${jobFiles.length ? jobFiles.map((f, idx)=>{
