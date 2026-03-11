@@ -14015,7 +14015,10 @@ function renderJobs(){
 
   oneDriveSaveBtn?.addEventListener("click", ()=>{
     const cfg = getSharedConfig();
-    const link = String(oneDriveSharedLinkInput?.value || cfg.sharedFolderUrl || "").trim();
+    const rawLink = String(oneDriveSharedLinkInput?.value || cfg.sharedFolderUrl || "").trim();
+    const link = typeof window.oneDriveLibrary?.normalizeSharedUrl === "function"
+      ? window.oneDriveLibrary.normalizeSharedUrl(rawLink)
+      : rawLink;
     const next = updateSharedConfig({
       enabled: !!oneDriveEnabledInput?.checked,
       sharedFolderUrl: link,
@@ -14106,7 +14109,10 @@ function renderJobs(){
 
     explorerState = { folderId: null, filter: "all", query: "" };
     if (oneDriveExplorerSearch){ oneDriveExplorerSearch.value = ""; }
-    if (oneDriveEmbeddedFrame){ oneDriveEmbeddedFrame.src = cfg.sharedFolderUrl; }
+    const sharedLink = typeof window.oneDriveLibrary?.normalizeSharedUrl === "function"
+      ? window.oneDriveLibrary.normalizeSharedUrl(cfg.sharedFolderUrl)
+      : cfg.sharedFolderUrl;
+    if (oneDriveEmbeddedFrame){ oneDriveEmbeddedFrame.src = sharedLink; }
     if (oneDriveExplorerModal){ oneDriveExplorerModal.removeAttribute("hidden"); document.body.classList.add("modal-open"); }
 
     const existingCache = window.oneDriveLibrary?.readCache?.() || null;
@@ -14118,7 +14124,7 @@ function renderJobs(){
     }
 
     try {
-      const cache = await window.oneDriveLibrary.crawlSharedFolder(cfg.sharedFolderUrl);
+      const cache = await window.oneDriveLibrary.crawlSharedFolder(sharedLink);
       window.oneDriveLibrary.writeCache(cache);
       explorerState.folderId = cache.rootFolderId || null;
       renderExplorer();
