@@ -2320,6 +2320,9 @@ function normalizeInventoryMaterials(raw){
       const num = Number(txt);
       return Number.isFinite(num) ? num : Number.POSITIVE_INFINITY;
     };
+    if (!rows.some(row => Math.abs(parseThicknessValue(row.thickness) - 0.0625) < 1e-6)){
+      rows.push({ thickness: "0.0625", values: columns.map(() => "") });
+    }
     rows.sort((a,b)=> parseThicknessValue(a.thickness) - parseThicknessValue(b.thickness));
 
     sheets[type.id] = { columns, rows };

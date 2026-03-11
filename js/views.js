@@ -3678,11 +3678,16 @@ function materialSheetTableHTML(model, typeId){
         <thead>
           <tr>
             <th class="material-header material-editable" data-material-editable="1" data-edit-kind="material-name" data-type-id="${esc(typeId)}">${esc(type.name || "Material")}</th>
-            ${columns.map((col, idx)=>`<th class="material-header material-editable" data-material-editable="1" data-edit-kind="column" data-type-id="${esc(typeId)}" data-col-index="${idx}">
-              <span>${esc(col || "")}</span>
-              <button type="button" class="tiny danger" data-material-col-delete-index="${esc(typeId)}" data-col-index="${idx}" title="Delete this column">×</button>
-            </th>`).join("")}
+            ${columns.map((col, idx)=>`<th class="material-header material-editable" data-material-editable="1" data-edit-kind="column" data-type-id="${esc(typeId)}" data-col-index="${idx}">${esc(col || "")}</th>`).join("")}
             <th class="material-col-actions"><button type="button" class="small" data-material-col-add="${esc(typeId)}">+C</button></th>
+          </tr>
+          <tr class="material-col-control-row">
+            <th>Actions</th>
+            ${columns.map((_, idx)=>`<th>
+              <button type="button" class="tiny" data-material-col-add-after="${esc(typeId)}" data-col-index="${idx}" title="Insert column after this">+C</button>
+              <button type="button" class="tiny danger" data-material-col-delete-index="${esc(typeId)}" data-col-index="${idx}" title="Delete this column">−C</button>
+            </th>`).join("")}
+            <th></th>
           </tr>
         </thead>
         <tbody>
