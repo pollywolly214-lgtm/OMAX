@@ -2168,6 +2168,12 @@ function viewJobs(){
     const local = new Date(dt.getTime() - offset * 60000);
     return local.toISOString().slice(0,16);
   };
+  const normalizeProjectNumber = (value)=> String(value || "").trim().replace(/[^0-9]/g, "").slice(0, 8);
+  const projectLabel = (job)=> {
+    const value = normalizeProjectNumber(job?.projectNumber);
+    return value || "Unassigned";
+  };
+
 
   const rootCategoryId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
   const jobFolders = Array.isArray(window.jobFolders) && window.jobFolders.length
@@ -3209,6 +3215,10 @@ function viewJobs(){
                 <span class="job-main-category-label">Category</span>
                 <span class="job-main-category-name">${esc(categoryName)}</span>
               </div>
+              <div class="job-main-project small muted">
+                <span class="job-main-category-label">Project #</span>
+                <span class="job-main-category-name">${esc(projectLabel(j))}</span>
+              </div>
               <div class="job-main-category-picker small" data-category-color="1"${colorStyleAttr}>
                 <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(j.name || "Job")}">
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
@@ -3313,6 +3323,7 @@ function viewJobs(){
                 <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-j="chargeRate" data-id="${j.id}" value="${chargeRate}"></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
+                <label>Project #<input type="text" data-j="projectNumber" data-id="${j.id}" inputmode="numeric" maxlength="8" value="${esc(projectLabel(j) === "Unassigned" ? "" : projectLabel(j))}"></label>
                 <label>Priority<select data-j="priority" data-id="${j.id}">${priorityOptionsMarkup(priorityValue)}</select></label>
                 <label>Category<select data-j="cat" data-id="${j.id}" data-job-category-select>
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
@@ -3452,6 +3463,7 @@ function viewJobs(){
           <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
           <input type="date" id="jobStart" required>
           <input type="date" id="jobDue" required>
+          <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required>
           <div class="job-category-field">
             <select id="jobCategory" aria-label="Category" required>
               ${categoryOptionsMarkup(addJobDefaultCategory, { includeCreateOption: true })}
@@ -3468,6 +3480,7 @@ function viewJobs(){
       </section>
 
       <div class="job-category-indicator-wrapper">
+        <button type="button" class="job-flow-open" data-job-flow-open aria-haspopup="dialog" aria-controls="jobFlowModal">Project flow chart</button>
         <div class="job-main-category job-category-indicator" data-category-color="1"${selectedCategoryColorStyle}>
           <span class="job-main-category-label">Viewing</span>
           <div class="job-category-indicator-selectwrap">
@@ -3507,8 +3520,26 @@ function viewJobs(){
         <tbody>${rows}</tbody>
       </table>
       <p class="small muted">Material cost and quantity update immediately when changed.</p>
+      <div class="job-flow-modal-backdrop" id="jobFlowModal" hidden>
+        <div class="job-flow-modal" role="dialog" aria-modal="true" aria-labelledby="jobFlowModalTitle" tabindex="-1">
+          <div class="job-note-modal-header">
+            <h4 id="jobFlowModalTitle">Cutting Project Flow Chart</h4>
+            <button type="button" class="job-note-modal-close" data-job-flow-close aria-label="Close flow chart">×</button>
+          </div>
+          <div class="job-flow-toolbar">
+            <select id="jobFlowGrouping" aria-label="Group flow chart by">
+              <option value="categoryTree">Category tree</option>
+              <option value="project">Projects</option>
+              <option value="job">Jobs</option>
+            </select>
+            <input type="search" id="jobFlowFilter" placeholder="Filter by material, date, cut length, file name">
+            <label><input type="checkbox" id="jobFlowHidePreviews"> Hide previews</label>
+          </div>
+          <div class="job-flow-chart" id="jobFlowChart"></div>
+        </div>
+      </div>
       <div class="job-naming-modal-backdrop" id="jobNamingModal" hidden>
-        <div class="job-naming-modal" role="dialog" aria-modal="true" aria-labelledby="jobNamingModalTitle">
+        <div class="job-naming-modal" role="dialog" aria-modal="true" aria-labelledby="jobNamingModalTitle" tabindex="-1">
           <div class="job-note-modal-header">
             <h4 id="jobNamingModalTitle">File Naming Widget</h4>
             <button type="button" class="job-note-modal-close" data-naming-close aria-label="Close naming widget">×</button>
