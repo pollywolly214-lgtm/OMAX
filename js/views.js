@@ -2009,14 +2009,14 @@ function viewJobs(){
   };
   const oneDriveConfig = (typeof window.getOneDriveJobConfig === "function")
     ? window.getOneDriveJobConfig()
-    : { enabled: false, rootDriveId: "", rootFolderItemId: "", rootName: "", rootWebUrl: "", folderHint: "", sharedFolderUrl: "", shareToken: "", accessToken: "", accessTokenExpiresAt: "", lastLinkedAt: "" };
+    : { enabled: false, rootDriveId: "", rootFolderItemId: "", rootName: "", rootWebUrl: "", folderHint: "", localRootName: "", localRootSignature: "", shareToken: "", accessToken: "", accessTokenExpiresAt: "", lastLinkedAt: "" };
   const oneDriveLibrary = (typeof window.getOneDriveJobLibrary === "function")
     ? window.getOneDriveJobLibrary()
     : [];
-  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.sharedFolderUrl);
+  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.localRootSignature);
   const oneDriveStatusLabel = oneDriveReady
-    ? `OneDrive linked${oneDriveConfig.folderHint ? ` · ${oneDriveConfig.folderHint}` : ""}`
-    : "OneDrive not linked";
+    ? `OneDrive root ready${oneDriveConfig.folderHint ? ` · ${oneDriveConfig.folderHint}` : ""}`
+    : "OneDrive root not set on this computer";
   const extractFileExtension = (filename)=>{
     const name = String(filename || "");
     const dot = name.lastIndexOf(".");
@@ -3624,21 +3624,18 @@ function viewJobs(){
           <div class="job-note-modal-body">
             <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Attach files from this computer's synced OneDrive root folder. Each computer can map a different local path to the same shared folder and the app will verify folder identity.</p>
             <ol class="job-onedrive-steps small">
-              <li><strong>Step 1:</strong> Paste the OneDrive folder share link.</li>
-              <li><strong>Step 2:</strong> Save setup and click <strong>Add from OneDrive library</strong>.</li>
-              <li><strong>Step 3:</strong> Set this computer root folder and use local OneDrive attach.</li>
+              <li><strong>Step 1:</strong> Click <strong>Set this computer root folder</strong> and pick your synced shared OneDrive folder.</li>
+              <li><strong>Step 2:</strong> Save setup for this computer only (it does not copy to other computers).</li>
+              <li><strong>Step 3:</strong> Use <strong>Add from this computer OneDrive folder</strong> when attaching files.</li>
             </ol>
             <div class="job-onedrive-status-grid small muted" data-onedrive-status-grid>
-              <div>Shared link: <span data-onedrive-connection-status>Not set</span></div>
+              <div>Root setup: <span data-onedrive-connection-status>Not set</span></div>
               <div>Folder status: <span data-onedrive-folder-status>Not ready</span></div>
               <div>This computer root: <span data-onedrive-root-status>Not set</span></div>
               <div>This computer ID: <span data-onedrive-device-status>Not set</span></div>
               <div>Indexed files: <span data-onedrive-library-status>0</span></div>
             </div>
-            <label class="job-edit-note">OneDrive shared folder link
-              <input type="url" id="jobOneDriveSharedLink" placeholder="https://... (shared folder URL)" value="${esc(oneDriveConfig.sharedFolderUrl || "")}">
-            </label>
-            <div class="job-onedrive-sync-actions">
+                        <div class="job-onedrive-sync-actions">
               <button type="button" class="job-note-modal-secondary" id="jobOneDriveRootPickerBtn">Set this computer root folder</button>
             </div>
             <label class="job-edit-note">Folder label (optional)
@@ -3655,31 +3652,6 @@ function viewJobs(){
         </div>
       </div>
 
-      <div class="job-note-modal-backdrop" id="jobOneDriveExplorerModal" hidden>
-        <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobOneDriveExplorerTitle">
-          <div class="job-note-modal-header">
-            <h4 id="jobOneDriveExplorerTitle">OneDrive File Explorer</h4>
-            <button type="button" class="job-note-modal-close" data-onedrive-explorer-cancel aria-label="Close file explorer">×</button>
-          </div>
-          <div class="job-note-modal-body">
-            <p class="small muted">OneDrive shared folder (embedded):</p>
-            <iframe id="jobOneDriveEmbeddedFrame" title="OneDrive folder" style="width:100%;height:280px;border:1px solid rgba(255,255,255,.18);border-radius:8px;background:#0b1220"></iframe>
-            <a id="jobOneDriveEmbeddedLink" class="small" href="#" target="_blank" rel="noopener noreferrer">Open shared folder in new tab</a>
-            <div class="small muted" id="jobOneDriveBreadcrumb">/</div>
-            <input type="search" id="jobOneDriveSearch" placeholder="Search files...">
-            <div class="job-onedrive-filter-row">
-              <button type="button" class="job-note-modal-secondary" data-od-filter="all">All</button>
-              <button type="button" class="job-note-modal-secondary" data-od-filter=".dxf">DXF</button>
-              <button type="button" class="job-note-modal-secondary" data-od-filter=".ord">ORD</button>
-              <button type="button" class="job-note-modal-secondary" data-od-filter=".omx">OMX</button>
-            </div>
-            <ul class="job-onedrive-library-list" id="jobOneDriveExplorerList"></ul>
-          </div>
-          <div class="job-note-modal-actions">
-            <button type="button" class="job-note-modal-secondary" data-onedrive-explorer-cancel>Cancel</button>
-          </div>
-        </div>
-      </div>
       <div class="job-naming-modal-backdrop" id="jobNamingModal" hidden>
         <div class="job-naming-modal" role="dialog" aria-modal="true" aria-labelledby="jobNamingModalTitle">
           <div class="job-note-modal-header">

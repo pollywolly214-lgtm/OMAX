@@ -14089,7 +14089,6 @@ function renderJobs(){
   const newFilesInput = document.getElementById("jobFiles");
   const oneDriveSetupBtn = content.querySelector("[data-job-onedrive-setup]");
   const oneDriveModal = document.querySelector("#jobOneDriveModal");
-  const oneDriveSharedLinkInput = document.querySelector("#jobOneDriveSharedLink");
   const oneDriveFolderHintInput = document.querySelector("#jobOneDriveFolderHint");
   const oneDriveEnabledInput = document.querySelector("#jobOneDriveEnabled");
   const oneDriveSaveBtn = document.querySelector("[data-onedrive-save]");
@@ -14102,20 +14101,11 @@ function renderJobs(){
   const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
   const oneDriveRootPickerBtn = document.getElementById("jobOneDriveRootPickerBtn");
 
-  const oneDriveExplorerModal = document.querySelector("#jobOneDriveExplorerModal");
-  const oneDriveExplorerList = document.querySelector("#jobOneDriveExplorerList");
-  const oneDriveExplorerSearch = document.querySelector("#jobOneDriveSearch");
-  const oneDriveEmbeddedFrame = document.querySelector("#jobOneDriveEmbeddedFrame");
-  const oneDriveEmbeddedLink = document.querySelector("#jobOneDriveEmbeddedLink");
-  const oneDriveBreadcrumb = document.querySelector("#jobOneDriveBreadcrumb");
-  const oneDriveExplorerCancelBtns = Array.from(document.querySelectorAll("[data-onedrive-explorer-cancel]"));
-  const oneDriveFilterBtns = Array.from(document.querySelectorAll("[data-od-filter]"));
 
   const getSharedConfig = ()=>{
     const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : normalizeOneDriveJobConfig(null);
     return {
       enabled: !!cfg?.enabled,
-      sharedFolderUrl: String(cfg?.sharedFolderUrl || ""),
       folderHint: String(cfg?.folderHint || ""),
       localRootName: String(cfg?.localRootName || ""),
       localRootSignature: String(cfg?.localRootSignature || "")
@@ -14129,9 +14119,9 @@ function renderJobs(){
 
   const updateOneDriveWizardStatus = async ()=>{
     const cfg = getSharedConfig();
-    if (oneDriveConnStatus) oneDriveConnStatus.textContent = cfg.sharedFolderUrl ? "Configured" : "Optional";
+    if (oneDriveConnStatus) oneDriveConnStatus.textContent = cfg.localRootSignature ? "Configured" : "Not set";
     if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = cfg.localRootSignature ? "Verified" : "Not ready";
-    if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = "Local mode";
+    if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = cfg.localRootSignature ? "Ready" : "Setup required";
     if (oneDriveRootStatus){
       oneDriveRootStatus.textContent = cfg.localRootName || "Not set";
     }
@@ -14184,12 +14174,11 @@ function renderJobs(){
       toast("This browser does not support local root folder attach.");
       return false;
     }
-    let rootHandle = await readLocalRootHandle();
+    const rootHandle = await readLocalRootHandle();
     if (!rootHandle){
-      const picked = await chooseLocalOneDriveRoot();
-      if (!picked) return false;
-      rootHandle = await readLocalRootHandle();
-      if (!rootHandle) return false;
+      toast("Root folder is not set on this computer. Open OneDrive setup and choose the root folder first.");
+      openOneDriveModal();
+      return false;
     }
 
     try {
@@ -14284,87 +14273,14 @@ function renderJobs(){
 
   oneDriveSaveBtn?.addEventListener("click", ()=>{
     const cfg = getSharedConfig();
-    const link = String(oneDriveSharedLinkInput?.value || cfg.sharedFolderUrl || "").trim();
     const next = updateSharedConfig({
       enabled: !!oneDriveEnabledInput?.checked,
-      sharedFolderUrl: link,
       folderHint: String(oneDriveFolderHintInput?.value || cfg.folderHint || "")
     });
     closeOneDriveModal();
-    toast(next.enabled ? "OneDrive shared link saved" : "OneDrive setup saved (disabled)");
+    toast(next.enabled ? "OneDrive root setup saved for this computer" : "OneDrive setup saved (disabled)");
     renderJobs();
   });
-
-  let explorerState = { folderId: null, filter: "all", query: "" };
-
-  const closeOneDriveExplorer = ()=>{
-    if (!oneDriveExplorerModal) return;
-    oneDriveExplorerModal.setAttribute("hidden", "");
-    if (oneDriveEmbeddedFrame){ oneDriveEmbeddedFrame.src = "about:blank"; }
-    if (oneDriveEmbeddedLink){ oneDriveEmbeddedLink.href = "#"; }
-    document.body.classList.remove("modal-open");
-  };
-
-  const renderExplorer = ()=>{
-    if (!oneDriveExplorerList) return;
-    const cache = window.oneDriveLibrary?.readCache?.() || {};
-    const tree = cache.tree || { folders:{}, files:{}, rootFolderId:null };
-    if (!explorerState.folderId) explorerState.folderId = tree.rootFolderId || null;
-    const folder = explorerState.folderId ? tree.folders?.[explorerState.folderId] : null;
-    const childFolders = folder ? (folder.childFolderIds||[]).map(id=>tree.folders?.[id]).filter(Boolean) : [];
-    const childFiles = folder ? (folder.childFileIds||[]).map(id=>tree.files?.[id]).filter(Boolean) : (Array.isArray(cache.flat)?cache.flat:[]);
-    const q = explorerState.query.toLowerCase();
-    const files = childFiles.filter(f => (!q || String(f.name||"").toLowerCase().includes(q)) && (explorerState.filter==="all" || String(f.ext||"").toLowerCase()===explorerState.filter));
-    if (oneDriveBreadcrumb) oneDriveBreadcrumb.textContent = folder?.path || "/";
-    oneDriveExplorerList.innerHTML = "";
-    const upLi = document.createElement("li");
-    upLi.innerHTML = '<button type="button" class="link" data-od-up="1">⬆ Up</button>';
-    oneDriveExplorerList.appendChild(upLi);
-    childFolders.forEach(f=>{ const li=document.createElement("li"); li.innerHTML=`<button type="button" class="link" data-od-open-folder="${f.id}">📁 ${f.name}</button>`; oneDriveExplorerList.appendChild(li); });
-    files.forEach(file=>{ const li=document.createElement("li"); li.innerHTML=`<button type="button" class="link" data-od-select-file="${file.id}">📄 ${file.name}</button>`; oneDriveExplorerList.appendChild(li); });
-    if (!childFolders.length && !files.length){ const li=document.createElement("li"); li.className="muted"; li.textContent="No matching files in this folder."; oneDriveExplorerList.appendChild(li); }
-  };
-
-  oneDriveExplorerList?.addEventListener("click", (event)=>{
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    const openFolder = target?.closest("[data-od-open-folder]");
-    if (openFolder){ explorerState.folderId = openFolder.getAttribute("data-od-open-folder"); renderExplorer(); return; }
-    const up = target?.closest("[data-od-up]");
-    if (up){
-      const cache = window.oneDriveLibrary?.readCache?.() || {}; const tree = cache.tree || {}; const cur = tree.folders?.[explorerState.folderId];
-      explorerState.folderId = cur?.parentId || cache.rootFolderId || tree.rootFolderId || explorerState.folderId; renderExplorer(); return;
-    }
-    const selectFile = target?.closest("[data-od-select-file]");
-    if (selectFile){
-      const fileId = selectFile.getAttribute("data-od-select-file") || "";
-      const cache = window.oneDriveLibrary?.readCache?.() || {}; const tree = cache.tree || {};
-      const picked = tree.files?.[fileId] || (Array.isArray(cache.flat)?cache.flat.find(f=>String(f.id)===String(fileId)):null);
-      if (!picked) return;
-      pendingNewJobFiles.push({
-        id: genId(picked.name || "job_file"),
-        name: picked.name || "Linked file",
-        type: "",
-        size: Number(picked.size || 0),
-        source: "onedrive",
-        driveId: picked.driveId || "",
-        itemId: picked.itemId || picked.id || "",
-        eTag: picked.eTag || "",
-        lastModifiedDateTime: picked.lastModifiedDateTime || "",
-        webUrl: picked.webUrl || "",
-        url: picked.webUrl || "",
-        path: picked.parentPath || "",
-        selectedAt: new Date().toISOString(),
-        addedAt: new Date().toISOString()
-      });
-      toast("OneDrive file attached to job");
-      closeOneDriveExplorer();
-      renderJobs();
-    }
-  });
-
-  oneDriveExplorerSearch?.addEventListener("input", ()=>{ explorerState.query = String(oneDriveExplorerSearch.value || ""); renderExplorer(); });
-  oneDriveFilterBtns.forEach(btn=>btn.addEventListener("click", ()=>{ explorerState.filter = btn.getAttribute("data-od-filter") || "all"; renderExplorer(); }));
-  oneDriveExplorerCancelBtns.forEach(btn=>btn.addEventListener("click", closeOneDriveExplorer));
 
   oneDriveLibraryAddToJobBtn?.addEventListener("click", async ()=>{
     const attached = await attachFromLocalOneDriveRoot();
@@ -15024,7 +14940,8 @@ function renderJobs(){
       }
       const fileBlob = await resolveLocalFileFromRelativePath(file.localRelativePath);
       if (!fileBlob){
-        toast("Unable to locate this file in the configured local root folder.");
+        toast("Local root is missing or incorrect on this computer. Re-run OneDrive setup.");
+        openOneDriveModal();
         return false;
       }
       triggerFileDownload(fileBlob, file.name || fileBlob.name || "attachment");
