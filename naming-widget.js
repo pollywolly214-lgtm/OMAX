@@ -751,10 +751,14 @@ function parseOmaxRows(content) {
   const rows = [];
   String(content || '').split(/\r?\n/).forEach(raw => {
     const line = raw.trim();
-    if (!line || line.startsWith('//') || !line.startsWith('[0]')) return;
+    if (!line || line.startsWith('//') || !line.startsWith('[')) return;
 
-    let after = line.split(']', 1)[1] || '';
-    after = after.trimStart();
+    const endBracket = line.indexOf(']');
+    if (endBracket <= 1) return;
+    const recordId = Number.parseInt(line.slice(1, endBracket), 10);
+    if (!Number.isFinite(recordId) || recordId < 0) return;
+
+    let after = line.slice(endBracket + 1).trimStart();
     if (after.startsWith(',')) after = after.slice(1);
     const tokens = after.split(',').map(token => token.trim());
     if (tokens.length < 8) return;
