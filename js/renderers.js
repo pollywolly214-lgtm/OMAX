@@ -13971,6 +13971,9 @@ function renderJobs(){
   const oneDriveEmbeddedFrame = document.querySelector("#jobOneDriveEmbeddedFrame");
   const oneDriveEmbeddedLink = document.querySelector("#jobOneDriveEmbeddedLink");
   const oneDriveBreadcrumb = document.querySelector("#jobOneDriveBreadcrumb");
+  const oneDriveManualUrlInput = document.querySelector("#jobOneDriveManualUrl");
+  const oneDriveManualNameInput = document.querySelector("#jobOneDriveManualName");
+  const oneDriveManualAttachBtn = document.querySelector("#jobOneDriveManualAttachBtn");
   const oneDriveExplorerCancelBtns = Array.from(document.querySelectorAll("[data-onedrive-explorer-cancel]"));
   const oneDriveFilterBtns = Array.from(document.querySelectorAll("[data-od-filter]"));
 
@@ -14034,6 +14037,8 @@ function renderJobs(){
     oneDriveExplorerModal.setAttribute("hidden", "");
     if (oneDriveEmbeddedFrame){ oneDriveEmbeddedFrame.src = "about:blank"; }
     if (oneDriveEmbeddedLink){ oneDriveEmbeddedLink.href = "#"; }
+    if (oneDriveManualUrlInput){ oneDriveManualUrlInput.value = ""; }
+    if (oneDriveManualNameInput){ oneDriveManualNameInput.value = ""; }
     document.body.classList.remove("modal-open");
   };
 
@@ -14092,6 +14097,52 @@ function renderJobs(){
       closeOneDriveExplorer();
       renderJobs();
     }
+  });
+
+
+
+  oneDriveManualAttachBtn?.addEventListener("click", ()=>{
+    const manualUrl = String(oneDriveManualUrlInput?.value || "").trim();
+    const manualName = String(oneDriveManualNameInput?.value || "").trim();
+    if (!manualUrl){
+      toast("Paste a OneDrive file link first.");
+      oneDriveManualUrlInput?.focus();
+      return;
+    }
+    if (!/^https:\/\//i.test(manualUrl)){
+      toast("Use a full https:// file link.");
+      oneDriveManualUrlInput?.focus();
+      return;
+    }
+    let derivedName = manualName;
+    if (!derivedName){
+      try {
+        const parsed = new URL(manualUrl);
+        const pathPart = parsed.pathname.split("/").filter(Boolean).pop() || "";
+        derivedName = decodeURIComponent(pathPart) || "OneDrive file";
+      } catch (_){
+        derivedName = "OneDrive file";
+      }
+    }
+    pendingNewJobFiles.push({
+      id: genId(derivedName || "job_file"),
+      name: derivedName || "OneDrive file",
+      type: "",
+      size: 0,
+      source: "onedrive",
+      driveId: "",
+      itemId: "",
+      eTag: "",
+      lastModifiedDateTime: "",
+      webUrl: manualUrl,
+      url: manualUrl,
+      path: "",
+      selectedAt: new Date().toISOString(),
+      addedAt: new Date().toISOString()
+    });
+    toast("OneDrive link attached to job");
+    closeOneDriveExplorer();
+    renderJobs();
   });
 
   oneDriveExplorerSearch?.addEventListener("input", ()=>{ explorerState.query = String(oneDriveExplorerSearch.value || ""); renderExplorer(); });

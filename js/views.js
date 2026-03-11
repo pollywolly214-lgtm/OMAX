@@ -3663,6 +3663,15 @@ function viewJobs(){
               <button type="button" class="job-note-modal-secondary" data-od-filter=".omx">OMX</button>
             </div>
             <ul class="job-onedrive-library-list" id="jobOneDriveExplorerList"></ul>
+            <div class="job-onedrive-manual-attach">
+              <label class="job-edit-note">Attach from OneDrive file link
+                <input type="url" id="jobOneDriveManualUrl" placeholder="https://... (file link)">
+              </label>
+              <label class="job-edit-note">File name (optional)
+                <input type="text" id="jobOneDriveManualName" placeholder="drawing.dxf">
+              </label>
+              <button type="button" class="job-note-modal-primary" id="jobOneDriveManualAttachBtn">Attach this link</button>
+            </div>
           </div>
           <div class="job-note-modal-actions">
             <button type="button" class="job-note-modal-secondary" data-onedrive-explorer-cancel>Cancel</button>

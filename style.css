@@ -5716,3 +5716,12 @@ body.log-history-open { overflow: hidden; }
 .log-history-actions .log-history-save { border: none; background: #1f3a60; color: #fff; padding: 8px 14px; border-radius: 9px; font-weight: 600; box-shadow: 0 2px 6px rgba(31,58,96,0.22); }
 .log-history-actions .log-history-save:hover { background: #254674; }
 .log-history-actions-spacer { flex: 1 1 auto; }
+
+
+.job-onedrive-manual-attach {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.14);
+  display: grid;
+  gap: 8px;
+}
