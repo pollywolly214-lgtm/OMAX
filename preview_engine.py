@@ -62,7 +62,7 @@ def preview_file(file_path: str | Path, output_path: str | Path | None = None, _
     if ext == ".dxf":
         return preview_dxf(target, output).output_path
     if ext == ".omx":
-        return preview_omx(target, output).output_path
+        return render_placeholder(target, "OMX preview is disabled; upload DXF or ORD", output).output_path
     if ext == ".ord":
         return preview_ord(target, output, _visited).output_path
 

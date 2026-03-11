@@ -59,9 +59,9 @@ function fileStep() {
   const preview = filePreviewMarkup(answers.file);
   return {
     title: 'First, choose your file',
-    hint: 'We keep the extension and rename only the filename body.',
+    hint: 'Supports .dxf and .ord files. We keep the extension and rename only the filename body.',
     body: `
-      <label for="fileInput">Upload file<input id="fileInput" type="file" required /></label>
+      <label for="fileInput">Upload file<input id="fileInput" type="file" accept=".dxf,.ord" required /></label>
       <p class="tiny">${answers.file ? `${answers.file.name} (${formatBytes(answers.file.size)})` : 'No file selected yet.'}</p>
       ${preview ? `<div class="file-preview-wrap">${preview}</div>` : ''}
     `,
@@ -69,7 +69,16 @@ function fileStep() {
       const input = byId('fileInput');
       input.onchange = async () => {
         releasePreviewObjectUrl();
-        answers.file = input.files?.[0] || null;
+        const selected = input.files?.[0] || null;
+        if (selected && !isSupportedUpload(selected.name)) {
+          answers.file = null;
+          input.value = '';
+          ui.inlineError.textContent = 'Only .dxf and .ord files are supported.';
+          renderStep();
+          return;
+        }
+
+        answers.file = selected;
         if (answers.file) {
           await preparePreviewData(answers.file);
         }
@@ -582,6 +591,12 @@ function gcd(a, b) {
   return gcd(b, a % b);
 }
 
+
+function isSupportedUpload(filename) {
+  const ext = extractExtension(filename).toLowerCase();
+  return ext === '.dxf' || ext === '.ord';
+}
+
 function extractExtension(filename) {
   const name = String(filename || '');
   const lastDot = name.lastIndexOf('.');
@@ -628,8 +643,7 @@ async function preparePreviewData(file) {
 
   const previewSvg = renderCadToSvgDataUrl(content)
     || renderOmaxToolpathToSvgDataUrl(content, ext)
-    || renderCoordinateCloudToSvgDataUrl(content)
-    || renderBinaryFloatPairsToSvgDataUrl(buffer);
+    || renderCoordinateCloudToSvgDataUrl(content);
 
   file.preview = previewSvg
     ? { mode: 'svg', content: previewSvg }
@@ -681,7 +695,7 @@ function renderCadToSvgDataUrl(text) {
 
 
 function renderOmaxToolpathToSvgDataUrl(content, ext) {
-  if (ext !== '.omx' && ext !== '.ord') return '';
+  if (ext !== '.ord') return '';
 
   const rows = parseOmaxRows(content);
   if (rows.length < 2) return '';
