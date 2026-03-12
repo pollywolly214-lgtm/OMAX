@@ -3883,6 +3883,9 @@ function viewInventory(){
   const section = String(window.inventorySection || "items") === "material" ? "material" : "items";
   const materialModel = normalizeInventoryMaterials(window.inventoryMaterials);
   const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
+  const folderUiState = window.inventoryFolderUiState && typeof window.inventoryFolderUiState === "object"
+    ? window.inventoryFolderUiState
+    : {};
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const childrenOf = (parentId)=>{
     const target = parentId == null ? "" : String(parentId);
@@ -3897,21 +3900,23 @@ function viewInventory(){
     const folderId = String(folder.id);
     const subFolders = childrenOf(folderId).map(renderFolder).join("");
     const folderItems = itemsIn(folderId).map(i => inventoryRowsHTML([i])).join("");
+    const isOpen = folderUiState[folderId] === true;
     return `
-      <details class="inventory-folder" data-folder-drop-target="${esc(folderId)}" open>
+      <details class="inventory-folder" data-folder-drop-target="${esc(folderId)}" ${isOpen ? "open" : ""}>
         <summary>
           <span>📁 ${esc(folder.name || "Unnamed folder")}</span>
-          <span class="inventory-folder-controls">
-            <button type="button" data-inventory-subfolder="${esc(folderId)}">+ Folder</button>
-            <button type="button" data-inventory-folder-rename="${esc(folderId)}">Rename</button>
-            <button type="button" class="danger" data-inventory-folder-delete="${esc(folderId)}">Delete</button>
-          </span>
+          <div class="inventory-folder-options" data-folder-options>
+            <button type="button" class="inventory-folder-options-trigger" data-folder-options-trigger="${esc(folderId)}" aria-expanded="false" aria-haspopup="true">Options</button>
+            <div class="inventory-folder-options-menu" role="menu" hidden>
+              <button type="button" data-inventory-subfolder="${esc(folderId)}" role="menuitem">+ Folder</button>
+              <button type="button" data-inventory-folder-rename="${esc(folderId)}" role="menuitem">Rename</button>
+              <button type="button" class="danger" data-inventory-folder-delete="${esc(folderId)}" role="menuitem">Delete</button>
+              <label>Move folder to
+                <select data-folder-parent="${esc(folderId)}">${inventoryFolderOptionsMarkup(folder.parent, { includeCurrent: folderId })}</select>
+              </label>
+            </div>
+          </div>
         </summary>
-        <div class="mini-form inventory-folder-move-row">
-          <label>Move folder to
-            <select data-folder-parent="${esc(folderId)}">${inventoryFolderOptionsMarkup(folder.parent, { includeCurrent: folderId })}</select>
-          </label>
-        </div>
         <table class="inventory-table"><tbody>${folderItems || `<tr><td colspan="10" class="muted">No parts in this folder.</td></tr>`}</tbody></table>
         <div class="small muted">Drop parts here to move into this folder</div>
         <div class="inventory-folder-children">${subFolders}</div>
@@ -3945,7 +3950,7 @@ function viewInventory(){
       </div>
       <div class="small muted inventory-hint">Results update as you type. Organize folders like a file explorer.</div>
       <div class="inventory-explorer" data-inventory-rows>
-        <details class="inventory-folder" data-folder-drop-target="" open>
+        <details class="inventory-folder" data-folder-drop-target="" ${folderUiState.__root__ === false ? "" : "open"}>
           <summary><span>🗂️ Root</span></summary>
           <table class="inventory-table">
             <thead><tr><th>Item</th><th>Qty (New)</th><th>Qty (Old)</th><th>Unit</th><th>PN</th><th>Link</th><th>Price</th><th>Note</th><th>Folder</th><th>Actions</th></tr></thead>
