@@ -15728,6 +15728,7 @@ function renderInventory(){
   const qtyNewField = modal?.querySelector("[name=\"inventoryQtyNew\"]");
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
   let addToMaintenance = false;
+  let isInventoryDragging = false;
 
   const persistInventoryMaterials = ()=>{
     window.inventoryMaterials = normalizeInventoryMaterials(window.inventoryMaterials);
@@ -16342,6 +16343,7 @@ function renderInventory(){
   rowsTarget?.addEventListener("toggle", (e)=>{
     const folderNode = e.target.closest("[data-folder-drop-target]");
     if (!folderNode) return;
+    if (isInventoryDragging) return;
     if (!window.inventoryFolderUiState || typeof window.inventoryFolderUiState !== "object"){
       window.inventoryFolderUiState = {};
     }
@@ -16353,6 +16355,7 @@ function renderInventory(){
 
   rowsTarget?.addEventListener("dragstart", (e)=>{
     if (e.target.closest("input,select,button,a,textarea")) return;
+    isInventoryDragging = true;
     const row = e.target.closest("[data-inventory-item-row]");
     if (!row) return;
     const itemId = row.getAttribute("data-inventory-item-row");
@@ -16363,6 +16366,7 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("dragend", (e)=>{
+    isInventoryDragging = false;
     const row = e.target.closest("[data-inventory-item-row]");
     if (row) row.classList.remove("dragging");
     rowsTarget.querySelectorAll("[data-folder-drop-target].drop-active").forEach(el => el.classList.remove("drop-active"));
@@ -16388,6 +16392,7 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("drop", (e)=>{
+    isInventoryDragging = false;
     const target = e.target.closest("[data-folder-drop-target]");
     if (!target) return;
     e.preventDefault();
@@ -16400,6 +16405,13 @@ function renderInventory(){
     item.folderId = folderId ? String(folderId) : null;
     saveCloudDebounced();
     refreshRows();
+  });
+
+  rowsTarget?.addEventListener("mousedown", (e)=>{
+    const optionsTrigger = e.target.closest("[data-folder-options-trigger]");
+    if (!optionsTrigger) return;
+    e.preventDefault();
+    e.stopPropagation();
   });
 
   rowsTarget?.addEventListener("click", async (e)=>{
