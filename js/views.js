@@ -2221,6 +2221,44 @@ function viewJobs(){
     const bTime = new Date(b.completedAtISO || b.dueISO || b.startISO || 0).getTime();
     return bTime - aTime;
   });
+  const allJobsForCutNumbers = (Array.isArray(cuttingJobs) ? cuttingJobs : []).concat(completedJobs).filter(Boolean);
+  const addedOrderFromId = (job)=>{
+    const id = String(job?.id || "");
+    const token = id.includes("_") ? id.slice(id.lastIndexOf("_") + 1) : "";
+    const parsed = Number.parseInt(token, 36);
+    return Number.isFinite(parsed) ? parsed : Number.NaN;
+  };
+  const fallbackOrderTime = (job)=>{
+    const val = Date.parse(job?.startISO || job?.createdAt || job?.completedAtISO || "");
+    return Number.isFinite(val) ? val : Number.MAX_SAFE_INTEGER;
+  };
+  const cutOrder = allJobsForCutNumbers.slice().sort((a, b)=>{
+    const aAdded = addedOrderFromId(a);
+    const bAdded = addedOrderFromId(b);
+    if (Number.isFinite(aAdded) || Number.isFinite(bAdded)){
+      if (!Number.isFinite(aAdded)) return 1;
+      if (!Number.isFinite(bAdded)) return -1;
+      if (aAdded !== bAdded) return aAdded - bAdded;
+    }
+    const aTime = fallbackOrderTime(a);
+    const bTime = fallbackOrderTime(b);
+    if (aTime !== bTime) return aTime - bTime;
+    return String(a?.id || "").localeCompare(String(b?.id || ""));
+  });
+  const jobCutMap = new Map();
+  const jobCategoryCutMap = new Map();
+  const categoryCounts = new Map();
+  cutOrder.forEach((job, idx)=>{
+    const key = String(job?.id || `${job?.name || "job"}_${idx}`);
+    jobCutMap.set(key, `C${String(idx + 1).padStart(3, "0")}`);
+    const catKey = String(job?.cat || (window.JOB_ROOT_FOLDER_ID || "jobs_root"));
+    const nextCat = (categoryCounts.get(catKey) || 0) + 1;
+    categoryCounts.set(catKey, nextCat);
+    jobCategoryCutMap.set(key, String(nextCat));
+  });
+  const jobCutLabel = (job)=> jobCutMap.get(String(job?.id || "")) || "C000";
+  const jobCategoryCutLabel = (job)=> jobCategoryCutMap.get(String(job?.id || "")) || "0";
+  const jobNameWithCut = (job, fallback = "Job")=> `${String(job?.name || fallback)} · ${jobCutLabel(job)} · ${jobCategoryCutLabel(job)}`;
   const historySearchRaw = typeof jobHistorySearchTerm === "string"
     ? jobHistorySearchTerm
     : (typeof window.jobHistorySearchTerm === "string" ? window.jobHistorySearchTerm : "");
@@ -2304,6 +2342,13 @@ function viewJobs(){
       if (!text) return false;
       return text.toLowerCase().includes(historyQuery);
     });
+  };
+
+
+  const normalizeProjectNumber = (value)=> String(value || "").trim().replace(/[^0-9]/g, "").slice(0, 8);
+  const projectLabel = (job)=> {
+    const value = normalizeProjectNumber(job?.projectNumber);
+    return value || "Unassigned";
   };
 
   const numberInputValue = (value)=>{
@@ -2593,7 +2638,7 @@ function viewJobs(){
           const jobColorStyle = categoryColorStyle(job?.cat);
           return `<li><div class="job-folder-job-chip job-title-chip job-title-chip-compact"${jobColorStyle}>
               <span class="job-title-chip-dot" aria-hidden="true"></span>
-              <span class="job-title-chip-text">${esc(job?.name || "Untitled job")}</span>
+              <span class="job-title-chip-text">${esc(jobNameWithCut(job, "Untitled job"))}</span>
             </div>${metaLine}</li>`;
         }).join("")
       : `<li class="muted">Add jobs to this category to see them listed.</li>`;
@@ -2952,7 +2997,7 @@ function viewJobs(){
               <div class="job-main-headline">
                 <div class="job-title-chip"${colorStyleAttr}>
                   <span class="job-title-chip-dot" aria-hidden="true"></span>
-                  <span class="job-title-chip-text">${esc(job?.name || "Job")}</span>
+                  <span class="job-title-chip-text">${esc(jobNameWithCut(job, "Job"))}</span>
                 </div>
                 <div class="job-priority-inline job-priority-inline-static">
                   <span class="job-priority-inline-label">Priority</span>
@@ -3325,7 +3370,7 @@ function viewJobs(){
               <div class="job-main-headline">
                 <div class="job-title-chip"${colorStyleAttr}>
                   <span class="job-title-chip-dot" aria-hidden="true"></span>
-                  <span class="job-title-chip-text">${esc(j.name || "Job")}</span>
+                  <span class="job-title-chip-text">${esc(jobNameWithCut(j, "Job"))}</span>
                 </div>
                 <div class="job-priority-inline">
                   <label class="job-priority-inline-label" for="${esc(prioritySelectId)}">Priority</label>
@@ -3339,8 +3384,12 @@ function viewJobs(){
                 <span class="job-main-category-label">Category</span>
                 <span class="job-main-category-name">${esc(categoryName)}</span>
               </div>
+              <div class="job-main-project small muted">
+                <span class="job-main-category-label">Project #</span>
+                <span class="job-main-category-name">${esc(projectLabel(j))}</span>
+              </div>
               <div class="job-main-category-picker small" data-category-color="1"${colorStyleAttr}>
-                <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(j.name || "Job")}">
+                <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(jobNameWithCut(j, "Job"))}">
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
                 </select>
               </div>
@@ -3417,6 +3466,7 @@ function viewJobs(){
                 <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-j="chargeRate" data-id="${j.id}" value="${chargeRate}"></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
+                <label>Project #<input type="text" data-j="projectNumber" data-id="${j.id}" inputmode="numeric" maxlength="8" value="${esc(projectLabel(j) === "Unassigned" ? "" : projectLabel(j))}"></label>
                 <label>Priority<select data-j="priority" data-id="${j.id}">${priorityOptionsMarkup(priorityValue)}</select></label>
                 <label>Category<select data-j="cat" data-id="${j.id}" data-job-category-select>
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
@@ -3559,6 +3609,7 @@ function viewJobs(){
           <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
           <input type="date" id="jobStart" required>
           <input type="date" id="jobDue" required>
+          <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required>
           <div class="job-category-field">
             <select id="jobCategory" aria-label="Category" required>
               ${categoryOptionsMarkup(addJobDefaultCategory, { includeCreateOption: true })}
@@ -3576,6 +3627,7 @@ function viewJobs(){
       </section>
 
       <div class="job-category-indicator-wrapper">
+        <button type="button" class="job-flow-open" data-job-flow-open aria-haspopup="dialog" aria-controls="jobFlowModal">Project flow chart</button>
         <div class="job-main-category job-category-indicator" data-category-color="1"${selectedCategoryColorStyle}>
           <span class="job-main-category-label">Viewing</span>
           <div class="job-category-indicator-selectwrap">
@@ -3615,6 +3667,24 @@ function viewJobs(){
         <tbody>${rows}</tbody>
       </table>
       <p class="small muted">Material cost and quantity update immediately when changed.</p>
+      <div class="job-flow-modal-backdrop" id="jobFlowModal" hidden>
+        <div class="job-flow-modal" role="dialog" aria-modal="true" aria-labelledby="jobFlowModalTitle" tabindex="-1">
+          <div class="job-note-modal-header">
+            <h4 id="jobFlowModalTitle">Cutting Project Flow Chart</h4>
+            <button type="button" class="job-note-modal-close" data-job-flow-close aria-label="Close flow chart">×</button>
+          </div>
+          <div class="job-flow-toolbar">
+            <select id="jobFlowGrouping" aria-label="Group flow chart by">
+              <option value="categoryTree">Category tree</option>
+              <option value="project">Projects</option>
+              <option value="job">Jobs</option>
+            </select>
+            <input type="search" id="jobFlowFilter" placeholder="Filter by material, date, cut length, file name">
+            <label><input type="checkbox" id="jobFlowHidePreviews"> Hide previews</label>
+          </div>
+          <div class="job-flow-chart" id="jobFlowChart"></div>
+        </div>
+      </div>
       <div class="job-note-modal-backdrop" id="jobOneDriveModal" hidden>
         <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobOneDriveModalTitle" aria-describedby="jobOneDriveModalDescription">
           <div class="job-note-modal-header">
@@ -3653,7 +3723,7 @@ function viewJobs(){
       </div>
 
       <div class="job-naming-modal-backdrop" id="jobNamingModal" hidden>
-        <div class="job-naming-modal" role="dialog" aria-modal="true" aria-labelledby="jobNamingModalTitle">
+        <div class="job-naming-modal" role="dialog" aria-modal="true" aria-labelledby="jobNamingModalTitle" tabindex="-1">
           <div class="job-note-modal-header">
             <h4 id="jobNamingModalTitle">File Naming Widget</h4>
             <button type="button" class="job-note-modal-close" data-naming-close aria-label="Close naming widget">×</button>
