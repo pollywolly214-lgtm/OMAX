@@ -16303,6 +16303,18 @@ function renderInventory(){
     }
   });
 
+  rowsTarget?.addEventListener("toggle", (e)=>{
+    const folderNode = e.target.closest("[data-folder-drop-target]");
+    if (!folderNode) return;
+    if (!window.inventoryFolderUiState || typeof window.inventoryFolderUiState !== "object"){
+      window.inventoryFolderUiState = {};
+    }
+    const folderId = folderNode.getAttribute("data-folder-drop-target") || "__root__";
+    window.inventoryFolderUiState[folderId] = folderNode.open === true;
+    saveCloudDebounced();
+  });
+
+
   rowsTarget?.addEventListener("dragstart", (e)=>{
     if (e.target.closest("input,select,button,a,textarea")) return;
     const row = e.target.closest("[data-inventory-item-row]");
@@ -16355,6 +16367,37 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("click", async (e)=>{
+    const optionsTrigger = e.target.closest("[data-folder-options-trigger]");
+    if (optionsTrigger){
+      e.preventDefault();
+      e.stopPropagation();
+      const holder = optionsTrigger.closest("[data-folder-options]");
+      if (!holder) return;
+      const menu = holder.querySelector(".inventory-folder-options-menu");
+      if (!menu) return;
+      const willOpen = menu.hasAttribute("hidden");
+      rowsTarget.querySelectorAll("[data-folder-options]").forEach(node => {
+        const nodeMenu = node.querySelector(".inventory-folder-options-menu");
+        const nodeBtn = node.querySelector("[data-folder-options-trigger]");
+        if (nodeMenu) nodeMenu.setAttribute("hidden", "");
+        if (nodeBtn) nodeBtn.setAttribute("aria-expanded", "false");
+      });
+      if (willOpen){
+        menu.removeAttribute("hidden");
+        optionsTrigger.setAttribute("aria-expanded", "true");
+      }
+      return;
+    }
+
+    if (!e.target.closest("[data-folder-options]")){
+      rowsTarget.querySelectorAll("[data-folder-options]").forEach(node => {
+        const nodeMenu = node.querySelector(".inventory-folder-options-menu");
+        const nodeBtn = node.querySelector("[data-folder-options-trigger]");
+        if (nodeMenu) nodeMenu.setAttribute("hidden", "");
+        if (nodeBtn) nodeBtn.setAttribute("aria-expanded", "false");
+      });
+    }
+
     const addSubFolderBtn = e.target.closest("[data-inventory-subfolder]");
     if (addSubFolderBtn){
       e.preventDefault();
