@@ -3879,7 +3879,16 @@ function viewInventoryMaterial(model){
 }
 
 function viewInventory(){
-  const filtered = filterInventoryItems(inventorySearchTerm);
+  const filteredSource = filterInventoryItems(inventorySearchTerm);
+  const seenInventoryIds = new Set();
+  const filtered = filteredSource.filter(item => {
+    if (!item || typeof item !== "object") return false;
+    const id = item.id != null ? String(item.id) : "";
+    if (!id) return true;
+    if (seenInventoryIds.has(id)) return false;
+    seenInventoryIds.add(id);
+    return true;
+  });
   const section = String(window.inventorySection || "items") === "material" ? "material" : "items";
   const materialModel = normalizeInventoryMaterials(window.inventoryMaterials);
   const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
@@ -3899,7 +3908,10 @@ function viewInventory(){
   const renderFolder = (folder)=>{
     const folderId = String(folder.id);
     const subFolders = childrenOf(folderId).map(renderFolder).join("");
-    const folderItems = itemsIn(folderId).map(i => inventoryRowsHTML([i])).join("");
+    const folderItemsList = itemsIn(folderId);
+    const folderItems = folderItemsList.length
+      ? inventoryRowsHTML(folderItemsList)
+      : `<tr><td colspan="10" class="muted">No parts in this folder.</td></tr>`;
     const isOpen = folderUiState[folderId] === true;
     return `
       <details class="inventory-folder" data-folder-drop-target="${esc(folderId)}" ${isOpen ? "open" : ""}>
@@ -3917,7 +3929,7 @@ function viewInventory(){
             </div>
           </div>
         </summary>
-        <table class="inventory-table"><tbody>${folderItems || `<tr><td colspan="10" class="muted">No parts in this folder.</td></tr>`}</tbody></table>
+        <table class="inventory-table"><tbody>${folderItems}</tbody></table>
         <div class="small muted">Drop parts here to move into this folder</div>
         <div class="inventory-folder-children">${subFolders}</div>
       </details>`;

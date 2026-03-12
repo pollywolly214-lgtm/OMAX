@@ -15752,16 +15752,52 @@ function renderInventory(){
   };
 
   window.inventoryFolders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
-  window.inventoryFolders = window.inventoryFolders.filter(folder => folder && folder.id != null).map(folder => ({
-    ...folder,
-    id: String(folder.id),
-    parent: folder.parent != null ? String(folder.parent) : null,
-    name: String(folder.name || "Folder")
-  }));
-  inventory.forEach(item => {
-    if (!item || typeof item !== "object") return;
-    if (item.folderId != null) item.folderId = String(item.folderId);
-  });
+  const seenFolderIds = new Set();
+  window.inventoryFolders = window.inventoryFolders
+    .filter(folder => folder && folder.id != null)
+    .map(folder => ({
+      ...folder,
+      id: String(folder.id),
+      parent: folder.parent != null ? String(folder.parent) : null,
+      name: String(folder.name || "Folder")
+    }))
+    .filter(folder => {
+      if (seenFolderIds.has(folder.id)) return false;
+      seenFolderIds.add(folder.id);
+      return true;
+    })
+    .map(folder => ({
+      ...folder,
+      parent: (folder.parent && seenFolderIds.has(String(folder.parent)) && String(folder.parent) !== folder.id)
+        ? String(folder.parent)
+        : null
+    }));
+
+  const seenInventoryIds = new Set();
+  let inventoryMutated = false;
+  inventory = Array.isArray(inventory) ? inventory : [];
+  inventory = inventory
+    .filter(item => item && typeof item === "object")
+    .filter(item => {
+      const id = item.id != null ? String(item.id) : "";
+      if (!id) return true;
+      if (seenInventoryIds.has(id)){
+        inventoryMutated = true;
+        return false;
+      }
+      seenInventoryIds.add(id);
+      return true;
+    })
+    .map(item => {
+      if (item.folderId != null) item.folderId = String(item.folderId);
+      if (item.folderId && !seenFolderIds.has(String(item.folderId))){
+        item.folderId = null;
+        inventoryMutated = true;
+      }
+      return item;
+    });
+  window.inventory = inventory;
+  if (inventoryMutated) saveCloudDebounced();
 
   function syncLinkedTasksFromInventory(item, updates){
     if (!item) return false;
