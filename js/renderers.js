@@ -1388,6 +1388,75 @@ async function resolveOneDriveAttachmentPreview(file){
   return task;
 }
 
+async function resolveAttachmentPreview(file){
+  if (!file || typeof file !== "object") return false;
+  if (file.preview && file.preview.mode === "image" && file.preview.content) return true;
+
+  const name = String(file.name || "");
+  const ext = fileExtFromName(name);
+  const href = String(file.dataUrl || file.url || "").trim();
+  const previewUrl = String(file.previewUrl || "").trim();
+
+  if (/^https?:\/\//i.test(previewUrl)){
+    file.preview = { mode: "image", content: previewUrl };
+    return true;
+  }
+
+  if (file.source === "onedrive" && file.driveId && file.itemId){
+    return resolveOneDriveAttachmentPreview(file);
+  }
+
+  if (file.source === "onedrive_local_root" && file.localRelativePath){
+    try {
+      const localFile = await resolveLocalFileFromRelativePath(file.localRelativePath);
+      if (!localFile){
+        file.preview = file.preview || { mode: "message", content: "Preview unavailable. Local root file is missing." };
+        return false;
+      }
+      const preview = await buildAttachmentPreview(localFile);
+      if (preview?.content){
+        file.preview = preview;
+        return preview.mode === "image";
+      }
+      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this local root file type." };
+      return false;
+    } catch (_err){
+      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this local root file." };
+      return false;
+    }
+  }
+
+  if (ext === ".svg" || /^data:image\//i.test(href) || (/^https?:\/\//i.test(href) && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"].includes(ext))){
+    file.preview = { mode: "image", content: href };
+    return true;
+  }
+
+  if ([".dxf", ".ord", ".omx"].includes(ext)){
+    try {
+      let text = "";
+      if (/^data:/i.test(href)){
+        const base64 = href.split(",")[1] || "";
+        text = atob(base64);
+      } else if (/^https?:\/\//i.test(href)){
+        const res = await fetch(href, { cache: "no-store" });
+        if (res.ok) text = await res.text();
+      }
+      const svg = text ? renderCadPreviewDataUrl(text) : "";
+      if (svg){
+        file.preview = { mode: "image", content: svg };
+        return true;
+      }
+      file.preview = file.preview || { mode: "message", content: "2D preview unavailable for this file." };
+      return false;
+    } catch (_err){
+      file.preview = file.preview || { mode: "message", content: "2D preview unavailable for this file." };
+      return false;
+    }
+  }
+
+  return false;
+}
+
 function captureNewJobFormState(){
   const form = document.getElementById("addJobForm");
   if (!form) return null;
@@ -13401,14 +13470,14 @@ function renderJobs(){
     document.body.appendChild(inlineOneDriveExplorerModal);
   }
 
-  const queueOneDrivePreviewHydration = ()=>{
+  const queueAttachmentPreviewHydration = ()=>{
     const allJobs = [];
     if (Array.isArray(cuttingJobs)) allJobs.push(...cuttingJobs);
     if (Array.isArray(completedCuttingJobs)) allJobs.push(...completedCuttingJobs);
     const files = allJobs.flatMap(job => Array.isArray(job?.files) ? job.files : []);
-    const targets = files.filter(file => file && file.source === "onedrive" && file.driveId && file.itemId && !(file.preview && file.preview.content));
+    const targets = files.filter(file => file && !(file.preview && file.preview.content));
     if (!targets.length) return;
-    Promise.allSettled(targets.map(resolveOneDriveAttachmentPreview)).then((results)=>{
+    Promise.allSettled(targets.map(resolveAttachmentPreview)).then((results)=>{
       const changed = results.some(r => r.status === "fulfilled" && r.value === true);
       if (changed){
         saveCloudDebounced();
@@ -13416,7 +13485,7 @@ function renderJobs(){
       }
     });
   };
-  queueOneDrivePreviewHydration();
+  queueAttachmentPreviewHydration();
 
   const jobOverlapMessage = "Jobs might be overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
   const jobTableEl = content.querySelector(".job-table");
@@ -13493,7 +13562,7 @@ function renderJobs(){
   const hslToHex = (h, s, l)=>{ const sat=Math.max(0,Math.min(100,s))/100; const lig=Math.max(0,Math.min(100,l))/100; const chroma=(1-Math.abs((2*lig)-1))*sat; const huePrime=(((h%360)+360)%360)/60; const x=chroma*(1-Math.abs((huePrime%2)-1)); let r=0,g=0,b=0; if (huePrime<1){[r,g,b]=[chroma,x,0];} else if (huePrime<2){[r,g,b]=[x,chroma,0];} else if (huePrime<3){[r,g,b]=[0,chroma,x];} else if (huePrime<4){[r,g,b]=[0,x,chroma];} else if (huePrime<5){[r,g,b]=[x,0,chroma];} else {[r,g,b]=[chroma,0,x];} const m=lig-(chroma/2); const toHex=(v)=>Math.round(Math.max(0,Math.min(255,v))).toString(16).padStart(2,"0"); return `#${toHex((r+m)*255)}${toHex((g+m)*255)}${toHex((b+m)*255)}`.toUpperCase(); };
   const categoryAccent = (catId, folderMap, rootId)=>{ const normalized = catId != null ? String(catId) : rootId; const folder = folderMap.get(normalized); const custom = normalizeHexColor(folder?.color); if (custom) return custom; if (!normalized || normalized === rootId) return "#13233F"; let hash = 0; for (let i=0;i<normalized.length;i+=1){ hash=((hash<<5)-hash)+normalized.charCodeAt(i); hash|=0; } return hslToHex(Math.abs(hash)%360,62,55); };
   const categoryStyleAttr = (catId, folderMap, rootId)=>{ const accentHex = categoryAccent(catId, folderMap, rootId); return ` style="--job-category-accent:${accentHex};--job-category-surface:#FFFFFF;--job-category-border:${rgbaFromHex(accentHex, 0.55)};--job-category-text:#0F172A;--job-category-meta:#1F2937;"`; };
-  const previewCardMarkup = (file)=>{ const preview=file?.preview; if (preview?.mode === "image" && preview.content){ return `<div class="job-flow-preview"><img src="${escapeHtml(preview.content)}" alt="Preview of ${escapeHtml(file?.name || "file")}" loading="lazy"></div>`; } const fallback = preview?.content || "Preview unavailable"; return `<div class="job-flow-preview is-empty small muted">${escapeHtml(fallback)}</div>`; };
+  const previewCardMarkup = (file)=>{ const preview=file?.preview; const fallbackImage = String(file?.previewUrl || file?.dataUrl || file?.url || ""); const canUseFallbackImage = /^data:image\//i.test(fallbackImage) || /^https?:\/\//i.test(fallbackImage); const imgSource = (preview?.mode === "image" && preview.content) ? preview.content : (canUseFallbackImage ? fallbackImage : ""); if (imgSource){ return `<div class="job-flow-preview"><img src="${escapeHtml(imgSource)}" alt="Preview of ${escapeHtml(file?.name || "file")}" loading="lazy"></div>`; } const fallback = preview?.content || "Preview unavailable"; return `<div class="job-flow-preview is-empty small muted">${escapeHtml(fallback)}</div>`; };
   const readFlowCollapsedCategories = ()=>{ const raw = Array.isArray(window.jobFlowCollapsedCategories) ? window.jobFlowCollapsedCategories : []; return new Set(raw.map(id => String(id))); };
   const writeFlowCollapsedCategories = (set)=>{ window.jobFlowCollapsedCategories = Array.from(set).map(id => String(id)); };
   const renderFlowChart = ()=>{ if (!flowChart) return; const query = String(flowFilterInput?.value || "").trim().toLowerCase(); const grouping = String(flowGroupingSelect?.value || "categoryTree"); const hidePreviews = Boolean(flowHidePreviews?.checked); const jobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : []; const completed = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : []; const list = jobs.concat(completed).filter(Boolean); const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"; const folders = Array.isArray(window.jobFolders)&&window.jobFolders.length ? window.jobFolders.slice() : [{ id: rootId, name: "All Jobs", parent: null, order: 1 }]; if (!folders.some(folder => String(folder?.id) === String(rootId))) folders.push({ id: rootId, name: "All Jobs", parent: null, order: 1 }); const folderMap = new Map(folders.map(folder => [String(folder.id), folder])); const normalizeCategory=(cat)=>{ const key = cat != null ? String(cat) : rootId; return folderMap.has(key)?key:rootId; }; const projectNumberForJob=(job)=>{ const direct = normalizeProjectNumber(job?.projectNumber); if (direct) return direct; const folderName = folderMap.get(normalizeCategory(job?.cat))?.name || ""; return categoryProjectNumber(folderName) || "0000"; }; const childrenOf=(parentId)=>{ const key=parentId==null?null:String(parentId); return folders.filter(folder => (folder.parent==null?null:String(folder.parent))===key).sort((a,b)=>String(a?.name||"").localeCompare(String(b?.name||""))); }; const categoryOrder=[]; const walkCategory=(id)=>{ const key=String(id); categoryOrder.push(key); childrenOf(key).forEach(child=>walkCategory(child.id)); }; walkCategory(rootId); const categoryCutMap=new Map(categoryOrder.map((id,idx)=>[id,`CAT-${String(idx+1).padStart(3,"0")}`])); const categoryCutLabel=(catId)=>categoryCutMap.get(String(catId||rootId))||"CAT-000"; const filtered=list.filter(job=>{ const project=projectNumberForJob(job); const material=String(job?.material||""); const est=Number(job?.estimateHours); const dateTokens=[job?.startISO,job?.dueISO,job?.completedAtISO].filter(Boolean).join(" "); const fileNames=(Array.isArray(job?.files)?job.files:[]).map(file=>file?.name||"").join(" "); const token=`${project} ${job?.name||""} ${material} ${Number.isFinite(est)?est:""} ${dateTokens} ${fileNames}`.toLowerCase(); return !query || token.includes(query); }); const addedOrderFromId=(job)=>{ const id=String(job?.id||""); const token=id.includes("_")?id.slice(id.lastIndexOf("_")+1):""; const parsed=Number.parseInt(token,36); return Number.isFinite(parsed)?parsed:Number.NaN; }; const fallbackOrderTime=(job)=>{ const val = Date.parse(job?.startISO || job?.createdAt || job?.completedAtISO || ""); return Number.isFinite(val)?val:Number.MAX_SAFE_INTEGER; }; const jobCutOrder=list.slice().sort((a,b)=>{ const aAdded=addedOrderFromId(a), bAdded=addedOrderFromId(b); if (Number.isFinite(aAdded)||Number.isFinite(bAdded)){ if (!Number.isFinite(aAdded)) return 1; if (!Number.isFinite(bAdded)) return -1; if (aAdded!==bAdded) return aAdded-bAdded; } const aTime=fallbackOrderTime(a), bTime=fallbackOrderTime(b); if (aTime!==bTime) return aTime-bTime; return String(a?.id||"").localeCompare(String(b?.id||"")); }); const jobCutMap=new Map(), jobCategoryCutMap=new Map(), categoryCounts=new Map(); jobCutOrder.forEach((job,idx)=>{ const key=String(job?.id||`${job?.name||"job"}_${idx}`); jobCutMap.set(key,`C${String(idx+1).padStart(3,"0")}`); const catKey=normalizeCategory(job?.cat); const next=(categoryCounts.get(catKey)||0)+1; categoryCounts.set(catKey,next); jobCategoryCutMap.set(key,String(next)); }); const jobCutLabel=(job)=>jobCutMap.get(String(job?.id||""))||"C000"; const jobCategoryCutLabel=(job)=>jobCategoryCutMap.get(String(job?.id||""))||"0"; const renderJobCard=(job)=>{ const files=Array.isArray(job?.files)?job.files:[]; const fileList=files.length?files.map(file=>`<li><span class="job-flow-file-name">${escapeHtml(file?.name || "Attachment")}</span>${hidePreviews?"":previewCardMarkup(file)}</li>`).join(""):'<li class="small job-flow-empty">No attached files</li>'; const style=categoryStyleAttr(normalizeCategory(job?.cat), folderMap, rootId); return `<article class="job-flow-job-card"${style}><header><div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")} · ${escapeHtml(jobCutLabel(job))} · ${escapeHtml(jobCategoryCutLabel(job))}</div><div class="small job-flow-meta">Project #${escapeHtml(projectNumberForJob(job))}</div><div class="small job-flow-meta">Material: ${escapeHtml(job?.material || "—")}</div><div class="small job-flow-meta">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div><div class="small job-flow-meta">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div></header><ul class="job-flow-file-list">${fileList}</ul></article>`; }; let html=""; if (grouping==="categoryTree"){ const byCategory=new Map(); filtered.forEach(job=>{ const cat=normalizeCategory(job?.cat); if (!byCategory.has(cat)) byCategory.set(cat,[]); byCategory.get(cat).push(job); }); const hasDescendantJobs=(categoryId)=>{ const key=String(categoryId); if ((byCategory.get(key)||[]).length>0) return true; return childrenOf(key).some(child=>hasDescendantJobs(String(child.id))); }; const collapsedSet=readFlowCollapsedCategories(); const renderCategoryNode=(categoryId, depth=0)=>{ const key=String(categoryId); if (!hasDescendantJobs(key)) return ""; const folder=folderMap.get(key)||{id:key,name:"Category"}; const projects=new Map(); (byCategory.get(key)||[]).forEach(job=>{ const project=projectNumberForJob(job); if (!projects.has(project)) projects.set(project,[]); projects.get(project).push(job); }); const projectMarkup=Array.from(projects.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([project, projectJobs])=>`<section class="job-flow-project-group"><h6>Project ${escapeHtml(project)}</h6><div class="job-flow-group-grid">${projectJobs.map(renderJobCard).join("")}</div></section>`).join(""); const childMarkup=childrenOf(key).map(child=>renderCategoryNode(String(child.id), depth+1)).join(""); const style=categoryStyleAttr(key, folderMap, rootId); const collapsed=collapsedSet.has(key); return `<div class="job-flow-tree-node" data-depth="${depth}"><div class="job-flow-tree-title-row"><button type="button" class="job-flow-tree-title job-flow-tree-title-toggle" data-job-flow-tree-toggle="${escapeHtml(key)}" aria-expanded="${collapsed?"false":"true"}"${style}>${escapeHtml(folder?.name || "Category")} · ${escapeHtml(categoryProjectNumber(folder?.name) || "----")} · ${escapeHtml(categoryCutLabel(key))}</button></div><div class="job-flow-tree-body${collapsed ? " is-collapsed" : ""}">${projectMarkup || '<p class="small job-flow-empty">No direct jobs in this category.</p>'}${childMarkup}</div></div>`; }; html=`<section class="job-flow-group"><h5>Category tree</h5>${renderCategoryNode(rootId)}</section>`; } else { const groups=new Map(); filtered.forEach(job=>{ const key=grouping==="job"?String(job?.name||"Untitled job"):projectNumberForJob(job); if (!groups.has(key)) groups.set(key,[]); groups.get(key).push(job); }); html=Array.from(groups.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([key,groupJobs])=>`<section class="job-flow-group"><h5>${escapeHtml(grouping==="job"?"Job":"Project")} ${escapeHtml(key)}</h5><div class="job-flow-group-grid">${groupJobs.map(renderJobCard).join("")}</div></section>`).join(""); } flowChart.innerHTML = html || '<p class="small job-flow-empty">No projects match this filter.</p>'; if (flowChart) flowChart.classList.toggle("hide-previews", hidePreviews); };
