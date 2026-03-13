@@ -3917,18 +3917,18 @@ function viewInventory(){
       <details class="inventory-folder" data-folder-drop-target="${esc(folderId)}" ${isOpen ? "open" : ""}>
         <summary>
           <span>📁 ${esc(folder.name || "Unnamed folder")}</span>
-          <div class="inventory-folder-options" data-folder-options>
-            <button type="button" class="inventory-folder-options-trigger" data-folder-options-trigger="${esc(folderId)}" aria-expanded="false" aria-haspopup="true">Options</button>
-            <div class="inventory-folder-options-menu" role="menu" hidden>
-              <button type="button" data-inventory-subfolder="${esc(folderId)}" role="menuitem">+ Folder</button>
-              <button type="button" data-inventory-folder-rename="${esc(folderId)}" role="menuitem">Rename</button>
-              <button type="button" class="danger" data-inventory-folder-delete="${esc(folderId)}" role="menuitem">Delete</button>
-              <label>Move folder to
-                <select data-folder-parent="${esc(folderId)}">${inventoryFolderOptionsMarkup(folder.parent, { includeCurrent: folderId })}</select>
-              </label>
-            </div>
-          </div>
         </summary>
+        <div class="inventory-folder-options" data-folder-options>
+          <button type="button" class="inventory-folder-options-trigger" data-folder-options-trigger="${esc(folderId)}" aria-expanded="false" aria-haspopup="true">Options</button>
+          <div class="inventory-folder-options-menu" role="menu" hidden>
+            <button type="button" data-inventory-subfolder="${esc(folderId)}" role="menuitem">+ Folder</button>
+            <button type="button" data-inventory-folder-rename="${esc(folderId)}" role="menuitem">Rename</button>
+            <button type="button" class="danger" data-inventory-folder-delete="${esc(folderId)}" role="menuitem">Delete</button>
+            <label>Move folder to
+              <select data-folder-parent="${esc(folderId)}">${inventoryFolderOptionsMarkup(folder.parent, { includeCurrent: folderId })}</select>
+            </label>
+          </div>
+        </div>
         <table class="inventory-table"><tbody>${folderItems}</tbody></table>
         <div class="small muted">Drop parts here to move into this folder</div>
         <div class="inventory-folder-children">${subFolders}</div>

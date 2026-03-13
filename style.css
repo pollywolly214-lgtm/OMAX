@@ -898,9 +898,9 @@ body.cost-info-visible{
 .inventory-search{ flex:1 1 260px; }
 .inventory-hint{ margin-bottom:12px; }
 .inventory-folder{ margin:10px 0; border:1px solid rgba(10,31,63,.2); border-radius:12px; background:rgba(255,255,255,.72); overflow:visible; }
-.inventory-folder > summary{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; cursor:pointer; font-weight:600; color:#0a1f3f; background:rgba(224,237,255,.45); }
+.inventory-folder > summary{ display:flex; align-items:center; gap:10px; padding:10px 12px; padding-right:104px; cursor:pointer; font-weight:600; color:#0a1f3f; background:rgba(224,237,255,.45); }
 .inventory-folder > summary::-webkit-details-marker{ margin-right:6px; }
-.inventory-folder-options{ position:relative; margin-left:auto; }
+.inventory-folder-options{ position:absolute; top:6px; right:10px; isolation:isolate; }
 .inventory-folder-options-trigger{ border:1px solid #3b82f6; background:#e0edff; color:#0f3c91; border-radius:999px; padding:6px 12px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; }
 .inventory-folder-options-menu{ position:absolute; right:0; top:calc(100% + 6px); z-index:20; min-width:190px; max-width:min(280px, calc(100vw - 32px)); display:flex; flex-direction:column; gap:6px; padding:10px; border:1px solid rgba(10,31,63,.2); border-radius:10px; background:#fff; box-shadow:0 10px 28px rgba(10,31,63,.2); }
 .inventory-folder-options-menu button,
@@ -5757,4 +5757,3 @@ body.log-history-open { overflow: hidden; }
 
 .inventory-folder.drop-active > summary{ outline:2px solid rgba(10,99,194,.35); }
 
-.inventory-folder-options{ isolation:isolate; }

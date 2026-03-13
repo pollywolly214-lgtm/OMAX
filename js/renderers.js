@@ -16407,13 +16407,6 @@ function renderInventory(){
     refreshRows();
   });
 
-  rowsTarget?.addEventListener("mousedown", (e)=>{
-    const optionsTrigger = e.target.closest("[data-folder-options-trigger]");
-    if (!optionsTrigger) return;
-    e.preventDefault();
-    e.stopPropagation();
-  });
-
   rowsTarget?.addEventListener("click", async (e)=>{
     const optionsTrigger = e.target.closest("[data-folder-options-trigger]");
     if (optionsTrigger){
