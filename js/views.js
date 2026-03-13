@@ -2036,6 +2036,41 @@ function viewJobs(){
       return "";
     }
   };
+  const cadPointsToSegments = (points, closed = false)=>{
+    const cleaned = Array.isArray(points) ? points.filter(Boolean) : [];
+    if (cleaned.length < 2) return [];
+    const segments = [];
+    for (let i = 1; i < cleaned.length; i += 1){
+      const prev = cleaned[i - 1];
+      const next = cleaned[i];
+      if ([prev?.x, prev?.y, next?.x, next?.y].every(Number.isFinite)){
+        segments.push({ x1: prev.x, y1: prev.y, x2: next.x, y2: next.y });
+      }
+    }
+    if (closed && cleaned.length > 2){
+      const first = cleaned[0];
+      const last = cleaned[cleaned.length - 1];
+      if ([first?.x, first?.y, last?.x, last?.y].every(Number.isFinite)){
+        segments.push({ x1: last.x, y1: last.y, x2: first.x, y2: first.y });
+      }
+    }
+    return segments;
+  };
+  const cadArcToSegments = (cx, cy, radius, startDeg, endDeg)=>{
+    if (![cx, cy, radius, startDeg, endDeg].every(Number.isFinite) || radius <= 0) return [];
+    const tau = Math.PI * 2;
+    let start = (startDeg * Math.PI) / 180;
+    let end = (endDeg * Math.PI) / 180;
+    while (end <= start) end += tau;
+    const sweep = Math.max(0, end - start);
+    const segmentCount = Math.max(12, Math.ceil(sweep / (Math.PI / 18)));
+    const points = [];
+    for (let i = 0; i <= segmentCount; i += 1){
+      const t = start + ((sweep * i) / segmentCount);
+      points.push({ x: cx + (radius * Math.cos(t)), y: cy + (radius * Math.sin(t)) });
+    }
+    return cadPointsToSegments(points, false);
+  };
   const parseCadSegments = (text)=>{
     const lines = String(text || "").split(/\r?\n/);
     const pairs = [];
@@ -2072,16 +2107,75 @@ function viewJobs(){
       current = { type: marker, data: [] };
     }
     if (current) entities.push(current);
+
+    const numberCode = (pairsList, code)=>{
+      const pair = pairsList.find(item => Number(item?.code) === Number(code));
+      if (!pair) return null;
+      const n = Number.parseFloat(String(pair.value ?? "").trim());
+      return Number.isFinite(n) ? n : null;
+    };
+
     const segments = [];
-    entities.forEach(entity => {
-      const fields = new Map();
-      entity.data.forEach(item => fields.set(item.code, Number.parseFloat(item.value)));
+    for (let idx = 0; idx < entities.length; idx += 1){
+      const entity = entities[idx];
+      if (!entity) continue;
       if (entity.type === "LINE") {
-        const x1 = fields.get(10); const y1 = fields.get(20);
-        const x2 = fields.get(11); const y2 = fields.get(21);
+        const x1 = numberCode(entity.data, 10); const y1 = numberCode(entity.data, 20);
+        const x2 = numberCode(entity.data, 11); const y2 = numberCode(entity.data, 21);
         if ([x1, y1, x2, y2].every(Number.isFinite)) segments.push({ x1, y1, x2, y2 });
+        continue;
       }
-    });
+      if (entity.type === "ARC"){
+        const cx = numberCode(entity.data, 10);
+        const cy = numberCode(entity.data, 20);
+        const radius = numberCode(entity.data, 40);
+        const startDeg = numberCode(entity.data, 50);
+        const endDeg = numberCode(entity.data, 51);
+        segments.push(...cadArcToSegments(cx, cy, radius, startDeg, endDeg));
+        continue;
+      }
+      if (entity.type === "CIRCLE"){
+        const cx = numberCode(entity.data, 10);
+        const cy = numberCode(entity.data, 20);
+        const radius = numberCode(entity.data, 40);
+        segments.push(...cadArcToSegments(cx, cy, radius, 0, 360));
+        continue;
+      }
+      if (entity.type === "LWPOLYLINE") {
+        const points = [];
+        for (let i = 0; i < entity.data.length; i += 1){
+          const pair = entity.data[i];
+          if (Number(pair?.code) !== 10) continue;
+          const x = Number.parseFloat(pair.value);
+          const next = entity.data[i + 1];
+          if (!next || Number(next.code) !== 20) continue;
+          const y = Number.parseFloat(next.value);
+          if ([x, y].every(Number.isFinite)) points.push({ x, y });
+        }
+        const closedRaw = numberCode(entity.data, 70);
+        const closed = Number.isFinite(closedRaw) ? (Math.round(closedRaw) & 1) === 1 : false;
+        segments.push(...cadPointsToSegments(points, closed));
+        continue;
+      }
+      if (entity.type === "POLYLINE") {
+        const points = [];
+        const closedRaw = numberCode(entity.data, 70);
+        const closed = Number.isFinite(closedRaw) ? (Math.round(closedRaw) & 1) === 1 : false;
+        for (let j = idx + 1; j < entities.length; j += 1){
+          const child = entities[j];
+          if (!child) continue;
+          if (child.type === "SEQEND"){
+            idx = j;
+            break;
+          }
+          if (child.type !== "VERTEX") continue;
+          const x = numberCode(child.data, 10);
+          const y = numberCode(child.data, 20);
+          if ([x, y].every(Number.isFinite)) points.push({ x, y });
+        }
+        segments.push(...cadPointsToSegments(points, closed));
+      }
+    }
     return segments;
   };
   const renderCadToSvgDataUrl = (text)=>{
