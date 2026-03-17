@@ -1131,6 +1131,13 @@ function viewCosts(model){
   const timeframeRows = Array.isArray(data.timeframeRows) ? data.timeframeRows : [];
   const historyRows = Array.isArray(data.historyRows) ? data.historyRows : [];
   const jobBreakdown = Array.isArray(data.jobBreakdown) ? data.jobBreakdown : [];
+  const weeklyReports = Array.isArray(data.weeklyReports) ? data.weeklyReports : [];
+  const selectedWeeklyKeyRaw = (typeof window !== "undefined" && typeof window.weeklyCostReportSelected === "string")
+    ? window.weeklyCostReportSelected
+    : "";
+  const selectedWeeklyReport = weeklyReports.find(item => item && item.weekStartISO === selectedWeeklyKeyRaw) || (weeklyReports[0] || null);
+  const selectedWeeklyKey = selectedWeeklyReport ? String(selectedWeeklyReport.weekStartISO || "") : "";
+  if (typeof window !== "undefined") window.weeklyCostReportSelected = selectedWeeklyKey;
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
   const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
@@ -1550,6 +1557,38 @@ function viewCosts(model){
     `
     : `<p class="small muted">Add maintenance intervals, pricing, and expected frequency to project spend.</p>`;
 
+  const weeklyOptions = weeklyReports.length
+    ? weeklyReports.map(report => {
+        if (!report) return "";
+        const key = esc(report.weekStartISO || "");
+        const label = esc(report.weekLabel || report.weekStartISO || "Week");
+        const selectedAttr = selectedWeeklyKey && selectedWeeklyKey === String(report.weekStartISO || "") ? " selected" : "";
+        return `<option value="${key}"${selectedAttr}>${label}</option>`;
+      }).join("")
+    : '<option value="">No weekly reports yet</option>';
+
+  const weeklyCutRows = selectedWeeklyReport && Array.isArray(selectedWeeklyReport.cutItems) && selectedWeeklyReport.cutItems.length
+    ? selectedWeeklyReport.cutItems.map(item => `
+      <tr>
+        <td>${esc(item.name || "Cut")}</td>
+        <td>${esc(item.category || "Uncategorized")}</td>
+        <td>${esc(item.hoursLabel || "0 hr")}</td>
+        <td>${esc(item.costLabel || "$0")}</td>
+      </tr>
+    `).join("")
+    : '<tr><td colspan="4" class="cost-table-placeholder">No cuts completed this week.</td></tr>';
+
+  const weeklyMaintenanceRows = selectedWeeklyReport && Array.isArray(selectedWeeklyReport.maintenanceItems) && selectedWeeklyReport.maintenanceItems.length
+    ? selectedWeeklyReport.maintenanceItems.map(item => `
+      <tr>
+        <td>${esc(item.name || "Maintenance task")}</td>
+        <td>${esc(item.taskLabel || "Maintenance")}</td>
+        <td>${esc(item.partNumber || "—")}</td>
+        <td>${esc(item.costLabel || "$0")}</td>
+      </tr>
+    `).join("")
+    : '<tr><td colspan="4" class="cost-table-placeholder">No maintenance completed this week.</td></tr>';
+
   return `
   <div class="container cost-container">
     <div class="dashboard-toolbar">
@@ -1865,6 +1904,43 @@ function viewCosts(model){
           </div>
           ${categoryOverviewTable}
           ${summaryMarkup}
+        </div>
+      </div>
+
+      <div class="dashboard-window" data-cost-window="weekly">
+        <div class="block" data-cost-weekly-reports>
+          <h3>Weekly cost reports</h3>
+          <div class="cost-weekly-controls">
+            <label class="cost-category-select-label">
+              <span class="cost-category-select-label-text">Report week</span>
+              <select data-cost-weekly-select aria-label="Select weekly cost report">
+                ${weeklyOptions}
+              </select>
+            </label>
+            <button type="button" class="btn secondary" data-cost-weekly-export ${selectedWeeklyReport ? "" : "disabled"}>Export week (CSV)</button>
+          </div>
+          <div class="cost-weekly-summary">
+            <div><span class="label">Cuts total</span><span>${esc(selectedWeeklyReport?.totalCutCostLabel || "$0")}</span></div>
+            <div><span class="label">Maintenance total</span><span>${esc(selectedWeeklyReport?.totalMaintenanceCostLabel || "$0")}</span></div>
+            <div><span class="label">Cutting time</span><span>${esc(selectedWeeklyReport?.totalCutHoursLabel || "0 hr")}</span></div>
+          </div>
+          <div class="cost-weekly-grid">
+            <div>
+              <h4>Cuts completed</h4>
+              <table class="cost-table">
+                <thead><tr><th>Cut</th><th>Category</th><th>Hours</th><th>Cost impact</th></tr></thead>
+                <tbody>${weeklyCutRows}</tbody>
+              </table>
+            </div>
+            <div>
+              <h4>Maintenance completed</h4>
+              <table class="cost-table">
+                <thead><tr><th>Task</th><th>Type</th><th>Part #</th><th>Cost</th></tr></thead>
+                <tbody>${weeklyMaintenanceRows}</tbody>
+              </table>
+            </div>
+          </div>
+          <canvas id="weeklyCostChart" width="900" height="280" aria-label="Weekly report chart"></canvas>
         </div>
       </div>
 

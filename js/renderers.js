@@ -9889,6 +9889,7 @@ function renderCosts(){
   refreshTimeEfficiencyWidgets();
   setupCostTimeframeModal(model);
   setupJobCategoryWindow(model);
+  setupWeeklyReportWindow(model);
 
   function setupCostTimeframeModal(currentModel){
     if (typeof window.__cleanupCostTimeframeModal === "function"){
@@ -10136,6 +10137,67 @@ function renderCosts(){
         catch (_err){}
       });
     };
+  }
+
+  function setupWeeklyReportWindow(currentModel){
+    const panel = content.querySelector("[data-cost-weekly-reports]");
+    if (!panel) return;
+
+    const reports = Array.isArray(currentModel?.weeklyReports) ? currentModel.weeklyReports : [];
+    const selected = (typeof window !== "undefined" && typeof window.weeklyCostReportSelected === "string")
+      ? window.weeklyCostReportSelected
+      : "";
+    const fallback = reports.length ? String(reports[0].weekStartISO || "") : "";
+    const normalized = reports.some(r => String(r?.weekStartISO || "") === selected) ? selected : fallback;
+    if (typeof window !== "undefined") window.weeklyCostReportSelected = normalized;
+
+    const selectEl = panel.querySelector("[data-cost-weekly-select]");
+    if (selectEl instanceof HTMLSelectElement){
+      selectEl.addEventListener("change", (event)=>{
+        const val = event && event.target instanceof HTMLSelectElement ? event.target.value : selectEl.value;
+        if (typeof window !== "undefined") window.weeklyCostReportSelected = String(val || "");
+        renderCosts();
+      });
+    }
+
+    const exportBtn = panel.querySelector("[data-cost-weekly-export]");
+    if (exportBtn instanceof HTMLElement){
+      exportBtn.addEventListener("click", ()=>{
+        const report = reports.find(item => String(item?.weekStartISO || "") === normalized);
+        if (!report) return;
+        const rows = [["Type","Name","Category/Task Type","Part Number","Hours","Cost"]];
+        (Array.isArray(report.cutItems) ? report.cutItems : []).forEach(item => {
+          rows.push(["Cut", item?.name || "", item?.category || "", "", item?.hours != null ? String(item.hours) : "", Number(item?.cost || 0).toFixed(2)]);
+        });
+        (Array.isArray(report.maintenanceItems) ? report.maintenanceItems : []).forEach(item => {
+          rows.push(["Maintenance", item?.name || "", item?.taskLabel || "", item?.partNumber || "", "", Number(item?.cost || 0).toFixed(2)]);
+        });
+        rows.push([]);
+        rows.push(["Summary","Week",report.weekLabel || report.weekStartISO || "","","",""]);
+        rows.push(["Summary","Cuts total","","","",Number(report.totalCutCost || 0).toFixed(2)]);
+        rows.push(["Summary","Maintenance total","","","",Number(report.totalMaintenanceCost || 0).toFixed(2)]);
+        rows.push(["Summary","Cutting hours total","","",Number(report.totalCutHours || 0).toFixed(2),""]);
+        const csv = rows.map(cols => cols.map(v => {
+          const text = String(v == null ? "" : v);
+          return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+        }).join(",")).join("\n");
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.href = url;
+        link.download = `weekly-cost-report-${report.weekStartISO || "week"}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      });
+    }
+
+    const canvas = panel.querySelector("#weeklyCostChart");
+    const reportForChart = reports.find(item => String(item?.weekStartISO || "") === normalized) || null;
+    if (canvas instanceof HTMLCanvasElement){
+      drawWeeklyReportChart(canvas, reportForChart);
+    }
   }
 
   function setupJobCategoryWindow(currentModel){
@@ -11244,6 +11306,23 @@ function computeCostModel(){
     .filter(Boolean)
     .sort((a,b)=> a.date - b.date);
 
+  const startOfWeekMonday = (value)=>{
+    let dt = null;
+    if (value instanceof Date) dt = new Date(value);
+    else if (typeof parseDateLocal === "function") dt = parseDateLocal(value) || new Date(value);
+    else dt = new Date(value);
+    if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return null;
+    dt.setHours(0,0,0,0);
+    const day = dt.getDay();
+    const diff = day === 0 ? -6 : (1 - day);
+    dt.setDate(dt.getDate() + diff);
+    return dt;
+  };
+  const formatWeekKey = (date)=>{
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+    return date.toISOString().slice(0,10);
+  };
+
   const suppressionEntriesInitial = listCostHistorySuppressions();
   const suppressionMap = new Map();
   suppressionEntriesInitial.forEach(entry => {
@@ -11932,6 +12011,7 @@ function computeCostModel(){
       }
 
       jobsInfo.push({
+        id: job.id != null ? String(job.id) : null,
         name: job.name || "Untitled job",
         date,
         milestoneLabel,
@@ -11978,6 +12058,7 @@ function computeCostModel(){
       }
 
       jobsInfo.push({
+        id: job.id != null ? String(job.id) : null,
         name: job.name || "Untitled job",
         date,
         milestoneLabel,
@@ -12571,6 +12652,119 @@ function computeCostModel(){
     maintenanceHint = `${rateParts.join(" · ")}. Actual last 12 months: ${formatterCurrency(combinedActualYear, { decimals: combinedActualYear < 1000 ? 2 : 0 })}.`;
   }
 
+  const completedJobsById = new Map();
+  (Array.isArray(completedCuttingJobs) ? completedCuttingJobs : []).forEach(job => {
+    if (!job || job.id == null) return;
+    completedJobsById.set(String(job.id), job);
+  });
+
+  const weeklyMap = new Map();
+  const ensureWeek = (weekStart)=>{
+    const key = formatWeekKey(weekStart);
+    if (!key) return null;
+    if (!weeklyMap.has(key)){
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      weeklyMap.set(key, {
+        weekKey: key,
+        weekStartISO: key,
+        weekEndISO: weekEnd.toISOString().slice(0,10),
+        cutItems: [],
+        maintenanceItems: [],
+        totalCutCost: 0,
+        totalMaintenanceCost: 0,
+        totalCutHours: 0,
+        cutByCategory: {},
+        generatedAtISO: new Date().toISOString()
+      });
+    }
+    return weeklyMap.get(key);
+  };
+
+  maintenanceHistory.forEach((entry, idx)=>{
+    if (!entry || !(entry.date instanceof Date) || Number.isNaN(entry.date.getTime())) return;
+    const weekStart = startOfWeekMonday(entry.date);
+    const bucket = ensureWeek(weekStart);
+    if (!bucket) return;
+    const tasks = Array.isArray(entry.tasks) ? entry.tasks.filter(Boolean) : [];
+    if (tasks.length){
+      const pricedTotal = tasks.reduce((sum, task)=>{
+        const v = Number(task?.unitPrice);
+        return sum + (Number.isFinite(v) && v > 0 ? v : 0);
+      }, 0);
+      const fallback = 1 / tasks.length;
+      tasks.forEach((task, taskIndex)=>{
+        const unit = Number(task?.unitPrice);
+        const share = (pricedTotal > 0 && Number.isFinite(unit) && unit > 0) ? (unit / pricedTotal) : fallback;
+        const cost = Math.max(0, (Number(entry.cost) || 0) * share);
+        bucket.maintenanceItems.push({
+          id: `m_${entry.dateISO || idx}_${taskIndex}`,
+          dateISO: entry.dateISO || null,
+          name: task?.name || 'Maintenance task',
+          cost,
+          costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
+          taskLabel: task?.mode === 'asreq' ? 'As required' : 'Interval',
+          partNumber: task?.partNumber || ''
+        });
+      });
+    } else {
+      const cost = Math.max(0, Number(entry.cost) || 0);
+      bucket.maintenanceItems.push({
+        id: `m_${entry.dateISO || idx}`,
+        dateISO: entry.dateISO || null,
+        name: 'Maintenance allocation',
+        cost,
+        costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
+        taskLabel: 'Allocated',
+        partNumber: ''
+      });
+    }
+    bucket.totalMaintenanceCost += Math.max(0, Number(entry.cost) || 0);
+  });
+
+  jobsInfo.forEach((job, idx)=>{
+    if (!job || !(job.date instanceof Date) || Number.isNaN(job.date.getTime())) return;
+    const weekStart = startOfWeekMonday(job.date);
+    const bucket = ensureWeek(weekStart);
+    if (!bucket) return;
+    const sourceJob = completedJobsById.get(String(job.id || '')) || null;
+    const catId = sourceJob?.cat != null ? String(sourceJob.cat) : (typeof JOB_ROOT_FOLDER_ID === 'string' ? JOB_ROOT_FOLDER_ID : 'jobs_root');
+    const categoryName = (typeof getJobFolderName === 'function') ? getJobFolderName(catId) : 'Uncategorized';
+    const cutCost = Number(job.gainLoss) || 0;
+    const cutHours = Number(sourceJob?.actualHours) || 0;
+    bucket.cutItems.push({
+      id: `c_${job.id || idx}`,
+      dateISO: (sourceJob && sourceJob.completedAtISO) ? sourceJob.completedAtISO : (job.date ? job.date.toISOString().slice(0,10) : null),
+      name: job.name || 'Cut',
+      category: categoryName || 'Uncategorized',
+      categoryId: catId,
+      cost: cutCost,
+      hours: cutHours,
+      costLabel: formatterCurrency(cutCost, { showPlus: true, decimals: Math.abs(cutCost) < 1000 ? 2 : 0 }),
+      hoursLabel: formatHours(cutHours)
+    });
+    bucket.totalCutCost += cutCost;
+    bucket.totalCutHours += cutHours > 0 ? cutHours : 0;
+    if (!bucket.cutByCategory[categoryName || 'Uncategorized']) bucket.cutByCategory[categoryName || 'Uncategorized'] = { count: 0, cost: 0, hours: 0 };
+    bucket.cutByCategory[categoryName || 'Uncategorized'].count += 1;
+    bucket.cutByCategory[categoryName || 'Uncategorized'].cost += cutCost;
+    bucket.cutByCategory[categoryName || 'Uncategorized'].hours += cutHours > 0 ? cutHours : 0;
+  });
+
+  const weeklyReports = Array.from(weeklyMap.values())
+    .sort((a,b)=> String(b.weekStartISO).localeCompare(String(a.weekStartISO)))
+    .map(report => ({
+      ...report,
+      totalCutCostLabel: formatterCurrency(report.totalCutCost, { showPlus: true, decimals: Math.abs(report.totalCutCost) < 1000 ? 2 : 0 }),
+      totalMaintenanceCostLabel: formatterCurrency(report.totalMaintenanceCost, { decimals: report.totalMaintenanceCost < 1000 ? 2 : 0 }),
+      totalCutHoursLabel: formatHours(report.totalCutHours),
+      weekLabel: `${formatDateLabelShort(new Date(report.weekStartISO))} - ${formatDateLabelShort(new Date(report.weekEndISO))}`
+    }));
+
+  if (typeof window !== 'undefined'){
+    window.weeklyCostReports = weeklyReports.map(item => ({ ...item }));
+  }
+
   const summaryCards = [
     {
       key: "maintenanceForecast",
@@ -13093,8 +13287,65 @@ function computeCostModel(){
     orderRequestSummary,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries,
-    jobSeries
+    jobSeries,
+    weeklyReports
   };
+}
+
+function drawWeeklyReportChart(canvas, report){
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width;
+  const H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0,0,W,H);
+
+  if (!report){
+    ctx.fillStyle = "#777";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No weekly report selected.", W/2, H/2);
+    return;
+  }
+
+  const bars = [
+    { label: "Cuts", value: Number(report.totalCutCost) || 0, color: "#2e7d32" },
+    { label: "Maintenance", value: Number(report.totalMaintenanceCost) || 0, color: "#0a63c2" },
+    { label: "Cut hrs", value: Number(report.totalCutHours) || 0, color: "#8a5cf6", isHours: true }
+  ];
+  const maxVal = Math.max(1, ...bars.map(b => Math.abs(b.value)));
+  const left = 70, right = W - 30, top = 26, bottom = H - 50;
+  const chartW = right - left;
+  const barW = Math.min(140, chartW / (bars.length * 1.6));
+  const gap = (chartW - (barW * bars.length)) / Math.max(1, bars.length - 1);
+
+  ctx.strokeStyle = "#d6ddea";
+  ctx.beginPath();
+  ctx.moveTo(left, bottom);
+  ctx.lineTo(right, bottom);
+  ctx.stroke();
+
+  bars.forEach((bar, idx) => {
+    const x = left + idx * (barW + gap);
+    const height = Math.max(2, (Math.abs(bar.value) / maxVal) * (bottom - top));
+    const y = bottom - height;
+    ctx.fillStyle = bar.color;
+    ctx.fillRect(x, y, barW, height);
+    ctx.fillStyle = "#1d2b45";
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "center";
+    const labelValue = bar.isHours
+      ? `${bar.value.toFixed(1)} hr`
+      : new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(bar.value);
+    ctx.fillText(labelValue, x + barW/2, y - 8);
+    ctx.fillText(bar.label, x + barW/2, bottom + 16);
+  });
+
+  ctx.fillStyle = "#5a6478";
+  ctx.font = "12px sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(`Week: ${report.weekLabel || report.weekStartISO || ""}`, left, 16);
 }
 
 function drawCostChart(canvas, model, show){
