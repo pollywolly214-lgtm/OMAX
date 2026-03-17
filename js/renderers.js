@@ -10016,6 +10016,114 @@ function renderCosts(){
   refreshTimeEfficiencyWidgets();
   setupCostTimeframeModal(model);
   setupJobCategoryWindow(model);
+  setupWeeklyReportWidgets(model);
+
+  function setupWeeklyReportWidgets(currentModel){
+    const reports = Array.isArray(currentModel?.weeklyReports) ? currentModel.weeklyReports : [];
+    const canvas = document.getElementById("weeklyCostChart");
+    const selected = reports.find(item => item && String(item.key) === String(currentModel?.activeWeeklyReportKey || "")) || reports[0] || null;
+
+    const drawWeeklyChart = ()=>{
+      if (!canvas || !selected) return;
+      const ctx = canvas.getContext("2d");
+      const W = canvas.width;
+      const H = canvas.height;
+      ctx.clearRect(0,0,W,H);
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0,0,W,H);
+      const points = Array.isArray(selected.chartPoints) ? selected.chartPoints : [];
+      if (!points.length){
+        ctx.fillStyle = "#666";
+        ctx.font = "13px sans-serif";
+        ctx.fillText("No daily cost points for this week yet.", 16, H/2);
+        return;
+      }
+      const maxY = Math.max(1, ...points.map(pt => Math.max(Number(pt.cuts)||0, Number(pt.maintenance)||0)));
+      const left = 46, right = W - 20, top = 20, bottom = H - 30;
+      const barW = Math.max(10, Math.floor((right-left)/(points.length*2.6)));
+      const groupW = barW*2 + 8;
+      const startX = left + Math.max(0, ((right-left) - groupW*points.length)/2);
+      const yOf = (v)=> bottom - ((Math.max(0, Number(v)||0) / maxY) * (bottom-top));
+      ctx.strokeStyle = "#d0d7de";
+      ctx.beginPath(); ctx.moveTo(left, bottom); ctx.lineTo(right, bottom); ctx.stroke();
+      points.forEach((pt, idx)=>{
+        const x = startX + idx*groupW;
+        const cuts = Math.max(0, Number(pt.cuts)||0);
+        const maintenance = Math.max(0, Number(pt.maintenance)||0);
+        const cutY = yOf(cuts);
+        const maintY = yOf(maintenance);
+        ctx.fillStyle = "#2e7d32";
+        ctx.fillRect(x, cutY, barW, bottom-cutY);
+        ctx.fillStyle = "#0a63c2";
+        ctx.fillRect(x+barW+4, maintY, barW, bottom-maintY);
+        ctx.fillStyle = "#444";
+        ctx.font = "11px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(String(pt.label || ""), x + barW, bottom + 14);
+      });
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#2e7d32";
+      ctx.fillRect(left, 4, 10, 10);
+      ctx.fillStyle = "#111";
+      ctx.font = "12px sans-serif";
+      ctx.fillText("Cuts", left + 14, 13);
+      ctx.fillStyle = "#0a63c2";
+      ctx.fillRect(left + 70, 4, 10, 10);
+      ctx.fillStyle = "#111";
+      ctx.fillText("Maintenance", left + 84, 13);
+    };
+    drawWeeklyChart();
+
+    const weeklySelect = content.querySelector("[data-cost-weekly-report-select]");
+    if (weeklySelect){
+      weeklySelect.addEventListener("change", ()=>{
+        const key = String(weeklySelect.value || "");
+        try {
+          const storageKey = String(currentModel?.weeklyReportSelectionKey || "costWeeklySelectedWeek_v1");
+          localStorage.setItem(storageKey, key);
+        } catch (_err){}
+        renderCosts();
+      });
+    }
+
+    const exportBtn = content.querySelector("[data-cost-weekly-export]");
+    if (exportBtn){
+      exportBtn.addEventListener("click", ()=>{
+        if (!selected) return;
+        const rows = [["Week", selected.label || ""],[],["Cuts"],["Name","Category","Date","Hours","Cost"]];
+        const cuts = Array.isArray(selected.cuts) ? selected.cuts : [];
+        cuts.forEach(item => rows.push([
+          item?.name || "",
+          item?.category || "",
+          item?.dateISO || "",
+          Number(item?.hours || 0).toFixed(2),
+          Number(item?.cost || 0).toFixed(2)
+        ]));
+        rows.push(["","","","Total", Number(selected.cutsTotal || 0).toFixed(2)], [], ["Maintenance"], ["Name","Date","Hours","Cost"]);
+        const maintenance = Array.isArray(selected.maintenance) ? selected.maintenance : [];
+        maintenance.forEach(item => rows.push([
+          item?.name || "",
+          item?.dateISO || "",
+          Number(item?.hours || 0).toFixed(2),
+          Number(item?.cost || 0).toFixed(2)
+        ]));
+        rows.push(["","","Total", Number(selected.maintenanceTotal || 0).toFixed(2)]);
+        const csv = rows.map(r => r.map(v => {
+          const text = String(v ?? "");
+          return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+        }).join(",")).join("\n");
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `weekly-cost-report-${selected.key || "week"}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      });
+    }
+  }
 
   function setupCostTimeframeModal(currentModel){
     if (typeof window.__cleanupCostTimeframeModal === "function"){
@@ -13146,6 +13254,188 @@ function computeCostModel(){
     }
   })();
 
+
+  const weeklyReports = (()=>{
+    const MONDAY_STORAGE_KEY = "costWeeklyReports_v1";
+    const SELECTED_WEEK_KEY = "costWeeklySelectedWeek_v1";
+
+    const toDateOnly = (value)=>{
+      if (!value) return null;
+      const d = value instanceof Date ? new Date(value) : new Date(value);
+      if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null;
+      d.setHours(0,0,0,0);
+      return d;
+    };
+
+    const mondayFor = (value)=>{
+      const d = toDateOnly(value);
+      if (!d) return null;
+      const day = d.getDay();
+      const delta = (day + 6) % 7;
+      d.setDate(d.getDate() - delta);
+      return d;
+    };
+
+    const weekKeyFor = (value)=>{
+      const m = mondayFor(value);
+      return m ? m.toISOString().slice(0,10) : "";
+    };
+
+    const formatWeekLabel = (startISO)=>{
+      const start = toDateOnly(startISO);
+      if (!start) return "Weekly report";
+      const end = new Date(start);
+      end.setDate(end.getDate() + 6);
+      const fmt = (dt)=> dt.toLocaleDateString(undefined, { month:"short", day:"numeric" });
+      return `${fmt(start)} – ${fmt(end)}`;
+    };
+
+    const currentWeekKey = weekKeyFor(new Date());
+    const currentWeekStart = toDateOnly(currentWeekKey);
+    const allCategoriesById = new Map();
+    if (jobCategoryAnalytics && Array.isArray(jobCategoryAnalytics.categories)){
+      jobCategoryAnalytics.categories.forEach(category => {
+        if (!category || category.id == null) return;
+        allCategoriesById.set(String(category.id), String(category.name || "Uncategorized"));
+      });
+    }
+
+    const cutsByWeek = new Map();
+    completedJobsList.forEach((job, idx)=>{
+      if (!job) return;
+      const completedDate = toDateOnly(job.completedAtISO || job.dueISO || job.startISO);
+      if (!completedDate) return;
+      const weekKey = weekKeyFor(completedDate);
+      if (!weekKey) return;
+      const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null) || {};
+      const actualHours = Number(eff.actualHours ?? job.actualHours ?? job.estimateHours ?? 0);
+      const fallbackCost = Number(job.totalCost ?? job.totalJobCost ?? job.actualCost ?? 0);
+      const costRate = Number(eff.costRate ?? job.costRate);
+      const derivedCost = Number.isFinite(costRate) && Number.isFinite(actualHours) && actualHours > 0
+        ? costRate * actualHours
+        : fallbackCost;
+      const cost = Number.isFinite(derivedCost) ? Math.max(0, derivedCost) : 0;
+      const catId = job.cat != null ? String(job.cat) : "";
+      const categoryLabel = catId && allCategoriesById.has(catId)
+        ? allCategoriesById.get(catId)
+        : "Uncategorized";
+      const row = {
+        id: String(job.id || `cut_${idx}`),
+        name: String(job.name || "Untitled cut"),
+        dateISO: completedDate.toISOString().slice(0,10),
+        dateLabel: completedDate.toLocaleDateString(),
+        category: categoryLabel,
+        hours: Number.isFinite(actualHours) && actualHours > 0 ? actualHours : 0,
+        cost
+      };
+      const list = cutsByWeek.get(weekKey) || [];
+      list.push(row);
+      cutsByWeek.set(weekKey, list);
+    });
+
+    const maintenanceByWeek = new Map();
+    maintenanceHistory.forEach((entry, idx)=>{
+      if (!entry) return;
+      const d = toDateOnly(entry.dateISO || entry.rangeEndISO || entry.date);
+      if (!d) return;
+      const weekKey = weekKeyFor(d);
+      if (!weekKey) return;
+      const title = Array.isArray(entry.tasks) && entry.tasks.length
+        ? String(entry.tasks[0]?.name || "Maintenance event")
+        : "Maintenance event";
+      const cost = Number(entry.cost);
+      const row = {
+        id: String(entry.key || `maint_${idx}`),
+        name: title,
+        dateISO: d.toISOString().slice(0,10),
+        dateLabel: d.toLocaleDateString(),
+        hours: Number(entry.hours) || 0,
+        cost: Number.isFinite(cost) ? Math.max(0, cost) : 0
+      };
+      const list = maintenanceByWeek.get(weekKey) || [];
+      list.push(row);
+      maintenanceByWeek.set(weekKey, list);
+    });
+
+    const buildWeekReport = (weekKey)=>{
+      if (!weekKey) return null;
+      const cuts = (cutsByWeek.get(weekKey) || []).slice().sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+      const maintenance = (maintenanceByWeek.get(weekKey) || []).slice().sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+      const cutsTotal = cuts.reduce((sum,row)=> sum + (Number(row.cost) || 0), 0);
+      const maintenanceTotal = maintenance.reduce((sum,row)=> sum + (Number(row.cost) || 0), 0);
+      const totalCutHours = cuts.reduce((sum,row)=> sum + (Number(row.hours) || 0), 0);
+      const byDay = new Map();
+      const addDayVal = (dateISO, key, value)=>{
+        const iso = String(dateISO || "");
+        if (!iso) return;
+        const base = byDay.get(iso) || { dateISO: iso, cuts: 0, maintenance: 0 };
+        base[key] += Number(value) || 0;
+        byDay.set(iso, base);
+      };
+      cuts.forEach(row => addDayVal(row.dateISO, "cuts", row.cost));
+      maintenance.forEach(row => addDayVal(row.dateISO, "maintenance", row.cost));
+      const chartPoints = Array.from(byDay.values()).sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO))).map(point => {
+        const dt = new Date(point.dateISO);
+        return {
+          ...point,
+          label: (dt instanceof Date && !Number.isNaN(dt.getTime()))
+            ? dt.toLocaleDateString(undefined, { month:"short", day:"numeric" })
+            : point.dateISO
+        };
+      });
+      return {
+        key: weekKey,
+        label: formatWeekLabel(weekKey),
+        weekStartISO: weekKey,
+        cuts,
+        maintenance,
+        cutsTotal,
+        maintenanceTotal,
+        totalCutHours,
+        chartPoints,
+        generatedAtISO: new Date().toISOString()
+      };
+    };
+
+    const generatedReports = [];
+    const availableWeekKeys = new Set([...cutsByWeek.keys(), ...maintenanceByWeek.keys(), currentWeekKey]);
+    Array.from(availableWeekKeys).sort((a,b)=> String(b).localeCompare(String(a))).forEach(key => {
+      const report = buildWeekReport(key);
+      if (report) generatedReports.push(report);
+    });
+
+    let savedReports = [];
+    try {
+      const raw = localStorage.getItem(MONDAY_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) savedReports = parsed.filter(item => item && item.key).map(item => ({ ...item }));
+    } catch (_err){ savedReports = []; }
+
+    const merged = new Map();
+    savedReports.forEach(item => { if (item?.key) merged.set(String(item.key), item); });
+    generatedReports.forEach(item => { if (item?.key) merged.set(String(item.key), item); });
+
+    const mergedList = Array.from(merged.values()).sort((a,b)=> String(b?.key || "").localeCompare(String(a?.key || "")));
+    try { localStorage.setItem(MONDAY_STORAGE_KEY, JSON.stringify(mergedList)); } catch (_err){}
+
+    let activeWeeklyReportKey = "";
+    try { activeWeeklyReportKey = String(localStorage.getItem(SELECTED_WEEK_KEY) || ""); } catch (_err){ activeWeeklyReportKey = ""; }
+    if (!activeWeeklyReportKey || !merged.has(activeWeeklyReportKey)){
+      activeWeeklyReportKey = merged.has(currentWeekKey)
+        ? currentWeekKey
+        : (mergedList[0]?.key || "");
+      try { localStorage.setItem(SELECTED_WEEK_KEY, activeWeeklyReportKey); } catch (_err){}
+    }
+
+    return {
+      rows: mergedList,
+      activeKey: activeWeeklyReportKey,
+      storageKey: MONDAY_STORAGE_KEY,
+      selectionKey: SELECTED_WEEK_KEY
+    };
+  })();
+
+
   let timeframeNote;
   if (maintenanceOrderItems.length){
     timeframeNote = "Actual spend combines interval allocations with approved maintenance orders matched to your task part numbers.";
@@ -13215,6 +13505,9 @@ function computeCostModel(){
     jobBreakdown,
     jobEmpty,
     jobCategoryAnalytics,
+    weeklyReports: weeklyReports.rows,
+    activeWeeklyReportKey: weeklyReports.activeKey,
+    weeklyReportSelectionKey: weeklyReports.selectionKey,
     chartNote,
     chartInfo,
     orderRequestSummary,
