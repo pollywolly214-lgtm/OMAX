@@ -265,7 +265,7 @@ function getAverageDailyCutHours(){
   }
   if (!eligibleDays) return null;
 
-  const dailyList = Array.isArray(dailyCutHours) ? dailyCutHours : [];
+  const dailyList = Array.isArray(window.dailyCutHours) ? window.dailyCutHours : [];
   if (dailyList.length){
     let totalHours = 0;
     let hasWindowEntry = false;
