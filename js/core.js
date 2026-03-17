@@ -255,66 +255,70 @@ function getAverageDailyCutHours(){
 
   const excludeWeekends = shouldExcludeWeekends();
   let eligibleDays = 0;
-  const cursor = new Date(start);
-  while (cursor <= today){
-    const day = cursor.getDay();
-    if (!excludeWeekends || (day !== 0 && day !== 6)){
-      eligibleDays += 1;
-    }
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  if (!eligibleDays) return null;
 
+  const dailyMap = new Map();
   const dailyList = Array.isArray(window.dailyCutHours) ? window.dailyCutHours : [];
-  if (dailyList.length){
-    let totalHours = 0;
-    let hasWindowEntry = false;
-    dailyList.forEach(entry => {
-      if (!entry || !entry.dateISO) return;
-      const key = normalizeDateISO(entry.dateISO);
-      if (!key || key < startKey || key > endKey) return;
-      const parsed = parseDateLocal(key);
-      if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return;
-      if (excludeWeekends){
-        const day = parsed.getDay();
-        if (day === 0 || day === 6) return;
-      }
-      const hours = clampDailyCutHours(entry.hours);
-      totalHours += hours;
-      hasWindowEntry = true;
-    });
-    if (hasWindowEntry){
-      const rate = totalHours / eligibleDays;
-      return (Number.isFinite(rate) && rate > 0) ? rate : null;
-    }
-  }
+  dailyList.forEach(entry => {
+    if (!entry || !entry.dateISO) return;
+    const key = normalizeDateISO(entry.dateISO);
+    if (!key || key < startKey || key > endKey) return;
+    dailyMap.set(key, clampDailyCutHours(entry.hours));
+  });
 
-  const list = Array.isArray(window.totalHistory) ? window.totalHistory : [];
-  const sorted = list
+  const totalList = Array.isArray(window.totalHistory) ? window.totalHistory : [];
+  const sortedTotals = totalList
     .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
     .slice()
     .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
-  if (sorted.length < 2) return null;
 
-  const startTime = start.getTime();
-  const todayTime = today.getTime();
-  let startHours = null;
-  let endHours = null;
-  for (const entry of sorted){
-    const entryDate = parseDateLocal(entry.dateISO);
-    if (!(entryDate instanceof Date) || Number.isNaN(entryDate.getTime())) continue;
-    entryDate.setHours(0,0,0,0);
-    const entryTime = entryDate.getTime();
-    if (entryTime <= startTime) startHours = Number(entry.hours);
-    if (entryTime <= todayTime) endHours = Number(entry.hours);
-    if (entryTime > todayTime) break;
+  const totalsByDate = new Map();
+  sortedTotals.forEach(entry => {
+    const key = normalizeDateISO(entry.dateISO);
+    if (!key) return;
+    totalsByDate.set(key, Number(entry.hours));
+  });
+
+  let runningTotal = null;
+  for (let i = 0; i < sortedTotals.length; i++){
+    const item = sortedTotals[i];
+    const key = normalizeDateISO(item?.dateISO);
+    if (!key || key > startKey) break;
+    runningTotal = Number(item.hours);
   }
-  if (!Number.isFinite(startHours) || !Number.isFinite(endHours)) return null;
-  const diffHours = Math.max(0, endHours - startHours);
-  if (!Number.isFinite(diffHours)) return null;
-  const rate = diffHours / eligibleDays;
+
+  let totalHours = 0;
+  const cursor = new Date(start);
+  while (cursor <= today){
+    const day = cursor.getDay();
+    const key = ymd(cursor);
+    const includeDay = !excludeWeekends || (day !== 0 && day !== 6);
+    const hasDaily = dailyMap.has(key);
+
+    if (totalsByDate.has(key)){
+      const nextTotal = totalsByDate.get(key);
+      if (runningTotal == null){
+        runningTotal = nextTotal;
+      } else {
+        const delta = Math.max(0, Number(nextTotal) - Number(runningTotal));
+        if (!hasDaily && includeDay){
+          totalHours += delta;
+        }
+        runningTotal = nextTotal;
+      }
+    }
+
+    if (hasDaily && includeDay){
+      totalHours += dailyMap.get(key) || 0;
+    }
+    if (includeDay) eligibleDays += 1;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  if (!eligibleDays) return null;
+  const rate = totalHours / eligibleDays;
   return (Number.isFinite(rate) && rate > 0) ? rate : null;
 }
+
 
 function refreshDerivedDailyHours(){
   DAILY_HOURS = getConfiguredDailyHours();
@@ -2815,7 +2819,6 @@ function adoptState(doc){
 
 const saveCloudInternal = debounce(async ()=>{
   if (!FB.ready || !FB.docRef) return;
-  if (isVercelPreviewRuntime()) return;
   try{
     const snap = snapshotState();
     window.__lastSnapshot = snap;
@@ -2835,7 +2838,6 @@ const saveCloudInternal = debounce(async ()=>{
   }
 }, 300);
 function saveCloudDebounced(){
-  if (isVercelPreviewRuntime()) return;
   try {
     if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
@@ -2849,7 +2851,6 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(){
-  if (isVercelPreviewRuntime()) return;
   try {
     if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
