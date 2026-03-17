@@ -5944,9 +5944,9 @@ body.job-flow-lock-scroll {
 .cost-weekly-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
 .cost-weekly-grid h4{ margin:0 0 6px; }
 @media (max-width: 980px){ .cost-weekly-grid{ grid-template-columns:1fr; } }
-#weeklyCostChart{ display:block; width:100%; margin-top:10px; border:1px solid #d9e2f2; border-radius:10px; background:#fff; }
+#weeklyCostChart{ display:block; width:100%; min-height:340px; margin-top:10px; border:1px solid #d9e2f2; border-radius:10px; background:#fff; }
 
-.block[data-cost-weekly-reports]{ overflow:hidden; }
+.block[data-cost-weekly-reports]{ max-height:78vh; overflow:auto; padding-right:4px; }
 
 
 .cost-weekly-section{ border:1px solid #d9e2f2; border-radius:10px; background:#fff; overflow:hidden; }
@@ -5956,3 +5956,5 @@ body.job-flow-lock-scroll {
 .cost-weekly-section:not([open])>summary::after{ content:"▸"; }
 .cost-weekly-table-wrap{ max-height:280px; overflow:auto; }
 .cost-weekly-table-wrap .cost-table{ margin:0; }
+
+.cost-weekly-section-totals{ display:flex; flex-wrap:wrap; gap:10px 16px; padding:10px 12px; border-top:1px solid #e4e9f3; color:#1e2b45; background:#fbfcff; font-variant-numeric:tabular-nums; }

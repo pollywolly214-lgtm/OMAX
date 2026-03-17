@@ -12761,8 +12761,11 @@ function computeCostModel(){
       const date = (completedDate instanceof Date && !Number.isNaN(completedDate.getTime())) ? completedDate : null;
       if (!date) return null;
       const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
-      const gainLoss = Number(eff?.gainLoss);
-      const cutCost = Number.isFinite(gainLoss) ? gainLoss : 0;
+      const costRateRaw = Number(eff?.costRate);
+      const estimateHoursRawForRate = Number(job.estimateHours);
+      const fallbackCostRate = Number.isFinite(estimateHoursRawForRate) && estimateHoursRawForRate > 0
+        ? (JOB_BASE_COST_PER_HOUR + ((Number(job?.materialCost) || 0) * (Number(job?.materialQty) || 0) / estimateHoursRawForRate))
+        : JOB_BASE_COST_PER_HOUR;
       const catId = job.cat != null ? String(job.cat) : rootFolderId;
       const categoryName = resolveCategoryName(catId);
       const actualHoursRaw = Number(job.actualHours);
@@ -12777,6 +12780,8 @@ function computeCostModel(){
       const categoryDisplay = projectNumber
         ? `${categoryName} · ${projectNumber}`
         : categoryName;
+      const effectiveCostRate = Number.isFinite(costRateRaw) && costRateRaw > 0 ? costRateRaw : fallbackCostRate;
+      const cutCost = Math.max(0, cutHours * effectiveCostRate);
       return {
         id: String(job.id || "cut"),
         date,

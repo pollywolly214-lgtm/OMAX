@@ -1927,6 +1927,10 @@ function viewCosts(model){
           <div class="cost-weekly-grid">
             <details class="cost-weekly-section" open>
               <summary>Cuts completed</summary>
+              <div class="cost-weekly-section-totals">
+                <span><strong>Cuts related total:</strong> ${esc(selectedWeeklyReport?.totalCutCostLabel || "$0")}</span>
+                <span><strong>Total cut time:</strong> ${esc(selectedWeeklyReport?.totalCutHoursLabel || "0 hr")}</span>
+              </div>
               <div class="cost-weekly-table-wrap">
                 <table class="cost-table">
                   <thead><tr><th>Cut</th><th>Category</th><th>Hours</th><th>Cost impact</th></tr></thead>
@@ -1936,6 +1940,9 @@ function viewCosts(model){
             </details>
             <details class="cost-weekly-section" open>
               <summary>Maintenance completed</summary>
+              <div class="cost-weekly-section-totals">
+                <span><strong>Maintenance related total:</strong> ${esc(selectedWeeklyReport?.totalMaintenanceCostLabel || "$0")}</span>
+              </div>
               <div class="cost-weekly-table-wrap">
                 <table class="cost-table">
                   <thead><tr><th>Task</th><th>Type</th><th>Part #</th><th>Cost</th></tr></thead>
