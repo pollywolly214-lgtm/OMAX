@@ -101,8 +101,12 @@ function commitCalendarHoursEditing(){
   renderCalendar();
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
   if (changed){
+    if (typeof refreshDerivedDailyHours === "function") refreshDerivedDailyHours();
     if (typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
-    if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets();
+    if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets({ full: true });
+    if (typeof route === "function"){
+      try { route(); } catch (_err){}
+    }
     toast("Daily hours updated");
   }else{
     toast("No changes to save.");
