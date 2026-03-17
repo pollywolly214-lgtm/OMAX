@@ -13434,43 +13434,82 @@ function drawWeeklyReportChart(canvas, report){
     return;
   }
 
-  const costBars = [
-    { key: "cuts", label: "Cuts cost", value: Math.max(0, Number(report.totalCutCost) || 0), color: "#2e7d32" },
-    { key: "maintenance", label: "Maintenance cost", value: Math.max(0, Number(report.totalMaintenanceCost) || 0), color: "#0a63c2" }
-  ];
   const weeklyHoursActual = Math.max(0, Number(report.totalCutHours) || 0);
   const weeklyHoursGoal = 40;
+  const costBars = [
+    { label: "Cuts cost", value: Math.max(0, Number(report.totalCutCost) || 0), color: "#2e7d32" },
+    { label: "Maintenance cost", value: Math.max(0, Number(report.totalMaintenanceCost) || 0), color: "#0a63c2" }
+  ];
 
-  const left = 72;
-  const right = W - 72;
+  const outerLeft = 24;
+  const outerRight = W - 24;
   const top = 38;
   const bottom = H - 62;
-  const chartW = right - left;
-  const chartH = bottom - top;
+  const sectionGap = 22;
+  const innerW = outerRight - outerLeft;
+  const sectionW = Math.max(220, (innerW - sectionGap) / 2);
+  const costLeft = outerLeft;
+  const costRight = costLeft + sectionW;
+  const hoursLeft = costRight + sectionGap;
+  const hoursRight = outerRight;
 
-  const maxCost = Math.max(1, ...costBars.map(item => item.value));
-  const maxHours = Math.max(weeklyHoursGoal, weeklyHoursActual, 1);
+  const drawSectionTitle = (left, title)=>{
+    ctx.fillStyle = "#1e2b45";
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(title, left, top - 14);
+  };
 
-  const YCost = (value)=> bottom - ((Math.max(0, value) / maxCost) * chartH);
-  const YHours = (value)=> bottom - ((Math.max(0, value) / maxHours) * chartH);
+  drawSectionTitle(costLeft, "Cost");
+  drawSectionTitle(hoursLeft, "Cutting hours");
 
-  ctx.strokeStyle = "#d6ddea";
+  // Divider between charts
+  const dividerX = costRight + (sectionGap / 2);
+  ctx.strokeStyle = "#d7ddeb";
+  ctx.setLineDash([4,4]);
   ctx.beginPath();
-  ctx.moveTo(left, bottom);
-  ctx.lineTo(right, bottom);
+  ctx.moveTo(dividerX, top - 16);
+  ctx.lineTo(dividerX, bottom + 28);
   ctx.stroke();
+  ctx.setLineDash([]);
 
-  const barWidth = Math.min(140, chartW / 6);
-  const firstX = left + (chartW * 0.18);
-  const secondX = left + (chartW * 0.48);
-  const barXs = [firstX, secondX];
+  // COST SECTION (left)
+  const costMax = Math.max(1, ...costBars.map(item => item.value));
+  const costChartLeft = costLeft + 42;
+  const costChartRight = costRight - 10;
+  const costChartW = costChartRight - costChartLeft;
+  const costChartH = bottom - top;
+  const YCost = (value)=> bottom - ((Math.max(0, value) / costMax) * costChartH);
 
+  [0, 0.5, 1].forEach(ratio => {
+    const value = costMax * ratio;
+    const y = YCost(value);
+    ctx.strokeStyle = "#eef1f8";
+    ctx.beginPath();
+    ctx.moveTo(costChartLeft, y);
+    ctx.lineTo(costChartRight, y);
+    ctx.stroke();
+
+    ctx.fillStyle = "#5a6478";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "right";
+    const money = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(value);
+    ctx.fillText(money, costChartLeft - 6, y + 4);
+  });
+
+  const costBarWidth = Math.min(120, costChartW / 3.2);
+  const costStartX = costChartLeft + ((costChartW - (costBarWidth * 2)) / 3);
   costBars.forEach((bar, idx) => {
-    const x = barXs[idx];
+    const x = costStartX + idx * (costBarWidth + ((costChartW - (costBarWidth * 2)) / 3));
     const y = YCost(bar.value);
     const height = Math.max(2, bottom - y);
     ctx.fillStyle = bar.color;
-    ctx.fillRect(x, y, barWidth, height);
+    ctx.fillRect(x, y, costBarWidth, height);
 
     ctx.fillStyle = "#1d2b45";
     ctx.font = "12px sans-serif";
@@ -13481,72 +13520,68 @@ function drawWeeklyReportChart(canvas, report){
       minimumFractionDigits: 0,
       maximumFractionDigits: 0
     }).format(bar.value);
-    ctx.fillText(money, x + (barWidth / 2), Math.max(top + 14, y - 8));
-    ctx.fillText(bar.label, x + (barWidth / 2), bottom + 16);
+    ctx.fillText(money, x + (costBarWidth / 2), Math.max(top + 14, y - 8));
+    ctx.fillText(bar.label, x + (costBarWidth / 2), bottom + 16);
   });
 
-  const lineXStart = left + (chartW * 0.72);
-  const lineXEnd = right - 8;
-  const yGoal = YHours(weeklyHoursGoal);
-  const yActual = YHours(weeklyHoursActual);
+  // HOURS SECTION (right)
+  const hoursMax = Math.max(weeklyHoursGoal, weeklyHoursActual, 1);
+  const hoursChartLeft = hoursLeft + 26;
+  const hoursChartRight = hoursRight - 44;
+  const hoursChartW = hoursChartRight - hoursChartLeft;
+  const hoursChartH = bottom - top;
+  const YHours = (value)=> bottom - ((Math.max(0, value) / hoursMax) * hoursChartH);
 
-  ctx.setLineDash([6,4]);
+  [0, 0.5, 1].forEach(ratio => {
+    const value = hoursMax * ratio;
+    const y = YHours(value);
+    ctx.strokeStyle = "#f1edfb";
+    ctx.beginPath();
+    ctx.moveTo(hoursChartLeft, y);
+    ctx.lineTo(hoursChartRight, y);
+    ctx.stroke();
+
+    ctx.fillStyle = "#6b46c1";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(`${value.toFixed(0)} hr`, hoursChartRight + 6, y + 4);
+  });
+
+  const goalBar = { label: "Goal", value: weeklyHoursGoal, color: "#8a5cf6" };
+  const actualBar = { label: "Actual", value: weeklyHoursActual, color: "#d97706" };
+  const hourBars = [goalBar, actualBar];
+  const hourBarWidth = Math.min(96, hoursChartW / 3.2);
+  const hourStartX = hoursChartLeft + ((hoursChartW - (hourBarWidth * 2)) / 3);
+  hourBars.forEach((bar, idx) => {
+    const x = hourStartX + idx * (hourBarWidth + ((hoursChartW - (hourBarWidth * 2)) / 3));
+    const y = YHours(bar.value);
+    const height = Math.max(2, bottom - y);
+    ctx.fillStyle = bar.color;
+    ctx.fillRect(x, y, hourBarWidth, height);
+
+    ctx.fillStyle = "#1d2b45";
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(`${bar.value.toFixed(bar.label === "Actual" ? 1 : 0)} hr`, x + (hourBarWidth / 2), Math.max(top + 14, y - 8));
+    ctx.fillText(bar.label, x + (hourBarWidth / 2), bottom + 16);
+  });
+
+  // Threshold line across hours chart
+  const yGoalLine = YHours(weeklyHoursGoal);
   ctx.strokeStyle = "#8a5cf6";
-  ctx.lineWidth = 2;
+  ctx.setLineDash([6,4]);
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(lineXStart, yGoal);
-  ctx.lineTo(lineXEnd, yGoal);
+  ctx.moveTo(hoursChartLeft, yGoalLine);
+  ctx.lineTo(hoursChartRight, yGoalLine);
   ctx.stroke();
   ctx.setLineDash([]);
-
-  ctx.strokeStyle = "#d97706";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(lineXStart, yActual);
-  ctx.lineTo(lineXEnd, yActual);
-  ctx.stroke();
-
-  ctx.fillStyle = "#8a5cf6";
-  ctx.font = "12px sans-serif";
-  ctx.textAlign = "left";
-  ctx.fillText(`Goal: ${weeklyHoursGoal.toFixed(0)} hr`, lineXStart, Math.max(top + 12, yGoal - 6));
-
-  ctx.fillStyle = "#d97706";
-  ctx.fillText(`Actual: ${weeklyHoursActual.toFixed(1)} hr`, lineXStart, Math.max(top + 28, yActual - 6));
-
-  // Left cost axis labels
-  ctx.fillStyle = "#5a6478";
-  ctx.font = "11px sans-serif";
-  ctx.textAlign = "right";
-  [0, 0.5, 1].forEach(ratio => {
-    const value = maxCost * ratio;
-    const y = YCost(value);
-    ctx.strokeStyle = "#eef1f8";
-    ctx.beginPath();
-    ctx.moveTo(left, y);
-    ctx.lineTo(right, y);
-    ctx.stroke();
-    const money = new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(value);
-    ctx.fillText(money, left - 6, y + 4);
-  });
-
-  // Right hours axis labels
-  ctx.fillStyle = "#6b46c1";
-  ctx.textAlign = "left";
-  [0, maxHours].forEach(value => {
-    const y = YHours(value);
-    ctx.fillText(`${value.toFixed(0)} hr`, right + 6, y + 4);
-  });
+  ctx.lineWidth = 1;
 
   ctx.fillStyle = "#5a6478";
   ctx.font = "12px sans-serif";
   ctx.textAlign = "left";
-  ctx.fillText(`Week: ${report.weekLabel || report.weekStartISO || ""}`, left, 18);
+  ctx.fillText(`Week: ${report.weekLabel || report.weekStartISO || ""}`, outerLeft, 18);
 }
 
 function drawCostChart(canvas, model, show){
