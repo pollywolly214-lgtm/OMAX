@@ -1418,6 +1418,7 @@ if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
 if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
 if (!Array.isArray(window.opportunityRollups)) window.opportunityRollups = [];
+if (!Array.isArray(window.weeklyCostReports)) window.weeklyCostReports = [];
 if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
@@ -1439,6 +1440,7 @@ let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
 let dailyCutHours = window.dailyCutHours;
 let jobFolders = window.jobFolders;
+let weeklyCostReports = window.weeklyCostReports;
 
 function normalizeJobPriorityOrder(list){
   if (!Array.isArray(list)) return list;
@@ -1894,6 +1896,9 @@ function snapshotState(){
       : [],
     opportunityRollups: Array.isArray(window.opportunityRollups)
       ? window.opportunityRollups.map(entry => ({ ...entry }))
+      : [],
+    weeklyCostReports: Array.isArray(window.weeklyCostReports)
+      ? window.weeklyCostReports.map(entry => ({ ...entry }))
       : [],
     appConfig: normalizeAppConfig(window.appConfig),
     pumpEff: safePumpEff,
@@ -2570,6 +2575,7 @@ function adoptState(doc){
   garnetCleanings = Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [];
   dailyCutHours = normalizeDailyCutHours(Array.isArray(data.dailyCutHours) ? data.dailyCutHours : []);
   opportunityRollups = Array.isArray(data.opportunityRollups) ? data.opportunityRollups : [];
+  weeklyCostReports = Array.isArray(data.weeklyCostReports) ? data.weeklyCostReports.map(entry => ({ ...entry })) : [];
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -2581,6 +2587,7 @@ function adoptState(doc){
   window.garnetCleanings = garnetCleanings;
   window.dailyCutHours = dailyCutHours;
   window.opportunityRollups = opportunityRollups;
+  window.weeklyCostReports = weeklyCostReports;
   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
   window.deletedItems = deletedItems;
   purgeExpiredDeletedItems();
@@ -2863,6 +2870,7 @@ async function loadFromCloud(){
         orderRequestTab: typeof window.orderRequestTab === "string" ? window.orderRequestTab : "active",
         dailyCutHours: Array.isArray(window.dailyCutHours) ? window.dailyCutHours.slice() : [],
         opportunityRollups: Array.isArray(window.opportunityRollups) ? window.opportunityRollups.slice() : [],
+        weeklyCostReports: Array.isArray(window.weeklyCostReports) ? window.weeklyCostReports.slice() : [],
         jobFolders: typeof defaultJobFolders === "function" ? defaultJobFolders() : [],
         pumpEff: pe,
         appConfig: normalizeAppConfig(window.appConfig),
