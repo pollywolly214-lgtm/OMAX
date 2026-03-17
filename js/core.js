@@ -245,41 +245,13 @@ function getPredictionHoursSummary(){
 }
 
 function getAverageDailyCutHours(){
-  const list = Array.isArray(window.totalHistory) ? window.totalHistory : [];
-  const sorted = list
-    .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
-    .slice()
-    .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
-  if (sorted.length < 2) return null;
-
   const today = new Date();
   today.setHours(0,0,0,0);
   const lookbackDays = 60;
   const start = new Date(today);
   start.setDate(start.getDate() - lookbackDays);
-
-  const startTime = start.getTime();
-  const todayTime = today.getTime();
-
-  let startHours = null;
-  let endHours = null;
-  for (const entry of sorted){
-    const entryDate = parseDateLocal(entry.dateISO);
-    if (!(entryDate instanceof Date) || Number.isNaN(entryDate.getTime())) continue;
-    entryDate.setHours(0,0,0,0);
-    const entryTime = entryDate.getTime();
-    if (entryTime <= startTime){
-      startHours = Number(entry.hours);
-    }
-    if (entryTime <= todayTime){
-      endHours = Number(entry.hours);
-    }
-    if (entryTime > todayTime) break;
-  }
-
-  if (!Number.isFinite(startHours) || !Number.isFinite(endHours)) return null;
-  const diffHours = Math.max(0, endHours - startHours);
-  if (!Number.isFinite(diffHours)) return null;
+  const startKey = ymd(start);
+  const endKey = ymd(today);
 
   const excludeWeekends = shouldExcludeWeekends();
   let eligibleDays = 0;
@@ -293,6 +265,53 @@ function getAverageDailyCutHours(){
   }
   if (!eligibleDays) return null;
 
+  const dailyList = Array.isArray(dailyCutHours) ? dailyCutHours : [];
+  if (dailyList.length){
+    let totalHours = 0;
+    let hasWindowEntry = false;
+    dailyList.forEach(entry => {
+      if (!entry || !entry.dateISO) return;
+      const key = normalizeDateISO(entry.dateISO);
+      if (!key || key < startKey || key > endKey) return;
+      const parsed = parseDateLocal(key);
+      if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return;
+      if (excludeWeekends){
+        const day = parsed.getDay();
+        if (day === 0 || day === 6) return;
+      }
+      const hours = clampDailyCutHours(entry.hours);
+      totalHours += hours;
+      hasWindowEntry = true;
+    });
+    if (hasWindowEntry){
+      const rate = totalHours / eligibleDays;
+      return (Number.isFinite(rate) && rate > 0) ? rate : null;
+    }
+  }
+
+  const list = Array.isArray(window.totalHistory) ? window.totalHistory : [];
+  const sorted = list
+    .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
+    .slice()
+    .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+  if (sorted.length < 2) return null;
+
+  const startTime = start.getTime();
+  const todayTime = today.getTime();
+  let startHours = null;
+  let endHours = null;
+  for (const entry of sorted){
+    const entryDate = parseDateLocal(entry.dateISO);
+    if (!(entryDate instanceof Date) || Number.isNaN(entryDate.getTime())) continue;
+    entryDate.setHours(0,0,0,0);
+    const entryTime = entryDate.getTime();
+    if (entryTime <= startTime) startHours = Number(entry.hours);
+    if (entryTime <= todayTime) endHours = Number(entry.hours);
+    if (entryTime > todayTime) break;
+  }
+  if (!Number.isFinite(startHours) || !Number.isFinite(endHours)) return null;
+  const diffHours = Math.max(0, endHours - startHours);
+  if (!Number.isFinite(diffHours)) return null;
   const rate = diffHours / eligibleDays;
   return (Number.isFinite(rate) && rate > 0) ? rate : null;
 }
