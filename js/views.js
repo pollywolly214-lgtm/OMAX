@@ -1868,6 +1868,39 @@ function viewCosts(model){
         </div>
       </div>
 
+      <div class="dashboard-window" data-cost-window="weeklyReports">
+        <div class="block" data-cost-weekly-reports>
+          <div class="cost-weekly-header">
+            <h3>Weekly cost reports</h3>
+            <div class="cost-weekly-actions">
+              <label>
+                <span class="sr-only">Select weekly report</span>
+                <select id="costWeeklyReportSelect" aria-label="Select weekly report"></select>
+              </label>
+              <button type="button" class="btn secondary" id="costWeeklyExportBtn">Export sheet (CSV)</button>
+            </div>
+          </div>
+          <div class="cost-weekly-summary" id="costWeeklySummary"></div>
+          <div class="cost-weekly-graph" id="costWeeklyGraph" aria-label="Weekly cost graph"></div>
+          <div class="cost-weekly-tables">
+            <div>
+              <h4>Cuts completed</h4>
+              <table class="cost-table" id="costWeeklyCutsTable">
+                <thead><tr><th>Cut</th><th>Category</th><th>Time</th><th>Cost</th></tr></thead>
+                <tbody><tr><td colspan="4" class="cost-table-placeholder">No cuts completed this week.</td></tr></tbody>
+              </table>
+            </div>
+            <div>
+              <h4>Maintenance completed</h4>
+              <table class="cost-table" id="costWeeklyMaintenanceTable">
+                <thead><tr><th>Task</th><th>Date</th><th>Cost</th></tr></thead>
+                <tbody><tr><td colspan="3" class="cost-table-placeholder">No maintenance completed this week.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="dashboard-window" data-cost-window="efficiency">
         <div class="block" data-cost-jobs-history role="link" tabindex="0">
           <h3>Cutting Job Efficiency Snapshot</h3>

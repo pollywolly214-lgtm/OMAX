@@ -5936,3 +5936,17 @@ body.job-flow-lock-scroll {
   border-radius: 8px;
   background: #f8fafc;
 }
+
+
+.cost-weekly-header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.cost-weekly-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.cost-weekly-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:8px 0 12px}
+.cost-weekly-pill{background:#f7f9fc;border:1px solid #d6deea;border-radius:10px;padding:8px 10px;display:flex;flex-direction:column}
+.cost-weekly-pill span{font-size:12px;color:#5b677a}
+.cost-weekly-pill strong{font-size:16px;color:#10213a}
+.cost-weekly-graph{display:grid;gap:8px;margin-bottom:12px}
+.cost-weekly-bar-row{display:grid;grid-template-columns:90px 1fr auto;gap:8px;align-items:center}
+.cost-weekly-bar{height:12px;background:#e6edf7;border-radius:999px;overflow:hidden}
+.cost-weekly-bar i{display:block;height:100%;background:linear-gradient(90deg,#0a63c2,#2e7d32)}
+.cost-weekly-tables{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width: 960px){.cost-weekly-tables{grid-template-columns:1fr}}
