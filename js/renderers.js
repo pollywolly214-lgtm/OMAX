@@ -10174,7 +10174,7 @@ function renderCosts(){
         const cutsRows = (Array.isArray(report.cutItems) ? report.cutItems : []).map(item => `
           <tr>
             <td>${escHtml(item?.name || "Cut")}</td>
-            <td>${escHtml(item?.category || "Uncategorized")}</td>
+            <td>${escHtml(item?.categoryDisplay || item?.category || "Uncategorized")}</td>
             <td>${escHtml(item?.hoursLabel || "0 hr")}</td>
             <td>${escHtml(item?.costLabel || "$0")}</td>
           </tr>`).join("") || '<tr><td colspan="4">No cuts completed this week.</td></tr>';
@@ -12767,15 +12767,24 @@ function computeCostModel(){
       const categoryName = resolveCategoryName(catId);
       const actualHoursRaw = Number(job.actualHours);
       const effHoursRaw = Number(eff?.actualHours);
+      const estimateHoursRaw = Number(job.estimateHours);
       const cutHours = Number.isFinite(actualHoursRaw) && actualHoursRaw > 0
         ? actualHoursRaw
-        : (Number.isFinite(effHoursRaw) && effHoursRaw > 0 ? effHoursRaw : 0);
+        : (Number.isFinite(effHoursRaw) && effHoursRaw > 0
+          ? effHoursRaw
+          : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0));
+      const projectNumber = String(job?.projectNumber || "").replace(/[^0-9]/g, "").slice(0, 8);
+      const categoryDisplay = projectNumber
+        ? `${categoryName} · ${projectNumber}`
+        : categoryName;
       return {
         id: String(job.id || "cut"),
         date,
         dateISO: ymd(date),
         name: job.name || "Cut",
         category: categoryName,
+        categoryDisplay,
+        projectNumber,
         categoryId: catId,
         cost: cutCost,
         hours: cutHours
@@ -12792,6 +12801,8 @@ function computeCostModel(){
       dateISO: cut.dateISO,
       name: cut.name,
       category: cut.category,
+      categoryDisplay: cut.categoryDisplay,
+      projectNumber: cut.projectNumber,
       categoryId: cut.categoryId,
       cost: cut.cost,
       hours: cut.hours,

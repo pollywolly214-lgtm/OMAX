@@ -5947,3 +5947,12 @@ body.job-flow-lock-scroll {
 #weeklyCostChart{ display:block; width:100%; margin-top:10px; border:1px solid #d9e2f2; border-radius:10px; background:#fff; }
 
 .block[data-cost-weekly-reports]{ overflow:hidden; }
+
+
+.cost-weekly-section{ border:1px solid #d9e2f2; border-radius:10px; background:#fff; overflow:hidden; }
+.cost-weekly-section>summary{ cursor:pointer; list-style:none; font-weight:600; color:#1e2b45; padding:10px 12px; background:#f6f8fc; }
+.cost-weekly-section>summary::-webkit-details-marker{ display:none; }
+.cost-weekly-section>summary::after{ content:"▾"; float:right; color:#5a6478; }
+.cost-weekly-section:not([open])>summary::after{ content:"▸"; }
+.cost-weekly-table-wrap{ max-height:280px; overflow:auto; }
+.cost-weekly-table-wrap .cost-table{ margin:0; }

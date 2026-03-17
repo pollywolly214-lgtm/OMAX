@@ -1571,7 +1571,7 @@ function viewCosts(model){
     ? selectedWeeklyReport.cutItems.map(item => `
       <tr>
         <td>${esc(item.name || "Cut")}</td>
-        <td>${esc(item.category || "Uncategorized")}</td>
+        <td>${esc(item.categoryDisplay || item.category || "Uncategorized")}</td>
         <td>${esc(item.hoursLabel || "0 hr")}</td>
         <td>${esc(item.costLabel || "$0")}</td>
       </tr>
@@ -1925,20 +1925,24 @@ function viewCosts(model){
             <div><span class="label">Cutting time</span><span>${esc(selectedWeeklyReport?.totalCutHoursLabel || "0 hr")}</span></div>
           </div>
           <div class="cost-weekly-grid">
-            <div>
-              <h4>Cuts completed</h4>
-              <table class="cost-table">
-                <thead><tr><th>Cut</th><th>Category</th><th>Hours</th><th>Cost impact</th></tr></thead>
-                <tbody>${weeklyCutRows}</tbody>
-              </table>
-            </div>
-            <div>
-              <h4>Maintenance completed</h4>
-              <table class="cost-table">
-                <thead><tr><th>Task</th><th>Type</th><th>Part #</th><th>Cost</th></tr></thead>
-                <tbody>${weeklyMaintenanceRows}</tbody>
-              </table>
-            </div>
+            <details class="cost-weekly-section" open>
+              <summary>Cuts completed</summary>
+              <div class="cost-weekly-table-wrap">
+                <table class="cost-table">
+                  <thead><tr><th>Cut</th><th>Category</th><th>Hours</th><th>Cost impact</th></tr></thead>
+                  <tbody>${weeklyCutRows}</tbody>
+                </table>
+              </div>
+            </details>
+            <details class="cost-weekly-section" open>
+              <summary>Maintenance completed</summary>
+              <div class="cost-weekly-table-wrap">
+                <table class="cost-table">
+                  <thead><tr><th>Task</th><th>Type</th><th>Part #</th><th>Cost</th></tr></thead>
+                  <tbody>${weeklyMaintenanceRows}</tbody>
+                </table>
+              </div>
+            </details>
           </div>
           <canvas id="weeklyCostChart" width="900" height="340" aria-label="Weekly report chart"></canvas>
         </div>
