@@ -265,11 +265,30 @@ function getAverageDailyCutHours(){
     dailyMap.set(key, clampDailyCutHours(entry.hours));
   });
 
+  if (dailyMap.size > 0){
+    let totalHours = 0;
+    const cursor = new Date(start);
+    while (cursor <= today){
+      const day = cursor.getDay();
+      const key = ymd(cursor);
+      const includeDay = !excludeWeekends || (day !== 0 && day !== 6);
+      if (includeDay){
+        totalHours += dailyMap.get(key) || 0;
+        eligibleDays += 1;
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    if (!eligibleDays) return null;
+    const rate = totalHours / eligibleDays;
+    return (Number.isFinite(rate) && rate > 0) ? rate : null;
+  }
+
   const totalList = Array.isArray(window.totalHistory) ? window.totalHistory : [];
   const sortedTotals = totalList
     .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
     .slice()
     .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+  if (sortedTotals.length < 2) return null;
 
   const totalsByDate = new Map();
   sortedTotals.forEach(entry => {
@@ -287,30 +306,27 @@ function getAverageDailyCutHours(){
   }
 
   let totalHours = 0;
+  eligibleDays = 0;
   const cursor = new Date(start);
   while (cursor <= today){
     const day = cursor.getDay();
     const key = ymd(cursor);
     const includeDay = !excludeWeekends || (day !== 0 && day !== 6);
-    const hasDaily = dailyMap.has(key);
+    if (includeDay) eligibleDays += 1;
 
     if (totalsByDate.has(key)){
       const nextTotal = totalsByDate.get(key);
       if (runningTotal == null){
         runningTotal = nextTotal;
-      } else {
+      } else if (includeDay) {
         const delta = Math.max(0, Number(nextTotal) - Number(runningTotal));
-        if (!hasDaily && includeDay){
-          totalHours += delta;
-        }
+        totalHours += delta;
+        runningTotal = nextTotal;
+      } else {
         runningTotal = nextTotal;
       }
     }
 
-    if (hasDaily && includeDay){
-      totalHours += dailyMap.get(key) || 0;
-    }
-    if (includeDay) eligibleDays += 1;
     cursor.setDate(cursor.getDate() + 1);
   }
 
