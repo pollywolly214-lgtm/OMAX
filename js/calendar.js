@@ -1966,6 +1966,54 @@ function renderCalendar(){
   const intervalTasks = Array.isArray(window.tasksInterval)
     ? window.tasksInterval.filter(t => t && t.mode === "interval" && isInstanceTask(t))
     : [];
+
+  const normalizeProjectionName = (task)=> String(task?.name || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const intervalProjectionGroupKey = (task)=>{
+    const intervalVal = Number(task?.interval);
+    const intervalKey = Number.isFinite(intervalVal) && intervalVal > 0 ? String(Math.round(intervalVal * 1000) / 1000) : "na";
+    return `${normalizeProjectionName(task)}|${intervalKey}`;
+  };
+  const taskProjectionAnchorTime = (task)=>{
+    if (!task || typeof task !== "object") return -Infinity;
+    const toTime = (value)=>{
+      const key = normalizeDateKey(value);
+      if (!key) return -Infinity;
+      const parsed = parseDateLocal(key);
+      if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return -Infinity;
+      parsed.setHours(0,0,0,0);
+      return parsed.getTime();
+    };
+    let best = -Infinity;
+    best = Math.max(best, toTime(task.calendarDateISO));
+    if (Array.isArray(task.completedDates)){
+      task.completedDates.forEach(dateKey => { best = Math.max(best, toTime(dateKey)); });
+    }
+    const history = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(task)
+      : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
+    history.forEach(entry => {
+      if (!entry || entry.status === "removed") return;
+      best = Math.max(best, toTime(entry.dateISO));
+    });
+    return best;
+  };
+
+  const projectionTaskByGroup = new Map();
+  intervalTasks.forEach(task => {
+    const key = intervalProjectionGroupKey(task);
+    if (!key) return;
+    const score = taskProjectionAnchorTime(task);
+    const existing = projectionTaskByGroup.get(key);
+    if (!existing || score > existing.score){
+      projectionTaskByGroup.set(key, { id: String(task.id), score });
+      return;
+    }
+    if (score === existing.score && String(task.id) > String(existing.id)){
+      projectionTaskByGroup.set(key, { id: String(task.id), score });
+    }
+  });
+  const projectionTaskIds = new Set(Array.from(projectionTaskByGroup.values()).map(item => item.id));
+
   const completedByTask = new Map();
   intervalTasks.forEach(t => {
     if (!t) return;
@@ -2023,6 +2071,10 @@ function renderCalendar(){
       if (removedSet.has(dateKey)) return;
       pushTaskEvent(t, dateKey, "manual");
     });
+
+    if (!projectionTaskIds.has(taskKey)){
+      return;
+    }
 
     const skipDates = new Set(completedKeys);
     manualDates.forEach(dateKey => skipDates.add(dateKey));
