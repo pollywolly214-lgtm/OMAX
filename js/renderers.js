@@ -16537,6 +16537,8 @@ function renderInventory(){
   const qtyNewField = modal?.querySelector("[name=\"inventoryQtyNew\"]");
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
   let addToMaintenance = false;
+  let isInventoryDragging = false;
+  const finishInventoryDrag = ()=>{ setTimeout(()=>{ isInventoryDragging = false; }, 0); };
 
   const persistInventoryMaterials = ()=>{
     window.inventoryMaterials = normalizeInventoryMaterials(window.inventoryMaterials);
@@ -16561,16 +16563,62 @@ function renderInventory(){
   };
 
   window.inventoryFolders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
-  window.inventoryFolders = window.inventoryFolders.filter(folder => folder && folder.id != null).map(folder => ({
-    ...folder,
-    id: String(folder.id),
-    parent: folder.parent != null ? String(folder.parent) : null,
-    name: String(folder.name || "Folder")
-  }));
-  inventory.forEach(item => {
-    if (!item || typeof item !== "object") return;
-    if (item.folderId != null) item.folderId = String(item.folderId);
-  });
+  const seenFolderIds = new Set();
+  window.inventoryFolders = window.inventoryFolders
+    .filter(folder => folder && folder.id != null)
+    .map(folder => ({
+      ...folder,
+      id: String(folder.id),
+      parent: folder.parent != null ? String(folder.parent) : null,
+      name: String(folder.name || "Folder")
+    }))
+    .filter(folder => {
+      if (seenFolderIds.has(folder.id)) return false;
+      seenFolderIds.add(folder.id);
+      return true;
+    })
+    .map(folder => ({
+      ...folder,
+      parent: (folder.parent && seenFolderIds.has(String(folder.parent)) && String(folder.parent) !== folder.id)
+        ? String(folder.parent)
+        : null
+    }));
+
+  const seenInventoryIds = new Set();
+  let inventoryMutated = false;
+  inventory = Array.isArray(inventory) ? inventory : [];
+  inventory = inventory
+    .filter(item => item && typeof item === "object")
+    .map(item => {
+      const rawId = item.id != null ? String(item.id) : "";
+      if (!rawId){
+        item.id = genId("inventory");
+        inventoryMutated = true;
+      } else {
+        item.id = rawId;
+      }
+      return item;
+    })
+    .filter(item => {
+      const id = String(item.id || "");
+      if (!id) return false;
+      if (seenInventoryIds.has(id)){
+        inventoryMutated = true;
+        return false;
+      }
+      seenInventoryIds.add(id);
+      return true;
+    })
+    .map(item => {
+      if (item.folderId != null) item.folderId = String(item.folderId);
+      if (item.folderId && !seenFolderIds.has(String(item.folderId))){
+        item.folderId = null;
+        inventoryMutated = true;
+      }
+      return item;
+    });
+  window.inventory = inventory;
+  if (inventoryMutated) saveCloudDebounced();
 
   function syncLinkedTasksFromInventory(item, updates){
     if (!item) return false;
@@ -17112,8 +17160,22 @@ function renderInventory(){
     }
   });
 
+  rowsTarget?.addEventListener("toggle", (e)=>{
+    const folderNode = e.target.closest("[data-folder-drop-target]");
+    if (!folderNode) return;
+    if (isInventoryDragging) return;
+    if (!window.inventoryFolderUiState || typeof window.inventoryFolderUiState !== "object"){
+      window.inventoryFolderUiState = {};
+    }
+    const folderId = folderNode.getAttribute("data-folder-drop-target") || "__root__";
+    window.inventoryFolderUiState[folderId] = folderNode.open === true;
+    saveCloudDebounced();
+  });
+
+
   rowsTarget?.addEventListener("dragstart", (e)=>{
     if (e.target.closest("input,select,button,a,textarea")) return;
+    isInventoryDragging = true;
     const row = e.target.closest("[data-inventory-item-row]");
     if (!row) return;
     const itemId = row.getAttribute("data-inventory-item-row");
@@ -17124,6 +17186,7 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("dragend", (e)=>{
+    finishInventoryDrag();
     const row = e.target.closest("[data-inventory-item-row]");
     if (row) row.classList.remove("dragging");
     rowsTarget.querySelectorAll("[data-folder-drop-target].drop-active").forEach(el => el.classList.remove("drop-active"));
@@ -17161,9 +17224,41 @@ function renderInventory(){
     item.folderId = folderId ? String(folderId) : null;
     saveCloudDebounced();
     refreshRows();
+    finishInventoryDrag();
   });
 
   rowsTarget?.addEventListener("click", async (e)=>{
+    const optionsTrigger = e.target.closest("[data-folder-options-trigger]");
+    if (optionsTrigger){
+      e.preventDefault();
+      e.stopPropagation();
+      const holder = optionsTrigger.closest("[data-folder-options]");
+      if (!holder) return;
+      const menu = holder.querySelector(".inventory-folder-options-menu");
+      if (!menu) return;
+      const willOpen = menu.hasAttribute("hidden");
+      rowsTarget.querySelectorAll("[data-folder-options]").forEach(node => {
+        const nodeMenu = node.querySelector(".inventory-folder-options-menu");
+        const nodeBtn = node.querySelector("[data-folder-options-trigger]");
+        if (nodeMenu) nodeMenu.setAttribute("hidden", "");
+        if (nodeBtn) nodeBtn.setAttribute("aria-expanded", "false");
+      });
+      if (willOpen){
+        menu.removeAttribute("hidden");
+        optionsTrigger.setAttribute("aria-expanded", "true");
+      }
+      return;
+    }
+
+    if (!e.target.closest("[data-folder-options]")){
+      rowsTarget.querySelectorAll("[data-folder-options]").forEach(node => {
+        const nodeMenu = node.querySelector(".inventory-folder-options-menu");
+        const nodeBtn = node.querySelector("[data-folder-options-trigger]");
+        if (nodeMenu) nodeMenu.setAttribute("hidden", "");
+        if (nodeBtn) nodeBtn.setAttribute("aria-expanded", "false");
+      });
+    }
+
     const addSubFolderBtn = e.target.closest("[data-inventory-subfolder]");
     if (addSubFolderBtn){
       e.preventDefault();
