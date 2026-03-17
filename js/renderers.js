@@ -10165,27 +10165,51 @@ function renderCosts(){
       exportBtn.addEventListener("click", ()=>{
         const report = reports.find(item => String(item?.weekStartISO || "") === normalized);
         if (!report) return;
-        const rows = [["Type","Name","Category/Task Type","Part Number","Hours","Cost"]];
-        (Array.isArray(report.cutItems) ? report.cutItems : []).forEach(item => {
-          rows.push(["Cut", item?.name || "", item?.category || "", "", item?.hours != null ? String(item.hours) : "", Number(item?.cost || 0).toFixed(2)]);
-        });
-        (Array.isArray(report.maintenanceItems) ? report.maintenanceItems : []).forEach(item => {
-          rows.push(["Maintenance", item?.name || "", item?.taskLabel || "", item?.partNumber || "", "", Number(item?.cost || 0).toFixed(2)]);
-        });
-        rows.push([]);
-        rows.push(["Summary","Week",report.weekLabel || report.weekStartISO || "","","",""]);
-        rows.push(["Summary","Cuts total","","","",Number(report.totalCutCost || 0).toFixed(2)]);
-        rows.push(["Summary","Maintenance total","","","",Number(report.totalMaintenanceCost || 0).toFixed(2)]);
-        rows.push(["Summary","Cutting hours total","","",Number(report.totalCutHours || 0).toFixed(2),""]);
-        const csv = rows.map(cols => cols.map(v => {
-          const text = String(v == null ? "" : v);
-          return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-        }).join(",")).join("\n");
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const escHtml = (value)=> String(value == null ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+        const weekTitle = report.weekLabel || report.weekStartISO || "Weekly report";
+        const cutsRows = (Array.isArray(report.cutItems) ? report.cutItems : []).map(item => `
+          <tr>
+            <td>${escHtml(item?.name || "Cut")}</td>
+            <td>${escHtml(item?.category || "Uncategorized")}</td>
+            <td>${escHtml(item?.hoursLabel || "0 hr")}</td>
+            <td>${escHtml(item?.costLabel || "$0")}</td>
+          </tr>`).join("") || '<tr><td colspan="4">No cuts completed this week.</td></tr>';
+        const maintRows = (Array.isArray(report.maintenanceItems) ? report.maintenanceItems : []).map(item => `
+          <tr>
+            <td>${escHtml(item?.name || "Maintenance task")}</td>
+            <td>${escHtml(item?.taskLabel || "Maintenance")}</td>
+            <td>${escHtml(item?.partNumber || "—")}</td>
+            <td>${escHtml(item?.costLabel || "$0")}</td>
+          </tr>`).join("") || '<tr><td colspan="4">No maintenance completed this week.</td></tr>';
+
+        const workbookHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+          body{font-family:Arial,sans-serif;padding:16px;color:#1e2b45;} h2,h3{margin:0 0 8px;} .summary{margin:8px 0 14px;}
+          table{border-collapse:collapse;width:100%;margin-bottom:18px;} th,td{border:1px solid #cfd7e6;padding:6px 8px;text-align:left;}
+          th{background:#eef3fb;} .totals td{font-weight:700;background:#f7f9fd;}
+        </style></head><body>
+          <h2>Weekly Cost Report</h2>
+          <div class="summary"><strong>Week:</strong> ${escHtml(weekTitle)}</div>
+          <table>
+            <thead><tr><th colspan="4">Cuts completed</th></tr><tr><th>Cut</th><th>Category</th><th>Hours</th><th>Cost impact</th></tr></thead>
+            <tbody>${cutsRows}</tbody>
+            <tfoot class="totals"><tr><td colspan="3">Cuts total</td><td>${escHtml(report.totalCutCostLabel || "$0")}</td></tr><tr><td colspan="3">Cutting time</td><td>${escHtml(report.totalCutHoursLabel || "0 hr")}</td></tr></tfoot>
+          </table>
+          <table>
+            <thead><tr><th colspan="4">Maintenance completed</th></tr><tr><th>Task</th><th>Type</th><th>Part #</th><th>Cost</th></tr></thead>
+            <tbody>${maintRows}</tbody>
+            <tfoot class="totals"><tr><td colspan="3">Maintenance total</td><td>${escHtml(report.totalMaintenanceCostLabel || "$0")}</td></tr></tfoot>
+          </table>
+        </body></html>`;
+
+        const blob = new Blob([workbookHtml], { type: "application/vnd.ms-excel;charset=utf-8;" });
         const link = document.createElement("a");
         const url = URL.createObjectURL(blob);
         link.href = url;
-        link.download = `weekly-cost-report-${report.weekStartISO || "week"}.csv`;
+        link.download = `weekly-cost-report-${report.weekStartISO || "week"}.xls`;
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -12652,11 +12676,19 @@ function computeCostModel(){
     maintenanceHint = `${rateParts.join(" · ")}. Actual last 12 months: ${formatterCurrency(combinedActualYear, { decimals: combinedActualYear < 1000 ? 2 : 0 })}.`;
   }
 
-  const completedJobsById = new Map();
-  (Array.isArray(completedCuttingJobs) ? completedCuttingJobs : []).forEach(job => {
-    if (!job || job.id == null) return;
-    completedJobsById.set(String(job.id), job);
+  const folderNameById = new Map();
+  const rootFolderId = typeof JOB_ROOT_FOLDER_ID === "string" ? JOB_ROOT_FOLDER_ID : "jobs_root";
+  folderNameById.set(rootFolderId, "All Jobs");
+  (Array.isArray(jobFolders) ? jobFolders : []).forEach(folder => {
+    if (!folder || folder.id == null) return;
+    const id = String(folder.id);
+    const name = typeof folder.name === "string" && folder.name.trim() ? folder.name.trim() : "Uncategorized";
+    folderNameById.set(id, name);
   });
+  const resolveCategoryName = (catId)=>{
+    const key = catId != null ? String(catId) : rootFolderId;
+    return folderNameById.get(key) || "Uncategorized";
+  };
 
   const weeklyMap = new Map();
   const ensureWeek = (weekStart)=>{
@@ -12700,11 +12732,11 @@ function computeCostModel(){
         bucket.maintenanceItems.push({
           id: `m_${entry.dateISO || idx}_${taskIndex}`,
           dateISO: entry.dateISO || null,
-          name: task?.name || 'Maintenance task',
+          name: task?.name || "Maintenance task",
           cost,
           costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
-          taskLabel: task?.mode === 'asreq' ? 'As required' : 'Interval',
-          partNumber: task?.partNumber || ''
+          taskLabel: task?.mode === "asreq" ? "As required" : "Interval",
+          partNumber: task?.partNumber || ""
         });
       });
     } else {
@@ -12712,43 +12744,93 @@ function computeCostModel(){
       bucket.maintenanceItems.push({
         id: `m_${entry.dateISO || idx}`,
         dateISO: entry.dateISO || null,
-        name: 'Maintenance allocation',
+        name: "Maintenance allocation",
         cost,
         costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
-        taskLabel: 'Allocated',
-        partNumber: ''
+        taskLabel: "Allocated",
+        partNumber: ""
       });
     }
     bucket.totalMaintenanceCost += Math.max(0, Number(entry.cost) || 0);
   });
 
-  jobsInfo.forEach((job, idx)=>{
-    if (!job || !(job.date instanceof Date) || Number.isNaN(job.date.getTime())) return;
-    const weekStart = startOfWeekMonday(job.date);
+  const completedCutsForWeekly = (Array.isArray(completedCuttingJobs) ? completedCuttingJobs : [])
+    .map(job => {
+      if (!job) return null;
+      const completedDate = job.completedAtISO ? (parseDateLocal(job.completedAtISO) || new Date(job.completedAtISO)) : null;
+      const date = (completedDate instanceof Date && !Number.isNaN(completedDate.getTime())) ? completedDate : null;
+      if (!date) return null;
+      const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
+      const gainLoss = Number(eff?.gainLoss);
+      const cutCost = Number.isFinite(gainLoss) ? gainLoss : 0;
+      const catId = job.cat != null ? String(job.cat) : rootFolderId;
+      const categoryName = resolveCategoryName(catId);
+      const actualHoursRaw = Number(job.actualHours);
+      const effHoursRaw = Number(eff?.actualHours);
+      const cutHours = Number.isFinite(actualHoursRaw) && actualHoursRaw > 0
+        ? actualHoursRaw
+        : (Number.isFinite(effHoursRaw) && effHoursRaw > 0 ? effHoursRaw : 0);
+      return {
+        id: String(job.id || "cut"),
+        date,
+        dateISO: ymd(date),
+        name: job.name || "Cut",
+        category: categoryName,
+        categoryId: catId,
+        cost: cutCost,
+        hours: cutHours
+      };
+    })
+    .filter(Boolean);
+
+  completedCutsForWeekly.forEach((cut, idx)=>{
+    const weekStart = startOfWeekMonday(cut.date);
     const bucket = ensureWeek(weekStart);
     if (!bucket) return;
-    const sourceJob = completedJobsById.get(String(job.id || '')) || null;
-    const catId = sourceJob?.cat != null ? String(sourceJob.cat) : (typeof JOB_ROOT_FOLDER_ID === 'string' ? JOB_ROOT_FOLDER_ID : 'jobs_root');
-    const categoryName = (typeof getJobFolderName === 'function') ? getJobFolderName(catId) : 'Uncategorized';
-    const cutCost = Number(job.gainLoss) || 0;
-    const cutHours = Number(sourceJob?.actualHours) || 0;
     bucket.cutItems.push({
-      id: `c_${job.id || idx}`,
-      dateISO: (sourceJob && sourceJob.completedAtISO) ? sourceJob.completedAtISO : (job.date ? job.date.toISOString().slice(0,10) : null),
-      name: job.name || 'Cut',
-      category: categoryName || 'Uncategorized',
-      categoryId: catId,
-      cost: cutCost,
-      hours: cutHours,
-      costLabel: formatterCurrency(cutCost, { showPlus: true, decimals: Math.abs(cutCost) < 1000 ? 2 : 0 }),
-      hoursLabel: formatHours(cutHours)
+      id: `c_${cut.id || idx}`,
+      dateISO: cut.dateISO,
+      name: cut.name,
+      category: cut.category,
+      categoryId: cut.categoryId,
+      cost: cut.cost,
+      hours: cut.hours,
+      costLabel: formatterCurrency(cut.cost, { showPlus: true, decimals: Math.abs(cut.cost) < 1000 ? 2 : 0 }),
+      hoursLabel: formatHours(cut.hours)
     });
-    bucket.totalCutCost += cutCost;
-    bucket.totalCutHours += cutHours > 0 ? cutHours : 0;
-    if (!bucket.cutByCategory[categoryName || 'Uncategorized']) bucket.cutByCategory[categoryName || 'Uncategorized'] = { count: 0, cost: 0, hours: 0 };
-    bucket.cutByCategory[categoryName || 'Uncategorized'].count += 1;
-    bucket.cutByCategory[categoryName || 'Uncategorized'].cost += cutCost;
-    bucket.cutByCategory[categoryName || 'Uncategorized'].hours += cutHours > 0 ? cutHours : 0;
+    bucket.totalCutCost += cut.cost;
+    if (!bucket.cutByCategory[cut.category]) bucket.cutByCategory[cut.category] = { count: 0, cost: 0, hours: 0 };
+    bucket.cutByCategory[cut.category].count += 1;
+    bucket.cutByCategory[cut.category].cost += cut.cost;
+    bucket.cutByCategory[cut.category].hours += cut.hours > 0 ? cut.hours : 0;
+  });
+
+  const safeDailyCutHours = Array.isArray(dailyCutHours) ? dailyCutHours : [];
+  weeklyMap.forEach(report => {
+    const weekStart = parseDateLocal(report.weekStartISO);
+    const weekEnd = parseDateLocal(report.weekEndISO);
+    if (!(weekStart instanceof Date) || Number.isNaN(weekStart.getTime()) || !(weekEnd instanceof Date) || Number.isNaN(weekEnd.getTime())){
+      report.totalCutHours = report.cutItems.reduce((sum, item) => sum + (Number(item?.hours) > 0 ? Number(item.hours) : 0), 0);
+      return;
+    }
+    const startMs = weekStart.getTime();
+    const endMs = weekEnd.getTime();
+    let weeklyHoursFromCalendar = 0;
+    safeDailyCutHours.forEach(entry => {
+      if (!entry) return;
+      const date = parseDateLocal(entry.dateISO || entry.date);
+      if (!(date instanceof Date) || Number.isNaN(date.getTime())) return;
+      const t = date.getTime();
+      if (t < startMs || t > endMs) return;
+      const hrs = Number(entry.hours);
+      if (!Number.isFinite(hrs) || hrs <= 0) return;
+      weeklyHoursFromCalendar += hrs;
+    });
+    if (weeklyHoursFromCalendar > 0){
+      report.totalCutHours = weeklyHoursFromCalendar;
+    } else {
+      report.totalCutHours = report.cutItems.reduce((sum, item) => sum + (Number(item?.hours) > 0 ? Number(item.hours) : 0), 0);
+    }
   });
 
   const weeklyReports = Array.from(weeklyMap.values())
@@ -12761,7 +12843,7 @@ function computeCostModel(){
       weekLabel: `${formatDateLabelShort(new Date(report.weekStartISO))} - ${formatDateLabelShort(new Date(report.weekEndISO))}`
     }));
 
-  if (typeof window !== 'undefined'){
+  if (typeof window !== "undefined"){
     window.weeklyCostReports = weeklyReports.map(item => ({ ...item }));
   }
 
@@ -13338,7 +13420,8 @@ function drawWeeklyReportChart(canvas, report){
     const labelValue = bar.isHours
       ? `${bar.value.toFixed(1)} hr`
       : new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(bar.value);
-    ctx.fillText(labelValue, x + barW/2, y - 8);
+    const labelY = Math.max(top + 14, y - 8);
+    ctx.fillText(labelValue, x + barW/2, labelY);
     ctx.fillText(bar.label, x + barW/2, bottom + 16);
   });
 

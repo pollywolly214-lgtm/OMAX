@@ -5944,4 +5944,6 @@ body.job-flow-lock-scroll {
 .cost-weekly-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
 .cost-weekly-grid h4{ margin:0 0 6px; }
 @media (max-width: 980px){ .cost-weekly-grid{ grid-template-columns:1fr; } }
-#weeklyCostChart{ width:100%; border:1px solid #d9e2f2; border-radius:10px; background:#fff; }
+#weeklyCostChart{ display:block; width:100%; margin-top:10px; border:1px solid #d9e2f2; border-radius:10px; background:#fff; }
+
+.block[data-cost-weekly-reports]{ overflow:hidden; }

@@ -1917,7 +1917,7 @@ function viewCosts(model){
                 ${weeklyOptions}
               </select>
             </label>
-            <button type="button" class="btn secondary" data-cost-weekly-export ${selectedWeeklyReport ? "" : "disabled"}>Export week (CSV)</button>
+            <button type="button" class="btn secondary" data-cost-weekly-export ${selectedWeeklyReport ? "" : "disabled"}>Export week (Excel)</button>
           </div>
           <div class="cost-weekly-summary">
             <div><span class="label">Cuts total</span><span>${esc(selectedWeeklyReport?.totalCutCostLabel || "$0")}</span></div>
@@ -1940,7 +1940,7 @@ function viewCosts(model){
               </table>
             </div>
           </div>
-          <canvas id="weeklyCostChart" width="900" height="280" aria-label="Weekly report chart"></canvas>
+          <canvas id="weeklyCostChart" width="900" height="340" aria-label="Weekly report chart"></canvas>
         </div>
       </div>
 
