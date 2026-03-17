@@ -1130,6 +1130,8 @@ function viewCosts(model){
   const cards = Array.isArray(data.summaryCards) ? data.summaryCards : [];
   const timeframeRows = Array.isArray(data.timeframeRows) ? data.timeframeRows : [];
   const historyRows = Array.isArray(data.historyRows) ? data.historyRows : [];
+  const weeklyReports = Array.isArray(data.weeklyReports) ? data.weeklyReports : [];
+  const activeWeeklyReportKey = typeof data.activeWeeklyReportKey === "string" ? data.activeWeeklyReportKey : "";
   const jobBreakdown = Array.isArray(data.jobBreakdown) ? data.jobBreakdown : [];
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
@@ -1140,6 +1142,7 @@ function viewCosts(model){
   const ordersInsight = data.ordersInsight || "Tracks every waterjet part request from submission through approval so finance can confirm spend and spot stalled orders.";
   const timeframeInsight = data.timeframeInsight || "Usage windows combine logged machine hours with interval pricing to estimate what each upcoming maintenance window will cost.";
   const historyInsight = data.historyInsight || "Shows the latest completed maintenance, combining hours logged and reconciled spend to highlight cost spikes.";
+  const weeklyInsight = data.weeklyInsight || "Weekly reports reset every Monday, preserve prior weeks, and combine completed cuts plus maintenance work with per-item and category totals.";
   const efficiencyInsight = data.efficiencyInsight || "Summarizes cutting job profitability by tying revenue to labor, material, consumable, and overhead allocations so you can act on true margins.";
 
   const formatCurrencyValue = (value)=>{
@@ -1185,6 +1188,10 @@ function viewCosts(model){
     if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "—";
     return dt.toLocaleDateString();
   };
+  const activeWeeklyReport = weeklyReports.find(report => report && String(report.key) === activeWeeklyReportKey) || weeklyReports[0] || null;
+  const activeWeeklyCuts = Array.isArray(activeWeeklyReport?.cuts) ? activeWeeklyReport.cuts : [];
+  const activeWeeklyMaintenance = Array.isArray(activeWeeklyReport?.maintenance) ? activeWeeklyReport.maintenance : [];
+
 
   const ensureCategoryStats = (stats)=>{
     const base = stats && typeof stats === "object" ? stats : {};
@@ -1846,6 +1853,70 @@ function viewCosts(model){
               </button>
               <div class="chart-info-bubble" id="costHistoryInsight" role="tooltip">
                 <p>${esc(historyInsight)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+      <div class="dashboard-window" data-cost-window="weeklyReports">
+        <div class="block">
+          <h3>Weekly Cost Reports</h3>
+          <div class="cost-category-controls">
+            <label class="cost-category-select-label">
+              <span class="cost-category-select-label-text">Select week</span>
+              <select data-cost-weekly-report-select aria-label="Select weekly report">
+                ${weeklyReports.map(report => `<option value="${esc(report.key || "")}" ${activeWeeklyReport && String(activeWeeklyReport.key) === String(report.key) ? "selected" : ""}>${esc(report.label || report.key || "Weekly report")}</option>`).join("")}
+              </select>
+            </label>
+            <button type="button" data-cost-weekly-export ${activeWeeklyReport ? "" : "disabled"}>Export weekly report (.csv)</button>
+          </div>
+          ${activeWeeklyReport ? `
+            <div class="cost-jobs-summary order-cost-summary">
+              <div><span class="label">Week</span><span>${esc(activeWeeklyReport.label || "")}</span></div>
+              <div><span class="label">Cut total</span><span>${esc(formatCurrencyValue(activeWeeklyReport.cutsTotal || 0))}</span></div>
+              <div><span class="label">Maintenance total</span><span>${esc(formatCurrencyValue(activeWeeklyReport.maintenanceTotal || 0))}</span></div>
+              <div><span class="label">Total cut time</span><span>${esc(formatHoursValue(activeWeeklyReport.totalCutHours || 0))}</span></div>
+            </div>
+            <div class="cost-chart-canvas">
+              <canvas id="weeklyCostChart" width="780" height="220"></canvas>
+            </div>
+            <table class="cost-table">
+              <thead><tr><th>Cut</th><th>Category</th><th>Date</th><th>Hours</th><th>Cost</th><th>Maintenance task</th><th>Date</th><th>Hours</th><th>Cost</th></tr></thead>
+              <tbody>
+                ${Array.from({ length: Math.max(activeWeeklyCuts.length, activeWeeklyMaintenance.length, 1) }).map((_, idx)=>{
+                  const cut = activeWeeklyCuts[idx] || null;
+                  const maint = activeWeeklyMaintenance[idx] || null;
+                  return `<tr>
+                    <td>${cut ? esc(cut.name || "") : "—"}</td>
+                    <td>${cut ? esc(cut.category || "Uncategorized") : "—"}</td>
+                    <td>${cut ? esc(cut.dateLabel || formatDateLabel(cut.dateISO)) : "—"}</td>
+                    <td>${cut ? esc(formatHoursValue(cut.hours || 0)) : "—"}</td>
+                    <td>${cut ? esc(formatCurrencyValue(cut.cost || 0)) : "—"}</td>
+                    <td>${maint ? esc(maint.name || "") : "—"}</td>
+                    <td>${maint ? esc(maint.dateLabel || formatDateLabel(maint.dateISO)) : "—"}</td>
+                    <td>${maint ? esc(formatHoursValue(maint.hours || 0)) : "—"}</td>
+                    <td>${maint ? esc(formatCurrencyValue(maint.cost || 0)) : "—"}</td>
+                  </tr>`;
+                }).join("")}
+                <tr>
+                  <th scope="row" colspan="4">Cuts total</th>
+                  <th>${esc(formatCurrencyValue(activeWeeklyReport.cutsTotal || 0))}</th>
+                  <th colspan="3">Maintenance total</th>
+                  <th>${esc(formatCurrencyValue(activeWeeklyReport.maintenanceTotal || 0))}</th>
+                </tr>
+              </tbody>
+            </table>
+          ` : `<p class="small muted">No weekly reports yet. Complete cuts and maintenance this week to build a report.</p>`}
+          <div class="cost-window-insight">
+            <div class="chart-info">
+              <button type="button" class="chart-info-button" aria-describedby="costWeeklyInsight" aria-label="Explain weekly reports">
+                <span aria-hidden="true">?</span>
+                <span class="sr-only">Show how weekly cost reports are built</span>
+              </button>
+              <div class="chart-info-bubble" id="costWeeklyInsight" role="tooltip">
+                <p>${esc(weeklyInsight)}</p>
               </div>
             </div>
           </div>
