@@ -3979,9 +3979,53 @@ function filterInventoryItems(term){
   });
 }
 
+function getNormalizedInventoryFolders(){
+  const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
+  const seenIds = new Set();
+  const normalized = folders
+    .filter(folder => folder && folder.id != null)
+    .map(folder => ({
+      ...folder,
+      id: String(folder.id),
+      parent: folder.parent != null ? String(folder.parent) : null,
+      name: String(folder.name || "Folder")
+    }))
+    .filter(folder => {
+      if (seenIds.has(folder.id)) return false;
+      seenIds.add(folder.id);
+      return true;
+    })
+    .map(folder => ({
+      ...folder,
+      parent: (folder.parent && seenIds.has(String(folder.parent)) && String(folder.parent) !== folder.id)
+        ? String(folder.parent)
+        : null
+    }));
+
+  const folderMap = new Map(normalized.map(folder => [String(folder.id), folder]));
+  normalized.forEach(folder => {
+    const folderId = String(folder.id);
+    let cursor = folder.parent != null ? String(folder.parent) : null;
+    if (!cursor) return;
+    const seen = new Set([folderId]);
+    while (cursor){
+      if (seen.has(cursor)){
+        folder.parent = null;
+        return;
+      }
+      seen.add(cursor);
+      const parentFolder = folderMap.get(cursor);
+      if (!parentFolder) return;
+      cursor = parentFolder.parent != null ? String(parentFolder.parent) : null;
+    }
+  });
+
+  return normalized;
+}
+
 function inventoryFolderOptionsMarkup(selectedId, { includeCurrent = null, allowRoot = true } = {}){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-  const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
+  const folders = getNormalizedInventoryFolders();
   const selected = selectedId != null ? String(selectedId) : "";
   const current = includeCurrent != null ? String(includeCurrent) : null;
   const options = [];
@@ -4142,7 +4186,8 @@ function viewInventory(){
   });
   const section = String(window.inventorySection || "items") === "material" ? "material" : "items";
   const materialModel = normalizeInventoryMaterials(window.inventoryMaterials);
-  const folders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
+  const folders = getNormalizedInventoryFolders();
+  const validFolderIds = new Set(folders.map(folder => String(folder.id)));
   const folderUiState = window.inventoryFolderUiState && typeof window.inventoryFolderUiState === "object"
     ? window.inventoryFolderUiState
     : {};
@@ -4153,7 +4198,11 @@ function viewInventory(){
   };
   const itemsIn = (folderId)=>{
     const target = folderId == null ? "" : String(folderId);
-    return filtered.filter(item => String(item?.folderId ?? "") === target);
+    return filtered.filter(item => {
+      const rawFolderId = item?.folderId != null ? String(item.folderId) : "";
+      const normalizedFolderId = rawFolderId && validFolderIds.has(rawFolderId) ? rawFolderId : "";
+      return normalizedFolderId === target;
+    });
   };
 
   const renderFolder = (folder)=>{
