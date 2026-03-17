@@ -3884,7 +3884,7 @@ function viewInventory(){
   const filtered = filteredSource.filter(item => {
     if (!item || typeof item !== "object") return false;
     const id = item.id != null ? String(item.id) : "";
-    if (!id) return true;
+    if (!id) return false;
     if (seenInventoryIds.has(id)) return false;
     seenInventoryIds.add(id);
     return true;

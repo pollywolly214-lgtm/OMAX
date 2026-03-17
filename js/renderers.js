@@ -15729,6 +15729,7 @@ function renderInventory(){
   const qtyOldField = modal?.querySelector("[name=\"inventoryQtyOld\"]");
   let addToMaintenance = false;
   let isInventoryDragging = false;
+  const finishInventoryDrag = ()=>{ setTimeout(()=>{ isInventoryDragging = false; }, 0); };
 
   const persistInventoryMaterials = ()=>{
     window.inventoryMaterials = normalizeInventoryMaterials(window.inventoryMaterials);
@@ -15779,9 +15780,19 @@ function renderInventory(){
   inventory = Array.isArray(inventory) ? inventory : [];
   inventory = inventory
     .filter(item => item && typeof item === "object")
+    .map(item => {
+      const rawId = item.id != null ? String(item.id) : "";
+      if (!rawId){
+        item.id = genId("inventory");
+        inventoryMutated = true;
+      } else {
+        item.id = rawId;
+      }
+      return item;
+    })
     .filter(item => {
-      const id = item.id != null ? String(item.id) : "";
-      if (!id) return true;
+      const id = String(item.id || "");
+      if (!id) return false;
       if (seenInventoryIds.has(id)){
         inventoryMutated = true;
         return false;
@@ -16366,7 +16377,7 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("dragend", (e)=>{
-    isInventoryDragging = false;
+    finishInventoryDrag();
     const row = e.target.closest("[data-inventory-item-row]");
     if (row) row.classList.remove("dragging");
     rowsTarget.querySelectorAll("[data-folder-drop-target].drop-active").forEach(el => el.classList.remove("drop-active"));
@@ -16392,7 +16403,6 @@ function renderInventory(){
   });
 
   rowsTarget?.addEventListener("drop", (e)=>{
-    isInventoryDragging = false;
     const target = e.target.closest("[data-folder-drop-target]");
     if (!target) return;
     e.preventDefault();
@@ -16405,6 +16415,7 @@ function renderInventory(){
     item.folderId = folderId ? String(folderId) : null;
     saveCloudDebounced();
     refreshRows();
+    finishInventoryDrag();
   });
 
   rowsTarget?.addEventListener("click", async (e)=>{
