@@ -24,6 +24,15 @@ const WORKSPACE_ID = (() => {
   // Fallback for non-browser contexts so build-time scripts default to production doc
   return "github-prod";
 })();
+
+function isVercelPreviewRuntime(){
+  if (typeof window === "undefined" || !window.location) return false;
+  const host = String(window.location.hostname || "").toLowerCase();
+  const isVercelHost = host.includes("vercel.app");
+  const isPreviewHost = host.includes("-git-");
+  return isVercelHost && isPreviewHost;
+}
+
 if (typeof window !== "undefined") {
   window.WORKSPACE_ID = WORKSPACE_ID;
   window.workspaceRef = null;
@@ -39,7 +48,7 @@ const TIME_EFFICIENCY_WINDOWS = [
   { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
   { key: "365d", label: "1Y", days: 365, description: "Past year" }
 ];
-const DEFAULT_APP_CONFIG = { excludeWeekends: false, dailyHours: DEFAULT_DAILY_HOURS };
+const DEFAULT_APP_CONFIG = { excludeWeekends: false, dailyHours: DEFAULT_DAILY_HOURS, predictionMode: "average" };
 let appConfig = { ...DEFAULT_APP_CONFIG };
 
 const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
@@ -62,6 +71,7 @@ if (typeof window !== "undefined"){
   window.appConfig = appConfig;
   window.getConfiguredDailyHours = getConfiguredDailyHours;
   window.getAverageDailyCutHours = getAverageDailyCutHours;
+  window.getPredictionHoursSummary = getPredictionHoursSummary;
   window.shouldExcludeWeekends = shouldExcludeWeekends;
   window.setAppConfig = setAppConfig;
   window.normalizeAppConfig = normalizeAppConfig;
@@ -202,6 +212,9 @@ function normalizeAppConfig(config){
       const clamped = clampDailyCutHours(config.dailyHours);
       if (clamped > 0) normalized.dailyHours = clamped;
     }
+    if (config.predictionMode === "fixed" || config.predictionMode === "average"){
+      normalized.predictionMode = config.predictionMode;
+    }
   }
   return normalized;
 }
@@ -215,17 +228,67 @@ function shouldExcludeWeekends(){
 }
 
 function getConfiguredDailyHours(){
-  const avg = getAverageDailyCutHours();
-  if (avg != null && Number.isFinite(avg) && avg > 0) return avg;
-  try {
-    const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
-    const clamped = clampDailyCutHours(cfg.dailyHours);
-    if (clamped > 0) return clamped;
-  } catch (_err){ /* ignore */ }
-  return DEFAULT_DAILY_HOURS;
+  const summary = getPredictionHoursSummary();
+  return summary.effectiveHours;
+}
+
+function getPredictionHoursSummary(){
+  const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
+  const mode = cfg.predictionMode === "fixed" ? "fixed" : "average";
+  const averageHours = getAverageDailyCutHours();
+  const fixedHours = clampDailyCutHours(cfg.dailyHours);
+  const fallbackFixed = fixedHours > 0 ? fixedHours : DEFAULT_DAILY_HOURS;
+  const effectiveHours = (mode === "average" && Number.isFinite(averageHours) && averageHours > 0)
+    ? averageHours
+    : fallbackFixed;
+  return { mode, averageHours, fixedHours: fallbackFixed, effectiveHours };
 }
 
 function getAverageDailyCutHours(){
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const lookbackDays = 60;
+  const start = new Date(today);
+  start.setDate(start.getDate() - lookbackDays);
+  const startKey = ymd(start);
+  const endKey = ymd(today);
+
+  const excludeWeekends = shouldExcludeWeekends();
+  let eligibleDays = 0;
+  const cursor = new Date(start);
+  while (cursor <= today){
+    const day = cursor.getDay();
+    if (!excludeWeekends || (day !== 0 && day !== 6)){
+      eligibleDays += 1;
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  if (!eligibleDays) return null;
+
+  const dailyList = Array.isArray(window.dailyCutHours) ? window.dailyCutHours : [];
+  if (dailyList.length){
+    let totalHours = 0;
+    let hasWindowEntry = false;
+    dailyList.forEach(entry => {
+      if (!entry || !entry.dateISO) return;
+      const key = normalizeDateISO(entry.dateISO);
+      if (!key || key < startKey || key > endKey) return;
+      const parsed = parseDateLocal(key);
+      if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return;
+      if (excludeWeekends){
+        const day = parsed.getDay();
+        if (day === 0 || day === 6) return;
+      }
+      const hours = clampDailyCutHours(entry.hours);
+      totalHours += hours;
+      hasWindowEntry = true;
+    });
+    if (hasWindowEntry){
+      const rate = totalHours / eligibleDays;
+      return (Number.isFinite(rate) && rate > 0) ? rate : null;
+    }
+  }
+
   const list = Array.isArray(window.totalHistory) ? window.totalHistory : [];
   const sorted = list
     .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
@@ -233,15 +296,8 @@ function getAverageDailyCutHours(){
     .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
   if (sorted.length < 2) return null;
 
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  const windowDays = (typeof shouldExcludeWeekends === "function" && shouldExcludeWeekends()) ? 22 : 30;
-  const monthStart = new Date(today);
-  monthStart.setDate(monthStart.getDate() - windowDays);
-
-  const monthStartTime = monthStart.getTime();
+  const startTime = start.getTime();
   const todayTime = today.getTime();
-
   let startHours = null;
   let endHours = null;
   for (const entry of sorted){
@@ -249,19 +305,14 @@ function getAverageDailyCutHours(){
     if (!(entryDate instanceof Date) || Number.isNaN(entryDate.getTime())) continue;
     entryDate.setHours(0,0,0,0);
     const entryTime = entryDate.getTime();
-    if (entryTime <= monthStartTime){
-      startHours = Number(entry.hours);
-    }
-    if (entryTime <= todayTime){
-      endHours = Number(entry.hours);
-    }
+    if (entryTime <= startTime) startHours = Number(entry.hours);
+    if (entryTime <= todayTime) endHours = Number(entry.hours);
     if (entryTime > todayTime) break;
   }
-
   if (!Number.isFinite(startHours) || !Number.isFinite(endHours)) return null;
   const diffHours = Math.max(0, endHours - startHours);
   if (!Number.isFinite(diffHours)) return null;
-  const rate = diffHours / windowDays;
+  const rate = diffHours / eligibleDays;
   return (Number.isFinite(rate) && rate > 0) ? rate : null;
 }
 
@@ -2764,6 +2815,7 @@ function adoptState(doc){
 
 const saveCloudInternal = debounce(async ()=>{
   if (!FB.ready || !FB.docRef) return;
+  if (isVercelPreviewRuntime()) return;
   try{
     const snap = snapshotState();
     window.__lastSnapshot = snap;
@@ -2783,6 +2835,7 @@ const saveCloudInternal = debounce(async ()=>{
   }
 }, 300);
 function saveCloudDebounced(){
+  if (isVercelPreviewRuntime()) return;
   try {
     if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
@@ -2796,6 +2849,7 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(){
+  if (isVercelPreviewRuntime()) return;
   try {
     if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
