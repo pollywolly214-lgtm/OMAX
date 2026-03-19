@@ -5,8 +5,9 @@ function renderAverageHoursBanner(contextLabel){
   const summary = (typeof getPredictionHoursSummary === "function")
     ? getPredictionHoursSummary()
     : { mode:"average", effectiveHours: (typeof getConfiguredDailyHours === "function" ? Number(getConfiguredDailyHours()) : 0) };
-  const avgLabel = (Number.isFinite(avg) && avg > 0) ? `${avg.toFixed(2)} hrs/day` : "Insufficient 2-month history";
-  const modeLabel = summary.mode === "fixed" ? "Fixed daily hours" : "2-month average";
+  const avgWindowLabel = String(summary.averageWindowLabel || "2 months");
+  const avgLabel = (Number.isFinite(avg) && avg > 0) ? `${avg.toFixed(2)} hrs/day` : `Insufficient ${avgWindowLabel.toLowerCase()} history`;
+  const modeLabel = summary.mode === "fixed" ? "Fixed daily hours" : `${avgWindowLabel} average`;
   const eff = Number(summary.effectiveHours);
   const effLabel = Number.isFinite(eff) && eff > 0 ? `${eff.toFixed(2)} hrs/day` : "—";
   return `<div class="block average-hours-banner" data-average-hours-banner="${esc(contextLabel || "")}"><div><strong>Average Hours Cut / Day:</strong> ${esc(avgLabel)}</div><div class="small muted">Prediction basis: ${esc(modeLabel)} • Effective: ${esc(effLabel)}</div></div>`;

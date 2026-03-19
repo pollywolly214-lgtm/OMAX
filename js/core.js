@@ -46,7 +46,20 @@ const TIME_EFFICIENCY_WINDOWS = [
   { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
   { key: "365d", label: "1Y", days: 365, description: "Past year" }
 ];
-const DEFAULT_APP_CONFIG = { excludeWeekends: false, dailyHours: DEFAULT_DAILY_HOURS, predictionMode: "average" };
+const PREDICTION_AVERAGE_WINDOWS = [
+  { value: 7, label: "1 week" },
+  { value: 14, label: "2 weeks" },
+  { value: 30, label: "1 month" },
+  { value: 60, label: "2 months" },
+  { value: 90, label: "3 months" }
+];
+const DEFAULT_PREDICTION_AVERAGE_WINDOW = 60;
+const DEFAULT_APP_CONFIG = {
+  excludeWeekends: false,
+  dailyHours: DEFAULT_DAILY_HOURS,
+  predictionMode: "average",
+  averageWindowDays: DEFAULT_PREDICTION_AVERAGE_WINDOW
+};
 let appConfig = { ...DEFAULT_APP_CONFIG };
 
 const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
@@ -66,10 +79,12 @@ if (typeof window !== "undefined"){
   window.CUTTING_BASELINE_WEEKLY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS;
   window.CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_DAILY_HOURS;
   window.TIME_EFFICIENCY_WINDOWS = TIME_EFFICIENCY_WINDOWS;
+  window.PREDICTION_AVERAGE_WINDOWS = PREDICTION_AVERAGE_WINDOWS;
   window.appConfig = appConfig;
   window.getConfiguredDailyHours = getConfiguredDailyHours;
   window.getAverageDailyCutHours = getAverageDailyCutHours;
   window.getPredictionHoursSummary = getPredictionHoursSummary;
+  window.normalizePredictionAverageWindow = normalizePredictionAverageWindow;
   window.shouldExcludeWeekends = shouldExcludeWeekends;
   window.setAppConfig = setAppConfig;
   window.normalizeAppConfig = normalizeAppConfig;
@@ -202,6 +217,12 @@ function clampDailyCutHours(value){
   return num;
 }
 
+function normalizePredictionAverageWindow(value){
+  const raw = Number(value);
+  const match = PREDICTION_AVERAGE_WINDOWS.find(option => option.value === raw);
+  return match ? match.value : DEFAULT_PREDICTION_AVERAGE_WINDOW;
+}
+
 function normalizeAppConfig(config){
   const normalized = { ...DEFAULT_APP_CONFIG };
   if (config && typeof config === "object"){
@@ -213,6 +234,7 @@ function normalizeAppConfig(config){
     if (config.predictionMode === "average" || config.predictionMode === "fixed"){
       normalized.predictionMode = config.predictionMode;
     }
+    normalized.averageWindowDays = normalizePredictionAverageWindow(config.averageWindowDays);
   }
   return normalized;
 }
@@ -233,19 +255,32 @@ function getPredictionHoursSummary(){
   const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
   const mode = cfg.predictionMode === "fixed" ? "fixed" : "average";
   const averageHours = getAverageDailyCutHours();
+  const averageWindowDays = normalizePredictionAverageWindow(cfg.averageWindowDays);
+  const averageWindowOption = PREDICTION_AVERAGE_WINDOWS.find(option => option.value === averageWindowDays)
+    || PREDICTION_AVERAGE_WINDOWS.find(option => option.value === DEFAULT_PREDICTION_AVERAGE_WINDOW)
+    || { value: averageWindowDays, label: `${averageWindowDays} days` };
   const fixedHoursRaw = clampDailyCutHours(cfg.dailyHours);
   const fixedHours = fixedHoursRaw > 0 ? fixedHoursRaw : DEFAULT_DAILY_HOURS;
   const effectiveHours = (mode === "average" && Number.isFinite(averageHours) && averageHours > 0)
     ? averageHours
     : fixedHours;
-  return { mode, averageHours, fixedHours, effectiveHours };
+  return {
+    mode,
+    averageHours,
+    fixedHours,
+    effectiveHours,
+    averageWindowDays,
+    averageWindowLabel: averageWindowOption.label
+  };
 }
 
-function getAverageDailyCutHours(){
+function getAverageDailyCutHours(windowDaysOverride = null){
   const today = new Date();
   today.setHours(0,0,0,0);
+  const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
+  const windowDays = normalizePredictionAverageWindow(windowDaysOverride != null ? windowDaysOverride : cfg.averageWindowDays);
   const start = new Date(today);
-  start.setDate(start.getDate() - 60);
+  start.setDate(start.getDate() - windowDays);
   const startKey = ymd(start);
   const endKey = ymd(today);
   const excludeWeekends = shouldExcludeWeekends();

@@ -36,9 +36,10 @@ This plan was revised after reviewing the current implementation so execution ma
 3. Respect the weekend toggle:
    - Ignore weekends ON → weekday-only denominator.
    - Ignore weekends OFF → all days denominator.
-4. Add a settings option to choose prediction basis:
+4. Add settings options to choose prediction basis and average window:
    - Average daily hours (computed), or
    - Fixed daily hours (manual).
+   - Average lookback choices: 1 week, 2 weeks, 1 month, 2 months, 3 months.
 5. Recompute predictions whenever:
    - Dashboard hours change,
    - Dashboard settings change,
@@ -65,6 +66,7 @@ This plan was revised after reviewing the current implementation so execution ma
 - Every occurrence-based task shows exactly one predicted next due date.
 - Average/day is computed from 60-day history and is weekend-policy aware.
 - Prediction basis toggle (average/fixed) works and is respected globally.
+- Average window toggle (1 week, 2 weeks, 1 month, 2 months, 3 months) updates computed averages globally.
 - Dashboard, cutting history, and cost analysis show consistent average/day at top.
 - Recompute triggers fire on required changes.
 - Vercel previews do not persist Firebase writes.

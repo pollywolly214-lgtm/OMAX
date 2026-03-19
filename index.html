@@ -162,10 +162,21 @@
         <label class="config-field" for="configPredictionMode">
           <span class="config-label">Occurrence prediction basis</span>
           <select id="configPredictionMode" name="configPredictionMode">
-            <option value="average">2-month average hours/day</option>
+            <option value="average">Average hours/day</option>
             <option value="fixed">Fixed daily hours</option>
           </select>
-          <small class="config-help">Average mode uses the last 60 days and honors the weekend setting.</small>
+          <small class="config-help">Average mode uses the selected lookback window and honors the weekend setting.</small>
+        </label>
+        <label class="config-field" for="configAverageWindow">
+          <span class="config-label">Average lookback window</span>
+          <select id="configAverageWindow" name="configAverageWindow">
+            <option value="7">1 week</option>
+            <option value="14">2 weeks</option>
+            <option value="30">1 month</option>
+            <option value="60">2 months</option>
+            <option value="90">3 months</option>
+          </select>
+          <small class="config-help">Controls how far back average mode looks when computing hours/day.</small>
         </label>
         <label class="config-toggle" for="configExcludeWeekends">
           <input type="checkbox" id="configExcludeWeekends" name="configExcludeWeekends" />

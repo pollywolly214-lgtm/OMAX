@@ -2794,14 +2794,15 @@ function getConfigurationElements(){
   const hoursInput = document.getElementById("configDailyHours");
   const excludeWeekends = document.getElementById("configExcludeWeekends");
   const predictionMode = document.getElementById("configPredictionMode");
+  const averageWindow = document.getElementById("configAverageWindow");
   const cancel = document.getElementById("configCancel");
-  return { modal, form, hoursInput, excludeWeekends, predictionMode, cancel };
+  return { modal, form, hoursInput, excludeWeekends, predictionMode, averageWindow, cancel };
 }
 
 function currentAppConfiguration(){
   if (typeof normalizeAppConfig === "function") return normalizeAppConfig(window.appConfig);
   const fallbackDaily = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8;
-  return { excludeWeekends: false, dailyHours: fallbackDaily, predictionMode: "average" };
+  return { excludeWeekends: false, dailyHours: fallbackDaily, predictionMode: "average", averageWindowDays: 60 };
 }
 
 function closeConfigurationModal(){
@@ -2822,7 +2823,7 @@ function closeConfigurationModal(){
 }
 
 function openConfigurationModal(trigger){
-  const { modal, hoursInput, excludeWeekends, predictionMode } = getConfigurationElements();
+  const { modal, hoursInput, excludeWeekends, predictionMode, averageWindow } = getConfigurationElements();
   if (!modal) return;
   const cfg = currentAppConfiguration();
   if (hoursInput){
@@ -2834,6 +2835,10 @@ function openConfigurationModal(trigger){
   }
   if (predictionMode){
     predictionMode.value = cfg.predictionMode === "fixed" ? "fixed" : "average";
+  }
+  if (averageWindow){
+    averageWindow.value = String(cfg.averageWindowDays != null ? cfg.averageWindowDays : 60);
+    averageWindow.disabled = !!(predictionMode && predictionMode.value === "fixed");
   }
   modal.removeAttribute("hidden");
   modal.setAttribute("aria-hidden", "false");
@@ -2847,10 +2852,16 @@ function openConfigurationModal(trigger){
 }
 
 function applyConfigurationForm(){
-  const { hoursInput, excludeWeekends, predictionMode } = getConfigurationElements();
+  const { hoursInput, excludeWeekends, predictionMode, averageWindow } = getConfigurationElements();
   const nextDaily = hoursInput ? Number(hoursInput.value) : null;
   const nextMode = predictionMode && predictionMode.value === "fixed" ? "fixed" : "average";
-  const nextConfig = { dailyHours: nextDaily, excludeWeekends: !!(excludeWeekends && excludeWeekends.checked), predictionMode: nextMode };
+  const nextWindow = averageWindow ? Number(averageWindow.value) : 60;
+  const nextConfig = {
+    dailyHours: nextDaily,
+    excludeWeekends: !!(excludeWeekends && excludeWeekends.checked),
+    predictionMode: nextMode,
+    averageWindowDays: nextWindow
+  };
   if (typeof setAppConfig === "function") setAppConfig(nextConfig);
   else {
     window.appConfig = typeof normalizeAppConfig === "function" ? normalizeAppConfig(nextConfig) : nextConfig;
@@ -2871,7 +2882,7 @@ function applyConfigurationForm(){
 }
 
 function wireConfigurationModal(){
-  const { modal, form, cancel } = getConfigurationElements();
+  const { modal, form, cancel, predictionMode, averageWindow } = getConfigurationElements();
   const trigger = document.getElementById("dashboardConfigLaunch");
   if (trigger && trigger.dataset.boundConfig !== "1"){
     trigger.dataset.boundConfig = "1";
@@ -2894,6 +2905,14 @@ function wireConfigurationModal(){
     cancel.addEventListener("click", (event)=>{
       event.preventDefault();
       closeConfigurationModal();
+    });
+  }
+  if (predictionMode && predictionMode.dataset.boundAverageWindow !== "1"){
+    predictionMode.dataset.boundAverageWindow = "1";
+    predictionMode.addEventListener("change", ()=>{
+      if (averageWindow){
+        averageWindow.disabled = predictionMode.value === "fixed";
+      }
     });
   }
   if (modal && modal.dataset.boundConfig !== "1"){
