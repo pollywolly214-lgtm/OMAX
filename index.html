@@ -155,9 +155,28 @@
       <p class="config-description">Tune scheduling defaults for cutting work.</p>
       <form id="configForm" class="config-form">
         <label class="config-field" for="configDailyHours">
-          <span class="config-label">Daily cutting hours</span>
+          <span class="config-label">Daily cutting hours (fixed mode)</span>
           <input type="number" id="configDailyHours" name="configDailyHours" min="0.25" max="24" step="0.25" required />
-          <small class="config-help">Updates every calculation that uses hours/day.</small>
+          <small class="config-help">Used when prediction basis is set to Fixed daily hours.</small>
+        </label>
+        <label class="config-field" for="configPredictionMode">
+          <span class="config-label">Occurrence prediction basis</span>
+          <select id="configPredictionMode" name="configPredictionMode">
+            <option value="average">Average hours/day</option>
+            <option value="fixed">Fixed daily hours</option>
+          </select>
+          <small class="config-help">Average mode uses the selected lookback window and honors the weekend setting.</small>
+        </label>
+        <label class="config-field" for="configAverageWindow">
+          <span class="config-label">Average lookback window</span>
+          <select id="configAverageWindow" name="configAverageWindow">
+            <option value="7">1 week</option>
+            <option value="14">2 weeks</option>
+            <option value="30">1 month</option>
+            <option value="60">2 months</option>
+            <option value="90">3 months</option>
+          </select>
+          <small class="config-help">Controls how far back average mode looks when computing hours/day.</small>
         </label>
         <label class="config-toggle" for="configExcludeWeekends">
           <input type="checkbox" id="configExcludeWeekends" name="configExcludeWeekends" />

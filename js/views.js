@@ -1,4 +1,18 @@
 /* ========================= VIEWS ========================== */
+function renderAverageHoursBanner(contextLabel){
+  const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const avg = (typeof getAverageDailyCutHours === "function") ? Number(getAverageDailyCutHours()) : NaN;
+  const summary = (typeof getPredictionHoursSummary === "function")
+    ? getPredictionHoursSummary()
+    : { mode:"average", effectiveHours: (typeof getConfiguredDailyHours === "function" ? Number(getConfiguredDailyHours()) : 0) };
+  const avgWindowLabel = String(summary.averageWindowLabel || "2 months");
+  const avgLabel = (Number.isFinite(avg) && avg > 0) ? `${avg.toFixed(2)} hrs/day` : `Insufficient ${avgWindowLabel.toLowerCase()} history`;
+  const modeLabel = summary.mode === "fixed" ? "Fixed daily hours" : `${avgWindowLabel} average`;
+  const eff = Number(summary.effectiveHours);
+  const effLabel = Number.isFinite(eff) && eff > 0 ? `${eff.toFixed(2)} hrs/day` : "—";
+  return `<div class="block average-hours-banner" data-average-hours-banner="${esc(contextLabel || "")}"><div><strong>Average Hours Cut / Day:</strong> ${esc(avgLabel)}</div><div class="small muted">Prediction basis: ${esc(modeLabel)} • Effective: ${esc(effLabel)}</div></div>`;
+}
+
 function viewDashboard(){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const cur   = RENDER_TOTAL ?? currentTotal();
@@ -29,6 +43,7 @@ function viewDashboard(){
     `;
   }).join("");
   const defaultEfficiencyDescription = esc(efficiencyWindows[0]?.description || "Past 7 days");
+  const avgBanner = renderAverageHoursBanner("dashboard");
 
   const jobRootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
   const jobFolders = Array.isArray(window.jobFolders) && window.jobFolders.length
@@ -67,6 +82,8 @@ function viewDashboard(){
     <div class="dashboard-toolbar">
       <span class="dashboard-edit-hint" id="dashboardEditHint" hidden>Drag windows to rearrange and resize. Calendar stays fixed.</span>
     </div>
+
+    ${avgBanner}
 
     <div class="dashboard-layout" id="dashboardLayout">
       <div class="dashboard-window" data-dashboard-window="totalHours">
@@ -1148,6 +1165,7 @@ function viewCosts(model){
   const timeframeInsight = data.timeframeInsight || "Usage windows combine logged machine hours with interval pricing to estimate what each upcoming maintenance window will cost.";
   const historyInsight = data.historyInsight || "Shows the latest completed maintenance, combining hours logged and reconciled spend to highlight cost spikes.";
   const efficiencyInsight = data.efficiencyInsight || "Summarizes cutting job profitability by tying revenue to labor, material, consumable, and overhead allocations so you can act on true margins.";
+  const avgBanner = renderAverageHoursBanner("cost-analysis");
 
   const formatCurrencyValue = (value)=>{
     const num = Number(value);
@@ -1594,6 +1612,8 @@ function viewCosts(model){
     <div class="dashboard-toolbar">
       <span class="dashboard-edit-hint" id="costEditHint" hidden>Drag windows to rearrange and resize the cost overview.</span>
     </div>
+
+    ${avgBanner}
 
     <div class="cost-info-trigger">
       <button type="button" class="cost-info-button" id="costInfoOpen" aria-haspopup="dialog" aria-controls="costInfoPanel" aria-expanded="false">
@@ -2962,6 +2982,7 @@ function viewJobs(){
 
   const jobOverlapNotice = "Jobs might be overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
   const jobOverlapBannerText = "Two or more cutting jobs are overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
+  const avgBanner = renderAverageHoursBanner("cutting-job-history");
   const jobOverlapNoticeEsc = esc(jobOverlapNotice);
   const overlappingJobIds = (()=>{
     if (!Array.isArray(cuttingJobs) || !cuttingJobs.length) return new Set();
@@ -3730,6 +3751,8 @@ function viewJobs(){
     <div class="dashboard-toolbar">
       <span class="dashboard-edit-hint" id="jobEditHint" hidden>Drag the job categories window to reposition or resize it.</span>
     </div>
+
+    ${avgBanner}
 
     <div class="dashboard-layout job-layout" id="jobLayout">
       <div class="dashboard-window" data-job-window="categories">

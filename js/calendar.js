@@ -101,8 +101,12 @@ function commitCalendarHoursEditing(){
   renderCalendar();
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
   if (changed){
+    if (typeof refreshDerivedDailyHours === "function") refreshDerivedDailyHours();
     if (typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
-    if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets();
+    if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets({ full: true });
+    if (typeof route === "function"){
+      try { route(); } catch (_err){}
+    }
     toast("Daily hours updated");
   }else{
     toast("No changes to save.");
@@ -1681,6 +1685,10 @@ function projectIntervalDueDates(task, options = {}){
   const minOccurrences = Number.isFinite(minOccurrencesRaw) && minOccurrencesRaw > 0
     ? Math.floor(minOccurrencesRaw)
     : 6;
+  const maxOccurrencesRaw = Number(options.maxOccurrences);
+  const maxOccurrences = Number.isFinite(maxOccurrencesRaw) && maxOccurrencesRaw > 0
+    ? Math.floor(maxOccurrencesRaw)
+    : null;
 
   const toDayStart = (value)=>{
     const key = normalizeDateKey(value);
@@ -1822,6 +1830,7 @@ function projectIntervalDueDates(task, options = {}){
   }
 
   events.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
+  if (maxOccurrences != null) return events.slice(0, maxOccurrences);
   return events;
 }
 
@@ -2023,16 +2032,15 @@ function renderCalendar(){
     const projections = projectIntervalDueDates(t, {
       monthsAhead: 3,
       excludeDates: skipDates,
-      minOccurrences: 6
+      minOccurrences: 1,
+      maxOccurrences: 1
     });
     if (projections.length){
-      projections.forEach(pred => {
-        const dueKey = normalizeDateKey(pred?.dateISO);
-        if (!dueKey) return;
-        if (completedKeys.has(dueKey)) return;
-        if (manualKey && manualKey === dueKey && !completedKeys.has(dueKey)) return;
+      const pred = projections[0];
+      const dueKey = normalizeDateKey(pred?.dateISO);
+      if (dueKey && !completedKeys.has(dueKey) && (!manualKey || manualKey !== dueKey || completedKeys.has(dueKey))){
         pushTaskEvent(t, dueKey, "due");
-      });
+      }
       return;
     }
 
