@@ -16,12 +16,27 @@ const DEFAULT_DAILY_HOURS = 8;
 let DAILY_HOURS = DEFAULT_DAILY_HOURS;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
 const JOB_BASE_COST_PER_HOUR = 30; // $/hr baseline internal cost applied to every job
-// Decide workspace based on hostname (all hosts write to production).
+// Decide workspace based on hostname (preview vs production).
+const WORKSPACE_OVERRIDE = (() => {
+  if (typeof window === "undefined") return null;
+  const search = new URLSearchParams(window.location.search);
+  return search.get("workspace");
+})();
 const WORKSPACE_ID = (() => {
-  if (typeof window !== "undefined") {
+  if (typeof window === "undefined") {
+    // Fallback for non-browser contexts so build-time scripts default to production doc
     return "github-prod";
   }
-  // Fallback for non-browser contexts so build-time scripts default to production doc
+
+  const host = window.location.hostname.toLowerCase();
+  if (WORKSPACE_OVERRIDE) return WORKSPACE_OVERRIDE;
+
+  const isVercelHost = host.endsWith(".vercel.app");
+
+  if (isVercelHost) {
+    return "github-preview";
+  }
+
   return "github-prod";
 })();
 
@@ -33,6 +48,13 @@ function isVercelPreviewRuntime(){
 
 if (typeof window !== "undefined") {
   window.WORKSPACE_ID = WORKSPACE_ID;
+  window.WORKSPACE_OVERRIDE = WORKSPACE_OVERRIDE;
+  window.WORKSPACE_DIAGNOSTICS = {
+    host: window.location.hostname,
+    workspaceId: WORKSPACE_ID,
+    override: WORKSPACE_OVERRIDE,
+    docPath: `workspaces/${WORKSPACE_ID}/app/state`
+  };
   window.workspaceRef = null;
   window.workspaceDocRef = null;
   window.DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
@@ -93,6 +115,36 @@ if (typeof window !== "undefined"){
   window.normalizeDailyCutHours = normalizeDailyCutHours;
   window.normalizeDateISO = normalizeDateISO;
   window.__opportunityStateReady = false;
+}
+
+let workspaceReadLogged = false;
+let workspaceWriteLogged = false;
+function logWorkspaceDiagnostics(phase, authState){
+  if (typeof window === "undefined") return;
+  const diagnostics = window.WORKSPACE_DIAGNOSTICS || {};
+  const host = diagnostics.host || window.location.hostname;
+  const workspaceId = diagnostics.workspaceId || window.WORKSPACE_ID;
+  const override = diagnostics.override || null;
+  const docPath = diagnostics.docPath || `workspaces/${workspaceId}/app/state`;
+  const overrideUsed = Boolean(override);
+  console.info("[workspace]", {
+    phase,
+    host,
+    workspaceId,
+    override,
+    overrideUsed,
+    docPath,
+    authState
+  });
+  const dbgWs = document.getElementById("dbgWs");
+  if (dbgWs){
+    const label = `${workspaceId}/app/state @ ${host}${overrideUsed ? " (override)" : ""}`;
+    dbgWs.textContent = label;
+    dbgWs.title = `Host: ${host}\nWorkspace: ${workspaceId}\nOverride: ${override || "none"}\nDoc: ${docPath}\nAuth: ${authState || "unknown"}\nPhase: ${phase}`;
+  }
+  if (window.DEBUG_MODE && host.endsWith(".vercel.app") && override === "github-prod"){
+    console.warn("Debug: preview host is overriding to github-prod.");
+  }
 }
 
 /* Root helpers */
@@ -522,16 +574,7 @@ function applyFirestoreSettings(db){
   }
 
   if (!isDevEnv){
-    if (ignoreAlreadyEnabled){
-      firebaseSettingsApplied = true;
-      return;
-    }
-    try {
-      db.settings({ ...currentSettings, ignoreUndefinedProperties: true });
-      firebaseSettingsApplied = true;
-    } catch (err) {
-      console.warn("Failed to enable ignoreUndefinedProperties", err);
-    }
+    firebaseSettingsApplied = true;
     return;
   }
 
@@ -662,6 +705,7 @@ async function initFirebase(){
     FB.user = user || null;
     workspaceMetadataWritesBlocked = false;
     if (user){
+      logWorkspaceDiagnostics("auth-ready", "signed-in");
       if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
       if (btnIn)  btnIn.style.display  = "none";
       if (btnOut) btnOut.style.display = "inline-block";
@@ -679,6 +723,7 @@ async function initFirebase(){
       await loadFromCloud();
       route();
     }else{
+      logWorkspaceDiagnostics("auth-ready", "signed-out");
       FB.ready = false;
       FB.workspaceRef = null;
       FB.workspaceDoc = null;
@@ -2861,6 +2906,10 @@ function adoptState(doc){
 const saveCloudInternal = debounce(async ()=>{
   if (!FB.ready || !FB.docRef) return;
   try{
+    if (!workspaceWriteLogged){
+      workspaceWriteLogged = true;
+      logWorkspaceDiagnostics("firestore-write", FB.user ? "signed-in" : "signed-out");
+    }
     const snap = snapshotState();
     window.__lastSnapshot = snap;
     await FB.docRef.set(snap, { merge:true });
@@ -2925,14 +2974,46 @@ if (typeof window !== "undefined"){
 async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
   try{
-    let snap = await FB.docRef.get();
-    let data = snap.exists ? (typeof snap.data === "function" ? snap.data() : snap.data()) : null;
+    if (!workspaceReadLogged){
+      workspaceReadLogged = true;
+      logWorkspaceDiagnostics("firestore-read", FB.user ? "signed-in" : "signed-out");
+    }
+    async function fetchWorkspaceState(workspaceId){
+      const workspaceDoc = FB.db.collection("workspaces").doc(workspaceId);
+      const stateRef = workspaceDoc.collection("app").doc("state");
+      const stateSnap = await stateRef.get();
+      const stateData = stateSnap.exists
+        ? (typeof stateSnap.data === "function" ? stateSnap.data() : stateSnap.data())
+        : null;
+      if (stateHasMeaningfulData(stateData)){
+        return { data: stateData, workspaceDoc, stateRef, legacy: false };
+      }
+      const rootSnap = await workspaceDoc.get();
+      const rootData = rootSnap.exists
+        ? (typeof rootSnap.data === "function" ? rootSnap.data() : rootSnap.data())
+        : null;
+      if (stateHasMeaningfulData(rootData)){
+        return { data: rootData, workspaceDoc, stateRef, legacy: true };
+      }
+      return { data: null, workspaceDoc, stateRef, legacy: false };
+    }
 
-    if (!stateHasMeaningfulData(data)){
-      const migrated = await migrateLegacyWorkspaceDoc();
-      if (migrated){
-        data = migrated;
-        snap = { exists: true };
+    let { data, legacy } = await fetchWorkspaceState(WORKSPACE_ID);
+
+    if (legacy && stateHasMeaningfulData(data)){
+      try {
+        await FB.docRef.set(data, { merge:true });
+        if (FB.workspaceDoc){
+          await updateWorkspaceMetadata({
+            workspaceId: WORKSPACE_ID,
+            lastStateMigrationAt: new Date().toISOString(),
+            lastStateDocPath: FB.docRef.path,
+            lastTouchedAt: new Date().toISOString()
+          });
+        }
+        legacy = false;
+      } catch (err) {
+        console.warn("Failed to migrate legacy workspace document", err);
       }
     }
 
@@ -3043,8 +3124,7 @@ function setupDebugPanel(){
   const panel = document.getElementById("debugPanel");
   if (!panel) return;
   panel.style.display = "block";
-  const dbgWs = document.getElementById("dbgWs");
-  if (dbgWs) dbgWs.textContent = `${window.WORKSPACE_ID || ""}/app/state`;
+  logWorkspaceDiagnostics("debug-panel", FB.user ? "signed-in" : "signed-out");
   const btnCloud = document.getElementById("dbgRefreshCloud");
   const btnSnap  = document.getElementById("dbgRefreshSnapshot");
   if (btnCloud) btnCloud.onclick = ()=>refreshDebugCloud();
