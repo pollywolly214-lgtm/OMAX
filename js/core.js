@@ -1334,9 +1334,7 @@ window.defaultIntervalTasks = defaultIntervalTasks;
 const ROOT_FOLDER_ID = "root";
 window.ROOT_FOLDER_ID = ROOT_FOLDER_ID;
 const DEFAULT_SETTINGS_FOLDERS = [
-  { id: ROOT_FOLDER_ID, name: "All Tasks",    parent: null,           order: 3 },
-  { id: "interval",    name: "Per Interval", parent: ROOT_FOLDER_ID, order: 2 },
-  { id: "asreq",       name: "As Required",  parent: ROOT_FOLDER_ID, order: 1 }
+  { id: ROOT_FOLDER_ID, name: "Maintenance", parent: null, order: 1 }
 ];
 
 const JOB_ROOT_FOLDER_ID = "jobs_root";

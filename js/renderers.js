@@ -6342,12 +6342,21 @@ function repairMaintenanceGraph(){
     const ROOT_ID = (typeof window !== "undefined" && window.ROOT_FOLDER_ID)
       ? String(window.ROOT_FOLDER_ID)
       : "root";
+    const legacyFolderIds = new Set(["interval", "asreq"]);
 
     if (!window.settingsFolders.some(f => f && String(f.id) === ROOT_ID)){
       const fallbackOrder = Number(window._maintOrderCounter) || 0;
-      window.settingsFolders.push({ id: ROOT_ID, name: "All Tasks", parent: null, order: fallbackOrder + 1 });
+      window.settingsFolders.push({ id: ROOT_ID, name: "Maintenance", parent: null, order: fallbackOrder + 1 });
       window._maintOrderCounter = Math.max(Number(window._maintOrderCounter) || 0, fallbackOrder + 1);
     }
+    window.settingsFolders.forEach(folder => {
+      if (!folder || folder.id == null) return;
+      if (legacyFolderIds.has(String(folder.parent))) folder.parent = ROOT_ID;
+    });
+    window.settingsFolders = window.settingsFolders.filter(folder => {
+      if (!folder || folder.id == null) return false;
+      return !legacyFolderIds.has(String(folder.id));
+    });
 
     // Flatten any legacy nested `.sub` arrays so every task lives in the
     // top-level list with a parentTask pointer (Explorer-style tree).
@@ -6395,6 +6404,26 @@ function repairMaintenanceGraph(){
     const fMap = Object.create(null);
     for (const f of window.settingsFolders){ if (f && f.id!=null) fMap[String(f.id)] = f; }
 
+    let defaultCategoryId = null;
+    const hasVisibleCategory = window.settingsFolders.some(folder => {
+      if (!folder || folder.id == null) return false;
+      return String(folder.id) !== ROOT_ID;
+    });
+    if (!hasVisibleCategory){
+      const baseId = "general";
+      let candidate = baseId;
+      let suffix = 1;
+      while (fMap[candidate]){
+        candidate = `${baseId}_${suffix++}`;
+      }
+      const fallbackOrder = Number(window._maintOrderCounter) || 0;
+      const category = { id: candidate, name: "General", parent: ROOT_ID, order: fallbackOrder + 1 };
+      window.settingsFolders.push(category);
+      fMap[String(candidate)] = category;
+      window._maintOrderCounter = Math.max(Number(window._maintOrderCounter) || 0, fallbackOrder + 1);
+      defaultCategoryId = String(candidate);
+    }
+
     // --- Fix bad folder parents & cycles ---
     for (const f of window.settingsFolders){
       if (!f || f.id == null) continue;
@@ -6439,8 +6468,8 @@ function repairMaintenanceGraph(){
         if (pid === String(t.id) || !tMap[pid]) t.parentTask = null;
       }
       // folder ref to nowhere → clear
-      if (t.cat != null && !fMap[String(t.cat)]) t.cat = ROOT_ID;
-      if (t.cat == null) t.cat = ROOT_ID;
+      if (t.cat != null && legacyFolderIds.has(String(t.cat))) t.cat = null;
+      if (t.cat != null && !fMap[String(t.cat)]) t.cat = null;
 
       // break cycles: follow parentTask chain and cut if we loop
       if (t.parentTask != null){
@@ -6464,8 +6493,13 @@ function repairMaintenanceGraph(){
         }
       }
 
-      if (t.parentTask == null && (t.cat == null || !fMap[String(t.cat)])){
-        t.cat = ROOT_ID;
+      if (t.parentTask == null){
+        if (defaultCategoryId && (t.cat == null || String(t.cat) === ROOT_ID)){
+          t.cat = defaultCategoryId;
+        }
+        if (t.cat == null || !fMap[String(t.cat)]){
+          t.cat = ROOT_ID;
+        }
       }
 
       // numeric 'order' normalization (optional but stabilizes rendering)
@@ -7685,9 +7719,17 @@ function renderSettings(){
   };
 
   // --- Helpers & derived collections ---
+  const rootFolderId = (typeof window !== "undefined" && window.ROOT_FOLDER_ID)
+    ? String(window.ROOT_FOLDER_ID)
+    : "root";
   const byIdFolder = (id)=> window.settingsFolders.find(f => String(f.id)===String(id)) || null;
   const childrenFolders = (parent)=> window.settingsFolders
-      .filter(f => String(f.parent||"") === String(parent||""))
+      .filter(f => {
+        if (!f || f.id == null) return false;
+        const targetParent = parent == null ? rootFolderId : String(parent);
+        if (String(f.id) === rootFolderId) return false;
+        return String(f.parent ?? rootFolderId) === targetParent;
+      })
       .sort((a,b)=> (Number(b.order||0)-Number(a.order||0)) || String(a.name).localeCompare(String(b.name)));
 
   function ensureIdsOrder(obj){
@@ -7704,7 +7746,7 @@ function renderSettings(){
     task.mode = type;
     ensureTaskVariant(task, type);
     if (task.parentTask == null) task.parentTask = null;
-    if (task.cat == null) task.cat = task.cat ?? null;
+    if (task.cat == null) task.cat = rootFolderId;
     if (!Array.isArray(task.completedDates)) task.completedDates = [];
     if (typeof task.note !== "string") task.note = "";
     if ((type === "interval" || type === "asreq") && isTemplateTask(task)){
@@ -8073,7 +8115,7 @@ function renderSettings(){
     `;
   }
 
-  const mixedRoot = renderMixedList(null, {
+  const mixedRoot = renderMixedList(rootFolderId, {
     taskGapLabel: "Move item here",
     tailLabel: "Move item here",
     catGapLabel: "Move category here"
@@ -8085,7 +8127,7 @@ function renderSettings(){
       flattenedFolders.push({ id: f.id, label: `${prefix}${f.name}` });
       walk(f.id, `${prefix}${f.name} / `);
     }
-  })(null, "");
+  })(rootFolderId, "");
 
   const categoryOptions = ["<option value=\"\">(No Category)</option>"]
     .concat(flattenedFolders.map(f => `<option value=\"${f.id}\">${escapeHtml(f.label)}</option>`))
@@ -8112,7 +8154,7 @@ function renderSettings(){
           <div class="dz" data-drop-root="1" data-label="Move to top level"></div>
           ${mixedRoot}
           ${searchEmpty ? `<div class="empty">No maintenance tasks match your search.</div>` : ``}
-          ${(window.settingsFolders.length === 0 && window.tasksInterval.length + window.tasksAsReq.length === 0) ? `<div class="empty">No tasks yet. Add one to get started.</div>` : ``}
+          ${(window.settingsFolders.filter(folder => folder && String(folder.id) !== rootFolderId).length === 0 && window.tasksInterval.length + window.tasksAsReq.length === 0) ? `<div class="empty">No tasks yet. Add one to get started.</div>` : ``}
         </div>
       </div>
     </div>
