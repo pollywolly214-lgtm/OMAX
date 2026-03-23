@@ -1955,6 +1955,8 @@ function renderCalendar(){
     });
   }
 
+  const renderToday = new Date();
+  renderToday.setHours(0,0,0,0);
   const intervalTasks = Array.isArray(window.tasksInterval)
     ? window.tasksInterval.filter(t => t && t.mode === "interval" && isInstanceTask(t))
     : [];
@@ -1970,7 +1972,7 @@ function renderCalendar(){
     if (!t) return;
     const taskKey = String(t.id);
     const removedSet = normalizeRemovedOccurrences(t);
-    const suppressProjectedDue = hasActiveRemovedOccurrence(t, today);
+    const suppressProjectedDue = hasActiveRemovedOccurrence(t, renderToday);
     let completedKeys = completedByTask.get(taskKey);
     if (!(completedKeys instanceof Set)){
       completedKeys = new Set();
