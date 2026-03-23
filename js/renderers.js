@@ -2802,7 +2802,7 @@ function getConfigurationElements(){
 function currentAppConfiguration(){
   if (typeof normalizeAppConfig === "function") return normalizeAppConfig(window.appConfig);
   const fallbackDaily = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8;
-  return { excludeWeekends: false, dailyHours: fallbackDaily, predictionMode: "average", averageWindowDays: 60 };
+  return { excludeWeekends: false, dailyHours: fallbackDaily, predictionMode: "fixed", averageWindowDays: 60 };
 }
 
 function closeConfigurationModal(){

@@ -57,7 +57,7 @@ const DEFAULT_PREDICTION_AVERAGE_WINDOW = 60;
 const DEFAULT_APP_CONFIG = {
   excludeWeekends: false,
   dailyHours: DEFAULT_DAILY_HOURS,
-  predictionMode: "average",
+  predictionMode: "fixed",
   averageWindowDays: DEFAULT_PREDICTION_AVERAGE_WINDOW
 };
 let appConfig = { ...DEFAULT_APP_CONFIG };
@@ -233,6 +233,8 @@ function normalizeAppConfig(config){
     }
     if (config.predictionMode === "average" || config.predictionMode === "fixed"){
       normalized.predictionMode = config.predictionMode;
+    } else if (config.dailyHours != null){
+      normalized.predictionMode = "fixed";
     }
     normalized.averageWindowDays = normalizePredictionAverageWindow(config.averageWindowDays);
   }
