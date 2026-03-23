@@ -584,6 +584,7 @@ async function initFirebase(){
   const emailEl  = $("#authEmail");
   const passEl   = $("#authPass");
   const btnClose = $("#authClose");
+  const formSubmitBtn = form ? form.querySelector('button[type="submit"]') : null;
 
   const showModal = ()=>{ if (modal) modal.style.display = "flex"; };
   const hideModal = ()=>{ if (modal) modal.style.display = "none"; };
@@ -594,7 +595,16 @@ async function initFirebase(){
       const cred = await FB.auth.signInWithEmailAndPassword(email,password);
       return cred.user;
     }catch(e){
-      if (e && e.code === "auth/user-not-found"){
+      let canCreate = e && e.code === "auth/user-not-found";
+      if (!canCreate && FB.auth && typeof FB.auth.fetchSignInMethodsForEmail === "function"){
+        try {
+          const methods = await FB.auth.fetchSignInMethodsForEmail(email);
+          canCreate = Array.isArray(methods) && methods.length === 0;
+        } catch (lookupErr) {
+          console.warn("Could not determine sign-in methods for email:", lookupErr);
+        }
+      }
+      if (canCreate){
         await FB.auth.createUserWithEmailAndPassword(email,password);
         const cred = await FB.auth.signInWithEmailAndPassword(email,password);
         return cred.user;
@@ -608,12 +618,26 @@ async function initFirebase(){
   if (btnClose) btnClose.onclick = hideModal;
 
   if (form){
+    let authSubmitting = false;
     form.onsubmit = async (e)=>{
       e.preventDefault();
+      if (authSubmitting) return;
+      authSubmitting = true;
+      if (formSubmitBtn){
+        formSubmitBtn.disabled = true;
+        formSubmitBtn.textContent = "Signing In…";
+      }
       try{
         await ensureEmailPassword((emailEl.value||"").trim(), (passEl.value||"").trim());
         hideModal();
       }catch(err){ console.error(err); alert(err.message || "Sign-in failed"); }
+      finally {
+        authSubmitting = false;
+        if (formSubmitBtn){
+          formSubmitBtn.disabled = false;
+          formSubmitBtn.textContent = "Sign In";
+        }
+      }
     };
   }
 
