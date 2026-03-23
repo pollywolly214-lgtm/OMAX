@@ -12891,6 +12891,25 @@ function computeCostModel(){
     return weeklyMap.get(key);
   };
 
+  occurrenceCostItems.forEach((item, idx) => {
+    if (!item || !(item.resolvedAt instanceof Date) || Number.isNaN(item.resolvedAt.getTime())) return;
+    const weekStart = startOfWeekMonday(item.resolvedAt);
+    const bucket = ensureWeek(weekStart);
+    if (!bucket) return;
+    const cost = Math.max(0, Number(item.amount) || 0);
+    if (cost <= 0) return;
+    bucket.maintenanceItems.push({
+      id: `mo_${item.taskId || idx}`,
+      dateISO: item.resolvedISO ? String(item.resolvedISO).slice(0, 10) : ymd(item.resolvedAt),
+      name: item.name || "Maintenance occurrence",
+      cost,
+      costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
+      taskLabel: "Occurrence cost",
+      partNumber: item.pn || ""
+    });
+    bucket.totalMaintenanceCost += cost;
+  });
+
   maintenanceHistory.forEach((entry, idx)=>{
     if (!entry || !(entry.date instanceof Date) || Number.isNaN(entry.date.getTime())) return;
     const weekStart = startOfWeekMonday(entry.date);
@@ -12903,10 +12922,14 @@ function computeCostModel(){
         return sum + (Number.isFinite(v) && v > 0 ? v : 0);
       }, 0);
       const fallback = 1 / tasks.length;
+      let entryTotal = 0;
       tasks.forEach((task, taskIndex)=>{
         const unit = Number(task?.unitPrice);
         const share = (pricedTotal > 0 && Number.isFinite(unit) && unit > 0) ? (unit / pricedTotal) : fallback;
-        const cost = Math.max(0, (Number(entry.cost) || 0) * share);
+        const allocatedCost = Math.max(0, (Number(entry.cost) || 0) * share);
+        const directCost = Number.isFinite(unit) && unit > 0 ? unit : 0;
+        const cost = Math.max(allocatedCost, directCost);
+        entryTotal += cost;
         bucket.maintenanceItems.push({
           id: `m_${entry.dateISO || idx}_${taskIndex}`,
           dateISO: entry.dateISO || null,
@@ -12917,6 +12940,7 @@ function computeCostModel(){
           partNumber: task?.partNumber || ""
         });
       });
+      bucket.totalMaintenanceCost += entryTotal;
     } else {
       const cost = Math.max(0, Number(entry.cost) || 0);
       bucket.maintenanceItems.push({
@@ -12928,8 +12952,8 @@ function computeCostModel(){
         taskLabel: "Allocated",
         partNumber: ""
       });
+      bucket.totalMaintenanceCost += cost;
     }
-    bucket.totalMaintenanceCost += Math.max(0, Number(entry.cost) || 0);
   });
 
   const completedCutsForWeekly = (Array.isArray(completedCuttingJobs) ? completedCuttingJobs : [])
@@ -12944,7 +12968,8 @@ function computeCostModel(){
         .filter(entry => Number.isFinite(Number(entry?.completedHours)) && Number(entry.completedHours) >= 0)
         .sort((a, b) => String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")))
         .pop() || null;
-      const costRateRaw = Number(eff?.costRate);
+      const costRateRaw = Number(job?.costRate ?? eff?.costRate);
+      const chargeRateRaw = Number(job?.chargeRate ?? eff?.chargeRate);
       const estimateHoursRawForRate = Number(job.estimateHours);
       const fallbackCostRate = Number.isFinite(estimateHoursRawForRate) && estimateHoursRawForRate > 0
         ? (JOB_BASE_COST_PER_HOUR + ((Number(job?.materialCost) || 0) * (Number(job?.materialQty) || 0) / estimateHoursRawForRate))
@@ -12969,8 +12994,9 @@ function computeCostModel(){
       const categoryDisplay = projectNumber
         ? `${categoryName} · ${projectNumber}`
         : categoryName;
-      const effectiveCostRate = Number.isFinite(costRateRaw) && costRateRaw > 0 ? costRateRaw : fallbackCostRate;
-      const cutCost = Math.max(0, cutHours * effectiveCostRate);
+      const effectiveCostRate = Number.isFinite(costRateRaw) && costRateRaw >= 0 ? costRateRaw : fallbackCostRate;
+      const effectiveChargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
+      const cutCost = cutHours * (effectiveChargeRate - effectiveCostRate);
       return {
         id: String(job.id || "cut"),
         date,
