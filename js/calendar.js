@@ -1025,11 +1025,13 @@ function showTaskBubble(taskId, anchor, options = {}){
   const statusHint = options.status || anchor?.getAttribute("data-cal-status") || null;
   const modeHint = options.mode || anchor?.getAttribute("data-cal-mode") || null;
   const dateHint = options.dateISO || anchor?.getAttribute("data-cal-date") || anchor?.closest(".day")?.dataset.dateIso || null;
+  const startHint = options.startDateISO || anchor?.getAttribute("data-cal-start") || null;
   const meta = findCalendarTaskMeta(taskId);
   if (!meta || !meta.task) return;
   const task = meta.task;
   const mode = modeHint === "asreq" || meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
   const dateKey = normalizeDateKey(dateHint);
+  const occurrenceKey = normalizeDateKey(startHint) || dateKey;
   const displayDate = dateKey ? (()=>{
     const parsed = parseDateLocal(dateKey);
     return parsed instanceof Date && !Number.isNaN(parsed.getTime()) ? parsed.toDateString() : dateKey;
@@ -1050,10 +1052,10 @@ function showTaskBubble(taskId, anchor, options = {}){
     ? "Completed"
     : (normalizedStatus === "manual" ? "Scheduled" : normalizedStatus === "due" ? "Projected" : "Scheduled");
 
-  const occurrenceNote = dateKey ? getOccurrenceNoteForTask(task, dateKey) : "";
+  const occurrenceNote = occurrenceKey ? getOccurrenceNoteForTask(task, occurrenceKey) : "";
 
   const hoursPerDay = configuredDailyHours();
-  const occurrenceHours = dateKey ? getOccurrenceHoursForTask(task, dateKey) : null;
+  const occurrenceHours = occurrenceKey ? getOccurrenceHoursForTask(task, occurrenceKey) : null;
   
   const downtimeHours = (()=>{
     const raw = Number(task.downtimeHours);
@@ -1098,7 +1100,7 @@ function showTaskBubble(taskId, anchor, options = {}){
     infoParts.push(`<div class="bubble-kv"><span>Note:</span><span>${escapeHtml(occurrenceNote)}</span></div>`);
   }
 
-  const targetKey = dateKey || normalizeDateKey(new Date());
+  const targetKey = occurrenceKey || normalizeDateKey(new Date());
 
   const actions = [];
   if (dateKey){
@@ -1552,7 +1554,8 @@ function wireCalendarBubbles(){
     return {
       status: el.getAttribute("data-cal-status") || null,
       mode: el.getAttribute("data-cal-mode") || null,
-      dateISO: el.getAttribute("data-cal-date") || el.closest(".day")?.dataset.dateIso || null
+      dateISO: el.getAttribute("data-cal-date") || el.closest(".day")?.dataset.dateIso || null,
+      startDateISO: el.getAttribute("data-cal-start") || null
     };
   };
 
