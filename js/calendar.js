@@ -36,6 +36,14 @@ function configuredDailyHours(){
   return 8;
 }
 
+function configuredTaskDurationDailyHours(){
+  if (typeof getFixedDailyHours === "function"){
+    const fixed = Number(getFixedDailyHours());
+    if (Number.isFinite(fixed) && fixed > 0) return fixed;
+  }
+  return configuredDailyHours();
+}
+
 function getCalendarPendingHours(dateISO){
   if (!(calendarHoursPending instanceof Map)) return undefined;
   const key = normalizeDateKey(dateISO);
@@ -1065,7 +1073,7 @@ function showTaskBubble(taskId, anchor, options = {}){
 
   const occurrenceNote = dateKey ? getOccurrenceNoteForTask(task, dateKey) : "";
 
-  const hoursPerDay = configuredDailyHours();
+  const hoursPerDay = configuredTaskDurationDailyHours();
   const occurrenceHours = dateKey ? getOccurrenceHoursForTask(task, dateKey) : null;
   
   const downtimeHours = (()=>{
@@ -1842,7 +1850,7 @@ function renderCalendar(){
   const monthOffset = Number.isFinite(monthOffsetRaw) ? Math.min(12, Math.max(-12, Math.round(monthOffsetRaw))) : 0;
   window.__calendarMonthOffset = monthOffset;
   const editingHours = isCalendarHoursEditing();
-  const hoursPerDay = configuredDailyHours();
+  const hoursPerDay = configuredTaskDurationDailyHours();
   const hoursMap = typeof getDailyCutHoursMap === "function" ? getDailyCutHoursMap() : new Map();
   container.innerHTML = "";
   const block = container.closest(".calendar-block");

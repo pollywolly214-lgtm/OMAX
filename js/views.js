@@ -4,7 +4,7 @@ function renderAverageHoursBanner(contextLabel){
   const avg = (typeof getAverageDailyCutHours === "function") ? Number(getAverageDailyCutHours()) : NaN;
   const summary = (typeof getPredictionHoursSummary === "function")
     ? getPredictionHoursSummary()
-    : { mode:"average", effectiveHours: (typeof getConfiguredDailyHours === "function" ? Number(getConfiguredDailyHours()) : 0) };
+    : { mode:"fixed", effectiveHours: (typeof getConfiguredDailyHours === "function" ? Number(getConfiguredDailyHours()) : 0) };
   const avgWindowLabel = String(summary.averageWindowLabel || "2 months");
   const avgLabel = (Number.isFinite(avg) && avg > 0) ? `${avg.toFixed(2)} hrs/day` : `Insufficient ${avgWindowLabel.toLowerCase()} history`;
   const modeLabel = summary.mode === "fixed" ? "Fixed daily hours" : `${avgWindowLabel} average`;

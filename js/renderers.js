@@ -470,10 +470,14 @@ function collectTaskHistoryDates(task){
     return null;
   };
   const dailyHours = (()=> {
-    const configured = typeof getConfiguredDailyHours === "function"
+    const configured = typeof getFixedDailyHours === "function"
+      ? Number(getFixedDailyHours())
+      : null;
+    if (Number.isFinite(configured) && configured > 0) return configured;
+    const fallback = typeof getConfiguredDailyHours === "function"
       ? Number(getConfiguredDailyHours())
       : null;
-    return Number.isFinite(configured) && configured > 0 ? configured : 8;
+    return Number.isFinite(fallback) && fallback > 0 ? fallback : 8;
   })();
   const resolveOccurrenceHours = (dateKey)=>{
     if (!dateKey) return null;
@@ -2802,7 +2806,7 @@ function getConfigurationElements(){
 function currentAppConfiguration(){
   if (typeof normalizeAppConfig === "function") return normalizeAppConfig(window.appConfig);
   const fallbackDaily = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8;
-  return { excludeWeekends: false, dailyHours: fallbackDaily, predictionMode: "average", averageWindowDays: 60 };
+  return { excludeWeekends: false, dailyHours: fallbackDaily, predictionMode: "fixed", averageWindowDays: 60 };
 }
 
 function closeConfigurationModal(){

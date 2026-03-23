@@ -57,7 +57,7 @@ const DEFAULT_PREDICTION_AVERAGE_WINDOW = 60;
 const DEFAULT_APP_CONFIG = {
   excludeWeekends: false,
   dailyHours: DEFAULT_DAILY_HOURS,
-  predictionMode: "average",
+  predictionMode: "fixed",
   averageWindowDays: DEFAULT_PREDICTION_AVERAGE_WINDOW
 };
 let appConfig = { ...DEFAULT_APP_CONFIG };
@@ -82,6 +82,7 @@ if (typeof window !== "undefined"){
   window.PREDICTION_AVERAGE_WINDOWS = PREDICTION_AVERAGE_WINDOWS;
   window.appConfig = appConfig;
   window.getConfiguredDailyHours = getConfiguredDailyHours;
+  window.getFixedDailyHours = getFixedDailyHours;
   window.getAverageDailyCutHours = getAverageDailyCutHours;
   window.getPredictionHoursSummary = getPredictionHoursSummary;
   window.normalizePredictionAverageWindow = normalizePredictionAverageWindow;
@@ -233,6 +234,8 @@ function normalizeAppConfig(config){
     }
     if (config.predictionMode === "average" || config.predictionMode === "fixed"){
       normalized.predictionMode = config.predictionMode;
+    } else if (config.dailyHours != null){
+      normalized.predictionMode = "fixed";
     }
     normalized.averageWindowDays = normalizePredictionAverageWindow(config.averageWindowDays);
   }
@@ -247,6 +250,12 @@ function shouldExcludeWeekends(){
   }
 }
 
+function getFixedDailyHours(){
+  const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
+  const fixedHoursRaw = clampDailyCutHours(cfg.dailyHours);
+  return fixedHoursRaw > 0 ? fixedHoursRaw : DEFAULT_DAILY_HOURS;
+}
+
 function getConfiguredDailyHours(){
   return getPredictionHoursSummary().effectiveHours;
 }
@@ -259,8 +268,7 @@ function getPredictionHoursSummary(){
   const averageWindowOption = PREDICTION_AVERAGE_WINDOWS.find(option => option.value === averageWindowDays)
     || PREDICTION_AVERAGE_WINDOWS.find(option => option.value === DEFAULT_PREDICTION_AVERAGE_WINDOW)
     || { value: averageWindowDays, label: `${averageWindowDays} days` };
-  const fixedHoursRaw = clampDailyCutHours(cfg.dailyHours);
-  const fixedHours = fixedHoursRaw > 0 ? fixedHoursRaw : DEFAULT_DAILY_HOURS;
+  const fixedHours = getFixedDailyHours();
   const effectiveHours = (mode === "average" && Number.isFinite(averageHours) && averageHours > 0)
     ? averageHours
     : fixedHours;
