@@ -815,28 +815,29 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     return mutated;
   };
 
-  const pruneTaskOccurrenceState = ()=>{
+  const pruneTaskOccurrenceState = (targetTask = task)=>{
+    if (!targetTask || typeof targetTask !== "object") return false;
     let mutated = false;
-    if (matchesScope(task.calendarDateISO)){
-      task.calendarDateISO = null;
+    if (matchesScope(targetTask.calendarDateISO)){
+      targetTask.calendarDateISO = null;
       mutated = true;
     }
 
-    if (Array.isArray(task.completedDates)){
-      const next = task.completedDates.filter(value => !matchesScope(value));
-      if (next.length !== task.completedDates.length){
-        task.completedDates = next;
+    if (Array.isArray(targetTask.completedDates)){
+      const next = targetTask.completedDates.filter(value => !matchesScope(value));
+      if (next.length !== targetTask.completedDates.length){
+        targetTask.completedDates = next;
         mutated = true;
       }
     }
 
-    if (pruneOccurrenceObject(task.occurrenceNotes)) mutated = true;
-    if (pruneOccurrenceObject(task.occurrenceHours)) mutated = true;
+    if (pruneOccurrenceObject(targetTask.occurrenceNotes)) mutated = true;
+    if (pruneOccurrenceObject(targetTask.occurrenceHours)) mutated = true;
 
-    if (mode === "interval" && Array.isArray(task.manualHistory)){
-      const nextHistory = task.manualHistory.filter(entry => !matchesScope(entry?.dateISO));
-      if (nextHistory.length !== task.manualHistory.length){
-        task.manualHistory = nextHistory;
+    if (mode === "interval" && Array.isArray(targetTask.manualHistory)){
+      const nextHistory = targetTask.manualHistory.filter(entry => !matchesScope(entry?.dateISO));
+      if (nextHistory.length !== targetTask.manualHistory.length){
+        targetTask.manualHistory = nextHistory;
         mutated = true;
       }
     }
@@ -854,13 +855,14 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
   }
 
   if (mode === "interval"){
-    const removedSet = normalizeRemovedOccurrences(task);
-    const removedBefore = removedSet.size;
+    const baseRemovedSet = normalizeRemovedOccurrences(task);
+    const removedBefore = baseRemovedSet.size;
+    const removedKeysToApply = new Set();
     const addRemoved = (value)=>{
       const normalized = normalizeDateKey(value);
       if (!normalized) return;
       if (!matchesScope(normalized)) return;
-      removedSet.add(normalized);
+      removedKeysToApply.add(normalized);
     };
 
     if (normalizedScope === "single"){
@@ -891,7 +893,7 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
         const projectedKey = normalizeDateKey(pred?.dateISO);
         if (!projectedKey) return;
         if (normalizedScope === "all"){
-          removedSet.add(projectedKey);
+          removedKeysToApply.add(projectedKey);
           return;
         }
         const projectedDate = toDayStart(projectedKey);
@@ -899,12 +901,30 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
           ? projectedDate.getTime()
           : null;
         if (targetTime != null && projectedTime != null && projectedTime >= targetTime){
-          removedSet.add(projectedKey);
+          removedKeysToApply.add(projectedKey);
         }
       });
 
-      if (removedSet.size !== removedBefore){
-        task.removedOccurrences = Array.from(removedSet);
+      const applyRemovedKeys = (targetTask)=>{
+        if (!targetTask || typeof targetTask !== "object") return false;
+        const targetSet = normalizeRemovedOccurrences(targetTask);
+        const beforeSize = targetSet.size;
+        removedKeysToApply.forEach(value => targetSet.add(value));
+        if (targetSet.size === beforeSize) return false;
+        targetTask.removedOccurrences = Array.from(targetSet);
+        return true;
+      };
+
+      let familyMutated = false;
+      visitTaskFamily(task, member => {
+        if (applyRemovedKeys(member)) familyMutated = true;
+        if (pruneTaskOccurrenceState(member)) familyMutated = true;
+      });
+      if (!familyMutated){
+        if (applyRemovedKeys(task)) familyMutated = true;
+        if (pruneTaskOccurrenceState(task)) familyMutated = true;
+      }
+      if (familyMutated || (baseRemovedSet.size !== removedBefore)){
         changed = true;
       }
     }
@@ -913,7 +933,9 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     if (removedChanged) changed = true;
   }
 
-  if (pruneTaskOccurrenceState()) changed = true;
+  if (normalizedScope === "single" || mode !== "interval"){
+    if (pruneTaskOccurrenceState()) changed = true;
+  }
 
   if (mode === "interval"){
     if (changed){
