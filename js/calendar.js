@@ -882,7 +882,11 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
       addArrayValues(Array.isArray(task.manualHistory) ? task.manualHistory.map(entry => entry?.dateISO) : []);
       addRemoved(task.calendarDateISO);
 
-      const projected = projectIntervalDueDates(task, { monthsAhead: 12, minOccurrences: 12 });
+      const projected = projectIntervalDueDates(task, {
+        monthsAhead: normalizedScope === "all" ? 120 : 60,
+        minOccurrences: normalizedScope === "all" ? 240 : 120,
+        maxOccurrences: normalizedScope === "all" ? 240 : 120
+      });
       projected.forEach(pred => {
         const projectedKey = normalizeDateKey(pred?.dateISO);
         if (!projectedKey) return;
