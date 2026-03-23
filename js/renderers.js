@@ -12939,6 +12939,11 @@ function computeCostModel(){
       const date = (completedDate instanceof Date && !Number.isNaN(completedDate.getTime())) ? completedDate : null;
       if (!date) return null;
       const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
+      const manualLogs = Array.isArray(job.manualLogs) ? job.manualLogs : [];
+      const latestManualLog = manualLogs
+        .filter(entry => Number.isFinite(Number(entry?.completedHours)) && Number(entry.completedHours) >= 0)
+        .sort((a, b) => String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")))
+        .pop() || null;
       const costRateRaw = Number(eff?.costRate);
       const estimateHoursRawForRate = Number(job.estimateHours);
       const fallbackCostRate = Number.isFinite(estimateHoursRawForRate) && estimateHoursRawForRate > 0
@@ -12947,13 +12952,19 @@ function computeCostModel(){
       const catId = job.cat != null ? String(job.cat) : rootFolderId;
       const categoryName = resolveCategoryName(catId);
       const actualHoursRaw = Number(job.actualHours);
+      const manualHoursRaw = Number(latestManualLog?.completedHours);
+      const storedEffHoursRaw = Number(job?.efficiency?.actualHours);
       const effHoursRaw = Number(eff?.actualHours);
       const estimateHoursRaw = Number(job.estimateHours);
-      const cutHours = Number.isFinite(actualHoursRaw) && actualHoursRaw > 0
+      const cutHours = Number.isFinite(actualHoursRaw) && actualHoursRaw >= 0
         ? actualHoursRaw
-        : (Number.isFinite(effHoursRaw) && effHoursRaw > 0
-          ? effHoursRaw
-          : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0));
+        : (Number.isFinite(manualHoursRaw) && manualHoursRaw >= 0
+          ? manualHoursRaw
+          : (Number.isFinite(storedEffHoursRaw) && storedEffHoursRaw >= 0
+            ? storedEffHoursRaw
+            : (Number.isFinite(effHoursRaw) && effHoursRaw >= 0
+              ? effHoursRaw
+              : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0))));
       const projectNumber = String(job?.projectNumber || "").replace(/[^0-9]/g, "").slice(0, 8);
       const categoryDisplay = projectNumber
         ? `${categoryName} · ${projectNumber}`
@@ -12998,6 +13009,11 @@ function computeCostModel(){
     bucket.cutByCategory[cut.category].cost += cut.cost;
     bucket.cutByCategory[cut.category].hours += cut.hours > 0 ? cut.hours : 0;
   });
+
+  const currentWeekStart = startOfWeekMonday(new Date());
+  if (currentWeekStart){
+    ensureWeek(currentWeekStart);
+  }
 
   const safeDailyCutHours = Array.isArray(dailyCutHours) ? dailyCutHours : [];
   weeklyMap.forEach(report => {
