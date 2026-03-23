@@ -789,51 +789,53 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     return normalized >= key;
   };
 
-  if (mode === "interval" && normalizedScope === "single"){
-    if (markOccurrenceRemoved(task, key)) changed = true;
-
-    const nowIso = new Date().toISOString();
-    const history = Array.isArray(task.manualHistory) ? task.manualHistory : [];
-    let hasEntry = false;
-    history.forEach(entry => {
-      if (isSameDay(entry?.dateISO)){
-        hasEntry = true;
-        if (entry.status !== "removed"){ entry.status = "removed"; changed = true; }
-        if (!entry.recordedAtISO) entry.recordedAtISO = nowIso;
+  const pruneOccurrenceObject = (obj)=>{
+    if (!obj || typeof obj !== "object") return false;
+    let mutated = false;
+    Object.keys(obj).forEach(k => {
+      if (matchesScope(k)){
+        delete obj[k];
+        mutated = true;
       }
     });
-    if (!hasEntry){
-      history.push({ dateISO: key, status: "removed", recordedAtISO: nowIso, source: "calendar" });
-      changed = true;
-    }
-    task.manualHistory = history;
+    return mutated;
+  };
 
-    const pruneSingle = (obj)=>{
-      if (!obj || typeof obj !== "object") return false;
-      let mutated = false;
-      Object.keys(obj).forEach(k => {
-        if (isSameDay(k)){
-          delete obj[k];
-          mutated = true;
-        }
-      });
-      return mutated;
-    };
-
-    if (isSameDay(task.calendarDateISO)){
+  const pruneTaskOccurrenceState = ()=>{
+    let mutated = false;
+    if (matchesScope(task.calendarDateISO)){
       task.calendarDateISO = null;
-      changed = true;
+      mutated = true;
     }
+
     if (Array.isArray(task.completedDates)){
-      const idx = task.completedDates.findIndex(v => isSameDay(v));
-      if (idx >= 0){
-        task.completedDates.splice(idx,1);
-        changed = true;
+      const next = task.completedDates.filter(value => !matchesScope(value));
+      if (next.length !== task.completedDates.length){
+        task.completedDates = next;
+        mutated = true;
       }
     }
-    if (pruneSingle(task.occurrenceNotes)) changed = true;
-    if (pruneSingle(task.occurrenceHours)) changed = true;
 
+    if (pruneOccurrenceObject(task.occurrenceNotes)) mutated = true;
+    if (pruneOccurrenceObject(task.occurrenceHours)) mutated = true;
+
+    if (mode === "interval" && Array.isArray(task.manualHistory)){
+      const nextHistory = task.manualHistory.filter(entry => !matchesScope(entry?.dateISO));
+      if (nextHistory.length !== task.manualHistory.length){
+        task.manualHistory = nextHistory;
+        mutated = true;
+      }
+    }
+
+    return mutated;
+  };
+
+  if (mode === "interval" && normalizedScope === "single"){
+    if (markOccurrenceRemoved(task, key)) changed = true;
+    if (pruneTaskOccurrenceState()) changed = true;
+    if (changed){
+      applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
+    }
     return changed;
   }
 
@@ -893,42 +895,9 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
     if (removedChanged) changed = true;
   }
 
-  const pruneOccurrenceObject = (obj)=>{
-    if (!obj || typeof obj !== "object") return false;
-    let mutated = false;
-    Object.keys(obj).forEach(k => {
-      if (matchesScope(k)){
-        delete obj[k];
-        mutated = true;
-      }
-    });
-    return mutated;
-  };
-
-  if (matchesScope(task.calendarDateISO)){
-    task.calendarDateISO = null;
-    changed = true;
-  }
-
-  if (Array.isArray(task.completedDates)){
-    const next = task.completedDates.filter(value => !matchesScope(value));
-    if (next.length !== task.completedDates.length){
-      task.completedDates = next;
-      changed = true;
-    }
-  }
-
-  if (pruneOccurrenceObject(task.occurrenceNotes)) changed = true;
-  if (pruneOccurrenceObject(task.occurrenceHours)) changed = true;
+  if (pruneTaskOccurrenceState()) changed = true;
 
   if (mode === "interval"){
-    if (Array.isArray(task.manualHistory)){
-      const nextHistory = task.manualHistory.filter(entry => !matchesScope(entry?.dateISO));
-      if (nextHistory.length !== task.manualHistory.length){
-        task.manualHistory = nextHistory;
-        changed = true;
-      }
-    }
     if (changed){
       applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
     }
@@ -1713,12 +1682,19 @@ function projectIntervalDueDates(task, options = {}){
 
   manualHistory.sort((a,b)=> String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")));
 
+  const isBaselineHistoryEntry = (entry)=>{
+    if (!entry || typeof entry !== "object") return false;
+    const status = typeof entry.status === "string" ? entry.status.toLowerCase() : "logged";
+    return status !== "removed" && status !== "scheduled";
+  };
+
   let baselineEntry = null;
   let futureBaselineEntry = null;
   let futureBaselineTime = Infinity;
   for (let i = manualHistory.length - 1; i >= 0; i--){
     const entry = manualHistory[i];
     if (!entry || typeof entry.dateISO !== "string") continue;
+    if (!isBaselineHistoryEntry(entry)) continue;
     const entryDate = toDayStart(entry.dateISO);
     if (!entryDate) continue;
     const entryTime = entryDate.getTime();
