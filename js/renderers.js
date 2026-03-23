@@ -12869,6 +12869,7 @@ function computeCostModel(){
   };
 
   const weeklyMap = new Map();
+  const weeklyMaintenanceItemKeys = new Set();
   const ensureWeek = (weekStart)=>{
     const key = formatWeekKey(weekStart);
     if (!key) return null;
@@ -12891,6 +12892,16 @@ function computeCostModel(){
     return weeklyMap.get(key);
   };
 
+  const registerWeeklyMaintenanceItem = (bucket, item, uniqueKey)=>{
+    if (!bucket || !item) return false;
+    const key = uniqueKey != null ? String(uniqueKey) : "";
+    if (key && weeklyMaintenanceItemKeys.has(key)) return false;
+    bucket.maintenanceItems.push(item);
+    bucket.totalMaintenanceCost += Math.max(0, Number(item.cost) || 0);
+    if (key) weeklyMaintenanceItemKeys.add(key);
+    return true;
+  };
+
   occurrenceCostItems.forEach((item, idx) => {
     if (!item || !(item.resolvedAt instanceof Date) || Number.isNaN(item.resolvedAt.getTime())) return;
     const weekStart = startOfWeekMonday(item.resolvedAt);
@@ -12898,7 +12909,7 @@ function computeCostModel(){
     if (!bucket) return;
     const cost = Math.max(0, Number(item.amount) || 0);
     if (cost <= 0) return;
-    bucket.maintenanceItems.push({
+    registerWeeklyMaintenanceItem(bucket, {
       id: `mo_${item.taskId || idx}`,
       dateISO: item.resolvedISO ? String(item.resolvedISO).slice(0, 10) : ymd(item.resolvedAt),
       name: item.name || "Maintenance occurrence",
@@ -12906,8 +12917,7 @@ function computeCostModel(){
       costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
       taskLabel: "Occurrence cost",
       partNumber: item.pn || ""
-    });
-    bucket.totalMaintenanceCost += cost;
+    }, `occurrence__${item.taskId || idx}__${item.resolvedISO ? String(item.resolvedISO).slice(0, 10) : ymd(item.resolvedAt)}`);
   });
 
   maintenanceHistory.forEach((entry, idx)=>{
@@ -12922,15 +12932,13 @@ function computeCostModel(){
         return sum + (Number.isFinite(v) && v > 0 ? v : 0);
       }, 0);
       const fallback = 1 / tasks.length;
-      let entryTotal = 0;
       tasks.forEach((task, taskIndex)=>{
         const unit = Number(task?.unitPrice);
         const share = (pricedTotal > 0 && Number.isFinite(unit) && unit > 0) ? (unit / pricedTotal) : fallback;
         const allocatedCost = Math.max(0, (Number(entry.cost) || 0) * share);
         const directCost = Number.isFinite(unit) && unit > 0 ? unit : 0;
         const cost = Math.max(allocatedCost, directCost);
-        entryTotal += cost;
-        bucket.maintenanceItems.push({
+        registerWeeklyMaintenanceItem(bucket, {
           id: `m_${entry.dateISO || idx}_${taskIndex}`,
           dateISO: entry.dateISO || null,
           name: task?.name || "Maintenance task",
@@ -12938,12 +12946,11 @@ function computeCostModel(){
           costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
           taskLabel: task?.mode === "asreq" ? "As required" : "Interval",
           partNumber: task?.partNumber || ""
-        });
+        }, `history__${entry.dateISO || idx}__${task?.originalId || task?.id || taskIndex}`);
       });
-      bucket.totalMaintenanceCost += entryTotal;
     } else {
       const cost = Math.max(0, Number(entry.cost) || 0);
-      bucket.maintenanceItems.push({
+      registerWeeklyMaintenanceItem(bucket, {
         id: `m_${entry.dateISO || idx}`,
         dateISO: entry.dateISO || null,
         name: "Maintenance allocation",
@@ -12951,9 +12958,31 @@ function computeCostModel(){
         costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
         taskLabel: "Allocated",
         partNumber: ""
-      });
-      bucket.totalMaintenanceCost += cost;
+      }, `history__${entry.dateISO || idx}__allocation`);
     }
+  });
+
+  taskEventsByDate.forEach((tasksOnDate, dateISO) => {
+    const occurrenceDate = parseDateLocal(dateISO);
+    if (!(occurrenceDate instanceof Date) || Number.isNaN(occurrenceDate.getTime())) return;
+    const weekStart = startOfWeekMonday(occurrenceDate);
+    const bucket = ensureWeek(weekStart);
+    if (!bucket) return;
+    const tasks = Array.isArray(tasksOnDate) ? tasksOnDate.filter(Boolean) : [];
+    tasks.forEach((task, taskIndex) => {
+      const unitPrice = Number(task?.unitPrice);
+      const cost = Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice : 0;
+      if (cost <= 0) return;
+      registerWeeklyMaintenanceItem(bucket, {
+        id: `mt_${dateISO}_${task?.originalId || task?.id || taskIndex}`,
+        dateISO,
+        name: task?.name || "Maintenance task",
+        cost,
+        costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
+        taskLabel: task?.mode === "asreq" ? "As required" : "Interval",
+        partNumber: task?.partNumber || ""
+      }, `history__${dateISO}__${task?.originalId || task?.id || taskIndex}`);
+    });
   });
 
   const completedCutsForWeekly = (Array.isArray(completedCuttingJobs) ? completedCuttingJobs : [])
