@@ -451,6 +451,20 @@ function clearRemovedOccurrences(task, predicate){
   return true;
 }
 
+function hasActiveRemovedOccurrence(task, referenceDate = new Date()){
+  if (!task) return false;
+  const ref = toDayStart(referenceDate);
+  if (!(ref instanceof Date) || Number.isNaN(ref.getTime())) return false;
+  const refTime = ref.getTime();
+  const removedSet = normalizeRemovedOccurrences(task);
+  for (const key of removedSet){
+    const removedDate = toDayStart(key);
+    if (!(removedDate instanceof Date) || Number.isNaN(removedDate.getTime())) continue;
+    if (removedDate.getTime() >= refTime) return true;
+  }
+  return false;
+}
+
 function getOccurrenceNoteForTask(task, dateISO){
   const key = normalizeDateKey(dateISO);
   if (!key) return "";
@@ -1956,6 +1970,7 @@ function renderCalendar(){
     if (!t) return;
     const taskKey = String(t.id);
     const removedSet = normalizeRemovedOccurrences(t);
+    const suppressProjectedDue = hasActiveRemovedOccurrence(t, today);
     let completedKeys = completedByTask.get(taskKey);
     if (!(completedKeys instanceof Set)){
       completedKeys = new Set();
@@ -2005,6 +2020,7 @@ function renderCalendar(){
     const skipDates = new Set(completedKeys);
     manualDates.forEach(dateKey => skipDates.add(dateKey));
     removedSet.forEach(dateKey => skipDates.add(dateKey));
+    if (suppressProjectedDue) return;
     const projections = projectIntervalDueDates(t, {
       monthsAhead: 3,
       excludeDates: skipDates,
