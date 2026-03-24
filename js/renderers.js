@@ -470,10 +470,14 @@ function collectTaskHistoryDates(task){
     return null;
   };
   const dailyHours = (()=> {
-    const configured = typeof getConfiguredDailyHours === "function"
+    const configured = typeof getFixedDailyHours === "function"
+      ? Number(getFixedDailyHours())
+      : null;
+    if (Number.isFinite(configured) && configured > 0) return configured;
+    const fallback = typeof getConfiguredDailyHours === "function"
       ? Number(getConfiguredDailyHours())
       : null;
-    return Number.isFinite(configured) && configured > 0 ? configured : 8;
+    return Number.isFinite(fallback) && fallback > 0 ? fallback : 8;
   })();
   const resolveOccurrenceHours = (dateKey)=>{
     if (!dateKey) return null;
@@ -2802,7 +2806,7 @@ function getConfigurationElements(){
 function currentAppConfiguration(){
   if (typeof normalizeAppConfig === "function") return normalizeAppConfig(window.appConfig);
   const fallbackDaily = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8;
-  return { excludeWeekends: false, dailyHours: fallbackDaily, predictionMode: "average", averageWindowDays: 60 };
+  return { excludeWeekends: false, dailyHours: fallbackDaily, predictionMode: "fixed", averageWindowDays: 60 };
 }
 
 function closeConfigurationModal(){
@@ -9166,8 +9170,32 @@ function renderSettings(){
       }
       updateDueChip(holder, meta.task);
     }else if (key === "price"){
+      const prevPrice = meta.task.price;
       meta.task.price = value == null ? null : Number(value);
       syncLinkedInventoryFromTask(meta.task, { price: meta.task.price });
+      const changedPrice = prevPrice !== meta.task.price;
+      if (changedPrice){
+        const templateId = isInstanceTask(meta.task) ? meta.task.templateId : meta.task.id;
+        const updateLinkedPrices = (list)=>{
+          if (!Array.isArray(list) || templateId == null) return;
+          list.forEach(task => {
+            if (!task || !isInstanceTask(task)) return;
+            if (String(task.templateId) !== String(templateId)) return;
+            const hasCustomPrice = task.price != null && task.price !== prevPrice;
+            if (!hasCustomPrice){
+              task.price = meta.task.price;
+            }
+          });
+        };
+        updateLinkedPrices(window.tasksInterval);
+        updateLinkedPrices(window.tasksAsReq);
+      }
+      if (typeof refreshDashboardWidgets === "function"){
+        refreshDashboardWidgets({ full: true });
+      }
+      if (typeof renderCosts === "function"){
+        renderCosts();
+      }
     }else if (key === "downtimeHours"){
       const prevDowntime = meta.task.downtimeHours;
       if (value == null){
@@ -9191,9 +9219,12 @@ function renderSettings(){
           });
         }
         if (typeof refreshDashboardWidgets === "function"){
-          refreshDashboardWidgets();
+          refreshDashboardWidgets({ full: true });
         }else if (typeof renderCalendar === "function"){
           renderCalendar();
+        }
+        if (typeof renderCosts === "function"){
+          renderCosts();
         }
       }
     }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
@@ -11496,6 +11527,24 @@ function buildCalendarMaintenanceHistory({ intervalTasks = [], asReqTasks = [] }
 }
 
 function computeCostModel(){
+  const MAINTENANCE_LABOR_RATE_PER_HOUR = 30;
+  const roundMaintenanceCurrency = (value)=> {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return 0;
+    return Math.round(num * 100) / 100;
+  };
+  const resolveMaintenanceLaborHours = (task)=> {
+    const raw = Number(task?.downtimeHours);
+    return Number.isFinite(raw) && raw > 0 ? raw : 0;
+  };
+  const resolveMaintenanceUnitCostWithLabor = (task, baseCost = null)=> {
+    const resolvedBase = Number.isFinite(Number(baseCost)) ? Number(baseCost) : 0;
+    const partsCost = resolvedBase > 0 ? resolvedBase : 0;
+    const laborHours = resolveMaintenanceLaborHours(task);
+    const laborCost = laborHours > 0 ? laborHours * MAINTENANCE_LABOR_RATE_PER_HOUR : 0;
+    return roundMaintenanceCurrency(partsCost + laborCost);
+  };
+
   const safeHistory = Array.isArray(totalHistory) ? totalHistory.slice() : [];
   const parsedHistory = safeHistory
     .map(entry => {
@@ -11556,8 +11605,11 @@ function computeCostModel(){
 
   const resolveMaintenanceUnitCost = (task)=>{
     const directPrice = Number(task?.price);
-    if (Number.isFinite(directPrice) && directPrice > 0) return directPrice;
-    return resolveCalendarUnitCost(task, calendarCostByTemplateId);
+    const baseCost = Number.isFinite(directPrice) && directPrice > 0
+      ? directPrice
+      : resolveCalendarUnitCost(task, calendarCostByTemplateId);
+    const totalCost = resolveMaintenanceUnitCostWithLabor(task, baseCost);
+    return totalCost > 0 ? totalCost : null;
   };
 
   const toHistoryDateKey = (value)=>{
@@ -12869,6 +12921,7 @@ function computeCostModel(){
   };
 
   const weeklyMap = new Map();
+  const weeklyMaintenanceItemKeys = new Set();
   const ensureWeek = (weekStart)=>{
     const key = formatWeekKey(weekStart);
     if (!key) return null;
@@ -12891,6 +12944,34 @@ function computeCostModel(){
     return weeklyMap.get(key);
   };
 
+  const registerWeeklyMaintenanceItem = (bucket, item, uniqueKey)=>{
+    if (!bucket || !item) return false;
+    const key = uniqueKey != null ? String(uniqueKey) : "";
+    if (key && weeklyMaintenanceItemKeys.has(key)) return false;
+    bucket.maintenanceItems.push(item);
+    bucket.totalMaintenanceCost += Math.max(0, Number(item.cost) || 0);
+    if (key) weeklyMaintenanceItemKeys.add(key);
+    return true;
+  };
+
+  occurrenceCostItems.forEach((item, idx) => {
+    if (!item || !(item.resolvedAt instanceof Date) || Number.isNaN(item.resolvedAt.getTime())) return;
+    const weekStart = startOfWeekMonday(item.resolvedAt);
+    const bucket = ensureWeek(weekStart);
+    if (!bucket) return;
+    const cost = Math.max(0, Number(item.amount) || 0);
+    if (cost <= 0) return;
+    registerWeeklyMaintenanceItem(bucket, {
+      id: `mo_${item.taskId || idx}`,
+      dateISO: item.resolvedISO ? String(item.resolvedISO).slice(0, 10) : ymd(item.resolvedAt),
+      name: item.name || "Maintenance occurrence",
+      cost,
+      costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
+      taskLabel: "Occurrence cost",
+      partNumber: item.pn || ""
+    }, `occurrence__${item.taskId || idx}__${item.resolvedISO ? String(item.resolvedISO).slice(0, 10) : ymd(item.resolvedAt)}`);
+  });
+
   maintenanceHistory.forEach((entry, idx)=>{
     if (!entry || !(entry.date instanceof Date) || Number.isNaN(entry.date.getTime())) return;
     const weekStart = startOfWeekMonday(entry.date);
@@ -12906,8 +12987,10 @@ function computeCostModel(){
       tasks.forEach((task, taskIndex)=>{
         const unit = Number(task?.unitPrice);
         const share = (pricedTotal > 0 && Number.isFinite(unit) && unit > 0) ? (unit / pricedTotal) : fallback;
-        const cost = Math.max(0, (Number(entry.cost) || 0) * share);
-        bucket.maintenanceItems.push({
+        const allocatedCost = Math.max(0, (Number(entry.cost) || 0) * share);
+        const directCost = Number.isFinite(unit) && unit > 0 ? unit : 0;
+        const cost = Math.max(allocatedCost, directCost);
+        registerWeeklyMaintenanceItem(bucket, {
           id: `m_${entry.dateISO || idx}_${taskIndex}`,
           dateISO: entry.dateISO || null,
           name: task?.name || "Maintenance task",
@@ -12915,11 +12998,11 @@ function computeCostModel(){
           costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
           taskLabel: task?.mode === "asreq" ? "As required" : "Interval",
           partNumber: task?.partNumber || ""
-        });
+        }, `history__${entry.dateISO || idx}__${task?.originalId || task?.id || taskIndex}`);
       });
     } else {
       const cost = Math.max(0, Number(entry.cost) || 0);
-      bucket.maintenanceItems.push({
+      registerWeeklyMaintenanceItem(bucket, {
         id: `m_${entry.dateISO || idx}`,
         dateISO: entry.dateISO || null,
         name: "Maintenance allocation",
@@ -12927,9 +13010,31 @@ function computeCostModel(){
         costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
         taskLabel: "Allocated",
         partNumber: ""
-      });
+      }, `history__${entry.dateISO || idx}__allocation`);
     }
-    bucket.totalMaintenanceCost += Math.max(0, Number(entry.cost) || 0);
+  });
+
+  taskEventsByDate.forEach((tasksOnDate, dateISO) => {
+    const occurrenceDate = parseDateLocal(dateISO);
+    if (!(occurrenceDate instanceof Date) || Number.isNaN(occurrenceDate.getTime())) return;
+    const weekStart = startOfWeekMonday(occurrenceDate);
+    const bucket = ensureWeek(weekStart);
+    if (!bucket) return;
+    const tasks = Array.isArray(tasksOnDate) ? tasksOnDate.filter(Boolean) : [];
+    tasks.forEach((task, taskIndex) => {
+      const unitPrice = Number(task?.unitPrice);
+      const cost = Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice : 0;
+      if (cost <= 0) return;
+      registerWeeklyMaintenanceItem(bucket, {
+        id: `mt_${dateISO}_${task?.originalId || task?.id || taskIndex}`,
+        dateISO,
+        name: task?.name || "Maintenance task",
+        cost,
+        costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
+        taskLabel: task?.mode === "asreq" ? "As required" : "Interval",
+        partNumber: task?.partNumber || ""
+      }, `history__${dateISO}__${task?.originalId || task?.id || taskIndex}`);
+    });
   });
 
   const completedCutsForWeekly = (Array.isArray(completedCuttingJobs) ? completedCuttingJobs : [])
@@ -12939,7 +13044,13 @@ function computeCostModel(){
       const date = (completedDate instanceof Date && !Number.isNaN(completedDate.getTime())) ? completedDate : null;
       if (!date) return null;
       const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
-      const costRateRaw = Number(eff?.costRate);
+      const manualLogs = Array.isArray(job.manualLogs) ? job.manualLogs : [];
+      const latestManualLog = manualLogs
+        .filter(entry => Number.isFinite(Number(entry?.completedHours)) && Number(entry.completedHours) >= 0)
+        .sort((a, b) => String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")))
+        .pop() || null;
+      const costRateRaw = Number(job?.costRate ?? eff?.costRate);
+      const chargeRateRaw = Number(job?.chargeRate ?? eff?.chargeRate);
       const estimateHoursRawForRate = Number(job.estimateHours);
       const fallbackCostRate = Number.isFinite(estimateHoursRawForRate) && estimateHoursRawForRate > 0
         ? (JOB_BASE_COST_PER_HOUR + ((Number(job?.materialCost) || 0) * (Number(job?.materialQty) || 0) / estimateHoursRawForRate))
@@ -12947,19 +13058,26 @@ function computeCostModel(){
       const catId = job.cat != null ? String(job.cat) : rootFolderId;
       const categoryName = resolveCategoryName(catId);
       const actualHoursRaw = Number(job.actualHours);
+      const manualHoursRaw = Number(latestManualLog?.completedHours);
+      const storedEffHoursRaw = Number(job?.efficiency?.actualHours);
       const effHoursRaw = Number(eff?.actualHours);
       const estimateHoursRaw = Number(job.estimateHours);
-      const cutHours = Number.isFinite(actualHoursRaw) && actualHoursRaw > 0
+      const cutHours = Number.isFinite(actualHoursRaw) && actualHoursRaw >= 0
         ? actualHoursRaw
-        : (Number.isFinite(effHoursRaw) && effHoursRaw > 0
-          ? effHoursRaw
-          : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0));
+        : (Number.isFinite(manualHoursRaw) && manualHoursRaw >= 0
+          ? manualHoursRaw
+          : (Number.isFinite(storedEffHoursRaw) && storedEffHoursRaw >= 0
+            ? storedEffHoursRaw
+            : (Number.isFinite(effHoursRaw) && effHoursRaw >= 0
+              ? effHoursRaw
+              : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0))));
       const projectNumber = String(job?.projectNumber || "").replace(/[^0-9]/g, "").slice(0, 8);
       const categoryDisplay = projectNumber
         ? `${categoryName} · ${projectNumber}`
         : categoryName;
-      const effectiveCostRate = Number.isFinite(costRateRaw) && costRateRaw > 0 ? costRateRaw : fallbackCostRate;
-      const cutCost = Math.max(0, cutHours * effectiveCostRate);
+      const effectiveCostRate = Number.isFinite(costRateRaw) && costRateRaw >= 0 ? costRateRaw : fallbackCostRate;
+      const effectiveChargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
+      const cutCost = cutHours * (effectiveChargeRate - effectiveCostRate);
       return {
         id: String(job.id || "cut"),
         date,
@@ -12998,6 +13116,11 @@ function computeCostModel(){
     bucket.cutByCategory[cut.category].cost += cut.cost;
     bucket.cutByCategory[cut.category].hours += cut.hours > 0 ? cut.hours : 0;
   });
+
+  const currentWeekStart = startOfWeekMonday(new Date());
+  if (currentWeekStart){
+    ensureWeek(currentWeekStart);
+  }
 
   const safeDailyCutHours = Array.isArray(dailyCutHours) ? dailyCutHours : [];
   weeklyMap.forEach(report => {
