@@ -9170,8 +9170,26 @@ function renderSettings(){
       }
       updateDueChip(holder, meta.task);
     }else if (key === "price"){
+      const prevPrice = meta.task.price;
       meta.task.price = value == null ? null : Number(value);
       syncLinkedInventoryFromTask(meta.task, { price: meta.task.price });
+      const changedPrice = prevPrice !== meta.task.price;
+      if (changedPrice){
+        const templateId = isInstanceTask(meta.task) ? meta.task.templateId : meta.task.id;
+        const updateLinkedPrices = (list)=>{
+          if (!Array.isArray(list) || templateId == null) return;
+          list.forEach(task => {
+            if (!task || !isInstanceTask(task)) return;
+            if (String(task.templateId) !== String(templateId)) return;
+            const hasCustomPrice = task.price != null && task.price !== prevPrice;
+            if (!hasCustomPrice){
+              task.price = meta.task.price;
+            }
+          });
+        };
+        updateLinkedPrices(window.tasksInterval);
+        updateLinkedPrices(window.tasksAsReq);
+      }
       if (typeof refreshDashboardWidgets === "function"){
         refreshDashboardWidgets({ full: true });
       }
