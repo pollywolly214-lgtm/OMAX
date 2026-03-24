@@ -9172,6 +9172,12 @@ function renderSettings(){
     }else if (key === "price"){
       meta.task.price = value == null ? null : Number(value);
       syncLinkedInventoryFromTask(meta.task, { price: meta.task.price });
+      if (typeof refreshDashboardWidgets === "function"){
+        refreshDashboardWidgets({ full: true });
+      }
+      if (typeof renderCosts === "function"){
+        renderCosts();
+      }
     }else if (key === "downtimeHours"){
       const prevDowntime = meta.task.downtimeHours;
       if (value == null){
@@ -9195,9 +9201,12 @@ function renderSettings(){
           });
         }
         if (typeof refreshDashboardWidgets === "function"){
-          refreshDashboardWidgets();
+          refreshDashboardWidgets({ full: true });
         }else if (typeof renderCalendar === "function"){
           renderCalendar();
+        }
+        if (typeof renderCosts === "function"){
+          renderCosts();
         }
       }
     }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
@@ -11500,6 +11509,24 @@ function buildCalendarMaintenanceHistory({ intervalTasks = [], asReqTasks = [] }
 }
 
 function computeCostModel(){
+  const MAINTENANCE_LABOR_RATE_PER_HOUR = 30;
+  const roundMaintenanceCurrency = (value)=> {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return 0;
+    return Math.round(num * 100) / 100;
+  };
+  const resolveMaintenanceLaborHours = (task)=> {
+    const raw = Number(task?.downtimeHours);
+    return Number.isFinite(raw) && raw > 0 ? raw : 0;
+  };
+  const resolveMaintenanceUnitCostWithLabor = (task, baseCost = null)=> {
+    const resolvedBase = Number.isFinite(Number(baseCost)) ? Number(baseCost) : 0;
+    const partsCost = resolvedBase > 0 ? resolvedBase : 0;
+    const laborHours = resolveMaintenanceLaborHours(task);
+    const laborCost = laborHours > 0 ? laborHours * MAINTENANCE_LABOR_RATE_PER_HOUR : 0;
+    return roundMaintenanceCurrency(partsCost + laborCost);
+  };
+
   const safeHistory = Array.isArray(totalHistory) ? totalHistory.slice() : [];
   const parsedHistory = safeHistory
     .map(entry => {
@@ -11560,8 +11587,11 @@ function computeCostModel(){
 
   const resolveMaintenanceUnitCost = (task)=>{
     const directPrice = Number(task?.price);
-    if (Number.isFinite(directPrice) && directPrice > 0) return directPrice;
-    return resolveCalendarUnitCost(task, calendarCostByTemplateId);
+    const baseCost = Number.isFinite(directPrice) && directPrice > 0
+      ? directPrice
+      : resolveCalendarUnitCost(task, calendarCostByTemplateId);
+    const totalCost = resolveMaintenanceUnitCostWithLabor(task, baseCost);
+    return totalCost > 0 ? totalCost : null;
   };
 
   const toHistoryDateKey = (value)=>{
