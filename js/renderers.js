@@ -13093,9 +13093,17 @@ function computeCostModel(){
       const categoryDisplay = projectNumber
         ? `${categoryName} · ${projectNumber}`
         : categoryName;
+      const storedGainLossRaw = Number(job?.gainLoss);
+      const efficiencyGainLossRaw = Number(job?.efficiency?.gainLoss);
+      const derivedGainLossRaw = Number(eff?.gainLoss);
       const effectiveCostRate = Number.isFinite(costRateRaw) && costRateRaw >= 0 ? costRateRaw : fallbackCostRate;
       const effectiveChargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
-      const cutCost = cutHours * (effectiveChargeRate - effectiveCostRate);
+      const fallbackGainLoss = cutHours * (effectiveChargeRate - effectiveCostRate);
+      const cutCost = Number.isFinite(storedGainLossRaw)
+        ? storedGainLossRaw
+        : (Number.isFinite(efficiencyGainLossRaw)
+          ? efficiencyGainLossRaw
+          : (Number.isFinite(derivedGainLossRaw) ? derivedGainLossRaw : fallbackGainLoss));
       return {
         id: String(job.id || "cut"),
         date,
