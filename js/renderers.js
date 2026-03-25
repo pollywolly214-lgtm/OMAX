@@ -12966,8 +12966,15 @@ function computeCostModel(){
     if (!bucket || !item) return false;
     const key = uniqueKey != null ? String(uniqueKey) : "";
     if (key && weeklyMaintenanceItemKeys.has(key)) return false;
-    bucket.maintenanceItems.push(item);
-    bucket.totalMaintenanceCost += Math.max(0, Number(item.cost) || 0);
+    const rawCost = Number(item.cost);
+    const normalizedCost = Number.isFinite(rawCost) ? -Math.abs(rawCost) : 0;
+    const normalizedItem = {
+      ...item,
+      cost: normalizedCost,
+      costLabel: formatterCurrency(normalizedCost, { decimals: Math.abs(normalizedCost) < 1000 ? 2 : 0 })
+    };
+    bucket.maintenanceItems.push(normalizedItem);
+    bucket.totalMaintenanceCost += normalizedCost;
     if (key) weeklyMaintenanceItemKeys.add(key);
     return true;
   };
@@ -13738,7 +13745,7 @@ function drawWeeklyReportChart(canvas, report){
   const weeklyHoursGoal = 40;
   const costBars = [
     { label: "Cuts cost", value: Math.max(0, Number(report.totalCutCost) || 0), color: "#2e7d32" },
-    { label: "Maintenance cost", value: Math.max(0, Number(report.totalMaintenanceCost) || 0), color: "#0a63c2" }
+    { label: "Maintenance cost", value: Math.abs(Number(report.totalMaintenanceCost) || 0), color: "#0a63c2" }
   ];
 
   const outerLeft = 24;
