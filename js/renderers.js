@@ -11957,10 +11957,21 @@ function computeCostModel(){
   });
 
   const taskEventsByDate = new Map();
-  const isCompletedMaintenanceHistoryStatus = (status)=> {
-    const normalized = typeof status === "string" ? status.trim().toLowerCase() : "";
-    if (!normalized) return false;
-    return normalized === "completed" || normalized === "complete" || normalized === "done";
+  const shouldIncludeManualHistoryEntry = (entry, completedDateKeys = null)=> {
+    if (!entry) return false;
+    const status = typeof entry.status === "string" ? entry.status.trim().toLowerCase() : "";
+    if (status === "completed" || status === "complete" || status === "done") return true;
+    if (status === "scheduled" || status === "removed") return false;
+    const entryKey = toHistoryDateKey(entry.dateISO);
+    if (completedDateKeys instanceof Set && entryKey && completedDateKeys.has(entryKey)) return true;
+    const explicitComplete = entry.completed === true || entry.isCompleted === true || entry.complete === true;
+    if (explicitComplete && entryKey) return true;
+    const source = typeof entry.source === "string" ? entry.source.trim().toLowerCase() : "";
+    const hoursAtEntry = Number(entry.hoursAtEntry);
+    if ((status === "logged" || !status) && source === "machine" && Number.isFinite(hoursAtEntry) && hoursAtEntry >= 0){
+      return true;
+    }
+    return false;
   };
 
   const addTaskEventForDate = (dateKey, info)=>{
@@ -12030,13 +12041,16 @@ function computeCostModel(){
         trashId: entry.id != null ? String(entry.id) : null
       };
       const completedDates = Array.isArray(payload.completedDates) ? payload.completedDates : [];
+      const completedDateKeys = new Set();
       completedDates.forEach(dateVal => {
         const key = toHistoryDateKey(dateVal);
-        if (key) addTaskEventForDate(key, baseInfo);
+        if (!key) return;
+        completedDateKeys.add(key);
+        addTaskEventForDate(key, baseInfo);
       });
       const manualHistory = Array.isArray(payload.manualHistory) ? payload.manualHistory : [];
       manualHistory.forEach(item => {
-        if (!item || !isCompletedMaintenanceHistoryStatus(item.status)) return;
+        if (!shouldIncludeManualHistoryEntry(item, completedDateKeys)) return;
         const key = toHistoryDateKey(item.dateISO);
         if (key) addTaskEventForDate(key, baseInfo);
       });
@@ -12107,13 +12121,16 @@ function computeCostModel(){
     const pushHistory = (sourceTask)=>{
       if (!sourceTask) return;
       const completedDates = Array.isArray(sourceTask.completedDates) ? sourceTask.completedDates : [];
+      const completedDateKeys = new Set();
       completedDates.forEach(dateVal => {
         const key = toHistoryDateKey(dateVal);
-        if (key) addTaskEventForDate(key, baseInfo);
+        if (!key) return;
+        completedDateKeys.add(key);
+        addTaskEventForDate(key, baseInfo);
       });
       const manualHistory = Array.isArray(sourceTask.manualHistory) ? sourceTask.manualHistory : [];
       manualHistory.forEach(entry => {
-        if (!entry || !isCompletedMaintenanceHistoryStatus(entry.status)) return;
+        if (!shouldIncludeManualHistoryEntry(entry, completedDateKeys)) return;
         const key = toHistoryDateKey(entry.dateISO);
         if (key) addTaskEventForDate(key, baseInfo);
       });
