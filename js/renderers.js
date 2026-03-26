@@ -13067,21 +13067,24 @@ function computeCostModel(){
         ? `${categoryName} · ${projectNumber}`
         : categoryName;
 
-      const storedGainLossRaw = Number(job?.gainLoss ?? job?.profitLoss);
-      const efficiencyGainLossRaw = Number(job?.efficiency?.gainLoss);
       const derivedGainLossRaw = Number(eff?.gainLoss);
+      const efficiencyGainLossRaw = Number(job?.efficiency?.gainLoss);
+      const storedGainLossRaw = Number(job?.gainLoss);
+      const storedProfitRaw = Number(job?.profitLoss);
       const totalChargeRaw = Number(job?.totalCharge ?? job?.revenue ?? job?.invoiceTotal);
       const totalCostRaw = Number(job?.totalCost);
       const revenueDeltaRaw = (Number.isFinite(totalChargeRaw) && Number.isFinite(totalCostRaw))
         ? (totalChargeRaw - totalCostRaw)
         : NaN;
-      const cutCost = Number.isFinite(storedGainLossRaw)
-        ? storedGainLossRaw
+      const cutCost = Number.isFinite(derivedGainLossRaw)
+        ? derivedGainLossRaw
         : (Number.isFinite(efficiencyGainLossRaw)
           ? efficiencyGainLossRaw
-          : (Number.isFinite(derivedGainLossRaw)
-            ? derivedGainLossRaw
-            : (Number.isFinite(revenueDeltaRaw) ? revenueDeltaRaw : 0)));
+          : (Number.isFinite(storedGainLossRaw)
+            ? storedGainLossRaw
+            : (Number.isFinite(storedProfitRaw)
+              ? storedProfitRaw
+              : (Number.isFinite(revenueDeltaRaw) ? revenueDeltaRaw : 0))));
 
       return {
         id: String(job.id || "cut"),
@@ -13127,32 +13130,8 @@ function computeCostModel(){
     ensureWeek(currentWeekStart);
   }
 
-  const safeDailyCutHours = Array.isArray(dailyCutHours) ? dailyCutHours : [];
   weeklyMap.forEach(report => {
-    const weekStart = parseDateLocal(report.weekStartISO);
-    const weekEnd = parseDateLocal(report.weekEndISO);
-    if (!(weekStart instanceof Date) || Number.isNaN(weekStart.getTime()) || !(weekEnd instanceof Date) || Number.isNaN(weekEnd.getTime())){
-      report.totalCutHours = report.cutItems.reduce((sum, item) => sum + (Number(item?.hours) > 0 ? Number(item.hours) : 0), 0);
-      return;
-    }
-    const startMs = weekStart.getTime();
-    const endMs = weekEnd.getTime();
-    let weeklyHoursFromCalendar = 0;
-    safeDailyCutHours.forEach(entry => {
-      if (!entry) return;
-      const date = parseDateLocal(entry.dateISO || entry.date);
-      if (!(date instanceof Date) || Number.isNaN(date.getTime())) return;
-      const t = date.getTime();
-      if (t < startMs || t > endMs) return;
-      const hrs = Number(entry.hours);
-      if (!Number.isFinite(hrs) || hrs <= 0) return;
-      weeklyHoursFromCalendar += hrs;
-    });
-    if (weeklyHoursFromCalendar > 0){
-      report.totalCutHours = weeklyHoursFromCalendar;
-    } else {
-      report.totalCutHours = report.cutItems.reduce((sum, item) => sum + (Number(item?.hours) > 0 ? Number(item.hours) : 0), 0);
-    }
+    report.totalCutHours = report.cutItems.reduce((sum, item) => sum + (Number(item?.hours) > 0 ? Number(item.hours) : 0), 0);
   });
 
   const weeklyReports = Array.from(weeklyMap.values())
