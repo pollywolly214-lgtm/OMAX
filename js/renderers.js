@@ -12997,48 +12997,6 @@ function computeCostModel(){
     }, `occurrence__${item.taskId || idx}__${item.resolvedISO ? String(item.resolvedISO).slice(0, 10) : ymd(item.resolvedAt)}`);
   });
 
-  maintenanceHistory.forEach((entry, idx)=>{
-    if (!entry || !(entry.date instanceof Date) || Number.isNaN(entry.date.getTime())) return;
-    const weekStart = startOfWeekMonday(entry.date);
-    const bucket = ensureWeek(weekStart);
-    if (!bucket) return;
-    const tasks = Array.isArray(entry.tasks) ? entry.tasks.filter(Boolean) : [];
-    if (tasks.length){
-      const pricedTotal = tasks.reduce((sum, task)=>{
-        const v = Number(task?.unitPrice);
-        return sum + (Number.isFinite(v) && v > 0 ? v : 0);
-      }, 0);
-      const fallback = 1 / tasks.length;
-      tasks.forEach((task, taskIndex)=>{
-        const unit = Number(task?.unitPrice);
-        const share = (pricedTotal > 0 && Number.isFinite(unit) && unit > 0) ? (unit / pricedTotal) : fallback;
-        const allocatedCost = Math.max(0, (Number(entry.cost) || 0) * share);
-        const directCost = Number.isFinite(unit) && unit > 0 ? unit : 0;
-        const cost = Math.max(allocatedCost, directCost);
-        registerWeeklyMaintenanceItem(bucket, {
-          id: `m_${entry.dateISO || idx}_${taskIndex}`,
-          dateISO: entry.dateISO || null,
-          name: task?.name || "Maintenance task",
-          cost,
-          costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
-          taskLabel: task?.mode === "asreq" ? "As required" : "Interval",
-          partNumber: task?.partNumber || ""
-        }, `history__${entry.dateISO || idx}__${task?.originalId || task?.id || taskIndex}`);
-      });
-    } else {
-      const cost = Math.max(0, Number(entry.cost) || 0);
-      registerWeeklyMaintenanceItem(bucket, {
-        id: `m_${entry.dateISO || idx}`,
-        dateISO: entry.dateISO || null,
-        name: "Maintenance allocation",
-        cost,
-        costLabel: formatterCurrency(cost, { decimals: cost < 1000 ? 2 : 0 }),
-        taskLabel: "Allocated",
-        partNumber: ""
-      }, `history__${entry.dateISO || idx}__allocation`);
-    }
-  });
-
   taskEventsByDate.forEach((tasksOnDate, dateISO) => {
     const occurrenceDate = parseDateLocal(dateISO);
     if (!(occurrenceDate instanceof Date) || Number.isNaN(occurrenceDate.getTime())) return;
@@ -13065,52 +13023,66 @@ function computeCostModel(){
   const completedCutsForWeekly = (Array.isArray(completedCuttingJobs) ? completedCuttingJobs : [])
     .map(job => {
       if (!job) return null;
-      const completedDate = job.completedAtISO ? (parseDateLocal(job.completedAtISO) || new Date(job.completedAtISO)) : null;
-      const date = (completedDate instanceof Date && !Number.isNaN(completedDate.getTime())) ? completedDate : null;
+      const completedISO = job.completedAtISO || job.completedISO || job.doneISO || job.finishedISO || "";
+      const completedDate = completedISO ? (parseDateLocal(completedISO) || new Date(completedISO)) : null;
+      const fallbackDateISO = job.dueISO || job.startISO || "";
+      const fallbackDate = fallbackDateISO ? (parseDateLocal(fallbackDateISO) || new Date(fallbackDateISO)) : null;
+      const date = (completedDate instanceof Date && !Number.isNaN(completedDate.getTime()))
+        ? completedDate
+        : ((fallbackDate instanceof Date && !Number.isNaN(fallbackDate.getTime())) ? fallbackDate : null);
       if (!date) return null;
+
       const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
       const manualLogs = Array.isArray(job.manualLogs) ? job.manualLogs : [];
       const latestManualLog = manualLogs
         .filter(entry => Number.isFinite(Number(entry?.completedHours)) && Number(entry.completedHours) >= 0)
         .sort((a, b) => String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")))
         .pop() || null;
-      const costRateRaw = Number(job?.costRate ?? eff?.costRate);
-      const chargeRateRaw = Number(job?.chargeRate ?? eff?.chargeRate);
-      const estimateHoursRawForRate = Number(job.estimateHours);
-      const fallbackCostRate = Number.isFinite(estimateHoursRawForRate) && estimateHoursRawForRate > 0
-        ? (JOB_BASE_COST_PER_HOUR + ((Number(job?.materialCost) || 0) * (Number(job?.materialQty) || 0) / estimateHoursRawForRate))
-        : JOB_BASE_COST_PER_HOUR;
+
       const catId = job.cat != null ? String(job.cat) : rootFolderId;
       const categoryName = resolveCategoryName(catId);
       const actualHoursRaw = Number(job.actualHours);
       const manualHoursRaw = Number(latestManualLog?.completedHours);
+      const durationHoursRaw = Number(job.durationHours);
+      const completedHoursRaw = Number(job.completedHours);
       const storedEffHoursRaw = Number(job?.efficiency?.actualHours);
       const effHoursRaw = Number(eff?.actualHours);
       const estimateHoursRaw = Number(job.estimateHours);
-      const cutHours = Number.isFinite(actualHoursRaw) && actualHoursRaw >= 0
+      const cutHours = Number.isFinite(actualHoursRaw) && actualHoursRaw > 0
         ? actualHoursRaw
-        : (Number.isFinite(manualHoursRaw) && manualHoursRaw >= 0
+        : (Number.isFinite(manualHoursRaw) && manualHoursRaw > 0
           ? manualHoursRaw
-          : (Number.isFinite(storedEffHoursRaw) && storedEffHoursRaw >= 0
-            ? storedEffHoursRaw
-            : (Number.isFinite(effHoursRaw) && effHoursRaw >= 0
-              ? effHoursRaw
-              : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0))));
+          : (Number.isFinite(durationHoursRaw) && durationHoursRaw > 0
+            ? durationHoursRaw
+            : (Number.isFinite(completedHoursRaw) && completedHoursRaw > 0
+              ? completedHoursRaw
+              : (Number.isFinite(storedEffHoursRaw) && storedEffHoursRaw > 0
+                ? storedEffHoursRaw
+                : (Number.isFinite(effHoursRaw) && effHoursRaw > 0
+                  ? effHoursRaw
+                  : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0))))));
+
       const projectNumber = String(job?.projectNumber || "").replace(/[^0-9]/g, "").slice(0, 8);
       const categoryDisplay = projectNumber
         ? `${categoryName} · ${projectNumber}`
         : categoryName;
-      const storedGainLossRaw = Number(job?.gainLoss);
+
+      const storedGainLossRaw = Number(job?.gainLoss ?? job?.profitLoss);
       const efficiencyGainLossRaw = Number(job?.efficiency?.gainLoss);
       const derivedGainLossRaw = Number(eff?.gainLoss);
-      const effectiveCostRate = Number.isFinite(costRateRaw) && costRateRaw >= 0 ? costRateRaw : fallbackCostRate;
-      const effectiveChargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
-      const fallbackGainLoss = cutHours * (effectiveChargeRate - effectiveCostRate);
+      const totalChargeRaw = Number(job?.totalCharge ?? job?.revenue ?? job?.invoiceTotal);
+      const totalCostRaw = Number(job?.totalCost);
+      const revenueDeltaRaw = (Number.isFinite(totalChargeRaw) && Number.isFinite(totalCostRaw))
+        ? (totalChargeRaw - totalCostRaw)
+        : NaN;
       const cutCost = Number.isFinite(storedGainLossRaw)
         ? storedGainLossRaw
         : (Number.isFinite(efficiencyGainLossRaw)
           ? efficiencyGainLossRaw
-          : (Number.isFinite(derivedGainLossRaw) ? derivedGainLossRaw : fallbackGainLoss));
+          : (Number.isFinite(derivedGainLossRaw)
+            ? derivedGainLossRaw
+            : (Number.isFinite(revenueDeltaRaw) ? revenueDeltaRaw : 0)));
+
       return {
         id: String(job.id || "cut"),
         date,
