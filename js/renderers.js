@@ -13086,6 +13086,7 @@ function computeCostModel(){
               ? storedProfitRaw
               : (Number.isFinite(revenueDeltaRaw) ? revenueDeltaRaw : 0))));
 
+      const normalizedCutCost = Number.isFinite(cutCost) ? Math.abs(cutCost) : 0;
       return {
         id: String(job.id || "cut"),
         date,
@@ -13095,7 +13096,7 @@ function computeCostModel(){
         categoryDisplay,
         projectNumber,
         categoryId: catId,
-        cost: cutCost,
+        cost: normalizedCutCost,
         hours: cutHours
       };
     })
