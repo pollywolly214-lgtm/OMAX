@@ -4754,7 +4754,8 @@ function openLogHistoryModal(){
     window.RENDER_TOTAL = RENDER_TOTAL;
     window.RENDER_DELTA = RENDER_DELTA;
     const dailyUpdated = recomputeDailyCutHoursFromTotalHistory(entries);
-    saveCloudDebounced();
+    if (typeof saveCloudNow === "function") saveCloudNow();
+    else saveCloudDebounced();
     toast("Logged hours updated");
     closeLogHistoryModal();
     renderDashboard();
@@ -5271,7 +5272,8 @@ function renderDashboard(){
     const idx = arr.findIndex(dt => dt.dateISO === dateISO);
     if (idx < 0) return;
     arr.splice(idx,1);
-    saveCloudDebounced();
+    if (typeof saveCloudNow === "function") saveCloudNow();
+    else saveCloudDebounced();
     toast("Down time removed");
     refreshDownTimeList();
     renderCalendar();
@@ -5433,7 +5435,8 @@ function renderDashboard(){
     const entry = arr.find(item => String(item.id) === String(id));
     if (!entry) return;
     entry.completed = !entry.completed;
-    saveCloudDebounced();
+    if (typeof saveCloudNow === "function") saveCloudNow();
+    else saveCloudDebounced();
     toast(entry.completed ? "Garnet cleaning completed" : "Marked as scheduled");
     refreshGarnetList();
     renderCalendar();
@@ -5936,7 +5939,8 @@ function renderDashboard(){
     });
 
     setContextDate(calendarDateISO);
-    saveCloudDebounced();
+    if (typeof saveCloudNow === "function") saveCloudNow();
+    else saveCloudDebounced();
     toast(message);
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
@@ -5978,7 +5982,8 @@ function renderDashboard(){
     const list = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = []);
     list.unshift(task);
     setContextDate(targetISO);
-    saveCloudDebounced();
+    if (typeof saveCloudNow === "function") saveCloudNow();
+    else saveCloudDebounced();
     toast("One-time task added to the calendar");
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
@@ -6025,7 +6030,8 @@ function renderDashboard(){
       message = "As-required task linked from Maintenance Settings";
     }
     setContextDate(targetISO);
-    saveCloudDebounced();
+    if (typeof saveCloudNow === "function") saveCloudNow();
+    else saveCloudDebounced();
     toast(message);
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
