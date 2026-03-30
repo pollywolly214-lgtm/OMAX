@@ -1036,7 +1036,8 @@ function completeTask(taskId){
   if (!todayKey) return;
   const changed = markCalendarTaskComplete(meta, todayKey);
   if (changed){
-    saveCloudDebounced();
+    if (typeof saveCloudNow === "function") saveCloudNow();
+    else saveCloudDebounced();
     toast("Task completed");
     route();
   }
@@ -1164,7 +1165,8 @@ function showTaskBubble(taskId, anchor, options = {}){
     const parsed = Number(nextRaw);
     const changed = setFamilyOccurrenceHours(task, targetKey, Number.isFinite(parsed) && parsed > 0 ? parsed : null);
     if (changed){
-      saveCloudDebounced();
+      if (typeof saveCloudNow === "function") saveCloudNow();
+      else saveCloudDebounced();
       toast((Number.isFinite(parsed) && parsed > 0) ? "Occurrence time saved" : "Occurrence time removed");
       hideBubble();
       route();
@@ -1178,7 +1180,8 @@ function showTaskBubble(taskId, anchor, options = {}){
     if (next === null || next === undefined) return;
     const changed = setFamilyOccurrenceNote(task, targetKey, next);
     if (changed){
-      saveCloudDebounced();
+      if (typeof saveCloudNow === "function") saveCloudNow();
+      else saveCloudDebounced();
       toast((next || "").trim() ? "Occurrence note saved" : "Occurrence note removed");
       hideBubble();
       route();
@@ -1188,7 +1191,8 @@ function showTaskBubble(taskId, anchor, options = {}){
   b.querySelector("[data-bbl-complete]")?.addEventListener("click", ()=>{
     const changed = markCalendarTaskComplete(meta, targetKey);
     if (changed){
-      saveCloudDebounced();
+      if (typeof saveCloudNow === "function") saveCloudNow();
+      else saveCloudDebounced();
       toast("Task marked complete");
       hideBubble();
       route();
@@ -1198,7 +1202,8 @@ function showTaskBubble(taskId, anchor, options = {}){
   b.querySelector("[data-bbl-uncomplete]")?.addEventListener("click", ()=>{
     const changed = unmarkCalendarTaskComplete(meta, targetKey);
     if (changed){
-      saveCloudDebounced();
+      if (typeof saveCloudNow === "function") saveCloudNow();
+      else saveCloudDebounced();
       toast("Completion removed");
       hideBubble();
       route();
@@ -1216,7 +1221,8 @@ function showTaskBubble(taskId, anchor, options = {}){
     if (!shouldRemove) return;
     const changed = removeCalendarTaskOccurrences(meta, targetKey, scope);
     if (changed){
-      saveCloudDebounced();
+      if (typeof saveCloudNow === "function") saveCloudNow();
+      else saveCloudDebounced();
       const toastMessage = scope === "future"
         ? "Current and future occurrences removed"
         : scope === "all"
@@ -1244,7 +1250,8 @@ function showTaskBubble(taskId, anchor, options = {}){
       console.warn("Failed to record deleted task from calendar", err);
     }
     if (removeCalendarTaskFamily(meta)){
-      saveCloudDebounced();
+      if (typeof saveCloudNow === "function") saveCloudNow();
+      else saveCloudDebounced();
       toast("Task removed");
       hideBubble();
       route();
