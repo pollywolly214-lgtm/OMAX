@@ -15808,7 +15808,8 @@ function renderJobs(){
     }
     if (e.target.matches("input[data-job-file-input]")){
       const id = e.target.getAttribute("data-job-file-input");
-      const j = cuttingJobs.find(x=>x.id===id);
+      const idStr = String(id || "");
+      const j = cuttingJobs.find(x => String(x?.id) === idStr);
       if (!j){ e.target.value = ""; return; }
       const attachments = await filesToAttachments(e.target.files);
       e.target.value = "";
@@ -16363,7 +16364,8 @@ function renderJobs(){
     const linkJobFile = e.target.closest("[data-link-job-file]");
     if (linkJobFile){
       const id = linkJobFile.getAttribute("data-link-job-file");
-      const j = cuttingJobs.find(x=>x.id===id);
+      const idStr = String(id || "");
+      const j = cuttingJobs.find(x => String(x?.id) === idStr);
       if (!j) return;
       try {
         const picked = await window.oneDrivePicker.openOneDriveDxfPicker();
@@ -16396,7 +16398,8 @@ function renderJobs(){
     if (editFileLink){
       const id = editFileLink.getAttribute("data-edit-file-link");
       const idx = Number(editFileLink.getAttribute("data-file-index"));
-      const j = cuttingJobs.find(x=>x.id===id);
+      const idStr = String(id || "");
+      const j = cuttingJobs.find(x => String(x?.id) === idStr);
       const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null;
       if (!file) return;
       const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || "");
@@ -16413,7 +16416,8 @@ function renderJobs(){
     if (removeFile){
       const id = removeFile.getAttribute("data-remove-file");
       const idx = Number(removeFile.getAttribute("data-file-index"));
-      const j = cuttingJobs.find(x=>x.id===id);
+      const idStr = String(id || "");
+      const j = cuttingJobs.find(x => String(x?.id) === idStr);
       if (j && Array.isArray(j.files) && idx>=0 && idx<j.files.length){
         j.files.splice(idx,1);
         saveCloudDebounced();
@@ -16441,7 +16445,8 @@ function renderJobs(){
       closeActionMenu();
       closeHistoryActionMenu();
       const id = rm.getAttribute("data-remove-job");
-      const job = cuttingJobs.find(x=>x.id===id);
+      const idStr = String(id || "");
+      const job = cuttingJobs.find(x => String(x?.id) === idStr);
       if (job){
         try {
           if (typeof recordDeletedItem === "function") recordDeletedItem("job", job, {});
@@ -16449,7 +16454,7 @@ function renderJobs(){
           console.warn("Failed to record deleted job", err);
         }
       }
-      cuttingJobs = cuttingJobs.filter(x=>x.id!==id);
+      cuttingJobs = cuttingJobs.filter(x => String(x?.id) !== idStr);
       window.cuttingJobs = cuttingJobs;
       normalizeAllPriorities();
       saveCloudDebounced(); toast("Removed"); renderJobs();
@@ -16481,8 +16486,9 @@ function renderJobs(){
       closeFileMenu();
       closeActionMenu();
       const id = sv.getAttribute("data-save-job");
-      const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
-      const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${id}"]`)?.value;
+      const idStr = String(id || "");
+      const j  = cuttingJobs.find(x => String(x?.id) === idStr); if (!j) return;
+      const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${idStr}"]`)?.value;
       const chargeRaw = qs("chargeRate");
       const chargeVal = chargeRaw === "" || chargeRaw == null ? null : Number(chargeRaw);
       if (chargeVal != null && (!Number.isFinite(chargeVal) || chargeVal < 0)){ toast("Enter a valid charge rate."); return; }
@@ -16500,7 +16506,7 @@ function renderJobs(){
       j.dueISO   = qs("dueISO")   || j.dueISO;
       const projectInput = String(qs("projectNumber") || "").replace(/[^0-9]/g, "").slice(0, 8);
       if (projectInput) j.projectNumber = projectInput;
-      j.notes    = content.querySelector(`[data-j="notes"][data-id="${id}"]`)?.value || j.notes || "";
+      j.notes    = content.querySelector(`[data-j="notes"][data-id="${idStr}"]`)?.value || j.notes || "";
       j.chargeRate = chargeToSet;
       const priorityRaw = qs("priority");
       if (priorityRaw != null){
@@ -16518,7 +16524,7 @@ function renderJobs(){
       }
       reorderPriorities(j.id, j.priority);
       if (catVal && catVal !== "__new__") j.cat = catVal;
-      editingJobs.delete(id);
+      editingJobs.delete(idStr);
       saveCloudDebounced();
       toast("saved");
       renderJobs();
@@ -16533,12 +16539,13 @@ function renderJobs(){
       closeFileMenu();
       closeActionMenu();
       const id = lg.getAttribute("data-log-job");
-      const anchor   = content.querySelector(`tr[data-job-row="${id}"]`);
-      const existing = content.querySelector(`tr[data-log-row="${id}"]`);
+      const idStr = String(id || "");
+      const anchor   = content.querySelector(`tr[data-job-row="${idStr}"]`);
+      const existing = content.querySelector(`tr[data-log-row="${idStr}"]`);
       if (existing){ existing.remove(); return; }
       if (!anchor) return;
 
-      const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
+      const j  = cuttingJobs.find(x => String(x?.id) === idStr); if (!j) return;
       const lm = lastManual(j);
       const spentSuggest = suggestSpent(j);
       const completedSoFar = lm ? Number(lm.completedHours)||0 : 0;
@@ -16547,7 +16554,7 @@ function renderJobs(){
 
       const trForm = document.createElement("tr");
       trForm.className = "manual-log-row";
-      trForm.setAttribute("data-log-row", id);
+      trForm.setAttribute("data-log-row", idStr);
       const columnCount = content.querySelector(".job-table thead tr")?.children.length || 15;
       trForm.innerHTML = `
         <td colspan="${columnCount}">
@@ -16559,18 +16566,18 @@ function renderJobs(){
 
             <label style="display:block">
               <span class="muted">Add time spent (hrs)</span>
-              <input type="number" step="0.1" min="0" id="manSpent_${id}" value="${spentSuggest.toFixed(1)}">
+              <input type="number" step="0.1" min="0" id="manSpent_${idStr}" value="${spentSuggest.toFixed(1)}">
             </label>
             <div style="display:flex; gap:8px; align-items:center">
-              <button data-log-apply-spent="${id}">Apply spent</button>
+              <button data-log-apply-spent="${idStr}">Apply spent</button>
             </div>
 
             <label style="display:block">
               <span class="muted">Set time remaining (hrs)</span>
-              <input type="number" step="0.1" min="0" id="manRemain_${id}" value="">
+              <input type="number" step="0.1" min="0" id="manRemain_${idStr}" value="">
             </label>
             <div style="display:flex; gap:8px; align-items:center">
-              <button data-log-apply-remain="${id}">Apply remaining</button>
+              <button data-log-apply-remain="${idStr}">Apply remaining</button>
             </div>
           </div>
         </td>`;
@@ -16583,8 +16590,9 @@ function renderJobs(){
       closeFileMenu();
       closeActionMenu();
       const id = apSpent.getAttribute("data-log-apply-spent");
-      const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
-      const add = Number(content.querySelector(`#manSpent_${id}`)?.value);
+      const idStr = String(id || "");
+      const j  = cuttingJobs.find(x => String(x?.id) === idStr); if (!j) return;
+      const add = Number(content.querySelector(`#manSpent_${idStr}`)?.value);
       if (!isFinite(add) || add < 0){ toast("Enter a valid spent hours."); return; }
 
       const lm = lastManual(j);
@@ -16607,8 +16615,9 @@ function renderJobs(){
       closeFileMenu();
       closeActionMenu();
       const id = apRemain.getAttribute("data-log-apply-remain");
-      const j  = cuttingJobs.find(x=>x.id===id); if (!j) return;
-      const remain = Number(content.querySelector(`#manRemain_${id}`)?.value);
+      const idStr = String(id || "");
+      const j  = cuttingJobs.find(x => String(x?.id) === idStr); if (!j) return;
+      const remain = Number(content.querySelector(`#manRemain_${idStr}`)?.value);
       const est    = Number(j.estimateHours)||0;
       if (!isFinite(remain) || remain < 0){ toast("Enter valid remaining hours."); return; }
 
