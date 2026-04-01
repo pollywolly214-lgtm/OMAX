@@ -499,6 +499,8 @@ let FB = {
 let firebaseInitStarted = false;
 let firebaseSettingsApplied = false;
 let workspaceMetadataWritesBlocked = false;
+let workspaceStateUnsubscribe = null;
+let suppressNextWorkspaceSnapshot = false;
 
 function applyFirestoreSettings(db){
   if (!db || firebaseSettingsApplied) return;
@@ -669,6 +671,11 @@ async function initFirebase(){
   FB.auth.onAuthStateChanged(async (user)=>{
     FB.user = user || null;
     workspaceMetadataWritesBlocked = false;
+    if (typeof workspaceStateUnsubscribe === "function"){
+      try { workspaceStateUnsubscribe(); } catch (err) { console.warn("Failed to stop workspace sync listener", err); }
+      workspaceStateUnsubscribe = null;
+    }
+    suppressNextWorkspaceSnapshot = false;
     if (user){
       if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
       if (btnIn)  btnIn.style.display  = "none";
@@ -685,6 +692,7 @@ async function initFirebase(){
       FB.ready = true;
       try { setupDebugPanel(); } catch (e) {}
       await loadFromCloud();
+      startWorkspaceStateListener();
       route();
     }else{
       FB.ready = false;
@@ -700,6 +708,34 @@ async function initFirebase(){
       if (btnOut) btnOut.style.display = "none";
       renderSignedOut();
     }
+  });
+}
+
+function startWorkspaceStateListener(){
+  if (!FB.ready || !FB.docRef || typeof FB.docRef.onSnapshot !== "function") return;
+  if (typeof workspaceStateUnsubscribe === "function") return;
+  workspaceStateUnsubscribe = FB.docRef.onSnapshot((snap)=>{
+    if (!snap || !snap.exists) return;
+    if (suppressNextWorkspaceSnapshot){
+      suppressNextWorkspaceSnapshot = false;
+      return;
+    }
+    const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
+    if (!stateHasMeaningfulData(incoming)) return;
+    try{
+      const incomingJSON = JSON.stringify(incoming);
+      const currentJSON = JSON.stringify(snapshotState());
+      if (incomingJSON === currentJSON) return;
+    }catch (err){
+      console.warn("Failed to compare workspace snapshots", err);
+    }
+    adoptState(incoming || {});
+    if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
+    if (typeof route === "function"){
+      try { route(); } catch (err) { console.warn("Route refresh after workspace sync failed", err); }
+    }
+  }, (err)=>{
+    console.warn("Workspace realtime sync listener error", err);
   });
 }
 
@@ -2871,6 +2907,7 @@ const saveCloudInternal = debounce(async ()=>{
   try{
     const snap = snapshotState();
     window.__lastSnapshot = snap;
+    suppressNextWorkspaceSnapshot = true;
     await FB.docRef.set(snap, { merge:true });
     if (window.DEBUG_MODE){
       const el = document.getElementById("dbgSnap");
