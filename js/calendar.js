@@ -1689,6 +1689,7 @@ function projectIntervalDueDates(task, options = {}){
   const maxOccurrences = Number.isFinite(maxOccurrencesRaw) && maxOccurrencesRaw > 0
     ? Math.floor(maxOccurrencesRaw)
     : null;
+  const includePastOccurrences = options.includePastOccurrences !== false;
 
   const toDayStart = (value)=>{
     const key = normalizeDateKey(value);
@@ -1830,8 +1831,11 @@ function projectIntervalDueDates(task, options = {}){
   }
 
   events.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
-  if (maxOccurrences != null) return events.slice(0, maxOccurrences);
-  return events;
+  const visibleEvents = includePastOccurrences
+    ? events
+    : events.filter(event => event && event.dueDate instanceof Date && event.dueDate.getTime() >= todayTime);
+  if (maxOccurrences != null) return visibleEvents.slice(0, maxOccurrences);
+  return visibleEvents;
 }
 
 function renderCalendar(){
@@ -2033,7 +2037,8 @@ function renderCalendar(){
       monthsAhead: 3,
       excludeDates: skipDates,
       minOccurrences: 1,
-      maxOccurrences: 1
+      maxOccurrences: 1,
+      includePastOccurrences: false
     });
     if (projections.length){
       const pred = projections[0];

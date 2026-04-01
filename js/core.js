@@ -295,6 +295,7 @@ function getAverageDailyCutHours(windowDaysOverride = null){
 
   let eligibleDays = 0;
   if (dailyMap.size){
+    let coveredDays = 0;
     let totalHours = 0;
     const cursor = new Date(start);
     while (cursor <= today){
@@ -303,13 +304,17 @@ function getAverageDailyCutHours(windowDaysOverride = null){
       const include = !excludeWeekends || (day !== 0 && day !== 6);
       if (include){
         eligibleDays += 1;
-        totalHours += (dailyMap.get(key) || 0);
+        if (dailyMap.has(key)){
+          coveredDays += 1;
+          totalHours += (dailyMap.get(key) || 0);
+        }
       }
       cursor.setDate(cursor.getDate() + 1);
     }
-    if (!eligibleDays) return null;
-    const dailyRate = totalHours / eligibleDays;
-    return Number.isFinite(dailyRate) && dailyRate > 0 ? dailyRate : null;
+    if (eligibleDays > 0 && coveredDays === eligibleDays){
+      const dailyRate = totalHours / eligibleDays;
+      return Number.isFinite(dailyRate) && dailyRate > 0 ? dailyRate : null;
+    }
   }
 
   const totals = (Array.isArray(window.totalHistory) ? window.totalHistory : [])
