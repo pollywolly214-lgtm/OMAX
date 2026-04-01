@@ -909,7 +909,7 @@ function expectedRootSignatureFromJobs(){
     });
   };
   take(window.cuttingJobs);
-  take(window.completedJobs);
+  take(window.completedCuttingJobs);
   return signatures.size ? Array.from(signatures)[0] : "";
 }
 
