@@ -727,10 +727,12 @@ function startWorkspaceStateListener(){
   const localClientId = getCloudSyncClientId();
   workspaceStateUnsubscribe = FB.docRef.onSnapshot((snap)=>{
     if (!snap || !snap.exists) return;
+    if (snap.metadata && snap.metadata.hasPendingWrites) return;
     const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
     if (!stateHasMeaningfulData(incoming)) return;
     const meta = incoming && typeof incoming.syncMeta === "object" ? incoming.syncMeta : null;
     const incomingRev = Number(meta?.rev || 0);
+    if (!incomingRev) return;
     const incomingBy = String(meta?.updatedBy || "");
     if (incomingRev && incomingRev <= lastAppliedCloudRevision) return;
     if (incomingRev && incomingBy === localClientId && incomingRev === lastAppliedCloudRevision) return;
