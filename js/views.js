@@ -2319,7 +2319,7 @@ function viewJobs(){
       const content = String(savedPreview.content || "").trim();
       if (content) return { name, href, mode, content };
     }
-    if (/^https?:\/\//i.test(previewUrl)) return { name, href: href || previewUrl, mode: "image", content: previewUrl };
+    if (/^data:image\//i.test(previewUrl) || /^https?:\/\//i.test(previewUrl)) return { name, href: href || previewUrl, mode: "image", content: previewUrl };
     if (!href) return { name, href: "", mode: "message", content: "Preview unavailable" };
     if (ext === ".svg") return { name, href, mode: "image", content: href };
     if (/^data:image\//i.test(href)) return { name, href, mode: "image", content: href };

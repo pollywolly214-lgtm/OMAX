@@ -1459,7 +1459,7 @@ async function resolveAttachmentPreview(file){
   const href = String(file.dataUrl || file.url || "").trim();
   const previewUrl = String(file.previewUrl || "").trim();
 
-  if (/^https?:\/\//i.test(previewUrl)){
+  if (/^data:image\//i.test(previewUrl) || /^https?:\/\//i.test(previewUrl)){
     file.preview = { mode: "image", content: previewUrl };
     return true;
   }
