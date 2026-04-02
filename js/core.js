@@ -499,6 +499,18 @@ let FB = {
 let firebaseInitStarted = false;
 let firebaseSettingsApplied = false;
 let workspaceMetadataWritesBlocked = false;
+let workspaceStateUnsubscribe = null;
+let lastAppliedCloudRevision = 0;
+const CLOUD_SYNC_CLIENT_KEY = "cloud_sync_client_id_v1";
+
+function getCloudSyncClientId(){
+  if (typeof window === "undefined" || !window.localStorage) return "unknown_client";
+  let id = String(window.localStorage.getItem(CLOUD_SYNC_CLIENT_KEY) || "").trim();
+  if (id) return id;
+  id = `client_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  try { window.localStorage.setItem(CLOUD_SYNC_CLIENT_KEY, id); } catch (_err){ }
+  return id;
+}
 
 function applyFirestoreSettings(db){
   if (!db || firebaseSettingsApplied) return;
@@ -669,6 +681,11 @@ async function initFirebase(){
   FB.auth.onAuthStateChanged(async (user)=>{
     FB.user = user || null;
     workspaceMetadataWritesBlocked = false;
+    if (typeof workspaceStateUnsubscribe === "function"){
+      try { workspaceStateUnsubscribe(); } catch (err) { console.warn("Failed to stop workspace sync listener", err); }
+      workspaceStateUnsubscribe = null;
+    }
+    lastAppliedCloudRevision = 0;
     if (user){
       if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
       if (btnIn)  btnIn.style.display  = "none";
@@ -685,6 +702,7 @@ async function initFirebase(){
       FB.ready = true;
       try { setupDebugPanel(); } catch (e) {}
       await loadFromCloud();
+      startWorkspaceStateListener();
       route();
     }else{
       FB.ready = false;
@@ -700,6 +718,32 @@ async function initFirebase(){
       if (btnOut) btnOut.style.display = "none";
       renderSignedOut();
     }
+  });
+}
+
+function startWorkspaceStateListener(){
+  if (!FB.ready || !FB.docRef || typeof FB.docRef.onSnapshot !== "function") return;
+  if (typeof workspaceStateUnsubscribe === "function") return;
+  const localClientId = getCloudSyncClientId();
+  workspaceStateUnsubscribe = FB.docRef.onSnapshot((snap)=>{
+    if (!snap || !snap.exists) return;
+    if (snap.metadata && snap.metadata.hasPendingWrites) return;
+    const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
+    if (!stateHasMeaningfulData(incoming)) return;
+    const meta = incoming && typeof incoming.syncMeta === "object" ? incoming.syncMeta : null;
+    const incomingRev = Number(meta?.rev || 0);
+    if (!incomingRev) return;
+    const incomingBy = String(meta?.updatedBy || "");
+    if (incomingRev && incomingRev <= lastAppliedCloudRevision) return;
+    if (incomingRev && incomingBy === localClientId && incomingRev === lastAppliedCloudRevision) return;
+    adoptState(incoming || {});
+    if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
+    if (incomingRev > 0) lastAppliedCloudRevision = incomingRev;
+    if (typeof route === "function"){
+      try { route(); } catch (err) { console.warn("Route refresh after workspace sync failed", err); }
+    }
+  }, (err)=>{
+    console.warn("Workspace realtime sync listener error", err);
   });
 }
 
@@ -2005,7 +2049,12 @@ function snapshotState(){
     jobFolders: snapshotJobFolders(),
     dashboardLayout: cloneStructured(dashLayoutSource) || {},
     costLayout: cloneStructured(costLayoutSource) || {},
-    jobLayout: cloneStructured(jobLayoutSource) || {}
+    jobLayout: cloneStructured(jobLayoutSource) || {},
+    syncMeta: {
+      rev: Math.max(Date.now(), (Number(lastAppliedCloudRevision) || 0) + 1),
+      updatedAtISO: new Date().toISOString(),
+      updatedBy: getCloudSyncClientId()
+    }
   };
 }
 
@@ -2871,7 +2920,9 @@ const saveCloudInternal = debounce(async ()=>{
   try{
     const snap = snapshotState();
     window.__lastSnapshot = snap;
+    const writeRev = Number(snap?.syncMeta?.rev || 0);
     await FB.docRef.set(snap, { merge:true });
+    if (writeRev > 0) lastAppliedCloudRevision = writeRev;
     if (window.DEBUG_MODE){
       const el = document.getElementById("dbgSnap");
       if (el) el.value = JSON.stringify(snap, null, 2);
@@ -2946,6 +2997,8 @@ async function loadFromCloud(){
 
     if (stateHasMeaningfulData(data)){
       adoptState(data || {});
+      const loadedRev = Number(data?.syncMeta?.rev || 0);
+      if (loadedRev > 0) lastAppliedCloudRevision = loadedRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
     }else{
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
@@ -2978,9 +3031,16 @@ async function loadFromCloud(){
         garnetCleanings: Array.isArray(window.garnetCleanings) ? window.garnetCleanings.slice() : [],
         dashboardLayout: typeof window.dashboardLayout === "object" ? { ...window.dashboardLayout } : {},
         costLayout: typeof window.costLayout === "object" ? { ...window.costLayout } : {},
-        jobLayout: typeof window.jobLayout === "object" ? { ...window.jobLayout } : {}
+        jobLayout: typeof window.jobLayout === "object" ? { ...window.jobLayout } : {},
+        syncMeta: {
+          rev: Math.max(Date.now(), (Number(lastAppliedCloudRevision) || 0) + 1),
+          updatedAtISO: new Date().toISOString(),
+          updatedBy: getCloudSyncClientId()
+        }
       };
       adoptState(seeded);
+      const seededRev = Number(seeded?.syncMeta?.rev || 0);
+      if (seededRev > 0) lastAppliedCloudRevision = seededRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
       await FB.docRef.set(seeded, { merge:true });
       if (FB.workspaceDoc){
