@@ -15503,8 +15503,8 @@ function renderJobs(){
     });
   }
 
-  const showAllJobsBtn = content.querySelector("[data-job-show-all]");
-  if (showAllJobsBtn && !showAllJobsBtn.dataset.wired){
+  content.querySelectorAll("[data-job-show-all]").forEach((showAllJobsBtn)=>{
+    if (!(showAllJobsBtn instanceof HTMLElement) || showAllJobsBtn.dataset.wired) return;
     showAllJobsBtn.dataset.wired = "1";
     showAllJobsBtn.addEventListener("click", (event)=>{
       event.preventDefault();
@@ -15519,7 +15519,7 @@ function renderJobs(){
       }
       rerenderPreservingState(rootId);
     });
-  }
+  });
 
   content.querySelectorAll("[data-job-category-select]").forEach(select => {
     if (!(select instanceof HTMLSelectElement)) return;
