@@ -82,6 +82,7 @@ if (typeof window !== "undefined"){
   window.PREDICTION_AVERAGE_WINDOWS = PREDICTION_AVERAGE_WINDOWS;
   window.appConfig = appConfig;
   window.getConfiguredDailyHours = getConfiguredDailyHours;
+  window.getSchedulingDailyHours = getSchedulingDailyHours;
   window.getFixedDailyHours = getFixedDailyHours;
   window.getAverageDailyCutHours = getAverageDailyCutHours;
   window.getPredictionHoursSummary = getPredictionHoursSummary;
@@ -258,6 +259,10 @@ function getFixedDailyHours(){
 
 function getConfiguredDailyHours(){
   return getPredictionHoursSummary().effectiveHours;
+}
+
+function getSchedulingDailyHours(){
+  return getFixedDailyHours();
 }
 
 function getPredictionHoursSummary(){
