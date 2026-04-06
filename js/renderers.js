@@ -15635,6 +15635,16 @@ function renderJobs(){
     if (!Number.isFinite(num) || num <= 0) return 1;
     return Math.max(1, Math.floor(num));
   };
+  const persistJobChanges = ()=>{
+    saveCloudDebounced();
+    if (typeof saveCloudNow === "function"){
+      try {
+        saveCloudNow();
+      } catch (err){
+        console.warn("Immediate cloud save failed after job update", err);
+      }
+    }
+  };
 
   const priorityEntries = ()=>{
     if (!Array.isArray(cuttingJobs)) return [];
@@ -15759,7 +15769,8 @@ function renderJobs(){
     ensureJobCategories?.();
     pendingNewJobFiles.length = 0;
     window.jobCategoryFilter = previousCategoryFilter;
-    saveCloudDebounced(); renderJobs();
+    persistJobChanges();
+    renderJobs();
   });
 
   // 5) Inline material $/qty (kept)
