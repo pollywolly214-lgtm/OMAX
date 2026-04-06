@@ -2889,6 +2889,11 @@ function viewJobs(){
     const normalized = normalizeCategory(job?.cat);
     return activeAllowedCategories.has(normalized);
   });
+  const totalActiveJobs = Array.isArray(cuttingJobs) ? cuttingJobs.length : 0;
+  const hiddenActiveJobs = Math.max(0, totalActiveJobs - jobsForCategory.length);
+  const activeFilterNotice = hiddenActiveJobs > 0
+    ? `<div class="small muted job-filter-status">Showing ${jobsForCategory.length} of ${totalActiveJobs} active jobs in <strong>${esc(selectedCategoryName)}</strong>. <button type="button" class="link" data-job-show-all>Show all jobs</button></div>`
+    : "";
 
   jobsForCategory.sort((a, b) => {
     const priorityDiff = priorityForJob(a) - priorityForJob(b);
@@ -2907,6 +2912,8 @@ function viewJobs(){
   });
 
   const completedFiltered = completedForCategory.filter(matchesHistorySearch);
+  const totalCompletedJobs = Array.isArray(completedSorted) ? completedSorted.length : 0;
+  const hiddenCompletedByCategory = Math.max(0, totalCompletedJobs - completedForCategory.length);
   const resolveChargeRate = (job) => {
     const chargeRaw = job?.chargeRate;
     const chargeNum = Number(chargeRaw);
@@ -3411,6 +3418,9 @@ function viewJobs(){
   const historyFilterStatus = historySearchActive
     ? `<div class="small muted past-jobs-filter-status">Showing ${completedFiltered.length} of ${totalCompletedCount} logged jobs.</div>`
     : "";
+  const historyCategoryNotice = (!historySearchActive && hiddenCompletedByCategory > 0)
+    ? `<div class="small muted past-jobs-filter-status">Showing ${completedForCategory.length} of ${totalCompletedJobs} past jobs in <strong>${esc(historyCategoryName)}</strong>.</div>`
+    : "";
   const activeColumnCount = jobColumnCount;
   const priorityAnimationMap = (typeof window !== "undefined" && window.__priorityAnimationMap instanceof Map)
     ? window.__priorityAnimationMap
@@ -3847,6 +3857,7 @@ function viewJobs(){
           </div>
         </div>
       </div>
+      ${activeFilterNotice}
 
       <table class="job-table"${jobTableOverlapAttr}>
         <thead>
@@ -3983,6 +3994,7 @@ function viewJobs(){
         </div>
       </div>
       <div class="small muted past-jobs-hint">Results update as you type.</div>
+      ${historyCategoryNotice}
       ${historyFilterStatus}
       ${completedTable}
     </div>

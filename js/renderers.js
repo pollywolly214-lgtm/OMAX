@@ -15503,8 +15503,8 @@ function renderJobs(){
     });
   }
 
-  const showAllJobsBtn = content.querySelector("[data-job-show-all]");
-  if (showAllJobsBtn && !showAllJobsBtn.dataset.wired){
+  content.querySelectorAll("[data-job-show-all]").forEach((showAllJobsBtn)=>{
+    if (!(showAllJobsBtn instanceof HTMLElement) || showAllJobsBtn.dataset.wired) return;
     showAllJobsBtn.dataset.wired = "1";
     showAllJobsBtn.addEventListener("click", (event)=>{
       event.preventDefault();
@@ -15519,7 +15519,7 @@ function renderJobs(){
       }
       rerenderPreservingState(rootId);
     });
-  }
+  });
 
   content.querySelectorAll("[data-job-category-select]").forEach(select => {
     if (!(select instanceof HTMLSelectElement)) return;
@@ -15634,6 +15634,16 @@ function renderJobs(){
     const num = Number(value);
     if (!Number.isFinite(num) || num <= 0) return 1;
     return Math.max(1, Math.floor(num));
+  };
+  const persistJobChanges = ()=>{
+    saveCloudDebounced();
+    if (typeof saveCloudNow === "function"){
+      try {
+        saveCloudNow();
+      } catch (err){
+        console.warn("Immediate cloud save failed after job update", err);
+      }
+    }
   };
 
   const priorityEntries = ()=>{
@@ -15759,7 +15769,8 @@ function renderJobs(){
     ensureJobCategories?.();
     pendingNewJobFiles.length = 0;
     window.jobCategoryFilter = previousCategoryFilter;
-    saveCloudDebounced(); renderJobs();
+    persistJobChanges();
+    renderJobs();
   });
 
   // 5) Inline material $/qty (kept)
