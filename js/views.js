@@ -76,6 +76,20 @@ function viewDashboard(){
   const jobRootFolder = jobFolders.find(folder => String(folder.id) === jobRootId) || { id: jobRootId, name: "All Jobs", parent: null, order: 1 };
   appendJobFolderOption(jobRootFolder, 0);
   const dashboardCategoryOptions = jobFolderOptions.map(option => `<option value="${esc(option.id)}">${option.label}</option>`).join("");
+  const dashboardDefaultJobDateISO = (() => {
+    const now = new Date();
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+  })();
+  const dashboardMaterialInventory = normalizeInventoryMaterials(window.inventoryMaterials);
+  const dashboardMaterialOptions = Array.from(new Set(
+    (Array.isArray(dashboardMaterialInventory?.types) ? dashboardMaterialInventory.types : [])
+      .map(type => String(type?.name || "").trim())
+      .filter(Boolean)
+  ));
+  const dashboardMaterialOptionsMarkup = dashboardMaterialOptions
+    .map(name => `<option value="${esc(name)}"></option>`)
+    .join("");
 
   return `
   <div class="container">
@@ -277,12 +291,13 @@ function viewDashboard(){
           <div class="modal-grid">
             <label>Job name<input id="dashJobName" required placeholder="Job"></label>
             <label>Estimate (hrs)<input type="number" min="1" step="0.1" id="dashJobEstimate" required placeholder="e.g. 12"></label>
-            <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCharge" placeholder="Optional"></label>
-            <label>Material<input id="dashJobMaterial" placeholder="Material"></label>
+            <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCharge" value="200"></label>
+            <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCostRate" value="45"></label>
+            <label>Material<input id="dashJobMaterial" placeholder="Material" list="dashJobMaterialOptions"></label>
             <label>Material cost ($)<input type="number" min="0" step="0.01" id="dashJobMaterialCost" placeholder="optional"></label>
             <label>Material quantity<input type="number" min="0" step="0.01" id="dashJobMaterialQty" placeholder="optional"></label>
-            <label>Start date<input type="date" id="dashJobStart" required></label>
-            <label>Due date<input type="date" id="dashJobDue" required></label>
+            <label>Start date<input type="date" id="dashJobStart" required value="${dashboardDefaultJobDateISO}"></label>
+            <label>Due date<input type="date" id="dashJobDue" required value="${dashboardDefaultJobDateISO}"></label>
             <label>Category<select id="dashJobCategory" required>
               ${dashboardCategoryOptions}
               <option value="__new__">+ Create new category…</option>
@@ -290,6 +305,7 @@ function viewDashboard(){
             <span class="small muted job-category-hint" id="dashJobCategoryHint" aria-live="polite">
               Choose a category to keep jobs organized. We'll save it under All Jobs if you skip this step.
             </span></label>
+            <datalist id="dashJobMaterialOptions">${dashboardMaterialOptionsMarkup}</datalist>
           </div>
           <div class="modal-actions">
             <button type="button" class="secondary" data-step-back>Back</button>
@@ -2124,6 +2140,20 @@ function viewJobs(){
   const oneDriveStatusLabel = oneDriveReady
     ? `OneDrive root ready${oneDriveConfig.folderHint ? ` · ${oneDriveConfig.folderHint}` : ""}`
     : "OneDrive root not set on this computer";
+  const defaultJobDateISO = (() => {
+    const now = new Date();
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+  })();
+  const materialInventoryModel = normalizeInventoryMaterials(window.inventoryMaterials);
+  const materialInventoryNames = Array.from(new Set(
+    (Array.isArray(materialInventoryModel?.types) ? materialInventoryModel.types : [])
+      .map(type => String(type?.name || "").trim())
+      .filter(Boolean)
+  ));
+  const materialInventoryOptionsMarkup = materialInventoryNames
+    .map(name => `<option value="${esc(name)}"></option>`)
+    .join("");
   const extractFileExtension = (filename)=>{
     const name = String(filename || "");
     const dot = name.lastIndexOf(".");
@@ -3817,12 +3847,13 @@ function viewJobs(){
             ${priorityOptionsMarkup(1)}
           </select>
           <p class="small muted job-priority-hint">Priority 1 runs before higher numbers.</p>
-          <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01">
-          <input type="text" id="jobMaterial" placeholder="Material">
+          <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01" value="200">
+          <input type="number" id="jobCostRate" placeholder="Cost rate ($/hr)" min="0" step="0.01" value="45">
+          <input type="text" id="jobMaterial" placeholder="Material" list="jobMaterialOptions">
           <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
           <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
-          <input type="date" id="jobStart" required>
-          <input type="date" id="jobDue" required>
+          <input type="date" id="jobStart" required value="${defaultJobDateISO}">
+          <input type="date" id="jobDue" required value="${defaultJobDateISO}">
           <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required>
           <div class="job-category-field">
             <select id="jobCategory" aria-label="Category" required>
@@ -3835,6 +3866,7 @@ function viewJobs(){
           <button type="button" id="jobFilesBtn">Attach Files</button>
           <button type="button" id="jobOneDriveLibraryAddBtn">Add from this computer OneDrive folder</button>
           <input type="file" id="jobFiles" multiple style="display:none">
+          <datalist id="jobMaterialOptions">${materialInventoryOptionsMarkup}</datalist>
           <button type="submit">Add Job</button>
         </form>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
