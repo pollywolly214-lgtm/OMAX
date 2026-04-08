@@ -4766,6 +4766,10 @@ function openLogHistoryModal(){
 
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
+  const activeDashboardModal = document.getElementById("dashboardAddModal");
+  if (activeDashboardModal && activeDashboardModal.classList.contains("is-visible")){
+    return;
+  }
   content.innerHTML = viewDashboard();
   setAppSettingsContext("dashboard");
   wireDashboardSettingsMenu();
