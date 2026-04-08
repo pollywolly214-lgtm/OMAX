@@ -739,6 +739,8 @@ function startWorkspaceStateListener(){
   };
   const hasActiveBlockingOverlay = ()=>{
     if (typeof document === "undefined") return false;
+    const activeEl = document.activeElement;
+    if (isEditableTarget(activeEl)) return true;
     const body = document.body;
     if (body?.classList?.contains("modal-open")) return true;
     if (body?.classList?.contains("forecast-modal-open")) return true;
