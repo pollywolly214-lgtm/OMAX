@@ -15743,6 +15743,32 @@ function renderJobs(){
   };
 
   // 4) Add Job (unchanged)
+  const syncAddJobDraftFromForm = ()=>{
+    const form = document.getElementById("addJobForm");
+    if (!form) return;
+    const getVal = (id)=>{
+      const el = document.getElementById(id);
+      return el && typeof el.value === "string" ? el.value : "";
+    };
+    window.jobAddDraft = {
+      name: getVal("jobName"),
+      estimate: getVal("jobEst"),
+      priority: getVal("jobPriority"),
+      charge: getVal("jobCharge"),
+      costRate: getVal("jobCostRate"),
+      material: getVal("jobMaterial"),
+      materialCost: getVal("jobMaterialCost"),
+      materialQty: getVal("jobMaterialQty"),
+      start: getVal("jobStart"),
+      due: getVal("jobDue"),
+      projectNumber: getVal("jobProjectNumber"),
+      category: getVal("jobCategory")
+    };
+  };
+  const addJobForm = document.getElementById("addJobForm");
+  addJobForm?.addEventListener("input", syncAddJobDraftFromForm);
+  addJobForm?.addEventListener("change", syncAddJobDraftFromForm);
+
   document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name  = document.getElementById("jobName").value.trim();
@@ -15787,6 +15813,7 @@ function renderJobs(){
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
     pendingNewJobFiles.length = 0;
+    window.jobAddDraft = {};
     window.jobCategoryFilter = previousCategoryFilter;
     persistJobChanges();
     renderJobs();

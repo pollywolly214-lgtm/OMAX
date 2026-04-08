@@ -2626,6 +2626,22 @@ function viewJobs(){
     : (historyCategory === rootCategoryId ? "All Jobs" : "Category");
   window.jobHistoryCategoryFilter = historyCategory;
   const addJobDefaultCategory = rootCategoryId;
+  const addJobDraft = window.jobAddDraft && typeof window.jobAddDraft === "object"
+    ? window.jobAddDraft
+    : {};
+  const addJobDraftField = (key, fallback = "")=>{
+    const raw = addJobDraft[key];
+    if (raw == null) return fallback;
+    return String(raw);
+  };
+  const addJobPriorityDefault = (() => {
+    const raw = Number(addJobDraftField("priority", "1"));
+    return Number.isFinite(raw) && raw > 0 ? Math.max(1, Math.floor(raw)) : 1;
+  })();
+  const addJobCategoryDefault = (() => {
+    const draftCategory = addJobDraftField("category", addJobDefaultCategory);
+    return folderMap.has(draftCategory) ? draftCategory : addJobDefaultCategory;
+  })();
   window.jobCategoryFilter = selectedCategory;
 
   const initialOpenFolders = Array.isArray(window.jobCategoryOpenFolders)
@@ -3841,23 +3857,23 @@ function viewJobs(){
         aria-hidden="${addFormOpen ? "false" : "true"}"
       >
         <form id="addJobForm" class="mini-form job-add-form">
-          <input type="text" id="jobName" placeholder="Job name" required>
-          <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="0.01" step="0.01">
+          <input type="text" id="jobName" placeholder="Job name" required value="${esc(addJobDraftField("name"))}">
+          <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="0.01" step="0.01" value="${esc(addJobDraftField("estimate"))}">
           <select id="jobPriority" aria-label="Priority">
-            ${priorityOptionsMarkup(1)}
+            ${priorityOptionsMarkup(addJobPriorityDefault)}
           </select>
           <p class="small muted job-priority-hint">Priority 1 runs before higher numbers.</p>
-          <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01" value="200">
-          <input type="number" id="jobCostRate" placeholder="Cost rate ($/hr)" min="0" step="0.01" value="45">
-          <input type="text" id="jobMaterial" placeholder="Material" list="jobMaterialOptions">
-          <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
-          <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
-          <input type="date" id="jobStart" required value="${defaultJobDateISO}">
-          <input type="date" id="jobDue" required value="${defaultJobDateISO}">
-          <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required>
+          <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01" value="${esc(addJobDraftField("charge", "200"))}">
+          <input type="number" id="jobCostRate" placeholder="Cost rate ($/hr)" min="0" step="0.01" value="${esc(addJobDraftField("costRate", "45"))}">
+          <input type="text" id="jobMaterial" placeholder="Material" list="jobMaterialOptions" value="${esc(addJobDraftField("material"))}">
+          <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}">
+          <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01" value="${esc(addJobDraftField("materialQty"))}">
+          <input type="date" id="jobStart" required value="${esc(addJobDraftField("start", defaultJobDateISO))}">
+          <input type="date" id="jobDue" required value="${esc(addJobDraftField("due", defaultJobDateISO))}">
+          <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required value="${esc(addJobDraftField("projectNumber"))}">
           <div class="job-category-field">
             <select id="jobCategory" aria-label="Category" required>
-              ${categoryOptionsMarkup(addJobDefaultCategory, { includeCreateOption: true })}
+              ${categoryOptionsMarkup(addJobCategoryDefault, { includeCreateOption: true })}
             </select>
             <p class="small muted job-category-hint" id="jobCategoryHint" aria-live="polite">
               Choose a category to keep jobs organized. We'll save it under All Jobs if you skip this step.
