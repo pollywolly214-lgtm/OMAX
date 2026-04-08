@@ -3529,7 +3529,7 @@ function viewJobs(){
     const estHours = Number(j.estimateHours) || 0;
     const chargeRateRaw = Number(j.chargeRate);
     const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
-    const costRate = JOB_BASE_COST_PER_HOUR + (estHours > 0 ? (matTotal / estHours) : 0);
+    const costRate = resolveCostRate(j, estHours, matTotal);
     const netRate = chargeRate - costRate;
     const chargeDisplay = formatRate(chargeRate);
     const costDisplay = formatRate(costRate);
@@ -3722,6 +3722,7 @@ function viewJobs(){
                 <label>Material cost ($)<input type="number" min="0" step="0.01" data-j="materialCost" data-id="${j.id}" value="${matCost}"></label>
                 <label>Material quantity<input type="number" min="0" step="0.01" data-j="materialQty" data-id="${j.id}" value="${matQty}"></label>
                 <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-j="chargeRate" data-id="${j.id}" value="${chargeRate}"></label>
+                <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" data-j="costRate" data-id="${j.id}" value="${Number.isFinite(costRate) ? costRate : 45}"></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
                 <label>Project #<input type="text" data-j="projectNumber" data-id="${j.id}" inputmode="numeric" maxlength="8" value="${esc(projectLabel(j) === "Unassigned" ? "" : projectLabel(j))}"></label>

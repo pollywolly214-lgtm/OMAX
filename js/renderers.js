@@ -16558,10 +16558,17 @@ function renderJobs(){
       const chargeRaw = qs("chargeRate");
       const chargeVal = chargeRaw === "" || chargeRaw == null ? null : Number(chargeRaw);
       if (chargeVal != null && (!Number.isFinite(chargeVal) || chargeVal < 0)){ toast("Enter a valid charge rate."); return; }
+      const costRaw = qs("costRate");
+      const costVal = costRaw === "" || costRaw == null ? null : Number(costRaw);
+      if (costVal != null && (!Number.isFinite(costVal) || costVal < 0)){ toast("Enter a valid cost rate."); return; }
       const existingCharge = Number.isFinite(Number(j.chargeRate)) && Number(j.chargeRate) >= 0
         ? Number(j.chargeRate)
         : JOB_RATE_PER_HOUR;
       const chargeToSet = chargeVal == null ? existingCharge : chargeVal;
+      const existingCost = Number.isFinite(Number(j.costRate)) && Number(j.costRate) >= 0
+        ? Number(j.costRate)
+        : 45;
+      const costToSet = costVal == null ? existingCost : costVal;
       const catVal = qs("cat");
       j.name = qs("name") || j.name;
       j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
@@ -16574,6 +16581,7 @@ function renderJobs(){
       if (projectInput) j.projectNumber = projectInput;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${idStr}"]`)?.value || j.notes || "";
       j.chargeRate = chargeToSet;
+      j.costRate = costToSet;
       const priorityRaw = qs("priority");
       if (priorityRaw != null){
         const priorityNum = priorityRaw === "" ? null : Number(priorityRaw);
