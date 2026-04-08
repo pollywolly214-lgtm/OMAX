@@ -725,6 +725,39 @@ function startWorkspaceStateListener(){
   if (!FB.ready || !FB.docRef || typeof FB.docRef.onSnapshot !== "function") return;
   if (typeof workspaceStateUnsubscribe === "function") return;
   const localClientId = getCloudSyncClientId();
+  let deferredRouteTimer = null;
+  const clearDeferredRouteTimer = ()=>{
+    if (deferredRouteTimer != null){
+      clearTimeout(deferredRouteTimer);
+      deferredRouteTimer = null;
+    }
+  };
+  const hasActiveBlockingOverlay = ()=>{
+    if (typeof document === "undefined") return false;
+    const body = document.body;
+    if (body?.classList?.contains("modal-open")) return true;
+    if (body?.classList?.contains("forecast-modal-open")) return true;
+    if (body?.classList?.contains("cost-timeframe-modal-open")) return true;
+    if (document.querySelector(".modal-backdrop.is-visible:not([hidden])")) return true;
+    if (document.querySelector(".job-note-modal-backdrop:not([hidden])")) return true;
+    if (document.querySelector(".job-naming-modal-backdrop:not([hidden])")) return true;
+    if (document.querySelector(".job-flow-modal-backdrop:not([hidden])")) return true;
+    if (document.querySelector(".forecast-modal:not([hidden])")) return true;
+    if (document.querySelector(".cost-timeframe-modal:not([hidden])")) return true;
+    if (document.querySelector(".config-modal:not([hidden])")) return true;
+    if (document.querySelector(".auth-modal-backdrop[style*='display: flex']")) return true;
+    return false;
+  };
+  const refreshRouteSafely = ()=>{
+    if (typeof route !== "function") return;
+    if (hasActiveBlockingOverlay()){
+      clearDeferredRouteTimer();
+      deferredRouteTimer = setTimeout(()=>{ refreshRouteSafely(); }, 1200);
+      return;
+    }
+    clearDeferredRouteTimer();
+    try { route(); } catch (err) { console.warn("Route refresh after workspace sync failed", err); }
+  };
   workspaceStateUnsubscribe = FB.docRef.onSnapshot((snap)=>{
     if (!snap || !snap.exists) return;
     if (snap.metadata && snap.metadata.hasPendingWrites) return;
@@ -739,9 +772,7 @@ function startWorkspaceStateListener(){
     adoptState(incoming || {});
     if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
     if (incomingRev > 0) lastAppliedCloudRevision = incomingRev;
-    if (typeof route === "function"){
-      try { route(); } catch (err) { console.warn("Route refresh after workspace sync failed", err); }
-    }
+    refreshRouteSafely();
   }, (err)=>{
     console.warn("Workspace realtime sync listener error", err);
   });
