@@ -15199,6 +15199,7 @@ function renderJobs(){
         addedAt: new Date().toISOString()
       });
       toast("File attached from this computer OneDrive root.");
+      window.jobAddFormOpen = true;
       renderJobs();
       return true;
     } catch (err){
@@ -15244,7 +15245,7 @@ function renderJobs(){
   oneDriveLibraryAddToJobBtn?.addEventListener("click", async ()=>{
     const formState = captureNewJobFormState();
     const attached = await attachFromLocalOneDriveRoot();
-    restoreNewJobFormState(formState);
+    requestAnimationFrame(()=> restoreNewJobFormState(formState));
     if (!attached){
       openOneDriveModal();
     }
@@ -15289,8 +15290,9 @@ function renderJobs(){
     }
     pendingNewJobFiles.push(...attachments.map(a=>({ ...a })));
     toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
+    window.jobAddFormOpen = true;
     renderJobs();
-    restoreNewJobFormState(formState);
+    requestAnimationFrame(()=> restoreNewJobFormState(formState));
   });
 
   const addRootCategoryBtn = content.querySelector("[data-job-folder-add-root]");
