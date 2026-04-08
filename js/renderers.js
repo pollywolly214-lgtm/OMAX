@@ -15623,7 +15623,9 @@ function renderJobs(){
       const last = new Date(lm.dateISO + "T00:00:00");
       const today = new Date(todayISO + "T00:00:00");
       const days = Math.max(0, Math.floor((today - last)/(24*60*60*1000)));
-      const perDay = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : DAILY_HOURS;
+      const perDay = typeof getSchedulingDailyHours === "function"
+        ? getSchedulingDailyHours()
+        : (typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : DAILY_HOURS);
       return days * perDay;
     }
     return 0;
@@ -15990,9 +15992,11 @@ function renderJobs(){
       const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
       if (!entry){ toast("Unable to locate completed job."); return; }
 
-      const hoursPerDay = typeof getConfiguredDailyHours === "function"
-        ? getConfiguredDailyHours()
-        : ((typeof DAILY_HOURS === "number" && isFinite(DAILY_HOURS) && DAILY_HOURS > 0) ? DAILY_HOURS : 8);
+      const hoursPerDay = typeof getSchedulingDailyHours === "function"
+        ? getSchedulingDailyHours()
+        : (typeof getConfiguredDailyHours === "function"
+          ? getConfiguredDailyHours()
+          : ((typeof DAILY_HOURS === "number" && isFinite(DAILY_HOURS) && DAILY_HOURS > 0) ? DAILY_HOURS : 8));
       const safeToday = (() => {
         const parsed = parseJobDate(todayISO) || parseJobDate(new Date());
         if (parsed){

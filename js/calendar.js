@@ -28,6 +28,10 @@ function formatCalendarDayHours(value){
 }
 
 function configuredDailyHours(){
+  if (typeof getSchedulingDailyHours === "function"){
+    const scheduled = Number(getSchedulingDailyHours());
+    if (Number.isFinite(scheduled) && scheduled > 0) return scheduled;
+  }
   if (typeof getConfiguredDailyHours === "function") return getConfiguredDailyHours();
   if (typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0) return Number(DAILY_HOURS);
   if (typeof DEFAULT_DAILY_HOURS === "number" && Number.isFinite(DEFAULT_DAILY_HOURS) && DEFAULT_DAILY_HOURS > 0){

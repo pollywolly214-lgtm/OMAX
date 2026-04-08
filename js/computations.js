@@ -328,8 +328,8 @@ function computeJobEfficiency(job){
   let evaluationDay = completionDate ? new Date(completionDate) : today;
   evaluationDay.setHours(0,0,0,0);
   if (evaluationDay < start) evaluationDay = new Date(start);
-  const hoursPerDay = typeof getConfiguredDailyHours === "function"
-    ? getConfiguredDailyHours()
+  const hoursPerDay = typeof getSchedulingDailyHours === "function"
+    ? getSchedulingDailyHours()
     : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
       ? Number(DAILY_HOURS)
       : 8);
