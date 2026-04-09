@@ -16541,7 +16541,7 @@ function renderJobs(){
       cuttingJobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : cuttingJobs;
       completedCuttingJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : completedCuttingJobs;
       editingJobs.delete(id);
-      saveCloudDebounced();
+      persistJobChanges();
       toast("Job marked complete");
       renderJobs();
       return;
