@@ -739,6 +739,8 @@ function startWorkspaceStateListener(){
   };
   const hasActiveBlockingOverlay = ()=>{
     if (typeof document === "undefined") return false;
+    const activeEl = document.activeElement;
+    if (isEditableTarget(activeEl)) return true;
     const body = document.body;
     if (body?.classList?.contains("modal-open")) return true;
     if (body?.classList?.contains("forecast-modal-open")) return true;
@@ -747,6 +749,9 @@ function startWorkspaceStateListener(){
     if (document.querySelector(".job-note-modal-backdrop:not([hidden])")) return true;
     if (document.querySelector(".job-naming-modal-backdrop:not([hidden])")) return true;
     if (document.querySelector(".job-flow-modal-backdrop:not([hidden])")) return true;
+    if (document.querySelector('[data-job-actions-menu]:not([hidden])')) return true;
+    if (document.querySelector('[data-history-actions-menu]:not([hidden])')) return true;
+    if (document.querySelector('[data-job-file-menu]:not([hidden])')) return true;
     if (document.querySelector(".forecast-modal:not([hidden])")) return true;
     if (document.querySelector(".cost-timeframe-modal:not([hidden])")) return true;
     if (document.querySelector(".config-modal:not([hidden])")) return true;

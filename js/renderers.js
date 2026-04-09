@@ -1557,6 +1557,7 @@ function captureNewJobFormState(){
       estimate: captureField("jobEst"),
       priority: captureField("jobPriority"),
       charge: captureField("jobCharge"),
+      costRate: captureField("jobCostRate"),
       material: captureField("jobMaterial"),
       materialCost: captureField("jobMaterialCost"),
       materialQty: captureField("jobMaterialQty"),
@@ -1586,6 +1587,7 @@ function restoreNewJobFormState(state){
   assignField("jobEst", state.fields.estimate);
   assignField("jobPriority", state.fields.priority);
   assignField("jobCharge", state.fields.charge);
+  assignField("jobCostRate", state.fields.costRate);
   assignField("jobMaterial", state.fields.material);
   assignField("jobMaterialCost", state.fields.materialCost);
   assignField("jobMaterialQty", state.fields.materialQty);
@@ -4933,6 +4935,7 @@ function renderDashboard(){
   const jobNameInput     = document.getElementById("dashJobName");
   const jobEstimateInput = document.getElementById("dashJobEstimate");
   const jobChargeInput   = document.getElementById("dashJobCharge");
+  const jobCostRateInput = document.getElementById("dashJobCostRate");
   const jobMaterialInput = document.getElementById("dashJobMaterial");
   const jobMaterialCostInput = document.getElementById("dashJobMaterialCost");
   const jobMaterialQtyInput = document.getElementById("dashJobMaterialQty");
@@ -6071,6 +6074,7 @@ function renderDashboard(){
     const name = (jobNameInput?.value || "").trim();
     const est  = Number(jobEstimateInput?.value);
     const chargeRaw = jobChargeInput?.value ?? "";
+    const costRateRaw = jobCostRateInput?.value ?? "";
     const material = (jobMaterialInput?.value || "").trim();
     const materialCostRaw = jobMaterialCostInput?.value ?? "";
     const materialQtyRaw  = jobMaterialQtyInput?.value ?? "";
@@ -6082,11 +6086,13 @@ function renderDashboard(){
       : dashRootCategoryId;
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
     const materialQty  = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
-    const chargeRate = chargeRaw === "" ? JOB_RATE_PER_HOUR : Number(chargeRaw);
+    const chargeRate = chargeRaw === "" ? 200 : Number(chargeRaw);
+    const costRate = costRateRaw === "" ? 45 : Number(costRateRaw);
     if (!name || !isFinite(est) || est <= 0 || !start || !due){ toast("Fill job fields."); return; }
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
+    if (!Number.isFinite(costRate) || costRate < 0){ toast("Enter a valid cost rate."); return; }
     if (!categoryId){ toast("Choose a category."); return; }
     if (categoryId === "__new__"){
       const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
@@ -6095,7 +6101,7 @@ function renderDashboard(){
       categoryId = String(folder.id);
       ensureJobCategoryFolderOpen(categoryId);
     }
-    const newJob = { id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, priority: 1, notes:"", manualLogs:[], cat: categoryId };
+    const newJob = { id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, costRate, priority: 1, notes:"", manualLogs:[], cat: categoryId };
     cuttingJobs.push(newJob);
     reorderPriorities(newJob.id, newJob.priority);
     ensureJobCategories?.();
@@ -15193,6 +15199,7 @@ function renderJobs(){
         addedAt: new Date().toISOString()
       });
       toast("File attached from this computer OneDrive root.");
+      window.jobAddFormOpen = true;
       renderJobs();
       return true;
     } catch (err){
@@ -15236,7 +15243,9 @@ function renderJobs(){
   });
 
   oneDriveLibraryAddToJobBtn?.addEventListener("click", async ()=>{
+    const formState = captureNewJobFormState();
     const attached = await attachFromLocalOneDriveRoot();
+    requestAnimationFrame(()=> restoreNewJobFormState(formState));
     if (!attached){
       openOneDriveModal();
     }
@@ -15281,8 +15290,9 @@ function renderJobs(){
     }
     pendingNewJobFiles.push(...attachments.map(a=>({ ...a })));
     toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
+    window.jobAddFormOpen = true;
     renderJobs();
-    restoreNewJobFormState(formState);
+    requestAnimationFrame(()=> restoreNewJobFormState(formState));
   });
 
   const addRootCategoryBtn = content.querySelector("[data-job-folder-add-root]");
@@ -15733,12 +15743,39 @@ function renderJobs(){
   };
 
   // 4) Add Job (unchanged)
+  const syncAddJobDraftFromForm = ()=>{
+    const form = document.getElementById("addJobForm");
+    if (!form) return;
+    const getVal = (id)=>{
+      const el = document.getElementById(id);
+      return el && typeof el.value === "string" ? el.value : "";
+    };
+    window.jobAddDraft = {
+      name: getVal("jobName"),
+      estimate: getVal("jobEst"),
+      priority: getVal("jobPriority"),
+      charge: getVal("jobCharge"),
+      costRate: getVal("jobCostRate"),
+      material: getVal("jobMaterial"),
+      materialCost: getVal("jobMaterialCost"),
+      materialQty: getVal("jobMaterialQty"),
+      start: getVal("jobStart"),
+      due: getVal("jobDue"),
+      projectNumber: getVal("jobProjectNumber"),
+      category: getVal("jobCategory")
+    };
+  };
+  const addJobForm = document.getElementById("addJobForm");
+  addJobForm?.addEventListener("input", syncAddJobDraftFromForm);
+  addJobForm?.addEventListener("change", syncAddJobDraftFromForm);
+
   document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name  = document.getElementById("jobName").value.trim();
     const est   = Number(document.getElementById("jobEst").value);
     const material = document.getElementById("jobMaterial")?.value.trim() || "";
     const chargeRaw = document.getElementById("jobCharge")?.value ?? "";
+    const costRateRaw = document.getElementById("jobCostRate")?.value ?? "";
     const materialCostRaw = document.getElementById("jobMaterialCost")?.value ?? "";
     const materialQtyRaw = document.getElementById("jobMaterialQty")?.value ?? "";
     const start = document.getElementById("jobStart").value;
@@ -15755,11 +15792,13 @@ function renderJobs(){
       : jobRootCategoryId;
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
     const materialQty = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
-    const chargeRate = chargeRaw === "" ? JOB_RATE_PER_HOUR : Number(chargeRaw);
+    const chargeRate = chargeRaw === "" ? 200 : Number(chargeRaw);
+    const costRate = costRateRaw === "" ? 45 : Number(costRateRaw);
     if (!name || !isFinite(est) || est<=0 || !start || !due || !projectNumber){ toast("Fill job fields, including project #."); return; }
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
+    if (!Number.isFinite(costRate) || costRate < 0){ toast("Enter a valid cost rate."); return; }
     if (!categoryId){ toast("Choose a category."); return; }
     if (categoryId === "__new__"){
       const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
@@ -15769,11 +15808,12 @@ function renderJobs(){
       ensureJobCategoryFolderOpen(categoryId);
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material, materialCost, materialQty, chargeRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
+    const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material, materialCost, materialQty, chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
     cuttingJobs.push(newJob);
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
     pendingNewJobFiles.length = 0;
+    window.jobAddDraft = {};
     window.jobCategoryFilter = previousCategoryFilter;
     persistJobChanges();
     renderJobs();
@@ -16491,8 +16531,9 @@ function renderJobs(){
       closeActionMenu();
       closeHistoryActionMenu();
       const id = complete.getAttribute("data-complete-job");
-      const now = new Date();
-      const completionISO = now.toISOString();
+      const completedDay = parseJobDate(todayISO) || new Date();
+      completedDay.setHours(12, 0, 0, 0);
+      const completionISO = completedDay.toISOString();
       const completed = typeof completeCuttingJob === "function"
         ? completeCuttingJob(id, { completedAtISO: completionISO, normalizePriorities: () => normalizeAllPriorities() })
         : null;
@@ -16500,7 +16541,7 @@ function renderJobs(){
       cuttingJobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : cuttingJobs;
       completedCuttingJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : completedCuttingJobs;
       editingJobs.delete(id);
-      saveCloudDebounced();
+      persistJobChanges();
       toast("Job marked complete");
       renderJobs();
       return;
@@ -16517,10 +16558,17 @@ function renderJobs(){
       const chargeRaw = qs("chargeRate");
       const chargeVal = chargeRaw === "" || chargeRaw == null ? null : Number(chargeRaw);
       if (chargeVal != null && (!Number.isFinite(chargeVal) || chargeVal < 0)){ toast("Enter a valid charge rate."); return; }
+      const costRaw = qs("costRate");
+      const costVal = costRaw === "" || costRaw == null ? null : Number(costRaw);
+      if (costVal != null && (!Number.isFinite(costVal) || costVal < 0)){ toast("Enter a valid cost rate."); return; }
       const existingCharge = Number.isFinite(Number(j.chargeRate)) && Number(j.chargeRate) >= 0
         ? Number(j.chargeRate)
         : JOB_RATE_PER_HOUR;
       const chargeToSet = chargeVal == null ? existingCharge : chargeVal;
+      const existingCost = Number.isFinite(Number(j.costRate)) && Number(j.costRate) >= 0
+        ? Number(j.costRate)
+        : 45;
+      const costToSet = costVal == null ? existingCost : costVal;
       const catVal = qs("cat");
       j.name = qs("name") || j.name;
       j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
@@ -16533,6 +16581,7 @@ function renderJobs(){
       if (projectInput) j.projectNumber = projectInput;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${idStr}"]`)?.value || j.notes || "";
       j.chargeRate = chargeToSet;
+      j.costRate = costToSet;
       const priorityRaw = qs("priority");
       if (priorityRaw != null){
         const priorityNum = priorityRaw === "" ? null : Number(priorityRaw);

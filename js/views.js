@@ -76,6 +76,20 @@ function viewDashboard(){
   const jobRootFolder = jobFolders.find(folder => String(folder.id) === jobRootId) || { id: jobRootId, name: "All Jobs", parent: null, order: 1 };
   appendJobFolderOption(jobRootFolder, 0);
   const dashboardCategoryOptions = jobFolderOptions.map(option => `<option value="${esc(option.id)}">${option.label}</option>`).join("");
+  const dashboardDefaultJobDateISO = (() => {
+    const now = new Date();
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+  })();
+  const dashboardMaterialInventory = normalizeInventoryMaterials(window.inventoryMaterials);
+  const dashboardMaterialOptions = Array.from(new Set(
+    (Array.isArray(dashboardMaterialInventory?.types) ? dashboardMaterialInventory.types : [])
+      .map(type => String(type?.name || "").trim())
+      .filter(Boolean)
+  ));
+  const dashboardMaterialOptionsMarkup = dashboardMaterialOptions
+    .map(name => `<option value="${esc(name)}"></option>`)
+    .join("");
 
   return `
   <div class="container">
@@ -277,12 +291,13 @@ function viewDashboard(){
           <div class="modal-grid">
             <label>Job name<input id="dashJobName" required placeholder="Job"></label>
             <label>Estimate (hrs)<input type="number" min="1" step="0.1" id="dashJobEstimate" required placeholder="e.g. 12"></label>
-            <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCharge" placeholder="Optional"></label>
-            <label>Material<input id="dashJobMaterial" placeholder="Material"></label>
+            <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCharge" value="200"></label>
+            <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCostRate" value="45"></label>
+            <label>Material<input id="dashJobMaterial" placeholder="Material" list="dashJobMaterialOptions"></label>
             <label>Material cost ($)<input type="number" min="0" step="0.01" id="dashJobMaterialCost" placeholder="optional"></label>
             <label>Material quantity<input type="number" min="0" step="0.01" id="dashJobMaterialQty" placeholder="optional"></label>
-            <label>Start date<input type="date" id="dashJobStart" required></label>
-            <label>Due date<input type="date" id="dashJobDue" required></label>
+            <label>Start date<input type="date" id="dashJobStart" required value="${dashboardDefaultJobDateISO}"></label>
+            <label>Due date<input type="date" id="dashJobDue" required value="${dashboardDefaultJobDateISO}"></label>
             <label>Category<select id="dashJobCategory" required>
               ${dashboardCategoryOptions}
               <option value="__new__">+ Create new category…</option>
@@ -290,6 +305,7 @@ function viewDashboard(){
             <span class="small muted job-category-hint" id="dashJobCategoryHint" aria-live="polite">
               Choose a category to keep jobs organized. We'll save it under All Jobs if you skip this step.
             </span></label>
+            <datalist id="dashJobMaterialOptions">${dashboardMaterialOptionsMarkup}</datalist>
           </div>
           <div class="modal-actions">
             <button type="button" class="secondary" data-step-back>Back</button>
@@ -2124,6 +2140,20 @@ function viewJobs(){
   const oneDriveStatusLabel = oneDriveReady
     ? `OneDrive root ready${oneDriveConfig.folderHint ? ` · ${oneDriveConfig.folderHint}` : ""}`
     : "OneDrive root not set on this computer";
+  const defaultJobDateISO = (() => {
+    const now = new Date();
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+  })();
+  const materialInventoryModel = normalizeInventoryMaterials(window.inventoryMaterials);
+  const materialInventoryNames = Array.from(new Set(
+    (Array.isArray(materialInventoryModel?.types) ? materialInventoryModel.types : [])
+      .map(type => String(type?.name || "").trim())
+      .filter(Boolean)
+  ));
+  const materialInventoryOptionsMarkup = materialInventoryNames
+    .map(name => `<option value="${esc(name)}"></option>`)
+    .join("");
   const extractFileExtension = (filename)=>{
     const name = String(filename || "");
     const dot = name.lastIndexOf(".");
@@ -2596,6 +2626,22 @@ function viewJobs(){
     : (historyCategory === rootCategoryId ? "All Jobs" : "Category");
   window.jobHistoryCategoryFilter = historyCategory;
   const addJobDefaultCategory = rootCategoryId;
+  const addJobDraft = window.jobAddDraft && typeof window.jobAddDraft === "object"
+    ? window.jobAddDraft
+    : {};
+  const addJobDraftField = (key, fallback = "")=>{
+    const raw = addJobDraft[key];
+    if (raw == null) return fallback;
+    return String(raw);
+  };
+  const addJobPriorityDefault = (() => {
+    const raw = Number(addJobDraftField("priority", "1"));
+    return Number.isFinite(raw) && raw > 0 ? Math.max(1, Math.floor(raw)) : 1;
+  })();
+  const addJobCategoryDefault = (() => {
+    const draftCategory = addJobDraftField("category", addJobDefaultCategory);
+    return folderMap.has(draftCategory) ? draftCategory : addJobDefaultCategory;
+  })();
   window.jobCategoryFilter = selectedCategory;
 
   const initialOpenFolders = Array.isArray(window.jobCategoryOpenFolders)
@@ -3483,7 +3529,7 @@ function viewJobs(){
     const estHours = Number(j.estimateHours) || 0;
     const chargeRateRaw = Number(j.chargeRate);
     const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
-    const costRate = JOB_BASE_COST_PER_HOUR + (estHours > 0 ? (matTotal / estHours) : 0);
+    const costRate = resolveCostRate(j, estHours, matTotal);
     const netRate = chargeRate - costRate;
     const chargeDisplay = formatRate(chargeRate);
     const costDisplay = formatRate(costRate);
@@ -3676,6 +3722,7 @@ function viewJobs(){
                 <label>Material cost ($)<input type="number" min="0" step="0.01" data-j="materialCost" data-id="${j.id}" value="${matCost}"></label>
                 <label>Material quantity<input type="number" min="0" step="0.01" data-j="materialQty" data-id="${j.id}" value="${matQty}"></label>
                 <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-j="chargeRate" data-id="${j.id}" value="${chargeRate}"></label>
+                <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" data-j="costRate" data-id="${j.id}" value="${Number.isFinite(costRate) ? costRate : 45}"></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
                 <label>Project #<input type="text" data-j="projectNumber" data-id="${j.id}" inputmode="numeric" maxlength="8" value="${esc(projectLabel(j) === "Unassigned" ? "" : projectLabel(j))}"></label>
@@ -3811,22 +3858,23 @@ function viewJobs(){
         aria-hidden="${addFormOpen ? "false" : "true"}"
       >
         <form id="addJobForm" class="mini-form job-add-form">
-          <input type="text" id="jobName" placeholder="Job name" required>
-          <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="0.01" step="0.01">
+          <input type="text" id="jobName" placeholder="Job name" required value="${esc(addJobDraftField("name"))}">
+          <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="0.01" step="0.01" value="${esc(addJobDraftField("estimate"))}">
           <select id="jobPriority" aria-label="Priority">
-            ${priorityOptionsMarkup(1)}
+            ${priorityOptionsMarkup(addJobPriorityDefault)}
           </select>
           <p class="small muted job-priority-hint">Priority 1 runs before higher numbers.</p>
-          <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01">
-          <input type="text" id="jobMaterial" placeholder="Material">
-          <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01">
-          <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01">
-          <input type="date" id="jobStart" required>
-          <input type="date" id="jobDue" required>
-          <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required>
+          <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01" value="${esc(addJobDraftField("charge", "200"))}">
+          <input type="number" id="jobCostRate" placeholder="Cost rate ($/hr)" min="0" step="0.01" value="${esc(addJobDraftField("costRate", "45"))}">
+          <input type="text" id="jobMaterial" placeholder="Material" list="jobMaterialOptions" value="${esc(addJobDraftField("material"))}">
+          <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}">
+          <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01" value="${esc(addJobDraftField("materialQty"))}">
+          <input type="date" id="jobStart" required value="${esc(addJobDraftField("start", defaultJobDateISO))}">
+          <input type="date" id="jobDue" required value="${esc(addJobDraftField("due", defaultJobDateISO))}">
+          <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required value="${esc(addJobDraftField("projectNumber"))}">
           <div class="job-category-field">
             <select id="jobCategory" aria-label="Category" required>
-              ${categoryOptionsMarkup(addJobDefaultCategory, { includeCreateOption: true })}
+              ${categoryOptionsMarkup(addJobCategoryDefault, { includeCreateOption: true })}
             </select>
             <p class="small muted job-category-hint" id="jobCategoryHint" aria-live="polite">
               Choose a category to keep jobs organized. We'll save it under All Jobs if you skip this step.
@@ -3835,6 +3883,7 @@ function viewJobs(){
           <button type="button" id="jobFilesBtn">Attach Files</button>
           <button type="button" id="jobOneDriveLibraryAddBtn">Add from this computer OneDrive folder</button>
           <input type="file" id="jobFiles" multiple style="display:none">
+          <datalist id="jobMaterialOptions">${materialInventoryOptionsMarkup}</datalist>
           <button type="submit">Add Job</button>
         </form>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
