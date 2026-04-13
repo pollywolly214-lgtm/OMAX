@@ -13102,7 +13102,7 @@ function computeCostModel(){
               ? storedProfitRaw
               : (Number.isFinite(revenueDeltaRaw) ? revenueDeltaRaw : 0))));
 
-      const normalizedCutCost = Number.isFinite(cutCost) ? Math.abs(cutCost) : 0;
+      const normalizedCutCost = Number.isFinite(cutCost) ? cutCost : 0;
       return {
         id: String(job.id || "cut"),
         date,
