@@ -766,7 +766,13 @@ function startWorkspaceStateListener(){
       return;
     }
     clearDeferredRouteTimer();
-    try { route(); } catch (err) { console.warn("Route refresh after workspace sync failed", err); }
+    const expectedHash = typeof location !== "undefined" ? String(location.hash || "#/") : "#/";
+    const scrollY = (typeof window !== "undefined" && Number.isFinite(Number(window.scrollY))) ? Number(window.scrollY) : 0;
+    try {
+      route({ preserveScroll: true, expectedHash, scrollY });
+    } catch (err) {
+      console.warn("Route refresh after workspace sync failed", err);
+    }
   };
   workspaceStateUnsubscribe = FB.docRef.onSnapshot((snap)=>{
     if (!snap || !snap.exists) return;
