@@ -11799,6 +11799,21 @@ function computeCostModel(){
   intervalTasks.forEach(task => addOccurrenceCostsFromTask(task));
   asReqTasks.forEach(task => addOccurrenceCostsFromTask(task));
   occurrenceCostItems.sort((a, b) => a.time - b.time);
+  const sumMaintenanceCostsByDate = (items)=>{
+    const map = new Map();
+    if (!Array.isArray(items)) return map;
+    items.forEach(item => {
+      if (!item) return;
+      const key = toHistoryDateKey(item.resolvedISO || item.resolvedAt);
+      if (!key) return;
+      const amount = Number(item.amount);
+      if (!Number.isFinite(amount) || amount <= 0) return;
+      map.set(key, (map.get(key) || 0) + amount);
+    });
+    return map;
+  };
+  const maintenanceOrderCostByDate = sumMaintenanceCostsByDate(maintenanceOrderItems);
+  const maintenanceOccurrenceCostByDate = sumMaintenanceCostsByDate(occurrenceCostItems);
 
   const maintenanceSpendSince = (days)=>{
     if (!isFinite(days) || days <= 0) return 0;
@@ -12195,6 +12210,17 @@ function computeCostModel(){
     const linkedTasks = Array.isArray(linkedTasksRaw)
       ? linkedTasksRaw.map(task => task ? { ...task } : task).filter(Boolean)
       : [];
+    const taskActualCost = linkedTasks.reduce((sum, task)=>{
+      const unitPrice = Number(task?.unitPrice);
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) return sum;
+      return sum + unitPrice;
+    }, 0);
+    const orderActualCost = (dateKey ? maintenanceOrderCostByDate.get(dateKey) : 0) || 0;
+    const occurrenceActualCost = (dateKey ? maintenanceOccurrenceCostByDate.get(dateKey) : 0) || 0;
+    const actualCost = taskActualCost + orderActualCost + occurrenceActualCost;
+    const allocatedEstimate = combinedCostPerHour > 0
+      ? deltaSafe * combinedCostPerHour
+      : estimateIntervalCost(deltaSafe);
     maintenanceHistory.push({
       date: curr.date,
       dateISO: curr.dateISO,
@@ -12203,9 +12229,8 @@ function computeCostModel(){
       rangeEnd: curr.date,
       rangeEndISO: curr.dateISO,
       hours: deltaSafe,
-      cost: combinedCostPerHour > 0
-        ? deltaSafe * combinedCostPerHour
-        : estimateIntervalCost(deltaSafe),
+      cost: actualCost > 0 ? actualCost : allocatedEstimate,
+      costSource: actualCost > 0 ? "actual" : "estimated",
       tasks: linkedTasks,
       key: entryKey
     });
@@ -12251,9 +12276,90 @@ function computeCostModel(){
     return {
       date: entry.date,
       value: entry.cost,
-      detail: `Estimated maintenance dollars allocated to ${hoursFragment} logged on ${dateLabel}.`
+      detail: entry.costSource === "actual"
+        ? `Actual maintenance cost recorded for ${dateLabel} covering ${hoursFragment}.`
+        : `Estimated maintenance dollars allocated to ${hoursFragment} logged on ${dateLabel}.`
     };
   });
+
+  const resolveCompletedCutFinancials = (job, eff)=>{
+    if (!job) return null;
+    const completedISO = job.completedAtISO || job.completedISO || job.doneISO || job.finishedISO || "";
+    const completedDate = completedISO ? (parseDateLocal(completedISO) || new Date(completedISO)) : null;
+    const fallbackDateISO = job.dueISO || job.startISO || "";
+    const fallbackDate = fallbackDateISO ? (parseDateLocal(fallbackDateISO) || new Date(fallbackDateISO)) : null;
+    const date = (completedDate instanceof Date && !Number.isNaN(completedDate.getTime()))
+      ? completedDate
+      : ((fallbackDate instanceof Date && !Number.isNaN(fallbackDate.getTime())) ? fallbackDate : null);
+    const manualLogs = Array.isArray(job.manualLogs) ? job.manualLogs : [];
+    const latestManualLog = manualLogs
+      .filter(entry => Number.isFinite(Number(entry?.completedHours)) && Number(entry.completedHours) >= 0)
+      .sort((a, b) => String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")))
+      .pop() || null;
+    const actualHoursRaw = Number(job.actualHours);
+    const manualHoursRaw = Number(latestManualLog?.completedHours);
+    const durationHoursRaw = Number(job.durationHours);
+    const completedHoursRaw = Number(job.completedHours);
+    const storedEffHoursRaw = Number(job?.efficiency?.actualHours);
+    const effHoursRaw = Number(eff?.actualHours);
+    const estimateHoursRaw = Number(job.estimateHours);
+    const cutHours = Number.isFinite(actualHoursRaw) && actualHoursRaw > 0
+      ? actualHoursRaw
+      : (Number.isFinite(manualHoursRaw) && manualHoursRaw > 0
+        ? manualHoursRaw
+        : (Number.isFinite(durationHoursRaw) && durationHoursRaw > 0
+          ? durationHoursRaw
+          : (Number.isFinite(completedHoursRaw) && completedHoursRaw > 0
+            ? completedHoursRaw
+            : (Number.isFinite(storedEffHoursRaw) && storedEffHoursRaw > 0
+              ? storedEffHoursRaw
+              : (Number.isFinite(effHoursRaw) && effHoursRaw > 0
+                ? effHoursRaw
+                : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0))))));
+    const chargeRateRaw = Number(job?.chargeRate ?? job?.efficiency?.chargeRate);
+    const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
+    const computedCharge = chargeRate * cutHours;
+    const totalChargeRaw = Number(job?.totalCharge ?? job?.revenue ?? job?.invoiceTotal);
+    const revenue = Number.isFinite(totalChargeRaw) ? totalChargeRaw : computedCharge;
+    const materialOverrides = [job?.materialTotal, job?.materialSpend, job?.totalMaterialCost, job?.materialCostTotal];
+    let materialCost = null;
+    for (const entry of materialOverrides){
+      const num = Number(entry);
+      if (Number.isFinite(num)){ materialCost = Math.max(0, num); break; }
+    }
+    if (materialCost == null){
+      const unit = Number(job?.materialCost);
+      const qty = Number(job?.materialQty);
+      materialCost = Math.max(0, (Number.isFinite(unit) ? unit : 0) * (Number.isFinite(qty) ? qty : 0));
+    }
+    const laborOverrides = [job?.laborCost, job?.laborTotal, job?.laborSpend, job?.totalLaborCost, job?.actualLaborCost];
+    let laborCost = null;
+    for (const entry of laborOverrides){
+      const num = Number(entry);
+      if (Number.isFinite(num)){ laborCost = Math.max(0, num); break; }
+    }
+    if (laborCost == null){
+      laborCost = Math.max(0, cutHours) * JOB_BASE_COST_PER_HOUR;
+    }
+    const machineOverrides = [job?.machineCost, job?.machineTotal, job?.equipmentCost, job?.machinesCost, job?.machineSpend];
+    let machineCost = 0;
+    for (const entry of machineOverrides){
+      const num = Number(entry);
+      if (Number.isFinite(num)){ machineCost = Math.max(0, num); break; }
+    }
+    const overheadOverrides = [job?.overheadCost, job?.overheadTotal, job?.overheadSpend, job?.overhead];
+    let overheadCost = 0;
+    for (const entry of overheadOverrides){
+      const num = Number(entry);
+      if (Number.isFinite(num)){ overheadCost = Math.max(0, num); break; }
+    }
+    const totalCostRaw = Number(job?.totalCost);
+    const totalCost = Number.isFinite(totalCostRaw)
+      ? totalCostRaw
+      : (materialCost + laborCost + machineCost + overheadCost);
+    const netProfit = Number.isFinite(revenue - totalCost) ? (revenue - totalCost) : 0;
+    return { date, netProfit, hours: cutHours };
+  };
 
   const jobsInfo = [];
   const jobSeriesRaw = [];
@@ -12265,15 +12371,12 @@ function computeCostModel(){
     for (const job of completedJobsList){
       if (!job) continue;
       const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
-      const gainLoss = eff && Number.isFinite(eff.gainLoss) ? Number(eff.gainLoss) : 0;
+      const financials = resolveCompletedCutFinancials(job, eff);
+      const gainLoss = financials && Number.isFinite(financials.netProfit)
+        ? Number(financials.netProfit)
+        : (eff && Number.isFinite(eff.gainLoss) ? Number(eff.gainLoss) : 0);
       const deltaHours = eff && Number.isFinite(eff.deltaHours) ? Number(eff.deltaHours) : 0;
-      let date = null;
-      if (job.completedAtISO){
-        const completedDate = parseDateLocal(job.completedAtISO) || new Date(job.completedAtISO);
-        if (completedDate instanceof Date && !Number.isNaN(completedDate.getTime())){
-          date = completedDate;
-        }
-      }
+      let date = financials?.date || null;
       if (!date && job.dueISO){
         const due = parseDateLocal(job.dueISO);
         if (due) date = due;
@@ -13039,98 +13142,21 @@ function computeCostModel(){
   const completedCutsForWeekly = (Array.isArray(completedCuttingJobs) ? completedCuttingJobs : [])
     .map(job => {
       if (!job) return null;
-      const completedISO = job.completedAtISO || job.completedISO || job.doneISO || job.finishedISO || "";
-      const completedDate = completedISO ? (parseDateLocal(completedISO) || new Date(completedISO)) : null;
-      const fallbackDateISO = job.dueISO || job.startISO || "";
-      const fallbackDate = fallbackDateISO ? (parseDateLocal(fallbackDateISO) || new Date(fallbackDateISO)) : null;
-      const date = (completedDate instanceof Date && !Number.isNaN(completedDate.getTime()))
-        ? completedDate
-        : ((fallbackDate instanceof Date && !Number.isNaN(fallbackDate.getTime())) ? fallbackDate : null);
-      if (!date) return null;
-
       const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
-      const manualLogs = Array.isArray(job.manualLogs) ? job.manualLogs : [];
-      const latestManualLog = manualLogs
-        .filter(entry => Number.isFinite(Number(entry?.completedHours)) && Number(entry.completedHours) >= 0)
-        .sort((a, b) => String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")))
-        .pop() || null;
+      const financials = resolveCompletedCutFinancials(job, eff);
+      const date = financials?.date || null;
+      if (!date) return null;
 
       const catId = job.cat != null ? String(job.cat) : rootFolderId;
       const categoryName = resolveCategoryName(catId);
-      const actualHoursRaw = Number(job.actualHours);
-      const manualHoursRaw = Number(latestManualLog?.completedHours);
-      const durationHoursRaw = Number(job.durationHours);
-      const completedHoursRaw = Number(job.completedHours);
-      const storedEffHoursRaw = Number(job?.efficiency?.actualHours);
-      const effHoursRaw = Number(eff?.actualHours);
-      const estimateHoursRaw = Number(job.estimateHours);
-      const cutHours = Number.isFinite(actualHoursRaw) && actualHoursRaw > 0
-        ? actualHoursRaw
-        : (Number.isFinite(manualHoursRaw) && manualHoursRaw > 0
-          ? manualHoursRaw
-          : (Number.isFinite(durationHoursRaw) && durationHoursRaw > 0
-            ? durationHoursRaw
-            : (Number.isFinite(completedHoursRaw) && completedHoursRaw > 0
-              ? completedHoursRaw
-              : (Number.isFinite(storedEffHoursRaw) && storedEffHoursRaw > 0
-                ? storedEffHoursRaw
-                : (Number.isFinite(effHoursRaw) && effHoursRaw > 0
-                  ? effHoursRaw
-                  : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0))))));
+      const cutHours = Number(financials?.hours) > 0 ? Number(financials.hours) : 0;
 
       const projectNumber = String(job?.projectNumber || "").replace(/[^0-9]/g, "").slice(0, 8);
       const categoryDisplay = projectNumber
         ? `${categoryName} · ${projectNumber}`
         : categoryName;
 
-      const chargeRateRaw = Number(job?.chargeRate ?? job?.efficiency?.chargeRate);
-      const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
-      const computedCharge = chargeRate * cutHours;
-      const totalChargeRaw = Number(job?.totalCharge ?? job?.revenue ?? job?.invoiceTotal);
-      const revenue = Number.isFinite(totalChargeRaw) ? totalChargeRaw : computedCharge;
-
-      const materialOverrides = [job?.materialTotal, job?.materialSpend, job?.totalMaterialCost, job?.materialCostTotal];
-      let materialCost = null;
-      for (const entry of materialOverrides){
-        const num = Number(entry);
-        if (Number.isFinite(num)){ materialCost = Math.max(0, num); break; }
-      }
-      if (materialCost == null){
-        const unit = Number(job?.materialCost);
-        const qty = Number(job?.materialQty);
-        materialCost = Math.max(0, (Number.isFinite(unit) ? unit : 0) * (Number.isFinite(qty) ? qty : 0));
-      }
-
-      const laborOverrides = [job?.laborCost, job?.laborTotal, job?.laborSpend, job?.totalLaborCost, job?.actualLaborCost];
-      let laborCost = null;
-      for (const entry of laborOverrides){
-        const num = Number(entry);
-        if (Number.isFinite(num)){ laborCost = Math.max(0, num); break; }
-      }
-      if (laborCost == null){
-        laborCost = Math.max(0, cutHours) * JOB_BASE_COST_PER_HOUR;
-      }
-
-      const machineOverrides = [job?.machineCost, job?.machineTotal, job?.equipmentCost, job?.machinesCost, job?.machineSpend];
-      let machineCost = 0;
-      for (const entry of machineOverrides){
-        const num = Number(entry);
-        if (Number.isFinite(num)){ machineCost = Math.max(0, num); break; }
-      }
-
-      const overheadOverrides = [job?.overheadCost, job?.overheadTotal, job?.overheadSpend, job?.overhead];
-      let overheadCost = 0;
-      for (const entry of overheadOverrides){
-        const num = Number(entry);
-        if (Number.isFinite(num)){ overheadCost = Math.max(0, num); break; }
-      }
-
-      const totalCostRaw = Number(job?.totalCost);
-      const totalCost = Number.isFinite(totalCostRaw)
-        ? totalCostRaw
-        : (materialCost + laborCost + machineCost + overheadCost);
-      const cutCost = revenue - totalCost;
-      const normalizedCutCost = Number.isFinite(cutCost) ? cutCost : 0;
+      const normalizedCutCost = Number.isFinite(financials?.netProfit) ? Number(financials.netProfit) : 0;
       return {
         id: String(job.id || "cut"),
         date,
@@ -13657,8 +13683,8 @@ function computeCostModel(){
     : "No usage history yet. Log machine hours to estimate maintenance spend.";
   const jobEmpty = "Add cutting jobs with estimates to build the efficiency tracker.";
 
-  const chartNote = `Maintenance line allocates interval pricing plus as-required spend per logged hour (${asReqAnnualActual > 0 ? "derived from approved orders" : "using task estimates when orders are unavailable"}); cutting jobs line shows the rolling average gain/loss at ${formatterCurrency(JOB_RATE_PER_HOUR, { decimals: 0 })}/hr.`;
-  const chartInfo = "Maintenance trend distributes interval task pricing and approved as-required spend across each logged machine hour so you can monitor burn rate, while the cutting jobs trend plots rolling average gain or loss to highlight profitability swings.";
+  const chartNote = `Maintenance line uses recorded task/occurrence/order costs when available (otherwise hourly allocations are estimated from configured pricing); cutting jobs line shows rolling average net profit from each completed job's recorded revenue and costs.`;
+  const chartInfo = "Maintenance trend prioritizes recorded task completions, occurrence notes, and approved order spend by date (falling back to hourly allocation estimates when records are missing), while the cutting jobs trend plots rolling average net profit from completed jobs.";
 
   const orderSorted = orderHistory.slice().sort((a,b)=>{
     const aTime = new Date(a.resolvedAt || a.createdAt || 0).getTime();
