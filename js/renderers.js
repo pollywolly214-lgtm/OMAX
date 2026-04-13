@@ -13083,26 +13083,54 @@ function computeCostModel(){
         ? `${categoryName} · ${projectNumber}`
         : categoryName;
 
-      const derivedGainLossRaw = Number(eff?.gainLoss);
-      const efficiencyGainLossRaw = Number(job?.efficiency?.gainLoss);
-      const storedGainLossRaw = Number(job?.gainLoss);
-      const storedProfitRaw = Number(job?.profitLoss);
+      const chargeRateRaw = Number(job?.chargeRate ?? job?.efficiency?.chargeRate);
+      const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
+      const computedCharge = chargeRate * cutHours;
       const totalChargeRaw = Number(job?.totalCharge ?? job?.revenue ?? job?.invoiceTotal);
-      const totalCostRaw = Number(job?.totalCost);
-      const revenueDeltaRaw = (Number.isFinite(totalChargeRaw) && Number.isFinite(totalCostRaw))
-        ? (totalChargeRaw - totalCostRaw)
-        : NaN;
-      const cutCost = Number.isFinite(derivedGainLossRaw)
-        ? derivedGainLossRaw
-        : (Number.isFinite(efficiencyGainLossRaw)
-          ? efficiencyGainLossRaw
-          : (Number.isFinite(storedGainLossRaw)
-            ? storedGainLossRaw
-            : (Number.isFinite(storedProfitRaw)
-              ? storedProfitRaw
-              : (Number.isFinite(revenueDeltaRaw) ? revenueDeltaRaw : 0))));
+      const revenue = Number.isFinite(totalChargeRaw) ? totalChargeRaw : computedCharge;
 
-      const normalizedCutCost = Number.isFinite(cutCost) ? Math.abs(cutCost) : 0;
+      const materialOverrides = [job?.materialTotal, job?.materialSpend, job?.totalMaterialCost, job?.materialCostTotal];
+      let materialCost = null;
+      for (const entry of materialOverrides){
+        const num = Number(entry);
+        if (Number.isFinite(num)){ materialCost = Math.max(0, num); break; }
+      }
+      if (materialCost == null){
+        const unit = Number(job?.materialCost);
+        const qty = Number(job?.materialQty);
+        materialCost = Math.max(0, (Number.isFinite(unit) ? unit : 0) * (Number.isFinite(qty) ? qty : 0));
+      }
+
+      const laborOverrides = [job?.laborCost, job?.laborTotal, job?.laborSpend, job?.totalLaborCost, job?.actualLaborCost];
+      let laborCost = null;
+      for (const entry of laborOverrides){
+        const num = Number(entry);
+        if (Number.isFinite(num)){ laborCost = Math.max(0, num); break; }
+      }
+      if (laborCost == null){
+        laborCost = Math.max(0, cutHours) * JOB_BASE_COST_PER_HOUR;
+      }
+
+      const machineOverrides = [job?.machineCost, job?.machineTotal, job?.equipmentCost, job?.machinesCost, job?.machineSpend];
+      let machineCost = 0;
+      for (const entry of machineOverrides){
+        const num = Number(entry);
+        if (Number.isFinite(num)){ machineCost = Math.max(0, num); break; }
+      }
+
+      const overheadOverrides = [job?.overheadCost, job?.overheadTotal, job?.overheadSpend, job?.overhead];
+      let overheadCost = 0;
+      for (const entry of overheadOverrides){
+        const num = Number(entry);
+        if (Number.isFinite(num)){ overheadCost = Math.max(0, num); break; }
+      }
+
+      const totalCostRaw = Number(job?.totalCost);
+      const totalCost = Number.isFinite(totalCostRaw)
+        ? totalCostRaw
+        : (materialCost + laborCost + machineCost + overheadCost);
+      const cutCost = revenue - totalCost;
+      const normalizedCutCost = Number.isFinite(cutCost) ? cutCost : 0;
       return {
         id: String(job.id || "cut"),
         date,

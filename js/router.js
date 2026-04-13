@@ -14,7 +14,7 @@ function nav(){
   </div>`;
 }
 
-function route(){
+function route(options = {}){
   // Ensure a content root exists
   let content = document.getElementById("content");
   if (!content) {
@@ -73,6 +73,17 @@ function route(){
   const normHash = normalizeHash(location.hash || "#/");
   renderByHash(normHash);
   setActiveTabs(normHash);
+
+  if (options && options.preserveScroll){
+    const expectedHashNorm = normalizeHash(options.expectedHash || normHash);
+    const currentHashNorm = normalizeHash(location.hash || "#/");
+    const targetY = Number(options.scrollY);
+    if (expectedHashNorm === currentHashNorm && Number.isFinite(targetY) && targetY >= 0){
+      requestAnimationFrame(()=>{
+        try { window.scrollTo(0, targetY); } catch (_err) { }
+      });
+    }
+  }
 
   // ---- Helpers (scoped to route) ----
   function normalizeHash(h){
