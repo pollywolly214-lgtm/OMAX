@@ -10108,8 +10108,76 @@ function renderCosts(){
   setupTimeEfficiencyWidget(document.getElementById("costTimeEfficiency"));
   refreshTimeEfficiencyWidgets();
   setupCostTimeframeModal(model);
+  setupCostAuditModal();
   setupJobCategoryWindow(model);
   setupWeeklyReportWindow(model);
+
+  function setupCostAuditModal(){
+    const modal = document.getElementById("costAuditModal");
+    const openBtn = content.querySelector("[data-cost-audit-open]");
+    if (!modal || !openBtn) return;
+    const closeControls = Array.from(modal.querySelectorAll("[data-cost-audit-close]"));
+    let keyHandler = null;
+    let lastFocused = null;
+
+    const closeModal = ()=>{
+      modal.classList.remove("is-visible");
+      modal.setAttribute("aria-hidden", "true");
+      if (!modal.hasAttribute("hidden")) modal.setAttribute("hidden", "");
+      document.body.classList.remove("cost-timeframe-modal-open");
+      if (keyHandler){
+        document.removeEventListener("keydown", keyHandler);
+        keyHandler = null;
+      }
+      if (lastFocused && typeof lastFocused.focus === "function"){
+        try { lastFocused.focus({ preventScroll: true }); }
+        catch (_err){ lastFocused.focus(); }
+      }
+    };
+
+    const openModal = ()=>{
+      lastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      modal.classList.add("is-visible");
+      modal.removeAttribute("hidden");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.classList.add("cost-timeframe-modal-open");
+      requestAnimationFrame(() => {
+        const focusTarget = closeControls.find(el => el instanceof HTMLElement) || modal;
+        if (focusTarget && typeof focusTarget.focus === "function"){
+          try { focusTarget.focus({ preventScroll: true }); }
+          catch (_err){ focusTarget.focus(); }
+        }
+      });
+      keyHandler = (event)=>{
+        if (event.key === "Escape"){
+          event.preventDefault();
+          closeModal();
+        }
+      };
+      document.addEventListener("keydown", keyHandler);
+    };
+
+    openBtn.addEventListener("click", (event)=>{
+      event.preventDefault();
+      openModal();
+    });
+
+    modal.addEventListener("click", (event)=>{
+      const target = event.target;
+      if (target && target.hasAttribute && target.hasAttribute("data-cost-audit-close")){
+        event.preventDefault();
+        closeModal();
+      }
+    });
+
+    closeControls.forEach(control => {
+      if (!(control instanceof HTMLElement)) return;
+      control.addEventListener("click", (event)=>{
+        event.preventDefault();
+        closeModal();
+      });
+    });
+  }
 
   function setupCostTimeframeModal(currentModel){
     if (typeof window.__cleanupCostTimeframeModal === "function"){
@@ -12231,6 +12299,10 @@ function computeCostModel(){
       hours: deltaSafe,
       cost: actualCost > 0 ? actualCost : allocatedEstimate,
       costSource: actualCost > 0 ? "actual" : "estimated",
+      taskCost: taskActualCost,
+      orderCost: orderActualCost,
+      occurrenceCost: occurrenceActualCost,
+      timeCost: allocatedEstimate,
       tasks: linkedTasks,
       key: entryKey
     });
@@ -13170,7 +13242,8 @@ function computeCostModel(){
         categoryId: catId,
         cost: normalizedCutCost,
         hours: cutHours,
-        totalCost: normalizedTotalCutCost
+        totalCost: normalizedTotalCutCost,
+        revenue: Number.isFinite(Number(financials?.revenue)) ? Number(financials.revenue) : 0
       };
     })
     .filter(Boolean);
@@ -13256,9 +13329,9 @@ function computeCostModel(){
       ? formatterCurrency(jobSeries[jobSeries.length-1].value, { decimals: 0, showPlus: true })
       : formatterCurrency(0, { decimals: 0 })
   };
-  const totalCuttingCostValue = completedCutsForWeekly.reduce((sum, item)=>{
-    const value = Number(item?.totalCost);
-    return sum + (Number.isFinite(value) && value > 0 ? value : 0);
+  const totalCuttingProfitValue = completedCutsForWeekly.reduce((sum, item)=>{
+    const value = Number(item?.cost);
+    return sum + (Number.isFinite(value) ? value : 0);
   }, 0);
   const totalCuttingHoursValue = completedCutsForWeekly.reduce((sum, item)=>{
     const value = Number(item?.hours);
@@ -13268,8 +13341,8 @@ function computeCostModel(){
     const value = Number(entry?.cost);
     return sum + (Number.isFinite(value) && value > 0 ? value : 0);
   }, 0);
-  const averageCuttingCostValue = completedCutsForWeekly.length
-    ? (totalCuttingCostValue / completedCutsForWeekly.length)
+  const averageCuttingProfitValue = completedCutsForWeekly.length
+    ? (totalCuttingProfitValue / completedCutsForWeekly.length)
     : 0;
   const averageMaintenanceCostValue = maintenanceHistory.length
     ? (totalMaintenanceCostValue / maintenanceHistory.length)
@@ -13278,13 +13351,57 @@ function computeCostModel(){
     ? (totalMaintenanceCostValue / totalCuttingHoursValue)
     : null;
   const costTrackingSummary = {
-    totalCuttingCostLabel: formatterCurrency(totalCuttingCostValue, { decimals: totalCuttingCostValue < 1000 ? 2 : 0 }),
-    avgCuttingCostLabel: formatterCurrency(averageCuttingCostValue, { decimals: averageCuttingCostValue < 1000 ? 2 : 0 }),
+    totalCuttingProfitLabel: formatterCurrency(totalCuttingProfitValue, { decimals: Math.abs(totalCuttingProfitValue) < 1000 ? 2 : 0, showPlus: true }),
+    avgCuttingProfitLabel: formatterCurrency(averageCuttingProfitValue, { decimals: Math.abs(averageCuttingProfitValue) < 1000 ? 2 : 0, showPlus: true }),
+    totalCuttingHoursLabel: formatHours(totalCuttingHoursValue),
     totalMaintenanceCostLabel: formatterCurrency(totalMaintenanceCostValue, { decimals: totalMaintenanceCostValue < 1000 ? 2 : 0 }),
     avgMaintenanceCostLabel: formatterCurrency(averageMaintenanceCostValue, { decimals: averageMaintenanceCostValue < 1000 ? 2 : 0 }),
     maintenanceCostPerHourOfCuttingTimeLabel: maintenanceCostPerHourOfCuttingTime != null
       ? `${formatterCurrency(maintenanceCostPerHourOfCuttingTime, { decimals: maintenanceCostPerHourOfCuttingTime < 1000 ? 2 : 0 })}/hr`
       : "—"
+  };
+  const cuttingAuditRows = completedCutsForWeekly
+    .slice()
+    .sort((a,b)=> String(a.dateISO || "").localeCompare(String(b.dateISO || "")))
+    .map(row => {
+      const profit = Number(row?.cost) || 0;
+      const totalCost = Number(row?.totalCost) || 0;
+      const revenue = Number(row?.revenue) || 0;
+      const hours = Number(row?.hours) || 0;
+      const chargePerHour = hours > 0 ? (revenue / hours) : 0;
+      const costPerHour = hours > 0 ? (totalCost / hours) : 0;
+      return {
+        name: row?.name || "Cutting job",
+        dateLabel: row?.dateISO || "—",
+        hoursLabel: formatHours(hours),
+        revenueLabel: formatterCurrency(revenue, { decimals: revenue < 1000 ? 2 : 0 }),
+        totalCostLabel: formatterCurrency(totalCost, { decimals: totalCost < 1000 ? 2 : 0 }),
+        profitLabel: formatterCurrency(profit, { decimals: Math.abs(profit) < 1000 ? 2 : 0, showPlus: true }),
+        chargePerHourLabel: formatterCurrency(chargePerHour, { decimals: 2 }),
+        costPerHourLabel: formatterCurrency(costPerHour, { decimals: 2 })
+      };
+    });
+  const maintenanceAuditRows = maintenanceHistory
+    .slice()
+    .sort((a,b)=> String(a.dateISO || "").localeCompare(String(b.dateISO || "")))
+    .map(entry => ({
+      dateLabel: entry?.dateISO || "—",
+      hoursLabel: formatHours(Number(entry?.hours) || 0),
+      timeCostLabel: formatterCurrency(Number(entry?.timeCost) || 0, { decimals: 2 }),
+      taskCostLabel: formatterCurrency(Number(entry?.taskCost) || 0, { decimals: 2 }),
+      chargeCostLabel: formatterCurrency((Number(entry?.orderCost) || 0) + (Number(entry?.occurrenceCost) || 0), { decimals: 2 }),
+      totalCostLabel: formatterCurrency(Number(entry?.cost) || 0, { decimals: 2 }),
+      sourceLabel: entry?.costSource === "actual" ? "Actual" : "Estimated"
+    }));
+  const auditSummary = {
+    totalCuttingJobsLabel: String(cuttingAuditRows.length),
+    totalMaintenanceEventsLabel: String(maintenanceAuditRows.length),
+    totalCuttingProfitLabel: costTrackingSummary.totalCuttingProfitLabel,
+    avgCuttingProfitLabel: costTrackingSummary.avgCuttingProfitLabel,
+    totalCuttingHoursLabel: costTrackingSummary.totalCuttingHoursLabel,
+    totalMaintenanceCostLabel: costTrackingSummary.totalMaintenanceCostLabel,
+    avgMaintenanceCostLabel: costTrackingSummary.avgMaintenanceCostLabel,
+    maintenanceCostPerHourLabel: costTrackingSummary.maintenanceCostPerHourOfCuttingTimeLabel
   };
 
   const jobCategoryAnalytics = (()=>{
@@ -13776,7 +13893,10 @@ function computeCostModel(){
     maintenanceSeries,
     jobSeries,
     weeklyReports,
-    costTrackingSummary
+    costTrackingSummary,
+    auditSummary,
+    cuttingAuditRows,
+    maintenanceAuditRows
   };
 }
 
