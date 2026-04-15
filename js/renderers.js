@@ -7964,6 +7964,7 @@ function renderSettings(){
     const openTaskIds = Array.isArray(pending.openTaskIds)
       ? pending.openTaskIds.map(id => String(id)).filter(Boolean)
       : [];
+    openTaskIds.forEach(id => openTaskState.add(id));
     openTaskIds.forEach(ensureTaskOpen);
 
     const idsSource = Array.isArray(pending.taskIds)
