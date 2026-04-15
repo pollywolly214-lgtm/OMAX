@@ -97,11 +97,7 @@ function viewDashboard(){
       <span class="dashboard-edit-hint" id="dashboardEditHint" hidden>Drag windows to rearrange and resize. Calendar stays fixed.</span>
     </div>
 
-    <div style="text-align: center; margin: 20px 0;">
-      <h2 onclick="confetti({particleCount: 150, spread: 80, origin: {y: 0.6}})" style="cursor: pointer; display: inline-block; padding: 15px 30px; background: linear-gradient(135deg, #6e8efb, #a777e3); color: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); transition: transform 0.2s ease, box-shadow 0.2s ease;" onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 6px 20px rgba(0,0,0,0.15)';" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.1)';">
-        I am working!
-      </h2>
-    </div>
+
 
     ${avgBanner}
 
@@ -363,12 +359,17 @@ function viewDashboard(){
         <form id="dashTaskForm" class="modal-form task-option-body" data-task-variant="new">
           <div class="modal-grid">
             <label>Task name<input id="dashTaskName" required placeholder="Task"></label>
-            <label>Type<select id="dashTaskType">
-              <option value="interval">Per interval</option>
-              <option value="asreq">As required</option>
-            </select></label>
-            <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
-            <label data-task-last>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
+            <label class="checkbox-label" style="display: flex; gap: 8px; align-items: center; margin-top: 10px; margin-bottom: 5px;">
+              <input type="checkbox" id="dashTaskIsRepeating" checked> Automatically repeat?
+            </label>
+            <div data-task-repeat-settings style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <label>Repeat every<input type="number" min="1" step="0.1" id="dashTaskInterval" placeholder="e.g. 40"></label>
+              <label>Frequency<select id="dashTaskIntervalType">
+                <option value="hours">Machine Hours</option>
+                <option value="days">Calendar Days</option>
+              </select></label>
+            </div>
+            <label data-task-last>Time since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
             <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
             <label>Manual link<input type="url" id="dashTaskManual" placeholder="https://..."></label>
             <label>Store link<input type="url" id="dashTaskStore" placeholder="https://..."></label>
@@ -744,22 +745,26 @@ function viewSettings(){
 
       <div class="add-forms" style="margin-bottom:8px">
         <form id="addIntervalForm" class="mini-form">
-          <strong>Add Interval Task:</strong>
+          <strong>Add Repeating Task:</strong>
           <input type="text" id="ai_name" placeholder="Name" required>
-          <input type="number" id="ai_interval" placeholder="Interval (hrs)" required min="1">
+          <input type="number" id="ai_interval" placeholder="Repeat every" required min="1">
+          <select id="ai_intervalType">
+            <option value="hours">Hours</option>
+            <option value="days">Days</option>
+          </select>
           <button type="submit">Add</button>
         </form>
 
         <form id="addAsReqForm" class="mini-form">
-          <strong>Add As-Required Task:</strong>
+          <strong>Add Condition-based Task:</strong>
           <input type="text" id="ar_name" placeholder="Name" required>
           <input type="text" id="ar_condition" placeholder="Condition (e.g., When damaged)">
           <button type="submit">Add</button>
         </form>
       </div>
 
-      ${buildMenu("interval","Interval Hourly Maintenance")}
-      ${buildMenu("asreq","As-Needed Maintenance")}
+      ${buildMenu("interval","Repeating Maintenance")}
+      ${buildMenu("asreq","Condition-based Maintenance")}
 
       <div style="margin-top:10px;">
         <button id="saveTasksBtn">Save All</button>
