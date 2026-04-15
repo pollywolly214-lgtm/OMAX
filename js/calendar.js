@@ -617,6 +617,17 @@ function markCalendarTaskComplete(meta, dateISO){
     if (!task.calendarDateISO || normalizeDateKey(task.calendarDateISO) === key){
       task.calendarDateISO = key;
     }
+    const recurrence = getTaskRecurrence(task);
+    if (recurrence && recurrence.enabled){
+      recurrence.completionAnchorISO = key;
+      if (currentHours != null && Number.isFinite(Number(currentHours))){
+        recurrence.completionAnchorHours = Number(currentHours);
+      }
+      if (recurrence.basis === "machine_hours"){
+        recurrence.startISO = key;
+      }
+      task.recurrence = recurrence;
+    }
     changed = true;
   }else{
     if (!Array.isArray(task.completedDates)) task.completedDates = [];
@@ -627,6 +638,12 @@ function markCalendarTaskComplete(meta, dateISO){
     }
     if (normalizeDateKey(task.calendarDateISO) !== key){
       task.calendarDateISO = key;
+      changed = true;
+    }
+    const recurrence = getTaskRecurrence(task);
+    if (recurrence && recurrence.enabled){
+      recurrence.completionAnchorISO = key;
+      task.recurrence = recurrence;
       changed = true;
     }
   }
@@ -1028,14 +1045,6 @@ function makeBubble(anchor){
 function completeTask(taskId){
   let meta = findCalendarTaskMeta(taskId);
   if (!meta) return;
-  if (isTemplateTask(meta.task) && meta.task.mode === "interval"){
-    const instance = scheduleExistingIntervalTask(meta.task, { dateISO: ymd(new Date()) });
-    if (instance){
-      const nextMeta = findCalendarTaskMeta(instance.id);
-      if (nextMeta) meta = nextMeta;
-      else meta = { task: instance, mode: "interval", list: window.tasksInterval, index: window.tasksInterval.indexOf(instance) };
-    }
-  }
   const todayKey = normalizeDateKey(new Date());
   if (!todayKey) return;
   const changed = markCalendarTaskComplete(meta, todayKey);
@@ -1613,6 +1622,87 @@ function wireCalendarBubbles(){
   });
 }
 
+function getTaskRecurrence(task){
+  if (!task || typeof task !== "object") return null;
+  if (typeof normalizeTaskRecurrence === "function"){
+    try { return normalizeTaskRecurrence(task); } catch (_err){}
+  }
+  const raw = task.recurrence && typeof task.recurrence === "object" ? task.recurrence : null;
+  if (!raw) return null;
+  const basis = String(raw.basis || "").toLowerCase();
+  const everyRaw = Number(raw.every);
+  return {
+    enabled: Boolean(raw.enabled),
+    basis: ["machine_hours", "calendar_day", "calendar_week", "calendar_month"].includes(basis) ? basis : "calendar_day",
+    every: Number.isFinite(everyRaw) && everyRaw > 0 ? Math.max(1, Math.round(everyRaw)) : 1,
+    intervalHours: Number.isFinite(Number(raw.intervalHours)) ? Number(raw.intervalHours) : null,
+    startISO: normalizeDateKey(raw.startISO || task.calendarDateISO || null),
+    endType: String(raw.endType || "never").toLowerCase(),
+    endDateISO: normalizeDateKey(raw.endDateISO || null),
+    endCount: Number.isFinite(Number(raw.endCount)) ? Math.max(1, Math.floor(Number(raw.endCount))) : null,
+    completionAnchorISO: normalizeDateKey(raw.completionAnchorISO || null),
+    completionAnchorHours: Number.isFinite(Number(raw.completionAnchorHours)) ? Number(raw.completionAnchorHours) : null
+  };
+}
+
+function projectCalendarBasedOccurrences(task, recurrence, options = {}){
+  if (!task || !recurrence || !recurrence.enabled) return [];
+  if (!["calendar_day", "calendar_week", "calendar_month"].includes(recurrence.basis)) return [];
+  const toDayStart = (value)=>{
+    const key = normalizeDateKey(value);
+    if (!key) return null;
+    const parsed = parseDateLocal(key);
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+    parsed.setHours(0,0,0,0);
+    return parsed;
+  };
+  const excludeSet = new Set();
+  const excludeRaw = options.excludeDates;
+  if (excludeRaw && typeof excludeRaw.forEach === "function"){
+    excludeRaw.forEach(v => {
+      const key = normalizeDateKey(v);
+      if (key) excludeSet.add(key);
+    });
+  }
+  const minOccurrences = Number.isFinite(Number(options.minOccurrences)) ? Math.max(1, Math.floor(Number(options.minOccurrences))) : 1;
+  const maxOccurrences = Number.isFinite(Number(options.maxOccurrences)) ? Math.max(1, Math.floor(Number(options.maxOccurrences))) : null;
+  const startDate = toDayStart(recurrence.completionAnchorISO || recurrence.startISO || task.calendarDateISO || ymd(new Date()));
+  if (!startDate) return [];
+  const today = new Date(); today.setHours(0,0,0,0);
+  const horizon = new Date(today);
+  const monthsAhead = Number.isFinite(Number(options.monthsAhead)) ? Math.max(1, Number(options.monthsAhead)) : 3;
+  horizon.setMonth(horizon.getMonth() + monthsAhead);
+  const every = Math.max(1, Number(recurrence.every) || 1);
+  const endDate = recurrence.endType === "on_date" ? toDayStart(recurrence.endDateISO) : null;
+  const endCount = recurrence.endType === "after_count" ? Math.max(1, Number(recurrence.endCount) || 1) : null;
+  const events = [];
+  let producedCount = 0;
+  const maxIterations = 720;
+  for (let i = 0; i < maxIterations; i++){
+    const cursor = new Date(startDate);
+    if (recurrence.basis === "calendar_day"){
+      cursor.setDate(cursor.getDate() + (i * every));
+    }else if (recurrence.basis === "calendar_week"){
+      cursor.setDate(cursor.getDate() + (i * every * 7));
+    }else{
+      cursor.setMonth(cursor.getMonth() + (i * every));
+    }
+    cursor.setHours(0,0,0,0);
+    const key = ymd(cursor);
+    if (!key) continue;
+    producedCount += 1;
+    if (endDate && cursor.getTime() > endDate.getTime()) break;
+    if (endCount != null && producedCount > endCount) break;
+    if (excludeSet.has(key)) continue;
+    if (cursor.getTime() >= today.getTime()){
+      events.push({ dateISO: key, dueDate: new Date(cursor) });
+      if (maxOccurrences != null && events.length >= maxOccurrences) break;
+    }
+    if (cursor.getTime() > horizon.getTime() && events.length >= minOccurrences) break;
+  }
+  return events;
+}
+
 function estimateIntervalDailyHours(task, baselineEntry, today){
   const defaultHours = configuredDailyHours();
   const history = Array.isArray(task?.manualHistory) ? task.manualHistory : [];
@@ -1666,6 +1756,16 @@ function estimateIntervalDailyHours(task, baselineEntry, today){
 
 function projectIntervalDueDates(task, options = {}){
   if (!task || task.mode !== "interval") return [];
+  const recurrence = getTaskRecurrence(task);
+  if (recurrence && recurrence.enabled === false){
+    return [];
+  }
+  if (recurrence && recurrence.enabled && recurrence.basis !== "machine_hours"){
+    return projectCalendarBasedOccurrences(task, recurrence, options);
+  }
+  if (recurrence && recurrence.enabled && recurrence.basis === "machine_hours" && Number.isFinite(Number(recurrence.intervalHours)) && Number(recurrence.intervalHours) > 0){
+    task.interval = Number(recurrence.intervalHours);
+  }
   const interval = Number(task.interval);
   if (!Number.isFinite(interval) || interval <= 0) return [];
 
@@ -1948,6 +2048,7 @@ function renderCalendar(){
       const events = dueMap[segKey] ||= [];
       const baseId = String(task.id);
       const compositeId = seg.count > 1 ? `${baseId}__seg${seg.index}` : baseId;
+      const templateKey = String(task.templateId != null ? task.templateId : task.id);
       const existing = events.find(ev => ev.type === "task" && ev.id === compositeId);
       if (existing){
         existing.name = task.name;
@@ -1965,12 +2066,33 @@ function renderCalendar(){
         existing.totalDowntimeHours = downtimeHours;
         existing.taskId = baseId;
         existing.taskStartsOn = key;
+        existing.templateKey = templateKey;
+        return;
+      }
+      const duplicateByTemplate = events.find(ev =>
+        ev.type === "task"
+        && String(ev.templateKey || ev.taskId || ev.id) === templateKey
+        && String(ev.taskStartsOn || ev.dateISO || "") === String(key)
+        && Number(ev.segmentIndex || 0) === Number(seg.index || 0)
+      );
+      if (duplicateByTemplate){
+        const statusPriority = { completed: 3, manual: 2, due: 1 };
+        const nextPriority = statusPriority[statusKey] || 1;
+        const existingPriority = statusPriority[duplicateByTemplate.status || "due"] || 1;
+        if (nextPriority >= existingPriority){
+          duplicateByTemplate.status = statusKey;
+          duplicateByTemplate.name = task.name;
+          duplicateByTemplate.mode = task && task.mode === "asreq" ? "asreq" : "interval";
+          duplicateByTemplate.durationHours = seg.hours;
+          duplicateByTemplate.totalDowntimeHours = downtimeHours;
+        }
         return;
       }
       events.push({
         type: "task",
         id: compositeId,
         taskId: baseId,
+        templateKey,
         name: task.name,
         status: statusKey,
         mode: task && task.mode === "asreq" ? "asreq" : "interval",
@@ -2083,6 +2205,23 @@ function renderCalendar(){
     const manualKey = normalizeDateKey(t.calendarDateISO);
     if (manualKey){
       pushTaskEvent(t, manualKey, completedDates.has(manualKey) ? "completed" : "manual");
+    }
+    const recurrence = getTaskRecurrence(t);
+    if (recurrence && recurrence.enabled){
+      const skipDates = new Set(completedDates);
+      if (manualKey) skipDates.add(manualKey);
+      const projections = projectCalendarBasedOccurrences(t, recurrence, {
+        monthsAhead: 3,
+        excludeDates: skipDates,
+        minOccurrences: 1,
+        maxOccurrences: 1
+      });
+      if (projections.length){
+        const dueKey = normalizeDateKey(projections[0].dateISO);
+        if (dueKey && !completedDates.has(dueKey) && (!manualKey || manualKey !== dueKey)){
+          pushTaskEvent(t, dueKey, "due");
+        }
+      }
     }
   });
 

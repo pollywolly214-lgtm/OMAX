@@ -181,7 +181,30 @@ function liveSince(task){
 }
 
 function nextDue(task){
-  if (!task || task.interval == null) return null;
+  if (!task) return null;
+  const recurrence = (()=>{
+    if (typeof normalizeTaskRecurrence === "function"){
+      try { return normalizeTaskRecurrence(task); } catch (_err){}
+    }
+    return task.recurrence && typeof task.recurrence === "object" ? task.recurrence : null;
+  })();
+  if (recurrence && recurrence.enabled === false) return null;
+  if (recurrence && recurrence.enabled && recurrence.basis && recurrence.basis !== "machine_hours"){
+    const startISO = (recurrence.completionAnchorISO || recurrence.startISO || task.calendarDateISO || ymd(new Date()));
+    const startDate = parseDateLocal(startISO);
+    if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) return null;
+    startDate.setHours(0,0,0,0);
+    const every = Math.max(1, Number(recurrence.every) || 1);
+    const due = new Date(startDate);
+    if (recurrence.basis === "calendar_month") due.setMonth(due.getMonth() + every);
+    else if (recurrence.basis === "calendar_week") due.setDate(due.getDate() + (every * 7));
+    else due.setDate(due.getDate() + every);
+    due.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0,0,0,0);
+    const days = Math.round((due.getTime() - today.getTime()) / MS_PER_DAY);
+    return { since: 0, remain: 0, days, due, lastServicedAt: null };
+  }
+  if (task.interval == null) return null;
   const sinceRaw = liveSince(task);
   if (sinceRaw == null) return null;
   const since = Math.max(0, Number(sinceRaw) || 0);
