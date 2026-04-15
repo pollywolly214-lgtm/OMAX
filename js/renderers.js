@@ -11880,8 +11880,24 @@ function computeCostModel(){
     });
     return map;
   };
+  const collectMaintenanceNamesByDate = (items)=>{
+    const map = new Map();
+    if (!Array.isArray(items)) return map;
+    items.forEach(item => {
+      if (!item) return;
+      const key = toHistoryDateKey(item.resolvedISO || item.resolvedAt);
+      if (!key) return;
+      const raw = typeof item.name === "string" ? item.name.trim() : "";
+      if (!raw) return;
+      if (!map.has(key)) map.set(key, new Set());
+      map.get(key).add(raw);
+    });
+    return map;
+  };
   const maintenanceOrderCostByDate = sumMaintenanceCostsByDate(maintenanceOrderItems);
   const maintenanceOccurrenceCostByDate = sumMaintenanceCostsByDate(occurrenceCostItems);
+  const maintenanceOrderNamesByDate = collectMaintenanceNamesByDate(maintenanceOrderItems);
+  const maintenanceOccurrenceNamesByDate = collectMaintenanceNamesByDate(occurrenceCostItems);
 
   const maintenanceSpendSince = (days)=>{
     if (!isFinite(days) || days <= 0) return 0;
@@ -12292,6 +12308,19 @@ function computeCostModel(){
     const partCost = actualCost > 0 ? actualCost : allocatedEstimate;
     const timeCost = deltaSafe * MAINTENANCE_LABOR_RATE_PER_HOUR;
     const totalMaintenanceCost = partCost + timeCost;
+    const dateOrderNames = dateKey ? maintenanceOrderNamesByDate.get(dateKey) : null;
+    const dateOccurrenceNames = dateKey ? maintenanceOccurrenceNamesByDate.get(dateKey) : null;
+    const entryTaskNames = new Set();
+    linkedTasks.forEach(task => {
+      const name = typeof task?.name === "string" ? task.name.trim() : "";
+      if (name) entryTaskNames.add(name);
+    });
+    if (dateOrderNames instanceof Set){
+      dateOrderNames.forEach(name => { if (name) entryTaskNames.add(name); });
+    }
+    if (dateOccurrenceNames instanceof Set){
+      dateOccurrenceNames.forEach(name => { if (name) entryTaskNames.add(name); });
+    }
     maintenanceHistory.push({
       date: curr.date,
       dateISO: curr.dateISO,
@@ -12307,6 +12336,7 @@ function computeCostModel(){
       occurrenceCost: occurrenceActualCost,
       partCost,
       timeCost,
+      taskNames: Array.from(entryTaskNames),
       tasks: linkedTasks,
       key: entryKey
     });
@@ -13390,9 +13420,12 @@ function computeCostModel(){
     .sort((a,b)=> String(a.dateISO || "").localeCompare(String(b.dateISO || "")))
     .map(entry => {
       const tasks = Array.isArray(entry?.tasks) ? entry.tasks : [];
-      const taskName = tasks.length
-        ? Array.from(new Set(tasks.map(item => (item?.name || "").trim()).filter(Boolean))).join(", ")
-        : "Unlinked maintenance task";
+      const explicitNames = Array.isArray(entry?.taskNames) ? entry.taskNames.filter(Boolean) : [];
+      const taskName = explicitNames.length
+        ? explicitNames.join(", ")
+        : (tasks.length
+          ? Array.from(new Set(tasks.map(item => (item?.name || "").trim()).filter(Boolean))).join(", ")
+          : `Maintenance event ${entry?.dateISO || ""}`.trim());
       const partCost = Number(entry?.partCost);
       const safePartCost = Number.isFinite(partCost) && partCost > 0 ? partCost : 0;
       const timeCost = Number(entry?.timeCost);
