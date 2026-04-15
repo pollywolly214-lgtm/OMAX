@@ -2122,9 +2122,9 @@ function viewCosts(model){
       <h4>Maintenance tasks and charges</h4>
       <div class="cost-timeframe-table-wrap">
         <table class="cost-table">
-          <thead><tr><th>Date</th><th>Hours</th><th>Time cost</th><th>Part/task cost</th><th>Charge cost</th><th>Total cost</th><th>Source</th></tr></thead>
+          <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Time cost (30/hr)</th><th>Part cost</th><th>Total cost</th><th>Source</th></tr></thead>
           <tbody>
-            ${maintenanceAuditRows.map(row => `<tr><td>${esc(row.dateLabel)}</td><td>${esc(row.hoursLabel)}</td><td>${esc(row.timeCostLabel)}</td><td>${esc(row.taskCostLabel)}</td><td>${esc(row.chargeCostLabel)}</td><td>${esc(row.totalCostLabel)}</td><td>${esc(row.sourceLabel)}</td></tr>`).join("") || `<tr><td colspan="7" class="cost-table-placeholder">No maintenance events yet.</td></tr>`}
+            ${maintenanceAuditRows.map(row => `<tr><td>${esc(row.taskName)}</td><td>${esc(row.dateLabel)}</td><td>${esc(row.hoursLabel)}</td><td>${esc(row.timeCostLabel)}</td><td>${esc(row.partCostLabel)}</td><td>${esc(row.totalCostLabel)}</td><td>${esc(row.sourceLabel)}</td></tr>`).join("") || `<tr><td colspan="7" class="cost-table-placeholder">No maintenance events yet.</td></tr>`}
           </tbody>
         </table>
       </div>

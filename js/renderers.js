@@ -11611,7 +11611,6 @@ function buildCalendarMaintenanceHistory({ intervalTasks = [], asReqTasks = [] }
 }
 
 function computeCostModel(){
-  const MAINTENANCE_LABOR_RATE_PER_HOUR = 30;
   const roundMaintenanceCurrency = (value)=> {
     const num = Number(value);
     if (!Number.isFinite(num)) return 0;
@@ -12009,6 +12008,7 @@ function computeCostModel(){
     ? asReqAnnualProjection / hoursForRate
     : 0;
   const combinedCostPerHour = intervalCostPerHour + asReqCostPerHour;
+  const MAINTENANCE_LABOR_RATE_PER_HOUR = 30;
 
   const predictedIntervalAnnual = (intervalCostPerHour > 0 && baselineAnnualHours > 0)
     ? intervalCostPerHour * baselineAnnualHours
@@ -12289,6 +12289,9 @@ function computeCostModel(){
     const allocatedEstimate = combinedCostPerHour > 0
       ? deltaSafe * combinedCostPerHour
       : estimateIntervalCost(deltaSafe);
+    const partCost = actualCost > 0 ? actualCost : allocatedEstimate;
+    const timeCost = deltaSafe * MAINTENANCE_LABOR_RATE_PER_HOUR;
+    const totalMaintenanceCost = partCost + timeCost;
     maintenanceHistory.push({
       date: curr.date,
       dateISO: curr.dateISO,
@@ -12297,12 +12300,13 @@ function computeCostModel(){
       rangeEnd: curr.date,
       rangeEndISO: curr.dateISO,
       hours: deltaSafe,
-      cost: actualCost > 0 ? actualCost : allocatedEstimate,
+      cost: totalMaintenanceCost,
       costSource: actualCost > 0 ? "actual" : "estimated",
       taskCost: taskActualCost,
       orderCost: orderActualCost,
       occurrenceCost: occurrenceActualCost,
-      timeCost: allocatedEstimate,
+      partCost,
+      timeCost,
       tasks: linkedTasks,
       key: entryKey
     });
@@ -13384,15 +13388,26 @@ function computeCostModel(){
   const maintenanceAuditRows = maintenanceHistory
     .slice()
     .sort((a,b)=> String(a.dateISO || "").localeCompare(String(b.dateISO || "")))
-    .map(entry => ({
-      dateLabel: entry?.dateISO || "—",
-      hoursLabel: formatHours(Number(entry?.hours) || 0),
-      timeCostLabel: formatterCurrency(Number(entry?.timeCost) || 0, { decimals: 2 }),
-      taskCostLabel: formatterCurrency(Number(entry?.taskCost) || 0, { decimals: 2 }),
-      chargeCostLabel: formatterCurrency((Number(entry?.orderCost) || 0) + (Number(entry?.occurrenceCost) || 0), { decimals: 2 }),
-      totalCostLabel: formatterCurrency(Number(entry?.cost) || 0, { decimals: 2 }),
-      sourceLabel: entry?.costSource === "actual" ? "Actual" : "Estimated"
-    }));
+    .map(entry => {
+      const tasks = Array.isArray(entry?.tasks) ? entry.tasks : [];
+      const taskName = tasks.length
+        ? Array.from(new Set(tasks.map(item => (item?.name || "").trim()).filter(Boolean))).join(", ")
+        : "Unlinked maintenance task";
+      const partCost = Number(entry?.partCost);
+      const safePartCost = Number.isFinite(partCost) && partCost > 0 ? partCost : 0;
+      const timeCost = Number(entry?.timeCost);
+      const safeTimeCost = Number.isFinite(timeCost) && timeCost > 0 ? timeCost : 0;
+      const total = safePartCost + safeTimeCost;
+      return {
+        taskName,
+        dateLabel: entry?.dateISO || "—",
+        hoursLabel: formatHours(Number(entry?.hours) || 0),
+        timeCostLabel: formatterCurrency(safeTimeCost, { decimals: 2 }),
+        partCostLabel: formatterCurrency(safePartCost, { decimals: 2 }),
+        totalCostLabel: formatterCurrency(total, { decimals: 2 }),
+        sourceLabel: entry?.costSource === "actual" ? "Actual part record + labor" : "Estimated part + labor"
+      };
+    });
   const auditSummary = {
     totalCuttingJobsLabel: String(cuttingAuditRows.length),
     totalMaintenanceEventsLabel: String(maintenanceAuditRows.length),
