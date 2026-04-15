@@ -1787,6 +1787,13 @@ function viewCosts(model){
               </div>
             </div>
           </div>
+          <div class="cost-jobs-summary">
+            <div><span class="label">Total cutting cost</span><span>${esc(costTrackingSummary.totalCuttingCostLabel || "$0.00")}</span></div>
+            <div><span class="label">Avg cutting cost</span><span>${esc(costTrackingSummary.avgCuttingCostLabel || "$0.00")}</span></div>
+            <div><span class="label">Total maintenance cost</span><span>${esc(costTrackingSummary.totalMaintenanceCostLabel || "$0.00")}</span></div>
+            <div><span class="label">Avg maintenance cost</span><span>${esc(costTrackingSummary.avgMaintenanceCostLabel || "$0.00")}</span></div>
+            <div><span class="label">Cutting hr ÷ maintenance $</span><span>${esc(costTrackingSummary.maintenanceCostPerHourOfCuttingTimeLabel || "—")}</span></div>
+          </div>
           <div class="cost-chart-canvas">
             <canvas id="costChart" width="780" height="240"></canvas>
           </div>
@@ -2056,12 +2063,6 @@ function viewCosts(model){
             <div><span class="label">Total gain / loss</span><span>${esc(jobSummary.totalLabel || "$0.00")}</span></div>
             <div><span class="label">Avg per job</span><span>${esc(jobSummary.averageLabel || "$0.00")}</span></div>
             <div><span class="label">Rolling avg (chart)</span><span>${esc(jobSummary.rollingLabel || "$0.00")}</span></div>
-            <div><span class="label">Total cutting cost</span><span>${esc(costTrackingSummary.totalCuttingCostLabel || "$0.00")}</span></div>
-            <div><span class="label">Avg cutting cost</span><span>${esc(costTrackingSummary.avgCuttingCostLabel || "$0.00")}</span></div>
-            <div><span class="label">Total maintenance cost</span><span>${esc(costTrackingSummary.totalMaintenanceCostLabel || "$0.00")}</span></div>
-            <div><span class="label">Avg maintenance cost</span><span>${esc(costTrackingSummary.avgMaintenanceCostLabel || "$0.00")}</span></div>
-            <div><span class="label">Maintenance cost / cutting hr</span><span>${esc(costTrackingSummary.maintenanceCostPerCuttingHourLabel || "—")}</span></div>
-            <div><span class="label">Cutting hrs / maintenance $</span><span>${esc(costTrackingSummary.cuttingHoursPerMaintenanceDollarLabel || "—")}</span></div>
           </div>
           <table class="cost-table">
             <thead><tr><th>Job</th><th>Milestone</th><th>Status</th><th>Cost impact</th></tr></thead>
