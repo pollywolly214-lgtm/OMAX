@@ -334,6 +334,25 @@ function viewDashboard(){
           <p class="small muted">Pick a task saved in Maintenance Settings to schedule it on the calendar.</p>
           <p class="small muted" data-task-existing-empty hidden>No maintenance tasks yet. Create one below to get started.</p>
           <p class="small muted" data-task-existing-search-empty hidden>No tasks match your search. Try a different name.</p>
+          <label>Repeat<select id="dashTaskExistingRepeat">
+            <option value="inherit">Use task default</option>
+            <option value="off">Does not repeat</option>
+            <option value="on">Repeats</option>
+          </select></label>
+          <label data-existing-repeat-basis hidden>Repeat based on<select id="dashTaskExistingRepeatBasis">
+            <option value="hours">Machine hours</option>
+            <option value="days">Days</option>
+            <option value="weeks">Weeks</option>
+            <option value="months">Months</option>
+          </select></label>
+          <label data-existing-repeat-every hidden>Every<input type="number" min="1" step="1" id="dashTaskExistingRepeatEvery" value="1"></label>
+          <label data-existing-repeat-end hidden>Ends<select id="dashTaskExistingRepeatEndType">
+            <option value="never">Never</option>
+            <option value="on_date">On date</option>
+            <option value="after_count">After count</option>
+          </select></label>
+          <label data-existing-repeat-end-date hidden>End date<input type="date" id="dashTaskExistingRepeatEndDate"></label>
+          <label data-existing-repeat-end-count hidden>Occurrences<input type="number" min="1" step="1" id="dashTaskExistingRepeatEndCount" placeholder="e.g. 12"></label>
           <label>Occurrence note<textarea id="dashTaskExistingNote" rows="3" placeholder="Optional note for this calendar date"></textarea></label>
           <div class="modal-actions">
             <button type="button" class="secondary" data-task-card-back>Back</button>
@@ -371,6 +390,25 @@ function viewDashboard(){
             <label>Time to complete (hrs)<input type="number" min="0.25" step="0.25" id="dashTaskDowntime" placeholder="e.g. 1"></label>
             <label>Category<select id="dashTaskCategory"></select></label>
             <label>Calendar date<input type="date" id="dashTaskDate"></label>
+            <label>Repeat<select id="dashTaskRepeatMode">
+              <option value="auto">Auto (recommended)</option>
+              <option value="off">Does not repeat</option>
+              <option value="on">Repeats</option>
+            </select></label>
+            <label data-task-repeat-basis>Repeat based on<select id="dashTaskRepeatBasis">
+              <option value="hours">Machine hours</option>
+              <option value="days">Days</option>
+              <option value="weeks">Weeks</option>
+              <option value="months">Months</option>
+            </select></label>
+            <label data-task-repeat-every>Every<input type="number" min="1" step="1" id="dashTaskRepeatEvery" value="1"></label>
+            <label data-task-repeat-end>Ends<select id="dashTaskRepeatEndType">
+              <option value="never">Never</option>
+              <option value="on_date">On date</option>
+              <option value="after_count">After count</option>
+            </select></label>
+            <label data-task-repeat-end-date hidden>End date<input type="date" id="dashTaskRepeatEndDate"></label>
+            <label data-task-repeat-end-count hidden>Occurrences<input type="number" min="1" step="1" id="dashTaskRepeatEndCount" placeholder="e.g. 12"></label>
           </div>
 
           <div class="subtask-section">
