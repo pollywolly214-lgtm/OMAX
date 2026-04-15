@@ -1172,6 +1172,7 @@ function viewCosts(model){
   const selectedWeeklyKey = selectedWeeklyReport ? String(selectedWeeklyReport.weekStartISO || "") : "";
   if (typeof window !== "undefined") window.weeklyCostReportSelected = selectedWeeklyKey;
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
+  const costTrackingSummary = data.costTrackingSummary || {};
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
   const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
   const orderSummary = data.orderRequestSummary || {};
@@ -2051,10 +2052,16 @@ function viewCosts(model){
             <p class="small muted">Baseline adapts to your average logged hours per day.</p>
           </div>
           <div class="cost-jobs-summary">
-            <div><span class="label">Jobs tracked</span><span>—</span></div>
-            <div><span class="label">Total gain / loss</span><span>—</span></div>
-            <div><span class="label">Avg per job</span><span>—</span></div>
-            <div><span class="label">Rolling avg (chart)</span><span>—</span></div>
+            <div><span class="label">Jobs tracked</span><span>${esc(jobSummary.countLabel || "0")}</span></div>
+            <div><span class="label">Total gain / loss</span><span>${esc(jobSummary.totalLabel || "$0.00")}</span></div>
+            <div><span class="label">Avg per job</span><span>${esc(jobSummary.averageLabel || "$0.00")}</span></div>
+            <div><span class="label">Rolling avg (chart)</span><span>${esc(jobSummary.rollingLabel || "$0.00")}</span></div>
+            <div><span class="label">Total cutting cost</span><span>${esc(costTrackingSummary.totalCuttingCostLabel || "$0.00")}</span></div>
+            <div><span class="label">Avg cutting cost</span><span>${esc(costTrackingSummary.avgCuttingCostLabel || "$0.00")}</span></div>
+            <div><span class="label">Total maintenance cost</span><span>${esc(costTrackingSummary.totalMaintenanceCostLabel || "$0.00")}</span></div>
+            <div><span class="label">Avg maintenance cost</span><span>${esc(costTrackingSummary.avgMaintenanceCostLabel || "$0.00")}</span></div>
+            <div><span class="label">Maintenance cost / cutting hr</span><span>${esc(costTrackingSummary.maintenanceCostPerCuttingHourLabel || "—")}</span></div>
+            <div><span class="label">Cutting hrs / maintenance $</span><span>${esc(costTrackingSummary.cuttingHoursPerMaintenanceDollarLabel || "—")}</span></div>
           </div>
           <table class="cost-table">
             <thead><tr><th>Job</th><th>Milestone</th><th>Status</th><th>Cost impact</th></tr></thead>

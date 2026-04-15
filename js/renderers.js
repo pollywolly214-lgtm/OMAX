@@ -12277,8 +12277,8 @@ function computeCostModel(){
       date: entry.date,
       value: entry.cost,
       detail: entry.costSource === "actual"
-        ? `Actual maintenance cost recorded for ${dateLabel} covering ${hoursFragment}.`
-        : `Estimated maintenance dollars allocated to ${hoursFragment} logged on ${dateLabel}.`
+        ? `Actual maintenance cost recorded on ${dateLabel} for the ${hoursFragment} logged since the previous meter reading (not cumulative for the full period).`
+        : `Estimated maintenance dollars allocated to the ${hoursFragment} logged since the previous meter reading on ${dateLabel}.`
     };
   });
 
@@ -12358,7 +12358,7 @@ function computeCostModel(){
       ? totalCostRaw
       : (materialCost + laborCost + machineCost + overheadCost);
     const netProfit = Number.isFinite(revenue - totalCost) ? (revenue - totalCost) : 0;
-    return { date, netProfit, hours: cutHours };
+    return { date, netProfit, hours: cutHours, totalCost, revenue };
   };
 
   const jobsInfo = [];
@@ -13157,6 +13157,8 @@ function computeCostModel(){
         : categoryName;
 
       const normalizedCutCost = Number.isFinite(financials?.netProfit) ? Number(financials.netProfit) : 0;
+      const totalCutCost = Number(financials?.totalCost);
+      const normalizedTotalCutCost = Number.isFinite(totalCutCost) && totalCutCost > 0 ? totalCutCost : 0;
       return {
         id: String(job.id || "cut"),
         date,
@@ -13167,7 +13169,8 @@ function computeCostModel(){
         projectNumber,
         categoryId: catId,
         cost: normalizedCutCost,
-        hours: cutHours
+        hours: cutHours,
+        totalCost: normalizedTotalCutCost
       };
     })
     .filter(Boolean);
@@ -13252,6 +13255,42 @@ function computeCostModel(){
     rollingLabel: jobSeries.length
       ? formatterCurrency(jobSeries[jobSeries.length-1].value, { decimals: 0, showPlus: true })
       : formatterCurrency(0, { decimals: 0 })
+  };
+  const totalCuttingCostValue = completedCutsForWeekly.reduce((sum, item)=>{
+    const value = Number(item?.totalCost);
+    return sum + (Number.isFinite(value) && value > 0 ? value : 0);
+  }, 0);
+  const totalCuttingHoursValue = completedCutsForWeekly.reduce((sum, item)=>{
+    const value = Number(item?.hours);
+    return sum + (Number.isFinite(value) && value > 0 ? value : 0);
+  }, 0);
+  const totalMaintenanceCostValue = maintenanceHistory.reduce((sum, entry)=>{
+    const value = Number(entry?.cost);
+    return sum + (Number.isFinite(value) && value > 0 ? value : 0);
+  }, 0);
+  const averageCuttingCostValue = completedCutsForWeekly.length
+    ? (totalCuttingCostValue / completedCutsForWeekly.length)
+    : 0;
+  const averageMaintenanceCostValue = maintenanceHistory.length
+    ? (totalMaintenanceCostValue / maintenanceHistory.length)
+    : 0;
+  const maintenanceCostPerCuttingHour = totalCuttingHoursValue > 0
+    ? (totalMaintenanceCostValue / totalCuttingHoursValue)
+    : null;
+  const cuttingHoursPerMaintenanceDollar = totalMaintenanceCostValue > 0
+    ? (totalCuttingHoursValue / totalMaintenanceCostValue)
+    : null;
+  const costTrackingSummary = {
+    totalCuttingCostLabel: formatterCurrency(totalCuttingCostValue, { decimals: totalCuttingCostValue < 1000 ? 2 : 0 }),
+    avgCuttingCostLabel: formatterCurrency(averageCuttingCostValue, { decimals: averageCuttingCostValue < 1000 ? 2 : 0 }),
+    totalMaintenanceCostLabel: formatterCurrency(totalMaintenanceCostValue, { decimals: totalMaintenanceCostValue < 1000 ? 2 : 0 }),
+    avgMaintenanceCostLabel: formatterCurrency(averageMaintenanceCostValue, { decimals: averageMaintenanceCostValue < 1000 ? 2 : 0 }),
+    maintenanceCostPerCuttingHourLabel: maintenanceCostPerCuttingHour != null
+      ? formatterCurrency(maintenanceCostPerCuttingHour, { decimals: maintenanceCostPerCuttingHour < 1000 ? 2 : 0 })
+      : "—",
+    cuttingHoursPerMaintenanceDollarLabel: cuttingHoursPerMaintenanceDollar != null
+      ? `${cuttingHoursPerMaintenanceDollar.toFixed(cuttingHoursPerMaintenanceDollar >= 1 ? 2 : 3)} hr/$`
+      : "—"
   };
 
   const jobCategoryAnalytics = (()=>{
@@ -13742,7 +13781,8 @@ function computeCostModel(){
     chartColors: COST_CHART_COLORS,
     maintenanceSeries,
     jobSeries,
-    weeklyReports
+    weeklyReports,
+    costTrackingSummary
   };
 }
 
