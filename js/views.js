@@ -2095,6 +2095,7 @@ function viewCosts(model){
     <div class="cost-timeframe-backdrop" data-cost-audit-close tabindex="-1" aria-label="Close cost audit"></div>
     <div class="cost-timeframe-card" role="document">
       <button type="button" class="cost-timeframe-close" data-cost-audit-close aria-label="Close cost audit"><span aria-hidden="true">×</span></button>
+      <div class="cost-timeframe-card-body">
       <header class="cost-timeframe-header">
         <h3 class="cost-timeframe-title" id="costAuditModalTitle">Cost audit table</h3>
         <p class="cost-timeframe-range">All values used in chart calculations.</p>
@@ -2126,6 +2127,7 @@ function viewCosts(model){
             ${maintenanceAuditRows.map(row => `<tr><td>${esc(row.dateLabel)}</td><td>${esc(row.hoursLabel)}</td><td>${esc(row.timeCostLabel)}</td><td>${esc(row.taskCostLabel)}</td><td>${esc(row.chargeCostLabel)}</td><td>${esc(row.totalCostLabel)}</td><td>${esc(row.sourceLabel)}</td></tr>`).join("") || `<tr><td colspan="7" class="cost-table-placeholder">No maintenance events yet.</td></tr>`}
           </tbody>
         </table>
+      </div>
       </div>
     </div>
   </div>
