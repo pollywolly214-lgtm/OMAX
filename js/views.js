@@ -334,6 +334,21 @@ function viewDashboard(){
           <p class="small muted">Pick a task saved in Maintenance Settings to schedule it on the calendar.</p>
           <p class="small muted" data-task-existing-empty hidden>No maintenance tasks yet. Create one below to get started.</p>
           <p class="small muted" data-task-existing-search-empty hidden>No tasks match your search. Try a different name.</p>
+          <label>Repeat<select id="dashTaskExistingRepeat">
+            <option value="none">Does not repeat</option>
+            <option value="hours">Repeat by machine hours</option>
+            <option value="daily">Repeat by days</option>
+            <option value="weekly">Repeat by weeks</option>
+            <option value="monthly">Repeat by months</option>
+          </select></label>
+          <label data-task-existing-repeat-every hidden>Repeat every<input type="number" min="1" step="1" id="dashTaskExistingRepeatEvery" value="1"></label>
+          <label data-task-existing-repeat-end hidden>Repeat ends<select id="dashTaskExistingRepeatEnd">
+            <option value="never">Never</option>
+            <option value="on_date">On date</option>
+            <option value="after_count">After occurrences</option>
+          </select></label>
+          <label data-task-existing-repeat-end-date hidden>End date<input type="date" id="dashTaskExistingRepeatEndDate"></label>
+          <label data-task-existing-repeat-end-count hidden>Occurrences<input type="number" min="1" step="1" id="dashTaskExistingRepeatCount" value="10"></label>
           <label>Occurrence note<textarea id="dashTaskExistingNote" rows="3" placeholder="Optional note for this calendar date"></textarea></label>
           <div class="modal-actions">
             <button type="button" class="secondary" data-task-card-back>Back</button>
@@ -371,6 +386,21 @@ function viewDashboard(){
             <label>Time to complete (hrs)<input type="number" min="0.25" step="0.25" id="dashTaskDowntime" placeholder="e.g. 1"></label>
             <label>Category<select id="dashTaskCategory"></select></label>
             <label>Calendar date<input type="date" id="dashTaskDate"></label>
+            <label>Repeat<select id="dashTaskRepeat">
+              <option value="none">Does not repeat</option>
+              <option value="hours">Repeat by machine hours</option>
+              <option value="daily">Repeat by days</option>
+              <option value="weekly">Repeat by weeks</option>
+              <option value="monthly">Repeat by months</option>
+            </select></label>
+            <label data-task-repeat-every hidden>Repeat every<input type="number" min="1" step="1" id="dashTaskRepeatEvery" value="1"></label>
+            <label data-task-repeat-end hidden>Repeat ends<select id="dashTaskRepeatEnd">
+              <option value="never">Never</option>
+              <option value="on_date">On date</option>
+              <option value="after_count">After occurrences</option>
+            </select></label>
+            <label data-task-repeat-end-date hidden>End date<input type="date" id="dashTaskRepeatEndDate"></label>
+            <label data-task-repeat-end-count hidden>Occurrences<input type="number" min="1" step="1" id="dashTaskRepeatCount" value="10"></label>
           </div>
 
           <div class="subtask-section">

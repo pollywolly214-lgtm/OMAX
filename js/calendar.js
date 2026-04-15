@@ -617,6 +617,7 @@ function markCalendarTaskComplete(meta, dateISO){
     if (!task.calendarDateISO || normalizeDateKey(task.calendarDateISO) === key){
       task.calendarDateISO = key;
     }
+    task.recurrenceStartDate = key;
     changed = true;
   }else{
     if (!Array.isArray(task.completedDates)) task.completedDates = [];
@@ -629,6 +630,7 @@ function markCalendarTaskComplete(meta, dateISO){
       task.calendarDateISO = key;
       changed = true;
     }
+    task.recurrenceStartDate = key;
   }
 
   return changed;
@@ -1029,7 +1031,12 @@ function completeTask(taskId){
   let meta = findCalendarTaskMeta(taskId);
   if (!meta) return;
   if (isTemplateTask(meta.task) && meta.task.mode === "interval"){
-    const instance = scheduleExistingIntervalTask(meta.task, { dateISO: ymd(new Date()) });
+    const templateId = String(meta.task.id);
+    const intervalList = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+    let instance = intervalList.find(item => item && isInstanceTask(item) && String(item.templateId) === templateId) || null;
+    if (!instance){
+      instance = scheduleExistingIntervalTask(meta.task, { dateISO: ymd(new Date()), refreshDashboard: false });
+    }
     if (instance){
       const nextMeta = findCalendarTaskMeta(instance.id);
       if (nextMeta) meta = nextMeta;
@@ -1135,6 +1142,7 @@ function showTaskBubble(taskId, anchor, options = {}){
   }
   if (canMarkComplete){
     actions.push(`<button data-bbl-complete>Mark complete</button>`);
+    actions.push(`<button data-bbl-complete-custom class="secondary">Mark complete on…</button>`);
   }
   if (canUnmarkComplete){
     actions.push(`<button data-bbl-uncomplete>Unmark complete</button>`);
@@ -1194,6 +1202,25 @@ function showTaskBubble(taskId, anchor, options = {}){
 
   b.querySelector("[data-bbl-complete]")?.addEventListener("click", ()=>{
     const changed = markCalendarTaskComplete(meta, targetKey);
+    if (changed){
+      if (typeof saveCloudNow === "function") saveCloudNow();
+      else saveCloudDebounced();
+      toast("Task marked complete");
+      hideBubble();
+      route();
+    }
+  });
+
+  b.querySelector("[data-bbl-complete-custom]")?.addEventListener("click", ()=>{
+    const defaultDate = targetKey || normalizeDateKey(new Date());
+    const raw = window.prompt ? window.prompt("Complete on date (YYYY-MM-DD):", defaultDate || "") : defaultDate;
+    if (raw == null) return;
+    const selected = normalizeDateKey(raw);
+    if (!selected){
+      toast("Enter a valid completion date (YYYY-MM-DD)");
+      return;
+    }
+    const changed = markCalendarTaskComplete(meta, selected);
     if (changed){
       if (typeof saveCloudNow === "function") saveCloudNow();
       else saveCloudDebounced();
@@ -1853,6 +1880,123 @@ function projectIntervalDueDates(task, options = {}){
   return events;
 }
 
+function normalizeTaskRecurrenceLocal(task, fallbackType = "none"){
+  if (!task || typeof task !== "object"){
+    return { enabled: false, type: "none", every: 1, endType: "never", endDate: null, count: null, startDate: null };
+  }
+  if (typeof normalizeTaskRecurrence === "function"){
+    try {
+      return normalizeTaskRecurrence(task, { fallbackHoursMode: fallbackType });
+    } catch (_err){}
+  }
+  const typeRaw = String(task.recurrenceType || fallbackType || "none").toLowerCase();
+  const type = ["none", "hours", "daily", "weekly", "monthly"].includes(typeRaw) ? typeRaw : "none";
+  const enabled = task.recurrenceEnabled == null ? type !== "none" : Boolean(task.recurrenceEnabled);
+  const everyRaw = Number(task.recurrenceInterval ?? 1);
+  const every = Number.isFinite(everyRaw) && everyRaw > 0 ? Math.max(1, Math.round(everyRaw)) : 1;
+  const endRaw = String(task.recurrenceEndType || "never").toLowerCase();
+  const endType = (endRaw === "on_date" || endRaw === "after_count") ? endRaw : "never";
+  const endDate = normalizeDateKey(task.recurrenceEndDate) || null;
+  const countRaw = Number(task.recurrenceCount);
+  const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.max(1, Math.round(countRaw)) : null;
+  const startDate = normalizeDateKey(task.recurrenceStartDate || task.calendarDateISO) || null;
+  return { enabled, type: enabled ? type : "none", every, endType, endDate, count, startDate };
+}
+
+function projectCalendarRecurrenceDates(task, recurrence, options = {}){
+  const rec = recurrence || normalizeTaskRecurrenceLocal(task, "none");
+  if (!rec.enabled || !["daily", "weekly", "monthly"].includes(rec.type)) return [];
+  const excludeSet = new Set();
+  const excludeRaw = options.excludeDates;
+  if (excludeRaw && typeof excludeRaw.forEach === "function"){
+    excludeRaw.forEach(value => {
+      const key = normalizeDateKey(value);
+      if (key) excludeSet.add(key);
+    });
+  }
+  const startISO = normalizeDateKey(options.startDate || rec.startDate || task?.calendarDateISO || new Date());
+  const start = toDayStart(startISO);
+  if (!(start instanceof Date) || Number.isNaN(start.getTime())) return [];
+  const monthsAheadRaw = Number(options.monthsAhead);
+  const monthsAhead = Number.isFinite(monthsAheadRaw) && monthsAheadRaw > 0 ? monthsAheadRaw : 3;
+  const horizon = new Date(start.getTime());
+  horizon.setMonth(horizon.getMonth() + monthsAhead);
+  const maxOccurrencesRaw = Number(options.maxOccurrences);
+  const maxOccurrences = Number.isFinite(maxOccurrencesRaw) && maxOccurrencesRaw > 0 ? Math.round(maxOccurrencesRaw) : 40;
+  const out = [];
+  const cursor = new Date(start.getTime());
+  let produced = 0;
+  while (produced < maxOccurrences){
+    const key = ymd(cursor);
+    if (!key) break;
+    if (!excludeSet.has(key)){
+      if (rec.endType === "on_date" && rec.endDate && key > rec.endDate) break;
+      if (rec.endType === "after_count" && rec.count != null && out.length >= rec.count) break;
+      out.push({ dateISO: key, dueDate: new Date(cursor.getTime()) });
+    }
+    produced += 1;
+    if (cursor > horizon && out.length > 0) break;
+    if (rec.type === "daily"){
+      cursor.setDate(cursor.getDate() + rec.every);
+    }else if (rec.type === "weekly"){
+      cursor.setDate(cursor.getDate() + (7 * rec.every));
+    }else{
+      cursor.setMonth(cursor.getMonth() + rec.every);
+    }
+  }
+  return out;
+}
+
+function projectHoursRecurrenceDates(task, recurrence, options = {}){
+  const rec = recurrence || normalizeTaskRecurrenceLocal(task, "hours");
+  if (!rec.enabled || rec.type !== "hours") return [];
+  const excludeSet = new Set();
+  const excludeRaw = options.excludeDates;
+  if (excludeRaw && typeof excludeRaw.forEach === "function"){
+    excludeRaw.forEach(value => {
+      const key = normalizeDateKey(value);
+      if (key) excludeSet.add(key);
+    });
+  }
+  const nd = typeof nextDue === "function" ? nextDue(task) : null;
+  const firstDue = nd && nd.due instanceof Date ? new Date(nd.due.getTime()) : null;
+  if (!(firstDue instanceof Date) || Number.isNaN(firstDue.getTime())) return [];
+  firstDue.setHours(0,0,0,0);
+  const effDaily = (()=>{
+    if (typeof getPredictionHoursSummary === "function"){
+      const summary = getPredictionHoursSummary();
+      const hrs = Number(summary?.effectiveHours);
+      if (Number.isFinite(hrs) && hrs > 0) return hrs;
+    }
+    const configured = Number(configuredDailyHours());
+    return Number.isFinite(configured) && configured > 0 ? configured : 8;
+  })();
+  const intervalHours = Number(task?.interval) || 0;
+  const everyMultiplier = Number(rec.every) || 1;
+  const hoursForCycle = intervalHours * Math.max(1, everyMultiplier);
+  const daysStep = Math.max(1, Math.ceil(hoursForCycle / effDaily));
+  const monthsAheadRaw = Number(options.monthsAhead);
+  const monthsAhead = Number.isFinite(monthsAheadRaw) && monthsAheadRaw > 0 ? monthsAheadRaw : 3;
+  const horizon = new Date(firstDue.getTime());
+  horizon.setMonth(horizon.getMonth() + monthsAhead);
+  const maxOccurrencesRaw = Number(options.maxOccurrences);
+  const maxOccurrences = Number.isFinite(maxOccurrencesRaw) && maxOccurrencesRaw > 0 ? Math.round(maxOccurrencesRaw) : 40;
+  const events = [];
+  const cursor = new Date(firstDue.getTime());
+  for (let i = 0; i < maxOccurrences; i++){
+    const key = ymd(cursor);
+    if (!key) break;
+    if (!(rec.endType === "on_date" && rec.endDate && key > rec.endDate)
+      && !(rec.endType === "after_count" && rec.count != null && events.length >= rec.count)
+      && !excludeSet.has(key)){
+      events.push({ dateISO: key, dueDate: new Date(cursor.getTime()) });
+    }
+    if (cursor > horizon && events.length > 0) break;
+    cursor.setDate(cursor.getDate() + daysStep);
+  }
+  return events;
+}
+
 function renderCalendar(){
   const container = $("#months");
   if (!container) return;
@@ -2048,29 +2192,36 @@ function renderCalendar(){
     const skipDates = new Set(completedKeys);
     manualDates.forEach(dateKey => skipDates.add(dateKey));
     removedSet.forEach(dateKey => skipDates.add(dateKey));
-    const projections = projectIntervalDueDates(t, {
-      monthsAhead: 3,
-      excludeDates: skipDates,
-      minOccurrences: 1,
-      maxOccurrences: 1
-    });
-    if (projections.length){
-      const pred = projections[0];
+    const recurrence = normalizeTaskRecurrenceLocal(t, "hours");
+    let projections = [];
+    if (recurrence.enabled && recurrence.type === "hours"){
+      projections = projectHoursRecurrenceDates(t, recurrence, {
+        monthsAhead: 3,
+        excludeDates: skipDates,
+        maxOccurrences: 24
+      });
+    }else if (recurrence.enabled && ["daily", "weekly", "monthly"].includes(recurrence.type)){
+      projections = projectCalendarRecurrenceDates(t, recurrence, {
+        monthsAhead: 3,
+        excludeDates: skipDates,
+        startDate: t.calendarDateISO || recurrence.startDate || ymd(new Date()),
+        maxOccurrences: 24
+      });
+    }else{
+      projections = projectIntervalDueDates(t, {
+        monthsAhead: 3,
+        excludeDates: skipDates,
+        minOccurrences: 1,
+        maxOccurrences: 1
+      });
+    }
+    projections.forEach(pred => {
       const dueKey = normalizeDateKey(pred?.dateISO);
-      if (dueKey && !completedKeys.has(dueKey) && (!manualKey || manualKey !== dueKey || completedKeys.has(dueKey))){
-        pushTaskEvent(t, dueKey, "due");
-      }
-      return;
-    }
-
-    const nd = nextDue(t);
-    if (!nd) return;
-    const dueKey = normalizeDateKey(nd.due);
-    if (!dueKey) return;
-    if (completedKeys.has(dueKey)) return;
-    if (!manualKey || manualKey !== dueKey){
+      if (!dueKey) return;
+      if (completedKeys.has(dueKey)) return;
+      if (manualKey && manualKey === dueKey && !completedKeys.has(dueKey)) return;
       pushTaskEvent(t, dueKey, "due");
-    }
+    });
   });
 
   const asReqTasks = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
@@ -2083,6 +2234,24 @@ function renderCalendar(){
     const manualKey = normalizeDateKey(t.calendarDateISO);
     if (manualKey){
       pushTaskEvent(t, manualKey, completedDates.has(manualKey) ? "completed" : "manual");
+    }
+    const recurrence = normalizeTaskRecurrenceLocal(t, "none");
+    if (recurrence.enabled && recurrence.type !== "none"){
+      const skipDates = new Set(completedDates);
+      if (manualKey) skipDates.add(manualKey);
+      const projections = recurrence.type === "hours"
+        ? projectHoursRecurrenceDates(t, recurrence, { monthsAhead: 3, excludeDates: skipDates, maxOccurrences: 24 })
+        : projectCalendarRecurrenceDates(t, recurrence, {
+          monthsAhead: 3,
+          excludeDates: skipDates,
+          startDate: manualKey || recurrence.startDate || ymd(new Date()),
+          maxOccurrences: 24
+        });
+      projections.forEach(pred => {
+        const dueKey = normalizeDateKey(pred?.dateISO);
+        if (!dueKey || skipDates.has(dueKey)) return;
+        pushTaskEvent(t, dueKey, "due");
+      });
     }
   });
 
