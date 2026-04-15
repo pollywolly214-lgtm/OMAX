@@ -1792,7 +1792,7 @@ function viewCosts(model){
             <div><span class="label">Avg cutting cost</span><span>${esc(costTrackingSummary.avgCuttingCostLabel || "$0.00")}</span></div>
             <div><span class="label">Total maintenance cost</span><span>${esc(costTrackingSummary.totalMaintenanceCostLabel || "$0.00")}</span></div>
             <div><span class="label">Avg maintenance cost</span><span>${esc(costTrackingSummary.avgMaintenanceCostLabel || "$0.00")}</span></div>
-            <div><span class="label">Cutting hr ÷ maintenance $</span><span>${esc(costTrackingSummary.maintenanceCostPerHourOfCuttingTimeLabel || "—")}</span></div>
+            <div><span class="label">Maintenance cost / cutting hr</span><span>${esc(costTrackingSummary.maintenanceCostPerHourOfCuttingTimeLabel || "—")}</span></div>
           </div>
           <div class="cost-chart-canvas">
             <canvas id="costChart" width="780" height="240"></canvas>

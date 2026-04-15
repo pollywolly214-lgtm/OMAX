@@ -13274,8 +13274,8 @@ function computeCostModel(){
   const averageMaintenanceCostValue = maintenanceHistory.length
     ? (totalMaintenanceCostValue / maintenanceHistory.length)
     : 0;
-  const maintenanceCostPerHourOfCuttingTime = totalMaintenanceCostValue > 0
-    ? (totalCuttingHoursValue / totalMaintenanceCostValue)
+  const maintenanceCostPerHourOfCuttingTime = totalCuttingHoursValue > 0
+    ? (totalMaintenanceCostValue / totalCuttingHoursValue)
     : null;
   const costTrackingSummary = {
     totalCuttingCostLabel: formatterCurrency(totalCuttingCostValue, { decimals: totalCuttingCostValue < 1000 ? 2 : 0 }),
@@ -13283,7 +13283,7 @@ function computeCostModel(){
     totalMaintenanceCostLabel: formatterCurrency(totalMaintenanceCostValue, { decimals: totalMaintenanceCostValue < 1000 ? 2 : 0 }),
     avgMaintenanceCostLabel: formatterCurrency(averageMaintenanceCostValue, { decimals: averageMaintenanceCostValue < 1000 ? 2 : 0 }),
     maintenanceCostPerHourOfCuttingTimeLabel: maintenanceCostPerHourOfCuttingTime != null
-      ? `${maintenanceCostPerHourOfCuttingTime.toFixed(maintenanceCostPerHourOfCuttingTime >= 1 ? 2 : 3)} hr/$`
+      ? `${formatterCurrency(maintenanceCostPerHourOfCuttingTime, { decimals: maintenanceCostPerHourOfCuttingTime < 1000 ? 2 : 0 })}/hr`
       : "—"
   };
 
