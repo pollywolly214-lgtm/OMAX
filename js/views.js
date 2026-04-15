@@ -97,6 +97,12 @@ function viewDashboard(){
       <span class="dashboard-edit-hint" id="dashboardEditHint" hidden>Drag windows to rearrange and resize. Calendar stays fixed.</span>
     </div>
 
+    <div style="text-align: center; margin: 20px 0;">
+      <h2 onclick="confetti({particleCount: 150, spread: 80, origin: {y: 0.6}})" style="cursor: pointer; display: inline-block; padding: 15px 30px; background: linear-gradient(135deg, #6e8efb, #a777e3); color: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); transition: transform 0.2s ease, box-shadow 0.2s ease;" onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 6px 20px rgba(0,0,0,0.15)';" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.1)';">
+        I am working!
+      </h2>
+    </div>
+
     ${avgBanner}
 
     <div class="dashboard-layout" id="dashboardLayout">
