@@ -5347,18 +5347,18 @@ function renderDashboard(){
   }
 
   function toggleRepeatEndFields(endSelect, endDateInput, endCountInput){
-    const mode = String(endSelect?.value || "never");
-    if (endDateInput) endDateInput.parentElement.hidden = mode !== "on_date";
-    if (endCountInput) endCountInput.parentElement.hidden = mode !== "after_count";
+    if (endDateInput?.parentElement) endDateInput.parentElement.hidden = true;
+    if (endCountInput?.parentElement) endCountInput.parentElement.hidden = true;
   }
 
   function toggleRepeatFields(repeatSelect, basisSelect, everyInput, endSelect, endDateInput, endCountInput){
     const enabled = String(repeatSelect?.value || "no") === "yes";
-    [basisSelect, everyInput, endSelect].forEach(el => {
+    [basisSelect, everyInput].forEach(el => {
       if (!el) return;
       const row = el.closest("label");
       if (row) row.hidden = !enabled;
     });
+    if (endSelect?.closest("label")) endSelect.closest("label").hidden = true;
     toggleRepeatEndFields(endSelect, endDateInput, endCountInput);
     if (!enabled){
       if (endDateInput?.parentElement) endDateInput.parentElement.hidden = true;
@@ -5375,19 +5375,9 @@ function renderDashboard(){
       : (defaultBasis || "calendar_day");
     const everyRaw = Number(everyInput?.value);
     const every = Number.isFinite(everyRaw) && everyRaw > 0 ? Math.max(1, Math.round(everyRaw)) : 1;
-    const endTypeRaw = String(endInput?.value || "never").toLowerCase();
-    const endType = ["never", "on_date", "after_count"].includes(endTypeRaw) ? endTypeRaw : "never";
-    const payload = { enabled: true, basis, every, endType };
+    const payload = { enabled: true, basis, every, endType: "never" };
     if (basis === "machine_hours"){
       payload.intervalHours = every;
-    }
-    if (endType === "on_date"){
-      const endDateISO = normalizeDateKey(endDateInput?.value || null);
-      if (endDateISO) payload.endDateISO = endDateISO;
-      else payload.endType = "never";
-    } else if (endType === "after_count"){
-      const countRaw = Number(endCountInput?.value);
-      payload.endCount = Number.isFinite(countRaw) && countRaw > 0 ? Math.floor(countRaw) : 1;
     }
     return payload;
   }
@@ -8324,13 +8314,6 @@ function renderSettings(){
               <option value="calendar_month" ${recurrence.basis==="calendar_month"?"selected":""}>Calendar month</option>
             </select></label>
             <label data-field="recurrenceEvery">Repeat every<input type="number" min="1" step="1" data-k="recurrenceEvery" data-id="${t.id}" data-list="${type}" value="${Math.max(1, Number(recurrence.every)||1)}"></label>
-            <label data-field="recurrenceEndType">Repeat ends<select data-k="recurrenceEndType" data-id="${t.id}" data-list="${type}">
-              <option value="never" ${recurrence.endType==="never"?"selected":""}>Never</option>
-              <option value="on_date" ${recurrence.endType==="on_date"?"selected":""}>On date</option>
-              <option value="after_count" ${recurrence.endType==="after_count"?"selected":""}>After count</option>
-            </select></label>
-            <label data-field="recurrenceEndDate">Repeat end date<input type="date" data-k="recurrenceEndDate" data-id="${t.id}" data-list="${type}" value="${escapeHtml(recurrence.endDateISO||"")}"></label>
-            <label data-field="recurrenceEndCount">Repeat end count<input type="number" min="1" step="1" data-k="recurrenceEndCount" data-id="${t.id}" data-list="${type}" value="${Math.max(1, Number(recurrence.endCount)||1)}"></label>
             <label data-field="manualLink">Manual link<input type="url" data-k="manualLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.manualLink||"")}" placeholder="https://..."></label>
             <label data-field="storeLink">Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
             <label data-field="pn">Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
@@ -8616,7 +8599,6 @@ function renderSettings(){
     const isEditing = getTaskEditingState(taskEl);
     const repeatEnabled = Boolean(recurrence?.enabled);
     const basis = String(recurrence?.basis || "");
-    const endType = String(recurrence?.endType || "never");
     const mode = String(task.mode || meta.mode || "asreq");
     const toggle = (field, visible)=>{
       const row = taskEl.querySelector(`[data-field="${field}"]`);
@@ -8641,9 +8623,6 @@ function renderSettings(){
     const showRecurrenceDetail = repeatEnabled && isEditing;
     toggle("recurrenceBasis", showRecurrenceDetail);
     toggle("recurrenceEvery", showRecurrenceDetail);
-    toggle("recurrenceEndType", showRecurrenceDetail);
-    toggle("recurrenceEndDate", showRecurrenceDetail && endType === "on_date");
-    toggle("recurrenceEndCount", showRecurrenceDetail && endType === "after_count");
     if (repeatEnabled){
       const basisRow = taskEl.querySelector('[data-field="recurrenceBasis"] select[data-k="recurrenceBasis"]');
       if (basisRow instanceof HTMLSelectElement){
@@ -8776,6 +8755,13 @@ function renderSettings(){
   };
 
   lockAllTasks();
+  openTaskState.forEach(taskId => {
+    const selector = `[data-task-id="${escapeAttr(taskId)}"]`;
+    const el = root.querySelector(selector);
+    if (!el) return;
+    ensureDetailsChainOpen(el);
+    if (el instanceof HTMLDetailsElement) el.open = true;
+  });
   tree?.querySelectorAll("details.task").forEach(taskEl => updateTaskFieldRelevance(taskEl));
 
   tree?.addEventListener("dblclick", (e)=>{
