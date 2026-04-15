@@ -382,6 +382,52 @@ function baselineInputValue(task){
   return "";
 }
 
+const DEFAULT_RECURRENCE_RULE = Object.freeze({
+  type: "none",
+  every: 1,
+  endType: "never",
+  endDateISO: null,
+  count: null
+});
+
+function normalizeRecurrenceRule(rawRule, task = null){
+  const src = (rawRule && typeof rawRule === "object") ? rawRule : {};
+  let type = typeof src.type === "string" ? src.type : "";
+  if (!type){
+    if (task && task.mode === "interval"){
+      type = "machine_hours";
+    }else{
+      type = "none";
+    }
+  }
+  const allowedTypes = new Set(["none", "machine_hours", "calendar_daily", "calendar_weekly", "calendar_monthly"]);
+  if (!allowedTypes.has(type)) type = "none";
+  const everyRaw = Number(src.every);
+  const every = Number.isFinite(everyRaw) && everyRaw > 0 ? Math.max(1, Math.round(everyRaw)) : 1;
+  let endType = typeof src.endType === "string" ? src.endType : "never";
+  if (!["never", "on_date", "after_count"].includes(endType)) endType = "never";
+  const endDateISO = (typeof src.endDateISO === "string" && /^\d{4}-\d{2}-\d{2}$/.test(src.endDateISO.trim()))
+    ? src.endDateISO.trim()
+    : null;
+  const countRaw = Number(src.count);
+  const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.max(1, Math.round(countRaw)) : null;
+  return { type, every, endType, endDateISO, count };
+}
+
+function recurrenceRuleForTask(task){
+  if (!task || typeof task !== "object") return { ...DEFAULT_RECURRENCE_RULE };
+  const normalized = normalizeRecurrenceRule(task.recurrenceRule, task);
+  task.recurrenceRule = normalized;
+  return normalized;
+}
+
+function setTaskRecurrenceRule(task, nextRule){
+  if (!task || typeof task !== "object") return null;
+  const normalized = normalizeRecurrenceRule(nextRule, task);
+  task.recurrenceRule = normalized;
+  return normalized;
+}
+
 const DASHBOARD_DAY_MS = 24 * 60 * 60 * 1000;
 
 function hoursSnapshotOnOrBefore(dateISO){
@@ -583,6 +629,7 @@ function createIntervalTaskInstance(template){
     occurrenceNotes: {},
     occurrenceHours: {},
     note: template.note || "",
+    recurrenceRule: normalizeRecurrenceRule(template.recurrenceRule, template),
     downtimeHours: (()=>{
       const raw = Number(template.downtimeHours);
       if (Number.isFinite(raw) && raw > 0) return Math.max(1, Math.round(raw * 100) / 100);
@@ -595,7 +642,7 @@ function createIntervalTaskInstance(template){
   return copy;
 }
 
-function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refreshDashboard = true } = {}){
+function scheduleExistingIntervalTask(task, { dateISO = null, note = "", recurrenceRule = null, refreshDashboard = true } = {}){
   if (!task || task.mode !== "interval") return null;
   if (!Array.isArray(tasksInterval)){
     if (Array.isArray(window.tasksInterval)){
@@ -629,6 +676,12 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
     if (template && template.templateId != null) instance.templateId = template.templateId;
     else if (template && template.id != null) instance.templateId = template.id;
     else instance.templateId = instance.id;
+  }
+  const templateRule = normalizeRecurrenceRule(template?.recurrenceRule, template || instance);
+  const instanceRule = normalizeRecurrenceRule(recurrenceRule || instance.recurrenceRule || templateRule, instance);
+  instance.recurrenceRule = instanceRule;
+  if (template && !isInstanceTask(template)){
+    template.recurrenceRule = templateRule;
   }
 
   const resolveDowntime = ()=>{
@@ -753,7 +806,7 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
   return instance;
 }
 
-function scheduleExistingAsReqTask(task, { dateISO = null, note = "", refreshDashboard = true } = {}){
+function scheduleExistingAsReqTask(task, { dateISO = null, note = "", recurrenceRule = null, refreshDashboard = true } = {}){
   if (!task || task.mode !== "asreq") return null;
   if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
 
@@ -771,7 +824,8 @@ function scheduleExistingAsReqTask(task, { dateISO = null, note = "", refreshDas
     id: genId(task.name || "task"),
     variant: "instance",
     templateId: templateId != null ? templateId : null,
-    calendarDateISO: normalizeDate(dateISO)
+    calendarDateISO: normalizeDate(dateISO),
+    recurrenceRule: normalizeRecurrenceRule(recurrenceRule || task.recurrenceRule, task)
   };
 
   if (Array.isArray(task.parts)) instance.parts = task.parts.map(part => part ? { ...part } : part).filter(Boolean);
@@ -798,6 +852,9 @@ if (typeof window !== "undefined"){
   window.scheduleExistingIntervalTask = scheduleExistingIntervalTask;
   window.scheduleExistingAsReqTask = scheduleExistingAsReqTask;
   window.createIntervalTaskInstance = createIntervalTaskInstance;
+  window.normalizeRecurrenceRule = normalizeRecurrenceRule;
+  window.recurrenceRuleForTask = recurrenceRuleForTask;
+  window.setTaskRecurrenceRule = setTaskRecurrenceRule;
 }
 
 function editingCompletedJobsSet(){
@@ -2310,6 +2367,10 @@ function renderNextDueWidget(ndBox){
   const upcoming = tasksInterval
     .filter(task => task && task.mode === "interval" && isInstanceTask(task))
     .map(t => {
+      const recurrence = recurrenceRuleForTask(t);
+      if (recurrence.type !== "machine_hours" && recurrence.type !== "calendar_daily" && recurrence.type !== "calendar_weekly" && recurrence.type !== "calendar_monthly"){
+        return null;
+      }
       const nd = nextDue(t);
       if (!nd || !(nd.due instanceof Date)) return null;
 
@@ -4914,6 +4975,13 @@ function renderDashboard(){
   const taskPNInput      = document.getElementById("dashTaskPN");
   const taskPriceInput   = document.getElementById("dashTaskPrice");
   const taskDowntimeInput= document.getElementById("dashTaskDowntime");
+  const taskRepeatTypeInput = document.getElementById("dashTaskRepeatType");
+  const taskRepeatEveryInput = document.getElementById("dashTaskRepeatEvery");
+  const taskRepeatEndTypeInput = document.getElementById("dashTaskRepeatEndType");
+  const taskRepeatEndDateInput = document.getElementById("dashTaskRepeatEndDate");
+  const taskRepeatCountInput = document.getElementById("dashTaskRepeatCount");
+  const taskRepeatEndDateRow = taskForm?.querySelector("[data-repeat-end-date]");
+  const taskRepeatEndCountRow = taskForm?.querySelector("[data-repeat-end-count]");
   const categorySelect   = document.getElementById("dashTaskCategory");
   const taskDateInput    = document.getElementById("dashTaskDate");
   const subtaskList      = document.getElementById("dashSubtaskList");
@@ -4922,6 +4990,13 @@ function renderDashboard(){
   const taskOptionButtons= Array.from(modal?.querySelectorAll('[data-task-option]') || []);
   const taskCards        = Array.from(modal?.querySelectorAll('[data-task-card]') || []);
   const taskExistingSearchInput = document.getElementById("dashTaskExistingSearch");
+  const taskExistingRepeatTypeInput = document.getElementById("dashTaskExistingRepeatType");
+  const taskExistingRepeatEveryInput = document.getElementById("dashTaskExistingRepeatEvery");
+  const taskExistingRepeatEndTypeInput = document.getElementById("dashTaskExistingRepeatEndType");
+  const taskExistingRepeatEndDateInput = document.getElementById("dashTaskExistingRepeatEndDate");
+  const taskExistingRepeatCountInput = document.getElementById("dashTaskExistingRepeatCount");
+  const taskExistingRepeatEndDateRow = taskExistingForm?.querySelector("[data-existing-repeat-end-date]");
+  const taskExistingRepeatEndCountRow = taskExistingForm?.querySelector("[data-existing-repeat-end-count]");
   const taskExistingSearchWrapper = taskExistingForm?.querySelector(".task-existing-search");
   const existingTaskResults = taskExistingForm?.querySelector('[data-task-existing-results]');
   const existingTaskEmpty  = taskExistingForm?.querySelector('[data-task-existing-empty]');
@@ -5060,6 +5135,16 @@ function renderDashboard(){
       btn.classList.toggle("is-active", isMatch);
       btn.setAttribute("aria-pressed", isMatch ? "true" : "false");
     });
+    if (!selectedExistingTaskId) return;
+    const meta = findMaintenanceTaskById(selectedExistingTaskId);
+    if (!meta || !meta.task) return;
+    const rule = recurrenceRuleForTask(meta.task);
+    if (taskExistingRepeatTypeInput) taskExistingRepeatTypeInput.value = rule.type || "none";
+    if (taskExistingRepeatEveryInput) taskExistingRepeatEveryInput.value = String(rule.every || 1);
+    if (taskExistingRepeatEndTypeInput) taskExistingRepeatEndTypeInput.value = rule.endType || "never";
+    if (taskExistingRepeatEndDateInput) taskExistingRepeatEndDateInput.value = rule.endDateISO || "";
+    if (taskExistingRepeatCountInput) taskExistingRepeatCountInput.value = rule.count != null ? String(rule.count) : "";
+    toggleRepeatEndRows(taskExistingRepeatEndTypeInput?.value || "never", taskExistingRepeatEndDateRow, taskExistingRepeatEndCountRow);
   }
 
   function setTaskOptionPage(target){
@@ -5147,6 +5232,12 @@ function renderDashboard(){
   function resetExistingTaskForm(){
     if (taskExistingSearchInput) taskExistingSearchInput.value = "";
     if (taskExistingNoteInput) taskExistingNoteInput.value = "";
+    if (taskExistingRepeatTypeInput) taskExistingRepeatTypeInput.value = "none";
+    if (taskExistingRepeatEveryInput) taskExistingRepeatEveryInput.value = "1";
+    if (taskExistingRepeatEndTypeInput) taskExistingRepeatEndTypeInput.value = "never";
+    if (taskExistingRepeatEndDateInput) taskExistingRepeatEndDateInput.value = "";
+    if (taskExistingRepeatCountInput) taskExistingRepeatCountInput.value = "";
+    toggleRepeatEndRows("never", taskExistingRepeatEndDateRow, taskExistingRepeatEndCountRow);
     setSelectedExistingTask(null);
     refreshExistingTaskOptions("");
   }
@@ -5196,6 +5287,31 @@ function renderDashboard(){
     if (!modalVisible || !taskDateInput.value){
       taskDateInput.value = ymd(new Date());
     }
+  }
+
+  function toggleRepeatEndRows(endType, rowDate, rowCount){
+    if (rowDate) rowDate.hidden = endType !== "on_date";
+    if (rowCount) rowCount.hidden = endType !== "after_count";
+  }
+
+  function readRecurrenceFromInputs({
+    typeInput,
+    everyInput,
+    endTypeInput,
+    endDateInput,
+    countInput,
+    fallbackTask = null
+  } = {}){
+    const type = typeInput?.value || (fallbackTask?.mode === "interval" ? "machine_hours" : "none");
+    const everyRaw = Number(everyInput?.value);
+    const endType = endTypeInput?.value || "never";
+    return normalizeRecurrenceRule({
+      type,
+      every: Number.isFinite(everyRaw) && everyRaw > 0 ? everyRaw : 1,
+      endType,
+      endDateISO: endDateInput?.value || null,
+      count: countInput?.value || null
+    }, fallbackTask);
   }
 
   function syncOneTimeDateInput(){
@@ -5493,10 +5609,16 @@ function renderDashboard(){
       taskFreqRow.hidden = true;
       taskLastRow.hidden = true;
       taskConditionRow.hidden = false;
+      if (taskRepeatTypeInput && taskRepeatTypeInput.value === "machine_hours"){
+        taskRepeatTypeInput.value = "none";
+      }
     }else{
       taskFreqRow.hidden = false;
       taskLastRow.hidden = false;
       taskConditionRow.hidden = true;
+      if (taskRepeatTypeInput && (!taskRepeatTypeInput.value || taskRepeatTypeInput.value === "none")){
+        taskRepeatTypeInput.value = "machine_hours";
+      }
     }
   }
 
@@ -5505,6 +5627,12 @@ function renderDashboard(){
     if (taskDowntimeInput){
       taskDowntimeInput.value = "1";
     }
+    if (taskRepeatTypeInput) taskRepeatTypeInput.value = "machine_hours";
+    if (taskRepeatEveryInput) taskRepeatEveryInput.value = "1";
+    if (taskRepeatEndTypeInput) taskRepeatEndTypeInput.value = "never";
+    if (taskRepeatEndDateInput) taskRepeatEndDateInput.value = "";
+    if (taskRepeatCountInput) taskRepeatCountInput.value = "";
+    toggleRepeatEndRows("never", taskRepeatEndDateRow, taskRepeatEndCountRow);
     subtaskList?.replaceChildren();
     resetExistingTaskForm();
     showTaskOptionStage();
@@ -5801,6 +5929,12 @@ function renderDashboard(){
   });
 
   taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
+  taskRepeatEndTypeInput?.addEventListener("change", ()=>{
+    toggleRepeatEndRows(taskRepeatEndTypeInput.value, taskRepeatEndDateRow, taskRepeatEndCountRow);
+  });
+  taskExistingRepeatEndTypeInput?.addEventListener("change", ()=>{
+    toggleRepeatEndRows(taskExistingRepeatEndTypeInput.value, taskExistingRepeatEndDateRow, taskExistingRepeatEndCountRow);
+  });
   syncTaskMode(taskTypeSelect?.value || "interval");
   syncTaskDateInput();
   syncOneTimeDateInput();
@@ -5839,6 +5973,14 @@ function renderDashboard(){
     const dateISO = rawDate ? ymd(rawDate) : "";
     const targetISO = dateISO || addContextDateISO || ymd(new Date());
     const calendarDateISO = targetISO || null;
+    const recurrenceRule = readRecurrenceFromInputs({
+      typeInput: taskRepeatTypeInput,
+      everyInput: taskRepeatEveryInput,
+      endTypeInput: taskRepeatEndTypeInput,
+      endDateInput: taskRepeatEndDateInput,
+      countInput: taskRepeatCountInput,
+      fallbackTask: { mode }
+    });
     const base = {
       id,
       name,
@@ -5850,7 +5992,8 @@ function renderDashboard(){
       parentTask: null,
       order: ++window._maintOrderCounter,
       calendarDateISO: null,
-      downtimeHours: downtimeVal
+      downtimeHours: downtimeVal,
+      recurrenceRule
     };
     let message = "Task added";
     if (mode === "interval"){
@@ -5871,7 +6014,7 @@ function renderDashboard(){
       const baselineHours = parseBaselineHours(taskLastInput?.value);
       applyIntervalBaseline(template, { baselineHours, currentHours: curHours });
       tasksInterval.unshift(template);
-      const instance = scheduleExistingIntervalTask(template, { dateISO: targetISO, refreshDashboard: false }) || template;
+      const instance = scheduleExistingIntervalTask(template, { dateISO: targetISO, recurrenceRule, refreshDashboard: false }) || template;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
       let dateLabel = targetISO;
@@ -5926,7 +6069,8 @@ function renderDashboard(){
           completedDates: [],
           manualHistory: [],
           variant: "template",
-          templateId: subBase.id
+          templateId: subBase.id,
+          recurrenceRule: normalizeRecurrenceRule({ type: "machine_hours", every: subInterval }, { mode: "interval", interval: subInterval })
         });
         const curHours = getCurrentMachineHours();
         const lastField = row.querySelector("[data-subtask-last]");
@@ -5939,7 +6083,8 @@ function renderDashboard(){
           mode:"asreq",
           condition: (condInput?.value || "").trim() || "As required",
           variant: "template",
-          templateId: subBase.id
+          templateId: subBase.id,
+          recurrenceRule: normalizeRecurrenceRule({ type: "none" }, { mode: "asreq" })
         });
         tasksAsReq.unshift(subTask);
       }
@@ -6015,9 +6160,17 @@ function renderDashboard(){
     const task = meta.task;
     const targetISO = addContextDateISO || ymd(new Date());
     const occurrenceNote = (taskExistingNoteInput?.value || "").trim();
+    const recurrenceRule = readRecurrenceFromInputs({
+      typeInput: taskExistingRepeatTypeInput,
+      everyInput: taskExistingRepeatEveryInput,
+      endTypeInput: taskExistingRepeatEndTypeInput,
+      endDateInput: taskExistingRepeatEndDateInput,
+      countInput: taskExistingRepeatCountInput,
+      fallbackTask: task
+    });
     let message = "Maintenance task added";
     if (task.mode === "interval"){
-      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO, note: occurrenceNote, refreshDashboard: true }) || task;
+      const instance = scheduleExistingIntervalTask(task, { dateISO: targetISO, note: occurrenceNote, recurrenceRule, refreshDashboard: true }) || task;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
       let dateLabel = targetISO;
@@ -6033,7 +6186,7 @@ function renderDashboard(){
         ? `Logged "${instance.name || "Task"}" as completed on ${dateLabel}`
         : `Scheduled "${instance.name || "Task"}" for ${dateLabel}`;
     }else{
-      const instance = scheduleExistingAsReqTask(task, { dateISO: targetISO, note: occurrenceNote, refreshDashboard: true }) || task;
+      const instance = scheduleExistingAsReqTask(task, { dateISO: targetISO, note: occurrenceNote, recurrenceRule, refreshDashboard: true }) || task;
       message = "As-required task linked from Maintenance Settings";
     }
     setContextDate(targetISO);
@@ -7938,6 +8091,14 @@ function renderSettings(){
     const condition = escapeHtml(t.condition || "As required");
     const freq = t.interval ? `${t.interval} hrs` : "Set frequency";
     const baselineVal = baselineInputValue(t);
+    const recurrence = recurrenceRuleForTask(t);
+    const recurrenceTypeLabel = ({
+      none: "No repeat",
+      machine_hours: "By machine hours",
+      calendar_daily: "Daily",
+      calendar_weekly: "Weekly",
+      calendar_monthly: "Monthly"
+    })[recurrence.type] || "No repeat";
     const occurrenceNoteMap = (typeof normalizeOccurrenceNotes === "function") ? normalizeOccurrenceNotes(t) : (t.occurrenceNotes || {});
     const occurrenceHoursMap = (typeof normalizeOccurrenceHours === "function") ? normalizeOccurrenceHours(t) : (t.occurrenceHours || {});
     const occurrenceKeys = new Set([
@@ -7966,6 +8127,7 @@ function renderSettings(){
           <span class="task-name">${name}</span>
           <span class="chip">${type === "interval" ? "By Interval" : "As Required"}</span>
           ${type === "interval" ? `<span class=\"chip\" data-chip-frequency="${t.id}">${escapeHtml(freq)}</span>` : `<span class=\"chip\" data-chip-condition="${t.id}">${condition}</span>`}
+          <span class="chip" data-chip-repeat="${t.id}">${escapeHtml(recurrenceTypeLabel)}</span>
           ${notesChip}
           ${type === "interval" ? dueChip(t) : ""}
         </summary>
@@ -7981,6 +8143,25 @@ function renderSettings(){
               ? `<label data-field="interval">Frequency (hrs)<input type=\"number\" min=\"1\" step=\"1\" data-k=\"interval\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${t.interval!=null?t.interval:""}\" placeholder=\"Hours between service\"></label>`
               : `<label data-field="condition">Condition / trigger<input data-k=\"condition\" data-id=\"${t.id}\" data-list=\"asreq\" value=\"${escapeHtml(t.condition||"")}\" placeholder=\"When to perform\"></label>`}
             ${type === "interval" ? `<label data-field="sinceBase">Hours since last service<input type=\"number\" min=\"0\" step=\"0.01\" data-k=\"sinceBase\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${baselineVal!==""?baselineVal:""}\" placeholder=\"optional\"></label>` : ""}
+            <label data-field="recurrenceType">Repeat
+              <select data-k="recurrenceType" data-id="${t.id}" data-list="${type}">
+                <option value="none" ${recurrence.type === "none" ? "selected" : ""}>Does not repeat</option>
+                <option value="machine_hours" ${recurrence.type === "machine_hours" ? "selected" : ""}>By machine hours</option>
+                <option value="calendar_daily" ${recurrence.type === "calendar_daily" ? "selected" : ""}>Daily</option>
+                <option value="calendar_weekly" ${recurrence.type === "calendar_weekly" ? "selected" : ""}>Weekly</option>
+                <option value="calendar_monthly" ${recurrence.type === "calendar_monthly" ? "selected" : ""}>Monthly</option>
+              </select>
+            </label>
+            <label data-field="recurrenceEvery">Repeat every<input type="number" min="1" step="1" data-k="recurrenceEvery" data-id="${t.id}" data-list="${type}" value="${recurrence.every || 1}"></label>
+            <label data-field="recurrenceEndType">Repeat until
+              <select data-k="recurrenceEndType" data-id="${t.id}" data-list="${type}">
+                <option value="never" ${recurrence.endType === "never" ? "selected" : ""}>Never ends</option>
+                <option value="on_date" ${recurrence.endType === "on_date" ? "selected" : ""}>End on date</option>
+                <option value="after_count" ${recurrence.endType === "after_count" ? "selected" : ""}>End after count</option>
+              </select>
+            </label>
+            <label data-field="recurrenceEndDate">End date<input type="date" data-k="recurrenceEndDate" data-id="${t.id}" data-list="${type}" value="${recurrence.endDateISO || ""}"></label>
+            <label data-field="recurrenceCount">Occurrences<input type="number" min="1" step="1" data-k="recurrenceCount" data-id="${t.id}" data-list="${type}" value="${recurrence.count != null ? recurrence.count : ""}" placeholder="e.g. 20"></label>
             <label data-field="manualLink">Manual link<input type="url" data-k="manualLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.manualLink||"")}" placeholder="https://..."></label>
             <label data-field="storeLink">Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
             <label data-field="pn">Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
@@ -9156,7 +9337,7 @@ function renderSettings(){
     const key = target.getAttribute("data-k");
     if (!key || key === "mode") return;
     let value = target.value;
-    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase" || key === "downtimeHours"){
+    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase" || key === "downtimeHours" || key === "recurrenceEvery" || key === "recurrenceCount"){
       value = value === "" ? null : Number(value);
       if (value !== null && !isFinite(value)) return;
     }
@@ -9250,6 +9431,29 @@ function renderSettings(){
       if (key === "storeLink"){ syncLinkedInventoryFromTask(meta.task, { link: meta.task.storeLink || "" }); }
       if (key === "pn"){ syncLinkedInventoryFromTask(meta.task, { pn: meta.task.pn || "" }); }
       if (key === "name"){ syncLinkedInventoryFromTask(meta.task, { name: meta.task.name || "" }); }
+    }else if (key === "recurrenceEvery" || key === "recurrenceCount" || key === "recurrenceEndDate"){
+      const nextRule = { ...(meta.task.recurrenceRule || {}) };
+      if (key === "recurrenceEvery"){
+        nextRule.every = value == null ? 1 : Math.max(1, Math.round(Number(value)));
+        if (value != null) target.value = String(nextRule.every);
+      }else if (key === "recurrenceCount"){
+        nextRule.count = value == null ? null : Math.max(1, Math.round(Number(value)));
+        if (nextRule.count != null) target.value = String(nextRule.count);
+      }else{
+        nextRule.endDateISO = target.value || null;
+      }
+      const rule = setTaskRecurrenceRule(meta.task, nextRule);
+      const chip = holder.querySelector('[data-chip-repeat]');
+      if (chip){
+        const label = ({
+          none: "No repeat",
+          machine_hours: "By machine hours",
+          calendar_daily: "Daily",
+          calendar_weekly: "Weekly",
+          calendar_monthly: "Monthly"
+        })[rule?.type] || "No repeat";
+        chip.textContent = label;
+      }
     }
     persist();
   });
@@ -9268,7 +9472,30 @@ function renderSettings(){
       persist();
       return;
     }
-    if (target.getAttribute("data-k") === "mode"){
+    const selectKey = target.getAttribute("data-k");
+    if (selectKey === "recurrenceType" || selectKey === "recurrenceEndType"){
+      const nextRule = { ...(meta.task.recurrenceRule || {}) };
+      if (selectKey === "recurrenceType"){
+        nextRule.type = target.value;
+      }else{
+        nextRule.endType = target.value;
+      }
+      const rule = setTaskRecurrenceRule(meta.task, nextRule);
+      const chip = holder.querySelector('[data-chip-repeat]');
+      if (chip){
+        const label = ({
+          none: "No repeat",
+          machine_hours: "By machine hours",
+          calendar_daily: "Daily",
+          calendar_weekly: "Weekly",
+          calendar_monthly: "Monthly"
+        })[rule?.type] || "No repeat";
+        chip.textContent = label;
+      }
+      persist();
+      return;
+    }
+    if (selectKey === "mode"){
       const nextMode = target.value;
       if (nextMode === meta.mode) return;
       meta.list.splice(meta.index,1);
@@ -9280,6 +9507,7 @@ function renderSettings(){
         meta.task.sinceBase = baselineHours;
         applyIntervalBaseline(meta.task, { baselineHours });
         delete meta.task.condition;
+        meta.task.recurrenceRule = normalizeRecurrenceRule(meta.task.recurrenceRule, meta.task);
         window.tasksInterval.unshift(meta.task);
       }else{
         let removeOccurrences = false;
@@ -9300,6 +9528,7 @@ function renderSettings(){
         delete meta.task.interval;
         delete meta.task.sinceBase;
         delete meta.task.anchorTotal;
+        meta.task.recurrenceRule = normalizeRecurrenceRule({ type: "none", every: 1 }, meta.task);
         window.tasksAsReq.unshift(meta.task);
       }
       persist();

@@ -1028,14 +1028,6 @@ function makeBubble(anchor){
 function completeTask(taskId){
   let meta = findCalendarTaskMeta(taskId);
   if (!meta) return;
-  if (isTemplateTask(meta.task) && meta.task.mode === "interval"){
-    const instance = scheduleExistingIntervalTask(meta.task, { dateISO: ymd(new Date()) });
-    if (instance){
-      const nextMeta = findCalendarTaskMeta(instance.id);
-      if (nextMeta) meta = nextMeta;
-      else meta = { task: instance, mode: "interval", list: window.tasksInterval, index: window.tasksInterval.indexOf(instance) };
-    }
-  }
   const todayKey = normalizeDateKey(new Date());
   if (!todayKey) return;
   const changed = markCalendarTaskComplete(meta, todayKey);
@@ -1984,6 +1976,79 @@ function renderCalendar(){
     });
   }
 
+  const recurrenceForTask = (task)=>{
+    const fallback = task && task.mode === "interval"
+      ? { type: "machine_hours", every: Math.max(1, Math.round(Number(task.interval) || 1)), endType: "never", endDateISO: null, count: null }
+      : { type: "none", every: 1, endType: "never", endDateISO: null, count: null };
+    if (typeof recurrenceRuleForTask === "function"){
+      try { return recurrenceRuleForTask(task); } catch (_err){}
+    }
+    const raw = task && task.recurrenceRule && typeof task.recurrenceRule === "object" ? task.recurrenceRule : null;
+    if (!raw) return fallback;
+    const type = typeof raw.type === "string" ? raw.type : fallback.type;
+    const every = Number.isFinite(Number(raw.every)) && Number(raw.every) > 0 ? Math.max(1, Math.round(Number(raw.every))) : fallback.every;
+    const endType = raw.endType === "on_date" || raw.endType === "after_count" ? raw.endType : "never";
+    const endDateISO = typeof raw.endDateISO === "string" ? raw.endDateISO : null;
+    const count = Number.isFinite(Number(raw.count)) && Number(raw.count) > 0 ? Math.max(1, Math.round(Number(raw.count))) : null;
+    return { type, every, endType, endDateISO, count };
+  };
+
+  const projectCalendarRecurringDates = (task, rule, { skipDates = new Set(), minOccurrences = 1, maxOccurrences = 1 } = {})=>{
+    if (!task || !rule || !String(rule.type || "").startsWith("calendar_")) return [];
+    const toStart = (value)=>{
+      const key = normalizeDateKey(value);
+      if (!key) return null;
+      const parsed = parseDateLocal(key);
+      if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+      parsed.setHours(0,0,0,0);
+      return parsed;
+    };
+    const completedDates = Array.isArray(task.completedDates) ? task.completedDates.map(normalizeDateKey).filter(Boolean) : [];
+    const manualDates = Array.isArray(task.manualHistory) ? task.manualHistory.map(item => normalizeDateKey(item?.dateISO)).filter(Boolean) : [];
+    const explicit = normalizeDateKey(task.calendarDateISO);
+    const baseCandidates = [...completedDates, ...manualDates];
+    if (explicit) baseCandidates.push(explicit);
+    let base = null;
+    if (baseCandidates.length){
+      baseCandidates.sort();
+      base = toStart(baseCandidates[baseCandidates.length - 1]);
+    }
+    if (!(base instanceof Date)){
+      base = toStart(new Date()) || new Date();
+      base.setHours(0,0,0,0);
+    }
+    const every = Math.max(1, Math.round(Number(rule.every) || 1));
+    const today = toStart(new Date()) || new Date();
+    today.setHours(0,0,0,0);
+    const out = [];
+    let generated = 0;
+    let cursor = new Date(base.getTime());
+    const maxIterations = 180;
+    while (generated < maxIterations && out.length < Math.max(minOccurrences, maxOccurrences || 1)){
+      generated += 1;
+      if (rule.type === "calendar_daily"){
+        cursor.setDate(cursor.getDate() + every);
+      }else if (rule.type === "calendar_weekly"){
+        cursor.setDate(cursor.getDate() + (every * 7));
+      }else if (rule.type === "calendar_monthly"){
+        cursor.setMonth(cursor.getMonth() + every);
+      }else{
+        break;
+      }
+      const key = ymd(cursor);
+      if (!key || skipDates.has(key)) continue;
+      if (rule.endType === "on_date" && rule.endDateISO && key > rule.endDateISO) break;
+      if (rule.endType === "after_count" && rule.count != null && out.length >= rule.count) break;
+      if (cursor < today && out.length < minOccurrences){
+        out.push({ dateISO: key, dueDate: new Date(cursor.getTime()) });
+        continue;
+      }
+      out.push({ dateISO: key, dueDate: new Date(cursor.getTime()) });
+    }
+    if (maxOccurrences != null) return out.slice(0, maxOccurrences);
+    return out;
+  };
+
   const intervalTasks = Array.isArray(window.tasksInterval)
     ? window.tasksInterval.filter(t => t && t.mode === "interval" && isInstanceTask(t))
     : [];
@@ -2048,12 +2113,22 @@ function renderCalendar(){
     const skipDates = new Set(completedKeys);
     manualDates.forEach(dateKey => skipDates.add(dateKey));
     removedSet.forEach(dateKey => skipDates.add(dateKey));
-    const projections = projectIntervalDueDates(t, {
-      monthsAhead: 3,
-      excludeDates: skipDates,
-      minOccurrences: 1,
-      maxOccurrences: 1
-    });
+    const recurrence = recurrenceForTask(t);
+    let projections = [];
+    if (recurrence.type === "machine_hours"){
+      projections = projectIntervalDueDates(t, {
+        monthsAhead: 3,
+        excludeDates: skipDates,
+        minOccurrences: 1,
+        maxOccurrences: 1
+      });
+    } else if (String(recurrence.type || "").startsWith("calendar_")){
+      projections = projectCalendarRecurringDates(t, recurrence, {
+        skipDates,
+        minOccurrences: 1,
+        maxOccurrences: 1
+      });
+    }
     if (projections.length){
       const pred = projections[0];
       const dueKey = normalizeDateKey(pred?.dateISO);
@@ -2063,6 +2138,7 @@ function renderCalendar(){
       return;
     }
 
+    if (recurrence.type !== "machine_hours") return;
     const nd = nextDue(t);
     if (!nd) return;
     const dueKey = normalizeDateKey(nd.due);
@@ -2083,6 +2159,18 @@ function renderCalendar(){
     const manualKey = normalizeDateKey(t.calendarDateISO);
     if (manualKey){
       pushTaskEvent(t, manualKey, completedDates.has(manualKey) ? "completed" : "manual");
+    }
+    const recurrence = recurrenceForTask(t);
+    if (String(recurrence.type || "").startsWith("calendar_")){
+      const skipDates = new Set(completedDates);
+      if (manualKey) skipDates.add(manualKey);
+      const projections = projectCalendarRecurringDates(t, recurrence, { skipDates, minOccurrences: 1, maxOccurrences: 1 });
+      if (projections.length){
+        const dueKey = normalizeDateKey(projections[0]?.dateISO);
+        if (dueKey && !skipDates.has(dueKey)){
+          pushTaskEvent(t, dueKey, "due");
+        }
+      }
     }
   });
 
