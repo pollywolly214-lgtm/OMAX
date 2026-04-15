@@ -1134,11 +1134,13 @@ function showTaskBubble(taskId, anchor, options = {}){
   }
 
   const targetKey = dateKey || normalizeDateKey(new Date());
+  const recurrence = getTaskRecurrence(task);
+  const isRepeating = Boolean(recurrence && recurrence.enabled);
 
   const actions = [];
   if (dateKey){
-    const noteLabel = occurrenceNote ? "Edit occurrence note" : "Add occurrence note";
-    const hoursLabel = occurrenceHours != null ? "Edit occurrence time" : "Add occurrence time";
+    const noteLabel = occurrenceNote ? "Edit note" : "Add note";
+    const hoursLabel = occurrenceHours != null ? "Edit time" : "Add time";
     actions.push(`<button data-bbl-occurrence-hours>${escapeHtml(hoursLabel)}</button>`);
     actions.push(`<button data-bbl-occurrence-note>${escapeHtml(noteLabel)}</button>`);
   }
@@ -1149,20 +1151,10 @@ function showTaskBubble(taskId, anchor, options = {}){
     actions.push(`<button data-bbl-uncomplete>Unmark complete</button>`);
   }
   if (canRemoveOccurrence){
-    const removeSelectId = `bubbleRemoveScope-${taskId}-${targetKey || "na"}`;
-    actions.push(`
-      <div class="bubble-remove-group">
-        <label for="${removeSelectId}">Remove:</label>
-        <div class="bubble-remove-row">
-          <select id="${removeSelectId}" data-bbl-remove-scope>
-            <option value="single">This occurrence only</option>
-            <option value="future">This and future occurrences</option>
-            <option value="all">All occurrences (past & future)</option>
-          </select>
-          <button class="secondary" data-bbl-remove-occurrence>Remove</button>
-        </div>
-      </div>
-    `);
+    actions.push(`<button class="secondary" data-bbl-remove-single>Remove occurrence</button>`);
+    if (isRepeating){
+      actions.push(`<button class="secondary" data-bbl-remove-future>Remove future</button>`);
+    }
   }
   actions.push(`<button data-bbl-edit>Edit settings</button>`);
   actions.push(`<button class="danger" data-bbl-remove-task>Remove task</button>`);
@@ -1223,8 +1215,7 @@ function showTaskBubble(taskId, anchor, options = {}){
     }
   });
 
-  b.querySelector("[data-bbl-remove-occurrence]")?.addEventListener("click", ()=>{
-    const scope = b.querySelector("[data-bbl-remove-scope]")?.value || "single";
+  const runRemoveScope = (scope)=>{
     const confirmText = scope === "future"
       ? "Remove this occurrence and all future occurrences from the calendar?"
       : scope === "all"
@@ -1245,7 +1236,10 @@ function showTaskBubble(taskId, anchor, options = {}){
       hideBubble();
       route();
     }
-  });
+  };
+  b.querySelector("[data-bbl-remove-single]")?.addEventListener("click", ()=> runRemoveScope("single"));
+  b.querySelector("[data-bbl-remove-future]")?.addEventListener("click", ()=> runRemoveScope("future"));
+  b.querySelector("[data-bbl-remove-all]")?.addEventListener("click", ()=> runRemoveScope("all"));
 
   b.querySelector("[data-bbl-remove-task]")?.addEventListener("click", ()=>{
     const templateId = task.templateId != null ? String(task.templateId) : String(task.id);

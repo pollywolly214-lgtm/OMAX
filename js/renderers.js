@@ -8637,11 +8637,12 @@ function renderSettings(){
     toggle("interval", mode === "interval");
     toggle("sinceBase", mode === "interval");
     toggle("condition", mode !== "interval");
-    toggle("recurrenceBasis", repeatEnabled);
-    toggle("recurrenceEvery", repeatEnabled);
-    toggle("recurrenceEndType", repeatEnabled);
-    toggle("recurrenceEndDate", repeatEnabled && endType === "on_date");
-    toggle("recurrenceEndCount", repeatEnabled && endType === "after_count");
+    const showRecurrenceDetail = repeatEnabled && isEditing;
+    toggle("recurrenceBasis", showRecurrenceDetail);
+    toggle("recurrenceEvery", showRecurrenceDetail);
+    toggle("recurrenceEndType", showRecurrenceDetail);
+    toggle("recurrenceEndDate", showRecurrenceDetail && endType === "on_date");
+    toggle("recurrenceEndCount", showRecurrenceDetail && endType === "after_count");
     if (repeatEnabled){
       const basisRow = taskEl.querySelector('[data-field="recurrenceBasis"] select[data-k="recurrenceBasis"]');
       if (basisRow instanceof HTMLSelectElement){
