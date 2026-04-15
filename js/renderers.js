@@ -11611,6 +11611,7 @@ function buildCalendarMaintenanceHistory({ intervalTasks = [], asReqTasks = [] }
 }
 
 function computeCostModel(){
+  const MAINTENANCE_LABOR_RATE_PER_HOUR = 30;
   const roundMaintenanceCurrency = (value)=> {
     const num = Number(value);
     if (!Number.isFinite(num)) return 0;
@@ -12008,7 +12009,6 @@ function computeCostModel(){
     ? asReqAnnualProjection / hoursForRate
     : 0;
   const combinedCostPerHour = intervalCostPerHour + asReqCostPerHour;
-  const MAINTENANCE_LABOR_RATE_PER_HOUR = 30;
 
   const predictedIntervalAnnual = (intervalCostPerHour > 0 && baselineAnnualHours > 0)
     ? intervalCostPerHour * baselineAnnualHours
