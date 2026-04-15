@@ -5326,7 +5326,7 @@ function renderDashboard(){
         oneTimeNameInput.focus();
       }
     }else{
-      syncTaskMode(taskTypeSelect?.value || "interval");
+      syncTaskRepeatMode();
       syncTaskDateInput();
       if (taskNameInput){
         taskNameInput.focus();
@@ -5712,6 +5712,33 @@ function renderDashboard(){
     }
   }
 
+  function deriveTaskModeFromRepeat(){
+    const repeatEnabled = String(taskRepeatInput?.value || "no") === "yes";
+    const basis = String(taskRepeatBasisInput?.value || "calendar_day");
+    if (!repeatEnabled) return "asreq";
+    return basis === "machine_hours" ? "interval" : "asreq";
+  }
+
+  function syncTaskRepeatMode(){
+    const derivedMode = deriveTaskModeFromRepeat();
+    if (taskTypeSelect){
+      taskTypeSelect.value = derivedMode;
+      taskTypeSelect.disabled = true;
+      const row = taskTypeSelect.closest("label");
+      if (row) row.hidden = true;
+    }
+    syncTaskMode(derivedMode);
+    if (taskConditionInput){
+      taskConditionInput.disabled = derivedMode !== "asreq";
+    }
+    if (taskIntervalInput){
+      taskIntervalInput.disabled = derivedMode !== "interval";
+    }
+    if (taskLastInput){
+      taskLastInput.disabled = derivedMode !== "interval";
+    }
+  }
+
   function resetTaskForm(){
     taskForm?.reset();
     if (taskDowntimeInput){
@@ -5720,12 +5747,13 @@ function renderDashboard(){
     subtaskList?.replaceChildren();
     resetExistingTaskForm();
     showTaskOptionStage();
-    syncTaskMode(taskTypeSelect?.value || "interval");
-    syncTaskDateInput();
     if (taskRepeatInput) taskRepeatInput.value = "no";
+    if (taskRepeatBasisInput) taskRepeatBasisInput.value = "machine_hours";
     if (taskRepeatEveryInput) taskRepeatEveryInput.value = "1";
     if (taskRepeatEndInput) taskRepeatEndInput.value = "never";
     toggleRepeatFields(taskRepeatInput, taskRepeatBasisInput, taskRepeatEveryInput, taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput);
+    syncTaskRepeatMode();
+    syncTaskDateInput();
   }
 
   function showStep(step){
@@ -6018,12 +6046,15 @@ function renderDashboard(){
 
   taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
   taskRepeatInput?.addEventListener("change", ()=> toggleRepeatFields(taskRepeatInput, taskRepeatBasisInput, taskRepeatEveryInput, taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput));
+  taskRepeatInput?.addEventListener("change", ()=> syncTaskRepeatMode());
+  taskRepeatBasisInput?.addEventListener("change", ()=> syncTaskRepeatMode());
   taskRepeatEndInput?.addEventListener("change", ()=> toggleRepeatEndFields(taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput));
   taskExistingRepeatInput?.addEventListener("change", ()=> toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput));
   taskExistingEndInput?.addEventListener("change", ()=> toggleRepeatEndFields(taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput));
   syncTaskMode(taskTypeSelect?.value || "interval");
   toggleRepeatFields(taskRepeatInput, taskRepeatBasisInput, taskRepeatEveryInput, taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput);
   toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
+  syncTaskRepeatMode();
   syncTaskDateInput();
   syncOneTimeDateInput();
   populateCategoryOptions();
@@ -6041,7 +6072,7 @@ function renderDashboard(){
     if (!taskForm) return;
     const name = (taskNameInput?.value || "").trim();
     if (!name){ alert("Task name is required."); return; }
-    const mode = (taskTypeSelect?.value === "asreq") ? "asreq" : "interval";
+    const mode = deriveTaskModeFromRepeat();
     const manual = (taskManualInput?.value || "").trim();
     const store  = (taskStoreInput?.value || "").trim();
     const pn     = (taskPNInput?.value || "").trim();
@@ -7642,10 +7673,20 @@ function renderSettings(){
   window.tasksInterval   = Array.isArray(window.tasksInterval)   ? window.tasksInterval   : [];
   window.tasksAsReq      = Array.isArray(window.tasksAsReq)      ? window.tasksAsReq      : [];
   if (!(window.settingsOpenFolders instanceof Set)) window.settingsOpenFolders = new Set();
+  if (!(window.settingsOpenTasks instanceof Set)) window.settingsOpenTasks = new Set();
   const openFolderState = window.settingsOpenFolders;
+  const openTaskState = window.settingsOpenTasks;
   const validFolderIds = new Set(window.settingsFolders.map(f => String(f.id)));
+  const validTaskIds = new Set(
+    window.tasksInterval.concat(window.tasksAsReq)
+      .filter(Boolean)
+      .map(task => String(task.id))
+  );
   for (const id of Array.from(openFolderState)){
     if (!validFolderIds.has(id)) openFolderState.delete(id);
+  }
+  for (const id of Array.from(openTaskState)){
+    if (!validTaskIds.has(id)) openTaskState.delete(id);
   }
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
 
@@ -8248,8 +8289,9 @@ function renderSettings(){
       emptyAttrs: `data-empty-sub="${t.id}"`
     });
     const inventoryInfo = getInventoryLinkInfo(t);
+    const openAttr = openTaskState.has(String(t.id)) ? " open" : "";
     return `
-      <details class="task task--${type}" data-task-id="${t.id}" data-owner="${type}" data-editing="0">
+      <details class="task task--${type}" data-task-id="${t.id}" data-owner="${type}" data-editing="0"${openAttr}>
         <summary draggable="true">
           <span class="task-name">${name}</span>
           <span class="chip">${type === "interval" ? "By Interval" : "As Required"}</span>
@@ -8560,6 +8602,59 @@ function renderSettings(){
       linkBtn.disabled = !isEditing;
       linkBtn.classList.toggle("is-locked-control", !isEditing);
     }
+    updateTaskFieldRelevance(taskEl);
+  };
+
+  const updateTaskFieldRelevance = (taskEl)=>{
+    if (!(taskEl instanceof HTMLElement)) return;
+    const taskId = taskEl.getAttribute("data-task-id");
+    const meta = taskId ? findTaskMeta(taskId) : null;
+    const task = meta?.task;
+    if (!task) return;
+    const recurrence = normalizeTaskRecurrence(task);
+    const isEditing = getTaskEditingState(taskEl);
+    const repeatEnabled = Boolean(recurrence?.enabled);
+    const basis = String(recurrence?.basis || "");
+    const endType = String(recurrence?.endType || "never");
+    const mode = String(task.mode || meta.mode || "asreq");
+    const toggle = (field, visible)=>{
+      const row = taskEl.querySelector(`[data-field="${field}"]`);
+      if (!row) return;
+      row.hidden = !visible;
+      const control = row.querySelector("input,select,textarea");
+      if (control instanceof HTMLElement){
+        if (!visible){
+          control.setAttribute("data-irrelevant", "1");
+          control.setAttribute("disabled", "disabled");
+        }else{
+          control.removeAttribute("data-irrelevant");
+          if (isEditing){
+            control.removeAttribute("disabled");
+          }
+        }
+      }
+    };
+    toggle("interval", mode === "interval");
+    toggle("sinceBase", mode === "interval");
+    toggle("condition", mode !== "interval");
+    toggle("recurrenceBasis", repeatEnabled);
+    toggle("recurrenceEvery", repeatEnabled);
+    toggle("recurrenceEndType", repeatEnabled);
+    toggle("recurrenceEndDate", repeatEnabled && endType === "on_date");
+    toggle("recurrenceEndCount", repeatEnabled && endType === "after_count");
+    if (repeatEnabled){
+      const basisRow = taskEl.querySelector('[data-field="recurrenceBasis"] select[data-k="recurrenceBasis"]');
+      if (basisRow instanceof HTMLSelectElement){
+        Array.from(basisRow.options).forEach(opt => {
+          if (opt.value === "machine_hours"){
+            opt.disabled = mode !== "interval";
+          }
+        });
+        if (mode !== "interval" && basis === "machine_hours"){
+          basisRow.value = "calendar_day";
+        }
+      }
+    }
   };
 
   const closeInventoryLinkModal = ()=>{
@@ -8679,6 +8774,7 @@ function renderSettings(){
   };
 
   lockAllTasks();
+  tree?.querySelectorAll("details.task").forEach(taskEl => updateTaskFieldRelevance(taskEl));
 
   tree?.addEventListener("dblclick", (e)=>{
     const target = e.target;
@@ -8697,9 +8793,16 @@ function renderSettings(){
     const details = e.target;
     if (!(details instanceof HTMLDetailsElement)) return;
     if (!details.matches("details.task")) return;
+    const taskId = details.getAttribute("data-task-id");
+    if (taskId){
+      if (details.open) openTaskState.add(String(taskId));
+      else openTaskState.delete(String(taskId));
+    }
     if (!details.open){
       setTaskEditingState(details, false);
+      return;
     }
+    updateTaskFieldRelevance(details);
   });
 
   const promptRemoveLinkedInventory = async (task, matches)=>{
@@ -9580,6 +9683,7 @@ function renderSettings(){
       meta.task.recurrence = recurrence;
       const recurChip = holder.querySelector('[data-chip-recurrence]');
       if (recurChip) recurChip.textContent = recurrenceSummaryLabel(meta.task);
+      updateTaskFieldRelevance(holder);
       if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets({ full: true });
     }else if (key === "recurrenceEndDate"){
       const recurrence = normalizeTaskRecurrence(meta.task);
@@ -9588,6 +9692,7 @@ function renderSettings(){
       meta.task.recurrence = recurrence;
       const recurChip = holder.querySelector('[data-chip-recurrence]');
       if (recurChip) recurChip.textContent = recurrenceSummaryLabel(meta.task);
+      updateTaskFieldRelevance(holder);
     }
     persist();
   });
@@ -9629,6 +9734,7 @@ function renderSettings(){
       normalizeTaskRecurrence(meta.task);
       const recurChip = holder.querySelector('[data-chip-recurrence]');
       if (recurChip) recurChip.textContent = recurrenceSummaryLabel(meta.task);
+      updateTaskFieldRelevance(holder);
       if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets({ full: true });
       persist();
       if (typeof renderCalendar === "function") renderCalendar();
