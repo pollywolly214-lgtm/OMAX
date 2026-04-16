@@ -563,16 +563,17 @@ function markCalendarTaskComplete(meta, dateISO){
   const key = normalizeDateKey(dateISO || new Date());
   if (!key) return false;
   const task = meta.task;
-  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
   let changed = false;
 
-  if (mode === "interval"){
-    const currentHoursRaw = typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : null;
-    const currentHours = currentHoursRaw != null && Number.isFinite(Number(currentHoursRaw)) ? Number(currentHoursRaw) : null;
-    if (currentHours != null){
-      task.anchorTotal = currentHours;
+  if (task.isRepeating){
+    if (task.intervalType !== "days") {
+      const currentHoursRaw = typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : null;
+      const currentHours = currentHoursRaw != null && Number.isFinite(Number(currentHoursRaw)) ? Number(currentHoursRaw) : null;
+      if (currentHours != null){
+        task.anchorTotal = currentHours;
+      }
+      task.sinceBase = 0;
     }
-    task.sinceBase = 0;
 
     if (!Array.isArray(task.completedDates)) task.completedDates = [];
     if (!task.completedDates.includes(key)){
@@ -1028,14 +1029,6 @@ function makeBubble(anchor){
 function completeTask(taskId){
   let meta = findCalendarTaskMeta(taskId);
   if (!meta) return;
-  if (isTemplateTask(meta.task) && meta.task.mode === "interval"){
-    const instance = scheduleExistingIntervalTask(meta.task, { dateISO: ymd(new Date()) });
-    if (instance){
-      const nextMeta = findCalendarTaskMeta(instance.id);
-      if (nextMeta) meta = nextMeta;
-      else meta = { task: instance, mode: "interval", list: window.tasksInterval, index: window.tasksInterval.indexOf(instance) };
-    }
-  }
   const todayKey = normalizeDateKey(new Date());
   if (!todayKey) return;
   const changed = markCalendarTaskComplete(meta, todayKey);
@@ -1665,7 +1658,7 @@ function estimateIntervalDailyHours(task, baselineEntry, today){
 }
 
 function projectIntervalDueDates(task, options = {}){
-  if (!task || task.mode !== "interval") return [];
+  if (!task || task.mode !== "interval" || task.isRepeating === false) return [];
   const interval = Number(task.interval);
   if (!Number.isFinite(interval) || interval <= 0) return [];
 
@@ -1796,7 +1789,7 @@ function projectIntervalDueDates(task, options = {}){
   }
 
   const hoursPerDay = estimateIntervalDailyHours(task, baselineEntry, today);
-  const intervalDays = interval / hoursPerDay;
+  const intervalDays = (task.intervalType === "days") ? interval : (interval / hoursPerDay);
   if (!Number.isFinite(intervalDays) || intervalDays <= 0) return [];
 
   const baseTime = baseDate.getTime();

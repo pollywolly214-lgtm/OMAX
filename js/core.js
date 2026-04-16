@@ -2739,12 +2739,32 @@ function adoptState(doc){
 
   // Core lists (fallback to defaults if empty/missing)
   totalHistory = Array.isArray(data.totalHistory) ? data.totalHistory : [];
+  const enforceTaskSchema = (task, defaultMode) => {
+    if (!task) return null;
+    task.mode = task.mode || defaultMode;
+    if (task.isRepeating === undefined) {
+      if (task.mode === "interval" && (!task.variant || task.variant === "template")) {
+        task.isRepeating = true;
+        task.intervalType = "hours";
+      } else {
+        task.isRepeating = false;
+      }
+    }
+    if (task.intervalType === undefined && task.isRepeating) {
+      task.intervalType = "hours";
+    }
+    if (task.variant === "instance" && task.isRepeating) {
+      task.isRepeating = false;
+    }
+    return task;
+  };
+
   tasksInterval = (Array.isArray(data.tasksInterval) && data.tasksInterval.length)
-    ? data.tasksInterval
-    : defaultIntervalTasks.slice();
+    ? data.tasksInterval.map(t => enforceTaskSchema(t, "interval"))
+    : defaultIntervalTasks.map(t => enforceTaskSchema({...t}, "interval"));
   tasksAsReq = (Array.isArray(data.tasksAsReq) && data.tasksAsReq.length)
-    ? data.tasksAsReq
-    : defaultAsReqTasks.slice();
+    ? data.tasksAsReq.map(t => enforceTaskSchema(t, "asreq"))
+    : defaultAsReqTasks.map(t => enforceTaskSchema({...t}, "asreq"));
   inventory = Array.isArray(data.inventory)
     ? data.inventory.map(normalizeInventoryItem).filter(Boolean)
     : seedInventoryFromTasks();

@@ -181,12 +181,51 @@ function liveSince(task){
 }
 
 function nextDue(task){
-  if (!task || task.interval == null) return null;
+  if (!task || task.interval == null || task.isRepeating === false) return null;
+  const interval = Number(task.interval);
+  if (!Number.isFinite(interval) || interval <= 0) return null;
+
+  if (task.intervalType === "days") {
+    let baseEpoch = null;
+    const completed = Array.isArray(task.completedDates) ? task.completedDates.slice().sort() : [];
+    if (completed.length > 0) {
+      // Find the most recent date
+      for (let i = completed.length - 1; i >= 0; i--) {
+        const parsed = window.parseDateLocal ? window.parseDateLocal(completed[i]) : new Date(completed[i]);
+        if (parsed && !Number.isNaN(parsed.getTime())) {
+          parsed.setHours(0, 0, 0, 0);
+          baseEpoch = parsed.getTime();
+          break;
+        }
+      }
+    }
+    if (!baseEpoch && task.calendarDateISO) {
+      const parsed = window.parseDateLocal ? window.parseDateLocal(task.calendarDateISO) : new Date(task.calendarDateISO);
+      if (parsed && !Number.isNaN(parsed.getTime())) {
+        parsed.setHours(0, 0, 0, 0);
+        baseEpoch = parsed.getTime();
+      }
+    }
+    if (!baseEpoch) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      baseEpoch = today.getTime();
+    }
+    
+    const msSince = Math.max(0, Date.now() - baseEpoch);
+    const daysSince = Math.floor(msSince / 86400000);
+    const remain = interval - daysSince;
+    
+    let due = new Date(baseEpoch);
+    due.setDate(due.getDate() + interval);
+    due.setHours(0, 0, 0, 0);
+    
+    return { since: daysSince, remain, days: remain, due, lastServicedAt: baseEpoch }; 
+  }
+
   const sinceRaw = liveSince(task);
   if (sinceRaw == null) return null;
   const since = Math.max(0, Number(sinceRaw) || 0);
-  const interval = Number(task.interval);
-  if (!Number.isFinite(interval) || interval <= 0) return null;
   const hoursPerDay = typeof getConfiguredDailyHours === "function"
     ? getConfiguredDailyHours()
     : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)

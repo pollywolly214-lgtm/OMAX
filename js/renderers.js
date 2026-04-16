@@ -566,6 +566,8 @@ function createIntervalTaskInstance(template){
     variant: "instance",
     templateId: templateId != null ? templateId : null,
     mode: "interval",
+    isRepeating: false,
+    intervalType: "hours",
     name: template.name || "",
     manualLink: template.manualLink || "",
     storeLink: template.storeLink || "",
@@ -4904,7 +4906,8 @@ function renderDashboard(){
   const jobForm          = document.getElementById("dashJobForm");
   const downList         = document.getElementById("dashDownList");
   const downDateInput    = document.getElementById("dashDownDate");
-  const taskTypeSelect   = document.getElementById("dashTaskType");
+  const taskIsRepeatingInput = document.getElementById("dashTaskIsRepeating");
+  const taskIntervalTypeSelect = document.getElementById("dashTaskIntervalType");
   const taskNameInput    = document.getElementById("dashTaskName");
   const taskIntervalInput= document.getElementById("dashTaskInterval");
   const taskLastInput    = document.getElementById("dashTaskLast");
@@ -5178,7 +5181,7 @@ function renderDashboard(){
         oneTimeNameInput.focus();
       }
     }else{
-      syncTaskMode(taskTypeSelect?.value || "interval");
+      syncTaskMode((taskIsRepeatingInput?.checked ?? true) ? "interval" : "asreq");
       syncTaskDateInput();
       if (taskNameInput){
         taskNameInput.focus();
@@ -5508,7 +5511,7 @@ function renderDashboard(){
     subtaskList?.replaceChildren();
     resetExistingTaskForm();
     showTaskOptionStage();
-    syncTaskMode(taskTypeSelect?.value || "interval");
+    syncTaskMode((taskIsRepeatingInput?.checked ?? true) ? "interval" : "asreq");
     syncTaskDateInput();
   }
 
@@ -5800,8 +5803,8 @@ function renderDashboard(){
     }, 80);
   });
 
-  taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
-  syncTaskMode(taskTypeSelect?.value || "interval");
+  taskIsRepeatingInput?.addEventListener("change", ()=> syncTaskMode(taskIsRepeatingInput.checked ? "interval" : "asreq"));
+  syncTaskMode((taskIsRepeatingInput?.checked ?? true) ? "interval" : "asreq");
   syncTaskDateInput();
   syncOneTimeDateInput();
   populateCategoryOptions();
@@ -5810,7 +5813,7 @@ function renderDashboard(){
   showTaskOptionStage();
 
   addSubtaskBtn?.addEventListener("click", ()=>{
-    const row = createSubtaskRow(taskTypeSelect?.value || "interval");
+    const row = createSubtaskRow((taskIsRepeatingInput?.checked ?? true) ? "interval" : "asreq");
     if (row) subtaskList?.appendChild(row);
   });
 
@@ -5819,7 +5822,7 @@ function renderDashboard(){
     if (!taskForm) return;
     const name = (taskNameInput?.value || "").trim();
     if (!name){ alert("Task name is required."); return; }
-    const mode = (taskTypeSelect?.value === "asreq") ? "asreq" : "interval";
+    const isRepeating = taskIsRepeatingInput ? taskIsRepeatingInput.checked : true;
     const manual = (taskManualInput?.value || "").trim();
     const store  = (taskStoreInput?.value || "").trim();
     const pn     = (taskPNInput?.value || "").trim();
@@ -5849,29 +5852,38 @@ function renderDashboard(){
       cat: catId,
       parentTask: null,
       order: ++window._maintOrderCounter,
-      calendarDateISO: null,
-      downtimeHours: downtimeVal
+      calendarDateISO: targetISO,
+      downtimeHours: downtimeVal,
+      isRepeating: isRepeating
     };
     let message = "Task added";
-    if (mode === "interval"){
+    if (isRepeating){
       let interval = Number(taskIntervalInput?.value);
       if (!isFinite(interval) || interval <= 0) interval = 8;
+      const intervalType = taskIntervalTypeSelect?.value === "days" ? "days" : "hours";
       const template = Object.assign({}, base, {
         mode:"interval",
         interval,
+        intervalType,
         sinceBase:0,
         anchorTotal:null,
         completedDates: [],
         manualHistory: [],
         variant: "template",
-        templateId: id,
-        downtimeHours: downtimeVal
+        templateId: id
       });
       const curHours = getCurrentMachineHours();
       const baselineHours = parseBaselineHours(taskLastInput?.value);
-      applyIntervalBaseline(template, { baselineHours, currentHours: curHours });
+      if (intervalType === "hours") {
+        applyIntervalBaseline(template, { baselineHours, currentHours: curHours });
+      } else {
+        // days interval
+        let bd = new Date();
+        bd.setHours(0,0,0,0);
+        if (baselineHours > 0) bd.setDate(bd.getDate() - baselineHours);
+        template.completedDates.push(ymd(bd));
+      }
       tasksInterval.unshift(template);
-      const instance = scheduleExistingIntervalTask(template, { dateISO: targetISO, refreshDashboard: false }) || template;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
       let dateLabel = targetISO;
@@ -5884,13 +5896,13 @@ function renderDashboard(){
         completed = compare.getTime() <= todayMidnight.getTime();
       }
       message = completed
-        ? `Logged "${instance.name || "Task"}" as completed on ${dateLabel}`
-        : `Scheduled "${instance.name || "Task"}" for ${dateLabel}`;
+        ? `Logged "${template.name || "Task"}" as completed on ${dateLabel}`
+        : `Scheduled "${template.name || "Task"}" for ${dateLabel}`;
     }else{
       const condition = (taskConditionInput?.value || "").trim() || "As required";
       const task = Object.assign({}, base, { mode:"asreq", condition, variant: "template", templateId: id });
       tasksAsReq.unshift(task);
-      message = "As-required task added to Maintenance Settings";
+      message = "One-off task added to calendar & settings";
     }
 
     const parentInterval = Number(taskIntervalInput?.value);
