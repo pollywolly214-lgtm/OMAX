@@ -5181,7 +5181,7 @@ function renderDashboard(){
         oneTimeNameInput.focus();
       }
     }else{
-      syncTaskMode(taskTypeSelect?.value || "interval");
+      syncTaskMode((taskIsRepeatingInput?.checked ?? true) ? "interval" : "asreq");
       syncTaskDateInput();
       if (taskNameInput){
         taskNameInput.focus();
@@ -5511,7 +5511,7 @@ function renderDashboard(){
     subtaskList?.replaceChildren();
     resetExistingTaskForm();
     showTaskOptionStage();
-    syncTaskMode(taskTypeSelect?.value || "interval");
+    syncTaskMode((taskIsRepeatingInput?.checked ?? true) ? "interval" : "asreq");
     syncTaskDateInput();
   }
 
@@ -5803,8 +5803,8 @@ function renderDashboard(){
     }, 80);
   });
 
-  taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
-  syncTaskMode(taskTypeSelect?.value || "interval");
+  taskIsRepeatingInput?.addEventListener("change", ()=> syncTaskMode(taskIsRepeatingInput.checked ? "interval" : "asreq"));
+  syncTaskMode((taskIsRepeatingInput?.checked ?? true) ? "interval" : "asreq");
   syncTaskDateInput();
   syncOneTimeDateInput();
   populateCategoryOptions();
@@ -5813,7 +5813,7 @@ function renderDashboard(){
   showTaskOptionStage();
 
   addSubtaskBtn?.addEventListener("click", ()=>{
-    const row = createSubtaskRow(taskTypeSelect?.value || "interval");
+    const row = createSubtaskRow((taskIsRepeatingInput?.checked ?? true) ? "interval" : "asreq");
     if (row) subtaskList?.appendChild(row);
   });
 
