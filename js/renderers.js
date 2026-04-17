@@ -5016,6 +5016,8 @@ function renderDashboard(){
   const taskRepeatEndInput = document.getElementById("dashTaskRepeatEnd");
   const taskRepeatEndDateInput = document.getElementById("dashTaskRepeatEndDate");
   const taskRepeatEndCountInput = document.getElementById("dashTaskRepeatEndCount");
+  const taskWeekdaysRow = document.getElementById("dashTaskWeekdaysRow");
+  const taskWeekdayInputs = Array.from(modal?.querySelectorAll('[data-task-weekday]') || []);
   const subtaskList      = document.getElementById("dashSubtaskList");
   const addSubtaskBtn    = document.getElementById("dashAddSubtask");
   const taskOptionStage  = modal?.querySelector('[data-task-option-stage]');
@@ -5033,6 +5035,8 @@ function renderDashboard(){
   const taskExistingEndInput = document.getElementById("dashTaskExistingRepeatEnd");
   const taskExistingEndDateInput = document.getElementById("dashTaskExistingRepeatEndDate");
   const taskExistingEndCountInput = document.getElementById("dashTaskExistingRepeatEndCount");
+  const taskExistingWeekdaysRow = document.getElementById("dashTaskExistingWeekdaysRow");
+  const taskExistingWeekdayInputs = Array.from(modal?.querySelectorAll('[data-existing-weekday]') || []);
   const taskCardBackButtons = Array.from(modal?.querySelectorAll('[data-task-card-back]') || []);
   const oneTimeForm      = document.getElementById("dashOneTimeForm");
   const oneTimeNameInput = document.getElementById("dashOneTimeName");
@@ -5203,6 +5207,16 @@ function renderDashboard(){
     if (taskExistingEndCountInput){
       taskExistingEndCountInput.value = String(Math.max(1, Number(recurrence?.endCount) || 1));
     }
+    taskExistingWeekdayInputs.forEach(input => {
+      if (!(input instanceof HTMLInputElement)) return;
+      const day = Number(input.value);
+      const selected = Array.isArray(recurrence?.weekDays) && recurrence.weekDays.includes(day);
+      input.checked = !!selected;
+    });
+    const weekly = String(taskExistingBasisInput?.value || "") === "calendar_week";
+    if (taskExistingWeekdaysRow){
+      taskExistingWeekdaysRow.hidden = !(taskExistingRepeatInput?.value === "yes" && weekly);
+    }
     toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
   }
 
@@ -5292,8 +5306,11 @@ function renderDashboard(){
     if (taskExistingSearchInput) taskExistingSearchInput.value = "";
     if (taskExistingNoteInput) taskExistingNoteInput.value = "";
     if (taskExistingRepeatInput) taskExistingRepeatInput.value = "no";
+    if (taskExistingBasisInput) taskExistingBasisInput.value = "calendar_day";
     if (taskExistingEveryInput) taskExistingEveryInput.value = "1";
     if (taskExistingEndInput) taskExistingEndInput.value = "never";
+    taskExistingWeekdayInputs.forEach(input => { if (input instanceof HTMLInputElement) input.checked = false; });
+    if (taskExistingWeekdaysRow) taskExistingWeekdaysRow.hidden = true;
     setSelectedExistingTask(null);
     refreshExistingTaskOptions("");
     toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
@@ -5347,18 +5364,18 @@ function renderDashboard(){
   }
 
   function toggleRepeatEndFields(endSelect, endDateInput, endCountInput){
-    if (endDateInput?.parentElement) endDateInput.parentElement.hidden = true;
-    if (endCountInput?.parentElement) endCountInput.parentElement.hidden = true;
+    const mode = String(endSelect?.value || "never");
+    if (endDateInput?.parentElement) endDateInput.parentElement.hidden = mode !== "on_date";
+    if (endCountInput?.parentElement) endCountInput.parentElement.hidden = mode !== "after_count";
   }
 
   function toggleRepeatFields(repeatSelect, basisSelect, everyInput, endSelect, endDateInput, endCountInput){
     const enabled = String(repeatSelect?.value || "no") === "yes";
-    [basisSelect, everyInput].forEach(el => {
+    [basisSelect, everyInput, endSelect].forEach(el => {
       if (!el) return;
       const row = el.closest("label");
       if (row) row.hidden = !enabled;
     });
-    if (endSelect?.closest("label")) endSelect.closest("label").hidden = true;
     toggleRepeatEndFields(endSelect, endDateInput, endCountInput);
     if (!enabled){
       if (endDateInput?.parentElement) endDateInput.parentElement.hidden = true;
@@ -5375,9 +5392,29 @@ function renderDashboard(){
       : (defaultBasis || "calendar_day");
     const everyRaw = Number(everyInput?.value);
     const every = Number.isFinite(everyRaw) && everyRaw > 0 ? Math.max(1, Math.round(everyRaw)) : 1;
-    const payload = { enabled: true, basis, every, endType: "never" };
+    const endTypeRaw = String(endInput?.value || "never").toLowerCase();
+    const endType = ["never", "on_date", "after_count"].includes(endTypeRaw) ? endTypeRaw : "never";
+    const payload = { enabled: true, basis, every, endType };
     if (basis === "machine_hours"){
       payload.intervalHours = every;
+    }
+    if (basis === "calendar_week"){
+      const source = repeatInput === taskExistingRepeatInput ? taskExistingWeekdayInputs : taskWeekdayInputs;
+      const weekDays = source
+        .filter(input => input instanceof HTMLInputElement && input.checked)
+        .map(input => Number(input.value))
+        .filter(day => Number.isInteger(day) && day >= 0 && day <= 6);
+      if (weekDays.length){
+        payload.weekDays = Array.from(new Set(weekDays)).sort((a,b)=> a - b);
+      }
+    }
+    if (endType === "on_date"){
+      const endDateISO = normalizeDateKey(endDateInput?.value || null);
+      if (endDateISO) payload.endDateISO = endDateISO;
+      else payload.endType = "never";
+    }else if (endType === "after_count"){
+      const countRaw = Number(endCountInput?.value);
+      payload.endCount = Number.isFinite(countRaw) && countRaw > 0 ? Math.floor(countRaw) : 1;
     }
     return payload;
   }
@@ -5673,7 +5710,6 @@ function renderDashboard(){
 
   function syncTaskMode(mode){
     if (!taskFreqRow || !taskLastRow || !taskConditionRow) return;
-    const isAsReq = mode === "asreq";
     if (mode === "asreq"){
       taskFreqRow.hidden = true;
       taskLastRow.hidden = true;
@@ -5683,50 +5719,46 @@ function renderDashboard(){
       taskLastRow.hidden = false;
       taskConditionRow.hidden = true;
     }
-    if (taskRepeatBasisInput){
-      const dayOptions = [
-        { value: "calendar_day", label: "By calendar day" },
-        { value: "calendar_week", label: "By calendar week" },
-        { value: "calendar_month", label: "By calendar month" }
-      ];
-      const intervalOptions = [
-        { value: "machine_hours", label: "By machine cutting hours" },
-        ...dayOptions
-      ];
-      const options = isAsReq ? dayOptions : intervalOptions;
-      const current = String(taskRepeatBasisInput.value || "");
-      taskRepeatBasisInput.innerHTML = options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join("");
-      taskRepeatBasisInput.value = options.some(opt => opt.value === current)
-        ? current
-        : (isAsReq ? "calendar_day" : "machine_hours");
-    }
   }
 
-  function deriveTaskModeFromRepeat(){
-    const repeatEnabled = String(taskRepeatInput?.value || "no") === "yes";
-    const basis = String(taskRepeatBasisInput?.value || "calendar_day");
-    if (!repeatEnabled) return "asreq";
-    return basis === "machine_hours" ? "interval" : "asreq";
+  function selectedTaskMode(){
+    return (taskTypeSelect?.value === "asreq") ? "asreq" : "interval";
   }
 
   function syncTaskRepeatMode(){
-    const derivedMode = deriveTaskModeFromRepeat();
-    if (taskTypeSelect){
-      taskTypeSelect.value = derivedMode;
-      taskTypeSelect.disabled = true;
-      const row = taskTypeSelect.closest("label");
-      if (row) row.hidden = true;
+    const mode = selectedTaskMode();
+    syncTaskMode(mode);
+    const repeatEnabled = String(taskRepeatInput?.value || "no") === "yes";
+    if (taskRepeatBasisInput){
+      const isInterval = mode === "interval";
+      const options = isInterval
+        ? [
+            { value: "machine_hours", label: "By machine cutting hours" },
+            { value: "calendar_day", label: "By calendar day" },
+            { value: "calendar_week", label: "By calendar week" },
+            { value: "calendar_month", label: "By calendar month" }
+          ]
+        : [
+            { value: "calendar_day", label: "By calendar day" },
+            { value: "calendar_week", label: "By calendar week" },
+            { value: "calendar_month", label: "By calendar month" }
+          ];
+      const current = String(taskRepeatBasisInput.value || "");
+      taskRepeatBasisInput.innerHTML = options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join("");
+      taskRepeatBasisInput.value = options.some(opt => opt.value === current) ? current : (isInterval ? "machine_hours" : "calendar_day");
     }
-    syncTaskMode(derivedMode);
     if (taskConditionInput){
-      taskConditionInput.disabled = derivedMode !== "asreq";
+      taskConditionInput.disabled = mode !== "asreq";
     }
     if (taskIntervalInput){
-      taskIntervalInput.disabled = derivedMode !== "interval";
+      taskIntervalInput.disabled = mode !== "interval";
     }
     if (taskLastInput){
-      taskLastInput.disabled = derivedMode !== "interval";
+      taskLastInput.disabled = mode !== "interval";
     }
+    toggleRepeatFields(taskRepeatInput, taskRepeatBasisInput, taskRepeatEveryInput, taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput);
+    const weekly = repeatEnabled && String(taskRepeatBasisInput?.value || "") === "calendar_week";
+    if (taskWeekdaysRow) taskWeekdaysRow.hidden = !weekly;
   }
 
   function resetTaskForm(){
@@ -5741,6 +5773,8 @@ function renderDashboard(){
     if (taskRepeatBasisInput) taskRepeatBasisInput.value = "machine_hours";
     if (taskRepeatEveryInput) taskRepeatEveryInput.value = "1";
     if (taskRepeatEndInput) taskRepeatEndInput.value = "never";
+    taskWeekdayInputs.forEach(input => { if (input instanceof HTMLInputElement) input.checked = false; });
+    if (taskWeekdaysRow) taskWeekdaysRow.hidden = true;
     toggleRepeatFields(taskRepeatInput, taskRepeatBasisInput, taskRepeatEveryInput, taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput);
     syncTaskRepeatMode();
     syncTaskDateInput();
@@ -6034,12 +6068,20 @@ function renderDashboard(){
     }, 80);
   });
 
-  taskTypeSelect?.addEventListener("change", ()=> syncTaskMode(taskTypeSelect.value));
+  taskTypeSelect?.addEventListener("change", ()=> syncTaskRepeatMode());
   taskRepeatInput?.addEventListener("change", ()=> toggleRepeatFields(taskRepeatInput, taskRepeatBasisInput, taskRepeatEveryInput, taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput));
   taskRepeatInput?.addEventListener("change", ()=> syncTaskRepeatMode());
   taskRepeatBasisInput?.addEventListener("change", ()=> syncTaskRepeatMode());
   taskRepeatEndInput?.addEventListener("change", ()=> toggleRepeatEndFields(taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput));
-  taskExistingRepeatInput?.addEventListener("change", ()=> toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput));
+  taskExistingRepeatInput?.addEventListener("change", ()=> {
+    toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
+    const weekly = String(taskExistingBasisInput?.value || "") === "calendar_week";
+    if (taskExistingWeekdaysRow) taskExistingWeekdaysRow.hidden = !(taskExistingRepeatInput?.value === "yes" && weekly);
+  });
+  taskExistingBasisInput?.addEventListener("change", ()=> {
+    const weekly = String(taskExistingBasisInput?.value || "") === "calendar_week";
+    if (taskExistingWeekdaysRow) taskExistingWeekdaysRow.hidden = !(taskExistingRepeatInput?.value === "yes" && weekly);
+  });
   taskExistingEndInput?.addEventListener("change", ()=> toggleRepeatEndFields(taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput));
   syncTaskMode(taskTypeSelect?.value || "interval");
   toggleRepeatFields(taskRepeatInput, taskRepeatBasisInput, taskRepeatEveryInput, taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput);
@@ -6062,7 +6104,7 @@ function renderDashboard(){
     if (!taskForm) return;
     const name = (taskNameInput?.value || "").trim();
     if (!name){ alert("Task name is required."); return; }
-    const mode = deriveTaskModeFromRepeat();
+    const mode = selectedTaskMode();
     const manual = (taskManualInput?.value || "").trim();
     const store  = (taskStoreInput?.value || "").trim();
     const pn     = (taskPNInput?.value || "").trim();
@@ -7882,6 +7924,8 @@ function renderSettings(){
       .modal-card h4{margin:0 0 12px;font-size:1.1rem}
       .modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
       .modal-grid label{display:flex;flex-direction:column;font-size:.9rem;gap:4px}
+      .task-weekday-group{display:flex;flex-wrap:wrap;gap:8px;padding-top:4px}
+      .task-weekday-group label{display:inline-flex;flex-direction:row;align-items:center;gap:4px;font-size:.82rem}
       .modal-grid input,.modal-grid select,.modal-grid textarea{padding:.45rem .55rem;border:1px solid #cdd4e1;border-radius:6px;font-size:.95rem}
       .modal-grid textarea{min-height:90px;resize:vertical}
       .modal-grid .task-note{grid-column:1/-1}

@@ -1667,11 +1667,41 @@ function projectCalendarBasedOccurrences(task, recurrence, options = {}){
   const monthsAhead = Number.isFinite(Number(options.monthsAhead)) ? Math.max(1, Number(options.monthsAhead)) : 3;
   horizon.setMonth(horizon.getMonth() + monthsAhead);
   const every = Math.max(1, Number(recurrence.every) || 1);
+  const weekDays = Array.isArray(recurrence.weekDays)
+    ? recurrence.weekDays.map(v => Number(v)).filter(v => Number.isInteger(v) && v >= 0 && v <= 6)
+    : [];
   const endDate = recurrence.endType === "on_date" ? toDayStart(recurrence.endDateISO) : null;
   const endCount = recurrence.endType === "after_count" ? Math.max(1, Number(recurrence.endCount) || 1) : null;
   const events = [];
   let producedCount = 0;
   const maxIterations = 720;
+  if (recurrence.basis === "calendar_week" && weekDays.length){
+    const startWeekAnchor = new Date(startDate);
+    startWeekAnchor.setDate(startWeekAnchor.getDate() - startWeekAnchor.getDay());
+    startWeekAnchor.setHours(0,0,0,0);
+    for (let dayOffset = 0; dayOffset < maxIterations; dayOffset++){
+      const cursor = new Date(startDate);
+      cursor.setDate(cursor.getDate() + dayOffset);
+      cursor.setHours(0,0,0,0);
+      const day = cursor.getDay();
+      if (!weekDays.includes(day)) continue;
+      const diffWeeks = Math.floor((cursor.getTime() - startWeekAnchor.getTime()) / (7 * CALENDAR_DAY_MS));
+      if (diffWeeks < 0) continue;
+      if (diffWeeks % every !== 0) continue;
+      const key = ymd(cursor);
+      if (!key) continue;
+      producedCount += 1;
+      if (endDate && cursor.getTime() > endDate.getTime()) break;
+      if (endCount != null && producedCount > endCount) break;
+      if (excludeSet.has(key)) continue;
+      if (cursor.getTime() >= today.getTime()){
+        events.push({ dateISO: key, dueDate: new Date(cursor) });
+        if (maxOccurrences != null && events.length >= maxOccurrences) break;
+      }
+      if (cursor.getTime() > horizon.getTime() && events.length >= minOccurrences) break;
+    }
+    return events;
+  }
   for (let i = 0; i < maxIterations; i++){
     const cursor = new Date(startDate);
     if (recurrence.basis === "calendar_day"){
