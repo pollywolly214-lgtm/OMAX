@@ -5173,13 +5173,18 @@ function renderDashboard(){
     if (taskExistingBasisInput){
       const isInterval = task?.mode === "interval";
       const options = isInterval
-        ? [{ value: "machine_hours", label: "By machine cutting hours" }]
+        ? [
+            { value: "machine_hours", label: "By machine cutting hours" },
+            { value: "calendar_day", label: "By calendar day" },
+            { value: "calendar_week", label: "By calendar week" },
+            { value: "calendar_month", label: "By calendar month" }
+          ]
         : [{ value: "calendar_day", label: "By calendar day" }];
       taskExistingBasisInput.innerHTML = options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join("");
       taskExistingBasisInput.value = recurrence?.basis && options.some(opt => opt.value === recurrence.basis)
         ? recurrence.basis
         : (isInterval ? "machine_hours" : "calendar_day");
-      taskExistingBasisInput.disabled = true;
+      taskExistingBasisInput.disabled = false;
     }
     if (taskExistingRepeatInput){
       taskExistingRepeatInput.value = task?.mode === "interval" ? "yes" : "no";
@@ -5361,9 +5366,8 @@ function renderDashboard(){
       if (endDateInput?.parentElement) endDateInput.parentElement.hidden = true;
       if (endCountInput?.parentElement) endCountInput.parentElement.hidden = true;
     }
-    const isHours = enabled && String(basisSelect?.value || "") === "machine_hours";
     if (basisSelect?.closest("label")){
-      basisSelect.closest("label").hidden = !enabled || isHours;
+      basisSelect.closest("label").hidden = !enabled;
     }
     const detailsRow = repeatSelect === taskExistingRepeatInput ? taskExistingWeekdaysRow : taskWeekdaysRow;
     if (detailsRow){
@@ -5710,12 +5714,17 @@ function renderDashboard(){
     }
     if (taskRepeatBasisInput){
       const options = isInterval
-        ? [{ value: "machine_hours", label: "By machine cutting hours" }]
+        ? [
+            { value: "machine_hours", label: "By machine cutting hours" },
+            { value: "calendar_day", label: "By calendar day" },
+            { value: "calendar_week", label: "By calendar week" },
+            { value: "calendar_month", label: "By calendar month" }
+          ]
         : [{ value: "calendar_day", label: "By calendar day" }];
       const current = String(taskRepeatBasisInput.value || "");
       taskRepeatBasisInput.innerHTML = options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join("");
       taskRepeatBasisInput.value = options.some(opt => opt.value === current) ? current : (isInterval ? "machine_hours" : "calendar_day");
-      taskRepeatBasisInput.disabled = true;
+      taskRepeatBasisInput.disabled = mode !== "interval";
     }
     if (taskConditionInput){
       taskConditionInput.disabled = mode !== "asreq";
@@ -5742,7 +5751,7 @@ function renderDashboard(){
     if (taskRepeatEveryInput) taskRepeatEveryInput.value = "1";
     if (taskRepeatEndInput) taskRepeatEndInput.value = "never";
     if (taskRepeatInput) taskRepeatInput.disabled = true;
-    if (taskRepeatBasisInput) taskRepeatBasisInput.disabled = true;
+    if (taskRepeatBasisInput) taskRepeatBasisInput.disabled = false;
     if (taskWeekdaysRow) taskWeekdaysRow.hidden = true;
     toggleRepeatFields(taskRepeatInput, taskRepeatBasisInput, taskRepeatEveryInput, taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput);
     syncTaskRepeatMode();
@@ -8321,7 +8330,12 @@ function renderSettings(){
             </select></label>
             <label data-field="recurrenceBasis">Repeat basis<select data-k="recurrenceBasis" data-id="${t.id}" data-list="${type}">
               ${type === "interval"
-                ? `<option value="machine_hours" ${recurrence.basis==="machine_hours"?"selected":""}>Machine cutting hours</option>`
+                ? `
+                  <option value="machine_hours" ${recurrence.basis==="machine_hours"?"selected":""}>Machine cutting hours</option>
+                  <option value="calendar_day" ${recurrence.basis==="calendar_day"?"selected":""}>Calendar day</option>
+                  <option value="calendar_week" ${recurrence.basis==="calendar_week"?"selected":""}>Calendar week</option>
+                  <option value="calendar_month" ${recurrence.basis==="calendar_month"?"selected":""}>Calendar month</option>
+                `
                 : `<option value="calendar_day" ${recurrence.basis==="calendar_day"?"selected":""}>Calendar day</option>`}
             </select></label>
             <label data-field="recurrenceEvery">Repeat every<input type="number" min="1" step="1" data-k="recurrenceEvery" data-id="${t.id}" data-list="${type}" value="${Math.max(1, Number(recurrence.every)||1)}"></label>
@@ -8639,8 +8653,6 @@ function renderSettings(){
         basisRow.disabled = mode !== "interval";
         if (mode !== "interval"){
           basisRow.value = "calendar_day";
-        }else{
-          basisRow.value = "machine_hours";
         }
       }
     }
@@ -9701,7 +9713,10 @@ function renderSettings(){
       if (selectKey === "recurrenceEnabled"){
         recurrence.enabled = meta.task.mode === "interval";
       }else if (selectKey === "recurrenceBasis"){
-        recurrence.basis = meta.task.mode === "interval" ? "machine_hours" : "calendar_day";
+        const requested = String(target.value || "");
+        recurrence.basis = meta.task.mode === "interval"
+          ? (["machine_hours", "calendar_day", "calendar_week", "calendar_month"].includes(requested) ? requested : "machine_hours")
+          : "calendar_day";
         if (recurrence.basis === "machine_hours"){
           recurrence.intervalHours = Number(meta.task.interval) || Number(recurrence.intervalHours) || 1;
           recurrence.every = Math.max(1, Math.round(Number(recurrence.intervalHours) || 1));
@@ -9733,9 +9748,11 @@ function renderSettings(){
         const every = Math.max(1, Number(recurrence.every) || Number(meta.task.interval) || 8);
         meta.task.interval = every;
         recurrence.enabled = true;
-        recurrence.basis = "machine_hours";
+        recurrence.basis = ["machine_hours", "calendar_day", "calendar_week", "calendar_month"].includes(String(recurrence.basis || ""))
+          ? recurrence.basis
+          : "machine_hours";
         recurrence.every = every;
-        recurrence.intervalHours = every;
+        recurrence.intervalHours = recurrence.basis === "machine_hours" ? every : null;
         recurrence.endType = recurrence.endType || "never";
         meta.task.recurrence = recurrence;
         const baseSince = Number(meta.task.sinceBase);
