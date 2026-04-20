@@ -1970,7 +1970,7 @@ function viewCosts(model){
           <h3>Maintenance Data Center Table</h3>
           <div class="small muted" style="margin-bottom:8px;">Open as a full-size popup for review and auditing.</div>
           <button type="button" class="secondary" data-open-data-center ${maintenanceDataTable.length ? "" : "disabled"}>Open Data Center</button>
-          <div class="cost-data-center-modal" data-data-center-modal hidden aria-hidden="true" tabindex="-1">
+          <div id="costDataCenterModal" class="cost-data-center-modal" data-data-center-modal hidden aria-hidden="true" tabindex="-1">
             <div class="cost-data-center-backdrop" data-close-data-center></div>
             <div class="cost-data-center-panel" role="dialog" aria-modal="true" aria-labelledby="dataCenterTitle">
               <div class="cost-data-center-header">

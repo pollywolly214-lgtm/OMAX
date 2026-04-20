@@ -10568,6 +10568,11 @@ function setupForecastBreakdownModal(){
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
+  const previousModal = document.getElementById("costDataCenterModal");
+  if (previousModal && previousModal.parentElement === document.body){
+    previousModal.remove();
+    document.body.classList.remove("cost-data-center-open");
+  }
 
   const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 
@@ -10652,6 +10657,9 @@ function renderCosts(){
     const openBtn = content.querySelector("[data-open-data-center]");
     const modal = content.querySelector("[data-data-center-modal]");
     const closeBtns = Array.from(content.querySelectorAll("[data-close-data-center]"));
+    if (modal instanceof HTMLElement){
+      document.body.appendChild(modal);
+    }
     const closeDataCenter = ()=>{
       if (!(modal instanceof HTMLElement)) return;
       modal.setAttribute("hidden", "");
@@ -10675,11 +10683,14 @@ function renderCosts(){
         if (!(btn instanceof HTMLElement)) return;
         btn.addEventListener("click", closeDataCenter);
       });
-      modal.addEventListener("keydown", (event)=>{
-        if (event.key === "Escape" && !modal.hasAttribute("hidden")){
-          closeDataCenter();
-        }
-      });
+      if (!modal.dataset.wired){
+        modal.dataset.wired = "1";
+        modal.addEventListener("keydown", (event)=>{
+          if (event.key === "Escape" && !modal.hasAttribute("hidden")){
+            closeDataCenter();
+          }
+        });
+      }
     }
 
     const rows = Array.from(content.querySelectorAll("[data-maintenance-open-task]"));
