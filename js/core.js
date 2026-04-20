@@ -2254,8 +2254,17 @@ function ensureTaskCategories(){
     if (!t) return;
     if (!t.cat) t.cat = "interval";
     if (!Array.isArray(t.completedDates)) t.completedDates = [];
+    if (typeof window.normalizeTaskRecurrence === "function"){
+      try { window.normalizeTaskRecurrence(t); } catch (_err){}
+    }
   });
-  tasksAsReq.forEach(t =>    { if (t && !t.cat) t.cat = "asreq"; });
+  tasksAsReq.forEach(t =>    {
+    if (!t) return;
+    if (!t.cat) t.cat = "asreq";
+    if (typeof window.normalizeTaskRecurrence === "function"){
+      try { window.normalizeTaskRecurrence(t); } catch (_err){}
+    }
+  });
 }
 
 function ensureJobCategories(){
