@@ -1213,6 +1213,7 @@ function viewCosts(model){
   const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
   const orderSummary = data.orderRequestSummary || {};
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
+  const maintenanceDataTable = Array.isArray(data.maintenanceDataTable) ? data.maintenanceDataTable : [];
   const overviewInsight = data.overviewInsight || "Totals blend the latest maintenance allocations, consumable burn rates, downtime burdens, and job margin data so you always see current cost exposure.";
   const ordersInsight = data.ordersInsight || "Tracks every waterjet part request from submission through approval so finance can confirm spend and spot stalled orders.";
   const timeframeInsight = data.timeframeInsight || "Usage windows combine logged machine hours with interval pricing to estimate what each upcoming maintenance window will cost.";
@@ -1961,6 +1962,48 @@ function viewCosts(model){
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="dashboard-window" data-cost-window="dataCenter">
+        <div class="block">
+          <h3>Maintenance Data Center Table</h3>
+          ${maintenanceDataTable.length ? `
+            <table class="cost-table">
+              <thead>
+                <tr>
+                  <th>Task</th>
+                  <th>Maint. hrs</th>
+                  <th>Part cost</th>
+                  <th>Rate/hr</th>
+                  <th>Labor cost</th>
+                  <th>Total cost</th>
+                  <th>Date</th>
+                  <th>Days since last</th>
+                  <th>Cut hrs since</th>
+                  <th>Qty</th>
+                  <th>Settings link</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${maintenanceDataTable.map(row => `
+                  <tr>
+                    <td>${esc(row.taskName || "Maintenance task")}</td>
+                    <td>${esc(row.maintenanceHrsLabel || "0")}</td>
+                    <td>${esc(row.partCostLabel || "$0.00")}</td>
+                    <td>${esc(row.chargeRateLabel || "$0.00")}</td>
+                    <td>${esc(row.laborCostLabel || "$0.00")}</td>
+                    <td>${esc(row.totalCostLabel || "$0.00")}</td>
+                    <td>${esc(row.dateISO || "—")}</td>
+                    <td>${esc(row.daysSinceLastTaskLabel || "—")}</td>
+                    <td>${esc(row.cuttingHoursSinceLabel || "—")}</td>
+                    <td>${esc(row.qtyLabel || "1")}</td>
+                    <td><a href="${esc(row.settingsLink || "#/settings")}" data-maintenance-link>Open task</a></td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          ` : `<p class="small muted">No completed maintenance occurrences yet.</p>`}
         </div>
       </div>
 

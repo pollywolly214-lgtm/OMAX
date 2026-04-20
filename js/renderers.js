@@ -7699,6 +7699,18 @@ function renderSettings(){
     if (!validTaskIds.has(id)) openTaskState.delete(id);
   }
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+  try {
+    const hash = String(window.location?.hash || "");
+    const queryIndex = hash.indexOf("?");
+    if (queryIndex >= 0){
+      const query = hash.slice(queryIndex + 1);
+      const params = new URLSearchParams(query);
+      const taskId = (params.get("taskId") || "").trim();
+      if (taskId){
+        window.pendingMaintenanceFocus = { taskIds: [taskId] };
+      }
+    }
+  } catch (_err){}
 
   // --- one-time hydration for legacy/remote tasks (per-list) ---
   // Previously this only ran if BOTH lists were empty. That prevented legacy
@@ -14187,6 +14199,87 @@ function computeCostModel(){
     emptyMessage: orderRows.length ? "" : "Approve or deny order requests to build the spend log."
   };
 
+  const taskById = new Map();
+  [Array.isArray(intervalTasksAll) ? intervalTasksAll : [], Array.isArray(asReqTasksAll) ? asReqTasksAll : []].forEach(list => {
+    list.forEach(task => {
+      if (!task || task.id == null) return;
+      taskById.set(String(task.id), task);
+    });
+  });
+  const maintenanceDataTableRows = [];
+  const taskDateGroups = new Map();
+  taskEventsByDate.forEach((tasksOnDate, dateISO) => {
+    const key = toHistoryDateKey(dateISO);
+    if (!key || !Array.isArray(tasksOnDate)) return;
+    tasksOnDate.forEach(taskMeta => {
+      if (!taskMeta) return;
+      const originalId = taskMeta.originalId != null ? String(taskMeta.originalId) : (taskMeta.id != null ? String(taskMeta.id) : null);
+      if (!originalId) return;
+      const groupKey = originalId;
+      if (!taskDateGroups.has(groupKey)) taskDateGroups.set(groupKey, []);
+      taskDateGroups.get(groupKey).push(key);
+      const task = taskById.get(originalId) || taskById.get(String(taskMeta.id || "")) || null;
+      const maintenanceHours = Number(task?.downtimeHours);
+      const maintenanceHrs = Number.isFinite(maintenanceHours) && maintenanceHours > 0 ? maintenanceHours : 1;
+      const partCost = Number(taskMeta?.unitPrice);
+      const partCostValue = Number.isFinite(partCost) && partCost > 0 ? partCost : 0;
+      const chargeRate = MAINTENANCE_LABOR_RATE_PER_HOUR;
+      const laborCost = maintenanceHrs * chargeRate;
+      const totalCost = laborCost + partCostValue;
+      const snapshotHours = typeof hoursSnapshotOnOrBefore === "function" ? hoursSnapshotOnOrBefore(key) : null;
+      const hoursSince = (Number.isFinite(Number(currentHours)) && Number.isFinite(Number(snapshotHours)))
+        ? Math.max(0, Number(currentHours) - Number(snapshotHours))
+        : null;
+      maintenanceDataTableRows.push({
+        taskId: originalId,
+        taskName: taskMeta.name || task?.name || "Maintenance task",
+        maintenanceHrs,
+        partCost: partCostValue,
+        chargeRate,
+        laborCost,
+        totalCost,
+        dateISO: key,
+        cuttingHoursSince: hoursSince,
+        settingsLink: `#/settings?taskId=${encodeURIComponent(originalId)}`
+      });
+    });
+  });
+  taskDateGroups.forEach((dateList, taskId) => {
+    const uniqueDates = Array.from(new Set((Array.isArray(dateList) ? dateList : []).filter(Boolean))).sort((a,b)=> b.localeCompare(a));
+    const qty = uniqueDates.length;
+    uniqueDates.forEach((dateISO, index) => {
+      const row = maintenanceDataTableRows.find(item => item.taskId === taskId && item.dateISO === dateISO);
+      if (!row) return;
+      row.qty = qty;
+      if (index < uniqueDates.length - 1){
+        const prev = parseDateLocal(uniqueDates[index + 1]);
+        const current = parseDateLocal(dateISO);
+        if (prev instanceof Date && current instanceof Date && !Number.isNaN(prev.getTime()) && !Number.isNaN(current.getTime())){
+          row.daysSinceLastTask = Math.max(0, Math.round((current.getTime() - prev.getTime()) / JOB_DAY_MS));
+        }else{
+          row.daysSinceLastTask = null;
+        }
+      }else{
+        row.daysSinceLastTask = null;
+      }
+    });
+  });
+  maintenanceDataTableRows.sort((a,b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
+  const maintenanceDataTable = maintenanceDataTableRows.map((row, idx) => ({
+    id: `${row.taskId}_${row.dateISO}_${idx}`,
+    taskName: row.taskName,
+    maintenanceHrsLabel: formatHoursValue(row.maintenanceHrs) || "0",
+    partCostLabel: formatterCurrency(row.partCost, { decimals: row.partCost < 1000 ? 2 : 0 }),
+    chargeRateLabel: formatterCurrency(row.chargeRate, { decimals: 2 }),
+    laborCostLabel: formatterCurrency(row.laborCost, { decimals: row.laborCost < 1000 ? 2 : 0 }),
+    totalCostLabel: formatterCurrency(row.totalCost, { decimals: row.totalCost < 1000 ? 2 : 0 }),
+    dateISO: row.dateISO,
+    daysSinceLastTaskLabel: Number.isFinite(row.daysSinceLastTask) ? String(row.daysSinceLastTask) : "—",
+    cuttingHoursSinceLabel: Number.isFinite(row.cuttingHoursSince) ? formatHoursValue(row.cuttingHoursSince) : "—",
+    settingsLink: row.settingsLink,
+    qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "1"
+  }));
+
   return {
     summaryCards,
     timeframeRows,
@@ -14202,6 +14295,7 @@ function computeCostModel(){
     chartNote,
     chartInfo,
     orderRequestSummary,
+    maintenanceDataTable,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries,
     jobSeries,
