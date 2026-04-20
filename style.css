@@ -500,6 +500,21 @@ body.pump-notes-open { overflow:hidden; }
 .cost-timeframe-row:focus-visible{ outline:2px solid var(--brand-blue-400, #2563eb); outline-offset:2px; }
 .cost-timeframe-section .small.muted{ margin-top:0; }
 body.cost-timeframe-modal-open{ overflow:hidden; }
+.cost-data-center-modal{ position:fixed; inset:0; z-index:1550; display:flex; align-items:center; justify-content:center; padding:24px; }
+.cost-data-center-modal[hidden]{ display:none; }
+.cost-data-center-backdrop{ position:absolute; inset:0; background:rgba(15,23,42,0.5); }
+.cost-data-center-panel{
+  position:relative;
+  width:min(1400px,96vw);
+  max-height:88vh;
+  overflow:auto;
+  background:#fff;
+  border-radius:12px;
+  box-shadow:0 20px 46px rgba(2,8,20,.35);
+  padding:16px;
+}
+.cost-data-center-header{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+body.cost-data-center-open{ overflow:hidden; }
 @media (max-width: 640px){
   .cost-timeframe-card-body{ padding:24px 18px 28px; }
   .cost-timeframe-table th,.cost-timeframe-table td{ padding:8px 10px; }

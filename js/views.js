@@ -1967,12 +1967,17 @@ function viewCosts(model){
 
       <div class="dashboard-window" data-cost-window="dataCenter">
         <div class="block">
-          <details class="cost-data-center" data-cost-data-center>
-            <summary>
-              <h3>Maintenance Data Center Table</h3>
-              <span class="small muted">Click to ${maintenanceDataTable.length ? "expand" : "view"}.</span>
-            </summary>
-            ${maintenanceDataTable.length ? `
+          <h3>Maintenance Data Center Table</h3>
+          <div class="small muted" style="margin-bottom:8px;">Open as a full-size popup for review and auditing.</div>
+          <button type="button" class="secondary" data-open-data-center ${maintenanceDataTable.length ? "" : "disabled"}>Open Data Center</button>
+          <div class="cost-data-center-modal" data-data-center-modal hidden aria-hidden="true" tabindex="-1">
+            <div class="cost-data-center-backdrop" data-close-data-center></div>
+            <div class="cost-data-center-panel" role="dialog" aria-modal="true" aria-labelledby="dataCenterTitle">
+              <div class="cost-data-center-header">
+                <h3 id="dataCenterTitle">Maintenance Data Center Table</h3>
+                <button type="button" class="secondary" data-close-data-center>Close</button>
+              </div>
+              ${maintenanceDataTable.length ? `
             <table class="cost-table" style="margin-top:10px">
               <thead>
                 <tr>
@@ -2021,7 +2026,8 @@ function viewCosts(model){
               </tbody>
             </table>
             ` : `<p class="small muted">No completed maintenance occurrences yet.</p>`}
-          </details>
+            </div>
+          </div>
         </div>
       </div>
 

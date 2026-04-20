@@ -10649,6 +10649,39 @@ function renderCosts(){
   }
 
   function setupMaintenanceDataCenterActions(){
+    const openBtn = content.querySelector("[data-open-data-center]");
+    const modal = content.querySelector("[data-data-center-modal]");
+    const closeBtns = Array.from(content.querySelectorAll("[data-close-data-center]"));
+    const closeDataCenter = ()=>{
+      if (!(modal instanceof HTMLElement)) return;
+      modal.setAttribute("hidden", "");
+      modal.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("cost-data-center-open");
+    };
+    const openDataCenter = ()=>{
+      if (!(modal instanceof HTMLElement)) return;
+      modal.removeAttribute("hidden");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.classList.add("cost-data-center-open");
+      try { modal.focus({ preventScroll: true }); } catch (_err){ modal.focus(); }
+      const panel = modal.querySelector(".cost-data-center-panel");
+      if (panel instanceof HTMLElement){
+        panel.scrollTop = 0;
+      }
+    };
+    if (openBtn instanceof HTMLElement && modal instanceof HTMLElement){
+      openBtn.addEventListener("click", openDataCenter);
+      closeBtns.forEach(btn => {
+        if (!(btn instanceof HTMLElement)) return;
+        btn.addEventListener("click", closeDataCenter);
+      });
+      modal.addEventListener("keydown", (event)=>{
+        if (event.key === "Escape" && !modal.hasAttribute("hidden")){
+          closeDataCenter();
+        }
+      });
+    }
+
     const rows = Array.from(content.querySelectorAll("[data-maintenance-open-task]"));
     if (!rows.length) return;
     rows.forEach(btn => {
