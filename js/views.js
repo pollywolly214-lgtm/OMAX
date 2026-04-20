@@ -351,17 +351,7 @@ function viewDashboard(){
             <option value="on_date">On date</option>
             <option value="after_count">After count</option>
           </select></label>
-          <label hidden id="dashTaskExistingWeekdaysRow">Repeat on
-            <span class="task-weekday-group">
-              <label><input type="checkbox" value="1" data-existing-weekday>Mon</label>
-              <label><input type="checkbox" value="2" data-existing-weekday>Tue</label>
-              <label><input type="checkbox" value="3" data-existing-weekday>Wed</label>
-              <label><input type="checkbox" value="4" data-existing-weekday>Thu</label>
-              <label><input type="checkbox" value="5" data-existing-weekday>Fri</label>
-              <label><input type="checkbox" value="6" data-existing-weekday>Sat</label>
-              <label><input type="checkbox" value="0" data-existing-weekday>Sun</label>
-            </span>
-          </label>
+          <label hidden id="dashTaskExistingWeekdaysRow">Repeat details<input type="text" value="Weekly repeats use the selected calendar date weekday." disabled></label>
           <label hidden>Repeat end date<input type="date" id="dashTaskExistingRepeatEndDate"></label>
           <label hidden>Repeat end count<input type="number" min="1" step="1" id="dashTaskExistingRepeatEndCount" value="1"></label>
           <div class="modal-actions">
@@ -390,7 +380,6 @@ function viewDashboard(){
               <option value="interval">Per interval</option>
               <option value="asreq">As required</option>
             </select></label>
-            <label data-task-frequency>Frequency (hrs)<input type="number" min="1" step="1" id="dashTaskInterval" placeholder="e.g. 40"></label>
             <label data-task-last>Hours since last service<input type="number" min="0" step="0.01" id="dashTaskLast" placeholder="optional"></label>
             <label data-task-condition hidden>Condition / trigger<input id="dashTaskCondition" placeholder="e.g. When clogged"></label>
             <label>Manual link<input type="url" id="dashTaskManual" placeholder="https://..."></label>
@@ -416,17 +405,7 @@ function viewDashboard(){
               <option value="on_date">On date</option>
               <option value="after_count">After count</option>
             </select></label>
-            <label hidden id="dashTaskWeekdaysRow">Repeat on
-              <span class="task-weekday-group">
-                <label><input type="checkbox" value="1" data-task-weekday>Mon</label>
-                <label><input type="checkbox" value="2" data-task-weekday>Tue</label>
-                <label><input type="checkbox" value="3" data-task-weekday>Wed</label>
-                <label><input type="checkbox" value="4" data-task-weekday>Thu</label>
-                <label><input type="checkbox" value="5" data-task-weekday>Fri</label>
-                <label><input type="checkbox" value="6" data-task-weekday>Sat</label>
-                <label><input type="checkbox" value="0" data-task-weekday>Sun</label>
-              </span>
-            </label>
+            <label hidden id="dashTaskWeekdaysRow">Repeat details<input type="text" value="Weekly repeats use the selected calendar date weekday." disabled></label>
             <label hidden>Repeat end date<input type="date" id="dashTaskRepeatEndDate"></label>
             <label hidden>Repeat end count<input type="number" min="1" step="1" id="dashTaskRepeatEndCount" value="1"></label>
           </div>

@@ -5017,7 +5017,6 @@ function renderDashboard(){
   const taskRepeatEndDateInput = document.getElementById("dashTaskRepeatEndDate");
   const taskRepeatEndCountInput = document.getElementById("dashTaskRepeatEndCount");
   const taskWeekdaysRow = document.getElementById("dashTaskWeekdaysRow");
-  const taskWeekdayInputs = Array.from(modal?.querySelectorAll('[data-task-weekday]') || []);
   const subtaskList      = document.getElementById("dashSubtaskList");
   const addSubtaskBtn    = document.getElementById("dashAddSubtask");
   const taskOptionStage  = modal?.querySelector('[data-task-option-stage]');
@@ -5036,7 +5035,6 @@ function renderDashboard(){
   const taskExistingEndDateInput = document.getElementById("dashTaskExistingRepeatEndDate");
   const taskExistingEndCountInput = document.getElementById("dashTaskExistingRepeatEndCount");
   const taskExistingWeekdaysRow = document.getElementById("dashTaskExistingWeekdaysRow");
-  const taskExistingWeekdayInputs = Array.from(modal?.querySelectorAll('[data-existing-weekday]') || []);
   const taskCardBackButtons = Array.from(modal?.querySelectorAll('[data-task-card-back]') || []);
   const oneTimeForm      = document.getElementById("dashOneTimeForm");
   const oneTimeNameInput = document.getElementById("dashOneTimeName");
@@ -5068,7 +5066,6 @@ function renderDashboard(){
   const garnetCancelBtn  = document.getElementById("dashGarnetCancel");
   const garnetList       = document.getElementById("dashGarnetList");
 
-  const taskFreqRow      = taskForm?.querySelector("[data-task-frequency]");
   const taskLastRow      = taskForm?.querySelector("[data-task-last]");
   const taskConditionRow = taskForm?.querySelector("[data-task-condition]");
   const stepSections     = modal ? Array.from(modal.querySelectorAll("[data-step]")) : [];
@@ -5176,24 +5173,17 @@ function renderDashboard(){
     if (taskExistingBasisInput){
       const isInterval = task?.mode === "interval";
       const options = isInterval
-        ? [
-            { value: "machine_hours", label: "By machine cutting hours" },
-            { value: "calendar_day", label: "By calendar day" },
-            { value: "calendar_week", label: "By calendar week" },
-            { value: "calendar_month", label: "By calendar month" }
-          ]
-        : [
-            { value: "calendar_day", label: "By calendar day" },
-            { value: "calendar_week", label: "By calendar week" },
-            { value: "calendar_month", label: "By calendar month" }
-          ];
+        ? [{ value: "machine_hours", label: "By machine cutting hours" }]
+        : [{ value: "calendar_day", label: "By calendar day" }];
       taskExistingBasisInput.innerHTML = options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join("");
       taskExistingBasisInput.value = recurrence?.basis && options.some(opt => opt.value === recurrence.basis)
         ? recurrence.basis
         : (isInterval ? "machine_hours" : "calendar_day");
+      taskExistingBasisInput.disabled = true;
     }
     if (taskExistingRepeatInput){
-      taskExistingRepeatInput.value = recurrence?.enabled ? "yes" : "no";
+      taskExistingRepeatInput.value = task?.mode === "interval" ? "yes" : "no";
+      taskExistingRepeatInput.disabled = true;
     }
     if (taskExistingEveryInput){
       taskExistingEveryInput.value = String(Math.max(1, Number(recurrence?.every) || 1));
@@ -5206,16 +5196,6 @@ function renderDashboard(){
     }
     if (taskExistingEndCountInput){
       taskExistingEndCountInput.value = String(Math.max(1, Number(recurrence?.endCount) || 1));
-    }
-    taskExistingWeekdayInputs.forEach(input => {
-      if (!(input instanceof HTMLInputElement)) return;
-      const day = Number(input.value);
-      const selected = Array.isArray(recurrence?.weekDays) && recurrence.weekDays.includes(day);
-      input.checked = !!selected;
-    });
-    const weekly = String(taskExistingBasisInput?.value || "") === "calendar_week";
-    if (taskExistingWeekdaysRow){
-      taskExistingWeekdaysRow.hidden = !(taskExistingRepeatInput?.value === "yes" && weekly);
     }
     toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
   }
@@ -5306,11 +5286,11 @@ function renderDashboard(){
     if (taskExistingSearchInput) taskExistingSearchInput.value = "";
     if (taskExistingNoteInput) taskExistingNoteInput.value = "";
     if (taskExistingRepeatInput) taskExistingRepeatInput.value = "no";
+    if (taskExistingRepeatInput) taskExistingRepeatInput.disabled = true;
     if (taskExistingBasisInput) taskExistingBasisInput.value = "calendar_day";
+    if (taskExistingBasisInput) taskExistingBasisInput.disabled = true;
     if (taskExistingEveryInput) taskExistingEveryInput.value = "1";
     if (taskExistingEndInput) taskExistingEndInput.value = "never";
-    taskExistingWeekdayInputs.forEach(input => { if (input instanceof HTMLInputElement) input.checked = false; });
-    if (taskExistingWeekdaysRow) taskExistingWeekdaysRow.hidden = true;
     setSelectedExistingTask(null);
     refreshExistingTaskOptions("");
     toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
@@ -5381,6 +5361,14 @@ function renderDashboard(){
       if (endDateInput?.parentElement) endDateInput.parentElement.hidden = true;
       if (endCountInput?.parentElement) endCountInput.parentElement.hidden = true;
     }
+    const isHours = enabled && String(basisSelect?.value || "") === "machine_hours";
+    if (basisSelect?.closest("label")){
+      basisSelect.closest("label").hidden = !enabled || isHours;
+    }
+    const detailsRow = repeatSelect === taskExistingRepeatInput ? taskExistingWeekdaysRow : taskWeekdaysRow;
+    if (detailsRow){
+      detailsRow.hidden = !(enabled && String(basisSelect?.value || "") === "calendar_week");
+    }
   }
 
   function readRepeatConfig({ repeatInput, basisInput, everyInput, endInput, endDateInput, endCountInput, defaultBasis }){
@@ -5397,16 +5385,6 @@ function renderDashboard(){
     const payload = { enabled: true, basis, every, endType };
     if (basis === "machine_hours"){
       payload.intervalHours = every;
-    }
-    if (basis === "calendar_week"){
-      const source = repeatInput === taskExistingRepeatInput ? taskExistingWeekdayInputs : taskWeekdayInputs;
-      const weekDays = source
-        .filter(input => input instanceof HTMLInputElement && input.checked)
-        .map(input => Number(input.value))
-        .filter(day => Number.isInteger(day) && day >= 0 && day <= 6);
-      if (weekDays.length){
-        payload.weekDays = Array.from(new Set(weekDays)).sort((a,b)=> a - b);
-      }
     }
     if (endType === "on_date"){
       const endDateISO = normalizeDateKey(endDateInput?.value || null);
@@ -5709,15 +5687,12 @@ function renderDashboard(){
   }
 
   function syncTaskMode(mode){
-    if (!taskFreqRow || !taskLastRow || !taskConditionRow) return;
     if (mode === "asreq"){
-      taskFreqRow.hidden = true;
-      taskLastRow.hidden = true;
-      taskConditionRow.hidden = false;
+      if (taskLastRow) taskLastRow.hidden = true;
+      if (taskConditionRow) taskConditionRow.hidden = false;
     }else{
-      taskFreqRow.hidden = false;
-      taskLastRow.hidden = false;
-      taskConditionRow.hidden = true;
+      if (taskLastRow) taskLastRow.hidden = false;
+      if (taskConditionRow) taskConditionRow.hidden = true;
     }
   }
 
@@ -5728,37 +5703,30 @@ function renderDashboard(){
   function syncTaskRepeatMode(){
     const mode = selectedTaskMode();
     syncTaskMode(mode);
-    const repeatEnabled = String(taskRepeatInput?.value || "no") === "yes";
+    const isInterval = mode === "interval";
+    if (taskRepeatInput){
+      taskRepeatInput.value = isInterval ? "yes" : "no";
+      taskRepeatInput.disabled = true;
+    }
     if (taskRepeatBasisInput){
-      const isInterval = mode === "interval";
       const options = isInterval
-        ? [
-            { value: "machine_hours", label: "By machine cutting hours" },
-            { value: "calendar_day", label: "By calendar day" },
-            { value: "calendar_week", label: "By calendar week" },
-            { value: "calendar_month", label: "By calendar month" }
-          ]
-        : [
-            { value: "calendar_day", label: "By calendar day" },
-            { value: "calendar_week", label: "By calendar week" },
-            { value: "calendar_month", label: "By calendar month" }
-          ];
+        ? [{ value: "machine_hours", label: "By machine cutting hours" }]
+        : [{ value: "calendar_day", label: "By calendar day" }];
       const current = String(taskRepeatBasisInput.value || "");
       taskRepeatBasisInput.innerHTML = options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join("");
       taskRepeatBasisInput.value = options.some(opt => opt.value === current) ? current : (isInterval ? "machine_hours" : "calendar_day");
+      taskRepeatBasisInput.disabled = true;
     }
     if (taskConditionInput){
       taskConditionInput.disabled = mode !== "asreq";
     }
     if (taskIntervalInput){
-      taskIntervalInput.disabled = mode !== "interval";
+      taskIntervalInput.disabled = true;
     }
     if (taskLastInput){
       taskLastInput.disabled = mode !== "interval";
     }
     toggleRepeatFields(taskRepeatInput, taskRepeatBasisInput, taskRepeatEveryInput, taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput);
-    const weekly = repeatEnabled && String(taskRepeatBasisInput?.value || "") === "calendar_week";
-    if (taskWeekdaysRow) taskWeekdaysRow.hidden = !weekly;
   }
 
   function resetTaskForm(){
@@ -5769,11 +5737,12 @@ function renderDashboard(){
     subtaskList?.replaceChildren();
     resetExistingTaskForm();
     showTaskOptionStage();
-    if (taskRepeatInput) taskRepeatInput.value = "no";
+    if (taskRepeatInput) taskRepeatInput.value = "yes";
     if (taskRepeatBasisInput) taskRepeatBasisInput.value = "machine_hours";
     if (taskRepeatEveryInput) taskRepeatEveryInput.value = "1";
     if (taskRepeatEndInput) taskRepeatEndInput.value = "never";
-    taskWeekdayInputs.forEach(input => { if (input instanceof HTMLInputElement) input.checked = false; });
+    if (taskRepeatInput) taskRepeatInput.disabled = true;
+    if (taskRepeatBasisInput) taskRepeatBasisInput.disabled = true;
     if (taskWeekdaysRow) taskWeekdaysRow.hidden = true;
     toggleRepeatFields(taskRepeatInput, taskRepeatBasisInput, taskRepeatEveryInput, taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput);
     syncTaskRepeatMode();
@@ -6148,7 +6117,7 @@ function renderDashboard(){
     };
     let message = "Task added";
     if (mode === "interval"){
-      let interval = Number(taskIntervalInput?.value);
+      let interval = Number(repeatConfig.intervalHours);
       if (!isFinite(interval) || interval <= 0) interval = 8;
       if (repeatConfig.enabled && repeatConfig.basis === "machine_hours" && Number.isFinite(Number(repeatConfig.intervalHours))){
         interval = Math.max(1, Number(repeatConfig.intervalHours));
@@ -6216,7 +6185,7 @@ function renderDashboard(){
       message = "As-required task added to Maintenance Settings";
     }
 
-    const parentInterval = Number(taskIntervalInput?.value);
+    const parentInterval = Number(repeatConfig.intervalHours);
     const subRows = subtaskList ? Array.from(subtaskList.querySelectorAll("[data-subtask-row]")) : [];
     subRows.forEach(row => {
       const subName = (row.querySelector("[data-subtask-name]")?.value || "").trim();
@@ -8298,7 +8267,6 @@ function renderSettings(){
     const type = entry.type;
     const name = escapeHtml(t.name || "(unnamed task)");
     const condition = escapeHtml(t.condition || "As required");
-    const freq = t.interval ? `${t.interval} hrs` : "Set frequency";
     const baselineVal = baselineInputValue(t);
     const recurrence = normalizeTaskRecurrence(t);
     const recurrenceChip = recurrenceSummaryLabel(t);
@@ -8330,7 +8298,7 @@ function renderSettings(){
         <summary draggable="true">
           <span class="task-name">${name}</span>
           <span class="chip">${type === "interval" ? "By Interval" : "As Required"}</span>
-          ${type === "interval" ? `<span class=\"chip\" data-chip-frequency="${t.id}">${escapeHtml(freq)}</span>` : `<span class=\"chip\" data-chip-condition="${t.id}">${condition}</span>`}
+          ${type === "interval" ? "" : `<span class=\"chip\" data-chip-condition="${t.id}">${condition}</span>`}
           <span class="chip" data-chip-recurrence="${t.id}">${escapeHtml(recurrenceChip)}</span>
           ${notesChip}
           ${type === "interval" ? dueChip(t) : ""}
@@ -8344,7 +8312,7 @@ function renderSettings(){
               <option value="asreq" ${type==="asreq"?"selected":""}>As required</option>
             </select></label>
             ${type === "interval"
-              ? `<label data-field="interval">Frequency (hrs)<input type=\"number\" min=\"1\" step=\"1\" data-k=\"interval\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${t.interval!=null?t.interval:""}\" placeholder=\"Hours between service\"></label>`
+              ? ""
               : `<label data-field="condition">Condition / trigger<input data-k=\"condition\" data-id=\"${t.id}\" data-list=\"asreq\" value=\"${escapeHtml(t.condition||"")}\" placeholder=\"When to perform\"></label>`}
             ${type === "interval" ? `<label data-field="sinceBase">Hours since last service<input type=\"number\" min=\"0\" step=\"0.01\" data-k=\"sinceBase\" data-id=\"${t.id}\" data-list=\"interval\" value=\"${baselineVal!==""?baselineVal:""}\" placeholder=\"optional\"></label>` : ""}
             <label data-field="recurrenceEnabled">Repeat<select data-k="recurrenceEnabled" data-id="${t.id}" data-list="${type}">
@@ -8352,10 +8320,9 @@ function renderSettings(){
               <option value="no" ${!recurrence.enabled ? "selected" : ""}>No</option>
             </select></label>
             <label data-field="recurrenceBasis">Repeat basis<select data-k="recurrenceBasis" data-id="${t.id}" data-list="${type}">
-              ${type === "interval" ? `<option value="machine_hours" ${recurrence.basis==="machine_hours"?"selected":""}>Machine cutting hours</option>` : ""}
-              <option value="calendar_day" ${recurrence.basis==="calendar_day"?"selected":""}>Calendar day</option>
-              <option value="calendar_week" ${recurrence.basis==="calendar_week"?"selected":""}>Calendar week</option>
-              <option value="calendar_month" ${recurrence.basis==="calendar_month"?"selected":""}>Calendar month</option>
+              ${type === "interval"
+                ? `<option value="machine_hours" ${recurrence.basis==="machine_hours"?"selected":""}>Machine cutting hours</option>`
+                : `<option value="calendar_day" ${recurrence.basis==="calendar_day"?"selected":""}>Calendar day</option>`}
             </select></label>
             <label data-field="recurrenceEvery">Repeat every<input type="number" min="1" step="1" data-k="recurrenceEvery" data-id="${t.id}" data-list="${type}" value="${Math.max(1, Number(recurrence.every)||1)}"></label>
             <label data-field="manualLink">Manual link<input type="url" data-k="manualLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.manualLink||"")}" placeholder="https://..."></label>
@@ -8661,7 +8628,6 @@ function renderSettings(){
         }
       }
     };
-    toggle("interval", mode === "interval");
     toggle("sinceBase", mode === "interval");
     toggle("condition", mode !== "interval");
     const showRecurrenceDetail = repeatEnabled && isEditing;
@@ -8670,13 +8636,11 @@ function renderSettings(){
     if (repeatEnabled){
       const basisRow = taskEl.querySelector('[data-field="recurrenceBasis"] select[data-k="recurrenceBasis"]');
       if (basisRow instanceof HTMLSelectElement){
-        Array.from(basisRow.options).forEach(opt => {
-          if (opt.value === "machine_hours"){
-            opt.disabled = mode !== "interval";
-          }
-        });
-        if (mode !== "interval" && basis === "machine_hours"){
+        basisRow.disabled = mode !== "interval";
+        if (mode !== "interval"){
           basisRow.value = "calendar_day";
+        }else{
+          basisRow.value = "machine_hours";
         }
       }
     }
@@ -9598,24 +9562,11 @@ function renderSettings(){
     const key = target.getAttribute("data-k");
     if (!key || key === "mode") return;
     let value = target.value;
-    if (key === "price" || key === "interval" || key === "anchorTotal" || key === "sinceBase" || key === "downtimeHours" || key === "recurrenceEvery" || key === "recurrenceEndCount"){
+    if (key === "price" || key === "anchorTotal" || key === "sinceBase" || key === "downtimeHours" || key === "recurrenceEvery" || key === "recurrenceEndCount"){
       value = value === "" ? null : Number(value);
       if (value !== null && !isFinite(value)) return;
     }
-    if (key === "interval"){
-      meta.task.interval = value == null ? null : Number(value);
-      const recurrence = normalizeTaskRecurrence(meta.task);
-      if (recurrence && recurrence.basis === "machine_hours"){
-        recurrence.intervalHours = meta.task.interval;
-        recurrence.every = Math.max(1, Math.round(Number(meta.task.interval) || 1));
-        meta.task.recurrence = recurrence;
-      }
-      const chip = holder.querySelector('[data-chip-frequency]');
-      if (chip) chip.textContent = meta.task.interval ? `${meta.task.interval} hrs` : "Set frequency";
-      const recurChip = holder.querySelector('[data-chip-recurrence]');
-      if (recurChip) recurChip.textContent = recurrenceSummaryLabel(meta.task);
-      updateDueChip(holder, meta.task);
-    }else if (key === "anchorTotal"){
+    if (key === "anchorTotal"){
       if (value == null){
         meta.task.anchorTotal = null;
         meta.task.sinceBase = null;
@@ -9748,9 +9699,9 @@ function renderSettings(){
       const recurrence = normalizeTaskRecurrence(meta.task);
       if (!recurrence) return;
       if (selectKey === "recurrenceEnabled"){
-        recurrence.enabled = target.value === "yes";
+        recurrence.enabled = meta.task.mode === "interval";
       }else if (selectKey === "recurrenceBasis"){
-        recurrence.basis = target.value;
+        recurrence.basis = meta.task.mode === "interval" ? "machine_hours" : "calendar_day";
         if (recurrence.basis === "machine_hours"){
           recurrence.intervalHours = Number(meta.task.interval) || Number(recurrence.intervalHours) || 1;
           recurrence.every = Math.max(1, Math.round(Number(recurrence.intervalHours) || 1));
@@ -9778,7 +9729,15 @@ function renderSettings(){
       meta.list.splice(meta.index,1);
       if (nextMode === "interval"){
         meta.task.mode = "interval";
-        meta.task.interval = meta.task.interval && meta.task.interval>0 ? Number(meta.task.interval) : 8;
+        const recurrence = normalizeTaskRecurrence(meta.task) || {};
+        const every = Math.max(1, Number(recurrence.every) || Number(meta.task.interval) || 8);
+        meta.task.interval = every;
+        recurrence.enabled = true;
+        recurrence.basis = "machine_hours";
+        recurrence.every = every;
+        recurrence.intervalHours = every;
+        recurrence.endType = recurrence.endType || "never";
+        meta.task.recurrence = recurrence;
         const baseSince = Number(meta.task.sinceBase);
         const baselineHours = Number.isFinite(baseSince) && baseSince >= 0 ? baseSince : 0;
         meta.task.sinceBase = baselineHours;
@@ -9804,6 +9763,15 @@ function renderSettings(){
         delete meta.task.interval;
         delete meta.task.sinceBase;
         delete meta.task.anchorTotal;
+        const recurrence = normalizeTaskRecurrence(meta.task) || {};
+        recurrence.enabled = false;
+        recurrence.basis = "calendar_day";
+        recurrence.intervalHours = null;
+        recurrence.every = Math.max(1, Number(recurrence.every) || 1);
+        recurrence.endType = "never";
+        recurrence.endDateISO = null;
+        recurrence.endCount = null;
+        meta.task.recurrence = recurrence;
         window.tasksAsReq.unshift(meta.task);
       }
       persist();
