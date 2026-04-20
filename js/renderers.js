@@ -10569,6 +10569,7 @@ function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
   const previousModal = document.getElementById("costDataCenterModal");
+  const wasDataCenterOpen = Boolean(previousModal && !previousModal.hasAttribute("hidden"));
   if (previousModal && previousModal.parentElement === document.body){
     previousModal.remove();
     document.body.classList.remove("cost-data-center-open");
@@ -10616,7 +10617,7 @@ function renderCosts(){
   setupCostTimeframeModal(model);
   setupJobCategoryWindow(model);
   setupWeeklyReportWindow(model);
-  setupMaintenanceDataCenterActions();
+  setupMaintenanceDataCenterActions({ openImmediately: wasDataCenterOpen });
 
   function focusCalendarAtOccurrence(taskId, dateISO){
     const dueISO = String(dateISO || "");
@@ -10653,7 +10654,7 @@ function renderCosts(){
     }
   }
 
-  function setupMaintenanceDataCenterActions(){
+  function setupMaintenanceDataCenterActions(options = {}){
     const openBtn = content.querySelector("[data-open-data-center]");
     const modal = content.querySelector("[data-data-center-modal]");
     const closeBtns = Array.from(content.querySelectorAll("[data-close-data-center]"));
@@ -10690,6 +10691,9 @@ function renderCosts(){
             closeDataCenter();
           }
         });
+      }
+      if (options && options.openImmediately){
+        openDataCenter();
       }
     }
 

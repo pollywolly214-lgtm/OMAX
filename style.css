@@ -512,8 +512,20 @@ body.cost-timeframe-modal-open{ overflow:hidden; }
   border-radius:12px;
   box-shadow:0 20px 46px rgba(2,8,20,.35);
   padding:16px;
+  color:#000;
 }
 .cost-data-center-header{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+.cost-data-center-panel h3,
+.cost-data-center-panel .small,
+.cost-data-center-panel .muted,
+.cost-data-center-panel .cost-table,
+.cost-data-center-panel .cost-table th,
+.cost-data-center-panel .cost-table td,
+.cost-data-center-panel label,
+.cost-data-center-panel select,
+.cost-data-center-panel button{
+  color:#000;
+}
 body.cost-data-center-open{ overflow:hidden; }
 @media (max-width: 640px){
   .cost-timeframe-card-body{ padding:24px 18px 28px; }
