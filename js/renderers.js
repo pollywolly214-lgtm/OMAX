@@ -10611,6 +10611,62 @@ function renderCosts(){
   setupCostTimeframeModal(model);
   setupJobCategoryWindow(model);
   setupWeeklyReportWindow(model);
+  setupMaintenanceDataCenterActions();
+
+  function focusCalendarAtOccurrence(taskId, dateISO){
+    const dueISO = String(dateISO || "");
+    const parsedDue = dueISO && typeof parseDateLocal === "function"
+      ? parseDateLocal(dueISO)
+      : (dueISO ? new Date(dueISO) : null);
+    if (parsedDue instanceof Date && !Number.isNaN(parsedDue.getTime())){
+      parsedDue.setHours(0,0,0,0);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const diffMonths = (parsedDue.getFullYear() - today.getFullYear()) * 12 + (parsedDue.getMonth() - today.getMonth());
+      window.__calendarMonthOffset = Math.min(12, Math.max(-12, Math.round(diffMonths)));
+    }
+    if (typeof hideBubble === "function") hideBubble();
+    location.hash = "#/";
+    const runFocus = ()=>{
+      if (typeof renderCalendar === "function") renderCalendar();
+      const months = document.getElementById("months");
+      const cell = dueISO ? months?.querySelector(`[data-date-iso="${dueISO}"]`) : null;
+      if (!cell) return false;
+      cell.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (typeof highlightCalendarDayCell === "function"){
+        highlightCalendarDayCell(cell);
+      }
+      const anchor = taskId ? (cell.querySelector(`[data-cal-task="${String(taskId)}"]`) || cell) : cell;
+      if (taskId && typeof showTaskBubble === "function"){
+        showTaskBubble(String(taskId), anchor, { dateISO: dueISO });
+      }
+      return true;
+    };
+    if (!runFocus()){
+      setTimeout(runFocus, 120);
+      setTimeout(runFocus, 320);
+    }
+  }
+
+  function setupMaintenanceDataCenterActions(){
+    const rows = Array.from(content.querySelectorAll("[data-maintenance-open-task]"));
+    if (!rows.length) return;
+    rows.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", ()=>{
+        const row = btn.closest("tr");
+        const select = row ? row.querySelector("[data-maintenance-link-mode]") : null;
+        const destination = (select instanceof HTMLSelectElement ? select.value : "calendar").toLowerCase();
+        const taskId = String(btn.getAttribute("data-task-id") || "");
+        const dateISO = String(btn.getAttribute("data-date-iso") || "");
+        if (destination === "settings"){
+          location.hash = `#/settings?taskId=${encodeURIComponent(taskId)}`;
+          return;
+        }
+        focusCalendarAtOccurrence(taskId, dateISO);
+      });
+    });
+  }
 
   function setupCostTimeframeModal(currentModel){
     if (typeof window.__cleanupCostTimeframeModal === "function"){
@@ -14251,6 +14307,7 @@ function computeCostModel(){
       const row = maintenanceDataTableRows.find(item => item.taskId === taskId && item.dateISO === dateISO);
       if (!row) return;
       row.qty = qty;
+      row.counter = Math.max(1, qty - index);
       if (index < uniqueDates.length - 1){
         const prev = parseDateLocal(uniqueDates[index + 1]);
         const current = parseDateLocal(dateISO);
@@ -14267,6 +14324,7 @@ function computeCostModel(){
   maintenanceDataTableRows.sort((a,b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
   const maintenanceDataTable = maintenanceDataTableRows.map((row, idx) => ({
     id: `${row.taskId}_${row.dateISO}_${idx}`,
+    taskId: row.taskId,
     taskName: row.taskName,
     maintenanceHrsLabel: formatHoursValue(row.maintenanceHrs) || "0",
     partCostLabel: formatterCurrency(row.partCost, { decimals: row.partCost < 1000 ? 2 : 0 }),
@@ -14277,7 +14335,8 @@ function computeCostModel(){
     daysSinceLastTaskLabel: Number.isFinite(row.daysSinceLastTask) ? String(row.daysSinceLastTask) : "—",
     cuttingHoursSinceLabel: Number.isFinite(row.cuttingHoursSince) ? formatHoursValue(row.cuttingHoursSince) : "—",
     settingsLink: row.settingsLink,
-    qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "1"
+    qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "1",
+    counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1"
   }));
 
   return {

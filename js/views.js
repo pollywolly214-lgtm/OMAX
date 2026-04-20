@@ -1967,11 +1967,16 @@ function viewCosts(model){
 
       <div class="dashboard-window" data-cost-window="dataCenter">
         <div class="block">
-          <h3>Maintenance Data Center Table</h3>
-          ${maintenanceDataTable.length ? `
-            <table class="cost-table">
+          <details class="cost-data-center" data-cost-data-center>
+            <summary>
+              <h3>Maintenance Data Center Table</h3>
+              <span class="small muted">Click to ${maintenanceDataTable.length ? "expand" : "view"}.</span>
+            </summary>
+            ${maintenanceDataTable.length ? `
+            <table class="cost-table" style="margin-top:10px">
               <thead>
                 <tr>
+                  <th>Counter</th>
                   <th>Task</th>
                   <th>Maint. hrs</th>
                   <th>Part cost</th>
@@ -1982,12 +1987,13 @@ function viewCosts(model){
                   <th>Days since last</th>
                   <th>Cut hrs since</th>
                   <th>Qty</th>
-                  <th>Settings link</th>
+                  <th>Task link</th>
                 </tr>
               </thead>
               <tbody>
                 ${maintenanceDataTable.map(row => `
                   <tr>
+                    <td>${esc(row.counterLabel || "#1")}</td>
                     <td>${esc(row.taskName || "Maintenance task")}</td>
                     <td>${esc(row.maintenanceHrsLabel || "0")}</td>
                     <td>${esc(row.partCostLabel || "$0.00")}</td>
@@ -1998,12 +2004,24 @@ function viewCosts(model){
                     <td>${esc(row.daysSinceLastTaskLabel || "—")}</td>
                     <td>${esc(row.cuttingHoursSinceLabel || "—")}</td>
                     <td>${esc(row.qtyLabel || "1")}</td>
-                    <td><a href="${esc(row.settingsLink || "#/settings")}" data-maintenance-link>Open task</a></td>
+                    <td>
+                      <label class="sr-only" for="maintenanceLinkMode_${esc(row.id || "")}">Destination</label>
+                      <select id="maintenanceLinkMode_${esc(row.id || "")}" data-maintenance-link-mode>
+                        <option value="calendar">Calendar</option>
+                        <option value="settings">Maintenance Settings</option>
+                      </select>
+                      <button type="button"
+                        data-maintenance-open-task
+                        data-task-id="${esc(row.taskId || "")}"
+                        data-date-iso="${esc(row.dateISO || "")}"
+                        data-settings-link="${esc(row.settingsLink || "#/settings")}">Open task</button>
+                    </td>
                   </tr>
                 `).join("")}
               </tbody>
             </table>
-          ` : `<p class="small muted">No completed maintenance occurrences yet.</p>`}
+            ` : `<p class="small muted">No completed maintenance occurrences yet.</p>`}
+          </details>
         </div>
       </div>
 
