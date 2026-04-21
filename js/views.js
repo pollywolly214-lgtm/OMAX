@@ -3900,7 +3900,9 @@ function viewJobs(){
         aria-hidden="${addFormOpen ? "false" : "true"}"
       >
         <form id="addJobForm" class="mini-form job-add-form">
-          <input type="text" id="jobName" placeholder="Job name" required value="${esc(addJobDraftField("name"))}">
+          <label>Job name
+            <input type="text" id="jobName" placeholder="Job name" required value="${esc(addJobDraftField("name"))}">
+          </label>
           <label class="job-estimate-label-group">
             <span class="small muted" id="jobEstBreakdown">0 hrs = 0 hrs 0 min</span>
             Estimate (hrs)
@@ -3909,18 +3911,36 @@ function viewJobs(){
           <label>Add minutes
             <input type="number" id="jobEstMinutes" min="0" step="1" placeholder="e.g. 45">
           </label>
-          <select id="jobPriority" aria-label="Priority">
-            ${priorityOptionsMarkup(addJobPriorityDefault)}
-          </select>
+          <label>Priority
+            <select id="jobPriority" aria-label="Priority">
+              ${priorityOptionsMarkup(addJobPriorityDefault)}
+            </select>
+          </label>
           <p class="small muted job-priority-hint">Priority 1 runs before higher numbers.</p>
-          <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01" value="${esc(addJobDraftField("charge", "200"))}">
-          <input type="number" id="jobCostRate" placeholder="Cost rate ($/hr)" min="0" step="0.01" value="${esc(addJobDraftField("costRate", "45"))}">
-          <input type="text" id="jobMaterial" placeholder="Material" list="jobMaterialOptions" value="${esc(addJobDraftField("material"))}">
-          <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}">
-          <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01" value="${esc(addJobDraftField("materialQty"))}">
-          <input type="date" id="jobStart" required value="${esc(addJobDraftField("start", defaultJobDateISO))}">
-          <input type="date" id="jobDue" required value="${esc(addJobDraftField("due", defaultJobDateISO))}">
-          <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required value="${esc(addJobDraftField("projectNumber"))}">
+          <label>Charge rate ($/hr)
+            <input type="number" id="jobCharge" placeholder="200.00" min="0" step="0.01" value="${esc(addJobDraftField("charge", "200"))}">
+          </label>
+          <label>Cost rate ($/hr)
+            <input type="number" id="jobCostRate" placeholder="45.00" min="0" step="0.01" value="${esc(addJobDraftField("costRate", "45"))}">
+          </label>
+          <label>Material
+            <input type="text" id="jobMaterial" placeholder="Material" list="jobMaterialOptions" value="${esc(addJobDraftField("material"))}">
+          </label>
+          <label>Material cost ($)
+            <input type="number" id="jobMaterialCost" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}">
+          </label>
+          <label>Material quantity
+            <input type="number" id="jobMaterialQty" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialQty"))}">
+          </label>
+          <label>Start date
+            <input type="date" id="jobStart" required value="${esc(addJobDraftField("start", defaultJobDateISO))}">
+          </label>
+          <label>Due date
+            <input type="date" id="jobDue" required value="${esc(addJobDraftField("due", defaultJobDateISO))}">
+          </label>
+          <label>Project #
+            <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required value="${esc(addJobDraftField("projectNumber"))}">
+          </label>
           <div class="job-category-field">
             <select id="jobCategory" aria-label="Category" required>
               ${categoryOptionsMarkup(addJobCategoryDefault, { includeCreateOption: true })}
