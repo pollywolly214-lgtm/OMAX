@@ -10832,22 +10832,18 @@ function renderCosts(){
 
     const cuttingSearchInput = modal instanceof HTMLElement ? modal.querySelector("[data-cutting-search]") : null;
     const cuttingCategoryFilter = modal instanceof HTMLElement ? modal.querySelector("[data-cutting-filter-category]") : null;
-    const cuttingTaskFilter = modal instanceof HTMLElement ? modal.querySelector("[data-cutting-filter-job]") : null;
     const applyCuttingFilter = ()=>{
       if (!(modal instanceof HTMLElement)) return;
       const term = String(cuttingSearchInput instanceof HTMLInputElement ? cuttingSearchInput.value : "").trim().toLowerCase();
       const categoryValue = String(cuttingCategoryFilter instanceof HTMLSelectElement ? cuttingCategoryFilter.value : "").trim();
-      const taskValue = String(cuttingTaskFilter instanceof HTMLSelectElement ? cuttingTaskFilter.value : "").trim().toLowerCase();
       const rows = Array.from(modal.querySelectorAll("[data-cutting-row]"));
       rows.forEach(row => {
         if (!(row instanceof HTMLElement)) return;
         const haystack = String(row.getAttribute("data-cutting-search-text") || "").toLowerCase();
         const rowCategory = String(row.getAttribute("data-cutting-category-id") || "");
-        const rowJob = String(row.getAttribute("data-cutting-job-key") || "").toLowerCase();
         const matchesSearch = !term || haystack.includes(term);
         const matchesCategory = !categoryValue || rowCategory === categoryValue;
-        const matchesTask = !taskValue || rowJob === taskValue;
-        row.hidden = !(matchesSearch && matchesCategory && matchesTask);
+        row.hidden = !(matchesSearch && matchesCategory);
       });
     };
     if (cuttingSearchInput instanceof HTMLInputElement){
@@ -10857,9 +10853,17 @@ function renderCosts(){
     if (cuttingCategoryFilter instanceof HTMLSelectElement){
       cuttingCategoryFilter.addEventListener("change", applyCuttingFilter);
     }
-    if (cuttingTaskFilter instanceof HTMLSelectElement){
-      cuttingTaskFilter.addEventListener("change", applyCuttingFilter);
-    }
+    Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-cutting-open-job]")).forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", ()=>{
+        const jobId = String(btn.getAttribute("data-job-id") || "");
+        closeDataCenter();
+        if (jobId){
+          window.pendingJobFocus = { type: "jobRow", id: jobId };
+        }
+        location.hash = "#/jobs";
+      });
+    });
 
     const rows = Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-maintenance-open-task]"));
     if (!rows.length) return;
@@ -14475,6 +14479,7 @@ function computeCostModel(){
     emptyMessage: orderRows.length ? "" : "Approve or deny order requests to build the spend log."
   };
 
+  const cuttingCategoryCounters = new Map();
   const cuttingJobsDataTable = (Array.isArray(completedCuttingJobs) ? completedCuttingJobs : []).map((job, index) => {
     const categoryId = job?.cat != null ? String(job.cat) : "";
     const categoryLabel = categoryId ? resolveCategoryName(categoryId) : "Uncategorized";
@@ -14485,6 +14490,8 @@ function computeCostModel(){
       Number(job?.estimateHours)
     ];
     const hours = actualHoursCandidates.find(val => Number.isFinite(val) && val >= 0) ?? 0;
+    const categoryCutCount = (cuttingCategoryCounters.get(categoryId || "__uncategorized__") || 0) + 1;
+    cuttingCategoryCounters.set(categoryId || "__uncategorized__", categoryCutCount);
     const chargeRateRaw = Number(job?.chargeRate);
     const costRateRaw = Number(job?.costRate);
     const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
@@ -14497,7 +14504,7 @@ function computeCostModel(){
       name: job?.name || `Completed job ${index + 1}`,
       categoryId,
       categoryLabel,
-      hoursLabel: formatHoursValue(hours) || "0",
+      hoursLabel: Number.isFinite(hours) ? String(hours) : "0",
       chargeRateLabel: formatterCurrency(chargeRate, { decimals: 2 }),
       costRateLabel: formatterCurrency(costRate, { decimals: 2 }),
       materialType: String(job?.material || "—"),
@@ -14508,7 +14515,9 @@ function computeCostModel(){
       completedDateLabel: completedISO ? String(completedISO).slice(0, 10) : "—",
       projectNumber: String(job?.projectNumber || "—"),
       notes: String(job?.notes || "").trim() || "—",
-      priorityLabel: Number.isFinite(Number(job?.priority)) ? String(Math.max(1, Math.floor(Number(job.priority)))) : "—"
+      priorityLabel: Number.isFinite(Number(job?.priority)) ? String(Math.max(1, Math.floor(Number(job.priority)))) : "—",
+      cumulativeCutNumberLabel: `#${index + 1}`,
+      categoryCutNumberLabel: `#${categoryCutCount}`
     };
   });
 
@@ -15178,6 +15187,19 @@ function renderJobs(){
             addButton.focus();
           }
           addButton.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+        }
+      });
+    } else if (pendingJobFocus.type === "jobRow" && pendingJobFocus.id != null){
+      requestAnimationFrame(()=>{
+        const targetRow = content.querySelector(`[data-job-row="${pendingJobFocus.id}"]`);
+        if (targetRow instanceof HTMLElement){
+          targetRow.classList.add("job-row-priority-animate");
+          try {
+            targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+          } catch (_err){
+            try { targetRow.scrollIntoView(); } catch(__){}
+          }
+          setTimeout(()=> targetRow.classList.remove("job-row-priority-animate"), 1800);
         }
       });
     }

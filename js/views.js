@@ -1238,9 +1238,6 @@ function viewCosts(model){
     const [id, label] = entry.split("|||");
     return { id, label };
   }).sort((a, b) => a.label.localeCompare(b.label));
-  const cuttingJobTaskOptions = Array.from(new Set(
-    cuttingJobsDataTable.map(row => String(row?.name || "").trim()).filter(Boolean)
-  )).sort((a, b) => a.localeCompare(b));
   const overviewInsight = data.overviewInsight || "Totals blend the latest maintenance allocations, consumable burn rates, downtime burdens, and job margin data so you always see current cost exposure.";
   const ordersInsight = data.ordersInsight || "Tracks every waterjet part request from submission through approval so finance can confirm spend and spot stalled orders.";
   const timeframeInsight = data.timeframeInsight || "Usage windows combine logged machine hours with interval pricing to estimate what each upcoming maintenance window will cost.";
@@ -2084,17 +2081,14 @@ function viewCosts(model){
                     <option value="">All categories</option>
                     ${cuttingJobCategoryOptions.map(opt => `<option value="${esc(opt.id)}">${esc(opt.label)}</option>`).join("")}
                   </select>
-                  <label for="costDataCenterCuttingTaskFilter">Filter by job</label>
-                  <select id="costDataCenterCuttingTaskFilter" data-cutting-filter-job>
-                    <option value="">All jobs</option>
-                    ${cuttingJobTaskOptions.map(name => `<option value="${esc(name.toLowerCase())}">${esc(name)}</option>`).join("")}
-                  </select>
                 </div>
                 ${cuttingJobsDataTable.length ? `
                 <table class="cost-table" style="margin-top:10px">
                   <thead>
                     <tr>
                       <th>Job name</th>
+                      <th>Cumulative cut #</th>
+                      <th>Category cut #</th>
                       <th>Category</th>
                       <th>Hours</th>
                       <th>Charge rate/hr</th>
@@ -2108,12 +2102,15 @@ function viewCosts(model){
                       <th>Project #</th>
                       <th>Priority</th>
                       <th>Notes</th>
+                      <th>Job link</th>
                     </tr>
                   </thead>
                   <tbody>
                     ${cuttingJobsDataTable.map(row => `
                       <tr data-cutting-row data-cutting-category-id="${esc(String(row.categoryId || ""))}" data-cutting-job-key="${esc(String(row.name || "").toLowerCase())}" data-cutting-search-text="${esc(`${row.name || ""} ${row.categoryLabel || ""} ${row.materialType || ""} ${row.projectNumber || ""} ${row.completedDateLabel || ""}`.toLowerCase())}">
                         <td>${esc(row.name || "—")}</td>
+                        <td>${esc(row.cumulativeCutNumberLabel || "—")}</td>
+                        <td>${esc(row.categoryCutNumberLabel || "—")}</td>
                         <td>${esc(row.categoryLabel || "—")}</td>
                         <td>${esc(row.hoursLabel || "0")}</td>
                         <td>${esc(row.chargeRateLabel || "—")}</td>
@@ -2127,6 +2124,7 @@ function viewCosts(model){
                         <td>${esc(row.projectNumber || "—")}</td>
                         <td>${esc(row.priorityLabel || "—")}</td>
                         <td>${esc(row.notes || "—")}</td>
+                        <td><button type="button" data-cutting-open-job data-job-id="${esc(row.id || "")}">Open job</button></td>
                       </tr>
                     `).join("")}
                   </tbody>
