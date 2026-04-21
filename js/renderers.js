@@ -10700,6 +10700,61 @@ function renderCosts(){
     }
 
     const searchInput = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-search]") : null;
+    const suggestionsBox = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-search-suggestions]") : null;
+    const suggestionState = { items: [] };
+    const computeSuggestions = (term, rows)=>{
+      const normalizedTerm = String(term || "").trim().toLowerCase();
+      if (!normalizedTerm) return [];
+      const counts = new Map();
+      rows.forEach(row => {
+        if (!(row instanceof HTMLElement)) return;
+        const taskName = String(row.getAttribute("data-task-name") || "").trim();
+        if (!taskName) return;
+        const key = taskName.toLowerCase();
+        counts.set(key, { taskName, count: (counts.get(key)?.count || 0) + 1 });
+      });
+      const ranked = Array.from(counts.values())
+        .map(item => {
+          const lower = item.taskName.toLowerCase();
+          const starts = lower.startsWith(normalizedTerm) ? 2 : 0;
+          const contains = !starts && lower.includes(normalizedTerm) ? 1 : 0;
+          return { ...item, score: starts + contains };
+        })
+        .filter(item => item.score > 0)
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          if (b.count !== a.count) return b.count - a.count;
+          return a.taskName.localeCompare(b.taskName);
+        })
+        .slice(0, 3);
+      return ranked.map(item => item.taskName);
+    };
+    const renderSuggestions = ()=>{
+      if (!(suggestionsBox instanceof HTMLElement) || !(searchInput instanceof HTMLInputElement) || !(modal instanceof HTMLElement)) return;
+      const tableRows = Array.from(modal.querySelectorAll("[data-maintenance-row]"));
+      suggestionState.items = computeSuggestions(searchInput.value, tableRows);
+      if (!suggestionState.items.length){
+        suggestionsBox.hidden = true;
+        suggestionsBox.innerHTML = "";
+        return;
+      }
+      suggestionsBox.innerHTML = suggestionState.items.map((label, idx)=> `
+        <button type="button" class="cost-data-center-suggestion" data-suggestion-index="${idx}">${escapeHtml(label)}</button>
+      `).join("");
+      suggestionsBox.hidden = false;
+      Array.from(suggestionsBox.querySelectorAll("[data-suggestion-index]")).forEach(btn => {
+        if (!(btn instanceof HTMLElement)) return;
+        btn.addEventListener("click", ()=>{
+          const index = Number(btn.getAttribute("data-suggestion-index"));
+          const selected = suggestionState.items[index];
+          if (!selected || !(searchInput instanceof HTMLInputElement)) return;
+          searchInput.value = selected;
+          applySearchFilter();
+          renderSuggestions();
+          try { searchInput.focus({ preventScroll: true }); } catch (_err){ searchInput.focus(); }
+        });
+      });
+    };
     const applySearchFilter = ()=>{
       if (!(modal instanceof HTMLElement)) return;
       const term = String(searchInput instanceof HTMLInputElement ? searchInput.value : "").trim().toLowerCase();
@@ -10712,8 +10767,23 @@ function renderCosts(){
       });
     };
     if (searchInput instanceof HTMLInputElement){
-      searchInput.addEventListener("input", applySearchFilter);
+      searchInput.addEventListener("input", ()=>{
+        applySearchFilter();
+        renderSuggestions();
+      });
+      searchInput.addEventListener("keydown", (event)=>{
+        if (event.key === "Tab" && suggestionState.items.length){
+          event.preventDefault();
+          const selected = suggestionState.items[0];
+          if (selected){
+            searchInput.value = selected;
+            applySearchFilter();
+            renderSuggestions();
+          }
+        }
+      });
       applySearchFilter();
+      renderSuggestions();
     }
 
     const rows = Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-maintenance-open-task]"));
