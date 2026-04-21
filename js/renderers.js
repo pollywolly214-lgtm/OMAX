@@ -13429,7 +13429,7 @@ function computeCostModel(){
     });
   };
 
-  const maintenanceSeries = maintenanceHistory.map(entry => {
+  let maintenanceSeries = maintenanceHistory.map(entry => {
     const dateLabel = (entry.date instanceof Date && !Number.isNaN(entry.date.getTime()))
       ? entry.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
       : "the latest log";
@@ -15071,6 +15071,38 @@ function computeCostModel(){
     qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "1",
     counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1"
   }));
+
+  const maintenanceTrendRows = maintenanceDataTableRows.filter(row => {
+    if (!row) return false;
+    if (!row.taskId || !row.settingsLink) return false;
+    if (!toHistoryDateKey(row.dateISO)) return false;
+    return Number.isFinite(Number(row.totalCost)) && Number(row.totalCost) >= 0;
+  });
+  const maintenanceCostByDate = new Map();
+  maintenanceTrendRows.forEach(row => {
+    const dateISO = toHistoryDateKey(row.dateISO);
+    if (!dateISO) return;
+    const prior = maintenanceCostByDate.get(dateISO) || 0;
+    maintenanceCostByDate.set(dateISO, prior + Math.max(0, Number(row.totalCost) || 0));
+  });
+  const maintenanceSeriesFromDataTable = Array.from(maintenanceCostByDate.entries())
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    .map(([dateISO, totalCost]) => {
+      const parsedDate = typeof parseDateLocal === "function"
+        ? (parseDateLocal(dateISO) || new Date(dateISO))
+        : new Date(dateISO);
+      const date = (parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime()))
+        ? parsedDate
+        : new Date(dateISO);
+      const dayRows = maintenanceTrendRows.filter(row => toHistoryDateKey(row.dateISO) === dateISO);
+      const taskCount = dayRows.length;
+      return {
+        date,
+        value: totalCost,
+        detail: `${taskCount} completed maintenance ${taskCount === 1 ? "occurrence" : "occurrences"} recorded in the data center table on ${dateISO}.`
+      };
+    });
+  maintenanceSeries = maintenanceSeriesFromDataTable;
 
   return {
     summaryCards,
