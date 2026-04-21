@@ -14429,12 +14429,28 @@ function computeCostModel(){
     });
   });
   const categoryById = new Map();
+  const categoryParentById = new Map();
   if (Array.isArray(window.settingsFolders)){
     window.settingsFolders.forEach(folder => {
       if (!folder || folder.id == null) return;
       categoryById.set(String(folder.id), String(folder.name || "Category"));
+      categoryParentById.set(String(folder.id), folder.parent != null ? String(folder.parent) : null);
     });
   }
+  const resolveCategoryPath = (categoryId)=>{
+    const key = String(categoryId || "");
+    if (!key) return "";
+    const visited = new Set();
+    const names = [];
+    let current = key;
+    while (current && !visited.has(current)){
+      visited.add(current);
+      const name = categoryById.get(current);
+      if (name) names.unshift(name);
+      current = categoryParentById.get(current) || null;
+    }
+    return names.join(" › ");
+  };
   const maintenanceDataTableRows = [];
   const taskDateGroups = new Map();
   taskEventsByDate.forEach((tasksOnDate, dateISO) => {
@@ -14448,8 +14464,13 @@ function computeCostModel(){
       if (!taskDateGroups.has(groupKey)) taskDateGroups.set(groupKey, []);
       taskDateGroups.get(groupKey).push(key);
       const task = taskById.get(originalId) || taskById.get(String(taskMeta.id || "")) || null;
-      const categoryId = task?.cat != null ? String(task.cat) : "";
-      const categoryLabel = categoryId ? (categoryById.get(categoryId) || categoryId) : "";
+      const taskModeRaw = String(task?.mode || taskMeta?.mode || "interval").toLowerCase();
+      const taskMode = taskModeRaw === "asreq" ? "asreq" : "interval";
+      const modeLabel = taskMode === "asreq" ? "As Required" : "Per Interval";
+      const rawCategoryId = task?.cat != null ? String(task.cat) : "";
+      const categoryPath = rawCategoryId ? (resolveCategoryPath(rawCategoryId) || rawCategoryId) : "";
+      const categoryId = `${taskMode}:${rawCategoryId || "uncategorized"}`;
+      const categoryLabel = categoryPath ? `${modeLabel} • ${categoryPath}` : `${modeLabel} • Uncategorized`;
       const maintenanceHours = Number(task?.downtimeHours);
       const maintenanceHrs = Number.isFinite(maintenanceHours) && maintenanceHours > 0 ? maintenanceHours : 1;
       const partCost = Number(taskMeta?.unitPrice);
@@ -14473,7 +14494,8 @@ function computeCostModel(){
         cuttingHoursSince: hoursSince,
         settingsLink: `#/settings?taskId=${encodeURIComponent(originalId)}`,
         categoryId,
-        categoryLabel
+        categoryLabel,
+        taskMode
       });
     });
   });
