@@ -15024,6 +15024,22 @@ function computeCostModel(){
     rows: efficiencyRows,
     emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
   };
+  const efficiencyDisplayProfit = Math.max(0, efficiencyTotals.profit);
+  const efficiencyDisplayAverage = efficiencyCount ? (efficiencyDisplayProfit / efficiencyCount) : 0;
+  const cuttingCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "cuttingJobs") : null;
+  if (cuttingCard){
+    cuttingCard.value = formatterCurrency(efficiencyDisplayProfit, { decimals: 0, showPlus: true });
+    cuttingCard.hint = efficiencyCount
+      ? `Average gain/loss ${formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true })} across ${efficiencyCount} completed job${efficiencyCount===1?"":"s"} (source: central data table).`
+      : "No cutting jobs logged yet.";
+  }
+  const combinedCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "combinedImpact") : null;
+  if (combinedCard){
+    combinedCard.value = formatterCurrency(efficiencyDisplayProfit - predictedAnnual, { decimals: 0, showPlus: true });
+  }
+  jobSummary.countLabel = efficiencyCount ? `${efficiencyCount} completed` : "0";
+  jobSummary.totalLabel = formatterCurrency(efficiencyDisplayProfit, { decimals: 0, showPlus: true });
+  jobSummary.averageLabel = formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true });
 
   const taskById = new Map();
   [Array.isArray(intervalTasksAll) ? intervalTasksAll : [], Array.isArray(asReqTasksAll) ? asReqTasksAll : []].forEach(list => {
