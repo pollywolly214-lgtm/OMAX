@@ -15001,11 +15001,12 @@ function computeCostModel(){
       totalProfitLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
       hoursValue: Number(row?.hoursValue) || 0,
       revenueValue: Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)),
+      beforeExpenseLabel: formatterCurrency(Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)), { decimals: 2, showPlus: true }),
       materialValue: Math.max(0, Number(row?.materialCostValue) || 0),
       laborValue: Math.max(0, Number(row?.laborCostValue) || 0),
       totalCostValue: Number(row?.totalCostValue) || 0,
       totalProfitValue: Number(row?.totalProfitValue) || 0,
-      formulaTitle: "Source: Central data table completed cutting jobs row. Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost).",
+      formulaTitle: "Source: Central data table completed cutting jobs row. Before expense gain = Hours × Charge Rate. Excludes maintenance parts, labor, and consumables reductions.",
       settingsLink: row?.settingsLink || ""
     }));
   const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
@@ -15025,20 +15026,23 @@ function computeCostModel(){
     averageCostLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.cost / efficiencyCount) : 0, { decimals: 2 }),
     totalProfitLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
     averageProfitLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
+    totalBeforeExpenseLabel: formatterCurrency(efficiencyTotals.revenue, { decimals: Math.abs(efficiencyTotals.revenue) < 1000 ? 2 : 0, showPlus: true }),
+    averageBeforeExpenseLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.revenue / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
     sourceLabel: "Source: central data table completed cutting jobs rows.",
-    formulaLabel: "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)",
+    formulaLabel: "Before expense gain = Hours × Charge Rate",
+    disclaimerLabel: "Before expense only: does not include reductions for maintenance parts, labor, or consumables.",
     rows: efficiencyRows,
     emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
   };
-  const efficiencyMathDetails = `Profit = Revenue - (Labor + Material). Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Labor ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Profit ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}, Hours ${formatHoursValue(efficiencyTotals.hours)}.`;
+  const efficiencyMathDetails = `Before expense gain = Hours × Charge Rate. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })} from ${formatHoursValue(efficiencyTotals.hours)}. This excludes maintenance parts, labor, and consumables reductions.`;
   efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
-  const efficiencyDisplayProfit = Math.max(0, efficiencyTotals.profit);
+  const efficiencyDisplayProfit = Math.max(0, efficiencyTotals.revenue);
   const efficiencyDisplayAverage = efficiencyCount ? (efficiencyDisplayProfit / efficiencyCount) : 0;
   const cuttingCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "cuttingJobs") : null;
   if (cuttingCard){
     cuttingCard.value = formatterCurrency(efficiencyDisplayProfit, { decimals: 0, showPlus: true });
     cuttingCard.hint = efficiencyCount
-      ? `Average gain/loss ${formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true })} across ${efficiencyCount} completed job${efficiencyCount===1?"":"s"} (source: central data table).`
+      ? `Average gain before expense ${formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true })} across ${efficiencyCount} completed job${efficiencyCount===1?"":"s"} (source: central data table).`
       : "No cutting jobs logged yet.";
     cuttingCard.tooltip = `Source: central data table completed rows. ${efficiencyMathDetails}`;
   }

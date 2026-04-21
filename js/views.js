@@ -2246,12 +2246,12 @@ function viewCosts(model){
           <div class="cost-jobs-summary">
             <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
             <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
-            <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)"}`.trim())}"><span class="label">Total profit</span><span>${esc(efficiencySnapshot.totalProfitLabel || "$0.00")}</span></div>
-            <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)"}`.trim())}"><span class="label">Avg profit / row</span><span>${esc(efficiencySnapshot.averageProfitLabel || "$0.00")}</span></div>
+            <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"}`.trim())}"><span class="label">Total gain (before expense)</span><span>${esc(efficiencySnapshot.totalBeforeExpenseLabel || "$0.00")}</span></div>
+            <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"}`.trim())}"><span class="label">Avg gain / row (before expense)</span><span>${esc(efficiencySnapshot.averageBeforeExpenseLabel || "$0.00")}</span></div>
           </div>
-          <p class="small muted" title="${esc(efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)")}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")}</p>
+          <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"} ${efficiencySnapshot.disclaimerLabel || "Before expense only: does not include reductions for maintenance parts, labor, or consumables."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Before expense only: does not include reductions for maintenance parts, labor, or consumables.")}</p>
           <table class="cost-table">
-            <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)")}" aria-label="Profit calculation">Profit</th><th>Task link</th></tr></thead>
+            <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Before expense gain calculation">Gain (before expense)</th><th>Task link</th></tr></thead>
             <tbody>
               ${efficiencyRows.length ? efficiencyRows.map(row => `
                 <tr>
@@ -2261,7 +2261,7 @@ function viewCosts(model){
                   <td>${esc(row.partCostLabel || "$0.00")}</td>
                   <td>${esc(row.laborCostLabel || "$0.00")}</td>
                   <td>${esc(row.totalCostLabel || "$0.00")}</td>
-                  <td title="${esc(row.formulaTitle || efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)")}" data-efficiency-profit-cell>${esc(row.totalProfitLabel || "$0.00")}</td>
+                  <td title="${esc(`${row.formulaTitle || efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" data-efficiency-profit-cell>${esc(row.beforeExpenseLabel || "$0.00")}</td>
                   <td>${row.settingsLink ? `<a href="${esc(row.settingsLink)}">Open settings</a>` : "Invalid link"}</td>
                 </tr>
               `).join("") : `
