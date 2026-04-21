@@ -14931,6 +14931,9 @@ function computeCostModel(){
     const costRate = Number.isFinite(costRateRaw) && costRateRaw >= 0 ? costRateRaw : JOB_BASE_COST_PER_HOUR;
     const materialCost = Number(job?.materialCost);
     const materialQty = Number(job?.materialQty);
+    const materialCostValue = Number.isFinite(materialCost) && materialCost >= 0 ? materialCost : 0;
+    const laborCostValue = Math.max(0, hours) * costRate;
+    const totalCostValue = materialCostValue + laborCostValue;
     const completedISO = typeof job?.completedAtISO === "string" && job.completedAtISO ? job.completedAtISO : "";
     return {
       id: job?.id != null ? String(job.id) : `completed_job_${index}`,
@@ -14946,13 +14949,54 @@ function computeCostModel(){
       startDateLabel: job?.startISO || "—",
       dueDateLabel: job?.dueISO || "—",
       completedDateLabel: completedISO ? String(completedISO).slice(0, 10) : "—",
+      completedDateISO: completedISO ? String(completedISO).slice(0, 10) : "",
       projectNumber: String(job?.projectNumber || "—"),
       notes: String(job?.notes || "").trim() || "—",
       priorityLabel: Number.isFinite(Number(job?.priority)) ? String(Math.max(1, Math.floor(Number(job.priority)))) : "—",
       cumulativeCutNumberLabel: `#${Math.max(1, totalCompletedJobs - index)}`,
-      categoryCutNumberLabel: `#${categoryCutCount}`
+      categoryCutNumberLabel: `#${categoryCutCount}`,
+      hoursValue: hours,
+      materialCostValue,
+      laborCostValue,
+      totalCostValue,
+      settingsLink: job?.id != null ? `#/settings?jobId=${encodeURIComponent(String(job.id))}` : ""
     };
   });
+
+  const efficiencyRows = cuttingJobsDataTable
+    .filter(row => {
+      const hasDate = typeof row?.completedDateISO === "string" && row.completedDateISO.trim().length > 0;
+      const hasTaskName = typeof row?.name === "string" && row.name.trim().length > 0;
+      const hasSettingsLink = typeof row?.settingsLink === "string" && /^#\/settings\?jobId=/.test(row.settingsLink);
+      return hasDate && hasTaskName && hasSettingsLink;
+    })
+    .sort((a, b) => String(b?.completedDateISO || "").localeCompare(String(a?.completedDateISO || "")))
+    .map((row, index) => ({
+      id: row?.id != null ? String(row.id) : `efficiency_row_${index}`,
+      taskName: row?.name || "Completed task",
+      dateLabel: row?.completedDateISO || "—",
+      hoursLabel: formatHoursValue(Number(row?.hoursValue) || 0),
+      partCostLabel: formatterCurrency(Number(row?.materialCostValue) || 0, { decimals: 2 }),
+      laborCostLabel: formatterCurrency(Number(row?.laborCostValue) || 0, { decimals: 2 }),
+      totalCostLabel: formatterCurrency(Number(row?.totalCostValue) || 0, { decimals: 2 }),
+      hoursValue: Number(row?.hoursValue) || 0,
+      totalCostValue: Number(row?.totalCostValue) || 0,
+      settingsLink: row?.settingsLink || ""
+    }));
+  const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
+    if (Number.isFinite(row?.hoursValue)) acc.hours += Math.max(0, Number(row.hoursValue));
+    if (Number.isFinite(row?.totalCostValue)) acc.cost += Math.max(0, Number(row.totalCostValue));
+    return acc;
+  }, { hours: 0, cost: 0 });
+  const efficiencyCount = efficiencyRows.length;
+  const efficiencySnapshot = {
+    countLabel: String(efficiencyCount),
+    totalHoursLabel: formatHoursValue(efficiencyTotals.hours),
+    totalCostLabel: formatterCurrency(efficiencyTotals.cost, { decimals: efficiencyTotals.cost < 1000 ? 2 : 0 }),
+    averageCostLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.cost / efficiencyCount) : 0, { decimals: 2 }),
+    rows: efficiencyRows,
+    emptyMessage: "No valid completed cutting tasks with settings links were found in the data center table."
+  };
 
   const taskById = new Map();
   [Array.isArray(intervalTasksAll) ? intervalTasksAll : [], Array.isArray(asReqTasksAll) ? asReqTasksAll : []].forEach(list => {
@@ -15089,6 +15133,7 @@ function computeCostModel(){
     orderRequestSummary,
     maintenanceDataTable,
     cuttingJobsDataTable,
+    efficiencySnapshot,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries,
     jobSeries,
