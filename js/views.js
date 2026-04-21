@@ -1784,15 +1784,15 @@ function viewCosts(model){
     </div>
 
     <div class="cost-receipt-modal" id="costReceiptModal" role="dialog" aria-modal="true" aria-labelledby="costReceiptTitle" aria-hidden="true" hidden>
-      <div class="cost-receipt-backdrop" data-receipt-close tabindex="-1" aria-label="Close receipt tracker"></div>
+      <div class="cost-receipt-backdrop" tabindex="-1" aria-hidden="true"></div>
       <div class="cost-receipt-card" role="document">
-        <button type="button" class="cost-receipt-close" data-receipt-close aria-label="Close receipt tracker"><span aria-hidden="true">×</span></button>
+        <button type="button" class="cost-receipt-close" data-receipt-close aria-label="Close purchase history"><span aria-hidden="true">×</span></button>
         <div class="cost-receipt-card-body">
-          <h3 id="costReceiptTitle">Receipt tracker</h3>
+          <h3 id="costReceiptTitle">Purchase History</h3>
           <div class="cost-receipt-controls">
             <label>
               <span>Week of year</span>
-              <select data-receipt-week-select aria-label="Select receipt tracker week"></select>
+              <select data-receipt-week-select aria-label="Select purchase history week"></select>
             </label>
             <button type="button" class="btn secondary" data-receipt-export-week>Export week (CSV)</button>
             <button type="button" class="btn secondary" data-receipt-export-range>Export range (CSV)</button>
@@ -2036,7 +2036,7 @@ function viewCosts(model){
                 ${weeklyOptions}
               </select>
             </label>
-            <button type="button" class="btn secondary" data-cost-receipt-open>Receipt tracker</button>
+            <button type="button" class="btn secondary" data-cost-receipt-open>Purchase History</button>
             <button type="button" class="btn secondary" data-cost-weekly-export ${selectedWeeklyReport ? "" : "disabled"}>Export week (Excel)</button>
           </div>
           <div class="cost-weekly-summary">

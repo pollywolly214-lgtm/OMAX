@@ -10556,6 +10556,10 @@ function setupForecastBreakdownModal(){
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
+  const existingReceiptModal = document.getElementById("costReceiptModal");
+  if (existingReceiptModal instanceof HTMLElement){
+    window.costPurchaseHistoryModalOpen = !existingReceiptModal.hasAttribute("hidden");
+  }
 
   const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 
@@ -11202,15 +11206,20 @@ function renderCosts(){
         modal.hidden = false;
         modal.setAttribute("aria-hidden", "false");
         document.body.classList.add("cost-receipt-modal-open");
+        window.costPurchaseHistoryModalOpen = true;
       };
       const closeModal = ()=>{
         saveWeekRowsFromDom();
         modal.hidden = true;
         modal.setAttribute("aria-hidden", "true");
         document.body.classList.remove("cost-receipt-modal-open");
+        window.costPurchaseHistoryModalOpen = false;
       };
       receiptOpenBtn.addEventListener("click", openModal);
       closeControls.forEach(control => control.addEventListener("click", closeModal));
+      if (window.costPurchaseHistoryModalOpen){
+        openModal();
+      }
     }
 
     const canvas = panel.querySelector("#weeklyCostChart");
