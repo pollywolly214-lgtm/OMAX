@@ -736,6 +736,23 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
   const today = new Date(); today.setHours(0,0,0,0);
   const todayISO = ymd(today);
 
+  const clearRemovedDateAcrossFamily = (dateKey)=>{
+    const normalized = typeof normalizeDateKey === "function" ? normalizeDateKey(dateKey) : dateKey;
+    if (!normalized || typeof clearRemovedOccurrences !== "function") return;
+    const clearForTask = (taskRef)=>{
+      if (!taskRef || taskRef.mode !== "interval") return;
+      clearRemovedOccurrences(taskRef, (value)=> {
+        const key = typeof normalizeDateKey === "function" ? normalizeDateKey(value) : value;
+        return key === normalized;
+      });
+    };
+    if (typeof visitTaskFamily === "function"){
+      visitTaskFamily(instance, clearForTask);
+      return;
+    }
+    clearForTask(instance);
+  };
+
   const liveHoursRaw = getCurrentMachineHours();
   const liveHours = (liveHoursRaw != null && Number.isFinite(Number(liveHoursRaw)))
     ? Number(liveHoursRaw)
@@ -754,6 +771,7 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
   if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
     targetDate.setHours(0,0,0,0);
     targetISO = ymd(targetDate);
+    clearRemovedDateAcrossFamily(targetISO);
     instance.calendarDateISO = targetISO;
     const isPastOrToday = targetDate.getTime() <= today.getTime();
     const hoursAtTarget = hoursSnapshotOnOrBefore(targetISO);
@@ -4922,7 +4940,14 @@ function renderDashboard(){
       if (!btn || !btn.dataset) return;
       const taskId = btn.dataset.taskId ? String(btn.dataset.taskId) : (btn.dataset.calTask ? String(btn.dataset.calTask) : "");
       const dueISO = btn.dataset.dueIso ? String(btn.dataset.dueIso) : "";
-      const parsedDue = dueISO && typeof parseDateLocal === "function" ? parseDateLocal(dueISO) : (dueISO ? new Date(dueISO) : null);
+      const parseCalendarDate = (dateISO)=>{
+        if (!dateISO) return null;
+        const parsed = typeof parseDateLocal === "function" ? parseDateLocal(dateISO) : new Date(dateISO);
+        if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+        parsed.setHours(0,0,0,0);
+        return parsed;
+      };
+      const parsedDue = parseCalendarDate(dueISO);
       if (parsedDue instanceof Date && !Number.isNaN(parsedDue.getTime())){
         parsedDue.setHours(0,0,0,0);
         const today = new Date();
@@ -4937,7 +4962,35 @@ function renderDashboard(){
       }
       if (typeof renderCalendar === "function") renderCalendar();
       const months = document.getElementById("months");
-      const cell = dueISO ? months?.querySelector(`[data-date-iso="${dueISO}"]`) : null;
+      const taskChip = taskId ? months?.querySelector(`[data-cal-task="${taskId}"]`) : null;
+      const taskCell = taskChip?.closest?.("[data-date-iso]") || null;
+      const taskCellISO = taskCell?.dataset?.dateIso ? String(taskCell.dataset.dateIso) : "";
+      const resolvedISO = taskCellISO || dueISO;
+      let cell = resolvedISO ? months?.querySelector(`[data-date-iso="${resolvedISO}"]`) : null;
+
+      if (!cell && taskId){
+        const fallbackChip = months?.querySelector(`[data-cal-task="${taskId}"]`);
+        if (fallbackChip?.closest){
+          cell = fallbackChip.closest("[data-date-iso]");
+        }
+      }
+
+      if (cell){
+        const resolvedDate = parseCalendarDate(resolvedISO);
+        if (resolvedDate){
+          const today = new Date();
+          today.setHours(0,0,0,0);
+          const diffMonths = (resolvedDate.getFullYear() - today.getFullYear()) * 12 + (resolvedDate.getMonth() - today.getMonth());
+          const clamped = Math.min(12, Math.max(-12, Math.round(diffMonths)));
+          if (window.__calendarMonthOffset !== clamped){
+            window.__calendarMonthOffset = clamped;
+            if (typeof renderCalendar === "function") renderCalendar();
+            const refreshedMonths = document.getElementById("months");
+            cell = resolvedISO ? refreshedMonths?.querySelector(`[data-date-iso="${resolvedISO}"]`) : cell;
+          }
+        }
+      }
+
       if (cell){
         cell.scrollIntoView({ behavior: "smooth", block: "center" });
         highlightCalendarDayCell(cell);

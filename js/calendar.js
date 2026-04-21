@@ -966,6 +966,75 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
   return changed;
 }
 
+function getNextProjectedIntervalOccurrenceKey(task){
+  if (!task || task.mode === "asreq") return null;
+
+  const completedKeys = new Set(
+    Array.isArray(task.completedDates)
+      ? task.completedDates.map(normalizeDateKey).filter(Boolean)
+      : []
+  );
+
+  const manualHistory = Array.isArray(task.manualHistory) ? task.manualHistory : [];
+  const manualDates = new Set();
+  manualHistory.forEach(entry => {
+    if (!entry) return;
+    const entryKey = normalizeDateKey(entry.dateISO);
+    if (!entryKey) return;
+    const status = entry.status || "logged";
+    if (status === "completed"){
+      completedKeys.add(entryKey);
+      return;
+    }
+    manualDates.add(entryKey);
+  });
+
+  const removedSet = normalizeRemovedOccurrences(task);
+  removedSet.forEach(key => manualDates.add(key));
+
+  const manualKey = normalizeDateKey(task.calendarDateISO);
+  if (manualKey) manualDates.add(manualKey);
+
+  const skipDates = new Set(completedKeys);
+  manualDates.forEach(key => skipDates.add(key));
+
+  const projections = projectIntervalDueDates(task, {
+    monthsAhead: 3,
+    excludeDates: skipDates,
+    minOccurrences: 1,
+    maxOccurrences: 1
+  });
+
+  return normalizeDateKey(projections?.[0]?.dateISO);
+}
+
+function shouldOfferEndRepeatAfterSingleRemoval(task, removedDateISO){
+  if (!task || task.mode === "asreq") return false;
+  const removedKey = normalizeDateKey(removedDateISO);
+  if (!removedKey) return false;
+  const nextKey = getNextProjectedIntervalOccurrenceKey(task);
+  if (!nextKey) return false;
+  const removedDate = toDayStart(removedKey);
+  const nextDate = toDayStart(nextKey);
+  if (!(removedDate instanceof Date) || Number.isNaN(removedDate.getTime())) return false;
+  if (!(nextDate instanceof Date) || Number.isNaN(nextDate.getTime())) return false;
+  const diffDays = Math.round((nextDate.getTime() - removedDate.getTime()) / CALENDAR_DAY_MS);
+  return diffDays >= 0 && diffDays <= 1;
+}
+
+function removeIntervalOccurrenceScopeAcrossInstances(task, dateISO, scope){
+  if (!task) return false;
+  let changed = false;
+  visitTaskFamily(task, member => {
+    if (!member || member.mode !== "interval" || !isInstanceTask(member)) return;
+    const memberMeta = { task: member, mode: "interval" };
+    if (removeCalendarTaskOccurrences(memberMeta, dateISO, scope)){
+      changed = true;
+    }
+  });
+  return changed;
+}
+
 function removeCalendarTaskEverywhere(meta){
   if (!meta || !meta.list || typeof meta.index !== "number" || meta.index < 0) return false;
   const list = meta.list;
@@ -1223,11 +1292,31 @@ function showTaskBubble(taskId, anchor, options = {}){
         : "Remove this occurrence from the calendar?";
     const shouldRemove = window.confirm ? window.confirm(confirmText) : true;
     if (!shouldRemove) return;
-    const changed = removeCalendarTaskOccurrences(meta, targetKey, scope);
+    const singleIntervalRemoval = scope === "single"
+      && (meta.mode === "interval" || task.mode === "interval");
+    const changed = singleIntervalRemoval
+      ? removeIntervalOccurrenceScopeAcrossInstances(task, targetKey, "single")
+      : removeCalendarTaskOccurrences(meta, targetKey, scope);
     if (changed){
+      let endedRepeat = false;
+      if (scope === "single" && (meta.mode === "interval" || task.mode === "interval")){
+        const shouldOfferEndRepeat = shouldOfferEndRepeatAfterSingleRemoval(task, targetKey);
+        if (shouldOfferEndRepeat && typeof window.confirm === "function"){
+          const parsed = parseDateLocal(targetKey);
+          const display = (parsed instanceof Date && !Number.isNaN(parsed.getTime()))
+            ? parsed.toLocaleDateString()
+            : targetKey;
+          const shouldEndRepeat = window.confirm(`This task repeats and the next occurrence is already scheduled. End repeating from ${display} onward?`);
+          if (shouldEndRepeat){
+            endedRepeat = removeIntervalOccurrenceScopeAcrossInstances(task, targetKey, "future");
+          }
+        }
+      }
       if (typeof saveCloudNow === "function") saveCloudNow();
       else saveCloudDebounced();
-      const toastMessage = scope === "future"
+      const toastMessage = endedRepeat
+        ? "Recurring schedule ended from this occurrence"
+        : scope === "future"
         ? "Current and future occurrences removed"
         : scope === "all"
           ? "All occurrences removed"
