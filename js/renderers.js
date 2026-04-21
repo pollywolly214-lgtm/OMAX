@@ -10717,9 +10717,7 @@ function renderCosts(){
           if (taskId){
             window.pendingMaintenanceFocus = { taskIds: [taskId] };
           }
-          location.hash = taskId
-            ? `#/settings?taskId=${encodeURIComponent(taskId)}`
-            : "#/settings";
+          location.hash = "#/settings";
           return;
         }
         closeDataCenter();
