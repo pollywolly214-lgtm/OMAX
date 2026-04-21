@@ -857,6 +857,24 @@ function ensureTaskVariant(task, type){
   }
 }
 
+function isIntervalRepeatPaused(task){
+  return !!(task && task.mode === "interval" && task.repeatPaused === true);
+}
+
+function setIntervalRepeatPaused(task, paused){
+  if (!task || task.mode !== "interval") return false;
+  const next = paused === true;
+  const prev = task.repeatPaused === true;
+  if (prev === next) return false;
+  task.repeatPaused = next;
+  if (next){
+    task.repeatPausedAtISO = new Date().toISOString();
+  }else{
+    delete task.repeatPausedAtISO;
+  }
+  return true;
+}
+
 function pruneCurrentAndFutureIntervalOccurrences(templateId){
   const tid = templateId != null ? String(templateId) : null;
   if (!tid || !Array.isArray(window.tasksInterval)) return;

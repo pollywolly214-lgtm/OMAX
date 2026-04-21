@@ -182,6 +182,7 @@ function liveSince(task){
 
 function nextDue(task){
   if (!task || task.interval == null) return null;
+  if (typeof isIntervalRepeatPaused === "function" && isIntervalRepeatPaused(task)) return null;
   const sinceRaw = liveSince(task);
   if (sinceRaw == null) return null;
   const since = Math.max(0, Number(sinceRaw) || 0);

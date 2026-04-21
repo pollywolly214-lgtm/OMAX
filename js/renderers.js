@@ -582,6 +582,7 @@ function createIntervalTaskInstance(template){
     manualHistory: [],
     occurrenceNotes: {},
     occurrenceHours: {},
+    repeatPaused: template.repeatPaused === true,
     note: template.note || "",
     downtimeHours: (()=>{
       const raw = Number(template.downtimeHours);
@@ -678,6 +679,21 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
     }
     clearForTask(instance);
   };
+  const resumeRepeatAcrossFamily = ()=>{
+    const resumeForTask = (taskRef)=>{
+      if (!taskRef || taskRef.mode !== "interval") return;
+      if (typeof setIntervalRepeatPaused === "function"){
+        setIntervalRepeatPaused(taskRef, false);
+      }else{
+        taskRef.repeatPaused = false;
+      }
+    };
+    if (typeof visitTaskFamily === "function"){
+      visitTaskFamily(instance, resumeForTask);
+      return;
+    }
+    resumeForTask(instance);
+  };
 
   const liveHoursRaw = getCurrentMachineHours();
   const liveHours = (liveHoursRaw != null && Number.isFinite(Number(liveHoursRaw)))
@@ -698,6 +714,7 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
     targetDate.setHours(0,0,0,0);
     targetISO = ymd(targetDate);
     clearRemovedDateAcrossFamily(targetISO);
+    resumeRepeatAcrossFamily();
     instance.calendarDateISO = targetISO;
     const isPastOrToday = targetDate.getTime() <= today.getTime();
     const hoursAtTarget = hoursSnapshotOnOrBefore(targetISO);
