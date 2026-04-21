@@ -14543,11 +14543,22 @@ function computeCostModel(){
   const cuttingJobsDataTable = completedJobsForDataCenter.map((job, index) => {
     const categoryId = job?.cat != null ? String(job.cat) : "";
     const categoryLabel = categoryId ? resolveCategoryName(categoryId) : "Uncategorized";
+    const manualLogs = Array.isArray(job?.manualLogs) ? job.manualLogs : [];
+    const latestManualLog = manualLogs
+      .filter(entry => Number.isFinite(Number(entry?.completedHours)))
+      .sort((a, b) => String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")))
+      .pop() || null;
+    const efficiencyActualHours = Number(job?.efficiency?.actualHours);
+    const computedEfficiency = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
+    const computedActualHours = Number(computedEfficiency?.actualHours);
     const actualHoursCandidates = [
       Number(job?.actualHours),
       Number(job?.durationHours),
       Number(job?.completedHours),
-      Number(job?.estimateHours)
+      Number(job?.estimateHours),
+      Number(latestManualLog?.completedHours),
+      efficiencyActualHours,
+      computedActualHours
     ];
     const hours = actualHoursCandidates.find(val => Number.isFinite(val) && val >= 0) ?? 0;
     const categoryKey = categoryId || "__uncategorized__";
