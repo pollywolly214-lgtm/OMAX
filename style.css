@@ -515,6 +515,9 @@ body.cost-timeframe-modal-open{ overflow:hidden; }
   color:#000;
 }
 .cost-data-center-header{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+.cost-data-center-search{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px; max-width:360px; }
+.cost-data-center-search label{ font-weight:600; font-size:14px; }
+.cost-data-center-search input{ border:1px solid #9aa6bb; border-radius:6px; padding:8px 10px; font-size:14px; color:#000; background:#fff; }
 .cost-data-center-panel h3,
 .cost-data-center-panel .small,
 .cost-data-center-panel .muted,

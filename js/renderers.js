@@ -10699,6 +10699,23 @@ function renderCosts(){
       }
     }
 
+    const searchInput = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-search]") : null;
+    const applySearchFilter = ()=>{
+      if (!(modal instanceof HTMLElement)) return;
+      const term = String(searchInput instanceof HTMLInputElement ? searchInput.value : "").trim().toLowerCase();
+      const tableRows = Array.from(modal.querySelectorAll("[data-maintenance-row]"));
+      tableRows.forEach(row => {
+        if (!(row instanceof HTMLElement)) return;
+        const haystack = String(row.getAttribute("data-search-text") || "").toLowerCase();
+        const matches = !term || haystack.includes(term);
+        row.hidden = !matches;
+      });
+    };
+    if (searchInput instanceof HTMLInputElement){
+      searchInput.addEventListener("input", applySearchFilter);
+      applySearchFilter();
+    }
+
     const rows = Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-maintenance-open-task]"));
     if (!rows.length) return;
     rows.forEach(btn => {

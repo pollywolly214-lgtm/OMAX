@@ -1977,6 +1977,10 @@ function viewCosts(model){
                 <h3 id="dataCenterTitle">Maintenance Data Center Table</h3>
                 <button type="button" class="secondary" data-close-data-center>Close</button>
               </div>
+              <div class="cost-data-center-search">
+                <label for="costDataCenterSearch">Search table</label>
+                <input id="costDataCenterSearch" type="search" placeholder="Search task, date, counter, or link target" data-maintenance-search>
+              </div>
               ${maintenanceDataTable.length ? `
             <table class="cost-table" style="margin-top:10px">
               <thead>
@@ -1997,7 +2001,7 @@ function viewCosts(model){
               </thead>
               <tbody>
                 ${maintenanceDataTable.map(row => `
-                  <tr>
+                  <tr data-maintenance-row data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
                     <td>${esc(row.counterLabel || "#1")}</td>
                     <td>${esc(row.taskName || "Maintenance task")}</td>
                     <td>${esc(row.maintenanceHrsLabel || "0")}</td>
