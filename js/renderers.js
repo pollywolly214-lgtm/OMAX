@@ -7710,7 +7710,9 @@ function renderSettings(){
         window.pendingMaintenanceFocus = { taskIds: [taskId] };
       }
     }
-  } catch (_err){}
+  } catch (err){
+    console.error("Failed to parse maintenance focus from URL hash:", err);
+  }
 
   // --- one-time hydration for legacy/remote tasks (per-list) ---
   // Previously this only ran if BOTH lists were empty. That prevented legacy
@@ -10697,7 +10699,7 @@ function renderCosts(){
       }
     }
 
-    const rows = Array.from(content.querySelectorAll("[data-maintenance-open-task]"));
+    const rows = Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-maintenance-open-task]"));
     if (!rows.length) return;
     rows.forEach(btn => {
       if (!(btn instanceof HTMLElement)) return;
@@ -14349,7 +14351,8 @@ function computeCostModel(){
     });
   });
   taskDateGroups.forEach((dateList, taskId) => {
-    const uniqueDates = Array.from(new Set((Array.isArray(dateList) ? dateList : []).filter(Boolean))).sort((a,b)=> b.localeCompare(a));
+    const normalizedDates = Array.isArray(dateList) ? dateList.filter(Boolean) : [];
+    const uniqueDates = [...new Set(normalizedDates)].sort((a, b) => b.localeCompare(a));
     const qty = uniqueDates.length;
     uniqueDates.forEach((dateISO, index) => {
       const row = maintenanceDataTableRows.find(item => item.taskId === taskId && item.dateISO === dateISO);
