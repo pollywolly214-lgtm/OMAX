@@ -12267,6 +12267,27 @@ function computeCostModel(){
   if (Array.isArray(asReqTasks)){
     asReqTasks.forEach(task => captureTaskHistory(task, { exists: true }));
   }
+  const calendarTaskNamesByDate = new Map();
+  const addCalendarTaskName = (dateValue, taskName)=>{
+    const key = toHistoryDateKey(dateValue);
+    if (!key) return;
+    const name = typeof taskName === "string" ? taskName.trim() : "";
+    if (!name) return;
+    if (!calendarTaskNamesByDate.has(key)) calendarTaskNamesByDate.set(key, new Set());
+    calendarTaskNamesByDate.get(key).add(name);
+  };
+  const collectCalendarTaskNames = (task)=>{
+    if (!task) return;
+    const name = typeof task.name === "string" ? task.name.trim() : "";
+    if (!name) return;
+    addCalendarTaskName(task.calendarDateISO, name);
+    const completedDates = Array.isArray(task.completedDates) ? task.completedDates : [];
+    completedDates.forEach(dateVal => addCalendarTaskName(dateVal, name));
+    const manualHistory = Array.isArray(task.manualHistory) ? task.manualHistory : [];
+    manualHistory.forEach(entry => addCalendarTaskName(entry?.dateISO, name));
+  };
+  if (Array.isArray(intervalTasks)) intervalTasks.forEach(collectCalendarTaskNames);
+  if (Array.isArray(asReqTasks)) asReqTasks.forEach(collectCalendarTaskNames);
 
   const maintenanceHistory = [];
   const maintenanceHistoryKeys = new Set();
@@ -12320,6 +12341,10 @@ function computeCostModel(){
     }
     if (dateOccurrenceNames instanceof Set){
       dateOccurrenceNames.forEach(name => { if (name) entryTaskNames.add(name); });
+    }
+    const dateCalendarNames = dateKey ? calendarTaskNamesByDate.get(dateKey) : null;
+    if (dateCalendarNames instanceof Set){
+      dateCalendarNames.forEach(name => { if (name) entryTaskNames.add(name); });
     }
     maintenanceHistory.push({
       date: curr.date,
@@ -13425,7 +13450,7 @@ function computeCostModel(){
         ? explicitNames.join(", ")
         : (tasks.length
           ? Array.from(new Set(tasks.map(item => (item?.name || "").trim()).filter(Boolean))).join(", ")
-          : `Maintenance event ${entry?.dateISO || ""}`.trim());
+          : "Unnamed maintenance task");
       const partCost = Number(entry?.partCost);
       const safePartCost = Number.isFinite(partCost) && partCost > 0 ? partCost : 0;
       const timeCost = Number(entry?.timeCost);
