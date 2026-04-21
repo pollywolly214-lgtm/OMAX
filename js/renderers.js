@@ -7699,6 +7699,20 @@ function renderSettings(){
     if (!validTaskIds.has(id)) openTaskState.delete(id);
   }
   if (typeof window._maintOrderCounter === "undefined") window._maintOrderCounter = 0;
+  try {
+    const hash = String(window.location?.hash || "");
+    const queryIndex = hash.indexOf("?");
+    if (queryIndex >= 0){
+      const query = hash.slice(queryIndex + 1);
+      const params = new URLSearchParams(query);
+      const taskId = (params.get("taskId") || "").trim();
+      if (taskId){
+        window.pendingMaintenanceFocus = { taskIds: [taskId] };
+      }
+    }
+  } catch (err){
+    console.error("Failed to parse maintenance focus from URL hash:", err);
+  }
 
   // --- one-time hydration for legacy/remote tasks (per-list) ---
   // Previously this only ran if BOTH lists were empty. That prevented legacy
@@ -10556,6 +10570,12 @@ function setupForecastBreakdownModal(){
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
+  const previousModal = document.getElementById("costDataCenterModal");
+  const wasDataCenterOpen = Boolean(previousModal && !previousModal.hasAttribute("hidden"));
+  if (previousModal && previousModal.parentElement === document.body){
+    previousModal.remove();
+    document.body.classList.remove("cost-data-center-open");
+  }
 
   const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 
@@ -10599,6 +10619,327 @@ function renderCosts(){
   setupCostTimeframeModal(model);
   setupJobCategoryWindow(model);
   setupWeeklyReportWindow(model);
+  setupMaintenanceDataCenterActions({ openImmediately: wasDataCenterOpen });
+
+  function focusCalendarAtOccurrence(taskId, dateISO){
+    const dueISO = String(dateISO || "");
+    const parsedDue = dueISO && typeof parseDateLocal === "function"
+      ? parseDateLocal(dueISO)
+      : (dueISO ? new Date(dueISO) : null);
+    if (parsedDue instanceof Date && !Number.isNaN(parsedDue.getTime())){
+      parsedDue.setHours(0,0,0,0);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const diffMonths = (parsedDue.getFullYear() - today.getFullYear()) * 12 + (parsedDue.getMonth() - today.getMonth());
+      window.__calendarMonthOffset = Math.min(12, Math.max(-12, Math.round(diffMonths)));
+    }
+    if (typeof hideBubble === "function") hideBubble();
+    location.hash = "#/";
+    const runFocus = ()=>{
+      if (typeof renderCalendar === "function") renderCalendar();
+      const months = document.getElementById("months");
+      const cell = dueISO ? months?.querySelector(`[data-date-iso="${dueISO}"]`) : null;
+      if (!cell) return false;
+      cell.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (typeof highlightCalendarDayCell === "function"){
+        highlightCalendarDayCell(cell);
+      }
+      const anchor = taskId ? (cell.querySelector(`[data-cal-task="${String(taskId)}"]`) || cell) : cell;
+      if (taskId && typeof showTaskBubble === "function"){
+        showTaskBubble(String(taskId), anchor, { dateISO: dueISO });
+      }
+      return true;
+    };
+    if (!runFocus()){
+      setTimeout(runFocus, 120);
+      setTimeout(runFocus, 320);
+    }
+  }
+
+  function focusCalendarForCuttingJob(jobId, dateISO){
+    const dueISO = String(dateISO || "");
+    const parsedDue = dueISO && typeof parseDateLocal === "function"
+      ? parseDateLocal(dueISO)
+      : (dueISO ? new Date(dueISO) : null);
+    if (parsedDue instanceof Date && !Number.isNaN(parsedDue.getTime())){
+      parsedDue.setHours(0,0,0,0);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const diffMonths = (parsedDue.getFullYear() - today.getFullYear()) * 12 + (parsedDue.getMonth() - today.getMonth());
+      window.__calendarMonthOffset = Math.min(12, Math.max(-12, Math.round(diffMonths)));
+    }
+    if (typeof hideBubble === "function") hideBubble();
+    location.hash = "#/";
+    const runFocus = ()=>{
+      if (typeof renderCalendar === "function") renderCalendar();
+      const months = document.getElementById("months");
+      const cell = dueISO ? months?.querySelector(`[data-date-iso="${dueISO}"]`) : null;
+      if (!cell) return false;
+      cell.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (typeof highlightCalendarDayCell === "function"){
+        highlightCalendarDayCell(cell);
+      }
+      const anchor = jobId ? (cell.querySelector(`[data-cal-job="${String(jobId)}"]`) || cell) : cell;
+      if (jobId && typeof showJobBubble === "function"){
+        showJobBubble(String(jobId), anchor);
+      }
+      return true;
+    };
+    if (!runFocus()){
+      setTimeout(runFocus, 120);
+      setTimeout(runFocus, 320);
+    }
+  }
+
+  function setupMaintenanceDataCenterActions(options = {}){
+    const openBtn = content.querySelector("[data-open-data-center]");
+    const modal = content.querySelector("[data-data-center-modal]");
+    const closeBtns = Array.from(content.querySelectorAll("[data-close-data-center]"));
+    const tabButtons = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-tab]")) : [];
+    const panels = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-panel]")) : [];
+    const setActiveTab = (tabKey)=>{
+      if (typeof window !== "undefined"){
+        window.dataCenterActiveTab = tabKey;
+      }
+      tabButtons.forEach(btn => {
+        if (!(btn instanceof HTMLElement)) return;
+        const isActive = String(btn.getAttribute("data-dc-tab") || "") === tabKey;
+        btn.classList.toggle("is-active", isActive);
+        btn.setAttribute("aria-selected", isActive ? "true" : "false");
+      });
+      panels.forEach(panel => {
+        if (!(panel instanceof HTMLElement)) return;
+        const isActive = String(panel.getAttribute("data-dc-panel") || "") === tabKey;
+        panel.hidden = !isActive;
+      });
+    };
+    tabButtons.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", ()=>{
+        const key = String(btn.getAttribute("data-dc-tab") || "maintenance");
+        setActiveTab(key);
+      });
+    });
+    const rememberedTab = (typeof window !== "undefined" && typeof window.dataCenterActiveTab === "string")
+      ? window.dataCenterActiveTab
+      : "maintenance";
+    setActiveTab(rememberedTab === "cutting" ? "cutting" : "maintenance");
+    if (modal instanceof HTMLElement){
+      document.body.appendChild(modal);
+    }
+    const closeDataCenter = ()=>{
+      if (!(modal instanceof HTMLElement)) return;
+      modal.setAttribute("hidden", "");
+      modal.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("cost-data-center-open");
+    };
+    const openDataCenter = ()=>{
+      if (!(modal instanceof HTMLElement)) return;
+      modal.removeAttribute("hidden");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.classList.add("cost-data-center-open");
+      try { modal.focus({ preventScroll: true }); } catch (_err){ modal.focus(); }
+      const panel = modal.querySelector(".cost-data-center-panel");
+      if (panel instanceof HTMLElement){
+        panel.scrollTop = 0;
+      }
+    };
+    if (openBtn instanceof HTMLElement && modal instanceof HTMLElement){
+      openBtn.addEventListener("click", openDataCenter);
+      closeBtns.forEach(btn => {
+        if (!(btn instanceof HTMLElement)) return;
+        btn.addEventListener("click", closeDataCenter);
+      });
+      if (!modal.dataset.wired){
+        modal.dataset.wired = "1";
+        modal.addEventListener("keydown", (event)=>{
+          if (event.key === "Escape" && !modal.hasAttribute("hidden")){
+            closeDataCenter();
+          }
+        });
+      }
+      if (options && options.openImmediately){
+        openDataCenter();
+      }
+    }
+
+    const searchInput = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-search]") : null;
+    const categoryFilter = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-filter-category]") : null;
+    const taskFilter = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-filter-task]") : null;
+    const suggestionsBox = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-search-suggestions]") : null;
+    const suggestionState = { items: [] };
+    const computeSuggestions = (term, rows)=>{
+      const normalizedTerm = String(term || "").trim().toLowerCase();
+      if (!normalizedTerm) return [];
+      const counts = new Map();
+      rows.forEach(row => {
+        if (!(row instanceof HTMLElement)) return;
+        const taskName = String(row.getAttribute("data-task-name") || "").trim();
+        if (!taskName) return;
+        const key = taskName.toLowerCase();
+        counts.set(key, { taskName, count: (counts.get(key)?.count || 0) + 1 });
+      });
+      const ranked = Array.from(counts.values())
+        .map(item => {
+          const lower = item.taskName.toLowerCase();
+          const starts = lower.startsWith(normalizedTerm) ? 2 : 0;
+          const contains = !starts && lower.includes(normalizedTerm) ? 1 : 0;
+          return { ...item, score: starts + contains };
+        })
+        .filter(item => item.score > 0)
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          if (b.count !== a.count) return b.count - a.count;
+          return a.taskName.localeCompare(b.taskName);
+        })
+        .slice(0, 3);
+      return ranked.map(item => item.taskName);
+    };
+    const renderSuggestions = ()=>{
+      if (!(suggestionsBox instanceof HTMLElement) || !(searchInput instanceof HTMLInputElement) || !(modal instanceof HTMLElement)) return;
+      const tableRows = Array.from(modal.querySelectorAll("[data-maintenance-row]"));
+      suggestionState.items = computeSuggestions(searchInput.value, tableRows);
+      if (!suggestionState.items.length){
+        suggestionsBox.hidden = true;
+        suggestionsBox.innerHTML = "";
+        return;
+      }
+      suggestionsBox.innerHTML = suggestionState.items.map((label, idx)=> `
+        <button type="button" class="cost-data-center-suggestion" data-suggestion-index="${idx}">${escapeHtml(label)}</button>
+      `).join("");
+      suggestionsBox.hidden = false;
+      Array.from(suggestionsBox.querySelectorAll("[data-suggestion-index]")).forEach(btn => {
+        if (!(btn instanceof HTMLElement)) return;
+        btn.addEventListener("click", ()=>{
+          const index = Number(btn.getAttribute("data-suggestion-index"));
+          const selected = suggestionState.items[index];
+          if (!selected || !(searchInput instanceof HTMLInputElement)) return;
+          searchInput.value = selected;
+          applySearchFilter();
+          renderSuggestions();
+          try { searchInput.focus({ preventScroll: true }); } catch (_err){ searchInput.focus(); }
+        });
+      });
+    };
+    const applySearchFilter = ()=>{
+      if (!(modal instanceof HTMLElement)) return;
+      const term = String(searchInput instanceof HTMLInputElement ? searchInput.value : "").trim().toLowerCase();
+      const categoryValue = String(categoryFilter instanceof HTMLSelectElement ? categoryFilter.value : "").trim();
+      const taskValue = String(taskFilter instanceof HTMLSelectElement ? taskFilter.value : "").trim().toLowerCase();
+      const tableRows = Array.from(modal.querySelectorAll("[data-maintenance-row]"));
+      tableRows.forEach(row => {
+        if (!(row instanceof HTMLElement)) return;
+        const haystack = String(row.getAttribute("data-search-text") || "").toLowerCase();
+        const rowCategory = String(row.getAttribute("data-category-id") || "");
+        const rowTask = String(row.getAttribute("data-task-key") || "").toLowerCase();
+        const matchesSearch = !term || haystack.includes(term);
+        const matchesCategory = !categoryValue || rowCategory === categoryValue;
+        const matchesTask = !taskValue || rowTask === taskValue;
+        const matches = matchesSearch && matchesCategory && matchesTask;
+        row.hidden = !matches;
+      });
+    };
+    if (searchInput instanceof HTMLInputElement){
+      searchInput.addEventListener("input", ()=>{
+        applySearchFilter();
+        renderSuggestions();
+      });
+      searchInput.addEventListener("keydown", (event)=>{
+        if (event.key === "Tab" && suggestionState.items.length){
+          event.preventDefault();
+          const selected = suggestionState.items[0];
+          if (selected){
+            searchInput.value = selected;
+            applySearchFilter();
+            renderSuggestions();
+          }
+        }
+      });
+      applySearchFilter();
+      renderSuggestions();
+    }
+    if (categoryFilter instanceof HTMLSelectElement){
+      categoryFilter.addEventListener("change", ()=>{
+        applySearchFilter();
+        renderSuggestions();
+      });
+    }
+    if (taskFilter instanceof HTMLSelectElement){
+      taskFilter.addEventListener("change", ()=>{
+        applySearchFilter();
+        renderSuggestions();
+      });
+    }
+
+    const cuttingSearchInput = modal instanceof HTMLElement ? modal.querySelector("[data-cutting-search]") : null;
+    const cuttingCategoryFilter = modal instanceof HTMLElement ? modal.querySelector("[data-cutting-filter-category]") : null;
+    const applyCuttingFilter = ()=>{
+      if (!(modal instanceof HTMLElement)) return;
+      const term = String(cuttingSearchInput instanceof HTMLInputElement ? cuttingSearchInput.value : "").trim().toLowerCase();
+      const categoryValue = String(cuttingCategoryFilter instanceof HTMLSelectElement ? cuttingCategoryFilter.value : "").trim();
+      const rows = Array.from(modal.querySelectorAll("[data-cutting-row]"));
+      rows.forEach(row => {
+        if (!(row instanceof HTMLElement)) return;
+        const haystack = String(row.getAttribute("data-cutting-search-text") || "").toLowerCase();
+        const rowCategory = String(row.getAttribute("data-cutting-category-id") || "");
+        const matchesSearch = !term || haystack.includes(term);
+        const matchesCategory = !categoryValue || rowCategory === categoryValue;
+        row.hidden = !(matchesSearch && matchesCategory);
+      });
+    };
+    if (cuttingSearchInput instanceof HTMLInputElement){
+      cuttingSearchInput.addEventListener("input", applyCuttingFilter);
+      applyCuttingFilter();
+    }
+    if (cuttingCategoryFilter instanceof HTMLSelectElement){
+      cuttingCategoryFilter.addEventListener("change", applyCuttingFilter);
+    }
+    Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-cutting-open-job]")).forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", ()=>{
+        const jobId = String(btn.getAttribute("data-job-id") || "");
+        const dateISO = String(btn.getAttribute("data-date-iso") || "");
+        const modeId = String(btn.getAttribute("data-link-mode-id") || "");
+        const modeEl = modeId ? document.getElementById(modeId) : null;
+        const destination = String(modeEl instanceof HTMLSelectElement ? modeEl.value : "jobs").toLowerCase();
+        closeDataCenter();
+        if (destination === "calendar"){
+          focusCalendarForCuttingJob(jobId, dateISO);
+          return;
+        }
+        if (jobId){
+          window.pendingJobFocus = { type: "jobRow", id: jobId };
+        }
+        location.hash = "#/jobs";
+      });
+    });
+
+    const rows = Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-maintenance-open-task]"));
+    if (!rows.length) return;
+    rows.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", ()=>{
+        const modeId = String(btn.getAttribute("data-link-mode-id") || "");
+        const explicitSelect = modeId ? document.getElementById(modeId) : null;
+        const row = btn.closest("tr");
+        const fallbackSelect = row ? row.querySelector("[data-maintenance-link-mode]") : null;
+        const select = (explicitSelect instanceof HTMLSelectElement) ? explicitSelect : fallbackSelect;
+        const destination = String((select instanceof HTMLSelectElement ? select.value : "calendar") || "calendar").toLowerCase();
+        const taskId = String(btn.getAttribute("data-task-id") || "");
+        const dateISO = String(btn.getAttribute("data-date-iso") || "");
+        if (destination === "settings"){
+          closeDataCenter();
+          if (taskId){
+            window.pendingMaintenanceFocus = { taskIds: [taskId] };
+          }
+          location.hash = "#/settings";
+          return;
+        }
+        closeDataCenter();
+        focusCalendarAtOccurrence(taskId, dateISO);
+      });
+    });
+  }
 
   function setupCostTimeframeModal(currentModel){
     if (typeof window.__cleanupCostTimeframeModal === "function"){
@@ -14187,6 +14528,191 @@ function computeCostModel(){
     emptyMessage: orderRows.length ? "" : "Approve or deny order requests to build the spend log."
   };
 
+  const completedJobsForDataCenter = (Array.isArray(completedCuttingJobs) ? completedCuttingJobs.slice() : [])
+    .sort((a, b) => {
+      const aDate = String(a?.completedAtISO || a?.dueISO || a?.startISO || "");
+      const bDate = String(b?.completedAtISO || b?.dueISO || b?.startISO || "");
+      return bDate.localeCompare(aDate);
+    });
+  const cuttingCategoryRemaining = new Map();
+  completedJobsForDataCenter.forEach(job => {
+    const key = job?.cat != null ? String(job.cat) : "__uncategorized__";
+    cuttingCategoryRemaining.set(key, (cuttingCategoryRemaining.get(key) || 0) + 1);
+  });
+  const totalCompletedJobs = completedJobsForDataCenter.length;
+  const cuttingJobsDataTable = completedJobsForDataCenter.map((job, index) => {
+    const categoryId = job?.cat != null ? String(job.cat) : "";
+    const categoryLabel = categoryId ? resolveCategoryName(categoryId) : "Uncategorized";
+    const manualLogs = Array.isArray(job?.manualLogs) ? job.manualLogs : [];
+    const latestManualLog = manualLogs
+      .filter(entry => Number.isFinite(Number(entry?.completedHours)))
+      .sort((a, b) => String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")))
+      .pop() || null;
+    const efficiencyActualHours = Number(job?.efficiency?.actualHours);
+    const computedEfficiency = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
+    const computedActualHours = Number(computedEfficiency?.actualHours);
+    const actualHoursCandidates = [
+      Number(job?.actualHours),
+      Number(job?.durationHours),
+      Number(job?.completedHours),
+      Number(job?.estimateHours),
+      Number(latestManualLog?.completedHours),
+      efficiencyActualHours,
+      computedActualHours
+    ];
+    const positiveHours = actualHoursCandidates.find(val => Number.isFinite(val) && val > 0);
+    const fallbackHours = actualHoursCandidates.find(val => Number.isFinite(val) && val >= 0);
+    const hours = Number.isFinite(positiveHours) ? positiveHours : (Number.isFinite(fallbackHours) ? fallbackHours : 0);
+    const categoryKey = categoryId || "__uncategorized__";
+    const categoryCutCount = cuttingCategoryRemaining.get(categoryKey) || 1;
+    cuttingCategoryRemaining.set(categoryKey, Math.max(0, categoryCutCount - 1));
+    const chargeRateRaw = Number(job?.chargeRate);
+    const costRateRaw = Number(job?.costRate);
+    const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
+    const costRate = Number.isFinite(costRateRaw) && costRateRaw >= 0 ? costRateRaw : JOB_BASE_COST_PER_HOUR;
+    const materialCost = Number(job?.materialCost);
+    const materialQty = Number(job?.materialQty);
+    const completedISO = typeof job?.completedAtISO === "string" && job.completedAtISO ? job.completedAtISO : "";
+    return {
+      id: job?.id != null ? String(job.id) : `completed_job_${index}`,
+      name: job?.name || `Completed job ${index + 1}`,
+      categoryId,
+      categoryLabel,
+      hoursLabel: Number.isFinite(hours) ? String(hours) : "0",
+      chargeRateLabel: formatterCurrency(chargeRate, { decimals: 2 }),
+      costRateLabel: formatterCurrency(costRate, { decimals: 2 }),
+      materialType: String(job?.material || "—"),
+      materialCostLabel: Number.isFinite(materialCost) ? formatterCurrency(materialCost, { decimals: 2 }) : "—",
+      materialQtyLabel: Number.isFinite(materialQty) ? String(materialQty) : "—",
+      startDateLabel: job?.startISO || "—",
+      dueDateLabel: job?.dueISO || "—",
+      completedDateLabel: completedISO ? String(completedISO).slice(0, 10) : "—",
+      projectNumber: String(job?.projectNumber || "—"),
+      notes: String(job?.notes || "").trim() || "—",
+      priorityLabel: Number.isFinite(Number(job?.priority)) ? String(Math.max(1, Math.floor(Number(job.priority)))) : "—",
+      cumulativeCutNumberLabel: `#${Math.max(1, totalCompletedJobs - index)}`,
+      categoryCutNumberLabel: `#${categoryCutCount}`
+    };
+  });
+
+  const taskById = new Map();
+  [Array.isArray(intervalTasksAll) ? intervalTasksAll : [], Array.isArray(asReqTasksAll) ? asReqTasksAll : []].forEach(list => {
+    list.forEach(task => {
+      if (!task || task.id == null) return;
+      taskById.set(String(task.id), task);
+    });
+  });
+  const categoryById = new Map();
+  const categoryParentById = new Map();
+  if (Array.isArray(window.settingsFolders)){
+    window.settingsFolders.forEach(folder => {
+      if (!folder || folder.id == null) return;
+      categoryById.set(String(folder.id), String(folder.name || "Category"));
+      categoryParentById.set(String(folder.id), folder.parent != null ? String(folder.parent) : null);
+    });
+  }
+  const resolveCategoryPath = (categoryId)=>{
+    const key = String(categoryId || "");
+    if (!key) return "";
+    const visited = new Set();
+    const names = [];
+    let current = key;
+    while (current && !visited.has(current)){
+      visited.add(current);
+      const name = categoryById.get(current);
+      if (name) names.unshift(name);
+      current = categoryParentById.get(current) || null;
+    }
+    return names.join(" › ");
+  };
+  const maintenanceDataTableRows = [];
+  const taskDateGroups = new Map();
+  taskEventsByDate.forEach((tasksOnDate, dateISO) => {
+    const key = toHistoryDateKey(dateISO);
+    if (!key || !Array.isArray(tasksOnDate)) return;
+    tasksOnDate.forEach(taskMeta => {
+      if (!taskMeta) return;
+      const originalId = taskMeta.originalId != null ? String(taskMeta.originalId) : (taskMeta.id != null ? String(taskMeta.id) : null);
+      if (!originalId) return;
+      const groupKey = originalId;
+      if (!taskDateGroups.has(groupKey)) taskDateGroups.set(groupKey, []);
+      taskDateGroups.get(groupKey).push(key);
+      const task = taskById.get(originalId) || taskById.get(String(taskMeta.id || "")) || null;
+      const taskModeRaw = String(task?.mode || taskMeta?.mode || "interval").toLowerCase();
+      const taskMode = taskModeRaw === "asreq" ? "asreq" : "interval";
+      const modeLabel = taskMode === "asreq" ? "As Required" : "Per Interval";
+      const rawCategoryId = task?.cat != null ? String(task.cat) : "";
+      const categoryPath = rawCategoryId ? (resolveCategoryPath(rawCategoryId) || rawCategoryId) : "";
+      const categoryId = `${taskMode}:${rawCategoryId || "uncategorized"}`;
+      const categoryLabel = categoryPath ? `${modeLabel} • ${categoryPath}` : `${modeLabel} • Uncategorized`;
+      const maintenanceHours = Number(task?.downtimeHours);
+      const maintenanceHrs = Number.isFinite(maintenanceHours) && maintenanceHours > 0 ? maintenanceHours : 1;
+      const partCost = Number(taskMeta?.unitPrice);
+      const partCostValue = Number.isFinite(partCost) && partCost > 0 ? partCost : 0;
+      const chargeRate = MAINTENANCE_LABOR_RATE_PER_HOUR;
+      const laborCost = maintenanceHrs * chargeRate;
+      const totalCost = laborCost + partCostValue;
+      const snapshotHours = typeof hoursSnapshotOnOrBefore === "function" ? hoursSnapshotOnOrBefore(key) : null;
+      const hoursSince = (Number.isFinite(Number(currentHours)) && Number.isFinite(Number(snapshotHours)))
+        ? Math.max(0, Number(currentHours) - Number(snapshotHours))
+        : null;
+      maintenanceDataTableRows.push({
+        taskId: originalId,
+        taskName: taskMeta.name || task?.name || "Maintenance task",
+        maintenanceHrs,
+        partCost: partCostValue,
+        chargeRate,
+        laborCost,
+        totalCost,
+        dateISO: key,
+        cuttingHoursSince: hoursSince,
+        settingsLink: `#/settings?taskId=${encodeURIComponent(originalId)}`,
+        categoryId,
+        categoryLabel,
+        taskMode
+      });
+    });
+  });
+  taskDateGroups.forEach((dateList, taskId) => {
+    const normalizedDates = Array.isArray(dateList) ? dateList.filter(Boolean) : [];
+    const uniqueDates = [...new Set(normalizedDates)].sort((a, b) => b.localeCompare(a));
+    const qty = uniqueDates.length;
+    uniqueDates.forEach((dateISO, index) => {
+      const row = maintenanceDataTableRows.find(item => item.taskId === taskId && item.dateISO === dateISO);
+      if (!row) return;
+      row.qty = qty;
+      row.counter = Math.max(1, qty - index);
+      const current = parseDateLocal(dateISO);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      if (current instanceof Date && !Number.isNaN(current.getTime())){
+        current.setHours(0,0,0,0);
+        row.daysSinceTask = Math.max(0, Math.round((today.getTime() - current.getTime()) / JOB_DAY_MS));
+      }else{
+        row.daysSinceTask = null;
+      }
+    });
+  });
+  maintenanceDataTableRows.sort((a,b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
+  const maintenanceDataTable = maintenanceDataTableRows.map((row, idx) => ({
+    id: `${row.taskId}_${row.dateISO}_${idx}`,
+    taskId: row.taskId,
+    taskName: row.taskName,
+    maintenanceHrsLabel: formatHoursValue(row.maintenanceHrs) || "0",
+    partCostLabel: formatterCurrency(row.partCost, { decimals: row.partCost < 1000 ? 2 : 0 }),
+    chargeRateLabel: formatterCurrency(row.chargeRate, { decimals: 2 }),
+    laborCostLabel: formatterCurrency(row.laborCost, { decimals: row.laborCost < 1000 ? 2 : 0 }),
+    totalCostLabel: formatterCurrency(row.totalCost, { decimals: row.totalCost < 1000 ? 2 : 0 }),
+    dateISO: row.dateISO,
+    daysSinceLabel: Number.isFinite(row.daysSinceTask) ? String(row.daysSinceTask) : "—",
+    cuttingHoursSinceLabel: Number.isFinite(row.cuttingHoursSince) ? formatHoursValue(row.cuttingHoursSince) : "—",
+    settingsLink: row.settingsLink,
+    categoryId: row.categoryId || "",
+    categoryLabel: row.categoryLabel || "",
+    qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "1",
+    counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1"
+  }));
+
   return {
     summaryCards,
     timeframeRows,
@@ -14202,6 +14728,8 @@ function computeCostModel(){
     chartNote,
     chartInfo,
     orderRequestSummary,
+    maintenanceDataTable,
+    cuttingJobsDataTable,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries,
     jobSeries,
@@ -14733,6 +15261,19 @@ function renderJobs(){
             addButton.focus();
           }
           addButton.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+        }
+      });
+    } else if (pendingJobFocus.type === "jobRow" && pendingJobFocus.id != null){
+      requestAnimationFrame(()=>{
+        const targetRow = content.querySelector(`[data-job-row="${pendingJobFocus.id}"], [data-history-row="${pendingJobFocus.id}"]`);
+        if (targetRow instanceof HTMLElement){
+          targetRow.classList.add("job-row-link-highlight");
+          try {
+            targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+          } catch (_err){
+            try { targetRow.scrollIntoView(); } catch(__){}
+          }
+          setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2000);
         }
       });
     }

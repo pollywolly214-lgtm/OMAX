@@ -1213,6 +1213,31 @@ function viewCosts(model){
   const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
   const orderSummary = data.orderRequestSummary || {};
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
+  const maintenanceDataTable = Array.isArray(data.maintenanceDataTable) ? data.maintenanceDataTable : [];
+  const maintenanceCategoryOptions = Array.from(new Set(
+    maintenanceDataTable
+      .map(row => ({ id: String(row?.categoryId || ""), label: String(row?.categoryLabel || "") }))
+      .filter(entry => entry.id && entry.label)
+      .map(entry => `${entry.id}|||${entry.label}`)
+  )).map(entry => {
+    const [id, label] = entry.split("|||");
+    return { id, label };
+  }).sort((a, b) => a.label.localeCompare(b.label));
+  const maintenanceTaskOptions = Array.from(new Set(
+    maintenanceDataTable
+      .map(row => String(row?.taskName || "").trim())
+      .filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b));
+  const cuttingJobsDataTable = Array.isArray(data.cuttingJobsDataTable) ? data.cuttingJobsDataTable : [];
+  const cuttingJobCategoryOptions = Array.from(new Set(
+    cuttingJobsDataTable
+      .map(row => ({ id: String(row?.categoryId || ""), label: String(row?.categoryLabel || "") }))
+      .filter(entry => entry.label)
+      .map(entry => `${entry.id}|||${entry.label}`)
+  )).map(entry => {
+    const [id, label] = entry.split("|||");
+    return { id, label };
+  }).sort((a, b) => a.label.localeCompare(b.label));
   const overviewInsight = data.overviewInsight || "Totals blend the latest maintenance allocations, consumable burn rates, downtime burdens, and job margin data so you always see current cost exposure.";
   const ordersInsight = data.ordersInsight || "Tracks every waterjet part request from submission through approval so finance can confirm spend and spot stalled orders.";
   const timeframeInsight = data.timeframeInsight || "Usage windows combine logged machine hours with interval pricing to estimate what each upcoming maintenance window will cost.";
@@ -1958,6 +1983,160 @@ function viewCosts(model){
               </button>
               <div class="chart-info-bubble" id="costHistoryInsight" role="tooltip">
                 <p>${esc(historyInsight)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dashboard-window" data-cost-window="dataCenter">
+        <div class="block">
+          <h3>Maintenance Data Center Table</h3>
+          <div class="small muted" style="margin-bottom:8px;">Open as a full-size popup for review and auditing.</div>
+          <button type="button" class="secondary" data-open-data-center ${maintenanceDataTable.length ? "" : "disabled"}>Open Data Center</button>
+          <div id="costDataCenterModal" class="cost-data-center-modal" data-data-center-modal hidden aria-hidden="true" tabindex="-1">
+            <div class="cost-data-center-backdrop" data-close-data-center></div>
+            <div class="cost-data-center-panel" role="dialog" aria-modal="true" aria-labelledby="dataCenterTitle">
+              <div class="cost-data-center-header">
+                <h3 id="dataCenterTitle">Maintenance Data Center Table</h3>
+                <button type="button" class="secondary" data-close-data-center>Close</button>
+              </div>
+              <div class="cost-data-center-tabs" role="tablist" aria-label="Data center tables">
+                <button type="button" class="cost-data-center-tab is-active" data-dc-tab="maintenance" role="tab" aria-selected="true">Maintenance Tasks</button>
+                <button type="button" class="cost-data-center-tab" data-dc-tab="cutting" role="tab" aria-selected="false">Completed Cutting Jobs</button>
+              </div>
+              <div class="cost-data-center-panel-content" data-dc-panel="maintenance">
+              <div class="cost-data-center-search">
+                <label for="costDataCenterSearch">Search table</label>
+                <input id="costDataCenterSearch" type="search" placeholder="Search task, date, counter, or link target" data-maintenance-search>
+                <label for="costDataCenterCategoryFilter">Filter by category</label>
+                <select id="costDataCenterCategoryFilter" data-maintenance-filter-category>
+                  <option value="">All categories</option>
+                  ${maintenanceCategoryOptions.map(opt => `<option value="${esc(opt.id)}">${esc(opt.label)}</option>`).join("")}
+                </select>
+                <label for="costDataCenterTaskFilter">Filter by task</label>
+                <select id="costDataCenterTaskFilter" data-maintenance-filter-task>
+                  <option value="">All tasks</option>
+                  ${maintenanceTaskOptions.map(name => `<option value="${esc(name.toLowerCase())}">${esc(name)}</option>`).join("")}
+                </select>
+                <div class="cost-data-center-search-suggestions" data-maintenance-search-suggestions hidden></div>
+              </div>
+              ${maintenanceDataTable.length ? `
+            <table class="cost-table" style="margin-top:10px">
+              <thead>
+                <tr>
+                  <th>Counter</th>
+                  <th>Task</th>
+                  <th>Maint. hrs</th>
+                  <th>Part cost</th>
+                  <th>Rate/hr</th>
+                  <th>Labor cost</th>
+                  <th>Total cost</th>
+                  <th>Date</th>
+                  <th>Days since</th>
+                  <th>Cut hrs since</th>
+                  <th>Qty</th>
+                  <th>Task link</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${maintenanceDataTable.map(row => `
+                  <tr data-maintenance-row data-category-id="${esc(String(row.categoryId || ""))}" data-task-key="${esc(String(row.taskName || "").toLowerCase())}" data-task-name="${esc(row.taskName || "")}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
+                    <td>${esc(row.counterLabel || "#1")}</td>
+                    <td>${esc(row.taskName || "Maintenance task")}</td>
+                    <td>${esc(row.maintenanceHrsLabel || "0")}</td>
+                    <td>${esc(row.partCostLabel || "$0.00")}</td>
+                    <td>${esc(row.chargeRateLabel || "$0.00")}</td>
+                    <td>${esc(row.laborCostLabel || "$0.00")}</td>
+                    <td>${esc(row.totalCostLabel || "$0.00")}</td>
+                    <td>${esc(row.dateISO || "—")}</td>
+                    <td>${esc(row.daysSinceLabel || "—")}</td>
+                    <td>${esc(row.cuttingHoursSinceLabel || "—")}</td>
+                    <td>${esc(row.qtyLabel || "1")}</td>
+                    <td>
+                      <label class="sr-only" for="maintenanceLinkMode_${esc(row.id || "")}">Destination</label>
+                      <select id="maintenanceLinkMode_${esc(row.id || "")}" data-maintenance-link-mode>
+                        <option value="calendar">Calendar</option>
+                        <option value="settings">Maintenance Settings</option>
+                      </select>
+                      <button type="button"
+                        data-maintenance-open-task
+                        data-task-id="${esc(row.taskId || "")}"
+                        data-date-iso="${esc(row.dateISO || "")}"
+                        data-link-mode-id="maintenanceLinkMode_${esc(row.id || "")}"
+                        data-settings-link="${esc(row.settingsLink || "#/settings")}">Open task</button>
+                    </td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+            ` : `<p class="small muted">No completed maintenance occurrences yet.</p>`}
+              </div>
+              <div class="cost-data-center-panel-content" data-dc-panel="cutting" hidden>
+                <div class="cost-data-center-search">
+                  <label for="costDataCenterCuttingSearch">Search completed jobs</label>
+                  <input id="costDataCenterCuttingSearch" type="search" placeholder="Search job name, date, material, or project #" data-cutting-search>
+                  <label for="costDataCenterCuttingCategoryFilter">Filter by category</label>
+                  <select id="costDataCenterCuttingCategoryFilter" data-cutting-filter-category>
+                    <option value="">All categories</option>
+                    ${cuttingJobCategoryOptions.map(opt => `<option value="${esc(opt.id)}">${esc(opt.label)}</option>`).join("")}
+                  </select>
+                </div>
+                ${cuttingJobsDataTable.length ? `
+                <table class="cost-table" style="margin-top:10px">
+                  <thead>
+                    <tr>
+                      <th>Job name</th>
+                      <th>Cumulative cut #</th>
+                      <th>Category cut #</th>
+                      <th>Category</th>
+                      <th>Hours</th>
+                      <th>Charge rate/hr</th>
+                      <th>Cost rate/hr</th>
+                      <th>Material type</th>
+                      <th>Material cost</th>
+                      <th>Material qty</th>
+                      <th>Start date</th>
+                      <th>Due date</th>
+                      <th>Completed date</th>
+                      <th>Project #</th>
+                      <th>Priority</th>
+                      <th>Notes</th>
+                      <th>Job link</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${cuttingJobsDataTable.map(row => `
+                      <tr data-cutting-row data-cutting-category-id="${esc(String(row.categoryId || ""))}" data-cutting-job-key="${esc(String(row.name || "").toLowerCase())}" data-cutting-search-text="${esc(`${row.name || ""} ${row.categoryLabel || ""} ${row.materialType || ""} ${row.projectNumber || ""} ${row.completedDateLabel || ""}`.toLowerCase())}">
+                        <td>${esc(row.name || "—")}</td>
+                        <td>${esc(row.cumulativeCutNumberLabel || "—")}</td>
+                        <td>${esc(row.categoryCutNumberLabel || "—")}</td>
+                        <td>${esc(row.categoryLabel || "—")}</td>
+                        <td>${esc(row.hoursLabel || "0")}</td>
+                        <td>${esc(row.chargeRateLabel || "—")}</td>
+                        <td>${esc(row.costRateLabel || "—")}</td>
+                        <td>${esc(row.materialType || "—")}</td>
+                        <td>${esc(row.materialCostLabel || "—")}</td>
+                        <td>${esc(row.materialQtyLabel || "—")}</td>
+                        <td>${esc(row.startDateLabel || "—")}</td>
+                        <td>${esc(row.dueDateLabel || "—")}</td>
+                        <td>${esc(row.completedDateLabel || "—")}</td>
+                        <td>${esc(row.projectNumber || "—")}</td>
+                        <td>${esc(row.priorityLabel || "—")}</td>
+                        <td>${esc(row.notes || "—")}</td>
+                        <td>
+                          <label class="sr-only" for="cuttingLinkMode_${esc(row.id || "")}">Cutting link destination</label>
+                          <select id="cuttingLinkMode_${esc(row.id || "")}" data-cutting-link-mode>
+                            <option value="jobs">Cutting jobs page</option>
+                            <option value="calendar">Calendar</option>
+                          </select>
+                          <button type="button" data-cutting-open-job data-job-id="${esc(row.id || "")}" data-date-iso="${esc(row.completedDateLabel || "")}" data-link-mode-id="cuttingLinkMode_${esc(row.id || "")}">Open job</button>
+                        </td>
+                      </tr>
+                    `).join("")}
+                  </tbody>
+                </table>
+                ` : `<p class="small muted">No completed cutting jobs yet.</p>`}
               </div>
             </div>
           </div>
