@@ -537,6 +537,19 @@ body.cost-timeframe-modal-open{ overflow:hidden; }
   color:#000;
 }
 body.cost-data-center-open{ overflow:hidden; }
+
+.cost-receipt-modal{ position:fixed; inset:0; z-index:1600; display:flex; align-items:center; justify-content:center; padding:24px 20px; }
+.cost-receipt-modal[hidden]{ display:none; }
+.cost-receipt-backdrop{ position:absolute; inset:0; background:rgba(15,23,42,0.55); }
+.cost-receipt-card{ position:relative; width:min(1100px, 100%); max-height:92vh; background:#fff; border-radius:18px; box-shadow:0 32px 72px rgba(15,23,42,0.28); overflow:hidden; }
+.cost-receipt-card-body{ position:relative; z-index:2; padding:24px; overflow:auto; max-height:92vh; }
+.cost-receipt-close{ position:absolute; top:10px; right:12px; border:none; background:none; font-size:28px; cursor:pointer; color:#1e2b45; z-index:3; }
+.cost-receipt-controls,.cost-receipt-summary-controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px; }
+.cost-receipt-controls label,.cost-receipt-summary-controls label{ display:flex; flex-direction:column; gap:4px; font-weight:600; color:#1e2b45; }
+.cost-receipt-controls select,.cost-receipt-summary-controls select{ min-width:240px; padding:6px 8px; border:1px solid #c8d0e0; border-radius:6px; }
+.cost-receipt-week-table input{ width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cfd7e6; border-radius:6px; font:inherit; }
+.cost-receipt-week-table td[data-col="total"],.cost-receipt-week-table tfoot th,.cost-receipt-summary-table tfoot th{ font-weight:700; }
+body.cost-receipt-modal-open{ overflow:hidden; }
 @media (max-width: 640px){
   .cost-timeframe-card-body{ padding:24px 18px 28px; }
   .cost-timeframe-table th,.cost-timeframe-table td{ padding:8px 10px; }
