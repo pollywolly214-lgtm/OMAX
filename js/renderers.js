@@ -10576,6 +10576,10 @@ function renderCosts(){
     previousModal.remove();
     document.body.classList.remove("cost-data-center-open");
   }
+  const existingReceiptModal = document.getElementById("costReceiptModal");
+  if (existingReceiptModal instanceof HTMLElement){
+    window.costPurchaseHistoryModalOpen = !existingReceiptModal.hasAttribute("hidden");
+  }
 
   const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 
@@ -11270,6 +11274,293 @@ function renderCosts(){
         link.remove();
         URL.revokeObjectURL(url);
       });
+    }
+
+    const formatUsd = (value)=> new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(Number(value)) ? Number(value) : 0);
+    const toIsoDate = (value)=> String(value || "").slice(0, 10);
+    const parseIsoDate = (iso)=>{
+      const raw = String(iso || "");
+      if (!raw) return null;
+      const dt = new Date(`${raw}T00:00:00`);
+      return Number.isNaN(dt.getTime()) ? null : dt;
+    };
+    const weekStartFromIndex = (year, week)=>{
+      const jan4 = new Date(Date.UTC(year, 0, 4));
+      const jan4Day = jan4.getUTCDay() || 7;
+      const monday = new Date(jan4);
+      monday.setUTCDate(jan4.getUTCDate() - jan4Day + 1 + ((week - 1) * 7));
+      return monday;
+    };
+    const weekKey = (year, week)=> `${year}-W${String(week).padStart(2, "0")}`;
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const weekOptions = Array.from({ length: 52 }, (_, i)=>{
+      const week = i + 1;
+      const start = weekStartFromIndex(year, week);
+      const end = new Date(start); end.setUTCDate(start.getUTCDate() + 6);
+      return { key: weekKey(year, week), year, week, startISO: start.toISOString().slice(0, 10), endISO: end.toISOString().slice(0, 10) };
+    });
+    if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
+    const persistReceiptState = ()=>{
+      if (typeof saveCloudDebounced === "function"){
+        try { saveCloudDebounced(); } catch (_err){}
+      }
+    };
+    const normalizeRows = (rows)=> (Array.isArray(rows) ? rows : []).map(item => ({
+      date: toIsoDate(item?.date),
+      purchased: String(item?.purchased || ""),
+      cost: Number(item?.cost) || 0,
+      qty: Number(item?.qty) || 0,
+      partNumber: String(item?.partNumber || ""),
+      shipping: Number(item?.shipping) || 0,
+      tax: Number(item?.tax) || 0
+    })).filter(row => row.date || row.purchased || row.cost || row.qty || row.partNumber || row.shipping || row.tax);
+    const getWeekEntry = (key)=>{
+      const existing = window.receiptTrackerWeeks.find(entry => String(entry?.key || "") === key);
+      if (existing) return existing;
+      const meta = weekOptions.find(item => item.key === key);
+      const created = { key, year: meta?.year || year, week: meta?.week || 1, startISO: meta?.startISO || "", endISO: meta?.endISO || "", rows: [] };
+      window.receiptTrackerWeeks.push(created);
+      return created;
+    };
+    const computeRowTotal = (row)=> ((Number(row?.cost) || 0) * (Number(row?.qty) || 0)) + (Number(row?.shipping) || 0) + (Number(row?.tax) || 0);
+    const buildRangeRows = (months)=>{
+      const end = new Date();
+      const start = months === "all" ? null : new Date(end.getFullYear(), end.getMonth() - Number(months), end.getDate());
+      const rows = [];
+      (window.receiptTrackerWeeks || []).forEach(week => {
+        normalizeRows(week?.rows).forEach(row => {
+          const date = parseIsoDate(row.date);
+          if (!date) return;
+          if (start && date < start) return;
+          if (date > end) return;
+          rows.push({ ...row, total: computeRowTotal(row) });
+        });
+      });
+      rows.sort((a,b)=> String(a.date).localeCompare(String(b.date)));
+      return rows;
+    };
+    const downloadCsv = (name, rows)=>{
+      const csv = rows.map(cols => cols.map(val => `"${String(val ?? "").replace(/"/g, "\"\"")}"`).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.href = url;
+      link.download = name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    };
+
+    const receiptOpenBtn = panel.querySelector("[data-cost-receipt-open]");
+    const modal = document.getElementById("costReceiptModal");
+    if (receiptOpenBtn instanceof HTMLElement && modal instanceof HTMLElement){
+      const weekSelect = modal.querySelector("[data-receipt-week-select]");
+      const weekRangeLabel = modal.querySelector("[data-receipt-week-range]");
+      const weekRowsBody = modal.querySelector("[data-receipt-week-rows]");
+      const weekSubtotal = modal.querySelector("[data-receipt-week-subtotal]");
+      const rangeSelect = modal.querySelector("[data-receipt-range-select]");
+      const rangeRowsBody = modal.querySelector("[data-receipt-range-rows]");
+      const rangeSubtotal = modal.querySelector("[data-receipt-range-subtotal]");
+      const closeControls = Array.from(modal.querySelectorAll("[data-receipt-close]"));
+      const exportWeekBtn = modal.querySelector("[data-receipt-export-week]");
+      const exportRangeBtn = modal.querySelector("[data-receipt-export-range]");
+      let activeWeekKey = String((window.receiptTrackerWeekSelected || weekOptions[0]?.key || ""));
+      let activeRange = String(window.receiptTrackerRangeSelected || "1");
+      window.receiptTrackerWeekSelected = activeWeekKey;
+      window.receiptTrackerRangeSelected = activeRange;
+
+      const renderWeekOptions = ()=>{
+        if (!(weekSelect instanceof HTMLSelectElement)) return;
+        weekSelect.innerHTML = weekOptions.map(opt => `<option value="${escapeHtml(opt.key)}">Week ${escapeHtml(String(opt.week))} (${escapeHtml(opt.startISO)} to ${escapeHtml(opt.endISO)})</option>`).join("");
+        if (!weekOptions.some(item => item.key === activeWeekKey)) activeWeekKey = weekOptions[0]?.key || "";
+        weekSelect.value = activeWeekKey;
+      };
+      const saveWeekRowsFromDom = ()=>{
+        const entry = getWeekEntry(activeWeekKey);
+        if (!(weekRowsBody instanceof HTMLElement)) return entry;
+        const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).map(tr => ({
+          date: toIsoDate(tr.querySelector('[data-col=\"date\"]')?.value || ""),
+          purchased: String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim(),
+          cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
+          qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
+          partNumber: String(tr.querySelector('[data-col=\"partNumber\"]')?.value || "").trim(),
+          shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
+          tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
+        }));
+        entry.rows = normalizeRows(rows);
+        persistReceiptState();
+        return entry;
+      };
+      const appendEmptyRow = (focusFirst = false)=>{
+        if (!(weekRowsBody instanceof HTMLElement)) return;
+        const tr = document.createElement("tr");
+        tr.setAttribute("data-receipt-row", "1");
+        tr.innerHTML = `
+          <td><input type="date" data-col="date"></td>
+          <td><input type="text" data-col="purchased" placeholder="Item"></td>
+          <td><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
+          <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
+          <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
+          <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00"></td>
+          <td><input type="number" min="0" step="0.01" data-col="tax" placeholder="0.00"></td>
+          <td data-col="total">${formatUsd(0)}</td>`;
+        weekRowsBody.appendChild(tr);
+        if (focusFirst){
+          const first = tr.querySelector("[data-col='date']");
+          if (first instanceof HTMLElement) first.focus();
+        }
+      };
+      const recomputeWeekTotals = ()=>{
+        if (!(weekRowsBody instanceof HTMLElement)) return;
+        let subtotal = 0;
+        Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).forEach(tr => {
+          const row = {
+            cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
+            qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
+            shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
+            tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
+          };
+          const total = computeRowTotal(row);
+          subtotal += total;
+          const totalCell = tr.querySelector('[data-col=\"total\"]');
+          if (totalCell) totalCell.textContent = formatUsd(total);
+        });
+        if (weekSubtotal) weekSubtotal.textContent = formatUsd(subtotal);
+      };
+      const renderWeekRows = ()=>{
+        const entry = getWeekEntry(activeWeekKey);
+        const rows = normalizeRows(entry.rows);
+        if (weekRangeLabel){
+          weekRangeLabel.textContent = entry.startISO && entry.endISO ? `Date range: ${entry.startISO} to ${entry.endISO}` : "Date range unavailable";
+        }
+        if (!(weekRowsBody instanceof HTMLElement)) return;
+        weekRowsBody.innerHTML = rows.map(row => `
+          <tr data-receipt-row="1">
+            <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}"></td>
+            <td><input type="text" data-col="purchased" value="${escapeHtml(row.purchased || "")}"></td>
+            <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
+            <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
+            <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
+            <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}"></td>
+            <td><input type="number" min="0" step="0.01" data-col="tax" value="${escapeHtml(String(row.tax || 0))}"></td>
+            <td data-col="total">${formatUsd(computeRowTotal(row))}</td>
+          </tr>`).join("");
+        appendEmptyRow();
+        recomputeWeekTotals();
+      };
+      const renderRangeTable = ()=>{
+        if (!(rangeRowsBody instanceof HTMLElement)) return;
+        const rows = buildRangeRows(activeRange);
+        const subtotal = rows.reduce((sum, row) => sum + row.total, 0);
+        rangeRowsBody.innerHTML = rows.length ? rows.map(row => `
+          <tr>
+            <td>${escapeHtml(row.date || "—")}</td>
+            <td>${escapeHtml(row.purchased || "—")}</td>
+            <td>${escapeHtml(String(row.qty || 0))}</td>
+            <td>${escapeHtml(row.partNumber || "—")}</td>
+            <td>${formatUsd(row.shipping || 0)}</td>
+            <td>${formatUsd(row.tax || 0)}</td>
+            <td>${formatUsd(row.total || 0)}</td>
+            <td></td>
+          </tr>`).join("") : '<tr><td colspan="8" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
+        if (rangeSubtotal) rangeSubtotal.textContent = formatUsd(subtotal);
+      };
+      const bindRowEvents = ()=>{
+        if (!(weekRowsBody instanceof HTMLElement)) return;
+        weekRowsBody.addEventListener("keydown", event => {
+          if (event.key !== "Enter") return;
+          const input = event.target;
+          if (!(input instanceof HTMLInputElement)) return;
+          event.preventDefault();
+          const row = input.closest("tr[data-receipt-row]");
+          if (!row) return;
+          const columns = ["date", "purchased", "cost", "qty", "partNumber", "shipping", "tax"];
+          const col = input.getAttribute("data-col") || "";
+          const idx = columns.indexOf(col);
+          if (idx < 0) return;
+          if (idx === columns.length - 1){
+            appendEmptyRow(true);
+          } else {
+            const next = row.querySelector(`[data-col="${columns[idx + 1]}"]`);
+            if (next instanceof HTMLElement) next.focus();
+          }
+          recomputeWeekTotals();
+          saveWeekRowsFromDom();
+          renderRangeTable();
+        });
+        weekRowsBody.addEventListener("input", ()=>{
+          recomputeWeekTotals();
+          saveWeekRowsFromDom();
+          renderRangeTable();
+        });
+      };
+      bindRowEvents();
+      renderWeekOptions();
+      renderWeekRows();
+      renderRangeTable();
+      if (rangeSelect instanceof HTMLSelectElement){
+        rangeSelect.value = activeRange;
+        rangeSelect.addEventListener("change", ()=>{
+          activeRange = rangeSelect.value || "1";
+          window.receiptTrackerRangeSelected = activeRange;
+          renderRangeTable();
+          persistReceiptState();
+        });
+      }
+      if (weekSelect instanceof HTMLSelectElement){
+        weekSelect.addEventListener("change", ()=>{
+          saveWeekRowsFromDom();
+          activeWeekKey = weekSelect.value;
+          window.receiptTrackerWeekSelected = activeWeekKey;
+          renderWeekRows();
+          renderRangeTable();
+        });
+      }
+      if (exportWeekBtn instanceof HTMLElement){
+        exportWeekBtn.addEventListener("click", ()=>{
+          const entry = saveWeekRowsFromDom();
+          const rows = normalizeRows(entry.rows);
+          const subtotal = rows.reduce((sum, row) => sum + computeRowTotal(row), 0);
+          const payload = [
+            ["Date", "Purchased", "Cost", "Qty", "Part number", "Shipping", "Tax", "Total"],
+            ...rows.map(row => [row.date, row.purchased, row.cost, row.qty, row.partNumber, row.shipping, row.tax, computeRowTotal(row)]),
+            ["", "", "", "", "", "", "Subtotal", subtotal]
+          ];
+          downloadCsv(`receipt-week-${entry.key}.csv`, payload);
+        });
+      }
+      if (exportRangeBtn instanceof HTMLElement){
+        exportRangeBtn.addEventListener("click", ()=>{
+          const rows = buildRangeRows(activeRange);
+          const subtotal = rows.reduce((sum, row) => sum + row.total, 0);
+          const payload = [
+            ["Date", "Purchased", "Qty", "Part number", "Shipping", "Tax", "Total"],
+            ...rows.map(row => [row.date, row.purchased, row.qty, row.partNumber, row.shipping, row.tax, row.total]),
+            ["", "", "", "", "", "Subtotal", subtotal]
+          ];
+          downloadCsv(`receipt-range-${activeRange}.csv`, payload);
+        });
+      }
+      const openModal = ()=>{
+        modal.hidden = false;
+        modal.setAttribute("aria-hidden", "false");
+        document.body.classList.add("cost-receipt-modal-open");
+        window.costPurchaseHistoryModalOpen = true;
+      };
+      const closeModal = ()=>{
+        saveWeekRowsFromDom();
+        modal.hidden = true;
+        modal.setAttribute("aria-hidden", "true");
+        document.body.classList.remove("cost-receipt-modal-open");
+        window.costPurchaseHistoryModalOpen = false;
+      };
+      receiptOpenBtn.addEventListener("click", openModal);
+      closeControls.forEach(control => control.addEventListener("click", closeModal));
+      if (window.costPurchaseHistoryModalOpen){
+        openModal();
+      }
     }
 
     const canvas = panel.querySelector("#weeklyCostChart");
