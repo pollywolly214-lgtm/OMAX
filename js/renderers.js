@@ -14528,8 +14528,19 @@ function computeCostModel(){
     emptyMessage: orderRows.length ? "" : "Approve or deny order requests to build the spend log."
   };
 
-  const cuttingCategoryCounters = new Map();
-  const cuttingJobsDataTable = (Array.isArray(completedCuttingJobs) ? completedCuttingJobs : []).map((job, index) => {
+  const completedJobsForDataCenter = (Array.isArray(completedCuttingJobs) ? completedCuttingJobs.slice() : [])
+    .sort((a, b) => {
+      const aDate = String(a?.completedAtISO || a?.dueISO || a?.startISO || "");
+      const bDate = String(b?.completedAtISO || b?.dueISO || b?.startISO || "");
+      return bDate.localeCompare(aDate);
+    });
+  const cuttingCategoryRemaining = new Map();
+  completedJobsForDataCenter.forEach(job => {
+    const key = job?.cat != null ? String(job.cat) : "__uncategorized__";
+    cuttingCategoryRemaining.set(key, (cuttingCategoryRemaining.get(key) || 0) + 1);
+  });
+  const totalCompletedJobs = completedJobsForDataCenter.length;
+  const cuttingJobsDataTable = completedJobsForDataCenter.map((job, index) => {
     const categoryId = job?.cat != null ? String(job.cat) : "";
     const categoryLabel = categoryId ? resolveCategoryName(categoryId) : "Uncategorized";
     const actualHoursCandidates = [
@@ -14539,8 +14550,9 @@ function computeCostModel(){
       Number(job?.estimateHours)
     ];
     const hours = actualHoursCandidates.find(val => Number.isFinite(val) && val >= 0) ?? 0;
-    const categoryCutCount = (cuttingCategoryCounters.get(categoryId || "__uncategorized__") || 0) + 1;
-    cuttingCategoryCounters.set(categoryId || "__uncategorized__", categoryCutCount);
+    const categoryKey = categoryId || "__uncategorized__";
+    const categoryCutCount = cuttingCategoryRemaining.get(categoryKey) || 1;
+    cuttingCategoryRemaining.set(categoryKey, Math.max(0, categoryCutCount - 1));
     const chargeRateRaw = Number(job?.chargeRate);
     const costRateRaw = Number(job?.costRate);
     const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
@@ -14565,7 +14577,7 @@ function computeCostModel(){
       projectNumber: String(job?.projectNumber || "—"),
       notes: String(job?.notes || "").trim() || "—",
       priorityLabel: Number.isFinite(Number(job?.priority)) ? String(Math.max(1, Math.floor(Number(job.priority)))) : "—",
-      cumulativeCutNumberLabel: `#${index + 1}`,
+      cumulativeCutNumberLabel: `#${Math.max(1, totalCompletedJobs - index)}`,
       categoryCutNumberLabel: `#${categoryCutCount}`
     };
   });
@@ -15240,7 +15252,7 @@ function renderJobs(){
       });
     } else if (pendingJobFocus.type === "jobRow" && pendingJobFocus.id != null){
       requestAnimationFrame(()=>{
-        const targetRow = content.querySelector(`[data-job-row="${pendingJobFocus.id}"]`);
+        const targetRow = content.querySelector(`[data-job-row="${pendingJobFocus.id}"], [data-history-row="${pendingJobFocus.id}"]`);
         if (targetRow instanceof HTMLElement){
           targetRow.classList.add("job-row-link-highlight");
           try {
