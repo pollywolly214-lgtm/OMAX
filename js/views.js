@@ -1214,6 +1214,20 @@ function viewCosts(model){
   const orderSummary = data.orderRequestSummary || {};
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
   const maintenanceDataTable = Array.isArray(data.maintenanceDataTable) ? data.maintenanceDataTable : [];
+  const maintenanceCategoryOptions = Array.from(new Set(
+    maintenanceDataTable
+      .map(row => ({ id: String(row?.categoryId || ""), label: String(row?.categoryLabel || "") }))
+      .filter(entry => entry.id && entry.label)
+      .map(entry => `${entry.id}|||${entry.label}`)
+  )).map(entry => {
+    const [id, label] = entry.split("|||");
+    return { id, label };
+  }).sort((a, b) => a.label.localeCompare(b.label));
+  const maintenanceTaskOptions = Array.from(new Set(
+    maintenanceDataTable
+      .map(row => String(row?.taskName || "").trim())
+      .filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b));
   const overviewInsight = data.overviewInsight || "Totals blend the latest maintenance allocations, consumable burn rates, downtime burdens, and job margin data so you always see current cost exposure.";
   const ordersInsight = data.ordersInsight || "Tracks every waterjet part request from submission through approval so finance can confirm spend and spot stalled orders.";
   const timeframeInsight = data.timeframeInsight || "Usage windows combine logged machine hours with interval pricing to estimate what each upcoming maintenance window will cost.";
@@ -1980,6 +1994,16 @@ function viewCosts(model){
               <div class="cost-data-center-search">
                 <label for="costDataCenterSearch">Search table</label>
                 <input id="costDataCenterSearch" type="search" placeholder="Search task, date, counter, or link target" data-maintenance-search>
+                <label for="costDataCenterCategoryFilter">Filter by category</label>
+                <select id="costDataCenterCategoryFilter" data-maintenance-filter-category>
+                  <option value="">All categories</option>
+                  ${maintenanceCategoryOptions.map(opt => `<option value="${esc(opt.id)}">${esc(opt.label)}</option>`).join("")}
+                </select>
+                <label for="costDataCenterTaskFilter">Filter by task</label>
+                <select id="costDataCenterTaskFilter" data-maintenance-filter-task>
+                  <option value="">All tasks</option>
+                  ${maintenanceTaskOptions.map(name => `<option value="${esc(name.toLowerCase())}">${esc(name)}</option>`).join("")}
+                </select>
                 <div class="cost-data-center-search-suggestions" data-maintenance-search-suggestions hidden></div>
               </div>
               ${maintenanceDataTable.length ? `
@@ -2002,7 +2026,7 @@ function viewCosts(model){
               </thead>
               <tbody>
                 ${maintenanceDataTable.map(row => `
-                  <tr data-maintenance-row data-task-name="${esc(row.taskName || "")}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
+                  <tr data-maintenance-row data-category-id="${esc(String(row.categoryId || ""))}" data-task-key="${esc(String(row.taskName || "").toLowerCase())}" data-task-name="${esc(row.taskName || "")}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
                     <td>${esc(row.counterLabel || "#1")}</td>
                     <td>${esc(row.taskName || "Maintenance task")}</td>
                     <td>${esc(row.maintenanceHrsLabel || "0")}</td>

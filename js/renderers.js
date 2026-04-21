@@ -10700,6 +10700,8 @@ function renderCosts(){
     }
 
     const searchInput = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-search]") : null;
+    const categoryFilter = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-filter-category]") : null;
+    const taskFilter = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-filter-task]") : null;
     const suggestionsBox = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-search-suggestions]") : null;
     const suggestionState = { items: [] };
     const computeSuggestions = (term, rows)=>{
@@ -10758,11 +10760,18 @@ function renderCosts(){
     const applySearchFilter = ()=>{
       if (!(modal instanceof HTMLElement)) return;
       const term = String(searchInput instanceof HTMLInputElement ? searchInput.value : "").trim().toLowerCase();
+      const categoryValue = String(categoryFilter instanceof HTMLSelectElement ? categoryFilter.value : "").trim();
+      const taskValue = String(taskFilter instanceof HTMLSelectElement ? taskFilter.value : "").trim().toLowerCase();
       const tableRows = Array.from(modal.querySelectorAll("[data-maintenance-row]"));
       tableRows.forEach(row => {
         if (!(row instanceof HTMLElement)) return;
         const haystack = String(row.getAttribute("data-search-text") || "").toLowerCase();
-        const matches = !term || haystack.includes(term);
+        const rowCategory = String(row.getAttribute("data-category-id") || "");
+        const rowTask = String(row.getAttribute("data-task-key") || "").toLowerCase();
+        const matchesSearch = !term || haystack.includes(term);
+        const matchesCategory = !categoryValue || rowCategory === categoryValue;
+        const matchesTask = !taskValue || rowTask === taskValue;
+        const matches = matchesSearch && matchesCategory && matchesTask;
         row.hidden = !matches;
       });
     };
@@ -10784,6 +10793,18 @@ function renderCosts(){
       });
       applySearchFilter();
       renderSuggestions();
+    }
+    if (categoryFilter instanceof HTMLSelectElement){
+      categoryFilter.addEventListener("change", ()=>{
+        applySearchFilter();
+        renderSuggestions();
+      });
+    }
+    if (taskFilter instanceof HTMLSelectElement){
+      taskFilter.addEventListener("change", ()=>{
+        applySearchFilter();
+        renderSuggestions();
+      });
     }
 
     const rows = Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-maintenance-open-task]"));
@@ -14407,6 +14428,13 @@ function computeCostModel(){
       taskById.set(String(task.id), task);
     });
   });
+  const categoryById = new Map();
+  if (Array.isArray(window.settingsFolders)){
+    window.settingsFolders.forEach(folder => {
+      if (!folder || folder.id == null) return;
+      categoryById.set(String(folder.id), String(folder.name || "Category"));
+    });
+  }
   const maintenanceDataTableRows = [];
   const taskDateGroups = new Map();
   taskEventsByDate.forEach((tasksOnDate, dateISO) => {
@@ -14420,6 +14448,8 @@ function computeCostModel(){
       if (!taskDateGroups.has(groupKey)) taskDateGroups.set(groupKey, []);
       taskDateGroups.get(groupKey).push(key);
       const task = taskById.get(originalId) || taskById.get(String(taskMeta.id || "")) || null;
+      const categoryId = task?.cat != null ? String(task.cat) : "";
+      const categoryLabel = categoryId ? (categoryById.get(categoryId) || categoryId) : "";
       const maintenanceHours = Number(task?.downtimeHours);
       const maintenanceHrs = Number.isFinite(maintenanceHours) && maintenanceHours > 0 ? maintenanceHours : 1;
       const partCost = Number(taskMeta?.unitPrice);
@@ -14441,7 +14471,9 @@ function computeCostModel(){
         totalCost,
         dateISO: key,
         cuttingHoursSince: hoursSince,
-        settingsLink: `#/settings?taskId=${encodeURIComponent(originalId)}`
+        settingsLink: `#/settings?taskId=${encodeURIComponent(originalId)}`,
+        categoryId,
+        categoryLabel
       });
     });
   });
@@ -14479,6 +14511,8 @@ function computeCostModel(){
     daysSinceLabel: Number.isFinite(row.daysSinceTask) ? String(row.daysSinceTask) : "—",
     cuttingHoursSinceLabel: Number.isFinite(row.cuttingHoursSince) ? formatHoursValue(row.cuttingHoursSince) : "—",
     settingsLink: row.settingsLink,
+    categoryId: row.categoryId || "",
+    categoryLabel: row.categoryLabel || "",
     qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "1",
     counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1"
   }));
