@@ -14376,7 +14376,15 @@ function computeCostModel(){
           row.daysSinceLastTask = null;
         }
       }else{
-        row.daysSinceLastTask = null;
+        const current = parseDateLocal(dateISO);
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        if (current instanceof Date && !Number.isNaN(current.getTime())){
+          current.setHours(0,0,0,0);
+          row.daysSinceLastTask = Math.max(0, Math.round((today.getTime() - current.getTime()) / JOB_DAY_MS));
+        }else{
+          row.daysSinceLastTask = null;
+        }
       }
     });
   });
