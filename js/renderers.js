@@ -10550,6 +10550,19 @@ function setupForecastBreakdownModal(){
 
   modal.addEventListener("click", (event)=>{
     const target = event.target;
+    const openTaskBtn = target instanceof HTMLElement ? target.closest("[data-forecast-open-task]") : null;
+    if (openTaskBtn instanceof HTMLElement){
+      event.preventDefault();
+      const taskId = String(openTaskBtn.getAttribute("data-task-id") || "");
+      const dateISO = String(openTaskBtn.getAttribute("data-date-iso") || "");
+      closeModal();
+      if (typeof window.focusMaintenanceDataCenterRow === "function"){
+        window.focusMaintenanceDataCenterRow({ taskId, dateISO });
+      }else{
+        window.pendingCostDataCenterFocus = { taskId, dateISO };
+      }
+      return;
+    }
     if (target && target.hasAttribute && target.hasAttribute("data-forecast-close")){
       event.preventDefault();
       closeModal();
@@ -10761,6 +10774,50 @@ function renderCosts(){
       }
       pendingDataCenterScrollTop = null;
     };
+    const highlightMaintenanceDataCenterRow = ({ taskId = "", dateISO = "" } = {})=>{
+      if (!(modal instanceof HTMLElement)) return false;
+      const taskKey = String(taskId || "").trim();
+      const dateKey = String(dateISO || "").trim();
+      const cssEsc = (value)=>{
+        const raw = String(value || "");
+        if (typeof CSS !== "undefined" && CSS && typeof CSS.escape === "function"){
+          return CSS.escape(raw);
+        }
+        return raw.replace(/["\\]/g, "\\$&");
+      };
+      const selector = dateKey
+        ? `[data-maintenance-row][data-row-task-id="${cssEsc(taskKey)}"][data-row-date-iso="${cssEsc(dateKey)}"]`
+        : `[data-maintenance-row][data-row-task-id="${cssEsc(taskKey)}"]`;
+      let targetRow = taskKey ? modal.querySelector(selector) : null;
+      if (!(targetRow instanceof HTMLElement) && taskKey){
+        targetRow = modal.querySelector(`[data-maintenance-row][data-row-task-id="${cssEsc(taskKey)}"]`);
+      }
+      if (!(targetRow instanceof HTMLElement)) return false;
+      const allRows = Array.from(modal.querySelectorAll("[data-maintenance-row-link-highlight]"));
+      allRows.forEach(row => row.removeAttribute("data-maintenance-row-link-highlight"));
+      targetRow.setAttribute("data-maintenance-row-link-highlight", "1");
+      targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+      const taskName = String(targetRow.getAttribute("data-task-name") || "").trim();
+      if (taskName && searchInput instanceof HTMLInputElement){
+        searchInput.value = taskName;
+        applySearchFilter();
+      }
+      setTimeout(()=>{
+        targetRow.removeAttribute("data-maintenance-row-link-highlight");
+      }, 2400);
+      return true;
+    };
+    window.focusMaintenanceDataCenterRow = ({ taskId = "", dateISO = "" } = {})=>{
+      const focusTaskId = String(taskId || "").trim();
+      if (!focusTaskId) return false;
+      setActiveTab("maintenance");
+      openDataCenter();
+      const focusedNow = highlightMaintenanceDataCenterRow({ taskId: focusTaskId, dateISO: String(dateISO || "").trim() });
+      if (focusedNow) return true;
+      setTimeout(()=> highlightMaintenanceDataCenterRow({ taskId: focusTaskId, dateISO: String(dateISO || "").trim() }), 120);
+      setTimeout(()=> highlightMaintenanceDataCenterRow({ taskId: focusTaskId, dateISO: String(dateISO || "").trim() }), 280);
+      return false;
+    };
     if (openBtn instanceof HTMLElement && modal instanceof HTMLElement){
       openBtn.addEventListener("click", openDataCenter);
       closeBtns.forEach(btn => {
@@ -10777,6 +10834,11 @@ function renderCosts(){
       }
       if (options && options.openImmediately){
         openDataCenter({ restoreScroll: true });
+      }
+      if (window.pendingCostDataCenterFocus && typeof window.focusMaintenanceDataCenterRow === "function"){
+        const pendingFocus = window.pendingCostDataCenterFocus;
+        window.pendingCostDataCenterFocus = null;
+        window.focusMaintenanceDataCenterRow(pendingFocus);
       }
     }
 
@@ -15184,10 +15246,15 @@ function computeCostModel(){
         key: taskKey,
         name: row.taskName || "Maintenance task",
         totalCost: 0,
-        count: 0
+        count: 0,
+        taskId: row.taskId || "",
+        latestDateISO: row.dateISO || ""
       };
       entry.totalCost += row.totalCost;
       entry.count += 1;
+      if (row.dateISO && (!entry.latestDateISO || String(row.dateISO).localeCompare(String(entry.latestDateISO)) > 0)){
+        entry.latestDateISO = row.dateISO;
+      }
       byTask.set(taskKey, entry);
     });
     return Array.from(byTask.values())
@@ -15195,6 +15262,8 @@ function computeCostModel(){
       .map((entry, index) => ({
         key: `${prefix}_${entry.key}_${index}`,
         name: entry.name,
+        taskId: entry.taskId,
+        latestDateISO: entry.latestDateISO,
         cadenceLabel: `${entry.count} completed occurrence${entry.count === 1 ? "" : "s"}`,
         unitCostLabel: entry.count > 0
           ? formatterCurrency(entry.totalCost / entry.count, { decimals: 2 })

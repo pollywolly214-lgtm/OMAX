@@ -1617,7 +1617,11 @@ function viewCosts(model){
               const rowsHtml = rows.length
                 ? rows.map(row => `
               <tr>
-                <th scope="row">${esc(row.name || "")}</th>
+                <th scope="row">
+                  <button type="button" class="forecast-task-link" data-forecast-open-task data-task-id="${esc(row.taskId || "")}" data-date-iso="${esc(row.latestDateISO || "")}">
+                    ${esc(row.name || "")}
+                  </button>
+                </th>
                 <td>${esc(row.cadenceLabel || "—")}</td>
                 <td>${esc(row.unitCostLabel || "—")}</td>
                 <td>${esc(row.annualTotalLabel || "—")}</td>
@@ -2088,7 +2092,7 @@ function viewCosts(model){
               </thead>
               <tbody>
                 ${maintenanceDataTable.map(row => `
-                  <tr data-maintenance-row data-category-id="${esc(String(row.categoryId || ""))}" data-task-key="${esc(String(row.taskName || "").toLowerCase())}" data-task-name="${esc(row.taskName || "")}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
+                  <tr data-maintenance-row data-row-task-id="${esc(String(row.taskId || ""))}" data-row-date-iso="${esc(String(row.dateISO || ""))}" data-category-id="${esc(String(row.categoryId || ""))}" data-task-key="${esc(String(row.taskName || "").toLowerCase())}" data-task-name="${esc(row.taskName || "")}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
                     <td>${esc(row.counterLabel || "#1")}</td>
                     <td>${esc(row.taskName || "Maintenance task")}</td>
                     <td>${esc(row.maintenanceHrsLabel || "0")}</td>
