@@ -15069,7 +15069,209 @@ function computeCostModel(){
     });
   });
   maintenanceDataTableRows.sort((a,b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
-  const maintenanceDataTable = maintenanceDataTableRows.map((row, idx) => ({
+  const centralMaintenanceRows = maintenanceDataTableRows
+    .filter(row => {
+      const hasTask = typeof row?.taskId === "string" && row.taskId.trim().length > 0;
+      const hasSettingsLink = typeof row?.settingsLink === "string" && row.settingsLink.includes("taskId=");
+      const parsedDate = parseDateLocal(row?.dateISO || "");
+      const hasDate = parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime());
+      const totalCost = Number(row?.totalCost);
+      return hasTask && hasSettingsLink && hasDate && Number.isFinite(totalCost) && totalCost >= 0;
+    })
+    .map(row => {
+      const occurredAt = parseDateLocal(row.dateISO);
+      return {
+        ...row,
+        occurredAt,
+        totalCost: Math.max(0, Number(row.totalCost) || 0),
+        maintenanceHrs: Math.max(0, Number(row.maintenanceHrs) || 0),
+        partCost: Math.max(0, Number(row.partCost) || 0),
+        laborCost: Math.max(0, Number(row.laborCost) || 0)
+      };
+    })
+    .sort((a, b) => Number(b.occurredAt?.getTime?.() || 0) - Number(a.occurredAt?.getTime?.() || 0));
+
+  const centralTotals = centralMaintenanceRows.reduce((acc, row) => {
+    acc.totalCost += row.totalCost;
+    acc.totalHours += row.maintenanceHrs;
+    return acc;
+  }, { totalCost: 0, totalHours: 0 });
+
+  const oneYearAgo = new Date();
+  oneYearAgo.setHours(0, 0, 0, 0);
+  oneYearAgo.setDate(oneYearAgo.getDate() - 365);
+  const recentYearRows = centralMaintenanceRows.filter(row => row.occurredAt >= oneYearAgo);
+  const annualActualFromCentral = recentYearRows.reduce((sum, row) => sum + row.totalCost, 0);
+  const annualForecastFromCentral = annualActualFromCentral > 0
+    ? annualActualFromCentral
+    : (centralMaintenanceRows.length ? centralTotals.totalCost : 0);
+
+  const timeframeDefsCentral = [
+    { key: "year", label: "Past 12 months", days: 365 },
+    { key: "six", label: "Past 6 months", days: 182 },
+    { key: "quarter", label: "Past 3 months", days: 92 },
+    { key: "month", label: "Past 30 days", days: 30 }
+  ];
+  const timeframeRowsCentral = timeframeDefsCentral.map(def => {
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    const start = new Date(end);
+    start.setDate(start.getDate() - def.days);
+    const rowsInWindow = centralMaintenanceRows.filter(row => row.occurredAt >= start && row.occurredAt <= end);
+    const costActual = rowsInWindow.reduce((sum, row) => sum + row.totalCost, 0);
+    const hours = rowsInWindow.reduce((sum, row) => sum + row.maintenanceHrs, 0);
+    const projected = annualForecastFromCentral > 0 ? (annualForecastFromCentral / 365) * def.days : 0;
+    return {
+      key: def.key,
+      label: def.label,
+      hoursLabel: formatHours(hours),
+      costLabel: formatterCurrency(costActual, { decimals: costActual < 1000 ? 2 : 0 }),
+      projectedLabel: formatterCurrency(projected, { decimals: projected < 1000 ? 2 : 0 })
+    };
+  });
+
+  const timeframeDetailsCentral = timeframeDefsCentral.map(def => {
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    const start = new Date(end);
+    start.setDate(start.getDate() - def.days);
+    const rowsInWindow = centralMaintenanceRows.filter(row => row.occurredAt >= start && row.occurredAt <= end);
+    const actualRows = rowsInWindow.map((row, idx) => ({
+      key: `${def.key}_${row.taskId}_${row.dateISO}_${idx}`,
+      name: row.taskName || "Maintenance task",
+      pn: row.partNumber || "",
+      dateLabel: formatDateLabelShort(row.occurredAt),
+      dateISO: row.dateISO || null,
+      unitLabel: formatterCurrency(row.chargeRate || MAINTENANCE_LABOR_RATE_PER_HOUR, { decimals: 2 }),
+      quantityLabel: Number.isFinite(row.maintenanceHrs) ? String(row.maintenanceHrs) : "—",
+      totalLabel: formatterCurrency(row.totalCost, { decimals: row.totalCost < 1000 ? 2 : 0 }),
+      totalValue: row.totalCost,
+      note: row.taskMode === "asreq" ? "As-required task occurrence" : "Interval task occurrence"
+    }));
+    const actualTotal = actualRows.reduce((sum, row) => sum + (Number(row.totalValue) || 0), 0);
+    const projected = annualForecastFromCentral > 0 ? (annualForecastFromCentral / 365) * def.days : 0;
+    return {
+      key: def.key,
+      label: def.label,
+      rangeLabel: formatRangeLabel(start, end),
+      actualRows,
+      actualTotalLabel: formatterCurrency(actualTotal, { decimals: actualTotal < 1000 ? 2 : 0 }),
+      actualEmptyMessage: actualRows.length ? "" : "No maintenance spend recorded in this window.",
+      projectionRows: [
+        {
+          type: "group",
+          label: "Central maintenance table projection"
+        },
+        {
+          type: "item",
+          key: `projection_${def.key}`,
+          label: "Historical annualized maintenance cost",
+          basis: "Projected from completed task occurrences in the central table",
+          amountLabel: formatterCurrency(projected, { decimals: projected < 1000 ? 2 : 0 })
+        }
+      ],
+      projectionTotalLabel: formatterCurrency(projected, { decimals: projected < 1000 ? 2 : 0 }),
+      projectionEmptyMessage: ""
+    };
+  });
+
+  const modeGroupRows = (modeValue) => centralMaintenanceRows.filter(row => row.taskMode === modeValue);
+  const makeForecastRows = (rows, prefix) => {
+    const byTask = new Map();
+    rows.forEach(row => {
+      const taskKey = `${row.taskId}`;
+      const entry = byTask.get(taskKey) || {
+        key: taskKey,
+        name: row.taskName || "Maintenance task",
+        totalCost: 0,
+        count: 0
+      };
+      entry.totalCost += row.totalCost;
+      entry.count += 1;
+      byTask.set(taskKey, entry);
+    });
+    return Array.from(byTask.values())
+      .sort((a, b) => b.totalCost - a.totalCost)
+      .map((entry, index) => ({
+        key: `${prefix}_${entry.key}_${index}`,
+        name: entry.name,
+        cadenceLabel: `${entry.count} completed occurrence${entry.count === 1 ? "" : "s"}`,
+        unitCostLabel: entry.count > 0
+          ? formatterCurrency(entry.totalCost / entry.count, { decimals: 2 })
+          : "—",
+        annualTotalLabel: formatterCurrency(entry.totalCost, { decimals: entry.totalCost < 1000 ? 2 : 0 })
+      }));
+  };
+  const intervalRowsFromCentral = makeForecastRows(modeGroupRows("interval"), "interval");
+  const asReqRowsFromCentral = makeForecastRows(modeGroupRows("asreq"), "asreq");
+  const intervalTotalFromCentral = modeGroupRows("interval").reduce((sum, row) => sum + row.totalCost, 0);
+  const asReqTotalFromCentral = modeGroupRows("asreq").reduce((sum, row) => sum + row.totalCost, 0);
+  const forecastBreakdownCentral = {
+    sections: [
+      {
+        key: "interval",
+        label: "Interval tasks",
+        rows: intervalRowsFromCentral,
+        totalLabel: formatterCurrency(intervalTotalFromCentral, { decimals: intervalTotalFromCentral < 1000 ? 2 : 0 }),
+        emptyMessage: intervalRowsFromCentral.length ? "" : "No interval occurrences in central data table."
+      },
+      {
+        key: "asRequired",
+        label: "As-required tasks",
+        rows: asReqRowsFromCentral,
+        totalLabel: formatterCurrency(asReqTotalFromCentral, { decimals: asReqTotalFromCentral < 1000 ? 2 : 0 }),
+        emptyMessage: asReqRowsFromCentral.length ? "" : "No as-required occurrences in central data table."
+      }
+    ],
+    totals: {
+      intervalLabel: formatterCurrency(intervalTotalFromCentral, { decimals: intervalTotalFromCentral < 1000 ? 2 : 0 }),
+      asReqLabel: formatterCurrency(asReqTotalFromCentral, { decimals: asReqTotalFromCentral < 1000 ? 2 : 0 }),
+      combinedLabel: formatterCurrency(intervalTotalFromCentral + asReqTotalFromCentral, { decimals: intervalTotalFromCentral + asReqTotalFromCentral < 1000 ? 2 : 0 })
+    }
+  };
+
+  const historyRowsCentral = centralMaintenanceRows.slice(0, 6).map(row => ({
+    dateLabel: formatDateLabelShort(row.occurredAt),
+    hoursLabel: formatHours(row.maintenanceHrs),
+    costLabel: formatterCurrency(row.totalCost, { decimals: row.totalCost < 1000 ? 2 : 0 }),
+    dateISO: row.dateISO,
+    key: `${row.taskId}_${row.dateISO}`,
+    hoursValue: row.maintenanceHrs,
+    taskId: row.taskId,
+    originalTaskId: row.taskId,
+    taskMode: row.taskMode || "interval",
+    taskName: row.taskName || "Maintenance task",
+    titleLabel: row.taskName || "Maintenance task",
+    rangeLabel: formatDateLabelShort(row.occurredAt),
+    taskLabel: `Linked task: ${row.taskName || "Maintenance task"}`,
+    tooltipLabel: row.taskName || null,
+    missingTask: false,
+    taskCount: 1,
+    hasLinkedTasks: true,
+    trashId: null
+  }));
+
+  const maintenanceSeriesCentral = centralMaintenanceRows
+    .slice()
+    .sort((a, b) => Number(a.occurredAt?.getTime?.() || 0) - Number(b.occurredAt?.getTime?.() || 0))
+    .map(row => ({
+      date: row.occurredAt,
+      value: row.totalCost,
+      detail: `Completed maintenance task ${row.taskName || "task"} recorded on ${formatDateLabelShort(row.occurredAt)} from the central data table.`
+    }));
+
+  if (Array.isArray(summaryCards) && summaryCards.length){
+    summaryCards[0].value = formatterCurrency(-annualForecastFromCentral, { decimals: 0, showPlus: true });
+    summaryCards[0].hint = annualActualFromCentral > 0
+      ? `Projected from completed task occurrences in the central table. Last 12 months actual: ${formatterCurrency(annualActualFromCentral, { decimals: annualActualFromCentral < 1000 ? 2 : 0 })}.`
+      : "Projected directly from central maintenance table rows.";
+    const combinedCard = summaryCards.find(card => card && card.key === "combinedImpact");
+    if (combinedCard){
+      combinedCard.value = formatterCurrency(totalGainLoss - annualForecastFromCentral, { decimals: 0, showPlus: true });
+      combinedCard.hint = "Maintenance forecast (central table) plus cutting job efficiency impact.";
+    }
+  }
+  const maintenanceDataTable = centralMaintenanceRows.map((row, idx) => ({
     id: `${row.taskId}_${row.dateISO}_${idx}`,
     taskId: row.taskId,
     taskName: row.taskName,
@@ -15090,11 +15292,11 @@ function computeCostModel(){
 
   return {
     summaryCards,
-    timeframeRows,
-    timeframeDetails,
-    forecastBreakdown,
+    timeframeRows: timeframeRowsCentral,
+    timeframeDetails: timeframeDetailsCentral,
+    forecastBreakdown: forecastBreakdownCentral,
     timeframeNote,
-    historyRows,
+    historyRows: historyRowsCentral,
     historyEmpty,
     jobSummary,
     jobBreakdown,
@@ -15106,7 +15308,7 @@ function computeCostModel(){
     maintenanceDataTable,
     cuttingJobsDataTable,
     chartColors: COST_CHART_COLORS,
-    maintenanceSeries,
+    maintenanceSeries: maintenanceSeriesCentral,
     jobSeries,
     weeklyReports
   };
