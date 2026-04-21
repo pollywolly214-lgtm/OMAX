@@ -1648,8 +1648,7 @@ function captureNewJobFormState(){
   return {
     fields: {
       name: captureField("jobName"),
-      estimateHours: captureField("jobEstHours"),
-      estimateMinutes: captureField("jobEstMinutes"),
+      estimate: captureField("jobEst"),
       priority: captureField("jobPriority"),
       charge: captureField("jobCharge"),
       costRate: captureField("jobCostRate"),
@@ -1679,8 +1678,7 @@ function restoreNewJobFormState(state){
   };
 
   assignField("jobName", state.fields.name);
-  assignField("jobEstHours", state.fields.estimateHours);
-  assignField("jobEstMinutes", state.fields.estimateMinutes);
+  assignField("jobEst", state.fields.estimate);
   assignField("jobPriority", state.fields.priority);
   assignField("jobCharge", state.fields.charge);
   assignField("jobCostRate", state.fields.costRate);
@@ -5043,8 +5041,9 @@ function renderDashboard(){
   const oneTimeDateInput = document.getElementById("dashOneTimeDate");
   const oneTimeNoteInput = document.getElementById("dashOneTimeNote");
   const jobNameInput     = document.getElementById("dashJobName");
-  const jobEstimateHoursInput = document.getElementById("dashJobEstimateHours");
+  const jobEstimateInput = document.getElementById("dashJobEstimate");
   const jobEstimateMinutesInput = document.getElementById("dashJobEstimateMinutes");
+  const jobEstimateBreakdown = document.getElementById("dashJobEstimateBreakdown");
   const jobChargeInput   = document.getElementById("dashJobCharge");
   const jobCostRateInput = document.getElementById("dashJobCostRate");
   const jobMaterialInput = document.getElementById("dashJobMaterial");
@@ -5059,19 +5058,6 @@ function renderDashboard(){
     if (!dashJobCategoryHint) return;
     const current = jobCategoryInput ? String(jobCategoryInput.value || "") : "";
     dashJobCategoryHint.hidden = !!current && current !== dashRootCategoryId;
-  };
-  const normalizeDashEstimateInputs = ()=>{
-    if (!(jobEstimateHoursInput instanceof HTMLInputElement) || !(jobEstimateMinutesInput instanceof HTMLInputElement)) return;
-    const rawHours = Number(jobEstimateHoursInput.value);
-    const rawMinutes = Number(jobEstimateMinutesInput.value);
-    let hours = Number.isFinite(rawHours) && rawHours >= 0 ? Math.floor(rawHours) : 0;
-    let minutes = Number.isFinite(rawMinutes) && rawMinutes >= 0 ? Math.floor(rawMinutes) : 0;
-    if (minutes >= 60){
-      hours += Math.floor(minutes / 60);
-      minutes %= 60;
-    }
-    jobEstimateHoursInput.value = String(hours);
-    jobEstimateMinutesInput.value = String(minutes);
   };
   const garnetForm       = document.getElementById("dashGarnetForm");
   const garnetDateInput  = document.getElementById("dashGarnetDate");
@@ -6404,13 +6390,41 @@ function renderDashboard(){
   });
 
   updateDashJobCategoryHint();
-  jobEstimateMinutesInput?.addEventListener("input", normalizeDashEstimateInputs);
+  const formatDashEstimateBreakdown = (hoursValue)=>{
+    const totalHours = Number(hoursValue);
+    const safeHours = Number.isFinite(totalHours) && totalHours >= 0 ? totalHours : 0;
+    const wholeHours = Math.floor(safeHours);
+    const minutes = Math.round((safeHours - wholeHours) * 60);
+    const safeText = safeHours.toFixed(2).replace(/\.?0+$/, "");
+    return `${safeText} hrs = ${wholeHours} hrs ${Math.min(minutes, 59)} min`;
+  };
+  const refreshDashEstimateBreakdown = ()=>{
+    if (!(jobEstimateInput instanceof HTMLInputElement) || !(jobEstimateBreakdown instanceof HTMLElement)) return;
+    jobEstimateBreakdown.textContent = formatDashEstimateBreakdown(jobEstimateInput.value);
+  };
+  const applyDashMinutesToHours = ()=>{
+    if (!(jobEstimateInput instanceof HTMLInputElement) || !(jobEstimateMinutesInput instanceof HTMLInputElement)) return;
+    const minutes = Number(jobEstimateMinutesInput.value);
+    if (!Number.isFinite(minutes) || minutes <= 0){
+      refreshDashEstimateBreakdown();
+      return;
+    }
+    const baseHours = Number(jobEstimateInput.value);
+    const safeHours = Number.isFinite(baseHours) && baseHours >= 0 ? baseHours : 0;
+    jobEstimateInput.value = String(Number((safeHours + (minutes / 60)).toFixed(2)));
+    jobEstimateMinutesInput.value = "";
+    refreshDashEstimateBreakdown();
+  };
+  jobEstimateInput?.addEventListener("input", refreshDashEstimateBreakdown);
+  jobEstimateMinutesInput?.addEventListener("change", applyDashMinutesToHours);
+  jobEstimateMinutesInput?.addEventListener("blur", applyDashMinutesToHours);
+  refreshDashEstimateBreakdown();
 
   jobForm?.addEventListener("submit", (e)=>{
     e.preventDefault();
     const name = (jobNameInput?.value || "").trim();
-    normalizeDashEstimateInputs();
-    const est  = (Number(jobEstimateHoursInput?.value) || 0) + ((Number(jobEstimateMinutesInput?.value) || 0) / 60);
+    applyDashMinutesToHours();
+    const est  = Number(jobEstimateInput?.value);
     const chargeRaw = jobChargeInput?.value ?? "";
     const costRateRaw = jobCostRateInput?.value ?? "";
     const material = (jobMaterialInput?.value || "").trim();
@@ -16278,30 +16292,45 @@ function renderJobs(){
   };
 
   // 4) Add Job (unchanged)
-  const normalizeEstimateInputs = (hoursInput, minutesInput)=>{
-    if (!(hoursInput instanceof HTMLInputElement) || !(minutesInput instanceof HTMLInputElement)) return;
-    const rawHours = Number(hoursInput.value);
-    const rawMinutes = Number(minutesInput.value);
-    let hours = Number.isFinite(rawHours) && rawHours >= 0 ? Math.floor(rawHours) : 0;
-    let minutes = Number.isFinite(rawMinutes) && rawMinutes >= 0 ? Math.floor(rawMinutes) : 0;
+  const formatEstimateBreakdown = (hoursValue)=>{
+    const totalHours = Number(hoursValue);
+    const safeHours = Number.isFinite(totalHours) && totalHours >= 0 ? totalHours : 0;
+    const wholeHours = Math.floor(safeHours);
+    const minutes = Math.round((safeHours - wholeHours) * 60);
     if (minutes >= 60){
-      hours += Math.floor(minutes / 60);
-      minutes %= 60;
+      return `${(wholeHours + 1).toFixed(2).replace(/\.?0+$/, "")} hrs = ${wholeHours + 1} hrs 0 min`;
     }
-    hoursInput.value = String(hours);
-    minutesInput.value = String(minutes);
+    const normalizedHoursText = safeHours.toFixed(2).replace(/\.?0+$/, "");
+    return `${normalizedHoursText} hrs = ${wholeHours} hrs ${minutes} min`;
+  };
+  const refreshEstimateBreakdown = (hoursInput, breakdownEl)=>{
+    if (!(hoursInput instanceof HTMLInputElement) || !(breakdownEl instanceof HTMLElement)) return;
+    breakdownEl.textContent = formatEstimateBreakdown(hoursInput.value);
+  };
+  const applyMinutesToHours = (hoursInput, minutesInput, breakdownEl)=>{
+    if (!(hoursInput instanceof HTMLInputElement) || !(minutesInput instanceof HTMLInputElement)) return;
+    const baseHours = Number(hoursInput.value);
+    const minutes = Number(minutesInput.value);
+    if (!Number.isFinite(minutes) || minutes <= 0){
+      refreshEstimateBreakdown(hoursInput, breakdownEl);
+      return;
+    }
+    const safeHours = Number.isFinite(baseHours) && baseHours >= 0 ? baseHours : 0;
+    const converted = Number((safeHours + (minutes / 60)).toFixed(2));
+    hoursInput.value = String(converted);
+    minutesInput.value = "";
+    refreshEstimateBreakdown(hoursInput, breakdownEl);
   };
   const syncAddJobDraftFromForm = ()=>{
     const form = document.getElementById("addJobForm");
     if (!form) return;
-    normalizeEstimateInputs(document.getElementById("jobEstHours"), document.getElementById("jobEstMinutes"));
     const getVal = (id)=>{
       const el = document.getElementById(id);
       return el && typeof el.value === "string" ? el.value : "";
     };
     window.jobAddDraft = {
       name: getVal("jobName"),
-      estimate: String((Number(getVal("jobEstHours")) || 0) + ((Number(getVal("jobEstMinutes")) || 0) / 60)),
+      estimate: getVal("jobEst"),
       priority: getVal("jobPriority"),
       charge: getVal("jobCharge"),
       costRate: getVal("jobCostRate"),
@@ -16317,17 +16346,26 @@ function renderJobs(){
   const addJobForm = document.getElementById("addJobForm");
   addJobForm?.addEventListener("input", syncAddJobDraftFromForm);
   addJobForm?.addEventListener("change", syncAddJobDraftFromForm);
-  document.getElementById("jobEstMinutes")?.addEventListener("input", ()=>{
-    normalizeEstimateInputs(document.getElementById("jobEstHours"), document.getElementById("jobEstMinutes"));
+  const addJobEstHoursInput = document.getElementById("jobEst");
+  const addJobEstMinutesInput = document.getElementById("jobEstMinutes");
+  const addJobEstBreakdown = document.getElementById("jobEstBreakdown");
+  addJobEstHoursInput?.addEventListener("input", ()=> refreshEstimateBreakdown(addJobEstHoursInput, addJobEstBreakdown));
+  addJobEstMinutesInput?.addEventListener("change", ()=>{
+    applyMinutesToHours(addJobEstHoursInput, addJobEstMinutesInput, addJobEstBreakdown);
+    syncAddJobDraftFromForm();
   });
+  addJobEstMinutesInput?.addEventListener("blur", ()=>{
+    applyMinutesToHours(addJobEstHoursInput, addJobEstMinutesInput, addJobEstBreakdown);
+    syncAddJobDraftFromForm();
+  });
+  refreshEstimateBreakdown(addJobEstHoursInput, addJobEstBreakdown);
 
   document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name  = document.getElementById("jobName").value.trim();
-    const estHoursInput = document.getElementById("jobEstHours");
     const estMinutesInput = document.getElementById("jobEstMinutes");
-    normalizeEstimateInputs(estHoursInput, estMinutesInput);
-    const est = (Number(estHoursInput?.value) || 0) + ((Number(estMinutesInput?.value) || 0) / 60);
+    applyMinutesToHours(addJobEstHoursInput, estMinutesInput, addJobEstBreakdown);
+    const est = Number(addJobEstHoursInput?.value);
     const material = document.getElementById("jobMaterial")?.value.trim() || "";
     const chargeRaw = document.getElementById("jobCharge")?.value ?? "";
     const costRateRaw = document.getElementById("jobCostRate")?.value ?? "";
