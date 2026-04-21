@@ -10967,8 +10967,9 @@ function renderCosts(){
       cost: Number(item?.cost) || 0,
       qty: Number(item?.qty) || 0,
       partNumber: String(item?.partNumber || ""),
-      shipping: Number(item?.shipping) || 0
-    })).filter(row => row.date || row.purchased || row.cost || row.qty || row.partNumber || row.shipping);
+      shipping: Number(item?.shipping) || 0,
+      tax: Number(item?.tax) || 0
+    })).filter(row => row.date || row.purchased || row.cost || row.qty || row.partNumber || row.shipping || row.tax);
     const getWeekEntry = (key)=>{
       const existing = window.receiptTrackerWeeks.find(entry => String(entry?.key || "") === key);
       if (existing) return existing;
@@ -10977,7 +10978,7 @@ function renderCosts(){
       window.receiptTrackerWeeks.push(created);
       return created;
     };
-    const computeRowTotal = (row)=> ((Number(row?.cost) || 0) * (Number(row?.qty) || 0)) + (Number(row?.shipping) || 0);
+    const computeRowTotal = (row)=> ((Number(row?.cost) || 0) * (Number(row?.qty) || 0)) + (Number(row?.shipping) || 0) + (Number(row?.tax) || 0);
     const buildRangeRows = (months)=>{
       const end = new Date();
       const start = months === "all" ? null : new Date(end.getFullYear(), end.getMonth() - Number(months), end.getDate());
@@ -11040,7 +11041,8 @@ function renderCosts(){
           cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
           qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
           partNumber: String(tr.querySelector('[data-col=\"partNumber\"]')?.value || "").trim(),
-          shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0
+          shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
+          tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
         }));
         entry.rows = normalizeRows(rows);
         persistReceiptState();
@@ -11057,6 +11059,7 @@ function renderCosts(){
           <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
           <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00"></td>
+          <td><input type="number" min="0" step="0.01" data-col="tax" placeholder="0.00"></td>
           <td data-col="total">${formatUsd(0)}</td>`;
         weekRowsBody.appendChild(tr);
         if (focusFirst){
@@ -11071,7 +11074,8 @@ function renderCosts(){
           const row = {
             cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
             qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
-            shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0
+            shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
+            tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
           };
           const total = computeRowTotal(row);
           subtotal += total;
@@ -11095,6 +11099,7 @@ function renderCosts(){
             <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
             <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}"></td>
+            <td><input type="number" min="0" step="0.01" data-col="tax" value="${escapeHtml(String(row.tax || 0))}"></td>
             <td data-col="total">${formatUsd(computeRowTotal(row))}</td>
           </tr>`).join("");
         appendEmptyRow();
@@ -11111,9 +11116,10 @@ function renderCosts(){
             <td>${escapeHtml(String(row.qty || 0))}</td>
             <td>${escapeHtml(row.partNumber || "—")}</td>
             <td>${formatUsd(row.shipping || 0)}</td>
+            <td>${formatUsd(row.tax || 0)}</td>
             <td>${formatUsd(row.total || 0)}</td>
             <td></td>
-          </tr>`).join("") : '<tr><td colspan="7" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
+          </tr>`).join("") : '<tr><td colspan="8" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
         if (rangeSubtotal) rangeSubtotal.textContent = formatUsd(subtotal);
       };
       const bindRowEvents = ()=>{
@@ -11125,7 +11131,7 @@ function renderCosts(){
           event.preventDefault();
           const row = input.closest("tr[data-receipt-row]");
           if (!row) return;
-          const columns = ["date", "purchased", "cost", "qty", "partNumber", "shipping"];
+          const columns = ["date", "purchased", "cost", "qty", "partNumber", "shipping", "tax"];
           const col = input.getAttribute("data-col") || "";
           const idx = columns.indexOf(col);
           if (idx < 0) return;
@@ -11173,9 +11179,9 @@ function renderCosts(){
           const rows = normalizeRows(entry.rows);
           const subtotal = rows.reduce((sum, row) => sum + computeRowTotal(row), 0);
           const payload = [
-            ["Date", "Purchased", "Cost", "Qty", "Part number", "Shipping", "Total"],
-            ...rows.map(row => [row.date, row.purchased, row.cost, row.qty, row.partNumber, row.shipping, computeRowTotal(row)]),
-            ["", "", "", "", "", "Subtotal", subtotal]
+            ["Date", "Purchased", "Cost", "Qty", "Part number", "Shipping", "Tax", "Total"],
+            ...rows.map(row => [row.date, row.purchased, row.cost, row.qty, row.partNumber, row.shipping, row.tax, computeRowTotal(row)]),
+            ["", "", "", "", "", "", "Subtotal", subtotal]
           ];
           downloadCsv(`receipt-week-${entry.key}.csv`, payload);
         });
@@ -11185,9 +11191,9 @@ function renderCosts(){
           const rows = buildRangeRows(activeRange);
           const subtotal = rows.reduce((sum, row) => sum + row.total, 0);
           const payload = [
-            ["Date", "Purchased", "Qty", "Part number", "Shipping", "Total"],
-            ...rows.map(row => [row.date, row.purchased, row.qty, row.partNumber, row.shipping, row.total]),
-            ["", "", "", "", "Subtotal", subtotal]
+            ["Date", "Purchased", "Qty", "Part number", "Shipping", "Tax", "Total"],
+            ...rows.map(row => [row.date, row.purchased, row.qty, row.partNumber, row.shipping, row.tax, row.total]),
+            ["", "", "", "", "", "Subtotal", subtotal]
           ];
           downloadCsv(`receipt-range-${activeRange}.csv`, payload);
         });

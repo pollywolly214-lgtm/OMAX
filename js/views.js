@@ -1800,9 +1800,9 @@ function viewCosts(model){
           <p class="small muted" data-receipt-week-range>—</p>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-week-table">
-              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Total</th></tr></thead>
+              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th></tr></thead>
               <tbody data-receipt-week-rows></tbody>
-              <tfoot><tr><th colspan="6">Subtotal</th><th data-receipt-week-subtotal>$0.00</th></tr></tfoot>
+              <tfoot><tr><th colspan="7">Subtotal</th><th data-receipt-week-subtotal>$0.00</th></tr></tfoot>
             </table>
           </div>
           <div class="cost-receipt-summary-controls">
@@ -1820,9 +1820,9 @@ function viewCosts(model){
           </div>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-summary-table">
-              <thead><tr><th>Date</th><th>Purchased</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Total</th><th>Sub total</th></tr></thead>
+              <thead><tr><th>Date</th><th>Purchased</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th><th>Sub total</th></tr></thead>
               <tbody data-receipt-range-rows></tbody>
-              <tfoot><tr><th colspan="6">Subtotal</th><th data-receipt-range-subtotal>$0.00</th></tr></tfoot>
+              <tfoot><tr><th colspan="7">Subtotal</th><th data-receipt-range-subtotal>$0.00</th></tr></tfoot>
             </table>
           </div>
         </div>
