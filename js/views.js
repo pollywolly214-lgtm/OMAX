@@ -824,13 +824,12 @@ function renderSettingsCategoriesPane(){
   // Small helpers
 // Give every task a category so the explorer can find them
 function ensureTaskCategories(){
-  // interval tasks live under the "interval" folder
+  const rootId = typeof window.ROOT_FOLDER_ID === "string" ? window.ROOT_FOLDER_ID : "root";
   if (Array.isArray(tasksInterval)) {
-    tasksInterval.forEach(t => { if (!t.cat) t.cat = "interval"; });
+    tasksInterval.forEach(t => { if (!t.cat) t.cat = rootId; });
   }
-  // as-required tasks live under the "asreq" folder
   if (Array.isArray(tasksAsReq)) {
-    tasksAsReq.forEach(t => { if (!t.cat) t.cat = "asreq"; });
+    tasksAsReq.forEach(t => { if (!t.cat) t.cat = rootId; });
   }
 }
 
