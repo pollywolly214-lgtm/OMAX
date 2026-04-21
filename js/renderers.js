@@ -15000,6 +15000,9 @@ function computeCostModel(){
       totalCostLabel: formatterCurrency(Number(row?.totalCostValue) || 0, { decimals: 2 }),
       totalProfitLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
       hoursValue: Number(row?.hoursValue) || 0,
+      revenueValue: Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)),
+      materialValue: Math.max(0, Number(row?.materialCostValue) || 0),
+      laborValue: Math.max(0, Number(row?.laborCostValue) || 0),
       totalCostValue: Number(row?.totalCostValue) || 0,
       totalProfitValue: Number(row?.totalProfitValue) || 0,
       formulaTitle: "Source: Central data table completed cutting jobs row. Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost).",
@@ -15007,10 +15010,13 @@ function computeCostModel(){
     }));
   const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
     if (Number.isFinite(row?.hoursValue)) acc.hours += Math.max(0, Number(row.hoursValue));
+    if (Number.isFinite(row?.revenueValue)) acc.revenue += Math.max(0, Number(row.revenueValue));
+    if (Number.isFinite(row?.materialValue)) acc.material += Math.max(0, Number(row.materialValue));
+    if (Number.isFinite(row?.laborValue)) acc.labor += Math.max(0, Number(row.laborValue));
     if (Number.isFinite(row?.totalCostValue)) acc.cost += Math.max(0, Number(row.totalCostValue));
     if (Number.isFinite(row?.totalProfitValue)) acc.profit += Number(row.totalProfitValue);
     return acc;
-  }, { hours: 0, cost: 0, profit: 0 });
+  }, { hours: 0, revenue: 0, material: 0, labor: 0, cost: 0, profit: 0 });
   const efficiencyCount = efficiencyRows.length;
   const efficiencySnapshot = {
     countLabel: String(efficiencyCount),
@@ -15024,6 +15030,8 @@ function computeCostModel(){
     rows: efficiencyRows,
     emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
   };
+  const efficiencyMathDetails = `Profit = Revenue - (Labor + Material). Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Labor ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Profit ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}, Hours ${formatHoursValue(efficiencyTotals.hours)}.`;
+  efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
   const efficiencyDisplayProfit = Math.max(0, efficiencyTotals.profit);
   const efficiencyDisplayAverage = efficiencyCount ? (efficiencyDisplayProfit / efficiencyCount) : 0;
   const cuttingCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "cuttingJobs") : null;
@@ -15032,6 +15040,7 @@ function computeCostModel(){
     cuttingCard.hint = efficiencyCount
       ? `Average gain/loss ${formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true })} across ${efficiencyCount} completed job${efficiencyCount===1?"":"s"} (source: central data table).`
       : "No cutting jobs logged yet.";
+    cuttingCard.tooltip = `Source: central data table completed rows. ${efficiencyMathDetails}`;
   }
   const combinedCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "combinedImpact") : null;
   if (combinedCard){

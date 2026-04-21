@@ -1544,6 +1544,9 @@ function viewCosts(model){
     if (key){
       attrParts.push(`data-card-key="${esc(key)}"`);
     }
+    if (card && card.tooltip){
+      attrParts.push(`title="${esc(card.tooltip)}"`);
+    }
     if (isForecast){
       attrParts.push("role=\"button\"");
       attrParts.push("tabindex=\"0\"");
@@ -2243,8 +2246,8 @@ function viewCosts(model){
           <div class="cost-jobs-summary">
             <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
             <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
-            <div title="${esc(`Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)"}`)}"><span class="label">Total profit</span><span>${esc(efficiencySnapshot.totalProfitLabel || "$0.00")}</span></div>
-            <div title="${esc(`Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)"}`)}"><span class="label">Avg profit / row</span><span>${esc(efficiencySnapshot.averageProfitLabel || "$0.00")}</span></div>
+            <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)"}`.trim())}"><span class="label">Total profit</span><span>${esc(efficiencySnapshot.totalProfitLabel || "$0.00")}</span></div>
+            <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)"}`.trim())}"><span class="label">Avg profit / row</span><span>${esc(efficiencySnapshot.averageProfitLabel || "$0.00")}</span></div>
           </div>
           <p class="small muted" title="${esc(efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)")}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")}</p>
           <table class="cost-table">
