@@ -500,6 +500,39 @@ body.pump-notes-open { overflow:hidden; }
 .cost-timeframe-row:focus-visible{ outline:2px solid var(--brand-blue-400, #2563eb); outline-offset:2px; }
 .cost-timeframe-section .small.muted{ margin-top:0; }
 body.cost-timeframe-modal-open{ overflow:hidden; }
+.cost-data-center-modal{ position:fixed; inset:0; z-index:99999; display:flex; align-items:center; justify-content:center; padding:24px; }
+.cost-data-center-modal[hidden]{ display:none; }
+.cost-data-center-backdrop{ position:absolute; inset:0; background:rgba(15,23,42,0.5); }
+.cost-data-center-panel{
+  position:relative;
+  width:min(1600px,98vw);
+  max-height:92vh;
+  overflow:auto;
+  background:#fff;
+  border-radius:12px;
+  box-shadow:0 20px 46px rgba(2,8,20,.35);
+  padding:16px;
+  color:#000;
+}
+.cost-data-center-header{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+.cost-data-center-search{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px; max-width:360px; }
+.cost-data-center-search label{ font-weight:600; font-size:14px; }
+.cost-data-center-search input{ border:1px solid #9aa6bb; border-radius:6px; padding:8px 10px; font-size:14px; color:#000; background:#fff; }
+.cost-data-center-search-suggestions{ display:flex; flex-direction:column; gap:4px; border:1px solid #b9c4d6; border-radius:6px; background:#fff; padding:4px; }
+.cost-data-center-suggestion{ text-align:left; border:0; background:#f4f7ff; color:#000; padding:6px 8px; border-radius:4px; cursor:pointer; font-size:13px; }
+.cost-data-center-suggestion:hover{ background:#e7eeff; }
+.cost-data-center-panel h3,
+.cost-data-center-panel .small,
+.cost-data-center-panel .muted,
+.cost-data-center-panel .cost-table,
+.cost-data-center-panel .cost-table th,
+.cost-data-center-panel .cost-table td,
+.cost-data-center-panel label,
+.cost-data-center-panel select,
+.cost-data-center-panel button{
+  color:#000;
+}
+body.cost-data-center-open{ overflow:hidden; }
 @media (max-width: 640px){
   .cost-timeframe-card-body{ padding:24px 18px 28px; }
   .cost-timeframe-table th,.cost-timeframe-table td{ padding:8px 10px; }
