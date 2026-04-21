@@ -2124,7 +2124,14 @@ function viewCosts(model){
                         <td>${esc(row.projectNumber || "—")}</td>
                         <td>${esc(row.priorityLabel || "—")}</td>
                         <td>${esc(row.notes || "—")}</td>
-                        <td><button type="button" data-cutting-open-job data-job-id="${esc(row.id || "")}">Open job</button></td>
+                        <td>
+                          <label class="sr-only" for="cuttingLinkMode_${esc(row.id || "")}">Cutting link destination</label>
+                          <select id="cuttingLinkMode_${esc(row.id || "")}" data-cutting-link-mode>
+                            <option value="jobs">Cutting jobs page</option>
+                            <option value="calendar">Calendar</option>
+                          </select>
+                          <button type="button" data-cutting-open-job data-job-id="${esc(row.id || "")}" data-date-iso="${esc(row.completedDateLabel || "")}" data-link-mode-id="cuttingLinkMode_${esc(row.id || "")}">Open job</button>
+                        </td>
                       </tr>
                     `).join("")}
                   </tbody>

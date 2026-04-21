@@ -10656,6 +10656,41 @@ function renderCosts(){
     }
   }
 
+  function focusCalendarForCuttingJob(jobId, dateISO){
+    const dueISO = String(dateISO || "");
+    const parsedDue = dueISO && typeof parseDateLocal === "function"
+      ? parseDateLocal(dueISO)
+      : (dueISO ? new Date(dueISO) : null);
+    if (parsedDue instanceof Date && !Number.isNaN(parsedDue.getTime())){
+      parsedDue.setHours(0,0,0,0);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const diffMonths = (parsedDue.getFullYear() - today.getFullYear()) * 12 + (parsedDue.getMonth() - today.getMonth());
+      window.__calendarMonthOffset = Math.min(12, Math.max(-12, Math.round(diffMonths)));
+    }
+    if (typeof hideBubble === "function") hideBubble();
+    location.hash = "#/";
+    const runFocus = ()=>{
+      if (typeof renderCalendar === "function") renderCalendar();
+      const months = document.getElementById("months");
+      const cell = dueISO ? months?.querySelector(`[data-date-iso="${dueISO}"]`) : null;
+      if (!cell) return false;
+      cell.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (typeof highlightCalendarDayCell === "function"){
+        highlightCalendarDayCell(cell);
+      }
+      const anchor = jobId ? (cell.querySelector(`[data-cal-job="${String(jobId)}"]`) || cell) : cell;
+      if (jobId && typeof showJobBubble === "function"){
+        showJobBubble(String(jobId), anchor);
+      }
+      return true;
+    };
+    if (!runFocus()){
+      setTimeout(runFocus, 120);
+      setTimeout(runFocus, 320);
+    }
+  }
+
   function setupMaintenanceDataCenterActions(options = {}){
     const openBtn = content.querySelector("[data-open-data-center]");
     const modal = content.querySelector("[data-data-center-modal]");
@@ -10663,6 +10698,9 @@ function renderCosts(){
     const tabButtons = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-tab]")) : [];
     const panels = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-panel]")) : [];
     const setActiveTab = (tabKey)=>{
+      if (typeof window !== "undefined"){
+        window.dataCenterActiveTab = tabKey;
+      }
       tabButtons.forEach(btn => {
         if (!(btn instanceof HTMLElement)) return;
         const isActive = String(btn.getAttribute("data-dc-tab") || "") === tabKey;
@@ -10682,7 +10720,10 @@ function renderCosts(){
         setActiveTab(key);
       });
     });
-    setActiveTab("maintenance");
+    const rememberedTab = (typeof window !== "undefined" && typeof window.dataCenterActiveTab === "string")
+      ? window.dataCenterActiveTab
+      : "maintenance";
+    setActiveTab(rememberedTab === "cutting" ? "cutting" : "maintenance");
     if (modal instanceof HTMLElement){
       document.body.appendChild(modal);
     }
@@ -10857,7 +10898,15 @@ function renderCosts(){
       if (!(btn instanceof HTMLElement)) return;
       btn.addEventListener("click", ()=>{
         const jobId = String(btn.getAttribute("data-job-id") || "");
+        const dateISO = String(btn.getAttribute("data-date-iso") || "");
+        const modeId = String(btn.getAttribute("data-link-mode-id") || "");
+        const modeEl = modeId ? document.getElementById(modeId) : null;
+        const destination = String(modeEl instanceof HTMLSelectElement ? modeEl.value : "jobs").toLowerCase();
         closeDataCenter();
+        if (destination === "calendar"){
+          focusCalendarForCuttingJob(jobId, dateISO);
+          return;
+        }
         if (jobId){
           window.pendingJobFocus = { type: "jobRow", id: jobId };
         }
@@ -15193,13 +15242,13 @@ function renderJobs(){
       requestAnimationFrame(()=>{
         const targetRow = content.querySelector(`[data-job-row="${pendingJobFocus.id}"]`);
         if (targetRow instanceof HTMLElement){
-          targetRow.classList.add("job-row-priority-animate");
+          targetRow.classList.add("job-row-link-highlight");
           try {
             targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
           } catch (_err){
             try { targetRow.scrollIntoView(); } catch(__){}
           }
-          setTimeout(()=> targetRow.classList.remove("job-row-priority-animate"), 1800);
+          setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2000);
         }
       });
     }
