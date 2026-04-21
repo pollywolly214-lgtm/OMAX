@@ -1209,6 +1209,7 @@ function viewCosts(model){
   const cuttingJobsDataTable = Array.isArray(data.cuttingJobsDataTable) ? data.cuttingJobsDataTable : [];
   const efficiencySnapshot = data.efficiencySnapshot || {};
   const efficiencyRows = Array.isArray(efficiencySnapshot.rows) ? efficiencySnapshot.rows : [];
+  const calculatorDefaults = efficiencySnapshot.calculatorDefaults || {};
   const cuttingJobCategoryOptions = Array.from(new Set(
     cuttingJobsDataTable
       .map(row => ({ id: String(row?.categoryId || ""), label: String(row?.categoryLabel || "") }))
@@ -2248,6 +2249,24 @@ function viewCosts(model){
             <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
             <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"}`.trim())}"><span class="label">Total gain (before expense)</span><span>${esc(efficiencySnapshot.totalBeforeExpenseLabel || "$0.00")}</span></div>
             <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"}`.trim())}"><span class="label">Avg gain / row (before expense)</span><span>${esc(efficiencySnapshot.averageBeforeExpenseLabel || "$0.00")}</span></div>
+          </div>
+          <div class="cost-efficiency-calculator" data-efficiency-calc>
+            <div class="cost-efficiency-calculator-row">
+              <label>
+                <span class="label">Charge / hr (temporary)</span>
+                <input type="number" step="0.01" min="0" value="${esc(String(Number(calculatorDefaults.chargeRate) || 0))}" data-efficiency-calc-charge>
+              </label>
+              <label>
+                <span class="label">Cost / hr (temporary)</span>
+                <input type="number" step="0.01" min="0" value="${esc(String(Number(calculatorDefaults.costRate) || 0))}" data-efficiency-calc-cost>
+              </label>
+              <button type="button" class="btn secondary" data-efficiency-calc-reset>Reset</button>
+            </div>
+            <p class="small muted">Calculator only: temporary what-if net gain across all jobs. Refresh resets to central data table defaults.</p>
+            <p class="small muted" data-efficiency-calc-result>
+              Net total gain (calculator): <strong data-efficiency-calc-total>${esc(efficiencySnapshot.totalProfitLabel || "$0.00")}</strong>
+              · Avg / row: <strong data-efficiency-calc-average>${esc(efficiencySnapshot.averageProfitLabel || "$0.00")}</strong>
+            </p>
           </div>
           <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"} ${efficiencySnapshot.disclaimerLabel || "Before expense only: does not include reductions for maintenance parts, labor, or consumables."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Before expense only: does not include reductions for maintenance parts, labor, or consumables.")}</p>
           <table class="cost-table">

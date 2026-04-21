@@ -10630,6 +10630,7 @@ function renderCosts(){
   setupCostTimeframeModal(model);
   setupJobCategoryWindow(model);
   setupWeeklyReportWindow(model);
+  setupEfficiencyCalculator(model);
   setupMaintenanceDataCenterActions({ openImmediately: wasDataCenterOpen });
 
   function focusCalendarAtOccurrence(taskId, dateISO){
@@ -11649,6 +11650,60 @@ function renderCosts(){
     if (canvas instanceof HTMLCanvasElement){
       drawWeeklyReportChart(canvas, reportForChart);
     }
+  }
+
+  function setupEfficiencyCalculator(currentModel){
+    const panel = content.querySelector("[data-efficiency-calc]");
+    if (!(panel instanceof HTMLElement)) return;
+    const snapshot = currentModel && currentModel.efficiencySnapshot ? currentModel.efficiencySnapshot : {};
+    const rows = Array.isArray(snapshot.rows) ? snapshot.rows : [];
+    const defaults = snapshot.calculatorDefaults || {};
+    const chargeInput = panel.querySelector("[data-efficiency-calc-charge]");
+    const costInput = panel.querySelector("[data-efficiency-calc-cost]");
+    const resetBtn = panel.querySelector("[data-efficiency-calc-reset]");
+    const totalEl = panel.querySelector("[data-efficiency-calc-total]");
+    const avgEl = panel.querySelector("[data-efficiency-calc-average]");
+    if (!(chargeInput instanceof HTMLInputElement) || !(costInput instanceof HTMLInputElement)) return;
+
+    const formatUsd = (value)=> new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: Math.abs(Number(value) || 0) < 1000 ? 2 : 0,
+      maximumFractionDigits: Math.abs(Number(value) || 0) < 1000 ? 2 : 0
+    }).format(Number.isFinite(Number(value)) ? Number(value) : 0);
+    const asNumber = (value, fallback = 0)=>{
+      const num = Number(value);
+      return Number.isFinite(num) ? num : fallback;
+    };
+    const defaultCharge = Math.max(0, asNumber(defaults.chargeRate, asNumber(chargeInput.value, 0)));
+    const defaultCost = Math.max(0, asNumber(defaults.costRate, asNumber(costInput.value, 0)));
+    chargeInput.value = String(defaultCharge);
+    costInput.value = String(defaultCost);
+
+    const recalc = ()=>{
+      const chargeRate = Math.max(0, asNumber(chargeInput.value, defaultCharge));
+      const costRate = Math.max(0, asNumber(costInput.value, defaultCost));
+      const totals = rows.reduce((acc, row)=>{
+        const hours = Math.max(0, asNumber(row?.hoursValue, 0));
+        const material = Math.max(0, asNumber(row?.materialValue ?? row?.materialCostValue, 0));
+        acc.rows += 1;
+        acc.net += (hours * (chargeRate - costRate)) - material;
+        return acc;
+      }, { rows: 0, net: 0 });
+      if (totalEl) totalEl.textContent = formatUsd(totals.net);
+      if (avgEl) avgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
+    };
+
+    chargeInput.addEventListener("input", recalc);
+    costInput.addEventListener("input", recalc);
+    if (resetBtn instanceof HTMLElement){
+      resetBtn.addEventListener("click", ()=>{
+        chargeInput.value = String(defaultCharge);
+        costInput.value = String(defaultCost);
+        recalc();
+      });
+    }
+    recalc();
   }
 
   function setupJobCategoryWindow(currentModel){
@@ -15000,6 +15055,8 @@ function computeCostModel(){
       totalCostLabel: formatterCurrency(Number(row?.totalCostValue) || 0, { decimals: 2 }),
       totalProfitLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
       hoursValue: Number(row?.hoursValue) || 0,
+      chargeRateValue: Number(row?.chargeRateValue) || 0,
+      costRateValue: Number(row?.costRateValue) || 0,
       revenueValue: Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)),
       beforeExpenseLabel: formatterCurrency(Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)), { decimals: 2, showPlus: true }),
       materialValue: Math.max(0, Number(row?.materialCostValue) || 0),
@@ -15036,6 +15093,13 @@ function computeCostModel(){
   };
   const efficiencyMathDetails = `Before expense gain = Hours × Charge Rate. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })} from ${formatHoursValue(efficiencyTotals.hours)}. This excludes maintenance parts, labor, and consumables reductions.`;
   efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
+  const totalCalcHours = efficiencyTotals.hours > 0 ? efficiencyTotals.hours : 0;
+  const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.revenue / totalCalcHours) : JOB_RATE_PER_HOUR;
+  const defaultCostRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.labor / totalCalcHours) : JOB_BASE_COST_PER_HOUR;
+  efficiencySnapshot.calculatorDefaults = {
+    chargeRate: Number.isFinite(defaultChargeRateForCalc) ? defaultChargeRateForCalc : JOB_RATE_PER_HOUR,
+    costRate: Number.isFinite(defaultCostRateForCalc) ? defaultCostRateForCalc : JOB_BASE_COST_PER_HOUR
+  };
   const efficiencyDisplayProfit = Math.max(0, efficiencyTotals.revenue);
   const efficiencyDisplayAverage = efficiencyCount ? (efficiencyDisplayProfit / efficiencyCount) : 0;
   const cuttingCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "cuttingJobs") : null;
