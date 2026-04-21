@@ -10704,15 +10704,25 @@ function renderCosts(){
     rows.forEach(btn => {
       if (!(btn instanceof HTMLElement)) return;
       btn.addEventListener("click", ()=>{
+        const modeId = String(btn.getAttribute("data-link-mode-id") || "");
+        const explicitSelect = modeId ? document.getElementById(modeId) : null;
         const row = btn.closest("tr");
-        const select = row ? row.querySelector("[data-maintenance-link-mode]") : null;
-        const destination = (select instanceof HTMLSelectElement ? select.value : "calendar").toLowerCase();
+        const fallbackSelect = row ? row.querySelector("[data-maintenance-link-mode]") : null;
+        const select = (explicitSelect instanceof HTMLSelectElement) ? explicitSelect : fallbackSelect;
+        const destination = String((select instanceof HTMLSelectElement ? select.value : "calendar") || "calendar").toLowerCase();
         const taskId = String(btn.getAttribute("data-task-id") || "");
         const dateISO = String(btn.getAttribute("data-date-iso") || "");
         if (destination === "settings"){
-          location.hash = `#/settings?taskId=${encodeURIComponent(taskId)}`;
+          closeDataCenter();
+          if (taskId){
+            window.pendingMaintenanceFocus = { taskIds: [taskId] };
+          }
+          location.hash = taskId
+            ? `#/settings?taskId=${encodeURIComponent(taskId)}`
+            : "#/settings";
           return;
         }
+        closeDataCenter();
         focusCalendarAtOccurrence(taskId, dateISO);
       });
     });

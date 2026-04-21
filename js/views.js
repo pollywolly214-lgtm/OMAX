@@ -2019,6 +2019,7 @@ function viewCosts(model){
                         data-maintenance-open-task
                         data-task-id="${esc(row.taskId || "")}"
                         data-date-iso="${esc(row.dateISO || "")}"
+                        data-link-mode-id="maintenanceLinkMode_${esc(row.id || "")}"
                         data-settings-link="${esc(row.settingsLink || "#/settings")}">Open task</button>
                     </td>
                   </tr>
