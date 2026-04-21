@@ -14560,7 +14560,9 @@ function computeCostModel(){
       efficiencyActualHours,
       computedActualHours
     ];
-    const hours = actualHoursCandidates.find(val => Number.isFinite(val) && val >= 0) ?? 0;
+    const positiveHours = actualHoursCandidates.find(val => Number.isFinite(val) && val > 0);
+    const fallbackHours = actualHoursCandidates.find(val => Number.isFinite(val) && val >= 0);
+    const hours = Number.isFinite(positiveHours) ? positiveHours : (Number.isFinite(fallbackHours) ? fallbackHours : 0);
     const categoryKey = categoryId || "__uncategorized__";
     const categoryCutCount = cuttingCategoryRemaining.get(categoryKey) || 1;
     cuttingCategoryRemaining.set(categoryKey, Math.max(0, categoryCutCount - 1));
