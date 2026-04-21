@@ -1989,7 +1989,7 @@ function viewCosts(model){
                   <th>Labor cost</th>
                   <th>Total cost</th>
                   <th>Date</th>
-                  <th>Days since last</th>
+                  <th>Days since</th>
                   <th>Cut hrs since</th>
                   <th>Qty</th>
                   <th>Task link</th>
@@ -2006,7 +2006,7 @@ function viewCosts(model){
                     <td>${esc(row.laborCostLabel || "$0.00")}</td>
                     <td>${esc(row.totalCostLabel || "$0.00")}</td>
                     <td>${esc(row.dateISO || "—")}</td>
-                    <td>${esc(row.daysSinceLastTaskLabel || "—")}</td>
+                    <td>${esc(row.daysSinceLabel || "—")}</td>
                     <td>${esc(row.cuttingHoursSinceLabel || "—")}</td>
                     <td>${esc(row.qtyLabel || "1")}</td>
                     <td>

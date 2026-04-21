@@ -14367,24 +14367,14 @@ function computeCostModel(){
       if (!row) return;
       row.qty = qty;
       row.counter = Math.max(1, qty - index);
-      if (index < uniqueDates.length - 1){
-        const prev = parseDateLocal(uniqueDates[index + 1]);
-        const current = parseDateLocal(dateISO);
-        if (prev instanceof Date && current instanceof Date && !Number.isNaN(prev.getTime()) && !Number.isNaN(current.getTime())){
-          row.daysSinceLastTask = Math.max(0, Math.round((current.getTime() - prev.getTime()) / JOB_DAY_MS));
-        }else{
-          row.daysSinceLastTask = null;
-        }
+      const current = parseDateLocal(dateISO);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      if (current instanceof Date && !Number.isNaN(current.getTime())){
+        current.setHours(0,0,0,0);
+        row.daysSinceTask = Math.max(0, Math.round((today.getTime() - current.getTime()) / JOB_DAY_MS));
       }else{
-        const current = parseDateLocal(dateISO);
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        if (current instanceof Date && !Number.isNaN(current.getTime())){
-          current.setHours(0,0,0,0);
-          row.daysSinceLastTask = Math.max(0, Math.round((today.getTime() - current.getTime()) / JOB_DAY_MS));
-        }else{
-          row.daysSinceLastTask = null;
-        }
+        row.daysSinceTask = null;
       }
     });
   });
@@ -14399,7 +14389,7 @@ function computeCostModel(){
     laborCostLabel: formatterCurrency(row.laborCost, { decimals: row.laborCost < 1000 ? 2 : 0 }),
     totalCostLabel: formatterCurrency(row.totalCost, { decimals: row.totalCost < 1000 ? 2 : 0 }),
     dateISO: row.dateISO,
-    daysSinceLastTaskLabel: Number.isFinite(row.daysSinceLastTask) ? String(row.daysSinceLastTask) : "—",
+    daysSinceLabel: Number.isFinite(row.daysSinceTask) ? String(row.daysSinceTask) : "—",
     cuttingHoursSinceLabel: Number.isFinite(row.cuttingHoursSince) ? formatHoursValue(row.cuttingHoursSince) : "—",
     settingsLink: row.settingsLink,
     qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "1",
