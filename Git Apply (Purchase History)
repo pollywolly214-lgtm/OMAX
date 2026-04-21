@@ -1,0 +1,1060 @@
+//remove this file when done. Apply code without conflict be careful to not break the data tracker tables in the cost analysis page. 
+
+(cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/js/core.js b/js/core.js
+index 4cab648b8461e5f66981ffa95ecc838d3064d7a5..ca699a9b417e3601edb221f5774c404cf44ddead 100644
+--- a/js/core.js
++++ b/js/core.js
+@@ -1585,72 +1585,74 @@ function setJobFolders(raw){
+     }
+   }
+   return window.jobFolders;
+ }
+ 
+ function snapshotJobFolders(){
+   const source = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();
+   const normalized = normalizeJobFolders(source);
+   window.jobFolders = normalized;
+   return cloneJobFolders(normalized);
+ }
+ 
+ /* ===================== Persisted state ===================== */
+ if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateISO, hours}]
+ if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
+ if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
+ if (!Array.isArray(window.inventory))    window.inventory    = [];
+ if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,chargeRate,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
+ if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+ if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
+ if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+ if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+ if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+ if (!Array.isArray(window.opportunityRollups)) window.opportunityRollups = [];
+ if (!Array.isArray(window.weeklyCostReports)) window.weeklyCostReports = [];
++if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
+ if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
+ if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
+ 
+ if (typeof window.pumpEff !== "object" || !window.pumpEff){
+   window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
+ }
+ if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
+ if (!Array.isArray(window.pumpEff.notes)) window.pumpEff.notes = [];
+ 
+ let totalHistory = window.totalHistory;
+ let tasksInterval = window.tasksInterval;
+ let tasksAsReq    = window.tasksAsReq;
+ let inventory     = window.inventory;
+ let cuttingJobs   = window.cuttingJobs;
+ let completedCuttingJobs = window.completedCuttingJobs;
+ let opportunityRollups = window.opportunityRollups;
+ let orderRequests = window.orderRequests;
+ let orderRequestTab = window.orderRequestTab;
+ let garnetCleanings = window.garnetCleanings;
+ let dailyCutHours = window.dailyCutHours;
+ let jobFolders = window.jobFolders;
+ let weeklyCostReports = window.weeklyCostReports;
++let receiptTrackerWeeks = window.receiptTrackerWeeks;
+ 
+ function normalizeJobPriorityOrder(list){
+   if (!Array.isArray(list)) return list;
+   const entries = list.map((job, index) => {
+     if (!job || job.id == null) return null;
+     const priority = typeof getJobPriority === "function"
+       ? getJobPriority(job)
+       : (Number.isFinite(Number(job?.priority)) && Number(job.priority) > 0
+         ? Math.max(1, Math.floor(Number(job.priority)))
+         : (index + 1));
+     return { job, priority, originalIndex: index };
+   }).filter(Boolean);
+ 
+   entries.sort((a, b) => {
+     if (a.priority !== b.priority) return a.priority - b.priority;
+     return a.originalIndex - b.originalIndex;
+   });
+ 
+   entries.forEach((entry, idx) => {
+     entry.job.priority = idx + 1;
+   });
+ 
+   return list;
+ }
+ 
+@@ -1857,129 +1859,133 @@ function snapshotSettingsFolders(){
+   return cloneFolders(normalized);
+ }
+ 
+ window.defaultAsReqTasks = defaultAsReqTasks;
+ 
+ (function ensureSnapshotState(){
+   const orig = window.snapshotState;
+   window.snapshotState = function(){
+     const s = typeof orig === "function" ? orig() : {};
+     const copyArr = (key)=>{
+       if (!Array.isArray(s[key])){
+         if (Array.isArray(window[key])) s[key] = window[key].slice(); else s[key] = [];
+       }
+     };
+     const copyObj = (key)=>{
+       if (!s[key] || typeof s[key] !== "object"){
+         if (window[key] && typeof window[key] === "object") s[key] = { ...window[key] }; else s[key] = {};
+       }
+     };
+     copyArr("tasksInterval");
+     copyArr("tasksAsReq");
+     copyArr("cuttingJobs");
+     copyArr("completedCuttingJobs");
+     copyArr("dailyCutHours");
+     copyArr("orderRequests");
++    copyArr("receiptTrackerWeeks");
+     copyArr("garnetCleanings");
+     copyArr("totalHistory");
+     copyObj("appConfig");
+     copyObj("settingsFolders");
+     copyObj("folders");
+     copyObj("dashboardLayout");
+     copyObj("costLayout");
+     copyObj("jobLayout");
+     copyObj("pumpEff");
+     if (typeof s.schema !== "number") s.schema = APP_SCHEMA;
+     return s;
+   };
+ })();
+ 
+ (function patchAdoptState(){
+   const orig = window.adoptState;
+   window.adoptState = function(data){
+     const sanitized = (data && typeof data === "object") ? { ...data } : {};
+     if (!Array.isArray(sanitized.tasksInterval) && Array.isArray(window.tasksInterval)) sanitized.tasksInterval = window.tasksInterval.slice();
+     if (!Array.isArray(sanitized.tasksAsReq) && Array.isArray(window.tasksAsReq)) sanitized.tasksAsReq = window.tasksAsReq.slice();
+     if (!Array.isArray(sanitized.cuttingJobs) && Array.isArray(window.cuttingJobs)) sanitized.cuttingJobs = window.cuttingJobs.slice();
+     if (!Array.isArray(sanitized.completedCuttingJobs) && Array.isArray(window.completedCuttingJobs)) sanitized.completedCuttingJobs = window.completedCuttingJobs.slice();
+     if (!Array.isArray(sanitized.dailyCutHours) && Array.isArray(window.dailyCutHours)) sanitized.dailyCutHours = window.dailyCutHours.slice();
+     if (!Array.isArray(sanitized.inventory) && Array.isArray(window.inventory)) sanitized.inventory = window.inventory.slice();
+     if (!Array.isArray(sanitized.orderRequests) && Array.isArray(window.orderRequests)) sanitized.orderRequests = window.orderRequests.slice();
++    if (!Array.isArray(sanitized.receiptTrackerWeeks) && Array.isArray(window.receiptTrackerWeeks)) sanitized.receiptTrackerWeeks = window.receiptTrackerWeeks.slice();
+     if (!Array.isArray(sanitized.garnetCleanings) && Array.isArray(window.garnetCleanings)) sanitized.garnetCleanings = window.garnetCleanings.slice();
+     if (!Array.isArray(sanitized.totalHistory) && Array.isArray(window.totalHistory)) sanitized.totalHistory = window.totalHistory.slice();
+     if (!Array.isArray(sanitized.deletedItems) && Array.isArray(window.deletedItems)) sanitized.deletedItems = window.deletedItems.slice();
+     if (!Array.isArray(sanitized.jobFolders) && Array.isArray(window.jobFolders)) sanitized.jobFolders = window.jobFolders.slice();
+     if (!sanitized.appConfig || typeof sanitized.appConfig !== "object") sanitized.appConfig = normalizeAppConfig(appConfig);
+     if ((!sanitized.settingsFolders && !sanitized.folders) && Array.isArray(window.settingsFolders)) sanitized.settingsFolders = JSON.parse(JSON.stringify(window.settingsFolders));
+     if (!sanitized.dashboardLayout && window.dashboardLayout) sanitized.dashboardLayout = { ...window.dashboardLayout };
+     if (!sanitized.costLayout && window.costLayout) sanitized.costLayout = { ...window.costLayout };
+     if (!sanitized.jobLayout && window.jobLayout) sanitized.jobLayout = { ...window.jobLayout };
+     if (!sanitized.pumpEff && window.pumpEff) sanitized.pumpEff = { ...window.pumpEff };
+     if (typeof orig === "function") orig(sanitized);
+     if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
+     if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
+     if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
+     if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
+     if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+     appConfig = normalizeAppConfig(sanitized.appConfig);
+     window.appConfig = appConfig;
+     refreshDerivedDailyHours();
+     if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
++    if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
+     if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+     if (!Array.isArray(window.totalHistory)) window.totalHistory = [];
+     if (!window.settingsFolders || !Array.isArray(window.settingsFolders)) window.settingsFolders = typeof defaultSettingsFolders === "function" ? defaultSettingsFolders() : [];
+     if (!window.folders || typeof window.folders !== "object") window.folders = Array.isArray(window.settingsFolders) ? JSON.parse(JSON.stringify(window.settingsFolders)) : [];
+     if (!window.dashboardLayout || typeof window.dashboardLayout !== "object") window.dashboardLayout = {};
+     if (!window.costLayout || typeof window.costLayout !== "object") window.costLayout = {};
+     if (!window.jobLayout || typeof window.jobLayout !== "object") window.jobLayout = {};
+     if (!window.pumpEff || typeof window.pumpEff !== "object") window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
+     if (typeof window.ensureTaskCategories === "function") window.ensureTaskCategories();
+     if (typeof window.ensureJobCategories === "function") window.ensureJobCategories();
+     const jobFileCache = readJobFileCache();
+     syncJobFileCacheFromJobs(window.cuttingJobs, jobFileCache);
+     syncJobFileCacheFromJobs(window.completedCuttingJobs, jobFileCache);
+     applyJobFileCacheToJobs(window.cuttingJobs, jobFileCache);
+     applyJobFileCacheToJobs(window.completedCuttingJobs, jobFileCache);
+     writeJobFileCache(jobFileCache);
+     if (typeof window.syncRenderTotalsFromHistory === "function") window.syncRenderTotalsFromHistory();
+   };
+ })();
+ 
+ /* ==================== Cloud load / save ===================== */
+ function stateHasMeaningfulData(data){
+   if (!data || typeof data !== "object") return false;
+   const keys = Object.keys(data);
+   if (keys.length === 0) return false;
+   if (keys.length === 1 && keys[0] === "schema") return false;
+   const meaningfulKeys = new Set([
+     "tasksInterval",
+     "tasksAsReq",
+     "inventory",
+     "cuttingJobs",
+     "completedCuttingJobs",
+     "dailyCutHours",
+     "orderRequests",
++    "receiptTrackerWeeks",
+     "totalHistory",
+     "garnetCleanings",
+     "deletedItems",
+     "dashboardLayout",
+     "costLayout",
+     "jobLayout",
+     "appConfig",
+     "settingsFolders",
+     "folders",
+     "pumpEff",
+     "jobFolders",
+     "orderRequestTab",
+     "schema"
+   ]);
+   return keys.some(key => meaningfulKeys.has(key));
+ }
+ 
+ const JOB_FILE_CACHE_KEY = "cutting_job_files_v1";
+ 
+ function readJobFileCache(){
+   if (typeof window === "undefined" || !window.localStorage) return {};
+   try {
+     const raw = window.localStorage.getItem(JOB_FILE_CACHE_KEY);
+     if (!raw) return {};
+     const parsed = JSON.parse(raw);
+@@ -2055,50 +2061,53 @@ function snapshotState(){
+     meta: entry.meta && typeof entry.meta === "object" ? { ...entry.meta } : {},
+     label: entry.label,
+     deletedAt: entry.deletedAt
+   }));
+   const dashLayoutSource = window.cloudDashboardLayoutLoaded
+     ? window.cloudDashboardLayout
+     : (window.dashboardLayoutState && window.dashboardLayoutState.layoutById);
+   const costLayoutSource = window.cloudCostLayoutLoaded
+     ? window.cloudCostLayout
+     : (window.costLayoutState && window.costLayoutState.layoutById);
+   const jobLayoutSource = window.cloudJobLayoutLoaded
+     ? window.cloudJobLayout
+     : (window.jobLayoutState && window.jobLayoutState.layoutById);
+   return {
+     schema: window.APP_SCHEMA || APP_SCHEMA,
+     totalHistory,
+     tasksInterval,
+     tasksAsReq,
+     inventory,
+     inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.map(folder => ({ ...folder })) : [],
+     inventoryMaterials: normalizeInventoryMaterials(window.inventoryMaterials),
+     inventorySection: String(window.inventorySection || "items") === "material" ? "material" : "items",
+     cuttingJobs: stripJobFileDataUrls(cuttingJobs),
+     completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs),
+     orderRequests,
++    receiptTrackerWeeks: Array.isArray(window.receiptTrackerWeeks)
++      ? window.receiptTrackerWeeks.map(entry => ({ ...entry }))
++      : [],
+     orderRequestTab,
+     garnetCleanings,
+     dailyCutHours: Array.isArray(dailyCutHours)
+       ? dailyCutHours.map(entry => ({ ...entry }))
+       : [],
+     opportunityRollups: Array.isArray(window.opportunityRollups)
+       ? window.opportunityRollups.map(entry => ({ ...entry }))
+       : [],
+     weeklyCostReports: Array.isArray(window.weeklyCostReports)
+       ? window.weeklyCostReports.map(entry => ({ ...entry }))
+       : [],
+     appConfig: normalizeAppConfig(window.appConfig),
+     pumpEff: safePumpEff,
+     deletedItems: trashSnapshot,
+     settingsFolders: foldersSnapshot,
+     folders: cloneFolders(window.settingsFolders),
+     jobFolders: snapshotJobFolders(),
+     dashboardLayout: cloneStructured(dashLayoutSource) || {},
+     costLayout: cloneStructured(costLayoutSource) || {},
+     jobLayout: cloneStructured(jobLayoutSource) || {},
+     syncMeta: {
+       rev: Math.max(Date.now(), (Number(lastAppliedCloudRevision) || 0) + 1),
+       updatedAtISO: new Date().toISOString(),
+       updatedBy: getCloudSyncClientId()
+     }
+@@ -2756,62 +2765,64 @@ function adoptState(doc){
+     : defaultAsReqTasks.slice();
+   inventory = Array.isArray(data.inventory)
+     ? data.inventory.map(normalizeInventoryItem).filter(Boolean)
+     : seedInventoryFromTasks();
+   window.inventoryFolders = Array.isArray(data.inventoryFolders)
+     ? data.inventoryFolders.filter(folder => folder && folder.id != null).map(folder => ({
+       ...folder,
+       id: String(folder.id),
+       parent: folder.parent != null ? String(folder.parent) : null,
+       name: String(folder.name || "Folder")
+     }))
+     : (Array.isArray(window.inventoryFolders) ? window.inventoryFolders : []);
+   ensureInventoryForAllMaintenanceTasks();
+   window.inventoryMaterials = normalizeInventoryMaterials(data.inventoryMaterials);
+   window.inventorySection = String(data.inventorySection || window.inventorySection || "items") === "material" ? "material" : "items";
+   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
+   completedCuttingJobs = Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [];
+   orderRequests = normalizeOrderRequests(Array.isArray(data.orderRequests) ? data.orderRequests : []);
+   if (!orderRequests.some(req => req && req.status === "draft")){
+     orderRequests.push(createOrderRequest());
+   }
+   garnetCleanings = Array.isArray(data.garnetCleanings) ? data.garnetCleanings : [];
+   dailyCutHours = normalizeDailyCutHours(Array.isArray(data.dailyCutHours) ? data.dailyCutHours : []);
+   opportunityRollups = Array.isArray(data.opportunityRollups) ? data.opportunityRollups : [];
+   weeklyCostReports = Array.isArray(data.weeklyCostReports) ? data.weeklyCostReports.map(entry => ({ ...entry })) : [];
++  receiptTrackerWeeks = Array.isArray(data.receiptTrackerWeeks) ? data.receiptTrackerWeeks.map(entry => ({ ...entry })) : [];
+ 
+   window.totalHistory = totalHistory;
+   window.tasksInterval = tasksInterval;
+   window.tasksAsReq = tasksAsReq;
+   window.inventory = inventory;
+   window.cuttingJobs = cuttingJobs;
+   window.completedCuttingJobs = completedCuttingJobs;
+   window.orderRequests = orderRequests;
+   window.garnetCleanings = garnetCleanings;
+   window.dailyCutHours = dailyCutHours;
+   window.opportunityRollups = opportunityRollups;
+   window.weeklyCostReports = weeklyCostReports;
++  window.receiptTrackerWeeks = receiptTrackerWeeks;
+   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
+   window.deletedItems = deletedItems;
+   purgeExpiredDeletedItems();
+   if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
+   window.pendingNewJobFiles.length = 0;
+   if (typeof data.orderRequestTab === "string"){
+     orderRequestTab = data.orderRequestTab;
+     window.orderRequestTab = orderRequestTab;
+   }
+   if (typeof window.orderRequestTab !== "string" || !window.orderRequestTab){
+     window.orderRequestTab = orderRequestTab || "active";
+   }
+   orderRequestTab = window.orderRequestTab;
+ 
+   const rawFolders = Array.isArray(data.settingsFolders)
+     ? data.settingsFolders
+     : (Array.isArray(data.folders) ? data.folders : null);
+   setSettingsFolders(rawFolders);
+ 
+   const rawJobFolders = Array.isArray(data.jobFolders)
+     ? data.jobFolders
+     : null;
+   setJobFolders(rawJobFolders);
+   jobFolders = window.jobFolders;
+ 
+@@ -3053,50 +3064,51 @@ async function loadFromCloud(){
+ 
+     if (stateHasMeaningfulData(data)){
+       adoptState(data || {});
+       const loadedRev = Number(data?.syncMeta?.rev || 0);
+       if (loadedRev > 0) lastAppliedCloudRevision = loadedRev;
+       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
+     }else{
+       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
+         ? window.pumpEff
+         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
+       if (!Array.isArray(pe.entries)) pe.entries = [];
+       if (!Array.isArray(pe.notes)) pe.notes = [];
+       const folders = (typeof defaultSettingsFolders === "function") ? defaultSettingsFolders() : [];
+       const seeded = {
+         schema: APP_SCHEMA,
+         totalHistory: [],
+         tasksInterval: Array.isArray(window.tasksInterval) && window.tasksInterval.length ? window.tasksInterval.slice() : (Array.isArray(window.defaultIntervalTasks) ? window.defaultIntervalTasks.slice() : []),
+         tasksAsReq: Array.isArray(window.tasksAsReq) && window.tasksAsReq.length ? window.tasksAsReq.slice() : (Array.isArray(window.defaultAsReqTasks) ? window.defaultAsReqTasks.slice() : []),
+         inventory: Array.isArray(window.inventory) && window.inventory.length ? window.inventory.slice() : (typeof seedInventoryFromTasks === "function" ? seedInventoryFromTasks() : []),
+         inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.map(folder => ({ ...folder })) : [],
+         inventoryMaterials: normalizeInventoryMaterials(window.inventoryMaterials),
+         inventorySection: String(window.inventorySection || "items") === "material" ? "material" : "items",
+         cuttingJobs: Array.isArray(window.cuttingJobs) ? window.cuttingJobs.slice() : [],
+         completedCuttingJobs: Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [],
+         orderRequests: Array.isArray(window.orderRequests) && window.orderRequests.length ? window.orderRequests.slice() : [typeof createOrderRequest === "function" ? createOrderRequest() : { id:"req_"+Date.now(), items:[] }],
++        receiptTrackerWeeks: Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks.slice() : [],
+         orderRequestTab: typeof window.orderRequestTab === "string" ? window.orderRequestTab : "active",
+         dailyCutHours: Array.isArray(window.dailyCutHours) ? window.dailyCutHours.slice() : [],
+         opportunityRollups: Array.isArray(window.opportunityRollups) ? window.opportunityRollups.slice() : [],
+         weeklyCostReports: Array.isArray(window.weeklyCostReports) ? window.weeklyCostReports.slice() : [],
+         jobFolders: typeof defaultJobFolders === "function" ? defaultJobFolders() : [],
+         pumpEff: pe,
+         appConfig: normalizeAppConfig(window.appConfig),
+         settingsFolders: folders,
+         folders: JSON.parse(JSON.stringify(folders)),
+         garnetCleanings: Array.isArray(window.garnetCleanings) ? window.garnetCleanings.slice() : [],
+         dashboardLayout: typeof window.dashboardLayout === "object" ? { ...window.dashboardLayout } : {},
+         costLayout: typeof window.costLayout === "object" ? { ...window.costLayout } : {},
+         jobLayout: typeof window.jobLayout === "object" ? { ...window.jobLayout } : {},
+         syncMeta: {
+           rev: Math.max(Date.now(), (Number(lastAppliedCloudRevision) || 0) + 1),
+           updatedAtISO: new Date().toISOString(),
+           updatedBy: getCloudSyncClientId()
+         }
+       };
+       adoptState(seeded);
+       const seededRev = Number(seeded?.syncMeta?.rev || 0);
+       if (seededRev > 0) lastAppliedCloudRevision = seededRev;
+       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
+       await FB.docRef.set(seeded, { merge:true });
+       if (FB.workspaceDoc){
+@@ -3286,50 +3298,51 @@ function createOrderRequest(items){
+     id: genId("order"),
+     code: buildOrderRequestCode(createdAt),
+     createdAt,
+     status: "draft",
+     resolvedAt: null,
+     note: "",
+     items: []
+   };
+   if (Array.isArray(items) && items.length){
+     template.items = items.map(cloneOrderRequestItem).filter(Boolean);
+   }
+   return template;
+ }
+ 
+ function buildCleanState(){
+ const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
+   return {
+     schema: APP_SCHEMA,
+     totalHistory: [],
+     tasksInterval: defaultIntervalTasks.slice(),
+     tasksAsReq: defaultAsReqTasks.slice(),
+     inventory: seedInventoryFromTasks(),
+     cuttingJobs: [],
+     completedCuttingJobs: [],
+     orderRequests: [createOrderRequest()],
++    receiptTrackerWeeks: [],
+     orderRequestTab: "active",
+     dailyCutHours: [],
+     opportunityRollups: [],
+     garnetCleanings: [],
+     pumpEff: { ...pumpDefaults },
+     deletedItems: [],
+     jobFolders: defaultJobFolders(),
+     dashboardLayout: {},
+     costLayout: {},
+     jobLayout: {}
+   };
+ }
+ 
+ async function clearAllAppData(){
+   try {
+     const label = (()=>{
+       try {
+         return `Workspace snapshot (${new Date().toLocaleString()})`;
+       } catch (_){
+         return "Workspace snapshot";
+       }
+     })();
+     recordDeletedItem("workspace", snapshotWorkspaceForTrash(), { reason: "clear-all", label });
+   } catch (err) {
+     console.warn("Failed to snapshot workspace before clearing", err);
+diff --git a/js/renderers.js b/js/renderers.js
+index cb722285f4a9b96336fff872099e3ae1cd7bbd2d..d595bc4a4396b7881a7db859967505d37eaa63ae 100644
+--- a/js/renderers.js
++++ b/js/renderers.js
+@@ -10534,50 +10534,54 @@ function setupForecastBreakdownModal(){
+     }
+   });
+ 
+   modal.addEventListener("click", (event)=>{
+     const target = event.target;
+     if (target && target.hasAttribute && target.hasAttribute("data-forecast-close")){
+       event.preventDefault();
+       closeModal();
+     }
+   });
+ 
+   const closeButtons = modal.querySelectorAll("[data-forecast-close]");
+   closeButtons.forEach(btn => {
+     btn.addEventListener("keydown", event => {
+       if (event.key === "Enter" || event.key === " "){
+         event.preventDefault();
+         closeModal();
+       }
+     });
+   });
+ }
+ 
+ function renderCosts(){
+   const content = document.getElementById("content");
+   if (!content) return;
++  const existingReceiptModal = document.getElementById("costReceiptModal");
++  if (existingReceiptModal instanceof HTMLElement){
++    window.costPurchaseHistoryModalOpen = !existingReceiptModal.hasAttribute("hidden");
++  }
+ 
+   const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+ 
+   const model = computeCostModel();
+   const maintenanceSeriesBase = Array.isArray(model.maintenanceSeries)
+     ? model.maintenanceSeries.slice()
+     : [];
+   const jobSeriesBase = Array.isArray(model.jobSeries)
+     ? model.jobSeries.slice()
+     : [];
+   content.innerHTML = viewCosts(model);
+   const pendingWeeklyScrollState = (typeof window !== "undefined" && window.__costWeeklyScrollState && typeof window.__costWeeklyScrollState === "object")
+     ? { ...window.__costWeeklyScrollState }
+     : null;
+   if (pendingWeeklyScrollState && typeof window !== "undefined"){
+     window.__costWeeklyScrollState = null;
+     const restoreWeeklyScroll = ()=>{
+       const weeklyPanel = content.querySelector("[data-cost-weekly-reports]");
+       if (weeklyPanel instanceof HTMLElement){
+         weeklyPanel.scrollTop = Number.isFinite(Number(pendingWeeklyScrollState.panelScrollTop))
+           ? Number(pendingWeeklyScrollState.panelScrollTop)
+           : 0;
+       }
+       if (Number.isFinite(Number(pendingWeeklyScrollState.pageScrollY))){
+         window.scrollTo(0, Number(pendingWeeklyScrollState.pageScrollY));
+@@ -10909,50 +10913,337 @@ function renderCosts(){
+           <div class="summary"><strong>Week:</strong> ${escHtml(weekTitle)}</div>
+           <table>
+             <thead><tr><th colspan="4">Cuts completed</th></tr><tr><th>Cut</th><th>Category</th><th>Hours</th><th>Cost impact</th></tr></thead>
+             <tbody>${cutsRows}</tbody>
+             <tfoot class="totals"><tr><td colspan="3">Cuts total</td><td>${escHtml(report.totalCutCostLabel || "$0")}</td></tr><tr><td colspan="3">Cutting time</td><td>${escHtml(report.totalCutHoursLabel || "0 hr")}</td></tr></tfoot>
+           </table>
+           <table>
+             <thead><tr><th colspan="4">Maintenance completed</th></tr><tr><th>Task</th><th>Type</th><th>Part #</th><th>Cost</th></tr></thead>
+             <tbody>${maintRows}</tbody>
+             <tfoot class="totals"><tr><td colspan="3">Maintenance total</td><td>${escHtml(report.totalMaintenanceCostLabel || "$0")}</td></tr></tfoot>
+           </table>
+         </body></html>`;
+ 
+         const blob = new Blob([workbookHtml], { type: "application/vnd.ms-excel;charset=utf-8;" });
+         const link = document.createElement("a");
+         const url = URL.createObjectURL(blob);
+         link.href = url;
+         link.download = `weekly-cost-report-${report.weekStartISO || "week"}.xls`;
+         document.body.appendChild(link);
+         link.click();
+         link.remove();
+         URL.revokeObjectURL(url);
+       });
+     }
+ 
++    const formatUsd = (value)=> new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(Number(value)) ? Number(value) : 0);
++    const toIsoDate = (value)=> String(value || "").slice(0, 10);
++    const parseIsoDate = (iso)=>{
++      const raw = String(iso || "");
++      if (!raw) return null;
++      const dt = new Date(`${raw}T00:00:00`);
++      return Number.isNaN(dt.getTime()) ? null : dt;
++    };
++    const weekStartFromIndex = (year, week)=>{
++      const jan4 = new Date(Date.UTC(year, 0, 4));
++      const jan4Day = jan4.getUTCDay() || 7;
++      const monday = new Date(jan4);
++      monday.setUTCDate(jan4.getUTCDate() - jan4Day + 1 + ((week - 1) * 7));
++      return monday;
++    };
++    const weekKey = (year, week)=> `${year}-W${String(week).padStart(2, "0")}`;
++    const now = new Date();
++    const year = now.getUTCFullYear();
++    const weekOptions = Array.from({ length: 52 }, (_, i)=>{
++      const week = i + 1;
++      const start = weekStartFromIndex(year, week);
++      const end = new Date(start); end.setUTCDate(start.getUTCDate() + 6);
++      return { key: weekKey(year, week), year, week, startISO: start.toISOString().slice(0, 10), endISO: end.toISOString().slice(0, 10) };
++    });
++    if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
++    const persistReceiptState = ()=>{
++      if (typeof saveCloudDebounced === "function"){
++        try { saveCloudDebounced(); } catch (_err){}
++      }
++    };
++    const normalizeRows = (rows)=> (Array.isArray(rows) ? rows : []).map(item => ({
++      date: toIsoDate(item?.date),
++      purchased: String(item?.purchased || ""),
++      cost: Number(item?.cost) || 0,
++      qty: Number(item?.qty) || 0,
++      partNumber: String(item?.partNumber || ""),
++      shipping: Number(item?.shipping) || 0,
++      tax: Number(item?.tax) || 0
++    })).filter(row => row.date || row.purchased || row.cost || row.qty || row.partNumber || row.shipping || row.tax);
++    const getWeekEntry = (key)=>{
++      const existing = window.receiptTrackerWeeks.find(entry => String(entry?.key || "") === key);
++      if (existing) return existing;
++      const meta = weekOptions.find(item => item.key === key);
++      const created = { key, year: meta?.year || year, week: meta?.week || 1, startISO: meta?.startISO || "", endISO: meta?.endISO || "", rows: [] };
++      window.receiptTrackerWeeks.push(created);
++      return created;
++    };
++    const computeRowTotal = (row)=> ((Number(row?.cost) || 0) * (Number(row?.qty) || 0)) + (Number(row?.shipping) || 0) + (Number(row?.tax) || 0);
++    const buildRangeRows = (months)=>{
++      const end = new Date();
++      const start = months === "all" ? null : new Date(end.getFullYear(), end.getMonth() - Number(months), end.getDate());
++      const rows = [];
++      (window.receiptTrackerWeeks || []).forEach(week => {
++        normalizeRows(week?.rows).forEach(row => {
++          const date = parseIsoDate(row.date);
++          if (!date) return;
++          if (start && date < start) return;
++          if (date > end) return;
++          rows.push({ ...row, total: computeRowTotal(row) });
++        });
++      });
++      rows.sort((a,b)=> String(a.date).localeCompare(String(b.date)));
++      return rows;
++    };
++    const downloadCsv = (name, rows)=>{
++      const csv = rows.map(cols => cols.map(val => `"${String(val ?? "").replace(/"/g, "\"\"")}"`).join(",")).join("\n");
++      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
++      const link = document.createElement("a");
++      const url = URL.createObjectURL(blob);
++      link.href = url;
++      link.download = name;
++      document.body.appendChild(link);
++      link.click();
++      link.remove();
++      URL.revokeObjectURL(url);
++    };
++
++    const receiptOpenBtn = panel.querySelector("[data-cost-receipt-open]");
++    const modal = document.getElementById("costReceiptModal");
++    if (receiptOpenBtn instanceof HTMLElement && modal instanceof HTMLElement){
++      const weekSelect = modal.querySelector("[data-receipt-week-select]");
++      const weekRangeLabel = modal.querySelector("[data-receipt-week-range]");
++      const weekRowsBody = modal.querySelector("[data-receipt-week-rows]");
++      const weekSubtotal = modal.querySelector("[data-receipt-week-subtotal]");
++      const rangeSelect = modal.querySelector("[data-receipt-range-select]");
++      const rangeRowsBody = modal.querySelector("[data-receipt-range-rows]");
++      const rangeSubtotal = modal.querySelector("[data-receipt-range-subtotal]");
++      const closeControls = Array.from(modal.querySelectorAll("[data-receipt-close]"));
++      const exportWeekBtn = modal.querySelector("[data-receipt-export-week]");
++      const exportRangeBtn = modal.querySelector("[data-receipt-export-range]");
++      let activeWeekKey = String((window.receiptTrackerWeekSelected || weekOptions[0]?.key || ""));
++      let activeRange = String(window.receiptTrackerRangeSelected || "1");
++      window.receiptTrackerWeekSelected = activeWeekKey;
++      window.receiptTrackerRangeSelected = activeRange;
++
++      const renderWeekOptions = ()=>{
++        if (!(weekSelect instanceof HTMLSelectElement)) return;
++        weekSelect.innerHTML = weekOptions.map(opt => `<option value="${escapeHtml(opt.key)}">Week ${escapeHtml(String(opt.week))} (${escapeHtml(opt.startISO)} to ${escapeHtml(opt.endISO)})</option>`).join("");
++        if (!weekOptions.some(item => item.key === activeWeekKey)) activeWeekKey = weekOptions[0]?.key || "";
++        weekSelect.value = activeWeekKey;
++      };
++      const saveWeekRowsFromDom = ()=>{
++        const entry = getWeekEntry(activeWeekKey);
++        if (!(weekRowsBody instanceof HTMLElement)) return entry;
++        const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).map(tr => ({
++          date: toIsoDate(tr.querySelector('[data-col=\"date\"]')?.value || ""),
++          purchased: String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim(),
++          cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
++          qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
++          partNumber: String(tr.querySelector('[data-col=\"partNumber\"]')?.value || "").trim(),
++          shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
++          tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
++        }));
++        entry.rows = normalizeRows(rows);
++        persistReceiptState();
++        return entry;
++      };
++      const appendEmptyRow = (focusFirst = false)=>{
++        if (!(weekRowsBody instanceof HTMLElement)) return;
++        const tr = document.createElement("tr");
++        tr.setAttribute("data-receipt-row", "1");
++        tr.innerHTML = `
++          <td><input type="date" data-col="date"></td>
++          <td><input type="text" data-col="purchased" placeholder="Item"></td>
++          <td><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
++          <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
++          <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
++          <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00"></td>
++          <td><input type="number" min="0" step="0.01" data-col="tax" placeholder="0.00"></td>
++          <td data-col="total">${formatUsd(0)}</td>`;
++        weekRowsBody.appendChild(tr);
++        if (focusFirst){
++          const first = tr.querySelector("[data-col='date']");
++          if (first instanceof HTMLElement) first.focus();
++        }
++      };
++      const recomputeWeekTotals = ()=>{
++        if (!(weekRowsBody instanceof HTMLElement)) return;
++        let subtotal = 0;
++        Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).forEach(tr => {
++          const row = {
++            cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
++            qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
++            shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
++            tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
++          };
++          const total = computeRowTotal(row);
++          subtotal += total;
++          const totalCell = tr.querySelector('[data-col=\"total\"]');
++          if (totalCell) totalCell.textContent = formatUsd(total);
++        });
++        if (weekSubtotal) weekSubtotal.textContent = formatUsd(subtotal);
++      };
++      const renderWeekRows = ()=>{
++        const entry = getWeekEntry(activeWeekKey);
++        const rows = normalizeRows(entry.rows);
++        if (weekRangeLabel){
++          weekRangeLabel.textContent = entry.startISO && entry.endISO ? `Date range: ${entry.startISO} to ${entry.endISO}` : "Date range unavailable";
++        }
++        if (!(weekRowsBody instanceof HTMLElement)) return;
++        weekRowsBody.innerHTML = rows.map(row => `
++          <tr data-receipt-row="1">
++            <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}"></td>
++            <td><input type="text" data-col="purchased" value="${escapeHtml(row.purchased || "")}"></td>
++            <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
++            <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
++            <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
++            <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}"></td>
++            <td><input type="number" min="0" step="0.01" data-col="tax" value="${escapeHtml(String(row.tax || 0))}"></td>
++            <td data-col="total">${formatUsd(computeRowTotal(row))}</td>
++          </tr>`).join("");
++        appendEmptyRow();
++        recomputeWeekTotals();
++      };
++      const renderRangeTable = ()=>{
++        if (!(rangeRowsBody instanceof HTMLElement)) return;
++        const rows = buildRangeRows(activeRange);
++        const subtotal = rows.reduce((sum, row) => sum + row.total, 0);
++        rangeRowsBody.innerHTML = rows.length ? rows.map(row => `
++          <tr>
++            <td>${escapeHtml(row.date || "—")}</td>
++            <td>${escapeHtml(row.purchased || "—")}</td>
++            <td>${escapeHtml(String(row.qty || 0))}</td>
++            <td>${escapeHtml(row.partNumber || "—")}</td>
++            <td>${formatUsd(row.shipping || 0)}</td>
++            <td>${formatUsd(row.tax || 0)}</td>
++            <td>${formatUsd(row.total || 0)}</td>
++            <td></td>
++          </tr>`).join("") : '<tr><td colspan="8" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
++        if (rangeSubtotal) rangeSubtotal.textContent = formatUsd(subtotal);
++      };
++      const bindRowEvents = ()=>{
++        if (!(weekRowsBody instanceof HTMLElement)) return;
++        weekRowsBody.addEventListener("keydown", event => {
++          if (event.key !== "Enter") return;
++          const input = event.target;
++          if (!(input instanceof HTMLInputElement)) return;
++          event.preventDefault();
++          const row = input.closest("tr[data-receipt-row]");
++          if (!row) return;
++          const columns = ["date", "purchased", "cost", "qty", "partNumber", "shipping", "tax"];
++          const col = input.getAttribute("data-col") || "";
++          const idx = columns.indexOf(col);
++          if (idx < 0) return;
++          if (idx === columns.length - 1){
++            appendEmptyRow(true);
++          } else {
++            const next = row.querySelector(`[data-col="${columns[idx + 1]}"]`);
++            if (next instanceof HTMLElement) next.focus();
++          }
++          recomputeWeekTotals();
++          saveWeekRowsFromDom();
++          renderRangeTable();
++        });
++        weekRowsBody.addEventListener("input", ()=>{
++          recomputeWeekTotals();
++          saveWeekRowsFromDom();
++          renderRangeTable();
++        });
++      };
++      bindRowEvents();
++      renderWeekOptions();
++      renderWeekRows();
++      renderRangeTable();
++      if (rangeSelect instanceof HTMLSelectElement){
++        rangeSelect.value = activeRange;
++        rangeSelect.addEventListener("change", ()=>{
++          activeRange = rangeSelect.value || "1";
++          window.receiptTrackerRangeSelected = activeRange;
++          renderRangeTable();
++          persistReceiptState();
++        });
++      }
++      if (weekSelect instanceof HTMLSelectElement){
++        weekSelect.addEventListener("change", ()=>{
++          saveWeekRowsFromDom();
++          activeWeekKey = weekSelect.value;
++          window.receiptTrackerWeekSelected = activeWeekKey;
++          renderWeekRows();
++          renderRangeTable();
++        });
++      }
++      if (exportWeekBtn instanceof HTMLElement){
++        exportWeekBtn.addEventListener("click", ()=>{
++          const entry = saveWeekRowsFromDom();
++          const rows = normalizeRows(entry.rows);
++          const subtotal = rows.reduce((sum, row) => sum + computeRowTotal(row), 0);
++          const payload = [
++            ["Date", "Purchased", "Cost", "Qty", "Part number", "Shipping", "Tax", "Total"],
++            ...rows.map(row => [row.date, row.purchased, row.cost, row.qty, row.partNumber, row.shipping, row.tax, computeRowTotal(row)]),
++            ["", "", "", "", "", "", "Subtotal", subtotal]
++          ];
++          downloadCsv(`receipt-week-${entry.key}.csv`, payload);
++        });
++      }
++      if (exportRangeBtn instanceof HTMLElement){
++        exportRangeBtn.addEventListener("click", ()=>{
++          const rows = buildRangeRows(activeRange);
++          const subtotal = rows.reduce((sum, row) => sum + row.total, 0);
++          const payload = [
++            ["Date", "Purchased", "Qty", "Part number", "Shipping", "Tax", "Total"],
++            ...rows.map(row => [row.date, row.purchased, row.qty, row.partNumber, row.shipping, row.tax, row.total]),
++            ["", "", "", "", "", "Subtotal", subtotal]
++          ];
++          downloadCsv(`receipt-range-${activeRange}.csv`, payload);
++        });
++      }
++      const openModal = ()=>{
++        modal.hidden = false;
++        modal.setAttribute("aria-hidden", "false");
++        document.body.classList.add("cost-receipt-modal-open");
++        window.costPurchaseHistoryModalOpen = true;
++      };
++      const closeModal = ()=>{
++        saveWeekRowsFromDom();
++        modal.hidden = true;
++        modal.setAttribute("aria-hidden", "true");
++        document.body.classList.remove("cost-receipt-modal-open");
++        window.costPurchaseHistoryModalOpen = false;
++      };
++      receiptOpenBtn.addEventListener("click", openModal);
++      closeControls.forEach(control => control.addEventListener("click", closeModal));
++      if (window.costPurchaseHistoryModalOpen){
++        openModal();
++      }
++    }
++
+     const canvas = panel.querySelector("#weeklyCostChart");
+     const reportForChart = reports.find(item => String(item?.weekStartISO || "") === normalized) || null;
+     if (canvas instanceof HTMLCanvasElement){
+       drawWeeklyReportChart(canvas, reportForChart);
+     }
+   }
+ 
+   function setupJobCategoryWindow(currentModel){
+     const panel = content.querySelector("[data-cost-job-categories]");
+     if (!panel) return;
+     const analytics = currentModel && typeof currentModel === "object"
+       ? currentModel.jobCategoryAnalytics
+       : null;
+     const categorySelect = panel.querySelector("[data-cost-job-category-select]");
+     if (categorySelect instanceof HTMLSelectElement){
+       const optionIds = new Set();
+       if (analytics && Array.isArray(analytics.options)){
+         analytics.options.forEach(opt => {
+           if (opt && opt.id != null){
+             optionIds.add(String(opt.id));
+           }
+         });
+       }
+       const fallbackId = (analytics && typeof analytics.rootId === "string")
+         ? analytics.rootId
+diff --git a/js/views.js b/js/views.js
+index 7c59c69008c48ac728db6a212e2f38821e663116..fab1f4b71dba8e7a54bb6a930141c562386efc44 100644
+--- a/js/views.js
++++ b/js/views.js
+@@ -1761,50 +1761,96 @@ function viewCosts(model){
+ 
+           <section class="cost-timeframe-section">
+             <h4>Projected maintenance cost</h4>
+             <p class="small muted" data-timeframe-projection-empty hidden>Add pricing to maintenance tasks to project this window.</p>
+             <div class="cost-timeframe-table-wrap" data-timeframe-projection-table hidden>
+               <table class="cost-timeframe-table">
+                 <thead>
+                   <tr>
+                     <th scope="col">Item</th>
+                     <th scope="col">Basis</th>
+                     <th scope="col">Projected cost</th>
+                   </tr>
+                 </thead>
+                 <tbody data-timeframe-projection-rows></tbody>
+               </table>
+               <div class="cost-timeframe-total">
+                 <span>Total projected cost</span>
+                 <strong data-timeframe-projection-total>$0</strong>
+               </div>
+             </div>
+           </section>
+         </div>
+       </div>
+     </div>
+ 
++    <div class="cost-receipt-modal" id="costReceiptModal" role="dialog" aria-modal="true" aria-labelledby="costReceiptTitle" aria-hidden="true" hidden>
++      <div class="cost-receipt-backdrop" tabindex="-1" aria-hidden="true"></div>
++      <div class="cost-receipt-card" role="document">
++        <button type="button" class="cost-receipt-close" data-receipt-close aria-label="Close purchase history"><span aria-hidden="true">×</span></button>
++        <div class="cost-receipt-card-body">
++          <h3 id="costReceiptTitle">Purchase History</h3>
++          <div class="cost-receipt-controls">
++            <label>
++              <span>Week of year</span>
++              <select data-receipt-week-select aria-label="Select purchase history week"></select>
++            </label>
++            <button type="button" class="btn secondary" data-receipt-export-week>Export week (CSV)</button>
++            <button type="button" class="btn secondary" data-receipt-export-range>Export range (CSV)</button>
++          </div>
++          <p class="small muted" data-receipt-week-range>—</p>
++          <div class="cost-weekly-table-wrap">
++            <table class="cost-table cost-receipt-week-table">
++              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th></tr></thead>
++              <tbody data-receipt-week-rows></tbody>
++              <tfoot><tr><th colspan="7">Subtotal</th><th data-receipt-week-subtotal>$0.00</th></tr></tfoot>
++            </table>
++          </div>
++          <div class="cost-receipt-summary-controls">
++            <label>
++              <span>Range</span>
++              <select data-receipt-range-select aria-label="Select receipt summary range">
++                <option value="1">1 month</option>
++                <option value="2">2 months</option>
++                <option value="3">3 months</option>
++                <option value="6">6 months</option>
++                <option value="12">1 year</option>
++                <option value="all">All time</option>
++              </select>
++            </label>
++          </div>
++          <div class="cost-weekly-table-wrap">
++            <table class="cost-table cost-receipt-summary-table">
++              <thead><tr><th>Date</th><th>Purchased</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th><th>Sub total</th></tr></thead>
++              <tbody data-receipt-range-rows></tbody>
++              <tfoot><tr><th colspan="7">Subtotal</th><th data-receipt-range-subtotal>$0.00</th></tr></tfoot>
++            </table>
++          </div>
++        </div>
++      </div>
++    </div>
++
+     <div class="dashboard-layout cost-layout" id="costLayout">
+       <div class="dashboard-window" data-cost-window="overview">
+         <div class="block cost-overview-block">
+           <h3>Cost Overview</h3>
+           <div class="cost-summary-grid">
+             ${summaryCardsHTML}
+           </div>
+           <div class="cost-window-insight">
+             <div class="chart-info">
+               <button type="button" class="chart-info-button" aria-describedby="costOverviewInsight" aria-label="Explain Cost Overview metrics">
+                 <span aria-hidden="true">?</span>
+                 <span class="sr-only">Show how Cost Overview metrics are calculated</span>
+               </button>
+               <div class="chart-info-bubble" id="costOverviewInsight" role="tooltip">
+                 <p>${esc(overviewInsight)}</p>
+               </div>
+             </div>
+           </div>
+         </div>
+       </div>
+ 
+       <div class="dashboard-window" data-cost-window="chart">
+         <div class="block cost-chart-block">
+           <div class="cost-chart-header">
+             <div class="cost-chart-title">
+@@ -1968,50 +2014,51 @@ function viewCosts(model){
+         <div class="block" data-cost-job-categories>
+           <h3>Job Categories</h3>
+           <div class="cost-category-controls">
+             <label class="cost-category-select-label">
+               <span class="cost-category-select-label-text">Focus category</span>
+               <select data-cost-job-category-select aria-label="Filter job metrics by category">
+                 ${categoryOptionsMarkup}
+               </select>
+             </label>
+           </div>
+           ${categoryOverviewTable}
+           ${summaryMarkup}
+         </div>
+       </div>
+ 
+       <div class="dashboard-window" data-cost-window="weekly">
+         <div class="block" data-cost-weekly-reports>
+           <h3>Weekly cost reports</h3>
+           <div class="cost-weekly-controls">
+             <label class="cost-category-select-label">
+               <span class="cost-category-select-label-text">Report week</span>
+               <select data-cost-weekly-select aria-label="Select weekly cost report">
+                 ${weeklyOptions}
+               </select>
+             </label>
++            <button type="button" class="btn secondary" data-cost-receipt-open>Purchase History</button>
+             <button type="button" class="btn secondary" data-cost-weekly-export ${selectedWeeklyReport ? "" : "disabled"}>Export week (Excel)</button>
+           </div>
+           <div class="cost-weekly-summary">
+             <div><span class="label">Cuts total</span><span>${esc(selectedWeeklyReport?.totalCutCostLabel || "$0")}</span></div>
+             <div><span class="label">Maintenance total</span><span>${esc(selectedWeeklyReport?.totalMaintenanceCostLabel || "$0")}</span></div>
+             <div><span class="label">Cutting time</span><span>${esc(selectedWeeklyReport?.totalCutHoursLabel || "0 hr")}</span></div>
+           </div>
+           <div class="cost-weekly-grid">
+             <details class="cost-weekly-section" open>
+               <summary>Cuts completed</summary>
+               <div class="cost-weekly-section-totals">
+                 <span><strong>Cuts related total:</strong> ${esc(selectedWeeklyReport?.totalCutCostLabel || "$0")}</span>
+                 <span><strong>Total cut time:</strong> ${esc(selectedWeeklyReport?.totalCutHoursLabel || "0 hr")}</span>
+               </div>
+               <div class="cost-weekly-table-wrap">
+                 <table class="cost-table">
+                   <thead><tr><th>Cut</th><th>Category</th><th>Hours</th><th>Cost impact</th></tr></thead>
+                   <tbody>${weeklyCutRows}</tbody>
+                 </table>
+               </div>
+             </details>
+             <details class="cost-weekly-section" open>
+               <summary>Maintenance completed</summary>
+               <div class="cost-weekly-section-totals">
+                 <span><strong>Maintenance related total:</strong> ${esc(selectedWeeklyReport?.totalMaintenanceCostLabel || "$0")}</span>
+diff --git a/style.css b/style.css
+index d5998fef57e20ca7a63ca0d337847aeae4918352..e5b312514608148e13fd017807b8028f3c93a854 100644
+--- a/style.css
++++ b/style.css
+@@ -478,50 +478,63 @@ body.pump-notes-open { overflow:hidden; }
+ .cost-timeframe-card-body{ padding:28px 24px 32px; overflow:auto; }
+ .cost-timeframe-close{ position:absolute; top:14px; right:14px; background:none; border:none; font-size:26px; line-height:1; color:#0b1a38; cursor:pointer; padding:4px; }
+ .cost-timeframe-close:hover{ color:#0b1a38; }
+ .cost-timeframe-close:focus-visible{ outline:2px solid var(--brand-blue-400, #2563eb); outline-offset:2px; }
+ .cost-timeframe-title{ margin:0 0 4px; font-size:20px; color:#0b1a38; }
+ .cost-timeframe-range{ margin:0 0 20px; font-size:14px; color:#526082; }
+ .cost-timeframe-section{ margin-bottom:24px; }
+ .cost-timeframe-section:last-of-type{ margin-bottom:0; }
+ .cost-timeframe-section h4{ margin:0 0 8px; font-size:16px; color:#0b1a38; }
+ .cost-timeframe-table-wrap{ border:1px solid #d8deeb; border-radius:12px; overflow:hidden; background:#f8faff; }
+ .cost-timeframe-table-wrap[hidden]{ display:none; }
+ .cost-timeframe-table{ width:100%; border-collapse:collapse; font-size:14px; color:#1f2937; }
+ .cost-timeframe-table th,.cost-timeframe-table td{ padding:10px 14px; text-align:left; border-bottom:1px solid #e1e7f5; vertical-align:top; }
+ .cost-timeframe-table th{ background:#eef2fb; font-weight:600; color:#0b1a38; }
+ .cost-timeframe-table tr:last-child td{ border-bottom:none; }
+ .cost-timeframe-table td:last-child{ text-align:right; font-weight:600; }
+ .cost-timeframe-table th:last-child{ text-align:right; }
+ .cost-timeframe-total{ display:flex; align-items:center; justify-content:space-between; padding:12px 14px; background:#f1f5ff; font-weight:600; color:#0b1a38; }
+ .cost-timeframe-note{ margin-top:4px; font-size:12px; color:#556080; }
+ .cost-timeframe-group th{ background:#f4f7ff; font-weight:600; text-transform:uppercase; font-size:12px; letter-spacing:.04em; color:#5b6c8f; border-bottom:1px solid #d9e1f5; text-align:left; }
+ .cost-timeframe-row{ cursor:pointer; transition:background-color .12s ease; }
+ .cost-timeframe-row:hover td,.cost-timeframe-row:focus td{ background-color:#f4f7ff; }
+ .cost-timeframe-row:focus-visible{ outline:2px solid var(--brand-blue-400, #2563eb); outline-offset:2px; }
+ .cost-timeframe-section .small.muted{ margin-top:0; }
+ body.cost-timeframe-modal-open{ overflow:hidden; }
++
++.cost-receipt-modal{ position:fixed; inset:0; z-index:1600; display:flex; align-items:center; justify-content:center; padding:24px 20px; }
++.cost-receipt-modal[hidden]{ display:none; }
++.cost-receipt-backdrop{ position:absolute; inset:0; background:rgba(15,23,42,0.55); }
++.cost-receipt-card{ position:relative; width:min(1100px, 100%); max-height:92vh; background:#fff; border-radius:18px; box-shadow:0 32px 72px rgba(15,23,42,0.28); overflow:hidden; }
++.cost-receipt-card-body{ position:relative; z-index:2; padding:24px; overflow:auto; max-height:92vh; }
++.cost-receipt-close{ position:absolute; top:10px; right:12px; border:none; background:none; font-size:28px; cursor:pointer; color:#1e2b45; z-index:3; }
++.cost-receipt-controls,.cost-receipt-summary-controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px; }
++.cost-receipt-controls label,.cost-receipt-summary-controls label{ display:flex; flex-direction:column; gap:4px; font-weight:600; color:#1e2b45; }
++.cost-receipt-controls select,.cost-receipt-summary-controls select{ min-width:240px; padding:6px 8px; border:1px solid #c8d0e0; border-radius:6px; }
++.cost-receipt-week-table input{ width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cfd7e6; border-radius:6px; font:inherit; }
++.cost-receipt-week-table td[data-col="total"],.cost-receipt-week-table tfoot th,.cost-receipt-summary-table tfoot th{ font-weight:700; }
++body.cost-receipt-modal-open{ overflow:hidden; }
+ @media (max-width: 640px){
+   .cost-timeframe-card-body{ padding:24px 18px 28px; }
+   .cost-timeframe-table th,.cost-timeframe-table td{ padding:8px 10px; }
+ }
+ .forecast-table-wrap{ overflow:auto; border-radius:16px; border:1px solid rgba(22,48,92,0.1); background:rgba(248,251,255,0.6); }
+ .forecast-table{ width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+ .forecast-table thead{ background:rgba(16, 61, 130, 0.12); color:#0c2340; }
+ .forecast-table th,
+ .forecast-table td{
+   padding:12px 16px;
+   border-bottom:1px solid rgba(15, 31, 61, 0.08);
+   text-align:right;
+   white-space:nowrap;
+ }
+ .forecast-table th:first-child,
+ .forecast-table td:first-child{
+   text-align:left;
+   white-space:normal;
+ }
+ .forecast-table th:nth-child(2),
+ .forecast-table td:nth-child(2){
+   text-align:left;
+   white-space:normal;
+ }
+ .forecast-table tbody tr:nth-child(even){ background:rgba(234, 241, 255, 0.6); }
+ 
+EOF
+)
