@@ -662,6 +662,23 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
   const today = new Date(); today.setHours(0,0,0,0);
   const todayISO = ymd(today);
 
+  const clearRemovedDateAcrossFamily = (dateKey)=>{
+    const normalized = typeof normalizeDateKey === "function" ? normalizeDateKey(dateKey) : dateKey;
+    if (!normalized || typeof clearRemovedOccurrences !== "function") return;
+    const clearForTask = (taskRef)=>{
+      if (!taskRef || taskRef.mode !== "interval") return;
+      clearRemovedOccurrences(taskRef, (value)=> {
+        const key = typeof normalizeDateKey === "function" ? normalizeDateKey(value) : value;
+        return key === normalized;
+      });
+    };
+    if (typeof visitTaskFamily === "function"){
+      visitTaskFamily(instance, clearForTask);
+      return;
+    }
+    clearForTask(instance);
+  };
+
   const liveHoursRaw = getCurrentMachineHours();
   const liveHours = (liveHoursRaw != null && Number.isFinite(Number(liveHoursRaw)))
     ? Number(liveHoursRaw)
@@ -680,6 +697,7 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
   if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
     targetDate.setHours(0,0,0,0);
     targetISO = ymd(targetDate);
+    clearRemovedDateAcrossFamily(targetISO);
     instance.calendarDateISO = targetISO;
     const isPastOrToday = targetDate.getTime() <= today.getTime();
     const hoursAtTarget = hoursSnapshotOnOrBefore(targetISO);
