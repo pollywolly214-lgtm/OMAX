@@ -1598,8 +1598,9 @@ function viewCosts(model){
             <tr>
               <th scope="col">Task</th>
               <th scope="col">Cadence</th>
+              <th scope="col">Projection basis</th>
               <th scope="col">Unit cost</th>
-              <th scope="col">Annual estimate</th>
+              <th scope="col">Year projection</th>
             </tr>
           </thead>
           <tbody>
@@ -1607,7 +1608,7 @@ function viewCosts(model){
               const rows = Array.isArray(section.rows) ? section.rows : [];
               const headerRow = `
               <tr class="forecast-section-row">
-                <th scope="rowgroup" colspan="4">
+                <th scope="rowgroup" colspan="5">
                   <span class="forecast-section-header">
                     <span class="forecast-section-title">${esc(section.label || "")}</span>
                     ${section.totalLabel ? `<span class="forecast-section-total">${esc(section.totalLabel)}</span>` : ""}
@@ -1623,13 +1624,14 @@ function viewCosts(model){
                   </button>
                 </th>
                 <td>${esc(row.cadenceLabel || "—")}</td>
+                <td>${esc(row.projectionBasisLabel || "Derived from central table completed occurrences")}</td>
                 <td>${esc(row.unitCostLabel || "—")}</td>
                 <td>${esc(row.annualTotalLabel || "—")}</td>
               </tr>
             `).join("")
                 : `
               <tr class="forecast-empty-row">
-                <td colspan="4">${esc(section.emptyMessage || "No tasks yet.")}</td>
+                <td colspan="5">${esc(section.emptyMessage || "No tasks yet.")}</td>
               </tr>`;
               return `${headerRow}${rowsHtml}`;
             }).join("")}
@@ -1638,17 +1640,17 @@ function viewCosts(model){
           <tfoot>
             <tr class="forecast-total-row">
               <th scope="row">Interval total</th>
-              <td colspan="2"></td>
+              <td colspan="3"></td>
               <td>${esc(breakdownTotals.intervalLabel || "—")}</td>
             </tr>
             <tr class="forecast-total-row">
               <th scope="row">As-required total</th>
-              <td colspan="2"></td>
+              <td colspan="3"></td>
               <td>${esc(breakdownTotals.asReqLabel || "—")}</td>
             </tr>
             <tr class="forecast-grand-total-row">
               <th scope="row">Combined total</th>
-              <td colspan="2"></td>
+              <td colspan="3"></td>
               <td>${esc(breakdownTotals.combinedLabel || "—")}</td>
             </tr>
           </tfoot>` : ""}

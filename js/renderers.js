@@ -8582,6 +8582,27 @@ function renderSettings(){
   let contextTarget = null;
   let occurrenceNotesTaskId = null;
   let inventoryLinkTask = null;
+  let pendingCentralCostRefreshTimer = null;
+  const scheduleCentralCostRefresh = ({ immediate = false } = {})=>{
+    const runRefresh = ()=>{
+      pendingCentralCostRefreshTimer = null;
+      if (typeof refreshDashboardWidgets === "function"){
+        refreshDashboardWidgets();
+      }
+      if (typeof renderCosts === "function"){
+        renderCosts();
+      }
+    };
+    if (pendingCentralCostRefreshTimer != null){
+      clearTimeout(pendingCentralCostRefreshTimer);
+      pendingCentralCostRefreshTimer = null;
+    }
+    if (immediate){
+      runRefresh();
+      return;
+    }
+    pendingCentralCostRefreshTimer = setTimeout(runRefresh, 700);
+  };
 
   const getTaskEditingState = (taskEl)=>{
     if (!(taskEl instanceof HTMLElement)) return false;
@@ -9633,12 +9654,7 @@ function renderSettings(){
         updateLinkedPrices(window.tasksInterval);
         updateLinkedPrices(window.tasksAsReq);
       }
-      if (typeof refreshDashboardWidgets === "function"){
-        refreshDashboardWidgets({ full: true });
-      }
-      if (typeof renderCosts === "function"){
-        renderCosts();
-      }
+      scheduleCentralCostRefresh();
     }else if (key === "downtimeHours"){
       const prevDowntime = meta.task.downtimeHours;
       if (value == null){
@@ -9662,13 +9678,11 @@ function renderSettings(){
           });
         }
         if (typeof refreshDashboardWidgets === "function"){
-          refreshDashboardWidgets({ full: true });
+          refreshDashboardWidgets();
         }else if (typeof renderCalendar === "function"){
           renderCalendar();
         }
-        if (typeof renderCosts === "function"){
-          renderCosts();
-        }
+        scheduleCentralCostRefresh();
       }
     }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
       meta.task[key] = target.value;
@@ -9809,6 +9823,15 @@ function renderSettings(){
       renderSettings();
     }
   });
+
+  tree?.addEventListener("blur", (e)=>{
+    const target = e.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+    const key = target.getAttribute("data-k");
+    if (key === "price" || key === "downtimeHours"){
+      scheduleCentralCostRefresh({ immediate: true });
+    }
+  }, true);
 
   tree?.addEventListener("click", async (e)=>{
     const editBtn = e.target.closest('[data-edit-task]');
@@ -15233,7 +15256,9 @@ function computeCostModel(){
       note: row.taskMode === "asreq" ? "As-required task occurrence" : "Interval task occurrence"
     }));
     const actualTotal = actualRows.reduce((sum, row) => sum + (Number(row.totalValue) || 0), 0);
-    const projected = annualForecastFromCentral > 0 ? (annualForecastFromCentral / 365) * def.days : 0;
+    const projected = def.days == null
+      ? annualForecastFromCentral
+      : (annualForecastFromCentral > 0 ? (annualForecastFromCentral / 365) * def.days : 0);
     return {
       key: def.key,
       label: def.label,
@@ -15270,10 +15295,14 @@ function computeCostModel(){
         totalCost: 0,
         count: 0,
         taskId: row.taskId || "",
-        latestDateISO: row.dateISO || ""
+        latestDateISO: row.dateISO || "",
+        ytdCost: 0
       };
       entry.totalCost += row.totalCost;
       entry.count += 1;
+      if (row.occurredAt >= yearStart && row.occurredAt <= today){
+        entry.ytdCost += row.totalCost;
+      }
       if (row.dateISO && (!entry.latestDateISO || String(row.dateISO).localeCompare(String(entry.latestDateISO)) > 0)){
         entry.latestDateISO = row.dateISO;
       }
@@ -15282,6 +15311,8 @@ function computeCostModel(){
     return Array.from(byTask.values())
       .sort((a, b) => b.totalCost - a.totalCost)
       .map((entry, index) => ({
+        projectedYearTotal: entry.ytdCost + ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining),
+        projectedRemaining: (elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining,
         key: `${prefix}_${entry.key}_${index}`,
         name: entry.name,
         taskId: entry.taskId,
@@ -15290,7 +15321,8 @@ function computeCostModel(){
         unitCostLabel: entry.count > 0
           ? formatterCurrency(entry.totalCost / entry.count, { decimals: 2 })
           : "—",
-        annualTotalLabel: formatterCurrency(entry.totalCost, { decimals: entry.totalCost < 1000 ? 2 : 0 })
+        annualTotalLabel: formatterCurrency(entry.ytdCost + ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining), { decimals: entry.totalCost < 1000 ? 2 : 0 }),
+        projectionBasisLabel: `YTD ${formatterCurrency(entry.ytdCost, { decimals: entry.ytdCost < 1000 ? 2 : 0 })} + remaining ${formatterCurrency((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining, { decimals: ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining) < 1000 ? 2 : 0 })}`
       }));
   };
   const intervalRowsFromCentral = makeForecastRows(modeGroupRows("interval"), "interval");

@@ -574,6 +574,11 @@ body.cost-receipt-modal-open{ overflow:hidden; }
   text-align:left;
   white-space:normal;
 }
+.forecast-table th:nth-child(3),
+.forecast-table td:nth-child(3){
+  text-align:left;
+  white-space:normal;
+}
 .forecast-table tbody tr:nth-child(even){ background:rgba(234, 241, 255, 0.6); }
 .forecast-task-link{
   border:0;
