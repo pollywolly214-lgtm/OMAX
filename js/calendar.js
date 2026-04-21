@@ -1292,7 +1292,11 @@ function showTaskBubble(taskId, anchor, options = {}){
         : "Remove this occurrence from the calendar?";
     const shouldRemove = window.confirm ? window.confirm(confirmText) : true;
     if (!shouldRemove) return;
-    const changed = removeCalendarTaskOccurrences(meta, targetKey, scope);
+    const singleIntervalRemoval = scope === "single"
+      && (meta.mode === "interval" || task.mode === "interval");
+    const changed = singleIntervalRemoval
+      ? removeIntervalOccurrenceScopeAcrossInstances(task, targetKey, "single")
+      : removeCalendarTaskOccurrences(meta, targetKey, scope);
     if (changed){
       let endedRepeat = false;
       if (scope === "single" && (meta.mode === "interval" || task.mode === "interval")){
