@@ -1005,11 +1005,11 @@ function shouldOfferEndRepeatAfterSingleRemoval(task, removedDateISO){
   return diffDays >= 0 && diffDays <= 1;
 }
 
-function removeIntervalOccurrenceScopeAcrossFamily(task, dateISO, scope){
+function removeIntervalOccurrenceScopeAcrossInstances(task, dateISO, scope){
   if (!task) return false;
   let changed = false;
   visitTaskFamily(task, member => {
-    if (!member || member.mode !== "interval") return;
+    if (!member || member.mode !== "interval" || !isInstanceTask(member)) return;
     const memberMeta = { task: member, mode: "interval" };
     if (removeCalendarTaskOccurrences(memberMeta, dateISO, scope)){
       changed = true;
@@ -1292,11 +1292,7 @@ function showTaskBubble(taskId, anchor, options = {}){
         : "Remove this occurrence from the calendar?";
     const shouldRemove = window.confirm ? window.confirm(confirmText) : true;
     if (!shouldRemove) return;
-    const intervalScopeRemoval = (scope === "future" || scope === "all")
-      && (meta.mode === "interval" || task.mode === "interval");
-    const changed = intervalScopeRemoval
-      ? removeIntervalOccurrenceScopeAcrossFamily(task, targetKey, scope)
-      : removeCalendarTaskOccurrences(meta, targetKey, scope);
+    const changed = removeCalendarTaskOccurrences(meta, targetKey, scope);
     if (changed){
       let endedRepeat = false;
       if (scope === "single" && (meta.mode === "interval" || task.mode === "interval")){
@@ -1308,7 +1304,7 @@ function showTaskBubble(taskId, anchor, options = {}){
             : targetKey;
           const shouldEndRepeat = window.confirm(`This task repeats and the next occurrence is already scheduled. End repeating from ${display} onward?`);
           if (shouldEndRepeat){
-            endedRepeat = removeIntervalOccurrenceScopeAcrossFamily(task, targetKey, "future");
+            endedRepeat = removeIntervalOccurrenceScopeAcrossInstances(task, targetKey, "future");
           }
         }
       }
