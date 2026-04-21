@@ -578,7 +578,7 @@ body.cost-receipt-modal-open{ overflow:hidden; }
 .forecast-task-link{
   border:0;
   background:none;
-  color:#0a63c2;
+  color:#0f1e3a;
   cursor:pointer;
   font:inherit;
   font-weight:600;
@@ -586,7 +586,7 @@ body.cost-receipt-modal-open{ overflow:hidden; }
   text-align:left;
   text-decoration:underline;
 }
-.forecast-task-link:hover{ color:#084e98; }
+.forecast-task-link:hover{ color:#0a63c2; }
 .forecast-table tfoot{ background:rgba(13,55,117,0.12); font-weight:600; color:#0a1f3f; }
 .forecast-total-row th,
 .forecast-total-row td{ border-bottom:1px solid rgba(13,55,117,0.18); }
