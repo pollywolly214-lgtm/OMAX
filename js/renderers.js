@@ -14387,6 +14387,8 @@ function computeCostModel(){
       ...report,
       totalCutCostLabel: formatterCurrency(report.totalCutCost, { showPlus: true, decimals: Math.abs(report.totalCutCost) < 1000 ? 2 : 0 }),
       totalMaintenanceCostLabel: formatterCurrency(report.totalMaintenanceCost, { decimals: report.totalMaintenanceCost < 1000 ? 2 : 0 }),
+      totalCutProfitLabel: formatterCurrency(report.totalCutCost, { showPlus: true, decimals: Math.abs(report.totalCutCost) < 1000 ? 2 : 0 }),
+      totalMaintenanceLossLabel: formatterCurrency(-Math.abs(report.totalMaintenanceCost), { showPlus: true, decimals: report.totalMaintenanceCost < 1000 ? 2 : 0 }),
       totalCutHoursLabel: formatHours(report.totalCutHours),
       weekLabel: `${formatDateLabelShort(new Date(report.weekStartISO))} - ${formatDateLabelShort(new Date(report.weekEndISO))}`
     }));
@@ -14947,6 +14949,7 @@ function computeCostModel(){
     const materialCostValue = Number.isFinite(materialCost) && materialCost >= 0 ? materialCost : 0;
     const laborCostValue = Math.max(0, hours) * costRate;
     const totalCostValue = materialCostValue + laborCostValue;
+    const totalProfitValue = (Math.max(0, hours) * chargeRate) - totalCostValue;
     const completedISO = typeof job?.completedAtISO === "string" && job.completedAtISO ? job.completedAtISO : "";
     return {
       id: job?.id != null ? String(job.id) : `completed_job_${index}`,
@@ -14969,9 +14972,12 @@ function computeCostModel(){
       cumulativeCutNumberLabel: `#${Math.max(1, totalCompletedJobs - index)}`,
       categoryCutNumberLabel: `#${categoryCutCount}`,
       hoursValue: hours,
+      chargeRateValue: chargeRate,
+      costRateValue: costRate,
       materialCostValue,
       laborCostValue,
       totalCostValue,
+      totalProfitValue,
       settingsLink: job?.id != null ? `#/settings?jobId=${encodeURIComponent(String(job.id))}` : ""
     };
   });
@@ -14992,23 +14998,31 @@ function computeCostModel(){
       partCostLabel: formatterCurrency(Number(row?.materialCostValue) || 0, { decimals: 2 }),
       laborCostLabel: formatterCurrency(Number(row?.laborCostValue) || 0, { decimals: 2 }),
       totalCostLabel: formatterCurrency(Number(row?.totalCostValue) || 0, { decimals: 2 }),
+      totalProfitLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
       hoursValue: Number(row?.hoursValue) || 0,
       totalCostValue: Number(row?.totalCostValue) || 0,
+      totalProfitValue: Number(row?.totalProfitValue) || 0,
+      formulaTitle: "Source: Central data table completed cutting jobs row. Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost).",
       settingsLink: row?.settingsLink || ""
     }));
   const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
     if (Number.isFinite(row?.hoursValue)) acc.hours += Math.max(0, Number(row.hoursValue));
     if (Number.isFinite(row?.totalCostValue)) acc.cost += Math.max(0, Number(row.totalCostValue));
+    if (Number.isFinite(row?.totalProfitValue)) acc.profit += Number(row.totalProfitValue);
     return acc;
-  }, { hours: 0, cost: 0 });
+  }, { hours: 0, cost: 0, profit: 0 });
   const efficiencyCount = efficiencyRows.length;
   const efficiencySnapshot = {
     countLabel: String(efficiencyCount),
     totalHoursLabel: formatHoursValue(efficiencyTotals.hours),
     totalCostLabel: formatterCurrency(efficiencyTotals.cost, { decimals: efficiencyTotals.cost < 1000 ? 2 : 0 }),
     averageCostLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.cost / efficiencyCount) : 0, { decimals: 2 }),
+    totalProfitLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
+    averageProfitLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
+    sourceLabel: "Source: central data table completed cutting jobs rows.",
+    formulaLabel: "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)",
     rows: efficiencyRows,
-    emptyMessage: "No valid completed cutting tasks with settings links were found in the data center table."
+    emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
   };
 
   const taskById = new Map();

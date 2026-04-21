@@ -2202,15 +2202,15 @@ function viewCosts(model){
             <button type="button" class="btn secondary" data-cost-weekly-export ${selectedWeeklyReport ? "" : "disabled"}>Export week (Excel)</button>
           </div>
           <div class="cost-weekly-summary">
-            <div><span class="label">Cuts total</span><span>${esc(selectedWeeklyReport?.totalCutCostLabel || "$0")}</span></div>
-            <div><span class="label">Maintenance total</span><span>${esc(selectedWeeklyReport?.totalMaintenanceCostLabel || "$0")}</span></div>
+            <div><span class="label">Cuts total profit</span><span>${esc(selectedWeeklyReport?.totalCutProfitLabel || selectedWeeklyReport?.totalCutCostLabel || "$0")}</span></div>
+            <div><span class="label">Maintenance total loss</span><span>${esc(selectedWeeklyReport?.totalMaintenanceLossLabel || selectedWeeklyReport?.totalMaintenanceCostLabel || "$0")}</span></div>
             <div><span class="label">Cutting time</span><span>${esc(selectedWeeklyReport?.totalCutHoursLabel || "0 hr")}</span></div>
           </div>
           <div class="cost-weekly-grid">
             <details class="cost-weekly-section" open>
               <summary>Cuts completed</summary>
               <div class="cost-weekly-section-totals">
-                <span><strong>Cuts related total:</strong> ${esc(selectedWeeklyReport?.totalCutCostLabel || "$0")}</span>
+                <span><strong>Cuts related total profit:</strong> ${esc(selectedWeeklyReport?.totalCutProfitLabel || selectedWeeklyReport?.totalCutCostLabel || "$0")}</span>
                 <span><strong>Total cut time:</strong> ${esc(selectedWeeklyReport?.totalCutHoursLabel || "0 hr")}</span>
               </div>
               <div class="cost-weekly-table-wrap">
@@ -2223,7 +2223,7 @@ function viewCosts(model){
             <details class="cost-weekly-section" open>
               <summary>Maintenance completed</summary>
               <div class="cost-weekly-section-totals">
-                <span><strong>Maintenance related total:</strong> ${esc(selectedWeeklyReport?.totalMaintenanceCostLabel || "$0")}</span>
+                <span><strong>Maintenance related total loss:</strong> ${esc(selectedWeeklyReport?.totalMaintenanceLossLabel || selectedWeeklyReport?.totalMaintenanceCostLabel || "$0")}</span>
               </div>
               <div class="cost-weekly-table-wrap">
                 <table class="cost-table">
@@ -2243,11 +2243,12 @@ function viewCosts(model){
           <div class="cost-jobs-summary">
             <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
             <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
-            <div><span class="label">Total cost</span><span>${esc(efficiencySnapshot.totalCostLabel || "$0.00")}</span></div>
-            <div><span class="label">Avg cost / row</span><span>${esc(efficiencySnapshot.averageCostLabel || "$0.00")}</span></div>
+            <div title="${esc(`Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)"}`)}"><span class="label">Total profit</span><span>${esc(efficiencySnapshot.totalProfitLabel || "$0.00")}</span></div>
+            <div title="${esc(`Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)"}`)}"><span class="label">Avg profit / row</span><span>${esc(efficiencySnapshot.averageProfitLabel || "$0.00")}</span></div>
           </div>
+          <p class="small muted" title="${esc(efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)")}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")}</p>
           <table class="cost-table">
-            <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th>Task link</th></tr></thead>
+            <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)")}" aria-label="Profit calculation">Profit</th><th>Task link</th></tr></thead>
             <tbody>
               ${efficiencyRows.length ? efficiencyRows.map(row => `
                 <tr>
@@ -2257,11 +2258,12 @@ function viewCosts(model){
                   <td>${esc(row.partCostLabel || "$0.00")}</td>
                   <td>${esc(row.laborCostLabel || "$0.00")}</td>
                   <td>${esc(row.totalCostLabel || "$0.00")}</td>
+                  <td title="${esc(row.formulaTitle || efficiencySnapshot.formulaLabel || "Profit = (Hours × Charge Rate) - (Hours × Cost Rate + Material Cost)")}" data-efficiency-profit-cell>${esc(row.totalProfitLabel || "$0.00")}</td>
                   <td>${row.settingsLink ? `<a href="${esc(row.settingsLink)}">Open settings</a>` : "Invalid link"}</td>
                 </tr>
               `).join("") : `
                 <tr>
-                  <td colspan="7" class="cost-table-placeholder">${esc(efficiencySnapshot.emptyMessage || "No valid completed rows available from the data center table.")}</td>
+                  <td colspan="8" class="cost-table-placeholder">${esc(efficiencySnapshot.emptyMessage || "No valid completed rows available from the central data table.")}</td>
                 </tr>
               `}
             </tbody>
