@@ -2140,6 +2140,7 @@ function viewCosts(model){
                       <th>Hours</th>
                       <th>Charge rate/hr</th>
                       <th>Cost rate/hr</th>
+                      <th>Total profit</th>
                       <th>Material type</th>
                       <th>Material cost</th>
                       <th>Material qty</th>
@@ -2162,6 +2163,7 @@ function viewCosts(model){
                         <td>${esc(row.hoursLabel || "0")}</td>
                         <td>${esc(row.chargeRateLabel || "—")}</td>
                         <td>${esc(row.costRateLabel || "—")}</td>
+                        <td>${esc(row.totalProfitLabel || "—")}</td>
                         <td>${esc(row.materialType || "—")}</td>
                         <td>${esc(row.materialCostLabel || "—")}</td>
                         <td>${esc(row.materialQtyLabel || "—")}</td>

@@ -10572,6 +10572,13 @@ function renderCosts(){
   if (!content) return;
   const previousModal = document.getElementById("costDataCenterModal");
   const wasDataCenterOpen = Boolean(previousModal && !previousModal.hasAttribute("hidden"));
+  let pendingDataCenterScrollTop = null;
+  if (previousModal instanceof HTMLElement && wasDataCenterOpen){
+    const previousPanel = previousModal.querySelector(".cost-data-center-panel");
+    if (previousPanel instanceof HTMLElement){
+      pendingDataCenterScrollTop = previousPanel.scrollTop;
+    }
+  }
   if (previousModal && previousModal.parentElement === document.body){
     previousModal.remove();
     document.body.classList.remove("cost-data-center-open");
@@ -10737,7 +10744,7 @@ function renderCosts(){
       modal.setAttribute("aria-hidden", "true");
       document.body.classList.remove("cost-data-center-open");
     };
-    const openDataCenter = ()=>{
+    const openDataCenter = ({ restoreScroll = false } = {})=>{
       if (!(modal instanceof HTMLElement)) return;
       modal.removeAttribute("hidden");
       modal.setAttribute("aria-hidden", "false");
@@ -10745,8 +10752,14 @@ function renderCosts(){
       try { modal.focus({ preventScroll: true }); } catch (_err){ modal.focus(); }
       const panel = modal.querySelector(".cost-data-center-panel");
       if (panel instanceof HTMLElement){
-        panel.scrollTop = 0;
+        const savedScrollTop = Number(pendingDataCenterScrollTop);
+        if (restoreScroll && Number.isFinite(savedScrollTop) && savedScrollTop > 0){
+          panel.scrollTop = savedScrollTop;
+        } else {
+          panel.scrollTop = 0;
+        }
       }
+      pendingDataCenterScrollTop = null;
     };
     if (openBtn instanceof HTMLElement && modal instanceof HTMLElement){
       openBtn.addEventListener("click", openDataCenter);
@@ -10763,7 +10776,7 @@ function renderCosts(){
         });
       }
       if (options && options.openImmediately){
-        openDataCenter();
+        openDataCenter({ restoreScroll: true });
       }
     }
 
@@ -14931,6 +14944,8 @@ function computeCostModel(){
     const costRate = Number.isFinite(costRateRaw) && costRateRaw >= 0 ? costRateRaw : JOB_BASE_COST_PER_HOUR;
     const materialCost = Number(job?.materialCost);
     const materialQty = Number(job?.materialQty);
+    const materialCostValue = Number.isFinite(materialCost) ? materialCost : 0;
+    const totalProfit = ((chargeRate * hours) - (costRate * hours)) - materialCostValue;
     const completedISO = typeof job?.completedAtISO === "string" && job.completedAtISO ? job.completedAtISO : "";
     return {
       id: job?.id != null ? String(job.id) : `completed_job_${index}`,
@@ -14943,6 +14958,7 @@ function computeCostModel(){
       materialType: String(job?.material || "—"),
       materialCostLabel: Number.isFinite(materialCost) ? formatterCurrency(materialCost, { decimals: 2 }) : "—",
       materialQtyLabel: Number.isFinite(materialQty) ? String(materialQty) : "—",
+      totalProfitLabel: formatterCurrency(totalProfit, { decimals: 2 }),
       startDateLabel: job?.startISO || "—",
       dueDateLabel: job?.dueISO || "—",
       completedDateLabel: completedISO ? String(completedISO).slice(0, 10) : "—",
