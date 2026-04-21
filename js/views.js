@@ -290,7 +290,8 @@ function viewDashboard(){
         <form id="dashJobForm" class="modal-form">
           <div class="modal-grid">
             <label>Job name<input id="dashJobName" required placeholder="Job"></label>
-            <label>Estimate (hrs)<input type="number" min="1" step="0.1" id="dashJobEstimate" required placeholder="e.g. 12"></label>
+            <label>Estimate hours<input type="number" min="0" step="1" id="dashJobEstimateHours" required placeholder="e.g. 12"></label>
+            <label>Estimate minutes<input type="number" min="0" step="1" id="dashJobEstimateMinutes" placeholder="e.g. 30"></label>
             <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCharge" value="200"></label>
             <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCostRate" value="45"></label>
             <label>Material<input id="dashJobMaterial" placeholder="Material" list="dashJobMaterialOptions"></label>
@@ -3896,7 +3897,8 @@ function viewJobs(){
       >
         <form id="addJobForm" class="mini-form job-add-form">
           <input type="text" id="jobName" placeholder="Job name" required value="${esc(addJobDraftField("name"))}">
-          <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="0.01" step="0.01" value="${esc(addJobDraftField("estimate"))}">
+          <input type="number" id="jobEstHours" placeholder="Estimate hours" required min="0" step="1" value="${esc(Math.floor(Number(addJobDraftField("estimate", "0")) || 0))}">
+          <input type="number" id="jobEstMinutes" placeholder="Estimate minutes" min="0" step="1" value="${esc(Math.round((((Number(addJobDraftField("estimate", "0")) || 0) % 1) + Number.EPSILON) * 60))}">
           <select id="jobPriority" aria-label="Priority">
             ${priorityOptionsMarkup(addJobPriorityDefault)}
           </select>
