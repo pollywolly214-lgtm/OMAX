@@ -1783,6 +1783,52 @@ function viewCosts(model){
       </div>
     </div>
 
+    <div class="cost-receipt-modal" id="costReceiptModal" role="dialog" aria-modal="true" aria-labelledby="costReceiptTitle" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-receipt-close tabindex="-1" aria-label="Close receipt tracker"></div>
+      <div class="cost-receipt-card" role="document">
+        <button type="button" class="cost-receipt-close" data-receipt-close aria-label="Close receipt tracker"><span aria-hidden="true">×</span></button>
+        <div class="cost-receipt-card-body">
+          <h3 id="costReceiptTitle">Receipt tracker</h3>
+          <div class="cost-receipt-controls">
+            <label>
+              <span>Week of year</span>
+              <select data-receipt-week-select aria-label="Select receipt tracker week"></select>
+            </label>
+            <button type="button" class="btn secondary" data-receipt-export-week>Export week (CSV)</button>
+            <button type="button" class="btn secondary" data-receipt-export-range>Export range (CSV)</button>
+          </div>
+          <p class="small muted" data-receipt-week-range>—</p>
+          <div class="cost-weekly-table-wrap">
+            <table class="cost-table cost-receipt-week-table">
+              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Total</th></tr></thead>
+              <tbody data-receipt-week-rows></tbody>
+              <tfoot><tr><th colspan="6">Subtotal</th><th data-receipt-week-subtotal>$0.00</th></tr></tfoot>
+            </table>
+          </div>
+          <div class="cost-receipt-summary-controls">
+            <label>
+              <span>Range</span>
+              <select data-receipt-range-select aria-label="Select receipt summary range">
+                <option value="1">1 month</option>
+                <option value="2">2 months</option>
+                <option value="3">3 months</option>
+                <option value="6">6 months</option>
+                <option value="12">1 year</option>
+                <option value="all">All time</option>
+              </select>
+            </label>
+          </div>
+          <div class="cost-weekly-table-wrap">
+            <table class="cost-table cost-receipt-summary-table">
+              <thead><tr><th>Date</th><th>Purchased</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Total</th><th>Sub total</th></tr></thead>
+              <tbody data-receipt-range-rows></tbody>
+              <tfoot><tr><th colspan="6">Subtotal</th><th data-receipt-range-subtotal>$0.00</th></tr></tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="dashboard-layout cost-layout" id="costLayout">
       <div class="dashboard-window" data-cost-window="overview">
         <div class="block cost-overview-block">
@@ -1990,6 +2036,7 @@ function viewCosts(model){
                 ${weeklyOptions}
               </select>
             </label>
+            <button type="button" class="btn secondary" data-cost-receipt-open>Receipt tracker</button>
             <button type="button" class="btn secondary" data-cost-weekly-export ${selectedWeeklyReport ? "" : "disabled"}>Export week (Excel)</button>
           </div>
           <div class="cost-weekly-summary">

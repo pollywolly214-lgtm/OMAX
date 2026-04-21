@@ -1607,6 +1607,7 @@ if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
 if (!Array.isArray(window.opportunityRollups)) window.opportunityRollups = [];
 if (!Array.isArray(window.weeklyCostReports)) window.weeklyCostReports = [];
+if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
 if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
@@ -1629,6 +1630,7 @@ let garnetCleanings = window.garnetCleanings;
 let dailyCutHours = window.dailyCutHours;
 let jobFolders = window.jobFolders;
 let weeklyCostReports = window.weeklyCostReports;
+let receiptTrackerWeeks = window.receiptTrackerWeeks;
 
 function normalizeJobPriorityOrder(list){
   if (!Array.isArray(list)) return list;
@@ -1879,6 +1881,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     copyArr("completedCuttingJobs");
     copyArr("dailyCutHours");
     copyArr("orderRequests");
+    copyArr("receiptTrackerWeeks");
     copyArr("garnetCleanings");
     copyArr("totalHistory");
     copyObj("appConfig");
@@ -1904,6 +1907,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(sanitized.dailyCutHours) && Array.isArray(window.dailyCutHours)) sanitized.dailyCutHours = window.dailyCutHours.slice();
     if (!Array.isArray(sanitized.inventory) && Array.isArray(window.inventory)) sanitized.inventory = window.inventory.slice();
     if (!Array.isArray(sanitized.orderRequests) && Array.isArray(window.orderRequests)) sanitized.orderRequests = window.orderRequests.slice();
+    if (!Array.isArray(sanitized.receiptTrackerWeeks) && Array.isArray(window.receiptTrackerWeeks)) sanitized.receiptTrackerWeeks = window.receiptTrackerWeeks.slice();
     if (!Array.isArray(sanitized.garnetCleanings) && Array.isArray(window.garnetCleanings)) sanitized.garnetCleanings = window.garnetCleanings.slice();
     if (!Array.isArray(sanitized.totalHistory) && Array.isArray(window.totalHistory)) sanitized.totalHistory = window.totalHistory.slice();
     if (!Array.isArray(sanitized.deletedItems) && Array.isArray(window.deletedItems)) sanitized.deletedItems = window.deletedItems.slice();
@@ -1924,6 +1928,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     window.appConfig = appConfig;
     refreshDerivedDailyHours();
     if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+    if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
     if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
     if (!Array.isArray(window.totalHistory)) window.totalHistory = [];
     if (!window.settingsFolders || !Array.isArray(window.settingsFolders)) window.settingsFolders = typeof defaultSettingsFolders === "function" ? defaultSettingsFolders() : [];
@@ -1958,6 +1963,7 @@ function stateHasMeaningfulData(data){
     "completedCuttingJobs",
     "dailyCutHours",
     "orderRequests",
+    "receiptTrackerWeeks",
     "totalHistory",
     "garnetCleanings",
     "deletedItems",
@@ -2077,6 +2083,9 @@ function snapshotState(){
     cuttingJobs: stripJobFileDataUrls(cuttingJobs),
     completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs),
     orderRequests,
+    receiptTrackerWeeks: Array.isArray(window.receiptTrackerWeeks)
+      ? window.receiptTrackerWeeks.map(entry => ({ ...entry }))
+      : [],
     orderRequestTab,
     garnetCleanings,
     dailyCutHours: Array.isArray(dailyCutHours)
@@ -2778,6 +2787,7 @@ function adoptState(doc){
   dailyCutHours = normalizeDailyCutHours(Array.isArray(data.dailyCutHours) ? data.dailyCutHours : []);
   opportunityRollups = Array.isArray(data.opportunityRollups) ? data.opportunityRollups : [];
   weeklyCostReports = Array.isArray(data.weeklyCostReports) ? data.weeklyCostReports.map(entry => ({ ...entry })) : [];
+  receiptTrackerWeeks = Array.isArray(data.receiptTrackerWeeks) ? data.receiptTrackerWeeks.map(entry => ({ ...entry })) : [];
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -2790,6 +2800,7 @@ function adoptState(doc){
   window.dailyCutHours = dailyCutHours;
   window.opportunityRollups = opportunityRollups;
   window.weeklyCostReports = weeklyCostReports;
+  window.receiptTrackerWeeks = receiptTrackerWeeks;
   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
   window.deletedItems = deletedItems;
   purgeExpiredDeletedItems();
@@ -3075,6 +3086,7 @@ async function loadFromCloud(){
         cuttingJobs: Array.isArray(window.cuttingJobs) ? window.cuttingJobs.slice() : [],
         completedCuttingJobs: Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [],
         orderRequests: Array.isArray(window.orderRequests) && window.orderRequests.length ? window.orderRequests.slice() : [typeof createOrderRequest === "function" ? createOrderRequest() : { id:"req_"+Date.now(), items:[] }],
+        receiptTrackerWeeks: Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks.slice() : [],
         orderRequestTab: typeof window.orderRequestTab === "string" ? window.orderRequestTab : "active",
         dailyCutHours: Array.isArray(window.dailyCutHours) ? window.dailyCutHours.slice() : [],
         opportunityRollups: Array.isArray(window.opportunityRollups) ? window.opportunityRollups.slice() : [],
@@ -3308,6 +3320,7 @@ const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes
     cuttingJobs: [],
     completedCuttingJobs: [],
     orderRequests: [createOrderRequest()],
+    receiptTrackerWeeks: [],
     orderRequestTab: "active",
     dailyCutHours: [],
     opportunityRollups: [],
