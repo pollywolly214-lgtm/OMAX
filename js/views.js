@@ -1843,6 +1843,7 @@ function viewCosts(model){
               </select>
             </label>
           </div>
+          <p class="small muted" data-receipt-range-label>—</p>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-summary-table">
               <thead><tr><th>Date</th><th>Purchased</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th><th>Sub total</th></tr></thead>

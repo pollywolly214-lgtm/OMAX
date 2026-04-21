@@ -11324,9 +11324,62 @@ function renderCosts(){
       return created;
     };
     const computeRowTotal = (row)=> ((Number(row?.cost) || 0) * (Number(row?.qty) || 0)) + (Number(row?.shipping) || 0) + (Number(row?.tax) || 0);
+    const escWorkbookHtml = (value)=> String(value == null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+    const buildWorkbookFromTable = ({ title, subtitle, headerRows, bodyRows, footerRows = [] })=> `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+      body{font-family:Arial,sans-serif;padding:16px;color:#1e2b45;} h2{margin:0 0 6px;} .summary{margin:0 0 14px;}
+      table{border-collapse:collapse;width:100%;margin-bottom:12px;} th,td{border:1px solid #cfd7e6;padding:6px 8px;text-align:left;}
+      th{background:#eef3fb;font-weight:700;} .right{text-align:right;} .totals td{font-weight:700;background:#f7f9fd;}
+    </style></head><body>
+      <h2>${escWorkbookHtml(title || "Export")}</h2>
+      <div class="summary">${escWorkbookHtml(subtitle || "")}</div>
+      <table>
+        <thead>${(Array.isArray(headerRows) ? headerRows : []).map(row => `<tr>${row.map(col => `<th>${escWorkbookHtml(col)}</th>`).join("")}</tr>`).join("")}</thead>
+        <tbody>${(Array.isArray(bodyRows) ? bodyRows : []).map(row => `<tr>${row.map((col, idx) => `<td class="${idx >= 2 ? "right" : ""}">${escWorkbookHtml(col)}</td>`).join("")}</tr>`).join("") || "<tr><td colspan=\"8\">No rows available.</td></tr>"}</tbody>
+        <tfoot class="totals">${(Array.isArray(footerRows) ? footerRows : []).map(row => `<tr>${row.map((col, idx) => `<td class="${idx >= 2 ? "right" : ""}">${escWorkbookHtml(col)}</td>`).join("")}</tr>`).join("")}</tfoot>
+      </table>
+    </body></html>`;
+    const downloadWorkbook = (name, html)=>{
+      const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8;" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.href = url;
+      link.download = name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    };
+    const shiftMonthsBack = (anchorDate, monthsBack)=>{
+      const base = anchorDate instanceof Date ? anchorDate : new Date();
+      const m = Number(monthsBack);
+      if (!Number.isFinite(m) || m <= 0) return null;
+      const dayOfMonth = base.getDate();
+      const startOfTargetMonth = new Date(base.getFullYear(), base.getMonth() - m, 1);
+      const lastDay = new Date(startOfTargetMonth.getFullYear(), startOfTargetMonth.getMonth() + 1, 0).getDate();
+      const boundedDay = Math.min(dayOfMonth, lastDay);
+      const shifted = new Date(startOfTargetMonth);
+      shifted.setDate(boundedDay);
+      shifted.setHours(0, 0, 0, 0);
+      return shifted;
+    };
+    const getRangeWindow = (months)=>{
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      const start = months === "all" ? null : shiftMonthsBack(today, months);
+      return { start, end: today };
+    };
+    const formatDateRangeLabel = (start, end)=> {
+      const endIso = end instanceof Date && !Number.isNaN(end.getTime()) ? end.toISOString().slice(0, 10) : "";
+      if (!start) return endIso ? `Range: All time through ${endIso}` : "Range: All time";
+      const startIso = start instanceof Date && !Number.isNaN(start.getTime()) ? start.toISOString().slice(0, 10) : "";
+      return startIso && endIso ? `Range: ${startIso} to ${endIso}` : "Range: Date window unavailable";
+    };
     const buildRangeRows = (months)=>{
-      const end = new Date();
-      const start = months === "all" ? null : new Date(end.getFullYear(), end.getMonth() - Number(months), end.getDate());
+      const { start, end } = getRangeWindow(months);
       const rows = [];
       (window.receiptTrackerWeeks || []).forEach(week => {
         normalizeRows(week?.rows).forEach(row => {
@@ -11340,19 +11393,6 @@ function renderCosts(){
       rows.sort((a,b)=> String(a.date).localeCompare(String(b.date)));
       return rows;
     };
-    const downloadCsv = (name, rows)=>{
-      const csv = rows.map(cols => cols.map(val => `"${String(val ?? "").replace(/"/g, "\"\"")}"`).join(",")).join("\n");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const link = document.createElement("a");
-      const url = URL.createObjectURL(blob);
-      link.href = url;
-      link.download = name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    };
-
     const receiptOpenBtn = panel.querySelector("[data-cost-receipt-open]");
     const modal = document.getElementById("costReceiptModal");
     if (receiptOpenBtn instanceof HTMLElement && modal instanceof HTMLElement){
@@ -11363,6 +11403,7 @@ function renderCosts(){
       const rangeSelect = modal.querySelector("[data-receipt-range-select]");
       const rangeRowsBody = modal.querySelector("[data-receipt-range-rows]");
       const rangeSubtotal = modal.querySelector("[data-receipt-range-subtotal]");
+      const rangeLabel = modal.querySelector("[data-receipt-range-label]");
       const closeControls = Array.from(modal.querySelectorAll("[data-receipt-close]"));
       const exportWeekBtn = modal.querySelector("[data-receipt-export-week]");
       const exportRangeBtn = modal.querySelector("[data-receipt-export-range]");
@@ -11452,6 +11493,7 @@ function renderCosts(){
       };
       const renderRangeTable = ()=>{
         if (!(rangeRowsBody instanceof HTMLElement)) return;
+        const { start, end } = getRangeWindow(activeRange);
         const rows = buildRangeRows(activeRange);
         const subtotal = rows.reduce((sum, row) => sum + row.total, 0);
         rangeRowsBody.innerHTML = rows.length ? rows.map(row => `
@@ -11466,6 +11508,7 @@ function renderCosts(){
             <td></td>
           </tr>`).join("") : '<tr><td colspan="8" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
         if (rangeSubtotal) rangeSubtotal.textContent = formatUsd(subtotal);
+        if (rangeLabel) rangeLabel.textContent = formatDateRangeLabel(start, end);
       };
       const bindRowEvents = ()=>{
         if (!(weekRowsBody instanceof HTMLElement)) return;
@@ -11523,24 +11566,49 @@ function renderCosts(){
           const entry = saveWeekRowsFromDom();
           const rows = normalizeRows(entry.rows);
           const subtotal = rows.reduce((sum, row) => sum + computeRowTotal(row), 0);
-          const payload = [
-            ["Date", "Purchased", "Cost", "Qty", "Part number", "Shipping", "Tax", "Total"],
-            ...rows.map(row => [row.date, row.purchased, row.cost, row.qty, row.partNumber, row.shipping, row.tax, computeRowTotal(row)]),
-            ["", "", "", "", "", "", "Subtotal", subtotal]
-          ];
-          downloadCsv(`receipt-week-${entry.key}.csv`, payload);
+          const weekRange = entry.startISO && entry.endISO
+            ? `Week: ${entry.startISO} to ${entry.endISO}`
+            : `Week: ${entry.key || "Selected week"}`;
+          const workbook = buildWorkbookFromTable({
+            title: "Purchase History — Weekly Export",
+            subtitle: weekRange,
+            headerRows: [["Date", "Purchased", "Cost", "Qty", "Part number", "Shipping", "Tax", "Total"]],
+            bodyRows: rows.map(row => [
+              row.date || "—",
+              row.purchased || "—",
+              Number(row.cost || 0).toFixed(2),
+              Number(row.qty || 0).toFixed(2),
+              row.partNumber || "—",
+              Number(row.shipping || 0).toFixed(2),
+              Number(row.tax || 0).toFixed(2),
+              Number(computeRowTotal(row) || 0).toFixed(2)
+            ]),
+            footerRows: [["", "", "", "", "", "", "Subtotal", Number(subtotal || 0).toFixed(2)]]
+          });
+          downloadWorkbook(`receipt-week-${entry.key || "week"}.xls`, workbook);
         });
       }
       if (exportRangeBtn instanceof HTMLElement){
         exportRangeBtn.addEventListener("click", ()=>{
+          const { start, end } = getRangeWindow(activeRange);
           const rows = buildRangeRows(activeRange);
           const subtotal = rows.reduce((sum, row) => sum + row.total, 0);
-          const payload = [
-            ["Date", "Purchased", "Qty", "Part number", "Shipping", "Tax", "Total"],
-            ...rows.map(row => [row.date, row.purchased, row.qty, row.partNumber, row.shipping, row.tax, row.total]),
-            ["", "", "", "", "", "Subtotal", subtotal]
-          ];
-          downloadCsv(`receipt-range-${activeRange}.csv`, payload);
+          const workbook = buildWorkbookFromTable({
+            title: "Purchase History — Date Range Export",
+            subtitle: formatDateRangeLabel(start, end),
+            headerRows: [["Date", "Purchased", "Qty", "Part number", "Shipping", "Tax", "Total"]],
+            bodyRows: rows.map(row => [
+              row.date || "—",
+              row.purchased || "—",
+              Number(row.qty || 0).toFixed(2),
+              row.partNumber || "—",
+              Number(row.shipping || 0).toFixed(2),
+              Number(row.tax || 0).toFixed(2),
+              Number(row.total || 0).toFixed(2)
+            ]),
+            footerRows: [["", "", "", "", "", "Subtotal", Number(subtotal || 0).toFixed(2)]]
+          });
+          downloadWorkbook(`receipt-range-${activeRange}.xls`, workbook);
         });
       }
       const openModal = ()=>{
