@@ -9721,6 +9721,16 @@ function renderSettings(){
   });
 
   tree?.addEventListener("change", (e)=>{
+    const directInputTarget = e.target;
+    if (directInputTarget instanceof HTMLInputElement || directInputTarget instanceof HTMLTextAreaElement){
+      const key = directInputTarget.getAttribute("data-k");
+      if (key === "price" || key === "downtimeHours"){
+        const holder = directInputTarget.closest("[data-task-id]");
+        if (holder && getTaskEditingState(holder)){
+          scheduleCentralCostRefresh({ immediate: true });
+        }
+      }
+    }
     const target = e.target;
     if (!(target instanceof HTMLSelectElement)) return;
     const holder = target.closest("[data-task-id]");
@@ -9823,15 +9833,6 @@ function renderSettings(){
       renderSettings();
     }
   });
-
-  tree?.addEventListener("blur", (e)=>{
-    const target = e.target;
-    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
-    const key = target.getAttribute("data-k");
-    if (key === "price" || key === "downtimeHours"){
-      scheduleCentralCostRefresh({ immediate: true });
-    }
-  }, true);
 
   tree?.addEventListener("click", async (e)=>{
     const editBtn = e.target.closest('[data-edit-task]');
