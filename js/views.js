@@ -3942,6 +3942,7 @@ function viewJobs(){
             <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required value="${esc(addJobDraftField("projectNumber"))}">
           </label>
           <div class="job-category-field">
+            <label for="jobCategory">Category</label>
             <select id="jobCategory" aria-label="Category" required>
               ${categoryOptionsMarkup(addJobCategoryDefault, { includeCreateOption: true })}
             </select>
@@ -3949,11 +3950,13 @@ function viewJobs(){
               Choose a category to keep jobs organized. We'll save it under All Jobs if you skip this step.
             </p>
           </div>
-          <button type="button" id="jobFilesBtn">Attach Files</button>
-          <button type="button" id="jobOneDriveLibraryAddBtn">Add from this computer OneDrive folder</button>
+          <div class="job-add-actions">
+            <button type="button" id="jobFilesBtn">Attach Files</button>
+            <button type="button" id="jobOneDriveLibraryAddBtn">Add from this computer OneDrive folder</button>
+            <button type="submit">Add Job</button>
+          </div>
           <input type="file" id="jobFiles" multiple style="display:none">
           <datalist id="jobMaterialOptions">${materialInventoryOptionsMarkup}</datalist>
-          <button type="submit">Add Job</button>
         </form>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
       </section>

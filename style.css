@@ -2099,12 +2099,78 @@ body.modal-open .auth-bar {
   display: none;
 }
 .job-add-form {
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px 14px;
+  align-items: end;
+}
+.job-add-form > label,
+.job-category-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #29405f;
+  letter-spacing: 0.01em;
 }
 .job-add-form input,
-.job-add-form select,
-.job-add-form button {
-  min-width: 120px;
+.job-add-form select {
+  width: 100%;
+  min-height: 42px;
+  border-radius: 12px;
+  border: 1px solid #cdd8ea;
+  background: #ffffff;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: #18304f;
+  box-shadow: inset 0 1px 2px rgba(10, 30, 56, 0.05);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.job-add-form input:focus,
+.job-add-form select:focus {
+  outline: none;
+  border-color: #5ea3ff;
+  box-shadow: 0 0 0 3px rgba(94, 163, 255, 0.18);
+}
+.job-estimate-label-group .small {
+  margin-bottom: 2px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.job-priority-hint {
+  margin: 0;
+  align-self: end;
+}
+.job-add-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.job-add-actions button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 16px;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  background: linear-gradient(135deg, #4ea4f5, #2f80d8);
+  color: #fff;
+  box-shadow: 0 8px 16px rgba(20, 87, 154, 0.24);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+.job-add-actions button:hover,
+.job-add-actions button:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(20, 87, 154, 0.3);
+  filter: brightness(1.02);
+}
+.job-add-actions button[type="submit"] {
+  background: linear-gradient(135deg, #2378d9, #0d62c0);
 }
 .job-add-indicator {
   display: inline-flex;
@@ -5659,6 +5725,11 @@ tr.row-editing {
 .job-category-field {
   display: flex;
   flex-direction: column;
+}
+.job-category-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #29405f;
 }
 
 .job-category-hint {
