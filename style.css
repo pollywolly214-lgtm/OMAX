@@ -450,7 +450,7 @@ body.pump-notes-open { overflow:hidden; }
   box-shadow:0 42px 96px rgba(5, 24, 62, 0.48);
   width:min(960px, 96vw);
   max-height:min(90vh, 760px);
-  overflow:auto;
+  overflow:hidden;
   display:flex;
   flex-direction:column;
   gap:18px;
@@ -557,7 +557,15 @@ body.cost-receipt-modal-open{ overflow:hidden; }
   .cost-timeframe-card-body{ padding:24px 18px 28px; }
   .cost-timeframe-table th,.cost-timeframe-table td{ padding:8px 10px; }
 }
-.forecast-table-wrap{ overflow:auto; border-radius:16px; border:1px solid rgba(22,48,92,0.1); background:rgba(248,251,255,0.6); }
+.forecast-table-wrap{
+  overflow:auto;
+  flex:1 1 auto;
+  min-height:0;
+  max-height:58vh;
+  border-radius:16px;
+  border:1px solid rgba(22,48,92,0.1);
+  background:rgba(248,251,255,0.6);
+}
 .forecast-table{ width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
 .forecast-table thead{ background:rgba(16, 61, 130, 0.12); color:#0c2340; }
 .forecast-table th,
