@@ -10571,6 +10571,7 @@ function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
   const previousModal = document.getElementById("costDataCenterModal");
+  const previousEfficiencyModal = document.getElementById("efficiencySnapshotModal");
   const wasDataCenterOpen = Boolean(previousModal && !previousModal.hasAttribute("hidden"));
   let pendingDataCenterScrollTop = null;
   if (previousModal instanceof HTMLElement && wasDataCenterOpen){
@@ -10581,6 +10582,10 @@ function renderCosts(){
   }
   if (previousModal && previousModal.parentElement === document.body){
     previousModal.remove();
+    document.body.classList.remove("cost-data-center-open");
+  }
+  if (previousEfficiencyModal && previousEfficiencyModal.parentElement === document.body){
+    previousEfficiencyModal.remove();
     document.body.classList.remove("cost-data-center-open");
   }
   const existingReceiptModal = document.getElementById("costReceiptModal");
@@ -11671,7 +11676,7 @@ function renderCosts(){
       if (!(btn instanceof HTMLElement)) return;
       btn.addEventListener("click", openSnapshot);
     });
-    const closeSnapshotBtns = Array.from(content.querySelectorAll("[data-close-efficiency-snapshot]"));
+    const closeSnapshotBtns = Array.from(document.querySelectorAll("[data-close-efficiency-snapshot]"));
     closeSnapshotBtns.forEach(btn => {
       if (!(btn instanceof HTMLElement)) return;
       btn.addEventListener("click", closeSnapshot);
@@ -11701,6 +11706,14 @@ function renderCosts(){
     const asNumber = (value, fallback = 0)=>{
       const num = Number(value);
       return Number.isFinite(num) ? num : fallback;
+    };
+    const normalizeToTwo = (inputEl, fallback)=>{
+      if (!(inputEl instanceof HTMLInputElement)) return fallback;
+      const raw = asNumber(inputEl.value, fallback);
+      const safe = Math.max(0, raw);
+      const normalized = Math.round(safe * 100) / 100;
+      inputEl.value = normalized.toFixed(2);
+      return normalized;
     };
     const defaultCharge = Math.max(0, asNumber(defaults.chargeRate, asNumber(chargeInput.value, 0)));
     const defaultCost = Math.max(0, asNumber(defaults.costRate, asNumber(costInput.value, 0)));
@@ -11753,8 +11766,8 @@ function renderCosts(){
     };
 
     const recalc = ()=>{
-      const chargeRate = Math.max(0, asNumber(chargeInput.value, defaultCharge));
-      const costRate = Math.max(0, asNumber(costInput.value, defaultCost));
+      const chargeRate = normalizeToTwo(chargeInput, defaultCharge);
+      const costRate = normalizeToTwo(costInput, defaultCost);
       const visibleRows = rows.filter(row => withinRange(row, activeRange));
       const totals = visibleRows.reduce((acc, row)=>{
         const hours = Math.max(0, asNumber(row?.hoursValue, 0));
@@ -11775,6 +11788,18 @@ function renderCosts(){
         const rowObj = rows.find(row => String(row?.id || "") === rowId) || null;
         const show = rowObj ? withinRange(rowObj, activeRange) : false;
         tr.hidden = !show;
+        if (!show) return;
+        const hours = Math.max(0, asNumber(tr.getAttribute("data-efficiency-hours"), asNumber(rowObj?.hoursValue, 0)));
+        const material = Math.max(0, asNumber(tr.getAttribute("data-efficiency-material"), asNumber(rowObj?.materialValue ?? rowObj?.materialCostValue, 0)));
+        const labor = hours * costRate;
+        const totalCost = labor + material;
+        const net = (hours * (chargeRate - costRate)) - material;
+        const laborCell = tr.querySelector("[data-efficiency-labor-cell]");
+        const totalCostCell = tr.querySelector("[data-efficiency-total-cost-cell]");
+        const profitCell = tr.querySelector("[data-efficiency-profit-cell]");
+        if (laborCell) laborCell.textContent = formatUsd(labor);
+        if (totalCostCell) totalCostCell.textContent = formatUsd(totalCost);
+        if (profitCell) profitCell.textContent = formatUsd(net);
       });
     };
 

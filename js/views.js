@@ -1175,6 +1175,17 @@ function ensureTaskCategories(){
 function viewCosts(model){
   const data = model || {};
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const efficiencyWindows = [
+    { key: "7d", label: "1W", days: 7, description: "Past 7 days" },
+    { key: "30d", label: "1M", days: 30, description: "Past 30 days" },
+    { key: "90d", label: "3M", days: 90, description: "Past 3 months" },
+    { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
+    { key: "365d", label: "1Y", days: 365, description: "Past year" }
+  ];
+  const efficiencyButtons = efficiencyWindows.map((win, index) => `
+    <button type="button" class="time-efficiency-toggle${index === 0 ? " is-active" : ""}" data-efficiency-range="${esc(String(win.days))}" data-efficiency-range-label="${esc(win.description)}" aria-pressed="${index === 0 ? "true" : "false"}" title="${esc(win.description)}">${esc(win.label)}</button>
+  `).join("");
+  const defaultEfficiencyDescription = esc(efficiencyWindows[0]?.description || "Past 7 days");
   const cards = Array.isArray(data.summaryCards) ? data.summaryCards : [];
   const timeframeRows = Array.isArray(data.timeframeRows) ? data.timeframeRows : [];
   const historyRows = Array.isArray(data.historyRows) ? data.historyRows : [];
@@ -2284,6 +2295,41 @@ function viewCosts(model){
         <button type="button" class="btn ghost" data-close-efficiency-snapshot>Close</button>
       </div>
       <div class="cost-data-center-body">
+        <div class="time-efficiency-inline" id="costTimeEfficiency">
+          <div class="time-efficiency-inline-header">
+            <span class="time-efficiency-inline-title">Cutting time efficiency</span>
+            <div class="time-efficiency-controls">
+              <div class="time-efficiency-toggles" role="tablist">
+                ${efficiencyButtons}
+              </div>
+              <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit range</button>
+            </div>
+          </div>
+          <div class="time-efficiency-edit" data-efficiency-edit-panel hidden>
+            <div class="time-efficiency-edit-row">
+              <label class="time-efficiency-edit-field">
+                <span class="time-efficiency-edit-label">Start date</span>
+                <input type="date" data-efficiency-start-input>
+              </label>
+              <div class="time-efficiency-edit-actions">
+                <button type="button" class="time-efficiency-edit-apply" data-efficiency-apply>Apply</button>
+                <button type="button" class="time-efficiency-edit-cancel" data-efficiency-cancel>Cancel</button>
+              </div>
+            </div>
+            <p class="small muted time-efficiency-edit-note" data-efficiency-edit-note></p>
+          </div>
+          <div class="time-efficiency-metrics" role="status" aria-live="polite">
+            <div class="time-efficiency-metric"><span class="label">Actual hours</span><span class="value" data-efficiency-actual>—</span></div>
+            <div class="time-efficiency-metric"><span class="label">Current target</span><span class="value" data-efficiency-target>—</span></div>
+            <div class="time-efficiency-metric"><span class="label">Gap vs target</span><span class="value" data-efficiency-gap-target>—</span></div>
+            <div class="time-efficiency-metric"><span class="label">End goal</span><span class="value" data-efficiency-goal>—</span></div>
+            <div class="time-efficiency-metric"><span class="label">Avg usage/day</span><span class="value" data-efficiency-average>—</span></div>
+            <div class="time-efficiency-metric"><span class="label">Gap vs goal</span><span class="value" data-efficiency-gap-goal>—</span></div>
+            <div class="time-efficiency-metric"><span class="label">Efficiency (to date)</span><span class="value" data-efficiency-percent>—</span></div>
+          </div>
+          <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
+          <p class="small muted">Baseline adapts to your average logged hours per day.</p>
+        </div>
         <div class="cost-efficiency-calculator" data-efficiency-calc>
           <div class="cost-efficiency-calculator-row">
             <label>
@@ -2330,13 +2376,13 @@ function viewCosts(model){
             <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net gain</th><th>Task link</th></tr></thead>
             <tbody>
               ${efficiencyRows.length ? efficiencyRows.map(row => `
-                <tr data-efficiency-row data-efficiency-id="${esc(row.id || "")}" data-efficiency-date="${esc(row.dateLabel || "")}">
+                <tr data-efficiency-row data-efficiency-id="${esc(row.id || "")}" data-efficiency-date="${esc(row.dateLabel || "")}" data-efficiency-hours="${esc(String(Number(row.hoursValue) || 0))}" data-efficiency-material="${esc(String(Number(row.materialValue || 0)))}">
                   <td>${esc(row.taskName || "Completed task")}</td>
                   <td>${esc(row.dateLabel || "—")}</td>
                   <td>${esc(row.hoursLabel || "0 hr")}</td>
                   <td>${esc(row.partCostLabel || "$0.00")}</td>
-                  <td>${esc(row.laborCostLabel || "$0.00")}</td>
-                  <td>${esc(row.totalCostLabel || "$0.00")}</td>
+                  <td data-efficiency-labor-cell>${esc(row.laborCostLabel || "$0.00")}</td>
+                  <td data-efficiency-total-cost-cell>${esc(row.totalCostLabel || "$0.00")}</td>
                   <td title="${esc(`${row.formulaTitle || efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" data-efficiency-profit-cell>${esc(row.netGainLabel || "$0.00")}</td>
                   <td>${row.settingsLink ? `<button type="button" class="btn secondary" data-efficiency-open-job="${esc(row.id || "")}">Open job</button>` : "Invalid link"}</td>
                 </tr>
