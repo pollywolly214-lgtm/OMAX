@@ -10615,6 +10615,7 @@ function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
   const previousModal = document.getElementById("costDataCenterModal");
+  const previousEfficiencyModal = document.getElementById("efficiencySnapshotModal");
   const wasDataCenterOpen = Boolean(previousModal && !previousModal.hasAttribute("hidden"));
   let pendingDataCenterScrollTop = null;
   if (previousModal instanceof HTMLElement && wasDataCenterOpen){
@@ -10625,6 +10626,10 @@ function renderCosts(){
   }
   if (previousModal && previousModal.parentElement === document.body){
     previousModal.remove();
+    document.body.classList.remove("cost-data-center-open");
+  }
+  if (previousEfficiencyModal && previousEfficiencyModal.parentElement === document.body){
+    previousEfficiencyModal.remove();
     document.body.classList.remove("cost-data-center-open");
   }
   const existingReceiptModal = document.getElementById("costReceiptModal");
@@ -10674,6 +10679,7 @@ function renderCosts(){
   setupCostTimeframeModal(model);
   setupJobCategoryWindow(model);
   setupWeeklyReportWindow(model);
+  setupEfficiencyCalculator(model);
   setupMaintenanceDataCenterActions({ openImmediately: wasDataCenterOpen });
 
   function focusCalendarAtOccurrence(taskId, dateISO){
@@ -11747,6 +11753,204 @@ function renderCosts(){
     }
   }
 
+  function setupEfficiencyCalculator(currentModel){
+    const openSnapshotBtns = Array.from(content.querySelectorAll("[data-open-efficiency-snapshot]"));
+    const closeSnapshot = ()=>{
+      const modal = document.getElementById("efficiencySnapshotModal");
+      if (!(modal instanceof HTMLElement)) return;
+      modal.hidden = true;
+      document.body.classList.remove("cost-data-center-open");
+    };
+    const openSnapshot = ()=>{
+      const modal = document.getElementById("efficiencySnapshotModal");
+      if (!(modal instanceof HTMLElement)) return;
+      modal.hidden = false;
+      if (modal.parentElement !== document.body) document.body.appendChild(modal);
+      document.body.classList.add("cost-data-center-open");
+    };
+    openSnapshotBtns.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", openSnapshot);
+    });
+    const closeSnapshotBtns = Array.from(document.querySelectorAll("[data-close-efficiency-snapshot]"));
+    closeSnapshotBtns.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", closeSnapshot);
+    });
+
+    const panel = content.querySelector("[data-efficiency-calc]");
+    if (!(panel instanceof HTMLElement)) return;
+    const snapshot = currentModel && currentModel.efficiencySnapshot ? currentModel.efficiencySnapshot : {};
+    const rows = Array.isArray(snapshot.rows) ? snapshot.rows : [];
+    const defaults = snapshot.calculatorDefaults || {};
+    const chargeInput = panel.querySelector("[data-efficiency-calc-charge]");
+    const costInput = panel.querySelector("[data-efficiency-calc-cost]");
+    const resetBtn = panel.querySelector("[data-efficiency-calc-reset]");
+    const rangeSelect = panel.querySelector("[data-efficiency-calc-range-select]");
+    const rangeLabelEl = panel.querySelector("[data-efficiency-calc-range-label]");
+    const totalEl = panel.querySelector("[data-efficiency-calc-total]");
+    const avgEl = panel.querySelector("[data-efficiency-calc-average]");
+    const goJobsBtn = panel.querySelector("[data-go-jobs-history]");
+    if (!(chargeInput instanceof HTMLInputElement) || !(costInput instanceof HTMLInputElement)) return;
+
+    const formatUsd = (value)=> new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: Math.abs(Number(value) || 0) < 1000 ? 2 : 0,
+      maximumFractionDigits: Math.abs(Number(value) || 0) < 1000 ? 2 : 0
+    }).format(Number.isFinite(Number(value)) ? Number(value) : 0);
+    const asNumber = (value, fallback = 0)=>{
+      const num = Number(value);
+      return Number.isFinite(num) ? num : fallback;
+    };
+    const normalizeToTwo = (inputEl, fallback)=>{
+      if (!(inputEl instanceof HTMLInputElement)) return fallback;
+      const raw = asNumber(inputEl.value, fallback);
+      const safe = Math.max(0, raw);
+      const normalized = Math.round(safe * 100) / 100;
+      inputEl.value = normalized.toFixed(2);
+      return normalized;
+    };
+    const defaultCharge = Math.max(0, asNumber(defaults.chargeRate, asNumber(chargeInput.value, 0)));
+    const defaultCost = Math.max(0, asNumber(defaults.costRate, asNumber(costInput.value, 0)));
+    chargeInput.value = String(defaultCharge);
+    costInput.value = String(defaultCost);
+    let activeRange = "1m";
+
+    const getRangeStart = (rangeKey)=>{
+      const now = new Date();
+      now.setHours(23, 59, 59, 999);
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      if (rangeKey === "all") return null;
+      if (rangeKey === "ytd"){
+        return new Date(start.getFullYear(), 0, 1);
+      }
+      const monthMap = { "1m": 1, "2m": 2, "3m": 3, "6m": 6, "1y": 12 };
+      const monthsBack = monthMap[rangeKey];
+      if (!monthsBack) return null;
+      return new Date(start.getFullYear(), start.getMonth() - monthsBack, start.getDate());
+    };
+    const parseRowDate = (row)=>{
+      const raw = String(row?.dateLabel || "");
+      if (!raw) return null;
+      const parsed = new Date(`${raw}T00:00:00`);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+    const withinRange = (row, rangeKey)=>{
+      if (rangeKey === "all") return true;
+      const rowDate = parseRowDate(row);
+      if (!(rowDate instanceof Date)) return false;
+      const start = getRangeStart(rangeKey);
+      if (!(start instanceof Date)) return true;
+      return rowDate >= start;
+    };
+    const updateRangeButtons = ()=>{
+      if (rangeSelect instanceof HTMLSelectElement) rangeSelect.value = activeRange;
+      const labels = {
+        "1m": "Range: past 1 month from central data table rows.",
+        "2m": "Range: past 2 months from central data table rows.",
+        "3m": "Range: past 3 months from central data table rows.",
+        "6m": "Range: past 6 months from central data table rows.",
+        "1y": "Range: past 1 year from central data table rows.",
+        ytd: "Range: year to date from central data table rows.",
+        all: "Range: all time from central data table rows."
+      };
+      if (rangeLabelEl instanceof HTMLElement){
+        rangeLabelEl.textContent = labels[activeRange] || labels["1m"];
+      }
+    };
+
+    const recalc = ()=>{
+      const chargeRate = normalizeToTwo(chargeInput, defaultCharge);
+      const costRate = normalizeToTwo(costInput, defaultCost);
+      const visibleRows = rows.filter(row => withinRange(row, activeRange));
+      const totals = visibleRows.reduce((acc, row)=>{
+        const hours = Math.max(0, asNumber(row?.hoursValue, 0));
+        const material = Math.max(0, asNumber(row?.materialValue ?? row?.materialCostValue, 0));
+        acc.rows += 1;
+        acc.net += (hours * (chargeRate - costRate)) - material;
+        return acc;
+      }, { rows: 0, net: 0 });
+      if (totalEl) totalEl.textContent = formatUsd(totals.net);
+      if (avgEl) avgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
+      const summaryTotalEl = document.querySelector("[data-efficiency-summary-total]");
+      const summaryAvgEl = document.querySelector("[data-efficiency-summary-average]");
+      if (summaryTotalEl) summaryTotalEl.textContent = formatUsd(totals.net);
+      if (summaryAvgEl) summaryAvgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
+      const tableRows = Array.from(document.querySelectorAll("[data-efficiency-row]"));
+      tableRows.forEach(tr => {
+        const rowId = String(tr.getAttribute("data-efficiency-id") || "");
+        const rowObj = rows.find(row => String(row?.id || "") === rowId) || null;
+        const show = rowObj ? withinRange(rowObj, activeRange) : false;
+        tr.hidden = !show;
+        if (!show) return;
+        const hours = Math.max(0, asNumber(tr.getAttribute("data-efficiency-hours"), asNumber(rowObj?.hoursValue, 0)));
+        const material = Math.max(0, asNumber(tr.getAttribute("data-efficiency-material"), asNumber(rowObj?.materialValue ?? rowObj?.materialCostValue, 0)));
+        const labor = hours * costRate;
+        const totalCost = labor + material;
+        const net = (hours * (chargeRate - costRate)) - material;
+        const laborCell = tr.querySelector("[data-efficiency-labor-cell]");
+        const totalCostCell = tr.querySelector("[data-efficiency-total-cost-cell]");
+        const profitCell = tr.querySelector("[data-efficiency-profit-cell]");
+        if (laborCell) laborCell.textContent = formatUsd(labor);
+        if (totalCostCell) totalCostCell.textContent = formatUsd(totalCost);
+        if (profitCell) profitCell.textContent = formatUsd(net);
+      });
+    };
+
+    chargeInput.addEventListener("input", recalc);
+    costInput.addEventListener("input", recalc);
+    if (rangeSelect instanceof HTMLSelectElement){
+      rangeSelect.addEventListener("change", ()=>{
+        activeRange = String(rangeSelect.value || "1m");
+        updateRangeButtons();
+        recalc();
+      });
+    }
+    if (resetBtn instanceof HTMLElement){
+      resetBtn.addEventListener("click", ()=>{
+        chargeInput.value = String(defaultCharge);
+        costInput.value = String(defaultCost);
+        activeRange = "1m";
+        recalc();
+        updateRangeButtons();
+      });
+    }
+    if (typeof window !== "undefined"){
+      if (typeof window.__efficiencySnapshotEscHandler === "function"){
+        document.removeEventListener("keydown", window.__efficiencySnapshotEscHandler);
+      }
+      window.__efficiencySnapshotEscHandler = (event)=>{
+        if (event.key !== "Escape") return;
+        const modal = document.getElementById("efficiencySnapshotModal");
+        if (modal instanceof HTMLElement && !modal.hidden) closeSnapshot();
+      };
+      document.addEventListener("keydown", window.__efficiencySnapshotEscHandler);
+    }
+    if (goJobsBtn instanceof HTMLElement){
+      goJobsBtn.addEventListener("click", ()=>{
+        closeSnapshot();
+        goToJobsHistory();
+      });
+    }
+    const openJobBtns = Array.from(document.querySelectorAll("[data-efficiency-open-job]"));
+    openJobBtns.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", ()=>{
+        const id = String(btn.getAttribute("data-efficiency-open-job") || "");
+        if (!id) return;
+        if (typeof window !== "undefined"){
+          window.pendingJobFocus = { type: "jobRow", id };
+        }
+        closeSnapshot();
+        goToJobsHistory();
+      });
+    });
+    updateRangeButtons();
+    recalc();
+  }
+
   function setupJobCategoryWindow(currentModel){
     const panel = content.querySelector("[data-cost-job-categories]");
     if (!panel) return;
@@ -12175,7 +12379,6 @@ function renderCosts(){
   };
 
   wireJobsHistoryShortcut(content.querySelector("[data-cost-jobs-history]"));
-  wireJobsHistoryShortcut(content.querySelector("[data-cost-cutting-card]"));
   wireJobsHistoryShortcut(content.querySelector(".cost-chart-toggle-link"));
 
   const normalizeHistoryDate = (value)=>{
@@ -14483,6 +14686,8 @@ function computeCostModel(){
       ...report,
       totalCutCostLabel: formatterCurrency(report.totalCutCost, { showPlus: true, decimals: Math.abs(report.totalCutCost) < 1000 ? 2 : 0 }),
       totalMaintenanceCostLabel: formatterCurrency(report.totalMaintenanceCost, { decimals: report.totalMaintenanceCost < 1000 ? 2 : 0 }),
+      totalCutProfitLabel: formatterCurrency(report.totalCutCost, { showPlus: true, decimals: Math.abs(report.totalCutCost) < 1000 ? 2 : 0 }),
+      totalMaintenanceLossLabel: formatterCurrency(-Math.abs(report.totalMaintenanceCost), { showPlus: true, decimals: report.totalMaintenanceCost < 1000 ? 2 : 0 }),
       totalCutHoursLabel: formatHours(report.totalCutHours),
       weekLabel: `${formatDateLabelShort(new Date(report.weekStartISO))} - ${formatDateLabelShort(new Date(report.weekEndISO))}`
     }));
@@ -15040,8 +15245,10 @@ function computeCostModel(){
     const costRate = Number.isFinite(costRateRaw) && costRateRaw >= 0 ? costRateRaw : JOB_BASE_COST_PER_HOUR;
     const materialCost = Number(job?.materialCost);
     const materialQty = Number(job?.materialQty);
-    const materialCostValue = Number.isFinite(materialCost) ? materialCost : 0;
-    const totalProfit = ((chargeRate * hours) - (costRate * hours)) - materialCostValue;
+    const materialCostValue = Number.isFinite(materialCost) && materialCost >= 0 ? materialCost : 0;
+    const laborCostValue = Math.max(0, hours) * costRate;
+    const totalCostValue = materialCostValue + laborCostValue;
+    const totalProfitValue = (Math.max(0, hours) * chargeRate) - totalCostValue;
     const completedISO = typeof job?.completedAtISO === "string" && job.completedAtISO ? job.completedAtISO : "";
     return {
       id: job?.id != null ? String(job.id) : `completed_job_${index}`,
@@ -15054,17 +15261,106 @@ function computeCostModel(){
       materialType: String(job?.material || "—"),
       materialCostLabel: Number.isFinite(materialCost) ? formatterCurrency(materialCost, { decimals: 2 }) : "—",
       materialQtyLabel: Number.isFinite(materialQty) ? String(materialQty) : "—",
-      totalProfitLabel: formatterCurrency(totalProfit, { decimals: 2 }),
       startDateLabel: job?.startISO || "—",
       dueDateLabel: job?.dueISO || "—",
       completedDateLabel: completedISO ? String(completedISO).slice(0, 10) : "—",
+      completedDateISO: completedISO ? String(completedISO).slice(0, 10) : "",
       projectNumber: String(job?.projectNumber || "—"),
       notes: String(job?.notes || "").trim() || "—",
       priorityLabel: Number.isFinite(Number(job?.priority)) ? String(Math.max(1, Math.floor(Number(job.priority)))) : "—",
       cumulativeCutNumberLabel: `#${Math.max(1, totalCompletedJobs - index)}`,
-      categoryCutNumberLabel: `#${categoryCutCount}`
+      categoryCutNumberLabel: `#${categoryCutCount}`,
+      hoursValue: hours,
+      chargeRateValue: chargeRate,
+      costRateValue: costRate,
+      materialCostValue,
+      laborCostValue,
+      totalCostValue,
+      totalProfitValue,
+      settingsLink: job?.id != null ? `#/settings?jobId=${encodeURIComponent(String(job.id))}` : ""
     };
   });
+
+  const efficiencyRows = cuttingJobsDataTable
+    .filter(row => {
+      const hasDate = typeof row?.completedDateISO === "string" && row.completedDateISO.trim().length > 0;
+      const hasTaskName = typeof row?.name === "string" && row.name.trim().length > 0;
+      const hasSettingsLink = typeof row?.settingsLink === "string" && /^#\/settings\?jobId=/.test(row.settingsLink);
+      return hasDate && hasTaskName && hasSettingsLink;
+    })
+    .sort((a, b) => String(b?.completedDateISO || "").localeCompare(String(a?.completedDateISO || "")))
+    .map((row, index) => ({
+      id: row?.id != null ? String(row.id) : `efficiency_row_${index}`,
+      taskName: row?.name || "Completed task",
+      dateLabel: row?.completedDateISO || "—",
+      hoursLabel: formatHoursValue(Number(row?.hoursValue) || 0),
+      partCostLabel: formatterCurrency(Number(row?.materialCostValue) || 0, { decimals: 2 }),
+      laborCostLabel: formatterCurrency(Number(row?.laborCostValue) || 0, { decimals: 2 }),
+      totalCostLabel: formatterCurrency(Number(row?.totalCostValue) || 0, { decimals: 2 }),
+      totalProfitLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
+      hoursValue: Number(row?.hoursValue) || 0,
+      chargeRateValue: Number(row?.chargeRateValue) || 0,
+      costRateValue: Number(row?.costRateValue) || 0,
+      revenueValue: Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)),
+      netGainLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
+      materialValue: Math.max(0, Number(row?.materialCostValue) || 0),
+      laborValue: Math.max(0, Number(row?.laborCostValue) || 0),
+      totalCostValue: Number(row?.totalCostValue) || 0,
+      totalProfitValue: Number(row?.totalProfitValue) || 0,
+      formulaTitle: "Source: Central data table completed cutting jobs row. Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost.",
+      settingsLink: row?.settingsLink || ""
+    }));
+  const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
+    if (Number.isFinite(row?.hoursValue)) acc.hours += Math.max(0, Number(row.hoursValue));
+    if (Number.isFinite(row?.revenueValue)) acc.revenue += Math.max(0, Number(row.revenueValue));
+    if (Number.isFinite(row?.materialValue)) acc.material += Math.max(0, Number(row.materialValue));
+    if (Number.isFinite(row?.laborValue)) acc.labor += Math.max(0, Number(row.laborValue));
+    if (Number.isFinite(row?.totalCostValue)) acc.cost += Math.max(0, Number(row.totalCostValue));
+    if (Number.isFinite(row?.totalProfitValue)) acc.profit += Number(row.totalProfitValue);
+    return acc;
+  }, { hours: 0, revenue: 0, material: 0, labor: 0, cost: 0, profit: 0 });
+  const efficiencyCount = efficiencyRows.length;
+  const efficiencySnapshot = {
+    countLabel: String(efficiencyCount),
+    totalHoursLabel: formatHoursValue(efficiencyTotals.hours),
+    totalCostLabel: formatterCurrency(efficiencyTotals.cost, { decimals: efficiencyTotals.cost < 1000 ? 2 : 0 }),
+    averageCostLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.cost / efficiencyCount) : 0, { decimals: 2 }),
+    totalProfitLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
+    averageProfitLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
+    totalNetGainLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
+    averageNetGainLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
+    sourceLabel: "Source: central data table completed cutting jobs rows.",
+    formulaLabel: "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost",
+    disclaimerLabel: "Uses central data table values only.",
+    rows: efficiencyRows,
+    emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
+  };
+  const efficiencyMathDetails = `Net gain = (Hours × (Charge Rate - Cost Rate)) - Material. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
+  efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
+  const totalCalcHours = efficiencyTotals.hours > 0 ? efficiencyTotals.hours : 0;
+  const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.revenue / totalCalcHours) : JOB_RATE_PER_HOUR;
+  const defaultCostRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.labor / totalCalcHours) : JOB_BASE_COST_PER_HOUR;
+  efficiencySnapshot.calculatorDefaults = {
+    chargeRate: Number.isFinite(defaultChargeRateForCalc) ? defaultChargeRateForCalc : JOB_RATE_PER_HOUR,
+    costRate: Number.isFinite(defaultCostRateForCalc) ? defaultCostRateForCalc : JOB_BASE_COST_PER_HOUR
+  };
+  const efficiencyDisplayProfit = efficiencyTotals.profit;
+  const efficiencyDisplayAverage = efficiencyCount ? (efficiencyDisplayProfit / efficiencyCount) : 0;
+  const cuttingCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "cuttingJobs") : null;
+  if (cuttingCard){
+    cuttingCard.value = formatterCurrency(efficiencyDisplayProfit, { decimals: 0, showPlus: true });
+    cuttingCard.hint = efficiencyCount
+      ? `Average net gain ${formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true })} across ${efficiencyCount} completed job${efficiencyCount===1?"":"s"} (source: central data table).`
+      : "No cutting jobs logged yet.";
+    cuttingCard.tooltip = `Source: central data table completed rows. ${efficiencyMathDetails}`;
+  }
+  const combinedCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "combinedImpact") : null;
+  if (combinedCard){
+    combinedCard.value = formatterCurrency(efficiencyDisplayProfit - predictedAnnual, { decimals: 0, showPlus: true });
+  }
+  jobSummary.countLabel = efficiencyCount ? `${efficiencyCount} completed` : "0";
+  jobSummary.totalLabel = formatterCurrency(efficiencyDisplayProfit, { decimals: 0, showPlus: true });
+  jobSummary.averageLabel = formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true });
 
   const taskById = new Map();
   [Array.isArray(intervalTasksAll) ? intervalTasksAll : [], Array.isArray(asReqTasksAll) ? asReqTasksAll : []].forEach(list => {
@@ -15445,6 +15741,7 @@ function computeCostModel(){
     orderRequestSummary,
     maintenanceDataTable,
     cuttingJobsDataTable,
+    efficiencySnapshot,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries: maintenanceSeriesCentral,
     jobSeries,
