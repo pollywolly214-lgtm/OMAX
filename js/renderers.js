@@ -11653,6 +11653,30 @@ function renderCosts(){
   }
 
   function setupEfficiencyCalculator(currentModel){
+    const openSnapshotBtns = Array.from(content.querySelectorAll("[data-open-efficiency-snapshot]"));
+    const closeSnapshot = ()=>{
+      const modal = document.getElementById("efficiencySnapshotModal");
+      if (!(modal instanceof HTMLElement)) return;
+      modal.hidden = true;
+      document.body.classList.remove("cost-data-center-open");
+    };
+    const openSnapshot = ()=>{
+      const modal = document.getElementById("efficiencySnapshotModal");
+      if (!(modal instanceof HTMLElement)) return;
+      modal.hidden = false;
+      if (modal.parentElement !== document.body) document.body.appendChild(modal);
+      document.body.classList.add("cost-data-center-open");
+    };
+    openSnapshotBtns.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", openSnapshot);
+    });
+    const closeSnapshotBtns = Array.from(content.querySelectorAll("[data-close-efficiency-snapshot]"));
+    closeSnapshotBtns.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", closeSnapshot);
+    });
+
     const panel = content.querySelector("[data-efficiency-calc]");
     if (!(panel instanceof HTMLElement)) return;
     const snapshot = currentModel && currentModel.efficiencySnapshot ? currentModel.efficiencySnapshot : {};
@@ -11665,7 +11689,6 @@ function renderCosts(){
     const rangeLabelEl = panel.querySelector("[data-efficiency-calc-range-label]");
     const totalEl = panel.querySelector("[data-efficiency-calc-total]");
     const avgEl = panel.querySelector("[data-efficiency-calc-average]");
-    const openSnapshotBtn = panel.querySelector("[data-open-efficiency-snapshot]");
     const goJobsBtn = panel.querySelector("[data-go-jobs-history]");
     if (!(chargeInput instanceof HTMLInputElement) || !(costInput instanceof HTMLInputElement)) return;
 
@@ -11769,25 +11792,17 @@ function renderCosts(){
         updateRangeButtons();
       });
     }
-    if (openSnapshotBtn instanceof HTMLElement){
-      openSnapshotBtn.addEventListener("click", ()=>{
+    if (typeof window !== "undefined"){
+      if (typeof window.__efficiencySnapshotEscHandler === "function"){
+        document.removeEventListener("keydown", window.__efficiencySnapshotEscHandler);
+      }
+      window.__efficiencySnapshotEscHandler = (event)=>{
+        if (event.key !== "Escape") return;
         const modal = document.getElementById("efficiencySnapshotModal");
-        if (!(modal instanceof HTMLElement)) return;
-        modal.hidden = false;
-        if (modal.parentElement !== document.body) document.body.appendChild(modal);
-        document.body.classList.add("cost-data-center-open");
-      });
+        if (modal instanceof HTMLElement && !modal.hidden) closeSnapshot();
+      };
+      document.addEventListener("keydown", window.__efficiencySnapshotEscHandler);
     }
-    const closeSnapshotBtns = Array.from(document.querySelectorAll("[data-close-efficiency-snapshot]"));
-    closeSnapshotBtns.forEach(btn => {
-      if (!(btn instanceof HTMLElement)) return;
-      btn.addEventListener("click", ()=>{
-        const modal = document.getElementById("efficiencySnapshotModal");
-        if (!(modal instanceof HTMLElement)) return;
-        modal.hidden = true;
-        document.body.classList.remove("cost-data-center-open");
-      });
-    });
     if (goJobsBtn instanceof HTMLElement){
       goJobsBtn.addEventListener("click", ()=>{
         goToJobsHistory();

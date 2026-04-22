@@ -1846,38 +1846,8 @@ function viewCosts(model){
           <div class="cost-summary-grid">
             ${summaryCardsHTML}
           </div>
-          <div class="cost-efficiency-calculator" data-efficiency-calc>
-            <div class="cost-efficiency-calculator-row">
-              <label>
-                <span class="label">Charge / hr (temporary)</span>
-                <input type="number" step="0.01" min="0" value="${esc(String(Number(calculatorDefaults.chargeRate) || 0))}" data-efficiency-calc-charge>
-              </label>
-              <label>
-                <span class="label">Cost / hr (temporary)</span>
-                <input type="number" step="0.01" min="0" value="${esc(String(Number(calculatorDefaults.costRate) || 0))}" data-efficiency-calc-cost>
-              </label>
-              <label>
-                <span class="label">Time range</span>
-                <select data-efficiency-calc-range-select>
-                  <option value="1m">Past 1 month</option>
-                  <option value="2m">Past 2 months</option>
-                  <option value="3m">Past 3 months</option>
-                  <option value="6m">Past 6 months</option>
-                  <option value="1y">Past 1 year</option>
-                  <option value="ytd">Year to date</option>
-                  <option value="all">All time</option>
-                </select>
-              </label>
-              <button type="button" class="btn secondary" data-efficiency-calc-reset>Reset</button>
-              <button type="button" class="btn secondary" data-open-efficiency-snapshot>Open snapshot</button>
-              <button type="button" class="btn secondary" data-go-jobs-history>Go to cutting jobs</button>
-            </div>
-            <p class="small muted" data-efficiency-calc-range-label>Range: past 1 month from central data table rows.</p>
-            <p class="small muted">Temporary calculator only. Refresh resets values to central data table defaults.</p>
-            <p class="small muted" data-efficiency-calc-result>
-              Net total gain (calculator): <strong data-efficiency-calc-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</strong>
-              · Avg / row: <strong data-efficiency-calc-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</strong>
-            </p>
+          <div class="cost-overview-actions">
+            <button type="button" class="btn secondary" data-open-efficiency-snapshot>Open cutting efficiency calculator & snapshot</button>
           </div>
           <div class="cost-window-insight">
             <div class="chart-info">
@@ -2286,6 +2256,38 @@ function viewCosts(model){
         <button type="button" class="btn ghost" data-close-efficiency-snapshot>Close</button>
       </div>
       <div class="cost-data-center-body">
+        <div class="cost-efficiency-calculator" data-efficiency-calc>
+          <div class="cost-efficiency-calculator-row">
+            <label>
+              <span class="label">Charge / hr (temporary)</span>
+              <input type="number" step="0.01" min="0" value="${esc(String(Number(calculatorDefaults.chargeRate) || 0))}" data-efficiency-calc-charge>
+            </label>
+            <label>
+              <span class="label">Cost / hr (temporary)</span>
+              <input type="number" step="0.01" min="0" value="${esc(String(Number(calculatorDefaults.costRate) || 0))}" data-efficiency-calc-cost>
+            </label>
+            <label>
+              <span class="label">Time range</span>
+              <select data-efficiency-calc-range-select>
+                <option value="1m">Past 1 month</option>
+                <option value="2m">Past 2 months</option>
+                <option value="3m">Past 3 months</option>
+                <option value="6m">Past 6 months</option>
+                <option value="1y">Past 1 year</option>
+                <option value="ytd">Year to date</option>
+                <option value="all">All time</option>
+              </select>
+            </label>
+            <button type="button" class="btn secondary" data-efficiency-calc-reset>Reset</button>
+            <button type="button" class="btn secondary" data-go-jobs-history>Go to cutting jobs</button>
+          </div>
+          <p class="small muted" data-efficiency-calc-range-label>Range: past 1 month from central data table rows.</p>
+          <p class="small muted">Temporary calculator only. Refresh resets values to central data table defaults.</p>
+          <p class="small muted" data-efficiency-calc-result>
+            Net total gain (calculator): <strong data-efficiency-calc-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</strong>
+            · Avg / row: <strong data-efficiency-calc-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</strong>
+          </p>
+        </div>
         <div class="cost-jobs-summary">
           <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
           <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
@@ -2315,6 +2317,17 @@ function viewCosts(model){
               `}
             </tbody>
           </table>
+        </div>
+        <div class="cost-window-insight">
+          <div class="chart-info">
+            <button type="button" class="chart-info-button" aria-describedby="costEfficiencyInsight" aria-label="Explain Cutting Job Efficiency Snapshot">
+              <span aria-hidden="true">?</span>
+              <span class="sr-only">Show how the Cutting Job Efficiency Snapshot reveals margin trends</span>
+            </button>
+            <div class="chart-info-bubble" id="costEfficiencyInsight" role="tooltip">
+              <p>${esc(efficiencyInsight)}</p>
+            </div>
+          </div>
         </div>
       </div>
     </div></div>`;
