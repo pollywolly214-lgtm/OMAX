@@ -1623,7 +1623,17 @@ function viewCosts(model){
                     ${esc(row.name || "")}
                   </button>
                 </th>
-                <td>${esc(row.cadenceLabel || "—")}</td>
+                <td>
+                  <div class="forecast-occurrence-cell">
+                    <div>${esc(row.cadenceLabel || "—")}</div>
+                    ${Array.isArray(row.occurrenceOptions) && row.occurrenceOptions.length ? `
+                      <label class="sr-only">Occurrence</label>
+                      <select data-forecast-occurrence-select>
+                        ${row.occurrenceOptions.map(option => `<option value="${esc(option.dateISO || "")}">${esc(option.label || option.dateISO || "")}</option>`).join("")}
+                      </select>
+                    ` : ""}
+                  </div>
+                </td>
                 <td>${esc(row.projectionBasisLabel || "Derived from central table completed occurrences")}</td>
                 <td>${esc(row.unitCostLabel || "—")}</td>
                 <td>${esc(row.annualTotalLabel || "—")}</td>

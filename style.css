@@ -592,6 +592,20 @@ body.cost-receipt-modal-open{ overflow:hidden; }
   text-decoration:underline;
 }
 .forecast-task-link:hover{ color:#0a63c2; }
+.forecast-occurrence-cell{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.forecast-occurrence-cell select{
+  max-width:220px;
+  padding:4px 6px;
+  border:1px solid #c8d0e0;
+  border-radius:6px;
+  font:inherit;
+  color:#0f1e3a;
+  background:#fff;
+}
 .forecast-table tfoot{ background:rgba(13,55,117,0.12); font-weight:600; color:#0a1f3f; }
 .forecast-total-row th,
 .forecast-total-row td{ border-bottom:1px solid rgba(13,55,117,0.18); }

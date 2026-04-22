@@ -10580,7 +10580,12 @@ function setupForecastBreakdownModal(){
     if (openTaskBtn instanceof HTMLElement){
       event.preventDefault();
       const taskId = String(openTaskBtn.getAttribute("data-task-id") || "");
-      const dateISO = String(openTaskBtn.getAttribute("data-date-iso") || "");
+      const rowEl = openTaskBtn.closest("tr");
+      const occurrenceSelect = rowEl instanceof HTMLElement ? rowEl.querySelector("[data-forecast-occurrence-select]") : null;
+      const selectedOccurrenceDate = occurrenceSelect instanceof HTMLSelectElement
+        ? String(occurrenceSelect.value || "").trim()
+        : "";
+      const dateISO = selectedOccurrenceDate || String(openTaskBtn.getAttribute("data-date-iso") || "");
       closeModal();
       if (typeof window.focusMaintenanceDataCenterRow === "function"){
         window.focusMaintenanceDataCenterRow({ taskId, dateISO });
@@ -15299,10 +15304,12 @@ function computeCostModel(){
         count: 0,
         taskId: row.taskId || "",
         latestDateISO: row.dateISO || "",
-        ytdCost: 0
+        ytdCost: 0,
+        occurrences: []
       };
       entry.totalCost += row.totalCost;
       entry.count += 1;
+      if (row.dateISO) entry.occurrences.push(String(row.dateISO));
       if (row.occurredAt >= yearStart && row.occurredAt <= today){
         entry.ytdCost += row.totalCost;
       }
@@ -15314,6 +15321,12 @@ function computeCostModel(){
     return Array.from(byTask.values())
       .sort((a, b) => b.totalCost - a.totalCost)
       .map((entry, index) => ({
+        occurrenceOptions: Array.from(new Set(entry.occurrences))
+          .sort((a, b) => b.localeCompare(a))
+          .map((dateISO, optionIndex) => ({
+            dateISO,
+            label: `#${optionIndex + 1} · ${dateISO}`
+          })),
         projectedYearTotal: entry.ytdCost + ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining),
         projectedRemaining: (elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining,
         key: `${prefix}_${entry.key}_${index}`,
