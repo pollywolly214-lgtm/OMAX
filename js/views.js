@@ -1846,6 +1846,39 @@ function viewCosts(model){
           <div class="cost-summary-grid">
             ${summaryCardsHTML}
           </div>
+          <div class="cost-efficiency-calculator" data-efficiency-calc>
+            <div class="cost-efficiency-calculator-row">
+              <label>
+                <span class="label">Charge / hr (temporary)</span>
+                <input type="number" step="0.01" min="0" value="${esc(String(Number(calculatorDefaults.chargeRate) || 0))}" data-efficiency-calc-charge>
+              </label>
+              <label>
+                <span class="label">Cost / hr (temporary)</span>
+                <input type="number" step="0.01" min="0" value="${esc(String(Number(calculatorDefaults.costRate) || 0))}" data-efficiency-calc-cost>
+              </label>
+              <label>
+                <span class="label">Time range</span>
+                <select data-efficiency-calc-range-select>
+                  <option value="1m">Past 1 month</option>
+                  <option value="2m">Past 2 months</option>
+                  <option value="3m">Past 3 months</option>
+                  <option value="6m">Past 6 months</option>
+                  <option value="1y">Past 1 year</option>
+                  <option value="ytd">Year to date</option>
+                  <option value="all">All time</option>
+                </select>
+              </label>
+              <button type="button" class="btn secondary" data-efficiency-calc-reset>Reset</button>
+              <button type="button" class="btn secondary" data-open-efficiency-snapshot>Open snapshot</button>
+              <button type="button" class="btn secondary" data-go-jobs-history>Go to cutting jobs</button>
+            </div>
+            <p class="small muted" data-efficiency-calc-range-label>Range: past 1 month from central data table rows.</p>
+            <p class="small muted">Temporary calculator only. Refresh resets values to central data table defaults.</p>
+            <p class="small muted" data-efficiency-calc-result>
+              Net total gain (calculator): <strong data-efficiency-calc-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</strong>
+              · Avg / row: <strong data-efficiency-calc-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</strong>
+            </p>
+          </div>
           <div class="cost-window-insight">
             <div class="chart-info">
               <button type="button" class="chart-info-button" aria-describedby="costOverviewInsight" aria-label="Explain Cost Overview metrics">
@@ -2241,44 +2274,26 @@ function viewCosts(model){
         </div>
       </div>
 
-      <div class="dashboard-window" data-cost-window="efficiency">
-        <div class="block" data-cost-jobs-history role="link" tabindex="0">
-          <h3>Cutting Job Efficiency Snapshot</h3>
-          <div class="cost-jobs-summary">
-            <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
-            <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
-            <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Total net gain</span><span>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
-            <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Avg net gain / row</span><span>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
-          </div>
-          <div class="cost-efficiency-calculator" data-efficiency-calc>
-            <div class="cost-efficiency-calculator-row">
-              <label>
-                <span class="label">Charge / hr (temporary)</span>
-                <input type="number" step="0.01" min="0" value="${esc(String(Number(calculatorDefaults.chargeRate) || 0))}" data-efficiency-calc-charge>
-              </label>
-              <label>
-                <span class="label">Cost / hr (temporary)</span>
-                <input type="number" step="0.01" min="0" value="${esc(String(Number(calculatorDefaults.costRate) || 0))}" data-efficiency-calc-cost>
-              </label>
-              <button type="button" class="btn secondary" data-efficiency-calc-reset>Reset</button>
-            </div>
-            <div class="time-efficiency-toggles" role="tablist" aria-label="Efficiency range filter">
-              <button type="button" class="time-efficiency-toggle is-active" data-efficiency-calc-range="1m">1M</button>
-              <button type="button" class="time-efficiency-toggle" data-efficiency-calc-range="2m">2M</button>
-              <button type="button" class="time-efficiency-toggle" data-efficiency-calc-range="3m">3M</button>
-              <button type="button" class="time-efficiency-toggle" data-efficiency-calc-range="6m">6M</button>
-              <button type="button" class="time-efficiency-toggle" data-efficiency-calc-range="1y">1Y</button>
-              <button type="button" class="time-efficiency-toggle" data-efficiency-calc-range="ytd">YTD</button>
-              <button type="button" class="time-efficiency-toggle" data-efficiency-calc-range="all">All</button>
-            </div>
-            <p class="small muted" data-efficiency-calc-range-label>Range: past 1 month from central data table rows.</p>
-            <p class="small muted">Calculator only: temporary what-if net gain across filtered jobs. Refresh resets to central data table defaults.</p>
-            <p class="small muted" data-efficiency-calc-result>
-              Net total gain (calculator): <strong data-efficiency-calc-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</strong>
-              · Avg / row: <strong data-efficiency-calc-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</strong>
-            </p>
-          </div>
-          <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
+
+    </div>
+  </div>
+
+  <div class="cost-data-center-modal" id="efficiencySnapshotModal" data-efficiency-snapshot-modal hidden>
+    <div class="cost-data-center-backdrop" data-close-efficiency-snapshot></div>
+    <div class="cost-data-center-panel" role="dialog" aria-modal="true" aria-label="Cutting Job Efficiency Snapshot" style="max-width:1100px;border-radius:16px;">
+      <div class="cost-data-center-header" style="border-radius:16px 16px 0 0;">
+        <h4>Cutting Job Efficiency Snapshot</h4>
+        <button type="button" class="btn ghost" data-close-efficiency-snapshot>Close</button>
+      </div>
+      <div class="cost-data-center-body">
+        <div class="cost-jobs-summary">
+          <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
+          <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
+          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Total net gain</span><span>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
+          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Avg net gain / row</span><span>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
+        </div>
+        <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
+        <div class="cost-weekly-table-wrap">
           <table class="cost-table">
             <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net gain</th><th>Task link</th></tr></thead>
             <tbody>
@@ -2300,21 +2315,9 @@ function viewCosts(model){
               `}
             </tbody>
           </table>
-          <div class="cost-window-insight">
-            <div class="chart-info">
-              <button type="button" class="chart-info-button" aria-describedby="costEfficiencyInsight" aria-label="Explain Cutting Job Efficiency Snapshot">
-                <span aria-hidden="true">?</span>
-                <span class="sr-only">Show how the Cutting Job Efficiency Snapshot reveals margin trends</span>
-              </button>
-              <div class="chart-info-bubble" id="costEfficiencyInsight" role="tooltip">
-                <p>${esc(efficiencyInsight)}</p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
-    </div>
-  </div>`;
+    </div></div>`;
 }
 
 function viewJobs(){

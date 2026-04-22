@@ -11661,10 +11661,12 @@ function renderCosts(){
     const chargeInput = panel.querySelector("[data-efficiency-calc-charge]");
     const costInput = panel.querySelector("[data-efficiency-calc-cost]");
     const resetBtn = panel.querySelector("[data-efficiency-calc-reset]");
-    const rangeButtons = Array.from(panel.querySelectorAll("[data-efficiency-calc-range]"));
+    const rangeSelect = panel.querySelector("[data-efficiency-calc-range-select]");
     const rangeLabelEl = panel.querySelector("[data-efficiency-calc-range-label]");
     const totalEl = panel.querySelector("[data-efficiency-calc-total]");
     const avgEl = panel.querySelector("[data-efficiency-calc-average]");
+    const openSnapshotBtn = panel.querySelector("[data-open-efficiency-snapshot]");
+    const goJobsBtn = panel.querySelector("[data-go-jobs-history]");
     if (!(chargeInput instanceof HTMLInputElement) || !(costInput instanceof HTMLInputElement)) return;
 
     const formatUsd = (value)=> new Intl.NumberFormat(undefined, {
@@ -11712,12 +11714,7 @@ function renderCosts(){
       return rowDate >= start;
     };
     const updateRangeButtons = ()=>{
-      rangeButtons.forEach(btn => {
-        const key = String(btn.getAttribute("data-efficiency-calc-range") || "");
-        const isActive = key === activeRange;
-        btn.classList.toggle("is-active", isActive);
-        btn.setAttribute("aria-pressed", isActive ? "true" : "false");
-      });
+      if (rangeSelect instanceof HTMLSelectElement) rangeSelect.value = activeRange;
       const labels = {
         "1m": "Range: past 1 month from central data table rows.",
         "2m": "Range: past 2 months from central data table rows.",
@@ -11756,20 +11753,44 @@ function renderCosts(){
 
     chargeInput.addEventListener("input", recalc);
     costInput.addEventListener("input", recalc);
-    rangeButtons.forEach(btn => {
-      if (!(btn instanceof HTMLElement)) return;
-      btn.addEventListener("click", ()=>{
-        const next = String(btn.getAttribute("data-efficiency-calc-range") || "1m");
-        activeRange = next || "1m";
+    if (rangeSelect instanceof HTMLSelectElement){
+      rangeSelect.addEventListener("change", ()=>{
+        activeRange = String(rangeSelect.value || "1m");
         updateRangeButtons();
         recalc();
       });
-    });
+    }
     if (resetBtn instanceof HTMLElement){
       resetBtn.addEventListener("click", ()=>{
         chargeInput.value = String(defaultCharge);
         costInput.value = String(defaultCost);
+        activeRange = "1m";
         recalc();
+        updateRangeButtons();
+      });
+    }
+    if (openSnapshotBtn instanceof HTMLElement){
+      openSnapshotBtn.addEventListener("click", ()=>{
+        const modal = document.getElementById("efficiencySnapshotModal");
+        if (!(modal instanceof HTMLElement)) return;
+        modal.hidden = false;
+        if (modal.parentElement !== document.body) document.body.appendChild(modal);
+        document.body.classList.add("cost-data-center-open");
+      });
+    }
+    const closeSnapshotBtns = Array.from(document.querySelectorAll("[data-close-efficiency-snapshot]"));
+    closeSnapshotBtns.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", ()=>{
+        const modal = document.getElementById("efficiencySnapshotModal");
+        if (!(modal instanceof HTMLElement)) return;
+        modal.hidden = true;
+        document.body.classList.remove("cost-data-center-open");
+      });
+    });
+    if (goJobsBtn instanceof HTMLElement){
+      goJobsBtn.addEventListener("click", ()=>{
+        goToJobsHistory();
       });
     }
     updateRangeButtons();
@@ -12204,7 +12225,6 @@ function renderCosts(){
   };
 
   wireJobsHistoryShortcut(content.querySelector("[data-cost-jobs-history]"));
-  wireJobsHistoryShortcut(content.querySelector("[data-cost-cutting-card]"));
   wireJobsHistoryShortcut(content.querySelector(".cost-chart-toggle-link"));
 
   const normalizeHistoryDate = (value)=>{
@@ -15161,7 +15181,7 @@ function computeCostModel(){
     rows: efficiencyRows,
     emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
   };
-  const efficiencyMathDetails = `Net gain = (Hours × (Charge Rate - Cost Rate)) - Material. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Labor ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
+  const efficiencyMathDetails = `Net gain = (Hours × (Charge Rate - Cost Rate)) - Material. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
   efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
   const totalCalcHours = efficiencyTotals.hours > 0 ? efficiencyTotals.hours : 0;
   const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.revenue / totalCalcHours) : JOB_RATE_PER_HOUR;
