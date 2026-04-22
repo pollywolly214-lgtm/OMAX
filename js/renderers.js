@@ -11106,6 +11106,9 @@ function renderCosts(){
           return;
         }
         if (jobId){
+          jobHistorySearchTerm = "";
+          window.jobHistorySearchTerm = "";
+          window.jobHistoryCategoryFilter = String(window.JOB_ROOT_FOLDER_ID || "jobs_root");
           window.pendingJobFocus = { type: "jobRow", id: jobId };
         }
         location.hash = "#/jobs";
@@ -12523,6 +12526,7 @@ function renderCosts(){
   const toggleJobs  = document.getElementById("toggleCostJobs");
   const canvasWrap = content.querySelector(".cost-chart-canvas");
   let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
+  let lastPointerClientPos = null;
   const rangeButtons = Array.from(content.querySelectorAll("[data-cost-range]"));
   const allowedChartRanges = [1, 3, 6, 12];
   const defaultChartRange = 6;
@@ -12726,6 +12730,10 @@ function renderCosts(){
 
   const handlePointerHover = (event)=>{
     if (!canvas) return;
+    lastPointerClientPos = {
+      x: Number(event.clientX),
+      y: Number(event.clientY)
+    };
     const rect = canvas.getBoundingClientRect();
     const clientWidth = canvas.clientWidth || rect.width || canvas.width;
     const clientHeight = canvas.clientHeight || rect.height || canvas.height;
@@ -12748,6 +12756,23 @@ function renderCosts(){
     }else{
       hideTooltip();
     }
+  };
+  const refreshTooltipFromLastPointer = ()=>{
+    if (!canvas || !lastPointerClientPos) return;
+    const rect = canvas.getBoundingClientRect();
+    const withinCanvas = lastPointerClientPos.x >= rect.left
+      && lastPointerClientPos.x <= rect.right
+      && lastPointerClientPos.y >= rect.top
+      && lastPointerClientPos.y <= rect.bottom;
+    if (!withinCanvas){
+      hideTooltip();
+      return;
+    }
+    const syntheticEvent = {
+      clientX: lastPointerClientPos.x,
+      clientY: lastPointerClientPos.y
+    };
+    handlePointerHover(syntheticEvent);
   };
   const resolvePointerTarget = (event)=>{
     if (!canvas) return null;
@@ -12778,6 +12803,10 @@ function renderCosts(){
     const pointerMove = (event)=> handlePointerHover(event);
     const pointerDown = (event)=> handlePointerHover(event);
     const pointerClick = (event)=>{
+      lastPointerClientPos = {
+        x: Number(event.clientX),
+        y: Number(event.clientY)
+      };
       const target = resolvePointerTarget(event);
       if (!target || !target.rowRef || typeof window === "undefined") return;
       const focusFn = window.__focusCostDataCenterRow;
@@ -12785,7 +12814,10 @@ function renderCosts(){
         focusFn(target.rowRef);
       }
     };
-    const pointerLeave = ()=> hideTooltip();
+    const pointerLeave = ()=>{
+      lastPointerClientPos = null;
+      hideTooltip();
+    };
     canvas.addEventListener("pointermove", pointerMove);
     canvas.addEventListener("pointerdown", pointerDown);
     canvas.addEventListener("click", pointerClick);
@@ -12830,12 +12862,12 @@ function renderCosts(){
     };
     updateChartRangeButtons();
     if (canvas){
-      hideTooltip();
       resizeCostChartCanvas(canvas);
       drawCostChart(canvas, chartModel, {
         maintenance: !toggleMaint || toggleMaint.checked,
         jobs: !toggleJobs || toggleJobs.checked
       });
+      refreshTooltipFromLastPointer();
       updateCostChartResizeSnapshot(canvas);
     }
     if (typeof refreshCostTrainer === "function"){
@@ -16302,16 +16334,25 @@ function renderJobs(){
       });
     } else if (pendingJobFocus.type === "jobRow" && pendingJobFocus.id != null){
       requestAnimationFrame(()=>{
-        const targetRow = content.querySelector(`[data-job-row="${pendingJobFocus.id}"], [data-history-row="${pendingJobFocus.id}"]`);
-        if (targetRow instanceof HTMLElement){
-          targetRow.classList.add("job-row-link-highlight");
-          try {
-            targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
-          } catch (_err){
-            try { targetRow.scrollIntoView(); } catch(__){}
+        const targetId = String(pendingJobFocus.id);
+        const maxAttempts = 20;
+        const retryDelayMs = 180;
+        const focusJobRowWithRetry = (attempt = 0)=>{
+          const targetRow = content.querySelector(`[data-job-row="${targetId}"], [data-history-row="${targetId}"]`);
+          if (targetRow instanceof HTMLElement){
+            targetRow.classList.add("job-row-link-highlight");
+            try {
+              targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+            } catch (_err){
+              try { targetRow.scrollIntoView(); } catch(__){}
+            }
+            setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2000);
+            return;
           }
-          setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2000);
-        }
+          if (attempt >= maxAttempts) return;
+          setTimeout(()=> focusJobRowWithRetry(attempt + 1), retryDelayMs);
+        };
+        focusJobRowWithRetry(0);
       });
     }
   }
