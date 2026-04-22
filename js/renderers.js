@@ -11714,7 +11714,8 @@ function renderCosts(){
         openSnapshot();
       });
     });
-    const closeSnapshotBtns = Array.from(document.querySelectorAll("[data-close-efficiency-snapshot]"));
+    const closeSnapshotBtns = Array.from(document.querySelectorAll("[data-close-efficiency-snapshot]"))
+      .filter(btn => !(btn instanceof HTMLElement) ? false : !btn.classList.contains("cost-data-center-backdrop"));
     closeSnapshotBtns.forEach(btn => {
       if (!(btn instanceof HTMLElement)) return;
       btn.addEventListener("click", closeSnapshot);
