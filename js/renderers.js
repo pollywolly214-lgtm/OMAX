@@ -11696,6 +11696,7 @@ function renderCosts(){
       if (!(modal instanceof HTMLElement)) return;
       modal.hidden = true;
       document.body.classList.remove("cost-data-center-open");
+      if (typeof window !== "undefined") window.__efficiencySnapshotModalOpen = false;
     };
     const openSnapshot = ()=>{
       const modal = document.getElementById("efficiencySnapshotModal");
@@ -11704,6 +11705,7 @@ function renderCosts(){
       if (modal.parentElement !== document.body) document.body.appendChild(modal);
       document.body.classList.add("cost-data-center-open");
       suppressCloseUntil = Date.now() + 250;
+      if (typeof window !== "undefined") window.__efficiencySnapshotModalOpen = true;
     };
     openSnapshotBtns.forEach(btn => {
       if (!(btn instanceof HTMLElement)) return;
@@ -11894,6 +11896,9 @@ function renderCosts(){
     });
     updateRangeButtons();
     recalc();
+    if (typeof window !== "undefined" && window.__efficiencySnapshotModalOpen){
+      openSnapshot();
+    }
   }
 
   function setupJobCategoryWindow(currentModel){
