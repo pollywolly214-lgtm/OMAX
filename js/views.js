@@ -1558,6 +1558,9 @@ function viewCosts(model){
       attrParts.push("tabindex=\"0\"");
     }
     const attr = attrParts.join(" ");
+    const cuttingOpenBtn = isCutting
+      ? `<button type="button" class="btn secondary" data-open-efficiency-snapshot>Open calculator</button>`
+      : "";
     return `
               <div ${attr}>
                 <div class="cost-card-icon">${esc(card.icon || "")}</div>
@@ -1565,6 +1568,7 @@ function viewCosts(model){
                   <div class="cost-card-title">${esc(card.title || "")}</div>
                   <div class="cost-card-value">${esc(card.value || "")}</div>
                   <div class="cost-card-hint">${esc(card.hint || "")}</div>
+                  ${cuttingOpenBtn}
                 </div>
               </div>
             `;
@@ -1846,9 +1850,6 @@ function viewCosts(model){
           <div class="cost-summary-grid">
             ${summaryCardsHTML}
           </div>
-          <div class="cost-overview-actions">
-            <button type="button" class="btn secondary" data-open-efficiency-snapshot>Open cutting efficiency calculator & snapshot</button>
-          </div>
           <div class="cost-window-insight">
             <div class="chart-info">
               <button type="button" class="chart-info-button" aria-describedby="costOverviewInsight" aria-label="Explain Cost Overview metrics">
@@ -2038,6 +2039,7 @@ function viewCosts(model){
               <div class="cost-data-center-tabs" role="tablist" aria-label="Data center tables">
                 <button type="button" class="cost-data-center-tab is-active" data-dc-tab="maintenance" role="tab" aria-selected="true">Maintenance Tasks</button>
                 <button type="button" class="cost-data-center-tab" data-dc-tab="cutting" role="tab" aria-selected="false">Completed Cutting Jobs</button>
+                <button type="button" class="cost-data-center-tab" data-dc-tab="efficiency" role="tab" aria-selected="false">Efficiency Metrics</button>
               </div>
               <div class="cost-data-center-panel-content" data-dc-panel="maintenance">
               <div class="cost-data-center-search">
@@ -2174,6 +2176,32 @@ function viewCosts(model){
                 </table>
                 ` : `<p class="small muted">No completed cutting jobs yet.</p>`}
               </div>
+              <div class="cost-data-center-panel-content" data-dc-panel="efficiency" hidden>
+                ${efficiencyRows.length ? `
+                <div class="cost-jobs-summary">
+                  <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
+                  <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
+                  <div><span class="label">Total net gain</span><span>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
+                  <div><span class="label">Avg net gain / row</span><span>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
+                </div>
+                <table class="cost-table" style="margin-top:10px">
+                  <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Run cost</th><th>Total cost</th><th>Net gain</th></tr></thead>
+                  <tbody>
+                    ${efficiencyRows.map(row => `
+                      <tr>
+                        <td>${esc(row.taskName || "Completed task")}</td>
+                        <td>${esc(row.dateLabel || "—")}</td>
+                        <td>${esc(row.hoursLabel || "0 hr")}</td>
+                        <td>${esc(row.partCostLabel || "$0.00")}</td>
+                        <td>${esc(row.laborCostLabel || "$0.00")}</td>
+                        <td>${esc(row.totalCostLabel || "$0.00")}</td>
+                        <td>${esc(row.netGainLabel || "$0.00")}</td>
+                      </tr>
+                    `).join("")}
+                  </tbody>
+                </table>
+                ` : `<p class="small muted">No efficiency rows found in the central data table.</p>`}
+              </div>
             </div>
           </div>
         </div>
@@ -2291,8 +2319,10 @@ function viewCosts(model){
         <div class="cost-jobs-summary">
           <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
           <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
-          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Total net gain</span><span>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
-          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Avg net gain / row</span><span>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
+          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Total net gain</span><span data-efficiency-summary-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
+          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Avg net gain / row</span><span data-efficiency-summary-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
+          <div><span class="label">Total run cost</span><span>${esc(efficiencySnapshot.totalCostLabel || "$0.00")}</span></div>
+          <div><span class="label">Avg run cost / row</span><span>${esc(efficiencySnapshot.averageCostLabel || "$0.00")}</span></div>
         </div>
         <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
         <div class="cost-weekly-table-wrap">
@@ -2308,7 +2338,7 @@ function viewCosts(model){
                   <td>${esc(row.laborCostLabel || "$0.00")}</td>
                   <td>${esc(row.totalCostLabel || "$0.00")}</td>
                   <td title="${esc(`${row.formulaTitle || efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" data-efficiency-profit-cell>${esc(row.netGainLabel || "$0.00")}</td>
-                  <td>${row.settingsLink ? `<a href="${esc(row.settingsLink)}">Open settings</a>` : "Invalid link"}</td>
+                  <td>${row.settingsLink ? `<button type="button" class="btn secondary" data-efficiency-open-job="${esc(row.id || "")}">Open job</button>` : "Invalid link"}</td>
                 </tr>
               `).join("") : `
                 <tr>

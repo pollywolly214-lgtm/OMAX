@@ -11765,7 +11765,11 @@ function renderCosts(){
       }, { rows: 0, net: 0 });
       if (totalEl) totalEl.textContent = formatUsd(totals.net);
       if (avgEl) avgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
-      const tableRows = Array.from(content.querySelectorAll("[data-efficiency-row]"));
+      const summaryTotalEl = document.querySelector("[data-efficiency-summary-total]");
+      const summaryAvgEl = document.querySelector("[data-efficiency-summary-average]");
+      if (summaryTotalEl) summaryTotalEl.textContent = formatUsd(totals.net);
+      if (summaryAvgEl) summaryAvgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
+      const tableRows = Array.from(document.querySelectorAll("[data-efficiency-row]"));
       tableRows.forEach(tr => {
         const rowId = String(tr.getAttribute("data-efficiency-id") || "");
         const rowObj = rows.find(row => String(row?.id || "") === rowId) || null;
@@ -11805,9 +11809,23 @@ function renderCosts(){
     }
     if (goJobsBtn instanceof HTMLElement){
       goJobsBtn.addEventListener("click", ()=>{
+        closeSnapshot();
         goToJobsHistory();
       });
     }
+    const openJobBtns = Array.from(document.querySelectorAll("[data-efficiency-open-job]"));
+    openJobBtns.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", ()=>{
+        const id = String(btn.getAttribute("data-efficiency-open-job") || "");
+        if (!id) return;
+        if (typeof window !== "undefined"){
+          window.pendingJobFocus = { type: "jobRow", id };
+        }
+        closeSnapshot();
+        goToJobsHistory();
+      });
+    });
     updateRangeButtons();
     recalc();
   }
