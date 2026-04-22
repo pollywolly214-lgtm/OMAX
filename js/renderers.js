@@ -4542,25 +4542,9 @@ function toggleTimeEfficiencyEditPanel(widget, show){
   }
 }
 
-function applyTimeEfficiencyEdit(widget){
+  function applyTimeEfficiencyEdit(widget){
   if (!widget) return;
   const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
-  if (!widget.editInput || widget.editInput.disabled){
-    toggleTimeEfficiencyEditPanel(widget, false);
-    return;
-  }
-  const raw = widget.editInput.value;
-  if (!raw){
-    widget.customStartByRange?.delete(days);
-    toggleTimeEfficiencyEditPanel(widget, false);
-    refreshTimeEfficiencyWidget(widget);
-    return;
-  }
-  const normalized = normalizeTimeEfficiencyStart(days, raw);
-  if (!normalized){
-    widget.editInput.classList.add("has-error");
-    return;
-  }
   if (widget.goalInput){
     const weeklyGoal = Number(widget.goalInput.value);
     if (Number.isFinite(weeklyGoal) && weeklyGoal > 0){
@@ -4577,6 +4561,24 @@ function applyTimeEfficiencyEdit(widget){
       else window.appConfig = nextConfig;
       if (typeof persist === "function") persist();
     }
+  }
+  if (!widget.editInput || widget.editInput.disabled){
+    toggleTimeEfficiencyEditPanel(widget, false);
+    refreshTimeEfficiencyWidgets();
+    return;
+  }
+  const raw = widget.editInput.value;
+  if (!raw){
+    widget.customStartByRange?.delete(days);
+    toggleTimeEfficiencyEditPanel(widget, false);
+    refreshTimeEfficiencyWidget(widget);
+    refreshTimeEfficiencyWidgets();
+    return;
+  }
+  const normalized = normalizeTimeEfficiencyStart(days, raw);
+  if (!normalized){
+    widget.editInput.classList.add("has-error");
+    return;
   }
   widget.editInput.classList.remove("has-error");
   widget.editInput.value = normalized;
@@ -11687,7 +11689,9 @@ function renderCosts(){
 
   function setupEfficiencyCalculator(currentModel){
     const openSnapshotBtns = Array.from(content.querySelectorAll("[data-open-efficiency-snapshot]"));
+    let suppressCloseUntil = 0;
     const closeSnapshot = ()=>{
+      if (Date.now() < suppressCloseUntil) return;
       const modal = document.getElementById("efficiencySnapshotModal");
       if (!(modal instanceof HTMLElement)) return;
       modal.hidden = true;
@@ -11699,6 +11703,7 @@ function renderCosts(){
       modal.hidden = false;
       if (modal.parentElement !== document.body) document.body.appendChild(modal);
       document.body.classList.add("cost-data-center-open");
+      suppressCloseUntil = Date.now() + 250;
     };
     openSnapshotBtns.forEach(btn => {
       if (!(btn instanceof HTMLElement)) return;
@@ -11799,8 +11804,8 @@ function renderCosts(){
     };
 
     const recalc = ()=>{
-      const chargeRate = normalizeToTwo(chargeInput, defaultCharge);
-      const costRate = normalizeToTwo(costInput, defaultCost);
+      const chargeRate = Math.max(0, asNumber(chargeInput.value, defaultCharge));
+      const costRate = Math.max(0, asNumber(costInput.value, defaultCost));
       const visibleRows = rows.filter(row => withinRange(row, activeRange));
       const totals = visibleRows.reduce((acc, row)=>{
         const hours = Math.max(0, asNumber(row?.hoursValue, 0));
@@ -11838,6 +11843,8 @@ function renderCosts(){
 
     chargeInput.addEventListener("input", recalc);
     costInput.addEventListener("input", recalc);
+    chargeInput.addEventListener("blur", ()=>{ normalizeToTwo(chargeInput, defaultCharge); recalc(); });
+    costInput.addEventListener("blur", ()=>{ normalizeToTwo(costInput, defaultCost); recalc(); });
     if (rangeSelect instanceof HTMLSelectElement){
       rangeSelect.addEventListener("change", ()=>{
         activeRange = String(rangeSelect.value || "1m");

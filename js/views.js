@@ -1569,8 +1569,6 @@ function viewCosts(model){
     }
     if (isCutting){
       attrParts.push("data-cost-cutting-card=\"\"");
-      attrParts.push("role=\"link\"");
-      attrParts.push("tabindex=\"0\"");
     }
     const attr = attrParts.join(" ");
     const cuttingOpenBtn = isCutting
