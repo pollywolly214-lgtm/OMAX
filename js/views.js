@@ -1554,6 +1554,15 @@ function viewCosts(model){
     )
   );
   const forecastNote = breakdown.note || "Add pricing to maintenance tasks and approve order requests to enrich the forecast.";
+  const projectionControl = breakdown.projectionControl || {};
+  const projectionMethod = String(projectionControl.method || "annualized_average");
+  const projectionWindow = String(projectionControl.window || "ytd");
+  const projectionMethodOptions = Array.isArray(projectionControl.methodOptions) && projectionControl.methodOptions.length
+    ? projectionControl.methodOptions
+    : [{ key: "annualized_average", label: "Annualized average" }, { key: "run_rate", label: "YTD + remaining run rate" }];
+  const projectionWindowOptions = Array.isArray(projectionControl.windowOptions) && projectionControl.windowOptions.length
+    ? projectionControl.windowOptions
+    : [{ key: "ytd", label: "YTD" }, { key: "1m", label: "1 month" }, { key: "2m", label: "2 months" }, { key: "3m", label: "3 months" }, { key: "6m", label: "6 months" }, { key: "12m", label: "12 months" }, { key: "all", label: "All time" }];
 
   const renderSummaryCard = (card = {})=>{
     const key = card && card.key ? String(card.key) : "";
@@ -1592,6 +1601,20 @@ function viewCosts(model){
 
   const forecastTableHTML = (hasSections || hasTotals)
     ? `
+      <div class="forecast-controls">
+        <label class="forecast-controls-label">
+          <span>Projection method</span>
+          <select data-forecast-projection-method aria-label="Select maintenance forecast projection method">
+            ${projectionMethodOptions.map(option => `<option value="${esc(option.key || "")}"${String(option.key || "") === projectionMethod ? " selected" : ""}>${esc(option.label || option.key || "")}</option>`).join("")}
+          </select>
+        </label>
+        <label class="forecast-controls-label">
+          <span>Average from</span>
+          <select data-forecast-projection-window aria-label="Select maintenance forecast lookback window">
+            ${projectionWindowOptions.map(option => `<option value="${esc(option.key || "")}"${String(option.key || "") === projectionWindow ? " selected" : ""}>${esc(option.label || option.key || "")}</option>`).join("")}
+          </select>
+        </label>
+      </div>
       <div class="forecast-table-wrap">
         <table class="forecast-table">
           <thead>

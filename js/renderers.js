@@ -10561,6 +10561,9 @@ function setupForecastBreakdownModal(){
     };
     document.addEventListener("keydown", keyHandler);
   };
+  if (typeof window !== "undefined"){
+    window.openForecastBreakdownModal = openModal;
+  }
 
   trigger.addEventListener("click", (event)=>{
     event.preventDefault();
@@ -10594,9 +10597,40 @@ function setupForecastBreakdownModal(){
       }
       return;
     }
-    if (target && target.hasAttribute && target.hasAttribute("data-forecast-close")){
+    const closeTrigger = target instanceof HTMLElement ? target.closest("[data-forecast-close]") : null;
+    if (closeTrigger){
       event.preventDefault();
       closeModal();
+      return;
+    }
+  });
+  const refreshForecastModalWithSelection = ()=>{
+    const shouldReopen = !modal.hasAttribute("hidden");
+    closeModal();
+    renderCosts();
+    if (shouldReopen){
+      requestAnimationFrame(()=>{
+        if (typeof window !== "undefined" && typeof window.openForecastBreakdownModal === "function"){
+          window.openForecastBreakdownModal();
+        }
+      });
+    }
+  };
+  modal.addEventListener("change", (event)=>{
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement)) return;
+    if (target.matches("[data-forecast-projection-method]")){
+      if (typeof window !== "undefined"){
+        window.costForecastProjectionMethod = String(target.value || "annualized_average");
+      }
+      refreshForecastModalWithSelection();
+      return;
+    }
+    if (target.matches("[data-forecast-projection-window]")){
+      if (typeof window !== "undefined"){
+        window.costForecastProjectionWindow = String(target.value || "ytd");
+      }
+      refreshForecastModalWithSelection();
     }
   });
 
@@ -12925,6 +12959,27 @@ function computeCostModel(){
     const totalCost = resolveMaintenanceUnitCostWithLabor(task, baseCost);
     return totalCost > 0 ? totalCost : null;
   };
+  const resolveMaintenanceUnitCostFromSettings = (task)=>{
+    if (!task) return null;
+    const directPrice = Number(task?.price);
+    const baseCost = Number.isFinite(directPrice) && directPrice >= 0
+      ? directPrice
+      : resolveCalendarUnitCost(task, calendarCostByTemplateId);
+    const normalizedBase = Number.isFinite(baseCost) && baseCost >= 0 ? baseCost : 0;
+    return resolveMaintenanceUnitCostWithLabor(task, normalizedBase);
+  };
+  const resolveMaintenancePartCostFromSettings = (task)=>{
+    if (!task) return null;
+    const directPrice = Number(task?.price);
+    if (Number.isFinite(directPrice) && directPrice >= 0){
+      return roundMaintenanceCurrency(directPrice);
+    }
+    const calendarPrice = resolveCalendarUnitCost(task, calendarCostByTemplateId);
+    if (Number.isFinite(calendarPrice) && calendarPrice >= 0){
+      return roundMaintenanceCurrency(calendarPrice);
+    }
+    return null;
+  };
 
   const toHistoryDateKey = (value)=>{
     if (!value) return null;
@@ -12964,6 +13019,21 @@ function computeCostModel(){
 
   const intervalTasks = intervalTasksAll.filter(isTaskActive);
   const asReqTasks = asReqTasksAll.filter(isTaskActive);
+  const taskCostFromSettingsById = new Map();
+  const registerTaskCostFromSettings = (task)=>{
+    if (!task || task.id == null) return;
+    const isInstance = typeof isInstanceTask === "function"
+      ? isInstanceTask(task)
+      : (task.variant === "instance");
+    if (isInstance) return;
+    const id = String(task.id);
+    const resolved = resolveMaintenanceUnitCostFromSettings(task);
+    if (Number.isFinite(resolved) && resolved >= 0){
+      taskCostFromSettingsById.set(id, resolved);
+    }
+  };
+  intervalTasks.forEach(registerTaskCostFromSettings);
+  asReqTasks.forEach(registerTaskCostFromSettings);
 
   const cleanPartNumber = (pn)=> String(pn || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
   const maintenancePartNumbers = new Set();
@@ -13068,13 +13138,23 @@ function computeCostModel(){
   };
   const addOccurrenceCostsFromTask = (task)=>{
     if (!task) return;
+    const templateId = task.templateId != null ? String(task.templateId) : null;
+    const taskId = task.id != null ? String(task.id) : null;
+    const settingsTaskId = templateId || taskId;
+    const settingsCost = settingsTaskId && taskCostFromSettingsById.has(settingsTaskId)
+      ? Number(taskCostFromSettingsById.get(settingsTaskId))
+      : null;
+    const fallbackTaskCost = resolveMaintenanceUnitCostFromSettings(task);
     const rawNotes = (typeof normalizeOccurrenceNotes === "function")
       ? normalizeOccurrenceNotes(task)
       : (task?.occurrenceNotes || {});
     if (!rawNotes || typeof rawNotes !== "object") return;
     Object.entries(rawNotes).forEach(([dateKey, note]) => {
       if (!note) return;
-      const cost = parseOccurrenceCost(note);
+      const noteCost = parseOccurrenceCost(note);
+      const cost = Number.isFinite(settingsCost) && settingsCost >= 0
+        ? settingsCost
+        : (Number.isFinite(fallbackTaskCost) && fallbackTaskCost >= 0 ? fallbackTaskCost : noteCost);
       if (!Number.isFinite(cost) || cost <= 0) return;
       const resolved = parseOccurrenceDate(dateKey);
       if (!resolved) return;
@@ -15118,8 +15198,11 @@ function computeCostModel(){
       const categoryLabel = categoryPath ? `${modeLabel} • ${categoryPath}` : `${modeLabel} • Uncategorized`;
       const maintenanceHours = Number(task?.downtimeHours);
       const maintenanceHrs = Number.isFinite(maintenanceHours) && maintenanceHours > 0 ? maintenanceHours : 1;
-      const partCost = Number(taskMeta?.unitPrice);
-      const partCostValue = Number.isFinite(partCost) && partCost > 0 ? partCost : 0;
+      const settingsPartCost = resolveMaintenancePartCostFromSettings(task);
+      const historicalPartCost = Number(taskMeta?.unitPrice);
+      const partCostValue = Number.isFinite(settingsPartCost) && settingsPartCost >= 0
+        ? settingsPartCost
+        : (Number.isFinite(historicalPartCost) && historicalPartCost > 0 ? historicalPartCost : 0);
       const chargeRate = MAINTENANCE_LABOR_RATE_PER_HOUR;
       const laborCost = maintenanceHrs * chargeRate;
       const totalCost = laborCost + partCostValue;
@@ -15129,7 +15212,7 @@ function computeCostModel(){
         : null;
       maintenanceDataTableRows.push({
         taskId: originalId,
-        taskName: taskMeta.name || task?.name || "Maintenance task",
+        taskName: task?.name || taskMeta.name || "Maintenance task",
         maintenanceHrs,
         partCost: partCostValue,
         chargeRate,
@@ -15207,9 +15290,70 @@ function computeCostModel(){
   const elapsedDays = Math.max(1, Math.floor((today.getTime() - yearStart.getTime()) / JOB_DAY_MS) + 1);
   const totalYearDays = Math.max(1, Math.floor((nextYearStart.getTime() - yearStart.getTime()) / JOB_DAY_MS));
   const daysRemaining = Math.max(0, totalYearDays - elapsedDays);
-  const ytdDailyRate = elapsedDays > 0 ? (ytdActual / elapsedDays) : 0;
-  const remainderProjection = ytdDailyRate > 0 ? ytdDailyRate * daysRemaining : 0;
-  const annualForecastFromCentral = ytdActual + remainderProjection;
+  const projectionMethodOptions = [
+    { key: "annualized_average", label: "Annualized average" },
+    { key: "run_rate", label: "YTD + remaining run rate" }
+  ];
+  const projectionWindowOptions = [
+    { key: "ytd", label: "YTD", days: null, mode: "ytd" },
+    { key: "1m", label: "1 month", days: 30, mode: "rolling" },
+    { key: "2m", label: "2 months", days: 61, mode: "rolling" },
+    { key: "3m", label: "3 months", days: 92, mode: "rolling" },
+    { key: "6m", label: "6 months", days: 182, mode: "rolling" },
+    { key: "12m", label: "12 months", days: 365, mode: "rolling" },
+    { key: "all", label: "All time", days: null, mode: "all" }
+  ];
+  const chosenMethodRaw = typeof window !== "undefined" ? String(window.costForecastProjectionMethod || "") : "";
+  const chosenWindowRaw = typeof window !== "undefined" ? String(window.costForecastProjectionWindow || "") : "";
+  const projectionMethod = projectionMethodOptions.some(option => option.key === chosenMethodRaw)
+    ? chosenMethodRaw
+    : "annualized_average";
+  const projectionWindowKey = projectionWindowOptions.some(option => option.key === chosenWindowRaw)
+    ? chosenWindowRaw
+    : "ytd";
+  if (typeof window !== "undefined"){
+    window.costForecastProjectionMethod = projectionMethod;
+    window.costForecastProjectionWindow = projectionWindowKey;
+  }
+  const projectionWindowConfig = projectionWindowOptions.find(option => option.key === projectionWindowKey) || projectionWindowOptions[0];
+  const projectionWindowEnd = new Date(today);
+  projectionWindowEnd.setHours(23, 59, 59, 999);
+  const projectionWindowStart = (() => {
+    if (projectionWindowConfig.mode === "ytd"){
+      const start = new Date(yearStart);
+      start.setHours(0, 0, 0, 0);
+      return start;
+    }
+    if (projectionWindowConfig.mode === "all"){
+      if (!centralMaintenanceRows.length) return null;
+      const oldest = centralMaintenanceRows[centralMaintenanceRows.length - 1]?.occurredAt;
+      if (!(oldest instanceof Date) || Number.isNaN(oldest.getTime())) return null;
+      const start = new Date(oldest);
+      start.setHours(0, 0, 0, 0);
+      return start;
+    }
+    const start = new Date(projectionWindowEnd);
+    start.setDate(start.getDate() - (Number(projectionWindowConfig.days) || 0));
+    start.setHours(0, 0, 0, 0);
+    return start;
+  })();
+  const isInProjectionWindow = (row)=>{
+    const dt = row?.occurredAt;
+    if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return false;
+    if (projectionWindowStart && dt < projectionWindowStart) return false;
+    if (dt > projectionWindowEnd) return false;
+    return true;
+  };
+  const projectionWindowRows = centralMaintenanceRows.filter(isInProjectionWindow);
+  const projectionWindowTotal = projectionWindowRows.reduce((sum, row) => sum + row.totalCost, 0);
+  const projectionWindowDays = projectionWindowStart
+    ? Math.max(1, Math.floor((projectionWindowEnd.getTime() - projectionWindowStart.getTime()) / JOB_DAY_MS) + 1)
+    : 1;
+  const projectionDailyAverage = projectionWindowDays > 0 ? projectionWindowTotal / projectionWindowDays : 0;
+  const annualForecastFromCentral = projectionMethod === "run_rate"
+    ? (ytdActual + (projectionDailyAverage * daysRemaining))
+    : (projectionDailyAverage * 365);
+  const remainderProjection = Math.max(0, annualForecastFromCentral - ytdActual);
 
   const timeframeDefsCentral = [
     { key: "1m", label: "Past 1 month", days: 30 },
@@ -15305,6 +15449,8 @@ function computeCostModel(){
         taskId: row.taskId || "",
         latestDateISO: row.dateISO || "",
         ytdCost: 0,
+        trailingYearCost: 0,
+        projectionWindowCost: 0,
         occurrences: []
       };
       entry.totalCost += row.totalCost;
@@ -15312,6 +15458,12 @@ function computeCostModel(){
       if (row.dateISO) entry.occurrences.push(String(row.dateISO));
       if (row.occurredAt >= yearStart && row.occurredAt <= today){
         entry.ytdCost += row.totalCost;
+      }
+      if (row.occurredAt >= oneYearAgo && row.occurredAt <= today){
+        entry.trailingYearCost += row.totalCost;
+      }
+      if (isInProjectionWindow(row)){
+        entry.projectionWindowCost += row.totalCost;
       }
       if (row.dateISO && (!entry.latestDateISO || String(row.dateISO).localeCompare(String(entry.latestDateISO)) > 0)){
         entry.latestDateISO = row.dateISO;
@@ -15327,8 +15479,12 @@ function computeCostModel(){
             dateISO,
             label: `#${optionIndex + 1} · ${dateISO}`
           })),
-        projectedYearTotal: entry.ytdCost + ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining),
-        projectedRemaining: (elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining,
+        projectedYearTotal: projectionMethod === "run_rate"
+          ? (entry.ytdCost + (((projectionWindowDays > 0 ? entry.projectionWindowCost / projectionWindowDays : 0)) * daysRemaining))
+          : ((projectionWindowDays > 0 ? entry.projectionWindowCost / projectionWindowDays : 0) * 365),
+        projectedRemaining: projectionMethod === "run_rate"
+          ? Math.max(0, (entry.ytdCost + (((projectionWindowDays > 0 ? entry.projectionWindowCost / projectionWindowDays : 0)) * daysRemaining)) - entry.ytdCost)
+          : Math.max(0, ((projectionWindowDays > 0 ? entry.projectionWindowCost / projectionWindowDays : 0) * 365) - entry.ytdCost),
         key: `${prefix}_${entry.key}_${index}`,
         name: entry.name,
         taskId: entry.taskId,
@@ -15337,8 +15493,14 @@ function computeCostModel(){
         unitCostLabel: entry.count > 0
           ? formatterCurrency(entry.totalCost / entry.count, { decimals: 2 })
           : "—",
-        annualTotalLabel: formatterCurrency(entry.ytdCost + ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining), { decimals: entry.totalCost < 1000 ? 2 : 0 }),
-        projectionBasisLabel: `YTD ${formatterCurrency(entry.ytdCost, { decimals: entry.ytdCost < 1000 ? 2 : 0 })} + remaining ${formatterCurrency((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining, { decimals: ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining) < 1000 ? 2 : 0 })}`
+        annualTotalLabel: formatterCurrency(projectionMethod === "run_rate"
+          ? (entry.ytdCost + (((projectionWindowDays > 0 ? entry.projectionWindowCost / projectionWindowDays : 0)) * daysRemaining))
+          : ((projectionWindowDays > 0 ? entry.projectionWindowCost / projectionWindowDays : 0) * 365), {
+          decimals: (projectionMethod === "run_rate"
+            ? (entry.ytdCost + (((projectionWindowDays > 0 ? entry.projectionWindowCost / projectionWindowDays : 0)) * daysRemaining))
+            : ((projectionWindowDays > 0 ? entry.projectionWindowCost / projectionWindowDays : 0) * 365)) < 1000 ? 2 : 0
+        }),
+        projectionBasisLabel: `${projectionMethod === "run_rate" ? "YTD + remaining run rate" : "Annualized average"} using ${projectionWindowConfig.label} (${formatterCurrency(entry.projectionWindowCost, { decimals: entry.projectionWindowCost < 1000 ? 2 : 0 })} over ${projectionWindowDays} day${projectionWindowDays === 1 ? "" : "s"})`
       }));
   };
   const intervalRowsFromCentral = makeForecastRows(modeGroupRows("interval"), "interval");
@@ -15346,6 +15508,13 @@ function computeCostModel(){
   const intervalTotalFromCentral = modeGroupRows("interval").reduce((sum, row) => sum + row.totalCost, 0);
   const asReqTotalFromCentral = modeGroupRows("asreq").reduce((sum, row) => sum + row.totalCost, 0);
   const forecastBreakdownCentral = {
+    projectionControl: {
+      method: projectionMethod,
+      window: projectionWindowKey,
+      methodOptions: projectionMethodOptions.map(option => ({ key: option.key, label: option.label })),
+      windowOptions: projectionWindowOptions.map(option => ({ key: option.key, label: option.label })),
+      windowDays: projectionWindowDays
+    },
     sections: [
       {
         key: "interval",
@@ -15368,7 +15537,7 @@ function computeCostModel(){
       combinedLabel: `${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })} projected (${currentYear}) · ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })} actual YTD`
     }
   };
-  forecastBreakdownCentral.note = `Projection year: ${currentYear}. YTD actual from Jan 1 to today = ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })} over ${elapsedDays} day${elapsedDays === 1 ? "" : "s"}. Remaining ${daysRemaining} day${daysRemaining === 1 ? "" : "s"} projected at ${formatterCurrency(ytdDailyRate, { decimals: 2 })}/day = ${formatterCurrency(remainderProjection, { decimals: remainderProjection < 1000 ? 2 : 0 })}. Total ${currentYear} projection = ${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })}.`;
+  forecastBreakdownCentral.note = `Projection year: ${currentYear}. Method: ${projectionMethod === "run_rate" ? "YTD + remaining run rate" : "Annualized average"}. Source window: ${projectionWindowConfig.label} (${projectionWindowDays} day${projectionWindowDays === 1 ? "" : "s"}) from the central data table. Window actual = ${formatterCurrency(projectionWindowTotal, { decimals: projectionWindowTotal < 1000 ? 2 : 0 })}. YTD actual = ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })}. Past 12 months actual = ${formatterCurrency(annualActualFromCentral, { decimals: annualActualFromCentral < 1000 ? 2 : 0 })}. Remaining-year estimate = ${formatterCurrency(remainderProjection, { decimals: remainderProjection < 1000 ? 2 : 0 })}. Total ${currentYear} projection = ${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })}.`;
 
   const historyRowsCentral = centralMaintenanceRows.slice(0, 6).map(row => ({
     dateLabel: formatDateLabelShort(row.occurredAt),

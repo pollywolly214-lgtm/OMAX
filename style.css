@@ -450,7 +450,7 @@ body.pump-notes-open { overflow:hidden; }
   box-shadow:0 42px 96px rgba(5, 24, 62, 0.48);
   width:min(960px, 96vw);
   max-height:min(90vh, 760px);
-  overflow:auto;
+  overflow:hidden;
   display:flex;
   flex-direction:column;
   gap:18px;
@@ -471,6 +471,9 @@ body.pump-notes-open { overflow:hidden; }
 .forecast-modal-close:hover{ color:#0b1a38; }
 .forecast-modal-close:focus-visible{ outline:2px solid var(--brand-blue-400, #2563eb); outline-offset:2px; }
 .forecast-modal-subtitle{ margin:0; color:#2a3c63; font-size:14px; }
+.forecast-controls{ display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+.forecast-controls-label{ display:flex; flex-direction:column; gap:4px; font-size:12px; font-weight:600; color:#2a3c63; }
+.forecast-controls-label select{ min-width:180px; border:1px solid #c5d1e8; border-radius:8px; padding:6px 8px; background:#fff; color:#1f2a44; font:inherit; }
 .cost-timeframe-modal{ position:fixed; inset:0; z-index:1500; display:flex; align-items:center; justify-content:center; padding:32px 20px; }
 .cost-timeframe-modal[hidden]{ display:none; }
 .cost-timeframe-backdrop{ position:absolute; inset:0; background:rgba(15,23,42,0.55); }
@@ -554,7 +557,15 @@ body.cost-receipt-modal-open{ overflow:hidden; }
   .cost-timeframe-card-body{ padding:24px 18px 28px; }
   .cost-timeframe-table th,.cost-timeframe-table td{ padding:8px 10px; }
 }
-.forecast-table-wrap{ overflow:auto; border-radius:16px; border:1px solid rgba(22,48,92,0.1); background:rgba(248,251,255,0.6); }
+.forecast-table-wrap{
+  overflow:auto;
+  flex:1 1 auto;
+  min-height:0;
+  max-height:58vh;
+  border-radius:16px;
+  border:1px solid rgba(22,48,92,0.1);
+  background:rgba(248,251,255,0.6);
+}
 .forecast-table{ width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
 .forecast-table thead{ background:rgba(16, 61, 130, 0.12); color:#0c2340; }
 .forecast-table th,
