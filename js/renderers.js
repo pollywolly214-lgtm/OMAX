@@ -12925,6 +12925,15 @@ function computeCostModel(){
     const totalCost = resolveMaintenanceUnitCostWithLabor(task, baseCost);
     return totalCost > 0 ? totalCost : null;
   };
+  const resolveMaintenanceUnitCostFromSettings = (task)=>{
+    if (!task) return null;
+    const directPrice = Number(task?.price);
+    const baseCost = Number.isFinite(directPrice) && directPrice >= 0
+      ? directPrice
+      : resolveCalendarUnitCost(task, calendarCostByTemplateId);
+    const normalizedBase = Number.isFinite(baseCost) && baseCost >= 0 ? baseCost : 0;
+    return resolveMaintenanceUnitCostWithLabor(task, normalizedBase);
+  };
 
   const toHistoryDateKey = (value)=>{
     if (!value) return null;
@@ -12964,6 +12973,21 @@ function computeCostModel(){
 
   const intervalTasks = intervalTasksAll.filter(isTaskActive);
   const asReqTasks = asReqTasksAll.filter(isTaskActive);
+  const taskCostFromSettingsById = new Map();
+  const registerTaskCostFromSettings = (task)=>{
+    if (!task || task.id == null) return;
+    const isInstance = typeof isInstanceTask === "function"
+      ? isInstanceTask(task)
+      : (task.variant === "instance");
+    if (isInstance) return;
+    const id = String(task.id);
+    const resolved = resolveMaintenanceUnitCostFromSettings(task);
+    if (Number.isFinite(resolved) && resolved >= 0){
+      taskCostFromSettingsById.set(id, resolved);
+    }
+  };
+  intervalTasks.forEach(registerTaskCostFromSettings);
+  asReqTasks.forEach(registerTaskCostFromSettings);
 
   const cleanPartNumber = (pn)=> String(pn || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
   const maintenancePartNumbers = new Set();
@@ -13068,13 +13092,23 @@ function computeCostModel(){
   };
   const addOccurrenceCostsFromTask = (task)=>{
     if (!task) return;
+    const templateId = task.templateId != null ? String(task.templateId) : null;
+    const taskId = task.id != null ? String(task.id) : null;
+    const settingsTaskId = templateId || taskId;
+    const settingsCost = settingsTaskId && taskCostFromSettingsById.has(settingsTaskId)
+      ? Number(taskCostFromSettingsById.get(settingsTaskId))
+      : null;
+    const fallbackTaskCost = resolveMaintenanceUnitCostFromSettings(task);
     const rawNotes = (typeof normalizeOccurrenceNotes === "function")
       ? normalizeOccurrenceNotes(task)
       : (task?.occurrenceNotes || {});
     if (!rawNotes || typeof rawNotes !== "object") return;
     Object.entries(rawNotes).forEach(([dateKey, note]) => {
       if (!note) return;
-      const cost = parseOccurrenceCost(note);
+      const noteCost = parseOccurrenceCost(note);
+      const cost = Number.isFinite(settingsCost) && settingsCost >= 0
+        ? settingsCost
+        : (Number.isFinite(fallbackTaskCost) && fallbackTaskCost >= 0 ? fallbackTaskCost : noteCost);
       if (!Number.isFinite(cost) || cost <= 0) return;
       const resolved = parseOccurrenceDate(dateKey);
       if (!resolved) return;
