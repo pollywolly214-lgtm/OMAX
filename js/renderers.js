@@ -15256,9 +15256,8 @@ function computeCostModel(){
   const elapsedDays = Math.max(1, Math.floor((today.getTime() - yearStart.getTime()) / JOB_DAY_MS) + 1);
   const totalYearDays = Math.max(1, Math.floor((nextYearStart.getTime() - yearStart.getTime()) / JOB_DAY_MS));
   const daysRemaining = Math.max(0, totalYearDays - elapsedDays);
-  const ytdDailyRate = elapsedDays > 0 ? (ytdActual / elapsedDays) : 0;
-  const remainderProjection = ytdDailyRate > 0 ? ytdDailyRate * daysRemaining : 0;
-  const annualForecastFromCentral = ytdActual + remainderProjection;
+  const annualForecastFromCentral = annualActualFromCentral;
+  const remainderProjection = Math.max(0, annualForecastFromCentral - ytdActual);
 
   const timeframeDefsCentral = [
     { key: "1m", label: "Past 1 month", days: 30 },
@@ -15354,6 +15353,7 @@ function computeCostModel(){
         taskId: row.taskId || "",
         latestDateISO: row.dateISO || "",
         ytdCost: 0,
+        trailingYearCost: 0,
         occurrences: []
       };
       entry.totalCost += row.totalCost;
@@ -15361,6 +15361,9 @@ function computeCostModel(){
       if (row.dateISO) entry.occurrences.push(String(row.dateISO));
       if (row.occurredAt >= yearStart && row.occurredAt <= today){
         entry.ytdCost += row.totalCost;
+      }
+      if (row.occurredAt >= oneYearAgo && row.occurredAt <= today){
+        entry.trailingYearCost += row.totalCost;
       }
       if (row.dateISO && (!entry.latestDateISO || String(row.dateISO).localeCompare(String(entry.latestDateISO)) > 0)){
         entry.latestDateISO = row.dateISO;
@@ -15376,8 +15379,8 @@ function computeCostModel(){
             dateISO,
             label: `#${optionIndex + 1} · ${dateISO}`
           })),
-        projectedYearTotal: entry.ytdCost + ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining),
-        projectedRemaining: (elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining,
+        projectedYearTotal: entry.trailingYearCost,
+        projectedRemaining: Math.max(0, entry.trailingYearCost - entry.ytdCost),
         key: `${prefix}_${entry.key}_${index}`,
         name: entry.name,
         taskId: entry.taskId,
@@ -15386,8 +15389,8 @@ function computeCostModel(){
         unitCostLabel: entry.count > 0
           ? formatterCurrency(entry.totalCost / entry.count, { decimals: 2 })
           : "—",
-        annualTotalLabel: formatterCurrency(entry.ytdCost + ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining), { decimals: entry.totalCost < 1000 ? 2 : 0 }),
-        projectionBasisLabel: `YTD ${formatterCurrency(entry.ytdCost, { decimals: entry.ytdCost < 1000 ? 2 : 0 })} + remaining ${formatterCurrency((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining, { decimals: ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining) < 1000 ? 2 : 0 })}`
+        annualTotalLabel: formatterCurrency(entry.trailingYearCost, { decimals: entry.trailingYearCost < 1000 ? 2 : 0 }),
+        projectionBasisLabel: `Past 12 months actual ${formatterCurrency(entry.trailingYearCost, { decimals: entry.trailingYearCost < 1000 ? 2 : 0 })} from central table (YTD ${formatterCurrency(entry.ytdCost, { decimals: entry.ytdCost < 1000 ? 2 : 0 })})`
       }));
   };
   const intervalRowsFromCentral = makeForecastRows(modeGroupRows("interval"), "interval");
@@ -15417,7 +15420,7 @@ function computeCostModel(){
       combinedLabel: `${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })} projected (${currentYear}) · ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })} actual YTD`
     }
   };
-  forecastBreakdownCentral.note = `Projection year: ${currentYear}. YTD actual from Jan 1 to today = ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })} over ${elapsedDays} day${elapsedDays === 1 ? "" : "s"}. Remaining ${daysRemaining} day${daysRemaining === 1 ? "" : "s"} projected at ${formatterCurrency(ytdDailyRate, { decimals: 2 })}/day = ${formatterCurrency(remainderProjection, { decimals: remainderProjection < 1000 ? 2 : 0 })}. Total ${currentYear} projection = ${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })}.`;
+  forecastBreakdownCentral.note = `Projection year: ${currentYear}. All values are sourced from completed occurrences in the central data table. YTD actual from Jan 1 to today = ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })}. Past 12 months actual = ${formatterCurrency(annualActualFromCentral, { decimals: annualActualFromCentral < 1000 ? 2 : 0 })}. Remaining-year estimate = ${formatterCurrency(remainderProjection, { decimals: remainderProjection < 1000 ? 2 : 0 })}. Total ${currentYear} projection = ${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })}.`;
 
   const historyRowsCentral = centralMaintenanceRows.slice(0, 6).map(row => ({
     dateLabel: formatDateLabelShort(row.occurredAt),
