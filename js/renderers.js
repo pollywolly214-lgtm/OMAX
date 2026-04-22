@@ -12528,12 +12528,20 @@ function renderCosts(){
   let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
   let lastPointerClientPos = null;
   const rangeButtons = Array.from(content.querySelectorAll("[data-cost-range]"));
-  const allowedChartRanges = [1, 3, 6, 12];
-  const defaultChartRange = 6;
+  const allowedChartRanges = ["1", "3", "6", "12", "ytd", "all"];
+  const defaultChartRange = "6";
+  const rangeLabelMap = new Map([
+    ["1", "1 month"],
+    ["3", "3 months"],
+    ["6", "6 months"],
+    ["12", "12 months"],
+    ["ytd", "YTD"],
+    ["all", "All time"]
+  ]);
 
   const normalizeChartRange = (value)=>{
-    const months = Number(value);
-    return allowedChartRanges.includes(months) ? months : defaultChartRange;
+    const key = String(value == null ? "" : value).toLowerCase();
+    return allowedChartRanges.includes(key) ? key : defaultChartRange;
   };
 
   const getChartRangeState = ()=>{
@@ -12593,17 +12601,27 @@ function renderCosts(){
       return { points: [], domainStart: null, domainEnd: null };
     }
 
-    const approximateDaysPerMonth = 31;
-    const limit = Math.max(180, Math.ceil(normalizedRange * approximateDaysPerMonth));
-
     const latestPoint = sanitized[sanitized.length - 1];
     const latestTime = latestPoint.date.getTime();
     const cutoff = new Date(latestTime);
     cutoff.setHours(0, 0, 0, 0);
-    cutoff.setMonth(cutoff.getMonth() - normalizedRange);
+    if (normalizedRange === "ytd"){
+      cutoff.setMonth(0, 1);
+    }else if (normalizedRange !== "all"){
+      const months = Number(normalizedRange);
+      cutoff.setMonth(cutoff.getMonth() - (Number.isFinite(months) ? months : 6));
+    }else{
+      const oldest = sanitized[0]?.date;
+      if (oldest instanceof Date && !Number.isNaN(oldest.getTime())){
+        cutoff.setTime(oldest.getTime());
+        cutoff.setHours(0, 0, 0, 0);
+      }
+    }
     const cutoffTime = cutoff.getTime();
 
-    let filtered = sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
+    let filtered = normalizedRange === "all"
+      ? sanitized.slice()
+      : sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
 
     if (!filtered.length){
       const fallback = sanitized[sanitized.length - 1];
@@ -12615,7 +12633,9 @@ function renderCosts(){
       }
     }
 
-    const limited = limitChartSeries(filtered, limit);
+    const limited = normalizedRange === "all"
+      ? filtered.slice()
+      : limitChartSeries(filtered, Math.max(180, Math.ceil((Number(normalizedRange) || 6) * 31)));
     if (!allowedChartRanges.includes(normalizedRange)){
       return { points: limited, domainStart: null, domainEnd: null };
     }
@@ -12854,6 +12874,17 @@ function renderCosts(){
     const { months } = getChartRangeState();
     const maintenanceRange = filterChartSeriesByRange(maintenanceSeriesBase, months);
     const jobRange = filterChartSeriesByRange(jobSeriesBase, months);
+    const maintenanceCostTotalInWindow = maintenanceRange.points.reduce((sum, item) => {
+      const value = Number(item?.value) || 0;
+      return sum + Math.abs(value);
+    }, 0);
+    const cutCountInWindow = jobRange.points.length;
+    const maintenanceCostPerCutValue = cutCountInWindow > 0
+      ? (maintenanceCostTotalInWindow / cutCountInWindow)
+      : 0;
+    const maintenanceCostPerCutLabel = formatterCurrency(maintenanceCostPerCutValue, {
+      decimals: maintenanceCostPerCutValue < 1000 ? 2 : 0
+    });
 
     const domainStarts = [maintenanceRange.domainStart, jobRange.domainStart]
       .map(value => Number.isFinite(value) ? Number(value) : null)
@@ -12866,10 +12897,18 @@ function renderCosts(){
       ...model,
       maintenanceSeries: maintenanceRange.points,
       jobSeries: jobRange.points,
+      maintenanceCostPerCutValue,
+      maintenanceCostPerCutLabel,
+      maintenanceCostPerCutWindowLabel: rangeLabelMap.get(months) || "selected range",
       chartDomain: (domainStarts.length && domainEnds.length)
         ? { start: Math.min(...domainStarts), end: Math.max(...domainEnds) }
         : null
     };
+    const maintenanceCostPerCutEl = content.querySelector("[data-maint-cost-per-cut-label]");
+    if (maintenanceCostPerCutEl){
+      maintenanceCostPerCutEl.textContent = maintenanceCostPerCutLabel;
+      maintenanceCostPerCutEl.setAttribute("title", `Window: ${rangeLabelMap.get(months) || months}`);
+    }
     updateChartRangeButtons();
     if (canvas){
       resizeCostChartCanvas(canvas);
@@ -15754,6 +15793,9 @@ function computeCostModel(){
   const cuttingAverageValue = jobSeries.length
     ? (jobSeries.reduce((sum, item) => sum + (Number(item?.value) || 0), 0) / jobSeries.length)
     : 0;
+  const maintenanceCostTotalAll = maintenanceSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
+  const cutCountAll = jobSeries.length;
+  const maintenanceCostPerCutValue = cutCountAll > 0 ? (maintenanceCostTotalAll / cutCountAll) : 0;
 
   return {
     summaryCards,
@@ -15771,6 +15813,9 @@ function computeCostModel(){
     chartInfo,
     maintenanceAverageValue,
     maintenanceAverageLabel: formatterCurrency(maintenanceAverageValue, { showPlus: true, decimals: 0 }),
+    maintenanceCostPerCutValue,
+    maintenanceCostPerCutLabel: formatterCurrency(maintenanceCostPerCutValue, { decimals: maintenanceCostPerCutValue < 1000 ? 2 : 0 }),
+    maintenanceCostPerCutWindowLabel: "6 months",
     cuttingAverageValue,
     cuttingAverageLabel: formatterCurrency(cuttingAverageValue, { showPlus: true, decimals: 0 }),
     orderRequestSummary,
@@ -16044,15 +16089,16 @@ function drawCostChart(canvas, model, show){
     if (value > 0) return `+${formatted}`;
     return formatted;
   };
-  const maintenanceAvg = Number(model?.maintenanceAverageValue) || 0;
+  const maintenanceAvg = Number(model?.maintenanceCostPerCutValue ?? model?.maintenanceAverageValue) || 0;
   const cuttingAvg = Number(model?.cuttingAverageValue) || 0;
-  const maintenanceAvgLabel = model?.maintenanceAverageLabel || formatMoney(maintenanceAvg);
+  const maintenanceAvgLabel = model?.maintenanceCostPerCutLabel || model?.maintenanceAverageLabel || formatMoney(maintenanceAvg);
   const cuttingAvgLabel = model?.cuttingAverageLabel || formatMoney(cuttingAvg);
+  const maintenanceWindowLabel = String(model?.maintenanceCostPerCutWindowLabel || "selected range");
 
   ctx.font = "12px sans-serif";
   ctx.textAlign = "left";
   ctx.fillStyle = model.chartColors.maintenance;
-  ctx.fillText(`Avg maintenance (loss): ${maintenanceAvgLabel}`, left, 14);
+  ctx.fillText(`Avg maint cost/cut (${maintenanceWindowLabel}): ${maintenanceAvgLabel}`, left, 14);
   ctx.fillStyle = model.chartColors.jobs;
   ctx.fillText(`Avg cutting gain/loss: ${cuttingAvgLabel}`, Math.max(left + 250, W * 0.45), 14);
 
