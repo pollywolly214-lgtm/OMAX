@@ -12934,6 +12934,18 @@ function computeCostModel(){
     const normalizedBase = Number.isFinite(baseCost) && baseCost >= 0 ? baseCost : 0;
     return resolveMaintenanceUnitCostWithLabor(task, normalizedBase);
   };
+  const resolveMaintenancePartCostFromSettings = (task)=>{
+    if (!task) return null;
+    const directPrice = Number(task?.price);
+    if (Number.isFinite(directPrice) && directPrice >= 0){
+      return roundMaintenanceCurrency(directPrice);
+    }
+    const calendarPrice = resolveCalendarUnitCost(task, calendarCostByTemplateId);
+    if (Number.isFinite(calendarPrice) && calendarPrice >= 0){
+      return roundMaintenanceCurrency(calendarPrice);
+    }
+    return null;
+  };
 
   const toHistoryDateKey = (value)=>{
     if (!value) return null;
@@ -15152,7 +15164,7 @@ function computeCostModel(){
       const categoryLabel = categoryPath ? `${modeLabel} • ${categoryPath}` : `${modeLabel} • Uncategorized`;
       const maintenanceHours = Number(task?.downtimeHours);
       const maintenanceHrs = Number.isFinite(maintenanceHours) && maintenanceHours > 0 ? maintenanceHours : 1;
-      const settingsPartCost = resolveMaintenanceUnitCostFromSettings(task);
+      const settingsPartCost = resolveMaintenancePartCostFromSettings(task);
       const historicalPartCost = Number(taskMeta?.unitPrice);
       const partCostValue = Number.isFinite(settingsPartCost) && settingsPartCost >= 0
         ? settingsPartCost
