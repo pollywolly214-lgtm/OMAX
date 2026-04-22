@@ -165,31 +165,31 @@ function viewDashboard(){
           <div class="time-efficiency-metrics" role="status" aria-live="polite">
             <div class="time-efficiency-metric">
               <span class="label">Actual hours</span>
-              <span class="value" data-efficiency-actual>—</span>
+              <span class="value" data-efficiency-actual title="Sum of logged cutting hours in the selected date window.">—</span>
             </div>
             <div class="time-efficiency-metric">
               <span class="label">Current target</span>
-              <span class="value" data-efficiency-target>—</span>
+              <span class="value" data-efficiency-target title="Target-to-date: weekly goal converted to daily goal and multiplied by elapsed days in this window.">—</span>
             </div>
             <div class="time-efficiency-metric">
               <span class="label">Gap vs target</span>
-              <span class="value" data-efficiency-gap-target>—</span>
+                <span class="value" data-efficiency-gap-target title="Actual hours minus target-to-date hours in this window.">—</span>
             </div>
             <div class="time-efficiency-metric">
               <span class="label">End goal</span>
-              <span class="value" data-efficiency-goal>—</span>
+                <span class="value" data-efficiency-goal title="End goal: full-window goal hours using your configured weekly goal.">—</span>
             </div>
             <div class="time-efficiency-metric">
               <span class="label">Avg usage/day</span>
-              <span class="value" data-efficiency-average>—</span>
+                <span class="value" data-efficiency-average title="Average logged cutting hours per day across the selected window.">—</span>
             </div>
             <div class="time-efficiency-metric">
               <span class="label">Gap vs goal</span>
-              <span class="value" data-efficiency-gap-goal>—</span>
+                <span class="value" data-efficiency-gap-goal title="Actual hours minus full-window goal hours.">—</span>
             </div>
             <div class="time-efficiency-metric">
               <span class="label">Efficiency (to date)</span>
-              <span class="value" data-efficiency-percent>—</span>
+                <span class="value" data-efficiency-percent title="Efficiency to date: actual hours divided by target-to-date hours.">—</span>
             </div>
           </div>
           <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
@@ -2326,13 +2326,13 @@ function viewCosts(model){
             <p class="small muted time-efficiency-edit-note" data-efficiency-edit-note></p>
           </div>
           <div class="time-efficiency-metrics" role="status" aria-live="polite">
-            <div class="time-efficiency-metric"><span class="label">Actual hours</span><span class="value" data-efficiency-actual>—</span></div>
-            <div class="time-efficiency-metric"><span class="label">Current target</span><span class="value" data-efficiency-target>—</span></div>
-            <div class="time-efficiency-metric"><span class="label">Gap vs target</span><span class="value" data-efficiency-gap-target>—</span></div>
-            <div class="time-efficiency-metric"><span class="label">End goal</span><span class="value" data-efficiency-goal>—</span></div>
-            <div class="time-efficiency-metric"><span class="label">Avg usage/day</span><span class="value" data-efficiency-average>—</span></div>
-            <div class="time-efficiency-metric"><span class="label">Gap vs goal</span><span class="value" data-efficiency-gap-goal>—</span></div>
-            <div class="time-efficiency-metric"><span class="label">Efficiency (to date)</span><span class="value" data-efficiency-percent>—</span></div>
+            <div class="time-efficiency-metric"><span class="label">Actual hours</span><span class="value" data-efficiency-actual title="Sum of logged cutting hours in the selected date window.">—</span></div>
+            <div class="time-efficiency-metric"><span class="label">Current target</span><span class="value" data-efficiency-target title="Target-to-date: weekly goal converted to daily goal and multiplied by elapsed days in this window.">—</span></div>
+            <div class="time-efficiency-metric"><span class="label">Gap vs target</span><span class="value" data-efficiency-gap-target title="Actual hours minus target-to-date hours in this window.">—</span></div>
+            <div class="time-efficiency-metric"><span class="label">End goal</span><span class="value" data-efficiency-goal title="End goal: full-window goal hours using your configured weekly goal.">—</span></div>
+            <div class="time-efficiency-metric"><span class="label">Avg usage/day</span><span class="value" data-efficiency-average title="Average logged cutting hours per day across the selected window.">—</span></div>
+            <div class="time-efficiency-metric"><span class="label">Gap vs goal</span><span class="value" data-efficiency-gap-goal title="Actual hours minus full-window goal hours.">—</span></div>
+            <div class="time-efficiency-metric"><span class="label">Efficiency (to date)</span><span class="value" data-efficiency-percent title="Efficiency to date: actual hours divided by target-to-date hours.">—</span></div>
           </div>
           <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
           <p class="small muted">How this works: <strong>Target</strong> = your weekly goal prorated by elapsed days in the selected window. <strong>End goal</strong> = full-window goal. So you can be ahead of target today while still behind the full-window goal.</p>
