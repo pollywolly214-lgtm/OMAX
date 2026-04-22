@@ -8589,7 +8589,9 @@ function renderSettings(){
       if (typeof refreshDashboardWidgets === "function"){
         refreshDashboardWidgets();
       }
-      if (typeof renderCosts === "function"){
+      const hash = String(window.location?.hash || "").toLowerCase();
+      const onCostsPage = hash === "#/costs" || hash === "#costs";
+      if (onCostsPage && typeof renderCosts === "function"){
         renderCosts();
       }
     };
@@ -9654,7 +9656,7 @@ function renderSettings(){
         updateLinkedPrices(window.tasksInterval);
         updateLinkedPrices(window.tasksAsReq);
       }
-      scheduleCentralCostRefresh();
+      // Wait for a committed change (change/blur) before refreshing external views
     }else if (key === "downtimeHours"){
       const prevDowntime = meta.task.downtimeHours;
       if (value == null){
@@ -9682,7 +9684,7 @@ function renderSettings(){
         }else if (typeof renderCalendar === "function"){
           renderCalendar();
         }
-        scheduleCentralCostRefresh();
+        // Wait for a committed change (change/blur) before refreshing external views
       }
     }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
       meta.task[key] = target.value;
