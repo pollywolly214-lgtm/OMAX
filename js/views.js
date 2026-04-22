@@ -1598,8 +1598,9 @@ function viewCosts(model){
             <tr>
               <th scope="col">Task</th>
               <th scope="col">Cadence</th>
+              <th scope="col">Projection basis</th>
               <th scope="col">Unit cost</th>
-              <th scope="col">Annual estimate</th>
+              <th scope="col">Year projection</th>
             </tr>
           </thead>
           <tbody>
@@ -1607,7 +1608,7 @@ function viewCosts(model){
               const rows = Array.isArray(section.rows) ? section.rows : [];
               const headerRow = `
               <tr class="forecast-section-row">
-                <th scope="rowgroup" colspan="4">
+                <th scope="rowgroup" colspan="5">
                   <span class="forecast-section-header">
                     <span class="forecast-section-title">${esc(section.label || "")}</span>
                     ${section.totalLabel ? `<span class="forecast-section-total">${esc(section.totalLabel)}</span>` : ""}
@@ -1617,15 +1618,30 @@ function viewCosts(model){
               const rowsHtml = rows.length
                 ? rows.map(row => `
               <tr>
-                <th scope="row">${esc(row.name || "")}</th>
-                <td>${esc(row.cadenceLabel || "—")}</td>
+                <th scope="row">
+                  <button type="button" class="forecast-task-link" data-forecast-open-task data-task-id="${esc(row.taskId || "")}" data-date-iso="${esc(row.latestDateISO || "")}">
+                    ${esc(row.name || "")}
+                  </button>
+                </th>
+                <td>
+                  <div class="forecast-occurrence-cell">
+                    <div>${esc(row.cadenceLabel || "—")}</div>
+                    ${Array.isArray(row.occurrenceOptions) && row.occurrenceOptions.length ? `
+                      <label class="sr-only">Occurrence</label>
+                      <select data-forecast-occurrence-select>
+                        ${row.occurrenceOptions.map(option => `<option value="${esc(option.dateISO || "")}">${esc(option.label || option.dateISO || "")}</option>`).join("")}
+                      </select>
+                    ` : ""}
+                  </div>
+                </td>
+                <td>${esc(row.projectionBasisLabel || "Derived from central table completed occurrences")}</td>
                 <td>${esc(row.unitCostLabel || "—")}</td>
                 <td>${esc(row.annualTotalLabel || "—")}</td>
               </tr>
             `).join("")
                 : `
               <tr class="forecast-empty-row">
-                <td colspan="4">${esc(section.emptyMessage || "No tasks yet.")}</td>
+                <td colspan="5">${esc(section.emptyMessage || "No tasks yet.")}</td>
               </tr>`;
               return `${headerRow}${rowsHtml}`;
             }).join("")}
@@ -1634,17 +1650,17 @@ function viewCosts(model){
           <tfoot>
             <tr class="forecast-total-row">
               <th scope="row">Interval total</th>
-              <td colspan="2"></td>
+              <td colspan="3"></td>
               <td>${esc(breakdownTotals.intervalLabel || "—")}</td>
             </tr>
             <tr class="forecast-total-row">
               <th scope="row">As-required total</th>
-              <td colspan="2"></td>
+              <td colspan="3"></td>
               <td>${esc(breakdownTotals.asReqLabel || "—")}</td>
             </tr>
             <tr class="forecast-grand-total-row">
               <th scope="row">Combined total</th>
-              <td colspan="2"></td>
+              <td colspan="3"></td>
               <td>${esc(breakdownTotals.combinedLabel || "—")}</td>
             </tr>
           </tfoot>` : ""}
@@ -2088,7 +2104,7 @@ function viewCosts(model){
               </thead>
               <tbody>
                 ${maintenanceDataTable.map(row => `
-                  <tr data-maintenance-row data-category-id="${esc(String(row.categoryId || ""))}" data-task-key="${esc(String(row.taskName || "").toLowerCase())}" data-task-name="${esc(row.taskName || "")}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
+                  <tr data-maintenance-row data-row-task-id="${esc(String(row.taskId || ""))}" data-row-date-iso="${esc(String(row.dateISO || ""))}" data-category-id="${esc(String(row.categoryId || ""))}" data-task-key="${esc(String(row.taskName || "").toLowerCase())}" data-task-name="${esc(row.taskName || "")}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
                     <td>${esc(row.counterLabel || "#1")}</td>
                     <td>${esc(row.taskName || "Maintenance task")}</td>
                     <td>${esc(row.maintenanceHrsLabel || "0")}</td>

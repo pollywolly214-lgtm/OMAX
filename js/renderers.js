@@ -8582,6 +8582,29 @@ function renderSettings(){
   let contextTarget = null;
   let occurrenceNotesTaskId = null;
   let inventoryLinkTask = null;
+  let pendingCentralCostRefreshTimer = null;
+  const scheduleCentralCostRefresh = ({ immediate = false } = {})=>{
+    const runRefresh = ()=>{
+      pendingCentralCostRefreshTimer = null;
+      if (typeof refreshDashboardWidgets === "function"){
+        refreshDashboardWidgets();
+      }
+      const hash = String(window.location?.hash || "").toLowerCase();
+      const onCostsPage = hash === "#/costs" || hash === "#costs";
+      if (onCostsPage && typeof renderCosts === "function"){
+        renderCosts();
+      }
+    };
+    if (pendingCentralCostRefreshTimer != null){
+      clearTimeout(pendingCentralCostRefreshTimer);
+      pendingCentralCostRefreshTimer = null;
+    }
+    if (immediate){
+      runRefresh();
+      return;
+    }
+    pendingCentralCostRefreshTimer = setTimeout(runRefresh, 700);
+  };
 
   const getTaskEditingState = (taskEl)=>{
     if (!(taskEl instanceof HTMLElement)) return false;
@@ -9633,12 +9656,7 @@ function renderSettings(){
         updateLinkedPrices(window.tasksInterval);
         updateLinkedPrices(window.tasksAsReq);
       }
-      if (typeof refreshDashboardWidgets === "function"){
-        refreshDashboardWidgets({ full: true });
-      }
-      if (typeof renderCosts === "function"){
-        renderCosts();
-      }
+      // Wait for a committed change (change/blur) before refreshing external views
     }else if (key === "downtimeHours"){
       const prevDowntime = meta.task.downtimeHours;
       if (value == null){
@@ -9662,13 +9680,11 @@ function renderSettings(){
           });
         }
         if (typeof refreshDashboardWidgets === "function"){
-          refreshDashboardWidgets({ full: true });
+          refreshDashboardWidgets();
         }else if (typeof renderCalendar === "function"){
           renderCalendar();
         }
-        if (typeof renderCosts === "function"){
-          renderCosts();
-        }
+        // Wait for a committed change (change/blur) before refreshing external views
       }
     }else if (key === "manualLink" || key === "storeLink" || key === "pn" || key === "name" || key === "condition" || key === "note"){
       meta.task[key] = target.value;
@@ -9707,6 +9723,16 @@ function renderSettings(){
   });
 
   tree?.addEventListener("change", (e)=>{
+    const directInputTarget = e.target;
+    if (directInputTarget instanceof HTMLInputElement || directInputTarget instanceof HTMLTextAreaElement){
+      const key = directInputTarget.getAttribute("data-k");
+      if (key === "price" || key === "downtimeHours"){
+        const holder = directInputTarget.closest("[data-task-id]");
+        if (holder && getTaskEditingState(holder)){
+          scheduleCentralCostRefresh({ immediate: true });
+        }
+      }
+    }
     const target = e.target;
     if (!(target instanceof HTMLSelectElement)) return;
     const holder = target.closest("[data-task-id]");
@@ -10550,6 +10576,24 @@ function setupForecastBreakdownModal(){
 
   modal.addEventListener("click", (event)=>{
     const target = event.target;
+    const openTaskBtn = target instanceof HTMLElement ? target.closest("[data-forecast-open-task]") : null;
+    if (openTaskBtn instanceof HTMLElement){
+      event.preventDefault();
+      const taskId = String(openTaskBtn.getAttribute("data-task-id") || "");
+      const rowEl = openTaskBtn.closest("tr");
+      const occurrenceSelect = rowEl instanceof HTMLElement ? rowEl.querySelector("[data-forecast-occurrence-select]") : null;
+      const selectedOccurrenceDate = occurrenceSelect instanceof HTMLSelectElement
+        ? String(occurrenceSelect.value || "").trim()
+        : "";
+      const dateISO = selectedOccurrenceDate || String(openTaskBtn.getAttribute("data-date-iso") || "");
+      closeModal();
+      if (typeof window.focusMaintenanceDataCenterRow === "function"){
+        window.focusMaintenanceDataCenterRow({ taskId, dateISO });
+      }else{
+        window.pendingCostDataCenterFocus = { taskId, dateISO };
+      }
+      return;
+    }
     if (target && target.hasAttribute && target.hasAttribute("data-forecast-close")){
       event.preventDefault();
       closeModal();
@@ -10761,6 +10805,34 @@ function renderCosts(){
       }
       pendingDataCenterScrollTop = null;
     };
+    const highlightMaintenanceDataCenterRow = ({ taskId = "", dateISO = "" } = {})=>{
+      if (!(modal instanceof HTMLElement)) return false;
+      const taskKey = String(taskId || "").trim();
+      const dateKey = String(dateISO || "").trim();
+      const cssEsc = (value)=>{
+        const raw = String(value || "");
+        if (typeof CSS !== "undefined" && CSS && typeof CSS.escape === "function"){
+          return CSS.escape(raw);
+        }
+        return raw.replace(/["\\]/g, "\\$&");
+      };
+      const selector = dateKey
+        ? `[data-maintenance-row][data-row-task-id="${cssEsc(taskKey)}"][data-row-date-iso="${cssEsc(dateKey)}"]`
+        : `[data-maintenance-row][data-row-task-id="${cssEsc(taskKey)}"]`;
+      let targetRow = taskKey ? modal.querySelector(selector) : null;
+      if (!(targetRow instanceof HTMLElement) && taskKey){
+        targetRow = modal.querySelector(`[data-maintenance-row][data-row-task-id="${cssEsc(taskKey)}"]`);
+      }
+      if (!(targetRow instanceof HTMLElement)) return false;
+      const allRows = Array.from(modal.querySelectorAll("[data-maintenance-row-link-highlight]"));
+      allRows.forEach(row => row.removeAttribute("data-maintenance-row-link-highlight"));
+      targetRow.setAttribute("data-maintenance-row-link-highlight", "1");
+      targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(()=>{
+        targetRow.removeAttribute("data-maintenance-row-link-highlight");
+      }, 2400);
+      return true;
+    };
     if (openBtn instanceof HTMLElement && modal instanceof HTMLElement){
       openBtn.addEventListener("click", openDataCenter);
       closeBtns.forEach(btn => {
@@ -10856,6 +10928,25 @@ function renderCosts(){
         row.hidden = !matches;
       });
     };
+    const resetMaintenanceFilters = ()=>{
+      if (searchInput instanceof HTMLInputElement) searchInput.value = "";
+      if (categoryFilter instanceof HTMLSelectElement) categoryFilter.value = "";
+      if (taskFilter instanceof HTMLSelectElement) taskFilter.value = "";
+      applySearchFilter();
+      renderSuggestions();
+    };
+    window.focusMaintenanceDataCenterRow = ({ taskId = "", dateISO = "" } = {})=>{
+      const focusTaskId = String(taskId || "").trim();
+      if (!focusTaskId) return false;
+      setActiveTab("maintenance");
+      openDataCenter();
+      resetMaintenanceFilters();
+      const focusedNow = highlightMaintenanceDataCenterRow({ taskId: focusTaskId, dateISO: String(dateISO || "").trim() });
+      if (focusedNow) return true;
+      setTimeout(()=> highlightMaintenanceDataCenterRow({ taskId: focusTaskId, dateISO: String(dateISO || "").trim() }), 120);
+      setTimeout(()=> highlightMaintenanceDataCenterRow({ taskId: focusTaskId, dateISO: String(dateISO || "").trim() }), 280);
+      return false;
+    };
     if (searchInput instanceof HTMLInputElement){
       searchInput.addEventListener("input", ()=>{
         applySearchFilter();
@@ -10886,6 +10977,11 @@ function renderCosts(){
         applySearchFilter();
         renderSuggestions();
       });
+    }
+    if (window.pendingCostDataCenterFocus && typeof window.focusMaintenanceDataCenterRow === "function"){
+      const pendingFocus = window.pendingCostDataCenterFocus;
+      window.pendingCostDataCenterFocus = null;
+      window.focusMaintenanceDataCenterRow(pendingFocus);
     }
 
     const cuttingSearchInput = modal instanceof HTMLElement ? modal.querySelector("[data-cutting-search]") : null;
@@ -15069,7 +15165,251 @@ function computeCostModel(){
     });
   });
   maintenanceDataTableRows.sort((a,b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
-  const maintenanceDataTable = maintenanceDataTableRows.map((row, idx) => ({
+  const centralMaintenanceRows = maintenanceDataTableRows
+    .filter(row => {
+      const hasTask = typeof row?.taskId === "string" && row.taskId.trim().length > 0;
+      const hasSettingsLink = typeof row?.settingsLink === "string" && row.settingsLink.includes("taskId=");
+      const parsedDate = parseDateLocal(row?.dateISO || "");
+      const hasDate = parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime());
+      const totalCost = Number(row?.totalCost);
+      return hasTask && hasSettingsLink && hasDate && Number.isFinite(totalCost) && totalCost >= 0;
+    })
+    .map(row => {
+      const occurredAt = parseDateLocal(row.dateISO);
+      return {
+        ...row,
+        occurredAt,
+        totalCost: Math.max(0, Number(row.totalCost) || 0),
+        maintenanceHrs: Math.max(0, Number(row.maintenanceHrs) || 0),
+        partCost: Math.max(0, Number(row.partCost) || 0),
+        laborCost: Math.max(0, Number(row.laborCost) || 0)
+      };
+    })
+    .sort((a, b) => Number(b.occurredAt?.getTime?.() || 0) - Number(a.occurredAt?.getTime?.() || 0));
+
+  const centralTotals = centralMaintenanceRows.reduce((acc, row) => {
+    acc.totalCost += row.totalCost;
+    acc.totalHours += row.maintenanceHrs;
+    return acc;
+  }, { totalCost: 0, totalHours: 0 });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const currentYear = today.getFullYear();
+  const yearStart = new Date(currentYear, 0, 1);
+  const nextYearStart = new Date(currentYear + 1, 0, 1);
+  const oneYearAgo = new Date(today);
+  oneYearAgo.setDate(oneYearAgo.getDate() - 365);
+  const recentYearRows = centralMaintenanceRows.filter(row => row.occurredAt >= oneYearAgo && row.occurredAt <= today);
+  const annualActualFromCentral = recentYearRows.reduce((sum, row) => sum + row.totalCost, 0);
+  const ytdRows = centralMaintenanceRows.filter(row => row.occurredAt >= yearStart && row.occurredAt <= today);
+  const ytdActual = ytdRows.reduce((sum, row) => sum + row.totalCost, 0);
+  const elapsedDays = Math.max(1, Math.floor((today.getTime() - yearStart.getTime()) / JOB_DAY_MS) + 1);
+  const totalYearDays = Math.max(1, Math.floor((nextYearStart.getTime() - yearStart.getTime()) / JOB_DAY_MS));
+  const daysRemaining = Math.max(0, totalYearDays - elapsedDays);
+  const ytdDailyRate = elapsedDays > 0 ? (ytdActual / elapsedDays) : 0;
+  const remainderProjection = ytdDailyRate > 0 ? ytdDailyRate * daysRemaining : 0;
+  const annualForecastFromCentral = ytdActual + remainderProjection;
+
+  const timeframeDefsCentral = [
+    { key: "1m", label: "Past 1 month", days: 30 },
+    { key: "2m", label: "Past 2 months", days: 61 },
+    { key: "3m", label: "Past 3 months", days: 92 },
+    { key: "6m", label: "Past 6 months", days: 182 },
+    { key: "year", label: "Past 12 months", days: 365 },
+    { key: "all", label: "All time", days: null }
+  ];
+  const timeframeRowsCentral = timeframeDefsCentral.map(def => {
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    const start = def.days == null ? null : new Date(end);
+    if (start) start.setDate(start.getDate() - def.days);
+    const rowsInWindow = centralMaintenanceRows.filter(row => {
+      if (!start) return row.occurredAt <= end;
+      return row.occurredAt >= start && row.occurredAt <= end;
+    });
+    const costActual = rowsInWindow.reduce((sum, row) => sum + row.totalCost, 0);
+    const hours = rowsInWindow.reduce((sum, row) => sum + row.maintenanceHrs, 0);
+    const projected = def.days == null
+      ? annualForecastFromCentral
+      : (annualForecastFromCentral > 0 ? (annualForecastFromCentral / 365) * def.days : 0);
+    return {
+      key: def.key,
+      label: def.label,
+      hoursLabel: formatHours(hours),
+      costLabel: formatterCurrency(costActual, { decimals: costActual < 1000 ? 2 : 0 }),
+      projectedLabel: formatterCurrency(projected, { decimals: projected < 1000 ? 2 : 0 })
+    };
+  });
+
+  const timeframeDetailsCentral = timeframeDefsCentral.map(def => {
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    const start = def.days == null ? null : new Date(end);
+    if (start) start.setDate(start.getDate() - def.days);
+    const rowsInWindow = centralMaintenanceRows.filter(row => {
+      if (!start) return row.occurredAt <= end;
+      return row.occurredAt >= start && row.occurredAt <= end;
+    });
+    const actualRows = rowsInWindow.map((row, idx) => ({
+      key: `${def.key}_${row.taskId}_${row.dateISO}_${idx}`,
+      name: row.taskName || "Maintenance task",
+      pn: row.partNumber || "",
+      dateLabel: formatDateLabelShort(row.occurredAt),
+      dateISO: row.dateISO || null,
+      unitLabel: formatterCurrency(row.chargeRate || MAINTENANCE_LABOR_RATE_PER_HOUR, { decimals: 2 }),
+      quantityLabel: Number.isFinite(row.maintenanceHrs) ? String(row.maintenanceHrs) : "—",
+      totalLabel: formatterCurrency(row.totalCost, { decimals: row.totalCost < 1000 ? 2 : 0 }),
+      totalValue: row.totalCost,
+      note: row.taskMode === "asreq" ? "As-required task occurrence" : "Interval task occurrence"
+    }));
+    const actualTotal = actualRows.reduce((sum, row) => sum + (Number(row.totalValue) || 0), 0);
+    const projected = def.days == null
+      ? annualForecastFromCentral
+      : (annualForecastFromCentral > 0 ? (annualForecastFromCentral / 365) * def.days : 0);
+    return {
+      key: def.key,
+      label: def.label,
+      rangeLabel: start ? formatRangeLabel(start, end) : "All recorded maintenance occurrences",
+      actualRows,
+      actualTotalLabel: formatterCurrency(actualTotal, { decimals: actualTotal < 1000 ? 2 : 0 }),
+      actualEmptyMessage: actualRows.length ? "" : "No maintenance spend recorded in this window.",
+      projectionRows: [
+        {
+          type: "group",
+          label: "Central maintenance table projection"
+        },
+        {
+          type: "item",
+          key: `projection_${def.key}`,
+          label: "Historical annualized maintenance cost",
+          basis: "Projected from completed task occurrences in the central table",
+          amountLabel: formatterCurrency(projected, { decimals: projected < 1000 ? 2 : 0 })
+        }
+      ],
+      projectionTotalLabel: formatterCurrency(projected, { decimals: projected < 1000 ? 2 : 0 }),
+      projectionEmptyMessage: ""
+    };
+  });
+
+  const modeGroupRows = (modeValue) => centralMaintenanceRows.filter(row => row.taskMode === modeValue);
+  const makeForecastRows = (rows, prefix) => {
+    const byTask = new Map();
+    rows.forEach(row => {
+      const taskKey = `${row.taskId}`;
+      const entry = byTask.get(taskKey) || {
+        key: taskKey,
+        name: row.taskName || "Maintenance task",
+        totalCost: 0,
+        count: 0,
+        taskId: row.taskId || "",
+        latestDateISO: row.dateISO || "",
+        ytdCost: 0,
+        occurrences: []
+      };
+      entry.totalCost += row.totalCost;
+      entry.count += 1;
+      if (row.dateISO) entry.occurrences.push(String(row.dateISO));
+      if (row.occurredAt >= yearStart && row.occurredAt <= today){
+        entry.ytdCost += row.totalCost;
+      }
+      if (row.dateISO && (!entry.latestDateISO || String(row.dateISO).localeCompare(String(entry.latestDateISO)) > 0)){
+        entry.latestDateISO = row.dateISO;
+      }
+      byTask.set(taskKey, entry);
+    });
+    return Array.from(byTask.values())
+      .sort((a, b) => b.totalCost - a.totalCost)
+      .map((entry, index) => ({
+        occurrenceOptions: Array.from(new Set(entry.occurrences))
+          .sort((a, b) => b.localeCompare(a))
+          .map((dateISO, optionIndex) => ({
+            dateISO,
+            label: `#${optionIndex + 1} · ${dateISO}`
+          })),
+        projectedYearTotal: entry.ytdCost + ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining),
+        projectedRemaining: (elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining,
+        key: `${prefix}_${entry.key}_${index}`,
+        name: entry.name,
+        taskId: entry.taskId,
+        latestDateISO: entry.latestDateISO,
+        cadenceLabel: `${entry.count} completed occurrence${entry.count === 1 ? "" : "s"}`,
+        unitCostLabel: entry.count > 0
+          ? formatterCurrency(entry.totalCost / entry.count, { decimals: 2 })
+          : "—",
+        annualTotalLabel: formatterCurrency(entry.ytdCost + ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining), { decimals: entry.totalCost < 1000 ? 2 : 0 }),
+        projectionBasisLabel: `YTD ${formatterCurrency(entry.ytdCost, { decimals: entry.ytdCost < 1000 ? 2 : 0 })} + remaining ${formatterCurrency((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining, { decimals: ((elapsedDays > 0 ? entry.ytdCost / elapsedDays : 0) * daysRemaining) < 1000 ? 2 : 0 })}`
+      }));
+  };
+  const intervalRowsFromCentral = makeForecastRows(modeGroupRows("interval"), "interval");
+  const asReqRowsFromCentral = makeForecastRows(modeGroupRows("asreq"), "asreq");
+  const intervalTotalFromCentral = modeGroupRows("interval").reduce((sum, row) => sum + row.totalCost, 0);
+  const asReqTotalFromCentral = modeGroupRows("asreq").reduce((sum, row) => sum + row.totalCost, 0);
+  const forecastBreakdownCentral = {
+    sections: [
+      {
+        key: "interval",
+        label: "Interval tasks",
+        rows: intervalRowsFromCentral,
+        totalLabel: formatterCurrency(intervalTotalFromCentral, { decimals: intervalTotalFromCentral < 1000 ? 2 : 0 }),
+        emptyMessage: intervalRowsFromCentral.length ? "" : "No interval occurrences in central data table."
+      },
+      {
+        key: "asRequired",
+        label: "As-required tasks",
+        rows: asReqRowsFromCentral,
+        totalLabel: formatterCurrency(asReqTotalFromCentral, { decimals: asReqTotalFromCentral < 1000 ? 2 : 0 }),
+        emptyMessage: asReqRowsFromCentral.length ? "" : "No as-required occurrences in central data table."
+      }
+    ],
+    totals: {
+      intervalLabel: formatterCurrency(intervalTotalFromCentral, { decimals: intervalTotalFromCentral < 1000 ? 2 : 0 }),
+      asReqLabel: formatterCurrency(asReqTotalFromCentral, { decimals: asReqTotalFromCentral < 1000 ? 2 : 0 }),
+      combinedLabel: `${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })} projected (${currentYear}) · ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })} actual YTD`
+    }
+  };
+  forecastBreakdownCentral.note = `Projection year: ${currentYear}. YTD actual from Jan 1 to today = ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })} over ${elapsedDays} day${elapsedDays === 1 ? "" : "s"}. Remaining ${daysRemaining} day${daysRemaining === 1 ? "" : "s"} projected at ${formatterCurrency(ytdDailyRate, { decimals: 2 })}/day = ${formatterCurrency(remainderProjection, { decimals: remainderProjection < 1000 ? 2 : 0 })}. Total ${currentYear} projection = ${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })}.`;
+
+  const historyRowsCentral = centralMaintenanceRows.slice(0, 6).map(row => ({
+    dateLabel: formatDateLabelShort(row.occurredAt),
+    hoursLabel: formatHours(row.maintenanceHrs),
+    costLabel: formatterCurrency(row.totalCost, { decimals: row.totalCost < 1000 ? 2 : 0 }),
+    dateISO: row.dateISO,
+    key: `${row.taskId}_${row.dateISO}`,
+    hoursValue: row.maintenanceHrs,
+    taskId: row.taskId,
+    originalTaskId: row.taskId,
+    taskMode: row.taskMode || "interval",
+    taskName: row.taskName || "Maintenance task",
+    titleLabel: row.taskName || "Maintenance task",
+    rangeLabel: formatDateLabelShort(row.occurredAt),
+    taskLabel: `Linked task: ${row.taskName || "Maintenance task"}`,
+    tooltipLabel: row.taskName || null,
+    missingTask: false,
+    taskCount: 1,
+    hasLinkedTasks: true,
+    trashId: null
+  }));
+
+  const maintenanceSeriesCentral = centralMaintenanceRows
+    .slice()
+    .sort((a, b) => Number(a.occurredAt?.getTime?.() || 0) - Number(b.occurredAt?.getTime?.() || 0))
+    .map(row => ({
+      date: row.occurredAt,
+      value: row.totalCost,
+      detail: `Completed maintenance task ${row.taskName || "task"} recorded on ${formatDateLabelShort(row.occurredAt)} from the central data table.`
+    }));
+
+  if (Array.isArray(summaryCards) && summaryCards.length){
+    summaryCards[0].value = formatterCurrency(-annualForecastFromCentral, { decimals: 0, showPlus: true });
+    summaryCards[0].hint = `Projected ${currentYear} total: ${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })}. Actual YTD: ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })}. Remaining-year projection: ${formatterCurrency(remainderProjection, { decimals: remainderProjection < 1000 ? 2 : 0 })}.`;
+    const combinedCard = summaryCards.find(card => card && card.key === "combinedImpact");
+    if (combinedCard){
+      combinedCard.value = formatterCurrency(totalGainLoss - annualForecastFromCentral, { decimals: 0, showPlus: true });
+      combinedCard.hint = "Maintenance forecast (central table) plus cutting job efficiency impact.";
+    }
+  }
+  const maintenanceDataTable = centralMaintenanceRows.map((row, idx) => ({
     id: `${row.taskId}_${row.dateISO}_${idx}`,
     taskId: row.taskId,
     taskName: row.taskName,
@@ -15090,11 +15430,11 @@ function computeCostModel(){
 
   return {
     summaryCards,
-    timeframeRows,
-    timeframeDetails,
-    forecastBreakdown,
+    timeframeRows: timeframeRowsCentral,
+    timeframeDetails: timeframeDetailsCentral,
+    forecastBreakdown: forecastBreakdownCentral,
     timeframeNote,
-    historyRows,
+    historyRows: historyRowsCentral,
     historyEmpty,
     jobSummary,
     jobBreakdown,
@@ -15106,7 +15446,7 @@ function computeCostModel(){
     maintenanceDataTable,
     cuttingJobsDataTable,
     chartColors: COST_CHART_COLORS,
-    maintenanceSeries,
+    maintenanceSeries: maintenanceSeriesCentral,
     jobSeries,
     weeklyReports
   };
