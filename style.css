@@ -471,6 +471,9 @@ body.pump-notes-open { overflow:hidden; }
 .forecast-modal-close:hover{ color:#0b1a38; }
 .forecast-modal-close:focus-visible{ outline:2px solid var(--brand-blue-400, #2563eb); outline-offset:2px; }
 .forecast-modal-subtitle{ margin:0; color:#2a3c63; font-size:14px; }
+.forecast-controls{ display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+.forecast-controls-label{ display:flex; flex-direction:column; gap:4px; font-size:12px; font-weight:600; color:#2a3c63; }
+.forecast-controls-label select{ min-width:180px; border:1px solid #c5d1e8; border-radius:8px; padding:6px 8px; background:#fff; color:#1f2a44; font:inherit; }
 .cost-timeframe-modal{ position:fixed; inset:0; z-index:1500; display:flex; align-items:center; justify-content:center; padding:32px 20px; }
 .cost-timeframe-modal[hidden]{ display:none; }
 .cost-timeframe-backdrop{ position:absolute; inset:0; background:rgba(15,23,42,0.55); }
