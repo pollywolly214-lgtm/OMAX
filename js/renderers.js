@@ -15178,7 +15178,7 @@ function computeCostModel(){
         : null;
       maintenanceDataTableRows.push({
         taskId: originalId,
-        taskName: taskMeta.name || task?.name || "Maintenance task",
+        taskName: task?.name || taskMeta.name || "Maintenance task",
         maintenanceHrs,
         partCost: partCostValue,
         chargeRate,
