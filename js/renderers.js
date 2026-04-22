@@ -4542,7 +4542,7 @@ function toggleTimeEfficiencyEditPanel(widget, show){
   }
 }
 
-  function applyTimeEfficiencyEdit(widget){
+function applyTimeEfficiencyEdit(widget){
   if (!widget) return;
   const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
   if (widget.goalInput){
@@ -4590,10 +4590,111 @@ function toggleTimeEfficiencyEditPanel(widget, show){
   refreshTimeEfficiencyWidgets();
 }
 
+let timeEfficiencyTooltipEl = null;
+let activeTimeEfficiencyTooltipTarget = null;
+let timeEfficiencyTooltipViewportBound = false;
+
+function ensureTimeEfficiencyTooltip(){
+  if (timeEfficiencyTooltipEl instanceof HTMLElement && document.body.contains(timeEfficiencyTooltipEl)){
+    return timeEfficiencyTooltipEl;
+  }
+  const el = document.createElement("div");
+  el.className = "time-efficiency-tooltip";
+  el.setAttribute("role", "tooltip");
+  el.hidden = true;
+  document.body.appendChild(el);
+  timeEfficiencyTooltipEl = el;
+  if (!timeEfficiencyTooltipViewportBound){
+    const handleViewportChange = ()=>{
+      if (activeTimeEfficiencyTooltipTarget instanceof HTMLElement){
+        positionTimeEfficiencyTooltip(activeTimeEfficiencyTooltipTarget);
+      }
+    };
+    window.addEventListener("scroll", handleViewportChange, true);
+    window.addEventListener("resize", handleViewportChange);
+    timeEfficiencyTooltipViewportBound = true;
+  }
+  return el;
+}
+
+function hideTimeEfficiencyTooltip(){
+  if (timeEfficiencyTooltipEl instanceof HTMLElement){
+    timeEfficiencyTooltipEl.hidden = true;
+    timeEfficiencyTooltipEl.textContent = "";
+    delete timeEfficiencyTooltipEl.dataset.visible;
+    delete timeEfficiencyTooltipEl.dataset.placement;
+  }
+  if (activeTimeEfficiencyTooltipTarget instanceof HTMLElement){
+    activeTimeEfficiencyTooltipTarget.removeAttribute("aria-describedby");
+  }
+  activeTimeEfficiencyTooltipTarget = null;
+}
+
+function positionTimeEfficiencyTooltip(target){
+  if (!(target instanceof HTMLElement)) return;
+  const tooltip = ensureTimeEfficiencyTooltip();
+  const rect = target.getBoundingClientRect();
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+  const gap = 10;
+  tooltip.hidden = false;
+  tooltip.style.left = "0px";
+  tooltip.style.top = "0px";
+  const tipRect = tooltip.getBoundingClientRect();
+  const centerX = rect.left + (rect.width / 2);
+  let left = centerX - (tipRect.width / 2);
+  left = Math.max(8, Math.min(left, Math.max(8, viewportWidth - tipRect.width - 8)));
+  const hasSpaceAbove = rect.top >= (tipRect.height + gap + 6);
+  const placement = hasSpaceAbove ? "above" : "below";
+  const top = hasSpaceAbove
+    ? (rect.top - tipRect.height - gap)
+    : (rect.bottom + gap);
+  tooltip.style.left = `${Math.round(left)}px`;
+  tooltip.style.top = `${Math.round(Math.max(8, Math.min(top, Math.max(8, viewportHeight - tipRect.height - 8))))}px`;
+  tooltip.dataset.visible = "true";
+  tooltip.dataset.placement = placement;
+}
+
+function showTimeEfficiencyTooltip(target){
+  if (!(target instanceof HTMLElement)) return;
+  const message = String(target.dataset.efficiencyTooltip || target.getAttribute("title") || "").trim();
+  if (!message) return;
+  const tooltip = ensureTimeEfficiencyTooltip();
+  if (!tooltip.id){
+    tooltip.id = "timeEfficiencyTooltip";
+  }
+  activeTimeEfficiencyTooltipTarget = target;
+  target.setAttribute("aria-describedby", tooltip.id);
+  tooltip.textContent = message;
+  positionTimeEfficiencyTooltip(target);
+}
+
+function bindTimeEfficiencyMetricTooltips(root){
+  if (!(root instanceof HTMLElement)) return;
+  const metricEls = Array.from(root.querySelectorAll("[data-efficiency-tooltip]"));
+  metricEls.forEach(el => {
+    if (!(el instanceof HTMLElement) || el.dataset.efficiencyTooltipBound === "1") return;
+    const show = ()=> showTimeEfficiencyTooltip(el);
+    const hide = ()=> hideTimeEfficiencyTooltip();
+    const update = ()=> {
+      if (activeTimeEfficiencyTooltipTarget === el){
+        positionTimeEfficiencyTooltip(el);
+      }
+    };
+    el.addEventListener("mouseenter", show);
+    el.addEventListener("focus", show);
+    el.addEventListener("mouseleave", hide);
+    el.addEventListener("blur", hide);
+    el.addEventListener("mousemove", update);
+    el.dataset.efficiencyTooltipBound = "1";
+  });
+}
+
 function setupTimeEfficiencyWidget(root){
   if (!(root instanceof HTMLElement)) return;
   if (root.dataset.timeEfficiencyBound === "1"){
     refreshTimeEfficiencyWidgets();
+    bindTimeEfficiencyMetricTooltips(root);
     return;
   }
   const toggles = Array.from(root.querySelectorAll("[data-efficiency-range]"));
@@ -4642,6 +4743,7 @@ function setupTimeEfficiencyWidget(root){
   if (widget.cancelBtn){
     widget.cancelBtn.addEventListener("click", ()=> toggleTimeEfficiencyEditPanel(widget, false));
   }
+  bindTimeEfficiencyMetricTooltips(root);
   timeEfficiencyWidgets.push(widget);
   root.dataset.timeEfficiencyBound = "1";
   refreshTimeEfficiencyWidget(widget);
