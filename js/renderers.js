@@ -11661,6 +11661,8 @@ function renderCosts(){
     const chargeInput = panel.querySelector("[data-efficiency-calc-charge]");
     const costInput = panel.querySelector("[data-efficiency-calc-cost]");
     const resetBtn = panel.querySelector("[data-efficiency-calc-reset]");
+    const rangeButtons = Array.from(panel.querySelectorAll("[data-efficiency-calc-range]"));
+    const rangeLabelEl = panel.querySelector("[data-efficiency-calc-range-label]");
     const totalEl = panel.querySelector("[data-efficiency-calc-total]");
     const avgEl = panel.querySelector("[data-efficiency-calc-average]");
     if (!(chargeInput instanceof HTMLInputElement) || !(costInput instanceof HTMLInputElement)) return;
@@ -11679,11 +11681,62 @@ function renderCosts(){
     const defaultCost = Math.max(0, asNumber(defaults.costRate, asNumber(costInput.value, 0)));
     chargeInput.value = String(defaultCharge);
     costInput.value = String(defaultCost);
+    let activeRange = "1m";
+
+    const getRangeStart = (rangeKey)=>{
+      const now = new Date();
+      now.setHours(23, 59, 59, 999);
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      if (rangeKey === "all") return null;
+      if (rangeKey === "ytd"){
+        return new Date(start.getFullYear(), 0, 1);
+      }
+      const monthMap = { "1m": 1, "2m": 2, "3m": 3, "6m": 6, "1y": 12 };
+      const monthsBack = monthMap[rangeKey];
+      if (!monthsBack) return null;
+      return new Date(start.getFullYear(), start.getMonth() - monthsBack, start.getDate());
+    };
+    const parseRowDate = (row)=>{
+      const raw = String(row?.dateLabel || "");
+      if (!raw) return null;
+      const parsed = new Date(`${raw}T00:00:00`);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+    const withinRange = (row, rangeKey)=>{
+      if (rangeKey === "all") return true;
+      const rowDate = parseRowDate(row);
+      if (!(rowDate instanceof Date)) return false;
+      const start = getRangeStart(rangeKey);
+      if (!(start instanceof Date)) return true;
+      return rowDate >= start;
+    };
+    const updateRangeButtons = ()=>{
+      rangeButtons.forEach(btn => {
+        const key = String(btn.getAttribute("data-efficiency-calc-range") || "");
+        const isActive = key === activeRange;
+        btn.classList.toggle("is-active", isActive);
+        btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+      const labels = {
+        "1m": "Range: past 1 month from central data table rows.",
+        "2m": "Range: past 2 months from central data table rows.",
+        "3m": "Range: past 3 months from central data table rows.",
+        "6m": "Range: past 6 months from central data table rows.",
+        "1y": "Range: past 1 year from central data table rows.",
+        ytd: "Range: year to date from central data table rows.",
+        all: "Range: all time from central data table rows."
+      };
+      if (rangeLabelEl instanceof HTMLElement){
+        rangeLabelEl.textContent = labels[activeRange] || labels["1m"];
+      }
+    };
 
     const recalc = ()=>{
       const chargeRate = Math.max(0, asNumber(chargeInput.value, defaultCharge));
       const costRate = Math.max(0, asNumber(costInput.value, defaultCost));
-      const totals = rows.reduce((acc, row)=>{
+      const visibleRows = rows.filter(row => withinRange(row, activeRange));
+      const totals = visibleRows.reduce((acc, row)=>{
         const hours = Math.max(0, asNumber(row?.hoursValue, 0));
         const material = Math.max(0, asNumber(row?.materialValue ?? row?.materialCostValue, 0));
         acc.rows += 1;
@@ -11692,10 +11745,26 @@ function renderCosts(){
       }, { rows: 0, net: 0 });
       if (totalEl) totalEl.textContent = formatUsd(totals.net);
       if (avgEl) avgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
+      const tableRows = Array.from(content.querySelectorAll("[data-efficiency-row]"));
+      tableRows.forEach(tr => {
+        const rowId = String(tr.getAttribute("data-efficiency-id") || "");
+        const rowObj = rows.find(row => String(row?.id || "") === rowId) || null;
+        const show = rowObj ? withinRange(rowObj, activeRange) : false;
+        tr.hidden = !show;
+      });
     };
 
     chargeInput.addEventListener("input", recalc);
     costInput.addEventListener("input", recalc);
+    rangeButtons.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", ()=>{
+        const next = String(btn.getAttribute("data-efficiency-calc-range") || "1m");
+        activeRange = next || "1m";
+        updateRangeButtons();
+        recalc();
+      });
+    });
     if (resetBtn instanceof HTMLElement){
       resetBtn.addEventListener("click", ()=>{
         chargeInput.value = String(defaultCharge);
@@ -11703,6 +11772,7 @@ function renderCosts(){
         recalc();
       });
     }
+    updateRangeButtons();
     recalc();
   }
 
@@ -15058,12 +15128,12 @@ function computeCostModel(){
       chargeRateValue: Number(row?.chargeRateValue) || 0,
       costRateValue: Number(row?.costRateValue) || 0,
       revenueValue: Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)),
-      beforeExpenseLabel: formatterCurrency(Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)), { decimals: 2, showPlus: true }),
+      netGainLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
       materialValue: Math.max(0, Number(row?.materialCostValue) || 0),
       laborValue: Math.max(0, Number(row?.laborCostValue) || 0),
       totalCostValue: Number(row?.totalCostValue) || 0,
       totalProfitValue: Number(row?.totalProfitValue) || 0,
-      formulaTitle: "Source: Central data table completed cutting jobs row. Before expense gain = Hours × Charge Rate. Excludes maintenance parts, labor, and consumables reductions.",
+      formulaTitle: "Source: Central data table completed cutting jobs row. Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost.",
       settingsLink: row?.settingsLink || ""
     }));
   const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
@@ -15083,15 +15153,15 @@ function computeCostModel(){
     averageCostLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.cost / efficiencyCount) : 0, { decimals: 2 }),
     totalProfitLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
     averageProfitLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
-    totalBeforeExpenseLabel: formatterCurrency(efficiencyTotals.revenue, { decimals: Math.abs(efficiencyTotals.revenue) < 1000 ? 2 : 0, showPlus: true }),
-    averageBeforeExpenseLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.revenue / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
+    totalNetGainLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
+    averageNetGainLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
     sourceLabel: "Source: central data table completed cutting jobs rows.",
-    formulaLabel: "Before expense gain = Hours × Charge Rate",
-    disclaimerLabel: "Before expense only: does not include reductions for maintenance parts, labor, or consumables.",
+    formulaLabel: "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost",
+    disclaimerLabel: "Uses central data table values only.",
     rows: efficiencyRows,
     emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
   };
-  const efficiencyMathDetails = `Before expense gain = Hours × Charge Rate. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })} from ${formatHoursValue(efficiencyTotals.hours)}. This excludes maintenance parts, labor, and consumables reductions.`;
+  const efficiencyMathDetails = `Net gain = (Hours × (Charge Rate - Cost Rate)) - Material. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Labor ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
   efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
   const totalCalcHours = efficiencyTotals.hours > 0 ? efficiencyTotals.hours : 0;
   const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.revenue / totalCalcHours) : JOB_RATE_PER_HOUR;
@@ -15100,13 +15170,13 @@ function computeCostModel(){
     chargeRate: Number.isFinite(defaultChargeRateForCalc) ? defaultChargeRateForCalc : JOB_RATE_PER_HOUR,
     costRate: Number.isFinite(defaultCostRateForCalc) ? defaultCostRateForCalc : JOB_BASE_COST_PER_HOUR
   };
-  const efficiencyDisplayProfit = Math.max(0, efficiencyTotals.revenue);
+  const efficiencyDisplayProfit = efficiencyTotals.profit;
   const efficiencyDisplayAverage = efficiencyCount ? (efficiencyDisplayProfit / efficiencyCount) : 0;
   const cuttingCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "cuttingJobs") : null;
   if (cuttingCard){
     cuttingCard.value = formatterCurrency(efficiencyDisplayProfit, { decimals: 0, showPlus: true });
     cuttingCard.hint = efficiencyCount
-      ? `Average gain before expense ${formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true })} across ${efficiencyCount} completed job${efficiencyCount===1?"":"s"} (source: central data table).`
+      ? `Average net gain ${formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true })} across ${efficiencyCount} completed job${efficiencyCount===1?"":"s"} (source: central data table).`
       : "No cutting jobs logged yet.";
     cuttingCard.tooltip = `Source: central data table completed rows. ${efficiencyMathDetails}`;
   }

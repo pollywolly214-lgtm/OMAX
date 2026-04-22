@@ -2247,8 +2247,8 @@ function viewCosts(model){
           <div class="cost-jobs-summary">
             <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
             <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
-            <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"}`.trim())}"><span class="label">Total gain (before expense)</span><span>${esc(efficiencySnapshot.totalBeforeExpenseLabel || "$0.00")}</span></div>
-            <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"}`.trim())}"><span class="label">Avg gain / row (before expense)</span><span>${esc(efficiencySnapshot.averageBeforeExpenseLabel || "$0.00")}</span></div>
+            <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Total net gain</span><span>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
+            <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Avg net gain / row</span><span>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
           </div>
           <div class="cost-efficiency-calculator" data-efficiency-calc>
             <div class="cost-efficiency-calculator-row">
@@ -2262,25 +2262,35 @@ function viewCosts(model){
               </label>
               <button type="button" class="btn secondary" data-efficiency-calc-reset>Reset</button>
             </div>
-            <p class="small muted">Calculator only: temporary what-if net gain across all jobs. Refresh resets to central data table defaults.</p>
+            <div class="time-efficiency-toggles" role="tablist" aria-label="Efficiency range filter">
+              <button type="button" class="time-efficiency-toggle is-active" data-efficiency-calc-range="1m">1M</button>
+              <button type="button" class="time-efficiency-toggle" data-efficiency-calc-range="2m">2M</button>
+              <button type="button" class="time-efficiency-toggle" data-efficiency-calc-range="3m">3M</button>
+              <button type="button" class="time-efficiency-toggle" data-efficiency-calc-range="6m">6M</button>
+              <button type="button" class="time-efficiency-toggle" data-efficiency-calc-range="1y">1Y</button>
+              <button type="button" class="time-efficiency-toggle" data-efficiency-calc-range="ytd">YTD</button>
+              <button type="button" class="time-efficiency-toggle" data-efficiency-calc-range="all">All</button>
+            </div>
+            <p class="small muted" data-efficiency-calc-range-label>Range: past 1 month from central data table rows.</p>
+            <p class="small muted">Calculator only: temporary what-if net gain across filtered jobs. Refresh resets to central data table defaults.</p>
             <p class="small muted" data-efficiency-calc-result>
-              Net total gain (calculator): <strong data-efficiency-calc-total>${esc(efficiencySnapshot.totalProfitLabel || "$0.00")}</strong>
-              · Avg / row: <strong data-efficiency-calc-average>${esc(efficiencySnapshot.averageProfitLabel || "$0.00")}</strong>
+              Net total gain (calculator): <strong data-efficiency-calc-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</strong>
+              · Avg / row: <strong data-efficiency-calc-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</strong>
             </p>
           </div>
-          <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"} ${efficiencySnapshot.disclaimerLabel || "Before expense only: does not include reductions for maintenance parts, labor, or consumables."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Before expense only: does not include reductions for maintenance parts, labor, or consumables.")}</p>
+          <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
           <table class="cost-table">
-            <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Before expense gain calculation">Gain (before expense)</th><th>Task link</th></tr></thead>
+            <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net gain</th><th>Task link</th></tr></thead>
             <tbody>
               ${efficiencyRows.length ? efficiencyRows.map(row => `
-                <tr>
+                <tr data-efficiency-row data-efficiency-id="${esc(row.id || "")}" data-efficiency-date="${esc(row.dateLabel || "")}">
                   <td>${esc(row.taskName || "Completed task")}</td>
                   <td>${esc(row.dateLabel || "—")}</td>
                   <td>${esc(row.hoursLabel || "0 hr")}</td>
                   <td>${esc(row.partCostLabel || "$0.00")}</td>
                   <td>${esc(row.laborCostLabel || "$0.00")}</td>
                   <td>${esc(row.totalCostLabel || "$0.00")}</td>
-                  <td title="${esc(`${row.formulaTitle || efficiencySnapshot.formulaLabel || "Before expense gain = Hours × Charge Rate"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" data-efficiency-profit-cell>${esc(row.beforeExpenseLabel || "$0.00")}</td>
+                  <td title="${esc(`${row.formulaTitle || efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" data-efficiency-profit-cell>${esc(row.netGainLabel || "$0.00")}</td>
                   <td>${row.settingsLink ? `<a href="${esc(row.settingsLink)}">Open settings</a>` : "Invalid link"}</td>
                 </tr>
               `).join("") : `
