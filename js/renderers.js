@@ -12728,31 +12728,61 @@ function renderCosts(){
     canvas.style.cursor = "pointer";
   };
 
+  const getPointerMetrics = (clientX, clientY)=>{
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientWidth = canvas.clientWidth || rect.width || canvas.width;
+    const clientHeight = canvas.clientHeight || rect.height || canvas.height;
+    const scaleX = canvas.width / Math.max(1, clientWidth);
+    const scaleY = canvas.height / Math.max(1, clientHeight);
+    const pointerX = (Number(clientX) - rect.left) * scaleX;
+    const pointerY = (Number(clientY) - rect.top) * scaleY;
+    return { rect, scaleX, scaleY, pointerX, pointerY };
+  };
+  const resolvePointerTarget = (event, { allowProximity = false } = {})=>{
+    if (!canvas) return null;
+    const metrics = getPointerMetrics(event?.clientX, event?.clientY);
+    if (!metrics) return null;
+    const { scaleX, scaleY, pointerX, pointerY } = metrics;
+    const targets = Array.isArray(canvas.__costChartTargets) ? canvas.__costChartTargets : [];
+    for (const target of targets){
+      if (!target || !target.rect) continue;
+      const { x, y, width, height } = target.rect;
+      if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
+        return { target, scaleX, scaleY };
+      }
+    }
+    if (!allowProximity) return null;
+    const proximityRadius = 14 * Math.max(scaleX, scaleY);
+    let nearest = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (const target of targets){
+      if (!target || !target.rect) continue;
+      const centerX = Number(target.rect.x) + (Number(target.rect.width) / 2);
+      const centerY = Number(target.rect.y) + (Number(target.rect.height) / 2);
+      const dx = pointerX - centerX;
+      const dy = pointerY - centerY;
+      const distance = Math.sqrt((dx * dx) + (dy * dy));
+      if (distance < nearestDistance){
+        nearest = target;
+        nearestDistance = distance;
+      }
+    }
+    if (nearest && nearestDistance <= proximityRadius){
+      return { target: nearest, scaleX, scaleY };
+    }
+    return null;
+  };
   const handlePointerHover = (event)=>{
     if (!canvas) return;
     lastPointerClientPos = {
       x: Number(event.clientX),
       y: Number(event.clientY)
     };
-    const rect = canvas.getBoundingClientRect();
-    const clientWidth = canvas.clientWidth || rect.width || canvas.width;
-    const clientHeight = canvas.clientHeight || rect.height || canvas.height;
-    const scaleX = canvas.width / Math.max(1, clientWidth);
-    const scaleY = canvas.height / Math.max(1, clientHeight);
-    const pointerX = (event.clientX - rect.left) * scaleX;
-    const pointerY = (event.clientY - rect.top) * scaleY;
-    const targets = Array.isArray(canvas.__costChartTargets) ? canvas.__costChartTargets : [];
-    let hovered = null;
-    for (const target of targets){
-      if (!target || !target.rect) continue;
-      const { x, y, width, height } = target.rect;
-      if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
-        hovered = target;
-        break;
-      }
-    }
+    const resolved = resolvePointerTarget(event, { allowProximity: true });
+    const hovered = resolved?.target || null;
     if (hovered){
-      showTooltip(hovered, { scaleX, scaleY });
+      showTooltip(hovered, { scaleX: resolved.scaleX, scaleY: resolved.scaleY });
     }else{
       hideTooltip();
     }
@@ -12774,26 +12804,6 @@ function renderCosts(){
     };
     handlePointerHover(syntheticEvent);
   };
-  const resolvePointerTarget = (event)=>{
-    if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    const clientWidth = canvas.clientWidth || rect.width || canvas.width;
-    const clientHeight = canvas.clientHeight || rect.height || canvas.height;
-    const scaleX = canvas.width / Math.max(1, clientWidth);
-    const scaleY = canvas.height / Math.max(1, clientHeight);
-    const pointerX = (event.clientX - rect.left) * scaleX;
-    const pointerY = (event.clientY - rect.top) * scaleY;
-    const targets = Array.isArray(canvas.__costChartTargets) ? canvas.__costChartTargets : [];
-    for (const target of targets){
-      if (!target || !target.rect) continue;
-      const { x, y, width, height } = target.rect;
-      if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
-        return target;
-      }
-    }
-    return null;
-  };
-
   const attachTooltipHandlers = ()=>{
     if (!canvas) return;
     ensureTooltip();
@@ -12807,7 +12817,7 @@ function renderCosts(){
         x: Number(event.clientX),
         y: Number(event.clientY)
       };
-      const target = resolvePointerTarget(event);
+      const target = resolvePointerTarget(event, { allowProximity: true })?.target || null;
       if (!target || !target.rowRef || typeof window === "undefined") return;
       const focusFn = window.__focusCostDataCenterRow;
       if (typeof focusFn === "function"){
@@ -15767,7 +15777,7 @@ function computeCostModel(){
     maintenanceDataTable,
     cuttingJobsDataTable,
     chartColors: COST_CHART_COLORS,
-    maintenanceSeries: maintenanceSeriesCentral,
+    maintenanceSeries: maintenanceSeriesFromDataTable,
     jobSeries,
     weeklyReports
   };
