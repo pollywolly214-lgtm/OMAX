@@ -18405,6 +18405,9 @@ function renderJobs(){
         gainLoss
       };
 
+      // Keep both shared references in sync so a re-render or background refresh
+      // does not resurrect stale history values (e.g., old actualHours).
+      window.completedCuttingJobs = completedCuttingJobs;
       editingCompletedJobsSet().delete(String(id));
       saveCloudDebounced();
       toast("History updated");
