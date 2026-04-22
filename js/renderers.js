@@ -15152,8 +15152,11 @@ function computeCostModel(){
       const categoryLabel = categoryPath ? `${modeLabel} • ${categoryPath}` : `${modeLabel} • Uncategorized`;
       const maintenanceHours = Number(task?.downtimeHours);
       const maintenanceHrs = Number.isFinite(maintenanceHours) && maintenanceHours > 0 ? maintenanceHours : 1;
-      const partCost = Number(taskMeta?.unitPrice);
-      const partCostValue = Number.isFinite(partCost) && partCost > 0 ? partCost : 0;
+      const settingsPartCost = resolveMaintenanceUnitCostFromSettings(task);
+      const historicalPartCost = Number(taskMeta?.unitPrice);
+      const partCostValue = Number.isFinite(settingsPartCost) && settingsPartCost >= 0
+        ? settingsPartCost
+        : (Number.isFinite(historicalPartCost) && historicalPartCost > 0 ? historicalPartCost : 0);
       const chargeRate = MAINTENANCE_LABOR_RATE_PER_HOUR;
       const laborCost = maintenanceHrs * chargeRate;
       const totalCost = laborCost + partCostValue;
