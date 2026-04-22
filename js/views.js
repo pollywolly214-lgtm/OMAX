@@ -152,7 +152,7 @@ function viewDashboard(){
                   <input type="date" data-efficiency-start-input>
                 </label>
                 <label class="time-efficiency-edit-field">
-                  <span class="time-efficiency-edit-label">Goal / week (hr)</span>
+                  <span class="time-efficiency-edit-label">Goal / week (hr, drives target)</span>
                   <input type="number" min="1" step="0.5" data-efficiency-goal-input>
                 </label>
                 <div class="time-efficiency-edit-actions">
@@ -193,6 +193,7 @@ function viewDashboard(){
             </div>
           </div>
           <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
+          <p class="small muted">How this works: <strong>Target</strong> = your weekly goal prorated by elapsed days in the selected window. <strong>End goal</strong> = full-window goal. So you can be ahead of target today while still behind the full-window goal.</p>
           <p class="small muted">Baseline adapts to your average logged hours per day.</p>
         </div>
       </div>
@@ -2314,7 +2315,7 @@ function viewCosts(model){
                 <input type="date" data-efficiency-start-input>
               </label>
               <label class="time-efficiency-edit-field">
-                <span class="time-efficiency-edit-label">Goal / week (hr)</span>
+                <span class="time-efficiency-edit-label">Goal / week (hr, drives target)</span>
                 <input type="number" min="1" step="0.5" data-efficiency-goal-input>
               </label>
               <div class="time-efficiency-edit-actions">
@@ -2334,17 +2335,18 @@ function viewCosts(model){
             <div class="time-efficiency-metric"><span class="label">Efficiency (to date)</span><span class="value" data-efficiency-percent>—</span></div>
           </div>
           <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
+          <p class="small muted">How this works: <strong>Target</strong> = your weekly goal prorated by elapsed days in the selected window. <strong>End goal</strong> = full-window goal. So you can be ahead of target today while still behind the full-window goal.</p>
           <p class="small muted">Baseline adapts to your average logged hours per day.</p>
         </div>
         <div class="cost-efficiency-calculator" data-efficiency-calc>
           <div class="cost-efficiency-calculator-row">
             <label>
               <span class="label">Charge / hr (temporary)</span>
-              <input type="number" step="1" min="0" value="${esc(String(Number(calculatorDefaults.chargeRate) || 0))}" data-efficiency-calc-charge>
+              <input type="number" step="1" min="0" value="${esc((Number.isFinite(Number(calculatorDefaults.chargeRate)) ? Number(calculatorDefaults.chargeRate) : 0).toFixed(2))}" data-efficiency-calc-charge>
             </label>
             <label>
               <span class="label">Cost / hr (temporary)</span>
-              <input type="number" step="1" min="0" value="${esc(String(Number(calculatorDefaults.costRate) || 0))}" data-efficiency-calc-cost>
+              <input type="number" step="1" min="0" value="${esc((Number.isFinite(Number(calculatorDefaults.costRate)) ? Number(calculatorDefaults.costRate) : 0).toFixed(2))}" data-efficiency-calc-cost>
             </label>
             <label>
               <span class="label">Time range</span>

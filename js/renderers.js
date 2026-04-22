@@ -11768,8 +11768,8 @@ function renderCosts(){
       : null;
     const defaultCharge = Math.max(0, asNumber(draft?.chargeRate, asNumber(defaults.chargeRate, asNumber(chargeInput.value, 0))));
     const defaultCost = Math.max(0, asNumber(draft?.costRate, asNumber(defaults.costRate, asNumber(costInput.value, 0))));
-    chargeInput.value = String(defaultCharge);
-    costInput.value = String(defaultCost);
+    chargeInput.value = defaultCharge.toFixed(2);
+    costInput.value = defaultCost.toFixed(2);
     let activeRange = "1m";
 
     const getRangeStart = (rangeKey)=>{
@@ -11870,8 +11870,8 @@ function renderCosts(){
     }
     if (resetBtn instanceof HTMLElement){
       resetBtn.addEventListener("click", ()=>{
-        chargeInput.value = String(defaultCharge);
-        costInput.value = String(defaultCost);
+        chargeInput.value = defaultCharge.toFixed(2);
+        costInput.value = defaultCost.toFixed(2);
         activeRange = "1m";
         recalc();
         updateRangeButtons();
