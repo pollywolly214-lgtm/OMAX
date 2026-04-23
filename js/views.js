@@ -1209,6 +1209,10 @@ function viewCosts(model){
   const selectedWeeklyKey = selectedWeeklyReport ? String(selectedWeeklyReport.weekStartISO || "") : "";
   if (typeof window !== "undefined") window.weeklyCostReportSelected = selectedWeeklyKey;
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
+  const costTrackingSummary = data.costTrackingSummary || {};
+  const auditSummary = data.auditSummary || {};
+  const cuttingAuditRows = Array.isArray(data.cuttingAuditRows) ? data.cuttingAuditRows : [];
+  const maintenanceAuditRows = Array.isArray(data.maintenanceAuditRows) ? data.maintenanceAuditRows : [];
   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
   const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
   const orderSummary = data.orderRequestSummary || {};
@@ -1922,6 +1926,7 @@ function viewCosts(model){
               <h3>Estimated Cost Trends</h3>
             </div>
             <div class="cost-chart-actions">
+              <button type="button" class="secondary" data-cost-audit-open>Audit calculations</button>
               <div class="cost-chart-range" role="group" aria-label="Select cost trend timeline">
                 <button type="button" data-cost-range="1" aria-pressed="false">1 mo</button>
                 <button type="button" data-cost-range="3" aria-pressed="false">3 mo</button>
@@ -1933,6 +1938,14 @@ function viewCosts(model){
                 <label class="cost-chart-toggle-jobs"><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> <span class="cost-chart-toggle-link" role="link" tabindex="0">Cutting jobs</span></label>
               </div>
             </div>
+          </div>
+          <div class="cost-jobs-summary">
+            <div><span class="label">Total cutting profit</span><span>${esc(costTrackingSummary.totalCuttingProfitLabel || "$0.00")}</span></div>
+            <div><span class="label">Avg cutting profit</span><span>${esc(costTrackingSummary.avgCuttingProfitLabel || "$0.00")}</span></div>
+            <div><span class="label">Total cutting hours</span><span>${esc(costTrackingSummary.totalCuttingHoursLabel || "0 hr")}</span></div>
+            <div><span class="label">Total maintenance cost</span><span>${esc(costTrackingSummary.totalMaintenanceCostLabel || "$0.00")}</span></div>
+            <div><span class="label">Avg maintenance cost</span><span>${esc(costTrackingSummary.avgMaintenanceCostLabel || "$0.00")}</span></div>
+            <div><span class="label">Maintenance cost / cutting hr</span><span>${esc(costTrackingSummary.maintenanceCostPerHourOfCuttingTimeLabel || "—")}</span></div>
           </div>
           <div class="cost-chart-canvas">
             <canvas id="costChart" width="780" height="240"></canvas>
@@ -2356,10 +2369,10 @@ function viewCosts(model){
             <p class="small muted">Baseline adapts to your average logged hours per day.</p>
           </div>
           <div class="cost-jobs-summary">
-            <div><span class="label">Jobs tracked</span><span>—</span></div>
-            <div><span class="label">Total gain / loss</span><span>—</span></div>
-            <div><span class="label">Avg per job</span><span>—</span></div>
-            <div><span class="label">Rolling avg (chart)</span><span>—</span></div>
+            <div><span class="label">Jobs tracked</span><span>${esc(jobSummary.countLabel || "0")}</span></div>
+            <div><span class="label">Total gain / loss</span><span>${esc(jobSummary.totalLabel || "$0.00")}</span></div>
+            <div><span class="label">Avg per job</span><span>${esc(jobSummary.averageLabel || "$0.00")}</span></div>
+            <div><span class="label">Rolling avg (chart)</span><span>${esc(jobSummary.rollingLabel || "$0.00")}</span></div>
           </div>
           <table class="cost-table">
             <thead><tr><th>Job</th><th>Milestone</th><th>Status</th><th>Cost impact</th></tr></thead>
@@ -2381,8 +2394,48 @@ function viewCosts(model){
             </div>
           </div>
         </div>
+    </div>
+  </div>
+  <div class="cost-timeframe-modal" id="costAuditModal" role="dialog" aria-modal="true" aria-labelledby="costAuditModalTitle" aria-hidden="true" hidden>
+    <div class="cost-timeframe-backdrop" data-cost-audit-close tabindex="-1" aria-label="Close cost audit"></div>
+    <div class="cost-timeframe-card" role="document">
+      <button type="button" class="cost-timeframe-close" data-cost-audit-close aria-label="Close cost audit"><span aria-hidden="true">×</span></button>
+      <div class="cost-timeframe-card-body">
+      <header class="cost-timeframe-header">
+        <h3 class="cost-timeframe-title" id="costAuditModalTitle">Cost audit table</h3>
+        <p class="cost-timeframe-range">All values used in chart calculations.</p>
+      </header>
+      <section class="cost-jobs-summary">
+        <div><span class="label">Cutting jobs</span><span>${esc(auditSummary.totalCuttingJobsLabel || "0")}</span></div>
+        <div><span class="label">Maintenance events</span><span>${esc(auditSummary.totalMaintenanceEventsLabel || "0")}</span></div>
+        <div><span class="label">Total cutting profit</span><span>${esc(auditSummary.totalCuttingProfitLabel || "$0.00")}</span></div>
+        <div><span class="label">Avg cutting profit</span><span>${esc(auditSummary.avgCuttingProfitLabel || "$0.00")}</span></div>
+        <div><span class="label">Total cutting hours</span><span>${esc(auditSummary.totalCuttingHoursLabel || "0 hr")}</span></div>
+        <div><span class="label">Total maintenance cost</span><span>${esc(auditSummary.totalMaintenanceCostLabel || "$0.00")}</span></div>
+        <div><span class="label">Avg maintenance cost</span><span>${esc(auditSummary.avgMaintenanceCostLabel || "$0.00")}</span></div>
+        <div><span class="label">Maintenance cost / cutting hr</span><span>${esc(auditSummary.maintenanceCostPerHourLabel || "—")}</span></div>
+      </section>
+      <h4>Cutting jobs</h4>
+      <div class="cost-timeframe-table-wrap">
+        <table class="cost-table">
+          <thead><tr><th>Job</th><th>Date</th><th>Hours</th><th>Charge/hr</th><th>Cut cost/hr</th><th>Total charge</th><th>Total cut cost</th><th>Profit</th></tr></thead>
+          <tbody>
+            ${cuttingAuditRows.map(row => `<tr><td>${esc(row.name)}</td><td>${esc(row.dateLabel)}</td><td>${esc(row.hoursLabel)}</td><td>${esc(row.chargePerHourLabel)}</td><td>${esc(row.costPerHourLabel)}</td><td>${esc(row.revenueLabel)}</td><td>${esc(row.totalCostLabel)}</td><td>${esc(row.profitLabel)}</td></tr>`).join("") || `<tr><td colspan="8" class="cost-table-placeholder">No completed cutting jobs yet.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <h4>Maintenance tasks and charges</h4>
+      <div class="cost-timeframe-table-wrap">
+        <table class="cost-table">
+          <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Time cost (30/hr)</th><th>Part cost</th><th>Total cost</th><th>Source</th></tr></thead>
+          <tbody>
+            ${maintenanceAuditRows.map(row => `<tr><td>${esc(row.taskName)}</td><td>${esc(row.dateLabel)}</td><td>${esc(row.hoursLabel)}</td><td>${esc(row.timeCostLabel)}</td><td>${esc(row.partCostLabel)}</td><td>${esc(row.totalCostLabel)}</td><td>${esc(row.sourceLabel)}</td></tr>`).join("") || `<tr><td colspan="7" class="cost-table-placeholder">No maintenance events yet.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
       </div>
     </div>
+  </div>
   </div>`;
 }
 
