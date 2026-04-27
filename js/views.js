@@ -2699,6 +2699,11 @@ function viewJobs(){
       ? Number(DAILY_HOURS)
       : 8);
   const resolveActualHours = (job, eff = {}) => {
+    const estimateNum = Number(job?.estimateHours);
+    const hasSubHourEstimate = Number.isFinite(estimateNum) && estimateNum > 0 && estimateNum < 1;
+    if (job?.completedAtISO && hasSubHourEstimate){
+      return 1;
+    }
     const actualRaw = job?.actualHours;
     const actualNum = Number(actualRaw);
     if (actualRaw !== undefined && actualRaw !== null && actualRaw !== "" && Number.isFinite(actualNum) && actualNum >= 0){
