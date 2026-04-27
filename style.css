@@ -2135,9 +2135,15 @@ body.modal-open .auth-bar {
   box-shadow: 0 0 0 3px rgba(94, 163, 255, 0.18);
 }
 .job-estimate-label-group .small {
-  margin-bottom: 2px;
+  position: absolute;
+  top: -18px;
+  left: 0;
   font-weight: 500;
   letter-spacing: 0;
+  white-space: nowrap;
+}
+.job-estimate-label-group {
+  position: relative;
 }
 .job-priority-hint {
   margin: 4px 0 0;
