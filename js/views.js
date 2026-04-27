@@ -1937,6 +1937,10 @@ function viewCosts(model){
           <div class="cost-chart-canvas">
             <canvas id="costChart" width="780" height="240"></canvas>
           </div>
+          <div class="small muted" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;">
+            <span style="color:${esc(chartColors.maintenance)};"><strong>Avg maintenance (loss):</strong> ${esc(data.maintenanceAverageLabel || "$0")}</span>
+            <span style="color:${esc(chartColors.jobs)};"><strong>Avg cutting gain/loss:</strong> ${esc(data.cuttingAverageLabel || "$0")}</span>
+          </div>
           ${data.chartNote ? `<p class="small muted">${esc(data.chartNote)}</p>` : `<p class="small muted">Toggle a line to explore how maintenance and job efficiency costs evolve over time.</p>`}
           <div class="cost-window-insight">
             <div class="chart-info">
@@ -2127,7 +2131,8 @@ function viewCosts(model){
               </thead>
               <tbody>
                 ${maintenanceDataTable.map(row => `
-                  <tr data-maintenance-row data-row-task-id="${esc(String(row.taskId || ""))}" data-row-date-iso="${esc(String(row.dateISO || ""))}" data-category-id="${esc(String(row.categoryId || ""))}" data-task-key="${esc(String(row.taskName || "").toLowerCase())}" data-task-name="${esc(row.taskName || "")}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
+                  <tr data-maintenance-row data-task-id="${esc(String(row.taskId || ""))}" data-maintenance-date-iso="${esc(String(row.dateISO || ""))}" data-category-id="${esc(String(row.categoryId || ""))}" data-task-key="${esc(String(row.taskName || "").toLowerCase())}" data-task-name="${esc(row.taskName || "")}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
+
                     <td>${esc(row.counterLabel || "#1")}</td>
                     <td>${esc(row.taskName || "Maintenance task")}</td>
                     <td>${esc(row.maintenanceHrsLabel || "0")}</td>
@@ -2194,7 +2199,7 @@ function viewCosts(model){
                   </thead>
                   <tbody>
                     ${cuttingJobsDataTable.map(row => `
-                      <tr data-cutting-row data-cutting-category-id="${esc(String(row.categoryId || ""))}" data-cutting-job-key="${esc(String(row.name || "").toLowerCase())}" data-cutting-search-text="${esc(`${row.name || ""} ${row.categoryLabel || ""} ${row.materialType || ""} ${row.projectNumber || ""} ${row.completedDateLabel || ""}`.toLowerCase())}">
+                      <tr data-cutting-row data-job-id="${esc(String(row.id || ""))}" data-cutting-date-iso="${esc(String(row.completedDateLabel || ""))}" data-cutting-category-id="${esc(String(row.categoryId || ""))}" data-cutting-job-key="${esc(String(row.name || "").toLowerCase())}" data-cutting-search-text="${esc(`${row.name || ""} ${row.categoryLabel || ""} ${row.materialType || ""} ${row.projectNumber || ""} ${row.completedDateLabel || ""}`.toLowerCase())}">
                         <td>${esc(row.name || "—")}</td>
                         <td>${esc(row.cumulativeCutNumberLabel || "—")}</td>
                         <td>${esc(row.categoryCutNumberLabel || "—")}</td>
