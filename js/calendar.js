@@ -952,8 +952,13 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
 function removeIntervalOccurrenceScopeAcrossInstances(task, dateISO, scope){
   if (!task) return false;
   let changed = false;
+  const selfMeta = { task, mode: task.mode === "asreq" ? "asreq" : "interval" };
+  if (removeCalendarTaskOccurrences(selfMeta, dateISO, scope)){
+    changed = true;
+  }
   visitTaskFamily(task, member => {
     if (!member || member.mode !== "interval" || !isInstanceTask(member)) return;
+    if (String(member.id) === String(task.id)) return;
     const memberMeta = { task: member, mode: "interval" };
     if (removeCalendarTaskOccurrences(memberMeta, dateISO, scope)){
       changed = true;
@@ -1256,9 +1261,12 @@ function showTaskBubble(taskId, anchor, options = {}){
     if (!shouldRemove) return;
     const singleIntervalRemoval = scope === "single"
       && (meta.mode === "interval" || task.mode === "interval");
-    const changed = singleIntervalRemoval
+    let changed = singleIntervalRemoval
       ? removeIntervalOccurrenceScopeAcrossInstances(task, targetKey, "single")
       : removeCalendarTaskOccurrences(meta, targetKey, scope);
+    if (!changed && singleIntervalRemoval){
+      changed = removeCalendarTaskOccurrences(meta, targetKey, "single");
+    }
     if (changed){
       let pausedRepeat = false;
       if (scope === "single" && (meta.mode === "interval" || task.mode === "interval") && typeof window.confirm === "function"){
