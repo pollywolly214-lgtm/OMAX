@@ -16497,6 +16497,24 @@ function computeCostModel(){
     counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1"
   }));
   const purchaseDataTableRows = [];
+  const flattenCentralSpendRows = (weekEntry)=>{
+    const rows = typeof normalizeRows === "function"
+      ? normalizeRows(weekEntry?.rows)
+      : (Array.isArray(weekEntry?.rows) ? weekEntry.rows : []);
+    return rows.map(row => {
+      const dateValue = typeof toIsoDate === "function" ? toIsoDate(row?.date) : String(row?.date || "").slice(0, 10);
+      const purchased = String(row?.purchased || "").trim();
+      const partNumber = String(row?.partNumber || "").trim();
+      const cost = Math.max(0, Number(row?.cost) || 0);
+      const qty = Math.max(0, Number(row?.qty) || 0);
+      const shipping = Math.max(0, Number(row?.shipping) || 0);
+      const tax = Math.max(0, Number(row?.tax) || 0);
+      const total = typeof computeRowTotal === "function"
+        ? Math.max(0, Number(computeRowTotal({ cost, qty, shipping, tax })) || 0)
+        : ((cost * qty) + shipping + tax);
+      return { dateValue, purchased, partNumber, cost, qty, shipping, tax, total };
+    });
+  };
   (Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks : []).forEach(weekEntry => {
     const key = String(weekEntry?.key || "");
     const weekNum = Number(weekEntry?.week);
@@ -16504,15 +16522,15 @@ function computeCostModel(){
     const startISO = String(weekEntry?.startISO || "");
     const endISO = String(weekEntry?.endISO || "");
     const weekLabel = startISO && endISO ? `${weekLabelBase} (${startISO} to ${endISO})` : weekLabelBase;
-    (Array.isArray(weekEntry?.rows) ? weekEntry.rows : []).forEach(rawRow => {
-      const dateISO = toHistoryDateKey(rawRow?.date || "");
-      const purchased = String(rawRow?.purchased || "").trim();
-      const partNumber = String(rawRow?.partNumber || "").trim();
+    flattenCentralSpendRows(weekEntry).forEach(rawRow => {
+      const dateISO = toHistoryDateKey(rawRow?.dateValue || "");
+      const purchased = String(rawRow?.purchased || "");
+      const partNumber = String(rawRow?.partNumber || "");
       const cost = Math.max(0, Number(rawRow?.cost) || 0);
       const qty = Math.max(0, Number(rawRow?.qty) || 0);
       const shipping = Math.max(0, Number(rawRow?.shipping) || 0);
       const tax = Math.max(0, Number(rawRow?.tax) || 0);
-      const total = (cost * qty) + shipping + tax;
+      const total = Math.max(0, Number(rawRow?.total) || 0);
       if (!dateISO && !purchased && !partNumber && total <= 0) return;
       purchaseDataTableRows.push({ dateISO, purchased, partNumber, cost, qty, shipping, tax, total, weekLabel });
     });
