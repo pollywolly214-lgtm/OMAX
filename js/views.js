@@ -2302,7 +2302,6 @@ function viewCosts(model){
             </label>
             <button type="button" class="btn secondary" data-cost-receipt-open>Purchase History</button>
             <button type="button" class="btn secondary" data-cost-weekly-export ${selectedWeeklyReport ? "" : "disabled"}>Export week (Excel)</button>
-            <button type="button" class="btn secondary" data-cost-weekly-print ${selectedWeeklyReport ? "" : "disabled"}>Print week</button>
           </div>
           <div class="cost-weekly-summary">
             <div><span class="label">Cuts total profit</span><span>${esc(selectedWeeklyReport?.totalCutProfitLabel || selectedWeeklyReport?.totalCutCostLabel || "$0")}</span></div>
