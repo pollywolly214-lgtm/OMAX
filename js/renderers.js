@@ -4398,12 +4398,16 @@ function normalizeTimeEfficiencyStart(days, value){
 
 function describeTimeEfficiencyEdit(days){
   if (days === 7){
-    return "Weekly range automatically runs Monday through Sunday.";
+    return "Weekly range automatically runs Monday through Sunday. Goal mode sets whether we compare against average/day or dashboard max/day.";
   }
   if (days > 35){
-    return "Choose the start date you'd like to measure from.";
+    return "Choose the start date you'd like to measure from. Goal mode sets average/day vs max/day target math.";
   }
-  return "Choose a start date. It will snap to the first day of that month.";
+  return "Choose a start date. It will snap to the first day of that month. Goal mode sets average/day vs max/day target math.";
+}
+
+function normalizeTimeEfficiencyGoalMode(value){
+  return value === "average" ? "average" : "maximum";
 }
 
 function refreshTimeEfficiencyWidget(widget){
@@ -4441,6 +4445,30 @@ function refreshTimeEfficiencyWidget(widget){
       zeroLabel: "Goal met",
       fallback: "Goal met"
     });
+  }
+  const targetTooltip = data.goalMode === "average"
+    ? "Target-to-date from your average cut hours/day multiplied by elapsed days in this window."
+    : "Target-to-date from your dashboard max daily-hours goal multiplied by elapsed days in this window.";
+  const goalTooltip = data.goalMode === "average"
+    ? "End goal from your average cut hours/day multiplied by total eligible days in this window."
+    : "End goal from your dashboard max daily-hours goal multiplied by total eligible days in this window.";
+  const gapTargetTooltip = "Actual hours minus target-to-date hours in this window.";
+  const gapGoalTooltip = "Actual hours minus full-window end-goal hours.";
+  if (widget.metrics.target){
+    widget.metrics.target.dataset.efficiencyTooltip = targetTooltip;
+    widget.metrics.target.setAttribute("title", targetTooltip);
+  }
+  if (widget.metrics.goal){
+    widget.metrics.goal.dataset.efficiencyTooltip = goalTooltip;
+    widget.metrics.goal.setAttribute("title", goalTooltip);
+  }
+  if (widget.metrics.diffTarget){
+    widget.metrics.diffTarget.dataset.efficiencyTooltip = gapTargetTooltip;
+    widget.metrics.diffTarget.setAttribute("title", gapTargetTooltip);
+  }
+  if (widget.metrics.diffGoal){
+    widget.metrics.diffGoal.dataset.efficiencyTooltip = gapGoalTooltip;
+    widget.metrics.diffGoal.setAttribute("title", gapGoalTooltip);
   }
   if (widget.root){
     const trend = determineTimeEfficiencyTrend(data);
@@ -4512,6 +4540,10 @@ function updateTimeEfficiencyEditPanel(widget){
       widget.editInput.value = saved;
     }
   }
+  if (widget.goalInput){
+    const modeFromConfig = normalizeTimeEfficiencyGoalMode(window?.appConfig?.timeEfficiencyGoalMode);
+    widget.goalInput.value = modeFromConfig;
+  }
 }
 
 function toggleTimeEfficiencyEditPanel(widget, show){
@@ -4536,8 +4568,22 @@ function toggleTimeEfficiencyEditPanel(widget, show){
 function applyTimeEfficiencyEdit(widget){
   if (!widget) return;
   const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
+  if (widget.goalInput){
+    const selectedMode = normalizeTimeEfficiencyGoalMode(widget.goalInput.value);
+    const currentConfig = (typeof normalizeAppConfig === "function")
+      ? normalizeAppConfig(window.appConfig)
+      : (window.appConfig || {});
+    const nextConfig = {
+      ...currentConfig,
+      timeEfficiencyGoalMode: selectedMode
+    };
+    if (typeof setAppConfig === "function") setAppConfig(nextConfig);
+    else window.appConfig = nextConfig;
+    if (typeof persist === "function") persist();
+  }
   if (!widget.editInput || widget.editInput.disabled){
     toggleTimeEfficiencyEditPanel(widget, false);
+    refreshTimeEfficiencyWidgets();
     return;
   }
   const raw = widget.editInput.value;
@@ -4545,6 +4591,7 @@ function applyTimeEfficiencyEdit(widget){
     widget.customStartByRange?.delete(days);
     toggleTimeEfficiencyEditPanel(widget, false);
     refreshTimeEfficiencyWidget(widget);
+    refreshTimeEfficiencyWidgets();
     return;
   }
   const normalized = normalizeTimeEfficiencyStart(days, raw);
@@ -4559,12 +4606,114 @@ function applyTimeEfficiencyEdit(widget){
   }
   toggleTimeEfficiencyEditPanel(widget, false);
   refreshTimeEfficiencyWidget(widget);
+  refreshTimeEfficiencyWidgets();
+}
+
+let timeEfficiencyTooltipEl = null;
+let activeTimeEfficiencyTooltipTarget = null;
+let timeEfficiencyTooltipViewportBound = false;
+
+function ensureTimeEfficiencyTooltip(){
+  if (timeEfficiencyTooltipEl instanceof HTMLElement && document.body.contains(timeEfficiencyTooltipEl)){
+    return timeEfficiencyTooltipEl;
+  }
+  const el = document.createElement("div");
+  el.className = "time-efficiency-tooltip";
+  el.setAttribute("role", "tooltip");
+  el.hidden = true;
+  document.body.appendChild(el);
+  timeEfficiencyTooltipEl = el;
+  if (!timeEfficiencyTooltipViewportBound){
+    const handleViewportChange = ()=>{
+      if (activeTimeEfficiencyTooltipTarget instanceof HTMLElement){
+        positionTimeEfficiencyTooltip(activeTimeEfficiencyTooltipTarget);
+      }
+    };
+    window.addEventListener("scroll", handleViewportChange, true);
+    window.addEventListener("resize", handleViewportChange);
+    timeEfficiencyTooltipViewportBound = true;
+  }
+  return el;
+}
+
+function hideTimeEfficiencyTooltip(){
+  if (timeEfficiencyTooltipEl instanceof HTMLElement){
+    timeEfficiencyTooltipEl.hidden = true;
+    timeEfficiencyTooltipEl.textContent = "";
+    delete timeEfficiencyTooltipEl.dataset.visible;
+    delete timeEfficiencyTooltipEl.dataset.placement;
+  }
+  if (activeTimeEfficiencyTooltipTarget instanceof HTMLElement){
+    activeTimeEfficiencyTooltipTarget.removeAttribute("aria-describedby");
+  }
+  activeTimeEfficiencyTooltipTarget = null;
+}
+
+function positionTimeEfficiencyTooltip(target){
+  if (!(target instanceof HTMLElement)) return;
+  const tooltip = ensureTimeEfficiencyTooltip();
+  const rect = target.getBoundingClientRect();
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+  const gap = 10;
+  tooltip.hidden = false;
+  tooltip.style.left = "0px";
+  tooltip.style.top = "0px";
+  const tipRect = tooltip.getBoundingClientRect();
+  const centerX = rect.left + (rect.width / 2);
+  let left = centerX - (tipRect.width / 2);
+  left = Math.max(8, Math.min(left, Math.max(8, viewportWidth - tipRect.width - 8)));
+  const hasSpaceAbove = rect.top >= (tipRect.height + gap + 6);
+  const placement = hasSpaceAbove ? "above" : "below";
+  const top = hasSpaceAbove
+    ? (rect.top - tipRect.height - gap)
+    : (rect.bottom + gap);
+  tooltip.style.left = `${Math.round(left)}px`;
+  tooltip.style.top = `${Math.round(Math.max(8, Math.min(top, Math.max(8, viewportHeight - tipRect.height - 8))))}px`;
+  tooltip.dataset.visible = "true";
+  tooltip.dataset.placement = placement;
+}
+
+function showTimeEfficiencyTooltip(target){
+  if (!(target instanceof HTMLElement)) return;
+  const message = String(target.dataset.efficiencyTooltip || target.getAttribute("title") || "").trim();
+  if (!message) return;
+  const tooltip = ensureTimeEfficiencyTooltip();
+  if (!tooltip.id){
+    tooltip.id = "timeEfficiencyTooltip";
+  }
+  activeTimeEfficiencyTooltipTarget = target;
+  target.setAttribute("aria-describedby", tooltip.id);
+  tooltip.textContent = message;
+  positionTimeEfficiencyTooltip(target);
+}
+
+function bindTimeEfficiencyMetricTooltips(root){
+  if (!(root instanceof HTMLElement)) return;
+  const metricEls = Array.from(root.querySelectorAll("[data-efficiency-tooltip]"));
+  metricEls.forEach(el => {
+    if (!(el instanceof HTMLElement) || el.dataset.efficiencyTooltipBound === "1") return;
+    const show = ()=> showTimeEfficiencyTooltip(el);
+    const hide = ()=> hideTimeEfficiencyTooltip();
+    const update = ()=> {
+      if (activeTimeEfficiencyTooltipTarget === el){
+        positionTimeEfficiencyTooltip(el);
+      }
+    };
+    el.addEventListener("mouseenter", show);
+    el.addEventListener("focus", show);
+    el.addEventListener("mouseleave", hide);
+    el.addEventListener("blur", hide);
+    el.addEventListener("mousemove", update);
+    el.dataset.efficiencyTooltipBound = "1";
+  });
 }
 
 function setupTimeEfficiencyWidget(root){
   if (!(root instanceof HTMLElement)) return;
   if (root.dataset.timeEfficiencyBound === "1"){
     refreshTimeEfficiencyWidgets();
+    bindTimeEfficiencyMetricTooltips(root);
     return;
   }
   const toggles = Array.from(root.querySelectorAll("[data-efficiency-range]"));
@@ -4595,7 +4744,8 @@ function setupTimeEfficiencyWidget(root){
     editInput: root.querySelector("[data-efficiency-start-input]"),
     applyBtn: root.querySelector("[data-efficiency-apply]") || root.querySelector("[data-efficiency-save]") || null,
     cancelBtn: root.querySelector("[data-efficiency-cancel]") || null,
-    editNote: root.querySelector("[data-efficiency-edit-note]") || null
+    editNote: root.querySelector("[data-efficiency-edit-note]") || null,
+    goalInput: root.querySelector("[data-efficiency-goal-mode-input]") || null
   };
   toggles.forEach(btn => {
     btn.addEventListener("click", ()=> selectTimeEfficiencyRange(widget, btn));
@@ -4612,6 +4762,7 @@ function setupTimeEfficiencyWidget(root){
   if (widget.cancelBtn){
     widget.cancelBtn.addEventListener("click", ()=> toggleTimeEfficiencyEditPanel(widget, false));
   }
+  bindTimeEfficiencyMetricTooltips(root);
   timeEfficiencyWidgets.push(widget);
   root.dataset.timeEfficiencyBound = "1";
   refreshTimeEfficiencyWidget(widget);
@@ -10649,6 +10800,7 @@ function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
   const previousModal = document.getElementById("costDataCenterModal");
+  const previousEfficiencyModal = document.getElementById("efficiencySnapshotModal");
   const wasDataCenterOpen = Boolean(previousModal && !previousModal.hasAttribute("hidden"));
   let pendingDataCenterScrollTop = null;
   if (previousModal instanceof HTMLElement && wasDataCenterOpen){
@@ -10659,6 +10811,10 @@ function renderCosts(){
   }
   if (previousModal && previousModal.parentElement === document.body){
     previousModal.remove();
+    document.body.classList.remove("cost-data-center-open");
+  }
+  if (previousEfficiencyModal && previousEfficiencyModal.parentElement === document.body){
+    previousEfficiencyModal.remove();
     document.body.classList.remove("cost-data-center-open");
   }
   const existingReceiptModal = document.getElementById("costReceiptModal");
@@ -10708,6 +10864,7 @@ function renderCosts(){
   setupCostTimeframeModal(model);
   setupJobCategoryWindow(model);
   setupWeeklyReportWindow(model);
+  setupEfficiencyCalculator(model);
   setupMaintenanceDataCenterActions({ openImmediately: wasDataCenterOpen });
 
   function focusCalendarAtOccurrence(taskId, dateISO){
@@ -11805,6 +11962,240 @@ function renderCosts(){
     }
   }
 
+  function setupEfficiencyCalculator(currentModel){
+    const openSnapshotBtns = Array.from(content.querySelectorAll("[data-open-efficiency-snapshot]"));
+    const closeSnapshot = ()=>{
+      const modal = document.getElementById("efficiencySnapshotModal");
+      if (!(modal instanceof HTMLElement)) return;
+      modal.hidden = true;
+      document.body.classList.remove("cost-data-center-open");
+      if (typeof window !== "undefined") window.__efficiencySnapshotModalOpen = false;
+      if (typeof window !== "undefined") window.__efficiencyCalculatorDraft = null;
+    };
+    const openSnapshot = ()=>{
+      const modal = document.getElementById("efficiencySnapshotModal");
+      if (!(modal instanceof HTMLElement)) return;
+      modal.hidden = false;
+      if (modal.parentElement !== document.body) document.body.appendChild(modal);
+      document.body.classList.add("cost-data-center-open");
+      if (typeof window !== "undefined") window.__efficiencySnapshotModalOpen = true;
+      const panelEl = modal.querySelector(".cost-data-center-panel");
+      if (panelEl instanceof HTMLElement && panelEl.dataset.efficiencyBubbleBound !== "1"){
+        const stopEvent = (event)=>{
+          event.stopPropagation();
+        };
+        panelEl.addEventListener("click", stopEvent);
+        panelEl.addEventListener("mousedown", stopEvent);
+        panelEl.dataset.efficiencyBubbleBound = "1";
+      }
+    };
+    openSnapshotBtns.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", (event)=>{
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+        openSnapshot();
+      });
+    });
+    const closeSnapshotBtns = Array.from(document.querySelectorAll("[data-close-efficiency-snapshot]"))
+      .filter(btn => !(btn instanceof HTMLElement) ? false : !btn.classList.contains("cost-data-center-backdrop"));
+    closeSnapshotBtns.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", closeSnapshot);
+    });
+
+    const panel = content.querySelector("[data-efficiency-calc]");
+    if (!(panel instanceof HTMLElement)) return;
+    const snapshot = currentModel && currentModel.efficiencySnapshot ? currentModel.efficiencySnapshot : {};
+    const rows = Array.isArray(snapshot.rows) ? snapshot.rows : [];
+    const defaults = snapshot.calculatorDefaults || {};
+    const chargeInput = panel.querySelector("[data-efficiency-calc-charge]");
+    const costInput = panel.querySelector("[data-efficiency-calc-cost]");
+    const resetBtn = panel.querySelector("[data-efficiency-calc-reset]");
+    const rangeSelect = panel.querySelector("[data-efficiency-calc-range-select]");
+    const rangeLabelEl = panel.querySelector("[data-efficiency-calc-range-label]");
+    const totalEl = panel.querySelector("[data-efficiency-calc-total]");
+    const avgEl = panel.querySelector("[data-efficiency-calc-average]");
+    const goJobsBtn = panel.querySelector("[data-go-jobs-history]");
+    if (!(chargeInput instanceof HTMLInputElement) || !(costInput instanceof HTMLInputElement)) return;
+
+    const formatUsd = (value)=> new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: Math.abs(Number(value) || 0) < 1000 ? 2 : 0,
+      maximumFractionDigits: Math.abs(Number(value) || 0) < 1000 ? 2 : 0
+    }).format(Number.isFinite(Number(value)) ? Number(value) : 0);
+    const asNumber = (value, fallback = 0)=>{
+      const num = Number(value);
+      return Number.isFinite(num) ? num : fallback;
+    };
+    const normalizeToTwo = (inputEl, fallback)=>{
+      if (!(inputEl instanceof HTMLInputElement)) return fallback;
+      const raw = asNumber(inputEl.value, fallback);
+      const safe = Math.max(0, raw);
+      const normalized = Math.round(safe * 100) / 100;
+      inputEl.value = normalized.toFixed(2);
+      return normalized;
+    };
+    const draft = (typeof window !== "undefined" && window.__efficiencyCalculatorDraft && typeof window.__efficiencyCalculatorDraft === "object")
+      ? window.__efficiencyCalculatorDraft
+      : null;
+    const defaultCharge = Math.max(0, asNumber(draft?.chargeRate, asNumber(defaults.chargeRate, asNumber(chargeInput.value, 0))));
+    const defaultCost = Math.max(0, asNumber(draft?.costRate, asNumber(defaults.costRate, asNumber(costInput.value, 0))));
+    chargeInput.value = defaultCharge.toFixed(2);
+    costInput.value = defaultCost.toFixed(2);
+    let activeRange = "1m";
+
+    const getRangeStart = (rangeKey)=>{
+      const now = new Date();
+      now.setHours(23, 59, 59, 999);
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      if (rangeKey === "all") return null;
+      if (rangeKey === "ytd"){
+        return new Date(start.getFullYear(), 0, 1);
+      }
+      const monthMap = { "1m": 1, "2m": 2, "3m": 3, "6m": 6, "1y": 12 };
+      const monthsBack = monthMap[rangeKey];
+      if (!monthsBack) return null;
+      return new Date(start.getFullYear(), start.getMonth() - monthsBack, start.getDate());
+    };
+    const parseRowDate = (row)=>{
+      const raw = String(row?.dateLabel || "");
+      if (!raw) return null;
+      const parsed = new Date(`${raw}T00:00:00`);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+    const withinRange = (row, rangeKey)=>{
+      if (rangeKey === "all") return true;
+      const rowDate = parseRowDate(row);
+      if (!(rowDate instanceof Date)) return false;
+      const start = getRangeStart(rangeKey);
+      if (!(start instanceof Date)) return true;
+      return rowDate >= start;
+    };
+    const updateRangeButtons = ()=>{
+      if (rangeSelect instanceof HTMLSelectElement) rangeSelect.value = activeRange;
+      const labels = {
+        "1m": "Range: past 1 month from central data table rows.",
+        "2m": "Range: past 2 months from central data table rows.",
+        "3m": "Range: past 3 months from central data table rows.",
+        "6m": "Range: past 6 months from central data table rows.",
+        "1y": "Range: past 1 year from central data table rows.",
+        ytd: "Range: year to date from central data table rows.",
+        all: "Range: all time from central data table rows."
+      };
+      if (rangeLabelEl instanceof HTMLElement){
+        rangeLabelEl.textContent = labels[activeRange] || labels["1m"];
+      }
+    };
+
+    const recalc = ()=>{
+      const chargeRate = Math.max(0, asNumber(chargeInput.value, defaultCharge));
+      const costRate = Math.max(0, asNumber(costInput.value, defaultCost));
+      if (typeof window !== "undefined"){
+        window.__efficiencyCalculatorDraft = { chargeRate, costRate };
+      }
+      const visibleRows = rows.filter(row => withinRange(row, activeRange));
+      const totals = visibleRows.reduce((acc, row)=>{
+        const hours = Math.max(0, asNumber(row?.hoursValue, 0));
+        const material = Math.max(0, asNumber(row?.materialValue ?? row?.materialCostValue, 0));
+        const labor = hours * costRate;
+        const totalCost = labor + material;
+        acc.rows += 1;
+        acc.net += (hours * (chargeRate - costRate)) - material;
+        acc.cost += totalCost;
+        return acc;
+      }, { rows: 0, net: 0, cost: 0 });
+      if (totalEl) totalEl.textContent = formatUsd(totals.net);
+      if (avgEl) avgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
+      const summaryTotalEl = document.querySelector("[data-efficiency-summary-total]");
+      const summaryAvgEl = document.querySelector("[data-efficiency-summary-average]");
+      const summaryCostEl = document.querySelector("[data-efficiency-summary-cost]");
+      const summaryCostAvgEl = document.querySelector("[data-efficiency-summary-cost-average]");
+      if (summaryTotalEl) summaryTotalEl.textContent = formatUsd(totals.net);
+      if (summaryAvgEl) summaryAvgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
+      if (summaryCostEl) summaryCostEl.textContent = formatUsd(totals.cost);
+      if (summaryCostAvgEl) summaryCostAvgEl.textContent = formatUsd(totals.rows ? (totals.cost / totals.rows) : 0);
+      const tableRows = Array.from(document.querySelectorAll("[data-efficiency-row]"));
+      tableRows.forEach(tr => {
+        const rowId = String(tr.getAttribute("data-efficiency-id") || "");
+        const rowObj = rows.find(row => String(row?.id || "") === rowId) || null;
+        const show = rowObj ? withinRange(rowObj, activeRange) : false;
+        tr.hidden = !show;
+        if (!show) return;
+        const hours = Math.max(0, asNumber(tr.getAttribute("data-efficiency-hours"), asNumber(rowObj?.hoursValue, 0)));
+        const material = Math.max(0, asNumber(tr.getAttribute("data-efficiency-material"), asNumber(rowObj?.materialValue ?? rowObj?.materialCostValue, 0)));
+        const labor = hours * costRate;
+        const totalCost = labor + material;
+        const net = (hours * (chargeRate - costRate)) - material;
+        const laborCell = tr.querySelector("[data-efficiency-labor-cell]");
+        const totalCostCell = tr.querySelector("[data-efficiency-total-cost-cell]");
+        const profitCell = tr.querySelector("[data-efficiency-profit-cell]");
+        if (laborCell) laborCell.textContent = formatUsd(labor);
+        if (totalCostCell) totalCostCell.textContent = formatUsd(totalCost);
+        if (profitCell) profitCell.textContent = formatUsd(net);
+      });
+    };
+
+    chargeInput.addEventListener("input", recalc);
+    costInput.addEventListener("input", recalc);
+    chargeInput.addEventListener("blur", ()=>{ normalizeToTwo(chargeInput, defaultCharge); recalc(); });
+    costInput.addEventListener("blur", ()=>{ normalizeToTwo(costInput, defaultCost); recalc(); });
+    if (rangeSelect instanceof HTMLSelectElement){
+      rangeSelect.addEventListener("change", ()=>{
+        activeRange = String(rangeSelect.value || "1m");
+        updateRangeButtons();
+        recalc();
+      });
+    }
+    if (resetBtn instanceof HTMLElement){
+      resetBtn.addEventListener("click", ()=>{
+        chargeInput.value = defaultCharge.toFixed(2);
+        costInput.value = defaultCost.toFixed(2);
+        activeRange = "1m";
+        recalc();
+        updateRangeButtons();
+      });
+    }
+    if (typeof window !== "undefined"){
+      if (typeof window.__efficiencySnapshotEscHandler === "function"){
+        document.removeEventListener("keydown", window.__efficiencySnapshotEscHandler);
+      }
+      window.__efficiencySnapshotEscHandler = (event)=>{
+        if (event.key !== "Escape") return;
+        const modal = document.getElementById("efficiencySnapshotModal");
+        if (modal instanceof HTMLElement && !modal.hidden) closeSnapshot();
+      };
+      document.addEventListener("keydown", window.__efficiencySnapshotEscHandler);
+    }
+    if (goJobsBtn instanceof HTMLElement){
+      goJobsBtn.addEventListener("click", ()=>{
+        closeSnapshot();
+        goToJobsHistory();
+      });
+    }
+    const openJobBtns = Array.from(document.querySelectorAll("[data-efficiency-open-job]"));
+    openJobBtns.forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.addEventListener("click", ()=>{
+        const id = String(btn.getAttribute("data-efficiency-open-job") || "");
+        if (!id) return;
+        if (typeof window !== "undefined"){
+          window.pendingJobFocus = { type: "jobRow", id };
+        }
+        closeSnapshot();
+        goToJobsHistory();
+      });
+    });
+    updateRangeButtons();
+    recalc();
+    if (typeof window !== "undefined" && window.__efficiencySnapshotModalOpen){
+      openSnapshot();
+    }
+  }
+
   function setupJobCategoryWindow(currentModel){
     const panel = content.querySelector("[data-cost-job-categories]");
     if (!panel) return;
@@ -12233,7 +12624,6 @@ function renderCosts(){
   };
 
   wireJobsHistoryShortcut(content.querySelector("[data-cost-jobs-history]"));
-  wireJobsHistoryShortcut(content.querySelector("[data-cost-cutting-card]"));
   wireJobsHistoryShortcut(content.querySelector(".cost-chart-toggle-link"));
 
   const normalizeHistoryDate = (value)=>{
@@ -14628,6 +15018,8 @@ function computeCostModel(){
       ...report,
       totalCutCostLabel: formatterCurrency(report.totalCutCost, { showPlus: true, decimals: Math.abs(report.totalCutCost) < 1000 ? 2 : 0 }),
       totalMaintenanceCostLabel: formatterCurrency(report.totalMaintenanceCost, { decimals: report.totalMaintenanceCost < 1000 ? 2 : 0 }),
+      totalCutProfitLabel: formatterCurrency(report.totalCutCost, { showPlus: true, decimals: Math.abs(report.totalCutCost) < 1000 ? 2 : 0 }),
+      totalMaintenanceLossLabel: formatterCurrency(-Math.abs(report.totalMaintenanceCost), { showPlus: true, decimals: report.totalMaintenanceCost < 1000 ? 2 : 0 }),
       totalCutHoursLabel: formatHours(report.totalCutHours),
       weekLabel: `${formatDateLabelShort(new Date(report.weekStartISO))} - ${formatDateLabelShort(new Date(report.weekEndISO))}`
     }));
@@ -15170,7 +15562,10 @@ function computeCostModel(){
     const costRate = Number.isFinite(Number(jobNet.cutCostRate)) ? Number(jobNet.cutCostRate) : JOB_BASE_COST_PER_HOUR;
     const materialCost = Number(jobNet.materialCost);
     const materialQty = Number(job?.materialQty);
-    const totalProfit = Number(jobNet.total) || 0;
+    const materialCostValue = Number.isFinite(materialCost) && materialCost >= 0 ? materialCost : 0;
+    const laborCostValue = Math.max(0, hours) * costRate;
+    const totalCostValue = materialCostValue + laborCostValue;
+    const totalProfitValue = (Math.max(0, hours) * chargeRate) - totalCostValue;
     const completedISO = typeof job?.completedAtISO === "string" && job.completedAtISO ? job.completedAtISO : "";
     return {
       id: job?.id != null ? String(job.id) : `completed_job_${index}`,
@@ -15183,17 +15578,106 @@ function computeCostModel(){
       materialType: String(job?.material || "—"),
       materialCostLabel: Number.isFinite(materialCost) ? formatterCurrency(materialCost, { decimals: 2 }) : "—",
       materialQtyLabel: Number.isFinite(materialQty) ? String(materialQty) : "—",
-      totalProfitLabel: formatterCurrency(totalProfit, { decimals: 2 }),
       startDateLabel: job?.startISO || "—",
       dueDateLabel: job?.dueISO || "—",
       completedDateLabel: completedISO ? String(completedISO).slice(0, 10) : "—",
+      completedDateISO: completedISO ? String(completedISO).slice(0, 10) : "",
       projectNumber: String(job?.projectNumber || "—"),
       notes: String(job?.notes || "").trim() || "—",
       priorityLabel: Number.isFinite(Number(job?.priority)) ? String(Math.max(1, Math.floor(Number(job.priority)))) : "—",
       cumulativeCutNumberLabel: `#${Math.max(1, totalCompletedJobs - index)}`,
-      categoryCutNumberLabel: `#${categoryCutCount}`
+      categoryCutNumberLabel: `#${categoryCutCount}`,
+      hoursValue: hours,
+      chargeRateValue: chargeRate,
+      costRateValue: costRate,
+      materialCostValue,
+      laborCostValue,
+      totalCostValue,
+      totalProfitValue,
+      settingsLink: job?.id != null ? `#/settings?jobId=${encodeURIComponent(String(job.id))}` : ""
     };
   });
+
+  const efficiencyRows = cuttingJobsDataTable
+    .filter(row => {
+      const hasDate = typeof row?.completedDateISO === "string" && row.completedDateISO.trim().length > 0;
+      const hasTaskName = typeof row?.name === "string" && row.name.trim().length > 0;
+      const hasSettingsLink = typeof row?.settingsLink === "string" && /^#\/settings\?jobId=/.test(row.settingsLink);
+      return hasDate && hasTaskName && hasSettingsLink;
+    })
+    .sort((a, b) => String(b?.completedDateISO || "").localeCompare(String(a?.completedDateISO || "")))
+    .map((row, index) => ({
+      id: row?.id != null ? String(row.id) : `efficiency_row_${index}`,
+      taskName: row?.name || "Completed task",
+      dateLabel: row?.completedDateISO || "—",
+      hoursLabel: formatHoursValue(Number(row?.hoursValue) || 0),
+      partCostLabel: formatterCurrency(Number(row?.materialCostValue) || 0, { decimals: 2 }),
+      laborCostLabel: formatterCurrency(Number(row?.laborCostValue) || 0, { decimals: 2 }),
+      totalCostLabel: formatterCurrency(Number(row?.totalCostValue) || 0, { decimals: 2 }),
+      totalProfitLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
+      hoursValue: Number(row?.hoursValue) || 0,
+      chargeRateValue: Number(row?.chargeRateValue) || 0,
+      costRateValue: Number(row?.costRateValue) || 0,
+      revenueValue: Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)),
+      netGainLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
+      materialValue: Math.max(0, Number(row?.materialCostValue) || 0),
+      laborValue: Math.max(0, Number(row?.laborCostValue) || 0),
+      totalCostValue: Number(row?.totalCostValue) || 0,
+      totalProfitValue: Number(row?.totalProfitValue) || 0,
+      formulaTitle: "Source: Central data table completed cutting jobs row. Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost.",
+      settingsLink: row?.settingsLink || ""
+    }));
+  const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
+    if (Number.isFinite(row?.hoursValue)) acc.hours += Math.max(0, Number(row.hoursValue));
+    if (Number.isFinite(row?.revenueValue)) acc.revenue += Math.max(0, Number(row.revenueValue));
+    if (Number.isFinite(row?.materialValue)) acc.material += Math.max(0, Number(row.materialValue));
+    if (Number.isFinite(row?.laborValue)) acc.labor += Math.max(0, Number(row.laborValue));
+    if (Number.isFinite(row?.totalCostValue)) acc.cost += Math.max(0, Number(row.totalCostValue));
+    if (Number.isFinite(row?.totalProfitValue)) acc.profit += Number(row.totalProfitValue);
+    return acc;
+  }, { hours: 0, revenue: 0, material: 0, labor: 0, cost: 0, profit: 0 });
+  const efficiencyCount = efficiencyRows.length;
+  const efficiencySnapshot = {
+    countLabel: String(efficiencyCount),
+    totalHoursLabel: formatHoursValue(efficiencyTotals.hours),
+    totalCostLabel: formatterCurrency(efficiencyTotals.cost, { decimals: efficiencyTotals.cost < 1000 ? 2 : 0 }),
+    averageCostLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.cost / efficiencyCount) : 0, { decimals: 2 }),
+    totalProfitLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
+    averageProfitLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
+    totalNetGainLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
+    averageNetGainLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
+    sourceLabel: "Source: central data table completed cutting jobs rows.",
+    formulaLabel: "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost",
+    disclaimerLabel: "Uses central data table values only.",
+    rows: efficiencyRows,
+    emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
+  };
+  const efficiencyMathDetails = `Net gain = (Hours × (Charge Rate - Cost Rate)) - Material. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
+  efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
+  const totalCalcHours = efficiencyTotals.hours > 0 ? efficiencyTotals.hours : 0;
+  const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.revenue / totalCalcHours) : JOB_RATE_PER_HOUR;
+  const defaultCostRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.labor / totalCalcHours) : JOB_BASE_COST_PER_HOUR;
+  efficiencySnapshot.calculatorDefaults = {
+    chargeRate: Number.isFinite(defaultChargeRateForCalc) ? defaultChargeRateForCalc : JOB_RATE_PER_HOUR,
+    costRate: Number.isFinite(defaultCostRateForCalc) ? defaultCostRateForCalc : JOB_BASE_COST_PER_HOUR
+  };
+  const efficiencyDisplayProfit = efficiencyTotals.profit;
+  const efficiencyDisplayAverage = efficiencyCount ? (efficiencyDisplayProfit / efficiencyCount) : 0;
+  const cuttingCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "cuttingJobs") : null;
+  if (cuttingCard){
+    cuttingCard.value = formatterCurrency(efficiencyDisplayProfit, { decimals: 0, showPlus: true });
+    cuttingCard.hint = efficiencyCount
+      ? `Average net gain ${formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true })} across ${efficiencyCount} completed job${efficiencyCount===1?"":"s"} (source: central data table).`
+      : "No cutting jobs logged yet.";
+    cuttingCard.tooltip = `Source: central data table completed rows. ${efficiencyMathDetails}`;
+  }
+  const combinedCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "combinedImpact") : null;
+  if (combinedCard){
+    combinedCard.value = formatterCurrency(efficiencyDisplayProfit - predictedAnnual, { decimals: 0, showPlus: true });
+  }
+  jobSummary.countLabel = efficiencyCount ? `${efficiencyCount} completed` : "0";
+  jobSummary.totalLabel = formatterCurrency(efficiencyDisplayProfit, { decimals: 0, showPlus: true });
+  jobSummary.averageLabel = formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true });
 
   const taskById = new Map();
   [Array.isArray(intervalTasksAll) ? intervalTasksAll : [], Array.isArray(asReqTasksAll) ? asReqTasksAll : []].forEach(list => {
@@ -15707,6 +16191,7 @@ function computeCostModel(){
     orderRequestSummary,
     maintenanceDataTable,
     cuttingJobsDataTable,
+    efficiencySnapshot,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries: maintenanceSeriesCentral,
     jobSeries,
