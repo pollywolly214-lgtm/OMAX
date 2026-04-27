@@ -2100,9 +2100,9 @@ body.modal-open .auth-bar {
 }
 .job-add-form {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 12px 14px;
-  align-items: end;
+  align-items: start;
 }
 .job-add-form > label,
 .job-category-field {
@@ -2113,6 +2113,7 @@ body.modal-open .auth-bar {
   font-weight: 600;
   color: #29405f;
   letter-spacing: 0.01em;
+  justify-content: flex-start;
 }
 .job-add-form input,
 .job-add-form select {
@@ -2139,8 +2140,9 @@ body.modal-open .auth-bar {
   letter-spacing: 0;
 }
 .job-priority-hint {
-  margin: 0;
-  align-self: end;
+  margin: 4px 0 0;
+  min-height: 18px;
+  display: block;
 }
 .job-add-actions {
   grid-column: 1 / -1;
@@ -2148,6 +2150,8 @@ body.modal-open .auth-bar {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+  justify-content: center;
+  padding-top: 2px;
 }
 .job-add-actions button {
   min-height: 40px;

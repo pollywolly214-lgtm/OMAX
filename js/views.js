@@ -3915,8 +3915,8 @@ function viewJobs(){
             <select id="jobPriority" aria-label="Priority">
               ${priorityOptionsMarkup(addJobPriorityDefault)}
             </select>
+            <span class="small muted job-priority-hint">Priority 1 runs before higher numbers.</span>
           </label>
-          <p class="small muted job-priority-hint">Priority 1 runs before higher numbers.</p>
           <label>Charge rate ($/hr)
             <input type="number" id="jobCharge" placeholder="200.00" min="0" step="0.01" value="${esc(addJobDraftField("charge", "200"))}">
           </label>
