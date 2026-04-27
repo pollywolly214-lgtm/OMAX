@@ -1216,6 +1216,7 @@ function viewCosts(model){
   const orderSummary = data.orderRequestSummary || {};
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
   const maintenanceDataTable = Array.isArray(data.maintenanceDataTable) ? data.maintenanceDataTable : [];
+  const purchaseDataTable = Array.isArray(data.purchaseDataTable) ? data.purchaseDataTable : [];
   const maintenanceCategoryOptions = Array.from(new Set(
     maintenanceDataTable
       .map(row => ({ id: String(row?.categoryId || ""), label: String(row?.categoryLabel || "") }))
@@ -1231,6 +1232,7 @@ function viewCosts(model){
       .filter(Boolean)
   )).sort((a, b) => a.localeCompare(b));
   const cuttingJobsDataTable = Array.isArray(data.cuttingJobsDataTable) ? data.cuttingJobsDataTable : [];
+  const hasAnyDataCenterRows = maintenanceDataTable.length || cuttingJobsDataTable.length || purchaseDataTable.length;
   const efficiencySnapshot = data.efficiencySnapshot || {};
   const efficiencyRows = Array.isArray(efficiencySnapshot.rows) ? efficiencySnapshot.rows : [];
   const calculatorDefaults = efficiencySnapshot.calculatorDefaults || {};
@@ -2095,7 +2097,7 @@ function viewCosts(model){
         <div class="block">
           <h3>Maintenance Data Center Table</h3>
           <div class="small muted" style="margin-bottom:8px;">Open as a full-size popup for review and auditing.</div>
-          <button type="button" class="secondary" data-open-data-center ${maintenanceDataTable.length ? "" : "disabled"}>Open Data Center</button>
+          <button type="button" class="secondary" data-open-data-center ${hasAnyDataCenterRows ? "" : "disabled"}>Open Data Center</button>
           <div id="costDataCenterModal" class="cost-data-center-modal" data-data-center-modal hidden aria-hidden="true" tabindex="-1">
             <div class="cost-data-center-backdrop" data-close-data-center></div>
             <div class="cost-data-center-panel" role="dialog" aria-modal="true" aria-labelledby="dataCenterTitle">
@@ -2105,6 +2107,7 @@ function viewCosts(model){
               </div>
               <div class="cost-data-center-tabs" role="tablist" aria-label="Data center tables">
                 <button type="button" class="cost-data-center-tab is-active" data-dc-tab="maintenance" role="tab" aria-selected="true">Maintenance Tasks</button>
+                <button type="button" class="cost-data-center-tab" data-dc-tab="spend" role="tab" aria-selected="false">Total Spend</button>
                 <button type="button" class="cost-data-center-tab" data-dc-tab="cutting" role="tab" aria-selected="false">Completed Cutting Jobs</button>
                 <button type="button" class="cost-data-center-tab" data-dc-tab="efficiency" role="tab" aria-selected="false">Efficiency Metrics</button>
               </div>
@@ -2174,6 +2177,42 @@ function viewCosts(model){
               </tbody>
             </table>
             ` : `<p class="small muted">No completed maintenance occurrences yet.</p>`}
+              </div>
+              <div class="cost-data-center-panel-content" data-dc-panel="spend" hidden>
+                <div class="cost-data-center-search">
+                  <label for="costDataCenterSpendSearch">Search purchases</label>
+                  <input id="costDataCenterSpendSearch" type="search" placeholder="Search date, item, part number, or week" data-spend-search>
+                </div>
+                <table class="cost-table" style="margin-top:10px">
+                  <thead>
+                    <tr>
+                      <th>Purchase date</th>
+                      <th>Purchased item</th>
+                      <th>Week</th>
+                      <th>Cost</th>
+                      <th>Qty</th>
+                      <th>Part #</th>
+                      <th>Shipping</th>
+                      <th>Tax</th>
+                      <th>Total spend</th>
+                    </tr>
+                  </thead>
+                  <tbody data-spend-table-body>
+                    ${purchaseDataTable.length ? purchaseDataTable.map(row => `
+                      <tr data-spend-row data-spend-search-text="${esc(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
+                        <td>${esc(row.dateISO || "—")}</td>
+                        <td>${esc(row.purchased || "—")}</td>
+                        <td>${esc(row.weekLabel || "—")}</td>
+                        <td>${esc(row.costLabel || "$0.00")}</td>
+                        <td>${esc(row.qtyLabel || "0")}</td>
+                        <td>${esc(row.partNumber || "—")}</td>
+                        <td>${esc(row.shippingLabel || "$0.00")}</td>
+                        <td>${esc(row.taxLabel || "$0.00")}</td>
+                        <td>${esc(row.totalLabel || "$0.00")}</td>
+                      </tr>
+                    `).join("") : `<tr><td colspan="9" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>`}
+                  </tbody>
+                </table>
               </div>
               <div class="cost-data-center-panel-content" data-dc-panel="cutting" hidden>
                 <div class="cost-data-center-search">

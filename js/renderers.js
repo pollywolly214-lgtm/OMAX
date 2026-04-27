@@ -11001,7 +11001,7 @@ function renderCosts(){
     const rememberedTab = (typeof window !== "undefined" && typeof window.dataCenterActiveTab === "string")
       ? window.dataCenterActiveTab
       : "maintenance";
-    setActiveTab(rememberedTab === "cutting" ? "cutting" : "maintenance");
+    setActiveTab(["maintenance", "cutting", "spend", "efficiency"].includes(rememberedTab) ? rememberedTab : "maintenance");
     if (modal instanceof HTMLElement){
       document.body.appendChild(modal);
     }
@@ -11280,6 +11280,21 @@ function renderCosts(){
     }
     if (cuttingCategoryFilter instanceof HTMLSelectElement){
       cuttingCategoryFilter.addEventListener("change", applyCuttingFilter);
+    }
+    const spendSearchInput = modal instanceof HTMLElement ? modal.querySelector("[data-spend-search]") : null;
+    const applySpendFilter = ()=>{
+      if (!(modal instanceof HTMLElement)) return;
+      const term = String(spendSearchInput instanceof HTMLInputElement ? spendSearchInput.value : "").trim().toLowerCase();
+      const rows = Array.from(modal.querySelectorAll("[data-spend-row]"));
+      rows.forEach(row => {
+        if (!(row instanceof HTMLElement)) return;
+        const haystack = String(row.getAttribute("data-spend-search-text") || "").toLowerCase();
+        row.hidden = !!term && !haystack.includes(term);
+      });
+    };
+    if (spendSearchInput instanceof HTMLInputElement){
+      spendSearchInput.addEventListener("input", applySpendFilter);
+      applySpendFilter();
     }
     Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-cutting-open-job]")).forEach(btn => {
       if (!(btn instanceof HTMLElement)) return;
@@ -11701,6 +11716,53 @@ function renderCosts(){
       shipping: Number(item?.shipping) || 0,
       tax: Number(item?.tax) || 0
     })).filter(row => row.date || row.purchased || row.cost || row.qty || row.partNumber || row.shipping || row.tax);
+    const renderCentralSpendRows = ()=>{
+      const spendBody = document.querySelector("[data-spend-table-body]");
+      if (!(spendBody instanceof HTMLElement)) return;
+      const getWeekLabel = (entry)=>{
+        const weekNum = Number(entry?.week);
+        const weekText = Number.isFinite(weekNum) && weekNum > 0 ? `Week ${weekNum}` : String(entry?.key || "Week");
+        const startISO = String(entry?.startISO || "");
+        const endISO = String(entry?.endISO || "");
+        return startISO && endISO ? `${weekText} (${startISO} to ${endISO})` : weekText;
+      };
+      const flatRows = [];
+      (window.receiptTrackerWeeks || []).forEach(entry => {
+        const weekLabel = getWeekLabel(entry);
+        normalizeRows(entry?.rows).forEach(row => {
+          const total = computeRowTotal(row);
+          flatRows.push({
+            dateISO: toIsoDate(row.date) || "",
+            purchased: String(row.purchased || ""),
+            partNumber: String(row.partNumber || ""),
+            qty: Number(row.qty) || 0,
+            cost: Number(row.cost) || 0,
+            shipping: Number(row.shipping) || 0,
+            tax: Number(row.tax) || 0,
+            total,
+            weekLabel
+          });
+        });
+      });
+      flatRows.sort((a, b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
+      if (!flatRows.length){
+        spendBody.innerHTML = '<tr><td colspan="9" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>';
+        return;
+      }
+      spendBody.innerHTML = flatRows.map(row => `
+        <tr data-spend-row data-spend-search-text="${escapeHtml(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
+          <td>${escapeHtml(row.dateISO || "—")}</td>
+          <td>${escapeHtml(row.purchased || "—")}</td>
+          <td>${escapeHtml(row.weekLabel || "—")}</td>
+          <td>${formatUsd(row.cost || 0)}</td>
+          <td>${escapeHtml(String(row.qty || 0))}</td>
+          <td>${escapeHtml(row.partNumber || "—")}</td>
+          <td>${formatUsd(row.shipping || 0)}</td>
+          <td>${formatUsd(row.tax || 0)}</td>
+          <td>${formatUsd(row.total || 0)}</td>
+        </tr>
+      `).join("");
+    };
     const getWeekEntry = (key)=>{
       const existing = window.receiptTrackerWeeks.find(entry => String(entry?.key || "") === key);
       if (existing) return existing;
@@ -11818,6 +11880,7 @@ function renderCosts(){
         }));
         entry.rows = normalizeRows(rows);
         persistReceiptState();
+        renderCentralSpendRows();
         return entry;
       };
       const appendEmptyRow = (focusFirst = false)=>{
@@ -11918,17 +11981,20 @@ function renderCosts(){
           recomputeWeekTotals();
           saveWeekRowsFromDom();
           renderRangeTable();
+          renderCentralSpendRows();
         });
         weekRowsBody.addEventListener("input", ()=>{
           recomputeWeekTotals();
           saveWeekRowsFromDom();
           renderRangeTable();
+          renderCentralSpendRows();
         });
       };
       bindRowEvents();
       renderWeekOptions();
       renderWeekRows();
       renderRangeTable();
+      renderCentralSpendRows();
       if (rangeSelect instanceof HTMLSelectElement){
         rangeSelect.value = activeRange;
         rangeSelect.addEventListener("change", ()=>{
@@ -16309,6 +16375,40 @@ function computeCostModel(){
     qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "1",
     counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1"
   }));
+  const purchaseDataTableRows = [];
+  (Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks : []).forEach(weekEntry => {
+    const key = String(weekEntry?.key || "");
+    const weekNum = Number(weekEntry?.week);
+    const weekLabelBase = Number.isFinite(weekNum) && weekNum > 0 ? `Week ${weekNum}` : (key || "Week");
+    const startISO = String(weekEntry?.startISO || "");
+    const endISO = String(weekEntry?.endISO || "");
+    const weekLabel = startISO && endISO ? `${weekLabelBase} (${startISO} to ${endISO})` : weekLabelBase;
+    (Array.isArray(weekEntry?.rows) ? weekEntry.rows : []).forEach(rawRow => {
+      const dateISO = toHistoryDateKey(rawRow?.date || "");
+      const purchased = String(rawRow?.purchased || "").trim();
+      const partNumber = String(rawRow?.partNumber || "").trim();
+      const cost = Math.max(0, Number(rawRow?.cost) || 0);
+      const qty = Math.max(0, Number(rawRow?.qty) || 0);
+      const shipping = Math.max(0, Number(rawRow?.shipping) || 0);
+      const tax = Math.max(0, Number(rawRow?.tax) || 0);
+      const total = (cost * qty) + shipping + tax;
+      if (!dateISO && !purchased && !partNumber && total <= 0) return;
+      purchaseDataTableRows.push({ dateISO, purchased, partNumber, cost, qty, shipping, tax, total, weekLabel });
+    });
+  });
+  purchaseDataTableRows.sort((a, b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
+  const purchaseDataTable = purchaseDataTableRows.map((row, idx) => ({
+    id: `spend_${idx}_${row.dateISO || "undated"}`,
+    dateISO: row.dateISO || "—",
+    purchased: row.purchased || "—",
+    weekLabel: row.weekLabel || "—",
+    costLabel: formatterCurrency(row.cost, { decimals: 2 }),
+    qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "0",
+    partNumber: row.partNumber || "—",
+    shippingLabel: formatterCurrency(row.shipping, { decimals: 2 }),
+    taxLabel: formatterCurrency(row.tax, { decimals: 2 }),
+    totalLabel: formatterCurrency(row.total, { decimals: row.total < 1000 ? 2 : 0 })
+  }));
 
   const maintenanceTrendRows = maintenanceDataTableRows.filter(row => {
     if (!row) return false;
@@ -16379,6 +16479,7 @@ function computeCostModel(){
     cuttingAverageLabel: formatterCurrency(cuttingAverageValue, { showPlus: true, decimals: 0 }),
     orderRequestSummary,
     maintenanceDataTable,
+    purchaseDataTable,
     cuttingJobsDataTable,
     efficiencySnapshot,
     chartColors: COST_CHART_COLORS,
