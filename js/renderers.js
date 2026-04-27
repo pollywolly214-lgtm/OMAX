@@ -12895,9 +12895,12 @@ function renderCosts(){
       const value = Number(item?.value) || 0;
       return sum + Math.abs(value);
     }, 0);
-    const cutCountInWindow = jobRange.points.length;
-    const maintenanceCostPerCutValue = cutCountInWindow > 0
-      ? (maintenanceCostTotalInWindow / cutCountInWindow)
+    const totalCutHoursInWindow = jobRange.points.reduce((sum, item) => {
+      const hours = Number(item?.cutHours) || 0;
+      return sum + (Number.isFinite(hours) && hours > 0 ? hours : 0);
+    }, 0);
+    const maintenanceCostPerCutValue = totalCutHoursInWindow > 0
+      ? (maintenanceCostTotalInWindow / totalCutHoursInWindow)
       : 0;
     const maintenanceCostPerCutLabel = formatCurrencyUnsigned(maintenanceCostPerCutValue);
     const cuttingTotalInWindow = jobRange.points.reduce((sum, item) => sum + (Number(item?.value) || 0), 0);
@@ -12932,7 +12935,7 @@ function renderCosts(){
       maintenanceCostPerCutEl.textContent = maintenanceCostPerCutLabel;
       maintenanceCostPerCutEl.setAttribute(
         "title",
-        `Average maintenance cost per completed cut (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${cutCountInWindow} completed cut${cutCountInWindow === 1 ? "" : "s"}. This is not per cut hour.`
+        `Average maintenance cost per cut hour (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${totalCutHoursInWindow.toFixed(1)} total cut hr.`
       );
     }
     const cuttingAverageEl = content.querySelector("[data-cutting-average-label]");
@@ -13890,6 +13893,7 @@ function computeCostModel(){
       if (!job) continue;
       const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
       const gainLoss = resolveCuttingJobNetTotal(job, eff).total;
+      const cutHours = resolveCuttingJobHours(job, eff);
       const deltaHours = eff && Number.isFinite(eff.deltaHours) ? Number(eff.deltaHours) : 0;
       let date = null;
       if (job.completedAtISO){
@@ -13936,6 +13940,7 @@ function computeCostModel(){
         jobSeriesRaw.push({
           date,
           rawValue: gainLoss,
+          cutHours: Number.isFinite(cutHours) && cutHours > 0 ? cutHours : 0,
           label: job.name || "Job",
           jobId: job.id != null ? String(job.id) : null,
           dateISO: ymd(date)
@@ -13999,6 +14004,7 @@ function computeCostModel(){
       jobSeries.push({
         date: pt.date,
         value: pointValue,
+        cutHours: Number.isFinite(Number(pt.cutHours)) && Number(pt.cutHours) > 0 ? Number(pt.cutHours) : 0,
         count: jobCount,
         detail: `Completed cutting job #${jobCount} recorded ${pointValue >= 0 ? "a gain" : "a loss"} on ${dateLabel}.`,
         jobId: pt.jobId || null,
@@ -15828,8 +15834,11 @@ function computeCostModel(){
     ? (jobSeries.reduce((sum, item) => sum + (Number(item?.value) || 0), 0) / jobSeries.length)
     : 0;
   const maintenanceCostTotalAll = maintenanceSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
-  const cutCountAll = jobSeries.length;
-  const maintenanceCostPerCutValue = cutCountAll > 0 ? (maintenanceCostTotalAll / cutCountAll) : 0;
+  const totalCutHoursAll = jobSeries.reduce((sum, item) => {
+    const hours = Number(item?.cutHours) || 0;
+    return sum + (Number.isFinite(hours) && hours > 0 ? hours : 0);
+  }, 0);
+  const maintenanceCostPerCutValue = totalCutHoursAll > 0 ? (maintenanceCostTotalAll / totalCutHoursAll) : 0;
 
   return {
     summaryCards,
@@ -16132,7 +16141,7 @@ function drawCostChart(canvas, model, show){
   ctx.font = "12px sans-serif";
   ctx.textAlign = "left";
   ctx.fillStyle = model.chartColors.maintenance;
-  ctx.fillText(`Avg maint cost/completed cut (${maintenanceWindowLabel}): ${maintenanceAvgLabel}`, left, 14);
+  ctx.fillText(`Avg maint cost/cut hr (${maintenanceWindowLabel}): ${maintenanceAvgLabel}`, left, 14);
   ctx.fillStyle = model.chartColors.jobs;
   ctx.fillText(`Avg cutting gain/loss: ${cuttingAvgLabel}`, Math.max(left + 250, W * 0.45), 14);
 
