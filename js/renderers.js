@@ -10409,6 +10409,7 @@ function renderSettings(){
 // ---- Costs page ----
 const COST_CHART_COLORS = {
   maintenance: "#0a63c2",
+  spend: "#c62828",
   jobs: "#2e7d32"
 };
 
@@ -10860,6 +10861,9 @@ function renderCosts(){
   const maintenanceSeriesBase = Array.isArray(model.maintenanceSeries)
     ? model.maintenanceSeries.slice()
     : [];
+  const totalSpendSeriesBase = Array.isArray(model.totalSpendSeries)
+    ? model.totalSpendSeries.slice()
+    : [];
   const jobSeriesBase = Array.isArray(model.jobSeries)
     ? model.jobSeries.slice()
     : [];
@@ -11056,6 +11060,23 @@ function renderCosts(){
       }, 2400);
       return true;
     };
+    const highlightSpendDataCenterRow = ({ dateISO = "" } = {})=>{
+      if (!(modal instanceof HTMLElement)) return false;
+      const dateKey = String(dateISO || "").trim();
+      if (!dateKey) return false;
+      const cssEsc = (value)=>{
+        const raw = String(value || "");
+        if (typeof CSS !== "undefined" && CSS && typeof CSS.escape === "function"){
+          return CSS.escape(raw);
+        }
+        return raw.replace(/["\\]/g, "\\$&");
+      };
+      const targetRow = modal.querySelector(`[data-spend-row][data-spend-date-iso="${cssEsc(dateKey)}"]`);
+      if (!(targetRow instanceof HTMLElement)) return false;
+      targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+      pulseRow(targetRow);
+      return true;
+    };
     const pulseRow = (row)=>{
       if (!(row instanceof HTMLElement)) return;
       row.hidden = false;
@@ -11081,11 +11102,14 @@ function renderCosts(){
       const type = String(payload.type || "").toLowerCase();
       if (type === "cutting"){
         setActiveTab("cutting");
+      }else if (type === "spend"){
+        setActiveTab("spend");
       }else{
         setActiveTab("maintenance");
       }
       openDataCenter({ restoreScroll: true });
-      const panelRoot = modal.querySelector(`[data-dc-panel="${type === "cutting" ? "cutting" : "maintenance"}"]`) || modal;
+      const panelKey = type === "cutting" ? "cutting" : (type === "spend" ? "spend" : "maintenance");
+      const panelRoot = modal.querySelector(`[data-dc-panel="${panelKey}"]`) || modal;
       let row = null;
       if (type === "cutting"){
         const jobId = String(payload.jobId || "");
@@ -11093,6 +11117,10 @@ function renderCosts(){
         row = (jobId && panelRoot.querySelector(`[data-cutting-row][data-job-id="${escapeForSelector(jobId)}"]`))
           || (dateISO && panelRoot.querySelector(`[data-cutting-row][data-cutting-date-iso="${escapeForSelector(dateISO)}"]`))
           || panelRoot.querySelector("[data-cutting-row]");
+      }else if (type === "spend"){
+        const dateISO = String(payload.dateISO || "");
+        row = (dateISO && panelRoot.querySelector(`[data-spend-row][data-spend-date-iso="${escapeForSelector(dateISO)}"]`))
+          || panelRoot.querySelector("[data-spend-row]");
       }else{
         const taskId = String(payload.taskId || "");
         const dateISO = String(payload.dateISO || "");
@@ -11750,7 +11778,7 @@ function renderCosts(){
         return;
       }
       spendBody.innerHTML = flatRows.map(row => `
-        <tr data-spend-row data-spend-search-text="${escapeHtml(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
+        <tr data-spend-row data-spend-date-iso="${escapeHtml(String(row.dateISO || ""))}" data-spend-search-text="${escapeHtml(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
           <td>${escapeHtml(row.dateISO || "—")}</td>
           <td>${escapeHtml(row.purchased || "—")}</td>
           <td>${escapeHtml(row.weekLabel || "—")}</td>
@@ -13011,6 +13039,7 @@ function renderCosts(){
 
   const canvas = document.getElementById("costChart");
   const toggleMaint = document.getElementById("toggleCostMaintenance");
+  const toggleSpend = document.getElementById("toggleCostSpend");
   const toggleJobs  = document.getElementById("toggleCostJobs");
   const canvasWrap = content.querySelector(".cost-chart-canvas");
   let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
@@ -13378,6 +13407,7 @@ function renderCosts(){
     };
     const { months } = getChartRangeState();
     const maintenanceRange = filterChartSeriesByRange(maintenanceSeriesBase, months);
+    const spendRange = filterChartSeriesByRange(totalSpendSeriesBase, months);
     const jobRange = filterChartSeriesByRange(jobSeriesBase, months);
     const maintenanceCostTotalInWindow = maintenanceRange.points.reduce((sum, item) => {
       const value = Number(item?.value) || 0;
@@ -13391,26 +13421,37 @@ function renderCosts(){
       ? (maintenanceCostTotalInWindow / totalCutHoursInWindow)
       : 0;
     const maintenanceCostPerCutLabel = formatCurrencyUnsigned(maintenanceCostPerCutValue);
+    const totalSpendInWindow = spendRange.points.reduce((sum, item) => {
+      const value = Number(item?.value) || 0;
+      return sum + Math.abs(value);
+    }, 0);
+    const totalSpendPerCutValue = totalCutHoursInWindow > 0
+      ? (totalSpendInWindow / totalCutHoursInWindow)
+      : 0;
+    const totalSpendPerCutLabel = formatCurrencyUnsigned(totalSpendPerCutValue);
     const cuttingTotalInWindow = jobRange.points.reduce((sum, item) => sum + (Number(item?.value) || 0), 0);
     const cuttingAverageValueInWindow = jobRange.points.length
       ? (cuttingTotalInWindow / jobRange.points.length)
       : 0;
     const cuttingAverageLabelInWindow = formatCurrencySigned(cuttingAverageValueInWindow);
 
-    const domainStarts = [maintenanceRange.domainStart, jobRange.domainStart]
+    const domainStarts = [maintenanceRange.domainStart, spendRange.domainStart, jobRange.domainStart]
       .map(value => Number.isFinite(value) ? Number(value) : null)
       .filter(value => value != null);
-    const domainEnds = [maintenanceRange.domainEnd, jobRange.domainEnd]
+    const domainEnds = [maintenanceRange.domainEnd, spendRange.domainEnd, jobRange.domainEnd]
       .map(value => Number.isFinite(value) ? Number(value) : null)
       .filter(value => value != null);
 
     const chartModel = {
       ...model,
       maintenanceSeries: maintenanceRange.points,
+      totalSpendSeries: spendRange.points,
       jobSeries: jobRange.points,
       maintenanceCostPerCutValue,
       maintenanceCostPerCutLabel,
       maintenanceCostPerCutWindowLabel: rangeLabelMap.get(months) || "selected range",
+      totalSpendPerCutValue,
+      totalSpendPerCutLabel,
       cuttingAverageValue: cuttingAverageValueInWindow,
       cuttingAverageLabel: cuttingAverageLabelInWindow,
       chartDomain: (domainStarts.length && domainEnds.length)
@@ -13426,6 +13467,14 @@ function renderCosts(){
         `Average maintenance cost per cut hour (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${totalCutHoursInWindow.toFixed(1)} total cut hr.`
       );
     }
+    const spendPerCutEl = content.querySelector("[data-spend-cost-per-cut-label]");
+    if (spendPerCutEl){
+      spendPerCutEl.textContent = totalSpendPerCutLabel;
+      spendPerCutEl.setAttribute(
+        "title",
+        `Average total spend per cut hour (${windowLabel}) = total purchase spend ${formatCurrencyUnsigned(totalSpendInWindow)} ÷ ${totalCutHoursInWindow.toFixed(1)} total cut hr.`
+      );
+    }
     const cuttingAverageEl = content.querySelector("[data-cutting-average-label]");
     if (cuttingAverageEl){
       cuttingAverageEl.textContent = cuttingAverageLabelInWindow;
@@ -13439,6 +13488,7 @@ function renderCosts(){
       resizeCostChartCanvas(canvas);
       drawCostChart(canvas, chartModel, {
         maintenance: !toggleMaint || toggleMaint.checked,
+        spend: !toggleSpend || toggleSpend.checked,
         jobs: !toggleJobs || toggleJobs.checked
       });
       refreshTooltipFromLastPointer();
@@ -13471,6 +13521,7 @@ function renderCosts(){
   updateChartRangeButtons();
   redraw();
   toggleMaint?.addEventListener("change", redraw);
+  toggleSpend?.addEventListener("change", redraw);
   toggleJobs?.addEventListener("change", redraw);
 
   notifyCostLayoutContentChanged();
@@ -16409,6 +16460,29 @@ function computeCostModel(){
     taxLabel: formatterCurrency(row.tax, { decimals: 2 }),
     totalLabel: formatterCurrency(row.total, { decimals: row.total < 1000 ? 2 : 0 })
   }));
+  const spendByDate = new Map();
+  purchaseDataTableRows.forEach(row => {
+    const dateISO = toHistoryDateKey(row.dateISO || "");
+    if (!dateISO) return;
+    const prior = spendByDate.get(dateISO) || 0;
+    spendByDate.set(dateISO, prior + Math.max(0, Number(row.total) || 0));
+  });
+  const totalSpendSeries = Array.from(spendByDate.entries())
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    .map(([dateISO, total]) => {
+      const parsedDate = typeof parseDateLocal === "function"
+        ? (parseDateLocal(dateISO) || new Date(dateISO))
+        : new Date(dateISO);
+      const date = (parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime()))
+        ? parsedDate
+        : new Date(dateISO);
+      return {
+        date,
+        dateISO,
+        value: -Math.abs(total),
+        detail: `Purchase spend recorded on ${dateISO} from the centralized spend table.`
+      };
+    });
 
   const maintenanceTrendRows = maintenanceDataTableRows.filter(row => {
     if (!row) return false;
@@ -16455,6 +16529,8 @@ function computeCostModel(){
     return sum + (Number.isFinite(hours) && hours > 0 ? hours : 0);
   }, 0);
   const maintenanceCostPerCutValue = totalCutHoursAll > 0 ? (maintenanceCostTotalAll / totalCutHoursAll) : 0;
+  const totalSpendAll = totalSpendSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
+  const totalSpendPerCutValue = totalCutHoursAll > 0 ? (totalSpendAll / totalCutHoursAll) : 0;
 
   return {
     summaryCards,
@@ -16475,6 +16551,8 @@ function computeCostModel(){
     maintenanceCostPerCutValue,
     maintenanceCostPerCutLabel: formatterCurrency(maintenanceCostPerCutValue, { decimals: maintenanceCostPerCutValue < 1000 ? 2 : 0 }),
     maintenanceCostPerCutWindowLabel: "6 months",
+    totalSpendPerCutValue,
+    totalSpendPerCutLabel: formatterCurrency(totalSpendPerCutValue, { decimals: totalSpendPerCutValue < 1000 ? 2 : 0 }),
     cuttingAverageValue,
     cuttingAverageLabel: formatterCurrency(cuttingAverageValue, { showPlus: true, decimals: 0 }),
     orderRequestSummary,
@@ -16484,6 +16562,7 @@ function computeCostModel(){
     efficiencySnapshot,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries: maintenanceSeriesFromDataTable,
+    totalSpendSeries,
     jobSeries,
     weeklyReports
   };
@@ -16671,6 +16750,9 @@ function drawCostChart(canvas, model, show){
   if (show.maintenance && model.maintenanceSeries.length){
     active.push({ key:"maintenance", color:model.chartColors.maintenance, points:model.maintenanceSeries });
   }
+  if (show.spend && Array.isArray(model.totalSpendSeries) && model.totalSpendSeries.length){
+    active.push({ key:"spend", color:model.chartColors.spend, points:model.totalSpendSeries });
+  }
   if (show.jobs && model.jobSeries.length){
     active.push({ key:"jobs", color:model.chartColors.jobs, points:model.jobSeries });
   }
@@ -16751,8 +16833,10 @@ function drawCostChart(canvas, model, show){
     return formatted;
   };
   const maintenanceAvg = Number(model?.maintenanceCostPerCutValue ?? model?.maintenanceAverageValue) || 0;
+  const spendAvg = Number(model?.totalSpendPerCutValue) || 0;
   const cuttingAvg = Number(model?.cuttingAverageValue) || 0;
   const maintenanceAvgLabel = model?.maintenanceCostPerCutLabel || model?.maintenanceAverageLabel || formatMoney(maintenanceAvg);
+  const spendAvgLabel = model?.totalSpendPerCutLabel || formatMoney(spendAvg);
   const cuttingAvgLabel = model?.cuttingAverageLabel || formatMoney(cuttingAvg);
   const maintenanceWindowLabel = String(model?.maintenanceCostPerCutWindowLabel || "selected range");
 
@@ -16760,8 +16844,10 @@ function drawCostChart(canvas, model, show){
   ctx.textAlign = "left";
   ctx.fillStyle = model.chartColors.maintenance;
   ctx.fillText(`Avg maint cost/cut hr (${maintenanceWindowLabel}): ${maintenanceAvgLabel}`, left, 14);
+  ctx.fillStyle = model.chartColors.spend;
+  ctx.fillText(`Avg total spend/cut hr (${maintenanceWindowLabel}): ${spendAvgLabel}`, left, 30);
   ctx.fillStyle = model.chartColors.jobs;
-  ctx.fillText(`Avg cutting gain/loss: ${cuttingAvgLabel}`, Math.max(left + 250, W * 0.45), 14);
+  ctx.fillText(`Avg cutting gain/loss: ${cuttingAvgLabel}`, Math.max(left + 300, W * 0.5), 14);
 
   if (0 >= yMin && 0 <= yMax){
     const zeroY = Y(0);
@@ -16852,7 +16938,9 @@ function drawCostChart(canvas, model, show){
     ctx.stroke();
 
     ctx.fillStyle = series.color;
-    const datasetLabel = series.key === "maintenance" ? "Maintenance" : "Cutting jobs";
+    const datasetLabel = series.key === "maintenance"
+      ? "Maintenance"
+      : (series.key === "spend" ? "Total spend" : "Cutting jobs");
     points.forEach(pt => {
       const x = X(pt.date.getTime());
       const y = Y(Number(pt.value));
@@ -16867,7 +16955,9 @@ function drawCostChart(canvas, model, show){
       if (!detail){
         detail = series.key === "maintenance"
           ? `Maintenance loss recorded on ${dateLabel}.`
-          : `Cutting job result recorded on ${dateLabel}.`;
+          : (series.key === "spend"
+            ? `Purchase spend recorded on ${dateLabel}.`
+            : `Cutting job result recorded on ${dateLabel}.`);
       }
       hitTargets.push({
         key: series.key,
@@ -16876,7 +16966,9 @@ function drawCostChart(canvas, model, show){
         detail,
         rowRef: series.key === "maintenance"
           ? { type: "maintenance", dateISO: pt.dateISO || ymd(pt.date), taskId: pt.taskId || null }
-          : { type: "cutting", jobId: pt.jobId || null, dateISO: pt.dateISO || ymd(pt.date) },
+          : (series.key === "spend"
+            ? { type: "spend", dateISO: pt.dateISO || ymd(pt.date) }
+            : { type: "cutting", jobId: pt.jobId || null, dateISO: pt.dateISO || ymd(pt.date) }),
         rect: { x: x - 8, y: y - 8, width: 16, height: 16 }
       });
     });
@@ -16885,7 +16977,7 @@ function drawCostChart(canvas, model, show){
     if (last){
       const x = X(last.date.getTime());
       const y = Y(Number(last.value));
-      const label = `${series.key === "maintenance" ? "Maintenance" : "Cutting jobs"} ${formatMoney(Number(last.value))}`;
+      const label = `${series.key === "maintenance" ? "Maintenance" : (series.key === "spend" ? "Total spend" : "Cutting jobs")} ${formatMoney(Number(last.value))}`;
       ctx.font = "12px sans-serif";
       const metrics = ctx.measureText(label);
       const paddingX = 6;
@@ -16912,7 +17004,9 @@ function drawCostChart(canvas, model, show){
       if (!detail){
         detail = series.key === "maintenance"
           ? `Maintenance loss recorded on ${dateLabel}.`
-          : `Cutting job gain/loss recorded on ${dateLabel}.`;
+          : (series.key === "spend"
+            ? `Purchase spend recorded on ${dateLabel}.`
+            : `Cutting job gain/loss recorded on ${dateLabel}.`);
       }
       hitTargets.push({
         key: series.key,
@@ -16921,7 +17015,9 @@ function drawCostChart(canvas, model, show){
         detail,
         rowRef: series.key === "maintenance"
           ? { type: "maintenance", dateISO: last.dateISO || ymd(last.date), taskId: last.taskId || null }
-          : { type: "cutting", jobId: last.jobId || null, dateISO: last.dateISO || ymd(last.date) },
+          : (series.key === "spend"
+            ? { type: "spend", dateISO: last.dateISO || ymd(last.date) }
+            : { type: "cutting", jobId: last.jobId || null, dateISO: last.dateISO || ymd(last.date) }),
         rect: { x: boxX, y: boxY - boxHeight, width: boxWidth, height: boxHeight }
       });
     }

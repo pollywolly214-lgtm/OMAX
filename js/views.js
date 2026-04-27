@@ -1211,7 +1211,7 @@ function viewCosts(model){
   const selectedWeeklyKey = selectedWeeklyReport ? String(selectedWeeklyReport.weekStartISO || "") : "";
   if (typeof window !== "undefined") window.weeklyCostReportSelected = selectedWeeklyKey;
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
-  const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
+  const chartColors = data.chartColors || { maintenance:"#0a63c2", spend:"#c62828", jobs:"#2e7d32" };
   const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
   const orderSummary = data.orderRequestSummary || {};
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
@@ -1944,6 +1944,7 @@ function viewCosts(model){
               </div>
               <div class="cost-chart-toggle">
                 <label><input type="checkbox" id="toggleCostMaintenance" checked> <span class="dot" style="background:${esc(chartColors.maintenance)}"></span> Maintenance</label>
+                <label><input type="checkbox" id="toggleCostSpend" checked> <span class="dot" style="background:${esc(chartColors.spend)}"></span> Total spend</label>
                 <label class="cost-chart-toggle-jobs"><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> <span class="cost-chart-toggle-link" role="link" tabindex="0">Cutting jobs</span></label>
               </div>
             </div>
@@ -1953,6 +1954,7 @@ function viewCosts(model){
           </div>
           <div class="small muted" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;">
             <span style="color:${esc(chartColors.maintenance)};"><strong>Avg maintenance cost/cut hr:</strong> <span data-maint-cost-per-cut-label>${esc(data.maintenanceCostPerCutLabel || "$0")}</span></span>
+            <span style="color:${esc(chartColors.spend)};"><strong>Avg total spend/cut hr:</strong> <span data-spend-cost-per-cut-label>${esc(data.totalSpendPerCutLabel || "$0")}</span></span>
             <span style="color:${esc(chartColors.jobs)};"><strong>Avg cutting gain/loss:</strong> <span data-cutting-average-label>${esc(data.cuttingAverageLabel || "$0")}</span></span>
           </div>
           ${data.chartNote ? `<p class="small muted">${esc(data.chartNote)}</p>` : `<p class="small muted">Toggle a line to explore how maintenance and job efficiency costs evolve over time.</p>`}
@@ -2199,7 +2201,7 @@ function viewCosts(model){
                   </thead>
                   <tbody data-spend-table-body>
                     ${purchaseDataTable.length ? purchaseDataTable.map(row => `
-                      <tr data-spend-row data-spend-search-text="${esc(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
+                      <tr data-spend-row data-spend-date-iso="${esc(String(row.dateISO || ""))}" data-spend-search-text="${esc(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
                         <td>${esc(row.dateISO || "—")}</td>
                         <td>${esc(row.purchased || "—")}</td>
                         <td>${esc(row.weekLabel || "—")}</td>
