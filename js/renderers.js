@@ -11701,13 +11701,12 @@ function renderCosts(){
         window.removeEventListener("afterprint", restore);
       };
       window.addEventListener("afterprint", restore);
-      setTimeout(()=>{
-        try {
-          window.print();
-        } finally {
-          setTimeout(restore, 1200);
-        }
-      }, 40);
+      try {
+        // Keep print invocation synchronous with the click gesture; async delays can be blocked by browsers.
+        window.print();
+      } finally {
+        setTimeout(restore, 1200);
+      }
     };
     if (weeklyPrintBtn instanceof HTMLElement){
       weeklyPrintBtn.addEventListener("click", runWeeklyPrint);
