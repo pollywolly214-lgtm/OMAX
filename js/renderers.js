@@ -11686,6 +11686,33 @@ function renderCosts(){
       });
     }
 
+    const weeklyPrintBtn = panel.querySelector("[data-cost-weekly-print]");
+    const runWeeklyPrint = ()=>{
+      const weeklySection = panel.querySelector("[data-cost-weekly-reports]");
+      if (!(weeklySection instanceof HTMLElement)) return;
+      const previousTitle = document.title;
+      const report = reports.find(item => String(item?.weekStartISO || "") === normalized);
+      const subtitle = report?.weekLabel || report?.weekStartISO || "Weekly report";
+      document.title = `Weekly Cost Report — ${subtitle}`;
+      document.body.classList.add("cost-weekly-printing");
+      const restore = ()=>{
+        document.body.classList.remove("cost-weekly-printing");
+        document.title = previousTitle;
+        window.removeEventListener("afterprint", restore);
+      };
+      window.addEventListener("afterprint", restore);
+      setTimeout(()=>{
+        try {
+          window.print();
+        } finally {
+          setTimeout(restore, 1200);
+        }
+      }, 40);
+    };
+    if (weeklyPrintBtn instanceof HTMLElement){
+      weeklyPrintBtn.addEventListener("click", runWeeklyPrint);
+    }
+
     const formatUsd = (value)=> new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(Number(value)) ? Number(value) : 0);
     const toIsoDate = (value)=> String(value || "").slice(0, 10);
     const parseIsoDate = (iso)=>{
@@ -11828,28 +11855,6 @@ function renderCosts(){
       rows.sort((a,b)=> String(a.date).localeCompare(String(b.date)));
       return rows;
     };
-      const serializeCanvasImage = (canvasEl)=>{
-        if (!(canvasEl instanceof HTMLCanvasElement)) return "";
-        try {
-          return canvasEl.toDataURL("image/png");
-        } catch (_err){
-          return "";
-        }
-      };
-    const buildPrintDocument = ({ title, subtitle, tableHtml, chartDataUrl = "" })=> `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escWorkbookHtml(title || "Print")}</title><style>
-      body{font-family:Arial,sans-serif;padding:20px;color:#1e2b45;}
-      h1{margin:0 0 6px;font-size:22px;} .summary{margin:0 0 14px;color:#4b5a77;}
-      table{border-collapse:collapse;width:100%;margin-bottom:14px;} th,td{border:1px solid #cfd7e6;padding:6px 8px;text-align:left;}
-      th{background:#eef3fb;font-weight:700;} tfoot th{background:#f7f9fd;}
-      .chart-wrap h2{margin:4px 0 8px;font-size:18px;}
-      .chart-wrap img{max-width:100%;border:1px solid #d9e2f2;border-radius:8px;}
-    </style></head><body>
-      <h1>${escWorkbookHtml(title || "Weekly Report")}</h1>
-      <div class="summary">${escWorkbookHtml(subtitle || "")}</div>
-      ${tableHtml || ""}
-      ${chartDataUrl ? `<section class="chart-wrap"><h2>Weekly chart</h2><img src="${chartDataUrl}" alt="Weekly report chart"></section>` : ""}
-      <script>window.addEventListener("load",()=>{window.print();});<\/script>
-    </body></html>`;
     const receiptOpenBtn = panel.querySelector("[data-cost-receipt-open]");
     const modal = document.getElementById("costReceiptModal");
     if (receiptOpenBtn instanceof HTMLElement && modal instanceof HTMLElement){
@@ -11864,7 +11869,6 @@ function renderCosts(){
       const closeControls = Array.from(modal.querySelectorAll("[data-receipt-close]"));
       const exportWeekBtn = modal.querySelector("[data-receipt-export-week]");
       const exportRangeBtn = modal.querySelector("[data-receipt-export-range]");
-      const weeklyPrintBtn = panel.querySelector("[data-cost-weekly-print]");
       let activeWeekKey = String((window.receiptTrackerWeekSelected || weekOptions[0]?.key || ""));
       let activeRange = String(window.receiptTrackerRangeSelected || "1");
       window.receiptTrackerWeekSelected = activeWeekKey;
@@ -12017,54 +12021,6 @@ function renderCosts(){
           window.receiptTrackerWeekSelected = activeWeekKey;
           renderWeekRows();
           renderRangeTable();
-        });
-      }
-      if (weeklyPrintBtn instanceof HTMLElement){
-        weeklyPrintBtn.addEventListener("click", ()=>{
-          const report = reports.find(item => String(item?.weekStartISO || "") === normalized);
-          const weeklySection = panel.querySelector("[data-cost-weekly-reports]");
-          if (!weeklySection) return;
-          const rowsTable = weeklySection.querySelector(".cost-weekly-section .cost-weekly-table-wrap")?.innerHTML || "";
-          const maintenanceTable = weeklySection.querySelectorAll(".cost-weekly-section .cost-weekly-table-wrap");
-          const summaryTables = Array.from(maintenanceTable).map(table => `<table class="cost-table">${table.innerHTML}</table>`).join("");
-          const chartUrl = serializeCanvasImage(panel.querySelector("#weeklyCostChart"));
-          const subtitle = report?.weekLabel || report?.weekStartISO || "Selected week";
-          const printHtml = buildPrintDocument({
-            title: "Weekly Cost Report",
-            subtitle,
-            tableHtml: summaryTables || rowsTable,
-            chartDataUrl: chartUrl
-          });
-          const frame = document.createElement("iframe");
-          frame.style.position = "fixed";
-          frame.style.right = "0";
-          frame.style.bottom = "0";
-          frame.style.width = "0";
-          frame.style.height = "0";
-          frame.style.border = "0";
-          frame.setAttribute("aria-hidden", "true");
-          document.body.appendChild(frame);
-          const frameDoc = frame.contentDocument || frame.contentWindow?.document;
-          if (!frameDoc){
-            frame.remove();
-            return;
-          }
-          let didPrint = false;
-          const triggerPrint = ()=>{
-            if (didPrint) return;
-            didPrint = true;
-            try {
-              frame.contentWindow?.focus();
-              frame.contentWindow?.print();
-            } finally {
-              setTimeout(()=> frame.remove(), 1200);
-            }
-          };
-          frame.onload = triggerPrint;
-          frameDoc.open();
-          frameDoc.write(printHtml);
-          frameDoc.close();
-          setTimeout(triggerPrint, 180);
         });
       }
       if (exportWeekBtn instanceof HTMLElement){

@@ -6038,6 +6038,34 @@ body.job-flow-lock-scroll {
   accent-color: #1d4ed8;
 }
 .job-flow-chart { padding: 14px 16px 18px; }
+
+@media print {
+  body.cost-weekly-printing > * { display: none !important; }
+  body.cost-weekly-printing .dashboard-layout,
+  body.cost-weekly-printing .dashboard-window,
+  body.cost-weekly-printing .block[data-cost-weekly-reports] {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    overflow: visible !important;
+  }
+  body.cost-weekly-printing .cost-weekly-controls {
+    margin-bottom: 10px !important;
+  }
+  body.cost-weekly-printing .cost-weekly-controls button,
+  body.cost-weekly-printing .cost-weekly-controls label {
+    display: none !important;
+  }
+  body.cost-weekly-printing #weeklyCostChart {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border: 1px solid #ccd5e8 !important;
+  }
+}
 .job-flow-group { margin-bottom: 16px; }
 .job-flow-group h5 {
   margin: 0 0 8px;
