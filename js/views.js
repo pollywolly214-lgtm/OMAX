@@ -1941,7 +1941,7 @@ function viewCosts(model){
           </div>
           <div class="small muted" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;">
             <span style="color:${esc(chartColors.maintenance)};"><strong>Avg maintenance cost/cut:</strong> <span data-maint-cost-per-cut-label>${esc(data.maintenanceCostPerCutLabel || "$0")}</span></span>
-            <span style="color:${esc(chartColors.jobs)};"><strong>Avg cutting gain/loss:</strong> ${esc(data.cuttingAverageLabel || "$0")}</span>
+            <span style="color:${esc(chartColors.jobs)};"><strong>Avg cutting gain/loss:</strong> <span data-cutting-average-label>${esc(data.cuttingAverageLabel || "$0")}</span></span>
           </div>
           ${data.chartNote ? `<p class="small muted">${esc(data.chartNote)}</p>` : `<p class="small muted">Toggle a line to explore how maintenance and job efficiency costs evolve over time.</p>`}
           <div class="cost-window-insight">

@@ -12871,6 +12871,23 @@ function renderCosts(){
   const state = getCostLayoutState();
 
   const redraw = ()=>{
+    const formatCurrencyUnsigned = (value)=>{
+      const safe = Math.abs(Number(value) || 0);
+      const decimals = safe < 1000 ? 2 : 0;
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
+      }).format(safe);
+    };
+    const formatCurrencySigned = (value)=>{
+      const safe = Number(value) || 0;
+      const base = formatCurrencyUnsigned(safe);
+      if (safe < 0) return `-${base}`;
+      if (safe > 0) return `+${base}`;
+      return base;
+    };
     const { months } = getChartRangeState();
     const maintenanceRange = filterChartSeriesByRange(maintenanceSeriesBase, months);
     const jobRange = filterChartSeriesByRange(jobSeriesBase, months);
@@ -12882,13 +12899,12 @@ function renderCosts(){
     const maintenanceCostPerCutValue = cutCountInWindow > 0
       ? (maintenanceCostTotalInWindow / cutCountInWindow)
       : 0;
-    const maintenanceCostPerCutDecimals = maintenanceCostPerCutValue < 1000 ? 2 : 0;
-    const maintenanceCostPerCutLabel = new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: maintenanceCostPerCutDecimals,
-      maximumFractionDigits: maintenanceCostPerCutDecimals
-    }).format(Math.abs(maintenanceCostPerCutValue || 0));
+    const maintenanceCostPerCutLabel = formatCurrencyUnsigned(maintenanceCostPerCutValue);
+    const cuttingTotalInWindow = jobRange.points.reduce((sum, item) => sum + (Number(item?.value) || 0), 0);
+    const cuttingAverageValueInWindow = jobRange.points.length
+      ? (cuttingTotalInWindow / jobRange.points.length)
+      : 0;
+    const cuttingAverageLabelInWindow = formatCurrencySigned(cuttingAverageValueInWindow);
 
     const domainStarts = [maintenanceRange.domainStart, jobRange.domainStart]
       .map(value => Number.isFinite(value) ? Number(value) : null)
@@ -12904,14 +12920,28 @@ function renderCosts(){
       maintenanceCostPerCutValue,
       maintenanceCostPerCutLabel,
       maintenanceCostPerCutWindowLabel: rangeLabelMap.get(months) || "selected range",
+      cuttingAverageValue: cuttingAverageValueInWindow,
+      cuttingAverageLabel: cuttingAverageLabelInWindow,
       chartDomain: (domainStarts.length && domainEnds.length)
         ? { start: Math.min(...domainStarts), end: Math.max(...domainEnds) }
         : null
     };
+    const windowLabel = rangeLabelMap.get(months) || String(months || "selected range");
     const maintenanceCostPerCutEl = content.querySelector("[data-maint-cost-per-cut-label]");
     if (maintenanceCostPerCutEl){
       maintenanceCostPerCutEl.textContent = maintenanceCostPerCutLabel;
-      maintenanceCostPerCutEl.setAttribute("title", `Window: ${rangeLabelMap.get(months) || months}`);
+      maintenanceCostPerCutEl.setAttribute(
+        "title",
+        `Average maintenance cost per cut (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${cutCountInWindow} completed cut${cutCountInWindow === 1 ? "" : "s"}.`
+      );
+    }
+    const cuttingAverageEl = content.querySelector("[data-cutting-average-label]");
+    if (cuttingAverageEl){
+      cuttingAverageEl.textContent = cuttingAverageLabelInWindow;
+      cuttingAverageEl.setAttribute(
+        "title",
+        `Average cutting gain/loss (${windowLabel}) = total cutting net ${formatCurrencySigned(cuttingTotalInWindow)} ÷ ${jobRange.points.length} completed job${jobRange.points.length === 1 ? "" : "s"}.`
+      );
     }
     updateChartRangeButtons();
     if (canvas){
