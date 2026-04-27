@@ -11666,7 +11666,6 @@ function renderCosts(){
             <td>${escHtml(item?.partNumber || "—")}</td>
             <td>${escHtml(item?.costLabel || "$0")}</td>
           </tr>`).join("") || '<tr><td colspan="4">No maintenance completed this week.</td></tr>';
-
         const workbookHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
           body{font-family:Arial,sans-serif;padding:16px;color:#1e2b45;} h2,h3{margin:0 0 8px;} .summary{margin:8px 0 14px;}
           table{border-collapse:collapse;width:100%;margin-bottom:18px;} th,td{border:1px solid #cfd7e6;padding:6px 8px;text-align:left;}
@@ -11792,6 +11791,15 @@ function renderCosts(){
       window.receiptTrackerWeeks.push(created);
       return created;
     };
+    const clampDateToWeek = (dateIso, entry)=>{
+      const value = toIsoDate(dateIso);
+      if (!value || !entry) return value;
+      const min = toIsoDate(entry.startISO);
+      const max = toIsoDate(entry.endISO);
+      if (min && value < min) return min;
+      if (max && value > max) return max;
+      return value;
+    };
     const computeRowTotal = (row)=> ((Number(row?.cost) || 0) * (Number(row?.qty) || 0)) + (Number(row?.shipping) || 0) + (Number(row?.tax) || 0);
     const escWorkbookHtml = (value)=> String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
@@ -11876,6 +11884,14 @@ function renderCosts(){
       const closeControls = Array.from(modal.querySelectorAll("[data-receipt-close]"));
       const exportWeekBtn = modal.querySelector("[data-receipt-export-week]");
       const exportRangeBtn = modal.querySelector("[data-receipt-export-range]");
+      const purchasedDatalistId = "receiptPurchasedSuggestions";
+      let purchasedDatalist = modal.querySelector(`#${purchasedDatalistId}`);
+      if (!(purchasedDatalist instanceof HTMLDataListElement)){
+        purchasedDatalist = document.createElement("datalist");
+        purchasedDatalist.id = purchasedDatalistId;
+        modal.appendChild(purchasedDatalist);
+      }
+      const purchaseTemplates = new Map();
       let activeWeekKey = String((window.receiptTrackerWeekSelected || weekOptions[0]?.key || ""));
       let activeRange = String(window.receiptTrackerRangeSelected || "1");
       window.receiptTrackerWeekSelected = activeWeekKey;
@@ -11891,7 +11907,7 @@ function renderCosts(){
         const entry = getWeekEntry(activeWeekKey);
         if (!(weekRowsBody instanceof HTMLElement)) return entry;
         const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).map(tr => ({
-          date: toIsoDate(tr.querySelector('[data-col=\"date\"]')?.value || ""),
+          date: clampDateToWeek(tr.querySelector('[data-col=\"date\"]')?.value || "", entry),
           purchased: String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim(),
           cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
           qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
@@ -11904,13 +11920,57 @@ function renderCosts(){
         renderCentralSpendRows();
         return entry;
       };
+      const rebuildPurchaseTemplates = ()=>{
+        purchaseTemplates.clear();
+        const rows = [];
+        (window.receiptTrackerWeeks || []).forEach(week => {
+          normalizeRows(week?.rows).forEach(row => {
+            const purchased = String(row?.purchased || "").trim();
+            if (!purchased) return;
+            rows.push({
+              purchased,
+              key: purchased.toLowerCase(),
+              date: toIsoDate(row?.date),
+              cost: Number(row?.cost) || 0,
+              qty: Number(row?.qty) || 0,
+              partNumber: String(row?.partNumber || ""),
+              shipping: Number(row?.shipping) || 0,
+              tax: Number(row?.tax) || 0
+            });
+          });
+        });
+        rows.sort((a,b)=> String(b.date || "").localeCompare(String(a.date || "")));
+        rows.forEach(row => {
+          if (!purchaseTemplates.has(row.key)){
+            purchaseTemplates.set(row.key, row);
+          }
+        });
+        if (purchasedDatalist instanceof HTMLDataListElement){
+          purchasedDatalist.innerHTML = Array.from(purchaseTemplates.values())
+            .sort((a,b)=> String(a.purchased).localeCompare(String(b.purchased)))
+            .map(item => `<option value="${escapeHtml(item.purchased)}"></option>`)
+            .join("");
+        }
+      };
+      const applyTemplateToRow = (rowEl, template)=>{
+        if (!(rowEl instanceof HTMLElement) || !template) return;
+        const setField = (col, value)=>{
+          const el = rowEl.querySelector(`[data-col="${col}"]`);
+          if (el instanceof HTMLInputElement) el.value = String(value ?? "");
+        };
+        setField("cost", Number(template.cost || 0));
+        setField("qty", Number(template.qty || 0));
+        setField("partNumber", String(template.partNumber || ""));
+        setField("shipping", Number(template.shipping || 0));
+        setField("tax", Number(template.tax || 0));
+      };
       const appendEmptyRow = (focusFirst = false)=>{
         if (!(weekRowsBody instanceof HTMLElement)) return;
         const tr = document.createElement("tr");
         tr.setAttribute("data-receipt-row", "1");
         tr.innerHTML = `
-          <td><input type="date" data-col="date"></td>
-          <td><input type="text" data-col="purchased" placeholder="Item"></td>
+          <td><input type="date" data-col="date" min="${escapeHtml(String(getWeekEntry(activeWeekKey)?.startISO || ""))}" max="${escapeHtml(String(getWeekEntry(activeWeekKey)?.endISO || ""))}"></td>
+          <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" placeholder="Item"></td>
           <td><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
           <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
@@ -11949,8 +12009,8 @@ function renderCosts(){
         if (!(weekRowsBody instanceof HTMLElement)) return;
         weekRowsBody.innerHTML = rows.map(row => `
           <tr data-receipt-row="1">
-            <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}"></td>
-            <td><input type="text" data-col="purchased" value="${escapeHtml(row.purchased || "")}"></td>
+            <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}" min="${escapeHtml(String(entry.startISO || ""))}" max="${escapeHtml(String(entry.endISO || ""))}"></td>
+            <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" value="${escapeHtml(row.purchased || "")}"></td>
             <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
             <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
@@ -12007,11 +12067,28 @@ function renderCosts(){
         weekRowsBody.addEventListener("input", ()=>{
           recomputeWeekTotals();
           saveWeekRowsFromDom();
+          rebuildPurchaseTemplates();
+          renderRangeTable();
+        });
+        weekRowsBody.addEventListener("change", event => {
+          const input = event.target;
+          if (!(input instanceof HTMLInputElement)) return;
+          if (input.getAttribute("data-col") !== "purchased") return;
+          const key = String(input.value || "").trim().toLowerCase();
+          if (!key) return;
+          const template = purchaseTemplates.get(key);
+          if (!template) return;
+          const row = input.closest("tr[data-receipt-row]");
+          applyTemplateToRow(row, template);
+          recomputeWeekTotals();
+          saveWeekRowsFromDom();
+          rebuildPurchaseTemplates();
           renderRangeTable();
           renderCentralSpendRows();
         });
       };
       bindRowEvents();
+      rebuildPurchaseTemplates();
       renderWeekOptions();
       renderWeekRows();
       renderRangeTable();
