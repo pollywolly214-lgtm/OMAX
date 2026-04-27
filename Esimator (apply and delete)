@@ -1,0 +1,2268 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/js/computations.js b/js/computations.js
+index 34a4ae8ac69278b0f276eef918e8d4048da4a57e..ed3132835708cb85b3dee6cf6267130cd8af24de 100644
+--- a/js/computations.js
++++ b/js/computations.js
+@@ -55,112 +55,129 @@ function computeTimeEfficiency(rangeDays, options = {}){
+     if (startCandidate instanceof Date && !Number.isNaN(startCandidate.getTime())){
+       startDate = new Date(startCandidate.getFullYear(), startCandidate.getMonth(), startCandidate.getDate());
+       startDate.setHours(0,0,0,0);
+       endDate = new Date(startDate);
+       endDate.setDate(startDate.getDate() + (normalizedDays - 1));
+     }
+   }
+ 
+   if (!startDate){
+     startDate = new Date(endDate);
+     startDate.setDate(endDate.getDate() - (normalizedDays - 1));
+   }
+ 
+   if (normalizedDays === 7){
+     const monday = new Date(endDate);
+     const day = monday.getDay();
+     const offset = (day + 6) % 7; // 0 => Monday, 6 => Sunday
+     monday.setDate(monday.getDate() - offset);
+     monday.setHours(0,0,0,0);
+     startDate = monday;
+     endDate = new Date(monday);
+     endDate.setDate(monday.getDate() + 6);
+   }
+ 
+   const map = getDailyCutHoursMap();
+-  const baselineDailyHoursRaw = (typeof getConfiguredDailyHours === "function")
+-    ? Number(getConfiguredDailyHours())
+-    : Number(CUTTING_BASELINE_DAILY_HOURS);
+-  const baselineDailyHours = (Number.isFinite(baselineDailyHoursRaw) && baselineDailyHoursRaw > 0)
+-    ? baselineDailyHoursRaw
++  const configuredGoalMode = (typeof window !== "undefined" && window.appConfig)
++    ? window.appConfig.timeEfficiencyGoalMode
++    : null;
++  const goalModeRaw = options.goalMode || configuredGoalMode || "maximum";
++  const goalMode = goalModeRaw === "average" ? "average" : "maximum";
++  const configuredDailyHoursRaw = (typeof getFixedDailyHours === "function")
++    ? Number(getFixedDailyHours())
++    : ((typeof getConfiguredDailyHours === "function")
++      ? Number(getConfiguredDailyHours())
++      : Number(CUTTING_BASELINE_DAILY_HOURS));
++  const configuredDailyHours = (Number.isFinite(configuredDailyHoursRaw) && configuredDailyHoursRaw > 0)
++    ? configuredDailyHoursRaw
+     : CUTTING_BASELINE_DAILY_HOURS;
+   const averageDailyHours = (typeof getAverageDailyCutHours === "function")
+     ? getAverageDailyCutHours()
+     : null;
++  const goalDailyHours = (goalMode === "average" && Number.isFinite(Number(averageDailyHours)) && Number(averageDailyHours) > 0)
++    ? Number(averageDailyHours)
++    : configuredDailyHours;
++  const goalDailyHoursLabel = `${Math.abs(goalDailyHours - Math.round(goalDailyHours)) < 0.05 ? Math.round(goalDailyHours) : goalDailyHours.toFixed(1)} hr`;
+   let actual = 0;
+   let coverage = 0;
+   const cursor = new Date(startDate);
+   for (let i = 0; i < normalizedDays; i++){
+     const key = ymd(cursor);
+     const record = map.get(key);
+     const value = record ? clampDailyCutHours(record.hours) : 0;
+     if (value > 0){
+       coverage += 1;
+     }
+     actual += value;
+     cursor.setDate(cursor.getDate() + 1);
+   }
+ 
+   const workingDays = inclusiveDayCount(startDate, endDate) || 0;
+-  const baseline = baselineDailyHours * workingDays;
++  const baseline = goalDailyHours * workingDays;
+ 
+   const todayLocal = new Date();
+   todayLocal.setHours(0,0,0,0);
+   let progressDate = new Date(todayLocal.getFullYear(), todayLocal.getMonth(), todayLocal.getDate());
+   progressDate.setHours(0,0,0,0);
+   let elapsedDays = 0;
+   if (progressDate < startDate){
+     elapsedDays = 0;
+     progressDate = new Date(startDate);
+   } else {
+     if (progressDate > endDate){
+       progressDate = new Date(endDate);
+     }
+     elapsedDays = inclusiveDayCount(startDate, progressDate);
+   }
+   if (!Number.isFinite(elapsedDays)) elapsedDays = 0;
+   elapsedDays = Math.max(0, Math.min(normalizedDays, Math.round(elapsedDays)));
+ 
+-  const targetHours = baselineDailyHours * elapsedDays;
++  const targetHours = goalDailyHours * elapsedDays;
+   const differenceToDate = actual - targetHours;
+   const difference = actual - baseline;
+   const percentToDate = targetHours > 0
+     ? (actual / targetHours) * 100
+     : (baseline > 0 ? (actual / baseline) * 100 : null);
+   const percentGoal = baseline > 0 ? (actual / baseline) * 100 : null;
+ 
+   return {
+     windowDays: normalizedDays,
+     actualHours: actual,
+     baselineHours: baseline,
+     differenceHours: difference,
+     targetHoursToDate: targetHours,
+     differenceToDateHours: differenceToDate,
+     targetDaysElapsed: elapsedDays,
+     efficiencyPercent: percentToDate,
+     efficiencyGoalPercent: percentGoal,
+     coverageDays: coverage,
++    goalMode,
++    goalModeLabel: goalMode === "average" ? "Go off average" : "Go off maximum",
++    goalDailyHours,
++    goalSourceLabel: goalMode === "average"
++      ? `Average cut hours/day (${goalDailyHoursLabel})`
++      : `Dashboard goal hours/day (${goalDailyHoursLabel})`,
+     averageDailyHours,
+     startISO: ymd(startDate),
+     endISO: ymd(endDate),
+     description: meta.description,
+     label: meta.label,
+     key: meta.key
+   };
+ }
+ 
+ function syncDailyHoursFromTotals(dateISO){
+   const key = normalizeDateISO(dateISO);
+   if (!key || !Array.isArray(totalHistory) || !totalHistory.length) return false;
+   const sorted = totalHistory
+     .filter(entry => entry && entry.dateISO)
+     .slice()
+     .sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+   const idx = sorted.findIndex(entry => entry && normalizeDateISO(entry.dateISO) === key);
+   if (idx < 0) return false;
+   const current = Number(sorted[idx].hours);
+   if (!Number.isFinite(current)) return false;
+   let prev = null;
+   for (let i = idx - 1; i >= 0; i--){
+     const candidate = Number(sorted[i].hours);
+     if (Number.isFinite(candidate)){
+       prev = candidate;
+diff --git a/js/core.js b/js/core.js
+index ca699a9b417e3601edb221f5774c404cf44ddead..06293dfdc686f643dd59277a8e0caba680e5d4f5 100644
+--- a/js/core.js
++++ b/js/core.js
+@@ -36,51 +36,52 @@ if (typeof window !== "undefined") {
+   window.workspaceRef = null;
+   window.workspaceDocRef = null;
+   window.DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
+ }
+ let CUTTING_BASELINE_WEEKLY_HOURS = 56;
+ let CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS / 7;
+ const TIME_EFFICIENCY_WINDOWS = [
+   { key: "7d", label: "1W", days: 7, description: "Past 7 days" },
+   { key: "30d", label: "1M", days: 30, description: "Past 30 days" },
+   { key: "90d", label: "3M", days: 90, description: "Past 3 months" },
+   { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
+   { key: "365d", label: "1Y", days: 365, description: "Past year" }
+ ];
+ const PREDICTION_AVERAGE_WINDOWS = [
+   { value: 7, label: "1 week" },
+   { value: 14, label: "2 weeks" },
+   { value: 30, label: "1 month" },
+   { value: 60, label: "2 months" },
+   { value: 90, label: "3 months" }
+ ];
+ const DEFAULT_PREDICTION_AVERAGE_WINDOW = 60;
+ const DEFAULT_APP_CONFIG = {
+   excludeWeekends: false,
+   dailyHours: DEFAULT_DAILY_HOURS,
+   predictionMode: "fixed",
+-  averageWindowDays: DEFAULT_PREDICTION_AVERAGE_WINDOW
++  averageWindowDays: DEFAULT_PREDICTION_AVERAGE_WINDOW,
++  timeEfficiencyGoalMode: "maximum"
+ };
+ let appConfig = { ...DEFAULT_APP_CONFIG };
+ 
+ const CLEAR_DATA_PASSWORD = (typeof window !== "undefined" && typeof window.CLEAR_DATA_PASSWORD === "string" && window.CLEAR_DATA_PASSWORD)
+   ? window.CLEAR_DATA_PASSWORD
+   : "reset-omax";
+ if (typeof window !== "undefined") window.CLEAR_DATA_PASSWORD = CLEAR_DATA_PASSWORD;
+ 
+ window.APP_SCHEMA = APP_SCHEMA;
+ 
+ if (typeof window !== "undefined"){
+   window.cloudDashboardLayout = {};
+   window.cloudCostLayout = {};
+   window.cloudJobLayout = {};
+   window.cloudDashboardLayoutLoaded = false;
+   window.cloudCostLayoutLoaded = false;
+   window.cloudJobLayoutLoaded = false;
+   window.CUTTING_BASELINE_WEEKLY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS;
+   window.CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_DAILY_HOURS;
+   window.TIME_EFFICIENCY_WINDOWS = TIME_EFFICIENCY_WINDOWS;
+   window.PREDICTION_AVERAGE_WINDOWS = PREDICTION_AVERAGE_WINDOWS;
+   window.appConfig = appConfig;
+   window.getConfiguredDailyHours = getConfiguredDailyHours;
+   window.getSchedulingDailyHours = getSchedulingDailyHours;
+   window.getFixedDailyHours = getFixedDailyHours;
+@@ -217,50 +218,51 @@ function clampDailyCutHours(value){
+   if (!Number.isFinite(num) || num < 0) return 0;
+   if (num > 24) return 24;
+   return num;
+ }
+ 
+ function normalizePredictionAverageWindow(value){
+   const raw = Number(value);
+   const match = PREDICTION_AVERAGE_WINDOWS.find(option => option.value === raw);
+   return match ? match.value : DEFAULT_PREDICTION_AVERAGE_WINDOW;
+ }
+ 
+ function normalizeAppConfig(config){
+   const normalized = { ...DEFAULT_APP_CONFIG };
+   if (config && typeof config === "object"){
+     if (typeof config.excludeWeekends === "boolean") normalized.excludeWeekends = config.excludeWeekends;
+     if (config.dailyHours != null){
+       const clamped = clampDailyCutHours(config.dailyHours);
+       if (clamped > 0) normalized.dailyHours = clamped;
+     }
+     if (config.predictionMode === "average" || config.predictionMode === "fixed"){
+       normalized.predictionMode = config.predictionMode;
+     } else if (config.dailyHours != null){
+       normalized.predictionMode = "fixed";
+     }
+     normalized.averageWindowDays = normalizePredictionAverageWindow(config.averageWindowDays);
++    normalized.timeEfficiencyGoalMode = config.timeEfficiencyGoalMode === "average" ? "average" : "maximum";
+   }
+   return normalized;
+ }
+ 
+ function shouldExcludeWeekends(){
+   try {
+     return Boolean((appConfig || {}).excludeWeekends);
+   } catch (_err){
+     return false;
+   }
+ }
+ 
+ function getFixedDailyHours(){
+   const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
+   const fixedHoursRaw = clampDailyCutHours(cfg.dailyHours);
+   return fixedHoursRaw > 0 ? fixedHoursRaw : DEFAULT_DAILY_HOURS;
+ }
+ 
+ function getConfiguredDailyHours(){
+   return getPredictionHoursSummary().effectiveHours;
+ }
+ 
+ function getSchedulingDailyHours(){
+   return getFixedDailyHours();
+ }
+diff --git a/js/renderers.js b/js/renderers.js
+index 1974cc6026f01cab7d9d71f4cbec48f5d9a3f80f..59599b8da83d667723dcb8fde31c2c21a2a736f0 100644
+--- a/js/renderers.js
++++ b/js/renderers.js
+@@ -4376,94 +4376,122 @@ function parseTimeEfficiencyInput(value){
+   return dt;
+ }
+ 
+ function formatISODate(date){
+   if (typeof ymd === "function") return ymd(date);
+   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+   const y = date.getFullYear();
+   const m = `${date.getMonth() + 1}`.padStart(2, "0");
+   const d = `${date.getDate()}`.padStart(2, "0");
+   return `${y}-${m}-${d}`;
+ }
+ 
+ function normalizeTimeEfficiencyStart(days, value){
+   const base = parseTimeEfficiencyInput(value);
+   if (!base) return null;
+   const normalizedDays = Math.max(1, Math.round(Number(days) || 0));
+   if (normalizedDays > 7 && normalizedDays <= 35){
+     base.setDate(1);
+   }
+   base.setHours(0,0,0,0);
+   return formatISODate(base);
+ }
+ 
+ function describeTimeEfficiencyEdit(days){
+   if (days === 7){
+-    return "Weekly range automatically runs Monday through Sunday.";
++    return "Weekly range automatically runs Monday through Sunday. Goal mode sets whether we compare against average/day or dashboard max/day.";
+   }
+   if (days > 35){
+-    return "Choose the start date you'd like to measure from.";
++    return "Choose the start date you'd like to measure from. Goal mode sets average/day vs max/day target math.";
+   }
+-  return "Choose a start date. It will snap to the first day of that month.";
++  return "Choose a start date. It will snap to the first day of that month. Goal mode sets average/day vs max/day target math.";
++}
++
++function normalizeTimeEfficiencyGoalMode(value){
++  return value === "average" ? "average" : "maximum";
+ }
+ 
+ function refreshTimeEfficiencyWidget(widget){
+   if (!widget || !widget.root || !widget.root.isConnected) return;
+   const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
+   const options = {};
+   const savedStart = widget.customStartByRange?.get(days);
+   if (savedStart){
+     options.startDate = savedStart;
+   }
+   const data = typeof computeTimeEfficiency === "function"
+     ? computeTimeEfficiency(days, options)
+     : null;
+   if (!data) return;
+   if (widget.metrics.actual) widget.metrics.actual.textContent = formatTimeEfficiencyHours(data.actualHours);
+   if (widget.metrics.target) widget.metrics.target.textContent = formatTimeEfficiencyHours(data.targetHoursToDate);
+   if (widget.metrics.goal) widget.metrics.goal.textContent = formatTimeEfficiencyHours(data.baselineHours);
+   if (widget.metrics.average){
+     const avg = data.averageDailyHours;
+     widget.metrics.average.textContent = (avg != null && Number.isFinite(avg) && avg > 0)
+       ? formatTimeEfficiencyHours(avg)
+       : "—";
+   }
+   if (widget.metrics.percent) widget.metrics.percent.textContent = formatTimeEfficiencyPercent(data.efficiencyPercent);
+   if (widget.metrics.percentGoal) widget.metrics.percentGoal.textContent = formatTimeEfficiencyPercent(data.efficiencyGoalPercent);
+   if (widget.metrics.diffTarget){
+     const zeroLabel = data && Number(data.targetHoursToDate) > 0 ? "On target" : "No target yet";
+     widget.metrics.diffTarget.textContent = formatTimeEfficiencyDiff(data.differenceToDateHours, {
+       zeroLabel,
+       fallback: zeroLabel
+     });
+   }
+   if (widget.metrics.diffGoal){
+     widget.metrics.diffGoal.textContent = formatTimeEfficiencyDiff(data.differenceHours, {
+       zeroLabel: "Goal met",
+       fallback: "Goal met"
+     });
+   }
++  const targetTooltip = data.goalMode === "average"
++    ? "Target-to-date from your average cut hours/day multiplied by elapsed days in this window."
++    : "Target-to-date from your dashboard max daily-hours goal multiplied by elapsed days in this window.";
++  const goalTooltip = data.goalMode === "average"
++    ? "End goal from your average cut hours/day multiplied by total eligible days in this window."
++    : "End goal from your dashboard max daily-hours goal multiplied by total eligible days in this window.";
++  const gapTargetTooltip = "Actual hours minus target-to-date hours in this window.";
++  const gapGoalTooltip = "Actual hours minus full-window end-goal hours.";
++  if (widget.metrics.target){
++    widget.metrics.target.dataset.efficiencyTooltip = targetTooltip;
++    widget.metrics.target.setAttribute("title", targetTooltip);
++  }
++  if (widget.metrics.goal){
++    widget.metrics.goal.dataset.efficiencyTooltip = goalTooltip;
++    widget.metrics.goal.setAttribute("title", goalTooltip);
++  }
++  if (widget.metrics.diffTarget){
++    widget.metrics.diffTarget.dataset.efficiencyTooltip = gapTargetTooltip;
++    widget.metrics.diffTarget.setAttribute("title", gapTargetTooltip);
++  }
++  if (widget.metrics.diffGoal){
++    widget.metrics.diffGoal.dataset.efficiencyTooltip = gapGoalTooltip;
++    widget.metrics.diffGoal.setAttribute("title", gapGoalTooltip);
++  }
+   if (widget.root){
+     const trend = determineTimeEfficiencyTrend(data);
+     if (trend){
+       widget.root.dataset.efficiencyTrend = trend;
+     } else {
+       delete widget.root.dataset.efficiencyTrend;
+     }
+     widget.currentTrend = trend || "";
+   }
+   if (widget.labelEl){
+     const labelText = widget.selectedLabel
+       || (data && data.description)
+       || widget.labelEl.textContent
+       || "";
+     widget.labelEl.textContent = labelText;
+   }
+   widget.lastStartISO = data.startISO || null;
+   widget.lastEndISO = data.endISO || null;
+   if (widget.editPanel && !widget.editPanel.hidden){
+     updateTimeEfficiencyEditPanel(widget);
+   }
+ }
+ 
+ function refreshTimeEfficiencyWidgets(){
+   for (let i = timeEfficiencyWidgets.length - 1; i >= 0; i--){
+@@ -4490,150 +4518,273 @@ function selectTimeEfficiencyRange(widget, button){
+     }
+   });
+   if (widget.editPanel && !widget.editPanel.hidden){
+     updateTimeEfficiencyEditPanel(widget);
+   }
+   refreshTimeEfficiencyWidget(widget);
+ }
+ 
+ function updateTimeEfficiencyEditPanel(widget){
+   if (!widget || !widget.editPanel) return;
+   const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
+   if (widget.editNote){
+     widget.editNote.textContent = describeTimeEfficiencyEdit(days);
+   }
+   if (widget.editInput){
+     widget.editInput.classList.remove("has-error");
+     if (days === 7){
+       widget.editInput.value = "";
+       widget.editInput.disabled = true;
+     } else {
+       const saved = widget.customStartByRange?.get(days) || widget.lastStartISO || "";
+       widget.editInput.disabled = false;
+       widget.editInput.value = saved;
+     }
+   }
++  if (widget.goalInput){
++    const modeFromConfig = normalizeTimeEfficiencyGoalMode(window?.appConfig?.timeEfficiencyGoalMode);
++    widget.goalInput.value = modeFromConfig;
++  }
+ }
+ 
+ function toggleTimeEfficiencyEditPanel(widget, show){
+   if (!widget || !widget.editPanel) return;
+   const shouldShow = show == null ? widget.editPanel.hidden : Boolean(show);
+   if (!shouldShow){
+     widget.editPanel.hidden = true;
+     widget.root?.classList.remove("time-efficiency-edit-open");
+     if (widget.editInput){
+       widget.editInput.classList.remove("has-error");
+     }
+     return;
+   }
+   widget.editPanel.hidden = false;
+   widget.root?.classList.add("time-efficiency-edit-open");
+   updateTimeEfficiencyEditPanel(widget);
+   if (widget.editInput && !widget.editInput.disabled){
+     widget.editInput.focus({ preventScroll: true });
+   }
+ }
+ 
+ function applyTimeEfficiencyEdit(widget){
+   if (!widget) return;
+   const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
++  if (widget.goalInput){
++    const selectedMode = normalizeTimeEfficiencyGoalMode(widget.goalInput.value);
++    const currentConfig = (typeof normalizeAppConfig === "function")
++      ? normalizeAppConfig(window.appConfig)
++      : (window.appConfig || {});
++    const nextConfig = {
++      ...currentConfig,
++      timeEfficiencyGoalMode: selectedMode
++    };
++    if (typeof setAppConfig === "function") setAppConfig(nextConfig);
++    else window.appConfig = nextConfig;
++    if (typeof persist === "function") persist();
++  }
+   if (!widget.editInput || widget.editInput.disabled){
+     toggleTimeEfficiencyEditPanel(widget, false);
++    refreshTimeEfficiencyWidgets();
+     return;
+   }
+   const raw = widget.editInput.value;
+   if (!raw){
+     widget.customStartByRange?.delete(days);
+     toggleTimeEfficiencyEditPanel(widget, false);
+     refreshTimeEfficiencyWidget(widget);
++    refreshTimeEfficiencyWidgets();
+     return;
+   }
+   const normalized = normalizeTimeEfficiencyStart(days, raw);
+   if (!normalized){
+     widget.editInput.classList.add("has-error");
+     return;
+   }
+   widget.editInput.classList.remove("has-error");
+   widget.editInput.value = normalized;
+   if (widget.customStartByRange){
+     widget.customStartByRange.set(days, normalized);
+   }
+   toggleTimeEfficiencyEditPanel(widget, false);
+   refreshTimeEfficiencyWidget(widget);
++  refreshTimeEfficiencyWidgets();
++}
++
++let timeEfficiencyTooltipEl = null;
++let activeTimeEfficiencyTooltipTarget = null;
++let timeEfficiencyTooltipViewportBound = false;
++
++function ensureTimeEfficiencyTooltip(){
++  if (timeEfficiencyTooltipEl instanceof HTMLElement && document.body.contains(timeEfficiencyTooltipEl)){
++    return timeEfficiencyTooltipEl;
++  }
++  const el = document.createElement("div");
++  el.className = "time-efficiency-tooltip";
++  el.setAttribute("role", "tooltip");
++  el.hidden = true;
++  document.body.appendChild(el);
++  timeEfficiencyTooltipEl = el;
++  if (!timeEfficiencyTooltipViewportBound){
++    const handleViewportChange = ()=>{
++      if (activeTimeEfficiencyTooltipTarget instanceof HTMLElement){
++        positionTimeEfficiencyTooltip(activeTimeEfficiencyTooltipTarget);
++      }
++    };
++    window.addEventListener("scroll", handleViewportChange, true);
++    window.addEventListener("resize", handleViewportChange);
++    timeEfficiencyTooltipViewportBound = true;
++  }
++  return el;
++}
++
++function hideTimeEfficiencyTooltip(){
++  if (timeEfficiencyTooltipEl instanceof HTMLElement){
++    timeEfficiencyTooltipEl.hidden = true;
++    timeEfficiencyTooltipEl.textContent = "";
++    delete timeEfficiencyTooltipEl.dataset.visible;
++    delete timeEfficiencyTooltipEl.dataset.placement;
++  }
++  if (activeTimeEfficiencyTooltipTarget instanceof HTMLElement){
++    activeTimeEfficiencyTooltipTarget.removeAttribute("aria-describedby");
++  }
++  activeTimeEfficiencyTooltipTarget = null;
++}
++
++function positionTimeEfficiencyTooltip(target){
++  if (!(target instanceof HTMLElement)) return;
++  const tooltip = ensureTimeEfficiencyTooltip();
++  const rect = target.getBoundingClientRect();
++  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
++  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
++  const gap = 10;
++  tooltip.hidden = false;
++  tooltip.style.left = "0px";
++  tooltip.style.top = "0px";
++  const tipRect = tooltip.getBoundingClientRect();
++  const centerX = rect.left + (rect.width / 2);
++  let left = centerX - (tipRect.width / 2);
++  left = Math.max(8, Math.min(left, Math.max(8, viewportWidth - tipRect.width - 8)));
++  const hasSpaceAbove = rect.top >= (tipRect.height + gap + 6);
++  const placement = hasSpaceAbove ? "above" : "below";
++  const top = hasSpaceAbove
++    ? (rect.top - tipRect.height - gap)
++    : (rect.bottom + gap);
++  tooltip.style.left = `${Math.round(left)}px`;
++  tooltip.style.top = `${Math.round(Math.max(8, Math.min(top, Math.max(8, viewportHeight - tipRect.height - 8))))}px`;
++  tooltip.dataset.visible = "true";
++  tooltip.dataset.placement = placement;
++}
++
++function showTimeEfficiencyTooltip(target){
++  if (!(target instanceof HTMLElement)) return;
++  const message = String(target.dataset.efficiencyTooltip || target.getAttribute("title") || "").trim();
++  if (!message) return;
++  const tooltip = ensureTimeEfficiencyTooltip();
++  if (!tooltip.id){
++    tooltip.id = "timeEfficiencyTooltip";
++  }
++  activeTimeEfficiencyTooltipTarget = target;
++  target.setAttribute("aria-describedby", tooltip.id);
++  tooltip.textContent = message;
++  positionTimeEfficiencyTooltip(target);
++}
++
++function bindTimeEfficiencyMetricTooltips(root){
++  if (!(root instanceof HTMLElement)) return;
++  const metricEls = Array.from(root.querySelectorAll("[data-efficiency-tooltip]"));
++  metricEls.forEach(el => {
++    if (!(el instanceof HTMLElement) || el.dataset.efficiencyTooltipBound === "1") return;
++    const show = ()=> showTimeEfficiencyTooltip(el);
++    const hide = ()=> hideTimeEfficiencyTooltip();
++    const update = ()=> {
++      if (activeTimeEfficiencyTooltipTarget === el){
++        positionTimeEfficiencyTooltip(el);
++      }
++    };
++    el.addEventListener("mouseenter", show);
++    el.addEventListener("focus", show);
++    el.addEventListener("mouseleave", hide);
++    el.addEventListener("blur", hide);
++    el.addEventListener("mousemove", update);
++    el.dataset.efficiencyTooltipBound = "1";
++  });
+ }
+ 
+ function setupTimeEfficiencyWidget(root){
+   if (!(root instanceof HTMLElement)) return;
+   if (root.dataset.timeEfficiencyBound === "1"){
+     refreshTimeEfficiencyWidgets();
++    bindTimeEfficiencyMetricTooltips(root);
+     return;
+   }
+   const toggles = Array.from(root.querySelectorAll("[data-efficiency-range]"));
+   if (!toggles.length) return;
+   const metrics = {
+     actual: root.querySelector("[data-efficiency-actual]"),
+     target: root.querySelector("[data-efficiency-target]"),
+     goal: root.querySelector("[data-efficiency-goal]"),
+     average: root.querySelector("[data-efficiency-average]"),
+     percent: root.querySelector("[data-efficiency-percent]"),
+     percentGoal: root.querySelector("[data-efficiency-goal-percent]"),
+     diffTarget: root.querySelector("[data-efficiency-gap-target]"),
+     diffGoal: root.querySelector("[data-efficiency-gap-goal]")
+   };
+   const labelEl = root.querySelector("[data-efficiency-window-label]");
+   const firstToggle = toggles[0];
+   const widget = {
+     root,
+     toggles,
+     metrics,
+     labelEl,
+     currentDays: Number(firstToggle?.dataset?.efficiencyRange) || 7,
+     defaultDays: Number(firstToggle?.dataset?.efficiencyRange) || 7,
+     selectedLabel: firstToggle?.dataset?.efficiencyRangeLabel || (labelEl ? labelEl.textContent : ""),
+     customStartByRange: sharedTimeEfficiencyStarts,
+     editBtn: root.querySelector("[data-efficiency-edit]"),
+     editPanel: root.querySelector("[data-efficiency-edit-panel]"),
+     editInput: root.querySelector("[data-efficiency-start-input]"),
+     applyBtn: root.querySelector("[data-efficiency-apply]") || root.querySelector("[data-efficiency-save]") || null,
+     cancelBtn: root.querySelector("[data-efficiency-cancel]") || null,
+-    editNote: root.querySelector("[data-efficiency-edit-note]") || null
++    editNote: root.querySelector("[data-efficiency-edit-note]") || null,
++    goalInput: root.querySelector("[data-efficiency-goal-mode-input]") || null
+   };
+   toggles.forEach(btn => {
+     btn.addEventListener("click", ()=> selectTimeEfficiencyRange(widget, btn));
+   });
+   if (widget.editBtn){
+     widget.editBtn.addEventListener("click", ()=> {
+       const shouldShow = widget.editPanel ? widget.editPanel.hidden : true;
+       toggleTimeEfficiencyEditPanel(widget, shouldShow);
+     });
+   }
+   if (widget.applyBtn){
+     widget.applyBtn.addEventListener("click", ()=> applyTimeEfficiencyEdit(widget));
+   }
+   if (widget.cancelBtn){
+     widget.cancelBtn.addEventListener("click", ()=> toggleTimeEfficiencyEditPanel(widget, false));
+   }
++  bindTimeEfficiencyMetricTooltips(root);
+   timeEfficiencyWidgets.push(widget);
+   root.dataset.timeEfficiencyBound = "1";
+   refreshTimeEfficiencyWidget(widget);
+ }
+ 
+ function updateCalendarHoursControls(){
+   const editBtn = document.getElementById("calendarHoursEditBtn");
+   const cancelBtn = document.getElementById("calendarHoursCancelBtn");
+   const editing = typeof isCalendarHoursEditing === "function" ? Boolean(isCalendarHoursEditing()) : false;
+   if (editBtn){
+     editBtn.textContent = editing ? "Save Hours" : "Edit Hours";
+     editBtn.dataset.mode = editing ? "save" : "edit";
+   }
+   if (cancelBtn){
+     cancelBtn.hidden = !editing;
+   }
+ }
+ 
+ function setupCalendarHoursControls(){
+   const editBtn = document.getElementById("calendarHoursEditBtn");
+   const cancelBtn = document.getElementById("calendarHoursCancelBtn");
+   if (editBtn && !editBtn.dataset.bound){
+     editBtn.dataset.bound = "1";
+     editBtn.addEventListener("click", ()=>{
+       const editing = typeof isCalendarHoursEditing === "function" ? Boolean(isCalendarHoursEditing()) : false;
+@@ -10549,109 +10700,115 @@ function setupForecastBreakdownModal(){
+   });
+ 
+   modal.addEventListener("click", (event)=>{
+     const target = event.target;
+     if (target && target.hasAttribute && target.hasAttribute("data-forecast-close")){
+       event.preventDefault();
+       closeModal();
+     }
+   });
+ 
+   const closeButtons = modal.querySelectorAll("[data-forecast-close]");
+   closeButtons.forEach(btn => {
+     btn.addEventListener("keydown", event => {
+       if (event.key === "Enter" || event.key === " "){
+         event.preventDefault();
+         closeModal();
+       }
+     });
+   });
+ }
+ 
+ function renderCosts(){
+   const content = document.getElementById("content");
+   if (!content) return;
+   const previousModal = document.getElementById("costDataCenterModal");
++  const previousEfficiencyModal = document.getElementById("efficiencySnapshotModal");
+   const wasDataCenterOpen = Boolean(previousModal && !previousModal.hasAttribute("hidden"));
+   let pendingDataCenterScrollTop = null;
+   if (previousModal instanceof HTMLElement && wasDataCenterOpen){
+     const previousPanel = previousModal.querySelector(".cost-data-center-panel");
+     if (previousPanel instanceof HTMLElement){
+       pendingDataCenterScrollTop = previousPanel.scrollTop;
+     }
+   }
+   if (previousModal && previousModal.parentElement === document.body){
+     previousModal.remove();
+     document.body.classList.remove("cost-data-center-open");
+   }
++  if (previousEfficiencyModal && previousEfficiencyModal.parentElement === document.body){
++    previousEfficiencyModal.remove();
++    document.body.classList.remove("cost-data-center-open");
++  }
+   const existingReceiptModal = document.getElementById("costReceiptModal");
+   if (existingReceiptModal instanceof HTMLElement){
+     window.costPurchaseHistoryModalOpen = !existingReceiptModal.hasAttribute("hidden");
+   }
+ 
+   const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+ 
+   const model = computeCostModel();
+   const maintenanceSeriesBase = Array.isArray(model.maintenanceSeries)
+     ? model.maintenanceSeries.slice()
+     : [];
+   const jobSeriesBase = Array.isArray(model.jobSeries)
+     ? model.jobSeries.slice()
+     : [];
+   content.innerHTML = viewCosts(model);
+   const pendingWeeklyScrollState = (typeof window !== "undefined" && window.__costWeeklyScrollState && typeof window.__costWeeklyScrollState === "object")
+     ? { ...window.__costWeeklyScrollState }
+     : null;
+   if (pendingWeeklyScrollState && typeof window !== "undefined"){
+     window.__costWeeklyScrollState = null;
+     const restoreWeeklyScroll = ()=>{
+       const weeklyPanel = content.querySelector("[data-cost-weekly-reports]");
+       if (weeklyPanel instanceof HTMLElement){
+         weeklyPanel.scrollTop = Number.isFinite(Number(pendingWeeklyScrollState.panelScrollTop))
+           ? Number(pendingWeeklyScrollState.panelScrollTop)
+           : 0;
+       }
+       if (Number.isFinite(Number(pendingWeeklyScrollState.pageScrollY))){
+         window.scrollTo(0, Number(pendingWeeklyScrollState.pageScrollY));
+       }
+     };
+     if (typeof window.requestAnimationFrame === "function"){
+       window.requestAnimationFrame(restoreWeeklyScroll);
+     } else {
+       setTimeout(restoreWeeklyScroll, 0);
+     }
+   }
+   setAppSettingsContext("costs");
+   wireCostSettingsMenu();
+ 
+   setupCostInfoPanel();
+   setupForecastBreakdownModal();
+   setupTimeEfficiencyWidget(document.getElementById("costTimeEfficiency"));
+   refreshTimeEfficiencyWidgets();
+   setupCostTimeframeModal(model);
+   setupJobCategoryWindow(model);
+   setupWeeklyReportWindow(model);
++  setupEfficiencyCalculator(model);
+   setupMaintenanceDataCenterActions({ openImmediately: wasDataCenterOpen });
+ 
+   function focusCalendarAtOccurrence(taskId, dateISO){
+     const dueISO = String(dateISO || "");
+     const parsedDue = dueISO && typeof parseDateLocal === "function"
+       ? parseDateLocal(dueISO)
+       : (dueISO ? new Date(dueISO) : null);
+     if (parsedDue instanceof Date && !Number.isNaN(parsedDue.getTime())){
+       parsedDue.setHours(0,0,0,0);
+       const today = new Date();
+       today.setHours(0,0,0,0);
+       const diffMonths = (parsedDue.getFullYear() - today.getFullYear()) * 12 + (parsedDue.getMonth() - today.getMonth());
+       window.__calendarMonthOffset = Math.min(12, Math.max(-12, Math.round(diffMonths)));
+     }
+     if (typeof hideBubble === "function") hideBubble();
+     location.hash = "#/";
+     const runFocus = ()=>{
+       if (typeof renderCalendar === "function") renderCalendar();
+       const months = document.getElementById("months");
+       const cell = dueISO ? months?.querySelector(`[data-date-iso="${dueISO}"]`) : null;
+       if (!cell) return false;
+       cell.scrollIntoView({ behavior: "smooth", block: "center" });
+       if (typeof highlightCalendarDayCell === "function"){
+         highlightCalendarDayCell(cell);
+       }
+@@ -11629,50 +11786,284 @@ function renderCosts(){
+         modal.setAttribute("aria-hidden", "false");
+         document.body.classList.add("cost-receipt-modal-open");
+         window.costPurchaseHistoryModalOpen = true;
+       };
+       const closeModal = ()=>{
+         saveWeekRowsFromDom();
+         modal.hidden = true;
+         modal.setAttribute("aria-hidden", "true");
+         document.body.classList.remove("cost-receipt-modal-open");
+         window.costPurchaseHistoryModalOpen = false;
+       };
+       receiptOpenBtn.addEventListener("click", openModal);
+       closeControls.forEach(control => control.addEventListener("click", closeModal));
+       if (window.costPurchaseHistoryModalOpen){
+         openModal();
+       }
+     }
+ 
+     const canvas = panel.querySelector("#weeklyCostChart");
+     const reportForChart = reports.find(item => String(item?.weekStartISO || "") === normalized) || null;
+     if (canvas instanceof HTMLCanvasElement){
+       drawWeeklyReportChart(canvas, reportForChart);
+     }
+   }
+ 
++  function setupEfficiencyCalculator(currentModel){
++    const openSnapshotBtns = Array.from(content.querySelectorAll("[data-open-efficiency-snapshot]"));
++    const closeSnapshot = ()=>{
++      const modal = document.getElementById("efficiencySnapshotModal");
++      if (!(modal instanceof HTMLElement)) return;
++      modal.hidden = true;
++      document.body.classList.remove("cost-data-center-open");
++      if (typeof window !== "undefined") window.__efficiencySnapshotModalOpen = false;
++      if (typeof window !== "undefined") window.__efficiencyCalculatorDraft = null;
++    };
++    const openSnapshot = ()=>{
++      const modal = document.getElementById("efficiencySnapshotModal");
++      if (!(modal instanceof HTMLElement)) return;
++      modal.hidden = false;
++      if (modal.parentElement !== document.body) document.body.appendChild(modal);
++      document.body.classList.add("cost-data-center-open");
++      if (typeof window !== "undefined") window.__efficiencySnapshotModalOpen = true;
++      const panelEl = modal.querySelector(".cost-data-center-panel");
++      if (panelEl instanceof HTMLElement && panelEl.dataset.efficiencyBubbleBound !== "1"){
++        const stopEvent = (event)=>{
++          event.stopPropagation();
++        };
++        panelEl.addEventListener("click", stopEvent);
++        panelEl.addEventListener("mousedown", stopEvent);
++        panelEl.dataset.efficiencyBubbleBound = "1";
++      }
++    };
++    openSnapshotBtns.forEach(btn => {
++      if (!(btn instanceof HTMLElement)) return;
++      btn.addEventListener("click", (event)=>{
++        event.preventDefault();
++        event.stopPropagation();
++        if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
++        openSnapshot();
++      });
++    });
++    const closeSnapshotBtns = Array.from(document.querySelectorAll("[data-close-efficiency-snapshot]"))
++      .filter(btn => !(btn instanceof HTMLElement) ? false : !btn.classList.contains("cost-data-center-backdrop"));
++    closeSnapshotBtns.forEach(btn => {
++      if (!(btn instanceof HTMLElement)) return;
++      btn.addEventListener("click", closeSnapshot);
++    });
++
++    const panel = content.querySelector("[data-efficiency-calc]");
++    if (!(panel instanceof HTMLElement)) return;
++    const snapshot = currentModel && currentModel.efficiencySnapshot ? currentModel.efficiencySnapshot : {};
++    const rows = Array.isArray(snapshot.rows) ? snapshot.rows : [];
++    const defaults = snapshot.calculatorDefaults || {};
++    const chargeInput = panel.querySelector("[data-efficiency-calc-charge]");
++    const costInput = panel.querySelector("[data-efficiency-calc-cost]");
++    const resetBtn = panel.querySelector("[data-efficiency-calc-reset]");
++    const rangeSelect = panel.querySelector("[data-efficiency-calc-range-select]");
++    const rangeLabelEl = panel.querySelector("[data-efficiency-calc-range-label]");
++    const totalEl = panel.querySelector("[data-efficiency-calc-total]");
++    const avgEl = panel.querySelector("[data-efficiency-calc-average]");
++    const goJobsBtn = panel.querySelector("[data-go-jobs-history]");
++    if (!(chargeInput instanceof HTMLInputElement) || !(costInput instanceof HTMLInputElement)) return;
++
++    const formatUsd = (value)=> new Intl.NumberFormat(undefined, {
++      style: "currency",
++      currency: "USD",
++      minimumFractionDigits: Math.abs(Number(value) || 0) < 1000 ? 2 : 0,
++      maximumFractionDigits: Math.abs(Number(value) || 0) < 1000 ? 2 : 0
++    }).format(Number.isFinite(Number(value)) ? Number(value) : 0);
++    const asNumber = (value, fallback = 0)=>{
++      const num = Number(value);
++      return Number.isFinite(num) ? num : fallback;
++    };
++    const normalizeToTwo = (inputEl, fallback)=>{
++      if (!(inputEl instanceof HTMLInputElement)) return fallback;
++      const raw = asNumber(inputEl.value, fallback);
++      const safe = Math.max(0, raw);
++      const normalized = Math.round(safe * 100) / 100;
++      inputEl.value = normalized.toFixed(2);
++      return normalized;
++    };
++    const draft = (typeof window !== "undefined" && window.__efficiencyCalculatorDraft && typeof window.__efficiencyCalculatorDraft === "object")
++      ? window.__efficiencyCalculatorDraft
++      : null;
++    const defaultCharge = Math.max(0, asNumber(draft?.chargeRate, asNumber(defaults.chargeRate, asNumber(chargeInput.value, 0))));
++    const defaultCost = Math.max(0, asNumber(draft?.costRate, asNumber(defaults.costRate, asNumber(costInput.value, 0))));
++    chargeInput.value = defaultCharge.toFixed(2);
++    costInput.value = defaultCost.toFixed(2);
++    let activeRange = "1m";
++
++    const getRangeStart = (rangeKey)=>{
++      const now = new Date();
++      now.setHours(23, 59, 59, 999);
++      const start = new Date(now);
++      start.setHours(0, 0, 0, 0);
++      if (rangeKey === "all") return null;
++      if (rangeKey === "ytd"){
++        return new Date(start.getFullYear(), 0, 1);
++      }
++      const monthMap = { "1m": 1, "2m": 2, "3m": 3, "6m": 6, "1y": 12 };
++      const monthsBack = monthMap[rangeKey];
++      if (!monthsBack) return null;
++      return new Date(start.getFullYear(), start.getMonth() - monthsBack, start.getDate());
++    };
++    const parseRowDate = (row)=>{
++      const raw = String(row?.dateLabel || "");
++      if (!raw) return null;
++      const parsed = new Date(`${raw}T00:00:00`);
++      return Number.isNaN(parsed.getTime()) ? null : parsed;
++    };
++    const withinRange = (row, rangeKey)=>{
++      if (rangeKey === "all") return true;
++      const rowDate = parseRowDate(row);
++      if (!(rowDate instanceof Date)) return false;
++      const start = getRangeStart(rangeKey);
++      if (!(start instanceof Date)) return true;
++      return rowDate >= start;
++    };
++    const updateRangeButtons = ()=>{
++      if (rangeSelect instanceof HTMLSelectElement) rangeSelect.value = activeRange;
++      const labels = {
++        "1m": "Range: past 1 month from central data table rows.",
++        "2m": "Range: past 2 months from central data table rows.",
++        "3m": "Range: past 3 months from central data table rows.",
++        "6m": "Range: past 6 months from central data table rows.",
++        "1y": "Range: past 1 year from central data table rows.",
++        ytd: "Range: year to date from central data table rows.",
++        all: "Range: all time from central data table rows."
++      };
++      if (rangeLabelEl instanceof HTMLElement){
++        rangeLabelEl.textContent = labels[activeRange] || labels["1m"];
++      }
++    };
++
++    const recalc = ()=>{
++      const chargeRate = Math.max(0, asNumber(chargeInput.value, defaultCharge));
++      const costRate = Math.max(0, asNumber(costInput.value, defaultCost));
++      if (typeof window !== "undefined"){
++        window.__efficiencyCalculatorDraft = { chargeRate, costRate };
++      }
++      const visibleRows = rows.filter(row => withinRange(row, activeRange));
++      const totals = visibleRows.reduce((acc, row)=>{
++        const hours = Math.max(0, asNumber(row?.hoursValue, 0));
++        const material = Math.max(0, asNumber(row?.materialValue ?? row?.materialCostValue, 0));
++        const labor = hours * costRate;
++        const totalCost = labor + material;
++        acc.rows += 1;
++        acc.net += (hours * (chargeRate - costRate)) - material;
++        acc.cost += totalCost;
++        return acc;
++      }, { rows: 0, net: 0, cost: 0 });
++      if (totalEl) totalEl.textContent = formatUsd(totals.net);
++      if (avgEl) avgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
++      const summaryTotalEl = document.querySelector("[data-efficiency-summary-total]");
++      const summaryAvgEl = document.querySelector("[data-efficiency-summary-average]");
++      const summaryCostEl = document.querySelector("[data-efficiency-summary-cost]");
++      const summaryCostAvgEl = document.querySelector("[data-efficiency-summary-cost-average]");
++      if (summaryTotalEl) summaryTotalEl.textContent = formatUsd(totals.net);
++      if (summaryAvgEl) summaryAvgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
++      if (summaryCostEl) summaryCostEl.textContent = formatUsd(totals.cost);
++      if (summaryCostAvgEl) summaryCostAvgEl.textContent = formatUsd(totals.rows ? (totals.cost / totals.rows) : 0);
++      const tableRows = Array.from(document.querySelectorAll("[data-efficiency-row]"));
++      tableRows.forEach(tr => {
++        const rowId = String(tr.getAttribute("data-efficiency-id") || "");
++        const rowObj = rows.find(row => String(row?.id || "") === rowId) || null;
++        const show = rowObj ? withinRange(rowObj, activeRange) : false;
++        tr.hidden = !show;
++        if (!show) return;
++        const hours = Math.max(0, asNumber(tr.getAttribute("data-efficiency-hours"), asNumber(rowObj?.hoursValue, 0)));
++        const material = Math.max(0, asNumber(tr.getAttribute("data-efficiency-material"), asNumber(rowObj?.materialValue ?? rowObj?.materialCostValue, 0)));
++        const labor = hours * costRate;
++        const totalCost = labor + material;
++        const net = (hours * (chargeRate - costRate)) - material;
++        const laborCell = tr.querySelector("[data-efficiency-labor-cell]");
++        const totalCostCell = tr.querySelector("[data-efficiency-total-cost-cell]");
++        const profitCell = tr.querySelector("[data-efficiency-profit-cell]");
++        if (laborCell) laborCell.textContent = formatUsd(labor);
++        if (totalCostCell) totalCostCell.textContent = formatUsd(totalCost);
++        if (profitCell) profitCell.textContent = formatUsd(net);
++      });
++    };
++
++    chargeInput.addEventListener("input", recalc);
++    costInput.addEventListener("input", recalc);
++    chargeInput.addEventListener("blur", ()=>{ normalizeToTwo(chargeInput, defaultCharge); recalc(); });
++    costInput.addEventListener("blur", ()=>{ normalizeToTwo(costInput, defaultCost); recalc(); });
++    if (rangeSelect instanceof HTMLSelectElement){
++      rangeSelect.addEventListener("change", ()=>{
++        activeRange = String(rangeSelect.value || "1m");
++        updateRangeButtons();
++        recalc();
++      });
++    }
++    if (resetBtn instanceof HTMLElement){
++      resetBtn.addEventListener("click", ()=>{
++        chargeInput.value = defaultCharge.toFixed(2);
++        costInput.value = defaultCost.toFixed(2);
++        activeRange = "1m";
++        recalc();
++        updateRangeButtons();
++      });
++    }
++    if (typeof window !== "undefined"){
++      if (typeof window.__efficiencySnapshotEscHandler === "function"){
++        document.removeEventListener("keydown", window.__efficiencySnapshotEscHandler);
++      }
++      window.__efficiencySnapshotEscHandler = (event)=>{
++        if (event.key !== "Escape") return;
++        const modal = document.getElementById("efficiencySnapshotModal");
++        if (modal instanceof HTMLElement && !modal.hidden) closeSnapshot();
++      };
++      document.addEventListener("keydown", window.__efficiencySnapshotEscHandler);
++    }
++    if (goJobsBtn instanceof HTMLElement){
++      goJobsBtn.addEventListener("click", ()=>{
++        closeSnapshot();
++        goToJobsHistory();
++      });
++    }
++    const openJobBtns = Array.from(document.querySelectorAll("[data-efficiency-open-job]"));
++    openJobBtns.forEach(btn => {
++      if (!(btn instanceof HTMLElement)) return;
++      btn.addEventListener("click", ()=>{
++        const id = String(btn.getAttribute("data-efficiency-open-job") || "");
++        if (!id) return;
++        if (typeof window !== "undefined"){
++          window.pendingJobFocus = { type: "jobRow", id };
++        }
++        closeSnapshot();
++        goToJobsHistory();
++      });
++    });
++    updateRangeButtons();
++    recalc();
++    if (typeof window !== "undefined" && window.__efficiencySnapshotModalOpen){
++      openSnapshot();
++    }
++  }
++
+   function setupJobCategoryWindow(currentModel){
+     const panel = content.querySelector("[data-cost-job-categories]");
+     if (!panel) return;
+     const analytics = currentModel && typeof currentModel === "object"
+       ? currentModel.jobCategoryAnalytics
+       : null;
+     const categorySelect = panel.querySelector("[data-cost-job-category-select]");
+     if (categorySelect instanceof HTMLSelectElement){
+       const optionIds = new Set();
+       if (analytics && Array.isArray(analytics.options)){
+         analytics.options.forEach(opt => {
+           if (opt && opt.id != null){
+             optionIds.add(String(opt.id));
+           }
+         });
+       }
+       const fallbackId = (analytics && typeof analytics.rootId === "string")
+         ? analytics.rootId
+         : (typeof JOB_ROOT_FOLDER_ID === "string" ? JOB_ROOT_FOLDER_ID : "jobs_root");
+       categorySelect.addEventListener("change", event => {
+         const rawValue = event && event.target instanceof HTMLSelectElement
+           ? event.target.value
+           : categorySelect.value;
+         let normalized = String(rawValue || "");
+         if (optionIds.size){
+@@ -12057,51 +12448,50 @@ function renderCosts(){
+         const key = event.key;
+         if (key === "Enter" || key === " " || key === "Spacebar"){
+           return selectionTools.selectionTouchesElement(element);
+         }
+       }
+       return false;
+     };
+     const activateHistoryLink = (event)=>{
+       const origin = event?.target instanceof HTMLElement ? event.target : null;
+       if (origin && origin.closest(".time-efficiency-toggles")) return;
+       if (shouldDeferForSelection(event)) return;
+       event.preventDefault();
+       event.stopPropagation();
+       goToJobsHistory();
+     };
+     element.addEventListener("click", activateHistoryLink);
+     element.addEventListener("keydown", (event)=>{
+       if (event.repeat) return;
+       if (event.key === "Enter" || event.key === " " || event.key === "Spacebar"){
+         activateHistoryLink(event);
+       }
+     });
+   };
+ 
+   wireJobsHistoryShortcut(content.querySelector("[data-cost-jobs-history]"));
+-  wireJobsHistoryShortcut(content.querySelector("[data-cost-cutting-card]"));
+   wireJobsHistoryShortcut(content.querySelector(".cost-chart-toggle-link"));
+ 
+   const normalizeHistoryDate = (value)=>{
+     if (!value) return null;
+     if (typeof normalizeDateKey === "function"){
+       try {
+         const normalized = normalizeDateKey(value);
+         if (normalized) return normalized;
+       } catch (_err){}
+     }
+     if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return value.trim();
+     const parsed = new Date(value);
+     if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
+       return parsed.toISOString().slice(0, 10);
+     }
+     return null;
+   };
+ 
+   const ensureMaintOrderCounter = ()=>{
+     if (typeof window._maintOrderCounter !== "number" || !Number.isFinite(window._maintOrderCounter)){
+       window._maintOrderCounter = 0;
+     }
+   };
+ 
+   const createTaskFromCostHistory = ({ name, mode, originalId, dateISO })=>{
+@@ -14365,50 +14755,52 @@ function computeCostModel(){
+       costLabel: formatterCurrency(cut.cost, { showPlus: true, decimals: Math.abs(cut.cost) < 1000 ? 2 : 0 }),
+       hoursLabel: formatHours(cut.hours)
+     });
+     bucket.totalCutCost += cut.cost;
+     if (!bucket.cutByCategory[cut.category]) bucket.cutByCategory[cut.category] = { count: 0, cost: 0, hours: 0 };
+     bucket.cutByCategory[cut.category].count += 1;
+     bucket.cutByCategory[cut.category].cost += cut.cost;
+     bucket.cutByCategory[cut.category].hours += cut.hours > 0 ? cut.hours : 0;
+   });
+ 
+   const currentWeekStart = startOfWeekMonday(new Date());
+   if (currentWeekStart){
+     ensureWeek(currentWeekStart);
+   }
+ 
+   weeklyMap.forEach(report => {
+     report.totalCutHours = report.cutItems.reduce((sum, item) => sum + (Number(item?.hours) > 0 ? Number(item.hours) : 0), 0);
+   });
+ 
+   const weeklyReports = Array.from(weeklyMap.values())
+     .sort((a,b)=> String(b.weekStartISO).localeCompare(String(a.weekStartISO)))
+     .map(report => ({
+       ...report,
+       totalCutCostLabel: formatterCurrency(report.totalCutCost, { showPlus: true, decimals: Math.abs(report.totalCutCost) < 1000 ? 2 : 0 }),
+       totalMaintenanceCostLabel: formatterCurrency(report.totalMaintenanceCost, { decimals: report.totalMaintenanceCost < 1000 ? 2 : 0 }),
++      totalCutProfitLabel: formatterCurrency(report.totalCutCost, { showPlus: true, decimals: Math.abs(report.totalCutCost) < 1000 ? 2 : 0 }),
++      totalMaintenanceLossLabel: formatterCurrency(-Math.abs(report.totalMaintenanceCost), { showPlus: true, decimals: report.totalMaintenanceCost < 1000 ? 2 : 0 }),
+       totalCutHoursLabel: formatHours(report.totalCutHours),
+       weekLabel: `${formatDateLabelShort(new Date(report.weekStartISO))} - ${formatDateLabelShort(new Date(report.weekEndISO))}`
+     }));
+ 
+   if (typeof window !== "undefined"){
+     window.weeklyCostReports = weeklyReports.map(item => ({ ...item }));
+   }
+ 
+   const summaryCards = [
+     {
+       key: "maintenanceForecast",
+       icon: "🛠️",
+       title: "Maintenance forecast (interval + as-required)",
+       value: formatterCurrency(-predictedAnnual, { decimals: 0, showPlus: true }),
+       hint: maintenanceHint
+     },
+     {
+       key: "cuttingJobs",
+       icon: "✂️",
+       title: "Cutting jobs efficiency",
+       value: formatterCurrency(totalGainLoss, { decimals: 0, showPlus: true }),
+       hint: jobCount
+         ? `Average gain/loss ${formatterCurrency(averageGainLoss, { decimals: 0, showPlus: true })} across ${jobCount} completed job${jobCount===1?"":"s"}.`
+         : "No cutting jobs logged yet."
+     },
+@@ -14922,76 +15314,167 @@ function computeCostModel(){
+       .pop() || null;
+     const efficiencyActualHours = Number(job?.efficiency?.actualHours);
+     const computedEfficiency = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
+     const computedActualHours = Number(computedEfficiency?.actualHours);
+     const actualHoursCandidates = [
+       Number(job?.actualHours),
+       Number(job?.durationHours),
+       Number(job?.completedHours),
+       Number(job?.estimateHours),
+       Number(latestManualLog?.completedHours),
+       efficiencyActualHours,
+       computedActualHours
+     ];
+     const positiveHours = actualHoursCandidates.find(val => Number.isFinite(val) && val > 0);
+     const fallbackHours = actualHoursCandidates.find(val => Number.isFinite(val) && val >= 0);
+     const hours = Number.isFinite(positiveHours) ? positiveHours : (Number.isFinite(fallbackHours) ? fallbackHours : 0);
+     const categoryKey = categoryId || "__uncategorized__";
+     const categoryCutCount = cuttingCategoryRemaining.get(categoryKey) || 1;
+     cuttingCategoryRemaining.set(categoryKey, Math.max(0, categoryCutCount - 1));
+     const chargeRateRaw = Number(job?.chargeRate);
+     const costRateRaw = Number(job?.costRate);
+     const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
+     const costRate = Number.isFinite(costRateRaw) && costRateRaw >= 0 ? costRateRaw : JOB_BASE_COST_PER_HOUR;
+     const materialCost = Number(job?.materialCost);
+     const materialQty = Number(job?.materialQty);
+-    const materialCostValue = Number.isFinite(materialCost) ? materialCost : 0;
+-    const totalProfit = ((chargeRate * hours) - (costRate * hours)) - materialCostValue;
++    const materialCostValue = Number.isFinite(materialCost) && materialCost >= 0 ? materialCost : 0;
++    const laborCostValue = Math.max(0, hours) * costRate;
++    const totalCostValue = materialCostValue + laborCostValue;
++    const totalProfitValue = (Math.max(0, hours) * chargeRate) - totalCostValue;
+     const completedISO = typeof job?.completedAtISO === "string" && job.completedAtISO ? job.completedAtISO : "";
+     return {
+       id: job?.id != null ? String(job.id) : `completed_job_${index}`,
+       name: job?.name || `Completed job ${index + 1}`,
+       categoryId,
+       categoryLabel,
+       hoursLabel: Number.isFinite(hours) ? String(hours) : "0",
+       chargeRateLabel: formatterCurrency(chargeRate, { decimals: 2 }),
+       costRateLabel: formatterCurrency(costRate, { decimals: 2 }),
+       materialType: String(job?.material || "—"),
+       materialCostLabel: Number.isFinite(materialCost) ? formatterCurrency(materialCost, { decimals: 2 }) : "—",
+       materialQtyLabel: Number.isFinite(materialQty) ? String(materialQty) : "—",
+-      totalProfitLabel: formatterCurrency(totalProfit, { decimals: 2 }),
+       startDateLabel: job?.startISO || "—",
+       dueDateLabel: job?.dueISO || "—",
+       completedDateLabel: completedISO ? String(completedISO).slice(0, 10) : "—",
++      completedDateISO: completedISO ? String(completedISO).slice(0, 10) : "",
+       projectNumber: String(job?.projectNumber || "—"),
+       notes: String(job?.notes || "").trim() || "—",
+       priorityLabel: Number.isFinite(Number(job?.priority)) ? String(Math.max(1, Math.floor(Number(job.priority)))) : "—",
+       cumulativeCutNumberLabel: `#${Math.max(1, totalCompletedJobs - index)}`,
+-      categoryCutNumberLabel: `#${categoryCutCount}`
++      categoryCutNumberLabel: `#${categoryCutCount}`,
++      hoursValue: hours,
++      chargeRateValue: chargeRate,
++      costRateValue: costRate,
++      materialCostValue,
++      laborCostValue,
++      totalCostValue,
++      totalProfitValue,
++      settingsLink: job?.id != null ? `#/settings?jobId=${encodeURIComponent(String(job.id))}` : ""
+     };
+   });
+ 
++  const efficiencyRows = cuttingJobsDataTable
++    .filter(row => {
++      const hasDate = typeof row?.completedDateISO === "string" && row.completedDateISO.trim().length > 0;
++      const hasTaskName = typeof row?.name === "string" && row.name.trim().length > 0;
++      const hasSettingsLink = typeof row?.settingsLink === "string" && /^#\/settings\?jobId=/.test(row.settingsLink);
++      return hasDate && hasTaskName && hasSettingsLink;
++    })
++    .sort((a, b) => String(b?.completedDateISO || "").localeCompare(String(a?.completedDateISO || "")))
++    .map((row, index) => ({
++      id: row?.id != null ? String(row.id) : `efficiency_row_${index}`,
++      taskName: row?.name || "Completed task",
++      dateLabel: row?.completedDateISO || "—",
++      hoursLabel: formatHoursValue(Number(row?.hoursValue) || 0),
++      partCostLabel: formatterCurrency(Number(row?.materialCostValue) || 0, { decimals: 2 }),
++      laborCostLabel: formatterCurrency(Number(row?.laborCostValue) || 0, { decimals: 2 }),
++      totalCostLabel: formatterCurrency(Number(row?.totalCostValue) || 0, { decimals: 2 }),
++      totalProfitLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
++      hoursValue: Number(row?.hoursValue) || 0,
++      chargeRateValue: Number(row?.chargeRateValue) || 0,
++      costRateValue: Number(row?.costRateValue) || 0,
++      revenueValue: Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)),
++      netGainLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
++      materialValue: Math.max(0, Number(row?.materialCostValue) || 0),
++      laborValue: Math.max(0, Number(row?.laborCostValue) || 0),
++      totalCostValue: Number(row?.totalCostValue) || 0,
++      totalProfitValue: Number(row?.totalProfitValue) || 0,
++      formulaTitle: "Source: Central data table completed cutting jobs row. Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost.",
++      settingsLink: row?.settingsLink || ""
++    }));
++  const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
++    if (Number.isFinite(row?.hoursValue)) acc.hours += Math.max(0, Number(row.hoursValue));
++    if (Number.isFinite(row?.revenueValue)) acc.revenue += Math.max(0, Number(row.revenueValue));
++    if (Number.isFinite(row?.materialValue)) acc.material += Math.max(0, Number(row.materialValue));
++    if (Number.isFinite(row?.laborValue)) acc.labor += Math.max(0, Number(row.laborValue));
++    if (Number.isFinite(row?.totalCostValue)) acc.cost += Math.max(0, Number(row.totalCostValue));
++    if (Number.isFinite(row?.totalProfitValue)) acc.profit += Number(row.totalProfitValue);
++    return acc;
++  }, { hours: 0, revenue: 0, material: 0, labor: 0, cost: 0, profit: 0 });
++  const efficiencyCount = efficiencyRows.length;
++  const efficiencySnapshot = {
++    countLabel: String(efficiencyCount),
++    totalHoursLabel: formatHoursValue(efficiencyTotals.hours),
++    totalCostLabel: formatterCurrency(efficiencyTotals.cost, { decimals: efficiencyTotals.cost < 1000 ? 2 : 0 }),
++    averageCostLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.cost / efficiencyCount) : 0, { decimals: 2 }),
++    totalProfitLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
++    averageProfitLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
++    totalNetGainLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
++    averageNetGainLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
++    sourceLabel: "Source: central data table completed cutting jobs rows.",
++    formulaLabel: "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost",
++    disclaimerLabel: "Uses central data table values only.",
++    rows: efficiencyRows,
++    emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
++  };
++  const efficiencyMathDetails = `Net gain = (Hours × (Charge Rate - Cost Rate)) - Material. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
++  efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
++  const totalCalcHours = efficiencyTotals.hours > 0 ? efficiencyTotals.hours : 0;
++  const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.revenue / totalCalcHours) : JOB_RATE_PER_HOUR;
++  const defaultCostRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.labor / totalCalcHours) : JOB_BASE_COST_PER_HOUR;
++  efficiencySnapshot.calculatorDefaults = {
++    chargeRate: Number.isFinite(defaultChargeRateForCalc) ? defaultChargeRateForCalc : JOB_RATE_PER_HOUR,
++    costRate: Number.isFinite(defaultCostRateForCalc) ? defaultCostRateForCalc : JOB_BASE_COST_PER_HOUR
++  };
++  const efficiencyDisplayProfit = efficiencyTotals.profit;
++  const efficiencyDisplayAverage = efficiencyCount ? (efficiencyDisplayProfit / efficiencyCount) : 0;
++  const cuttingCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "cuttingJobs") : null;
++  if (cuttingCard){
++    cuttingCard.value = formatterCurrency(efficiencyDisplayProfit, { decimals: 0, showPlus: true });
++    cuttingCard.hint = efficiencyCount
++      ? `Average net gain ${formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true })} across ${efficiencyCount} completed job${efficiencyCount===1?"":"s"} (source: central data table).`
++      : "No cutting jobs logged yet.";
++    cuttingCard.tooltip = `Source: central data table completed rows. ${efficiencyMathDetails}`;
++  }
++  const combinedCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "combinedImpact") : null;
++  if (combinedCard){
++    combinedCard.value = formatterCurrency(efficiencyDisplayProfit - predictedAnnual, { decimals: 0, showPlus: true });
++  }
++  jobSummary.countLabel = efficiencyCount ? `${efficiencyCount} completed` : "0";
++  jobSummary.totalLabel = formatterCurrency(efficiencyDisplayProfit, { decimals: 0, showPlus: true });
++  jobSummary.averageLabel = formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true });
++
+   const taskById = new Map();
+   [Array.isArray(intervalTasksAll) ? intervalTasksAll : [], Array.isArray(asReqTasksAll) ? asReqTasksAll : []].forEach(list => {
+     list.forEach(task => {
+       if (!task || task.id == null) return;
+       taskById.set(String(task.id), task);
+     });
+   });
+   const categoryById = new Map();
+   const categoryParentById = new Map();
+   if (Array.isArray(window.settingsFolders)){
+     window.settingsFolders.forEach(folder => {
+       if (!folder || folder.id == null) return;
+       categoryById.set(String(folder.id), String(folder.name || "Category"));
+       categoryParentById.set(String(folder.id), folder.parent != null ? String(folder.parent) : null);
+     });
+   }
+   const resolveCategoryPath = (categoryId)=>{
+     const key = String(categoryId || "");
+     if (!key) return "";
+     const visited = new Set();
+     const names = [];
+     let current = key;
+     while (current && !visited.has(current)){
+       visited.add(current);
+       const name = categoryById.get(current);
+@@ -15083,50 +15566,51 @@ function computeCostModel(){
+     cuttingHoursSinceLabel: Number.isFinite(row.cuttingHoursSince) ? formatHoursValue(row.cuttingHoursSince) : "—",
+     settingsLink: row.settingsLink,
+     categoryId: row.categoryId || "",
+     categoryLabel: row.categoryLabel || "",
+     qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "1",
+     counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1"
+   }));
+ 
+   return {
+     summaryCards,
+     timeframeRows,
+     timeframeDetails,
+     forecastBreakdown,
+     timeframeNote,
+     historyRows,
+     historyEmpty,
+     jobSummary,
+     jobBreakdown,
+     jobEmpty,
+     jobCategoryAnalytics,
+     chartNote,
+     chartInfo,
+     orderRequestSummary,
+     maintenanceDataTable,
+     cuttingJobsDataTable,
++    efficiencySnapshot,
+     chartColors: COST_CHART_COLORS,
+     maintenanceSeries,
+     jobSeries,
+     weeklyReports
+   };
+ }
+ 
+ function drawWeeklyReportChart(canvas, report){
+   if (!canvas) return;
+   const ctx = canvas.getContext("2d");
+   const W = canvas.width;
+   const H = canvas.height;
+   ctx.clearRect(0,0,W,H);
+   ctx.fillStyle = "#fff";
+   ctx.fillRect(0,0,W,H);
+ 
+   if (!report){
+     ctx.fillStyle = "#777";
+     ctx.font = "14px sans-serif";
+     ctx.textAlign = "center";
+     ctx.fillText("No weekly report selected.", W/2, H/2);
+     return;
+   }
+ 
+   const weeklyHoursActual = Math.max(0, Number(report.totalCutHours) || 0);
+diff --git a/js/views.js b/js/views.js
+index 18d4cb0891b4832097aec89ae959116d18f61097..9d43db0fa426d40c1076e426769e93248a43032b 100644
+--- a/js/views.js
++++ b/js/views.js
+@@ -120,97 +120,105 @@ function viewDashboard(){
+       </div>
+ 
+       <div class="dashboard-window" data-dashboard-window="nextDue">
+         <div class="block next-due-block">
+           <h3>Next Due</h3>
+           <div id="nextDueBox">Calculating…</div>
+         </div>
+       </div>
+ 
+       <div class="dashboard-window" data-dashboard-window="pumpLog">
+         <section id="pump-log-widget" class="block pump-log-block"></section>
+       </div>
+ 
+       <div class="dashboard-window" data-dashboard-window="pumpChart">
+         <section id="pump-chart-widget" class="block pump-chart-block"></section>
+       </div>
+ 
+       <div class="dashboard-window" data-dashboard-window="timeEfficiency">
+         <div class="block time-efficiency-block" id="dashboardTimeEfficiency">
+           <div class="time-efficiency-header">
+             <h3>Cutting Time Efficiency</h3>
+             <div class="time-efficiency-controls">
+               <div class="time-efficiency-toggles" role="tablist">
+                 ${efficiencyButtons}
+               </div>
+-              <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit range</button>
++              <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit tracking</button>
+             </div>
+           </div>
+           <div class="time-efficiency-edit" data-efficiency-edit-panel hidden>
+-            <div class="time-efficiency-edit-row">
+-              <label class="time-efficiency-edit-field">
+-                <span class="time-efficiency-edit-label">Start date</span>
+-                <input type="date" data-efficiency-start-input>
+-              </label>
+-              <div class="time-efficiency-edit-actions">
++              <div class="time-efficiency-edit-row">
++                <label class="time-efficiency-edit-field">
++                  <span class="time-efficiency-edit-label">Start date</span>
++                  <input type="date" data-efficiency-start-input>
++                </label>
++                <label class="time-efficiency-edit-field">
++                  <span class="time-efficiency-edit-label">Weekly goal mode</span>
++                  <select data-efficiency-goal-mode-input>
++                    <option value="average">Go off average</option>
++                    <option value="maximum">Go off maximum</option>
++                  </select>
++                </label>
++                <div class="time-efficiency-edit-actions">
+                 <button type="button" class="time-efficiency-edit-apply" data-efficiency-apply>Apply</button>
+                 <button type="button" class="time-efficiency-edit-cancel" data-efficiency-cancel>Cancel</button>
+               </div>
+             </div>
+             <p class="small muted time-efficiency-edit-note" data-efficiency-edit-note></p>
+           </div>
+           <div class="time-efficiency-metrics" role="status" aria-live="polite">
+             <div class="time-efficiency-metric">
+               <span class="label">Actual hours</span>
+-              <span class="value" data-efficiency-actual>—</span>
++              <span class="value" data-efficiency-actual data-efficiency-tooltip="Sum of logged cutting hours in the selected date window." title="Sum of logged cutting hours in the selected date window.">—</span>
+             </div>
+             <div class="time-efficiency-metric">
+               <span class="label">Current target</span>
+-              <span class="value" data-efficiency-target>—</span>
++              <span class="value" data-efficiency-target data-efficiency-tooltip="Target-to-date: weekly goal converted to daily goal and multiplied by elapsed days in this window." title="Target-to-date: weekly goal converted to daily goal and multiplied by elapsed days in this window.">—</span>
+             </div>
+             <div class="time-efficiency-metric">
+               <span class="label">Gap vs target</span>
+-              <span class="value" data-efficiency-gap-target>—</span>
++                <span class="value" data-efficiency-gap-target data-efficiency-tooltip="Actual hours minus target-to-date hours in this window." title="Actual hours minus target-to-date hours in this window.">—</span>
+             </div>
+             <div class="time-efficiency-metric">
+               <span class="label">End goal</span>
+-              <span class="value" data-efficiency-goal>—</span>
++                <span class="value" data-efficiency-goal data-efficiency-tooltip="End goal: full-window goal hours using your configured weekly goal." title="End goal: full-window goal hours using your configured weekly goal.">—</span>
+             </div>
+             <div class="time-efficiency-metric">
+               <span class="label">Avg usage/day</span>
+-              <span class="value" data-efficiency-average>—</span>
++                <span class="value" data-efficiency-average data-efficiency-tooltip="Average logged cutting hours per day across the selected window." title="Average logged cutting hours per day across the selected window.">—</span>
+             </div>
+             <div class="time-efficiency-metric">
+               <span class="label">Gap vs goal</span>
+-              <span class="value" data-efficiency-gap-goal>—</span>
++                <span class="value" data-efficiency-gap-goal data-efficiency-tooltip="Actual hours minus full-window goal hours." title="Actual hours minus full-window goal hours.">—</span>
+             </div>
+             <div class="time-efficiency-metric">
+               <span class="label">Efficiency (to date)</span>
+-              <span class="value" data-efficiency-percent>—</span>
++                <span class="value" data-efficiency-percent data-efficiency-tooltip="Efficiency to date: actual hours divided by target-to-date hours." title="Efficiency to date: actual hours divided by target-to-date hours.">—</span>
+             </div>
+           </div>
+           <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
++          <p class="small muted">How this works: <strong>Go off average</strong> uses your average cut hours/day. <strong>Go off maximum</strong> uses your dashboard daily-hours goal (default 8 hr/day) and respects the weekend include/exclude setting.</p>
+           <p class="small muted">Baseline adapts to your average logged hours per day.</p>
+         </div>
+       </div>
+     </div>
+ 
+     <div class="block calendar-block">
+       <h3>Calendar</h3>
+ 
+       <div class="calendar-toolbar">
+         <div class="calendar-month-nav" aria-label="Month navigation">
+           <button type="button" class="calendar-nav-btn" id="calendarPrevMonthBtn" aria-label="Show previous months">‹</button>
+           <span class="calendar-range-label" id="calendarRangeLabel">This month</span>
+           <button type="button" class="calendar-nav-btn" id="calendarNextMonthBtn" aria-label="Show upcoming months">›</button>
+         </div>
+         <button type="button" class="calendar-hours-edit-btn" id="calendarHoursEditBtn">Edit Hours</button>
+         <button type="button" class="calendar-hours-cancel-btn" id="calendarHoursCancelBtn" hidden>Cancel</button>
+         <button type="button" class="calendar-toggle-btn" id="calendarToggleBtn" aria-pressed="false" aria-controls="months">Show All Months</button>
+         <button type="button" class="calendar-add-btn" id="calendarAddBtn" title="Add maintenance task, down time, or job">+</button>
+       </div>
+ 
+       <div id="months"></div>
+       <div class="small">Hover a due item for actions. Click to pin the bubble. Use the arrows to browse months and toggle “Show All Months” to scroll through the schedule.</div>
+     </div>
+   </div>
+ 
+@@ -1153,104 +1161,96 @@ function ensureTaskCategories(){
+       const holder = sum.closest("details.folder");
+       const fid = holder?.getAttribute("data-folder-id");
+       sum.classList.remove("drop-hint");
+       const raw = e.dataTransfer.getData("text/plain") || "";
+       const [kind, id] = raw.split(":");
+       if (!fid || kind!=="task" || !id) return;
+ 
+       if (typeof moveNodeSafely === "function"){
+         if (moveNodeSafely("task", id, { intoCat: fid })){
+           persist(); if (typeof renderSettings === "function") renderSettings();
+         }
+         return;
+       }
+       const live = findTask(id); if (!live) return;
+       live.ref.cat = fid; live.ref.parentTask = null; live.ref.order = (++window._maintOrderCounter);
+       persist(); if (typeof renderSettings === "function") renderSettings();
+     });
+   });
+ }
+ 
+ 
+ 
+ function viewCosts(model){
+   const data = model || {};
+   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+-  const efficiencyWindows = (Array.isArray(TIME_EFFICIENCY_WINDOWS) && TIME_EFFICIENCY_WINDOWS.length)
+-    ? TIME_EFFICIENCY_WINDOWS
+-    : [
+-        { key: "7d", label: "1W", days: 7, description: "Past 7 days" },
+-        { key: "30d", label: "1M", days: 30, description: "Past 30 days" },
+-        { key: "90d", label: "3M", days: 90, description: "Past 3 months" },
+-        { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
+-        { key: "365d", label: "1Y", days: 365, description: "Past year" }
+-      ];
+-  const efficiencyButtons = efficiencyWindows.map((win, index) => {
+-    const days = Number(win?.days) || 0;
+-    const label = esc(win?.label ?? `${days || ""}`);
+-    const description = esc(win?.description ?? (days ? `Past ${days} days` : "Selected window"));
+-    const isActive = index === 0;
+-    return `
+-      <button type="button" class="time-efficiency-toggle${isActive ? " is-active" : ""}" data-efficiency-range="${esc(String(days))}" data-efficiency-range-label="${description}" aria-pressed="${isActive ? "true" : "false"}" title="${description}">
+-        ${label}
+-      </button>
+-    `;
+-  }).join("");
++  const efficiencyWindows = [
++    { key: "7d", label: "1W", days: 7, description: "Past 7 days" },
++    { key: "30d", label: "1M", days: 30, description: "Past 30 days" },
++    { key: "90d", label: "3M", days: 90, description: "Past 3 months" },
++    { key: "182d", label: "6M", days: 182, description: "Past 6 months" },
++    { key: "365d", label: "1Y", days: 365, description: "Past year" }
++  ];
++  const efficiencyButtons = efficiencyWindows.map((win, index) => `
++    <button type="button" class="time-efficiency-toggle${index === 0 ? " is-active" : ""}" data-efficiency-range="${esc(String(win.days))}" data-efficiency-range-label="${esc(win.description)}" aria-pressed="${index === 0 ? "true" : "false"}" title="${esc(win.description)}">${esc(win.label)}</button>
++  `).join("");
+   const defaultEfficiencyDescription = esc(efficiencyWindows[0]?.description || "Past 7 days");
+-
+   const cards = Array.isArray(data.summaryCards) ? data.summaryCards : [];
+   const timeframeRows = Array.isArray(data.timeframeRows) ? data.timeframeRows : [];
+   const historyRows = Array.isArray(data.historyRows) ? data.historyRows : [];
+   const jobBreakdown = Array.isArray(data.jobBreakdown) ? data.jobBreakdown : [];
+   const weeklyReports = Array.isArray(data.weeklyReports) ? data.weeklyReports : [];
+   const selectedWeeklyKeyRaw = (typeof window !== "undefined" && typeof window.weeklyCostReportSelected === "string")
+     ? window.weeklyCostReportSelected
+     : "";
+   const selectedWeeklyReport = weeklyReports.find(item => item && item.weekStartISO === selectedWeeklyKeyRaw) || (weeklyReports[0] || null);
+   const selectedWeeklyKey = selectedWeeklyReport ? String(selectedWeeklyReport.weekStartISO || "") : "";
+   if (typeof window !== "undefined") window.weeklyCostReportSelected = selectedWeeklyKey;
+   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
+   const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
+   const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
+   const orderSummary = data.orderRequestSummary || {};
+   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
+   const maintenanceDataTable = Array.isArray(data.maintenanceDataTable) ? data.maintenanceDataTable : [];
+   const maintenanceCategoryOptions = Array.from(new Set(
+     maintenanceDataTable
+       .map(row => ({ id: String(row?.categoryId || ""), label: String(row?.categoryLabel || "") }))
+       .filter(entry => entry.id && entry.label)
+       .map(entry => `${entry.id}|||${entry.label}`)
+   )).map(entry => {
+     const [id, label] = entry.split("|||");
+     return { id, label };
+   }).sort((a, b) => a.label.localeCompare(b.label));
+   const maintenanceTaskOptions = Array.from(new Set(
+     maintenanceDataTable
+       .map(row => String(row?.taskName || "").trim())
+       .filter(Boolean)
+   )).sort((a, b) => a.localeCompare(b));
+   const cuttingJobsDataTable = Array.isArray(data.cuttingJobsDataTable) ? data.cuttingJobsDataTable : [];
++  const efficiencySnapshot = data.efficiencySnapshot || {};
++  const efficiencyRows = Array.isArray(efficiencySnapshot.rows) ? efficiencySnapshot.rows : [];
++  const calculatorDefaults = efficiencySnapshot.calculatorDefaults || {};
+   const cuttingJobCategoryOptions = Array.from(new Set(
+     cuttingJobsDataTable
+       .map(row => ({ id: String(row?.categoryId || ""), label: String(row?.categoryLabel || "") }))
+       .filter(entry => entry.label)
+       .map(entry => `${entry.id}|||${entry.label}`)
+   )).map(entry => {
+     const [id, label] = entry.split("|||");
+     return { id, label };
+   }).sort((a, b) => a.label.localeCompare(b.label));
+   const overviewInsight = data.overviewInsight || "Totals blend the latest maintenance allocations, consumable burn rates, downtime burdens, and job margin data so you always see current cost exposure.";
+   const ordersInsight = data.ordersInsight || "Tracks every waterjet part request from submission through approval so finance can confirm spend and spot stalled orders.";
+   const timeframeInsight = data.timeframeInsight || "Usage windows combine logged machine hours with interval pricing to estimate what each upcoming maintenance window will cost.";
+   const historyInsight = data.historyInsight || "Shows the latest completed maintenance, combining hours logged and reconciled spend to highlight cost spikes.";
+   const efficiencyInsight = data.efficiencyInsight || "Summarizes cutting job profitability by tying revenue to labor, material, consumable, and overhead allocations so you can act on true margins.";
+   const avgBanner = renderAverageHoursBanner("cost-analysis");
+ 
+   const formatCurrencyValue = (value)=>{
+     const num = Number(value);
+     const safe = Number.isFinite(num) ? num : 0;
+     const abs = Math.abs(safe);
+     const digits = abs < 1000 ? 2 : 0;
+     return new Intl.NumberFormat(undefined, {
+       style: "currency",
+       currency: "USD",
+       minimumFractionDigits: digits,
+@@ -1542,67 +1542,72 @@ function viewCosts(model){
+     </div>
+   `;
+ 
+   const breakdown = data.forecastBreakdown || {};
+   const breakdownSections = Array.isArray(breakdown.sections) ? breakdown.sections : [];
+   const breakdownTotals = breakdown.totals || {};
+   const hasSections = breakdownSections.length > 0;
+   const hasTotals = Boolean(
+     breakdownTotals && (
+       breakdownTotals.intervalLabel ||
+       breakdownTotals.asReqLabel ||
+       breakdownTotals.combinedLabel
+     )
+   );
+   const forecastNote = breakdown.note || "Add pricing to maintenance tasks and approve order requests to enrich the forecast.";
+ 
+   const renderSummaryCard = (card = {})=>{
+     const key = card && card.key ? String(card.key) : "";
+     const isForecast = key === "maintenanceForecast";
+     const isCutting = key === "cuttingJobs";
+     const classes = ["cost-card"];
+     const attrParts = [`class="${classes.join(" ")}"`];
+     if (key){
+       attrParts.push(`data-card-key="${esc(key)}"`);
+     }
++    if (card && card.tooltip){
++      attrParts.push(`title="${esc(card.tooltip)}"`);
++    }
+     if (isForecast){
+       attrParts.push("role=\"button\"");
+       attrParts.push("tabindex=\"0\"");
+     }
+     if (isCutting){
+       attrParts.push("data-cost-cutting-card=\"\"");
+-      attrParts.push("role=\"link\"");
+-      attrParts.push("tabindex=\"0\"");
+     }
+     const attr = attrParts.join(" ");
++    const cuttingOpenBtn = isCutting
++      ? `<button type="button" class="btn secondary" data-open-efficiency-snapshot>Open calculator</button>`
++      : "";
+     return `
+               <div ${attr}>
+                 <div class="cost-card-icon">${esc(card.icon || "")}</div>
+                 <div class="cost-card-body">
+                   <div class="cost-card-title">${esc(card.title || "")}</div>
+                   <div class="cost-card-value">${esc(card.value || "")}</div>
+                   <div class="cost-card-hint">${esc(card.hint || "")}</div>
++                  ${cuttingOpenBtn}
+                 </div>
+               </div>
+             `;
+   };
+ 
+   const summaryCardsHTML = cards.length
+     ? cards.map(renderSummaryCard).join("")
+     : `<p class="small muted">No cost metrics yet. Log machine hours and add pricing to interval tasks.</p>`;
+ 
+   const forecastTableHTML = (hasSections || hasTotals)
+     ? `
+       <div class="forecast-table-wrap">
+         <table class="forecast-table">
+           <thead>
+             <tr>
+               <th scope="col">Task</th>
+               <th scope="col">Cadence</th>
+               <th scope="col">Unit cost</th>
+               <th scope="col">Annual estimate</th>
+             </tr>
+           </thead>
+           <tbody>
+             ${breakdownSections.map(section => {
+               const rows = Array.isArray(section.rows) ? section.rows : [];
+               const headerRow = `
+@@ -2029,50 +2034,51 @@ function viewCosts(model){
+                 <span class="sr-only">Show how Recent Maintenance Events are curated</span>
+               </button>
+               <div class="chart-info-bubble" id="costHistoryInsight" role="tooltip">
+                 <p>${esc(historyInsight)}</p>
+               </div>
+             </div>
+           </div>
+         </div>
+       </div>
+ 
+       <div class="dashboard-window" data-cost-window="dataCenter">
+         <div class="block">
+           <h3>Maintenance Data Center Table</h3>
+           <div class="small muted" style="margin-bottom:8px;">Open as a full-size popup for review and auditing.</div>
+           <button type="button" class="secondary" data-open-data-center ${maintenanceDataTable.length ? "" : "disabled"}>Open Data Center</button>
+           <div id="costDataCenterModal" class="cost-data-center-modal" data-data-center-modal hidden aria-hidden="true" tabindex="-1">
+             <div class="cost-data-center-backdrop" data-close-data-center></div>
+             <div class="cost-data-center-panel" role="dialog" aria-modal="true" aria-labelledby="dataCenterTitle">
+               <div class="cost-data-center-header">
+                 <h3 id="dataCenterTitle">Maintenance Data Center Table</h3>
+                 <button type="button" class="secondary" data-close-data-center>Close</button>
+               </div>
+               <div class="cost-data-center-tabs" role="tablist" aria-label="Data center tables">
+                 <button type="button" class="cost-data-center-tab is-active" data-dc-tab="maintenance" role="tab" aria-selected="true">Maintenance Tasks</button>
+                 <button type="button" class="cost-data-center-tab" data-dc-tab="cutting" role="tab" aria-selected="false">Completed Cutting Jobs</button>
++                <button type="button" class="cost-data-center-tab" data-dc-tab="efficiency" role="tab" aria-selected="false">Efficiency Metrics</button>
+               </div>
+               <div class="cost-data-center-panel-content" data-dc-panel="maintenance">
+               <div class="cost-data-center-search">
+                 <label for="costDataCenterSearch">Search table</label>
+                 <input id="costDataCenterSearch" type="search" placeholder="Search task, date, counter, or link target" data-maintenance-search>
+                 <label for="costDataCenterCategoryFilter">Filter by category</label>
+                 <select id="costDataCenterCategoryFilter" data-maintenance-filter-category>
+                   <option value="">All categories</option>
+                   ${maintenanceCategoryOptions.map(opt => `<option value="${esc(opt.id)}">${esc(opt.label)}</option>`).join("")}
+                 </select>
+                 <label for="costDataCenterTaskFilter">Filter by task</label>
+                 <select id="costDataCenterTaskFilter" data-maintenance-filter-task>
+                   <option value="">All tasks</option>
+                   ${maintenanceTaskOptions.map(name => `<option value="${esc(name.toLowerCase())}">${esc(name)}</option>`).join("")}
+                 </select>
+                 <div class="cost-data-center-search-suggestions" data-maintenance-search-suggestions hidden></div>
+               </div>
+               ${maintenanceDataTable.length ? `
+             <table class="cost-table" style="margin-top:10px">
+               <thead>
+                 <tr>
+                   <th>Counter</th>
+                   <th>Task</th>
+                   <th>Maint. hrs</th>
+                   <th>Part cost</th>
+@@ -2165,208 +2171,278 @@ function viewCosts(model){
+                         <td>${esc(row.costRateLabel || "—")}</td>
+                         <td>${esc(row.totalProfitLabel || "—")}</td>
+                         <td>${esc(row.materialType || "—")}</td>
+                         <td>${esc(row.materialCostLabel || "—")}</td>
+                         <td>${esc(row.materialQtyLabel || "—")}</td>
+                         <td>${esc(row.startDateLabel || "—")}</td>
+                         <td>${esc(row.dueDateLabel || "—")}</td>
+                         <td>${esc(row.completedDateLabel || "—")}</td>
+                         <td>${esc(row.projectNumber || "—")}</td>
+                         <td>${esc(row.priorityLabel || "—")}</td>
+                         <td>${esc(row.notes || "—")}</td>
+                         <td>
+                           <label class="sr-only" for="cuttingLinkMode_${esc(row.id || "")}">Cutting link destination</label>
+                           <select id="cuttingLinkMode_${esc(row.id || "")}" data-cutting-link-mode>
+                             <option value="jobs">Cutting jobs page</option>
+                             <option value="calendar">Calendar</option>
+                           </select>
+                           <button type="button" data-cutting-open-job data-job-id="${esc(row.id || "")}" data-date-iso="${esc(row.completedDateLabel || "")}" data-link-mode-id="cuttingLinkMode_${esc(row.id || "")}">Open job</button>
+                         </td>
+                       </tr>
+                     `).join("")}
+                   </tbody>
+                 </table>
+                 ` : `<p class="small muted">No completed cutting jobs yet.</p>`}
+               </div>
++              <div class="cost-data-center-panel-content" data-dc-panel="efficiency" hidden>
++                ${efficiencyRows.length ? `
++                <div class="cost-jobs-summary">
++                  <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
++                  <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
++                  <div><span class="label">Total net gain</span><span>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
++                  <div><span class="label">Avg net gain / row</span><span>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
++                </div>
++                <table class="cost-table" style="margin-top:10px">
++                  <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Run cost</th><th>Total cost</th><th>Net gain</th></tr></thead>
++                  <tbody>
++                    ${efficiencyRows.map(row => `
++                      <tr>
++                        <td>${esc(row.taskName || "Completed task")}</td>
++                        <td>${esc(row.dateLabel || "—")}</td>
++                        <td>${esc(row.hoursLabel || "0 hr")}</td>
++                        <td>${esc(row.partCostLabel || "$0.00")}</td>
++                        <td>${esc(row.laborCostLabel || "$0.00")}</td>
++                        <td>${esc(row.totalCostLabel || "$0.00")}</td>
++                        <td>${esc(row.netGainLabel || "$0.00")}</td>
++                      </tr>
++                    `).join("")}
++                  </tbody>
++                </table>
++                ` : `<p class="small muted">No efficiency rows found in the central data table.</p>`}
++              </div>
+             </div>
+           </div>
+         </div>
+       </div>
+ 
+       <div class="dashboard-window" data-cost-window="jobCategories">
+         <div class="block" data-cost-job-categories>
+           <h3>Job Categories</h3>
+           <div class="cost-category-controls">
+             <label class="cost-category-select-label">
+               <span class="cost-category-select-label-text">Focus category</span>
+               <select data-cost-job-category-select aria-label="Filter job metrics by category">
+                 ${categoryOptionsMarkup}
+               </select>
+             </label>
+           </div>
+           ${categoryOverviewTable}
+           ${summaryMarkup}
+         </div>
+       </div>
+ 
+       <div class="dashboard-window" data-cost-window="weekly">
+         <div class="block" data-cost-weekly-reports>
+           <h3>Weekly cost reports</h3>
+           <div class="cost-weekly-controls">
+             <label class="cost-category-select-label">
+               <span class="cost-category-select-label-text">Report week</span>
+               <select data-cost-weekly-select aria-label="Select weekly cost report">
+                 ${weeklyOptions}
+               </select>
+             </label>
+             <button type="button" class="btn secondary" data-cost-receipt-open>Purchase History</button>
+             <button type="button" class="btn secondary" data-cost-weekly-export ${selectedWeeklyReport ? "" : "disabled"}>Export week (Excel)</button>
+           </div>
+           <div class="cost-weekly-summary">
+-            <div><span class="label">Cuts total</span><span>${esc(selectedWeeklyReport?.totalCutCostLabel || "$0")}</span></div>
+-            <div><span class="label">Maintenance total</span><span>${esc(selectedWeeklyReport?.totalMaintenanceCostLabel || "$0")}</span></div>
++            <div><span class="label">Cuts total profit</span><span>${esc(selectedWeeklyReport?.totalCutProfitLabel || selectedWeeklyReport?.totalCutCostLabel || "$0")}</span></div>
++            <div><span class="label">Maintenance total loss</span><span>${esc(selectedWeeklyReport?.totalMaintenanceLossLabel || selectedWeeklyReport?.totalMaintenanceCostLabel || "$0")}</span></div>
+             <div><span class="label">Cutting time</span><span>${esc(selectedWeeklyReport?.totalCutHoursLabel || "0 hr")}</span></div>
+           </div>
+           <div class="cost-weekly-grid">
+             <details class="cost-weekly-section" open>
+               <summary>Cuts completed</summary>
+               <div class="cost-weekly-section-totals">
+-                <span><strong>Cuts related total:</strong> ${esc(selectedWeeklyReport?.totalCutCostLabel || "$0")}</span>
++                <span><strong>Cuts related total profit:</strong> ${esc(selectedWeeklyReport?.totalCutProfitLabel || selectedWeeklyReport?.totalCutCostLabel || "$0")}</span>
+                 <span><strong>Total cut time:</strong> ${esc(selectedWeeklyReport?.totalCutHoursLabel || "0 hr")}</span>
+               </div>
+               <div class="cost-weekly-table-wrap">
+                 <table class="cost-table">
+                   <thead><tr><th>Cut</th><th>Category</th><th>Hours</th><th>Cost impact</th></tr></thead>
+                   <tbody>${weeklyCutRows}</tbody>
+                 </table>
+               </div>
+             </details>
+             <details class="cost-weekly-section" open>
+               <summary>Maintenance completed</summary>
+               <div class="cost-weekly-section-totals">
+-                <span><strong>Maintenance related total:</strong> ${esc(selectedWeeklyReport?.totalMaintenanceCostLabel || "$0")}</span>
++                <span><strong>Maintenance related total loss:</strong> ${esc(selectedWeeklyReport?.totalMaintenanceLossLabel || selectedWeeklyReport?.totalMaintenanceCostLabel || "$0")}</span>
+               </div>
+               <div class="cost-weekly-table-wrap">
+                 <table class="cost-table">
+                   <thead><tr><th>Task</th><th>Type</th><th>Part #</th><th>Cost</th></tr></thead>
+                   <tbody>${weeklyMaintenanceRows}</tbody>
+                 </table>
+               </div>
+             </details>
+           </div>
+           <canvas id="weeklyCostChart" width="900" height="340" aria-label="Weekly report chart"></canvas>
+         </div>
+       </div>
+ 
+-      <div class="dashboard-window" data-cost-window="efficiency">
+-        <div class="block" data-cost-jobs-history role="link" tabindex="0">
+-          <h3>Cutting Job Efficiency Snapshot</h3>
+-          <div class="time-efficiency-inline" id="costTimeEfficiency">
+-            <div class="time-efficiency-inline-header">
+-              <span class="time-efficiency-inline-title">Cutting time efficiency</span>
+-              <div class="time-efficiency-controls">
+-                <div class="time-efficiency-toggles" role="tablist">
+-                  ${efficiencyButtons}
+-                </div>
+-                <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit range</button>
+-              </div>
+-            </div>
+-            <div class="time-efficiency-edit" data-efficiency-edit-panel hidden>
+-              <div class="time-efficiency-edit-row">
+-                <label class="time-efficiency-edit-field">
+-                  <span class="time-efficiency-edit-label">Start date</span>
+-                  <input type="date" data-efficiency-start-input>
+-                </label>
+-                <div class="time-efficiency-edit-actions">
+-                  <button type="button" class="time-efficiency-edit-apply" data-efficiency-apply>Apply</button>
+-                  <button type="button" class="time-efficiency-edit-cancel" data-efficiency-cancel>Cancel</button>
+-                </div>
++
++    </div>
++  </div>
++
++  <div class="cost-data-center-modal" id="efficiencySnapshotModal" data-efficiency-snapshot-modal hidden>
++    <div class="cost-data-center-backdrop" data-close-efficiency-snapshot></div>
++    <div class="cost-data-center-panel" role="dialog" aria-modal="true" aria-label="Cutting Job Efficiency Snapshot" style="max-width:1100px;border-radius:16px;">
++      <div class="cost-data-center-header" style="border-radius:16px 16px 0 0;">
++        <h4>Cutting Job Efficiency Snapshot</h4>
++        <button type="button" class="btn ghost" data-close-efficiency-snapshot>Close</button>
++      </div>
++      <div class="cost-data-center-body">
++        <div class="time-efficiency-inline" id="costTimeEfficiency">
++          <div class="time-efficiency-inline-header">
++            <span class="time-efficiency-inline-title">Cutting time efficiency</span>
++            <div class="time-efficiency-controls">
++              <div class="time-efficiency-toggles" role="tablist">
++                ${efficiencyButtons}
+               </div>
+-              <p class="small muted time-efficiency-edit-note" data-efficiency-edit-note></p>
++              <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit tracking</button>
+             </div>
+-            <div class="time-efficiency-metrics" role="status" aria-live="polite">
+-              <div class="time-efficiency-metric">
+-                <span class="label">Actual hours</span>
+-                <span class="value" data-efficiency-actual>—</span>
+-              </div>
+-              <div class="time-efficiency-metric">
+-                <span class="label">Current target</span>
+-                <span class="value" data-efficiency-target>—</span>
+-              </div>
+-              <div class="time-efficiency-metric">
+-                <span class="label">Gap vs target</span>
+-                <span class="value" data-efficiency-gap-target>—</span>
+-              </div>
+-              <div class="time-efficiency-metric">
+-                <span class="label">End goal</span>
+-                <span class="value" data-efficiency-goal>—</span>
+-              </div>
+-              <div class="time-efficiency-metric">
+-              <span class="label">Avg usage/day</span>
+-                <span class="value" data-efficiency-average>—</span>
+-              </div>
+-              <div class="time-efficiency-metric">
+-                <span class="label">Gap vs goal</span>
+-                <span class="value" data-efficiency-gap-goal>—</span>
+-              </div>
+-              <div class="time-efficiency-metric">
+-                <span class="label">Efficiency (to date)</span>
+-                <span class="value" data-efficiency-percent>—</span>
++          </div>
++          <div class="time-efficiency-edit" data-efficiency-edit-panel hidden>
++            <div class="time-efficiency-edit-row">
++              <label class="time-efficiency-edit-field">
++                <span class="time-efficiency-edit-label">Start date</span>
++                <input type="date" data-efficiency-start-input>
++              </label>
++              <label class="time-efficiency-edit-field">
++                <span class="time-efficiency-edit-label">Weekly goal mode</span>
++                <select data-efficiency-goal-mode-input>
++                  <option value="average">Go off average</option>
++                  <option value="maximum">Go off maximum</option>
++                </select>
++              </label>
++              <div class="time-efficiency-edit-actions">
++                <button type="button" class="time-efficiency-edit-apply" data-efficiency-apply>Apply</button>
++                <button type="button" class="time-efficiency-edit-cancel" data-efficiency-cancel>Cancel</button>
+               </div>
+             </div>
+-            <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
+-            <p class="small muted">Baseline adapts to your average logged hours per day.</p>
++            <p class="small muted time-efficiency-edit-note" data-efficiency-edit-note></p>
+           </div>
+-          <div class="cost-jobs-summary">
+-            <div><span class="label">Jobs tracked</span><span>—</span></div>
+-            <div><span class="label">Total gain / loss</span><span>—</span></div>
+-            <div><span class="label">Avg per job</span><span>—</span></div>
+-            <div><span class="label">Rolling avg (chart)</span><span>—</span></div>
++          <div class="time-efficiency-metrics" role="status" aria-live="polite">
++            <div class="time-efficiency-metric"><span class="label">Actual hours</span><span class="value" data-efficiency-actual data-efficiency-tooltip="Sum of logged cutting hours in the selected date window." title="Sum of logged cutting hours in the selected date window.">—</span></div>
++            <div class="time-efficiency-metric"><span class="label">Current target</span><span class="value" data-efficiency-target data-efficiency-tooltip="Target-to-date: weekly goal converted to daily goal and multiplied by elapsed days in this window." title="Target-to-date: weekly goal converted to daily goal and multiplied by elapsed days in this window.">—</span></div>
++            <div class="time-efficiency-metric"><span class="label">Gap vs target</span><span class="value" data-efficiency-gap-target data-efficiency-tooltip="Actual hours minus target-to-date hours in this window." title="Actual hours minus target-to-date hours in this window.">—</span></div>
++            <div class="time-efficiency-metric"><span class="label">End goal</span><span class="value" data-efficiency-goal data-efficiency-tooltip="End goal: full-window goal hours using your configured weekly goal." title="End goal: full-window goal hours using your configured weekly goal.">—</span></div>
++            <div class="time-efficiency-metric"><span class="label">Avg usage/day</span><span class="value" data-efficiency-average data-efficiency-tooltip="Average logged cutting hours per day across the selected window." title="Average logged cutting hours per day across the selected window.">—</span></div>
++            <div class="time-efficiency-metric"><span class="label">Gap vs goal</span><span class="value" data-efficiency-gap-goal data-efficiency-tooltip="Actual hours minus full-window goal hours." title="Actual hours minus full-window goal hours.">—</span></div>
++            <div class="time-efficiency-metric"><span class="label">Efficiency (to date)</span><span class="value" data-efficiency-percent data-efficiency-tooltip="Efficiency to date: actual hours divided by target-to-date hours." title="Efficiency to date: actual hours divided by target-to-date hours.">—</span></div>
+           </div>
++          <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
++          <p class="small muted">How this works: <strong>Go off average</strong> uses your average cut hours/day. <strong>Go off maximum</strong> uses your dashboard daily-hours goal (default 8 hr/day) and respects the weekend include/exclude setting.</p>
++          <p class="small muted">Baseline adapts to your average logged hours per day.</p>
++        </div>
++        <div class="cost-efficiency-calculator" data-efficiency-calc>
++          <div class="cost-efficiency-calculator-row">
++            <label>
++              <span class="label">Charge / hr (temporary)</span>
++              <input type="number" step="1" min="0" value="${esc((Number.isFinite(Number(calculatorDefaults.chargeRate)) ? Number(calculatorDefaults.chargeRate) : 0).toFixed(2))}" data-efficiency-calc-charge>
++            </label>
++            <label>
++              <span class="label">Cost / hr (temporary)</span>
++              <input type="number" step="1" min="0" value="${esc((Number.isFinite(Number(calculatorDefaults.costRate)) ? Number(calculatorDefaults.costRate) : 0).toFixed(2))}" data-efficiency-calc-cost>
++            </label>
++            <label>
++              <span class="label">Time range</span>
++              <select data-efficiency-calc-range-select>
++                <option value="1m">Past 1 month</option>
++                <option value="2m">Past 2 months</option>
++                <option value="3m">Past 3 months</option>
++                <option value="6m">Past 6 months</option>
++                <option value="1y">Past 1 year</option>
++                <option value="ytd">Year to date</option>
++                <option value="all">All time</option>
++              </select>
++            </label>
++            <button type="button" class="btn secondary" data-efficiency-calc-reset>Reset</button>
++            <button type="button" class="btn secondary" data-go-jobs-history>Go to cutting jobs</button>
++          </div>
++          <p class="small muted" data-efficiency-calc-range-label>Range: past 1 month from central data table rows.</p>
++          <p class="small muted">Temporary calculator only. Refresh resets values to central data table defaults.</p>
++          <p class="small muted" data-efficiency-calc-result>
++            Net total gain (calculator): <strong data-efficiency-calc-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</strong>
++            · Avg / row: <strong data-efficiency-calc-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</strong>
++          </p>
++        </div>
++        <div class="cost-jobs-summary">
++          <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
++          <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
++          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Total net gain</span><span data-efficiency-summary-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
++          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Avg net gain / row</span><span data-efficiency-summary-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
++          <div><span class="label">Total run cost</span><span data-efficiency-summary-cost>${esc(efficiencySnapshot.totalCostLabel || "$0.00")}</span></div>
++          <div><span class="label">Avg run cost / row</span><span data-efficiency-summary-cost-average>${esc(efficiencySnapshot.averageCostLabel || "$0.00")}</span></div>
++        </div>
++        <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
++        <div class="cost-weekly-table-wrap">
+           <table class="cost-table">
+-            <thead><tr><th>Job</th><th>Milestone</th><th>Status</th><th>Cost impact</th></tr></thead>
++            <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net gain</th><th>Task link</th></tr></thead>
+             <tbody>
+-              <tr>
+-                <td colspan="4" class="cost-table-placeholder">Job history visualization coming soon.</td>
+-              </tr>
++              ${efficiencyRows.length ? efficiencyRows.map(row => `
++                <tr data-efficiency-row data-efficiency-id="${esc(row.id || "")}" data-efficiency-date="${esc(row.dateLabel || "")}" data-efficiency-hours="${esc(String(Number(row.hoursValue) || 0))}" data-efficiency-material="${esc(String(Number(row.materialValue || 0)))}">
++                  <td>${esc(row.taskName || "Completed task")}</td>
++                  <td>${esc(row.dateLabel || "—")}</td>
++                  <td>${esc(row.hoursLabel || "0 hr")}</td>
++                  <td>${esc(row.partCostLabel || "$0.00")}</td>
++                  <td data-efficiency-labor-cell>${esc(row.laborCostLabel || "$0.00")}</td>
++                  <td data-efficiency-total-cost-cell>${esc(row.totalCostLabel || "$0.00")}</td>
++                  <td title="${esc(`${row.formulaTitle || efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" data-efficiency-profit-cell>${esc(row.netGainLabel || "$0.00")}</td>
++                  <td>${row.settingsLink ? `<button type="button" class="btn secondary" data-efficiency-open-job="${esc(row.id || "")}">Open job</button>` : "Invalid link"}</td>
++                </tr>
++              `).join("") : `
++                <tr>
++                  <td colspan="8" class="cost-table-placeholder">${esc(efficiencySnapshot.emptyMessage || "No valid completed rows available from the central data table.")}</td>
++                </tr>
++              `}
+             </tbody>
+           </table>
+-          <div class="cost-window-insight">
+-            <div class="chart-info">
+-              <button type="button" class="chart-info-button" aria-describedby="costEfficiencyInsight" aria-label="Explain Cutting Job Efficiency Snapshot">
+-                <span aria-hidden="true">?</span>
+-                <span class="sr-only">Show how the Cutting Job Efficiency Snapshot reveals margin trends</span>
+-              </button>
+-              <div class="chart-info-bubble" id="costEfficiencyInsight" role="tooltip">
+-                <p>${esc(efficiencyInsight)}</p>
+-              </div>
++        </div>
++        <div class="cost-window-insight">
++          <div class="chart-info">
++            <button type="button" class="chart-info-button" aria-describedby="costEfficiencyInsight" aria-label="Explain Cutting Job Efficiency Snapshot">
++              <span aria-hidden="true">?</span>
++              <span class="sr-only">Show how the Cutting Job Efficiency Snapshot reveals margin trends</span>
++            </button>
++            <div class="chart-info-bubble" id="costEfficiencyInsight" role="tooltip">
++              <p>${esc(efficiencyInsight)}</p>
+             </div>
+           </div>
+         </div>
+       </div>
+-    </div>
+-  </div>`;
++    </div></div>`;
+ }
+ 
+ function viewJobs(){
+   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+   const textEsc = (str)=> String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+   const formatCurrency = (value, { showPlus = true } = {})=>{
+     const num = Number(value);
+     const safe = Number.isFinite(num) ? num : 0;
+     const abs = Math.abs(safe);
+     const formatted = new Intl.NumberFormat(undefined, {
+       style: "currency",
+       currency: "USD",
+       minimumFractionDigits: abs < 1000 ? 2 : 0,
+       maximumFractionDigits: abs < 1000 ? 2 : 0
+     }).format(abs);
+     if (safe < 0) return `-${formatted}`;
+     if (safe > 0 && showPlus) return `+${formatted}`;
+     return formatted;
+   };
+   const formatRate = (value, { showPlus = false } = {})=>{
+     const num = Number(value);
+     if (!Number.isFinite(num)) return "—";
+     const abs = Math.abs(num);
+     const formatted = new Intl.NumberFormat(undefined, {
+       style: "currency",
+diff --git a/style.css b/style.css
+index 00f096d972ae544ad56daa8f34a104aebe43169e..8f0be76a35d68b9d02bb8816b02d1d23e07f898f 100644
+--- a/style.css
++++ b/style.css
+@@ -515,50 +515,78 @@ body.cost-timeframe-modal-open{ overflow:hidden; }
+   color:#000;
+ }
+ .cost-data-center-header{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+ .cost-data-center-tabs{ display:flex; gap:8px; margin-bottom:10px; }
+ .cost-data-center-tab{ border:1px solid #a8b6ce; background:#eef3ff; color:#0b1a38; padding:7px 12px; border-radius:6px; cursor:pointer; font-weight:600; }
+ .cost-data-center-tab.is-active{ background:#0a63c2; color:#fff; border-color:#0a63c2; }
+ .cost-data-center-panel-content[hidden]{ display:none !important; }
+ .cost-data-center-search{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px; max-width:360px; }
+ .cost-data-center-search label{ font-weight:600; font-size:14px; }
+ .cost-data-center-search input{ border:1px solid #9aa6bb; border-radius:6px; padding:8px 10px; font-size:14px; color:#000; background:#fff; }
+ .cost-data-center-search-suggestions{ display:flex; flex-direction:column; gap:4px; border:1px solid #b9c4d6; border-radius:6px; background:#fff; padding:4px; }
+ .cost-data-center-suggestion{ text-align:left; border:0; background:#f4f7ff; color:#000; padding:6px 8px; border-radius:4px; cursor:pointer; font-size:13px; }
+ .cost-data-center-suggestion:hover{ background:#e7eeff; }
+ .cost-data-center-panel h3,
+ .cost-data-center-panel .small,
+ .cost-data-center-panel .muted,
+ .cost-data-center-panel .cost-table,
+ .cost-data-center-panel .cost-table th,
+ .cost-data-center-panel .cost-table td,
+ .cost-data-center-panel label,
+ .cost-data-center-panel select,
+ .cost-data-center-panel button{
+   color:#000;
+ }
+ body.cost-data-center-open{ overflow:hidden; }
++.time-efficiency-tooltip{
++  position:fixed;
++  z-index:100100;
++  pointer-events:none;
++  background:#0f172a;
++  color:#f8fafc;
++  border-radius:8px;
++  padding:8px 10px;
++  font-size:12px;
++  line-height:1.35;
++  max-width:min(300px, calc(100vw - 16px));
++  box-shadow:0 16px 34px rgba(2, 8, 20, 0.45);
++  opacity:0;
++  transform:translateY(0);
++  transition:opacity 120ms ease, transform 120ms ease;
++}
++.time-efficiency-tooltip[data-visible="true"]{
++  opacity:1;
++}
++.time-efficiency-tooltip[data-placement="above"][data-visible="true"]{
++  transform:translateY(-2px);
++}
++.time-efficiency-tooltip[data-placement="below"][data-visible="true"]{
++  transform:translateY(2px);
++}
++.time-efficiency-tooltip[hidden]{
++  display:none;
++}
+ 
+ .cost-receipt-modal{ position:fixed; inset:0; z-index:1600; display:flex; align-items:center; justify-content:center; padding:24px 20px; }
+ .cost-receipt-modal[hidden]{ display:none; }
+ .cost-receipt-backdrop{ position:absolute; inset:0; background:rgba(15,23,42,0.55); }
+ .cost-receipt-card{ position:relative; width:min(1100px, 100%); max-height:92vh; background:#fff; border-radius:18px; box-shadow:0 32px 72px rgba(15,23,42,0.28); overflow:hidden; }
+ .cost-receipt-card-body{ position:relative; z-index:2; padding:24px; overflow:auto; max-height:92vh; }
+ .cost-receipt-close{ position:absolute; top:10px; right:12px; border:none; background:none; font-size:28px; cursor:pointer; color:#1e2b45; z-index:3; }
+ .cost-receipt-controls,.cost-receipt-summary-controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px; }
+ .cost-receipt-controls label,.cost-receipt-summary-controls label{ display:flex; flex-direction:column; gap:4px; font-weight:600; color:#1e2b45; }
+ .cost-receipt-controls select,.cost-receipt-summary-controls select{ min-width:240px; padding:6px 8px; border:1px solid #c8d0e0; border-radius:6px; }
+ .cost-receipt-week-table input{ width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cfd7e6; border-radius:6px; font:inherit; }
+ .cost-receipt-week-table td[data-col="total"],.cost-receipt-week-table tfoot th,.cost-receipt-summary-table tfoot th{ font-weight:700; }
+ body.cost-receipt-modal-open{ overflow:hidden; }
+ @media (max-width: 640px){
+   .cost-timeframe-card-body{ padding:24px 18px 28px; }
+   .cost-timeframe-table th,.cost-timeframe-table td{ padding:8px 10px; }
+ }
+ .forecast-table-wrap{ overflow:auto; border-radius:16px; border:1px solid rgba(22,48,92,0.1); background:rgba(248,251,255,0.6); }
+ .forecast-table{ width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+ .forecast-table thead{ background:rgba(16, 61, 130, 0.12); color:#0c2340; }
+ .forecast-table th,
+ .forecast-table td{
+   padding:12px 16px;
+   border-bottom:1px solid rgba(15, 31, 61, 0.08);
+   text-align:right;
+@@ -4347,61 +4375,66 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
+   border: 1px solid #dbe3f6;
+   background: #f0f6ff;
+   border-radius: 10px;
+   padding: 10px 12px;
+   display: flex;
+   flex-direction: column;
+   gap: 10px;
+   width: 100%;
+ }
+ 
+ .time-efficiency-edit-row {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 12px;
+   align-items: flex-end;
+ }
+ 
+ .time-efficiency-edit-field {
+   display: flex;
+   flex-direction: column;
+   gap: 4px;
+   font-size: 12px;
+   color: #0a1f3f;
+ }
+ 
+-.time-efficiency-edit-field input[type="date"] {
++.time-efficiency-edit-field input[type="date"],
++.time-efficiency-edit-field input[type="number"],
++.time-efficiency-edit-field select {
+   border: 1px solid #cbd6ee;
+   border-radius: 8px;
+   padding: 6px 10px;
+   font-size: 14px;
+   color: #0a1f3f;
+   transition: border-color 0.18s ease, box-shadow 0.18s ease;
+   min-width: 180px;
++  background:#fff;
+ }
+ 
+-.time-efficiency-edit-field input[type="date"]:focus {
++.time-efficiency-edit-field input[type="date"]:focus,
++.time-efficiency-edit-field input[type="number"]:focus,
++.time-efficiency-edit-field select:focus {
+   border-color: #0a63c2;
+   box-shadow: 0 0 0 2px rgba(10, 99, 194, 0.18);
+   outline: none;
+ }
+ 
+ .time-efficiency-edit-field input.has-error {
+   border-color: #c53030;
+   box-shadow: 0 0 0 2px rgba(197, 48, 48, 0.18);
+ }
+ 
+ .time-efficiency-edit-actions {
+   display: flex;
+   gap: 8px;
+ }
+ 
+ .time-efficiency-edit-apply,
+ .time-efficiency-edit-cancel {
+   border: none;
+   border-radius: 8px;
+   padding: 6px 12px;
+   font-size: 12px;
+   font-weight: 600;
+   cursor: pointer;
+   transition: transform 0.15s ease, box-shadow 0.18s ease;
+ }
+ 
+EOF
+)
