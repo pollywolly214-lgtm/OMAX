@@ -11947,16 +11947,23 @@ function renderCosts(){
       const totals = visibleRows.reduce((acc, row)=>{
         const hours = Math.max(0, asNumber(row?.hoursValue, 0));
         const material = Math.max(0, asNumber(row?.materialValue ?? row?.materialCostValue, 0));
+        const labor = hours * costRate;
+        const totalCost = labor + material;
         acc.rows += 1;
         acc.net += (hours * (chargeRate - costRate)) - material;
+        acc.cost += totalCost;
         return acc;
-      }, { rows: 0, net: 0 });
+      }, { rows: 0, net: 0, cost: 0 });
       if (totalEl) totalEl.textContent = formatUsd(totals.net);
       if (avgEl) avgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
       const summaryTotalEl = document.querySelector("[data-efficiency-summary-total]");
       const summaryAvgEl = document.querySelector("[data-efficiency-summary-average]");
+      const summaryCostEl = document.querySelector("[data-efficiency-summary-cost]");
+      const summaryCostAvgEl = document.querySelector("[data-efficiency-summary-cost-average]");
       if (summaryTotalEl) summaryTotalEl.textContent = formatUsd(totals.net);
       if (summaryAvgEl) summaryAvgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
+      if (summaryCostEl) summaryCostEl.textContent = formatUsd(totals.cost);
+      if (summaryCostAvgEl) summaryCostAvgEl.textContent = formatUsd(totals.rows ? (totals.cost / totals.rows) : 0);
       const tableRows = Array.from(document.querySelectorAll("[data-efficiency-row]"));
       tableRows.forEach(tr => {
         const rowId = String(tr.getAttribute("data-efficiency-id") || "");

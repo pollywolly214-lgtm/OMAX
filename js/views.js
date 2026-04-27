@@ -142,7 +142,7 @@ function viewDashboard(){
               <div class="time-efficiency-toggles" role="tablist">
                 ${efficiencyButtons}
               </div>
-              <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit range</button>
+              <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit tracking</button>
             </div>
           </div>
           <div class="time-efficiency-edit" data-efficiency-edit-panel hidden>
@@ -2308,7 +2308,7 @@ function viewCosts(model){
               <div class="time-efficiency-toggles" role="tablist">
                 ${efficiencyButtons}
               </div>
-              <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit range</button>
+              <button type="button" class="time-efficiency-edit-btn" data-efficiency-edit>Edit tracking</button>
             </div>
           </div>
           <div class="time-efficiency-edit" data-efficiency-edit-panel hidden>
@@ -2381,8 +2381,8 @@ function viewCosts(model){
           <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
           <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Total net gain</span><span data-efficiency-summary-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
           <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Avg net gain / row</span><span data-efficiency-summary-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
-          <div><span class="label">Total run cost</span><span>${esc(efficiencySnapshot.totalCostLabel || "$0.00")}</span></div>
-          <div><span class="label">Avg run cost / row</span><span>${esc(efficiencySnapshot.averageCostLabel || "$0.00")}</span></div>
+          <div><span class="label">Total run cost</span><span data-efficiency-summary-cost>${esc(efficiencySnapshot.totalCostLabel || "$0.00")}</span></div>
+          <div><span class="label">Avg run cost / row</span><span data-efficiency-summary-cost-average>${esc(efficiencySnapshot.averageCostLabel || "$0.00")}</span></div>
         </div>
         <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
         <div class="cost-weekly-table-wrap">
