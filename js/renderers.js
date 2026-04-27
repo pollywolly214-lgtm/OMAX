@@ -10851,11 +10851,11 @@ function renderCosts(){
         return raw.replace(/["\\]/g, "\\$&");
       };
       const selector = dateKey
-        ? `[data-maintenance-row][data-row-task-id="${cssEsc(taskKey)}"][data-row-date-iso="${cssEsc(dateKey)}"]`
-        : `[data-maintenance-row][data-row-task-id="${cssEsc(taskKey)}"]`;
+        ? `[data-maintenance-row][data-task-id="${cssEsc(taskKey)}"][data-maintenance-date-iso="${cssEsc(dateKey)}"]`
+        : `[data-maintenance-row][data-task-id="${cssEsc(taskKey)}"]`;
       let targetRow = taskKey ? modal.querySelector(selector) : null;
       if (!(targetRow instanceof HTMLElement) && taskKey){
-        targetRow = modal.querySelector(`[data-maintenance-row][data-row-task-id="${cssEsc(taskKey)}"]`);
+        targetRow = modal.querySelector(`[data-maintenance-row][data-task-id="${cssEsc(taskKey)}"]`);
       }
       if (!(targetRow instanceof HTMLElement)) return false;
       const allRows = Array.from(modal.querySelectorAll("[data-maintenance-row-link-highlight]"));
@@ -10867,6 +10867,57 @@ function renderCosts(){
       }, 2400);
       return true;
     };
+    const pulseRow = (row)=>{
+      if (!(row instanceof HTMLElement)) return;
+      row.hidden = false;
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      const prevBg = row.style.backgroundColor;
+      const prevTransition = row.style.transition;
+      row.style.transition = "background-color 0.35s ease";
+      row.style.backgroundColor = "rgba(52, 120, 246, 0.28)";
+      setTimeout(()=>{
+        row.style.backgroundColor = prevBg || "";
+        row.style.transition = prevTransition || "";
+      }, 1700);
+    };
+    const escapeForSelector = (value)=>{
+      const raw = String(value || "");
+      if (typeof CSS !== "undefined" && typeof CSS.escape === "function"){
+        return CSS.escape(raw);
+      }
+      return raw.replace(/["\\]/g, "\\$&");
+    };
+    const focusDataCenterRow = (payload = {})=>{
+      if (!(modal instanceof HTMLElement)) return false;
+      const type = String(payload.type || "").toLowerCase();
+      if (type === "cutting"){
+        setActiveTab("cutting");
+      }else{
+        setActiveTab("maintenance");
+      }
+      openDataCenter({ restoreScroll: true });
+      const panelRoot = modal.querySelector(`[data-dc-panel="${type === "cutting" ? "cutting" : "maintenance"}"]`) || modal;
+      let row = null;
+      if (type === "cutting"){
+        const jobId = String(payload.jobId || "");
+        const dateISO = String(payload.dateISO || "");
+        row = (jobId && panelRoot.querySelector(`[data-cutting-row][data-job-id="${escapeForSelector(jobId)}"]`))
+          || (dateISO && panelRoot.querySelector(`[data-cutting-row][data-cutting-date-iso="${escapeForSelector(dateISO)}"]`))
+          || panelRoot.querySelector("[data-cutting-row]");
+      }else{
+        const taskId = String(payload.taskId || "");
+        const dateISO = String(payload.dateISO || "");
+        row = (taskId && dateISO && panelRoot.querySelector(`[data-maintenance-row][data-task-id="${escapeForSelector(taskId)}"][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`))
+          || (dateISO && panelRoot.querySelector(`[data-maintenance-row][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`))
+          || panelRoot.querySelector("[data-maintenance-row]");
+      }
+      if (!(row instanceof HTMLElement)) return false;
+      pulseRow(row);
+      return true;
+    };
+    if (typeof window !== "undefined"){
+      window.__focusCostDataCenterRow = focusDataCenterRow;
+    }
     if (openBtn instanceof HTMLElement && modal instanceof HTMLElement){
       openBtn.addEventListener("click", openDataCenter);
       closeBtns.forEach(btn => {
@@ -11055,6 +11106,9 @@ function renderCosts(){
           return;
         }
         if (jobId){
+          jobHistorySearchTerm = "";
+          window.jobHistorySearchTerm = "";
+          window.jobHistoryCategoryFilter = String(window.JOB_ROOT_FOLDER_ID || "jobs_root");
           window.pendingJobFocus = { type: "jobRow", id: jobId };
         }
         location.hash = "#/jobs";
@@ -12472,13 +12526,22 @@ function renderCosts(){
   const toggleJobs  = document.getElementById("toggleCostJobs");
   const canvasWrap = content.querySelector(".cost-chart-canvas");
   let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
+  let lastPointerClientPos = null;
   const rangeButtons = Array.from(content.querySelectorAll("[data-cost-range]"));
-  const allowedChartRanges = [1, 3, 6, 12];
-  const defaultChartRange = 6;
+  const allowedChartRanges = ["1", "3", "6", "12", "ytd", "all"];
+  const defaultChartRange = "6";
+  const rangeLabelMap = new Map([
+    ["1", "1 month"],
+    ["3", "3 months"],
+    ["6", "6 months"],
+    ["12", "12 months"],
+    ["ytd", "YTD"],
+    ["all", "All time"]
+  ]);
 
   const normalizeChartRange = (value)=>{
-    const months = Number(value);
-    return allowedChartRanges.includes(months) ? months : defaultChartRange;
+    const key = String(value == null ? "" : value).toLowerCase();
+    return allowedChartRanges.includes(key) ? key : defaultChartRange;
   };
 
   const getChartRangeState = ()=>{
@@ -12538,17 +12601,27 @@ function renderCosts(){
       return { points: [], domainStart: null, domainEnd: null };
     }
 
-    const approximateDaysPerMonth = 31;
-    const limit = Math.max(180, Math.ceil(normalizedRange * approximateDaysPerMonth));
-
     const latestPoint = sanitized[sanitized.length - 1];
     const latestTime = latestPoint.date.getTime();
     const cutoff = new Date(latestTime);
     cutoff.setHours(0, 0, 0, 0);
-    cutoff.setMonth(cutoff.getMonth() - normalizedRange);
+    if (normalizedRange === "ytd"){
+      cutoff.setMonth(0, 1);
+    }else if (normalizedRange !== "all"){
+      const months = Number(normalizedRange);
+      cutoff.setMonth(cutoff.getMonth() - (Number.isFinite(months) ? months : 6));
+    }else{
+      const oldest = sanitized[0]?.date;
+      if (oldest instanceof Date && !Number.isNaN(oldest.getTime())){
+        cutoff.setTime(oldest.getTime());
+        cutoff.setHours(0, 0, 0, 0);
+      }
+    }
     const cutoffTime = cutoff.getTime();
 
-    let filtered = sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
+    let filtered = normalizedRange === "all"
+      ? sanitized.slice()
+      : sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
 
     if (!filtered.length){
       const fallback = sanitized[sanitized.length - 1];
@@ -12560,7 +12633,9 @@ function renderCosts(){
       }
     }
 
-    const limited = limitChartSeries(filtered, limit);
+    const limited = normalizedRange === "all"
+      ? filtered.slice()
+      : limitChartSeries(filtered, Math.max(180, Math.ceil((Number(normalizedRange) || 6) * 31)));
     if (!allowedChartRanges.includes(normalizedRange)){
       return { points: limited, domainStart: null, domainEnd: null };
     }
@@ -12673,32 +12748,82 @@ function renderCosts(){
     canvas.style.cursor = "pointer";
   };
 
-  const handlePointerHover = (event)=>{
+  const getPointerMetrics = (clientX, clientY)=>{
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const clientWidth = canvas.clientWidth || rect.width || canvas.width;
     const clientHeight = canvas.clientHeight || rect.height || canvas.height;
     const scaleX = canvas.width / Math.max(1, clientWidth);
     const scaleY = canvas.height / Math.max(1, clientHeight);
-    const pointerX = (event.clientX - rect.left) * scaleX;
-    const pointerY = (event.clientY - rect.top) * scaleY;
+    const pointerX = (Number(clientX) - rect.left) * scaleX;
+    const pointerY = (Number(clientY) - rect.top) * scaleY;
+    return { rect, scaleX, scaleY, pointerX, pointerY };
+  };
+  const resolvePointerTarget = (event, { allowProximity = false } = {})=>{
+    if (!canvas) return null;
+    const metrics = getPointerMetrics(event?.clientX, event?.clientY);
+    if (!metrics) return null;
+    const { scaleX, scaleY, pointerX, pointerY } = metrics;
     const targets = Array.isArray(canvas.__costChartTargets) ? canvas.__costChartTargets : [];
-    let hovered = null;
     for (const target of targets){
       if (!target || !target.rect) continue;
       const { x, y, width, height } = target.rect;
       if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
-        hovered = target;
-        break;
+        return { target, scaleX, scaleY };
       }
     }
+    if (!allowProximity) return null;
+    const proximityRadius = 14 * Math.max(scaleX, scaleY);
+    let nearest = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (const target of targets){
+      if (!target || !target.rect) continue;
+      const centerX = Number(target.rect.x) + (Number(target.rect.width) / 2);
+      const centerY = Number(target.rect.y) + (Number(target.rect.height) / 2);
+      const dx = pointerX - centerX;
+      const dy = pointerY - centerY;
+      const distance = Math.sqrt((dx * dx) + (dy * dy));
+      if (distance < nearestDistance){
+        nearest = target;
+        nearestDistance = distance;
+      }
+    }
+    if (nearest && nearestDistance <= proximityRadius){
+      return { target: nearest, scaleX, scaleY };
+    }
+    return null;
+  };
+  const handlePointerHover = (event)=>{
+    if (!canvas) return;
+    lastPointerClientPos = {
+      x: Number(event.clientX),
+      y: Number(event.clientY)
+    };
+    const resolved = resolvePointerTarget(event, { allowProximity: true });
+    const hovered = resolved?.target || null;
     if (hovered){
-      showTooltip(hovered, { scaleX, scaleY });
+      showTooltip(hovered, { scaleX: resolved.scaleX, scaleY: resolved.scaleY });
     }else{
       hideTooltip();
     }
   };
-
+  const refreshTooltipFromLastPointer = ()=>{
+    if (!canvas || !lastPointerClientPos) return;
+    const rect = canvas.getBoundingClientRect();
+    const withinCanvas = lastPointerClientPos.x >= rect.left
+      && lastPointerClientPos.x <= rect.right
+      && lastPointerClientPos.y >= rect.top
+      && lastPointerClientPos.y <= rect.bottom;
+    if (!withinCanvas){
+      hideTooltip();
+      return;
+    }
+    const syntheticEvent = {
+      clientX: lastPointerClientPos.x,
+      clientY: lastPointerClientPos.y
+    };
+    handlePointerHover(syntheticEvent);
+  };
   const attachTooltipHandlers = ()=>{
     if (!canvas) return;
     ensureTooltip();
@@ -12707,13 +12832,30 @@ function renderCosts(){
     }
     const pointerMove = (event)=> handlePointerHover(event);
     const pointerDown = (event)=> handlePointerHover(event);
-    const pointerLeave = ()=> hideTooltip();
+    const pointerClick = (event)=>{
+      lastPointerClientPos = {
+        x: Number(event.clientX),
+        y: Number(event.clientY)
+      };
+      const target = resolvePointerTarget(event, { allowProximity: true })?.target || null;
+      if (!target || !target.rowRef || typeof window === "undefined") return;
+      const focusFn = window.__focusCostDataCenterRow;
+      if (typeof focusFn === "function"){
+        focusFn(target.rowRef);
+      }
+    };
+    const pointerLeave = ()=>{
+      lastPointerClientPos = null;
+      hideTooltip();
+    };
     canvas.addEventListener("pointermove", pointerMove);
     canvas.addEventListener("pointerdown", pointerDown);
+    canvas.addEventListener("click", pointerClick);
     canvas.addEventListener("pointerleave", pointerLeave);
     canvas.__costHoverCleanup = ()=>{
       canvas.removeEventListener("pointermove", pointerMove);
       canvas.removeEventListener("pointerdown", pointerDown);
+      canvas.removeEventListener("click", pointerClick);
       canvas.removeEventListener("pointerleave", pointerLeave);
       hideTooltip();
     };
@@ -12729,9 +12871,40 @@ function renderCosts(){
   const state = getCostLayoutState();
 
   const redraw = ()=>{
+    const formatCurrencyUnsigned = (value)=>{
+      const safe = Math.abs(Number(value) || 0);
+      const decimals = safe < 1000 ? 2 : 0;
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
+      }).format(safe);
+    };
+    const formatCurrencySigned = (value)=>{
+      const safe = Number(value) || 0;
+      const base = formatCurrencyUnsigned(safe);
+      if (safe < 0) return `-${base}`;
+      if (safe > 0) return `+${base}`;
+      return base;
+    };
     const { months } = getChartRangeState();
     const maintenanceRange = filterChartSeriesByRange(maintenanceSeriesBase, months);
     const jobRange = filterChartSeriesByRange(jobSeriesBase, months);
+    const maintenanceCostTotalInWindow = maintenanceRange.points.reduce((sum, item) => {
+      const value = Number(item?.value) || 0;
+      return sum + Math.abs(value);
+    }, 0);
+    const cutCountInWindow = jobRange.points.length;
+    const maintenanceCostPerCutValue = cutCountInWindow > 0
+      ? (maintenanceCostTotalInWindow / cutCountInWindow)
+      : 0;
+    const maintenanceCostPerCutLabel = formatCurrencyUnsigned(maintenanceCostPerCutValue);
+    const cuttingTotalInWindow = jobRange.points.reduce((sum, item) => sum + (Number(item?.value) || 0), 0);
+    const cuttingAverageValueInWindow = jobRange.points.length
+      ? (cuttingTotalInWindow / jobRange.points.length)
+      : 0;
+    const cuttingAverageLabelInWindow = formatCurrencySigned(cuttingAverageValueInWindow);
 
     const domainStarts = [maintenanceRange.domainStart, jobRange.domainStart]
       .map(value => Number.isFinite(value) ? Number(value) : null)
@@ -12744,18 +12917,40 @@ function renderCosts(){
       ...model,
       maintenanceSeries: maintenanceRange.points,
       jobSeries: jobRange.points,
+      maintenanceCostPerCutValue,
+      maintenanceCostPerCutLabel,
+      maintenanceCostPerCutWindowLabel: rangeLabelMap.get(months) || "selected range",
+      cuttingAverageValue: cuttingAverageValueInWindow,
+      cuttingAverageLabel: cuttingAverageLabelInWindow,
       chartDomain: (domainStarts.length && domainEnds.length)
         ? { start: Math.min(...domainStarts), end: Math.max(...domainEnds) }
         : null
     };
+    const windowLabel = rangeLabelMap.get(months) || String(months || "selected range");
+    const maintenanceCostPerCutEl = content.querySelector("[data-maint-cost-per-cut-label]");
+    if (maintenanceCostPerCutEl){
+      maintenanceCostPerCutEl.textContent = maintenanceCostPerCutLabel;
+      maintenanceCostPerCutEl.setAttribute(
+        "title",
+        `Average maintenance cost per cut (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${cutCountInWindow} completed cut${cutCountInWindow === 1 ? "" : "s"}.`
+      );
+    }
+    const cuttingAverageEl = content.querySelector("[data-cutting-average-label]");
+    if (cuttingAverageEl){
+      cuttingAverageEl.textContent = cuttingAverageLabelInWindow;
+      cuttingAverageEl.setAttribute(
+        "title",
+        `Average cutting gain/loss (${windowLabel}) = total cutting net ${formatCurrencySigned(cuttingTotalInWindow)} ÷ ${jobRange.points.length} completed job${jobRange.points.length === 1 ? "" : "s"}.`
+      );
+    }
     updateChartRangeButtons();
     if (canvas){
-      hideTooltip();
       resizeCostChartCanvas(canvas);
       drawCostChart(canvas, chartModel, {
         maintenance: !toggleMaint || toggleMaint.checked,
         jobs: !toggleJobs || toggleJobs.checked
       });
+      refreshTooltipFromLastPointer();
       updateCostChartResizeSnapshot(canvas);
     }
     if (typeof refreshCostTrainer === "function"){
@@ -13618,7 +13813,58 @@ function computeCostModel(){
     });
   };
 
-  const maintenanceSeries = maintenanceHistory.map(entry => {
+  const resolveCuttingJobHours = (job, eff = null)=>{
+    const manualLogs = Array.isArray(job?.manualLogs) ? job.manualLogs : [];
+    const latestManualLog = manualLogs
+      .filter(entry => Number.isFinite(Number(entry?.completedHours)) && Number(entry.completedHours) >= 0)
+      .sort((a, b) => String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")))
+      .pop() || null;
+    const candidates = [
+      Number(job?.actualHours),
+      Number(latestManualLog?.completedHours),
+      Number(job?.durationHours),
+      Number(job?.completedHours),
+      Number(eff?.actualHours),
+      Number(job?.estimateHours)
+    ];
+    const positive = candidates.find(val => Number.isFinite(val) && val > 0);
+    const fallback = candidates.find(val => Number.isFinite(val) && val >= 0);
+    return Number.isFinite(positive) ? positive : (Number.isFinite(fallback) ? fallback : 0);
+  };
+
+  const resolveCuttingJobMaterialCost = (job)=>{
+    const overrides = [job?.materialTotal, job?.materialSpend, job?.totalMaterialCost, job?.materialCostTotal];
+    for (const entry of overrides){
+      const num = Number(entry);
+      if (Number.isFinite(num)) return Math.max(0, num);
+    }
+    const unit = Number(job?.materialCost);
+    const qty = Number(job?.materialQty);
+    if (Number.isFinite(unit) && Number.isFinite(qty) && qty > 0){
+      return Math.max(0, unit * qty);
+    }
+    return Number.isFinite(unit) && unit > 0 ? unit : 0;
+  };
+
+  const resolveCuttingJobNetTotal = (job, eff = null)=>{
+    const hours = resolveCuttingJobHours(job, eff);
+    const chargeRateRaw = Number(job?.chargeRate ?? eff?.chargeRate);
+    const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
+    const cutCostRateRaw = Number(job?.costRate ?? eff?.costRate);
+    const cutCostRate = Number.isFinite(cutCostRateRaw) && cutCostRateRaw >= 0 ? cutCostRateRaw : JOB_BASE_COST_PER_HOUR;
+    const materialCost = resolveCuttingJobMaterialCost(job);
+    const billedAmount = chargeRate * Math.max(0, hours);
+    const cutCost = Math.max(0, hours) * cutCostRate;
+    return {
+      hours,
+      chargeRate,
+      cutCostRate,
+      materialCost,
+      total: billedAmount - materialCost - cutCost
+    };
+  };
+
+  let maintenanceSeries = maintenanceHistory.map(entry => {
     const dateLabel = (entry.date instanceof Date && !Number.isNaN(entry.date.getTime()))
       ? entry.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
       : "the latest log";
@@ -13643,7 +13889,7 @@ function computeCostModel(){
     for (const job of completedJobsList){
       if (!job) continue;
       const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
-      const gainLoss = eff && Number.isFinite(eff.gainLoss) ? Number(eff.gainLoss) : 0;
+      const gainLoss = resolveCuttingJobNetTotal(job, eff).total;
       const deltaHours = eff && Number.isFinite(eff.deltaHours) ? Number(eff.deltaHours) : 0;
       let date = null;
       if (job.completedAtISO){
@@ -13687,7 +13933,13 @@ function computeCostModel(){
       });
 
       if (date instanceof Date && !Number.isNaN(date.getTime())){
-        jobSeriesRaw.push({ date, rawValue: gainLoss, label: job.name || "Job" });
+        jobSeriesRaw.push({
+          date,
+          rawValue: gainLoss,
+          label: job.name || "Job",
+          jobId: job.id != null ? String(job.id) : null,
+          dateISO: ymd(date)
+        });
       }
 
       totalGainLoss += gainLoss;
@@ -13699,7 +13951,7 @@ function computeCostModel(){
     for (const job of cuttingJobs){
       if (!job) continue;
       const eff = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : { gainLoss:0, deltaHours:0 };
-      const gainLoss = Number(eff?.gainLoss) || 0;
+      const gainLoss = resolveCuttingJobNetTotal(job, eff).total;
       const deltaHours = Number(eff?.deltaHours) || 0;
       let date = null;
       if (job.dueISO){
@@ -13738,19 +13990,19 @@ function computeCostModel(){
   const jobSeriesSorted = jobSeriesRaw.slice().sort((a,b)=> a.date - b.date);
   const jobSeries = [];
   if (jobSeriesSorted.length){
-    let cumulative = 0;
     jobSeriesSorted.forEach((pt, idx)=>{
-      cumulative += pt.rawValue;
-      const rollingValue = cumulative / (idx + 1);
       const dateLabel = (pt.date instanceof Date && !Number.isNaN(pt.date.getTime()))
         ? pt.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
         : "the latest completed job";
+      const pointValue = Number(pt.rawValue) || 0;
       const jobCount = idx + 1;
       jobSeries.push({
         date: pt.date,
-        value: rollingValue,
+        value: pointValue,
         count: jobCount,
-        detail: `Rolling average profit per cutting job across ${jobCount} completed job${jobCount === 1 ? "" : "s"} through ${dateLabel}.`
+        detail: `Completed cutting job #${jobCount} recorded ${pointValue >= 0 ? "a gain" : "a loss"} on ${dateLabel}.`,
+        jobId: pt.jobId || null,
+        dateISO: pt.dateISO || ymd(pt.date)
       });
     });
   }
@@ -14461,53 +14713,8 @@ function computeCostModel(){
         ? `${categoryName} · ${projectNumber}`
         : categoryName;
 
-      const chargeRateRaw = Number(job?.chargeRate ?? job?.efficiency?.chargeRate);
-      const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
-      const computedCharge = chargeRate * cutHours;
-      const totalChargeRaw = Number(job?.totalCharge ?? job?.revenue ?? job?.invoiceTotal);
-      const revenue = Number.isFinite(totalChargeRaw) ? totalChargeRaw : computedCharge;
-
-      const materialOverrides = [job?.materialTotal, job?.materialSpend, job?.totalMaterialCost, job?.materialCostTotal];
-      let materialCost = null;
-      for (const entry of materialOverrides){
-        const num = Number(entry);
-        if (Number.isFinite(num)){ materialCost = Math.max(0, num); break; }
-      }
-      if (materialCost == null){
-        const unit = Number(job?.materialCost);
-        const qty = Number(job?.materialQty);
-        materialCost = Math.max(0, (Number.isFinite(unit) ? unit : 0) * (Number.isFinite(qty) ? qty : 0));
-      }
-
-      const laborOverrides = [job?.laborCost, job?.laborTotal, job?.laborSpend, job?.totalLaborCost, job?.actualLaborCost];
-      let laborCost = null;
-      for (const entry of laborOverrides){
-        const num = Number(entry);
-        if (Number.isFinite(num)){ laborCost = Math.max(0, num); break; }
-      }
-      if (laborCost == null){
-        laborCost = Math.max(0, cutHours) * JOB_BASE_COST_PER_HOUR;
-      }
-
-      const machineOverrides = [job?.machineCost, job?.machineTotal, job?.equipmentCost, job?.machinesCost, job?.machineSpend];
-      let machineCost = 0;
-      for (const entry of machineOverrides){
-        const num = Number(entry);
-        if (Number.isFinite(num)){ machineCost = Math.max(0, num); break; }
-      }
-
-      const overheadOverrides = [job?.overheadCost, job?.overheadTotal, job?.overheadSpend, job?.overhead];
-      let overheadCost = 0;
-      for (const entry of overheadOverrides){
-        const num = Number(entry);
-        if (Number.isFinite(num)){ overheadCost = Math.max(0, num); break; }
-      }
-
-      const totalCostRaw = Number(job?.totalCost);
-      const totalCost = Number.isFinite(totalCostRaw)
-        ? totalCostRaw
-        : (materialCost + laborCost + machineCost + overheadCost);
-      const cutCost = revenue - totalCost;
+      const jobNet = resolveCuttingJobNetTotal(job, eff);
+      const cutCost = Number(jobNet.total) || 0;
       const normalizedCutCost = Number.isFinite(cutCost) ? cutCost : 0;
       return {
         id: String(job.id || "cut"),
@@ -14765,17 +14972,16 @@ function computeCostModel(){
         if (!job) return null;
         jobAutoId += 1;
         const eff = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
-        const actualCandidates = [job?.actualHours, eff?.actualHours];
-        let actualHours = actualCandidates.find(val => Number.isFinite(Number(val)) && Number(val) >= 0);
-        actualHours = Number.isFinite(actualHours) ? Number(actualHours) : 0;
+        const actualHours = resolveCuttingJobHours(job, eff);
         const estimateHours = Number(job?.estimateHours);
         const estimateSafe = Number.isFinite(estimateHours) && estimateHours > 0 ? estimateHours : 0;
         const durationHours = actualHours > 0 ? actualHours : estimateSafe;
-        const materialCost = materialFromJob(job);
-        const laborCost = laborFromJob(job, durationHours);
+        const materialCost = resolveCuttingJobMaterialCost(job);
+        const laborCost = Math.max(0, durationHours) * (Number.isFinite(Number(job?.costRate)) ? Number(job.costRate) : JOB_BASE_COST_PER_HOUR);
         const machineCost = machineFromJob(job);
         const overheadCost = overheadFromJob(job);
-        const totalCost = materialCost + laborCost + machineCost + overheadCost;
+        const jobNet = resolveCuttingJobNetTotal(job, eff);
+        const totalCost = Number(jobNet.total) || 0;
         const id = job && job.id != null ? String(job.id) : `job_${jobAutoId}`;
         const name = job?.name || "Job";
         const categoryId = normalizeCategoryId(job?.cat);
@@ -14816,7 +15022,7 @@ function computeCostModel(){
           dueISO,
           completedISO,
           chargeRate: Number.isFinite(chargeRate) ? chargeRate : JOB_RATE_PER_HOUR,
-          gainLoss: Number(eff?.gainLoss) || 0,
+          gainLoss: totalCost,
           deltaHours: Number.isFinite(deltaHours) ? deltaHours : 0,
           code
         };
@@ -15035,8 +15241,8 @@ function computeCostModel(){
     : "No usage history yet. Log machine hours to estimate maintenance spend.";
   const jobEmpty = "Add cutting jobs with estimates to build the efficiency tracker.";
 
-  const chartNote = `Maintenance line allocates interval pricing plus as-required spend per logged hour (${asReqAnnualActual > 0 ? "derived from approved orders" : "using task estimates when orders are unavailable"}); cutting jobs line shows the rolling average gain/loss at ${formatterCurrency(JOB_RATE_PER_HOUR, { decimals: 0 })}/hr.`;
-  const chartInfo = "Maintenance trend distributes interval task pricing and approved as-required spend across each logged machine hour so you can monitor burn rate, while the cutting jobs trend plots rolling average gain or loss to highlight profitability swings.";
+  const chartNote = "Maintenance line shows negative loss values (blue), and cutting jobs line shows per-job net gain/loss (green when profitable, negative if jobs become unprofitable). Hover or click any point for details, then click to jump to matching Data Center rows.";
+  const chartInfo = "Maintenance trend is plotted as negative cost impact, while cutting jobs are plotted as each completed job’s net result so profitability changes are visible immediately. Point hover/click reveals context and can jump to linked Data Center rows.";
 
   const orderSorted = orderHistory.slice().sort((a,b)=>{
     const aTime = new Date(a.resolvedAt || a.createdAt || 0).getTime();
@@ -15096,32 +15302,17 @@ function computeCostModel(){
       .filter(entry => Number.isFinite(Number(entry?.completedHours)))
       .sort((a, b) => String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")))
       .pop() || null;
-    const efficiencyActualHours = Number(job?.efficiency?.actualHours);
     const computedEfficiency = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
-    const computedActualHours = Number(computedEfficiency?.actualHours);
-    const actualHoursCandidates = [
-      Number(job?.actualHours),
-      Number(job?.durationHours),
-      Number(job?.completedHours),
-      Number(job?.estimateHours),
-      Number(latestManualLog?.completedHours),
-      efficiencyActualHours,
-      computedActualHours
-    ];
-    const positiveHours = actualHoursCandidates.find(val => Number.isFinite(val) && val > 0);
-    const fallbackHours = actualHoursCandidates.find(val => Number.isFinite(val) && val >= 0);
-    const hours = Number.isFinite(positiveHours) ? positiveHours : (Number.isFinite(fallbackHours) ? fallbackHours : 0);
+    const jobNet = resolveCuttingJobNetTotal(job, computedEfficiency);
+    const hours = Number(jobNet.hours) || 0;
     const categoryKey = categoryId || "__uncategorized__";
     const categoryCutCount = cuttingCategoryRemaining.get(categoryKey) || 1;
     cuttingCategoryRemaining.set(categoryKey, Math.max(0, categoryCutCount - 1));
-    const chargeRateRaw = Number(job?.chargeRate);
-    const costRateRaw = Number(job?.costRate);
-    const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
-    const costRate = Number.isFinite(costRateRaw) && costRateRaw >= 0 ? costRateRaw : JOB_BASE_COST_PER_HOUR;
-    const materialCost = Number(job?.materialCost);
+    const chargeRate = Number.isFinite(Number(jobNet.chargeRate)) ? Number(jobNet.chargeRate) : JOB_RATE_PER_HOUR;
+    const costRate = Number.isFinite(Number(jobNet.cutCostRate)) ? Number(jobNet.cutCostRate) : JOB_BASE_COST_PER_HOUR;
+    const materialCost = Number(jobNet.materialCost);
     const materialQty = Number(job?.materialQty);
-    const materialCostValue = Number.isFinite(materialCost) ? materialCost : 0;
-    const totalProfit = ((chargeRate * hours) - (costRate * hours)) - materialCostValue;
+    const totalProfit = Number(jobNet.total) || 0;
     const completedISO = typeof job?.completedAtISO === "string" && job.completedAtISO ? job.completedAtISO : "";
     return {
       id: job?.id != null ? String(job.id) : `completed_job_${index}`,
@@ -15597,6 +15788,49 @@ function computeCostModel(){
     counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1"
   }));
 
+  const maintenanceTrendRows = maintenanceDataTableRows.filter(row => {
+    if (!row) return false;
+    if (!row.taskId || !row.settingsLink) return false;
+    if (!toHistoryDateKey(row.dateISO)) return false;
+    return Number.isFinite(Number(row.totalCost)) && Number(row.totalCost) >= 0;
+  });
+  const maintenanceCostByDate = new Map();
+  maintenanceTrendRows.forEach(row => {
+    const dateISO = toHistoryDateKey(row.dateISO);
+    if (!dateISO) return;
+    const prior = maintenanceCostByDate.get(dateISO) || 0;
+    maintenanceCostByDate.set(dateISO, prior + Math.max(0, Number(row.totalCost) || 0));
+  });
+  const maintenanceSeriesFromDataTable = Array.from(maintenanceCostByDate.entries())
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    .map(([dateISO, totalCost]) => {
+      const parsedDate = typeof parseDateLocal === "function"
+        ? (parseDateLocal(dateISO) || new Date(dateISO))
+        : new Date(dateISO);
+      const date = (parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime()))
+        ? parsedDate
+        : new Date(dateISO);
+      const dayRows = maintenanceTrendRows.filter(row => toHistoryDateKey(row.dateISO) === dateISO);
+      const taskCount = dayRows.length;
+      return {
+        date,
+        value: -Math.abs(totalCost),
+        dateISO,
+        taskId: dayRows.length === 1 ? String(dayRows[0].taskId || "") : null,
+        detail: `${taskCount} completed maintenance ${taskCount === 1 ? "occurrence" : "occurrences"} recorded in the data center table on ${dateISO}.`
+      };
+    });
+  maintenanceSeries = maintenanceSeriesFromDataTable;
+  const maintenanceAverageValue = maintenanceSeries.length
+    ? (maintenanceSeries.reduce((sum, item) => sum + (Number(item?.value) || 0), 0) / maintenanceSeries.length)
+    : 0;
+  const cuttingAverageValue = jobSeries.length
+    ? (jobSeries.reduce((sum, item) => sum + (Number(item?.value) || 0), 0) / jobSeries.length)
+    : 0;
+  const maintenanceCostTotalAll = maintenanceSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
+  const cutCountAll = jobSeries.length;
+  const maintenanceCostPerCutValue = cutCountAll > 0 ? (maintenanceCostTotalAll / cutCountAll) : 0;
+
   return {
     summaryCards,
     timeframeRows: timeframeRowsCentral,
@@ -15611,11 +15845,18 @@ function computeCostModel(){
     jobCategoryAnalytics,
     chartNote,
     chartInfo,
+    maintenanceAverageValue,
+    maintenanceAverageLabel: formatterCurrency(maintenanceAverageValue, { showPlus: true, decimals: 0 }),
+    maintenanceCostPerCutValue,
+    maintenanceCostPerCutLabel: formatterCurrency(maintenanceCostPerCutValue, { decimals: maintenanceCostPerCutValue < 1000 ? 2 : 0 }),
+    maintenanceCostPerCutWindowLabel: "6 months",
+    cuttingAverageValue,
+    cuttingAverageLabel: formatterCurrency(cuttingAverageValue, { showPlus: true, decimals: 0 }),
     orderRequestSummary,
     maintenanceDataTable,
     cuttingJobsDataTable,
     chartColors: COST_CHART_COLORS,
-    maintenanceSeries: maintenanceSeriesCentral,
+    maintenanceSeries: maintenanceSeriesFromDataTable,
     jobSeries,
     weeklyReports
   };
@@ -15882,8 +16123,19 @@ function drawCostChart(canvas, model, show){
     if (value > 0) return `+${formatted}`;
     return formatted;
   };
+  const maintenanceAvg = Number(model?.maintenanceCostPerCutValue ?? model?.maintenanceAverageValue) || 0;
+  const cuttingAvg = Number(model?.cuttingAverageValue) || 0;
+  const maintenanceAvgLabel = model?.maintenanceCostPerCutLabel || model?.maintenanceAverageLabel || formatMoney(maintenanceAvg);
+  const cuttingAvgLabel = model?.cuttingAverageLabel || formatMoney(cuttingAvg);
+  const maintenanceWindowLabel = String(model?.maintenanceCostPerCutWindowLabel || "selected range");
 
   ctx.font = "12px sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillStyle = model.chartColors.maintenance;
+  ctx.fillText(`Avg maint cost/cut (${maintenanceWindowLabel}): ${maintenanceAvgLabel}`, left, 14);
+  ctx.fillStyle = model.chartColors.jobs;
+  ctx.fillText(`Avg cutting gain/loss: ${cuttingAvgLabel}`, Math.max(left + 250, W * 0.45), 14);
+
   if (0 >= yMin && 0 <= yMax){
     const zeroY = Y(0);
     ctx.strokeStyle = "#d0d5e2";
@@ -15973,12 +16225,33 @@ function drawCostChart(canvas, model, show){
     ctx.stroke();
 
     ctx.fillStyle = series.color;
+    const datasetLabel = series.key === "maintenance" ? "Maintenance" : "Cutting jobs";
     points.forEach(pt => {
       const x = X(pt.date.getTime());
       const y = Y(Number(pt.value));
       ctx.beginPath();
       ctx.arc(x, y, 3, 0, Math.PI*2);
       ctx.fill();
+      const valueLabel = formatMoney(Number(pt.value));
+      const dateLabel = (pt.date instanceof Date && !Number.isNaN(pt.date.getTime()))
+        ? pt.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+        : "the latest update";
+      let detail = (typeof pt.detail === "string" && pt.detail.trim()) ? pt.detail.trim() : "";
+      if (!detail){
+        detail = series.key === "maintenance"
+          ? `Maintenance loss recorded on ${dateLabel}.`
+          : `Cutting job result recorded on ${dateLabel}.`;
+      }
+      hitTargets.push({
+        key: series.key,
+        datasetLabel,
+        valueLabel,
+        detail,
+        rowRef: series.key === "maintenance"
+          ? { type: "maintenance", dateISO: pt.dateISO || ymd(pt.date), taskId: pt.taskId || null }
+          : { type: "cutting", jobId: pt.jobId || null, dateISO: pt.dateISO || ymd(pt.date) },
+        rect: { x: x - 8, y: y - 8, width: 16, height: 16 }
+      });
     });
 
     const last = points[points.length - 1];
@@ -16004,7 +16277,6 @@ function drawCostChart(canvas, model, show){
       ctx.fillText(label, boxX + paddingX, boxY - (boxHeight / 2));
       ctx.textBaseline = "alphabetic";
 
-      const datasetLabel = series.key === "maintenance" ? "Maintenance" : "Cutting jobs";
       const valueLabel = formatMoney(Number(last.value));
       const dateLabel = (last.date instanceof Date && !Number.isNaN(last.date.getTime()))
         ? last.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
@@ -16012,14 +16284,17 @@ function drawCostChart(canvas, model, show){
       let detail = (typeof last.detail === "string" && last.detail.trim()) ? last.detail.trim() : "";
       if (!detail){
         detail = series.key === "maintenance"
-          ? `Estimated maintenance dollars allocated to hours logged on ${dateLabel}.`
-          : `Rolling average profit per cutting job through ${dateLabel}.`;
+          ? `Maintenance loss recorded on ${dateLabel}.`
+          : `Cutting job gain/loss recorded on ${dateLabel}.`;
       }
       hitTargets.push({
         key: series.key,
         datasetLabel,
         valueLabel,
         detail,
+        rowRef: series.key === "maintenance"
+          ? { type: "maintenance", dateISO: last.dateISO || ymd(last.date), taskId: last.taskId || null }
+          : { type: "cutting", jobId: last.jobId || null, dateISO: last.dateISO || ymd(last.date) },
         rect: { x: boxX, y: boxY - boxHeight, width: boxWidth, height: boxHeight }
       });
     }
@@ -16149,16 +16424,25 @@ function renderJobs(){
       });
     } else if (pendingJobFocus.type === "jobRow" && pendingJobFocus.id != null){
       requestAnimationFrame(()=>{
-        const targetRow = content.querySelector(`[data-job-row="${pendingJobFocus.id}"], [data-history-row="${pendingJobFocus.id}"]`);
-        if (targetRow instanceof HTMLElement){
-          targetRow.classList.add("job-row-link-highlight");
-          try {
-            targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
-          } catch (_err){
-            try { targetRow.scrollIntoView(); } catch(__){}
+        const targetId = String(pendingJobFocus.id);
+        const maxAttempts = 20;
+        const retryDelayMs = 180;
+        const focusJobRowWithRetry = (attempt = 0)=>{
+          const targetRow = content.querySelector(`[data-job-row="${targetId}"], [data-history-row="${targetId}"]`);
+          if (targetRow instanceof HTMLElement){
+            targetRow.classList.add("job-row-link-highlight");
+            try {
+              targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+            } catch (_err){
+              try { targetRow.scrollIntoView(); } catch(__){}
+            }
+            setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2000);
+            return;
           }
-          setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2000);
-        }
+          if (attempt >= maxAttempts) return;
+          setTimeout(()=> focusJobRowWithRetry(attempt + 1), retryDelayMs);
+        };
+        focusJobRowWithRetry(0);
       });
     }
   }
@@ -18252,6 +18536,9 @@ function renderJobs(){
         gainLoss
       };
 
+      // Keep both shared references in sync so a re-render or background refresh
+      // does not resurrect stale history values (e.g., old actualHours).
+      window.completedCuttingJobs = completedCuttingJobs;
       editingCompletedJobsSet().delete(String(id));
       saveCloudDebounced();
       toast("History updated");
