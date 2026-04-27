@@ -12932,7 +12932,7 @@ function renderCosts(){
       maintenanceCostPerCutEl.textContent = maintenanceCostPerCutLabel;
       maintenanceCostPerCutEl.setAttribute(
         "title",
-        `Average maintenance cost per cut (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${cutCountInWindow} completed cut${cutCountInWindow === 1 ? "" : "s"}.`
+        `Average maintenance cost per completed cut (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${cutCountInWindow} completed cut${cutCountInWindow === 1 ? "" : "s"}. This is not per cut hour.`
       );
     }
     const cuttingAverageEl = content.querySelector("[data-cutting-average-label]");
@@ -16132,7 +16132,7 @@ function drawCostChart(canvas, model, show){
   ctx.font = "12px sans-serif";
   ctx.textAlign = "left";
   ctx.fillStyle = model.chartColors.maintenance;
-  ctx.fillText(`Avg maint cost/cut (${maintenanceWindowLabel}): ${maintenanceAvgLabel}`, left, 14);
+  ctx.fillText(`Avg maint cost/completed cut (${maintenanceWindowLabel}): ${maintenanceAvgLabel}`, left, 14);
   ctx.fillStyle = model.chartColors.jobs;
   ctx.fillText(`Avg cutting gain/loss: ${cuttingAvgLabel}`, Math.max(left + 250, W * 0.45), 14);
 
