@@ -1211,11 +1211,12 @@ function viewCosts(model){
   const selectedWeeklyKey = selectedWeeklyReport ? String(selectedWeeklyReport.weekStartISO || "") : "";
   if (typeof window !== "undefined") window.weeklyCostReportSelected = selectedWeeklyKey;
   const jobSummary = data.jobSummary || { countLabel:"0", totalLabel:"$0", averageLabel:"$0", rollingLabel:"$0" };
-  const chartColors = data.chartColors || { maintenance:"#0a63c2", jobs:"#2e7d32" };
+  const chartColors = data.chartColors || { maintenance:"#0a63c2", spend:"#c62828", jobs:"#2e7d32" };
   const chartInfo = data.chartInfo || "Maintenance cost line spreads interval pricing and approved as-required spend across logged machine hours; cutting jobs line tracks the rolling average gain or loss per completed job to spotlight margin drift.";
   const orderSummary = data.orderRequestSummary || {};
   const orderRows = Array.isArray(orderSummary.rows) ? orderSummary.rows : [];
   const maintenanceDataTable = Array.isArray(data.maintenanceDataTable) ? data.maintenanceDataTable : [];
+  const purchaseDataTable = Array.isArray(data.purchaseDataTable) ? data.purchaseDataTable : [];
   const maintenanceCategoryOptions = Array.from(new Set(
     maintenanceDataTable
       .map(row => ({ id: String(row?.categoryId || ""), label: String(row?.categoryLabel || "") }))
@@ -1231,6 +1232,7 @@ function viewCosts(model){
       .filter(Boolean)
   )).sort((a, b) => a.localeCompare(b));
   const cuttingJobsDataTable = Array.isArray(data.cuttingJobsDataTable) ? data.cuttingJobsDataTable : [];
+  const hasAnyDataCenterRows = maintenanceDataTable.length || cuttingJobsDataTable.length || purchaseDataTable.length;
   const efficiencySnapshot = data.efficiencySnapshot || {};
   const efficiencyRows = Array.isArray(efficiencySnapshot.rows) ? efficiencySnapshot.rows : [];
   const calculatorDefaults = efficiencySnapshot.calculatorDefaults || {};
@@ -1942,6 +1944,7 @@ function viewCosts(model){
               </div>
               <div class="cost-chart-toggle">
                 <label><input type="checkbox" id="toggleCostMaintenance" checked> <span class="dot" style="background:${esc(chartColors.maintenance)}"></span> Maintenance</label>
+                <label><input type="checkbox" id="toggleCostSpend" checked> <span class="dot" style="background:${esc(chartColors.spend)}"></span> Total spend</label>
                 <label class="cost-chart-toggle-jobs"><input type="checkbox" id="toggleCostJobs" checked> <span class="dot" style="background:${esc(chartColors.jobs)}"></span> <span class="cost-chart-toggle-link" role="link" tabindex="0">Cutting jobs</span></label>
               </div>
             </div>
@@ -1951,6 +1954,7 @@ function viewCosts(model){
           </div>
           <div class="small muted" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;">
             <span style="color:${esc(chartColors.maintenance)};"><strong>Avg maintenance cost/cut hr:</strong> <span data-maint-cost-per-cut-label>${esc(data.maintenanceCostPerCutLabel || "$0")}</span></span>
+            <span style="color:${esc(chartColors.spend)};"><strong>Avg total spend/cut hr:</strong> <span data-spend-cost-per-cut-label>${esc(data.totalSpendPerCutLabel || "$0")}</span></span>
             <span style="color:${esc(chartColors.jobs)};"><strong>Avg cutting gain/loss:</strong> <span data-cutting-average-label>${esc(data.cuttingAverageLabel || "$0")}</span></span>
           </div>
           ${data.chartNote ? `<p class="small muted">${esc(data.chartNote)}</p>` : `<p class="small muted">Toggle a line to explore how maintenance and job efficiency costs evolve over time.</p>`}
@@ -2095,7 +2099,7 @@ function viewCosts(model){
         <div class="block">
           <h3>Maintenance Data Center Table</h3>
           <div class="small muted" style="margin-bottom:8px;">Open as a full-size popup for review and auditing.</div>
-          <button type="button" class="secondary" data-open-data-center ${maintenanceDataTable.length ? "" : "disabled"}>Open Data Center</button>
+          <button type="button" class="secondary" data-open-data-center ${hasAnyDataCenterRows ? "" : "disabled"}>Open Data Center</button>
           <div id="costDataCenterModal" class="cost-data-center-modal" data-data-center-modal hidden aria-hidden="true" tabindex="-1">
             <div class="cost-data-center-backdrop" data-close-data-center></div>
             <div class="cost-data-center-panel" role="dialog" aria-modal="true" aria-labelledby="dataCenterTitle">
@@ -2105,6 +2109,7 @@ function viewCosts(model){
               </div>
               <div class="cost-data-center-tabs" role="tablist" aria-label="Data center tables">
                 <button type="button" class="cost-data-center-tab is-active" data-dc-tab="maintenance" role="tab" aria-selected="true">Maintenance Tasks</button>
+                <button type="button" class="cost-data-center-tab" data-dc-tab="spend" role="tab" aria-selected="false">Total Spend</button>
                 <button type="button" class="cost-data-center-tab" data-dc-tab="cutting" role="tab" aria-selected="false">Completed Cutting Jobs</button>
                 <button type="button" class="cost-data-center-tab" data-dc-tab="efficiency" role="tab" aria-selected="false">Efficiency Metrics</button>
               </div>
@@ -2174,6 +2179,42 @@ function viewCosts(model){
               </tbody>
             </table>
             ` : `<p class="small muted">No completed maintenance occurrences yet.</p>`}
+              </div>
+              <div class="cost-data-center-panel-content" data-dc-panel="spend" hidden>
+                <div class="cost-data-center-search">
+                  <label for="costDataCenterSpendSearch">Search purchases</label>
+                  <input id="costDataCenterSpendSearch" type="search" placeholder="Search date, item, part number, or week" data-spend-search>
+                </div>
+                <table class="cost-table" style="margin-top:10px">
+                  <thead>
+                    <tr>
+                      <th>Purchase date</th>
+                      <th>Purchased item</th>
+                      <th>Week</th>
+                      <th>Cost</th>
+                      <th>Qty</th>
+                      <th>Part #</th>
+                      <th>Shipping</th>
+                      <th>Tax</th>
+                      <th>Total spend</th>
+                    </tr>
+                  </thead>
+                  <tbody data-spend-table-body>
+                    ${purchaseDataTable.length ? purchaseDataTable.map(row => `
+                      <tr data-spend-row data-spend-date-iso="${esc(String(row.dateISO || ""))}" data-spend-search-text="${esc(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
+                        <td>${esc(row.dateISO || "—")}</td>
+                        <td>${esc(row.purchased || "—")}</td>
+                        <td>${esc(row.weekLabel || "—")}</td>
+                        <td>${esc(row.costLabel || "$0.00")}</td>
+                        <td>${esc(row.qtyLabel || "0")}</td>
+                        <td>${esc(row.partNumber || "—")}</td>
+                        <td>${esc(row.shippingLabel || "$0.00")}</td>
+                        <td>${esc(row.taxLabel || "$0.00")}</td>
+                        <td>${esc(row.totalLabel || "$0.00")}</td>
+                      </tr>
+                    `).join("") : `<tr><td colspan="9" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>`}
+                  </tbody>
+                </table>
               </div>
               <div class="cost-data-center-panel-content" data-dc-panel="cutting" hidden>
                 <div class="cost-data-center-search">

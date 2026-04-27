@@ -10409,6 +10409,7 @@ function renderSettings(){
 // ---- Costs page ----
 const COST_CHART_COLORS = {
   maintenance: "#0a63c2",
+  spend: "#c62828",
   jobs: "#2e7d32"
 };
 
@@ -10860,6 +10861,9 @@ function renderCosts(){
   const maintenanceSeriesBase = Array.isArray(model.maintenanceSeries)
     ? model.maintenanceSeries.slice()
     : [];
+  const totalSpendSeriesBase = Array.isArray(model.totalSpendSeries)
+    ? model.totalSpendSeries.slice()
+    : [];
   const jobSeriesBase = Array.isArray(model.jobSeries)
     ? model.jobSeries.slice()
     : [];
@@ -11001,7 +11005,7 @@ function renderCosts(){
     const rememberedTab = (typeof window !== "undefined" && typeof window.dataCenterActiveTab === "string")
       ? window.dataCenterActiveTab
       : "maintenance";
-    setActiveTab(rememberedTab === "cutting" ? "cutting" : "maintenance");
+    setActiveTab(["maintenance", "cutting", "spend", "efficiency"].includes(rememberedTab) ? rememberedTab : "maintenance");
     if (modal instanceof HTMLElement){
       document.body.appendChild(modal);
     }
@@ -11081,11 +11085,14 @@ function renderCosts(){
       const type = String(payload.type || "").toLowerCase();
       if (type === "cutting"){
         setActiveTab("cutting");
+      }else if (type === "spend"){
+        setActiveTab("spend");
       }else{
         setActiveTab("maintenance");
       }
       openDataCenter({ restoreScroll: true });
-      const panelRoot = modal.querySelector(`[data-dc-panel="${type === "cutting" ? "cutting" : "maintenance"}"]`) || modal;
+      const panelKey = type === "cutting" ? "cutting" : (type === "spend" ? "spend" : "maintenance");
+      const panelRoot = modal.querySelector(`[data-dc-panel="${panelKey}"]`) || modal;
       let row = null;
       if (type === "cutting"){
         const jobId = String(payload.jobId || "");
@@ -11093,6 +11100,20 @@ function renderCosts(){
         row = (jobId && panelRoot.querySelector(`[data-cutting-row][data-job-id="${escapeForSelector(jobId)}"]`))
           || (dateISO && panelRoot.querySelector(`[data-cutting-row][data-cutting-date-iso="${escapeForSelector(dateISO)}"]`))
           || panelRoot.querySelector("[data-cutting-row]");
+      }else if (type === "spend"){
+        const dateISO = String(payload.dateISO || "");
+        if (dateISO){
+          const matchingRows = Array.from(panelRoot.querySelectorAll(`[data-spend-row][data-spend-date-iso="${escapeForSelector(dateISO)}"]`))
+            .filter(item => item instanceof HTMLElement);
+          if (matchingRows.length){
+            matchingRows[0].scrollIntoView({ behavior: "smooth", block: "center" });
+            matchingRows.forEach((item, idx) => {
+              setTimeout(()=> pulseRow(item), idx * 90);
+            });
+            return true;
+          }
+        }
+        row = panelRoot.querySelector("[data-spend-row]");
       }else{
         const taskId = String(payload.taskId || "");
         const dateISO = String(payload.dateISO || "");
@@ -11280,6 +11301,21 @@ function renderCosts(){
     }
     if (cuttingCategoryFilter instanceof HTMLSelectElement){
       cuttingCategoryFilter.addEventListener("change", applyCuttingFilter);
+    }
+    const spendSearchInput = modal instanceof HTMLElement ? modal.querySelector("[data-spend-search]") : null;
+    const applySpendFilter = ()=>{
+      if (!(modal instanceof HTMLElement)) return;
+      const term = String(spendSearchInput instanceof HTMLInputElement ? spendSearchInput.value : "").trim().toLowerCase();
+      const rows = Array.from(modal.querySelectorAll("[data-spend-row]"));
+      rows.forEach(row => {
+        if (!(row instanceof HTMLElement)) return;
+        const haystack = String(row.getAttribute("data-spend-search-text") || "").toLowerCase();
+        row.hidden = !!term && !haystack.includes(term);
+      });
+    };
+    if (spendSearchInput instanceof HTMLInputElement){
+      spendSearchInput.addEventListener("input", applySpendFilter);
+      applySpendFilter();
     }
     Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-cutting-open-job]")).forEach(btn => {
       if (!(btn instanceof HTMLElement)) return;
@@ -11701,6 +11737,53 @@ function renderCosts(){
       shipping: Number(item?.shipping) || 0,
       tax: Number(item?.tax) || 0
     })).filter(row => row.date || row.purchased || row.cost || row.qty || row.partNumber || row.shipping || row.tax);
+    const renderCentralSpendRows = ()=>{
+      const spendBody = document.querySelector("[data-spend-table-body]");
+      if (!(spendBody instanceof HTMLElement)) return;
+      const getWeekLabel = (entry)=>{
+        const weekNum = Number(entry?.week);
+        const weekText = Number.isFinite(weekNum) && weekNum > 0 ? `Week ${weekNum}` : String(entry?.key || "Week");
+        const startISO = String(entry?.startISO || "");
+        const endISO = String(entry?.endISO || "");
+        return startISO && endISO ? `${weekText} (${startISO} to ${endISO})` : weekText;
+      };
+      const flatRows = [];
+      (window.receiptTrackerWeeks || []).forEach(entry => {
+        const weekLabel = getWeekLabel(entry);
+        normalizeRows(entry?.rows).forEach(row => {
+          const total = computeRowTotal(row);
+          flatRows.push({
+            dateISO: toIsoDate(row.date) || "",
+            purchased: String(row.purchased || ""),
+            partNumber: String(row.partNumber || ""),
+            qty: Number(row.qty) || 0,
+            cost: Number(row.cost) || 0,
+            shipping: Number(row.shipping) || 0,
+            tax: Number(row.tax) || 0,
+            total,
+            weekLabel
+          });
+        });
+      });
+      flatRows.sort((a, b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
+      if (!flatRows.length){
+        spendBody.innerHTML = '<tr><td colspan="9" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>';
+        return;
+      }
+      spendBody.innerHTML = flatRows.map(row => `
+        <tr data-spend-row data-spend-date-iso="${escapeHtml(String(row.dateISO || ""))}" data-spend-search-text="${escapeHtml(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
+          <td>${escapeHtml(row.dateISO || "—")}</td>
+          <td>${escapeHtml(row.purchased || "—")}</td>
+          <td>${escapeHtml(row.weekLabel || "—")}</td>
+          <td>${formatUsd(row.cost || 0)}</td>
+          <td>${escapeHtml(String(row.qty || 0))}</td>
+          <td>${escapeHtml(row.partNumber || "—")}</td>
+          <td>${formatUsd(row.shipping || 0)}</td>
+          <td>${formatUsd(row.tax || 0)}</td>
+          <td>${formatUsd(row.total || 0)}</td>
+        </tr>
+      `).join("");
+    };
     const getWeekEntry = (key)=>{
       const existing = window.receiptTrackerWeeks.find(entry => String(entry?.key || "") === key);
       if (existing) return existing;
@@ -11818,6 +11901,7 @@ function renderCosts(){
         }));
         entry.rows = normalizeRows(rows);
         persistReceiptState();
+        renderCentralSpendRows();
         return entry;
       };
       const appendEmptyRow = (focusFirst = false)=>{
@@ -11918,17 +12002,20 @@ function renderCosts(){
           recomputeWeekTotals();
           saveWeekRowsFromDom();
           renderRangeTable();
+          renderCentralSpendRows();
         });
         weekRowsBody.addEventListener("input", ()=>{
           recomputeWeekTotals();
           saveWeekRowsFromDom();
           renderRangeTable();
+          renderCentralSpendRows();
         });
       };
       bindRowEvents();
       renderWeekOptions();
       renderWeekRows();
       renderRangeTable();
+      renderCentralSpendRows();
       if (rangeSelect instanceof HTMLSelectElement){
         rangeSelect.value = activeRange;
         rangeSelect.addEventListener("change", ()=>{
@@ -12945,6 +13032,7 @@ function renderCosts(){
 
   const canvas = document.getElementById("costChart");
   const toggleMaint = document.getElementById("toggleCostMaintenance");
+  const toggleSpend = document.getElementById("toggleCostSpend");
   const toggleJobs  = document.getElementById("toggleCostJobs");
   const canvasWrap = content.querySelector(".cost-chart-canvas");
   let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
@@ -13312,6 +13400,7 @@ function renderCosts(){
     };
     const { months } = getChartRangeState();
     const maintenanceRange = filterChartSeriesByRange(maintenanceSeriesBase, months);
+    const spendRange = filterChartSeriesByRange(totalSpendSeriesBase, months);
     const jobRange = filterChartSeriesByRange(jobSeriesBase, months);
     const maintenanceCostTotalInWindow = maintenanceRange.points.reduce((sum, item) => {
       const value = Number(item?.value) || 0;
@@ -13325,26 +13414,37 @@ function renderCosts(){
       ? (maintenanceCostTotalInWindow / totalCutHoursInWindow)
       : 0;
     const maintenanceCostPerCutLabel = formatCurrencyUnsigned(maintenanceCostPerCutValue);
+    const totalSpendInWindow = spendRange.points.reduce((sum, item) => {
+      const value = Number(item?.value) || 0;
+      return sum + Math.abs(value);
+    }, 0);
+    const totalSpendPerCutValue = totalCutHoursInWindow > 0
+      ? (totalSpendInWindow / totalCutHoursInWindow)
+      : 0;
+    const totalSpendPerCutLabel = formatCurrencyUnsigned(totalSpendPerCutValue);
     const cuttingTotalInWindow = jobRange.points.reduce((sum, item) => sum + (Number(item?.value) || 0), 0);
     const cuttingAverageValueInWindow = jobRange.points.length
       ? (cuttingTotalInWindow / jobRange.points.length)
       : 0;
     const cuttingAverageLabelInWindow = formatCurrencySigned(cuttingAverageValueInWindow);
 
-    const domainStarts = [maintenanceRange.domainStart, jobRange.domainStart]
+    const domainStarts = [maintenanceRange.domainStart, spendRange.domainStart, jobRange.domainStart]
       .map(value => Number.isFinite(value) ? Number(value) : null)
       .filter(value => value != null);
-    const domainEnds = [maintenanceRange.domainEnd, jobRange.domainEnd]
+    const domainEnds = [maintenanceRange.domainEnd, spendRange.domainEnd, jobRange.domainEnd]
       .map(value => Number.isFinite(value) ? Number(value) : null)
       .filter(value => value != null);
 
     const chartModel = {
       ...model,
       maintenanceSeries: maintenanceRange.points,
+      totalSpendSeries: spendRange.points,
       jobSeries: jobRange.points,
       maintenanceCostPerCutValue,
       maintenanceCostPerCutLabel,
       maintenanceCostPerCutWindowLabel: rangeLabelMap.get(months) || "selected range",
+      totalSpendPerCutValue,
+      totalSpendPerCutLabel,
       cuttingAverageValue: cuttingAverageValueInWindow,
       cuttingAverageLabel: cuttingAverageLabelInWindow,
       chartDomain: (domainStarts.length && domainEnds.length)
@@ -13360,6 +13460,14 @@ function renderCosts(){
         `Average maintenance cost per cut hour (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${totalCutHoursInWindow.toFixed(1)} total cut hr.`
       );
     }
+    const spendPerCutEl = content.querySelector("[data-spend-cost-per-cut-label]");
+    if (spendPerCutEl){
+      spendPerCutEl.textContent = totalSpendPerCutLabel;
+      spendPerCutEl.setAttribute(
+        "title",
+        `Average total spend per cut hour (${windowLabel}) = total purchase spend ${formatCurrencyUnsigned(totalSpendInWindow)} ÷ ${totalCutHoursInWindow.toFixed(1)} total cut hr.`
+      );
+    }
     const cuttingAverageEl = content.querySelector("[data-cutting-average-label]");
     if (cuttingAverageEl){
       cuttingAverageEl.textContent = cuttingAverageLabelInWindow;
@@ -13373,6 +13481,7 @@ function renderCosts(){
       resizeCostChartCanvas(canvas);
       drawCostChart(canvas, chartModel, {
         maintenance: !toggleMaint || toggleMaint.checked,
+        spend: !toggleSpend || toggleSpend.checked,
         jobs: !toggleJobs || toggleJobs.checked
       });
       refreshTooltipFromLastPointer();
@@ -13405,6 +13514,7 @@ function renderCosts(){
   updateChartRangeButtons();
   redraw();
   toggleMaint?.addEventListener("change", redraw);
+  toggleSpend?.addEventListener("change", redraw);
   toggleJobs?.addEventListener("change", redraw);
 
   notifyCostLayoutContentChanged();
@@ -16309,6 +16419,75 @@ function computeCostModel(){
     qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "1",
     counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1"
   }));
+  const purchaseDataTableRows = [];
+  (Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks : []).forEach(weekEntry => {
+    const key = String(weekEntry?.key || "");
+    const weekNum = Number(weekEntry?.week);
+    const weekLabelBase = Number.isFinite(weekNum) && weekNum > 0 ? `Week ${weekNum}` : (key || "Week");
+    const startISO = String(weekEntry?.startISO || "");
+    const endISO = String(weekEntry?.endISO || "");
+    const weekLabel = startISO && endISO ? `${weekLabelBase} (${startISO} to ${endISO})` : weekLabelBase;
+    (Array.isArray(weekEntry?.rows) ? weekEntry.rows : []).forEach(rawRow => {
+      const dateISO = toHistoryDateKey(rawRow?.date || "");
+      const purchased = String(rawRow?.purchased || "").trim();
+      const partNumber = String(rawRow?.partNumber || "").trim();
+      const cost = Math.max(0, Number(rawRow?.cost) || 0);
+      const qty = Math.max(0, Number(rawRow?.qty) || 0);
+      const shipping = Math.max(0, Number(rawRow?.shipping) || 0);
+      const tax = Math.max(0, Number(rawRow?.tax) || 0);
+      const total = (cost * qty) + shipping + tax;
+      if (!dateISO && !purchased && !partNumber && total <= 0) return;
+      purchaseDataTableRows.push({ dateISO, purchased, partNumber, cost, qty, shipping, tax, total, weekLabel });
+    });
+  });
+  purchaseDataTableRows.sort((a, b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
+  const purchaseDataTable = purchaseDataTableRows.map((row, idx) => ({
+    id: `spend_${idx}_${row.dateISO || "undated"}`,
+    dateISO: row.dateISO || "—",
+    purchased: row.purchased || "—",
+    weekLabel: row.weekLabel || "—",
+    costLabel: formatterCurrency(row.cost, { decimals: 2 }),
+    qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "0",
+    partNumber: row.partNumber || "—",
+    shippingLabel: formatterCurrency(row.shipping, { decimals: 2 }),
+    taxLabel: formatterCurrency(row.tax, { decimals: 2 }),
+    totalLabel: formatterCurrency(row.total, { decimals: row.total < 1000 ? 2 : 0 })
+  }));
+  const spendByDate = new Map();
+  purchaseDataTableRows.forEach(row => {
+    const dateISO = toHistoryDateKey(row.dateISO || "");
+    if (!dateISO) return;
+    const entry = spendByDate.get(dateISO) || { total: 0, items: [], rowCount: 0 };
+    entry.total += Math.max(0, Number(row.total) || 0);
+    entry.rowCount += 1;
+    if (row.purchased){
+      entry.items.push(String(row.purchased));
+    }
+    spendByDate.set(dateISO, entry);
+  });
+  const totalSpendSeries = Array.from(spendByDate.entries())
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    .map(([dateISO, entry]) => {
+      const parsedDate = typeof parseDateLocal === "function"
+        ? (parseDateLocal(dateISO) || new Date(dateISO))
+        : new Date(dateISO);
+      const date = (parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime()))
+        ? parsedDate
+        : new Date(dateISO);
+      const itemNames = Array.from(new Set(Array.isArray(entry?.items) ? entry.items.filter(Boolean) : []));
+      const itemPreview = itemNames.length
+        ? itemNames.slice(0, 6).join(", ")
+        : "No item names provided";
+      const rowCount = Number(entry?.rowCount) || itemNames.length || 0;
+      const detailPrefix = `${rowCount} purchase item${rowCount === 1 ? "" : "s"} recorded on ${dateISO}`;
+      const detailSuffix = itemNames.length > 6 ? " …" : "";
+      return {
+        date,
+        dateISO,
+        value: -Math.abs(Number(entry?.total) || 0),
+        detail: `${detailPrefix}: ${itemPreview}${detailSuffix}.`
+      };
+    });
 
   const maintenanceTrendRows = maintenanceDataTableRows.filter(row => {
     if (!row) return false;
@@ -16355,6 +16534,8 @@ function computeCostModel(){
     return sum + (Number.isFinite(hours) && hours > 0 ? hours : 0);
   }, 0);
   const maintenanceCostPerCutValue = totalCutHoursAll > 0 ? (maintenanceCostTotalAll / totalCutHoursAll) : 0;
+  const totalSpendAll = totalSpendSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
+  const totalSpendPerCutValue = totalCutHoursAll > 0 ? (totalSpendAll / totalCutHoursAll) : 0;
 
   return {
     summaryCards,
@@ -16375,14 +16556,18 @@ function computeCostModel(){
     maintenanceCostPerCutValue,
     maintenanceCostPerCutLabel: formatterCurrency(maintenanceCostPerCutValue, { decimals: maintenanceCostPerCutValue < 1000 ? 2 : 0 }),
     maintenanceCostPerCutWindowLabel: "6 months",
+    totalSpendPerCutValue,
+    totalSpendPerCutLabel: formatterCurrency(totalSpendPerCutValue, { decimals: totalSpendPerCutValue < 1000 ? 2 : 0 }),
     cuttingAverageValue,
     cuttingAverageLabel: formatterCurrency(cuttingAverageValue, { showPlus: true, decimals: 0 }),
     orderRequestSummary,
     maintenanceDataTable,
+    purchaseDataTable,
     cuttingJobsDataTable,
     efficiencySnapshot,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries: maintenanceSeriesFromDataTable,
+    totalSpendSeries,
     jobSeries,
     weeklyReports
   };
@@ -16570,6 +16755,9 @@ function drawCostChart(canvas, model, show){
   if (show.maintenance && model.maintenanceSeries.length){
     active.push({ key:"maintenance", color:model.chartColors.maintenance, points:model.maintenanceSeries });
   }
+  if (show.spend && Array.isArray(model.totalSpendSeries) && model.totalSpendSeries.length){
+    active.push({ key:"spend", color:model.chartColors.spend, points:model.totalSpendSeries });
+  }
   if (show.jobs && model.jobSeries.length){
     active.push({ key:"jobs", color:model.chartColors.jobs, points:model.jobSeries });
   }
@@ -16650,8 +16838,10 @@ function drawCostChart(canvas, model, show){
     return formatted;
   };
   const maintenanceAvg = Number(model?.maintenanceCostPerCutValue ?? model?.maintenanceAverageValue) || 0;
+  const spendAvg = Number(model?.totalSpendPerCutValue) || 0;
   const cuttingAvg = Number(model?.cuttingAverageValue) || 0;
   const maintenanceAvgLabel = model?.maintenanceCostPerCutLabel || model?.maintenanceAverageLabel || formatMoney(maintenanceAvg);
+  const spendAvgLabel = model?.totalSpendPerCutLabel || formatMoney(spendAvg);
   const cuttingAvgLabel = model?.cuttingAverageLabel || formatMoney(cuttingAvg);
   const maintenanceWindowLabel = String(model?.maintenanceCostPerCutWindowLabel || "selected range");
 
@@ -16659,8 +16849,10 @@ function drawCostChart(canvas, model, show){
   ctx.textAlign = "left";
   ctx.fillStyle = model.chartColors.maintenance;
   ctx.fillText(`Avg maint cost/cut hr (${maintenanceWindowLabel}): ${maintenanceAvgLabel}`, left, 14);
+  ctx.fillStyle = model.chartColors.spend;
+  ctx.fillText(`Avg total spend/cut hr (${maintenanceWindowLabel}): ${spendAvgLabel}`, left, 30);
   ctx.fillStyle = model.chartColors.jobs;
-  ctx.fillText(`Avg cutting gain/loss: ${cuttingAvgLabel}`, Math.max(left + 250, W * 0.45), 14);
+  ctx.fillText(`Avg cutting gain/loss: ${cuttingAvgLabel}`, Math.max(left + 300, W * 0.5), 14);
 
   if (0 >= yMin && 0 <= yMax){
     const zeroY = Y(0);
@@ -16751,7 +16943,9 @@ function drawCostChart(canvas, model, show){
     ctx.stroke();
 
     ctx.fillStyle = series.color;
-    const datasetLabel = series.key === "maintenance" ? "Maintenance" : "Cutting jobs";
+    const datasetLabel = series.key === "maintenance"
+      ? "Maintenance"
+      : (series.key === "spend" ? "Total spend" : "Cutting jobs");
     points.forEach(pt => {
       const x = X(pt.date.getTime());
       const y = Y(Number(pt.value));
@@ -16766,7 +16960,9 @@ function drawCostChart(canvas, model, show){
       if (!detail){
         detail = series.key === "maintenance"
           ? `Maintenance loss recorded on ${dateLabel}.`
-          : `Cutting job result recorded on ${dateLabel}.`;
+          : (series.key === "spend"
+            ? `Purchase spend recorded on ${dateLabel}.`
+            : `Cutting job result recorded on ${dateLabel}.`);
       }
       hitTargets.push({
         key: series.key,
@@ -16775,7 +16971,9 @@ function drawCostChart(canvas, model, show){
         detail,
         rowRef: series.key === "maintenance"
           ? { type: "maintenance", dateISO: pt.dateISO || ymd(pt.date), taskId: pt.taskId || null }
-          : { type: "cutting", jobId: pt.jobId || null, dateISO: pt.dateISO || ymd(pt.date) },
+          : (series.key === "spend"
+            ? { type: "spend", dateISO: pt.dateISO || ymd(pt.date) }
+            : { type: "cutting", jobId: pt.jobId || null, dateISO: pt.dateISO || ymd(pt.date) }),
         rect: { x: x - 8, y: y - 8, width: 16, height: 16 }
       });
     });
@@ -16784,7 +16982,7 @@ function drawCostChart(canvas, model, show){
     if (last){
       const x = X(last.date.getTime());
       const y = Y(Number(last.value));
-      const label = `${series.key === "maintenance" ? "Maintenance" : "Cutting jobs"} ${formatMoney(Number(last.value))}`;
+      const label = `${series.key === "maintenance" ? "Maintenance" : (series.key === "spend" ? "Total spend" : "Cutting jobs")} ${formatMoney(Number(last.value))}`;
       ctx.font = "12px sans-serif";
       const metrics = ctx.measureText(label);
       const paddingX = 6;
@@ -16811,7 +17009,9 @@ function drawCostChart(canvas, model, show){
       if (!detail){
         detail = series.key === "maintenance"
           ? `Maintenance loss recorded on ${dateLabel}.`
-          : `Cutting job gain/loss recorded on ${dateLabel}.`;
+          : (series.key === "spend"
+            ? `Purchase spend recorded on ${dateLabel}.`
+            : `Cutting job gain/loss recorded on ${dateLabel}.`);
       }
       hitTargets.push({
         key: series.key,
@@ -16820,7 +17020,9 @@ function drawCostChart(canvas, model, show){
         detail,
         rowRef: series.key === "maintenance"
           ? { type: "maintenance", dateISO: last.dateISO || ymd(last.date), taskId: last.taskId || null }
-          : { type: "cutting", jobId: last.jobId || null, dateISO: last.dateISO || ymd(last.date) },
+          : (series.key === "spend"
+            ? { type: "spend", dateISO: last.dateISO || ymd(last.date) }
+            : { type: "cutting", jobId: last.jobId || null, dateISO: last.dateISO || ymd(last.date) }),
         rect: { x: boxX, y: boxY - boxHeight, width: boxWidth, height: boxHeight }
       });
     }
