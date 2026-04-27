@@ -949,42 +949,6 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
   return changed;
 }
 
-function removeIntervalOccurrenceScopeAcrossInstances(task, dateISO, scope){
-  if (!task) return false;
-  let changed = false;
-  const selfMeta = { task, mode: task.mode === "asreq" ? "asreq" : "interval" };
-  if (removeCalendarTaskOccurrences(selfMeta, dateISO, scope)){
-    changed = true;
-  }
-  visitTaskFamily(task, member => {
-    if (!member || member.mode !== "interval" || !isInstanceTask(member)) return;
-    if (String(member.id) === String(task.id)) return;
-    const memberMeta = { task: member, mode: "interval" };
-    if (removeCalendarTaskOccurrences(memberMeta, dateISO, scope)){
-      changed = true;
-    }
-  });
-  return changed;
-}
-
-function setIntervalRepeatPausedAcrossFamily(task, paused){
-  if (!task) return false;
-  let changed = false;
-  visitTaskFamily(task, member => {
-    if (!member || member.mode !== "interval") return;
-    if (typeof setIntervalRepeatPaused === "function"){
-      if (setIntervalRepeatPaused(member, paused)) changed = true;
-      return;
-    }
-    const next = paused === true;
-    if ((member.repeatPaused === true) !== next){
-      member.repeatPaused = next;
-      changed = true;
-    }
-  });
-  return changed;
-}
-
 function removeCalendarTaskEverywhere(meta){
   if (!meta || !meta.list || typeof meta.index !== "number" || meta.index < 0) return false;
   const list = meta.list;
@@ -1259,20 +1223,18 @@ function showTaskBubble(taskId, anchor, options = {}){
         : "Remove this occurrence from the calendar?";
     const shouldRemove = window.confirm ? window.confirm(confirmText) : true;
     if (!shouldRemove) return;
-    const singleIntervalRemoval = scope === "single"
-      && (meta.mode === "interval" || task.mode === "interval");
-    let changed = singleIntervalRemoval
-      ? removeIntervalOccurrenceScopeAcrossInstances(task, targetKey, "single")
-      : removeCalendarTaskOccurrences(meta, targetKey, scope);
-    if (!changed && singleIntervalRemoval){
-      changed = removeCalendarTaskOccurrences(meta, targetKey, "single");
-    }
+    const changed = removeCalendarTaskOccurrences(meta, targetKey, scope);
     if (changed){
       let pausedRepeat = false;
       if (scope === "single" && (meta.mode === "interval" || task.mode === "interval") && typeof window.confirm === "function"){
         const shouldPauseRepeat = window.confirm("Pause repeat predictions for this task until you manually add it again?");
         if (shouldPauseRepeat){
-          pausedRepeat = setIntervalRepeatPausedAcrossFamily(task, true);
+          if (typeof setIntervalRepeatPaused === "function"){
+            pausedRepeat = setIntervalRepeatPaused(task, true);
+          }else{
+            task.repeatPaused = true;
+            pausedRepeat = true;
+          }
         }
       }
       if (typeof saveCloudNow === "function") saveCloudNow();
