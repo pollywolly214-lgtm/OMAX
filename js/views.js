@@ -298,7 +298,12 @@ function viewDashboard(){
         <form id="dashJobForm" class="modal-form">
           <div class="modal-grid">
             <label>Job name<input id="dashJobName" required placeholder="Job"></label>
-            <label>Estimate (hrs)<input type="number" min="1" step="0.1" id="dashJobEstimate" required placeholder="e.g. 12"></label>
+            <label class="job-estimate-label-group">
+              <span class="small muted" id="dashJobEstimateBreakdown">0 hrs = 0 hrs 0 min</span>
+              Estimate (hrs)
+              <input type="number" min="0.01" step="0.01" id="dashJobEstimate" required placeholder="e.g. 12">
+            </label>
+            <label>Add minutes<input type="number" min="0" step="1" id="dashJobEstimateMinutes" placeholder="e.g. 45"></label>
             <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCharge" value="200"></label>
             <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCostRate" value="45"></label>
             <label>Material<input id="dashJobMaterial" placeholder="Material" list="dashJobMaterialOptions"></label>
@@ -4245,21 +4250,48 @@ function viewJobs(){
         aria-hidden="${addFormOpen ? "false" : "true"}"
       >
         <form id="addJobForm" class="mini-form job-add-form">
-          <input type="text" id="jobName" placeholder="Job name" required value="${esc(addJobDraftField("name"))}">
-          <input type="number" id="jobEst" placeholder="Estimate (hrs)" required min="0.01" step="0.01" value="${esc(addJobDraftField("estimate"))}">
-          <select id="jobPriority" aria-label="Priority">
-            ${priorityOptionsMarkup(addJobPriorityDefault)}
-          </select>
-          <p class="small muted job-priority-hint">Priority 1 runs before higher numbers.</p>
-          <input type="number" id="jobCharge" placeholder="Charge rate ($/hr)" min="0" step="0.01" value="${esc(addJobDraftField("charge", "200"))}">
-          <input type="number" id="jobCostRate" placeholder="Cost rate ($/hr)" min="0" step="0.01" value="${esc(addJobDraftField("costRate", "45"))}">
-          <input type="text" id="jobMaterial" placeholder="Material" list="jobMaterialOptions" value="${esc(addJobDraftField("material"))}">
-          <input type="number" id="jobMaterialCost" placeholder="Material cost ($)" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}">
-          <input type="number" id="jobMaterialQty" placeholder="Material quantity" min="0" step="0.01" value="${esc(addJobDraftField("materialQty"))}">
-          <input type="date" id="jobStart" required value="${esc(addJobDraftField("start", defaultJobDateISO))}">
-          <input type="date" id="jobDue" required value="${esc(addJobDraftField("due", defaultJobDateISO))}">
-          <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required value="${esc(addJobDraftField("projectNumber"))}">
+          <label>Job name
+            <input type="text" id="jobName" placeholder="Job name" required value="${esc(addJobDraftField("name"))}">
+          </label>
+          <label class="job-estimate-label-group">
+            <span class="small muted" id="jobEstBreakdown">0 hrs = 0 hrs 0 min</span>
+            Estimate (hrs)
+            <input type="number" id="jobEst" required min="0.01" step="0.01" value="${esc(addJobDraftField("estimate"))}">
+          </label>
+          <label>Add minutes
+            <input type="number" id="jobEstMinutes" min="0" step="1" placeholder="e.g. 45">
+          </label>
+          <label>Priority
+            <select id="jobPriority" aria-label="Priority">
+              ${priorityOptionsMarkup(addJobPriorityDefault)}
+            </select>
+          </label>
+          <label>Charge rate ($/hr)
+            <input type="number" id="jobCharge" placeholder="200.00" min="0" step="0.01" value="${esc(addJobDraftField("charge", "200"))}">
+          </label>
+          <label>Cost rate ($/hr)
+            <input type="number" id="jobCostRate" placeholder="45.00" min="0" step="0.01" value="${esc(addJobDraftField("costRate", "45"))}">
+          </label>
+          <label>Material
+            <input type="text" id="jobMaterial" placeholder="Material" list="jobMaterialOptions" value="${esc(addJobDraftField("material"))}">
+          </label>
+          <label>Material cost ($)
+            <input type="number" id="jobMaterialCost" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}">
+          </label>
+          <label>Material quantity
+            <input type="number" id="jobMaterialQty" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialQty"))}">
+          </label>
+          <label>Start date
+            <input type="date" id="jobStart" required value="${esc(addJobDraftField("start", defaultJobDateISO))}">
+          </label>
+          <label>Due date
+            <input type="date" id="jobDue" required value="${esc(addJobDraftField("due", defaultJobDateISO))}">
+          </label>
+          <label>Project #
+            <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required value="${esc(addJobDraftField("projectNumber"))}">
+          </label>
           <div class="job-category-field">
+            <label for="jobCategory">Category</label>
             <select id="jobCategory" aria-label="Category" required>
               ${categoryOptionsMarkup(addJobCategoryDefault, { includeCreateOption: true })}
             </select>
@@ -4267,11 +4299,13 @@ function viewJobs(){
               Choose a category to keep jobs organized. We'll save it under All Jobs if you skip this step.
             </p>
           </div>
-          <button type="button" id="jobFilesBtn">Attach Files</button>
-          <button type="button" id="jobOneDriveLibraryAddBtn">Add from this computer OneDrive folder</button>
+          <div class="job-add-actions">
+            <button type="button" id="jobFilesBtn">Attach Files</button>
+            <button type="button" id="jobOneDriveLibraryAddBtn">Add from this computer OneDrive folder</button>
+            <button type="submit">Add Job</button>
+          </div>
           <input type="file" id="jobFiles" multiple style="display:none">
           <datalist id="jobMaterialOptions">${materialInventoryOptionsMarkup}</datalist>
-          <button type="submit">Add Job</button>
         </form>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
       </section>

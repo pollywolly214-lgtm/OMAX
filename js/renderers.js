@@ -5193,6 +5193,8 @@ function renderDashboard(){
   const oneTimeNoteInput = document.getElementById("dashOneTimeNote");
   const jobNameInput     = document.getElementById("dashJobName");
   const jobEstimateInput = document.getElementById("dashJobEstimate");
+  const jobEstimateMinutesInput = document.getElementById("dashJobEstimateMinutes");
+  const jobEstimateBreakdown = document.getElementById("dashJobEstimateBreakdown");
   const jobChargeInput   = document.getElementById("dashJobCharge");
   const jobCostRateInput = document.getElementById("dashJobCostRate");
   const jobMaterialInput = document.getElementById("dashJobMaterial");
@@ -6539,10 +6541,40 @@ function renderDashboard(){
   });
 
   updateDashJobCategoryHint();
+  const formatDashEstimateBreakdown = (hoursValue)=>{
+    const totalHours = Number(hoursValue);
+    const safeHours = Number.isFinite(totalHours) && totalHours >= 0 ? totalHours : 0;
+    const wholeHours = Math.floor(safeHours);
+    const minutes = Math.round((safeHours - wholeHours) * 60);
+    const safeText = safeHours.toFixed(2).replace(/\.?0+$/, "");
+    return `${safeText} hrs = ${wholeHours} hrs ${Math.min(minutes, 59)} min`;
+  };
+  const refreshDashEstimateBreakdown = ()=>{
+    if (!(jobEstimateInput instanceof HTMLInputElement) || !(jobEstimateBreakdown instanceof HTMLElement)) return;
+    jobEstimateBreakdown.textContent = formatDashEstimateBreakdown(jobEstimateInput.value);
+  };
+  const applyDashMinutesToHours = ()=>{
+    if (!(jobEstimateInput instanceof HTMLInputElement) || !(jobEstimateMinutesInput instanceof HTMLInputElement)) return;
+    const minutes = Number(jobEstimateMinutesInput.value);
+    if (!Number.isFinite(minutes) || minutes <= 0){
+      refreshDashEstimateBreakdown();
+      return;
+    }
+    const baseHours = Number(jobEstimateInput.value);
+    const safeHours = Number.isFinite(baseHours) && baseHours >= 0 ? baseHours : 0;
+    jobEstimateInput.value = String(Number((safeHours + (minutes / 60)).toFixed(2)));
+    jobEstimateMinutesInput.value = "";
+    refreshDashEstimateBreakdown();
+  };
+  jobEstimateInput?.addEventListener("input", refreshDashEstimateBreakdown);
+  jobEstimateMinutesInput?.addEventListener("change", applyDashMinutesToHours);
+  jobEstimateMinutesInput?.addEventListener("blur", applyDashMinutesToHours);
+  refreshDashEstimateBreakdown();
 
   jobForm?.addEventListener("submit", (e)=>{
     e.preventDefault();
     const name = (jobNameInput?.value || "").trim();
+    applyDashMinutesToHours();
     const est  = Number(jobEstimateInput?.value);
     const chargeRaw = jobChargeInput?.value ?? "";
     const costRateRaw = jobCostRateInput?.value ?? "";
@@ -18463,6 +18495,35 @@ function renderJobs(){
   };
 
   // 4) Add Job (unchanged)
+  const formatEstimateBreakdown = (hoursValue)=>{
+    const totalHours = Number(hoursValue);
+    const safeHours = Number.isFinite(totalHours) && totalHours >= 0 ? totalHours : 0;
+    const wholeHours = Math.floor(safeHours);
+    const minutes = Math.round((safeHours - wholeHours) * 60);
+    if (minutes >= 60){
+      return `${(wholeHours + 1).toFixed(2).replace(/\.?0+$/, "")} hrs = ${wholeHours + 1} hrs 0 min`;
+    }
+    const normalizedHoursText = safeHours.toFixed(2).replace(/\.?0+$/, "");
+    return `${normalizedHoursText} hrs = ${wholeHours} hrs ${minutes} min`;
+  };
+  const refreshEstimateBreakdown = (hoursInput, breakdownEl)=>{
+    if (!(hoursInput instanceof HTMLInputElement) || !(breakdownEl instanceof HTMLElement)) return;
+    breakdownEl.textContent = formatEstimateBreakdown(hoursInput.value);
+  };
+  const applyMinutesToHours = (hoursInput, minutesInput, breakdownEl)=>{
+    if (!(hoursInput instanceof HTMLInputElement) || !(minutesInput instanceof HTMLInputElement)) return;
+    const baseHours = Number(hoursInput.value);
+    const minutes = Number(minutesInput.value);
+    if (!Number.isFinite(minutes) || minutes <= 0){
+      refreshEstimateBreakdown(hoursInput, breakdownEl);
+      return;
+    }
+    const safeHours = Number.isFinite(baseHours) && baseHours >= 0 ? baseHours : 0;
+    const converted = Number((safeHours + (minutes / 60)).toFixed(2));
+    hoursInput.value = String(converted);
+    minutesInput.value = "";
+    refreshEstimateBreakdown(hoursInput, breakdownEl);
+  };
   const syncAddJobDraftFromForm = ()=>{
     const form = document.getElementById("addJobForm");
     if (!form) return;
@@ -18488,11 +18549,26 @@ function renderJobs(){
   const addJobForm = document.getElementById("addJobForm");
   addJobForm?.addEventListener("input", syncAddJobDraftFromForm);
   addJobForm?.addEventListener("change", syncAddJobDraftFromForm);
+  const addJobEstHoursInput = document.getElementById("jobEst");
+  const addJobEstMinutesInput = document.getElementById("jobEstMinutes");
+  const addJobEstBreakdown = document.getElementById("jobEstBreakdown");
+  addJobEstHoursInput?.addEventListener("input", ()=> refreshEstimateBreakdown(addJobEstHoursInput, addJobEstBreakdown));
+  addJobEstMinutesInput?.addEventListener("change", ()=>{
+    applyMinutesToHours(addJobEstHoursInput, addJobEstMinutesInput, addJobEstBreakdown);
+    syncAddJobDraftFromForm();
+  });
+  addJobEstMinutesInput?.addEventListener("blur", ()=>{
+    applyMinutesToHours(addJobEstHoursInput, addJobEstMinutesInput, addJobEstBreakdown);
+    syncAddJobDraftFromForm();
+  });
+  refreshEstimateBreakdown(addJobEstHoursInput, addJobEstBreakdown);
 
   document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const name  = document.getElementById("jobName").value.trim();
-    const est   = Number(document.getElementById("jobEst").value);
+    const estMinutesInput = document.getElementById("jobEstMinutes");
+    applyMinutesToHours(addJobEstHoursInput, estMinutesInput, addJobEstBreakdown);
+    const est = Number(addJobEstHoursInput?.value);
     const material = document.getElementById("jobMaterial")?.value.trim() || "";
     const chargeRaw = document.getElementById("jobCharge")?.value ?? "";
     const costRateRaw = document.getElementById("jobCostRate")?.value ?? "";
