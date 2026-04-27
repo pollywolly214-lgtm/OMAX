@@ -11060,23 +11060,6 @@ function renderCosts(){
       }, 2400);
       return true;
     };
-    const highlightSpendDataCenterRow = ({ dateISO = "" } = {})=>{
-      if (!(modal instanceof HTMLElement)) return false;
-      const dateKey = String(dateISO || "").trim();
-      if (!dateKey) return false;
-      const cssEsc = (value)=>{
-        const raw = String(value || "");
-        if (typeof CSS !== "undefined" && CSS && typeof CSS.escape === "function"){
-          return CSS.escape(raw);
-        }
-        return raw.replace(/["\\]/g, "\\$&");
-      };
-      const targetRow = modal.querySelector(`[data-spend-row][data-spend-date-iso="${cssEsc(dateKey)}"]`);
-      if (!(targetRow instanceof HTMLElement)) return false;
-      targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
-      pulseRow(targetRow);
-      return true;
-    };
     const pulseRow = (row)=>{
       if (!(row instanceof HTMLElement)) return;
       row.hidden = false;
@@ -11119,8 +11102,18 @@ function renderCosts(){
           || panelRoot.querySelector("[data-cutting-row]");
       }else if (type === "spend"){
         const dateISO = String(payload.dateISO || "");
-        row = (dateISO && panelRoot.querySelector(`[data-spend-row][data-spend-date-iso="${escapeForSelector(dateISO)}"]`))
-          || panelRoot.querySelector("[data-spend-row]");
+        if (dateISO){
+          const matchingRows = Array.from(panelRoot.querySelectorAll(`[data-spend-row][data-spend-date-iso="${escapeForSelector(dateISO)}"]`))
+            .filter(item => item instanceof HTMLElement);
+          if (matchingRows.length){
+            matchingRows[0].scrollIntoView({ behavior: "smooth", block: "center" });
+            matchingRows.forEach((item, idx) => {
+              setTimeout(()=> pulseRow(item), idx * 90);
+            });
+            return true;
+          }
+        }
+        row = panelRoot.querySelector("[data-spend-row]");
       }else{
         const taskId = String(payload.taskId || "");
         const dateISO = String(payload.dateISO || "");
@@ -16464,23 +16457,35 @@ function computeCostModel(){
   purchaseDataTableRows.forEach(row => {
     const dateISO = toHistoryDateKey(row.dateISO || "");
     if (!dateISO) return;
-    const prior = spendByDate.get(dateISO) || 0;
-    spendByDate.set(dateISO, prior + Math.max(0, Number(row.total) || 0));
+    const entry = spendByDate.get(dateISO) || { total: 0, items: [], rowCount: 0 };
+    entry.total += Math.max(0, Number(row.total) || 0);
+    entry.rowCount += 1;
+    if (row.purchased){
+      entry.items.push(String(row.purchased));
+    }
+    spendByDate.set(dateISO, entry);
   });
   const totalSpendSeries = Array.from(spendByDate.entries())
     .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
-    .map(([dateISO, total]) => {
+    .map(([dateISO, entry]) => {
       const parsedDate = typeof parseDateLocal === "function"
         ? (parseDateLocal(dateISO) || new Date(dateISO))
         : new Date(dateISO);
       const date = (parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime()))
         ? parsedDate
         : new Date(dateISO);
+      const itemNames = Array.from(new Set(Array.isArray(entry?.items) ? entry.items.filter(Boolean) : []));
+      const itemPreview = itemNames.length
+        ? itemNames.slice(0, 6).join(", ")
+        : "No item names provided";
+      const rowCount = Number(entry?.rowCount) || itemNames.length || 0;
+      const detailPrefix = `${rowCount} purchase item${rowCount === 1 ? "" : "s"} recorded on ${dateISO}`;
+      const detailSuffix = itemNames.length > 6 ? " …" : "";
       return {
         date,
         dateISO,
-        value: -Math.abs(total),
-        detail: `Purchase spend recorded on ${dateISO} from the centralized spend table.`
+        value: -Math.abs(Number(entry?.total) || 0),
+        detail: `${detailPrefix}: ${itemPreview}${detailSuffix}.`
       };
     });
 
