@@ -11644,7 +11644,6 @@ function renderCosts(){
           body{font-family:Arial,sans-serif;padding:16px;color:#1e2b45;} h2,h3{margin:0 0 8px;} .summary{margin:8px 0 14px;}
           table{border-collapse:collapse;width:100%;margin-bottom:18px;} th,td{border:1px solid #cfd7e6;padding:6px 8px;text-align:left;}
           th{background:#eef3fb;} .totals td{font-weight:700;background:#f7f9fd;}
-          .chart-wrap{margin-top:12px;} .chart-wrap img{max-width:100%;border:1px solid #d9e2f2;border-radius:10px;}
         </style></head><body>
           <h2>Weekly Cost Report</h2>
           <div class="summary"><strong>Week:</strong> ${escHtml(weekTitle)}</div>
@@ -11658,7 +11657,6 @@ function renderCosts(){
             <tbody>${maintRows}</tbody>
             <tfoot class="totals"><tr><td colspan="3">Maintenance total</td><td>${escHtml(report.totalMaintenanceCostLabel || "$0")}</td></tr></tfoot>
           </table>
-          ${weeklyChartDataUrl ? `<section class="chart-wrap"><h3>Weekly charts</h3><img src="${weeklyChartDataUrl}" alt="Weekly report charts"></section>` : ""}
         </body></html>`;
 
         const blob = new Blob([workbookHtml], { type: "application/vnd.ms-excel;charset=utf-8;" });
@@ -11670,6 +11668,21 @@ function renderCosts(){
         link.click();
         link.remove();
         URL.revokeObjectURL(url);
+        if (weeklyChartDataUrl){
+          try {
+            const chartBlob = dataURLToBlob(weeklyChartDataUrl);
+            if (chartBlob){
+              const chartLink = document.createElement("a");
+              const chartUrl = URL.createObjectURL(chartBlob);
+              chartLink.href = chartUrl;
+              chartLink.download = `weekly-cost-report-${report.weekStartISO || "week"}-chart.png`;
+              document.body.appendChild(chartLink);
+              chartLink.click();
+              chartLink.remove();
+              URL.revokeObjectURL(chartUrl);
+            }
+          } catch (_err){}
+        }
       });
     }
 
@@ -11735,11 +11748,26 @@ function renderCosts(){
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
-    const buildWorkbookFromTable = ({ title, subtitle, headerRows, bodyRows, footerRows = [], appendixHtml = "" })=> `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+    const dataURLToBlob = (dataUrl)=>{
+      const raw = String(dataUrl || "");
+      const match = raw.match(/^data:([^;,]+)?(?:;charset=[^;,]+)?(;base64)?,(.*)$/);
+      if (!match) return null;
+      const mime = match[1] || "application/octet-stream";
+      const payload = match[3] || "";
+      if (match[2]){
+        const binary = atob(payload);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1){
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return new Blob([bytes], { type: mime });
+      }
+      return new Blob([decodeURIComponent(payload)], { type: mime });
+    };
+    const buildWorkbookFromTable = ({ title, subtitle, headerRows, bodyRows, footerRows = [] })=> `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
       body{font-family:Arial,sans-serif;padding:16px;color:#1e2b45;} h2{margin:0 0 6px;} .summary{margin:0 0 14px;}
       table{border-collapse:collapse;width:100%;margin-bottom:12px;} th,td{border:1px solid #cfd7e6;padding:6px 8px;text-align:left;}
       th{background:#eef3fb;font-weight:700;} .right{text-align:right;} .totals td{font-weight:700;background:#f7f9fd;}
-      .chart-wrap{margin-top:14px;} .chart-wrap h3{margin:0 0 8px;} .chart-wrap img{max-width:100%;border:1px solid #d9e2f2;border-radius:8px;}
     </style></head><body>
       <h2>${escWorkbookHtml(title || "Export")}</h2>
       <div class="summary">${escWorkbookHtml(subtitle || "")}</div>
@@ -11748,7 +11776,6 @@ function renderCosts(){
         <tbody>${(Array.isArray(bodyRows) ? bodyRows : []).map(row => `<tr>${row.map((col, idx) => `<td class="${idx >= 2 ? "right" : ""}">${escWorkbookHtml(col)}</td>`).join("")}</tr>`).join("") || "<tr><td colspan=\"8\">No rows available.</td></tr>"}</tbody>
         <tfoot class="totals">${(Array.isArray(footerRows) ? footerRows : []).map(row => `<tr>${row.map((col, idx) => `<td class="${idx >= 2 ? "right" : ""}">${escWorkbookHtml(col)}</td>`).join("")}</tr>`).join("")}</tfoot>
       </table>
-      ${appendixHtml || ""}
     </body></html>`;
     const downloadWorkbook = (name, html)=>{
       const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8;" });
@@ -11801,14 +11828,14 @@ function renderCosts(){
       rows.sort((a,b)=> String(a.date).localeCompare(String(b.date)));
       return rows;
     };
-    const serializeCanvasImage = (canvasEl)=>{
-      if (!(canvasEl instanceof HTMLCanvasElement)) return "";
-      try {
-        return canvasEl.toDataURL("image/png");
-      } catch (_err){
-        return "";
-      }
-    };
+      const serializeCanvasImage = (canvasEl)=>{
+        if (!(canvasEl instanceof HTMLCanvasElement)) return "";
+        try {
+          return canvasEl.toDataURL("image/png");
+        } catch (_err){
+          return "";
+        }
+      };
     const buildPrintDocument = ({ title, subtitle, tableHtml, chartDataUrl = "" })=> `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escWorkbookHtml(title || "Print")}</title><style>
       body{font-family:Arial,sans-serif;padding:20px;color:#1e2b45;}
       h1{margin:0 0 6px;font-size:22px;} .summary{margin:0 0 14px;color:#4b5a77;}
@@ -12001,17 +12028,43 @@ function renderCosts(){
           const maintenanceTable = weeklySection.querySelectorAll(".cost-weekly-section .cost-weekly-table-wrap");
           const summaryTables = Array.from(maintenanceTable).map(table => `<table class="cost-table">${table.innerHTML}</table>`).join("");
           const chartUrl = serializeCanvasImage(panel.querySelector("#weeklyCostChart"));
-          const printWindow = window.open("", "_blank", "noopener,noreferrer,width=980,height=780");
-          if (!printWindow) return;
           const subtitle = report?.weekLabel || report?.weekStartISO || "Selected week";
-          printWindow.document.open();
-          printWindow.document.write(buildPrintDocument({
+          const printHtml = buildPrintDocument({
             title: "Weekly Cost Report",
             subtitle,
             tableHtml: summaryTables || rowsTable,
             chartDataUrl: chartUrl
-          }));
-          printWindow.document.close();
+          });
+          const frame = document.createElement("iframe");
+          frame.style.position = "fixed";
+          frame.style.right = "0";
+          frame.style.bottom = "0";
+          frame.style.width = "0";
+          frame.style.height = "0";
+          frame.style.border = "0";
+          frame.setAttribute("aria-hidden", "true");
+          document.body.appendChild(frame);
+          const frameDoc = frame.contentDocument || frame.contentWindow?.document;
+          if (!frameDoc){
+            frame.remove();
+            return;
+          }
+          let didPrint = false;
+          const triggerPrint = ()=>{
+            if (didPrint) return;
+            didPrint = true;
+            try {
+              frame.contentWindow?.focus();
+              frame.contentWindow?.print();
+            } finally {
+              setTimeout(()=> frame.remove(), 1200);
+            }
+          };
+          frame.onload = triggerPrint;
+          frameDoc.open();
+          frameDoc.write(printHtml);
+          frameDoc.close();
+          setTimeout(triggerPrint, 180);
         });
       }
       if (exportWeekBtn instanceof HTMLElement){
