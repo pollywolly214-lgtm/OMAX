@@ -11630,11 +11630,21 @@ function renderCosts(){
             <td>${escHtml(item?.partNumber || "—")}</td>
             <td>${escHtml(item?.costLabel || "$0")}</td>
           </tr>`).join("") || '<tr><td colspan="4">No maintenance completed this week.</td></tr>';
+        const weeklyChartDataUrl = (()=> {
+          const weeklyCanvas = panel.querySelector("#weeklyCostChart");
+          if (!(weeklyCanvas instanceof HTMLCanvasElement)) return "";
+          try {
+            return weeklyCanvas.toDataURL("image/png");
+          } catch (_err){
+            return "";
+          }
+        })();
 
         const workbookHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
           body{font-family:Arial,sans-serif;padding:16px;color:#1e2b45;} h2,h3{margin:0 0 8px;} .summary{margin:8px 0 14px;}
           table{border-collapse:collapse;width:100%;margin-bottom:18px;} th,td{border:1px solid #cfd7e6;padding:6px 8px;text-align:left;}
           th{background:#eef3fb;} .totals td{font-weight:700;background:#f7f9fd;}
+          .chart-wrap{margin-top:12px;} .chart-wrap img{max-width:100%;border:1px solid #d9e2f2;border-radius:10px;}
         </style></head><body>
           <h2>Weekly Cost Report</h2>
           <div class="summary"><strong>Week:</strong> ${escHtml(weekTitle)}</div>
@@ -11648,6 +11658,7 @@ function renderCosts(){
             <tbody>${maintRows}</tbody>
             <tfoot class="totals"><tr><td colspan="3">Maintenance total</td><td>${escHtml(report.totalMaintenanceCostLabel || "$0")}</td></tr></tfoot>
           </table>
+          ${weeklyChartDataUrl ? `<section class="chart-wrap"><h3>Weekly charts</h3><img src="${weeklyChartDataUrl}" alt="Weekly report charts"></section>` : ""}
         </body></html>`;
 
         const blob = new Blob([workbookHtml], { type: "application/vnd.ms-excel;charset=utf-8;" });
@@ -11709,16 +11720,26 @@ function renderCosts(){
       window.receiptTrackerWeeks.push(created);
       return created;
     };
+    const clampDateToWeek = (dateIso, entry)=>{
+      const value = toIsoDate(dateIso);
+      if (!value || !entry) return value;
+      const min = toIsoDate(entry.startISO);
+      const max = toIsoDate(entry.endISO);
+      if (min && value < min) return min;
+      if (max && value > max) return max;
+      return value;
+    };
     const computeRowTotal = (row)=> ((Number(row?.cost) || 0) * (Number(row?.qty) || 0)) + (Number(row?.shipping) || 0) + (Number(row?.tax) || 0);
     const escWorkbookHtml = (value)=> String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
-    const buildWorkbookFromTable = ({ title, subtitle, headerRows, bodyRows, footerRows = [] })=> `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+    const buildWorkbookFromTable = ({ title, subtitle, headerRows, bodyRows, footerRows = [], appendixHtml = "" })=> `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
       body{font-family:Arial,sans-serif;padding:16px;color:#1e2b45;} h2{margin:0 0 6px;} .summary{margin:0 0 14px;}
       table{border-collapse:collapse;width:100%;margin-bottom:12px;} th,td{border:1px solid #cfd7e6;padding:6px 8px;text-align:left;}
       th{background:#eef3fb;font-weight:700;} .right{text-align:right;} .totals td{font-weight:700;background:#f7f9fd;}
+      .chart-wrap{margin-top:14px;} .chart-wrap h3{margin:0 0 8px;} .chart-wrap img{max-width:100%;border:1px solid #d9e2f2;border-radius:8px;}
     </style></head><body>
       <h2>${escWorkbookHtml(title || "Export")}</h2>
       <div class="summary">${escWorkbookHtml(subtitle || "")}</div>
@@ -11727,6 +11748,7 @@ function renderCosts(){
         <tbody>${(Array.isArray(bodyRows) ? bodyRows : []).map(row => `<tr>${row.map((col, idx) => `<td class="${idx >= 2 ? "right" : ""}">${escWorkbookHtml(col)}</td>`).join("")}</tr>`).join("") || "<tr><td colspan=\"8\">No rows available.</td></tr>"}</tbody>
         <tfoot class="totals">${(Array.isArray(footerRows) ? footerRows : []).map(row => `<tr>${row.map((col, idx) => `<td class="${idx >= 2 ? "right" : ""}">${escWorkbookHtml(col)}</td>`).join("")}</tr>`).join("")}</tfoot>
       </table>
+      ${appendixHtml || ""}
     </body></html>`;
     const downloadWorkbook = (name, html)=>{
       const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8;" });
@@ -11779,6 +11801,28 @@ function renderCosts(){
       rows.sort((a,b)=> String(a.date).localeCompare(String(b.date)));
       return rows;
     };
+    const serializeCanvasImage = (canvasEl)=>{
+      if (!(canvasEl instanceof HTMLCanvasElement)) return "";
+      try {
+        return canvasEl.toDataURL("image/png");
+      } catch (_err){
+        return "";
+      }
+    };
+    const buildPrintDocument = ({ title, subtitle, tableHtml, chartDataUrl = "" })=> `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escWorkbookHtml(title || "Print")}</title><style>
+      body{font-family:Arial,sans-serif;padding:20px;color:#1e2b45;}
+      h1{margin:0 0 6px;font-size:22px;} .summary{margin:0 0 14px;color:#4b5a77;}
+      table{border-collapse:collapse;width:100%;margin-bottom:14px;} th,td{border:1px solid #cfd7e6;padding:6px 8px;text-align:left;}
+      th{background:#eef3fb;font-weight:700;} tfoot th{background:#f7f9fd;}
+      .chart-wrap h2{margin:4px 0 8px;font-size:18px;}
+      .chart-wrap img{max-width:100%;border:1px solid #d9e2f2;border-radius:8px;}
+    </style></head><body>
+      <h1>${escWorkbookHtml(title || "Weekly Report")}</h1>
+      <div class="summary">${escWorkbookHtml(subtitle || "")}</div>
+      ${tableHtml || ""}
+      ${chartDataUrl ? `<section class="chart-wrap"><h2>Weekly chart</h2><img src="${chartDataUrl}" alt="Weekly report chart"></section>` : ""}
+      <script>window.addEventListener("load",()=>{window.print();});<\/script>
+    </body></html>`;
     const receiptOpenBtn = panel.querySelector("[data-cost-receipt-open]");
     const modal = document.getElementById("costReceiptModal");
     if (receiptOpenBtn instanceof HTMLElement && modal instanceof HTMLElement){
@@ -11793,6 +11837,7 @@ function renderCosts(){
       const closeControls = Array.from(modal.querySelectorAll("[data-receipt-close]"));
       const exportWeekBtn = modal.querySelector("[data-receipt-export-week]");
       const exportRangeBtn = modal.querySelector("[data-receipt-export-range]");
+      const weeklyPrintBtn = panel.querySelector("[data-cost-weekly-print]");
       let activeWeekKey = String((window.receiptTrackerWeekSelected || weekOptions[0]?.key || ""));
       let activeRange = String(window.receiptTrackerRangeSelected || "1");
       window.receiptTrackerWeekSelected = activeWeekKey;
@@ -11808,7 +11853,7 @@ function renderCosts(){
         const entry = getWeekEntry(activeWeekKey);
         if (!(weekRowsBody instanceof HTMLElement)) return entry;
         const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).map(tr => ({
-          date: toIsoDate(tr.querySelector('[data-col=\"date\"]')?.value || ""),
+          date: clampDateToWeek(tr.querySelector('[data-col=\"date\"]')?.value || "", entry),
           purchased: String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim(),
           cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
           qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
@@ -11825,7 +11870,7 @@ function renderCosts(){
         const tr = document.createElement("tr");
         tr.setAttribute("data-receipt-row", "1");
         tr.innerHTML = `
-          <td><input type="date" data-col="date"></td>
+          <td><input type="date" data-col="date" min="${escapeHtml(String(getWeekEntry(activeWeekKey)?.startISO || ""))}" max="${escapeHtml(String(getWeekEntry(activeWeekKey)?.endISO || ""))}"></td>
           <td><input type="text" data-col="purchased" placeholder="Item"></td>
           <td><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
           <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
@@ -11865,7 +11910,7 @@ function renderCosts(){
         if (!(weekRowsBody instanceof HTMLElement)) return;
         weekRowsBody.innerHTML = rows.map(row => `
           <tr data-receipt-row="1">
-            <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}"></td>
+            <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}" min="${escapeHtml(String(entry.startISO || ""))}" max="${escapeHtml(String(entry.endISO || ""))}"></td>
             <td><input type="text" data-col="purchased" value="${escapeHtml(row.purchased || "")}"></td>
             <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
             <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
@@ -11945,6 +11990,28 @@ function renderCosts(){
           window.receiptTrackerWeekSelected = activeWeekKey;
           renderWeekRows();
           renderRangeTable();
+        });
+      }
+      if (weeklyPrintBtn instanceof HTMLElement){
+        weeklyPrintBtn.addEventListener("click", ()=>{
+          const report = reports.find(item => String(item?.weekStartISO || "") === normalized);
+          const weeklySection = panel.querySelector("[data-cost-weekly-reports]");
+          if (!weeklySection) return;
+          const rowsTable = weeklySection.querySelector(".cost-weekly-section .cost-weekly-table-wrap")?.innerHTML || "";
+          const maintenanceTable = weeklySection.querySelectorAll(".cost-weekly-section .cost-weekly-table-wrap");
+          const summaryTables = Array.from(maintenanceTable).map(table => `<table class="cost-table">${table.innerHTML}</table>`).join("");
+          const chartUrl = serializeCanvasImage(panel.querySelector("#weeklyCostChart"));
+          const printWindow = window.open("", "_blank", "noopener,noreferrer,width=980,height=780");
+          if (!printWindow) return;
+          const subtitle = report?.weekLabel || report?.weekStartISO || "Selected week";
+          printWindow.document.open();
+          printWindow.document.write(buildPrintDocument({
+            title: "Weekly Cost Report",
+            subtitle,
+            tableHtml: summaryTables || rowsTable,
+            chartDataUrl: chartUrl
+          }));
+          printWindow.document.close();
         });
       }
       if (exportWeekBtn instanceof HTMLElement){
