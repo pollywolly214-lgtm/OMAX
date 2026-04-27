@@ -77,15 +77,26 @@ function computeTimeEfficiency(rangeDays, options = {}){
   }
 
   const map = getDailyCutHoursMap();
-  const baselineDailyHoursRaw = (typeof getConfiguredDailyHours === "function")
-    ? Number(getConfiguredDailyHours())
-    : Number(CUTTING_BASELINE_DAILY_HOURS);
-  const baselineDailyHours = (Number.isFinite(baselineDailyHoursRaw) && baselineDailyHoursRaw > 0)
-    ? baselineDailyHoursRaw
+  const configuredGoalMode = (typeof window !== "undefined" && window.appConfig)
+    ? window.appConfig.timeEfficiencyGoalMode
+    : null;
+  const goalModeRaw = options.goalMode || configuredGoalMode || "maximum";
+  const goalMode = goalModeRaw === "average" ? "average" : "maximum";
+  const configuredDailyHoursRaw = (typeof getFixedDailyHours === "function")
+    ? Number(getFixedDailyHours())
+    : ((typeof getConfiguredDailyHours === "function")
+      ? Number(getConfiguredDailyHours())
+      : Number(CUTTING_BASELINE_DAILY_HOURS));
+  const configuredDailyHours = (Number.isFinite(configuredDailyHoursRaw) && configuredDailyHoursRaw > 0)
+    ? configuredDailyHoursRaw
     : CUTTING_BASELINE_DAILY_HOURS;
   const averageDailyHours = (typeof getAverageDailyCutHours === "function")
     ? getAverageDailyCutHours()
     : null;
+  const goalDailyHours = (goalMode === "average" && Number.isFinite(Number(averageDailyHours)) && Number(averageDailyHours) > 0)
+    ? Number(averageDailyHours)
+    : configuredDailyHours;
+  const goalDailyHoursLabel = `${Math.abs(goalDailyHours - Math.round(goalDailyHours)) < 0.05 ? Math.round(goalDailyHours) : goalDailyHours.toFixed(1)} hr`;
   let actual = 0;
   let coverage = 0;
   const cursor = new Date(startDate);
@@ -101,7 +112,7 @@ function computeTimeEfficiency(rangeDays, options = {}){
   }
 
   const workingDays = inclusiveDayCount(startDate, endDate) || 0;
-  const baseline = baselineDailyHours * workingDays;
+  const baseline = goalDailyHours * workingDays;
 
   const todayLocal = new Date();
   todayLocal.setHours(0,0,0,0);
@@ -120,7 +131,7 @@ function computeTimeEfficiency(rangeDays, options = {}){
   if (!Number.isFinite(elapsedDays)) elapsedDays = 0;
   elapsedDays = Math.max(0, Math.min(normalizedDays, Math.round(elapsedDays)));
 
-  const targetHours = baselineDailyHours * elapsedDays;
+  const targetHours = goalDailyHours * elapsedDays;
   const differenceToDate = actual - targetHours;
   const difference = actual - baseline;
   const percentToDate = targetHours > 0
@@ -139,6 +150,12 @@ function computeTimeEfficiency(rangeDays, options = {}){
     efficiencyPercent: percentToDate,
     efficiencyGoalPercent: percentGoal,
     coverageDays: coverage,
+    goalMode,
+    goalModeLabel: goalMode === "average" ? "Go off average" : "Go off maximum",
+    goalDailyHours,
+    goalSourceLabel: goalMode === "average"
+      ? `Average cut hours/day (${goalDailyHoursLabel})`
+      : `Dashboard goal hours/day (${goalDailyHoursLabel})`,
     averageDailyHours,
     startISO: ymd(startDate),
     endISO: ymd(endDate),

@@ -540,6 +540,34 @@ body.cost-timeframe-modal-open{ overflow:hidden; }
   color:#000;
 }
 body.cost-data-center-open{ overflow:hidden; }
+.time-efficiency-tooltip{
+  position:fixed;
+  z-index:100100;
+  pointer-events:none;
+  background:#0f172a;
+  color:#f8fafc;
+  border-radius:8px;
+  padding:8px 10px;
+  font-size:12px;
+  line-height:1.35;
+  max-width:min(300px, calc(100vw - 16px));
+  box-shadow:0 16px 34px rgba(2, 8, 20, 0.45);
+  opacity:0;
+  transform:translateY(0);
+  transition:opacity 120ms ease, transform 120ms ease;
+}
+.time-efficiency-tooltip[data-visible="true"]{
+  opacity:1;
+}
+.time-efficiency-tooltip[data-placement="above"][data-visible="true"]{
+  transform:translateY(-2px);
+}
+.time-efficiency-tooltip[data-placement="below"][data-visible="true"]{
+  transform:translateY(2px);
+}
+.time-efficiency-tooltip[hidden]{
+  display:none;
+}
 
 .cost-receipt-modal{ position:fixed; inset:0; z-index:1600; display:flex; align-items:center; justify-content:center; padding:24px 20px; }
 .cost-receipt-modal[hidden]{ display:none; }
@@ -4416,7 +4444,9 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   color: #0a1f3f;
 }
 
-.time-efficiency-edit-field input[type="date"] {
+.time-efficiency-edit-field input[type="date"],
+.time-efficiency-edit-field input[type="number"],
+.time-efficiency-edit-field select {
   border: 1px solid #cbd6ee;
   border-radius: 8px;
   padding: 6px 10px;
@@ -4424,9 +4454,12 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   color: #0a1f3f;
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   min-width: 180px;
+  background:#fff;
 }
 
-.time-efficiency-edit-field input[type="date"]:focus {
+.time-efficiency-edit-field input[type="date"]:focus,
+.time-efficiency-edit-field input[type="number"]:focus,
+.time-efficiency-edit-field select:focus {
   border-color: #0a63c2;
   box-shadow: 0 0 0 2px rgba(10, 99, 194, 0.18);
   outline: none;

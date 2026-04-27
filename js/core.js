@@ -58,7 +58,8 @@ const DEFAULT_APP_CONFIG = {
   excludeWeekends: false,
   dailyHours: DEFAULT_DAILY_HOURS,
   predictionMode: "fixed",
-  averageWindowDays: DEFAULT_PREDICTION_AVERAGE_WINDOW
+  averageWindowDays: DEFAULT_PREDICTION_AVERAGE_WINDOW,
+  timeEfficiencyGoalMode: "maximum"
 };
 let appConfig = { ...DEFAULT_APP_CONFIG };
 
@@ -239,6 +240,7 @@ function normalizeAppConfig(config){
       normalized.predictionMode = "fixed";
     }
     normalized.averageWindowDays = normalizePredictionAverageWindow(config.averageWindowDays);
+    normalized.timeEfficiencyGoalMode = config.timeEfficiencyGoalMode === "average" ? "average" : "maximum";
   }
   return normalized;
 }
