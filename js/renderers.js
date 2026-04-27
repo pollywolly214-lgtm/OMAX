@@ -12882,9 +12882,13 @@ function renderCosts(){
     const maintenanceCostPerCutValue = cutCountInWindow > 0
       ? (maintenanceCostTotalInWindow / cutCountInWindow)
       : 0;
-    const maintenanceCostPerCutLabel = formatterCurrency(maintenanceCostPerCutValue, {
-      decimals: maintenanceCostPerCutValue < 1000 ? 2 : 0
-    });
+    const maintenanceCostPerCutDecimals = maintenanceCostPerCutValue < 1000 ? 2 : 0;
+    const maintenanceCostPerCutLabel = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: maintenanceCostPerCutDecimals,
+      maximumFractionDigits: maintenanceCostPerCutDecimals
+    }).format(Math.abs(maintenanceCostPerCutValue || 0));
 
     const domainStarts = [maintenanceRange.domainStart, jobRange.domainStart]
       .map(value => Number.isFinite(value) ? Number(value) : null)
