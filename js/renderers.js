@@ -4398,12 +4398,16 @@ function normalizeTimeEfficiencyStart(days, value){
 
 function describeTimeEfficiencyEdit(days){
   if (days === 7){
-    return "Weekly range automatically runs Monday through Sunday.";
+    return "Weekly range automatically runs Monday through Sunday. Goal mode sets whether we compare against average/day or dashboard max/day.";
   }
   if (days > 35){
-    return "Choose the start date you'd like to measure from.";
+    return "Choose the start date you'd like to measure from. Goal mode sets average/day vs max/day target math.";
   }
-  return "Choose a start date. It will snap to the first day of that month.";
+  return "Choose a start date. It will snap to the first day of that month. Goal mode sets average/day vs max/day target math.";
+}
+
+function normalizeTimeEfficiencyGoalMode(value){
+  return value === "average" ? "average" : "maximum";
 }
 
 function refreshTimeEfficiencyWidget(widget){
@@ -4441,6 +4445,30 @@ function refreshTimeEfficiencyWidget(widget){
       zeroLabel: "Goal met",
       fallback: "Goal met"
     });
+  }
+  const targetTooltip = data.goalMode === "average"
+    ? "Target-to-date from your average cut hours/day multiplied by elapsed days in this window."
+    : "Target-to-date from your dashboard max daily-hours goal multiplied by elapsed days in this window.";
+  const goalTooltip = data.goalMode === "average"
+    ? "End goal from your average cut hours/day multiplied by total eligible days in this window."
+    : "End goal from your dashboard max daily-hours goal multiplied by total eligible days in this window.";
+  const gapTargetTooltip = "Actual hours minus target-to-date hours in this window.";
+  const gapGoalTooltip = "Actual hours minus full-window end-goal hours.";
+  if (widget.metrics.target){
+    widget.metrics.target.dataset.efficiencyTooltip = targetTooltip;
+    widget.metrics.target.setAttribute("title", targetTooltip);
+  }
+  if (widget.metrics.goal){
+    widget.metrics.goal.dataset.efficiencyTooltip = goalTooltip;
+    widget.metrics.goal.setAttribute("title", goalTooltip);
+  }
+  if (widget.metrics.diffTarget){
+    widget.metrics.diffTarget.dataset.efficiencyTooltip = gapTargetTooltip;
+    widget.metrics.diffTarget.setAttribute("title", gapTargetTooltip);
+  }
+  if (widget.metrics.diffGoal){
+    widget.metrics.diffGoal.dataset.efficiencyTooltip = gapGoalTooltip;
+    widget.metrics.diffGoal.setAttribute("title", gapGoalTooltip);
   }
   if (widget.root){
     const trend = determineTimeEfficiencyTrend(data);
@@ -4513,13 +4541,8 @@ function updateTimeEfficiencyEditPanel(widget){
     }
   }
   if (widget.goalInput){
-    const configuredDaily = (typeof getConfiguredDailyHours === "function")
-      ? Number(getConfiguredDailyHours())
-      : Number(CUTTING_BASELINE_DAILY_HOURS || 0);
-    const weeklyGoal = Number.isFinite(configuredDaily) && configuredDaily > 0
-      ? configuredDaily * 7
-      : 56;
-    widget.goalInput.value = weeklyGoal.toFixed(1);
+    const modeFromConfig = normalizeTimeEfficiencyGoalMode(window?.appConfig?.timeEfficiencyGoalMode);
+    widget.goalInput.value = modeFromConfig;
   }
 }
 
@@ -4546,21 +4569,17 @@ function applyTimeEfficiencyEdit(widget){
   if (!widget) return;
   const days = Number(widget.currentDays) || Number(widget.defaultDays) || 7;
   if (widget.goalInput){
-    const weeklyGoal = Number(widget.goalInput.value);
-    if (Number.isFinite(weeklyGoal) && weeklyGoal > 0){
-      const dailyGoal = Math.max(0.1, Math.round((weeklyGoal / 7) * 100) / 100);
-      const currentConfig = (typeof normalizeAppConfig === "function")
-        ? normalizeAppConfig(window.appConfig)
-        : (window.appConfig || {});
-      const nextConfig = {
-        ...currentConfig,
-        predictionMode: "fixed",
-        dailyHours: dailyGoal
-      };
-      if (typeof setAppConfig === "function") setAppConfig(nextConfig);
-      else window.appConfig = nextConfig;
-      if (typeof persist === "function") persist();
-    }
+    const selectedMode = normalizeTimeEfficiencyGoalMode(widget.goalInput.value);
+    const currentConfig = (typeof normalizeAppConfig === "function")
+      ? normalizeAppConfig(window.appConfig)
+      : (window.appConfig || {});
+    const nextConfig = {
+      ...currentConfig,
+      timeEfficiencyGoalMode: selectedMode
+    };
+    if (typeof setAppConfig === "function") setAppConfig(nextConfig);
+    else window.appConfig = nextConfig;
+    if (typeof persist === "function") persist();
   }
   if (!widget.editInput || widget.editInput.disabled){
     toggleTimeEfficiencyEditPanel(widget, false);
@@ -4726,7 +4745,7 @@ function setupTimeEfficiencyWidget(root){
     applyBtn: root.querySelector("[data-efficiency-apply]") || root.querySelector("[data-efficiency-save]") || null,
     cancelBtn: root.querySelector("[data-efficiency-cancel]") || null,
     editNote: root.querySelector("[data-efficiency-edit-note]") || null,
-    goalInput: root.querySelector("[data-efficiency-goal-input]") || null
+    goalInput: root.querySelector("[data-efficiency-goal-mode-input]") || null
   };
   toggles.forEach(btn => {
     btn.addEventListener("click", ()=> selectTimeEfficiencyRange(widget, btn));

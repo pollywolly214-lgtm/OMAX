@@ -152,8 +152,11 @@ function viewDashboard(){
                   <input type="date" data-efficiency-start-input>
                 </label>
                 <label class="time-efficiency-edit-field">
-                  <span class="time-efficiency-edit-label">Goal / week (hr, drives target)</span>
-                  <input type="number" min="1" step="0.5" data-efficiency-goal-input>
+                  <span class="time-efficiency-edit-label">Weekly goal mode</span>
+                  <select data-efficiency-goal-mode-input>
+                    <option value="average">Go off average</option>
+                    <option value="maximum">Go off maximum</option>
+                  </select>
                 </label>
                 <div class="time-efficiency-edit-actions">
                 <button type="button" class="time-efficiency-edit-apply" data-efficiency-apply>Apply</button>
@@ -193,7 +196,7 @@ function viewDashboard(){
             </div>
           </div>
           <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
-          <p class="small muted">How this works: <strong>Target</strong> = your weekly goal prorated by elapsed days in the selected window. <strong>End goal</strong> = full-window goal. So you can be ahead of target today while still behind the full-window goal.</p>
+          <p class="small muted">How this works: <strong>Go off average</strong> uses your average cut hours/day. <strong>Go off maximum</strong> uses your dashboard daily-hours goal (default 8 hr/day) and respects the weekend include/exclude setting.</p>
           <p class="small muted">Baseline adapts to your average logged hours per day.</p>
         </div>
       </div>
@@ -2315,8 +2318,11 @@ function viewCosts(model){
                 <input type="date" data-efficiency-start-input>
               </label>
               <label class="time-efficiency-edit-field">
-                <span class="time-efficiency-edit-label">Goal / week (hr, drives target)</span>
-                <input type="number" min="1" step="0.5" data-efficiency-goal-input>
+                <span class="time-efficiency-edit-label">Weekly goal mode</span>
+                <select data-efficiency-goal-mode-input>
+                  <option value="average">Go off average</option>
+                  <option value="maximum">Go off maximum</option>
+                </select>
               </label>
               <div class="time-efficiency-edit-actions">
                 <button type="button" class="time-efficiency-edit-apply" data-efficiency-apply>Apply</button>
@@ -2335,7 +2341,7 @@ function viewCosts(model){
             <div class="time-efficiency-metric"><span class="label">Efficiency (to date)</span><span class="value" data-efficiency-percent data-efficiency-tooltip="Efficiency to date: actual hours divided by target-to-date hours." title="Efficiency to date: actual hours divided by target-to-date hours.">—</span></div>
           </div>
           <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
-          <p class="small muted">How this works: <strong>Target</strong> = your weekly goal prorated by elapsed days in the selected window. <strong>End goal</strong> = full-window goal. So you can be ahead of target today while still behind the full-window goal.</p>
+          <p class="small muted">How this works: <strong>Go off average</strong> uses your average cut hours/day. <strong>Go off maximum</strong> uses your dashboard daily-hours goal (default 8 hr/day) and respects the weekend include/exclude setting.</p>
           <p class="small muted">Baseline adapts to your average logged hours per day.</p>
         </div>
         <div class="cost-efficiency-calculator" data-efficiency-calc>

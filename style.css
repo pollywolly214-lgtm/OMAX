@@ -4397,7 +4397,9 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   color: #0a1f3f;
 }
 
-.time-efficiency-edit-field input[type="date"] {
+.time-efficiency-edit-field input[type="date"],
+.time-efficiency-edit-field input[type="number"],
+.time-efficiency-edit-field select {
   border: 1px solid #cbd6ee;
   border-radius: 8px;
   padding: 6px 10px;
@@ -4405,9 +4407,12 @@ th { background: linear-gradient(135deg, rgba(9, 68, 165, 0.85), rgba(33, 182, 2
   color: #0a1f3f;
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   min-width: 180px;
+  background:#fff;
 }
 
-.time-efficiency-edit-field input[type="date"]:focus {
+.time-efficiency-edit-field input[type="date"]:focus,
+.time-efficiency-edit-field input[type="number"]:focus,
+.time-efficiency-edit-field select:focus {
   border-color: #0a63c2;
   box-shadow: 0 0 0 2px rgba(10, 99, 194, 0.18);
   outline: none;
