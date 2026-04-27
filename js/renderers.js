@@ -10996,6 +10996,34 @@ function renderCosts(){
       }
       pendingDataCenterScrollTop = null;
     };
+    const highlightMaintenanceDataCenterRow = ({ taskId = "", dateISO = "" } = {})=>{
+      if (!(modal instanceof HTMLElement)) return false;
+      const taskKey = String(taskId || "").trim();
+      const dateKey = String(dateISO || "").trim();
+      const cssEsc = (value)=>{
+        const raw = String(value || "");
+        if (typeof CSS !== "undefined" && CSS && typeof CSS.escape === "function"){
+          return CSS.escape(raw);
+        }
+        return raw.replace(/["\\]/g, "\\$&");
+      };
+      const selector = dateKey
+        ? `[data-maintenance-row][data-task-id="${cssEsc(taskKey)}"][data-maintenance-date-iso="${cssEsc(dateKey)}"]`
+        : `[data-maintenance-row][data-task-id="${cssEsc(taskKey)}"]`;
+      let targetRow = taskKey ? modal.querySelector(selector) : null;
+      if (!(targetRow instanceof HTMLElement) && taskKey){
+        targetRow = modal.querySelector(`[data-maintenance-row][data-task-id="${cssEsc(taskKey)}"]`);
+      }
+      if (!(targetRow instanceof HTMLElement)) return false;
+      const allRows = Array.from(modal.querySelectorAll("[data-maintenance-row-link-highlight]"));
+      allRows.forEach(row => row.removeAttribute("data-maintenance-row-link-highlight"));
+      targetRow.setAttribute("data-maintenance-row-link-highlight", "1");
+      targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(()=>{
+        targetRow.removeAttribute("data-maintenance-row-link-highlight");
+      }, 2400);
+      return true;
+    };
     const pulseRow = (row)=>{
       if (!(row instanceof HTMLElement)) return;
       row.hidden = false;
@@ -11047,7 +11075,6 @@ function renderCosts(){
     if (typeof window !== "undefined"){
       window.__focusCostDataCenterRow = focusDataCenterRow;
     }
-
     if (openBtn instanceof HTMLElement && modal instanceof HTMLElement){
       openBtn.addEventListener("click", openDataCenter);
       closeBtns.forEach(btn => {
@@ -11236,6 +11263,9 @@ function renderCosts(){
           return;
         }
         if (jobId){
+          jobHistorySearchTerm = "";
+          window.jobHistorySearchTerm = "";
+          window.jobHistoryCategoryFilter = String(window.JOB_ROOT_FOLDER_ID || "jobs_root");
           window.pendingJobFocus = { type: "jobRow", id: jobId };
         }
         location.hash = "#/jobs";
@@ -12886,13 +12916,22 @@ function renderCosts(){
   const toggleJobs  = document.getElementById("toggleCostJobs");
   const canvasWrap = content.querySelector(".cost-chart-canvas");
   let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
+  let lastPointerClientPos = null;
   const rangeButtons = Array.from(content.querySelectorAll("[data-cost-range]"));
-  const allowedChartRanges = [1, 3, 6, 12];
-  const defaultChartRange = 6;
+  const allowedChartRanges = ["1", "3", "6", "12", "ytd", "all"];
+  const defaultChartRange = "6";
+  const rangeLabelMap = new Map([
+    ["1", "1 month"],
+    ["3", "3 months"],
+    ["6", "6 months"],
+    ["12", "12 months"],
+    ["ytd", "YTD"],
+    ["all", "All time"]
+  ]);
 
   const normalizeChartRange = (value)=>{
-    const months = Number(value);
-    return allowedChartRanges.includes(months) ? months : defaultChartRange;
+    const key = String(value == null ? "" : value).toLowerCase();
+    return allowedChartRanges.includes(key) ? key : defaultChartRange;
   };
 
   const getChartRangeState = ()=>{
@@ -12952,17 +12991,27 @@ function renderCosts(){
       return { points: [], domainStart: null, domainEnd: null };
     }
 
-    const approximateDaysPerMonth = 31;
-    const limit = Math.max(180, Math.ceil(normalizedRange * approximateDaysPerMonth));
-
     const latestPoint = sanitized[sanitized.length - 1];
     const latestTime = latestPoint.date.getTime();
     const cutoff = new Date(latestTime);
     cutoff.setHours(0, 0, 0, 0);
-    cutoff.setMonth(cutoff.getMonth() - normalizedRange);
+    if (normalizedRange === "ytd"){
+      cutoff.setMonth(0, 1);
+    }else if (normalizedRange !== "all"){
+      const months = Number(normalizedRange);
+      cutoff.setMonth(cutoff.getMonth() - (Number.isFinite(months) ? months : 6));
+    }else{
+      const oldest = sanitized[0]?.date;
+      if (oldest instanceof Date && !Number.isNaN(oldest.getTime())){
+        cutoff.setTime(oldest.getTime());
+        cutoff.setHours(0, 0, 0, 0);
+      }
+    }
     const cutoffTime = cutoff.getTime();
 
-    let filtered = sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
+    let filtered = normalizedRange === "all"
+      ? sanitized.slice()
+      : sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
 
     if (!filtered.length){
       const fallback = sanitized[sanitized.length - 1];
@@ -12974,7 +13023,9 @@ function renderCosts(){
       }
     }
 
-    const limited = limitChartSeries(filtered, limit);
+    const limited = normalizedRange === "all"
+      ? filtered.slice()
+      : limitChartSeries(filtered, Math.max(180, Math.ceil((Number(normalizedRange) || 6) * 31)));
     if (!allowedChartRanges.includes(normalizedRange)){
       return { points: limited, domainStart: null, domainEnd: null };
     }
@@ -13087,51 +13138,82 @@ function renderCosts(){
     canvas.style.cursor = "pointer";
   };
 
-  const handlePointerHover = (event)=>{
+  const getPointerMetrics = (clientX, clientY)=>{
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const clientWidth = canvas.clientWidth || rect.width || canvas.width;
     const clientHeight = canvas.clientHeight || rect.height || canvas.height;
     const scaleX = canvas.width / Math.max(1, clientWidth);
     const scaleY = canvas.height / Math.max(1, clientHeight);
-    const pointerX = (event.clientX - rect.left) * scaleX;
-    const pointerY = (event.clientY - rect.top) * scaleY;
+    const pointerX = (Number(clientX) - rect.left) * scaleX;
+    const pointerY = (Number(clientY) - rect.top) * scaleY;
+    return { rect, scaleX, scaleY, pointerX, pointerY };
+  };
+  const resolvePointerTarget = (event, { allowProximity = false } = {})=>{
+    if (!canvas) return null;
+    const metrics = getPointerMetrics(event?.clientX, event?.clientY);
+    if (!metrics) return null;
+    const { scaleX, scaleY, pointerX, pointerY } = metrics;
     const targets = Array.isArray(canvas.__costChartTargets) ? canvas.__costChartTargets : [];
-    let hovered = null;
     for (const target of targets){
       if (!target || !target.rect) continue;
       const { x, y, width, height } = target.rect;
       if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
-        hovered = target;
-        break;
+        return { target, scaleX, scaleY };
       }
     }
+    if (!allowProximity) return null;
+    const proximityRadius = 14 * Math.max(scaleX, scaleY);
+    let nearest = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (const target of targets){
+      if (!target || !target.rect) continue;
+      const centerX = Number(target.rect.x) + (Number(target.rect.width) / 2);
+      const centerY = Number(target.rect.y) + (Number(target.rect.height) / 2);
+      const dx = pointerX - centerX;
+      const dy = pointerY - centerY;
+      const distance = Math.sqrt((dx * dx) + (dy * dy));
+      if (distance < nearestDistance){
+        nearest = target;
+        nearestDistance = distance;
+      }
+    }
+    if (nearest && nearestDistance <= proximityRadius){
+      return { target: nearest, scaleX, scaleY };
+    }
+    return null;
+  };
+  const handlePointerHover = (event)=>{
+    if (!canvas) return;
+    lastPointerClientPos = {
+      x: Number(event.clientX),
+      y: Number(event.clientY)
+    };
+    const resolved = resolvePointerTarget(event, { allowProximity: true });
+    const hovered = resolved?.target || null;
     if (hovered){
-      showTooltip(hovered, { scaleX, scaleY });
+      showTooltip(hovered, { scaleX: resolved.scaleX, scaleY: resolved.scaleY });
     }else{
       hideTooltip();
     }
   };
-  const resolvePointerTarget = (event)=>{
-    if (!canvas) return null;
+  const refreshTooltipFromLastPointer = ()=>{
+    if (!canvas || !lastPointerClientPos) return;
     const rect = canvas.getBoundingClientRect();
-    const clientWidth = canvas.clientWidth || rect.width || canvas.width;
-    const clientHeight = canvas.clientHeight || rect.height || canvas.height;
-    const scaleX = canvas.width / Math.max(1, clientWidth);
-    const scaleY = canvas.height / Math.max(1, clientHeight);
-    const pointerX = (event.clientX - rect.left) * scaleX;
-    const pointerY = (event.clientY - rect.top) * scaleY;
-    const targets = Array.isArray(canvas.__costChartTargets) ? canvas.__costChartTargets : [];
-    for (const target of targets){
-      if (!target || !target.rect) continue;
-      const { x, y, width, height } = target.rect;
-      if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
-        return target;
-      }
+    const withinCanvas = lastPointerClientPos.x >= rect.left
+      && lastPointerClientPos.x <= rect.right
+      && lastPointerClientPos.y >= rect.top
+      && lastPointerClientPos.y <= rect.bottom;
+    if (!withinCanvas){
+      hideTooltip();
+      return;
     }
-    return null;
+    const syntheticEvent = {
+      clientX: lastPointerClientPos.x,
+      clientY: lastPointerClientPos.y
+    };
+    handlePointerHover(syntheticEvent);
   };
-
   const attachTooltipHandlers = ()=>{
     if (!canvas) return;
     ensureTooltip();
@@ -13141,14 +13223,21 @@ function renderCosts(){
     const pointerMove = (event)=> handlePointerHover(event);
     const pointerDown = (event)=> handlePointerHover(event);
     const pointerClick = (event)=>{
-      const target = resolvePointerTarget(event);
+      lastPointerClientPos = {
+        x: Number(event.clientX),
+        y: Number(event.clientY)
+      };
+      const target = resolvePointerTarget(event, { allowProximity: true })?.target || null;
       if (!target || !target.rowRef || typeof window === "undefined") return;
       const focusFn = window.__focusCostDataCenterRow;
       if (typeof focusFn === "function"){
         focusFn(target.rowRef);
       }
     };
-    const pointerLeave = ()=> hideTooltip();
+    const pointerLeave = ()=>{
+      lastPointerClientPos = null;
+      hideTooltip();
+    };
     canvas.addEventListener("pointermove", pointerMove);
     canvas.addEventListener("pointerdown", pointerDown);
     canvas.addEventListener("click", pointerClick);
@@ -13172,9 +13261,43 @@ function renderCosts(){
   const state = getCostLayoutState();
 
   const redraw = ()=>{
+    const formatCurrencyUnsigned = (value)=>{
+      const safe = Math.abs(Number(value) || 0);
+      const decimals = safe < 1000 ? 2 : 0;
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
+      }).format(safe);
+    };
+    const formatCurrencySigned = (value)=>{
+      const safe = Number(value) || 0;
+      const base = formatCurrencyUnsigned(safe);
+      if (safe < 0) return `-${base}`;
+      if (safe > 0) return `+${base}`;
+      return base;
+    };
     const { months } = getChartRangeState();
     const maintenanceRange = filterChartSeriesByRange(maintenanceSeriesBase, months);
     const jobRange = filterChartSeriesByRange(jobSeriesBase, months);
+    const maintenanceCostTotalInWindow = maintenanceRange.points.reduce((sum, item) => {
+      const value = Number(item?.value) || 0;
+      return sum + Math.abs(value);
+    }, 0);
+    const totalCutHoursInWindow = jobRange.points.reduce((sum, item) => {
+      const hours = Number(item?.cutHours) || 0;
+      return sum + (Number.isFinite(hours) && hours > 0 ? hours : 0);
+    }, 0);
+    const maintenanceCostPerCutValue = totalCutHoursInWindow > 0
+      ? (maintenanceCostTotalInWindow / totalCutHoursInWindow)
+      : 0;
+    const maintenanceCostPerCutLabel = formatCurrencyUnsigned(maintenanceCostPerCutValue);
+    const cuttingTotalInWindow = jobRange.points.reduce((sum, item) => sum + (Number(item?.value) || 0), 0);
+    const cuttingAverageValueInWindow = jobRange.points.length
+      ? (cuttingTotalInWindow / jobRange.points.length)
+      : 0;
+    const cuttingAverageLabelInWindow = formatCurrencySigned(cuttingAverageValueInWindow);
 
     const domainStarts = [maintenanceRange.domainStart, jobRange.domainStart]
       .map(value => Number.isFinite(value) ? Number(value) : null)
@@ -13187,18 +13310,40 @@ function renderCosts(){
       ...model,
       maintenanceSeries: maintenanceRange.points,
       jobSeries: jobRange.points,
+      maintenanceCostPerCutValue,
+      maintenanceCostPerCutLabel,
+      maintenanceCostPerCutWindowLabel: rangeLabelMap.get(months) || "selected range",
+      cuttingAverageValue: cuttingAverageValueInWindow,
+      cuttingAverageLabel: cuttingAverageLabelInWindow,
       chartDomain: (domainStarts.length && domainEnds.length)
         ? { start: Math.min(...domainStarts), end: Math.max(...domainEnds) }
         : null
     };
+    const windowLabel = rangeLabelMap.get(months) || String(months || "selected range");
+    const maintenanceCostPerCutEl = content.querySelector("[data-maint-cost-per-cut-label]");
+    if (maintenanceCostPerCutEl){
+      maintenanceCostPerCutEl.textContent = maintenanceCostPerCutLabel;
+      maintenanceCostPerCutEl.setAttribute(
+        "title",
+        `Average maintenance cost per cut hour (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${totalCutHoursInWindow.toFixed(1)} total cut hr.`
+      );
+    }
+    const cuttingAverageEl = content.querySelector("[data-cutting-average-label]");
+    if (cuttingAverageEl){
+      cuttingAverageEl.textContent = cuttingAverageLabelInWindow;
+      cuttingAverageEl.setAttribute(
+        "title",
+        `Average cutting gain/loss (${windowLabel}) = total cutting net ${formatCurrencySigned(cuttingTotalInWindow)} ÷ ${jobRange.points.length} completed job${jobRange.points.length === 1 ? "" : "s"}.`
+      );
+    }
     updateChartRangeButtons();
     if (canvas){
-      hideTooltip();
       resizeCostChartCanvas(canvas);
       drawCostChart(canvas, chartModel, {
         maintenance: !toggleMaint || toggleMaint.checked,
         jobs: !toggleJobs || toggleJobs.checked
       });
+      refreshTooltipFromLastPointer();
       updateCostChartResizeSnapshot(canvas);
     }
     if (typeof refreshCostTrainer === "function"){
@@ -14138,6 +14283,7 @@ function computeCostModel(){
       if (!job) continue;
       const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
       const gainLoss = resolveCuttingJobNetTotal(job, eff).total;
+      const cutHours = resolveCuttingJobHours(job, eff);
       const deltaHours = eff && Number.isFinite(eff.deltaHours) ? Number(eff.deltaHours) : 0;
       let date = null;
       if (job.completedAtISO){
@@ -14184,6 +14330,7 @@ function computeCostModel(){
         jobSeriesRaw.push({
           date,
           rawValue: gainLoss,
+          cutHours: Number.isFinite(cutHours) && cutHours > 0 ? cutHours : 0,
           label: job.name || "Job",
           jobId: job.id != null ? String(job.id) : null,
           dateISO: ymd(date)
@@ -14247,6 +14394,7 @@ function computeCostModel(){
       jobSeries.push({
         date: pt.date,
         value: pointValue,
+        cutHours: Number.isFinite(Number(pt.cutHours)) && Number(pt.cutHours) > 0 ? Number(pt.cutHours) : 0,
         count: jobCount,
         detail: `Completed cutting job #${jobCount} recorded ${pointValue >= 0 ? "a gain" : "a loss"} on ${dateLabel}.`,
         jobId: pt.jobId || null,
@@ -16169,6 +16317,12 @@ function computeCostModel(){
   const cuttingAverageValue = jobSeries.length
     ? (jobSeries.reduce((sum, item) => sum + (Number(item?.value) || 0), 0) / jobSeries.length)
     : 0;
+  const maintenanceCostTotalAll = maintenanceSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
+  const totalCutHoursAll = jobSeries.reduce((sum, item) => {
+    const hours = Number(item?.cutHours) || 0;
+    return sum + (Number.isFinite(hours) && hours > 0 ? hours : 0);
+  }, 0);
+  const maintenanceCostPerCutValue = totalCutHoursAll > 0 ? (maintenanceCostTotalAll / totalCutHoursAll) : 0;
 
   return {
     summaryCards,
@@ -16186,6 +16340,9 @@ function computeCostModel(){
     chartInfo,
     maintenanceAverageValue,
     maintenanceAverageLabel: formatterCurrency(maintenanceAverageValue, { showPlus: true, decimals: 0 }),
+    maintenanceCostPerCutValue,
+    maintenanceCostPerCutLabel: formatterCurrency(maintenanceCostPerCutValue, { decimals: maintenanceCostPerCutValue < 1000 ? 2 : 0 }),
+    maintenanceCostPerCutWindowLabel: "6 months",
     cuttingAverageValue,
     cuttingAverageLabel: formatterCurrency(cuttingAverageValue, { showPlus: true, decimals: 0 }),
     orderRequestSummary,
@@ -16193,7 +16350,7 @@ function computeCostModel(){
     cuttingJobsDataTable,
     efficiencySnapshot,
     chartColors: COST_CHART_COLORS,
-    maintenanceSeries: maintenanceSeriesCentral,
+    maintenanceSeries: maintenanceSeriesFromDataTable,
     jobSeries,
     weeklyReports
   };
@@ -16460,15 +16617,16 @@ function drawCostChart(canvas, model, show){
     if (value > 0) return `+${formatted}`;
     return formatted;
   };
-  const maintenanceAvg = Number(model?.maintenanceAverageValue) || 0;
+  const maintenanceAvg = Number(model?.maintenanceCostPerCutValue ?? model?.maintenanceAverageValue) || 0;
   const cuttingAvg = Number(model?.cuttingAverageValue) || 0;
-  const maintenanceAvgLabel = model?.maintenanceAverageLabel || formatMoney(maintenanceAvg);
+  const maintenanceAvgLabel = model?.maintenanceCostPerCutLabel || model?.maintenanceAverageLabel || formatMoney(maintenanceAvg);
   const cuttingAvgLabel = model?.cuttingAverageLabel || formatMoney(cuttingAvg);
+  const maintenanceWindowLabel = String(model?.maintenanceCostPerCutWindowLabel || "selected range");
 
   ctx.font = "12px sans-serif";
   ctx.textAlign = "left";
   ctx.fillStyle = model.chartColors.maintenance;
-  ctx.fillText(`Avg maintenance (loss): ${maintenanceAvgLabel}`, left, 14);
+  ctx.fillText(`Avg maint cost/cut hr (${maintenanceWindowLabel}): ${maintenanceAvgLabel}`, left, 14);
   ctx.fillStyle = model.chartColors.jobs;
   ctx.fillText(`Avg cutting gain/loss: ${cuttingAvgLabel}`, Math.max(left + 250, W * 0.45), 14);
 
@@ -16760,16 +16918,25 @@ function renderJobs(){
       });
     } else if (pendingJobFocus.type === "jobRow" && pendingJobFocus.id != null){
       requestAnimationFrame(()=>{
-        const targetRow = content.querySelector(`[data-job-row="${pendingJobFocus.id}"], [data-history-row="${pendingJobFocus.id}"]`);
-        if (targetRow instanceof HTMLElement){
-          targetRow.classList.add("job-row-link-highlight");
-          try {
-            targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
-          } catch (_err){
-            try { targetRow.scrollIntoView(); } catch(__){}
+        const targetId = String(pendingJobFocus.id);
+        const maxAttempts = 20;
+        const retryDelayMs = 180;
+        const focusJobRowWithRetry = (attempt = 0)=>{
+          const targetRow = content.querySelector(`[data-job-row="${targetId}"], [data-history-row="${targetId}"]`);
+          if (targetRow instanceof HTMLElement){
+            targetRow.classList.add("job-row-link-highlight");
+            try {
+              targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+            } catch (_err){
+              try { targetRow.scrollIntoView(); } catch(__){}
+            }
+            setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2000);
+            return;
           }
-          setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2000);
-        }
+          if (attempt >= maxAttempts) return;
+          setTimeout(()=> focusJobRowWithRetry(attempt + 1), retryDelayMs);
+        };
+        focusJobRowWithRetry(0);
       });
     }
   }
@@ -18863,6 +19030,9 @@ function renderJobs(){
         gainLoss
       };
 
+      // Keep both shared references in sync so a re-render or background refresh
+      // does not resurrect stale history values (e.g., old actualHours).
+      window.completedCuttingJobs = completedCuttingJobs;
       editingCompletedJobsSet().delete(String(id));
       saveCloudDebounced();
       toast("History updated");
