@@ -11117,6 +11117,20 @@ function renderCosts(){
       }else{
         const taskId = String(payload.taskId || "");
         const dateISO = String(payload.dateISO || "");
+        if (dateISO){
+          const selector = taskId
+            ? `[data-maintenance-row][data-task-id="${escapeForSelector(taskId)}"][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`
+            : `[data-maintenance-row][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`;
+          const matchingRows = Array.from(panelRoot.querySelectorAll(selector))
+            .filter(item => item instanceof HTMLElement);
+          if (matchingRows.length){
+            matchingRows[0].scrollIntoView({ behavior: "smooth", block: "center" });
+            matchingRows.forEach((item, idx) => {
+              setTimeout(()=> pulseRow(item), idx * 90);
+            });
+            return true;
+          }
+        }
         row = (taskId && dateISO && panelRoot.querySelector(`[data-maintenance-row][data-task-id="${escapeForSelector(taskId)}"][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`))
           || (dateISO && panelRoot.querySelector(`[data-maintenance-row][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`))
           || panelRoot.querySelector("[data-maintenance-row]");
