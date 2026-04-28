@@ -2202,7 +2202,7 @@ function viewCosts(model){
                   </thead>
                   <tbody data-spend-table-body>
                     ${purchaseDataTable.length ? purchaseDataTable.map(row => `
-                      <tr data-spend-row data-spend-date-iso="${esc(String(row.dateISO || ""))}" data-spend-search-text="${esc(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
+                      <tr data-spend-row title="Click to open this row in Purchase History" style="cursor:pointer;" data-spend-date-iso="${esc(String(row.dateISO || ""))}" data-spend-week-key="${esc(String(row.weekKey || ""))}" data-spend-row-index="${esc(String(Number.isFinite(Number(row.rowIndex)) ? Number(row.rowIndex) : -1))}" data-spend-search-text="${esc(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
                         <td>${esc(row.dateISO || "—")}</td>
                         <td>${esc(row.purchased || "—")}</td>
                         <td>${esc(row.weekLabel || "—")}</td>

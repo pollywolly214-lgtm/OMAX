@@ -578,6 +578,9 @@ body.cost-data-center-open{ overflow:hidden; }
 .cost-receipt-controls,.cost-receipt-summary-controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px; }
 .cost-receipt-controls label,.cost-receipt-summary-controls label{ display:flex; flex-direction:column; gap:4px; font-weight:600; color:#1e2b45; }
 .cost-receipt-controls select,.cost-receipt-summary-controls select{ min-width:240px; padding:6px 8px; border:1px solid #c8d0e0; border-radius:6px; }
+.receipt-save-status-chip{ display:inline-flex; align-items:center; gap:4px; margin-left:2px; font-size:12px; font-weight:700; color:#1f6d2f; background:#eaf8ee; border:1px solid #bfe9c8; border-radius:999px; padding:4px 10px; opacity:0; transform:translateY(-2px); transition:opacity 220ms ease, transform 220ms ease; pointer-events:none; }
+.receipt-save-status-chip.is-error{ color:#8f1d1d; background:#fdeeee; border-color:#f4caca; }
+.receipt-save-status-chip[data-visible="true"]{ opacity:1; transform:translateY(0); }
 .cost-receipt-week-table input{ width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cfd7e6; border-radius:6px; font:inherit; }
 .cost-receipt-week-table td[data-col="total"],.cost-receipt-week-table tfoot th,.cost-receipt-summary-table tfoot th{ font-weight:700; }
 body.cost-receipt-modal-open{ overflow:hidden; }
