@@ -11327,6 +11327,9 @@ function renderCosts(){
         const weekKey = String(row.getAttribute("data-spend-week-key") || "");
         const rowIndex = Number(row.getAttribute("data-spend-row-index"));
         if (!weekKey || !Number.isFinite(rowIndex) || rowIndex < 0) return;
+        if (typeof closeDataCenter === "function"){
+          closeDataCenter();
+        }
         openPurchaseHistory({ weekKey, rowIndex });
       });
     }
@@ -11965,7 +11968,16 @@ function renderCosts(){
         renderCentralSpendRows();
         return entry;
       };
-      const savePurchaseHistoryWeek = async ({ showInlineStatus = false } = {})=>{
+      const refreshCostDashboard = ({ keepReceiptModalOpen = false } = {})=>{
+        if (typeof renderCosts !== "function") return;
+        if (typeof window !== "undefined"){
+          window.costPurchaseHistoryModalOpen = !!keepReceiptModalOpen;
+        }
+        setTimeout(()=>{
+          try { renderCosts(); } catch (err){ console.warn("Failed to refresh cost view after purchase-history save", err); }
+        }, 0);
+      };
+      const savePurchaseHistoryWeek = async ({ showInlineStatus = false, refreshDashboard = true, keepReceiptModalOpen = true } = {})=>{
         saveWeekRowsFromDom();
         rebuildPurchaseTemplates();
         renderRangeTable();
@@ -11976,9 +11988,13 @@ function renderCosts(){
             if (maybePromise && typeof maybePromise.then === "function"){
               await maybePromise;
             }
+            if (typeof saveCloudDebounced === "function"){
+              saveCloudDebounced();
+            }
             hasUnsavedReceiptChanges = false;
             hasExplicitSaveSinceEdit = true;
             if (showInlineStatus) showSaveStatusChip("Save complete");
+            if (refreshDashboard) refreshCostDashboard({ keepReceiptModalOpen });
             return true;
           }
           if (typeof saveCloudDebounced === "function"){
@@ -11986,6 +12002,7 @@ function renderCosts(){
             hasUnsavedReceiptChanges = false;
             hasExplicitSaveSinceEdit = true;
             if (showInlineStatus) showSaveStatusChip("Save complete");
+            if (refreshDashboard) refreshCostDashboard({ keepReceiptModalOpen });
             return true;
           }
           if (typeof toast === "function") toast("Unable to save purchase history right now.");
@@ -12152,6 +12169,12 @@ function renderCosts(){
           rebuildPurchaseTemplates();
           renderRangeTable();
         });
+        weekRowsBody.addEventListener("change", ()=>{
+          hasUnsavedReceiptChanges = true;
+          hasExplicitSaveSinceEdit = false;
+          saveWeekRowsFromDom();
+          renderRangeTable();
+        });
         weekRowsBody.addEventListener("change", event => {
           const input = event.target;
           if (!(input instanceof HTMLInputElement)) return;
@@ -12296,8 +12319,9 @@ function renderCosts(){
       const closeModal = async ()=>{
         saveWeekRowsFromDom();
         if (hasUnsavedReceiptChanges && !hasExplicitSaveSinceEdit){
-          await savePurchaseHistoryWeek();
+          await savePurchaseHistoryWeek({ refreshDashboard: false, keepReceiptModalOpen: false });
           if (typeof toast === "function") toast("Saved");
+          refreshCostDashboard({ keepReceiptModalOpen: false });
         }
         modal.hidden = true;
         modal.setAttribute("aria-hidden", "true");
