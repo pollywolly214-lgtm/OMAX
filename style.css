@@ -539,6 +539,13 @@ body.cost-timeframe-modal-open{ overflow:hidden; }
 .cost-data-center-panel button{
   color:#000;
 }
+.cost-data-center-modal[data-data-center-modal] .cost-table thead th{
+  position:sticky;
+  top:0;
+  z-index:4;
+  background:#f4f7fb;
+  box-shadow:0 1px 0 #d9e2ef;
+}
 body.cost-data-center-open{ overflow:hidden; }
 .time-efficiency-tooltip{
   position:fixed;
