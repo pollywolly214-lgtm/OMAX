@@ -16772,7 +16772,7 @@ function computeCostModel(){
         date,
         dateISO,
         value: -Math.abs(Number(entry?.total) || 0),
-        detail: `${detailPrefix}: ${itemPreview}${detailSuffix}.`
+        detail: `${detailPrefix}. Items: ${itemPreview}${detailSuffix}.`
       };
     });
 
@@ -16800,12 +16800,19 @@ function computeCostModel(){
         : new Date(dateISO);
       const dayRows = maintenanceTrendRows.filter(row => toHistoryDateKey(row.dateISO) === dateISO);
       const taskCount = dayRows.length;
+      const taskNames = Array.from(new Set(dayRows
+        .map(row => String(row?.taskName || "").trim())
+        .filter(Boolean)));
+      const taskPreview = taskNames.length
+        ? taskNames.slice(0, 6).join(", ")
+        : "No task names provided";
+      const taskSuffix = taskNames.length > 6 ? " …" : "";
       return {
         date,
         value: -Math.abs(totalCost),
         dateISO,
         taskId: dayRows.length === 1 ? String(dayRows[0].taskId || "") : null,
-        detail: `${taskCount} completed maintenance ${taskCount === 1 ? "occurrence" : "occurrences"} recorded in the data center table on ${dateISO}.`
+        detail: `${taskCount} completed maintenance ${taskCount === 1 ? "occurrence" : "occurrences"} recorded on ${dateISO}: ${taskPreview}${taskSuffix}.`
       };
     });
   maintenanceSeries = maintenanceSeriesFromDataTable;
@@ -17124,23 +17131,6 @@ function drawCostChart(canvas, model, show){
     if (value > 0) return `+${formatted}`;
     return formatted;
   };
-  const maintenanceAvg = Number(model?.maintenanceCostPerCutValue ?? model?.maintenanceAverageValue) || 0;
-  const spendAvg = Number(model?.totalSpendPerCutValue) || 0;
-  const cuttingAvg = Number(model?.cuttingAverageValue) || 0;
-  const maintenanceAvgLabel = model?.maintenanceCostPerCutLabel || model?.maintenanceAverageLabel || formatMoney(maintenanceAvg);
-  const spendAvgLabel = model?.totalSpendPerCutLabel || formatMoney(spendAvg);
-  const cuttingAvgLabel = model?.cuttingAverageLabel || formatMoney(cuttingAvg);
-  const maintenanceWindowLabel = String(model?.maintenanceCostPerCutWindowLabel || "selected range");
-
-  ctx.font = "12px sans-serif";
-  ctx.textAlign = "left";
-  ctx.fillStyle = model.chartColors.maintenance;
-  ctx.fillText(`Avg maint cost/cut hr (${maintenanceWindowLabel}): ${maintenanceAvgLabel}`, left, 14);
-  ctx.fillStyle = model.chartColors.spend;
-  ctx.fillText(`Avg total spend/cut hr (${maintenanceWindowLabel}): ${spendAvgLabel}`, left, 30);
-  ctx.fillStyle = model.chartColors.jobs;
-  ctx.fillText(`Avg cutting gain/loss: ${cuttingAvgLabel}`, Math.max(left + 300, W * 0.5), 14);
-
   if (0 >= yMin && 0 <= yMax){
     const zeroY = Y(0);
     ctx.strokeStyle = "#d0d5e2";
