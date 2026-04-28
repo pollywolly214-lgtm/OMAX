@@ -11317,6 +11317,22 @@ function renderCosts(){
       spendSearchInput.addEventListener("input", applySpendFilter);
       applySpendFilter();
     }
+    if (modal instanceof HTMLElement && !modal.dataset.spendRowOpenWired){
+      modal.dataset.spendRowOpenWired = "1";
+      modal.addEventListener("click", (event)=>{
+        const row = (event.target instanceof HTMLElement) ? event.target.closest("[data-spend-row]") : null;
+        if (!(row instanceof HTMLElement)) return;
+        const openPurchaseHistory = (typeof window !== "undefined") ? window.__openPurchaseHistoryModalAtEntry : null;
+        if (typeof openPurchaseHistory !== "function") return;
+        const weekKey = String(row.getAttribute("data-spend-week-key") || "");
+        const rowIndex = Number(row.getAttribute("data-spend-row-index"));
+        if (!weekKey || !Number.isFinite(rowIndex) || rowIndex < 0) return;
+        if (typeof closeDataCenter === "function"){
+          closeDataCenter();
+        }
+        openPurchaseHistory({ weekKey, rowIndex });
+      });
+    }
     Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-cutting-open-job]")).forEach(btn => {
       if (!(btn instanceof HTMLElement)) return;
       btn.addEventListener("click", ()=>{
@@ -11749,7 +11765,7 @@ function renderCosts(){
       const flatRows = [];
       (window.receiptTrackerWeeks || []).forEach(entry => {
         const weekLabel = getWeekLabel(entry);
-        normalizeRows(entry?.rows).forEach(row => {
+        normalizeRows(entry?.rows).forEach((row, idx) => {
           const total = computeRowTotal(row);
           flatRows.push({
             dateISO: toIsoDate(row.date) || "",
@@ -11760,7 +11776,9 @@ function renderCosts(){
             shipping: Number(row.shipping) || 0,
             tax: Number(row.tax) || 0,
             total,
-            weekLabel
+            weekLabel,
+            weekKey: String(entry?.key || ""),
+            rowIndex: idx
           });
         });
       });
@@ -11770,7 +11788,7 @@ function renderCosts(){
         return;
       }
       spendBody.innerHTML = flatRows.map(row => `
-        <tr data-spend-row data-spend-date-iso="${escapeHtml(String(row.dateISO || ""))}" data-spend-search-text="${escapeHtml(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
+        <tr data-spend-row title="Click to open this row in Purchase History" style="cursor:pointer;" data-spend-date-iso="${escapeHtml(String(row.dateISO || ""))}" data-spend-week-key="${escapeHtml(String(row.weekKey || ""))}" data-spend-row-index="${escapeHtml(String(Number.isFinite(Number(row.rowIndex)) ? Number(row.rowIndex) : -1))}" data-spend-search-text="${escapeHtml(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
           <td>${escapeHtml(row.dateISO || "—")}</td>
           <td>${escapeHtml(row.purchased || "—")}</td>
           <td>${escapeHtml(row.weekLabel || "—")}</td>
@@ -11882,6 +11900,7 @@ function renderCosts(){
       const rangeSubtotal = modal.querySelector("[data-receipt-range-subtotal]");
       const rangeLabel = modal.querySelector("[data-receipt-range-label]");
       const closeControls = Array.from(modal.querySelectorAll("[data-receipt-close]"));
+      const saveWeekBtn = modal.querySelector("[data-receipt-save-week]");
       const exportWeekBtn = modal.querySelector("[data-receipt-export-week]");
       const exportRangeBtn = modal.querySelector("[data-receipt-export-range]");
       const purchasedDatalistId = "receiptPurchasedSuggestions";
@@ -11894,8 +11913,37 @@ function renderCosts(){
       const purchaseTemplates = new Map();
       let activeWeekKey = String((window.receiptTrackerWeekSelected || weekOptions[0]?.key || ""));
       let activeRange = String(window.receiptTrackerRangeSelected || "1");
+      let hasUnsavedReceiptChanges = false;
+      let hasExplicitSaveSinceEdit = false;
       window.receiptTrackerWeekSelected = activeWeekKey;
       window.receiptTrackerRangeSelected = activeRange;
+      let saveStatusTimer = null;
+
+      const ensureSaveStatusChip = ()=>{
+        if (!(saveWeekBtn instanceof HTMLElement)) return null;
+        let chip = saveWeekBtn.parentElement?.querySelector("[data-receipt-save-status]");
+        if (chip instanceof HTMLElement) return chip;
+        chip = document.createElement("span");
+        chip.className = "receipt-save-status-chip";
+        chip.setAttribute("data-receipt-save-status", "1");
+        chip.setAttribute("aria-live", "polite");
+        saveWeekBtn.insertAdjacentElement("afterend", chip);
+        return chip;
+      };
+      const showSaveStatusChip = (text, isError = false)=>{
+        const chip = ensureSaveStatusChip();
+        if (!(chip instanceof HTMLElement)) return;
+        if (saveStatusTimer){
+          clearTimeout(saveStatusTimer);
+          saveStatusTimer = null;
+        }
+        chip.textContent = isError ? `⚠ ${text}` : `✓ ${text}`;
+        chip.classList.toggle("is-error", !!isError);
+        chip.dataset.visible = "true";
+        saveStatusTimer = setTimeout(()=>{
+          chip.dataset.visible = "false";
+        }, 3000);
+      };
 
       const renderWeekOptions = ()=>{
         if (!(weekSelect instanceof HTMLSelectElement)) return;
@@ -11919,6 +11967,53 @@ function renderCosts(){
         persistReceiptState();
         renderCentralSpendRows();
         return entry;
+      };
+      const refreshCostDashboard = ({ keepReceiptModalOpen = false } = {})=>{
+        if (typeof renderCosts !== "function") return;
+        if (typeof window !== "undefined"){
+          window.costPurchaseHistoryModalOpen = !!keepReceiptModalOpen;
+        }
+        setTimeout(()=>{
+          try { renderCosts(); } catch (err){ console.warn("Failed to refresh cost view after purchase-history save", err); }
+        }, 0);
+      };
+      const savePurchaseHistoryWeek = async ({ showInlineStatus = false, refreshDashboard = true, keepReceiptModalOpen = true } = {})=>{
+        saveWeekRowsFromDom();
+        rebuildPurchaseTemplates();
+        renderRangeTable();
+        renderCentralSpendRows();
+        try {
+          if (typeof saveCloudNow === "function"){
+            const maybePromise = saveCloudNow();
+            if (maybePromise && typeof maybePromise.then === "function"){
+              await maybePromise;
+            }
+            if (typeof saveCloudDebounced === "function"){
+              saveCloudDebounced();
+            }
+            hasUnsavedReceiptChanges = false;
+            hasExplicitSaveSinceEdit = true;
+            if (showInlineStatus) showSaveStatusChip("Save complete");
+            if (refreshDashboard) refreshCostDashboard({ keepReceiptModalOpen });
+            return true;
+          }
+          if (typeof saveCloudDebounced === "function"){
+            saveCloudDebounced();
+            hasUnsavedReceiptChanges = false;
+            hasExplicitSaveSinceEdit = true;
+            if (showInlineStatus) showSaveStatusChip("Save complete");
+            if (refreshDashboard) refreshCostDashboard({ keepReceiptModalOpen });
+            return true;
+          }
+          if (typeof toast === "function") toast("Unable to save purchase history right now.");
+        } catch (err) {
+          console.error("Purchase history save failed:", err);
+          if (typeof toast === "function"){
+            toast("Purchase history save failed. Please try again.");
+          }
+          if (showInlineStatus) showSaveStatusChip("Save failed", true);
+        }
+        return false;
       };
       const rebuildPurchaseTemplates = ()=>{
         purchaseTemplates.clear();
@@ -12007,8 +12102,8 @@ function renderCosts(){
           weekRangeLabel.textContent = entry.startISO && entry.endISO ? `Date range: ${entry.startISO} to ${entry.endISO}` : "Date range unavailable";
         }
         if (!(weekRowsBody instanceof HTMLElement)) return;
-        weekRowsBody.innerHTML = rows.map(row => `
-          <tr data-receipt-row="1">
+        weekRowsBody.innerHTML = rows.map((row, idx) => `
+          <tr data-receipt-row="1" data-receipt-row-index="${idx}">
             <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}" min="${escapeHtml(String(entry.startISO || ""))}" max="${escapeHtml(String(entry.endISO || ""))}"></td>
             <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" value="${escapeHtml(row.purchased || "")}"></td>
             <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
@@ -12060,14 +12155,24 @@ function renderCosts(){
             if (next instanceof HTMLElement) next.focus();
           }
           recomputeWeekTotals();
+          hasUnsavedReceiptChanges = true;
+          hasExplicitSaveSinceEdit = false;
           saveWeekRowsFromDom();
           renderRangeTable();
           renderCentralSpendRows();
         });
         weekRowsBody.addEventListener("input", ()=>{
           recomputeWeekTotals();
+          hasUnsavedReceiptChanges = true;
+          hasExplicitSaveSinceEdit = false;
           saveWeekRowsFromDom();
           rebuildPurchaseTemplates();
+          renderRangeTable();
+        });
+        weekRowsBody.addEventListener("change", ()=>{
+          hasUnsavedReceiptChanges = true;
+          hasExplicitSaveSinceEdit = false;
+          saveWeekRowsFromDom();
           renderRangeTable();
         });
         weekRowsBody.addEventListener("change", event => {
@@ -12081,6 +12186,8 @@ function renderCosts(){
           const row = input.closest("tr[data-receipt-row]");
           applyTemplateToRow(row, template);
           recomputeWeekTotals();
+          hasUnsavedReceiptChanges = true;
+          hasExplicitSaveSinceEdit = false;
           saveWeekRowsFromDom();
           rebuildPurchaseTemplates();
           renderRangeTable();
@@ -12105,10 +12212,22 @@ function renderCosts(){
       if (weekSelect instanceof HTMLSelectElement){
         weekSelect.addEventListener("change", ()=>{
           saveWeekRowsFromDom();
+          hasUnsavedReceiptChanges = true;
+          hasExplicitSaveSinceEdit = false;
           activeWeekKey = weekSelect.value;
           window.receiptTrackerWeekSelected = activeWeekKey;
           renderWeekRows();
           renderRangeTable();
+        });
+      }
+      if (saveWeekBtn instanceof HTMLButtonElement){
+        saveWeekBtn.addEventListener("click", async ()=>{
+          saveWeekBtn.disabled = true;
+          const prevLabel = saveWeekBtn.textContent;
+          saveWeekBtn.textContent = "Saving…";
+          await savePurchaseHistoryWeek({ showInlineStatus: true });
+          saveWeekBtn.disabled = false;
+          saveWeekBtn.textContent = prevLabel || "Save week";
         });
       }
       if (exportWeekBtn instanceof HTMLElement){
@@ -12167,13 +12286,55 @@ function renderCosts(){
         document.body.classList.add("cost-receipt-modal-open");
         window.costPurchaseHistoryModalOpen = true;
       };
-      const closeModal = ()=>{
+      const highlightReceiptRow = (row)=>{
+        if (!(row instanceof HTMLElement)) return;
+        row.hidden = false;
+        row.scrollIntoView({ behavior: "smooth", block: "center" });
+        const prevBg = row.style.backgroundColor;
+        const prevTransition = row.style.transition;
+        row.style.transition = "background-color 0.35s ease";
+        row.style.backgroundColor = "rgba(46, 125, 50, 0.25)";
+        setTimeout(()=>{
+          row.style.backgroundColor = prevBg || "";
+          row.style.transition = prevTransition || "";
+        }, 1800);
+      };
+      const focusReceiptWeekRow = (target = {})=>{
+        if (!(weekSelect instanceof HTMLSelectElement) || !(weekRowsBody instanceof HTMLElement)) return false;
+        const weekKey = String(target.weekKey || "");
+        const rowIndex = Number(target.rowIndex);
+        if (!weekKey) return false;
+        if (weekSelect.value !== weekKey){
+          weekSelect.value = weekKey;
+          activeWeekKey = weekKey;
+          window.receiptTrackerWeekSelected = activeWeekKey;
+          renderWeekRows();
+        }
+        if (!Number.isFinite(rowIndex) || rowIndex < 0) return false;
+        const row = weekRowsBody.querySelector(`[data-receipt-row-index="${rowIndex}"]`);
+        if (!(row instanceof HTMLElement)) return false;
+        highlightReceiptRow(row);
+        return true;
+      };
+      const closeModal = async ()=>{
         saveWeekRowsFromDom();
+        if (hasUnsavedReceiptChanges && !hasExplicitSaveSinceEdit){
+          await savePurchaseHistoryWeek({ refreshDashboard: false, keepReceiptModalOpen: false });
+          if (typeof toast === "function") toast("Saved");
+          refreshCostDashboard({ keepReceiptModalOpen: false });
+        }
         modal.hidden = true;
         modal.setAttribute("aria-hidden", "true");
         document.body.classList.remove("cost-receipt-modal-open");
         window.costPurchaseHistoryModalOpen = false;
       };
+      if (typeof window !== "undefined"){
+        window.__openPurchaseHistoryModalAtEntry = (target = {})=>{
+          openModal();
+          setTimeout(()=>{ focusReceiptWeekRow(target); }, 10);
+          return true;
+        };
+      }
       receiptOpenBtn.addEventListener("click", openModal);
       closeControls.forEach(control => control.addEventListener("click", closeModal));
       if (window.costPurchaseHistoryModalOpen){
@@ -16497,6 +16658,24 @@ function computeCostModel(){
     counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1"
   }));
   const purchaseDataTableRows = [];
+  const flattenCentralSpendRows = (weekEntry)=>{
+    const rows = typeof normalizeRows === "function"
+      ? normalizeRows(weekEntry?.rows)
+      : (Array.isArray(weekEntry?.rows) ? weekEntry.rows : []);
+    return rows.map(row => {
+      const dateValue = typeof toIsoDate === "function" ? toIsoDate(row?.date) : String(row?.date || "").slice(0, 10);
+      const purchased = String(row?.purchased || "").trim();
+      const partNumber = String(row?.partNumber || "").trim();
+      const cost = Math.max(0, Number(row?.cost) || 0);
+      const qty = Math.max(0, Number(row?.qty) || 0);
+      const shipping = Math.max(0, Number(row?.shipping) || 0);
+      const tax = Math.max(0, Number(row?.tax) || 0);
+      const total = typeof computeRowTotal === "function"
+        ? Math.max(0, Number(computeRowTotal({ cost, qty, shipping, tax })) || 0)
+        : ((cost * qty) + shipping + tax);
+      return { dateValue, purchased, partNumber, cost, qty, shipping, tax, total };
+    });
+  };
   (Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks : []).forEach(weekEntry => {
     const key = String(weekEntry?.key || "");
     const weekNum = Number(weekEntry?.week);
@@ -16504,17 +16683,29 @@ function computeCostModel(){
     const startISO = String(weekEntry?.startISO || "");
     const endISO = String(weekEntry?.endISO || "");
     const weekLabel = startISO && endISO ? `${weekLabelBase} (${startISO} to ${endISO})` : weekLabelBase;
-    (Array.isArray(weekEntry?.rows) ? weekEntry.rows : []).forEach(rawRow => {
-      const dateISO = toHistoryDateKey(rawRow?.date || "");
-      const purchased = String(rawRow?.purchased || "").trim();
-      const partNumber = String(rawRow?.partNumber || "").trim();
+    flattenCentralSpendRows(weekEntry).forEach((rawRow, rowIndex) => {
+      const dateISO = toHistoryDateKey(rawRow?.dateValue || "");
+      const purchased = String(rawRow?.purchased || "");
+      const partNumber = String(rawRow?.partNumber || "");
       const cost = Math.max(0, Number(rawRow?.cost) || 0);
       const qty = Math.max(0, Number(rawRow?.qty) || 0);
       const shipping = Math.max(0, Number(rawRow?.shipping) || 0);
       const tax = Math.max(0, Number(rawRow?.tax) || 0);
-      const total = (cost * qty) + shipping + tax;
+      const total = Math.max(0, Number(rawRow?.total) || 0);
       if (!dateISO && !purchased && !partNumber && total <= 0) return;
-      purchaseDataTableRows.push({ dateISO, purchased, partNumber, cost, qty, shipping, tax, total, weekLabel });
+      purchaseDataTableRows.push({
+        dateISO,
+        purchased,
+        partNumber,
+        cost,
+        qty,
+        shipping,
+        tax,
+        total,
+        weekLabel,
+        weekKey: key,
+        rowIndex
+      });
     });
   });
   purchaseDataTableRows.sort((a, b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
@@ -16523,6 +16714,8 @@ function computeCostModel(){
     dateISO: row.dateISO || "—",
     purchased: row.purchased || "—",
     weekLabel: row.weekLabel || "—",
+    weekKey: row.weekKey || "",
+    rowIndex: Number.isFinite(row.rowIndex) ? row.rowIndex : -1,
     costLabel: formatterCurrency(row.cost, { decimals: 2 }),
     qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "0",
     partNumber: row.partNumber || "—",
@@ -17055,54 +17248,6 @@ function drawCostChart(canvas, model, show){
       });
     });
 
-    const last = points[points.length - 1];
-    if (last){
-      const x = X(last.date.getTime());
-      const y = Y(Number(last.value));
-      const label = `${series.key === "maintenance" ? "Maintenance" : (series.key === "spend" ? "Total spend" : "Cutting jobs")} ${formatMoney(Number(last.value))}`;
-      ctx.font = "12px sans-serif";
-      const metrics = ctx.measureText(label);
-      const paddingX = 6;
-      const boxWidth = metrics.width + paddingX * 2;
-      const boxHeight = 18;
-      let boxX = Math.min(right - boxWidth, Math.max(left, x + 10));
-      let boxY = Math.max(top + boxHeight, y - boxHeight - 6);
-      boxY = Math.min(bottom - 4, boxY);
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.fillRect(boxX, boxY - boxHeight, boxWidth, boxHeight);
-      ctx.strokeStyle = series.color;
-      ctx.strokeRect(boxX, boxY - boxHeight, boxWidth, boxHeight);
-      ctx.fillStyle = "#1f2937";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText(label, boxX + paddingX, boxY - (boxHeight / 2));
-      ctx.textBaseline = "alphabetic";
-
-      const valueLabel = formatMoney(Number(last.value));
-      const dateLabel = (last.date instanceof Date && !Number.isNaN(last.date.getTime()))
-        ? last.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
-        : "the latest update";
-      let detail = (typeof last.detail === "string" && last.detail.trim()) ? last.detail.trim() : "";
-      if (!detail){
-        detail = series.key === "maintenance"
-          ? `Maintenance loss recorded on ${dateLabel}.`
-          : (series.key === "spend"
-            ? `Purchase spend recorded on ${dateLabel}.`
-            : `Cutting job gain/loss recorded on ${dateLabel}.`);
-      }
-      hitTargets.push({
-        key: series.key,
-        datasetLabel,
-        valueLabel,
-        detail,
-        rowRef: series.key === "maintenance"
-          ? { type: "maintenance", dateISO: last.dateISO || ymd(last.date), taskId: last.taskId || null }
-          : (series.key === "spend"
-            ? { type: "spend", dateISO: last.dateISO || ymd(last.date) }
-            : { type: "cutting", jobId: last.jobId || null, dateISO: last.dateISO || ymd(last.date) }),
-        rect: { x: boxX, y: boxY - boxHeight, width: boxWidth, height: boxHeight }
-      });
-    }
   });
 
   canvas.__costChartTargets = hitTargets;
