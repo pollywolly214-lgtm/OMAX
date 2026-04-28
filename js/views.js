@@ -1870,6 +1870,7 @@ function viewCosts(model){
               <span>Week of year</span>
               <select data-receipt-week-select aria-label="Select purchase history week"></select>
             </label>
+            <button type="button" class="btn" data-receipt-save-week>Save week</button>
             <button type="button" class="btn secondary" data-receipt-export-week>Export week (CSV)</button>
             <button type="button" class="btn secondary" data-receipt-export-range>Export range (CSV)</button>
           </div>

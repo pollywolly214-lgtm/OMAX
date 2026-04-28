@@ -11882,6 +11882,7 @@ function renderCosts(){
       const rangeSubtotal = modal.querySelector("[data-receipt-range-subtotal]");
       const rangeLabel = modal.querySelector("[data-receipt-range-label]");
       const closeControls = Array.from(modal.querySelectorAll("[data-receipt-close]"));
+      const saveWeekBtn = modal.querySelector("[data-receipt-save-week]");
       const exportWeekBtn = modal.querySelector("[data-receipt-export-week]");
       const exportRangeBtn = modal.querySelector("[data-receipt-export-range]");
       const purchasedDatalistId = "receiptPurchasedSuggestions";
@@ -11919,6 +11920,40 @@ function renderCosts(){
         persistReceiptState();
         renderCentralSpendRows();
         return entry;
+      };
+      const savePurchaseHistoryWeek = async ()=>{
+        saveWeekRowsFromDom();
+        rebuildPurchaseTemplates();
+        renderRangeTable();
+        renderCentralSpendRows();
+        try {
+          if (typeof saveCloudNow === "function"){
+            const maybePromise = saveCloudNow();
+            if (maybePromise && typeof maybePromise.then === "function"){
+              await maybePromise;
+            }
+            if (typeof window !== "undefined" && typeof window.alert === "function"){
+              window.alert("Purchase history saved successfully.");
+            }
+            return true;
+          }
+          if (typeof saveCloudDebounced === "function"){
+            saveCloudDebounced();
+            if (typeof window !== "undefined" && typeof window.alert === "function"){
+              window.alert("Purchase history saved successfully.");
+            }
+            return true;
+          }
+          if (typeof toast === "function") toast("Unable to save purchase history right now.");
+        } catch (err) {
+          console.error("Purchase history save failed:", err);
+          if (typeof toast === "function"){
+            toast("Purchase history save failed. Please try again.");
+          } else if (typeof window !== "undefined" && typeof window.alert === "function"){
+            window.alert("Purchase history save failed. Please try again.");
+          }
+        }
+        return false;
       };
       const rebuildPurchaseTemplates = ()=>{
         purchaseTemplates.clear();
@@ -12109,6 +12144,16 @@ function renderCosts(){
           window.receiptTrackerWeekSelected = activeWeekKey;
           renderWeekRows();
           renderRangeTable();
+        });
+      }
+      if (saveWeekBtn instanceof HTMLButtonElement){
+        saveWeekBtn.addEventListener("click", async ()=>{
+          saveWeekBtn.disabled = true;
+          const prevLabel = saveWeekBtn.textContent;
+          saveWeekBtn.textContent = "Saving…";
+          await savePurchaseHistoryWeek();
+          saveWeekBtn.disabled = false;
+          saveWeekBtn.textContent = prevLabel || "Save week";
         });
       }
       if (exportWeekBtn instanceof HTMLElement){
