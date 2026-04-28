@@ -1953,11 +1953,6 @@ function viewCosts(model){
           <div class="cost-chart-canvas">
             <canvas id="costChart" width="780" height="240"></canvas>
           </div>
-          <div class="small muted" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;">
-            <span style="color:${esc(chartColors.maintenance)};"><strong>Avg maintenance cost/cut hr:</strong> <span data-maint-cost-per-cut-label>${esc(data.maintenanceCostPerCutLabel || "$0")}</span></span>
-            <span style="color:${esc(chartColors.spend)};"><strong>Avg total spend/cut hr:</strong> <span data-spend-cost-per-cut-label>${esc(data.totalSpendPerCutLabel || "$0")}</span></span>
-            <span style="color:${esc(chartColors.jobs)};"><strong>Avg cutting gain/loss:</strong> <span data-cutting-average-label>${esc(data.cuttingAverageLabel || "$0")}</span></span>
-          </div>
           ${data.chartNote ? `<p class="small muted">${esc(data.chartNote)}</p>` : `<p class="small muted">Toggle a line to explore how maintenance and job efficiency costs evolve over time.</p>`}
           <div class="cost-window-insight">
             <div class="chart-info">
@@ -2294,10 +2289,10 @@ function viewCosts(model){
                   <div><span class="label">Avg net gain / row</span><span>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
                 </div>
                 <table class="cost-table" style="margin-top:10px">
-                  <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Run cost</th><th>Total cost</th><th>Net gain</th></tr></thead>
+                  <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Run cost</th><th>Total cost</th><th>Net gain</th><th>Job link</th></tr></thead>
                   <tbody>
                     ${efficiencyRows.map(row => `
-                      <tr>
+                      <tr data-efficiency-row-link data-efficiency-job-id="${esc(row.id || "")}">
                         <td>${esc(row.taskName || "Completed task")}</td>
                         <td>${esc(row.dateLabel || "—")}</td>
                         <td>${esc(row.hoursLabel || "0 hr")}</td>
@@ -2305,6 +2300,7 @@ function viewCosts(model){
                         <td>${esc(row.laborCostLabel || "$0.00")}</td>
                         <td>${esc(row.totalCostLabel || "$0.00")}</td>
                         <td>${esc(row.netGainLabel || "$0.00")}</td>
+                        <td>${row.settingsLink ? `<button type="button" class="btn secondary" data-efficiency-open-job="${esc(row.id || "")}">Open job</button>` : "Invalid link"}</td>
                       </tr>
                     `).join("")}
                   </tbody>

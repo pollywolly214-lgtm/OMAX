@@ -11333,6 +11333,23 @@ function renderCosts(){
         openPurchaseHistory({ weekKey, rowIndex });
       });
     }
+    if (modal instanceof HTMLElement && !modal.dataset.efficiencyRowOpenWired){
+      modal.dataset.efficiencyRowOpenWired = "1";
+      modal.addEventListener("click", (event)=>{
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        if (!target) return;
+        const row = target.closest("[data-efficiency-row-link]");
+        if (!(row instanceof HTMLElement)) return;
+        if (target.closest("[data-efficiency-open-job]")) return;
+        const id = String(row.getAttribute("data-efficiency-job-id") || "");
+        if (!id) return;
+        if (typeof window !== "undefined"){
+          window.pendingJobFocus = { type: "jobRow", id };
+        }
+        closeDataCenter();
+        location.hash = "#/jobs";
+      });
+    }
     Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-cutting-open-job]")).forEach(btn => {
       if (!(btn instanceof HTMLElement)) return;
       btn.addEventListener("click", ()=>{
@@ -14776,7 +14793,7 @@ function computeCostModel(){
         value: pointValue,
         cutHours: Number.isFinite(Number(pt.cutHours)) && Number(pt.cutHours) > 0 ? Number(pt.cutHours) : 0,
         count: jobCount,
-        detail: `Completed cutting job #${jobCount} recorded ${pointValue >= 0 ? "a gain" : "a loss"} on ${dateLabel}.`,
+        detail: `${pt.label || `Cutting job #${jobCount}`} (${pt.jobId ? `ID ${pt.jobId}` : `record #${jobCount}`}) recorded ${pointValue >= 0 ? "a gain" : "a loss"} on ${dateLabel}.`,
         jobId: pt.jobId || null,
         dateISO: pt.dateISO || ymd(pt.date)
       });
