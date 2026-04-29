@@ -2008,14 +2008,6 @@ function viewCosts(model){
               <div class="chart-info-bubble" id="costOverviewInsight" role="tooltip">
                 <p>${esc(overviewInsight)}</p>
               
-              <div class="cost-data-center-panel-content" data-dc-panel="inventory" hidden>
-                <p class="small muted">Inventory source-of-truth table.</p>
-                <table class="cost-table" style="margin-top:10px"><thead><tr><th>Name</th><th>Part #</th><th>Qty New</th><th>Qty Old</th><th>Unit</th><th>Price</th><th>Folder</th><th>Link</th></tr></thead><tbody data-dc-inventory-rows></tbody></table>
-              </div>
-              <div class="cost-data-center-panel-content" data-dc-panel="logs" hidden>
-                <p class="small muted">System Wiring & Save Log</p>
-                <table class="cost-table" style="margin-top:10px"><thead><tr><th>Date/time</th><th>Event type</th><th>Status</th><th>Source</th><th>Target</th><th>Part #</th><th>Qty Δ</th><th>Message</th></tr></thead><tbody data-dc-log-rows></tbody></table>
-              </div>
 </div>
             </div>
           </div>
@@ -2406,6 +2398,20 @@ function viewCosts(model){
                   </tbody>
                 </table>
                 ` : `<p class="small muted">No efficiency rows found in the central data table.</p>`}
+              </div>
+              <div class="cost-data-center-panel-content" data-dc-panel="inventory" hidden>
+                <p class="small muted">Inventory source-of-truth table.</p>
+                <table class="cost-table" style="margin-top:10px">
+                  <thead><tr><th>Name</th><th>Part #</th><th>Qty New</th><th>Qty Old</th><th>Unit</th><th>Price</th><th>Folder</th><th>Link</th></tr></thead>
+                  <tbody data-dc-inventory-rows></tbody>
+                </table>
+              </div>
+              <div class="cost-data-center-panel-content" data-dc-panel="logs" hidden>
+                <p class="small muted">System Wiring & Save Log</p>
+                <table class="cost-table" style="margin-top:10px">
+                  <thead><tr><th>Date/time</th><th>Event type</th><th>Status</th><th>Source</th><th>Target</th><th>Part #</th><th>Qty Δ</th><th>Message</th></tr></thead>
+                  <tbody data-dc-log-rows></tbody>
+                </table>
               </div>
             </div>
           </div>
