@@ -555,13 +555,19 @@ body.cost-timeframe-modal-open{ overflow:hidden; }
   border-collapse:separate;
   border-spacing:0;
 }
-.cost-data-center-modal[data-data-center-modal] .cost-table thead{
-  position:sticky;
-  top:0;
-  z-index:5;
+.cost-data-center-table-wrap{
+  max-height:min(56vh, 640px);
+  overflow:auto;
+  border:1px solid #d6deea;
+  border-radius:8px;
+  background:#fff;
 }
-.cost-data-center-modal[data-data-center-modal] .cost-table thead th{
-  z-index:6;
+.cost-data-center-table-wrap .cost-table{
+  margin:0;
+}
+.cost-data-center-table-wrap .cost-table thead th{
+  top:0;
+  z-index:8;
 }
 body.cost-data-center-open{ overflow:hidden; }
 .time-efficiency-tooltip{
