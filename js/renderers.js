@@ -12464,8 +12464,10 @@ ${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
         if (window.purchaseInventoryLinks.length > 500) window.purchaseInventoryLinks.length = 500;
         if (typeof appendSystemLog === 'function') appendSystemLog({ eventType:'purchase_inventory_link_repaired', sourceArea:'orderRequests', targetArea:'inventory', partNumber: group.partNumber || '', affectedCount: group.count, inventoryId: inv.id, finalName: canonicalName || inv.name || '', qtyDelta:0, status:'historical_link_repaired_no_qty_change', message:'Inventory quantity was not changed because this was a historical link repair.' });
         persistReceiptState();
+        renderWeekRows();
         saveWeekRowsFromDom();
-        renderWeekRows(); renderRangeTable(); renderCentralSpendRows();
+        renderRangeTable();
+        renderCentralSpendRows();
       };
       const openFixerWidget = ()=>{
         const inventoryRows = Array.isArray(window.inventory) ? window.inventory : (Array.isArray(inventory) ? inventory : []);
