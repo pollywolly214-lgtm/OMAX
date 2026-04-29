@@ -12410,22 +12410,46 @@ ${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
         renderWeekRows(); renderRangeTable(); renderCentralSpendRows();
       };
       const openFixerWidget = ()=>{
-        const groups = buildUnlinkedGroups();
         const inventoryRows = Array.isArray(inventory) ? inventory : [];
         let selectedGroupKey = "";
         let selectedInventoryId = "";
         let searchTerm = "";
+        let activeTab = "unlinked";
         const shell = document.createElement('div');
         shell.className = 'cost-receipt-modal';
         shell.style.color = '#000';
         shell.style.zIndex = '10002';
+        const linkedRows = ()=>{
+          const output = [];
+          (window.receiptTrackerWeeks || []).forEach(week => {
+            normalizeRows(week?.rows).forEach((row, rowIndex) => {
+              if (!String(row?.inventoryItemId || "").trim()) return;
+              output.push({ ...row, weekKey: String(week?.key || ""), rowIndex });
+            });
+          });
+          return output;
+        };
         const redraw = ()=>{
+          const groups = buildUnlinkedGroups();
+          const repaired = linkedRows();
           const filteredInv = inventoryRows.filter(item => `${item?.name||""} ${item?.pn||""} ${item?.link||""}`.toLowerCase().includes(searchTerm.toLowerCase()));
-          shell.innerHTML = `<div class="cost-receipt-backdrop" data-close="1"></div><div class="cost-receipt-card" style="max-width:1200px;color:#000;background:#fff"><div class="cost-receipt-card-body"><h3>Repair Purchase-to-Inventory Links</h3><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><h4>Unlinked purchase groups</h4><table class="cost-table"><thead><tr><th>Select</th><th>Part #</th><th>Names</th><th>Rows</th><th>Total Qty</th></tr></thead><tbody>${groups.map(g=>`<tr><td><input type='radio' name='g' value='${escapeHtml(g.key)}' ${selectedGroupKey===g.key?'checked':''}></td><td>${escapeHtml(g.partNumber||'—')}</td><td>${escapeHtml(g.names.join(', ')||'—')}</td><td>${g.count}</td><td>${g.qty}</td></tr>`).join('')||"<tr><td colspan='5'>No unlinked groups.</td></tr>"}</tbody></table></div><div><h4>Inventory items</h4><input type='search' placeholder='Search inventory...' value='${escapeHtml(searchTerm)}' data-inv-search><table class='cost-table'><thead><tr><th>Select</th><th>Name</th><th>Part #</th><th>Qty</th></tr></thead><tbody>${filteredInv.map(item=>`<tr><td><input type='radio' name='i' value='${escapeHtml(String(item.id||""))}' ${String(item.id)===selectedInventoryId?'checked':''}></td><td>${escapeHtml(item.name||'')}</td><td>${escapeHtml(item.pn||'—')}</td><td>${escapeHtml(String((Number(item.qtyNew)||0)+(Number(item.qtyOld)||0)))}</td></tr>`).join('')||"<tr><td colspan='4'>No inventory matches.</td></tr>"}</tbody></table></div></div><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn secondary' data-close='1'>Close</button><button class='btn primary' data-link='1'>Link Selected</button></div></div></div>`;
+          shell.innerHTML = `<div class="cost-receipt-backdrop" data-close="1"></div><div class="cost-receipt-card" style="max-width:1200px;color:#000;background:#fff"><div class="cost-receipt-card-body"><h3>Repair Purchase-to-Inventory Links</h3><p class="small muted">How to use: select an unlinked purchase group, pick an inventory item, then click <strong>Link Selected</strong>. Linked rows appear under the <strong>Repaired</strong> tab where you can revisit prior fixes.</p><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div style="display:flex;gap:6px"><button class="btn ${activeTab==='unlinked'?'primary':'secondary'}" data-fixer-tab="unlinked">Unlinked (${groups.length})</button><button class="btn ${activeTab==='repaired'?'primary':'secondary'}" data-fixer-tab="repaired">Repaired (${repaired.length})</button></div><div style='display:flex;gap:8px;align-items:center'><input type='search' placeholder='Search inventory...' value='${escapeHtml(searchTerm)}' data-inv-search><button class='btn primary' data-link='1'>Link Selected</button></div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px" ${activeTab==='repaired'?'hidden':''}><div><h4>Unlinked purchase groups</h4><table class="cost-table"><thead><tr><th>Select</th><th>Part #</th><th>Names</th><th>Rows</th><th>Total Qty</th></tr></thead><tbody>${groups.map(g=>`<tr><td><input type='radio' name='g' value='${escapeHtml(g.key)}' ${selectedGroupKey===g.key?'checked':''}></td><td>${escapeHtml(g.partNumber||'—')}</td><td>${escapeHtml(g.names.join(', ')||'—')}</td><td>${g.count}</td><td>${g.qty}</td></tr>`).join('')||"<tr><td colspan='5'>No unlinked groups.</td></tr>"}</tbody></table></div><div><h4>Inventory items</h4><table class='cost-table'><thead><tr><th>Select</th><th>Name</th><th>Part #</th><th>Qty</th><th>Edit</th></tr></thead><tbody>${filteredInv.map(item=>`<tr><td><input type='radio' name='i' value='${escapeHtml(String(item.id||""))}' ${String(item.id)===selectedInventoryId?'checked':''}></td><td>${escapeHtml(item.name||'')}</td><td>${escapeHtml(item.pn||'—')}</td><td>${escapeHtml(String((Number(item.qtyNew)||0)+(Number(item.qtyOld)||0)))}</td><td><button class='btn secondary' data-go-inventory='1'>Inventory settings</button></td></tr>`).join('')||"<tr><td colspan='5'>No inventory matches.</td></tr>"}</tbody></table></div></div><div style="margin-top:10px" ${activeTab==='repaired'?'':'hidden'}><h4>Repaired links</h4><table class='cost-table'><thead><tr><th>Date</th><th>Name</th><th>Part #</th><th>Week</th><th>Edit</th></tr></thead><tbody>${repaired.map(row=>`<tr><td>${escapeHtml(String(row.linkedAtISO||row.date||'—'))}</td><td>${escapeHtml(String(row.purchased||'—'))}</td><td>${escapeHtml(String(row.partNumber||'—'))}</td><td>${escapeHtml(String(row.weekKey||'—'))}</td><td><button class='btn secondary' data-edit-fix='${escapeHtml(String(row.weekKey||''))}|${escapeHtml(String(row.rowIndex))}'>Open row</button></td></tr>`).join('')||"<tr><td colspan='5'>No repaired rows yet.</td></tr>"}</tbody></table></div><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn secondary' data-close='1'>Close</button></div></div></div>`;
           shell.querySelectorAll("input[name='g']").forEach(el=>el.addEventListener('change',()=>{selectedGroupKey=el.value;}));
           shell.querySelectorAll("input[name='i']").forEach(el=>el.addEventListener('change',()=>{selectedInventoryId=el.value;}));
           const sInput = shell.querySelector('[data-inv-search]');
           sInput?.addEventListener('input',()=>{searchTerm=sInput.value||'';redraw();});
+          shell.querySelectorAll('[data-fixer-tab]').forEach(btn => btn.addEventListener('click', ()=>{ activeTab = String(btn.getAttribute('data-fixer-tab') || 'unlinked'); redraw(); }));
+          shell.querySelectorAll('[data-go-inventory="1"]').forEach(btn => btn.addEventListener('click', ()=>{
+            shell.remove();
+            if (typeof window !== "undefined"){ window.location.hash = "#inventory"; }
+          }));
+          shell.querySelectorAll('[data-edit-fix]').forEach(btn => btn.addEventListener('click', ()=>{
+            const raw = String(btn.getAttribute('data-edit-fix') || '');
+            const [weekKey, rowIndexRaw] = raw.split('|');
+            openModal();
+            setTimeout(()=>focusReceiptWeekRow({ weekKey, rowIndex: Number(rowIndexRaw) }), 15);
+            shell.remove();
+          }));
           shell.querySelectorAll('[data-close="1"]').forEach(btn=>btn.addEventListener('click',()=>shell.remove()));
           shell.querySelector('[data-link="1"]')?.addEventListener('click',()=>{
             const g = groups.find(x=>x.key===selectedGroupKey); const inv = inventoryRows.find(x=>String(x?.id||'')===String(selectedInventoryId||''));
