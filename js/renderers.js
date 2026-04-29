@@ -12428,23 +12428,25 @@ const appendEmptyRow = (focusFirst = false)=>{
         });
       };
       const applyGroupLink = (group, inv)=>{
-        if (!group || !inv) return;
+        if (!group || !inv) return 0;
         if (!Array.isArray(window.purchaseInventoryLinks)) window.purchaseInventoryLinks = [];
         let canonicalName = inv.name || "";
         if (group.names.length > 1){
           const picked = prompt(`Name standardization required for part number ${group.partNumber || "(none)"}. Choose final name:
 ${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
           canonicalName = picked.trim();
-          if (!canonicalName) return;
+          if (!canonicalName) return 0;
           const proceed = confirm(`All purchase history records in this part-number group will be renamed to "${canonicalName}". Continue?`);
-          if (!proceed) return;
+          if (!proceed) return 0;
         }
+        let touched = 0;
         (window.receiptTrackerWeeks || []).forEach(week => {
           if (!Array.isArray(week?.rows)) return;
           week.rows = week.rows.map((row, idx) => {
             const samePn = group.partNumber && String(row?.partNumber||"").trim().toLowerCase() === String(group.partNumber).toLowerCase();
             const sameRow = !group.partNumber && group.rows.some(x => x.weekKey===week.key && Number(x.rowIndex)===idx);
             if (!samePn && !sameRow) return row;
+            touched += 1;
             return { ...row, inventoryItemId: inv.id, isInventoryLinked: true, purchased: canonicalName || inv.name || row.purchased || "", partNumber: inv.pn || row.partNumber || "", pnSnapshot: inv.pn || row.partNumber || "", inventoryNameSnapshot: inv.name || "", linkedAtISO: new Date().toISOString(), linkSource: "manual_part_number_group" };
           });
         });
@@ -12468,6 +12470,7 @@ ${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
         saveWeekRowsFromDom();
         renderRangeTable();
         renderCentralSpendRows();
+        return touched;
       };
       const openFixerWidget = ()=>{
         const inventoryRows = Array.isArray(window.inventory) ? window.inventory : (Array.isArray(inventory) ? inventory : []);
@@ -12535,8 +12538,11 @@ ${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
             const selectedInvValue = String(selectedInvEl?.value || selectedInventoryId || "");
             const g = groups.find(x=>x.key===selectedGroupValue); const inv = inventoryRows.find(x=>String(x?.id||'')===selectedInvValue);
             if (!g || !inv){ toast('Select one purchase group and one inventory item.'); return; }
-            applyGroupLink(g, inv);
+            const updatedCount = applyGroupLink(g, inv);
+            if (!updatedCount){ toast('No rows were updated.'); return; }
             selectedGroupKey = "";
+            activeTab = "repaired";
+            toast(`Linked ${updatedCount} purchase row${updatedCount===1?"":"s"}.`);
             redraw();
           });
         };
