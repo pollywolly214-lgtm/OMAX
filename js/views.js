@@ -10,7 +10,18 @@ function renderAverageHoursBanner(contextLabel){
   const modeLabel = summary.mode === "fixed" ? "Fixed daily hours" : `${avgWindowLabel} average`;
   const eff = Number(summary.effectiveHours);
   const effLabel = Number.isFinite(eff) && eff > 0 ? `${eff.toFixed(2)} hrs/day` : "—";
-  return `<div class="block average-hours-banner" data-average-hours-banner="${esc(contextLabel || "")}"><div><strong>Average Hours Cut / Day:</strong> ${esc(avgLabel)}</div><div class="small muted">Prediction basis: ${esc(modeLabel)} • Effective: ${esc(effLabel)}</div></div>`;
+  return `<div class="block average-hours-banner" data-average-hours-banner="${esc(contextLabel || "")}"><div><strong>Average Hours Cut / Day:</strong> ${esc(avgLabel)}</div><div class="small muted">Prediction basis: ${esc(modeLabel)} • Effective: ${esc(effLabel)}</div></div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 }
 
 function viewDashboard(){
@@ -465,7 +476,18 @@ function viewDashboard(){
         </form>
       </div>
     </div>
-  </div>`;
+  </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 }
 
 function taskDetailsInterval(task){
@@ -612,7 +634,18 @@ function viewSettings(){
              data-part-k="note" data-part-id="${p.pid}" data-parent="${parentId}" data-list="${listType}">
       <button class="danger" type="button"
               data-part-remove="${p.pid}" data-parent="${parentId}" data-list="${listType}">Remove</button>
-    </div>`;
+    </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 
   // One maintenance card (task). Kept attrs used by renderSettings().
   const card = (t, listType) => {
@@ -702,7 +735,18 @@ function viewSettings(){
       </div>` : "";
     const list       = (listType==="interval"?tasksInterval:tasksAsReq);
     const tasksHtml  = tasksIn(list, folder.id).map(t => card(t, listType)).join("")
-                      || `<div class="small muted">No items in this category.</div>`;
+                      || `<div class="small muted">No items in this category.</div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
     return `
       <details class="folder block" data-folder-id="${folder.id}" open>
         <summary class="folder-title" style="display:flex;align-items:center;gap:10px;font-weight:700;">
@@ -734,7 +778,18 @@ function viewSettings(){
     <div class="folder-dropzone folder-dropzone-line small muted" data-drop-folder-tail=""
          style="border:1px dashed #bbb; padding:6px; margin:4px 0 6px; border-radius:8px;">
       Drag folders here to place at the end of root categories
-    </div>`;
+    </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 
   // Root-level (no folder) tasks should appear at the top of each menu (no "Uncategorized" label).
   const rootTasksBlock = (listType)=>{
@@ -751,7 +806,18 @@ function viewSettings(){
       <div class="folder-dropzone small muted" data-drop-menu="${listType}"
            style="border:1px dashed #bbb; padding:6px; margin:6px 8px 10px 8px; border-radius:8px;">
         Drag here to move an item into <b>${title}</b> (${listType === "interval" ? "will require an Interval" : "as-needed"})
-      </div>`;
+      </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
     const listId = listType==="interval" ? "intervalList" : "asreqList";
     return `
       <details class="block" open data-menu="${listType}">
@@ -809,7 +875,18 @@ function viewSettings(){
         <button id="saveTasksBtn">Save All</button>
       </div>
     </div>
-  </div>`;
+  </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 }
 
 function renderSettingsCategoriesPane(){
@@ -2512,7 +2589,18 @@ function viewCosts(model){
           </div>
         </div>
       </div>
-    </div></div>`;
+    </div></div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 }
 
 function viewJobs(){
@@ -3344,7 +3432,18 @@ function viewJobs(){
           <input type="color" class="category-color-picker" value="${categoryAccentHex(id)}" data-job-folder-color-input="${esc(id)}" aria-label="Choose color for ${esc(folder.name || (isRoot ? "All Jobs" : "Category"))}">
         </span>
         <button type="button" class="category-color-reset${categoryHasCustomColor(id) ? "" : " is-hidden"}" data-job-folder-color-reset="${esc(id)}" title="Use automatic color">Auto</button>
-      </div>`;
+      </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
     return `
       <div class="job-folder" data-job-folder="${esc(id)}">
         <div class="job-folder-row${selectedClass}" data-category-color="1"${colorStyleAttr}>
@@ -3927,7 +4026,18 @@ function viewJobs(){
           return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
         }).join("")
       : "";
-    const fileMenuActions = `<div class="job-file-menu-actions"><button type="button" class="job-file-menu-action" data-job-file-add="${j.id}">+ Add files</button></div>`;
+    const fileMenuActions = `<div class="job-file-menu-actions"><button type="button" class="job-file-menu-action" data-job-file-add="${j.id}">+ Add files</button></div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
     const fileMenu = (fileCount
       ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
       : `<p class="job-file-menu-empty small muted">No files attached</p>`)
@@ -4510,7 +4620,18 @@ function viewJobs(){
       ${historyFilterStatus}
       ${completedTable}
     </div>
-  </div>`;
+  </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 }
 
 function filterInventoryItems(term){
@@ -4694,7 +4815,18 @@ function materialSheetTableHTML(model, typeId){
         <button type="button" class="small" data-material-row-add="${esc(typeId)}">+ Row</button>
       </div>
       <div class="small muted">Double-click any table cell/header to edit.</div>
-    </div>`;
+    </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 }
 
 function viewInventoryMaterial(model){
@@ -4717,7 +4849,18 @@ function viewInventoryMaterial(model){
         </label>
       </div>
       <div class="material-table-wrap">${body}</div>
-    </div>`;
+    </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 }
 
 function viewInventory(){
@@ -4857,7 +5000,18 @@ function viewInventory(){
         </form>
       </section>
     </div>
-  </div>`;
+  </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 }
 
 function viewOrderRequest(model){
@@ -4883,6 +5037,17 @@ function viewOrderRequest(model){
           <span class="value">${esc(active.created || "—")}</span>
         </div>
       </div>
+      <div class="order-link-repair" data-order-link-repair>
+        <h4>Purchase ↔ Inventory Link Repair</h4>
+        <div class="order-link-repair-stats" data-order-link-stats></div>
+        <div class="order-link-repair-actions">
+          <button type="button" class="btn" data-order-fix-links>Fix Purchase Links</button>
+          <button type="button" class="btn" data-order-review-invalid>Review Invalid Links</button>
+          <button type="button" class="btn" data-order-refresh-scan>Refresh Scan</button>
+          <button type="button" class="btn" data-order-view-system-log>View System Log</button>
+        </div>
+      </div>
+
       ${active.items && active.items.length ? `
         <div class="order-table-wrap">
           <table class="order-table">
@@ -4895,6 +5060,7 @@ function viewOrderRequest(model){
                 <th>Qty</th>
                 <th>Line total</th>
                 <th>Store link</th>
+                <th>Link status</th>
                 <th></th>
               </tr>
             </thead>
@@ -4908,7 +5074,8 @@ function viewOrderRequest(model){
                   <td><input type="number" min="1" step="1" data-order-qty="${esc(item.id)}" value="${esc(item.qtyInput || "1")}"></td>
                   <td class="order-money">${esc(item.lineTotal || "$0.00")}</td>
                   <td>${item.link ? `<a href="${esc(item.link)}" target="_blank" rel="noopener">View</a>` : "—"}</td>
-                  <td><button type="button" class="link danger" data-order-remove="${esc(item.id)}">Remove</button></td>
+                  <td><span class="status-chip ${esc(item.linkStatusClass || "")}">${esc(item.linkStatusLabel || "Unlinked")}</span></td>
+                  <td><button type="button" class="link" data-order-item-link="${esc(item.id)}">Link</button> <button type="button" class="link danger" data-order-remove="${esc(item.id)}">Remove</button></td>
                 </tr>
               `).join("")}
             </tbody>
@@ -4927,7 +5094,18 @@ function viewOrderRequest(model){
           <button type="button" class="secondary" data-order-deny ${!active.canApprove ? "disabled" : ""}>Mark denied</button>
         </div>
       </div>
-    </div>`;
+    </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 
   const historyContent = `
     <div class="order-history">
@@ -4971,7 +5149,18 @@ function viewOrderRequest(model){
           </div>
         </details>
       `).join("") : `<p class="small muted">No previous order requests yet. Approved or denied requests will appear here.</p>`}
-    </div>`;
+    </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 
   const summaryContent = `
     <div class="order-summary">
@@ -4987,7 +5176,18 @@ function viewOrderRequest(model){
         <span class="label">Last update</span>
         <span class="value">${esc(summary.lastUpdated || "—")}</span>
       </div>
-    </div>`;
+    </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 
   return `
     <div class="container order-request-layout">
@@ -5003,7 +5203,18 @@ function viewOrderRequest(model){
           ${tab === "history" ? historyContent : activeContent}
         </div>
       </div>
-    </div>`;
+    </div>
+    <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+      <div class="cost-receipt-backdrop" data-order-repair-close></div>
+      <div class="cost-receipt-card" role="document">
+        <div class="cost-receipt-card-body">
+          <h3>Repair Purchase-to-Inventory Links</h3>
+          <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+          <div data-order-repair-table></div>
+        </div>
+      </div>
+    </div>
+`;
 }
 
 function viewDeletedItems(model){

@@ -21085,6 +21085,45 @@ function formatOrderDate(iso, { includeTime = false } = {}){
   return dt.toLocaleDateString();
 }
 
+
+function appendSystemLog(entry){
+  if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
+  window.syncProcessLog.unshift({ id: genId("sync_log"), atISO: new Date().toISOString(), status: "ok", ...entry });
+  if (window.syncProcessLog.length > 500) window.syncProcessLog = window.syncProcessLog.slice(0, 500);
+}
+
+function scanPurchaseInventoryLinks(){
+  const invById = new Map((Array.isArray(inventory)?inventory:[]).filter(Boolean).map(item => [String(item.id), item]));
+  const requests = Array.isArray(orderRequests) ? orderRequests : [];
+  const lines = [];
+  requests.forEach(req => {
+    (Array.isArray(req?.items)?req.items:[]).forEach(item => {
+      if (!item) return;
+      const inventoryId = item.inventoryId != null ? String(item.inventoryId) : "";
+      const hasId = !!inventoryId;
+      const valid = hasId && invById.has(inventoryId);
+      const linkState = valid ? "linked" : (hasId ? "invalid" : "unlinked");
+      lines.push({ requestId: req.id, requestCode: req.code || req.id, requestStatus: req.status || "draft", item, inventoryId, linkState });
+    });
+  });
+  const unlinked = lines.filter(x=>x.linkState==="unlinked");
+  const invalid = lines.filter(x=>x.linkState==="invalid");
+  const groupsMap = new Map();
+  unlinked.forEach(row => {
+    const pn = String(row.item?.pn || "").trim();
+    const key = pn ? `pn:${pn.toLowerCase()}` : `item:${row.requestId}:${row.item?.id||genId('tmp')}`;
+    if (!groupsMap.has(key)) groupsMap.set(key,{ key, pn, rows: [] });
+    groupsMap.get(key).rows.push(row);
+  });
+  const groups = Array.from(groupsMap.values()).map(g=>{
+    const names = Array.from(new Set(g.rows.map(r=>String(r.item?.name||"").trim()).filter(Boolean)));
+    const qtyTotal = g.rows.reduce((sum,r)=>sum+(Number(r.item?.qty)||0),0);
+    const dates = g.rows.map(r=>String((r.item?.createdAt||"") || (r.item?.date||"") || r.requestCode || "")).filter(Boolean).sort();
+    return { ...g, names, qtyTotal, count: g.rows.length, dateStart: dates[0]||"—", dateEnd: dates[dates.length-1]||"—" };
+  });
+  return { lines, unlinked, invalid, linked: lines.filter(x=>x.linkState==='linked'), groups };
+}
+
 function computeOrderRequestModel(){
   const draft = ensureActiveOrderRequest();
   const existingIds = new Set(draft.items.map(item => item.id));
@@ -21519,7 +21558,7 @@ function applyInventoryForApprovedItems(items){
   if (!Array.isArray(items)) return;
   items.forEach(item => {
     if (!item) return;
-    if (!item.inventoryId) return;
+    if (!item.inventoryId){ appendSystemLog({ eventType:"purchase_inventory_update_skipped", sourceArea:"orderRequests", targetArea:"inventory", status:"skipped_unlinked_inventory", qtyDelta:0, message:"Purchase item was unlinked, so inventory was not updated." }); return; }
     const inv = inventory.find(x => x.id === item.inventoryId);
     if (!inv) return;
     const qty = Number(item.qty);
@@ -21601,6 +21640,13 @@ function renderOrderRequest(){
   const activeCard = content.querySelector(".order-card");
   const draft = ensureActiveOrderRequest();
 
+  const scan = scanPurchaseInventoryLinks();
+  const statsEl = content.querySelector("[data-order-link-stats]");
+  if (statsEl){
+    const noPn = scan.groups.filter(g => !String(g.pn||"").trim()).length;
+    statsEl.innerHTML = `<div>Total scanned: <strong>${scan.lines.length}</strong></div><div>Linked: <strong>${scan.linked.length}</strong></div><div>Unlinked: <strong>${scan.unlinked.length}</strong></div><div>Invalid: <strong>${scan.invalid.length}</strong></div><div>Unlinked PN groups: <strong>${scan.groups.length - noPn}</strong></div><div>No-PN records: <strong>${noPn}</strong></div><p class="small ${scan.unlinked.length||scan.invalid.length?"":"muted"}">${scan.unlinked.length||scan.invalid.length?"Action needed: unlinked/invalid purchase items found.":"Purchase links verified: no unlinked purchase items found."}</p>`;
+  }
+
   content.querySelectorAll("[data-order-tab]").forEach(btn => {
     btn.addEventListener("click", ()=>{
       const target = btn.getAttribute("data-order-tab") || "active";
@@ -21652,6 +21698,16 @@ function renderOrderRequest(){
   });
 
   activeCard?.addEventListener("click", (e)=>{
+    const linkBtn = e.target.closest("[data-order-item-link]");
+    if (linkBtn){ renderRepairModal("unlinked"); return; }
+    const fixBtn = e.target.closest("[data-order-fix-links]");
+    if (fixBtn){ renderRepairModal("unlinked"); return; }
+    const invalidBtn = e.target.closest("[data-order-review-invalid]");
+    if (invalidBtn){ renderRepairModal("invalid"); return; }
+    const refreshBtn = e.target.closest("[data-order-refresh-scan]");
+    if (refreshBtn){ renderOrderRequest(); return; }
+    const logBtn = e.target.closest("[data-order-view-system-log]");
+    if (logBtn){ location.hash = "#/costs"; renderCosts(); return; }
     const removeBtn = e.target.closest("[data-order-remove]");
     if (removeBtn){
       const id = removeBtn.getAttribute("data-order-remove");
@@ -21701,6 +21757,36 @@ function renderOrderRequest(){
     }
   });
 
+
+  content.addEventListener("click", (e)=>{
+    const viewBtn = e.target.closest("[data-order-group-view]");
+    const matchBtn = e.target.closest("[data-order-group-match]");
+    const createBtn = e.target.closest("[data-order-group-create]");
+    const clearBtn = e.target.closest("[data-order-group-clear]");
+    if (!(viewBtn||matchBtn||createBtn||clearBtn)) return;
+    const key = (viewBtn||matchBtn||createBtn||clearBtn).getAttribute("data-order-group-view") || (viewBtn||matchBtn||createBtn||clearBtn).getAttribute("data-order-group-match") || (viewBtn||matchBtn||createBtn||clearBtn).getAttribute("data-order-group-create") || (viewBtn||matchBtn||createBtn||clearBtn).getAttribute("data-order-group-clear");
+    const scan2 = scanPurchaseInventoryLinks();
+    let rows=[];
+    if (key && key.startsWith('invalid:')) rows = scan2.invalid.filter(r => `invalid:${r.item.id}`===key);
+    else rows = (scan2.groups.find(g=>g.key===key)?.rows)||[];
+    if (viewBtn){ toast(`Records: ${rows.map(r=>`${r.requestCode} / ${r.item.name}`).join(' | ') || 'none'}`); return; }
+    if (clearBtn){ rows.forEach(r=>{ r.item.inventoryId=null; r.item.isInventoryLinked=false; }); appendSystemLog({ eventType:'purchase_invalid_link_cleared', sourceArea:'orderRequests', targetArea:'orderRequests', status:'cleared_to_unlinked', qtyDelta:0, message:'Invalid inventory link cleared; no inventory quantity changed.'}); saveCloudDebounced(); renderOrderRequest(); return; }
+    const invName = prompt('Search inventory name/part number', rows[0]?.item?.name || '') || '';
+    const matches = (Array.isArray(inventory)?inventory:[]).filter(it => `${it.name||''} ${it.pn||''} ${it.link||''}`.toLowerCase().includes(invName.toLowerCase()));
+    let inv = matches[0]||null;
+    if (createBtn || !inv){
+      const finalName = (prompt('Final inventory name', rows[0]?.item?.name||'')||'').trim(); if(!finalName) return;
+      const pn = (rows[0]?.item?.pn || '').trim();
+      const folderId = (window.inventoryFolders && window.inventoryFolders[0] && window.inventoryFolders[0].id) ? window.inventoryFolders[0].id : null;
+      inv = normalizeInventoryItem({ id:genId('inventory'), name:finalName, pn, qtyNew:0, qtyOld:0, qty:0, unit: rows[0]?.item?.unit||'pcs', price: rows[0]?.item?.price||null, folderId, link: rows[0]?.item?.link||'' });
+      inventory.unshift(inv); window.inventory=inventory;
+    }
+    if (!inv) return;
+    rows.forEach(r=>{ r.item.inventoryId = inv.id; r.item.isInventoryLinked = true; r.item.inventoryNameSnapshot = inv.name||''; r.item.pnSnapshot = r.item.pn || inv.pn || ''; r.item.linkSnapshot = r.item.link || inv.link || ''; r.item.unitCostSnapshot = r.item.price != null ? Number(r.item.price)||0 : null; r.item.unitSnapshot = r.item.unit || inv.unit || 'pcs'; r.item.linkedAtISO = new Date().toISOString(); r.item.linkSource = 'manual_part_number_group'; r.item.name = inv.name || r.item.name; });
+    appendSystemLog({ eventType:'purchase_inventory_link_repaired', sourceArea:'orderRequests', targetArea:'inventory', partNumber: rows[0]?.item?.pn || '', affectedCount: rows.length, inventoryId: inv.id, finalName: inv.name, qtyDelta:0, status:'historical_link_repaired_no_qty_change', message:'Inventory quantity was not changed because this was a historical link repair.'});
+    saveCloudDebounced(); renderOrderRequest();
+  });
+
   content.querySelectorAll("[data-order-download-history]").forEach(btn => {
     btn.addEventListener("click", ()=>{
       const id = btn.getAttribute("data-order-download-history");
@@ -21709,6 +21795,19 @@ function renderOrderRequest(){
       if (req) downloadOrderRequestCSV(req);
     });
   });
+
+
+  function renderRepairModal(mode){
+    const modal = content.querySelector("#orderLinkRepairModal");
+    const host = content.querySelector("[data-order-repair-table]");
+    if (!modal || !host) return;
+    const rescan = scanPurchaseInventoryLinks();
+    const groups = mode === "invalid" ? rescan.invalid.map(row => ({ key:`invalid:${row.item.id}`, pn: row.item.pn||"", names:[row.item.name||""], count:1, qtyTotal:Number(row.item.qty)||0, rows:[row], badId: row.inventoryId, dateStart: row.requestCode, dateEnd: row.requestCode })) : rescan.groups;
+    host.innerHTML = `<table class="cost-table"><thead><tr><th>Status</th><th>Part number</th><th>Names found</th><th>Affected</th><th>Total qty</th><th>Date range</th><th>Current status</th><th>Actions</th></tr></thead><tbody>${groups.map(g=>`<tr><td>${mode==="invalid"?"Invalid":"Unlinked"}</td><td>${escapeHtml(g.pn||"—")}</td><td>${escapeHtml((g.names||[]).join(", ")||"—")}</td><td>${g.count}</td><td>${g.qtyTotal}</td><td>${escapeHtml(`${g.dateStart} → ${g.dateEnd}`)}</td><td>${mode==="invalid"?`Bad ID: ${escapeHtml(g.badId||"—")}`:"Needs link"}</td><td><button data-order-group-view="${escapeHtml(g.key)}">View Records</button> <button data-order-group-match="${escapeHtml(g.key)}">Match Existing Inventory</button> <button data-order-group-create="${escapeHtml(g.key)}">Create New Inventory Item</button>${mode==="invalid"?` <button data-order-group-clear="${escapeHtml(g.key)}">Clear Link</button>`:""}</td></tr>`).join("") || `<tr><td colspan='8'>No records to repair.</td></tr>`}</tbody></table>`;
+    modal.hidden = false; modal.setAttribute('aria-hidden','false');
+    modal.dataset.mode = mode;
+  }
+  content.querySelectorAll('[data-order-repair-close]').forEach(btn=>btn.addEventListener('click', ()=>{ const m=content.querySelector('#orderLinkRepairModal'); if(m){m.hidden=true;m.setAttribute('aria-hidden','true');} }));
 
   updateOrderTotalsUI(activeCard, draft);
 }
@@ -21856,3 +21955,5 @@ function renderDeletedItems(options){
     }
   }
 }
+
+window.debugPurchaseInventoryLinks = function(){ const scan = scanPurchaseInventoryLinks(); return { totalOrderRequests: Array.isArray(orderRequests)?orderRequests.length:0, totalPurchaseLines: scan.lines.length, linkedCount: scan.linked.length, unlinkedCount: scan.unlinked.length, invalidLinkCount: scan.invalid.length, unlinkedGroupsByPartNumber: scan.groups.filter(g=>g.pn).length, noPartNumberIndividualRecords: scan.groups.filter(g=>!g.pn).length, syncProcessLogCount: Array.isArray(window.syncProcessLog)?window.syncProcessLog.length:0, inventoryTransactionsCount: Array.isArray(window.inventoryTransactions)?window.inventoryTransactions.length:0, sampleUnlinkedRecords: scan.unlinked.slice(0,5), sampleInvalidRecords: scan.invalid.slice(0,5) }; };
