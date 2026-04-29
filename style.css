@@ -551,6 +551,18 @@ body.cost-timeframe-modal-open{ overflow:hidden; }
   background:#f4f7fb;
   box-shadow:0 1px 0 #d9e2ef;
 }
+.cost-data-center-modal[data-data-center-modal] .cost-table{
+  border-collapse:separate;
+  border-spacing:0;
+}
+.cost-data-center-modal[data-data-center-modal] .cost-table thead{
+  position:sticky;
+  top:0;
+  z-index:5;
+}
+.cost-data-center-modal[data-data-center-modal] .cost-table thead th{
+  z-index:6;
+}
 body.cost-data-center-open{ overflow:hidden; }
 .time-efficiency-tooltip{
   position:fixed;
