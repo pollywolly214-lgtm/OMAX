@@ -2131,7 +2131,8 @@ function viewCosts(model){
                 <div class="cost-data-center-search-suggestions" data-maintenance-search-suggestions hidden></div>
               </div>
               ${maintenanceDataTable.length ? `
-            <table class="cost-table" style="margin-top:10px">
+            <div class="cost-data-center-table-wrap" style="margin-top:10px;">
+            <table class="cost-table">
               <thead>
                 <tr>
                   <th>Counter</th>
@@ -2179,6 +2180,7 @@ function viewCosts(model){
                 `).join("")}
               </tbody>
             </table>
+            </div>
             ` : `<p class="small muted">No completed maintenance occurrences yet.</p>`}
               </div>
               <div class="cost-data-center-panel-content" data-dc-panel="spend" hidden>
@@ -2186,7 +2188,8 @@ function viewCosts(model){
                   <label for="costDataCenterSpendSearch">Search purchases</label>
                   <input id="costDataCenterSpendSearch" type="search" placeholder="Search date, item, part number, or week" data-spend-search>
                 </div>
-                <table class="cost-table" style="margin-top:10px">
+                <div class="cost-data-center-table-wrap" style="margin-top:10px;">
+                <table class="cost-table">
                   <thead>
                     <tr>
                       <th>Purchase date</th>
@@ -2216,6 +2219,7 @@ function viewCosts(model){
                     `).join("") : `<tr><td colspan="9" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>`}
                   </tbody>
                 </table>
+                </div>
               </div>
               <div class="cost-data-center-panel-content" data-dc-panel="cutting" hidden>
                 <div class="cost-data-center-search">
@@ -2228,7 +2232,8 @@ function viewCosts(model){
                   </select>
                 </div>
                 ${cuttingJobsDataTable.length ? `
-                <table class="cost-table" style="margin-top:10px">
+                <div class="cost-data-center-table-wrap" style="margin-top:10px;">
+                <table class="cost-table">
                   <thead>
                     <tr>
                       <th>Job name</th>
@@ -2283,6 +2288,7 @@ function viewCosts(model){
                     `).join("")}
                   </tbody>
                 </table>
+                </div>
                 ` : `<p class="small muted">No completed cutting jobs yet.</p>`}
               </div>
               <div class="cost-data-center-panel-content" data-dc-panel="efficiency" hidden>
@@ -2293,11 +2299,12 @@ function viewCosts(model){
                   <div><span class="label">Total net gain</span><span>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
                   <div><span class="label">Avg net gain / row</span><span>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
                 </div>
-                <table class="cost-table" style="margin-top:10px">
-                  <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Run cost</th><th>Total cost</th><th>Net gain</th></tr></thead>
+                <div class="cost-data-center-table-wrap" style="margin-top:10px;">
+                <table class="cost-table">
+                  <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Run cost</th><th>Total cost</th><th>Net gain</th><th>Job link</th></tr></thead>
                   <tbody>
                     ${efficiencyRows.map(row => `
-                      <tr>
+                      <tr data-efficiency-row-link data-efficiency-job-id="${esc(row.id || "")}">
                         <td>${esc(row.taskName || "Completed task")}</td>
                         <td>${esc(row.dateLabel || "—")}</td>
                         <td>${esc(row.hoursLabel || "0 hr")}</td>
@@ -2305,10 +2312,12 @@ function viewCosts(model){
                         <td>${esc(row.laborCostLabel || "$0.00")}</td>
                         <td>${esc(row.totalCostLabel || "$0.00")}</td>
                         <td>${esc(row.netGainLabel || "$0.00")}</td>
+                        <td>${row.settingsLink ? `<button type="button" class="btn secondary" data-efficiency-open-job="${esc(row.id || "")}">Open job</button>` : "Invalid link"}</td>
                       </tr>
                     `).join("")}
                   </tbody>
                 </table>
+                </div>
                 ` : `<p class="small muted">No efficiency rows found in the central data table.</p>`}
               </div>
             </div>
