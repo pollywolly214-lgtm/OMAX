@@ -10983,12 +10983,13 @@ function renderCosts(){
       if (!invRowsHost) return;
       const folders = Array.isArray(window.inventoryFolders)?window.inventoryFolders:[];
       const folderName=(id)=> (folders.find(f=>String(f?.id||'')===String(id||''))?.name)||'—';
-      invRowsHost.innerHTML = (Array.isArray(inventory)&&inventory.length)?inventory.map(item=>`<tr><td>${escapeHtml(item?.name||'')}</td><td>${escapeHtml(item?.pn||'—')}</td><td>${escapeHtml(String(Number(item?.qtyNew)||0))}</td><td>${escapeHtml(String(Number(item?.qtyOld)||0))}</td><td>${escapeHtml(item?.unit||'pcs')}</td><td>${escapeHtml(item?.price!=null?String(item.price):'—')}</td><td>${escapeHtml(folderName(item?.folderId))}</td><td style="white-space:normal;word-break:break-word">${escapeHtml(item?.link||'—')}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No inventory rows available.</td></tr>`;
+      const invRows = Array.isArray(window.inventory) ? window.inventory : (Array.isArray(inventory) ? inventory : []);
+      invRowsHost.innerHTML = invRows.length?invRows.map(item=>`<tr><td>${escapeHtml(item?.name||'')}</td><td>${escapeHtml(item?.pn||'—')}</td><td>${escapeHtml(String(Number(item?.qtyNew)||0))}</td><td>${escapeHtml(String(Number(item?.qtyOld)||0))}</td><td>${escapeHtml(item?.unit||'pcs')}</td><td>${escapeHtml(item?.price!=null?String(item.price):'—')}</td><td>${escapeHtml(folderName(item?.folderId))}</td><td style="white-space:normal;word-break:break-word">${escapeHtml(item?.link||'—')}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No inventory rows available.</td></tr>`;
     };
     const logRowsHost = modal instanceof HTMLElement ? modal.querySelector('[data-dc-log-rows]') : null;
     const renderDataCenterLogRows = ()=>{
       if (!logRowsHost) return;
-      const logs = Array.isArray(window.syncProcessLog)?window.syncProcessLog:[];
+      const logs = Array.isArray(window.syncProcessLog)?window.syncProcessLog:(Array.isArray(window.systemSaveLog)?window.systemSaveLog:[]);
       const saveLogs = Array.isArray(window.maintenanceCostLog) ? window.maintenanceCostLog.slice(0, 100).map(entry => ({ atISO: entry?.createdAt, eventType: entry?.type || "save_event", status: "saved", sourceArea: "maintenanceCostLog", targetArea: "", partNumber: entry?.partNumber || "", qtyDelta: "", message: entry?.notes || entry?.message || "Saved cost/history entry." })) : [];
       const merged = [...logs, ...saveLogs];
       logRowsHost.innerHTML = merged.length?merged.slice(0,100).map(entry=>`<tr><td>${escapeHtml(String(entry?.atISO||entry?.createdAt||'—'))}</td><td>${escapeHtml(String(entry?.eventType||entry?.type||'—'))}</td><td>${escapeHtml(String(entry?.status||'—'))}</td><td>${escapeHtml(String(entry?.sourceArea||'—'))}</td><td>${escapeHtml(String(entry?.targetArea||'—'))}</td><td>${escapeHtml(String(entry?.partNumber||'—'))}</td><td>${escapeHtml(String(entry?.qtyDelta!=null?entry.qtyDelta:'—'))}</td><td>${escapeHtml(String(entry?.message||'—'))}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No system wiring or save log entries yet.</td></tr>`;
@@ -12508,9 +12509,15 @@ ${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
           }));
           shell.querySelectorAll('[data-close="1"]').forEach(btn=>btn.addEventListener('click',()=>shell.remove()));
           shell.querySelector('[data-link="1"]')?.addEventListener('click',()=>{
-            const g = groups.find(x=>x.key===selectedGroupKey); const inv = inventoryRows.find(x=>String(x?.id||'')===String(selectedInventoryId||''));
+            const selectedGroupEl = shell.querySelector("input[name='g']:checked");
+            const selectedInvEl = shell.querySelector("input[name='i']:checked");
+            const selectedGroupValue = String(selectedGroupEl?.value || selectedGroupKey || "");
+            const selectedInvValue = String(selectedInvEl?.value || selectedInventoryId || "");
+            const g = groups.find(x=>x.key===selectedGroupValue); const inv = inventoryRows.find(x=>String(x?.id||'')===selectedInvValue);
             if (!g || !inv){ toast('Select one purchase group and one inventory item.'); return; }
-            applyGroupLink(g, inv); redraw();
+            applyGroupLink(g, inv);
+            selectedGroupKey = "";
+            redraw();
           });
         };
         redraw();
