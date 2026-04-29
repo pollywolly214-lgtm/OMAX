@@ -2395,11 +2395,22 @@ function renderNextDueWidget(ndBox){
     parsed.setHours(0,0,0,0);
     return parsed;
   };
-  const completedDatesFor = (task)=> new Set(
-    Array.isArray(task?.completedDates)
-      ? task.completedDates.map(normalizeKey).filter(Boolean)
-      : []
-  );
+  const completedDatesFor = (task)=>{
+    const completed = new Set(
+      Array.isArray(task?.completedDates)
+        ? task.completedDates.map(normalizeKey).filter(Boolean)
+        : []
+    );
+    const manualHistory = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(task)
+      : (Array.isArray(task?.manualHistory) ? task.manualHistory : []);
+    manualHistory.forEach(entry => {
+      if (!entry || entry.status !== "completed") return;
+      const key = normalizeKey(entry.dateISO);
+      if (key) completed.add(key);
+    });
+    return completed;
+  };
 
   const upcoming = tasksInterval
     .filter(task => task && task.mode === "interval" && isInstanceTask(task))
