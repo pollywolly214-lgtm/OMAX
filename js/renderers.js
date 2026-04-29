@@ -10978,6 +10978,10 @@ function renderCosts(){
     const modal = content.querySelector("[data-data-center-modal]");
     const closeBtns = Array.from(content.querySelectorAll("[data-close-data-center]"));
     const tabButtons = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-tab]")) : [];
+    const invRowsHost = modal instanceof HTMLElement ? modal.querySelector('[data-dc-inventory-rows]') : null;
+    if (invRowsHost){ const folders = Array.isArray(window.inventoryFolders)?window.inventoryFolders:[]; const folderName=(id)=> (folders.find(f=>String(f?.id||'')===String(id||''))?.name)||'—'; invRowsHost.innerHTML = (Array.isArray(inventory)&&inventory.length)?inventory.map(item=>`<tr><td>${escapeHtml(item?.name||'')}</td><td>${escapeHtml(item?.pn||'—')}</td><td>${escapeHtml(String(Number(item?.qtyNew)||0))}</td><td>${escapeHtml(String(Number(item?.qtyOld)||0))}</td><td>${escapeHtml(item?.unit||'pcs')}</td><td>${escapeHtml(item?.price!=null?String(item.price):'—')}</td><td>${escapeHtml(folderName(item?.folderId))}</td><td>${escapeHtml(item?.link||'—')}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No inventory rows available.</td></tr>`; }
+    const logRowsHost = modal instanceof HTMLElement ? modal.querySelector('[data-dc-log-rows]') : null;
+    if (logRowsHost){ const logs = Array.isArray(window.syncProcessLog)?window.syncProcessLog:[]; logRowsHost.innerHTML = logs.length?logs.slice(0,100).map(entry=>`<tr><td>${escapeHtml(String(entry?.atISO||entry?.createdAt||'—'))}</td><td>${escapeHtml(String(entry?.eventType||entry?.type||'—'))}</td><td>${escapeHtml(String(entry?.status||'—'))}</td><td>${escapeHtml(String(entry?.sourceArea||'—'))}</td><td>${escapeHtml(String(entry?.targetArea||'—'))}</td><td>${escapeHtml(String(entry?.partNumber||'—'))}</td><td>${escapeHtml(String(entry?.qtyDelta!=null?entry.qtyDelta:'—'))}</td><td>${escapeHtml(String(entry?.message||'—'))}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No system wiring or save log entries yet.</td></tr>`; }
     const panels = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-panel]")) : [];
     const setActiveTab = (tabKey)=>{
       if (typeof window !== "undefined"){
@@ -11750,8 +11754,9 @@ function renderCosts(){
       qty: Number(item?.qty) || 0,
       partNumber: String(item?.partNumber || ""),
       shipping: Number(item?.shipping) || 0,
-      tax: Number(item?.tax) || 0
-    })).filter(row => row.date || row.purchased || row.cost || row.qty || row.partNumber || row.shipping || row.tax);
+      tax: Number(item?.tax) || 0,
+      inventoryItemId: String(item?.inventoryItemId || "")
+    })).filter(row => row.date || row.purchased || row.cost || row.qty || row.partNumber || row.shipping || row.tax || row.inventoryItemId);
     const renderCentralSpendRows = ()=>{
       const spendBody = document.querySelector("[data-spend-table-body]");
       if (!(spendBody instanceof HTMLElement)) return;
@@ -12059,7 +12064,20 @@ function renderCosts(){
         setField("shipping", Number(template.shipping || 0));
         setField("tax", Number(template.tax || 0));
       };
-      const appendEmptyRow = (focusFirst = false)=>{
+      
+      const inventorySelectOptionsMarkup = (selectedId)=>{
+        const selected = String(selectedId || "");
+        const rows = (Array.isArray(inventory) ? inventory : []).filter(Boolean).slice().sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));
+        const opts = ['<option value="">Save as unlinked</option>'];
+        rows.forEach(item => {
+          const id = String(item.id || "");
+          if (!id) return;
+          const label = `${item.name || "Unnamed"} ${item.pn ? `(${item.pn})` : ""}`.trim();
+          opts.push(`<option value="${escapeHtml(id)}" ${selected===id?"selected":""}>${escapeHtml(label)}</option>`);
+        });
+        return opts.join("");
+      };
+const appendEmptyRow = (focusFirst = false)=>{
         if (!(weekRowsBody instanceof HTMLElement)) return;
         const tr = document.createElement("tr");
         tr.setAttribute("data-receipt-row", "1");
@@ -12069,6 +12087,7 @@ function renderCosts(){
           <td><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
           <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
+          <td><select data-col="inventoryItemId">${inventorySelectOptionsMarkup("")}</select></td>
           <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00"></td>
           <td><input type="number" min="0" step="0.01" data-col="tax" placeholder="0.00"></td>
           <td data-col="total">${formatUsd(0)}</td>`;
@@ -12109,6 +12128,7 @@ function renderCosts(){
             <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
             <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
+            <td><select data-col="inventoryItemId">${inventorySelectOptionsMarkup(row.inventoryItemId || "")}</select></td>
             <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}"></td>
             <td><input type="number" min="0" step="0.01" data-col="tax" value="${escapeHtml(String(row.tax || 0))}"></td>
             <td data-col="total">${formatUsd(computeRowTotal(row))}</td>
@@ -12227,7 +12247,7 @@ function renderCosts(){
           event.preventDefault();
           const row = input.closest("tr[data-receipt-row]");
           if (!row) return;
-          const columns = ["date", "purchased", "cost", "qty", "partNumber", "shipping", "tax"];
+          const columns = ["date", "purchased", "cost", "qty", "partNumber", "inventoryItemId", "shipping", "tax"];
           const col = input.getAttribute("data-col") || "";
           const idx = columns.indexOf(col);
           if (idx < 0) return;
@@ -12397,10 +12417,11 @@ ${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
         let searchTerm = "";
         const shell = document.createElement('div');
         shell.className = 'cost-receipt-modal';
+        shell.style.color = '#000';
         shell.style.zIndex = '10002';
         const redraw = ()=>{
           const filteredInv = inventoryRows.filter(item => `${item?.name||""} ${item?.pn||""} ${item?.link||""}`.toLowerCase().includes(searchTerm.toLowerCase()));
-          shell.innerHTML = `<div class="cost-receipt-backdrop" data-close="1"></div><div class="cost-receipt-card" style="max-width:1200px"><div class="cost-receipt-card-body"><h3>Repair Purchase-to-Inventory Links</h3><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><h4>Unlinked purchase groups</h4><table class="cost-table"><thead><tr><th>Select</th><th>Part #</th><th>Names</th><th>Rows</th><th>Total Qty</th></tr></thead><tbody>${groups.map(g=>`<tr><td><input type='radio' name='g' value='${escapeHtml(g.key)}' ${selectedGroupKey===g.key?'checked':''}></td><td>${escapeHtml(g.partNumber||'—')}</td><td>${escapeHtml(g.names.join(', ')||'—')}</td><td>${g.count}</td><td>${g.qty}</td></tr>`).join('')||"<tr><td colspan='5'>No unlinked groups.</td></tr>"}</tbody></table></div><div><h4>Inventory items</h4><input type='search' placeholder='Search inventory...' value='${escapeHtml(searchTerm)}' data-inv-search><table class='cost-table'><thead><tr><th>Select</th><th>Name</th><th>Part #</th><th>Qty</th></tr></thead><tbody>${filteredInv.map(item=>`<tr><td><input type='radio' name='i' value='${escapeHtml(String(item.id||""))}' ${String(item.id)===selectedInventoryId?'checked':''}></td><td>${escapeHtml(item.name||'')}</td><td>${escapeHtml(item.pn||'—')}</td><td>${escapeHtml(String((Number(item.qtyNew)||0)+(Number(item.qtyOld)||0)))}</td></tr>`).join('')||"<tr><td colspan='4'>No inventory matches.</td></tr>"}</tbody></table></div></div><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn secondary' data-close='1'>Close</button><button class='btn primary' data-link='1'>Link Selected</button></div></div></div>`;
+          shell.innerHTML = `<div class="cost-receipt-backdrop" data-close="1"></div><div class="cost-receipt-card" style="max-width:1200px;color:#000;background:#fff"><div class="cost-receipt-card-body"><h3>Repair Purchase-to-Inventory Links</h3><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><h4>Unlinked purchase groups</h4><table class="cost-table"><thead><tr><th>Select</th><th>Part #</th><th>Names</th><th>Rows</th><th>Total Qty</th></tr></thead><tbody>${groups.map(g=>`<tr><td><input type='radio' name='g' value='${escapeHtml(g.key)}' ${selectedGroupKey===g.key?'checked':''}></td><td>${escapeHtml(g.partNumber||'—')}</td><td>${escapeHtml(g.names.join(', ')||'—')}</td><td>${g.count}</td><td>${g.qty}</td></tr>`).join('')||"<tr><td colspan='5'>No unlinked groups.</td></tr>"}</tbody></table></div><div><h4>Inventory items</h4><input type='search' placeholder='Search inventory...' value='${escapeHtml(searchTerm)}' data-inv-search><table class='cost-table'><thead><tr><th>Select</th><th>Name</th><th>Part #</th><th>Qty</th></tr></thead><tbody>${filteredInv.map(item=>`<tr><td><input type='radio' name='i' value='${escapeHtml(String(item.id||""))}' ${String(item.id)===selectedInventoryId?'checked':''}></td><td>${escapeHtml(item.name||'')}</td><td>${escapeHtml(item.pn||'—')}</td><td>${escapeHtml(String((Number(item.qtyNew)||0)+(Number(item.qtyOld)||0)))}</td></tr>`).join('')||"<tr><td colspan='4'>No inventory matches.</td></tr>"}</tbody></table></div></div><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn secondary' data-close='1'>Close</button><button class='btn primary' data-link='1'>Link Selected</button></div></div></div>`;
           shell.querySelectorAll("input[name='g']").forEach(el=>el.addEventListener('change',()=>{selectedGroupKey=el.value;}));
           shell.querySelectorAll("input[name='i']").forEach(el=>el.addEventListener('change',()=>{selectedInventoryId=el.value;}));
           const sInput = shell.querySelector('[data-inv-search]');

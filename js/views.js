@@ -1961,9 +1961,9 @@ function viewCosts(model){
           <p class="small muted" data-receipt-week-range>—</p>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-week-table">
-              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th></tr></thead>
+              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th>Inventory link</th><th>Shipping</th><th>Tax</th><th>Total</th></tr></thead>
               <tbody data-receipt-week-rows></tbody>
-              <tfoot><tr><th colspan="7">Subtotal</th><th data-receipt-week-subtotal>$0.00</th></tr></tfoot>
+              <tfoot><tr><th colspan="8">Subtotal</th><th data-receipt-week-subtotal>$0.00</th></tr></tfoot>
             </table>
           </div>
           <div class="cost-receipt-summary-controls">
@@ -2007,7 +2007,16 @@ function viewCosts(model){
               </button>
               <div class="chart-info-bubble" id="costOverviewInsight" role="tooltip">
                 <p>${esc(overviewInsight)}</p>
+              
+              <div class="cost-data-center-panel-content" data-dc-panel="inventory" hidden>
+                <p class="small muted">Inventory source-of-truth table.</p>
+                <table class="cost-table" style="margin-top:10px"><thead><tr><th>Name</th><th>Part #</th><th>Qty New</th><th>Qty Old</th><th>Unit</th><th>Price</th><th>Folder</th><th>Link</th></tr></thead><tbody data-dc-inventory-rows></tbody></table>
               </div>
+              <div class="cost-data-center-panel-content" data-dc-panel="logs" hidden>
+                <p class="small muted">System Wiring & Save Log</p>
+                <table class="cost-table" style="margin-top:10px"><thead><tr><th>Date/time</th><th>Event type</th><th>Status</th><th>Source</th><th>Target</th><th>Part #</th><th>Qty Δ</th><th>Message</th></tr></thead><tbody data-dc-log-rows></tbody></table>
+              </div>
+</div>
             </div>
           </div>
         </div>
@@ -2198,6 +2207,8 @@ function viewCosts(model){
                 <button type="button" class="cost-data-center-tab" data-dc-tab="spend" role="tab" aria-selected="false">Total Spend</button>
                 <button type="button" class="cost-data-center-tab" data-dc-tab="cutting" role="tab" aria-selected="false">Completed Cutting Jobs</button>
                 <button type="button" class="cost-data-center-tab" data-dc-tab="efficiency" role="tab" aria-selected="false">Efficiency Metrics</button>
+                <button type="button" class="cost-data-center-tab" data-dc-tab="inventory" role="tab" aria-selected="false">Inventory</button>
+                <button type="button" class="cost-data-center-tab" data-dc-tab="logs" role="tab" aria-selected="false">History Logs</button>
               </div>
               <div class="cost-data-center-panel-content" data-dc-panel="maintenance">
               <div class="cost-data-center-search">
