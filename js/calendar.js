@@ -558,6 +558,47 @@ function setFamilyOccurrenceHours(task, dateISO, hours){
   return changed;
 }
 
+function killTaskFamilyCalendarScheduling(task){
+  let changed = false;
+  visitTaskFamily(task, member => {
+    if (!member) return;
+    if (member.recurrence && typeof member.recurrence === "object"){
+      if (member.recurrence.enabled !== false){
+        member.recurrence = { ...member.recurrence, enabled: false };
+        changed = true;
+      }
+    }
+    const removedSet = normalizeRemovedOccurrences(member);
+    const projected = projectIntervalDueDates(member, { monthsAhead: 24, minOccurrences: 24 });
+    projected.forEach(pred => {
+      const key = normalizeDateKey(pred?.dateISO);
+      if (!key) return;
+      if (!removedSet.has(key)){
+        removedSet.add(key);
+        changed = true;
+      }
+    });
+    if (member.calendarDateISO != null){
+      member.calendarDateISO = null;
+      changed = true;
+    }
+    if (Array.isArray(member.completedDates) && member.completedDates.length){
+      member.completedDates = [];
+      changed = true;
+    }
+    if (member.occurrenceNotes && Object.keys(member.occurrenceNotes).length){
+      member.occurrenceNotes = {};
+      changed = true;
+    }
+    if (member.occurrenceHours && Object.keys(member.occurrenceHours).length){
+      member.occurrenceHours = {};
+      changed = true;
+    }
+    member.removedOccurrences = Array.from(removedSet);
+  });
+  return changed;
+}
+
 function markCalendarTaskComplete(meta, dateISO){
   if (!meta || !meta.task) return false;
   const key = normalizeDateKey(dateISO || new Date());
@@ -819,57 +860,7 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
   };
 
   if (mode === "interval" && normalizedScope === "single"){
-    const applySingleRemoval = (member)=>{
-      let memberChanged = false;
-      if (markOccurrenceRemoved(member, key)) memberChanged = true;
-
-      const nowIso = new Date().toISOString();
-      const history = Array.isArray(member.manualHistory) ? member.manualHistory : [];
-      let hasEntry = false;
-      history.forEach(entry => {
-        if (isSameDay(entry?.dateISO)){
-          hasEntry = true;
-          if (entry.status !== "removed"){ entry.status = "removed"; memberChanged = true; }
-          if (!entry.recordedAtISO) entry.recordedAtISO = nowIso;
-        }
-      });
-      if (!hasEntry){
-        history.push({ dateISO: key, status: "removed", recordedAtISO: nowIso, source: "calendar" });
-        memberChanged = true;
-      }
-      member.manualHistory = history;
-
-      const pruneSingle = (obj)=>{
-        if (!obj || typeof obj !== "object") return false;
-        let mutated = false;
-        Object.keys(obj).forEach(k => {
-          if (isSameDay(k)){
-            delete obj[k];
-            mutated = true;
-          }
-        });
-        return mutated;
-      };
-
-      if (isSameDay(member.calendarDateISO)){
-        member.calendarDateISO = null;
-        memberChanged = true;
-      }
-      if (Array.isArray(member.completedDates)){
-        const idx = member.completedDates.findIndex(v => isSameDay(v));
-        if (idx >= 0){
-          member.completedDates.splice(idx,1);
-          memberChanged = true;
-        }
-      }
-      if (pruneSingle(member.occurrenceNotes)) memberChanged = true;
-      if (pruneSingle(member.occurrenceHours)) memberChanged = true;
-      return memberChanged;
-    };
-
-    visitTaskFamily(task, member => {
-      if (applySingleRemoval(member)) changed = true;
-    });
+    if (killTaskFamilyCalendarScheduling(task)) changed = true;
     return changed;
   }
 
