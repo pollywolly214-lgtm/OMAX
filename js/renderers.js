@@ -12148,7 +12148,7 @@ function renderCosts(){
         const nameOptions = Array.from(new Set(matchingRows.map(row => String(row?.purchased || "").trim()).filter(Boolean)));
         let selectedName = nameOptions[0] || "";
         if (nameOptions.length > 1){
-          selectedName = prompt(`Multiple names use part number . Choose the canonical name:\n`, selectedName || nameOptions[0] || "") || "";
+          selectedName = prompt(`Multiple names use part number ${pn}. Choose the canonical name:\n${nameOptions.join("\n")}`, selectedName || nameOptions[0] || "") || "";
           selectedName = selectedName.trim();
           if (!selectedName) return;
           const proceed = confirm(`This will rename all purchase history rows with part number ${pn} to "${selectedName}" and link them together. Continue?`);
@@ -12202,9 +12202,7 @@ function renderCosts(){
         const subtotal = rows.reduce((sum, row) => sum + row.total, 0);
         rangeRowsBody.innerHTML = rows.length ? rows.map(row => {
           const linked = !!findInventoryByPartNumber(row.partNumber);
-          const stateLabel = linked ? "Linked" : "Missing";
-          const btnClass = linked ? "btn" : "btn danger";
-          const btnText = linked ? "View" : "Error";
+          const stateLabel = linked ? "Linked" : "Unlinked";
           return `
           <tr>
             <td>${escapeHtml(row.date || "—")}</td>
@@ -12214,7 +12212,7 @@ function renderCosts(){
             <td>${formatUsd(row.shipping || 0)}</td>
             <td>${formatUsd(row.tax || 0)}</td>
             <td>${formatUsd(row.total || 0)}</td>
-            <td><button type="button" class="${btnClass}" data-receipt-link-error="${escapeHtml(String(row.partNumber || ""))}" data-link-state="${linked?"linked":"missing"}">${btnText}</button> <span class="small muted">${stateLabel}</span></td>
+            <td><span class="small muted">${stateLabel}</span></td>
           </tr>`;
         }).join("") : '<tr><td colspan="8" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
         if (rangeSubtotal) rangeSubtotal.textContent = formatUsd(subtotal);
@@ -12342,6 +12340,29 @@ function renderCosts(){
           downloadWorkbook(`receipt-week-${entry.key || "week"}.xls`, workbook);
         });
       }
+      const openFixerBtn = modal.querySelector("[data-receipt-open-fixer]");
+      openFixerBtn?.addEventListener("click", ()=>{
+        const missing = [];
+        (window.receiptTrackerWeeks || []).forEach(week => {
+          normalizeRows(week?.rows).forEach(row => {
+            const pn = String(row.partNumber || "").trim();
+            const linked = pn ? findInventoryByPartNumber(pn) : null;
+            if (!linked){ missing.push(row); }
+          });
+        });
+        const grouped = new Map();
+        missing.forEach(row => {
+          const pn = String(row.partNumber || "").trim() || "(No part number)";
+          if (!grouped.has(pn)) grouped.set(pn, []);
+          grouped.get(pn).push(row);
+        });
+        const options = Array.from(grouped.keys());
+        if (!options.length){ toast("No unlinked purchase-history rows found."); return; }
+        const choice = prompt(`Unlinked groups:
+${options.join("\n")}\n\nEnter a part number to repair:`, options[0]);
+        if (!choice) return;
+        openPurchaseLinkingWorkflow(String(choice).trim() === "(No part number)" ? "" : choice.trim());
+      });
       if (exportRangeBtn instanceof HTMLElement){
         exportRangeBtn.addEventListener("click", ()=>{
           const { start, end } = getRangeWindow(activeRange);

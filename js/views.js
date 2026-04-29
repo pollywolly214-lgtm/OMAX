@@ -18,6 +18,7 @@ function renderAverageHoursBanner(contextLabel){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -484,6 +485,7 @@ function viewDashboard(){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -642,6 +644,7 @@ function viewSettings(){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -743,6 +746,7 @@ function viewSettings(){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -786,6 +790,7 @@ function viewSettings(){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -814,6 +819,7 @@ function viewSettings(){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -883,6 +889,7 @@ function viewSettings(){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -1980,6 +1987,7 @@ function viewCosts(model){
               <tfoot><tr><th colspan="7">Subtotal</th><th data-receipt-range-subtotal>$0.00</th></tr></tfoot>
             </table>
           </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -2587,6 +2595,7 @@ function viewCosts(model){
               <p>${esc(efficiencyInsight)}</p>
             </div>
           </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div></div>
@@ -2597,6 +2606,7 @@ function viewCosts(model){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -3440,6 +3450,7 @@ function viewJobs(){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -4034,6 +4045,7 @@ function viewJobs(){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -4589,6 +4601,7 @@ function viewJobs(){
             <button type="button" class="job-note-modal-secondary" data-note-save-new>Save &amp; add another</button>
             <button type="button" class="job-note-modal-primary" data-note-save>Save notes</button>
           </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -4628,6 +4641,7 @@ function viewJobs(){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -4823,6 +4837,7 @@ function materialSheetTableHTML(model, typeId){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -4857,6 +4872,7 @@ function viewInventoryMaterial(model){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -5008,6 +5024,7 @@ function viewInventory(){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -5102,6 +5119,7 @@ function viewOrderRequest(model){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -5157,6 +5175,7 @@ function viewOrderRequest(model){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -5184,6 +5203,7 @@ function viewOrderRequest(model){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
@@ -5211,6 +5231,7 @@ function viewOrderRequest(model){
           <h3>Repair Purchase-to-Inventory Links</h3>
           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
           <div data-order-repair-table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
     </div>
