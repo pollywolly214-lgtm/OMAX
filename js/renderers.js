@@ -10993,7 +10993,7 @@ function renderCosts(){
           shell = document.createElement("div");
           shell.className = "cost-data-center-floating-head";
           shell.setAttribute("aria-hidden", "true");
-          wrap.appendChild(shell);
+          wrap.insertBefore(shell, table);
         }
         shell.innerHTML = "";
         const headTable = document.createElement("table");
@@ -11012,8 +11012,13 @@ function renderCosts(){
           cell.style.width = `${width}px`;
           cell.style.minWidth = `${width}px`;
         });
-        head.style.visibility = "hidden";
-        shell.style.display = "";
+        if (targetCells.length){
+          head.style.visibility = "hidden";
+          shell.style.display = "";
+        }else{
+          head.style.visibility = "";
+          shell.style.display = "none";
+        }
         shell.style.width = `${Math.ceil(table.getBoundingClientRect().width)}px`;
         const syncScroll = ()=>{
           shell.style.transform = `translateX(${-wrap.scrollLeft}px)`;
