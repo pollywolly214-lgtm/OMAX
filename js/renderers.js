@@ -12430,15 +12430,8 @@ const appendEmptyRow = (focusFirst = false)=>{
       const applyGroupLink = (group, inv)=>{
         if (!group || !inv) return 0;
         if (!Array.isArray(window.purchaseInventoryLinks)) window.purchaseInventoryLinks = [];
-        let canonicalName = inv.name || "";
-        if (group.names.length > 1){
-          const picked = prompt(`Name standardization required for part number ${group.partNumber || "(none)"}. Choose final name:
-${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
-          canonicalName = picked.trim();
-          if (!canonicalName) return 0;
-          const proceed = confirm(`All purchase history records in this part-number group will be renamed to "${canonicalName}". Continue?`);
-          if (!proceed) return 0;
-        }
+        const canonicalName = String(inv.name || group.names[0] || "").trim();
+        if (!canonicalName) return 0;
         let touched = 0;
         (window.receiptTrackerWeeks || []).forEach(week => {
           if (!Array.isArray(week?.rows)) return;
@@ -12464,7 +12457,11 @@ ${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
         };
         window.purchaseInventoryLinks.unshift(linkRecord);
         if (window.purchaseInventoryLinks.length > 500) window.purchaseInventoryLinks.length = 500;
-        if (typeof appendSystemLog === 'function') appendSystemLog({ eventType:'purchase_inventory_link_repaired', sourceArea:'orderRequests', targetArea:'inventory', partNumber: group.partNumber || '', affectedCount: group.count, inventoryId: inv.id, finalName: canonicalName || inv.name || '', qtyDelta:0, status:'historical_link_repaired_no_qty_change', message:'Inventory quantity was not changed because this was a historical link repair.' });
+        if (typeof appendSystemLog === 'function'){
+          appendSystemLog({ eventType:'purchase_history_saved', sourceArea:'purchaseHistory', targetArea:'purchaseHistory', partNumber: group.partNumber || '', affectedCount: touched, inventoryId: inv.id, finalName: canonicalName || inv.name || '', qtyDelta:0, status:'saved', message:'Purchase history rows linked to inventory item.' });
+          appendSystemLog({ eventType:'inventory_link_updated', sourceArea:'inventory', targetArea:'inventory', partNumber: inv.pn || group.partNumber || '', affectedCount: touched, inventoryId: inv.id, finalName: canonicalName || inv.name || '', qtyDelta:0, status:'saved', message:'Inventory link reference updated from fixer.' });
+          appendSystemLog({ eventType:'central_data_inventory_refreshed', sourceArea:'dataCenter', targetArea:'dataCenter', partNumber: inv.pn || group.partNumber || '', affectedCount: touched, inventoryId: inv.id, finalName: canonicalName || inv.name || '', qtyDelta:0, status:'saved', message:'Central Data Table inventory/log views refreshed after link repair.' });
+        }
         persistReceiptState();
         renderWeekRows();
         saveWeekRowsFromDom();
