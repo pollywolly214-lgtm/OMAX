@@ -10979,69 +10979,6 @@ function renderCosts(){
     const closeBtns = Array.from(content.querySelectorAll("[data-close-data-center]"));
     const tabButtons = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-tab]")) : [];
     const panels = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-panel]")) : [];
-    const setupFloatingTableHeaders = ()=>{
-      if (!(modal instanceof HTMLElement)) return;
-      const wraps = Array.from(modal.querySelectorAll(".cost-data-center-table-wrap"));
-      wraps.forEach(wrap => {
-        if (!(wrap instanceof HTMLElement)) return;
-        const table = wrap.querySelector("table.cost-table");
-        const head = table ? table.querySelector("thead") : null;
-        if (!(table instanceof HTMLTableElement) || !(head instanceof HTMLElement)) return;
-
-        let shell = wrap.querySelector(".cost-data-center-floating-head");
-        if (!(shell instanceof HTMLElement)){
-          shell = document.createElement("div");
-          shell.className = "cost-data-center-floating-head";
-          shell.setAttribute("aria-hidden", "true");
-          wrap.insertBefore(shell, table);
-        }
-        shell.innerHTML = "";
-        const headTable = document.createElement("table");
-        headTable.className = table.className;
-        headTable.appendChild(head.cloneNode(true));
-        shell.appendChild(headTable);
-
-        const sourceCells = Array.from(head.querySelectorAll("th"));
-        const firstBodyRow = table.tBodies && table.tBodies[0]
-          ? Array.from(table.tBodies[0].rows).find(row => row instanceof HTMLTableRowElement && !row.hidden)
-          : null;
-        const bodyCells = firstBodyRow ? Array.from(firstBodyRow.cells) : [];
-        const targetCells = Array.from(headTable.querySelectorAll("th"));
-        const widths = sourceCells.map((cell, idx) => {
-          const bodyCell = bodyCells[idx];
-          const candidateWidth = bodyCell instanceof HTMLElement
-            ? bodyCell.getBoundingClientRect().width
-            : cell.getBoundingClientRect().width;
-          return Math.max(48, Math.ceil(candidateWidth));
-        });
-        sourceCells.forEach((cell, idx) => {
-          if (idx >= targetCells.length) return;
-          const width = widths[idx];
-          targetCells[idx].style.width = `${width}px`;
-          targetCells[idx].style.minWidth = `${width}px`;
-          cell.style.width = `${width}px`;
-          cell.style.minWidth = `${width}px`;
-        });
-        if (targetCells.length){
-          head.style.visibility = "hidden";
-          shell.style.display = "";
-        }else{
-          head.style.visibility = "";
-          shell.style.display = "none";
-        }
-        const tablePixelWidth = Math.ceil(table.scrollWidth || table.getBoundingClientRect().width);
-        headTable.style.width = `${tablePixelWidth}px`;
-        shell.style.width = `${tablePixelWidth}px`;
-        const syncScroll = ()=>{
-          shell.style.transform = `translateX(${-wrap.scrollLeft}px)`;
-        };
-        syncScroll();
-        if (wrap.dataset.floatHeadBound !== "1"){
-          wrap.dataset.floatHeadBound = "1";
-          wrap.addEventListener("scroll", syncScroll, { passive: true });
-        }
-      });
-    };
     const setActiveTab = (tabKey)=>{
       if (typeof window !== "undefined"){
         window.dataCenterActiveTab = tabKey;
@@ -11222,12 +11159,6 @@ function renderCosts(){
       if (options && options.openImmediately){
         openDataCenter({ restoreScroll: true });
       }
-    }
-    setupFloatingTableHeaders();
-    if (typeof window !== "undefined"){
-      window.requestAnimationFrame?.(()=> setupFloatingTableHeaders());
-      window.requestAnimationFrame?.(()=> setupFloatingTableHeaders());
-      window.addEventListener("resize", setupFloatingTableHeaders);
     }
 
     const searchInput = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-search]") : null;

@@ -566,26 +566,12 @@ body.cost-timeframe-modal-open{ overflow:hidden; }
 .cost-data-center-table-wrap .cost-table{
   margin:0;
 }
-.cost-data-center-floating-head{
-  position:sticky;
+.cost-data-center-table-wrap > .cost-table thead th{
+  position:sticky !important;
   top:0;
-  left:0;
-  z-index:12;
-  pointer-events:none;
+  z-index:10;
   background:#f4f7fb;
   box-shadow:0 1px 0 #d9e2ef;
-}
-.cost-data-center-floating-head .cost-table{
-  margin:0;
-  border-collapse:separate;
-  border-spacing:0;
-}
-.cost-data-center-floating-head th{
-  background:#f4f7fb;
-  border-bottom:1px solid #d9e2ef;
-}
-.cost-data-center-table-wrap > .cost-table thead th{
-  position:static !important;
 }
 body.cost-data-center-open{ overflow:hidden; }
 .time-efficiency-tooltip{
