@@ -819,50 +819,57 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
   };
 
   if (mode === "interval" && normalizedScope === "single"){
-    if (markOccurrenceRemoved(task, key)) changed = true;
+    const applySingleRemoval = (member)=>{
+      let memberChanged = false;
+      if (markOccurrenceRemoved(member, key)) memberChanged = true;
 
-    const nowIso = new Date().toISOString();
-    const history = Array.isArray(task.manualHistory) ? task.manualHistory : [];
-    let hasEntry = false;
-    history.forEach(entry => {
-      if (isSameDay(entry?.dateISO)){
-        hasEntry = true;
-        if (entry.status !== "removed"){ entry.status = "removed"; changed = true; }
-        if (!entry.recordedAtISO) entry.recordedAtISO = nowIso;
-      }
-    });
-    if (!hasEntry){
-      history.push({ dateISO: key, status: "removed", recordedAtISO: nowIso, source: "calendar" });
-      changed = true;
-    }
-    task.manualHistory = history;
-
-    const pruneSingle = (obj)=>{
-      if (!obj || typeof obj !== "object") return false;
-      let mutated = false;
-      Object.keys(obj).forEach(k => {
-        if (isSameDay(k)){
-          delete obj[k];
-          mutated = true;
+      const nowIso = new Date().toISOString();
+      const history = Array.isArray(member.manualHistory) ? member.manualHistory : [];
+      let hasEntry = false;
+      history.forEach(entry => {
+        if (isSameDay(entry?.dateISO)){
+          hasEntry = true;
+          if (entry.status !== "removed"){ entry.status = "removed"; memberChanged = true; }
+          if (!entry.recordedAtISO) entry.recordedAtISO = nowIso;
         }
       });
-      return mutated;
+      if (!hasEntry){
+        history.push({ dateISO: key, status: "removed", recordedAtISO: nowIso, source: "calendar" });
+        memberChanged = true;
+      }
+      member.manualHistory = history;
+
+      const pruneSingle = (obj)=>{
+        if (!obj || typeof obj !== "object") return false;
+        let mutated = false;
+        Object.keys(obj).forEach(k => {
+          if (isSameDay(k)){
+            delete obj[k];
+            mutated = true;
+          }
+        });
+        return mutated;
+      };
+
+      if (isSameDay(member.calendarDateISO)){
+        member.calendarDateISO = null;
+        memberChanged = true;
+      }
+      if (Array.isArray(member.completedDates)){
+        const idx = member.completedDates.findIndex(v => isSameDay(v));
+        if (idx >= 0){
+          member.completedDates.splice(idx,1);
+          memberChanged = true;
+        }
+      }
+      if (pruneSingle(member.occurrenceNotes)) memberChanged = true;
+      if (pruneSingle(member.occurrenceHours)) memberChanged = true;
+      return memberChanged;
     };
 
-    if (isSameDay(task.calendarDateISO)){
-      task.calendarDateISO = null;
-      changed = true;
-    }
-    if (Array.isArray(task.completedDates)){
-      const idx = task.completedDates.findIndex(v => isSameDay(v));
-      if (idx >= 0){
-        task.completedDates.splice(idx,1);
-        changed = true;
-      }
-    }
-    if (pruneSingle(task.occurrenceNotes)) changed = true;
-    if (pruneSingle(task.occurrenceHours)) changed = true;
-
+    visitTaskFamily(task, member => {
+      if (applySingleRemoval(member)) changed = true;
+    });
     return changed;
   }
 
