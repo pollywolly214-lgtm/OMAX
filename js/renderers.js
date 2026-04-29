@@ -12341,28 +12341,81 @@ function renderCosts(){
         });
       }
       const openFixerBtn = modal.querySelector("[data-receipt-open-fixer]");
-      openFixerBtn?.addEventListener("click", ()=>{
+      const buildUnlinkedGroups = ()=>{
         const missing = [];
         (window.receiptTrackerWeeks || []).forEach(week => {
-          normalizeRows(week?.rows).forEach(row => {
+          normalizeRows(week?.rows).forEach((row,rowIndex) => {
             const pn = String(row.partNumber || "").trim();
             const linked = pn ? findInventoryByPartNumber(pn) : null;
-            if (!linked){ missing.push(row); }
+            const explicitId = String(row.inventoryItemId || "").trim();
+            if (!linked && !explicitId){ missing.push({ ...row, weekKey: String(week?.key||""), rowIndex }); }
           });
         });
-        const grouped = new Map();
+        const map = new Map();
         missing.forEach(row => {
-          const pn = String(row.partNumber || "").trim() || "(No part number)";
-          if (!grouped.has(pn)) grouped.set(pn, []);
-          grouped.get(pn).push(row);
+          const pn = String(row.partNumber || "").trim();
+          const key = pn ? `pn:${pn.toLowerCase()}` : `row:${row.weekKey}:${row.rowIndex}`;
+          if (!map.has(key)) map.set(key, { key, partNumber: pn, rows: [] });
+          map.get(key).rows.push(row);
         });
-        const options = Array.from(grouped.keys());
-        if (!options.length){ toast("No unlinked purchase-history rows found."); return; }
-        const choice = prompt(`Unlinked groups:
-${options.join("\n")}\n\nEnter a part number to repair:`, options[0]);
-        if (!choice) return;
-        openPurchaseLinkingWorkflow(String(choice).trim() === "(No part number)" ? "" : choice.trim());
-      });
+        return Array.from(map.values()).map(group => {
+          const names = Array.from(new Set(group.rows.map(r => String(r.purchased || "").trim()).filter(Boolean)));
+          const qty = group.rows.reduce((sum,r)=>sum+(Number(r.qty)||0),0);
+          return { ...group, names, qty, count: group.rows.length };
+        });
+      };
+      const applyGroupLink = (group, inv)=>{
+        if (!group || !inv) return;
+        let canonicalName = inv.name || "";
+        if (group.names.length > 1){
+          const picked = prompt(`Name standardization required for part number ${group.partNumber || "(none)"}. Choose final name:
+${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
+          canonicalName = picked.trim();
+          if (!canonicalName) return;
+          const proceed = confirm(`All purchase history records in this part-number group will be renamed to "${canonicalName}". Continue?`);
+          if (!proceed) return;
+        }
+        (window.receiptTrackerWeeks || []).forEach(week => {
+          if (!Array.isArray(week?.rows)) return;
+          week.rows = week.rows.map((row, idx) => {
+            const samePn = group.partNumber && String(row?.partNumber||"").trim().toLowerCase() === String(group.partNumber).toLowerCase();
+            const sameRow = !group.partNumber && group.rows.some(x => x.weekKey===week.key && Number(x.rowIndex)===idx);
+            if (!samePn && !sameRow) return row;
+            return { ...row, inventoryItemId: inv.id, isInventoryLinked: true, purchased: canonicalName || inv.name || row.purchased || "", pnSnapshot: inv.pn || row.partNumber || "", inventoryNameSnapshot: inv.name || "", linkedAtISO: new Date().toISOString(), linkSource: "manual_part_number_group" };
+          });
+        });
+        if (typeof appendSystemLog === 'function') appendSystemLog({ eventType:'purchase_inventory_link_repaired', sourceArea:'orderRequests', targetArea:'inventory', partNumber: group.partNumber || '', affectedCount: group.count, inventoryId: inv.id, finalName: canonicalName || inv.name || '', qtyDelta:0, status:'historical_link_repaired_no_qty_change', message:'Inventory quantity was not changed because this was a historical link repair.' });
+        persistReceiptState();
+        saveWeekRowsFromDom();
+        renderWeekRows(); renderRangeTable(); renderCentralSpendRows();
+      };
+      const openFixerWidget = ()=>{
+        const groups = buildUnlinkedGroups();
+        const inventoryRows = Array.isArray(inventory) ? inventory : [];
+        let selectedGroupKey = "";
+        let selectedInventoryId = "";
+        let searchTerm = "";
+        const shell = document.createElement('div');
+        shell.className = 'cost-receipt-modal';
+        shell.style.zIndex = '10002';
+        const redraw = ()=>{
+          const filteredInv = inventoryRows.filter(item => `${item?.name||""} ${item?.pn||""} ${item?.link||""}`.toLowerCase().includes(searchTerm.toLowerCase()));
+          shell.innerHTML = `<div class="cost-receipt-backdrop" data-close="1"></div><div class="cost-receipt-card" style="max-width:1200px"><div class="cost-receipt-card-body"><h3>Repair Purchase-to-Inventory Links</h3><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><h4>Unlinked purchase groups</h4><table class="cost-table"><thead><tr><th>Select</th><th>Part #</th><th>Names</th><th>Rows</th><th>Total Qty</th></tr></thead><tbody>${groups.map(g=>`<tr><td><input type='radio' name='g' value='${escapeHtml(g.key)}' ${selectedGroupKey===g.key?'checked':''}></td><td>${escapeHtml(g.partNumber||'—')}</td><td>${escapeHtml(g.names.join(', ')||'—')}</td><td>${g.count}</td><td>${g.qty}</td></tr>`).join('')||"<tr><td colspan='5'>No unlinked groups.</td></tr>"}</tbody></table></div><div><h4>Inventory items</h4><input type='search' placeholder='Search inventory...' value='${escapeHtml(searchTerm)}' data-inv-search><table class='cost-table'><thead><tr><th>Select</th><th>Name</th><th>Part #</th><th>Qty</th></tr></thead><tbody>${filteredInv.map(item=>`<tr><td><input type='radio' name='i' value='${escapeHtml(String(item.id||""))}' ${String(item.id)===selectedInventoryId?'checked':''}></td><td>${escapeHtml(item.name||'')}</td><td>${escapeHtml(item.pn||'—')}</td><td>${escapeHtml(String((Number(item.qtyNew)||0)+(Number(item.qtyOld)||0)))}</td></tr>`).join('')||"<tr><td colspan='4'>No inventory matches.</td></tr>"}</tbody></table></div></div><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn secondary' data-close='1'>Close</button><button class='btn primary' data-link='1'>Link Selected</button></div></div></div>`;
+          shell.querySelectorAll("input[name='g']").forEach(el=>el.addEventListener('change',()=>{selectedGroupKey=el.value;}));
+          shell.querySelectorAll("input[name='i']").forEach(el=>el.addEventListener('change',()=>{selectedInventoryId=el.value;}));
+          const sInput = shell.querySelector('[data-inv-search]');
+          sInput?.addEventListener('input',()=>{searchTerm=sInput.value||'';redraw();});
+          shell.querySelectorAll('[data-close="1"]').forEach(btn=>btn.addEventListener('click',()=>shell.remove()));
+          shell.querySelector('[data-link="1"]')?.addEventListener('click',()=>{
+            const g = groups.find(x=>x.key===selectedGroupKey); const inv = inventoryRows.find(x=>String(x?.id||'')===String(selectedInventoryId||''));
+            if (!g || !inv){ toast('Select one purchase group and one inventory item.'); return; }
+            applyGroupLink(g, inv); redraw();
+          });
+        };
+        redraw();
+        document.body.appendChild(shell);
+      };
+      openFixerBtn?.addEventListener("click", openFixerWidget);
       if (exportRangeBtn instanceof HTMLElement){
         exportRangeBtn.addEventListener("click", ()=>{
           const { start, end } = getRangeWindow(activeRange);
