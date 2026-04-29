@@ -10989,7 +10989,9 @@ function renderCosts(){
     const renderDataCenterLogRows = ()=>{
       if (!logRowsHost) return;
       const logs = Array.isArray(window.syncProcessLog)?window.syncProcessLog:[];
-      logRowsHost.innerHTML = logs.length?logs.slice(0,100).map(entry=>`<tr><td>${escapeHtml(String(entry?.atISO||entry?.createdAt||'—'))}</td><td>${escapeHtml(String(entry?.eventType||entry?.type||'—'))}</td><td>${escapeHtml(String(entry?.status||'—'))}</td><td>${escapeHtml(String(entry?.sourceArea||'—'))}</td><td>${escapeHtml(String(entry?.targetArea||'—'))}</td><td>${escapeHtml(String(entry?.partNumber||'—'))}</td><td>${escapeHtml(String(entry?.qtyDelta!=null?entry.qtyDelta:'—'))}</td><td>${escapeHtml(String(entry?.message||'—'))}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No system wiring or save log entries yet.</td></tr>`;
+      const saveLogs = Array.isArray(window.maintenanceCostLog) ? window.maintenanceCostLog.slice(0, 100).map(entry => ({ atISO: entry?.createdAt, eventType: entry?.type || "save_event", status: "saved", sourceArea: "maintenanceCostLog", targetArea: "", partNumber: entry?.partNumber || "", qtyDelta: "", message: entry?.notes || entry?.message || "Saved cost/history entry." })) : [];
+      const merged = [...logs, ...saveLogs];
+      logRowsHost.innerHTML = merged.length?merged.slice(0,100).map(entry=>`<tr><td>${escapeHtml(String(entry?.atISO||entry?.createdAt||'—'))}</td><td>${escapeHtml(String(entry?.eventType||entry?.type||'—'))}</td><td>${escapeHtml(String(entry?.status||'—'))}</td><td>${escapeHtml(String(entry?.sourceArea||'—'))}</td><td>${escapeHtml(String(entry?.targetArea||'—'))}</td><td>${escapeHtml(String(entry?.partNumber||'—'))}</td><td>${escapeHtml(String(entry?.qtyDelta!=null?entry.qtyDelta:'—'))}</td><td>${escapeHtml(String(entry?.message||'—'))}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No system wiring or save log entries yet.</td></tr>`;
     };
     renderDataCenterInventoryRows();
     renderDataCenterLogRows();
@@ -12100,7 +12102,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           <td><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
           <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
-          <td style="min-width:180px"><select data-col="inventoryItemId" style="max-width:260px;white-space:normal">${inventorySelectOptionsMarkup("")}</select></td>
+          <td style="width:160px;max-width:160px"><select data-col="inventoryItemId" style="width:100%;max-width:160px;text-overflow:ellipsis">${inventorySelectOptionsMarkup("")}</select></td>
           <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00" style="min-width:86px"></td>
           <td><input type="number" min="0" step="0.01" data-col="tax" placeholder="0.00" style="min-width:72px"></td>
           <td data-col="total">${formatUsd(0)}</td>`;
@@ -12141,7 +12143,7 @@ const appendEmptyRow = (focusFirst = false)=>{
             <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
             <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
-            <td style="min-width:180px"><select data-col="inventoryItemId" style="max-width:260px;white-space:normal">${inventorySelectOptionsMarkup(row.inventoryItemId || "")}</select></td>
+            <td style="width:160px;max-width:160px"><select data-col="inventoryItemId" style="width:100%;max-width:160px;text-overflow:ellipsis">${inventorySelectOptionsMarkup(row.inventoryItemId || "")}</select></td>
             <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}" style="min-width:86px"></td>
             <td><input type="number" min="0" step="0.01" data-col="tax" value="${escapeHtml(String(row.tax || 0))}" style="min-width:72px"></td>
             <td data-col="total">${formatUsd(computeRowTotal(row))}</td>
@@ -12469,12 +12471,20 @@ ${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
         const redraw = ()=>{
           const groups = buildUnlinkedGroups();
           const repaired = linkedRows();
+          const prevFocus = document.activeElement instanceof HTMLElement && document.activeElement.matches('[data-inv-search]') ? true : false;
           const filteredInv = inventoryRows.filter(item => `${item?.name||""} ${item?.pn||""} ${item?.link||""}`.toLowerCase().includes(searchTerm.toLowerCase()));
           shell.innerHTML = `<div class="cost-receipt-backdrop" data-close="1"></div><div class="cost-receipt-card" style="max-width:1200px;color:#000;background:#fff"><div class="cost-receipt-card-body"><h3>Repair Purchase-to-Inventory Links</h3><p class="small muted">How to use: select an unlinked purchase group, pick an inventory item, then click <strong>Link Selected</strong>. Linked rows appear under the <strong>Repaired</strong> tab where you can revisit prior fixes.</p><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div style="display:flex;gap:6px"><button class="btn ${activeTab==='unlinked'?'primary':'secondary'}" data-fixer-tab="unlinked">Unlinked (${groups.length})</button><button class="btn ${activeTab==='repaired'?'primary':'secondary'}" data-fixer-tab="repaired">Repaired (${repaired.length})</button></div><div style='display:flex;gap:8px;align-items:center'><input type='search' placeholder='Search inventory...' value='${escapeHtml(searchTerm)}' data-inv-search><button class='btn primary' data-link='1'>Link Selected</button></div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px" ${activeTab==='repaired'?'hidden':''}><div><h4>Unlinked purchase groups</h4><table class="cost-table"><thead><tr><th>Select</th><th>Part #</th><th>Names</th><th>Rows</th><th>Total Qty</th></tr></thead><tbody>${groups.map(g=>`<tr><td><input type='radio' name='g' value='${escapeHtml(g.key)}' ${selectedGroupKey===g.key?'checked':''}></td><td>${escapeHtml(g.partNumber||'—')}</td><td>${escapeHtml(g.names.join(', ')||'—')}</td><td>${g.count}</td><td>${g.qty}</td></tr>`).join('')||"<tr><td colspan='5'>No unlinked groups.</td></tr>"}</tbody></table></div><div><h4>Inventory items</h4><table class='cost-table'><thead><tr><th>Select</th><th>Name</th><th>Part #</th><th>Qty</th><th>Edit</th></tr></thead><tbody>${filteredInv.map(item=>`<tr><td><input type='radio' name='i' value='${escapeHtml(String(item.id||""))}' ${String(item.id)===selectedInventoryId?'checked':''}></td><td>${escapeHtml(item.name||'')}</td><td>${escapeHtml(item.pn||'—')}</td><td>${escapeHtml(String((Number(item.qtyNew)||0)+(Number(item.qtyOld)||0)))}</td><td><button class='btn secondary' data-go-inventory='1'>Inventory settings</button></td></tr>`).join('')||"<tr><td colspan='5'>No inventory matches.</td></tr>"}</tbody></table></div></div><div style="margin-top:10px" ${activeTab==='repaired'?'':'hidden'}><h4>Repaired links</h4><table class='cost-table'><thead><tr><th>Date</th><th>Name</th><th>Part #</th><th>Week</th><th>Edit</th></tr></thead><tbody>${repaired.map(row=>`<tr><td>${escapeHtml(String(row.linkedAtISO||row.date||'—'))}</td><td>${escapeHtml(String(row.purchased||'—'))}</td><td>${escapeHtml(String(row.partNumber||'—'))}</td><td>${escapeHtml(String(row.weekKey||'—'))}</td><td><button class='btn secondary' data-edit-fix='${escapeHtml(String(row.weekKey||''))}|${escapeHtml(String(row.rowIndex))}'>Open row</button></td></tr>`).join('')||"<tr><td colspan='5'>No repaired rows yet.</td></tr>"}</tbody></table></div><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn secondary' data-close='1'>Close</button></div></div></div>`;
           shell.querySelectorAll("input[name='g']").forEach(el=>el.addEventListener('change',()=>{selectedGroupKey=el.value;}));
           shell.querySelectorAll("input[name='i']").forEach(el=>el.addEventListener('change',()=>{selectedInventoryId=el.value;}));
+          shell.querySelectorAll("tbody tr").forEach(tr => tr.addEventListener("click", (event)=>{
+            const target = event.target;
+            if (target instanceof HTMLElement && (target.closest("button") || target.closest("input"))) return;
+            const radio = tr.querySelector("input[type='radio']");
+            if (radio instanceof HTMLInputElement){ radio.checked = true; radio.dispatchEvent(new Event("change", { bubbles: true })); }
+          }));
           const sInput = shell.querySelector('[data-inv-search]');
           sInput?.addEventListener('input',()=>{searchTerm=sInput.value||'';redraw();});
+          if (prevFocus && sInput instanceof HTMLInputElement){ sInput.focus(); sInput.setSelectionRange(sInput.value.length, sInput.value.length); }
           shell.querySelectorAll('[data-fixer-tab]').forEach(btn => btn.addEventListener('click', ()=>{ activeTab = String(btn.getAttribute('data-fixer-tab') || 'unlinked'); redraw(); }));
           shell.querySelectorAll('[data-go-inventory="1"]').forEach(btn => btn.addEventListener('click', ()=>{
             shell.remove();

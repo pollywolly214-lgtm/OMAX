@@ -1961,7 +1961,7 @@ function viewCosts(model){
           <p class="small muted" data-receipt-week-range>—</p>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-week-table">
-              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th>Inventory link</th><th>Shipping</th><th>Tax</th><th>Total</th></tr></thead>
+              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th style="width:160px;max-width:160px">Inventory link</th><th>Shipping</th><th>Tax</th><th>Total</th></tr></thead>
               <tbody data-receipt-week-rows></tbody>
               <tfoot><tr><th colspan="8">Subtotal</th><th data-receipt-week-subtotal>$0.00</th></tr></tfoot>
             </table>
