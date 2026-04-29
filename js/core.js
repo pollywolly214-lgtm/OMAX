@@ -3018,6 +3018,18 @@ function saveCloudDebounced(){
   } catch (err) {
     console.warn("History capture before save failed:", err);
   }
+  try {
+    if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
+    window.syncProcessLog.unshift({
+      atISO: new Date().toISOString(),
+      eventType: "save_requested",
+      status: "queued",
+      sourceArea: "app",
+      targetArea: "cloud",
+      message: "saveCloudDebounced invoked"
+    });
+    if (window.syncProcessLog.length > 500) window.syncProcessLog.length = 500;
+  } catch (_err) {}
   saveCloudInternal();
 }
 function saveCloudNow(){
@@ -3032,6 +3044,18 @@ function saveCloudNow(){
   } catch (err) {
     console.warn("History capture before save failed:", err);
   }
+  try {
+    if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
+    window.syncProcessLog.unshift({
+      atISO: new Date().toISOString(),
+      eventType: "save_requested",
+      status: "immediate",
+      sourceArea: "app",
+      targetArea: "cloud",
+      message: "saveCloudNow invoked"
+    });
+    if (window.syncProcessLog.length > 500) window.syncProcessLog.length = 500;
+  } catch (_err) {}
   if (typeof saveCloudInternal.flush === "function"){
     const flushed = saveCloudInternal.flush();
     if (!flushed){

@@ -10983,7 +10983,10 @@ function renderCosts(){
       if (!invRowsHost) return;
       const folders = Array.isArray(window.inventoryFolders)?window.inventoryFolders:[];
       const folderName=(id)=> (folders.find(f=>String(f?.id||'')===String(id||''))?.name)||'—';
-      const invRows = Array.isArray(window.inventory) ? window.inventory : (Array.isArray(inventory) ? inventory : []);
+      let invRows = Array.isArray(window.inventory) ? window.inventory : (Array.isArray(inventory) ? inventory : []);
+      if ((!Array.isArray(invRows) || !invRows.length) && Array.isArray(window.inventoryFolders)){
+        invRows = window.inventoryFolders.flatMap(folder => Array.isArray(folder?.items) ? folder.items.map(item => ({ ...item, folderId: folder.id })) : []);
+      }
       invRowsHost.innerHTML = invRows.length?invRows.map(item=>`<tr><td>${escapeHtml(item?.name||'')}</td><td>${escapeHtml(item?.pn||'—')}</td><td>${escapeHtml(String(Number(item?.qtyNew)||0))}</td><td>${escapeHtml(String(Number(item?.qtyOld)||0))}</td><td>${escapeHtml(item?.unit||'pcs')}</td><td>${escapeHtml(item?.price!=null?String(item.price):'—')}</td><td>${escapeHtml(folderName(item?.folderId))}</td><td style="white-space:normal;word-break:break-word">${escapeHtml(item?.link||'—')}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No inventory rows available.</td></tr>`;
     };
     const logRowsHost = modal instanceof HTMLElement ? modal.querySelector('[data-dc-log-rows]') : null;
@@ -12441,7 +12444,7 @@ ${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
             const samePn = group.partNumber && String(row?.partNumber||"").trim().toLowerCase() === String(group.partNumber).toLowerCase();
             const sameRow = !group.partNumber && group.rows.some(x => x.weekKey===week.key && Number(x.rowIndex)===idx);
             if (!samePn && !sameRow) return row;
-            return { ...row, inventoryItemId: inv.id, isInventoryLinked: true, purchased: canonicalName || inv.name || row.purchased || "", pnSnapshot: inv.pn || row.partNumber || "", inventoryNameSnapshot: inv.name || "", linkedAtISO: new Date().toISOString(), linkSource: "manual_part_number_group" };
+            return { ...row, inventoryItemId: inv.id, isInventoryLinked: true, purchased: canonicalName || inv.name || row.purchased || "", partNumber: inv.pn || row.partNumber || "", pnSnapshot: inv.pn || row.partNumber || "", inventoryNameSnapshot: inv.name || "", linkedAtISO: new Date().toISOString(), linkSource: "manual_part_number_group" };
           });
         });
         if (typeof appendSystemLog === 'function') appendSystemLog({ eventType:'purchase_inventory_link_repaired', sourceArea:'orderRequests', targetArea:'inventory', partNumber: group.partNumber || '', affectedCount: group.count, inventoryId: inv.id, finalName: canonicalName || inv.name || '', qtyDelta:0, status:'historical_link_repaired_no_qty_change', message:'Inventory quantity was not changed because this was a historical link repair.' });
