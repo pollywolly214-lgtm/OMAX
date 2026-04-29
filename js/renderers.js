@@ -21015,6 +21015,8 @@ function computeOrderRequestModel(){
     subtitle: draft.items.length ? `${draft.items.length} item${draft.items.length===1?"":"s"} ready for approval` : "Add parts from inventory to start a request.",
     items: draft.items.map(item => ({
       id: item.id,
+      inventoryId: item.inventoryId != null ? String(item.inventoryId) : null,
+      suggestedInventoryId: item.suggestedInventoryId != null ? String(item.suggestedInventoryId) : null,
       name: item.name || "",
       pn: item.pn || "",
       link: item.link || "",
@@ -21026,7 +21028,9 @@ function computeOrderRequestModel(){
     total: formatOrderCurrency(requestedTotal),
     selectionTotal: selectedTotal > 0 ? formatOrderCurrency(selectedTotal) : null,
     canApprove: draft.items.length > 0,
-    downloadLabel: "Download request (.csv)"
+    unlinkedCount: draft.items.filter(item => !item?.inventoryId).length,
+    downloadLabel: "Download request (.csv)",
+    unlinkedGroups: collectUnlinkedOrderGroups()
   };
 
   const historyRaw = Array.isArray(orderRequests)
@@ -21108,6 +21112,97 @@ function computeOrderRequestModel(){
   return { tab, active: activeModel, history, summary };
 }
 
+function collectUnlinkedOrderGroups(){
+  const groups = new Map();
+  (Array.isArray(orderRequests) ? orderRequests : []).forEach(req => {
+    const reqId = String(req?.id || "");
+    const reqCode = String(req?.code || reqId || "");
+    (Array.isArray(req?.items) ? req.items : []).forEach(item => {
+      if (!item || item.inventoryId) return;
+      const pn = String(item.pn || "").trim();
+      const key = pn ? `pn:${pn.toLowerCase()}` : `item:${reqId}:${String(item.id || "")}`;
+      if (!groups.has(key)){
+        groups.set(key, { key, partNumber: pn || "", items: [], names: new Set() });
+      }
+      const row = groups.get(key);
+      row.items.push({
+        requestId: reqId,
+        requestCode: reqCode,
+        requestDate: req?.createdAt || null,
+        itemId: String(item.id || ""),
+        name: String(item.name || ""),
+        pn: pn || "",
+        qty: Number(item.qty) || 0,
+        price: item.price == null ? null : Number(item.price),
+        status: String(item.status || "pending"),
+        link: String(item.link || "")
+      });
+      if (item.name) row.names.add(String(item.name));
+    });
+  });
+  return Array.from(groups.values()).map(group => ({ ...group, names: Array.from(group.names) }));
+}
+
+function createInventoryItemFromPurchaseLink(input){
+  const baseItem = {
+    id: genId("inventory"),
+    name: input.name,
+    qtyNew: 0,
+    qtyOld: 0,
+    unit: input.unit || "pcs",
+    pn: input.pn || "",
+    link: input.link || "",
+    price: input.price == null ? null : Number(input.price),
+    note: "Created from purchase-history link repair",
+    folderId: input.folderId || null
+  };
+  const item = typeof normalizeInventoryItem === "function" ? normalizeInventoryItem(baseItem) : { ...baseItem, qty: 0 };
+  inventory.unshift(item);
+  window.inventory = inventory;
+  return item;
+}
+
+function linkPurchaseGroupToInventory(group, inventoryItem, options = {}){
+  if (!group || !inventoryItem) return 0;
+  const nowIso = new Date().toISOString();
+  const actor = (FB && FB.user && (FB.user.email || FB.user.uid)) ? (FB.user.email || FB.user.uid) : "system";
+  const finalName = options.finalName || inventoryItem.name || "";
+  let affected = 0;
+  const affectedIds = [];
+  group.items.forEach(meta => {
+    const req = orderRequests.find(r => r && String(r.id) === String(meta.requestId));
+    if (!req || !Array.isArray(req.items)) return;
+    const line = req.items.find(it => it && String(it.id) === String(meta.itemId));
+    if (!line) return;
+    line.inventoryId = inventoryItem.id;
+    line.isInventoryLinked = true;
+    line.inventoryNameSnapshot = inventoryItem.name || finalName || "";
+    line.pnSnapshot = inventoryItem.pn || line.pn || "";
+    line.linkSnapshot = inventoryItem.link || line.link || "";
+    line.unitCostSnapshot = inventoryItem.price != null ? Number(inventoryItem.price) : (line.price != null ? Number(line.price) : null);
+    line.unitSnapshot = inventoryItem.unit || line.unit || "pcs";
+    line.linkedAtISO = nowIso;
+    line.linkedBy = actor;
+    line.linkSource = "manual_part_number_group";
+    line.name = finalName || line.name;
+    affected += 1;
+    affectedIds.push(String(line.id || ""));
+  });
+  appendSyncProcessLog({
+    sourceArea: "orderRequests",
+    eventType: "purchase_inventory_link_repaired",
+    partNumber: group.partNumber || "",
+    affectedOrderItemIds: affectedIds,
+    affectedCount: affected,
+    inventoryId: inventoryItem.id,
+    finalName,
+    qtyDelta: 0,
+    status: "historical_link_repaired_no_qty_change",
+    message: "Historical purchase links repaired. Inventory quantity was not changed."
+  });
+  return affected;
+}
+
 function updateOrderTotalsUI(card, request){
   if (!card || !request) return;
   const total = request.items.reduce((sum, item)=> sum + orderItemLineTotal(item), 0);
@@ -21140,6 +21235,12 @@ function addInventoryItemToOrder(inventoryId){
   const newItem = {
     id: genId("order_item"),
     inventoryId,
+    isInventoryLinked: true,
+    inventoryNameSnapshot: item.name || "",
+    pnSnapshot: item.pn || "",
+    linkSnapshot: item.link || "",
+    unitCostSnapshot: item.price != null ? Number(item.price) : null,
+    unitSnapshot: item.unit || "",
     name: item.name || "",
     pn: item.pn || "",
     link: item.link || "",
@@ -21152,6 +21253,32 @@ function addInventoryItemToOrder(inventoryId){
   saveCloudDebounced();
   toast("Added to order request");
   if (location.hash === "#/order-request" || location.hash === "#order-request"){ renderOrderRequest(); }
+}
+
+function suggestInventoryMatchForOrderLine(line){
+  if (!line || line.inventoryId) return null;
+  const pn = String(line.pn || "").trim().toLowerCase();
+  const name = String(line.name || "").trim().toLowerCase();
+  const link = String(line.link || "").trim();
+  let match = null;
+  let reason = "";
+  let confidence = 0;
+  if (pn){
+    const byPn = inventory.filter(item => String(item?.pn || "").trim().toLowerCase() === pn);
+    if (byPn.length === 1){ match = byPn[0]; reason = "pn_exact"; confidence = 0.95; }
+  }
+  if (!match && name){
+    const byName = inventory.filter(item => String(item?.name || "").trim().toLowerCase() === name);
+    if (byName.length === 1){ match = byName[0]; reason = "name_exact"; confidence = 0.8; }
+  }
+  if (!match && link){
+    const byLink = inventory.filter(item => String(item?.link || "").trim() === link);
+    if (byLink.length === 1){ match = byLink[0]; reason = "link_exact"; confidence = 0.85; }
+  }
+  if (!match) return null;
+  const suggestion = { suggestedInventoryId: match.id, suggestedMatchReason: reason, suggestedMatchConfidence: confidence };
+  console.log("[PurchaseInventoryLink:SUGGESTED]", { orderItemId: line.id, ...suggestion });
+  return suggestion;
 }
 
 function findTasksLinkedToInventoryItem(item){
@@ -21430,21 +21557,161 @@ function downloadOrderRequestCSV(request){
   }, 0);
 }
 
-function applyInventoryForApprovedItems(items){
+function getDataSafetyFlagsRuntime(){
+  const defaults = {
+    ENABLE_INVENTORY_TRANSACTIONS: false,
+    ENABLE_INVENTORY_TRANSACTIONS_DRY_RUN: true,
+    ENABLE_SYNC_PROCESS_LOG: true,
+    ENABLE_SYNC_PROCESS_LOG_DRY_RUN: true,
+    ENABLE_MAINTENANCE_CONSUMES_INVENTORY: false,
+    ENABLE_PREVIEW_WRITE_TO_PROD: false
+  };
+  const runtime = (typeof window !== "undefined" && window.DATA_SAFETY_FLAGS && typeof window.DATA_SAFETY_FLAGS === "object")
+    ? window.DATA_SAFETY_FLAGS
+    : {};
+  return { ...defaults, ...runtime };
+}
+
+function appendSyncProcessLog(entry){
+  const flags = getDataSafetyFlagsRuntime();
+  if (!flags.ENABLE_SYNC_PROCESS_LOG) return false;
+  if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
+  const payload = {
+    id: genId("sync_process"),
+    eventType: "",
+    sourceArea: "",
+    sourceId: null,
+    sourceItemId: null,
+    targetArea: "",
+    targetId: null,
+    inventoryId: null,
+    taskId: null,
+    orderId: null,
+    qtyDelta: null,
+    fieldChanges: {},
+    beforeSnapshot: null,
+    afterSnapshot: null,
+    status: "info",
+    dryRun: !!flags.ENABLE_SYNC_PROCESS_LOG_DRY_RUN,
+    message: "",
+    error: null,
+    createdAtISO: new Date().toISOString(),
+    actor: "system",
+    ...(entry && typeof entry === "object" ? entry : {})
+  };
+  if (payload.dryRun){
+    console.log("[SyncProcessLog:DRY_RUN]", payload);
+    return false;
+  }
+  window.syncProcessLog.push(payload);
+  console.log("[SyncProcessLog]", payload);
+  return true;
+}
+
+function hasInventoryTransactionIdempotencyKey(idempotencyKey){
+  if (!idempotencyKey || !Array.isArray(window.inventoryTransactions)) return false;
+  return window.inventoryTransactions.some(tx => tx && String(tx.idempotencyKey || "") === String(idempotencyKey));
+}
+
+function createInventoryTransactionCandidate(input = {}){
+  const type = String(input.type || "");
+  const supported = new Set(["purchase_receive", "maintenance_consume", "manual_adjust", "correction", "reversal"]);
+  if (!supported.has(type)) return null;
+  return {
+    id: genId("inventory_tx"),
+    inventoryId: input.inventoryId != null ? String(input.inventoryId) : null,
+    type,
+    qtyDelta: Number(input.qtyDelta) || 0,
+    unitCostSnapshot: input.unitCostSnapshot != null ? Number(input.unitCostSnapshot) : null,
+    sourceType: input.sourceType || null,
+    sourceId: input.sourceId || null,
+    sourceItemId: input.sourceItemId || null,
+    dateISO: input.dateISO || (typeof ymd === "function" ? ymd(new Date()) : new Date().toISOString().slice(0, 10)),
+    createdAtISO: new Date().toISOString(),
+    actor: input.actor || "system",
+    notes: input.notes || "",
+    reversalOfTransactionId: input.reversalOfTransactionId || null,
+    idempotencyKey: input.idempotencyKey || null,
+    legacyApplied: !!input.legacyApplied,
+    dryRun: !!input.dryRun
+  };
+}
+
+function recordInventoryTransaction(candidate){
+  if (!candidate) return { created: false, reason: "missing_candidate" };
+  const flags = getDataSafetyFlagsRuntime();
+  if (!Array.isArray(window.inventoryTransactions)) window.inventoryTransactions = [];
+  if (candidate.idempotencyKey && hasInventoryTransactionIdempotencyKey(candidate.idempotencyKey)){
+    console.warn("[InventoryTx] Duplicate idempotency key prevented:", candidate.idempotencyKey);
+    appendSyncProcessLog({ eventType: "inventory_transaction_duplicate", targetArea: "inventoryTransactions", status: "skipped_duplicate", dryRun: true, message: "Duplicate idempotency key prevented." });
+    return { created: false, reason: "duplicate_idempotency" };
+  }
+  const txDryRun = !flags.ENABLE_INVENTORY_TRANSACTIONS || flags.ENABLE_INVENTORY_TRANSACTIONS_DRY_RUN;
+  const tx = { ...candidate, dryRun: txDryRun };
+  if (txDryRun){
+    console.log("[InventoryTx:DRY_RUN]", tx);
+    appendSyncProcessLog({ eventType: "inventory_transaction_candidate", targetArea: "inventoryTransactions", inventoryId: tx.inventoryId || null, qtyDelta: tx.qtyDelta, status: "dry_run", dryRun: true, message: `Transaction candidate: ${tx.type}` });
+    return { created: false, reason: "dry_run", tx };
+  }
+  window.inventoryTransactions.push(tx);
+  console.log("[InventoryTx]", tx);
+  appendSyncProcessLog({ eventType: "inventory_transaction_created", targetArea: "inventoryTransactions", inventoryId: tx.inventoryId || null, qtyDelta: tx.qtyDelta, status: "created", dryRun: false, message: `Transaction created: ${tx.type}` });
+  return { created: true, tx };
+}
+
+function applyInventoryForApprovedItems(items, options = {}){
   if (!Array.isArray(items)) return;
+  const orderRequestId = options.orderRequestId != null ? String(options.orderRequestId) : "";
   items.forEach(item => {
     if (!item) return;
-    if (!item.inventoryId) return;
+    if (!item.inventoryId){
+      console.log("[PurchaseInventoryLink:UNLINKED]", { orderRequestId, orderItemId: item.id, name: item.name || "", pn: item.pn || "" });
+      const suggestion = suggestInventoryMatchForOrderLine(item);
+      appendSyncProcessLog({
+        eventType: "order_approval_inventory_skipped",
+        sourceArea: "orderRequests",
+        sourceId: orderRequestId || null,
+        sourceItemId: item.id != null ? String(item.id) : null,
+        targetArea: "inventory",
+        status: "skipped_unlinked_inventory",
+        dryRun: true,
+        message: suggestion ? "Unlinked line skipped; suggestion available." : "Unlinked line skipped."
+      });
+      if (suggestion){
+        item.suggestedInventoryId = suggestion.suggestedInventoryId;
+        item.suggestedMatchReason = suggestion.suggestedMatchReason;
+        item.suggestedMatchConfidence = suggestion.suggestedMatchConfidence;
+      }
+      return;
+    }
+    console.log("[PurchaseInventoryLink]", { orderRequestId, orderItemId: item.id, inventoryId: item.inventoryId });
     const inv = inventory.find(x => x.id === item.inventoryId);
     if (!inv) return;
     const qty = Number(item.qty);
     if (!Number.isFinite(qty) || qty <= 0) return;
+    const idempotencyKey = `purchase_receive:${orderRequestId || "unknown"}:${String(item.id || "line")}:${String(item.inventoryId || "")}`;
+    const txCandidate = createInventoryTransactionCandidate({
+      inventoryId: item.inventoryId,
+      type: "purchase_receive",
+      qtyDelta: qty,
+      unitCostSnapshot: item.price != null ? Number(item.price) : null,
+      sourceType: "orderRequests",
+      sourceId: orderRequestId || null,
+      sourceItemId: item.id != null ? String(item.id) : null,
+      idempotencyKey,
+      legacyApplied: true,
+      notes: "Order approval inventory increase"
+    });
+    const beforeQty = Number(inv.qty);
+    recordInventoryTransaction(txCandidate);
     const baseNew = Number(inv.qtyNew);
     const baseOld = Number(inv.qtyOld);
     const nextNew = (Number.isFinite(baseNew) ? baseNew : 0) + qty;
     inv.qtyNew = nextNew;
     inv.qtyOld = Number.isFinite(baseOld) && baseOld >= 0 ? baseOld : 0;
     inv.qty = nextNew + inv.qtyOld;
+    const afterQty = Number(inv.qty);
+    console.log("[InventoryTx:DRY_RUN] Legacy qty projection", { inventoryId: inv.id, beforeQty, qtyDelta: qty, afterQty });
     if (item.price != null && (inv.price == null || inv.price === "")){
       inv.price = Number(item.price) || inv.price;
     }
@@ -21458,7 +21725,7 @@ function finalizeOrderRequest(mode){
 
   if (mode === "approveAll"){
     draft.items.forEach(item => item.status = "approved");
-    applyInventoryForApprovedItems(draft.items);
+    applyInventoryForApprovedItems(draft.items, { orderRequestId: draft.id });
     draft.status = "approved";
     draft.resolvedAt = nowISO;
     draft.code = buildOrderRequestCode(nowISO, { excludeId: draft.id });
@@ -21488,7 +21755,7 @@ function finalizeOrderRequest(mode){
       }
     });
     if (approvedItems.length){
-      applyInventoryForApprovedItems(approvedItems);
+      applyInventoryForApprovedItems(approvedItems, { orderRequestId: draft.id });
     }
     draft.status = "partial";
     draft.resolvedAt = nowISO;
@@ -21515,6 +21782,90 @@ function renderOrderRequest(){
 
   const activeCard = content.querySelector(".order-card");
   const draft = ensureActiveOrderRequest();
+  const repairModal = content.querySelector("#orderRepairModal");
+  const repairGroupsBody = content.querySelector("[data-order-repair-groups]");
+  const repairDetailsBody = content.querySelector("[data-order-repair-details]");
+  const inventorySearchInput = content.querySelector("[data-order-repair-search]");
+  const inventoryResultsBody = content.querySelector("[data-order-repair-results]");
+  const closeRepairBtn = content.querySelector("[data-order-repair-close]");
+  const createInventoryBtn = content.querySelector("[data-order-repair-create-inventory]");
+  const applyExistingBtn = content.querySelector("[data-order-repair-link-existing]");
+  let selectedGroupKey = null;
+  let selectedInventoryId = null;
+  const getGroups = ()=> collectUnlinkedOrderGroups();
+  const findGroup = (key)=> getGroups().find(group => String(group.key) === String(key)) || null;
+  const findInventoryById = (id)=> inventory.find(item => item && String(item.id) === String(id)) || null;
+  const renderInventoryResults = ()=>{
+    if (!inventoryResultsBody) return;
+    const q = String(inventorySearchInput?.value || "").trim().toLowerCase();
+    const results = (Array.isArray(inventory) ? inventory : []).filter(item => {
+      if (!item) return false;
+      if (!q) return true;
+      const token = `${item.name || ""} ${item.pn || ""} ${item.link || ""}`.toLowerCase();
+      return token.includes(q);
+    });
+    inventoryResultsBody.innerHTML = results.map(item => `
+      <tr data-repair-result-row="${escapeHtml(String(item.id))}">
+        <td><input type="radio" name="repairInventoryPick" value="${escapeHtml(String(item.id))}" ${selectedInventoryId === String(item.id) ? "checked" : ""}></td>
+        <td>${escapeHtml(item.name || "Unnamed")}</td>
+        <td>${escapeHtml(item.pn || "—")}</td>
+        <td>${Number.isFinite(Number(item.qty)) ? Number(item.qty).toFixed(2) : "0"}</td>
+        <td>${escapeHtml(item.unit || "pcs")}</td>
+        <td>${escapeHtml(item.folderId || "—")}</td>
+        <td>${item.price != null ? `$${Number(item.price).toFixed(2)}` : "—"}</td>
+      </tr>
+    `).join("") || `<tr><td colspan="7" class="small muted">No inventory matches.</td></tr>`;
+  };
+  const renderRepairDetails = ()=>{
+    if (!repairDetailsBody) return;
+    const group = selectedGroupKey ? findGroup(selectedGroupKey) : null;
+    if (!group){ repairDetailsBody.innerHTML = `<tr><td colspan="7" class="small muted">Select a group to view records.</td></tr>`; return; }
+    repairDetailsBody.innerHTML = group.items.map(item => `
+      <tr>
+        <td>${escapeHtml(item.name || "Unnamed")}</td>
+        <td>${escapeHtml(formatOrderDate(item.requestDate) || "—")}</td>
+        <td>${escapeHtml(String(item.qty || 0))}</td>
+        <td>${item.price != null ? `$${Number(item.price).toFixed(2)}` : "—"}</td>
+        <td>${escapeHtml(item.status || "pending")}</td>
+        <td>${escapeHtml(item.requestCode || item.requestId || "—")}</td>
+        <td>${item.inventoryId ? "Linked" : "Unlinked"}</td>
+      </tr>
+    `).join("");
+  };
+  const renderRepairGroups = ()=>{
+    if (!repairGroupsBody) return;
+    const groups = getGroups();
+    repairGroupsBody.innerHTML = groups.map(group => {
+      const qtyTotal = group.items.reduce((sum, item)=> sum + (Number(item.qty) || 0), 0);
+      const dates = group.items.map(item => item.requestDate).filter(Boolean).sort();
+      const dateRange = dates.length ? `${formatOrderDate(dates[0])} → ${formatOrderDate(dates[dates.length-1])}` : "—";
+      const suggestion = group.items.length ? suggestInventoryMatchForOrderLine(group.items[0]) : null;
+      return `<tr data-repair-group-row="${escapeHtml(group.key)}" class="${selectedGroupKey===group.key ? "is-selected" : ""}">
+        <td>${escapeHtml(group.partNumber || "—")}</td>
+        <td>${escapeHtml(group.names.join(", ") || "Unnamed")}</td>
+        <td>${group.items.length}</td>
+        <td>${qtyTotal}</td>
+        <td>${escapeHtml(dateRange)}</td>
+        <td>${suggestion ? escapeHtml(`${suggestion.suggestedInventoryId} (${suggestion.suggestedMatchReason})`) : "—"}</td>
+        <td><button type="button" data-repair-select-group="${escapeHtml(group.key)}">View Records</button></td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="7" class="small muted">No unlinked purchase items found.</td></tr>`;
+    renderRepairDetails();
+  };
+  const openRepairModal = ()=>{
+    if (!repairModal) return;
+    selectedGroupKey = null;
+    selectedInventoryId = null;
+    renderRepairGroups();
+    renderInventoryResults();
+    repairModal.hidden = false;
+    repairModal.setAttribute("aria-hidden", "false");
+  };
+  const closeRepairModal = ()=>{
+    if (!repairModal) return;
+    repairModal.hidden = true;
+    repairModal.setAttribute("aria-hidden", "true");
+  };
 
   content.querySelectorAll("[data-order-tab]").forEach(btn => {
     btn.addEventListener("click", ()=>{
@@ -21567,6 +21918,11 @@ function renderOrderRequest(){
   });
 
   activeCard?.addEventListener("click", (e)=>{
+    const repairBtn = e.target.closest("[data-order-repair-links]");
+    if (repairBtn){
+      openRepairModal();
+      return;
+    }
     const removeBtn = e.target.closest("[data-order-remove]");
     if (removeBtn){
       const id = removeBtn.getAttribute("data-order-remove");
@@ -21614,6 +21970,57 @@ function renderOrderRequest(){
       if (confirmed) finalizeOrderRequest("deny");
       return;
     }
+  });
+  closeRepairBtn?.addEventListener("click", closeRepairModal);
+  repairModal?.addEventListener("click", (event)=>{ if (event.target === repairModal) closeRepairModal(); });
+  repairGroupsBody?.addEventListener("click", (event)=>{
+    const btn = event.target.closest("[data-repair-select-group]");
+    if (!btn) return;
+    selectedGroupKey = btn.getAttribute("data-repair-select-group");
+    renderRepairGroups();
+  });
+  inventorySearchInput?.addEventListener("input", ()=> renderInventoryResults());
+  inventoryResultsBody?.addEventListener("change", (event)=>{
+    const radio = event.target.closest("input[name='repairInventoryPick']");
+    if (!radio) return;
+    selectedInventoryId = radio.value;
+  });
+  applyExistingBtn?.addEventListener("click", ()=>{
+    if (!selectedGroupKey){ toast("Select a group first."); return; }
+    if (!selectedInventoryId){ toast("Select an inventory item first."); return; }
+    const group = findGroup(selectedGroupKey);
+    const targetInventory = findInventoryById(selectedInventoryId);
+    if (!group || !targetInventory){ toast("Unable to link selected group."); return; }
+    const hasNameConflict = (group.names || []).length > 1 || !(group.names || []).includes(String(targetInventory.name || ""));
+    if (hasNameConflict){
+      const ok = window.confirm("This part number appears under multiple names in purchase history. Linking this group will standardize those purchase lines to the selected inventory item name. Dates, quantities, prices, and statuses will remain unchanged.");
+      if (!ok) return;
+    }
+    const affected = linkPurchaseGroupToInventory(group, targetInventory, { finalName: targetInventory.name || "" });
+    if (affected > 0){ toast(`Linked ${affected} purchase item(s). No qty change applied.`); saveCloudDebounced(); renderOrderRequest(); }
+  });
+  createInventoryBtn?.addEventListener("click", ()=>{
+    if (!selectedGroupKey){ toast("Select a group first."); return; }
+    const group = findGroup(selectedGroupKey);
+    if (!group) return;
+    const nameSelect = content.querySelector("[data-repair-create-name]");
+    const customNameInput = content.querySelector("[data-repair-create-custom-name]");
+    const unitInput = content.querySelector("[data-repair-create-unit]");
+    const folderSelect = content.querySelector("[data-repair-create-folder]");
+    const priceInput = content.querySelector("[data-repair-create-price]");
+    const linkInput = content.querySelector("[data-repair-create-link]");
+    const nameChosen = (customNameInput?.value || nameSelect?.value || "").trim();
+    if (!nameChosen){ toast("Choose a final standardized name."); return; }
+    const targetInventory = createInventoryItemFromPurchaseLink({
+      name: nameChosen,
+      pn: group.partNumber || "",
+      link: String(linkInput?.value || group.items[0]?.link || ""),
+      price: priceInput?.value === "" ? (group.items[0]?.price ?? null) : Number(priceInput?.value),
+      unit: String(unitInput?.value || "pcs"),
+      folderId: String(folderSelect?.value || "") || null
+    });
+    const affected = linkPurchaseGroupToInventory(group, targetInventory, { finalName: nameChosen });
+    if (affected > 0){ toast(`Created inventory + linked ${affected} record(s). No qty change applied.`); saveCloudDebounced(); renderOrderRequest(); }
   });
 
   content.querySelectorAll("[data-order-download-history]").forEach(btn => {

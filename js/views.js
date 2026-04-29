@@ -4902,7 +4902,7 @@ function viewOrderRequest(model){
               ${active.items.map(item => `
                 <tr>
                   <td><input type="checkbox" data-order-approve="${esc(item.id)}" ${item.selected ? "checked" : ""}></td>
-                  <td class="order-item-name">${esc(item.name || "Unnamed item")}</td>
+                  <td class="order-item-name">${esc(item.name || "Unnamed item")}<div class="small muted">${item.inventoryId ? "Linked to inventory" : (item.suggestedInventoryId ? "Suggested inventory match" : "Not linked to inventory")}</div></td>
                   <td>${esc(item.pn || "—")}</td>
                   <td><input type="number" step="0.01" min="0" data-order-price="${esc(item.id)}" value="${esc(item.priceInput || "")}" placeholder="0.00"></td>
                   <td><input type="number" min="1" step="1" data-order-qty="${esc(item.id)}" value="${esc(item.qtyInput || "1")}"></td>
@@ -4921,6 +4921,7 @@ function viewOrderRequest(model){
           <div class="order-total small" data-order-selection-row ${active.selectionTotal ? "" : "hidden"}>Selected for approval: <strong data-order-selection-value>${esc(active.selectionTotal || "$0.00")}</strong></div>
         </div>
         <div class="order-actions">
+          <button type="button" data-order-repair-links ${active.unlinkedCount ? "" : "disabled"} title="Repair missing purchase-to-inventory links">⚠️ Missing links (${Number(active.unlinkedCount || 0)})</button>
           <button type="button" data-order-download>${downloadLabel}</button>
           <button type="button" class="primary" data-order-approve-all ${!active.canApprove ? "disabled" : ""}>Mark approved</button>
           <button type="button" data-order-partial ${!active.canApprove ? "disabled" : ""}>Save partial approval</button>
@@ -4987,6 +4988,35 @@ function viewOrderRequest(model){
         <span class="label">Last update</span>
         <span class="value">${esc(summary.lastUpdated || "—")}</span>
       </div>
+      </div>`;
+  const unlinkedGroups = Array.isArray(active.unlinkedGroups) ? active.unlinkedGroups : [];
+  const nameOptions = Array.from(new Set(unlinkedGroups.flatMap(group => Array.isArray(group.names) ? group.names : []))).filter(Boolean);
+  const folderOptions = (Array.isArray(window.inventoryFolders) ? window.inventoryFolders : []).map(folder => `<option value="${esc(folder.id)}">${esc(folder.name || folder.id || "Folder")}</option>`).join("");
+  const repairModal = `
+    <div class="modal-backdrop is-visible" id="orderRepairModal" hidden aria-hidden="true">
+      <div class="modal-card" style="max-width:1100px; width:min(96vw,1100px); max-height:90vh; overflow:auto;">
+        <h3>Unlinked Purchase Items</h3>
+        <table class="order-table"><thead><tr><th>Part #</th><th>Names</th><th>Records</th><th>Total Qty</th><th>Date Range</th><th>Suggested Match</th><th>Action</th></tr></thead><tbody data-order-repair-groups><tr><td colspan="7" class="small muted">No groups loaded.</td></tr></tbody></table>
+        <h4 style="margin-top:12px;">Group Records</h4>
+        <table class="order-table"><thead><tr><th>Name</th><th>Date</th><th>Qty</th><th>Price</th><th>Status</th><th>Request Ref</th><th>Link</th></tr></thead><tbody data-order-repair-details><tr><td colspan="7" class="small muted">Select a group to view records.</td></tr></tbody></table>
+        <h4 style="margin-top:12px;">Link Existing Inventory Item</h4>
+        <input type="search" data-order-repair-search placeholder="Search inventory by name, part #, or link" style="width:100%;margin-bottom:8px;">
+        <table class="order-table"><thead><tr><th></th><th>Name</th><th>Part #</th><th>Qty</th><th>Unit</th><th>Folder</th><th>Price</th></tr></thead><tbody data-order-repair-results><tr><td colspan="7" class="small muted">No inventory loaded.</td></tr></tbody></table>
+        <h4 style="margin-top:12px;">Create New Inventory Item</h4>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <label>Choose existing name<select data-repair-create-name><option value="">-- Choose --</option>${nameOptions.map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join("")}</select></label>
+          <label>Or type final name<input type="text" data-repair-create-custom-name placeholder="Final standardized name"></label>
+          <label>Unit<input type="text" data-repair-create-unit value="pcs"></label>
+          <label>Price<input type="number" min="0" step="0.01" data-repair-create-price></label>
+          <label>Store link<input type="url" data-repair-create-link></label>
+          <label>Folder / Location<select data-repair-create-folder><option value="">-- None --</option>${folderOptions}</select></label>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+          <button type="button" data-order-repair-close>Close</button>
+          <button type="button" data-order-repair-create-inventory>Create New Inventory Item</button>
+          <button type="button" class="primary" data-order-repair-link-existing>Link Existing Inventory Item</button>
+        </div>
+      </div>
     </div>`;
 
   return `
@@ -5003,7 +5033,8 @@ function viewOrderRequest(model){
           ${tab === "history" ? historyContent : activeContent}
         </div>
       </div>
-    </div>`;
+    </div>
+    ${repairModal}`;
 }
 
 function viewDeletedItems(model){
