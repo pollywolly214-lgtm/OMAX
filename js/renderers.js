@@ -2417,7 +2417,7 @@ function renderNextDueWidget(ndBox){
   };
 
   const upcoming = tasksInterval
-    .filter(task => task && task.mode === "interval" && isInstanceTask(task))
+    .filter(task => task && task.mode === "interval" && isInstanceTask(task) && task.calendarKilled !== true && !(task.recurrence && task.recurrence.enabled === false))
     .map(t => {
       const nd = nextDue(t);
       if (!nd || !(nd.due instanceof Date)) return null;
@@ -2451,6 +2451,12 @@ function renderNextDueWidget(ndBox){
           days = manualDays;
         }
       }
+
+      const removedSet = Array.isArray(t?.removedOccurrences)
+        ? new Set(t.removedOccurrences.map(normalizeKey).filter(Boolean))
+        : new Set();
+      const dueKey = normalizeKey(dueDate);
+      if (dueKey && removedSet.has(dueKey)) return null;
 
       return { t, nd: { ...nd, due: dueDate, days } };
     })

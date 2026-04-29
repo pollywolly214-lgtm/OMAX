@@ -562,11 +562,14 @@ function killTaskFamilyCalendarScheduling(task){
   let changed = false;
   visitTaskFamily(task, member => {
     if (!member) return;
-    if (member.recurrence && typeof member.recurrence === "object"){
-      if (member.recurrence.enabled !== false){
-        member.recurrence = { ...member.recurrence, enabled: false };
-        changed = true;
-      }
+    const recurrence = (member.recurrence && typeof member.recurrence === "object") ? member.recurrence : {};
+    if (recurrence.enabled !== false){
+      member.recurrence = { ...recurrence, enabled: false };
+      changed = true;
+    }
+    if (member.calendarKilled !== true){
+      member.calendarKilled = true;
+      changed = true;
     }
     const removedSet = normalizeRemovedOccurrences(member);
     const projected = projectIntervalDueDates(member, { monthsAhead: 24, minOccurrences: 24 });
@@ -860,8 +863,9 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
   };
 
   if (mode === "interval" && normalizedScope === "single"){
-    if (killTaskFamilyCalendarScheduling(task)) changed = true;
-    return changed;
+    const killed = killTaskFamilyCalendarScheduling(task);
+    if (killed) changed = true;
+    return killed || changed || true;
   }
 
   if (mode === "interval"){
