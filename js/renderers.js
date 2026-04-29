@@ -11002,8 +11002,18 @@ function renderCosts(){
         shell.appendChild(headTable);
 
         const sourceCells = Array.from(head.querySelectorAll("th"));
+        const firstBodyRow = table.tBodies && table.tBodies[0]
+          ? Array.from(table.tBodies[0].rows).find(row => row instanceof HTMLTableRowElement && !row.hidden)
+          : null;
+        const bodyCells = firstBodyRow ? Array.from(firstBodyRow.cells) : [];
         const targetCells = Array.from(headTable.querySelectorAll("th"));
-        const widths = sourceCells.map(cell => Math.ceil(cell.getBoundingClientRect().width));
+        const widths = sourceCells.map((cell, idx) => {
+          const bodyCell = bodyCells[idx];
+          const candidateWidth = bodyCell instanceof HTMLElement
+            ? bodyCell.getBoundingClientRect().width
+            : cell.getBoundingClientRect().width;
+          return Math.max(48, Math.ceil(candidateWidth));
+        });
         sourceCells.forEach((cell, idx) => {
           if (idx >= targetCells.length) return;
           const width = widths[idx];
@@ -11019,7 +11029,9 @@ function renderCosts(){
           head.style.visibility = "";
           shell.style.display = "none";
         }
-        shell.style.width = `${Math.ceil(table.getBoundingClientRect().width)}px`;
+        const tablePixelWidth = Math.ceil(table.scrollWidth || table.getBoundingClientRect().width);
+        headTable.style.width = `${tablePixelWidth}px`;
+        shell.style.width = `${tablePixelWidth}px`;
         const syncScroll = ()=>{
           shell.style.transform = `translateX(${-wrap.scrollLeft}px)`;
         };
