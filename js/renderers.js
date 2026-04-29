@@ -10979,6 +10979,52 @@ function renderCosts(){
     const closeBtns = Array.from(content.querySelectorAll("[data-close-data-center]"));
     const tabButtons = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-tab]")) : [];
     const panels = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-panel]")) : [];
+    const setupFloatingTableHeaders = ()=>{
+      if (!(modal instanceof HTMLElement)) return;
+      const wraps = Array.from(modal.querySelectorAll(".cost-data-center-table-wrap"));
+      wraps.forEach(wrap => {
+        if (!(wrap instanceof HTMLElement)) return;
+        const table = wrap.querySelector("table.cost-table");
+        const head = table ? table.querySelector("thead") : null;
+        if (!(table instanceof HTMLTableElement) || !(head instanceof HTMLElement)) return;
+
+        let shell = wrap.querySelector(".cost-data-center-floating-head");
+        if (!(shell instanceof HTMLElement)){
+          shell = document.createElement("div");
+          shell.className = "cost-data-center-floating-head";
+          shell.setAttribute("aria-hidden", "true");
+          wrap.appendChild(shell);
+        }
+        shell.innerHTML = "";
+        const headTable = document.createElement("table");
+        headTable.className = table.className;
+        headTable.appendChild(head.cloneNode(true));
+        shell.appendChild(headTable);
+
+        const sourceCells = Array.from(head.querySelectorAll("th"));
+        const targetCells = Array.from(headTable.querySelectorAll("th"));
+        const widths = sourceCells.map(cell => Math.ceil(cell.getBoundingClientRect().width));
+        sourceCells.forEach((cell, idx) => {
+          if (idx >= targetCells.length) return;
+          const width = widths[idx];
+          targetCells[idx].style.width = `${width}px`;
+          targetCells[idx].style.minWidth = `${width}px`;
+          cell.style.width = `${width}px`;
+          cell.style.minWidth = `${width}px`;
+        });
+        head.style.visibility = "hidden";
+        shell.style.display = "";
+        shell.style.width = `${Math.ceil(table.getBoundingClientRect().width)}px`;
+        const syncScroll = ()=>{
+          shell.style.transform = `translateX(${-wrap.scrollLeft}px)`;
+        };
+        syncScroll();
+        if (wrap.dataset.floatHeadBound !== "1"){
+          wrap.dataset.floatHeadBound = "1";
+          wrap.addEventListener("scroll", syncScroll, { passive: true });
+        }
+      });
+    };
     const setActiveTab = (tabKey)=>{
       if (typeof window !== "undefined"){
         window.dataCenterActiveTab = tabKey;
@@ -11159,6 +11205,12 @@ function renderCosts(){
       if (options && options.openImmediately){
         openDataCenter({ restoreScroll: true });
       }
+    }
+    setupFloatingTableHeaders();
+    if (typeof window !== "undefined"){
+      window.requestAnimationFrame?.(()=> setupFloatingTableHeaders());
+      window.requestAnimationFrame?.(()=> setupFloatingTableHeaders());
+      window.addEventListener("resize", setupFloatingTableHeaders);
     }
 
     const searchInput = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-search]") : null;
