@@ -10979,9 +10979,20 @@ function renderCosts(){
     const closeBtns = Array.from(content.querySelectorAll("[data-close-data-center]"));
     const tabButtons = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-tab]")) : [];
     const invRowsHost = modal instanceof HTMLElement ? modal.querySelector('[data-dc-inventory-rows]') : null;
-    if (invRowsHost){ const folders = Array.isArray(window.inventoryFolders)?window.inventoryFolders:[]; const folderName=(id)=> (folders.find(f=>String(f?.id||'')===String(id||''))?.name)||'—'; invRowsHost.innerHTML = (Array.isArray(inventory)&&inventory.length)?inventory.map(item=>`<tr><td>${escapeHtml(item?.name||'')}</td><td>${escapeHtml(item?.pn||'—')}</td><td>${escapeHtml(String(Number(item?.qtyNew)||0))}</td><td>${escapeHtml(String(Number(item?.qtyOld)||0))}</td><td>${escapeHtml(item?.unit||'pcs')}</td><td>${escapeHtml(item?.price!=null?String(item.price):'—')}</td><td>${escapeHtml(folderName(item?.folderId))}</td><td>${escapeHtml(item?.link||'—')}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No inventory rows available.</td></tr>`; }
+    const renderDataCenterInventoryRows = ()=>{
+      if (!invRowsHost) return;
+      const folders = Array.isArray(window.inventoryFolders)?window.inventoryFolders:[];
+      const folderName=(id)=> (folders.find(f=>String(f?.id||'')===String(id||''))?.name)||'—';
+      invRowsHost.innerHTML = (Array.isArray(inventory)&&inventory.length)?inventory.map(item=>`<tr><td>${escapeHtml(item?.name||'')}</td><td>${escapeHtml(item?.pn||'—')}</td><td>${escapeHtml(String(Number(item?.qtyNew)||0))}</td><td>${escapeHtml(String(Number(item?.qtyOld)||0))}</td><td>${escapeHtml(item?.unit||'pcs')}</td><td>${escapeHtml(item?.price!=null?String(item.price):'—')}</td><td>${escapeHtml(folderName(item?.folderId))}</td><td style="white-space:normal;word-break:break-word">${escapeHtml(item?.link||'—')}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No inventory rows available.</td></tr>`;
+    };
     const logRowsHost = modal instanceof HTMLElement ? modal.querySelector('[data-dc-log-rows]') : null;
-    if (logRowsHost){ const logs = Array.isArray(window.syncProcessLog)?window.syncProcessLog:[]; logRowsHost.innerHTML = logs.length?logs.slice(0,100).map(entry=>`<tr><td>${escapeHtml(String(entry?.atISO||entry?.createdAt||'—'))}</td><td>${escapeHtml(String(entry?.eventType||entry?.type||'—'))}</td><td>${escapeHtml(String(entry?.status||'—'))}</td><td>${escapeHtml(String(entry?.sourceArea||'—'))}</td><td>${escapeHtml(String(entry?.targetArea||'—'))}</td><td>${escapeHtml(String(entry?.partNumber||'—'))}</td><td>${escapeHtml(String(entry?.qtyDelta!=null?entry.qtyDelta:'—'))}</td><td>${escapeHtml(String(entry?.message||'—'))}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No system wiring or save log entries yet.</td></tr>`; }
+    const renderDataCenterLogRows = ()=>{
+      if (!logRowsHost) return;
+      const logs = Array.isArray(window.syncProcessLog)?window.syncProcessLog:[];
+      logRowsHost.innerHTML = logs.length?logs.slice(0,100).map(entry=>`<tr><td>${escapeHtml(String(entry?.atISO||entry?.createdAt||'—'))}</td><td>${escapeHtml(String(entry?.eventType||entry?.type||'—'))}</td><td>${escapeHtml(String(entry?.status||'—'))}</td><td>${escapeHtml(String(entry?.sourceArea||'—'))}</td><td>${escapeHtml(String(entry?.targetArea||'—'))}</td><td>${escapeHtml(String(entry?.partNumber||'—'))}</td><td>${escapeHtml(String(entry?.qtyDelta!=null?entry.qtyDelta:'—'))}</td><td>${escapeHtml(String(entry?.message||'—'))}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No system wiring or save log entries yet.</td></tr>`;
+    };
+    renderDataCenterInventoryRows();
+    renderDataCenterLogRows();
     const panels = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-panel]")) : [];
     const setActiveTab = (tabKey)=>{
       if (typeof window !== "undefined"){
@@ -11009,7 +11020,7 @@ function renderCosts(){
     const rememberedTab = (typeof window !== "undefined" && typeof window.dataCenterActiveTab === "string")
       ? window.dataCenterActiveTab
       : "maintenance";
-    setActiveTab(["maintenance", "cutting", "spend", "efficiency"].includes(rememberedTab) ? rememberedTab : "maintenance");
+    setActiveTab(["maintenance", "cutting", "spend", "efficiency", "inventory", "logs"].includes(rememberedTab) ? rememberedTab : "maintenance");
     if (modal instanceof HTMLElement){
       document.body.appendChild(modal);
     }
@@ -11024,6 +11035,8 @@ function renderCosts(){
       modal.removeAttribute("hidden");
       modal.setAttribute("aria-hidden", "false");
       document.body.classList.add("cost-data-center-open");
+      renderDataCenterInventoryRows();
+      renderDataCenterLogRows();
       try { modal.focus({ preventScroll: true }); } catch (_err){ modal.focus(); }
       const panel = modal.querySelector(".cost-data-center-panel");
       if (panel instanceof HTMLElement){
@@ -12068,7 +12081,7 @@ function renderCosts(){
       const inventorySelectOptionsMarkup = (selectedId)=>{
         const selected = String(selectedId || "");
         const rows = (Array.isArray(inventory) ? inventory : []).filter(Boolean).slice().sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));
-        const opts = ['<option value="">Save as unlinked</option>'];
+        const opts = ['<option value="">Auto-detect from name</option>'];
         rows.forEach(item => {
           const id = String(item.id || "");
           if (!id) return;
@@ -12087,9 +12100,9 @@ const appendEmptyRow = (focusFirst = false)=>{
           <td><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
           <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
-          <td><select data-col="inventoryItemId">${inventorySelectOptionsMarkup("")}</select></td>
-          <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00"></td>
-          <td><input type="number" min="0" step="0.01" data-col="tax" placeholder="0.00"></td>
+          <td style="min-width:180px"><select data-col="inventoryItemId" style="max-width:260px;white-space:normal">${inventorySelectOptionsMarkup("")}</select></td>
+          <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00" style="min-width:86px"></td>
+          <td><input type="number" min="0" step="0.01" data-col="tax" placeholder="0.00" style="min-width:72px"></td>
           <td data-col="total">${formatUsd(0)}</td>`;
         weekRowsBody.appendChild(tr);
         if (focusFirst){
@@ -12128,9 +12141,9 @@ const appendEmptyRow = (focusFirst = false)=>{
             <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
             <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
-            <td><select data-col="inventoryItemId">${inventorySelectOptionsMarkup(row.inventoryItemId || "")}</select></td>
-            <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}"></td>
-            <td><input type="number" min="0" step="0.01" data-col="tax" value="${escapeHtml(String(row.tax || 0))}"></td>
+            <td style="min-width:180px"><select data-col="inventoryItemId" style="max-width:260px;white-space:normal">${inventorySelectOptionsMarkup(row.inventoryItemId || "")}</select></td>
+            <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}" style="min-width:86px"></td>
+            <td><input type="number" min="0" step="0.01" data-col="tax" value="${escapeHtml(String(row.tax || 0))}" style="min-width:72px"></td>
             <td data-col="total">${formatUsd(computeRowTotal(row))}</td>
           </tr>`).join("");
         appendEmptyRow();
@@ -12140,6 +12153,11 @@ const appendEmptyRow = (focusFirst = false)=>{
         const key = String(partNumber || "").trim().toLowerCase();
         if (!key || !Array.isArray(inventory)) return null;
         return inventory.find(item => String(item?.pn || "").trim().toLowerCase() === key) || null;
+      };
+      const findInventoryByNameLike = (name)=>{
+        const key = String(name || "").trim().toLowerCase();
+        if (!key || !Array.isArray(inventory)) return null;
+        return inventory.find(item => String(item?.name || "").toLowerCase().includes(key)) || null;
       };
       const ensurePurchaseHistoryLinkForPartNumber = ({ partNumber, inventoryItemId, canonicalName })=>{
         const partKey = String(partNumber || "").trim().toLowerCase();
@@ -12264,7 +12282,21 @@ const appendEmptyRow = (focusFirst = false)=>{
           renderRangeTable();
           renderCentralSpendRows();
         });
-        weekRowsBody.addEventListener("input", ()=>{
+        weekRowsBody.addEventListener("input", (event)=>{
+          const inputEl = event.target;
+          if (inputEl instanceof HTMLInputElement && inputEl.getAttribute("data-col") === "purchased"){
+            const row = inputEl.closest("tr[data-receipt-row]");
+            const typed = String(inputEl.value || "").trim();
+            if (row && typed){
+              const inv = findInventoryByNameLike(typed);
+              if (inv){
+                const invSel = row.querySelector('[data-col="inventoryItemId"]');
+                const partEl = row.querySelector('[data-col="partNumber"]');
+                if (invSel instanceof HTMLSelectElement && String(invSel.value || "") !== String(inv.id || "")) invSel.value = String(inv.id || "");
+                if (partEl instanceof HTMLInputElement && !String(partEl.value || "").trim()) partEl.value = String(inv.pn || "");
+              }
+            }
+          }
           recomputeWeekTotals();
           hasUnsavedReceiptChanges = true;
           hasExplicitSaveSinceEdit = false;
@@ -12284,10 +12316,15 @@ const appendEmptyRow = (focusFirst = false)=>{
           if (input.getAttribute("data-col") !== "purchased") return;
           const key = String(input.value || "").trim().toLowerCase();
           if (!key) return;
-          const template = purchaseTemplates.get(key);
+          const template = purchaseTemplates.get(key) || Array.from(purchaseTemplates.entries()).find(([name]) => name.includes(key))?.[1];
           if (!template) return;
           const row = input.closest("tr[data-receipt-row]");
           applyTemplateToRow(row, template);
+          const inv = findInventoryByNameLike(input.value || "");
+          if (row && inv){
+            const invSel = row.querySelector('[data-col="inventoryItemId"]');
+            if (invSel instanceof HTMLSelectElement) invSel.value = String(inv.id || "");
+          }
           recomputeWeekTotals();
           hasUnsavedReceiptChanges = true;
           hasExplicitSaveSinceEdit = false;
@@ -12441,7 +12478,16 @@ ${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
           shell.querySelectorAll('[data-fixer-tab]').forEach(btn => btn.addEventListener('click', ()=>{ activeTab = String(btn.getAttribute('data-fixer-tab') || 'unlinked'); redraw(); }));
           shell.querySelectorAll('[data-go-inventory="1"]').forEach(btn => btn.addEventListener('click', ()=>{
             shell.remove();
-            if (typeof window !== "undefined"){ window.location.hash = "#inventory"; }
+            if (modal instanceof HTMLElement){
+              modal.hidden = true;
+              modal.setAttribute("aria-hidden", "true");
+            }
+            document.body.classList.remove("cost-receipt-modal-open");
+            if (typeof window !== "undefined"){
+              window.costPurchaseHistoryModalOpen = false;
+              window.location.hash = "#inventory";
+              requestAnimationFrame(()=>{ document.body.style.overflow = ""; });
+            }
           }));
           shell.querySelectorAll('[data-edit-fix]').forEach(btn => btn.addEventListener('click', ()=>{
             const raw = String(btn.getAttribute('data-edit-fix') || '');
