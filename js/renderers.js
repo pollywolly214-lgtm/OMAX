@@ -11117,6 +11117,20 @@ function renderCosts(){
       }else{
         const taskId = String(payload.taskId || "");
         const dateISO = String(payload.dateISO || "");
+        if (dateISO){
+          const selector = taskId
+            ? `[data-maintenance-row][data-task-id="${escapeForSelector(taskId)}"][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`
+            : `[data-maintenance-row][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`;
+          const matchingRows = Array.from(panelRoot.querySelectorAll(selector))
+            .filter(item => item instanceof HTMLElement);
+          if (matchingRows.length){
+            matchingRows[0].scrollIntoView({ behavior: "smooth", block: "center" });
+            matchingRows.forEach((item, idx) => {
+              setTimeout(()=> pulseRow(item), idx * 90);
+            });
+            return true;
+          }
+        }
         row = (taskId && dateISO && panelRoot.querySelector(`[data-maintenance-row][data-task-id="${escapeForSelector(taskId)}"][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`))
           || (dateISO && panelRoot.querySelector(`[data-maintenance-row][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`))
           || panelRoot.querySelector("[data-maintenance-row]");
@@ -11331,6 +11345,23 @@ function renderCosts(){
           closeDataCenter();
         }
         openPurchaseHistory({ weekKey, rowIndex });
+      });
+    }
+    if (modal instanceof HTMLElement && !modal.dataset.efficiencyRowOpenWired){
+      modal.dataset.efficiencyRowOpenWired = "1";
+      modal.addEventListener("click", (event)=>{
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        if (!target) return;
+        const row = target.closest("[data-efficiency-row-link]");
+        if (!(row instanceof HTMLElement)) return;
+        if (target.closest("[data-efficiency-open-job]")) return;
+        const id = String(row.getAttribute("data-efficiency-job-id") || "");
+        if (!id) return;
+        if (typeof window !== "undefined"){
+          window.pendingJobFocus = { type: "jobRow", id };
+        }
+        closeDataCenter();
+        location.hash = "#/jobs";
       });
     }
     Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-cutting-open-job]")).forEach(btn => {
@@ -14776,7 +14807,7 @@ function computeCostModel(){
         value: pointValue,
         cutHours: Number.isFinite(Number(pt.cutHours)) && Number(pt.cutHours) > 0 ? Number(pt.cutHours) : 0,
         count: jobCount,
-        detail: `Completed cutting job #${jobCount} recorded ${pointValue >= 0 ? "a gain" : "a loss"} on ${dateLabel}.`,
+        detail: `${pt.label || `Cutting job #${jobCount}`} (${pt.jobId ? `ID ${pt.jobId}` : `record #${jobCount}`}) recorded ${pointValue >= 0 ? "a gain" : "a loss"} on ${dateLabel}.`,
         jobId: pt.jobId || null,
         dateISO: pt.dateISO || ymd(pt.date)
       });
@@ -16755,7 +16786,7 @@ function computeCostModel(){
         date,
         dateISO,
         value: -Math.abs(Number(entry?.total) || 0),
-        detail: `${detailPrefix}: ${itemPreview}${detailSuffix}.`
+        detail: `${detailPrefix}. Items: ${itemPreview}${detailSuffix}.`
       };
     });
 
@@ -16783,12 +16814,19 @@ function computeCostModel(){
         : new Date(dateISO);
       const dayRows = maintenanceTrendRows.filter(row => toHistoryDateKey(row.dateISO) === dateISO);
       const taskCount = dayRows.length;
+      const taskNames = Array.from(new Set(dayRows
+        .map(row => String(row?.taskName || "").trim())
+        .filter(Boolean)));
+      const taskPreview = taskNames.length
+        ? taskNames.slice(0, 6).join(", ")
+        : "No task names provided";
+      const taskSuffix = taskNames.length > 6 ? " …" : "";
       return {
         date,
         value: -Math.abs(totalCost),
         dateISO,
         taskId: dayRows.length === 1 ? String(dayRows[0].taskId || "") : null,
-        detail: `${taskCount} completed maintenance ${taskCount === 1 ? "occurrence" : "occurrences"} recorded in the data center table on ${dateISO}.`
+        detail: `${taskCount} completed maintenance ${taskCount === 1 ? "occurrence" : "occurrences"} recorded on ${dateISO}: ${taskPreview}${taskSuffix}.`
       };
     });
   maintenanceSeries = maintenanceSeriesFromDataTable;
@@ -17107,23 +17145,6 @@ function drawCostChart(canvas, model, show){
     if (value > 0) return `+${formatted}`;
     return formatted;
   };
-  const maintenanceAvg = Number(model?.maintenanceCostPerCutValue ?? model?.maintenanceAverageValue) || 0;
-  const spendAvg = Number(model?.totalSpendPerCutValue) || 0;
-  const cuttingAvg = Number(model?.cuttingAverageValue) || 0;
-  const maintenanceAvgLabel = model?.maintenanceCostPerCutLabel || model?.maintenanceAverageLabel || formatMoney(maintenanceAvg);
-  const spendAvgLabel = model?.totalSpendPerCutLabel || formatMoney(spendAvg);
-  const cuttingAvgLabel = model?.cuttingAverageLabel || formatMoney(cuttingAvg);
-  const maintenanceWindowLabel = String(model?.maintenanceCostPerCutWindowLabel || "selected range");
-
-  ctx.font = "12px sans-serif";
-  ctx.textAlign = "left";
-  ctx.fillStyle = model.chartColors.maintenance;
-  ctx.fillText(`Avg maint cost/cut hr (${maintenanceWindowLabel}): ${maintenanceAvgLabel}`, left, 14);
-  ctx.fillStyle = model.chartColors.spend;
-  ctx.fillText(`Avg total spend/cut hr (${maintenanceWindowLabel}): ${spendAvgLabel}`, left, 30);
-  ctx.fillStyle = model.chartColors.jobs;
-  ctx.fillText(`Avg cutting gain/loss: ${cuttingAvgLabel}`, Math.max(left + 300, W * 0.5), 14);
-
   if (0 >= yMin && 0 <= yMax){
     const zeroY = Y(0);
     ctx.strokeStyle = "#d0d5e2";
