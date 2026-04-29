@@ -645,6 +645,7 @@ function createIntervalTaskInstance(template){
     anchorTotal: null,
     completedDates: [],
     manualHistory: [],
+    removedOccurrences: [],
     occurrenceNotes: {},
     occurrenceHours: {},
     note: template.note || "",
@@ -661,6 +662,9 @@ function createIntervalTaskInstance(template){
   }
   if (Array.isArray(template.parts)){
     copy.parts = template.parts.map(part => part ? { ...part } : part).filter(Boolean);
+  }
+  if (Array.isArray(template.removedOccurrences)){
+    copy.removedOccurrences = template.removedOccurrences.slice();
   }
   return copy;
 }
