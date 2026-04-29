@@ -12116,12 +12116,96 @@ function renderCosts(){
         appendEmptyRow();
         recomputeWeekTotals();
       };
+      const findInventoryByPartNumber = (partNumber)=>{
+        const key = String(partNumber || "").trim().toLowerCase();
+        if (!key || !Array.isArray(inventory)) return null;
+        return inventory.find(item => String(item?.pn || "").trim().toLowerCase() === key) || null;
+      };
+      const ensurePurchaseHistoryLinkForPartNumber = ({ partNumber, inventoryItemId, canonicalName })=>{
+        const partKey = String(partNumber || "").trim().toLowerCase();
+        if (!partKey || !inventoryItemId) return 0;
+        let updates = 0;
+        (window.receiptTrackerWeeks || []).forEach(week => {
+          if (!Array.isArray(week?.rows)) return;
+          week.rows = week.rows.map(row => {
+            const rowPart = String(row?.partNumber || "").trim().toLowerCase();
+            if (!rowPart || rowPart !== partKey) return row;
+            updates += 1;
+            return { ...row, inventoryItemId: String(inventoryItemId), purchased: canonicalName || row.purchased || "" };
+          });
+        });
+        return updates;
+      };
+      const openPurchaseLinkingWorkflow = (partNumber)=>{
+        const pn = String(partNumber || "").trim();
+        if (!pn){ toast("Part number is required before linking."); return; }
+        const matchingRows = [];
+        (window.receiptTrackerWeeks || []).forEach(week => {
+          normalizeRows(week?.rows).forEach(row => {
+            if (String(row?.partNumber || "").trim().toLowerCase() === pn.toLowerCase()) matchingRows.push(row);
+          });
+        });
+        const nameOptions = Array.from(new Set(matchingRows.map(row => String(row?.purchased || "").trim()).filter(Boolean)));
+        let selectedName = nameOptions[0] || "";
+        if (nameOptions.length > 1){
+          selectedName = prompt(`Multiple names use part number . Choose the canonical name:\n`, selectedName || nameOptions[0] || "") || "";
+          selectedName = selectedName.trim();
+          if (!selectedName) return;
+          const proceed = confirm(`This will rename all purchase history rows with part number ${pn} to "${selectedName}" and link them together. Continue?`);
+          if (!proceed) return;
+        }
+        const inventoryMatches = (Array.isArray(inventory) ? inventory : []).filter(item => String(item?.pn || "").trim().toLowerCase() === pn.toLowerCase());
+        let linkedItem = inventoryMatches[0] || null;
+        if (!linkedItem){
+          const createNew = confirm(`No inventory item is linked for part number ${pn}. Click OK to create a new inventory item, or Cancel to search by name.`);
+          if (createNew){
+            const newName = (prompt("New inventory item name", selectedName || matchingRows[0]?.purchased || "") || "").trim();
+            if (!newName) return;
+            const folderId = (prompt("Inventory folder ID/location (optional)", "") || "").trim();
+            const item = normalizeInventoryItem({ id: genId("inventory"), name: newName, pn, qtyNew: 0, qtyOld: 0, unit: "pcs", note: "Created from purchase history", folderId: folderId || null });
+            if (!item){ toast("Unable to create inventory item."); return; }
+            inventory.unshift(item);
+            window.inventory = inventory;
+            linkedItem = item;
+          } else {
+            const query = (prompt("Search inventory by name to link", selectedName || "") || "").trim().toLowerCase();
+            linkedItem = (Array.isArray(inventory) ? inventory : []).find(item => String(item?.name || "").toLowerCase().includes(query)) || null;
+          }
+        }
+        if (!linkedItem){ toast("No inventory item selected."); return; }
+        const canonicalName = linkedItem.name || selectedName || matchingRows[0]?.purchased || "";
+        const updated = ensurePurchaseHistoryLinkForPartNumber({ partNumber: pn, inventoryItemId: linkedItem.id, canonicalName });
+        if (updated > 0){
+          if (Array.isArray(window.maintenanceCostLog)){
+            window.maintenanceCostLog.unshift({
+              id: genId("purchase_link"),
+              type: "purchase_history_linked",
+              createdAt: new Date().toISOString(),
+              partNumber: pn,
+              linkedInventoryId: linkedItem.id,
+              linkedInventoryName: canonicalName,
+              affectedRows: updated
+            });
+          }
+          persistReceiptState();
+          saveWeekRowsFromDom();
+          renderWeekRows();
+          renderRangeTable();
+          renderCentralSpendRows();
+          toast(`Linked ${updated} purchase row${updated===1?"":"s"} to inventory item.`);
+        }
+      };
       const renderRangeTable = ()=>{
         if (!(rangeRowsBody instanceof HTMLElement)) return;
         const { start, end } = getRangeWindow(activeRange);
         const rows = buildRangeRows(activeRange);
         const subtotal = rows.reduce((sum, row) => sum + row.total, 0);
-        rangeRowsBody.innerHTML = rows.length ? rows.map(row => `
+        rangeRowsBody.innerHTML = rows.length ? rows.map(row => {
+          const linked = !!findInventoryByPartNumber(row.partNumber);
+          const stateLabel = linked ? "Linked" : "Missing";
+          const btnClass = linked ? "btn" : "btn danger";
+          const btnText = linked ? "View" : "Error";
+          return `
           <tr>
             <td>${escapeHtml(row.date || "—")}</td>
             <td>${escapeHtml(row.purchased || "—")}</td>
@@ -12130,8 +12214,9 @@ function renderCosts(){
             <td>${formatUsd(row.shipping || 0)}</td>
             <td>${formatUsd(row.tax || 0)}</td>
             <td>${formatUsd(row.total || 0)}</td>
-            <td></td>
-          </tr>`).join("") : '<tr><td colspan="8" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
+            <td><button type="button" class="${btnClass}" data-receipt-link-error="${escapeHtml(String(row.partNumber || ""))}" data-link-state="${linked?"linked":"missing"}">${btnText}</button> <span class="small muted">${stateLabel}</span></td>
+          </tr>`;
+        }).join("") : '<tr><td colspan="8" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
         if (rangeSubtotal) rangeSubtotal.textContent = formatUsd(subtotal);
         if (rangeLabel) rangeLabel.textContent = formatDateRangeLabel(start, end);
       };
