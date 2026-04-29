@@ -2424,6 +2424,20 @@ function renderNextDueWidget(ndBox){
       let dueDate = nd.due;
       let days = nd.days;
 
+      if (typeof projectIntervalDueDates === "function"){
+        const skipDates = new Set(completedSet);
+        if (manualKey) skipDates.add(manualKey);
+        const projections = projectIntervalDueDates(t, { monthsAhead: 3, excludeDates: skipDates, minOccurrences: 1, maxOccurrences: 1 });
+        if (projections.length){
+          const projected = projections[0];
+          const projectedDate = toDayStart(projected?.dateISO || projected?.dueDate);
+          if (projectedDate){
+            dueDate = projectedDate;
+            days = Math.round((projectedDate.getTime() - today.getTime()) / dayMs);
+          }
+        }
+      }
+
       if (manualDate && !completedSet.has(manualKey)){
         const manualDays = Math.round((manualDate.getTime() - today.getTime()) / dayMs);
         const manualIsEarlier = manualDate.getTime() < dueDate.getTime();
