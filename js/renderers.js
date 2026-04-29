@@ -21721,6 +21721,15 @@ function applyInventoryForApprovedItems(items, options = {}){
 function finalizeOrderRequest(mode){
   const draft = ensureActiveOrderRequest();
   if (!draft.items.length){ toast("Add at least one item to the request."); return; }
+  const unlinkedDraftItems = draft.items.filter(item => !item?.inventoryId);
+  if (unlinkedDraftItems.length){
+    console.warn("[PurchaseInventoryLink:UNLINKED]", {
+      orderRequestId: draft.id,
+      unlinkedCount: unlinkedDraftItems.length,
+      message: "Unlinked lines will not update inventory until repaired."
+    });
+    toast(`${unlinkedDraftItems.length} unlinked line(s) detected. They will be skipped for inventory updates until linked.`);
+  }
   const nowISO = new Date().toISOString();
 
   if (mode === "approveAll"){
