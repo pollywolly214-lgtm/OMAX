@@ -12429,6 +12429,7 @@ const appendEmptyRow = (focusFirst = false)=>{
       };
       const applyGroupLink = (group, inv)=>{
         if (!group || !inv) return;
+        if (!Array.isArray(window.purchaseInventoryLinks)) window.purchaseInventoryLinks = [];
         let canonicalName = inv.name || "";
         if (group.names.length > 1){
           const picked = prompt(`Name standardization required for part number ${group.partNumber || "(none)"}. Choose final name:
@@ -12447,13 +12448,27 @@ ${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
             return { ...row, inventoryItemId: inv.id, isInventoryLinked: true, purchased: canonicalName || inv.name || row.purchased || "", partNumber: inv.pn || row.partNumber || "", pnSnapshot: inv.pn || row.partNumber || "", inventoryNameSnapshot: inv.name || "", linkedAtISO: new Date().toISOString(), linkSource: "manual_part_number_group" };
           });
         });
+        const linkRecord = {
+          id: genId("purchase_inventory_link"),
+          atISO: new Date().toISOString(),
+          inventoryId: String(inv.id || ""),
+          inventoryName: String(inv.name || ""),
+          inventoryPartNumber: String(inv.pn || ""),
+          purchaseGroupKey: String(group.key || ""),
+          purchasePartNumber: String(group.partNumber || ""),
+          purchaseNames: Array.isArray(group.names) ? group.names.slice() : [],
+          affectedRows: Number(group.count || 0),
+          canonicalName: String(canonicalName || inv.name || "")
+        };
+        window.purchaseInventoryLinks.unshift(linkRecord);
+        if (window.purchaseInventoryLinks.length > 500) window.purchaseInventoryLinks.length = 500;
         if (typeof appendSystemLog === 'function') appendSystemLog({ eventType:'purchase_inventory_link_repaired', sourceArea:'orderRequests', targetArea:'inventory', partNumber: group.partNumber || '', affectedCount: group.count, inventoryId: inv.id, finalName: canonicalName || inv.name || '', qtyDelta:0, status:'historical_link_repaired_no_qty_change', message:'Inventory quantity was not changed because this was a historical link repair.' });
         persistReceiptState();
         saveWeekRowsFromDom();
         renderWeekRows(); renderRangeTable(); renderCentralSpendRows();
       };
       const openFixerWidget = ()=>{
-        const inventoryRows = Array.isArray(inventory) ? inventory : [];
+        const inventoryRows = Array.isArray(window.inventory) ? window.inventory : (Array.isArray(inventory) ? inventory : []);
         let selectedGroupKey = "";
         let selectedInventoryId = "";
         let searchTerm = "";
