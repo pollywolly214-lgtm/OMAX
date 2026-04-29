@@ -521,6 +521,11 @@ body.cost-timeframe-modal-open{ overflow:hidden; }
 .cost-data-center-tabs{ display:flex; gap:8px; margin-bottom:10px; }
 .cost-data-center-tab{ border:1px solid #a8b6ce; background:#eef3ff; color:#0b1a38; padding:7px 12px; border-radius:6px; cursor:pointer; font-weight:600; }
 .cost-data-center-tab.is-active{ background:#0a63c2; color:#fff; border-color:#0a63c2; }
+.cost-data-center-panel-content{
+  max-height:none;
+  overflow:visible;
+  padding-right:0;
+}
 .cost-data-center-panel-content[hidden]{ display:none !important; }
 .cost-data-center-search{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px; max-width:360px; }
 .cost-data-center-search label{ font-weight:600; font-size:14px; }

@@ -2294,10 +2294,10 @@ function viewCosts(model){
                   <div><span class="label">Avg net gain / row</span><span>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
                 </div>
                 <table class="cost-table" style="margin-top:10px">
-                  <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Run cost</th><th>Total cost</th><th>Net gain</th></tr></thead>
+                  <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Run cost</th><th>Total cost</th><th>Net gain</th><th>Job link</th></tr></thead>
                   <tbody>
                     ${efficiencyRows.map(row => `
-                      <tr>
+                      <tr data-efficiency-row-link data-efficiency-job-id="${esc(row.id || "")}">
                         <td>${esc(row.taskName || "Completed task")}</td>
                         <td>${esc(row.dateLabel || "—")}</td>
                         <td>${esc(row.hoursLabel || "0 hr")}</td>
@@ -2305,6 +2305,7 @@ function viewCosts(model){
                         <td>${esc(row.laborCostLabel || "$0.00")}</td>
                         <td>${esc(row.totalCostLabel || "$0.00")}</td>
                         <td>${esc(row.netGainLabel || "$0.00")}</td>
+                        <td>${row.settingsLink ? `<button type="button" class="btn secondary" data-efficiency-open-job="${esc(row.id || "")}">Open job</button>` : "Invalid link"}</td>
                       </tr>
                     `).join("")}
                   </tbody>
