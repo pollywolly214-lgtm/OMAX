@@ -1974,7 +1974,44 @@ function projectIntervalDueDates(task, options = {}){
   return events;
 }
 
+
+function restoreCriticalIntervalTasks(){
+  const tasks = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  if (!tasks.length) return false;
+  const targets = new Set(["mixing_tube_rotation", "jewel_nozzle_clean"]);
+  let changed = false;
+  tasks.forEach(task => {
+    if (!task) return;
+    const key = String(task.templateId != null ? task.templateId : task.id || "").trim().toLowerCase();
+    const name = String(task.name || "").trim().toLowerCase();
+    const matches = targets.has(key)
+      || name.includes("mixing tube rotation")
+      || name.includes("jew") && name.includes("orifice") && name.includes("nozzle");
+    if (!matches) return;
+
+    if (task.calendarKilled === true){ task.calendarKilled = false; changed = true; }
+    if (task.recurrence && typeof task.recurrence === "object" && task.recurrence.enabled === false){
+      task.recurrence = { ...task.recurrence, enabled: true };
+      changed = true;
+    }
+    if (Array.isArray(task.removedOccurrences) && task.removedOccurrences.length){
+      task.removedOccurrences = [];
+      changed = true;
+    }
+    if (Array.isArray(task.manualHistory)){
+      const next = task.manualHistory.filter(entry => entry && entry.status !== "removed");
+      if (next.length !== task.manualHistory.length){
+        task.manualHistory = next;
+        changed = true;
+      }
+    }
+  });
+  return changed;
+}
 function renderCalendar(){
+  if (restoreCriticalIntervalTasks()){
+    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+  }
   const container = $("#months");
   if (!container) return;
   let showAll = Boolean(window.__calendarShowAllMonths);
