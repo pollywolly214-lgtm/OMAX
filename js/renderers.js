@@ -645,6 +645,7 @@ function createIntervalTaskInstance(template){
     anchorTotal: null,
     completedDates: [],
     manualHistory: [],
+    removedOccurrences: [],
     occurrenceNotes: {},
     occurrenceHours: {},
     note: template.note || "",
@@ -661,6 +662,9 @@ function createIntervalTaskInstance(template){
   }
   if (Array.isArray(template.parts)){
     copy.parts = template.parts.map(part => part ? { ...part } : part).filter(Boolean);
+  }
+  if (Array.isArray(template.removedOccurrences)){
+    copy.removedOccurrences = template.removedOccurrences.slice();
   }
   return copy;
 }
@@ -2395,11 +2399,22 @@ function renderNextDueWidget(ndBox){
     parsed.setHours(0,0,0,0);
     return parsed;
   };
-  const completedDatesFor = (task)=> new Set(
-    Array.isArray(task?.completedDates)
-      ? task.completedDates.map(normalizeKey).filter(Boolean)
-      : []
-  );
+  const completedDatesFor = (task)=>{
+    const completed = new Set(
+      Array.isArray(task?.completedDates)
+        ? task.completedDates.map(normalizeKey).filter(Boolean)
+        : []
+    );
+    const manualHistory = typeof ensureTaskManualHistory === "function"
+      ? ensureTaskManualHistory(task)
+      : (Array.isArray(task?.manualHistory) ? task.manualHistory : []);
+    manualHistory.forEach(entry => {
+      if (!entry || entry.status !== "completed") return;
+      const key = normalizeKey(entry.dateISO);
+      if (key) completed.add(key);
+    });
+    return completed;
+  };
 
   const upcoming = tasksInterval
     .filter(task => task && task.mode === "interval" && isInstanceTask(task))
@@ -2413,6 +2428,20 @@ function renderNextDueWidget(ndBox){
       let dueDate = nd.due;
       let days = nd.days;
 
+      if (typeof projectIntervalDueDates === "function"){
+        const skipDates = new Set(completedSet);
+        if (manualKey) skipDates.add(manualKey);
+        const projections = projectIntervalDueDates(t, { monthsAhead: 3, excludeDates: skipDates, minOccurrences: 1, maxOccurrences: 1 });
+        if (projections.length){
+          const projected = projections[0];
+          const projectedDate = toDayStart(projected?.dateISO || projected?.dueDate);
+          if (projectedDate){
+            dueDate = projectedDate;
+            days = Math.round((projectedDate.getTime() - today.getTime()) / dayMs);
+          }
+        }
+      }
+
       if (manualDate && !completedSet.has(manualKey)){
         const manualDays = Math.round((manualDate.getTime() - today.getTime()) / dayMs);
         const manualIsEarlier = manualDate.getTime() < dueDate.getTime();
@@ -2422,6 +2451,12 @@ function renderNextDueWidget(ndBox){
           days = manualDays;
         }
       }
+
+      const removedSet = Array.isArray(t?.removedOccurrences)
+        ? new Set(t.removedOccurrences.map(normalizeKey).filter(Boolean))
+        : new Set();
+      const dueKey = normalizeKey(dueDate);
+      if (dueKey && removedSet.has(dueKey)) return null;
 
       return { t, nd: { ...nd, due: dueDate, days } };
     })
