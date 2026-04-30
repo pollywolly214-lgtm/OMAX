@@ -1978,8 +1978,23 @@ function projectIntervalDueDates(task, options = {}){
 function restoreCriticalIntervalTasks(){
   const tasks = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
   if (!tasks.length) return false;
-  const targets = new Set(["mixing_tube_rotation", "jewel_nozzle_clean"]);
+  const targets = new Set(["mixing_tube_rotation", "jewel_nozzle_clean", "pump_rebuild"]);
   let changed = false;
+  const deleted = Array.isArray(window.deletedItems) ? window.deletedItems : [];
+  const restoreFromTrash = (matchFn)=>{
+    if (typeof restoreDeletedItem !== "function") return false;
+    const entry = deleted.find(item => item && item.type === "task" && matchFn(String(item.payload?.id || "").toLowerCase(), String(item.payload?.name || "").toLowerCase()));
+    if (!entry || !entry.id) return false;
+    try {
+      const result = restoreDeletedItem(entry.id);
+      return Boolean(result && result.ok);
+    } catch (_err){
+      return false;
+    }
+  };
+  if (restoreFromTrash((id,name)=> id.includes("mixing_tube_rotation") || name.includes("mixing tube rotation"))) changed = true;
+  if (restoreFromTrash((id,name)=> id.includes("jewel_nozzle_clean") || (name.includes("jew") && name.includes("orifice") && name.includes("nozzle")))) changed = true;
+  if (restoreFromTrash((id,name)=> id.includes("pump_rebuild") || (name.includes("pump") && name.includes("rebuild")))) changed = true;
   const matched = [];
   tasks.forEach(task => {
     if (!task) return;
@@ -1987,7 +2002,8 @@ function restoreCriticalIntervalTasks(){
     const name = String(task.name || "").trim().toLowerCase();
     const matches = targets.has(key)
       || name.includes("mixing tube rotation")
-      || name.includes("jew") && name.includes("orifice") && name.includes("nozzle");
+      || name.includes("jew") && name.includes("orifice") && name.includes("nozzle")
+      || name.includes("pump") && name.includes("rebuild");
     if (!matches) return;
     matched.push(task);
 
