@@ -1980,6 +1980,7 @@ function restoreCriticalIntervalTasks(){
   if (!tasks.length) return false;
   const targets = new Set(["mixing_tube_rotation", "jewel_nozzle_clean"]);
   let changed = false;
+  const matched = [];
   tasks.forEach(task => {
     if (!task) return;
     const key = String(task.templateId != null ? task.templateId : task.id || "").trim().toLowerCase();
@@ -1988,6 +1989,7 @@ function restoreCriticalIntervalTasks(){
       || name.includes("mixing tube rotation")
       || name.includes("jew") && name.includes("orifice") && name.includes("nozzle");
     if (!matches) return;
+    matched.push(task);
 
     if (task.calendarKilled === true){ task.calendarKilled = false; changed = true; }
     if (task.recurrence && typeof task.recurrence === "object" && task.recurrence.enabled === false){
@@ -2006,6 +2008,18 @@ function restoreCriticalIntervalTasks(){
       }
     }
   });
+
+  const hasInstanceForTemplate = (templateId)=> tasks.some(item => item && isInstanceTask(item) && String(item.templateId || "") === String(templateId || ""));
+  matched.forEach(task => {
+    if (!isTemplateTask(task)) return;
+    const templateId = task.templateId != null ? task.templateId : task.id;
+    if (hasInstanceForTemplate(templateId)) return;
+    if (typeof scheduleExistingIntervalTask === "function"){
+      const created = scheduleExistingIntervalTask(task, { dateISO: ymd(new Date()), refreshDashboard: false });
+      if (created) changed = true;
+    }
+  });
+
   return changed;
 }
 function renderCalendar(){
