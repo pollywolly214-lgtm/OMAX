@@ -1859,53 +1859,7 @@ function viewCosts(model){
       </div>
     </div>
 
-    <div class="cost-receipt-modal" id="costReceiptModal" role="dialog" aria-modal="true" aria-labelledby="costReceiptTitle" aria-hidden="true" hidden>
-      <div class="cost-receipt-backdrop" tabindex="-1" aria-hidden="true"></div>
-      <div class="cost-receipt-card" role="document">
-        <button type="button" class="cost-receipt-close" data-receipt-close aria-label="Close purchase history"><span aria-hidden="true">×</span></button>
-        <div class="cost-receipt-card-body">
-          <h3 id="costReceiptTitle">Purchase History</h3>
-          <div class="cost-receipt-controls">
-            <label>
-              <span>Week of year</span>
-              <select data-receipt-week-select aria-label="Select purchase history week"></select>
-            </label>
-            <button type="button" class="btn" data-receipt-save-week>Save week</button>
-            <button type="button" class="btn secondary" data-receipt-export-week>Export week (CSV)</button>
-            <button type="button" class="btn secondary" data-receipt-export-range>Export range (CSV)</button>
-          </div>
-          <p class="small muted" data-receipt-week-range>—</p>
-          <div class="cost-weekly-table-wrap">
-            <table class="cost-table cost-receipt-week-table">
-              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th></tr></thead>
-              <tbody data-receipt-week-rows></tbody>
-              <tfoot><tr><th colspan="7">Subtotal</th><th data-receipt-week-subtotal>$0.00</th></tr></tfoot>
-            </table>
-          </div>
-          <div class="cost-receipt-summary-controls">
-            <label>
-              <span>Range</span>
-              <select data-receipt-range-select aria-label="Select receipt summary range">
-                <option value="1">1 month</option>
-                <option value="2">2 months</option>
-                <option value="3">3 months</option>
-                <option value="6">6 months</option>
-                <option value="12">1 year</option>
-                <option value="all">All time</option>
-              </select>
-            </label>
-          </div>
-          <p class="small muted" data-receipt-range-label>—</p>
-          <div class="cost-weekly-table-wrap">
-            <table class="cost-table cost-receipt-summary-table">
-              <thead><tr><th>Date</th><th>Purchased</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th><th>Sub total</th></tr></thead>
-              <tbody data-receipt-range-rows></tbody>
-              <tfoot><tr><th colspan="7">Subtotal</th><th data-receipt-range-subtotal>$0.00</th></tr></tfoot>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
+${purchaseHistoryModalMarkup}
 
     <div class="dashboard-layout cost-layout" id="costLayout">
       <div class="dashboard-window" data-cost-window="overview">
@@ -4928,7 +4882,8 @@ function viewOrderRequest(model){
           <button type="button" class="secondary" data-order-deny ${!active.canApprove ? "disabled" : ""}>Mark denied</button>
         </div>
       </div>
-    </div>`;
+    </div>
+    ${purchaseHistoryModalMarkup}`;
 
   const historyContent = `
     <div class="order-history">
@@ -4996,6 +4951,9 @@ function viewOrderRequest(model){
         <h3>Order Requests</h3>
         <p class="small muted">Build purchase lists for waterjet parts, approve them, and keep an auditable history.</p>
         ${summaryContent}
+        <div class="order-request-tools">
+          <button type="button" class="btn secondary" data-cost-receipt-open>Purchase History</button>
+        </div>
         <div class="order-tabs">
           <button type="button" data-order-tab="active" class="${tab === "active" ? "active" : ""}">Active request</button>
           <button type="button" data-order-tab="history" class="${tab === "history" ? "active" : ""}">History</button>
@@ -5063,3 +5021,53 @@ function viewDeletedItems(model){
     </div>
   `;
 }
+
+const purchaseHistoryModalMarkup = `
+  <div class="cost-receipt-modal" id="costReceiptModal" role="dialog" aria-modal="true" aria-labelledby="costReceiptTitle" aria-hidden="true" hidden>
+    <div class="cost-receipt-backdrop" tabindex="-1" aria-hidden="true" data-receipt-close></div>
+    <div class="cost-receipt-card" role="document">
+      <button type="button" class="cost-receipt-close" data-receipt-close aria-label="Close purchase history"><span aria-hidden="true">×</span></button>
+      <div class="cost-receipt-card-body">
+        <h3 id="costReceiptTitle">Purchase History</h3>
+        <div class="cost-receipt-controls">
+          <label>
+            <span>Week of year</span>
+            <select data-receipt-week-select aria-label="Select purchase history week"></select>
+          </label>
+          <button type="button" class="btn" data-receipt-save-week>Save week</button>
+          <button type="button" class="btn secondary" data-receipt-export-week>Export week (CSV)</button>
+          <button type="button" class="btn secondary" data-receipt-export-range>Export range (CSV)</button>
+        </div>
+        <p class="small muted" data-receipt-week-range>—</p>
+        <div class="cost-weekly-table-wrap">
+          <table class="cost-table cost-receipt-week-table">
+            <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th></tr></thead>
+            <tbody data-receipt-week-rows></tbody>
+            <tfoot><tr><th colspan="7">Subtotal</th><th data-receipt-week-subtotal>$0.00</th></tr></tfoot>
+          </table>
+        </div>
+        <div class="cost-receipt-summary-controls">
+          <label>
+            <span>Range</span>
+            <select data-receipt-range-select aria-label="Select receipt summary range">
+              <option value="1">1 month</option>
+              <option value="2">2 months</option>
+              <option value="3">3 months</option>
+              <option value="6">6 months</option>
+              <option value="12">1 year</option>
+              <option value="all">All time</option>
+            </select>
+          </label>
+        </div>
+        <p class="small muted" data-receipt-range-label>—</p>
+        <div class="cost-weekly-table-wrap">
+          <table class="cost-table cost-receipt-summary-table">
+            <thead><tr><th>Date</th><th>Purchased</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th><th>Sub total</th></tr></thead>
+            <tbody data-receipt-range-rows></tbody>
+            <tfoot><tr><th colspan="7">Subtotal</th><th data-receipt-range-subtotal>$0.00</th></tr></tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
