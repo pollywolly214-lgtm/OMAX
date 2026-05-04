@@ -3005,13 +3005,18 @@ const saveCloudInternal = debounce(async ()=>{
   }catch(e){
     console.error("Cloud save failed:", e);
   }
-}, 300);
+}, 10000);
 function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
   try {
     if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
     const prev = window.__lastSnapshotForFlow && typeof window.__lastSnapshotForFlow === "object" ? window.__lastSnapshotForFlow : null;
     const next = nextSnapshot && typeof nextSnapshot === "object" ? nextSnapshot : null;
     const trackedKeys = ["maintenanceTasks", "maintenanceLogs", "calendarItems", "inventory", "receiptTrackerWeeks", "orderRequests", "jobs", "settingsFolders"];
+    const skipTrigger = /history|syncprocesslog|data_flow_save/i.test(String(trigger || ""));
+    if (skipTrigger){
+      if (next) window.__lastSnapshotForFlow = next;
+      return;
+    }
     const changedAreas = [];
     const details = [];
     if (prev && next){
@@ -3092,6 +3097,19 @@ function saveCloudNow(){
 }
 
 if (typeof window !== "undefined"){
+  if (!window.__globalEditSaveHookBound){
+    const onEditAutosave = (event)=>{
+      const t = event && event.target;
+      if (!(t instanceof HTMLElement)) return;
+      const tag = String(t.tagName || "").toLowerCase();
+      const editable = tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable;
+      if (!editable) return;
+      saveCloudDebounced();
+    };
+    document.addEventListener("change", onEditAutosave, true);
+    document.addEventListener("input", onEditAutosave, true);
+    window.__globalEditSaveHookBound = true;
+  }
   window.addEventListener("visibilitychange", ()=>{
     if (document.visibilityState === "hidden"){
       saveCloudNow();
