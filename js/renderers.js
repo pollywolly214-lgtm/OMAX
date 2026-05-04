@@ -12404,6 +12404,10 @@ const appendEmptyRow = (focusFirst = false)=>{
         });
       }
       const openFixerBtn = modal.querySelector("[data-receipt-open-fixer]");
+      if (openFixerBtn instanceof HTMLElement){
+        openFixerBtn.hidden = true;
+        openFixerBtn.setAttribute("aria-hidden", "true");
+      }
       const buildUnlinkedGroups = ()=>{
         const missing = [];
         (window.receiptTrackerWeeks || []).forEach(week => {
@@ -12470,6 +12474,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         return touched;
       };
       const openFixerWidget = ()=>{
+        return;
         const inventoryRows = Array.isArray(window.inventory) ? window.inventory : (Array.isArray(inventory) ? inventory : []);
         let selectedGroupKey = "";
         let selectedInventoryId = "";
@@ -12546,7 +12551,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         redraw();
         document.body.appendChild(shell);
       };
-      openFixerBtn?.addEventListener("click", openFixerWidget);
+      // Fixer widget intentionally disabled; linking is now handled inline via direct data flows.
       if (exportRangeBtn instanceof HTMLElement){
         exportRangeBtn.addEventListener("click", ()=>{
           const { start, end } = getRangeWindow(activeRange);
