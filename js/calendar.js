@@ -1978,7 +1978,7 @@ function projectIntervalDueDates(task, options = {}){
 function restoreCriticalIntervalTasks(){
   const tasks = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
   if (!tasks.length) return false;
-  const targets = new Set(["mixing_tube_rotation", "jewel_nozzle_clean", "pump_rebuild"]);
+  const targets = new Set(["mixing_tube_rotation", "jewel_nozzle_clean", "pump_rebuild", "pump_tube_noz_filter"]);
   let changed = false;
   const deleted = Array.isArray(window.deletedItems) ? window.deletedItems : [];
   const restoreFromTrash = (matchFn)=>{
@@ -1993,6 +1993,7 @@ function restoreCriticalIntervalTasks(){
     }
   };
   if (restoreFromTrash((id,name)=> id.includes("mixing_tube_rotation") || name.includes("mixing tube rotation"))) changed = true;
+  if (restoreFromTrash((id,name)=> id.includes("pump_tube_noz_filter") || (name.includes("mixing tube") && name.includes("replace")) || (name.includes("pump tube") && name.includes("nozzle filter")))) changed = true;
   if (restoreFromTrash((id,name)=> id.includes("jewel_nozzle_clean") || (name.includes("jew") && name.includes("orifice") && name.includes("nozzle")))) changed = true;
   if (restoreFromTrash((id,name)=> id.includes("pump_rebuild") || (name.includes("pump") && name.includes("rebuild")))) changed = true;
   const matched = [];
@@ -2003,7 +2004,9 @@ function restoreCriticalIntervalTasks(){
     const matches = targets.has(key)
       || name.includes("mixing tube rotation")
       || name.includes("jew") && name.includes("orifice") && name.includes("nozzle")
-      || name.includes("pump") && name.includes("rebuild");
+      || name.includes("pump") && name.includes("rebuild")
+      || name.includes("mixing tube") && name.includes("replace")
+      || name.includes("pump tube") && name.includes("nozzle filter");
     if (!matches) return;
     matched.push(task);
 
