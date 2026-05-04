@@ -558,6 +558,45 @@ function setFamilyOccurrenceHours(task, dateISO, hours){
   return changed;
 }
 
+
+function removeSingleOccurrenceAcrossTaskFamily(task, dateISO){
+  const key = normalizeDateKey(dateISO);
+  if (!key) return false;
+  let changed = false;
+  const isSameDay = (value)=> normalizeDateKey(value) === key;
+  visitTaskFamily(task, member => {
+    if (!member) return;
+    if (markOccurrenceRemoved(member, key)) changed = true;
+
+    const nowIso = new Date().toISOString();
+    const history = Array.isArray(member.manualHistory) ? member.manualHistory : [];
+    let entry = history.find(item => isSameDay(item?.dateISO));
+    if (!entry){
+      history.push({ dateISO: key, status: "removed", recordedAtISO: nowIso, source: "calendar" });
+      member.manualHistory = history;
+      changed = true;
+    }else if (entry.status !== "removed"){
+      entry.status = "removed";
+      if (!entry.recordedAtISO) entry.recordedAtISO = nowIso;
+      changed = true;
+    }
+
+    if (member.calendarKilled === true){
+      member.calendarKilled = false;
+      changed = true;
+    }
+    if (member.recurrence && typeof member.recurrence === "object" && member.recurrence.enabled === false){
+      member.recurrence = { ...member.recurrence, enabled: true };
+      changed = true;
+    }
+    if (isSameDay(member.calendarDateISO)){
+      member.calendarDateISO = null;
+      changed = true;
+    }
+  });
+  return changed;
+}
+
 function killTaskFamilyCalendarScheduling(task){
   let changed = false;
   visitTaskFamily(task, member => {
@@ -863,9 +902,9 @@ function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
   };
 
   if (mode === "interval" && normalizedScope === "single"){
-    const killed = killTaskFamilyCalendarScheduling(task);
-    if (killed) changed = true;
-    return killed || changed || true;
+    const removed = removeSingleOccurrenceAcrossTaskFamily(task, key);
+    if (removed) changed = true;
+    return changed;
   }
 
   if (mode === "interval"){
@@ -1979,7 +2018,78 @@ function projectIntervalDueDates(task, options = {}){
   return events;
 }
 
+
+function restoreCriticalIntervalTasks(){
+  const tasks = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  if (!tasks.length) return false;
+  const targets = new Set(["mixing_tube_rotation", "jewel_nozzle_clean", "pump_rebuild", "pump_tube_noz_filter"]);
+  let changed = false;
+  const deleted = Array.isArray(window.deletedItems) ? window.deletedItems : [];
+  const restoreFromTrash = (matchFn)=>{
+    if (typeof restoreDeletedItem !== "function") return false;
+    const entry = deleted.find(item => item && item.type === "task" && matchFn(String(item.payload?.id || "").toLowerCase(), String(item.payload?.name || "").toLowerCase()));
+    if (!entry || !entry.id) return false;
+    try {
+      const result = restoreDeletedItem(entry.id);
+      return Boolean(result && result.ok);
+    } catch (_err){
+      return false;
+    }
+  };
+  if (restoreFromTrash((id,name)=> id.includes("mixing_tube_rotation") || name.includes("mixing tube rotation"))) changed = true;
+  if (restoreFromTrash((id,name)=> id.includes("pump_tube_noz_filter") || (name.includes("mixing tube") && name.includes("replace")) || (name.includes("pump tube") && name.includes("nozzle filter")))) changed = true;
+  if (restoreFromTrash((id,name)=> id.includes("jewel_nozzle_clean") || (name.includes("jew") && name.includes("orifice") && name.includes("nozzle")))) changed = true;
+  if (restoreFromTrash((id,name)=> id.includes("pump_rebuild") || (name.includes("pump") && name.includes("rebuild")))) changed = true;
+  const matched = [];
+  tasks.forEach(task => {
+    if (!task) return;
+    const key = String(task.templateId != null ? task.templateId : task.id || "").trim().toLowerCase();
+    const name = String(task.name || "").trim().toLowerCase();
+    const matches = targets.has(key)
+      || name.includes("mixing tube rotation")
+      || name.includes("jew") && name.includes("orifice") && name.includes("nozzle")
+      || name.includes("pump") && name.includes("rebuild")
+      || name.includes("mixing tube") && name.includes("replace")
+      || name.includes("pump tube") && name.includes("nozzle filter");
+    if (!matches) return;
+    matched.push(task);
+
+    if (task.calendarKilled === true){ task.calendarKilled = false; changed = true; }
+    if (task.recurrence && typeof task.recurrence === "object" && task.recurrence.enabled === false){
+      task.recurrence = { ...task.recurrence, enabled: true };
+      changed = true;
+    }
+    if (Array.isArray(task.removedOccurrences) && task.removedOccurrences.length){
+      task.removedOccurrences = [];
+      changed = true;
+    }
+    if (Array.isArray(task.manualHistory)){
+      const next = task.manualHistory.filter(entry => entry && entry.status !== "removed");
+      if (next.length !== task.manualHistory.length){
+        task.manualHistory = next;
+        changed = true;
+      }
+    }
+  });
+
+  const hasInstanceForTemplate = (templateId)=> tasks.some(item => item && isInstanceTask(item) && String(item.templateId || "") === String(templateId || ""));
+  matched.forEach(task => {
+    if (!isTemplateTask(task)) return;
+    const templateId = task.templateId != null ? task.templateId : task.id;
+    if (hasInstanceForTemplate(templateId)) return;
+    if (typeof scheduleExistingIntervalTask === "function"){
+      const created = scheduleExistingIntervalTask(task, { dateISO: ymd(new Date()), refreshDashboard: false });
+      if (created) changed = true;
+    }
+  });
+
+  return changed;
+}
+
 function renderCalendar(){
+  if (restoreCriticalIntervalTasks()){
+    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+  }
   const container = $("#months");
   if (!container) return;
   let showAll = Boolean(window.__calendarShowAllMonths);
