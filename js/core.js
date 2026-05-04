@@ -3006,6 +3006,53 @@ const saveCloudInternal = debounce(async ()=>{
     console.error("Cloud save failed:", e);
   }
 }, 300);
+function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
+  try {
+    if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
+    const prev = window.__lastSnapshotForFlow && typeof window.__lastSnapshotForFlow === "object" ? window.__lastSnapshotForFlow : null;
+    const next = nextSnapshot && typeof nextSnapshot === "object" ? nextSnapshot : null;
+    const trackedKeys = ["maintenanceTasks", "maintenanceLogs", "calendarItems", "inventory", "receiptTrackerWeeks", "orderRequests", "jobs", "settingsFolders"];
+    const changedAreas = [];
+    const details = [];
+    if (prev && next){
+      trackedKeys.forEach(key => {
+        const beforeVal = prev[key] ?? null;
+        const afterVal = next[key] ?? null;
+        const a = JSON.stringify(beforeVal);
+        const b = JSON.stringify(afterVal);
+        if (a !== b){
+          changedAreas.push(key);
+          const beforeCount = Array.isArray(beforeVal) ? beforeVal.length : (beforeVal && typeof beforeVal === "object" ? Object.keys(beforeVal).length : (beforeVal == null ? 0 : 1));
+          const afterCount = Array.isArray(afterVal) ? afterVal.length : (afterVal && typeof afterVal === "object" ? Object.keys(afterVal).length : (afterVal == null ? 0 : 1));
+          details.push(`${key}: ${beforeCount} -> ${afterCount}`);
+        }
+      });
+    } else if (!prev && next){
+      trackedKeys.forEach(key => {
+        const afterVal = next[key] ?? null;
+        const afterCount = Array.isArray(afterVal) ? afterVal.length : (afterVal && typeof afterVal === "object" ? Object.keys(afterVal).length : (afterVal == null ? 0 : 1));
+        if (afterCount > 0){
+          changedAreas.push(key);
+          details.push(`${key}: initialized -> ${afterCount}`);
+        }
+      });
+    }
+    if (!changedAreas.length){
+      if (next) window.__lastSnapshotForFlow = next;
+      return;
+    }
+    window.syncProcessLog.unshift({
+      atISO: new Date().toISOString(),
+      eventType: "data_flow_save",
+      status: "saved",
+      sourceArea: trigger,
+      targetArea: changedAreas.join(","),
+      message: `WHAT changed: ${details.join(" | ")}; FROM: ${trigger}; TO: ${changedAreas.join(", ")}; HOW: state diff on save.`
+    });
+    if (window.syncProcessLog.length > 1000) window.syncProcessLog.length = 1000;
+    if (next) window.__lastSnapshotForFlow = next;
+  } catch (_err){}
+}
 function saveCloudDebounced(){
   if (isVercelPreviewRuntime()) return;
   try {
@@ -3018,6 +3065,7 @@ function saveCloudDebounced(){
   } catch (err) {
     console.warn("History capture before save failed:", err);
   }
+  try { recordDataFlowEvent("saveCloudDebounced", snapshotState()); } catch (_err){}
   saveCloudInternal();
 }
 function saveCloudNow(){
@@ -3032,6 +3080,7 @@ function saveCloudNow(){
   } catch (err) {
     console.warn("History capture before save failed:", err);
   }
+  try { recordDataFlowEvent("saveCloudNow", snapshotState()); } catch (_err){}
   if (typeof saveCloudInternal.flush === "function"){
     const flushed = saveCloudInternal.flush();
     if (!flushed){
