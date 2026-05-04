@@ -2882,11 +2882,7 @@ function viewJobs(){
   }
   const addFormOpen = addFormOpenState;
   const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [];
-  const completedSorted = completedJobs.sort((a,b)=>{
-    const aTime = new Date(a.completedAtISO || a.dueISO || a.startISO || 0).getTime();
-    const bTime = new Date(b.completedAtISO || b.dueISO || b.startISO || 0).getTime();
-    return bTime - aTime;
-  });
+  const completedSorted = completedJobs.slice();
   const allJobsForCutNumbers = (Array.isArray(cuttingJobs) ? cuttingJobs : []).concat(completedJobs).filter(Boolean);
   const addedOrderFromId = (job)=>{
     const id = String(job?.id || "");
@@ -2924,6 +2920,16 @@ function viewJobs(){
   });
   const jobCutLabel = (job)=> jobCutMap.get(String(job?.id || "")) || "C000";
   const jobCategoryCutLabel = (job)=> jobCategoryCutMap.get(String(job?.id || "")) || "0";
+  const cutNumberValue = (job)=> {
+    const label = jobCutLabel(job);
+    const numeric = Number.parseInt(String(label).replace(/[^\d]/g, ""), 10);
+    return Number.isFinite(numeric) ? numeric : 0;
+  };
+  completedSorted.sort((a, b) => {
+    const diff = cutNumberValue(b) - cutNumberValue(a);
+    if (diff !== 0) return diff;
+    return String(b?.completedAtISO || b?.dueISO || b?.startISO || "").localeCompare(String(a?.completedAtISO || a?.dueISO || a?.startISO || ""));
+  });
   const jobNameWithCut = (job, fallback = "Job")=> `${String(job?.name || fallback)} · ${jobCutLabel(job)} · ${jobCategoryCutLabel(job)}`;
   const historySearchRaw = typeof jobHistorySearchTerm === "string"
     ? jobHistorySearchTerm
