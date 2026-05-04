@@ -11967,6 +11967,8 @@ function renderCosts(){
       const rangeLabel = modal.querySelector("[data-receipt-range-label]");
       const closeControls = Array.from(modal.querySelectorAll("[data-receipt-close]"));
       const saveWeekBtn = modal.querySelector("[data-receipt-save-week]");
+      const clearAllBtn = modal.querySelector("[data-receipt-clear-all]");
+      const undoClearBtn = modal.querySelector("[data-receipt-undo-clear]");
       const exportWeekBtn = modal.querySelector("[data-receipt-export-week]");
       const exportRangeBtn = modal.querySelector("[data-receipt-export-range]");
       const purchasedDatalistId = "receiptPurchasedSuggestions";
@@ -11981,6 +11983,7 @@ function renderCosts(){
       let activeRange = String(window.receiptTrackerRangeSelected || "1");
       let hasUnsavedReceiptChanges = false;
       let hasExplicitSaveSinceEdit = false;
+      let purchaseHistoryUndoSnapshot = null;
       window.receiptTrackerWeekSelected = activeWeekKey;
       window.receiptTrackerRangeSelected = activeRange;
       let saveStatusTimer = null;
@@ -12080,6 +12083,18 @@ function renderCosts(){
           if (showInlineStatus) showSaveStatusChip("Save failed", true);
         }
         return false;
+      };
+      const setUndoClearEnabled = (enabled)=>{
+        if (!(undoClearBtn instanceof HTMLButtonElement)) return;
+        undoClearBtn.disabled = !enabled;
+      };
+      const snapshotPurchaseHistory = ()=>{
+        return Array.isArray(window.receiptTrackerWeeks)
+          ? window.receiptTrackerWeeks.map(week => ({
+              ...week,
+              rows: normalizeRows(week?.rows).map(row => ({ ...row }))
+            }))
+          : [];
       };
       const rebuildPurchaseTemplates = ()=>{
         purchaseTemplates.clear();
@@ -12296,6 +12311,48 @@ function renderCosts(){
           saveWeekBtn.textContent = prevLabel || "Save week";
         });
       }
+      if (clearAllBtn instanceof HTMLButtonElement){
+        clearAllBtn.addEventListener("click", async ()=>{
+          purchaseHistoryUndoSnapshot = snapshotPurchaseHistory();
+          setUndoClearEnabled(Array.isArray(purchaseHistoryUndoSnapshot) && purchaseHistoryUndoSnapshot.length > 0);
+          if (Array.isArray(window.receiptTrackerWeeks)){
+            window.receiptTrackerWeeks = window.receiptTrackerWeeks.map(week => ({ ...week, rows: [] }));
+          } else {
+            window.receiptTrackerWeeks = [];
+          }
+          hasUnsavedReceiptChanges = true;
+          hasExplicitSaveSinceEdit = false;
+          persistReceiptState();
+          rebuildPurchaseTemplates();
+          renderWeekRows();
+          renderRangeTable();
+          renderCentralSpendRows();
+          await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true });
+          if (typeof toast === "function") toast("Purchase history cleared. Use Undo clear to restore.");
+        });
+      }
+      if (undoClearBtn instanceof HTMLButtonElement){
+        undoClearBtn.addEventListener("click", async ()=>{
+          if (!Array.isArray(purchaseHistoryUndoSnapshot)) return;
+          window.receiptTrackerWeeks = purchaseHistoryUndoSnapshot.map(week => ({
+            ...week,
+            rows: normalizeRows(week?.rows).map(row => ({ ...row }))
+          }));
+          purchaseHistoryUndoSnapshot = null;
+          setUndoClearEnabled(false);
+          hasUnsavedReceiptChanges = true;
+          hasExplicitSaveSinceEdit = false;
+          persistReceiptState();
+          rebuildPurchaseTemplates();
+          renderWeekOptions();
+          renderWeekRows();
+          renderRangeTable();
+          renderCentralSpendRows();
+          await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true });
+          if (typeof toast === "function") toast("Purchase history restore complete.");
+        });
+      }
+      setUndoClearEnabled(false);
       if (exportWeekBtn instanceof HTMLElement){
         exportWeekBtn.addEventListener("click", ()=>{
           const entry = saveWeekRowsFromDom();
