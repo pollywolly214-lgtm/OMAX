@@ -16126,18 +16126,25 @@ function computeCostModel(){
     emptyMessage: orderRows.length ? "" : "Approve or deny order requests to build the spend log."
   };
 
-  const completedJobsForDataCenter = (Array.isArray(completedCuttingJobs) ? completedCuttingJobs.slice() : [])
+  const completedJobsInCounterOrder = Array.isArray(completedCuttingJobs) ? completedCuttingJobs.slice() : [];
+  const completedJobCounterById = new Map();
+  completedJobsInCounterOrder.forEach((job, index) => {
+    const key = job?.id != null ? String(job.id) : `completed_job_${index}`;
+    completedJobCounterById.set(key, index + 1);
+  });
+  const completedJobsForDataCenter = completedJobsInCounterOrder
     .sort((a, b) => {
-      const aDate = String(a?.completedAtISO || a?.dueISO || a?.startISO || "");
-      const bDate = String(b?.completedAtISO || b?.dueISO || b?.startISO || "");
-      return bDate.localeCompare(aDate);
+      const aKey = a?.id != null ? String(a.id) : "";
+      const bKey = b?.id != null ? String(b.id) : "";
+      const aCounter = completedJobCounterById.get(aKey) || 0;
+      const bCounter = completedJobCounterById.get(bKey) || 0;
+      return bCounter - aCounter;
     });
   const cuttingCategoryRemaining = new Map();
   completedJobsForDataCenter.forEach(job => {
     const key = job?.cat != null ? String(job.cat) : "__uncategorized__";
     cuttingCategoryRemaining.set(key, (cuttingCategoryRemaining.get(key) || 0) + 1);
   });
-  const totalCompletedJobs = completedJobsForDataCenter.length;
   const cuttingJobsDataTable = completedJobsForDataCenter.map((job, index) => {
     const categoryId = job?.cat != null ? String(job.cat) : "";
     const categoryLabel = categoryId ? resolveCategoryName(categoryId) : "Uncategorized";
@@ -16179,7 +16186,7 @@ function computeCostModel(){
       projectNumber: String(job?.projectNumber || "—"),
       notes: String(job?.notes || "").trim() || "—",
       priorityLabel: Number.isFinite(Number(job?.priority)) ? String(Math.max(1, Math.floor(Number(job.priority)))) : "—",
-      cumulativeCutNumberLabel: `#${Math.max(1, totalCompletedJobs - index)}`,
+      cumulativeCutNumberLabel: `C${Math.max(1, completedJobCounterById.get(job?.id != null ? String(job.id) : `completed_job_${index}`) || 0)}`,
       categoryCutNumberLabel: `#${categoryCutCount}`,
       hoursValue: hours,
       chargeRateValue: chargeRate,
