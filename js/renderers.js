@@ -11756,9 +11756,9 @@ function renderCosts(){
           <h2>Weekly Cost Report</h2>
           <div class="summary"><strong>Week:</strong> ${escHtml(weekTitle)}</div>
           <table>
-            <thead><tr><th colspan="4">Cuts completed</th></tr><tr><th>Cut</th><th>Category</th><th>Hours</th><th>Cost impact</th></tr></thead>
+            <thead><tr><th colspan="4">Cuts completed</th></tr><tr><th>Cut</th><th>Category</th><th>Hours</th><th>Profit impact</th></tr></thead>
             <tbody>${cutsRows}</tbody>
-            <tfoot class="totals"><tr><td colspan="3">Cuts total</td><td>${escHtml(report.totalCutCostLabel || "$0")}</td></tr><tr><td colspan="3">Cutting time</td><td>${escHtml(report.totalCutHoursLabel || "0 hr")}</td></tr></tfoot>
+            <tfoot class="totals"><tr><td colspan="3">Cuts total profit</td><td>${escHtml(report.totalCutCostLabel || "$0")}</td></tr><tr><td colspan="3">Cutting time</td><td>${escHtml(report.totalCutHoursLabel || "0 hr")}</td></tr></tfoot>
           </table>
           <table>
             <thead><tr><th colspan="4">Maintenance completed</th></tr><tr><th>Task</th><th>Type</th><th>Part #</th><th>Cost</th></tr></thead>
@@ -16936,7 +16936,7 @@ function drawWeeklyReportChart(canvas, report){
   const weeklyHoursActual = Math.max(0, Number(report.totalCutHours) || 0);
   const weeklyHoursGoal = 40;
   const costBars = [
-    { label: "Cuts cost", value: Math.max(0, Number(report.totalCutCost) || 0), color: "#2e7d32" },
+    { label: "Cuts profit", value: Math.max(0, Number(report.totalCutCost) || 0), color: "#2e7d32" },
     { label: "Maintenance cost", value: Math.abs(Number(report.totalMaintenanceCost) || 0), color: "#0a63c2" }
   ];
 
