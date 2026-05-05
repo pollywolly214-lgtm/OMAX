@@ -3051,6 +3051,11 @@ function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
       if (next) window.__lastSnapshotForFlow = next;
       return;
     }
+    const fingerprint = `${changedAreas.join(",")}::${details.join("|")}::${String(trigger || "")}`;
+    if (window.__lastDataFlowFingerprint === fingerprint){
+      if (next) window.__lastSnapshotForFlow = next;
+      return;
+    }
     window.syncProcessLog.unshift({
       atISO: new Date().toISOString(),
       eventType: "data_flow_save",
@@ -3059,6 +3064,7 @@ function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
       targetArea: changedAreas.join(","),
       message: `WHAT changed: ${details.join(" | ")}; FROM: ${trigger}; TO: ${changedAreas.join(", ")}; HOW: state diff on save.`
     });
+    window.__lastDataFlowFingerprint = fingerprint;
     if (window.syncProcessLog.length > 1000) window.syncProcessLog.length = 1000;
     if (next) window.__lastSnapshotForFlow = next;
   } catch (_err){}
