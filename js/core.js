@@ -3009,7 +3009,7 @@ const saveCloudInternal = debounce(async ()=>{
   }catch(e){
     console.error("Cloud save failed:", e);
   }
-}, 10000);
+}, 1000);
 function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
   try {
     if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
@@ -3124,10 +3124,6 @@ function saveCloudDebounced(){
   }
   const snap = snapshotState();
   const signature = getTrackedStateSignature(snap);
-  if (window.__lastSavedTrackedStateSignature === signature){
-    if (!window.__lastSnapshotForFlow) window.__lastSnapshotForFlow = snap;
-    return;
-  }
   try { recordDataFlowEvent("saveCloudDebounced", snap); } catch (_err){}
   window.__lastSavedTrackedStateSignature = signature;
   saveCloudInternal();
