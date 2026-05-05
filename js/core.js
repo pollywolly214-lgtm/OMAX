@@ -3146,10 +3146,6 @@ function saveCloudNow(){
   }
   const snap = snapshotState();
   const signature = getTrackedStateSignature(snap);
-  if (window.__lastSavedTrackedStateSignature === signature){
-    if (!window.__lastSnapshotForFlow) window.__lastSnapshotForFlow = snap;
-    return;
-  }
   try { recordDataFlowEvent("saveCloudNow", snap); } catch (_err){}
   window.__lastSavedTrackedStateSignature = signature;
   if (typeof saveCloudInternal.flush === "function"){
