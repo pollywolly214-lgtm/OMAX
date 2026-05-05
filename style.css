@@ -6193,3 +6193,12 @@ body.job-flow-lock-scroll {
 [data-receipt-open-fixer]{
   display:none !important;
 }
+
+[data-dc-log-rows] td{
+  white-space:normal !important;
+  line-height:1.25 !important;
+  padding-top:6px !important;
+  padding-bottom:6px !important;
+  vertical-align:top;
+  word-break:break-word;
+}
