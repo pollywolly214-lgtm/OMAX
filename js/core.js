@@ -3023,8 +3023,8 @@ function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
       trackedKeys.forEach(key => {
         const beforeVal = prev[key] ?? null;
         const afterVal = next[key] ?? null;
-        const a = JSON.stringify(beforeVal);
-        const b = JSON.stringify(afterVal);
+        const a = getAreaSignature(key, beforeVal);
+        const b = getAreaSignature(key, afterVal);
         if (a !== b){
           changedAreas.push(key);
           const beforeCount = Array.isArray(beforeVal) ? beforeVal.length : (beforeVal && typeof beforeVal === "object" ? Object.keys(beforeVal).length : (beforeVal == null ? 0 : 1));
@@ -3058,6 +3058,35 @@ function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
     if (next) window.__lastSnapshotForFlow = next;
   } catch (_err){}
 }
+function stableStringify(value){
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(item => stableStringify(item)).join(",")}]`;
+  const keys = Object.keys(value).sort();
+  return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
+}
+function getAreaSignature(areaKey, areaValue){
+  if (!Array.isArray(areaValue) && (!areaValue || typeof areaValue !== "object")) return stableStringify(areaValue);
+  if (areaKey === "inventory"){
+    const rows = Array.isArray(areaValue) ? areaValue.slice() : [];
+    rows.sort((a,b)=> String(a?.id || a?.pn || a?.name || "").localeCompare(String(b?.id || b?.pn || b?.name || "")));
+    return stableStringify(rows.map(item => ({
+      id: item?.id ?? null, name: item?.name ?? null, pn: item?.pn ?? null, qtyNew: item?.qtyNew ?? null, qtyOld: item?.qtyOld ?? null, unit: item?.unit ?? null, price: item?.price ?? null, folderId: item?.folderId ?? null, link: item?.link ?? null
+    })));
+  }
+  if (areaKey === "receiptTrackerWeeks"){
+    const weeks = Array.isArray(areaValue) ? areaValue.slice() : [];
+    weeks.sort((a,b)=> String(a?.key || "").localeCompare(String(b?.key || "")));
+    return stableStringify(weeks.map(week => ({
+      key: week?.key ?? null,
+      startISO: week?.startISO ?? null,
+      endISO: week?.endISO ?? null,
+      rows: (Array.isArray(week?.rows) ? week.rows.slice() : []).map(row => ({
+        date: row?.date ?? null, purchased: row?.purchased ?? null, cost: row?.cost ?? null, qty: row?.qty ?? null, partNumber: row?.partNumber ?? null, inventoryItemId: row?.inventoryItemId ?? null, shipping: row?.shipping ?? null, tax: row?.tax ?? null
+      })).sort((a,b)=> `${a.date||""}|${a.purchased||""}|${a.partNumber||""}`.localeCompare(`${b.date||""}|${b.purchased||""}|${b.partNumber||""}`))
+    })));
+  }
+  return stableStringify(areaValue);
+}
 function getTrackedStateSignature(snapshot){
   const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
   const tracked = {
@@ -3070,7 +3099,8 @@ function getTrackedStateSignature(snapshot){
     jobs: snap.jobs ?? null,
     settingsFolders: snap.settingsFolders ?? null
   };
-  return JSON.stringify(tracked);
+  const normalized = Object.fromEntries(Object.entries(tracked).map(([k,v]) => [k, getAreaSignature(k, v)]));
+  return stableStringify(normalized);
 }
 function saveCloudDebounced(){
   if (isVercelPreviewRuntime()) return;
