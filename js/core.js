@@ -2099,6 +2099,9 @@ function snapshotState(){
     weeklyCostReports: Array.isArray(window.weeklyCostReports)
       ? window.weeklyCostReports.map(entry => ({ ...entry }))
       : [],
+    syncProcessLog: Array.isArray(window.syncProcessLog)
+      ? window.syncProcessLog.map(entry => ({ ...entry }))
+      : [],
     appConfig: normalizeAppConfig(window.appConfig),
     pumpEff: safePumpEff,
     deletedItems: trashSnapshot,
@@ -2790,6 +2793,7 @@ function adoptState(doc){
   opportunityRollups = Array.isArray(data.opportunityRollups) ? data.opportunityRollups : [];
   weeklyCostReports = Array.isArray(data.weeklyCostReports) ? data.weeklyCostReports.map(entry => ({ ...entry })) : [];
   receiptTrackerWeeks = Array.isArray(data.receiptTrackerWeeks) ? data.receiptTrackerWeeks.map(entry => ({ ...entry })) : [];
+  window.syncProcessLog = Array.isArray(data.syncProcessLog) ? data.syncProcessLog.map(entry => ({ ...entry })) : (Array.isArray(window.syncProcessLog) ? window.syncProcessLog : []);
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -3166,7 +3170,8 @@ if (typeof window !== "undefined"){
       const tag = String(t.tagName || "").toLowerCase();
       const editable = tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable;
       if (!editable) return;
-      saveCloudDebounced();
+      if (event && event.type === "change") saveCloudNow();
+      else saveCloudDebounced();
     };
     document.addEventListener("change", onEditAutosave, true);
     document.addEventListener("input", onEditAutosave, true);
