@@ -3006,10 +3006,11 @@ const saveCloudInternal = debounce(async ()=>{
         lastTouchedAt: new Date().toISOString()
       });
     }
+    try { recordDataFlowEvent("saveCloudInternal", snap); } catch (_err){}
   }catch(e){
     console.error("Cloud save failed:", e);
   }
-}, 1000);
+}, 300);
 function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
   try {
     if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
@@ -3122,10 +3123,6 @@ function saveCloudDebounced(){
   } catch (err) {
     console.warn("History capture before save failed:", err);
   }
-  const snap = snapshotState();
-  const signature = getTrackedStateSignature(snap);
-  try { recordDataFlowEvent("saveCloudDebounced", snap); } catch (_err){}
-  window.__lastSavedTrackedStateSignature = signature;
   saveCloudInternal();
 }
 function saveCloudNow(){
@@ -3140,10 +3137,6 @@ function saveCloudNow(){
   } catch (err) {
     console.warn("History capture before save failed:", err);
   }
-  const snap = snapshotState();
-  const signature = getTrackedStateSignature(snap);
-  try { recordDataFlowEvent("saveCloudNow", snap); } catch (_err){}
-  window.__lastSavedTrackedStateSignature = signature;
   if (typeof saveCloudInternal.flush === "function"){
     const flushed = saveCloudInternal.flush();
     if (!flushed){
