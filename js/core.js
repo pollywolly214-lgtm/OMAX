@@ -3163,20 +3163,6 @@ function saveCloudNow(){
 }
 
 if (typeof window !== "undefined"){
-  if (!window.__globalEditSaveHookBound){
-    const onEditAutosave = (event)=>{
-      const t = event && event.target;
-      if (!(t instanceof HTMLElement)) return;
-      const tag = String(t.tagName || "").toLowerCase();
-      const editable = tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable;
-      if (!editable) return;
-      if (event && event.type === "change") saveCloudNow();
-      else saveCloudDebounced();
-    };
-    document.addEventListener("change", onEditAutosave, true);
-    document.addEventListener("input", onEditAutosave, true);
-    window.__globalEditSaveHookBound = true;
-  }
   window.addEventListener("visibilitychange", ()=>{
     if (document.visibilityState === "hidden"){
       saveCloudNow();
