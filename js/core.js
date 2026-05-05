@@ -3011,7 +3011,7 @@ function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
     if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
     const prev = window.__lastSnapshotForFlow && typeof window.__lastSnapshotForFlow === "object" ? window.__lastSnapshotForFlow : null;
     const next = nextSnapshot && typeof nextSnapshot === "object" ? nextSnapshot : null;
-    const trackedKeys = ["maintenanceTasks", "maintenanceLogs", "calendarItems", "inventory", "receiptTrackerWeeks", "orderRequests", "jobs", "settingsFolders"];
+    const trackedKeys = ["totalHistory", "tasksInterval", "tasksAsReq", "inventory", "inventoryFolders", "receiptTrackerWeeks", "orderRequests", "cuttingJobs", "completedCuttingJobs", "dailyCutHours", "garnetCleanings", "settingsFolders"];
     const skipTrigger = /history|syncprocesslog|data_flow_save/i.test(String(trigger || ""));
     if (skipTrigger){
       if (next) window.__lastSnapshotForFlow = next;
@@ -3090,13 +3090,17 @@ function getAreaSignature(areaKey, areaValue){
 function getTrackedStateSignature(snapshot){
   const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
   const tracked = {
-    maintenanceTasks: snap.maintenanceTasks ?? null,
-    maintenanceLogs: snap.maintenanceLogs ?? null,
-    calendarItems: snap.calendarItems ?? null,
+    totalHistory: snap.totalHistory ?? null,
+    tasksInterval: snap.tasksInterval ?? null,
+    tasksAsReq: snap.tasksAsReq ?? null,
     inventory: snap.inventory ?? null,
+    inventoryFolders: snap.inventoryFolders ?? null,
     receiptTrackerWeeks: snap.receiptTrackerWeeks ?? null,
     orderRequests: snap.orderRequests ?? null,
-    jobs: snap.jobs ?? null,
+    cuttingJobs: snap.cuttingJobs ?? null,
+    completedCuttingJobs: snap.completedCuttingJobs ?? null,
+    dailyCutHours: snap.dailyCutHours ?? null,
+    garnetCleanings: snap.garnetCleanings ?? null,
     settingsFolders: snap.settingsFolders ?? null
   };
   const normalized = Object.fromEntries(Object.entries(tracked).map(([k,v]) => [k, getAreaSignature(k, v)]));
