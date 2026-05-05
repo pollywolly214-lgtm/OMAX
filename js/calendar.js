@@ -565,8 +565,13 @@ function markCalendarTaskComplete(meta, dateISO){
   const task = meta.task;
   const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
   let changed = false;
+  const clearRemovedForKey = (member)=>{
+    if (!member || typeof member !== "object") return false;
+    return clearRemovedOccurrences(member, value => normalizeDateKey(value) === key);
+  };
 
   if (mode === "interval"){
+    if (clearRemovedForKey(task)) changed = true;
     const currentHoursRaw = typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : null;
     const currentHours = currentHoursRaw != null && Number.isFinite(Number(currentHoursRaw)) ? Number(currentHoursRaw) : null;
     if (currentHours != null){
@@ -630,6 +635,7 @@ function markCalendarTaskComplete(meta, dateISO){
     }
     changed = true;
   }else{
+    if (clearRemovedForKey(task)) changed = true;
     if (!Array.isArray(task.completedDates)) task.completedDates = [];
     if (!task.completedDates.includes(key)){
       task.completedDates.push(key);

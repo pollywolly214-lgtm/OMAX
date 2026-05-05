@@ -2099,6 +2099,9 @@ function snapshotState(){
     weeklyCostReports: Array.isArray(window.weeklyCostReports)
       ? window.weeklyCostReports.map(entry => ({ ...entry }))
       : [],
+    syncProcessLog: Array.isArray(window.syncProcessLog)
+      ? window.syncProcessLog.map(entry => ({ ...entry }))
+      : [],
     appConfig: normalizeAppConfig(window.appConfig),
     pumpEff: safePumpEff,
     deletedItems: trashSnapshot,
@@ -2790,6 +2793,7 @@ function adoptState(doc){
   opportunityRollups = Array.isArray(data.opportunityRollups) ? data.opportunityRollups : [];
   weeklyCostReports = Array.isArray(data.weeklyCostReports) ? data.weeklyCostReports.map(entry => ({ ...entry })) : [];
   receiptTrackerWeeks = Array.isArray(data.receiptTrackerWeeks) ? data.receiptTrackerWeeks.map(entry => ({ ...entry })) : [];
+  window.syncProcessLog = Array.isArray(data.syncProcessLog) ? data.syncProcessLog.map(entry => ({ ...entry })) : (Array.isArray(window.syncProcessLog) ? window.syncProcessLog : []);
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -3006,6 +3010,112 @@ const saveCloudInternal = debounce(async ()=>{
     console.error("Cloud save failed:", e);
   }
 }, 300);
+function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
+  try {
+    if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
+    const prev = window.__lastSnapshotForFlow && typeof window.__lastSnapshotForFlow === "object" ? window.__lastSnapshotForFlow : null;
+    const next = nextSnapshot && typeof nextSnapshot === "object" ? nextSnapshot : null;
+    const trackedKeys = ["totalHistory", "tasksInterval", "tasksAsReq", "inventory", "inventoryFolders", "receiptTrackerWeeks", "orderRequests", "cuttingJobs", "completedCuttingJobs", "dailyCutHours", "garnetCleanings", "settingsFolders"];
+    const skipTrigger = /history|syncprocesslog|data_flow_save/i.test(String(trigger || ""));
+    if (skipTrigger){
+      if (next) window.__lastSnapshotForFlow = next;
+      return;
+    }
+    const changedAreas = [];
+    const details = [];
+    if (prev && next){
+      trackedKeys.forEach(key => {
+        const beforeVal = prev[key] ?? null;
+        const afterVal = next[key] ?? null;
+        const a = getAreaSignature(key, beforeVal);
+        const b = getAreaSignature(key, afterVal);
+        if (a !== b){
+          changedAreas.push(key);
+          const beforeCount = Array.isArray(beforeVal) ? beforeVal.length : (beforeVal && typeof beforeVal === "object" ? Object.keys(beforeVal).length : (beforeVal == null ? 0 : 1));
+          const afterCount = Array.isArray(afterVal) ? afterVal.length : (afterVal && typeof afterVal === "object" ? Object.keys(afterVal).length : (afterVal == null ? 0 : 1));
+          details.push(`${key}: ${beforeCount} -> ${afterCount}`);
+        }
+      });
+    } else if (!prev && next){
+      trackedKeys.forEach(key => {
+        const afterVal = next[key] ?? null;
+        const afterCount = Array.isArray(afterVal) ? afterVal.length : (afterVal && typeof afterVal === "object" ? Object.keys(afterVal).length : (afterVal == null ? 0 : 1));
+        if (afterCount > 0){
+          changedAreas.push(key);
+          details.push(`${key}: initialized -> ${afterCount}`);
+        }
+      });
+    }
+    if (!changedAreas.length){
+      if (next) window.__lastSnapshotForFlow = next;
+      return;
+    }
+    const fingerprint = `${changedAreas.join(",")}::${details.join("|")}::${String(trigger || "")}`;
+    if (window.__lastDataFlowFingerprint === fingerprint){
+      if (next) window.__lastSnapshotForFlow = next;
+      return;
+    }
+    window.syncProcessLog.unshift({
+      atISO: new Date().toISOString(),
+      eventType: "data_flow_save",
+      status: "saved",
+      sourceArea: trigger,
+      targetArea: changedAreas.join(","),
+      message: `WHAT changed: ${details.join(" | ")}; FROM: ${trigger}; TO: ${changedAreas.join(", ")}; HOW: state diff on save.`
+    });
+    window.__lastDataFlowFingerprint = fingerprint;
+    if (window.syncProcessLog.length > 1000) window.syncProcessLog.length = 1000;
+    if (next) window.__lastSnapshotForFlow = next;
+  } catch (_err){}
+}
+function stableStringify(value){
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(item => stableStringify(item)).join(",")}]`;
+  const keys = Object.keys(value).sort();
+  return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
+}
+function getAreaSignature(areaKey, areaValue){
+  if (!Array.isArray(areaValue) && (!areaValue || typeof areaValue !== "object")) return stableStringify(areaValue);
+  if (areaKey === "inventory"){
+    const rows = Array.isArray(areaValue) ? areaValue.slice() : [];
+    rows.sort((a,b)=> String(a?.id || a?.pn || a?.name || "").localeCompare(String(b?.id || b?.pn || b?.name || "")));
+    return stableStringify(rows.map(item => ({
+      id: item?.id ?? null, name: item?.name ?? null, pn: item?.pn ?? null, qtyNew: item?.qtyNew ?? null, qtyOld: item?.qtyOld ?? null, unit: item?.unit ?? null, price: item?.price ?? null, folderId: item?.folderId ?? null, link: item?.link ?? null
+    })));
+  }
+  if (areaKey === "receiptTrackerWeeks"){
+    const weeks = Array.isArray(areaValue) ? areaValue.slice() : [];
+    weeks.sort((a,b)=> String(a?.key || "").localeCompare(String(b?.key || "")));
+    return stableStringify(weeks.map(week => ({
+      key: week?.key ?? null,
+      startISO: week?.startISO ?? null,
+      endISO: week?.endISO ?? null,
+      rows: (Array.isArray(week?.rows) ? week.rows.slice() : []).map(row => ({
+        date: row?.date ?? null, purchased: row?.purchased ?? null, cost: row?.cost ?? null, qty: row?.qty ?? null, partNumber: row?.partNumber ?? null, inventoryItemId: row?.inventoryItemId ?? null, shipping: row?.shipping ?? null, tax: row?.tax ?? null
+      })).sort((a,b)=> `${a.date||""}|${a.purchased||""}|${a.partNumber||""}`.localeCompare(`${b.date||""}|${b.purchased||""}|${b.partNumber||""}`))
+    })));
+  }
+  return stableStringify(areaValue);
+}
+function getTrackedStateSignature(snapshot){
+  const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const tracked = {
+    totalHistory: snap.totalHistory ?? null,
+    tasksInterval: snap.tasksInterval ?? null,
+    tasksAsReq: snap.tasksAsReq ?? null,
+    inventory: snap.inventory ?? null,
+    inventoryFolders: snap.inventoryFolders ?? null,
+    receiptTrackerWeeks: snap.receiptTrackerWeeks ?? null,
+    orderRequests: snap.orderRequests ?? null,
+    cuttingJobs: snap.cuttingJobs ?? null,
+    completedCuttingJobs: snap.completedCuttingJobs ?? null,
+    dailyCutHours: snap.dailyCutHours ?? null,
+    garnetCleanings: snap.garnetCleanings ?? null,
+    settingsFolders: snap.settingsFolders ?? null
+  };
+  const normalized = Object.fromEntries(Object.entries(tracked).map(([k,v]) => [k, getAreaSignature(k, v)]));
+  return stableStringify(normalized);
+}
 function saveCloudDebounced(){
   if (isVercelPreviewRuntime()) return;
   try {
