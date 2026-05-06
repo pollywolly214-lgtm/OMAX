@@ -2862,13 +2862,11 @@ function viewJobs(){
     if (efficiency && efficiency.costRate != null && Number.isFinite(Number(efficiency.costRate))){
       costRate = Number(efficiency.costRate);
     } else {
-      const hoursBase = hoursForTotal > 0 ? hoursForTotal : hoursFromEstimate;
-      const variableRate = hoursBase > 0 ? (materialTotal / hoursBase) : 0;
-      costRate = JOB_BASE_COST_PER_HOUR + variableRate;
+      costRate = JOB_BASE_COST_PER_HOUR;
     }
     const netRate = chargeRate - costRate;
     const totalHours = hoursForTotal > 0 ? hoursForTotal : 0;
-    return netRate * totalHours;
+    return (netRate * totalHours) - materialTotal;
   };
 
   const pendingFiles = Array.isArray(window.pendingNewJobFiles) ? window.pendingNewJobFiles : [];
@@ -3419,9 +3417,7 @@ function viewJobs(){
     const efficiencyCost = Number(job?.efficiency?.costRate);
     if (Number.isFinite(efficiencyCost) && efficiencyCost >= 0) return efficiencyCost;
     const hoursVal = Number(estHours);
-    return (Number.isFinite(hoursVal) && hoursVal > 0)
-      ? JOB_BASE_COST_PER_HOUR + (matTotal / hoursVal)
-      : JOB_BASE_COST_PER_HOUR;
+    return JOB_BASE_COST_PER_HOUR;
   };
   const completedStats = completedFiltered.reduce((acc, job)=>{
     const eff = computeJobEfficiency(job);

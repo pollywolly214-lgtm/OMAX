@@ -19282,12 +19282,13 @@ function renderJobs(){
       ? window.jobCategoryFilter
       : jobRootCategoryId;
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
-    const materialQty = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
+    const materialWeight = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
+    const materialQty = 1;
     const chargeRate = chargeRaw === "" ? 200 : Number(chargeRaw);
     const costRate = costRateRaw === "" ? 45 : Number(costRateRaw);
     if (!name || !isFinite(est) || est<=0 || !start || !due || !projectNumber){ toast("Fill job fields, including project #."); return; }
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
-    if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
+    if (!Number.isFinite(materialWeight) || materialWeight < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
     if (!Number.isFinite(costRate) || costRate < 0){ toast("Enter a valid cost rate."); return; }
     if (!categoryId){ toast("Choose a category."); return; }
@@ -19299,7 +19300,7 @@ function renderJobs(){
       ensureJobCategoryFolderOpen(categoryId);
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material, materialCost, materialQty, chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
+    const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material, materialCost, materialQty, materialWeight, chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
     cuttingJobs.push(newJob);
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
