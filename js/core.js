@@ -1751,6 +1751,11 @@ function completeCuttingJob(jobId, { completedAtISO = null, normalizePriorities 
   completedCuttingJobs.push(completed);
   window.completedCuttingJobs = completedCuttingJobs;
 
+  if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+  if (typeof saveCloudNow === "function"){
+    try { saveCloudNow(); } catch (err){ console.warn("Immediate save failed after completing cutting job", err); }
+  }
+
   return completed;
 }
 
