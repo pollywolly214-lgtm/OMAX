@@ -1751,6 +1751,18 @@ function completeCuttingJob(jobId, { completedAtISO = null, normalizePriorities 
   completedCuttingJobs.push(completed);
   window.completedCuttingJobs = completedCuttingJobs;
 
+  if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
+  window.syncProcessLog.unshift({
+    id: typeof genId === "function" ? genId("sync_log") : `sync_log_${Date.now()}`,
+    atISO: new Date().toISOString(),
+    eventType: "cutting_job_completed",
+    status: "saved",
+    sourceArea: "cuttingJobs",
+    targetArea: "completedCuttingJobs,dataCenter,charts",
+    message: `Cutting job "${String(job?.name || idStr)}" moved from active to completed and propagated to dependent views.`
+  });
+  if (window.syncProcessLog.length > 1000) window.syncProcessLog.length = 1000;
+
   if (typeof saveCloudDebounced === "function") saveCloudDebounced();
   if (typeof saveCloudNow === "function"){
     try { saveCloudNow(); } catch (err){ console.warn("Immediate save failed after completing cutting job", err); }
@@ -2997,6 +3009,16 @@ const saveCloudInternal = debounce(async ()=>{
   if (!FB.ready || !FB.docRef) return;
   try{
     const snap = snapshotState();
+    try {
+      const prevLogLen = Array.isArray(window.syncProcessLog) ? window.syncProcessLog.length : 0;
+      recordDataFlowEvent("cloud_save", snap);
+      const nextLogLen = Array.isArray(window.syncProcessLog) ? window.syncProcessLog.length : 0;
+      if (nextLogLen !== prevLogLen){
+        snap.syncProcessLog = window.syncProcessLog.slice();
+      }
+    } catch (err) {
+      console.warn("Failed to record save flow event", err);
+    }
     window.__lastSnapshot = snap;
     const writeRev = Number(snap?.syncMeta?.rev || 0);
     await FB.docRef.set(snap, { merge:true });
