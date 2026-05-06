@@ -12,6 +12,14 @@
 
 /* =================== CONSTANTS / GLOBALS =================== */
 const APP_SCHEMA = 72;
+const DATA_SAFETY_FLAGS = Object.freeze({
+  ENABLE_INVENTORY_TRANSACTIONS: false,
+  ENABLE_INVENTORY_TRANSACTIONS_DRY_RUN: true,
+  ENABLE_SYNC_PROCESS_LOG: true,
+  ENABLE_SYNC_PROCESS_LOG_DRY_RUN: true,
+  ENABLE_MAINTENANCE_CONSUMES_INVENTORY: false,
+  ENABLE_PREVIEW_WRITE_TO_PROD: false
+});
 const DEFAULT_DAILY_HOURS = 8;
 let DAILY_HOURS = DEFAULT_DAILY_HOURS;
 const JOB_RATE_PER_HOUR = 250; // $/hr (default charge when a job doesn't set its own rate)
@@ -36,6 +44,53 @@ if (typeof window !== "undefined") {
   window.workspaceRef = null;
   window.workspaceDocRef = null;
   window.DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
+  window.DATA_SAFETY_FLAGS = { ...DATA_SAFETY_FLAGS, ...(window.DATA_SAFETY_FLAGS || {}) };
+}
+function getDataSafetyFlags(){
+  const runtime = (typeof window !== "undefined" && window.DATA_SAFETY_FLAGS && typeof window.DATA_SAFETY_FLAGS === "object")
+    ? window.DATA_SAFETY_FLAGS
+    : {};
+  return { ...DATA_SAFETY_FLAGS, ...runtime };
+}
+function isProductionWorkspaceTarget(){
+  return String(WORKSPACE_ID || "") === "github-prod";
+}
+function isProductionFirebaseProjectTarget(){
+  const cfg = (typeof window !== "undefined" && window.FIREBASE_CONFIG && typeof window.FIREBASE_CONFIG === "object")
+    ? window.FIREBASE_CONFIG
+    : {};
+  return String(cfg.projectId || "") === "omax-maintenance";
+}
+function canWriteWorkspace(reason = "unknown"){
+  const flags = getDataSafetyFlags();
+  const previewRuntime = isVercelPreviewRuntime();
+  const prodWorkspace = isProductionWorkspaceTarget();
+  if (previewRuntime && prodWorkspace && !flags.ENABLE_PREVIEW_WRITE_TO_PROD){
+    console.warn(`[DataSafety] Blocked Firestore write (${reason}) from preview runtime to production workspace.`);
+    return false;
+  }
+  return true;
+}
+function warnDataSafetyContext(){
+  const flags = getDataSafetyFlags();
+  const previewRuntime = isVercelPreviewRuntime();
+  const prodFirebase = isProductionFirebaseProjectTarget();
+  const prodWorkspace = isProductionWorkspaceTarget();
+  if (previewRuntime){
+    console.warn("[DataSafety] Vercel preview runtime detected.");
+  }
+  if (prodFirebase){
+    console.warn("[DataSafety] Firebase production project detected: omax-maintenance.");
+  }
+  if (prodWorkspace){
+    console.warn("[DataSafety] Production workspace detected: github-prod.");
+  }
+  if (previewRuntime && prodFirebase && prodWorkspace){
+    console.warn("[DataSafety] Preview runtime is connected to production Firebase/workspace routing.");
+  }
+  if (prodWorkspace && (flags.ENABLE_INVENTORY_TRANSACTIONS || flags.ENABLE_MAINTENANCE_CONSUMES_INVENTORY)){
+    console.warn("[DataSafety] Transaction-related flags are enabled while targeting production workspace.");
+  }
 }
 let CUTTING_BASELINE_WEEKLY_HOURS = 56;
 let CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS / 7;
@@ -583,6 +638,7 @@ function applyFirestoreSettings(db){
 
 async function initFirebase(){
   if (!window.firebase || !firebase.initializeApp){ console.warn("Firebase SDK not loaded."); return; }
+  try { warnDataSafetyContext(); } catch (_err) {}
   if (!window.FIREBASE_CONFIG){ console.warn("Missing FIREBASE_CONFIG."); return; }
   if (FB.ready) return;
   if (firebaseInitStarted) return;
@@ -1605,6 +1661,8 @@ if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,nam
 if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+if (!Array.isArray(window.inventoryTransactions)) window.inventoryTransactions = [];
+if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
 if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
 if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
 if (!Array.isArray(window.opportunityRollups)) window.opportunityRollups = [];
@@ -1627,6 +1685,8 @@ let cuttingJobs   = window.cuttingJobs;
 let completedCuttingJobs = window.completedCuttingJobs;
 let opportunityRollups = window.opportunityRollups;
 let orderRequests = window.orderRequests;
+let inventoryTransactions = window.inventoryTransactions;
+let syncProcessLog = window.syncProcessLog;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
 let dailyCutHours = window.dailyCutHours;
@@ -1909,6 +1969,8 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(sanitized.dailyCutHours) && Array.isArray(window.dailyCutHours)) sanitized.dailyCutHours = window.dailyCutHours.slice();
     if (!Array.isArray(sanitized.inventory) && Array.isArray(window.inventory)) sanitized.inventory = window.inventory.slice();
     if (!Array.isArray(sanitized.orderRequests) && Array.isArray(window.orderRequests)) sanitized.orderRequests = window.orderRequests.slice();
+    if (!Array.isArray(sanitized.inventoryTransactions) && Array.isArray(window.inventoryTransactions)) sanitized.inventoryTransactions = window.inventoryTransactions.slice();
+    if (!Array.isArray(sanitized.syncProcessLog) && Array.isArray(window.syncProcessLog)) sanitized.syncProcessLog = window.syncProcessLog.slice();
     if (!Array.isArray(sanitized.receiptTrackerWeeks) && Array.isArray(window.receiptTrackerWeeks)) sanitized.receiptTrackerWeeks = window.receiptTrackerWeeks.slice();
     if (!Array.isArray(sanitized.garnetCleanings) && Array.isArray(window.garnetCleanings)) sanitized.garnetCleanings = window.garnetCleanings.slice();
     if (!Array.isArray(sanitized.totalHistory) && Array.isArray(window.totalHistory)) sanitized.totalHistory = window.totalHistory.slice();
@@ -1930,6 +1992,8 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     window.appConfig = appConfig;
     refreshDerivedDailyHours();
     if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
+    if (!Array.isArray(window.inventoryTransactions)) window.inventoryTransactions = [];
+    if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
     if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
     if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
     if (!Array.isArray(window.totalHistory)) window.totalHistory = [];
@@ -2085,6 +2149,8 @@ function snapshotState(){
     cuttingJobs: stripJobFileDataUrls(cuttingJobs),
     completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs),
     orderRequests,
+    inventoryTransactions: Array.isArray(window.inventoryTransactions) ? window.inventoryTransactions.map(entry => ({ ...entry })) : [],
+    syncProcessLog: Array.isArray(window.syncProcessLog) ? window.syncProcessLog.map(entry => ({ ...entry })) : [],
     receiptTrackerWeeks: Array.isArray(window.receiptTrackerWeeks)
       ? window.receiptTrackerWeeks.map(entry => ({ ...entry }))
       : [],
@@ -2990,6 +3056,7 @@ const saveCloudInternal = debounce(async ()=>{
     const snap = snapshotState();
     window.__lastSnapshot = snap;
     const writeRev = Number(snap?.syncMeta?.rev || 0);
+    if (!canWriteWorkspace("saveCloudInternal")) return;
     await FB.docRef.set(snap, { merge:true });
     if (writeRev > 0) lastAppliedCloudRevision = writeRev;
     if (window.DEBUG_MODE){
@@ -3007,7 +3074,7 @@ const saveCloudInternal = debounce(async ()=>{
   }
 }, 300);
 function saveCloudDebounced(){
-  if (isVercelPreviewRuntime()) return;
+  if (!canWriteWorkspace("saveCloudDebounced")) return;
   try {
     if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
@@ -3021,7 +3088,7 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(){
-  if (isVercelPreviewRuntime()) return;
+  if (!canWriteWorkspace("saveCloudNow")) return;
   try {
     if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
@@ -3112,7 +3179,9 @@ async function loadFromCloud(){
       const seededRev = Number(seeded?.syncMeta?.rev || 0);
       if (seededRev > 0) lastAppliedCloudRevision = seededRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
-      await FB.docRef.set(seeded, { merge:true });
+      if (canWriteWorkspace("loadFromCloud:seeded-state")){
+        await FB.docRef.set(seeded, { merge:true });
+      }
       if (FB.workspaceDoc){
         await updateWorkspaceMetadata({
           workspaceId: WORKSPACE_ID,
@@ -3141,7 +3210,9 @@ async function migrateLegacyWorkspaceDoc(){
     delete stateData.createdAt;
     delete stateData.lastStateMigrationAt;
     delete stateData.lastStateDocPath;
-    await FB.docRef.set(stateData, { merge:true });
+    if (canWriteWorkspace("migrateLegacyWorkspaceDoc")){
+      await FB.docRef.set(stateData, { merge:true });
+    }
     const meta = {
       workspaceId: WORKSPACE_ID,
       lastStateMigrationAt: new Date().toISOString(),
@@ -3246,9 +3317,17 @@ function normalizeOrderItem(raw){
   const qtyNum = Number(raw.qty);
   const qty = Number.isFinite(qtyNum) && qtyNum > 0 ? qtyNum : 1;
   const priceNum = raw.price == null ? null : Number(raw.price);
+  const inventoryId = raw.inventoryId != null && String(raw.inventoryId).trim() ? String(raw.inventoryId) : null;
+  const isInventoryLinked = typeof raw.isInventoryLinked === "boolean" ? raw.isInventoryLinked : Boolean(inventoryId);
   return {
     id: raw.id || genId("order_item"),
-    inventoryId: raw.inventoryId || null,
+    inventoryId,
+    isInventoryLinked,
+    inventoryNameSnapshot: raw.inventoryNameSnapshot != null ? String(raw.inventoryNameSnapshot) : "",
+    pnSnapshot: raw.pnSnapshot != null ? String(raw.pnSnapshot) : "",
+    linkSnapshot: raw.linkSnapshot != null ? String(raw.linkSnapshot) : "",
+    unitCostSnapshot: raw.unitCostSnapshot == null ? null : (Number.isFinite(Number(raw.unitCostSnapshot)) ? Number(raw.unitCostSnapshot) : null),
+    unitSnapshot: raw.unitSnapshot != null ? String(raw.unitSnapshot) : "",
     name: raw.name || "",
     pn: raw.pn || "",
     link: raw.link || "",
@@ -3413,6 +3492,7 @@ async function clearAllAppData(){
 
   try {
     if (FB.ready && FB.docRef) {
+      if (!canWriteWorkspace("clearAllAppData")) return defaults;
       await FB.docRef.set(snapshotState());
     } else {
       saveCloudDebounced();
