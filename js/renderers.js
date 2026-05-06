@@ -6309,7 +6309,8 @@ function renderDashboard(){
       const curHours = getCurrentMachineHours();
       const baselineHours = parseBaselineHours(taskLastInput?.value);
       applyIntervalBaseline(template, { baselineHours, currentHours: curHours });
-      tasksInterval.unshift(template);
+      (Array.isArray(window.tasksInterval) ? window.tasksInterval : (window.tasksInterval = [])).unshift(template);
+      tasksInterval = window.tasksInterval;
       const instance = scheduleExistingIntervalTask(template, {
         dateISO: targetISO,
         refreshDashboard: false,
@@ -6343,7 +6344,8 @@ function renderDashboard(){
         endCount: repeatConfig.endCount || null
       };
       normalizeTaskRecurrence(task);
-      tasksAsReq.unshift(task);
+      (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = [])).unshift(task);
+      tasksAsReq = window.tasksAsReq;
       message = "As-required task added to Maintenance Settings";
     }
 
@@ -6386,7 +6388,8 @@ function renderDashboard(){
         const lastField = row.querySelector("[data-subtask-last]");
         const baselineHours = parseBaselineHours(lastField?.value);
         applyIntervalBaseline(subTask, { baselineHours, currentHours: curHours });
-        tasksInterval.unshift(subTask);
+        (Array.isArray(window.tasksInterval) ? window.tasksInterval : (window.tasksInterval = [])).unshift(subTask);
+        tasksInterval = window.tasksInterval;
       }else{
         const condInput = row.querySelector("[data-subtask-condition-input]");
         const subTask = Object.assign({}, subBase, {
@@ -6395,7 +6398,8 @@ function renderDashboard(){
           variant: "template",
           templateId: subBase.id
         });
-        tasksAsReq.unshift(subTask);
+        (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = [])).unshift(subTask);
+        tasksAsReq = window.tasksAsReq;
       }
     });
 
@@ -9537,7 +9541,8 @@ function renderSettings(){
     }else{
       const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
       const task = Object.assign(base, { mode:"asreq", condition, variant: "template", templateId: id });
-      window.tasksAsReq.unshift(task);
+      (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = [])).unshift(task);
+      tasksAsReq = window.tasksAsReq;
       createdTask = task;
     }
 
