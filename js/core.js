@@ -3006,6 +3006,32 @@ const saveCloudInternal = debounce(async ()=>{
     console.error("Cloud save failed:", e);
   }
 }, 300);
+function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
+  try {
+    if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
+    const prev = window.__lastSnapshotForFlow && typeof window.__lastSnapshotForFlow === "object" ? window.__lastSnapshotForFlow : null;
+    const next = nextSnapshot && typeof nextSnapshot === "object" ? nextSnapshot : null;
+    const changedAreas = [];
+    if (prev && next){
+      const keys = ["maintenanceTasks", "maintenanceLogs", "calendarItems", "inventory", "receiptTrackerWeeks", "orderRequests", "jobs", "settingsFolders"];
+      keys.forEach(key => {
+        const a = JSON.stringify(prev[key] ?? null);
+        const b = JSON.stringify(next[key] ?? null);
+        if (a !== b) changedAreas.push(key);
+      });
+    }
+    window.syncProcessLog.unshift({
+      atISO: new Date().toISOString(),
+      eventType: "data_flow_save",
+      status: "saved",
+      sourceArea: trigger,
+      targetArea: changedAreas.join(",") || "unknown",
+      message: changedAreas.length ? `Data changed in: ${changedAreas.join(", ")}` : "Save executed (no tracked diffs detected)."
+    });
+    if (window.syncProcessLog.length > 1000) window.syncProcessLog.length = 1000;
+    if (next) window.__lastSnapshotForFlow = next;
+  } catch (_err){}
+}
 function saveCloudDebounced(){
   if (isVercelPreviewRuntime()) return;
   try {
@@ -3018,6 +3044,7 @@ function saveCloudDebounced(){
   } catch (err) {
     console.warn("History capture before save failed:", err);
   }
+  try { recordDataFlowEvent("saveCloudDebounced", snapshotState()); } catch (_err){}
   saveCloudInternal();
 }
 function saveCloudNow(){
@@ -3032,6 +3059,7 @@ function saveCloudNow(){
   } catch (err) {
     console.warn("History capture before save failed:", err);
   }
+  try { recordDataFlowEvent("saveCloudNow", snapshotState()); } catch (_err){}
   if (typeof saveCloudInternal.flush === "function"){
     const flushed = saveCloudInternal.flush();
     if (!flushed){
