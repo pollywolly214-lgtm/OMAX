@@ -19082,6 +19082,8 @@ function renderJobs(){
       charge: getVal("jobCharge"),
       costRate: getVal("jobCostRate"),
       material: getVal("jobMaterial"),
+      materialThickness: getVal("jobMaterialThickness"),
+      materialArea: getVal("jobMaterialArea"),
       materialCost: getVal("jobMaterialCost"),
       materialQty: getVal("jobMaterialQty"),
       start: getVal("jobStart"),
@@ -19090,9 +19092,114 @@ function renderJobs(){
       category: getVal("jobCategory")
     };
   };
+  const MATERIAL_SETTINGS_KEY = "job_material_pricing_v1";
+  const defaultMaterialSettings = ()=>({
+    wasteFactor: 10,
+    materials: [
+      { name: "A36 steel", density: 0.283, pricePerLb: 0.8 },
+      { name: "Grade 572-50 steel", density: 0.283, pricePerLb: 0.95 },
+      { name: "Stainless Steel", density: 0.289, pricePerLb: 1.9 },
+      { name: "Aluminum", density: 0.098, pricePerLb: 1.75 }
+    ]
+  });
+  const loadMaterialSettings = ()=>{
+    try {
+      const parsed = JSON.parse(localStorage.getItem(MATERIAL_SETTINGS_KEY) || "null");
+      if (!parsed || typeof parsed !== "object") return defaultMaterialSettings();
+      const fallback = defaultMaterialSettings();
+      const materials = Array.isArray(parsed.materials) ? parsed.materials.filter(m => m && m.name) : fallback.materials;
+      return { wasteFactor: Number(parsed.wasteFactor) >= 0 ? Number(parsed.wasteFactor) : fallback.wasteFactor, materials };
+    } catch(_){ return defaultMaterialSettings(); }
+  };
+  const saveMaterialSettings = (settings)=> localStorage.setItem(MATERIAL_SETTINGS_KEY, JSON.stringify(settings));
+  let materialSettings = loadMaterialSettings();
+  const recalcMaterialTotals = ()=>{
+    const matEl = document.getElementById("jobMaterial");
+    const tEl = document.getElementById("jobMaterialThickness");
+    const areaEl = document.getElementById("jobMaterialArea");
+    const costEl = document.getElementById("jobMaterialCost");
+    const qtyEl = document.getElementById("jobMaterialQty");
+    if (!(matEl && tEl && areaEl && costEl && qtyEl)) return;
+    const selected = materialSettings.materials.find(m => m.name === matEl.value);
+    const thickness = Number(tEl.value);
+    const area = Number(areaEl.value);
+    if (!selected || !Number.isFinite(thickness) || !Number.isFinite(area) || thickness <= 0 || area <= 0){
+      costEl.value = "";
+      qtyEl.value = "";
+      return;
+    }
+    const baseWeight = thickness * area * Number(selected.density || 0);
+    const wasteMultiplier = 1 + (Math.max(0, Number(materialSettings.wasteFactor) || 0) / 100);
+    const weight = baseWeight * wasteMultiplier;
+    const totalCost = weight * Number(selected.pricePerLb || 0);
+    qtyEl.value = weight.toFixed(2);
+    costEl.value = totalCost.toFixed(2);
+  };
+  const renderMaterialSettingsPanel = ()=>{
+    const list = document.getElementById("jobMaterialSettingsList");
+    const matSelect = document.getElementById("jobMaterial");
+    const wasteInput = document.getElementById("jobWasteFactor");
+    if (!list || !matSelect || !wasteInput) return;
+    wasteInput.value = String(materialSettings.wasteFactor);
+    matSelect.innerHTML = `<option value="">Select material</option>${materialSettings.materials.map(m=>`<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}</option>`).join("")}`;
+    list.innerHTML = materialSettings.materials.map((m, idx)=>`
+      <div class="job-material-row">
+        <input data-mat-name="${idx}" value="${escapeHtml(m.name)}">
+        <input data-mat-density="${idx}" type="number" step="0.001" min="0" value="${Number(m.density) || 0}">
+        <input data-mat-price="${idx}" type="number" step="0.01" min="0" value="${Number(m.pricePerLb) || 0}">
+        <button type="button" data-mat-remove="${idx}">Remove</button>
+      </div>
+    `).join("");
+  };
   const addJobForm = document.getElementById("addJobForm");
   addJobForm?.addEventListener("input", syncAddJobDraftFromForm);
   addJobForm?.addEventListener("change", syncAddJobDraftFromForm);
+  addJobForm?.addEventListener("input", (e)=>{
+    if (["jobMaterial", "jobMaterialThickness", "jobMaterialArea"].includes(e.target?.id)) recalcMaterialTotals();
+  });
+  renderMaterialSettingsPanel();
+  document.getElementById("jobMaterialSettingsBtn")?.addEventListener("click", ()=>{
+    const panel = document.getElementById("jobMaterialSettingsPanel");
+    if (!panel) return;
+    panel.hidden = false; panel.setAttribute("aria-hidden", "false");
+    renderMaterialSettingsPanel();
+  });
+  document.getElementById("jobMaterialSettingsClose")?.addEventListener("click", ()=>{
+    const panel = document.getElementById("jobMaterialSettingsPanel");
+    if (!panel) return;
+    panel.hidden = true; panel.setAttribute("aria-hidden", "true");
+  });
+  document.getElementById("jobMaterialAddTypeBtn")?.addEventListener("click", ()=>{
+    materialSettings.materials.push({ name: "New Material", density: 0.1, pricePerLb: 1 });
+    saveMaterialSettings(materialSettings);
+    renderMaterialSettingsPanel();
+  });
+  document.getElementById("jobWasteFactor")?.addEventListener("change", (e)=>{
+    materialSettings.wasteFactor = Math.max(0, Number(e.target.value) || 0);
+    saveMaterialSettings(materialSettings);
+    recalcMaterialTotals();
+  });
+  document.getElementById("jobMaterialSettingsList")?.addEventListener("input", (e)=>{
+    const t = e.target;
+    const idx = Number(t.dataset.matName ?? t.dataset.matDensity ?? t.dataset.matPrice);
+    if (!Number.isInteger(idx) || !materialSettings.materials[idx]) return;
+    if (t.dataset.matName != null) materialSettings.materials[idx].name = t.value.trim() || "Material";
+    if (t.dataset.matDensity != null) materialSettings.materials[idx].density = Math.max(0, Number(t.value) || 0);
+    if (t.dataset.matPrice != null) materialSettings.materials[idx].pricePerLb = Math.max(0, Number(t.value) || 0);
+    saveMaterialSettings(materialSettings);
+    renderMaterialSettingsPanel();
+    recalcMaterialTotals();
+  });
+  document.getElementById("jobMaterialSettingsList")?.addEventListener("click", (e)=>{
+    const btn = e.target.closest("[data-mat-remove]");
+    if (!btn) return;
+    const idx = Number(btn.getAttribute("data-mat-remove"));
+    if (!Number.isInteger(idx)) return;
+    materialSettings.materials.splice(idx, 1);
+    saveMaterialSettings(materialSettings);
+    renderMaterialSettingsPanel();
+    recalcMaterialTotals();
+  });
   const addJobEstHoursInput = document.getElementById("jobEst");
   const addJobEstMinutesInput = document.getElementById("jobEstMinutes");
   const addJobEstBreakdown = document.getElementById("jobEstBreakdown");
