@@ -10173,11 +10173,25 @@ function renderSettings(){
           const cur = new Date(completedDates[completionIndex] + 'T00:00:00');
           sincePrior = `${Math.round((cur - prev)/86400000)} day(s)`;
         }
-        return `<tr><td><button type="button" data-history-jump="${dateISO}" data-task-id="${t.id}">${dateISO}</button></td><td>${scheduledDates.includes(dateISO)?'Yes':'No'}</td><td>${completedDates.includes(dateISO)?'Yes':'No'}</td><td>${escapeHtml(sincePrior)}</td><td>${escapeHtml(note || '—')}</td></tr>`;
-      }).join('') || '<tr><td colspan="5">No history yet.</td></tr>';
+        const intervalLabel = Number.isFinite(Number(t.intervalHrs)) && Number(t.intervalHrs) > 0 ? `${Number(t.intervalHrs)} hrs` : (Number.isFinite(Number(t.recurrenceEvery)) ? `${Math.max(1, Number(t.recurrenceEvery))} ${String(t.recurrenceBasis||'day').replace('calendar_','')}` : '—');
+        const statusLabel = completedDates.includes(dateISO) ? 'Completed' : (scheduledDates.includes(dateISO) ? 'Scheduled' : '—');
+        const lastServicedLabel = lastCompleted ? `${lastCompleted}` : '—';
+        let remainLabel = '—';
+        if (Number.isFinite(Number(t.intervalHrs))){
+          const base = Number.isFinite(Number(t.anchorTotal)) ? Number(t.anchorTotal) : 0;
+          const cur = (typeof currentTotal === 'function') ? Number(currentTotal()) : NaN;
+          if (Number.isFinite(cur)) remainLabel = `${Math.max(0, Number(t.intervalHrs) - Math.max(0, cur - base)).toFixed(0)} hrs`;
+        }
+        const costLabel = Number.isFinite(Number(t.price)) ? `$${Number(t.price).toFixed(0)}` : '—';
+        const timeLabel = Number.isFinite(Number(t.downtimeHours)) ? `${Number(t.downtimeHours)} hr` : '—';
+        const links = [];
+        if (t.manualLink) links.push(`<a href="${escapeHtml(t.manualLink)}" target="_blank" rel="noopener">Manual</a>`);
+        if (t.storeLink) links.push(`<a href="${escapeHtml(t.storeLink)}" target="_blank" rel="noopener">Store</a>`);
+        return `<tr><td><button type="button" data-history-jump="${dateISO}" data-task-id="${t.id}">${dateISO}</button></td><td>${escapeHtml(intervalLabel)}</td><td>${escapeHtml(statusLabel)}</td><td>${escapeHtml(lastServicedLabel)}</td><td>${escapeHtml(remainLabel)}</td><td>${escapeHtml(costLabel)}</td><td>${escapeHtml(timeLabel)}</td><td>${links.length ? links.join(' · ') : '—'}</td><td>${scheduledDates.includes(dateISO)?'Yes':'No'}</td><td>${completedDates.includes(dateISO)?'Yes':'No'}</td><td>${escapeHtml(sincePrior)}</td><td>${escapeHtml(note || '—')}</td></tr>`;
+      }).join('') || '<tr><td colspan="12">No history yet.</td></tr>';
       const modal = document.createElement('div');
       modal.className = 'modal-backdrop';
-      modal.innerHTML = `<div class="modal-card" style="max-width:900px"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Source: central data table • Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Predicted next: ${escapeHtml(predicted)}</p><table class="cost-table"><thead><tr><th>Date</th><th>Scheduled</th><th>Completed</th><th>Since prior completion</th><th>Occurrence notes</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+      modal.innerHTML = `<div class="modal-card" style="max-width:900px"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Source: central data table • Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Predicted next: ${escapeHtml(predicted)}</p><table class="cost-table"><thead><tr><th>Date</th><th>Interval</th><th>Status</th><th>Last serviced</th><th>Remain</th><th>Cost</th><th>Time to complete</th><th>Links</th><th>Scheduled</th><th>Completed</th><th>Since prior completion</th><th>Occurrence notes</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`;
       document.body.appendChild(modal);
       modal.addEventListener('click', (ev)=>{
         const jump = ev.target instanceof HTMLElement ? ev.target.closest('[data-history-jump]') : null;
