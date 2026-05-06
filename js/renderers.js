@@ -5093,24 +5093,23 @@ function renderDashboard(){
     globalSuggestions.hidden = false;
   };
   globalSearchInput?.addEventListener("input", ()=> renderDashboardSuggestions(globalSearchInput.value));
-  globalSuggestions?.addEventListener("click", (e)=>{
-    const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-search-id]") : null;
+  globalSuggestions?.addEventListener("mousedown", (e)=>{ e.preventDefault(); });
+  const handleDashboardSuggestionSelect = (btn)=>{
     if (!btn) return;
     const type = btn.getAttribute("data-search-type") || "maintenance";
     const id = btn.getAttribute("data-search-id") || "";
     globalSuggestions.hidden = true;
     if (type === "cutting"){
-      window.location.hash = "#jobs";
       window.pendingJobFocus = { type: "jobRow", id };
-      setTimeout(()=>{
-        const selector = `[data-job-id="${CSS.escape(id)}"], [data-completed-job-id="${CSS.escape(id)}"]`;
-        const row = document.querySelector(selector);
-        if (row){ row.scrollIntoView({behavior:"smooth", block:"center"}); row.classList.add("pulse-highlight"); setTimeout(()=>row.classList.remove("pulse-highlight"), 1600); }
-      }, 240);
+      window.location.hash = "#jobs";
       return;
     }
-    window.location.hash = `#/settings?taskId=${encodeURIComponent(id)}`;
     window.pendingMaintenanceFocus = { taskIds:[id], flash:true, openHistory:true };
+    window.location.hash = `#/settings?taskId=${encodeURIComponent(id)}`;
+  };
+  globalSuggestions?.addEventListener("click", (e)=>{
+    const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-search-id]") : null;
+    handleDashboardSuggestionSelect(btn);
   });
   // Log hours
   document.getElementById("logBtn")?.addEventListener("click", ()=>{
@@ -10182,7 +10181,7 @@ function renderSettings(){
       document.body.appendChild(modal);
       modal.addEventListener('click', (ev)=>{
         const jump = ev.target instanceof HTMLElement ? ev.target.closest('[data-history-jump]') : null;
-        if (jump){ const dateISO = jump.getAttribute('data-history-jump'); if (dateISO){ location.hash = '#/'; setTimeout(()=>{ if (typeof renderCalendar==='function') renderCalendar(); const cell=document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`); if(cell){ cell.scrollIntoView({behavior:'smooth', block:'center'}); if (typeof highlightCalendarDayCell==='function') highlightCalendarDayCell(cell); const taskAnchor = cell.querySelector(`[data-cal-task="${CSS.escape(String(t.id))}"]`) || cell; if (typeof showTaskBubble==='function') showTaskBubble(String(t.id), taskAnchor); } },220); } }
+        if (jump){ const dateISO = jump.getAttribute('data-history-jump'); if (dateISO){ const d=new Date(dateISO+'T00:00:00'); if(!Number.isNaN(d.getTime())){ const today=new Date(); today.setHours(0,0,0,0); const diffMonths=(d.getFullYear()-today.getFullYear())*12+(d.getMonth()-today.getMonth()); window.__calendarMonthOffset=Math.max(-12,Math.min(12,Math.round(diffMonths))); } location.hash = '#/'; setTimeout(()=>{ if (typeof renderCalendar==='function') renderCalendar(); const cell=document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`); if(cell){ cell.scrollIntoView({behavior:'smooth', block:'center'}); if (typeof highlightCalendarDayCell==='function') highlightCalendarDayCell(cell); const taskAnchor = cell.querySelector(`[data-cal-task="${CSS.escape(String(t.id))}"]`) || cell; if (typeof showTaskBubble==='function') showTaskBubble(String(t.id), taskAnchor); } },280); } }
         if (ev.target === modal || (ev.target instanceof HTMLElement && ev.target.closest('[data-close]'))) modal.remove();
       });
       return;
