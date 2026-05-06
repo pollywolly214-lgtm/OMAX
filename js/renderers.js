@@ -11013,6 +11013,10 @@ function renderCosts(){
     const modal = content.querySelector("[data-data-center-modal]");
     const closeBtns = Array.from(content.querySelectorAll("[data-close-data-center]"));
     const tabButtons = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-tab]")) : [];
+    const invRowsHost = modal instanceof HTMLElement ? modal.querySelector('[data-dc-inventory-rows]') : null;
+    if (invRowsHost){ const folders = Array.isArray(window.inventoryFolders)?window.inventoryFolders:[]; const folderName=(id)=> (folders.find(f=>String(f?.id||'')===String(id||''))?.name)||'—'; invRowsHost.innerHTML = (Array.isArray(inventory)&&inventory.length)?inventory.map(item=>`<tr><td>${escapeHtml(item?.name||'')}</td><td>${escapeHtml(item?.pn||'—')}</td><td>${escapeHtml(String(Number(item?.qtyNew)||0))}</td><td>${escapeHtml(String(Number(item?.qtyOld)||0))}</td><td>${escapeHtml(item?.unit||'pcs')}</td><td>${escapeHtml(item?.price!=null?String(item.price):'—')}</td><td>${escapeHtml(folderName(item?.folderId))}</td><td>${escapeHtml(item?.link||'—')}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No inventory rows available.</td></tr>`; }
+    const logRowsHost = modal instanceof HTMLElement ? modal.querySelector('[data-dc-log-rows]') : null;
+    if (logRowsHost){ const logs = Array.isArray(window.syncProcessLog)?window.syncProcessLog:[]; logRowsHost.innerHTML = logs.length?logs.slice(0,100).map(entry=>`<tr><td>${escapeHtml(String(entry?.atISO||entry?.createdAt||'—'))}</td><td>${escapeHtml(String(entry?.eventType||entry?.type||'—'))}</td><td>${escapeHtml(String(entry?.status||'—'))}</td><td>${escapeHtml(String(entry?.sourceArea||'—'))}</td><td>${escapeHtml(String(entry?.targetArea||'—'))}</td><td>${escapeHtml(String(entry?.partNumber||'—'))}</td><td>${escapeHtml(String(entry?.qtyDelta!=null?entry.qtyDelta:'—'))}</td><td>${escapeHtml(String(entry?.message||'—'))}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No system wiring or save log entries yet.</td></tr>`; }
     const panels = modal instanceof HTMLElement ? Array.from(modal.querySelectorAll("[data-dc-panel]")) : [];
     const setActiveTab = (tabKey)=>{
       if (typeof window !== "undefined"){
@@ -11816,8 +11820,9 @@ function renderCosts(){
       qty: Number(item?.qty) || 0,
       partNumber: String(item?.partNumber || ""),
       shipping: Number(item?.shipping) || 0,
-      tax: Number(item?.tax) || 0
-    })).filter(row => row.date || row.purchased || row.cost || row.qty || row.partNumber || row.shipping || row.tax);
+      tax: Number(item?.tax) || 0,
+      inventoryItemId: String(item?.inventoryItemId || "")
+    })).filter(row => row.date || row.purchased || row.cost || row.qty || row.partNumber || row.shipping || row.tax || row.inventoryItemId);
     const renderCentralSpendRows = ()=>{
       const spendBody = document.querySelector("[data-spend-table-body]");
       if (!(spendBody instanceof HTMLElement)) return;
@@ -12140,7 +12145,20 @@ function renderCosts(){
         setField("shipping", Number(template.shipping || 0));
         setField("tax", Number(template.tax || 0));
       };
-      const appendEmptyRow = (focusFirst = false)=>{
+      
+      const inventorySelectOptionsMarkup = (selectedId)=>{
+        const selected = String(selectedId || "");
+        const rows = (Array.isArray(inventory) ? inventory : []).filter(Boolean).slice().sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));
+        const opts = ['<option value="">Save as unlinked</option>'];
+        rows.forEach(item => {
+          const id = String(item.id || "");
+          if (!id) return;
+          const label = `${item.name || "Unnamed"} ${item.pn ? `(${item.pn})` : ""}`.trim();
+          opts.push(`<option value="${escapeHtml(id)}" ${selected===id?"selected":""}>${escapeHtml(label)}</option>`);
+        });
+        return opts.join("");
+      };
+const appendEmptyRow = (focusFirst = false)=>{
         if (!(weekRowsBody instanceof HTMLElement)) return;
         const tr = document.createElement("tr");
         tr.setAttribute("data-receipt-row", "1");
@@ -12150,6 +12168,7 @@ function renderCosts(){
           <td><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
           <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
+          <td><select data-col="inventoryItemId">${inventorySelectOptionsMarkup("")}</select></td>
           <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00"></td>
           <td><input type="number" min="0" step="0.01" data-col="tax" placeholder="0.00"></td>
           <td data-col="total">${formatUsd(0)}</td>`;
@@ -12190,6 +12209,7 @@ function renderCosts(){
             <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
             <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
+            <td><select data-col="inventoryItemId">${inventorySelectOptionsMarkup(row.inventoryItemId || "")}</select></td>
             <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}"></td>
             <td><input type="number" min="0" step="0.01" data-col="tax" value="${escapeHtml(String(row.tax || 0))}"></td>
             <td data-col="total">${formatUsd(computeRowTotal(row))}</td>
@@ -12197,12 +12217,94 @@ function renderCosts(){
         appendEmptyRow();
         recomputeWeekTotals();
       };
+      const findInventoryByPartNumber = (partNumber)=>{
+        const key = String(partNumber || "").trim().toLowerCase();
+        if (!key || !Array.isArray(inventory)) return null;
+        return inventory.find(item => String(item?.pn || "").trim().toLowerCase() === key) || null;
+      };
+      const ensurePurchaseHistoryLinkForPartNumber = ({ partNumber, inventoryItemId, canonicalName })=>{
+        const partKey = String(partNumber || "").trim().toLowerCase();
+        if (!partKey || !inventoryItemId) return 0;
+        let updates = 0;
+        (window.receiptTrackerWeeks || []).forEach(week => {
+          if (!Array.isArray(week?.rows)) return;
+          week.rows = week.rows.map(row => {
+            const rowPart = String(row?.partNumber || "").trim().toLowerCase();
+            if (!rowPart || rowPart !== partKey) return row;
+            updates += 1;
+            return { ...row, inventoryItemId: String(inventoryItemId), purchased: canonicalName || row.purchased || "" };
+          });
+        });
+        return updates;
+      };
+      const openPurchaseLinkingWorkflow = (partNumber)=>{
+        const pn = String(partNumber || "").trim();
+        if (!pn){ toast("Part number is required before linking."); return; }
+        const matchingRows = [];
+        (window.receiptTrackerWeeks || []).forEach(week => {
+          normalizeRows(week?.rows).forEach(row => {
+            if (String(row?.partNumber || "").trim().toLowerCase() === pn.toLowerCase()) matchingRows.push(row);
+          });
+        });
+        const nameOptions = Array.from(new Set(matchingRows.map(row => String(row?.purchased || "").trim()).filter(Boolean)));
+        let selectedName = nameOptions[0] || "";
+        if (nameOptions.length > 1){
+          selectedName = prompt(`Multiple names use part number ${pn}. Choose the canonical name:\n${nameOptions.join("\n")}`, selectedName || nameOptions[0] || "") || "";
+          selectedName = selectedName.trim();
+          if (!selectedName) return;
+          const proceed = confirm(`This will rename all purchase history rows with part number ${pn} to "${selectedName}" and link them together. Continue?`);
+          if (!proceed) return;
+        }
+        const inventoryMatches = (Array.isArray(inventory) ? inventory : []).filter(item => String(item?.pn || "").trim().toLowerCase() === pn.toLowerCase());
+        let linkedItem = inventoryMatches[0] || null;
+        if (!linkedItem){
+          const createNew = confirm(`No inventory item is linked for part number ${pn}. Click OK to create a new inventory item, or Cancel to search by name.`);
+          if (createNew){
+            const newName = (prompt("New inventory item name", selectedName || matchingRows[0]?.purchased || "") || "").trim();
+            if (!newName) return;
+            const folderId = (prompt("Inventory folder ID/location (optional)", "") || "").trim();
+            const item = normalizeInventoryItem({ id: genId("inventory"), name: newName, pn, qtyNew: 0, qtyOld: 0, unit: "pcs", note: "Created from purchase history", folderId: folderId || null });
+            if (!item){ toast("Unable to create inventory item."); return; }
+            inventory.unshift(item);
+            window.inventory = inventory;
+            linkedItem = item;
+          } else {
+            const query = (prompt("Search inventory by name to link", selectedName || "") || "").trim().toLowerCase();
+            linkedItem = (Array.isArray(inventory) ? inventory : []).find(item => String(item?.name || "").toLowerCase().includes(query)) || null;
+          }
+        }
+        if (!linkedItem){ toast("No inventory item selected."); return; }
+        const canonicalName = linkedItem.name || selectedName || matchingRows[0]?.purchased || "";
+        const updated = ensurePurchaseHistoryLinkForPartNumber({ partNumber: pn, inventoryItemId: linkedItem.id, canonicalName });
+        if (updated > 0){
+          if (Array.isArray(window.maintenanceCostLog)){
+            window.maintenanceCostLog.unshift({
+              id: genId("purchase_link"),
+              type: "purchase_history_linked",
+              createdAt: new Date().toISOString(),
+              partNumber: pn,
+              linkedInventoryId: linkedItem.id,
+              linkedInventoryName: canonicalName,
+              affectedRows: updated
+            });
+          }
+          persistReceiptState();
+          saveWeekRowsFromDom();
+          renderWeekRows();
+          renderRangeTable();
+          renderCentralSpendRows();
+          toast(`Linked ${updated} purchase row${updated===1?"":"s"} to inventory item.`);
+        }
+      };
       const renderRangeTable = ()=>{
         if (!(rangeRowsBody instanceof HTMLElement)) return;
         const { start, end } = getRangeWindow(activeRange);
         const rows = buildRangeRows(activeRange);
         const subtotal = rows.reduce((sum, row) => sum + row.total, 0);
-        rangeRowsBody.innerHTML = rows.length ? rows.map(row => `
+        rangeRowsBody.innerHTML = rows.length ? rows.map(row => {
+          const linked = !!findInventoryByPartNumber(row.partNumber);
+          const stateLabel = linked ? "Linked" : "Unlinked";
+          return `
           <tr>
             <td>${escapeHtml(row.date || "—")}</td>
             <td>${escapeHtml(row.purchased || "—")}</td>
@@ -12211,8 +12313,9 @@ function renderCosts(){
             <td>${formatUsd(row.shipping || 0)}</td>
             <td>${formatUsd(row.tax || 0)}</td>
             <td>${formatUsd(row.total || 0)}</td>
-            <td></td>
-          </tr>`).join("") : '<tr><td colspan="8" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
+            <td><span class="small muted">${stateLabel}</span></td>
+          </tr>`;
+        }).join("") : '<tr><td colspan="8" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
         if (rangeSubtotal) rangeSubtotal.textContent = formatUsd(subtotal);
         if (rangeLabel) rangeLabel.textContent = formatDateRangeLabel(start, end);
       };
@@ -12225,7 +12328,7 @@ function renderCosts(){
           event.preventDefault();
           const row = input.closest("tr[data-receipt-row]");
           if (!row) return;
-          const columns = ["date", "purchased", "cost", "qty", "partNumber", "shipping", "tax"];
+          const columns = ["date", "purchased", "cost", "qty", "partNumber", "inventoryItemId", "shipping", "tax"];
           const col = input.getAttribute("data-col") || "";
           const idx = columns.indexOf(col);
           if (idx < 0) return;
@@ -12380,6 +12483,83 @@ function renderCosts(){
           downloadWorkbook(`receipt-week-${entry.key || "week"}.xls`, workbook);
         });
       }
+      const openFixerBtn = modal.querySelector("[data-receipt-open-fixer]");
+      const buildUnlinkedGroups = ()=>{
+        const missing = [];
+        (window.receiptTrackerWeeks || []).forEach(week => {
+          normalizeRows(week?.rows).forEach((row,rowIndex) => {
+            const pn = String(row.partNumber || "").trim();
+            const linked = pn ? findInventoryByPartNumber(pn) : null;
+            const explicitId = String(row.inventoryItemId || "").trim();
+            if (!linked && !explicitId){ missing.push({ ...row, weekKey: String(week?.key||""), rowIndex }); }
+          });
+        });
+        const map = new Map();
+        missing.forEach(row => {
+          const pn = String(row.partNumber || "").trim();
+          const key = pn ? `pn:${pn.toLowerCase()}` : `row:${row.weekKey}:${row.rowIndex}`;
+          if (!map.has(key)) map.set(key, { key, partNumber: pn, rows: [] });
+          map.get(key).rows.push(row);
+        });
+        return Array.from(map.values()).map(group => {
+          const names = Array.from(new Set(group.rows.map(r => String(r.purchased || "").trim()).filter(Boolean)));
+          const qty = group.rows.reduce((sum,r)=>sum+(Number(r.qty)||0),0);
+          return { ...group, names, qty, count: group.rows.length };
+        });
+      };
+      const applyGroupLink = (group, inv)=>{
+        if (!group || !inv) return;
+        let canonicalName = inv.name || "";
+        if (group.names.length > 1){
+          const picked = prompt(`Name standardization required for part number ${group.partNumber || "(none)"}. Choose final name:
+${group.names.join("\n")}`, canonicalName || group.names[0] || "") || "";
+          canonicalName = picked.trim();
+          if (!canonicalName) return;
+          const proceed = confirm(`All purchase history records in this part-number group will be renamed to "${canonicalName}". Continue?`);
+          if (!proceed) return;
+        }
+        (window.receiptTrackerWeeks || []).forEach(week => {
+          if (!Array.isArray(week?.rows)) return;
+          week.rows = week.rows.map((row, idx) => {
+            const samePn = group.partNumber && String(row?.partNumber||"").trim().toLowerCase() === String(group.partNumber).toLowerCase();
+            const sameRow = !group.partNumber && group.rows.some(x => x.weekKey===week.key && Number(x.rowIndex)===idx);
+            if (!samePn && !sameRow) return row;
+            return { ...row, inventoryItemId: inv.id, isInventoryLinked: true, purchased: canonicalName || inv.name || row.purchased || "", pnSnapshot: inv.pn || row.partNumber || "", inventoryNameSnapshot: inv.name || "", linkedAtISO: new Date().toISOString(), linkSource: "manual_part_number_group" };
+          });
+        });
+        if (typeof appendSystemLog === 'function') appendSystemLog({ eventType:'purchase_inventory_link_repaired', sourceArea:'orderRequests', targetArea:'inventory', partNumber: group.partNumber || '', affectedCount: group.count, inventoryId: inv.id, finalName: canonicalName || inv.name || '', qtyDelta:0, status:'historical_link_repaired_no_qty_change', message:'Inventory quantity was not changed because this was a historical link repair.' });
+        persistReceiptState();
+        saveWeekRowsFromDom();
+        renderWeekRows(); renderRangeTable(); renderCentralSpendRows();
+      };
+      const openFixerWidget = ()=>{
+        const groups = buildUnlinkedGroups();
+        const inventoryRows = Array.isArray(inventory) ? inventory : [];
+        let selectedGroupKey = "";
+        let selectedInventoryId = "";
+        let searchTerm = "";
+        const shell = document.createElement('div');
+        shell.className = 'cost-receipt-modal';
+        shell.style.color = '#000';
+        shell.style.zIndex = '10002';
+        const redraw = ()=>{
+          const filteredInv = inventoryRows.filter(item => `${item?.name||""} ${item?.pn||""} ${item?.link||""}`.toLowerCase().includes(searchTerm.toLowerCase()));
+          shell.innerHTML = `<div class="cost-receipt-backdrop" data-close="1"></div><div class="cost-receipt-card" style="max-width:1200px;color:#000;background:#fff"><div class="cost-receipt-card-body"><h3>Repair Purchase-to-Inventory Links</h3><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><h4>Unlinked purchase groups</h4><table class="cost-table"><thead><tr><th>Select</th><th>Part #</th><th>Names</th><th>Rows</th><th>Total Qty</th></tr></thead><tbody>${groups.map(g=>`<tr><td><input type='radio' name='g' value='${escapeHtml(g.key)}' ${selectedGroupKey===g.key?'checked':''}></td><td>${escapeHtml(g.partNumber||'—')}</td><td>${escapeHtml(g.names.join(', ')||'—')}</td><td>${g.count}</td><td>${g.qty}</td></tr>`).join('')||"<tr><td colspan='5'>No unlinked groups.</td></tr>"}</tbody></table></div><div><h4>Inventory items</h4><input type='search' placeholder='Search inventory...' value='${escapeHtml(searchTerm)}' data-inv-search><table class='cost-table'><thead><tr><th>Select</th><th>Name</th><th>Part #</th><th>Qty</th></tr></thead><tbody>${filteredInv.map(item=>`<tr><td><input type='radio' name='i' value='${escapeHtml(String(item.id||""))}' ${String(item.id)===selectedInventoryId?'checked':''}></td><td>${escapeHtml(item.name||'')}</td><td>${escapeHtml(item.pn||'—')}</td><td>${escapeHtml(String((Number(item.qtyNew)||0)+(Number(item.qtyOld)||0)))}</td></tr>`).join('')||"<tr><td colspan='4'>No inventory matches.</td></tr>"}</tbody></table></div></div><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn secondary' data-close='1'>Close</button><button class='btn primary' data-link='1'>Link Selected</button></div></div></div>`;
+          shell.querySelectorAll("input[name='g']").forEach(el=>el.addEventListener('change',()=>{selectedGroupKey=el.value;}));
+          shell.querySelectorAll("input[name='i']").forEach(el=>el.addEventListener('change',()=>{selectedInventoryId=el.value;}));
+          const sInput = shell.querySelector('[data-inv-search]');
+          sInput?.addEventListener('input',()=>{searchTerm=sInput.value||'';redraw();});
+          shell.querySelectorAll('[data-close="1"]').forEach(btn=>btn.addEventListener('click',()=>shell.remove()));
+          shell.querySelector('[data-link="1"]')?.addEventListener('click',()=>{
+            const g = groups.find(x=>x.key===selectedGroupKey); const inv = inventoryRows.find(x=>String(x?.id||'')===String(selectedInventoryId||''));
+            if (!g || !inv){ toast('Select one purchase group and one inventory item.'); return; }
+            applyGroupLink(g, inv); redraw();
+          });
+        };
+        redraw();
+        document.body.appendChild(shell);
+      };
+      openFixerBtn?.addEventListener("click", openFixerWidget);
       if (exportRangeBtn instanceof HTMLElement){
         exportRangeBtn.addEventListener("click", ()=>{
           const { start, end } = getRangeWindow(activeRange);
@@ -21120,6 +21300,45 @@ function formatOrderDate(iso, { includeTime = false } = {}){
   return dt.toLocaleDateString();
 }
 
+
+function appendSystemLog(entry){
+  if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
+  window.syncProcessLog.unshift({ id: genId("sync_log"), atISO: new Date().toISOString(), status: "ok", ...entry });
+  if (window.syncProcessLog.length > 500) window.syncProcessLog = window.syncProcessLog.slice(0, 500);
+}
+
+function scanPurchaseInventoryLinks(){
+  const invById = new Map((Array.isArray(inventory)?inventory:[]).filter(Boolean).map(item => [String(item.id), item]));
+  const requests = Array.isArray(orderRequests) ? orderRequests : [];
+  const lines = [];
+  requests.forEach(req => {
+    (Array.isArray(req?.items)?req.items:[]).forEach(item => {
+      if (!item) return;
+      const inventoryId = item.inventoryId != null ? String(item.inventoryId) : "";
+      const hasId = !!inventoryId;
+      const valid = hasId && invById.has(inventoryId);
+      const linkState = valid ? "linked" : (hasId ? "invalid" : "unlinked");
+      lines.push({ requestId: req.id, requestCode: req.code || req.id, requestStatus: req.status || "draft", item, inventoryId, linkState });
+    });
+  });
+  const unlinked = lines.filter(x=>x.linkState==="unlinked");
+  const invalid = lines.filter(x=>x.linkState==="invalid");
+  const groupsMap = new Map();
+  unlinked.forEach(row => {
+    const pn = String(row.item?.pn || "").trim();
+    const key = pn ? `pn:${pn.toLowerCase()}` : `item:${row.requestId}:${row.item?.id||genId('tmp')}`;
+    if (!groupsMap.has(key)) groupsMap.set(key,{ key, pn, rows: [] });
+    groupsMap.get(key).rows.push(row);
+  });
+  const groups = Array.from(groupsMap.values()).map(g=>{
+    const names = Array.from(new Set(g.rows.map(r=>String(r.item?.name||"").trim()).filter(Boolean)));
+    const qtyTotal = g.rows.reduce((sum,r)=>sum+(Number(r.item?.qty)||0),0);
+    const dates = g.rows.map(r=>String((r.item?.createdAt||"") || (r.item?.date||"") || r.requestCode || "")).filter(Boolean).sort();
+    return { ...g, names, qtyTotal, count: g.rows.length, dateStart: dates[0]||"—", dateEnd: dates[dates.length-1]||"—" };
+  });
+  return { lines, unlinked, invalid, linked: lines.filter(x=>x.linkState==='linked'), groups };
+}
+
 function computeOrderRequestModel(){
   const draft = ensureActiveOrderRequest();
   const existingIds = new Set(draft.items.map(item => item.id));
@@ -21554,7 +21773,7 @@ function applyInventoryForApprovedItems(items){
   if (!Array.isArray(items)) return;
   items.forEach(item => {
     if (!item) return;
-    if (!item.inventoryId) return;
+    if (!item.inventoryId){ appendSystemLog({ eventType:"purchase_inventory_update_skipped", sourceArea:"orderRequests", targetArea:"inventory", status:"skipped_unlinked_inventory", qtyDelta:0, message:"Purchase item was unlinked, so inventory was not updated." }); return; }
     const inv = inventory.find(x => x.id === item.inventoryId);
     if (!inv) return;
     const qty = Number(item.qty);
@@ -21636,6 +21855,13 @@ function renderOrderRequest(){
   const activeCard = content.querySelector(".order-card");
   const draft = ensureActiveOrderRequest();
 
+  const scan = scanPurchaseInventoryLinks();
+  const statsEl = content.querySelector("[data-order-link-stats]");
+  if (statsEl){
+    const noPn = scan.groups.filter(g => !String(g.pn||"").trim()).length;
+    statsEl.innerHTML = `<div>Total scanned: <strong>${scan.lines.length}</strong></div><div>Linked: <strong>${scan.linked.length}</strong></div><div>Unlinked: <strong>${scan.unlinked.length}</strong></div><div>Invalid: <strong>${scan.invalid.length}</strong></div><div>Unlinked PN groups: <strong>${scan.groups.length - noPn}</strong></div><div>No-PN records: <strong>${noPn}</strong></div><p class="small ${scan.unlinked.length||scan.invalid.length?"":"muted"}">${scan.unlinked.length||scan.invalid.length?"Action needed: unlinked/invalid purchase items found.":"Purchase links verified: no unlinked purchase items found."}</p>`;
+  }
+
   content.querySelectorAll("[data-order-tab]").forEach(btn => {
     btn.addEventListener("click", ()=>{
       const target = btn.getAttribute("data-order-tab") || "active";
@@ -21687,6 +21913,16 @@ function renderOrderRequest(){
   });
 
   activeCard?.addEventListener("click", (e)=>{
+    const linkBtn = e.target.closest("[data-order-item-link]");
+    if (linkBtn){ renderRepairModal("unlinked"); return; }
+    const fixBtn = e.target.closest("[data-order-fix-links]");
+    if (fixBtn){ renderRepairModal("unlinked"); return; }
+    const invalidBtn = e.target.closest("[data-order-review-invalid]");
+    if (invalidBtn){ renderRepairModal("invalid"); return; }
+    const refreshBtn = e.target.closest("[data-order-refresh-scan]");
+    if (refreshBtn){ renderOrderRequest(); return; }
+    const logBtn = e.target.closest("[data-order-view-system-log]");
+    if (logBtn){ location.hash = "#/costs"; renderCosts(); return; }
     const removeBtn = e.target.closest("[data-order-remove]");
     if (removeBtn){
       const id = removeBtn.getAttribute("data-order-remove");
@@ -21736,6 +21972,36 @@ function renderOrderRequest(){
     }
   });
 
+
+  content.addEventListener("click", (e)=>{
+    const viewBtn = e.target.closest("[data-order-group-view]");
+    const matchBtn = e.target.closest("[data-order-group-match]");
+    const createBtn = e.target.closest("[data-order-group-create]");
+    const clearBtn = e.target.closest("[data-order-group-clear]");
+    if (!(viewBtn||matchBtn||createBtn||clearBtn)) return;
+    const key = (viewBtn||matchBtn||createBtn||clearBtn).getAttribute("data-order-group-view") || (viewBtn||matchBtn||createBtn||clearBtn).getAttribute("data-order-group-match") || (viewBtn||matchBtn||createBtn||clearBtn).getAttribute("data-order-group-create") || (viewBtn||matchBtn||createBtn||clearBtn).getAttribute("data-order-group-clear");
+    const scan2 = scanPurchaseInventoryLinks();
+    let rows=[];
+    if (key && key.startsWith('invalid:')) rows = scan2.invalid.filter(r => `invalid:${r.item.id}`===key);
+    else rows = (scan2.groups.find(g=>g.key===key)?.rows)||[];
+    if (viewBtn){ toast(`Records: ${rows.map(r=>`${r.requestCode} / ${r.item.name}`).join(' | ') || 'none'}`); return; }
+    if (clearBtn){ rows.forEach(r=>{ r.item.inventoryId=null; r.item.isInventoryLinked=false; }); appendSystemLog({ eventType:'purchase_invalid_link_cleared', sourceArea:'orderRequests', targetArea:'orderRequests', status:'cleared_to_unlinked', qtyDelta:0, message:'Invalid inventory link cleared; no inventory quantity changed.'}); saveCloudDebounced(); renderOrderRequest(); return; }
+    const invName = prompt('Search inventory name/part number', rows[0]?.item?.name || '') || '';
+    const matches = (Array.isArray(inventory)?inventory:[]).filter(it => `${it.name||''} ${it.pn||''} ${it.link||''}`.toLowerCase().includes(invName.toLowerCase()));
+    let inv = matches[0]||null;
+    if (createBtn || !inv){
+      const finalName = (prompt('Final inventory name', rows[0]?.item?.name||'')||'').trim(); if(!finalName) return;
+      const pn = (rows[0]?.item?.pn || '').trim();
+      const folderId = (window.inventoryFolders && window.inventoryFolders[0] && window.inventoryFolders[0].id) ? window.inventoryFolders[0].id : null;
+      inv = normalizeInventoryItem({ id:genId('inventory'), name:finalName, pn, qtyNew:0, qtyOld:0, qty:0, unit: rows[0]?.item?.unit||'pcs', price: rows[0]?.item?.price||null, folderId, link: rows[0]?.item?.link||'' });
+      inventory.unshift(inv); window.inventory=inventory;
+    }
+    if (!inv) return;
+    rows.forEach(r=>{ r.item.inventoryId = inv.id; r.item.isInventoryLinked = true; r.item.inventoryNameSnapshot = inv.name||''; r.item.pnSnapshot = r.item.pn || inv.pn || ''; r.item.linkSnapshot = r.item.link || inv.link || ''; r.item.unitCostSnapshot = r.item.price != null ? Number(r.item.price)||0 : null; r.item.unitSnapshot = r.item.unit || inv.unit || 'pcs'; r.item.linkedAtISO = new Date().toISOString(); r.item.linkSource = 'manual_part_number_group'; r.item.name = inv.name || r.item.name; });
+    appendSystemLog({ eventType:'purchase_inventory_link_repaired', sourceArea:'orderRequests', targetArea:'inventory', partNumber: rows[0]?.item?.pn || '', affectedCount: rows.length, inventoryId: inv.id, finalName: inv.name, qtyDelta:0, status:'historical_link_repaired_no_qty_change', message:'Inventory quantity was not changed because this was a historical link repair.'});
+    saveCloudDebounced(); renderOrderRequest();
+  });
+
   content.querySelectorAll("[data-order-download-history]").forEach(btn => {
     btn.addEventListener("click", ()=>{
       const id = btn.getAttribute("data-order-download-history");
@@ -21744,6 +22010,19 @@ function renderOrderRequest(){
       if (req) downloadOrderRequestCSV(req);
     });
   });
+
+
+  function renderRepairModal(mode){
+    const modal = content.querySelector("#orderLinkRepairModal");
+    const host = content.querySelector("[data-order-repair-table]");
+    if (!modal || !host) return;
+    const rescan = scanPurchaseInventoryLinks();
+    const groups = mode === "invalid" ? rescan.invalid.map(row => ({ key:`invalid:${row.item.id}`, pn: row.item.pn||"", names:[row.item.name||""], count:1, qtyTotal:Number(row.item.qty)||0, rows:[row], badId: row.inventoryId, dateStart: row.requestCode, dateEnd: row.requestCode })) : rescan.groups;
+    host.innerHTML = `<table class="cost-table"><thead><tr><th>Status</th><th>Part number</th><th>Names found</th><th>Affected</th><th>Total qty</th><th>Date range</th><th>Current status</th><th>Actions</th></tr></thead><tbody>${groups.map(g=>`<tr><td>${mode==="invalid"?"Invalid":"Unlinked"}</td><td>${escapeHtml(g.pn||"—")}</td><td>${escapeHtml((g.names||[]).join(", ")||"—")}</td><td>${g.count}</td><td>${g.qtyTotal}</td><td>${escapeHtml(`${g.dateStart} → ${g.dateEnd}`)}</td><td>${mode==="invalid"?`Bad ID: ${escapeHtml(g.badId||"—")}`:"Needs link"}</td><td><button data-order-group-view="${escapeHtml(g.key)}">View Records</button> <button data-order-group-match="${escapeHtml(g.key)}">Match Existing Inventory</button> <button data-order-group-create="${escapeHtml(g.key)}">Create New Inventory Item</button>${mode==="invalid"?` <button data-order-group-clear="${escapeHtml(g.key)}">Clear Link</button>`:""}</td></tr>`).join("") || `<tr><td colspan='8'>No records to repair.</td></tr>`}</tbody></table>`;
+    modal.hidden = false; modal.setAttribute('aria-hidden','false');
+    modal.dataset.mode = mode;
+  }
+  content.querySelectorAll('[data-order-repair-close]').forEach(btn=>btn.addEventListener('click', ()=>{ const m=content.querySelector('#orderLinkRepairModal'); if(m){m.hidden=true;m.setAttribute('aria-hidden','true');} }));
 
   updateOrderTotalsUI(activeCard, draft);
 }
@@ -21891,3 +22170,5 @@ function renderDeletedItems(options){
     }
   }
 }
+
+window.debugPurchaseInventoryLinks = function(){ const scan = scanPurchaseInventoryLinks(); return { totalOrderRequests: Array.isArray(orderRequests)?orderRequests.length:0, totalPurchaseLines: scan.lines.length, linkedCount: scan.linked.length, unlinkedCount: scan.unlinked.length, invalidLinkCount: scan.invalid.length, unlinkedGroupsByPartNumber: scan.groups.filter(g=>g.pn).length, noPartNumberIndividualRecords: scan.groups.filter(g=>!g.pn).length, syncProcessLogCount: Array.isArray(window.syncProcessLog)?window.syncProcessLog.length:0, inventoryTransactionsCount: Array.isArray(window.inventoryTransactions)?window.inventoryTransactions.length:0, sampleUnlinkedRecords: scan.unlinked.slice(0,5), sampleInvalidRecords: scan.invalid.slice(0,5) }; };
