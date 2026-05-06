@@ -6195,3 +6195,15 @@ body.job-flow-lock-scroll {
 .cost-weekly-section-totals{ display:flex; flex-wrap:wrap; gap:10px 16px; padding:10px 12px; border-top:1px solid #e4e9f3; color:#1e2b45; background:#fbfcff; font-variant-numeric:tabular-nums; }
 
 .average-hours-banner{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+[data-receipt-open-fixer]{
+  display:none !important;
+}
+
+[data-dc-log-rows] td{
+  white-space:normal !important;
+  line-height:1.25 !important;
+  padding-top:6px !important;
+  padding-bottom:6px !important;
+  vertical-align:top;
+  word-break:break-word;
+}
