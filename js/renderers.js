@@ -5056,6 +5056,42 @@ function renderDashboard(){
   setAppSettingsContext("dashboard");
   wireDashboardSettingsMenu();
 
+
+  const globalSearchInput = document.getElementById("dashboardGlobalSearch");
+  const globalSuggestions = document.getElementById("dashboardGlobalSearchSuggestions");
+  const getDashboardSearchItems = ()=>{
+    const items = [];
+    (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).forEach(task=>{ if(task&&task.id&&task.name) items.push({type:"maintenance", id:String(task.id), label:String(task.name)}); });
+    (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []).forEach(task=>{ if(task&&task.id&&task.name) items.push({type:"maintenance", id:String(task.id), label:String(task.name)}); });
+    (Array.isArray(window.jobs) ? window.jobs : []).forEach(job=>{ if(job&&job.id&&job.name) items.push({type:"cutting", id:String(job.id), label:String(job.name)}); });
+    return items;
+  };
+  const renderDashboardSuggestions = (term="")=>{
+    if (!globalSearchInput || !globalSuggestions) return;
+    const q = String(term || "").trim().toLowerCase();
+    if (!q){ globalSuggestions.hidden = true; globalSuggestions.innerHTML = ""; return; }
+    const matches = getDashboardSearchItems().filter(item => item.label.toLowerCase().includes(q)).slice(0,8);
+    if (!matches.length){ globalSuggestions.hidden = true; globalSuggestions.innerHTML = ""; return; }
+    globalSuggestions.innerHTML = matches.map(item=>`<button type="button" data-search-type="${item.type}" data-search-id="${item.id}">${escapeHtml(item.label)} <small>(${item.type === "cutting" ? "Cutting job" : "Maintenance task"})</small></button>`).join("");
+    globalSuggestions.hidden = false;
+  };
+  globalSearchInput?.addEventListener("input", ()=> renderDashboardSuggestions(globalSearchInput.value));
+  globalSuggestions?.addEventListener("click", (e)=>{
+    const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-search-id]") : null;
+    if (!btn) return;
+    const type = btn.getAttribute("data-search-type") || "maintenance";
+    const id = btn.getAttribute("data-search-id") || "";
+    if (type === "cutting"){
+      location.hash = "#jobs";
+      setTimeout(()=>{
+        const row = document.querySelector(`[data-job-id="${CSS.escape(id)}"]`);
+        if (row){ row.classList.add("pulse-highlight"); setTimeout(()=>row.classList.remove("pulse-highlight"), 1600); }
+      }, 120);
+      return;
+    }
+    location.hash = `#settings?taskId=${encodeURIComponent(id)}`;
+    window.pendingMaintenanceFocus = { taskIds:[id], flash:true };
+  });
   // Log hours
   document.getElementById("logBtn")?.addEventListener("click", ()=>{
     const input = document.getElementById("totalInput");
@@ -8585,6 +8621,7 @@ function renderSettings(){
           <div class="row-actions">
             <button type="button" class="btn-edit" data-edit-task="${t.id}" aria-pressed="false">Edit</button>
             <button type="button" class="btn-notes" data-occurrence-notes="${t.id}" aria-haspopup="dialog">Occurrence notes</button>
+            <button type="button" class="btn-notes" data-task-history="${t.id}">History</button>
             ${type === "interval" ? `<button class="btn-complete" data-complete="${t.id}">Mark completed now</button>` : ""}
             <button class="danger" data-remove="${t.id}" data-from="${type}">Remove</button>
           </div>
@@ -10084,6 +10121,48 @@ function renderSettings(){
     if (notesBtn){
       const id = notesBtn.getAttribute('data-occurrence-notes');
       if (id) openOccurrenceNotes(id);
+      return;
+    }
+    const historyBtn = e.target.closest('[data-task-history]');
+    if (historyBtn){
+      const id = historyBtn.getAttribute('data-task-history');
+      const meta = findTaskMeta(id);
+      if (!meta) return;
+      const t = meta.task;
+      const scheduled = Array.from(new Set([].concat(Array.isArray(t.manualHistory) ? t.manualHistory.map(x=>x&&x.dateISO).filter(Boolean) : [], t.calendarDateISO ? [t.calendarDateISO] : []))).sort();
+      const completed = Array.from(new Set(Array.isArray(t.completedDates) ? t.completedDates.filter(Boolean) : [])).sort();
+      const lastCompleted = completed.length ? completed[completed.length-1] : '';
+      let gapLabel = '—';
+      if (completed.length >= 2){
+        const a = new Date(completed[completed.length-2]); const b = new Date(completed[completed.length-1]);
+        const days = Math.round((b-a)/86400000); gapLabel = `${days} day(s)`;
+      }
+      const every = Math.max(1, Number(t.recurrenceEvery||1));
+      const basis = String(t.recurrenceBasis || 'calendar_day');
+      let predicted = '—';
+      if (lastCompleted){
+        const d = new Date(lastCompleted+'T00:00:00');
+        if (basis === 'calendar_week') d.setDate(d.getDate() + (every*7));
+        else if (basis === 'calendar_month') d.setMonth(d.getMonth() + every);
+        else d.setDate(d.getDate() + every);
+        predicted = d.toISOString().slice(0,10);
+      }
+      const rows = Array.from(new Set(scheduled.concat(completed))).sort().map(dateISO=>{
+        const note = (t.occurrenceNotes && t.occurrenceNotes[dateISO]) ? String(t.occurrenceNotes[dateISO]) : '';
+        return `<tr><td><button type="button" data-history-jump="${dateISO}" data-task-id="${t.id}">${dateISO}</button></td><td>${scheduled.includes(dateISO)?'Yes':'No'}</td><td>${completed.includes(dateISO)?'Yes':'No'}</td><td>${escapeHtml(note||'')}</td></tr>`;
+      }).join('') || '<tr><td colspan="4">No history yet.</td></tr>';
+      const modal = document.createElement('div');
+      modal.className = 'modal-backdrop';
+      modal.innerHTML = `<div class="modal-card" style="max-width:900px"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Predicted next: ${escapeHtml(predicted)}</p><table class="cost-table"><thead><tr><th>Date</th><th>Scheduled</th><th>Completed</th><th>Occurrence notes</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      document.body.appendChild(modal);
+      modal.addEventListener('click', (ev)=>{
+        const jump = ev.target instanceof HTMLElement ? ev.target.closest('[data-history-jump]') : null;
+        if (jump){
+          const dateISO = jump.getAttribute('data-history-jump');
+          if (dateISO){ location.hash = '#/'; setTimeout(()=>{ if (typeof renderCalendar==='function') renderCalendar(); const cell=document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`); if(cell){ cell.scrollIntoView({behavior:'smooth', block:'center'}); if (typeof highlightCalendarDayCell==='function') highlightCalendarDayCell(cell); } },150); }
+        }
+        if (ev.target === modal || (ev.target instanceof HTMLElement && ev.target.closest('[data-close]'))) modal.remove();
+      });
       return;
     }
     const removeBtn = e.target.closest('[data-remove]');
