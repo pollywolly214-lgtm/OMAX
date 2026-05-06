@@ -10995,7 +10995,14 @@ function renderCosts(){
       const logs = Array.isArray(window.syncProcessLog)?window.syncProcessLog:(Array.isArray(window.systemSaveLog)?window.systemSaveLog:[]);
       const saveLogs = Array.isArray(window.maintenanceCostLog) ? window.maintenanceCostLog.slice(0, 100).map(entry => ({ atISO: entry?.createdAt, eventType: entry?.type || "save_event", status: "saved", sourceArea: "maintenanceCostLog", targetArea: "", partNumber: entry?.partNumber || "", qtyDelta: "", message: entry?.notes || entry?.message || "Saved cost/history entry." })) : [];
       const merged = [...logs, ...saveLogs];
-      logRowsHost.innerHTML = merged.length?merged.slice(0,100).map(entry=>`<tr><td>${escapeHtml(String(entry?.atISO||entry?.createdAt||'—'))}</td><td>${escapeHtml(String(entry?.eventType||entry?.type||'—'))}</td><td>${escapeHtml(String(entry?.status||'—'))}</td><td>${escapeHtml(String(entry?.sourceArea||'—'))}</td><td>${escapeHtml(String(entry?.targetArea||'—'))}</td><td>${escapeHtml(String(entry?.partNumber||'—'))}</td><td>${escapeHtml(String(entry?.qtyDelta!=null?entry.qtyDelta:'—'))}</td><td>${escapeHtml(String(entry?.message||'—'))}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No system wiring or save log entries yet.</td></tr>`;
+      const toCst = (value)=>{
+        const iso = String(value || "").trim();
+        if (!iso) return "—";
+        const dt = new Date(iso);
+        if (Number.isNaN(dt.getTime())) return iso;
+        return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true, timeZoneName: "short" }).format(dt);
+      };
+      logRowsHost.innerHTML = merged.length?merged.slice(0,100).map(entry=>`<tr><td>${escapeHtml(toCst(entry?.atISO||entry?.createdAt||''))}</td><td>${escapeHtml(String(entry?.eventType||entry?.type||'—'))}</td><td>${escapeHtml(String(entry?.status||'—'))}</td><td>${escapeHtml(String(entry?.sourceArea||'—'))}</td><td>${escapeHtml(String(entry?.targetArea||'—'))}</td><td>${escapeHtml(String(entry?.partNumber||'—'))}</td><td>${escapeHtml(String(entry?.qtyDelta!=null?entry.qtyDelta:'—'))}</td><td>${escapeHtml(String(entry?.message||'—'))}</td></tr>`).join(''):`<tr><td colspan=8 class="cost-table-placeholder">No system wiring or save log entries yet.</td></tr>`;
     };
     renderDataCenterInventoryRows();
     renderDataCenterLogRows();
