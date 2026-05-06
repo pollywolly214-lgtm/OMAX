@@ -2228,7 +2228,7 @@ body.modal-open .auth-bar {
 }
 .job-add-form {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 12px 16px;
   align-items: start;
 }
@@ -2242,6 +2242,13 @@ body.modal-open .auth-bar {
   border:1px solid #d7e3f7;
   border-radius:12px;
   background:#f1f7ff;
+}
+.job-add-column-material > #jobMaterialSettingsBtn{
+  min-height:40px;
+  border-radius:10px;
+  border:1px solid #c5d7f4;
+  background:#fff;
+  font-weight:600;
 }
 .job-add-form > label,
 .job-category-field {

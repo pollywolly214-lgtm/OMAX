@@ -19246,6 +19246,7 @@ function renderJobs(){
 
   document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
+    recalcMaterialTotals();
     const name  = document.getElementById("jobName").value.trim();
     const estMinutesInput = document.getElementById("jobEstMinutes");
     applyMinutesToHours(addJobEstHoursInput, estMinutesInput, addJobEstBreakdown);

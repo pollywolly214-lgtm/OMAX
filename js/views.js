@@ -4325,32 +4325,6 @@ function viewJobs(){
             <input type="number" id="jobCostRate" placeholder="45.00" min="0" step="0.01" value="${esc(addJobDraftField("costRate", "45"))}">
           </label>
           </div>
-          <div class="job-add-column job-add-column-material">
-          <label>Material
-            <select id="jobMaterial" aria-label="Material">
-              <option value="">Select material</option>
-              <option value="A36 steel">A36 steel</option>
-              <option value="Grade 572-50 steel">Grade 572-50 steel</option>
-              <option value="Stainless Steel">Stainless Steel</option>
-              <option value="Aluminum">Aluminum</option>
-            </select>
-          </label>
-          <label>Thickness (in, fraction or decimal)
-            <input type="text" id="jobMaterialThickness" placeholder="1/4" inputmode="decimal" value="${esc(addJobDraftField("materialThickness"))}">
-          </label>
-          <label>Path length (ft)
-            <input type="number" id="jobMaterialLengthFt" placeholder="10" min="0.01" step="0.01" value="${esc(addJobDraftField("materialLengthFt"))}">
-          </label>
-          <label>Path width (ft)
-            <input type="number" id="jobMaterialWidthFt" placeholder="4" min="0.01" step="0.01" value="${esc(addJobDraftField("materialWidthFt"))}">
-          </label>
-          <label>Material cost ($)
-            <input type="number" id="jobMaterialCost" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}" readonly>
-          </label>
-          <label>Material weight (lb)
-            <input type="number" id="jobMaterialQty" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialQty"))}" readonly>
-          </label>
-          </div>
           <div class="job-add-column">
           <label>Start date
             <input type="date" id="jobStart" required value="${esc(addJobDraftField("start", defaultJobDateISO))}">
@@ -4371,26 +4345,52 @@ function viewJobs(){
             </p>
           </div>
           </div>
+          <div class="job-add-column job-add-column-material">
+          <label>Material
+            <select id="jobMaterial" aria-label="Material">
+              <option value="">Select material</option>
+              <option value="A36 steel">A36 steel</option>
+              <option value="Grade 572-50 steel">Grade 572-50 steel</option>
+              <option value="Stainless Steel">Stainless Steel</option>
+              <option value="Aluminum">Aluminum</option>
+            </select>
+          </label>
+          <label>Thickness (in, fraction or decimal)
+            <input type="text" id="jobMaterialThickness" placeholder="1/4" inputmode="decimal" value="${esc(addJobDraftField("materialThickness"))}">
+          </label>
+          <label>Path length (ft)
+            <input type="number" id="jobMaterialLengthFt" placeholder="10" min="0.01" step="0.01" value="${esc(addJobDraftField("materialLengthFt"))}">
+          </label>
+          <label>Path width (ft)
+            <input type="number" id="jobMaterialWidthFt" placeholder="4" min="0.01" step="0.01" value="${esc(addJobDraftField("materialWidthFt"))}">
+          </label>
+          <label>Material cost ($)
+            <input type="number" id="jobMaterialCost" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}" readonly aria-readonly="true">
+          </label>
+          <label>Material weight (lb)
+            <input type="number" id="jobMaterialQty" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialQty"))}" readonly aria-readonly="true">
+          </label>
+          <button type="button" id="jobMaterialSettingsBtn">Material settings</button>
+          <div class="job-material-settings" id="jobMaterialSettingsPanel" hidden aria-hidden="true">
+            <div class="job-material-settings-header">
+              <strong>Material settings</strong>
+              <button type="button" id="jobMaterialSettingsClose">Close</button>
+            </div>
+            <label>Waste factor (%)
+              <input type="number" id="jobWasteFactor" min="0" step="1" value="10">
+            </label>
+            <div id="jobMaterialSettingsList"></div>
+            <button type="button" id="jobMaterialAddTypeBtn">+ Add material type</button>
+          </div>
+          </div>
           <div class="job-add-actions">
             <button type="button" id="jobFilesBtn">Attach Files</button>
             <button type="button" id="jobOneDriveLibraryAddBtn">Add from this computer OneDrive folder</button>
-            <button type="button" id="jobMaterialSettingsBtn">Material settings</button>
             <button type="submit">Add Job</button>
           </div>
           <input type="file" id="jobFiles" multiple style="display:none">
           <datalist id="jobMaterialOptions">${materialInventoryOptionsMarkup}</datalist>
         </form>
-        <div class="job-material-settings" id="jobMaterialSettingsPanel" hidden aria-hidden="true">
-          <div class="job-material-settings-header">
-            <strong>Material settings</strong>
-            <button type="button" id="jobMaterialSettingsClose">Close</button>
-          </div>
-          <label>Waste factor (%)
-            <input type="number" id="jobWasteFactor" min="0" step="1" value="10">
-          </label>
-          <div id="jobMaterialSettingsList"></div>
-          <button type="button" id="jobMaterialAddTypeBtn">+ Add material type</button>
-        </div>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
       </section>
 
