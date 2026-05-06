@@ -19281,16 +19281,25 @@ function renderJobs(){
     const previousCategoryFilter = typeof window.jobCategoryFilter === "string" && window.jobCategoryFilter
       ? window.jobCategoryFilter
       : jobRootCategoryId;
-    const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
+    let materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
     const materialWeight = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
     const materialQty = 1;
     const chargeRate = chargeRaw === "" ? 200 : Number(chargeRaw);
     const costRate = costRateRaw === "" ? 45 : Number(costRateRaw);
     if (!name || !isFinite(est) || est<=0 || !start || !due || !projectNumber){ toast("Fill job fields, including project #."); return; }
-    if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
+    if (!Number.isFinite(materialCost) || materialCost < 0){
+      materialCost = 0;
+    }
     if (!Number.isFinite(materialWeight) || materialWeight < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
     if (!Number.isFinite(costRate) || costRate < 0){ toast("Enter a valid cost rate."); return; }
+    if (materialCost <= 0 && materialWeight > 0){
+      const selectedMaterial = materialSettings.materials.find(m => m.name === material);
+      const pricePerLb = Number(selectedMaterial?.pricePerLb || 0);
+      if (Number.isFinite(pricePerLb) && pricePerLb > 0){
+        materialCost = Number((materialWeight * pricePerLb).toFixed(2));
+      }
+    }
     if (!categoryId){ toast("Choose a category."); return; }
     if (categoryId === "__new__"){
       const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
@@ -22041,5 +22050,5 @@ function renderDeletedItems(options){
     } catch (_){
       /* ignore selection failures (e.g. unsupported input types) */
     }
-  }
+    }
 }
