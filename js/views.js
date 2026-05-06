@@ -4368,20 +4368,9 @@ function viewJobs(){
             <input type="number" id="jobMaterialCost" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}" readonly aria-readonly="true">
           </label>
           <label>Material weight (lb)
-            <input type="number" id="jobMaterialQty" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialQty"))}" readonly aria-readonly="true">
+            <output id="jobMaterialQty" class="job-material-output">${esc(addJobDraftField("materialQty") || "0.00")}</output>
           </label>
           <button type="button" id="jobMaterialSettingsBtn">Material settings</button>
-          <div class="job-material-settings" id="jobMaterialSettingsPanel" hidden aria-hidden="true">
-            <div class="job-material-settings-header">
-              <strong>Material settings</strong>
-              <button type="button" id="jobMaterialSettingsClose">Close</button>
-            </div>
-            <label>Waste factor (%)
-              <input type="number" id="jobWasteFactor" min="0" step="1" value="10">
-            </label>
-            <div id="jobMaterialSettingsList"></div>
-            <button type="button" id="jobMaterialAddTypeBtn">+ Add material type</button>
-          </div>
           </div>
           <div class="job-add-actions">
             <button type="button" id="jobFilesBtn">Attach Files</button>
@@ -4392,6 +4381,19 @@ function viewJobs(){
           <datalist id="jobMaterialOptions">${materialInventoryOptionsMarkup}</datalist>
         </form>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
+        <div class="job-material-settings-modal" id="jobMaterialSettingsPanel" hidden aria-hidden="true">
+          <div class="job-material-settings">
+            <div class="job-material-settings-header">
+              <strong>Material settings</strong>
+              <button type="button" id="jobMaterialSettingsClose">Close</button>
+            </div>
+            <label>Waste factor (%)
+              <input type="number" id="jobWasteFactor" min="0" step="1" value="10">
+            </label>
+            <div id="jobMaterialSettingsList"></div>
+            <button type="button" id="jobMaterialAddTypeBtn">+ Add material type</button>
+          </div>
+        </div>
       </section>
 
       <div class="job-category-indicator-wrapper">

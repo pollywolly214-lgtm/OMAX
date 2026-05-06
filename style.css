@@ -2228,9 +2228,10 @@ body.modal-open .auth-bar {
 }
 .job-add-form {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
   gap: 12px 16px;
   align-items: start;
+  width: 100%;
 }
 .job-add-column{
   display:grid;
@@ -2249,6 +2250,7 @@ body.modal-open .auth-bar {
   border:1px solid #c5d7f4;
   background:#fff;
   font-weight:600;
+  color:#1d3d66;
 }
 .job-add-form > label,
 .job-category-field {
@@ -2281,16 +2283,14 @@ body.modal-open .auth-bar {
   box-shadow: 0 0 0 3px rgba(94, 163, 255, 0.18);
 }
 .job-estimate-label-group .small {
-  position: absolute;
-  top: -18px;
-  left: 0;
+  position: static;
+  display:block;
+  margin-bottom:2px;
   font-weight: 500;
   letter-spacing: 0;
   white-space: nowrap;
 }
-.job-estimate-label-group {
-  position: relative;
-}
+.job-estimate-label-group { position: static; }
 .job-priority-hint {
   margin: 4px 0 0;
   min-height: 18px;
@@ -2318,6 +2318,33 @@ body.modal-open .auth-bar {
   gap:4px;
   font-size:12px;
   font-weight:600;
+}
+.job-material-output{
+  min-height:42px;
+  border-radius:12px;
+  border:1px solid #cdd8ea;
+  background:#f8fbff;
+  padding:10px 12px;
+  display:flex;
+  align-items:center;
+}
+.job-material-settings-modal{
+  position:fixed;
+  inset:0;
+  background:rgba(8,19,35,.45);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:2000;
+}
+.job-material-settings-modal[hidden]{ display:none; }
+.job-material-settings{
+  width:min(880px, 92vw);
+  max-height:86vh;
+  overflow:auto;
+  background:#fff;
+  padding:16px;
+  border-radius:14px;
 }
 .job-add-actions button {
   min-height: 40px;

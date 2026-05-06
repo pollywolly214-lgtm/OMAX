@@ -19073,7 +19073,9 @@ function renderJobs(){
     if (!form) return;
     const getVal = (id)=>{
       const el = document.getElementById(id);
-      return el && typeof el.value === "string" ? el.value : "";
+      if (!el) return "";
+      if (typeof el.value === "string") return el.value;
+      return typeof el.textContent === "string" ? el.textContent : "";
     };
     window.jobAddDraft = {
       name: getVal("jobName"),
@@ -19149,14 +19151,14 @@ function renderJobs(){
     const areaSqIn = lengthFt * widthFt * 144;
     if (!selected || !Number.isFinite(thickness) || !Number.isFinite(areaSqIn) || thickness <= 0 || areaSqIn <= 0){
       costEl.value = "";
-      qtyEl.value = "";
+      qtyEl.textContent = "0.00";
       return;
     }
     const baseWeight = thickness * areaSqIn * Number(selected.density || 0);
     const wasteMultiplier = 1 + (Math.max(0, Number(materialSettings.wasteFactor) || 0) / 100);
     const weight = baseWeight * wasteMultiplier;
     const totalCost = weight * Number(selected.pricePerLb || 0);
-    qtyEl.value = weight.toFixed(2);
+    qtyEl.textContent = weight.toFixed(2);
     costEl.value = totalCost.toFixed(2);
   };
   const renderMaterialSettingsPanel = ()=>{
@@ -19180,6 +19182,17 @@ function renderJobs(){
   addJobForm?.addEventListener("change", syncAddJobDraftFromForm);
   addJobForm?.addEventListener("input", (e)=>{
     if (["jobMaterial", "jobMaterialThickness", "jobMaterialLengthFt", "jobMaterialWidthFt"].includes(e.target?.id)) recalcMaterialTotals();
+  });
+  addJobForm?.addEventListener("keydown", (e)=>{
+    if (e.key !== "Enter" || e.shiftKey) return;
+    const target = e.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+    e.preventDefault();
+    const fields = Array.from(addJobForm.querySelectorAll("input, select, button[type='submit']"))
+      .filter(el => !el.disabled && el.type !== "hidden" && el.id !== "jobFiles");
+    const idx = fields.indexOf(target);
+    const next = idx >= 0 ? fields[idx + 1] : null;
+    if (next && typeof next.focus === "function") next.focus();
   });
   document.getElementById("jobMaterialThickness")?.addEventListener("blur", (e)=>{
     const normalized = toNearestSixteenthText(e.target.value);
@@ -19255,7 +19268,7 @@ function renderJobs(){
     const chargeRaw = document.getElementById("jobCharge")?.value ?? "";
     const costRateRaw = document.getElementById("jobCostRate")?.value ?? "";
     const materialCostRaw = document.getElementById("jobMaterialCost")?.value ?? "";
-    const materialQtyRaw = document.getElementById("jobMaterialQty")?.value ?? "";
+    const materialQtyRaw = document.getElementById("jobMaterialQty")?.textContent ?? "";
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
     const projectNumberRaw = document.getElementById("jobProjectNumber")?.value ?? "";
