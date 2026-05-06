@@ -5101,7 +5101,7 @@ function renderDashboard(){
     globalSuggestions.hidden = true;
     if (type === "cutting"){
       window.location.hash = "#jobs";
-      window.pendingJobSearchId = id;
+      window.pendingJobFocus = { type: "jobRow", id };
       setTimeout(()=>{
         const selector = `[data-job-id="${CSS.escape(id)}"], [data-completed-job-id="${CSS.escape(id)}"]`;
         const row = document.querySelector(selector);
@@ -5109,7 +5109,7 @@ function renderDashboard(){
       }, 240);
       return;
     }
-    window.location.hash = `#settings?taskId=${encodeURIComponent(id)}`;
+    window.location.hash = `#/settings?taskId=${encodeURIComponent(id)}`;
     window.pendingMaintenanceFocus = { taskIds:[id], flash:true, openHistory:true };
   });
   // Log hours
@@ -10167,15 +10167,22 @@ function renderSettings(){
       const bodyRows = merged.map(dateISO=>{
         const centralRows = rows.filter(r => String(r?.dateISO||'')===dateISO);
         const note = centralRows.map(r => String(r?.note || r?.occurrenceNote || '').trim()).filter(Boolean)[0] || (t.occurrenceNotes && t.occurrenceNotes[dateISO]) || '';
-        return `<tr><td><button type="button" data-history-jump="${dateISO}" data-task-id="${t.id}">${dateISO}</button></td><td>${scheduledDates.includes(dateISO)?'Yes':'No'}</td><td>${completedDates.includes(dateISO)?'Yes':'No'}</td><td>${escapeHtml(note || '—')}</td></tr>`;
-      }).join('') || '<tr><td colspan="4">No history yet.</td></tr>';
+        const completionIndex = completedDates.indexOf(dateISO);
+        let sincePrior = '—';
+        if (completionIndex > 0){
+          const prev = new Date(completedDates[completionIndex - 1] + 'T00:00:00');
+          const cur = new Date(completedDates[completionIndex] + 'T00:00:00');
+          sincePrior = `${Math.round((cur - prev)/86400000)} day(s)`;
+        }
+        return `<tr><td><button type="button" data-history-jump="${dateISO}" data-task-id="${t.id}">${dateISO}</button></td><td>${scheduledDates.includes(dateISO)?'Yes':'No'}</td><td>${completedDates.includes(dateISO)?'Yes':'No'}</td><td>${escapeHtml(sincePrior)}</td><td>${escapeHtml(note || '—')}</td></tr>`;
+      }).join('') || '<tr><td colspan="5">No history yet.</td></tr>';
       const modal = document.createElement('div');
       modal.className = 'modal-backdrop';
-      modal.innerHTML = `<div class="modal-card" style="max-width:900px"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Source: central data table • Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Predicted next: ${escapeHtml(predicted)}</p><table class="cost-table"><thead><tr><th>Date</th><th>Scheduled</th><th>Completed</th><th>Occurrence notes</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+      modal.innerHTML = `<div class="modal-card" style="max-width:900px"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Source: central data table • Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Predicted next: ${escapeHtml(predicted)}</p><table class="cost-table"><thead><tr><th>Date</th><th>Scheduled</th><th>Completed</th><th>Since prior completion</th><th>Occurrence notes</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`;
       document.body.appendChild(modal);
       modal.addEventListener('click', (ev)=>{
         const jump = ev.target instanceof HTMLElement ? ev.target.closest('[data-history-jump]') : null;
-        if (jump){ const dateISO = jump.getAttribute('data-history-jump'); if (dateISO){ location.hash = '#/'; setTimeout(()=>{ if (typeof renderCalendar==='function') renderCalendar(); const cell=document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`); if(cell){ cell.scrollIntoView({behavior:'smooth', block:'center'}); if (typeof highlightCalendarDayCell==='function') highlightCalendarDayCell(cell); } },180); } }
+        if (jump){ const dateISO = jump.getAttribute('data-history-jump'); if (dateISO){ location.hash = '#/'; setTimeout(()=>{ if (typeof renderCalendar==='function') renderCalendar(); const cell=document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`); if(cell){ cell.scrollIntoView({behavior:'smooth', block:'center'}); if (typeof highlightCalendarDayCell==='function') highlightCalendarDayCell(cell); const taskAnchor = cell.querySelector(`[data-cal-task="${CSS.escape(String(t.id))}"]`) || cell; if (typeof showTaskBubble==='function') showTaskBubble(String(t.id), taskAnchor); } },220); } }
         if (ev.target === modal || (ev.target instanceof HTMLElement && ev.target.closest('[data-close]'))) modal.remove();
       });
       return;
