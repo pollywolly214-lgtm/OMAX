@@ -508,6 +508,7 @@ let firebaseSettingsApplied = false;
 let workspaceMetadataWritesBlocked = false;
 let workspaceStateUnsubscribe = null;
 let lastAppliedCloudRevision = 0;
+let hasPendingLocalChanges = false;
 const CLOUD_SYNC_CLIENT_KEY = "cloud_sync_client_id_v1";
 
 function getCloudSyncClientId(){
@@ -785,6 +786,7 @@ function startWorkspaceStateListener(){
     const incomingRev = Number(meta?.rev || 0);
     if (!incomingRev) return;
     const incomingBy = String(meta?.updatedBy || "");
+    if (hasPendingLocalChanges) return;
     if (incomingRev && incomingRev <= lastAppliedCloudRevision) return;
     if (incomingRev && incomingBy === localClientId && incomingRev === lastAppliedCloudRevision) return;
     adoptState(incoming || {});
@@ -3027,6 +3029,7 @@ const saveCloudInternal = debounce(async ()=>{
       const el = document.getElementById("dbgSnap");
       if (el) el.value = JSON.stringify(snap, null, 2);
     }
+    hasPendingLocalChanges = false;
     if (FB.workspaceDoc){
       await updateWorkspaceMetadata({
         workspaceId: WORKSPACE_ID,
@@ -3145,6 +3148,7 @@ function getTrackedStateSignature(snapshot){
 }
 function saveCloudDebounced(){
   if (isVercelPreviewRuntime()) return;
+  hasPendingLocalChanges = true;
   try {
     if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
@@ -3159,6 +3163,7 @@ function saveCloudDebounced(){
 }
 function saveCloudNow(){
   if (isVercelPreviewRuntime()) return;
+  hasPendingLocalChanges = true;
   try {
     if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
@@ -3250,7 +3255,8 @@ async function loadFromCloud(){
       if (seededRev > 0) lastAppliedCloudRevision = seededRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
       await FB.docRef.set(seeded, { merge:true });
-      if (FB.workspaceDoc){
+      hasPendingLocalChanges = false;
+    if (FB.workspaceDoc){
         await updateWorkspaceMetadata({
           workspaceId: WORKSPACE_ID,
           lastTouchedAt: new Date().toISOString()
