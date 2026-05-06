@@ -2228,9 +2228,20 @@ body.modal-open .auth-bar {
 }
 .job-add-form {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 12px 14px;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
   align-items: start;
+}
+.job-add-column{
+  display:grid;
+  gap:12px;
+  align-content:start;
+}
+.job-add-column-material{
+  padding:10px;
+  border:1px solid #d7e3f7;
+  border-radius:12px;
+  background:#f1f7ff;
 }
 .job-add-form > label,
 .job-category-field {
@@ -2286,6 +2297,20 @@ body.modal-open .auth-bar {
   align-items: center;
   justify-content: center;
   padding-top: 2px;
+}
+.job-material-row{
+  display:grid;
+  grid-template-columns: 1.2fr 1fr 1fr auto;
+  gap:8px;
+  align-items:end;
+  margin:8px 0;
+}
+.job-material-row label{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  font-size:12px;
+  font-weight:600;
 }
 .job-add-actions button {
   min-height: 40px;

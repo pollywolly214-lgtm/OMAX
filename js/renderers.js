@@ -19083,7 +19083,8 @@ function renderJobs(){
       costRate: getVal("jobCostRate"),
       material: getVal("jobMaterial"),
       materialThickness: getVal("jobMaterialThickness"),
-      materialArea: getVal("jobMaterialArea"),
+      materialLengthFt: getVal("jobMaterialLengthFt"),
+      materialWidthFt: getVal("jobMaterialWidthFt"),
       materialCost: getVal("jobMaterialCost"),
       materialQty: getVal("jobMaterialQty"),
       start: getVal("jobStart"),
@@ -19113,22 +19114,45 @@ function renderJobs(){
   };
   const saveMaterialSettings = (settings)=> localStorage.setItem(MATERIAL_SETTINGS_KEY, JSON.stringify(settings));
   let materialSettings = loadMaterialSettings();
+  const gcd = (a, b)=> b ? gcd(b, a % b) : a;
+  const fractionToNumber = (value)=>{
+    const txt = String(value || "").trim();
+    if (!txt) return NaN;
+    if (txt.includes("/")){
+      const [n, d] = txt.split("/").map(Number);
+      if (!Number.isFinite(n) || !Number.isFinite(d) || d === 0) return NaN;
+      return n / d;
+    }
+    const num = Number(txt);
+    return Number.isFinite(num) ? num : NaN;
+  };
+  const toNearestSixteenthText = (value)=>{
+    const num = fractionToNumber(value);
+    if (!Number.isFinite(num) || num <= 0) return "";
+    const rounded = Math.max(1, Math.round(num * 16));
+    if (rounded % 16 === 0) return String(rounded / 16);
+    const divisor = gcd(rounded, 16);
+    return `${rounded / divisor}/${16 / divisor}`;
+  };
   const recalcMaterialTotals = ()=>{
     const matEl = document.getElementById("jobMaterial");
     const tEl = document.getElementById("jobMaterialThickness");
-    const areaEl = document.getElementById("jobMaterialArea");
+    const lengthEl = document.getElementById("jobMaterialLengthFt");
+    const widthEl = document.getElementById("jobMaterialWidthFt");
     const costEl = document.getElementById("jobMaterialCost");
     const qtyEl = document.getElementById("jobMaterialQty");
-    if (!(matEl && tEl && areaEl && costEl && qtyEl)) return;
+    if (!(matEl && tEl && lengthEl && widthEl && costEl && qtyEl)) return;
     const selected = materialSettings.materials.find(m => m.name === matEl.value);
-    const thickness = Number(tEl.value);
-    const area = Number(areaEl.value);
-    if (!selected || !Number.isFinite(thickness) || !Number.isFinite(area) || thickness <= 0 || area <= 0){
+    const thickness = fractionToNumber(tEl.value);
+    const lengthFt = Number(lengthEl.value);
+    const widthFt = Number(widthEl.value);
+    const areaSqIn = lengthFt * widthFt * 144;
+    if (!selected || !Number.isFinite(thickness) || !Number.isFinite(areaSqIn) || thickness <= 0 || areaSqIn <= 0){
       costEl.value = "";
       qtyEl.value = "";
       return;
     }
-    const baseWeight = thickness * area * Number(selected.density || 0);
+    const baseWeight = thickness * areaSqIn * Number(selected.density || 0);
     const wasteMultiplier = 1 + (Math.max(0, Number(materialSettings.wasteFactor) || 0) / 100);
     const weight = baseWeight * wasteMultiplier;
     const totalCost = weight * Number(selected.pricePerLb || 0);
@@ -19144,9 +19168,9 @@ function renderJobs(){
     matSelect.innerHTML = `<option value="">Select material</option>${materialSettings.materials.map(m=>`<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}</option>`).join("")}`;
     list.innerHTML = materialSettings.materials.map((m, idx)=>`
       <div class="job-material-row">
-        <input data-mat-name="${idx}" value="${escapeHtml(m.name)}">
-        <input data-mat-density="${idx}" type="number" step="0.001" min="0" value="${Number(m.density) || 0}">
-        <input data-mat-price="${idx}" type="number" step="0.01" min="0" value="${Number(m.pricePerLb) || 0}">
+        <label>Name<input data-mat-name="${idx}" value="${escapeHtml(m.name)}"></label>
+        <label>Density (lb/in³)<input data-mat-density="${idx}" type="number" step="0.001" min="0" value="${Number(m.density) || 0}"></label>
+        <label>Price ($/lb)<input data-mat-price="${idx}" type="number" step="0.01" min="0" value="${Number(m.pricePerLb) || 0}"></label>
         <button type="button" data-mat-remove="${idx}">Remove</button>
       </div>
     `).join("");
@@ -19155,7 +19179,13 @@ function renderJobs(){
   addJobForm?.addEventListener("input", syncAddJobDraftFromForm);
   addJobForm?.addEventListener("change", syncAddJobDraftFromForm);
   addJobForm?.addEventListener("input", (e)=>{
-    if (["jobMaterial", "jobMaterialThickness", "jobMaterialArea"].includes(e.target?.id)) recalcMaterialTotals();
+    if (["jobMaterial", "jobMaterialThickness", "jobMaterialLengthFt", "jobMaterialWidthFt"].includes(e.target?.id)) recalcMaterialTotals();
+  });
+  document.getElementById("jobMaterialThickness")?.addEventListener("blur", (e)=>{
+    const normalized = toNearestSixteenthText(e.target.value);
+    if (normalized) e.target.value = normalized;
+    recalcMaterialTotals();
+    syncAddJobDraftFromForm();
   });
   renderMaterialSettingsPanel();
   document.getElementById("jobMaterialSettingsBtn")?.addEventListener("click", ()=>{
