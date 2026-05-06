@@ -5059,20 +5059,37 @@ function renderDashboard(){
 
   const globalSearchInput = document.getElementById("dashboardGlobalSearch");
   const globalSuggestions = document.getElementById("dashboardGlobalSearchSuggestions");
+  const centralModel = (typeof computeCostModel === "function") ? computeCostModel() : null;
+  const maintenanceRows = Array.isArray(centralModel?.maintenanceDataTable) ? centralModel.maintenanceDataTable : [];
+  const cuttingRows = Array.isArray(centralModel?.cuttingJobsDataTable) ? centralModel.cuttingJobsDataTable : [];
+  const maintenanceByTask = new Map();
+  maintenanceRows.forEach(row=>{
+    const taskId = String(row?.taskId || "").trim();
+    const taskName = String(row?.taskName || "").trim();
+    if (!taskId || !taskName) return;
+    if (!maintenanceByTask.has(taskId)) maintenanceByTask.set(taskId, { taskId, taskName, rows: [] });
+    maintenanceByTask.get(taskId).rows.push(row);
+  });
+  const cuttingByJob = new Map();
+  cuttingRows.forEach(row=>{
+    const jobId = String(row?.id || "").trim();
+    const name = String(row?.name || "").trim();
+    if (!jobId || !name) return;
+    if (!cuttingByJob.has(jobId)) cuttingByJob.set(jobId, { id: jobId, name, row });
+  });
   const getDashboardSearchItems = ()=>{
     const items = [];
-    (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).forEach(task=>{ if(task&&task.id&&task.name) items.push({type:"maintenance", id:String(task.id), label:String(task.name)}); });
-    (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []).forEach(task=>{ if(task&&task.id&&task.name) items.push({type:"maintenance", id:String(task.id), label:String(task.name)}); });
-    (Array.isArray(window.jobs) ? window.jobs : []).forEach(job=>{ if(job&&job.id&&job.name) items.push({type:"cutting", id:String(job.id), label:String(job.name)}); });
-    return items;
+    maintenanceByTask.forEach(entry=> items.push({ type:"maintenance", id:entry.taskId, label:entry.taskName, count:entry.rows.length }));
+    cuttingByJob.forEach(entry=> items.push({ type:"cutting", id:entry.id, label:entry.name, count:1 }));
+    return items.sort((a,b)=> a.label.localeCompare(b.label));
   };
   const renderDashboardSuggestions = (term="")=>{
     if (!globalSearchInput || !globalSuggestions) return;
     const q = String(term || "").trim().toLowerCase();
     if (!q){ globalSuggestions.hidden = true; globalSuggestions.innerHTML = ""; return; }
-    const matches = getDashboardSearchItems().filter(item => item.label.toLowerCase().includes(q)).slice(0,8);
+    const matches = getDashboardSearchItems().filter(item => item.label.toLowerCase().includes(q)).slice(0,10);
     if (!matches.length){ globalSuggestions.hidden = true; globalSuggestions.innerHTML = ""; return; }
-    globalSuggestions.innerHTML = matches.map(item=>`<button type="button" data-search-type="${item.type}" data-search-id="${item.id}">${escapeHtml(item.label)} <small>(${item.type === "cutting" ? "Cutting job" : "Maintenance task"})</small></button>`).join("");
+    globalSuggestions.innerHTML = matches.map(item=>`<button type="button" data-search-type="${item.type}" data-search-id="${item.id}">${escapeHtml(item.label)} <small>(${item.type === "cutting" ? "Cutting job" : `${item.count} occurrence${item.count===1?"":"s"}`})</small></button>`).join("");
     globalSuggestions.hidden = false;
   };
   globalSearchInput?.addEventListener("input", ()=> renderDashboardSuggestions(globalSearchInput.value));
@@ -5081,16 +5098,19 @@ function renderDashboard(){
     if (!btn) return;
     const type = btn.getAttribute("data-search-type") || "maintenance";
     const id = btn.getAttribute("data-search-id") || "";
+    globalSuggestions.hidden = true;
     if (type === "cutting"){
-      location.hash = "#jobs";
+      window.location.hash = "#jobs";
+      window.pendingJobSearchId = id;
       setTimeout(()=>{
-        const row = document.querySelector(`[data-job-id="${CSS.escape(id)}"]`);
-        if (row){ row.classList.add("pulse-highlight"); setTimeout(()=>row.classList.remove("pulse-highlight"), 1600); }
-      }, 120);
+        const selector = `[data-job-id="${CSS.escape(id)}"], [data-completed-job-id="${CSS.escape(id)}"]`;
+        const row = document.querySelector(selector);
+        if (row){ row.scrollIntoView({behavior:"smooth", block:"center"}); row.classList.add("pulse-highlight"); setTimeout(()=>row.classList.remove("pulse-highlight"), 1600); }
+      }, 240);
       return;
     }
-    location.hash = `#settings?taskId=${encodeURIComponent(id)}`;
-    window.pendingMaintenanceFocus = { taskIds:[id], flash:true };
+    window.location.hash = `#settings?taskId=${encodeURIComponent(id)}`;
+    window.pendingMaintenanceFocus = { taskIds:[id], flash:true, openHistory:true };
   });
   // Log hours
   document.getElementById("logBtn")?.addEventListener("click", ()=>{
@@ -10129,38 +10149,33 @@ function renderSettings(){
       const meta = findTaskMeta(id);
       if (!meta) return;
       const t = meta.task;
-      const scheduled = Array.from(new Set([].concat(Array.isArray(t.manualHistory) ? t.manualHistory.map(x=>x&&x.dateISO).filter(Boolean) : [], t.calendarDateISO ? [t.calendarDateISO] : []))).sort();
-      const completed = Array.from(new Set(Array.isArray(t.completedDates) ? t.completedDates.filter(Boolean) : [])).sort();
-      const lastCompleted = completed.length ? completed[completed.length-1] : '';
+      const model = (typeof computeCostModel === 'function') ? computeCostModel() : null;
+      const rows = Array.isArray(model?.maintenanceDataTable) ? model.maintenanceDataTable.filter(row => String(row?.taskId || '') === String(id)) : [];
+      const completedDates = Array.from(new Set(rows.map(r => String(r?.dateISO || '').trim()).filter(Boolean))).sort();
+      const scheduledDates = Array.from(new Set([].concat(Array.isArray(t.manualHistory) ? t.manualHistory.map(x=>x&&x.dateISO).filter(Boolean) : [], t.calendarDateISO ? [t.calendarDateISO] : [], completedDates))).sort();
+      const lastCompleted = completedDates.length ? completedDates[completedDates.length-1] : '';
       let gapLabel = '—';
-      if (completed.length >= 2){
-        const a = new Date(completed[completed.length-2]); const b = new Date(completed[completed.length-1]);
-        const days = Math.round((b-a)/86400000); gapLabel = `${days} day(s)`;
+      if (completedDates.length >= 2){
+        const a = new Date(completedDates[completedDates.length-2]); const b = new Date(completedDates[completedDates.length-1]);
+        gapLabel = `${Math.round((b-a)/86400000)} day(s)`;
       }
       const every = Math.max(1, Number(t.recurrenceEvery||1));
       const basis = String(t.recurrenceBasis || 'calendar_day');
       let predicted = '—';
-      if (lastCompleted){
-        const d = new Date(lastCompleted+'T00:00:00');
-        if (basis === 'calendar_week') d.setDate(d.getDate() + (every*7));
-        else if (basis === 'calendar_month') d.setMonth(d.getMonth() + every);
-        else d.setDate(d.getDate() + every);
-        predicted = d.toISOString().slice(0,10);
-      }
-      const rows = Array.from(new Set(scheduled.concat(completed))).sort().map(dateISO=>{
-        const note = (t.occurrenceNotes && t.occurrenceNotes[dateISO]) ? String(t.occurrenceNotes[dateISO]) : '';
-        return `<tr><td><button type="button" data-history-jump="${dateISO}" data-task-id="${t.id}">${dateISO}</button></td><td>${scheduled.includes(dateISO)?'Yes':'No'}</td><td>${completed.includes(dateISO)?'Yes':'No'}</td><td>${escapeHtml(note||'')}</td></tr>`;
+      if (lastCompleted){ const d = new Date(lastCompleted+'T00:00:00'); if (basis==='calendar_week') d.setDate(d.getDate()+every*7); else if (basis==='calendar_month') d.setMonth(d.getMonth()+every); else d.setDate(d.getDate()+every); predicted = d.toISOString().slice(0,10); }
+      const merged = Array.from(new Set(scheduledDates.concat(completedDates))).sort();
+      const bodyRows = merged.map(dateISO=>{
+        const centralRows = rows.filter(r => String(r?.dateISO||'')===dateISO);
+        const note = centralRows.map(r => String(r?.note || r?.occurrenceNote || '').trim()).filter(Boolean)[0] || (t.occurrenceNotes && t.occurrenceNotes[dateISO]) || '';
+        return `<tr><td><button type="button" data-history-jump="${dateISO}" data-task-id="${t.id}">${dateISO}</button></td><td>${scheduledDates.includes(dateISO)?'Yes':'No'}</td><td>${completedDates.includes(dateISO)?'Yes':'No'}</td><td>${escapeHtml(note || '—')}</td></tr>`;
       }).join('') || '<tr><td colspan="4">No history yet.</td></tr>';
       const modal = document.createElement('div');
       modal.className = 'modal-backdrop';
-      modal.innerHTML = `<div class="modal-card" style="max-width:900px"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Predicted next: ${escapeHtml(predicted)}</p><table class="cost-table"><thead><tr><th>Date</th><th>Scheduled</th><th>Completed</th><th>Occurrence notes</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      modal.innerHTML = `<div class="modal-card" style="max-width:900px"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Source: central data table • Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Predicted next: ${escapeHtml(predicted)}</p><table class="cost-table"><thead><tr><th>Date</th><th>Scheduled</th><th>Completed</th><th>Occurrence notes</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`;
       document.body.appendChild(modal);
       modal.addEventListener('click', (ev)=>{
         const jump = ev.target instanceof HTMLElement ? ev.target.closest('[data-history-jump]') : null;
-        if (jump){
-          const dateISO = jump.getAttribute('data-history-jump');
-          if (dateISO){ location.hash = '#/'; setTimeout(()=>{ if (typeof renderCalendar==='function') renderCalendar(); const cell=document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`); if(cell){ cell.scrollIntoView({behavior:'smooth', block:'center'}); if (typeof highlightCalendarDayCell==='function') highlightCalendarDayCell(cell); } },150); }
-        }
+        if (jump){ const dateISO = jump.getAttribute('data-history-jump'); if (dateISO){ location.hash = '#/'; setTimeout(()=>{ if (typeof renderCalendar==='function') renderCalendar(); const cell=document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`); if(cell){ cell.scrollIntoView({behavior:'smooth', block:'center'}); if (typeof highlightCalendarDayCell==='function') highlightCalendarDayCell(cell); } },180); } }
         if (ev.target === modal || (ev.target instanceof HTMLElement && ev.target.closest('[data-close]'))) modal.remove();
       });
       return;
