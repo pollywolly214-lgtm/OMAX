@@ -5101,7 +5101,7 @@ function renderDashboard(){
     globalSuggestions.hidden = true;
     if (type === "cutting"){
       window.pendingJobFocus = { type: "jobRow", id };
-      window.location.hash = "#jobs";
+      window.location.hash = "#/jobs";
       return;
     }
     window.pendingMaintenanceFocus = { taskIds:[id], flash:true, openHistory:true };
@@ -10191,11 +10191,11 @@ function renderSettings(){
       }).join('') || '<tr><td colspan="12">No history yet.</td></tr>';
       const modal = document.createElement('div');
       modal.className = 'modal-backdrop';
-      modal.innerHTML = `<div class="modal-card" style="max-width:900px"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Source: central data table • Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Predicted next: ${escapeHtml(predicted)}</p><table class="cost-table"><thead><tr><th>Date</th><th>Interval</th><th>Status</th><th>Last serviced</th><th>Remain</th><th>Cost</th><th>Time to complete</th><th>Links</th><th>Scheduled</th><th>Completed</th><th>Since prior completion</th><th>Occurrence notes</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+      modal.innerHTML = `<div class="modal-card" style="max-width:min(96vw,1600px);width:min(96vw,1600px);max-height:90vh;overflow:auto"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Source: central data table • Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Predicted next: ${escapeHtml(predicted)}</p><table class="cost-table"><thead><tr><th>Date</th><th>Interval</th><th>Status</th><th>Last serviced</th><th>Remain</th><th>Cost</th><th>Time to complete</th><th>Links</th><th>Scheduled</th><th>Completed</th><th>Since prior completion</th><th>Occurrence notes</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`;
       document.body.appendChild(modal);
       modal.addEventListener('click', (ev)=>{
         const jump = ev.target instanceof HTMLElement ? ev.target.closest('[data-history-jump]') : null;
-        if (jump){ const dateISO = jump.getAttribute('data-history-jump'); if (dateISO){ const d=new Date(dateISO+'T00:00:00'); if(!Number.isNaN(d.getTime())){ const today=new Date(); today.setHours(0,0,0,0); const diffMonths=(d.getFullYear()-today.getFullYear())*12+(d.getMonth()-today.getMonth()); window.__calendarMonthOffset=Math.max(-12,Math.min(12,Math.round(diffMonths))); } location.hash = '#/'; const focusCalendarDay = (attempt=0)=>{ if (typeof renderCalendar==='function') renderCalendar(); const cell=document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`); if(cell){ cell.scrollIntoView({behavior:'smooth', block:'center'}); if (typeof highlightCalendarDayCell==='function') highlightCalendarDayCell(cell); const taskAnchor = cell.querySelector(`[data-cal-task="${CSS.escape(String(t.id))}"]`) || cell; if (typeof showTaskBubble==='function') showTaskBubble(String(t.id), taskAnchor); return; } if (attempt < 8) setTimeout(()=>focusCalendarDay(attempt+1), 120); }; setTimeout(()=>focusCalendarDay(0),220); } }
+        if (jump){ const dateISO = jump.getAttribute('data-history-jump'); if (dateISO){ if (modal && modal.parentElement) modal.remove(); const d=new Date(dateISO+'T00:00:00'); if(!Number.isNaN(d.getTime())){ const today=new Date(); today.setHours(0,0,0,0); const diffMonths=(d.getFullYear()-today.getFullYear())*12+(d.getMonth()-today.getMonth()); window.__calendarMonthOffset=Math.max(-12,Math.min(12,Math.round(diffMonths))); } location.hash = '#/'; const focusCalendarDay = (attempt=0)=>{ if (typeof renderCalendar==='function') renderCalendar(); const cell=document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`); if(cell){ cell.scrollIntoView({behavior:'smooth', block:'center'}); if (typeof highlightCalendarDayCell==='function') highlightCalendarDayCell(cell); const taskAnchor = cell.querySelector(`[data-cal-task="${CSS.escape(String(t.id))}"]`) || cell; if (typeof showTaskBubble==='function') showTaskBubble(String(t.id), taskAnchor); return; } if (attempt < 8) setTimeout(()=>focusCalendarDay(attempt+1), 120); }; setTimeout(()=>focusCalendarDay(0),220); } }
         if (ev.target === modal || (ev.target instanceof HTMLElement && ev.target.closest('[data-close]'))) modal.remove();
       });
       return;
