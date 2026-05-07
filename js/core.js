@@ -27,8 +27,8 @@ const WORKSPACE_ID = (() => {
 
 function isVercelPreviewRuntime(){
   if (typeof window === "undefined" || !window.location) return false;
-  const host = String(window.location.hostname || "").toLowerCase();
-  return host.includes("vercel.app") && host.includes("-git-");
+  const params = new URLSearchParams(window.location.search || "");
+  return params.get("previewReadonly") === "1";
 }
 
 if (typeof window !== "undefined") {
