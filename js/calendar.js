@@ -199,22 +199,101 @@ function showV2OneTimeBubble(occurrenceId, anchorEl){
   const b = document.getElementById("bubble");
   if (!b) return;
   const dateText = parseDateLocal(ev.dateISO)?.toDateString() || ev.dateISO || "—";
+  const statusText = ev.status === "completed" ? "Completed" : "Scheduled";
   b.innerHTML = `
     <div class="bubble-title">${escapeHtml(ev.name || "Maintenance reminder")}</div>
     <div class="bubble-kv"><span>Date:</span><span>${escapeHtml(dateText)}</span></div>
     <div class="bubble-kv"><span>Mode:</span><span>One-time (V2)</span></div>
-    <div class="bubble-kv"><span>Status:</span><span>Scheduled</span></div>
+    <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusText)}</span></div>
     <div class="bubble-kv"><span>Note:</span><span>${escapeHtml(ev.note || "—")}</span></div>
+    <div class="bubble-kv"><span>Hours:</span><span>${ev.hours != null ? escapeHtml(String(ev.hours)) : "—"}</span></div>
     <div class="bubble-kv"><span>Info:</span><span>Completion/actions for V2 reminders are coming in the next step.</span></div>
-    <div class="bubble-actions"><button type="button" data-bubble-close>Close</button></div>
+    <div class="bubble-actions">
+      <button type="button" data-v2-complete>${ev.status === "completed" ? "Completed" : "Mark complete"}</button>
+      <button type="button" data-v2-uncomplete>Mark incomplete</button>
+      <button type="button" data-v2-note>Set note</button>
+      <button type="button" data-v2-hours>Set hours</button>
+      <button type="button" data-bubble-close>Close</button>
+    </div>
   `;
   const closeBtn = b.querySelector("[data-bubble-close]");
   closeBtn?.addEventListener("click", ()=> hideBubbleSoon());
+  b.querySelector("[data-v2-complete]")?.addEventListener("click", ()=>{
+    if (typeof window.completeV2OneTimeOccurrence === "function") window.completeV2OneTimeOccurrence(String(occurrenceId));
+  });
+  b.querySelector("[data-v2-uncomplete]")?.addEventListener("click", ()=>{
+    if (typeof window.uncompleteV2OneTimeOccurrence === "function") window.uncompleteV2OneTimeOccurrence(String(occurrenceId));
+  });
+  b.querySelector("[data-v2-note]")?.addEventListener("click", ()=>{
+    if (typeof window.setV2OneTimeOccurrenceNote === "function") window.setV2OneTimeOccurrenceNote(String(occurrenceId));
+  });
+  b.querySelector("[data-v2-hours]")?.addEventListener("click", ()=>{
+    if (typeof window.setV2OneTimeOccurrenceHours === "function") window.setV2OneTimeOccurrenceHours(String(occurrenceId));
+  });
   const rect = anchorEl.getBoundingClientRect();
   b.style.top  = `${window.scrollY + rect.bottom + 8}px`;
   b.style.left = `${window.scrollX + rect.left}px`;
   b.classList.add("show");
 }
+
+function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supersedesEventId = null){
+  const list = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : (window.maintenanceOccurrencesV2 = []);
+  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
+  const base = lookup[String(baseOccurrenceId)];
+  if (!base) return false;
+  const next = {
+    id: genId(`v2_${eventType}`),
+    system: "v2",
+    schemaVersion: 2,
+    instanceId: base.instanceId,
+    taskId: base.taskId,
+    eventType,
+    effectiveDateISO: base.dateISO,
+    recordedAtISO: new Date().toISOString(),
+    supersedesEventId: supersedesEventId || null,
+    rootOccurrenceId: String(baseOccurrenceId),
+    payload: { ...(payload || {}) }
+  };
+  list.unshift(next);
+  if (typeof saveCloudNow === "function") saveCloudNow();
+  else saveCloudDebounced();
+  renderCalendar();
+  return true;
+}
+
+window.completeV2OneTimeOccurrence = (occurrenceId)=>{
+  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
+  const base = lookup[String(occurrenceId)];
+  if (!base) return;
+  if (base.status === "completed"){ toast("Already completed"); return; }
+  if (appendV2OccurrenceEvent(occurrenceId, "completed", {}, String(occurrenceId))) toast("Marked complete");
+};
+window.uncompleteV2OneTimeOccurrence = (occurrenceId)=>{
+  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
+  const base = lookup[String(occurrenceId)];
+  if (!base) return;
+  if (base.status !== "completed"){ toast("Already incomplete"); return; }
+  if (appendV2OccurrenceEvent(occurrenceId, "uncompleted", {}, String(occurrenceId))) toast("Marked incomplete");
+};
+window.setV2OneTimeOccurrenceNote = (occurrenceId)=>{
+  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
+  const base = lookup[String(occurrenceId)];
+  if (!base) return;
+  const input = window.prompt("Set note for this V2 reminder:", base.note || "");
+  if (input === null) return;
+  if (appendV2OccurrenceEvent(occurrenceId, "note_set", { note: String(input) }, String(occurrenceId))) toast("Note saved");
+};
+window.setV2OneTimeOccurrenceHours = (occurrenceId)=>{
+  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
+  const base = lookup[String(occurrenceId)];
+  if (!base) return;
+  const input = window.prompt("Set hours for this V2 reminder:", base.hours != null ? String(base.hours) : "");
+  if (input === null) return;
+  const trimmed = String(input).trim();
+  const hours = trimmed === "" ? null : Number(trimmed);
+  if (trimmed !== "" && (!Number.isFinite(hours) || hours < 0)){ toast("Enter a valid non-negative number."); return; }
+  if (appendV2OccurrenceEvent(occurrenceId, "hours_set", { hours }, String(occurrenceId))) toast("Hours saved");
+};
 function triggerDashboardAddPicker(opts){
   const detail = (opts && typeof opts === "object") ? { ...opts } : {};
   const enqueueRequest = ()=>{
@@ -2426,8 +2505,23 @@ function renderCalendar(){
     if (!dateISO) return;
     const task = v2TaskLookup.get(String(instance.taskId || event.taskId || "")) || null;
     const name = String(event.taskName || (task && task.name) || "Maintenance reminder");
-    const note = event.payload && typeof event.payload === "object" && event.payload.note != null ? String(event.payload.note) : "";
     const occurrenceId = String(event.id);
+    const rootOccurrenceId = occurrenceId;
+    const timeline = (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : []).filter(e => {
+      if (!e || typeof e !== "object") return false;
+      const rid = e.rootOccurrenceId != null ? String(e.rootOccurrenceId) : (String(e.id || "") === rootOccurrenceId ? rootOccurrenceId : "");
+      return rid === rootOccurrenceId || String(e.id || "") === rootOccurrenceId;
+    });
+    let status = "scheduled";
+    let note = event.payload && typeof event.payload === "object" && event.payload.note != null ? String(event.payload.note) : "";
+    let hours = event.payload && typeof event.payload === "object" && Number.isFinite(Number(event.payload.hours)) ? Number(event.payload.hours) : null;
+    timeline.forEach(e => {
+      const type = String(e.eventType || "");
+      if (type === "completed") status = "completed";
+      if (type === "uncompleted") status = "scheduled";
+      if (type === "note_set" && e.payload && typeof e.payload.note === "string") note = e.payload.note;
+      if (type === "hours_set" && e.payload && (e.payload.hours == null || Number.isFinite(Number(e.payload.hours)))) hours = e.payload.hours == null ? null : Number(e.payload.hours);
+    });
     const mapKey = `${occurrenceId}:${dateISO}`;
     if (seenV2ChipKeys.has(mapKey)) return;
     seenV2ChipKeys.add(mapKey);
@@ -2438,7 +2532,9 @@ function renderCalendar(){
       taskId: String(instance.taskId || event.taskId || ""),
       dateISO,
       name,
-      note
+      note,
+      hours,
+      status
     };
     (dueMap[dateISO] ||= []).push({
       type: "v2task",
@@ -2446,7 +2542,7 @@ function renderCalendar(){
       occurrenceId,
       instanceId,
       name,
-      status: "manual",
+      status: status === "completed" ? "completed" : "manual",
       mode: "one_time_v2",
       dateISO
     });
