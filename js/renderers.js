@@ -5051,6 +5051,21 @@ function openLogHistoryModal(){
   });
 }
 
+
+function redirectToCuttingJobPage(jobId){
+  const id = String(jobId || "").trim();
+  if (!id) return;
+  if (typeof window !== "undefined"){
+    window.pendingJobFocus = { type: "jobRow", id };
+    window.pendingJobRowHighlight = { id, untilMs: Date.now() + 5000 };
+  }
+  if (location.hash !== "#/jobs"){
+    location.hash = "#/jobs";
+  } else if (typeof renderJobs === "function"){
+    renderJobs();
+  }
+}
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   const activeDashboardModal = document.getElementById("dashboardAddModal");
@@ -5060,6 +5075,73 @@ function renderDashboard(){
   content.innerHTML = viewDashboard();
   setAppSettingsContext("dashboard");
   wireDashboardSettingsMenu();
+
+  const globalSearchInput = document.getElementById("dashboardGlobalSearch");
+  const globalSuggestions = document.getElementById("dashboardGlobalSearchSuggestions");
+  const centralModel = (typeof computeCostModel === "function") ? computeCostModel() : null;
+  const maintenanceRows = Array.isArray(centralModel?.maintenanceDataTable) ? centralModel.maintenanceDataTable : [];
+  const cuttingRows = Array.isArray(centralModel?.cuttingJobsDataTable) ? centralModel.cuttingJobsDataTable : [];
+  const allCutJobsForLabels = ([]).concat(Array.isArray(window.cuttingJobs) ? window.cuttingJobs : [], Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : []).filter(Boolean);
+  const cutNumberMap = (()=>{
+    const addedOrderFromId = (job)=>{ const id = String(job?.id || ""); const token = id.includes("_") ? id.slice(id.lastIndexOf("_") + 1) : ""; const parsed = Number.parseInt(token, 36); return Number.isFinite(parsed) ? parsed : Number.NaN; };
+    const fallbackOrderTime = (job)=>{ const val = Date.parse(job?.startISO || job?.createdAt || job?.completedAtISO || ""); return Number.isFinite(val) ? val : Number.MAX_SAFE_INTEGER; };
+    const ordered = allCutJobsForLabels.slice().sort((a,b)=>{ const aa=addedOrderFromId(a), bb=addedOrderFromId(b); if (Number.isFinite(aa)||Number.isFinite(bb)){ if (!Number.isFinite(aa)) return 1; if (!Number.isFinite(bb)) return -1; if (aa!==bb) return aa-bb; } const at=fallbackOrderTime(a), bt=fallbackOrderTime(b); if (at!==bt) return at-bt; return String(a?.id||"").localeCompare(String(b?.id||"")); });
+    const map = new Map();
+    ordered.forEach((job, idx)=> map.set(String(job?.id || ""), `C${String(idx + 1).padStart(3, "0")}`));
+    return map;
+  })();
+  const maintenanceByTask = new Map();
+  maintenanceRows.forEach(row=>{
+    const taskId = String(row?.taskId || "").trim();
+    const taskName = String(row?.taskName || "").trim();
+    if (!taskId || !taskName) return;
+    if (!maintenanceByTask.has(taskId)) maintenanceByTask.set(taskId, { taskId, taskName, rows: [] });
+    maintenanceByTask.get(taskId).rows.push(row);
+  });
+  const cuttingByJob = new Map();
+  cuttingRows.forEach(row=>{
+    const jobId = String(row?.id || "").trim();
+    const name = String(row?.name || "").trim();
+    if (!jobId || !name) return;
+    const cutNumber = String(row?.cutNumber || row?.cutLabel || row?.jobCut || cutNumberMap.get(jobId) || "").trim();
+    if (!cuttingByJob.has(jobId)) cuttingByJob.set(jobId, { id: jobId, name, cutNumber, row });
+  });
+  const getDashboardSearchItems = ()=>{
+    const items = [];
+    maintenanceByTask.forEach(entry=> items.push({ type:"maintenance", id:entry.taskId, label:entry.taskName, count:entry.rows.length }));
+    cuttingByJob.forEach(entry=> {
+      const label = entry.cutNumber ? `${entry.name} · ${entry.cutNumber}` : entry.name;
+      items.push({ type:"cutting", id:entry.id, label, count:1 });
+    });
+    return items.sort((a,b)=> a.label.localeCompare(b.label));
+  };
+  const renderDashboardSuggestions = (term="")=>{
+    if (!globalSearchInput || !globalSuggestions) return;
+    const q = String(term || "").trim().toLowerCase();
+    if (!q){ globalSuggestions.hidden = true; globalSuggestions.innerHTML = ""; return; }
+    const matches = getDashboardSearchItems().filter(item => item.label.toLowerCase().includes(q)).slice(0,10);
+    if (!matches.length){ globalSuggestions.hidden = true; globalSuggestions.innerHTML = ""; return; }
+    globalSuggestions.innerHTML = matches.map(item=>`<button type="button" data-search-type="${item.type}" data-search-id="${item.id}">${escapeHtml(item.label)} <small>(${item.type === "cutting" ? "Cutting job" : `${item.count} occurrence${item.count===1?"":"s"}`})</small></button>`).join("");
+    globalSuggestions.hidden = false;
+  };
+  globalSearchInput?.addEventListener("input", ()=> renderDashboardSuggestions(globalSearchInput.value));
+  globalSuggestions?.addEventListener("mousedown", (e)=>{ e.preventDefault(); });
+  const handleDashboardSuggestionSelect = (btn)=>{
+    if (!btn) return;
+    const type = btn.getAttribute("data-search-type") || "maintenance";
+    const id = btn.getAttribute("data-search-id") || "";
+    globalSuggestions.hidden = true;
+    if (type === "cutting"){
+      redirectToCuttingJobPage(id);
+      return;
+    }
+    window.pendingMaintenanceFocus = { taskIds:[id], flash:true, openHistory:true };
+    window.location.hash = `#/settings?taskId=${encodeURIComponent(id)}`;
+  };
+  globalSuggestions?.addEventListener("click", (e)=>{
+    const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-search-id]") : null;
+    handleDashboardSuggestionSelect(btn);
+  });
 
   // Log hours
   document.getElementById("logBtn")?.addEventListener("click", ()=>{
@@ -6729,7 +6811,7 @@ function renderDashboard(){
 function openJobsEditor(jobId){
   // Navigate to the Jobs page, then open the specified job in edit mode.
   // We wait briefly so the router can render the page before we toggle edit.
-  location.hash = "#/jobs";
+  redirectToCuttingJobPage(jobId);
   setTimeout(()=>{
     // Mark this job as "editing" so viewJobs() renders the edit row
     editingJobs.add(String(jobId));
@@ -8594,6 +8676,7 @@ function renderSettings(){
           <div class="row-actions">
             <button type="button" class="btn-edit" data-edit-task="${t.id}" aria-pressed="false">Edit</button>
             <button type="button" class="btn-notes" data-occurrence-notes="${t.id}" aria-haspopup="dialog">Occurrence notes</button>
+            <button type="button" class="btn-notes" data-task-history="${t.id}">History</button>
             ${type === "interval" ? `<button class="btn-complete" data-complete="${t.id}">Mark completed now</button>` : ""}
             <button class="danger" data-remove="${t.id}" data-from="${type}">Remove</button>
           </div>
@@ -10096,6 +10179,64 @@ function renderSettings(){
       if (id) openOccurrenceNotes(id);
       return;
     }
+    const historyBtn = e.target.closest('[data-task-history]');
+    if (historyBtn){
+      const id = historyBtn.getAttribute('data-task-history');
+      const meta = findTaskMeta(id);
+      if (!meta) return;
+      const t = meta.task;
+      const model = (typeof computeCostModel === 'function') ? computeCostModel() : null;
+      const rows = Array.isArray(model?.maintenanceDataTable) ? model.maintenanceDataTable.filter(row => String(row?.taskId || '') === String(id)) : [];
+      const completedDates = Array.from(new Set(rows.map(r => String(r?.dateISO || '').trim()).filter(Boolean))).sort();
+      const scheduledDates = Array.from(new Set([].concat(Array.isArray(t.manualHistory) ? t.manualHistory.map(x=>x&&x.dateISO).filter(Boolean) : [], t.calendarDateISO ? [t.calendarDateISO] : [], completedDates))).sort();
+      const lastCompleted = completedDates.length ? completedDates[completedDates.length-1] : '';
+      let gapLabel = '—';
+      if (completedDates.length >= 2){
+        const a = new Date(completedDates[completedDates.length-2]); const b = new Date(completedDates[completedDates.length-1]);
+        gapLabel = `${Math.round((b-a)/86400000)} day(s)`;
+      }
+      const every = Math.max(1, Number(t.recurrenceEvery||1));
+      const basis = String(t.recurrenceBasis || 'calendar_day');
+      let predicted = '—';
+      if (lastCompleted){ const d = new Date(lastCompleted+'T00:00:00'); if (basis==='calendar_week') d.setDate(d.getDate()+every*7); else if (basis==='calendar_month') d.setMonth(d.getMonth()+every); else d.setDate(d.getDate()+every); predicted = d.toISOString().slice(0,10); }
+      const merged = Array.from(new Set(scheduledDates.concat(completedDates))).sort();
+      const bodyRows = merged.map(dateISO=>{
+        const centralRows = rows.filter(r => String(r?.dateISO||'')===dateISO);
+        const note = centralRows.map(r => String(r?.note || r?.occurrenceNote || '').trim()).filter(Boolean)[0] || (t.occurrenceNotes && t.occurrenceNotes[dateISO]) || '';
+        const completionIndex = completedDates.indexOf(dateISO);
+        let sincePrior = '—';
+        if (completionIndex > 0){
+          const prev = new Date(completedDates[completionIndex - 1] + 'T00:00:00');
+          const cur = new Date(completedDates[completionIndex] + 'T00:00:00');
+          sincePrior = `${Math.round((cur - prev)/86400000)} day(s)`;
+        }
+        const intervalLabel = Number.isFinite(Number(t.intervalHrs)) && Number(t.intervalHrs) > 0 ? `${Number(t.intervalHrs)} hrs` : (Number.isFinite(Number(t.recurrenceEvery)) ? `${Math.max(1, Number(t.recurrenceEvery))} ${String(t.recurrenceBasis||'day').replace('calendar_','')}` : '—');
+        const statusLabel = completedDates.includes(dateISO) ? 'Completed' : (scheduledDates.includes(dateISO) ? 'Scheduled' : '—');
+        const lastServicedLabel = lastCompleted ? `${lastCompleted}` : '—';
+        let remainLabel = '—';
+        if (Number.isFinite(Number(t.intervalHrs))){
+          const base = Number.isFinite(Number(t.anchorTotal)) ? Number(t.anchorTotal) : 0;
+          const cur = (typeof currentTotal === 'function') ? Number(currentTotal()) : NaN;
+          if (Number.isFinite(cur)) remainLabel = `${Math.max(0, Number(t.intervalHrs) - Math.max(0, cur - base)).toFixed(0)} hrs`;
+        }
+        const costLabel = Number.isFinite(Number(t.price)) ? `$${Number(t.price).toFixed(0)}` : '—';
+        const timeLabel = Number.isFinite(Number(t.downtimeHours)) ? `${Number(t.downtimeHours)} hr` : '—';
+        const links = [];
+        if (t.manualLink) links.push(`<a href="${escapeHtml(t.manualLink)}" target="_blank" rel="noopener">Manual</a>`);
+        if (t.storeLink) links.push(`<a href="${escapeHtml(t.storeLink)}" target="_blank" rel="noopener">Store</a>`);
+        return `<tr><td><button type="button" data-history-jump="${dateISO}" data-task-id="${t.id}">${dateISO}</button></td><td>${escapeHtml(intervalLabel)}</td><td>${escapeHtml(statusLabel)}</td><td>${escapeHtml(lastServicedLabel)}</td><td>${escapeHtml(remainLabel)}</td><td>${escapeHtml(costLabel)}</td><td>${escapeHtml(timeLabel)}</td><td>${links.length ? links.join(' · ') : '—'}</td><td>${scheduledDates.includes(dateISO)?'Yes':'No'}</td><td>${completedDates.includes(dateISO)?'Yes':'No'}</td><td>${escapeHtml(sincePrior)}</td><td>${escapeHtml(note || '—')}</td></tr>`;
+      }).join('') || '<tr><td colspan="12">No history yet.</td></tr>';
+      const modal = document.createElement('div');
+      modal.className = 'modal-backdrop';
+      modal.innerHTML = `<div class="modal-card" style="max-width:min(96vw,1600px);width:min(96vw,1600px);max-height:90vh;overflow:auto"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Source: central data table • Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Predicted next: ${escapeHtml(predicted)}</p><table class="cost-table"><thead><tr><th>Date</th><th>Interval</th><th>Status</th><th>Last serviced</th><th>Remain</th><th>Cost</th><th>Time to complete</th><th>Links</th><th>Scheduled</th><th>Completed</th><th>Since prior completion</th><th>Occurrence notes</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+      document.body.appendChild(modal);
+      modal.addEventListener('click', (ev)=>{
+        const jump = ev.target instanceof HTMLElement ? ev.target.closest('[data-history-jump]') : null;
+        if (jump){ const dateISO = jump.getAttribute('data-history-jump'); if (dateISO){ if (modal && modal.parentElement) modal.remove(); const d=new Date(dateISO+'T00:00:00'); if(!Number.isNaN(d.getTime())){ const today=new Date(); today.setHours(0,0,0,0); const diffMonths=(d.getFullYear()-today.getFullYear())*12+(d.getMonth()-today.getMonth()); window.__calendarMonthOffset=Math.max(-12,Math.min(12,Math.round(diffMonths))); } location.hash = '#/'; const focusCalendarDay = (attempt=0)=>{ if (typeof renderCalendar==='function') renderCalendar(); const cell=document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`); if(cell){ cell.scrollIntoView({behavior:'smooth', block:'center'}); if (typeof highlightCalendarDayCell==='function') highlightCalendarDayCell(cell); const taskAnchor = cell.querySelector(`[data-cal-task="${CSS.escape(String(t.id))}"]`) || cell; if (typeof showTaskBubble==='function') showTaskBubble(String(t.id), taskAnchor); return; } if (attempt < 8) setTimeout(()=>focusCalendarDay(attempt+1), 120); }; setTimeout(()=>focusCalendarDay(0),220); } }
+        if (ev.target === modal || (ev.target instanceof HTMLElement && ev.target.closest('[data-close]'))) modal.remove();
+      });
+      return;
+    }
     const removeBtn = e.target.closest('[data-remove]');
     if (removeBtn){
       const id = removeBtn.getAttribute('data-remove');
@@ -11433,10 +11574,9 @@ function renderCosts(){
         const id = String(row.getAttribute("data-efficiency-job-id") || "");
         if (!id) return;
         if (typeof window !== "undefined"){
-          window.pendingJobFocus = { type: "jobRow", id };
+          redirectToCuttingJobPage(id);
         }
         closeDataCenter();
-        location.hash = "#/jobs";
       });
     }
     Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-cutting-open-job]")).forEach(btn => {
@@ -11456,9 +11596,8 @@ function renderCosts(){
           jobHistorySearchTerm = "";
           window.jobHistorySearchTerm = "";
           window.jobHistoryCategoryFilter = String(window.JOB_ROOT_FOLDER_ID || "jobs_root");
-          window.pendingJobFocus = { type: "jobRow", id: jobId };
+          redirectToCuttingJobPage(jobId);
         }
-        location.hash = "#/jobs";
       });
     });
 
@@ -13005,7 +13144,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         const id = String(btn.getAttribute("data-efficiency-open-job") || "");
         if (!id) return;
         if (typeof window !== "undefined"){
-          window.pendingJobFocus = { type: "jobRow", id };
+          redirectToCuttingJobPage(id);
         }
         closeSnapshot();
         goToJobsHistory();
@@ -17822,6 +17961,24 @@ function renderJobs(){
     }
   }
 
+
+  const applyPendingJobHighlight = ()=>{
+    const pending = window.pendingJobRowHighlight;
+    if (!pending || pending.id == null) return;
+    if (Number(pending.untilMs || 0) < Date.now()){ window.pendingJobRowHighlight = null; return; }
+    const id = String(pending.id);
+    const selectorId = (typeof escapeForSelector === "function")
+      ? escapeForSelector(id)
+      : ((typeof CSS !== "undefined" && typeof CSS.escape === "function") ? CSS.escape(id) : id);
+    const row = content.querySelector(`[data-job-row="${selectorId}"], [data-history-row="${selectorId}"]`);
+    if (!(row instanceof HTMLElement)) return;
+    row.classList.remove("job-row-link-highlight");
+    void row.offsetWidth;
+    row.classList.add("job-row-link-highlight");
+    setTimeout(()=> row.classList.remove("job-row-link-highlight"), 2600);
+  };
+  applyPendingJobHighlight();
+
   const pendingJobFocus = window.pendingJobFocus;
   if (pendingJobFocus){
     window.pendingJobFocus = null;
@@ -17840,21 +17997,58 @@ function renderJobs(){
     } else if (pendingJobFocus.type === "jobRow" && pendingJobFocus.id != null){
       requestAnimationFrame(()=>{
         const targetId = String(pendingJobFocus.id);
-        const maxAttempts = 20;
-        const retryDelayMs = 180;
+        const maxAttempts = 45;
+        const retryDelayMs = 160;
+        const scrollLockEvents = ["wheel", "touchmove"];
+        const scrollKeyCodes = new Set(["ArrowUp","ArrowDown","PageUp","PageDown","Home","End","Space"]);
+        const preventScroll = (ev)=>{ ev.preventDefault(); };
+        const preventScrollKeys = (ev)=>{ if (scrollKeyCodes.has(ev.code || "")) ev.preventDefault(); };
+        const lockUserScroll = ()=>{
+          scrollLockEvents.forEach(name=> window.addEventListener(name, preventScroll, { passive:false, capture:true }));
+          window.addEventListener("keydown", preventScrollKeys, { capture:true });
+        };
+        const unlockUserScroll = ()=>{
+          scrollLockEvents.forEach(name=> window.removeEventListener(name, preventScroll, { capture:true }));
+          window.removeEventListener("keydown", preventScrollKeys, { capture:true });
+        };
+        let unlocked = false;
+        const safeUnlock = ()=>{ if (!unlocked){ unlocked = true; unlockUserScroll(); } };
+        lockUserScroll();
+        const releaseTimer = setTimeout(()=> safeUnlock(), 6000);
+        const forceCenter = (el)=>{
+          const rect = el.getBoundingClientRect();
+          const viewportMid = window.innerHeight / 2;
+          const targetY = window.scrollY + rect.top - (viewportMid - (rect.height / 2));
+          window.scrollTo({ top: Math.max(0, targetY), behavior: "auto" });
+        };
         const focusJobRowWithRetry = (attempt = 0)=>{
-          const targetRow = content.querySelector(`[data-job-row="${targetId}"], [data-history-row="${targetId}"]`);
+          const targetSelectorId = (typeof escapeForSelector === "function")
+            ? escapeForSelector(targetId)
+            : ((typeof CSS !== "undefined" && typeof CSS.escape === "function") ? CSS.escape(targetId) : targetId);
+          const targetRow = content.querySelector(`[data-job-row="${targetSelectorId}"], [data-history-row="${targetSelectorId}"]`);
           if (targetRow instanceof HTMLElement){
+            window.pendingJobRowHighlight = { id: targetId, untilMs: Date.now() + 5000 };
+            const parentDetails = targetRow.closest("details");
+            if (parentDetails instanceof HTMLElement) parentDetails.open = true;
+            targetRow.classList.remove("job-row-link-highlight");
+            void targetRow.offsetWidth;
             targetRow.classList.add("job-row-link-highlight");
-            try {
-              targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
-            } catch (_err){
-              try { targetRow.scrollIntoView(); } catch(__){}
-            }
-            setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2000);
+            try { targetRow.scrollIntoView({ behavior: "auto", block: "center" }); } catch (_err){ try { targetRow.scrollIntoView(); } catch(__){} }
+            forceCenter(targetRow);
+            const pinMs = 1800;
+            const pinStart = Date.now();
+            const pinTimer = setInterval(()=>{
+              if (!targetRow.isConnected || (Date.now() - pinStart) > pinMs){
+                clearInterval(pinTimer);
+                return;
+              }
+              forceCenter(targetRow);
+            }, 120);
+            setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2600);
+            setTimeout(()=>{ clearInterval(pinTimer); clearTimeout(releaseTimer); safeUnlock(); }, pinMs + 120);
             return;
           }
-          if (attempt >= maxAttempts) return;
+          if (attempt >= maxAttempts){ clearTimeout(releaseTimer); safeUnlock(); return; }
           setTimeout(()=> focusJobRowWithRetry(attempt + 1), retryDelayMs);
         };
         focusJobRowWithRetry(0);
