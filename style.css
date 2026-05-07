@@ -6195,6 +6195,13 @@ body.job-flow-lock-scroll {
 .cost-weekly-section-totals{ display:flex; flex-wrap:wrap; gap:10px 16px; padding:10px 12px; border-top:1px solid #e4e9f3; color:#1e2b45; background:#fbfcff; font-variant-numeric:tabular-nums; }
 
 .average-hours-banner{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+
+.dashboard-search{position:relative;max-width:520px;width:100%}
+#dashboardGlobalSearch{width:100%;padding:.5rem .75rem;border:1px solid #ccd4e0;border-radius:10px}
+.dashboard-search-suggestions{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #d0d7e4;border-radius:10px;box-shadow:0 10px 22px rgba(0,0,0,.12);z-index:30;padding:6px;display:flex;flex-direction:column;gap:4px}
+.dashboard-search-suggestions button{border:0;background:#f6f8fc;text-align:left;padding:.45rem .6rem;border-radius:8px;cursor:pointer}
+.pulse-highlight{animation:pulseHighlight 1.6s ease}
+@keyframes pulseHighlight{0%{background:#fff5a8}100%{background:transparent}}
 [data-receipt-open-fixer]{
   display:none !important;
 }

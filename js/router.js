@@ -88,9 +88,12 @@ function route(options = {}){
   // ---- Helpers (scoped to route) ----
   function normalizeHash(h){
     // Accept "#dashboard" | "#/dashboard" | "#/" | "#settings" | "#/settings" | "#jobs" | "#/jobs" | "#costs" | "#inventory"
-    const raw = (h || "#/").toLowerCase();
+    const rawFull = (h || "#/");
+    const queryIndex = rawFull.indexOf("?");
+    const raw = (queryIndex >= 0 ? rawFull.slice(0, queryIndex) : rawFull).toLowerCase();
+    const suffix = queryIndex >= 0 ? rawFull.slice(queryIndex) : "";
     if (raw === "#dashboard" || raw === "#/dashboard" || raw === "#/") return "#/";
-    if (raw === "#settings"  || raw === "#/settings")  return "#/settings";
+    if (raw === "#settings"  || raw === "#/settings")  return `#/settings${suffix}`;
     if (raw === "#tolerance" || raw === "#/tolerance") return "#/tolerance";
     if (raw === "#jobs"      || raw === "#/jobs")      return "#/jobs";
     if (raw === "#costs"     || raw === "#/costs")     return "#/costs";
@@ -121,7 +124,7 @@ function route(options = {}){
       try { teardownCostChartAutoResize(); }
       catch (err){ console.warn(err); }
     }
-    if (norm === "#/settings")      { renderSettings();   return; }
+    if (norm === "#/settings" || norm.startsWith("#/settings?"))      { renderSettings();   return; }
     if (norm === "#/tolerance")     { renderTolerance();  return; }
     if (norm === "#/jobs")          { renderJobs();       return; }
     if (norm === "#/costs")         { renderCosts();      return; }

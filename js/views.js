@@ -106,6 +106,10 @@ function viewDashboard(){
   return `
   <div class="container">
     <div class="dashboard-toolbar">
+      <div class="dashboard-search" id="dashboardGlobalSearchWrap">
+        <input type="search" id="dashboardGlobalSearch" placeholder="Search maintenance or cutting jobs…" autocomplete="off" aria-label="Search maintenance tasks and cutting jobs">
+        <div class="dashboard-search-suggestions" id="dashboardGlobalSearchSuggestions" hidden></div>
+      </div>
       <span class="dashboard-edit-hint" id="dashboardEditHint" hidden>Drag windows to rearrange and resize. Calendar stays fixed.</span>
     </div>
 
