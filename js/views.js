@@ -2862,13 +2862,11 @@ function viewJobs(){
     if (efficiency && efficiency.costRate != null && Number.isFinite(Number(efficiency.costRate))){
       costRate = Number(efficiency.costRate);
     } else {
-      const hoursBase = hoursForTotal > 0 ? hoursForTotal : hoursFromEstimate;
-      const variableRate = hoursBase > 0 ? (materialTotal / hoursBase) : 0;
-      costRate = JOB_BASE_COST_PER_HOUR + variableRate;
+      costRate = JOB_BASE_COST_PER_HOUR;
     }
     const netRate = chargeRate - costRate;
     const totalHours = hoursForTotal > 0 ? hoursForTotal : 0;
-    return netRate * totalHours;
+    return (netRate * totalHours) - materialTotal;
   };
 
   const pendingFiles = Array.isArray(window.pendingNewJobFiles) ? window.pendingNewJobFiles : [];
@@ -3419,9 +3417,7 @@ function viewJobs(){
     const efficiencyCost = Number(job?.efficiency?.costRate);
     if (Number.isFinite(efficiencyCost) && efficiencyCost >= 0) return efficiencyCost;
     const hoursVal = Number(estHours);
-    return (Number.isFinite(hoursVal) && hoursVal > 0)
-      ? JOB_BASE_COST_PER_HOUR + (matTotal / hoursVal)
-      : JOB_BASE_COST_PER_HOUR;
+    return JOB_BASE_COST_PER_HOUR;
   };
   const completedStats = completedFiltered.reduce((acc, job)=>{
     const eff = computeJobEfficiency(job);
@@ -4301,6 +4297,7 @@ function viewJobs(){
         aria-hidden="${addFormOpen ? "false" : "true"}"
       >
         <form id="addJobForm" class="mini-form job-add-form">
+          <div class="job-add-column">
           <label>Job name
             <input type="text" id="jobName" placeholder="Job name" required value="${esc(addJobDraftField("name"))}">
           </label>
@@ -4323,15 +4320,8 @@ function viewJobs(){
           <label>Cost rate ($/hr)
             <input type="number" id="jobCostRate" placeholder="45.00" min="0" step="0.01" value="${esc(addJobDraftField("costRate", "45"))}">
           </label>
-          <label>Material
-            <input type="text" id="jobMaterial" placeholder="Material" list="jobMaterialOptions" value="${esc(addJobDraftField("material"))}">
-          </label>
-          <label>Material cost ($)
-            <input type="number" id="jobMaterialCost" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}">
-          </label>
-          <label>Material quantity
-            <input type="number" id="jobMaterialQty" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialQty"))}">
-          </label>
+          </div>
+          <div class="job-add-column">
           <label>Start date
             <input type="date" id="jobStart" required value="${esc(addJobDraftField("start", defaultJobDateISO))}">
           </label>
@@ -4350,6 +4340,34 @@ function viewJobs(){
               Choose a category to keep jobs organized. We'll save it under All Jobs if you skip this step.
             </p>
           </div>
+          </div>
+          <div class="job-add-column job-add-column-material">
+          <label>Material
+            <select id="jobMaterial" aria-label="Material">
+              <option value="">Select material</option>
+              <option value="A36 steel">A36 steel</option>
+              <option value="Grade 572-50 steel">Grade 572-50 steel</option>
+              <option value="Stainless Steel">Stainless Steel</option>
+              <option value="Aluminum">Aluminum</option>
+            </select>
+          </label>
+          <label>Thickness (in, fraction or decimal)
+            <input type="text" id="jobMaterialThickness" placeholder="1/4" inputmode="decimal" value="${esc(addJobDraftField("materialThickness"))}">
+          </label>
+          <label>Path length (ft)
+            <input type="number" id="jobMaterialLengthFt" placeholder="10" min="0.01" step="0.01" value="${esc(addJobDraftField("materialLengthFt"))}">
+          </label>
+          <label>Path width (ft)
+            <input type="number" id="jobMaterialWidthFt" placeholder="4" min="0.01" step="0.01" value="${esc(addJobDraftField("materialWidthFt"))}">
+          </label>
+          <label>Material cost ($)
+            <input type="number" id="jobMaterialCost" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}" readonly aria-readonly="true">
+          </label>
+          <label>Material weight (lb)
+            <output id="jobMaterialQty" class="job-material-output">${esc(addJobDraftField("materialQty") || "0.00")}</output>
+          </label>
+          <button type="button" id="jobMaterialSettingsBtn">Material settings</button>
+          </div>
           <div class="job-add-actions">
             <button type="button" id="jobFilesBtn">Attach Files</button>
             <button type="button" id="jobOneDriveLibraryAddBtn">Add from this computer OneDrive folder</button>
@@ -4359,6 +4377,19 @@ function viewJobs(){
           <datalist id="jobMaterialOptions">${materialInventoryOptionsMarkup}</datalist>
         </form>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
+        <div class="job-material-settings-modal" id="jobMaterialSettingsPanel" hidden aria-hidden="true">
+          <div class="job-material-settings">
+            <div class="job-material-settings-header">
+              <strong>Material settings</strong>
+              <button type="button" id="jobMaterialSettingsClose">Close</button>
+            </div>
+            <label>Waste factor (%)
+              <input type="number" id="jobWasteFactor" min="0" step="1" value="10">
+            </label>
+            <div id="jobMaterialSettingsList"></div>
+            <button type="button" id="jobMaterialAddTypeBtn">+ Add material type</button>
+          </div>
+        </div>
       </section>
 
       <div class="job-category-indicator-wrapper">
