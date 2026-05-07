@@ -17941,14 +17941,23 @@ function renderJobs(){
           window.scrollTo({ top: Math.max(0, targetY), behavior: "auto" });
         };
         const focusJobRowWithRetry = (attempt = 0)=>{
-          const targetRow = content.querySelector(`[data-job-row="${targetId}"], [data-history-row="${targetId}"]`);
+          const targetSelectorId = (typeof escapeForSelector === "function")
+            ? escapeForSelector(targetId)
+            : ((typeof CSS !== "undefined" && typeof CSS.escape === "function") ? CSS.escape(targetId) : targetId);
+          const targetRow = content.querySelector(`[data-job-row="${targetSelectorId}"], [data-history-row="${targetSelectorId}"]`);
           if (targetRow instanceof HTMLElement){
+            const parentDetails = targetRow.closest("details");
+            if (parentDetails instanceof HTMLElement) parentDetails.open = true;
+            targetRow.classList.remove("job-row-link-highlight");
+            void targetRow.offsetWidth;
             targetRow.classList.add("job-row-link-highlight");
+            targetRow.classList.add("pulse-highlight");
             try { targetRow.scrollIntoView({ behavior: "auto", block: "center" }); } catch (_err){ try { targetRow.scrollIntoView(); } catch(__){} }
             forceCenter(targetRow);
             setTimeout(()=> forceCenter(targetRow), 120);
             setTimeout(()=> forceCenter(targetRow), 320);
-            setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2000);
+            setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2600);
+            setTimeout(()=> targetRow.classList.remove("pulse-highlight"), 2600);
             setTimeout(()=>{ clearTimeout(releaseTimer); safeUnlock(); }, 500);
             return;
           }
