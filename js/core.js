@@ -511,7 +511,30 @@ let lastAppliedCloudRevision = 0;
 let hasPendingLocalChanges = false;
 let lastLocalMutationAt = 0;
 const CLOUD_SYNC_CLIENT_KEY = "cloud_sync_client_id_v1";
+const LOCAL_STATE_BACKUP_KEY = "omax_local_state_backup_v1";
 
+
+function persistLocalStateBackup(snapshot){
+  if (typeof window === "undefined" || !window.localStorage || !snapshot) return;
+  try {
+    window.localStorage.setItem(LOCAL_STATE_BACKUP_KEY, JSON.stringify(snapshot));
+  } catch (err){
+    console.warn("Failed to persist local state backup", err);
+  }
+}
+
+function readLocalStateBackup(){
+  if (typeof window === "undefined" || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(LOCAL_STATE_BACKUP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (err){
+    console.warn("Failed to read local state backup", err);
+    return null;
+  }
+}
 function getCloudSyncClientId(){
   if (typeof window === "undefined" || !window.localStorage) return "unknown_client";
   let id = String(window.localStorage.getItem(CLOUD_SYNC_CLIENT_KEY) || "").trim();
@@ -3025,6 +3048,7 @@ const saveCloudInternal = debounce(async ()=>{
       console.warn("Failed to record save flow event", err);
     }
     window.__lastSnapshot = snap;
+    persistLocalStateBackup(snap);
     const remoteSnap = await FB.docRef.get();
     const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
     if (remoteData && typeof remoteData === "object"){
@@ -3286,11 +3310,27 @@ async function loadFromCloud(){
       }
     }
 
+    const localBackup = readLocalStateBackup();
+    const cloudRev = Number(data?.syncMeta?.rev || 0);
+    const backupRev = Number(localBackup?.syncMeta?.rev || 0);
+
     if (stateHasMeaningfulData(data)){
-      adoptState(data || {});
-      const loadedRev = Number(data?.syncMeta?.rev || 0);
+      const useBackup = stateHasMeaningfulData(localBackup) && backupRev > cloudRev;
+      adoptState((useBackup ? localBackup : data) || {});
+      const loadedRev = useBackup ? backupRev : cloudRev;
       if (loadedRev > 0) lastAppliedCloudRevision = loadedRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
+      if (useBackup && typeof saveCloudNow === "function"){
+        try { saveCloudNow(); } catch (err){ console.warn("Failed to push local backup after cloud load", err); }
+      }
+    }else if (stateHasMeaningfulData(localBackup)){
+      adoptState(localBackup || {});
+      const loadedRev = Number(localBackup?.syncMeta?.rev || 0);
+      if (loadedRev > 0) lastAppliedCloudRevision = loadedRev;
+      if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
+      if (typeof saveCloudNow === "function"){
+        try { saveCloudNow(); } catch (err){ console.warn("Failed to push local backup after fallback load", err); }
+      }
     }else{
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
