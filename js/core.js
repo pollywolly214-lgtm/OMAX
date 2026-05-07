@@ -509,6 +509,7 @@ let workspaceMetadataWritesBlocked = false;
 let workspaceStateUnsubscribe = null;
 let lastAppliedCloudRevision = 0;
 let hasPendingLocalChanges = false;
+let lastLocalMutationAt = 0;
 const CLOUD_SYNC_CLIENT_KEY = "cloud_sync_client_id_v1";
 
 function getCloudSyncClientId(){
@@ -787,6 +788,8 @@ function startWorkspaceStateListener(){
     if (!incomingRev) return;
     const incomingBy = String(meta?.updatedBy || "");
     if (hasPendingLocalChanges) return;
+    const localEditAgeMs = Date.now() - (Number(lastLocalMutationAt) || 0);
+    if (incomingBy !== localClientId && localEditAgeMs >= 0 && localEditAgeMs < 15000) return;
     if (incomingRev && incomingRev <= lastAppliedCloudRevision) return;
     if (incomingRev && incomingBy === localClientId && incomingRev === lastAppliedCloudRevision) return;
     adoptState(incoming || {});
@@ -3149,6 +3152,7 @@ function getTrackedStateSignature(snapshot){
 function saveCloudDebounced(){
   if (isVercelPreviewRuntime()) return;
   hasPendingLocalChanges = true;
+  lastLocalMutationAt = Date.now();
   try {
     if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
@@ -3164,6 +3168,7 @@ function saveCloudDebounced(){
 function saveCloudNow(){
   if (isVercelPreviewRuntime()) return;
   hasPendingLocalChanges = true;
+  lastLocalMutationAt = Date.now();
   try {
     if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
