@@ -2239,14 +2239,17 @@ body.modal-open .auth-bar {
   gap:10px 12px;
   align-content:start;
   min-width:0;
-}
-.job-add-column-material{
   padding:10px;
   border:1px solid #cfdcf4;
   border-radius:12px;
   background:#f4f8ff;
+}
+.job-add-column-material{
   width:100%;
   justify-self:stretch;
+}
+.job-add-form > .job-add-column:nth-child(2){
+  margin-top:-2px;
 }
 .job-add-column-material > label:first-child{
   grid-column: span 2;
