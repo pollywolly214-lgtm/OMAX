@@ -2227,10 +2227,57 @@ body.modal-open .auth-bar {
   display: none;
 }
 .job-add-form {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 12px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: start;
+  width: 100%;
+}
+.job-add-column{
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap:8px 10px;
+  align-content:start;
+  align-items:start;
+  min-width:0;
+  padding:8px;
+  border:1px solid #cfdcf4;
+  border-radius:12px;
+  background:#f4f8ff;
+}
+.job-add-form > .job-add-column:nth-child(1){
+  flex: 1 1 calc(50% - 5px);
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  min-height: 136px;
+  padding-bottom: 22px;
+}
+.job-add-form > .job-add-column:nth-child(1) > label{
+  padding-top: 16px;
+}
+.job-add-form > .job-add-column:nth-child(2){
+  flex: 1 1 calc(50% - 5px);
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  min-height: 136px;
+}
+.job-add-column-material{
+  flex: 1 1 100%;
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
+  align-items:end;
+  width:100%;
+  justify-self:stretch;
+}
+.job-add-column-material > #jobMaterialSettingsBtn{
+  grid-column: 6;
+  justify-self:end;
+  min-width:180px;
+}
+.job-add-column-material > #jobMaterialSettingsBtn{
+  min-height:40px;
+  border-radius:10px;
+  border:1px solid #c5d7f4;
+  background:#fff;
+  font-weight:600;
+  color:#1d3d66;
 }
 .job-add-form > label,
 .job-category-field {
@@ -2246,11 +2293,11 @@ body.modal-open .auth-bar {
 .job-add-form input,
 .job-add-form select {
   width: 100%;
-  min-height: 42px;
+  min-height: 34px;
   border-radius: 12px;
   border: 1px solid #cdd8ea;
   background: #ffffff;
-  padding: 10px 12px;
+  padding: 8px 10px;
   font-size: 14px;
   color: #18304f;
   box-shadow: inset 0 1px 2px rgba(10, 30, 56, 0.05);
@@ -2264,14 +2311,21 @@ body.modal-open .auth-bar {
 }
 .job-estimate-label-group .small {
   position: absolute;
-  top: -18px;
+  top: 0;
   left: 0;
+  display:block;
+  margin-bottom:0;
   font-weight: 500;
   letter-spacing: 0;
   white-space: nowrap;
 }
 .job-estimate-label-group {
   position: relative;
+  padding-top: 16px;
+}
+.job-add-form > .job-add-column:nth-child(2) > label,
+.job-add-form > .job-add-column:nth-child(2) .job-category-field{
+  align-self:start;
 }
 .job-priority-hint {
   margin: 4px 0 0;
@@ -2286,6 +2340,48 @@ body.modal-open .auth-bar {
   align-items: center;
   justify-content: center;
   padding-top: 2px;
+  justify-content: flex-start;
+}
+.job-material-row{
+  display:grid;
+  grid-template-columns: 1.2fr 1fr 1fr auto;
+  gap:8px;
+  align-items:end;
+  margin:8px 0;
+}
+.job-material-row label{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  font-size:12px;
+  font-weight:600;
+}
+.job-material-output{
+  min-height:34px;
+  border-radius:12px;
+  border:1px solid #cdd8ea;
+  background:#f8fbff;
+  padding:8px 10px;
+  display:flex;
+  align-items:center;
+}
+.job-material-settings-modal{
+  position:fixed;
+  inset:0;
+  background:rgba(8,19,35,.45);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:2000;
+}
+.job-material-settings-modal[hidden]{ display:none; }
+.job-material-settings{
+  width:min(880px, 92vw);
+  max-height:86vh;
+  overflow:auto;
+  background:#fff;
+  padding:16px;
+  border-radius:14px;
 }
 .job-add-actions button {
   min-height: 40px;
