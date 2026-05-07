@@ -17951,14 +17951,19 @@ function renderJobs(){
             targetRow.classList.remove("job-row-link-highlight");
             void targetRow.offsetWidth;
             targetRow.classList.add("job-row-link-highlight");
-            targetRow.classList.add("pulse-highlight");
             try { targetRow.scrollIntoView({ behavior: "auto", block: "center" }); } catch (_err){ try { targetRow.scrollIntoView(); } catch(__){} }
             forceCenter(targetRow);
-            setTimeout(()=> forceCenter(targetRow), 120);
-            setTimeout(()=> forceCenter(targetRow), 320);
+            const pinMs = 1800;
+            const pinStart = Date.now();
+            const pinTimer = setInterval(()=>{
+              if (!targetRow.isConnected || (Date.now() - pinStart) > pinMs){
+                clearInterval(pinTimer);
+                return;
+              }
+              forceCenter(targetRow);
+            }, 120);
             setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2600);
-            setTimeout(()=> targetRow.classList.remove("pulse-highlight"), 2600);
-            setTimeout(()=>{ clearTimeout(releaseTimer); safeUnlock(); }, 500);
+            setTimeout(()=>{ clearInterval(pinTimer); clearTimeout(releaseTimer); safeUnlock(); }, pinMs + 120);
             return;
           }
           if (attempt >= maxAttempts){ clearTimeout(releaseTimer); safeUnlock(); return; }
