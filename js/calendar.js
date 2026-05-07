@@ -5,7 +5,7 @@ let calendarHoursEditing = false;
 let calendarHoursPending = new Map();
 if (typeof window !== "undefined"){
   if (typeof window.__calendarShowAllMonths !== "boolean"){
-    window.__calendarShowAllMonths = false;
+    window.__calendarShowAllMonths = true;
   }
   if (typeof window.__calendarAvailableMonths !== "number"){
     window.__calendarAvailableMonths = 3;
