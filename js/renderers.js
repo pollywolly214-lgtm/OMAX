@@ -14773,7 +14773,14 @@ function computeCostModel(){
       list = [];
       taskEventsByDate.set(dateKey, list);
     }
-    const existsAlready = list.some(existing => existing && existing.originalId === info.originalId);
+    const occurrenceId = info.occurrenceId != null ? String(info.occurrenceId) : "";
+    const dedupeKey = occurrenceId || String(info.originalId);
+    const existsAlready = list.some(existing => {
+      if (!existing || existing.originalId !== info.originalId) return false;
+      const existingOccurrence = existing.occurrenceId != null ? String(existing.occurrenceId) : "";
+      const existingKey = existingOccurrence || String(existing.originalId);
+      return existingKey === dedupeKey;
+    });
     if (!existsAlready){
       list.push({ ...info });
     }
@@ -14834,17 +14841,27 @@ function computeCostModel(){
       };
       const completedDates = Array.isArray(payload.completedDates) ? payload.completedDates : [];
       const completedDateKeys = new Set();
-      completedDates.forEach(dateVal => {
+      completedDates.forEach((dateVal, index) => {
         const key = toHistoryDateKey(dateVal);
         if (!key) return;
         completedDateKeys.add(key);
-        addTaskEventForDate(key, baseInfo);
+        addTaskEventForDate(key, {
+          ...baseInfo,
+          occurrenceId: `completed:${key}:${index}`
+        });
       });
       const manualHistory = Array.isArray(payload.manualHistory) ? payload.manualHistory : [];
-      manualHistory.forEach(item => {
+      manualHistory.forEach((item, index) => {
         if (!shouldIncludeManualHistoryEntry(item, completedDateKeys)) return;
         const key = toHistoryDateKey(item.dateISO);
-        if (key) addTaskEventForDate(key, baseInfo);
+        if (key){
+          const status = typeof item?.status === "string" ? item.status.trim().toLowerCase() : "logged";
+          const marker = item?.recordedAtISO || item?.recordedAt || item?.timeISO || "";
+          addTaskEventForDate(key, {
+            ...baseInfo,
+            occurrenceId: `manual:${status}:${key}:${marker}:${index}`
+          });
+        }
       });
     });
   }
@@ -14914,17 +14931,27 @@ function computeCostModel(){
       if (!sourceTask) return;
       const completedDates = Array.isArray(sourceTask.completedDates) ? sourceTask.completedDates : [];
       const completedDateKeys = new Set();
-      completedDates.forEach(dateVal => {
+      completedDates.forEach((dateVal, index) => {
         const key = toHistoryDateKey(dateVal);
         if (!key) return;
         completedDateKeys.add(key);
-        addTaskEventForDate(key, baseInfo);
+        addTaskEventForDate(key, {
+          ...baseInfo,
+          occurrenceId: `completed:${key}:${index}`
+        });
       });
       const manualHistory = Array.isArray(sourceTask.manualHistory) ? sourceTask.manualHistory : [];
-      manualHistory.forEach(entry => {
+      manualHistory.forEach((entry, index) => {
         if (!shouldIncludeManualHistoryEntry(entry, completedDateKeys)) return;
         const key = toHistoryDateKey(entry.dateISO);
-        if (key) addTaskEventForDate(key, baseInfo);
+        if (key){
+          const status = typeof entry?.status === "string" ? entry.status.trim().toLowerCase() : "logged";
+          const marker = entry?.recordedAtISO || entry?.recordedAt || entry?.timeISO || "";
+          addTaskEventForDate(key, {
+            ...baseInfo,
+            occurrenceId: `manual:${status}:${key}:${marker}:${index}`
+          });
+        }
       });
     };
 
