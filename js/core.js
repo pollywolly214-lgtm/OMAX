@@ -2373,15 +2373,39 @@ function ensureTaskCategories(){
 function detectMaintenanceRecordSystem(record){
   if (!record || typeof record !== "object") return "legacy";
   if (record.system === "v2") return "v2";
+  if ("eventType" in record || "effectiveDateISO" in record || "recordedAtISO" in record || "payload" in record) return "v2";
   if (Number(record.schemaVersion) >= 2) return "v2";
   return "legacy";
+}
+
+function createMaintenanceCompatibilityRow(base){
+  return {
+    streamId: base.streamId || "",
+    sourceSystem: base.sourceSystem || "legacy",
+    taskId: base.taskId || null,
+    taskName: base.taskName || "",
+    instanceId: base.instanceId || null,
+    occurrenceId: base.occurrenceId || null,
+    eventId: base.eventId || base.occurrenceId || null,
+    dateISO: normalizeDateISO(base.dateISO || ""),
+    status: base.status || "unknown",
+    eventType: base.eventType || null,
+    instanceMode: base.instanceMode || null,
+    note: base.note != null ? String(base.note) : null,
+    hours: base.hours != null && Number.isFinite(Number(base.hours)) ? Number(base.hours) : null,
+    categoryRef: base.categoryRef || null,
+    inventoryRef: base.inventoryRef || null,
+    costRef: base.costRef ?? null,
+    linkRef: base.linkRef || null,
+    provenance: base.provenance && typeof base.provenance === "object" ? { ...base.provenance } : {}
+  };
 }
 
 function normalizeLegacyMaintenanceTask(task, mode){
   if (!task || typeof task !== "object") return null;
   const taskId = task.id != null ? String(task.id) : "";
   if (!taskId) return null;
-  return {
+  return createMaintenanceCompatibilityRow({
     streamId: `legacy-task:${mode}:${taskId}`,
     sourceSystem: "legacy",
     taskId,
@@ -2402,20 +2426,107 @@ function normalizeLegacyMaintenanceTask(task, mode){
       taskId,
       sourceField: "tasksInterval/tasksAsReq"
     }
-  };
+  });
 }
 
 function buildMaintenanceCompatibilityStream(){
   const out = [];
+  const normalizeLegacyEvents = (task, mode)=>{
+    if (!task || typeof task !== "object") return;
+    const taskId = task.id != null ? String(task.id) : "";
+    if (!taskId) return;
+    const taskName = String(task.name || "").trim();
+    const instanceMode = mode === "asreq" ? "one_time" : "repeat";
+    const categoryRef = task.cat != null ? String(task.cat) : null;
+    const inventoryRef = task.inventoryId != null ? String(task.inventoryId) : null;
+    const costRef = task.price != null ? Number(task.price) : null;
+    const linkRef = task.storeLink != null ? String(task.storeLink) : null;
+    const instanceId = task.templateId != null ? String(task.templateId) : null;
+    const variant = task.variant != null ? String(task.variant) : null;
+    const common = { sourceSystem: "legacy", taskId, taskName, instanceMode, categoryRef, inventoryRef, costRef, linkRef, instanceId };
+    const pushEvent = (input)=> out.push(createMaintenanceCompatibilityRow({ ...common, ...input }));
+
+    if (task.calendarDateISO){
+      pushEvent({
+        streamId: `legacy-calendar:${mode}:${taskId}:${task.calendarDateISO}`,
+        status: "scheduled",
+        eventType: "scheduled",
+        dateISO: task.calendarDateISO,
+        provenance: { sourceField: "calendarDateISO", taskMode: mode, taskId, templateId: instanceId, variant }
+      });
+    }
+    (Array.isArray(task.completedDates) ? task.completedDates : []).forEach((date, idx)=>{
+      pushEvent({
+        streamId: `legacy-completed:${mode}:${taskId}:${idx}:${String(date)}`,
+        occurrenceId: `legacy-completed:${taskId}:${String(date)}:${idx}`,
+        status: "completed",
+        eventType: "completed",
+        dateISO: date,
+        provenance: { sourceField: "completedDates", index: idx, taskMode: mode, taskId, templateId: instanceId, variant }
+      });
+    });
+    (Array.isArray(task.manualHistory) ? task.manualHistory : []).forEach((entry, idx)=>{
+      const dateISO = entry && typeof entry === "object" ? (entry.dateISO || entry.date || entry.doneDateISO) : entry;
+      const note = entry && typeof entry === "object" ? (entry.note || entry.notes || null) : null;
+      const hours = entry && typeof entry === "object" ? (entry.hours ?? entry.timeHours ?? null) : null;
+      pushEvent({
+        streamId: `legacy-manual:${mode}:${taskId}:${idx}`,
+        occurrenceId: `legacy-manual:${taskId}:${idx}`,
+        status: "completed",
+        eventType: "manual_history",
+        dateISO,
+        note,
+        hours,
+        provenance: { sourceField: "manualHistory", index: idx, rawId: entry && entry.id != null ? String(entry.id) : null, taskMode: mode, taskId, templateId: instanceId, variant }
+      });
+    });
+    (Array.isArray(task.removedOccurrences) ? task.removedOccurrences : []).forEach((entry, idx)=>{
+      const dateISO = entry && typeof entry === "object" ? (entry.dateISO || entry.date || entry.when) : entry;
+      pushEvent({
+        streamId: `legacy-removed:${mode}:${taskId}:${idx}`,
+        occurrenceId: `legacy-removed:${taskId}:${idx}`,
+        status: "removed",
+        eventType: "removed",
+        dateISO,
+        provenance: { sourceField: "removedOccurrences", index: idx, taskMode: mode, taskId, templateId: instanceId, variant }
+      });
+    });
+    const notesMap = task.occurrenceNotes && typeof task.occurrenceNotes === "object" ? task.occurrenceNotes : {};
+    Object.entries(notesMap).forEach(([dateKey, note])=>{
+      pushEvent({
+        streamId: `legacy-note:${mode}:${taskId}:${dateKey}`,
+        occurrenceId: `legacy-note:${taskId}:${dateKey}`,
+        status: "annotated",
+        eventType: "note",
+        dateISO: dateKey,
+        note,
+        provenance: { sourceField: "occurrenceNotes", key: dateKey, taskMode: mode, taskId, templateId: instanceId, variant }
+      });
+    });
+    const hoursMap = task.occurrenceHours && typeof task.occurrenceHours === "object" ? task.occurrenceHours : {};
+    Object.entries(hoursMap).forEach(([dateKey, hours])=>{
+      pushEvent({
+        streamId: `legacy-hours:${mode}:${taskId}:${dateKey}`,
+        occurrenceId: `legacy-hours:${taskId}:${dateKey}`,
+        status: "annotated",
+        eventType: "hours",
+        dateISO: dateKey,
+        hours,
+        provenance: { sourceField: "occurrenceHours", key: dateKey, taskMode: mode, taskId, templateId: instanceId, variant }
+      });
+    });
+  };
   const intervalList = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
   const asReqList = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
   intervalList.forEach(task => {
     const row = normalizeLegacyMaintenanceTask(task, "interval");
     if (row) out.push(row);
+    normalizeLegacyEvents(task, "interval");
   });
   asReqList.forEach(task => {
     const row = normalizeLegacyMaintenanceTask(task, "asreq");
     if (row) out.push(row);
+    normalizeLegacyEvents(task, "asreq");
   });
 
   const v2Tasks = Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : [];
@@ -2450,11 +2561,12 @@ function buildMaintenanceCompatibilityStream(){
       taskName: String(event.taskName || (task && task.name) || "").trim(),
       instanceId: instanceId || null,
       occurrenceId: occurrenceId || null,
-      dateISO: normalizeDateISO(event.dateISO || event.completedAtISO || event.occurredAtISO || ""),
-      status: String(event.status || event.type || "unknown"),
+      dateISO: normalizeDateISO(event.effectiveDateISO || event.dateISO || event.completedAtISO || event.occurredAtISO || ""),
+      status: String(event.status || event.eventType || event.type || "unknown"),
+      eventType: event.eventType != null ? String(event.eventType) : (event.type != null ? String(event.type) : null),
       instanceMode: inst && inst.instanceMode ? String(inst.instanceMode) : null,
-      note: event.note != null ? String(event.note) : null,
-      hours: event.hours != null && Number.isFinite(Number(event.hours)) ? Number(event.hours) : null,
+      note: event.note != null ? String(event.note) : (event.payload && event.payload.note != null ? String(event.payload.note) : null),
+      hours: event.hours != null && Number.isFinite(Number(event.hours)) ? Number(event.hours) : (event.payload && Number.isFinite(Number(event.payload.hours)) ? Number(event.payload.hours) : null),
       categoryRef: task && task.folderId != null ? String(task.folderId) : null,
       inventoryRef: task && task.inventoryId != null ? String(task.inventoryId) : null,
       costRef: task && task.costProfileId != null ? String(task.costProfileId) : null,
@@ -2463,6 +2575,9 @@ function buildMaintenanceCompatibilityStream(){
         taskId: taskId || null,
         instanceId: instanceId || null,
         occurrenceId: occurrenceId || null,
+        supersedesEventId: event.supersedesEventId != null ? String(event.supersedesEventId) : null,
+        recordedAtISO: event.recordedAtISO != null ? String(event.recordedAtISO) : null,
+        sourceField: "maintenanceOccurrencesV2",
         taskRecordSystem: task ? detectMaintenanceRecordSystem(task) : null,
         instanceRecordSystem: inst ? detectMaintenanceRecordSystem(inst) : null,
         occurrenceRecordSystem: detectMaintenanceRecordSystem(event)
