@@ -2370,6 +2370,111 @@ function ensureTaskCategories(){
   });
 }
 
+function detectMaintenanceRecordSystem(record){
+  if (!record || typeof record !== "object") return "legacy";
+  if (record.system === "v2") return "v2";
+  if (Number(record.schemaVersion) >= 2) return "v2";
+  return "legacy";
+}
+
+function normalizeLegacyMaintenanceTask(task, mode){
+  if (!task || typeof task !== "object") return null;
+  const taskId = task.id != null ? String(task.id) : "";
+  if (!taskId) return null;
+  return {
+    streamId: `legacy-task:${mode}:${taskId}`,
+    sourceSystem: "legacy",
+    taskId,
+    taskName: String(task.name || "").trim(),
+    instanceId: null,
+    occurrenceId: null,
+    dateISO: normalizeDateISO(task.calendarDateISO || task.nextDueISO || task.lastDoneISO || ""),
+    status: "task_definition",
+    instanceMode: mode === "asreq" ? "one_time" : "repeat",
+    note: null,
+    hours: null,
+    categoryRef: task.cat != null ? String(task.cat) : null,
+    inventoryRef: task.inventoryId != null ? String(task.inventoryId) : null,
+    costRef: task.price != null ? Number(task.price) : null,
+    linkRef: task.storeLink != null ? String(task.storeLink) : null,
+    provenance: {
+      taskMode: mode,
+      taskId,
+      sourceField: "tasksInterval/tasksAsReq"
+    }
+  };
+}
+
+function buildMaintenanceCompatibilityStream(){
+  const out = [];
+  const intervalList = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  const asReqList = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  intervalList.forEach(task => {
+    const row = normalizeLegacyMaintenanceTask(task, "interval");
+    if (row) out.push(row);
+  });
+  asReqList.forEach(task => {
+    const row = normalizeLegacyMaintenanceTask(task, "asreq");
+    if (row) out.push(row);
+  });
+
+  const v2Tasks = Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : [];
+  const v2Instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
+  const v2Occurrences = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+  const taskMap = new Map();
+  v2Tasks.forEach(task => {
+    if (!task || typeof task !== "object") return;
+    const id = task.id != null ? String(task.id) : "";
+    if (!id) return;
+    taskMap.set(id, task);
+  });
+  const instanceMap = new Map();
+  v2Instances.forEach(instance => {
+    if (!instance || typeof instance !== "object") return;
+    const id = instance.id != null ? String(instance.id) : "";
+    if (!id) return;
+    instanceMap.set(id, instance);
+  });
+  v2Occurrences.forEach(event => {
+    if (!event || typeof event !== "object") return;
+    if (detectMaintenanceRecordSystem(event) !== "v2") return;
+    const occurrenceId = event.id != null ? String(event.id) : "";
+    const instanceId = event.instanceId != null ? String(event.instanceId) : "";
+    const inst = instanceMap.get(instanceId) || null;
+    const taskId = event.taskId != null ? String(event.taskId) : (inst && inst.taskId != null ? String(inst.taskId) : "");
+    const task = taskMap.get(taskId) || null;
+    out.push({
+      streamId: `v2-occurrence:${occurrenceId || `${instanceId}:unknown`}`,
+      sourceSystem: "v2",
+      taskId: taskId || null,
+      taskName: String(event.taskName || (task && task.name) || "").trim(),
+      instanceId: instanceId || null,
+      occurrenceId: occurrenceId || null,
+      dateISO: normalizeDateISO(event.dateISO || event.completedAtISO || event.occurredAtISO || ""),
+      status: String(event.status || event.type || "unknown"),
+      instanceMode: inst && inst.instanceMode ? String(inst.instanceMode) : null,
+      note: event.note != null ? String(event.note) : null,
+      hours: event.hours != null && Number.isFinite(Number(event.hours)) ? Number(event.hours) : null,
+      categoryRef: task && task.folderId != null ? String(task.folderId) : null,
+      inventoryRef: task && task.inventoryId != null ? String(task.inventoryId) : null,
+      costRef: task && task.costProfileId != null ? String(task.costProfileId) : null,
+      linkRef: task && task.linkRef != null ? String(task.linkRef) : null,
+      provenance: {
+        taskId: taskId || null,
+        instanceId: instanceId || null,
+        occurrenceId: occurrenceId || null,
+        taskRecordSystem: task ? detectMaintenanceRecordSystem(task) : null,
+        instanceRecordSystem: inst ? detectMaintenanceRecordSystem(inst) : null,
+        occurrenceRecordSystem: detectMaintenanceRecordSystem(event)
+      }
+    });
+  });
+  return out;
+}
+
+window.detectMaintenanceRecordSystem = detectMaintenanceRecordSystem;
+window.buildMaintenanceCompatibilityStream = buildMaintenanceCompatibilityStream;
+
 function ensureJobCategories(){
   const folders = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();
   const rootId = folders.find(f => String(f.id) === JOB_ROOT_FOLDER_ID)
