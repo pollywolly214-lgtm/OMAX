@@ -17898,6 +17898,24 @@ function renderJobs(){
     }
   }
 
+
+  const applyPendingJobHighlight = ()=>{
+    const pending = window.pendingJobRowHighlight;
+    if (!pending || pending.id == null) return;
+    if (Number(pending.untilMs || 0) < Date.now()){ window.pendingJobRowHighlight = null; return; }
+    const id = String(pending.id);
+    const selectorId = (typeof escapeForSelector === "function")
+      ? escapeForSelector(id)
+      : ((typeof CSS !== "undefined" && typeof CSS.escape === "function") ? CSS.escape(id) : id);
+    const row = content.querySelector(`[data-job-row="${selectorId}"], [data-history-row="${selectorId}"]`);
+    if (!(row instanceof HTMLElement)) return;
+    row.classList.remove("job-row-link-highlight");
+    void row.offsetWidth;
+    row.classList.add("job-row-link-highlight");
+    setTimeout(()=> row.classList.remove("job-row-link-highlight"), 2600);
+  };
+  applyPendingJobHighlight();
+
   const pendingJobFocus = window.pendingJobFocus;
   if (pendingJobFocus){
     window.pendingJobFocus = null;
@@ -17946,6 +17964,7 @@ function renderJobs(){
             : ((typeof CSS !== "undefined" && typeof CSS.escape === "function") ? CSS.escape(targetId) : targetId);
           const targetRow = content.querySelector(`[data-job-row="${targetSelectorId}"], [data-history-row="${targetSelectorId}"]`);
           if (targetRow instanceof HTMLElement){
+            window.pendingJobRowHighlight = { id: targetId, untilMs: Date.now() + 5000 };
             const parentDetails = targetRow.closest("details");
             if (parentDetails instanceof HTMLElement) parentDetails.open = true;
             targetRow.classList.remove("job-row-link-highlight");
