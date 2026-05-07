@@ -14752,15 +14752,21 @@ function computeCostModel(){
   const shouldIncludeManualHistoryEntry = (entry, completedDateKeys = null)=> {
     if (!entry) return false;
     const status = typeof entry.status === "string" ? entry.status.trim().toLowerCase() : "";
-    if (status === "completed" || status === "complete" || status === "done") return true;
-    if (status === "scheduled" || status === "removed") return false;
     const entryKey = toHistoryDateKey(entry.dateISO);
+    if (!entryKey) return false;
+    if (status === "removed") return false;
+    if (status === "completed" || status === "complete" || status === "done" || status === "manual" || status === "logged"){
+      return true;
+    }
+    if (status === "scheduled"){
+      return completedDateKeys instanceof Set && completedDateKeys.has(entryKey);
+    }
     if (completedDateKeys instanceof Set && entryKey && completedDateKeys.has(entryKey)) return true;
-    const explicitComplete = entry.completed === true || entry.isCompleted === true || entry.complete === true;
+    const explicitComplete = entry.completed === true || entry.isCompleted === true || entry.complete === true || entry.logged === true;
     if (explicitComplete && entryKey) return true;
     const source = typeof entry.source === "string" ? entry.source.trim().toLowerCase() : "";
     const hoursAtEntry = Number(entry.hoursAtEntry);
-    if ((status === "logged" || !status) && source === "machine" && Number.isFinite(hoursAtEntry) && hoursAtEntry >= 0){
+    if ((!status || status === "logged") && source === "machine" && Number.isFinite(hoursAtEntry) && hoursAtEntry >= 0){
       return true;
     }
     return false;
