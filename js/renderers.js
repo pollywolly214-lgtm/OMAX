@@ -6066,6 +6066,79 @@ function renderDashboard(){
     showStep(step);
   }
 
+  function ensureMaintenanceV2Collections(){
+    if (!Array.isArray(window.maintenanceTasksV2)) window.maintenanceTasksV2 = [];
+    if (!Array.isArray(window.maintenanceCalendarInstancesV2)) window.maintenanceCalendarInstancesV2 = [];
+    if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
+    return {
+      tasks: window.maintenanceTasksV2,
+      instances: window.maintenanceCalendarInstancesV2,
+      occurrences: window.maintenanceOccurrencesV2
+    };
+  }
+
+  function createMaintenanceV2FromTemplate(task, opts = {}){
+    if (!task || task.id == null) return null;
+    const collections = ensureMaintenanceV2Collections();
+    const mode = String(opts.mode || "one_time");
+    const eventType = String(opts.eventType || "scheduled");
+    const effectiveDateISO = normalizeDateKey(opts.effectiveDateISO || addContextDateISO || ymd(new Date()));
+    const nowISO = new Date().toISOString();
+    const legacyTaskId = String(task.id);
+    const existingTask = collections.tasks.find(entry => entry && String(entry.legacyTaskId || "") === legacyTaskId) || null;
+    const taskRecord = existingTask || {
+      id: genId("maintenance_task_v2"),
+      system: "v2",
+      schemaVersion: 2,
+      legacyTaskId,
+      name: task.name || "Maintenance task",
+      categoryRef: task.cat != null ? String(task.cat) : null,
+      inventoryId: task.inventoryId != null ? String(task.inventoryId) : null,
+      storeLink: task.storeLink || "",
+      manualLink: task.manualLink || "",
+      pn: task.pn || "",
+      price: task.price != null ? Number(task.price) : null,
+      createdAtISO: nowISO,
+      updatedAtISO: nowISO
+    };
+    if (!existingTask){
+      collections.tasks.unshift(taskRecord);
+    }else{
+      taskRecord.updatedAtISO = nowISO;
+    }
+    const instance = {
+      id: genId("maintenance_instance_v2"),
+      system: "v2",
+      schemaVersion: 2,
+      taskId: taskRecord.id,
+      legacyTaskId,
+      instanceMode: mode,
+      startDateISO: effectiveDateISO,
+      status: "active",
+      repeatRule: mode === "repeat" ? (opts.repeatRule || null) : null,
+      createdAtISO: nowISO,
+      updatedAtISO: nowISO
+    };
+    collections.instances.unshift(instance);
+    const occurrence = {
+      id: genId("maintenance_occurrence_v2"),
+      system: "v2",
+      schemaVersion: 2,
+      instanceId: instance.id,
+      taskId: taskRecord.id,
+      legacyTaskId,
+      eventType,
+      effectiveDateISO,
+      recordedAtISO: nowISO,
+      payload: {
+        note: opts.note || "",
+        hours: Number.isFinite(Number(opts.hours)) ? Number(opts.hours) : null
+      }
+    };
+    collections.occurrences.unshift(occurrence);
+    return { taskRecord, instance, occurrence };
+  }
+
   function hideBackdrop(){
     if (!modal) return;
     modal.classList.remove("is-visible");
@@ -6604,36 +6677,41 @@ function renderDashboard(){
       endCountInput: taskExistingEndCountInput,
       defaultBasis: task.mode === "interval" ? "machine_hours" : "calendar_day"
     });
+    const choiceRaw = window.prompt(
+      "How should this task be added?\n1) One-time reminder\n2) Start repeat tracking\n3) Log past completion",
+      "1"
+    );
+    const choice = String(choiceRaw || "").trim();
+    if (!choice || !["1", "2", "3"].includes(choice)){
+      toast("Add to calendar cancelled");
+      return;
+    }
     let message = "Maintenance task added";
-    if (task.mode === "interval"){
-      const instance = scheduleExistingIntervalTask(task, {
-        dateISO: targetISO,
+    if (choice === "1"){
+      createMaintenanceV2FromTemplate(task, {
+        mode: "one_time",
+        eventType: "scheduled",
+        effectiveDateISO: targetISO,
+        note: occurrenceNote
+      });
+      message = `One-time reminder created for "${task.name || "Task"}"`;
+    }else if (choice === "2"){
+      createMaintenanceV2FromTemplate(task, {
+        mode: "repeat",
+        eventType: "repeat_started",
+        effectiveDateISO: targetISO,
         note: occurrenceNote,
-        refreshDashboard: true,
-        recurrence: repeatConfig
-      }) || task;
-      const parsed = parseDateLocal(targetISO);
-      const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
-      let dateLabel = targetISO;
-      let completed = false;
-      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
-        const display = new Date(parsed.getTime());
-        dateLabel = display.toLocaleDateString();
-        const compare = new Date(parsed.getTime());
-        compare.setHours(0,0,0,0);
-        completed = compare.getTime() <= todayMidnight.getTime();
-      }
-      message = completed
-        ? `Logged "${instance.name || "Task"}" as completed on ${dateLabel}`
-        : `Scheduled "${instance.name || "Task"}" for ${dateLabel}`;
+        repeatRule: repeatConfig.enabled ? repeatConfig : null
+      });
+      message = `Repeat tracking started for "${task.name || "Task"}"`;
     }else{
-      const instance = scheduleExistingAsReqTask(task, {
-        dateISO: targetISO,
-        note: occurrenceNote,
-        refreshDashboard: true,
-        recurrence: repeatConfig
-      }) || task;
-      message = "As-required task linked from Maintenance Settings";
+      createMaintenanceV2FromTemplate(task, {
+        mode: "past_log",
+        eventType: "completed",
+        effectiveDateISO: targetISO,
+        note: occurrenceNote
+      });
+      message = `Past completion logged for "${task.name || "Task"}"`;
     }
     setContextDate(targetISO);
     if (typeof saveCloudNow === "function") saveCloudNow();
