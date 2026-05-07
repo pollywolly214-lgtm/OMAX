@@ -5301,6 +5301,7 @@ function renderDashboard(){
   const existingTaskEmpty  = taskExistingForm?.querySelector('[data-task-existing-empty]');
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
   const taskExistingNoteInput = document.getElementById("dashTaskExistingNote");
+  const taskExistingAddModeInput = document.getElementById("dashTaskExistingAddMode");
   const taskExistingRepeatInput = document.getElementById("dashTaskExistingRepeat");
   const taskExistingBasisInput = document.getElementById("dashTaskExistingRepeatBasis");
   const taskExistingEveryInput = document.getElementById("dashTaskExistingRepeatEvery");
@@ -5565,6 +5566,7 @@ function renderDashboard(){
   function resetExistingTaskForm(){
     if (taskExistingSearchInput) taskExistingSearchInput.value = "";
     if (taskExistingNoteInput) taskExistingNoteInput.value = "";
+    if (taskExistingAddModeInput) taskExistingAddModeInput.value = "one_time";
     if (taskExistingRepeatInput) taskExistingRepeatInput.value = "no";
     if (taskExistingRepeatInput) taskExistingRepeatInput.disabled = true;
     if (taskExistingBasisInput) taskExistingBasisInput.value = "calendar_day";
@@ -6136,6 +6138,16 @@ function renderDashboard(){
       }
     };
     collections.occurrences.unshift(occurrence);
+    if (window.DEBUG_MODE){
+      console.info("[maintenance-v2] created records", {
+        legacyTaskId,
+        taskId: taskRecord.id,
+        instanceId: instance.id,
+        occurrenceId: occurrence.id,
+        instanceMode: mode,
+        eventType
+      });
+    }
     return { taskRecord, instance, occurrence };
   }
 
@@ -6677,17 +6689,21 @@ function renderDashboard(){
       endCountInput: taskExistingEndCountInput,
       defaultBasis: task.mode === "interval" ? "machine_hours" : "calendar_day"
     });
-    const choiceRaw = window.prompt(
-      "How should this task be added?\n1) One-time reminder\n2) Start repeat tracking\n3) Log past completion",
-      "1"
-    );
-    const choice = String(choiceRaw || "").trim();
-    if (!choice || !["1", "2", "3"].includes(choice)){
+    let choice = String(taskExistingAddModeInput?.value || "").trim();
+    if (!choice){
+      const choiceRaw = window.prompt(
+        "Temporary chooser fallback:\n1) One-time reminder\n2) Start repeat tracking\n3) Log past completion",
+        "1"
+      );
+      const mapped = { "1": "one_time", "2": "repeat", "3": "past_log" };
+      choice = mapped[String(choiceRaw || "").trim()] || "";
+    }
+    if (!choice || !["one_time", "repeat", "past_log"].includes(choice)){
       toast("Add to calendar cancelled");
       return;
     }
     let message = "Maintenance task added";
-    if (choice === "1"){
+    if (choice === "one_time"){
       createMaintenanceV2FromTemplate(task, {
         mode: "one_time",
         eventType: "scheduled",
@@ -6695,7 +6711,7 @@ function renderDashboard(){
         note: occurrenceNote
       });
       message = `One-time reminder created for "${task.name || "Task"}"`;
-    }else if (choice === "2"){
+    }else if (choice === "repeat"){
       createMaintenanceV2FromTemplate(task, {
         mode: "repeat",
         eventType: "repeat_started",
