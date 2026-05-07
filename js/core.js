@@ -1652,6 +1652,9 @@ if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
 if (!Array.isArray(window.opportunityRollups)) window.opportunityRollups = [];
 if (!Array.isArray(window.weeklyCostReports)) window.weeklyCostReports = [];
 if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
+if (!Array.isArray(window.maintenanceTasksV2)) window.maintenanceTasksV2 = [];
+if (!Array.isArray(window.maintenanceCalendarInstancesV2)) window.maintenanceCalendarInstancesV2 = [];
+if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
 if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
@@ -1672,6 +1675,9 @@ let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
 let dailyCutHours = window.dailyCutHours;
+let maintenanceTasksV2 = window.maintenanceTasksV2;
+let maintenanceCalendarInstancesV2 = window.maintenanceCalendarInstancesV2;
+let maintenanceOccurrencesV2 = window.maintenanceOccurrencesV2;
 let jobFolders = window.jobFolders;
 let weeklyCostReports = window.weeklyCostReports;
 let receiptTrackerWeeks = window.receiptTrackerWeeks;
@@ -1848,6 +1854,15 @@ function refreshGlobalCollections(){
   if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
   dailyCutHours = window.dailyCutHours;
 
+  if (!Array.isArray(window.maintenanceTasksV2)) window.maintenanceTasksV2 = [];
+  maintenanceTasksV2 = window.maintenanceTasksV2;
+
+  if (!Array.isArray(window.maintenanceCalendarInstancesV2)) window.maintenanceCalendarInstancesV2 = [];
+  maintenanceCalendarInstancesV2 = window.maintenanceCalendarInstancesV2;
+
+  if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
+  maintenanceOccurrencesV2 = window.maintenanceOccurrencesV2;
+
   if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
   jobFolders = window.jobFolders;
 }
@@ -1944,6 +1959,9 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     copyArr("orderRequests");
     copyArr("receiptTrackerWeeks");
     copyArr("garnetCleanings");
+    copyArr("maintenanceTasksV2");
+    copyArr("maintenanceCalendarInstancesV2");
+    copyArr("maintenanceOccurrencesV2");
     copyArr("totalHistory");
     copyObj("appConfig");
     copyObj("settingsFolders");
@@ -1970,6 +1988,9 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(sanitized.orderRequests) && Array.isArray(window.orderRequests)) sanitized.orderRequests = window.orderRequests.slice();
     if (!Array.isArray(sanitized.receiptTrackerWeeks) && Array.isArray(window.receiptTrackerWeeks)) sanitized.receiptTrackerWeeks = window.receiptTrackerWeeks.slice();
     if (!Array.isArray(sanitized.garnetCleanings) && Array.isArray(window.garnetCleanings)) sanitized.garnetCleanings = window.garnetCleanings.slice();
+    if (!Array.isArray(sanitized.maintenanceTasksV2) && Array.isArray(window.maintenanceTasksV2)) sanitized.maintenanceTasksV2 = window.maintenanceTasksV2.slice();
+    if (!Array.isArray(sanitized.maintenanceCalendarInstancesV2) && Array.isArray(window.maintenanceCalendarInstancesV2)) sanitized.maintenanceCalendarInstancesV2 = window.maintenanceCalendarInstancesV2.slice();
+    if (!Array.isArray(sanitized.maintenanceOccurrencesV2) && Array.isArray(window.maintenanceOccurrencesV2)) sanitized.maintenanceOccurrencesV2 = window.maintenanceOccurrencesV2.slice();
     if (!Array.isArray(sanitized.totalHistory) && Array.isArray(window.totalHistory)) sanitized.totalHistory = window.totalHistory.slice();
     if (!Array.isArray(sanitized.deletedItems) && Array.isArray(window.deletedItems)) sanitized.deletedItems = window.deletedItems.slice();
     if (!Array.isArray(sanitized.jobFolders) && Array.isArray(window.jobFolders)) sanitized.jobFolders = window.jobFolders.slice();
@@ -1991,6 +2012,9 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
     if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
     if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+    if (!Array.isArray(window.maintenanceTasksV2)) window.maintenanceTasksV2 = [];
+    if (!Array.isArray(window.maintenanceCalendarInstancesV2)) window.maintenanceCalendarInstancesV2 = [];
+    if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
     if (!Array.isArray(window.totalHistory)) window.totalHistory = [];
     if (!window.settingsFolders || !Array.isArray(window.settingsFolders)) window.settingsFolders = typeof defaultSettingsFolders === "function" ? defaultSettingsFolders() : [];
     if (!window.folders || typeof window.folders !== "object") window.folders = Array.isArray(window.settingsFolders) ? JSON.parse(JSON.stringify(window.settingsFolders)) : [];
@@ -2037,6 +2061,9 @@ function stateHasMeaningfulData(data){
     "pumpEff",
     "jobFolders",
     "orderRequestTab",
+    "maintenanceTasksV2",
+    "maintenanceCalendarInstancesV2",
+    "maintenanceOccurrencesV2",
     "schema"
   ]);
   return keys.some(key => meaningfulKeys.has(key));
@@ -2158,6 +2185,9 @@ function snapshotState(){
     weeklyCostReports: Array.isArray(window.weeklyCostReports)
       ? window.weeklyCostReports.map(entry => ({ ...entry }))
       : [],
+    maintenanceTasksV2: Array.isArray(maintenanceTasksV2) ? maintenanceTasksV2.map(entry => ({ ...entry })) : [],
+    maintenanceCalendarInstancesV2: Array.isArray(maintenanceCalendarInstancesV2) ? maintenanceCalendarInstancesV2.map(entry => ({ ...entry })) : [],
+    maintenanceOccurrencesV2: Array.isArray(maintenanceOccurrencesV2) ? maintenanceOccurrencesV2.map(entry => ({ ...entry })) : [],
     syncProcessLog: Array.isArray(window.syncProcessLog)
       ? window.syncProcessLog.map(entry => ({ ...entry }))
       : [],
@@ -2852,6 +2882,9 @@ function adoptState(doc){
   opportunityRollups = Array.isArray(data.opportunityRollups) ? data.opportunityRollups : [];
   weeklyCostReports = Array.isArray(data.weeklyCostReports) ? data.weeklyCostReports.map(entry => ({ ...entry })) : [];
   receiptTrackerWeeks = Array.isArray(data.receiptTrackerWeeks) ? data.receiptTrackerWeeks.map(entry => ({ ...entry })) : [];
+  maintenanceTasksV2 = Array.isArray(data.maintenanceTasksV2) ? data.maintenanceTasksV2.map(entry => ({ ...entry })) : [];
+  maintenanceCalendarInstancesV2 = Array.isArray(data.maintenanceCalendarInstancesV2) ? data.maintenanceCalendarInstancesV2.map(entry => ({ ...entry })) : [];
+  maintenanceOccurrencesV2 = Array.isArray(data.maintenanceOccurrencesV2) ? data.maintenanceOccurrencesV2.map(entry => ({ ...entry })) : [];
   window.syncProcessLog = Array.isArray(data.syncProcessLog) ? data.syncProcessLog.map(entry => ({ ...entry })) : (Array.isArray(window.syncProcessLog) ? window.syncProcessLog : []);
 
   window.totalHistory = totalHistory;
@@ -2866,6 +2899,9 @@ function adoptState(doc){
   window.opportunityRollups = opportunityRollups;
   window.weeklyCostReports = weeklyCostReports;
   window.receiptTrackerWeeks = receiptTrackerWeeks;
+  window.maintenanceTasksV2 = maintenanceTasksV2;
+  window.maintenanceCalendarInstancesV2 = maintenanceCalendarInstancesV2;
+  window.maintenanceOccurrencesV2 = maintenanceOccurrencesV2;
   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
   window.deletedItems = deletedItems;
   purgeExpiredDeletedItems();
@@ -2879,6 +2915,14 @@ function adoptState(doc){
     window.orderRequestTab = orderRequestTab || "active";
   }
   orderRequestTab = window.orderRequestTab;
+
+  if (window.DEBUG_MODE){
+    console.info("V2 maintenance storage ready", {
+      tasks: Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2.length : 0,
+      instances: Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2.length : 0,
+      occurrences: Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2.length : 0
+    });
+  }
 
   const rawFolders = Array.isArray(data.settingsFolders)
     ? data.settingsFolders
@@ -3093,7 +3137,7 @@ function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
     if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
     const prev = window.__lastSnapshotForFlow && typeof window.__lastSnapshotForFlow === "object" ? window.__lastSnapshotForFlow : null;
     const next = nextSnapshot && typeof nextSnapshot === "object" ? nextSnapshot : null;
-    const trackedKeys = ["totalHistory", "tasksInterval", "tasksAsReq", "inventory", "inventoryFolders", "receiptTrackerWeeks", "orderRequests", "cuttingJobs", "completedCuttingJobs", "dailyCutHours", "garnetCleanings", "settingsFolders"];
+    const trackedKeys = ["totalHistory", "tasksInterval", "tasksAsReq", "inventory", "inventoryFolders", "receiptTrackerWeeks", "orderRequests", "cuttingJobs", "completedCuttingJobs", "dailyCutHours", "garnetCleanings", "maintenanceTasksV2", "maintenanceCalendarInstancesV2", "maintenanceOccurrencesV2", "settingsFolders"];
     const skipTrigger = /history|syncprocesslog|data_flow_save/i.test(String(trigger || ""));
     if (skipTrigger){
       if (next) window.__lastSnapshotForFlow = next;
