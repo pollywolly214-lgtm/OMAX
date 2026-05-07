@@ -27,8 +27,8 @@ const WORKSPACE_ID = (() => {
 
 function isVercelPreviewRuntime(){
   if (typeof window === "undefined" || !window.location) return false;
-  const host = String(window.location.hostname || "").toLowerCase();
-  return host.includes("vercel.app") && host.includes("-git-");
+  const params = new URLSearchParams(window.location.search || "");
+  return params.get("previewReadonly") === "1";
 }
 
 if (typeof window !== "undefined") {
@@ -509,8 +509,32 @@ let workspaceMetadataWritesBlocked = false;
 let workspaceStateUnsubscribe = null;
 let lastAppliedCloudRevision = 0;
 let hasPendingLocalChanges = false;
+let lastLocalMutationAt = 0;
 const CLOUD_SYNC_CLIENT_KEY = "cloud_sync_client_id_v1";
+const LOCAL_STATE_BACKUP_KEY = "omax_local_state_backup_v1";
 
+
+function persistLocalStateBackup(snapshot){
+  if (typeof window === "undefined" || !window.localStorage || !snapshot) return;
+  try {
+    window.localStorage.setItem(LOCAL_STATE_BACKUP_KEY, JSON.stringify(snapshot));
+  } catch (err){
+    console.warn("Failed to persist local state backup", err);
+  }
+}
+
+function readLocalStateBackup(){
+  if (typeof window === "undefined" || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(LOCAL_STATE_BACKUP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (err){
+    console.warn("Failed to read local state backup", err);
+    return null;
+  }
+}
 function getCloudSyncClientId(){
   if (typeof window === "undefined" || !window.localStorage) return "unknown_client";
   let id = String(window.localStorage.getItem(CLOUD_SYNC_CLIENT_KEY) || "").trim();
@@ -787,6 +811,8 @@ function startWorkspaceStateListener(){
     if (!incomingRev) return;
     const incomingBy = String(meta?.updatedBy || "");
     if (hasPendingLocalChanges) return;
+    const localEditAgeMs = Date.now() - (Number(lastLocalMutationAt) || 0);
+    if (incomingBy !== localClientId && localEditAgeMs >= 0 && localEditAgeMs < 15000) return;
     if (incomingRev && incomingRev <= lastAppliedCloudRevision) return;
     if (incomingRev && incomingBy === localClientId && incomingRev === lastAppliedCloudRevision) return;
     adoptState(incoming || {});
@@ -3022,6 +3048,14 @@ const saveCloudInternal = debounce(async ()=>{
       console.warn("Failed to record save flow event", err);
     }
     window.__lastSnapshot = snap;
+    persistLocalStateBackup(snap);
+    const remoteSnap = await FB.docRef.get();
+    const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
+    if (remoteData && typeof remoteData === "object"){
+      snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
+      snap.dailyCutHours = mergeDailyCutHoursForSave(snap.dailyCutHours, remoteData.dailyCutHours);
+      snap.pumpEff = mergePumpEffForSave(snap.pumpEff, remoteData.pumpEff);
+    }
     const writeRev = Number(snap?.syncMeta?.rev || 0);
     await FB.docRef.set(snap, { merge:true });
     if (writeRev > 0) lastAppliedCloudRevision = writeRev;
@@ -3127,6 +3161,74 @@ function getAreaSignature(areaKey, areaValue){
   }
   return stableStringify(areaValue);
 }
+
+function mergeTotalHistoryForSave(localList, remoteList){
+  const map = new Map();
+  const ingest = (list)=>{
+    (Array.isArray(list) ? list : []).forEach((entry)=>{
+      const key = normalizeDateISO(entry?.dateISO);
+      const hours = Number(entry?.hours);
+      if (!key || !Number.isFinite(hours) || hours < 0) return;
+      const prev = map.get(key);
+      if (!prev || hours >= prev.hours){
+        map.set(key, { dateISO: key, hours });
+      }
+    });
+  };
+  ingest(remoteList);
+  ingest(localList);
+  return Array.from(map.values()).sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+}
+
+function mergeDailyCutHoursForSave(localList, remoteList){
+  const merged = normalizeDailyCutHours([...(Array.isArray(remoteList) ? remoteList : []), ...(Array.isArray(localList) ? localList : [])]);
+  return Array.isArray(merged) ? merged : [];
+}
+
+function mergePumpEffForSave(localPump, remotePump){
+  const local = localPump && typeof localPump === "object" ? localPump : {};
+  const remote = remotePump && typeof remotePump === "object" ? remotePump : {};
+  const merged = {
+    baselineRPM: Number.isFinite(Number(local.baselineRPM)) && Number(local.baselineRPM) > 0 ? Number(local.baselineRPM) : (Number.isFinite(Number(remote.baselineRPM)) && Number(remote.baselineRPM) > 0 ? Number(remote.baselineRPM) : null),
+    baselineDateISO: normalizeDateISO(local.baselineDateISO || remote.baselineDateISO || null),
+    entries: [],
+    notes: []
+  };
+
+  const entryMap = new Map();
+  const ingestEntries = (list, preferLocal=false)=>{
+    (Array.isArray(list) ? list : []).forEach((entry)=>{
+      const key = normalizeDateISO(entry?.dateISO);
+      const rpm = Number(entry?.rpm);
+      if (!key || !Number.isFinite(rpm) || rpm <= 0) return;
+      const normalized = { dateISO: key, rpm: Math.round(rpm), timeISO: String(entry?.timeISO || "12:00") };
+      if (!entryMap.has(key) || preferLocal) entryMap.set(key, normalized);
+    });
+  };
+  ingestEntries(remote.entries, false);
+  ingestEntries(local.entries, true);
+  merged.entries = Array.from(entryMap.values()).sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+
+  const noteMap = new Map();
+  const ingestNotes = (list, preferLocal=false)=>{
+    (Array.isArray(list) ? list : []).forEach((note)=>{
+      const dateISO = normalizeDateISO(note?.dateISO);
+      const range = String(note?.range || "all");
+      const text = String(note?.text || "").trim();
+      if (!dateISO || !text) return;
+      const key = `${dateISO}__${range}`;
+      const current = noteMap.get(key);
+      const updated = String(note?.updatedISO || "");
+      const next = { dateISO, range, text, updatedISO: updated || new Date().toISOString() };
+      if (!current || preferLocal || updated >= String(current.updatedISO || "")) noteMap.set(key, next);
+    });
+  };
+  ingestNotes(remote.notes, false);
+  ingestNotes(local.notes, true);
+  merged.notes = Array.from(noteMap.values()).sort((a,b)=> String(b.dateISO).localeCompare(String(a.dateISO)));
+
+  return merged;
+}
 function getTrackedStateSignature(snapshot){
   const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
   const tracked = {
@@ -3149,6 +3251,7 @@ function getTrackedStateSignature(snapshot){
 function saveCloudDebounced(){
   if (isVercelPreviewRuntime()) return;
   hasPendingLocalChanges = true;
+  lastLocalMutationAt = Date.now();
   try {
     if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
@@ -3164,6 +3267,7 @@ function saveCloudDebounced(){
 function saveCloudNow(){
   if (isVercelPreviewRuntime()) return;
   hasPendingLocalChanges = true;
+  lastLocalMutationAt = Date.now();
   try {
     if (typeof setSettingsFolders === "function") setSettingsFolders(window.settingsFolders);
   } catch (err) {
@@ -3206,11 +3310,27 @@ async function loadFromCloud(){
       }
     }
 
+    const localBackup = readLocalStateBackup();
+    const cloudRev = Number(data?.syncMeta?.rev || 0);
+    const backupRev = Number(localBackup?.syncMeta?.rev || 0);
+
     if (stateHasMeaningfulData(data)){
-      adoptState(data || {});
-      const loadedRev = Number(data?.syncMeta?.rev || 0);
+      const useBackup = stateHasMeaningfulData(localBackup) && backupRev > cloudRev;
+      adoptState((useBackup ? localBackup : data) || {});
+      const loadedRev = useBackup ? backupRev : cloudRev;
       if (loadedRev > 0) lastAppliedCloudRevision = loadedRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
+      if (useBackup && typeof saveCloudNow === "function"){
+        try { saveCloudNow(); } catch (err){ console.warn("Failed to push local backup after cloud load", err); }
+      }
+    }else if (stateHasMeaningfulData(localBackup)){
+      adoptState(localBackup || {});
+      const loadedRev = Number(localBackup?.syncMeta?.rev || 0);
+      if (loadedRev > 0) lastAppliedCloudRevision = loadedRev;
+      if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
+      if (typeof saveCloudNow === "function"){
+        try { saveCloudNow(); } catch (err){ console.warn("Failed to push local backup after fallback load", err); }
+      }
     }else{
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
