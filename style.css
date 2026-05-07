@@ -2238,7 +2238,7 @@ body.modal-open .auth-bar {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap:8px 10px;
   align-content:start;
-  align-items:end;
+  align-items:start;
   min-width:0;
   padding:8px;
   border:1px solid #cfdcf4;
@@ -2319,8 +2319,9 @@ body.modal-open .auth-bar {
   position: relative;
   padding-top: 16px;
 }
-.job-category-field{
-  align-self:end;
+.job-add-form > .job-add-column:nth-child(2) > label,
+.job-add-form > .job-add-column:nth-child(2) .job-category-field{
+  align-self:start;
 }
 .job-priority-hint {
   margin: 4px 0 0;
