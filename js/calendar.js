@@ -185,11 +185,11 @@ function hideBubbleSoon(){
   }, 180);
 }
 
-function showV2OneTimeBubble(instanceId, anchorEl){
+function showV2OneTimeBubble(occurrenceId, anchorEl){
   const lookup = (typeof window !== "undefined" && window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object")
     ? window.__calendarV2OneTimeLookup
     : {};
-  const ev = lookup && instanceId != null ? lookup[String(instanceId)] : null;
+  const ev = lookup && occurrenceId != null ? lookup[String(occurrenceId)] : null;
   if (!ev){
     toast("V2 reminder details unavailable");
     return;
@@ -2413,6 +2413,7 @@ function renderCalendar(){
     v2InstanceLookup.set(String(entry.id), entry);
   });
   const oneTimeLookup = {};
+  const seenV2ChipKeys = new Set();
   (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : []).forEach(event => {
     if (!event || event.id == null) return;
     if (String(event.system || "") !== "v2" && Number(event.schemaVersion || 0) < 2) return;
@@ -2426,12 +2427,23 @@ function renderCalendar(){
     const task = v2TaskLookup.get(String(instance.taskId || event.taskId || "")) || null;
     const name = String(event.taskName || (task && task.name) || "Maintenance reminder");
     const note = event.payload && typeof event.payload === "object" && event.payload.note != null ? String(event.payload.note) : "";
-    const mapKey = `${instanceId}:${dateISO}`;
-    if (oneTimeLookup[mapKey]) return;
-    oneTimeLookup[mapKey] = { instanceId, dateISO, name, note };
+    const occurrenceId = String(event.id);
+    const mapKey = `${occurrenceId}:${dateISO}`;
+    if (seenV2ChipKeys.has(mapKey)) return;
+    seenV2ChipKeys.add(mapKey);
+    oneTimeLookup[occurrenceId] = {
+      occurrenceId,
+      eventType,
+      instanceId,
+      taskId: String(instance.taskId || event.taskId || ""),
+      dateISO,
+      name,
+      note
+    };
     (dueMap[dateISO] ||= []).push({
       type: "v2task",
-      id: `v2-one-time:${instanceId}:${dateISO}`,
+      id: `v2-one-time:${occurrenceId}`,
+      occurrenceId,
       instanceId,
       name,
       status: "manual",
@@ -2439,10 +2451,7 @@ function renderCalendar(){
       dateISO
     });
   });
-  window.__calendarV2OneTimeLookup = Object.values(oneTimeLookup).reduce((acc, entry)=>{
-    acc[String(entry.instanceId)] = entry;
-    return acc;
-  }, {});
+  window.__calendarV2OneTimeLookup = oneTimeLookup;
 
   const jobsMap = {};
   cuttingJobs.forEach(j => {
@@ -2660,8 +2669,8 @@ function renderCalendar(){
         if (ev.status === "completed") cls += " is-complete";
         chip.className = cls;
         const baseTaskId = ev.taskId || ev.id;
-        if (ev.type === "v2task" && ev.instanceId){
-          chip.dataset.calV2OneTime = String(ev.instanceId);
+        if (ev.type === "v2task" && ev.occurrenceId){
+          chip.dataset.calV2OneTime = String(ev.occurrenceId);
         }else{
           chip.dataset.calTask = baseTaskId;
         }
