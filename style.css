@@ -2244,6 +2244,12 @@ body.modal-open .auth-bar {
   border-radius:12px;
   background:#f4f8ff;
 }
+.job-add-form > .job-add-column:nth-child(1){
+  grid-template-columns: minmax(190px,1.1fr) minmax(190px,1fr) minmax(170px,.9fr) minmax(150px,.8fr) minmax(170px,.9fr) minmax(170px,.9fr);
+}
+.job-add-form > .job-add-column:nth-child(2){
+  grid-template-columns: minmax(170px,.8fr) minmax(170px,.8fr) minmax(180px,.9fr) minmax(260px,1.5fr);
+}
 .job-add-column-material{
   width:100%;
   justify-self:stretch;
