@@ -2246,11 +2246,11 @@ body.modal-open .auth-bar {
 }
 .job-add-form > .job-add-column:nth-child(1){
   grid-column: 1;
-  grid-template-columns: minmax(190px,1.1fr) minmax(190px,1fr) minmax(170px,.9fr) minmax(150px,.8fr) minmax(170px,.9fr) minmax(170px,.9fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 .job-add-form > .job-add-column:nth-child(2){
   grid-column: 2;
-  grid-template-columns: minmax(170px,.8fr) minmax(170px,.8fr) minmax(180px,.9fr) minmax(260px,1.5fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .job-add-column-material{
   grid-column: 1 / -1;
