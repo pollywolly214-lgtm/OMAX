@@ -3025,6 +3025,12 @@ const saveCloudInternal = debounce(async ()=>{
       console.warn("Failed to record save flow event", err);
     }
     window.__lastSnapshot = snap;
+    const remoteSnap = await FB.docRef.get();
+    const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
+    if (remoteData && typeof remoteData === "object"){
+      snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
+      snap.dailyCutHours = mergeDailyCutHoursForSave(snap.dailyCutHours, remoteData.dailyCutHours);
+    }
     const writeRev = Number(snap?.syncMeta?.rev || 0);
     await FB.docRef.set(snap, { merge:true });
     if (writeRev > 0) lastAppliedCloudRevision = writeRev;
@@ -3129,6 +3135,29 @@ function getAreaSignature(areaKey, areaValue){
     })));
   }
   return stableStringify(areaValue);
+}
+
+function mergeTotalHistoryForSave(localList, remoteList){
+  const map = new Map();
+  const ingest = (list)=>{
+    (Array.isArray(list) ? list : []).forEach((entry)=>{
+      const key = normalizeDateISO(entry?.dateISO);
+      const hours = Number(entry?.hours);
+      if (!key || !Number.isFinite(hours) || hours < 0) return;
+      const prev = map.get(key);
+      if (!prev || hours >= prev.hours){
+        map.set(key, { dateISO: key, hours });
+      }
+    });
+  };
+  ingest(remoteList);
+  ingest(localList);
+  return Array.from(map.values()).sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+}
+
+function mergeDailyCutHoursForSave(localList, remoteList){
+  const merged = normalizeDailyCutHours([...(Array.isArray(remoteList) ? remoteList : []), ...(Array.isArray(localList) ? localList : [])]);
+  return Array.isArray(merged) ? merged : [];
 }
 function getTrackedStateSignature(snapshot){
   const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
