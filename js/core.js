@@ -3030,6 +3030,7 @@ const saveCloudInternal = debounce(async ()=>{
     if (remoteData && typeof remoteData === "object"){
       snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
       snap.dailyCutHours = mergeDailyCutHoursForSave(snap.dailyCutHours, remoteData.dailyCutHours);
+      snap.pumpEff = mergePumpEffForSave(snap.pumpEff, remoteData.pumpEff);
     }
     const writeRev = Number(snap?.syncMeta?.rev || 0);
     await FB.docRef.set(snap, { merge:true });
@@ -3158,6 +3159,51 @@ function mergeTotalHistoryForSave(localList, remoteList){
 function mergeDailyCutHoursForSave(localList, remoteList){
   const merged = normalizeDailyCutHours([...(Array.isArray(remoteList) ? remoteList : []), ...(Array.isArray(localList) ? localList : [])]);
   return Array.isArray(merged) ? merged : [];
+}
+
+function mergePumpEffForSave(localPump, remotePump){
+  const local = localPump && typeof localPump === "object" ? localPump : {};
+  const remote = remotePump && typeof remotePump === "object" ? remotePump : {};
+  const merged = {
+    baselineRPM: Number.isFinite(Number(local.baselineRPM)) && Number(local.baselineRPM) > 0 ? Number(local.baselineRPM) : (Number.isFinite(Number(remote.baselineRPM)) && Number(remote.baselineRPM) > 0 ? Number(remote.baselineRPM) : null),
+    baselineDateISO: normalizeDateISO(local.baselineDateISO || remote.baselineDateISO || null),
+    entries: [],
+    notes: []
+  };
+
+  const entryMap = new Map();
+  const ingestEntries = (list, preferLocal=false)=>{
+    (Array.isArray(list) ? list : []).forEach((entry)=>{
+      const key = normalizeDateISO(entry?.dateISO);
+      const rpm = Number(entry?.rpm);
+      if (!key || !Number.isFinite(rpm) || rpm <= 0) return;
+      const normalized = { dateISO: key, rpm: Math.round(rpm), timeISO: String(entry?.timeISO || "12:00") };
+      if (!entryMap.has(key) || preferLocal) entryMap.set(key, normalized);
+    });
+  };
+  ingestEntries(remote.entries, false);
+  ingestEntries(local.entries, true);
+  merged.entries = Array.from(entryMap.values()).sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+
+  const noteMap = new Map();
+  const ingestNotes = (list, preferLocal=false)=>{
+    (Array.isArray(list) ? list : []).forEach((note)=>{
+      const dateISO = normalizeDateISO(note?.dateISO);
+      const range = String(note?.range || "all");
+      const text = String(note?.text || "").trim();
+      if (!dateISO || !text) return;
+      const key = `${dateISO}__${range}`;
+      const current = noteMap.get(key);
+      const updated = String(note?.updatedISO || "");
+      const next = { dateISO, range, text, updatedISO: updated || new Date().toISOString() };
+      if (!current || preferLocal || updated >= String(current.updatedISO || "")) noteMap.set(key, next);
+    });
+  };
+  ingestNotes(remote.notes, false);
+  ingestNotes(local.notes, true);
+  merged.notes = Array.from(noteMap.values()).sort((a,b)=> String(b.dateISO).localeCompare(String(a.dateISO)));
+
+  return merged;
 }
 function getTrackedStateSignature(snapshot){
   const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
