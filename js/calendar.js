@@ -207,9 +207,9 @@ function showV2OneTimeBubble(occurrenceId, anchorEl){
     <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusText)}</span></div>
     <div class="bubble-kv"><span>Note:</span><span>${escapeHtml(ev.note || "—")}</span></div>
     <div class="bubble-kv"><span>Hours:</span><span>${ev.hours != null ? escapeHtml(String(ev.hours)) : "—"}</span></div>
-    <div class="bubble-kv"><span>Info:</span><span>Completion/actions for V2 reminders are coming in the next step.</span></div>
+    <div class="bubble-kv"><span>Info:</span><span>V2 one-time reminder actions are active.</span></div>
     <div class="bubble-actions">
-      <button type="button" data-v2-complete>${ev.status === "completed" ? "Completed" : "Mark complete"}</button>
+      <button type="button" data-v2-complete ${ev.status === "completed" ? "disabled" : ""}>${ev.status === "completed" ? "Completed" : "Mark complete"}</button>
       <button type="button" data-v2-uncomplete>Mark incomplete</button>
       <button type="button" data-v2-note>Set note</button>
       <button type="button" data-v2-hours>Set hours</button>
@@ -259,6 +259,51 @@ function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supe
   else saveCloudDebounced();
   renderCalendar();
   return true;
+}
+
+function resolveV2OneTimeOccurrenceState(rootOccurrenceId, scheduledEvent){
+  const rootId = String(rootOccurrenceId || "");
+  const events = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+  const relevant = events
+    .map((entry, index)=>({ entry, index }))
+    .filter(({ entry })=>{
+      if (!entry || typeof entry !== "object") return false;
+      const id = entry.id != null ? String(entry.id) : "";
+      if (id === rootId) return true;
+      if (entry.rootOccurrenceId != null && String(entry.rootOccurrenceId) === rootId) return true;
+      if (entry.supersedesEventId != null && String(entry.supersedesEventId) === rootId) return true;
+      return false;
+    })
+    .sort((a,b)=>{
+      const aTime = Date.parse(String(a.entry.recordedAtISO || ""));
+      const bTime = Date.parse(String(b.entry.recordedAtISO || ""));
+      const aValid = Number.isFinite(aTime);
+      const bValid = Number.isFinite(bTime);
+      if (aValid && bValid && aTime !== bTime) return aTime - bTime;
+      if (aValid && !bValid) return 1;
+      if (!aValid && bValid) return -1;
+      return a.index - b.index;
+    });
+  let status = "scheduled";
+  let note = scheduledEvent?.payload && Object.prototype.hasOwnProperty.call(scheduledEvent.payload, "note")
+    ? (scheduledEvent.payload.note == null ? "" : String(scheduledEvent.payload.note))
+    : "";
+  let hours = scheduledEvent?.payload && Object.prototype.hasOwnProperty.call(scheduledEvent.payload, "hours")
+    ? (scheduledEvent.payload.hours == null || scheduledEvent.payload.hours === "" ? null : Number(scheduledEvent.payload.hours))
+    : null;
+  relevant.forEach(({ entry })=>{
+    const type = String(entry.eventType || "");
+    if (type === "completed") status = "completed";
+    if (type === "uncompleted") status = "scheduled";
+    if (type === "note_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "note")){
+      note = entry.payload.note == null ? "" : String(entry.payload.note);
+    }
+    if (type === "hours_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "hours")){
+      const raw = entry.payload.hours;
+      hours = raw == null || raw === "" ? null : (Number.isFinite(Number(raw)) ? Number(raw) : hours);
+    }
+  });
+  return { status, note, hours };
 }
 
 window.completeV2OneTimeOccurrence = (occurrenceId)=>{
@@ -2507,21 +2552,7 @@ function renderCalendar(){
     const name = String(event.taskName || (task && task.name) || "Maintenance reminder");
     const occurrenceId = String(event.id);
     const rootOccurrenceId = occurrenceId;
-    const timeline = (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : []).filter(e => {
-      if (!e || typeof e !== "object") return false;
-      const rid = e.rootOccurrenceId != null ? String(e.rootOccurrenceId) : (String(e.id || "") === rootOccurrenceId ? rootOccurrenceId : "");
-      return rid === rootOccurrenceId || String(e.id || "") === rootOccurrenceId;
-    });
-    let status = "scheduled";
-    let note = event.payload && typeof event.payload === "object" && event.payload.note != null ? String(event.payload.note) : "";
-    let hours = event.payload && typeof event.payload === "object" && Number.isFinite(Number(event.payload.hours)) ? Number(event.payload.hours) : null;
-    timeline.forEach(e => {
-      const type = String(e.eventType || "");
-      if (type === "completed") status = "completed";
-      if (type === "uncompleted") status = "scheduled";
-      if (type === "note_set" && e.payload && typeof e.payload.note === "string") note = e.payload.note;
-      if (type === "hours_set" && e.payload && (e.payload.hours == null || Number.isFinite(Number(e.payload.hours)))) hours = e.payload.hours == null ? null : Number(e.payload.hours);
-    });
+    const { status, note, hours } = resolveV2OneTimeOccurrenceState(rootOccurrenceId, event);
     const mapKey = `${occurrenceId}:${dateISO}`;
     if (seenV2ChipKeys.has(mapKey)) return;
     seenV2ChipKeys.add(mapKey);
