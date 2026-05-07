@@ -364,6 +364,12 @@ function viewDashboard(){
           <p class="small muted" data-task-existing-empty hidden>No maintenance tasks yet. Create one below to get started.</p>
           <p class="small muted" data-task-existing-search-empty hidden>No tasks match your search. Try a different name.</p>
           <label>Occurrence note<textarea id="dashTaskExistingNote" rows="3" placeholder="Optional note for this calendar date"></textarea></label>
+          <label>Add mode<select id="dashTaskExistingAddMode">
+            <option value="one_time">One-time reminder</option>
+            <option value="repeat">Start repeat tracking</option>
+            <option value="past_log">Log past completion</option>
+          </select></label>
+          <p class="small muted">This creates V2 planning records only for now. Legacy calendar behavior remains unchanged until V2 rendering/actions are enabled.</p>
           <label>Repeat<select id="dashTaskExistingRepeat">
             <option value="no">Does not repeat</option>
             <option value="yes">Repeats</option>
