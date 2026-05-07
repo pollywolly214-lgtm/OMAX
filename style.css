@@ -2247,26 +2247,23 @@ body.modal-open .auth-bar {
 }
 .job-add-form > .job-add-column:nth-child(1){
   flex: 1 1 calc(50% - 5px);
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
   min-height: 118px;
 }
 .job-add-form > .job-add-column:nth-child(2){
   flex: 1 1 calc(50% - 5px);
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
   min-height: 118px;
 }
 .job-add-column-material{
   flex: 1 1 100%;
-  grid-template-columns: 1.4fr 0.7fr 0.7fr 0.7fr 0.7fr 0.7fr;
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
   align-items:end;
   width:100%;
   justify-self:stretch;
 }
-.job-add-column-material > label:first-child{
-  grid-column: span 2;
-}
 .job-add-column-material > #jobMaterialSettingsBtn{
-  grid-column: 1 / -1;
+  grid-column: 6;
   justify-self:end;
   min-width:180px;
 }
@@ -2310,7 +2307,7 @@ body.modal-open .auth-bar {
 }
 .job-estimate-label-group .small {
   position: absolute;
-  top: -14px;
+  top: 0;
   left: 0;
   display:block;
   margin-bottom:0;
@@ -2320,7 +2317,10 @@ body.modal-open .auth-bar {
 }
 .job-estimate-label-group {
   position: relative;
-  padding-top: 12px;
+  padding-top: 16px;
+}
+.job-category-field{
+  align-self:end;
 }
 .job-priority-hint {
   margin: 4px 0 0;
