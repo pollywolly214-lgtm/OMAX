@@ -2248,7 +2248,8 @@ body.modal-open .auth-bar {
 .job-add-form > .job-add-column:nth-child(1){
   flex: 1 1 calc(50% - 5px);
   grid-template-columns: repeat(6, minmax(120px, 1fr));
-  min-height: 118px;
+  min-height: 136px;
+  padding-bottom: 22px;
 }
 .job-add-form > .job-add-column:nth-child(1) > label{
   padding-top: 16px;
@@ -2256,7 +2257,7 @@ body.modal-open .auth-bar {
 .job-add-form > .job-add-column:nth-child(2){
   flex: 1 1 calc(50% - 5px);
   grid-template-columns: repeat(4, minmax(150px, 1fr));
-  min-height: 118px;
+  min-height: 136px;
 }
 .job-add-column-material{
   flex: 1 1 100%;
