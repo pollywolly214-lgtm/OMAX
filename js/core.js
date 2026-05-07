@@ -59,7 +59,8 @@ const DEFAULT_APP_CONFIG = {
   dailyHours: DEFAULT_DAILY_HOURS,
   predictionMode: "fixed",
   averageWindowDays: DEFAULT_PREDICTION_AVERAGE_WINDOW,
-  timeEfficiencyGoalMode: "maximum"
+  timeEfficiencyGoalMode: "maximum",
+  mondayStartLookback: false
 };
 let appConfig = { ...DEFAULT_APP_CONFIG };
 
@@ -241,6 +242,7 @@ function normalizeAppConfig(config){
     }
     normalized.averageWindowDays = normalizePredictionAverageWindow(config.averageWindowDays);
     normalized.timeEfficiencyGoalMode = config.timeEfficiencyGoalMode === "average" ? "average" : "maximum";
+    if (typeof config.mondayStartLookback === "boolean") normalized.mondayStartLookback = config.mondayStartLookback;
   }
   return normalized;
 }
@@ -294,8 +296,20 @@ function getAverageDailyCutHours(windowDaysOverride = null){
   today.setHours(0,0,0,0);
   const cfg = appConfig && typeof appConfig === "object" ? appConfig : DEFAULT_APP_CONFIG;
   const windowDays = normalizePredictionAverageWindow(windowDaysOverride != null ? windowDaysOverride : cfg.averageWindowDays);
+  const useMondayStartLookback = !!cfg.mondayStartLookback;
   const start = new Date(today);
-  start.setDate(start.getDate() - windowDays);
+  if (useMondayStartLookback){
+    const day = today.getDay();
+    const mondayOffset = (day + 6) % 7;
+    const currentMonday = new Date(today);
+    currentMonday.setDate(today.getDate() - mondayOffset);
+    const weekSpanByWindow = { 7: 1, 14: 2, 30: 4, 60: 8, 90: 13 };
+    const weeks = weekSpanByWindow[windowDays] || Math.max(1, Math.ceil(windowDays / 7));
+    start.setTime(currentMonday.getTime());
+    start.setDate(currentMonday.getDate() - ((weeks - 1) * 7));
+  } else {
+    start.setDate(start.getDate() - windowDays);
+  }
   const startKey = ymd(start);
   const endKey = ymd(today);
   const excludeWeekends = shouldExcludeWeekends();

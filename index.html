@@ -182,6 +182,11 @@
           <input type="checkbox" id="configExcludeWeekends" name="configExcludeWeekends" />
           <span>Ignore weekends in scheduling</span>
         </label>
+        <label class="config-toggle" for="configMondayStartLookback">
+          <input type="checkbox" id="configMondayStartLookback" name="configMondayStartLookback" />
+          <span>Use Monday-start lookback windows</span>
+        </label>
+        <p class="config-note">When enabled, 1 week = Monday to today and 1 month = 4 Mondays ago to today.</p>
         <p class="config-note">Weekend work counts as bonus time when ignored.</p>
         <div class="config-actions">
           <button type="submit" class="config-button config-button-primary" id="configSave">Save changes</button>
