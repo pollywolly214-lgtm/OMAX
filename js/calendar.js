@@ -184,6 +184,37 @@ function hideBubbleSoon(){
     hideBubble();
   }, 180);
 }
+
+function showV2OneTimeBubble(instanceId, anchorEl){
+  const lookup = (typeof window !== "undefined" && window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object")
+    ? window.__calendarV2OneTimeLookup
+    : {};
+  const ev = lookup && instanceId != null ? lookup[String(instanceId)] : null;
+  if (!ev){
+    toast("V2 reminder details unavailable");
+    return;
+  }
+  ensureBubble();
+  clearTimeout(bubbleTimer);
+  const b = document.getElementById("bubble");
+  if (!b) return;
+  const dateText = parseDateLocal(ev.dateISO)?.toDateString() || ev.dateISO || "—";
+  b.innerHTML = `
+    <div class="bubble-title">${escapeHtml(ev.name || "Maintenance reminder")}</div>
+    <div class="bubble-kv"><span>Date:</span><span>${escapeHtml(dateText)}</span></div>
+    <div class="bubble-kv"><span>Mode:</span><span>One-time (V2)</span></div>
+    <div class="bubble-kv"><span>Status:</span><span>Scheduled</span></div>
+    <div class="bubble-kv"><span>Note:</span><span>${escapeHtml(ev.note || "—")}</span></div>
+    <div class="bubble-kv"><span>Info:</span><span>Completion/actions for V2 reminders are coming in the next step.</span></div>
+    <div class="bubble-actions"><button type="button" data-bubble-close>Close</button></div>
+  `;
+  const closeBtn = b.querySelector("[data-bubble-close]");
+  closeBtn?.addEventListener("click", ()=> hideBubbleSoon());
+  const rect = anchorEl.getBoundingClientRect();
+  b.style.top  = `${window.scrollY + rect.bottom + 8}px`;
+  b.style.left = `${window.scrollX + rect.left}px`;
+  b.classList.add("show");
+}
 function triggerDashboardAddPicker(opts){
   const detail = (opts && typeof opts === "object") ? { ...opts } : {};
   const enqueueRequest = ()=>{
@@ -1645,6 +1676,7 @@ function wireCalendarBubbles(){
     hoverTarget = el;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
     if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el, extractTaskOptions(el));
+    if (el.dataset.calV2OneTime) showV2OneTimeBubble(el.dataset.calV2OneTime, el);
     if (el.dataset.calGarnet) showGarnetBubble(el.dataset.calGarnet, el);
   });
   months.addEventListener("mouseout", (e)=>{
@@ -1659,6 +1691,7 @@ function wireCalendarBubbles(){
     if (!el) return;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
     if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el, extractTaskOptions(el));
+    if (el.dataset.calV2OneTime) showV2OneTimeBubble(el.dataset.calV2OneTime, el);
     if (el.dataset.calGarnet) showGarnetBubble(el.dataset.calGarnet, el);
   });
 }
@@ -2367,6 +2400,50 @@ function renderCalendar(){
     }
   });
 
+  const v2TaskLookup = new Map();
+  (Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : []).forEach(entry => {
+    if (!entry || entry.id == null) return;
+    v2TaskLookup.set(String(entry.id), entry);
+  });
+  const v2InstanceLookup = new Map();
+  (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []).forEach(entry => {
+    if (!entry || entry.id == null) return;
+    if (String(entry.system || "") !== "v2" && Number(entry.schemaVersion || 0) < 2) return;
+    if (String(entry.instanceMode || "") !== "one_time") return;
+    v2InstanceLookup.set(String(entry.id), entry);
+  });
+  const oneTimeLookup = {};
+  (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : []).forEach(event => {
+    if (!event || event.id == null) return;
+    if (String(event.system || "") !== "v2" && Number(event.schemaVersion || 0) < 2) return;
+    const instanceId = event.instanceId != null ? String(event.instanceId) : "";
+    const instance = v2InstanceLookup.get(instanceId);
+    if (!instance) return;
+    const eventType = String(event.eventType || "");
+    if (eventType !== "scheduled") return;
+    const dateISO = normalizeDateKey(event.effectiveDateISO || event.dateISO || instance.startDateISO || null);
+    if (!dateISO) return;
+    const task = v2TaskLookup.get(String(instance.taskId || event.taskId || "")) || null;
+    const name = String(event.taskName || (task && task.name) || "Maintenance reminder");
+    const note = event.payload && typeof event.payload === "object" && event.payload.note != null ? String(event.payload.note) : "";
+    const mapKey = `${instanceId}:${dateISO}`;
+    if (oneTimeLookup[mapKey]) return;
+    oneTimeLookup[mapKey] = { instanceId, dateISO, name, note };
+    (dueMap[dateISO] ||= []).push({
+      type: "v2task",
+      id: `v2-one-time:${instanceId}:${dateISO}`,
+      instanceId,
+      name,
+      status: "manual",
+      mode: "one_time_v2",
+      dateISO
+    });
+  });
+  window.__calendarV2OneTimeLookup = Object.values(oneTimeLookup).reduce((acc, entry)=>{
+    acc[String(entry.instanceId)] = entry;
+    return acc;
+  }, {});
+
   const jobsMap = {};
   cuttingJobs.forEach(j => {
     const start = parseDateLocal(j.startISO);
@@ -2579,10 +2656,15 @@ function renderCalendar(){
       (dueMap[key]||[]).forEach(ev=>{
         const chip = document.createElement("div");
         let cls = "event generic cal-task";
+        if (ev.type === "v2task") cls += " v2-event";
         if (ev.status === "completed") cls += " is-complete";
         chip.className = cls;
         const baseTaskId = ev.taskId || ev.id;
-        chip.dataset.calTask = baseTaskId;
+        if (ev.type === "v2task" && ev.instanceId){
+          chip.dataset.calV2OneTime = String(ev.instanceId);
+        }else{
+          chip.dataset.calTask = baseTaskId;
+        }
         chip.dataset.calStatus = ev.status || "due";
         if (ev.mode) chip.dataset.calMode = ev.mode;
         chip.dataset.calDate = ev.dateISO || key;
