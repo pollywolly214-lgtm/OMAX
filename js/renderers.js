@@ -17916,21 +17916,43 @@ function renderJobs(){
     } else if (pendingJobFocus.type === "jobRow" && pendingJobFocus.id != null){
       requestAnimationFrame(()=>{
         const targetId = String(pendingJobFocus.id);
-        const maxAttempts = 20;
-        const retryDelayMs = 180;
+        const maxAttempts = 45;
+        const retryDelayMs = 160;
+        const scrollLockEvents = ["wheel", "touchmove"];
+        const scrollKeyCodes = new Set(["ArrowUp","ArrowDown","PageUp","PageDown","Home","End","Space"]);
+        const preventScroll = (ev)=>{ ev.preventDefault(); };
+        const preventScrollKeys = (ev)=>{ if (scrollKeyCodes.has(ev.code || "")) ev.preventDefault(); };
+        const lockUserScroll = ()=>{
+          scrollLockEvents.forEach(name=> window.addEventListener(name, preventScroll, { passive:false, capture:true }));
+          window.addEventListener("keydown", preventScrollKeys, { capture:true });
+        };
+        const unlockUserScroll = ()=>{
+          scrollLockEvents.forEach(name=> window.removeEventListener(name, preventScroll, { capture:true }));
+          window.removeEventListener("keydown", preventScrollKeys, { capture:true });
+        };
+        let unlocked = false;
+        const safeUnlock = ()=>{ if (!unlocked){ unlocked = true; unlockUserScroll(); } };
+        lockUserScroll();
+        const releaseTimer = setTimeout(()=> safeUnlock(), 6000);
+        const forceCenter = (el)=>{
+          const rect = el.getBoundingClientRect();
+          const viewportMid = window.innerHeight / 2;
+          const targetY = window.scrollY + rect.top - (viewportMid - (rect.height / 2));
+          window.scrollTo({ top: Math.max(0, targetY), behavior: "auto" });
+        };
         const focusJobRowWithRetry = (attempt = 0)=>{
           const targetRow = content.querySelector(`[data-job-row="${targetId}"], [data-history-row="${targetId}"]`);
           if (targetRow instanceof HTMLElement){
             targetRow.classList.add("job-row-link-highlight");
-            try {
-              targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
-            } catch (_err){
-              try { targetRow.scrollIntoView(); } catch(__){}
-            }
+            try { targetRow.scrollIntoView({ behavior: "auto", block: "center" }); } catch (_err){ try { targetRow.scrollIntoView(); } catch(__){} }
+            forceCenter(targetRow);
+            setTimeout(()=> forceCenter(targetRow), 120);
+            setTimeout(()=> forceCenter(targetRow), 320);
             setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2000);
+            setTimeout(()=>{ clearTimeout(releaseTimer); safeUnlock(); }, 500);
             return;
           }
-          if (attempt >= maxAttempts) return;
+          if (attempt >= maxAttempts){ clearTimeout(releaseTimer); safeUnlock(); return; }
           setTimeout(()=> focusJobRowWithRetry(attempt + 1), retryDelayMs);
         };
         focusJobRowWithRetry(0);
