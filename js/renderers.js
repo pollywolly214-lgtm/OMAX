@@ -5302,6 +5302,8 @@ function renderDashboard(){
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
   const taskExistingNoteInput = document.getElementById("dashTaskExistingNote");
   const taskExistingAddModeInput = document.getElementById("dashTaskExistingAddMode");
+  const taskExistingModeHint = document.getElementById("dashTaskExistingModeHint");
+  const taskExistingRepeatRows = Array.from(taskExistingForm?.querySelectorAll("[data-existing-repeat-row]") || []);
   const taskExistingRepeatInput = document.getElementById("dashTaskExistingRepeat");
   const taskExistingBasisInput = document.getElementById("dashTaskExistingRepeatBasis");
   const taskExistingEveryInput = document.getElementById("dashTaskExistingRepeatEvery");
@@ -5575,6 +5577,39 @@ function renderDashboard(){
     if (taskExistingEndInput) taskExistingEndInput.value = "never";
     setSelectedExistingTask(null);
     refreshExistingTaskOptions("");
+    toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
+    syncExistingAddModeUi();
+  }
+
+  function syncExistingAddModeUi(){
+    const mode = String(taskExistingAddModeInput?.value || "one_time");
+    const showRepeat = mode === "repeat";
+    taskExistingRepeatRows.forEach(row => { row.hidden = !showRepeat; });
+    if (taskExistingModeHint){
+      if (mode === "repeat"){
+        taskExistingModeHint.textContent = "Repeat tracking stores V2 repeat intent. Full repeat projection is coming later.";
+      }else if (mode === "past_log"){
+        taskExistingModeHint.textContent = "Past completion saves V2 history only and does not start future repeats.";
+      }else{
+        taskExistingModeHint.textContent = "One-time creates one scheduled V2 reminder on the selected date.";
+      }
+    }
+    if (taskExistingBasisInput){
+      const machineOpt = taskExistingBasisInput.querySelector('option[value=\"machine_hours\"]');
+      if (machineOpt){
+        machineOpt.disabled = true;
+        machineOpt.textContent = "By machine cutting hours (coming later)";
+      }
+    }
+    if (!showRepeat){
+      if (taskExistingRepeatInput) taskExistingRepeatInput.value = "no";
+      toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
+      return;
+    }
+    if (taskExistingRepeatInput) taskExistingRepeatInput.value = "yes";
+    if (taskExistingBasisInput && taskExistingBasisInput.value === "machine_hours"){
+      taskExistingBasisInput.value = "calendar_day";
+    }
     toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
   }
 
@@ -6421,6 +6456,7 @@ function renderDashboard(){
     if (taskExistingWeekdaysRow) taskExistingWeekdaysRow.hidden = !(taskExistingRepeatInput?.value === "yes" && weekly);
   });
   taskExistingEndInput?.addEventListener("change", ()=> toggleRepeatEndFields(taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput));
+  taskExistingAddModeInput?.addEventListener("change", syncExistingAddModeUi);
   syncTaskMode(taskTypeSelect?.value || "interval");
   toggleRepeatFields(taskRepeatInput, taskRepeatBasisInput, taskRepeatEveryInput, taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput);
   toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
@@ -6732,6 +6768,7 @@ function renderDashboard(){
     setContextDate(targetISO);
     if (typeof saveCloudNow === "function") saveCloudNow();
     else saveCloudDebounced();
+    if (typeof renderCalendar === "function") renderCalendar();
     toast(message);
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
