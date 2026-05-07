@@ -5046,6 +5046,21 @@ function openLogHistoryModal(){
   });
 }
 
+
+function redirectToCuttingJobPage(jobId){
+  const id = String(jobId || "").trim();
+  if (!id) return;
+  if (typeof window !== "undefined"){
+    window.pendingJobFocus = { type: "jobRow", id };
+    window.pendingJobRowHighlight = { id, untilMs: Date.now() + 5000 };
+  }
+  if (location.hash !== "#/jobs"){
+    location.hash = "#/jobs";
+  } else if (typeof renderJobs === "function"){
+    renderJobs();
+  }
+}
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   const activeDashboardModal = document.getElementById("dashboardAddModal");
@@ -5061,6 +5076,15 @@ function renderDashboard(){
   const centralModel = (typeof computeCostModel === "function") ? computeCostModel() : null;
   const maintenanceRows = Array.isArray(centralModel?.maintenanceDataTable) ? centralModel.maintenanceDataTable : [];
   const cuttingRows = Array.isArray(centralModel?.cuttingJobsDataTable) ? centralModel.cuttingJobsDataTable : [];
+  const allCutJobsForLabels = ([]).concat(Array.isArray(window.cuttingJobs) ? window.cuttingJobs : [], Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : []).filter(Boolean);
+  const cutNumberMap = (()=>{
+    const addedOrderFromId = (job)=>{ const id = String(job?.id || ""); const token = id.includes("_") ? id.slice(id.lastIndexOf("_") + 1) : ""; const parsed = Number.parseInt(token, 36); return Number.isFinite(parsed) ? parsed : Number.NaN; };
+    const fallbackOrderTime = (job)=>{ const val = Date.parse(job?.startISO || job?.createdAt || job?.completedAtISO || ""); return Number.isFinite(val) ? val : Number.MAX_SAFE_INTEGER; };
+    const ordered = allCutJobsForLabels.slice().sort((a,b)=>{ const aa=addedOrderFromId(a), bb=addedOrderFromId(b); if (Number.isFinite(aa)||Number.isFinite(bb)){ if (!Number.isFinite(aa)) return 1; if (!Number.isFinite(bb)) return -1; if (aa!==bb) return aa-bb; } const at=fallbackOrderTime(a), bt=fallbackOrderTime(b); if (at!==bt) return at-bt; return String(a?.id||"").localeCompare(String(b?.id||"")); });
+    const map = new Map();
+    ordered.forEach((job, idx)=> map.set(String(job?.id || ""), `C${String(idx + 1).padStart(3, "0")}`));
+    return map;
+  })();
   const maintenanceByTask = new Map();
   maintenanceRows.forEach(row=>{
     const taskId = String(row?.taskId || "").trim();
@@ -5074,12 +5098,16 @@ function renderDashboard(){
     const jobId = String(row?.id || "").trim();
     const name = String(row?.name || "").trim();
     if (!jobId || !name) return;
-    if (!cuttingByJob.has(jobId)) cuttingByJob.set(jobId, { id: jobId, name, row });
+    const cutNumber = String(row?.cutNumber || row?.cutLabel || row?.jobCut || cutNumberMap.get(jobId) || "").trim();
+    if (!cuttingByJob.has(jobId)) cuttingByJob.set(jobId, { id: jobId, name, cutNumber, row });
   });
   const getDashboardSearchItems = ()=>{
     const items = [];
     maintenanceByTask.forEach(entry=> items.push({ type:"maintenance", id:entry.taskId, label:entry.taskName, count:entry.rows.length }));
-    cuttingByJob.forEach(entry=> items.push({ type:"cutting", id:entry.id, label:entry.name, count:1 }));
+    cuttingByJob.forEach(entry=> {
+      const label = entry.cutNumber ? `${entry.name} · ${entry.cutNumber}` : entry.name;
+      items.push({ type:"cutting", id:entry.id, label, count:1 });
+    });
     return items.sort((a,b)=> a.label.localeCompare(b.label));
   };
   const renderDashboardSuggestions = (term="")=>{
@@ -5099,8 +5127,7 @@ function renderDashboard(){
     const id = btn.getAttribute("data-search-id") || "";
     globalSuggestions.hidden = true;
     if (type === "cutting"){
-      window.pendingJobFocus = { type: "jobRow", id };
-      window.location.hash = "#/jobs";
+      redirectToCuttingJobPage(id);
       return;
     }
     window.pendingMaintenanceFocus = { taskIds:[id], flash:true, openHistory:true };
@@ -6779,7 +6806,7 @@ function renderDashboard(){
 function openJobsEditor(jobId){
   // Navigate to the Jobs page, then open the specified job in edit mode.
   // We wait briefly so the router can render the page before we toggle edit.
-  location.hash = "#/jobs";
+  redirectToCuttingJobPage(jobId);
   setTimeout(()=>{
     // Mark this job as "editing" so viewJobs() renders the edit row
     editingJobs.add(String(jobId));
@@ -11542,10 +11569,9 @@ function renderCosts(){
         const id = String(row.getAttribute("data-efficiency-job-id") || "");
         if (!id) return;
         if (typeof window !== "undefined"){
-          window.pendingJobFocus = { type: "jobRow", id };
+          redirectToCuttingJobPage(id);
         }
         closeDataCenter();
-        location.hash = "#/jobs";
       });
     }
     Array.from((modal instanceof HTMLElement ? modal : content).querySelectorAll("[data-cutting-open-job]")).forEach(btn => {
@@ -11565,9 +11591,8 @@ function renderCosts(){
           jobHistorySearchTerm = "";
           window.jobHistorySearchTerm = "";
           window.jobHistoryCategoryFilter = String(window.JOB_ROOT_FOLDER_ID || "jobs_root");
-          window.pendingJobFocus = { type: "jobRow", id: jobId };
+          redirectToCuttingJobPage(jobId);
         }
-        location.hash = "#/jobs";
       });
     });
 
@@ -13114,7 +13139,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         const id = String(btn.getAttribute("data-efficiency-open-job") || "");
         if (!id) return;
         if (typeof window !== "undefined"){
-          window.pendingJobFocus = { type: "jobRow", id };
+          redirectToCuttingJobPage(id);
         }
         closeSnapshot();
         goToJobsHistory();
