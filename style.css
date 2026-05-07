@@ -2250,6 +2250,9 @@ body.modal-open .auth-bar {
   grid-template-columns: repeat(6, minmax(120px, 1fr));
   min-height: 118px;
 }
+.job-add-form > .job-add-column:nth-child(1) > label{
+  padding-top: 16px;
+}
 .job-add-form > .job-add-column:nth-child(2){
   flex: 1 1 calc(50% - 5px);
   grid-template-columns: repeat(4, minmax(150px, 1fr));
