@@ -2930,14 +2930,15 @@ function getConfigurationElements(){
   const excludeWeekends = document.getElementById("configExcludeWeekends");
   const predictionMode = document.getElementById("configPredictionMode");
   const averageWindow = document.getElementById("configAverageWindow");
+  const mondayStartLookback = document.getElementById("configMondayStartLookback");
   const cancel = document.getElementById("configCancel");
-  return { modal, form, hoursInput, excludeWeekends, predictionMode, averageWindow, cancel };
+  return { modal, form, hoursInput, excludeWeekends, predictionMode, averageWindow, mondayStartLookback, cancel };
 }
 
 function currentAppConfiguration(){
   if (typeof normalizeAppConfig === "function") return normalizeAppConfig(window.appConfig);
   const fallbackDaily = typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8;
-  return { excludeWeekends: false, dailyHours: fallbackDaily, predictionMode: "fixed", averageWindowDays: 60 };
+  return { excludeWeekends: false, dailyHours: fallbackDaily, predictionMode: "fixed", averageWindowDays: 60, mondayStartLookback: false };
 }
 
 function closeConfigurationModal(){
@@ -2958,7 +2959,7 @@ function closeConfigurationModal(){
 }
 
 function openConfigurationModal(trigger){
-  const { modal, hoursInput, excludeWeekends, predictionMode, averageWindow } = getConfigurationElements();
+  const { modal, hoursInput, excludeWeekends, predictionMode, averageWindow, mondayStartLookback } = getConfigurationElements();
   if (!modal) return;
   const cfg = currentAppConfiguration();
   if (hoursInput){
@@ -2975,6 +2976,9 @@ function openConfigurationModal(trigger){
     averageWindow.value = String(cfg.averageWindowDays != null ? cfg.averageWindowDays : 60);
     averageWindow.disabled = !!(predictionMode && predictionMode.value === "fixed");
   }
+  if (mondayStartLookback){
+    mondayStartLookback.checked = !!cfg.mondayStartLookback;
+  }
   modal.removeAttribute("hidden");
   modal.setAttribute("aria-hidden", "false");
   modal.classList.add("is-open");
@@ -2987,7 +2991,7 @@ function openConfigurationModal(trigger){
 }
 
 function applyConfigurationForm(){
-  const { hoursInput, excludeWeekends, predictionMode, averageWindow } = getConfigurationElements();
+  const { hoursInput, excludeWeekends, predictionMode, averageWindow, mondayStartLookback } = getConfigurationElements();
   const nextDaily = hoursInput ? Number(hoursInput.value) : null;
   const nextMode = predictionMode && predictionMode.value === "fixed" ? "fixed" : "average";
   const nextWindow = averageWindow ? Number(averageWindow.value) : 60;
@@ -2995,7 +2999,8 @@ function applyConfigurationForm(){
     dailyHours: nextDaily,
     excludeWeekends: !!(excludeWeekends && excludeWeekends.checked),
     predictionMode: nextMode,
-    averageWindowDays: nextWindow
+    averageWindowDays: nextWindow,
+    mondayStartLookback: !!(mondayStartLookback && mondayStartLookback.checked)
   };
   if (typeof setAppConfig === "function") setAppConfig(nextConfig);
   else {
