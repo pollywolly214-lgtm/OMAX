@@ -246,6 +246,56 @@ function showV2OneTimeBubble(occurrenceId, anchorEl){
   b.classList.add("show");
 }
 
+function closeV2OneTimePanel(){
+  const existing = document.getElementById("v2OneTimePanel");
+  if (existing) existing.remove();
+}
+
+function openV2OneTimePanel(occurrenceId){
+  const ev = getV2OneTimeOccurrenceView(String(occurrenceId));
+  if (!ev){ toast("V2 reminder details unavailable"); return; }
+  closeV2OneTimePanel();
+  const overlay = document.createElement("div");
+  overlay.id = "v2OneTimePanel";
+  overlay.style.position = "fixed";
+  overlay.style.inset = "0";
+  overlay.style.background = "rgba(0,0,0,.35)";
+  overlay.style.display = "grid";
+  overlay.style.placeItems = "center";
+  overlay.style.zIndex = "9999";
+  const card = document.createElement("div");
+  card.style.width = "min(92vw, 460px)";
+  card.style.background = "#fff";
+  card.style.borderRadius = "12px";
+  card.style.padding = "14px";
+  card.style.boxShadow = "0 14px 35px rgba(0,0,0,.25)";
+  const dateText = parseDateLocal(ev.dateISO)?.toDateString() || ev.dateISO || "—";
+  const statusText = ev.status === "completed" ? "Completed" : "Scheduled";
+  card.innerHTML = `
+    <div class="bubble-title">${escapeHtml(ev.name || "Maintenance reminder")}</div>
+    <div class="bubble-kv"><span>Date:</span><span>${escapeHtml(dateText)}</span></div>
+    <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusText)}</span></div>
+    <div class="bubble-kv"><span>Note:</span><span>${escapeHtml(ev.note || "—")}</span></div>
+    <div class="bubble-kv"><span>Hours:</span><span>${ev.hours != null ? escapeHtml(String(ev.hours)) : "—"}</span></div>
+    <div class="bubble-actions">
+      <button type="button" data-v2-panel-complete ${ev.status === "completed" ? "disabled" : ""}>${ev.status === "completed" ? "Completed" : "Mark complete"}</button>
+      <button type="button" data-v2-panel-uncomplete>Mark incomplete</button>
+      <button type="button" data-v2-panel-note>Set note</button>
+      <button type="button" data-v2-panel-hours>Set hours</button>
+      <button type="button" data-v2-panel-close>Close</button>
+    </div>
+  `;
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  const close = ()=> closeV2OneTimePanel();
+  overlay.addEventListener("click", (event)=>{ if (event.target === overlay) close(); });
+  card.querySelector("[data-v2-panel-close]")?.addEventListener("click", close);
+  card.querySelector("[data-v2-panel-complete]")?.addEventListener("click", ()=>{ window.completeV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-uncomplete]")?.addEventListener("click", ()=>{ window.uncompleteV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-note]")?.addEventListener("click", ()=>{ window.setV2OneTimeOccurrenceNote?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-hours]")?.addEventListener("click", ()=>{ window.setV2OneTimeOccurrenceHours?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+}
+
 function getV2OneTimeOccurrenceView(occurrenceId){
   const occId = String(occurrenceId || "");
   if (!occId) return null;
@@ -2838,7 +2888,7 @@ function renderCalendar(){
           chip.addEventListener("click", (event)=>{
             event.preventDefault();
             event.stopPropagation();
-            showV2OneTimeBubble(String(ev.occurrenceId), chip);
+            openV2OneTimePanel(String(ev.occurrenceId));
           });
           chip.addEventListener("mouseenter", ()=>{
             showV2OneTimeBubble(String(ev.occurrenceId), chip);
