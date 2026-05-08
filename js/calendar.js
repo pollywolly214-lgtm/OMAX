@@ -1795,7 +1795,7 @@ function wireCalendarBubbles(){
 
   months.addEventListener("mouseover", (e)=>{
     if (typeof isCalendarHoursEditing === "function" && isCalendarHoursEditing()) return;
-    const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
+    const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-v2-one-time], [data-cal-garnet]");
     if (!el || el === hoverTarget) return;
     hoverTarget = el;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
@@ -1805,13 +1805,13 @@ function wireCalendarBubbles(){
   });
   months.addEventListener("mouseout", (e)=>{
     if (typeof isCalendarHoursEditing === "function" && isCalendarHoursEditing()) return;
-    const from = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
-    const to   = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
+    const from = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-v2-one-time], [data-cal-garnet]");
+    const to   = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("[data-cal-job], [data-cal-task], [data-cal-v2-one-time], [data-cal-garnet]");
     if (from && !to) { hoverTarget = null; hideBubbleSoon(); }
   });
   months.addEventListener("click", (e)=>{
     if (typeof isCalendarHoursEditing === "function" && isCalendarHoursEditing()) return;
-    const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
+    const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-v2-one-time], [data-cal-garnet]");
     if (!el) return;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
     if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el, extractTaskOptions(el));
