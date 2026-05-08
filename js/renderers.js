@@ -6746,6 +6746,14 @@ function renderDashboard(){
         effectiveDateISO: targetISO,
         note: occurrenceNote
       });
+      const targetDate = parseDateLocal(targetISO);
+      if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        const diffMonths = (targetDate.getFullYear() - today.getFullYear()) * 12
+          + (targetDate.getMonth() - today.getMonth());
+        window.__calendarMonthOffset = Math.max(-12, Math.min(12, Math.round(diffMonths)));
+      }
       message = `One-time reminder created for "${task.name || "Task"}"`;
     }else if (choice === "repeat"){
       createMaintenanceV2FromTemplate(task, {
