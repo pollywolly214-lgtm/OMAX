@@ -189,8 +189,18 @@ function showV2OneTimeBubble(occurrenceId, anchorEl){
   const lookup = (typeof window !== "undefined" && window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object")
     ? window.__calendarV2OneTimeLookup
     : {};
-  const ev = lookup && occurrenceId != null ? lookup[String(occurrenceId)] : null;
+  let ev = lookup && occurrenceId != null ? lookup[String(occurrenceId)] : null;
+  if (!ev && occurrenceId != null){
+    const rebuilt = getV2OneTimeOccurrenceView(String(occurrenceId));
+    if (rebuilt){
+      ev = rebuilt;
+      window.__calendarV2OneTimeLookup = window.__calendarV2OneTimeLookup || {};
+      window.__calendarV2OneTimeLookup[String(occurrenceId)] = rebuilt;
+      if (window.DEBUG_MODE) console.info("[maintenance-v2] rebuilt one-time lookup on demand", occurrenceId, rebuilt);
+    }
+  }
   if (!ev){
+    if (window.DEBUG_MODE) console.warn("[maintenance-v2] bubble lookup miss", occurrenceId, lookup);
     toast("V2 reminder details unavailable");
     return;
   }
@@ -234,6 +244,33 @@ function showV2OneTimeBubble(occurrenceId, anchorEl){
   b.style.top  = `${window.scrollY + rect.bottom + 8}px`;
   b.style.left = `${window.scrollX + rect.left}px`;
   b.classList.add("show");
+}
+
+function getV2OneTimeOccurrenceView(occurrenceId){
+  const occId = String(occurrenceId || "");
+  if (!occId) return null;
+  const events = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+  const scheduled = events.find(entry => entry && String(entry.id || "") === occId && String(entry.eventType || "") === "scheduled");
+  if (!scheduled) return null;
+  const instanceId = scheduled.instanceId != null ? String(scheduled.instanceId) : "";
+  const instance = (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []).find(entry => entry && String(entry.id || "") === instanceId) || null;
+  if (!instance || String(instance.instanceMode || "") !== "one_time") return null;
+  const taskId = String(instance.taskId || scheduled.taskId || "");
+  const task = (Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : []).find(entry => entry && String(entry.id || "") === taskId) || null;
+  const dateISO = normalizeDateKey(scheduled.effectiveDateISO || scheduled.dateISO || instance.startDateISO || null);
+  if (!dateISO) return null;
+  const state = resolveV2OneTimeOccurrenceState(occId, scheduled);
+  return {
+    occurrenceId: occId,
+    eventType: "scheduled",
+    instanceId,
+    taskId,
+    dateISO,
+    name: String(scheduled.taskName || (task && task.name) || "Maintenance reminder"),
+    note: state.note,
+    hours: state.hours,
+    status: state.status
+  };
 }
 
 function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supersedesEventId = null){
@@ -2798,6 +2835,14 @@ function renderCalendar(){
         const baseTaskId = ev.taskId || ev.id;
         if (ev.type === "v2task" && ev.occurrenceId){
           chip.dataset.calV2OneTime = String(ev.occurrenceId);
+          chip.addEventListener("click", (event)=>{
+            event.preventDefault();
+            event.stopPropagation();
+            showV2OneTimeBubble(String(ev.occurrenceId), chip);
+          });
+          chip.addEventListener("mouseenter", ()=>{
+            showV2OneTimeBubble(String(ev.occurrenceId), chip);
+          });
         }else{
           chip.dataset.calTask = baseTaskId;
         }
