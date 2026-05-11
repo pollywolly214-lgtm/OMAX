@@ -216,7 +216,7 @@ function showV2OneTimeBubble(occurrenceId, anchorEl){
     <div class="bubble-kv"><span>Mode:</span><span>One-time (V2)</span></div>
     <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusText)}</span></div>
     <div class="bubble-kv"><span>Note:</span><span>${escapeHtml(ev.note || "—")}</span></div>
-    <div class="bubble-kv"><span>Hours:</span><span>${ev.hours != null ? escapeHtml(String(ev.hours)) : "—"}</span></div>
+    <div class="bubble-kv"><span>Logged hours:</span><span>${ev.hours != null ? escapeHtml(String(ev.hours)) : "—"}</span></div>
     <div class="bubble-kv"><span>Info:</span><span>V2 one-time reminder actions are active.</span></div>
     <div class="bubble-actions">
       <button type="button" data-v2-complete ${ev.status === "completed" ? "disabled" : ""}>${ev.status === "completed" ? "Completed" : "Mark complete"}</button>
@@ -276,14 +276,15 @@ function openV2OneTimePanel(occurrenceId){
     <div class="bubble-kv"><span>Date:</span><span>${escapeHtml(dateText)}</span></div>
     <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusText)}</span></div>
     <div class="bubble-kv"><span>Note:</span><span>${escapeHtml(ev.note || "—")}</span></div>
-    <div class="bubble-kv"><span>Hours:</span><span>${ev.hours != null ? escapeHtml(String(ev.hours)) : "—"}</span></div>
+    <div class="bubble-kv"><span>Logged hours:</span><span>${ev.hours != null ? escapeHtml(String(ev.hours)) : "—"}</span></div>
     <div class="bubble-actions">
       <button type="button" data-v2-panel-complete ${ev.status === "completed" ? "disabled" : ""}>${ev.status === "completed" ? "Completed" : "Mark complete"}</button>
       <button type="button" data-v2-panel-uncomplete>Mark incomplete</button>
       <button type="button" data-v2-panel-note>Set note</button>
-      <button type="button" data-v2-panel-hours>Set hours</button>
+      <button type="button" data-v2-panel-hours>Set logged hours</button>
       <button type="button" data-v2-panel-close>Close</button>
     </div>
+    <div class="small muted" style="margin-top:8px;">These hours are saved on this occurrence only.</div>
   `;
   overlay.appendChild(card);
   document.body.appendChild(overlay);
@@ -419,7 +420,7 @@ window.setV2OneTimeOccurrenceHours = (occurrenceId)=>{
   const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
   const base = lookup[String(occurrenceId)];
   if (!base) return;
-  const input = window.prompt("Set hours for this V2 reminder:", base.hours != null ? String(base.hours) : "");
+  const input = window.prompt("Enter hours to record for this maintenance occurrence. Leave blank to clear.", base.hours != null ? String(base.hours) : "");
   if (input === null) return;
   const trimmed = String(input).trim();
   const hours = trimmed === "" ? null : Number(trimmed);
