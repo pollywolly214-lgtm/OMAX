@@ -282,6 +282,7 @@ function openV2OneTimePanel(occurrenceId){
       <button type="button" data-v2-panel-uncomplete>Mark incomplete</button>
       <button type="button" data-v2-panel-note>Set note</button>
       <button type="button" data-v2-panel-hours>Set logged hours</button>
+      <button type="button" class="danger" data-v2-panel-remove>Remove from calendar</button>
       <button type="button" data-v2-panel-close>Close</button>
     </div>
     <div class="small muted" style="margin-top:8px;">These hours are saved on this occurrence only.</div>
@@ -295,6 +296,12 @@ function openV2OneTimePanel(occurrenceId){
   card.querySelector("[data-v2-panel-uncomplete]")?.addEventListener("click", ()=>{ window.uncompleteV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
   card.querySelector("[data-v2-panel-note]")?.addEventListener("click", ()=>{ window.setV2OneTimeOccurrenceNote?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
   card.querySelector("[data-v2-panel-hours]")?.addEventListener("click", ()=>{ window.setV2OneTimeOccurrenceHours?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-remove]")?.addEventListener("click", ()=>{
+    const ok = window.confirm ? window.confirm("Remove this V2 one-time reminder from the calendar?") : true;
+    if (!ok) return;
+    window.removeV2OneTimeOccurrence?.(String(occurrenceId));
+    close();
+  });
 }
 
 function getV2OneTimeOccurrenceView(occurrenceId){
@@ -383,6 +390,7 @@ function resolveV2OneTimeOccurrenceState(rootOccurrenceId, scheduledEvent){
     const type = String(entry.eventType || "");
     if (type === "completed") status = "completed";
     if (type === "uncompleted") status = "scheduled";
+    if (type === "removed") status = "removed";
     if (type === "note_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "note")){
       note = entry.payload.note == null ? "" : String(entry.payload.note);
     }
@@ -426,6 +434,15 @@ window.setV2OneTimeOccurrenceHours = (occurrenceId)=>{
   const hours = trimmed === "" ? null : Number(trimmed);
   if (trimmed !== "" && (!Number.isFinite(hours) || hours < 0)){ toast("Enter a valid non-negative number."); return; }
   if (appendV2OccurrenceEvent(occurrenceId, "hours_set", { hours }, String(occurrenceId))) toast("Hours saved");
+};
+window.removeV2OneTimeOccurrence = (occurrenceId)=>{
+  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
+  const base = lookup[String(occurrenceId)] || getV2OneTimeOccurrenceView(String(occurrenceId));
+  if (!base) return;
+  if (base.status === "removed"){ toast("Already removed"); return; }
+  if (appendV2OccurrenceEvent(occurrenceId, "removed", { source: "calendar_panel" }, String(occurrenceId))){
+    toast("Removed from calendar");
+  }
 };
 function triggerDashboardAddPicker(opts){
   const detail = (opts && typeof opts === "object") ? { ...opts } : {};
@@ -2655,6 +2672,7 @@ function renderCalendar(){
       hours,
       status
     };
+    if (status === "removed") return;
     (dueMap[dateISO] ||= []).push({
       type: "v2task",
       id: `v2-one-time:${occurrenceId}`,
