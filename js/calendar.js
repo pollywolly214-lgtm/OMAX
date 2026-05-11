@@ -425,6 +425,7 @@ function openV2RepeatPanel(view){
     <button type="button" data-rpt-note>Set note</button>
     <button type="button" data-rpt-hours>Set logged hours</button>
     <button type="button" class="danger" data-rpt-remove>Remove from calendar</button>
+    <button type="button" class="danger" data-rpt-stop>Stop repeat tracking</button>
     <button type="button" data-rpt-close>Close</button>
   </div>`;
   overlay.appendChild(card); document.body.appendChild(overlay);
@@ -435,7 +436,24 @@ function openV2RepeatPanel(view){
   card.querySelector("[data-rpt-note]")?.addEventListener("click", ()=>{ const v=window.prompt("Set note for this repeat occurrence:", view.note||""); if(v!==null) appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "note_set", { note:v }); reopen(); });
   card.querySelector("[data-rpt-hours]")?.addEventListener("click", ()=>{ const v=window.prompt("Enter hours to record for this maintenance occurrence. Leave blank to clear.", view.hours!=null?String(view.hours):""); if(v!==null){ const t=String(v).trim(); const h=t===""?null:Number(t); if(t!=="" && (!Number.isFinite(h)||h<0)){ toast("Enter a valid non-negative number."); return; } appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "hours_set", { hours:h }); reopen(); } });
   card.querySelector("[data-rpt-remove]")?.addEventListener("click", ()=>{ const ok=window.confirm?window.confirm("Remove this repeat occurrence from calendar?"):true; if(!ok) return; appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "removed", { source:"repeat_panel" }); closeV2OneTimePanel(); });
+  card.querySelector("[data-rpt-stop]")?.addEventListener("click", ()=>{
+    const ok = window.confirm ? window.confirm("Stop repeat tracking for this chain?") : true;
+    if (!ok) return;
+    if (typeof window.stopV2RepeatTracking === "function") window.stopV2RepeatTracking(String(view.instanceId), String(view.taskId), String(view.dateISO));
+    closeV2OneTimePanel();
+  });
 }
+
+window.stopV2RepeatTracking = (instanceId, taskId, dateISO)=>{
+  const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
+  const inst = instances.find(entry => entry && String(entry.id || "") === String(instanceId));
+  if (!inst) return;
+  if (String(inst.status || "") === "stopped"){ toast("Repeat tracking already stopped"); return; }
+  inst.status = "stopped";
+  inst.stoppedAtISO = new Date().toISOString();
+  appendV2RepeatEvent(instanceId, taskId, dateISO, "stopped", { source: "repeat_panel" });
+  toast("Repeat tracking stopped");
+};
 
 function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supersedesEventId = null){
   const list = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : (window.maintenanceOccurrencesV2 = []);
@@ -2793,7 +2811,10 @@ function renderCalendar(){
   window.__calendarV2OneTimeLookup = oneTimeLookup;
 
   const repeatInstances = (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [])
-    .filter(entry => entry && String(entry.instanceMode || "") === "repeat" && (String(entry.system || "") === "v2" || Number(entry.schemaVersion || 0) >= 2));
+    .filter(entry => entry
+      && String(entry.instanceMode || "") === "repeat"
+      && String(entry.status || "active") !== "stopped"
+      && (String(entry.system || "") === "v2" || Number(entry.schemaVersion || 0) >= 2));
   repeatInstances.forEach(instance => {
     const dates = projectV2RepeatDates(instance, 2);
     dates.forEach(dateISO => {
