@@ -5597,8 +5597,9 @@ function renderDashboard(){
     if (taskExistingBasisInput){
       const machineOpt = taskExistingBasisInput.querySelector('option[value=\"machine_hours\"]');
       if (machineOpt){
-        machineOpt.disabled = true;
-        machineOpt.textContent = "By machine cutting hours (coming later)";
+        const allowMachineHours = showRepeat && selectedExistingTaskId && findMaintenanceTaskById(selectedExistingTaskId)?.task?.mode === "interval";
+        machineOpt.disabled = !allowMachineHours;
+        machineOpt.textContent = allowMachineHours ? "By machine cutting hours (predicted)" : "By machine cutting hours (interval tasks only)";
       }
     }
     if (!showRepeat){
@@ -5607,7 +5608,7 @@ function renderDashboard(){
       return;
     }
     if (taskExistingRepeatInput) taskExistingRepeatInput.value = "yes";
-    if (taskExistingBasisInput && taskExistingBasisInput.value === "machine_hours"){
+    if (taskExistingBasisInput && taskExistingBasisInput.value === "machine_hours" && taskExistingBasisInput.querySelector('option[value=\"machine_hours\"]')?.disabled){
       taskExistingBasisInput.value = "calendar_day";
     }
     toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
@@ -6156,6 +6157,16 @@ function renderDashboard(){
       createdAtISO: nowISO,
       updatedAtISO: nowISO
     };
+    if (mode === "repeat" && instance.repeatRule && String(instance.repeatRule.basis || "") === "machine_hours"){
+      const currentHours = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
+      if (Number.isFinite(currentHours)){
+        instance.machineHourAnchorTotal = currentHours;
+        instance.machineHourAnchorDateISO = normalizeDateKey(effectiveDateISO || ymd(new Date()));
+      }
+      if (!Number.isFinite(Number(instance.repeatRule.intervalHours)) || Number(instance.repeatRule.intervalHours) <= 0){
+        instance.repeatRule.intervalHours = Math.max(1, Number(instance.repeatRule.every) || 1);
+      }
+    }
     collections.instances.unshift(instance);
     const occurrence = {
       id: genId("maintenance_occurrence_v2"),

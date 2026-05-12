@@ -339,7 +339,24 @@ function projectV2RepeatDates(instance, maxCount = 2){
   const rule = instance && instance.repeatRule && typeof instance.repeatRule === "object" ? instance.repeatRule : null;
   if (!rule || !rule.enabled) return [];
   const basis = String(rule.basis || "").toLowerCase();
-  if (!["calendar_day", "calendar_week", "calendar_month"].includes(basis)) return [];
+  if (!["calendar_day", "calendar_week", "calendar_month", "machine_hours"].includes(basis)) return [];
+  if (basis === "machine_hours"){
+    const intervalHours = Math.max(1, Number(rule.intervalHours || rule.every) || 1);
+    const currentTotal = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
+    const anchorTotal = Number(instance.machineHourAnchorTotal);
+    const anchorDate = normalizeDateKey(instance.machineHourAnchorDateISO || instance.startDateISO || rule.startISO || ymd(new Date()));
+    const avgPerDay = (typeof configuredDailyHours === "function" ? Number(configuredDailyHours()) : 8) || 8;
+    const safeAvg = Number.isFinite(avgPerDay) && avgPerDay > 0 ? avgPerDay : 8;
+    const remain = (Number.isFinite(currentTotal) && Number.isFinite(anchorTotal))
+      ? (intervalHours - Math.max(0, currentTotal - anchorTotal))
+      : intervalHours;
+    const daysOut = remain <= 0 ? 0 : Math.ceil(remain / safeAvg);
+    const d = parseDateLocal(anchorDate) || new Date();
+    d.setHours(0,0,0,0);
+    d.setDate(d.getDate() + daysOut);
+    const dueISO = ymd(d);
+    return dueISO ? [dueISO] : [];
+  }
   const every = Math.max(1, Number(rule.every) || 1);
   const startISO = normalizeDateKey(instance.startDateISO || rule.startISO || null);
   const start = startISO ? parseDateLocal(startISO) : null;
@@ -398,6 +415,16 @@ function appendV2RepeatEvent(instanceId, taskId, dateISO, eventType, payload = {
     rootOccurrenceId: key,
     payload: { ...(payload || {}) }
   });
+  if (eventType === "completed"){
+    const inst = (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []).find(entry => entry && String(entry.id || "") === String(instanceId));
+    if (inst && inst.repeatRule && String(inst.repeatRule.basis || "") === "machine_hours"){
+      const current = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
+      if (Number.isFinite(current)){
+        inst.machineHourAnchorTotal = current;
+        inst.machineHourAnchorDateISO = normalizeDateKey(ymd(new Date()));
+      }
+    }
+  }
   if (typeof saveCloudNow === "function") saveCloudNow();
   else saveCloudDebounced();
   renderCalendar();
@@ -419,6 +446,8 @@ function openV2RepeatPanel(view){
   <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusText)}</span></div>
   <div class="bubble-kv"><span>Note:</span><span>${escapeHtml(view.note || "—")}</span></div>
   <div class="bubble-kv"><span>Logged hours:</span><span>${view.hours != null ? escapeHtml(String(view.hours)) : "—"}</span></div>
+  <div class="bubble-kv"><span>Repeat type:</span><span>${escapeHtml(view.repeatType || "Calendar repeat")}</span></div>
+  ${view.repeatType === "Machine-hour predicted repeat" ? `<div class="small muted">This due date is predicted from machine-hour usage and may move as hours change.</div>` : ""}
   <div class="bubble-actions">
     <button type="button" data-rpt-complete ${view.status==="completed"?"disabled":""}>${view.status==="completed"?"Completed":"Mark complete"}</button>
     <button type="button" data-rpt-uncomplete>Mark incomplete</button>
@@ -2830,7 +2859,16 @@ function renderCalendar(){
         name: String((task && task.name) || "Maintenance repeat"),
         status: state.status === "completed" ? "completed" : "manual",
         mode: "repeat_v2",
-        repeatView: { instanceId: String(instance.id), taskId: String(instance.taskId || ""), dateISO, name: String((task && task.name) || "Maintenance repeat"), note: state.note, hours: state.hours, status: state.status }
+        repeatView: {
+          instanceId: String(instance.id),
+          taskId: String(instance.taskId || ""),
+          dateISO,
+          name: String((task && task.name) || "Maintenance repeat"),
+          note: state.note,
+          hours: state.hours,
+          status: state.status,
+          repeatType: String(instance.repeatRule?.basis || "") === "machine_hours" ? "Machine-hour predicted repeat" : "Calendar repeat"
+        }
       });
     });
   });
