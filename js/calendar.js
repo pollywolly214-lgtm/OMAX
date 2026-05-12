@@ -344,14 +344,13 @@ function projectV2RepeatDates(instance, maxCount = 2){
     const intervalHours = Math.max(1, Number(rule.intervalHours || rule.every) || 1);
     const currentTotal = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
     const anchorTotal = Number(instance.machineHourAnchorTotal);
-    const anchorDate = normalizeDateKey(instance.machineHourAnchorDateISO || instance.startDateISO || rule.startISO || ymd(new Date()));
     const avgPerDay = (typeof configuredDailyHours === "function" ? Number(configuredDailyHours()) : 8) || 8;
     const safeAvg = Number.isFinite(avgPerDay) && avgPerDay > 0 ? avgPerDay : 8;
     const remain = (Number.isFinite(currentTotal) && Number.isFinite(anchorTotal))
       ? (intervalHours - Math.max(0, currentTotal - anchorTotal))
       : intervalHours;
     const daysOut = remain <= 0 ? 0 : Math.ceil(remain / safeAvg);
-    const d = parseDateLocal(anchorDate) || new Date();
+    const d = new Date();
     d.setHours(0,0,0,0);
     d.setDate(d.getDate() + daysOut);
     const dueISO = ymd(d);
