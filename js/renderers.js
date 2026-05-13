@@ -5466,7 +5466,7 @@ function renderDashboard(){
     }
     if (taskExistingRepeatInput){
       taskExistingRepeatInput.value = task?.mode === "interval" ? "yes" : "no";
-      taskExistingRepeatInput.disabled = true;
+      taskExistingRepeatInput.disabled = false;
     }
     if (taskExistingEveryInput){
       taskExistingEveryInput.value = String(Math.max(1, Number(recurrence?.every) || 1));
@@ -5481,6 +5481,7 @@ function renderDashboard(){
       taskExistingEndCountInput.value = String(Math.max(1, Number(recurrence?.endCount) || 1));
     }
     toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
+    syncExistingAddModeUi();
   }
 
   function setTaskOptionPage(target){
@@ -5584,6 +5585,9 @@ function renderDashboard(){
   function syncExistingAddModeUi(){
     const mode = String(taskExistingAddModeInput?.value || "one_time");
     const showRepeat = mode === "repeat";
+    const selectedMeta = selectedExistingTaskId ? findMaintenanceTaskById(selectedExistingTaskId) : null;
+    const selectedMode = selectedMeta?.task?.mode === "interval" ? "interval" : "asreq";
+    const allowMachineHours = showRepeat && selectedMode === "interval";
     taskExistingRepeatRows.forEach(row => { row.hidden = !showRepeat; });
     if (taskExistingModeHint){
       if (mode === "repeat"){
@@ -5597,20 +5601,22 @@ function renderDashboard(){
     if (taskExistingBasisInput){
       const machineOpt = taskExistingBasisInput.querySelector('option[value=\"machine_hours\"]');
       if (machineOpt){
-        const allowMachineHours = showRepeat && selectedExistingTaskId && findMaintenanceTaskById(selectedExistingTaskId)?.task?.mode === "interval";
         machineOpt.disabled = !allowMachineHours;
         machineOpt.textContent = allowMachineHours ? "By machine cutting hours (predicted)" : "By machine cutting hours (interval tasks only)";
       }
     }
     if (!showRepeat){
       if (taskExistingRepeatInput) taskExistingRepeatInput.value = "no";
+      if (taskExistingRepeatInput) taskExistingRepeatInput.disabled = true;
       toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
       return;
     }
     if (taskExistingRepeatInput) taskExistingRepeatInput.value = "yes";
+    if (taskExistingRepeatInput) taskExistingRepeatInput.disabled = false;
     if (taskExistingBasisInput && taskExistingBasisInput.value === "machine_hours" && taskExistingBasisInput.querySelector('option[value=\"machine_hours\"]')?.disabled){
       taskExistingBasisInput.value = "calendar_day";
     }
+    if (taskExistingBasisInput) taskExistingBasisInput.disabled = false;
     toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
   }
 
@@ -6767,12 +6773,18 @@ function renderDashboard(){
       }
       message = `One-time reminder created for "${task.name || "Task"}"`;
     }else if (choice === "repeat"){
+      const normalizedRepeatConfig = (repeatConfig && typeof repeatConfig === "object") ? { ...repeatConfig } : {};
+      normalizedRepeatConfig.enabled = true;
+      if (!normalizedRepeatConfig.basis) normalizedRepeatConfig.basis = "calendar_day";
+      if (normalizedRepeatConfig.basis === "machine_hours"){
+        normalizedRepeatConfig.intervalHours = Math.max(1, Number(normalizedRepeatConfig.intervalHours || normalizedRepeatConfig.every || 1));
+      }
       createMaintenanceV2FromTemplate(task, {
         mode: "repeat",
         eventType: "repeat_started",
         effectiveDateISO: targetISO,
         note: occurrenceNote,
-        repeatRule: repeatConfig.enabled ? repeatConfig : null
+        repeatRule: normalizedRepeatConfig
       });
       message = `Repeat tracking started for "${task.name || "Task"}"`;
     }else{
