@@ -2385,6 +2385,21 @@ function renderCalendar(){
   const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
   completedJobs.forEach(job => {
     if (!job) return;
+    const start = parseDateLocal(job.startISO);
+    const end = parseDateLocal(job.dueISO || job.completedAtISO);
+    if (start && end){
+      start.setHours(0,0,0,0);
+      end.setHours(0,0,0,0);
+      const from = start.getTime() <= end.getTime() ? start : end;
+      const to = start.getTime() <= end.getTime() ? end : start;
+      const cur = new Date(from.getTime());
+      while (cur <= to){
+        const key = ymd(cur);
+        (jobsMap[key] ||= []).push({ type:"job", id:String(job.id), name:job.name, status:"completed", cat:job.cat });
+        cur.setDate(cur.getDate()+1);
+      }
+      return;
+    }
     const completionKey = job.completedAtISO ? ymd(job.completedAtISO) : (job.dueISO ? ymd(job.dueISO) : null);
     if (!completionKey) return;
     (jobsMap[completionKey] ||= []).push({ type:"job", id:String(job.id), name:job.name, status:"completed", cat:job.cat });

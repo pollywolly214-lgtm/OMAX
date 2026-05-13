@@ -6570,6 +6570,7 @@ function renderDashboard(){
     const list = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = []);
     list.unshift(task);
     setContextDate(targetISO);
+    if (typeof renderCalendar === "function") renderCalendar();
     if (typeof saveCloudNow === "function") saveCloudNow();
     else saveCloudDebounced();
     toast("One-time task added to the calendar");
@@ -6638,6 +6639,7 @@ function renderDashboard(){
       message = "As-required task linked from Maintenance Settings";
     }
     setContextDate(targetISO);
+    if (typeof renderCalendar === "function") renderCalendar();
     if (typeof saveCloudNow === "function") saveCloudNow();
     else saveCloudDebounced();
     toast(message);
