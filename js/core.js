@@ -28,7 +28,11 @@ const WORKSPACE_ID = (() => {
 function isVercelPreviewRuntime(){
   if (typeof window === "undefined" || !window.location) return false;
   const params = new URLSearchParams(window.location.search || "");
-  return params.get("previewReadonly") === "1";
+  const readonlyFlag = params.get("previewReadonly") === "1";
+  if (!readonlyFlag) return false;
+  const host = String(window.location.hostname || "").toLowerCase();
+  const isVercelHost = host.endsWith(".vercel.app") || host === "vercel.app";
+  return isVercelHost;
 }
 
 if (typeof window !== "undefined") {
@@ -3263,7 +3267,10 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
-  if (isVercelPreviewRuntime()) return;
+  if (isVercelPreviewRuntime()){
+    console.warn("Cloud save skipped: previewReadonly=1 on a Vercel preview host.");
+    return;
+  }
   hasPendingLocalChanges = true;
   lastLocalMutationAt = Date.now();
   try {
@@ -3279,7 +3286,10 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(){
-  if (isVercelPreviewRuntime()) return;
+  if (isVercelPreviewRuntime()){
+    console.warn("Cloud save skipped: previewReadonly=1 on a Vercel preview host.");
+    return;
+  }
   hasPendingLocalChanges = true;
   lastLocalMutationAt = Date.now();
   try {
