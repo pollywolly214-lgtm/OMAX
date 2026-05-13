@@ -6533,6 +6533,7 @@ function renderDashboard(){
     if (typeof refreshDashboardWidgets === "function"){
       refreshDashboardWidgets({ full: true });
     }
+    if (typeof renderCalendar === "function") renderCalendar();
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -6576,6 +6577,7 @@ function renderDashboard(){
     if (typeof refreshDashboardWidgets === "function"){
       refreshDashboardWidgets({ full: true });
     }
+    if (typeof renderCalendar === "function") renderCalendar();
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -6643,6 +6645,7 @@ function renderDashboard(){
     if (typeof refreshDashboardWidgets === "function"){
       refreshDashboardWidgets({ full: true });
     }
+    if (typeof renderCalendar === "function") renderCalendar();
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
