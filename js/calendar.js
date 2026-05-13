@@ -1360,7 +1360,7 @@ function showJobBubble(jobId, anchor){
   };
   try{
     const active = cuttingJobs.find(x => String(x.id) === String(jobId));
-    const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
+    const completedJobs = normalizeJobList(window.completedCuttingJobs);
     const completed = completedJobs.find(x => String(x?.id) === String(jobId));
     const prioritySchedule = typeof computePrioritySchedule === "function"
       ? computePrioritySchedule(cuttingJobs)
@@ -2378,7 +2378,16 @@ function renderCalendar(){
   });
 
   const jobsMap = {};
-  const activeJobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : ((typeof cuttingJobs !== "undefined" && Array.isArray(cuttingJobs)) ? cuttingJobs : []);
+  const normalizeJobList = (source)=>{
+    if (Array.isArray(source)) return source.filter(Boolean);
+    if (source && typeof source === "object") return Object.values(source).filter(Boolean);
+    return [];
+  };
+  const activeJobs = normalizeJobList(
+    Array.isArray(window.cuttingJobs) || (window.cuttingJobs && typeof window.cuttingJobs === "object")
+      ? window.cuttingJobs
+      : ((typeof cuttingJobs !== "undefined") ? cuttingJobs : [])
+  );
   activeJobs.forEach(j => {
     const start = parseDateLocal(j.startISO || j.startDate || j.start);
     const end = parseDateLocal(j.dueISO || j.dueDate || j.endISO || j.completedAtISO);
@@ -2395,7 +2404,7 @@ function renderCalendar(){
     }
   });
 
-  const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
+  const completedJobs = normalizeJobList(window.completedCuttingJobs);
   completedJobs.forEach(job => {
     if (!job) return;
     const start = parseDateLocal(job.startISO || job.startDate || job.start);
