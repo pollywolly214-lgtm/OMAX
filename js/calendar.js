@@ -3,22 +3,6 @@ let bubbleTimer = null;
 const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
 let calendarHoursEditing = false;
 let calendarHoursPending = new Map();
-function rerenderCalendarKeepScroll(){
-  if (typeof renderCalendar !== "function") return;
-  const scrollX = typeof window !== "undefined" ? window.scrollX : 0;
-  const scrollY = typeof window !== "undefined" ? window.scrollY : 0;
-  renderCalendar();
-  if (typeof window !== "undefined" && typeof window.scrollTo === "function"){
-    window.scrollTo(scrollX, scrollY);
-  }
-}
-
-function normalizeJobList(source){
-  if (Array.isArray(source)) return source.filter(Boolean);
-  if (source && typeof source === "object") return Object.values(source).filter(Boolean);
-  return [];
-}
-
 if (typeof window !== "undefined"){
   if (typeof window.__calendarShowAllMonths !== "boolean"){
     window.__calendarShowAllMonths = true;
@@ -95,7 +79,7 @@ function startCalendarHoursEditing(){
   if (calendarHoursEditing) return false;
   calendarHoursEditing = true;
   calendarHoursPending = new Map();
-  rerenderCalendarKeepScroll();
+  renderCalendar();
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
   return true;
 }
@@ -104,7 +88,7 @@ function cancelCalendarHoursEditing(){
   if (!calendarHoursEditing) return false;
   calendarHoursEditing = false;
   calendarHoursPending = new Map();
-  rerenderCalendarKeepScroll();
+  renderCalendar();
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
   return true;
 }
@@ -126,7 +110,7 @@ function commitCalendarHoursEditing(){
   calendarHoursPending = new Map();
   calendarHoursEditing = false;
   if (changed && typeof saveCloudDebounced === "function") saveCloudDebounced();
-  rerenderCalendarKeepScroll();
+  renderCalendar();
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
   if (changed){
     if (typeof refreshDerivedDailyHours === "function") refreshDerivedDailyHours();
@@ -165,7 +149,7 @@ function promptCalendarDayHours(dateISO){
   }
   const updated = setCalendarPendingHours(key, next);
   if (updated){
-    rerenderCalendarKeepScroll();
+    renderCalendar();
   }
   return updated;
 }
@@ -1115,7 +1099,7 @@ function completeTask(taskId){
     if (typeof saveCloudNow === "function") saveCloudNow();
     else saveCloudDebounced();
     toast("Task completed");
-    rerenderCalendarKeepScroll();
+    route();
   }
 }
 
@@ -1237,7 +1221,7 @@ function showTaskBubble(taskId, anchor, options = {}){
       else saveCloudDebounced();
       toast((Number.isFinite(parsed) && parsed > 0) ? "Occurrence time saved" : "Occurrence time removed");
       hideBubble();
-      rerenderCalendarKeepScroll();
+      route();
     }
   });
 
@@ -1252,7 +1236,7 @@ function showTaskBubble(taskId, anchor, options = {}){
       else saveCloudDebounced();
       toast((next || "").trim() ? "Occurrence note saved" : "Occurrence note removed");
       hideBubble();
-      rerenderCalendarKeepScroll();
+      route();
     }
   });
 
@@ -1263,7 +1247,7 @@ function showTaskBubble(taskId, anchor, options = {}){
       else saveCloudDebounced();
       toast("Task marked complete");
       hideBubble();
-      rerenderCalendarKeepScroll();
+      route();
     }
   });
 
@@ -1274,7 +1258,7 @@ function showTaskBubble(taskId, anchor, options = {}){
       else saveCloudDebounced();
       toast("Completion removed");
       hideBubble();
-      rerenderCalendarKeepScroll();
+      route();
     }
   });
 
@@ -1297,7 +1281,7 @@ function showTaskBubble(taskId, anchor, options = {}){
           : "Removed from calendar";
       toast(toastMessage);
       hideBubble();
-      rerenderCalendarKeepScroll();
+      route();
     }
   };
   b.querySelector("[data-bbl-remove-single]")?.addEventListener("click", ()=> runRemoveScope("single"));
@@ -1324,7 +1308,7 @@ function showTaskBubble(taskId, anchor, options = {}){
       else saveCloudDebounced();
       toast("Task removed");
       hideBubble();
-      rerenderCalendarKeepScroll();
+      route();
     }
   });
 
@@ -1366,7 +1350,7 @@ function showJobBubble(jobId, anchor){
   };
   try{
     const active = cuttingJobs.find(x => String(x.id) === String(jobId));
-    const completedJobs = normalizeJobList(window.completedCuttingJobs);
+    const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
     const completed = completedJobs.find(x => String(x?.id) === String(jobId));
     const prioritySchedule = typeof computePrioritySchedule === "function"
       ? computePrioritySchedule(cuttingJobs)
@@ -1550,7 +1534,7 @@ function showJobBubble(jobId, anchor){
       saveCloudDebounced();
       toast("Job marked complete");
       hideBubble();
-      rerenderCalendarKeepScroll();
+      renderCalendar();
       if (typeof window.location === "object" && window.location.hash === "#/jobs" && typeof renderJobs === "function"){
         renderJobs();
       }
@@ -1579,7 +1563,7 @@ function toggleGarnetComplete(id){
   entry.completed = !entry.completed;
   saveCloudDebounced();
   toast(entry.completed ? "Garnet cleaning completed" : "Marked as scheduled");
-  rerenderCalendarKeepScroll();
+  renderCalendar();
   if (typeof window.__dashRefreshGarnetList === "function") window.__dashRefreshGarnetList();
 }
 
@@ -1595,7 +1579,7 @@ function removeGarnetEntry(id){
   entries.splice(idx,1);
   saveCloudDebounced();
   toast("Garnet cleaning removed");
-  rerenderCalendarKeepScroll();
+  renderCalendar();
   if (typeof window.__dashRefreshGarnetList === "function") window.__dashRefreshGarnetList();
 }
 
@@ -2384,54 +2368,22 @@ function renderCalendar(){
   });
 
   const jobsMap = {};
-  const activeJobs = normalizeJobList(
-    Array.isArray(window.cuttingJobs) || (window.cuttingJobs && typeof window.cuttingJobs === "object")
-      ? window.cuttingJobs
-      : ((typeof cuttingJobs !== "undefined") ? cuttingJobs : [])
-  );
-  const resolveJobRange = (job)=>{
-    if (!job || typeof job !== "object") return { start:null, end:null };
-    const startCandidate = job.startISO ?? job.startDate ?? job.start ?? job.startAtISO ?? job.start_at ?? job.createdAt ?? null;
-    const endCandidate = job.dueISO ?? job.dueDate ?? job.endISO ?? job.endDate ?? job.end ?? job.completedAtISO ?? job.completedAt ?? null;
-    const start = parseDateLocal(startCandidate);
-    const end = parseDateLocal(endCandidate);
-    if (start && end) return { start, end };
-    if (start && !end) return { start, end: new Date(start.getTime()) };
-    if (!start && end) return { start: new Date(end.getTime()), end };
-    return { start:null, end:null };
-  };
-  activeJobs.forEach(j => {
-    const { start, end } = resolveJobRange(j);
+  cuttingJobs.forEach(j => {
+    const start = parseDateLocal(j.startISO);
+    const end   = parseDateLocal(j.dueISO);
     if (!start || !end) return;
-    start.setHours(0,0,0,0);
-    end.setHours(0,0,0,0);
-    const from = start.getTime() <= end.getTime() ? start : end;
-    const to = start.getTime() <= end.getTime() ? end : start;
-    const cur = new Date(from.getTime());
-    while (cur <= to){
+    start.setHours(0,0,0,0); end.setHours(0,0,0,0);
+    const cur = new Date(start.getTime());
+    while (cur <= end){
       const key = ymd(cur);
       (jobsMap[key] ||= []).push({ type:"job", id:String(j.id), name:j.name, status:"active", cat:j.cat });
       cur.setDate(cur.getDate()+1);
     }
   });
 
-  const completedJobs = normalizeJobList(window.completedCuttingJobs);
+  const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
   completedJobs.forEach(job => {
     if (!job) return;
-    const { start, end } = resolveJobRange(job);
-    if (start && end){
-      start.setHours(0,0,0,0);
-      end.setHours(0,0,0,0);
-      const from = start.getTime() <= end.getTime() ? start : end;
-      const to = start.getTime() <= end.getTime() ? end : start;
-      const cur = new Date(from.getTime());
-      while (cur <= to){
-        const key = ymd(cur);
-        (jobsMap[key] ||= []).push({ type:"job", id:String(job.id), name:job.name, status:"completed", cat:job.cat });
-        cur.setDate(cur.getDate()+1);
-      }
-      return;
-    }
     const completionKey = job.completedAtISO ? ymd(job.completedAtISO) : (job.dueISO ? ymd(job.dueISO) : null);
     if (!completionKey) return;
     (jobsMap[completionKey] ||= []).push({ type:"job", id:String(job.id), name:job.name, status:"completed", cat:job.cat });
@@ -2723,19 +2675,19 @@ function shiftCalendarMonthOffset(delta){
   const next = Math.min(12, Math.max(-12, Math.round(current + delta)));
   if (next === current) return false;
   window.__calendarMonthOffset = next;
-  rerenderCalendarKeepScroll();
+  renderCalendar();
   return true;
 }
 
 function resetCalendarMonthOffset(){
   if ((Number(window.__calendarMonthOffset) || 0) === 0) return false;
   window.__calendarMonthOffset = 0;
-  rerenderCalendarKeepScroll();
+  renderCalendar();
   return true;
 }
 
 function toggleCalendarShowAllMonths(){
   const next = !Boolean(window.__calendarShowAllMonths);
   window.__calendarShowAllMonths = next;
-  rerenderCalendarKeepScroll();
+  renderCalendar();
 }
