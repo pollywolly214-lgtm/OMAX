@@ -13,6 +13,12 @@ function rerenderCalendarKeepScroll(){
   }
 }
 
+function normalizeJobList(source){
+  if (Array.isArray(source)) return source.filter(Boolean);
+  if (source && typeof source === "object") return Object.values(source).filter(Boolean);
+  return [];
+}
+
 if (typeof window !== "undefined"){
   if (typeof window.__calendarShowAllMonths !== "boolean"){
     window.__calendarShowAllMonths = true;
@@ -2378,11 +2384,6 @@ function renderCalendar(){
   });
 
   const jobsMap = {};
-  const normalizeJobList = (source)=>{
-    if (Array.isArray(source)) return source.filter(Boolean);
-    if (source && typeof source === "object") return Object.values(source).filter(Boolean);
-    return [];
-  };
   const activeJobs = normalizeJobList(
     Array.isArray(window.cuttingJobs) || (window.cuttingJobs && typeof window.cuttingJobs === "object")
       ? window.cuttingJobs
