@@ -364,18 +364,24 @@ function viewDashboard(){
           <p class="small muted" data-task-existing-empty hidden>No maintenance tasks yet. Create one below to get started.</p>
           <p class="small muted" data-task-existing-search-empty hidden>No tasks match your search. Try a different name.</p>
           <label>Occurrence note<textarea id="dashTaskExistingNote" rows="3" placeholder="Optional note for this calendar date"></textarea></label>
-          <label>Repeat<select id="dashTaskExistingRepeat">
+          <label>Add mode<select id="dashTaskExistingAddMode">
+            <option value="one_time">One-time reminder</option>
+            <option value="repeat">Start repeat tracking</option>
+            <option value="past_log">Log past completion</option>
+          </select></label>
+          <p class="small muted" id="dashTaskExistingModeHint">One-time creates one scheduled V2 reminder on the selected date.</p>
+          <label data-existing-repeat-row>Repeat tracking<select id="dashTaskExistingRepeat">
             <option value="no">Does not repeat</option>
             <option value="yes">Repeats</option>
           </select></label>
-          <label>Repeat basis<select id="dashTaskExistingRepeatBasis">
+          <label data-existing-repeat-row>Repeat basis<select id="dashTaskExistingRepeatBasis">
             <option value="machine_hours">By machine cutting hours</option>
             <option value="calendar_day">By calendar day</option>
             <option value="calendar_week">By calendar week</option>
             <option value="calendar_month">By calendar month</option>
           </select></label>
-          <label>Repeat every<input type="number" min="1" step="1" id="dashTaskExistingRepeatEvery" value="1"></label>
-          <label>Repeat ends<select id="dashTaskExistingRepeatEnd">
+          <label data-existing-repeat-row>Repeat every<input type="number" min="1" step="1" id="dashTaskExistingRepeatEvery" value="1"></label>
+          <label data-existing-repeat-row>Repeat ends<select id="dashTaskExistingRepeatEnd">
             <option value="never">Never</option>
             <option value="on_date">On date</option>
             <option value="after_count">After count</option>
