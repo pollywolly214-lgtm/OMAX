@@ -6741,6 +6741,7 @@ function renderDashboard(){
     updateDashJobCategoryHint();
     window.jobCategoryFilter = previousCategoryFilter;
     saveCloudDebounced();
+    if (typeof renderCalendar === "function") renderCalendar();
     toast("Cutting job added");
     closeModal();
     renderDashboard();
@@ -19856,6 +19857,7 @@ function renderJobs(){
     window.jobAddDraft = {};
     window.jobCategoryFilter = previousCategoryFilter;
     persistJobChanges();
+    if (typeof renderCalendar === "function") renderCalendar();
     renderJobs();
   });
 
@@ -20185,6 +20187,7 @@ function renderJobs(){
       reorderPriorities(newJob.id, newJob.priority);
       window.cuttingJobs = cuttingJobs;
       saveCloudDebounced();
+      if (typeof renderCalendar === "function") renderCalendar();
       toast("Active cutting job created");
       renderJobs();
       return;

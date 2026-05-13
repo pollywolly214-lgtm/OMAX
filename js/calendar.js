@@ -2368,7 +2368,8 @@ function renderCalendar(){
   });
 
   const jobsMap = {};
-  cuttingJobs.forEach(j => {
+  const activeJobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : (Array.isArray(cuttingJobs) ? cuttingJobs : []);
+  activeJobs.forEach(j => {
     const start = parseDateLocal(j.startISO);
     const end   = parseDateLocal(j.dueISO);
     if (!start || !end) return;
