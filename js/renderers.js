@@ -5301,6 +5301,9 @@ function renderDashboard(){
   const existingTaskEmpty  = taskExistingForm?.querySelector('[data-task-existing-empty]');
   const existingTaskSearchEmpty = taskExistingForm?.querySelector('[data-task-existing-search-empty]');
   const taskExistingNoteInput = document.getElementById("dashTaskExistingNote");
+  const taskExistingAddModeInput = document.getElementById("dashTaskExistingAddMode");
+  const taskExistingModeHint = document.getElementById("dashTaskExistingModeHint");
+  const taskExistingRepeatRows = Array.from(taskExistingForm?.querySelectorAll("[data-existing-repeat-row]") || []);
   const taskExistingRepeatInput = document.getElementById("dashTaskExistingRepeat");
   const taskExistingBasisInput = document.getElementById("dashTaskExistingRepeatBasis");
   const taskExistingEveryInput = document.getElementById("dashTaskExistingRepeatEvery");
@@ -5463,7 +5466,7 @@ function renderDashboard(){
     }
     if (taskExistingRepeatInput){
       taskExistingRepeatInput.value = task?.mode === "interval" ? "yes" : "no";
-      taskExistingRepeatInput.disabled = true;
+      taskExistingRepeatInput.disabled = false;
     }
     if (taskExistingEveryInput){
       taskExistingEveryInput.value = String(Math.max(1, Number(recurrence?.every) || 1));
@@ -5478,6 +5481,7 @@ function renderDashboard(){
       taskExistingEndCountInput.value = String(Math.max(1, Number(recurrence?.endCount) || 1));
     }
     toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
+    syncExistingAddModeUi();
   }
 
   function setTaskOptionPage(target){
@@ -5565,6 +5569,7 @@ function renderDashboard(){
   function resetExistingTaskForm(){
     if (taskExistingSearchInput) taskExistingSearchInput.value = "";
     if (taskExistingNoteInput) taskExistingNoteInput.value = "";
+    if (taskExistingAddModeInput) taskExistingAddModeInput.value = "one_time";
     if (taskExistingRepeatInput) taskExistingRepeatInput.value = "no";
     if (taskExistingRepeatInput) taskExistingRepeatInput.disabled = true;
     if (taskExistingBasisInput) taskExistingBasisInput.value = "calendar_day";
@@ -5573,6 +5578,45 @@ function renderDashboard(){
     if (taskExistingEndInput) taskExistingEndInput.value = "never";
     setSelectedExistingTask(null);
     refreshExistingTaskOptions("");
+    toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
+    syncExistingAddModeUi();
+  }
+
+  function syncExistingAddModeUi(){
+    const mode = String(taskExistingAddModeInput?.value || "one_time");
+    const showRepeat = mode === "repeat";
+    const selectedMeta = selectedExistingTaskId ? findMaintenanceTaskById(selectedExistingTaskId) : null;
+    const selectedMode = selectedMeta?.task?.mode === "interval" ? "interval" : "asreq";
+    const allowMachineHours = showRepeat && selectedMode === "interval";
+    taskExistingRepeatRows.forEach(row => { row.hidden = !showRepeat; });
+    if (taskExistingModeHint){
+      if (mode === "repeat"){
+        taskExistingModeHint.textContent = "Repeat tracking stores V2 repeat intent. Full repeat projection is coming later.";
+      }else if (mode === "past_log"){
+        taskExistingModeHint.textContent = "Past completion saves V2 history only and does not start future repeats.";
+      }else{
+        taskExistingModeHint.textContent = "One-time creates one scheduled V2 reminder on the selected date.";
+      }
+    }
+    if (taskExistingBasisInput){
+      const machineOpt = taskExistingBasisInput.querySelector('option[value=\"machine_hours\"]');
+      if (machineOpt){
+        machineOpt.disabled = !allowMachineHours;
+        machineOpt.textContent = allowMachineHours ? "By machine cutting hours (predicted)" : "By machine cutting hours (interval tasks only)";
+      }
+    }
+    if (!showRepeat){
+      if (taskExistingRepeatInput) taskExistingRepeatInput.value = "no";
+      if (taskExistingRepeatInput) taskExistingRepeatInput.disabled = true;
+      toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
+      return;
+    }
+    if (taskExistingRepeatInput) taskExistingRepeatInput.value = "yes";
+    if (taskExistingRepeatInput) taskExistingRepeatInput.disabled = false;
+    if (taskExistingBasisInput && taskExistingBasisInput.value === "machine_hours" && taskExistingBasisInput.querySelector('option[value=\"machine_hours\"]')?.disabled){
+      taskExistingBasisInput.value = "calendar_day";
+    }
+    if (taskExistingBasisInput) taskExistingBasisInput.disabled = false;
     toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
   }
 
@@ -6066,6 +6110,99 @@ function renderDashboard(){
     showStep(step);
   }
 
+  function ensureMaintenanceV2Collections(){
+    if (!Array.isArray(window.maintenanceTasksV2)) window.maintenanceTasksV2 = [];
+    if (!Array.isArray(window.maintenanceCalendarInstancesV2)) window.maintenanceCalendarInstancesV2 = [];
+    if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
+    return {
+      tasks: window.maintenanceTasksV2,
+      instances: window.maintenanceCalendarInstancesV2,
+      occurrences: window.maintenanceOccurrencesV2
+    };
+  }
+
+  function createMaintenanceV2FromTemplate(task, opts = {}){
+    if (!task || task.id == null) return null;
+    const collections = ensureMaintenanceV2Collections();
+    const mode = String(opts.mode || "one_time");
+    const eventType = String(opts.eventType || "scheduled");
+    const effectiveDateISO = normalizeDateKey(opts.effectiveDateISO || addContextDateISO || ymd(new Date()));
+    const nowISO = new Date().toISOString();
+    const legacyTaskId = String(task.id);
+    const existingTask = collections.tasks.find(entry => entry && String(entry.legacyTaskId || "") === legacyTaskId) || null;
+    const taskRecord = existingTask || {
+      id: genId("maintenance_task_v2"),
+      system: "v2",
+      schemaVersion: 2,
+      legacyTaskId,
+      name: task.name || "Maintenance task",
+      categoryRef: task.cat != null ? String(task.cat) : null,
+      inventoryId: task.inventoryId != null ? String(task.inventoryId) : null,
+      storeLink: task.storeLink || "",
+      manualLink: task.manualLink || "",
+      pn: task.pn || "",
+      price: task.price != null ? Number(task.price) : null,
+      createdAtISO: nowISO,
+      updatedAtISO: nowISO
+    };
+    if (!existingTask){
+      collections.tasks.unshift(taskRecord);
+    }else{
+      taskRecord.updatedAtISO = nowISO;
+    }
+    const instance = {
+      id: genId("maintenance_instance_v2"),
+      system: "v2",
+      schemaVersion: 2,
+      taskId: taskRecord.id,
+      legacyTaskId,
+      instanceMode: mode,
+      startDateISO: effectiveDateISO,
+      status: "active",
+      repeatRule: mode === "repeat" ? (opts.repeatRule || null) : null,
+      createdAtISO: nowISO,
+      updatedAtISO: nowISO
+    };
+    if (mode === "repeat" && instance.repeatRule && String(instance.repeatRule.basis || "") === "machine_hours"){
+      const currentHours = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
+      if (Number.isFinite(currentHours)){
+        instance.machineHourAnchorTotal = currentHours;
+        instance.machineHourAnchorDateISO = normalizeDateKey(effectiveDateISO || ymd(new Date()));
+      }
+      if (!Number.isFinite(Number(instance.repeatRule.intervalHours)) || Number(instance.repeatRule.intervalHours) <= 0){
+        instance.repeatRule.intervalHours = Math.max(1, Number(instance.repeatRule.every) || 1);
+      }
+    }
+    collections.instances.unshift(instance);
+    const occurrence = {
+      id: genId("maintenance_occurrence_v2"),
+      system: "v2",
+      schemaVersion: 2,
+      instanceId: instance.id,
+      taskId: taskRecord.id,
+      legacyTaskId,
+      eventType,
+      effectiveDateISO,
+      recordedAtISO: nowISO,
+      payload: {
+        note: opts.note || "",
+        hours: Number.isFinite(Number(opts.hours)) ? Number(opts.hours) : null
+      }
+    };
+    collections.occurrences.unshift(occurrence);
+    if (window.DEBUG_MODE){
+      console.info("[maintenance-v2] created records", {
+        legacyTaskId,
+        taskId: taskRecord.id,
+        instanceId: instance.id,
+        occurrenceId: occurrence.id,
+        instanceMode: mode,
+        eventType
+      });
+    }
+    return { taskRecord, instance, occurrence };
+  }
+
   function hideBackdrop(){
     if (!modal) return;
     modal.classList.remove("is-visible");
@@ -6336,6 +6473,7 @@ function renderDashboard(){
     if (taskExistingWeekdaysRow) taskExistingWeekdaysRow.hidden = !(taskExistingRepeatInput?.value === "yes" && weekly);
   });
   taskExistingEndInput?.addEventListener("change", ()=> toggleRepeatEndFields(taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput));
+  taskExistingAddModeInput?.addEventListener("change", syncExistingAddModeUi);
   syncTaskMode(taskTypeSelect?.value || "interval");
   toggleRepeatFields(taskRepeatInput, taskRepeatBasisInput, taskRepeatEveryInput, taskRepeatEndInput, taskRepeatEndDateInput, taskRepeatEndCountInput);
   toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
@@ -6604,40 +6742,69 @@ function renderDashboard(){
       endCountInput: taskExistingEndCountInput,
       defaultBasis: task.mode === "interval" ? "machine_hours" : "calendar_day"
     });
+    let choice = String(taskExistingAddModeInput?.value || "").trim();
+    if (!choice){
+      const choiceRaw = window.prompt(
+        "Temporary chooser fallback:\n1) One-time reminder\n2) Start repeat tracking\n3) Log past completion",
+        "1"
+      );
+      const mapped = { "1": "one_time", "2": "repeat", "3": "past_log" };
+      choice = mapped[String(choiceRaw || "").trim()] || "";
+    }
+    if (!choice || !["one_time", "repeat", "past_log"].includes(choice)){
+      toast("Add to calendar cancelled");
+      return;
+    }
     let message = "Maintenance task added";
-    if (task.mode === "interval"){
-      const instance = scheduleExistingIntervalTask(task, {
-        dateISO: targetISO,
-        note: occurrenceNote,
-        refreshDashboard: true,
-        recurrence: repeatConfig
-      }) || task;
-      const parsed = parseDateLocal(targetISO);
-      const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
-      let dateLabel = targetISO;
-      let completed = false;
-      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())){
-        const display = new Date(parsed.getTime());
-        dateLabel = display.toLocaleDateString();
-        const compare = new Date(parsed.getTime());
-        compare.setHours(0,0,0,0);
-        completed = compare.getTime() <= todayMidnight.getTime();
+    if (choice === "one_time"){
+      createMaintenanceV2FromTemplate(task, {
+        mode: "one_time",
+        eventType: "scheduled",
+        effectiveDateISO: targetISO,
+        note: occurrenceNote
+      });
+      const targetDate = parseDateLocal(targetISO);
+      if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        const diffMonths = (targetDate.getFullYear() - today.getFullYear()) * 12
+          + (targetDate.getMonth() - today.getMonth());
+        window.__calendarMonthOffset = Math.max(-12, Math.min(12, Math.round(diffMonths)));
       }
-      message = completed
-        ? `Logged "${instance.name || "Task"}" as completed on ${dateLabel}`
-        : `Scheduled "${instance.name || "Task"}" for ${dateLabel}`;
-    }else{
-      const instance = scheduleExistingAsReqTask(task, {
-        dateISO: targetISO,
+      message = `One-time reminder created for "${task.name || "Task"}"`;
+    }else if (choice === "repeat"){
+      const normalizedRepeatConfig = (repeatConfig && typeof repeatConfig === "object") ? { ...repeatConfig } : {};
+      normalizedRepeatConfig.enabled = true;
+      if (!normalizedRepeatConfig.basis) normalizedRepeatConfig.basis = "calendar_day";
+      if (normalizedRepeatConfig.basis === "machine_hours"){
+        const rawEvery = Number(taskExistingEveryInput?.value);
+        const configuredHours = Number.isFinite(rawEvery) && rawEvery > 0
+          ? rawEvery
+          : Number(normalizedRepeatConfig.intervalHours || normalizedRepeatConfig.every || 1);
+        normalizedRepeatConfig.intervalHours = Math.max(1, configuredHours);
+        normalizedRepeatConfig.every = normalizedRepeatConfig.intervalHours;
+      }
+      createMaintenanceV2FromTemplate(task, {
+        mode: "repeat",
+        eventType: "repeat_started",
+        effectiveDateISO: targetISO,
         note: occurrenceNote,
-        refreshDashboard: true,
-        recurrence: repeatConfig
-      }) || task;
-      message = "As-required task linked from Maintenance Settings";
+        repeatRule: normalizedRepeatConfig
+      });
+      message = `Repeat tracking started for "${task.name || "Task"}"`;
+    }else{
+      createMaintenanceV2FromTemplate(task, {
+        mode: "past_log",
+        eventType: "completed",
+        effectiveDateISO: targetISO,
+        note: occurrenceNote
+      });
+      message = `Past completion logged for "${task.name || "Task"}"`;
     }
     setContextDate(targetISO);
     if (typeof saveCloudNow === "function") saveCloudNow();
     else saveCloudDebounced();
+    if (typeof renderCalendar === "function") renderCalendar();
     toast(message);
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
