@@ -2388,9 +2388,19 @@ function renderCalendar(){
       ? window.cuttingJobs
       : ((typeof cuttingJobs !== "undefined") ? cuttingJobs : [])
   );
+  const resolveJobRange = (job)=>{
+    if (!job || typeof job !== "object") return { start:null, end:null };
+    const startCandidate = job.startISO ?? job.startDate ?? job.start ?? job.startAtISO ?? job.start_at ?? job.createdAt ?? null;
+    const endCandidate = job.dueISO ?? job.dueDate ?? job.endISO ?? job.endDate ?? job.end ?? job.completedAtISO ?? job.completedAt ?? null;
+    const start = parseDateLocal(startCandidate);
+    const end = parseDateLocal(endCandidate);
+    if (start && end) return { start, end };
+    if (start && !end) return { start, end: new Date(start.getTime()) };
+    if (!start && end) return { start: new Date(end.getTime()), end };
+    return { start:null, end:null };
+  };
   activeJobs.forEach(j => {
-    const start = parseDateLocal(j.startISO || j.startDate || j.start);
-    const end = parseDateLocal(j.dueISO || j.dueDate || j.endISO || j.completedAtISO);
+    const { start, end } = resolveJobRange(j);
     if (!start || !end) return;
     start.setHours(0,0,0,0);
     end.setHours(0,0,0,0);
@@ -2407,8 +2417,7 @@ function renderCalendar(){
   const completedJobs = normalizeJobList(window.completedCuttingJobs);
   completedJobs.forEach(job => {
     if (!job) return;
-    const start = parseDateLocal(job.startISO || job.startDate || job.start);
-    const end = parseDateLocal(job.dueISO || job.dueDate || job.endISO || job.completedAtISO);
+    const { start, end } = resolveJobRange(job);
     if (start && end){
       start.setHours(0,0,0,0);
       end.setHours(0,0,0,0);
