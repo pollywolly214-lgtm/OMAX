@@ -1109,7 +1109,7 @@ function completeTask(taskId){
     if (typeof saveCloudNow === "function") saveCloudNow();
     else saveCloudDebounced();
     toast("Task completed");
-    route();
+    rerenderCalendarKeepScroll();
   }
 }
 
@@ -1231,7 +1231,7 @@ function showTaskBubble(taskId, anchor, options = {}){
       else saveCloudDebounced();
       toast((Number.isFinite(parsed) && parsed > 0) ? "Occurrence time saved" : "Occurrence time removed");
       hideBubble();
-      route();
+      rerenderCalendarKeepScroll();
     }
   });
 
@@ -1246,7 +1246,7 @@ function showTaskBubble(taskId, anchor, options = {}){
       else saveCloudDebounced();
       toast((next || "").trim() ? "Occurrence note saved" : "Occurrence note removed");
       hideBubble();
-      route();
+      rerenderCalendarKeepScroll();
     }
   });
 
@@ -1257,7 +1257,7 @@ function showTaskBubble(taskId, anchor, options = {}){
       else saveCloudDebounced();
       toast("Task marked complete");
       hideBubble();
-      route();
+      rerenderCalendarKeepScroll();
     }
   });
 
@@ -1268,7 +1268,7 @@ function showTaskBubble(taskId, anchor, options = {}){
       else saveCloudDebounced();
       toast("Completion removed");
       hideBubble();
-      route();
+      rerenderCalendarKeepScroll();
     }
   });
 
@@ -1291,7 +1291,7 @@ function showTaskBubble(taskId, anchor, options = {}){
           : "Removed from calendar";
       toast(toastMessage);
       hideBubble();
-      route();
+      rerenderCalendarKeepScroll();
     }
   };
   b.querySelector("[data-bbl-remove-single]")?.addEventListener("click", ()=> runRemoveScope("single"));
@@ -1318,7 +1318,7 @@ function showTaskBubble(taskId, anchor, options = {}){
       else saveCloudDebounced();
       toast("Task removed");
       hideBubble();
-      route();
+      rerenderCalendarKeepScroll();
     }
   });
 
@@ -2380,8 +2380,8 @@ function renderCalendar(){
   const jobsMap = {};
   const activeJobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : ((typeof cuttingJobs !== "undefined" && Array.isArray(cuttingJobs)) ? cuttingJobs : []);
   activeJobs.forEach(j => {
-    const start = parseDateLocal(j.startISO);
-    const end = parseDateLocal(j.dueISO || j.completedAtISO);
+    const start = parseDateLocal(j.startISO || j.startDate || j.start);
+    const end = parseDateLocal(j.dueISO || j.dueDate || j.endISO || j.completedAtISO);
     if (!start || !end) return;
     start.setHours(0,0,0,0);
     end.setHours(0,0,0,0);
@@ -2398,8 +2398,8 @@ function renderCalendar(){
   const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [];
   completedJobs.forEach(job => {
     if (!job) return;
-    const start = parseDateLocal(job.startISO);
-    const end = parseDateLocal(job.dueISO || job.completedAtISO);
+    const start = parseDateLocal(job.startISO || job.startDate || job.start);
+    const end = parseDateLocal(job.dueISO || job.dueDate || job.endISO || job.completedAtISO);
     if (start && end){
       start.setHours(0,0,0,0);
       end.setHours(0,0,0,0);
