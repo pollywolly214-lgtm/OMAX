@@ -898,16 +898,6 @@ if (typeof window !== "undefined"){
   window.recurrenceSummaryLabel = recurrenceSummaryLabel;
 }
 
-function renderCalendarPreservingScroll(){
-  if (typeof renderCalendar !== "function") return;
-  const scrollX = typeof window !== "undefined" ? window.scrollX : 0;
-  const scrollY = typeof window !== "undefined" ? window.scrollY : 0;
-  renderCalendar();
-  if (typeof window !== "undefined" && typeof window.scrollTo === "function"){
-    window.scrollTo(scrollX, scrollY);
-  }
-}
-
 function editingCompletedJobsSet(){
   if (typeof getEditingCompletedJobsSet === "function"){
     return getEditingCompletedJobsSet();
@@ -3019,7 +3009,7 @@ function applyConfigurationForm(){
   }
   if (typeof saveCloudDebounced === "function") saveCloudDebounced();
   if (typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
-  renderCalendarPreservingScroll();
+  if (typeof renderCalendar === "function") renderCalendar();
   if (typeof renderDashboard === "function") renderDashboard();
   if (typeof renderJobs === "function") renderJobs();
   if (typeof renderCosts === "function") renderCosts();
@@ -5218,7 +5208,7 @@ function renderDashboard(){
       if (location.hash !== "#/"){
         location.hash = "#/";
       }
-      renderCalendarPreservingScroll();
+      if (typeof renderCalendar === "function") renderCalendar();
       const months = document.getElementById("months");
       const cell = dueISO ? months?.querySelector(`[data-date-iso="${dueISO}"]`) : null;
       if (cell){
@@ -6543,7 +6533,6 @@ function renderDashboard(){
     if (typeof refreshDashboardWidgets === "function"){
       refreshDashboardWidgets({ full: true });
     }
-    renderCalendarPreservingScroll();
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -6580,7 +6569,6 @@ function renderDashboard(){
     const list = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = []);
     list.unshift(task);
     setContextDate(targetISO);
-    renderCalendarPreservingScroll();
     if (typeof saveCloudNow === "function") saveCloudNow();
     else saveCloudDebounced();
     toast("One-time task added to the calendar");
@@ -6588,7 +6576,6 @@ function renderDashboard(){
     if (typeof refreshDashboardWidgets === "function"){
       refreshDashboardWidgets({ full: true });
     }
-    renderCalendarPreservingScroll();
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -6649,7 +6636,6 @@ function renderDashboard(){
       message = "As-required task linked from Maintenance Settings";
     }
     setContextDate(targetISO);
-    renderCalendarPreservingScroll();
     if (typeof saveCloudNow === "function") saveCloudNow();
     else saveCloudDebounced();
     toast(message);
@@ -6657,7 +6643,6 @@ function renderDashboard(){
     if (typeof refreshDashboardWidgets === "function"){
       refreshDashboardWidgets({ full: true });
     }
-    renderCalendarPreservingScroll();
     const hash = (location.hash || "#").toLowerCase();
     if (hash.startsWith("#/costs")){
       renderCosts();
@@ -6756,7 +6741,6 @@ function renderDashboard(){
     updateDashJobCategoryHint();
     window.jobCategoryFilter = previousCategoryFilter;
     saveCloudDebounced();
-    renderCalendarPreservingScroll();
     toast("Cutting job added");
     closeModal();
     renderDashboard();
@@ -10102,7 +10086,7 @@ function renderSettings(){
       updateTaskFieldRelevance(holder);
       if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets({ full: true });
       persist();
-      renderCalendarPreservingScroll();
+      if (typeof renderCalendar === "function") renderCalendar();
       return;
     }
     if (selectKey === "mode"){
@@ -11120,7 +11104,7 @@ function renderCosts(){
     if (typeof hideBubble === "function") hideBubble();
     location.hash = "#/";
     const runFocus = ()=>{
-      renderCalendarPreservingScroll();
+      if (typeof renderCalendar === "function") renderCalendar();
       const months = document.getElementById("months");
       const cell = dueISO ? months?.querySelector(`[data-date-iso="${dueISO}"]`) : null;
       if (!cell) return false;
@@ -11155,7 +11139,7 @@ function renderCosts(){
     if (typeof hideBubble === "function") hideBubble();
     location.hash = "#/";
     const runFocus = ()=>{
-      renderCalendarPreservingScroll();
+      if (typeof renderCalendar === "function") renderCalendar();
       const months = document.getElementById("months");
       const cell = dueISO ? months?.querySelector(`[data-date-iso="${dueISO}"]`) : null;
       if (!cell) return false;
@@ -19872,7 +19856,6 @@ function renderJobs(){
     window.jobAddDraft = {};
     window.jobCategoryFilter = previousCategoryFilter;
     persistJobChanges();
-    renderCalendarPreservingScroll();
     renderJobs();
   });
 
@@ -20202,7 +20185,6 @@ function renderJobs(){
       reorderPriorities(newJob.id, newJob.priority);
       window.cuttingJobs = cuttingJobs;
       saveCloudDebounced();
-      renderCalendarPreservingScroll();
       toast("Active cutting job created");
       renderJobs();
       return;
