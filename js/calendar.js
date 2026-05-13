@@ -3,6 +3,16 @@ let bubbleTimer = null;
 const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
 let calendarHoursEditing = false;
 let calendarHoursPending = new Map();
+function rerenderCalendarKeepScroll(){
+  if (typeof renderCalendar !== "function") return;
+  const scrollX = typeof window !== "undefined" ? window.scrollX : 0;
+  const scrollY = typeof window !== "undefined" ? window.scrollY : 0;
+  renderCalendar();
+  if (typeof window !== "undefined" && typeof window.scrollTo === "function"){
+    window.scrollTo(scrollX, scrollY);
+  }
+}
+
 if (typeof window !== "undefined"){
   if (typeof window.__calendarShowAllMonths !== "boolean"){
     window.__calendarShowAllMonths = true;
@@ -79,7 +89,7 @@ function startCalendarHoursEditing(){
   if (calendarHoursEditing) return false;
   calendarHoursEditing = true;
   calendarHoursPending = new Map();
-  renderCalendar();
+  rerenderCalendarKeepScroll();
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
   return true;
 }
@@ -88,7 +98,7 @@ function cancelCalendarHoursEditing(){
   if (!calendarHoursEditing) return false;
   calendarHoursEditing = false;
   calendarHoursPending = new Map();
-  renderCalendar();
+  rerenderCalendarKeepScroll();
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
   return true;
 }
@@ -110,7 +120,7 @@ function commitCalendarHoursEditing(){
   calendarHoursPending = new Map();
   calendarHoursEditing = false;
   if (changed && typeof saveCloudDebounced === "function") saveCloudDebounced();
-  renderCalendar();
+  rerenderCalendarKeepScroll();
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
   if (changed){
     if (typeof refreshDerivedDailyHours === "function") refreshDerivedDailyHours();
@@ -149,7 +159,7 @@ function promptCalendarDayHours(dateISO){
   }
   const updated = setCalendarPendingHours(key, next);
   if (updated){
-    renderCalendar();
+    rerenderCalendarKeepScroll();
   }
   return updated;
 }
@@ -1534,7 +1544,7 @@ function showJobBubble(jobId, anchor){
       saveCloudDebounced();
       toast("Job marked complete");
       hideBubble();
-      renderCalendar();
+      rerenderCalendarKeepScroll();
       if (typeof window.location === "object" && window.location.hash === "#/jobs" && typeof renderJobs === "function"){
         renderJobs();
       }
@@ -1563,7 +1573,7 @@ function toggleGarnetComplete(id){
   entry.completed = !entry.completed;
   saveCloudDebounced();
   toast(entry.completed ? "Garnet cleaning completed" : "Marked as scheduled");
-  renderCalendar();
+  rerenderCalendarKeepScroll();
   if (typeof window.__dashRefreshGarnetList === "function") window.__dashRefreshGarnetList();
 }
 
@@ -1579,7 +1589,7 @@ function removeGarnetEntry(id){
   entries.splice(idx,1);
   saveCloudDebounced();
   toast("Garnet cleaning removed");
-  renderCalendar();
+  rerenderCalendarKeepScroll();
   if (typeof window.__dashRefreshGarnetList === "function") window.__dashRefreshGarnetList();
 }
 
@@ -2371,11 +2381,14 @@ function renderCalendar(){
   const activeJobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : ((typeof cuttingJobs !== "undefined" && Array.isArray(cuttingJobs)) ? cuttingJobs : []);
   activeJobs.forEach(j => {
     const start = parseDateLocal(j.startISO);
-    const end   = parseDateLocal(j.dueISO);
+    const end = parseDateLocal(j.dueISO || j.completedAtISO);
     if (!start || !end) return;
-    start.setHours(0,0,0,0); end.setHours(0,0,0,0);
-    const cur = new Date(start.getTime());
-    while (cur <= end){
+    start.setHours(0,0,0,0);
+    end.setHours(0,0,0,0);
+    const from = start.getTime() <= end.getTime() ? start : end;
+    const to = start.getTime() <= end.getTime() ? end : start;
+    const cur = new Date(from.getTime());
+    while (cur <= to){
       const key = ymd(cur);
       (jobsMap[key] ||= []).push({ type:"job", id:String(j.id), name:j.name, status:"active", cat:j.cat });
       cur.setDate(cur.getDate()+1);
@@ -2691,19 +2704,19 @@ function shiftCalendarMonthOffset(delta){
   const next = Math.min(12, Math.max(-12, Math.round(current + delta)));
   if (next === current) return false;
   window.__calendarMonthOffset = next;
-  renderCalendar();
+  rerenderCalendarKeepScroll();
   return true;
 }
 
 function resetCalendarMonthOffset(){
   if ((Number(window.__calendarMonthOffset) || 0) === 0) return false;
   window.__calendarMonthOffset = 0;
-  renderCalendar();
+  rerenderCalendarKeepScroll();
   return true;
 }
 
 function toggleCalendarShowAllMonths(){
   const next = !Boolean(window.__calendarShowAllMonths);
   window.__calendarShowAllMonths = next;
-  renderCalendar();
+  rerenderCalendarKeepScroll();
 }
