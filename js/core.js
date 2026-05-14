@@ -578,6 +578,10 @@ function isSafeMetadataString(key, value){
   if (raw.length > 2048) return false;
   return true;
 }
+function isProtectedBusinessDataKey(key){
+  const normalized = String(key || "").toLowerCase();
+  return /(tasksinterval|tasksasreq|completeddates|manualhistory|calendardateiso|recurrence|removedoccurrences|occurrenceoverrides|maintenancetasksv2|maintenanceoccurrencesv2|maintenancecalendarinstancesv2|settingsfolders|folders|inventory|inventoryfolders|inventorymaterials|inventorytransactions|orderrequests|receipttrackerweeks|purchase|vendor|tolerance|inspection|quality|layout|dashboardlayout|costlayout|joblayout|tolerancelayout)/i.test(normalized);
+}
 
 function sanitizeValueForStorage(value, { dropHeavyHistory = false } = {}){
   if (Array.isArray(value)) return value.map(v => sanitizeValueForStorage(v, { dropHeavyHistory }));
@@ -589,8 +593,7 @@ function sanitizeValueForStorage(value, { dropHeavyHistory = false } = {}){
   for (const [k,v] of Object.entries(value)){
     const key = String(k || "");
     if (/^(__|debug|cache|preview)/i.test(key)) continue;
-    const protectMaintenanceKey = /(completeddates|manualhistory|calendardateiso|recurrence|removedoccurrences|occurrenceoverrides|maintenanceoccurrencesv2|maintenancecalendarinstancesv2|maintenancetasksv2)/i.test(key);
-    if (dropHeavyHistory && !protectMaintenanceKey && /(history|logs|manuallogs|deleteditems|reports|rollups)/i.test(key)) continue;
+    if (dropHeavyHistory && !isProtectedBusinessDataKey(key) && /(syncprocesslog|logs|deleteditems|reports|rollups|savelogs)/i.test(key)) continue;
     if (typeof v === "string" && (isLikelyEmbeddedFileContent(key, v) || v.length > 200000)){
       if (isSafeMetadataString(key, v)) out[key] = v;
       continue;
@@ -696,6 +699,38 @@ function shouldPreferLocalBackup(cloudState, localState){
   const l = collectMaintenanceHistoryMetrics(localState);
   if ((l.completedDatesCount + l.manualHistoryCount + l.maintenanceOccurrencesV2Count) + 20 < (c.completedDatesCount + c.manualHistoryCount + c.maintenanceOccurrencesV2Count)) return false;
   return true;
+}
+function collectCoreBusinessMetrics(state){
+  const src = state && typeof state === "object" ? state : {};
+  const maintenance = collectMaintenanceHistoryMetrics(src);
+  const orderLineItemCount = (Array.isArray(src.orderRequests) ? src.orderRequests : []).reduce((n,r)=>n + (Array.isArray(r?.items) ? r.items.length : 0), 0);
+  const toleranceKeys = Object.keys(src).filter((k)=>/(tolerance|inspection|quality)/i.test(k));
+  return {
+    ...maintenance,
+    inventoryCount: Array.isArray(src.inventory) ? src.inventory.length : 0,
+    inventoryFoldersCount: Array.isArray(src.inventoryFolders) ? src.inventoryFolders.length : 0,
+    inventoryMaterialsCount: Array.isArray(src.inventoryMaterials) ? src.inventoryMaterials.length : 0,
+    inventoryTransactionsCount: Array.isArray(src.inventoryTransactions) ? src.inventoryTransactions.length : 0,
+    orderRequestsCount: Array.isArray(src.orderRequests) ? src.orderRequests.length : 0,
+    orderLineItemCount,
+    receiptTrackerWeeksCount: Array.isArray(src.receiptTrackerWeeks) ? src.receiptTrackerWeeks.length : 0,
+    settingsFoldersCount: Array.isArray(src.settingsFolders) ? src.settingsFolders.length : 0,
+    foldersCount: Array.isArray(src.folders) ? src.folders.length : 0,
+    toleranceFieldCount: toleranceKeys.length,
+    layoutPresent: Boolean(src.dashboardLayout && src.costLayout && src.jobLayout)
+  };
+}
+function logCoreBusinessDiagnostics(source, state){
+  const metrics = collectCoreBusinessMetrics(state);
+  console.info("Core business data diagnostics", { source, ...metrics });
+  return metrics;
+}
+function safeCleanupLoadedState(raw){
+  const src = raw && typeof raw === "object" ? { ...raw } : {};
+  delete src.syncProcessLog; delete src.__lastSnapshot; delete src.__lastSnapshotForFlow; delete src.__lastDataFlowFingerprint;
+  src.cuttingJobs = sanitizeValueForStorage(src.cuttingJobs);
+  src.completedCuttingJobs = sanitizeValueForStorage(src.completedCuttingJobs);
+  return src;
 }
 
 function persistLocalStateBackup(snapshot){
@@ -3259,8 +3294,14 @@ const saveCloudInternal = debounce(async ()=>{
     const snap = compactStateForStorage(rawSnap);
     const pendingMetrics = logMaintenanceHistoryDiagnostics("before-save", snap);
     const baselineMetrics = collectMaintenanceHistoryMetrics(window.__lastLoadedCloudState || {});
+    const pendingCore = logCoreBusinessDiagnostics("before-save", snap);
+    const baselineCore = collectCoreBusinessMetrics(window.__lastLoadedCloudState || {});
     if ((pendingMetrics.completedDatesCount + pendingMetrics.manualHistoryCount + pendingMetrics.maintenanceOccurrencesV2Count + 10) < (baselineMetrics.completedDatesCount + baselineMetrics.manualHistoryCount + baselineMetrics.maintenanceOccurrencesV2Count)){
       console.error("Cloud save blocked: maintenance completion history would be reduced unexpectedly.", { pendingMetrics, baselineMetrics });
+      return;
+    }
+    if (pendingCore.inventoryCount + 5 < baselineCore.inventoryCount || pendingCore.orderRequestsCount + 2 < baselineCore.orderRequestsCount || pendingCore.orderLineItemCount + 5 < baselineCore.orderLineItemCount || pendingCore.settingsFoldersCount + 1 < baselineCore.settingsFoldersCount || pendingCore.toleranceFieldCount + 1 < baselineCore.toleranceFieldCount || (!pendingCore.layoutPresent && baselineCore.layoutPresent)){
+      console.error("Cloud save blocked: core business data would be reduced unexpectedly.", { pendingCore, baselineCore });
       return;
     }
     const sizeBytes = estimatePayloadBytes(snap);
@@ -3576,10 +3617,10 @@ async function loadFromCloud(){
     if (stateHasMeaningfulData(data)){
       logMaintenanceHistoryDiagnostics("cloud-before-adopt", data || {});
       logMaintenanceHistoryDiagnostics("backup-before-adopt", localBackup || {});
+      logCoreBusinessDiagnostics("cloud-before-adopt", data || {});
+      logCoreBusinessDiagnostics("backup-before-adopt", localBackup || {});
       const useBackup = stateHasMeaningfulData(localBackup) && backupRev > cloudRev && shouldPreferLocalBackup(data || {}, localBackup || {});
-      const incomingState = compactStateForStorage((useBackup ? localBackup : data) || {});
-      logStateSizeDiagnostics((useBackup ? localBackup : data) || {}, "load-before-cleanup");
-      logStateSizeDiagnostics(incomingState, "load-after-cleanup");
+      const incomingState = safeCleanupLoadedState((useBackup ? localBackup : data) || {});
       adoptState(incomingState);
       window.__lastLoadedCloudState = cloneStructured(data || {});
       const loadedRev = useBackup ? backupRev : cloudRev;
@@ -3590,9 +3631,8 @@ async function loadFromCloud(){
       }
     }else if (stateHasMeaningfulData(localBackup)){
       logMaintenanceHistoryDiagnostics("backup-only-before-adopt", localBackup || {});
-      const incomingBackup = compactStateForStorage(localBackup || {});
-      logStateSizeDiagnostics(localBackup || {}, "backup-before-cleanup");
-      logStateSizeDiagnostics(incomingBackup, "backup-after-cleanup");
+      logCoreBusinessDiagnostics("backup-only-before-adopt", localBackup || {});
+      const incomingBackup = safeCleanupLoadedState(localBackup || {});
       adoptState(incomingBackup);
       window.__lastLoadedCloudState = cloneStructured(incomingBackup || {});
       const loadedRev = Number(localBackup?.syncMeta?.rev || 0);
