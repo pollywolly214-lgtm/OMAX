@@ -1639,6 +1639,10 @@ body.modal-open .auth-bar {
 .dashboard-layout.has-custom-layout .dashboard-window {
   position: absolute;
 }
+.cost-layout.has-custom-layout .dashboard-window{
+  min-width: 300px;
+  min-height: 200px;
+}
 .dashboard-layout:not(.has-custom-layout) .dashboard-window[data-dashboard-window="pumpChart"] {
   grid-column: 1 / -1;
 }
@@ -1656,6 +1660,14 @@ body.modal-open .auth-bar {
 .dashboard-window > .block {
   height: 100%;
   overflow: auto;
+}
+.cost-layout .dashboard-window > .block{
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+}
+.cost-layout .dashboard-window > .block > *{
+  min-height:0;
 }
 .dashboard-layout.has-custom-layout .dashboard-window > .block {
   max-height: 100%;
