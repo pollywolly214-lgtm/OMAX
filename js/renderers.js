@@ -981,6 +981,41 @@ async function readLocalRootHandle(){
   });
 }
 
+
+async function saveWJCutsRootFolderHandle(handle){ return saveLocalRootHandle(handle); }
+async function getWJCutsRootFolderHandle(){ return readLocalRootHandle(); }
+async function resolveWJCutsRelativePath(relativePath){ return resolveLocalFileFromRelativePath(relativePath); }
+async function setWJCutsRootFolder(){
+  if (!supportsLocalRootPicker()){ toast("Local file references require Chrome or Edge."); return null; }
+  const handle = await window.showDirectoryPicker({ mode: "read" });
+  const perm = await handle.requestPermission({ mode: "read" });
+  if (perm !== "granted") return null;
+  await saveWJCutsRootFolderHandle(handle);
+  return handle;
+}
+function sanitizeJobFileReferenceForFirestore(fileRef){
+  if (!fileRef || typeof fileRef !== "object") return null;
+  const clean = {
+    id: String(fileRef.id || genId("file")),
+    name: String(fileRef.name || "Attachment"),
+    type: String(fileRef.type || ""),
+    size: Number.isFinite(Number(fileRef.size)) ? Number(fileRef.size) : null,
+    source: "wj_cuts_reference",
+    rootLabel: "WJ Cuts",
+    relativePath: String(fileRef.relativePath || "").replace(/^\/+/, ""),
+    attachedAtISO: String(fileRef.attachedAtISO || fileRef.addedAt || new Date().toISOString())
+  };
+  if (fileRef.note) clean.note = String(fileRef.note);
+  return clean;
+}
+function attachWJCutsFileReference(jobId, fileRef){ return sanitizeJobFileReferenceForFirestore(fileRef); }
+async function openWJCutsReferencedFile(fileRef){
+  const file = await resolveWJCutsRelativePath(fileRef?.relativePath);
+  if (!file) throw new Error("File reference saved, but the file was not found under your selected WJ Cuts folder.");
+  triggerFileDownload(file, fileRef?.name || file.name);
+  return true;
+}
+
 async function computeLocalRootSignature(handle){
   if (!handle || typeof handle.entries !== "function") return "";
   const parts = [];
@@ -1464,26 +1499,21 @@ function readFileAsDataUrl(file){
 async function filesToAttachments(fileList){
   const files = Array.from(fileList || []);
   const attachments = [];
+  const rootHandle = await getWJCutsRootFolderHandle();
+  if (!rootHandle) return attachments;
   for (const file of files){
-    try {
-      const dataUrl = await readFileAsDataUrl(file);
-      const preview = await buildAttachmentPreview(file);
-      attachments.push({
-        id: genId(file.name || "job_file"),
-        name: file.name || "Attachment",
-        type: file.type || "",
-        size: typeof file.size === "number" ? file.size : null,
-        dataUrl,
-        preview,
-        source: "upload",
-        addedAt: new Date().toISOString()
-      });
-    } catch (err){
-      console.error("Unable to read file", err);
-      toast("Failed to read one of the files.");
-    }
+    const rel = String(file.webkitRelativePath || "").trim();
+    if (!rel) continue;
+    attachments.push(sanitizeJobFileReferenceForFirestore({
+      id: genId(file.name || "job_file"),
+      name: file.name || "Attachment",
+      type: file.type || "",
+      size: typeof file.size === "number" ? file.size : null,
+      relativePath: rel.replace(/^\/+/, ""),
+      attachedAtISO: new Date().toISOString()
+    }));
   }
-  return attachments;
+  return attachments.filter(Boolean);
 }
 
 const JOB_ONEDRIVE_PREVIEW_CACHE_KEY = "cutting_job_onedrive_preview_cache_v1";
@@ -1576,9 +1606,9 @@ async function resolveAttachmentPreview(file){
     return resolveOneDriveAttachmentPreview(file);
   }
 
-  if (file.source === "onedrive_local_root" && file.localRelativePath){
+  if (file.source === "wj_cuts_reference" && (file.relativePath || file.localRelativePath)){
     try {
-      const localFile = await resolveLocalFileFromRelativePath(file.localRelativePath);
+      const localFile = await resolveWJCutsRelativePath(file.relativePath || file.localRelativePath);
       if (!localFile){
         file.preview = file.preview || { mode: "message", content: "Preview unavailable. Local root file is missing." };
         return false;
@@ -18963,7 +18993,7 @@ function renderJobs(){
 
   const chooseLocalOneDriveRoot = async ()=>{
     if (!supportsLocalRootPicker()){
-      toast("This browser does not support saved OneDrive root folder access.");
+      toast("Local file references require Chrome or Edge.");
       return false;
     }
     try {
@@ -19002,7 +19032,7 @@ function renderJobs(){
 
   const attachFromLocalOneDriveRoot = async ()=>{
     if (!supportsLocalRootPicker()){
-      toast("This browser does not support local root folder attach.");
+      toast("Local file references require Chrome or Edge.");
       return false;
     }
     const rootHandle = await readLocalRootHandle();
@@ -19063,12 +19093,10 @@ function renderJobs(){
         name: file.name || "Attachment",
         type: file.type || "",
         size: typeof file.size === "number" ? file.size : null,
-        source: "onedrive_local_root",
-        localRelativePath: relPath,
-        localRootName: getSharedConfig().localRootName || rootHandle.name || "",
-        localRootSignature: signature,
-        localDeviceId: getLocalDeviceId(),
-        addedAt: new Date().toISOString()
+        source: "wj_cuts_reference",
+        rootLabel: "WJ Cuts",
+        relativePath: relPath.replace(/^\/+/, ""),
+        attachedAtISO: new Date().toISOString()
       });
       toast("File attached from this computer OneDrive root.");
       window.jobAddFormOpen = true;
@@ -19157,11 +19185,12 @@ function renderJobs(){
     const attachments = await filesToAttachments(files);
     e.target.value = "";
     if (!attachments.length){
+      toast("Use Attach from Reference Folder so this file can be saved as a WJ Cuts relative path.");
       restoreNewJobFormState(formState);
       return;
     }
     pendingNewJobFiles.push(...attachments.map(a=>({ ...a })));
-    toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
+    toast(`${attachments.length} file${attachments.length===1?"":"s"} reference${attachments.length===1?"":"s"} added`);
     window.jobAddFormOpen = true;
     renderJobs();
     requestAnimationFrame(()=> restoreNewJobFormState(formState));
