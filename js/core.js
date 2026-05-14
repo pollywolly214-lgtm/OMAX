@@ -672,7 +672,34 @@ function buildEmergencyBackup(snapshot){
 
 function buildTinyCriticalBackup(snapshot){
   const src = snapshot && typeof snapshot === "object" ? snapshot : {};
-  return sanitizeValueForStorage({ schema: src.schema || APP_SCHEMA, tasksInterval: src.tasksInterval || [], tasksAsReq: src.tasksAsReq || [], maintenanceTasksV2: src.maintenanceTasksV2 || [], maintenanceOccurrencesV2: src.maintenanceOccurrencesV2 || [], maintenanceCalendarInstancesV2: src.maintenanceCalendarInstancesV2 || [], inventory: src.inventory || [], orderRequests: src.orderRequests || [], cuttingJobs: src.cuttingJobs || [], completedCuttingJobs: src.completedCuttingJobs || [], settingsFolders: src.settingsFolders || [], appConfig: src.appConfig || normalizeAppConfig(window.appConfig) }, { dropHeavyHistory: true });
+  const base = {
+    schema: src.schema || APP_SCHEMA,
+    tasksInterval: src.tasksInterval || [],
+    tasksAsReq: src.tasksAsReq || [],
+    maintenanceTasksV2: src.maintenanceTasksV2 || [],
+    maintenanceOccurrencesV2: src.maintenanceOccurrencesV2 || [],
+    maintenanceCalendarInstancesV2: src.maintenanceCalendarInstancesV2 || [],
+    inventory: src.inventory || [],
+    inventoryFolders: src.inventoryFolders || [],
+    inventoryMaterials: src.inventoryMaterials || [],
+    inventoryTransactions: src.inventoryTransactions || [],
+    orderRequests: src.orderRequests || [],
+    receiptTrackerWeeks: src.receiptTrackerWeeks || [],
+    settingsFolders: src.settingsFolders || [],
+    folders: src.folders || [],
+    jobFolders: src.jobFolders || [],
+    dashboardLayout: src.dashboardLayout || {},
+    costLayout: src.costLayout || {},
+    jobLayout: src.jobLayout || {},
+    toleranceLayout: src.toleranceLayout || {},
+    appConfig: src.appConfig || normalizeAppConfig(window.appConfig)
+  };
+  for (const [k,v] of Object.entries(src)){
+    if (/(tolerance|inspection|quality)/i.test(k) && !(k in base)) base[k] = v;
+  }
+  const tiny = sanitizeValueForStorage(base, { dropHeavyHistory: true });
+  console.info("Tiny backup included keys", Object.keys(tiny).sort());
+  return tiny;
 }
 
 function collectMaintenanceHistoryMetrics(state){
@@ -3541,6 +3568,7 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
+  if (window.__recoveryInspectMode || window.__autosaveDisabled) return;
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
     console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
@@ -3561,6 +3589,7 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(){
+  if (window.__recoveryInspectMode || window.__autosaveDisabled) return;
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
     console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
@@ -3590,12 +3619,35 @@ function saveCloudNow(){
 
 if (typeof window !== "undefined"){
   window.addEventListener("visibilitychange", ()=>{
+    if (window.__recoveryInspectMode) return;
     if (document.visibilityState === "hidden"){
       saveCloudNow();
     }
   });
-  window.addEventListener("pagehide", ()=>saveCloudNow());
+  window.addEventListener("pagehide", ()=>{ if (!window.__recoveryInspectMode) saveCloudNow(); });
 }
+
+async function runRecoveryInspect(){
+  window.__recoveryInspectMode = true;
+  window.__autosaveDisabled = true;
+  console.warn("Recovery inspect mode enabled: autosave disabled.");
+  let cloudState = null;
+  try {
+    if (FB.ready && FB.docRef){
+      const snap = await FB.docRef.get();
+      cloudState = snap?.exists ? (typeof snap.data === "function" ? snap.data() : snap.data) : null;
+    }
+  } catch (err){ console.warn("Recovery inspect cloud read failed", err); }
+  const localBackup = readLocalStateBackup();
+  const localRaw = (typeof window !== "undefined" && window.localStorage) ? window.localStorage.getItem(LOCAL_STATE_BACKUP_KEY) : null;
+  console.info("Recovery inspect report", {
+    cloudMetrics: collectCoreBusinessMetrics(cloudState || {}),
+    localBackupMetrics: collectCoreBusinessMetrics(localBackup || {}),
+    localBackupBytes: localRaw ? localRaw.length : 0
+  });
+  return { cloudState, localBackup };
+}
+if (typeof window !== "undefined") window.recoveryInspect = runRecoveryInspect;
 async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
   try{
