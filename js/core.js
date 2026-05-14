@@ -534,8 +534,9 @@ const CLOUD_SYNC_CLIENT_KEY = "cloud_sync_client_id_v1";
 const LOCAL_STATE_BACKUP_KEY = "omax_local_state_backup_v1";
 
 
-const FIRESTORE_WARN_BYTES = 900000;
-const FIRESTORE_BLOCK_BYTES = 1000000;
+const FIRESTORE_WARN_BYTES = 850000;
+const FIRESTORE_STRONG_WARN_BYTES = 900000;
+const FIRESTORE_BLOCK_BYTES = 975000;
 const SAVE_LOG_THROTTLE_MS = 30000;
 let lastSaveLogWriteAt = 0;
 
@@ -549,6 +550,56 @@ function estimatePayloadBytes(payload){
   }
 }
 
+
+const LARGE_CONTENT_KEY_PATTERN = /(base64|filedata|dataurl|previewurl|content|raw|attachment|image|file|dxf|ord)/i;
+
+function sanitizeValueForStorage(value, { dropHeavyHistory = false } = {}){
+  if (Array.isArray(value)) return value.map(v => sanitizeValueForStorage(v, { dropHeavyHistory }));
+  if (!value || typeof value !== "object"){
+    if (typeof value === "string" && (value.startsWith("data:image") || value.length > 200000)) return "";
+    return value;
+  }
+  const out = {};
+  for (const [k,v] of Object.entries(value)){
+    const key = String(k || "");
+    if (/^(__|debug|cache|preview)/i.test(key)) continue;
+    if (dropHeavyHistory && /(history|logs|manualhistory|manuallogs|deleteditems|reports|layout|rollups|completeddates)/i.test(key)) continue;
+    if (typeof v === "string" && (v.startsWith("data:image") || (LARGE_CONTENT_KEY_PATTERN.test(key) && v.length > 2048) || v.length > 200000)){
+      if (/(name|type|size|label|path|link|url)$/i.test(key)) out[key] = v;
+      continue;
+    }
+    out[k] = sanitizeValueForStorage(v, { dropHeavyHistory });
+  }
+  return out;
+}
+
+function estimateTopLevelFieldSizes(state){
+  const src = state && typeof state === "object" ? state : {};
+  return Object.keys(src).map((field)=>({ field, bytes: estimatePayloadBytes(src[field]) })).sort((a,b)=>b.bytes-a.bytes);
+}
+
+function summarizeLargestNested(fieldName, value){
+  if (!Array.isArray(value)) return [];
+  return value.map((item, index)=>{
+    const keys = item && typeof item === "object" ? Object.keys(item).filter((k)=>LARGE_CONTENT_KEY_PATTERN.test(k) || (typeof item[k] === "string" && item[k].length > 5000)).slice(0,8) : [];
+    return { index, id: item?.id || "", name: item?.name || item?.title || "", bytes: estimatePayloadBytes(item), suspiciousKeys: keys.join(",") };
+  }).sort((a,b)=>b.bytes-a.bytes).slice(0,10);
+}
+
+function logStateSizeDiagnostics(state, label = "state"){
+  const ranked = estimateTopLevelFieldSizes(state);
+  console.info(`Field size diagnostics (${label})`);
+  console.table(ranked);
+  ranked.slice(0,3).forEach((entry)=>{
+    const nested = summarizeLargestNested(entry.field, state?.[entry.field]);
+    if (nested.length){
+      console.info(`Nested size diagnostics for ${entry.field}`);
+      console.table(nested);
+    }
+  });
+  return ranked;
+}
+
 function compactStateForStorage(raw, { forBackup = false } = {}){
   const snap = raw && typeof raw === "object" ? { ...raw } : {};
   // Safe-to-trim fields: operational/debug/save logs that can grow unbounded.
@@ -556,12 +607,20 @@ function compactStateForStorage(raw, { forBackup = false } = {}){
   delete snap.__lastSnapshot;
   delete snap.__lastSnapshotForFlow;
   delete snap.__lastDataFlowFingerprint;
+  snap.tasksInterval = sanitizeValueForStorage(snap.tasksInterval);
+  snap.tasksAsReq = sanitizeValueForStorage(snap.tasksAsReq);
+  snap.inventory = sanitizeValueForStorage(snap.inventory);
+  snap.orderRequests = sanitizeValueForStorage(snap.orderRequests);
+  snap.cuttingJobs = sanitizeValueForStorage(snap.cuttingJobs);
+  snap.completedCuttingJobs = sanitizeValueForStorage(snap.completedCuttingJobs);
+  snap.totalHistory = Array.isArray(snap.totalHistory) ? snap.totalHistory.slice(-500) : [];
+  snap.dailyCutHours = Array.isArray(snap.dailyCutHours) ? snap.dailyCutHours.slice(-365) : [];
   if (forBackup){
     delete snap.deletedItems;
     delete snap.opportunityRollups;
     delete snap.weeklyCostReports;
   }
-  return snap;
+  return sanitizeValueForStorage(snap, { dropHeavyHistory: forBackup });
 }
 
 function buildEmergencyBackup(snapshot){
@@ -581,6 +640,11 @@ function buildEmergencyBackup(snapshot){
   };
 }
 
+function buildTinyCriticalBackup(snapshot){
+  const src = snapshot && typeof snapshot === "object" ? snapshot : {};
+  return sanitizeValueForStorage({ schema: src.schema || APP_SCHEMA, tasksInterval: src.tasksInterval || [], tasksAsReq: src.tasksAsReq || [], inventory: src.inventory || [], orderRequests: src.orderRequests || [], cuttingJobs: src.cuttingJobs || [], completedCuttingJobs: src.completedCuttingJobs || [], settingsFolders: src.settingsFolders || [], appConfig: src.appConfig || normalizeAppConfig(window.appConfig) }, { dropHeavyHistory: true });
+}
+
 function persistLocalStateBackup(snapshot){
   if (typeof window === "undefined" || !window.localStorage || !snapshot) return;
   const trimmed = compactStateForStorage(snapshot, { forBackup:true });
@@ -588,7 +652,7 @@ function persistLocalStateBackup(snapshot){
     window.localStorage.setItem(LOCAL_STATE_BACKUP_KEY, JSON.stringify(trimmed));
     console.info("Local backup saved", { bytes: estimatePayloadBytes(trimmed) });
   } catch (err){
-    console.warn("Local backup primary write failed", err);
+    console.warn("Local backup primary write failed", err, { bytes: estimatePayloadBytes(trimmed) });
     try {
       window.localStorage.removeItem(LOCAL_STATE_BACKUP_KEY);
       const emergency = buildEmergencyBackup(trimmed);
@@ -596,6 +660,15 @@ function persistLocalStateBackup(snapshot){
       console.warn("Local backup saved in emergency mode", { bytes: estimatePayloadBytes(emergency) });
     } catch (retryErr){
       console.error("Failed to persist local backup even in emergency mode", retryErr);
+      try {
+        window.localStorage.removeItem(LOCAL_STATE_BACKUP_KEY);
+        ["omax_debug_cache","omax_sync_cache","omax_render_cache","omax_local_state_backup_v0"].forEach((k)=>window.localStorage.removeItem(k));
+        const tiny = buildTinyCriticalBackup(trimmed);
+        window.localStorage.setItem(LOCAL_STATE_BACKUP_KEY, JSON.stringify(tiny));
+        console.warn("Local backup saved in tiny mode", { bytes: estimatePayloadBytes(tiny) });
+      } catch (tinyErr){
+        console.error("Failed to persist tiny local backup", tinyErr);
+      }
     }
   }
 }
@@ -3120,10 +3193,13 @@ const saveCloudInternal = debounce(async ()=>{
     const snap = compactStateForStorage(rawSnap);
     const sizeBytes = estimatePayloadBytes(snap);
     if (sizeBytes >= FIRESTORE_WARN_BYTES){
-      console.warn("Cloud state size warning", { sizeBytes, warnAt: FIRESTORE_WARN_BYTES, blockAt: FIRESTORE_BLOCK_BYTES });
+      console.warn("Cloud state size warning", { sizeBytes, warnAt: FIRESTORE_WARN_BYTES, strongWarnAt: FIRESTORE_STRONG_WARN_BYTES, blockAt: FIRESTORE_BLOCK_BYTES });
+      logStateSizeDiagnostics(snap, "before-save");
+      if (sizeBytes >= FIRESTORE_STRONG_WARN_BYTES) console.error("Cloud state size strong warning", { sizeBytes, strongWarnAt: FIRESTORE_STRONG_WARN_BYTES });
     }
     if (sizeBytes >= FIRESTORE_BLOCK_BYTES){
       console.error("Cloud save blocked: state payload too large", { sizeBytes, blockAt: FIRESTORE_BLOCK_BYTES });
+      logStateSizeDiagnostics(snap, "blocked-save");
       hasPendingLocalChanges = true;
       persistLocalStateBackup(snap);
       return;
@@ -3420,7 +3496,10 @@ async function loadFromCloud(){
 
     if (stateHasMeaningfulData(data)){
       const useBackup = stateHasMeaningfulData(localBackup) && backupRev > cloudRev;
-      adoptState((useBackup ? localBackup : data) || {});
+      const incomingState = compactStateForStorage((useBackup ? localBackup : data) || {});
+      logStateSizeDiagnostics((useBackup ? localBackup : data) || {}, "load-before-cleanup");
+      logStateSizeDiagnostics(incomingState, "load-after-cleanup");
+      adoptState(incomingState);
       const loadedRev = useBackup ? backupRev : cloudRev;
       if (loadedRev > 0) lastAppliedCloudRevision = loadedRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
@@ -3428,7 +3507,10 @@ async function loadFromCloud(){
         try { saveCloudNow(); } catch (err){ console.warn("Failed to push local backup after cloud load", err); }
       }
     }else if (stateHasMeaningfulData(localBackup)){
-      adoptState(localBackup || {});
+      const incomingBackup = compactStateForStorage(localBackup || {});
+      logStateSizeDiagnostics(localBackup || {}, "backup-before-cleanup");
+      logStateSizeDiagnostics(incomingBackup, "backup-after-cleanup");
+      adoptState(incomingBackup);
       const loadedRev = Number(localBackup?.syncMeta?.rev || 0);
       if (loadedRev > 0) lastAppliedCloudRevision = loadedRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
