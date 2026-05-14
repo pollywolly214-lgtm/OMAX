@@ -28,13 +28,7 @@ const WORKSPACE_ID = (() => {
 function isVercelPreviewRuntime(){
   if (typeof window === "undefined" || !window.location) return false;
   const params = new URLSearchParams(window.location.search || "");
-  const readonlyFlag = params.get("previewReadonly") === "1";
-  if (!readonlyFlag) return false;
-  const host = String(window.location.hostname || "").toLowerCase();
-  if (!(host.endsWith(".vercel.app") || host === "vercel.app")) return false;
-  const subdomain = host.split(".")[0] || "";
-  const isPreviewHost = subdomain.includes("-git-") || subdomain.includes("---");
-  return isPreviewHost;
+  return params.get("previewReadonly") === "1";
 }
 
 if (typeof window !== "undefined") {
@@ -3269,11 +3263,7 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
-  if (isVercelPreviewRuntime()){
-    const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
-    console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
-    return;
-  }
+  if (isVercelPreviewRuntime()) return;
   hasPendingLocalChanges = true;
   lastLocalMutationAt = Date.now();
   try {
@@ -3289,11 +3279,7 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(){
-  if (isVercelPreviewRuntime()){
-    const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
-    console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
-    return;
-  }
+  if (isVercelPreviewRuntime()) return;
   hasPendingLocalChanges = true;
   lastLocalMutationAt = Date.now();
   try {
