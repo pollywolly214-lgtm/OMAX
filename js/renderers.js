@@ -1830,8 +1830,8 @@ const DASHBOARD_WINDOW_MIN_WIDTH   = 240;
 const DASHBOARD_WINDOW_MIN_HEIGHT  = 160;
 
 const COST_LAYOUT_STORAGE_KEY = "cost_layout_windows_v1";
-const COST_WINDOW_MIN_WIDTH   = 240;
-const COST_WINDOW_MIN_HEIGHT  = 160;
+const COST_WINDOW_MIN_WIDTH   = 300;
+const COST_WINDOW_MIN_HEIGHT  = 200;
 const COST_HISTORY_SUPPRESS_KEY = "cost_history_suppressed_v1";
 
 const JOB_LAYOUT_STORAGE_KEY = "job_layout_windows_v1";
@@ -2198,6 +2198,7 @@ function persistDashboardLayout(state){
   }
   if (!cloud.loaded) changed = true;
   if (changed && typeof saveCloudDebounced === "function"){
+    console.info("Layout change persisted", { layout: "dashboardLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true });
     try { saveCloudDebounced(); }
     catch (err) { console.warn("Unable to schedule cloud save for dashboard layout", err); }
   }
@@ -3384,6 +3385,19 @@ function getCostLayoutState(){
 function hasSavedCostLayout(state){
   return !!(state && state.layoutStored);
 }
+function getCostDefaultBox(id, index = 0){
+  const defaults = {
+    overview: { width: 500, height: 360 },
+    chart: { width: 500, height: 360 },
+    weeklyReports: { width: 460, height: 320 },
+    purchaseHistory: { width: 460, height: 320 },
+    inventorySummary: { width: 440, height: 300 }
+  };
+  const base = defaults[id] || { width: 440, height: 320 };
+  const col = index % 2;
+  const row = Math.floor(index / 2);
+  return { x: col * (base.width + 20), y: row * (base.height + 20), width: base.width, height: base.height };
+}
 
 function persistCostLayout(state){
   if (!state) return;
@@ -3413,6 +3427,7 @@ function persistCostLayout(state){
   }
   if (!cloud.loaded) changed = true;
   if (changed && typeof saveCloudDebounced === "function"){
+    console.info("Cost layout saved", { bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), windowCount: Object.keys(layoutClone || {}).length, saveTriggered: true });
     try { saveCloudDebounced(); }
     catch (err) { console.warn("Unable to schedule cloud save for cost layout", err); }
   }
@@ -3450,19 +3465,18 @@ function syncCostLayoutEntries(state){
   const rootRect = state.root.getBoundingClientRect();
   const useExisting = state.root.classList.contains("has-custom-layout") && Object.keys(layout).length;
   const seen = new Set();
-  state.windows.forEach(win => {
+  state.windows.forEach((win, index) => {
     if (!win || !win.dataset) return;
     const id = String(win.dataset.costWindow || "");
     if (!id) return;
     seen.add(id);
     if (!layout[id]){
       if (useExisting){
-        const fallbackWidth = Math.max(COST_WINDOW_MIN_WIDTH, Math.round(win.offsetWidth) || COST_WINDOW_MIN_WIDTH);
-        const fallbackHeight = Math.max(COST_WINDOW_MIN_HEIGHT, Math.round(win.offsetHeight) || COST_WINDOW_MIN_HEIGHT);
-        const offsetY = costLayoutMaxBottom(layout) + 24;
-        layout[id] = { x: 0, y: offsetY, width: fallbackWidth, height: fallbackHeight };
+        const preset = getCostDefaultBox(id, index);
+        const offsetY = costLayoutMaxBottom(layout) + 20;
+        layout[id] = { x: preset.x, y: Math.max(preset.y, offsetY), width: preset.width, height: preset.height };
       }else{
-        layout[id] = captureCostWindowRect(win, rootRect);
+        layout[id] = getCostDefaultBox(id, index);
       }
     }
   });
@@ -3521,7 +3535,12 @@ function applyCostLayout(state){
     scheduleCostLayoutRefresh(state);
     return;
   }
-  const responsiveLayout = getResponsiveLayout(state, COST_WINDOW_MIN_WIDTH, COST_WINDOW_MIN_HEIGHT);
+  const responsiveLayout = {};
+  const rootWidth = getLayoutRootWidth(state);
+  Object.entries(state?.layoutById || {}).forEach(([id, box]) => {
+    const adjusted = clampLayoutBox(box, rootWidth, COST_WINDOW_MIN_WIDTH, COST_WINDOW_MIN_HEIGHT);
+    if (adjusted) responsiveLayout[id] = adjusted;
+  });
   state.activeLayoutById = responsiveLayout;
   state.windows.forEach(win => {
     if (!win || !win.dataset) return;
@@ -3811,6 +3830,7 @@ function setupCostLayout(){
   }
   syncCostLayoutEntries(state);
   applyCostLayout(state);
+  console.info("Cost layout restored", { bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(state.layoutById || {}) : 0), windowCount: Object.keys(state.layoutById || {}).length });
   updateCostEditUi(state);
   if (state.editing){
     addCostWindowHandles(state);
@@ -3923,6 +3943,7 @@ function persistJobLayout(state){
   }
   if (!cloud.loaded) changed = true;
   if (changed && typeof saveCloudDebounced === "function"){
+    console.info("Layout change persisted", { layout: "jobLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true });
     try { saveCloudDebounced(); }
     catch (err) { console.warn("Unable to schedule cloud save for jobs layout", err); }
   }
