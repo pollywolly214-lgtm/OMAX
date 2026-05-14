@@ -28,7 +28,13 @@ const WORKSPACE_ID = (() => {
 function isVercelPreviewRuntime(){
   if (typeof window === "undefined" || !window.location) return false;
   const params = new URLSearchParams(window.location.search || "");
-  return params.get("previewReadonly") === "1";
+  const readonlyFlag = params.get("previewReadonly") === "1";
+  if (!readonlyFlag) return false;
+  const host = String(window.location.hostname || "").toLowerCase();
+  if (!(host.endsWith(".vercel.app") || host === "vercel.app")) return false;
+  const subdomain = host.split(".")[0] || "";
+  const isPreviewHost = subdomain.includes("-git-") || subdomain.includes("---");
+  return isPreviewHost;
 }
 
 if (typeof window !== "undefined") {
@@ -528,12 +534,69 @@ const CLOUD_SYNC_CLIENT_KEY = "cloud_sync_client_id_v1";
 const LOCAL_STATE_BACKUP_KEY = "omax_local_state_backup_v1";
 
 
+const FIRESTORE_WARN_BYTES = 900000;
+const FIRESTORE_BLOCK_BYTES = 1000000;
+const SAVE_LOG_THROTTLE_MS = 30000;
+let lastSaveLogWriteAt = 0;
+
+function estimatePayloadBytes(payload){
+  try {
+    const json = JSON.stringify(payload || {});
+    if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(json).length;
+    return new Blob([json]).size;
+  } catch (_err){
+    return Number.MAX_SAFE_INTEGER;
+  }
+}
+
+function compactStateForStorage(raw, { forBackup = false } = {}){
+  const snap = raw && typeof raw === "object" ? { ...raw } : {};
+  // Safe-to-trim fields: operational/debug/save logs that can grow unbounded.
+  delete snap.syncProcessLog;
+  delete snap.__lastSnapshot;
+  delete snap.__lastSnapshotForFlow;
+  delete snap.__lastDataFlowFingerprint;
+  if (forBackup){
+    delete snap.deletedItems;
+    delete snap.opportunityRollups;
+    delete snap.weeklyCostReports;
+  }
+  return snap;
+}
+
+function buildEmergencyBackup(snapshot){
+  const src = snapshot && typeof snapshot === "object" ? snapshot : {};
+  return {
+    schema: src.schema || APP_SCHEMA,
+    tasksInterval: Array.isArray(src.tasksInterval) ? src.tasksInterval : [],
+    tasksAsReq: Array.isArray(src.tasksAsReq) ? src.tasksAsReq : [],
+    inventory: Array.isArray(src.inventory) ? src.inventory : [],
+    inventoryFolders: Array.isArray(src.inventoryFolders) ? src.inventoryFolders : [],
+    cuttingJobs: Array.isArray(src.cuttingJobs) ? src.cuttingJobs : [],
+    completedCuttingJobs: Array.isArray(src.completedCuttingJobs) ? src.completedCuttingJobs : [],
+    orderRequests: Array.isArray(src.orderRequests) ? src.orderRequests : [],
+    receiptTrackerWeeks: Array.isArray(src.receiptTrackerWeeks) ? src.receiptTrackerWeeks : [],
+    appConfig: src.appConfig || normalizeAppConfig(window.appConfig),
+    settingsFolders: Array.isArray(src.settingsFolders) ? src.settingsFolders : []
+  };
+}
+
 function persistLocalStateBackup(snapshot){
   if (typeof window === "undefined" || !window.localStorage || !snapshot) return;
+  const trimmed = compactStateForStorage(snapshot, { forBackup:true });
   try {
-    window.localStorage.setItem(LOCAL_STATE_BACKUP_KEY, JSON.stringify(snapshot));
+    window.localStorage.setItem(LOCAL_STATE_BACKUP_KEY, JSON.stringify(trimmed));
+    console.info("Local backup saved", { bytes: estimatePayloadBytes(trimmed) });
   } catch (err){
-    console.warn("Failed to persist local state backup", err);
+    console.warn("Local backup primary write failed", err);
+    try {
+      window.localStorage.removeItem(LOCAL_STATE_BACKUP_KEY);
+      const emergency = buildEmergencyBackup(trimmed);
+      window.localStorage.setItem(LOCAL_STATE_BACKUP_KEY, JSON.stringify(emergency));
+      console.warn("Local backup saved in emergency mode", { bytes: estimatePayloadBytes(emergency) });
+    } catch (retryErr){
+      console.error("Failed to persist local backup even in emergency mode", retryErr);
+    }
   }
 }
 
@@ -2158,9 +2221,12 @@ function snapshotState(){
     weeklyCostReports: Array.isArray(window.weeklyCostReports)
       ? window.weeklyCostReports.map(entry => ({ ...entry }))
       : [],
-    syncProcessLog: Array.isArray(window.syncProcessLog)
-      ? window.syncProcessLog.map(entry => ({ ...entry }))
-      : [],
+    saveMeta: {
+      lastSavedAt: new Date().toISOString(),
+      lastSaveStatus: "pending",
+      lastSaveError: "",
+      lastSaveSizeBytes: 0
+    },
     appConfig: normalizeAppConfig(window.appConfig),
     pumpEff: safePumpEff,
     deletedItems: trashSnapshot,
@@ -2852,7 +2918,7 @@ function adoptState(doc){
   opportunityRollups = Array.isArray(data.opportunityRollups) ? data.opportunityRollups : [];
   weeklyCostReports = Array.isArray(data.weeklyCostReports) ? data.weeklyCostReports.map(entry => ({ ...entry })) : [];
   receiptTrackerWeeks = Array.isArray(data.receiptTrackerWeeks) ? data.receiptTrackerWeeks.map(entry => ({ ...entry })) : [];
-  window.syncProcessLog = Array.isArray(data.syncProcessLog) ? data.syncProcessLog.map(entry => ({ ...entry })) : (Array.isArray(window.syncProcessLog) ? window.syncProcessLog : []);
+  window.syncProcessLog = Array.isArray(data.syncProcessLog) ? data.syncProcessLog.slice(0,100).map(entry => ({ ...entry })) : (Array.isArray(window.syncProcessLog) ? window.syncProcessLog.slice(0,100) : []);
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -3050,14 +3116,20 @@ function adoptState(doc){
 const saveCloudInternal = debounce(async ()=>{
   if (!FB.ready || !FB.docRef) return;
   try{
-    const snap = snapshotState();
+    const rawSnap = snapshotState();
+    const snap = compactStateForStorage(rawSnap);
+    const sizeBytes = estimatePayloadBytes(snap);
+    if (sizeBytes >= FIRESTORE_WARN_BYTES){
+      console.warn("Cloud state size warning", { sizeBytes, warnAt: FIRESTORE_WARN_BYTES, blockAt: FIRESTORE_BLOCK_BYTES });
+    }
+    if (sizeBytes >= FIRESTORE_BLOCK_BYTES){
+      console.error("Cloud save blocked: state payload too large", { sizeBytes, blockAt: FIRESTORE_BLOCK_BYTES });
+      hasPendingLocalChanges = true;
+      persistLocalStateBackup(snap);
+      return;
+    }
     try {
-      const prevLogLen = Array.isArray(window.syncProcessLog) ? window.syncProcessLog.length : 0;
       recordDataFlowEvent("cloud_save", snap);
-      const nextLogLen = Array.isArray(window.syncProcessLog) ? window.syncProcessLog.length : 0;
-      if (nextLogLen !== prevLogLen){
-        snap.syncProcessLog = window.syncProcessLog.slice();
-      }
     } catch (err) {
       console.warn("Failed to record save flow event", err);
     }
@@ -3071,8 +3143,18 @@ const saveCloudInternal = debounce(async ()=>{
       snap.pumpEff = mergePumpEffForSave(snap.pumpEff, remoteData.pumpEff);
     }
     const writeRev = Number(snap?.syncMeta?.rev || 0);
+    snap.saveMeta = { lastSavedAt: new Date().toISOString(), lastSaveStatus: "saved", lastSaveError: "", lastSaveSizeBytes: sizeBytes };
     await FB.docRef.set(snap, { merge:true });
     if (writeRev > 0) lastAppliedCloudRevision = writeRev;
+    if (FB.workspaceDoc){
+      const nowMs = Date.now();
+      if (nowMs - lastSaveLogWriteAt >= SAVE_LOG_THROTTLE_MS){
+        lastSaveLogWriteAt = nowMs;
+        try {
+          await FB.workspaceDoc.collection("app").doc("saveLogs").collection("entries").add({ atISO: new Date().toISOString(), status: "saved", sizeBytes, workspaceId: WORKSPACE_ID });
+        } catch (logErr){ console.warn("Failed to write save log entry", logErr); }
+      }
+    }
     if (window.DEBUG_MODE){
       const el = document.getElementById("dbgSnap");
       if (el) el.value = JSON.stringify(snap, null, 2);
@@ -3087,7 +3169,7 @@ const saveCloudInternal = debounce(async ()=>{
   }catch(e){
     console.error("Cloud save failed:", e);
   }
-}, 300);
+}, 1800);
 function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
   try {
     if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
@@ -3263,7 +3345,11 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
-  if (isVercelPreviewRuntime()) return;
+  if (isVercelPreviewRuntime()){
+    const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
+    console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
+    return;
+  }
   hasPendingLocalChanges = true;
   lastLocalMutationAt = Date.now();
   try {
@@ -3279,7 +3365,11 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(){
-  if (isVercelPreviewRuntime()) return;
+  if (isVercelPreviewRuntime()){
+    const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
+    console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
+    return;
+  }
   hasPendingLocalChanges = true;
   lastLocalMutationAt = Date.now();
   try {
