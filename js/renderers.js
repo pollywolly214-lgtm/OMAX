@@ -2198,6 +2198,7 @@ function persistDashboardLayout(state){
   }
   if (!cloud.loaded) changed = true;
   if (changed && typeof saveCloudDebounced === "function"){
+    console.info("Layout change persisted", { layout: "dashboardLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true });
     try { saveCloudDebounced(); }
     catch (err) { console.warn("Unable to schedule cloud save for dashboard layout", err); }
   }
@@ -3413,6 +3414,7 @@ function persistCostLayout(state){
   }
   if (!cloud.loaded) changed = true;
   if (changed && typeof saveCloudDebounced === "function"){
+    console.info("Layout change persisted", { layout: "costLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true });
     try { saveCloudDebounced(); }
     catch (err) { console.warn("Unable to schedule cloud save for cost layout", err); }
   }
@@ -3923,6 +3925,7 @@ function persistJobLayout(state){
   }
   if (!cloud.loaded) changed = true;
   if (changed && typeof saveCloudDebounced === "function"){
+    console.info("Layout change persisted", { layout: "jobLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true });
     try { saveCloudDebounced(); }
     catch (err) { console.warn("Unable to schedule cloud save for jobs layout", err); }
   }
