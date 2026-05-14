@@ -534,8 +534,9 @@ const CLOUD_SYNC_CLIENT_KEY = "cloud_sync_client_id_v1";
 const LOCAL_STATE_BACKUP_KEY = "omax_local_state_backup_v1";
 
 
-const FIRESTORE_WARN_BYTES = 900000;
-const FIRESTORE_BLOCK_BYTES = 1000000;
+const FIRESTORE_WARN_BYTES = 850000;
+const FIRESTORE_STRONG_WARN_BYTES = 900000;
+const FIRESTORE_BLOCK_BYTES = 975000;
 const SAVE_LOG_THROTTLE_MS = 30000;
 let lastSaveLogWriteAt = 0;
 
@@ -549,6 +550,86 @@ function estimatePayloadBytes(payload){
   }
 }
 
+
+const LARGE_CONTENT_KEY_PATTERN = /(base64|filedata|dataurl|previewurl|previewdata|filecontent|content|raw|blob|attachment|image|file|dxf|ord|omx)/i;
+const SAFE_FILE_METADATA_KEY_PATTERN = /^(name|type|size|label|path|storagepath|externalurl|downloadurl|onedriveurl|attachedatiso|uploadedatiso|extension)$/i;
+const EMBEDDED_CONTENT_KEY_PATTERN = /^(dataurl|previewurl|previewdata|filedata|filecontent|raw|content|blob|base64)$/i;
+
+function isDataUrl(value){
+  const raw = String(value || "").trim();
+  return /^data:(image|application)\//i.test(raw);
+}
+
+function isLikelyEmbeddedFileContent(key, value){
+  if (typeof value !== "string") return false;
+  const raw = String(value || "");
+  const normalizedKey = String(key || "").toLowerCase();
+  if (isDataUrl(raw)) return true;
+  if (EMBEDDED_CONTENT_KEY_PATTERN.test(normalizedKey)) return true;
+  if (/base64|blob|binary|dxf|ord|omx/i.test(normalizedKey) && raw.length > 256) return true;
+  if (/^https?:\/\//i.test(raw)) return false;
+  return raw.length > 8192 && LARGE_CONTENT_KEY_PATTERN.test(normalizedKey);
+}
+
+function isSafeMetadataString(key, value){
+  const raw = String(value || "").trim();
+  if (!SAFE_FILE_METADATA_KEY_PATTERN.test(String(key || ""))) return false;
+  if (isDataUrl(raw)) return false;
+  if (raw.length > 2048) return false;
+  return true;
+}
+function isProtectedBusinessDataKey(key){
+  const normalized = String(key || "").toLowerCase();
+  return /(tasksinterval|tasksasreq|completeddates|manualhistory|calendardateiso|recurrence|removedoccurrences|occurrenceoverrides|maintenancetasksv2|maintenanceoccurrencesv2|maintenancecalendarinstancesv2|settingsfolders|folders|inventory|inventoryfolders|inventorymaterials|inventorytransactions|orderrequests|receipttrackerweeks|purchase|vendor|tolerance|inspection|quality|layout|dashboardlayout|costlayout|joblayout|tolerancelayout)/i.test(normalized);
+}
+
+function sanitizeValueForStorage(value, { dropHeavyHistory = false } = {}){
+  if (Array.isArray(value)) return value.map(v => sanitizeValueForStorage(v, { dropHeavyHistory }));
+  if (!value || typeof value !== "object"){
+    if (typeof value === "string" && (value.startsWith("data:image") || value.length > 200000)) return "";
+    return value;
+  }
+  const out = {};
+  for (const [k,v] of Object.entries(value)){
+    const key = String(k || "");
+    if (/^(__|debug|cache|preview)/i.test(key)) continue;
+    if (dropHeavyHistory && !isProtectedBusinessDataKey(key) && /(syncprocesslog|logs|deleteditems|reports|rollups|savelogs)/i.test(key)) continue;
+    if (typeof v === "string" && (isLikelyEmbeddedFileContent(key, v) || v.length > 200000)){
+      if (isSafeMetadataString(key, v)) out[key] = v;
+      continue;
+    }
+    out[k] = sanitizeValueForStorage(v, { dropHeavyHistory });
+  }
+  return out;
+}
+
+function estimateTopLevelFieldSizes(state){
+  const src = state && typeof state === "object" ? state : {};
+  return Object.keys(src).map((field)=>({ field, bytes: estimatePayloadBytes(src[field]) })).sort((a,b)=>b.bytes-a.bytes);
+}
+
+function summarizeLargestNested(fieldName, value){
+  if (!Array.isArray(value)) return [];
+  return value.map((item, index)=>{
+    const keys = item && typeof item === "object" ? Object.keys(item).filter((k)=>LARGE_CONTENT_KEY_PATTERN.test(k) || (typeof item[k] === "string" && item[k].length > 5000)).slice(0,8) : [];
+    return { index, id: item?.id || "", name: item?.name || item?.title || "", bytes: estimatePayloadBytes(item), suspiciousKeys: keys.join(",") };
+  }).sort((a,b)=>b.bytes-a.bytes).slice(0,10);
+}
+
+function logStateSizeDiagnostics(state, label = "state"){
+  const ranked = estimateTopLevelFieldSizes(state);
+  console.info(`Field size diagnostics (${label})`);
+  console.table(ranked);
+  ranked.slice(0,3).forEach((entry)=>{
+    const nested = summarizeLargestNested(entry.field, state?.[entry.field]);
+    if (nested.length){
+      console.info(`Nested size diagnostics for ${entry.field}`);
+      console.table(nested);
+    }
+  });
+  return ranked;
+}
+
 function compactStateForStorage(raw, { forBackup = false } = {}){
   const snap = raw && typeof raw === "object" ? { ...raw } : {};
   // Safe-to-trim fields: operational/debug/save logs that can grow unbounded.
@@ -556,12 +637,20 @@ function compactStateForStorage(raw, { forBackup = false } = {}){
   delete snap.__lastSnapshot;
   delete snap.__lastSnapshotForFlow;
   delete snap.__lastDataFlowFingerprint;
+  snap.tasksInterval = sanitizeValueForStorage(snap.tasksInterval);
+  snap.tasksAsReq = sanitizeValueForStorage(snap.tasksAsReq);
+  snap.inventory = sanitizeValueForStorage(snap.inventory);
+  snap.orderRequests = sanitizeValueForStorage(snap.orderRequests);
+  snap.cuttingJobs = sanitizeValueForStorage(snap.cuttingJobs);
+  snap.completedCuttingJobs = sanitizeValueForStorage(snap.completedCuttingJobs);
+  snap.totalHistory = Array.isArray(snap.totalHistory) ? snap.totalHistory.slice(-500) : [];
+  snap.dailyCutHours = Array.isArray(snap.dailyCutHours) ? snap.dailyCutHours.slice(-365) : [];
   if (forBackup){
     delete snap.deletedItems;
     delete snap.opportunityRollups;
     delete snap.weeklyCostReports;
   }
-  return snap;
+  return sanitizeValueForStorage(snap, { dropHeavyHistory: forBackup });
 }
 
 function buildEmergencyBackup(snapshot){
@@ -581,6 +670,96 @@ function buildEmergencyBackup(snapshot){
   };
 }
 
+function buildTinyCriticalBackup(snapshot){
+  const src = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const base = {
+    schema: src.schema || APP_SCHEMA,
+    tasksInterval: src.tasksInterval || [],
+    tasksAsReq: src.tasksAsReq || [],
+    maintenanceTasksV2: src.maintenanceTasksV2 || [],
+    maintenanceOccurrencesV2: src.maintenanceOccurrencesV2 || [],
+    maintenanceCalendarInstancesV2: src.maintenanceCalendarInstancesV2 || [],
+    inventory: src.inventory || [],
+    inventoryFolders: src.inventoryFolders || [],
+    inventoryMaterials: src.inventoryMaterials || [],
+    inventoryTransactions: src.inventoryTransactions || [],
+    orderRequests: src.orderRequests || [],
+    receiptTrackerWeeks: src.receiptTrackerWeeks || [],
+    settingsFolders: src.settingsFolders || [],
+    folders: src.folders || [],
+    jobFolders: src.jobFolders || [],
+    dashboardLayout: src.dashboardLayout || {},
+    costLayout: src.costLayout || {},
+    jobLayout: src.jobLayout || {},
+    toleranceLayout: src.toleranceLayout || {},
+    appConfig: src.appConfig || normalizeAppConfig(window.appConfig)
+  };
+  for (const [k,v] of Object.entries(src)){
+    if (/(tolerance|inspection|quality)/i.test(k) && !(k in base)) base[k] = v;
+  }
+  const tiny = sanitizeValueForStorage(base, { dropHeavyHistory: true });
+  console.info("Tiny backup included keys", Object.keys(tiny).sort());
+  return tiny;
+}
+
+function collectMaintenanceHistoryMetrics(state){
+  const src = state && typeof state === "object" ? state : {};
+  const listA = Array.isArray(src.tasksInterval) ? src.tasksInterval : [];
+  const listB = Array.isArray(src.tasksAsReq) ? src.tasksAsReq : [];
+  const countBy = (list, key)=>list.reduce((acc,t)=>acc + (Array.isArray(t?.[key]) ? t[key].length : 0), 0);
+  return {
+    tasksInterval: listA.length,
+    tasksAsReq: listB.length,
+    completedDatesCount: countBy(listA, "completedDates") + countBy(listB, "completedDates"),
+    manualHistoryCount: countBy(listA, "manualHistory") + countBy(listB, "manualHistory"),
+    maintenanceOccurrencesV2Count: Array.isArray(src.maintenanceOccurrencesV2) ? src.maintenanceOccurrencesV2.length : 0,
+    maintenanceCalendarInstancesV2Count: Array.isArray(src.maintenanceCalendarInstancesV2) ? src.maintenanceCalendarInstancesV2.length : 0
+  };
+}
+function logMaintenanceHistoryDiagnostics(source, state){
+  const m = collectMaintenanceHistoryMetrics(state);
+  console.info("Maintenance history diagnostics", { source, ...m, missingHistory: (m.completedDatesCount + m.manualHistoryCount) === 0 && (m.tasksInterval + m.tasksAsReq) > 0 });
+  return m;
+}
+function shouldPreferLocalBackup(cloudState, localState){
+  const c = collectMaintenanceHistoryMetrics(cloudState);
+  const l = collectMaintenanceHistoryMetrics(localState);
+  if ((l.completedDatesCount + l.manualHistoryCount + l.maintenanceOccurrencesV2Count) + 20 < (c.completedDatesCount + c.manualHistoryCount + c.maintenanceOccurrencesV2Count)) return false;
+  return true;
+}
+function collectCoreBusinessMetrics(state){
+  const src = state && typeof state === "object" ? state : {};
+  const maintenance = collectMaintenanceHistoryMetrics(src);
+  const orderLineItemCount = (Array.isArray(src.orderRequests) ? src.orderRequests : []).reduce((n,r)=>n + (Array.isArray(r?.items) ? r.items.length : 0), 0);
+  const toleranceKeys = Object.keys(src).filter((k)=>/(tolerance|inspection|quality)/i.test(k));
+  return {
+    ...maintenance,
+    inventoryCount: Array.isArray(src.inventory) ? src.inventory.length : 0,
+    inventoryFoldersCount: Array.isArray(src.inventoryFolders) ? src.inventoryFolders.length : 0,
+    inventoryMaterialsCount: Array.isArray(src.inventoryMaterials) ? src.inventoryMaterials.length : 0,
+    inventoryTransactionsCount: Array.isArray(src.inventoryTransactions) ? src.inventoryTransactions.length : 0,
+    orderRequestsCount: Array.isArray(src.orderRequests) ? src.orderRequests.length : 0,
+    orderLineItemCount,
+    receiptTrackerWeeksCount: Array.isArray(src.receiptTrackerWeeks) ? src.receiptTrackerWeeks.length : 0,
+    settingsFoldersCount: Array.isArray(src.settingsFolders) ? src.settingsFolders.length : 0,
+    foldersCount: Array.isArray(src.folders) ? src.folders.length : 0,
+    toleranceFieldCount: toleranceKeys.length,
+    layoutPresent: Boolean(src.dashboardLayout && src.costLayout && src.jobLayout)
+  };
+}
+function logCoreBusinessDiagnostics(source, state){
+  const metrics = collectCoreBusinessMetrics(state);
+  console.info("Core business data diagnostics", { source, ...metrics });
+  return metrics;
+}
+function safeCleanupLoadedState(raw){
+  const src = raw && typeof raw === "object" ? { ...raw } : {};
+  delete src.syncProcessLog; delete src.__lastSnapshot; delete src.__lastSnapshotForFlow; delete src.__lastDataFlowFingerprint;
+  src.cuttingJobs = sanitizeValueForStorage(src.cuttingJobs);
+  src.completedCuttingJobs = sanitizeValueForStorage(src.completedCuttingJobs);
+  return src;
+}
+
 function persistLocalStateBackup(snapshot){
   if (typeof window === "undefined" || !window.localStorage || !snapshot) return;
   const trimmed = compactStateForStorage(snapshot, { forBackup:true });
@@ -588,7 +767,7 @@ function persistLocalStateBackup(snapshot){
     window.localStorage.setItem(LOCAL_STATE_BACKUP_KEY, JSON.stringify(trimmed));
     console.info("Local backup saved", { bytes: estimatePayloadBytes(trimmed) });
   } catch (err){
-    console.warn("Local backup primary write failed", err);
+    console.warn("Local backup primary write failed", err, { bytes: estimatePayloadBytes(trimmed) });
     try {
       window.localStorage.removeItem(LOCAL_STATE_BACKUP_KEY);
       const emergency = buildEmergencyBackup(trimmed);
@@ -596,6 +775,15 @@ function persistLocalStateBackup(snapshot){
       console.warn("Local backup saved in emergency mode", { bytes: estimatePayloadBytes(emergency) });
     } catch (retryErr){
       console.error("Failed to persist local backup even in emergency mode", retryErr);
+      try {
+        window.localStorage.removeItem(LOCAL_STATE_BACKUP_KEY);
+        ["omax_debug_cache","omax_sync_cache","omax_render_cache","omax_local_state_backup_v0"].forEach((k)=>window.localStorage.removeItem(k));
+        const tiny = buildTinyCriticalBackup(trimmed);
+        window.localStorage.setItem(LOCAL_STATE_BACKUP_KEY, JSON.stringify(tiny));
+        console.warn("Local backup saved in tiny mode", { bytes: estimatePayloadBytes(tiny) });
+      } catch (tinyErr){
+        console.error("Failed to persist tiny local backup", tinyErr);
+      }
     }
   }
 }
@@ -2155,14 +2343,18 @@ function applyJobFileCacheToJobs(jobs, cache){
   });
 }
 
-function stripJobFileDataUrls(jobs){
+function stripJobFileDataUrls(jobs, tracker = null){
   if (!Array.isArray(jobs)) return [];
   return jobs.map(job => {
     if (!job || typeof job !== "object") return job;
     const files = Array.isArray(job.files)
       ? job.files.map(file => {
           if (!file || typeof file !== "object") return file;
-          const { dataUrl, ...rest } = file;
+          const rest = {};
+          for (const [k,v] of Object.entries(file)){
+            if (typeof v === "string" && isLikelyEmbeddedFileContent(k, v)){ if (tracker) tracker.count += 1; continue; }
+            rest[k] = v;
+          }
           return rest;
         })
       : [];
@@ -2172,6 +2364,7 @@ function stripJobFileDataUrls(jobs){
 
 function snapshotState(){
   refreshGlobalCollections();
+  const strippedTracker = { count: 0 };
   const jobFileCache = readJobFileCache();
   syncJobFileCacheFromJobs(cuttingJobs, jobFileCache);
   syncJobFileCacheFromJobs(completedCuttingJobs, jobFileCache);
@@ -2195,7 +2388,7 @@ function snapshotState(){
   const jobLayoutSource = window.cloudJobLayoutLoaded
     ? window.cloudJobLayout
     : (window.jobLayoutState && window.jobLayoutState.layoutById);
-  return {
+  const result = {
     schema: window.APP_SCHEMA || APP_SCHEMA,
     totalHistory,
     tasksInterval,
@@ -2204,8 +2397,8 @@ function snapshotState(){
     inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.map(folder => ({ ...folder })) : [],
     inventoryMaterials: normalizeInventoryMaterials(window.inventoryMaterials),
     inventorySection: String(window.inventorySection || "items") === "material" ? "material" : "items",
-    cuttingJobs: stripJobFileDataUrls(cuttingJobs),
-    completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs),
+    cuttingJobs: stripJobFileDataUrls(cuttingJobs, strippedTracker),
+    completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs, strippedTracker),
     orderRequests,
     receiptTrackerWeeks: Array.isArray(window.receiptTrackerWeeks)
       ? window.receiptTrackerWeeks.map(entry => ({ ...entry }))
@@ -2221,6 +2414,9 @@ function snapshotState(){
     weeklyCostReports: Array.isArray(window.weeklyCostReports)
       ? window.weeklyCostReports.map(entry => ({ ...entry }))
       : [],
+    maintenanceTasksV2: Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2.map(entry => ({ ...entry })) : [],
+    maintenanceOccurrencesV2: Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2.map(entry => ({ ...entry })) : [],
+    maintenanceCalendarInstancesV2: Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2.map(entry => ({ ...entry })) : [],
     saveMeta: {
       lastSavedAt: new Date().toISOString(),
       lastSaveStatus: "pending",
@@ -2242,6 +2438,8 @@ function snapshotState(){
       updatedBy: getCloudSyncClientId()
     }
   };
+  if (typeof window !== "undefined") window.__lastStrippedHeavyFields = strippedTracker.count;
+  return result;
 }
 
 /* ======================== HISTORY ========================= */
@@ -2932,6 +3130,9 @@ function adoptState(doc){
   window.opportunityRollups = opportunityRollups;
   window.weeklyCostReports = weeklyCostReports;
   window.receiptTrackerWeeks = receiptTrackerWeeks;
+  window.maintenanceTasksV2 = Array.isArray(data.maintenanceTasksV2) ? data.maintenanceTasksV2.map(entry => ({ ...entry })) : (Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : []);
+  window.maintenanceOccurrencesV2 = Array.isArray(data.maintenanceOccurrencesV2) ? data.maintenanceOccurrencesV2.map(entry => ({ ...entry })) : (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : []);
+  window.maintenanceCalendarInstancesV2 = Array.isArray(data.maintenanceCalendarInstancesV2) ? data.maintenanceCalendarInstancesV2.map(entry => ({ ...entry })) : (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []);
   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
   window.deletedItems = deletedItems;
   purgeExpiredDeletedItems();
@@ -3118,12 +3319,27 @@ const saveCloudInternal = debounce(async ()=>{
   try{
     const rawSnap = snapshotState();
     const snap = compactStateForStorage(rawSnap);
+    const pendingMetrics = logMaintenanceHistoryDiagnostics("before-save", snap);
+    const baselineMetrics = collectMaintenanceHistoryMetrics(window.__lastLoadedCloudState || {});
+    const pendingCore = logCoreBusinessDiagnostics("before-save", snap);
+    const baselineCore = collectCoreBusinessMetrics(window.__lastLoadedCloudState || {});
+    if ((pendingMetrics.completedDatesCount + pendingMetrics.manualHistoryCount + pendingMetrics.maintenanceOccurrencesV2Count + 10) < (baselineMetrics.completedDatesCount + baselineMetrics.manualHistoryCount + baselineMetrics.maintenanceOccurrencesV2Count)){
+      console.error("Cloud save blocked: maintenance completion history would be reduced unexpectedly.", { pendingMetrics, baselineMetrics });
+      return;
+    }
+    if (pendingCore.inventoryCount + 5 < baselineCore.inventoryCount || pendingCore.orderRequestsCount + 2 < baselineCore.orderRequestsCount || pendingCore.orderLineItemCount + 5 < baselineCore.orderLineItemCount || pendingCore.settingsFoldersCount + 1 < baselineCore.settingsFoldersCount || pendingCore.toleranceFieldCount + 1 < baselineCore.toleranceFieldCount || (!pendingCore.layoutPresent && baselineCore.layoutPresent)){
+      console.error("Cloud save blocked: core business data would be reduced unexpectedly.", { pendingCore, baselineCore });
+      return;
+    }
     const sizeBytes = estimatePayloadBytes(snap);
     if (sizeBytes >= FIRESTORE_WARN_BYTES){
-      console.warn("Cloud state size warning", { sizeBytes, warnAt: FIRESTORE_WARN_BYTES, blockAt: FIRESTORE_BLOCK_BYTES });
+      console.warn("Cloud state size warning", { sizeBytes, warnAt: FIRESTORE_WARN_BYTES, strongWarnAt: FIRESTORE_STRONG_WARN_BYTES, blockAt: FIRESTORE_BLOCK_BYTES });
+      logStateSizeDiagnostics(snap, "before-save");
+      if (sizeBytes >= FIRESTORE_STRONG_WARN_BYTES) console.error("Cloud state size strong warning", { sizeBytes, strongWarnAt: FIRESTORE_STRONG_WARN_BYTES });
     }
     if (sizeBytes >= FIRESTORE_BLOCK_BYTES){
       console.error("Cloud save blocked: state payload too large", { sizeBytes, blockAt: FIRESTORE_BLOCK_BYTES });
+      logStateSizeDiagnostics(snap, "blocked-save");
       hasPendingLocalChanges = true;
       persistLocalStateBackup(snap);
       return;
@@ -3145,6 +3361,13 @@ const saveCloudInternal = debounce(async ()=>{
     const writeRev = Number(snap?.syncMeta?.rev || 0);
     snap.saveMeta = { lastSavedAt: new Date().toISOString(), lastSaveStatus: "saved", lastSaveError: "", lastSaveSizeBytes: sizeBytes };
     await FB.docRef.set(snap, { merge:true });
+    console.info("Cloud save succeeded", {
+      workspaceId: WORKSPACE_ID,
+      path: FB.docRef?.path || "",
+      sizeBytes,
+      strippedHeavyFields: Number(window.__lastStrippedHeavyFields || 0),
+      layoutsIncluded: Boolean(snap && snap.dashboardLayout && snap.costLayout && snap.jobLayout)
+    });
     if (writeRev > 0) lastAppliedCloudRevision = writeRev;
     if (FB.workspaceDoc){
       const nowMs = Date.now();
@@ -3345,6 +3568,7 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
+  if (window.__recoveryInspectMode || window.__autosaveDisabled) return;
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
     console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
@@ -3365,6 +3589,7 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(){
+  if (window.__recoveryInspectMode || window.__autosaveDisabled) return;
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
     console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
@@ -3394,12 +3619,35 @@ function saveCloudNow(){
 
 if (typeof window !== "undefined"){
   window.addEventListener("visibilitychange", ()=>{
+    if (window.__recoveryInspectMode) return;
     if (document.visibilityState === "hidden"){
       saveCloudNow();
     }
   });
-  window.addEventListener("pagehide", ()=>saveCloudNow());
+  window.addEventListener("pagehide", ()=>{ if (!window.__recoveryInspectMode) saveCloudNow(); });
 }
+
+async function runRecoveryInspect(){
+  window.__recoveryInspectMode = true;
+  window.__autosaveDisabled = true;
+  console.warn("Recovery inspect mode enabled: autosave disabled.");
+  let cloudState = null;
+  try {
+    if (FB.ready && FB.docRef){
+      const snap = await FB.docRef.get();
+      cloudState = snap?.exists ? (typeof snap.data === "function" ? snap.data() : snap.data) : null;
+    }
+  } catch (err){ console.warn("Recovery inspect cloud read failed", err); }
+  const localBackup = readLocalStateBackup();
+  const localRaw = (typeof window !== "undefined" && window.localStorage) ? window.localStorage.getItem(LOCAL_STATE_BACKUP_KEY) : null;
+  console.info("Recovery inspect report", {
+    cloudMetrics: collectCoreBusinessMetrics(cloudState || {}),
+    localBackupMetrics: collectCoreBusinessMetrics(localBackup || {}),
+    localBackupBytes: localRaw ? localRaw.length : 0
+  });
+  return { cloudState, localBackup };
+}
+if (typeof window !== "undefined") window.recoveryInspect = runRecoveryInspect;
 async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
   try{
@@ -3419,8 +3667,14 @@ async function loadFromCloud(){
     const backupRev = Number(localBackup?.syncMeta?.rev || 0);
 
     if (stateHasMeaningfulData(data)){
-      const useBackup = stateHasMeaningfulData(localBackup) && backupRev > cloudRev;
-      adoptState((useBackup ? localBackup : data) || {});
+      logMaintenanceHistoryDiagnostics("cloud-before-adopt", data || {});
+      logMaintenanceHistoryDiagnostics("backup-before-adopt", localBackup || {});
+      logCoreBusinessDiagnostics("cloud-before-adopt", data || {});
+      logCoreBusinessDiagnostics("backup-before-adopt", localBackup || {});
+      const useBackup = stateHasMeaningfulData(localBackup) && backupRev > cloudRev && shouldPreferLocalBackup(data || {}, localBackup || {});
+      const incomingState = safeCleanupLoadedState((useBackup ? localBackup : data) || {});
+      adoptState(incomingState);
+      window.__lastLoadedCloudState = cloneStructured(data || {});
       const loadedRev = useBackup ? backupRev : cloudRev;
       if (loadedRev > 0) lastAppliedCloudRevision = loadedRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
@@ -3428,7 +3682,11 @@ async function loadFromCloud(){
         try { saveCloudNow(); } catch (err){ console.warn("Failed to push local backup after cloud load", err); }
       }
     }else if (stateHasMeaningfulData(localBackup)){
-      adoptState(localBackup || {});
+      logMaintenanceHistoryDiagnostics("backup-only-before-adopt", localBackup || {});
+      logCoreBusinessDiagnostics("backup-only-before-adopt", localBackup || {});
+      const incomingBackup = safeCleanupLoadedState(localBackup || {});
+      adoptState(incomingBackup);
+      window.__lastLoadedCloudState = cloneStructured(incomingBackup || {});
       const loadedRev = Number(localBackup?.syncMeta?.rev || 0);
       if (loadedRev > 0) lastAppliedCloudRevision = loadedRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
