@@ -3753,13 +3753,11 @@ function viewJobs(){
           if (f?.source === "onedrive_local_root" && f?.localRelativePath){
             return `<li class="job-file-menu-item"><button type="button" class="link" data-open-local-file data-job-id="${esc(String(job.id || ""))}" data-file-index="${idx}">${safeName}</button></li>`;
           }
-          const hrefRaw = f?.dataUrl || f?.url || f?.externalUrl || f?.downloadUrl || f?.oneDriveUrl || "";
+          const hrefRaw = f?.dataUrl || f?.url || "";
           const href = esc(hrefRaw);
-          const usableLink = !!hrefRaw && !/^data:(image|application)\//i.test(String(hrefRaw || "")) && /^https?:\/\//i.test(String(hrefRaw || ""));
           if (!hrefRaw){
-            return `<li class="job-file-menu-item">${safeName}<span class="small muted"> — File metadata saved only — original file content is not stored.</span></li>`;
+            return `<li class="job-file-menu-item">${safeName}</li>`;
           }
-          if (!usableLink) return `<li class="job-file-menu-item">${safeName}<span class="small muted"> — File metadata saved only — original file content is not stored.</span></li>`;
           return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
         }).join("")
       : "";
@@ -4057,13 +4055,11 @@ function viewJobs(){
           if (f?.source === "onedrive_local_root" && f?.localRelativePath){
             return `<li class="job-file-menu-item"><button type="button" class="link" data-open-local-file data-job-id="${esc(String(j.id || ""))}" data-file-index="${idx}">${safeName}</button></li>`;
           }
-          const hrefRaw = f?.dataUrl || f?.url || f?.externalUrl || f?.downloadUrl || f?.oneDriveUrl || "";
+          const hrefRaw = f?.dataUrl || f?.url || "";
           const href = esc(hrefRaw);
-          const usableLink = !!hrefRaw && !/^data:(image|application)\//i.test(String(hrefRaw || "")) && /^https?:\/\//i.test(String(hrefRaw || ""));
           if (!hrefRaw){
-            return `<li class="job-file-menu-item">${safeName}<span class="small muted"> — File metadata saved only — original file content is not stored.</span></li>`;
+            return `<li class="job-file-menu-item">${safeName}</li>`;
           }
-          if (!usableLink) return `<li class="job-file-menu-item">${safeName}<span class="small muted"> — File metadata saved only — original file content is not stored.</span></li>`;
           return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
         }).join("")
       : "";
@@ -4372,9 +4368,8 @@ function viewJobs(){
                 <ul class="job-file-list">
                   ${jobFiles.length ? jobFiles.map((f, idx)=>{
                     const safeName = f.name || `file_${idx+1}`;
-                    const href = f.dataUrl || f.url || f.externalUrl || f.downloadUrl || f.oneDriveUrl || "";
-                    const usableLink = !!href && !/^data:(image|application)\//i.test(String(href || "")) && /^https?:\/\//i.test(String(href || ""));
-                    const link = usableLink ? `<a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a>` : `${safeName} <span class="small muted">— File metadata saved only — original file content is not stored.</span>`;
+                    const href = f.dataUrl || f.url || "";
+                    const link = href ? `<a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a>` : safeName;
                     const sourceTag = f?.source === "onedrive" ? `<span class="job-file-source-badge">OneDrive</span>` : "";
                     return `<li>${link} ${sourceTag} <button type="button" class="link" data-edit-file-link="${j.id}" data-file-index="${idx}">Link</button> <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
                   }).join("") : `<li class=\"muted\">No files attached</li>`}
