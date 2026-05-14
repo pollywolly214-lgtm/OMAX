@@ -3270,7 +3270,8 @@ function getTrackedStateSignature(snapshot){
 }
 function saveCloudDebounced(){
   if (isVercelPreviewRuntime()){
-    console.warn("Cloud save skipped: previewReadonly=1 on a Vercel preview deployment host.");
+    const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
+    console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
     return;
   }
   hasPendingLocalChanges = true;
@@ -3289,7 +3290,8 @@ function saveCloudDebounced(){
 }
 function saveCloudNow(){
   if (isVercelPreviewRuntime()){
-    console.warn("Cloud save skipped: previewReadonly=1 on a Vercel preview deployment host.");
+    const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
+    console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
     return;
   }
   hasPendingLocalChanges = true;
