@@ -2345,17 +2345,20 @@ function applyJobFileCacheToJobs(jobs, cache){
 
 function stripJobFileDataUrls(jobs, tracker = null){
   if (!Array.isArray(jobs)) return [];
+  const allowed = new Set(["id","name","type","size","source","rootLabel","relativePath","attachedAtISO","note"]);
   return jobs.map(job => {
     if (!job || typeof job !== "object") return job;
     const files = Array.isArray(job.files)
       ? job.files.map(file => {
           if (!file || typeof file !== "object") return file;
-          const rest = {};
+          const clean = {};
           for (const [k,v] of Object.entries(file)){
-            if (typeof v === "string" && isLikelyEmbeddedFileContent(k, v)){ if (tracker) tracker.count += 1; continue; }
-            rest[k] = v;
+            const key = String(k || "");
+            if (!allowed.has(key)) { if (tracker) tracker.count += 1; continue; }
+            if (typeof v === "string" && isLikelyEmbeddedFileContent(key, v)){ if (tracker) tracker.count += 1; continue; }
+            clean[key] = v;
           }
-          return rest;
+          return clean;
         })
       : [];
     return { ...job, files };
@@ -2365,10 +2368,6 @@ function stripJobFileDataUrls(jobs, tracker = null){
 function snapshotState(){
   refreshGlobalCollections();
   const strippedTracker = { count: 0 };
-  const jobFileCache = readJobFileCache();
-  syncJobFileCacheFromJobs(cuttingJobs, jobFileCache);
-  syncJobFileCacheFromJobs(completedCuttingJobs, jobFileCache);
-  writeJobFileCache(jobFileCache);
   const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
   const foldersSnapshot = snapshotSettingsFolders();
   const trashSnapshot = deletedItems.map(entry => ({
