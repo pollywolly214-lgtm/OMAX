@@ -2475,6 +2475,9 @@ function snapshotState(){
     dashboardLayout: cloneStructured(dashLayoutSource) || {},
     costLayout: cloneStructured(costLayoutSource) || {},
     jobLayout: cloneStructured(jobLayoutSource) || {},
+    oneDriveJobConfig: (typeof window !== "undefined" && window.oneDriveJobConfig && typeof window.oneDriveJobConfig === "object")
+      ? cloneStructured(window.oneDriveJobConfig)
+      : null,
     syncMeta: {
       rev: Math.max(Date.now(), (Number(lastAppliedCloudRevision) || 0) + 1),
       updatedAtISO: new Date().toISOString(),
@@ -3406,6 +3409,17 @@ function adoptState(doc){
   purgeExpiredDeletedItems();
   if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
   window.pendingNewJobFiles.length = 0;
+
+  if (data.oneDriveJobConfig && typeof data.oneDriveJobConfig === "object"){
+    window.oneDriveJobConfig = { ...data.oneDriveJobConfig };
+    try {
+      if (window.localStorage){
+        window.localStorage.setItem("cutting_job_onedrive_config_v1", JSON.stringify(window.oneDriveJobConfig));
+      }
+    } catch (err){
+      console.warn("Unable to persist OneDrive job config locally", err);
+    }
+  }
   if (typeof data.orderRequestTab === "string"){
     orderRequestTab = data.orderRequestTab;
     window.orderRequestTab = orderRequestTab;
