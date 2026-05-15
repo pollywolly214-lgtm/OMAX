@@ -359,24 +359,24 @@ function projectV2RepeatDates(instance, maxCount = 3){
   const endType = String(rule.endType || "never").toLowerCase();
   const endCount = endType === "after_count" ? Math.max(1, Math.floor(Number(rule.endCount) || 1)) : null;
   const endDateISO = endType === "on_date" ? normalizeDateKey(rule.endDateISO || null) : null;
-  const completedCountForInstance = (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [])
-    .filter(entry => entry && String(entry.instanceId || "") === String(instance.id || "") && String(entry.eventType || "") === "completed")
+  const instanceId = instance && instance.id != null ? String(instance.id) : "";
+  const eventsForInstance = (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [])
+    .filter(entry => entry && String(entry.instanceId || "") === instanceId)
+    .sort((a,b)=> String(a.recordedAtISO || "").localeCompare(String(b.recordedAtISO || "")));
+  const latestByRoot = new Map();
+  eventsForInstance.forEach(entry => {
+    const root = String(entry.rootOccurrenceId || "");
+    if (!root) return;
+    latestByRoot.set(root, entry);
+  });
+  const completedCountForInstance = Array.from(latestByRoot.values())
+    .filter(entry => String(entry?.eventType || "") === "completed")
     .length;
   if (basis === "machine_hours"){
-    const blockedByCountLimit = endCount != null && completedCountForInstance >= endCount;
-    if (blockedByCountLimit){
-      if (window.DEBUG_MODE){
-        console.info("[maintenance-v2] machine-hour projection", {
-          instanceId: instance && instance.id != null ? String(instance.id) : null,
-          endType,
-          endCount,
-          completedCountForInstance,
-          blockedByCountLimit: true,
-          predictedDateISO: null
-        });
-      }
-      return [];
-    }
+    const startDateISO = normalizeDateKey(instance.startDateISO || rule.startISO || null);
+    const startDate = startDateISO ? parseDateLocal(startDateISO) : null;
+    if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) return [];
+    startDate.setHours(0,0,0,0);
     const intervalHours = Number(rule.intervalHours != null ? rule.intervalHours : rule.every);
     if (!Number.isFinite(intervalHours) || intervalHours <= 0) return [];
     const currentTotalHours = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
@@ -386,32 +386,69 @@ function projectV2RepeatDates(instance, maxCount = 3){
     const avgRaw = typeof configuredDailyHours === "function" ? Number(configuredDailyHours()) : null;
     const averageHoursPerDay = Number.isFinite(avgRaw) && avgRaw > 0 ? avgRaw : 1;
     const hoursUsedSinceAnchor = Math.max(0, safeCurrent - anchorTotalHours);
-    const remainingHours = intervalHours - hoursUsedSinceAnchor;
-    const daysOut = remainingHours <= 0 ? 0 : Math.ceil(remainingHours / averageHoursPerDay);
-    const predicted = new Date();
-    predicted.setHours(0,0,0,0);
-    predicted.setDate(predicted.getDate() + daysOut);
-    const predictedDateISO = normalizeDateKey(ymd(predicted));
+    const endDate = endType === "on_date" && endDateISO ? parseDateLocal(endDateISO) : null;
+    if (endDate instanceof Date && !Number.isNaN(endDate.getTime())) endDate.setHours(0,0,0,0);
+    const rollingCount = 3;
+    const requestedCount = endCount != null ? Math.max(0, endCount - completedCountForInstance) : rollingCount;
+    const blockedByCountLimit = endCount != null && requestedCount <= 0;
+    const out = [];
+    if (!blockedByCountLimit){
+      let lastTime = null;
+      for (let n = 1; n <= requestedCount; n++){
+        const targetHoursFromAnchor = intervalHours * n;
+        const remainingHoursForThisProjection = targetHoursFromAnchor - hoursUsedSinceAnchor;
+        const daysOut = remainingHoursForThisProjection <= 0 ? 0 : Math.ceil(remainingHoursForThisProjection / averageHoursPerDay);
+        const predicted = new Date();
+        predicted.setHours(0,0,0,0);
+        predicted.setDate(predicted.getDate() + daysOut);
+        const predictedBeforeGuardISO = normalizeDateKey(ymd(predicted));
+        if (predicted.getTime() < startDate.getTime()){
+          predicted.setTime(startDate.getTime());
+        }
+        if (lastTime != null && predicted.getTime() <= lastTime){
+          predicted.setTime(lastTime + (24 * 60 * 60 * 1000));
+        }
+        if (endDate instanceof Date && predicted.getTime() > endDate.getTime()) break;
+        const finalPredictedDateISO = normalizeDateKey(ymd(predicted));
+        if (finalPredictedDateISO) out.push(finalPredictedDateISO);
+        lastTime = predicted.getTime();
+        if (window.DEBUG_MODE){
+          console.info("[maintenance-v2] machine-hour projection occurrence", {
+            instanceId,
+            startDateISO,
+            intervalHours,
+            endType,
+            endCount,
+            completedCountForInstance,
+            averageHoursPerDay,
+            currentTotalHours: safeCurrent,
+            anchorTotalHours,
+            projectionNumber: n,
+            targetHoursFromAnchor,
+            remainingHoursForThisProjection,
+            daysOut,
+            predictedDateBeforeStartGuardISO: predictedBeforeGuardISO,
+            finalPredictedDateISO
+          });
+        }
+      }
+    }
     if (window.DEBUG_MODE){
       console.info("[maintenance-v2] machine-hour projection", {
-        instanceId: instance && instance.id != null ? String(instance.id) : null,
+        instanceId,
+        startDateISO,
+        intervalHours,
         endType,
         endCount,
         completedCountForInstance,
-        blockedByCountLimit: false,
-        basis,
-        intervalHours,
-        every: Number(rule.every),
-        currentTotalHours: safeCurrent,
-        machineHourAnchorTotal: anchorTotalHours,
-        hoursUsedSinceAnchor,
-        remainingHours,
         averageHoursPerDay,
-        daysOut,
-        predictedDateISO
+        currentTotalHours: safeCurrent,
+        anchorTotalHours,
+        blockedByCountLimit,
+        projectedCount: out.length
       });
     }
-    return predictedDateISO ? [predictedDateISO] : [];
+    return out;
   }
   const every = Math.max(1, Number(rule.every) || 1);
   const targetCount = endCount != null ? Math.max(0, endCount - completedCountForInstance) : maxCount;

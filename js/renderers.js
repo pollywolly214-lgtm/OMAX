@@ -5654,7 +5654,7 @@ function renderDashboard(){
         }else{
           const basis = String(taskExistingBasisInput?.value || "");
           taskExistingModeHint.textContent = basis === "machine_hours"
-            ? "Machine-hour repeat shows the next predicted due date only. Count limits how many completions occur before repeat stops."
+            ? "Machine-hour repeat dates are estimated from logged hours and average daily usage. The selected date is the first allowed due date. Count controls how many projected completions before the repeat stops."
             : "For Interval tasks, choose machine-hours to predict by logged usage, or choose calendar day/week/month.";
         }
       }else if (mode === "past_log"){
