@@ -357,36 +357,12 @@ function projectV2RepeatDates(instance, maxCount = 2){
   const basis = String(rule.basis || "").toLowerCase();
   if (!["calendar_day", "calendar_week", "calendar_month", "machine_hours"].includes(basis)) return [];
   if (basis === "machine_hours"){
-    const intervalHours = Math.max(1, Number(rule.intervalHours || rule.every) || 1);
-    const currentTotal = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
-    const anchorTotal = Number(instance.machineHourAnchorTotal);
-    const avgPerDay = (typeof configuredDailyHours === "function" ? Number(configuredDailyHours()) : 8) || 8;
-    const safeAvg = Number.isFinite(avgPerDay) && avgPerDay > 0 ? avgPerDay : 8;
-    const remain = (Number.isFinite(currentTotal) && Number.isFinite(anchorTotal))
-      ? (intervalHours - Math.max(0, currentTotal - anchorTotal))
-      : intervalHours;
-    const daysOut = remain <= 0 ? 0 : Math.ceil(remain / safeAvg);
-    const d = new Date();
-    d.setHours(0,0,0,0);
-    d.setDate(d.getDate() + daysOut);
-    const dueISO = ymd(d);
     if (window.DEBUG_MODE){
-      console.info("[maintenance-v2][machine_hours_projection]", {
-        instanceId: instance && instance.id != null ? String(instance.id) : null,
-        basis,
-        repeatRuleIntervalHours: rule.intervalHours,
-        repeatRuleEvery: rule.every,
-        intervalHoursUsed: intervalHours,
-        currentMachineHours: currentTotal,
-        machineHourAnchorTotal: Number.isFinite(anchorTotal) ? anchorTotal : null,
-        remainingHours: remain,
-        configuredDailyHours: avgPerDay,
-        safeDailyHoursUsed: safeAvg,
-        daysOut,
-        predictedDateISO: dueISO || null
+      console.info("[maintenance-v2] machine-hour repeat projection disabled for checkpoint", {
+        instanceId: instance && instance.id != null ? String(instance.id) : null
       });
     }
-    return dueISO ? [dueISO] : [];
+    return [];
   }
   const every = Math.max(1, Number(rule.every) || 1);
   const startISO = normalizeDateKey(instance.startDateISO || rule.startISO || null);
@@ -2752,7 +2728,7 @@ function renderCalendar(){
       if (!dateKey) return;
       if (completedKeys.has(dateKey)) return;
       if (removedSet.has(dateKey)) return;
-      pushTaskEvent(t, dateKey, "manual");
+      // Checkpoint: hide legacy active calendar clutter; preserve task definitions and history data.
     });
 
     const skipDates = new Set(completedKeys);
@@ -2768,7 +2744,7 @@ function renderCalendar(){
       const pred = projections[0];
       const dueKey = normalizeDateKey(pred?.dateISO);
       if (dueKey && !completedKeys.has(dueKey) && (!manualKey || manualKey !== dueKey || completedKeys.has(dueKey))){
-        pushTaskEvent(t, dueKey, "due");
+        // Checkpoint: hide legacy active calendar clutter; preserve task definitions and history data.
       }
       return;
     }
@@ -2779,7 +2755,7 @@ function renderCalendar(){
     if (!dueKey) return;
     if (completedKeys.has(dueKey)) return;
     if (!manualKey || manualKey !== dueKey){
-      pushTaskEvent(t, dueKey, "due");
+      // Checkpoint: hide legacy active calendar clutter; preserve task definitions and history data.
     }
   });
 
@@ -2800,7 +2776,7 @@ function renderCalendar(){
     });
     const manualKey = normalizeDateKey(t.calendarDateISO);
     if (manualKey){
-      pushTaskEvent(t, manualKey, completedDates.has(manualKey) ? "completed" : "manual");
+      if (completedDates.has(manualKey)) pushTaskEvent(t, manualKey, "completed");
     }
     const recurrence = getTaskRecurrence(t);
     const templateLike = typeof isTemplateTask === "function" ? isTemplateTask(t) : (!t.templateId || String(t.templateId) === String(t.id));
@@ -2817,7 +2793,7 @@ function renderCalendar(){
       if (projections.length){
         const dueKey = normalizeDateKey(projections[0].dateISO);
         if (dueKey && !completedDates.has(dueKey) && (!manualKey || manualKey !== dueKey)){
-          pushTaskEvent(t, dueKey, "due");
+          // Checkpoint: hide legacy active calendar clutter; preserve task definitions and history data.
         }
       }
     }

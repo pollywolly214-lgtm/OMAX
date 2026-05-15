@@ -5512,7 +5512,6 @@ function renderDashboard(){
       const isInterval = task?.mode === "interval";
       const options = isInterval
         ? [
-            { value: "machine_hours", label: "By machine cutting hours" },
             { value: "calendar_day", label: "By calendar day" },
             { value: "calendar_week", label: "By calendar week" },
             { value: "calendar_month", label: "By calendar month" }
@@ -5521,7 +5520,7 @@ function renderDashboard(){
       taskExistingBasisInput.innerHTML = options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join("");
       taskExistingBasisInput.value = recurrence?.basis && options.some(opt => opt.value === recurrence.basis)
         ? recurrence.basis
-        : (isInterval ? "machine_hours" : "calendar_day");
+        : "calendar_day";
       taskExistingBasisInput.disabled = false;
     }
     if (taskExistingRepeatInput){
@@ -5645,24 +5644,14 @@ function renderDashboard(){
   function syncExistingAddModeUi(){
     const mode = String(taskExistingAddModeInput?.value || "one_time");
     const showRepeat = mode === "repeat";
-    const selectedMeta = selectedExistingTaskId ? findMaintenanceTaskById(selectedExistingTaskId) : null;
-    const selectedMode = selectedMeta?.task?.mode === "interval" ? "interval" : "asreq";
-    const allowMachineHours = showRepeat && selectedMode === "interval";
     taskExistingRepeatRows.forEach(row => { row.hidden = !showRepeat; });
     if (taskExistingModeHint){
       if (mode === "repeat"){
-        taskExistingModeHint.textContent = "Repeat tracking stores V2 repeat intent. Full repeat projection is coming later.";
+        taskExistingModeHint.textContent = "Repeat tracking currently supports calendar day/week/month. Machine-hour repeat is coming later.";
       }else if (mode === "past_log"){
         taskExistingModeHint.textContent = "Past completion saves V2 history only and does not start future repeats.";
       }else{
         taskExistingModeHint.textContent = "One-time creates one scheduled V2 reminder on the selected date.";
-      }
-    }
-    if (taskExistingBasisInput){
-      const machineOpt = taskExistingBasisInput.querySelector('option[value=\"machine_hours\"]');
-      if (machineOpt){
-        machineOpt.disabled = !allowMachineHours;
-        machineOpt.textContent = allowMachineHours ? "By machine cutting hours (predicted)" : "By machine cutting hours (interval tasks only)";
       }
     }
     if (!showRepeat){
@@ -5673,9 +5662,6 @@ function renderDashboard(){
     }
     if (taskExistingRepeatInput) taskExistingRepeatInput.value = "yes";
     if (taskExistingRepeatInput) taskExistingRepeatInput.disabled = false;
-    if (taskExistingBasisInput && taskExistingBasisInput.value === "machine_hours" && taskExistingBasisInput.querySelector('option[value=\"machine_hours\"]')?.disabled){
-      taskExistingBasisInput.value = "calendar_day";
-    }
     if (taskExistingBasisInput) taskExistingBasisInput.disabled = false;
     toggleRepeatFields(taskExistingRepeatInput, taskExistingBasisInput, taskExistingEveryInput, taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput);
   }
@@ -6094,7 +6080,6 @@ function renderDashboard(){
     if (taskRepeatBasisInput){
       const options = isInterval
         ? [
-            { value: "machine_hours", label: "By machine cutting hours" },
             { value: "calendar_day", label: "By calendar day" },
             { value: "calendar_week", label: "By calendar week" },
             { value: "calendar_month", label: "By calendar month" }
@@ -6102,7 +6087,7 @@ function renderDashboard(){
         : [{ value: "calendar_day", label: "By calendar day" }];
       const current = String(taskRepeatBasisInput.value || "");
       taskRepeatBasisInput.innerHTML = options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join("");
-      taskRepeatBasisInput.value = options.some(opt => opt.value === current) ? current : (isInterval ? "machine_hours" : "calendar_day");
+      taskRepeatBasisInput.value = options.some(opt => opt.value === current) ? current : "calendar_day";
       taskRepeatBasisInput.disabled = mode !== "interval";
     }
     if (taskConditionInput){
@@ -6803,7 +6788,7 @@ function renderDashboard(){
       endInput: taskExistingEndInput,
       endDateInput: taskExistingEndDateInput,
       endCountInput: taskExistingEndCountInput,
-      defaultBasis: task.mode === "interval" ? "machine_hours" : "calendar_day"
+      defaultBasis: "calendar_day"
     });
     let choice = String(taskExistingAddModeInput?.value || "").trim();
     if (!choice){
@@ -6840,12 +6825,9 @@ function renderDashboard(){
       normalizedRepeatConfig.enabled = true;
       if (!normalizedRepeatConfig.basis) normalizedRepeatConfig.basis = "calendar_day";
       if (normalizedRepeatConfig.basis === "machine_hours"){
-        const rawEvery = Number(taskExistingEveryInput?.value);
-        const configuredHours = Number.isFinite(rawEvery) && rawEvery > 0
-          ? rawEvery
-          : Number(normalizedRepeatConfig.intervalHours || normalizedRepeatConfig.every || 1);
-        normalizedRepeatConfig.intervalHours = Math.max(1, configuredHours);
-        normalizedRepeatConfig.every = normalizedRepeatConfig.intervalHours;
+        toast("Machine-hour repeat is coming later. Choose calendar day/week/month.");
+        if (taskExistingBasisInput) taskExistingBasisInput.value = "calendar_day";
+        return;
       }
       createMaintenanceV2FromTemplate(task, {
         mode: "repeat",
