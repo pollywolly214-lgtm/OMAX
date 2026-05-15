@@ -20437,6 +20437,9 @@ function renderJobs(){
       window.completedCuttingJobs = completedCuttingJobs;
       editingCompletedJobsSet().delete(idStr);
       saveCloudDebounced();
+      if (typeof saveCloudNow === "function"){
+        try { saveCloudNow(); } catch (err) { console.warn("Immediate save failed after deleting completed cutting job", err); }
+      }
       toast("History entry deleted");
       renderJobs();
       return;
@@ -20776,7 +20779,11 @@ function renderJobs(){
       cuttingJobs = cuttingJobs.filter(x => String(x?.id) !== idStr);
       window.cuttingJobs = cuttingJobs;
       normalizeAllPriorities();
-      saveCloudDebounced(); toast("Removed"); renderJobs();
+      saveCloudDebounced();
+      if (typeof saveCloudNow === "function"){
+        try { saveCloudNow(); } catch (err){ console.warn("Immediate save failed after removing active cutting job", err); }
+      }
+      toast("Removed"); renderJobs();
       return;
     }
 
