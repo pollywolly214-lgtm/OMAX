@@ -65,22 +65,33 @@ function configuredTaskDurationDailyHours(){
 }
 
 function getMachineHourProjectionAveragePerDay(){
-  const configured = typeof configuredDailyHours === "function" ? Number(configuredDailyHours()) : null;
+  const uiVisibleSelectedAverage = typeof getConfiguredDailyHours === "function" ? Number(getConfiguredDailyHours()) : null;
+  const schedulingDailyHours = typeof getSchedulingDailyHours === "function" ? Number(getSchedulingDailyHours()) : null;
+  const configuredFnDailyHours = typeof configuredDailyHours === "function" ? Number(configuredDailyHours()) : null;
   const cfgDailyHours = Number(window?.appConfig?.dailyHours);
   const summary = typeof getPredictionHoursSummary === "function" ? getPredictionHoursSummary() : null;
   const averageDerived = Number(summary?.averageHours);
+  const predictionSummaryAverage = Number(summary?.averageHours);
   const fallbackFixed = Number(summary?.fixedHours);
-  const finalAverage = Number.isFinite(configured) && configured > 0
-    ? configured
-    : (Number.isFinite(averageDerived) && averageDerived > 0
-      ? averageDerived
-      : (Number.isFinite(cfgDailyHours) && cfgDailyHours > 0
-        ? cfgDailyHours
-        : (Number.isFinite(fallbackFixed) && fallbackFixed > 0 ? fallbackFixed : 8)));
+  const finalAverage = Number.isFinite(uiVisibleSelectedAverage) && uiVisibleSelectedAverage > 0
+    ? uiVisibleSelectedAverage
+    : (Number.isFinite(predictionSummaryAverage) && predictionSummaryAverage > 0
+      ? predictionSummaryAverage
+      : (Number.isFinite(configuredFnDailyHours) && configuredFnDailyHours > 0
+        ? configuredFnDailyHours
+        : (Number.isFinite(cfgDailyHours) && cfgDailyHours > 0
+          ? cfgDailyHours
+          : (Number.isFinite(schedulingDailyHours) && schedulingDailyHours > 0
+            ? schedulingDailyHours
+            : (Number.isFinite(fallbackFixed) && fallbackFixed > 0 ? fallbackFixed : 8)))));
   if (window.DEBUG_MODE){
     console.info("[maintenance-v2] machine-hour average source", {
-      configuredDailyHoursResult: configured,
+      uiVisibleSelectedAverage,
+      getSchedulingDailyHoursResult: schedulingDailyHours,
+      getConfiguredDailyHoursResult: uiVisibleSelectedAverage,
+      configuredDailyHoursResult: configuredFnDailyHours,
       appConfigDailyHours: cfgDailyHours,
+      predictionSummaryAverage,
       dailyCutHoursDerivedAverage: averageDerived,
       fixedDailyHoursFallback: fallbackFixed,
       finalAverageHoursPerDay: finalAverage
