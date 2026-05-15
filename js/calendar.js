@@ -2784,6 +2784,14 @@ function renderCalendar(){
   });
 
   const asReqTasks = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  const hasLegacyHistoryEvidence = (task)=>{
+    if (!task || typeof task !== "object") return false;
+    if (Array.isArray(task.completedDates) && task.completedDates.some(Boolean)) return true;
+    if (Array.isArray(task.manualHistory) && task.manualHistory.some(Boolean)) return true;
+    if (task.occurrenceHours && typeof task.occurrenceHours === "object" && Object.keys(task.occurrenceHours).length) return true;
+    if (task.occurrenceNotes && typeof task.occurrenceNotes === "object" && Object.keys(task.occurrenceNotes).length) return true;
+    return false;
+  };
   asReqTasks.forEach(t => {
     if (!t) return;
     const completedDates = new Set(Array.isArray(t.completedDates) ? t.completedDates.map(normalizeDateKey).filter(Boolean) : []);
@@ -2795,7 +2803,9 @@ function renderCalendar(){
       pushTaskEvent(t, manualKey, completedDates.has(manualKey) ? "completed" : "manual");
     }
     const recurrence = getTaskRecurrence(t);
-    if (recurrence && recurrence.enabled){
+    const templateLike = typeof isTemplateTask === "function" ? isTemplateTask(t) : (!t.templateId || String(t.templateId) === String(t.id));
+    const shouldSuppressLegacySchedule = templateLike && !hasLegacyHistoryEvidence(t);
+    if (recurrence && recurrence.enabled && !shouldSuppressLegacySchedule){
       const skipDates = new Set(completedDates);
       if (manualKey) skipDates.add(manualKey);
       const projections = projectCalendarBasedOccurrences(t, recurrence, {
