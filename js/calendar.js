@@ -351,12 +351,32 @@ function makeV2RepeatOccurrenceKey(instanceId, dateISO){
   return `repeat:${String(instanceId || "")}:${String(dateISO || "")}`;
 }
 
-function projectV2RepeatDates(instance, maxCount = 2){
+function projectV2RepeatDates(instance, maxCount = 3){
   const rule = instance && instance.repeatRule && typeof instance.repeatRule === "object" ? instance.repeatRule : null;
   if (!rule || !rule.enabled) return [];
   const basis = String(rule.basis || "").toLowerCase();
   if (!["calendar_day", "calendar_week", "calendar_month", "machine_hours"].includes(basis)) return [];
+  const endType = String(rule.endType || "never").toLowerCase();
+  const endCount = endType === "after_count" ? Math.max(1, Math.floor(Number(rule.endCount) || 1)) : null;
+  const endDateISO = endType === "on_date" ? normalizeDateKey(rule.endDateISO || null) : null;
+  const completedCountForInstance = (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [])
+    .filter(entry => entry && String(entry.instanceId || "") === String(instance.id || "") && String(entry.eventType || "") === "completed")
+    .length;
   if (basis === "machine_hours"){
+    const blockedByCountLimit = endCount != null && completedCountForInstance >= endCount;
+    if (blockedByCountLimit){
+      if (window.DEBUG_MODE){
+        console.info("[maintenance-v2] machine-hour projection", {
+          instanceId: instance && instance.id != null ? String(instance.id) : null,
+          endType,
+          endCount,
+          completedCountForInstance,
+          blockedByCountLimit: true,
+          predictedDateISO: null
+        });
+      }
+      return [];
+    }
     const intervalHours = Number(rule.intervalHours != null ? rule.intervalHours : rule.every);
     if (!Number.isFinite(intervalHours) || intervalHours <= 0) return [];
     const currentTotalHours = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
@@ -375,6 +395,10 @@ function projectV2RepeatDates(instance, maxCount = 2){
     if (window.DEBUG_MODE){
       console.info("[maintenance-v2] machine-hour projection", {
         instanceId: instance && instance.id != null ? String(instance.id) : null,
+        endType,
+        endCount,
+        completedCountForInstance,
+        blockedByCountLimit: false,
         basis,
         intervalHours,
         every: Number(rule.every),
@@ -390,18 +414,23 @@ function projectV2RepeatDates(instance, maxCount = 2){
     return predictedDateISO ? [predictedDateISO] : [];
   }
   const every = Math.max(1, Number(rule.every) || 1);
+  const targetCount = endCount != null ? Math.max(0, endCount - completedCountForInstance) : maxCount;
+  if (targetCount <= 0) return [];
   const startISO = normalizeDateKey(instance.startDateISO || rule.startISO || null);
   const start = startISO ? parseDateLocal(startISO) : null;
   if (!(start instanceof Date) || Number.isNaN(start.getTime())) return [];
   start.setHours(0,0,0,0);
   const today = new Date(); today.setHours(0,0,0,0);
   const out = [];
-  for (let i = 0; i < 180 && out.length < maxCount; i++){
+  const endDate = endDateISO ? parseDateLocal(endDateISO) : null;
+  if (endDate instanceof Date && !Number.isNaN(endDate.getTime())) endDate.setHours(0,0,0,0);
+  for (let i = 0; i < 366 && out.length < targetCount; i++){
     const d = new Date(start.getTime());
     if (basis === "calendar_day") d.setDate(d.getDate() + (i * every));
     if (basis === "calendar_week") d.setDate(d.getDate() + (i * every * 7));
     if (basis === "calendar_month") d.setMonth(d.getMonth() + (i * every));
     d.setHours(0,0,0,0);
+    if (endDate instanceof Date && d.getTime() > endDate.getTime()) break;
     if (d.getTime() < today.getTime()) continue;
     const iso = ymd(d);
     if (iso) out.push(iso);
@@ -2887,7 +2916,7 @@ function renderCalendar(){
       && String(entry.status || "active") !== "stopped"
       && (String(entry.system || "") === "v2" || Number(entry.schemaVersion || 0) >= 2));
   repeatInstances.forEach(instance => {
-    const dates = projectV2RepeatDates(instance, 2);
+    const dates = projectV2RepeatDates(instance);
     dates.forEach(dateISO => {
       const state = resolveV2RepeatOccurrenceState(instance.id, dateISO);
       if (state.status === "removed") return;

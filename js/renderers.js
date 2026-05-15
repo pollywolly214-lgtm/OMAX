@@ -5652,7 +5652,10 @@ function renderDashboard(){
         if (selected && selected.mode !== "interval"){
           taskExistingModeHint.textContent = "Machine-hour repeat is available for Interval tasks only. As Required support is coming later.";
         }else{
-          taskExistingModeHint.textContent = "For Interval tasks, choose machine-hours to predict by logged usage, or choose calendar day/week/month.";
+          const basis = String(taskExistingBasisInput?.value || "");
+          taskExistingModeHint.textContent = basis === "machine_hours"
+            ? "Machine-hour repeat shows the next predicted due date only. Count limits how many completions occur before repeat stops."
+            : "For Interval tasks, choose machine-hours to predict by logged usage, or choose calendar day/week/month.";
         }
       }else if (mode === "past_log"){
         taskExistingModeHint.textContent = "Past completion saves V2 history only and does not start future repeats.";
@@ -5732,7 +5735,6 @@ function renderDashboard(){
       const row = el.closest("label");
       if (row) row.hidden = !enabled;
     });
-    toggleRepeatEndFields(endSelect, endDateInput, endCountInput);
     if (!enabled){
       if (endDateInput?.parentElement) endDateInput.parentElement.hidden = true;
       if (endCountInput?.parentElement) endCountInput.parentElement.hidden = true;
@@ -5740,6 +5742,15 @@ function renderDashboard(){
     if (basisSelect?.closest("label")){
       basisSelect.closest("label").hidden = !enabled;
     }
+    const basis = String(basisSelect?.value || "");
+    if (enabled && endSelect instanceof HTMLSelectElement){
+      const onDateOpt = endSelect.querySelector('option[value="on_date"]');
+      if (onDateOpt) onDateOpt.disabled = basis === "machine_hours";
+      if (basis === "machine_hours" && String(endSelect.value || "") === "on_date"){
+        endSelect.value = "after_count";
+      }
+    }
+    toggleRepeatEndFields(endSelect, endDateInput, endCountInput);
     const detailsRow = repeatSelect === taskExistingRepeatInput ? taskExistingWeekdaysRow : taskWeekdaysRow;
     if (detailsRow){
       detailsRow.hidden = !(enabled && String(basisSelect?.value || "") === "calendar_week");
@@ -6523,6 +6534,7 @@ function renderDashboard(){
   taskExistingBasisInput?.addEventListener("change", ()=> {
     const weekly = String(taskExistingBasisInput?.value || "") === "calendar_week";
     if (taskExistingWeekdaysRow) taskExistingWeekdaysRow.hidden = !(taskExistingRepeatInput?.value === "yes" && weekly);
+    syncExistingAddModeUi();
   });
   taskExistingEndInput?.addEventListener("change", ()=> toggleRepeatEndFields(taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput));
   taskExistingAddModeInput?.addEventListener("change", syncExistingAddModeUi);
