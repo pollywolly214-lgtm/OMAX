@@ -440,7 +440,7 @@ function projectV2RepeatDates(instance, maxCount = 3){
       const today = new Date();
       today.setHours(0,0,0,0);
       let firstProjectedTime = null;
-      for (let n = 1; n <= requestedCount; n++){
+      for (let n = 1, attempts = 0; out.length < requestedCount && attempts < 120; n++, attempts++){
         const targetHoursFromAnchor = intervalHours * n;
         const remainingHoursForThisProjection = targetHoursFromAnchor - hoursUsedSinceAnchor;
         const daysOut = remainingHoursForThisProjection <= 0 ? 0 : Math.ceil(remainingHoursForThisProjection / averageHoursPerDay);
@@ -462,7 +462,10 @@ function projectV2RepeatDates(instance, maxCount = 3){
         if (endType === "never" && predicted.getTime() > maxRollingDate.getTime()) break;
         if (endDate instanceof Date && predicted.getTime() > endDate.getTime()) break;
         const finalPredictedDateISO = normalizeDateKey(ymd(predicted));
-        if (finalPredictedDateISO) out.push(finalPredictedDateISO);
+        if (!finalPredictedDateISO) continue;
+        const state = resolveV2RepeatOccurrenceState(instanceId, finalPredictedDateISO);
+        if (state.status === "removed" || state.status === "completed") continue;
+        if (!out.includes(finalPredictedDateISO)) out.push(finalPredictedDateISO);
         if (window.DEBUG_MODE){
           console.info("[maintenance-v2] machine-hour projection occurrence", {
             instanceId,
@@ -627,6 +630,14 @@ function openV2RepeatPanel(view){
   const endLabel = instanceStatus === "stopped"
     ? "Stopped"
     : (endType === "after_count" && Number.isFinite(endCount) ? `Ends after ${endCount} completions` : "Rolling preview, no fixed end");
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const dueDate = parseDateLocal(view.dateISO);
+  if (dueDate instanceof Date && !Number.isNaN(dueDate.getTime())) dueDate.setHours(0,0,0,0);
+  const dueDays = dueDate instanceof Date ? Math.round((dueDate.getTime() - today.getTime()) / (24 * 60 * 60 * 1000)) : null;
+  const dueDayText = dueDays == null
+    ? "Due date unavailable"
+    : (dueDays === 0 ? "Due today" : (dueDays > 0 ? `Due in ${dueDays} day${dueDays===1?"":"s"}` : `Past due by ${Math.abs(dueDays)} day${Math.abs(dueDays)===1?"":"s"}`));
   let machineInfoHtml = "";
   if (basis === "machine_hours"){
     const avg = Number(getMachineHourProjectionAveragePerDay());
@@ -635,10 +646,15 @@ function openV2RepeatPanel(view){
     const current = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
     const used = (Number.isFinite(current) && Number.isFinite(anchor)) ? Math.max(0, current - anchor) : null;
     const remaining = (used != null && Number.isFinite(intervalHours)) ? (intervalHours - used) : null;
-    machineInfoHtml = `<div class="bubble-kv"><span>Average/day:</span><span>${Number.isFinite(avg) ? avg : "—"} hrs</span></div>
-    <div class="bubble-kv"><span>Est. spacing:</span><span>${daysSpacing != null ? `${daysSpacing} day${daysSpacing===1?"":"s"}` : "—"}</span></div>
+    const hoursDelta = dueDays == null || !Number.isFinite(avg) ? null : Math.round(Math.abs(dueDays * avg) * 100) / 100;
+    const dueMachineText = dueDays == null || hoursDelta == null
+      ? "Due date unavailable"
+      : (dueDays === 0 ? "Due today" : (dueDays > 0 ? `Due in about ${hoursDelta} machine hours / ${dueDays} days` : `Past due by about ${hoursDelta} machine hours / ${Math.abs(dueDays)} days`));
+    machineInfoHtml = `<div class="bubble-kv"><span>Average/day:</span><span>${Number.isFinite(avg) ? avg : "—"} hrs/day</span></div>
+    <div class="bubble-kv"><span>Estimated cycle gap:</span><span>${daysSpacing != null ? `About ${daysSpacing} day${daysSpacing===1?"":"s"} per cycle at ${Number.isFinite(avg)?avg:"—"} hrs/day` : "—"}</span></div>
+    <div class="bubble-kv"><span>Due from today:</span><span>${escapeHtml(dueMachineText)}</span></div>
     <div class="bubble-kv"><span>Anchor hours:</span><span>${Number.isFinite(anchor) ? anchor : "—"}</span></div>
-    <div class="bubble-kv"><span>Remaining hours:</span><span>${remaining != null ? Math.max(0, Math.round(remaining*100)/100) : "—"}</span></div>`;
+    <div class="bubble-kv"><span>Current cycle remaining:</span><span>${remaining != null ? Math.max(0, Math.round(remaining*100)/100) : "—"} machine hours</span></div>`;
   }
   closeV2OneTimePanel();
   const overlay = document.createElement("div");
@@ -655,8 +671,9 @@ function openV2RepeatPanel(view){
   <div class="bubble-kv"><span>Repeat type:</span><span>${escapeHtml(view.repeatType || "Calendar repeat")}</span></div>
   <div class="bubble-kv"><span>Rule type:</span><span>${escapeHtml(typeLabel)}</span></div>
   <div class="bubble-kv"><span>Interval:</span><span>${escapeHtml(intervalLabel)}</span></div>
-  <div class="bubble-kv"><span>Occurrence:</span><span>${endType === "after_count" && Number.isFinite(endCount) ? `Occurrence in chain (of ${endCount})` : "Rolling occurrence"}</span></div>
+  <div class="bubble-kv"><span>Occurrence:</span><span>${endType === "after_count" && Number.isFinite(endCount) ? `Occurrence N of ${endCount}` : "Rolling occurrence"}</span></div>
   <div class="bubble-kv"><span>End behavior:</span><span>${escapeHtml(endLabel)}</span></div>
+  ${basis !== "machine_hours" ? `<div class="bubble-kv"><span>Due from today:</span><span>${escapeHtml(dueDayText)}</span></div>` : ""}
   ${machineInfoHtml}
   ${view.repeatType === "Machine-hour predicted repeat" ? `<div class="small muted">This due date is predicted from machine-hour usage and may move as hours change.</div>` : ""}
   <div class="bubble-actions">
