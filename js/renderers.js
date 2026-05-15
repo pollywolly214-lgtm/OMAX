@@ -19113,12 +19113,7 @@ function renderJobs(){
 
   const getSharedConfig = ()=>{
     const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : normalizeOneDriveJobConfig(null);
-    return {
-      enabled: !!cfg?.enabled,
-      folderHint: String(cfg?.folderHint || ""),
-      localRootName: String(cfg?.localRootName || ""),
-      localRootSignature: String(cfg?.localRootSignature || "")
-    };
+    return normalizeOneDriveJobConfig(cfg);
   };
 
   const updateSharedConfig = (patch)=>{
@@ -19201,9 +19196,6 @@ function renderJobs(){
       if (!match.ok){
         toast("Local root folder mismatch. Please pick the same shared root as other computers.");
         return false;
-      }
-      if (!cfg.localRootSignature || cfg.localRootSignature !== signature){
-        updateSharedConfig({ localRootSignature: signature, localRootName: cfg.localRootName || String(rootHandle.name || "") });
       }
 
       const perm = await rootHandle.requestPermission({ mode: "read" });
