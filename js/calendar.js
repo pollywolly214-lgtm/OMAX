@@ -431,7 +431,8 @@ function projectV2RepeatDates(instance, maxCount = 3){
     const daysPerInterval = Math.max(1, Math.ceil(intervalHours / averageHoursPerDay));
     const endDate = endType === "on_date" && endDateISO ? parseDateLocal(endDateISO) : null;
     if (endDate instanceof Date && !Number.isNaN(endDate.getTime())) endDate.setHours(0,0,0,0);
-    const rollingCount = 3;
+    const rollingCount = 5;
+    const rollingDaysCap = 90;
     const blockedByCountLimit = endCount != null && completedCountForInstance >= endCount;
     const requestedCount = endCount != null ? endCount : rollingCount;
     const out = [];
@@ -456,6 +457,9 @@ function projectV2RepeatDates(instance, maxCount = 3){
         }else if (firstProjectedTime != null){
           predicted.setTime(firstProjectedTime + ((n - 1) * daysPerInterval * 24 * 60 * 60 * 1000));
         }
+        const maxRollingDate = new Date(today.getTime());
+        maxRollingDate.setDate(maxRollingDate.getDate() + rollingDaysCap);
+        if (endType === "never" && predicted.getTime() > maxRollingDate.getTime()) break;
         if (endDate instanceof Date && predicted.getTime() > endDate.getTime()) break;
         const finalPredictedDateISO = normalizeDateKey(ymd(predicted));
         if (finalPredictedDateISO) out.push(finalPredictedDateISO);
@@ -509,6 +513,8 @@ function projectV2RepeatDates(instance, maxCount = 3){
   const today = new Date(); today.setHours(0,0,0,0);
   const out = [];
   const endDate = endDateISO ? parseDateLocal(endDateISO) : null;
+  const rollingEndDate = new Date(today.getTime());
+  rollingEndDate.setDate(rollingEndDate.getDate() + 90);
   if (endDate instanceof Date && !Number.isNaN(endDate.getTime())) endDate.setHours(0,0,0,0);
   for (let i = 0; i < 366 && out.length < targetCount; i++){
     const d = new Date(start.getTime());
@@ -516,6 +522,7 @@ function projectV2RepeatDates(instance, maxCount = 3){
     if (basis === "calendar_week") d.setDate(d.getDate() + (i * every * 7));
     if (basis === "calendar_month") d.setMonth(d.getMonth() + (i * every));
     d.setHours(0,0,0,0);
+    if (endType === "never" && d.getTime() > rollingEndDate.getTime()) break;
     if (endDate instanceof Date && d.getTime() > endDate.getTime()) break;
     if (d.getTime() < today.getTime()) continue;
     const iso = ymd(d);
@@ -605,6 +612,34 @@ function openV2RepeatPanel(view){
     && !["stopped", "archived"].includes(instanceStatus));
   const statusText = view.status === "completed" ? "Completed" : "Scheduled";
   const dateText = parseDateLocal(view.dateISO)?.toDateString() || view.dateISO;
+  const rule = instance && instance.repeatRule && typeof instance.repeatRule === "object" ? instance.repeatRule : null;
+  const basis = String(rule?.basis || "").toLowerCase();
+  const every = Math.max(1, Number(rule?.every) || 1);
+  const intervalHours = Number(rule?.intervalHours != null ? rule.intervalHours : every);
+  const endType = String(rule?.endType || "never").toLowerCase();
+  const endCount = Number(rule?.endCount);
+  const typeLabel = basis === "machine_hours"
+    ? "Machine-hour repeat"
+    : (basis === "calendar_week" ? "Calendar week repeat" : (basis === "calendar_month" ? "Calendar month repeat" : "Calendar day repeat"));
+  const intervalLabel = basis === "machine_hours"
+    ? `Every ${Number.isFinite(intervalHours) ? intervalHours : every} machine hours`
+    : (basis === "calendar_week" ? `Every ${every} week${every===1?"":"s"}` : (basis === "calendar_month" ? `Every ${every} month${every===1?"":"s"}` : `Every ${every} day${every===1?"":"s"}`));
+  const endLabel = instanceStatus === "stopped"
+    ? "Stopped"
+    : (endType === "after_count" && Number.isFinite(endCount) ? `Ends after ${endCount} completions` : "Rolling preview, no fixed end");
+  let machineInfoHtml = "";
+  if (basis === "machine_hours"){
+    const avg = Number(getMachineHourProjectionAveragePerDay());
+    const daysSpacing = Number.isFinite(avg) && avg > 0 && Number.isFinite(intervalHours) ? Math.max(1, Math.ceil(intervalHours / avg)) : null;
+    const anchor = Number(instance?.machineHourAnchorTotal);
+    const current = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
+    const used = (Number.isFinite(current) && Number.isFinite(anchor)) ? Math.max(0, current - anchor) : null;
+    const remaining = (used != null && Number.isFinite(intervalHours)) ? (intervalHours - used) : null;
+    machineInfoHtml = `<div class="bubble-kv"><span>Average/day:</span><span>${Number.isFinite(avg) ? avg : "—"} hrs</span></div>
+    <div class="bubble-kv"><span>Est. spacing:</span><span>${daysSpacing != null ? `${daysSpacing} day${daysSpacing===1?"":"s"}` : "—"}</span></div>
+    <div class="bubble-kv"><span>Anchor hours:</span><span>${Number.isFinite(anchor) ? anchor : "—"}</span></div>
+    <div class="bubble-kv"><span>Remaining hours:</span><span>${remaining != null ? Math.max(0, Math.round(remaining*100)/100) : "—"}</span></div>`;
+  }
   closeV2OneTimePanel();
   const overlay = document.createElement("div");
   overlay.id = "v2OneTimePanel";
@@ -618,6 +653,11 @@ function openV2RepeatPanel(view){
   <div class="bubble-kv"><span>Note:</span><span>${escapeHtml(view.note || "—")}</span></div>
   <div class="bubble-kv"><span>Logged hours:</span><span>${view.hours != null ? escapeHtml(String(view.hours)) : "—"}</span></div>
   <div class="bubble-kv"><span>Repeat type:</span><span>${escapeHtml(view.repeatType || "Calendar repeat")}</span></div>
+  <div class="bubble-kv"><span>Rule type:</span><span>${escapeHtml(typeLabel)}</span></div>
+  <div class="bubble-kv"><span>Interval:</span><span>${escapeHtml(intervalLabel)}</span></div>
+  <div class="bubble-kv"><span>Occurrence:</span><span>${endType === "after_count" && Number.isFinite(endCount) ? `Occurrence in chain (of ${endCount})` : "Rolling occurrence"}</span></div>
+  <div class="bubble-kv"><span>End behavior:</span><span>${escapeHtml(endLabel)}</span></div>
+  ${machineInfoHtml}
   ${view.repeatType === "Machine-hour predicted repeat" ? `<div class="small muted">This due date is predicted from machine-hour usage and may move as hours change.</div>` : ""}
   <div class="bubble-actions">
     <button type="button" data-rpt-complete ${view.status==="completed"?"disabled":""}>${view.status==="completed"?"Completed":"Mark complete"}</button>
