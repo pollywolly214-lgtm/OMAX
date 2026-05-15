@@ -357,12 +357,37 @@ function projectV2RepeatDates(instance, maxCount = 2){
   const basis = String(rule.basis || "").toLowerCase();
   if (!["calendar_day", "calendar_week", "calendar_month", "machine_hours"].includes(basis)) return [];
   if (basis === "machine_hours"){
+    const intervalHours = Number(rule.intervalHours != null ? rule.intervalHours : rule.every);
+    if (!Number.isFinite(intervalHours) || intervalHours <= 0) return [];
+    const currentTotalHours = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
+    const anchorRaw = Number(instance.machineHourAnchorTotal);
+    const anchorTotalHours = Number.isFinite(anchorRaw) ? anchorRaw : (Number.isFinite(currentTotalHours) ? currentTotalHours : 0);
+    const safeCurrent = Number.isFinite(currentTotalHours) ? currentTotalHours : anchorTotalHours;
+    const avgRaw = typeof configuredDailyHours === "function" ? Number(configuredDailyHours()) : null;
+    const averageHoursPerDay = Number.isFinite(avgRaw) && avgRaw > 0 ? avgRaw : 1;
+    const hoursUsedSinceAnchor = Math.max(0, safeCurrent - anchorTotalHours);
+    const remainingHours = intervalHours - hoursUsedSinceAnchor;
+    const daysOut = remainingHours <= 0 ? 0 : Math.ceil(remainingHours / averageHoursPerDay);
+    const predicted = new Date();
+    predicted.setHours(0,0,0,0);
+    predicted.setDate(predicted.getDate() + daysOut);
+    const predictedDateISO = normalizeDateKey(ymd(predicted));
     if (window.DEBUG_MODE){
-      console.info("[maintenance-v2] machine-hour repeat projection disabled for checkpoint", {
-        instanceId: instance && instance.id != null ? String(instance.id) : null
+      console.info("[maintenance-v2] machine-hour projection", {
+        instanceId: instance && instance.id != null ? String(instance.id) : null,
+        basis,
+        intervalHours,
+        every: Number(rule.every),
+        currentTotalHours: safeCurrent,
+        machineHourAnchorTotal: anchorTotalHours,
+        hoursUsedSinceAnchor,
+        remainingHours,
+        averageHoursPerDay,
+        daysOut,
+        predictedDateISO
       });
     }
-    return [];
+    return predictedDateISO ? [predictedDateISO] : [];
   }
   const every = Math.max(1, Number(rule.every) || 1);
   const startISO = normalizeDateKey(instance.startDateISO || rule.startISO || null);
