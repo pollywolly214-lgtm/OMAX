@@ -969,6 +969,7 @@ function sanitizeJobFileReferenceForFirestore(fileRef){
     size: Number.isFinite(Number(fileRef.size)) ? Number(fileRef.size) : null,
     source: "wj_cuts_reference",
     rootLabel: "WJ Cuts",
+    rootPathStart: String(fileRef.rootPathStart || "WJ Cuts"),
     relativePath: String(fileRef.relativePath || "").replace(/^\/+/, ""),
     attachedAtISO: String(fileRef.attachedAtISO || fileRef.addedAt || new Date().toISOString()),
     ...(fileRef.note ? { note: String(fileRef.note) } : {})
@@ -1604,11 +1605,11 @@ async function resolveAttachmentPreview(file){
     return resolveOneDriveAttachmentPreview(file);
   }
 
-  if (file.source === "onedrive_local_root" && file.localRelativePath){
+  if (file.source === "wj_cuts_reference" && file.relativePath){
     try {
-      const localFile = await resolveLocalFileFromRelativePath(file.localRelativePath);
+      const localFile = await resolveWJCutsRelativePath(file.relativePath);
       if (!localFile){
-        file.preview = file.preview || { mode: "message", content: "Preview unavailable. Local root file is missing." };
+        file.preview = file.preview || { mode: "message", content: "File reference saved, but the file was not found under your selected WJ Cuts folder." };
         return false;
       }
       const preview = await buildAttachmentPreview(localFile);
@@ -1616,10 +1617,10 @@ async function resolveAttachmentPreview(file){
         file.preview = preview;
         return preview.mode === "image";
       }
-      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this local root file type." };
+      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this WJ Cuts referenced file type." };
       return false;
     } catch (_err){
-      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this local root file." };
+      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this WJ Cuts referenced file." };
       return false;
     }
   }
@@ -19086,16 +19087,16 @@ function renderJobs(){
         return false;
       }
       const relPath = `${rel.join("/")}`;
-      pendingNewJobFiles.push({
+      pendingNewJobFiles.push(sanitizeJobFileReferenceForFirestore({
         id: genId(file.name || "job_file"),
         name: file.name || "Attachment",
         type: file.type || "",
         size: typeof file.size === "number" ? file.size : null,
-        source: "wj_cuts_reference",
         rootLabel: "WJ Cuts",
+        rootPathStart: "WJ Cuts",
         relativePath: relPath,
         attachedAtISO: new Date().toISOString()
-      });
+      }));
       toast("WJ Cuts file reference attached.");
       window.jobAddFormOpen = true;
       renderJobs();

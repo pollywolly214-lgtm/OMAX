@@ -3750,7 +3750,7 @@ function viewJobs(){
     const fileMenuItems = fileCount
       ? jobFiles.map((f, idx) => {
           const safeName = esc(f?.name || `file_${idx + 1}`);
-          if (f?.source === "onedrive_local_root" && f?.localRelativePath){
+          if (f?.source === "wj_cuts_reference" && f?.relativePath){
             return `<li class="job-file-menu-item"><button type="button" class="link" data-open-local-file data-job-id="${esc(String(job.id || ""))}" data-file-index="${idx}">${safeName}</button></li>`;
           }
           const hrefRaw = f?.dataUrl || f?.url || f?.externalUrl || f?.downloadUrl || f?.oneDriveUrl || "";
@@ -4054,7 +4054,7 @@ function viewJobs(){
     const fileMenuItems = fileCount
       ? jobFiles.map((f, idx) => {
           const safeName = esc(f?.name || `file_${idx + 1}`);
-          if (f?.source === "onedrive_local_root" && f?.localRelativePath){
+          if (f?.source === "wj_cuts_reference" && f?.relativePath){
             return `<li class="job-file-menu-item"><button type="button" class="link" data-open-local-file data-job-id="${esc(String(j.id || ""))}" data-file-index="${idx}">${safeName}</button></li>`;
           }
           const hrefRaw = f?.dataUrl || f?.url || f?.externalUrl || f?.downloadUrl || f?.oneDriveUrl || "";
