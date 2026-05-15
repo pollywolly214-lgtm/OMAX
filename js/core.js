@@ -657,16 +657,29 @@ function buildEmergencyBackup(snapshot){
   const src = snapshot && typeof snapshot === "object" ? snapshot : {};
   return {
     schema: src.schema || APP_SCHEMA,
+    totalHistory: Array.isArray(src.totalHistory) ? src.totalHistory : [],
     tasksInterval: Array.isArray(src.tasksInterval) ? src.tasksInterval : [],
     tasksAsReq: Array.isArray(src.tasksAsReq) ? src.tasksAsReq : [],
+    maintenanceTasksV2: Array.isArray(src.maintenanceTasksV2) ? src.maintenanceTasksV2 : [],
+    maintenanceCalendarInstancesV2: Array.isArray(src.maintenanceCalendarInstancesV2) ? src.maintenanceCalendarInstancesV2 : [],
+    maintenanceOccurrencesV2: Array.isArray(src.maintenanceOccurrencesV2) ? src.maintenanceOccurrencesV2 : [],
     inventory: Array.isArray(src.inventory) ? src.inventory : [],
     inventoryFolders: Array.isArray(src.inventoryFolders) ? src.inventoryFolders : [],
+    inventoryMaterials: Array.isArray(src.inventoryMaterials) ? src.inventoryMaterials : [],
     cuttingJobs: Array.isArray(src.cuttingJobs) ? src.cuttingJobs : [],
     completedCuttingJobs: Array.isArray(src.completedCuttingJobs) ? src.completedCuttingJobs : [],
     orderRequests: Array.isArray(src.orderRequests) ? src.orderRequests : [],
     receiptTrackerWeeks: Array.isArray(src.receiptTrackerWeeks) ? src.receiptTrackerWeeks : [],
+    garnetCleanings: Array.isArray(src.garnetCleanings) ? src.garnetCleanings : [],
+    dailyCutHours: Array.isArray(src.dailyCutHours) ? src.dailyCutHours : [],
     appConfig: src.appConfig || normalizeAppConfig(window.appConfig),
-    settingsFolders: Array.isArray(src.settingsFolders) ? src.settingsFolders : []
+    settingsFolders: Array.isArray(src.settingsFolders) ? src.settingsFolders : [],
+    folders: Array.isArray(src.folders) ? src.folders : [],
+    jobFolders: Array.isArray(src.jobFolders) ? src.jobFolders : [],
+    dashboardLayout: (src.dashboardLayout && typeof src.dashboardLayout === "object") ? src.dashboardLayout : {},
+    costLayout: (src.costLayout && typeof src.costLayout === "object") ? src.costLayout : {},
+    jobLayout: (src.jobLayout && typeof src.jobLayout === "object") ? src.jobLayout : {},
+    pumpEff: (src.pumpEff && typeof src.pumpEff === "object") ? src.pumpEff : {}
   };
 }
 
@@ -1903,6 +1916,9 @@ if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
 if (!Array.isArray(window.opportunityRollups)) window.opportunityRollups = [];
 if (!Array.isArray(window.weeklyCostReports)) window.weeklyCostReports = [];
 if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
+if (!Array.isArray(window.maintenanceTasksV2)) window.maintenanceTasksV2 = [];
+if (!Array.isArray(window.maintenanceCalendarInstancesV2)) window.maintenanceCalendarInstancesV2 = [];
+if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
 if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
 if (typeof window.orderRequestTab !== "string") window.orderRequestTab = "active";
 
@@ -1923,6 +1939,9 @@ let orderRequests = window.orderRequests;
 let orderRequestTab = window.orderRequestTab;
 let garnetCleanings = window.garnetCleanings;
 let dailyCutHours = window.dailyCutHours;
+let maintenanceTasksV2 = window.maintenanceTasksV2;
+let maintenanceCalendarInstancesV2 = window.maintenanceCalendarInstancesV2;
+let maintenanceOccurrencesV2 = window.maintenanceOccurrencesV2;
 let jobFolders = window.jobFolders;
 let weeklyCostReports = window.weeklyCostReports;
 let receiptTrackerWeeks = window.receiptTrackerWeeks;
@@ -2099,6 +2118,15 @@ function refreshGlobalCollections(){
   if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
   dailyCutHours = window.dailyCutHours;
 
+  if (!Array.isArray(window.maintenanceTasksV2)) window.maintenanceTasksV2 = [];
+  maintenanceTasksV2 = window.maintenanceTasksV2;
+
+  if (!Array.isArray(window.maintenanceCalendarInstancesV2)) window.maintenanceCalendarInstancesV2 = [];
+  maintenanceCalendarInstancesV2 = window.maintenanceCalendarInstancesV2;
+
+  if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
+  maintenanceOccurrencesV2 = window.maintenanceOccurrencesV2;
+
   if (!Array.isArray(window.jobFolders)) window.jobFolders = defaultJobFolders();
   jobFolders = window.jobFolders;
 }
@@ -2195,6 +2223,9 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     copyArr("orderRequests");
     copyArr("receiptTrackerWeeks");
     copyArr("garnetCleanings");
+    copyArr("maintenanceTasksV2");
+    copyArr("maintenanceCalendarInstancesV2");
+    copyArr("maintenanceOccurrencesV2");
     copyArr("totalHistory");
     copyObj("appConfig");
     copyObj("settingsFolders");
@@ -2221,6 +2252,9 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(sanitized.orderRequests) && Array.isArray(window.orderRequests)) sanitized.orderRequests = window.orderRequests.slice();
     if (!Array.isArray(sanitized.receiptTrackerWeeks) && Array.isArray(window.receiptTrackerWeeks)) sanitized.receiptTrackerWeeks = window.receiptTrackerWeeks.slice();
     if (!Array.isArray(sanitized.garnetCleanings) && Array.isArray(window.garnetCleanings)) sanitized.garnetCleanings = window.garnetCleanings.slice();
+    if (!Array.isArray(sanitized.maintenanceTasksV2) && Array.isArray(window.maintenanceTasksV2)) sanitized.maintenanceTasksV2 = window.maintenanceTasksV2.slice();
+    if (!Array.isArray(sanitized.maintenanceCalendarInstancesV2) && Array.isArray(window.maintenanceCalendarInstancesV2)) sanitized.maintenanceCalendarInstancesV2 = window.maintenanceCalendarInstancesV2.slice();
+    if (!Array.isArray(sanitized.maintenanceOccurrencesV2) && Array.isArray(window.maintenanceOccurrencesV2)) sanitized.maintenanceOccurrencesV2 = window.maintenanceOccurrencesV2.slice();
     if (!Array.isArray(sanitized.totalHistory) && Array.isArray(window.totalHistory)) sanitized.totalHistory = window.totalHistory.slice();
     if (!Array.isArray(sanitized.deletedItems) && Array.isArray(window.deletedItems)) sanitized.deletedItems = window.deletedItems.slice();
     if (!Array.isArray(sanitized.jobFolders) && Array.isArray(window.jobFolders)) sanitized.jobFolders = window.jobFolders.slice();
@@ -2242,6 +2276,9 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(window.orderRequests)) window.orderRequests = [];
     if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
     if (!Array.isArray(window.garnetCleanings)) window.garnetCleanings = [];
+    if (!Array.isArray(window.maintenanceTasksV2)) window.maintenanceTasksV2 = [];
+    if (!Array.isArray(window.maintenanceCalendarInstancesV2)) window.maintenanceCalendarInstancesV2 = [];
+    if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
     if (!Array.isArray(window.totalHistory)) window.totalHistory = [];
     if (!window.settingsFolders || !Array.isArray(window.settingsFolders)) window.settingsFolders = typeof defaultSettingsFolders === "function" ? defaultSettingsFolders() : [];
     if (!window.folders || typeof window.folders !== "object") window.folders = Array.isArray(window.settingsFolders) ? JSON.parse(JSON.stringify(window.settingsFolders)) : [];
@@ -2288,6 +2325,9 @@ function stateHasMeaningfulData(data){
     "pumpEff",
     "jobFolders",
     "orderRequestTab",
+    "maintenanceTasksV2",
+    "maintenanceCalendarInstancesV2",
+    "maintenanceOccurrencesV2",
     "schema"
   ]);
   return keys.some(key => meaningfulKeys.has(key));
@@ -2414,15 +2454,18 @@ function snapshotState(){
     weeklyCostReports: Array.isArray(window.weeklyCostReports)
       ? window.weeklyCostReports.map(entry => ({ ...entry }))
       : [],
-    maintenanceTasksV2: Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2.map(entry => ({ ...entry })) : [],
-    maintenanceOccurrencesV2: Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2.map(entry => ({ ...entry })) : [],
-    maintenanceCalendarInstancesV2: Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2.map(entry => ({ ...entry })) : [],
+    maintenanceTasksV2: Array.isArray(maintenanceTasksV2) ? maintenanceTasksV2.map(entry => ({ ...entry })) : [],
+    maintenanceCalendarInstancesV2: Array.isArray(maintenanceCalendarInstancesV2) ? maintenanceCalendarInstancesV2.map(entry => ({ ...entry })) : [],
+    maintenanceOccurrencesV2: Array.isArray(maintenanceOccurrencesV2) ? maintenanceOccurrencesV2.map(entry => ({ ...entry })) : [],
     saveMeta: {
       lastSavedAt: new Date().toISOString(),
       lastSaveStatus: "pending",
       lastSaveError: "",
       lastSaveSizeBytes: 0
     },
+    syncProcessLog: Array.isArray(window.syncProcessLog)
+      ? window.syncProcessLog.map(entry => ({ ...entry }))
+      : [],
     appConfig: normalizeAppConfig(window.appConfig),
     pumpEff: safePumpEff,
     deletedItems: trashSnapshot,
@@ -2603,6 +2646,226 @@ function ensureTaskCategories(){
     }
   });
 }
+
+function detectMaintenanceRecordSystem(record){
+  if (!record || typeof record !== "object") return "legacy";
+  if (record.system === "v2") return "v2";
+  if ("eventType" in record || "effectiveDateISO" in record || "recordedAtISO" in record || "payload" in record) return "v2";
+  if (Number(record.schemaVersion) >= 2) return "v2";
+  return "legacy";
+}
+
+function createMaintenanceCompatibilityRow(base){
+  return {
+    streamId: base.streamId || "",
+    sourceSystem: base.sourceSystem || "legacy",
+    taskId: base.taskId || null,
+    taskName: base.taskName || "",
+    instanceId: base.instanceId || null,
+    occurrenceId: base.occurrenceId || null,
+    eventId: base.eventId || base.occurrenceId || null,
+    dateISO: normalizeDateISO(base.dateISO || ""),
+    status: base.status || "unknown",
+    eventType: base.eventType || null,
+    instanceMode: base.instanceMode || null,
+    note: base.note != null ? String(base.note) : null,
+    hours: base.hours != null && Number.isFinite(Number(base.hours)) ? Number(base.hours) : null,
+    categoryRef: base.categoryRef || null,
+    inventoryRef: base.inventoryRef || null,
+    costRef: base.costRef ?? null,
+    linkRef: base.linkRef || null,
+    provenance: base.provenance && typeof base.provenance === "object" ? { ...base.provenance } : {}
+  };
+}
+
+function normalizeLegacyMaintenanceTask(task, mode){
+  if (!task || typeof task !== "object") return null;
+  const taskId = task.id != null ? String(task.id) : "";
+  if (!taskId) return null;
+  return createMaintenanceCompatibilityRow({
+    streamId: `legacy-task:${mode}:${taskId}`,
+    sourceSystem: "legacy",
+    taskId,
+    taskName: String(task.name || "").trim(),
+    instanceId: null,
+    occurrenceId: null,
+    dateISO: normalizeDateISO(task.calendarDateISO || task.nextDueISO || task.lastDoneISO || ""),
+    status: "task_definition",
+    instanceMode: mode === "asreq" ? "one_time" : "repeat",
+    note: null,
+    hours: null,
+    categoryRef: task.cat != null ? String(task.cat) : null,
+    inventoryRef: task.inventoryId != null ? String(task.inventoryId) : null,
+    costRef: task.price != null ? Number(task.price) : null,
+    linkRef: task.storeLink != null ? String(task.storeLink) : null,
+    provenance: {
+      taskMode: mode,
+      taskId,
+      sourceField: "tasksInterval/tasksAsReq"
+    }
+  });
+}
+
+function buildMaintenanceCompatibilityStream(){
+  const out = [];
+  const normalizeLegacyEvents = (task, mode)=>{
+    if (!task || typeof task !== "object") return;
+    const taskId = task.id != null ? String(task.id) : "";
+    if (!taskId) return;
+    const taskName = String(task.name || "").trim();
+    const instanceMode = mode === "asreq" ? "one_time" : "repeat";
+    const categoryRef = task.cat != null ? String(task.cat) : null;
+    const inventoryRef = task.inventoryId != null ? String(task.inventoryId) : null;
+    const costRef = task.price != null ? Number(task.price) : null;
+    const linkRef = task.storeLink != null ? String(task.storeLink) : null;
+    const instanceId = task.templateId != null ? String(task.templateId) : null;
+    const variant = task.variant != null ? String(task.variant) : null;
+    const common = { sourceSystem: "legacy", taskId, taskName, instanceMode, categoryRef, inventoryRef, costRef, linkRef, instanceId };
+    const pushEvent = (input)=> out.push(createMaintenanceCompatibilityRow({ ...common, ...input }));
+
+    if (task.calendarDateISO){
+      pushEvent({
+        streamId: `legacy-calendar:${mode}:${taskId}:${task.calendarDateISO}`,
+        status: "scheduled",
+        eventType: "scheduled",
+        dateISO: task.calendarDateISO,
+        provenance: { sourceField: "calendarDateISO", taskMode: mode, taskId, templateId: instanceId, variant }
+      });
+    }
+    (Array.isArray(task.completedDates) ? task.completedDates : []).forEach((date, idx)=>{
+      pushEvent({
+        streamId: `legacy-completed:${mode}:${taskId}:${idx}:${String(date)}`,
+        occurrenceId: `legacy-completed:${taskId}:${String(date)}:${idx}`,
+        status: "completed",
+        eventType: "completed",
+        dateISO: date,
+        provenance: { sourceField: "completedDates", index: idx, taskMode: mode, taskId, templateId: instanceId, variant }
+      });
+    });
+    (Array.isArray(task.manualHistory) ? task.manualHistory : []).forEach((entry, idx)=>{
+      const dateISO = entry && typeof entry === "object" ? (entry.dateISO || entry.date || entry.doneDateISO) : entry;
+      const note = entry && typeof entry === "object" ? (entry.note || entry.notes || null) : null;
+      const hours = entry && typeof entry === "object" ? (entry.hours ?? entry.timeHours ?? null) : null;
+      pushEvent({
+        streamId: `legacy-manual:${mode}:${taskId}:${idx}`,
+        occurrenceId: `legacy-manual:${taskId}:${idx}`,
+        status: "completed",
+        eventType: "manual_history",
+        dateISO,
+        note,
+        hours,
+        provenance: { sourceField: "manualHistory", index: idx, rawId: entry && entry.id != null ? String(entry.id) : null, taskMode: mode, taskId, templateId: instanceId, variant }
+      });
+    });
+    (Array.isArray(task.removedOccurrences) ? task.removedOccurrences : []).forEach((entry, idx)=>{
+      const dateISO = entry && typeof entry === "object" ? (entry.dateISO || entry.date || entry.when) : entry;
+      pushEvent({
+        streamId: `legacy-removed:${mode}:${taskId}:${idx}`,
+        occurrenceId: `legacy-removed:${taskId}:${idx}`,
+        status: "removed",
+        eventType: "removed",
+        dateISO,
+        provenance: { sourceField: "removedOccurrences", index: idx, taskMode: mode, taskId, templateId: instanceId, variant }
+      });
+    });
+    const notesMap = task.occurrenceNotes && typeof task.occurrenceNotes === "object" ? task.occurrenceNotes : {};
+    Object.entries(notesMap).forEach(([dateKey, note])=>{
+      pushEvent({
+        streamId: `legacy-note:${mode}:${taskId}:${dateKey}`,
+        occurrenceId: `legacy-note:${taskId}:${dateKey}`,
+        status: "annotated",
+        eventType: "note",
+        dateISO: dateKey,
+        note,
+        provenance: { sourceField: "occurrenceNotes", key: dateKey, taskMode: mode, taskId, templateId: instanceId, variant }
+      });
+    });
+    const hoursMap = task.occurrenceHours && typeof task.occurrenceHours === "object" ? task.occurrenceHours : {};
+    Object.entries(hoursMap).forEach(([dateKey, hours])=>{
+      pushEvent({
+        streamId: `legacy-hours:${mode}:${taskId}:${dateKey}`,
+        occurrenceId: `legacy-hours:${taskId}:${dateKey}`,
+        status: "annotated",
+        eventType: "hours",
+        dateISO: dateKey,
+        hours,
+        provenance: { sourceField: "occurrenceHours", key: dateKey, taskMode: mode, taskId, templateId: instanceId, variant }
+      });
+    });
+  };
+  const intervalList = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
+  const asReqList = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  intervalList.forEach(task => {
+    const row = normalizeLegacyMaintenanceTask(task, "interval");
+    if (row) out.push(row);
+    normalizeLegacyEvents(task, "interval");
+  });
+  asReqList.forEach(task => {
+    const row = normalizeLegacyMaintenanceTask(task, "asreq");
+    if (row) out.push(row);
+    normalizeLegacyEvents(task, "asreq");
+  });
+
+  const v2Tasks = Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : [];
+  const v2Instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
+  const v2Occurrences = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+  const taskMap = new Map();
+  v2Tasks.forEach(task => {
+    if (!task || typeof task !== "object") return;
+    const id = task.id != null ? String(task.id) : "";
+    if (!id) return;
+    taskMap.set(id, task);
+  });
+  const instanceMap = new Map();
+  v2Instances.forEach(instance => {
+    if (!instance || typeof instance !== "object") return;
+    const id = instance.id != null ? String(instance.id) : "";
+    if (!id) return;
+    instanceMap.set(id, instance);
+  });
+  v2Occurrences.forEach(event => {
+    if (!event || typeof event !== "object") return;
+    if (detectMaintenanceRecordSystem(event) !== "v2") return;
+    const occurrenceId = event.id != null ? String(event.id) : "";
+    const instanceId = event.instanceId != null ? String(event.instanceId) : "";
+    const inst = instanceMap.get(instanceId) || null;
+    const taskId = event.taskId != null ? String(event.taskId) : (inst && inst.taskId != null ? String(inst.taskId) : "");
+    const task = taskMap.get(taskId) || null;
+    out.push({
+      streamId: `v2-occurrence:${occurrenceId || `${instanceId}:unknown`}`,
+      sourceSystem: "v2",
+      taskId: taskId || null,
+      taskName: String(event.taskName || (task && task.name) || "").trim(),
+      instanceId: instanceId || null,
+      occurrenceId: occurrenceId || null,
+      dateISO: normalizeDateISO(event.effectiveDateISO || event.dateISO || event.completedAtISO || event.occurredAtISO || ""),
+      status: String(event.status || event.eventType || event.type || "unknown"),
+      eventType: event.eventType != null ? String(event.eventType) : (event.type != null ? String(event.type) : null),
+      instanceMode: inst && inst.instanceMode ? String(inst.instanceMode) : null,
+      note: event.note != null ? String(event.note) : (event.payload && event.payload.note != null ? String(event.payload.note) : null),
+      hours: event.hours != null && Number.isFinite(Number(event.hours)) ? Number(event.hours) : (event.payload && Number.isFinite(Number(event.payload.hours)) ? Number(event.payload.hours) : null),
+      categoryRef: task && task.folderId != null ? String(task.folderId) : null,
+      inventoryRef: task && task.inventoryId != null ? String(task.inventoryId) : null,
+      costRef: task && task.costProfileId != null ? String(task.costProfileId) : null,
+      linkRef: task && task.linkRef != null ? String(task.linkRef) : null,
+      provenance: {
+        taskId: taskId || null,
+        instanceId: instanceId || null,
+        occurrenceId: occurrenceId || null,
+        supersedesEventId: event.supersedesEventId != null ? String(event.supersedesEventId) : null,
+        recordedAtISO: event.recordedAtISO != null ? String(event.recordedAtISO) : null,
+        sourceField: "maintenanceOccurrencesV2",
+        taskRecordSystem: task ? detectMaintenanceRecordSystem(task) : null,
+        instanceRecordSystem: inst ? detectMaintenanceRecordSystem(inst) : null,
+        occurrenceRecordSystem: detectMaintenanceRecordSystem(event)
+      }
+    });
+  });
+  return out;
+}
+
+window.detectMaintenanceRecordSystem = detectMaintenanceRecordSystem;
+window.buildMaintenanceCompatibilityStream = buildMaintenanceCompatibilityStream;
 
 function ensureJobCategories(){
   const folders = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();
@@ -3116,7 +3379,12 @@ function adoptState(doc){
   opportunityRollups = Array.isArray(data.opportunityRollups) ? data.opportunityRollups : [];
   weeklyCostReports = Array.isArray(data.weeklyCostReports) ? data.weeklyCostReports.map(entry => ({ ...entry })) : [];
   receiptTrackerWeeks = Array.isArray(data.receiptTrackerWeeks) ? data.receiptTrackerWeeks.map(entry => ({ ...entry })) : [];
-  window.syncProcessLog = Array.isArray(data.syncProcessLog) ? data.syncProcessLog.slice(0,100).map(entry => ({ ...entry })) : (Array.isArray(window.syncProcessLog) ? window.syncProcessLog.slice(0,100) : []);
+  maintenanceTasksV2 = Array.isArray(data.maintenanceTasksV2) ? data.maintenanceTasksV2.map(entry => ({ ...entry })) : [];
+  maintenanceCalendarInstancesV2 = Array.isArray(data.maintenanceCalendarInstancesV2) ? data.maintenanceCalendarInstancesV2.map(entry => ({ ...entry })) : [];
+  maintenanceOccurrencesV2 = Array.isArray(data.maintenanceOccurrencesV2) ? data.maintenanceOccurrencesV2.map(entry => ({ ...entry })) : [];
+  window.syncProcessLog = Array.isArray(data.syncProcessLog)
+    ? data.syncProcessLog.slice(0,100).map(entry => ({ ...entry }))
+    : (Array.isArray(window.syncProcessLog) ? window.syncProcessLog.slice(0,100) : []);
 
   window.totalHistory = totalHistory;
   window.tasksInterval = tasksInterval;
@@ -3130,9 +3398,9 @@ function adoptState(doc){
   window.opportunityRollups = opportunityRollups;
   window.weeklyCostReports = weeklyCostReports;
   window.receiptTrackerWeeks = receiptTrackerWeeks;
-  window.maintenanceTasksV2 = Array.isArray(data.maintenanceTasksV2) ? data.maintenanceTasksV2.map(entry => ({ ...entry })) : (Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : []);
-  window.maintenanceOccurrencesV2 = Array.isArray(data.maintenanceOccurrencesV2) ? data.maintenanceOccurrencesV2.map(entry => ({ ...entry })) : (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : []);
-  window.maintenanceCalendarInstancesV2 = Array.isArray(data.maintenanceCalendarInstancesV2) ? data.maintenanceCalendarInstancesV2.map(entry => ({ ...entry })) : (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []);
+  window.maintenanceTasksV2 = maintenanceTasksV2;
+  window.maintenanceCalendarInstancesV2 = maintenanceCalendarInstancesV2;
+  window.maintenanceOccurrencesV2 = maintenanceOccurrencesV2;
   deletedItems = normalizeDeletedItems(Array.isArray(data.deletedItems) ? data.deletedItems : deletedItems);
   window.deletedItems = deletedItems;
   purgeExpiredDeletedItems();
@@ -3146,6 +3414,14 @@ function adoptState(doc){
     window.orderRequestTab = orderRequestTab || "active";
   }
   orderRequestTab = window.orderRequestTab;
+
+  if (window.DEBUG_MODE){
+    console.info("V2 maintenance storage ready", {
+      tasks: Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2.length : 0,
+      instances: Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2.length : 0,
+      occurrences: Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2.length : 0
+    });
+  }
 
   const rawFolders = Array.isArray(data.settingsFolders)
     ? data.settingsFolders
@@ -3398,7 +3674,7 @@ function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
     if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
     const prev = window.__lastSnapshotForFlow && typeof window.__lastSnapshotForFlow === "object" ? window.__lastSnapshotForFlow : null;
     const next = nextSnapshot && typeof nextSnapshot === "object" ? nextSnapshot : null;
-    const trackedKeys = ["totalHistory", "tasksInterval", "tasksAsReq", "inventory", "inventoryFolders", "receiptTrackerWeeks", "orderRequests", "cuttingJobs", "completedCuttingJobs", "dailyCutHours", "garnetCleanings", "settingsFolders"];
+    const trackedKeys = ["totalHistory", "tasksInterval", "tasksAsReq", "inventory", "inventoryFolders", "receiptTrackerWeeks", "orderRequests", "cuttingJobs", "completedCuttingJobs", "dailyCutHours", "garnetCleanings", "maintenanceTasksV2", "maintenanceCalendarInstancesV2", "maintenanceOccurrencesV2", "settingsFolders"];
     const skipTrigger = /history|syncprocesslog|data_flow_save/i.test(String(trigger || ""));
     if (skipTrigger){
       if (next) window.__lastSnapshotForFlow = next;
@@ -3562,6 +3838,9 @@ function getTrackedStateSignature(snapshot){
     completedCuttingJobs: snap.completedCuttingJobs ?? null,
     dailyCutHours: snap.dailyCutHours ?? null,
     garnetCleanings: snap.garnetCleanings ?? null,
+    maintenanceTasksV2: snap.maintenanceTasksV2 ?? null,
+    maintenanceCalendarInstancesV2: snap.maintenanceCalendarInstancesV2 ?? null,
+    maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 ?? null,
     settingsFolders: snap.settingsFolders ?? null
   };
   const normalized = Object.fromEntries(Object.entries(tracked).map(([k,v]) => [k, getAreaSignature(k, v)]));

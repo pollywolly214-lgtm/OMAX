@@ -200,6 +200,410 @@ function hideBubbleSoon(){
     hideBubble();
   }, 180);
 }
+
+function showV2OneTimeBubble(occurrenceId, anchorEl){
+  const lookup = (typeof window !== "undefined" && window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object")
+    ? window.__calendarV2OneTimeLookup
+    : {};
+  let ev = lookup && occurrenceId != null ? lookup[String(occurrenceId)] : null;
+  if (!ev && occurrenceId != null){
+    const rebuilt = getV2OneTimeOccurrenceView(String(occurrenceId));
+    if (rebuilt){
+      ev = rebuilt;
+      window.__calendarV2OneTimeLookup = window.__calendarV2OneTimeLookup || {};
+      window.__calendarV2OneTimeLookup[String(occurrenceId)] = rebuilt;
+      if (window.DEBUG_MODE) console.info("[maintenance-v2] rebuilt one-time lookup on demand", occurrenceId, rebuilt);
+    }
+  }
+  if (!ev){
+    if (window.DEBUG_MODE) console.warn("[maintenance-v2] bubble lookup miss", occurrenceId, lookup);
+    toast("V2 reminder details unavailable");
+    return;
+  }
+  ensureBubble();
+  clearTimeout(bubbleTimer);
+  const b = document.getElementById("bubble");
+  if (!b) return;
+  const dateText = parseDateLocal(ev.dateISO)?.toDateString() || ev.dateISO || "—";
+  const statusText = ev.status === "completed" ? "Completed" : "Scheduled";
+  b.innerHTML = `
+    <div class="bubble-title">${escapeHtml(ev.name || "Maintenance reminder")}</div>
+    <div class="bubble-kv"><span>Date:</span><span>${escapeHtml(dateText)}</span></div>
+    <div class="bubble-kv"><span>Mode:</span><span>One-time (V2)</span></div>
+    <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusText)}</span></div>
+    <div class="bubble-kv"><span>Note:</span><span>${escapeHtml(ev.note || "—")}</span></div>
+    <div class="bubble-kv"><span>Logged hours:</span><span>${ev.hours != null ? escapeHtml(String(ev.hours)) : "—"}</span></div>
+    <div class="bubble-kv"><span>Info:</span><span>V2 one-time reminder actions are active.</span></div>
+    <div class="bubble-actions">
+      <button type="button" data-v2-complete ${ev.status === "completed" ? "disabled" : ""}>${ev.status === "completed" ? "Completed" : "Mark complete"}</button>
+      <button type="button" data-v2-uncomplete>Mark incomplete</button>
+      <button type="button" data-v2-note>Set note</button>
+      <button type="button" data-v2-hours>Set hours</button>
+      <button type="button" data-bubble-close>Close</button>
+    </div>
+  `;
+  const closeBtn = b.querySelector("[data-bubble-close]");
+  closeBtn?.addEventListener("click", ()=> hideBubbleSoon());
+  b.querySelector("[data-v2-complete]")?.addEventListener("click", ()=>{
+    if (typeof window.completeV2OneTimeOccurrence === "function") window.completeV2OneTimeOccurrence(String(occurrenceId));
+  });
+  b.querySelector("[data-v2-uncomplete]")?.addEventListener("click", ()=>{
+    if (typeof window.uncompleteV2OneTimeOccurrence === "function") window.uncompleteV2OneTimeOccurrence(String(occurrenceId));
+  });
+  b.querySelector("[data-v2-note]")?.addEventListener("click", ()=>{
+    if (typeof window.setV2OneTimeOccurrenceNote === "function") window.setV2OneTimeOccurrenceNote(String(occurrenceId));
+  });
+  b.querySelector("[data-v2-hours]")?.addEventListener("click", ()=>{
+    if (typeof window.setV2OneTimeOccurrenceHours === "function") window.setV2OneTimeOccurrenceHours(String(occurrenceId));
+  });
+  const rect = anchorEl.getBoundingClientRect();
+  b.style.top  = `${window.scrollY + rect.bottom + 8}px`;
+  b.style.left = `${window.scrollX + rect.left}px`;
+  b.classList.add("show");
+}
+
+function closeV2OneTimePanel(){
+  const existing = document.getElementById("v2OneTimePanel");
+  if (existing) existing.remove();
+}
+
+function openV2OneTimePanel(occurrenceId){
+  const ev = getV2OneTimeOccurrenceView(String(occurrenceId));
+  if (!ev){ toast("V2 reminder details unavailable"); return; }
+  closeV2OneTimePanel();
+  const overlay = document.createElement("div");
+  overlay.id = "v2OneTimePanel";
+  overlay.style.position = "fixed";
+  overlay.style.inset = "0";
+  overlay.style.background = "rgba(0,0,0,.35)";
+  overlay.style.display = "grid";
+  overlay.style.placeItems = "center";
+  overlay.style.zIndex = "9999";
+  const card = document.createElement("div");
+  card.style.width = "min(92vw, 460px)";
+  card.style.background = "#fff";
+  card.style.borderRadius = "12px";
+  card.style.padding = "14px";
+  card.style.boxShadow = "0 14px 35px rgba(0,0,0,.25)";
+  const dateText = parseDateLocal(ev.dateISO)?.toDateString() || ev.dateISO || "—";
+  const statusText = ev.status === "completed" ? "Completed" : "Scheduled";
+  card.innerHTML = `
+    <div class="bubble-title">${escapeHtml(ev.name || "Maintenance reminder")}</div>
+    <div class="bubble-kv"><span>Date:</span><span>${escapeHtml(dateText)}</span></div>
+    <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusText)}</span></div>
+    <div class="bubble-kv"><span>Note:</span><span>${escapeHtml(ev.note || "—")}</span></div>
+    <div class="bubble-kv"><span>Logged hours:</span><span>${ev.hours != null ? escapeHtml(String(ev.hours)) : "—"}</span></div>
+    <div class="bubble-actions">
+      <button type="button" data-v2-panel-complete ${ev.status === "completed" ? "disabled" : ""}>${ev.status === "completed" ? "Completed" : "Mark complete"}</button>
+      <button type="button" data-v2-panel-uncomplete>Mark incomplete</button>
+      <button type="button" data-v2-panel-note>Set note</button>
+      <button type="button" data-v2-panel-hours>Set logged hours</button>
+      <button type="button" class="danger" data-v2-panel-remove>Remove from calendar</button>
+      <button type="button" data-v2-panel-close>Close</button>
+    </div>
+    <div class="small muted" style="margin-top:8px;">These hours are saved on this occurrence only.</div>
+  `;
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  const close = ()=> closeV2OneTimePanel();
+  overlay.addEventListener("click", (event)=>{ if (event.target === overlay) close(); });
+  card.querySelector("[data-v2-panel-close]")?.addEventListener("click", close);
+  card.querySelector("[data-v2-panel-complete]")?.addEventListener("click", ()=>{ window.completeV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-uncomplete]")?.addEventListener("click", ()=>{ window.uncompleteV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-note]")?.addEventListener("click", ()=>{ window.setV2OneTimeOccurrenceNote?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-hours]")?.addEventListener("click", ()=>{ window.setV2OneTimeOccurrenceHours?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-remove]")?.addEventListener("click", ()=>{
+    const ok = window.confirm ? window.confirm("Remove this V2 one-time reminder from the calendar?") : true;
+    if (!ok) return;
+    window.removeV2OneTimeOccurrence?.(String(occurrenceId));
+    close();
+  });
+}
+
+function getV2OneTimeOccurrenceView(occurrenceId){
+  const occId = String(occurrenceId || "");
+  if (!occId) return null;
+  const events = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+  const scheduled = events.find(entry => entry && String(entry.id || "") === occId && String(entry.eventType || "") === "scheduled");
+  if (!scheduled) return null;
+  const instanceId = scheduled.instanceId != null ? String(scheduled.instanceId) : "";
+  const instance = (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []).find(entry => entry && String(entry.id || "") === instanceId) || null;
+  if (!instance || String(instance.instanceMode || "") !== "one_time") return null;
+  const taskId = String(instance.taskId || scheduled.taskId || "");
+  const task = (Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : []).find(entry => entry && String(entry.id || "") === taskId) || null;
+  const dateISO = normalizeDateKey(scheduled.effectiveDateISO || scheduled.dateISO || instance.startDateISO || null);
+  if (!dateISO) return null;
+  const state = resolveV2OneTimeOccurrenceState(occId, scheduled);
+  return {
+    occurrenceId: occId,
+    eventType: "scheduled",
+    instanceId,
+    taskId,
+    dateISO,
+    name: String(scheduled.taskName || (task && task.name) || "Maintenance reminder"),
+    note: state.note,
+    hours: state.hours,
+    status: state.status
+  };
+}
+
+function makeV2RepeatOccurrenceKey(instanceId, dateISO){
+  return `repeat:${String(instanceId || "")}:${String(dateISO || "")}`;
+}
+
+function projectV2RepeatDates(instance, maxCount = 2){
+  const rule = instance && instance.repeatRule && typeof instance.repeatRule === "object" ? instance.repeatRule : null;
+  if (!rule || !rule.enabled) return [];
+  const basis = String(rule.basis || "").toLowerCase();
+  if (!["calendar_day", "calendar_week", "calendar_month", "machine_hours"].includes(basis)) return [];
+  if (basis === "machine_hours"){
+    if (window.DEBUG_MODE){
+      console.info("[maintenance-v2] machine-hour repeat projection disabled for checkpoint", {
+        instanceId: instance && instance.id != null ? String(instance.id) : null
+      });
+    }
+    return [];
+  }
+  const every = Math.max(1, Number(rule.every) || 1);
+  const startISO = normalizeDateKey(instance.startDateISO || rule.startISO || null);
+  const start = startISO ? parseDateLocal(startISO) : null;
+  if (!(start instanceof Date) || Number.isNaN(start.getTime())) return [];
+  start.setHours(0,0,0,0);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const out = [];
+  for (let i = 0; i < 180 && out.length < maxCount; i++){
+    const d = new Date(start.getTime());
+    if (basis === "calendar_day") d.setDate(d.getDate() + (i * every));
+    if (basis === "calendar_week") d.setDate(d.getDate() + (i * every * 7));
+    if (basis === "calendar_month") d.setMonth(d.getMonth() + (i * every));
+    d.setHours(0,0,0,0);
+    if (d.getTime() < today.getTime()) continue;
+    const iso = ymd(d);
+    if (iso) out.push(iso);
+  }
+  return out;
+}
+
+function resolveV2RepeatOccurrenceState(instanceId, dateISO){
+  const key = makeV2RepeatOccurrenceKey(instanceId, dateISO);
+  const events = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+  const related = events
+    .filter(entry => entry && typeof entry === "object" && String(entry.rootOccurrenceId || "") === key)
+    .sort((a,b)=> String(a.recordedAtISO || "").localeCompare(String(b.recordedAtISO || "")));
+  let status = "scheduled";
+  let note = "";
+  let hours = null;
+  related.forEach(entry => {
+    const t = String(entry.eventType || "");
+    if (t === "completed") status = "completed";
+    if (t === "uncompleted") status = "scheduled";
+    if (t === "removed") status = "removed";
+    if (t === "note_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "note")) note = String(entry.payload.note || "");
+    if (t === "hours_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "hours")){
+      const raw = entry.payload.hours;
+      hours = raw == null || raw === "" ? null : (Number.isFinite(Number(raw)) ? Number(raw) : hours);
+    }
+  });
+  return { key, status, note, hours };
+}
+
+function appendV2RepeatEvent(instanceId, taskId, dateISO, eventType, payload = {}){
+  const key = makeV2RepeatOccurrenceKey(instanceId, dateISO);
+  const list = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : (window.maintenanceOccurrencesV2 = []);
+  list.unshift({
+    id: genId(`v2_repeat_${eventType}`),
+    system: "v2",
+    schemaVersion: 2,
+    instanceId: String(instanceId || ""),
+    taskId: String(taskId || ""),
+    eventType,
+    effectiveDateISO: normalizeDateKey(dateISO),
+    recordedAtISO: new Date().toISOString(),
+    rootOccurrenceId: key,
+    payload: { ...(payload || {}) }
+  });
+  if (eventType === "completed"){
+    const inst = (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []).find(entry => entry && String(entry.id || "") === String(instanceId));
+    if (inst && inst.repeatRule && String(inst.repeatRule.basis || "") === "machine_hours"){
+      const current = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
+      if (Number.isFinite(current)){
+        inst.machineHourAnchorTotal = current;
+        inst.machineHourAnchorDateISO = normalizeDateKey(ymd(new Date()));
+      }
+    }
+  }
+  if (typeof saveCloudNow === "function") saveCloudNow();
+  else saveCloudDebounced();
+  renderCalendar();
+}
+
+function openV2RepeatPanel(view){
+  if (!view) return;
+  const statusText = view.status === "completed" ? "Completed" : "Scheduled";
+  const dateText = parseDateLocal(view.dateISO)?.toDateString() || view.dateISO;
+  closeV2OneTimePanel();
+  const overlay = document.createElement("div");
+  overlay.id = "v2OneTimePanel";
+  overlay.style.position = "fixed"; overlay.style.inset = "0"; overlay.style.background = "rgba(0,0,0,.35)";
+  overlay.style.display = "grid"; overlay.style.placeItems = "center"; overlay.style.zIndex = "9999";
+  const card = document.createElement("div");
+  card.style.width = "min(92vw, 460px)"; card.style.background = "#fff"; card.style.borderRadius = "12px"; card.style.padding = "14px";
+  card.innerHTML = `<div class="bubble-title">${escapeHtml(view.name || "Maintenance repeat")}</div>
+  <div class="bubble-kv"><span>Date:</span><span>${escapeHtml(dateText)}</span></div>
+  <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusText)}</span></div>
+  <div class="bubble-kv"><span>Note:</span><span>${escapeHtml(view.note || "—")}</span></div>
+  <div class="bubble-kv"><span>Logged hours:</span><span>${view.hours != null ? escapeHtml(String(view.hours)) : "—"}</span></div>
+  <div class="bubble-kv"><span>Repeat type:</span><span>${escapeHtml(view.repeatType || "Calendar repeat")}</span></div>
+  ${view.repeatType === "Machine-hour predicted repeat" ? `<div class="small muted">This due date is predicted from machine-hour usage and may move as hours change.</div>` : ""}
+  <div class="bubble-actions">
+    <button type="button" data-rpt-complete ${view.status==="completed"?"disabled":""}>${view.status==="completed"?"Completed":"Mark complete"}</button>
+    <button type="button" data-rpt-uncomplete>Mark incomplete</button>
+    <button type="button" data-rpt-note>Set note</button>
+    <button type="button" data-rpt-hours>Set logged hours</button>
+    <button type="button" class="danger" data-rpt-remove>Remove from calendar</button>
+    <button type="button" class="danger" data-rpt-stop>Stop repeat tracking</button>
+    <button type="button" data-rpt-close>Close</button>
+  </div>`;
+  overlay.appendChild(card); document.body.appendChild(overlay);
+  const reopen = ()=> openV2RepeatPanel({ ...view, ...resolveV2RepeatOccurrenceState(view.instanceId, view.dateISO) });
+  card.querySelector("[data-rpt-close]")?.addEventListener("click", ()=> closeV2OneTimePanel());
+  card.querySelector("[data-rpt-complete]")?.addEventListener("click", ()=>{ if (view.status!=="completed") appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "completed"); reopen(); });
+  card.querySelector("[data-rpt-uncomplete]")?.addEventListener("click", ()=>{ if (view.status==="completed") appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "uncompleted"); reopen(); });
+  card.querySelector("[data-rpt-note]")?.addEventListener("click", ()=>{ const v=window.prompt("Set note for this repeat occurrence:", view.note||""); if(v!==null) appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "note_set", { note:v }); reopen(); });
+  card.querySelector("[data-rpt-hours]")?.addEventListener("click", ()=>{ const v=window.prompt("Enter hours to record for this maintenance occurrence. Leave blank to clear.", view.hours!=null?String(view.hours):""); if(v!==null){ const t=String(v).trim(); const h=t===""?null:Number(t); if(t!=="" && (!Number.isFinite(h)||h<0)){ toast("Enter a valid non-negative number."); return; } appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "hours_set", { hours:h }); reopen(); } });
+  card.querySelector("[data-rpt-remove]")?.addEventListener("click", ()=>{ const ok=window.confirm?window.confirm("Remove this repeat occurrence from calendar?"):true; if(!ok) return; appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "removed", { source:"repeat_panel" }); closeV2OneTimePanel(); });
+  card.querySelector("[data-rpt-stop]")?.addEventListener("click", ()=>{
+    const ok = window.confirm ? window.confirm("Stop repeat tracking for this chain?") : true;
+    if (!ok) return;
+    if (typeof window.stopV2RepeatTracking === "function") window.stopV2RepeatTracking(String(view.instanceId), String(view.taskId), String(view.dateISO));
+    closeV2OneTimePanel();
+  });
+}
+
+window.stopV2RepeatTracking = (instanceId, taskId, dateISO)=>{
+  const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
+  const inst = instances.find(entry => entry && String(entry.id || "") === String(instanceId));
+  if (!inst) return;
+  if (String(inst.status || "") === "stopped"){ toast("Repeat tracking already stopped"); return; }
+  inst.status = "stopped";
+  inst.stoppedAtISO = new Date().toISOString();
+  appendV2RepeatEvent(instanceId, taskId, dateISO, "stopped", { source: "repeat_panel" });
+  toast("Repeat tracking stopped");
+};
+
+function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supersedesEventId = null){
+  const list = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : (window.maintenanceOccurrencesV2 = []);
+  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
+  const base = lookup[String(baseOccurrenceId)];
+  if (!base) return false;
+  const next = {
+    id: genId(`v2_${eventType}`),
+    system: "v2",
+    schemaVersion: 2,
+    instanceId: base.instanceId,
+    taskId: base.taskId,
+    eventType,
+    effectiveDateISO: base.dateISO,
+    recordedAtISO: new Date().toISOString(),
+    supersedesEventId: supersedesEventId || null,
+    rootOccurrenceId: String(baseOccurrenceId),
+    payload: { ...(payload || {}) }
+  };
+  list.unshift(next);
+  if (typeof saveCloudNow === "function") saveCloudNow();
+  else saveCloudDebounced();
+  renderCalendar();
+  return true;
+}
+
+function resolveV2OneTimeOccurrenceState(rootOccurrenceId, scheduledEvent){
+  const rootId = String(rootOccurrenceId || "");
+  const events = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+  const relevant = events
+    .map((entry, index)=>({ entry, index }))
+    .filter(({ entry })=>{
+      if (!entry || typeof entry !== "object") return false;
+      const id = entry.id != null ? String(entry.id) : "";
+      if (id === rootId) return true;
+      if (entry.rootOccurrenceId != null && String(entry.rootOccurrenceId) === rootId) return true;
+      if (entry.supersedesEventId != null && String(entry.supersedesEventId) === rootId) return true;
+      return false;
+    })
+    .sort((a,b)=>{
+      const aTime = Date.parse(String(a.entry.recordedAtISO || ""));
+      const bTime = Date.parse(String(b.entry.recordedAtISO || ""));
+      const aValid = Number.isFinite(aTime);
+      const bValid = Number.isFinite(bTime);
+      if (aValid && bValid && aTime !== bTime) return aTime - bTime;
+      if (aValid && !bValid) return 1;
+      if (!aValid && bValid) return -1;
+      return a.index - b.index;
+    });
+  let status = "scheduled";
+  let note = scheduledEvent?.payload && Object.prototype.hasOwnProperty.call(scheduledEvent.payload, "note")
+    ? (scheduledEvent.payload.note == null ? "" : String(scheduledEvent.payload.note))
+    : "";
+  let hours = scheduledEvent?.payload && Object.prototype.hasOwnProperty.call(scheduledEvent.payload, "hours")
+    ? (scheduledEvent.payload.hours == null || scheduledEvent.payload.hours === "" ? null : Number(scheduledEvent.payload.hours))
+    : null;
+  relevant.forEach(({ entry })=>{
+    const type = String(entry.eventType || "");
+    if (type === "completed") status = "completed";
+    if (type === "uncompleted") status = "scheduled";
+    if (type === "removed") status = "removed";
+    if (type === "note_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "note")){
+      note = entry.payload.note == null ? "" : String(entry.payload.note);
+    }
+    if (type === "hours_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "hours")){
+      const raw = entry.payload.hours;
+      hours = raw == null || raw === "" ? null : (Number.isFinite(Number(raw)) ? Number(raw) : hours);
+    }
+  });
+  return { status, note, hours };
+}
+
+window.completeV2OneTimeOccurrence = (occurrenceId)=>{
+  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
+  const base = lookup[String(occurrenceId)];
+  if (!base) return;
+  if (base.status === "completed"){ toast("Already completed"); return; }
+  if (appendV2OccurrenceEvent(occurrenceId, "completed", {}, String(occurrenceId))) toast("Marked complete");
+};
+window.uncompleteV2OneTimeOccurrence = (occurrenceId)=>{
+  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
+  const base = lookup[String(occurrenceId)];
+  if (!base) return;
+  if (base.status !== "completed"){ toast("Already incomplete"); return; }
+  if (appendV2OccurrenceEvent(occurrenceId, "uncompleted", {}, String(occurrenceId))) toast("Marked incomplete");
+};
+window.setV2OneTimeOccurrenceNote = (occurrenceId)=>{
+  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
+  const base = lookup[String(occurrenceId)];
+  if (!base) return;
+  const input = window.prompt("Set note for this V2 reminder:", base.note || "");
+  if (input === null) return;
+  if (appendV2OccurrenceEvent(occurrenceId, "note_set", { note: String(input) }, String(occurrenceId))) toast("Note saved");
+};
+window.setV2OneTimeOccurrenceHours = (occurrenceId)=>{
+  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
+  const base = lookup[String(occurrenceId)];
+  if (!base) return;
+  const input = window.prompt("Enter hours to record for this maintenance occurrence. Leave blank to clear.", base.hours != null ? String(base.hours) : "");
+  if (input === null) return;
+  const trimmed = String(input).trim();
+  const hours = trimmed === "" ? null : Number(trimmed);
+  if (trimmed !== "" && (!Number.isFinite(hours) || hours < 0)){ toast("Enter a valid non-negative number."); return; }
+  if (appendV2OccurrenceEvent(occurrenceId, "hours_set", { hours }, String(occurrenceId))) toast("Hours saved");
+};
+window.removeV2OneTimeOccurrence = (occurrenceId)=>{
+  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
+  const base = lookup[String(occurrenceId)] || getV2OneTimeOccurrenceView(String(occurrenceId));
+  if (!base) return;
+  if (base.status === "removed"){ toast("Already removed"); return; }
+  if (appendV2OccurrenceEvent(occurrenceId, "removed", { source: "calendar_panel" }, String(occurrenceId))){
+    toast("Removed from calendar");
+  }
+};
 function triggerDashboardAddPicker(opts){
   const detail = (opts && typeof opts === "object") ? { ...opts } : {};
   const enqueueRequest = ()=>{
@@ -1656,25 +2060,27 @@ function wireCalendarBubbles(){
 
   months.addEventListener("mouseover", (e)=>{
     if (typeof isCalendarHoursEditing === "function" && isCalendarHoursEditing()) return;
-    const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
+    const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-v2-one-time], [data-cal-garnet]");
     if (!el || el === hoverTarget) return;
     hoverTarget = el;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
     if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el, extractTaskOptions(el));
+    if (el.dataset.calV2OneTime) showV2OneTimeBubble(el.dataset.calV2OneTime, el);
     if (el.dataset.calGarnet) showGarnetBubble(el.dataset.calGarnet, el);
   });
   months.addEventListener("mouseout", (e)=>{
     if (typeof isCalendarHoursEditing === "function" && isCalendarHoursEditing()) return;
-    const from = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
-    const to   = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
+    const from = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-v2-one-time], [data-cal-garnet]");
+    const to   = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("[data-cal-job], [data-cal-task], [data-cal-v2-one-time], [data-cal-garnet]");
     if (from && !to) { hoverTarget = null; hideBubbleSoon(); }
   });
   months.addEventListener("click", (e)=>{
     if (typeof isCalendarHoursEditing === "function" && isCalendarHoursEditing()) return;
-    const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-garnet]");
+    const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-v2-one-time], [data-cal-garnet]");
     if (!el) return;
     if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
     if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el, extractTaskOptions(el));
+    if (el.dataset.calV2OneTime) showV2OneTimeBubble(el.dataset.calV2OneTime, el);
     if (el.dataset.calGarnet) showGarnetBubble(el.dataset.calGarnet, el);
   });
 }
@@ -2322,7 +2728,7 @@ function renderCalendar(){
       if (!dateKey) return;
       if (completedKeys.has(dateKey)) return;
       if (removedSet.has(dateKey)) return;
-      pushTaskEvent(t, dateKey, "manual");
+      // Checkpoint: hide legacy active calendar clutter; preserve task definitions and history data.
     });
 
     const skipDates = new Set(completedKeys);
@@ -2338,7 +2744,7 @@ function renderCalendar(){
       const pred = projections[0];
       const dueKey = normalizeDateKey(pred?.dateISO);
       if (dueKey && !completedKeys.has(dueKey) && (!manualKey || manualKey !== dueKey || completedKeys.has(dueKey))){
-        pushTaskEvent(t, dueKey, "due");
+        // Checkpoint: hide legacy active calendar clutter; preserve task definitions and history data.
       }
       return;
     }
@@ -2349,11 +2755,19 @@ function renderCalendar(){
     if (!dueKey) return;
     if (completedKeys.has(dueKey)) return;
     if (!manualKey || manualKey !== dueKey){
-      pushTaskEvent(t, dueKey, "due");
+      // Checkpoint: hide legacy active calendar clutter; preserve task definitions and history data.
     }
   });
 
   const asReqTasks = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  const hasLegacyHistoryEvidence = (task)=>{
+    if (!task || typeof task !== "object") return false;
+    if (Array.isArray(task.completedDates) && task.completedDates.some(Boolean)) return true;
+    if (Array.isArray(task.manualHistory) && task.manualHistory.some(Boolean)) return true;
+    if (task.occurrenceHours && typeof task.occurrenceHours === "object" && Object.keys(task.occurrenceHours).length) return true;
+    if (task.occurrenceNotes && typeof task.occurrenceNotes === "object" && Object.keys(task.occurrenceNotes).length) return true;
+    return false;
+  };
   asReqTasks.forEach(t => {
     if (!t) return;
     const completedDates = new Set(Array.isArray(t.completedDates) ? t.completedDates.map(normalizeDateKey).filter(Boolean) : []);
@@ -2362,10 +2776,12 @@ function renderCalendar(){
     });
     const manualKey = normalizeDateKey(t.calendarDateISO);
     if (manualKey){
-      pushTaskEvent(t, manualKey, completedDates.has(manualKey) ? "completed" : "manual");
+      if (completedDates.has(manualKey)) pushTaskEvent(t, manualKey, "completed");
     }
     const recurrence = getTaskRecurrence(t);
-    if (recurrence && recurrence.enabled){
+    const templateLike = typeof isTemplateTask === "function" ? isTemplateTask(t) : (!t.templateId || String(t.templateId) === String(t.id));
+    const shouldSuppressLegacySchedule = templateLike && !hasLegacyHistoryEvidence(t);
+    if (recurrence && recurrence.enabled && !shouldSuppressLegacySchedule){
       const skipDates = new Set(completedDates);
       if (manualKey) skipDates.add(manualKey);
       const projections = projectCalendarBasedOccurrences(t, recurrence, {
@@ -2377,10 +2793,101 @@ function renderCalendar(){
       if (projections.length){
         const dueKey = normalizeDateKey(projections[0].dateISO);
         if (dueKey && !completedDates.has(dueKey) && (!manualKey || manualKey !== dueKey)){
-          pushTaskEvent(t, dueKey, "due");
+          // Checkpoint: hide legacy active calendar clutter; preserve task definitions and history data.
         }
       }
     }
+  });
+
+  const v2TaskLookup = new Map();
+  (Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : []).forEach(entry => {
+    if (!entry || entry.id == null) return;
+    v2TaskLookup.set(String(entry.id), entry);
+  });
+  const v2InstanceLookup = new Map();
+  (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []).forEach(entry => {
+    if (!entry || entry.id == null) return;
+    if (String(entry.system || "") !== "v2" && Number(entry.schemaVersion || 0) < 2) return;
+    if (String(entry.instanceMode || "") !== "one_time") return;
+    v2InstanceLookup.set(String(entry.id), entry);
+  });
+  const oneTimeLookup = {};
+  const seenV2ChipKeys = new Set();
+  (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : []).forEach(event => {
+    if (!event || event.id == null) return;
+    if (String(event.system || "") !== "v2" && Number(event.schemaVersion || 0) < 2) return;
+    const instanceId = event.instanceId != null ? String(event.instanceId) : "";
+    const instance = v2InstanceLookup.get(instanceId);
+    if (!instance) return;
+    const eventType = String(event.eventType || "");
+    if (eventType !== "scheduled") return;
+    const dateISO = normalizeDateKey(event.effectiveDateISO || event.dateISO || instance.startDateISO || null);
+    if (!dateISO) return;
+    const task = v2TaskLookup.get(String(instance.taskId || event.taskId || "")) || null;
+    const name = String(event.taskName || (task && task.name) || "Maintenance reminder");
+    const occurrenceId = String(event.id);
+    const rootOccurrenceId = occurrenceId;
+    const { status, note, hours } = resolveV2OneTimeOccurrenceState(rootOccurrenceId, event);
+    const mapKey = `${occurrenceId}:${dateISO}`;
+    if (seenV2ChipKeys.has(mapKey)) return;
+    seenV2ChipKeys.add(mapKey);
+    oneTimeLookup[occurrenceId] = {
+      occurrenceId,
+      eventType,
+      instanceId,
+      taskId: String(instance.taskId || event.taskId || ""),
+      dateISO,
+      name,
+      note,
+      hours,
+      status
+    };
+    if (status === "removed") return;
+    (dueMap[dateISO] ||= []).push({
+      type: "v2task",
+      id: `v2-one-time:${occurrenceId}`,
+      occurrenceId,
+      instanceId,
+      name,
+      status: status === "completed" ? "completed" : "manual",
+      mode: "one_time_v2",
+      dateISO
+    });
+  });
+  window.__calendarV2OneTimeLookup = oneTimeLookup;
+
+  const repeatInstances = (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [])
+    .filter(entry => entry
+      && String(entry.instanceMode || "") === "repeat"
+      && String(entry.status || "active") !== "stopped"
+      && (String(entry.system || "") === "v2" || Number(entry.schemaVersion || 0) >= 2));
+  repeatInstances.forEach(instance => {
+    const dates = projectV2RepeatDates(instance, 2);
+    dates.forEach(dateISO => {
+      const state = resolveV2RepeatOccurrenceState(instance.id, dateISO);
+      if (state.status === "removed") return;
+      const task = v2TaskLookup.get(String(instance.taskId || "")) || null;
+      (dueMap[dateISO] ||= []).push({
+        type: "v2repeat",
+        id: state.key,
+        instanceId: String(instance.id),
+        taskId: String(instance.taskId || ""),
+        dateISO,
+        name: String((task && task.name) || "Maintenance repeat"),
+        status: state.status === "completed" ? "completed" : "manual",
+        mode: "repeat_v2",
+        repeatView: {
+          instanceId: String(instance.id),
+          taskId: String(instance.taskId || ""),
+          dateISO,
+          name: String((task && task.name) || "Maintenance repeat"),
+          note: state.note,
+          hours: state.hours,
+          status: state.status,
+          repeatType: String(instance.repeatRule?.basis || "") === "machine_hours" ? "Machine-hour predicted repeat" : "Calendar repeat"
+        }
+      });
+    });
   });
 
   const jobsMap = {};
@@ -2627,10 +3134,29 @@ function renderCalendar(){
       (dueMap[key]||[]).forEach(ev=>{
         const chip = document.createElement("div");
         let cls = "event generic cal-task";
+        if (ev.type === "v2task") cls += " v2-event";
         if (ev.status === "completed") cls += " is-complete";
         chip.className = cls;
         const baseTaskId = ev.taskId || ev.id;
-        chip.dataset.calTask = baseTaskId;
+        if (ev.type === "v2task" && ev.occurrenceId){
+          chip.dataset.calV2OneTime = String(ev.occurrenceId);
+          chip.addEventListener("click", (event)=>{
+            event.preventDefault();
+            event.stopPropagation();
+            openV2OneTimePanel(String(ev.occurrenceId));
+          });
+          chip.addEventListener("mouseenter", ()=>{
+            showV2OneTimeBubble(String(ev.occurrenceId), chip);
+          });
+        }else if (ev.type === "v2repeat" && ev.repeatView){
+          chip.addEventListener("click", (event)=>{
+            event.preventDefault(); event.stopPropagation();
+            openV2RepeatPanel(ev.repeatView);
+          });
+          chip.dataset.calV2OneTime = `repeat:${ev.instanceId}:${ev.dateISO}`;
+        } else {
+          chip.dataset.calTask = baseTaskId;
+        }
         chip.dataset.calStatus = ev.status || "due";
         if (ev.mode) chip.dataset.calMode = ev.mode;
         chip.dataset.calDate = ev.dateISO || key;
