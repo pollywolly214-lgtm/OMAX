@@ -386,6 +386,7 @@ function projectV2RepeatDates(instance, maxCount = 3){
     const avgRaw = typeof configuredDailyHours === "function" ? Number(configuredDailyHours()) : null;
     const averageHoursPerDay = Number.isFinite(avgRaw) && avgRaw > 0 ? avgRaw : 1;
     const hoursUsedSinceAnchor = Math.max(0, safeCurrent - anchorTotalHours);
+    const daysPerInterval = Math.max(1, Math.ceil(intervalHours / averageHoursPerDay));
     const endDate = endType === "on_date" && endDateISO ? parseDateLocal(endDateISO) : null;
     if (endDate instanceof Date && !Number.isNaN(endDate.getTime())) endDate.setHours(0,0,0,0);
     const rollingCount = 3;
@@ -393,25 +394,29 @@ function projectV2RepeatDates(instance, maxCount = 3){
     const blockedByCountLimit = endCount != null && requestedCount <= 0;
     const out = [];
     if (!blockedByCountLimit){
-      let lastTime = null;
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      let firstProjectedTime = null;
       for (let n = 1; n <= requestedCount; n++){
         const targetHoursFromAnchor = intervalHours * n;
         const remainingHoursForThisProjection = targetHoursFromAnchor - hoursUsedSinceAnchor;
         const daysOut = remainingHoursForThisProjection <= 0 ? 0 : Math.ceil(remainingHoursForThisProjection / averageHoursPerDay);
-        const predicted = new Date();
-        predicted.setHours(0,0,0,0);
-        predicted.setDate(predicted.getDate() + daysOut);
+        const predicted = new Date(today.getTime());
+        predicted.setDate(today.getDate() + daysOut);
         const predictedBeforeGuardISO = normalizeDateKey(ymd(predicted));
-        if (predicted.getTime() < startDate.getTime()){
-          predicted.setTime(startDate.getTime());
-        }
-        if (lastTime != null && predicted.getTime() <= lastTime){
-          predicted.setTime(lastTime + (24 * 60 * 60 * 1000));
+        if (n === 1){
+          if (startDate.getTime() >= today.getTime()){
+            predicted.setTime(startDate.getTime());
+          }else{
+            predicted.setTime(Math.max(startDate.getTime(), predicted.getTime()));
+          }
+          firstProjectedTime = predicted.getTime();
+        }else if (firstProjectedTime != null){
+          predicted.setTime(firstProjectedTime + ((n - 1) * daysPerInterval * 24 * 60 * 60 * 1000));
         }
         if (endDate instanceof Date && predicted.getTime() > endDate.getTime()) break;
         const finalPredictedDateISO = normalizeDateKey(ymd(predicted));
         if (finalPredictedDateISO) out.push(finalPredictedDateISO);
-        lastTime = predicted.getTime();
         if (window.DEBUG_MODE){
           console.info("[maintenance-v2] machine-hour projection occurrence", {
             instanceId,
@@ -421,6 +426,7 @@ function projectV2RepeatDates(instance, maxCount = 3){
             endCount,
             completedCountForInstance,
             averageHoursPerDay,
+            daysPerInterval,
             currentTotalHours: safeCurrent,
             anchorTotalHours,
             projectionNumber: n,
@@ -442,6 +448,7 @@ function projectV2RepeatDates(instance, maxCount = 3){
         endCount,
         completedCountForInstance,
         averageHoursPerDay,
+        daysPerInterval,
         currentTotalHours: safeCurrent,
         anchorTotalHours,
         blockedByCountLimit,
@@ -513,15 +520,32 @@ function appendV2RepeatEvent(instanceId, taskId, dateISO, eventType, payload = {
     rootOccurrenceId: key,
     payload: { ...(payload || {}) }
   });
+  let anchorBefore = null;
+  let anchorAfter = null;
+  let anchorAdvanced = false;
   if (eventType === "completed"){
     const inst = (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []).find(entry => entry && String(entry.id || "") === String(instanceId));
     if (inst && inst.repeatRule && String(inst.repeatRule.basis || "") === "machine_hours"){
+      anchorBefore = Number(inst.machineHourAnchorTotal);
       const current = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
       if (Number.isFinite(current)){
         inst.machineHourAnchorTotal = current;
         inst.machineHourAnchorDateISO = normalizeDateKey(ymd(new Date()));
+        anchorAfter = Number(inst.machineHourAnchorTotal);
+        anchorAdvanced = true;
       }
     }
+  }
+  if (window.DEBUG_MODE && ["completed","uncompleted","removed"].includes(eventType)){
+    console.info("[maintenance-v2] machine-hour occurrence action", {
+      instanceId: String(instanceId || ""),
+      actionType: eventType,
+      clickedDateISO: normalizeDateKey(dateISO),
+      rootOccurrenceId: key,
+      anchorAdvanced,
+      machineHourAnchorTotalBefore: anchorBefore,
+      machineHourAnchorTotalAfter: anchorAfter
+    });
   }
   if (typeof saveCloudNow === "function") saveCloudNow();
   else saveCloudDebounced();
@@ -2968,6 +2992,7 @@ function renderCalendar(){
         status: state.status === "completed" ? "completed" : "manual",
         mode: "repeat_v2",
         repeatView: {
+          rootOccurrenceId: state.key,
           instanceId: String(instance.id),
           taskId: String(instance.taskId || ""),
           dateISO,
