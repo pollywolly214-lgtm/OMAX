@@ -3061,14 +3061,15 @@ function renderCalendar(){
     if (chooseNext) repeatHistoryLatest.set(rootId, { entry, index });
   });
   repeatHistoryLatest.forEach(({ entry }, rootId) => {
-    if (String(entry.eventType || "") !== "completed") return;
+    const latestType = String(entry.eventType || "");
+    if (!["completed", "uncompleted", "note_set", "hours_set"].includes(latestType)) return;
     const dateISO = normalizeDateKey(entry.effectiveDateISO || null) || String(rootId).split(":").slice(-1)[0];
     if (!dateISO) return;
     const instanceId = String(entry.instanceId || "");
     const taskId = String(entry.taskId || "");
     const task = v2TaskLookup.get(taskId) || null;
     const state = resolveV2RepeatOccurrenceState(instanceId, dateISO);
-    if (state.status !== "completed") return;
+    if (state.status === "removed") return;
     const exists = (dueMap[dateISO] || []).some(item => item && item.type === "v2repeat" && String(item.id || "") === rootId);
     if (exists) return;
     (dueMap[dateISO] ||= []).push({
@@ -3078,7 +3079,7 @@ function renderCalendar(){
       taskId,
       dateISO,
       name: String((task && task.name) || "Maintenance repeat"),
-      status: "completed",
+      status: state.status === "completed" ? "completed" : "manual",
       mode: "repeat_v2",
       repeatView: {
         rootOccurrenceId: rootId,
@@ -3088,7 +3089,7 @@ function renderCalendar(){
         name: String((task && task.name) || "Maintenance repeat"),
         note: state.note,
         hours: state.hours,
-        status: "completed",
+        status: state.status === "completed" ? "completed" : "scheduled",
         repeatType: "Repeat history"
       }
     });
