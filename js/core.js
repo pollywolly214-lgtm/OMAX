@@ -657,16 +657,29 @@ function buildEmergencyBackup(snapshot){
   const src = snapshot && typeof snapshot === "object" ? snapshot : {};
   return {
     schema: src.schema || APP_SCHEMA,
+    totalHistory: Array.isArray(src.totalHistory) ? src.totalHistory : [],
     tasksInterval: Array.isArray(src.tasksInterval) ? src.tasksInterval : [],
     tasksAsReq: Array.isArray(src.tasksAsReq) ? src.tasksAsReq : [],
+    maintenanceTasksV2: Array.isArray(src.maintenanceTasksV2) ? src.maintenanceTasksV2 : [],
+    maintenanceCalendarInstancesV2: Array.isArray(src.maintenanceCalendarInstancesV2) ? src.maintenanceCalendarInstancesV2 : [],
+    maintenanceOccurrencesV2: Array.isArray(src.maintenanceOccurrencesV2) ? src.maintenanceOccurrencesV2 : [],
     inventory: Array.isArray(src.inventory) ? src.inventory : [],
     inventoryFolders: Array.isArray(src.inventoryFolders) ? src.inventoryFolders : [],
+    inventoryMaterials: Array.isArray(src.inventoryMaterials) ? src.inventoryMaterials : [],
     cuttingJobs: Array.isArray(src.cuttingJobs) ? src.cuttingJobs : [],
     completedCuttingJobs: Array.isArray(src.completedCuttingJobs) ? src.completedCuttingJobs : [],
     orderRequests: Array.isArray(src.orderRequests) ? src.orderRequests : [],
     receiptTrackerWeeks: Array.isArray(src.receiptTrackerWeeks) ? src.receiptTrackerWeeks : [],
+    garnetCleanings: Array.isArray(src.garnetCleanings) ? src.garnetCleanings : [],
+    dailyCutHours: Array.isArray(src.dailyCutHours) ? src.dailyCutHours : [],
     appConfig: src.appConfig || normalizeAppConfig(window.appConfig),
-    settingsFolders: Array.isArray(src.settingsFolders) ? src.settingsFolders : []
+    settingsFolders: Array.isArray(src.settingsFolders) ? src.settingsFolders : [],
+    folders: Array.isArray(src.folders) ? src.folders : [],
+    jobFolders: Array.isArray(src.jobFolders) ? src.jobFolders : [],
+    dashboardLayout: (src.dashboardLayout && typeof src.dashboardLayout === "object") ? src.dashboardLayout : {},
+    costLayout: (src.costLayout && typeof src.costLayout === "object") ? src.costLayout : {},
+    jobLayout: (src.jobLayout && typeof src.jobLayout === "object") ? src.jobLayout : {},
+    pumpEff: (src.pumpEff && typeof src.pumpEff === "object") ? src.pumpEff : {}
   };
 }
 
@@ -3825,6 +3838,9 @@ function getTrackedStateSignature(snapshot){
     completedCuttingJobs: snap.completedCuttingJobs ?? null,
     dailyCutHours: snap.dailyCutHours ?? null,
     garnetCleanings: snap.garnetCleanings ?? null,
+    maintenanceTasksV2: snap.maintenanceTasksV2 ?? null,
+    maintenanceCalendarInstancesV2: snap.maintenanceCalendarInstancesV2 ?? null,
+    maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 ?? null,
     settingsFolders: snap.settingsFolders ?? null
   };
   const normalized = Object.fromEntries(Object.entries(tracked).map(([k,v]) => [k, getAreaSignature(k, v)]));
