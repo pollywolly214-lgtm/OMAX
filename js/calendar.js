@@ -589,6 +589,13 @@ function appendV2RepeatEvent(instanceId, taskId, dateISO, eventType, payload = {
 
 function openV2RepeatPanel(view){
   if (!view) return;
+  const instance = (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [])
+    .find(entry => entry && String(entry.id || "") === String(view.instanceId || ""));
+  const instanceMode = String(instance?.instanceMode || "");
+  const instanceStatus = String(instance?.status || "active");
+  const canStopRepeat = !!(instance
+    && instanceMode === "repeat"
+    && !["stopped", "archived"].includes(instanceStatus));
   const statusText = view.status === "completed" ? "Completed" : "Scheduled";
   const dateText = parseDateLocal(view.dateISO)?.toDateString() || view.dateISO;
   closeV2OneTimePanel();
@@ -611,10 +618,11 @@ function openV2RepeatPanel(view){
     <button type="button" data-rpt-note>Set note</button>
     <button type="button" data-rpt-hours>Set logged hours</button>
     <button type="button" class="danger" data-rpt-remove>Remove from calendar</button>
-    <button type="button" class="danger" data-rpt-stop>Stop repeat tracking</button>
+    ${canStopRepeat ? `<button type="button" class="danger" data-rpt-stop>Stop repeat tracking</button>` : ""}
     <button type="button" data-rpt-close>Close</button>
   </div>`;
   overlay.appendChild(card); document.body.appendChild(overlay);
+  overlay.addEventListener("click", (event)=>{ if (event.target === overlay) closeV2OneTimePanel(); });
   const reopen = ()=> openV2RepeatPanel({ ...view, ...resolveV2RepeatOccurrenceState(view.instanceId, view.dateISO) });
   card.querySelector("[data-rpt-close]")?.addEventListener("click", ()=> closeV2OneTimePanel());
   card.querySelector("[data-rpt-complete]")?.addEventListener("click", ()=>{ if (view.status!=="completed") appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "completed"); reopen(); });
