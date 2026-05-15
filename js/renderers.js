@@ -20776,14 +20776,14 @@ function renderJobs(){
           console.warn("Failed to record deleted job", err);
         }
       }
-      cuttingJobs = cuttingJobs.filter(x => String(x?.id) !== idStr);
+      const index = cuttingJobs.findIndex(x => String(x?.id) === idStr);
+      if (index >= 0) cuttingJobs.splice(index, 1);
       window.cuttingJobs = cuttingJobs;
       normalizeAllPriorities();
-      saveCloudDebounced();
-      if (typeof saveCloudNow === "function"){
-        try { saveCloudNow(); } catch (err){ console.warn("Immediate save failed after removing active cutting job", err); }
-      }
-      toast("Removed"); renderJobs();
+      persistJobChanges();
+      toast("Removed");
+      renderCalendarPreservingScroll();
+      renderJobs();
       return;
     }
 
