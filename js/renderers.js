@@ -5512,11 +5512,12 @@ function renderDashboard(){
       const isInterval = task?.mode === "interval";
       const options = isInterval
         ? [
+            { value: "machine_hours", label: "By machine hours" },
             { value: "calendar_day", label: "By calendar day" },
             { value: "calendar_week", label: "By calendar week" },
             { value: "calendar_month", label: "By calendar month" }
           ]
-        : [{ value: "calendar_day", label: "By calendar day" }];
+        : [{ value: "calendar_day", label: "By calendar day (interval tasks only for machine-hour repeat)" }];
       taskExistingBasisInput.innerHTML = options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join("");
       taskExistingBasisInput.value = recurrence?.basis && options.some(opt => opt.value === recurrence.basis)
         ? recurrence.basis
@@ -5647,7 +5648,15 @@ function renderDashboard(){
     taskExistingRepeatRows.forEach(row => { row.hidden = !showRepeat; });
     if (taskExistingModeHint){
       if (mode === "repeat"){
-        taskExistingModeHint.textContent = "Repeat tracking currently supports calendar day/week/month. Machine-hour repeat is coming later.";
+        const selected = selectedExistingTaskId ? findMaintenanceTaskById(selectedExistingTaskId)?.task : null;
+        if (selected && selected.mode !== "interval"){
+          taskExistingModeHint.textContent = "Machine-hour repeat is available for Interval tasks only. As Required support is coming later.";
+        }else{
+          const basis = String(taskExistingBasisInput?.value || "");
+          taskExistingModeHint.textContent = basis === "machine_hours"
+            ? "Machine-hour repeat dates are estimated from logged hours and average daily usage. The selected date is the first allowed due date. Count controls how many projected completions before the repeat stops."
+            : "For Interval tasks, choose machine-hours to predict by logged usage, or choose calendar day/week/month.";
+        }
       }else if (mode === "past_log"){
         taskExistingModeHint.textContent = "Past completion saves V2 history only and does not start future repeats.";
       }else{
@@ -5726,7 +5735,6 @@ function renderDashboard(){
       const row = el.closest("label");
       if (row) row.hidden = !enabled;
     });
-    toggleRepeatEndFields(endSelect, endDateInput, endCountInput);
     if (!enabled){
       if (endDateInput?.parentElement) endDateInput.parentElement.hidden = true;
       if (endCountInput?.parentElement) endCountInput.parentElement.hidden = true;
@@ -5734,6 +5742,15 @@ function renderDashboard(){
     if (basisSelect?.closest("label")){
       basisSelect.closest("label").hidden = !enabled;
     }
+    const basis = String(basisSelect?.value || "");
+    if (enabled && endSelect instanceof HTMLSelectElement){
+      const onDateOpt = endSelect.querySelector('option[value="on_date"]');
+      if (onDateOpt) onDateOpt.disabled = basis === "machine_hours";
+      if (basis === "machine_hours" && String(endSelect.value || "") === "on_date"){
+        endSelect.value = "after_count";
+      }
+    }
+    toggleRepeatEndFields(endSelect, endDateInput, endCountInput);
     const detailsRow = repeatSelect === taskExistingRepeatInput ? taskExistingWeekdaysRow : taskWeekdaysRow;
     if (detailsRow){
       detailsRow.hidden = !(enabled && String(basisSelect?.value || "") === "calendar_week");
@@ -6080,11 +6097,12 @@ function renderDashboard(){
     if (taskRepeatBasisInput){
       const options = isInterval
         ? [
+            { value: "machine_hours", label: "By machine hours" },
             { value: "calendar_day", label: "By calendar day" },
             { value: "calendar_week", label: "By calendar week" },
             { value: "calendar_month", label: "By calendar month" }
           ]
-        : [{ value: "calendar_day", label: "By calendar day" }];
+        : [{ value: "calendar_day", label: "By calendar day (interval tasks only for machine-hour repeat)" }];
       const current = String(taskRepeatBasisInput.value || "");
       taskRepeatBasisInput.innerHTML = options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join("");
       taskRepeatBasisInput.value = options.some(opt => opt.value === current) ? current : "calendar_day";
@@ -6516,6 +6534,7 @@ function renderDashboard(){
   taskExistingBasisInput?.addEventListener("change", ()=> {
     const weekly = String(taskExistingBasisInput?.value || "") === "calendar_week";
     if (taskExistingWeekdaysRow) taskExistingWeekdaysRow.hidden = !(taskExistingRepeatInput?.value === "yes" && weekly);
+    syncExistingAddModeUi();
   });
   taskExistingEndInput?.addEventListener("change", ()=> toggleRepeatEndFields(taskExistingEndInput, taskExistingEndDateInput, taskExistingEndCountInput));
   taskExistingAddModeInput?.addEventListener("change", syncExistingAddModeUi);
@@ -6790,6 +6809,7 @@ function renderDashboard(){
       endCountInput: taskExistingEndCountInput,
       defaultBasis: "calendar_day"
     });
+    const basisSelectValue = String(taskExistingBasisInput?.value || "").toLowerCase();
     let choice = String(taskExistingAddModeInput?.value || "").trim();
     if (!choice){
       const choiceRaw = window.prompt(
@@ -6821,21 +6841,54 @@ function renderDashboard(){
       }
       message = `One-time reminder created for "${task.name || "Task"}"`;
     }else if (choice === "repeat"){
+      if (window.DEBUG_MODE){
+        console.info("[maintenance-v2] repeat submit input", {
+          selectedExistingTaskId,
+          taskMode: task.mode,
+          basisSelectValue,
+          repeatEveryInputValue: taskExistingEveryInput?.value,
+          repeatEndType: taskExistingEndInput?.value,
+          repeatEndCount: taskExistingEndCountInput?.value,
+          repeatConfigBeforeNormalization: repeatConfig
+        });
+      }
       const normalizedRepeatConfig = (repeatConfig && typeof repeatConfig === "object") ? { ...repeatConfig } : {};
       normalizedRepeatConfig.enabled = true;
+      if (basisSelectValue === "machine_hours") normalizedRepeatConfig.basis = "machine_hours";
       if (!normalizedRepeatConfig.basis) normalizedRepeatConfig.basis = "calendar_day";
       if (normalizedRepeatConfig.basis === "machine_hours"){
-        toast("Machine-hour repeat is coming later. Choose calendar day/week/month.");
-        if (taskExistingBasisInput) taskExistingBasisInput.value = "calendar_day";
-        return;
+        if (task.mode !== "interval"){
+          toast("Machine-hour repeat is available for Interval tasks only. Choose another repeat basis for As Required tasks.");
+          if (taskExistingBasisInput) taskExistingBasisInput.value = "calendar_day";
+          return;
+        }
+        const intervalHours = Math.max(1, Number(normalizedRepeatConfig.intervalHours != null ? normalizedRepeatConfig.intervalHours : normalizedRepeatConfig.every) || 1);
+        normalizedRepeatConfig.intervalHours = intervalHours;
+        normalizedRepeatConfig.every = intervalHours;
       }
-      createMaintenanceV2FromTemplate(task, {
+      if (window.DEBUG_MODE){
+        console.info("[maintenance-v2] repeat submit normalized", {
+          selectedExistingTaskId,
+          normalizedRepeatConfig
+        });
+      }
+      const created = createMaintenanceV2FromTemplate(task, {
         mode: "repeat",
         eventType: "repeat_started",
         effectiveDateISO: targetISO,
         note: occurrenceNote,
         repeatRule: normalizedRepeatConfig
       });
+      if (window.DEBUG_MODE){
+        console.info("[maintenance-v2] repeat created instance", {
+          instanceId: created?.instance?.id || null,
+          instanceMode: created?.instance?.instanceMode || null,
+          repeatRuleBasis: created?.instance?.repeatRule?.basis || null,
+          repeatRuleIntervalHours: created?.instance?.repeatRule?.intervalHours ?? null,
+          repeatRuleEvery: created?.instance?.repeatRule?.every ?? null,
+          startDateISO: created?.instance?.startDateISO || null
+        });
+      }
       message = `Repeat tracking started for "${task.name || "Task"}"`;
     }else{
       createMaintenanceV2FromTemplate(task, {
