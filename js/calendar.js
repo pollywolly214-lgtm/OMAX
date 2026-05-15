@@ -64,6 +64,31 @@ function configuredTaskDurationDailyHours(){
   return configuredDailyHours();
 }
 
+function getMachineHourProjectionAveragePerDay(){
+  const configured = typeof configuredDailyHours === "function" ? Number(configuredDailyHours()) : null;
+  const cfgDailyHours = Number(window?.appConfig?.dailyHours);
+  const summary = typeof getPredictionHoursSummary === "function" ? getPredictionHoursSummary() : null;
+  const averageDerived = Number(summary?.averageHours);
+  const fallbackFixed = Number(summary?.fixedHours);
+  const finalAverage = Number.isFinite(configured) && configured > 0
+    ? configured
+    : (Number.isFinite(averageDerived) && averageDerived > 0
+      ? averageDerived
+      : (Number.isFinite(cfgDailyHours) && cfgDailyHours > 0
+        ? cfgDailyHours
+        : (Number.isFinite(fallbackFixed) && fallbackFixed > 0 ? fallbackFixed : 8)));
+  if (window.DEBUG_MODE){
+    console.info("[maintenance-v2] machine-hour average source", {
+      configuredDailyHoursResult: configured,
+      appConfigDailyHours: cfgDailyHours,
+      dailyCutHoursDerivedAverage: averageDerived,
+      fixedDailyHoursFallback: fallbackFixed,
+      finalAverageHoursPerDay: finalAverage
+    });
+  }
+  return finalAverage;
+}
+
 function getCalendarPendingHours(dateISO){
   if (!(calendarHoursPending instanceof Map)) return undefined;
   const key = normalizeDateKey(dateISO);
@@ -383,8 +408,7 @@ function projectV2RepeatDates(instance, maxCount = 3){
     const anchorRaw = Number(instance.machineHourAnchorTotal);
     const anchorTotalHours = Number.isFinite(anchorRaw) ? anchorRaw : (Number.isFinite(currentTotalHours) ? currentTotalHours : 0);
     const safeCurrent = Number.isFinite(currentTotalHours) ? currentTotalHours : anchorTotalHours;
-    const avgRaw = typeof configuredDailyHours === "function" ? Number(configuredDailyHours()) : null;
-    const averageHoursPerDay = Number.isFinite(avgRaw) && avgRaw > 0 ? avgRaw : 1;
+    const averageHoursPerDay = Number(getMachineHourProjectionAveragePerDay());
     const hoursUsedSinceAnchor = Math.max(0, safeCurrent - anchorTotalHours);
     const daysPerInterval = Math.max(1, Math.ceil(intervalHours / averageHoursPerDay));
     const endDate = endType === "on_date" && endDateISO ? parseDateLocal(endDateISO) : null;
@@ -3003,6 +3027,59 @@ function renderCalendar(){
           repeatType: String(instance.repeatRule?.basis || "") === "machine_hours" ? "Machine-hour predicted repeat" : "Calendar repeat"
         }
       });
+    });
+  });
+
+  const repeatEvents = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+  const repeatHistoryLatest = new Map();
+  repeatEvents.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+    if (String(entry.system || "") !== "v2" && Number(entry.schemaVersion || 0) < 2) return;
+    const rootId = String(entry.rootOccurrenceId || "");
+    if (!rootId.startsWith("repeat:")) return;
+    const prev = repeatHistoryLatest.get(rootId);
+    if (!prev){
+      repeatHistoryLatest.set(rootId, { entry, index });
+      return;
+    }
+    const prevTs = Date.parse(String(prev.entry.recordedAtISO || ""));
+    const nextTs = Date.parse(String(entry.recordedAtISO || ""));
+    const chooseNext = (Number.isFinite(nextTs) && Number.isFinite(prevTs) && nextTs >= prevTs)
+      || (Number.isFinite(nextTs) && !Number.isFinite(prevTs))
+      || (!Number.isFinite(nextTs) && !Number.isFinite(prevTs) && index >= prev.index);
+    if (chooseNext) repeatHistoryLatest.set(rootId, { entry, index });
+  });
+  repeatHistoryLatest.forEach(({ entry }, rootId) => {
+    if (String(entry.eventType || "") !== "completed") return;
+    const dateISO = normalizeDateKey(entry.effectiveDateISO || null) || String(rootId).split(":").slice(-1)[0];
+    if (!dateISO) return;
+    const instanceId = String(entry.instanceId || "");
+    const taskId = String(entry.taskId || "");
+    const task = v2TaskLookup.get(taskId) || null;
+    const state = resolveV2RepeatOccurrenceState(instanceId, dateISO);
+    if (state.status !== "completed") return;
+    const exists = (dueMap[dateISO] || []).some(item => item && item.type === "v2repeat" && String(item.id || "") === rootId);
+    if (exists) return;
+    (dueMap[dateISO] ||= []).push({
+      type: "v2repeat",
+      id: rootId,
+      instanceId,
+      taskId,
+      dateISO,
+      name: String((task && task.name) || "Maintenance repeat"),
+      status: "completed",
+      mode: "repeat_v2",
+      repeatView: {
+        rootOccurrenceId: rootId,
+        instanceId,
+        taskId,
+        dateISO,
+        name: String((task && task.name) || "Maintenance repeat"),
+        note: state.note,
+        hours: state.hours,
+        status: "completed",
+        repeatType: "Repeat history"
+      }
     });
   });
 
