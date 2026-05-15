@@ -6809,6 +6809,7 @@ function renderDashboard(){
       endCountInput: taskExistingEndCountInput,
       defaultBasis: "calendar_day"
     });
+    const basisSelectValue = String(taskExistingBasisInput?.value || "").toLowerCase();
     let choice = String(taskExistingAddModeInput?.value || "").trim();
     if (!choice){
       const choiceRaw = window.prompt(
@@ -6840,8 +6841,20 @@ function renderDashboard(){
       }
       message = `One-time reminder created for "${task.name || "Task"}"`;
     }else if (choice === "repeat"){
+      if (window.DEBUG_MODE){
+        console.info("[maintenance-v2] repeat submit input", {
+          selectedExistingTaskId,
+          taskMode: task.mode,
+          basisSelectValue,
+          repeatEveryInputValue: taskExistingEveryInput?.value,
+          repeatEndType: taskExistingEndInput?.value,
+          repeatEndCount: taskExistingEndCountInput?.value,
+          repeatConfigBeforeNormalization: repeatConfig
+        });
+      }
       const normalizedRepeatConfig = (repeatConfig && typeof repeatConfig === "object") ? { ...repeatConfig } : {};
       normalizedRepeatConfig.enabled = true;
+      if (basisSelectValue === "machine_hours") normalizedRepeatConfig.basis = "machine_hours";
       if (!normalizedRepeatConfig.basis) normalizedRepeatConfig.basis = "calendar_day";
       if (normalizedRepeatConfig.basis === "machine_hours"){
         if (task.mode !== "interval"){
@@ -6853,13 +6866,29 @@ function renderDashboard(){
         normalizedRepeatConfig.intervalHours = intervalHours;
         normalizedRepeatConfig.every = intervalHours;
       }
-      createMaintenanceV2FromTemplate(task, {
+      if (window.DEBUG_MODE){
+        console.info("[maintenance-v2] repeat submit normalized", {
+          selectedExistingTaskId,
+          normalizedRepeatConfig
+        });
+      }
+      const created = createMaintenanceV2FromTemplate(task, {
         mode: "repeat",
         eventType: "repeat_started",
         effectiveDateISO: targetISO,
         note: occurrenceNote,
         repeatRule: normalizedRepeatConfig
       });
+      if (window.DEBUG_MODE){
+        console.info("[maintenance-v2] repeat created instance", {
+          instanceId: created?.instance?.id || null,
+          instanceMode: created?.instance?.instanceMode || null,
+          repeatRuleBasis: created?.instance?.repeatRule?.basis || null,
+          repeatRuleIntervalHours: created?.instance?.repeatRule?.intervalHours ?? null,
+          repeatRuleEvery: created?.instance?.repeatRule?.every ?? null,
+          startDateISO: created?.instance?.startDateISO || null
+        });
+      }
       message = `Repeat tracking started for "${task.name || "Task"}"`;
     }else{
       createMaintenanceV2FromTemplate(task, {

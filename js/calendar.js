@@ -392,6 +392,13 @@ function projectV2RepeatDates(instance, maxCount = 3){
   if (!rule || !rule.enabled) return [];
   const basis = String(rule.basis || "").toLowerCase();
   if (!["calendar_day", "calendar_week", "calendar_month", "machine_hours"].includes(basis)) return [];
+  if (window.DEBUG_MODE){
+    console.info("[maintenance-v2] projection routing", {
+      instanceId: instance && instance.id != null ? String(instance.id) : null,
+      repeatRuleBasis: basis,
+      projectionBranch: basis
+    });
+  }
   const endType = String(rule.endType || "never").toLowerCase();
   const endCount = endType === "after_count" ? Math.max(1, Math.floor(Number(rule.endCount) || 1)) : null;
   const endDateISO = endType === "on_date" ? normalizeDateKey(rule.endDateISO || null) : null;
