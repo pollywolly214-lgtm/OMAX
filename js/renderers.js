@@ -921,7 +921,7 @@ function editingCompletedJobsSet(){
 const CAD_PREVIEWABLE_EXTENSIONS = new Set([".dxf", ".ord", ".omx"]);
 const JOB_ONEDRIVE_CONFIG_KEY = "cutting_job_onedrive_config_v1";
 const JOB_ONEDRIVE_LIBRARY_KEY = "cutting_job_onedrive_library_v1";
-const JOB_ONEDRIVE_LOCAL_ROOT_DB = "cutting_job_onedrive_local_root_db";
+const JOB_ONEDRIVE_LOCAL_ROOT_DB = "wj_cuts_local_root_db";
 const JOB_ONEDRIVE_LOCAL_ROOT_STORE = "handles";
 const JOB_ONEDRIVE_LOCAL_ROOT_KEY = "root";
 const JOB_ONEDRIVE_DEVICE_ID_KEY = "cutting_job_onedrive_device_id_v1";
@@ -941,6 +941,39 @@ function supportsLocalRootPicker(){
     && typeof window.showDirectoryPicker === "function"
     && typeof window.showOpenFilePicker === "function"
     && typeof window.indexedDB !== "undefined";
+}
+
+async function saveWJCutsRootFolderHandle(handle){
+  return saveLocalRootHandle(handle);
+}
+
+async function getWJCutsRootFolderHandle(){
+  return readLocalRootHandle();
+}
+
+async function setWJCutsRootFolder(){
+  return chooseLocalOneDriveRoot();
+}
+
+async function resolveWJCutsRelativePath(relativePath){
+  const clean = String(relativePath || "").replace(/^\/+/, "");
+  return resolveLocalFileFromRelativePath(clean);
+}
+
+function sanitizeJobFileReferenceForFirestore(fileRef){
+  if (!fileRef || typeof fileRef !== "object") return null;
+  return {
+    id: String(fileRef.id || genId(fileRef.name || "file_ref")),
+    name: String(fileRef.name || "Attachment"),
+    type: String(fileRef.type || ""),
+    size: Number.isFinite(Number(fileRef.size)) ? Number(fileRef.size) : null,
+    source: "wj_cuts_reference",
+    rootLabel: "WJ Cuts",
+    rootPathStart: String(fileRef.rootPathStart || "WJ Cuts"),
+    relativePath: String(fileRef.relativePath || "").replace(/^\/+/, ""),
+    attachedAtISO: String(fileRef.attachedAtISO || fileRef.addedAt || new Date().toISOString()),
+    ...(fileRef.note ? { note: String(fileRef.note) } : {})
+  };
 }
 
 function openOneDriveRootDb(){
@@ -1466,21 +1499,17 @@ async function filesToAttachments(fileList){
   const attachments = [];
   for (const file of files){
     try {
-      const dataUrl = await readFileAsDataUrl(file);
-      const preview = await buildAttachmentPreview(file);
       attachments.push({
         id: genId(file.name || "job_file"),
         name: file.name || "Attachment",
         type: file.type || "",
         size: typeof file.size === "number" ? file.size : null,
-        dataUrl,
-        preview,
-        source: "upload",
-        addedAt: new Date().toISOString()
+        source: "upload_requires_reference",
+        attachedAtISO: new Date().toISOString()
       });
     } catch (err){
       console.error("Unable to read file", err);
-      toast("Failed to read one of the files.");
+      toast("Use Attach from Reference Folder so this file can be saved as a WJ Cuts relative path.");
     }
   }
   return attachments;
@@ -1576,11 +1605,11 @@ async function resolveAttachmentPreview(file){
     return resolveOneDriveAttachmentPreview(file);
   }
 
-  if (file.source === "onedrive_local_root" && file.localRelativePath){
+  if (file.source === "wj_cuts_reference" && file.relativePath){
     try {
-      const localFile = await resolveLocalFileFromRelativePath(file.localRelativePath);
+      const localFile = await resolveWJCutsRelativePath(file.relativePath);
       if (!localFile){
-        file.preview = file.preview || { mode: "message", content: "Preview unavailable. Local root file is missing." };
+        file.preview = file.preview || { mode: "message", content: "File reference saved, but the file was not found under your selected WJ Cuts folder." };
         return false;
       }
       const preview = await buildAttachmentPreview(localFile);
@@ -1588,10 +1617,10 @@ async function resolveAttachmentPreview(file){
         file.preview = preview;
         return preview.mode === "image";
       }
-      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this local root file type." };
+      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this WJ Cuts referenced file type." };
       return false;
     } catch (_err){
-      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this local root file." };
+      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this WJ Cuts referenced file." };
       return false;
     }
   }
@@ -19002,12 +19031,12 @@ function renderJobs(){
 
   const attachFromLocalOneDriveRoot = async ()=>{
     if (!supportsLocalRootPicker()){
-      toast("This browser does not support local root folder attach.");
+      toast("Local file references require Chrome or Edge.");
       return false;
     }
     const rootHandle = await readLocalRootHandle();
     if (!rootHandle){
-      toast("Root folder is not set on this computer. Open OneDrive setup and choose the root folder first.");
+      toast("Set WJ Cuts Folder to open this file.");
       openOneDriveModal();
       return false;
     }
@@ -19057,20 +19086,18 @@ function renderJobs(){
         toast("Only DXF, ORD, or OMX files can be attached from OneDrive root.");
         return false;
       }
-      const relPath = `/${rel.join("/")}`;
-      pendingNewJobFiles.push({
+      const relPath = `${rel.join("/")}`;
+      pendingNewJobFiles.push(sanitizeJobFileReferenceForFirestore({
         id: genId(file.name || "job_file"),
         name: file.name || "Attachment",
         type: file.type || "",
         size: typeof file.size === "number" ? file.size : null,
-        source: "onedrive_local_root",
-        localRelativePath: relPath,
-        localRootName: getSharedConfig().localRootName || rootHandle.name || "",
-        localRootSignature: signature,
-        localDeviceId: getLocalDeviceId(),
-        addedAt: new Date().toISOString()
-      });
-      toast("File attached from this computer OneDrive root.");
+        rootLabel: "WJ Cuts",
+        rootPathStart: "WJ Cuts",
+        relativePath: relPath,
+        attachedAtISO: new Date().toISOString()
+      }));
+      toast("WJ Cuts file reference attached.");
       window.jobAddFormOpen = true;
       renderJobs();
       return true;
@@ -19160,8 +19187,7 @@ function renderJobs(){
       restoreNewJobFormState(formState);
       return;
     }
-    pendingNewJobFiles.push(...attachments.map(a=>({ ...a })));
-    toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
+    toast("Use Attach from Reference Folder so this file can be saved as a WJ Cuts relative path.");
     window.jobAddFormOpen = true;
     renderJobs();
     requestAnimationFrame(()=> restoreNewJobFormState(formState));
@@ -19956,10 +19982,7 @@ function renderJobs(){
       e.target.value = "";
       if (!attachments.length) return;
       j.files = Array.isArray(j.files) ? j.files : [];
-      attachments.forEach(att=> j.files.push({ ...att }));
-      saveCloudDebounced();
-      toast(`${attachments.length} file${attachments.length===1?"":"s"} added`);
-      renderJobs();
+      toast("Use Attach from Reference Folder so this file can be saved as a WJ Cuts relative path.");
     }
   });
 
@@ -20013,8 +20036,8 @@ function renderJobs(){
       file = files[idx] || null;
       if (file) break;
     }
-    if (!file || file.source !== "onedrive_local_root" || !file.localRelativePath){
-      toast("Local OneDrive reference not found for this file.");
+    if (!file || file.source !== "wj_cuts_reference" || !file.relativePath){
+      toast("File metadata saved only — original file content is not stored.");
       return false;
     }
     try {
@@ -20025,9 +20048,9 @@ function renderJobs(){
         openOneDriveModal();
         return false;
       }
-      const fileBlob = await resolveLocalFileFromRelativePath(file.localRelativePath);
+      const fileBlob = await resolveWJCutsRelativePath(file.relativePath);
       if (!fileBlob){
-        toast("Local root is missing or incorrect on this computer. Re-run OneDrive setup.");
+        toast("File reference saved, but the file was not found under your selected WJ Cuts folder.");
         openOneDriveModal();
         return false;
       }
