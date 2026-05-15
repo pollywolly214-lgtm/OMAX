@@ -425,8 +425,8 @@ function projectV2RepeatDates(instance, maxCount = 3){
     const endDate = endType === "on_date" && endDateISO ? parseDateLocal(endDateISO) : null;
     if (endDate instanceof Date && !Number.isNaN(endDate.getTime())) endDate.setHours(0,0,0,0);
     const rollingCount = 3;
-    const requestedCount = endCount != null ? Math.max(0, endCount - completedCountForInstance) : rollingCount;
-    const blockedByCountLimit = endCount != null && requestedCount <= 0;
+    const blockedByCountLimit = endCount != null && completedCountForInstance >= endCount;
+    const requestedCount = endCount != null ? endCount : rollingCount;
     const out = [];
     if (!blockedByCountLimit){
       const today = new Date();
