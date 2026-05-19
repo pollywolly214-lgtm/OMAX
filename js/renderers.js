@@ -12441,7 +12441,6 @@ function renderCosts(){
         purchasedDatalist.id = purchasedDatalistId;
         modal.appendChild(purchasedDatalist);
       }
-      const purchaseTemplates = new Map();
       let activeWeekKey = String((window.receiptTrackerWeekSelected || weekOptions[0]?.key || ""));
       let activeRange = String(window.receiptTrackerRangeSelected || "1");
       let hasUnsavedReceiptChanges = false;
@@ -12560,76 +12559,31 @@ function renderCosts(){
           : [];
       };
       const rebuildPurchaseTemplates = ()=>{
-        purchaseTemplates.clear();
-        const rows = [];
-        (window.receiptTrackerWeeks || []).forEach(week => {
-          normalizeRows(week?.rows).forEach(row => {
-            const purchased = String(row?.purchased || "").trim();
-            if (!purchased) return;
-            rows.push({
-              purchased,
-              key: purchased.toLowerCase(),
-              date: toIsoDate(row?.date),
-              cost: Number(row?.cost) || 0,
-              qty: Number(row?.qty) || 0,
-              partNumber: String(row?.partNumber || ""),
-              shipping: Number(row?.shipping) || 0,
-              tax: Number(row?.tax) || 0
-            });
-          });
-        });
-        rows.sort((a,b)=> String(b.date || "").localeCompare(String(a.date || "")));
-        rows.forEach(row => {
-          if (!purchaseTemplates.has(row.key)){
-            purchaseTemplates.set(row.key, row);
-          }
-        });
         if (purchasedDatalist instanceof HTMLDataListElement){
-          purchasedDatalist.innerHTML = Array.from(purchaseTemplates.values())
-            .sort((a,b)=> String(a.purchased).localeCompare(String(b.purchased)))
-            .map(item => `<option value="${escapeHtml(item.purchased)}"></option>`)
+          const options = (Array.isArray(inventory) ? inventory : [])
+            .filter(item => item && item.id != null && String(item.name || "").trim())
+            .sort((a,b)=> String(a.name || "").localeCompare(String(b.name || "")));
+          purchasedDatalist.innerHTML = options
+            .map(item => `<option value="${escapeHtml(String(item.name || ""))}"></option>`)
             .join("");
         }
       };
-      const applyTemplateToRow = (rowEl, template)=>{
-        if (!(rowEl instanceof HTMLElement) || !template) return;
-        const setField = (col, value)=>{
-          const el = rowEl.querySelector(`[data-col="${col}"]`);
-          if (el instanceof HTMLInputElement) el.value = String(value ?? "");
-        };
-        setField("cost", Number(template.cost || 0));
-        setField("qty", Number(template.qty || 0));
-        setField("partNumber", String(template.partNumber || ""));
-        setField("shipping", Number(template.shipping || 0));
-        setField("tax", Number(template.tax || 0));
-      };
       
-      const inventorySelectOptionsMarkup = (selectedId)=>{
-        const selected = String(selectedId || "");
-        const rows = (Array.isArray(inventory) ? inventory : []).filter(Boolean).slice().sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));
-        const opts = ['<option value="">Auto-detect from name</option>'];
-        rows.forEach(item => {
-          const id = String(item.id || "");
-          if (!id) return;
-          const label = `${item.name || "Unnamed"} ${item.pn ? `(${item.pn})` : ""}`.trim();
-          opts.push(`<option value="${escapeHtml(id)}" ${selected===id?"selected":""}>${escapeHtml(label)}</option>`);
-        });
-        return opts.join("");
-      };
 const appendEmptyRow = (focusFirst = false)=>{
         if (!(weekRowsBody instanceof HTMLElement)) return;
         const tr = document.createElement("tr");
         tr.setAttribute("data-receipt-row", "1");
         tr.innerHTML = `
           <td><input type="date" data-col="date" min="${escapeHtml(String(getWeekEntry(activeWeekKey)?.startISO || ""))}" max="${escapeHtml(String(getWeekEntry(activeWeekKey)?.endISO || ""))}"></td>
-          <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" placeholder="Item"></td>
+          <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" placeholder="Select existing item"></td>
           <td><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
           <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
-          <td style="width:160px;max-width:160px"><select data-col="inventoryItemId" style="width:100%;max-width:160px;text-overflow:ellipsis">${inventorySelectOptionsMarkup("")}</select></td>
+          <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
           <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00" style="min-width:86px"></td>
           <td><input type="number" min="0" step="0.01" data-col="tax" placeholder="0.00" style="min-width:72px"></td>
-          <td data-col="total">${formatUsd(0)}</td>`;
+          <td data-col="total">${formatUsd(0)}</td>
+          <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>`;
         weekRowsBody.appendChild(tr);
         if (focusFirst){
           const first = tr.querySelector("[data-col='date']");
@@ -12667,10 +12621,11 @@ const appendEmptyRow = (focusFirst = false)=>{
             <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
             <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
-            <td style="width:160px;max-width:160px"><select data-col="inventoryItemId" style="width:100%;max-width:160px;text-overflow:ellipsis">${inventorySelectOptionsMarkup(row.inventoryItemId || "")}</select></td>
+            <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
             <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}" style="min-width:86px"></td>
             <td><input type="number" min="0" step="0.01" data-col="tax" value="${escapeHtml(String(row.tax || 0))}" style="min-width:72px"></td>
             <td data-col="total">${formatUsd(computeRowTotal(row))}</td>
+            <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>
           </tr>`).join("");
         appendEmptyRow();
         recomputeWeekTotals();
@@ -12814,12 +12769,14 @@ const appendEmptyRow = (focusFirst = false)=>{
             const row = inputEl.closest("tr[data-receipt-row]");
             const typed = String(inputEl.value || "").trim();
             if (row && typed){
-              const inv = findInventoryByNameLike(typed);
+              const inv = (Array.isArray(inventory) ? inventory : []).find(item => String(item?.name || "").trim().toLowerCase() === typed.toLowerCase());
+              const partEl = row.querySelector('[data-col="partNumber"]');
+              const costEl = row.querySelector('[data-col="cost"]');
               if (inv){
-                const invSel = row.querySelector('[data-col="inventoryItemId"]');
-                const partEl = row.querySelector('[data-col="partNumber"]');
-                if (invSel instanceof HTMLSelectElement && String(invSel.value || "") !== String(inv.id || "")) invSel.value = String(inv.id || "");
-                if (partEl instanceof HTMLInputElement && !String(partEl.value || "").trim()) partEl.value = String(inv.pn || "");
+                if (partEl instanceof HTMLInputElement) partEl.value = String(inv.pn || "");
+                if (costEl instanceof HTMLInputElement && Number.isFinite(Number(inv.price))) costEl.value = String(Number(inv.price));
+              } else {
+                if (partEl instanceof HTMLInputElement) partEl.value = "";
               }
             }
           }
@@ -12836,28 +12793,24 @@ const appendEmptyRow = (focusFirst = false)=>{
           saveWeekRowsFromDom();
           renderRangeTable();
         });
-        weekRowsBody.addEventListener("change", event => {
-          const input = event.target;
-          if (!(input instanceof HTMLInputElement)) return;
-          if (input.getAttribute("data-col") !== "purchased") return;
-          const key = String(input.value || "").trim().toLowerCase();
-          if (!key) return;
-          const template = purchaseTemplates.get(key) || Array.from(purchaseTemplates.entries()).find(([name]) => name.includes(key))?.[1];
-          if (!template) return;
-          const row = input.closest("tr[data-receipt-row]");
-          applyTemplateToRow(row, template);
-          const inv = findInventoryByNameLike(input.value || "");
-          if (row && inv){
-            const invSel = row.querySelector('[data-col="inventoryItemId"]');
-            if (invSel instanceof HTMLSelectElement) invSel.value = String(inv.id || "");
+        weekRowsBody.addEventListener("click", event => {
+          const target = event.target instanceof HTMLElement ? event.target : null;
+          if (!target) return;
+          if (target.getAttribute("data-col") === "removeRow"){
+            const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]"));
+            if (rows.length <= 1){ if (typeof toast === "function") toast("At least one row is required."); return; }
+            target.closest("tr[data-receipt-row]")?.remove();
+            recomputeWeekTotals(); saveWeekRowsFromDom(); renderRangeTable(); renderCentralSpendRows();
+            return;
           }
-          recomputeWeekTotals();
-          hasUnsavedReceiptChanges = true;
-          hasExplicitSaveSinceEdit = false;
-          saveWeekRowsFromDom();
-          rebuildPurchaseTemplates();
-          renderRangeTable();
-          renderCentralSpendRows();
+          if (target.getAttribute("data-col") === "goTask"){
+            const row = target.closest("tr[data-receipt-row]");
+            const purchased = String(row?.querySelector('[data-col="purchased"]')?.value || "").trim().toLowerCase();
+            const inv = (Array.isArray(inventory) ? inventory : []).find(item => String(item?.name || "").trim().toLowerCase() === purchased);
+            const taskId = inv && inv.linkedTaskId != null ? String(inv.linkedTaskId) : "";
+            if (taskId && typeof openSettingsAndReveal === "function"){ openSettingsAndReveal(taskId); }
+            else if (typeof window.showScreen === "function"){ window.showScreen("settings"); }
+          }
         });
       };
       bindRowEvents();
@@ -12894,6 +12847,19 @@ const appendEmptyRow = (focusFirst = false)=>{
           await savePurchaseHistoryWeek({ showInlineStatus: true });
           saveWeekBtn.disabled = false;
           saveWeekBtn.textContent = prevLabel || "Save week";
+        });
+      }
+      const quickAddBtn = modal.querySelector("[data-receipt-quick-add-task]");
+      if (quickAddBtn instanceof HTMLButtonElement){
+        quickAddBtn.addEventListener("click", ()=>{
+          const btn = document.getElementById("btnAddTask");
+          if (btn instanceof HTMLButtonElement) btn.click();
+        });
+      }
+      const goSettingsBtn = modal.querySelector("[data-receipt-go-settings]");
+      if (goSettingsBtn instanceof HTMLButtonElement){
+        goSettingsBtn.addEventListener("click", ()=>{
+          if (typeof window.showScreen === "function") window.showScreen("settings");
         });
       }
       if (clearAllBtn instanceof HTMLButtonElement){

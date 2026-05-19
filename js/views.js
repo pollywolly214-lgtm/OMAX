@@ -1965,6 +1965,8 @@ function viewCosts(model){
               <select data-receipt-week-select aria-label="Select purchase history week"></select>
             </label>
             <button type="button" class="btn" data-receipt-save-week>Save week</button>
+            <button type="button" class="btn secondary" data-receipt-quick-add-task>Quick add task</button>
+            <button type="button" class="btn secondary" data-receipt-go-settings>Maintenance settings</button>
             <button type="button" class="btn secondary" data-receipt-clear-all>Clear all</button>
             <button type="button" class="btn secondary" data-receipt-undo-clear disabled>Undo clear</button>
             <button type="button" class="btn secondary" data-receipt-export-week>Export week (CSV)</button>
@@ -1973,9 +1975,9 @@ function viewCosts(model){
           <p class="small muted" data-receipt-week-range>—</p>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-week-table">
-              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th style="width:160px;max-width:160px">Inventory link</th><th>Shipping</th><th>Tax</th><th>Total</th></tr></thead>
+              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th>Task</th><th>Shipping</th><th>Tax</th><th>Total</th><th></th></tr></thead>
               <tbody data-receipt-week-rows></tbody>
-              <tfoot><tr><th colspan="8">Subtotal</th><th data-receipt-week-subtotal>$0.00</th></tr></tfoot>
+              <tfoot><tr><th colspan="8">Subtotal</th><th data-receipt-week-subtotal>$0.00</th><th></th></tr></tfoot>
             </table>
           </div>
           <div class="cost-receipt-summary-controls">
