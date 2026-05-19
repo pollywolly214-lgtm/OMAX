@@ -470,7 +470,7 @@ function projectV2RepeatDates(instance, maxCount = 3){
         const finalPredictedDateISO = normalizeDateKey(ymd(predicted));
         if (!finalPredictedDateISO) continue;
         const state = resolveV2RepeatOccurrenceState(instanceId, finalPredictedDateISO);
-        if (state.status === "removed" || state.status === "completed") continue;
+        if (state.lifecycleStatus === "removed" || state.lifecycleStatus === "completed" || state.isMoved) continue;
         if (!out.includes(finalPredictedDateISO)) out.push(finalPredictedDateISO);
         if (window.DEBUG_MODE){
           console.info("[maintenance-v2] machine-hour projection occurrence", {
@@ -547,27 +547,26 @@ function resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, fallbackDateISO 
   const related = events
     .filter(entry => entry && typeof entry === "object" && String(entry.rootOccurrenceId || "") === key)
     .sort((a,b)=> String(a.recordedAtISO || "").localeCompare(String(b.recordedAtISO || "")));
-  let status = "scheduled";
+  let lifecycleStatus = "scheduled";
   let note = "";
   let hours = null;
   let displayDateISO = fallback;
   related.forEach(entry => {
     const t = String(entry.eventType || "");
-    if (t === "completed") status = "completed";
-    if (t === "uncompleted") status = "scheduled";
-    if (t === "skipped") status = "skipped";
+    if (t === "completed") lifecycleStatus = "completed";
+    if (t === "uncompleted") lifecycleStatus = "scheduled";
+    if (t === "skipped") lifecycleStatus = "skipped";
     if (t === "moved" && entry.payload && entry.payload.toDateISO){
-      status = "moved";
       displayDateISO = normalizeDateKey(entry.payload.toDateISO) || displayDateISO;
     }
-    if (t === "removed") status = "removed";
+    if (t === "removed") lifecycleStatus = "removed";
     if (t === "note_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "note")) note = String(entry.payload.note || "");
     if (t === "hours_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "hours")){
       const raw = entry.payload.hours;
       hours = raw == null || raw === "" ? null : (Number.isFinite(Number(raw)) ? Number(raw) : hours);
     }
   });
-  return { key, status, note, hours, displayDateISO, originalDateISO: fallback };
+  return { key, lifecycleStatus, note, hours, displayDateISO, originalDateISO: fallback, isMoved: displayDateISO !== fallback };
 }
 
 function resolveV2RepeatOccurrenceState(instanceId, dateISO){
@@ -655,7 +654,7 @@ function openV2RepeatPanel(view){
   const canStopRepeat = !!(instance
     && instanceMode === "repeat"
     && !["stopped", "archived"].includes(instanceStatus));
-  const statusText = view.status === "completed" ? "Completed" : "Scheduled";
+  const statusText = view.lifecycleStatus === "completed" ? "Completed" : "Scheduled";
   const dateText = parseDateLocal(view.dateISO)?.toDateString() || view.dateISO;
   const rule = instance && instance.repeatRule && typeof instance.repeatRule === "object" ? instance.repeatRule : null;
   const basis = String(rule?.basis || "").toLowerCase();
@@ -719,12 +718,11 @@ function openV2RepeatPanel(view){
   ${machineInfoHtml}
   ${view.repeatType === "Machine-hour predicted repeat" ? `<div class="small muted">This due date is predicted from machine-hour usage and may move as hours change.</div>` : ""}
   <div class="bubble-actions">
-    <button type="button" data-rpt-complete ${view.status==="completed"?"disabled":""}>${view.status==="completed"?"Completed":"Mark complete"}</button>
+    <button type="button" data-rpt-complete ${view.lifecycleStatus==="completed"?"disabled":""}>${view.lifecycleStatus==="completed"?"Completed":"Mark complete"}</button>
     <button type="button" data-rpt-uncomplete>Mark incomplete</button>
     <button type="button" data-rpt-note>Set note</button>
     <button type="button" data-rpt-hours>Set logged hours</button>
     <button type="button" data-rpt-move>Move occurrence</button>
-    <button type="button" data-rpt-skip>Skip occurrence</button>
     <button type="button" class="danger" data-rpt-remove>Remove from calendar</button>
     ${canStopRepeat ? `<button type="button" class="danger" data-rpt-stop>Stop repeat tracking</button>` : ""}
     <button type="button" data-rpt-close>Close</button>
@@ -749,8 +747,8 @@ function openV2RepeatPanel(view){
     });
   };
   card.querySelector("[data-rpt-close]")?.addEventListener("click", ()=> closeV2OneTimePanel());
-  card.querySelector("[data-rpt-complete]")?.addEventListener("click", ()=>{ if (view.status!=="completed"){ logRepeatAction("completed"); appendV2RepeatEventByRoot({ ...view, eventType: "completed" }); } reopen(); });
-  card.querySelector("[data-rpt-uncomplete]")?.addEventListener("click", ()=>{ if (view.status==="completed"){ logRepeatAction("uncompleted"); appendV2RepeatEventByRoot({ ...view, eventType: "uncompleted" }); } reopen(); });
+  card.querySelector("[data-rpt-complete]")?.addEventListener("click", ()=>{ if (view.lifecycleStatus!=="completed"){ logRepeatAction("completed"); appendV2RepeatEventByRoot({ ...view, eventType: "completed" }); } reopen(); });
+  card.querySelector("[data-rpt-uncomplete]")?.addEventListener("click", ()=>{ if (view.lifecycleStatus==="completed"){ logRepeatAction("uncompleted"); appendV2RepeatEventByRoot({ ...view, eventType: "uncompleted" }); } reopen(); });
   card.querySelector("[data-rpt-note]")?.addEventListener("click", ()=>{ const v=window.prompt("Set note for this repeat occurrence:", view.note||""); if(v!==null){ logRepeatAction("note_set"); appendV2RepeatEventByRoot({ ...view, eventType: "note_set", payload: { note:v } }); } reopen(); });
   card.querySelector("[data-rpt-hours]")?.addEventListener("click", ()=>{ const v=window.prompt("Enter hours to record for this maintenance occurrence. Leave blank to clear.", view.hours!=null?String(view.hours):""); if(v!==null){ const t=String(v).trim(); const h=t===""?null:Number(t); if(t!=="" && (!Number.isFinite(h)||h<0)){ toast("Enter a valid non-negative number."); return; } logRepeatAction("hours_set"); appendV2RepeatEventByRoot({ ...view, eventType: "hours_set", payload: { hours:h } }); reopen(); } });
   card.querySelector("[data-rpt-move]")?.addEventListener("click", ()=>{
@@ -762,14 +760,31 @@ function openV2RepeatPanel(view){
     appendV2RepeatEventByRoot({ ...view, eventType: "moved", payload: { fromDateISO: view.originalDateISO, toDateISO, source: "calendar_panel" } });
     closeV2OneTimePanel();
   });
-  card.querySelector("[data-rpt-skip]")?.addEventListener("click", ()=>{
-    const ok=window.confirm?window.confirm("Skip this occurrence and keep the repeat chain running?"):true;
+  card.querySelector("[data-rpt-remove]")?.addEventListener("click", ()=>{
+    const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
+    const inst = instances.find(entry => entry && String(entry.id || "") === String(view.instanceId || ""));
+    const projected = inst ? projectV2RepeatDates(inst) : [];
+    const hasOtherVisible = projected.some(dateISO => {
+      const rootId = makeV2RepeatOccurrenceKey(view.instanceId, dateISO);
+      if (rootId === String(view.rootOccurrenceId || "")) return false;
+      const state = resolveV2RepeatOccurrenceStateByRoot(rootId, dateISO);
+      return !["removed", "skipped"].includes(String(state.lifecycleStatus || ""));
+    });
+    if (!hasOtherVisible){
+      const askStop = window.confirm ? window.confirm("This is the last visible occurrence in this repeat chain. Remove it and stop repeat tracking?") : true;
+      if (!askStop) return;
+      logRepeatAction("removed_last_visible_stop");
+      appendV2RepeatEventByRoot({ ...view, eventType: "removed", payload: { source:"repeat_panel" } });
+      if (typeof window.stopV2RepeatTracking === "function") window.stopV2RepeatTracking(String(view.instanceId), String(view.taskId), String(view.originalDateISO), String(view.rootOccurrenceId), String(view.displayDateISO || view.dateISO));
+      closeV2OneTimePanel();
+      return;
+    }
+    const ok=window.confirm?window.confirm("Remove this repeat occurrence from calendar?"):true;
     if(!ok) return;
-    logRepeatAction("skipped");
-    appendV2RepeatEventByRoot({ ...view, eventType: "skipped", payload: { source:"calendar_panel" } });
+    logRepeatAction("removed");
+    appendV2RepeatEventByRoot({ ...view, eventType: "removed", payload: { source:"repeat_panel" } });
     closeV2OneTimePanel();
   });
-  card.querySelector("[data-rpt-remove]")?.addEventListener("click", ()=>{ const ok=window.confirm?window.confirm("Remove this repeat occurrence from calendar?"):true; if(!ok) return; logRepeatAction("removed"); appendV2RepeatEventByRoot({ ...view, eventType: "removed", payload: { source:"repeat_panel" } }); closeV2OneTimePanel(); });
   card.querySelector("[data-rpt-stop]")?.addEventListener("click", ()=>{
     const ok = window.confirm ? window.confirm("Stop repeat tracking for this chain?") : true;
     if (!ok) return;
@@ -3181,7 +3196,7 @@ function renderCalendar(){
     dates.forEach(dateISO => {
       const rootOccurrenceId = makeV2RepeatOccurrenceKey(instance.id, dateISO);
       const state = resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, dateISO);
-      if (state.status === "removed" || state.status === "skipped" || state.status === "moved") return;
+      if (["removed","skipped"].includes(String(state.lifecycleStatus || "")) || state.isMoved) return;
       const task = v2TaskLookup.get(String(instance.taskId || "")) || null;
       (dueMap[dateISO] ||= []).push({
         type: "v2repeat",
@@ -3190,7 +3205,7 @@ function renderCalendar(){
         taskId: String(instance.taskId || ""),
         dateISO,
         name: String((task && task.name) || "Maintenance repeat"),
-        status: state.status === "completed" ? "completed" : "manual",
+        status: state.lifecycleStatus === "completed" ? "completed" : "manual",
         mode: "repeat_v2",
         repeatView: {
           rootOccurrenceId,
@@ -3202,7 +3217,7 @@ function renderCalendar(){
           name: String((task && task.name) || "Maintenance repeat"),
           note: state.note,
           hours: state.hours,
-          status: state.status,
+          status: state.lifecycleStatus,
           repeatType: String(instance.repeatRule?.basis || "") === "machine_hours" ? "Machine-hour predicted repeat" : "Calendar repeat"
         }
       });
@@ -3237,7 +3252,7 @@ function renderCalendar(){
     const taskId = String(entry.taskId || "");
     const task = v2TaskLookup.get(taskId) || null;
     const state = resolveV2RepeatOccurrenceStateByRoot(rootId, dateISO);
-    if (state.status === "removed") return;
+    if (["removed","skipped"].includes(String(state.lifecycleStatus || ""))) return;
     const resolvedDateISO = normalizeDateKey(state.displayDateISO || dateISO || null);
     if (!resolvedDateISO) return;
     const exists = (dueMap[resolvedDateISO] || []).some(item => item && item.type === "v2repeat" && String(item.id || "") === rootId);
@@ -3249,7 +3264,7 @@ function renderCalendar(){
       taskId,
       dateISO: resolvedDateISO,
       name: String((task && task.name) || "Maintenance repeat"),
-      status: state.status === "completed" ? "completed" : "manual",
+      status: state.lifecycleStatus === "completed" ? "completed" : "manual",
       mode: "repeat_v2",
       repeatView: {
         rootOccurrenceId: rootId,
@@ -3261,7 +3276,7 @@ function renderCalendar(){
         name: String((task && task.name) || "Maintenance repeat"),
         note: state.note,
         hours: state.hours,
-        status: state.status === "completed" ? "completed" : "scheduled",
+        status: state.lifecycleStatus === "completed" ? "completed" : "scheduled",
         repeatType: "Repeat history"
       }
     });
