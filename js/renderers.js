@@ -1534,6 +1534,12 @@ async function filesToAttachments(fileList){
   const attachments = [];
   for (const file of files){
     try {
+      const dataUrl = await new Promise((resolve, reject)=>{
+        const reader = new FileReader();
+        reader.onload = ()=> resolve(typeof reader.result === "string" ? reader.result : "");
+        reader.onerror = ()=> reject(reader.error || new Error("Unable to read file"));
+        reader.readAsDataURL(file);
+      });
       attachments.push({
         id: genId(file.name || "job_file"),
         name: file.name || "Attachment",
@@ -1541,7 +1547,9 @@ async function filesToAttachments(fileList){
         size: typeof file.size === "number" ? file.size : null,
         source: "upload_requires_reference",
         attachedAtISO: new Date().toISOString(),
-        rootLocationHint: String(cfg.folderHint || cfg.localRootName || "")
+        rootLocationHint: String(cfg.folderHint || cfg.localRootName || ""),
+        dataUrl,
+        previewUrl: /^data:image\//i.test(dataUrl || "") ? dataUrl : ""
       });
     } catch (err){
       console.error("Unable to read file", err);
@@ -20515,9 +20523,12 @@ function renderJobs(){
     if (upload){
       const id = upload.getAttribute("data-upload-job");
       e.preventDefault();
+      closeActionMenu();
+      closeHistoryActionMenu();
       content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
       return;
     }
+
   });
   historyBody?.addEventListener("change", (e)=>{
     const previewSelect = e.target instanceof Element
