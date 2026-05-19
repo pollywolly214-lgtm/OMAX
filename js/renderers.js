@@ -12854,15 +12854,27 @@ const appendEmptyRow = (focusFirst = false)=>{
       const quickAddBtn = modal.querySelector("[data-receipt-quick-add-task]");
       if (quickAddBtn instanceof HTMLButtonElement){
         quickAddBtn.addEventListener("click", ()=>{
-          const openTaskModal = typeof window.__openMaintenanceTaskModal === "function" ? window.__openMaintenanceTaskModal : null;
-          if (openTaskModal){
-            openTaskModal();
-            return;
+          const tryOpenTaskModal = ()=>{
+            const opener = typeof window.__openMaintenanceTaskModal === "function" ? window.__openMaintenanceTaskModal : null;
+            if (opener){
+              opener();
+              return true;
+            }
+            const addTaskBtn = document.getElementById("btnAddTask");
+            if (addTaskBtn instanceof HTMLButtonElement){
+              addTaskBtn.click();
+              return true;
+            }
+            return false;
+          };
+          if (tryOpenTaskModal()) return;
+          if (typeof renderSettings === "function"){
+            try { renderSettings(); } catch (err){ console.warn("Quick add task failed to pre-render settings modal", err); }
           }
-          if (typeof window.showScreen === "function") window.showScreen("settings");
           setTimeout(()=>{
-            const fallbackOpen = typeof window.__openMaintenanceTaskModal === "function" ? window.__openMaintenanceTaskModal : null;
-            if (fallbackOpen) fallbackOpen();
+            if (!tryOpenTaskModal() && typeof toast === "function"){
+              toast("Unable to open Add Task right now.");
+            }
           }, 0);
         });
       }
