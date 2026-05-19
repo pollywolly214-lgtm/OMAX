@@ -392,6 +392,9 @@ function getV2OneTimeOccurrenceView(occurrenceId){
 function makeV2RepeatOccurrenceKey(instanceId, dateISO){
   return `repeat:${String(instanceId || "")}:${String(dateISO || "")}`;
 }
+function makeV2RepeatOccurrenceSlotKey(instanceId, occurrenceIndex){
+  return `repeat:${String(instanceId || "")}:slot:${Math.max(1, Math.floor(Number(occurrenceIndex) || 1))}`;
+}
 
 function projectV2RepeatDates(instance, maxCount = 3){
   const rule = instance && instance.repeatRule && typeof instance.repeatRule === "object" ? instance.repeatRule : null;
@@ -410,8 +413,17 @@ function projectV2RepeatDates(instance, maxCount = 3){
   const endDateISO = endType === "on_date" ? normalizeDateKey(rule.endDateISO || null) : null;
   const instanceId = instance && instance.id != null ? String(instance.id) : "";
   const eventsForInstance = (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [])
-    .filter(entry => entry && String(entry.instanceId || "") === instanceId)
-    .sort((a,b)=> String(a.recordedAtISO || "").localeCompare(String(b.recordedAtISO || "")));
+    .map((entry, idx) => ({ entry, idx }))
+    .filter(({ entry }) => entry && String(entry.instanceId || "") === instanceId)
+    .sort((a,b)=>{
+      const at = Date.parse(String(a.entry?.recordedAtISO || ""));
+      const bt = Date.parse(String(b.entry?.recordedAtISO || ""));
+      const aTs = Number.isFinite(at) ? at : 0;
+      const bTs = Number.isFinite(bt) ? bt : 0;
+      if (aTs !== bTs) return aTs - bTs;
+      return b.idx - a.idx;
+    })
+    .map(({ entry }) => entry);
   const latestByRoot = new Map();
   eventsForInstance.forEach(entry => {
     const root = String(entry.rootOccurrenceId || "");
@@ -439,14 +451,12 @@ function projectV2RepeatDates(instance, maxCount = 3){
     if (endDate instanceof Date && !Number.isNaN(endDate.getTime())) endDate.setHours(0,0,0,0);
     const rollingCount = 5;
     const rollingDaysCap = 90;
-    const blockedByCountLimit = endCount != null && completedCountForInstance >= endCount;
     const requestedCount = endCount != null ? endCount : rollingCount;
     const out = [];
-    if (!blockedByCountLimit){
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      let firstProjectedTime = null;
-      for (let n = 1, attempts = 0; out.length < requestedCount && attempts < 120; n++, attempts++){
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    let firstProjectedTime = null;
+    for (let n = 1, attempts = 0; out.length < requestedCount && attempts < 120; n++, attempts++){
         const targetHoursFromAnchor = intervalHours * n;
         const remainingHoursForThisProjection = targetHoursFromAnchor - hoursUsedSinceAnchor;
         const daysOut = remainingHoursForThisProjection <= 0 ? 0 : Math.ceil(remainingHoursForThisProjection / averageHoursPerDay);
@@ -469,9 +479,13 @@ function projectV2RepeatDates(instance, maxCount = 3){
         if (endDate instanceof Date && predicted.getTime() > endDate.getTime()) break;
         const finalPredictedDateISO = normalizeDateKey(ymd(predicted));
         if (!finalPredictedDateISO) continue;
-        const state = resolveV2RepeatOccurrenceState(instanceId, finalPredictedDateISO);
-        if (state.lifecycleStatus === "removed" || state.lifecycleStatus === "completed" || state.isMoved) continue;
-        if (!out.includes(finalPredictedDateISO)) out.push(finalPredictedDateISO);
+        if (endType === "after_count"){
+          out.push({ dateISO: finalPredictedDateISO, occurrenceIndex: n });
+        }else{
+          const state = resolveV2RepeatOccurrenceState(instanceId, finalPredictedDateISO);
+          if (state.lifecycleStatus === "removed" || state.lifecycleStatus === "completed" || state.isMoved) continue;
+          if (!out.includes(finalPredictedDateISO)) out.push(finalPredictedDateISO);
+        }
         if (window.DEBUG_MODE){
           console.info("[maintenance-v2] machine-hour projection occurrence", {
             instanceId,
@@ -493,7 +507,6 @@ function projectV2RepeatDates(instance, maxCount = 3){
           });
         }
       }
-    }
     if (window.DEBUG_MODE){
       console.info("[maintenance-v2] machine-hour projection", {
         instanceId,
@@ -506,14 +519,13 @@ function projectV2RepeatDates(instance, maxCount = 3){
         daysPerInterval,
         currentTotalHours: safeCurrent,
         anchorTotalHours,
-        blockedByCountLimit,
         projectedCount: out.length
       });
     }
     return out;
   }
   const every = Math.max(1, Number(rule.every) || 1);
-  const targetCount = endCount != null ? Math.max(0, endCount - completedCountForInstance) : maxCount;
+  const targetCount = endCount != null ? endCount : maxCount;
   if (targetCount <= 0) return [];
   const startISO = normalizeDateKey(instance.startDateISO || rule.startISO || null);
   const start = startISO ? parseDateLocal(startISO) : null;
@@ -535,9 +547,27 @@ function projectV2RepeatDates(instance, maxCount = 3){
     if (endDate instanceof Date && d.getTime() > endDate.getTime()) break;
     if (d.getTime() < today.getTime()) continue;
     const iso = ymd(d);
-    if (iso) out.push(iso);
+    if (!iso) continue;
+    if (endType === "after_count"){
+      out.push({ dateISO: iso, occurrenceIndex: i + 1 });
+    }else{
+      out.push(iso);
+    }
   }
   return out;
+}
+
+function resolveV2RepeatOccurrenceStateWithCompat({ instanceId, rootOccurrenceId, fallbackDateISO = null, occurrenceIndex = null }){
+  const primaryRoot = String(rootOccurrenceId || "");
+  const primary = resolveV2RepeatOccurrenceStateByRoot(primaryRoot, fallbackDateISO);
+  if (primary.relatedEventsCount > 0) return { ...primary, matchedRootOccurrenceId: primaryRoot };
+  const dateFallback = normalizeDateKey(fallbackDateISO || null);
+  const legacyRoot = dateFallback ? makeV2RepeatOccurrenceKey(instanceId, dateFallback) : "";
+  if (legacyRoot && legacyRoot !== primaryRoot){
+    const legacy = resolveV2RepeatOccurrenceStateByRoot(legacyRoot, dateFallback);
+    if (legacy.relatedEventsCount > 0) return { ...legacy, matchedRootOccurrenceId: legacyRoot };
+  }
+  return { ...primary, matchedRootOccurrenceId: primaryRoot, occurrenceIndex };
 }
 
 function resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, fallbackDateISO = null){
@@ -545,8 +575,17 @@ function resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, fallbackDateISO 
   const fallback = normalizeDateKey(fallbackDateISO || key.split(":").slice(-1)[0] || null);
   const events = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
   const related = events
-    .filter(entry => entry && typeof entry === "object" && String(entry.rootOccurrenceId || "") === key)
-    .sort((a,b)=> String(a.recordedAtISO || "").localeCompare(String(b.recordedAtISO || "")));
+    .map((entry, idx) => ({ entry, idx }))
+    .filter(({ entry }) => entry && typeof entry === "object" && String(entry.rootOccurrenceId || "") === key)
+    .sort((a,b)=>{
+      const at = Date.parse(String(a.entry?.recordedAtISO || ""));
+      const bt = Date.parse(String(b.entry?.recordedAtISO || ""));
+      const aTs = Number.isFinite(at) ? at : 0;
+      const bTs = Number.isFinite(bt) ? bt : 0;
+      if (aTs !== bTs) return aTs - bTs;
+      return b.idx - a.idx;
+    })
+    .map(({ entry }) => entry);
   let lifecycleStatus = "scheduled";
   let note = "";
   let hours = null;
@@ -566,7 +605,7 @@ function resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, fallbackDateISO 
       hours = raw == null || raw === "" ? null : (Number.isFinite(Number(raw)) ? Number(raw) : hours);
     }
   });
-  return { key, lifecycleStatus, note, hours, displayDateISO, originalDateISO: fallback, isMoved: displayDateISO !== fallback };
+  return { key, lifecycleStatus, note, hours, displayDateISO, originalDateISO: fallback, isMoved: displayDateISO !== fallback, relatedEventsCount: related.length };
 }
 
 function resolveV2RepeatOccurrenceState(instanceId, dateISO){
@@ -730,9 +769,29 @@ function openV2RepeatPanel(view){
   overlay.appendChild(card); document.body.appendChild(overlay);
   overlay.addEventListener("click", (event)=>{ if (event.target === overlay) closeV2OneTimePanel(); });
   const reopen = ()=>{
-    const refreshed = resolveV2RepeatOccurrenceStateByRoot(view.rootOccurrenceId, view.originalDateISO);
+    const refreshed = resolveV2RepeatOccurrenceStateWithCompat({
+      instanceId: String(view.instanceId || ""),
+      rootOccurrenceId: String(view.rootOccurrenceId || ""),
+      fallbackDateISO: view.originalDateISO || view.dateISO || null,
+      occurrenceIndex: view.occurrenceIndex
+    });
     openV2RepeatPanel({ ...view, ...refreshed, dateISO: refreshed.displayDateISO || view.dateISO });
   };
+  const getLatestState = ()=> resolveV2RepeatOccurrenceStateWithCompat({
+    instanceId: String(view.instanceId || ""),
+    rootOccurrenceId: String(view.rootOccurrenceId || ""),
+    fallbackDateISO: view.originalDateISO || view.dateISO || null,
+    occurrenceIndex: view.occurrenceIndex
+  });
+  const appendPanelRootEvent = (eventType, payload = {})=> appendV2RepeatEventByRoot({
+    instanceId: String(view.instanceId || ""),
+    taskId: String(view.taskId || ""),
+    rootOccurrenceId: String(view.rootOccurrenceId || ""),
+    originalDateISO: String(view.originalDateISO || ""),
+    displayDateISO: String(view.displayDateISO || view.dateISO || ""),
+    eventType,
+    payload
+  });
   const logRepeatAction = (actionType, extra = {})=>{
     if (!window.DEBUG_MODE) return;
     console.info("[maintenance-v2] repeat action click", {
@@ -747,34 +806,47 @@ function openV2RepeatPanel(view){
     });
   };
   card.querySelector("[data-rpt-close]")?.addEventListener("click", ()=> closeV2OneTimePanel());
-  card.querySelector("[data-rpt-complete]")?.addEventListener("click", ()=>{ if (view.lifecycleStatus!=="completed"){ logRepeatAction("completed"); appendV2RepeatEventByRoot({ ...view, eventType: "completed" }); } reopen(); });
-  card.querySelector("[data-rpt-uncomplete]")?.addEventListener("click", ()=>{ if (view.lifecycleStatus==="completed"){ logRepeatAction("uncompleted"); appendV2RepeatEventByRoot({ ...view, eventType: "uncompleted" }); } reopen(); });
-  card.querySelector("[data-rpt-note]")?.addEventListener("click", ()=>{ const v=window.prompt("Set note for this repeat occurrence:", view.note||""); if(v!==null){ logRepeatAction("note_set"); appendV2RepeatEventByRoot({ ...view, eventType: "note_set", payload: { note:v } }); } reopen(); });
-  card.querySelector("[data-rpt-hours]")?.addEventListener("click", ()=>{ const v=window.prompt("Enter hours to record for this maintenance occurrence. Leave blank to clear.", view.hours!=null?String(view.hours):""); if(v!==null){ const t=String(v).trim(); const h=t===""?null:Number(t); if(t!=="" && (!Number.isFinite(h)||h<0)){ toast("Enter a valid non-negative number."); return; } logRepeatAction("hours_set"); appendV2RepeatEventByRoot({ ...view, eventType: "hours_set", payload: { hours:h } }); reopen(); } });
+  card.querySelector("[data-rpt-complete]")?.addEventListener("click", ()=>{
+    const latest = getLatestState();
+    if (latest.lifecycleStatus !== "completed"){ logRepeatAction("completed"); appendPanelRootEvent("completed"); }
+    reopen();
+  });
+  card.querySelector("[data-rpt-uncomplete]")?.addEventListener("click", ()=>{
+    const latest = getLatestState();
+    if (latest.lifecycleStatus === "completed"){ logRepeatAction("uncompleted"); appendPanelRootEvent("uncompleted"); }
+    reopen();
+  });
+  card.querySelector("[data-rpt-note]")?.addEventListener("click", ()=>{ const v=window.prompt("Set note for this repeat occurrence:", view.note||""); if(v!==null){ logRepeatAction("note_set"); appendPanelRootEvent("note_set", { note:v }); } reopen(); });
+  card.querySelector("[data-rpt-hours]")?.addEventListener("click", ()=>{ const v=window.prompt("Enter hours to record for this maintenance occurrence. Leave blank to clear.", view.hours!=null?String(view.hours):""); if(v!==null){ const t=String(v).trim(); const h=t===""?null:Number(t); if(t!=="" && (!Number.isFinite(h)||h<0)){ toast("Enter a valid non-negative number."); return; } logRepeatAction("hours_set"); appendPanelRootEvent("hours_set", { hours:h }); reopen(); } });
   card.querySelector("[data-rpt-move]")?.addEventListener("click", ()=>{
     const v = window.prompt("Move occurrence to date (YYYY-MM-DD):", String(view.dateISO || ""));
     if (v == null) return;
     const toDateISO = normalizeDateKey(v);
     if (!toDateISO){ toast("Enter a valid date (YYYY-MM-DD)."); return; }
     logRepeatAction("moved", { toDateISO });
-    appendV2RepeatEventByRoot({ ...view, eventType: "moved", payload: { fromDateISO: view.originalDateISO, toDateISO, source: "calendar_panel" } });
+    appendPanelRootEvent("moved", { fromDateISO: view.originalDateISO, toDateISO, source: "calendar_panel" });
     closeV2OneTimePanel();
   });
   card.querySelector("[data-rpt-remove]")?.addEventListener("click", ()=>{
     const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
     const inst = instances.find(entry => entry && String(entry.id || "") === String(view.instanceId || ""));
     const projected = inst ? projectV2RepeatDates(inst) : [];
-    const hasOtherVisible = projected.some(dateISO => {
-      const rootId = makeV2RepeatOccurrenceKey(view.instanceId, dateISO);
+    const hasOtherVisible = projected.some(slot => {
+      const dateISO = typeof slot === "string" ? slot : normalizeDateKey(slot?.dateISO || null);
+      const occurrenceIndex = typeof slot === "string" ? null : Number(slot?.occurrenceIndex);
+      if (!dateISO) return false;
+      const rootId = occurrenceIndex != null && Number.isFinite(occurrenceIndex)
+        ? makeV2RepeatOccurrenceSlotKey(view.instanceId, occurrenceIndex)
+        : makeV2RepeatOccurrenceKey(view.instanceId, dateISO);
       if (rootId === String(view.rootOccurrenceId || "")) return false;
-      const state = resolveV2RepeatOccurrenceStateByRoot(rootId, dateISO);
+      const state = resolveV2RepeatOccurrenceStateWithCompat({ instanceId: view.instanceId, rootOccurrenceId: rootId, fallbackDateISO: dateISO, occurrenceIndex });
       return !["removed", "skipped"].includes(String(state.lifecycleStatus || ""));
     });
     if (!hasOtherVisible){
       const askStop = window.confirm ? window.confirm("This is the last visible occurrence in this repeat chain. Remove it and stop repeat tracking?") : true;
       if (!askStop) return;
       logRepeatAction("removed_last_visible_stop");
-      appendV2RepeatEventByRoot({ ...view, eventType: "removed", payload: { source:"repeat_panel" } });
+      appendPanelRootEvent("removed", { source:"repeat_panel" });
       if (typeof window.stopV2RepeatTracking === "function") window.stopV2RepeatTracking(String(view.instanceId), String(view.taskId), String(view.originalDateISO), String(view.rootOccurrenceId), String(view.displayDateISO || view.dateISO));
       closeV2OneTimePanel();
       return;
@@ -782,7 +854,7 @@ function openV2RepeatPanel(view){
     const ok=window.confirm?window.confirm("Remove this repeat occurrence from calendar?"):true;
     if(!ok) return;
     logRepeatAction("removed");
-    appendV2RepeatEventByRoot({ ...view, eventType: "removed", payload: { source:"repeat_panel" } });
+    appendPanelRootEvent("removed", { source:"repeat_panel" });
     closeV2OneTimePanel();
   });
   card.querySelector("[data-rpt-stop]")?.addEventListener("click", ()=>{
@@ -3193,17 +3265,24 @@ function renderCalendar(){
       && (String(entry.system || "") === "v2" || Number(entry.schemaVersion || 0) >= 2));
   repeatInstances.forEach(instance => {
     const dates = projectV2RepeatDates(instance);
-    dates.forEach(dateISO => {
-      const rootOccurrenceId = makeV2RepeatOccurrenceKey(instance.id, dateISO);
-      const state = resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, dateISO);
+    dates.forEach(slot => {
+      const dateISO = typeof slot === "string" ? slot : normalizeDateKey(slot?.dateISO || null);
+      const occurrenceIndex = typeof slot === "string" ? null : Number(slot?.occurrenceIndex);
+      if (!dateISO) return;
+      const endType = String(instance?.repeatRule?.endType || "never").toLowerCase();
+      const rootOccurrenceId = endType === "after_count" && Number.isFinite(occurrenceIndex)
+        ? makeV2RepeatOccurrenceSlotKey(instance.id, occurrenceIndex)
+        : makeV2RepeatOccurrenceKey(instance.id, dateISO);
+      const state = resolveV2RepeatOccurrenceStateWithCompat({ instanceId: String(instance.id || ""), rootOccurrenceId, fallbackDateISO: dateISO, occurrenceIndex });
       if (["removed","skipped"].includes(String(state.lifecycleStatus || "")) || state.isMoved) return;
       const task = v2TaskLookup.get(String(instance.taskId || "")) || null;
-      (dueMap[dateISO] ||= []).push({
+      const renderDateISO = state.displayDateISO || dateISO;
+      (dueMap[renderDateISO] ||= []).push({
         type: "v2repeat",
         id: rootOccurrenceId,
         instanceId: String(instance.id),
         taskId: String(instance.taskId || ""),
-        dateISO,
+        dateISO: renderDateISO,
         name: String((task && task.name) || "Maintenance repeat"),
         status: state.lifecycleStatus === "completed" ? "completed" : "manual",
         mode: "repeat_v2",
@@ -3212,8 +3291,9 @@ function renderCalendar(){
           instanceId: String(instance.id),
           taskId: String(instance.taskId || ""),
           originalDateISO: dateISO,
-          displayDateISO: state.displayDateISO || dateISO,
-          dateISO: state.displayDateISO || dateISO,
+          displayDateISO: renderDateISO,
+          dateISO: renderDateISO,
+          occurrenceIndex: Number.isFinite(occurrenceIndex) ? occurrenceIndex : null,
           name: String((task && task.name) || "Maintenance repeat"),
           note: state.note,
           hours: state.hours,
@@ -3282,7 +3362,10 @@ function renderCalendar(){
     });
   });
 
-  const jobsMap = {};
+  
+window.resolveV2RepeatOccurrenceStateByRoot = resolveV2RepeatOccurrenceStateByRoot;
+window.resolveV2OneTimeOccurrenceState = resolveV2OneTimeOccurrenceState;
+const jobsMap = {};
   const activeJobs = normalizeJobList(
     Array.isArray(window.cuttingJobs) || (window.cuttingJobs && typeof window.cuttingJobs === "object")
       ? window.cuttingJobs
@@ -3532,6 +3615,9 @@ function renderCalendar(){
         const baseTaskId = ev.taskId || ev.id;
         if (ev.type === "v2task" && ev.occurrenceId){
           chip.dataset.calV2OneTime = String(ev.occurrenceId);
+          chip.dataset.sourceSystem = "v2";
+          chip.dataset.v2RootOccurrenceId = String(ev.occurrenceId || "");
+          chip.dataset.v2InstanceId = String(ev.instanceId || "");
           chip.addEventListener("click", (event)=>{
             event.preventDefault();
             event.stopPropagation();
@@ -3546,6 +3632,9 @@ function renderCalendar(){
             openV2RepeatPanel(ev.repeatView);
           });
           chip.dataset.calV2OneTime = `repeat:${ev.instanceId}:${ev.dateISO}`;
+          chip.dataset.sourceSystem = "v2";
+          chip.dataset.v2RootOccurrenceId = String(ev.repeatView.rootOccurrenceId || ev.id || "");
+          chip.dataset.v2InstanceId = String(ev.repeatView.instanceId || ev.instanceId || "");
         } else {
           chip.dataset.calTask = baseTaskId;
         }

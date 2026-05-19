@@ -5672,8 +5672,6 @@ function renderDashboard(){
             ? "Machine-hour repeat dates are estimated from logged hours and average daily usage. The selected date is the first allowed due date. Count controls how many projected completions before the repeat stops."
             : "For Interval tasks, choose machine-hours to predict by logged usage, or choose calendar day/week/month.";
         }
-      }else if (mode === "past_log"){
-        taskExistingModeHint.textContent = "Past completion saves V2 history only and does not start future repeats.";
       }else{
         taskExistingModeHint.textContent = "One-time creates one scheduled V2 reminder on the selected date.";
       }
@@ -6831,10 +6829,10 @@ function renderDashboard(){
         "Temporary chooser fallback:\n1) One-time reminder\n2) Start repeat tracking\n3) Log past completion",
         "1"
       );
-      const mapped = { "1": "one_time", "2": "repeat", "3": "past_log" };
+      const mapped = { "1": "one_time", "2": "repeat" };
       choice = mapped[String(choiceRaw || "").trim()] || "";
     }
-    if (!choice || !["one_time", "repeat", "past_log"].includes(choice)){
+    if (!choice || !["one_time", "repeat"].includes(choice)){
       toast("Add to calendar cancelled");
       return;
     }
@@ -6907,7 +6905,7 @@ function renderDashboard(){
       message = `Repeat tracking started for "${task.name || "Task"}"`;
     }else{
       createMaintenanceV2FromTemplate(task, {
-        mode: "past_log",
+        mode: "one_time",
         eventType: "completed",
         effectiveDateISO: targetISO,
         note: occurrenceNote
@@ -11544,8 +11542,11 @@ function renderCosts(){
   setupEfficiencyCalculator(model);
   setupMaintenanceDataCenterActions({ openImmediately: wasDataCenterOpen });
 
-  function focusCalendarAtOccurrence(taskId, dateISO){
-    const dueISO = String(dateISO || "");
+  function focusCalendarAtOccurrence(taskId, dateISO, options = {}){
+    const dueISO = String(options.displayDateISO || dateISO || "");
+    const sourceSystem = String(options.sourceSystem || "legacy").toLowerCase();
+    const rootOccurrenceId = String(options.rootOccurrenceId || "").trim();
+    const instanceId = String(options.instanceId || "").trim();
     const parsedDue = dueISO && typeof parseDateLocal === "function"
       ? parseDateLocal(dueISO)
       : (dueISO ? new Date(dueISO) : null);
@@ -11566,6 +11567,31 @@ function renderCosts(){
       cell.scrollIntoView({ behavior: "smooth", block: "center" });
       if (typeof highlightCalendarDayCell === "function"){
         highlightCalendarDayCell(cell);
+      }
+      if (sourceSystem === "v2" && rootOccurrenceId){
+        const v2Sel = `[data-source-system="v2"][data-v2-root-occurrence-id="${String(rootOccurrenceId)}"]`;
+        const v2AltSel = instanceId ? `[data-source-system="v2"][data-v2-instance-id="${String(instanceId)}"]` : "";
+        const v2Chip = cell.querySelector(v2Sel) || (v2AltSel ? cell.querySelector(v2AltSel) : null);
+        if (v2Chip instanceof HTMLElement){
+          v2Chip.click();
+          return true;
+        }
+        if (typeof toast === "function") toast("This V2 completed record is not visible on the calendar.");
+        const orphanCtx = {
+          sourceSystem: "v2",
+          taskId: String(taskId || ""),
+          instanceId,
+          rootOccurrenceId,
+          displayDateISO: dueISO,
+          dateISO: dueISO,
+          originalDateISO: String(options.originalDateISO || dueISO || ""),
+          taskName: String(options.taskName || "")
+        };
+        if (window.DEBUG_MODE) console.debug("[maintenance-v2-orphan-row-detected]", orphanCtx);
+        if (typeof window.repairV2OrphanCompletedRow === "function"){
+          window.repairV2OrphanCompletedRow(orphanCtx);
+        }
+        return false;
       }
       const anchor = taskId ? (cell.querySelector(`[data-cal-task="${String(taskId)}"]`) || cell) : cell;
       if (taskId && typeof showTaskBubble === "function"){
@@ -11896,6 +11922,7 @@ function renderCosts(){
       const categoryValue = String(categoryFilter instanceof HTMLSelectElement ? categoryFilter.value : "").trim();
       const taskValue = String(taskFilter instanceof HTMLSelectElement ? taskFilter.value : "").trim().toLowerCase();
       const tableRows = Array.from(modal.querySelectorAll("[data-maintenance-row]"));
+      let visibleCount = 0;
       tableRows.forEach(row => {
         if (!(row instanceof HTMLElement)) return;
         const haystack = String(row.getAttribute("data-search-text") || "").toLowerCase();
@@ -11906,7 +11933,20 @@ function renderCosts(){
         const matchesTask = !taskValue || rowTask === taskValue;
         const matches = matchesSearch && matchesCategory && matchesTask;
         row.hidden = !matches;
+        if (matches) visibleCount += 1;
       });
+      if (window.DEBUG_MODE){
+        const v2Count = tableRows.filter(row => row instanceof HTMLElement && String(row.getAttribute("data-source-system") || "").toLowerCase() === "v2").length;
+        const v2Visible = tableRows.filter(row => row instanceof HTMLElement && !row.hidden && String(row.getAttribute("data-source-system") || "").toLowerCase() === "v2").length;
+        console.debug("[maintenance-data-center]", {
+          totalMaintenanceCompatibilityRows: tableRows.length,
+          v2RowsCount: v2Count,
+          v2CompletedRowsCount: v2Count,
+          rowsVisibleAfterFiltering: visibleCount,
+          v2RowsVisibleAfterFiltering: v2Visible,
+          v2ExcludedReason: v2Count > 0 && v2Visible === 0 ? "ui_filters" : "none"
+        });
+      }
     };
     const resetMaintenanceFilters = ()=>{
       if (searchInput instanceof HTMLInputElement) searchInput.value = "";
@@ -11963,6 +12003,36 @@ function renderCosts(){
       window.pendingCostDataCenterFocus = null;
       window.focusMaintenanceDataCenterRow(pendingFocus);
     }
+    window.repairV2OrphanCompletedRow = (ctx = {})=>{
+      const sourceSystem = String(ctx.sourceSystem || "").toLowerCase();
+      if (sourceSystem !== "v2") return false;
+      const rootOccurrenceId = String(ctx.rootOccurrenceId || "").trim();
+      const instanceId = String(ctx.instanceId || "").trim();
+      const taskId = String(ctx.taskId || "").trim();
+      const displayDateISO = String(ctx.displayDateISO || ctx.dateISO || "").trim();
+      const originalDateISO = String(ctx.originalDateISO || displayDateISO || "").trim();
+      if (!rootOccurrenceId || !instanceId || !taskId || !displayDateISO) return false;
+      const ask = window.confirm ? window.confirm("This completed V2 occurrence exists in reporting but is not visible on the calendar. Remove this orphan record from completed reporting?") : true;
+      if (!ask) return false;
+      if (typeof window.appendV2RepeatEventByRoot === "function" && rootOccurrenceId.startsWith("repeat:")){
+        window.appendV2RepeatEventByRoot({
+          instanceId,
+          taskId,
+          rootOccurrenceId,
+          originalDateISO,
+          displayDateISO,
+          eventType: "removed",
+          payload: { source: "data_center_orphan_repair" }
+        });
+      } else if (typeof window.appendV2OccurrenceEvent === "function"){
+        window.appendV2OccurrenceEvent(rootOccurrenceId, "removed", { source: "data_center_orphan_repair", originalDateISO, displayDateISO });
+      } else {
+        return false;
+      }
+      if (typeof renderCalendarPreservingScroll === "function") renderCalendarPreservingScroll();
+      if (typeof renderCosts === "function") renderCosts();
+      return true;
+    };
 
     const cuttingSearchInput = modal instanceof HTMLElement ? modal.querySelector("[data-cutting-search]") : null;
     const cuttingCategoryFilter = modal instanceof HTMLElement ? modal.querySelector("[data-cutting-filter-category]") : null;
@@ -12069,6 +12139,12 @@ function renderCosts(){
         const destination = String((select instanceof HTMLSelectElement ? select.value : "calendar") || "calendar").toLowerCase();
         const taskId = String(btn.getAttribute("data-task-id") || "");
         const dateISO = String(btn.getAttribute("data-date-iso") || "");
+        const sourceSystem = String(btn.getAttribute("data-source-system") || "legacy");
+        const rootOccurrenceId = String(btn.getAttribute("data-v2-root-occurrence-id") || "");
+        const instanceId = String(btn.getAttribute("data-v2-instance-id") || "");
+        const displayDateISO = String(btn.getAttribute("data-v2-display-date-iso") || dateISO);
+        const originalDateISO = String(btn.getAttribute("data-v2-original-date-iso") || displayDateISO || dateISO);
+        const taskName = String(btn.getAttribute("data-task-name") || "");
         if (destination === "settings"){
           closeDataCenter();
           if (taskId){
@@ -12078,7 +12154,7 @@ function renderCosts(){
           return;
         }
         closeDataCenter();
-        focusCalendarAtOccurrence(taskId, dateISO);
+        focusCalendarAtOccurrence(taskId, dateISO, { sourceSystem, rootOccurrenceId, instanceId, displayDateISO, originalDateISO, taskName });
       });
     });
   }
@@ -17381,6 +17457,93 @@ function computeCostModel(){
       });
     });
   });
+  const compatibilityRows = typeof window.buildMaintenanceCompatibilityStream === "function"
+    ? (Array.isArray(window.buildMaintenanceCompatibilityStream()) ? window.buildMaintenanceCompatibilityStream() : [])
+    : [];
+  const v2CompatibilityRows = compatibilityRows.filter(row => row && String(row.sourceSystem || "") === "v2");
+  v2CompatibilityRows.forEach((row, idx) => {
+    const taskId = String(row.taskId || "").trim();
+    const instanceId = String(row.instanceId || "").trim();
+    const rootOccurrenceId = String(row.rootOccurrenceId || "").trim();
+    const lifecycleStatus = String(row.lifecycleStatus || row.status || "").trim().toLowerCase();
+    const dateISO = toHistoryDateKey(row.displayDateISO || row.dateISO || row.effectiveDateISO || "");
+    const isCompleted = row.isCompleted === true && lifecycleStatus === "completed";
+    let invalidReason = !isCompleted ? "not_completed" : (!taskId ? "missing_task_id" : (!instanceId ? "missing_instance_id" : (!rootOccurrenceId ? "missing_root_occurrence_id" : (!dateISO ? "missing_display_date" : (["removed","skipped","scheduled","stopped"].includes(lifecycleStatus) ? `lifecycle_${lifecycleStatus}` : "")))));
+    let resolvedStatus = "";
+    let resolvedDate = "";
+    if (!invalidReason && typeof window.resolveV2RepeatOccurrenceStateByRoot === "function" && rootOccurrenceId.startsWith("repeat:")){
+      const resolved = window.resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, dateISO);
+      resolvedStatus = String(resolved?.lifecycleStatus || "").toLowerCase();
+      resolvedDate = toHistoryDateKey(resolved?.displayDateISO || resolved?.dateISO || "");
+      if (resolvedStatus !== "completed") invalidReason = `resolver_status_${resolvedStatus||"unknown"}`;
+      else if (!resolvedDate || resolvedDate !== dateISO) invalidReason = "resolver_date_mismatch";
+    }
+    if (!invalidReason && typeof window.resolveV2OneTimeOccurrenceState === "function" && !rootOccurrenceId.startsWith("repeat:")){
+      const resolved = window.resolveV2OneTimeOccurrenceState(rootOccurrenceId, { id: rootOccurrenceId, effectiveDateISO: dateISO });
+      resolvedStatus = String(resolved?.status || "").toLowerCase();
+      resolvedDate = toHistoryDateKey(resolved?.displayDateISO || dateISO);
+      if (resolvedStatus && resolvedStatus !== "completed") invalidReason = `resolver_status_${resolvedStatus}`;
+      else if (!resolvedDate || resolvedDate !== dateISO) invalidReason = "resolver_date_mismatch";
+    }
+    if (invalidReason){ if (window.DEBUG_MODE){ console.debug('[maintenance-v2-row-skip]', { idx, invalidReason, taskId, instanceId, rootOccurrenceId, lifecycleStatus, resolvedStatus, resolvedDate, row }); } return; }
+    if (maintenanceDataTableRows.some(entry => String(entry.sourceSystem || "")==="v2" && String(entry.rootOccurrenceId||"")===rootOccurrenceId)) return;
+    const repeatBasis = String(row.repeatBasis || "").trim();
+    const modeTag = String(row.instanceMode || "").toLowerCase() === "repeat" ? "interval" : "asreq";
+    const modeLabel = modeTag === "asreq" ? "As Required" : "Per Interval";
+    const categoryRaw = String(row.categoryId || row.categoryRef || "").trim();
+    const categoryPath = categoryRaw ? (resolveCategoryPath(categoryRaw) || categoryRaw) : "";
+    const categoryId = `${modeTag}:${categoryRaw || "uncategorized"}`;
+    const categoryLabel = categoryPath ? `${modeLabel} • ${categoryPath}` : `${modeLabel} • Uncategorized`;
+    const maintenanceHrs = Number.isFinite(Number(row.loggedHours)) ? Number(row.loggedHours) : 1;
+    const partCostValue = Math.max(0, Number(row.costRef) || 0);
+    const chargeRate = MAINTENANCE_LABOR_RATE_PER_HOUR;
+    const laborCost = maintenanceHrs * chargeRate;
+    const totalCost = laborCost + partCostValue;
+
+    if (window.DEBUG_MODE && String(row.taskName||"").toLowerCase()==="abrasive tubing inspection" && dateISO==="2026-06-09"){
+      console.debug("[maintenance-v2-trace-abrasive-2026-06-09]", {
+        taskName: row.taskName,
+        taskId,
+        instanceId,
+        rootOccurrenceId,
+        displayDateISO: dateISO,
+        originalDateISO: row.originalDateISO || "",
+        lifecycleStatus,
+        isCompleted,
+        repeatBasis,
+        provenance: row.provenance || null,
+        resolverStatus,
+        resolverDate
+      });
+    }
+    maintenanceDataTableRows.push({
+      taskId,
+      taskName: String(row.taskName || "Maintenance task").trim() || "Maintenance task",
+      maintenanceHrs,
+      partCost: partCostValue,
+      chargeRate,
+      laborCost,
+      totalCost,
+      dateISO,
+      cuttingHoursSince: null,
+      settingsLink: `#/settings?taskId=${encodeURIComponent(taskId)}`,
+      categoryId,
+      categoryLabel,
+      taskMode: modeTag,
+      sourceSystem: "v2",
+      originalDateISO: toHistoryDateKey(row.originalDateISO || "") || "",
+      note: row.note != null ? String(row.note) : "",
+      repeatBasis,
+      provenance: row.provenance || null,
+      qty: 1,
+      counter: 1,
+      lifecycleStatus,
+      rootOccurrenceId,
+      instanceId,
+      displayDateISO: dateISO
+    });
+  });
+
   taskDateGroups.forEach((dateList, taskId) => {
     const normalizedDates = Array.isArray(dateList) ? dateList.filter(Boolean) : [];
     const uniqueDates = [...new Set(normalizedDates)].sort((a, b) => b.localeCompare(a));
@@ -17748,8 +17911,39 @@ function computeCostModel(){
     categoryId: row.categoryId || "",
     categoryLabel: row.categoryLabel || "",
     qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "1",
-    counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1"
+    counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1",
+    sourceSystem: row.sourceSystem || "legacy",
+    note: row.note || "",
+    repeatBasis: row.repeatBasis || "",
+    originalDateISO: row.originalDateISO || "",
+    displayDateISO: row.displayDateISO || row.dateISO || "",
+    lifecycleStatus: row.lifecycleStatus || row.status || "",
+    rootOccurrenceId: row.rootOccurrenceId || "",
+    instanceId: row.instanceId || "",
+    provenance: row.provenance || null
   }));
+  if (window.DEBUG_MODE){
+    const emittedV2 = compatibilityRows.filter(row => row && String(row.sourceSystem||"")==="v2" && row.isCompleted===true && String(row.lifecycleStatus||"").toLowerCase()==="completed");
+    const insertedV2 = maintenanceDataTableRows.filter(row => row && String(row.sourceSystem||"").toLowerCase()==="v2");
+    const renderedV2 = maintenanceDataTable.filter(row => row && String(row.sourceSystem||"").toLowerCase()==="v2");
+    console.debug("[maintenance-v2-parity-summary]", { emittedV2Count: emittedV2.length, insertedV2Count: insertedV2.length, renderedV2Count: renderedV2.length });
+    renderedV2.forEach(row => {
+      const rootOccurrenceId = String(row.rootOccurrenceId||"");
+      const dateISO = String(row.displayDateISO || row.dateISO || "");
+      const lifecycleStatus = String(row.lifecycleStatus || "").toLowerCase();
+      const hasResolver = typeof window.resolveV2RepeatOccurrenceStateByRoot === "function";
+      let resolverStatus = null;
+      let resolverDate = null;
+      if (hasResolver && rootOccurrenceId.startsWith("repeat:")){
+        const resolved = window.resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, dateISO);
+        resolverStatus = String(resolved?.lifecycleStatus || "").toLowerCase();
+        resolverDate = toHistoryDateKey(resolved?.displayDateISO || resolved?.dateISO || "");
+      }
+      if ((rootOccurrenceId.startsWith("repeat:") && (resolverStatus && resolverStatus !== "completed" || (resolverDate && resolverDate !== dateISO))) || lifecycleStatus !== "completed"){
+        console.debug("[maintenance-v2-orphan-reporting-row]", { sourceSystem: row.sourceSystem, rootOccurrenceId, taskId: row.taskId, instanceId: row.instanceId, displayDateISO: dateISO, lifecycleStatus, repeatBasis: row.repeatBasis, resolverStatus, resolverDate });
+      }
+    });
+  }
   const purchaseDataTableRows = [];
   const flattenCentralSpendRows = (weekEntry)=>{
     const rows = typeof normalizeRows === "function"
