@@ -2659,6 +2659,7 @@ function detectMaintenanceRecordSystem(record){
 }
 
 function createMaintenanceCompatibilityRow(base){
+  const lifecycleStatus = base.lifecycleStatus != null ? String(base.lifecycleStatus) : (base.status || "unknown");
   return {
     streamId: base.streamId || "",
     sourceSystem: base.sourceSystem || "legacy",
@@ -2666,14 +2667,28 @@ function createMaintenanceCompatibilityRow(base){
     taskName: base.taskName || "",
     instanceId: base.instanceId || null,
     occurrenceId: base.occurrenceId || null,
+    rootOccurrenceId: base.rootOccurrenceId || null,
     eventId: base.eventId || base.occurrenceId || null,
-    dateISO: normalizeDateISO(base.dateISO || ""),
-    status: base.status || "unknown",
+    originalDateISO: normalizeDateISO(base.originalDateISO || base.dateISO || ""),
+    displayDateISO: normalizeDateISO(base.displayDateISO || base.effectiveDateISO || base.dateISO || ""),
+    effectiveDateISO: normalizeDateISO(base.effectiveDateISO || base.displayDateISO || base.dateISO || ""),
+    dateISO: normalizeDateISO(base.dateISO || base.effectiveDateISO || ""),
+    status: base.status || lifecycleStatus,
+    lifecycleStatus,
     eventType: base.eventType || null,
+    eventRecordedAtISO: normalizeDateISO(base.eventRecordedAtISO || base.recordedAtISO || "") || null,
+    isCompleted: base.isCompleted === true,
+    isRemoved: base.isRemoved === true,
+    isMoved: base.isMoved === true,
+    isStoppedChain: base.isStoppedChain === true,
+    repeatBasis: base.repeatBasis || null,
+    repeatInterval: base.repeatInterval ?? null,
     instanceMode: base.instanceMode || null,
+    loggedHours: base.loggedHours != null && Number.isFinite(Number(base.loggedHours)) ? Number(base.loggedHours) : (base.hours != null && Number.isFinite(Number(base.hours)) ? Number(base.hours) : null),
     note: base.note != null ? String(base.note) : null,
     hours: base.hours != null && Number.isFinite(Number(base.hours)) ? Number(base.hours) : null,
     categoryRef: base.categoryRef || null,
+    categoryId: base.categoryId || base.categoryRef || null,
     inventoryRef: base.inventoryRef || null,
     costRef: base.costRef ?? null,
     linkRef: base.linkRef || null,
@@ -2826,44 +2841,98 @@ function buildMaintenanceCompatibilityStream(){
     if (!id) return;
     instanceMap.set(id, instance);
   });
+  const seenRoots = new Set();
+  let v2RowsGenerated = 0;
+  let v2CompletedRows = 0;
+  let v2RemovedOrSkipped = 0;
+  let v2DuplicateRootsSkipped = 0;
+
   v2Occurrences.forEach(event => {
     if (!event || typeof event !== "object") return;
     if (detectMaintenanceRecordSystem(event) !== "v2") return;
+    const lifecycleStatus = String(event.lifecycleStatus || event.status || event.eventType || event.type || "unknown");
+    const isCompleted = lifecycleStatus === "completed";
+    const isRemoved = lifecycleStatus === "removed";
+    const isSkipped = lifecycleStatus === "skipped";
+    if (!isCompleted || isRemoved || isSkipped) {
+      if (isRemoved || isSkipped) v2RemovedOrSkipped += 1;
+      return;
+    }
+    const rootOccurrenceId = event.rootOccurrenceId != null ? String(event.rootOccurrenceId) : "";
+    if (!rootOccurrenceId) return;
+    if (seenRoots.has(rootOccurrenceId)) {
+      v2DuplicateRootsSkipped += 1;
+      return;
+    }
+    seenRoots.add(rootOccurrenceId);
+
     const occurrenceId = event.id != null ? String(event.id) : "";
     const instanceId = event.instanceId != null ? String(event.instanceId) : "";
     const inst = instanceMap.get(instanceId) || null;
     const taskId = event.taskId != null ? String(event.taskId) : (inst && inst.taskId != null ? String(inst.taskId) : "");
     const task = taskMap.get(taskId) || null;
-    out.push({
-      streamId: `v2-occurrence:${occurrenceId || `${instanceId}:unknown`}`,
+    const originalDateISO = normalizeDateISO(event.originalDateISO || event.payload?.originalDateISO || event.dateISO || "");
+    const displayDateISO = normalizeDateISO(event.displayDateISO || event.payload?.displayDateISO || event.effectiveDateISO || originalDateISO || "");
+    const effectiveDateISO = normalizeDateISO(event.effectiveDateISO || displayDateISO || originalDateISO || "");
+    out.push(createMaintenanceCompatibilityRow({
+      streamId: `v2-occurrence:${rootOccurrenceId}`,
       sourceSystem: "v2",
       taskId: taskId || null,
       taskName: String(event.taskName || (task && task.name) || "").trim(),
       instanceId: instanceId || null,
       occurrenceId: occurrenceId || null,
-      dateISO: normalizeDateISO(event.effectiveDateISO || event.dateISO || event.completedAtISO || event.occurredAtISO || ""),
-      status: String(event.status || event.eventType || event.type || "unknown"),
+      rootOccurrenceId,
+      originalDateISO,
+      displayDateISO,
+      effectiveDateISO,
+      dateISO: displayDateISO || effectiveDateISO,
+      status: lifecycleStatus,
+      lifecycleStatus,
       eventType: event.eventType != null ? String(event.eventType) : (event.type != null ? String(event.type) : null),
+      eventRecordedAtISO: event.recordedAtISO || null,
+      isCompleted,
+      isRemoved,
+      isMoved: event.eventType === "moved" || Boolean(event.displayDateISO),
+      isStoppedChain: event.eventType === "stopped" || lifecycleStatus === "stopped",
+      repeatBasis: event.repeatBasis || inst?.repeatBasis || task?.repeatBasis || null,
+      repeatInterval: event.repeatInterval ?? inst?.repeatInterval ?? task?.repeatInterval ?? null,
       instanceMode: inst && inst.instanceMode ? String(inst.instanceMode) : null,
+      loggedHours: event.loggedHours ?? event.hours ?? event.payload?.hours ?? null,
       note: event.note != null ? String(event.note) : (event.payload && event.payload.note != null ? String(event.payload.note) : null),
-      hours: event.hours != null && Number.isFinite(Number(event.hours)) ? Number(event.hours) : (event.payload && Number.isFinite(Number(event.payload.hours)) ? Number(event.payload.hours) : null),
-      categoryRef: task && task.folderId != null ? String(task.folderId) : null,
-      inventoryRef: task && task.inventoryId != null ? String(task.inventoryId) : null,
-      costRef: task && task.costProfileId != null ? String(task.costProfileId) : null,
-      linkRef: task && task.linkRef != null ? String(task.linkRef) : null,
+      hours: event.hours,
+      categoryRef: task && (task.categoryRef ?? task.folderId) != null ? String(task.categoryRef ?? task.folderId) : null,
+      categoryId: task && (task.categoryId ?? task.cat) != null ? String(task.categoryId ?? task.cat) : null,
+      inventoryRef: task && task.inventoryRef != null ? String(task.inventoryRef) : (task && task.inventoryId != null ? String(task.inventoryId) : null),
+      costRef: task && (task.cost ?? task.price ?? task.costProfileId) != null ? (task.cost ?? task.price ?? task.costProfileId) : null,
       provenance: {
+        sourceArrays: ["maintenanceTasksV2", "maintenanceCalendarInstancesV2", "maintenanceOccurrencesV2"],
+        sourceField: "maintenanceOccurrencesV2",
         taskId: taskId || null,
         instanceId: instanceId || null,
         occurrenceId: occurrenceId || null,
-        supersedesEventId: event.supersedesEventId != null ? String(event.supersedesEventId) : null,
-        recordedAtISO: event.recordedAtISO != null ? String(event.recordedAtISO) : null,
-        sourceField: "maintenanceOccurrencesV2",
+        rootOccurrenceId,
+        originalDateISO,
+        displayDateISO,
         taskRecordSystem: task ? detectMaintenanceRecordSystem(task) : null,
         instanceRecordSystem: inst ? detectMaintenanceRecordSystem(inst) : null,
         occurrenceRecordSystem: detectMaintenanceRecordSystem(event)
       }
-    });
+    }));
+    v2RowsGenerated += 1;
+    if (isCompleted) v2CompletedRows += 1;
   });
+
+  if (window.DEBUG_MODE){
+    console.debug("[maintenance-v2-reporting]", {
+      v2TasksCount: v2Tasks.length,
+      v2InstancesCount: v2Instances.length,
+      v2OccurrencesCount: v2Occurrences.length,
+      v2ReportingRowsGenerated: v2RowsGenerated,
+      completedRowsCount: v2CompletedRows,
+      removedSkippedRowsCount: v2RemovedOrSkipped,
+      duplicateRootsSkipped: v2DuplicateRootsSkipped
+    });
+  }
   return out;
 }
 
