@@ -11370,8 +11370,11 @@ function renderCosts(){
   setupEfficiencyCalculator(model);
   setupMaintenanceDataCenterActions({ openImmediately: wasDataCenterOpen });
 
-  function focusCalendarAtOccurrence(taskId, dateISO){
-    const dueISO = String(dateISO || "");
+  function focusCalendarAtOccurrence(taskId, dateISO, options = {}){
+    const dueISO = String(options.displayDateISO || dateISO || "");
+    const sourceSystem = String(options.sourceSystem || "legacy").toLowerCase();
+    const rootOccurrenceId = String(options.rootOccurrenceId || "").trim();
+    const instanceId = String(options.instanceId || "").trim();
     const parsedDue = dueISO && typeof parseDateLocal === "function"
       ? parseDateLocal(dueISO)
       : (dueISO ? new Date(dueISO) : null);
@@ -11393,6 +11396,18 @@ function renderCosts(){
       if (typeof highlightCalendarDayCell === "function"){
         highlightCalendarDayCell(cell);
       }
+      if (sourceSystem === "v2" && rootOccurrenceId){
+        const v2Sel = `[data-source-system="v2"][data-v2-root-occurrence-id="${String(rootOccurrenceId)}"]`;
+        const v2AltSel = instanceId ? `[data-source-system="v2"][data-v2-instance-id="${String(instanceId)}"]` : "";
+        const v2Chip = cell.querySelector(v2Sel) || (v2AltSel ? cell.querySelector(v2AltSel) : null);
+        if (v2Chip instanceof HTMLElement){
+          v2Chip.click();
+          return true;
+        }
+        if (typeof toast === "function") toast("Completed V2 occurrence exists in reporting but is not visible on calendar.");
+        if (window.DEBUG_MODE) console.debug("[maintenance-v2-focus-miss]", { dueISO, rootOccurrenceId, instanceId, taskId });
+        return false;
+      }
       const anchor = taskId ? (cell.querySelector(`[data-cal-task="${String(taskId)}"]`) || cell) : cell;
       if (taskId && typeof showTaskBubble === "function"){
         showTaskBubble(String(taskId), anchor, { dateISO: dueISO });
@@ -11406,7 +11421,10 @@ function renderCosts(){
   }
 
   function focusCalendarForCuttingJob(jobId, dateISO){
-    const dueISO = String(dateISO || "");
+    const dueISO = String(options.displayDateISO || dateISO || "");
+    const sourceSystem = String(options.sourceSystem || "legacy").toLowerCase();
+    const rootOccurrenceId = String(options.rootOccurrenceId || "").trim();
+    const instanceId = String(options.instanceId || "").trim();
     const parsedDue = dueISO && typeof parseDateLocal === "function"
       ? parseDateLocal(dueISO)
       : (dueISO ? new Date(dueISO) : null);
@@ -11909,6 +11927,10 @@ function renderCosts(){
         const destination = String((select instanceof HTMLSelectElement ? select.value : "calendar") || "calendar").toLowerCase();
         const taskId = String(btn.getAttribute("data-task-id") || "");
         const dateISO = String(btn.getAttribute("data-date-iso") || "");
+        const sourceSystem = String(btn.getAttribute("data-source-system") || "legacy");
+        const rootOccurrenceId = String(btn.getAttribute("data-v2-root-occurrence-id") || "");
+        const instanceId = String(btn.getAttribute("data-v2-instance-id") || "");
+        const displayDateISO = String(btn.getAttribute("data-v2-display-date-iso") || dateISO);
         if (destination === "settings"){
           closeDataCenter();
           if (taskId){
@@ -11918,7 +11940,7 @@ function renderCosts(){
           return;
         }
         closeDataCenter();
-        focusCalendarAtOccurrence(taskId, dateISO);
+        focusCalendarAtOccurrence(taskId, dateISO, { sourceSystem, rootOccurrenceId, instanceId, displayDateISO });
       });
     });
   }
@@ -17200,12 +17222,17 @@ function computeCostModel(){
   const compatibilityRows = typeof window.buildMaintenanceCompatibilityStream === "function"
     ? (Array.isArray(window.buildMaintenanceCompatibilityStream()) ? window.buildMaintenanceCompatibilityStream() : [])
     : [];
-  const v2CompatibilityRows = compatibilityRows.filter(row => row && String(row.sourceSystem || "") === "v2" && row.isCompleted === true);
+  const v2CompatibilityRows = compatibilityRows.filter(row => row && String(row.sourceSystem || "") === "v2");
   v2CompatibilityRows.forEach((row, idx) => {
     const taskId = String(row.taskId || "").trim();
+    const instanceId = String(row.instanceId || "").trim();
+    const rootOccurrenceId = String(row.rootOccurrenceId || "").trim();
+    const lifecycleStatus = String(row.lifecycleStatus || row.status || "").trim().toLowerCase();
     const dateISO = toHistoryDateKey(row.displayDateISO || row.dateISO || row.effectiveDateISO || "");
-    if (!taskId || !dateISO) return;
-    if (maintenanceDataTableRows.some(entry => String(entry.taskId||"")===taskId && String(entry.dateISO||"")===dateISO)) return;
+    const isCompleted = row.isCompleted === true && lifecycleStatus === "completed";
+    const invalidReason = !isCompleted ? "not_completed" : (!taskId ? "missing_task_id" : (!instanceId ? "missing_instance_id" : (!rootOccurrenceId ? "missing_root_occurrence_id" : (!dateISO ? "missing_display_date" : (["removed","skipped","scheduled"].includes(lifecycleStatus) ? `lifecycle_${lifecycleStatus}` : "")))));
+    if (invalidReason){ if (window.DEBUG_MODE){ console.debug('[maintenance-v2-row-skip]', { idx, invalidReason, taskId, instanceId, rootOccurrenceId, lifecycleStatus, row }); } return; }
+    if (maintenanceDataTableRows.some(entry => String(entry.rootOccurrenceId||"")===rootOccurrenceId)) return;
     const repeatBasis = String(row.repeatBasis || "").trim();
     const modeTag = String(row.instanceMode || "").toLowerCase() === "repeat" ? "interval" : "asreq";
     const modeLabel = modeTag === "asreq" ? "As Required" : "Per Interval";
@@ -17237,7 +17264,11 @@ function computeCostModel(){
       note: row.note != null ? String(row.note) : "",
       repeatBasis,
       qty: 1,
-      counter: 1
+      counter: 1,
+      lifecycleStatus,
+      rootOccurrenceId,
+      instanceId,
+      displayDateISO: dateISO
     });
   });
 
@@ -17612,7 +17643,11 @@ function computeCostModel(){
     sourceSystem: row.sourceSystem || "legacy",
     note: row.note || "",
     repeatBasis: row.repeatBasis || "",
-    originalDateISO: row.originalDateISO || ""
+    originalDateISO: row.originalDateISO || "",
+    displayDateISO: row.displayDateISO || row.dateISO || "",
+    lifecycleStatus: row.lifecycleStatus || row.status || "",
+    rootOccurrenceId: row.rootOccurrenceId || "",
+    instanceId: row.instanceId || ""
   }));
   const purchaseDataTableRows = [];
   const flattenCentralSpendRows = (weekEntry)=>{

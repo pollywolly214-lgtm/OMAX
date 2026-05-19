@@ -2258,7 +2258,7 @@ function viewCosts(model){
               </thead>
               <tbody>
                 ${maintenanceDataTable.map(row => `
-                  <tr data-maintenance-row data-task-id="${esc(String(row.taskId || ""))}" data-maintenance-date-iso="${esc(String(row.dateISO || ""))}" data-category-id="${esc(String(row.categoryId || ""))}" data-task-key="${esc(String(row.taskName || "").toLowerCase())}" data-task-name="${esc(row.taskName || "")}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
+                  <tr data-maintenance-row data-task-id="${esc(String(row.taskId || ""))}" data-maintenance-date-iso="${esc(String(row.dateISO || ""))}" data-category-id="${esc(String(row.categoryId || ""))}" data-task-key="${esc(String(row.taskName || "").toLowerCase())}" data-task-name="${esc(row.taskName || "")}" data-source-system="${esc(String(row.sourceSystem || "legacy"))}" data-v2-root-occurrence-id="${esc(String(row.rootOccurrenceId || ""))}" data-v2-instance-id="${esc(String(row.instanceId || ""))}" data-v2-display-date-iso="${esc(String(row.displayDateISO || row.dateISO || ""))}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
                     <td>${esc(row.counterLabel || "#1")}</td>
                     <td>${esc(row.taskName || "Maintenance task")}</td>
                     <td>${esc((row.sourceSystem || "legacy").toUpperCase())}</td>
@@ -2284,6 +2284,10 @@ function viewCosts(model){
                         data-maintenance-open-task
                         data-task-id="${esc(row.taskId || "")}"
                         data-date-iso="${esc(row.dateISO || "")}"
+                        data-source-system="${esc(String(row.sourceSystem || "legacy"))}"
+                        data-v2-root-occurrence-id="${esc(String(row.rootOccurrenceId || ""))}"
+                        data-v2-instance-id="${esc(String(row.instanceId || ""))}"
+                        data-v2-display-date-iso="${esc(String(row.displayDateISO || row.dateISO || ""))}"
                         data-link-mode-id="maintenanceLinkMode_${esc(row.id || "")}"
                         data-settings-link="${esc(row.settingsLink || "#/settings")}">Open task</button>
                     </td>

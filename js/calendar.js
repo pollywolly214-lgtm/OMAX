@@ -3546,6 +3546,9 @@ function renderCalendar(){
             openV2RepeatPanel(ev.repeatView);
           });
           chip.dataset.calV2OneTime = `repeat:${ev.instanceId}:${ev.dateISO}`;
+          chip.dataset.sourceSystem = "v2";
+          chip.dataset.v2RootOccurrenceId = String(ev.repeatView.rootOccurrenceId || ev.id || "");
+          chip.dataset.v2InstanceId = String(ev.repeatView.instanceId || ev.instanceId || "");
         } else {
           chip.dataset.calTask = baseTaskId;
         }
