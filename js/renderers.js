@@ -936,6 +936,19 @@ function getLocalDeviceId(){
   return id;
 }
 
+
+
+function getLocalDeviceNumber(){
+  const id = String(getLocalDeviceId() || "");
+  if (!id) return "";
+  let hash = 0;
+  for (let i = 0; i < id.length; i += 1){
+    hash = ((hash << 5) - hash) + id.charCodeAt(i);
+    hash |= 0;
+  }
+  return String(Math.abs(hash % 1000000)).padStart(6, "0");
+}
+
 function supportsLocalRootPicker(){
   return typeof window !== "undefined"
     && typeof window.showDirectoryPicker === "function"
@@ -972,6 +985,8 @@ function sanitizeJobFileReferenceForFirestore(fileRef){
     rootPathStart: String(fileRef.rootPathStart || "WJ Cuts"),
     relativePath: String(fileRef.relativePath || "").replace(/^\/+/, ""),
     attachedAtISO: String(fileRef.attachedAtISO || fileRef.addedAt || new Date().toISOString()),
+    localRootSignature: String(fileRef.localRootSignature || ""),
+    localDeviceId: String(fileRef.localDeviceId || ""),
     ...(fileRef.note ? { note: String(fileRef.note) } : {})
   };
 }
@@ -19130,7 +19145,7 @@ function renderJobs(){
       oneDriveRootStatus.textContent = cfg.localRootName || "Not set";
     }
     if (oneDriveDeviceStatus){
-      oneDriveDeviceStatus.textContent = getLocalDeviceId() || "Unavailable";
+      oneDriveDeviceStatus.textContent = getLocalDeviceId() ? `${getLocalDeviceNumber()} (${getLocalDeviceId()})` : "Unavailable";
     }
   };
 
@@ -19173,7 +19188,7 @@ function renderJobs(){
     }
   };
 
-  const attachFromLocalOneDriveRoot = async ()=>{
+  const attachFromLocalOneDriveRoot = async (targetJobId = "")=>{
     if (!supportsLocalRootPicker()){
       toast("Local file references require Chrome or Edge.");
       return false;
@@ -19228,7 +19243,7 @@ function renderJobs(){
         return false;
       }
       const relPath = `${rel.join("/")}`;
-      pendingNewJobFiles.push(sanitizeJobFileReferenceForFirestore({
+      const reference = sanitizeJobFileReferenceForFirestore({
         id: genId(file.name || "job_file"),
         name: file.name || "Attachment",
         type: file.type || "",
@@ -19236,11 +19251,29 @@ function renderJobs(){
         rootLabel: "WJ Cuts",
         rootPathStart: "WJ Cuts",
         relativePath: relPath,
+        localRootSignature: signature,
+        localDeviceId: getLocalDeviceId(),
         attachedAtISO: new Date().toISOString()
-      }));
-      toast("WJ Cuts file reference attached.");
-      window.jobAddFormOpen = true;
-      renderJobs();
+      });
+      if (!reference) return false;
+      const targetId = String(targetJobId || "");
+      if (targetId){
+        const job = cuttingJobs.find(x => String(x?.id) === targetId);
+        if (!job){
+          toast("Job not found for OneDrive attachment.");
+          return false;
+        }
+        job.files = Array.isArray(job.files) ? job.files : [];
+        job.files.push(reference);
+        saveCloudDebounced();
+        toast("WJ Cuts file reference attached to job.");
+        renderJobs();
+      } else {
+        pendingNewJobFiles.push(reference);
+        toast("WJ Cuts file reference attached.");
+        window.jobAddFormOpen = true;
+        renderJobs();
+      }
       return true;
     } catch (err){
       if (err?.name !== "AbortError"){
@@ -20609,11 +20642,14 @@ function renderJobs(){
       const id = fileMenuAdd.getAttribute("data-job-file-add");
       if (id){
         e.preventDefault();
-        window.pendingJobFocus = { type: "jobAddFiles", id };
         closeFileMenu();
         closeActionMenu();
-        editingJobs.add(id);
-        renderJobs();
+        const attached = await attachFromLocalOneDriveRoot(id);
+        if (!attached){
+          window.pendingJobFocus = { type: "jobAddFiles", id };
+          editingJobs.add(id);
+          renderJobs();
+        }
       }
       return;
     }
