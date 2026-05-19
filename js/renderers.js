@@ -9763,6 +9763,19 @@ function renderSettings(){
   function showModal(options){
     if (!modal || !form || !typeField) return;
     const opts = options && typeof options === "object" ? options : {};
+    const syncBodyModalClass = ()=>{
+      const anyModalVisible = !!document.querySelector('.modal-backdrop:not([hidden]), .cost-receipt-modal:not([hidden])');
+      if (anyModalVisible) document.body?.classList.add("modal-open");
+      else document.body?.classList.remove("modal-open");
+    };
+    const previousSession = window.__maintenanceTaskModalSession && typeof window.__maintenanceTaskModalSession === "object"
+      ? window.__maintenanceTaskModalSession
+      : {};
+    window.__maintenanceTaskModalSession = {
+      source: String(opts.source || previousSession.source || "settings"),
+      onSaved: typeof opts.onSaved === "function" ? opts.onSaved : (typeof previousSession.onSaved === "function" ? previousSession.onSaved : null),
+      onClosed: typeof opts.onClosed === "function" ? opts.onClosed : (typeof previousSession.onClosed === "function" ? previousSession.onClosed : null)
+    };
     const categoryId = opts.categoryId != null ? String(opts.categoryId) : "";
     form.reset();
     const categoryField = form.querySelector('[name="taskCategory"]');
@@ -9776,14 +9789,25 @@ function renderSettings(){
     }
     modal.classList.add("is-visible");
     modal.hidden = false;
-    document.body?.classList.add("modal-open");
+    modal.style.zIndex = "10040";
+    syncBodyModalClass();
     syncFormMode(typeField.value);
   }
   function hideModal(){
     if (!modal) return;
+    const session = window.__maintenanceTaskModalSession && typeof window.__maintenanceTaskModalSession === "object"
+      ? window.__maintenanceTaskModalSession
+      : null;
+    const onClosed = session && typeof session.onClosed === "function" ? session.onClosed : null;
     modal.classList.remove("is-visible");
     modal.hidden = true;
-    document.body?.classList.remove("modal-open");
+    modal.style.zIndex = "";
+    const anyModalVisible = !!document.querySelector('.modal-backdrop:not([hidden]), .cost-receipt-modal:not([hidden])');
+    if (!anyModalVisible) document.body?.classList.remove("modal-open");
+    if (typeof onClosed === "function"){
+      try { onClosed(); } catch (err){ console.warn("Maintenance task modal onClosed callback failed", err); }
+    }
+    window.__maintenanceTaskModalSession = null;
   }
   window.__openMaintenanceTaskModal = showModal;
   window.__closeMaintenanceTaskModal = hideModal;
@@ -9977,8 +10001,17 @@ function renderSettings(){
     }
 
     persist();
+    const session = window.__maintenanceTaskModalSession && typeof window.__maintenanceTaskModalSession === "object"
+      ? window.__maintenanceTaskModalSession
+      : null;
+    const fromCostAnalysis = session && session.source === "cost-analysis";
     hideModal();
-    renderSettings();
+    if (!fromCostAnalysis){
+      renderSettings();
+    }
+    if (session && typeof session.onSaved === "function"){
+      try { session.onSaved(createdTask); } catch (err){ console.warn("Maintenance task modal onSaved callback failed", err); }
+    }
     if (createdTask && !autoLinkedInventory){
       setTimeout(()=>{
         const fn = window.__promptAddInventoryForTask;
@@ -12854,14 +12887,30 @@ const appendEmptyRow = (focusFirst = false)=>{
       const quickAddBtn = modal.querySelector("[data-receipt-quick-add-task]");
       if (quickAddBtn instanceof HTMLButtonElement){
         quickAddBtn.addEventListener("click", ()=>{
+          saveWeekRowsFromDom();
+          persistReceiptState();
+          const activePurchasedField = weekRowsBody instanceof HTMLElement
+            ? weekRowsBody.querySelector('tr[data-receipt-row]:last-of-type [data-col="purchased"]')
+            : null;
           const opener = typeof window.__openMaintenanceTaskModal === "function" ? window.__openMaintenanceTaskModal : null;
           if (opener){
-            opener();
-            return;
-          }
-          const addTaskBtn = document.getElementById("btnAddTask");
-          if (addTaskBtn instanceof HTMLButtonElement){
-            addTaskBtn.click();
+            opener({
+              source: "cost-analysis",
+              onSaved: ()=>{
+                rebuildPurchaseTemplates();
+                renderWeekRows();
+                renderRangeTable();
+                renderCentralSpendRows();
+                if (activePurchasedField instanceof HTMLElement){
+                  requestAnimationFrame(()=> activePurchasedField.focus());
+                }
+              },
+              onClosed: ()=>{
+                if (activePurchasedField instanceof HTMLElement){
+                  requestAnimationFrame(()=> activePurchasedField.focus());
+                }
+              }
+            });
             return;
           }
           if (typeof toast === "function"){
