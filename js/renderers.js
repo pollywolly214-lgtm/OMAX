@@ -11404,8 +11404,21 @@ function renderCosts(){
           v2Chip.click();
           return true;
         }
-        if (typeof toast === "function") toast("Completed V2 occurrence exists in reporting but is not visible on calendar.");
-        if (window.DEBUG_MODE) console.debug("[maintenance-v2-focus-miss]", { dueISO, rootOccurrenceId, instanceId, taskId });
+        if (typeof toast === "function") toast("This V2 completed record is not visible on the calendar.");
+        const orphanCtx = {
+          sourceSystem: "v2",
+          taskId: String(taskId || ""),
+          instanceId,
+          rootOccurrenceId,
+          displayDateISO: dueISO,
+          dateISO: dueISO,
+          originalDateISO: String(options.originalDateISO || dueISO || ""),
+          taskName: String(options.taskName || "")
+        };
+        if (window.DEBUG_MODE) console.debug("[maintenance-v2-orphan-row-detected]", orphanCtx);
+        if (typeof window.repairV2OrphanCompletedRow === "function"){
+          window.repairV2OrphanCompletedRow(orphanCtx);
+        }
         return false;
       }
       const anchor = taskId ? (cell.querySelector(`[data-cal-task="${String(taskId)}"]`) || cell) : cell;
@@ -11818,6 +11831,36 @@ function renderCosts(){
       window.pendingCostDataCenterFocus = null;
       window.focusMaintenanceDataCenterRow(pendingFocus);
     }
+    window.repairV2OrphanCompletedRow = (ctx = {})=>{
+      const sourceSystem = String(ctx.sourceSystem || "").toLowerCase();
+      if (sourceSystem !== "v2") return false;
+      const rootOccurrenceId = String(ctx.rootOccurrenceId || "").trim();
+      const instanceId = String(ctx.instanceId || "").trim();
+      const taskId = String(ctx.taskId || "").trim();
+      const displayDateISO = String(ctx.displayDateISO || ctx.dateISO || "").trim();
+      const originalDateISO = String(ctx.originalDateISO || displayDateISO || "").trim();
+      if (!rootOccurrenceId || !instanceId || !taskId || !displayDateISO) return false;
+      const ask = window.confirm ? window.confirm("This completed V2 occurrence exists in reporting but is not visible on the calendar. Remove this orphan record from completed reporting?") : true;
+      if (!ask) return false;
+      if (typeof window.appendV2RepeatEventByRoot === "function" && rootOccurrenceId.startsWith("repeat:")){
+        window.appendV2RepeatEventByRoot({
+          instanceId,
+          taskId,
+          rootOccurrenceId,
+          originalDateISO,
+          displayDateISO,
+          eventType: "removed",
+          payload: { source: "data_center_orphan_repair" }
+        });
+      } else if (typeof window.appendV2OccurrenceEvent === "function"){
+        window.appendV2OccurrenceEvent(rootOccurrenceId, "removed", { source: "data_center_orphan_repair", originalDateISO, displayDateISO });
+      } else {
+        return false;
+      }
+      if (typeof renderCalendarPreservingScroll === "function") renderCalendarPreservingScroll();
+      if (typeof renderCosts === "function") renderCosts();
+      return true;
+    };
 
     const cuttingSearchInput = modal instanceof HTMLElement ? modal.querySelector("[data-cutting-search]") : null;
     const cuttingCategoryFilter = modal instanceof HTMLElement ? modal.querySelector("[data-cutting-filter-category]") : null;
@@ -11928,6 +11971,8 @@ function renderCosts(){
         const rootOccurrenceId = String(btn.getAttribute("data-v2-root-occurrence-id") || "");
         const instanceId = String(btn.getAttribute("data-v2-instance-id") || "");
         const displayDateISO = String(btn.getAttribute("data-v2-display-date-iso") || dateISO);
+        const originalDateISO = String(btn.getAttribute("data-v2-original-date-iso") || displayDateISO || dateISO);
+        const taskName = String(btn.getAttribute("data-task-name") || "");
         if (destination === "settings"){
           closeDataCenter();
           if (taskId){
@@ -11937,7 +11982,7 @@ function renderCosts(){
           return;
         }
         closeDataCenter();
-        focusCalendarAtOccurrence(taskId, dateISO, { sourceSystem, rootOccurrenceId, instanceId, displayDateISO });
+        focusCalendarAtOccurrence(taskId, dateISO, { sourceSystem, rootOccurrenceId, instanceId, displayDateISO, originalDateISO, taskName });
       });
     });
   }
@@ -17227,7 +17272,7 @@ function computeCostModel(){
     const lifecycleStatus = String(row.lifecycleStatus || row.status || "").trim().toLowerCase();
     const dateISO = toHistoryDateKey(row.displayDateISO || row.dateISO || row.effectiveDateISO || "");
     const isCompleted = row.isCompleted === true && lifecycleStatus === "completed";
-    let invalidReason = !isCompleted ? "not_completed" : (!taskId ? "missing_task_id" : (!instanceId ? "missing_instance_id" : (!rootOccurrenceId ? "missing_root_occurrence_id" : (!dateISO ? "missing_display_date" : (["removed","skipped","scheduled"].includes(lifecycleStatus) ? `lifecycle_${lifecycleStatus}` : "")))));
+    let invalidReason = !isCompleted ? "not_completed" : (!taskId ? "missing_task_id" : (!instanceId ? "missing_instance_id" : (!rootOccurrenceId ? "missing_root_occurrence_id" : (!dateISO ? "missing_display_date" : (["removed","skipped","scheduled","stopped"].includes(lifecycleStatus) ? `lifecycle_${lifecycleStatus}` : "")))));
     let resolvedStatus = "";
     let resolvedDate = "";
     if (!invalidReason && typeof window.resolveV2RepeatOccurrenceStateByRoot === "function" && rootOccurrenceId.startsWith("repeat:")){
