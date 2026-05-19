@@ -769,9 +769,29 @@ function openV2RepeatPanel(view){
   overlay.appendChild(card); document.body.appendChild(overlay);
   overlay.addEventListener("click", (event)=>{ if (event.target === overlay) closeV2OneTimePanel(); });
   const reopen = ()=>{
-    const refreshed = resolveV2RepeatOccurrenceStateByRoot(view.rootOccurrenceId, view.originalDateISO);
+    const refreshed = resolveV2RepeatOccurrenceStateWithCompat({
+      instanceId: String(view.instanceId || ""),
+      rootOccurrenceId: String(view.rootOccurrenceId || ""),
+      fallbackDateISO: view.originalDateISO || view.dateISO || null,
+      occurrenceIndex: view.occurrenceIndex
+    });
     openV2RepeatPanel({ ...view, ...refreshed, dateISO: refreshed.displayDateISO || view.dateISO });
   };
+  const getLatestState = ()=> resolveV2RepeatOccurrenceStateWithCompat({
+    instanceId: String(view.instanceId || ""),
+    rootOccurrenceId: String(view.rootOccurrenceId || ""),
+    fallbackDateISO: view.originalDateISO || view.dateISO || null,
+    occurrenceIndex: view.occurrenceIndex
+  });
+  const appendPanelRootEvent = (eventType, payload = {})=> appendV2RepeatEventByRoot({
+    instanceId: String(view.instanceId || ""),
+    taskId: String(view.taskId || ""),
+    rootOccurrenceId: String(view.rootOccurrenceId || ""),
+    originalDateISO: String(view.originalDateISO || ""),
+    displayDateISO: String(view.displayDateISO || view.dateISO || ""),
+    eventType,
+    payload
+  });
   const logRepeatAction = (actionType, extra = {})=>{
     if (!window.DEBUG_MODE) return;
     console.info("[maintenance-v2] repeat action click", {
@@ -786,17 +806,25 @@ function openV2RepeatPanel(view){
     });
   };
   card.querySelector("[data-rpt-close]")?.addEventListener("click", ()=> closeV2OneTimePanel());
-  card.querySelector("[data-rpt-complete]")?.addEventListener("click", ()=>{ if (view.lifecycleStatus!=="completed"){ logRepeatAction("completed"); appendV2RepeatEventByRoot({ ...view, eventType: "completed" }); } reopen(); });
-  card.querySelector("[data-rpt-uncomplete]")?.addEventListener("click", ()=>{ if (view.lifecycleStatus==="completed"){ logRepeatAction("uncompleted"); appendV2RepeatEventByRoot({ ...view, eventType: "uncompleted" }); } reopen(); });
-  card.querySelector("[data-rpt-note]")?.addEventListener("click", ()=>{ const v=window.prompt("Set note for this repeat occurrence:", view.note||""); if(v!==null){ logRepeatAction("note_set"); appendV2RepeatEventByRoot({ ...view, eventType: "note_set", payload: { note:v } }); } reopen(); });
-  card.querySelector("[data-rpt-hours]")?.addEventListener("click", ()=>{ const v=window.prompt("Enter hours to record for this maintenance occurrence. Leave blank to clear.", view.hours!=null?String(view.hours):""); if(v!==null){ const t=String(v).trim(); const h=t===""?null:Number(t); if(t!=="" && (!Number.isFinite(h)||h<0)){ toast("Enter a valid non-negative number."); return; } logRepeatAction("hours_set"); appendV2RepeatEventByRoot({ ...view, eventType: "hours_set", payload: { hours:h } }); reopen(); } });
+  card.querySelector("[data-rpt-complete]")?.addEventListener("click", ()=>{
+    const latest = getLatestState();
+    if (latest.lifecycleStatus !== "completed"){ logRepeatAction("completed"); appendPanelRootEvent("completed"); }
+    reopen();
+  });
+  card.querySelector("[data-rpt-uncomplete]")?.addEventListener("click", ()=>{
+    const latest = getLatestState();
+    if (latest.lifecycleStatus === "completed"){ logRepeatAction("uncompleted"); appendPanelRootEvent("uncompleted"); }
+    reopen();
+  });
+  card.querySelector("[data-rpt-note]")?.addEventListener("click", ()=>{ const v=window.prompt("Set note for this repeat occurrence:", view.note||""); if(v!==null){ logRepeatAction("note_set"); appendPanelRootEvent("note_set", { note:v }); } reopen(); });
+  card.querySelector("[data-rpt-hours]")?.addEventListener("click", ()=>{ const v=window.prompt("Enter hours to record for this maintenance occurrence. Leave blank to clear.", view.hours!=null?String(view.hours):""); if(v!==null){ const t=String(v).trim(); const h=t===""?null:Number(t); if(t!=="" && (!Number.isFinite(h)||h<0)){ toast("Enter a valid non-negative number."); return; } logRepeatAction("hours_set"); appendPanelRootEvent("hours_set", { hours:h }); reopen(); } });
   card.querySelector("[data-rpt-move]")?.addEventListener("click", ()=>{
     const v = window.prompt("Move occurrence to date (YYYY-MM-DD):", String(view.dateISO || ""));
     if (v == null) return;
     const toDateISO = normalizeDateKey(v);
     if (!toDateISO){ toast("Enter a valid date (YYYY-MM-DD)."); return; }
     logRepeatAction("moved", { toDateISO });
-    appendV2RepeatEventByRoot({ ...view, eventType: "moved", payload: { fromDateISO: view.originalDateISO, toDateISO, source: "calendar_panel" } });
+    appendPanelRootEvent("moved", { fromDateISO: view.originalDateISO, toDateISO, source: "calendar_panel" });
     closeV2OneTimePanel();
   });
   card.querySelector("[data-rpt-remove]")?.addEventListener("click", ()=>{
@@ -818,7 +846,7 @@ function openV2RepeatPanel(view){
       const askStop = window.confirm ? window.confirm("This is the last visible occurrence in this repeat chain. Remove it and stop repeat tracking?") : true;
       if (!askStop) return;
       logRepeatAction("removed_last_visible_stop");
-      appendV2RepeatEventByRoot({ ...view, eventType: "removed", payload: { source:"repeat_panel" } });
+      appendPanelRootEvent("removed", { source:"repeat_panel" });
       if (typeof window.stopV2RepeatTracking === "function") window.stopV2RepeatTracking(String(view.instanceId), String(view.taskId), String(view.originalDateISO), String(view.rootOccurrenceId), String(view.displayDateISO || view.dateISO));
       closeV2OneTimePanel();
       return;
@@ -826,7 +854,7 @@ function openV2RepeatPanel(view){
     const ok=window.confirm?window.confirm("Remove this repeat occurrence from calendar?"):true;
     if(!ok) return;
     logRepeatAction("removed");
-    appendV2RepeatEventByRoot({ ...view, eventType: "removed", payload: { source:"repeat_panel" } });
+    appendPanelRootEvent("removed", { source:"repeat_panel" });
     closeV2OneTimePanel();
   });
   card.querySelector("[data-rpt-stop]")?.addEventListener("click", ()=>{
