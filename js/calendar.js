@@ -3282,7 +3282,10 @@ function renderCalendar(){
     });
   });
 
-  const jobsMap = {};
+  
+window.resolveV2RepeatOccurrenceStateByRoot = resolveV2RepeatOccurrenceStateByRoot;
+window.resolveV2OneTimeOccurrenceState = resolveV2OneTimeOccurrenceState;
+const jobsMap = {};
   const activeJobs = normalizeJobList(
     Array.isArray(window.cuttingJobs) || (window.cuttingJobs && typeof window.cuttingJobs === "object")
       ? window.cuttingJobs

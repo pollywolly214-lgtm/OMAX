@@ -11422,9 +11422,6 @@ function renderCosts(){
 
   function focusCalendarForCuttingJob(jobId, dateISO){
     const dueISO = String(options.displayDateISO || dateISO || "");
-    const sourceSystem = String(options.sourceSystem || "legacy").toLowerCase();
-    const rootOccurrenceId = String(options.rootOccurrenceId || "").trim();
-    const instanceId = String(options.instanceId || "").trim();
     const parsedDue = dueISO && typeof parseDateLocal === "function"
       ? parseDateLocal(dueISO)
       : (dueISO ? new Date(dueISO) : null);
@@ -17230,7 +17227,14 @@ function computeCostModel(){
     const lifecycleStatus = String(row.lifecycleStatus || row.status || "").trim().toLowerCase();
     const dateISO = toHistoryDateKey(row.displayDateISO || row.dateISO || row.effectiveDateISO || "");
     const isCompleted = row.isCompleted === true && lifecycleStatus === "completed";
-    const invalidReason = !isCompleted ? "not_completed" : (!taskId ? "missing_task_id" : (!instanceId ? "missing_instance_id" : (!rootOccurrenceId ? "missing_root_occurrence_id" : (!dateISO ? "missing_display_date" : (["removed","skipped","scheduled"].includes(lifecycleStatus) ? `lifecycle_${lifecycleStatus}` : "")))));
+    let invalidReason = !isCompleted ? "not_completed" : (!taskId ? "missing_task_id" : (!instanceId ? "missing_instance_id" : (!rootOccurrenceId ? "missing_root_occurrence_id" : (!dateISO ? "missing_display_date" : (["removed","skipped","scheduled"].includes(lifecycleStatus) ? `lifecycle_${lifecycleStatus}` : "")))));
+    if (!invalidReason && typeof window.resolveV2RepeatOccurrenceStateByRoot === "function" && rootOccurrenceId.startsWith("repeat:")){
+      const resolved = window.resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, dateISO);
+      const resolvedStatus = String(resolved?.lifecycleStatus || "").toLowerCase();
+      const resolvedDate = toHistoryDateKey(resolved?.displayDateISO || resolved?.dateISO || "");
+      if (resolvedStatus !== "completed") invalidReason = `resolver_status_${resolvedStatus||"unknown"}`;
+      else if (!resolvedDate || resolvedDate !== dateISO) invalidReason = "resolver_date_mismatch";
+    }
     if (invalidReason){ if (window.DEBUG_MODE){ console.debug('[maintenance-v2-row-skip]', { idx, invalidReason, taskId, instanceId, rootOccurrenceId, lifecycleStatus, row }); } return; }
     if (maintenanceDataTableRows.some(entry => String(entry.sourceSystem || "")==="v2" && String(entry.rootOccurrenceId||"")===rootOccurrenceId)) return;
     const repeatBasis = String(row.repeatBasis || "").trim();
@@ -17649,6 +17653,28 @@ function computeCostModel(){
     rootOccurrenceId: row.rootOccurrenceId || "",
     instanceId: row.instanceId || ""
   }));
+  if (window.DEBUG_MODE){
+    const emittedV2 = compatibilityRows.filter(row => row && String(row.sourceSystem||"")==="v2" && row.isCompleted===true && String(row.lifecycleStatus||"").toLowerCase()==="completed");
+    const insertedV2 = maintenanceDataTableRows.filter(row => row && String(row.sourceSystem||"").toLowerCase()==="v2");
+    const renderedV2 = maintenanceDataTable.filter(row => row && String(row.sourceSystem||"").toLowerCase()==="v2");
+    console.debug("[maintenance-v2-parity-summary]", { emittedV2Count: emittedV2.length, insertedV2Count: insertedV2.length, renderedV2Count: renderedV2.length });
+    renderedV2.forEach(row => {
+      const rootOccurrenceId = String(row.rootOccurrenceId||"");
+      const dateISO = String(row.displayDateISO || row.dateISO || "");
+      const lifecycleStatus = String(row.lifecycleStatus || "").toLowerCase();
+      const hasResolver = typeof window.resolveV2RepeatOccurrenceStateByRoot === "function";
+      let resolverStatus = null;
+      let resolverDate = null;
+      if (hasResolver && rootOccurrenceId.startsWith("repeat:")){
+        const resolved = window.resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, dateISO);
+        resolverStatus = String(resolved?.lifecycleStatus || "").toLowerCase();
+        resolverDate = toHistoryDateKey(resolved?.displayDateISO || resolved?.dateISO || "");
+      }
+      if ((rootOccurrenceId.startsWith("repeat:") && (resolverStatus && resolverStatus !== "completed" || (resolverDate && resolverDate !== dateISO))) || lifecycleStatus !== "completed"){
+        console.debug("[maintenance-v2-orphan-reporting-row]", { sourceSystem: row.sourceSystem, rootOccurrenceId, taskId: row.taskId, instanceId: row.instanceId, displayDateISO: dateISO, lifecycleStatus, repeatBasis: row.repeatBasis, resolverStatus, resolverDate });
+      }
+    });
+  }
   const purchaseDataTableRows = [];
   const flattenCentralSpendRows = (weekEntry)=>{
     const rows = typeof normalizeRows === "function"
