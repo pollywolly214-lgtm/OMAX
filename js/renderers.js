@@ -9785,6 +9785,8 @@ function renderSettings(){
     modal.hidden = true;
     document.body?.classList.remove("modal-open");
   }
+  window.__openMaintenanceTaskModal = showModal;
+  window.__closeMaintenanceTaskModal = hideModal;
 
   tree?.addEventListener("click", (e)=>{
     const target = e.target;
@@ -12852,14 +12854,16 @@ const appendEmptyRow = (focusFirst = false)=>{
       const quickAddBtn = modal.querySelector("[data-receipt-quick-add-task]");
       if (quickAddBtn instanceof HTMLButtonElement){
         quickAddBtn.addEventListener("click", ()=>{
-          const btn = document.getElementById("btnAddTask");
-          if (btn instanceof HTMLButtonElement) btn.click();
-        });
-      }
-      const goSettingsBtn = modal.querySelector("[data-receipt-go-settings]");
-      if (goSettingsBtn instanceof HTMLButtonElement){
-        goSettingsBtn.addEventListener("click", ()=>{
+          const openTaskModal = typeof window.__openMaintenanceTaskModal === "function" ? window.__openMaintenanceTaskModal : null;
+          if (openTaskModal){
+            openTaskModal();
+            return;
+          }
           if (typeof window.showScreen === "function") window.showScreen("settings");
+          setTimeout(()=>{
+            const fallbackOpen = typeof window.__openMaintenanceTaskModal === "function" ? window.__openMaintenanceTaskModal : null;
+            if (fallbackOpen) fallbackOpen();
+          }, 0);
         });
       }
       if (clearAllBtn instanceof HTMLButtonElement){

@@ -1966,7 +1966,6 @@ function viewCosts(model){
             </label>
             <button type="button" class="btn" data-receipt-save-week>Save week</button>
             <button type="button" class="btn secondary" data-receipt-quick-add-task>Quick add task</button>
-            <button type="button" class="btn secondary" data-receipt-go-settings>Maintenance settings</button>
             <button type="button" class="btn secondary" data-receipt-clear-all>Clear all</button>
             <button type="button" class="btn secondary" data-receipt-undo-clear disabled>Undo clear</button>
             <button type="button" class="btn secondary" data-receipt-export-week>Export week (CSV)</button>
