@@ -1075,9 +1075,28 @@ function verifyRootSignatureMatches(signature){
   return { ok: expected === signature, expected };
 }
 
+function describeLocalRootPreviewError(err){
+  const msg = String(err?.message || err || "").toLowerCase();
+  if (msg.includes("notallowederror") || msg.includes("permission") || msg.includes("denied")){
+    return "Preview unavailable: this browser lost access to your WJ Cuts root folder. Re-open OneDrive setup and re-select the root folder.";
+  }
+  if (msg.includes("notfounderror") || msg.includes("not found")){
+    return "Preview unavailable: this file was not found under your selected WJ Cuts root folder. Verify the same shared root folder is selected.";
+  }
+  return "Preview unavailable: unable to read this file from your WJ Cuts root folder. Re-open OneDrive setup and verify root folder access.";
+}
+
 async function resolveLocalFileFromRelativePath(relativePath){
   const rootHandle = await readLocalRootHandle();
-  if (!rootHandle) return null;
+  if (!rootHandle){
+    throw new Error("No saved WJ Cuts root folder on this device.");
+  }
+  const perm = typeof rootHandle.queryPermission === "function"
+    ? await rootHandle.queryPermission({ mode: "read" })
+    : "granted";
+  if (perm !== "granted"){
+    throw new Error("WJ Cuts root folder permission is not granted.");
+  }
   const rel = String(relativePath || "").replace(/^\/+/, "");
   if (!rel) return null;
   const segments = rel.split("/").filter(Boolean);
@@ -1624,7 +1643,7 @@ async function resolveAttachmentPreview(file){
     try {
       const localFile = await resolveWJCutsRelativePath(file.relativePath);
       if (!localFile){
-        file.preview = file.preview || { mode: "message", content: "File reference saved, but the file was not found under your selected WJ Cuts folder." };
+        file.preview = { mode: "message", content: "Preview unavailable: file reference was saved, but the file is missing under your selected WJ Cuts root folder." };
         return false;
       }
       const preview = await buildAttachmentPreview(localFile);
@@ -1632,10 +1651,10 @@ async function resolveAttachmentPreview(file){
         file.preview = preview;
         return preview.mode === "image";
       }
-      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this WJ Cuts referenced file type." };
+      file.preview = { mode: "message", content: "Preview unavailable: this WJ Cuts file type cannot be rendered as a 2D preview." };
       return false;
-    } catch (_err){
-      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this WJ Cuts referenced file." };
+    } catch (err){
+      file.preview = { mode: "message", content: describeLocalRootPreviewError(err) };
       return false;
     }
   }
