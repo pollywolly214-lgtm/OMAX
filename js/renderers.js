@@ -8263,7 +8263,109 @@ function showMakeActiveCopyModal(options){
   });
 }
 
+function ensureMaintenanceTaskModalAPI(){
+  if (typeof window.__openMaintenanceTaskModal === "function" && typeof window.__closeMaintenanceTaskModal === "function") return;
+  const ensureModalDom = ()=>{
+    let modal = document.getElementById("taskModal");
+    if (modal instanceof HTMLElement) return modal;
+    const rootId = (typeof window !== "undefined" && typeof window.ROOT_FOLDER_ID === "string") ? window.ROOT_FOLDER_ID : "root";
+    const options = ["<option value=\"\">(No Category)</option>"].concat(
+      (Array.isArray(window.settingsFolders) ? window.settingsFolders : []).map(f => `<option value="${escapeHtml(String(f?.id||""))}">${escapeHtml(String(f?.name||""))}</option>`)
+    ).join("");
+    const shell = document.createElement("div");
+    shell.innerHTML = `<div class="modal-backdrop" id="taskModal" hidden style="z-index:10040"><div class="modal-card"><button type="button" class="modal-close" id="closeTaskModal">×</button><h4>Create maintenance task</h4><form id="taskForm" class="modal-form"><div class="modal-grid"><label>Task name<input name="taskName" required placeholder="Task"></label><label>Type<select name="taskType" id="taskTypeSelect"><option value="interval">By interval</option><option value="asreq">As required</option></select></label><label data-form-frequency>Frequency (hrs)<input type="number" min="1" step="1" name="taskInterval" placeholder="e.g. 40"></label><label data-form-last>Hours since last service<input type="number" min="0" step="0.01" name="taskLastServiced" placeholder="optional"></label><label data-form-condition hidden>Condition / trigger<input name="taskCondition" placeholder="e.g. When clogged"></label><label>Manual link<input type="url" name="taskManual" placeholder="https://..."></label><label>Store link<input type="url" name="taskStore" placeholder="https://..."></label><label>Part #<input name="taskPN" placeholder="Part number"></label><label>Price ($)<input type="number" min="0" step="0.01" name="taskPrice" placeholder="optional"></label><label class="task-note">Note<textarea name="taskNote" rows="2" placeholder="Optional note"></textarea></label><label>Category<select name="taskCategory">${options || `<option value="${rootId}">Default</option>`}</select></label></div><div class="modal-actions"><button type="button" class="secondary" id="cancelTaskModal">Cancel</button><button type="submit" class="primary">Create Task</button></div></form></div></div>`;
+    modal = shell.firstElementChild;
+    if (modal) document.body.appendChild(modal);
+    return modal;
+  };
+  const syncMode = ()=>{
+    const form = document.getElementById("taskForm");
+    const typeField = document.getElementById("taskTypeSelect");
+    const freqRow = form?.querySelector('[data-form-frequency]');
+    const lastRow = form?.querySelector('[data-form-last]');
+    const conditionRow = form?.querySelector('[data-form-condition]');
+    const mode = String(typeField?.value || "interval");
+    if (!freqRow || !lastRow || !conditionRow) return;
+    freqRow.hidden = mode !== "interval";
+    lastRow.hidden = mode !== "interval";
+    conditionRow.hidden = mode === "interval";
+  };
+  const close = ()=>{
+    const modal = ensureModalDom();
+    if (!(modal instanceof HTMLElement)) return;
+    modal.hidden = true;
+    modal.classList.remove("is-visible");
+    const anyModalVisible = !!document.querySelector('.modal-backdrop:not([hidden]), .cost-receipt-modal:not([hidden])');
+    if (!anyModalVisible) document.body?.classList.remove("modal-open");
+  };
+  const open = (options={})=>{
+    const modal = ensureModalDom();
+    if (!(modal instanceof HTMLElement)) return false;
+    window.__maintenanceTaskModalSession = { source: String(options.source || "settings"), onSaved: typeof options.onSaved === "function" ? options.onSaved : null, onClosed: typeof options.onClosed === "function" ? options.onClosed : null };
+    const form = modal.querySelector("#taskForm");
+    form?.reset();
+    modal.hidden = false; modal.classList.add("is-visible"); modal.style.zIndex = "10040";
+    document.body?.classList.add("modal-open");
+    syncMode();
+    return true;
+  };
+  window.__openMaintenanceTaskModal = open;
+  window.__closeMaintenanceTaskModal = close;
+  if (!window.__maintenanceTaskModalSubmitBound){
+    window.__maintenanceTaskModalSubmitBound = true;
+    document.addEventListener("submit", (e)=>{
+      const form = e.target;
+      if (!(form instanceof HTMLFormElement) || form.id !== "taskForm") return;
+      if (form.closest("#explorer")) return;
+      e.preventDefault();
+      const data = new FormData(form);
+      const name = (data.get("taskName")||"").toString().trim();
+      const mode = (data.get("taskType")||"interval").toString();
+      if (!name){ alert("Task name is required."); return; }
+      const rootId = (typeof window !== "undefined" && typeof window.ROOT_FOLDER_ID === "string") ? window.ROOT_FOLDER_ID : "root";
+      const catRaw = (data.get("taskCategory")||"").toString().trim();
+      const catId = catRaw ? catRaw : rootId;
+      const manual = (data.get("taskManual")||"").toString().trim();
+      const store = (data.get("taskStore")||"").toString().trim();
+      const pn = (data.get("taskPN")||"").toString().trim();
+      const priceVal = data.get("taskPrice");
+      const price = priceVal === null || priceVal === "" ? null : Number(priceVal);
+      const noteRaw = (data.get("taskNote")||"").toString();
+      const note = noteRaw.trim() ? noteRaw : "";
+      const id = genId(name);
+      const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, note, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
+      let createdTask = null;
+      if (mode === "interval"){
+        const intervalVal = data.get("taskInterval");
+        const interval = intervalVal === null || intervalVal === "" ? 8 : Number(intervalVal);
+        const task = Object.assign(base, { mode:"interval", interval: isFinite(interval) && interval>0 ? interval : 8, sinceBase:0, anchorTotal:null, completedDates: [], manualHistory: [], variant: "template", templateId: id });
+        const curHours = getCurrentMachineHours();
+        const baselineHours = parseBaselineHours(data.get("taskLastServiced"));
+        applyIntervalBaseline(task, { baselineHours, currentHours: curHours });
+        window.tasksInterval.unshift(task);
+        createdTask = task;
+      } else {
+        const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
+        const task = Object.assign(base, { mode:"asreq", condition, variant: "template", templateId: id });
+        (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = [])).unshift(task);
+        createdTask = task;
+      }
+      try { if (typeof saveTasks === "function") saveTasks(); } catch(_){}
+      try { if (typeof saveCloudDebounced === "function") saveCloudDebounced(); } catch(_){}
+      const cb = window.__maintenanceTaskModalSession?.onSaved;
+      close();
+      if (typeof cb === "function") cb(createdTask);
+    }, true);
+  }
+  document.addEventListener("click", (event)=>{
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (!target) return;
+    if (target.id === "cancelTaskModal" || target.id === "closeTaskModal"){ close(); const cb = window.__maintenanceTaskModalSession?.onClosed; if (typeof cb === "function") cb(); return; }
+  });
+}
+
 function renderSettings(){
+  ensureMaintenanceTaskModalAPI();
   // === Explorer-style Maintenance Settings ===
   const root = document.getElementById("content");
   if (!root) return;
@@ -12887,34 +12989,34 @@ const appendEmptyRow = (focusFirst = false)=>{
       const quickAddBtn = modal.querySelector("[data-receipt-quick-add-task]");
       if (quickAddBtn instanceof HTMLButtonElement){
         quickAddBtn.addEventListener("click", ()=>{
+          ensureMaintenanceTaskModalAPI();
           saveWeekRowsFromDom();
           persistReceiptState();
-          const activePurchasedField = weekRowsBody instanceof HTMLElement
-            ? weekRowsBody.querySelector('tr[data-receipt-row]:last-of-type [data-col="purchased"]')
-            : null;
+          const focusRowIndex = Math.max(0, (weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelectorAll("tr[data-receipt-row]").length : 1) - 1);
           const opener = typeof window.__openMaintenanceTaskModal === "function" ? window.__openMaintenanceTaskModal : null;
           if (opener){
-            opener({
+            const opened = opener({
               source: "cost-analysis",
               onSaved: ()=>{
                 rebuildPurchaseTemplates();
                 renderWeekRows();
                 renderRangeTable();
                 renderCentralSpendRows();
-                if (activePurchasedField instanceof HTMLElement){
-                  requestAnimationFrame(()=> activePurchasedField.focus());
-                }
+                const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
+                if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
               },
               onClosed: ()=>{
-                if (activePurchasedField instanceof HTMLElement){
-                  requestAnimationFrame(()=> activePurchasedField.focus());
-                }
+                const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
+                if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
               }
             });
+            const modalEl = document.getElementById("taskModal");
+            if (!opened){ if (typeof toast === "function") toast("Add Task modal failed to open"); return; }
+            if (!(modalEl instanceof HTMLElement)){ if (typeof toast === "function") toast("Add Task modal DOM missing"); return; }
             return;
           }
           if (typeof toast === "function"){
-            toast("Unable to open Add Task right now.");
+            toast("Add Task modal opener missing");
           }
         });
       }
