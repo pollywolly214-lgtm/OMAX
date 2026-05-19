@@ -11606,7 +11606,7 @@ function renderCosts(){
   }
 
   function focusCalendarForCuttingJob(jobId, dateISO){
-    const dueISO = String(options.displayDateISO || dateISO || "");
+    const dueISO = String(dateISO || "");
     const parsedDue = dueISO && typeof parseDateLocal === "function"
       ? parseDateLocal(dueISO)
       : (dueISO ? new Date(dueISO) : null);

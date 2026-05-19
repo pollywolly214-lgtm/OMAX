@@ -392,6 +392,9 @@ function getV2OneTimeOccurrenceView(occurrenceId){
 function makeV2RepeatOccurrenceKey(instanceId, dateISO){
   return `repeat:${String(instanceId || "")}:${String(dateISO || "")}`;
 }
+function makeV2RepeatOccurrenceSlotKey(instanceId, occurrenceIndex){
+  return `repeat:${String(instanceId || "")}:slot:${Math.max(1, Math.floor(Number(occurrenceIndex) || 1))}`;
+}
 
 function projectV2RepeatDates(instance, maxCount = 3){
   const rule = instance && instance.repeatRule && typeof instance.repeatRule === "object" ? instance.repeatRule : null;
@@ -439,14 +442,12 @@ function projectV2RepeatDates(instance, maxCount = 3){
     if (endDate instanceof Date && !Number.isNaN(endDate.getTime())) endDate.setHours(0,0,0,0);
     const rollingCount = 5;
     const rollingDaysCap = 90;
-    const blockedByCountLimit = endCount != null && completedCountForInstance >= endCount;
     const requestedCount = endCount != null ? endCount : rollingCount;
     const out = [];
-    if (!blockedByCountLimit){
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      let firstProjectedTime = null;
-      for (let n = 1, attempts = 0; out.length < requestedCount && attempts < 120; n++, attempts++){
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    let firstProjectedTime = null;
+    for (let n = 1, attempts = 0; out.length < requestedCount && attempts < 120; n++, attempts++){
         const targetHoursFromAnchor = intervalHours * n;
         const remainingHoursForThisProjection = targetHoursFromAnchor - hoursUsedSinceAnchor;
         const daysOut = remainingHoursForThisProjection <= 0 ? 0 : Math.ceil(remainingHoursForThisProjection / averageHoursPerDay);
@@ -469,9 +470,13 @@ function projectV2RepeatDates(instance, maxCount = 3){
         if (endDate instanceof Date && predicted.getTime() > endDate.getTime()) break;
         const finalPredictedDateISO = normalizeDateKey(ymd(predicted));
         if (!finalPredictedDateISO) continue;
-        const state = resolveV2RepeatOccurrenceState(instanceId, finalPredictedDateISO);
-        if (state.lifecycleStatus === "removed" || state.lifecycleStatus === "completed" || state.isMoved) continue;
-        if (!out.includes(finalPredictedDateISO)) out.push(finalPredictedDateISO);
+        if (endType === "after_count"){
+          out.push({ dateISO: finalPredictedDateISO, occurrenceIndex: n });
+        }else{
+          const state = resolveV2RepeatOccurrenceState(instanceId, finalPredictedDateISO);
+          if (state.lifecycleStatus === "removed" || state.lifecycleStatus === "completed" || state.isMoved) continue;
+          if (!out.includes(finalPredictedDateISO)) out.push(finalPredictedDateISO);
+        }
         if (window.DEBUG_MODE){
           console.info("[maintenance-v2] machine-hour projection occurrence", {
             instanceId,
@@ -493,7 +498,6 @@ function projectV2RepeatDates(instance, maxCount = 3){
           });
         }
       }
-    }
     if (window.DEBUG_MODE){
       console.info("[maintenance-v2] machine-hour projection", {
         instanceId,
@@ -506,7 +510,6 @@ function projectV2RepeatDates(instance, maxCount = 3){
         daysPerInterval,
         currentTotalHours: safeCurrent,
         anchorTotalHours,
-        blockedByCountLimit,
         projectedCount: out.length
       });
     }
@@ -535,9 +538,27 @@ function projectV2RepeatDates(instance, maxCount = 3){
     if (endDate instanceof Date && d.getTime() > endDate.getTime()) break;
     if (d.getTime() < today.getTime()) continue;
     const iso = ymd(d);
-    if (iso) out.push(iso);
+    if (!iso) continue;
+    if (endType === "after_count"){
+      out.push({ dateISO: iso, occurrenceIndex: i + 1 });
+    }else{
+      out.push(iso);
+    }
   }
   return out;
+}
+
+function resolveV2RepeatOccurrenceStateWithCompat({ instanceId, rootOccurrenceId, fallbackDateISO = null, occurrenceIndex = null }){
+  const primaryRoot = String(rootOccurrenceId || "");
+  const primary = resolveV2RepeatOccurrenceStateByRoot(primaryRoot, fallbackDateISO);
+  if (primary.relatedEventsCount > 0) return { ...primary, matchedRootOccurrenceId: primaryRoot };
+  const dateFallback = normalizeDateKey(fallbackDateISO || null);
+  const legacyRoot = dateFallback ? makeV2RepeatOccurrenceKey(instanceId, dateFallback) : "";
+  if (legacyRoot && legacyRoot !== primaryRoot){
+    const legacy = resolveV2RepeatOccurrenceStateByRoot(legacyRoot, dateFallback);
+    if (legacy.relatedEventsCount > 0) return { ...legacy, matchedRootOccurrenceId: legacyRoot };
+  }
+  return { ...primary, matchedRootOccurrenceId: primaryRoot, occurrenceIndex };
 }
 
 function resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, fallbackDateISO = null){
@@ -764,10 +785,15 @@ function openV2RepeatPanel(view){
     const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
     const inst = instances.find(entry => entry && String(entry.id || "") === String(view.instanceId || ""));
     const projected = inst ? projectV2RepeatDates(inst) : [];
-    const hasOtherVisible = projected.some(dateISO => {
-      const rootId = makeV2RepeatOccurrenceKey(view.instanceId, dateISO);
+    const hasOtherVisible = projected.some(slot => {
+      const dateISO = typeof slot === "string" ? slot : normalizeDateKey(slot?.dateISO || null);
+      const occurrenceIndex = typeof slot === "string" ? null : Number(slot?.occurrenceIndex);
+      if (!dateISO) return false;
+      const rootId = occurrenceIndex != null && Number.isFinite(occurrenceIndex)
+        ? makeV2RepeatOccurrenceSlotKey(view.instanceId, occurrenceIndex)
+        : makeV2RepeatOccurrenceKey(view.instanceId, dateISO);
       if (rootId === String(view.rootOccurrenceId || "")) return false;
-      const state = resolveV2RepeatOccurrenceStateByRoot(rootId, dateISO);
+      const state = resolveV2RepeatOccurrenceStateWithCompat({ instanceId: view.instanceId, rootOccurrenceId: rootId, fallbackDateISO: dateISO, occurrenceIndex });
       return !["removed", "skipped"].includes(String(state.lifecycleStatus || ""));
     });
     if (!hasOtherVisible){
@@ -3193,17 +3219,24 @@ function renderCalendar(){
       && (String(entry.system || "") === "v2" || Number(entry.schemaVersion || 0) >= 2));
   repeatInstances.forEach(instance => {
     const dates = projectV2RepeatDates(instance);
-    dates.forEach(dateISO => {
-      const rootOccurrenceId = makeV2RepeatOccurrenceKey(instance.id, dateISO);
-      const state = resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, dateISO);
+    dates.forEach(slot => {
+      const dateISO = typeof slot === "string" ? slot : normalizeDateKey(slot?.dateISO || null);
+      const occurrenceIndex = typeof slot === "string" ? null : Number(slot?.occurrenceIndex);
+      if (!dateISO) return;
+      const endType = String(instance?.repeatRule?.endType || "never").toLowerCase();
+      const rootOccurrenceId = endType === "after_count" && Number.isFinite(occurrenceIndex)
+        ? makeV2RepeatOccurrenceSlotKey(instance.id, occurrenceIndex)
+        : makeV2RepeatOccurrenceKey(instance.id, dateISO);
+      const state = resolveV2RepeatOccurrenceStateWithCompat({ instanceId: String(instance.id || ""), rootOccurrenceId, fallbackDateISO: dateISO, occurrenceIndex });
       if (["removed","skipped"].includes(String(state.lifecycleStatus || "")) || state.isMoved) return;
       const task = v2TaskLookup.get(String(instance.taskId || "")) || null;
-      (dueMap[dateISO] ||= []).push({
+      const renderDateISO = state.displayDateISO || dateISO;
+      (dueMap[renderDateISO] ||= []).push({
         type: "v2repeat",
         id: rootOccurrenceId,
         instanceId: String(instance.id),
         taskId: String(instance.taskId || ""),
-        dateISO,
+        dateISO: renderDateISO,
         name: String((task && task.name) || "Maintenance repeat"),
         status: state.lifecycleStatus === "completed" ? "completed" : "manual",
         mode: "repeat_v2",
@@ -3212,8 +3245,9 @@ function renderCalendar(){
           instanceId: String(instance.id),
           taskId: String(instance.taskId || ""),
           originalDateISO: dateISO,
-          displayDateISO: state.displayDateISO || dateISO,
-          dateISO: state.displayDateISO || dateISO,
+          displayDateISO: renderDateISO,
+          dateISO: renderDateISO,
+          occurrenceIndex: Number.isFinite(occurrenceIndex) ? occurrenceIndex : null,
           name: String((task && task.name) || "Maintenance repeat"),
           note: state.note,
           hours: state.hours,
