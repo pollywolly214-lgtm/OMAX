@@ -1600,7 +1600,7 @@ async function resolveOneDriveAttachmentPreview(file){
       const text = window.dxfPreview.arrayBufferToText(bytes);
       const svg = window.dxfPreview.renderCadToSvgDataUrl(text);
       if (!svg){
-        file.preview = { mode: "message", content: "2D preview unavailable for this file." };
+        file.preview = { mode: "message", content: diagnosePreviewFailure(file) };
         return false;
       }
       file.preview = { mode: "image", content: svg };
@@ -1610,7 +1610,7 @@ async function resolveOneDriveAttachmentPreview(file){
       }
       return true;
     } catch (_err){
-      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this OneDrive file." };
+      file.preview = { mode: "message", content: diagnosePreviewFailure(file) };
       return false;
     } finally {
       oneDrivePreviewInFlight.delete(inFlightKey);
@@ -1619,6 +1619,25 @@ async function resolveOneDriveAttachmentPreview(file){
 
   oneDrivePreviewInFlight.set(inFlightKey, task);
   return task;
+}
+
+function diagnosePreviewFailure(file, context = ""){
+  const source = String(file?.source || "");
+  const ext = fileExtFromName(String(file?.name || ""));
+  const href = String(file?.dataUrl || file?.url || "").trim();
+  if (source === "onedrive"){
+    if (!file?.driveId || !file?.itemId) return "Preview unavailable: OneDrive file metadata is incomplete. Relink this file from OneDrive.";
+    return "Preview unavailable: OneDrive content could not be loaded. Check OneDrive sign-in and file permissions, then try again.";
+  }
+  if (source === "wj_cuts_reference"){
+    return "Preview unavailable: unable to read this file from the selected WJ Cuts root. Re-select root folder and verify this exact file path exists.";
+  }
+  if ([".dxf", ".ord", ".omx"].includes(ext)){
+    if (!href) return "Preview unavailable: no file content URL is saved. Re-attach from Reference Folder or add a direct OneDrive URL.";
+    if (/^https?:\/\//i.test(href)) return "Preview unavailable: remote CAD file could not be fetched. Check the link and access permissions.";
+    return "Preview unavailable: CAD data could not be decoded for preview. Re-attach the source file.";
+  }
+  return context || "Preview unavailable: unsupported format or missing data for this attachment.";
 }
 
 async function resolveAttachmentPreview(file){
@@ -1679,10 +1698,10 @@ async function resolveAttachmentPreview(file){
         file.preview = { mode: "image", content: svg };
         return true;
       }
-      file.preview = file.preview || { mode: "message", content: "2D preview unavailable for this file." };
+      file.preview = { mode: "message", content: diagnosePreviewFailure(file) };
       return false;
     } catch (_err){
-      file.preview = file.preview || { mode: "message", content: "2D preview unavailable for this file." };
+      file.preview = { mode: "message", content: diagnosePreviewFailure(file) };
       return false;
     }
   }
@@ -19393,6 +19412,8 @@ function renderJobs(){
   const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
   const oneDriveRootPickerBtn = document.getElementById("jobOneDriveRootPickerBtn");
 
+  let pendingAttachJobId = "";
+
 
   const getSharedConfig = ()=>{
     const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : normalizeOneDriveJobConfig(null);
@@ -19463,7 +19484,8 @@ function renderJobs(){
     }
     const rootHandle = await readLocalRootHandle();
     if (!rootHandle){
-      toast("Set WJ Cuts Folder to open this file.");
+      pendingAttachJobId = String(targetJobId || "");
+      toast("Root folder is not set up yet. Set up WJ Cuts Folder first, then attach the file.");
       openOneDriveModal();
       return false;
     }
@@ -19567,7 +19589,15 @@ function renderJobs(){
     closeFileMenu(); closeActionMenu(); closeHistoryActionMenu(); openOneDriveModal();
   });
   oneDriveRootPickerBtn?.addEventListener("click", async ()=>{
-    await chooseLocalOneDriveRoot();
+    const ok = await chooseLocalOneDriveRoot();
+    if (ok && pendingAttachJobId){
+      const targetId = pendingAttachJobId;
+      pendingAttachJobId = "";
+      const attached = await attachFromLocalOneDriveRoot(targetId);
+      if (attached){
+        closeOneDriveModal();
+      }
+    }
   });
   oneDriveCancelBtns.forEach(btn => btn.addEventListener("click", closeOneDriveModal));
   oneDriveModal?.addEventListener("click", (event)=>{ if (event.target === oneDriveModal) closeOneDriveModal(); });
