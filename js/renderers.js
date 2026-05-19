@@ -12654,6 +12654,12 @@ function renderCosts(){
         if (!weekOptions.some(item => item.key === activeWeekKey)) activeWeekKey = weekOptions[0]?.key || "";
         weekSelect.value = activeWeekKey;
       };
+      function findTaskByNameExact(name){
+        const key = String(name || "").trim().toLowerCase();
+        if (!key) return null;
+        const tasks = (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).concat(Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []);
+        return tasks.find(task => String(task?.name || "").trim().toLowerCase() === key) || null;
+      }
       const saveWeekRowsFromDom = ()=>{
         const entry = getWeekEntry(activeWeekKey);
         if (!(weekRowsBody instanceof HTMLElement)) return entry;
@@ -12663,6 +12669,7 @@ function renderCosts(){
           cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
           qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
           partNumber: String(tr.querySelector('[data-col=\"partNumber\"]')?.value || "").trim(),
+          taskId: String(findTaskByNameExact(String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim())?.id || ""),
           shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
           tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
         }));
@@ -12731,12 +12738,28 @@ function renderCosts(){
           : [];
       };
       const rebuildPurchaseTemplates = ()=>{
+        const getLiveTasks = ()=> (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).concat(Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []);
+        const getLiveInventory = ()=> Array.isArray(window.inventory) ? window.inventory : [];
+        const taskByName = new Map();
+        getLiveTasks().forEach(task => {
+          const name = String(task?.name || "").trim();
+          if (!name) return;
+          taskByName.set(name.toLowerCase(), task);
+        });
+        window.__purchaseHistoryTaskByName = taskByName;
         if (purchasedDatalist instanceof HTMLDataListElement){
-          const options = (Array.isArray(inventory) ? inventory : [])
-            .filter(item => item && item.id != null && String(item.name || "").trim())
-            .sort((a,b)=> String(a.name || "").localeCompare(String(b.name || "")));
-          purchasedDatalist.innerHTML = options
-            .map(item => `<option value="${escapeHtml(String(item.name || ""))}"></option>`)
+          const names = new Set();
+          getLiveTasks().forEach(task => {
+            const name = String(task?.name || "").trim();
+            if (name) names.add(name);
+          });
+          getLiveInventory().forEach(item => {
+            const name = String(item?.name || "").trim();
+            if (name) names.add(name);
+          });
+          purchasedDatalist.innerHTML = Array.from(names)
+            .sort((a,b)=> String(a).localeCompare(String(b)))
+            .map(name => `<option value="${escapeHtml(String(name || ""))}"></option>`)
             .join("");
         }
       };
@@ -12809,8 +12832,9 @@ const appendEmptyRow = (focusFirst = false)=>{
       };
       const findInventoryByNameLike = (name)=>{
         const key = String(name || "").trim().toLowerCase();
-        if (!key || !Array.isArray(inventory)) return null;
-        return inventory.find(item => String(item?.name || "").toLowerCase().includes(key)) || null;
+        const liveInventory = Array.isArray(window.inventory) ? window.inventory : [];
+        if (!key || !Array.isArray(liveInventory)) return null;
+        return liveInventory.find(item => String(item?.name || "").toLowerCase().includes(key)) || null;
       };
       const ensurePurchaseHistoryLinkForPartNumber = ({ partNumber, inventoryItemId, canonicalName })=>{
         const partKey = String(partNumber || "").trim().toLowerCase();
@@ -12941,14 +12965,23 @@ const appendEmptyRow = (focusFirst = false)=>{
             const row = inputEl.closest("tr[data-receipt-row]");
             const typed = String(inputEl.value || "").trim();
             if (row && typed){
-              const inv = (Array.isArray(inventory) ? inventory : []).find(item => String(item?.name || "").trim().toLowerCase() === typed.toLowerCase());
+              const task = findTaskByNameExact(typed);
+              const invFromTask = task && task.inventoryId != null && Array.isArray(window.inventory)
+                ? window.inventory.find(item => String(item?.id || "") === String(task.inventoryId))
+                : null;
+              const inv = invFromTask || (Array.isArray(window.inventory) ? window.inventory.find(item => String(item?.name || "").trim().toLowerCase() === typed.toLowerCase()) : null);
               const partEl = row.querySelector('[data-col="partNumber"]');
               const costEl = row.querySelector('[data-col="cost"]');
-              if (inv){
-                if (partEl instanceof HTMLInputElement) partEl.value = String(inv.pn || "");
-                if (costEl instanceof HTMLInputElement && Number.isFinite(Number(inv.price))) costEl.value = String(Number(inv.price));
-              } else {
-                if (partEl instanceof HTMLInputElement) partEl.value = "";
+              if (task || inv){
+                const taskPn = String(task?.pn || "").trim();
+                const taskPrice = Number(task?.price);
+                const invPn = String(inv?.pn || "").trim();
+                const invPrice = Number(inv?.price);
+                if (partEl instanceof HTMLInputElement) partEl.value = String(taskPn || invPn || partEl.value || "");
+                if (costEl instanceof HTMLInputElement){
+                  if (Number.isFinite(taskPrice)) costEl.value = String(taskPrice);
+                  else if (Number.isFinite(invPrice)) costEl.value = String(invPrice);
+                }
               }
             }
           }
@@ -13033,17 +13066,12 @@ const appendEmptyRow = (focusFirst = false)=>{
             const opened = opener({
               source: "cost-analysis",
               onSaved: ()=>{
-                const refreshReceiptSuggestions = ()=>{
-                  rebuildPurchaseTemplates();
-                  renderWeekRows();
-                  renderRangeTable();
-                  renderCentralSpendRows();
-                  const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
-                  if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
-                };
-                refreshReceiptSuggestions();
-                setTimeout(refreshReceiptSuggestions, 250);
-                setTimeout(refreshReceiptSuggestions, 900);
+                rebuildPurchaseTemplates();
+                renderWeekRows();
+                renderRangeTable();
+                renderCentralSpendRows();
+                const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
+                if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
               },
               onClosed: ()=>{
                 const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
