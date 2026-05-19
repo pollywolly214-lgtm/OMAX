@@ -440,7 +440,7 @@ function projectV2RepeatDates(instance, maxCount = 3){
     const rollingCount = 5;
     const rollingDaysCap = 90;
     const blockedByCountLimit = endCount != null && completedCountForInstance >= endCount;
-    const requestedCount = endCount != null ? endCount : rollingCount;
+    const requestedCount = endCount != null ? Math.max(0, endCount - completedCountForInstance) : rollingCount;
     const out = [];
     if (!blockedByCountLimit){
       const today = new Date();

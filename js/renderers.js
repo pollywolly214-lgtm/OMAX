@@ -5672,8 +5672,6 @@ function renderDashboard(){
             ? "Machine-hour repeat dates are estimated from logged hours and average daily usage. The selected date is the first allowed due date. Count controls how many projected completions before the repeat stops."
             : "For Interval tasks, choose machine-hours to predict by logged usage, or choose calendar day/week/month.";
         }
-      }else if (mode === "past_log"){
-        taskExistingModeHint.textContent = "Past completion saves V2 history only and does not start future repeats.";
       }else{
         taskExistingModeHint.textContent = "One-time creates one scheduled V2 reminder on the selected date.";
       }
@@ -6831,10 +6829,10 @@ function renderDashboard(){
         "Temporary chooser fallback:\n1) One-time reminder\n2) Start repeat tracking\n3) Log past completion",
         "1"
       );
-      const mapped = { "1": "one_time", "2": "repeat", "3": "past_log" };
+      const mapped = { "1": "one_time", "2": "repeat" };
       choice = mapped[String(choiceRaw || "").trim()] || "";
     }
-    if (!choice || !["one_time", "repeat", "past_log"].includes(choice)){
+    if (!choice || !["one_time", "repeat"].includes(choice)){
       toast("Add to calendar cancelled");
       return;
     }
@@ -6907,7 +6905,7 @@ function renderDashboard(){
       message = `Repeat tracking started for "${task.name || "Task"}"`;
     }else{
       createMaintenanceV2FromTemplate(task, {
-        mode: "past_log",
+        mode: "one_time",
         eventType: "completed",
         effectiveDateISO: targetISO,
         note: occurrenceNote
@@ -11724,6 +11722,7 @@ function renderCosts(){
       const categoryValue = String(categoryFilter instanceof HTMLSelectElement ? categoryFilter.value : "").trim();
       const taskValue = String(taskFilter instanceof HTMLSelectElement ? taskFilter.value : "").trim().toLowerCase();
       const tableRows = Array.from(modal.querySelectorAll("[data-maintenance-row]"));
+      let visibleCount = 0;
       tableRows.forEach(row => {
         if (!(row instanceof HTMLElement)) return;
         const haystack = String(row.getAttribute("data-search-text") || "").toLowerCase();
@@ -11734,7 +11733,20 @@ function renderCosts(){
         const matchesTask = !taskValue || rowTask === taskValue;
         const matches = matchesSearch && matchesCategory && matchesTask;
         row.hidden = !matches;
+        if (matches) visibleCount += 1;
       });
+      if (window.DEBUG_MODE){
+        const v2Count = tableRows.filter(row => row instanceof HTMLElement && String(row.getAttribute("data-source-system") || "").toLowerCase() === "v2").length;
+        const v2Visible = tableRows.filter(row => row instanceof HTMLElement && !row.hidden && String(row.getAttribute("data-source-system") || "").toLowerCase() === "v2").length;
+        console.debug("[maintenance-data-center]", {
+          totalMaintenanceCompatibilityRows: tableRows.length,
+          v2RowsCount: v2Count,
+          v2CompletedRowsCount: v2Count,
+          rowsVisibleAfterFiltering: visibleCount,
+          v2RowsVisibleAfterFiltering: v2Visible,
+          v2ExcludedReason: v2Count > 0 && v2Visible === 0 ? "ui_filters" : "none"
+        });
+      }
     };
     const resetMaintenanceFilters = ()=>{
       if (searchInput instanceof HTMLInputElement) searchInput.value = "";
@@ -17185,6 +17197,50 @@ function computeCostModel(){
       });
     });
   });
+  const compatibilityRows = typeof window.buildMaintenanceCompatibilityStream === "function"
+    ? (Array.isArray(window.buildMaintenanceCompatibilityStream()) ? window.buildMaintenanceCompatibilityStream() : [])
+    : [];
+  const v2CompatibilityRows = compatibilityRows.filter(row => row && String(row.sourceSystem || "") === "v2" && row.isCompleted === true);
+  v2CompatibilityRows.forEach((row, idx) => {
+    const taskId = String(row.taskId || "").trim();
+    const dateISO = toHistoryDateKey(row.displayDateISO || row.dateISO || row.effectiveDateISO || "");
+    if (!taskId || !dateISO) return;
+    if (maintenanceDataTableRows.some(entry => String(entry.taskId||"")===taskId && String(entry.dateISO||"")===dateISO)) return;
+    const repeatBasis = String(row.repeatBasis || "").trim();
+    const modeTag = String(row.instanceMode || "").toLowerCase() === "repeat" ? "interval" : "asreq";
+    const modeLabel = modeTag === "asreq" ? "As Required" : "Per Interval";
+    const categoryRaw = String(row.categoryId || row.categoryRef || "").trim();
+    const categoryPath = categoryRaw ? (resolveCategoryPath(categoryRaw) || categoryRaw) : "";
+    const categoryId = `${modeTag}:${categoryRaw || "uncategorized"}`;
+    const categoryLabel = categoryPath ? `${modeLabel} • ${categoryPath}` : `${modeLabel} • Uncategorized`;
+    const maintenanceHrs = Number.isFinite(Number(row.loggedHours)) ? Number(row.loggedHours) : 1;
+    const partCostValue = Math.max(0, Number(row.costRef) || 0);
+    const chargeRate = MAINTENANCE_LABOR_RATE_PER_HOUR;
+    const laborCost = maintenanceHrs * chargeRate;
+    const totalCost = laborCost + partCostValue;
+    maintenanceDataTableRows.push({
+      taskId,
+      taskName: String(row.taskName || "Maintenance task").trim() || "Maintenance task",
+      maintenanceHrs,
+      partCost: partCostValue,
+      chargeRate,
+      laborCost,
+      totalCost,
+      dateISO,
+      cuttingHoursSince: null,
+      settingsLink: `#/settings?taskId=${encodeURIComponent(taskId)}`,
+      categoryId,
+      categoryLabel,
+      taskMode: modeTag,
+      sourceSystem: "v2",
+      originalDateISO: toHistoryDateKey(row.originalDateISO || "") || "",
+      note: row.note != null ? String(row.note) : "",
+      repeatBasis,
+      qty: 1,
+      counter: 1
+    });
+  });
+
   taskDateGroups.forEach((dateList, taskId) => {
     const normalizedDates = Array.isArray(dateList) ? dateList.filter(Boolean) : [];
     const uniqueDates = [...new Set(normalizedDates)].sort((a, b) => b.localeCompare(a));
@@ -17552,7 +17608,11 @@ function computeCostModel(){
     categoryId: row.categoryId || "",
     categoryLabel: row.categoryLabel || "",
     qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "1",
-    counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1"
+    counterLabel: Number.isFinite(row.counter) ? `#${row.counter}` : "#1",
+    sourceSystem: row.sourceSystem || "legacy",
+    note: row.note || "",
+    repeatBasis: row.repeatBasis || "",
+    originalDateISO: row.originalDateISO || ""
   }));
   const purchaseDataTableRows = [];
   const flattenCentralSpendRows = (weekEntry)=>{

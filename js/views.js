@@ -367,7 +367,7 @@ function viewDashboard(){
           <label>Add mode<select id="dashTaskExistingAddMode">
             <option value="one_time">One-time reminder</option>
             <option value="repeat">Start repeat tracking</option>
-            <option value="past_log">Log past completion</option>
+            
           </select></label>
           <p class="small muted" id="dashTaskExistingModeHint">One-time creates one scheduled V2 reminder on the selected date.</p>
           <label data-existing-repeat-row>Repeat tracking<select id="dashTaskExistingRepeat">
@@ -1973,7 +1973,9 @@ function viewCosts(model){
           <p class="small muted" data-receipt-week-range>—</p>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-week-table">
-              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th style="width:160px;max-width:160px">Inventory link</th><th>Shipping</th><th>Tax</th><th>Total</th></tr></thead>
+              <thead><tr><th>Date</th>
+                  <th>Original</th>
+                  <th>Note</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th style="width:160px;max-width:160px">Inventory link</th><th>Shipping</th><th>Tax</th><th>Total</th></tr></thead>
               <tbody data-receipt-week-rows></tbody>
               <tfoot><tr><th colspan="8">Subtotal</th><th data-receipt-week-subtotal>$0.00</th></tr></tfoot>
             </table>
@@ -1994,7 +1996,9 @@ function viewCosts(model){
           <p class="small muted" data-receipt-range-label>—</p>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-summary-table">
-              <thead><tr><th>Date</th><th>Purchased</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th><th>Sub total</th></tr></thead>
+              <thead><tr><th>Date</th>
+                  <th>Original</th>
+                  <th>Note</th><th>Purchased</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th><th>Sub total</th></tr></thead>
               <tbody data-receipt-range-rows></tbody>
               <tfoot><tr><th colspan="7">Subtotal</th><th data-receipt-range-subtotal>$0.00</th></tr></tfoot>
             </table>
@@ -2236,12 +2240,16 @@ function viewCosts(model){
                 <tr>
                   <th>Counter</th>
                   <th>Task</th>
+                  <th>Source</th>
                   <th>Maint. hrs</th>
+                  <th>Repeat</th>
                   <th>Part cost</th>
                   <th>Rate/hr</th>
                   <th>Labor cost</th>
                   <th>Total cost</th>
                   <th>Date</th>
+                  <th>Original</th>
+                  <th>Note</th>
                   <th>Days since</th>
                   <th>Cut hrs since</th>
                   <th>Qty</th>
@@ -2253,12 +2261,16 @@ function viewCosts(model){
                   <tr data-maintenance-row data-task-id="${esc(String(row.taskId || ""))}" data-maintenance-date-iso="${esc(String(row.dateISO || ""))}" data-category-id="${esc(String(row.categoryId || ""))}" data-task-key="${esc(String(row.taskName || "").toLowerCase())}" data-task-name="${esc(row.taskName || "")}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
                     <td>${esc(row.counterLabel || "#1")}</td>
                     <td>${esc(row.taskName || "Maintenance task")}</td>
+                    <td>${esc((row.sourceSystem || "legacy").toUpperCase())}</td>
                     <td>${esc(row.maintenanceHrsLabel || "0")}</td>
+                    <td>${esc(row.repeatBasis || "—")}</td>
                     <td>${esc(row.partCostLabel || "$0.00")}</td>
                     <td>${esc(row.chargeRateLabel || "$0.00")}</td>
                     <td>${esc(row.laborCostLabel || "$0.00")}</td>
                     <td>${esc(row.totalCostLabel || "$0.00")}</td>
                     <td>${esc(row.dateISO || "—")}</td>
+                    <td>${esc(row.originalDateISO || "—")}</td>
+                    <td>${esc(row.note || "—")}</td>
                     <td>${esc(row.daysSinceLabel || "—")}</td>
                     <td>${esc(row.cuttingHoursSinceLabel || "—")}</td>
                     <td>${esc(row.qtyLabel || "1")}</td>
@@ -2304,6 +2316,8 @@ function viewCosts(model){
                     ${purchaseDataTable.length ? purchaseDataTable.map(row => `
                       <tr data-spend-row title="Click to open this row in Purchase History" style="cursor:pointer;" data-spend-date-iso="${esc(String(row.dateISO || ""))}" data-spend-week-key="${esc(String(row.weekKey || ""))}" data-spend-row-index="${esc(String(Number.isFinite(Number(row.rowIndex)) ? Number(row.rowIndex) : -1))}" data-spend-search-text="${esc(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
                         <td>${esc(row.dateISO || "—")}</td>
+                    <td>${esc(row.originalDateISO || "—")}</td>
+                    <td>${esc(row.note || "—")}</td>
                         <td>${esc(row.purchased || "—")}</td>
                         <td>${esc(row.weekLabel || "—")}</td>
                         <td>${esc(row.costLabel || "$0.00")}</td>
@@ -2394,7 +2408,10 @@ function viewCosts(model){
                   <div><span class="label">Avg net gain / row</span><span>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
                 </div>
                 <table class="cost-table" style="margin-top:10px">
-                  <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Run cost</th><th>Total cost</th><th>Net gain</th><th>Job link</th></tr></thead>
+                  <thead><tr><th>Task</th>
+                  <th>Source</th><th>Date</th>
+                  <th>Original</th>
+                  <th>Note</th><th>Hours</th><th>Part cost</th><th>Run cost</th><th>Total cost</th><th>Net gain</th><th>Job link</th></tr></thead>
                   <tbody>
                     ${efficiencyRows.map(row => `
                       <tr data-efficiency-row-link data-efficiency-job-id="${esc(row.id || "")}">
@@ -2486,7 +2503,8 @@ function viewCosts(model){
               </div>
               <div class="cost-weekly-table-wrap">
                 <table class="cost-table">
-                  <thead><tr><th>Task</th><th>Type</th><th>Part #</th><th>Cost</th></tr></thead>
+                  <thead><tr><th>Task</th>
+                  <th>Source</th><th>Type</th><th>Part #</th><th>Cost</th></tr></thead>
                   <tbody>${weeklyMaintenanceRows}</tbody>
                 </table>
               </div>
@@ -2594,7 +2612,10 @@ function viewCosts(model){
         <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
         <div class="cost-weekly-table-wrap">
           <table class="cost-table">
-            <thead><tr><th>Task</th><th>Date</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net gain</th><th>Task link</th></tr></thead>
+            <thead><tr><th>Task</th>
+                  <th>Source</th><th>Date</th>
+                  <th>Original</th>
+                  <th>Note</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net gain</th><th>Task link</th></tr></thead>
             <tbody>
               ${efficiencyRows.length ? efficiencyRows.map(row => `
                 <tr data-efficiency-row data-efficiency-id="${esc(row.id || "")}" data-efficiency-date="${esc(row.dateLabel || "")}" data-efficiency-hours="${esc(String(Number(row.hoursValue) || 0))}" data-efficiency-material="${esc(String(Number(row.materialValue || 0)))}">
