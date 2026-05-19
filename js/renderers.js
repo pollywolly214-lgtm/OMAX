@@ -987,7 +987,8 @@ function sanitizeJobFileReferenceForFirestore(fileRef){
     attachedAtISO: String(fileRef.attachedAtISO || fileRef.addedAt || new Date().toISOString()),
     localRootSignature: String(fileRef.localRootSignature || ""),
     localDeviceId: String(fileRef.localDeviceId || ""),
-    ...(fileRef.note ? { note: String(fileRef.note) } : {})
+    ...(fileRef.note ? { note: String(fileRef.note) } : {}),
+    ...(fileRef.rootLocationHint ? { rootLocationHint: String(fileRef.rootLocationHint) } : {})
   };
 }
 
@@ -1539,7 +1540,8 @@ async function filesToAttachments(fileList){
         type: file.type || "",
         size: typeof file.size === "number" ? file.size : null,
         source: "upload_requires_reference",
-        attachedAtISO: new Date().toISOString()
+        attachedAtISO: new Date().toISOString(),
+        rootLocationHint: String(cfg.folderHint || cfg.localRootName || "")
       });
     } catch (err){
       console.error("Unable to read file", err);
@@ -19408,6 +19410,7 @@ function renderJobs(){
   const oneDriveFolderStatus = document.querySelector("[data-onedrive-folder-status]");
   const oneDriveLibraryStatus = document.querySelector("[data-onedrive-library-status]");
   const oneDriveRootStatus = document.querySelector("[data-onedrive-root-status]");
+  const oneDriveRootPathStatus = document.querySelector("[data-onedrive-root-path]");
   const oneDriveDeviceStatus = document.querySelector("[data-onedrive-device-status]");
   const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
   const oneDriveRootPickerBtn = document.getElementById("jobOneDriveRootPickerBtn");
@@ -19432,6 +19435,9 @@ function renderJobs(){
     if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = cfg.localRootSignature ? "Ready" : "Setup required";
     if (oneDriveRootStatus){
       oneDriveRootStatus.textContent = cfg.localRootName || "Not set";
+    }
+    if (oneDriveRootPathStatus){
+      oneDriveRootPathStatus.textContent = cfg.folderHint || cfg.localRootName || "Not set";
     }
     if (oneDriveDeviceStatus){
       oneDriveDeviceStatus.textContent = getLocalDeviceId() ? `${getLocalDeviceNumber()} (${getLocalDeviceId()})` : "Unavailable";
@@ -19485,9 +19491,13 @@ function renderJobs(){
     const rootHandle = await readLocalRootHandle();
     if (!rootHandle){
       pendingAttachJobId = String(targetJobId || "");
-      toast("Root folder is not set up yet. Set up WJ Cuts Folder first, then attach the file.");
-      openOneDriveModal();
-      return false;
+      toast("Root folder is not set up yet. Select your WJ Cuts root folder now.");
+      const configured = await chooseLocalOneDriveRoot();
+      if (!configured){
+        openOneDriveModal();
+        return false;
+      }
+      return attachFromLocalOneDriveRoot(targetJobId);
     }
 
     try {
@@ -19543,7 +19553,8 @@ function renderJobs(){
         relativePath: relPath,
         localRootSignature: signature,
         localDeviceId: getLocalDeviceId(),
-        attachedAtISO: new Date().toISOString()
+        attachedAtISO: new Date().toISOString(),
+        rootLocationHint: String(cfg.folderHint || cfg.localRootName || "")
       });
       if (!reference) return false;
       const targetId = String(targetJobId || "");
@@ -20435,6 +20446,7 @@ function renderJobs(){
       if (pathBtn instanceof HTMLButtonElement){
         pathBtn.hidden = !(mode === "message" && expectedPath);
         pathBtn.dataset.previewExpectedPath = expectedPath;
+        pathBtn.dataset.previewRootLocation = option.getAttribute("data-preview-root-location") || "";
       }
       return;
     }
@@ -20489,8 +20501,10 @@ function renderJobs(){
       e.preventDefault();
       const expected = previewPathBtn.getAttribute("data-preview-expected-path") || "";
       if (expected){
-        const msg = `Expected file path:
-${expected}`;
+        const rootLocation = previewPathBtn.getAttribute("data-preview-root-location") || "";
+        const msg = rootLocation
+          ? `Root folder used: ${rootLocation}\nExpected file path:\n${expected}`
+          : `Expected file path:\n${expected}`;
         if (navigator?.clipboard?.writeText){ navigator.clipboard.writeText(expected).catch(()=>{}); }
         if (window.alert) window.alert(msg); else toast(msg);
       }
@@ -20544,6 +20558,7 @@ ${expected}`;
     if (pathBtn instanceof HTMLButtonElement){
       pathBtn.hidden = !(mode === "message" && expectedPath);
       pathBtn.dataset.previewExpectedPath = expectedPath;
+        pathBtn.dataset.previewRootLocation = option.getAttribute("data-preview-root-location") || "";
     }
   });
 
@@ -20616,8 +20631,10 @@ ${expected}`;
       e.preventDefault();
       const expected = previewPathBtn.getAttribute("data-preview-expected-path") || "";
       if (expected){
-        const msg = `Expected file path:
-${expected}`;
+        const rootLocation = previewPathBtn.getAttribute("data-preview-root-location") || "";
+        const msg = rootLocation
+          ? `Root folder used: ${rootLocation}\nExpected file path:\n${expected}`
+          : `Expected file path:\n${expected}`;
         if (navigator?.clipboard?.writeText){ navigator.clipboard.writeText(expected).catch(()=>{}); }
         if (window.alert) window.alert(msg); else toast(msg);
       }

@@ -2910,42 +2910,43 @@ function viewJobs(){
     const previewUrl = String(file?.previewUrl || "");
     const ext = extractFileExtension(name);
     const source = String(file?.source || "");
+    const rootLocation = String(file?.rootLocationHint || "");
     const savedPreview = file && typeof file === "object" ? file.preview : null;
     if (savedPreview && typeof savedPreview === "object"){
       const mode = savedPreview.mode === "image" ? "image" : "message";
       const content = String(savedPreview.content || "").trim();
-      if (content) return { name, href, mode, content, expectedPath };
+      if (content) return { name, href, mode, content, expectedPath, rootLocation };
     }
-    if (/^data:image\//i.test(previewUrl) || /^https?:\/\//i.test(previewUrl)) return { name, href: href || previewUrl, mode: "image", content: previewUrl, expectedPath };
+    if (/^data:image\//i.test(previewUrl) || /^https?:\/\//i.test(previewUrl)) return { name, href: href || previewUrl, mode: "image", content: previewUrl, expectedPath, rootLocation };
     if (!href){
-      if (source === "wj_cuts_reference") return { name, href: "", mode: "message", content: "Preview unavailable: this file is stored as a WJ Cuts reference path only. Select/verify your WJ Cuts root folder on this device, then reopen this job.", expectedPath };
-      if (source === "onedrive") return { name, href: "", mode: "message", content: "Preview unavailable: OneDrive link metadata is incomplete. Relink this file from OneDrive so preview content can load.", expectedPath };
-      if ([".dxf", ".ord", ".omx"].includes(ext)) return { name, href: "", mode: "message", content: "Preview unavailable: no file content URL is saved for this CAD file. Re-attach from Reference Folder or add a direct OneDrive URL.", expectedPath };
-      return { name, href: "", mode: "message", content: "Preview unavailable: no file content was saved for this attachment.", expectedPath };
+      if (source === "wj_cuts_reference") return { name, href: "", mode: "message", content: "Preview unavailable: this file is stored as a WJ Cuts reference path only. Select/verify your WJ Cuts root folder on this device, then reopen this job.", expectedPath, rootLocation };
+      if (source === "onedrive") return { name, href: "", mode: "message", content: "Preview unavailable: OneDrive link metadata is incomplete. Relink this file from OneDrive so preview content can load.", expectedPath, rootLocation };
+      if ([".dxf", ".ord", ".omx"].includes(ext)) return { name, href: "", mode: "message", content: "Preview unavailable: no file content URL is saved for this CAD file. Re-attach from Reference Folder or add a direct OneDrive URL.", expectedPath, rootLocation };
+      return { name, href: "", mode: "message", content: "Preview unavailable: no file content was saved for this attachment.", expectedPath, rootLocation };
     }
-    if (ext === ".svg") return { name, href, mode: "image", content: href, expectedPath };
-    if (/^data:image\//i.test(href)) return { name, href, mode: "image", content: href, expectedPath };
+    if (ext === ".svg") return { name, href, mode: "image", content: href, expectedPath, rootLocation };
+    if (/^data:image\//i.test(href)) return { name, href, mode: "image", content: href, expectedPath, rootLocation };
     if (/^https?:\/\//i.test(href) && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"].includes(ext)){
-      return { name, href, mode: "image", content: href, expectedPath };
+      return { name, href, mode: "image", content: href, expectedPath, rootLocation };
     }
     if ([".dxf", ".ord", ".omx"].includes(ext)) {
       const text = decodeDataUrlText(href);
       const cadSvg = text ? renderCadToSvgDataUrl(text) : "";
       return cadSvg
-        ? { name, href, mode: "image", content: cadSvg, expectedPath }
-        : { name, href, mode: "message", content: "2D preview unavailable. Add a OneDrive direct file URL or re-upload to refresh preview.", expectedPath };
+        ? { name, href, mode: "image", content: cadSvg, expectedPath, rootLocation }
+        : { name, href, mode: "message", content: "2D preview unavailable. Add a OneDrive direct file URL or re-upload to refresh preview.", expectedPath, rootLocation };
     }
-    return { name, href, mode: "message", content: "Preview unavailable for this file type.", expectedPath };
+    return { name, href, mode: "message", content: "Preview unavailable for this file type.", expectedPath, rootLocation };
   };
   const buildFileCellMarkup = (jobId, files)=>{
     const previews = (Array.isArray(files) ? files : []).map(filePreviewModel);
     if (!previews.length) return '<div class="job-file-preview-empty small muted">No files attached</div>';
-    const first = previews[0] || { name: "Attached file", mode: "message", content: "Preview unavailable", href: "", expectedPath: "" };
+    const first = previews[0] || { name: "Attached file", mode: "message", content: "Preview unavailable", href: "", expectedPath: "", rootLocation: "" };
     const selectId = `jobFileSelect_${esc(jobId)}`;
     return `
       <div class="job-file-preview" data-file-preview data-file-preview-job="${esc(jobId)}">
         ${previews.length > 1
-          ? `<label class="sr-only" for="${selectId}">Choose file preview</label><select id="${selectId}" class="job-file-preview-select" data-file-preview-select="${esc(jobId)}">${previews.map((f, idx)=>`<option value="${idx}" data-preview-name="${esc(f.name)}" data-preview-mode="${esc(f.mode)}" data-preview-content="${esc(f.content)}" data-preview-href="${esc(f.href || "")}" data-preview-expected-path="${esc(f.expectedPath || "")}">${esc(f.name)}</option>`).join("")}</select>`
+          ? `<label class="sr-only" for="${selectId}">Choose file preview</label><select id="${selectId}" class="job-file-preview-select" data-file-preview-select="${esc(jobId)}">${previews.map((f, idx)=>`<option value="${idx}" data-preview-name="${esc(f.name)}" data-preview-mode="${esc(f.mode)}" data-preview-content="${esc(f.content)}" data-preview-href="${esc(f.href || "")}" data-preview-expected-path="${esc(f.expectedPath || "")}" data-preview-root-location="${esc(f.rootLocation || "")}">${esc(f.name)}</option>`).join("")}</select>`
           : ""}
         <div class="job-file-preview-panes" data-file-preview-panes>
           <div class="job-file-preview-pane" data-file-preview-pane>
@@ -2953,7 +2954,7 @@ function viewJobs(){
             <div class="job-file-preview-frame">
               <img src="${first.mode === "image" ? esc(first.content) : ""}" alt="Preview of ${esc(first.name)}" class="job-file-preview-image" data-preview-image ${first.mode === "image" ? "" : "hidden"}>
               <span class="job-file-preview-message small muted" data-preview-message ${first.mode === "message" ? "" : "hidden"}>${first.mode === "message" ? esc(first.content) : ""}</span>
-              <button type="button" class="small link" data-preview-path-btn data-preview-expected-path="${esc(first.expectedPath || "")}" ${first.mode === "message" && first.expectedPath ? "" : "hidden"}>Show expected path</button>
+              <button type="button" class="small link" data-preview-path-btn data-preview-expected-path="${esc(first.expectedPath || "")}" data-preview-root-location="${esc(first.rootLocation || "")}" ${first.mode === "message" && first.expectedPath ? "" : "hidden"}>Show expected path</button>
             </div>
             <a class="job-file-preview-open small" data-preview-open href="${esc(first.href || "")}" target="_blank" rel="noopener" ${first.href ? "" : "hidden"}>Open file</a>
           </div>
@@ -4648,6 +4649,7 @@ function viewJobs(){
               <div>Root setup: <span data-onedrive-connection-status>Not set</span></div>
               <div>Folder status: <span data-onedrive-folder-status>Not ready</span></div>
               <div>This computer root: <span data-onedrive-root-status>Not set</span></div>
+              <div>Root path hint: <span data-onedrive-root-path>Not set</span></div>
               <div>This computer ID: <span data-onedrive-device-status>Not set</span></div>
               <div>Indexed files: <span data-onedrive-library-status>0</span></div>
             </div>
