@@ -17232,7 +17232,7 @@ function computeCostModel(){
     const isCompleted = row.isCompleted === true && lifecycleStatus === "completed";
     const invalidReason = !isCompleted ? "not_completed" : (!taskId ? "missing_task_id" : (!instanceId ? "missing_instance_id" : (!rootOccurrenceId ? "missing_root_occurrence_id" : (!dateISO ? "missing_display_date" : (["removed","skipped","scheduled"].includes(lifecycleStatus) ? `lifecycle_${lifecycleStatus}` : "")))));
     if (invalidReason){ if (window.DEBUG_MODE){ console.debug('[maintenance-v2-row-skip]', { idx, invalidReason, taskId, instanceId, rootOccurrenceId, lifecycleStatus, row }); } return; }
-    if (maintenanceDataTableRows.some(entry => String(entry.rootOccurrenceId||"")===rootOccurrenceId)) return;
+    if (maintenanceDataTableRows.some(entry => String(entry.sourceSystem || "")==="v2" && String(entry.rootOccurrenceId||"")===rootOccurrenceId)) return;
     const repeatBasis = String(row.repeatBasis || "").trim();
     const modeTag = String(row.instanceMode || "").toLowerCase() === "repeat" ? "interval" : "asreq";
     const modeLabel = modeTag === "asreq" ? "As Required" : "Per Interval";

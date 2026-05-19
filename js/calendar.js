@@ -440,7 +440,7 @@ function projectV2RepeatDates(instance, maxCount = 3){
     const rollingCount = 5;
     const rollingDaysCap = 90;
     const blockedByCountLimit = endCount != null && completedCountForInstance >= endCount;
-    const requestedCount = endCount != null ? Math.max(0, endCount - completedCountForInstance) : rollingCount;
+    const requestedCount = endCount != null ? endCount : rollingCount;
     const out = [];
     if (!blockedByCountLimit){
       const today = new Date();
@@ -513,7 +513,7 @@ function projectV2RepeatDates(instance, maxCount = 3){
     return out;
   }
   const every = Math.max(1, Number(rule.every) || 1);
-  const targetCount = endCount != null ? Math.max(0, endCount - completedCountForInstance) : maxCount;
+  const targetCount = endCount != null ? endCount : maxCount;
   if (targetCount <= 0) return [];
   const startISO = normalizeDateKey(instance.startDateISO || rule.startISO || null);
   const start = startISO ? parseDateLocal(startISO) : null;
@@ -3532,6 +3532,9 @@ function renderCalendar(){
         const baseTaskId = ev.taskId || ev.id;
         if (ev.type === "v2task" && ev.occurrenceId){
           chip.dataset.calV2OneTime = String(ev.occurrenceId);
+          chip.dataset.sourceSystem = "v2";
+          chip.dataset.v2RootOccurrenceId = String(ev.occurrenceId || "");
+          chip.dataset.v2InstanceId = String(ev.instanceId || "");
           chip.addEventListener("click", (event)=>{
             event.preventDefault();
             event.stopPropagation();
