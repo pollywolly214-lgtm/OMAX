@@ -237,6 +237,19 @@ function hideBubbleSoon(){
   }, 180);
 }
 
+function ensureBubble(){
+  let bubble = document.getElementById("bubble");
+  if (bubble) return bubble;
+  bubble = document.createElement("div");
+  bubble.id = "bubble";
+  bubble.className = "calendar-bubble";
+  bubble.setAttribute("role", "dialog");
+  bubble.setAttribute("aria-live", "polite");
+  bubble.tabIndex = -1;
+  document.body.appendChild(bubble);
+  return bubble;
+}
+
 function showV2OneTimeBubble(occurrenceId, anchorEl){
   const lookup = (typeof window !== "undefined" && window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object")
     ? window.__calendarV2OneTimeLookup

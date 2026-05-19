@@ -20481,7 +20481,10 @@ function renderJobs(){
       e.target.value = "";
       if (!attachments.length) return;
       j.files = Array.isArray(j.files) ? j.files : [];
-      toast("Use Attach from Reference Folder so this file can be saved as a WJ Cuts relative path.");
+      j.files.push(...attachments);
+      saveCloudDebounced();
+      toast("Files added. For durable cross-device links, use Attach from Reference Folder.");
+      renderJobs();
     }
   });
 
@@ -20526,6 +20529,75 @@ function renderJobs(){
       closeActionMenu();
       closeHistoryActionMenu();
       content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
+      return;
+    }
+
+    const linkJobFile = e.target.closest("[data-link-job-file]");
+    if (linkJobFile){
+      const id = linkJobFile.getAttribute("data-link-job-file");
+      const idStr = String(id || "");
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
+      if (!j) return;
+      try {
+        const picked = await window.oneDrivePicker.openOneDriveDxfPicker();
+        if (!picked) return;
+        j.files = Array.isArray(j.files) ? j.files : [];
+        j.files.push({
+          id: genId(picked.fileName || "job_file"),
+          name: picked.fileName || "Linked file",
+          type: "",
+          size: null,
+          source: "onedrive",
+          driveId: picked.driveId || "",
+          itemId: picked.itemId || "",
+          eTag: picked.eTag || "",
+          lastModifiedDateTime: picked.lastModifiedDateTime || "",
+          webUrl: picked.webUrl || "",
+          url: picked.webUrl || "",
+          addedAt: new Date().toISOString()
+        });
+        saveCloudDebounced();
+        toast("OneDrive DXF linked");
+        renderJobs();
+      } catch (err){
+        toast(err?.message || "Unable to link OneDrive DXF.");
+      }
+      return;
+    }
+
+    const editFileLink = e.target.closest("[data-edit-file-link]");
+    if (editFileLink){
+      const id = editFileLink.getAttribute("data-edit-file-link");
+      const idx = Number(editFileLink.getAttribute("data-file-index"));
+      const idStr = String(id || "");
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
+      const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null;
+      if (!file) return;
+      const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || "");
+      if (url == null) return;
+      file.url = url;
+      file.source = "onedrive";
+      saveCloudDebounced();
+      toast(url ? "File link updated" : "File link cleared");
+      renderJobs();
+      return;
+    }
+
+    const removeFile = e.target.closest("[data-remove-file]");
+    if (removeFile){
+      const id = removeFile.getAttribute("data-remove-file");
+      const idx = Number(removeFile.getAttribute("data-file-index"));
+      const idStr = String(id || "");
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
+      if (j && Array.isArray(j.files) && idx >= 0 && idx < j.files.length){
+        j.files.splice(idx, 1);
+        saveCloudDebounced();
+        toast("File removed");
+        renderJobs();
+      }
       return;
     }
 
