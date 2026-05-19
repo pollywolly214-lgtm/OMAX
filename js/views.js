@@ -2906,6 +2906,7 @@ function viewJobs(){
     const href = String(file?.dataUrl || file?.url || "");
     const previewUrl = String(file?.previewUrl || "");
     const ext = extractFileExtension(name);
+    const source = String(file?.source || "");
     const savedPreview = file && typeof file === "object" ? file.preview : null;
     if (savedPreview && typeof savedPreview === "object"){
       const mode = savedPreview.mode === "image" ? "image" : "message";
@@ -2913,7 +2914,12 @@ function viewJobs(){
       if (content) return { name, href, mode, content };
     }
     if (/^data:image\//i.test(previewUrl) || /^https?:\/\//i.test(previewUrl)) return { name, href: href || previewUrl, mode: "image", content: previewUrl };
-    if (!href) return { name, href: "", mode: "message", content: "Preview unavailable" };
+    if (!href){
+      if (source === "wj_cuts_reference") return { name, href: "", mode: "message", content: "Preview unavailable: this file is stored as a WJ Cuts reference path only. Select/verify your WJ Cuts root folder on this device, then reopen this job." };
+      if (source === "onedrive") return { name, href: "", mode: "message", content: "Preview unavailable: OneDrive link metadata is incomplete. Relink this file from OneDrive so preview content can load." };
+      if ([".dxf", ".ord", ".omx"].includes(ext)) return { name, href: "", mode: "message", content: "Preview unavailable: no file content URL is saved for this CAD file. Re-attach from Reference Folder or add a direct OneDrive URL." };
+      return { name, href: "", mode: "message", content: "Preview unavailable: no file content was saved for this attachment." };
+    }
     if (ext === ".svg") return { name, href, mode: "image", content: href };
     if (/^data:image\//i.test(href)) return { name, href, mode: "image", content: href };
     if (/^https?:\/\//i.test(href) && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"].includes(ext)){
