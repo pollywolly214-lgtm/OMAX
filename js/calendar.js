@@ -413,8 +413,17 @@ function projectV2RepeatDates(instance, maxCount = 3){
   const endDateISO = endType === "on_date" ? normalizeDateKey(rule.endDateISO || null) : null;
   const instanceId = instance && instance.id != null ? String(instance.id) : "";
   const eventsForInstance = (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [])
-    .filter(entry => entry && String(entry.instanceId || "") === instanceId)
-    .sort((a,b)=> String(a.recordedAtISO || "").localeCompare(String(b.recordedAtISO || "")));
+    .map((entry, idx) => ({ entry, idx }))
+    .filter(({ entry }) => entry && String(entry.instanceId || "") === instanceId)
+    .sort((a,b)=>{
+      const at = Date.parse(String(a.entry?.recordedAtISO || ""));
+      const bt = Date.parse(String(b.entry?.recordedAtISO || ""));
+      const aTs = Number.isFinite(at) ? at : 0;
+      const bTs = Number.isFinite(bt) ? bt : 0;
+      if (aTs !== bTs) return aTs - bTs;
+      return b.idx - a.idx;
+    })
+    .map(({ entry }) => entry);
   const latestByRoot = new Map();
   eventsForInstance.forEach(entry => {
     const root = String(entry.rootOccurrenceId || "");
@@ -566,8 +575,17 @@ function resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, fallbackDateISO 
   const fallback = normalizeDateKey(fallbackDateISO || key.split(":").slice(-1)[0] || null);
   const events = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
   const related = events
-    .filter(entry => entry && typeof entry === "object" && String(entry.rootOccurrenceId || "") === key)
-    .sort((a,b)=> String(a.recordedAtISO || "").localeCompare(String(b.recordedAtISO || "")));
+    .map((entry, idx) => ({ entry, idx }))
+    .filter(({ entry }) => entry && typeof entry === "object" && String(entry.rootOccurrenceId || "") === key)
+    .sort((a,b)=>{
+      const at = Date.parse(String(a.entry?.recordedAtISO || ""));
+      const bt = Date.parse(String(b.entry?.recordedAtISO || ""));
+      const aTs = Number.isFinite(at) ? at : 0;
+      const bTs = Number.isFinite(bt) ? bt : 0;
+      if (aTs !== bTs) return aTs - bTs;
+      return b.idx - a.idx;
+    })
+    .map(({ entry }) => entry);
   let lifecycleStatus = "scheduled";
   let note = "";
   let hours = null;
@@ -587,7 +605,7 @@ function resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, fallbackDateISO 
       hours = raw == null || raw === "" ? null : (Number.isFinite(Number(raw)) ? Number(raw) : hours);
     }
   });
-  return { key, lifecycleStatus, note, hours, displayDateISO, originalDateISO: fallback, isMoved: displayDateISO !== fallback };
+  return { key, lifecycleStatus, note, hours, displayDateISO, originalDateISO: fallback, isMoved: displayDateISO !== fallback, relatedEventsCount: related.length };
 }
 
 function resolveV2RepeatOccurrenceState(instanceId, dateISO){
