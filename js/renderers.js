@@ -17228,14 +17228,23 @@ function computeCostModel(){
     const dateISO = toHistoryDateKey(row.displayDateISO || row.dateISO || row.effectiveDateISO || "");
     const isCompleted = row.isCompleted === true && lifecycleStatus === "completed";
     let invalidReason = !isCompleted ? "not_completed" : (!taskId ? "missing_task_id" : (!instanceId ? "missing_instance_id" : (!rootOccurrenceId ? "missing_root_occurrence_id" : (!dateISO ? "missing_display_date" : (["removed","skipped","scheduled"].includes(lifecycleStatus) ? `lifecycle_${lifecycleStatus}` : "")))));
+    let resolvedStatus = "";
+    let resolvedDate = "";
     if (!invalidReason && typeof window.resolveV2RepeatOccurrenceStateByRoot === "function" && rootOccurrenceId.startsWith("repeat:")){
       const resolved = window.resolveV2RepeatOccurrenceStateByRoot(rootOccurrenceId, dateISO);
-      const resolvedStatus = String(resolved?.lifecycleStatus || "").toLowerCase();
-      const resolvedDate = toHistoryDateKey(resolved?.displayDateISO || resolved?.dateISO || "");
+      resolvedStatus = String(resolved?.lifecycleStatus || "").toLowerCase();
+      resolvedDate = toHistoryDateKey(resolved?.displayDateISO || resolved?.dateISO || "");
       if (resolvedStatus !== "completed") invalidReason = `resolver_status_${resolvedStatus||"unknown"}`;
       else if (!resolvedDate || resolvedDate !== dateISO) invalidReason = "resolver_date_mismatch";
     }
-    if (invalidReason){ if (window.DEBUG_MODE){ console.debug('[maintenance-v2-row-skip]', { idx, invalidReason, taskId, instanceId, rootOccurrenceId, lifecycleStatus, row }); } return; }
+    if (!invalidReason && typeof window.resolveV2OneTimeOccurrenceState === "function" && !rootOccurrenceId.startsWith("repeat:")){
+      const resolved = window.resolveV2OneTimeOccurrenceState(rootOccurrenceId, { id: rootOccurrenceId, effectiveDateISO: dateISO });
+      resolvedStatus = String(resolved?.status || "").toLowerCase();
+      resolvedDate = toHistoryDateKey(resolved?.displayDateISO || dateISO);
+      if (resolvedStatus && resolvedStatus !== "completed") invalidReason = `resolver_status_${resolvedStatus}`;
+      else if (!resolvedDate || resolvedDate !== dateISO) invalidReason = "resolver_date_mismatch";
+    }
+    if (invalidReason){ if (window.DEBUG_MODE){ console.debug('[maintenance-v2-row-skip]', { idx, invalidReason, taskId, instanceId, rootOccurrenceId, lifecycleStatus, resolvedStatus, resolvedDate, row }); } return; }
     if (maintenanceDataTableRows.some(entry => String(entry.sourceSystem || "")==="v2" && String(entry.rootOccurrenceId||"")===rootOccurrenceId)) return;
     const repeatBasis = String(row.repeatBasis || "").trim();
     const modeTag = String(row.instanceMode || "").toLowerCase() === "repeat" ? "interval" : "asreq";
@@ -17249,6 +17258,23 @@ function computeCostModel(){
     const chargeRate = MAINTENANCE_LABOR_RATE_PER_HOUR;
     const laborCost = maintenanceHrs * chargeRate;
     const totalCost = laborCost + partCostValue;
+
+    if (window.DEBUG_MODE && String(row.taskName||"").toLowerCase()==="abrasive tubing inspection" && dateISO==="2026-06-09"){
+      console.debug("[maintenance-v2-trace-abrasive-2026-06-09]", {
+        taskName: row.taskName,
+        taskId,
+        instanceId,
+        rootOccurrenceId,
+        displayDateISO: dateISO,
+        originalDateISO: row.originalDateISO || "",
+        lifecycleStatus,
+        isCompleted,
+        repeatBasis,
+        provenance: row.provenance || null,
+        resolverStatus,
+        resolverDate
+      });
+    }
     maintenanceDataTableRows.push({
       taskId,
       taskName: String(row.taskName || "Maintenance task").trim() || "Maintenance task",
@@ -17267,6 +17293,7 @@ function computeCostModel(){
       originalDateISO: toHistoryDateKey(row.originalDateISO || "") || "",
       note: row.note != null ? String(row.note) : "",
       repeatBasis,
+      provenance: row.provenance || null,
       qty: 1,
       counter: 1,
       lifecycleStatus,
@@ -17651,7 +17678,8 @@ function computeCostModel(){
     displayDateISO: row.displayDateISO || row.dateISO || "",
     lifecycleStatus: row.lifecycleStatus || row.status || "",
     rootOccurrenceId: row.rootOccurrenceId || "",
-    instanceId: row.instanceId || ""
+    instanceId: row.instanceId || "",
+    provenance: row.provenance || null
   }));
   if (window.DEBUG_MODE){
     const emittedV2 = compatibilityRows.filter(row => row && String(row.sourceSystem||"")==="v2" && row.isCompleted===true && String(row.lifecycleStatus||"").toLowerCase()==="completed");
