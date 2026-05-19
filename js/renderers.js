@@ -8290,13 +8290,33 @@ function ensureMaintenanceTaskModalAPI(){
     lastRow.hidden = mode !== "interval";
     conditionRow.hidden = mode === "interval";
   };
-  const close = ()=>{
+  const syncModalLock = ()=>{
+    const hasVisibleTaskModal = (() => {
+      const taskModal = document.getElementById("taskModal");
+      return !!(taskModal instanceof HTMLElement && !taskModal.hidden);
+    })();
+    const hasVisibleReceiptModal = (() => {
+      const receiptModal = document.getElementById("costReceiptModal");
+      return !!(receiptModal instanceof HTMLElement && !receiptModal.hidden);
+    })();
+    if (hasVisibleTaskModal || hasVisibleReceiptModal) document.body?.classList.add("modal-open");
+    else document.body?.classList.remove("modal-open");
+  };
+  const close = ({ trigger = "closed" } = {})=>{
     const modal = ensureModalDom();
     if (!(modal instanceof HTMLElement)) return;
+    const session = window.__maintenanceTaskModalSession && typeof window.__maintenanceTaskModalSession === "object"
+      ? window.__maintenanceTaskModalSession
+      : null;
     modal.hidden = true;
     modal.classList.remove("is-visible");
-    const anyModalVisible = !!document.querySelector('.modal-backdrop:not([hidden]), .cost-receipt-modal:not([hidden])');
-    if (!anyModalVisible) document.body?.classList.remove("modal-open");
+    modal.style.zIndex = "";
+    syncModalLock();
+    const callback = trigger === "saved" ? session?.onSaved : session?.onClosed;
+    window.__maintenanceTaskModalSession = null;
+    if (typeof callback === "function"){
+      try { callback(session?.savedTask || null); } catch (err){ console.warn("Maintenance task modal callback failed", err); }
+    }
   };
   const open = (options={})=>{
     const modal = ensureModalDom();
@@ -8305,7 +8325,7 @@ function ensureMaintenanceTaskModalAPI(){
     const form = modal.querySelector("#taskForm");
     form?.reset();
     modal.hidden = false; modal.classList.add("is-visible"); modal.style.zIndex = "10040";
-    document.body?.classList.add("modal-open");
+    syncModalLock();
     syncMode();
     return true;
   };
@@ -8352,16 +8372,24 @@ function ensureMaintenanceTaskModalAPI(){
       }
       try { if (typeof saveTasks === "function") saveTasks(); } catch(_){}
       try { if (typeof saveCloudDebounced === "function") saveCloudDebounced(); } catch(_){}
-      const cb = window.__maintenanceTaskModalSession?.onSaved;
-      close();
-      if (typeof cb === "function") cb(createdTask);
+      const session = window.__maintenanceTaskModalSession && typeof window.__maintenanceTaskModalSession === "object"
+        ? window.__maintenanceTaskModalSession
+        : null;
+      if (session) session.savedTask = createdTask;
+      if (createdTask && typeof window.__promptAddInventoryForTask === "function"){
+        setTimeout(()=>{ try { window.__promptAddInventoryForTask(createdTask); } catch (err){ console.warn("Inventory link prompt failed", err); } }, 60);
+      }
+      close({ trigger: "saved" });
     }, true);
   }
-  document.addEventListener("click", (event)=>{
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    if (!target) return;
-    if (target.id === "cancelTaskModal" || target.id === "closeTaskModal"){ close(); const cb = window.__maintenanceTaskModalSession?.onClosed; if (typeof cb === "function") cb(); return; }
-  });
+  if (!window.__maintenanceTaskModalClickBound){
+    window.__maintenanceTaskModalClickBound = true;
+    document.addEventListener("click", (event)=>{
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target) return;
+      if (target.id === "cancelTaskModal" || target.id === "closeTaskModal"){ close({ trigger: "closed" }); return; }
+    });
+  }
 }
 
 function renderSettings(){
@@ -12998,12 +13026,17 @@ const appendEmptyRow = (focusFirst = false)=>{
             const opened = opener({
               source: "cost-analysis",
               onSaved: ()=>{
-                rebuildPurchaseTemplates();
-                renderWeekRows();
-                renderRangeTable();
-                renderCentralSpendRows();
-                const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
-                if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
+                const refreshReceiptSuggestions = ()=>{
+                  rebuildPurchaseTemplates();
+                  renderWeekRows();
+                  renderRangeTable();
+                  renderCentralSpendRows();
+                  const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
+                  if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
+                };
+                refreshReceiptSuggestions();
+                setTimeout(refreshReceiptSuggestions, 250);
+                setTimeout(refreshReceiptSuggestions, 900);
               },
               onClosed: ()=>{
                 const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
@@ -13307,6 +13340,10 @@ const appendEmptyRow = (focusFirst = false)=>{
         modal.hidden = true;
         modal.setAttribute("aria-hidden", "true");
         document.body.classList.remove("cost-receipt-modal-open");
+        const taskModalEl = document.getElementById("taskModal");
+        if (!(taskModalEl instanceof HTMLElement) || taskModalEl.hidden){
+          document.body.classList.remove("modal-open");
+        }
         window.costPurchaseHistoryModalOpen = false;
       };
       if (typeof window !== "undefined"){
