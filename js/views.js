@@ -4374,7 +4374,7 @@ function viewJobs(){
             </div>
               <label class="job-edit-note">Notes<textarea data-j="notes" data-id="${j.id}" rows="3" placeholder="Notes...">${j.notes||""}</textarea></label>
               <div class="job-edit-files">
-                <div class="job-edit-files-actions"><button type="button" data-upload-job="${j.id}">Add Files</button><button type="button" data-link-job-file="${j.id}">Link OneDrive URL</button></div>
+                <div class="job-edit-files-actions"><button type="button" data-job-file-add="${j.id}">Attach from Reference Folder</button><button type="button" data-upload-job="${j.id}">Add Files</button><button type="button" data-link-job-file="${j.id}">Link OneDrive URL</button></div>
                 <input type="file" data-job-file-input="${j.id}" multiple style="display:none">
                 <ul class="job-file-list">
                   ${jobFiles.length ? jobFiles.map((f, idx)=>{
