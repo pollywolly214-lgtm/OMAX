@@ -2904,6 +2904,9 @@ function viewJobs(){
   const filePreviewModel = (file)=>{
     const name = String(file?.name || "Attached file");
     const href = String(file?.dataUrl || file?.url || "");
+    const expectedPath = file?.source === "wj_cuts_reference" && file?.relativePath
+      ? `${String(file?.rootPathStart || "WJ Cuts")}\\${String(file.relativePath || "").replace(/\//g, "\\")}`
+      : "";
     const previewUrl = String(file?.previewUrl || "");
     const ext = extractFileExtension(name);
     const source = String(file?.source || "");
@@ -2911,38 +2914,38 @@ function viewJobs(){
     if (savedPreview && typeof savedPreview === "object"){
       const mode = savedPreview.mode === "image" ? "image" : "message";
       const content = String(savedPreview.content || "").trim();
-      if (content) return { name, href, mode, content };
+      if (content) return { name, href, mode, content, expectedPath };
     }
-    if (/^data:image\//i.test(previewUrl) || /^https?:\/\//i.test(previewUrl)) return { name, href: href || previewUrl, mode: "image", content: previewUrl };
+    if (/^data:image\//i.test(previewUrl) || /^https?:\/\//i.test(previewUrl)) return { name, href: href || previewUrl, mode: "image", content: previewUrl, expectedPath };
     if (!href){
-      if (source === "wj_cuts_reference") return { name, href: "", mode: "message", content: "Preview unavailable: this file is stored as a WJ Cuts reference path only. Select/verify your WJ Cuts root folder on this device, then reopen this job." };
-      if (source === "onedrive") return { name, href: "", mode: "message", content: "Preview unavailable: OneDrive link metadata is incomplete. Relink this file from OneDrive so preview content can load." };
-      if ([".dxf", ".ord", ".omx"].includes(ext)) return { name, href: "", mode: "message", content: "Preview unavailable: no file content URL is saved for this CAD file. Re-attach from Reference Folder or add a direct OneDrive URL." };
-      return { name, href: "", mode: "message", content: "Preview unavailable: no file content was saved for this attachment." };
+      if (source === "wj_cuts_reference") return { name, href: "", mode: "message", content: "Preview unavailable: this file is stored as a WJ Cuts reference path only. Select/verify your WJ Cuts root folder on this device, then reopen this job.", expectedPath };
+      if (source === "onedrive") return { name, href: "", mode: "message", content: "Preview unavailable: OneDrive link metadata is incomplete. Relink this file from OneDrive so preview content can load.", expectedPath };
+      if ([".dxf", ".ord", ".omx"].includes(ext)) return { name, href: "", mode: "message", content: "Preview unavailable: no file content URL is saved for this CAD file. Re-attach from Reference Folder or add a direct OneDrive URL.", expectedPath };
+      return { name, href: "", mode: "message", content: "Preview unavailable: no file content was saved for this attachment.", expectedPath };
     }
-    if (ext === ".svg") return { name, href, mode: "image", content: href };
-    if (/^data:image\//i.test(href)) return { name, href, mode: "image", content: href };
+    if (ext === ".svg") return { name, href, mode: "image", content: href, expectedPath };
+    if (/^data:image\//i.test(href)) return { name, href, mode: "image", content: href, expectedPath };
     if (/^https?:\/\//i.test(href) && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"].includes(ext)){
-      return { name, href, mode: "image", content: href };
+      return { name, href, mode: "image", content: href, expectedPath };
     }
     if ([".dxf", ".ord", ".omx"].includes(ext)) {
       const text = decodeDataUrlText(href);
       const cadSvg = text ? renderCadToSvgDataUrl(text) : "";
       return cadSvg
-        ? { name, href, mode: "image", content: cadSvg }
-        : { name, href, mode: "message", content: "2D preview unavailable. Add a OneDrive direct file URL or re-upload to refresh preview." };
+        ? { name, href, mode: "image", content: cadSvg, expectedPath }
+        : { name, href, mode: "message", content: "2D preview unavailable. Add a OneDrive direct file URL or re-upload to refresh preview.", expectedPath };
     }
-    return { name, href, mode: "message", content: "Preview unavailable for this file type." };
+    return { name, href, mode: "message", content: "Preview unavailable for this file type.", expectedPath };
   };
   const buildFileCellMarkup = (jobId, files)=>{
     const previews = (Array.isArray(files) ? files : []).map(filePreviewModel);
     if (!previews.length) return '<div class="job-file-preview-empty small muted">No files attached</div>';
-    const first = previews[0] || { name: "Attached file", mode: "message", content: "Preview unavailable", href: "" };
+    const first = previews[0] || { name: "Attached file", mode: "message", content: "Preview unavailable", href: "", expectedPath: "" };
     const selectId = `jobFileSelect_${esc(jobId)}`;
     return `
       <div class="job-file-preview" data-file-preview data-file-preview-job="${esc(jobId)}">
         ${previews.length > 1
-          ? `<label class="sr-only" for="${selectId}">Choose file preview</label><select id="${selectId}" class="job-file-preview-select" data-file-preview-select="${esc(jobId)}">${previews.map((f, idx)=>`<option value="${idx}" data-preview-name="${esc(f.name)}" data-preview-mode="${esc(f.mode)}" data-preview-content="${esc(f.content)}" data-preview-href="${esc(f.href || "")}">${esc(f.name)}</option>`).join("")}</select>`
+          ? `<label class="sr-only" for="${selectId}">Choose file preview</label><select id="${selectId}" class="job-file-preview-select" data-file-preview-select="${esc(jobId)}">${previews.map((f, idx)=>`<option value="${idx}" data-preview-name="${esc(f.name)}" data-preview-mode="${esc(f.mode)}" data-preview-content="${esc(f.content)}" data-preview-href="${esc(f.href || "")}" data-preview-expected-path="${esc(f.expectedPath || "")}">${esc(f.name)}</option>`).join("")}</select>`
           : ""}
         <div class="job-file-preview-panes" data-file-preview-panes>
           <div class="job-file-preview-pane" data-file-preview-pane>
@@ -2950,6 +2953,7 @@ function viewJobs(){
             <div class="job-file-preview-frame">
               <img src="${first.mode === "image" ? esc(first.content) : ""}" alt="Preview of ${esc(first.name)}" class="job-file-preview-image" data-preview-image ${first.mode === "image" ? "" : "hidden"}>
               <span class="job-file-preview-message small muted" data-preview-message ${first.mode === "message" ? "" : "hidden"}>${first.mode === "message" ? esc(first.content) : ""}</span>
+              <button type="button" class="small link" data-preview-path-btn data-preview-expected-path="${esc(first.expectedPath || "")}" ${first.mode === "message" && first.expectedPath ? "" : "hidden"}>Show expected path</button>
             </div>
             <a class="job-file-preview-open small" data-preview-open href="${esc(first.href || "")}" target="_blank" rel="noopener" ${first.href ? "" : "hidden"}>Open file</a>
           </div>

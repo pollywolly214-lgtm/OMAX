@@ -20409,10 +20409,12 @@ function renderJobs(){
       const mode = option.getAttribute("data-preview-mode") || "message";
       const contentValue = option.getAttribute("data-preview-content") || "";
       const href = option.getAttribute("data-preview-href") || "";
+      const expectedPath = option.getAttribute("data-preview-expected-path") || "";
       const nameEl = previewRoot.querySelector("[data-preview-name]");
       const imgEl = previewRoot.querySelector("[data-preview-image]");
       const msgEl = previewRoot.querySelector("[data-preview-message]");
       const openEl = previewRoot.querySelector("[data-preview-open]");
+      const pathBtn = previewRoot.querySelector("[data-preview-path-btn]");
       if (nameEl){
         nameEl.textContent = name;
         nameEl.setAttribute("title", name);
@@ -20429,6 +20431,10 @@ function renderJobs(){
       if (openEl instanceof HTMLAnchorElement){
         openEl.href = href;
         openEl.hidden = !href;
+      }
+      if (pathBtn instanceof HTMLButtonElement){
+        pathBtn.hidden = !(mode === "message" && expectedPath);
+        pathBtn.dataset.previewExpectedPath = expectedPath;
       }
       return;
     }
@@ -20478,6 +20484,19 @@ function renderJobs(){
       return;
     }
 
+    const previewPathBtn = e.target.closest("[data-preview-path-btn]");
+    if (previewPathBtn){
+      e.preventDefault();
+      const expected = previewPathBtn.getAttribute("data-preview-expected-path") || "";
+      if (expected){
+        const msg = `Expected file path:
+${expected}`;
+        if (navigator?.clipboard?.writeText){ navigator.clipboard.writeText(expected).catch(()=>{}); }
+        if (window.alert) window.alert(msg); else toast(msg);
+      }
+      return;
+    }
+
     const upload = e.target.closest("[data-upload-job]");
     if (upload){
       const id = upload.getAttribute("data-upload-job");
@@ -20499,10 +20518,12 @@ function renderJobs(){
     const mode = option.getAttribute("data-preview-mode") || "message";
     const contentValue = option.getAttribute("data-preview-content") || "";
     const href = option.getAttribute("data-preview-href") || "";
+    const expectedPath = option.getAttribute("data-preview-expected-path") || "";
     const nameEl = previewRoot.querySelector("[data-preview-name]");
     const imgEl = previewRoot.querySelector("[data-preview-image]");
     const msgEl = previewRoot.querySelector("[data-preview-message]");
     const openEl = previewRoot.querySelector("[data-preview-open]");
+    const pathBtn = previewRoot.querySelector("[data-preview-path-btn]");
     if (nameEl){
       nameEl.textContent = name;
       nameEl.setAttribute("title", name);
@@ -20519,6 +20540,10 @@ function renderJobs(){
     if (openEl instanceof HTMLAnchorElement){
       openEl.href = href;
       openEl.hidden = !href;
+    }
+    if (pathBtn instanceof HTMLButtonElement){
+      pathBtn.hidden = !(mode === "message" && expectedPath);
+      pathBtn.dataset.previewExpectedPath = expectedPath;
     }
   });
 
@@ -20582,6 +20607,19 @@ function renderJobs(){
         closeHistoryActionMenu();
         closeActionMenu();
         openFileMenu(id, historyFileTrigger);
+      }
+      return;
+    }
+
+    const previewPathBtn = e.target.closest("[data-preview-path-btn]");
+    if (previewPathBtn){
+      e.preventDefault();
+      const expected = previewPathBtn.getAttribute("data-preview-expected-path") || "";
+      if (expected){
+        const msg = `Expected file path:
+${expected}`;
+        if (navigator?.clipboard?.writeText){ navigator.clipboard.writeText(expected).catch(()=>{}); }
+        if (window.alert) window.alert(msg); else toast(msg);
       }
       return;
     }

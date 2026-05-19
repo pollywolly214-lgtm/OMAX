@@ -3342,9 +3342,15 @@ body.modal-open .auth-bar {
   display: block;
 }
 .job-file-preview-message {
-  text-align: center;
+  text-align: left;
   line-height: 1.35;
   padding: 0 6px;
+  width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: block;
+  max-height: 84px;
+  overflow-y: auto;
 }
 .job-file-preview-empty {
   margin: 0;
