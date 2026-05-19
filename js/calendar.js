@@ -513,7 +513,7 @@ function projectV2RepeatDates(instance, maxCount = 3){
     return out;
   }
   const every = Math.max(1, Number(rule.every) || 1);
-  const targetCount = endCount != null ? Math.max(0, endCount - completedCountForInstance) : maxCount;
+  const targetCount = endCount != null ? endCount : maxCount;
   if (targetCount <= 0) return [];
   const startISO = normalizeDateKey(instance.startDateISO || rule.startISO || null);
   const start = startISO ? parseDateLocal(startISO) : null;
@@ -3282,7 +3282,10 @@ function renderCalendar(){
     });
   });
 
-  const jobsMap = {};
+  
+window.resolveV2RepeatOccurrenceStateByRoot = resolveV2RepeatOccurrenceStateByRoot;
+window.resolveV2OneTimeOccurrenceState = resolveV2OneTimeOccurrenceState;
+const jobsMap = {};
   const activeJobs = normalizeJobList(
     Array.isArray(window.cuttingJobs) || (window.cuttingJobs && typeof window.cuttingJobs === "object")
       ? window.cuttingJobs
@@ -3532,6 +3535,9 @@ function renderCalendar(){
         const baseTaskId = ev.taskId || ev.id;
         if (ev.type === "v2task" && ev.occurrenceId){
           chip.dataset.calV2OneTime = String(ev.occurrenceId);
+          chip.dataset.sourceSystem = "v2";
+          chip.dataset.v2RootOccurrenceId = String(ev.occurrenceId || "");
+          chip.dataset.v2InstanceId = String(ev.instanceId || "");
           chip.addEventListener("click", (event)=>{
             event.preventDefault();
             event.stopPropagation();
@@ -3546,6 +3552,9 @@ function renderCalendar(){
             openV2RepeatPanel(ev.repeatView);
           });
           chip.dataset.calV2OneTime = `repeat:${ev.instanceId}:${ev.dateISO}`;
+          chip.dataset.sourceSystem = "v2";
+          chip.dataset.v2RootOccurrenceId = String(ev.repeatView.rootOccurrenceId || ev.id || "");
+          chip.dataset.v2InstanceId = String(ev.repeatView.instanceId || ev.instanceId || "");
         } else {
           chip.dataset.calTask = baseTaskId;
         }
