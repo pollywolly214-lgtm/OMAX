@@ -275,6 +275,7 @@ function showV2OneTimeBubble(occurrenceId, anchorEl){
       <button type="button" data-v2-uncomplete>Mark incomplete</button>
       <button type="button" data-v2-note>Set note</button>
       <button type="button" data-v2-hours>Set hours</button>
+      <button type="button" data-v2-move>Move occurrence</button>
       <button type="button" data-bubble-close>Close</button>
     </div>
   `;
@@ -291,6 +292,9 @@ function showV2OneTimeBubble(occurrenceId, anchorEl){
   });
   b.querySelector("[data-v2-hours]")?.addEventListener("click", ()=>{
     if (typeof window.setV2OneTimeOccurrenceHours === "function") window.setV2OneTimeOccurrenceHours(String(occurrenceId));
+  });
+  b.querySelector("[data-v2-move]")?.addEventListener("click", ()=>{
+    if (typeof window.moveV2OneTimeOccurrence === "function") window.moveV2OneTimeOccurrence(String(occurrenceId));
   });
   const rect = anchorEl.getBoundingClientRect();
   b.style.top  = `${window.scrollY + rect.bottom + 8}px`;
@@ -334,6 +338,7 @@ function openV2OneTimePanel(occurrenceId){
       <button type="button" data-v2-panel-uncomplete>Mark incomplete</button>
       <button type="button" data-v2-panel-note>Set note</button>
       <button type="button" data-v2-panel-hours>Set logged hours</button>
+      <button type="button" data-v2-panel-move>Move occurrence</button>
       <button type="button" class="danger" data-v2-panel-remove>Remove from calendar</button>
       <button type="button" data-v2-panel-close>Close</button>
     </div>
@@ -348,6 +353,7 @@ function openV2OneTimePanel(occurrenceId){
   card.querySelector("[data-v2-panel-uncomplete]")?.addEventListener("click", ()=>{ window.uncompleteV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
   card.querySelector("[data-v2-panel-note]")?.addEventListener("click", ()=>{ window.setV2OneTimeOccurrenceNote?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
   card.querySelector("[data-v2-panel-hours]")?.addEventListener("click", ()=>{ window.setV2OneTimeOccurrenceHours?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-move]")?.addEventListener("click", ()=>{ window.moveV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
   card.querySelector("[data-v2-panel-remove]")?.addEventListener("click", ()=>{
     const ok = window.confirm ? window.confirm("Remove this V2 one-time reminder from the calendar?") : true;
     if (!ok) return;
@@ -375,7 +381,7 @@ function getV2OneTimeOccurrenceView(occurrenceId){
     eventType: "scheduled",
     instanceId,
     taskId,
-    dateISO,
+    dateISO: state.displayDateISO || dateISO,
     name: String(scheduled.taskName || (task && task.name) || "Maintenance reminder"),
     note: state.note,
     hours: state.hours,
@@ -543,10 +549,16 @@ function resolveV2RepeatOccurrenceState(instanceId, dateISO){
   let status = "scheduled";
   let note = "";
   let hours = null;
+  let displayDateISO = normalizeDateKey(dateISO);
   related.forEach(entry => {
     const t = String(entry.eventType || "");
     if (t === "completed") status = "completed";
     if (t === "uncompleted") status = "scheduled";
+    if (t === "skipped") status = "skipped";
+    if (t === "moved" && entry.payload && entry.payload.toDateISO){
+      status = "moved";
+      displayDateISO = normalizeDateKey(entry.payload.toDateISO) || displayDateISO;
+    }
     if (t === "removed") status = "removed";
     if (t === "note_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "note")) note = String(entry.payload.note || "");
     if (t === "hours_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "hours")){
@@ -554,7 +566,7 @@ function resolveV2RepeatOccurrenceState(instanceId, dateISO){
       hours = raw == null || raw === "" ? null : (Number.isFinite(Number(raw)) ? Number(raw) : hours);
     }
   });
-  return { key, status, note, hours };
+  return { key, status, note, hours, displayDateISO };
 }
 
 function appendV2RepeatEvent(instanceId, taskId, dateISO, eventType, payload = {}){
@@ -588,7 +600,7 @@ function appendV2RepeatEvent(instanceId, taskId, dateISO, eventType, payload = {
       }
     }
   }
-  if (window.DEBUG_MODE && ["completed","uncompleted","removed"].includes(eventType)){
+  if (window.DEBUG_MODE && ["completed","uncompleted","removed","skipped","moved","stopped"].includes(eventType)){
     console.info("[maintenance-v2] machine-hour occurrence action", {
       instanceId: String(instanceId || ""),
       actionType: eventType,
@@ -681,6 +693,8 @@ function openV2RepeatPanel(view){
     <button type="button" data-rpt-uncomplete>Mark incomplete</button>
     <button type="button" data-rpt-note>Set note</button>
     <button type="button" data-rpt-hours>Set logged hours</button>
+    <button type="button" data-rpt-move>Move occurrence</button>
+    <button type="button" data-rpt-skip>Skip occurrence</button>
     <button type="button" class="danger" data-rpt-remove>Remove from calendar</button>
     ${canStopRepeat ? `<button type="button" class="danger" data-rpt-stop>Stop repeat tracking</button>` : ""}
     <button type="button" data-rpt-close>Close</button>
@@ -693,6 +707,20 @@ function openV2RepeatPanel(view){
   card.querySelector("[data-rpt-uncomplete]")?.addEventListener("click", ()=>{ if (view.status==="completed") appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "uncompleted"); reopen(); });
   card.querySelector("[data-rpt-note]")?.addEventListener("click", ()=>{ const v=window.prompt("Set note for this repeat occurrence:", view.note||""); if(v!==null) appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "note_set", { note:v }); reopen(); });
   card.querySelector("[data-rpt-hours]")?.addEventListener("click", ()=>{ const v=window.prompt("Enter hours to record for this maintenance occurrence. Leave blank to clear.", view.hours!=null?String(view.hours):""); if(v!==null){ const t=String(v).trim(); const h=t===""?null:Number(t); if(t!=="" && (!Number.isFinite(h)||h<0)){ toast("Enter a valid non-negative number."); return; } appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "hours_set", { hours:h }); reopen(); } });
+  card.querySelector("[data-rpt-move]")?.addEventListener("click", ()=>{
+    const v = window.prompt("Move occurrence to date (YYYY-MM-DD):", String(view.dateISO || ""));
+    if (v == null) return;
+    const toDateISO = normalizeDateKey(v);
+    if (!toDateISO){ toast("Enter a valid date (YYYY-MM-DD)."); return; }
+    appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "moved", { fromDateISO: view.dateISO, toDateISO, source: "calendar_panel" });
+    closeV2OneTimePanel();
+  });
+  card.querySelector("[data-rpt-skip]")?.addEventListener("click", ()=>{
+    const ok=window.confirm?window.confirm("Skip this occurrence and keep the repeat chain running?"):true;
+    if(!ok) return;
+    appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "skipped", { source:"calendar_panel" });
+    closeV2OneTimePanel();
+  });
   card.querySelector("[data-rpt-remove]")?.addEventListener("click", ()=>{ const ok=window.confirm?window.confirm("Remove this repeat occurrence from calendar?"):true; if(!ok) return; appendV2RepeatEvent(view.instanceId, view.taskId, view.dateISO, "removed", { source:"repeat_panel" }); closeV2OneTimePanel(); });
   card.querySelector("[data-rpt-stop]")?.addEventListener("click", ()=>{
     const ok = window.confirm ? window.confirm("Stop repeat tracking for this chain?") : true;
@@ -768,10 +796,16 @@ function resolveV2OneTimeOccurrenceState(rootOccurrenceId, scheduledEvent){
   let hours = scheduledEvent?.payload && Object.prototype.hasOwnProperty.call(scheduledEvent.payload, "hours")
     ? (scheduledEvent.payload.hours == null || scheduledEvent.payload.hours === "" ? null : Number(scheduledEvent.payload.hours))
     : null;
+  let displayDateISO = normalizeDateKey(scheduledEvent?.effectiveDateISO || scheduledEvent?.dateISO || null);
   relevant.forEach(({ entry })=>{
     const type = String(entry.eventType || "");
     if (type === "completed") status = "completed";
     if (type === "uncompleted") status = "scheduled";
+    if (type === "skipped") status = "skipped";
+    if (type === "moved" && entry.payload && entry.payload.toDateISO){
+      status = "moved";
+      displayDateISO = normalizeDateKey(entry.payload.toDateISO) || displayDateISO;
+    }
     if (type === "removed") status = "removed";
     if (type === "note_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "note")){
       note = entry.payload.note == null ? "" : String(entry.payload.note);
@@ -781,7 +815,7 @@ function resolveV2OneTimeOccurrenceState(rootOccurrenceId, scheduledEvent){
       hours = raw == null || raw === "" ? null : (Number.isFinite(Number(raw)) ? Number(raw) : hours);
     }
   });
-  return { status, note, hours };
+  return { status, note, hours, displayDateISO };
 }
 
 window.completeV2OneTimeOccurrence = (occurrenceId)=>{
@@ -825,6 +859,15 @@ window.removeV2OneTimeOccurrence = (occurrenceId)=>{
   if (appendV2OccurrenceEvent(occurrenceId, "removed", { source: "calendar_panel" }, String(occurrenceId))){
     toast("Removed from calendar");
   }
+};
+window.moveV2OneTimeOccurrence = (occurrenceId)=>{
+  const base = getV2OneTimeOccurrenceView(String(occurrenceId));
+  if (!base) return;
+  const input = window.prompt("Move reminder to date (YYYY-MM-DD):", String(base.dateISO || ""));
+  if (input == null) return;
+  const toDateISO = normalizeDateKey(input);
+  if (!toDateISO){ toast("Enter a valid date (YYYY-MM-DD)."); return; }
+  if (appendV2OccurrenceEvent(occurrenceId, "moved", { fromDateISO: base.dateISO, toDateISO, source: "calendar_panel" }, String(occurrenceId))) toast("Occurrence moved");
 };
 function triggerDashboardAddPicker(opts){
   const detail = (opts && typeof opts === "object") ? { ...opts } : {};
@@ -3049,7 +3092,9 @@ function renderCalendar(){
     const name = String(event.taskName || (task && task.name) || "Maintenance reminder");
     const occurrenceId = String(event.id);
     const rootOccurrenceId = occurrenceId;
-    const { status, note, hours } = resolveV2OneTimeOccurrenceState(rootOccurrenceId, event);
+    const { status, note, hours, displayDateISO } = resolveV2OneTimeOccurrenceState(rootOccurrenceId, event);
+    const resolvedDateISO = normalizeDateKey(displayDateISO || dateISO || null);
+    if (!resolvedDateISO) return;
     const mapKey = `${occurrenceId}:${dateISO}`;
     if (seenV2ChipKeys.has(mapKey)) return;
     seenV2ChipKeys.add(mapKey);
@@ -3058,14 +3103,14 @@ function renderCalendar(){
       eventType,
       instanceId,
       taskId: String(instance.taskId || event.taskId || ""),
-      dateISO,
+      dateISO: resolvedDateISO,
       name,
       note,
       hours,
       status
     };
-    if (status === "removed") return;
-    (dueMap[dateISO] ||= []).push({
+    if (status === "removed" || status === "skipped") return;
+    (dueMap[resolvedDateISO] ||= []).push({
       type: "v2task",
       id: `v2-one-time:${occurrenceId}`,
       occurrenceId,
@@ -3073,7 +3118,7 @@ function renderCalendar(){
       name,
       status: status === "completed" ? "completed" : "manual",
       mode: "one_time_v2",
-      dateISO
+      dateISO: resolvedDateISO
     });
   });
   window.__calendarV2OneTimeLookup = oneTimeLookup;
@@ -3087,7 +3132,7 @@ function renderCalendar(){
     const dates = projectV2RepeatDates(instance);
     dates.forEach(dateISO => {
       const state = resolveV2RepeatOccurrenceState(instance.id, dateISO);
-      if (state.status === "removed") return;
+      if (state.status === "removed" || state.status === "skipped" || state.status === "moved") return;
       const task = v2TaskLookup.get(String(instance.taskId || "")) || null;
       (dueMap[dateISO] ||= []).push({
         type: "v2repeat",
@@ -3134,7 +3179,7 @@ function renderCalendar(){
   });
   repeatHistoryLatest.forEach(({ entry }, rootId) => {
     const latestType = String(entry.eventType || "");
-    if (!["completed", "uncompleted", "note_set", "hours_set"].includes(latestType)) return;
+    if (!["completed", "uncompleted", "note_set", "hours_set", "moved", "skipped", "removed"].includes(latestType)) return;
     const dateISO = normalizeDateKey(entry.effectiveDateISO || null) || String(rootId).split(":").slice(-1)[0];
     if (!dateISO) return;
     const instanceId = String(entry.instanceId || "");
@@ -3142,14 +3187,16 @@ function renderCalendar(){
     const task = v2TaskLookup.get(taskId) || null;
     const state = resolveV2RepeatOccurrenceState(instanceId, dateISO);
     if (state.status === "removed") return;
-    const exists = (dueMap[dateISO] || []).some(item => item && item.type === "v2repeat" && String(item.id || "") === rootId);
+    const resolvedDateISO = normalizeDateKey(state.displayDateISO || dateISO || null);
+    if (!resolvedDateISO) return;
+    const exists = (dueMap[resolvedDateISO] || []).some(item => item && item.type === "v2repeat" && String(item.id || "") === rootId);
     if (exists) return;
-    (dueMap[dateISO] ||= []).push({
+    (dueMap[resolvedDateISO] ||= []).push({
       type: "v2repeat",
       id: rootId,
       instanceId,
       taskId,
-      dateISO,
+      dateISO: resolvedDateISO,
       name: String((task && task.name) || "Maintenance repeat"),
       status: state.status === "completed" ? "completed" : "manual",
       mode: "repeat_v2",
@@ -3157,7 +3204,7 @@ function renderCalendar(){
         rootOccurrenceId: rootId,
         instanceId,
         taskId,
-        dateISO,
+        dateISO: resolvedDateISO,
         name: String((task && task.name) || "Maintenance repeat"),
         note: state.note,
         hours: state.hours,
