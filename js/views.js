@@ -3961,6 +3961,20 @@ function viewJobs(){
               </aside>
             </div>
             <label class="job-edit-note">Notes<textarea data-history-field="notes" data-history-id="${job.id}" rows="3" placeholder="Notes...">${textEsc(job?.notes || "")}</textarea></label>
+            <div class="job-edit-files">
+              <div class="job-edit-files-actions"><button type="button" data-job-file-add="${job.id}">Attach from Reference Folder</button><button type="button" data-upload-job="${job.id}">Add Files</button><button type="button" data-link-job-file="${job.id}">Link OneDrive URL</button></div>
+              <input type="file" data-job-file-input="${job.id}" multiple style="display:none">
+              <ul class="job-file-list">
+                ${jobFiles.length ? jobFiles.map((f, idx)=>{
+                  const safeName = f.name || `file_${idx+1}`;
+                  const href = f.dataUrl || f.url || f.externalUrl || f.downloadUrl || f.oneDriveUrl || "";
+                  const usableLink = !!href && !/^data:(image|application)\//i.test(String(href || "")) && /^https?:\/\//i.test(String(href || ""));
+                  const link = usableLink ? `<a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a>` : `${safeName} <span class="small muted">— File metadata saved only — original file content is not stored.</span>`;
+                  const sourceTag = f?.source === "onedrive" ? `<span class="job-file-source-badge">OneDrive</span>` : "";
+                  return `<li>${link} ${sourceTag} <button type="button" class="link" data-edit-file-link="${job.id}" data-file-index="${idx}">Link</button> <button type="button" class="link" data-remove-file="${job.id}" data-file-index="${idx}">Remove</button></li>`;
+                }).join("") : `<li class="muted">No files attached</li>`}
+              </ul>
+            </div>
             <div class="job-edit-actions">
               <button type="button" data-history-save="${job.id}">Save</button>
               <button type="button" class="danger" data-history-cancel="${job.id}">Cancel</button>

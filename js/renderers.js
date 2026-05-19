@@ -20399,7 +20399,8 @@ function renderJobs(){
     if (e.target.matches("input[data-job-file-input]")){
       const id = e.target.getAttribute("data-job-file-input");
       const idStr = String(id || "");
-      const j = cuttingJobs.find(x => String(x?.id) === idStr);
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
       if (!j){ e.target.value = ""; return; }
       const attachments = await filesToAttachments(e.target.files);
       e.target.value = "";
@@ -20964,7 +20965,8 @@ function renderJobs(){
     if (linkJobFile){
       const id = linkJobFile.getAttribute("data-link-job-file");
       const idStr = String(id || "");
-      const j = cuttingJobs.find(x => String(x?.id) === idStr);
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
       if (!j) return;
       try {
         const picked = await window.oneDrivePicker.openOneDriveDxfPicker();
@@ -20998,7 +21000,8 @@ function renderJobs(){
       const id = editFileLink.getAttribute("data-edit-file-link");
       const idx = Number(editFileLink.getAttribute("data-file-index"));
       const idStr = String(id || "");
-      const j = cuttingJobs.find(x => String(x?.id) === idStr);
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
       const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null;
       if (!file) return;
       const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || "");
@@ -21016,7 +21019,8 @@ function renderJobs(){
       const id = removeFile.getAttribute("data-remove-file");
       const idx = Number(removeFile.getAttribute("data-file-index"));
       const idStr = String(id || "");
-      const j = cuttingJobs.find(x => String(x?.id) === idStr);
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
       if (j && Array.isArray(j.files) && idx>=0 && idx<j.files.length){
         j.files.splice(idx,1);
         saveCloudDebounced();
