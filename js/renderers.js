@@ -8263,7 +8263,144 @@ function showMakeActiveCopyModal(options){
   });
 }
 
+function ensureMaintenanceTaskModalAPI(){
+  if (typeof window.__openMaintenanceTaskModal === "function" && typeof window.__closeMaintenanceTaskModal === "function") return;
+  const ensureModalDom = ()=>{
+    let modal = document.getElementById("taskModal");
+    if (modal instanceof HTMLElement) return modal;
+    const rootId = (typeof window !== "undefined" && typeof window.ROOT_FOLDER_ID === "string") ? window.ROOT_FOLDER_ID : "root";
+    const options = ["<option value=\"\">(No Category)</option>"].concat(
+      (Array.isArray(window.settingsFolders) ? window.settingsFolders : []).map(f => `<option value="${escapeHtml(String(f?.id||""))}">${escapeHtml(String(f?.name||""))}</option>`)
+    ).join("");
+    const shell = document.createElement("div");
+    shell.innerHTML = `<div class="modal-backdrop" id="taskModal" hidden style="z-index:10040"><div class="modal-card"><button type="button" class="modal-close" id="closeTaskModal">×</button><h4>Create maintenance task</h4><form id="taskForm" class="modal-form"><div class="modal-grid"><label>Task name<input name="taskName" required placeholder="Task"></label><label>Type<select name="taskType" id="taskTypeSelect"><option value="interval">By interval</option><option value="asreq">As required</option></select></label><label data-form-frequency>Frequency (hrs)<input type="number" min="1" step="1" name="taskInterval" placeholder="e.g. 40"></label><label data-form-last>Hours since last service<input type="number" min="0" step="0.01" name="taskLastServiced" placeholder="optional"></label><label data-form-condition hidden>Condition / trigger<input name="taskCondition" placeholder="e.g. When clogged"></label><label>Manual link<input type="url" name="taskManual" placeholder="https://..."></label><label>Store link<input type="url" name="taskStore" placeholder="https://..."></label><label>Part #<input name="taskPN" placeholder="Part number"></label><label>Price ($)<input type="number" min="0" step="0.01" name="taskPrice" placeholder="optional"></label><label class="task-note">Note<textarea name="taskNote" rows="2" placeholder="Optional note"></textarea></label><label>Category<select name="taskCategory">${options || `<option value="${rootId}">Default</option>`}</select></label></div><div class="modal-actions"><button type="button" class="secondary" id="cancelTaskModal">Cancel</button><button type="submit" class="primary">Create Task</button></div></form></div></div>`;
+    modal = shell.firstElementChild;
+    if (modal) document.body.appendChild(modal);
+    return modal;
+  };
+  const syncMode = ()=>{
+    const form = document.getElementById("taskForm");
+    const typeField = document.getElementById("taskTypeSelect");
+    const freqRow = form?.querySelector('[data-form-frequency]');
+    const lastRow = form?.querySelector('[data-form-last]');
+    const conditionRow = form?.querySelector('[data-form-condition]');
+    const mode = String(typeField?.value || "interval");
+    if (!freqRow || !lastRow || !conditionRow) return;
+    freqRow.hidden = mode !== "interval";
+    lastRow.hidden = mode !== "interval";
+    conditionRow.hidden = mode === "interval";
+  };
+  const syncModalLock = ()=>{
+    const hasVisibleTaskModal = (() => {
+      const taskModal = document.getElementById("taskModal");
+      return !!(taskModal instanceof HTMLElement && !taskModal.hidden);
+    })();
+    const hasVisibleReceiptModal = (() => {
+      const receiptModal = document.getElementById("costReceiptModal");
+      return !!(receiptModal instanceof HTMLElement && !receiptModal.hidden);
+    })();
+    if (hasVisibleTaskModal || hasVisibleReceiptModal) document.body?.classList.add("modal-open");
+    else document.body?.classList.remove("modal-open");
+  };
+  const close = ({ trigger = "closed", suppressCallback = false } = {})=>{
+    const modal = ensureModalDom();
+    if (!(modal instanceof HTMLElement)) return;
+    const session = window.__maintenanceTaskModalSession && typeof window.__maintenanceTaskModalSession === "object"
+      ? window.__maintenanceTaskModalSession
+      : null;
+    modal.hidden = true;
+    modal.classList.remove("is-visible");
+    modal.style.zIndex = "";
+    syncModalLock();
+    const callback = trigger === "saved" ? session?.onSaved : session?.onClosed;
+    window.__maintenanceTaskModalSession = null;
+    if (!suppressCallback && typeof callback === "function"){
+      try { callback(session?.savedTask || null); } catch (err){ console.warn("Maintenance task modal callback failed", err); }
+    }
+  };
+  const open = (options={})=>{
+    const modal = ensureModalDom();
+    if (!(modal instanceof HTMLElement)) return false;
+    window.__maintenanceTaskModalSession = { source: String(options.source || "settings"), onSaved: typeof options.onSaved === "function" ? options.onSaved : null, onClosed: typeof options.onClosed === "function" ? options.onClosed : null };
+    const form = modal.querySelector("#taskForm");
+    form?.reset();
+    modal.hidden = false; modal.classList.add("is-visible"); modal.style.zIndex = "10040";
+    syncModalLock();
+    syncMode();
+    return true;
+  };
+  window.__openMaintenanceTaskModal = open;
+  window.__closeMaintenanceTaskModal = close;
+  if (!window.__maintenanceTaskModalSubmitBound){
+    window.__maintenanceTaskModalSubmitBound = true;
+    document.addEventListener("submit", (e)=>{
+      const form = e.target;
+      if (!(form instanceof HTMLFormElement) || form.id !== "taskForm") return;
+      if (form.closest("#explorer")) return;
+      e.preventDefault();
+      const data = new FormData(form);
+      const name = (data.get("taskName")||"").toString().trim();
+      const mode = (data.get("taskType")||"interval").toString();
+      if (!name){ alert("Task name is required."); return; }
+      const rootId = (typeof window !== "undefined" && typeof window.ROOT_FOLDER_ID === "string") ? window.ROOT_FOLDER_ID : "root";
+      const catRaw = (data.get("taskCategory")||"").toString().trim();
+      const catId = catRaw ? catRaw : rootId;
+      const manual = (data.get("taskManual")||"").toString().trim();
+      const store = (data.get("taskStore")||"").toString().trim();
+      const pn = (data.get("taskPN")||"").toString().trim();
+      const priceVal = data.get("taskPrice");
+      const price = priceVal === null || priceVal === "" ? null : Number(priceVal);
+      const noteRaw = (data.get("taskNote")||"").toString();
+      const note = noteRaw.trim() ? noteRaw : "";
+      const id = genId(name);
+      const base = { id, name, manualLink: manual, storeLink: store, pn, price: isFinite(price)?price:null, note, cat: catId, parentTask:null, order: ++window._maintOrderCounter };
+      let createdTask = null;
+      if (mode === "interval"){
+        const intervalVal = data.get("taskInterval");
+        const interval = intervalVal === null || intervalVal === "" ? 8 : Number(intervalVal);
+        const task = Object.assign(base, { mode:"interval", interval: isFinite(interval) && interval>0 ? interval : 8, sinceBase:0, anchorTotal:null, completedDates: [], manualHistory: [], variant: "template", templateId: id });
+        const curHours = getCurrentMachineHours();
+        const baselineHours = parseBaselineHours(data.get("taskLastServiced"));
+        applyIntervalBaseline(task, { baselineHours, currentHours: curHours });
+        window.tasksInterval.unshift(task);
+        createdTask = task;
+      } else {
+        const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
+        const task = Object.assign(base, { mode:"asreq", condition, variant: "template", templateId: id });
+        (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = [])).unshift(task);
+        createdTask = task;
+      }
+      try { if (typeof saveTasks === "function") saveTasks(); } catch(_){}
+      try { if (typeof saveCloudDebounced === "function") saveCloudDebounced(); } catch(_){}
+      const session = window.__maintenanceTaskModalSession && typeof window.__maintenanceTaskModalSession === "object"
+        ? window.__maintenanceTaskModalSession
+        : null;
+      const savedCallback = session && typeof session.onSaved === "function" ? session.onSaved : null;
+      if (session) session.savedTask = createdTask;
+      close({ trigger: "saved", suppressCallback: true });
+      const runPostSave = async ()=>{
+        if (createdTask && typeof window.__promptAddInventoryForTask === "function"){
+          try { await window.__promptAddInventoryForTask(createdTask); } catch (err){ console.warn("Inventory link prompt failed", err); }
+        }
+        if (typeof savedCallback === "function"){
+          try { savedCallback(createdTask); } catch (err){ console.warn("Maintenance task modal post-save callback failed", err); }
+        }
+      };
+      setTimeout(()=>{ runPostSave(); }, 60);
+    }, true);
+  }
+  if (!window.__maintenanceTaskModalClickBound){
+    window.__maintenanceTaskModalClickBound = true;
+    document.addEventListener("click", (event)=>{
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target) return;
+      if (target.id === "cancelTaskModal" || target.id === "closeTaskModal"){ close({ trigger: "closed" }); return; }
+    });
+  }
+}
+
 function renderSettings(){
+  ensureMaintenanceTaskModalAPI();
   // === Explorer-style Maintenance Settings ===
   const root = document.getElementById("content");
   if (!root) return;
@@ -9763,6 +9900,19 @@ function renderSettings(){
   function showModal(options){
     if (!modal || !form || !typeField) return;
     const opts = options && typeof options === "object" ? options : {};
+    const syncBodyModalClass = ()=>{
+      const anyModalVisible = !!document.querySelector('.modal-backdrop:not([hidden]), .cost-receipt-modal:not([hidden])');
+      if (anyModalVisible) document.body?.classList.add("modal-open");
+      else document.body?.classList.remove("modal-open");
+    };
+    const previousSession = window.__maintenanceTaskModalSession && typeof window.__maintenanceTaskModalSession === "object"
+      ? window.__maintenanceTaskModalSession
+      : {};
+    window.__maintenanceTaskModalSession = {
+      source: String(opts.source || previousSession.source || "settings"),
+      onSaved: typeof opts.onSaved === "function" ? opts.onSaved : (typeof previousSession.onSaved === "function" ? previousSession.onSaved : null),
+      onClosed: typeof opts.onClosed === "function" ? opts.onClosed : (typeof previousSession.onClosed === "function" ? previousSession.onClosed : null)
+    };
     const categoryId = opts.categoryId != null ? String(opts.categoryId) : "";
     form.reset();
     const categoryField = form.querySelector('[name="taskCategory"]');
@@ -9776,15 +9926,28 @@ function renderSettings(){
     }
     modal.classList.add("is-visible");
     modal.hidden = false;
-    document.body?.classList.add("modal-open");
+    modal.style.zIndex = "10040";
+    syncBodyModalClass();
     syncFormMode(typeField.value);
   }
   function hideModal(){
     if (!modal) return;
+    const session = window.__maintenanceTaskModalSession && typeof window.__maintenanceTaskModalSession === "object"
+      ? window.__maintenanceTaskModalSession
+      : null;
+    const onClosed = session && typeof session.onClosed === "function" ? session.onClosed : null;
     modal.classList.remove("is-visible");
     modal.hidden = true;
-    document.body?.classList.remove("modal-open");
+    modal.style.zIndex = "";
+    const anyModalVisible = !!document.querySelector('.modal-backdrop:not([hidden]), .cost-receipt-modal:not([hidden])');
+    if (!anyModalVisible) document.body?.classList.remove("modal-open");
+    if (typeof onClosed === "function"){
+      try { onClosed(); } catch (err){ console.warn("Maintenance task modal onClosed callback failed", err); }
+    }
+    window.__maintenanceTaskModalSession = null;
   }
+  window.__openMaintenanceTaskModal = showModal;
+  window.__closeMaintenanceTaskModal = hideModal;
 
   tree?.addEventListener("click", (e)=>{
     const target = e.target;
@@ -9975,8 +10138,17 @@ function renderSettings(){
     }
 
     persist();
+    const session = window.__maintenanceTaskModalSession && typeof window.__maintenanceTaskModalSession === "object"
+      ? window.__maintenanceTaskModalSession
+      : null;
+    const fromCostAnalysis = session && session.source === "cost-analysis";
     hideModal();
-    renderSettings();
+    if (!fromCostAnalysis){
+      renderSettings();
+    }
+    if (session && typeof session.onSaved === "function"){
+      try { session.onSaved(createdTask); } catch (err){ console.warn("Maintenance task modal onSaved callback failed", err); }
+    }
     if (createdTask && !autoLinkedInventory){
       setTimeout(()=>{
         const fn = window.__promptAddInventoryForTask;
@@ -12441,7 +12613,6 @@ function renderCosts(){
         purchasedDatalist.id = purchasedDatalistId;
         modal.appendChild(purchasedDatalist);
       }
-      const purchaseTemplates = new Map();
       let activeWeekKey = String((window.receiptTrackerWeekSelected || weekOptions[0]?.key || ""));
       let activeRange = String(window.receiptTrackerRangeSelected || "1");
       let hasUnsavedReceiptChanges = false;
@@ -12483,6 +12654,12 @@ function renderCosts(){
         if (!weekOptions.some(item => item.key === activeWeekKey)) activeWeekKey = weekOptions[0]?.key || "";
         weekSelect.value = activeWeekKey;
       };
+      function findTaskByNameExact(name){
+        const key = String(name || "").trim().toLowerCase();
+        if (!key) return null;
+        const tasks = (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).concat(Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []);
+        return tasks.find(task => String(task?.name || "").trim().toLowerCase() === key) || null;
+      }
       const saveWeekRowsFromDom = ()=>{
         const entry = getWeekEntry(activeWeekKey);
         if (!(weekRowsBody instanceof HTMLElement)) return entry;
@@ -12492,6 +12669,7 @@ function renderCosts(){
           cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
           qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
           partNumber: String(tr.querySelector('[data-col=\"partNumber\"]')?.value || "").trim(),
+          taskId: String(findTaskByNameExact(String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim())?.id || ""),
           shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
           tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
         }));
@@ -12560,76 +12738,47 @@ function renderCosts(){
           : [];
       };
       const rebuildPurchaseTemplates = ()=>{
-        purchaseTemplates.clear();
-        const rows = [];
-        (window.receiptTrackerWeeks || []).forEach(week => {
-          normalizeRows(week?.rows).forEach(row => {
-            const purchased = String(row?.purchased || "").trim();
-            if (!purchased) return;
-            rows.push({
-              purchased,
-              key: purchased.toLowerCase(),
-              date: toIsoDate(row?.date),
-              cost: Number(row?.cost) || 0,
-              qty: Number(row?.qty) || 0,
-              partNumber: String(row?.partNumber || ""),
-              shipping: Number(row?.shipping) || 0,
-              tax: Number(row?.tax) || 0
-            });
-          });
+        const getLiveTasks = ()=> (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).concat(Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []);
+        const getLiveInventory = ()=> Array.isArray(window.inventory) ? window.inventory : [];
+        const taskByName = new Map();
+        getLiveTasks().forEach(task => {
+          const name = String(task?.name || "").trim();
+          if (!name) return;
+          taskByName.set(name.toLowerCase(), task);
         });
-        rows.sort((a,b)=> String(b.date || "").localeCompare(String(a.date || "")));
-        rows.forEach(row => {
-          if (!purchaseTemplates.has(row.key)){
-            purchaseTemplates.set(row.key, row);
-          }
-        });
+        window.__purchaseHistoryTaskByName = taskByName;
         if (purchasedDatalist instanceof HTMLDataListElement){
-          purchasedDatalist.innerHTML = Array.from(purchaseTemplates.values())
-            .sort((a,b)=> String(a.purchased).localeCompare(String(b.purchased)))
-            .map(item => `<option value="${escapeHtml(item.purchased)}"></option>`)
+          const names = new Set();
+          getLiveTasks().forEach(task => {
+            const name = String(task?.name || "").trim();
+            if (name) names.add(name);
+          });
+          getLiveInventory().forEach(item => {
+            const name = String(item?.name || "").trim();
+            if (name) names.add(name);
+          });
+          purchasedDatalist.innerHTML = Array.from(names)
+            .sort((a,b)=> String(a).localeCompare(String(b)))
+            .map(name => `<option value="${escapeHtml(String(name || ""))}"></option>`)
             .join("");
         }
       };
-      const applyTemplateToRow = (rowEl, template)=>{
-        if (!(rowEl instanceof HTMLElement) || !template) return;
-        const setField = (col, value)=>{
-          const el = rowEl.querySelector(`[data-col="${col}"]`);
-          if (el instanceof HTMLInputElement) el.value = String(value ?? "");
-        };
-        setField("cost", Number(template.cost || 0));
-        setField("qty", Number(template.qty || 0));
-        setField("partNumber", String(template.partNumber || ""));
-        setField("shipping", Number(template.shipping || 0));
-        setField("tax", Number(template.tax || 0));
-      };
       
-      const inventorySelectOptionsMarkup = (selectedId)=>{
-        const selected = String(selectedId || "");
-        const rows = (Array.isArray(inventory) ? inventory : []).filter(Boolean).slice().sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));
-        const opts = ['<option value="">Auto-detect from name</option>'];
-        rows.forEach(item => {
-          const id = String(item.id || "");
-          if (!id) return;
-          const label = `${item.name || "Unnamed"} ${item.pn ? `(${item.pn})` : ""}`.trim();
-          opts.push(`<option value="${escapeHtml(id)}" ${selected===id?"selected":""}>${escapeHtml(label)}</option>`);
-        });
-        return opts.join("");
-      };
 const appendEmptyRow = (focusFirst = false)=>{
         if (!(weekRowsBody instanceof HTMLElement)) return;
         const tr = document.createElement("tr");
         tr.setAttribute("data-receipt-row", "1");
         tr.innerHTML = `
           <td><input type="date" data-col="date" min="${escapeHtml(String(getWeekEntry(activeWeekKey)?.startISO || ""))}" max="${escapeHtml(String(getWeekEntry(activeWeekKey)?.endISO || ""))}"></td>
-          <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" placeholder="Item"></td>
+          <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" placeholder="Select existing item"></td>
           <td><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
           <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
-          <td style="width:160px;max-width:160px"><select data-col="inventoryItemId" style="width:100%;max-width:160px;text-overflow:ellipsis">${inventorySelectOptionsMarkup("")}</select></td>
+          <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
           <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00" style="min-width:86px"></td>
           <td><input type="number" min="0" step="0.01" data-col="tax" placeholder="0.00" style="min-width:72px"></td>
-          <td data-col="total">${formatUsd(0)}</td>`;
+          <td data-col="total">${formatUsd(0)}</td>
+          <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>`;
         weekRowsBody.appendChild(tr);
         if (focusFirst){
           const first = tr.querySelector("[data-col='date']");
@@ -12667,10 +12816,11 @@ const appendEmptyRow = (focusFirst = false)=>{
             <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
             <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
-            <td style="width:160px;max-width:160px"><select data-col="inventoryItemId" style="width:100%;max-width:160px;text-overflow:ellipsis">${inventorySelectOptionsMarkup(row.inventoryItemId || "")}</select></td>
+            <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
             <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}" style="min-width:86px"></td>
             <td><input type="number" min="0" step="0.01" data-col="tax" value="${escapeHtml(String(row.tax || 0))}" style="min-width:72px"></td>
             <td data-col="total">${formatUsd(computeRowTotal(row))}</td>
+            <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>
           </tr>`).join("");
         appendEmptyRow();
         recomputeWeekTotals();
@@ -12682,8 +12832,9 @@ const appendEmptyRow = (focusFirst = false)=>{
       };
       const findInventoryByNameLike = (name)=>{
         const key = String(name || "").trim().toLowerCase();
-        if (!key || !Array.isArray(inventory)) return null;
-        return inventory.find(item => String(item?.name || "").toLowerCase().includes(key)) || null;
+        const liveInventory = Array.isArray(window.inventory) ? window.inventory : [];
+        if (!key || !Array.isArray(liveInventory)) return null;
+        return liveInventory.find(item => String(item?.name || "").toLowerCase().includes(key)) || null;
       };
       const ensurePurchaseHistoryLinkForPartNumber = ({ partNumber, inventoryItemId, canonicalName })=>{
         const partKey = String(partNumber || "").trim().toLowerCase();
@@ -12814,12 +12965,23 @@ const appendEmptyRow = (focusFirst = false)=>{
             const row = inputEl.closest("tr[data-receipt-row]");
             const typed = String(inputEl.value || "").trim();
             if (row && typed){
-              const inv = findInventoryByNameLike(typed);
-              if (inv){
-                const invSel = row.querySelector('[data-col="inventoryItemId"]');
-                const partEl = row.querySelector('[data-col="partNumber"]');
-                if (invSel instanceof HTMLSelectElement && String(invSel.value || "") !== String(inv.id || "")) invSel.value = String(inv.id || "");
-                if (partEl instanceof HTMLInputElement && !String(partEl.value || "").trim()) partEl.value = String(inv.pn || "");
+              const task = findTaskByNameExact(typed);
+              const invFromTask = task && task.inventoryId != null && Array.isArray(window.inventory)
+                ? window.inventory.find(item => String(item?.id || "") === String(task.inventoryId))
+                : null;
+              const inv = invFromTask || (Array.isArray(window.inventory) ? window.inventory.find(item => String(item?.name || "").trim().toLowerCase() === typed.toLowerCase()) : null);
+              const partEl = row.querySelector('[data-col="partNumber"]');
+              const costEl = row.querySelector('[data-col="cost"]');
+              if (task || inv){
+                const taskPn = String(task?.pn || "").trim();
+                const taskPrice = Number(task?.price);
+                const invPn = String(inv?.pn || "").trim();
+                const invPrice = Number(inv?.price);
+                if (partEl instanceof HTMLInputElement) partEl.value = String(taskPn || invPn || partEl.value || "");
+                if (costEl instanceof HTMLInputElement){
+                  if (Number.isFinite(taskPrice)) costEl.value = String(taskPrice);
+                  else if (Number.isFinite(invPrice)) costEl.value = String(invPrice);
+                }
               }
             }
           }
@@ -12836,28 +12998,24 @@ const appendEmptyRow = (focusFirst = false)=>{
           saveWeekRowsFromDom();
           renderRangeTable();
         });
-        weekRowsBody.addEventListener("change", event => {
-          const input = event.target;
-          if (!(input instanceof HTMLInputElement)) return;
-          if (input.getAttribute("data-col") !== "purchased") return;
-          const key = String(input.value || "").trim().toLowerCase();
-          if (!key) return;
-          const template = purchaseTemplates.get(key) || Array.from(purchaseTemplates.entries()).find(([name]) => name.includes(key))?.[1];
-          if (!template) return;
-          const row = input.closest("tr[data-receipt-row]");
-          applyTemplateToRow(row, template);
-          const inv = findInventoryByNameLike(input.value || "");
-          if (row && inv){
-            const invSel = row.querySelector('[data-col="inventoryItemId"]');
-            if (invSel instanceof HTMLSelectElement) invSel.value = String(inv.id || "");
+        weekRowsBody.addEventListener("click", event => {
+          const target = event.target instanceof HTMLElement ? event.target : null;
+          if (!target) return;
+          if (target.getAttribute("data-col") === "removeRow"){
+            const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]"));
+            if (rows.length <= 1){ if (typeof toast === "function") toast("At least one row is required."); return; }
+            target.closest("tr[data-receipt-row]")?.remove();
+            recomputeWeekTotals(); saveWeekRowsFromDom(); renderRangeTable(); renderCentralSpendRows();
+            return;
           }
-          recomputeWeekTotals();
-          hasUnsavedReceiptChanges = true;
-          hasExplicitSaveSinceEdit = false;
-          saveWeekRowsFromDom();
-          rebuildPurchaseTemplates();
-          renderRangeTable();
-          renderCentralSpendRows();
+          if (target.getAttribute("data-col") === "goTask"){
+            const row = target.closest("tr[data-receipt-row]");
+            const purchased = String(row?.querySelector('[data-col="purchased"]')?.value || "").trim().toLowerCase();
+            const inv = (Array.isArray(inventory) ? inventory : []).find(item => String(item?.name || "").trim().toLowerCase() === purchased);
+            const taskId = inv && inv.linkedTaskId != null ? String(inv.linkedTaskId) : "";
+            if (taskId && typeof openSettingsAndReveal === "function"){ openSettingsAndReveal(taskId); }
+            else if (typeof window.showScreen === "function"){ window.showScreen("settings"); }
+          }
         });
       };
       bindRowEvents();
@@ -12894,6 +13052,40 @@ const appendEmptyRow = (focusFirst = false)=>{
           await savePurchaseHistoryWeek({ showInlineStatus: true });
           saveWeekBtn.disabled = false;
           saveWeekBtn.textContent = prevLabel || "Save week";
+        });
+      }
+      const quickAddBtn = modal.querySelector("[data-receipt-quick-add-task]");
+      if (quickAddBtn instanceof HTMLButtonElement){
+        quickAddBtn.addEventListener("click", ()=>{
+          ensureMaintenanceTaskModalAPI();
+          saveWeekRowsFromDom();
+          persistReceiptState();
+          const focusRowIndex = Math.max(0, (weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelectorAll("tr[data-receipt-row]").length : 1) - 1);
+          const opener = typeof window.__openMaintenanceTaskModal === "function" ? window.__openMaintenanceTaskModal : null;
+          if (opener){
+            const opened = opener({
+              source: "cost-analysis",
+              onSaved: ()=>{
+                rebuildPurchaseTemplates();
+                renderWeekRows();
+                renderRangeTable();
+                renderCentralSpendRows();
+                const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
+                if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
+              },
+              onClosed: ()=>{
+                const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
+                if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
+              }
+            });
+            const modalEl = document.getElementById("taskModal");
+            if (!opened){ if (typeof toast === "function") toast("Add Task modal failed to open"); return; }
+            if (!(modalEl instanceof HTMLElement)){ if (typeof toast === "function") toast("Add Task modal DOM missing"); return; }
+            return;
+          }
+          if (typeof toast === "function"){
+            toast("Add Task modal opener missing");
+          }
         });
       }
       if (clearAllBtn instanceof HTMLButtonElement){
@@ -13183,6 +13375,10 @@ const appendEmptyRow = (focusFirst = false)=>{
         modal.hidden = true;
         modal.setAttribute("aria-hidden", "true");
         document.body.classList.remove("cost-receipt-modal-open");
+        const taskModalEl = document.getElementById("taskModal");
+        if (!(taskModalEl instanceof HTMLElement) || taskModalEl.hidden){
+          document.body.classList.remove("modal-open");
+        }
         window.costPurchaseHistoryModalOpen = false;
       };
       if (typeof window !== "undefined"){
