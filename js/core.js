@@ -3019,6 +3019,95 @@ function buildMaintenanceCompatibilityStream(){
 
 window.detectMaintenanceRecordSystem = detectMaintenanceRecordSystem;
 window.buildMaintenanceCompatibilityStream = buildMaintenanceCompatibilityStream;
+function runMaintenanceV2SafetyChecks(){
+  const result = { ok: true, errors: [], warnings: [], info: [], counts: {} };
+  const push = (bucket, code, message, meta)=> result[bucket].push({ code, message, meta: meta || null });
+  const arraysToCheck = ["maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","tasksInterval","tasksAsReq","cuttingJobs","completedCuttingJobs","inventory","receiptTrackerWeeks"];
+  arraysToCheck.forEach(key => {
+    if (!Array.isArray(window[key])) push("warnings", "missing_array", `${key} is missing or not an array`, { key, type: typeof window[key] });
+  });
+  const tasks = Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : [];
+  const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
+  const occurrences = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+  const taskMap = new Map(tasks.filter(t => t && t.id != null).map(t => [String(t.id), t]));
+  const instanceMap = new Map(instances.filter(i => i && i.id != null).map(i => [String(i.id), i]));
+  const lifecycleByRoot = new Map();
+  const activeCompletedRoots = new Set();
+  const orphanCompletedRoots = new Set();
+  occurrences.forEach((event, idx) => {
+    if (!event || typeof event !== "object" || detectMaintenanceRecordSystem(event) !== "v2") return;
+    const rootOccurrenceId = String(event.rootOccurrenceId || "");
+    const eventType = String(event.eventType || event.type || "").toLowerCase();
+    const instanceId = String(event.instanceId || "");
+    const taskId = String(event.taskId || (instanceMap.get(instanceId)?.taskId || "") || "");
+    if (String(event.instanceMode || instanceMap.get(instanceId)?.instanceMode || "").toLowerCase() === "repeat"){
+      if (!rootOccurrenceId) push("errors", "repeat_missing_root", "Repeat V2 event is missing rootOccurrenceId", { idx, eventType });
+      if (!instanceId) push("errors", "repeat_missing_instance", "Repeat V2 event is missing instanceId", { idx, rootOccurrenceId });
+      if (!taskId) push("errors", "repeat_missing_task", "Repeat V2 event taskId cannot be resolved", { idx, rootOccurrenceId, instanceId });
+    }
+    if (!rootOccurrenceId) return;
+    const state = lifecycleByRoot.get(rootOccurrenceId) || { terminal: new Set(), movedCount: 0 };
+    if (["completed","scheduled","removed","skipped"].includes(eventType)) state.terminal.add(eventType);
+    if (eventType === "moved") state.movedCount += 1;
+    lifecycleByRoot.set(rootOccurrenceId, state);
+  });
+  lifecycleByRoot.forEach((state, rootOccurrenceId) => {
+    if (state.terminal.size > 1) push("warnings", "multiple_terminal_states", "Root occurrence has multiple lifecycle terminal states", { rootOccurrenceId, states: Array.from(state.terminal) });
+    if (state.movedCount > 0 && state.terminal.size > 1) push("warnings", "moved_overwrite_risk", "Moved events may be conflicting with lifecycle transitions", { rootOccurrenceId, movedCount: state.movedCount });
+    if (state.terminal.has("completed") && (state.terminal.has("removed") || state.terminal.has("skipped"))) push("errors", "completed_removed_conflict", "Removed/skipped root appears completed", { rootOccurrenceId });
+    if (state.terminal.has("completed") && !state.terminal.has("removed") && !state.terminal.has("skipped")) activeCompletedRoots.add(rootOccurrenceId);
+  });
+  instances.forEach((instance, idx) => {
+    if (!instance || typeof instance !== "object") return;
+    if (String(instance.instanceMode || "").toLowerCase() !== "repeat") return;
+    const repeatRule = instance.repeatRule && typeof instance.repeatRule === "object" ? instance.repeatRule : null;
+    const basis = String(repeatRule?.basis || "");
+    if (!repeatRule) push("errors", "repeat_missing_rule", "Repeat instance is missing repeatRule", { idx, instanceId: instance.id || null });
+    if (!["machine_hours","calendar_day","calendar_week","calendar_month"].includes(basis)) push("errors", "repeat_invalid_basis", "Repeat basis is invalid", { idx, instanceId: instance.id || null, basis });
+    if (String(repeatRule?.endMode || "").toLowerCase() === "after_count" && !(Number.isFinite(Number(repeatRule?.endCount)) && Number(repeatRule.endCount) > 0)) push("errors", "repeat_invalid_end_count", "after_count repeat rule requires valid endCount", { idx, instanceId: instance.id || null });
+    if (repeatRule && repeatRule.rollingPreviewOnly === true) push("warnings", "rolling_preview_only", "Repeat rule uses rolling preview only", { idx, instanceId: instance.id || null });
+    if (String(repeatRule?.endMode || "").toLowerCase() === "after_count" && repeatRule?.rollingRefill === true) push("warnings", "after_count_rolling_refill", "after_count should not use rolling refill", { idx, instanceId: instance.id || null });
+    if (basis === "machine_hours" && !(Number.isFinite(Number(repeatRule?.intervalHours)) && Number(repeatRule.intervalHours) > 0)) push("errors", "machine_hours_missing_interval", "machine_hours repeat rule requires intervalHours", { idx, instanceId: instance.id || null });
+    const task = taskMap.get(String(instance.taskId || ""));
+    if (basis === "machine_hours" && String(task?.mode || "").toLowerCase() === "asreq") push("warnings", "asreq_machine_hours", "As Required task is using machine_hours basis", { idx, instanceId: instance.id || null, taskId: instance.taskId || null });
+  });
+  const compatibilityRows = typeof window.buildMaintenanceCompatibilityStream === "function" ? (Array.isArray(window.buildMaintenanceCompatibilityStream()) ? window.buildMaintenanceCompatibilityStream() : []) : [];
+  const v2Rows = compatibilityRows.filter(row => row && String(row.sourceSystem || "").toLowerCase() === "v2");
+  const completedV2Rows = v2Rows.filter(row => row.isCompleted === true && String(row.lifecycleStatus || row.status || "").toLowerCase() === "completed");
+  const v2CalendarChips = Array.isArray(window.taskEvents)
+    ? window.taskEvents.filter(chip => chip && String(chip.sourceSystem || "").toLowerCase() === "v2" && String(chip.lifecycleStatus || chip.status || "").toLowerCase() === "completed")
+    : [];
+  const tableRows = Array.isArray(window.costAnalysisDataCenter?.maintenanceDataTable) ? window.costAnalysisDataCenter.maintenanceDataTable : [];
+  const v2TableRows = tableRows.filter(row => String(row?.sourceSystem || "").toLowerCase() === "v2");
+  const seenCompletedRoots = new Set();
+  completedV2Rows.forEach(row => {
+    const root = String(row.rootOccurrenceId || "");
+    if (!root) push("errors", "v2_row_missing_root", "V2 completed reporting row missing rootOccurrenceId", { streamId: row.streamId || null });
+    if (!String(row.displayDateISO || row.dateISO || "").trim()) push("warnings", "v2_row_missing_display_date", "V2 completed reporting row missing displayDateISO", { rootOccurrenceId: root || null });
+    if (root && seenCompletedRoots.has(root)) push("warnings", "duplicate_root_reporting", "Duplicate V2 completed rootOccurrenceId in reporting rows", { rootOccurrenceId: root });
+    if (root) seenCompletedRoots.add(root);
+  });
+  activeCompletedRoots.forEach(root => {
+    if (!seenCompletedRoots.has(root)) orphanCompletedRoots.add(root);
+  });
+  orphanCompletedRoots.forEach(root => push("warnings", "completed_not_in_reporting", "Completed V2 root missing from reporting stream", { rootOccurrenceId: root }));
+  result.counts = {
+    v2TasksCount: tasks.length,
+    v2InstancesCount: instances.length,
+    v2OccurrencesCount: occurrences.length,
+    completedV2RootsCount: activeCompletedRoots.size,
+    compatibilityV2CompletedRowsCount: completedV2Rows.length,
+    centralV2RowsCount: v2TableRows.length,
+    calendarV2CompletedChipsCount: v2CalendarChips.length,
+    orphanCandidateCount: orphanCompletedRoots.size
+  };
+  if (!Array.isArray(window.completedCuttingJobs)) push("errors", "missing_completed_cutting_jobs", "completedCuttingJobs is missing or invalid");
+  if (!(Array.isArray(window.cuttingJobs) || (window.cuttingJobs && typeof window.cuttingJobs === "object"))) push("errors", "invalid_cutting_jobs", "cuttingJobs is neither an array nor object");
+  result.ok = result.errors.length === 0;
+  if (window.DEBUG_MODE) console.debug("[maintenance-v2-safety-checks]", result);
+  return result;
+}
+window.runMaintenanceV2SafetyChecks = runMaintenanceV2SafetyChecks;
 
 function ensureJobCategories(){
   const folders = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();

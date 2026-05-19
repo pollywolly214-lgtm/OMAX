@@ -2235,6 +2235,15 @@ function viewCosts(model){
                 </select>
                 <div class="cost-data-center-search-suggestions" data-maintenance-search-suggestions hidden></div>
               </div>
+              ${window.DEBUG_MODE ? `
+                <div class="card" style="margin:10px 0;padding:10px;">
+                  <strong>Developer Debug</strong>
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+                    <button type="button" class="secondary" data-run-maintenance-v2-safety-checks>Run Maintenance V2 Safety Checks</button>
+                    <span class="small muted" data-maintenance-v2-safety-summary>No checks run yet.</span>
+                  </div>
+                </div>
+              ` : ""}
               ${maintenanceDataTable.length ? `
             <table class="cost-table" style="margin-top:10px">
               <thead>
