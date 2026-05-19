@@ -2841,65 +2841,143 @@ function buildMaintenanceCompatibilityStream(){
     if (!id) return;
     instanceMap.set(id, instance);
   });
-  const seenRoots = new Set();
-  let v2RowsGenerated = 0;
-  let v2CompletedRows = 0;
-  let v2RemovedOrSkipped = 0;
-  let v2DuplicateRootsSkipped = 0;
 
-  v2Occurrences.forEach(event => {
+  const v2RootGroups = new Map();
+  v2Occurrences.forEach((event, idx) => {
     if (!event || typeof event !== "object") return;
     if (detectMaintenanceRecordSystem(event) !== "v2") return;
-    const lifecycleStatus = String(event.lifecycleStatus || event.status || event.eventType || event.type || "unknown");
-    const isCompleted = lifecycleStatus === "completed";
-    const isRemoved = lifecycleStatus === "removed";
-    const isSkipped = lifecycleStatus === "skipped";
-    if (!isCompleted || isRemoved || isSkipped) {
-      if (isRemoved || isSkipped) v2RemovedOrSkipped += 1;
-      return;
-    }
     const rootOccurrenceId = event.rootOccurrenceId != null ? String(event.rootOccurrenceId) : "";
     if (!rootOccurrenceId) return;
-    if (seenRoots.has(rootOccurrenceId)) {
-      v2DuplicateRootsSkipped += 1;
+    const list = v2RootGroups.get(rootOccurrenceId) || [];
+    list.push({ event, idx });
+    v2RootGroups.set(rootOccurrenceId, list);
+  });
+
+  let completedRowsEmitted = 0;
+  let scheduledUncompletedRootsSkipped = 0;
+  let removedSkippedRootsSkipped = 0;
+  let movedCompletedRowsEmitted = 0;
+  let duplicateRootsSkipped = 0;
+  const emittedRoots = new Set();
+
+  v2RootGroups.forEach((entries, rootOccurrenceId) => {
+    const sorted = entries.slice().sort((a, b) => {
+      const aTime = Date.parse(String(a.event.recordedAtISO || ""));
+      const bTime = Date.parse(String(b.event.recordedAtISO || ""));
+      const aValid = Number.isFinite(aTime);
+      const bValid = Number.isFinite(bTime);
+      if (aValid && bValid && aTime !== bTime) return aTime - bTime;
+      if (aValid && !bValid) return -1;
+      if (!aValid && bValid) return 1;
+      return a.idx - b.idx;
+    });
+    const firstEvent = sorted[0]?.event || null;
+    if (!firstEvent) return;
+    const instanceId = firstEvent.instanceId != null ? String(firstEvent.instanceId) : "";
+    const inst = instanceMap.get(instanceId) || null;
+    const taskId = firstEvent.taskId != null ? String(firstEvent.taskId) : (inst && inst.taskId != null ? String(inst.taskId) : "");
+    const task = taskMap.get(taskId) || null;
+
+    const rootDateHint = String(rootOccurrenceId).match(/(\d{4}-\d{2}-\d{2})/)?.[1] || "";
+    let originalDateISO = normalizeDateISO(firstEvent.originalDateISO || firstEvent.effectiveDateISO || firstEvent.dateISO || rootDateHint || "");
+    let displayDateISO = normalizeDateISO(firstEvent.displayDateISO || firstEvent.effectiveDateISO || firstEvent.dateISO || originalDateISO || "");
+    let effectiveDateISO = normalizeDateISO(firstEvent.effectiveDateISO || displayDateISO || originalDateISO || "");
+    let lifecycleStatus = "scheduled";
+    let note = null;
+    let loggedHours = null;
+    let isMoved = false;
+    let isStoppedChain = inst && String(inst.status || "") === "stopped";
+    let latestEventType = null;
+    let latestRecordedAtISO = null;
+    const resolvedEventIds = [];
+
+    sorted.forEach(({ event }) => {
+      const eventType = String(event.eventType || event.type || "");
+      latestEventType = eventType || latestEventType;
+      latestRecordedAtISO = event.recordedAtISO || latestRecordedAtISO;
+      if (event.id != null) resolvedEventIds.push(String(event.id));
+
+      const nextOriginal = normalizeDateISO(event.originalDateISO || event.payload?.originalDateISO || "");
+      if (nextOriginal) originalDateISO = nextOriginal;
+      const nextEffective = normalizeDateISO(event.effectiveDateISO || event.dateISO || "");
+      if (nextEffective) effectiveDateISO = nextEffective;
+      if (!displayDateISO) displayDateISO = effectiveDateISO || originalDateISO;
+
+      if (eventType === "moved") {
+        const movedTo = normalizeDateISO(event.payload?.toDateISO || event.displayDateISO || event.effectiveDateISO || "");
+        if (movedTo) {
+          displayDateISO = movedTo;
+          isMoved = true;
+        }
+      }
+      if (eventType === "note_set" && event.payload && event.payload.note != null) note = String(event.payload.note);
+      else if (event.note != null) note = String(event.note);
+
+      const payloadHours = event.payload && event.payload.hours;
+      if (eventType === "hours_set" && Number.isFinite(Number(payloadHours))) loggedHours = Number(payloadHours);
+      else if (Number.isFinite(Number(event.loggedHours))) loggedHours = Number(event.loggedHours);
+      else if (Number.isFinite(Number(event.hours))) loggedHours = Number(event.hours);
+
+      if (eventType === "completed") lifecycleStatus = "completed";
+      if (eventType === "uncompleted") lifecycleStatus = "scheduled";
+      if (eventType === "removed") lifecycleStatus = "removed";
+      if (eventType === "skipped") lifecycleStatus = "skipped";
+      if (eventType === "stopped" || event.lifecycleStatus === "stopped") isStoppedChain = true;
+      if (event.lifecycleStatus === "completed") lifecycleStatus = "completed";
+      if (event.lifecycleStatus === "scheduled") lifecycleStatus = "scheduled";
+      if (event.lifecycleStatus === "removed") lifecycleStatus = "removed";
+      if (event.lifecycleStatus === "skipped") lifecycleStatus = "skipped";
+    });
+
+    if (!displayDateISO) displayDateISO = normalizeDateISO(effectiveDateISO || originalDateISO || "");
+    if (!effectiveDateISO) effectiveDateISO = normalizeDateISO(displayDateISO || originalDateISO || "");
+    if (!originalDateISO) originalDateISO = normalizeDateISO(effectiveDateISO || displayDateISO || rootDateHint || "");
+
+    if (lifecycleStatus === "removed" || lifecycleStatus === "skipped") {
+      removedSkippedRootsSkipped += 1;
       return;
     }
-    seenRoots.add(rootOccurrenceId);
+    if (lifecycleStatus !== "completed") {
+      scheduledUncompletedRootsSkipped += 1;
+      return;
+    }
+    if (emittedRoots.has(rootOccurrenceId)) {
+      duplicateRootsSkipped += 1;
+      return;
+    }
+    emittedRoots.add(rootOccurrenceId);
 
-    const occurrenceId = event.id != null ? String(event.id) : "";
-    const instanceId = event.instanceId != null ? String(event.instanceId) : "";
-    const inst = instanceMap.get(instanceId) || null;
-    const taskId = event.taskId != null ? String(event.taskId) : (inst && inst.taskId != null ? String(inst.taskId) : "");
-    const task = taskMap.get(taskId) || null;
-    const originalDateISO = normalizeDateISO(event.originalDateISO || event.payload?.originalDateISO || event.dateISO || "");
-    const displayDateISO = normalizeDateISO(event.displayDateISO || event.payload?.displayDateISO || event.effectiveDateISO || originalDateISO || "");
-    const effectiveDateISO = normalizeDateISO(event.effectiveDateISO || displayDateISO || originalDateISO || "");
+    const repeatRule = inst && inst.repeatRule && typeof inst.repeatRule === "object" ? inst.repeatRule : null;
+    const repeatBasis = (repeatRule && repeatRule.basis) || inst?.repeatBasis || firstEvent.repeatBasis || task?.repeatBasis || null;
+    const repeatInterval = repeatBasis === "machine_hours"
+      ? (repeatRule && repeatRule.intervalHours != null ? repeatRule.intervalHours : (inst?.repeatInterval ?? firstEvent.repeatInterval ?? task?.repeatInterval ?? null))
+      : (repeatRule && repeatRule.every != null ? repeatRule.every : (inst?.repeatInterval ?? firstEvent.repeatInterval ?? task?.repeatInterval ?? null));
+
     out.push(createMaintenanceCompatibilityRow({
       streamId: `v2-occurrence:${rootOccurrenceId}`,
       sourceSystem: "v2",
       taskId: taskId || null,
-      taskName: String(event.taskName || (task && task.name) || "").trim(),
+      taskName: String(firstEvent.taskName || (task && task.name) || "").trim(),
       instanceId: instanceId || null,
-      occurrenceId: occurrenceId || null,
+      occurrenceId: rootOccurrenceId,
       rootOccurrenceId,
       originalDateISO,
       displayDateISO,
       effectiveDateISO,
-      dateISO: displayDateISO || effectiveDateISO,
+      dateISO: displayDateISO,
       status: lifecycleStatus,
       lifecycleStatus,
-      eventType: event.eventType != null ? String(event.eventType) : (event.type != null ? String(event.type) : null),
-      eventRecordedAtISO: event.recordedAtISO || null,
-      isCompleted,
-      isRemoved,
-      isMoved: event.eventType === "moved" || Boolean(event.displayDateISO),
-      isStoppedChain: event.eventType === "stopped" || lifecycleStatus === "stopped",
-      repeatBasis: event.repeatBasis || inst?.repeatBasis || task?.repeatBasis || null,
-      repeatInterval: event.repeatInterval ?? inst?.repeatInterval ?? task?.repeatInterval ?? null,
+      eventType: latestEventType,
+      eventRecordedAtISO: latestRecordedAtISO || null,
+      isCompleted: lifecycleStatus === "completed",
+      isRemoved: lifecycleStatus === "removed",
+      isMoved,
+      isStoppedChain,
+      repeatBasis,
+      repeatInterval,
       instanceMode: inst && inst.instanceMode ? String(inst.instanceMode) : null,
-      loggedHours: event.loggedHours ?? event.hours ?? event.payload?.hours ?? null,
-      note: event.note != null ? String(event.note) : (event.payload && event.payload.note != null ? String(event.payload.note) : null),
-      hours: event.hours,
+      loggedHours,
+      note,
       categoryRef: task && (task.categoryRef ?? task.folderId) != null ? String(task.categoryRef ?? task.folderId) : null,
       categoryId: task && (task.categoryId ?? task.cat) != null ? String(task.categoryId ?? task.cat) : null,
       inventoryRef: task && task.inventoryRef != null ? String(task.inventoryRef) : (task && task.inventoryId != null ? String(task.inventoryId) : null),
@@ -2909,28 +2987,31 @@ function buildMaintenanceCompatibilityStream(){
         sourceField: "maintenanceOccurrencesV2",
         taskId: taskId || null,
         instanceId: instanceId || null,
-        occurrenceId: occurrenceId || null,
         rootOccurrenceId,
+        resolvedEventIds,
+        groupedEventCount: sorted.length,
         originalDateISO,
         displayDateISO,
         taskRecordSystem: task ? detectMaintenanceRecordSystem(task) : null,
         instanceRecordSystem: inst ? detectMaintenanceRecordSystem(inst) : null,
-        occurrenceRecordSystem: detectMaintenanceRecordSystem(event)
+        occurrenceRecordSystem: "v2"
       }
     }));
-    v2RowsGenerated += 1;
-    if (isCompleted) v2CompletedRows += 1;
-  });
 
+    completedRowsEmitted += 1;
+    if (isMoved) movedCompletedRowsEmitted += 1;
+  });
   if (window.DEBUG_MODE){
     console.debug("[maintenance-v2-reporting]", {
       v2TasksCount: v2Tasks.length,
       v2InstancesCount: v2Instances.length,
       v2OccurrencesCount: v2Occurrences.length,
-      v2ReportingRowsGenerated: v2RowsGenerated,
-      completedRowsCount: v2CompletedRows,
-      removedSkippedRowsCount: v2RemovedOrSkipped,
-      duplicateRootsSkipped: v2DuplicateRootsSkipped
+      rootGroupsCount: v2RootGroups.size,
+      completedRowsEmitted,
+      scheduledUncompletedRootsSkipped,
+      removedSkippedRootsSkipped,
+      movedCompletedRowsEmitted,
+      duplicateRootsSkipped
     });
   }
   return out;
