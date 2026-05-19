@@ -8302,7 +8302,7 @@ function ensureMaintenanceTaskModalAPI(){
     if (hasVisibleTaskModal || hasVisibleReceiptModal) document.body?.classList.add("modal-open");
     else document.body?.classList.remove("modal-open");
   };
-  const close = ({ trigger = "closed" } = {})=>{
+  const close = ({ trigger = "closed", suppressCallback = false } = {})=>{
     const modal = ensureModalDom();
     if (!(modal instanceof HTMLElement)) return;
     const session = window.__maintenanceTaskModalSession && typeof window.__maintenanceTaskModalSession === "object"
@@ -8314,7 +8314,7 @@ function ensureMaintenanceTaskModalAPI(){
     syncModalLock();
     const callback = trigger === "saved" ? session?.onSaved : session?.onClosed;
     window.__maintenanceTaskModalSession = null;
-    if (typeof callback === "function"){
+    if (!suppressCallback && typeof callback === "function"){
       try { callback(session?.savedTask || null); } catch (err){ console.warn("Maintenance task modal callback failed", err); }
     }
   };
@@ -8375,11 +8375,18 @@ function ensureMaintenanceTaskModalAPI(){
       const session = window.__maintenanceTaskModalSession && typeof window.__maintenanceTaskModalSession === "object"
         ? window.__maintenanceTaskModalSession
         : null;
+      const savedCallback = session && typeof session.onSaved === "function" ? session.onSaved : null;
       if (session) session.savedTask = createdTask;
-      if (createdTask && typeof window.__promptAddInventoryForTask === "function"){
-        setTimeout(()=>{ try { window.__promptAddInventoryForTask(createdTask); } catch (err){ console.warn("Inventory link prompt failed", err); } }, 60);
-      }
-      close({ trigger: "saved" });
+      close({ trigger: "saved", suppressCallback: true });
+      const runPostSave = async ()=>{
+        if (createdTask && typeof window.__promptAddInventoryForTask === "function"){
+          try { await window.__promptAddInventoryForTask(createdTask); } catch (err){ console.warn("Inventory link prompt failed", err); }
+        }
+        if (typeof savedCallback === "function"){
+          try { savedCallback(createdTask); } catch (err){ console.warn("Maintenance task modal post-save callback failed", err); }
+        }
+      };
+      setTimeout(()=>{ runPostSave(); }, 60);
     }, true);
   }
   if (!window.__maintenanceTaskModalClickBound){
