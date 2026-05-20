@@ -987,7 +987,8 @@ function sanitizeJobFileReferenceForFirestore(fileRef){
     attachedAtISO: String(fileRef.attachedAtISO || fileRef.addedAt || new Date().toISOString()),
     localRootSignature: String(fileRef.localRootSignature || ""),
     localDeviceId: String(fileRef.localDeviceId || ""),
-    ...(fileRef.note ? { note: String(fileRef.note) } : {})
+    ...(fileRef.note ? { note: String(fileRef.note) } : {}),
+    ...(fileRef.rootLocationHint ? { rootLocationHint: String(fileRef.rootLocationHint) } : {})
   };
 }
 
@@ -1075,9 +1076,28 @@ function verifyRootSignatureMatches(signature){
   return { ok: expected === signature, expected };
 }
 
+function describeLocalRootPreviewError(err){
+  const msg = String(err?.message || err || "").toLowerCase();
+  if (msg.includes("notallowederror") || msg.includes("permission") || msg.includes("denied")){
+    return "Preview unavailable: this browser lost access to your WJ Cuts root folder. Re-open OneDrive setup and re-select the root folder.";
+  }
+  if (msg.includes("notfounderror") || msg.includes("not found")){
+    return "Preview unavailable: this file was not found under your selected WJ Cuts root folder. Verify the same shared root folder is selected.";
+  }
+  return "Preview unavailable: unable to read this file from your WJ Cuts root folder. Re-open OneDrive setup and verify root folder access.";
+}
+
 async function resolveLocalFileFromRelativePath(relativePath){
   const rootHandle = await readLocalRootHandle();
-  if (!rootHandle) return null;
+  if (!rootHandle){
+    throw new Error("No saved WJ Cuts root folder on this device.");
+  }
+  const perm = typeof rootHandle.queryPermission === "function"
+    ? await rootHandle.queryPermission({ mode: "read" })
+    : "granted";
+  if (perm !== "granted"){
+    throw new Error("WJ Cuts root folder permission is not granted.");
+  }
   const rel = String(relativePath || "").replace(/^\/+/, "");
   if (!rel) return null;
   const segments = rel.split("/").filter(Boolean);
@@ -1511,23 +1531,10 @@ function readFileAsDataUrl(file){
 
 async function filesToAttachments(fileList){
   const files = Array.from(fileList || []);
-  const attachments = [];
-  for (const file of files){
-    try {
-      attachments.push({
-        id: genId(file.name || "job_file"),
-        name: file.name || "Attachment",
-        type: file.type || "",
-        size: typeof file.size === "number" ? file.size : null,
-        source: "upload_requires_reference",
-        attachedAtISO: new Date().toISOString()
-      });
-    } catch (err){
-      console.error("Unable to read file", err);
-      toast("Use Attach from Reference Folder so this file can be saved as a WJ Cuts relative path.");
-    }
+  if (files.length){
+    toast("Local uploads are temporary and not saved as durable cloud file references. Use Attach from Reference Folder.");
   }
-  return attachments;
+  return [];
 }
 
 const JOB_ONEDRIVE_PREVIEW_CACHE_KEY = "cutting_job_onedrive_preview_cache_v1";
@@ -1581,7 +1588,7 @@ async function resolveOneDriveAttachmentPreview(file){
       const text = window.dxfPreview.arrayBufferToText(bytes);
       const svg = window.dxfPreview.renderCadToSvgDataUrl(text);
       if (!svg){
-        file.preview = { mode: "message", content: "2D preview unavailable for this file." };
+        file.preview = { mode: "message", content: diagnosePreviewFailure(file) };
         return false;
       }
       file.preview = { mode: "image", content: svg };
@@ -1591,7 +1598,7 @@ async function resolveOneDriveAttachmentPreview(file){
       }
       return true;
     } catch (_err){
-      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this OneDrive file." };
+      file.preview = { mode: "message", content: diagnosePreviewFailure(file) };
       return false;
     } finally {
       oneDrivePreviewInFlight.delete(inFlightKey);
@@ -1600,6 +1607,25 @@ async function resolveOneDriveAttachmentPreview(file){
 
   oneDrivePreviewInFlight.set(inFlightKey, task);
   return task;
+}
+
+function diagnosePreviewFailure(file, context = ""){
+  const source = String(file?.source || "");
+  const ext = fileExtFromName(String(file?.name || ""));
+  const href = String(file?.dataUrl || file?.url || "").trim();
+  if (source === "onedrive"){
+    if (!file?.driveId || !file?.itemId) return "Preview unavailable: OneDrive file metadata is incomplete. Relink this file from OneDrive.";
+    return "Preview unavailable: OneDrive content could not be loaded. Check OneDrive sign-in and file permissions, then try again.";
+  }
+  if (source === "wj_cuts_reference"){
+    return "Preview unavailable: unable to read this file from the selected WJ Cuts root. Re-select root folder and verify this exact file path exists.";
+  }
+  if ([".dxf", ".ord", ".omx"].includes(ext)){
+    if (!href) return "Preview unavailable: no file content URL is saved. Re-attach from Reference Folder or add a direct OneDrive URL.";
+    if (/^https?:\/\//i.test(href)) return "Preview unavailable: remote CAD file could not be fetched. Check the link and access permissions.";
+    return "Preview unavailable: CAD data could not be decoded for preview. Re-attach the source file.";
+  }
+  return context || "Preview unavailable: unsupported format or missing data for this attachment.";
 }
 
 async function resolveAttachmentPreview(file){
@@ -1624,7 +1650,7 @@ async function resolveAttachmentPreview(file){
     try {
       const localFile = await resolveWJCutsRelativePath(file.relativePath);
       if (!localFile){
-        file.preview = file.preview || { mode: "message", content: "File reference saved, but the file was not found under your selected WJ Cuts folder." };
+        file.preview = { mode: "message", content: "Preview unavailable: file reference was saved, but the file is missing under your selected WJ Cuts root folder." };
         return false;
       }
       const preview = await buildAttachmentPreview(localFile);
@@ -1632,10 +1658,10 @@ async function resolveAttachmentPreview(file){
         file.preview = preview;
         return preview.mode === "image";
       }
-      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this WJ Cuts referenced file type." };
+      file.preview = { mode: "message", content: "Preview unavailable: this WJ Cuts file type cannot be rendered as a 2D preview." };
       return false;
-    } catch (_err){
-      file.preview = file.preview || { mode: "message", content: "Preview unavailable for this WJ Cuts referenced file." };
+    } catch (err){
+      file.preview = { mode: "message", content: describeLocalRootPreviewError(err) };
       return false;
     }
   }
@@ -1660,10 +1686,10 @@ async function resolveAttachmentPreview(file){
         file.preview = { mode: "image", content: svg };
         return true;
       }
-      file.preview = file.preview || { mode: "message", content: "2D preview unavailable for this file." };
+      file.preview = { mode: "message", content: diagnosePreviewFailure(file) };
       return false;
     } catch (_err){
-      file.preview = file.preview || { mode: "message", content: "2D preview unavailable for this file." };
+      file.preview = { mode: "message", content: diagnosePreviewFailure(file) };
       return false;
     }
   }
@@ -19370,9 +19396,12 @@ function renderJobs(){
   const oneDriveFolderStatus = document.querySelector("[data-onedrive-folder-status]");
   const oneDriveLibraryStatus = document.querySelector("[data-onedrive-library-status]");
   const oneDriveRootStatus = document.querySelector("[data-onedrive-root-status]");
+  const oneDriveRootPathStatus = document.querySelector("[data-onedrive-root-path]");
   const oneDriveDeviceStatus = document.querySelector("[data-onedrive-device-status]");
   const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
   const oneDriveRootPickerBtn = document.getElementById("jobOneDriveRootPickerBtn");
+
+  let pendingAttachTarget = null;
 
 
   const getSharedConfig = ()=>{
@@ -19380,6 +19409,20 @@ function renderJobs(){
     return normalizeOneDriveJobConfig(cfg);
   };
 
+
+  const getWJCutsRootStatus = async ()=>{
+    const config = getSharedConfig();
+    if (!supportsLocalRootPicker()) return { supported:false, handle:null, hasSavedHandle:false, permission:"unsupported", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Unsupported browser" };
+    const handle = await readLocalRootHandle();
+    if (!handle) return { supported:true, handle:null, hasSavedHandle:false, permission:"missing", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Not set" };
+    let permission = "prompt";
+    try { permission = typeof handle.queryPermission === "function" ? await handle.queryPermission({ mode:"read" }) : "granted"; } catch(_e){}
+    if (permission !== "granted") return { supported:true, handle, hasSavedHandle:true, permission, config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Permission needed" };
+    const signature = await computeLocalRootSignature(handle);
+    const expectedSignature = expectedRootSignatureFromJobs();
+    const signatureMatches = !expectedSignature || !signature ? true : signature === expectedSignature;
+    return { supported:true, handle, hasSavedHandle:true, permission:"granted", config, signature, expectedSignature, signatureMatches, message: signatureMatches ? "Verified" : "Mismatch" };
+  };
   const updateSharedConfig = (patch)=>{
     const cfg = getSharedConfig();
     return writeOneDriveJobConfig({ ...cfg, ...patch });
@@ -19387,11 +19430,16 @@ function renderJobs(){
 
   const updateOneDriveWizardStatus = async ()=>{
     const cfg = getSharedConfig();
-    if (oneDriveConnStatus) oneDriveConnStatus.textContent = cfg.localRootSignature ? "Configured" : "Not set";
-    if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = cfg.localRootSignature ? "Verified" : "Not ready";
-    if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = cfg.localRootSignature ? "Ready" : "Setup required";
+    const status = await getWJCutsRootStatus();
+    if (window.DEBUG_MODE) console.info("[cutting-job-files] root status", status);
+    if (oneDriveConnStatus) oneDriveConnStatus.textContent = status.message;
+    if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = status.permission === "granted" ? (status.signatureMatches ? "Verified" : "Mismatch") : (status.hasSavedHandle ? "Permission needed" : "Not set");
+    if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = status.permission === "granted" ? "Ready" : "Setup required";
     if (oneDriveRootStatus){
       oneDriveRootStatus.textContent = cfg.localRootName || "Not set";
+    }
+    if (oneDriveRootPathStatus){
+      oneDriveRootPathStatus.textContent = cfg.folderHint || cfg.localRootName || "Not set";
     }
     if (oneDriveDeviceStatus){
       oneDriveDeviceStatus.textContent = getLocalDeviceId() ? `${getLocalDeviceNumber()} (${getLocalDeviceId()})` : "Unavailable";
@@ -19421,10 +19469,13 @@ function renderJobs(){
         return false;
       }
       await saveLocalRootHandle(handle);
+      const verifyHandle = await readLocalRootHandle();
+      if (!verifyHandle){ toast("Unable to save root handle on this browser."); return false; }
       const cfg = getSharedConfig();
       updateSharedConfig({
         localRootName: String(handle.name || cfg.localRootName || "Configured"),
-        localRootSignature: signature
+        localRootSignature: signature,
+        enabled: true
       });
       await updateOneDriveWizardStatus();
       toast("This computer OneDrive root folder saved and verified.");
@@ -19444,14 +19495,16 @@ function renderJobs(){
     }
     const rootHandle = await readLocalRootHandle();
     if (!rootHandle){
-      toast("Set WJ Cuts Folder to open this file.");
+      pendingAttachTarget = targetJobId ? { mode: "job", jobId: String(targetJobId) } : { mode: "new" };
+      toast("Set this computer’s WJ Cuts root folder before attaching files. The app saves a reference path, not the file itself.");
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] attach blocked root missing", { targetJobId });
       openOneDriveModal();
       return false;
     }
 
     try {
       const cfg = getSharedConfig();
-      const signature = cfg.localRootSignature || await computeLocalRootSignature(rootHandle);
+      const signature = await computeLocalRootSignature(rootHandle);
       if (!signature){
         toast("Unable to verify local OneDrive root folder.");
         return false;
@@ -19501,13 +19554,16 @@ function renderJobs(){
         rootPathStart: "WJ Cuts",
         relativePath: relPath,
         localRootSignature: signature,
+        enabled: true,
         localDeviceId: getLocalDeviceId(),
-        attachedAtISO: new Date().toISOString()
+        attachedAtISO: new Date().toISOString(),
+        rootLocationHint: String(cfg.folderHint || cfg.localRootName || "")
       });
       if (!reference) return false;
       const targetId = String(targetJobId || "");
       if (targetId){
-        const job = cuttingJobs.find(x => String(x?.id) === targetId);
+        const found = findJobRecord(targetId);
+        const job = found && found.job ? found.job : null;
         if (!job){
           toast("Job not found for OneDrive attachment.");
           return false;
@@ -19515,6 +19571,7 @@ function renderJobs(){
         job.files = Array.isArray(job.files) ? job.files : [];
         job.files.push(reference);
         saveCloudDebounced();
+        if (window.DEBUG_MODE) console.info("[cutting-job-files] attached reference", { targetId, relPath });
         toast("WJ Cuts file reference attached to job.");
         renderJobs();
       } else {
@@ -19548,7 +19605,15 @@ function renderJobs(){
     closeFileMenu(); closeActionMenu(); closeHistoryActionMenu(); openOneDriveModal();
   });
   oneDriveRootPickerBtn?.addEventListener("click", async ()=>{
-    await chooseLocalOneDriveRoot();
+    const ok = await chooseLocalOneDriveRoot();
+    if (ok && pendingAttachTarget){
+      const target = pendingAttachTarget;
+      pendingAttachTarget = null;
+      const attached = await attachFromLocalOneDriveRoot(target.mode === "job" ? target.jobId : "");
+      if (attached){
+        closeOneDriveModal();
+      }
+    }
   });
   oneDriveCancelBtns.forEach(btn => btn.addEventListener("click", closeOneDriveModal));
   oneDriveModal?.addEventListener("click", (event)=>{ if (event.target === oneDriveModal) closeOneDriveModal(); });
@@ -20360,10 +20425,12 @@ function renderJobs(){
       const mode = option.getAttribute("data-preview-mode") || "message";
       const contentValue = option.getAttribute("data-preview-content") || "";
       const href = option.getAttribute("data-preview-href") || "";
+      const expectedPath = option.getAttribute("data-preview-expected-path") || "";
       const nameEl = previewRoot.querySelector("[data-preview-name]");
       const imgEl = previewRoot.querySelector("[data-preview-image]");
       const msgEl = previewRoot.querySelector("[data-preview-message]");
       const openEl = previewRoot.querySelector("[data-preview-open]");
+      const pathBtn = previewRoot.querySelector("[data-preview-path-btn]");
       if (nameEl){
         nameEl.textContent = name;
         nameEl.setAttribute("title", name);
@@ -20380,6 +20447,11 @@ function renderJobs(){
       if (openEl instanceof HTMLAnchorElement){
         openEl.href = href;
         openEl.hidden = !href;
+      }
+      if (pathBtn instanceof HTMLButtonElement){
+        pathBtn.hidden = !(mode === "message" && expectedPath);
+        pathBtn.dataset.previewExpectedPath = expectedPath;
+        pathBtn.dataset.previewRootLocation = option.getAttribute("data-preview-root-location") || "";
       }
       return;
     }
@@ -20399,17 +20471,22 @@ function renderJobs(){
     if (e.target.matches("input[data-job-file-input]")){
       const id = e.target.getAttribute("data-job-file-input");
       const idStr = String(id || "");
-      const j = cuttingJobs.find(x => String(x?.id) === idStr);
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
       if (!j){ e.target.value = ""; return; }
       const attachments = await filesToAttachments(e.target.files);
       e.target.value = "";
       if (!attachments.length) return;
       j.files = Array.isArray(j.files) ? j.files : [];
-      toast("Use Attach from Reference Folder so this file can be saved as a WJ Cuts relative path.");
+      j.files.push(...attachments);
+      saveCloudDebounced();
+      toast("Files added. For durable cross-device links, use Attach from Reference Folder.");
+      renderJobs();
     }
   });
 
   const historyBody = content.querySelector(".past-jobs-table tbody");
+  
   historyBody?.addEventListener("change", (e)=>{
     const previewSelect = e.target instanceof Element
       ? e.target.closest("select[data-file-preview-select]")
@@ -20423,10 +20500,12 @@ function renderJobs(){
     const mode = option.getAttribute("data-preview-mode") || "message";
     const contentValue = option.getAttribute("data-preview-content") || "";
     const href = option.getAttribute("data-preview-href") || "";
+    const expectedPath = option.getAttribute("data-preview-expected-path") || "";
     const nameEl = previewRoot.querySelector("[data-preview-name]");
     const imgEl = previewRoot.querySelector("[data-preview-image]");
     const msgEl = previewRoot.querySelector("[data-preview-message]");
     const openEl = previewRoot.querySelector("[data-preview-open]");
+    const pathBtn = previewRoot.querySelector("[data-preview-path-btn]");
     if (nameEl){
       nameEl.textContent = name;
       nameEl.setAttribute("title", name);
@@ -20443,6 +20522,11 @@ function renderJobs(){
     if (openEl instanceof HTMLAnchorElement){
       openEl.href = href;
       openEl.hidden = !href;
+    }
+    if (pathBtn instanceof HTMLButtonElement){
+      pathBtn.hidden = !(mode === "message" && expectedPath);
+      pathBtn.dataset.previewExpectedPath = expectedPath;
+        pathBtn.dataset.previewRootLocation = option.getAttribute("data-preview-root-location") || "";
     }
   });
 
@@ -20465,7 +20549,8 @@ function renderJobs(){
     }
     try {
       const cfg = getSharedConfig();
-      const currentSignature = cfg.localRootSignature;
+      const rootStatus = await getWJCutsRootStatus();
+      const currentSignature = rootStatus.signature || "";
       if (file.localRootSignature && currentSignature && file.localRootSignature !== currentSignature){
         toast("This computer is linked to a different root folder. Reconfigure this computer root folder.");
         openOneDriveModal();
@@ -20506,6 +20591,90 @@ function renderJobs(){
         closeHistoryActionMenu();
         closeActionMenu();
         openFileMenu(id, historyFileTrigger);
+      }
+      return;
+    }
+
+    const fileMenuAdd = e.target.closest("[data-job-file-add]");
+    if (fileMenuAdd){
+      const id = fileMenuAdd.getAttribute("data-job-file-add");
+      if (id){
+        e.preventDefault();
+        if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+        closeFileMenu(); closeActionMenu(); closeHistoryActionMenu();
+        const attached = await attachFromLocalOneDriveRoot(id);
+        if (!attached){ window.pendingJobFocus = { type: "jobRow", id }; renderJobs(); }
+      }
+      return;
+    }
+
+    const upload = e.target.closest("[data-upload-job]");
+    if (upload){
+      const id = upload.getAttribute("data-upload-job");
+      e.preventDefault();
+      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+      closeActionMenu(); closeHistoryActionMenu();
+      content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
+      return;
+    }
+
+    const linkJobFile = e.target.closest("[data-link-job-file]");
+    if (linkJobFile){
+      const id = linkJobFile.getAttribute("data-link-job-file");
+      const idStr = String(id || "");
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
+      if (!j) return;
+      try {
+        const picked = await window.oneDrivePicker.openOneDriveDxfPicker();
+        if (!picked) return;
+        j.files = Array.isArray(j.files) ? j.files : [];
+        j.files.push({ id: genId(picked.fileName || "job_file"), name: picked.fileName || "Linked file", type: "", size: null, source: "onedrive", driveId: picked.driveId || "", itemId: picked.itemId || "", eTag: picked.eTag || "", lastModifiedDateTime: picked.lastModifiedDateTime || "", webUrl: picked.webUrl || "", url: picked.webUrl || "", addedAt: new Date().toISOString() });
+        saveCloudDebounced(); toast("OneDrive DXF linked"); renderJobs();
+      } catch (err){ toast(err?.message || "Unable to link OneDrive DXF."); }
+      return;
+    }
+
+    const editFileLink = e.target.closest("[data-edit-file-link]");
+    if (editFileLink){
+      const id = editFileLink.getAttribute("data-edit-file-link");
+      const idx = Number(editFileLink.getAttribute("data-file-index"));
+      const idStr = String(id || "");
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
+      const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null;
+      if (!file) return;
+      const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || "");
+      if (url == null) return;
+      file.url = url; file.source = "onedrive";
+      saveCloudDebounced(); toast(url ? "File link updated" : "File link cleared"); renderJobs();
+      return;
+    }
+
+    const removeFile = e.target.closest("[data-remove-file]");
+    if (removeFile){
+      const id = removeFile.getAttribute("data-remove-file");
+      const idx = Number(removeFile.getAttribute("data-file-index"));
+      const idStr = String(id || "");
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
+      if (j && Array.isArray(j.files) && idx >= 0 && idx < j.files.length){
+        j.files.splice(idx, 1); saveCloudDebounced(); toast("File removed"); renderJobs();
+      }
+      return;
+    }
+
+    const previewPathBtn = e.target.closest("[data-preview-path-btn]");
+    if (previewPathBtn){
+      e.preventDefault();
+      const expected = previewPathBtn.getAttribute("data-preview-expected-path") || "";
+      if (expected){
+        const rootLocation = previewPathBtn.getAttribute("data-preview-root-location") || "";
+        const msg = rootLocation
+          ? `Root folder used: ${rootLocation}\nExpected file path:\n${expected}`
+          : `Expected file path:\n${expected}`;
+        if (navigator?.clipboard?.writeText){ navigator.clipboard.writeText(expected).catch(()=>{}); }
+        if (window.alert) window.alert(msg); else toast(msg);
       }
       return;
     }
@@ -20964,7 +21133,8 @@ function renderJobs(){
     if (linkJobFile){
       const id = linkJobFile.getAttribute("data-link-job-file");
       const idStr = String(id || "");
-      const j = cuttingJobs.find(x => String(x?.id) === idStr);
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
       if (!j) return;
       try {
         const picked = await window.oneDrivePicker.openOneDriveDxfPicker();
@@ -20998,7 +21168,8 @@ function renderJobs(){
       const id = editFileLink.getAttribute("data-edit-file-link");
       const idx = Number(editFileLink.getAttribute("data-file-index"));
       const idStr = String(id || "");
-      const j = cuttingJobs.find(x => String(x?.id) === idStr);
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
       const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null;
       if (!file) return;
       const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || "");
@@ -21016,7 +21187,8 @@ function renderJobs(){
       const id = removeFile.getAttribute("data-remove-file");
       const idx = Number(removeFile.getAttribute("data-file-index"));
       const idStr = String(id || "");
-      const j = cuttingJobs.find(x => String(x?.id) === idStr);
+      const found = findJobRecord(idStr);
+      const j = found && found.job ? found.job : null;
       if (j && Array.isArray(j.files) && idx>=0 && idx<j.files.length){
         j.files.splice(idx,1);
         saveCloudDebounced();
