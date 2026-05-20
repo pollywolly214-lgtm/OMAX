@@ -1531,32 +1531,10 @@ function readFileAsDataUrl(file){
 
 async function filesToAttachments(fileList){
   const files = Array.from(fileList || []);
-  const attachments = [];
-  for (const file of files){
-    try {
-      const dataUrl = await new Promise((resolve, reject)=>{
-        const reader = new FileReader();
-        reader.onload = ()=> resolve(typeof reader.result === "string" ? reader.result : "");
-        reader.onerror = ()=> reject(reader.error || new Error("Unable to read file"));
-        reader.readAsDataURL(file);
-      });
-      attachments.push({
-        id: genId(file.name || "job_file"),
-        name: file.name || "Attachment",
-        type: file.type || "",
-        size: typeof file.size === "number" ? file.size : null,
-        source: "upload_requires_reference",
-        attachedAtISO: new Date().toISOString(),
-        rootLocationHint: String(cfg.folderHint || cfg.localRootName || ""),
-        dataUrl,
-        previewUrl: /^data:image\//i.test(dataUrl || "") ? dataUrl : ""
-      });
-    } catch (err){
-      console.error("Unable to read file", err);
-      toast("Use Attach from Reference Folder so this file can be saved as a WJ Cuts relative path.");
-    }
+  if (files.length){
+    toast("Local uploads are temporary and not saved as durable cloud file references. Use Attach from Reference Folder.");
   }
-  return attachments;
+  return [];
 }
 
 const JOB_ONEDRIVE_PREVIEW_CACHE_KEY = "cutting_job_onedrive_preview_cache_v1";
@@ -19431,6 +19409,20 @@ function renderJobs(){
     return normalizeOneDriveJobConfig(cfg);
   };
 
+
+  const getWJCutsRootStatus = async ()=>{
+    const config = getSharedConfig();
+    if (!supportsLocalRootPicker()) return { supported:false, handle:null, hasSavedHandle:false, permission:"unsupported", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Unsupported browser" };
+    const handle = await readLocalRootHandle();
+    if (!handle) return { supported:true, handle:null, hasSavedHandle:false, permission:"missing", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Not set" };
+    let permission = "prompt";
+    try { permission = typeof handle.queryPermission === "function" ? await handle.queryPermission({ mode:"read" }) : "granted"; } catch(_e){}
+    if (permission !== "granted") return { supported:true, handle, hasSavedHandle:true, permission, config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Permission needed" };
+    const signature = await computeLocalRootSignature(handle);
+    const expectedSignature = expectedRootSignatureFromJobs();
+    const signatureMatches = !expectedSignature || !signature ? true : signature === expectedSignature;
+    return { supported:true, handle, hasSavedHandle:true, permission:"granted", config, signature, expectedSignature, signatureMatches, message: signatureMatches ? "Verified" : "Mismatch" };
+  };
   const updateSharedConfig = (patch)=>{
     const cfg = getSharedConfig();
     return writeOneDriveJobConfig({ ...cfg, ...patch });
@@ -19438,9 +19430,11 @@ function renderJobs(){
 
   const updateOneDriveWizardStatus = async ()=>{
     const cfg = getSharedConfig();
-    if (oneDriveConnStatus) oneDriveConnStatus.textContent = cfg.localRootSignature ? "Configured" : "Not set";
-    if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = cfg.localRootSignature ? "Verified" : "Not ready";
-    if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = cfg.localRootSignature ? "Ready" : "Setup required";
+    const status = await getWJCutsRootStatus();
+    if (window.DEBUG_MODE) console.info("[cutting-job-files] root status", status);
+    if (oneDriveConnStatus) oneDriveConnStatus.textContent = status.message;
+    if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = status.permission === "granted" ? (status.signatureMatches ? "Verified" : "Mismatch") : (status.hasSavedHandle ? "Permission needed" : "Not set");
+    if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = status.permission === "granted" ? "Ready" : "Setup required";
     if (oneDriveRootStatus){
       oneDriveRootStatus.textContent = cfg.localRootName || "Not set";
     }
@@ -19475,10 +19469,13 @@ function renderJobs(){
         return false;
       }
       await saveLocalRootHandle(handle);
+      const verifyHandle = await readLocalRootHandle();
+      if (!verifyHandle){ toast("Unable to save root handle on this browser."); return false; }
       const cfg = getSharedConfig();
       updateSharedConfig({
         localRootName: String(handle.name || cfg.localRootName || "Configured"),
-        localRootSignature: signature
+        localRootSignature: signature,
+        enabled: true
       });
       await updateOneDriveWizardStatus();
       toast("This computer OneDrive root folder saved and verified.");
@@ -19499,13 +19496,10 @@ function renderJobs(){
     const rootHandle = await readLocalRootHandle();
     if (!rootHandle){
       pendingAttachJobId = String(targetJobId || "");
-      toast("Root folder is not set up yet. Select your WJ Cuts root folder now.");
-      const configured = await chooseLocalOneDriveRoot();
-      if (!configured){
-        openOneDriveModal();
-        return false;
-      }
-      return attachFromLocalOneDriveRoot(targetJobId);
+      toast("Set this computer’s WJ Cuts root folder before attaching files. The app saves a reference path, not the file itself.");
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] attach blocked root missing", { targetJobId });
+      openOneDriveModal();
+      return false;
     }
 
     try {
@@ -19560,6 +19554,7 @@ function renderJobs(){
         rootPathStart: "WJ Cuts",
         relativePath: relPath,
         localRootSignature: signature,
+        enabled: true,
         localDeviceId: getLocalDeviceId(),
         attachedAtISO: new Date().toISOString(),
         rootLocationHint: String(cfg.folderHint || cfg.localRootName || "")
@@ -19567,7 +19562,8 @@ function renderJobs(){
       if (!reference) return false;
       const targetId = String(targetJobId || "");
       if (targetId){
-        const job = cuttingJobs.find(x => String(x?.id) === targetId);
+        const found = findJobRecord(targetId);
+        const job = found && found.job ? found.job : null;
         if (!job){
           toast("Job not found for OneDrive attachment.");
           return false;
@@ -19575,6 +19571,7 @@ function renderJobs(){
         job.files = Array.isArray(job.files) ? job.files : [];
         job.files.push(reference);
         saveCloudDebounced();
+        if (window.DEBUG_MODE) console.info("[cutting-job-files] attached reference", { targetId, relPath });
         toast("WJ Cuts file reference attached to job.");
         renderJobs();
       } else {
@@ -20490,8 +20487,10 @@ function renderJobs(){
 
   const historyBody = content.querySelector(".past-jobs-table tbody");
   historyBody?.addEventListener("click", async (e)=>{
+    let handled = false;
     const fileMenuAdd = e.target.closest("[data-job-file-add]");
     if (fileMenuAdd){
+      handled = true;
       const id = fileMenuAdd.getAttribute("data-job-file-add");
       if (id){
         e.preventDefault();
@@ -20509,6 +20508,7 @@ function renderJobs(){
 
     const previewPathBtn = e.target.closest("[data-preview-path-btn]");
     if (previewPathBtn){
+      handled = true;
       e.preventDefault();
       const expected = previewPathBtn.getAttribute("data-preview-expected-path") || "";
       if (expected){
@@ -20524,6 +20524,7 @@ function renderJobs(){
 
     const upload = e.target.closest("[data-upload-job]");
     if (upload){
+      handled = true;
       const id = upload.getAttribute("data-upload-job");
       e.preventDefault();
       closeActionMenu();
@@ -20534,6 +20535,7 @@ function renderJobs(){
 
     const linkJobFile = e.target.closest("[data-link-job-file]");
     if (linkJobFile){
+      handled = true;
       const id = linkJobFile.getAttribute("data-link-job-file");
       const idStr = String(id || "");
       const found = findJobRecord(idStr);
@@ -20568,6 +20570,7 @@ function renderJobs(){
 
     const editFileLink = e.target.closest("[data-edit-file-link]");
     if (editFileLink){
+      handled = true;
       const id = editFileLink.getAttribute("data-edit-file-link");
       const idx = Number(editFileLink.getAttribute("data-file-index"));
       const idStr = String(id || "");
@@ -20587,6 +20590,7 @@ function renderJobs(){
 
     const removeFile = e.target.closest("[data-remove-file]");
     if (removeFile){
+      handled = true;
       const id = removeFile.getAttribute("data-remove-file");
       const idx = Number(removeFile.getAttribute("data-file-index"));
       const idStr = String(id || "");
@@ -20601,6 +20605,7 @@ function renderJobs(){
       return;
     }
 
+    if (handled) e.stopImmediatePropagation();
   });
   historyBody?.addEventListener("change", (e)=>{
     const previewSelect = e.target instanceof Element
@@ -20685,6 +20690,7 @@ function renderJobs(){
   };
 
   historyBody?.addEventListener("click", async (e)=>{
+    let handled = false;
     const historyActionTrigger = e.target.closest("[data-history-actions-toggle]");
     if (historyActionTrigger){
       const id = historyActionTrigger.getAttribute("data-history-actions-toggle");
@@ -20711,6 +20717,7 @@ function renderJobs(){
 
     const previewPathBtn = e.target.closest("[data-preview-path-btn]");
     if (previewPathBtn){
+      handled = true;
       e.preventDefault();
       const expected = previewPathBtn.getAttribute("data-preview-expected-path") || "";
       if (expected){
@@ -21102,6 +21109,7 @@ function renderJobs(){
 
     const fileMenuAdd = e.target.closest("[data-job-file-add]");
     if (fileMenuAdd){
+      handled = true;
       const id = fileMenuAdd.getAttribute("data-job-file-add");
       if (id){
         e.preventDefault();
@@ -21166,6 +21174,7 @@ function renderJobs(){
 
     const upload = e.target.closest("[data-upload-job]");
     if (upload){
+      handled = true;
       const id = upload.getAttribute("data-upload-job");
       closeFileMenu();
       closeActionMenu();
@@ -21176,6 +21185,7 @@ function renderJobs(){
 
     const linkJobFile = e.target.closest("[data-link-job-file]");
     if (linkJobFile){
+      handled = true;
       const id = linkJobFile.getAttribute("data-link-job-file");
       const idStr = String(id || "");
       const found = findJobRecord(idStr);
@@ -21210,6 +21220,7 @@ function renderJobs(){
 
     const editFileLink = e.target.closest("[data-edit-file-link]");
     if (editFileLink){
+      handled = true;
       const id = editFileLink.getAttribute("data-edit-file-link");
       const idx = Number(editFileLink.getAttribute("data-file-index"));
       const idStr = String(id || "");
@@ -21229,6 +21240,7 @@ function renderJobs(){
 
     const removeFile = e.target.closest("[data-remove-file]");
     if (removeFile){
+      handled = true;
       const id = removeFile.getAttribute("data-remove-file");
       const idx = Number(removeFile.getAttribute("data-file-index"));
       const idStr = String(id || "");
