@@ -3019,6 +3019,153 @@ function buildMaintenanceCompatibilityStream(){
 
 window.detectMaintenanceRecordSystem = detectMaintenanceRecordSystem;
 window.buildMaintenanceCompatibilityStream = buildMaintenanceCompatibilityStream;
+function runMaintenanceV2SafetyChecks(){
+  const result = { ok: true, errors: [], warnings: [], info: [], counts: {} };
+  const push = (bucket, code, message, meta)=> result[bucket].push({ code, message, meta: meta || null });
+  const arraysToCheck = ["maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","tasksInterval","tasksAsReq","cuttingJobs","completedCuttingJobs","inventory","receiptTrackerWeeks"];
+  arraysToCheck.forEach(key => {
+    if (!Array.isArray(window[key])) push("warnings", "missing_array", `${key} is missing or not an array`, { key, type: typeof window[key] });
+  });
+  const tasks = Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : [];
+  const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
+  const occurrences = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+  const taskMap = new Map(tasks.filter(t => t && t.id != null).map(t => [String(t.id), t]));
+  const instanceMap = new Map(instances.filter(i => i && i.id != null).map(i => [String(i.id), i]));
+  const occurrenceEventsByRoot = new Map();
+  const occurrenceLifecycleEventTypes = new Set(["completed","uncompleted","moved","removed","skipped","note_set","hours_set"]);
+  const lifecycleEventTypes = new Set(["completed","uncompleted","scheduled","removed","skipped"]);
+  const chainEventTypes = new Set(["repeat_started","stopped"]);
+  const activeCompletedRoots = new Set();
+  const orphanCompletedRoots = new Set();
+  const finalLifecycleByRoot = new Map();
+  const finalEventTypeByRoot = new Map();
+  occurrences.forEach((event, idx) => {
+    if (!event || typeof event !== "object" || detectMaintenanceRecordSystem(event) !== "v2") return;
+    const rootOccurrenceId = String(event.rootOccurrenceId || "");
+    const eventType = String(event.eventType || event.type || "").toLowerCase();
+    const instanceId = String(event.instanceId || "");
+    const taskId = String(event.taskId || (instanceMap.get(instanceId)?.taskId || "") || "");
+    const isOccurrenceLevel = occurrenceLifecycleEventTypes.has(eventType);
+    const isChainLevel = chainEventTypes.has(eventType);
+    if (String(event.instanceMode || instanceMap.get(instanceId)?.instanceMode || "").toLowerCase() === "repeat"){
+      if (isOccurrenceLevel && !rootOccurrenceId) push("errors", "repeat_missing_root", "Repeat V2 occurrence-level event is missing rootOccurrenceId", { idx, eventType });
+      if (!instanceId) push("errors", "repeat_missing_instance", "Repeat V2 event is missing instanceId", { idx, rootOccurrenceId });
+      if (!taskId) push("errors", "repeat_missing_task", "Repeat V2 event taskId cannot be resolved", { idx, rootOccurrenceId, instanceId });
+    }
+    if (isChainLevel && !rootOccurrenceId) return;
+    if (!rootOccurrenceId) return;
+    const list = occurrenceEventsByRoot.get(rootOccurrenceId) || [];
+    list.push({ event, idx, eventType });
+    occurrenceEventsByRoot.set(rootOccurrenceId, list);
+  });
+  occurrenceEventsByRoot.forEach((entries, rootOccurrenceId) => {
+    const sorted = entries.slice().sort((a, b) => {
+      const aTime = Date.parse(String(a.event?.recordedAtISO || ""));
+      const bTime = Date.parse(String(b.event?.recordedAtISO || ""));
+      const aValid = Number.isFinite(aTime);
+      const bValid = Number.isFinite(bTime);
+      if (aValid && bValid && aTime !== bTime) return aTime - bTime;
+      if (aValid && !bValid) return -1;
+      if (!aValid && bValid) return 1;
+      return a.idx - b.idx;
+    });
+    if (!sorted.length) return;
+    let finalLifecycleStatus = "scheduled";
+    let hasOrderingSignal = false;
+    sorted.forEach(({ eventType, event }) => {
+      const hasRecordedAt = Number.isFinite(Date.parse(String(event?.recordedAtISO || "")));
+      if (hasRecordedAt) hasOrderingSignal = true;
+      if (!lifecycleEventTypes.has(eventType)) return;
+      if (eventType === "completed") finalLifecycleStatus = "completed";
+      else if (eventType === "uncompleted" || eventType === "scheduled") finalLifecycleStatus = "scheduled";
+      else if (eventType === "removed") finalLifecycleStatus = "removed";
+      else if (eventType === "skipped") finalLifecycleStatus = "skipped";
+      if (eventType) finalEventTypeByRoot.set(rootOccurrenceId, eventType);
+    });
+    if (!hasOrderingSignal && sorted.length > 1){
+      push("warnings", "event_order_ambiguous", "Root timeline has multiple events without recordedAtISO ordering signal; index fallback used", { rootOccurrenceId, eventCount: sorted.length });
+    }
+    finalLifecycleByRoot.set(rootOccurrenceId, finalLifecycleStatus);
+    if (finalLifecycleStatus === "completed") activeCompletedRoots.add(rootOccurrenceId);
+  });
+  instances.forEach((instance, idx) => {
+    if (!instance || typeof instance !== "object") return;
+    if (String(instance.instanceMode || "").toLowerCase() !== "repeat") return;
+    const repeatRule = instance.repeatRule && typeof instance.repeatRule === "object" ? instance.repeatRule : null;
+    const basis = String(repeatRule?.basis || "");
+    if (!repeatRule) push("errors", "repeat_missing_rule", "Repeat instance is missing repeatRule", { idx, instanceId: instance.id || null });
+    if (!["machine_hours","calendar_day","calendar_week","calendar_month"].includes(basis)) push("errors", "repeat_invalid_basis", "Repeat basis is invalid", { idx, instanceId: instance.id || null, basis });
+    const endType = String(repeatRule?.endType || repeatRule?.endMode || "").toLowerCase();
+    if (endType === "after_count" && !(Number.isFinite(Number(repeatRule?.endCount)) && Number(repeatRule.endCount) > 0)) push("errors", "repeat_invalid_end_count", "after_count repeat rule requires valid endCount", { idx, instanceId: instance.id || null });
+    if (repeatRule && repeatRule.rollingPreviewOnly === true) push("warnings", "rolling_preview_only", "Repeat rule uses rolling preview only", { idx, instanceId: instance.id || null });
+    if (endType === "after_count" && repeatRule?.rollingRefill === true) push("warnings", "after_count_rolling_refill", "after_count should not use rolling refill", { idx, instanceId: instance.id || null });
+    if (basis === "machine_hours" && !(Number.isFinite(Number(repeatRule?.intervalHours)) && Number(repeatRule.intervalHours) > 0)) push("errors", "machine_hours_missing_interval", "machine_hours repeat rule requires intervalHours", { idx, instanceId: instance.id || null });
+    const task = taskMap.get(String(instance.taskId || ""));
+    if (basis === "machine_hours" && String(task?.mode || "").toLowerCase() === "asreq") push("warnings", "asreq_machine_hours", "As Required task is using machine_hours basis", { idx, instanceId: instance.id || null, taskId: instance.taskId || null });
+  });
+  const compatibilityRows = typeof window.buildMaintenanceCompatibilityStream === "function" ? (Array.isArray(window.buildMaintenanceCompatibilityStream()) ? window.buildMaintenanceCompatibilityStream() : []) : [];
+  const v2Rows = compatibilityRows.filter(row => row && String(row.sourceSystem || "").toLowerCase() === "v2");
+  const completedV2Rows = v2Rows.filter(row => row.isCompleted === true && String(row.lifecycleStatus || row.status || "").toLowerCase() === "completed");
+  const v2CalendarChips = Array.isArray(window.taskEvents)
+    ? window.taskEvents.filter(chip => chip && String(chip.sourceSystem || "").toLowerCase() === "v2" && String(chip.lifecycleStatus || chip.status || "").toLowerCase() === "completed")
+    : [];
+  const tableRows = Array.isArray(window.costAnalysisDataCenter?.maintenanceDataTable) ? window.costAnalysisDataCenter.maintenanceDataTable : [];
+  const v2TableRows = tableRows.filter(row => String(row?.sourceSystem || "").toLowerCase() === "v2");
+  const seenCompletedRoots = new Set();
+  completedV2Rows.forEach(row => {
+    const root = String(row.rootOccurrenceId || "");
+    if (!root) push("errors", "v2_row_missing_root", "V2 completed reporting row missing rootOccurrenceId", { streamId: row.streamId || null });
+    if (!String(row.displayDateISO || row.dateISO || "").trim()) push("warnings", "v2_row_missing_display_date", "V2 completed reporting row missing displayDateISO", { rootOccurrenceId: root || null });
+    if (root && seenCompletedRoots.has(root)) push("warnings", "duplicate_root_reporting", "Duplicate V2 completed rootOccurrenceId in reporting rows", { rootOccurrenceId: root });
+    if (root) seenCompletedRoots.add(root);
+  });
+  activeCompletedRoots.forEach(root => {
+    if (!seenCompletedRoots.has(root)) orphanCompletedRoots.add(root);
+  });
+  orphanCompletedRoots.forEach(root => push("warnings", "completed_not_in_reporting", "Completed V2 root missing from reporting stream", { rootOccurrenceId: root }));
+  finalLifecycleByRoot.forEach((status, rootOccurrenceId) => {
+    if (status !== "removed") return;
+    const entries = occurrenceEventsByRoot.get(rootOccurrenceId) || [];
+    const hasRemovedEvent = entries.some(item => String(item?.eventType || "").toLowerCase() === "removed");
+    if (!hasRemovedEvent){
+      push("warnings", "removed_event_missing", "Root resolved as removed but no explicit removed event record was found", { rootOccurrenceId });
+    }
+  });
+  const repeatInstances = instances.filter(instance => instance && String(instance.instanceMode || "").toLowerCase() === "repeat");
+  const oneTimeInstances = instances.filter(instance => instance && String(instance.instanceMode || "").toLowerCase() !== "repeat");
+  const stoppedRepeatInstances = repeatInstances.filter(instance => String(instance?.status || "").toLowerCase() === "stopped");
+  const activeRepeatInstances = repeatInstances.filter(instance => String(instance?.status || "").toLowerCase() !== "stopped");
+  const projectedRepeatVisibleCount = null;
+  const projectedMachineHourCount = null;
+  const projectedCalendarRepeatCount = null;
+  const completedHistoryChipCount = null;
+  push("info", "event_records_explainer", "V2 event records are append-only saved history events. Future repeat calendar chips may be projections and may not increase this number until completed, moved, removed, noted, or edited.");
+  push("info", "projection_counts_unavailable", "Projected repeat visible counts are null because this checker is read-only and does not depend on rendered calendar projection state.");
+  result.counts = {
+    v2EventRecordsCount: occurrences.length,
+    v2TasksCount: tasks.length,
+    v2InstancesCount: instances.length,
+    completedV2RootsCount: activeCompletedRoots.size,
+    compatibilityV2CompletedRowsCount: completedV2Rows.length,
+    centralV2RowsCount: v2TableRows.length,
+    calendarV2CompletedChipsCount: v2CalendarChips.length,
+    orphanCandidateCount: orphanCompletedRoots.size,
+    repeatInstancesCount: repeatInstances.length,
+    oneTimeInstancesCount: oneTimeInstances.length,
+    activeRepeatInstancesCount: activeRepeatInstances.length,
+    stoppedRepeatInstancesCount: stoppedRepeatInstances.length,
+    projectedRepeatVisibleCount,
+    projectedMachineHourCount,
+    projectedCalendarRepeatCount,
+    completedHistoryChipCount
+  };
+  if (!Array.isArray(window.completedCuttingJobs)) push("errors", "missing_completed_cutting_jobs", "completedCuttingJobs is missing or invalid");
+  if (!(Array.isArray(window.cuttingJobs) || (window.cuttingJobs && typeof window.cuttingJobs === "object"))) push("errors", "invalid_cutting_jobs", "cuttingJobs is neither an array nor object");
+  result.ok = result.errors.length === 0;
+  if (window.DEBUG_MODE) console.debug("[maintenance-v2-safety-checks]", result);
+  return result;
+}
+window.runMaintenanceV2SafetyChecks = runMaintenanceV2SafetyChecks;
 
 function ensureJobCategories(){
   const folders = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();

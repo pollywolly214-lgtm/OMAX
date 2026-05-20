@@ -11862,6 +11862,8 @@ function renderCosts(){
     const categoryFilter = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-filter-category]") : null;
     const taskFilter = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-filter-task]") : null;
     const suggestionsBox = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-search-suggestions]") : null;
+    const v2SafetyBtn = modal instanceof HTMLElement ? modal.querySelector("[data-run-maintenance-v2-safety-checks]") : null;
+    const v2SafetySummary = modal instanceof HTMLElement ? modal.querySelector("[data-maintenance-v2-safety-summary]") : null;
     const suggestionState = { items: [] };
     const computeSuggestions = (term, rows)=>{
       const normalizedTerm = String(term || "").trim().toLowerCase();
@@ -11955,6 +11957,16 @@ function renderCosts(){
       applySearchFilter();
       renderSuggestions();
     };
+    if (v2SafetyBtn instanceof HTMLElement){
+      v2SafetyBtn.addEventListener("click", ()=>{
+        if (typeof window.runMaintenanceV2SafetyChecks !== "function") return;
+        const checks = window.runMaintenanceV2SafetyChecks();
+        if (v2SafetySummary instanceof HTMLElement){
+          const counts = checks && checks.counts && typeof checks.counts === "object" ? checks.counts : {};
+          v2SafetySummary.textContent = `Errors: ${checks?.errors?.length || 0} · Warnings: ${checks?.warnings?.length || 0} · V2 tasks: ${counts.v2TasksCount || 0} · V2 instances: ${counts.v2InstancesCount || 0} · V2 event records: ${counts.v2EventRecordsCount || 0} · Completed roots: ${counts.completedV2RootsCount || 0} · Orphans: ${counts.orphanCandidateCount || 0}`;
+        }
+      });
+    }
     window.focusMaintenanceDataCenterRow = ({ taskId = "", dateISO = "" } = {})=>{
       const focusTaskId = String(taskId || "").trim();
       if (!focusTaskId) return false;
