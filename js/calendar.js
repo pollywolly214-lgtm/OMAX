@@ -237,6 +237,19 @@ function hideBubbleSoon(){
   }, 180);
 }
 
+function ensureBubble(){
+  let bubble = document.getElementById("bubble");
+  if (bubble) return bubble;
+  bubble = document.createElement("div");
+  bubble.id = "bubble";
+  bubble.className = "calendar-bubble";
+  bubble.setAttribute("role", "dialog");
+  bubble.setAttribute("aria-live", "polite");
+  bubble.tabIndex = -1;
+  document.body.appendChild(bubble);
+  return bubble;
+}
+
 function showV2OneTimeBubble(occurrenceId, anchorEl){
   const lookup = (typeof window !== "undefined" && window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object")
     ? window.__calendarV2OneTimeLookup
@@ -952,6 +965,104 @@ function resolveV2OneTimeOccurrenceState(rootOccurrenceId, scheduledEvent){
   });
   return { status, note, hours, displayDateISO };
 }
+
+function runMaintenanceV2SafetyChecks(){
+  const occurrences = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+  const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
+  const warnings = [];
+  const errors = [];
+  const info = [];
+  const byRoot = new Map();
+  const lifecycleMap = new Map([
+    ["completed", "completed"],
+    ["uncompleted", "scheduled"],
+    ["scheduled", "scheduled"],
+    ["removed", "removed"],
+    ["skipped", "skipped"]
+  ]);
+  const stableId = (entry, idx)=> String(entry?.eventId || entry?.id || `${entry?.rootOccurrenceId || "root"}:${idx}`);
+  occurrences.forEach((entry, idx)=>{
+    if (!entry || typeof entry !== "object") return;
+    const rootId = String(entry.rootOccurrenceId || "");
+    if (!rootId) return;
+    if (!byRoot.has(rootId)) byRoot.set(rootId, []);
+    byRoot.get(rootId).push({ entry, idx, stable: stableId(entry, idx) });
+    if (String(entry.eventType || "") === "moved"){
+      const toDate = normalizeDateKey(entry?.payload?.toDateISO || entry?.displayDateISO || entry?.effectiveDateISO || null);
+      if (!toDate){
+        warnings.push({ type: "moved_missing_toDateISO", rootOccurrenceId: rootId, eventId: stableId(entry, idx) });
+      }
+    }
+  });
+
+  const finalLifecycleByRoot = new Map();
+  const finalEventByRoot = new Map();
+  const activeCompletedRoots = new Set();
+  byRoot.forEach((events, rootId)=>{
+    const sortable = events.map(item=>{
+      const ts = Date.parse(String(item.entry?.recordedAtISO || ""));
+      return { ...item, ts: Number.isFinite(ts) ? ts : null };
+    });
+    const unknownOrder = sortable.filter(x => x.ts == null).length > 1;
+    sortable.sort((a,b)=>{
+      if (a.ts != null && b.ts != null && a.ts !== b.ts) return a.ts - b.ts;
+      if (a.ts != null && b.ts == null) return -1;
+      if (a.ts == null && b.ts != null) return 1;
+      if (a.idx !== b.idx) return a.idx - b.idx;
+      return a.stable.localeCompare(b.stable);
+    });
+    if (unknownOrder){
+      warnings.push({ type: "undetermined_lifecycle_order", rootOccurrenceId: rootId, events: sortable.map(s=>s.stable) });
+    }
+    let finalLifecycleStatus = "scheduled";
+    let finalEvent = null;
+    sortable.forEach(item=>{
+      const t = String(item.entry?.eventType || "").toLowerCase();
+      if (lifecycleMap.has(t)){
+        finalLifecycleStatus = lifecycleMap.get(t);
+        finalEvent = item.entry;
+      }
+    });
+    finalLifecycleByRoot.set(rootId, finalLifecycleStatus);
+    if (finalEvent) finalEventByRoot.set(rootId, finalEvent);
+    if (finalLifecycleStatus === "completed") activeCompletedRoots.add(rootId);
+  });
+
+  instances.forEach(instance=>{
+    const rule = instance?.repeatRule && typeof instance.repeatRule === "object" ? instance.repeatRule : {};
+    const endTypeRaw = String(rule.endType || rule.endMode || "never").toLowerCase();
+    const endType = ["never", "on_date", "after_count"].includes(endTypeRaw) ? endTypeRaw : "never";
+    if (endType === "after_count" && !Number.isFinite(Number(rule.endCount || 0))){
+      warnings.push({ type: "repeat_after_count_missing_endCount", instanceId: String(instance?.id || "") });
+    }
+  });
+
+  activeCompletedRoots.forEach(rootId=>{
+    const ev = finalEventByRoot.get(rootId) || {};
+    const displayDateISO = normalizeDateKey(ev.displayDateISO || ev.effectiveDateISO || ev.dateISO || null);
+    if (!String(ev.rootOccurrenceId || rootId) || !String(ev.instanceId || "") || !String(ev.taskId || "") || !displayDateISO){
+      errors.push({ type: "completed_root_missing_required_fields", rootOccurrenceId: rootId });
+    }
+  });
+
+  if (!Array.isArray(window.taskEvents)){
+    info.push({ type: "calendar_chip_parity_non_blocking", detail: "window.taskEvents unavailable; parity check skipped." });
+  }
+
+  const report = {
+    checkedAtISO: new Date().toISOString(),
+    byRootCount: byRoot.size,
+    activeCompletedRoots: Array.from(activeCompletedRoots),
+    finalLifecycleByRoot: Object.fromEntries(finalLifecycleByRoot),
+    warnings,
+    errors,
+    info,
+    readOnly: true
+  };
+  if (window.DEBUG_MODE) console.info("[maintenance-v2] safety checks", report);
+  return report;
+}
+window.runMaintenanceV2SafetyChecks = runMaintenanceV2SafetyChecks;
 
 window.completeV2OneTimeOccurrence = (occurrenceId)=>{
   const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
