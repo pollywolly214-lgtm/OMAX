@@ -3037,6 +3037,8 @@ function runMaintenanceV2SafetyChecks(){
   const chainEventTypes = new Set(["repeat_started","stopped"]);
   const activeCompletedRoots = new Set();
   const orphanCompletedRoots = new Set();
+  const finalLifecycleByRoot = new Map();
+  const finalEventTypeByRoot = new Map();
   occurrences.forEach((event, idx) => {
     if (!event || typeof event !== "object" || detectMaintenanceRecordSystem(event) !== "v2") return;
     const rootOccurrenceId = String(event.rootOccurrenceId || "");
@@ -3078,10 +3080,12 @@ function runMaintenanceV2SafetyChecks(){
       else if (eventType === "uncompleted" || eventType === "scheduled") finalLifecycleStatus = "scheduled";
       else if (eventType === "removed") finalLifecycleStatus = "removed";
       else if (eventType === "skipped") finalLifecycleStatus = "skipped";
+      if (eventType) finalEventTypeByRoot.set(rootOccurrenceId, eventType);
     });
     if (!hasOrderingSignal && sorted.length > 1){
       push("warnings", "event_order_ambiguous", "Root timeline has multiple events without recordedAtISO ordering signal; index fallback used", { rootOccurrenceId, eventCount: sorted.length });
     }
+    finalLifecycleByRoot.set(rootOccurrenceId, finalLifecycleStatus);
     if (finalLifecycleStatus === "completed") activeCompletedRoots.add(rootOccurrenceId);
   });
   instances.forEach((instance, idx) => {
@@ -3119,15 +3123,41 @@ function runMaintenanceV2SafetyChecks(){
     if (!seenCompletedRoots.has(root)) orphanCompletedRoots.add(root);
   });
   orphanCompletedRoots.forEach(root => push("warnings", "completed_not_in_reporting", "Completed V2 root missing from reporting stream", { rootOccurrenceId: root }));
+  finalLifecycleByRoot.forEach((status, rootOccurrenceId) => {
+    if (status !== "removed") return;
+    const entries = occurrenceEventsByRoot.get(rootOccurrenceId) || [];
+    const hasRemovedEvent = entries.some(item => String(item?.eventType || "").toLowerCase() === "removed");
+    if (!hasRemovedEvent){
+      push("warnings", "removed_event_missing", "Root resolved as removed but no explicit removed event record was found", { rootOccurrenceId });
+    }
+  });
+  const repeatInstances = instances.filter(instance => instance && String(instance.instanceMode || "").toLowerCase() === "repeat");
+  const oneTimeInstances = instances.filter(instance => instance && String(instance.instanceMode || "").toLowerCase() !== "repeat");
+  const stoppedRepeatInstances = repeatInstances.filter(instance => String(instance?.status || "").toLowerCase() === "stopped");
+  const activeRepeatInstances = repeatInstances.filter(instance => String(instance?.status || "").toLowerCase() !== "stopped");
+  const projectedRepeatVisibleCount = null;
+  const projectedMachineHourCount = null;
+  const projectedCalendarRepeatCount = null;
+  const completedHistoryChipCount = null;
+  push("info", "event_records_explainer", "V2 event records are append-only saved history events. Future repeat calendar chips may be projections and may not increase this number until completed, moved, removed, noted, or edited.");
+  push("info", "projection_counts_unavailable", "Projected repeat visible counts are null because this checker is read-only and does not depend on rendered calendar projection state.");
   result.counts = {
+    v2EventRecordsCount: occurrences.length,
     v2TasksCount: tasks.length,
     v2InstancesCount: instances.length,
-    v2OccurrencesCount: occurrences.length,
     completedV2RootsCount: activeCompletedRoots.size,
     compatibilityV2CompletedRowsCount: completedV2Rows.length,
     centralV2RowsCount: v2TableRows.length,
     calendarV2CompletedChipsCount: v2CalendarChips.length,
-    orphanCandidateCount: orphanCompletedRoots.size
+    orphanCandidateCount: orphanCompletedRoots.size,
+    repeatInstancesCount: repeatInstances.length,
+    oneTimeInstancesCount: oneTimeInstances.length,
+    activeRepeatInstancesCount: activeRepeatInstances.length,
+    stoppedRepeatInstancesCount: stoppedRepeatInstances.length,
+    projectedRepeatVisibleCount,
+    projectedMachineHourCount,
+    projectedCalendarRepeatCount,
+    completedHistoryChipCount
   };
   if (!Array.isArray(window.completedCuttingJobs)) push("errors", "missing_completed_cutting_jobs", "completedCuttingJobs is missing or invalid");
   if (!(Array.isArray(window.cuttingJobs) || (window.cuttingJobs && typeof window.cuttingJobs === "object"))) push("errors", "invalid_cutting_jobs", "cuttingJobs is neither an array nor object");

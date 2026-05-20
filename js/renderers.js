@@ -11963,7 +11963,7 @@ function renderCosts(){
         const checks = window.runMaintenanceV2SafetyChecks();
         if (v2SafetySummary instanceof HTMLElement){
           const counts = checks && checks.counts && typeof checks.counts === "object" ? checks.counts : {};
-          v2SafetySummary.textContent = `Errors: ${checks?.errors?.length || 0} · Warnings: ${checks?.warnings?.length || 0} · V2 tasks: ${counts.v2TasksCount || 0} · V2 instances: ${counts.v2InstancesCount || 0} · V2 occurrences: ${counts.v2OccurrencesCount || 0} · Completed roots: ${counts.completedV2RootsCount || 0} · Orphans: ${counts.orphanCandidateCount || 0}`;
+          v2SafetySummary.textContent = `Errors: ${checks?.errors?.length || 0} · Warnings: ${checks?.warnings?.length || 0} · V2 tasks: ${counts.v2TasksCount || 0} · V2 instances: ${counts.v2InstancesCount || 0} · V2 event records: ${counts.v2EventRecordsCount || 0} · Completed roots: ${counts.completedV2RootsCount || 0} · Orphans: ${counts.orphanCandidateCount || 0}`;
         }
       });
     }
