@@ -2699,10 +2699,7 @@ function viewJobs(){
   const oneDriveLibrary = (typeof window.getOneDriveJobLibrary === "function")
     ? window.getOneDriveJobLibrary()
     : [];
-  const oneDriveReady = !!(oneDriveConfig && oneDriveConfig.enabled && oneDriveConfig.localRootSignature);
-  const oneDriveStatusLabel = oneDriveReady
-    ? `OneDrive root ready${oneDriveConfig.folderHint ? ` · ${oneDriveConfig.folderHint}` : ""}`
-    : "OneDrive root not set on this computer";
+  const oneDriveStatusLabel = "WJ Cuts root not set";
   const defaultJobDateISO = (() => {
     const now = new Date();
     const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
@@ -4665,7 +4662,7 @@ function viewJobs(){
           <div class="job-note-modal-body">
             <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Attach files from this computer's synced OneDrive root folder. Each computer can map a different local path to the same shared folder and the app will verify folder identity.</p>
             <ol class="job-onedrive-steps small">
-              <li><strong>Step 1:</strong> Click <strong>Set this computer root folder</strong> and pick your synced shared OneDrive folder.</li>
+              <li><strong>Step 1:</strong> Click <strong>Select / re-authorize this computer root folder</strong> and pick your synced shared OneDrive folder.</li>
               <li><strong>Step 2:</strong> Save setup for this computer only (it does not copy to other computers).</li>
               <li><strong>Step 3:</strong> Use <strong>Add from this computer OneDrive folder</strong> when attaching files.</li>
             </ol>
@@ -4693,12 +4690,12 @@ function viewJobs(){
             <div class="job-onedrive-known">
               <div class="small"><strong>Known computer root folders</strong></div>
               <table class="small">
-                <thead><tr><th>Computer</th><th>Folder name</th><th>Root location hint</th><th>Root signature</th><th>Last verified</th></tr></thead>
+                <thead><tr><th>Computer profile</th><th>Folder name</th><th>Root location hint</th><th>Root signature</th><th>Last verified</th><th>Last browser/device</th></tr></thead>
                 <tbody data-onedrive-known-devices></tbody>
               </table>
             </div>
                         <div class="job-onedrive-sync-actions">
-              <button type="button" class="job-note-modal-secondary" id="jobOneDriveRootPickerBtn">Set this computer root folder</button>
+              <button type="button" class="job-note-modal-secondary" id="jobOneDriveRootPickerBtn">Select / re-authorize this computer root folder</button>
             </div>
             <label class="job-edit-note">Folder label (optional)
               <input type="text" id="jobOneDriveFolderHint" placeholder="Shop drawings" value="${esc(oneDriveConfig.folderHint || "")}">
