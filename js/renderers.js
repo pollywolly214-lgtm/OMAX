@@ -669,8 +669,133 @@ function createIntervalTaskInstance(template){
   return copy;
 }
 
+function ensureMaintenanceV2Collections(){
+  if (!Array.isArray(window.maintenanceTasksV2)) window.maintenanceTasksV2 = [];
+  if (!Array.isArray(window.maintenanceCalendarInstancesV2)) window.maintenanceCalendarInstancesV2 = [];
+  if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
+  return {
+    tasks: window.maintenanceTasksV2,
+    instances: window.maintenanceCalendarInstancesV2,
+    occurrences: window.maintenanceOccurrencesV2
+  };
+}
+
+function createMaintenanceV2FromTemplate(task, opts = {}){
+  if (!task || task.id == null) return null;
+  const collections = ensureMaintenanceV2Collections();
+  const mode = String(opts.mode || "one_time");
+  const eventType = String(opts.eventType || "scheduled");
+  const effectiveDateISO = normalizeDateKey(opts.effectiveDateISO || ymd(new Date()));
+  const nowISO = new Date().toISOString();
+  const legacyTaskId = String(task.id);
+  const existingTask = collections.tasks.find(entry => entry && String(entry.legacyTaskId || "") === legacyTaskId) || null;
+  const taskRecord = existingTask || {
+    id: genId("maintenance_task_v2"),
+    system: "v2",
+    schemaVersion: 2,
+    legacyTaskId,
+    name: task.name || "Maintenance task",
+    categoryRef: task.cat != null ? String(task.cat) : null,
+    inventoryId: task.inventoryId != null ? String(task.inventoryId) : null,
+    storeLink: task.storeLink || "",
+    manualLink: task.manualLink || "",
+    pn: task.pn || "",
+    price: task.price != null ? Number(task.price) : null,
+    createdAtISO: nowISO,
+    updatedAtISO: nowISO
+  };
+  if (!existingTask){
+    collections.tasks.unshift(taskRecord);
+  }else{
+    taskRecord.updatedAtISO = nowISO;
+  }
+  const instance = {
+    id: genId("maintenance_instance_v2"),
+    system: "v2",
+    schemaVersion: 2,
+    taskId: taskRecord.id,
+    legacyTaskId,
+    instanceMode: mode,
+    startDateISO: effectiveDateISO,
+    status: "active",
+    repeatRule: mode === "repeat" ? (opts.repeatRule || null) : null,
+    createdAtISO: nowISO,
+    updatedAtISO: nowISO
+  };
+  if (mode === "repeat" && instance.repeatRule && String(instance.repeatRule.basis || "") === "machine_hours"){
+    const currentHours = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
+    if (Number.isFinite(currentHours)){
+      instance.machineHourAnchorTotal = currentHours;
+      instance.machineHourAnchorDateISO = normalizeDateKey(effectiveDateISO || ymd(new Date()));
+    }
+    if (!Number.isFinite(Number(instance.repeatRule.intervalHours)) || Number(instance.repeatRule.intervalHours) <= 0){
+      instance.repeatRule.intervalHours = Math.max(1, Number(instance.repeatRule.every) || 1);
+    }
+  }
+  collections.instances.unshift(instance);
+  const occurrence = {
+    id: genId("maintenance_occurrence_v2"),
+    system: "v2",
+    schemaVersion: 2,
+    instanceId: instance.id,
+    taskId: taskRecord.id,
+    legacyTaskId,
+    eventType,
+    effectiveDateISO,
+    recordedAtISO: nowISO,
+    payload: {
+      note: opts.note || "",
+      hours: Number.isFinite(Number(opts.hours)) ? Number(opts.hours) : null
+    }
+  };
+  collections.occurrences.unshift(occurrence);
+  if (window.DEBUG_MODE){
+    console.info("[maintenance-v2] created records", {
+      legacyTaskId,
+      taskId: taskRecord.id,
+      instanceId: instance.id,
+      occurrenceId: occurrence.id,
+      instanceMode: mode,
+      eventType
+    });
+  }
+  return { taskRecord, instance, occurrence };
+}
+window.createMaintenanceV2FromTemplate = createMaintenanceV2FromTemplate;
+
 function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refreshDashboard = true, recurrence = null } = {}){
   if (!task || task.mode !== "interval") return null;
+  if (typeof window.isMaintenanceV2NewRecordsPreferred === "function" && window.isMaintenanceV2NewRecordsPreferred()){
+    if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Prevented legacy maintenance calendar write because V2-only preference is active");
+    if (typeof window.createMaintenanceV2FromTemplate !== "function"){
+      toast("Could not schedule maintenance: V2 scheduler unavailable.");
+      if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] Missing createMaintenanceV2FromTemplate");
+      return null;
+    }
+    const repeatEnabled = !!(recurrence && recurrence.enabled);
+    const created = window.createMaintenanceV2FromTemplate(task, {
+      mode: repeatEnabled ? "repeat" : "one_time",
+      eventType: repeatEnabled ? "repeat_started" : "scheduled",
+      effectiveDateISO: dateISO || ymd(new Date()),
+      note: note || "",
+      repeatRule: repeatEnabled ? recurrence : null
+    });
+    if (!created){
+      toast("Could not schedule maintenance in V2.");
+      if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] V2 creation failed for interval task", { taskId: task.id });
+      return null;
+    }
+    if (window.DEBUG_MODE) console.info(repeatEnabled ? "[maintenance-v2-preference] Created V2 repeat record" : "[maintenance-v2-preference] Created V2 one-time record");
+    const compatDateISO = normalizeDateKey(dateISO || ymd(new Date()));
+    return {
+      ...(created.instance || {}),
+      name: task.name || created.instance?.name || "Task",
+      mode: task.mode || "interval",
+      calendarDateISO: compatDateISO || null,
+      completedDates: Array.isArray(task.completedDates) ? task.completedDates.slice() : [],
+      recurrence: recurrence && typeof recurrence === "object" ? { ...recurrence } : (task.recurrence ? { ...task.recurrence } : null)
+    };
+  }
   if (!Array.isArray(tasksInterval)){
     if (Array.isArray(window.tasksInterval)){
       tasksInterval = window.tasksInterval;
@@ -842,6 +967,37 @@ function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refresh
 
 function scheduleExistingAsReqTask(task, { dateISO = null, note = "", refreshDashboard = true, recurrence = null } = {}){
   if (!task || task.mode !== "asreq") return null;
+  if (typeof window.isMaintenanceV2NewRecordsPreferred === "function" && window.isMaintenanceV2NewRecordsPreferred()){
+    if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Prevented legacy maintenance calendar write because V2-only preference is active");
+    if (typeof window.createMaintenanceV2FromTemplate !== "function"){
+      toast("Could not schedule maintenance: V2 scheduler unavailable.");
+      if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] Missing createMaintenanceV2FromTemplate");
+      return null;
+    }
+    const repeatEnabled = !!(recurrence && recurrence.enabled);
+    const created = window.createMaintenanceV2FromTemplate(task, {
+      mode: repeatEnabled ? "repeat" : "one_time",
+      eventType: repeatEnabled ? "repeat_started" : "scheduled",
+      effectiveDateISO: dateISO || ymd(new Date()),
+      note: note || "",
+      repeatRule: repeatEnabled ? recurrence : null
+    });
+    if (!created){
+      toast("Could not schedule maintenance in V2.");
+      if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] V2 creation failed for as-required task", { taskId: task.id });
+      return null;
+    }
+    if (window.DEBUG_MODE) console.info(repeatEnabled ? "[maintenance-v2-preference] Created V2 repeat record" : "[maintenance-v2-preference] Created V2 one-time record");
+    const compatDateISO = normalizeDateKey(dateISO || ymd(new Date()));
+    return {
+      ...(created.instance || {}),
+      name: task.name || created.instance?.name || "Task",
+      mode: task.mode || "asreq",
+      calendarDateISO: compatDateISO || null,
+      completedDates: Array.isArray(task.completedDates) ? task.completedDates.slice() : [],
+      recurrence: recurrence && typeof recurrence === "object" ? { ...recurrence } : (task.recurrence ? { ...task.recurrence } : null)
+    };
+  }
   if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
 
   const template = task;
@@ -6186,99 +6342,6 @@ function renderDashboard(){
     showStep(step);
   }
 
-  function ensureMaintenanceV2Collections(){
-    if (!Array.isArray(window.maintenanceTasksV2)) window.maintenanceTasksV2 = [];
-    if (!Array.isArray(window.maintenanceCalendarInstancesV2)) window.maintenanceCalendarInstancesV2 = [];
-    if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
-    return {
-      tasks: window.maintenanceTasksV2,
-      instances: window.maintenanceCalendarInstancesV2,
-      occurrences: window.maintenanceOccurrencesV2
-    };
-  }
-
-  function createMaintenanceV2FromTemplate(task, opts = {}){
-    if (!task || task.id == null) return null;
-    const collections = ensureMaintenanceV2Collections();
-    const mode = String(opts.mode || "one_time");
-    const eventType = String(opts.eventType || "scheduled");
-    const effectiveDateISO = normalizeDateKey(opts.effectiveDateISO || addContextDateISO || ymd(new Date()));
-    const nowISO = new Date().toISOString();
-    const legacyTaskId = String(task.id);
-    const existingTask = collections.tasks.find(entry => entry && String(entry.legacyTaskId || "") === legacyTaskId) || null;
-    const taskRecord = existingTask || {
-      id: genId("maintenance_task_v2"),
-      system: "v2",
-      schemaVersion: 2,
-      legacyTaskId,
-      name: task.name || "Maintenance task",
-      categoryRef: task.cat != null ? String(task.cat) : null,
-      inventoryId: task.inventoryId != null ? String(task.inventoryId) : null,
-      storeLink: task.storeLink || "",
-      manualLink: task.manualLink || "",
-      pn: task.pn || "",
-      price: task.price != null ? Number(task.price) : null,
-      createdAtISO: nowISO,
-      updatedAtISO: nowISO
-    };
-    if (!existingTask){
-      collections.tasks.unshift(taskRecord);
-    }else{
-      taskRecord.updatedAtISO = nowISO;
-    }
-    const instance = {
-      id: genId("maintenance_instance_v2"),
-      system: "v2",
-      schemaVersion: 2,
-      taskId: taskRecord.id,
-      legacyTaskId,
-      instanceMode: mode,
-      startDateISO: effectiveDateISO,
-      status: "active",
-      repeatRule: mode === "repeat" ? (opts.repeatRule || null) : null,
-      createdAtISO: nowISO,
-      updatedAtISO: nowISO
-    };
-    if (mode === "repeat" && instance.repeatRule && String(instance.repeatRule.basis || "") === "machine_hours"){
-      const currentHours = typeof getCurrentMachineHours === "function" ? Number(getCurrentMachineHours()) : null;
-      if (Number.isFinite(currentHours)){
-        instance.machineHourAnchorTotal = currentHours;
-        instance.machineHourAnchorDateISO = normalizeDateKey(effectiveDateISO || ymd(new Date()));
-      }
-      if (!Number.isFinite(Number(instance.repeatRule.intervalHours)) || Number(instance.repeatRule.intervalHours) <= 0){
-        instance.repeatRule.intervalHours = Math.max(1, Number(instance.repeatRule.every) || 1);
-      }
-    }
-    collections.instances.unshift(instance);
-    const occurrence = {
-      id: genId("maintenance_occurrence_v2"),
-      system: "v2",
-      schemaVersion: 2,
-      instanceId: instance.id,
-      taskId: taskRecord.id,
-      legacyTaskId,
-      eventType,
-      effectiveDateISO,
-      recordedAtISO: nowISO,
-      payload: {
-        note: opts.note || "",
-        hours: Number.isFinite(Number(opts.hours)) ? Number(opts.hours) : null
-      }
-    };
-    collections.occurrences.unshift(occurrence);
-    if (window.DEBUG_MODE){
-      console.info("[maintenance-v2] created records", {
-        legacyTaskId,
-        taskId: taskRecord.id,
-        instanceId: instance.id,
-        occurrenceId: occurrence.id,
-        instanceMode: mode,
-        eventType
-      });
-    }
-    return { taskRecord, instance, occurrence };
-  }
-
   function hideBackdrop(){
     if (!modal) return;
     modal.classList.remove("is-visible");
@@ -6782,8 +6845,20 @@ function renderDashboard(){
       note,
       downtimeHours: 1
     };
-    const list = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = []);
-    list.unshift(task);
+    const created = (typeof window.createMaintenanceV2FromTemplate === "function")
+      ? window.createMaintenanceV2FromTemplate(task, {
+        mode: "one_time",
+        eventType: "scheduled",
+        effectiveDateISO: targetISO,
+        note
+      })
+      : null;
+    if (!created){
+      toast("Could not add one-time task. V2 creation failed.");
+      if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] Failed one-time V2 creation", { taskName: name, targetISO });
+      return;
+    }
+    if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 one-time record");
     setContextDate(targetISO);
     renderCalendarPreservingScroll();
     if (typeof saveCloudNow === "function") saveCloudNow();
@@ -6826,7 +6901,7 @@ function renderDashboard(){
     let choice = String(taskExistingAddModeInput?.value || "").trim();
     if (!choice){
       const choiceRaw = window.prompt(
-        "Temporary chooser fallback:\n1) One-time reminder\n2) Start repeat tracking\n3) Log past completion",
+        "Temporary chooser fallback:\n1) One-time reminder\n2) Start repeat tracking",
         "1"
       );
       const mapped = { "1": "one_time", "2": "repeat" };
@@ -6838,12 +6913,14 @@ function renderDashboard(){
     }
     let message = "Maintenance task added";
     if (choice === "one_time"){
-      createMaintenanceV2FromTemplate(task, {
+      const created = createMaintenanceV2FromTemplate(task, {
         mode: "one_time",
         eventType: "scheduled",
         effectiveDateISO: targetISO,
         note: occurrenceNote
       });
+      if (!created){ toast("Could not create one-time reminder in V2."); if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] V2 one-time creation failed", { taskId: task.id }); return; }
+      if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 one-time record");
       const targetDate = parseDateLocal(targetISO);
       if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
         const today = new Date();
@@ -6892,6 +6969,8 @@ function renderDashboard(){
         note: occurrenceNote,
         repeatRule: normalizedRepeatConfig
       });
+      if (!created){ toast("Could not start repeat tracking in V2."); if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] V2 repeat creation failed", { taskId: task.id }); return; }
+      if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 repeat record");
       if (window.DEBUG_MODE){
         console.info("[maintenance-v2] repeat created instance", {
           instanceId: created?.instance?.id || null,
@@ -6903,14 +6982,6 @@ function renderDashboard(){
         });
       }
       message = `Repeat tracking started for "${task.name || "Task"}"`;
-    }else{
-      createMaintenanceV2FromTemplate(task, {
-        mode: "one_time",
-        eventType: "completed",
-        effectiveDateISO: targetISO,
-        note: occurrenceNote
-      });
-      message = `Past completion logged for "${task.name || "Task"}"`;
     }
     setContextDate(targetISO);
     renderCalendarPreservingScroll();

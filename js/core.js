@@ -66,7 +66,8 @@ const DEFAULT_APP_CONFIG = {
   predictionMode: "fixed",
   averageWindowDays: DEFAULT_PREDICTION_AVERAGE_WINDOW,
   timeEfficiencyGoalMode: "maximum",
-  mondayStartLookback: false
+  mondayStartLookback: false,
+  maintenanceCalendarNewRecordsSystem: "v2"
 };
 let appConfig = { ...DEFAULT_APP_CONFIG };
 
@@ -102,6 +103,8 @@ if (typeof window !== "undefined"){
   window.getDailyCutHoursEntry = getDailyCutHoursEntry;
   window.normalizeDailyCutHours = normalizeDailyCutHours;
   window.normalizeDateISO = normalizeDateISO;
+  window.getMaintenanceCalendarNewRecordsSystem = getMaintenanceCalendarNewRecordsSystem;
+  window.isMaintenanceV2NewRecordsPreferred = isMaintenanceV2NewRecordsPreferred;
   window.__opportunityStateReady = false;
 }
 
@@ -249,8 +252,16 @@ function normalizeAppConfig(config){
     normalized.averageWindowDays = normalizePredictionAverageWindow(config.averageWindowDays);
     normalized.timeEfficiencyGoalMode = config.timeEfficiencyGoalMode === "average" ? "average" : "maximum";
     if (typeof config.mondayStartLookback === "boolean") normalized.mondayStartLookback = config.mondayStartLookback;
+    normalized.maintenanceCalendarNewRecordsSystem = "v2";
   }
   return normalized;
+}
+
+function getMaintenanceCalendarNewRecordsSystem(){
+  return "v2";
+}
+function isMaintenanceV2NewRecordsPreferred(){
+  return true;
 }
 
 function shouldExcludeWeekends(){
@@ -3022,10 +3033,37 @@ window.buildMaintenanceCompatibilityStream = buildMaintenanceCompatibilityStream
 function runMaintenanceV2SafetyChecks(){
   const result = { ok: true, errors: [], warnings: [], info: [], counts: {} };
   const push = (bucket, code, message, meta)=> result[bucket].push({ code, message, meta: meta || null });
-  const arraysToCheck = ["maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","tasksInterval","tasksAsReq","cuttingJobs","completedCuttingJobs","inventory","receiptTrackerWeeks"];
+  const arraysToCheck = ["maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","tasksInterval","tasksAsReq","cuttingJobs","completedCuttingJobs","inventory","receiptTrackerWeeks","dailyCutHours"];
   arraysToCheck.forEach(key => {
     if (!Array.isArray(window[key])) push("warnings", "missing_array", `${key} is missing or not an array`, { key, type: typeof window[key] });
   });
+  const inventoryMaterialsValue = window.inventoryMaterials;
+  if (!(Array.isArray(inventoryMaterialsValue) || (inventoryMaterialsValue && typeof inventoryMaterialsValue === "object"))){
+    push("warnings", "missing_inventory_materials", "inventoryMaterials is missing or not a valid object/array", { type: typeof inventoryMaterialsValue });
+  }
+  const maintenancePreference = (typeof window.getMaintenanceCalendarNewRecordsSystem === "function")
+    ? window.getMaintenanceCalendarNewRecordsSystem()
+    : "v2";
+  const v2PreferenceActive = maintenancePreference === "v2";
+  const suspiciousLegacyActiveCount = (()=>{
+    const lists = [Array.isArray(window.tasksInterval) ? window.tasksInterval : [], Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []];
+    let count = 0;
+    lists.forEach(list => list.forEach(task => {
+      if (!task || typeof task !== "object") return;
+      if (String(task.variant || "").toLowerCase() !== "instance") return;
+      const done = Array.isArray(task.completedDates) && task.completedDates.length > 0;
+      if (!done) count += 1;
+    }));
+    return count;
+  })();
+  const inventoryMaterialsCount = (()=>{
+    if (Array.isArray(inventoryMaterialsValue)) return inventoryMaterialsValue.length;
+    if (!inventoryMaterialsValue || typeof inventoryMaterialsValue !== "object") return 0;
+    const types = Array.isArray(inventoryMaterialsValue.types) ? inventoryMaterialsValue.types.length : 0;
+    const rows = Array.isArray(inventoryMaterialsValue.rows) ? inventoryMaterialsValue.rows.length : 0;
+    const cols = Array.isArray(inventoryMaterialsValue.columns) ? inventoryMaterialsValue.columns.length : 0;
+    return Math.max(types, rows, cols, Object.keys(inventoryMaterialsValue).length);
+  })();
   const tasks = Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : [];
   const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
   const occurrences = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
@@ -3142,6 +3180,20 @@ function runMaintenanceV2SafetyChecks(){
   push("info", "event_records_explainer", "V2 event records are append-only saved history events. Future repeat calendar chips may be projections and may not increase this number until completed, moved, removed, noted, or edited.");
   push("info", "projection_counts_unavailable", "Projected repeat visible counts are null because this checker is read-only and does not depend on rendered calendar projection state.");
   result.counts = {
+    maintenanceCalendarNewRecordsSystem: maintenancePreference,
+    maintenanceCalendarV2PreferenceActive: v2PreferenceActive,
+    tasksIntervalCount: Array.isArray(window.tasksInterval) ? window.tasksInterval.length : 0,
+    tasksAsReqCount: Array.isArray(window.tasksAsReq) ? window.tasksAsReq.length : 0,
+    inventoryCount: Array.isArray(window.inventory) ? window.inventory.length : 0,
+    inventoryMaterialsCount,
+    receiptTrackerWeeksCount: Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks.length : 0,
+    dailyCutHoursCount: Array.isArray(window.dailyCutHours) ? window.dailyCutHours.length : 0,
+    cuttingJobsCount: Array.isArray(window.cuttingJobs) ? window.cuttingJobs.length : (window.cuttingJobs && typeof window.cuttingJobs === "object" ? Object.keys(window.cuttingJobs).length : 0),
+    completedCuttingJobsCount: Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.length : 0,
+    pumpEffPresent: !!(window.pumpEff && typeof window.pumpEff === "object"),
+    pumpEffRpmLogsCount: Array.isArray(window.pumpEff?.rpmLogs) ? window.pumpEff.rpmLogs.length : 0,
+    pumpEffDailyLogsCount: Array.isArray(window.pumpEff?.dailyLogs) ? window.pumpEff.dailyLogs.length : 0,
+    suspiciousLegacyActiveCount,
     v2EventRecordsCount: occurrences.length,
     v2TasksCount: tasks.length,
     v2InstancesCount: instances.length,
