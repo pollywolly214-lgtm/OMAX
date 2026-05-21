@@ -545,6 +545,20 @@ body.cost-timeframe-modal-open{ overflow:hidden; }
   color:#000;
 }
 body.cost-data-center-open{ overflow:hidden; }
+
+[data-cost-window="dataCenter"] [data-open-data-center]{
+  display:block;
+  margin:0 auto;
+}
+
+.cost-data-center-panel [data-dc-panel="maintenance"] .cost-table{
+  border:3px solid #0f172a;
+  border-collapse:collapse;
+}
+.cost-data-center-panel [data-dc-panel="maintenance"] .cost-table th,
+.cost-data-center-panel [data-dc-panel="maintenance"] .cost-table td{
+  border:1px solid rgba(15,23,42,0.35);
+}
 .time-efficiency-tooltip{
   position:fixed;
   z-index:100100;
