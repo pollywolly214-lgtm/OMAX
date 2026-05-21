@@ -1124,6 +1124,20 @@ function triggerFileDownload(file, fileName){
 
 function normalizeOneDriveJobConfig(config){
   const source = config && typeof config === "object" ? config : {};
+  const rawDevices = source.rootDevices && typeof source.rootDevices === "object" ? source.rootDevices : {};
+  const rootDevices = Object.fromEntries(Object.entries(rawDevices).map(([key, value])=>{
+    const row = value && typeof value === "object" ? value : {};
+    const id = String(row.deviceId || key || "");
+    return [id, {
+      deviceId: id,
+      deviceNumber: Number.isFinite(Number(row.deviceNumber)) ? Number(row.deviceNumber) : null,
+      label: typeof row.label === "string" ? row.label : "",
+      folderName: typeof row.folderName === "string" ? row.folderName : "",
+      folderHint: typeof row.folderHint === "string" ? row.folderHint : "",
+      rootSignature: typeof row.rootSignature === "string" ? row.rootSignature : "",
+      lastVerifiedAtISO: typeof row.lastVerifiedAtISO === "string" ? row.lastVerifiedAtISO : ""
+    }];
+  }));
   return {
     enabled: source.enabled === true,
     folderHint: typeof source.folderHint === "string" ? source.folderHint.trim() : "",
@@ -1137,7 +1151,8 @@ function normalizeOneDriveJobConfig(config){
     shareToken: typeof source.shareToken === "string" ? source.shareToken : "",
     accessToken: typeof source.accessToken === "string" ? source.accessToken : "",
     accessTokenExpiresAt: typeof source.accessTokenExpiresAt === "string" ? source.accessTokenExpiresAt : "",
-    lastLinkedAt: typeof source.lastLinkedAt === "string" ? source.lastLinkedAt : ""
+    lastLinkedAt: typeof source.lastLinkedAt === "string" ? source.lastLinkedAt : "",
+    rootDevices
   };
 }
 
@@ -19398,6 +19413,8 @@ function renderJobs(){
   const oneDriveRootStatus = document.querySelector("[data-onedrive-root-status]");
   const oneDriveRootPathStatus = document.querySelector("[data-onedrive-root-path]");
   const oneDriveDeviceStatus = document.querySelector("[data-onedrive-device-status]");
+  const oneDriveCurrentComputer = document.querySelector("[data-onedrive-current-computer]");
+  const oneDriveKnownDevices = document.querySelector("[data-onedrive-known-devices]");
   const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
   const oneDriveRootPickerBtn = document.getElementById("jobOneDriveRootPickerBtn");
 
@@ -19412,16 +19429,19 @@ function renderJobs(){
 
   const getWJCutsRootStatus = async ()=>{
     const config = getSharedConfig();
+    const currentDeviceId = String(getLocalDeviceId() || "");
+    const currentDeviceNumber = getLocalDeviceNumber();
+    const currentDeviceMeta = (config.rootDevices && currentDeviceId) ? config.rootDevices[currentDeviceId] : null;
     if (!supportsLocalRootPicker()) return { supported:false, handle:null, hasSavedHandle:false, permission:"unsupported", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Unsupported browser" };
     const handle = await readLocalRootHandle();
-    if (!handle) return { supported:true, handle:null, hasSavedHandle:false, permission:"missing", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Not set" };
+    if (!handle) return { supported:true, handle:null, hasSavedHandle:false, permission:"missing", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Not set", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:"" };
     let permission = "prompt";
     try { permission = typeof handle.queryPermission === "function" ? await handle.queryPermission({ mode:"read" }) : "granted"; } catch(_e){}
-    if (permission !== "granted") return { supported:true, handle, hasSavedHandle:true, permission, config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Permission needed" };
+    if (permission !== "granted") return { supported:true, handle, hasSavedHandle:true, permission, config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Permission needed", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:String(handle?.name || "") };
     const signature = await computeLocalRootSignature(handle);
     const expectedSignature = expectedRootSignatureFromJobs();
     const signatureMatches = !expectedSignature || !signature ? true : signature === expectedSignature;
-    return { supported:true, handle, hasSavedHandle:true, permission:"granted", config, signature, expectedSignature, signatureMatches, message: signatureMatches ? "Verified" : "Mismatch" };
+    return { supported:true, handle, hasSavedHandle:true, permission:"granted", config, signature, expectedSignature, signatureMatches, message: signatureMatches ? "Verified" : "Mismatch", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:String(handle?.name || "") };
   };
   const updateSharedConfig = (patch)=>{
     const cfg = getSharedConfig();
@@ -19436,13 +19456,23 @@ function renderJobs(){
     if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = status.permission === "granted" ? (status.signatureMatches ? "Verified" : "Mismatch") : (status.hasSavedHandle ? "Permission needed" : "Not set");
     if (oneDriveLibraryStatus) oneDriveLibraryStatus.textContent = status.permission === "granted" ? "Ready" : "Setup required";
     if (oneDriveRootStatus){
-      oneDriveRootStatus.textContent = cfg.localRootName || "Not set";
+      oneDriveRootStatus.textContent = status.handleName || "Not selected on this computer";
     }
     if (oneDriveRootPathStatus){
-      oneDriveRootPathStatus.textContent = cfg.folderHint || cfg.localRootName || "Not set";
+      oneDriveRootPathStatus.textContent = status.currentDeviceMeta?.folderHint || cfg.folderHint || cfg.localRootName || "Not set";
     }
     if (oneDriveDeviceStatus){
       oneDriveDeviceStatus.textContent = getLocalDeviceId() ? `${getLocalDeviceNumber()} (${getLocalDeviceId()})` : "Unavailable";
+    }
+    if (oneDriveCurrentComputer){
+      const signature = status.signature || status.currentDeviceMeta?.rootSignature || "Not verified";
+      oneDriveCurrentComputer.innerHTML = `Computer ID: ${status.currentDeviceNumber || "?"} (${status.currentDeviceId || "Unavailable"})<br>Selected root folder: ${status.handleName || "Not selected on this computer"}<br>Root location hint: ${status.currentDeviceMeta?.folderHint || cfg.folderHint || "Not set"}<br>Root signature: ${signature}<br>Status: ${status.message}<br><span class="small muted">The browser cannot reveal the full local Windows path. Use the root location hint to record where this folder is on this computer.</span>`;
+    }
+    if (oneDriveKnownDevices){
+      const rows = Object.values(cfg.rootDevices || {});
+      oneDriveKnownDevices.innerHTML = rows.length
+        ? rows.map(row=>`<tr><td>${escapeHtml(String(row.deviceNumber || "?"))} (${escapeHtml(String(row.deviceId || ""))})${row.deviceId===status.currentDeviceId?" <strong>(This computer)</strong>":""}</td><td>${escapeHtml(row.folderName || "—")}</td><td>${escapeHtml(row.folderHint || "—")}</td><td>${escapeHtml(row.rootSignature || "—")}</td><td>${escapeHtml(row.lastVerifiedAtISO || "—")}</td></tr>`).join("")
+        : `<tr><td colspan="5" class="small muted">No computer roots recorded yet.</td></tr>`;
     }
   };
 
@@ -19472,10 +19502,19 @@ function renderJobs(){
       const verifyHandle = await readLocalRootHandle();
       if (!verifyHandle){ toast("Unable to save root handle on this browser."); return false; }
       const cfg = getSharedConfig();
+      const currentDeviceId = String(getLocalDeviceId() || "");
+      const currentDeviceNumber = getLocalDeviceNumber();
+      const rootHint = String(oneDriveFolderHintInput?.value || cfg.folderHint || "");
+      const rootDevices = { ...(cfg.rootDevices || {}) };
+      if (currentDeviceId){
+        rootDevices[currentDeviceId] = { ...(rootDevices[currentDeviceId] || {}), deviceId: currentDeviceId, deviceNumber: currentDeviceNumber, label: `Computer ${currentDeviceNumber}`, folderName: String(handle.name || ""), folderHint: rootHint, rootSignature: signature, lastVerifiedAtISO: new Date().toISOString() };
+      }
       updateSharedConfig({
         localRootName: String(handle.name || cfg.localRootName || "Configured"),
         localRootSignature: signature,
-        enabled: true
+        folderHint: rootHint,
+        enabled: true,
+        rootDevices
       });
       await updateOneDriveWizardStatus();
       toast("This computer OneDrive root folder saved and verified.");
@@ -19504,6 +19543,7 @@ function renderJobs(){
 
     try {
       const cfg = getSharedConfig();
+      const currentDeviceMeta = cfg.rootDevices?.[String(getLocalDeviceId() || "")];
       const signature = await computeLocalRootSignature(rootHandle);
       if (!signature){
         toast("Unable to verify local OneDrive root folder.");
@@ -19557,7 +19597,7 @@ function renderJobs(){
         enabled: true,
         localDeviceId: getLocalDeviceId(),
         attachedAtISO: new Date().toISOString(),
-        rootLocationHint: String(cfg.folderHint || cfg.localRootName || "")
+        rootLocationHint: String(currentDeviceMeta?.folderHint || cfg.folderHint || cfg.localRootName || "")
       });
       if (!reference) return false;
       const targetId = String(targetJobId || "");
@@ -19618,11 +19658,21 @@ function renderJobs(){
   oneDriveCancelBtns.forEach(btn => btn.addEventListener("click", closeOneDriveModal));
   oneDriveModal?.addEventListener("click", (event)=>{ if (event.target === oneDriveModal) closeOneDriveModal(); });
 
-  oneDriveSaveBtn?.addEventListener("click", ()=>{
+  oneDriveSaveBtn?.addEventListener("click", async ()=>{
     const cfg = getSharedConfig();
+    const currentDeviceId = String(getLocalDeviceId() || "");
+    const currentDeviceNumber = getLocalDeviceNumber();
+    const nextHint = String(oneDriveFolderHintInput?.value || cfg.folderHint || "");
+    const existing = cfg.rootDevices || {};
+    const rootStatus = await getWJCutsRootStatus();
+    const row = existing[currentDeviceId] || { deviceId: currentDeviceId, deviceNumber: currentDeviceNumber, label: `Computer ${currentDeviceNumber}` };
     const next = updateSharedConfig({
       enabled: !!oneDriveEnabledInput?.checked,
-      folderHint: String(oneDriveFolderHintInput?.value || cfg.folderHint || "")
+      folderHint: nextHint,
+      rootDevices: {
+        ...existing,
+        ...(currentDeviceId ? { [currentDeviceId]: { ...row, folderHint: nextHint, folderName: row.folderName || rootStatus.handleName || "", rootSignature: row.rootSignature || rootStatus.signature || "", lastVerifiedAtISO: rootStatus.message === "Verified" ? new Date().toISOString() : (row.lastVerifiedAtISO || "") } } : {})
+      }
     });
     closeOneDriveModal();
     toast(next.enabled ? "OneDrive root setup saved for this computer" : "OneDrive setup saved (disabled)");

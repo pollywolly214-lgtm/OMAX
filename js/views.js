@@ -2695,7 +2695,7 @@ function viewJobs(){
   };
   const oneDriveConfig = (typeof window.getOneDriveJobConfig === "function")
     ? window.getOneDriveJobConfig()
-    : { enabled: false, rootDriveId: "", rootFolderItemId: "", rootName: "", rootWebUrl: "", folderHint: "", localRootName: "", localRootSignature: "", shareToken: "", accessToken: "", accessTokenExpiresAt: "", lastLinkedAt: "" };
+    : { enabled: false, rootDriveId: "", rootFolderItemId: "", rootName: "", rootWebUrl: "", folderHint: "", localRootName: "", localRootSignature: "", shareToken: "", accessToken: "", accessTokenExpiresAt: "", lastLinkedAt: "", rootDevices: {} };
   const oneDriveLibrary = (typeof window.getOneDriveJobLibrary === "function")
     ? window.getOneDriveJobLibrary()
     : [];
@@ -4671,6 +4671,14 @@ function viewJobs(){
               <div>Root path hint: <span data-onedrive-root-path>Not set</span></div>
               <div>This computer ID: <span data-onedrive-device-status>Not set</span></div>
               <div>Indexed files: <span data-onedrive-library-status>0</span></div>
+            </div>
+            <div class="job-onedrive-current small muted" data-onedrive-current-computer></div>
+            <div class="job-onedrive-known">
+              <div class="small"><strong>Known computer root folders</strong></div>
+              <table class="small">
+                <thead><tr><th>Computer</th><th>Folder name</th><th>Root location hint</th><th>Root signature</th><th>Last verified</th></tr></thead>
+                <tbody data-onedrive-known-devices></tbody>
+              </table>
             </div>
                         <div class="job-onedrive-sync-actions">
               <button type="button" class="job-note-modal-secondary" id="jobOneDriveRootPickerBtn">Set this computer root folder</button>
