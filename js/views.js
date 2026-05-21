@@ -4690,7 +4690,7 @@ function viewJobs(){
             <div class="job-onedrive-known">
               <div class="small"><strong>Known computer root folders</strong></div>
               <table class="small">
-                <thead><tr><th>Computer profile</th><th>Folder name</th><th>Root location hint</th><th>Root signature</th><th>Last verified</th><th>Last browser/device</th></tr></thead>
+                <thead><tr><th>PC/profile</th><th>Root folder</th><th>Root hint</th><th>Root ID</th><th>Last verified</th><th>Last browser/device</th></tr></thead>
                 <tbody data-onedrive-known-devices></tbody>
               </table>
             </div>
