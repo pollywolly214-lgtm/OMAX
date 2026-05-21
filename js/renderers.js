@@ -1157,6 +1157,7 @@ function normalizeOneDriveJobConfig(config){
     accessTokenExpiresAt: typeof source.accessTokenExpiresAt === "string" ? source.accessTokenExpiresAt : "",
     lastLinkedAt: typeof source.lastLinkedAt === "string" ? source.lastLinkedAt : "",
     currentComputerProfileId: typeof source.currentComputerProfileId === "string" ? source.currentComputerProfileId : "",
+    currentComputerProfileByBrowserDeviceId: source.currentComputerProfileByBrowserDeviceId && typeof source.currentComputerProfileByBrowserDeviceId === "object" ? Object.fromEntries(Object.entries(source.currentComputerProfileByBrowserDeviceId).map(([k,v])=>[String(k), String(v||"")])) : {},
     rootDevices
   };
 }
@@ -19435,12 +19436,16 @@ function renderJobs(){
   const ensureCurrentProfile = (cfg)=>{
     const deviceId = String(getLocalDeviceId() || "");
     const nextCfg = { ...cfg };
-    if (!nextCfg.currentComputerProfileId){
-      nextCfg.currentComputerProfileId = deviceId || "";
-    }
     nextCfg.rootDevices = nextCfg.rootDevices || {};
+    nextCfg.currentComputerProfileByBrowserDeviceId = nextCfg.currentComputerProfileByBrowserDeviceId || {};
+    if (nextCfg.currentComputerProfileId && deviceId && !nextCfg.currentComputerProfileByBrowserDeviceId[deviceId]) nextCfg.currentComputerProfileByBrowserDeviceId[deviceId] = nextCfg.currentComputerProfileId;
     return nextCfg;
   };
+  function getCurrentComputerProfileId(cfg){
+    const browserDeviceId = String(getLocalDeviceId() || "");
+    const localFallback = (typeof window !== "undefined" && window.localStorage) ? String(window.localStorage.getItem("cutting_job_current_profile_local") || "") : "";
+    return String((cfg.currentComputerProfileByBrowserDeviceId || {})[browserDeviceId] || localFallback || cfg.currentComputerProfileId || browserDeviceId || "");
+  }
 
 
   const getSharedConfig = ()=>{
@@ -19453,7 +19458,7 @@ function renderJobs(){
     const config = getSharedConfig();
     const currentDeviceId = String(getLocalDeviceId() || "");
     const currentDeviceNumber = getLocalDeviceNumber();
-    const profileId = String(config.currentComputerProfileId || currentDeviceId || "");
+    const profileId = getCurrentComputerProfileId(config);
     const currentDeviceMeta = (config.rootDevices && profileId) ? config.rootDevices[profileId] : null;
     if (!supportsLocalRootPicker()) return { supported:false, handle:null, hasSavedHandle:false, permission:"unsupported", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Unsupported browser" };
     const handle = await readLocalRootHandle();
@@ -19475,7 +19480,7 @@ function renderJobs(){
     const cfg = getSharedConfig();
     const status = await getWJCutsRootStatus();
     if (oneDriveProfileSelect){
-      const selected = cfg.currentComputerProfileId || "";
+      const selected = getCurrentComputerProfileId(cfg);
       const rows = Object.values(cfg.rootDevices || {});
       oneDriveProfileSelect.innerHTML = rows.length
         ? rows.map(row=>`<option value="${escapeHtml(row.computerProfileId || row.deviceId || "")}" ${(row.computerProfileId || row.deviceId)===selected?"selected":""}>${escapeHtml(row.label || row.computerProfileId || row.deviceId || "Unnamed profile")}</option>`).join("")
@@ -19499,14 +19504,14 @@ function renderJobs(){
       oneDriveDeviceStatus.textContent = getLocalDeviceId() ? `${getLocalDeviceNumber()} (${getLocalDeviceId()})` : "Unavailable";
     }
     if (oneDriveCurrentComputer){
-      const selectedProfile = (cfg.rootDevices || {})[cfg.currentComputerProfileId || ""] || null;
+      const selectedProfile = (cfg.rootDevices || {})[getCurrentComputerProfileId(cfg) || ""] || null;
       const signature = status.signature || selectedProfile?.rootSignature || "Not verified";
       oneDriveCurrentComputer.innerHTML = `Browser/device ID: ${status.currentDeviceNumber || "?"} (${status.currentDeviceId || "Unavailable"})<br>Selected computer profile: ${escapeHtml(selectedProfile?.label || "Not selected")}<br>Selected root folder: ${status.handleName || "Not selected on this computer"}<br>Root location hint: ${selectedProfile?.folderHint || cfg.folderHint || "Not set"}<br>Root signature: ${signature}<br>Status: ${status.message}<br><span class="small muted">Root metadata is saved to the shared app state. Actual folder permission is saved in this browser profile and may need to be re-authorized after browser/site storage is cleared or when using a different browser.</span>`;
     }
     if (oneDriveKnownDevices){
       const rows = Object.values(cfg.rootDevices || {});
       oneDriveKnownDevices.innerHTML = rows.length
-        ? rows.map(row=>`<tr><td>${escapeHtml(row.label || "Unnamed")}<br><span class="small muted">${escapeHtml(String(row.deviceId || ""))}</span>${row.deviceId===cfg.currentComputerProfileId?" <strong>(Selected)</strong>":""}</td><td>${escapeHtml(row.folderName || "—")}</td><td>${escapeHtml(row.folderHint || "—")}</td><td>${escapeHtml(row.rootSignature || "—")}</td><td>${escapeHtml(row.lastVerifiedAtISO || "—")}<br><span class="small muted">${escapeHtml(String(row.lastSeenBrowserDeviceNumber || "?"))} (${escapeHtml(String(row.lastSeenBrowserDeviceId || ""))})</span></td></tr>`).join("")
+        ? rows.map(row=>`<tr><td>${escapeHtml(row.label || "Unnamed")}<br><span class="small muted">${escapeHtml(String(row.deviceId || ""))}</span>${(row.computerProfileId || row.deviceId)===getCurrentComputerProfileId(cfg)?" <strong>(Selected)</strong>":""}</td><td>${escapeHtml(row.folderName || "—")}</td><td>${escapeHtml(row.folderHint || "—")}</td><td>${escapeHtml(row.rootSignature || "—")}</td><td>${escapeHtml(row.lastVerifiedAtISO || "—")}<br><span class="small muted">${escapeHtml(String(row.lastSeenBrowserDeviceNumber || "?"))} (${escapeHtml(String(row.lastSeenBrowserDeviceId || ""))})</span></td></tr>`).join("")
         : `<tr><td colspan="5" class="small muted">No computer roots recorded yet.</td></tr>`;
     }
   };
@@ -19551,7 +19556,12 @@ function renderJobs(){
       const currentDeviceId = String(getLocalDeviceId() || "");
       const currentDeviceNumber = getLocalDeviceNumber();
       const rootHint = String(oneDriveFolderHintInput?.value || cfg.folderHint || "");
-      const profileId = String(cfg.currentComputerProfileId || currentDeviceId || "");
+      const profileId = getCurrentComputerProfileId(cfg);
+      const selectedProfile = (cfg.rootDevices || {})[profileId] || null;
+      if (selectedProfile?.rootSignature && selectedProfile.rootSignature !== signature){
+        toast("This folder does not match the saved root for this computer profile. Select the matching WJ Cuts root or create a new computer profile.");
+        return false;
+      }
       const rootDevices = { ...(cfg.rootDevices || {}) };
       if (profileId){
         rootDevices[profileId] = { ...(rootDevices[profileId] || {}), deviceId: profileId, computerProfileId: profileId, deviceNumber: currentDeviceNumber, label: rootDevices[profileId]?.label || `Computer ${currentDeviceNumber}`, folderName: String(handle.name || ""), folderHint: rootHint, rootSignature: signature, lastVerifiedAtISO: new Date().toISOString(), lastSeenBrowserDeviceId: currentDeviceId, lastSeenBrowserDeviceNumber: currentDeviceNumber };
@@ -19562,8 +19572,10 @@ function renderJobs(){
         folderHint: rootHint,
         enabled: true,
         rootDevices,
-        currentComputerProfileId: profileId
+        currentComputerProfileId: profileId,
+        currentComputerProfileByBrowserDeviceId: { ...(cfg.currentComputerProfileByBrowserDeviceId || {}), ...(currentDeviceId ? { [currentDeviceId]: profileId } : {}) }
       });
+      if (typeof saveCloudDebounced === "function") saveCloudDebounced();
       await updateOneDriveWizardStatus();
       toast("This computer OneDrive root folder saved and verified.");
       return true;
@@ -19591,7 +19603,7 @@ function renderJobs(){
 
     try {
       const cfg = getSharedConfig();
-      const profileId = String(cfg.currentComputerProfileId || getLocalDeviceId() || "");
+      const profileId = getCurrentComputerProfileId(cfg);
       const currentProfile = cfg.rootDevices?.[profileId];
       const signature = await computeLocalRootSignature(rootHandle);
       if (!signature){
@@ -19701,7 +19713,8 @@ function renderJobs(){
       pendingAttachTarget = null;
       const attached = await attachFromLocalOneDriveRoot(target.mode === "job" ? target.jobId : "");
       if (attached){
-        closeOneDriveModal();
+        if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+    closeOneDriveModal();
       }
     }
   });
@@ -19715,7 +19728,7 @@ function renderJobs(){
     const nextHint = String(oneDriveFolderHintInput?.value || cfg.folderHint || "");
     const existing = cfg.rootDevices || {};
     const rootStatus = await getWJCutsRootStatus();
-    const profileId = String(cfg.currentComputerProfileId || currentDeviceId || "");
+    const profileId = getCurrentComputerProfileId(cfg);
     const row = existing[profileId] || { deviceId: profileId, computerProfileId: profileId, deviceNumber: currentDeviceNumber, label: `Computer ${currentDeviceNumber}` };
     const next = updateSharedConfig({
       enabled: !!oneDriveEnabledInput?.checked,
@@ -19725,6 +19738,7 @@ function renderJobs(){
         ...(profileId ? { [profileId]: { ...row, folderHint: nextHint, folderName: row.folderName || rootStatus.handleName || "", rootSignature: row.rootSignature || rootStatus.signature || "", lastSeenBrowserDeviceId: currentDeviceId, lastSeenBrowserDeviceNumber: currentDeviceNumber, lastVerifiedAtISO: rootStatus.message === "Verified" ? new Date().toISOString() : (row.lastVerifiedAtISO || "") } } : {})
       }
     });
+    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
     closeOneDriveModal();
     toast(next.enabled ? "OneDrive root setup saved for this computer" : "OneDrive setup saved (disabled)");
     renderJobs();
@@ -19733,17 +19747,21 @@ function renderJobs(){
     const cfg = getSharedConfig();
     const selected = String(oneDriveProfileSelect?.value || "");
     if (!selected) return;
-    updateSharedConfig({ currentComputerProfileId: selected });
+    const browserDeviceId = String(getLocalDeviceId() || "");
+    if (typeof window !== "undefined" && window.localStorage) window.localStorage.setItem("cutting_job_current_profile_local", selected);
+    updateSharedConfig({ currentComputerProfileByBrowserDeviceId: { ...(cfg.currentComputerProfileByBrowserDeviceId || {}), ...(browserDeviceId ? { [browserDeviceId]: selected } : {}) }, currentComputerProfileId: cfg.currentComputerProfileId || selected });
+    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
     updateOneDriveWizardStatus();
   });
   oneDriveProfileSaveBtn?.addEventListener("click", ()=>{
     const cfg = getSharedConfig();
     const currentDeviceId = String(getLocalDeviceId() || "");
-    const profileId = String(oneDriveProfileSelect?.value || cfg.currentComputerProfileId || currentDeviceId || genId("computer_profile"));
+    const profileId = String(oneDriveProfileSelect?.value || getCurrentComputerProfileId(cfg) || currentDeviceId || genId("computer_profile"));
     const label = String(oneDriveProfileLabelInput?.value || "").trim() || `Computer ${getLocalDeviceNumber()}`;
     const rootDevices = { ...(cfg.rootDevices || {}) };
     rootDevices[profileId] = { ...(rootDevices[profileId] || {}), deviceId: profileId, computerProfileId: profileId, label, lastSeenBrowserDeviceId: currentDeviceId, lastSeenBrowserDeviceNumber: getLocalDeviceNumber() };
-    updateSharedConfig({ rootDevices, currentComputerProfileId: profileId });
+    updateSharedConfig({ rootDevices, currentComputerProfileId: profileId,
+        currentComputerProfileByBrowserDeviceId: { ...(cfg.currentComputerProfileByBrowserDeviceId || {}), ...(currentDeviceId ? { [currentDeviceId]: profileId } : {}) } });
     updateOneDriveWizardStatus();
   });
 
@@ -19768,6 +19786,7 @@ function renderJobs(){
       } catch (_err){
         toast("Permission is required for referenced files to preview or open.");
       }
+      if (typeof saveCloudDebounced === "function") saveCloudDebounced();
       await updateOneDriveWizardStatus();
       await updatePermissionBanner();
       return;
