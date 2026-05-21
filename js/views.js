@@ -3985,16 +3985,16 @@ function viewJobs(){
                   const href = f.dataUrl || f.url || f.externalUrl || f.downloadUrl || f.oneDriveUrl || "";
                   const usableLink = !!href && !/^data:(image|application)\//i.test(String(href || "")) && /^https?:\/\//i.test(String(href || ""));
                   const isRef = f?.source === "wj_cuts_reference" && !!f?.relativePath;
-                  const expectedPath = isRef ? `WJ Cuts\${String(f.relativePath || "").replace(/^\+/, "")}` : "";
+                  const expectedPath = isRef ? `WJ Cuts\\${String(f.relativePath || "").replace(/^\\+/, "")}` : "";
                   const link = isRef
-                    ? `<button type="button" class="link" data-open-local-file data-job-id="${j.id}" data-file-index="${idx}">${safeName}</button>`
+                    ? `<button type="button" class="link" data-open-local-file data-job-id="${job.id}" data-file-index="${idx}">${safeName}</button>`
                     : (usableLink ? `<a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a>` : `${safeName} <span class="small muted">— File metadata saved only — original file content is not stored.</span>`);
                   const sourceTag = isRef
                     ? `<span class="job-file-source-badge">Reference folder</span>`
                     : (f?.source === "onedrive" ? `<span class="job-file-source-badge">OneDrive</span>` : "");
                   const pathAction = expectedPath ? `<button type="button" class="link" data-preview-path-btn data-preview-expected-path="${esc(expectedPath)}" data-preview-root-location="${esc(f?.rootLocationHint || 'WJ Cuts')}">Show path</button>` : "";
-                  const linkAction = !isRef ? `<button type="button" class="link" data-edit-file-link="${j.id}" data-file-index="${idx}">Link</button>` : "";
-                  return `<li>${link} ${sourceTag} ${expectedPath ? `<span class="small muted">— ${esc(expectedPath)}</span>` : ""} ${pathAction} ${linkAction} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
+                  const linkAction = !isRef ? `<button type="button" class="link" data-edit-file-link="${job.id}" data-file-index="${idx}">Link</button>` : "";
+                  return `<li>${link} ${sourceTag} ${expectedPath ? `<span class="small muted">— ${esc(expectedPath)}</span>` : ""} ${pathAction} ${linkAction} <button type="button" class="link" data-remove-file="${job.id}" data-file-index="${idx}">Remove</button></li>`;
                 }).join("") : `<li class="muted">No files attached</li>`}
               </ul>
             </div>
@@ -4418,9 +4418,17 @@ function viewJobs(){
                     const safeName = f.name || `file_${idx+1}`;
                     const href = f.dataUrl || f.url || f.externalUrl || f.downloadUrl || f.oneDriveUrl || "";
                     const usableLink = !!href && !/^data:(image|application)\//i.test(String(href || "")) && /^https?:\/\//i.test(String(href || ""));
-                    const link = usableLink ? `<a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a>` : `${safeName} <span class="small muted">— File metadata saved only — original file content is not stored.</span>`;
-                    const sourceTag = f?.source === "onedrive" ? `<span class="job-file-source-badge">OneDrive</span>` : "";
-                    return `<li>${link} ${sourceTag} <button type="button" class="link" data-edit-file-link="${j.id}" data-file-index="${idx}">Link</button> <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
+                    const isRef = f?.source === "wj_cuts_reference" && !!f?.relativePath;
+                    const expectedPath = isRef ? `WJ Cuts\\${String(f.relativePath || "").replace(/^\\+/, "")}` : "";
+                    const link = isRef
+                      ? `<button type="button" class="link" data-open-local-file data-job-id="${j.id}" data-file-index="${idx}">${safeName}</button>`
+                      : (usableLink ? `<a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a>` : `${safeName} <span class="small muted">— File metadata saved only — original file content is not stored.</span>`);
+                    const sourceTag = isRef
+                      ? `<span class="job-file-source-badge">Reference folder</span>`
+                      : (f?.source === "onedrive" ? `<span class="job-file-source-badge">OneDrive</span>` : "");
+                    const pathAction = expectedPath ? `<button type="button" class="link" data-preview-path-btn data-preview-expected-path="${esc(expectedPath)}" data-preview-root-location="${esc(f?.rootLocationHint || 'WJ Cuts')}">Show path</button>` : "";
+                    const linkAction = !isRef ? `<button type="button" class="link" data-edit-file-link="${j.id}" data-file-index="${idx}">Link</button>` : "";
+                    return `<li>${link} ${sourceTag} ${expectedPath ? `<span class="small muted">— ${esc(expectedPath)}</span>` : ""} ${pathAction} ${linkAction} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
                   }).join("") : `<li class=\"muted\">No files attached</li>`}
                 </ul>
               </div>

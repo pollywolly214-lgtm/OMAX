@@ -20449,7 +20449,7 @@ function renderJobs(){
         openEl.hidden = !href;
       }
       if (pathBtn instanceof HTMLButtonElement){
-        pathBtn.hidden = !(mode === "message" && expectedPath);
+        pathBtn.hidden = !expectedPath;
         pathBtn.dataset.previewExpectedPath = expectedPath;
         pathBtn.dataset.previewRootLocation = option.getAttribute("data-preview-root-location") || "";
       }
@@ -20524,7 +20524,7 @@ function renderJobs(){
       openEl.hidden = !href;
     }
     if (pathBtn instanceof HTMLButtonElement){
-      pathBtn.hidden = !(mode === "message" && expectedPath);
+      pathBtn.hidden = !expectedPath;
       pathBtn.dataset.previewExpectedPath = expectedPath;
         pathBtn.dataset.previewRootLocation = option.getAttribute("data-preview-root-location") || "";
     }
@@ -20534,15 +20534,10 @@ function renderJobs(){
     const id = String(jobId || "");
     const idx = Number(fileIndex);
     if (!id || !Number.isInteger(idx) || idx < 0) return false;
-    const sources = [Array.isArray(cuttingJobs) ? cuttingJobs : [], Array.isArray(completedJobs) ? completedJobs : []];
-    let file = null;
-    for (const list of sources){
-      const job = list.find(item => String(item?.id || "") === id);
-      if (!job) continue;
-      const files = Array.isArray(job.files) ? job.files : [];
-      file = files[idx] || null;
-      if (file) break;
-    }
+    const found = findJobRecord(id);
+    const job = found && found.job ? found.job : null;
+    const files = Array.isArray(job?.files) ? job.files : [];
+    const file = files[idx] || null;
     if (!file || file.source !== "wj_cuts_reference" || !file.relativePath){
       toast("File metadata saved only — original file content is not stored.");
       return false;
@@ -20615,96 +20610,6 @@ function renderJobs(){
       return;
     }
 
-    const fileMenuAdd = e.target.closest("[data-job-file-add]");
-    if (fileMenuAdd){
-      const id = fileMenuAdd.getAttribute("data-job-file-add");
-      if (id){
-        e.preventDefault();
-        if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
-        closeFileMenu(); closeActionMenu(); closeHistoryActionMenu();
-        const attached = await attachFromLocalOneDriveRoot(id);
-        if (!attached){ window.pendingJobFocus = { type: "jobRow", id }; renderJobs(); }
-      }
-      return;
-    }
-
-    const upload = e.target.closest("[data-upload-job]");
-    if (upload){
-      const id = upload.getAttribute("data-upload-job");
-      e.preventDefault();
-      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
-      closeActionMenu(); closeHistoryActionMenu();
-      content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
-      return;
-    }
-
-    const linkJobFile = e.target.closest("[data-link-job-file]");
-    if (linkJobFile){
-      const id = linkJobFile.getAttribute("data-link-job-file");
-      const idStr = String(id || "");
-      const found = findJobRecord(idStr);
-      const j = found && found.job ? found.job : null;
-      if (!j) return;
-      try {
-        const picked = await window.oneDrivePicker.openOneDriveDxfPicker();
-        if (!picked) return;
-        j.files = Array.isArray(j.files) ? j.files : [];
-        j.files.push({ id: genId(picked.fileName || "job_file"), name: picked.fileName || "Linked file", type: "", size: null, source: "onedrive", driveId: picked.driveId || "", itemId: picked.itemId || "", eTag: picked.eTag || "", lastModifiedDateTime: picked.lastModifiedDateTime || "", webUrl: picked.webUrl || "", url: picked.webUrl || "", addedAt: new Date().toISOString() });
-        saveCloudDebounced(); toast("OneDrive DXF linked"); renderJobs();
-      } catch (err){ toast(err?.message || "Unable to link OneDrive DXF."); }
-      return;
-    }
-
-    const editFileLink = e.target.closest("[data-edit-file-link]");
-    if (editFileLink){
-      const id = editFileLink.getAttribute("data-edit-file-link");
-      const idx = Number(editFileLink.getAttribute("data-file-index"));
-      const idStr = String(id || "");
-      const found = findJobRecord(idStr);
-      const j = found && found.job ? found.job : null;
-      const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null;
-      if (!file) return;
-      const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || "");
-      if (url == null) return;
-      file.url = url; file.source = "onedrive";
-      saveCloudDebounced(); toast(url ? "File link updated" : "File link cleared"); renderJobs();
-      return;
-    }
-
-    const removeFile = e.target.closest("[data-remove-file]");
-    if (removeFile){
-      const id = removeFile.getAttribute("data-remove-file");
-      const idx = Number(removeFile.getAttribute("data-file-index"));
-      const idStr = String(id || "");
-      const found = findJobRecord(idStr);
-      const j = found && found.job ? found.job : null;
-      if (j && Array.isArray(j.files) && idx >= 0 && idx < j.files.length){
-        j.files.splice(idx, 1); saveCloudDebounced(); toast("File removed"); renderJobs();
-      }
-      return;
-    }
-
-    const previewPathBtn = e.target.closest("[data-preview-path-btn]");
-    if (previewPathBtn){
-      e.preventDefault();
-      const expected = previewPathBtn.getAttribute("data-preview-expected-path") || "";
-      if (expected){
-        const rootLocation = previewPathBtn.getAttribute("data-preview-root-location") || "";
-        const msg = rootLocation
-          ? `Root folder used: ${rootLocation}\nExpected file path:\n${expected}`
-          : `Expected file path:\n${expected}`;
-        if (navigator?.clipboard?.writeText){ navigator.clipboard.writeText(expected).catch(()=>{}); }
-        if (window.alert) window.alert(msg); else toast(msg);
-      }
-      return;
-    }
-
-    const localFileBtn = e.target.closest("[data-open-local-file]");
-    if (localFileBtn){
-      e.preventDefault();
-      await openLocalRootAttachment(localFileBtn.getAttribute("data-job-id"), localFileBtn.getAttribute("data-file-index"));
-      return;
-    }
 
     const noteTrigger = e.target.closest("[data-job-note]");
     if (noteTrigger && (!noteBackdrop || !noteBackdrop.contains(noteTrigger))){
@@ -21076,29 +20981,6 @@ function renderJobs(){
       return;
     }
 
-    const fileMenuAdd = e.target.closest("[data-job-file-add]");
-    if (fileMenuAdd){
-      const id = fileMenuAdd.getAttribute("data-job-file-add");
-      if (id){
-        e.preventDefault();
-        closeFileMenu();
-        closeActionMenu();
-        const attached = await attachFromLocalOneDriveRoot(id);
-        if (!attached){
-          window.pendingJobFocus = { type: "jobAddFiles", id };
-          editingJobs.add(id);
-          renderJobs();
-        }
-      }
-      return;
-    }
-
-    const localFileBtn = e.target.closest("[data-open-local-file]");
-    if (localFileBtn){
-      e.preventDefault();
-      await openLocalRootAttachment(localFileBtn.getAttribute("data-job-id"), localFileBtn.getAttribute("data-file-index"));
-      return;
-    }
 
     if (openFileMenuId){
       const activeMenu = content.querySelector(`[data-job-file-menu="${openFileMenuId}"]`);
@@ -21140,84 +21022,6 @@ function renderJobs(){
       return;
     }
 
-    const upload = e.target.closest("[data-upload-job]");
-    if (upload){
-      const id = upload.getAttribute("data-upload-job");
-      closeFileMenu();
-      closeActionMenu();
-      closeHistoryActionMenu();
-      content.querySelector(`input[data-job-file-input="${id}"]`)?.click();
-      return;
-    }
-
-    const linkJobFile = e.target.closest("[data-link-job-file]");
-    if (linkJobFile){
-      const id = linkJobFile.getAttribute("data-link-job-file");
-      const idStr = String(id || "");
-      const found = findJobRecord(idStr);
-      const j = found && found.job ? found.job : null;
-      if (!j) return;
-      try {
-        const picked = await window.oneDrivePicker.openOneDriveDxfPicker();
-        if (!picked) return;
-        j.files = Array.isArray(j.files) ? j.files : [];
-        j.files.push({
-          id: genId(picked.fileName || "job_file"),
-          name: picked.fileName || "Linked file",
-          type: "",
-          size: null,
-          source: "onedrive",
-          driveId: picked.driveId || "",
-          itemId: picked.itemId || "",
-          eTag: picked.eTag || "",
-          lastModifiedDateTime: picked.lastModifiedDateTime || "",
-          webUrl: picked.webUrl || "",
-          url: picked.webUrl || "",
-          addedAt: new Date().toISOString()
-        });
-        saveCloudDebounced();
-        toast("OneDrive DXF linked");
-        renderJobs();
-      } catch (err){
-        toast(err?.message || "Unable to link OneDrive DXF.");
-      }
-      return;
-    }
-
-    const editFileLink = e.target.closest("[data-edit-file-link]");
-    if (editFileLink){
-      const id = editFileLink.getAttribute("data-edit-file-link");
-      const idx = Number(editFileLink.getAttribute("data-file-index"));
-      const idStr = String(id || "");
-      const found = findJobRecord(idStr);
-      const j = found && found.job ? found.job : null;
-      const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null;
-      if (!file) return;
-      const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || "");
-      if (url == null) return;
-      file.url = url;
-      file.source = "onedrive";
-      saveCloudDebounced();
-      toast(url ? "File link updated" : "File link cleared");
-      renderJobs();
-      return;
-    }
-
-    const removeFile = e.target.closest("[data-remove-file]");
-    if (removeFile){
-      const id = removeFile.getAttribute("data-remove-file");
-      const idx = Number(removeFile.getAttribute("data-file-index"));
-      const idStr = String(id || "");
-      const found = findJobRecord(idStr);
-      const j = found && found.job ? found.job : null;
-      if (j && Array.isArray(j.files) && idx>=0 && idx<j.files.length){
-        j.files.splice(idx,1);
-        saveCloudDebounced();
-        toast("File removed");
-        renderJobs();
-      }
-      return;
-    }
 
     const ed = e.target.closest("[data-edit-job]");
     const rm = e.target.closest("[data-remove-job]");
