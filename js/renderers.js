@@ -19417,13 +19417,30 @@ function renderJobs(){
   const oneDriveKnownDevices = document.querySelector("[data-onedrive-known-devices]");
   const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
   const oneDriveRootPickerBtn = document.getElementById("jobOneDriveRootPickerBtn");
+  const permissionBanner = content.querySelector("[data-wjcuts-permission-banner]");
+  const permissionBannerText = content.querySelector("[data-wjcuts-permission-text]");
+  const permissionGrantBtn = content.querySelector("[data-wjcuts-grant-permission]");
+  const permissionSetupBtn = content.querySelector("[data-wjcuts-open-setup]");
+  const oneDriveProfileSelect = document.getElementById("jobOneDriveComputerProfile");
+  const oneDriveProfileLabelInput = document.getElementById("jobOneDriveProfileLabel");
+  const oneDriveProfileUseBtn = document.getElementById("jobOneDriveProfileUseBtn");
+  const oneDriveProfileSaveBtn = document.getElementById("jobOneDriveProfileSaveBtn");
 
   let pendingAttachTarget = null;
+  const ensureCurrentProfile = (cfg)=>{
+    const deviceId = String(getLocalDeviceId() || "");
+    const nextCfg = { ...cfg };
+    if (!nextCfg.currentComputerProfileId){
+      nextCfg.currentComputerProfileId = deviceId || "";
+    }
+    nextCfg.rootDevices = nextCfg.rootDevices || {};
+    return nextCfg;
+  };
 
 
   const getSharedConfig = ()=>{
     const cfg = (typeof window.getOneDriveJobConfig === "function") ? window.getOneDriveJobConfig() : normalizeOneDriveJobConfig(null);
-    return normalizeOneDriveJobConfig(cfg);
+    return ensureCurrentProfile(normalizeOneDriveJobConfig(cfg));
   };
 
 
@@ -19465,14 +19482,26 @@ function renderJobs(){
       oneDriveDeviceStatus.textContent = getLocalDeviceId() ? `${getLocalDeviceNumber()} (${getLocalDeviceId()})` : "Unavailable";
     }
     if (oneDriveCurrentComputer){
-      const signature = status.signature || status.currentDeviceMeta?.rootSignature || "Not verified";
-      oneDriveCurrentComputer.innerHTML = `Computer ID: ${status.currentDeviceNumber || "?"} (${status.currentDeviceId || "Unavailable"})<br>Selected root folder: ${status.handleName || "Not selected on this computer"}<br>Root location hint: ${status.currentDeviceMeta?.folderHint || cfg.folderHint || "Not set"}<br>Root signature: ${signature}<br>Status: ${status.message}<br><span class="small muted">The browser cannot reveal the full local Windows path. Use the root location hint to record where this folder is on this computer.</span>`;
+      const selectedProfile = (cfg.rootDevices || {})[cfg.currentComputerProfileId || ""] || null;
+      const signature = status.signature || selectedProfile?.rootSignature || "Not verified";
+      oneDriveCurrentComputer.innerHTML = `Browser/device ID: ${status.currentDeviceNumber || "?"} (${status.currentDeviceId || "Unavailable"})<br>Selected computer profile: ${escapeHtml(selectedProfile?.label || "Not selected")}<br>Selected root folder: ${status.handleName || "Not selected on this computer"}<br>Root location hint: ${selectedProfile?.folderHint || cfg.folderHint || "Not set"}<br>Root signature: ${signature}<br>Status: ${status.message}<br><span class="small muted">Root metadata is saved to the shared app state. Actual folder permission is saved in this browser profile and may need to be re-authorized after browser/site storage is cleared or when using a different browser.</span>`;
     }
     if (oneDriveKnownDevices){
       const rows = Object.values(cfg.rootDevices || {});
       oneDriveKnownDevices.innerHTML = rows.length
-        ? rows.map(row=>`<tr><td>${escapeHtml(String(row.deviceNumber || "?"))} (${escapeHtml(String(row.deviceId || ""))})${row.deviceId===status.currentDeviceId?" <strong>(This computer)</strong>":""}</td><td>${escapeHtml(row.folderName || "—")}</td><td>${escapeHtml(row.folderHint || "—")}</td><td>${escapeHtml(row.rootSignature || "—")}</td><td>${escapeHtml(row.lastVerifiedAtISO || "—")}</td></tr>`).join("")
+        ? rows.map(row=>`<tr><td>${escapeHtml(row.label || "Unnamed")}<br><span class="small muted">${escapeHtml(String(row.deviceId || ""))}</span>${row.deviceId===cfg.currentComputerProfileId?" <strong>(Selected)</strong>":""}</td><td>${escapeHtml(row.folderName || "—")}</td><td>${escapeHtml(row.folderHint || "—")}</td><td>${escapeHtml(row.rootSignature || "—")}</td><td>${escapeHtml(row.lastVerifiedAtISO || "—")}<br><span class="small muted">${escapeHtml(String(row.lastSeenBrowserDeviceNumber || "?"))} (${escapeHtml(String(row.lastSeenBrowserDeviceId || ""))})</span></td></tr>`).join("")
         : `<tr><td colspan="5" class="small muted">No computer roots recorded yet.</td></tr>`;
+    }
+  };
+  const updatePermissionBanner = async ()=>{
+    if (!permissionBanner) return;
+    const hasRefs = [...(Array.isArray(cuttingJobs)?cuttingJobs:[]), ...(Array.isArray(completedCuttingJobs)?completedCuttingJobs:[])].some(j => Array.isArray(j?.files) && j.files.some(f=>f?.source==="wj_cuts_reference"));
+    if (!hasRefs){ permissionBanner.hidden = true; return; }
+    const status = await getWJCutsRootStatus();
+    const blocked = !status.hasSavedHandle || status.permission !== "granted";
+    permissionBanner.hidden = !blocked;
+    if (permissionBannerText && blocked){
+      permissionBannerText.textContent = "WJ Cuts file references need folder permission before previews/opening files will work. Grant access to this computer’s WJ Cuts root folder.";
     }
   };
 
@@ -19505,16 +19534,18 @@ function renderJobs(){
       const currentDeviceId = String(getLocalDeviceId() || "");
       const currentDeviceNumber = getLocalDeviceNumber();
       const rootHint = String(oneDriveFolderHintInput?.value || cfg.folderHint || "");
+      const profileId = String(cfg.currentComputerProfileId || currentDeviceId || "");
       const rootDevices = { ...(cfg.rootDevices || {}) };
-      if (currentDeviceId){
-        rootDevices[currentDeviceId] = { ...(rootDevices[currentDeviceId] || {}), deviceId: currentDeviceId, deviceNumber: currentDeviceNumber, label: `Computer ${currentDeviceNumber}`, folderName: String(handle.name || ""), folderHint: rootHint, rootSignature: signature, lastVerifiedAtISO: new Date().toISOString() };
+      if (profileId){
+        rootDevices[profileId] = { ...(rootDevices[profileId] || {}), deviceId: profileId, computerProfileId: profileId, deviceNumber: currentDeviceNumber, label: rootDevices[profileId]?.label || `Computer ${currentDeviceNumber}`, folderName: String(handle.name || ""), folderHint: rootHint, rootSignature: signature, lastVerifiedAtISO: new Date().toISOString(), lastSeenBrowserDeviceId: currentDeviceId, lastSeenBrowserDeviceNumber: currentDeviceNumber };
       }
       updateSharedConfig({
         localRootName: String(handle.name || cfg.localRootName || "Configured"),
         localRootSignature: signature,
         folderHint: rootHint,
         enabled: true,
-        rootDevices
+        rootDevices,
+        currentComputerProfileId: profileId
       });
       await updateOneDriveWizardStatus();
       toast("This computer OneDrive root folder saved and verified.");
@@ -19665,18 +19696,36 @@ function renderJobs(){
     const nextHint = String(oneDriveFolderHintInput?.value || cfg.folderHint || "");
     const existing = cfg.rootDevices || {};
     const rootStatus = await getWJCutsRootStatus();
-    const row = existing[currentDeviceId] || { deviceId: currentDeviceId, deviceNumber: currentDeviceNumber, label: `Computer ${currentDeviceNumber}` };
+    const profileId = String(cfg.currentComputerProfileId || currentDeviceId || "");
+    const row = existing[profileId] || { deviceId: profileId, computerProfileId: profileId, deviceNumber: currentDeviceNumber, label: `Computer ${currentDeviceNumber}` };
     const next = updateSharedConfig({
       enabled: !!oneDriveEnabledInput?.checked,
       folderHint: nextHint,
       rootDevices: {
         ...existing,
-        ...(currentDeviceId ? { [currentDeviceId]: { ...row, folderHint: nextHint, folderName: row.folderName || rootStatus.handleName || "", rootSignature: row.rootSignature || rootStatus.signature || "", lastVerifiedAtISO: rootStatus.message === "Verified" ? new Date().toISOString() : (row.lastVerifiedAtISO || "") } } : {})
+        ...(profileId ? { [profileId]: { ...row, folderHint: nextHint, folderName: row.folderName || rootStatus.handleName || "", rootSignature: row.rootSignature || rootStatus.signature || "", lastSeenBrowserDeviceId: currentDeviceId, lastSeenBrowserDeviceNumber: currentDeviceNumber, lastVerifiedAtISO: rootStatus.message === "Verified" ? new Date().toISOString() : (row.lastVerifiedAtISO || "") } } : {})
       }
     });
     closeOneDriveModal();
     toast(next.enabled ? "OneDrive root setup saved for this computer" : "OneDrive setup saved (disabled)");
     renderJobs();
+  });
+  oneDriveProfileUseBtn?.addEventListener("click", ()=>{
+    const cfg = getSharedConfig();
+    const selected = String(oneDriveProfileSelect?.value || "");
+    if (!selected) return;
+    updateSharedConfig({ currentComputerProfileId: selected });
+    updateOneDriveWizardStatus();
+  });
+  oneDriveProfileSaveBtn?.addEventListener("click", ()=>{
+    const cfg = getSharedConfig();
+    const currentDeviceId = String(getLocalDeviceId() || "");
+    const profileId = String(oneDriveProfileSelect?.value || cfg.currentComputerProfileId || currentDeviceId || genId("computer_profile"));
+    const label = String(oneDriveProfileLabelInput?.value || "").trim() || `Computer ${getLocalDeviceNumber()}`;
+    const rootDevices = { ...(cfg.rootDevices || {}) };
+    rootDevices[profileId] = { ...(rootDevices[profileId] || {}), deviceId: profileId, computerProfileId: profileId, label, lastSeenBrowserDeviceId: currentDeviceId, lastSeenBrowserDeviceNumber: getLocalDeviceNumber() };
+    updateSharedConfig({ rootDevices, currentComputerProfileId: profileId });
+    updateOneDriveWizardStatus();
   });
 
   oneDriveLibraryAddToJobBtn?.addEventListener("click", async ()=>{
@@ -19689,6 +19738,24 @@ function renderJobs(){
   });
 
   updateOneDriveWizardStatus();
+  updatePermissionBanner();
+  permissionSetupBtn?.addEventListener("click", ()=> openOneDriveModal());
+  permissionGrantBtn?.addEventListener("click", async ()=>{
+    const handle = await readLocalRootHandle();
+    if (handle){
+      try {
+        const perm = await handle.requestPermission({ mode: "read" });
+        if (perm !== "granted") toast("Permission is required for referenced files to preview or open.");
+      } catch (_err){
+        toast("Permission is required for referenced files to preview or open.");
+      }
+      await updateOneDriveWizardStatus();
+      await updatePermissionBanner();
+      return;
+    }
+    openOneDriveModal();
+    toast("Root metadata exists for this computer profile, but this browser is not authorized yet. Re-authorize the folder shown in the hint.");
+  });
 
   addFormToggle?.addEventListener("click", ()=>{
     const formState = captureNewJobFormState();
@@ -23254,3 +23321,8 @@ function renderDeletedItems(options){
 }
 
 window.debugPurchaseInventoryLinks = function(){ const scan = scanPurchaseInventoryLinks(); return { totalOrderRequests: Array.isArray(orderRequests)?orderRequests.length:0, totalPurchaseLines: scan.lines.length, linkedCount: scan.linked.length, unlinkedCount: scan.unlinked.length, invalidLinkCount: scan.invalid.length, unlinkedGroupsByPartNumber: scan.groups.filter(g=>g.pn).length, noPartNumberIndividualRecords: scan.groups.filter(g=>!g.pn).length, syncProcessLogCount: Array.isArray(window.syncProcessLog)?window.syncProcessLog.length:0, inventoryTransactionsCount: Array.isArray(window.inventoryTransactions)?window.inventoryTransactions.length:0, sampleUnlinkedRecords: scan.unlinked.slice(0,5), sampleInvalidRecords: scan.invalid.slice(0,5) }; };
+    if (oneDriveProfileSelect){
+      const selected = cfg.currentComputerProfileId || "";
+      const rows = Object.values(cfg.rootDevices || {});
+      oneDriveProfileSelect.innerHTML = rows.map(row=>`<option value="${escapeHtml(row.deviceId || "")}" ${row.deviceId===selected?"selected":""}>${escapeHtml(row.label || row.deviceId || "Unnamed profile")}</option>`).join("");
+    }

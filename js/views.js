@@ -4448,6 +4448,11 @@ function viewJobs(){
     </div>
 
     ${avgBanner}
+    <div class="job-onedrive-permission-banner small" data-wjcuts-permission-banner hidden>
+      <span data-wjcuts-permission-text>WJ Cuts file references need folder permission before previews/opening files will work. Grant access to this computer’s WJ Cuts root folder.</span>
+      <button type="button" data-wjcuts-grant-permission>Grant permission</button>
+      <button type="button" data-wjcuts-open-setup>Open WJ Cuts setup</button>
+    </div>
 
     <div class="dashboard-layout job-layout" id="jobLayout">
       <div class="dashboard-window" data-job-window="categories">
@@ -4673,6 +4678,18 @@ function viewJobs(){
               <div>Indexed files: <span data-onedrive-library-status>0</span></div>
             </div>
             <div class="job-onedrive-current small muted" data-onedrive-current-computer></div>
+            <div class="job-onedrive-profile-controls">
+              <label class="job-edit-note">Selected computer profile
+                <select id="jobOneDriveComputerProfile"></select>
+              </label>
+              <label class="job-edit-note">New/rename profile label
+                <input type="text" id="jobOneDriveProfileLabel" placeholder="Shop PC">
+              </label>
+              <div class="job-onedrive-sync-actions">
+                <button type="button" class="job-note-modal-secondary" id="jobOneDriveProfileUseBtn">Use selected profile</button>
+                <button type="button" class="job-note-modal-secondary" id="jobOneDriveProfileSaveBtn">Save profile label</button>
+              </div>
+            </div>
             <div class="job-onedrive-known">
               <div class="small"><strong>Known computer root folders</strong></div>
               <table class="small">
@@ -4686,6 +4703,7 @@ function viewJobs(){
             <label class="job-edit-note">Folder label (optional)
               <input type="text" id="jobOneDriveFolderHint" placeholder="Shop drawings" value="${esc(oneDriveConfig.folderHint || "")}">
             </label>
+            <div class="small muted">Manual path hint only — the browser cannot use this path automatically.</div>
             <label class="job-edit-note">
               <input type="checkbox" id="jobOneDriveEnabled" ${oneDriveConfig.enabled ? "checked" : ""}> Enable OneDrive linking for cutting jobs
             </label>
