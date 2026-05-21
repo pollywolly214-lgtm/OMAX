@@ -4656,11 +4656,11 @@ function viewJobs(){
       <div class="job-note-modal-backdrop" id="jobOneDriveModal" hidden>
         <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobOneDriveModalTitle" aria-describedby="jobOneDriveModalDescription">
           <div class="job-note-modal-header">
-            <h4 id="jobOneDriveModalTitle">OneDrive shared-folder setup</h4>
+            <h4 id="jobOneDriveModalTitle">WJ Cuts Root Folder Setup</h4>
             <button type="button" class="job-note-modal-close" data-onedrive-cancel aria-label="Close OneDrive setup">×</button>
           </div>
           <div class="job-note-modal-body">
-            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Attach files from this computer's synced OneDrive root folder. Each computer can map a different local path to the same shared folder and the app will verify folder identity.</p>
+            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Choose the local OneDrive-synced WJ Cuts folder for this browser. The app saves file references, not file contents.</p>
             <ol class="job-onedrive-steps small">
               <li><strong>Step 1:</strong> Click <strong>Select / re-authorize this computer root folder</strong> and pick your synced shared OneDrive folder.</li>
               <li><strong>Step 2:</strong> Save setup for this computer only (it does not copy to other computers).</li>
@@ -4684,7 +4684,7 @@ function viewJobs(){
               </label>
               <div class="job-onedrive-sync-actions">
                 <button type="button" class="job-note-modal-secondary" id="jobOneDriveProfileUseBtn">Use selected profile</button>
-                <button type="button" class="job-note-modal-secondary" id="jobOneDriveProfileSaveBtn">Save profile label</button>
+                <button type="button" class="job-note-modal-secondary" id="jobOneDriveProfileSaveBtn">Save PC name / hint</button>
               </div>
             </div>
             <div class="job-onedrive-known">

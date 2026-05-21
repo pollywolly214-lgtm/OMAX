@@ -19532,13 +19532,32 @@ function renderJobs(){
   };
   async function ensureLocalRootAuthorizedForAttach(targetJobId = ""){
     const cfg = getSharedConfig(); const profileId = getCurrentComputerProfileId(cfg); const profile = cfg.rootDevices?.[profileId] || null;
+    const logSetupReason = (reason, extra = {})=>{
+      if (!window.DEBUG_MODE) return;
+      console.info("[cutting-job-files] opening setup instead of picker", {
+        reason,
+        hasHandle: !!extra.handle,
+        permission: extra.permission || "",
+        signature: extra.signature || "",
+        profileSignature: String(profile?.rootSignature || ""),
+        expectedSignature: expectedRootSignatureFromJobs(),
+        profileMatches: extra.profileMatches ?? null,
+        expectedMatches: extra.expectedMatches ?? null,
+        selectedProfileId: profileId
+      });
+    };
+    if (!supportsLocalRootPicker()){
+      logSetupReason("unsupported_browser", {});
+      toast("This browser does not support local root folder access.");
+      return { ok:false };
+    }
     const handle = await readLocalRootHandle();
-    if (!handle){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; openOneDriveModal(); toast(profile ? "This computer profile has saved root metadata, but this browser is not authorized. Select/Re-authorize the WJ Cuts root folder shown in the hint, then the file picker will open." : "Create/select a computer profile and choose this computer’s WJ Cuts root folder first."); return { ok:false }; }
+    if (!handle){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; logSetupReason("missing_local_handle", { handle:null }); openOneDriveModal(); toast(profile ? "This computer profile has saved root metadata, but this browser is not authorized. Select/Re-authorize the WJ Cuts root folder shown in the hint, then the file picker will open." : "Create/select a computer profile and choose this computer’s WJ Cuts root folder first."); return { ok:false }; }
     let perm = "prompt"; try { perm = await handle.requestPermission({ mode:"read" }); } catch(_){}
-    if (perm !== "granted"){ toast("Permission is required before WJ Cuts files can be added or previewed."); return { ok:false }; }
+    if (perm !== "granted"){ logSetupReason("permission_denied", { handle, permission:perm }); openOneDriveModal(); toast("Permission is required before WJ Cuts files can be added or previewed."); return { ok:false }; }
     const signature = await computeLocalRootSignature(handle); if (!signature) return { ok:false };
-    const match = verifyRootSignatureMatches(signature); if (!match.ok){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; openOneDriveModal(); toast("This folder does not match files already attached by other computers. Select the same shared root folder."); return { ok:false }; }
-    if (profile?.rootSignature && profile.rootSignature !== signature){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; openOneDriveModal(); toast("This folder does not match the saved root for this computer profile. Select the matching WJ Cuts root or create a new computer profile."); return { ok:false }; }
+    const match = verifyRootSignatureMatches(signature); if (!match.ok){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; logSetupReason("existing_reference_signature_mismatch", { handle, permission:perm, signature, profileMatches: !(profile?.rootSignature) || profile.rootSignature===signature, expectedMatches:false }); openOneDriveModal(); toast("This folder does not match files already attached by other computers. Select the same shared root folder."); return { ok:false }; }
+    if (profile?.rootSignature && profile.rootSignature !== signature){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; logSetupReason("profile_signature_mismatch", { handle, permission:perm, signature, profileMatches:false, expectedMatches:true }); openOneDriveModal(); toast("This folder does not match the saved root for this computer profile. Select the matching WJ Cuts root or create a new computer profile."); return { ok:false }; }
     return { ok:true, handle, signature, profileId, profile };
   }
   const updatePermissionBanner = async ()=>{
