@@ -3325,14 +3325,15 @@ body.modal-open .auth-bar {
 }
 .job-file-preview-frame {
   width: 100%;
-  height: 94px;
+  min-height: 64px;
+  height: auto;
   border-radius: 10px;
   border: 1px solid #d6e0f3;
   background: #fff;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
+  align-items: flex-start;
+  justify-content: flex-start;
+  overflow: visible;
   padding: 4px;
 }
 .job-file-preview-image {
@@ -3342,22 +3343,22 @@ body.modal-open .auth-bar {
   display: block;
 }
 .job-file-preview-message {
-  text-align: center;
+  font-size: 13px;
+  text-align: left;
   line-height: 1.35;
   padding: 0 6px;
+  width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: block;
+  max-height: none;
+  overflow: visible;
 }
 .job-file-preview-empty {
   margin: 0;
 }
-.job-file-preview-open {
-  color: #1f3b67;
-  text-decoration: none;
-  font-weight: 600;
-}
-.job-file-preview-open:hover,
-.job-file-preview-open:focus-visible {
-  text-decoration: underline;
-}
+.job-file-preview-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.job-file-preview-link { background: transparent; border: 0; padding: 0; color: #1f3b67; text-decoration: underline; font-size: 12px; font-weight: 600; cursor: pointer; }
 .job-edit-files-actions {
   display: flex;
   gap: 8px;
