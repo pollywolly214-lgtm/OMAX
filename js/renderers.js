@@ -12034,7 +12034,7 @@ function renderCosts(){
         const checks = window.runMaintenanceV2SafetyChecks();
         if (v2SafetySummary instanceof HTMLElement){
           const counts = checks && checks.counts && typeof checks.counts === "object" ? checks.counts : {};
-          v2SafetySummary.textContent = `Errors: ${checks?.errors?.length || 0} · Warnings: ${checks?.warnings?.length || 0} · V2 tasks: ${counts.v2TasksCount || 0} · V2 instances: ${counts.v2InstancesCount || 0} · V2 event records: ${counts.v2EventRecordsCount || 0} · Completed roots: ${counts.completedV2RootsCount || 0} · Orphans: ${counts.orphanCandidateCount || 0}`;
+          v2SafetySummary.textContent = `Errors: ${checks?.errors?.length || 0} · Warnings: ${checks?.warnings?.length || 0} · V2 tasks: ${counts.v2TasksCount || 0} · V2 instances (scheduled one-time/repeat chains): ${counts.v2InstancesCount || 0} · V2 event records (append-only history): ${counts.v2EventRecordsCount || 0} · Completed roots (completed occurrence identities): ${counts.completedV2RootsCount || 0} · Orphans (unmatched completed rows): ${counts.orphanCandidateCount || 0}`;
         }
       });
     }

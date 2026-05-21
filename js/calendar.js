@@ -730,7 +730,7 @@ function openV2RepeatPanel(view){
     const dueMachineText = dueDays == null || hoursDelta == null
       ? "Due date unavailable"
       : (dueDays === 0 ? "Due today" : (dueDays > 0 ? `Due in about ${hoursDelta} machine hours / ${dueDays} days` : `Past due by about ${hoursDelta} machine hours / ${Math.abs(dueDays)} days`));
-    machineInfoHtml = `<div class="bubble-kv"><span>Average/day:</span><span>${Number.isFinite(avg) ? avg : "—"} hrs/day</span></div>
+    machineInfoHtml = `<div class="bubble-kv"><span>Average/day source:</span><span>${Number.isFinite(avg) ? `${avg} hrs/day` : "—"}</span></div>
     <div class="bubble-kv"><span>Estimated cycle gap:</span><span>${daysSpacing != null ? `About ${daysSpacing} day${daysSpacing===1?"":"s"} per cycle at ${Number.isFinite(avg)?avg:"—"} hrs/day` : "—"}</span></div>
     <div class="bubble-kv"><span>Due from today:</span><span>${escapeHtml(dueMachineText)}</span></div>
     <div class="bubble-kv"><span>Anchor hours:</span><span>${Number.isFinite(anchor) ? anchor : "—"}</span></div>
@@ -744,13 +744,14 @@ function openV2RepeatPanel(view){
   const card = document.createElement("div");
   card.style.width = "min(92vw, 460px)"; card.style.background = "#fff"; card.style.borderRadius = "12px"; card.style.padding = "14px";
   card.innerHTML = `<div class="bubble-title">${escapeHtml(view.name || "Maintenance repeat")}</div>
-  <div class="bubble-kv"><span>Date:</span><span>${escapeHtml(dateText)}</span></div>
-  <div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusText)}</span></div>
+  <div class="bubble-kv"><span>Current occurrence date:</span><span>${escapeHtml(dateText)}</span></div>
+  <div class="bubble-kv"><span>Completion state:</span><span>${escapeHtml(statusText)}</span></div>
+  <div class="bubble-kv"><span>Moved occurrence:</span><span>${String(view.displayDateISO || view.dateISO || "") !== String(view.originalDateISO || view.dateISO || "") ? "Yes" : "No"}</span></div>
   <div class="bubble-kv"><span>Note:</span><span>${escapeHtml(view.note || "—")}</span></div>
   <div class="bubble-kv"><span>Logged hours:</span><span>${view.hours != null ? escapeHtml(String(view.hours)) : "—"}</span></div>
   <div class="bubble-kv"><span>Repeat type:</span><span>${escapeHtml(view.repeatType || "Calendar repeat")}</span></div>
-  <div class="bubble-kv"><span>Rule type:</span><span>${escapeHtml(typeLabel)}</span></div>
-  <div class="bubble-kv"><span>Interval:</span><span>${escapeHtml(intervalLabel)}</span></div>
+  <div class="bubble-kv"><span>Repeat basis:</span><span>${basis === "machine_hours" ? "Machine hours" : (basis === "calendar_week" ? "Week" : (basis === "calendar_month" ? "Month" : "Day"))}</span></div>
+  <div class="bubble-kv"><span>Repeat every:</span><span>${escapeHtml(intervalLabel)}</span></div>
   <div class="bubble-kv"><span>Occurrence:</span><span>${endType === "after_count" && Number.isFinite(endCount) ? `Occurrence N of ${endCount}` : "Rolling occurrence"}</span></div>
   <div class="bubble-kv"><span>End behavior:</span><span>${escapeHtml(endLabel)}</span></div>
   ${basis !== "machine_hours" ? `<div class="bubble-kv"><span>Due from today:</span><span>${escapeHtml(dueDayText)}</span></div>` : ""}
@@ -3656,9 +3657,16 @@ const jobsMap = {};
           label += ` (${durationLabel})`;
         }
 
+        if (ev.type === "v2repeat") {
+          const basis = String(ev.repeatView?.repeatBasis || "").toLowerCase();
+          if (basis === "machine_hours") label += " (repeat hrs)";
+          else if (basis === "calendar_week") label += " (repeat weekly)";
+          else if (basis === "calendar_month") label += " (repeat monthly)";
+          else if (basis === "calendar_day") label += " (repeat daily)";
+        }
+
         if (ev.status === "completed") label += " (completed)";
-        else if (ev.status === "manual") label += " (scheduled)";
-        else label += " (due)";
+        else label += " (scheduled)";
         chip.textContent = label;
         cell.appendChild(chip);
       });
