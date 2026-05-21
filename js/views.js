@@ -4666,6 +4666,7 @@ function viewJobs(){
               <li><strong>Step 2:</strong> Save setup for this computer only (it does not copy to other computers).</li>
               <li><strong>Step 3:</strong> Use <strong>Add from this computer OneDrive folder</strong> when attaching files.</li>
             </ol>
+            <p class="small muted" data-onedrive-setup-reason hidden></p>
             <div class="job-onedrive-status-grid small muted" data-onedrive-status-grid>
               <div>Root setup: <span data-onedrive-connection-status>Not set</span></div>
               <div>Folder status: <span data-onedrive-folder-status>Not ready</span></div>
