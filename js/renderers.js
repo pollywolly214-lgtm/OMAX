@@ -987,6 +987,7 @@ function sanitizeJobFileReferenceForFirestore(fileRef){
     attachedAtISO: String(fileRef.attachedAtISO || fileRef.addedAt || new Date().toISOString()),
     localRootSignature: String(fileRef.localRootSignature || ""),
     localDeviceId: String(fileRef.localDeviceId || ""),
+    ...(fileRef.computerProfileId ? { computerProfileId: String(fileRef.computerProfileId) } : {}),
     ...(fileRef.note ? { note: String(fileRef.note) } : {}),
     ...(fileRef.rootLocationHint ? { rootLocationHint: String(fileRef.rootLocationHint) } : {})
   };
@@ -1127,15 +1128,18 @@ function normalizeOneDriveJobConfig(config){
   const rawDevices = source.rootDevices && typeof source.rootDevices === "object" ? source.rootDevices : {};
   const rootDevices = Object.fromEntries(Object.entries(rawDevices).map(([key, value])=>{
     const row = value && typeof value === "object" ? value : {};
-    const id = String(row.deviceId || key || "");
+    const id = String(row.computerProfileId || row.deviceId || key || "");
     return [id, {
-      deviceId: id,
+      deviceId: String(row.deviceId || id),
+      computerProfileId: id,
       deviceNumber: Number.isFinite(Number(row.deviceNumber)) ? Number(row.deviceNumber) : null,
       label: typeof row.label === "string" ? row.label : "",
       folderName: typeof row.folderName === "string" ? row.folderName : "",
       folderHint: typeof row.folderHint === "string" ? row.folderHint : "",
       rootSignature: typeof row.rootSignature === "string" ? row.rootSignature : "",
-      lastVerifiedAtISO: typeof row.lastVerifiedAtISO === "string" ? row.lastVerifiedAtISO : ""
+      lastVerifiedAtISO: typeof row.lastVerifiedAtISO === "string" ? row.lastVerifiedAtISO : "",
+      lastSeenBrowserDeviceId: typeof row.lastSeenBrowserDeviceId === "string" ? row.lastSeenBrowserDeviceId : "",
+      lastSeenBrowserDeviceNumber: Number.isFinite(Number(row.lastSeenBrowserDeviceNumber)) ? Number(row.lastSeenBrowserDeviceNumber) : null
     }];
   }));
   return {
@@ -1152,6 +1156,7 @@ function normalizeOneDriveJobConfig(config){
     accessToken: typeof source.accessToken === "string" ? source.accessToken : "",
     accessTokenExpiresAt: typeof source.accessTokenExpiresAt === "string" ? source.accessTokenExpiresAt : "",
     lastLinkedAt: typeof source.lastLinkedAt === "string" ? source.lastLinkedAt : "",
+    currentComputerProfileId: typeof source.currentComputerProfileId === "string" ? source.currentComputerProfileId : "",
     rootDevices
   };
 }
@@ -19448,17 +19453,18 @@ function renderJobs(){
     const config = getSharedConfig();
     const currentDeviceId = String(getLocalDeviceId() || "");
     const currentDeviceNumber = getLocalDeviceNumber();
-    const currentDeviceMeta = (config.rootDevices && currentDeviceId) ? config.rootDevices[currentDeviceId] : null;
+    const profileId = String(config.currentComputerProfileId || currentDeviceId || "");
+    const currentDeviceMeta = (config.rootDevices && profileId) ? config.rootDevices[profileId] : null;
     if (!supportsLocalRootPicker()) return { supported:false, handle:null, hasSavedHandle:false, permission:"unsupported", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Unsupported browser" };
     const handle = await readLocalRootHandle();
-    if (!handle) return { supported:true, handle:null, hasSavedHandle:false, permission:"missing", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Not set", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:"" };
+    if (!handle) return { supported:true, handle:null, hasSavedHandle:false, permission:"missing", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message: currentDeviceMeta ? "Root metadata exists for this computer profile, but this browser is not authorized yet. Re-authorize the folder shown in the hint." : "Not set", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:"", profileId };
     let permission = "prompt";
     try { permission = typeof handle.queryPermission === "function" ? await handle.queryPermission({ mode:"read" }) : "granted"; } catch(_e){}
-    if (permission !== "granted") return { supported:true, handle, hasSavedHandle:true, permission, config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Permission needed", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:String(handle?.name || "") };
+    if (permission !== "granted") return { supported:true, handle, hasSavedHandle:true, permission, config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Folder permission is required for WJ Cuts file previews and Open actions.", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:String(handle?.name || ""), profileId };
     const signature = await computeLocalRootSignature(handle);
     const expectedSignature = expectedRootSignatureFromJobs();
     const signatureMatches = !expectedSignature || !signature ? true : signature === expectedSignature;
-    return { supported:true, handle, hasSavedHandle:true, permission:"granted", config, signature, expectedSignature, signatureMatches, message: signatureMatches ? "Verified" : "Mismatch", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:String(handle?.name || "") };
+    return { supported:true, handle, hasSavedHandle:true, permission:"granted", config, signature, expectedSignature, signatureMatches, message: signatureMatches ? "Verified" : "Mismatch", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:String(handle?.name || ""), profileId };
   };
   const updateSharedConfig = (patch)=>{
     const cfg = getSharedConfig();
@@ -19468,6 +19474,17 @@ function renderJobs(){
   const updateOneDriveWizardStatus = async ()=>{
     const cfg = getSharedConfig();
     const status = await getWJCutsRootStatus();
+    if (oneDriveProfileSelect){
+      const selected = cfg.currentComputerProfileId || "";
+      const rows = Object.values(cfg.rootDevices || {});
+      oneDriveProfileSelect.innerHTML = rows.length
+        ? rows.map(row=>`<option value="${escapeHtml(row.computerProfileId || row.deviceId || "")}" ${(row.computerProfileId || row.deviceId)===selected?"selected":""}>${escapeHtml(row.label || row.computerProfileId || row.deviceId || "Unnamed profile")}</option>`).join("")
+        : `<option value="">Create/select a computer profile</option>`;
+      if (oneDriveProfileLabelInput){
+        const selectedProfile = (cfg.rootDevices || {})[selected] || null;
+        oneDriveProfileLabelInput.value = selectedProfile?.label || "";
+      }
+    }
     if (window.DEBUG_MODE) console.info("[cutting-job-files] root status", status);
     if (oneDriveConnStatus) oneDriveConnStatus.textContent = status.message;
     if (oneDriveFolderStatus) oneDriveFolderStatus.textContent = status.permission === "granted" ? (status.signatureMatches ? "Verified" : "Mismatch") : (status.hasSavedHandle ? "Permission needed" : "Not set");
@@ -19574,7 +19591,8 @@ function renderJobs(){
 
     try {
       const cfg = getSharedConfig();
-      const currentDeviceMeta = cfg.rootDevices?.[String(getLocalDeviceId() || "")];
+      const profileId = String(cfg.currentComputerProfileId || getLocalDeviceId() || "");
+      const currentProfile = cfg.rootDevices?.[profileId];
       const signature = await computeLocalRootSignature(rootHandle);
       if (!signature){
         toast("Unable to verify local OneDrive root folder.");
@@ -19627,8 +19645,9 @@ function renderJobs(){
         localRootSignature: signature,
         enabled: true,
         localDeviceId: getLocalDeviceId(),
+        computerProfileId: profileId,
         attachedAtISO: new Date().toISOString(),
-        rootLocationHint: String(currentDeviceMeta?.folderHint || cfg.folderHint || cfg.localRootName || "")
+        rootLocationHint: String(currentProfile?.folderHint || cfg.folderHint || cfg.localRootName || "")
       });
       if (!reference) return false;
       const targetId = String(targetJobId || "");
@@ -23321,8 +23340,3 @@ function renderDeletedItems(options){
 }
 
 window.debugPurchaseInventoryLinks = function(){ const scan = scanPurchaseInventoryLinks(); return { totalOrderRequests: Array.isArray(orderRequests)?orderRequests.length:0, totalPurchaseLines: scan.lines.length, linkedCount: scan.linked.length, unlinkedCount: scan.unlinked.length, invalidLinkCount: scan.invalid.length, unlinkedGroupsByPartNumber: scan.groups.filter(g=>g.pn).length, noPartNumberIndividualRecords: scan.groups.filter(g=>!g.pn).length, syncProcessLogCount: Array.isArray(window.syncProcessLog)?window.syncProcessLog.length:0, inventoryTransactionsCount: Array.isArray(window.inventoryTransactions)?window.inventoryTransactions.length:0, sampleUnlinkedRecords: scan.unlinked.slice(0,5), sampleInvalidRecords: scan.invalid.slice(0,5) }; };
-    if (oneDriveProfileSelect){
-      const selected = cfg.currentComputerProfileId || "";
-      const rows = Object.values(cfg.rootDevices || {});
-      oneDriveProfileSelect.innerHTML = rows.map(row=>`<option value="${escapeHtml(row.deviceId || "")}" ${row.deviceId===selected?"selected":""}>${escapeHtml(row.label || row.deviceId || "Unnamed profile")}</option>`).join("");
-    }
