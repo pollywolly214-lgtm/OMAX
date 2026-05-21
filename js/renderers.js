@@ -19549,9 +19549,6 @@ function renderJobs(){
         toast("This folder does not match files already attached by other computers. Select the same shared root folder.");
         return false;
       }
-      await saveLocalRootHandle(handle);
-      const verifyHandle = await readLocalRootHandle();
-      if (!verifyHandle){ toast("Unable to save root handle on this browser."); return false; }
       const cfg = getSharedConfig();
       const currentDeviceId = String(getLocalDeviceId() || "");
       const currentDeviceNumber = getLocalDeviceNumber();
@@ -19562,6 +19559,9 @@ function renderJobs(){
         toast("This folder does not match the saved root for this computer profile. Select the matching WJ Cuts root or create a new computer profile.");
         return false;
       }
+      await saveLocalRootHandle(handle);
+      const verifyHandle = await readLocalRootHandle();
+      if (!verifyHandle){ toast("Unable to save root handle on this browser."); return false; }
       const rootDevices = { ...(cfg.rootDevices || {}) };
       if (profileId){
         rootDevices[profileId] = { ...(rootDevices[profileId] || {}), deviceId: profileId, computerProfileId: profileId, deviceNumber: currentDeviceNumber, label: rootDevices[profileId]?.label || `Computer ${currentDeviceNumber}`, folderName: String(handle.name || ""), folderHint: rootHint, rootSignature: signature, lastVerifiedAtISO: new Date().toISOString(), lastSeenBrowserDeviceId: currentDeviceId, lastSeenBrowserDeviceNumber: currentDeviceNumber };
@@ -19572,7 +19572,7 @@ function renderJobs(){
         folderHint: rootHint,
         enabled: true,
         rootDevices,
-        currentComputerProfileId: profileId,
+        currentComputerProfileId: cfg.currentComputerProfileId || profileId,
         currentComputerProfileByBrowserDeviceId: { ...(cfg.currentComputerProfileByBrowserDeviceId || {}), ...(currentDeviceId ? { [currentDeviceId]: profileId } : {}) }
       });
       if (typeof saveCloudDebounced === "function") saveCloudDebounced();
@@ -19713,8 +19713,7 @@ function renderJobs(){
       pendingAttachTarget = null;
       const attached = await attachFromLocalOneDriveRoot(target.mode === "job" ? target.jobId : "");
       if (attached){
-        if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-    closeOneDriveModal();
+        closeOneDriveModal();
       }
     }
   });
@@ -19760,8 +19759,9 @@ function renderJobs(){
     const label = String(oneDriveProfileLabelInput?.value || "").trim() || `Computer ${getLocalDeviceNumber()}`;
     const rootDevices = { ...(cfg.rootDevices || {}) };
     rootDevices[profileId] = { ...(rootDevices[profileId] || {}), deviceId: profileId, computerProfileId: profileId, label, lastSeenBrowserDeviceId: currentDeviceId, lastSeenBrowserDeviceNumber: getLocalDeviceNumber() };
-    updateSharedConfig({ rootDevices, currentComputerProfileId: profileId,
+    updateSharedConfig({ rootDevices, currentComputerProfileId: cfg.currentComputerProfileId || profileId,
         currentComputerProfileByBrowserDeviceId: { ...(cfg.currentComputerProfileByBrowserDeviceId || {}), ...(currentDeviceId ? { [currentDeviceId]: profileId } : {}) } });
+    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
     updateOneDriveWizardStatus();
   });
 
@@ -19786,7 +19786,6 @@ function renderJobs(){
       } catch (_err){
         toast("Permission is required for referenced files to preview or open.");
       }
-      if (typeof saveCloudDebounced === "function") saveCloudDebounced();
       await updateOneDriveWizardStatus();
       await updatePermissionBanner();
       return;
