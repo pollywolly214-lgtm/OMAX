@@ -931,7 +931,14 @@ function getLocalDeviceId(){
   if (typeof window === "undefined" || !window.localStorage) return "";
   let id = String(window.localStorage.getItem(JOB_ONEDRIVE_DEVICE_ID_KEY) || "").trim();
   const profileId = String(window.localStorage.getItem("cutting_job_current_profile_local") || "").trim();
-  const cloudLike = profileId && id === profileId;
+  let cloudLike = profileId && id === profileId;
+  try {
+    const cfg = typeof window.getOneDriveJobConfig === "function" ? window.getOneDriveJobConfig() : null;
+    const currentProfileId = String(cfg?.currentComputerProfileId || "").trim();
+    const rootDeviceKeys = cfg?.rootDevices && typeof cfg.rootDevices === "object" ? Object.keys(cfg.rootDevices) : [];
+    const profileIds = rootDeviceKeys.concat(rootDeviceKeys.map(k=>String(cfg?.rootDevices?.[k]?.computerProfileId || ""))).filter(Boolean);
+    if ((currentProfileId && id === currentProfileId) || profileIds.includes(id)) cloudLike = true;
+  } catch (_err){ }
   const invalid = !id || !/^device_[a-z0-9_-]{8,}$/i.test(id);
   if (!invalid && !cloudLike) return id;
   const uuid = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
@@ -974,9 +981,9 @@ async function setWJCutsRootFolder(){
   return chooseLocalOneDriveRoot();
 }
 
-async function resolveWJCutsRelativePath(relativePath){
+async function resolveWJCutsRelativePath(relativePath, profileId = ""){
   const clean = String(relativePath || "").replace(/^\/+/, "");
-  return resolveLocalFileFromRelativePath(clean);
+  return resolveLocalFileFromRelativePathForProfile(clean, profileId);
 }
 async function readWJCutsRootMarker(rootHandle){
   try {
@@ -1198,6 +1205,45 @@ async function resolveLocalFileFromRelativePath(relativePath){
   }
   const fileHandle = await dir.getFileHandle(segments[segments.length - 1]);
   return fileHandle.getFile();
+}
+async function resolveLocalFileFromRelativePathForProfile(relativePath, profileId){
+  const cfg = (typeof window.getOneDriveJobConfig === "function") ? normalizeOneDriveJobConfig(window.getOneDriveJobConfig()) : normalizeOneDriveJobConfig(null);
+  const selectedProfileId = String(profileId || cfg.currentComputerProfileId || "").trim();
+  const selectedProfile = selectedProfileId ? (cfg.rootDevices?.[selectedProfileId] || null) : null;
+  let rootHandle = selectedProfileId ? await readLocalRootHandleForProfile(selectedProfileId) : null;
+  if (!rootHandle){
+    const legacy = await readLocalRootHandle();
+    if (legacy){
+      const marker = await readWJCutsRootMarker(legacy);
+      const markerRootId = String(marker?.rootId || "").trim();
+      if (!selectedProfile?.rootId || (markerRootId && markerRootId === String(selectedProfile.rootId || "").trim())){
+        rootHandle = legacy;
+        if (selectedProfileId) await saveLocalRootHandleForProfile(selectedProfileId, legacy);
+      }
+    }
+  }
+  if (!rootHandle) throw new Error("No saved WJ Cuts root folder for selected profile.");
+  const perm = typeof rootHandle.queryPermission === "function" ? await rootHandle.queryPermission({ mode: "read" }) : "granted";
+  if (perm !== "granted") throw new Error("WJ Cuts root folder permission is not granted.");
+  const rel = String(relativePath || "").replace(/^\/+/, "");
+  if (!rel) return null;
+  const segments = rel.split("/").filter(Boolean);
+  let dir = rootHandle;
+  for (let idx = 0; idx < segments.length - 1; idx += 1) dir = await dir.getDirectoryHandle(segments[idx]);
+  const fileHandle = await dir.getFileHandle(segments[segments.length - 1]);
+  return fileHandle.getFile();
+}
+function diagnoseWJCutsReferenceStatus(file, currentRootStatus){
+  if (!currentRootStatus?.hasSavedHandle) return { code:"setup_required", message:"Setup required: no selected local WJ Cuts root handle." };
+  if (currentRootStatus?.permission !== "granted") return { code:"permission_needed", message:"Permission needed: grant access to the selected WJ Cuts root folder." };
+  if (!String(file?.relativePath || "").trim()) return { code:"missing_relative_path", message:"Reference is missing a relative path." };
+  const currentRootId = String(currentRootStatus?.markerRootId || "").trim();
+  const fileRootId = String(file?.rootId || "").trim();
+  if (fileRootId && currentRootId && fileRootId !== currentRootId){
+    return { code:"root_mismatch", message:`Root mismatch: this file belongs to root ID ${fileRootId}, but the selected folder is root ID ${currentRootId}.` };
+  }
+  if (!fileRootId) return { code:"legacy_reference", message:"Legacy reference: this file was saved before root IDs. It opened by relative path under the selected root." };
+  return { code:"ready", message:"Ready" };
 }
 
 function triggerFileDownload(file, fileName){
@@ -1759,7 +1805,9 @@ async function resolveAttachmentPreview(file){
 
   if (file.source === "wj_cuts_reference" && file.relativePath){
     try {
-      const localFile = await resolveWJCutsRelativePath(file.relativePath);
+      const cfg = (typeof window.getOneDriveJobConfig === "function") ? normalizeOneDriveJobConfig(window.getOneDriveJobConfig()) : normalizeOneDriveJobConfig(null);
+      const profileId = String(cfg.currentComputerProfileId || "");
+      const localFile = await resolveWJCutsRelativePath(file.relativePath, profileId);
       if (!localFile){
         file.preview = { mode: "message", content: "Preview unavailable: file reference was saved, but the file is missing under your selected WJ Cuts root folder." };
         return false;
@@ -20763,6 +20811,8 @@ function renderJobs(){
       const selectedIndex = option.getAttribute("data-preview-index") || option.value || "0";
       const expectedPath = option.getAttribute("data-preview-expected-path") || "";
       const rootLocation = option.getAttribute("data-preview-root-location") || "";
+      const rootId = option.getAttribute("data-preview-root-id") || "";
+      const rootHint = option.getAttribute("data-preview-root-hint") || "";
       const nameEl = previewRoot.querySelector("[data-preview-name]");
       const imgEl = previewRoot.querySelector("[data-preview-image]");
       const msgEl = previewRoot.querySelector("[data-preview-message]");
@@ -20796,6 +20846,8 @@ function renderJobs(){
         pathBtn.hidden = !expectedPath;
         pathBtn.dataset.previewExpectedPath = expectedPath;
         pathBtn.dataset.previewRootLocation = rootLocation;
+        pathBtn.dataset.previewRootId = rootId;
+        pathBtn.dataset.previewRootHint = rootHint;
       }
       return;
     }
@@ -20848,6 +20900,8 @@ function renderJobs(){
     const selectedIndex = option.getAttribute("data-preview-index") || option.value || "0";
     const expectedPath = option.getAttribute("data-preview-expected-path") || "";
     const rootLocation = option.getAttribute("data-preview-root-location") || "";
+    const rootId = option.getAttribute("data-preview-root-id") || "";
+    const rootHint = option.getAttribute("data-preview-root-hint") || "";
     const nameEl = previewRoot.querySelector("[data-preview-name]");
     const imgEl = previewRoot.querySelector("[data-preview-image]");
     const msgEl = previewRoot.querySelector("[data-preview-message]");
@@ -20881,6 +20935,8 @@ function renderJobs(){
       pathBtn.hidden = !expectedPath;
       pathBtn.dataset.previewExpectedPath = expectedPath;
       pathBtn.dataset.previewRootLocation = rootLocation;
+      pathBtn.dataset.previewRootId = rootId;
+      pathBtn.dataset.previewRootHint = rootHint;
     }
   });
 
@@ -20898,9 +20954,12 @@ function renderJobs(){
     }
     try {
       const cfg = getSharedConfig();
+      const profileId = getCurrentComputerProfileId(cfg);
       const rootStatus = await getWJCutsRootStatus();
       const currentSignature = rootStatus.signature || "";
       const currentRootId = rootStatus.markerRootId || "";
+      const diag = diagnoseWJCutsReferenceStatus(file, rootStatus);
+      if (diag.code === "root_mismatch"){ toast(diag.message); openOneDriveModal(); return false; }
       if (file.rootId && currentRootId && file.rootId !== currentRootId){
         toast(`This file belongs to a different WJ Cuts root. Select the root with ID ${file.rootId}.`);
         openOneDriveModal();
@@ -20911,12 +20970,13 @@ function renderJobs(){
         openOneDriveModal();
         return false;
       }
-      const fileBlob = await resolveWJCutsRelativePath(file.relativePath);
+      const fileBlob = await resolveWJCutsRelativePath(file.relativePath, profileId);
       if (!fileBlob){
-        toast("File reference saved, but the file was not found under your selected WJ Cuts folder.");
+        toast(file.rootId ? "File reference saved, but the file was not found under your selected WJ Cuts folder." : "Legacy reference could not be found under the selected WJ Cuts root. Verify the relative path exists or reattach the file.");
         openOneDriveModal();
         return false;
       }
+      if (!file.rootId) toast("Legacy reference: this file was saved before root IDs. It opened by relative path under the selected root.");
       triggerFileDownload(fileBlob, file.name || fileBlob.name || "attachment");
       return true;
     } catch (err){

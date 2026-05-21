@@ -2907,21 +2907,23 @@ function viewJobs(){
     const previewUrl = String(file?.previewUrl || "");
     const ext = extractFileExtension(name);
     const source = String(file?.source || "");
-    const rootLocation = String(file?.rootLocationHint || "");
+    const rootLocation = String(file?.computerProfileId || file?.rootLocationHint || "");
+    const rootId = String(file?.rootId || "");
+    const rootHint = String(file?.rootLocationHint || "");
     const savedPreview = file && typeof file === "object" ? file.preview : null;
     if (savedPreview && typeof savedPreview === "object"){
       const mode = savedPreview.mode === "image" ? "image" : "message";
       const content = String(savedPreview.content || "").trim();
-      if (content) return { name, href, mode, content, expectedPath, rootLocation, source };
+      if (content) return { name, href, mode, content, expectedPath, rootLocation, source, rootId, rootHint };
     }
-    if (/^data:image\//i.test(previewUrl) || /^https?:\/\//i.test(previewUrl)) return { name, href: href || previewUrl, mode: "image", content: previewUrl, expectedPath, rootLocation, source };
+    if (/^data:image\//i.test(previewUrl) || /^https?:\/\//i.test(previewUrl)) return { name, href: href || previewUrl, mode: "image", content: previewUrl, expectedPath, rootLocation, source, rootId, rootHint };
     if (!href){
-      if (source === "wj_cuts_reference") return { name, href: "", mode: "message", content: "Preview unavailable: this file is stored as a WJ Cuts reference path only. Select/verify your WJ Cuts root folder on this device, then reopen this job.", expectedPath, rootLocation, source };
+      if (source === "wj_cuts_reference") return { name, href: "", mode: "message", content: "Preview unavailable: this file is stored as a WJ Cuts reference path only. Select/verify your WJ Cuts root folder on this device, then reopen this job.", expectedPath, rootLocation, source, rootId, rootHint };
       if (source === "onedrive") return { name, href: "", mode: "message", content: "Preview unavailable: OneDrive link metadata is incomplete. Relink this file from OneDrive so preview content can load.", expectedPath, rootLocation, source };
       if ([".dxf", ".ord", ".omx"].includes(ext)) return { name, href: "", mode: "message", content: "Preview unavailable: no file content URL is saved for this CAD file. Re-attach from Reference Folder or add a direct OneDrive URL.", expectedPath, rootLocation, source };
       return { name, href: "", mode: "message", content: "Preview unavailable: no file content was saved for this attachment.", expectedPath, rootLocation, source };
     }
-    if (ext === ".svg") return { name, href, mode: "image", content: href, expectedPath, rootLocation, source };
+    if (ext === ".svg") return { name, href, mode: "image", content: href, expectedPath, rootLocation, source, rootId, rootHint };
     if (/^data:image\//i.test(href)) return { name, href, mode: "image", content: href, expectedPath, rootLocation, source };
     if (/^https?:\/\//i.test(href) && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"].includes(ext)){
       return { name, href, mode: "image", content: href, expectedPath, rootLocation, source };
@@ -2933,7 +2935,7 @@ function viewJobs(){
         ? { name, href, mode: "image", content: cadSvg, expectedPath, rootLocation, source }
         : { name, href, mode: "message", content: "2D preview unavailable. Add a OneDrive direct file URL or re-upload to refresh preview.", expectedPath, rootLocation, source };
     }
-    return { name, href, mode: "message", content: "Preview unavailable for this file type.", expectedPath, rootLocation, source };
+    return { name, href, mode: "message", content: "Preview unavailable for this file type.", expectedPath, rootLocation, source, rootId, rootHint };
   };
   const buildFileCellMarkup = (jobId, files)=>{
     const previews = (Array.isArray(files) ? files : []).map(filePreviewModel);
@@ -2943,7 +2945,7 @@ function viewJobs(){
     return `
       <div class="job-file-preview" data-file-preview data-file-preview-job="${esc(jobId)}">
         ${previews.length > 1
-          ? `<label class="sr-only" for="${selectId}">Choose file preview</label><select id="${selectId}" class="job-file-preview-select" data-file-preview-select="${esc(jobId)}">${previews.map((f, idx)=>`<option value="${idx}" data-preview-index="${idx}" data-preview-source="${esc(f.source || "")}" data-preview-name="${esc(f.name)}" data-preview-mode="${esc(f.mode)}" data-preview-content="${esc(f.content)}" data-preview-href="${esc(f.href || "")}" data-preview-expected-path="${esc(f.expectedPath || "")}" data-preview-root-location="${esc(f.rootLocation || "")}">${esc(f.name)}</option>`).join("")}</select>`
+          ? `<label class="sr-only" for="${selectId}">Choose file preview</label><select id="${selectId}" class="job-file-preview-select" data-file-preview-select="${esc(jobId)}">${previews.map((f, idx)=>`<option value="${idx}" data-preview-index="${idx}" data-preview-source="${esc(f.source || "")}" data-preview-name="${esc(f.name)}" data-preview-mode="${esc(f.mode)}" data-preview-content="${esc(f.content)}" data-preview-href="${esc(f.href || "")}" data-preview-expected-path="${esc(f.expectedPath || "")}" data-preview-root-location="${esc(f.rootLocation || "")}" data-preview-root-id="${esc(f.rootId || "")}" data-preview-root-hint="${esc(f.rootHint || "")}">${esc(f.name)}</option>`).join("")}</select>`
           : ""}
         <div class="job-file-preview-panes" data-file-preview-panes>
           <div class="job-file-preview-pane" data-file-preview-pane>
@@ -2953,7 +2955,7 @@ function viewJobs(){
               <span class="job-file-preview-message small muted" data-preview-message ${first.mode === "message" ? "" : "hidden"}>${first.mode === "message" ? esc(first.content) : ""}</span>
             </div>
             <div class="job-file-preview-actions">
-              <button type="button" class="job-file-preview-link" data-preview-path-btn data-preview-expected-path="${esc(first.expectedPath || "")}" data-preview-root-location="${esc(first.rootLocation || "")}" ${first.expectedPath ? "" : "hidden"}>Show path</button>
+              <button type="button" class="job-file-preview-link" data-preview-path-btn data-preview-expected-path="${esc(first.expectedPath || "")}" data-preview-root-location="${esc(first.rootLocation || "")}" data-preview-root-id="${esc(first.rootId || "")}" data-preview-root-hint="${esc(first.rootHint || "")}" ${first.expectedPath ? "" : "hidden"}>Show path</button>
               <button type="button" class="job-file-preview-link" data-preview-open-local data-open-local-file data-job-id="${esc(jobId)}" data-file-index="0" ${first.source === "wj_cuts_reference" ? "" : "hidden"}>Open</button>
               <a class="job-file-preview-link" data-preview-open-url href="${esc(first.href || "")}" target="_blank" rel="noopener" ${(first.source !== "wj_cuts_reference" && first.href) ? "" : "hidden"}>Open</a>
             </div>
