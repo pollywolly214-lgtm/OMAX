@@ -2303,7 +2303,7 @@ function viewCosts(model){
                         data-v2-original-date-iso="${esc(String(row.originalDateISO || ""))}"
                         data-task-name="${esc(String(row.taskName || ""))}"
                         data-link-mode-id="maintenanceLinkMode_${esc(row.id || "")}"
-                        data-settings-link="${esc(row.settingsLink || "#/settings")}">Open task</button>
+                        data-settings-link="${esc(row.settingsLink || "#/settings")}">${String(row.sourceSystem || "").toLowerCase() === "v2" ? "Open calendar item" : "Open task"}</button>
                     </td>
                   </tr>
                 `).join("")}
