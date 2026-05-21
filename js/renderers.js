@@ -19807,10 +19807,11 @@ function renderJobs(){
         const allowSwitch = window.confirm("This is a different WJ Cuts root. Existing files from the old root will show as mismatched until reattached. Continue?");
         if (!allowSwitch) return false;
       }
-      await saveLocalRootHandleForProfile(profileId, handle);
       await saveLocalRootHandle(handle);
-      const verifyHandle = await readLocalRootHandleForProfile(profileId);
-      if (!verifyHandle){ toast("Unable to save root handle on this browser."); return false; }
+      if (profileId) await saveLocalRootHandleForProfile(profileId, handle);
+      const verifyGlobalHandle = await readLocalRootHandle();
+      const verifyProfileHandle = profileId ? await readLocalRootHandleForProfile(profileId) : true;
+      if (!verifyGlobalHandle || !verifyProfileHandle){ toast("Unable to save root handle on this browser."); return false; }
       const rootDevices = { ...(cfg.rootDevices || {}) };
       if (profileId){
         rootDevices[profileId] = { ...(rootDevices[profileId] || {}), deviceId: profileId, computerProfileId: profileId, deviceNumber: currentDeviceNumber, label: rootDevices[profileId]?.label || `Computer ${currentDeviceNumber}`, folderName: String(handle.name || ""), folderHint: rootHint, rootSignature: signature, rootId: String(marker?.rootId || ""), lastVerifiedAtISO: new Date().toISOString(), lastSeenBrowserDeviceId: currentDeviceId, lastSeenBrowserDeviceNumber: currentDeviceNumber };
@@ -19825,7 +19826,16 @@ function renderJobs(){
         currentComputerProfileByBrowserDeviceId: { ...(cfg.currentComputerProfileByBrowserDeviceId || {}), ...(currentDeviceId ? { [currentDeviceId]: profileId } : {}) }
       });
       if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-      await updateOneDriveWizardStatus();
+      const refreshed = await refreshWJCutsRootStateAfterChange({ closeModal:false });
+      const guard = "wjCutsRootJustSelectedReload";
+      const statusText = String(oneDriveConnStatus?.textContent || "").toLowerCase();
+      const didReload = typeof window !== "undefined" && window.sessionStorage ? window.sessionStorage.getItem(guard) === "1" : false;
+      if (refreshed.ok && statusText.includes("not linked") && !didReload){
+        try { window.sessionStorage.setItem(guard, "1"); } catch(_){}
+        window.location.reload();
+        return true;
+      }
+      try { window.sessionStorage.removeItem(guard); } catch(_){}
       toast("This computer OneDrive root folder saved and verified.");
       return true;
     } catch (err){
@@ -19939,6 +19949,17 @@ function renderJobs(){
     document.body.classList.add("modal-open");
     updateOneDriveWizardStatus();
   };
+  const refreshWJCutsRootStateAfterChange = async (options = {})=>{
+    const active = await getActiveWJCutsRoot();
+    await updateOneDriveWizardStatus();
+    await updatePermissionBanner();
+    if (active.ok){
+      setSetupReason("");
+      if (options.closeModal !== false) closeOneDriveModal();
+    }
+    renderJobs();
+    return active;
+  };
 
   oneDriveSetupBtn?.addEventListener("click", ()=>{
     closeFileMenu(); closeActionMenu(); closeHistoryActionMenu(); openOneDriveModal();
@@ -20008,15 +20029,14 @@ function renderJobs(){
     requestAnimationFrame(()=> restoreNewJobFormState(formState));
   });
 
-  updateOneDriveWizardStatus();
-  updatePermissionBanner();
+  refreshWJCutsRootStateAfterChange({ closeModal:false });
   permissionSetupBtn?.addEventListener("click", ()=> openOneDriveModal());
   permissionGrantBtn?.addEventListener("click", async ()=>{
     const profileId = getCurrentComputerProfileId(getSharedConfig());
-    let handle = await readLocalRootHandleForProfile(profileId);
+    let handle = await readLocalRootHandle();
     if (!handle){
-      handle = await readLocalRootHandle();
-      if (handle && profileId) await saveLocalRootHandleForProfile(profileId, handle);
+      handle = await readLocalRootHandleForProfile(profileId);
+      if (handle) await saveLocalRootHandle(handle);
     }
     if (handle){
       try {
@@ -20025,8 +20045,7 @@ function renderJobs(){
       } catch (_err){
         toast("Permission is required for referenced files to preview or open.");
       }
-      await updateOneDriveWizardStatus();
-      await updatePermissionBanner();
+      await refreshWJCutsRootStateAfterChange({ closeModal:false });
       return;
     }
     openOneDriveModal();
