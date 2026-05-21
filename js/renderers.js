@@ -1042,6 +1042,32 @@ async function saveLocalRootHandle(handle){
     tx.onerror = ()=>{ db.close(); reject(tx.error || new Error("Failed saving local root handle")); };
   });
 }
+function localRootHandleKeyForProfile(profileId){
+  const clean = String(profileId || "").trim();
+  return clean ? `profile:${clean}` : JOB_ONEDRIVE_LOCAL_ROOT_KEY;
+}
+async function saveLocalRootHandleForProfile(profileId, handle){
+  if (!supportsLocalRootPicker()) return false;
+  const db = await openOneDriveRootDb();
+  const key = localRootHandleKeyForProfile(profileId);
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(JOB_ONEDRIVE_LOCAL_ROOT_STORE, "readwrite");
+    tx.objectStore(JOB_ONEDRIVE_LOCAL_ROOT_STORE).put(handle, key);
+    tx.oncomplete = ()=>{ db.close(); resolve(true); };
+    tx.onerror = ()=>{ db.close(); reject(tx.error || new Error("Failed saving profile local root handle")); };
+  });
+}
+async function readLocalRootHandleForProfile(profileId){
+  if (!supportsLocalRootPicker()) return null;
+  const db = await openOneDriveRootDb();
+  const key = localRootHandleKeyForProfile(profileId);
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(JOB_ONEDRIVE_LOCAL_ROOT_STORE, "readonly");
+    const req = tx.objectStore(JOB_ONEDRIVE_LOCAL_ROOT_STORE).get(key);
+    req.onsuccess = ()=>{ db.close(); resolve(req.result || null); };
+    req.onerror = ()=>{ db.close(); reject(req.error || new Error("Failed reading profile local root handle")); };
+  });
+}
 
 async function readLocalRootHandle(){
   if (!supportsLocalRootPicker()) return null;
@@ -19538,7 +19564,14 @@ function renderJobs(){
     const profileId = getCurrentComputerProfileId(config);
     const currentDeviceMeta = (config.rootDevices && profileId) ? config.rootDevices[profileId] : null;
     if (!supportsLocalRootPicker()) return { supported:false, handle:null, hasSavedHandle:false, permission:"unsupported", config, signature:"", profileSignature:"", profileMatches:true, expectedSignature: expectedRootSignatureFromJobs(), expectedMatches:true, signatureMatches:true, message:"Unsupported browser" };
-    const handle = await readLocalRootHandle();
+    let handle = await readLocalRootHandleForProfile(profileId);
+    if (!handle){
+      const legacyHandle = await readLocalRootHandle();
+      if (legacyHandle){
+        handle = legacyHandle;
+        if (profileId) await saveLocalRootHandleForProfile(profileId, legacyHandle);
+      }
+    }
     if (!handle) return { supported:true, handle:null, hasSavedHandle:false, permission:"missing", config, signature:"", profileSignature:String(currentDeviceMeta?.rootSignature || "").trim(), profileMatches:true, expectedSignature: expectedRootSignatureFromJobs(), expectedMatches:true, signatureMatches:true, message: currentDeviceMeta ? "Root metadata exists for this computer profile, but this browser is not authorized yet. Re-authorize the folder shown in the hint." : "Not set", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:"", profileId };
     let permission = "prompt";
     try { permission = typeof handle.queryPermission === "function" ? await handle.queryPermission({ mode:"read" }) : "granted"; } catch(_e){}
@@ -19548,12 +19581,9 @@ function renderJobs(){
     const profileRootId = String(currentDeviceMeta?.rootId || "").trim();
     const marker = await readWJCutsRootMarker(handle);
     const markerRootId = String(marker?.rootId || "").trim();
-    const expectedRootId = expectedRootIdFromJobs();
     const expectedSignature = expectedRootSignatureFromJobs();
     const profileMatches = !profileSignature || !signature || profileSignature === signature;
-    const expectedMatches = expectedRootId
-      ? (!markerRootId || expectedRootId === markerRootId)
-      : (!expectedSignature || !signature || expectedSignature === signature);
+    const expectedMatches = !expectedSignature || !signature || expectedSignature === signature;
     const markerMatchesProfile = !profileRootId || !markerRootId || profileRootId === markerRootId;
     const signatureMatches = profileMatches && expectedMatches && markerMatchesProfile;
     return { supported:true, handle, hasSavedHandle:true, permission:"granted", config, signature, profileSignature, profileMatches, expectedSignature, expectedMatches, signatureMatches, message: signatureMatches ? "Verified" : "Mismatch", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:String(handle?.name || ""), profileId, markerRootId, markerMatchesProfile };
@@ -19635,7 +19665,14 @@ function renderJobs(){
       toast("This browser does not support local root folder access.");
       return { ok:false };
     }
-    const handle = await readLocalRootHandle();
+    let handle = await readLocalRootHandleForProfile(profileId);
+    if (!handle){
+      const legacyHandle = await readLocalRootHandle();
+      if (legacyHandle){
+        handle = legacyHandle;
+        await saveLocalRootHandleForProfile(profileId, legacyHandle);
+      }
+    }
     if (!handle){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; setSetupReason("missing_local_root_folder"); logSetupReason("missing_local_handle", { handle:null }); openOneDriveModal(); toast(profile ? "This computer profile has saved root metadata, but this browser is not authorized. Select/Re-authorize the WJ Cuts root folder shown in the hint, then the file picker will open." : "Create/select a computer profile and choose this computer’s WJ Cuts root folder first."); return { ok:false }; }
     let perm = "prompt"; try { perm = await handle.requestPermission({ mode:"read" }); } catch(_){}
     if (perm !== "granted"){ setSetupReason("folder_permission_needed"); logSetupReason("permission_denied", { handle, permission:perm }); openOneDriveModal(); toast("Permission is required before WJ Cuts files can be added or previewed."); return { ok:false }; }
@@ -19650,21 +19687,8 @@ function renderJobs(){
       return { ok:false };
     }
     const marker = markerResult.marker;
-    const expectedRootId = expectedRootIdFromJobs();
-    if (expectedRootId){
-      if (String(marker?.rootId || "") !== expectedRootId){
-        pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" };
-        setSetupReason("existing_reference_root_mismatch");
-        logSetupReason("existing_reference_root_mismatch", { handle, permission:perm, signature, expectedMatches:false });
-        openOneDriveModal();
-        toast("This folder does not match files already attached by other computers. Select the same shared root folder.");
-        return { ok:false };
-      }
-    } else {
-      const match = verifyRootSignatureMatches(signature); if (!match.ok){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; setSetupReason("existing_reference_root_mismatch"); logSetupReason("existing_reference_signature_mismatch", { handle, permission:perm, signature, profileMatches: !(profile?.rootSignature) || profile.rootSignature===signature, expectedMatches:false }); openOneDriveModal(); toast("This folder does not match files already attached by other computers. Select the same shared root folder."); return { ok:false }; }
-    }
     if (profile?.rootId && marker?.rootId && profile.rootId !== marker.rootId){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; setSetupReason("profile_root_mismatch"); logSetupReason("selected root does not match this profile", { handle, permission:perm, signature }); openOneDriveModal(); toast("This file was attached under a different WJ Cuts root. Select the matching root folder or reattach the file."); return { ok:false }; }
-    if (!expectedRootId && profile?.rootSignature && profile.rootSignature !== signature){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; setSetupReason("profile_root_mismatch"); logSetupReason("profile_signature_mismatch", { handle, permission:perm, signature, profileMatches:false, expectedMatches:true }); openOneDriveModal(); toast("This folder does not match the saved root for this computer profile. Select the matching WJ Cuts root or create a new computer profile."); return { ok:false }; }
+    if (!profile?.rootId && profile?.rootSignature && profile.rootSignature !== signature){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; setSetupReason("profile_root_mismatch"); logSetupReason("profile_signature_mismatch", { handle, permission:perm, signature, profileMatches:false, expectedMatches:true }); openOneDriveModal(); toast("This folder does not match the saved root for this computer profile. Select the matching WJ Cuts root or create a new computer profile."); return { ok:false }; }
     return { ok:true, handle, signature, profileId, profile, rootId: String(marker?.rootId || ""), marker };
   }
   const updatePermissionBanner = async ()=>{
@@ -19708,28 +19732,16 @@ function renderJobs(){
         return false;
       }
       const marker = markerResult.marker;
-      const expectedRootId = expectedRootIdFromJobs();
-      if (expectedRootId){
-        if (String(marker?.rootId || "") !== expectedRootId){
-          toast("This folder does not match files already attached by other computers. Select the same shared root folder.");
-          return false;
-        }
-      } else {
-        const match = verifyRootSignatureMatches(signature);
-        if (!match.ok){
-          toast("This folder does not match files already attached by other computers. Select the same shared root folder.");
-          return false;
-        }
-      }
       if (selectedProfile?.rootId && marker?.rootId && selectedProfile.rootId !== marker.rootId){
-        const allowSwitch = window.confirm("This is a different WJ Cuts root. Existing attached files from the old root will show as mismatched until reattached. Continue?");
+        const allowSwitch = window.confirm("This is a different WJ Cuts root. Existing files from the old root will show as mismatched until reattached. Continue?");
         if (!allowSwitch) return false;
-      } else if (!expectedRootId && selectedProfile?.rootSignature && selectedProfile.rootSignature !== signature){
-        const allowSwitch = window.confirm("This is a different WJ Cuts root. Existing attached files from the old root will show as mismatched until reattached. Continue?");
+      } else if (!selectedProfile?.rootId && selectedProfile?.rootSignature && selectedProfile.rootSignature !== signature){
+        const allowSwitch = window.confirm("This is a different WJ Cuts root. Existing files from the old root will show as mismatched until reattached. Continue?");
         if (!allowSwitch) return false;
       }
+      await saveLocalRootHandleForProfile(profileId, handle);
       await saveLocalRootHandle(handle);
-      const verifyHandle = await readLocalRootHandle();
+      const verifyHandle = await readLocalRootHandleForProfile(profileId);
       if (!verifyHandle){ toast("Unable to save root handle on this browser."); return false; }
       const rootDevices = { ...(cfg.rootDevices || {}) };
       if (profileId){
@@ -19918,18 +19930,20 @@ function renderJobs(){
 
   oneDriveLibraryAddToJobBtn?.addEventListener("click", async ()=>{
     const formState = captureNewJobFormState();
-    const attached = await attachFromLocalOneDriveRoot();
+    await attachFromLocalOneDriveRoot();
     requestAnimationFrame(()=> restoreNewJobFormState(formState));
-    if (!attached){
-      openOneDriveModal();
-    }
   });
 
   updateOneDriveWizardStatus();
   updatePermissionBanner();
   permissionSetupBtn?.addEventListener("click", ()=> openOneDriveModal());
   permissionGrantBtn?.addEventListener("click", async ()=>{
-    const handle = await readLocalRootHandle();
+    const profileId = getCurrentComputerProfileId(getSharedConfig());
+    let handle = await readLocalRootHandleForProfile(profileId);
+    if (!handle){
+      handle = await readLocalRootHandle();
+      if (handle && profileId) await saveLocalRootHandleForProfile(profileId, handle);
+    }
     if (handle){
       try {
         const perm = await handle.requestPermission({ mode: "read" });
