@@ -20570,7 +20570,27 @@ function renderJobs(){
     }
   };
 
+  const handleCuttingJobFileActionClick = async (e)=>{
+    const act = (matched)=>{ if (!matched) return false; e.preventDefault(); e.stopPropagation(); if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation(); return true; };
+    const fileMenuAdd = e.target.closest("[data-job-file-add]");
+    if (fileMenuAdd && act(true)){ closeFileMenu(); closeActionMenu(); closeHistoryActionMenu(); const id = fileMenuAdd.getAttribute("data-job-file-add"); await attachFromLocalOneDriveRoot(id || ""); return true; }
+    const previewPathBtn = e.target.closest("[data-preview-path-btn]");
+    if (previewPathBtn && act(true)){ const expected = previewPathBtn.getAttribute("data-preview-expected-path") || ""; const rootLocation = previewPathBtn.getAttribute("data-preview-root-location") || "WJ Cuts"; if (expected && navigator?.clipboard?.writeText){ navigator.clipboard.writeText(expected).catch(()=>{}); } const msg = `Root folder: ${rootLocation || "WJ Cuts"}\nExpected file path: ${expected || "Unavailable"}`; if (window.alert) window.alert(msg); else toast(msg); return true; }
+    const localFileBtn = e.target.closest("[data-open-local-file]");
+    if (localFileBtn && act(true)){ await openLocalRootAttachment(localFileBtn.getAttribute("data-job-id"), localFileBtn.getAttribute("data-file-index")); return true; }
+    const upload = e.target.closest("[data-upload-job]");
+    if (upload && act(true)){ const id = upload.getAttribute("data-upload-job"); closeActionMenu(); closeHistoryActionMenu(); content.querySelector(`input[data-job-file-input="${id}"]`)?.click(); return true; }
+    const linkJobFile = e.target.closest("[data-link-job-file]");
+    if (linkJobFile && act(true)){ const idStr = String(linkJobFile.getAttribute("data-link-job-file") || ""); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; if (!j) return true; try { const picked = await window.oneDrivePicker.openOneDriveDxfPicker(); if (!picked) return true; j.files = Array.isArray(j.files) ? j.files : []; j.files.push({ id: genId(picked.fileName || "job_file"), name: picked.fileName || "Linked file", type: "", size: null, source: "onedrive", driveId: picked.driveId || "", itemId: picked.itemId || "", eTag: picked.eTag || "", lastModifiedDateTime: picked.lastModifiedDateTime || "", webUrl: picked.webUrl || "", url: picked.webUrl || "", addedAt: new Date().toISOString() }); saveCloudDebounced(); toast("OneDrive DXF linked"); renderJobs(); } catch (err){ toast(err?.message || "Unable to link OneDrive DXF."); } return true; }
+    const editFileLink = e.target.closest("[data-edit-file-link]");
+    if (editFileLink && act(true)){ const idStr = String(editFileLink.getAttribute("data-edit-file-link") || ""); const idx = Number(editFileLink.getAttribute("data-file-index")); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null; if (!file) return true; const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || ""); if (url == null) return true; file.url = url; file.source = "onedrive"; saveCloudDebounced(); toast(url ? "File link updated" : "File link cleared"); renderJobs(); return true; }
+    const removeFile = e.target.closest("[data-remove-file]");
+    if (removeFile && act(true)){ const idStr = String(removeFile.getAttribute("data-remove-file") || ""); const idx = Number(removeFile.getAttribute("data-file-index")); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; if (j && Array.isArray(j.files) && idx >= 0 && idx < j.files.length){ j.files.splice(idx, 1); saveCloudDebounced(); toast("File removed"); renderJobs(); } return true; }
+    return false;
+  };
+
   historyBody?.addEventListener("click", async (e)=>{
+    if (await handleCuttingJobFileActionClick(e)) return;
     const historyActionTrigger = e.target.closest("[data-history-actions-toggle]");
     if (historyActionTrigger){
       const id = historyActionTrigger.getAttribute("data-history-actions-toggle");
@@ -21019,6 +21039,7 @@ function renderJobs(){
 
   // 6) Edit/Remove/Save/Cancel + Log panel + Apply spent/remaining
   content.querySelector(".job-table tbody")?.addEventListener("click", async (e)=>{
+    if (await handleCuttingJobFileActionClick(e)) return;
     const overlapTrigger = e.target.closest("[data-job-overlap-info]");
     if (overlapTrigger){
       e.preventDefault();
