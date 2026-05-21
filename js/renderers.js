@@ -930,8 +930,14 @@ const JOB_ONEDRIVE_DEVICE_ID_KEY = "cutting_job_onedrive_device_id_v1";
 function getLocalDeviceId(){
   if (typeof window === "undefined" || !window.localStorage) return "";
   let id = String(window.localStorage.getItem(JOB_ONEDRIVE_DEVICE_ID_KEY) || "").trim();
-  if (id) return id;
-  id = `device_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const profileId = String(window.localStorage.getItem("cutting_job_current_profile_local") || "").trim();
+  const cloudLike = profileId && id === profileId;
+  const invalid = !id || !/^device_[a-z0-9_-]{8,}$/i.test(id);
+  if (!invalid && !cloudLike) return id;
+  const uuid = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}`;
+  id = `device_${uuid.replace(/[^a-z0-9_-]/ig, "")}`;
   try { window.localStorage.setItem(JOB_ONEDRIVE_DEVICE_ID_KEY, id); } catch (_err){ }
   return id;
 }
@@ -1138,9 +1144,11 @@ function expectedRootIdFromJobs(){
   return rootIds.size ? Array.from(rootIds)[0] : "";
 }
 
-async function ensureWJCutsRootMarker(rootHandle){
+async function ensureWJCutsRootMarker(rootHandle, opts = {}){
+  const expectedRootId = String(opts.expectedRootId || "").trim();
   const marker = await readWJCutsRootMarker(rootHandle);
   if (marker?.rootId) return { ok:true, marker, writeNeeded:false };
+  if (expectedRootId) return { ok:false, reason:"expected_marker_missing" };
   let writePermission = "prompt";
   try {
     writePermission = typeof rootHandle?.requestPermission === "function"
@@ -19521,6 +19529,7 @@ function renderJobs(){
     missing_local_root_folder: "Missing local root folder",
     folder_permission_needed: "Folder permission needed",
     marker_missing_write_denied: "WJ Cuts marker missing and write permission denied",
+    expected_marker_missing: "Selected folder is missing the expected WJ Cuts marker",
     profile_root_mismatch: "Selected root does not match this PC/profile",
     existing_reference_root_mismatch: "Selected root does not match existing file references",
     unsupported_browser: "Unsupported browser"
@@ -19624,7 +19633,7 @@ function renderJobs(){
       const selectedProfile = (cfg.rootDevices || {})[getCurrentComputerProfileId(cfg) || ""] || null;
       const signature = status.signature || selectedProfile?.rootSignature || "Not verified";
       const authState = status.permission === "granted" && status.signatureMatches ? "Authorized" : (status.hasSavedHandle ? "Needs permission" : "Not authorized");
-      oneDriveCurrentComputer.innerHTML = `Browser/device ID: ${status.currentDeviceNumber || "?"} (${status.currentDeviceId || "Unavailable"})<br>Selected computer profile: ${escapeHtml(selectedProfile?.label || "Not selected")}<br>Local root authorization: ${authState}<br>Selected root folder: ${status.handleName || "Not selected in this browser"}<br>Root marker ID: ${escapeHtml(String(status.markerRootId || selectedProfile?.rootId || "Not verified"))}<br>Root location hint: ${selectedProfile?.folderHint || cfg.folderHint || "Not set"}<br>Root signature: ${signature}<br>Root profile match: ${status.profileSignature ? (status.profileMatches ? "Match" : "Mismatch") : "Not recorded"}<br>Existing file root match: ${status.expectedSignature ? (status.expectedMatches ? "Match" : "Mismatch") : "No existing references"}<br>Status: ${status.message}`;
+      oneDriveCurrentComputer.innerHTML = `Browser/device ID (local): ${status.currentDeviceNumber || "?"} (${status.currentDeviceId || "Unavailable"})<br>Selected PC/profile ID (shared label): ${escapeHtml(getCurrentComputerProfileId(cfg) || "Not selected")}<br>Selected computer profile: ${escapeHtml(selectedProfile?.label || "Not selected")}<br>Local root authorization: ${authState}<br>Selected root folder: ${status.handleName || "Not selected in this browser"}<br>Expected root ID for profile: ${escapeHtml(String(selectedProfile?.rootId || "Not set"))}<br>Selected folder root ID: ${escapeHtml(String(status.markerRootId || "Marker missing"))}<br>Root match: ${selectedProfile?.rootId ? (status.markerRootId ? (selectedProfile.rootId === status.markerRootId ? "Match" : "Mismatch") : "Marker missing") : "No profile root set"}<br>Root location hint: ${selectedProfile?.folderHint || cfg.folderHint || "Not set"}<br>Root signature (compat): ${signature}<br>Status: ${status.message}`;
     }
     if (oneDriveStatusInline){
       const hint = (status.currentDeviceMeta?.folderHint || cfg.folderHint || status.handleName || "").trim();
@@ -19677,13 +19686,15 @@ function renderJobs(){
     let perm = "prompt"; try { perm = await handle.requestPermission({ mode:"read" }); } catch(_){}
     if (perm !== "granted"){ setSetupReason("folder_permission_needed"); logSetupReason("permission_denied", { handle, permission:perm }); openOneDriveModal(); toast("Permission is required before WJ Cuts files can be added or previewed."); return { ok:false }; }
     const signature = await computeLocalRootSignature(handle); if (!signature) return { ok:false };
-    const markerResult = await ensureWJCutsRootMarker(handle);
+    const markerResult = await ensureWJCutsRootMarker(handle, { expectedRootId: String(profile?.rootId || "") });
     if (!markerResult.ok){
       pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" };
-      setSetupReason("marker_missing_write_denied");
-      logSetupReason("root marker missing and write permission denied", { handle, permission:perm, signature });
+      setSetupReason(markerResult.reason === "expected_marker_missing" ? "expected_marker_missing" : "marker_missing_write_denied");
+      logSetupReason(markerResult.reason || "root marker missing and write permission denied", { handle, permission:perm, signature });
       openOneDriveModal();
-      toast("Setup opened because: WJ Cuts marker missing and write permission was denied.");
+      toast(markerResult.reason === "expected_marker_missing"
+        ? `This folder does not contain the expected WJ Cuts root marker for this PC/profile. Select the synced shared folder that contains root ID ${profile?.rootId || "required root ID"}, or create a new PC/root profile.`
+        : "Setup opened because: WJ Cuts marker missing and write permission was denied.");
       return { ok:false };
     }
     const marker = markerResult.marker;
@@ -19726,9 +19737,13 @@ function renderJobs(){
       const rootHint = String(oneDriveFolderHintInput?.value || cfg.folderHint || "");
       const profileId = getCurrentComputerProfileId(cfg);
       const selectedProfile = (cfg.rootDevices || {})[profileId] || null;
-      const markerResult = await ensureWJCutsRootMarker(handle);
+      const markerResult = await ensureWJCutsRootMarker(handle, { expectedRootId: String(selectedProfile?.rootId || "") });
       if (!markerResult.ok){
-        toast("Write permission is required once to create the WJ Cuts root marker. This lets other computers confirm they selected the same shared folder.");
+        if (markerResult.reason === "expected_marker_missing"){
+          toast(`The selected folder does not contain the synced WJ Cuts marker. Make sure this OneDrive account has the shared folder synced locally, then select that folder. Expected root ID: ${selectedProfile?.rootId || "required"}.`);
+        } else {
+          toast("Write permission is required once to create the WJ Cuts root marker. This lets other computers confirm they selected the same shared folder.");
+        }
         return false;
       }
       const marker = markerResult.marker;
@@ -20887,7 +20902,7 @@ function renderJobs(){
       const currentSignature = rootStatus.signature || "";
       const currentRootId = rootStatus.markerRootId || "";
       if (file.rootId && currentRootId && file.rootId !== currentRootId){
-        toast("This file was attached under a different WJ Cuts root. Select the matching root folder or reattach the file.");
+        toast(`This file belongs to a different WJ Cuts root. Select the root with ID ${file.rootId}.`);
         openOneDriveModal();
         return false;
       }
@@ -20915,7 +20930,7 @@ function renderJobs(){
     const fileMenuAdd = e.target.closest("[data-job-file-add]");
     if (fileMenuAdd && act(true)){ closeFileMenu(); closeActionMenu(); closeHistoryActionMenu(); const id = fileMenuAdd.getAttribute("data-job-file-add"); await attachFromLocalOneDriveRoot(id || ""); return true; }
     const previewPathBtn = e.target.closest("[data-preview-path-btn]");
-    if (previewPathBtn && act(true)){ const expected = previewPathBtn.getAttribute("data-preview-expected-path") || ""; const rootLocation = previewPathBtn.getAttribute("data-preview-root-location") || "WJ Cuts"; if (expected && navigator?.clipboard?.writeText){ navigator.clipboard.writeText(expected).catch(()=>{}); } const msg = `Root folder: ${rootLocation || "WJ Cuts"}\nExpected file path: ${expected || "Unavailable"}`; if (window.alert) window.alert(msg); else toast(msg); return true; }
+    if (previewPathBtn && act(true)){ const expected = previewPathBtn.getAttribute("data-preview-expected-path") || ""; const rootLocation = previewPathBtn.getAttribute("data-preview-root-location") || "WJ Cuts"; const rootId = previewPathBtn.getAttribute("data-preview-root-id") || "Not verified"; const manualHint = previewPathBtn.getAttribute("data-preview-root-hint") || ""; if (expected && navigator?.clipboard?.writeText){ navigator.clipboard.writeText(expected).catch(()=>{}); } const msg = `Root:\n${rootLocation || "WJ Cuts"}\n\nRoot ID:\n${rootId || "Not verified"}\n\nRelative path under root:\n${expected || "Unavailable"}\n\nHow to find it:\nOpen the selected WJ Cuts root folder on this computer, then follow the relative path above.${manualHint ? `\n\nOptional hint:\n${manualHint} (Manual hint, not verified full path)` : ""}`; if (window.alert) window.alert(msg); else toast(msg); return true; }
     const localFileBtn = e.target.closest("[data-open-local-file]");
     if (localFileBtn && act(true)){ await openLocalRootAttachment(localFileBtn.getAttribute("data-job-id"), localFileBtn.getAttribute("data-file-index")); return true; }
     const upload = e.target.closest("[data-upload-job]");
