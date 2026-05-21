@@ -19461,16 +19461,19 @@ function renderJobs(){
     const currentDeviceNumber = getLocalDeviceNumber();
     const profileId = getCurrentComputerProfileId(config);
     const currentDeviceMeta = (config.rootDevices && profileId) ? config.rootDevices[profileId] : null;
-    if (!supportsLocalRootPicker()) return { supported:false, handle:null, hasSavedHandle:false, permission:"unsupported", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Unsupported browser" };
+    if (!supportsLocalRootPicker()) return { supported:false, handle:null, hasSavedHandle:false, permission:"unsupported", config, signature:"", profileSignature:"", profileMatches:true, expectedSignature: expectedRootSignatureFromJobs(), expectedMatches:true, signatureMatches:true, message:"Unsupported browser" };
     const handle = await readLocalRootHandle();
-    if (!handle) return { supported:true, handle:null, hasSavedHandle:false, permission:"missing", config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message: currentDeviceMeta ? "Root metadata exists for this computer profile, but this browser is not authorized yet. Re-authorize the folder shown in the hint." : "Not set", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:"", profileId };
+    if (!handle) return { supported:true, handle:null, hasSavedHandle:false, permission:"missing", config, signature:"", profileSignature:String(currentDeviceMeta?.rootSignature || "").trim(), profileMatches:true, expectedSignature: expectedRootSignatureFromJobs(), expectedMatches:true, signatureMatches:true, message: currentDeviceMeta ? "Root metadata exists for this computer profile, but this browser is not authorized yet. Re-authorize the folder shown in the hint." : "Not set", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:"", profileId };
     let permission = "prompt";
     try { permission = typeof handle.queryPermission === "function" ? await handle.queryPermission({ mode:"read" }) : "granted"; } catch(_e){}
-    if (permission !== "granted") return { supported:true, handle, hasSavedHandle:true, permission, config, signature:"", expectedSignature: expectedRootSignatureFromJobs(), signatureMatches:true, message:"Folder permission is required for WJ Cuts file previews and Open actions.", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:String(handle?.name || ""), profileId };
+    if (permission !== "granted") return { supported:true, handle, hasSavedHandle:true, permission, config, signature:"", profileSignature:String(currentDeviceMeta?.rootSignature || "").trim(), profileMatches:true, expectedSignature: expectedRootSignatureFromJobs(), expectedMatches:true, signatureMatches:true, message:"Folder permission is required for WJ Cuts file previews and Open actions.", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:String(handle?.name || ""), profileId };
     const signature = await computeLocalRootSignature(handle);
+    const profileSignature = String(currentDeviceMeta?.rootSignature || "").trim();
     const expectedSignature = expectedRootSignatureFromJobs();
-    const signatureMatches = !expectedSignature || !signature ? true : signature === expectedSignature;
-    return { supported:true, handle, hasSavedHandle:true, permission:"granted", config, signature, expectedSignature, signatureMatches, message: signatureMatches ? "Verified" : "Mismatch", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:String(handle?.name || ""), profileId };
+    const profileMatches = !profileSignature || !signature || profileSignature === signature;
+    const expectedMatches = !expectedSignature || !signature || expectedSignature === signature;
+    const signatureMatches = profileMatches && expectedMatches;
+    return { supported:true, handle, hasSavedHandle:true, permission:"granted", config, signature, profileSignature, profileMatches, expectedSignature, expectedMatches, signatureMatches, message: signatureMatches ? "Verified" : "Mismatch", currentDeviceId, currentDeviceNumber, currentDeviceMeta, handleName:String(handle?.name || ""), profileId };
   };
   const updateSharedConfig = (patch)=>{
     const cfg = getSharedConfig();
@@ -19508,15 +19511,17 @@ function renderJobs(){
       const selectedProfile = (cfg.rootDevices || {})[getCurrentComputerProfileId(cfg) || ""] || null;
       const signature = status.signature || selectedProfile?.rootSignature || "Not verified";
       const authState = status.permission === "granted" && status.signatureMatches ? "Authorized" : (status.hasSavedHandle ? "Needs permission" : "Not authorized");
-      oneDriveCurrentComputer.innerHTML = `Browser/device ID: ${status.currentDeviceNumber || "?"} (${status.currentDeviceId || "Unavailable"})<br>Selected computer profile: ${escapeHtml(selectedProfile?.label || "Not selected")}<br>Local root authorization: ${authState}<br>Selected root folder: ${status.handleName || "Not selected in this browser"}<br>Root location hint: ${selectedProfile?.folderHint || cfg.folderHint || "Not set"}<br>Root signature: ${signature}<br>Status: ${status.message}`;
+      oneDriveCurrentComputer.innerHTML = `Browser/device ID: ${status.currentDeviceNumber || "?"} (${status.currentDeviceId || "Unavailable"})<br>Selected computer profile: ${escapeHtml(selectedProfile?.label || "Not selected")}<br>Local root authorization: ${authState}<br>Selected root folder: ${status.handleName || "Not selected in this browser"}<br>Root location hint: ${selectedProfile?.folderHint || cfg.folderHint || "Not set"}<br>Root signature: ${signature}<br>Root profile match: ${status.profileSignature ? (status.profileMatches ? "Match" : "Mismatch") : "Not recorded"}<br>Existing file root match: ${status.expectedSignature ? (status.expectedMatches ? "Match" : "Mismatch") : "No existing references"}<br>Status: ${status.message}`;
     }
     if (oneDriveStatusInline){
       const hint = (status.currentDeviceMeta?.folderHint || cfg.folderHint || status.handleName || "").trim();
-      oneDriveStatusInline.textContent = status.permission === "granted" && status.signature && status.signatureMatches
+      oneDriveStatusInline.textContent = status.permission === "granted" && status.signature && status.profileMatches && status.expectedMatches
         ? `WJ Cuts root authorized${hint ? ` · ${hint}` : ""}`
-        : ((status.currentDeviceMeta || cfg.folderHint || cfg.localRootName)
+        : (status.permission === "granted" && status.signature && !status.signatureMatches
+          ? "WJ Cuts root mismatch · re-authorize"
+          : ((status.currentDeviceMeta || cfg.folderHint || cfg.localRootName)
           ? `WJ Cuts root needs permission${hint ? ` · ${hint}` : ""}`
-          : "WJ Cuts root not set");
+          : "WJ Cuts root not set"));
     }
     if (oneDriveKnownDevices){
       const rows = Object.values(cfg.rootDevices || {});
@@ -19532,8 +19537,8 @@ function renderJobs(){
     let perm = "prompt"; try { perm = await handle.requestPermission({ mode:"read" }); } catch(_){}
     if (perm !== "granted"){ toast("Permission is required before WJ Cuts files can be added or previewed."); return { ok:false }; }
     const signature = await computeLocalRootSignature(handle); if (!signature) return { ok:false };
-    if (profile?.rootSignature && profile.rootSignature !== signature){ toast("This folder does not match the saved root for this computer profile. Select the matching WJ Cuts root or create a new computer profile."); return { ok:false }; }
-    const match = verifyRootSignatureMatches(signature); if (!match.ok){ toast("This folder does not match files already attached by other computers. Select the same shared root folder."); return { ok:false }; }
+    const match = verifyRootSignatureMatches(signature); if (!match.ok){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; openOneDriveModal(); toast("This folder does not match files already attached by other computers. Select the same shared root folder."); return { ok:false }; }
+    if (profile?.rootSignature && profile.rootSignature !== signature){ pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" }; openOneDriveModal(); toast("This folder does not match the saved root for this computer profile. Select the matching WJ Cuts root or create a new computer profile."); return { ok:false }; }
     return { ok:true, handle, signature, profileId, profile };
   }
   const updatePermissionBanner = async ()=>{
@@ -19541,7 +19546,7 @@ function renderJobs(){
     const hasRefs = [...(Array.isArray(cuttingJobs)?cuttingJobs:[]), ...(Array.isArray(completedCuttingJobs)?completedCuttingJobs:[])].some(j => Array.isArray(j?.files) && j.files.some(f=>f?.source==="wj_cuts_reference"));
     if (!hasRefs){ permissionBanner.hidden = true; return; }
     const status = await getWJCutsRootStatus();
-    const blocked = !status.hasSavedHandle || status.permission !== "granted";
+    const blocked = !status.hasSavedHandle || status.permission !== "granted" || !status.signatureMatches;
     permissionBanner.hidden = !blocked;
     if (permissionBannerText && blocked){
       permissionBannerText.textContent = "WJ Cuts file references need folder permission before previews/opening files will work. Grant access to this computer’s WJ Cuts root folder.";
