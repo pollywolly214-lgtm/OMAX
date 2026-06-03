@@ -617,6 +617,14 @@ body.cost-receipt-modal-open{ overflow:hidden; }
   white-space:nowrap;
   vertical-align:middle;
 }
+#costReceiptModal .cost-receipt-week-table thead th,
+#costReceiptModal .cost-receipt-summary-table thead th{
+  position:sticky;
+  top:0;
+  z-index:2;
+  background:#f4f7fb;
+  box-shadow:0 2px 0 #d7deeb;
+}
 #costReceiptModal .cost-receipt-week-table input{
   min-width:0 !important;
   padding:6px 7px;
