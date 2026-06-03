@@ -1974,9 +1974,7 @@ function viewCosts(model){
           <p class="small muted" data-receipt-week-range>—</p>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-week-table">
-              <thead><tr><th>Date</th>
-                  <th>Original</th>
-                  <th>Note</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th style="width:160px;max-width:160px">Inventory link</th><th>Shipping</th><th>Tax</th><th>Total</th></tr></thead>
+              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th style="width:160px;max-width:160px">Inventory link</th><th>Shipping</th><th>Tax</th><th>Total</th><th>Actions</th></tr></thead>
               <tbody data-receipt-week-rows></tbody>
               <tfoot><tr><th colspan="8">Subtotal</th><th data-receipt-week-subtotal>$0.00</th><th></th></tr></tfoot>
             </table>
@@ -1997,11 +1995,9 @@ function viewCosts(model){
           <p class="small muted" data-receipt-range-label>—</p>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-summary-table">
-              <thead><tr><th>Date</th>
-                  <th>Original</th>
-                  <th>Note</th><th>Purchased</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th><th>Sub total</th></tr></thead>
+              <thead><tr><th>Date</th><th>Purchased</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th><th>Link status</th></tr></thead>
               <tbody data-receipt-range-rows></tbody>
-              <tfoot><tr><th colspan="7">Subtotal</th><th data-receipt-range-subtotal>$0.00</th></tr></tfoot>
+              <tfoot><tr><th colspan="6">Subtotal</th><th data-receipt-range-subtotal>$0.00</th><th></th></tr></tfoot>
             </table>
           </div>
           <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
@@ -2334,8 +2330,6 @@ function viewCosts(model){
                     ${purchaseDataTable.length ? purchaseDataTable.map(row => `
                       <tr data-spend-row title="Click to open this row in Purchase History" style="cursor:pointer;" data-spend-date-iso="${esc(String(row.dateISO || ""))}" data-spend-week-key="${esc(String(row.weekKey || ""))}" data-spend-row-index="${esc(String(Number.isFinite(Number(row.rowIndex)) ? Number(row.rowIndex) : -1))}" data-spend-search-text="${esc(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
                         <td>${esc(row.dateISO || "—")}</td>
-                    <td>${esc(row.originalDateISO || "—")}</td>
-                    <td>${esc(row.note || "—")}</td>
                         <td>${esc(row.purchased || "—")}</td>
                         <td>${esc(row.weekLabel || "—")}</td>
                         <td>${esc(row.costLabel || "$0.00")}</td>
