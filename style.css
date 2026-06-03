@@ -590,68 +590,89 @@ body.cost-data-center-open{ overflow:hidden; }
 .cost-receipt-week-table td[data-col="total"],.cost-receipt-week-table tfoot th,.cost-receipt-summary-table tfoot th{ font-weight:700; }
 body.cost-receipt-modal-open{ overflow:hidden; }
 #costReceiptModal .cost-receipt-card{
-  width:min(1420px, calc(100vw - 32px));
-  max-width:calc(100vw - 32px);
+  width:min(1480px, calc(100vw - 24px));
+  max-width:calc(100vw - 24px);
 }
 #costReceiptModal .cost-receipt-card-body{
   overflow-x:hidden;
   overflow-y:auto;
+  padding:22px 20px 24px;
 }
 #costReceiptModal .cost-weekly-table-wrap{
   max-width:100%;
-  overflow:auto;
+  overflow-x:hidden;
+  overflow-y:auto;
 }
-#costReceiptModal .cost-receipt-week-table{
-  min-width:1260px;
-  table-layout:auto;
-}
+#costReceiptModal .cost-receipt-week-table,
 #costReceiptModal .cost-receipt-summary-table{
-  min-width:920px;
-  table-layout:auto;
+  width:100%;
+  min-width:0;
+  table-layout:fixed;
 }
 #costReceiptModal .cost-receipt-week-table th,
 #costReceiptModal .cost-receipt-week-table td,
 #costReceiptModal .cost-receipt-summary-table th,
 #costReceiptModal .cost-receipt-summary-table td{
+  padding:7px 6px;
   white-space:nowrap;
   vertical-align:middle;
 }
+#costReceiptModal .cost-receipt-week-table input{
+  min-width:0 !important;
+  padding:6px 7px;
+}
+#costReceiptModal .cost-receipt-week-table .btn,
+#costReceiptModal .cost-receipt-summary-table .btn{
+  padding:6px 8px;
+  white-space:nowrap;
+}
 #costReceiptModal .cost-receipt-week-table th:nth-child(1),
-#costReceiptModal .cost-receipt-week-table td:nth-child(1){ min-width:130px; }
+#costReceiptModal .cost-receipt-week-table td:nth-child(1){ width:10%; }
 #costReceiptModal .cost-receipt-week-table th:nth-child(2),
-#costReceiptModal .cost-receipt-week-table td:nth-child(2){ min-width:220px; }
+#costReceiptModal .cost-receipt-week-table td:nth-child(2){ width:19%; }
 #costReceiptModal .cost-receipt-week-table th:nth-child(3),
-#costReceiptModal .cost-receipt-week-table td:nth-child(3),
-#costReceiptModal .cost-receipt-week-table th:nth-child(7),
-#costReceiptModal .cost-receipt-week-table td:nth-child(7),
-#costReceiptModal .cost-receipt-week-table th:nth-child(8),
-#costReceiptModal .cost-receipt-week-table td:nth-child(8),
-#costReceiptModal .cost-receipt-week-table th:nth-child(9),
-#costReceiptModal .cost-receipt-week-table td:nth-child(9){ min-width:112px; }
+#costReceiptModal .cost-receipt-week-table td:nth-child(3){ width:10.5%; }
 #costReceiptModal .cost-receipt-week-table th:nth-child(4),
-#costReceiptModal .cost-receipt-week-table td:nth-child(4){ min-width:82px; }
+#costReceiptModal .cost-receipt-week-table td:nth-child(4){ width:5.5%; }
 #costReceiptModal .cost-receipt-week-table th:nth-child(5),
-#costReceiptModal .cost-receipt-week-table td:nth-child(5){ min-width:170px; }
+#costReceiptModal .cost-receipt-week-table td:nth-child(5){ width:13.5%; }
 #costReceiptModal .cost-receipt-week-table th:nth-child(6),
-#costReceiptModal .cost-receipt-week-table td:nth-child(6){ min-width:150px; }
+#costReceiptModal .cost-receipt-week-table td:nth-child(6){ width:8%; }
+#costReceiptModal .cost-receipt-week-table th:nth-child(7),
+#costReceiptModal .cost-receipt-week-table td:nth-child(7){ width:8.5%; }
+#costReceiptModal .cost-receipt-week-table th:nth-child(8),
+#costReceiptModal .cost-receipt-week-table td:nth-child(8){ width:7.5%; }
+#costReceiptModal .cost-receipt-week-table th:nth-child(9),
+#costReceiptModal .cost-receipt-week-table td:nth-child(9){ width:10%; }
 #costReceiptModal .cost-receipt-week-table th:nth-child(10),
-#costReceiptModal .cost-receipt-week-table td:nth-child(10){ min-width:82px; }
+#costReceiptModal .cost-receipt-week-table td:nth-child(10){ width:7.5%; }
 #costReceiptModal .cost-receipt-summary-table th:nth-child(1),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(1){ min-width:130px; }
+#costReceiptModal .cost-receipt-summary-table td:nth-child(1){ width:13%; }
 #costReceiptModal .cost-receipt-summary-table th:nth-child(2),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(2){ min-width:220px; }
+#costReceiptModal .cost-receipt-summary-table td:nth-child(2){ width:27%; }
 #costReceiptModal .cost-receipt-summary-table th:nth-child(3),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(3){ min-width:82px; }
+#costReceiptModal .cost-receipt-summary-table td:nth-child(3){ width:8%; }
 #costReceiptModal .cost-receipt-summary-table th:nth-child(4),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(4){ min-width:170px; }
+#costReceiptModal .cost-receipt-summary-table td:nth-child(4){ width:17%; }
 #costReceiptModal .cost-receipt-summary-table th:nth-child(5),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(5),
+#costReceiptModal .cost-receipt-summary-table td:nth-child(5){ width:10%; }
 #costReceiptModal .cost-receipt-summary-table th:nth-child(6),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(6),
+#costReceiptModal .cost-receipt-summary-table td:nth-child(6){ width:8%; }
 #costReceiptModal .cost-receipt-summary-table th:nth-child(7),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(7){ min-width:112px; }
+#costReceiptModal .cost-receipt-summary-table td:nth-child(7){ width:10%; }
 #costReceiptModal .cost-receipt-summary-table th:nth-child(8),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(8){ min-width:110px; }
+#costReceiptModal .cost-receipt-summary-table td:nth-child(8){ width:7%; }
+@media (max-width: 1180px){
+  #costReceiptModal .cost-weekly-table-wrap{
+    overflow-x:auto;
+  }
+  #costReceiptModal .cost-receipt-week-table{
+    min-width:1080px;
+  }
+  #costReceiptModal .cost-receipt-summary-table{
+    min-width:820px;
+  }
+}
 @media (max-width: 640px){
   .cost-timeframe-card-body{ padding:24px 18px 28px; }
   .cost-timeframe-table th,.cost-timeframe-table td{ padding:8px 10px; }
