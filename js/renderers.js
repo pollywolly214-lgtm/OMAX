@@ -20176,6 +20176,7 @@ function renderJobs(){
       return false;
     }
     const active = await getActiveWJCutsRoot();
+    if (window.DEBUG_MODE) console.info("[cutting-job-files] active root result", { jobId: attachJobId, ok: !!active.ok, reason: active.reason || "", permission: active.permission || "", rootId: active.rootId || "", folderName: active.folderName || "" });
     if (!active.ok){
       pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" };
       setSetupReason(active.reason || "missing_root");
@@ -20220,6 +20221,7 @@ function renderJobs(){
         return false;
       }
       const relPath = `${rel.join("/")}`;
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] picker selected file", { jobId: attachJobId, rootId, relativePath: relPath, name: file.name || "" });
       const reference = sanitizeJobFileReferenceForFirestore({
         id: genId(file.name || "job_file"),
         name: file.name || "Attachment",
@@ -20245,7 +20247,7 @@ function renderJobs(){
         const result = addWJCutsReferenceToJob(targetId, reference);
         if (window.DEBUG_MODE) console.info("[cutting-job-files] attach result", { jobId: targetId, ok: !!result.ok, reason: result.reason || "" });
         if (!result.ok){
-          toast(result.reason === "job_not_found" ? "Job not found for OneDrive attachment." : "Unable to attach WJ Cuts file reference.");
+          toast(result.reason === "job_not_found" ? "Job not found for WJ Cuts attachment." : "Unable to attach WJ Cuts file reference.");
           return false;
         }
         toast("WJ Cuts file reference attached to job.");
@@ -20258,8 +20260,10 @@ function renderJobs(){
       }
       return true;
     } catch (err){
-      if (err?.name !== "AbortError"){
-        toast(err?.message || "Unable to attach from this computer root folder.");
+      if (err?.name === "AbortError"){
+        if (typeof window !== "undefined") window.__wjCutsReferencePickerCanceled = true;
+      } else {
+        toast(err?.message || "Unable to attach WJ Cuts file reference.");
       }
       return false;
     }
@@ -21352,27 +21356,50 @@ function renderJobs(){
     }
   };
 
+  const handleReferenceFolderAttachButtonClick = async (event, button)=>{
+    const btn = button || event?.target?.closest?.("[data-job-file-add]");
+    if (!btn) return false;
+    if (event){
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      event.__wjCutsReferenceAttachHandled = true;
+    }
+    closeFileMenu(); closeActionMenu(); closeHistoryActionMenu();
+    const jobId = String(btn.getAttribute("data-job-file-add") || "");
+    const inHistoryRow = !!btn.closest("[data-history-row]");
+    const inActiveRow = !!btn.closest("[data-job-row]");
+    if (window.DEBUG_MODE) console.info("[cutting-job-files] reference attach button clicked", {
+      jobId,
+      inHistoryRow,
+      inActiveRow,
+      buttonText: String(btn.textContent || "").trim()
+    });
+    if (!jobId){
+      toast("Unable to attach file: missing job id.");
+      return true;
+    }
+    toast("Opening WJ Cuts reference picker…");
+    if (typeof window !== "undefined") window.__wjCutsReferencePickerCanceled = false;
+    try {
+      const completed = await attachFromLocalOneDriveRoot(jobId);
+      const modalOpen = oneDriveModal && !oneDriveModal.hasAttribute("hidden");
+      const pickerCanceled = typeof window !== "undefined" && window.__wjCutsReferencePickerCanceled === true;
+      if (!completed && !modalOpen && !pickerCanceled){
+        toast("Reference folder attach did not complete.");
+      }
+    } catch (err){
+      console.error("Cutting job reference attach failed", err);
+      toast("Unable to attach WJ Cuts file reference.");
+    }
+    return true;
+  };
+
   const handleCuttingJobFileActionClick = async (e)=>{
     const act = (matched)=>{ if (!matched) return false; e.preventDefault(); e.stopPropagation(); if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation(); return true; };
     const fileMenuAdd = e.target.closest("[data-job-file-add]");
-    if (fileMenuAdd && act(true)){
-      closeFileMenu(); closeActionMenu(); closeHistoryActionMenu();
-      const id = String(fileMenuAdd.getAttribute("data-job-file-add") || "");
-      const found = findJobRecord(id || "");
-      if (window.DEBUG_MODE) console.info("[cutting-job-files] file action click", {
-        action: "data-job-file-add",
-        jobId: id,
-        inHistoryRow: !!fileMenuAdd.closest("[data-history-row]"),
-        inActiveRow: !!fileMenuAdd.closest("[data-job-row]"),
-        tagName: String(fileMenuAdd.tagName || ""),
-        text: String(fileMenuAdd.textContent || "").trim()
-      });
-      if (window.DEBUG_MODE && found?.source === "history") console.info("[cutting-job-files] history attach click", { jobId: id, source: "history" });
-      if (!id){
-        toast("Unable to attach file: missing job id.");
-        return true;
-      }
-      await attachFromLocalOneDriveRoot(id);
+    if (fileMenuAdd){
+      await handleReferenceFolderAttachButtonClick(e, fileMenuAdd);
       return true;
     }
     const previewPathBtn = e.target.closest("[data-preview-path-btn]");
@@ -21405,6 +21432,35 @@ function renderJobs(){
   }
   content.__jobFileActionClickHandler = handleRootFileActionClick;
   content.addEventListener("click", handleRootFileActionClick, true);
+
+  const handleDocumentReferenceAttachClick = (event)=>{
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const btn = target.closest("[data-job-file-add]");
+    if (!btn) return;
+    handleReferenceFolderAttachButtonClick(event, btn).catch(err => {
+      console.error("Cutting job document reference attach failed", err);
+      toast("Unable to attach WJ Cuts file reference.");
+    });
+  };
+  if (typeof document !== "undefined"){
+    if (window.__cuttingJobReferenceAttachDocumentHandler){
+      document.removeEventListener("click", window.__cuttingJobReferenceAttachDocumentHandler, true);
+    }
+    window.__cuttingJobReferenceAttachDocumentHandler = handleDocumentReferenceAttachClick;
+    document.addEventListener("click", handleDocumentReferenceAttachClick, true);
+    document.querySelectorAll("[data-job-file-add]").forEach(btn => {
+      if (!(btn instanceof HTMLElement)) return;
+      if (btn.dataset.referenceAttachBound === "1") return;
+      btn.dataset.referenceAttachBound = "1";
+      btn.addEventListener("click", event => {
+        handleReferenceFolderAttachButtonClick(event, btn).catch(err => {
+          console.error("Cutting job direct reference attach failed", err);
+          toast("Unable to attach WJ Cuts file reference.");
+        });
+      });
+    });
+  }
 
   historyBody?.addEventListener("click", async (e)=>{
     if (await handleCuttingJobFileActionClick(e)) return;
