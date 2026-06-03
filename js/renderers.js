@@ -20194,6 +20194,7 @@ function renderJobs(){
       const cfg = getSharedConfig();
       const signature = active.signature;
       const rootId = active.rootId || "";
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] opening picker", { jobId: attachJobId, rootId, folderName: active.folderName || "" });
       const pickedHandles = await window.showOpenFilePicker({
         multiple: false,
         startIn: rootHandle,
@@ -20234,10 +20235,15 @@ function renderJobs(){
         attachedAtISO: new Date().toISOString(),
         rootLocationHint: String(cfg.folderHint || cfg.localRootName || "")
       });
-      if (!reference) return false;
+      if (!reference){
+        toast("Unable to attach WJ Cuts file reference.");
+        if (window.DEBUG_MODE) console.info("[cutting-job-files] attach result", { jobId: attachJobId, ok: false, reason: "invalid_reference" });
+        return false;
+      }
       const targetId = String(targetJobId || "");
       if (targetId){
         const result = addWJCutsReferenceToJob(targetId, reference);
+        if (window.DEBUG_MODE) console.info("[cutting-job-files] attach result", { jobId: targetId, ok: !!result.ok, reason: result.reason || "" });
         if (!result.ok){
           toast(result.reason === "job_not_found" ? "Job not found for OneDrive attachment." : "Unable to attach WJ Cuts file reference.");
           return false;
@@ -21351,10 +21357,22 @@ function renderJobs(){
     const fileMenuAdd = e.target.closest("[data-job-file-add]");
     if (fileMenuAdd && act(true)){
       closeFileMenu(); closeActionMenu(); closeHistoryActionMenu();
-      const id = fileMenuAdd.getAttribute("data-job-file-add");
+      const id = String(fileMenuAdd.getAttribute("data-job-file-add") || "");
       const found = findJobRecord(id || "");
-      if (window.DEBUG_MODE && found?.source === "history") console.info("[cutting-job-files] history attach click", { jobId: String(id || ""), source: "history" });
-      await attachFromLocalOneDriveRoot(id || "");
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] file action click", {
+        action: "data-job-file-add",
+        jobId: id,
+        inHistoryRow: !!fileMenuAdd.closest("[data-history-row]"),
+        inActiveRow: !!fileMenuAdd.closest("[data-job-row]"),
+        tagName: String(fileMenuAdd.tagName || ""),
+        text: String(fileMenuAdd.textContent || "").trim()
+      });
+      if (window.DEBUG_MODE && found?.source === "history") console.info("[cutting-job-files] history attach click", { jobId: id, source: "history" });
+      if (!id){
+        toast("Unable to attach file: missing job id.");
+        return true;
+      }
+      await attachFromLocalOneDriveRoot(id);
       return true;
     }
     const previewPathBtn = e.target.closest("[data-preview-path-btn]");
@@ -21371,6 +21389,22 @@ function renderJobs(){
     if (removeFile && act(true)){ const idStr = String(removeFile.getAttribute("data-remove-file") || ""); const idx = Number(removeFile.getAttribute("data-file-index")); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; if (j && Array.isArray(j.files) && idx >= 0 && idx < j.files.length){ j.files.splice(idx, 1); saveCloudDebounced(); toast("File removed"); renderJobs(); } return true; }
     return false;
   };
+
+  const handleRootFileActionClick = (e)=>{
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const fileAction = target.closest("[data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
+    if (!fileAction || !content.contains(fileAction)) return;
+    handleCuttingJobFileActionClick(e).catch(err => {
+      console.error("Cutting job file action failed", err);
+      toast("Unable to attach WJ Cuts file reference.");
+    });
+  };
+  if (content.__jobFileActionClickHandler){
+    content.removeEventListener("click", content.__jobFileActionClickHandler, true);
+  }
+  content.__jobFileActionClickHandler = handleRootFileActionClick;
+  content.addEventListener("click", handleRootFileActionClick, true);
 
   historyBody?.addEventListener("click", async (e)=>{
     if (await handleCuttingJobFileActionClick(e)) return;
