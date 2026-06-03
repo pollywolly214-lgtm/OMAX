@@ -12966,6 +12966,56 @@ function renderCosts(){
       window.receiptTrackerRangeSelected = activeRange;
       let saveStatusTimer = null;
 
+      if (typeof window !== "undefined" && window.DEBUG_MODE){
+        window.debugPurchaseHistorySticky = ()=>{
+          const styleFor = (el)=> el instanceof Element ? window.getComputedStyle(el) : null;
+          const metricsFor = (el)=>{
+            const cs = styleFor(el);
+            if (!el || !cs) return null;
+            return {
+              tag: el.tagName,
+              className: el.className || "",
+              overflowX: cs.overflowX,
+              overflowY: cs.overflowY,
+              maxHeight: cs.maxHeight,
+              height: cs.height,
+              position: cs.position,
+              transform: cs.transform,
+              contain: cs.contain,
+              borderCollapse: cs.borderCollapse,
+              clientHeight: el.clientHeight,
+              scrollHeight: el.scrollHeight,
+              scrollableY: el.scrollHeight > el.clientHeight
+            };
+          };
+          const wrappers = Array.from(modal.querySelectorAll(".cost-weekly-table-wrap"));
+          const headerCells = Array.from(modal.querySelectorAll(".cost-receipt-week-table thead th, .cost-receipt-summary-table thead th"));
+          const report = {
+            modalExists: modal instanceof HTMLElement,
+            cardBody: metricsFor(modal.querySelector(".cost-receipt-card-body")),
+            wrappers: wrappers.map(metricsFor),
+            firstHeader: (()=>{
+              const th = headerCells[0];
+              const cs = styleFor(th);
+              return th && cs ? {
+                text: th.textContent || "",
+                position: cs.position,
+                top: cs.top,
+                zIndex: cs.zIndex,
+                background: cs.backgroundColor,
+                clientHeight: th.clientHeight,
+                scrollHeight: th.scrollHeight
+              } : null;
+            })(),
+            scrollableElements: [modal.querySelector(".cost-receipt-card-body"), ...wrappers]
+              .filter(el => el && el.scrollHeight > el.clientHeight)
+              .map(el => el.className || el.tagName)
+          };
+          console.info("[purchase-history-sticky]", report);
+          return report;
+        };
+      }
+
       const ensureSaveStatusChip = ()=>{
         if (!(saveWeekBtn instanceof HTMLElement)) return null;
         let chip = saveWeekBtn.parentElement?.querySelector("[data-receipt-save-status]");

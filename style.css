@@ -601,10 +601,7 @@ body.cost-receipt-modal-open{ overflow:hidden; }
 #costReceiptModal .cost-weekly-table-wrap{
   position:relative;
   max-width:100%;
-  max-height:clamp(240px, 34vh, 380px);
-  overflow-x:hidden;
-  overflow-y:auto;
-  overscroll-behavior:contain;
+  overflow:visible;
 }
 #costReceiptModal .cost-receipt-week-table,
 #costReceiptModal .cost-receipt-summary-table{
@@ -679,6 +676,7 @@ body.cost-receipt-modal-open{ overflow:hidden; }
 @media (max-width: 1180px){
   #costReceiptModal .cost-weekly-table-wrap{
     overflow-x:auto;
+    overflow-y:visible;
   }
   #costReceiptModal .cost-receipt-week-table{
     min-width:1080px;
