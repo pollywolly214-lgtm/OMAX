@@ -4702,55 +4702,50 @@ function viewJobs(){
             <button type="button" class="job-note-modal-close" data-onedrive-cancel aria-label="Close OneDrive setup">×</button>
           </div>
           <div class="job-note-modal-body">
-            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Choose the local OneDrive-synced WJ Cuts folder for this browser. The app saves file references, not file contents.</p>
-            <ol class="job-onedrive-steps small">
-              <li><strong>Step 1:</strong> Click <strong>Select / re-authorize this computer root folder</strong> and pick your synced shared OneDrive folder.</li>
-              <li><strong>Step 2:</strong> Save setup for this computer only (it does not copy to other computers).</li>
-              <li><strong>Step 3:</strong> Use <strong>Add from this computer OneDrive folder</strong> when attaching files.</li>
-            </ol>
+            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Choose this browser’s local OneDrive-synced WJ Cuts root folder. The app saves file references, not file contents.</p>
             <p class="small muted" data-onedrive-setup-reason hidden></p>
             <div class="job-onedrive-status-grid small muted" data-onedrive-status-grid>
-              <div>Root setup: <span data-onedrive-connection-status>Not set</span></div>
-              <div>Folder status: <span data-onedrive-folder-status>Not ready</span></div>
-              <div>This computer root: <span data-onedrive-root-status>Not set</span></div>
-              <div>Root path hint: <span data-onedrive-root-path>Not set</span></div>
-              <div>This computer ID: <span data-onedrive-device-status>Not set</span></div>
-              <div>Indexed files: <span data-onedrive-library-status>0</span></div>
+              <div>Status: <span data-onedrive-connection-status>Not linked</span></div>
+              <div>Selected folder: <span data-onedrive-root-status>Not selected</span></div>
+              <div>Root ID: <span data-onedrive-library-status>Not verified</span></div>
+              <div>Browser/device ID: <span data-onedrive-device-status>Not set</span></div>
+              <div>Manual hint: <span data-onedrive-root-path>Not set</span></div>
             </div>
             <div class="job-onedrive-current small muted" data-onedrive-current-computer></div>
-            <div class="job-onedrive-profile-controls">
-              <label class="job-edit-note">Selected computer profile
-                <select id="jobOneDriveComputerProfile"></select>
-              </label>
-              <label class="job-edit-note">New/rename profile label
-                <input type="text" id="jobOneDriveProfileLabel" placeholder="Shop PC">
-              </label>
-              <div class="job-onedrive-sync-actions">
-                <button type="button" class="job-note-modal-secondary" id="jobOneDriveProfileUseBtn">Use selected profile</button>
-                <button type="button" class="job-note-modal-secondary" id="jobOneDriveProfileSaveBtn">Save PC name / hint</button>
-              </div>
-            </div>
-            <div class="job-onedrive-known">
-              <div class="small"><strong>Known computer root folders</strong></div>
-              <table class="small">
-                <thead><tr><th>PC/profile</th><th>Root folder</th><th>Root hint</th><th>Root ID</th><th>Last verified</th><th>Last browser/device</th></tr></thead>
-                <tbody data-onedrive-known-devices></tbody>
-              </table>
-            </div>
-                        <div class="job-onedrive-sync-actions">
-              <button type="button" class="job-note-modal-secondary" id="jobOneDriveRootPickerBtn">Select / re-authorize this computer root folder</button>
-            </div>
-            <label class="job-edit-note">Folder label (optional)
+            <label class="job-edit-note">Manual hint (optional)
               <input type="text" id="jobOneDriveFolderHint" placeholder="Shop drawings" value="${esc(oneDriveConfig.folderHint || "")}">
             </label>
-            <div class="small muted">Manual path hint only — the browser cannot use this path automatically.</div>
-            <label class="job-edit-note">
-              <input type="checkbox" id="jobOneDriveEnabled" ${oneDriveConfig.enabled ? "checked" : ""}> Enable OneDrive linking for cutting jobs
-            </label>
+            <div class="small muted">Manual hint only — the browser uses the selected local folder handle, not this text.</div>
+            <div class="job-onedrive-sync-actions">
+              <button type="button" class="job-note-modal-secondary" id="jobOneDriveRootPickerBtn">Select / re-authorize WJ Cuts root</button>
+              <button type="button" class="job-note-modal-secondary" data-wjcuts-modal-grant-permission hidden>Grant permission</button>
+            </div>
+            <details class="job-onedrive-advanced-diagnostics">
+              <summary>Advanced diagnostics</summary>
+              <div class="job-onedrive-profile-controls">
+                <label class="job-edit-note">Selected computer profile
+                  <select id="jobOneDriveComputerProfile"></select>
+                </label>
+                <label class="job-edit-note">New/rename profile label
+                  <input type="text" id="jobOneDriveProfileLabel" placeholder="Shop PC">
+                </label>
+                <div class="job-onedrive-sync-actions">
+                  <button type="button" class="job-note-modal-secondary" id="jobOneDriveProfileUseBtn">Use selected profile</button>
+                  <button type="button" class="job-note-modal-secondary" id="jobOneDriveProfileSaveBtn">Save PC name / hint</button>
+                </div>
+              </div>
+              <div class="job-onedrive-known">
+                <div class="small"><strong>Known computer root folders</strong></div>
+                <table class="small">
+                  <thead><tr><th>PC/profile</th><th>Root folder</th><th>Root hint</th><th>Root ID</th><th>Last verified</th><th>Last browser/device</th></tr></thead>
+                  <tbody data-onedrive-known-devices></tbody>
+                </table>
+              </div>
+            </details>
           </div>
           <div class="job-note-modal-actions">
-            <button type="button" class="job-note-modal-secondary" data-onedrive-cancel>Cancel</button>
-            <button type="button" class="job-note-modal-primary" data-onedrive-save>Save setup</button>
+            <button type="button" class="job-note-modal-secondary" data-onedrive-cancel>Close</button>
+            <button type="button" class="job-note-modal-primary" data-onedrive-save>Save hint</button>
           </div>
         </div>
       </div>
