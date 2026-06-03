@@ -20172,11 +20172,15 @@ function renderJobs(){
       }
     }
     if (window.DEBUG_MODE) console.info("[cutting-job-files] root status", status);
-    const statusLabel = activeRoot.attachReady
+    const displayAttachReady = !!(activeRoot.attachReady || activeRoot.ok);
+    const displayHasHandle = !!(activeRoot.hasHandle || activeRoot.handle || status.hasSavedHandle);
+    const displayPermissionGranted = !!(activeRoot.permissionGranted || activeRoot.permission === "granted" || status.permission === "granted");
+    const displayUsableLocalRoot = !!(activeRoot.usableLocalRoot || displayAttachReady || (displayHasHandle && displayPermissionGranted));
+    const statusLabel = displayAttachReady
       ? "Linked"
-      : (activeRoot.usableLocalRoot
+      : (displayUsableLocalRoot
         ? "Root linked — marker issue"
-        : (activeRoot.hasHandle || activeRoot.reason === "permission_needed"
+        : (displayHasHandle || activeRoot.reason === "permission_needed"
           ? "Permission needed"
           : (activeRoot.reason === "unsupported_browser" ? "Unsupported browser" : "Not linked")));
     if (oneDriveConnStatus) oneDriveConnStatus.textContent = statusLabel;
@@ -20200,13 +20204,13 @@ function renderJobs(){
     if (oneDriveModalGrantBtn) oneDriveModalGrantBtn.hidden = !(activeRoot.reason === "permission_needed" && !!activeRoot.handle);
     if (oneDriveStatusInline){
       const hint = (cfg.folderHint || status.handleName || activeRoot.folderName || "").trim();
-      const readiness = activeRoot.attachReady
+      const readiness = displayAttachReady
         ? "Root ready for attach"
-        : (activeRoot.usableLocalRoot
+        : (displayUsableLocalRoot
           ? "Root linked — marker issue"
-          : (activeRoot.hasHandle || activeRoot.reason === "permission_needed"
+          : (displayHasHandle || activeRoot.reason === "permission_needed"
             ? "Permission needed"
-            : (!cachedActiveWJCutsRoot ? "Root status loading" : "Root not linked")));
+            : (!cachedActiveWJCutsRoot ? "Checking WJ Cuts root…" : "Root not linked")));
       oneDriveStatusInline.textContent = `${readiness}${hint ? ` · ${hint}` : ""}`;
     }
     if (oneDriveKnownDevices){

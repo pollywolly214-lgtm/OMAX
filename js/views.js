@@ -2737,7 +2737,7 @@ function viewJobs(){
   const oneDriveLibrary = (typeof window.getOneDriveJobLibrary === "function")
     ? window.getOneDriveJobLibrary()
     : [];
-  const oneDriveStatusLabel = "WJ Cuts root not set";
+  const oneDriveStatusLabel = "Checking WJ Cuts root…";
   const defaultJobDateISO = (() => {
     const now = new Date();
     const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
