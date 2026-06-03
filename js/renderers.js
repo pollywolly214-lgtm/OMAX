@@ -18802,10 +18802,18 @@ function drawCostChart(canvas, model, show){
 
 
 let cachedActiveWJCutsRoot = null;
+let isRenderingJobs = false;
+let rootStatusRefreshInFlight = null;
 
 function renderJobs(){
   const content = document.getElementById("content");
   if (!content) return;
+  isRenderingJobs = true;
+  if (window.DEBUG_MODE) console.info("[cutting-job-files] renderJobs start");
+  setTimeout(()=>{
+    isRenderingJobs = false;
+    if (window.DEBUG_MODE) console.info("[cutting-job-files] renderJobs end");
+  }, 0);
   document.body.classList.remove("job-naming-open");
   try {
     ensureJobCategories?.();
@@ -19986,33 +19994,43 @@ function renderJobs(){
   };
 
   const refreshCachedActiveWJCutsRoot = async (reason = "")=>{
-    if (window.DEBUG_MODE) console.info("[cutting-job-files] cached root refresh", { reason, status: "start" });
-    try {
-      const active = await getActiveWJCutsRoot();
-      cachedActiveWJCutsRoot = {
-        ok: !!active.ok,
-        handle: active.handle || null,
-        rootId: String(active.rootId || ""),
-        marker: active.marker || null,
-        signature: String(active.signature || ""),
-        folderName: String(active.folderName || ""),
-        permission: String(active.permission || ""),
-        reason: String(active.reason || ""),
-        refreshedAt: Date.now()
-      };
-      if (window.DEBUG_MODE) console.info("[cutting-job-files] cached root refresh", {
-        reason,
-        ok: cachedActiveWJCutsRoot.ok,
-        rootId: cachedActiveWJCutsRoot.rootId,
-        permission: cachedActiveWJCutsRoot.permission,
-        failureReason: cachedActiveWJCutsRoot.reason
-      });
-      return cachedActiveWJCutsRoot;
-    } catch (err){
-      cachedActiveWJCutsRoot = { ok:false, handle:null, rootId:"", marker:null, signature:"", folderName:"", permission:"", reason:"refresh_failed", refreshedAt: Date.now() };
-      if (window.DEBUG_MODE) console.info("[cutting-job-files] cached root refresh", { reason, ok:false, rootId:"", permission:"", failureReason:"refresh_failed", message: err?.message || "" });
-      return cachedActiveWJCutsRoot;
+    if (rootStatusRefreshInFlight){
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] skipped refresh because one is already in flight", { reason });
+      return rootStatusRefreshInFlight;
     }
+    rootStatusRefreshInFlight = (async ()=>{
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] root status refresh start", { reason });
+      try {
+        const active = await getActiveWJCutsRoot();
+        cachedActiveWJCutsRoot = {
+          ok: !!active.ok,
+          handle: active.handle || null,
+          rootId: String(active.rootId || ""),
+          marker: active.marker || null,
+          signature: String(active.signature || ""),
+          folderName: String(active.folderName || ""),
+          permission: String(active.permission || ""),
+          reason: String(active.reason || ""),
+          refreshedAt: Date.now()
+        };
+        if (window.DEBUG_MODE) console.info("[cutting-job-files] cached root refresh", {
+          reason,
+          ok: cachedActiveWJCutsRoot.ok,
+          rootId: cachedActiveWJCutsRoot.rootId,
+          permission: cachedActiveWJCutsRoot.permission,
+          failureReason: cachedActiveWJCutsRoot.reason
+        });
+        return cachedActiveWJCutsRoot;
+      } catch (err){
+        cachedActiveWJCutsRoot = { ok:false, handle:null, rootId:"", marker:null, signature:"", folderName:"", permission:"", reason:"refresh_failed", refreshedAt: Date.now() };
+        if (window.DEBUG_MODE) console.info("[cutting-job-files] cached root refresh", { reason, ok:false, rootId:"", permission:"", failureReason:"refresh_failed", message: err?.message || "" });
+        return cachedActiveWJCutsRoot;
+      } finally {
+        if (window.DEBUG_MODE) console.info("[cutting-job-files] root status refresh end", { reason });
+        rootStatusRefreshInFlight = null;
+      }
+    })();
+    return rootStatusRefreshInFlight;
   };
 
   const describeCachedRootAttachBlock = (active)=>{
@@ -20081,10 +20099,10 @@ function renderJobs(){
     return writeOneDriveJobConfig({ ...cfg, ...patch });
   };
 
-  const updateOneDriveWizardStatus = async ()=>{
+  const updateOneDriveWizardStatus = async (options = {})=>{
     const cfg = getSharedConfig();
-    const status = await getWJCutsRootStatus();
-    const activeRoot = await refreshCachedActiveWJCutsRoot("wizard_status");
+    const status = options.status || await getWJCutsRootStatus();
+    const activeRoot = options.activeRoot || await refreshCachedActiveWJCutsRoot(options.reason || "wizard_status");
     if (oneDriveProfileSelect){
       const selected = getCurrentComputerProfileId(cfg);
       const rows = Object.values(cfg.rootDevices || {});
@@ -20198,7 +20216,7 @@ function renderJobs(){
         rootDevices
       });
       if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-      await refreshWJCutsRootStateAfterChange({ closeModal:false, reason:"root_setup_success" });
+      await refreshWJCutsRootStateAfterUserAction({ closeModal:false, reason:"root_setup_success", render:false });
       toast("WJ Cuts root folder saved and verified for this browser.");
       return true;
     } catch (err){
@@ -20338,23 +20356,34 @@ function renderJobs(){
     oneDriveModal.setAttribute("hidden", "");
     document.body.classList.remove("modal-open");
   };
-  const openOneDriveModal = ()=>{
-    if (!oneDriveModal) return;
-    oneDriveModal.removeAttribute("hidden");
-    document.body.classList.add("modal-open");
-    refreshCachedActiveWJCutsRoot("modal_open").catch(()=>{});
-    updateOneDriveWizardStatus();
-  };
-  const refreshWJCutsRootStateAfterChange = async (options = {})=>{
-    const active = await refreshCachedActiveWJCutsRoot(options.reason || "root_state_refresh");
-    await updateOneDriveWizardStatus();
+  const refreshWJCutsRootStatusOnly = async (reason = "")=>{
+    const active = await refreshCachedActiveWJCutsRoot(reason || "status_only");
+    await updateOneDriveWizardStatus({ activeRoot: active, reason: `${reason || "status_only"}:wizard` });
     await updatePermissionBanner();
+    return active;
+  };
+
+  const refreshWJCutsRootStateAfterUserAction = async (options = {})=>{
+    const active = await refreshWJCutsRootStatusOnly(options.reason || "user_action");
     if (active.ok){
       setSetupReason("");
       if (options.closeModal !== false) closeOneDriveModal();
     }
-    renderJobs();
+    if (options.render === true){
+      if (isRenderingJobs){
+        if (window.DEBUG_MODE) console.info("[cutting-job-files] skipped rerender because render is already active", { reason: options.reason || "user_action" });
+      } else {
+        renderJobs();
+      }
+    }
     return active;
+  };
+
+  const openOneDriveModal = ()=>{
+    if (!oneDriveModal) return;
+    oneDriveModal.removeAttribute("hidden");
+    document.body.classList.add("modal-open");
+    refreshWJCutsRootStatusOnly("modal_open").catch(()=>{});
   };
 
   oneDriveSetupBtn?.addEventListener("click", ()=>{
@@ -20424,7 +20453,8 @@ function renderJobs(){
     requestAnimationFrame(()=> restoreNewJobFormState(formState));
   });
 
-  refreshWJCutsRootStateAfterChange({ closeModal:false, reason:"render_init" });
+  if (oneDriveStatusInline) oneDriveStatusInline.textContent = "Checking WJ Cuts root…";
+  requestAnimationFrame(()=> refreshWJCutsRootStatusOnly("render_init").catch(()=>{}));
   permissionSetupBtn?.addEventListener("click", ()=> openOneDriveModal());
   const requestSavedRootPermission = async ()=>{
     let handle = await readLocalRootHandle();
@@ -20449,7 +20479,7 @@ function renderJobs(){
       } catch (_err){
         toast("Grant folder permission to use the saved WJ Cuts root.");
       }
-      await refreshWJCutsRootStateAfterChange({ closeModal:false, reason:"permission_grant" });
+      await refreshWJCutsRootStateAfterUserAction({ closeModal:false, reason:"permission_grant", render:false });
       return;
     }
     openOneDriveModal();
