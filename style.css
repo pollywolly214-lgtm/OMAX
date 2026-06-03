@@ -599,17 +599,15 @@ body.cost-receipt-modal-open{ overflow:hidden; }
   padding:22px 20px 24px;
 }
 #costReceiptModal .cost-weekly-table-wrap{
-  position:relative;
   max-width:100%;
-  overflow:visible;
+  overflow-x:hidden;
+  overflow-y:auto;
 }
 #costReceiptModal .cost-receipt-week-table,
 #costReceiptModal .cost-receipt-summary-table{
   width:100%;
   min-width:0;
   table-layout:fixed;
-  border-collapse:separate;
-  border-spacing:0;
 }
 #costReceiptModal .cost-receipt-week-table th,
 #costReceiptModal .cost-receipt-week-table td,
@@ -618,15 +616,6 @@ body.cost-receipt-modal-open{ overflow:hidden; }
   padding:7px 6px;
   white-space:nowrap;
   vertical-align:middle;
-}
-#costReceiptModal .cost-receipt-week-table thead th,
-#costReceiptModal .cost-receipt-summary-table thead th{
-  position:sticky;
-  top:0;
-  z-index:5;
-  background:#f4f7fb;
-  background-clip:padding-box;
-  box-shadow:0 2px 0 #d7deeb, 0 3px 8px rgba(15,23,42,0.08);
 }
 #costReceiptModal .cost-receipt-week-table input{
   min-width:0 !important;
@@ -676,7 +665,6 @@ body.cost-receipt-modal-open{ overflow:hidden; }
 @media (max-width: 1180px){
   #costReceiptModal .cost-weekly-table-wrap{
     overflow-x:auto;
-    overflow-y:visible;
   }
   #costReceiptModal .cost-receipt-week-table{
     min-width:1080px;
