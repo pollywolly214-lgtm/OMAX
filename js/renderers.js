@@ -19302,6 +19302,73 @@ function renderJobs(){
     return { job: null, source: null };
   };
 
+  const jobFileReferenceKey = (file)=>{
+    if (!file || typeof file !== "object") return "";
+    const id = String(file.id || "").trim();
+    if (id) return `id:${id}`;
+    const source = String(file.source || "").trim();
+    const rootId = String(file.rootId || "").trim();
+    const relativePath = String(file.relativePath || "").trim();
+    if (source === "wj_cuts_reference" && (rootId || relativePath)) return `wj:${rootId}:${relativePath}`;
+    const name = String(file.name || "").trim();
+    const url = String(file.url || file.webUrl || file.externalUrl || file.downloadUrl || file.oneDriveUrl || "").trim();
+    if (name || url) return `file:${name}:${url}`;
+    return "";
+  };
+
+  const mergeJobFileReferences = (...groups)=>{
+    const merged = [];
+    const seen = new Set();
+    groups.forEach(group => {
+      if (!Array.isArray(group)) return;
+      group.forEach(file => {
+        if (!file || typeof file !== "object") return;
+        const clean = file.source === "wj_cuts_reference"
+          ? sanitizeJobFileReferenceForFirestore(file)
+          : { ...file };
+        if (!clean) return;
+        const key = jobFileReferenceKey(clean) || `idx:${merged.length}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        merged.push(clean);
+      });
+    });
+    return merged;
+  };
+
+  const addWJCutsReferenceToJob = (jobId, reference)=>{
+    const idStr = String(jobId || "");
+    if (!idStr) return { ok:false, reason:"missing_job_id" };
+    const sanitized = sanitizeJobFileReferenceForFirestore(reference);
+    if (!sanitized || !sanitized.relativePath) return { ok:false, reason:"invalid_reference" };
+    const found = findJobRecord(idStr);
+    const job = found && found.job ? found.job : null;
+    if (!job) return { ok:false, reason:"job_not_found" };
+    const beforeFiles = Array.isArray(job.files) ? job.files.slice() : [];
+    job.files = mergeJobFileReferences(beforeFiles, [sanitized]);
+    if (found.source === "active" && editingJobs instanceof Set && editingJobs.has(idStr)){
+      editingJobs.add(idStr);
+    } else if (found.source === "history"){
+      const historyEditing = editingCompletedJobsSet();
+      if (historyEditing.has(idStr)) historyEditing.add(idStr);
+    }
+    if (typeof persistJobChanges === "function"){
+      persistJobChanges();
+    } else if (typeof saveCloudDebounced === "function"){
+      saveCloudDebounced();
+    }
+    if (window.DEBUG_MODE) console.info("[cutting-job-files] attach reference", {
+      jobId: idStr,
+      referenceId: sanitized.id,
+      relativePath: sanitized.relativePath,
+      rootId: sanitized.rootId || "",
+      filesBefore: beforeFiles.length,
+      filesAfter: job.files.length,
+      foundLocation: found.source || ""
+    });
+    return { ok:true, job, location: found.source || "" };
+  };
+
   const openJobNoteModal = (jobId, { appendBlank = false, trigger = null } = {})=>{
     if (!noteBackdrop || !noteTextarea) return;
     const id = jobId != null ? String(jobId) : "";
@@ -20188,18 +20255,13 @@ function renderJobs(){
       if (!reference) return false;
       const targetId = String(targetJobId || "");
       if (targetId){
-        const found = findJobRecord(targetId);
-        const job = found && found.job ? found.job : null;
-        if (!job){
-          toast("Job not found for OneDrive attachment.");
+        const result = addWJCutsReferenceToJob(targetId, reference);
+        if (!result.ok){
+          toast(result.reason === "job_not_found" ? "Job not found for OneDrive attachment." : "Unable to attach WJ Cuts file reference.");
           return false;
         }
-        job.files = Array.isArray(job.files) ? job.files : [];
-        job.files.push(reference);
-        saveCloudDebounced();
-        if (window.DEBUG_MODE) console.info("[cutting-job-files] attached reference", { targetId, relPath });
         toast("WJ Cuts file reference attached to job.");
-        renderJobs();
+        rerenderPreservingState(currentCategoryFilter());
       } else {
         pendingNewJobFiles.push(reference);
         toast("WJ Cuts file reference attached.");
@@ -21546,6 +21608,7 @@ function renderJobs(){
       if (!id) return;
       const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
       if (!entry) return;
+      const filesBeforeSave = Array.isArray(entry.files) ? entry.files.slice() : [];
       const field = (key)=> content.querySelector(`[data-history-field="${key}"][data-history-id="${id}"]`);
       const nameInput = field("name");
       const estimateInput = field("estimateHours");
@@ -21637,6 +21700,12 @@ function renderJobs(){
       entry.costRate = costRate;
       entry.notes = notes;
       entry.actualHours = actualHours != null ? actualHours : null;
+      entry.files = mergeJobFileReferences(filesBeforeSave, entry.files);
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] save edit files", {
+        jobId: String(id),
+        filesBeforeSave: filesBeforeSave.length,
+        filesAfterSave: Array.isArray(entry.files) ? entry.files.length : 0
+      });
       if (categoryInput && categoryInput.value && categoryInput.value !== "__new__"){
         entry.cat = categoryInput.value;
       }
@@ -21816,6 +21885,7 @@ function renderJobs(){
       const id = sv.getAttribute("data-save-job");
       const idStr = String(id || "");
       const j  = cuttingJobs.find(x => String(x?.id) === idStr); if (!j) return;
+      const filesBeforeSave = Array.isArray(j.files) ? j.files.slice() : [];
       const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${idStr}"]`)?.value;
       const chargeRaw = qs("chargeRate");
       const chargeVal = chargeRaw === "" || chargeRaw == null ? null : Number(chargeRaw);
@@ -21859,6 +21929,12 @@ function renderJobs(){
         j.priority = 1;
       }
       reorderPriorities(j.id, j.priority);
+      j.files = mergeJobFileReferences(filesBeforeSave, j.files);
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] save edit files", {
+        jobId: idStr,
+        filesBeforeSave: filesBeforeSave.length,
+        filesAfterSave: Array.isArray(j.files) ? j.files.length : 0
+      });
       if (catVal && catVal !== "__new__") j.cat = catVal;
       editingJobs.delete(idStr);
       saveCloudDebounced();
