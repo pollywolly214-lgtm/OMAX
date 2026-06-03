@@ -13293,14 +13293,18 @@ const appendEmptyRow = (focusFirst = false)=>{
           event.preventDefault();
           const row = input.closest("tr[data-receipt-row]");
           if (!row) return;
-          const columns = ["date", "purchased", "cost", "qty", "partNumber", "inventoryItemId", "shipping", "tax"];
+          const columns = ["date", "purchased", "cost", "qty", "partNumber", "shipping", "tax"];
           const col = input.getAttribute("data-col") || "";
           const idx = columns.indexOf(col);
           if (idx < 0) return;
-          if (idx === columns.length - 1){
+          const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]"));
+          const rowIndex = rows.indexOf(row);
+          const isLastRow = rowIndex === rows.length - 1;
+          if (isLastRow){
             appendEmptyRow(true);
           } else {
-            const next = row.querySelector(`[data-col="${columns[idx + 1]}"]`);
+            const nextCol = columns[idx + 1];
+            const next = nextCol ? row.querySelector(`[data-col="${nextCol}"]`) : rows[rowIndex + 1]?.querySelector(`[data-col="${columns[0]}"]`);
             if (next instanceof HTMLElement) next.focus();
           }
           recomputeWeekTotals();
