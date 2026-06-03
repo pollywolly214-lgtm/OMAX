@@ -20036,8 +20036,8 @@ function renderJobs(){
       const selectedProfile = (cfg.rootDevices || {})[getCurrentComputerProfileId(cfg) || ""] || null;
       oneDriveCurrentComputer.innerHTML = `Browser storage: ${status.hasSavedHandle || activeRoot.handle ? "Saved locally" : "Not saved"}<br>Root marker: ${escapeHtml(String(activeRoot.rootId || status.markerRootId || "Not verified"))}<br>Advanced diagnostics only: ${escapeHtml(selectedProfile?.label || "No selected PC/profile needed for attach")}`;
     }
-    if (oneDriveProfileControls) oneDriveProfileControls.hidden = false;
-    if (oneDriveKnownWrap) oneDriveKnownWrap.hidden = false;
+    if (oneDriveProfileControls) oneDriveProfileControls.hidden = true;
+    if (oneDriveKnownWrap) oneDriveKnownWrap.hidden = true;
     if (oneDriveModalGrantBtn) oneDriveModalGrantBtn.hidden = !(activeRoot.reason === "permission_needed" && !!activeRoot.handle);
     if (oneDriveStatusInline){
       const hint = (cfg.folderHint || status.handleName || "").trim();

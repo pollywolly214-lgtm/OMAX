@@ -4722,7 +4722,7 @@ function viewJobs(){
             </div>
             <details class="job-onedrive-advanced-diagnostics">
               <summary>Advanced diagnostics</summary>
-              <div class="job-onedrive-profile-controls">
+              <div class="job-onedrive-profile-controls" hidden>
                 <label class="job-edit-note">Selected computer profile
                   <select id="jobOneDriveComputerProfile"></select>
                 </label>
@@ -4734,7 +4734,7 @@ function viewJobs(){
                   <button type="button" class="job-note-modal-secondary" id="jobOneDriveProfileSaveBtn">Save PC name / hint</button>
                 </div>
               </div>
-              <div class="job-onedrive-known">
+              <div class="job-onedrive-known" hidden>
                 <div class="small"><strong>Known computer root folders</strong></div>
                 <table class="small">
                   <thead><tr><th>PC/profile</th><th>Root folder</th><th>Root hint</th><th>Root ID</th><th>Last verified</th><th>Last browser/device</th></tr></thead>
