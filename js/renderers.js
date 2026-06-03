@@ -19716,18 +19716,55 @@ function renderJobs(){
     });
   };
 
+  const captureEditingHistoryJobForms = ()=>{
+    const historyEditing = editingCompletedJobsSet();
+    if (!(historyEditing instanceof Set) || !historyEditing.size) return [];
+    const records = [];
+    historyEditing.forEach(id => {
+      const row = content.querySelector(`tr[data-history-row="${id}"]`);
+      if (!row) return;
+      const fields = {};
+      row.querySelectorAll('[data-history-field][data-history-id]').forEach(el => {
+        if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return;
+        const key = el.getAttribute('data-history-field');
+        const owner = el.getAttribute('data-history-id');
+        if (!key || owner !== String(id)) return;
+        fields[key] = el.value;
+      });
+      records.push({ id: String(id), fields });
+    });
+    return records;
+  };
+
+  const restoreEditingHistoryJobForms = (records)=>{
+    if (!Array.isArray(records) || !records.length) return;
+    records.forEach(entry => {
+      if (!entry || typeof entry !== 'object') return;
+      const row = content.querySelector(`tr[data-history-row="${entry.id}"]`);
+      if (!row || !entry.fields || typeof entry.fields !== 'object') return;
+      Object.entries(entry.fields).forEach(([key, value]) => {
+        const el = row.querySelector(`[data-history-field="${key}"][data-history-id="${entry.id}"]`);
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement){
+          el.value = value;
+        }
+      });
+    });
+  };
+
   const rerenderPreservingState = (categoryId)=>{
     const formState = captureNewJobFormState();
     if (formState && formState.fields && categoryId){
       formState.fields.category = categoryId;
     }
     const editingState = captureEditingJobForms();
+    const historyEditingState = captureEditingHistoryJobForms();
     const scrollPosition = captureScrollPosition();
     renderJobs();
     requestAnimationFrame(()=>{
       restoreScrollPosition(scrollPosition);
       restoreNewJobFormState(formState);
       restoreEditingJobForms(editingState);
+      restoreEditingHistoryJobForms(historyEditingState);
     });
   };
 
@@ -20129,6 +20166,8 @@ function renderJobs(){
   };
 
   const attachFromLocalOneDriveRoot = async (targetJobId = "")=>{
+    const attachJobId = String(targetJobId || "");
+    if (window.DEBUG_MODE) console.info("[cutting-job-files] attach start", { jobId: attachJobId });
     if (!supportsLocalRootPicker()){
       pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" };
       setSetupReason("unsupported_browser");
@@ -21298,7 +21337,11 @@ function renderJobs(){
       triggerFileDownload(fileBlob, file.name || fileBlob.name || "attachment");
       return true;
     } catch (err){
-      toast(err?.message || "Unable to open file from local root folder.");
+      if (!file.rootId && file.relativePath){
+        toast("Legacy reference could not be found under the selected WJ Cuts root. Reattach this file if needed.");
+      } else {
+        toast(err?.message || "Unable to open file from local root folder.");
+      }
       return false;
     }
   };
@@ -21306,7 +21349,14 @@ function renderJobs(){
   const handleCuttingJobFileActionClick = async (e)=>{
     const act = (matched)=>{ if (!matched) return false; e.preventDefault(); e.stopPropagation(); if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation(); return true; };
     const fileMenuAdd = e.target.closest("[data-job-file-add]");
-    if (fileMenuAdd && act(true)){ closeFileMenu(); closeActionMenu(); closeHistoryActionMenu(); const id = fileMenuAdd.getAttribute("data-job-file-add"); await attachFromLocalOneDriveRoot(id || ""); return true; }
+    if (fileMenuAdd && act(true)){
+      closeFileMenu(); closeActionMenu(); closeHistoryActionMenu();
+      const id = fileMenuAdd.getAttribute("data-job-file-add");
+      const found = findJobRecord(id || "");
+      if (window.DEBUG_MODE && found?.source === "history") console.info("[cutting-job-files] history attach click", { jobId: String(id || ""), source: "history" });
+      await attachFromLocalOneDriveRoot(id || "");
+      return true;
+    }
     const previewPathBtn = e.target.closest("[data-preview-path-btn]");
     if (previewPathBtn && act(true)){ const expected = previewPathBtn.getAttribute("data-preview-expected-path") || ""; const rootLocation = previewPathBtn.getAttribute("data-preview-root-location") || "WJ Cuts"; const rootId = previewPathBtn.getAttribute("data-preview-root-id") || "Not verified"; const manualHint = previewPathBtn.getAttribute("data-preview-root-hint") || ""; if (expected && navigator?.clipboard?.writeText){ navigator.clipboard.writeText(expected).catch(()=>{}); } const msg = `Root:\n${rootLocation || "WJ Cuts"}\n\nRoot ID:\n${rootId || "Not verified"}\n\nRelative path under root:\n${expected || "Unavailable"}\n\nHow to find it:\nOpen the selected WJ Cuts root folder on this computer, then follow the relative path above.${manualHint ? `\n\nOptional hint:\n${manualHint} (Manual hint, not verified full path)` : ""}`; if (window.alert) window.alert(msg); else toast(msg); return true; }
     const localFileBtn = e.target.closest("[data-open-local-file]");
@@ -21650,7 +21700,7 @@ function renderJobs(){
       entry.notes = notes;
       entry.actualHours = actualHours != null ? actualHours : null;
       entry.files = mergeJobFileReferences(filesBeforeSave, entry.files);
-      if (window.DEBUG_MODE) console.info("[cutting-job-files] save edit files", {
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] history save files", {
         jobId: String(id),
         filesBeforeSave: filesBeforeSave.length,
         filesAfterSave: Array.isArray(entry.files) ? entry.files.length : 0
