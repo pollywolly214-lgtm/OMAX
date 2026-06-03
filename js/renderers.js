@@ -7003,7 +7003,15 @@ function renderDashboard(){
     }
   });
 
-  oneTimeForm?.addEventListener("submit", (e)=>{
+  async function persistDashboardOneTimeTask(){
+    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+    if (typeof saveCloudNow === "function"){
+      const result = saveCloudNow();
+      if (result && typeof result.then === "function") await result;
+    }
+  }
+
+  oneTimeForm?.addEventListener("submit", async (e)=>{
     e.preventDefault();
     const name = (oneTimeNameInput?.value || "").trim();
     if (!name){ alert("Task name is required."); return; }
@@ -7046,8 +7054,7 @@ function renderDashboard(){
     if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 one-time record");
     setContextDate(targetISO);
     renderCalendarPreservingScroll();
-    if (typeof saveCloudNow === "function") saveCloudNow();
-    else saveCloudDebounced();
+    await persistDashboardOneTimeTask();
     toast("One-time task added to the calendar");
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){

@@ -119,15 +119,14 @@ function debounce(fn, ms=250){
     clearTimeout(t);
     t = setTimeout(()=>{
       t = null;
-      fn(...(lastArgs || []));
+      return fn(...(lastArgs || []));
     }, ms);
   };
   debounced.flush = ()=>{
     if (!t) return false;
     clearTimeout(t);
     t = null;
-    fn(...(lastArgs || []));
-    return true;
+    return fn(...(lastArgs || []));
   };
   debounced.cancel = ()=>{
     if (!t) return;
@@ -4252,10 +4251,11 @@ function saveCloudNow(){
   if (typeof saveCloudInternal.flush === "function"){
     const flushed = saveCloudInternal.flush();
     if (!flushed){
-      saveCloudInternal();
+      return saveCloudInternal();
     }
+    return flushed;
   }else{
-    saveCloudInternal();
+    return saveCloudInternal();
   }
 }
 
