@@ -18801,6 +18801,8 @@ function drawCostChart(canvas, model, show){
 }
 
 
+let cachedActiveWJCutsRoot = null;
+
 function renderJobs(){
   const content = document.getElementById("content");
   if (!content) return;
@@ -19982,6 +19984,45 @@ function renderJobs(){
     oneDriveSetupReason.textContent = `Setup opened because: ${setupReasonLabels[reason] || reason}`;
     oneDriveSetupReason.hidden = false;
   };
+
+  const refreshCachedActiveWJCutsRoot = async (reason = "")=>{
+    if (window.DEBUG_MODE) console.info("[cutting-job-files] cached root refresh", { reason, status: "start" });
+    try {
+      const active = await getActiveWJCutsRoot();
+      cachedActiveWJCutsRoot = {
+        ok: !!active.ok,
+        handle: active.handle || null,
+        rootId: String(active.rootId || ""),
+        marker: active.marker || null,
+        signature: String(active.signature || ""),
+        folderName: String(active.folderName || ""),
+        permission: String(active.permission || ""),
+        reason: String(active.reason || ""),
+        refreshedAt: Date.now()
+      };
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] cached root refresh", {
+        reason,
+        ok: cachedActiveWJCutsRoot.ok,
+        rootId: cachedActiveWJCutsRoot.rootId,
+        permission: cachedActiveWJCutsRoot.permission,
+        failureReason: cachedActiveWJCutsRoot.reason
+      });
+      return cachedActiveWJCutsRoot;
+    } catch (err){
+      cachedActiveWJCutsRoot = { ok:false, handle:null, rootId:"", marker:null, signature:"", folderName:"", permission:"", reason:"refresh_failed", refreshedAt: Date.now() };
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] cached root refresh", { reason, ok:false, rootId:"", permission:"", failureReason:"refresh_failed", message: err?.message || "" });
+      return cachedActiveWJCutsRoot;
+    }
+  };
+
+  const describeCachedRootAttachBlock = (active)=>{
+    const reason = String(active?.reason || (!active ? "loading" : "missing_root"));
+    if (reason === "permission_needed") return "Grant folder permission to use the saved WJ Cuts root.";
+    if (reason === "marker_missing") return "The selected root is missing the WJ Cuts marker file.";
+    if (reason === "unsupported_browser") return "This browser does not support saved WJ Cuts root folder access.";
+    if (reason === "loading" || reason === "refresh_failed") return "Root status loading. Click Attach again after the root shows Linked.";
+    return "Select your WJ Cuts root folder first.";
+  };
   const ensureCurrentProfile = (cfg)=>{
     const deviceId = String(getLocalDeviceId() || "");
     const nextCfg = { ...cfg };
@@ -20043,7 +20084,7 @@ function renderJobs(){
   const updateOneDriveWizardStatus = async ()=>{
     const cfg = getSharedConfig();
     const status = await getWJCutsRootStatus();
-    const activeRoot = await getActiveWJCutsRoot();
+    const activeRoot = await refreshCachedActiveWJCutsRoot("wizard_status");
     if (oneDriveProfileSelect){
       const selected = getCurrentComputerProfileId(cfg);
       const rows = Object.values(cfg.rootDevices || {});
@@ -20077,12 +20118,15 @@ function renderJobs(){
     if (oneDriveKnownWrap) oneDriveKnownWrap.hidden = true;
     if (oneDriveModalGrantBtn) oneDriveModalGrantBtn.hidden = !(activeRoot.reason === "permission_needed" && !!activeRoot.handle);
     if (oneDriveStatusInline){
-      const hint = (cfg.folderHint || status.handleName || "").trim();
-      oneDriveStatusInline.textContent = activeRoot.ok
-        ? `WJ Cuts root linked${hint ? ` · ${hint}` : ""}`
+      const hint = (cfg.folderHint || status.handleName || activeRoot.folderName || "").trim();
+      const readiness = activeRoot.ok
+        ? "Root ready for attach"
         : (activeRoot.reason === "permission_needed"
-          ? `WJ Cuts root needs permission${hint ? ` · ${hint}` : ""}`
-          : "WJ Cuts root not linked");
+          ? "Permission needed"
+          : (activeRoot.reason === "marker_missing"
+            ? "Root marker problem"
+            : (!cachedActiveWJCutsRoot ? "Root status loading" : "Root not linked")));
+      oneDriveStatusInline.textContent = `${readiness}${hint ? ` · ${hint}` : ""}`;
     }
     if (oneDriveKnownDevices){
       const rows = Object.values(cfg.rootDevices || {});
@@ -20154,7 +20198,7 @@ function renderJobs(){
         rootDevices
       });
       if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-      await refreshWJCutsRootStateAfterChange({ closeModal:false });
+      await refreshWJCutsRootStateAfterChange({ closeModal:false, reason:"root_setup_success" });
       toast("WJ Cuts root folder saved and verified for this browser.");
       return true;
     } catch (err){
@@ -20175,28 +20219,24 @@ function renderJobs(){
       toast("This browser does not support saved WJ Cuts root folder access.");
       return false;
     }
-    const active = await getActiveWJCutsRoot();
-    if (window.DEBUG_MODE) console.info("[cutting-job-files] active root result", { jobId: attachJobId, ok: !!active.ok, reason: active.reason || "", permission: active.permission || "", rootId: active.rootId || "", folderName: active.folderName || "" });
-    if (!active.ok){
+
+    const active = cachedActiveWJCutsRoot;
+    if (window.DEBUG_MODE) console.info("[cutting-job-files] active root result", { jobId: attachJobId, ok: !!active?.ok, reason: active?.reason || "", permission: active?.permission || "", rootId: active?.rootId || "", folderName: active?.folderName || "", cached: true });
+    if (!active || !active.ok || !active.handle){
       pendingAttachTarget = targetJobId ? { mode:"job", jobId:String(targetJobId) } : { mode:"new" };
-      setSetupReason(active.reason || "missing_root");
+      setSetupReason(active?.reason || "missing_root");
       openOneDriveModal();
-      const message = active.reason === "permission_needed"
-        ? "Grant folder permission to use the saved WJ Cuts root."
-        : (active.reason === "marker_missing"
-          ? "The selected root is missing the WJ Cuts marker file."
-          : "Select your WJ Cuts root folder first.");
-      toast(message);
+      toast(describeCachedRootAttachBlock(active));
+      refreshCachedActiveWJCutsRoot("attach_cache_miss").catch(()=>{});
       return false;
     }
-    const rootHandle = active.handle;
 
+    const rootHandle = active.handle;
+    const rootId = active.rootId || "";
+    let pickedHandles;
     try {
-      const cfg = getSharedConfig();
-      const signature = active.signature;
-      const rootId = active.rootId || "";
-      if (window.DEBUG_MODE) console.info("[cutting-job-files] opening picker", { jobId: attachJobId, rootId, folderName: active.folderName || "" });
-      const pickedHandles = await window.showOpenFilePicker({
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] calling showOpenFilePicker immediately", { jobId: attachJobId, rootId, folderName: active.folderName || "" });
+      const pickerPromise = window.showOpenFilePicker({
         multiple: false,
         startIn: rootHandle,
         types: [{
@@ -20207,8 +20247,33 @@ function renderJobs(){
           }
         }]
       });
+      pickedHandles = await pickerPromise;
+    } catch (err){
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] picker error", { name: err?.name, message: err?.message, action: (err?.name === "SecurityError" || err?.name === "NotAllowedError") ? "picker_user_activation_failed" : "picker_error" });
+      if (err?.name === "AbortError"){
+        if (typeof window !== "undefined") window.__wjCutsReferencePickerCanceled = true;
+      } else if (err?.name === "SecurityError" || err?.name === "NotAllowedError"){
+        toast("Browser blocked the file picker because the root check was not ready. Reopen WJ Cuts setup or click Attach again after the root shows Linked.");
+        refreshCachedActiveWJCutsRoot("picker_activation_error").catch(()=>{});
+      } else {
+        toast(err?.message || "Unable to attach WJ Cuts file reference.");
+      }
+      return false;
+    }
+
+    try {
       const fileHandle = Array.isArray(pickedHandles) ? pickedHandles[0] : null;
       if (!fileHandle) return false;
+      const markerResult = await ensureWJCutsRootMarker(rootHandle);
+      if (!markerResult.ok){
+        cachedActiveWJCutsRoot = { ...active, ok:false, reason:"marker_missing", marker:null, rootId:"", refreshedAt: Date.now() };
+        setSetupReason("marker_missing");
+        openOneDriveModal();
+        toast("The selected root is missing the WJ Cuts marker file.");
+        return false;
+      }
+      const marker = markerResult.marker;
+      const verifiedRootId = String(marker?.rootId || rootId || "");
       const rel = await rootHandle.resolve(fileHandle);
       if (!Array.isArray(rel)){
         toast("Selected file must come from the configured root folder.");
@@ -20217,11 +20282,14 @@ function renderJobs(){
       const file = await fileHandle.getFile();
       const ext = extractAttachmentExtension(file.name || "");
       if (!CAD_PREVIEWABLE_EXTENSIONS.has(ext)){
-        toast("Only DXF, ORD, or OMX files can be attached from OneDrive root.");
+        toast("Only DXF, ORD, or OMX files can be attached from WJ Cuts root.");
         return false;
       }
       const relPath = `${rel.join("/")}`;
-      if (window.DEBUG_MODE) console.info("[cutting-job-files] picker selected file", { jobId: attachJobId, rootId, relativePath: relPath, name: file.name || "" });
+      const signature = await computeLocalRootSignature(rootHandle);
+      cachedActiveWJCutsRoot = { ...active, ok:true, marker, rootId: verifiedRootId, signature, permission:"granted", reason:"", refreshedAt: Date.now() };
+      if (window.DEBUG_MODE) console.info("[cutting-job-files] picker selected file", { jobId: attachJobId, rootId: verifiedRootId, relativePath: relPath, name: file.name || "" });
+      const cfg = getSharedConfig();
       const reference = sanitizeJobFileReferenceForFirestore({
         id: genId(file.name || "job_file"),
         name: file.name || "Attachment",
@@ -20231,7 +20299,7 @@ function renderJobs(){
         rootPathStart: "WJ Cuts",
         relativePath: relPath,
         localRootSignature: signature,
-        rootId,
+        rootId: verifiedRootId,
         enabled: true,
         localDeviceId: getLocalDeviceId(),
         attachedAtISO: new Date().toISOString(),
@@ -20260,11 +20328,7 @@ function renderJobs(){
       }
       return true;
     } catch (err){
-      if (err?.name === "AbortError"){
-        if (typeof window !== "undefined") window.__wjCutsReferencePickerCanceled = true;
-      } else {
-        toast(err?.message || "Unable to attach WJ Cuts file reference.");
-      }
+      toast(err?.message || "Unable to attach WJ Cuts file reference.");
       return false;
     }
   };
@@ -20278,10 +20342,11 @@ function renderJobs(){
     if (!oneDriveModal) return;
     oneDriveModal.removeAttribute("hidden");
     document.body.classList.add("modal-open");
+    refreshCachedActiveWJCutsRoot("modal_open").catch(()=>{});
     updateOneDriveWizardStatus();
   };
   const refreshWJCutsRootStateAfterChange = async (options = {})=>{
-    const active = await getActiveWJCutsRoot();
+    const active = await refreshCachedActiveWJCutsRoot(options.reason || "root_state_refresh");
     await updateOneDriveWizardStatus();
     await updatePermissionBanner();
     if (active.ok){
@@ -20359,7 +20424,7 @@ function renderJobs(){
     requestAnimationFrame(()=> restoreNewJobFormState(formState));
   });
 
-  refreshWJCutsRootStateAfterChange({ closeModal:false });
+  refreshWJCutsRootStateAfterChange({ closeModal:false, reason:"render_init" });
   permissionSetupBtn?.addEventListener("click", ()=> openOneDriveModal());
   const requestSavedRootPermission = async ()=>{
     let handle = await readLocalRootHandle();
@@ -20384,7 +20449,7 @@ function renderJobs(){
       } catch (_err){
         toast("Grant folder permission to use the saved WJ Cuts root.");
       }
-      await refreshWJCutsRootStateAfterChange({ closeModal:false });
+      await refreshWJCutsRootStateAfterChange({ closeModal:false, reason:"permission_grant" });
       return;
     }
     openOneDriveModal();
@@ -21369,12 +21434,14 @@ function renderJobs(){
     const jobId = String(btn.getAttribute("data-job-file-add") || "");
     const inHistoryRow = !!btn.closest("[data-history-row]");
     const inActiveRow = !!btn.closest("[data-job-row]");
+    const activeCache = cachedActiveWJCutsRoot;
     if (window.DEBUG_MODE) console.info("[cutting-job-files] reference attach button clicked", {
       jobId,
       inHistoryRow,
       inActiveRow,
       buttonText: String(btn.textContent || "").trim()
     });
+    if (window.DEBUG_MODE) console.info("[cutting-job-files] attach click cached root", { jobId, cacheOk: !!activeCache?.ok, cacheReason: activeCache?.reason || "", hasHandle: !!activeCache?.handle });
     if (!jobId){
       toast("Unable to attach file: missing job id.");
       return true;
