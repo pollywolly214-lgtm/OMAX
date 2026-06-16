@@ -42,6 +42,46 @@ if (typeof window !== "undefined") {
   window.workspaceRef = null;
   window.workspaceDocRef = null;
   window.DEBUG_MODE = new URLSearchParams(window.location.search).get("debug") === "1";
+  const __omaxParams = new URLSearchParams(window.location.search || "");
+  window.__recoveryInspectMode = __omaxParams.get("recovery") === "1"
+    || __omaxParams.get("readonly") === "1"
+    || __omaxParams.get("diagnostics") === "1";
+  window.__autosaveDisabled = window.__recoveryInspectMode === true;
+  window.__cloudLoadAttemptComplete = false;
+  window.__initialAdoptComplete = false;
+  window.__localBackupOnlyMode = false;
+  window.__loadedCloudRevisionForSaveGuard = 0;
+}
+
+function isRecoveryMode(){
+  return typeof window !== "undefined" && window.__recoveryInspectMode === true;
+}
+
+function setCloudLoadGate({ loadComplete = false, adoptComplete = false } = {}){
+  if (typeof window === "undefined") return;
+  window.__cloudLoadAttemptComplete = Boolean(loadComplete);
+  window.__initialAdoptComplete = Boolean(adoptComplete);
+}
+
+function blockCloudSave(reason, details = null){
+  const message = `Cloud save blocked: ${reason}`;
+  if (details) console.error(message, details);
+  else console.warn(message);
+  try { if (typeof toast === "function") toast(message); } catch (_err){}
+  return false;
+}
+
+function canWriteCloud(reason = "cloud save"){
+  if (typeof window === "undefined") return false;
+  if (isRecoveryMode()) return blockCloudSave(`${reason}; Recovery Mode is read-only, cloud saves disabled.`);
+  if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
+  if (!window.__cloudLoadAttemptComplete || !window.__initialAdoptComplete){
+    return blockCloudSave(`${reason}; cloud load/adoption is not complete.`);
+  }
+  if (window.__localBackupOnlyMode){
+    return blockCloudSave(`${reason}; local backup was loaded without a cloud baseline. Export/review before any restore.`);
+  }
+  return true;
 }
 let CUTTING_BASELINE_WEEKLY_HOURS = 56;
 let CUTTING_BASELINE_DAILY_HOURS = CUTTING_BASELINE_WEEKLY_HOURS / 7;
@@ -556,6 +596,29 @@ const FIRESTORE_STRONG_WARN_BYTES = 900000;
 const FIRESTORE_BLOCK_BYTES = 975000;
 const SAVE_LOG_THROTTLE_MS = 30000;
 let lastSaveLogWriteAt = 0;
+const PROTECTED_STATE_FIELDS = [
+  "cuttingJobs",
+  "completedCuttingJobs",
+  "tasksInterval",
+  "tasksAsReq",
+  "maintenanceTasksV2",
+  "maintenanceCalendarInstancesV2",
+  "maintenanceOccurrencesV2",
+  "receiptTrackerWeeks",
+  "orderRequests",
+  "dailyCutHours",
+  "totalHistory",
+  "pumpEff",
+  "garnetCleanings",
+  "inventory",
+  "inventoryFolders",
+  "inventoryMaterials",
+  "settingsFolders",
+  "appConfig",
+  "dashboardLayout",
+  "costLayout",
+  "jobLayout"
+];
 
 function estimatePayloadBytes(payload){
   try {
@@ -782,6 +845,288 @@ function logCoreBusinessDiagnostics(source, state){
   console.info("Core business data diagnostics", { source, ...metrics });
   return metrics;
 }
+function countObjectKeys(value){
+  return value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value).length : 0;
+}
+
+function countTaskNestedMapEntries(list, key){
+  return (Array.isArray(list) ? list : []).reduce((acc, task)=>{
+    const value = task?.[key];
+    if (Array.isArray(value)) return acc + value.length;
+    if (value && typeof value === "object") return acc + Object.keys(value).length;
+    return acc;
+  }, 0);
+}
+
+function countTaskNestedArrayEntries(list, key){
+  return (Array.isArray(list) ? list : []).reduce((acc, task)=>acc + (Array.isArray(task?.[key]) ? task[key].length : 0), 0);
+}
+
+function countJobManualLogs(list){
+  return (Array.isArray(list) ? list : []).reduce((acc, job)=>acc + (Array.isArray(job?.manualLogs) ? job.manualLogs.length : 0), 0);
+}
+
+function buildProtectedFieldSummary(state){
+  const src = state && typeof state === "object" ? state : {};
+  const protectedFields = {};
+  PROTECTED_STATE_FIELDS.forEach(field => {
+    const value = src[field];
+    protectedFields[field] = {
+      present: Object.prototype.hasOwnProperty.call(src, field),
+      type: Array.isArray(value) ? "array" : (value === null ? "null" : typeof value),
+      length: Array.isArray(value) ? value.length : null,
+      keyCount: value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value).length : null,
+      bytes: estimatePayloadBytes(value)
+    };
+  });
+  const interval = Array.isArray(src.tasksInterval) ? src.tasksInterval : [];
+  const asReq = Array.isArray(src.tasksAsReq) ? src.tasksAsReq : [];
+  const allTasks = interval.concat(asReq);
+  const cutting = Array.isArray(src.cuttingJobs) ? src.cuttingJobs : [];
+  const completed = Array.isArray(src.completedCuttingJobs) ? src.completedCuttingJobs : [];
+  const pump = src.pumpEff;
+  return {
+    firestorePath: FB?.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
+    workspaceId: WORKSPACE_ID,
+    clientId: (typeof window !== "undefined" && window.localStorage) ? String(window.localStorage.getItem(CLOUD_SYNC_CLIENT_KEY) || "") : "unknown_client",
+    syncMeta: {
+      rev: Number(src.syncMeta?.rev || 0),
+      updatedAtISO: src.syncMeta?.updatedAtISO || "",
+      updatedBy: src.syncMeta?.updatedBy || ""
+    },
+    protectedFields,
+    nestedHistoryCounts: {
+      completedDates: countTaskNestedArrayEntries(allTasks, "completedDates"),
+      manualHistory: countTaskNestedArrayEntries(allTasks, "manualHistory"),
+      removedOccurrences: countTaskNestedArrayEntries(allTasks, "removedOccurrences") + countTaskNestedMapEntries(allTasks, "removedOccurrences"),
+      occurrenceNotes: countTaskNestedMapEntries(allTasks, "occurrenceNotes"),
+      occurrenceHours: countTaskNestedMapEntries(allTasks, "occurrenceHours")
+    },
+    cuttingJobCounts: {
+      cuttingJobs: cutting.length,
+      completedCuttingJobs: completed.length,
+      manualLogs: countJobManualLogs(cutting) + countJobManualLogs(completed)
+    },
+    purchaseOrderCounts: {
+      orderRequests: Array.isArray(src.orderRequests) ? src.orderRequests.length : 0,
+      receiptTrackerWeeks: Array.isArray(src.receiptTrackerWeeks) ? src.receiptTrackerWeeks.length : 0
+    },
+    maintenanceV2Counts: {
+      maintenanceTasksV2: Array.isArray(src.maintenanceTasksV2) ? src.maintenanceTasksV2.length : 0,
+      maintenanceCalendarInstancesV2: Array.isArray(src.maintenanceCalendarInstancesV2) ? src.maintenanceCalendarInstancesV2.length : 0,
+      maintenanceOccurrencesV2: Array.isArray(src.maintenanceOccurrencesV2) ? src.maintenanceOccurrencesV2.length : 0
+    },
+    pumpCounts: {
+      isArray: Array.isArray(pump),
+      length: Array.isArray(pump) ? pump.length : null,
+      keyCount: pump && typeof pump === "object" && !Array.isArray(pump) ? Object.keys(pump).length : 0,
+      entries: pump && typeof pump === "object" && Array.isArray(pump.entries) ? pump.entries.length : 0,
+      notes: pump && typeof pump === "object" && Array.isArray(pump.notes) ? pump.notes.length : 0
+    }
+  };
+}
+
+function compareProtectedFieldSummaries(remoteSummary, pendingSummary){
+  const issues = [];
+  const remote = remoteSummary || {};
+  const pending = pendingSummary || {};
+  const remoteFields = remote.protectedFields || {};
+  const pendingFields = pending.protectedFields || {};
+  PROTECTED_STATE_FIELDS.forEach(field => {
+    const r = remoteFields[field] || {};
+    const p = pendingFields[field] || {};
+    if (r.present && !p.present){
+      issues.push({ field, type: "missing_protected_field", remote: r, pending: p });
+      return;
+    }
+    if (r.type === "array"){
+      const rLen = Number(r.length || 0);
+      const pLen = Number(p.length || 0);
+      if (rLen > 0 && pLen === 0){
+        issues.push({ field, type: "array_would_be_emptied", remoteLength: rLen, pendingLength: pLen });
+      } else if (rLen >= 10 && pLen < Math.max(1, Math.floor(rLen * 0.5))){
+        issues.push({ field, type: "large_array_reduction", remoteLength: rLen, pendingLength: pLen });
+      } else if ((field === "completedCuttingJobs" || field === "receiptTrackerWeeks" || field === "maintenanceOccurrencesV2") && rLen > pLen){
+        issues.push({ field, type: "sensitive_array_reduction", remoteLength: rLen, pendingLength: pLen });
+      }
+    }
+  });
+  const nestedKeys = ["completedDates", "manualHistory", "removedOccurrences", "occurrenceNotes", "occurrenceHours"];
+  nestedKeys.forEach(key => {
+    const r = Number(remote.nestedHistoryCounts?.[key] || 0);
+    const p = Number(pending.nestedHistoryCounts?.[key] || 0);
+    if (r > 0 && p === 0){
+      issues.push({ field: key, type: "nested_history_would_be_emptied", remoteCount: r, pendingCount: p });
+    } else if (r >= 10 && p < Math.max(1, Math.floor(r * 0.5))){
+      issues.push({ field: key, type: "large_nested_history_reduction", remoteCount: r, pendingCount: p });
+    }
+  });
+  const remoteManualLogs = Number(remote.cuttingJobCounts?.manualLogs || 0);
+  const pendingManualLogs = Number(pending.cuttingJobCounts?.manualLogs || 0);
+  if (remoteManualLogs > 0 && pendingManualLogs === 0){
+    issues.push({ field: "manualLogs", type: "job_manual_logs_would_be_emptied", remoteCount: remoteManualLogs, pendingCount: pendingManualLogs });
+  } else if (remoteManualLogs >= 10 && pendingManualLogs < Math.max(1, Math.floor(remoteManualLogs * 0.5))){
+    issues.push({ field: "manualLogs", type: "large_job_manual_logs_reduction", remoteCount: remoteManualLogs, pendingCount: pendingManualLogs });
+  }
+  return issues;
+}
+
+function detectDangerousProtectedFieldReduction(remoteState, pendingState){
+  const remoteSummary = buildProtectedFieldSummary(remoteState || {});
+  const pendingSummary = buildProtectedFieldSummary(pendingState || {});
+  const issues = compareProtectedFieldSummaries(remoteSummary, pendingSummary);
+  return { blocked: issues.length > 0, issues, remoteSummary, pendingSummary };
+}
+
+function detectRemoteRevisionConflict(remoteState){
+  const remoteRev = Number(remoteState?.syncMeta?.rev || 0);
+  const loadedRev = Number((typeof window !== "undefined" ? window.__loadedCloudRevisionForSaveGuard : 0) || 0);
+  if (remoteRev > 0 && loadedRev > 0 && remoteRev > loadedRev){
+    return {
+      blocked: true,
+      remoteRev,
+      loadedRev,
+      remoteUpdatedAtISO: remoteState?.syncMeta?.updatedAtISO || "",
+      remoteUpdatedBy: remoteState?.syncMeta?.updatedBy || ""
+    };
+  }
+  return { blocked: false, remoteRev, loadedRev };
+}
+
+function exportJsonDownload(filename, data){
+  if (typeof document === "undefined") return false;
+  const safeName = String(filename || "omax-export.json").replace(/[^a-z0-9._-]+/gi, "_");
+  const blob = new Blob([JSON.stringify(data ?? null, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = safeName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  return true;
+}
+
+function loadLocalBackupReadOnly(){
+  return readLocalStateBackup();
+}
+
+function getCurrentAppStateForDiagnostics(){
+  if (isRecoveryMode()) return window.__lastLoadedCloudState || {};
+  try { return snapshotState(); }
+  catch (_err){ return window.__lastLoadedCloudState || {}; }
+}
+
+async function readCurrentCloudStateReadOnly(){
+  if (!FB.ready || !FB.docRef) return null;
+  const snap = await FB.docRef.get();
+  return snap && snap.exists ? (typeof snap.data === "function" ? snap.data() : snap.data) : null;
+}
+
+async function buildDiagnosticSummary(){
+  const cloudState = await readCurrentCloudStateReadOnly().catch(err => ({ __readError: String(err?.message || err) }));
+  const localBackup = loadLocalBackupReadOnly();
+  const appState = getCurrentAppStateForDiagnostics();
+  return {
+    generatedAtISO: new Date().toISOString(),
+    recoveryMode: isRecoveryMode(),
+    firestorePath: FB?.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
+    workspaceId: WORKSPACE_ID,
+    clientId: (typeof window !== "undefined" && window.localStorage) ? String(window.localStorage.getItem(CLOUD_SYNC_CLIENT_KEY) || "") : "unknown_client",
+    cloudLoadAttemptComplete: Boolean(window.__cloudLoadAttemptComplete),
+    initialAdoptComplete: Boolean(window.__initialAdoptComplete),
+    loadedCloudRevisionForSaveGuard: Number(window.__loadedCloudRevisionForSaveGuard || 0),
+    cloud: buildProtectedFieldSummary(cloudState || {}),
+    localBackup: buildProtectedFieldSummary(localBackup || {}),
+    currentAppState: buildProtectedFieldSummary(appState || {})
+  };
+}
+
+function showLocalBackupConflictWarning({ cloudRev = 0, backupRev = 0, backupOnly = false } = {}){
+  const msg = backupOnly
+    ? "Local backup loaded read-only because no meaningful cloud state was found. Export and review before restoring."
+    : `Newer local backup detected (backup rev ${backupRev}, cloud rev ${cloudRev}). Cloud state was kept; export both before any restore.`;
+  console.warn(msg);
+  try { if (typeof toast === "function") toast(msg); } catch (_err){}
+  if (typeof window !== "undefined") window.__lastLocalBackupConflict = { cloudRev, backupRev, backupOnly, message: msg, atISO: new Date().toISOString() };
+  renderRecoveryDiagnosticsPanel();
+}
+
+function ensureRecoveryBanner(){
+  if (typeof document === "undefined" || !isRecoveryMode()) return;
+  if (document.getElementById("recoveryModeBanner")) return;
+  const banner = document.createElement("div");
+  banner.id = "recoveryModeBanner";
+  banner.textContent = "Recovery Mode: read-only, cloud saves disabled.";
+  banner.style.cssText = "position:sticky;top:0;z-index:10000;background:#7f1d1d;color:#fff;padding:10px 14px;font-weight:700;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.18);";
+  document.body.prepend(banner);
+}
+
+function renderRecoveryDiagnosticsPanel(){
+  if (typeof document === "undefined" || !isRecoveryMode()) return;
+  ensureRecoveryBanner();
+  let panel = document.getElementById("recoveryDiagnosticsPanel");
+  if (!panel){
+    panel = document.createElement("section");
+    panel.id = "recoveryDiagnosticsPanel";
+    panel.style.cssText = "margin:12px;padding:12px;border:2px solid #7f1d1d;border-radius:10px;background:#fff7f7;color:#111;font:14px system-ui,sans-serif;";
+    panel.innerHTML = `
+      <h2 style="margin:0 0 8px;font-size:18px;">Recovery diagnostics</h2>
+      <p style="margin:0 0 10px;">Read-only tools. Exports download JSON locally and do not upload or restore data.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+        <button type="button" data-recovery-export="cloud">Export current cloud state JSON</button>
+        <button type="button" data-recovery-export="local">Export localStorage backup JSON</button>
+        <button type="button" data-recovery-export="summary">Export field-count diagnostic summary JSON</button>
+        <button type="button" data-recovery-copy="summary">Copy diagnostic summary</button>
+      </div>
+      <pre data-recovery-output style="white-space:pre-wrap;max-height:260px;overflow:auto;background:#fff;border:1px solid #f0caca;border-radius:8px;padding:8px;"></pre>`;
+    const mount = document.getElementById("app") || document.querySelector("main") || document.body;
+    if (mount === document.body) document.body.insertBefore(panel, document.body.children[1] || null);
+    else mount.prepend(panel);
+  }
+  const output = panel.querySelector("[data-recovery-output]");
+  const writeOutput = (data)=>{ if (output) output.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2); };
+  if (!panel.__recoveryWired){
+    panel.addEventListener("click", async (event)=>{
+      const exportBtn = event.target.closest("[data-recovery-export]");
+      const copyBtn = event.target.closest("[data-recovery-copy]");
+      if (!exportBtn && !copyBtn) return;
+      event.preventDefault();
+      try {
+        if (exportBtn){
+          const type = exportBtn.getAttribute("data-recovery-export");
+          if (type === "cloud"){
+            const cloudState = await readCurrentCloudStateReadOnly();
+            if (!cloudState){ writeOutput("Cloud state unavailable or empty."); return; }
+            exportJsonDownload(`omax-cloud-state-${Date.now()}.json`, cloudState);
+            writeOutput({ exported: "cloud", path: FB?.docRef?.path || "", bytes: estimatePayloadBytes(cloudState) });
+          } else if (type === "local"){
+            const local = loadLocalBackupReadOnly();
+            if (!local){ writeOutput("No localStorage backup found at omax_local_state_backup_v1."); return; }
+            exportJsonDownload(`omax-local-backup-${Date.now()}.json`, local);
+            writeOutput({ exported: "localBackup", key: LOCAL_STATE_BACKUP_KEY, bytes: estimatePayloadBytes(local) });
+          } else if (type === "summary"){
+            const summary = await buildDiagnosticSummary();
+            exportJsonDownload(`omax-diagnostic-summary-${Date.now()}.json`, summary);
+            writeOutput(summary);
+          }
+        } else if (copyBtn){
+          const summary = await buildDiagnosticSummary();
+          const text = JSON.stringify(summary, null, 2);
+          if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") await navigator.clipboard.writeText(text);
+          writeOutput(navigator.clipboard ? "Diagnostic summary copied to clipboard." : text);
+        }
+      } catch (err){
+        console.warn("Recovery diagnostic action failed", err);
+        writeOutput(`Diagnostic action failed: ${err?.message || err}`);
+      }
+    });
+    panel.__recoveryWired = true;
+  }
+  buildDiagnosticSummary().then(writeOutput).catch(err => writeOutput(`Diagnostic summary unavailable: ${err?.message || err}`));
+}
+
 function safeCleanupLoadedState(raw){
   const src = raw && typeof raw === "object" ? { ...raw } : {};
   delete src.syncProcessLog; delete src.__lastSnapshot; delete src.__lastSnapshotForFlow; delete src.__lastDataFlowFingerprint;
@@ -834,6 +1179,7 @@ function getCloudSyncClientId(){
   if (typeof window === "undefined" || !window.localStorage) return "unknown_client";
   let id = String(window.localStorage.getItem(CLOUD_SYNC_CLIENT_KEY) || "").trim();
   if (id) return id;
+  if (isRecoveryMode()) return "unknown_client";
   id = `client_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   try { window.localStorage.setItem(CLOUD_SYNC_CLIENT_KEY, id); } catch (_err){ }
   return id;
@@ -3961,6 +4307,7 @@ function adoptState(doc){
 
 const saveCloudInternal = debounce(async ()=>{
   if (!FB.ready || !FB.docRef) return;
+  if (!canWriteCloud("saveCloudInternal")) return;
   try{
     const rawSnap = snapshotState();
     const snap = compactStateForStorage(rawSnap);
@@ -3995,14 +4342,26 @@ const saveCloudInternal = debounce(async ()=>{
       console.warn("Failed to record save flow event", err);
     }
     window.__lastSnapshot = snap;
-    persistLocalStateBackup(snap);
     const remoteSnap = await FB.docRef.get();
     const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
     if (remoteData && typeof remoteData === "object"){
+      const revisionConflict = detectRemoteRevisionConflict(remoteData);
+      if (revisionConflict.blocked){
+        blockCloudSave("remote state is newer than this client. Export/reload/merge review before saving.", revisionConflict);
+        hasPendingLocalChanges = true;
+        return;
+      }
+      const dangerous = detectDangerousProtectedFieldReduction(remoteData, snap);
+      if (dangerous.blocked){
+        blockCloudSave("protected field reduction detected.", dangerous.issues);
+        hasPendingLocalChanges = true;
+        return;
+      }
       snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
       snap.dailyCutHours = mergeDailyCutHoursForSave(snap.dailyCutHours, remoteData.dailyCutHours);
       snap.pumpEff = mergePumpEffForSave(snap.pumpEff, remoteData.pumpEff);
     }
+    persistLocalStateBackup(snap);
     const writeRev = Number(snap?.syncMeta?.rev || 0);
     snap.saveMeta = { lastSavedAt: new Date().toISOString(), lastSaveStatus: "saved", lastSaveError: "", lastSaveSizeBytes: sizeBytes };
     await FB.docRef.set(snap, { merge:true });
@@ -4216,7 +4575,7 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
-  if (window.__recoveryInspectMode || window.__autosaveDisabled) return;
+  if (!canWriteCloud("saveCloudDebounced")) return;
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
     console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
@@ -4237,7 +4596,7 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(){
-  if (window.__recoveryInspectMode || window.__autosaveDisabled) return;
+  if (!canWriteCloud("saveCloudNow")) return;
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
     console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
@@ -4273,18 +4632,21 @@ function saveCloudNow(){
 
 if (typeof window !== "undefined"){
   window.addEventListener("visibilitychange", ()=>{
-    if (window.__recoveryInspectMode) return;
+    if (isRecoveryMode()) return;
     if (document.visibilityState === "hidden"){
       saveCloudNow();
     }
   });
-  window.addEventListener("pagehide", ()=>{ if (!window.__recoveryInspectMode) saveCloudNow(); });
+  window.addEventListener("pagehide", ()=>{ if (!isRecoveryMode()) saveCloudNow(); });
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", renderRecoveryDiagnosticsPanel);
+  else setTimeout(renderRecoveryDiagnosticsPanel, 0);
 }
 
 async function runRecoveryInspect(){
   window.__recoveryInspectMode = true;
   window.__autosaveDisabled = true;
   console.warn("Recovery inspect mode enabled: autosave disabled.");
+  renderRecoveryDiagnosticsPanel();
   let cloudState = null;
   try {
     if (FB.ready && FB.docRef){
@@ -4304,16 +4666,19 @@ async function runRecoveryInspect(){
 if (typeof window !== "undefined") window.recoveryInspect = runRecoveryInspect;
 async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
+  setCloudLoadGate({ loadComplete:false, adoptComplete:false });
   try{
     let snap = await FB.docRef.get();
     let data = snap.exists ? (typeof snap.data === "function" ? snap.data() : snap.data()) : null;
 
-    if (!stateHasMeaningfulData(data)){
+    if (!stateHasMeaningfulData(data) && !isRecoveryMode()){
       const migrated = await migrateLegacyWorkspaceDoc();
       if (migrated){
         data = migrated;
         snap = { exists: true };
       }
+    } else if (!stateHasMeaningfulData(data) && isRecoveryMode()){
+      console.warn("Recovery Mode: legacy migration write skipped during cloud load.");
     }
 
     const localBackup = readLocalStateBackup();
@@ -4325,28 +4690,27 @@ async function loadFromCloud(){
       logMaintenanceHistoryDiagnostics("backup-before-adopt", localBackup || {});
       logCoreBusinessDiagnostics("cloud-before-adopt", data || {});
       logCoreBusinessDiagnostics("backup-before-adopt", localBackup || {});
-      const useBackup = stateHasMeaningfulData(localBackup) && backupRev > cloudRev && shouldPreferLocalBackup(data || {}, localBackup || {});
-      const incomingState = safeCleanupLoadedState((useBackup ? localBackup : data) || {});
+      if (stateHasMeaningfulData(localBackup) && backupRev > cloudRev){
+        showLocalBackupConflictWarning({ cloudRev, backupRev, backupOnly:false });
+      }
+      const incomingState = safeCleanupLoadedState(data || {});
       adoptState(incomingState);
       window.__lastLoadedCloudState = cloneStructured(data || {});
-      const loadedRev = useBackup ? backupRev : cloudRev;
-      if (loadedRev > 0) lastAppliedCloudRevision = loadedRev;
+      window.__loadedCloudRevisionForSaveGuard = cloudRev;
+      if (cloudRev > 0) lastAppliedCloudRevision = cloudRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
-      if (useBackup && typeof saveCloudNow === "function"){
-        try { saveCloudNow(); } catch (err){ console.warn("Failed to push local backup after cloud load", err); }
-      }
     }else if (stateHasMeaningfulData(localBackup)){
       logMaintenanceHistoryDiagnostics("backup-only-before-adopt", localBackup || {});
       logCoreBusinessDiagnostics("backup-only-before-adopt", localBackup || {});
       const incomingBackup = safeCleanupLoadedState(localBackup || {});
       adoptState(incomingBackup);
-      window.__lastLoadedCloudState = cloneStructured(incomingBackup || {});
+      window.__lastLoadedCloudState = null;
+      window.__loadedCloudRevisionForSaveGuard = 0;
+      window.__localBackupOnlyMode = true;
       const loadedRev = Number(localBackup?.syncMeta?.rev || 0);
       if (loadedRev > 0) lastAppliedCloudRevision = loadedRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
-      if (typeof saveCloudNow === "function"){
-        try { saveCloudNow(); } catch (err){ console.warn("Failed to push local backup after fallback load", err); }
-      }
+      showLocalBackupConflictWarning({ cloudRev:0, backupRev:loadedRev, backupOnly:true });
     }else{
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
@@ -4387,27 +4751,41 @@ async function loadFromCloud(){
         }
       };
       adoptState(seeded);
+      window.__lastLoadedCloudState = cloneStructured(seeded || {});
+      window.__loadedCloudRevisionForSaveGuard = Number(seeded?.syncMeta?.rev || 0);
       const seededRev = Number(seeded?.syncMeta?.rev || 0);
       if (seededRev > 0) lastAppliedCloudRevision = seededRev;
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
-      await FB.docRef.set(seeded, { merge:true });
-      hasPendingLocalChanges = false;
-    if (FB.workspaceDoc){
-        await updateWorkspaceMetadata({
-          workspaceId: WORKSPACE_ID,
-          lastTouchedAt: new Date().toISOString()
-        });
+      if (isRecoveryMode()){
+        console.warn("Recovery Mode: seed/default Firestore write skipped.");
+      } else {
+        setCloudLoadGate({ loadComplete:true, adoptComplete:true });
+        await FB.docRef.set(seeded, { merge:true });
+        hasPendingLocalChanges = false;
+        if (FB.workspaceDoc){
+          await updateWorkspaceMetadata({
+            workspaceId: WORKSPACE_ID,
+            lastTouchedAt: new Date().toISOString()
+          });
+        }
       }
     }
+    setCloudLoadGate({ loadComplete:true, adoptComplete:true });
     if (window.DEBUG_MODE){
       try { refreshDebugCloud(); } catch (err) { console.warn("Debug panel refresh failed", err); }
     }
+    renderRecoveryDiagnosticsPanel();
   }catch(e){
     console.error("Cloud load failed:", e);
+    setCloudLoadGate({ loadComplete:true, adoptComplete:false });
+    renderRecoveryDiagnosticsPanel();
   }
 }
-
 async function migrateLegacyWorkspaceDoc(){
+  if (isRecoveryMode()){
+    console.warn("Recovery Mode: migrateLegacyWorkspaceDoc skipped to avoid writes.");
+    return null;
+  }
   if (!FB.workspaceDoc || !FB.docRef) return null;
   try{
     const workspaceSnap = await FB.workspaceDoc.get();
@@ -4436,6 +4814,10 @@ async function migrateLegacyWorkspaceDoc(){
 }
 
 async function updateWorkspaceMetadata(meta){
+  if (isRecoveryMode()){
+    console.warn("Recovery Mode: workspace metadata write skipped.");
+    return;
+  }
   if (!FB.workspaceDoc || workspaceMetadataWritesBlocked) return;
   try {
     await FB.workspaceDoc.set(meta, { merge:true });
@@ -4616,6 +4998,7 @@ const pumpDefaults = { baselineRPM:null, baselineDateISO:null, entries:[], notes
 }
 
 async function clearAllAppData(){
+  if (isRecoveryMode()) return blockCloudSave("clear/reset is disabled in Recovery Mode.");
   try {
     const label = (()=>{
       try {
@@ -4692,6 +5075,7 @@ async function clearAllAppData(){
 
   try {
     if (FB.ready && FB.docRef) {
+      if (!canWriteCloud("clearAllAppData")) return defaults;
       await FB.docRef.set(snapshotState());
     } else {
       saveCloudDebounced();
