@@ -1043,6 +1043,203 @@ async function buildDiagnosticSummary(){
   };
 }
 
+
+function escapeRecoveryHtml(value){
+  return String(value ?? "").replace(/[&<>'"]/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", '"':"&quot;" }[ch]));
+}
+
+async function parseUploadedRecoveryJsonFiles(fileList){
+  const files = Array.from(fileList || []);
+  const sources = [];
+  const warnings = [];
+  for (const file of files){
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)){
+        warnings.push(`${file.name}: JSON root is not an object; skipped.`);
+        continue;
+      }
+      const label = /cloud/i.test(file.name) ? "current-cloud" : file.name.replace(/\.json$/i, "") || `source-${sources.length + 1}`;
+      sources.push(summarizeRecoverySource({ label, filename: file.name, data: parsed, rawText: text }));
+    } catch (err){
+      warnings.push(`${file.name}: could not parse JSON (${err?.message || err}).`);
+    }
+  }
+  if (warnings.length) console.warn("Recovery Compare upload warnings", warnings);
+  return { sources, warnings };
+}
+
+function summarizeRecoverySource({ label, filename, data, rawText }){
+  const summary = buildProtectedFieldSummary(data || {});
+  return {
+    id: `recovery-source-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    label: String(label || filename || "uploaded-source"),
+    filename: String(filename || "uploaded.json"),
+    byteSize: typeof rawText === "string" ? rawText.length : estimatePayloadBytes(data),
+    summary,
+    data
+  };
+}
+
+function getFieldRecoveryScore(source, field){
+  const f = source?.summary?.protectedFields?.[field] || {};
+  const value = source?.data?.[field];
+  const nested = source?.summary?.nestedHistoryCounts || {};
+  const cutting = source?.summary?.cuttingJobCounts || {};
+  let count = 0;
+  if (Array.isArray(value)) count += value.length * 10;
+  else if (value && typeof value === "object") count += Object.keys(value).length * 10;
+  count += Math.min(100000, Number(f.bytes || 0));
+  if (field === "tasksInterval" || field === "tasksAsReq") count += (Number(nested.completedDates || 0) + Number(nested.manualHistory || 0) + Number(nested.removedOccurrences || 0) + Number(nested.occurrenceNotes || 0) + Number(nested.occurrenceHours || 0)) * 50;
+  if (field === "cuttingJobs" || field === "completedCuttingJobs") count += Number(cutting.manualLogs || 0) * 50;
+  return { present: Boolean(f.present), count, length: Number(f.length || 0), keyCount: Number(f.keyCount || 0), bytes: Number(f.bytes || 0) };
+}
+
+function chooseBestRecoverySourceForField(field, sources, cloudSource){
+  const candidates = (sources || []).filter(src => Object.prototype.hasOwnProperty.call(src.data || {}, field));
+  if (!candidates.length) return { field, action: "skip", reason: "No uploaded source contains this field." };
+  const base = cloudSource || sources.find(src => /cloud/i.test(`${src.label} ${src.filename}`)) || sources[0];
+  const baseScore = getFieldRecoveryScore(base, field);
+  const ranked = candidates.map(src => ({ source: src, score: getFieldRecoveryScore(src, field) })).sort((a,b)=>b.score.count-a.score.count);
+  const best = ranked[0];
+  if (!best || best.source === base || best.score.count <= baseScore.count) return { field, action: "skip", reason: "Cloud/current source appears at least as complete." };
+  const meaningful = best.score.length > 0 || best.score.keyCount > 0 || best.score.bytes > 8;
+  if (!meaningful) return { field, action: "skip", reason: "Best non-cloud source does not contain meaningful data." };
+  const second = ranked.find(r => r.source !== best.source && r.source !== base && r.score.count > baseScore.count);
+  if (second && second.score.count >= Math.floor(best.score.count * 0.85) && estimatePayloadBytes(second.source.data?.[field]) !== estimatePayloadBytes(best.source.data?.[field])){
+    return { field, action: "manual_review", reason: `${best.source.label} and ${second.source.label} both contain meaningful data for ${field}; review before choosing.`, candidateLabels: [best.source.label, second.source.label] };
+  }
+  let reason = `${base.label} has score ${baseScore.count}; ${best.source.label} has score ${best.score.count}.`;
+  if (!baseScore.present) reason = `${base.label} is missing ${field}; ${best.source.label} contains it.`;
+  else if (baseScore.length === 0 && best.score.length > 0) reason = `${base.label} has an empty ${field} array; ${best.source.label} has ${best.score.length} item(s).`;
+  return { field, action: "include", source: best.source, reason };
+}
+
+function buildRecoveryComparisonReport(sources){
+  const safeSources = Array.isArray(sources) ? sources : [];
+  const cloudSource = safeSources.find(src => /current-cloud|cloud/i.test(`${src.label} ${src.filename}`)) || safeSources[0] || null;
+  const fieldRecommendations = PROTECTED_STATE_FIELDS.map(field => chooseBestRecoverySourceForField(field, safeSources, cloudSource));
+  return {
+    version: 1,
+    createdAtISO: new Date().toISOString(),
+    mode: "recovery_compare_no_write",
+    baseCloudSourceLabel: cloudSource?.label || "",
+    sources: safeSources.map(src => ({
+      label: src.label,
+      filename: src.filename,
+      byteSize: src.byteSize,
+      syncMeta: src.summary.syncMeta,
+      protectedFields: src.summary.protectedFields,
+      nestedHistoryCounts: src.summary.nestedHistoryCounts,
+      cuttingJobCounts: src.summary.cuttingJobCounts,
+      purchaseOrderCounts: src.summary.purchaseOrderCounts,
+      maintenanceV2Counts: src.summary.maintenanceV2Counts,
+      pumpCounts: src.summary.pumpCounts
+    })),
+    fieldRecommendations,
+    warnings: safeSources.length < 2 ? ["Upload at least a cloud export and one backup for useful comparison."] : []
+  };
+}
+
+function buildProposedRestorePatch(report, sources){
+  const sourceByLabel = new Map((sources || []).map(src => [src.label, src]));
+  const patch = {
+    version: 1,
+    createdAtISO: new Date().toISOString(),
+    mode: "proposed_restore_patch_no_write",
+    baseCloudSourceLabel: report?.baseCloudSourceLabel || "current-cloud",
+    fields: {},
+    manualReviewRequired: [],
+    warnings: Array.isArray(report?.warnings) ? [...report.warnings] : []
+  };
+  (report?.fieldRecommendations || []).forEach(rec => {
+    if (rec.action === "include" && rec.source?.label){
+      const src = sourceByLabel.get(rec.source.label) || rec.source;
+      patch.fields[rec.field] = { sourceLabel: src.label, reason: rec.reason, value: src.data?.[rec.field] };
+    } else if (rec.action === "manual_review"){
+      patch.manualReviewRequired.push({ field: rec.field, reason: rec.reason, candidateLabels: rec.candidateLabels || [] });
+    }
+  });
+  patch.warnings.push("This patch is for manual review only. The app did not apply, upload, or save it.");
+  return patch;
+}
+
+function renderRecoveryComparePanel(panel){
+  if (!panel || !isRecoveryMode()) return;
+  let box = panel.querySelector("[data-recovery-compare-panel]");
+  if (!box){
+    box = document.createElement("section");
+    box.setAttribute("data-recovery-compare-panel", "1");
+    box.style.cssText = "margin-top:14px;padding-top:12px;border-top:1px solid #f0caca;";
+    box.innerHTML = `
+      <h3 style="margin:0 0 8px;font-size:16px;">Recovery Compare / Restore Prep</h3>
+      <p style="margin:0 0 10px;font-weight:700;color:#7f1d1d;">This tool only compares exported JSON files and builds a proposed patch. It does not restore, upload, or save data.</p>
+      <input type="file" accept="application/json,.json" multiple data-recovery-compare-upload>
+      <div data-recovery-compare-results style="margin-top:10px;"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button type="button" data-recovery-download-comparison disabled>Download comparison summary JSON</button>
+        <button type="button" data-recovery-download-patch disabled>Download proposed restore patch JSON</button>
+      </div>`;
+    panel.appendChild(box);
+  }
+  const results = box.querySelector("[data-recovery-compare-results]");
+  const renderResults = () => {
+    const sources = box.__recoverySources || [];
+    const warnings = box.__recoveryWarnings || [];
+    const report = sources.length ? buildRecoveryComparisonReport(sources) : null;
+    const patch = report ? buildProposedRestorePatch(report, sources) : null;
+    box.__recoveryReport = report;
+    box.__recoveryPatch = patch;
+    box.querySelector("[data-recovery-download-comparison]").disabled = !report;
+    box.querySelector("[data-recovery-download-patch]").disabled = !patch;
+    if (!sources.length){ results.innerHTML = `<p>No JSON files uploaded yet.</p>`; return; }
+    const sourceRows = sources.map(src => `<tr><td>${escapeRecoveryHtml(src.label)}</td><td>${escapeRecoveryHtml(src.filename)}</td><td>${src.byteSize}</td><td>${escapeRecoveryHtml(src.summary.syncMeta.rev)}</td><td>${escapeRecoveryHtml(src.summary.syncMeta.updatedAtISO)}</td><td>${escapeRecoveryHtml(src.summary.syncMeta.updatedBy)}</td><td>${src.summary.cuttingJobCounts.cuttingJobs}/${src.summary.cuttingJobCounts.completedCuttingJobs}/${src.summary.cuttingJobCounts.manualLogs}</td><td>${src.summary.nestedHistoryCounts.completedDates}/${src.summary.nestedHistoryCounts.manualHistory}/${src.summary.nestedHistoryCounts.removedOccurrences}/${src.summary.nestedHistoryCounts.occurrenceNotes}/${src.summary.nestedHistoryCounts.occurrenceHours}</td></tr>`).join("");
+    const fieldRows = PROTECTED_STATE_FIELDS.map(field => {
+      const cells = sources.map(src => { const f = src.summary.protectedFields[field] || {}; return `<td>${f.present ? "yes" : "no"}<br>len:${f.length ?? "—"} keys:${f.keyCount ?? "—"}<br>${f.bytes || 0} bytes</td>`; }).join("");
+      const rec = report.fieldRecommendations.find(r => r.field === field) || {};
+      return `<tr><th>${escapeRecoveryHtml(field)}</th>${cells}<td>${escapeRecoveryHtml(rec.action || "skip")}</td><td>${escapeRecoveryHtml(rec.source?.label || rec.reason || "")}</td></tr>`;
+    }).join("");
+    const recommended = Object.keys(patch.fields).map(field => `<li><strong>${escapeRecoveryHtml(field)}</strong>: ${escapeRecoveryHtml(patch.fields[field].reason)}</li>`).join("") || "<li>None selected automatically.</li>";
+    const manual = patch.manualReviewRequired.map(item => `<li><strong>${escapeRecoveryHtml(item.field)}</strong>: ${escapeRecoveryHtml(item.reason)}</li>`).join("") || "<li>None.</li>";
+    const allWarnings = warnings.concat(report.warnings || [], patch.warnings || []);
+    results.innerHTML = `
+      <h4>Uploaded sources</h4><ul>${sources.map(src => `<li>${escapeRecoveryHtml(src.label)} (${escapeRecoveryHtml(src.filename)})</li>`).join("")}</ul>
+      <h4>Source summary</h4><div style="overflow:auto;"><table border="1" cellpadding="4" cellspacing="0"><thead><tr><th>Label</th><th>Filename</th><th>Bytes</th><th>rev</th><th>updatedAtISO</th><th>updatedBy</th><th>cut/completed/logs</th><th>completed/manual/removed/notes/hours</th></tr></thead><tbody>${sourceRows}</tbody></table></div>
+      <h4>Protected-field comparison</h4><div style="overflow:auto;"><table border="1" cellpadding="4" cellspacing="0"><thead><tr><th>Field</th>${sources.map(src => `<th>${escapeRecoveryHtml(src.label)}</th>`).join("")}<th>Recommendation</th><th>Reason/source</th></tr></thead><tbody>${fieldRows}</tbody></table></div>
+      <h4>Recommended restore fields</h4><ul>${recommended}</ul>
+      <h4>Manual review fields</h4><ul>${manual}</ul>
+      <h4>Warnings</h4><ul>${allWarnings.map(w => `<li>${escapeRecoveryHtml(w)}</li>`).join("") || "<li>None.</li>"}</ul>`;
+  };
+  if (!box.__recoveryCompareWired){
+    box.addEventListener("change", async event => {
+      const input = event.target.closest("[data-recovery-compare-upload]");
+      if (!input) return;
+      const parsed = await parseUploadedRecoveryJsonFiles(input.files);
+      box.__recoverySources = (box.__recoverySources || []).concat(parsed.sources);
+      box.__recoveryWarnings = (box.__recoveryWarnings || []).concat(parsed.warnings || []);
+      input.value = "";
+      renderResults();
+    });
+    box.addEventListener("click", event => {
+      if (event.target.closest("[data-recovery-download-comparison]")) exportJsonDownload(`omax-recovery-comparison-${Date.now()}.json`, box.__recoveryReport || buildRecoveryComparisonReport(box.__recoverySources || []));
+      if (event.target.closest("[data-recovery-download-patch]")) exportJsonDownload(`omax-proposed-restore-patch-${Date.now()}.json`, box.__recoveryPatch || buildProposedRestorePatch(box.__recoveryReport, box.__recoverySources || []));
+    });
+    box.__recoveryCompareWired = true;
+  }
+  renderResults();
+}
+
+function downloadRecoveryComparison(){
+  const panel = typeof document !== "undefined" ? document.querySelector("[data-recovery-compare-panel]") : null;
+  return exportJsonDownload(`omax-recovery-comparison-${Date.now()}.json`, panel?.__recoveryReport || buildRecoveryComparisonReport(panel?.__recoverySources || []));
+}
+
+function downloadProposedRestorePatch(){
+  const panel = typeof document !== "undefined" ? document.querySelector("[data-recovery-compare-panel]") : null;
+  return exportJsonDownload(`omax-proposed-restore-patch-${Date.now()}.json`, panel?.__recoveryPatch || buildProposedRestorePatch(panel?.__recoveryReport, panel?.__recoverySources || []));
+}
+
 function showLocalBackupConflictWarning({ cloudRev = 0, backupRev = 0, backupOnly = false } = {}){
   const msg = backupOnly
     ? "Local backup loaded read-only because no meaningful cloud state was found. Export and review before restoring."
@@ -1124,6 +1321,7 @@ function renderRecoveryDiagnosticsPanel(){
     });
     panel.__recoveryWired = true;
   }
+  renderRecoveryComparePanel(panel);
   buildDiagnosticSummary().then(writeOutput).catch(err => writeOutput(`Diagnostic summary unavailable: ${err?.message || err}`));
 }
 
