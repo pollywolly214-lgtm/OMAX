@@ -596,6 +596,90 @@ const FIRESTORE_STRONG_WARN_BYTES = 900000;
 const FIRESTORE_BLOCK_BYTES = 975000;
 const SAVE_LOG_THROTTLE_MS = 30000;
 let lastSaveLogWriteAt = 0;
+const REQUIRED_PROTECTED_DATA_PATHS = [
+  "cuttingJobs",
+  "completedCuttingJobs",
+  "cuttingJobDatabase",
+  "tasksInterval",
+  "tasksAsReq",
+  "settingsFolders",
+  "folders",
+  "jobFolders",
+  "inventory",
+  "inventoryFolders",
+  "inventoryMaterials",
+  "inventoryTransactions",
+  "receiptTrackerWeeks",
+  "orderRequests",
+  "weeklyCostReports",
+  "dailyCutHours",
+  "totalHistory",
+  "pumpEff",
+  "garnetCleanings",
+  "appConfig",
+  "dashboardLayout",
+  "costLayout",
+  "jobLayout",
+  "maintenanceTasksV2",
+  "maintenanceCalendarInstancesV2",
+  "maintenanceOccurrencesV2",
+  "oneDriveJobConfig",
+  "cuttingJobs.manualLogs",
+  "completedCuttingJobs.manualLogs",
+  "tasksInterval.completedDates",
+  "tasksInterval.manualHistory",
+  "tasksInterval.occurrenceNotes",
+  "tasksInterval.occurrenceHours",
+  "tasksInterval.removedOccurrences",
+  "tasksAsReq.completedDates",
+  "tasksAsReq.manualHistory",
+  "tasksAsReq.occurrenceNotes",
+  "tasksAsReq.occurrenceHours",
+  "tasksAsReq.removedOccurrences"
+];
+const PROTECTED_FIELD_REGISTRY = [
+  { path:"cuttingJobs", label:"Active cutting jobs", category:"jobs", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"completedCuttingJobs", label:"Completed cutting jobs", category:"jobs", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"cuttingJobDatabase", label:"Cutting job database", category:"jobs", expectedShape:"arrayOrObject", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksInterval", label:"Interval maintenance tasks", category:"maintenance", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksAsReq", label:"As-required maintenance tasks", category:"maintenance", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"settingsFolders", label:"Settings folders", category:"config", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"folders", label:"General folders", category:"config", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"jobFolders", label:"Job folders", category:"jobs", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"inventory", label:"Inventory items", category:"inventory", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"inventoryFolders", label:"Inventory folders", category:"inventory", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"inventoryMaterials", label:"Inventory material matrix", category:"inventory", expectedShape:"arrayOrObject", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"inventoryTransactions", label:"Inventory transactions", category:"inventory", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"receiptTrackerWeeks", label:"Receipt tracker weeks", category:"orders", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"orderRequests", label:"Order requests", category:"orders", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"weeklyCostReports", label:"Weekly cost reports", category:"orders", expectedShape:"arrayOrObject", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"dailyCutHours", label:"Daily cut hours", category:"machine history", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"totalHistory", label:"Machine hour total history", category:"machine history", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"pumpEff", label:"Pump efficiency history", category:"machine history", expectedShape:"arrayOrObject", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"garnetCleanings", label:"Garnet cleaning history", category:"machine history", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"appConfig", label:"Application configuration", category:"config", expectedShape:"object", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"dashboardLayout", label:"Dashboard layout", category:"layouts", expectedShape:"object", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"costLayout", label:"Cost layout", category:"layouts", expectedShape:"object", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"jobLayout", label:"Job layout", category:"layouts", expectedShape:"object", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"maintenanceTasksV2", label:"Maintenance tasks V2", category:"maintenance", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"maintenanceCalendarInstancesV2", label:"Maintenance calendar instances V2", category:"maintenance", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"maintenanceOccurrencesV2", label:"Maintenance occurrences V2", category:"maintenance", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"oneDriveJobConfig", label:"OneDrive/reference folder config", category:"jobs", expectedShape:"object", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"cuttingJobs.manualLogs", label:"Active cutting job manual logs", category:"jobs", expectedShape:"nestedCount", parentPath:"cuttingJobs", nestedKey:"manualLogs", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"completedCuttingJobs.manualLogs", label:"Completed cutting job manual logs", category:"jobs", expectedShape:"nestedCount", parentPath:"completedCuttingJobs", nestedKey:"manualLogs", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksInterval.completedDates", label:"Interval task completed dates", category:"maintenance", expectedShape:"nestedCount", parentPath:"tasksInterval", nestedKey:"completedDates", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksInterval.manualHistory", label:"Interval task manual history", category:"maintenance", expectedShape:"nestedCount", parentPath:"tasksInterval", nestedKey:"manualHistory", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksInterval.occurrenceNotes", label:"Interval task occurrence notes", category:"maintenance", expectedShape:"nestedCount", parentPath:"tasksInterval", nestedKey:"occurrenceNotes", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksInterval.occurrenceHours", label:"Interval task occurrence hours", category:"maintenance", expectedShape:"nestedCount", parentPath:"tasksInterval", nestedKey:"occurrenceHours", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksInterval.removedOccurrences", label:"Interval task removed occurrences", category:"maintenance", expectedShape:"nestedCount", parentPath:"tasksInterval", nestedKey:"removedOccurrences", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksAsReq.completedDates", label:"As-required task completed dates", category:"maintenance", expectedShape:"nestedCount", parentPath:"tasksAsReq", nestedKey:"completedDates", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksAsReq.manualHistory", label:"As-required task manual history", category:"maintenance", expectedShape:"nestedCount", parentPath:"tasksAsReq", nestedKey:"manualHistory", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksAsReq.occurrenceNotes", label:"As-required task occurrence notes", category:"maintenance", expectedShape:"nestedCount", parentPath:"tasksAsReq", nestedKey:"occurrenceNotes", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksAsReq.occurrenceHours", label:"As-required task occurrence hours", category:"maintenance", expectedShape:"nestedCount", parentPath:"tasksAsReq", nestedKey:"occurrenceHours", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksAsReq.removedOccurrences", label:"As-required task removed occurrences", category:"maintenance", expectedShape:"nestedCount", parentPath:"tasksAsReq", nestedKey:"removedOccurrences", allowEmptyOnNewWorkspace:true, dangerousDrop:true }
+];
+// Legacy diagnostics still iterate this compatibility list, but SAFE-03
+// hard save blocking is registry-driven via PROTECTED_FIELD_REGISTRY.
 const PROTECTED_STATE_FIELDS = [
   "cuttingJobs",
   "completedCuttingJobs",
@@ -866,17 +950,566 @@ function countJobManualLogs(list){
   return (Array.isArray(list) ? list : []).reduce((acc, job)=>acc + (Array.isArray(job?.manualLogs) ? job.manualLogs.length : 0), 0);
 }
 
+function getValueAtPath(source, path){
+  if (!source || typeof source !== "object") return undefined;
+  return String(path || "").split(".").filter(Boolean).reduce((value, key)=>{
+    if (value == null || typeof value !== "object") return undefined;
+    return value[key];
+  }, source);
+}
+
+function getDataSafetyShape(value){
+  if (Array.isArray(value)) return "array";
+  if (value === null) return "null";
+  return typeof value;
+}
+
+function countCollectionValue(value){
+  if (Array.isArray(value)) return value.length;
+  if (value && typeof value === "object") return Object.keys(value).length;
+  if (value == null) return 0;
+  return 1;
+}
+
+function countNestedProtectedValues(list, key){
+  return (Array.isArray(list) ? list : []).reduce((acc, item)=>{
+    const value = item?.[key];
+    if (Array.isArray(value)) return acc + value.length;
+    if (value && typeof value === "object") return acc + Object.keys(value).length;
+    return acc;
+  }, 0);
+}
+
+function stableStringifyForIntegrity(value){
+  const seen = new WeakSet();
+  const normalize = (input)=>{
+    if (!input || typeof input !== "object") return input;
+    if (seen.has(input)) return "[Circular]";
+    seen.add(input);
+    if (Array.isArray(input)) return input.map(normalize);
+    return Object.keys(input).sort().reduce((out, key)=>{
+      const val = input[key];
+      if (typeof val !== "function" && typeof val !== "undefined") out[key] = normalize(val);
+      return out;
+    }, {});
+  };
+  try { return JSON.stringify(normalize(value)); }
+  catch (_err){ return String(value); }
+}
+
+function hashIntegrityString(input){
+  const text = String(input || "");
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1){
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function fingerprintProtectedValue(value, entry){
+  const shape = getDataSafetyShape(value);
+  const count = entry?.expectedShape === "nestedCount"
+    ? Number(value || 0)
+    : countCollectionValue(value);
+  const sample = stableStringifyForIntegrity(value);
+  return `${shape}:${count}:${hashIntegrityString(sample)}`;
+}
+
+function countProtectedField(state, registryEntry){
+  const entry = registryEntry || {};
+  const src = state && typeof state === "object" ? state : {};
+  if (entry.expectedShape === "nestedCount"){
+    const parent = getValueAtPath(src, entry.parentPath);
+    return countNestedProtectedValues(parent, entry.nestedKey);
+  }
+  return countCollectionValue(getValueAtPath(src, entry.path));
+}
+
+function validateProtectedFieldShape(value, entry){
+  const expected = entry?.expectedShape || "unknown";
+  if (expected === "nestedCount") return { ok:true, warning:null };
+  if (expected === "array") return { ok:Array.isArray(value), warning:Array.isArray(value) ? null : "Expected array" };
+  if (expected === "object") return { ok:Boolean(value && typeof value === "object" && !Array.isArray(value)), warning:(value && typeof value === "object" && !Array.isArray(value)) ? null : "Expected object" };
+  if (expected === "arrayOrObject") return { ok:Array.isArray(value) || Boolean(value && typeof value === "object"), warning:(Array.isArray(value) || Boolean(value && typeof value === "object")) ? null : "Expected array or object" };
+  return { ok:true, warning:null };
+}
+
+function getProtectedFieldRegistryCoverage(){
+  const registered = new Set(PROTECTED_FIELD_REGISTRY.map(entry => entry.path));
+  return {
+    required: REQUIRED_PROTECTED_DATA_PATHS.slice(),
+    registered: Array.from(registered),
+    missing: REQUIRED_PROTECTED_DATA_PATHS.filter(path => !registered.has(path)),
+    extra: Array.from(registered).filter(path => !REQUIRED_PROTECTED_DATA_PATHS.includes(path))
+  };
+}
+
+function buildProtectedFieldIntegritySummary(state){
+  const src = state && typeof state === "object" ? state : {};
+  const fields = {};
+  const warnings = [];
+  const totalsByCategory = {};
+  PROTECTED_FIELD_REGISTRY.forEach(entry => {
+    const isNested = entry.expectedShape === "nestedCount";
+    const rawValue = isNested ? countProtectedField(src, entry) : getValueAtPath(src, entry.path);
+    const parentValue = isNested ? getValueAtPath(src, entry.parentPath) : undefined;
+    const present = isNested
+      ? Array.isArray(parentValue)
+      : Object.prototype.hasOwnProperty.call(src, entry.path);
+    const shape = isNested ? "nestedCount" : getDataSafetyShape(rawValue);
+    const count = isNested ? Number(rawValue || 0) : countProtectedField(src, entry);
+    const validation = validateProtectedFieldShape(rawValue, entry);
+    const bytes = isNested ? 0 : estimatePayloadBytes(rawValue);
+    const summary = {
+      path: entry.path,
+      label: entry.label,
+      category: entry.category,
+      expectedShape: entry.expectedShape,
+      present,
+      shape,
+      count,
+      bytes,
+      allowEmptyOnNewWorkspace: entry.allowEmptyOnNewWorkspace === true,
+      dangerousDrop: entry.dangerousDrop === true,
+      fingerprint: fingerprintProtectedValue(rawValue, entry)
+    };
+    if (isNested){
+      summary.parentPath = entry.parentPath;
+      summary.nestedKey = entry.nestedKey;
+      summary.parentPresent = Array.isArray(parentValue);
+    }
+    if (!present){
+      summary.warning = isNested ? "Parent collection missing or not an array" : "Missing protected field";
+      warnings.push({ path: entry.path, type: "missing", message: summary.warning });
+    } else if (!validation.ok){
+      summary.warning = validation.warning;
+      warnings.push({ path: entry.path, type: "malformed", message: validation.warning, shape });
+    }
+    fields[entry.path] = summary;
+    if (!totalsByCategory[entry.category]) totalsByCategory[entry.category] = { count:0, bytes:0, fields:0, warnings:0 };
+    totalsByCategory[entry.category].count += Number(count || 0);
+    totalsByCategory[entry.category].bytes += Number(bytes || 0);
+    totalsByCategory[entry.category].fields += 1;
+    if (summary.warning) totalsByCategory[entry.category].warnings += 1;
+  });
+  return {
+    generatedAtISO: new Date().toISOString(),
+    schema: src.schema ?? null,
+    syncMeta: src.syncMeta && typeof src.syncMeta === "object" ? { ...src.syncMeta } : null,
+    fields,
+    warnings,
+    totalsByCategory,
+    coverage: getProtectedFieldRegistryCoverage(),
+    totalBytes: estimatePayloadBytes(src),
+    totalProtectedCount: Object.values(fields).reduce((sum, field)=>sum + Number(field.count || 0), 0),
+    summaryFingerprint: hashIntegrityString(stableStringifyForIntegrity(Object.fromEntries(Object.entries(fields).map(([path, field]) => [path, {
+      present: field.present,
+      shape: field.shape,
+      count: field.count,
+      fingerprint: field.fingerprint
+    }]))))
+  };
+}
+
+function buildDataIntegritySummary(state){
+  return buildProtectedFieldIntegritySummary(state);
+}
+
+function compareIntegritySummaries(baseSummary, nextSummary){
+  const baseFields = baseSummary?.fields || {};
+  const nextFields = nextSummary?.fields || {};
+  const paths = Array.from(new Set([...Object.keys(baseFields), ...Object.keys(nextFields)])).sort();
+  const changes = [];
+  paths.forEach(path => {
+    const before = baseFields[path] || {};
+    const after = nextFields[path] || {};
+    if (before.present && !after.present){
+      changes.push({ path, type:"missing_after", before, after });
+    } else if (before.shape && after.shape && before.shape !== after.shape){
+      changes.push({ path, type:"shape_changed", beforeShape: before.shape, afterShape: after.shape, before, after });
+    } else if (Number(before.count || 0) !== Number(after.count || 0)){
+      changes.push({ path, type:"count_changed", beforeCount: Number(before.count || 0), afterCount: Number(after.count || 0), before, after });
+    } else if (before.fingerprint && after.fingerprint && before.fingerprint !== after.fingerprint){
+      changes.push({ path, type:"fingerprint_changed", count: Number(after.count || 0), before, after });
+    }
+  });
+  return {
+    generatedAtISO: new Date().toISOString(),
+    baseFingerprint: baseSummary?.summaryFingerprint || "",
+    nextFingerprint: nextSummary?.summaryFingerprint || "",
+    changed: changes.length > 0,
+    changes
+  };
+}
+
+const DATA_SAFETY_PREFLIGHT_COUNT_DROP_RATIO = 0.5;
+const DATA_SAFETY_PREFLIGHT_MIN_BASELINE_COUNT = 3;
+const DATA_SAFETY_PREFLIGHT_TOTAL_DROP_RATIO = 0.5;
+const DATA_SAFETY_PREFLIGHT_SIZE_DROP_RATIO = 0.5;
+
+function hasAnyProtectedData(summary){
+  const fields = summary?.fields || {};
+  return Object.values(fields).some(field => field && field.present && Number(field.count || 0) > 0);
+}
+
+function hasAnyProtectedFieldPresence(summary){
+  const fields = summary?.fields || {};
+  return Object.values(fields).some(field => field && field.present);
+}
+
+function isDangerousShapeChange(before, after){
+  const beforeShape = before?.shape || "";
+  const afterShape = after?.shape || "";
+  if (!beforeShape || !afterShape || beforeShape === afterShape) return false;
+  if (beforeShape === "nestedCount" || afterShape === "nestedCount") return false;
+  const protectedShapes = new Set(["array", "object"]);
+  const dangerousTargets = new Set(["undefined", "null", "string", "number", "boolean"]);
+  return protectedShapes.has(beforeShape) && dangerousTargets.has(afterShape);
+}
+
+function chooseProtectedSaveBaseline({ baselineState, latestRemoteState, localBackupState, allowFirstRun = false } = {}){
+  const candidates = [
+    { source: "latestRemoteState", state: latestRemoteState },
+    { source: "loadedCloudState", state: baselineState },
+    { source: "localBackupState", state: localBackupState }
+  ];
+  for (const candidate of candidates){
+    if (candidate.state && typeof candidate.state === "object" && stateHasMeaningfulData(candidate.state)){
+      return {
+        ...candidate,
+        summary: buildDataIntegritySummary(candidate.state),
+        trusted: true
+      };
+    }
+  }
+  return {
+    source: allowFirstRun ? "explicitFirstRunWorkspace" : "unknown",
+    state: null,
+    summary: null,
+    trusted: Boolean(allowFirstRun)
+  };
+}
+
+function detectDangerousIntegrityReduction(baseSummary, pendingSummary, options = {}){
+  const reasons = [];
+  const fieldChanges = [];
+  const registryCoverage = pendingSummary?.coverage || getProtectedFieldRegistryCoverage();
+  const baselineFields = baseSummary?.fields || {};
+  const pendingFields = pendingSummary?.fields || {};
+  const addReason = (reason)=>{ reasons.push(reason); return reason; };
+  const addFieldChange = (change)=>{
+    fieldChanges.push(change);
+    if (change.reason) reasons.push(change.reason);
+  };
+
+  if (!pendingSummary || typeof pendingSummary !== "object"){
+    addReason({ type:"pending_summary_unavailable", severity:"block", message:"Pending protected-data summary could not be built." });
+  }
+  if (Array.isArray(registryCoverage.missing) && registryCoverage.missing.length){
+    addReason({ type:"registry_coverage_incomplete", severity:"block", paths: registryCoverage.missing.slice(), message:"Protected field registry coverage is incomplete." });
+  }
+  if (!baseSummary && !options.allowUnknownBaseline){
+    addReason({ type:"baseline_unknown", severity:"block", message:"No trusted protected-data baseline is available for this save." });
+  }
+
+  PROTECTED_FIELD_REGISTRY.forEach(entry => {
+    const before = baselineFields[entry.path];
+    const after = pendingFields[entry.path];
+    if (!before && !after) return;
+    if (before?.present && !after?.present){
+      addFieldChange({
+        path: entry.path,
+        label: entry.label,
+        category: entry.category,
+        type:"missing_after_present",
+        baselineCount: Number(before.count || 0),
+        pendingCount: 0,
+        reason: { type:"protected_field_missing", severity:"block", path: entry.path, message:`${entry.label} is missing from the pending save.` }
+      });
+      return;
+    }
+    if (before?.present && after?.present && isDangerousShapeChange(before, after)){
+      addFieldChange({
+        path: entry.path,
+        label: entry.label,
+        category: entry.category,
+        type:"dangerous_shape_change",
+        baselineShape: before.shape,
+        pendingShape: after.shape,
+        baselineCount: Number(before.count || 0),
+        pendingCount: Number(after.count || 0),
+        reason: { type:"protected_field_shape_changed", severity:"block", path: entry.path, baselineShape: before.shape, pendingShape: after.shape, message:`${entry.label} changed from ${before.shape} to ${after.shape}.` }
+      });
+    }
+    const beforeCount = Number(before?.count || 0);
+    const afterCount = Number(after?.count || 0);
+    if (beforeCount > 0 && afterCount === 0){
+      addFieldChange({
+        path: entry.path,
+        label: entry.label,
+        category: entry.category,
+        type: entry.expectedShape === "nestedCount" ? "nested_history_zeroed" : "protected_count_zeroed",
+        baselineCount: beforeCount,
+        pendingCount: afterCount,
+        reason: { type: entry.expectedShape === "nestedCount" ? "nested_history_zeroed" : "protected_count_zeroed", severity:"block", path: entry.path, baselineCount: beforeCount, pendingCount: afterCount, message:`${entry.label} would drop from ${beforeCount} to zero.` }
+      });
+    } else if (beforeCount >= DATA_SAFETY_PREFLIGHT_MIN_BASELINE_COUNT && afterCount <= Math.floor(beforeCount * DATA_SAFETY_PREFLIGHT_COUNT_DROP_RATIO)){
+      addFieldChange({
+        path: entry.path,
+        label: entry.label,
+        category: entry.category,
+        type: entry.expectedShape === "nestedCount" ? "nested_history_large_drop" : "protected_count_large_drop",
+        baselineCount: beforeCount,
+        pendingCount: afterCount,
+        dropRatio: beforeCount ? (beforeCount - afterCount) / beforeCount : 0,
+        reason: { type: entry.expectedShape === "nestedCount" ? "nested_history_large_drop" : "protected_count_large_drop", severity:"block", path: entry.path, baselineCount: beforeCount, pendingCount: afterCount, thresholdRatio: DATA_SAFETY_PREFLIGHT_COUNT_DROP_RATIO, message:`${entry.label} would drop by 50% or more.` }
+      });
+    }
+  });
+
+  const baselineTotal = Number(baseSummary?.totalProtectedCount || 0);
+  const pendingTotal = Number(pendingSummary?.totalProtectedCount || 0);
+  if (baselineTotal >= DATA_SAFETY_PREFLIGHT_MIN_BASELINE_COUNT && pendingTotal <= Math.floor(baselineTotal * DATA_SAFETY_PREFLIGHT_TOTAL_DROP_RATIO)){
+    addReason({ type:"total_protected_count_collapse", severity:"block", baselineTotal, pendingTotal, thresholdRatio: DATA_SAFETY_PREFLIGHT_TOTAL_DROP_RATIO, message:"Total protected record count would collapse by 50% or more." });
+  }
+
+  const baselineBytes = Number(baseSummary?.totalBytes || 0);
+  const pendingBytes = Number(pendingSummary?.totalBytes || 0);
+  if (baselineBytes > 0 && baselineTotal > 0 && pendingBytes > 0 && pendingBytes <= Math.floor(baselineBytes * DATA_SAFETY_PREFLIGHT_SIZE_DROP_RATIO)){
+    addReason({ type:"payload_size_collapse", severity:"block", baselineBytes, pendingBytes, thresholdRatio: DATA_SAFETY_PREFLIGHT_SIZE_DROP_RATIO, message:"State payload size would collapse by 50% or more while protected baseline data exists." });
+  }
+
+  return {
+    generatedAtISO: new Date().toISOString(),
+    allowed: reasons.length === 0,
+    blocked: reasons.length > 0,
+    severity: reasons.length ? "block" : "info",
+    reasons,
+    fieldChanges,
+    baselineFingerprint: baseSummary?.summaryFingerprint || "",
+    pendingFingerprint: pendingSummary?.summaryFingerprint || "",
+    baselineTotalProtectedCount: baselineTotal,
+    pendingTotalProtectedCount: pendingTotal,
+    baselineBytes,
+    pendingBytes
+  };
+}
+
+function validateProtectedSavePreflight({ baselineState, pendingState, latestRemoteState, localBackupState, reason = "cloud save", revisionConflict = null, allowFirstRun = false, skipRuntimeGates = false } = {}){
+  const generatedAtISO = new Date().toISOString();
+  let pendingSummary = null;
+  let baseline = null;
+  const reasons = [];
+  try {
+    pendingSummary = buildDataIntegritySummary(pendingState || {});
+  } catch (err){
+    return {
+      generatedAtISO,
+      allowed:false,
+      blocked:true,
+      severity:"block",
+      reason,
+      reasons:[{ type:"pending_summary_exception", severity:"block", message:String(err?.message || err) }],
+      fieldChanges:[],
+      baselineSource:"unknown",
+      baselineFingerprint:"",
+      pendingFingerprint:""
+    };
+  }
+
+  baseline = chooseProtectedSaveBaseline({ baselineState, latestRemoteState, localBackupState, allowFirstRun });
+  const pendingHasProtectedPresence = hasAnyProtectedFieldPresence(pendingSummary);
+  const pendingHasProtectedData = hasAnyProtectedData(pendingSummary);
+  const baselineHasProtectedData = hasAnyProtectedData(baseline.summary);
+
+  if (typeof window !== "undefined" && !skipRuntimeGates){
+    if (isRecoveryMode()) reasons.push({ type:"recovery_mode_active", severity:"block", message:"Recovery Mode is active; cloud saves must remain blocked." });
+    if (window.__localBackupOnlyMode) reasons.push({ type:"local_backup_only_mode", severity:"block", message:"Local-backup-only state is active without a trusted cloud baseline." });
+    if (!window.__cloudLoadAttemptComplete || !window.__initialAdoptComplete) reasons.push({ type:"cloud_load_or_adoption_incomplete", severity:"block", message:"Initial cloud load/adoption is incomplete." });
+  }
+  if (revisionConflict?.blocked){
+    reasons.push({ type:"remote_revision_conflict", severity:"block", message:"Remote state is newer than this client.", details: revisionConflict });
+  }
+  if (!baseline.trusted && pendingHasProtectedPresence && !allowFirstRun){
+    reasons.push({ type:"unknown_baseline_with_protected_fields", severity:"block", message:"Pending state contains protected fields but no trusted baseline is available." });
+  }
+  if (!baseline.trusted && pendingHasProtectedData && !allowFirstRun){
+    reasons.push({ type:"unknown_baseline_with_protected_data", severity:"block", message:"Pending state contains protected data but no trusted baseline is available." });
+  }
+
+  const reduction = detectDangerousIntegrityReduction(baseline.summary, pendingSummary, { allowUnknownBaseline: baseline.trusted });
+  const allReasons = reasons.concat(reduction.reasons || []);
+  return {
+    generatedAtISO,
+    allowed: allReasons.length === 0,
+    blocked: allReasons.length > 0,
+    severity: allReasons.length ? "block" : "info",
+    reason,
+    reasons: allReasons,
+    fieldChanges: reduction.fieldChanges || [],
+    baselineSource: baseline.source,
+    baselineFingerprint: baseline.summary?.summaryFingerprint || "",
+    pendingFingerprint: pendingSummary?.summaryFingerprint || "",
+    baselineSummary: baseline.summary,
+    pendingSummary,
+    baselineTotalProtectedCount: Number(baseline.summary?.totalProtectedCount || 0),
+    pendingTotalProtectedCount: Number(pendingSummary?.totalProtectedCount || 0),
+    baselineBytes: Number(baseline.summary?.totalBytes || 0),
+    pendingBytes: Number(pendingSummary?.totalBytes || 0),
+    baselineHasProtectedData,
+    pendingHasProtectedData,
+    registryCoverage: pendingSummary.coverage
+  };
+}
+
+function rememberDangerousSaveBlock(preflight, context = {}){
+  const block = {
+    atISO: new Date().toISOString(),
+    ...context,
+    preflight,
+    blockedFieldNames: Array.from(new Set((preflight?.fieldChanges || []).map(change => change.path).filter(Boolean))),
+    recommendedNextAction: "Stay in Recovery Mode if active, export diagnostics, and do not force-save until the protected-data counts are reviewed."
+  };
+  if (typeof window !== "undefined"){
+    window.__lastDangerousSaveBlock = block;
+  }
+  console.error("Dangerous cloud save blocked by protected data preflight", block);
+  try { if (typeof toast === "function") toast("Cloud save blocked: protected data loss detected. Export diagnostics before continuing."); } catch (_err){}
+  try { renderRecoveryDiagnosticsPanel(); } catch (_err){}
+  return block;
+}
+
+async function writeBlockedSaveLog(preflight, context = {}){
+  if (!FB?.workspaceDoc) return;
+  try {
+    await FB.workspaceDoc.collection("app").doc("saveLogs").collection("entries").add({
+      atISO: new Date().toISOString(),
+      status: "blocked",
+      reason: context.reason || preflight?.reason || "protected_save_preflight",
+      reasons: (preflight?.reasons || []).slice(0, 25),
+      fieldChanges: (preflight?.fieldChanges || []).slice(0, 50),
+      baselineSource: preflight?.baselineSource || "",
+      baselineFingerprint: preflight?.baselineFingerprint || "",
+      pendingFingerprint: preflight?.pendingFingerprint || "",
+      baselineTotalProtectedCount: Number(preflight?.baselineTotalProtectedCount || 0),
+      pendingTotalProtectedCount: Number(preflight?.pendingTotalProtectedCount || 0),
+      baselineBytes: Number(preflight?.baselineBytes || 0),
+      pendingBytes: Number(preflight?.pendingBytes || 0),
+      workspaceId: WORKSPACE_ID
+    });
+  } catch (err){
+    console.warn("Failed to write blocked-save diagnostic log", err);
+  }
+}
+
+function runDataSafetyPreflightSelfCheck(){
+  const clone = (value)=>JSON.parse(JSON.stringify(value));
+  const baseline = {
+    schema: APP_SCHEMA,
+    cuttingJobs: [{ id:"job1", manualLogs:[{ dateISO:"2026-01-01", completedHours:2 }] }],
+    completedCuttingJobs: [{ id:"done1", manualLogs:[{ dateISO:"2026-01-02", completedHours:1 }] }],
+    cuttingJobDatabase: [{ id:"db1" }],
+    tasksInterval: [{ id:"t1", completedDates:["2026-01-01"], manualHistory:[{ dateISO:"2026-01-01" }], occurrenceNotes:{ a:"note" }, occurrenceHours:{ a:1 }, removedOccurrences:["2026-01-02"] }],
+    tasksAsReq: [{ id:"a1", completedDates:["2026-01-03"], manualHistory:[{ dateISO:"2026-01-03" }], occurrenceNotes:{ b:"note" }, occurrenceHours:{ b:1 }, removedOccurrences:["2026-01-04"] }],
+    settingsFolders: [{ id:"sf1" }],
+    folders: [{ id:"f1" }],
+    jobFolders: [{ id:"jf1" }],
+    inventory: [{ id:"i1" }, { id:"i2" }, { id:"i3" }],
+    inventoryFolders: [{ id:"if1" }],
+    inventoryMaterials: [{ id:"m1" }],
+    inventoryTransactions: [{ id:"it1" }],
+    receiptTrackerWeeks: [{ id:"rw1" }],
+    orderRequests: [{ id:"or1", items:[{ id:"line1" }] }],
+    weeklyCostReports: [{ id:"w1" }],
+    dailyCutHours: [{ dateISO:"2026-01-01", hours:1 }],
+    totalHistory: [{ dateISO:"2026-01-01", hours:10 }],
+    pumpEff: { entries:[{ id:"p1" }], notes:[{ id:"n1" }] },
+    garnetCleanings: [{ id:"g1" }],
+    appConfig: { theme:"default" },
+    dashboardLayout: { cards:["a"] },
+    costLayout: { cards:["b"] },
+    jobLayout: { cards:["c"] },
+    maintenanceTasksV2: [{ id:"mt1" }],
+    maintenanceCalendarInstancesV2: [{ id:"mi1" }],
+    maintenanceOccurrencesV2: [{ id:"mo1" }],
+    oneDriveJobConfig: { enabled:true }
+  };
+  const run = (name, mutate, expectedBlocked)=>{
+    const pending = clone(baseline);
+    if (typeof mutate === "function") mutate(pending);
+    const result = validateProtectedSavePreflight({
+      baselineState: baseline,
+      pendingState: pending,
+      latestRemoteState: baseline,
+      reason: `self-check:${name}`,
+      allowFirstRun: false,
+      skipRuntimeGates: true
+    });
+    return { name, expectedBlocked, blocked: result.blocked, passed: result.blocked === expectedBlocked, reasons: result.reasons.map(r => r.type), fieldChanges: result.fieldChanges.map(c => c.path) };
+  };
+  const results = [
+    run("same-state-allows", null, false),
+    run("completedCuttingJobs-zero-blocks", pending => { pending.completedCuttingJobs = []; }, true),
+    run("task-completedDates-zero-blocks", pending => { pending.tasksInterval[0].completedDates = []; }, true),
+    run("cutting-manualLogs-zero-blocks", pending => { pending.cuttingJobs[0].manualLogs = []; }, true),
+    run("inventory-zero-blocks", pending => { pending.inventory = []; }, true),
+    run("missing-protected-field-blocks", pending => { delete pending.orderRequests; }, true),
+    run("shape-change-blocks", pending => { pending.inventory = "not an array"; }, true)
+  ];
+  const coverage = getProtectedFieldRegistryCoverage();
+  results.push({ name:"registry-coverage-complete", expectedBlocked:false, blocked:coverage.missing.length > 0, passed:coverage.missing.length === 0, missing:coverage.missing });
+  const baselineSummary = buildDataIntegritySummary(baseline);
+  const pendingSummary = buildDataIntegritySummary(baseline);
+  pendingSummary.coverage = { ...pendingSummary.coverage, missing:["selfCheck.missingRegistryPath"] };
+  const missingCoverage = detectDangerousIntegrityReduction(baselineSummary, pendingSummary);
+  results.push({ name:"registry-missing-coverage-blocks", expectedBlocked:true, blocked:missingCoverage.blocked, passed:missingCoverage.blocked === true, reasons:missingCoverage.reasons.map(r => r.type) });
+  const summary = {
+    generatedAtISO: new Date().toISOString(),
+    passed: results.every(result => result.passed),
+    results
+  };
+  console.info("Data safety preflight self-check", summary);
+  return summary;
+}
+
+if (typeof window !== "undefined"){
+  window.REQUIRED_PROTECTED_DATA_PATHS = REQUIRED_PROTECTED_DATA_PATHS;
+  window.PROTECTED_FIELD_REGISTRY = PROTECTED_FIELD_REGISTRY;
+  window.getProtectedFieldRegistryCoverage = getProtectedFieldRegistryCoverage;
+  window.buildDataIntegritySummary = buildDataIntegritySummary;
+  window.buildProtectedFieldIntegritySummary = buildProtectedFieldIntegritySummary;
+  window.compareIntegritySummaries = compareIntegritySummaries;
+  window.detectDangerousIntegrityReduction = detectDangerousIntegrityReduction;
+  window.validateProtectedSavePreflight = validateProtectedSavePreflight;
+  window.runDataSafetyPreflightSelfCheck = runDataSafetyPreflightSelfCheck;
+  window.buildDataIntegritySummaryForCurrentState = function(){
+    return buildDataIntegritySummary(getCurrentAppStateForDiagnostics());
+  };
+  window.exportDataIntegritySummary = function(){
+    const summary = buildDataIntegritySummary(getCurrentAppStateForDiagnostics());
+    if (typeof exportJsonDownload === "function"){
+      exportJsonDownload(`omax-data-integrity-summary-${Date.now()}.json`, summary);
+    }
+    return summary;
+  };
+}
+
 function buildProtectedFieldSummary(state){
   const src = state && typeof state === "object" ? state : {};
+  const integrity = buildProtectedFieldIntegritySummary(src);
   const protectedFields = {};
   PROTECTED_STATE_FIELDS.forEach(field => {
     const value = src[field];
+    const fieldIntegrity = integrity.fields[field] || {};
     protectedFields[field] = {
       present: Object.prototype.hasOwnProperty.call(src, field),
       type: Array.isArray(value) ? "array" : (value === null ? "null" : typeof value),
       length: Array.isArray(value) ? value.length : null,
       keyCount: value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value).length : null,
-      bytes: estimatePayloadBytes(value)
+      bytes: estimatePayloadBytes(value),
+      count: Number(fieldIntegrity.count || 0),
+      fingerprint: fieldIntegrity.fingerprint || ""
     };
   });
   const interval = Array.isArray(src.tasksInterval) ? src.tasksInterval : [];
@@ -894,6 +1527,7 @@ function buildProtectedFieldSummary(state){
       updatedAtISO: src.syncMeta?.updatedAtISO || "",
       updatedBy: src.syncMeta?.updatedBy || ""
     },
+    integrity,
     protectedFields,
     nestedHistoryCounts: {
       completedDates: countTaskNestedArrayEntries(allTasks, "completedDates"),
@@ -974,8 +1608,17 @@ function compareProtectedFieldSummaries(remoteSummary, pendingSummary){
 function detectDangerousProtectedFieldReduction(remoteState, pendingState){
   const remoteSummary = buildProtectedFieldSummary(remoteState || {});
   const pendingSummary = buildProtectedFieldSummary(pendingState || {});
-  const issues = compareProtectedFieldSummaries(remoteSummary, pendingSummary);
-  return { blocked: issues.length > 0, issues, remoteSummary, pendingSummary };
+  const legacyIssues = compareProtectedFieldSummaries(remoteSummary, pendingSummary);
+  const registryReduction = detectDangerousIntegrityReduction(remoteSummary.integrity, pendingSummary.integrity, { allowUnknownBaseline: true });
+  const issues = legacyIssues.concat(registryReduction.reasons || []);
+  return {
+    blocked: legacyIssues.length > 0 || registryReduction.blocked,
+    issues,
+    legacyIssues,
+    registryReduction,
+    remoteSummary,
+    pendingSummary
+  };
 }
 
 function detectRemoteRevisionConflict(remoteState){
@@ -1028,6 +1671,9 @@ async function buildDiagnosticSummary(){
   const cloudState = await readCurrentCloudStateReadOnly().catch(err => ({ __readError: String(err?.message || err) }));
   const localBackup = loadLocalBackupReadOnly();
   const appState = getCurrentAppStateForDiagnostics();
+  const cloudIntegrity = buildDataIntegritySummary(cloudState || {});
+  const localBackupIntegrity = buildDataIntegritySummary(localBackup || {});
+  const currentIntegrity = buildDataIntegritySummary(appState || {});
   return {
     generatedAtISO: new Date().toISOString(),
     recoveryMode: isRecoveryMode(),
@@ -1037,6 +1683,13 @@ async function buildDiagnosticSummary(){
     cloudLoadAttemptComplete: Boolean(window.__cloudLoadAttemptComplete),
     initialAdoptComplete: Boolean(window.__initialAdoptComplete),
     loadedCloudRevisionForSaveGuard: Number(window.__loadedCloudRevisionForSaveGuard || 0),
+    lastDangerousSaveBlock: (typeof window !== "undefined" && window.__lastDangerousSaveBlock) ? window.__lastDangerousSaveBlock : null,
+    registryCoverage: getProtectedFieldRegistryCoverage(),
+    integrity: {
+      cloud: cloudIntegrity,
+      localBackup: localBackupIntegrity,
+      currentAppState: currentIntegrity
+    },
     cloud: buildProtectedFieldSummary(cloudState || {}),
     localBackup: buildProtectedFieldSummary(localBackup || {}),
     currentAppState: buildProtectedFieldSummary(appState || {})
@@ -1080,13 +1733,46 @@ function renderRecoveryDiagnosticsPanel(){
         <button type="button" data-recovery-export="summary">Export field-count diagnostic summary JSON</button>
         <button type="button" data-recovery-copy="summary">Copy diagnostic summary</button>
       </div>
+      <div data-recovery-integrity-summary style="margin:8px 0;padding:8px;border:1px solid #f0caca;border-radius:8px;background:#fff;"></div>
       <pre data-recovery-output style="white-space:pre-wrap;max-height:260px;overflow:auto;background:#fff;border:1px solid #f0caca;border-radius:8px;padding:8px;"></pre>`;
     const mount = document.getElementById("app") || document.querySelector("main") || document.body;
     if (mount === document.body) document.body.insertBefore(panel, document.body.children[1] || null);
     else mount.prepend(panel);
   }
   const output = panel.querySelector("[data-recovery-output]");
-  const writeOutput = (data)=>{ if (output) output.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2); };
+  const integritySummaryEl = panel.querySelector("[data-recovery-integrity-summary]");
+  const renderIntegritySummary = (data)=>{
+    if (!integritySummaryEl || !data || typeof data !== "object") return;
+    const escapeDiagnosticHtml = (str)=>String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    const current = data.integrity?.currentAppState;
+    const local = data.integrity?.localBackup;
+    const cloud = data.integrity?.cloud;
+    if (!current) return;
+    const currentWarnings = Array.isArray(current.warnings) ? current.warnings.length : 0;
+    const localBytes = Number(local?.totalBytes || 0);
+    const cloudRev = Number(cloud?.syncMeta?.rev || 0);
+    const lastBlock = data.lastDangerousSaveBlock || null;
+    const blockedFields = Array.isArray(lastBlock?.blockedFieldNames) ? lastBlock.blockedFieldNames : [];
+    const blockHtml = lastBlock ? `
+      <div style="margin:8px 0 0;padding:8px;border:1px solid #b91c1c;border-radius:8px;background:#fff1f2;">
+        <strong>Last dangerous-save block:</strong> ${escapeDiagnosticHtml(lastBlock.atISO || "")}<br>
+        <span>Fields: ${escapeDiagnosticHtml(blockedFields.join(", ") || "none listed")}</span><br>
+        <span>Baseline → pending protected count: ${Number(lastBlock.preflight?.baselineTotalProtectedCount || 0)} → ${Number(lastBlock.preflight?.pendingTotalProtectedCount || 0)}</span><br>
+        <span>Recommended next action: export diagnostics and stay in Recovery Mode until counts are reviewed.</span>
+      </div>` : "";
+    const categoryRows = Object.entries(current.totalsByCategory || {})
+      .map(([name, totals])=>`<tr><td>${escapeDiagnosticHtml(name)}</td><td>${Number(totals.count || 0)}</td><td>${Number(totals.fields || 0)}</td><td>${Number(totals.warnings || 0)}</td></tr>`)
+      .join("");
+    integritySummaryEl.innerHTML = `
+      <h3 style="margin:0 0 6px;font-size:15px;">Protected data integrity summary (read-only)</h3>
+      <p style="margin:0 0 6px;">Current state bytes: ${Number(current.totalBytes || 0)} · Local backup bytes: ${localBytes} · Cloud rev: ${cloudRev} · Warnings: ${currentWarnings} · Fingerprint: ${escapeDiagnosticHtml(current.summaryFingerprint || "")}</p>
+      <table style="border-collapse:collapse;width:100%;font-size:12px;"><thead><tr><th style="text-align:left;border-bottom:1px solid #f0caca;">Category</th><th style="text-align:left;border-bottom:1px solid #f0caca;">Records</th><th style="text-align:left;border-bottom:1px solid #f0caca;">Fields</th><th style="text-align:left;border-bottom:1px solid #f0caca;">Warnings</th></tr></thead><tbody>${categoryRows}</tbody></table>
+      ${blockHtml}`;
+  };
+  const writeOutput = (data)=>{
+    renderIntegritySummary(data);
+    if (output) output.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  };
   if (!panel.__recoveryWired){
     panel.addEventListener("click", async (event)=>{
       const exportBtn = event.target.closest("[data-recovery-export]");
@@ -4344,8 +5030,33 @@ const saveCloudInternal = debounce(async ()=>{
     window.__lastSnapshot = snap;
     const remoteSnap = await FB.docRef.get();
     const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
+    const localBackupForPreflight = readLocalStateBackup();
+    const revisionConflict = remoteData && typeof remoteData === "object"
+      ? detectRemoteRevisionConflict(remoteData)
+      : { blocked:false };
+    const allowFirstRunPreflight = Boolean(remoteSnap && !remoteSnap.exists)
+      && !stateHasMeaningfulData(window.__lastLoadedCloudState || {})
+      && !stateHasMeaningfulData(localBackupForPreflight || {});
+    const registryPreflight = validateProtectedSavePreflight({
+      baselineState: window.__lastLoadedCloudState || null,
+      pendingState: snap,
+      latestRemoteState: remoteData,
+      localBackupState: localBackupForPreflight,
+      reason: "saveCloudInternal",
+      revisionConflict,
+      allowFirstRun: allowFirstRunPreflight
+    });
+    if (registryPreflight.blocked){
+      rememberDangerousSaveBlock(registryPreflight, {
+        reason: "saveCloudInternal",
+        firestorePath: FB.docRef?.path || "",
+        remoteExists: Boolean(remoteSnap && remoteSnap.exists)
+      });
+      hasPendingLocalChanges = true;
+      await writeBlockedSaveLog(registryPreflight, { reason: "saveCloudInternal" });
+      return;
+    }
     if (remoteData && typeof remoteData === "object"){
-      const revisionConflict = detectRemoteRevisionConflict(remoteData);
       if (revisionConflict.blocked){
         blockCloudSave("remote state is newer than this client. Export/reload/merge review before saving.", revisionConflict);
         hasPendingLocalChanges = true;
