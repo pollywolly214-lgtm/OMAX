@@ -1560,6 +1560,264 @@ function buildProtectedFieldSummary(state){
   };
 }
 
+const SAVE_SCHEMA_COVERAGE_FOCUS_PATHS = [
+  "completedDates",
+  "manualHistory",
+  "cuttingJobDatabase",
+  "inventoryTransactions",
+  "weeklyCostReports",
+  "deletedItems",
+  "maintenanceOccurrencesV2",
+  "maintenanceTasksV2",
+  "maintenanceCalendarInstancesV2",
+  "cuttingJobs",
+  "completedCuttingJobs",
+  "receiptTrackerWeeks",
+  "inventory",
+  "orderRequests",
+  "dailyCutHours",
+  "pumpEff",
+  "appConfig",
+  "dashboardLayout",
+  "costLayout",
+  "jobLayout"
+];
+
+function getSaveSchemaCoveragePathInfo(state, path){
+  const parts = String(path || "").split(".").filter(Boolean);
+  if (!parts.length) return { present:false, topLevelKey:"", nested:false, count:0, examples:[] };
+  const topLevelKey = parts[0];
+  if (parts.length === 1){
+    const present = Boolean(state && typeof state === "object" && Object.prototype.hasOwnProperty.call(state, topLevelKey));
+    const value = present ? state[topLevelKey] : undefined;
+    return {
+      present,
+      topLevelKey,
+      nested:false,
+      count: countCollectionValue(value),
+      shape: getDataSafetyShape(value),
+      examples: present ? [topLevelKey] : []
+    };
+  }
+  let nodes = [state];
+  for (const part of parts){
+    const next = [];
+    nodes.forEach(node => {
+      if (Array.isArray(node)){
+        node.forEach(item => {
+          if (item && typeof item === "object" && Object.prototype.hasOwnProperty.call(item, part)) next.push(item[part]);
+        });
+      } else if (node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, part)){
+        next.push(node[part]);
+      }
+    });
+    nodes = next;
+    if (!nodes.length) break;
+  }
+  return {
+    present: nodes.length > 0,
+    topLevelKey,
+    nested:true,
+    count: nodes.reduce((sum, value)=>sum + countCollectionValue(value), 0),
+    shape: nodes.length ? getDataSafetyShape(nodes[0]) : "undefined",
+    examples: nodes.slice(0, 5).map(value => getDataSafetyShape(value))
+  };
+}
+
+function buildSnapshotForSaveSchemaCoverage(){
+  if (typeof snapshotState !== "function") return { snapshot:{}, error:"snapshotState is unavailable." };
+  const previousStrippedHeavyFields = (typeof window !== "undefined") ? window.__lastStrippedHeavyFields : undefined;
+  const previousSettingsFolders = (typeof window !== "undefined" && Array.isArray(window.settingsFolders)) ? cloneStructured(window.settingsFolders) : undefined;
+  const previousFolders = (typeof window !== "undefined" && Array.isArray(window.folders)) ? cloneStructured(window.folders) : undefined;
+  let storagePatched = false;
+  let originalSetItem = null;
+  let storagePatchTarget = null;
+  try {
+    if (typeof window !== "undefined" && window.localStorage && typeof window.localStorage.setItem === "function"){
+      storagePatchTarget = (typeof Storage !== "undefined" && Storage.prototype && typeof Storage.prototype.setItem === "function")
+        ? Storage.prototype
+        : window.localStorage;
+      originalSetItem = storagePatchTarget.setItem;
+      storagePatchTarget.setItem = function(key, value){
+        if (String(key || "") === JOB_FILE_CACHE_KEY) return undefined;
+        return originalSetItem.call(this, key, value);
+      };
+      storagePatched = true;
+    }
+  } catch (_err){ storagePatched = false; }
+  try {
+    const snapshot = snapshotState();
+    return { snapshot: cloneStructured(snapshot) || {}, error:null };
+  } catch (err){
+    return { snapshot:{}, error:String(err?.message || err) };
+  } finally {
+    if (storagePatched && originalSetItem){
+      try { storagePatchTarget.setItem = originalSetItem; } catch (_err){}
+    }
+    if (typeof window !== "undefined"){
+      window.__lastStrippedHeavyFields = previousStrippedHeavyFields;
+      if (previousSettingsFolders) window.settingsFolders = previousSettingsFolders;
+      if (previousFolders) window.folders = previousFolders;
+    }
+  }
+}
+
+function getSaveSchemaCoverageReport(){
+  const snapshotResult = buildSnapshotForSaveSchemaCoverage();
+  const pendingSnapshot = snapshotResult.snapshot || {};
+  const compactedForCloud = compactStateForStorage(pendingSnapshot);
+  const compactedForBackup = compactStateForStorage(pendingSnapshot, { forBackup:true });
+  const tinyBackup = buildTinyCriticalBackup(pendingSnapshot);
+  const localBackup = loadLocalBackupReadOnly();
+  const requiredProtectedPaths = Array.isArray(REQUIRED_PROTECTED_DATA_PATHS) ? REQUIRED_PROTECTED_DATA_PATHS.slice() : [];
+  const registryProtectedPaths = Array.isArray(PROTECTED_FIELD_REGISTRY) ? PROTECTED_FIELD_REGISTRY.map(entry => entry.path).filter(Boolean) : [];
+  const allProtectedPaths = Array.from(new Set(requiredProtectedPaths.concat(registryProtectedPaths))).sort();
+  const snapshotKeys = Object.keys(pendingSnapshot).sort();
+  const presentProtectedPaths = [];
+  const missingProtectedPaths = [];
+  const protectedPathDetails = {};
+
+  allProtectedPaths.forEach(path => {
+    const info = getSaveSchemaCoveragePathInfo(pendingSnapshot, path);
+    protectedPathDetails[path] = info;
+    if (info.present) presentProtectedPaths.push(path);
+    else missingProtectedPaths.push(path);
+  });
+
+  const protectedWindowKeysMissingFromSnapshot = allProtectedPaths
+    .filter(path => !path.includes("."))
+    .filter(path => typeof window !== "undefined"
+      && Object.prototype.hasOwnProperty.call(window, path)
+      && !Object.prototype.hasOwnProperty.call(pendingSnapshot, path))
+    .sort();
+
+  const protectedPathsOnlyPresentInBackups = allProtectedPaths.filter(path => {
+    if (getSaveSchemaCoveragePathInfo(pendingSnapshot, path).present) return false;
+    const inTiny = getSaveSchemaCoveragePathInfo(tinyBackup, path).present;
+    const inLocal = getSaveSchemaCoveragePathInfo(localBackup || {}, path).present;
+    return inTiny || inLocal;
+  }).sort();
+
+  const cloudExcludedProtectedPaths = allProtectedPaths.filter(path => {
+    const before = getSaveSchemaCoveragePathInfo(pendingSnapshot, path).present;
+    const after = getSaveSchemaCoveragePathInfo(compactedForCloud, path).present;
+    return before && !after;
+  }).sort();
+
+  const backupExcludedProtectedPaths = allProtectedPaths.filter(path => {
+    const before = getSaveSchemaCoveragePathInfo(compactedForCloud, path).present;
+    const after = getSaveSchemaCoveragePathInfo(compactedForBackup, path).present;
+    return before && !after;
+  }).sort();
+
+  const sanitizerRiskPaths = [
+    {
+      path: "cuttingJobs.files.*",
+      risk: "stripJobFileDataUrls removes embedded file/data-url/content fields before save; job metadata and manualLogs are expected to remain.",
+      source: "stripJobFileDataUrls"
+    },
+    {
+      path: "completedCuttingJobs.files.*",
+      risk: "stripJobFileDataUrls removes embedded file/data-url/content fields before save; completed job metadata and manualLogs are expected to remain.",
+      source: "stripJobFileDataUrls"
+    },
+    {
+      path: "cuttingJobs / completedCuttingJobs",
+      risk: "safeCleanupLoadedState sanitizes job objects on load, so protected job history fields must never be named like debug/cache/preview or embedded content.",
+      source: "safeCleanupLoadedState + sanitizeValueForStorage"
+    },
+    {
+      path: "tasksInterval.completedDates / tasksAsReq.completedDates",
+      risk: "Protected maintenance completion history; currently recognized as protected business data by sanitizer key matching and registry coverage.",
+      source: "PROTECTED_FIELD_REGISTRY + isProtectedBusinessDataKey"
+    },
+    {
+      path: "tasksInterval.manualHistory / tasksAsReq.manualHistory",
+      risk: "Protected maintenance manual history; currently recognized as protected business data by sanitizer key matching and registry coverage.",
+      source: "PROTECTED_FIELD_REGISTRY + isProtectedBusinessDataKey"
+    }
+  ];
+
+  const normalizationRiskPaths = [
+    { path:"inventory", risk:"adoptState maps entries through normalizeInventoryItem; current normalizer spreads raw item first, but future changes could drop unknown inventory fields." },
+    { path:"orderRequests", risk:"adoptState maps entries through normalizeOrderRequests; normalizeOrderRequest/normalizeOrderItem reconstruct objects and can drop unknown purchase/history/linkage fields." },
+    { path:"inventoryMaterials", risk:"snapshotState/adoptState pass through normalizeInventoryMaterials; field preservation depends on that helper." },
+    { path:"dailyCutHours", risk:"adoptState normalizes dailyCutHours and compactStateForStorage keeps only the last 365 entries." },
+    { path:"appConfig", risk:"snapshotState/adoptState normalize appConfig; unknown settings preservation depends on normalizeAppConfig." }
+  ];
+
+  const staleWholeStateOverwriteRiskNotes = [
+    "Dashboard/cost/job layout changes call saveCloudDebounced(), which snapshots the whole app state rather than writing only layout keys.",
+    "saveCloudInternal checks remote revision before set(..., { merge:true }), but the read-then-write sequence is not a Firestore transaction/compare-and-swap.",
+    "Only totalHistory, dailyCutHours, and pumpEff have explicit remote merge protection before save; maintenanceOccurrencesV2, cutting jobs, task history, and purchase history rely on preflight blocking rather than append-only merging.",
+    "loadFromCloud seeds defaults only when neither cloud nor local backup is meaningful, but a false non-meaningful read would be dangerous if not caught by recovery/preflight gates."
+  ];
+
+  const possibleDeprecatedProtectedPaths = missingProtectedPaths
+    .filter(path => ["cuttingJobDatabase", "inventoryTransactions"].includes(path))
+    .map(path => ({
+      path,
+      status: "unknown",
+      note: "Protected registry includes this path, but the pending main save snapshot does not. Treat as sacred/unknown until DS-03 proves it obsolete or adds it to snapshotState."
+    }));
+
+  const focusedProtectedPathStatus = {};
+  SAVE_SCHEMA_COVERAGE_FOCUS_PATHS.forEach(path => {
+    const direct = getSaveSchemaCoveragePathInfo(pendingSnapshot, path);
+    const nestedMatches = allProtectedPaths
+      .filter(protectedPath => protectedPath === path || protectedPath.endsWith(`.${path}`))
+      .map(protectedPath => ({
+        protectedPath,
+        ...getSaveSchemaCoveragePathInfo(pendingSnapshot, protectedPath)
+      }));
+    focusedProtectedPathStatus[path] = {
+      direct,
+      nestedMatches,
+      protected: registryProtectedPaths.includes(path) || requiredProtectedPaths.includes(path) || nestedMatches.length > 0
+    };
+  });
+
+  const warnings = [];
+  if (snapshotResult.error) warnings.push({ type:"snapshot_error", message:snapshotResult.error });
+  missingProtectedPaths.forEach(path => warnings.push({ type:"missing_protected_path", path, message:`Protected path ${path} is not present in the pending save snapshot.` }));
+  protectedWindowKeysMissingFromSnapshot.forEach(path => warnings.push({ type:"window_key_missing_from_snapshot", path, message:`window.${path} exists but snapshotState() did not include it.` }));
+  backupExcludedProtectedPaths.forEach(path => warnings.push({ type:"backup_excludes_protected_path", path, message:`Protected path ${path} is present in cloud compact state but excluded from local backup compaction.` }));
+  cloudExcludedProtectedPaths.forEach(path => warnings.push({ type:"cloud_compaction_excludes_protected_path", path, message:`Protected path ${path} is present before compaction but missing after normal cloud compaction.` }));
+
+  return {
+    generatedAtISO: new Date().toISOString(),
+    readOnly: true,
+    snapshotKeys,
+    requiredProtectedPaths,
+    registryProtectedPaths,
+    presentProtectedPaths: presentProtectedPaths.sort(),
+    missingProtectedPaths: missingProtectedPaths.sort(),
+    protectedPathDetails,
+    protectedWindowKeysMissingFromSnapshot,
+    protectedPathsOnlyPresentInBackups,
+    cloudExcludedProtectedPaths,
+    backupExcludedProtectedPaths,
+    sanitizerRiskPaths,
+    normalizationRiskPaths,
+    staleWholeStateOverwriteRiskNotes,
+    possibleDeprecatedProtectedPaths,
+    focusedProtectedPathStatus,
+    warnings
+  };
+}
+
+function debugSaveSchemaCoverage(){
+  const report = getSaveSchemaCoverageReport();
+  console.info("Save schema coverage diagnostic", report);
+  if (Array.isArray(report.warnings) && report.warnings.length) console.warn("Save schema coverage warnings", report.warnings);
+  return report;
+}
+
+if (typeof window !== "undefined"){
+  window.getSaveSchemaCoverageReport = getSaveSchemaCoverageReport;
+  window.debugSaveSchemaCoverage = debugSaveSchemaCoverage;
+}
+
 function compareProtectedFieldSummaries(remoteSummary, pendingSummary){
   const issues = [];
   const remote = remoteSummary || {};
