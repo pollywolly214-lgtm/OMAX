@@ -6892,7 +6892,43 @@ function renderDashboard(){
     if (row) subtaskList?.appendChild(row);
   });
 
-  taskForm?.addEventListener("submit", (e)=>{
+  async function persistExplicitMaintenanceAddSave(actionName, created = null, details = {}){
+    const taskRecord = created && created.taskRecord ? created.taskRecord : null;
+    const instance = created && created.instance ? created.instance : null;
+    const occurrence = created && created.occurrence ? created.occurrence : null;
+    const payload = {
+      helper: "persistExplicitMaintenanceAddSave",
+      action: "save_requested",
+      actionName,
+      taskId: taskRecord?.id || details.taskId || null,
+      legacyTaskId: taskRecord?.legacyTaskId || details.legacyTaskId || null,
+      instanceId: instance?.id || details.instanceId || null,
+      occurrenceId: occurrence?.id || details.occurrenceId || null,
+      effectiveDateISO: occurrence?.effectiveDateISO || instance?.startDateISO || details.effectiveDateISO || null,
+      saveCloudNowAvailable: typeof saveCloudNow === "function"
+    };
+    if (typeof window.recordMaintenanceV2MutationSource === "function") window.recordMaintenanceV2MutationSource(payload);
+    if (typeof saveCloudNow === "function"){
+      const result = saveCloudNow();
+      if (result && typeof result.then === "function") await result;
+      if (typeof window.recordMaintenanceV2MutationSource === "function"){
+        window.recordMaintenanceV2MutationSource({
+          ...payload,
+          action: "save_completed_or_unblocked_returned",
+          pendingLocalChangesAfterSave: typeof hasPendingLocalChanges !== "undefined" ? Boolean(hasPendingLocalChanges) : null
+        });
+      }
+      return;
+    }
+    if (typeof saveCloudDebounced === "function"){
+      saveCloudDebounced();
+      if (typeof window.recordMaintenanceV2MutationSource === "function"){
+        window.recordMaintenanceV2MutationSource({ ...payload, action: "save_debounced_fallback" });
+      }
+    }
+  }
+
+  taskForm?.addEventListener("submit", async (e)=>{
     e.preventDefault();
     if (!taskForm) return;
     const name = (taskNameInput?.value || "").trim();
@@ -6940,6 +6976,7 @@ function renderDashboard(){
       downtimeHours: downtimeVal
     };
     let message = "Task added";
+    let createdV2Record = null;
     if (mode === "interval"){
       let interval = Number(repeatConfig.intervalHours);
       if (!isFinite(interval) || interval <= 0) interval = 8;
@@ -6978,6 +7015,7 @@ function renderDashboard(){
         refreshDashboard: false,
         recurrence: repeatConfig
       }) || template;
+      createdV2Record = instance && instance.taskRecord ? instance : null;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
       let dateLabel = targetISO;
@@ -7066,8 +7104,12 @@ function renderDashboard(){
     });
 
     setContextDate(calendarDateISO);
-    if (typeof saveCloudNow === "function") saveCloudNow();
-    else saveCloudDebounced();
+    toast("Saving maintenance changes…");
+    await persistExplicitMaintenanceAddSave("maintenance_settings_add_task", createdV2Record, {
+      taskId: id,
+      legacyTaskId: id,
+      effectiveDateISO: targetISO || calendarDateISO || ymd(new Date())
+    });
     toast(message);
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
@@ -7079,14 +7121,6 @@ function renderDashboard(){
       renderCosts();
     }
   });
-
-  async function persistDashboardOneTimeTask(){
-    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-    if (typeof saveCloudNow === "function"){
-      const result = saveCloudNow();
-      if (result && typeof result.then === "function") await result;
-    }
-  }
 
   oneTimeForm?.addEventListener("submit", async (e)=>{
     e.preventDefault();
@@ -7131,7 +7165,8 @@ function renderDashboard(){
     if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 one-time record");
     setContextDate(targetISO);
     renderCalendarPreservingScroll();
-    await persistDashboardOneTimeTask();
+    toast("Saving one-time task…");
+    await persistExplicitMaintenanceAddSave("calendar_add_one_time_new_task", created, { effectiveDateISO: targetISO });
     toast("One-time task added to the calendar");
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
@@ -7144,7 +7179,7 @@ function renderDashboard(){
     }
   });
 
-  taskExistingForm?.addEventListener("submit", (e)=>{
+  taskExistingForm?.addEventListener("submit", async (e)=>{
     e.preventDefault();
     const selectedId = selectedExistingTaskId;
     if (!selectedId){ alert("Select a maintenance task to schedule."); return; }
@@ -7181,6 +7216,7 @@ function renderDashboard(){
       return;
     }
     let message = "Maintenance task added";
+    let createdV2Record = null;
     if (choice === "one_time"){
       const created = createMaintenanceV2FromTemplate(task, {
         mode: "one_time",
@@ -7189,6 +7225,7 @@ function renderDashboard(){
         note: occurrenceNote
       });
       if (!created){ toast("Could not create one-time reminder in V2."); if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] V2 one-time creation failed", { taskId: task.id }); return; }
+      createdV2Record = created;
       if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 one-time record");
       const targetDate = parseDateLocal(targetISO);
       if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
@@ -7239,6 +7276,7 @@ function renderDashboard(){
         repeatRule: normalizedRepeatConfig
       });
       if (!created){ toast("Could not start repeat tracking in V2."); if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] V2 repeat creation failed", { taskId: task.id }); return; }
+      createdV2Record = created;
       if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 repeat record");
       if (window.DEBUG_MODE){
         console.info("[maintenance-v2] repeat created instance", {
@@ -7254,8 +7292,12 @@ function renderDashboard(){
     }
     setContextDate(targetISO);
     renderCalendarPreservingScroll();
-    if (typeof saveCloudNow === "function") saveCloudNow();
-    else saveCloudDebounced();
+    toast("Saving maintenance calendar change…");
+    await persistExplicitMaintenanceAddSave(`calendar_add_existing_${choice}`, createdV2Record, {
+      taskId: task.id,
+      legacyTaskId: task.id,
+      effectiveDateISO: targetISO
+    });
     if (typeof renderCalendar === "function") renderCalendar();
     toast(message);
     closeModal();

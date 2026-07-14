@@ -175,6 +175,14 @@ function debounce(fn, ms=250){
     t = null;
     return fn(...(lastArgs || []));
   };
+  debounced.now = (...a)=>{
+    if (t){
+      clearTimeout(t);
+      t = null;
+    }
+    lastArgs = a;
+    return fn(...a);
+  };
   debounced.cancel = ()=>{
     if (!t) return;
     clearTimeout(t);
@@ -5878,6 +5886,9 @@ function saveCloudNow(){
     if (typeof captureHistorySnapshot === "function") captureHistorySnapshot();
   } catch (err) {
     console.warn("History capture before save failed:", err);
+  }
+  if (typeof saveCloudInternal.now === "function"){
+    return saveCloudInternal.now();
   }
   if (typeof saveCloudInternal.flushResult === "function"){
     const result = saveCloudInternal.flushResult();
