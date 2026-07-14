@@ -744,7 +744,7 @@ function isSafeMetadataString(key, value){
 }
 function isProtectedBusinessDataKey(key){
   const normalized = String(key || "").toLowerCase();
-  return /(tasksinterval|tasksasreq|completeddates|manualhistory|calendardateiso|recurrence|removedoccurrences|occurrenceoverrides|maintenancetasksv2|maintenanceoccurrencesv2|maintenancecalendarinstancesv2|settingsfolders|folders|inventory|inventoryfolders|inventorymaterials|inventorytransactions|orderrequests|receipttrackerweeks|purchase|vendor|tolerance|inspection|quality|layout|dashboardlayout|costlayout|joblayout|tolerancelayout)/i.test(normalized);
+  return /(tasksinterval|tasksasreq|completeddates|manualhistory|calendardateiso|recurrence|removedoccurrences|occurrenceoverrides|maintenancetasksv2|maintenanceoccurrencesv2|maintenancecalendarinstancesv2|settingsfolders|folders|inventory|inventoryfolders|inventorymaterials|inventorytransactions|orderrequests|receipttrackerweeks|weeklycostreports|purchase|vendor|tolerance|inspection|quality|layout|dashboardlayout|costlayout|joblayout|tolerancelayout)/i.test(normalized);
 }
 
 function sanitizeValueForStorage(value, { dropHeavyHistory = false } = {}){
@@ -1864,13 +1864,31 @@ function debugSaveSchemaCoverage(){
   return report;
 }
 
+function debugProtectedSavePreflightClassification(){
+  const snapshotResult = buildSnapshotForSaveSchemaCoverage();
+  const pendingState = snapshotResult.snapshot || {};
+  const localBackupState = loadLocalBackupReadOnly();
+  const classification = classifyMissingProtectedPathsForSave({
+    pendingState,
+    baselineState: (typeof window !== "undefined" ? window.__lastLoadedCloudState : null) || null,
+    localBackupState,
+    remoteState: null,
+    windowState: buildWindowProtectedStateForCoverage(),
+    coverageReport: getSaveSchemaCoverageReport({ pendingSnapshot: pendingState })
+  });
+  console.info("Protected save preflight classification diagnostic", classification);
+  return classification;
+}
+
 if (typeof window !== "undefined"){
   if (window.DEBUG_MODE){
     window.getSaveSchemaCoverageReport = getSaveSchemaCoverageReport;
     window.debugSaveSchemaCoverage = debugSaveSchemaCoverage;
+    window.debugProtectedSavePreflightClassification = debugProtectedSavePreflightClassification;
   } else {
     try { delete window.getSaveSchemaCoverageReport; } catch (_err){}
     try { delete window.debugSaveSchemaCoverage; } catch (_err){}
+    try { delete window.debugProtectedSavePreflightClassification; } catch (_err){}
   }
 }
 
