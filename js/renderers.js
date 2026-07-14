@@ -680,6 +680,54 @@ function ensureMaintenanceV2Collections(){
   };
 }
 
+function recordMaintenanceV2MutationSource(entry = {}){
+  if (!window.DEBUG_MODE) return;
+  if (!Array.isArray(window.__maintenanceV2MutationSources)) window.__maintenanceV2MutationSources = [];
+  const phase = window.__maintenanceV2RenderRepairActive
+    ? "render_repair"
+    : (window.__initialAdoptComplete ? "post_load_or_user_action" : "initial_load_or_adopt");
+  window.__maintenanceV2MutationSources.unshift({
+    atISO: new Date().toISOString(),
+    phase,
+    ...entry
+  });
+  if (window.__maintenanceV2MutationSources.length > 120) window.__maintenanceV2MutationSources.length = 120;
+}
+window.recordMaintenanceV2MutationSource = recordMaintenanceV2MutationSource;
+
+function uniqueMaintenanceV2Id(prefix, collections){
+  const used = new Set();
+  (Array.isArray(collections?.tasks) ? collections.tasks : []).forEach(entry => { if (entry && entry.id != null) used.add(String(entry.id)); });
+  (Array.isArray(collections?.instances) ? collections.instances : []).forEach(entry => { if (entry && entry.id != null) used.add(String(entry.id)); });
+  (Array.isArray(collections?.occurrences) ? collections.occurrences : []).forEach(entry => { if (entry && entry.id != null) used.add(String(entry.id)); });
+  let id = genId(prefix);
+  const baseId = String(id);
+  let guard = 0;
+  while (used.has(String(id)) && guard < 20){
+    guard += 1;
+    id = `${baseId}_${guard}`;
+  }
+  return id;
+}
+
+function findEquivalentMaintenanceV2Instance(collections, taskRecord, legacyTaskId, mode, effectiveDateISO){
+  return (Array.isArray(collections.instances) ? collections.instances : []).find(entry => entry
+    && String(entry.taskId || "") === String(taskRecord.id || "")
+    && String(entry.legacyTaskId || "") === String(legacyTaskId || "")
+    && String(entry.instanceMode || "") === String(mode || "")
+    && normalizeDateKey(entry.startDateISO || null) === normalizeDateKey(effectiveDateISO || null)
+    && !["archived","deleted"].includes(String(entry.status || "active").toLowerCase())) || null;
+}
+
+function findEquivalentMaintenanceV2Occurrence(collections, instance, taskRecord, legacyTaskId, eventType, effectiveDateISO){
+  return (Array.isArray(collections.occurrences) ? collections.occurrences : []).find(entry => entry
+    && String(entry.instanceId || "") === String(instance.id || "")
+    && String(entry.taskId || "") === String(taskRecord.id || "")
+    && String(entry.legacyTaskId || "") === String(legacyTaskId || "")
+    && String(entry.eventType || "") === String(eventType || "")
+    && normalizeDateKey(entry.effectiveDateISO || null) === normalizeDateKey(effectiveDateISO || null)) || null;
+}
+
 function createMaintenanceV2FromTemplate(task, opts = {}){
   if (!task || task.id == null) return null;
   const collections = ensureMaintenanceV2Collections();
@@ -709,8 +757,10 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   }else{
     taskRecord.updatedAtISO = nowISO;
   }
-  const instance = {
-    id: genId("maintenance_instance_v2"),
+  let instance = findEquivalentMaintenanceV2Instance(collections, taskRecord, legacyTaskId, mode, effectiveDateISO);
+  const reusedInstance = !!instance;
+  if (!instance) instance = {
+    id: uniqueMaintenanceV2Id("maintenance_instance_v2", collections),
     system: "v2",
     schemaVersion: 2,
     taskId: taskRecord.id,
@@ -732,9 +782,11 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
       instance.repeatRule.intervalHours = Math.max(1, Number(instance.repeatRule.every) || 1);
     }
   }
-  collections.instances.unshift(instance);
-  const occurrence = {
-    id: genId("maintenance_occurrence_v2"),
+  if (!reusedInstance) collections.instances.unshift(instance);
+  let occurrence = findEquivalentMaintenanceV2Occurrence(collections, instance, taskRecord, legacyTaskId, eventType, effectiveDateISO);
+  const reusedOccurrence = !!occurrence;
+  if (!occurrence) occurrence = {
+    id: uniqueMaintenanceV2Id("maintenance_occurrence_v2", collections),
     system: "v2",
     schemaVersion: 2,
     instanceId: instance.id,
@@ -748,20 +800,43 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
       hours: Number.isFinite(Number(opts.hours)) ? Number(opts.hours) : null
     }
   };
-  collections.occurrences.unshift(occurrence);
+  if (!reusedOccurrence) collections.occurrences.unshift(occurrence);
+  recordMaintenanceV2MutationSource({
+    helper: "createMaintenanceV2FromTemplate",
+    action: reusedInstance || reusedOccurrence ? "deduped_or_reused" : "appended",
+    eventType,
+    taskId: taskRecord.id,
+    legacyTaskId,
+    instanceId: instance.id,
+    occurrenceId: occurrence.id,
+    effectiveDateISO,
+    reusedInstance,
+    reusedOccurrence
+  });
   if (window.DEBUG_MODE){
-    console.info("[maintenance-v2] created records", {
+    console.info(reusedInstance || reusedOccurrence ? "[maintenance-v2] reused existing records" : "[maintenance-v2] created records", {
       legacyTaskId,
       taskId: taskRecord.id,
       instanceId: instance.id,
       occurrenceId: occurrence.id,
       instanceMode: mode,
-      eventType
+      eventType,
+      reusedInstance,
+      reusedOccurrence
     });
   }
   return { taskRecord, instance, occurrence };
 }
 window.createMaintenanceV2FromTemplate = createMaintenanceV2FromTemplate;
+if (window.DEBUG_MODE){
+  window.debugV2MutationSources = function(){
+    return Array.isArray(window.__maintenanceV2MutationSources)
+      ? window.__maintenanceV2MutationSources.map(entry => ({ ...entry }))
+      : [];
+  };
+}else{
+  try { delete window.debugV2MutationSources; } catch (_err){}
+}
 
 function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refreshDashboard = true, recurrence = null } = {}){
   if (!task || task.mode !== "interval") return null;

@@ -1882,15 +1882,83 @@ function debugProtectedSavePreflightClassification(){
   return classification;
 }
 
+function summarizeV2DeltaRecord(entry){
+  if (!entry || typeof entry !== "object") return null;
+  return {
+    id: entry.id || null,
+    taskId: entry.taskId || null,
+    legacyTaskId: entry.legacyTaskId || null,
+    instanceId: entry.instanceId || null,
+    rootOccurrenceId: entry.rootOccurrenceId || null,
+    eventType: entry.eventType || null,
+    effectiveDateISO: entry.effectiveDateISO || null,
+    startDateISO: entry.startDateISO || null,
+    recordedAtISO: entry.recordedAtISO || null,
+    name: entry.name || null
+  };
+}
+
+function duplicateV2IdSummary(list){
+  const counts = new Map();
+  (Array.isArray(list) ? list : []).forEach(entry => {
+    const id = entry && entry.id != null ? String(entry.id) : "";
+    if (!id) return;
+    counts.set(id, (counts.get(id) || 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([id, count]) => ({ id, count }))
+    .sort((a, b)=> String(a.id).localeCompare(String(b.id)));
+}
+
+function buildV2CurrentCloudDeltaForList(currentList, cloudList){
+  const current = Array.isArray(currentList) ? currentList : [];
+  const cloud = Array.isArray(cloudList) ? cloudList : [];
+  const currentIds = new Set(current.map(entry => entry && entry.id != null ? String(entry.id) : "").filter(Boolean));
+  const cloudIds = new Set(cloud.map(entry => entry && entry.id != null ? String(entry.id) : "").filter(Boolean));
+  const onlyCurrent = current.filter(entry => entry && entry.id != null && !cloudIds.has(String(entry.id)));
+  const onlyCloud = cloud.filter(entry => entry && entry.id != null && !currentIds.has(String(entry.id)));
+  return {
+    currentCount: current.length,
+    cloudCount: cloud.length,
+    onlyCurrentCount: onlyCurrent.length,
+    onlyCloudCount: onlyCloud.length,
+    onlyCurrent: onlyCurrent.slice(0, 25).map(summarizeV2DeltaRecord).filter(Boolean),
+    onlyCloud: onlyCloud.slice(0, 25).map(summarizeV2DeltaRecord).filter(Boolean),
+    duplicateIdsCurrent: duplicateV2IdSummary(current),
+    duplicateIdsCloud: duplicateV2IdSummary(cloud)
+  };
+}
+
+function debugV2CurrentCloudDelta(){
+  const cloud = (typeof window !== "undefined" && window.__lastLoadedCloudState && typeof window.__lastLoadedCloudState === "object") ? window.__lastLoadedCloudState : {};
+  const report = {
+    generatedAtISO: new Date().toISOString(),
+    readOnly: true,
+    instances: buildV2CurrentCloudDeltaForList(
+      typeof window !== "undefined" ? window.maintenanceCalendarInstancesV2 : [],
+      cloud.maintenanceCalendarInstancesV2
+    ),
+    occurrences: buildV2CurrentCloudDeltaForList(
+      typeof window !== "undefined" ? window.maintenanceOccurrencesV2 : [],
+      cloud.maintenanceOccurrencesV2
+    )
+  };
+  console.info("Maintenance V2 current-vs-cloud delta diagnostic", report);
+  return report;
+}
+
 if (typeof window !== "undefined"){
   if (window.DEBUG_MODE){
     window.getSaveSchemaCoverageReport = getSaveSchemaCoverageReport;
     window.debugSaveSchemaCoverage = debugSaveSchemaCoverage;
     window.debugProtectedSavePreflightClassification = debugProtectedSavePreflightClassification;
+    window.debugV2CurrentCloudDelta = debugV2CurrentCloudDelta;
   } else {
     try { delete window.getSaveSchemaCoverageReport; } catch (_err){}
     try { delete window.debugSaveSchemaCoverage; } catch (_err){}
     try { delete window.debugProtectedSavePreflightClassification; } catch (_err){}
+    try { delete window.debugV2CurrentCloudDelta; } catch (_err){}
   }
 }
 
