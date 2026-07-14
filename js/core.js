@@ -3412,6 +3412,7 @@ if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateIS
 if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
 if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
 if (!Array.isArray(window.inventory))    window.inventory    = [];
+if (!Array.isArray(window.inventoryTransactions)) window.inventoryTransactions = [];
 if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,chargeRate,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
 if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
@@ -3725,6 +3726,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     copyArr("cuttingJobs");
     copyArr("completedCuttingJobs");
     copyArr("dailyCutHours");
+    copyArr("inventoryTransactions");
     copyArr("orderRequests");
     copyArr("receiptTrackerWeeks");
     copyArr("garnetCleanings");
@@ -3755,6 +3757,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(sanitized.completedCuttingJobs) && Array.isArray(window.completedCuttingJobs)) sanitized.completedCuttingJobs = window.completedCuttingJobs.slice();
     if (!Array.isArray(sanitized.dailyCutHours) && Array.isArray(window.dailyCutHours)) sanitized.dailyCutHours = window.dailyCutHours.slice();
     if (!Array.isArray(sanitized.inventory) && Array.isArray(window.inventory)) sanitized.inventory = window.inventory.slice();
+    if (!Array.isArray(sanitized.inventoryTransactions) && Array.isArray(window.inventoryTransactions)) sanitized.inventoryTransactions = window.inventoryTransactions.slice();
     if (!Array.isArray(sanitized.orderRequests) && Array.isArray(window.orderRequests)) sanitized.orderRequests = window.orderRequests.slice();
     if (!Array.isArray(sanitized.receiptTrackerWeeks) && Array.isArray(window.receiptTrackerWeeks)) sanitized.receiptTrackerWeeks = window.receiptTrackerWeeks.slice();
     if (!Array.isArray(sanitized.garnetCleanings) && Array.isArray(window.garnetCleanings)) sanitized.garnetCleanings = window.garnetCleanings.slice();
@@ -3777,6 +3780,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
     if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
     if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+    if (!Array.isArray(window.inventoryTransactions)) window.inventoryTransactions = [];
     appConfig = normalizeAppConfig(sanitized.appConfig);
     window.appConfig = appConfig;
     refreshDerivedDailyHours();
@@ -3941,6 +3945,11 @@ function snapshotState(){
     : ((typeof window !== "undefined" && window.__lastLoadedCloudState && window.__lastLoadedCloudState.cuttingJobDatabase && typeof window.__lastLoadedCloudState.cuttingJobDatabase === "object")
       ? window.__lastLoadedCloudState.cuttingJobDatabase
       : {});
+  const inventoryTransactionsSource = (typeof window !== "undefined" && Array.isArray(window.inventoryTransactions))
+    ? window.inventoryTransactions
+    : ((typeof window !== "undefined" && window.__lastLoadedCloudState && Array.isArray(window.__lastLoadedCloudState.inventoryTransactions))
+      ? window.__lastLoadedCloudState.inventoryTransactions
+      : []);
   const result = {
     schema: window.APP_SCHEMA || APP_SCHEMA,
     totalHistory,
@@ -3949,6 +3958,7 @@ function snapshotState(){
     inventory,
     inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.map(folder => ({ ...folder })) : [],
     inventoryMaterials: normalizeInventoryMaterials(window.inventoryMaterials),
+    inventoryTransactions: inventoryTransactionsSource.map(entry => (entry && typeof entry === "object" ? { ...entry } : entry)),
     inventorySection: String(window.inventorySection || "items") === "material" ? "material" : "items",
     cuttingJobDatabase: cloneStructured(cuttingJobDatabaseSource) || {},
     cuttingJobs: stripJobFileDataUrls(cuttingJobs, strippedTracker),
@@ -5222,6 +5232,9 @@ function adoptState(doc){
     : (Array.isArray(window.inventoryFolders) ? window.inventoryFolders : []);
   ensureInventoryForAllMaintenanceTasks();
   window.inventoryMaterials = normalizeInventoryMaterials(data.inventoryMaterials);
+  window.inventoryTransactions = Array.isArray(data.inventoryTransactions)
+    ? data.inventoryTransactions.map(entry => (entry && typeof entry === "object" ? { ...entry } : entry))
+    : (Array.isArray(window.inventoryTransactions) ? window.inventoryTransactions : []);
   window.inventorySection = String(data.inventorySection || window.inventorySection || "items") === "material" ? "material" : "items";
   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
   completedCuttingJobs = Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [];
