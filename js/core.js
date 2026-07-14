@@ -830,6 +830,7 @@ function buildEmergencyBackup(snapshot){
     inventoryFolders: Array.isArray(src.inventoryFolders) ? src.inventoryFolders : [],
     inventoryMaterials: Array.isArray(src.inventoryMaterials) ? src.inventoryMaterials : [],
     inventoryTransactions: Array.isArray(src.inventoryTransactions) ? src.inventoryTransactions : [],
+    cuttingJobDatabase: (src.cuttingJobDatabase && typeof src.cuttingJobDatabase === "object") ? src.cuttingJobDatabase : {},
     cuttingJobs: Array.isArray(src.cuttingJobs) ? src.cuttingJobs : [],
     completedCuttingJobs: Array.isArray(src.completedCuttingJobs) ? src.completedCuttingJobs : [],
     orderRequests: Array.isArray(src.orderRequests) ? src.orderRequests : [],
@@ -861,6 +862,7 @@ function buildTinyCriticalBackup(snapshot, { quiet = false } = {}){
     inventoryFolders: src.inventoryFolders || [],
     inventoryMaterials: src.inventoryMaterials || [],
     inventoryTransactions: src.inventoryTransactions || [],
+    cuttingJobDatabase: src.cuttingJobDatabase || {},
     orderRequests: src.orderRequests || [],
     receiptTrackerWeeks: src.receiptTrackerWeeks || [],
     weeklyCostReports: src.weeklyCostReports || [],
@@ -3733,6 +3735,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     copyObj("appConfig");
     copyObj("settingsFolders");
     copyObj("folders");
+    copyObj("cuttingJobDatabase");
     copyObj("dashboardLayout");
     copyObj("costLayout");
     copyObj("jobLayout");
@@ -3767,6 +3770,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!sanitized.costLayout && window.costLayout) sanitized.costLayout = { ...window.costLayout };
     if (!sanitized.jobLayout && window.jobLayout) sanitized.jobLayout = { ...window.jobLayout };
     if (!sanitized.pumpEff && window.pumpEff) sanitized.pumpEff = { ...window.pumpEff };
+    if (!sanitized.cuttingJobDatabase && window.cuttingJobDatabase && typeof window.cuttingJobDatabase === "object") sanitized.cuttingJobDatabase = cloneStructured(window.cuttingJobDatabase);
     if (typeof orig === "function") orig(sanitized);
     if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
     if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
@@ -3789,6 +3793,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!window.costLayout || typeof window.costLayout !== "object") window.costLayout = {};
     if (!window.jobLayout || typeof window.jobLayout !== "object") window.jobLayout = {};
     if (!window.pumpEff || typeof window.pumpEff !== "object") window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
+    if (!window.cuttingJobDatabase || typeof window.cuttingJobDatabase !== "object") window.cuttingJobDatabase = {};
     if (typeof window.ensureTaskCategories === "function") window.ensureTaskCategories();
     if (typeof window.ensureJobCategories === "function") window.ensureJobCategories();
     const jobFileCache = readJobFileCache();
@@ -3931,6 +3936,11 @@ function snapshotState(){
   const jobLayoutSource = window.cloudJobLayoutLoaded
     ? window.cloudJobLayout
     : (window.jobLayoutState && window.jobLayoutState.layoutById);
+  const cuttingJobDatabaseSource = (typeof window !== "undefined" && window.cuttingJobDatabase && typeof window.cuttingJobDatabase === "object")
+    ? window.cuttingJobDatabase
+    : ((typeof window !== "undefined" && window.__lastLoadedCloudState && window.__lastLoadedCloudState.cuttingJobDatabase && typeof window.__lastLoadedCloudState.cuttingJobDatabase === "object")
+      ? window.__lastLoadedCloudState.cuttingJobDatabase
+      : {});
   const result = {
     schema: window.APP_SCHEMA || APP_SCHEMA,
     totalHistory,
@@ -3940,6 +3950,7 @@ function snapshotState(){
     inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.map(folder => ({ ...folder })) : [],
     inventoryMaterials: normalizeInventoryMaterials(window.inventoryMaterials),
     inventorySection: String(window.inventorySection || "items") === "material" ? "material" : "items",
+    cuttingJobDatabase: cloneStructured(cuttingJobDatabaseSource) || {},
     cuttingJobs: stripJobFileDataUrls(cuttingJobs, strippedTracker),
     completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs, strippedTracker),
     orderRequests,
@@ -5226,6 +5237,11 @@ function adoptState(doc){
   maintenanceTasksV2 = Array.isArray(data.maintenanceTasksV2) ? data.maintenanceTasksV2.map(entry => ({ ...entry })) : [];
   maintenanceCalendarInstancesV2 = Array.isArray(data.maintenanceCalendarInstancesV2) ? data.maintenanceCalendarInstancesV2.map(entry => ({ ...entry })) : [];
   maintenanceOccurrencesV2 = Array.isArray(data.maintenanceOccurrencesV2) ? data.maintenanceOccurrencesV2.map(entry => ({ ...entry })) : [];
+  if (data.cuttingJobDatabase && typeof data.cuttingJobDatabase === "object"){
+    window.cuttingJobDatabase = cloneStructured(data.cuttingJobDatabase) || {};
+  } else if (!window.cuttingJobDatabase || typeof window.cuttingJobDatabase !== "object"){
+    window.cuttingJobDatabase = {};
+  }
   window.syncProcessLog = Array.isArray(data.syncProcessLog)
     ? data.syncProcessLog.slice(0,100).map(entry => ({ ...entry }))
     : (Array.isArray(window.syncProcessLog) ? window.syncProcessLog.slice(0,100) : []);
