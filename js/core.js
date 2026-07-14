@@ -812,7 +812,6 @@ function compactStateForStorage(raw, { forBackup = false } = {}){
   if (forBackup){
     delete snap.deletedItems;
     delete snap.opportunityRollups;
-    delete snap.weeklyCostReports;
   }
   return sanitizeValueForStorage(snap, { dropHeavyHistory: forBackup });
 }
@@ -830,10 +829,12 @@ function buildEmergencyBackup(snapshot){
     inventory: Array.isArray(src.inventory) ? src.inventory : [],
     inventoryFolders: Array.isArray(src.inventoryFolders) ? src.inventoryFolders : [],
     inventoryMaterials: Array.isArray(src.inventoryMaterials) ? src.inventoryMaterials : [],
+    inventoryTransactions: Array.isArray(src.inventoryTransactions) ? src.inventoryTransactions : [],
     cuttingJobs: Array.isArray(src.cuttingJobs) ? src.cuttingJobs : [],
     completedCuttingJobs: Array.isArray(src.completedCuttingJobs) ? src.completedCuttingJobs : [],
     orderRequests: Array.isArray(src.orderRequests) ? src.orderRequests : [],
     receiptTrackerWeeks: Array.isArray(src.receiptTrackerWeeks) ? src.receiptTrackerWeeks : [],
+    weeklyCostReports: Array.isArray(src.weeklyCostReports) ? src.weeklyCostReports : [],
     garnetCleanings: Array.isArray(src.garnetCleanings) ? src.garnetCleanings : [],
     dailyCutHours: Array.isArray(src.dailyCutHours) ? src.dailyCutHours : [],
     appConfig: src.appConfig || normalizeAppConfig(window.appConfig),
@@ -847,7 +848,7 @@ function buildEmergencyBackup(snapshot){
   };
 }
 
-function buildTinyCriticalBackup(snapshot){
+function buildTinyCriticalBackup(snapshot, { quiet = false } = {}){
   const src = snapshot && typeof snapshot === "object" ? snapshot : {};
   const base = {
     schema: src.schema || APP_SCHEMA,
@@ -862,6 +863,7 @@ function buildTinyCriticalBackup(snapshot){
     inventoryTransactions: src.inventoryTransactions || [],
     orderRequests: src.orderRequests || [],
     receiptTrackerWeeks: src.receiptTrackerWeeks || [],
+    weeklyCostReports: src.weeklyCostReports || [],
     settingsFolders: src.settingsFolders || [],
     folders: src.folders || [],
     jobFolders: src.jobFolders || [],
@@ -875,7 +877,7 @@ function buildTinyCriticalBackup(snapshot){
     if (/(tolerance|inspection|quality)/i.test(k) && !(k in base)) base[k] = v;
   }
   const tiny = sanitizeValueForStorage(base, { dropHeavyHistory: true });
-  console.info("Tiny backup included keys", Object.keys(tiny).sort());
+  if (!quiet) console.info("Tiny backup included keys", Object.keys(tiny).sort());
   return tiny;
 }
 
@@ -1296,7 +1298,7 @@ function detectDangerousIntegrityReduction(baseSummary, pendingSummary, options 
   };
 }
 
-function validateProtectedSavePreflight({ baselineState, pendingState, latestRemoteState, localBackupState, reason = "cloud save", revisionConflict = null, allowFirstRun = false, skipRuntimeGates = false } = {}){
+function validateProtectedSavePreflight({ baselineState, pendingState, latestRemoteState, localBackupState, windowState = null, coverageReport = null, reason = "cloud save", revisionConflict = null, allowFirstRun = false, skipRuntimeGates = false } = {}){
   const generatedAtISO = new Date().toISOString();
   let pendingSummary = null;
   let baseline = null;
@@ -1338,8 +1340,49 @@ function validateProtectedSavePreflight({ baselineState, pendingState, latestRem
     reasons.push({ type:"unknown_baseline_with_protected_data", severity:"block", message:"Pending state contains protected data but no trusted baseline is available." });
   }
 
+  const activeMissing = classifyMissingProtectedPathsForSave({
+    pendingState: pendingState || {},
+    baselineState,
+    localBackupState,
+    remoteState: latestRemoteState,
+    windowState,
+    coverageReport
+  });
+  const activeMissingReasons = (activeMissing.blocking || []).map(item => ({
+    type: "active_protected_path_missing",
+    severity: "block",
+    path: item.path,
+    message: item.reason,
+    pending: item.pending,
+    baseline: item.baseline,
+    localBackup: item.localBackup,
+    remote: item.remote,
+    window: item.window,
+    activeSources: item.activeSources || [],
+    suggestedNextAction: item.suggestedNextAction
+  }));
+  const cloudCompactionReasons = (Array.isArray(coverageReport?.cloudExcludedProtectedPaths) ? coverageReport.cloudExcludedProtectedPaths : []).map(path => ({
+    type: "protected_path_removed_by_cloud_compaction",
+    severity: "block",
+    path,
+    message: `${path} is protected but would be removed by normal cloud compaction before save.`,
+    pending: getSaveSchemaCoveragePathInfo(pendingState || {}, path),
+    suggestedNextAction: "Stop save, export diagnostics, and update compaction rules so protected entered data is never removed."
+  }));
+  const activeMissingWarnings = (activeMissing.warnings || []).map(item => ({
+    type: item.category || "protected_path_warning",
+    severity: "warn",
+    path: item.path,
+    message: item.reason,
+    pending: item.pending,
+    baseline: item.baseline,
+    localBackup: item.localBackup,
+    remote: item.remote,
+    window: item.window,
+    suggestedNextAction: item.suggestedNextAction
+  }));
   const reduction = detectDangerousIntegrityReduction(baseline.summary, pendingSummary, { allowUnknownBaseline: baseline.trusted });
-  const allReasons = reasons.concat(reduction.reasons || []);
+  const allReasons = reasons.concat(activeMissingReasons).concat(cloudCompactionReasons).concat(reduction.reasons || []);
   return {
     generatedAtISO,
     allowed: allReasons.length === 0,
@@ -1347,7 +1390,9 @@ function validateProtectedSavePreflight({ baselineState, pendingState, latestRem
     severity: allReasons.length ? "block" : "info",
     reason,
     reasons: allReasons,
+    warnings: activeMissingWarnings,
     fieldChanges: reduction.fieldChanges || [],
+    activeMissingClassification: activeMissing,
     baselineSource: baseline.source,
     baselineFingerprint: baseline.summary?.summaryFingerprint || "",
     pendingFingerprint: pendingSummary?.summaryFingerprint || "",
@@ -1368,7 +1413,10 @@ function rememberDangerousSaveBlock(preflight, context = {}){
     atISO: new Date().toISOString(),
     ...context,
     preflight,
-    blockedFieldNames: Array.from(new Set((preflight?.fieldChanges || []).map(change => change.path).filter(Boolean))),
+    blockedFieldNames: Array.from(new Set(
+      (preflight?.fieldChanges || []).map(change => change.path).filter(Boolean)
+        .concat((preflight?.reasons || []).map(reason => reason.path).filter(Boolean))
+    )),
     recommendedNextAction: "Stay in Recovery Mode if active, export diagnostics, and do not force-save until the protected-data counts are reviewed."
   };
   if (typeof window !== "undefined"){
@@ -1662,12 +1710,15 @@ function buildSnapshotForSaveSchemaCoverage(){
   }
 }
 
-function getSaveSchemaCoverageReport(){
-  const snapshotResult = buildSnapshotForSaveSchemaCoverage();
+function getSaveSchemaCoverageReport(options = {}){
+  const hasProvidedSnapshot = Boolean(options && options.pendingSnapshot && typeof options.pendingSnapshot === "object");
+  const snapshotResult = hasProvidedSnapshot
+    ? { snapshot: cloneStructured(options.pendingSnapshot) || {}, error:null }
+    : buildSnapshotForSaveSchemaCoverage();
   const pendingSnapshot = snapshotResult.snapshot || {};
   const compactedForCloud = compactStateForStorage(pendingSnapshot);
   const compactedForBackup = compactStateForStorage(pendingSnapshot, { forBackup:true });
-  const tinyBackup = buildTinyCriticalBackup(pendingSnapshot);
+  const tinyBackup = buildTinyCriticalBackup(pendingSnapshot, { quiet:true });
   const localBackup = loadLocalBackupReadOnly();
   const requiredProtectedPaths = Array.isArray(REQUIRED_PROTECTED_DATA_PATHS) ? REQUIRED_PROTECTED_DATA_PATHS.slice() : [];
   const registryProtectedPaths = Array.isArray(PROTECTED_FIELD_REGISTRY) ? PROTECTED_FIELD_REGISTRY.map(entry => entry.path).filter(Boolean) : [];
@@ -1814,8 +1865,135 @@ function debugSaveSchemaCoverage(){
 }
 
 if (typeof window !== "undefined"){
-  window.getSaveSchemaCoverageReport = getSaveSchemaCoverageReport;
-  window.debugSaveSchemaCoverage = debugSaveSchemaCoverage;
+  if (window.DEBUG_MODE){
+    window.getSaveSchemaCoverageReport = getSaveSchemaCoverageReport;
+    window.debugSaveSchemaCoverage = debugSaveSchemaCoverage;
+  } else {
+    try { delete window.getSaveSchemaCoverageReport; } catch (_err){}
+    try { delete window.debugSaveSchemaCoverage; } catch (_err){}
+  }
+}
+
+function buildWindowProtectedStateForCoverage(){
+  if (typeof window === "undefined") return {};
+  const state = {};
+  const paths = Array.from(new Set((REQUIRED_PROTECTED_DATA_PATHS || []).concat((PROTECTED_FIELD_REGISTRY || []).map(entry => entry.path)))).sort();
+  paths.forEach(path => {
+    const topLevelKey = String(path || "").split(".").filter(Boolean)[0];
+    if (!topLevelKey || Object.prototype.hasOwnProperty.call(state, topLevelKey)) return;
+    if (Object.prototype.hasOwnProperty.call(window, topLevelKey)){
+      state[topLevelKey] = cloneStructured(window[topLevelKey]);
+    }
+  });
+  return state;
+}
+
+function classifyMissingProtectedPathsForSave({ pendingState, baselineState, localBackupState, remoteState, windowState, coverageReport } = {}){
+  const report = coverageReport || getSaveSchemaCoverageReport({ pendingSnapshot: pendingState || {} });
+  const pending = pendingState && typeof pendingState === "object" ? pendingState : {};
+  const sources = [
+    { name:"remote", state: remoteState },
+    { name:"baseline", state: baselineState },
+    { name:"localBackup", state: localBackupState },
+    { name:"window", state: windowState }
+  ];
+  const categories = {
+    blockingActiveMissing: [],
+    warningAbsentButNoBaselineData: [],
+    warningEmptyParentArray: [],
+    backupOnlyProtectedData: [],
+    possiblyDeprecatedButUnproven: [],
+    backupExclusionRisk: []
+  };
+  const missingPaths = Array.isArray(report?.missingProtectedPaths) ? report.missingProtectedPaths.slice() : [];
+  const add = (category, item)=>{
+    if (!categories[category]) categories[category] = [];
+    categories[category].push(item);
+  };
+
+  missingPaths.forEach(path => {
+    const registryEntry = (PROTECTED_FIELD_REGISTRY || []).find(entry => entry.path === path) || {};
+    const pendingInfo = getSaveSchemaCoveragePathInfo(pending, path);
+    const sourceInfo = {};
+    let activeSources = [];
+    sources.forEach(source => {
+      const info = getSaveSchemaCoveragePathInfo(source.state || {}, path);
+      sourceInfo[source.name] = info;
+      if (info.present && Number(info.count || 0) > 0) activeSources.push(source.name);
+    });
+
+    const item = {
+      path,
+      reason: "",
+      pending: pendingInfo,
+      baseline: sourceInfo.baseline,
+      localBackup: sourceInfo.localBackup,
+      remote: sourceInfo.remote,
+      window: sourceInfo.window,
+      shouldBlock: false,
+      category: "",
+      suggestedNextAction: "Export diagnostics, reload latest cloud data, and do not force-save until protected-path coverage is reviewed."
+    };
+
+    if (registryEntry.expectedShape === "nestedCount" && registryEntry.parentPath){
+      const parentPending = getSaveSchemaCoveragePathInfo(pending, registryEntry.parentPath);
+      item.parentPath = registryEntry.parentPath;
+      item.parentPending = parentPending;
+      if (Number(parentPending.count || 0) === 0 && activeSources.length === 0){
+        item.category = "warningEmptyParentArray";
+        item.reason = `${path} is absent because parent ${registryEntry.parentPath} is empty and no baseline source has nested history data.`;
+        add("warningEmptyParentArray", item);
+        return;
+      }
+    }
+
+    if (activeSources.length){
+      item.shouldBlock = true;
+      item.category = "blockingActiveMissing";
+      item.activeSources = activeSources;
+      item.reason = `${path} has meaningful protected data in ${activeSources.join(", ")} but is missing from the pending save snapshot.`;
+      add("blockingActiveMissing", item);
+      if (activeSources.length === 1 && activeSources[0] === "localBackup"){
+        add("backupOnlyProtectedData", { ...item, category:"backupOnlyProtectedData", reason:`${path} is only active in local backup and would not be preserved by the pending cloud save.` });
+      }
+      return;
+    }
+
+    if (path === "inventoryTransactions" || path === "cuttingJobDatabase"){
+      item.category = "possiblyDeprecatedButUnproven";
+      item.reason = `${path} is protected but absent from the pending snapshot and has no meaningful baseline data in available sources; treat as unknown/unproven, not deprecated.`;
+      add("possiblyDeprecatedButUnproven", item);
+      return;
+    }
+
+    item.category = "warningAbsentButNoBaselineData";
+    item.reason = `${path} is absent from the pending snapshot, but no available baseline source has meaningful data for it.`;
+    add("warningAbsentButNoBaselineData", item);
+  });
+
+  (Array.isArray(report?.backupExcludedProtectedPaths) ? report.backupExcludedProtectedPaths : []).forEach(path => {
+    add("backupExclusionRisk", {
+      path,
+      reason: `${path} is protected and excluded from local backup coverage.`,
+      pending: getSaveSchemaCoveragePathInfo(pending, path),
+      shouldBlock: false,
+      category: "backupExclusionRisk",
+      suggestedNextAction: "Include this path in local backup or document a proven quota-safe alternative."
+    });
+  });
+
+  return {
+    generatedAtISO: new Date().toISOString(),
+    categories,
+    blocking: categories.blockingActiveMissing,
+    warnings: []
+      .concat(categories.warningAbsentButNoBaselineData)
+      .concat(categories.warningEmptyParentArray)
+      .concat(categories.backupOnlyProtectedData)
+      .concat(categories.possiblyDeprecatedButUnproven)
+      .concat(categories.backupExclusionRisk),
+    blocked: categories.blockingActiveMissing.length > 0
+  };
 }
 
 function compareProtectedFieldSummaries(remoteSummary, pendingSummary){
@@ -5295,11 +5473,14 @@ const saveCloudInternal = debounce(async ()=>{
     const allowFirstRunPreflight = Boolean(remoteSnap && !remoteSnap.exists)
       && !stateHasMeaningfulData(window.__lastLoadedCloudState || {})
       && !stateHasMeaningfulData(localBackupForPreflight || {});
+    const saveSchemaCoverage = getSaveSchemaCoverageReport({ pendingSnapshot: snap });
     const registryPreflight = validateProtectedSavePreflight({
       baselineState: window.__lastLoadedCloudState || null,
       pendingState: snap,
       latestRemoteState: remoteData,
       localBackupState: localBackupForPreflight,
+      windowState: buildWindowProtectedStateForCoverage(),
+      coverageReport: saveSchemaCoverage,
       reason: "saveCloudInternal",
       revisionConflict,
       allowFirstRun: allowFirstRunPreflight
