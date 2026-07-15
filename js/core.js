@@ -6085,12 +6085,40 @@ function buildLayoutSaveDebugReport(overrides = {}){
     firestoreSetError: overrides.firestoreSetError || "",
     lastCloudSaveBlock: (typeof window !== "undefined" && window.__lastCloudSaveBlock) ? window.__lastCloudSaveBlock : null,
     lastDangerousSaveBlock: (typeof window !== "undefined" && window.__lastDangerousSaveBlock) ? window.__lastDangerousSaveBlock : null,
+    persistFunctionCalled: Boolean(overrides.persistFunctionCalled),
+    layoutHasEntries: Boolean(overrides.layoutHasEntries),
+    cloudLoaded: Boolean(overrides.cloudLoaded),
+    layoutsEqualResult: Object.prototype.hasOwnProperty.call(overrides, "layoutsEqualResult") ? Boolean(overrides.layoutsEqualResult) : null,
+    changed: Object.prototype.hasOwnProperty.call(overrides, "changed") ? Boolean(overrides.changed) : null,
+    saveLayoutCloudOnlyCalled: Boolean(overrides.saveLayoutCloudOnlyCalled),
     localStorageUpdated: Boolean(overrides.localStorageUpdated),
     remoteLayoutVerified: Boolean(overrides.remoteLayoutVerified),
     remoteLayoutShape: remoteLayout && typeof remoteLayout === "object"
       ? { type: Array.isArray(remoteLayout) ? "array" : "object", keyCount: Object.keys(remoteLayout).length }
       : { type: remoteLayout == null ? "missing" : typeof remoteLayout, keyCount: 0 }
   };
+}
+
+function recordLayoutPersistAttempt(area, details = {}){
+  if (typeof window === "undefined") return null;
+  const previous = window.__lastLayoutSaveIsolationReport && typeof window.__lastLayoutSaveIsolationReport === "object"
+    ? window.__lastLayoutSaveIsolationReport
+    : {};
+  const payload = previous.payload && typeof previous.payload === "object" ? previous.payload : {};
+  const report = buildLayoutSaveDebugReport({
+    ...previous,
+    ...details,
+    action: details.action || "persist_attempt_recorded",
+    area,
+    firebasePath: FB.docRef?.path || previous.firebasePath || "",
+    payload,
+    usedWholeAppSnapshot: false,
+    calledSaveCloudDebounced: false,
+    persistFunctionCalled: true
+  });
+  window.__lastLayoutSaveIsolationReport = report;
+  if (window.DEBUG_MODE) console.info("Layout persist attempt", report);
+  return report;
 }
 
 async function saveLayoutCloudOnly(area, layout, options = {}){
@@ -6108,6 +6136,12 @@ async function saveLayoutCloudOnly(area, layout, options = {}){
     layoutKey: cfg?.stateKey || "",
     usedWholeAppSnapshot: false,
     calledSaveCloudDebounced: false,
+    persistFunctionCalled: Boolean(options.persistFunctionCalled),
+    layoutHasEntries: Boolean(options.layoutHasEntries),
+    cloudLoaded: Boolean(options.cloudLoaded),
+    layoutsEqualResult: options.layoutsEqualResult,
+    changed: options.changed,
+    saveLayoutCloudOnlyCalled: true,
     localStorageUpdated: Boolean(options.localStorageUpdated)
   });
   if (typeof window !== "undefined") window.__lastLayoutSaveIsolationReport = debug;
@@ -6123,7 +6157,7 @@ async function saveLayoutCloudOnly(area, layout, options = {}){
     return false;
   }
   if (!canWriteCloud(`layout save (${cfg.stateKey})`)){
-    debug = buildLayoutSaveDebugReport({ ...debug, action: "blocked_can_write_cloud", payload, layoutKey: cfg.stateKey, localStorageUpdated: Boolean(options.localStorageUpdated) });
+    debug = buildLayoutSaveDebugReport({ ...debug, action: "blocked_can_write_cloud", payload, layoutKey: cfg.stateKey, localStorageUpdated: Boolean(options.localStorageUpdated), saveLayoutCloudOnlyCalled: true });
     if (typeof window !== "undefined") window.__lastLayoutSaveIsolationReport = debug;
     return false;
   }
@@ -6168,6 +6202,12 @@ async function saveLayoutCloudOnly(area, layout, options = {}){
       usedWholeAppSnapshot: false,
       calledSaveCloudDebounced: false,
       firestoreSetAttempted: true,
+      persistFunctionCalled: Boolean(options.persistFunctionCalled),
+      layoutHasEntries: Boolean(options.layoutHasEntries),
+      cloudLoaded: Boolean(options.cloudLoaded),
+      layoutsEqualResult: options.layoutsEqualResult,
+      changed: options.changed,
+      saveLayoutCloudOnlyCalled: true,
       localStorageUpdated: Boolean(options.localStorageUpdated),
       remoteData
     });
@@ -6199,6 +6239,12 @@ async function saveLayoutCloudOnly(area, layout, options = {}){
       calledSaveCloudDebounced: false,
       firestoreSetAttempted: true,
       firestoreSetCompleted: true,
+      persistFunctionCalled: Boolean(options.persistFunctionCalled),
+      layoutHasEntries: Boolean(options.layoutHasEntries),
+      cloudLoaded: Boolean(options.cloudLoaded),
+      layoutsEqualResult: options.layoutsEqualResult,
+      changed: options.changed,
+      saveLayoutCloudOnlyCalled: true,
       localStorageUpdated: Boolean(options.localStorageUpdated),
       remoteLayoutVerified,
       remoteData: verifiedData
@@ -6216,6 +6262,12 @@ async function saveLayoutCloudOnly(area, layout, options = {}){
       calledSaveCloudDebounced: false,
       firestoreSetAttempted: Boolean(Object.keys(payload).length),
       firestoreSetError: err?.message || String(err),
+      persistFunctionCalled: Boolean(options.persistFunctionCalled),
+      layoutHasEntries: Boolean(options.layoutHasEntries),
+      cloudLoaded: Boolean(options.cloudLoaded),
+      layoutsEqualResult: options.layoutsEqualResult,
+      changed: options.changed,
+      saveLayoutCloudOnlyCalled: true,
       localStorageUpdated: Boolean(options.localStorageUpdated)
     });
     if (typeof window !== "undefined") window.__lastLayoutSaveIsolationReport = debug;
@@ -6226,6 +6278,7 @@ async function saveLayoutCloudOnly(area, layout, options = {}){
 
 if (typeof window !== "undefined"){
   window.saveLayoutCloudOnly = saveLayoutCloudOnly;
+  window.recordLayoutPersistAttempt = recordLayoutPersistAttempt;
   window.debugLayoutSaveIsolation = function debugLayoutSaveIsolation(){
     if (!window.DEBUG_MODE) return { available:false, reason:"DEBUG_MODE is disabled. Open with ?debug=1." };
     const report = window.__lastLayoutSaveIsolationReport || buildLayoutSaveDebugReport({ action:"no_layout_save_recorded" });
