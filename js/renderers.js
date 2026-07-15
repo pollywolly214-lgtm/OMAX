@@ -680,6 +680,23 @@ function ensureMaintenanceV2Collections(){
   };
 }
 
+function createMaintenanceV2StablePart(value){
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "item";
+}
+
+function stringifyMaintenanceV2RepeatRule(rule){
+  if (!rule || typeof rule !== "object") return "";
+  const keys = Object.keys(rule).sort();
+  return JSON.stringify(keys.reduce((out, key) => {
+    out[key] = rule[key];
+    return out;
+  }, {}));
+}
+
 function createMaintenanceV2FromTemplate(task, opts = {}){
   if (!task || task.id == null) return null;
   const collections = ensureMaintenanceV2Collections();
@@ -709,8 +726,57 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   }else{
     taskRecord.updatedAtISO = nowISO;
   }
+
+  const normalizedRepeatRule = mode === "repeat" ? (opts.repeatRule || null) : null;
+  const occurrenceHasRemovedLifecycle = (occurrence)=> {
+    const occurrenceId = String(occurrence?.id || "");
+    if (!occurrenceId) return false;
+    return collections.occurrences.some(event => {
+      if (!event || event === occurrence) return false;
+      const eventType = String(event.eventType || "");
+      if (eventType !== "removed" && eventType !== "skipped") return false;
+      return String(event.rootOccurrenceId || event.supersedesEventId || "") === occurrenceId;
+    });
+  };
+  const equivalentInstance = collections.instances.find(instance => {
+    if (!instance || typeof instance !== "object") return false;
+    if (String(instance.system || "") !== "v2" && Number(instance.schemaVersion || 0) < 2) return false;
+    if (String(instance.status || "active") === "stopped") return false;
+    if (String(instance.legacyTaskId || "") !== legacyTaskId) return false;
+    if (String(instance.instanceMode || "") !== mode) return false;
+    if (normalizeDateKey(instance.startDateISO || null) !== effectiveDateISO) return false;
+    if (mode === "repeat") return stringifyMaintenanceV2RepeatRule(instance.repeatRule) === stringifyMaintenanceV2RepeatRule(normalizedRepeatRule);
+    return collections.occurrences.some(event => event
+      && String(event.system || "") === "v2"
+      && String(event.instanceId || "") === String(instance.id || "")
+      && String(event.legacyTaskId || "") === legacyTaskId
+      && String(event.eventType || "") === eventType
+      && normalizeDateKey(event.effectiveDateISO || event.dateISO || null) === effectiveDateISO
+      && !occurrenceHasRemovedLifecycle(event));
+  }) || null;
+  if (equivalentInstance){
+    const equivalentOccurrence = collections.occurrences.find(event => event
+      && String(event.system || "") === "v2"
+      && String(event.instanceId || "") === String(equivalentInstance.id || "")
+      && String(event.eventType || "") === eventType
+      && normalizeDateKey(event.effectiveDateISO || event.dateISO || null) === effectiveDateISO
+      && !occurrenceHasRemovedLifecycle(event)) || null;
+    if (window.DEBUG_MODE){
+      console.info("[maintenance-v2] reused existing equivalent records", {
+        legacyTaskId,
+        taskId: taskRecord.id,
+        instanceId: equivalentInstance.id,
+        occurrenceId: equivalentOccurrence?.id || null,
+        instanceMode: mode,
+        eventType
+      });
+    }
+    return { taskRecord, instance: equivalentInstance, occurrence: equivalentOccurrence };
+  }
+
+  const stableBaseId = `${createMaintenanceV2StablePart(legacyTaskId)}_${createMaintenanceV2StablePart(effectiveDateISO)}_${createMaintenanceV2StablePart(mode)}`;
   const instance = {
-    id: genId("maintenance_instance_v2"),
+    id: `maintenance_instance_v2_${stableBaseId}`,
     system: "v2",
     schemaVersion: 2,
     taskId: taskRecord.id,
@@ -718,7 +784,7 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
     instanceMode: mode,
     startDateISO: effectiveDateISO,
     status: "active",
-    repeatRule: mode === "repeat" ? (opts.repeatRule || null) : null,
+    repeatRule: normalizedRepeatRule,
     createdAtISO: nowISO,
     updatedAtISO: nowISO
   };
@@ -734,7 +800,7 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   }
   collections.instances.unshift(instance);
   const occurrence = {
-    id: genId("maintenance_occurrence_v2"),
+    id: `maintenance_occurrence_v2_${stableBaseId}_${createMaintenanceV2StablePart(eventType)}`,
     system: "v2",
     schemaVersion: 2,
     instanceId: instance.id,
@@ -762,6 +828,124 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   return { taskRecord, instance, occurrence };
 }
 window.createMaintenanceV2FromTemplate = createMaintenanceV2FromTemplate;
+
+
+function buildMaintenanceV2DuplicateCalendarSpamReport(){
+  const collections = ensureMaintenanceV2Collections();
+  const duplicateGroups = (items, keyFn, labelFn = null)=> {
+    const groups = new Map();
+    items.forEach((item, index) => {
+      const key = keyFn(item, index);
+      if (!key) return;
+      const list = groups.get(key) || [];
+      list.push({ item, index, label: labelFn ? labelFn(item, index) : key });
+      groups.set(key, list);
+    });
+    return Array.from(groups.entries())
+      .filter(([, list]) => list.length > 1)
+      .map(([key, list]) => ({ key, count: list.length, entries: list }));
+  };
+  const taskById = new Map();
+  collections.tasks.forEach(task => { if (task?.id != null && !taskById.has(String(task.id))) taskById.set(String(task.id), task); });
+  const instanceById = new Map();
+  collections.instances.forEach(instance => { if (instance?.id != null && !instanceById.has(String(instance.id))) instanceById.set(String(instance.id), instance); });
+  const scheduledOneTimeEvents = collections.occurrences
+    .map((event, index)=>({ event, index }))
+    .filter(({ event }) => event
+      && (String(event.system || "") === "v2" || Number(event.schemaVersion || 0) >= 2)
+      && String(event.eventType || "") === "scheduled")
+    .filter(({ event }) => {
+      const instance = instanceById.get(String(event.instanceId || ""));
+      return instance && String(instance.instanceMode || "") === "one_time";
+    });
+  const equivalentScheduledGroups = duplicateGroups(
+    scheduledOneTimeEvents,
+    ({ event }) => {
+      const instance = instanceById.get(String(event.instanceId || ""));
+      const task = taskById.get(String(instance?.taskId || event.taskId || ""));
+      const dateISO = normalizeDateKey(event.effectiveDateISO || event.dateISO || instance?.startDateISO || null);
+      const taskName = String(event.taskName || task?.name || "Maintenance reminder").trim().toLowerCase();
+      const legacyTaskId = String(instance?.legacyTaskId || event.legacyTaskId || task?.legacyTaskId || event.taskId || instance?.taskId || "").trim();
+      return dateISO ? ["one_time", legacyTaskId, taskName, dateISO, String(event.eventType || "")].join("|") : "";
+    },
+    ({ event }) => String(event.id || "")
+  );
+  const removableScheduledOccurrenceIds = [];
+  equivalentScheduledGroups.forEach(group => {
+    const sorted = group.entries.slice().sort((a, b) => {
+      const at = Date.parse(String(a.item.event.recordedAtISO || ""));
+      const bt = Date.parse(String(b.item.event.recordedAtISO || ""));
+      const av = Number.isFinite(at);
+      const bv = Number.isFinite(bt);
+      if (av && bv && at !== bt) return at - bt;
+      if (av && !bv) return -1;
+      if (!av && bv) return 1;
+      return a.item.index - b.item.index;
+    });
+    sorted.slice(1).forEach(entry => {
+      const id = String(entry.item.event.id || "");
+      if (id) removableScheduledOccurrenceIds.push(id);
+    });
+  });
+  return {
+    generatedAtISO: new Date().toISOString(),
+    counts: {
+      maintenanceTasksV2: collections.tasks.length,
+      maintenanceCalendarInstancesV2: collections.instances.length,
+      maintenanceOccurrencesV2: collections.occurrences.length,
+      duplicateTaskIdGroups: duplicateGroups(collections.tasks, task => task?.id != null ? String(task.id) : "").length,
+      duplicateInstanceIdGroups: duplicateGroups(collections.instances, instance => instance?.id != null ? String(instance.id) : "").length,
+      duplicateOccurrenceIdGroups: duplicateGroups(collections.occurrences, event => event?.id != null ? String(event.id) : "").length,
+      duplicateRootOccurrenceIdGroups: duplicateGroups(collections.occurrences, event => event?.rootOccurrenceId != null ? String(event.rootOccurrenceId) : "").length,
+      duplicateEquivalentScheduledGroups: equivalentScheduledGroups.length,
+      removableScheduledOccurrences: removableScheduledOccurrenceIds.length
+    },
+    duplicateTaskIds: duplicateGroups(collections.tasks, task => task?.id != null ? String(task.id) : "", task => `${task?.legacyTaskId || ""} · ${task?.name || ""}`),
+    duplicateInstanceIds: duplicateGroups(collections.instances, instance => instance?.id != null ? String(instance.id) : "", instance => `${instance?.legacyTaskId || ""} · ${instance?.taskId || ""} · ${instance?.startDateISO || ""}`),
+    duplicateOccurrenceIds: duplicateGroups(collections.occurrences, event => event?.id != null ? String(event.id) : "", event => `${event?.eventType || ""} · ${event?.taskId || ""} · ${event?.effectiveDateISO || ""}`),
+    duplicateRootOccurrenceIds: duplicateGroups(collections.occurrences, event => event?.rootOccurrenceId != null ? String(event.rootOccurrenceId) : "", event => `${event?.eventType || ""} · ${event?.taskId || ""} · ${event?.effectiveDateISO || ""}`),
+    duplicateEquivalentScheduledGroups: equivalentScheduledGroups,
+    removableScheduledOccurrenceIds
+  };
+}
+
+function auditMaintenanceV2DuplicateCalendarSpam(){
+  const report = buildMaintenanceV2DuplicateCalendarSpamReport();
+  console.info("Maintenance V2 duplicate calendar spam audit", report);
+  return report;
+}
+
+function repairMaintenanceV2DuplicateCalendarSpam(){
+  const report = buildMaintenanceV2DuplicateCalendarSpamReport();
+  const removable = new Set(report.removableScheduledOccurrenceIds || []);
+  if (!removable.size){
+    console.info("Maintenance V2 duplicate calendar spam repair: no exact duplicate scheduled V2 occurrences found.", report);
+    return { ...report, repaired: false, removedScheduledOccurrences: 0 };
+  }
+  if (typeof createMaintenanceHistoryImportBackup !== "function") throw new Error("Backup helper is unavailable; V2 duplicate repair was blocked.");
+  createMaintenanceHistoryImportBackup();
+  if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
+  const beforeCount = collectionsLength(window.maintenanceOccurrencesV2);
+  for (let index = window.maintenanceOccurrencesV2.length - 1; index >= 0; index -= 1){
+    const event = window.maintenanceOccurrencesV2[index];
+    if (removable.has(String(event?.id || ""))) window.maintenanceOccurrencesV2.splice(index, 1);
+  }
+  const afterCount = collectionsLength(window.maintenanceOccurrencesV2);
+  if (typeof saveCloudNow === "function") saveCloudNow();
+  else if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+  if (typeof renderCalendar === "function") renderCalendar();
+  if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets();
+  const result = { ...report, repaired: true, removedScheduledOccurrences: beforeCount - afterCount };
+  console.info("Maintenance V2 duplicate calendar spam repair complete", result);
+  return result;
+}
+
+function collectionsLength(value){
+  return Array.isArray(value) ? value.length : 0;
+}
+
+window.auditMaintenanceV2DuplicateCalendarSpam = auditMaintenanceV2DuplicateCalendarSpam;
+window.repairMaintenanceV2DuplicateCalendarSpam = repairMaintenanceV2DuplicateCalendarSpam;
 
 function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refreshDashboard = true, recurrence = null } = {}){
   if (!task || task.mode !== "interval") return null;
