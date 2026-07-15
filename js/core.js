@@ -1816,7 +1816,7 @@ function getSaveSchemaCoverageReport(options = {}){
   ];
 
   const staleWholeStateOverwriteRiskNotes = [
-    "Dashboard/cost/job layout changes call saveCloudDebounced(), which snapshots the whole app state rather than writing only layout keys.",
+    "Dashboard/cost/job layout changes must keep using saveLayoutCloudOnly() so layout movement writes only layout keys instead of snapshotting the whole app state.",
     "saveCloudInternal checks remote revision before set(..., { merge:true }), but the read-then-write sequence is not a Firestore transaction/compare-and-swap.",
     "Only totalHistory, dailyCutHours, and pumpEff have explicit remote merge protection before save; maintenanceOccurrencesV2, cutting jobs, task history, and purchase history rely on preflight blocking rather than append-only merging.",
     "loadFromCloud seeds defaults only when neither cloud nor local backup is meaningful, but a false non-meaningful read would be dangerous if not caught by recovery/preflight gates."
@@ -6033,6 +6033,205 @@ function saveCloudNow(){
   }else{
     return saveCloudInternal();
   }
+}
+
+const LAYOUT_SAVE_PROTECTED_KEYS = [
+  "cuttingJobs",
+  "completedCuttingJobs",
+  "tasksInterval",
+  "tasksAsReq",
+  "settingsFolders",
+  "inventory",
+  "inventoryFolders",
+  "inventoryMaterials",
+  "inventoryTransactions",
+  "receiptTrackerWeeks",
+  "weeklyCostReports",
+  "orderRequests",
+  "dailyCutHours",
+  "totalHistory",
+  "pumpEff",
+  "garnetCleanings",
+  "appConfig",
+  "cuttingJobDatabase",
+  "maintenanceTasksV2",
+  "maintenanceCalendarInstancesV2",
+  "maintenanceOccurrencesV2"
+];
+const LAYOUT_SAVE_AREA_CONFIG = {
+  dashboard: { stateKey: "dashboardLayout", cloudKey: "cloudDashboardLayout", loadedKey: "cloudDashboardLayoutLoaded" },
+  cost: { stateKey: "costLayout", cloudKey: "cloudCostLayout", loadedKey: "cloudCostLayoutLoaded" },
+  jobs: { stateKey: "jobLayout", cloudKey: "cloudJobLayout", loadedKey: "cloudJobLayoutLoaded" },
+  job: { stateKey: "jobLayout", cloudKey: "cloudJobLayout", loadedKey: "cloudJobLayoutLoaded", canonicalArea: "jobs" }
+};
+
+function buildLayoutSaveDebugReport(overrides = {}){
+  const payload = overrides.payload && typeof overrides.payload === "object" ? overrides.payload : {};
+  const payloadKeys = Object.keys(payload);
+  const protectedKeysIncludedInPayload = payloadKeys.filter(key => LAYOUT_SAVE_PROTECTED_KEYS.includes(key));
+  const layoutKey = overrides.layoutKey || payloadKeys.find(key => /Layout$/.test(key)) || "";
+  const remoteLayout = layoutKey && overrides.remoteData && typeof overrides.remoteData === "object" ? overrides.remoteData[layoutKey] : null;
+  return {
+    atISO: new Date().toISOString(),
+    lastLayoutSaveAction: overrides.action || "",
+    layoutArea: overrides.area || "",
+    firebasePath: overrides.firebasePath || "",
+    payloadKeys,
+    protectedKeysIncludedInPayload,
+    usedWholeAppSnapshot: Boolean(overrides.usedWholeAppSnapshot),
+    calledSaveCloudDebounced: Boolean(overrides.calledSaveCloudDebounced),
+    firestoreSetAttempted: Boolean(overrides.firestoreSetAttempted),
+    firestoreSetCompleted: Boolean(overrides.firestoreSetCompleted),
+    firestoreSetError: overrides.firestoreSetError || "",
+    lastCloudSaveBlock: (typeof window !== "undefined" && window.__lastCloudSaveBlock) ? window.__lastCloudSaveBlock : null,
+    lastDangerousSaveBlock: (typeof window !== "undefined" && window.__lastDangerousSaveBlock) ? window.__lastDangerousSaveBlock : null,
+    localStorageUpdated: Boolean(overrides.localStorageUpdated),
+    remoteLayoutVerified: Boolean(overrides.remoteLayoutVerified),
+    remoteLayoutShape: remoteLayout && typeof remoteLayout === "object"
+      ? { type: Array.isArray(remoteLayout) ? "array" : "object", keyCount: Object.keys(remoteLayout).length }
+      : { type: remoteLayout == null ? "missing" : typeof remoteLayout, keyCount: 0 }
+  };
+}
+
+async function saveLayoutCloudOnly(area, layout, options = {}){
+  const cfg = LAYOUT_SAVE_AREA_CONFIG[area] || null;
+  const canonicalArea = cfg?.canonicalArea || area;
+  const layoutClone = (typeof cloneStructured === "function")
+    ? (cloneStructured(layout || {}) || {})
+    : JSON.parse(JSON.stringify(layout || {}));
+  let payload = {};
+  let debug = buildLayoutSaveDebugReport({
+    action: "layout_save_started",
+    area: canonicalArea || area || "",
+    firebasePath: FB.docRef?.path || "",
+    payload,
+    layoutKey: cfg?.stateKey || "",
+    usedWholeAppSnapshot: false,
+    calledSaveCloudDebounced: false,
+    localStorageUpdated: Boolean(options.localStorageUpdated)
+  });
+  if (typeof window !== "undefined") window.__lastLayoutSaveIsolationReport = debug;
+  if (!cfg){
+    debug = { ...debug, lastLayoutSaveAction: "blocked_unknown_layout_area", firestoreSetError: `Unknown layout area: ${area}` };
+    if (typeof window !== "undefined") window.__lastLayoutSaveIsolationReport = debug;
+    console.warn("Layout save skipped: unknown layout area", area);
+    return false;
+  }
+  if (!FB.ready || !FB.docRef){
+    debug = { ...debug, lastLayoutSaveAction: "blocked_firebase_not_ready" };
+    if (typeof window !== "undefined") window.__lastLayoutSaveIsolationReport = debug;
+    return false;
+  }
+  if (!canWriteCloud(`layout save (${cfg.stateKey})`)){
+    debug = buildLayoutSaveDebugReport({ ...debug, action: "blocked_can_write_cloud", payload, layoutKey: cfg.stateKey, localStorageUpdated: Boolean(options.localStorageUpdated) });
+    if (typeof window !== "undefined") window.__lastLayoutSaveIsolationReport = debug;
+    return false;
+  }
+  if (isVercelPreviewRuntime()){
+    debug = { ...debug, lastLayoutSaveAction: "blocked_preview_readonly" };
+    if (typeof window !== "undefined") window.__lastLayoutSaveIsolationReport = debug;
+    return false;
+  }
+  try {
+    const remoteSnap = await FB.docRef.get();
+    const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
+    const revisionConflict = remoteData && typeof remoteData === "object"
+      ? detectRemoteRevisionConflict(remoteData)
+      : { blocked:false };
+    if (revisionConflict.blocked){
+      blockCloudSave("Layout save paused because cloud changed. Refresh before editing layout.", revisionConflict);
+      debug = buildLayoutSaveDebugReport({ ...debug, action: "blocked_remote_revision_conflict", payload, layoutKey: cfg.stateKey, remoteData, localStorageUpdated: Boolean(options.localStorageUpdated) });
+      if (typeof window !== "undefined") window.__lastLayoutSaveIsolationReport = debug;
+      return false;
+    }
+    const previousRev = Math.max(
+      Number(remoteData?.syncMeta?.rev || 0),
+      Number(window.__loadedCloudRevisionForSaveGuard || 0),
+      Number(lastAppliedCloudRevision || 0)
+    );
+    payload = {
+      [cfg.stateKey]: layoutClone,
+      syncMeta: {
+        rev: Math.max(Date.now(), previousRev + 1),
+        updatedAtISO: new Date().toISOString(),
+        updatedBy: getCloudSyncClientId(),
+        lastLayoutSaveArea: canonicalArea,
+        lastLayoutSaveKey: cfg.stateKey
+      }
+    };
+    debug = buildLayoutSaveDebugReport({
+      action: "firestore_set_attempted",
+      area: canonicalArea,
+      firebasePath: FB.docRef?.path || "",
+      payload,
+      layoutKey: cfg.stateKey,
+      usedWholeAppSnapshot: false,
+      calledSaveCloudDebounced: false,
+      firestoreSetAttempted: true,
+      localStorageUpdated: Boolean(options.localStorageUpdated),
+      remoteData
+    });
+    if (typeof window !== "undefined") window.__lastLayoutSaveIsolationReport = debug;
+    await FB.docRef.set(payload, { merge:true });
+    const verifiedSnap = await FB.docRef.get();
+    const verifiedData = verifiedSnap && verifiedSnap.exists ? (typeof verifiedSnap.data === "function" ? verifiedSnap.data() : verifiedSnap.data) : null;
+    const verifiedLayout = verifiedData && typeof verifiedData === "object" ? verifiedData[cfg.stateKey] : null;
+    const remoteLayoutVerified = typeof stableStringify === "function"
+      ? stableStringify(verifiedLayout || {}) === stableStringify(layoutClone || {})
+      : true;
+    if (typeof window !== "undefined"){
+      window.__loadedCloudRevisionForSaveGuard = Number(payload.syncMeta.rev || 0);
+      lastAppliedCloudRevision = Number(payload.syncMeta.rev || 0);
+      const baseline = (window.__lastLoadedCloudState && typeof window.__lastLoadedCloudState === "object")
+        ? (cloneStructured(window.__lastLoadedCloudState) || { ...window.__lastLoadedCloudState })
+        : {};
+      baseline[cfg.stateKey] = cloneStructured(layoutClone) || layoutClone;
+      baseline.syncMeta = { ...(baseline.syncMeta && typeof baseline.syncMeta === "object" ? baseline.syncMeta : {}), ...payload.syncMeta };
+      window.__lastLoadedCloudState = baseline;
+    }
+    debug = buildLayoutSaveDebugReport({
+      action: "firestore_set_completed",
+      area: canonicalArea,
+      firebasePath: FB.docRef?.path || "",
+      payload,
+      layoutKey: cfg.stateKey,
+      usedWholeAppSnapshot: false,
+      calledSaveCloudDebounced: false,
+      firestoreSetAttempted: true,
+      firestoreSetCompleted: true,
+      localStorageUpdated: Boolean(options.localStorageUpdated),
+      remoteLayoutVerified,
+      remoteData: verifiedData
+    });
+    if (typeof window !== "undefined") window.__lastLayoutSaveIsolationReport = debug;
+    return true;
+  } catch (err){
+    debug = buildLayoutSaveDebugReport({
+      action: "firestore_set_error",
+      area: canonicalArea,
+      firebasePath: FB.docRef?.path || "",
+      payload,
+      layoutKey: cfg.stateKey,
+      usedWholeAppSnapshot: false,
+      calledSaveCloudDebounced: false,
+      firestoreSetAttempted: Boolean(Object.keys(payload).length),
+      firestoreSetError: err?.message || String(err),
+      localStorageUpdated: Boolean(options.localStorageUpdated)
+    });
+    if (typeof window !== "undefined") window.__lastLayoutSaveIsolationReport = debug;
+    console.warn("Layout-only cloud save failed", err);
+    return false;
+  }
+}
+
+if (typeof window !== "undefined"){
+  window.saveLayoutCloudOnly = saveLayoutCloudOnly;
+  window.debugLayoutSaveIsolation = function debugLayoutSaveIsolation(){
+    if (!window.DEBUG_MODE) return { available:false, reason:"DEBUG_MODE is disabled. Open with ?debug=1." };
+    const report = window.__lastLayoutSaveIsolationReport || buildLayoutSaveDebugReport({ action:"no_layout_save_recorded" });
+    console.info("Layout save isolation report", report);
+    return report;
+  };
 }
 
 if (typeof window !== "undefined"){

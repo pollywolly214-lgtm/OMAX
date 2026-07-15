@@ -2659,9 +2659,9 @@ function persistDashboardLayout(state){
     setCloudLayout("dashboard", layoutClone);
   }
   if (!cloud.loaded) changed = true;
-  if (changed && typeof saveCloudDebounced === "function"){
-    console.info("Layout change persisted", { layout: "dashboardLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true });
-    try { saveCloudDebounced(); }
+  if (changed && typeof saveLayoutCloudOnly === "function"){
+    console.info("Layout change persisted", { layout: "dashboardLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true, savePath: "layout-only" });
+    try { saveLayoutCloudOnly("dashboard", layoutClone, { localStorageUpdated: true }); }
     catch (err) { console.warn("Unable to schedule cloud save for dashboard layout", err); }
   }
 }
@@ -3888,9 +3888,9 @@ function persistCostLayout(state){
     setCloudLayout("cost", layoutClone);
   }
   if (!cloud.loaded) changed = true;
-  if (changed && typeof saveCloudDebounced === "function"){
-    console.info("Cost layout saved", { bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), windowCount: Object.keys(layoutClone || {}).length, saveTriggered: true });
-    try { saveCloudDebounced(); }
+  if (changed && typeof saveLayoutCloudOnly === "function"){
+    console.info("Cost layout saved", { bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), windowCount: Object.keys(layoutClone || {}).length, saveTriggered: true, savePath: "layout-only" });
+    try { saveLayoutCloudOnly("cost", layoutClone, { localStorageUpdated: true }); }
     catch (err) { console.warn("Unable to schedule cloud save for cost layout", err); }
   }
 }
@@ -4404,9 +4404,9 @@ function persistJobLayout(state){
     setCloudLayout("jobs", layoutClone);
   }
   if (!cloud.loaded) changed = true;
-  if (changed && typeof saveCloudDebounced === "function"){
-    console.info("Layout change persisted", { layout: "jobLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true });
-    try { saveCloudDebounced(); }
+  if (changed && typeof saveLayoutCloudOnly === "function"){
+    console.info("Layout change persisted", { layout: "jobLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true, savePath: "layout-only" });
+    try { saveLayoutCloudOnly("jobs", layoutClone, { localStorageUpdated: true }); }
     catch (err) { console.warn("Unable to schedule cloud save for jobs layout", err); }
   }
 }
