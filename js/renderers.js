@@ -6911,13 +6911,79 @@ function renderDashboard(){
       saveThrewError: null,
       hasPendingLocalChangesBefore: typeof hasPendingLocalChanges !== "undefined" ? Boolean(hasPendingLocalChanges) : null,
       hasPendingLocalChangesAfter: null,
+      windowInstanceFoundBeforeSave: false,
+      windowOccurrenceFoundBeforeSave: false,
+      windowInstancesCountBeforeSave: 0,
+      windowOccurrencesCountBeforeSave: 0,
+      snapshotInstanceFoundBeforeSave: false,
+      snapshotOccurrenceFoundBeforeSave: false,
+      snapshotInstancesCountBeforeSave: 0,
+      snapshotOccurrencesCountBeforeSave: 0,
+      compactedInstanceFoundBeforeWrite: false,
+      compactedOccurrenceFoundBeforeWrite: false,
+      compactedInstancesCountBeforeWrite: 0,
+      compactedOccurrencesCountBeforeWrite: 0,
+      saveCloudInternalEntered: false,
+      canWriteCloudPassed: false,
+      revisionConflictBlocked: false,
+      protectedPreflightBlocked: false,
+      dangerousReductionBlocked: false,
+      firestoreSetAttempted: false,
+      firestoreSetCompleted: false,
+      firestoreSetError: null,
+      saveCloudInternalReturnValue: null,
+      saveCloudInternalReturnType: null,
+      hasPendingLocalChangesBeforeInternal: null,
+      hasPendingLocalChangesAfterInternal: null,
+      firebasePath: "",
+      projectId: "",
+      workspaceDocPath: "",
       lastDangerousSaveBlock: typeof window !== "undefined" ? (window.__lastDangerousSaveBlock || null) : null,
       lastCloudSaveBlock: typeof window !== "undefined" ? (window.__lastCloudSaveBlock || null) : null,
+      remoteGetAttempted: false,
+      remoteGetSource: "",
+      remoteGetCompleted: false,
+      remoteGetError: null,
       remoteVerificationPassed: false,
       remoteInstanceFound: false,
       remoteOccurrenceFound: false,
+      remoteInstancesCount: 0,
+      remoteOccurrencesCount: 0,
       remoteVerificationError: null
     };
+    if (typeof FB !== "undefined"){
+      trace.firebasePath = FB.docRef?.path || "";
+      trace.workspaceDocPath = FB.workspaceDoc?.path || "";
+      trace.projectId = FB.app?.options?.projectId || window.FIREBASE_CONFIG?.projectId || "";
+    }
+    const currentInstances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
+    const currentOccurrences = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+    trace.windowInstancesCountBeforeSave = currentInstances.length;
+    trace.windowOccurrencesCountBeforeSave = currentOccurrences.length;
+    trace.windowInstanceFoundBeforeSave = currentInstances.some(entry => entry && String(entry.id || "") === String(trace.instanceId || ""));
+    trace.windowOccurrenceFoundBeforeSave = currentOccurrences.some(entry => entry && String(entry.id || "") === String(trace.occurrenceId || ""));
+    try {
+      if (typeof snapshotState === "function"){
+        const pendingSnapshot = snapshotState();
+        const snapshotInstances = Array.isArray(pendingSnapshot?.maintenanceCalendarInstancesV2) ? pendingSnapshot.maintenanceCalendarInstancesV2 : [];
+        const snapshotOccurrences = Array.isArray(pendingSnapshot?.maintenanceOccurrencesV2) ? pendingSnapshot.maintenanceOccurrencesV2 : [];
+        trace.snapshotInstancesCountBeforeSave = snapshotInstances.length;
+        trace.snapshotOccurrencesCountBeforeSave = snapshotOccurrences.length;
+        trace.snapshotInstanceFoundBeforeSave = snapshotInstances.some(entry => entry && String(entry.id || "") === String(trace.instanceId || ""));
+        trace.snapshotOccurrenceFoundBeforeSave = snapshotOccurrences.some(entry => entry && String(entry.id || "") === String(trace.occurrenceId || ""));
+        if (typeof compactStateForStorage === "function"){
+          const compactedSnapshot = compactStateForStorage(pendingSnapshot);
+          const compactedInstances = Array.isArray(compactedSnapshot?.maintenanceCalendarInstancesV2) ? compactedSnapshot.maintenanceCalendarInstancesV2 : [];
+          const compactedOccurrences = Array.isArray(compactedSnapshot?.maintenanceOccurrencesV2) ? compactedSnapshot.maintenanceOccurrencesV2 : [];
+          trace.compactedInstancesCountBeforeWrite = compactedInstances.length;
+          trace.compactedOccurrencesCountBeforeWrite = compactedOccurrences.length;
+          trace.compactedInstanceFoundBeforeWrite = compactedInstances.some(entry => entry && String(entry.id || "") === String(trace.instanceId || ""));
+          trace.compactedOccurrenceFoundBeforeWrite = compactedOccurrences.some(entry => entry && String(entry.id || "") === String(trace.occurrenceId || ""));
+        }
+      }
+    } catch (err){
+      trace.snapshotTraceError = err?.message || String(err);
+    }
     const rememberTrace = ()=>{
       if (!window.DEBUG_MODE) return;
       if (!Array.isArray(window.__explicitMaintenanceAddSaveTrace)) window.__explicitMaintenanceAddSaveTrace = [];
@@ -6944,6 +7010,7 @@ function renderDashboard(){
     try {
       if (typeof saveCloudNow === "function"){
         trace.saveCloudNowCalled = true;
+        window.__activeExplicitMaintenanceAddSaveTrace = trace;
         const result = saveCloudNow();
         trace.saveCloudNowReturnedPromise = !!(result && typeof result.then === "function");
         if (result && typeof result.then === "function") await result;
@@ -6960,13 +7027,25 @@ function renderDashboard(){
       trace.hasPendingLocalChangesAfter = typeof hasPendingLocalChanges !== "undefined" ? Boolean(hasPendingLocalChanges) : null;
       trace.lastDangerousSaveBlock = typeof window !== "undefined" ? (window.__lastDangerousSaveBlock || null) : null;
       trace.lastCloudSaveBlock = typeof window !== "undefined" ? (window.__lastCloudSaveBlock || null) : null;
+      if (window.__activeExplicitMaintenanceAddSaveTrace === trace) window.__activeExplicitMaintenanceAddSaveTrace = null;
     }
-    if (!trace.saveThrewError && trace.instanceId && trace.occurrenceId && window.FB && FB.ready && FB.docRef && typeof FB.docRef.get === "function"){
+    if (!trace.saveThrewError && trace.instanceId && trace.occurrenceId && typeof FB !== "undefined" && FB.ready && FB.docRef && typeof FB.docRef.get === "function"){
       try {
-        const remoteSnap = await FB.docRef.get();
+        trace.remoteGetAttempted = true;
+        let remoteSnap = null;
+        try {
+          remoteSnap = await FB.docRef.get({ source: "server" });
+          trace.remoteGetSource = "server";
+        } catch (serverErr){
+          trace.remoteGetSource = `fallback_after_server_get_failed:${serverErr?.message || String(serverErr)}`;
+          remoteSnap = await FB.docRef.get();
+        }
+        trace.remoteGetCompleted = true;
         const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
         const remoteInstances = Array.isArray(remoteData?.maintenanceCalendarInstancesV2) ? remoteData.maintenanceCalendarInstancesV2 : [];
         const remoteOccurrences = Array.isArray(remoteData?.maintenanceOccurrencesV2) ? remoteData.maintenanceOccurrencesV2 : [];
+        trace.remoteInstancesCount = remoteInstances.length;
+        trace.remoteOccurrencesCount = remoteOccurrences.length;
         trace.remoteInstanceFound = remoteInstances.some(entry => entry && String(entry.id || "") === String(trace.instanceId));
         trace.remoteOccurrenceFound = remoteOccurrences.some(entry => entry && String(entry.id || "") === String(trace.occurrenceId));
         trace.remoteVerificationPassed = trace.remoteInstanceFound && trace.remoteOccurrenceFound;
@@ -6974,8 +7053,11 @@ function renderDashboard(){
           window.__lastLoadedCloudState = (typeof cloneStructured === "function" ? cloneStructured(remoteData) : null) || { ...remoteData };
         }
       } catch (err){
+        trace.remoteGetError = err?.message || String(err);
         trace.remoteVerificationError = err?.message || String(err);
       }
+    } else if (!trace.saveThrewError && trace.instanceId && trace.occurrenceId){
+      trace.remoteVerificationError = "FB.docRef.get unavailable for explicit maintenance add verification.";
     } else if (!trace.instanceId && !trace.occurrenceId && !trace.saveThrewError){
       trace.remoteVerificationPassed = true;
     }

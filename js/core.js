@@ -5559,11 +5559,52 @@ function adoptState(doc){
 
 
 const saveCloudInternal = debounce(async ()=>{
-  if (!FB.ready || !FB.docRef) return;
-  if (!canWriteCloud("saveCloudInternal")) return;
+  const explicitTrace = (typeof window !== "undefined" && window.__activeExplicitMaintenanceAddSaveTrace && typeof window.__activeExplicitMaintenanceAddSaveTrace === "object")
+    ? window.__activeExplicitMaintenanceAddSaveTrace
+    : null;
+  if (explicitTrace){
+    explicitTrace.saveCloudInternalEntered = true;
+    explicitTrace.hasPendingLocalChangesBeforeInternal = Boolean(hasPendingLocalChanges);
+    explicitTrace.firebasePath = FB.docRef?.path || "";
+    explicitTrace.workspaceDocPath = FB.workspaceDoc?.path || "";
+    explicitTrace.projectId = FB.app?.options?.projectId || window.FIREBASE_CONFIG?.projectId || "";
+  }
+  if (!FB.ready || !FB.docRef){
+    if (explicitTrace){
+      explicitTrace.saveCloudInternalReturnValue = "firebase_not_ready";
+      explicitTrace.saveCloudInternalReturnType = "early_return";
+    }
+    return;
+  }
+  const canWrite = canWriteCloud("saveCloudInternal");
+  if (explicitTrace) explicitTrace.canWriteCloudPassed = Boolean(canWrite);
+  if (!canWrite){
+    if (explicitTrace){
+      explicitTrace.saveCloudInternalReturnValue = "can_write_cloud_blocked";
+      explicitTrace.saveCloudInternalReturnType = "early_return";
+      explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
+    }
+    return;
+  }
   try{
     const rawSnap = snapshotState();
+    if (explicitTrace){
+      const rawInstances = Array.isArray(rawSnap?.maintenanceCalendarInstancesV2) ? rawSnap.maintenanceCalendarInstancesV2 : [];
+      const rawOccurrences = Array.isArray(rawSnap?.maintenanceOccurrencesV2) ? rawSnap.maintenanceOccurrencesV2 : [];
+      explicitTrace.snapshotInstancesCountInsideSave = rawInstances.length;
+      explicitTrace.snapshotOccurrencesCountInsideSave = rawOccurrences.length;
+      explicitTrace.snapshotInstanceFoundInsideSave = rawInstances.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
+      explicitTrace.snapshotOccurrenceFoundInsideSave = rawOccurrences.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
+    }
     const snap = compactStateForStorage(rawSnap);
+    if (explicitTrace){
+      const compactedInstances = Array.isArray(snap?.maintenanceCalendarInstancesV2) ? snap.maintenanceCalendarInstancesV2 : [];
+      const compactedOccurrences = Array.isArray(snap?.maintenanceOccurrencesV2) ? snap.maintenanceOccurrencesV2 : [];
+      explicitTrace.compactedInstancesCountInsideSave = compactedInstances.length;
+      explicitTrace.compactedOccurrencesCountInsideSave = compactedOccurrences.length;
+      explicitTrace.compactedInstanceFoundInsideSave = compactedInstances.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
+      explicitTrace.compactedOccurrenceFoundInsideSave = compactedOccurrences.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
+    }
     const pendingMetrics = logMaintenanceHistoryDiagnostics("before-save", snap);
     const baselineMetrics = collectMaintenanceHistoryMetrics(window.__lastLoadedCloudState || {});
     const pendingCore = logCoreBusinessDiagnostics("before-save", snap);
@@ -5601,6 +5642,7 @@ const saveCloudInternal = debounce(async ()=>{
     const revisionConflict = remoteData && typeof remoteData === "object"
       ? detectRemoteRevisionConflict(remoteData)
       : { blocked:false };
+    if (explicitTrace) explicitTrace.revisionConflictBlocked = Boolean(revisionConflict?.blocked);
     const allowFirstRunPreflight = Boolean(remoteSnap && !remoteSnap.exists)
       && !stateHasMeaningfulData(window.__lastLoadedCloudState || {})
       && !stateHasMeaningfulData(localBackupForPreflight || {});
@@ -5617,6 +5659,12 @@ const saveCloudInternal = debounce(async ()=>{
       allowFirstRun: allowFirstRunPreflight
     });
     if (registryPreflight.blocked){
+      if (explicitTrace){
+        explicitTrace.protectedPreflightBlocked = true;
+        explicitTrace.saveCloudInternalReturnValue = "protected_preflight_blocked";
+        explicitTrace.saveCloudInternalReturnType = "early_return";
+        explicitTrace.hasPendingLocalChangesAfterInternal = true;
+      }
       rememberDangerousSaveBlock(registryPreflight, {
         reason: "saveCloudInternal",
         firestorePath: FB.docRef?.path || "",
@@ -5628,12 +5676,23 @@ const saveCloudInternal = debounce(async ()=>{
     }
     if (remoteData && typeof remoteData === "object"){
       if (revisionConflict.blocked){
+        if (explicitTrace){
+          explicitTrace.saveCloudInternalReturnValue = "revision_conflict_blocked";
+          explicitTrace.saveCloudInternalReturnType = "early_return";
+          explicitTrace.hasPendingLocalChangesAfterInternal = true;
+        }
         blockCloudSave("remote state is newer than this client. Export/reload/merge review before saving.", revisionConflict);
         hasPendingLocalChanges = true;
         return;
       }
       const dangerous = detectDangerousProtectedFieldReduction(remoteData, snap);
       if (dangerous.blocked){
+        if (explicitTrace){
+          explicitTrace.dangerousReductionBlocked = true;
+          explicitTrace.saveCloudInternalReturnValue = "dangerous_reduction_blocked";
+          explicitTrace.saveCloudInternalReturnType = "early_return";
+          explicitTrace.hasPendingLocalChangesAfterInternal = true;
+        }
         blockCloudSave("protected field reduction detected.", dangerous.issues);
         hasPendingLocalChanges = true;
         return;
@@ -5645,10 +5704,15 @@ const saveCloudInternal = debounce(async ()=>{
     persistLocalStateBackup(snap);
     const writeRev = Number(snap?.syncMeta?.rev || 0);
     snap.saveMeta = { lastSavedAt: new Date().toISOString(), lastSaveStatus: "saved", lastSaveError: "", lastSaveSizeBytes: sizeBytes };
-    await FB.docRef.set(snap, { merge:true });
-    if (typeof window !== "undefined"){
-      window.__lastLoadedCloudState = cloneStructured(snap) || { ...snap };
+    if (explicitTrace){
+      explicitTrace.firestoreSetAttempted = true;
+      explicitTrace.firestoreWritePayloadInstancesCount = Array.isArray(snap.maintenanceCalendarInstancesV2) ? snap.maintenanceCalendarInstancesV2.length : 0;
+      explicitTrace.firestoreWritePayloadOccurrencesCount = Array.isArray(snap.maintenanceOccurrencesV2) ? snap.maintenanceOccurrencesV2.length : 0;
+      explicitTrace.firestoreWritePayloadInstanceFound = Array.isArray(snap.maintenanceCalendarInstancesV2) && snap.maintenanceCalendarInstancesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
+      explicitTrace.firestoreWritePayloadOccurrenceFound = Array.isArray(snap.maintenanceOccurrencesV2) && snap.maintenanceOccurrencesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
     }
+    await FB.docRef.set(snap, { merge:true });
+    if (explicitTrace) explicitTrace.firestoreSetCompleted = true;
     console.info("Cloud save succeeded", {
       workspaceId: WORKSPACE_ID,
       path: FB.docRef?.path || "",
@@ -5671,6 +5735,11 @@ const saveCloudInternal = debounce(async ()=>{
       if (el) el.value = JSON.stringify(snap, null, 2);
     }
     hasPendingLocalChanges = false;
+    if (explicitTrace){
+      explicitTrace.hasPendingLocalChangesAfterInternal = false;
+      explicitTrace.saveCloudInternalReturnValue = "completed";
+      explicitTrace.saveCloudInternalReturnType = "resolved";
+    }
     if (FB.workspaceDoc){
       await updateWorkspaceMetadata({
         workspaceId: WORKSPACE_ID,
@@ -5678,6 +5747,12 @@ const saveCloudInternal = debounce(async ()=>{
       });
     }
   }catch(e){
+    if (explicitTrace){
+      explicitTrace.firestoreSetError = e?.message || String(e);
+      explicitTrace.saveCloudInternalReturnValue = "threw";
+      explicitTrace.saveCloudInternalReturnType = "rejected_or_caught";
+      explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
+    }
     console.error("Cloud save failed:", e);
   }
 }, 1800);
