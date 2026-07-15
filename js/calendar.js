@@ -636,8 +636,37 @@ function appendV2RepeatEventByRoot(opts = {}){
   const payload = opts.payload && typeof opts.payload === "object" ? opts.payload : {};
   if (!instanceId || !taskId || !rootOccurrenceId || !originalDateISO || !eventType) return false;
   const list = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : (window.maintenanceOccurrencesV2 = []);
+  const existing = list.find(entry => entry
+    && String(entry.instanceId || "") === instanceId
+    && String(entry.taskId || "") === taskId
+    && String(entry.rootOccurrenceId || "") === rootOccurrenceId
+    && String(entry.eventType || "") === eventType
+    && normalizeDateKey(entry.effectiveDateISO || null) === originalDateISO
+    && normalizeDateKey(entry.payload?.displayDateISO || null) === (displayDateISO || null));
+  if (existing){
+    if (typeof window.recordMaintenanceV2MutationSource === "function"){
+      window.recordMaintenanceV2MutationSource({
+        helper: "appendV2RepeatEventByRoot",
+        action: "deduped_or_reused",
+        eventType,
+        taskId,
+        instanceId,
+        occurrenceId: existing.id,
+        effectiveDateISO: originalDateISO,
+        rootOccurrenceId
+      });
+    }
+    return true;
+  }
+  let id = genId(`v2_repeat_${eventType}`);
+  const baseId = String(id);
+  let guard = 0;
+  while (list.some(entry => entry && String(entry.id || "") === String(id)) && guard < 20){
+    guard += 1;
+    id = `${baseId}_${guard}`;
+  }
   list.unshift({
-    id: genId(`v2_repeat_${eventType}`),
+    id,
     system: "v2",
     schemaVersion: 2,
     instanceId,
@@ -648,6 +677,18 @@ function appendV2RepeatEventByRoot(opts = {}){
     rootOccurrenceId,
     payload: { ...payload, ...(displayDateISO ? { displayDateISO } : {}) }
   });
+  if (typeof window.recordMaintenanceV2MutationSource === "function"){
+    window.recordMaintenanceV2MutationSource({
+      helper: "appendV2RepeatEventByRoot",
+      action: "appended",
+      eventType,
+      taskId,
+      instanceId,
+      occurrenceId: id,
+      effectiveDateISO: originalDateISO,
+      rootOccurrenceId
+    });
+  }
   let anchorBefore = null;
   let anchorAfter = null;
   let anchorAdvanced = false;
@@ -882,8 +923,37 @@ function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supe
   const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
   const base = lookup[String(baseOccurrenceId)];
   if (!base) return false;
+  const existing = list.find(entry => entry
+    && String(entry.instanceId || "") === String(base.instanceId || "")
+    && String(entry.taskId || "") === String(base.taskId || "")
+    && String(entry.eventType || "") === String(eventType || "")
+    && normalizeDateKey(entry.effectiveDateISO || null) === normalizeDateKey(base.dateISO || null)
+    && String(entry.rootOccurrenceId || "") === String(baseOccurrenceId || "")
+    && String(entry.supersedesEventId || "") === String(supersedesEventId || ""));
+  if (existing){
+    if (typeof window.recordMaintenanceV2MutationSource === "function"){
+      window.recordMaintenanceV2MutationSource({
+        helper: "appendV2OccurrenceEvent",
+        action: "deduped_or_reused",
+        eventType,
+        taskId: base.taskId,
+        instanceId: base.instanceId,
+        occurrenceId: existing.id,
+        effectiveDateISO: base.dateISO,
+        rootOccurrenceId: String(baseOccurrenceId)
+      });
+    }
+    return true;
+  }
+  let id = genId(`v2_${eventType}`);
+  const baseId = String(id);
+  let guard = 0;
+  while (list.some(entry => entry && String(entry.id || "") === String(id)) && guard < 20){
+    guard += 1;
+    id = `${baseId}_${guard}`;
+  }
   const next = {
-    id: genId(`v2_${eventType}`),
+    id,
     system: "v2",
     schemaVersion: 2,
     instanceId: base.instanceId,
@@ -896,6 +966,18 @@ function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supe
     payload: { ...(payload || {}) }
   };
   list.unshift(next);
+  if (typeof window.recordMaintenanceV2MutationSource === "function"){
+    window.recordMaintenanceV2MutationSource({
+      helper: "appendV2OccurrenceEvent",
+      action: "appended",
+      eventType,
+      taskId: base.taskId,
+      instanceId: base.instanceId,
+      occurrenceId: id,
+      effectiveDateISO: base.dateISO,
+      rootOccurrenceId: String(baseOccurrenceId)
+    });
+  }
   if (typeof saveCloudNow === "function") saveCloudNow();
   else saveCloudDebounced();
   renderCalendar();
@@ -2906,6 +2988,24 @@ function restoreCriticalIntervalTasks(){
     if (!isTemplateTask(task)) return;
     const templateId = task.templateId != null ? task.templateId : task.id;
     if (hasInstanceForTemplate(templateId)) return;
+    if (typeof window !== "undefined"
+      && typeof window.isMaintenanceV2NewRecordsPreferred === "function"
+      && window.isMaintenanceV2NewRecordsPreferred()){
+      if (typeof window.recordMaintenanceV2MutationSource === "function"){
+        window.recordMaintenanceV2MutationSource({
+          helper: "restoreCriticalIntervalTasks",
+          action: "skipped_render_time_v2_schedule",
+          eventType: "scheduled",
+          taskId: task.id,
+          legacyTaskId: task.id,
+          effectiveDateISO: ymd(new Date()),
+          phase: "render_repair",
+          reason: "render_calendar_restore_must_not_append_v2_records"
+        });
+      }
+      if (window.DEBUG_MODE) console.warn("[maintenance-v2] skipped render-time critical interval repair because V2 scheduled records must only be appended by explicit user actions", { taskId: task.id, name: task.name });
+      return;
+    }
     if (typeof scheduleExistingIntervalTask === "function"){
       const created = scheduleExistingIntervalTask(task, { dateISO: ymd(new Date()), refreshDashboard: false });
       if (created) changed = true;
