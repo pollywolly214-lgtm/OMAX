@@ -5610,10 +5610,22 @@ const saveCloudInternal = debounce(async ()=>{
     const pendingCore = logCoreBusinessDiagnostics("before-save", snap);
     const baselineCore = collectCoreBusinessMetrics(window.__lastLoadedCloudState || {});
     if ((pendingMetrics.completedDatesCount + pendingMetrics.manualHistoryCount + pendingMetrics.maintenanceOccurrencesV2Count + 10) < (baselineMetrics.completedDatesCount + baselineMetrics.manualHistoryCount + baselineMetrics.maintenanceOccurrencesV2Count)){
+      if (explicitTrace){
+        explicitTrace.maintenanceHistoryReductionBlocked = true;
+        explicitTrace.saveCloudInternalReturnValue = "maintenance_history_reduction_blocked";
+        explicitTrace.saveCloudInternalReturnType = "early_return";
+        explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
+      }
       console.error("Cloud save blocked: maintenance completion history would be reduced unexpectedly.", { pendingMetrics, baselineMetrics });
       return;
     }
     if (pendingCore.inventoryCount + 5 < baselineCore.inventoryCount || pendingCore.orderRequestsCount + 2 < baselineCore.orderRequestsCount || pendingCore.orderLineItemCount + 5 < baselineCore.orderLineItemCount || pendingCore.settingsFoldersCount + 1 < baselineCore.settingsFoldersCount || pendingCore.toleranceFieldCount + 1 < baselineCore.toleranceFieldCount || (!pendingCore.layoutPresent && baselineCore.layoutPresent)){
+      if (explicitTrace){
+        explicitTrace.coreBusinessReductionBlocked = true;
+        explicitTrace.saveCloudInternalReturnValue = "core_business_reduction_blocked";
+        explicitTrace.saveCloudInternalReturnType = "early_return";
+        explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
+      }
       console.error("Cloud save blocked: core business data would be reduced unexpectedly.", { pendingCore, baselineCore });
       return;
     }
@@ -5624,6 +5636,12 @@ const saveCloudInternal = debounce(async ()=>{
       if (sizeBytes >= FIRESTORE_STRONG_WARN_BYTES) console.error("Cloud state size strong warning", { sizeBytes, strongWarnAt: FIRESTORE_STRONG_WARN_BYTES });
     }
     if (sizeBytes >= FIRESTORE_BLOCK_BYTES){
+      if (explicitTrace){
+        explicitTrace.payloadSizeBlocked = true;
+        explicitTrace.saveCloudInternalReturnValue = "payload_size_blocked";
+        explicitTrace.saveCloudInternalReturnType = "early_return";
+        explicitTrace.hasPendingLocalChangesAfterInternal = true;
+      }
       console.error("Cloud save blocked: state payload too large", { sizeBytes, blockAt: FIRESTORE_BLOCK_BYTES });
       logStateSizeDiagnostics(snap, "blocked-save");
       hasPendingLocalChanges = true;

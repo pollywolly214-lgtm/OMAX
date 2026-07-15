@@ -6928,6 +6928,9 @@ function renderDashboard(){
       revisionConflictBlocked: false,
       protectedPreflightBlocked: false,
       dangerousReductionBlocked: false,
+      maintenanceHistoryReductionBlocked: false,
+      coreBusinessReductionBlocked: false,
+      payloadSizeBlocked: false,
       firestoreSetAttempted: false,
       firestoreSetCompleted: false,
       firestoreSetError: null,
@@ -7079,6 +7082,14 @@ function renderDashboard(){
       });
     }
     return trace;
+  }
+
+  if (window.DEBUG_MODE && typeof window.debugExplicitMaintenanceAddSaveTrace !== "function"){
+    window.debugExplicitMaintenanceAddSaveTrace = function(){
+      return Array.isArray(window.__explicitMaintenanceAddSaveTrace)
+        ? window.__explicitMaintenanceAddSaveTrace.map(entry => ({ ...entry }))
+        : [];
+    };
   }
 
   taskForm?.addEventListener("submit", async (e)=>{
