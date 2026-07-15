@@ -832,13 +832,14 @@ window.createMaintenanceV2FromTemplate = createMaintenanceV2FromTemplate;
 
 function buildMaintenanceV2DuplicateCalendarSpamReport(){
   const collections = ensureMaintenanceV2Collections();
-  const duplicateGroups = (items, keyFn, labelFn = null)=> {
+  const normalizeKeyPart = value => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const duplicateGroups = (items, keyFn, summarizeFn = null)=> {
     const groups = new Map();
     items.forEach((item, index) => {
       const key = keyFn(item, index);
       if (!key) return;
       const list = groups.get(key) || [];
-      list.push({ item, index, label: labelFn ? labelFn(item, index) : key });
+      list.push({ item, index, summary: summarizeFn ? summarizeFn(item, index) : null });
       groups.set(key, list);
     });
     return Array.from(groups.entries())
@@ -846,31 +847,60 @@ function buildMaintenanceV2DuplicateCalendarSpamReport(){
       .map(([key, list]) => ({ key, count: list.length, entries: list }));
   };
   const taskById = new Map();
-  collections.tasks.forEach(task => { if (task?.id != null && !taskById.has(String(task.id))) taskById.set(String(task.id), task); });
-  const instanceById = new Map();
-  collections.instances.forEach(instance => { if (instance?.id != null && !instanceById.has(String(instance.id))) instanceById.set(String(instance.id), instance); });
+  collections.tasks.forEach((task, index) => {
+    if (task?.id != null && !taskById.has(String(task.id))) taskById.set(String(task.id), { task, index });
+  });
+  const instanceCandidatesById = new Map();
+  collections.instances.forEach((instance, index) => {
+    const id = String(instance?.id || "");
+    if (!id) return;
+    const list = instanceCandidatesById.get(id) || [];
+    list.push({ instance, index });
+    instanceCandidatesById.set(id, list);
+  });
+  const resolveInstanceForEvent = (event)=> {
+    const instanceId = String(event?.instanceId || "");
+    const candidates = instanceCandidatesById.get(instanceId) || [];
+    if (!candidates.length) return null;
+    const eventLegacy = String(event?.legacyTaskId || "");
+    const eventTask = String(event?.taskId || "");
+    const eventDate = normalizeDateKey(event?.effectiveDateISO || event?.dateISO || null);
+    return candidates.find(({ instance }) => {
+      if (!instance || String(instance.instanceMode || "") !== "one_time") return false;
+      if (eventLegacy && String(instance.legacyTaskId || "") !== eventLegacy) return false;
+      if (eventTask && String(instance.taskId || "") !== eventTask) return false;
+      if (eventDate && normalizeDateKey(instance.startDateISO || null) !== eventDate) return false;
+      return true;
+    }) || candidates[0];
+  };
   const scheduledOneTimeEvents = collections.occurrences
-    .map((event, index)=>({ event, index }))
-    .filter(({ event }) => event
+    .map((event, index)=>({ event, index, instanceRef: resolveInstanceForEvent(event) }))
+    .filter(({ event, instanceRef }) => event
+      && instanceRef
       && (String(event.system || "") === "v2" || Number(event.schemaVersion || 0) >= 2)
-      && String(event.eventType || "") === "scheduled")
-    .filter(({ event }) => {
-      const instance = instanceById.get(String(event.instanceId || ""));
-      return instance && String(instance.instanceMode || "") === "one_time";
-    });
+      && String(event.eventType || "") === "scheduled"
+      && String(instanceRef.instance?.instanceMode || "") === "one_time");
   const equivalentScheduledGroups = duplicateGroups(
     scheduledOneTimeEvents,
-    ({ event }) => {
-      const instance = instanceById.get(String(event.instanceId || ""));
-      const task = taskById.get(String(instance?.taskId || event.taskId || ""));
-      const dateISO = normalizeDateKey(event.effectiveDateISO || event.dateISO || instance?.startDateISO || null);
-      const taskName = String(event.taskName || task?.name || "Maintenance reminder").trim().toLowerCase();
-      const legacyTaskId = String(instance?.legacyTaskId || event.legacyTaskId || task?.legacyTaskId || event.taskId || instance?.taskId || "").trim();
+    ({ event, instanceRef }) => {
+      const taskRef = taskById.get(String(instanceRef?.instance?.taskId || event.taskId || ""));
+      const task = taskRef?.task || null;
+      const dateISO = normalizeDateKey(event.effectiveDateISO || event.dateISO || instanceRef?.instance?.startDateISO || null);
+      const taskName = normalizeKeyPart(event.taskName || task?.name || "Maintenance reminder");
+      const legacyTaskId = normalizeKeyPart(instanceRef?.instance?.legacyTaskId || event.legacyTaskId || task?.legacyTaskId || event.taskId || instanceRef?.instance?.taskId || "");
       return dateISO ? ["one_time", legacyTaskId, taskName, dateISO, String(event.eventType || "")].join("|") : "";
     },
-    ({ event }) => String(event.id || "")
+    ({ event, instanceRef }) => ({
+      occurrenceId: String(event?.id || ""),
+      instanceId: String(event?.instanceId || ""),
+      taskId: String(event?.taskId || instanceRef?.instance?.taskId || ""),
+      legacyTaskId: String(event?.legacyTaskId || instanceRef?.instance?.legacyTaskId || ""),
+      dateISO: normalizeDateKey(event?.effectiveDateISO || event?.dateISO || instanceRef?.instance?.startDateISO || null) || "",
+      eventType: String(event?.eventType || "")
+    })
   );
-  const removableScheduledOccurrenceIds = [];
+  const removableScheduledOccurrenceIndexes = [];
+  const canonicalScheduledOccurrenceIndexes = [];
   equivalentScheduledGroups.forEach(group => {
     const sorted = group.entries.slice().sort((a, b) => {
       const at = Date.parse(String(a.item.event.recordedAtISO || ""));
@@ -882,30 +912,98 @@ function buildMaintenanceV2DuplicateCalendarSpamReport(){
       if (!av && bv) return 1;
       return a.item.index - b.item.index;
     });
+    if (sorted[0]) canonicalScheduledOccurrenceIndexes.push(sorted[0].item.index);
     sorted.slice(1).forEach(entry => {
-      const id = String(entry.item.event.id || "");
-      if (id) removableScheduledOccurrenceIds.push(id);
+      removableScheduledOccurrenceIndexes.push({
+        index: entry.item.index,
+        id: String(entry.item.event?.id || ""),
+        instanceId: String(entry.item.event?.instanceId || ""),
+        groupKey: group.key
+      });
     });
   });
+  const removableOccurrenceIndexSet = new Set(removableScheduledOccurrenceIndexes.map(entry => Number(entry.index)));
+  const remainingOccurrenceInstanceIds = new Set();
+  collections.occurrences.forEach((event, index) => {
+    if (removableOccurrenceIndexSet.has(index)) return;
+    const instanceId = String(event?.instanceId || "");
+    if (instanceId) remainingOccurrenceInstanceIds.add(instanceId);
+  });
+  const duplicateTaskIds = duplicateGroups(
+    collections.tasks,
+    task => task?.id != null ? String(task.id) : "",
+    task => ({ id: String(task?.id || ""), legacyTaskId: String(task?.legacyTaskId || ""), name: String(task?.name || "") })
+  );
+  const duplicateInstanceIds = duplicateGroups(
+    collections.instances,
+    instance => instance?.id != null ? String(instance.id) : "",
+    instance => ({ id: String(instance?.id || ""), legacyTaskId: String(instance?.legacyTaskId || ""), taskId: String(instance?.taskId || ""), instanceMode: String(instance?.instanceMode || ""), startDateISO: String(instance?.startDateISO || "") })
+  );
+  const removableInstanceIndexes = [];
+  duplicateInstanceIds.forEach(group => {
+    const oneTimeEntries = group.entries.filter(({ item }) => item && String(item.instanceMode || "") === "one_time");
+    if (oneTimeEntries.length < 2) return;
+    const equivalentBuckets = new Map();
+    oneTimeEntries.forEach(entry => {
+      const instance = entry.item;
+      const key = [
+        String(instance.id || ""),
+        String(instance.legacyTaskId || ""),
+        String(instance.taskId || ""),
+        normalizeDateKey(instance.startDateISO || null) || "",
+        String(instance.status || "active")
+      ].join("|");
+      const list = equivalentBuckets.get(key) || [];
+      list.push(entry);
+      equivalentBuckets.set(key, list);
+    });
+    equivalentBuckets.forEach(list => {
+      if (list.length < 2) return;
+      list.slice(1).forEach(entry => {
+        const instanceId = String(entry.item?.id || "");
+        removableInstanceIndexes.push({
+          index: entry.index,
+          id: instanceId,
+          groupKey: group.key,
+          remainingOccurrencesShareId: remainingOccurrenceInstanceIds.has(instanceId)
+        });
+      });
+    });
+  });
+  const duplicateOccurrenceIds = duplicateGroups(
+    collections.occurrences,
+    event => event?.id != null ? String(event.id) : "",
+    event => ({ id: String(event?.id || ""), eventType: String(event?.eventType || ""), taskId: String(event?.taskId || ""), instanceId: String(event?.instanceId || ""), effectiveDateISO: String(event?.effectiveDateISO || "") })
+  );
+  const duplicateRootOccurrenceIds = duplicateGroups(
+    collections.occurrences,
+    event => event?.rootOccurrenceId != null ? String(event.rootOccurrenceId) : "",
+    event => ({ rootOccurrenceId: String(event?.rootOccurrenceId || ""), eventType: String(event?.eventType || ""), taskId: String(event?.taskId || ""), instanceId: String(event?.instanceId || ""), effectiveDateISO: String(event?.effectiveDateISO || "") })
+  );
   return {
     generatedAtISO: new Date().toISOString(),
     counts: {
       maintenanceTasksV2: collections.tasks.length,
       maintenanceCalendarInstancesV2: collections.instances.length,
       maintenanceOccurrencesV2: collections.occurrences.length,
-      duplicateTaskIdGroups: duplicateGroups(collections.tasks, task => task?.id != null ? String(task.id) : "").length,
-      duplicateInstanceIdGroups: duplicateGroups(collections.instances, instance => instance?.id != null ? String(instance.id) : "").length,
-      duplicateOccurrenceIdGroups: duplicateGroups(collections.occurrences, event => event?.id != null ? String(event.id) : "").length,
-      duplicateRootOccurrenceIdGroups: duplicateGroups(collections.occurrences, event => event?.rootOccurrenceId != null ? String(event.rootOccurrenceId) : "").length,
+      duplicateTaskIdGroups: duplicateTaskIds.length,
+      duplicateInstanceIdGroups: duplicateInstanceIds.length,
+      duplicateOccurrenceIdGroups: duplicateOccurrenceIds.length,
+      duplicateRootOccurrenceIdGroups: duplicateRootOccurrenceIds.length,
       duplicateEquivalentScheduledGroups: equivalentScheduledGroups.length,
-      removableScheduledOccurrences: removableScheduledOccurrenceIds.length
+      removableScheduledOccurrences: removableScheduledOccurrenceIndexes.length,
+      removableScheduledOccurrenceIndexes: removableScheduledOccurrenceIndexes.length,
+      removableOneTimeInstanceIndexes: removableInstanceIndexes.length
     },
-    duplicateTaskIds: duplicateGroups(collections.tasks, task => task?.id != null ? String(task.id) : "", task => `${task?.legacyTaskId || ""} · ${task?.name || ""}`),
-    duplicateInstanceIds: duplicateGroups(collections.instances, instance => instance?.id != null ? String(instance.id) : "", instance => `${instance?.legacyTaskId || ""} · ${instance?.taskId || ""} · ${instance?.startDateISO || ""}`),
-    duplicateOccurrenceIds: duplicateGroups(collections.occurrences, event => event?.id != null ? String(event.id) : "", event => `${event?.eventType || ""} · ${event?.taskId || ""} · ${event?.effectiveDateISO || ""}`),
-    duplicateRootOccurrenceIds: duplicateGroups(collections.occurrences, event => event?.rootOccurrenceId != null ? String(event.rootOccurrenceId) : "", event => `${event?.eventType || ""} · ${event?.taskId || ""} · ${event?.effectiveDateISO || ""}`),
-    duplicateEquivalentScheduledGroups: equivalentScheduledGroups,
-    removableScheduledOccurrenceIds
+    duplicateTaskIds,
+    duplicateInstanceIds,
+    duplicateOccurrenceIds,
+    duplicateRootOccurrenceIds,
+    duplicateEquivalentScheduledGroups,
+    canonicalScheduledOccurrenceIndexes,
+    removableScheduledOccurrenceIndexes,
+    removableScheduledOccurrenceIds: removableScheduledOccurrenceIndexes.map(entry => entry.id).filter(Boolean),
+    removableInstanceIndexes
   };
 }
 
@@ -916,26 +1014,53 @@ function auditMaintenanceV2DuplicateCalendarSpam(){
 }
 
 function repairMaintenanceV2DuplicateCalendarSpam(){
-  const report = buildMaintenanceV2DuplicateCalendarSpamReport();
-  const removable = new Set(report.removableScheduledOccurrenceIds || []);
-  if (!removable.size){
-    console.info("Maintenance V2 duplicate calendar spam repair: no exact duplicate scheduled V2 occurrences found.", report);
-    return { ...report, repaired: false, removedScheduledOccurrences: 0 };
+  const beforeReport = buildMaintenanceV2DuplicateCalendarSpamReport();
+  const removableOccurrenceIndexes = Array.from(new Set((beforeReport.removableScheduledOccurrenceIndexes || [])
+    .map(entry => Number(entry.index))
+    .filter(index => Number.isInteger(index) && index >= 0)));
+  const removableInstanceIndexes = Array.from(new Set((beforeReport.removableInstanceIndexes || [])
+    .map(entry => Number(entry.index))
+    .filter(index => Number.isInteger(index) && index >= 0)));
+  if (!removableOccurrenceIndexes.length && !removableInstanceIndexes.length){
+    console.info("Maintenance V2 duplicate calendar spam repair: no exact duplicate scheduled V2 records found.", beforeReport);
+    return { repaired: false, beforeCounts: beforeReport.counts, afterCounts: beforeReport.counts, beforeReport, afterReport: beforeReport, removedScheduledOccurrences: 0, removedOneTimeInstances: 0 };
   }
   if (typeof createMaintenanceHistoryImportBackup !== "function") throw new Error("Backup helper is unavailable; V2 duplicate repair was blocked.");
   createMaintenanceHistoryImportBackup();
   if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
-  const beforeCount = collectionsLength(window.maintenanceOccurrencesV2);
-  for (let index = window.maintenanceOccurrencesV2.length - 1; index >= 0; index -= 1){
+  if (!Array.isArray(window.maintenanceCalendarInstancesV2)) window.maintenanceCalendarInstancesV2 = [];
+  const beforeOccurrenceCount = collectionsLength(window.maintenanceOccurrencesV2);
+  removableOccurrenceIndexes.sort((a, b) => b - a).forEach(index => {
     const event = window.maintenanceOccurrencesV2[index];
-    if (removable.has(String(event?.id || ""))) window.maintenanceOccurrencesV2.splice(index, 1);
-  }
-  const afterCount = collectionsLength(window.maintenanceOccurrencesV2);
+    if (event && String(event.eventType || "") === "scheduled") window.maintenanceOccurrencesV2.splice(index, 1);
+  });
+  const removedScheduledOccurrences = beforeOccurrenceCount - collectionsLength(window.maintenanceOccurrencesV2);
+  const beforeInstanceCount = collectionsLength(window.maintenanceCalendarInstancesV2);
+  const remainingInstanceIds = new Set((Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [])
+    .map(event => String(event?.instanceId || ""))
+    .filter(Boolean));
+  removableInstanceIndexes.sort((a, b) => b - a).forEach(index => {
+    const instance = window.maintenanceCalendarInstancesV2[index];
+    if (!instance || String(instance.instanceMode || "") !== "one_time") return;
+    const instanceId = String(instance.id || "");
+    const duplicatesWithSameId = window.maintenanceCalendarInstancesV2.filter(entry => entry && String(entry.id || "") === instanceId).length;
+    if (duplicatesWithSameId > 1 || !remainingInstanceIds.has(instanceId)) window.maintenanceCalendarInstancesV2.splice(index, 1);
+  });
+  const removedOneTimeInstances = beforeInstanceCount - collectionsLength(window.maintenanceCalendarInstancesV2);
+  const afterReport = buildMaintenanceV2DuplicateCalendarSpamReport();
   if (typeof saveCloudNow === "function") saveCloudNow();
   else if (typeof saveCloudDebounced === "function") saveCloudDebounced();
   if (typeof renderCalendar === "function") renderCalendar();
   if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets();
-  const result = { ...report, repaired: true, removedScheduledOccurrences: beforeCount - afterCount };
+  const result = {
+    repaired: true,
+    beforeCounts: beforeReport.counts,
+    afterCounts: afterReport.counts,
+    removedScheduledOccurrences,
+    removedOneTimeInstances,
+    beforeReport,
+    afterReport
+  };
   console.info("Maintenance V2 duplicate calendar spam repair complete", result);
   return result;
 }
