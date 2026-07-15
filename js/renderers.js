@@ -6909,6 +6909,13 @@ function renderDashboard(){
       saveStartedAtISO: startedAtISO,
       saveFinishedAtISO: null,
       saveThrewError: null,
+      clientId: typeof getCloudSyncClientId === "function" ? getCloudSyncClientId() : "",
+      loadedRevBeforeSave: typeof window !== "undefined" ? Number(window.__loadedCloudRevisionForSaveGuard || 0) : 0,
+      remoteRevBeforeSave: 0,
+      remoteUpdatedBy: "",
+      sameClientRemoteRevision: false,
+      loadedRevUpdatedAfterSuccessfulSave: false,
+      loadedRevAfterSave: 0,
       hasPendingLocalChangesBefore: typeof hasPendingLocalChanges !== "undefined" ? Boolean(hasPendingLocalChanges) : null,
       hasPendingLocalChangesAfter: null,
       windowInstanceFoundBeforeSave: false,
@@ -7054,6 +7061,9 @@ function renderDashboard(){
         trace.remoteVerificationPassed = trace.remoteInstanceFound && trace.remoteOccurrenceFound;
         if (trace.remoteVerificationPassed && typeof window !== "undefined" && remoteData && typeof remoteData === "object"){
           window.__lastLoadedCloudState = (typeof cloneStructured === "function" ? cloneStructured(remoteData) : null) || { ...remoteData };
+          window.__loadedCloudRevisionForSaveGuard = Number(remoteData?.syncMeta?.rev || window.__loadedCloudRevisionForSaveGuard || 0);
+          trace.loadedRevUpdatedAfterSuccessfulSave = true;
+          trace.loadedRevAfterSave = Number(window.__loadedCloudRevisionForSaveGuard || 0);
         }
       } catch (err){
         trace.remoteGetError = err?.message || String(err);

@@ -2164,16 +2164,21 @@ function detectDangerousProtectedFieldReduction(remoteState, pendingState){
 function detectRemoteRevisionConflict(remoteState){
   const remoteRev = Number(remoteState?.syncMeta?.rev || 0);
   const loadedRev = Number((typeof window !== "undefined" ? window.__loadedCloudRevisionForSaveGuard : 0) || 0);
+  const remoteUpdatedBy = String(remoteState?.syncMeta?.updatedBy || "");
+  const clientId = typeof getCloudSyncClientId === "function" ? getCloudSyncClientId() : "";
+  const sameClientRemoteRevision = !!(remoteUpdatedBy && clientId && remoteUpdatedBy === clientId);
   if (remoteRev > 0 && loadedRev > 0 && remoteRev > loadedRev){
     return {
-      blocked: true,
+      blocked: !sameClientRemoteRevision,
       remoteRev,
       loadedRev,
       remoteUpdatedAtISO: remoteState?.syncMeta?.updatedAtISO || "",
-      remoteUpdatedBy: remoteState?.syncMeta?.updatedBy || ""
+      remoteUpdatedBy,
+      clientId,
+      sameClientRemoteRevision
     };
   }
-  return { blocked: false, remoteRev, loadedRev };
+  return { blocked: false, remoteRev, loadedRev, remoteUpdatedBy, clientId, sameClientRemoteRevision };
 }
 
 function exportJsonDownload(filename, data){
@@ -2677,6 +2682,10 @@ function startWorkspaceStateListener(){
     const incomingRev = Number(meta?.rev || 0);
     if (!incomingRev) return;
     const incomingBy = String(meta?.updatedBy || "");
+    if (incomingBy === localClientId && incomingRev > Number(window.__loadedCloudRevisionForSaveGuard || 0)){
+      window.__loadedCloudRevisionForSaveGuard = incomingRev;
+      window.__lastLoadedCloudState = cloneStructured(incoming || {});
+    }
     if (hasPendingLocalChanges) return;
     const localEditAgeMs = Date.now() - (Number(lastLocalMutationAt) || 0);
     if (incomingBy !== localClientId && localEditAgeMs >= 0 && localEditAgeMs < 15000) return;
@@ -5568,6 +5577,8 @@ const saveCloudInternal = debounce(async ()=>{
     explicitTrace.firebasePath = FB.docRef?.path || "";
     explicitTrace.workspaceDocPath = FB.workspaceDoc?.path || "";
     explicitTrace.projectId = FB.app?.options?.projectId || window.FIREBASE_CONFIG?.projectId || "";
+    explicitTrace.clientId = typeof getCloudSyncClientId === "function" ? getCloudSyncClientId() : "";
+    explicitTrace.loadedRevBeforeSave = Number(window.__loadedCloudRevisionForSaveGuard || 0);
   }
   if (!FB.ready || !FB.docRef){
     if (explicitTrace){
@@ -5660,7 +5671,12 @@ const saveCloudInternal = debounce(async ()=>{
     const revisionConflict = remoteData && typeof remoteData === "object"
       ? detectRemoteRevisionConflict(remoteData)
       : { blocked:false };
-    if (explicitTrace) explicitTrace.revisionConflictBlocked = Boolean(revisionConflict?.blocked);
+    if (explicitTrace){
+      explicitTrace.revisionConflictBlocked = Boolean(revisionConflict?.blocked);
+      explicitTrace.remoteRevBeforeSave = Number(revisionConflict?.remoteRev || 0);
+      explicitTrace.remoteUpdatedBy = revisionConflict?.remoteUpdatedBy || "";
+      explicitTrace.sameClientRemoteRevision = Boolean(revisionConflict?.sameClientRemoteRevision);
+    }
     const allowFirstRunPreflight = Boolean(remoteSnap && !remoteSnap.exists)
       && !stateHasMeaningfulData(window.__lastLoadedCloudState || {})
       && !stateHasMeaningfulData(localBackupForPreflight || {});
@@ -5731,6 +5747,15 @@ const saveCloudInternal = debounce(async ()=>{
     }
     await FB.docRef.set(snap, { merge:true });
     if (explicitTrace) explicitTrace.firestoreSetCompleted = true;
+    if (typeof window !== "undefined"){
+      window.__loadedCloudRevisionForSaveGuard = Number(snap?.syncMeta?.rev || 0);
+      if (explicitTrace){
+        explicitTrace.loadedRevUpdatedAfterSuccessfulSave = true;
+        explicitTrace.loadedRevAfterSave = Number(window.__loadedCloudRevisionForSaveGuard || 0);
+      } else {
+        window.__lastLoadedCloudState = cloneStructured(snap) || { ...snap };
+      }
+    }
     console.info("Cloud save succeeded", {
       workspaceId: WORKSPACE_ID,
       path: FB.docRef?.path || "",
