@@ -65,6 +65,14 @@ function setCloudLoadGate({ loadComplete = false, adoptComplete = false } = {}){
 
 function blockCloudSave(reason, details = null){
   const message = `Cloud save blocked: ${reason}`;
+  if (typeof window !== "undefined"){
+    window.__lastCloudSaveBlock = {
+      atISO: new Date().toISOString(),
+      reason,
+      details,
+      message
+    };
+  }
   if (details) console.error(message, details);
   else console.warn(message);
   try { if (typeof toast === "function") toast(message); } catch (_err){}
@@ -174,6 +182,14 @@ function debounce(fn, ms=250){
     clearTimeout(t);
     t = null;
     return fn(...(lastArgs || []));
+  };
+  debounced.now = (...a)=>{
+    if (t){
+      clearTimeout(t);
+      t = null;
+    }
+    lastArgs = a;
+    return fn(...a);
   };
   debounced.cancel = ()=>{
     if (!t) return;
@@ -744,7 +760,7 @@ function isSafeMetadataString(key, value){
 }
 function isProtectedBusinessDataKey(key){
   const normalized = String(key || "").toLowerCase();
-  return /(tasksinterval|tasksasreq|completeddates|manualhistory|calendardateiso|recurrence|removedoccurrences|occurrenceoverrides|maintenancetasksv2|maintenanceoccurrencesv2|maintenancecalendarinstancesv2|settingsfolders|folders|inventory|inventoryfolders|inventorymaterials|inventorytransactions|orderrequests|receipttrackerweeks|purchase|vendor|tolerance|inspection|quality|layout|dashboardlayout|costlayout|joblayout|tolerancelayout)/i.test(normalized);
+  return /(tasksinterval|tasksasreq|completeddates|manualhistory|calendardateiso|recurrence|removedoccurrences|occurrenceoverrides|maintenancetasksv2|maintenanceoccurrencesv2|maintenancecalendarinstancesv2|settingsfolders|folders|inventory|inventoryfolders|inventorymaterials|inventorytransactions|orderrequests|receipttrackerweeks|weeklycostreports|purchase|vendor|tolerance|inspection|quality|layout|dashboardlayout|costlayout|joblayout|tolerancelayout)/i.test(normalized);
 }
 
 function sanitizeValueForStorage(value, { dropHeavyHistory = false } = {}){
@@ -812,7 +828,6 @@ function compactStateForStorage(raw, { forBackup = false } = {}){
   if (forBackup){
     delete snap.deletedItems;
     delete snap.opportunityRollups;
-    delete snap.weeklyCostReports;
   }
   return sanitizeValueForStorage(snap, { dropHeavyHistory: forBackup });
 }
@@ -830,10 +845,13 @@ function buildEmergencyBackup(snapshot){
     inventory: Array.isArray(src.inventory) ? src.inventory : [],
     inventoryFolders: Array.isArray(src.inventoryFolders) ? src.inventoryFolders : [],
     inventoryMaterials: Array.isArray(src.inventoryMaterials) ? src.inventoryMaterials : [],
+    inventoryTransactions: Array.isArray(src.inventoryTransactions) ? src.inventoryTransactions : [],
+    cuttingJobDatabase: (src.cuttingJobDatabase && typeof src.cuttingJobDatabase === "object") ? src.cuttingJobDatabase : {},
     cuttingJobs: Array.isArray(src.cuttingJobs) ? src.cuttingJobs : [],
     completedCuttingJobs: Array.isArray(src.completedCuttingJobs) ? src.completedCuttingJobs : [],
     orderRequests: Array.isArray(src.orderRequests) ? src.orderRequests : [],
     receiptTrackerWeeks: Array.isArray(src.receiptTrackerWeeks) ? src.receiptTrackerWeeks : [],
+    weeklyCostReports: Array.isArray(src.weeklyCostReports) ? src.weeklyCostReports : [],
     garnetCleanings: Array.isArray(src.garnetCleanings) ? src.garnetCleanings : [],
     dailyCutHours: Array.isArray(src.dailyCutHours) ? src.dailyCutHours : [],
     appConfig: src.appConfig || normalizeAppConfig(window.appConfig),
@@ -847,7 +865,7 @@ function buildEmergencyBackup(snapshot){
   };
 }
 
-function buildTinyCriticalBackup(snapshot){
+function buildTinyCriticalBackup(snapshot, { quiet = false } = {}){
   const src = snapshot && typeof snapshot === "object" ? snapshot : {};
   const base = {
     schema: src.schema || APP_SCHEMA,
@@ -860,8 +878,10 @@ function buildTinyCriticalBackup(snapshot){
     inventoryFolders: src.inventoryFolders || [],
     inventoryMaterials: src.inventoryMaterials || [],
     inventoryTransactions: src.inventoryTransactions || [],
+    cuttingJobDatabase: src.cuttingJobDatabase || {},
     orderRequests: src.orderRequests || [],
     receiptTrackerWeeks: src.receiptTrackerWeeks || [],
+    weeklyCostReports: src.weeklyCostReports || [],
     settingsFolders: src.settingsFolders || [],
     folders: src.folders || [],
     jobFolders: src.jobFolders || [],
@@ -875,7 +895,7 @@ function buildTinyCriticalBackup(snapshot){
     if (/(tolerance|inspection|quality)/i.test(k) && !(k in base)) base[k] = v;
   }
   const tiny = sanitizeValueForStorage(base, { dropHeavyHistory: true });
-  console.info("Tiny backup included keys", Object.keys(tiny).sort());
+  if (!quiet) console.info("Tiny backup included keys", Object.keys(tiny).sort());
   return tiny;
 }
 
@@ -1296,7 +1316,7 @@ function detectDangerousIntegrityReduction(baseSummary, pendingSummary, options 
   };
 }
 
-function validateProtectedSavePreflight({ baselineState, pendingState, latestRemoteState, localBackupState, reason = "cloud save", revisionConflict = null, allowFirstRun = false, skipRuntimeGates = false } = {}){
+function validateProtectedSavePreflight({ baselineState, pendingState, latestRemoteState, localBackupState, windowState = null, coverageReport = null, reason = "cloud save", revisionConflict = null, allowFirstRun = false, skipRuntimeGates = false } = {}){
   const generatedAtISO = new Date().toISOString();
   let pendingSummary = null;
   let baseline = null;
@@ -1338,8 +1358,49 @@ function validateProtectedSavePreflight({ baselineState, pendingState, latestRem
     reasons.push({ type:"unknown_baseline_with_protected_data", severity:"block", message:"Pending state contains protected data but no trusted baseline is available." });
   }
 
+  const activeMissing = classifyMissingProtectedPathsForSave({
+    pendingState: pendingState || {},
+    baselineState,
+    localBackupState,
+    remoteState: latestRemoteState,
+    windowState,
+    coverageReport
+  });
+  const activeMissingReasons = (activeMissing.blocking || []).map(item => ({
+    type: "active_protected_path_missing",
+    severity: "block",
+    path: item.path,
+    message: item.reason,
+    pending: item.pending,
+    baseline: item.baseline,
+    localBackup: item.localBackup,
+    remote: item.remote,
+    window: item.window,
+    activeSources: item.activeSources || [],
+    suggestedNextAction: item.suggestedNextAction
+  }));
+  const cloudCompactionReasons = (Array.isArray(coverageReport?.cloudExcludedProtectedPaths) ? coverageReport.cloudExcludedProtectedPaths : []).map(path => ({
+    type: "protected_path_removed_by_cloud_compaction",
+    severity: "block",
+    path,
+    message: `${path} is protected but would be removed by normal cloud compaction before save.`,
+    pending: getSaveSchemaCoveragePathInfo(pendingState || {}, path),
+    suggestedNextAction: "Stop save, export diagnostics, and update compaction rules so protected entered data is never removed."
+  }));
+  const activeMissingWarnings = (activeMissing.warnings || []).map(item => ({
+    type: item.category || "protected_path_warning",
+    severity: "warn",
+    path: item.path,
+    message: item.reason,
+    pending: item.pending,
+    baseline: item.baseline,
+    localBackup: item.localBackup,
+    remote: item.remote,
+    window: item.window,
+    suggestedNextAction: item.suggestedNextAction
+  }));
   const reduction = detectDangerousIntegrityReduction(baseline.summary, pendingSummary, { allowUnknownBaseline: baseline.trusted });
-  const allReasons = reasons.concat(reduction.reasons || []);
+  const allReasons = reasons.concat(activeMissingReasons).concat(cloudCompactionReasons).concat(reduction.reasons || []);
   return {
     generatedAtISO,
     allowed: allReasons.length === 0,
@@ -1347,7 +1408,9 @@ function validateProtectedSavePreflight({ baselineState, pendingState, latestRem
     severity: allReasons.length ? "block" : "info",
     reason,
     reasons: allReasons,
+    warnings: activeMissingWarnings,
     fieldChanges: reduction.fieldChanges || [],
+    activeMissingClassification: activeMissing,
     baselineSource: baseline.source,
     baselineFingerprint: baseline.summary?.summaryFingerprint || "",
     pendingFingerprint: pendingSummary?.summaryFingerprint || "",
@@ -1368,7 +1431,10 @@ function rememberDangerousSaveBlock(preflight, context = {}){
     atISO: new Date().toISOString(),
     ...context,
     preflight,
-    blockedFieldNames: Array.from(new Set((preflight?.fieldChanges || []).map(change => change.path).filter(Boolean))),
+    blockedFieldNames: Array.from(new Set(
+      (preflight?.fieldChanges || []).map(change => change.path).filter(Boolean)
+        .concat((preflight?.reasons || []).map(reason => reason.path).filter(Boolean))
+    )),
     recommendedNextAction: "Stay in Recovery Mode if active, export diagnostics, and do not force-save until the protected-data counts are reviewed."
   };
   if (typeof window !== "undefined"){
@@ -1560,6 +1626,480 @@ function buildProtectedFieldSummary(state){
   };
 }
 
+const SAVE_SCHEMA_COVERAGE_FOCUS_PATHS = [
+  "completedDates",
+  "manualHistory",
+  "cuttingJobDatabase",
+  "inventoryTransactions",
+  "weeklyCostReports",
+  "deletedItems",
+  "maintenanceOccurrencesV2",
+  "maintenanceTasksV2",
+  "maintenanceCalendarInstancesV2",
+  "cuttingJobs",
+  "completedCuttingJobs",
+  "receiptTrackerWeeks",
+  "inventory",
+  "orderRequests",
+  "dailyCutHours",
+  "pumpEff",
+  "appConfig",
+  "dashboardLayout",
+  "costLayout",
+  "jobLayout"
+];
+
+function getSaveSchemaCoveragePathInfo(state, path){
+  const parts = String(path || "").split(".").filter(Boolean);
+  if (!parts.length) return { present:false, topLevelKey:"", nested:false, count:0, examples:[] };
+  const topLevelKey = parts[0];
+  if (parts.length === 1){
+    const present = Boolean(state && typeof state === "object" && Object.prototype.hasOwnProperty.call(state, topLevelKey));
+    const value = present ? state[topLevelKey] : undefined;
+    return {
+      present,
+      topLevelKey,
+      nested:false,
+      count: countCollectionValue(value),
+      shape: getDataSafetyShape(value),
+      examples: present ? [topLevelKey] : []
+    };
+  }
+  let nodes = [state];
+  for (const part of parts){
+    const next = [];
+    nodes.forEach(node => {
+      if (Array.isArray(node)){
+        node.forEach(item => {
+          if (item && typeof item === "object" && Object.prototype.hasOwnProperty.call(item, part)) next.push(item[part]);
+        });
+      } else if (node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, part)){
+        next.push(node[part]);
+      }
+    });
+    nodes = next;
+    if (!nodes.length) break;
+  }
+  return {
+    present: nodes.length > 0,
+    topLevelKey,
+    nested:true,
+    count: nodes.reduce((sum, value)=>sum + countCollectionValue(value), 0),
+    shape: nodes.length ? getDataSafetyShape(nodes[0]) : "undefined",
+    examples: nodes.slice(0, 5).map(value => getDataSafetyShape(value))
+  };
+}
+
+function buildSnapshotForSaveSchemaCoverage(){
+  if (typeof snapshotState !== "function") return { snapshot:{}, error:"snapshotState is unavailable." };
+  const previousStrippedHeavyFields = (typeof window !== "undefined") ? window.__lastStrippedHeavyFields : undefined;
+  const previousSettingsFolders = (typeof window !== "undefined" && Array.isArray(window.settingsFolders)) ? cloneStructured(window.settingsFolders) : undefined;
+  const previousFolders = (typeof window !== "undefined" && Array.isArray(window.folders)) ? cloneStructured(window.folders) : undefined;
+  let storagePatched = false;
+  let originalSetItem = null;
+  let storagePatchTarget = null;
+  try {
+    if (typeof window !== "undefined" && window.localStorage && typeof window.localStorage.setItem === "function"){
+      storagePatchTarget = (typeof Storage !== "undefined" && Storage.prototype && typeof Storage.prototype.setItem === "function")
+        ? Storage.prototype
+        : window.localStorage;
+      originalSetItem = storagePatchTarget.setItem;
+      storagePatchTarget.setItem = function(key, value){
+        if (String(key || "") === JOB_FILE_CACHE_KEY) return undefined;
+        return originalSetItem.call(this, key, value);
+      };
+      storagePatched = true;
+    }
+  } catch (_err){ storagePatched = false; }
+  try {
+    const snapshot = snapshotState();
+    return { snapshot: cloneStructured(snapshot) || {}, error:null };
+  } catch (err){
+    return { snapshot:{}, error:String(err?.message || err) };
+  } finally {
+    if (storagePatched && originalSetItem){
+      try { storagePatchTarget.setItem = originalSetItem; } catch (_err){}
+    }
+    if (typeof window !== "undefined"){
+      window.__lastStrippedHeavyFields = previousStrippedHeavyFields;
+      if (previousSettingsFolders) window.settingsFolders = previousSettingsFolders;
+      if (previousFolders) window.folders = previousFolders;
+    }
+  }
+}
+
+function getSaveSchemaCoverageReport(options = {}){
+  const hasProvidedSnapshot = Boolean(options && options.pendingSnapshot && typeof options.pendingSnapshot === "object");
+  const snapshotResult = hasProvidedSnapshot
+    ? { snapshot: cloneStructured(options.pendingSnapshot) || {}, error:null }
+    : buildSnapshotForSaveSchemaCoverage();
+  const pendingSnapshot = snapshotResult.snapshot || {};
+  const compactedForCloud = compactStateForStorage(pendingSnapshot);
+  const compactedForBackup = compactStateForStorage(pendingSnapshot, { forBackup:true });
+  const tinyBackup = buildTinyCriticalBackup(pendingSnapshot, { quiet:true });
+  const localBackup = loadLocalBackupReadOnly();
+  const requiredProtectedPaths = Array.isArray(REQUIRED_PROTECTED_DATA_PATHS) ? REQUIRED_PROTECTED_DATA_PATHS.slice() : [];
+  const registryProtectedPaths = Array.isArray(PROTECTED_FIELD_REGISTRY) ? PROTECTED_FIELD_REGISTRY.map(entry => entry.path).filter(Boolean) : [];
+  const allProtectedPaths = Array.from(new Set(requiredProtectedPaths.concat(registryProtectedPaths))).sort();
+  const snapshotKeys = Object.keys(pendingSnapshot).sort();
+  const presentProtectedPaths = [];
+  const missingProtectedPaths = [];
+  const protectedPathDetails = {};
+
+  allProtectedPaths.forEach(path => {
+    const info = getSaveSchemaCoveragePathInfo(pendingSnapshot, path);
+    protectedPathDetails[path] = info;
+    if (info.present) presentProtectedPaths.push(path);
+    else missingProtectedPaths.push(path);
+  });
+
+  const protectedWindowKeysMissingFromSnapshot = allProtectedPaths
+    .filter(path => !path.includes("."))
+    .filter(path => typeof window !== "undefined"
+      && Object.prototype.hasOwnProperty.call(window, path)
+      && !Object.prototype.hasOwnProperty.call(pendingSnapshot, path))
+    .sort();
+
+  const protectedPathsOnlyPresentInBackups = allProtectedPaths.filter(path => {
+    if (getSaveSchemaCoveragePathInfo(pendingSnapshot, path).present) return false;
+    const inTiny = getSaveSchemaCoveragePathInfo(tinyBackup, path).present;
+    const inLocal = getSaveSchemaCoveragePathInfo(localBackup || {}, path).present;
+    return inTiny || inLocal;
+  }).sort();
+
+  const cloudExcludedProtectedPaths = allProtectedPaths.filter(path => {
+    const before = getSaveSchemaCoveragePathInfo(pendingSnapshot, path).present;
+    const after = getSaveSchemaCoveragePathInfo(compactedForCloud, path).present;
+    return before && !after;
+  }).sort();
+
+  const backupExcludedProtectedPaths = allProtectedPaths.filter(path => {
+    const before = getSaveSchemaCoveragePathInfo(compactedForCloud, path).present;
+    const after = getSaveSchemaCoveragePathInfo(compactedForBackup, path).present;
+    return before && !after;
+  }).sort();
+
+  const sanitizerRiskPaths = [
+    {
+      path: "cuttingJobs.files.*",
+      risk: "stripJobFileDataUrls removes embedded file/data-url/content fields before save; job metadata and manualLogs are expected to remain.",
+      source: "stripJobFileDataUrls"
+    },
+    {
+      path: "completedCuttingJobs.files.*",
+      risk: "stripJobFileDataUrls removes embedded file/data-url/content fields before save; completed job metadata and manualLogs are expected to remain.",
+      source: "stripJobFileDataUrls"
+    },
+    {
+      path: "cuttingJobs / completedCuttingJobs",
+      risk: "safeCleanupLoadedState sanitizes job objects on load, so protected job history fields must never be named like debug/cache/preview or embedded content.",
+      source: "safeCleanupLoadedState + sanitizeValueForStorage"
+    },
+    {
+      path: "tasksInterval.completedDates / tasksAsReq.completedDates",
+      risk: "Protected maintenance completion history; currently recognized as protected business data by sanitizer key matching and registry coverage.",
+      source: "PROTECTED_FIELD_REGISTRY + isProtectedBusinessDataKey"
+    },
+    {
+      path: "tasksInterval.manualHistory / tasksAsReq.manualHistory",
+      risk: "Protected maintenance manual history; currently recognized as protected business data by sanitizer key matching and registry coverage.",
+      source: "PROTECTED_FIELD_REGISTRY + isProtectedBusinessDataKey"
+    }
+  ];
+
+  const normalizationRiskPaths = [
+    { path:"inventory", risk:"adoptState maps entries through normalizeInventoryItem; current normalizer spreads raw item first, but future changes could drop unknown inventory fields." },
+    { path:"orderRequests", risk:"adoptState maps entries through normalizeOrderRequests; normalizeOrderRequest/normalizeOrderItem reconstruct objects and can drop unknown purchase/history/linkage fields." },
+    { path:"inventoryMaterials", risk:"snapshotState/adoptState pass through normalizeInventoryMaterials; field preservation depends on that helper." },
+    { path:"dailyCutHours", risk:"adoptState normalizes dailyCutHours and compactStateForStorage keeps only the last 365 entries." },
+    { path:"appConfig", risk:"snapshotState/adoptState normalize appConfig; unknown settings preservation depends on normalizeAppConfig." }
+  ];
+
+  const staleWholeStateOverwriteRiskNotes = [
+    "Dashboard/cost/job layout changes call saveCloudDebounced(), which snapshots the whole app state rather than writing only layout keys.",
+    "saveCloudInternal checks remote revision before set(..., { merge:true }), but the read-then-write sequence is not a Firestore transaction/compare-and-swap.",
+    "Only totalHistory, dailyCutHours, and pumpEff have explicit remote merge protection before save; maintenanceOccurrencesV2, cutting jobs, task history, and purchase history rely on preflight blocking rather than append-only merging.",
+    "loadFromCloud seeds defaults only when neither cloud nor local backup is meaningful, but a false non-meaningful read would be dangerous if not caught by recovery/preflight gates."
+  ];
+
+  const possibleDeprecatedProtectedPaths = missingProtectedPaths
+    .filter(path => ["cuttingJobDatabase", "inventoryTransactions"].includes(path))
+    .map(path => ({
+      path,
+      status: "unknown",
+      note: "Protected registry includes this path, but the pending main save snapshot does not. Treat as sacred/unknown until DS-03 proves it obsolete or adds it to snapshotState."
+    }));
+
+  const focusedProtectedPathStatus = {};
+  SAVE_SCHEMA_COVERAGE_FOCUS_PATHS.forEach(path => {
+    const direct = getSaveSchemaCoveragePathInfo(pendingSnapshot, path);
+    const nestedMatches = allProtectedPaths
+      .filter(protectedPath => protectedPath === path || protectedPath.endsWith(`.${path}`))
+      .map(protectedPath => ({
+        protectedPath,
+        ...getSaveSchemaCoveragePathInfo(pendingSnapshot, protectedPath)
+      }));
+    focusedProtectedPathStatus[path] = {
+      direct,
+      nestedMatches,
+      protected: registryProtectedPaths.includes(path) || requiredProtectedPaths.includes(path) || nestedMatches.length > 0
+    };
+  });
+
+  const warnings = [];
+  if (snapshotResult.error) warnings.push({ type:"snapshot_error", message:snapshotResult.error });
+  missingProtectedPaths.forEach(path => warnings.push({ type:"missing_protected_path", path, message:`Protected path ${path} is not present in the pending save snapshot.` }));
+  protectedWindowKeysMissingFromSnapshot.forEach(path => warnings.push({ type:"window_key_missing_from_snapshot", path, message:`window.${path} exists but snapshotState() did not include it.` }));
+  backupExcludedProtectedPaths.forEach(path => warnings.push({ type:"backup_excludes_protected_path", path, message:`Protected path ${path} is present in cloud compact state but excluded from local backup compaction.` }));
+  cloudExcludedProtectedPaths.forEach(path => warnings.push({ type:"cloud_compaction_excludes_protected_path", path, message:`Protected path ${path} is present before compaction but missing after normal cloud compaction.` }));
+
+  return {
+    generatedAtISO: new Date().toISOString(),
+    readOnly: true,
+    snapshotKeys,
+    requiredProtectedPaths,
+    registryProtectedPaths,
+    presentProtectedPaths: presentProtectedPaths.sort(),
+    missingProtectedPaths: missingProtectedPaths.sort(),
+    protectedPathDetails,
+    protectedWindowKeysMissingFromSnapshot,
+    protectedPathsOnlyPresentInBackups,
+    cloudExcludedProtectedPaths,
+    backupExcludedProtectedPaths,
+    sanitizerRiskPaths,
+    normalizationRiskPaths,
+    staleWholeStateOverwriteRiskNotes,
+    possibleDeprecatedProtectedPaths,
+    focusedProtectedPathStatus,
+    warnings
+  };
+}
+
+function debugSaveSchemaCoverage(){
+  const report = getSaveSchemaCoverageReport();
+  console.info("Save schema coverage diagnostic", report);
+  if (Array.isArray(report.warnings) && report.warnings.length) console.warn("Save schema coverage warnings", report.warnings);
+  return report;
+}
+
+function debugProtectedSavePreflightClassification(){
+  const snapshotResult = buildSnapshotForSaveSchemaCoverage();
+  const pendingState = snapshotResult.snapshot || {};
+  const localBackupState = loadLocalBackupReadOnly();
+  const classification = classifyMissingProtectedPathsForSave({
+    pendingState,
+    baselineState: (typeof window !== "undefined" ? window.__lastLoadedCloudState : null) || null,
+    localBackupState,
+    remoteState: null,
+    windowState: buildWindowProtectedStateForCoverage(),
+    coverageReport: getSaveSchemaCoverageReport({ pendingSnapshot: pendingState })
+  });
+  console.info("Protected save preflight classification diagnostic", classification);
+  return classification;
+}
+
+function summarizeV2DeltaRecord(entry){
+  if (!entry || typeof entry !== "object") return null;
+  return {
+    id: entry.id || null,
+    taskId: entry.taskId || null,
+    legacyTaskId: entry.legacyTaskId || null,
+    instanceId: entry.instanceId || null,
+    rootOccurrenceId: entry.rootOccurrenceId || null,
+    eventType: entry.eventType || null,
+    effectiveDateISO: entry.effectiveDateISO || null,
+    startDateISO: entry.startDateISO || null,
+    recordedAtISO: entry.recordedAtISO || null,
+    name: entry.name || null
+  };
+}
+
+function duplicateV2IdSummary(list){
+  const counts = new Map();
+  (Array.isArray(list) ? list : []).forEach(entry => {
+    const id = entry && entry.id != null ? String(entry.id) : "";
+    if (!id) return;
+    counts.set(id, (counts.get(id) || 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([id, count]) => ({ id, count }))
+    .sort((a, b)=> String(a.id).localeCompare(String(b.id)));
+}
+
+function buildV2CurrentCloudDeltaForList(currentList, cloudList){
+  const current = Array.isArray(currentList) ? currentList : [];
+  const cloud = Array.isArray(cloudList) ? cloudList : [];
+  const currentIds = new Set(current.map(entry => entry && entry.id != null ? String(entry.id) : "").filter(Boolean));
+  const cloudIds = new Set(cloud.map(entry => entry && entry.id != null ? String(entry.id) : "").filter(Boolean));
+  const onlyCurrent = current.filter(entry => entry && entry.id != null && !cloudIds.has(String(entry.id)));
+  const onlyCloud = cloud.filter(entry => entry && entry.id != null && !currentIds.has(String(entry.id)));
+  return {
+    currentCount: current.length,
+    cloudCount: cloud.length,
+    onlyCurrentCount: onlyCurrent.length,
+    onlyCloudCount: onlyCloud.length,
+    onlyCurrent: onlyCurrent.slice(0, 25).map(summarizeV2DeltaRecord).filter(Boolean),
+    onlyCloud: onlyCloud.slice(0, 25).map(summarizeV2DeltaRecord).filter(Boolean),
+    duplicateIdsCurrent: duplicateV2IdSummary(current),
+    duplicateIdsCloud: duplicateV2IdSummary(cloud)
+  };
+}
+
+function debugV2CurrentCloudDelta(){
+  const cloud = (typeof window !== "undefined" && window.__lastLoadedCloudState && typeof window.__lastLoadedCloudState === "object") ? window.__lastLoadedCloudState : {};
+  const report = {
+    generatedAtISO: new Date().toISOString(),
+    readOnly: true,
+    instances: buildV2CurrentCloudDeltaForList(
+      typeof window !== "undefined" ? window.maintenanceCalendarInstancesV2 : [],
+      cloud.maintenanceCalendarInstancesV2
+    ),
+    occurrences: buildV2CurrentCloudDeltaForList(
+      typeof window !== "undefined" ? window.maintenanceOccurrencesV2 : [],
+      cloud.maintenanceOccurrencesV2
+    )
+  };
+  console.info("Maintenance V2 current-vs-cloud delta diagnostic", report);
+  return report;
+}
+
+if (typeof window !== "undefined"){
+  if (window.DEBUG_MODE){
+    window.getSaveSchemaCoverageReport = getSaveSchemaCoverageReport;
+    window.debugSaveSchemaCoverage = debugSaveSchemaCoverage;
+    window.debugProtectedSavePreflightClassification = debugProtectedSavePreflightClassification;
+    window.debugV2CurrentCloudDelta = debugV2CurrentCloudDelta;
+  } else {
+    try { delete window.getSaveSchemaCoverageReport; } catch (_err){}
+    try { delete window.debugSaveSchemaCoverage; } catch (_err){}
+    try { delete window.debugProtectedSavePreflightClassification; } catch (_err){}
+    try { delete window.debugV2CurrentCloudDelta; } catch (_err){}
+  }
+}
+
+function buildWindowProtectedStateForCoverage(){
+  if (typeof window === "undefined") return {};
+  const state = {};
+  const paths = Array.from(new Set((REQUIRED_PROTECTED_DATA_PATHS || []).concat((PROTECTED_FIELD_REGISTRY || []).map(entry => entry.path)))).sort();
+  paths.forEach(path => {
+    const topLevelKey = String(path || "").split(".").filter(Boolean)[0];
+    if (!topLevelKey || Object.prototype.hasOwnProperty.call(state, topLevelKey)) return;
+    if (Object.prototype.hasOwnProperty.call(window, topLevelKey)){
+      state[topLevelKey] = cloneStructured(window[topLevelKey]);
+    }
+  });
+  return state;
+}
+
+function classifyMissingProtectedPathsForSave({ pendingState, baselineState, localBackupState, remoteState, windowState, coverageReport } = {}){
+  const report = coverageReport || getSaveSchemaCoverageReport({ pendingSnapshot: pendingState || {} });
+  const pending = pendingState && typeof pendingState === "object" ? pendingState : {};
+  const sources = [
+    { name:"remote", state: remoteState },
+    { name:"baseline", state: baselineState },
+    { name:"localBackup", state: localBackupState },
+    { name:"window", state: windowState }
+  ];
+  const categories = {
+    blockingActiveMissing: [],
+    warningAbsentButNoBaselineData: [],
+    warningEmptyParentArray: [],
+    backupOnlyProtectedData: [],
+    possiblyDeprecatedButUnproven: [],
+    backupExclusionRisk: []
+  };
+  const missingPaths = Array.isArray(report?.missingProtectedPaths) ? report.missingProtectedPaths.slice() : [];
+  const add = (category, item)=>{
+    if (!categories[category]) categories[category] = [];
+    categories[category].push(item);
+  };
+
+  missingPaths.forEach(path => {
+    const registryEntry = (PROTECTED_FIELD_REGISTRY || []).find(entry => entry.path === path) || {};
+    const pendingInfo = getSaveSchemaCoveragePathInfo(pending, path);
+    const sourceInfo = {};
+    let activeSources = [];
+    sources.forEach(source => {
+      const info = getSaveSchemaCoveragePathInfo(source.state || {}, path);
+      sourceInfo[source.name] = info;
+      if (info.present && Number(info.count || 0) > 0) activeSources.push(source.name);
+    });
+
+    const item = {
+      path,
+      reason: "",
+      pending: pendingInfo,
+      baseline: sourceInfo.baseline,
+      localBackup: sourceInfo.localBackup,
+      remote: sourceInfo.remote,
+      window: sourceInfo.window,
+      shouldBlock: false,
+      category: "",
+      suggestedNextAction: "Export diagnostics, reload latest cloud data, and do not force-save until protected-path coverage is reviewed."
+    };
+
+    if (registryEntry.expectedShape === "nestedCount" && registryEntry.parentPath){
+      const parentPending = getSaveSchemaCoveragePathInfo(pending, registryEntry.parentPath);
+      item.parentPath = registryEntry.parentPath;
+      item.parentPending = parentPending;
+      if (Number(parentPending.count || 0) === 0 && activeSources.length === 0){
+        item.category = "warningEmptyParentArray";
+        item.reason = `${path} is absent because parent ${registryEntry.parentPath} is empty and no baseline source has nested history data.`;
+        add("warningEmptyParentArray", item);
+        return;
+      }
+    }
+
+    if (activeSources.length){
+      item.shouldBlock = true;
+      item.category = "blockingActiveMissing";
+      item.activeSources = activeSources;
+      item.reason = `${path} has meaningful protected data in ${activeSources.join(", ")} but is missing from the pending save snapshot.`;
+      add("blockingActiveMissing", item);
+      if (activeSources.length === 1 && activeSources[0] === "localBackup"){
+        add("backupOnlyProtectedData", { ...item, category:"backupOnlyProtectedData", reason:`${path} is only active in local backup and would not be preserved by the pending cloud save.` });
+      }
+      return;
+    }
+
+    if (path === "inventoryTransactions" || path === "cuttingJobDatabase"){
+      item.category = "possiblyDeprecatedButUnproven";
+      item.reason = `${path} is protected but absent from the pending snapshot and has no meaningful baseline data in available sources; treat as unknown/unproven, not deprecated.`;
+      add("possiblyDeprecatedButUnproven", item);
+      return;
+    }
+
+    item.category = "warningAbsentButNoBaselineData";
+    item.reason = `${path} is absent from the pending snapshot, but no available baseline source has meaningful data for it.`;
+    add("warningAbsentButNoBaselineData", item);
+  });
+
+  (Array.isArray(report?.backupExcludedProtectedPaths) ? report.backupExcludedProtectedPaths : []).forEach(path => {
+    add("backupExclusionRisk", {
+      path,
+      reason: `${path} is protected and excluded from local backup coverage.`,
+      pending: getSaveSchemaCoveragePathInfo(pending, path),
+      shouldBlock: false,
+      category: "backupExclusionRisk",
+      suggestedNextAction: "Include this path in local backup or document a proven quota-safe alternative."
+    });
+  });
+
+  return {
+    generatedAtISO: new Date().toISOString(),
+    categories,
+    blocking: categories.blockingActiveMissing,
+    warnings: []
+      .concat(categories.warningAbsentButNoBaselineData)
+      .concat(categories.warningEmptyParentArray)
+      .concat(categories.backupOnlyProtectedData)
+      .concat(categories.possiblyDeprecatedButUnproven)
+      .concat(categories.backupExclusionRisk),
+    blocked: categories.blockingActiveMissing.length > 0
+  };
+}
+
 function compareProtectedFieldSummaries(remoteSummary, pendingSummary){
   const issues = [];
   const remote = remoteSummary || {};
@@ -1624,16 +2164,21 @@ function detectDangerousProtectedFieldReduction(remoteState, pendingState){
 function detectRemoteRevisionConflict(remoteState){
   const remoteRev = Number(remoteState?.syncMeta?.rev || 0);
   const loadedRev = Number((typeof window !== "undefined" ? window.__loadedCloudRevisionForSaveGuard : 0) || 0);
+  const remoteUpdatedBy = String(remoteState?.syncMeta?.updatedBy || "");
+  const clientId = typeof getCloudSyncClientId === "function" ? getCloudSyncClientId() : "";
+  const sameClientRemoteRevision = !!(remoteUpdatedBy && clientId && remoteUpdatedBy === clientId);
   if (remoteRev > 0 && loadedRev > 0 && remoteRev > loadedRev){
     return {
-      blocked: true,
+      blocked: !sameClientRemoteRevision,
       remoteRev,
       loadedRev,
       remoteUpdatedAtISO: remoteState?.syncMeta?.updatedAtISO || "",
-      remoteUpdatedBy: remoteState?.syncMeta?.updatedBy || ""
+      remoteUpdatedBy,
+      clientId,
+      sameClientRemoteRevision
     };
   }
-  return { blocked: false, remoteRev, loadedRev };
+  return { blocked: false, remoteRev, loadedRev, remoteUpdatedBy, clientId, sameClientRemoteRevision };
 }
 
 function exportJsonDownload(filename, data){
@@ -2137,6 +2682,10 @@ function startWorkspaceStateListener(){
     const incomingRev = Number(meta?.rev || 0);
     if (!incomingRev) return;
     const incomingBy = String(meta?.updatedBy || "");
+    if (incomingBy === localClientId && incomingRev > Number(window.__loadedCloudRevisionForSaveGuard || 0)){
+      window.__loadedCloudRevisionForSaveGuard = incomingRev;
+      window.__lastLoadedCloudState = cloneStructured(incoming || {});
+    }
     if (hasPendingLocalChanges) return;
     const localEditAgeMs = Date.now() - (Number(lastLocalMutationAt) || 0);
     if (incomingBy !== localClientId && localEditAgeMs >= 0 && localEditAgeMs < 15000) return;
@@ -2956,6 +3505,7 @@ if (!Array.isArray(window.totalHistory)) window.totalHistory = [];   // [{dateIS
 if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
 if (!Array.isArray(window.tasksAsReq))   window.tasksAsReq   = [];
 if (!Array.isArray(window.inventory))    window.inventory    = [];
+if (!Array.isArray(window.inventoryTransactions)) window.inventoryTransactions = [];
 if (!Array.isArray(window.cuttingJobs))  window.cuttingJobs  = [];   // [{id,name,estimateHours,material,materialCost,materialQty,chargeRate,notes,startISO,dueISO,manualLogs:[{dateISO,completedHours}],files:[{name,dataUrl,type,size,addedAt}]}]
 if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
@@ -3269,6 +3819,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     copyArr("cuttingJobs");
     copyArr("completedCuttingJobs");
     copyArr("dailyCutHours");
+    copyArr("inventoryTransactions");
     copyArr("orderRequests");
     copyArr("receiptTrackerWeeks");
     copyArr("garnetCleanings");
@@ -3279,6 +3830,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     copyObj("appConfig");
     copyObj("settingsFolders");
     copyObj("folders");
+    copyObj("cuttingJobDatabase");
     copyObj("dashboardLayout");
     copyObj("costLayout");
     copyObj("jobLayout");
@@ -3298,6 +3850,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!Array.isArray(sanitized.completedCuttingJobs) && Array.isArray(window.completedCuttingJobs)) sanitized.completedCuttingJobs = window.completedCuttingJobs.slice();
     if (!Array.isArray(sanitized.dailyCutHours) && Array.isArray(window.dailyCutHours)) sanitized.dailyCutHours = window.dailyCutHours.slice();
     if (!Array.isArray(sanitized.inventory) && Array.isArray(window.inventory)) sanitized.inventory = window.inventory.slice();
+    if (!Array.isArray(sanitized.inventoryTransactions) && Array.isArray(window.inventoryTransactions)) sanitized.inventoryTransactions = window.inventoryTransactions.slice();
     if (!Array.isArray(sanitized.orderRequests) && Array.isArray(window.orderRequests)) sanitized.orderRequests = window.orderRequests.slice();
     if (!Array.isArray(sanitized.receiptTrackerWeeks) && Array.isArray(window.receiptTrackerWeeks)) sanitized.receiptTrackerWeeks = window.receiptTrackerWeeks.slice();
     if (!Array.isArray(sanitized.garnetCleanings) && Array.isArray(window.garnetCleanings)) sanitized.garnetCleanings = window.garnetCleanings.slice();
@@ -3313,12 +3866,14 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!sanitized.costLayout && window.costLayout) sanitized.costLayout = { ...window.costLayout };
     if (!sanitized.jobLayout && window.jobLayout) sanitized.jobLayout = { ...window.jobLayout };
     if (!sanitized.pumpEff && window.pumpEff) sanitized.pumpEff = { ...window.pumpEff };
+    if (!sanitized.cuttingJobDatabase && window.cuttingJobDatabase && typeof window.cuttingJobDatabase === "object") sanitized.cuttingJobDatabase = cloneStructured(window.cuttingJobDatabase);
     if (typeof orig === "function") orig(sanitized);
     if (!Array.isArray(window.tasksInterval)) window.tasksInterval = [];
     if (!Array.isArray(window.tasksAsReq)) window.tasksAsReq = [];
     if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
     if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
     if (!Array.isArray(window.dailyCutHours)) window.dailyCutHours = [];
+    if (!Array.isArray(window.inventoryTransactions)) window.inventoryTransactions = [];
     appConfig = normalizeAppConfig(sanitized.appConfig);
     window.appConfig = appConfig;
     refreshDerivedDailyHours();
@@ -3335,6 +3890,7 @@ window.defaultAsReqTasks = defaultAsReqTasks;
     if (!window.costLayout || typeof window.costLayout !== "object") window.costLayout = {};
     if (!window.jobLayout || typeof window.jobLayout !== "object") window.jobLayout = {};
     if (!window.pumpEff || typeof window.pumpEff !== "object") window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
+    if (!window.cuttingJobDatabase || typeof window.cuttingJobDatabase !== "object") window.cuttingJobDatabase = {};
     if (typeof window.ensureTaskCategories === "function") window.ensureTaskCategories();
     if (typeof window.ensureJobCategories === "function") window.ensureJobCategories();
     const jobFileCache = readJobFileCache();
@@ -3477,6 +4033,16 @@ function snapshotState(){
   const jobLayoutSource = window.cloudJobLayoutLoaded
     ? window.cloudJobLayout
     : (window.jobLayoutState && window.jobLayoutState.layoutById);
+  const cuttingJobDatabaseSource = (typeof window !== "undefined" && window.cuttingJobDatabase && typeof window.cuttingJobDatabase === "object")
+    ? window.cuttingJobDatabase
+    : ((typeof window !== "undefined" && window.__lastLoadedCloudState && window.__lastLoadedCloudState.cuttingJobDatabase && typeof window.__lastLoadedCloudState.cuttingJobDatabase === "object")
+      ? window.__lastLoadedCloudState.cuttingJobDatabase
+      : {});
+  const inventoryTransactionsSource = (typeof window !== "undefined" && Array.isArray(window.inventoryTransactions))
+    ? window.inventoryTransactions
+    : ((typeof window !== "undefined" && window.__lastLoadedCloudState && Array.isArray(window.__lastLoadedCloudState.inventoryTransactions))
+      ? window.__lastLoadedCloudState.inventoryTransactions
+      : []);
   const result = {
     schema: window.APP_SCHEMA || APP_SCHEMA,
     totalHistory,
@@ -3485,7 +4051,9 @@ function snapshotState(){
     inventory,
     inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.map(folder => ({ ...folder })) : [],
     inventoryMaterials: normalizeInventoryMaterials(window.inventoryMaterials),
+    inventoryTransactions: inventoryTransactionsSource.map(entry => (entry && typeof entry === "object" ? { ...entry } : entry)),
     inventorySection: String(window.inventorySection || "items") === "material" ? "material" : "items",
+    cuttingJobDatabase: cloneStructured(cuttingJobDatabaseSource) || {},
     cuttingJobs: stripJobFileDataUrls(cuttingJobs, strippedTracker),
     completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs, strippedTracker),
     orderRequests,
@@ -4757,6 +5325,9 @@ function adoptState(doc){
     : (Array.isArray(window.inventoryFolders) ? window.inventoryFolders : []);
   ensureInventoryForAllMaintenanceTasks();
   window.inventoryMaterials = normalizeInventoryMaterials(data.inventoryMaterials);
+  window.inventoryTransactions = Array.isArray(data.inventoryTransactions)
+    ? data.inventoryTransactions.map(entry => (entry && typeof entry === "object" ? { ...entry } : entry))
+    : (Array.isArray(window.inventoryTransactions) ? window.inventoryTransactions : []);
   window.inventorySection = String(data.inventorySection || window.inventorySection || "items") === "material" ? "material" : "items";
   cuttingJobs = Array.isArray(data.cuttingJobs) ? data.cuttingJobs : [];
   completedCuttingJobs = Array.isArray(data.completedCuttingJobs) ? data.completedCuttingJobs : [];
@@ -4772,6 +5343,11 @@ function adoptState(doc){
   maintenanceTasksV2 = Array.isArray(data.maintenanceTasksV2) ? data.maintenanceTasksV2.map(entry => ({ ...entry })) : [];
   maintenanceCalendarInstancesV2 = Array.isArray(data.maintenanceCalendarInstancesV2) ? data.maintenanceCalendarInstancesV2.map(entry => ({ ...entry })) : [];
   maintenanceOccurrencesV2 = Array.isArray(data.maintenanceOccurrencesV2) ? data.maintenanceOccurrencesV2.map(entry => ({ ...entry })) : [];
+  if (data.cuttingJobDatabase && typeof data.cuttingJobDatabase === "object"){
+    window.cuttingJobDatabase = cloneStructured(data.cuttingJobDatabase) || {};
+  } else if (!window.cuttingJobDatabase || typeof window.cuttingJobDatabase !== "object"){
+    window.cuttingJobDatabase = {};
+  }
   window.syncProcessLog = Array.isArray(data.syncProcessLog)
     ? data.syncProcessLog.slice(0,100).map(entry => ({ ...entry }))
     : (Array.isArray(window.syncProcessLog) ? window.syncProcessLog.slice(0,100) : []);
@@ -4992,20 +5568,75 @@ function adoptState(doc){
 
 
 const saveCloudInternal = debounce(async ()=>{
-  if (!FB.ready || !FB.docRef) return;
-  if (!canWriteCloud("saveCloudInternal")) return;
+  const explicitTrace = (typeof window !== "undefined" && window.__activeExplicitMaintenanceAddSaveTrace && typeof window.__activeExplicitMaintenanceAddSaveTrace === "object")
+    ? window.__activeExplicitMaintenanceAddSaveTrace
+    : null;
+  if (explicitTrace){
+    explicitTrace.saveCloudInternalEntered = true;
+    explicitTrace.hasPendingLocalChangesBeforeInternal = Boolean(hasPendingLocalChanges);
+    explicitTrace.firebasePath = FB.docRef?.path || "";
+    explicitTrace.workspaceDocPath = FB.workspaceDoc?.path || "";
+    explicitTrace.projectId = FB.app?.options?.projectId || window.FIREBASE_CONFIG?.projectId || "";
+    explicitTrace.clientId = typeof getCloudSyncClientId === "function" ? getCloudSyncClientId() : "";
+    explicitTrace.loadedRevBeforeSave = Number(window.__loadedCloudRevisionForSaveGuard || 0);
+  }
+  if (!FB.ready || !FB.docRef){
+    if (explicitTrace){
+      explicitTrace.saveCloudInternalReturnValue = "firebase_not_ready";
+      explicitTrace.saveCloudInternalReturnType = "early_return";
+    }
+    return;
+  }
+  const canWrite = canWriteCloud("saveCloudInternal");
+  if (explicitTrace) explicitTrace.canWriteCloudPassed = Boolean(canWrite);
+  if (!canWrite){
+    if (explicitTrace){
+      explicitTrace.saveCloudInternalReturnValue = "can_write_cloud_blocked";
+      explicitTrace.saveCloudInternalReturnType = "early_return";
+      explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
+    }
+    return;
+  }
   try{
     const rawSnap = snapshotState();
+    if (explicitTrace){
+      const rawInstances = Array.isArray(rawSnap?.maintenanceCalendarInstancesV2) ? rawSnap.maintenanceCalendarInstancesV2 : [];
+      const rawOccurrences = Array.isArray(rawSnap?.maintenanceOccurrencesV2) ? rawSnap.maintenanceOccurrencesV2 : [];
+      explicitTrace.snapshotInstancesCountInsideSave = rawInstances.length;
+      explicitTrace.snapshotOccurrencesCountInsideSave = rawOccurrences.length;
+      explicitTrace.snapshotInstanceFoundInsideSave = rawInstances.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
+      explicitTrace.snapshotOccurrenceFoundInsideSave = rawOccurrences.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
+    }
     const snap = compactStateForStorage(rawSnap);
+    if (explicitTrace){
+      const compactedInstances = Array.isArray(snap?.maintenanceCalendarInstancesV2) ? snap.maintenanceCalendarInstancesV2 : [];
+      const compactedOccurrences = Array.isArray(snap?.maintenanceOccurrencesV2) ? snap.maintenanceOccurrencesV2 : [];
+      explicitTrace.compactedInstancesCountInsideSave = compactedInstances.length;
+      explicitTrace.compactedOccurrencesCountInsideSave = compactedOccurrences.length;
+      explicitTrace.compactedInstanceFoundInsideSave = compactedInstances.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
+      explicitTrace.compactedOccurrenceFoundInsideSave = compactedOccurrences.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
+    }
     const pendingMetrics = logMaintenanceHistoryDiagnostics("before-save", snap);
     const baselineMetrics = collectMaintenanceHistoryMetrics(window.__lastLoadedCloudState || {});
     const pendingCore = logCoreBusinessDiagnostics("before-save", snap);
     const baselineCore = collectCoreBusinessMetrics(window.__lastLoadedCloudState || {});
     if ((pendingMetrics.completedDatesCount + pendingMetrics.manualHistoryCount + pendingMetrics.maintenanceOccurrencesV2Count + 10) < (baselineMetrics.completedDatesCount + baselineMetrics.manualHistoryCount + baselineMetrics.maintenanceOccurrencesV2Count)){
+      if (explicitTrace){
+        explicitTrace.maintenanceHistoryReductionBlocked = true;
+        explicitTrace.saveCloudInternalReturnValue = "maintenance_history_reduction_blocked";
+        explicitTrace.saveCloudInternalReturnType = "early_return";
+        explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
+      }
       console.error("Cloud save blocked: maintenance completion history would be reduced unexpectedly.", { pendingMetrics, baselineMetrics });
       return;
     }
     if (pendingCore.inventoryCount + 5 < baselineCore.inventoryCount || pendingCore.orderRequestsCount + 2 < baselineCore.orderRequestsCount || pendingCore.orderLineItemCount + 5 < baselineCore.orderLineItemCount || pendingCore.settingsFoldersCount + 1 < baselineCore.settingsFoldersCount || pendingCore.toleranceFieldCount + 1 < baselineCore.toleranceFieldCount || (!pendingCore.layoutPresent && baselineCore.layoutPresent)){
+      if (explicitTrace){
+        explicitTrace.coreBusinessReductionBlocked = true;
+        explicitTrace.saveCloudInternalReturnValue = "core_business_reduction_blocked";
+        explicitTrace.saveCloudInternalReturnType = "early_return";
+        explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
+      }
       console.error("Cloud save blocked: core business data would be reduced unexpectedly.", { pendingCore, baselineCore });
       return;
     }
@@ -5016,6 +5647,12 @@ const saveCloudInternal = debounce(async ()=>{
       if (sizeBytes >= FIRESTORE_STRONG_WARN_BYTES) console.error("Cloud state size strong warning", { sizeBytes, strongWarnAt: FIRESTORE_STRONG_WARN_BYTES });
     }
     if (sizeBytes >= FIRESTORE_BLOCK_BYTES){
+      if (explicitTrace){
+        explicitTrace.payloadSizeBlocked = true;
+        explicitTrace.saveCloudInternalReturnValue = "payload_size_blocked";
+        explicitTrace.saveCloudInternalReturnType = "early_return";
+        explicitTrace.hasPendingLocalChangesAfterInternal = true;
+      }
       console.error("Cloud save blocked: state payload too large", { sizeBytes, blockAt: FIRESTORE_BLOCK_BYTES });
       logStateSizeDiagnostics(snap, "blocked-save");
       hasPendingLocalChanges = true;
@@ -5034,19 +5671,34 @@ const saveCloudInternal = debounce(async ()=>{
     const revisionConflict = remoteData && typeof remoteData === "object"
       ? detectRemoteRevisionConflict(remoteData)
       : { blocked:false };
+    if (explicitTrace){
+      explicitTrace.revisionConflictBlocked = Boolean(revisionConflict?.blocked);
+      explicitTrace.remoteRevBeforeSave = Number(revisionConflict?.remoteRev || 0);
+      explicitTrace.remoteUpdatedBy = revisionConflict?.remoteUpdatedBy || "";
+      explicitTrace.sameClientRemoteRevision = Boolean(revisionConflict?.sameClientRemoteRevision);
+    }
     const allowFirstRunPreflight = Boolean(remoteSnap && !remoteSnap.exists)
       && !stateHasMeaningfulData(window.__lastLoadedCloudState || {})
       && !stateHasMeaningfulData(localBackupForPreflight || {});
+    const saveSchemaCoverage = getSaveSchemaCoverageReport({ pendingSnapshot: snap });
     const registryPreflight = validateProtectedSavePreflight({
       baselineState: window.__lastLoadedCloudState || null,
       pendingState: snap,
       latestRemoteState: remoteData,
       localBackupState: localBackupForPreflight,
+      windowState: buildWindowProtectedStateForCoverage(),
+      coverageReport: saveSchemaCoverage,
       reason: "saveCloudInternal",
       revisionConflict,
       allowFirstRun: allowFirstRunPreflight
     });
     if (registryPreflight.blocked){
+      if (explicitTrace){
+        explicitTrace.protectedPreflightBlocked = true;
+        explicitTrace.saveCloudInternalReturnValue = "protected_preflight_blocked";
+        explicitTrace.saveCloudInternalReturnType = "early_return";
+        explicitTrace.hasPendingLocalChangesAfterInternal = true;
+      }
       rememberDangerousSaveBlock(registryPreflight, {
         reason: "saveCloudInternal",
         firestorePath: FB.docRef?.path || "",
@@ -5058,12 +5710,23 @@ const saveCloudInternal = debounce(async ()=>{
     }
     if (remoteData && typeof remoteData === "object"){
       if (revisionConflict.blocked){
+        if (explicitTrace){
+          explicitTrace.saveCloudInternalReturnValue = "revision_conflict_blocked";
+          explicitTrace.saveCloudInternalReturnType = "early_return";
+          explicitTrace.hasPendingLocalChangesAfterInternal = true;
+        }
         blockCloudSave("remote state is newer than this client. Export/reload/merge review before saving.", revisionConflict);
         hasPendingLocalChanges = true;
         return;
       }
       const dangerous = detectDangerousProtectedFieldReduction(remoteData, snap);
       if (dangerous.blocked){
+        if (explicitTrace){
+          explicitTrace.dangerousReductionBlocked = true;
+          explicitTrace.saveCloudInternalReturnValue = "dangerous_reduction_blocked";
+          explicitTrace.saveCloudInternalReturnType = "early_return";
+          explicitTrace.hasPendingLocalChangesAfterInternal = true;
+        }
         blockCloudSave("protected field reduction detected.", dangerous.issues);
         hasPendingLocalChanges = true;
         return;
@@ -5075,7 +5738,24 @@ const saveCloudInternal = debounce(async ()=>{
     persistLocalStateBackup(snap);
     const writeRev = Number(snap?.syncMeta?.rev || 0);
     snap.saveMeta = { lastSavedAt: new Date().toISOString(), lastSaveStatus: "saved", lastSaveError: "", lastSaveSizeBytes: sizeBytes };
+    if (explicitTrace){
+      explicitTrace.firestoreSetAttempted = true;
+      explicitTrace.firestoreWritePayloadInstancesCount = Array.isArray(snap.maintenanceCalendarInstancesV2) ? snap.maintenanceCalendarInstancesV2.length : 0;
+      explicitTrace.firestoreWritePayloadOccurrencesCount = Array.isArray(snap.maintenanceOccurrencesV2) ? snap.maintenanceOccurrencesV2.length : 0;
+      explicitTrace.firestoreWritePayloadInstanceFound = Array.isArray(snap.maintenanceCalendarInstancesV2) && snap.maintenanceCalendarInstancesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
+      explicitTrace.firestoreWritePayloadOccurrenceFound = Array.isArray(snap.maintenanceOccurrencesV2) && snap.maintenanceOccurrencesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
+    }
     await FB.docRef.set(snap, { merge:true });
+    if (explicitTrace) explicitTrace.firestoreSetCompleted = true;
+    if (typeof window !== "undefined"){
+      window.__loadedCloudRevisionForSaveGuard = Number(snap?.syncMeta?.rev || 0);
+      if (explicitTrace){
+        explicitTrace.loadedRevUpdatedAfterSuccessfulSave = true;
+        explicitTrace.loadedRevAfterSave = Number(window.__loadedCloudRevisionForSaveGuard || 0);
+      } else {
+        window.__lastLoadedCloudState = cloneStructured(snap) || { ...snap };
+      }
+    }
     console.info("Cloud save succeeded", {
       workspaceId: WORKSPACE_ID,
       path: FB.docRef?.path || "",
@@ -5098,6 +5778,11 @@ const saveCloudInternal = debounce(async ()=>{
       if (el) el.value = JSON.stringify(snap, null, 2);
     }
     hasPendingLocalChanges = false;
+    if (explicitTrace){
+      explicitTrace.hasPendingLocalChangesAfterInternal = false;
+      explicitTrace.saveCloudInternalReturnValue = "completed";
+      explicitTrace.saveCloudInternalReturnType = "resolved";
+    }
     if (FB.workspaceDoc){
       await updateWorkspaceMetadata({
         workspaceId: WORKSPACE_ID,
@@ -5105,6 +5790,12 @@ const saveCloudInternal = debounce(async ()=>{
       });
     }
   }catch(e){
+    if (explicitTrace){
+      explicitTrace.firestoreSetError = e?.message || String(e);
+      explicitTrace.saveCloudInternalReturnValue = "threw";
+      explicitTrace.saveCloudInternalReturnType = "rejected_or_caught";
+      explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
+    }
     console.error("Cloud save failed:", e);
   }
 }, 1800);
@@ -5324,6 +6015,9 @@ function saveCloudNow(){
     if (typeof captureHistorySnapshot === "function") captureHistorySnapshot();
   } catch (err) {
     console.warn("History capture before save failed:", err);
+  }
+  if (typeof saveCloudInternal.now === "function"){
+    return saveCloudInternal.now();
   }
   if (typeof saveCloudInternal.flushResult === "function"){
     const result = saveCloudInternal.flushResult();
