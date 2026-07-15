@@ -680,6 +680,54 @@ function ensureMaintenanceV2Collections(){
   };
 }
 
+function recordMaintenanceV2MutationSource(entry = {}){
+  if (!window.DEBUG_MODE) return;
+  if (!Array.isArray(window.__maintenanceV2MutationSources)) window.__maintenanceV2MutationSources = [];
+  const phase = window.__maintenanceV2RenderRepairActive
+    ? "render_repair"
+    : (window.__initialAdoptComplete ? "post_load_or_user_action" : "initial_load_or_adopt");
+  window.__maintenanceV2MutationSources.unshift({
+    atISO: new Date().toISOString(),
+    phase,
+    ...entry
+  });
+  if (window.__maintenanceV2MutationSources.length > 120) window.__maintenanceV2MutationSources.length = 120;
+}
+window.recordMaintenanceV2MutationSource = recordMaintenanceV2MutationSource;
+
+function uniqueMaintenanceV2Id(prefix, collections){
+  const used = new Set();
+  (Array.isArray(collections?.tasks) ? collections.tasks : []).forEach(entry => { if (entry && entry.id != null) used.add(String(entry.id)); });
+  (Array.isArray(collections?.instances) ? collections.instances : []).forEach(entry => { if (entry && entry.id != null) used.add(String(entry.id)); });
+  (Array.isArray(collections?.occurrences) ? collections.occurrences : []).forEach(entry => { if (entry && entry.id != null) used.add(String(entry.id)); });
+  let id = genId(prefix);
+  const baseId = String(id);
+  let guard = 0;
+  while (used.has(String(id)) && guard < 20){
+    guard += 1;
+    id = `${baseId}_${guard}`;
+  }
+  return id;
+}
+
+function findEquivalentMaintenanceV2Instance(collections, taskRecord, legacyTaskId, mode, effectiveDateISO){
+  return (Array.isArray(collections.instances) ? collections.instances : []).find(entry => entry
+    && String(entry.taskId || "") === String(taskRecord.id || "")
+    && String(entry.legacyTaskId || "") === String(legacyTaskId || "")
+    && String(entry.instanceMode || "") === String(mode || "")
+    && normalizeDateKey(entry.startDateISO || null) === normalizeDateKey(effectiveDateISO || null)
+    && !["archived","deleted"].includes(String(entry.status || "active").toLowerCase())) || null;
+}
+
+function findEquivalentMaintenanceV2Occurrence(collections, instance, taskRecord, legacyTaskId, eventType, effectiveDateISO){
+  return (Array.isArray(collections.occurrences) ? collections.occurrences : []).find(entry => entry
+    && String(entry.instanceId || "") === String(instance.id || "")
+    && String(entry.taskId || "") === String(taskRecord.id || "")
+    && String(entry.legacyTaskId || "") === String(legacyTaskId || "")
+    && String(entry.eventType || "") === String(eventType || "")
+    && normalizeDateKey(entry.effectiveDateISO || null) === normalizeDateKey(effectiveDateISO || null)) || null;
+}
+
 function createMaintenanceV2FromTemplate(task, opts = {}){
   if (!task || task.id == null) return null;
   const collections = ensureMaintenanceV2Collections();
@@ -709,8 +757,10 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   }else{
     taskRecord.updatedAtISO = nowISO;
   }
-  const instance = {
-    id: genId("maintenance_instance_v2"),
+  let instance = findEquivalentMaintenanceV2Instance(collections, taskRecord, legacyTaskId, mode, effectiveDateISO);
+  const reusedInstance = !!instance;
+  if (!instance) instance = {
+    id: uniqueMaintenanceV2Id("maintenance_instance_v2", collections),
     system: "v2",
     schemaVersion: 2,
     taskId: taskRecord.id,
@@ -732,9 +782,11 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
       instance.repeatRule.intervalHours = Math.max(1, Number(instance.repeatRule.every) || 1);
     }
   }
-  collections.instances.unshift(instance);
-  const occurrence = {
-    id: genId("maintenance_occurrence_v2"),
+  if (!reusedInstance) collections.instances.unshift(instance);
+  let occurrence = findEquivalentMaintenanceV2Occurrence(collections, instance, taskRecord, legacyTaskId, eventType, effectiveDateISO);
+  const reusedOccurrence = !!occurrence;
+  if (!occurrence) occurrence = {
+    id: uniqueMaintenanceV2Id("maintenance_occurrence_v2", collections),
     system: "v2",
     schemaVersion: 2,
     instanceId: instance.id,
@@ -748,20 +800,43 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
       hours: Number.isFinite(Number(opts.hours)) ? Number(opts.hours) : null
     }
   };
-  collections.occurrences.unshift(occurrence);
+  if (!reusedOccurrence) collections.occurrences.unshift(occurrence);
+  recordMaintenanceV2MutationSource({
+    helper: "createMaintenanceV2FromTemplate",
+    action: reusedInstance || reusedOccurrence ? "deduped_or_reused" : "appended",
+    eventType,
+    taskId: taskRecord.id,
+    legacyTaskId,
+    instanceId: instance.id,
+    occurrenceId: occurrence.id,
+    effectiveDateISO,
+    reusedInstance,
+    reusedOccurrence
+  });
   if (window.DEBUG_MODE){
-    console.info("[maintenance-v2] created records", {
+    console.info(reusedInstance || reusedOccurrence ? "[maintenance-v2] reused existing records" : "[maintenance-v2] created records", {
       legacyTaskId,
       taskId: taskRecord.id,
       instanceId: instance.id,
       occurrenceId: occurrence.id,
       instanceMode: mode,
-      eventType
+      eventType,
+      reusedInstance,
+      reusedOccurrence
     });
   }
   return { taskRecord, instance, occurrence };
 }
 window.createMaintenanceV2FromTemplate = createMaintenanceV2FromTemplate;
+if (window.DEBUG_MODE){
+  window.debugV2MutationSources = function(){
+    return Array.isArray(window.__maintenanceV2MutationSources)
+      ? window.__maintenanceV2MutationSources.map(entry => ({ ...entry }))
+      : [];
+  };
+}else{
+  try { delete window.debugV2MutationSources; } catch (_err){}
+}
 
 function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refreshDashboard = true, recurrence = null } = {}){
   if (!task || task.mode !== "interval") return null;
@@ -6817,7 +6892,196 @@ function renderDashboard(){
     if (row) subtaskList?.appendChild(row);
   });
 
-  taskForm?.addEventListener("submit", (e)=>{
+  async function persistExplicitMaintenanceAddSave(actionName, created = null, details = {}){
+    const taskRecord = created && created.taskRecord ? created.taskRecord : null;
+    const instance = created && created.instance ? created.instance : null;
+    const occurrence = created && created.occurrence ? created.occurrence : null;
+    const startedAtISO = new Date().toISOString();
+    const trace = {
+      actionName,
+      taskId: taskRecord?.id || details.taskId || null,
+      legacyTaskId: taskRecord?.legacyTaskId || details.legacyTaskId || null,
+      instanceId: instance?.id || details.instanceId || null,
+      occurrenceId: occurrence?.id || details.occurrenceId || null,
+      effectiveDateISO: occurrence?.effectiveDateISO || instance?.startDateISO || details.effectiveDateISO || null,
+      saveCloudNowCalled: false,
+      saveCloudNowReturnedPromise: false,
+      saveStartedAtISO: startedAtISO,
+      saveFinishedAtISO: null,
+      saveThrewError: null,
+      hasPendingLocalChangesBefore: typeof hasPendingLocalChanges !== "undefined" ? Boolean(hasPendingLocalChanges) : null,
+      hasPendingLocalChangesAfter: null,
+      windowInstanceFoundBeforeSave: false,
+      windowOccurrenceFoundBeforeSave: false,
+      windowInstancesCountBeforeSave: 0,
+      windowOccurrencesCountBeforeSave: 0,
+      snapshotInstanceFoundBeforeSave: false,
+      snapshotOccurrenceFoundBeforeSave: false,
+      snapshotInstancesCountBeforeSave: 0,
+      snapshotOccurrencesCountBeforeSave: 0,
+      compactedInstanceFoundBeforeWrite: false,
+      compactedOccurrenceFoundBeforeWrite: false,
+      compactedInstancesCountBeforeWrite: 0,
+      compactedOccurrencesCountBeforeWrite: 0,
+      saveCloudInternalEntered: false,
+      canWriteCloudPassed: false,
+      revisionConflictBlocked: false,
+      protectedPreflightBlocked: false,
+      dangerousReductionBlocked: false,
+      firestoreSetAttempted: false,
+      firestoreSetCompleted: false,
+      firestoreSetError: null,
+      saveCloudInternalReturnValue: null,
+      saveCloudInternalReturnType: null,
+      hasPendingLocalChangesBeforeInternal: null,
+      hasPendingLocalChangesAfterInternal: null,
+      firebasePath: "",
+      projectId: "",
+      workspaceDocPath: "",
+      lastDangerousSaveBlock: typeof window !== "undefined" ? (window.__lastDangerousSaveBlock || null) : null,
+      lastCloudSaveBlock: typeof window !== "undefined" ? (window.__lastCloudSaveBlock || null) : null,
+      remoteGetAttempted: false,
+      remoteGetSource: "",
+      remoteGetCompleted: false,
+      remoteGetError: null,
+      remoteVerificationPassed: false,
+      remoteInstanceFound: false,
+      remoteOccurrenceFound: false,
+      remoteInstancesCount: 0,
+      remoteOccurrencesCount: 0,
+      remoteVerificationError: null
+    };
+    if (typeof FB !== "undefined"){
+      trace.firebasePath = FB.docRef?.path || "";
+      trace.workspaceDocPath = FB.workspaceDoc?.path || "";
+      trace.projectId = FB.app?.options?.projectId || window.FIREBASE_CONFIG?.projectId || "";
+    }
+    const currentInstances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
+    const currentOccurrences = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
+    trace.windowInstancesCountBeforeSave = currentInstances.length;
+    trace.windowOccurrencesCountBeforeSave = currentOccurrences.length;
+    trace.windowInstanceFoundBeforeSave = currentInstances.some(entry => entry && String(entry.id || "") === String(trace.instanceId || ""));
+    trace.windowOccurrenceFoundBeforeSave = currentOccurrences.some(entry => entry && String(entry.id || "") === String(trace.occurrenceId || ""));
+    try {
+      if (typeof snapshotState === "function"){
+        const pendingSnapshot = snapshotState();
+        const snapshotInstances = Array.isArray(pendingSnapshot?.maintenanceCalendarInstancesV2) ? pendingSnapshot.maintenanceCalendarInstancesV2 : [];
+        const snapshotOccurrences = Array.isArray(pendingSnapshot?.maintenanceOccurrencesV2) ? pendingSnapshot.maintenanceOccurrencesV2 : [];
+        trace.snapshotInstancesCountBeforeSave = snapshotInstances.length;
+        trace.snapshotOccurrencesCountBeforeSave = snapshotOccurrences.length;
+        trace.snapshotInstanceFoundBeforeSave = snapshotInstances.some(entry => entry && String(entry.id || "") === String(trace.instanceId || ""));
+        trace.snapshotOccurrenceFoundBeforeSave = snapshotOccurrences.some(entry => entry && String(entry.id || "") === String(trace.occurrenceId || ""));
+        if (typeof compactStateForStorage === "function"){
+          const compactedSnapshot = compactStateForStorage(pendingSnapshot);
+          const compactedInstances = Array.isArray(compactedSnapshot?.maintenanceCalendarInstancesV2) ? compactedSnapshot.maintenanceCalendarInstancesV2 : [];
+          const compactedOccurrences = Array.isArray(compactedSnapshot?.maintenanceOccurrencesV2) ? compactedSnapshot.maintenanceOccurrencesV2 : [];
+          trace.compactedInstancesCountBeforeWrite = compactedInstances.length;
+          trace.compactedOccurrencesCountBeforeWrite = compactedOccurrences.length;
+          trace.compactedInstanceFoundBeforeWrite = compactedInstances.some(entry => entry && String(entry.id || "") === String(trace.instanceId || ""));
+          trace.compactedOccurrenceFoundBeforeWrite = compactedOccurrences.some(entry => entry && String(entry.id || "") === String(trace.occurrenceId || ""));
+        }
+      }
+    } catch (err){
+      trace.snapshotTraceError = err?.message || String(err);
+    }
+    const rememberTrace = ()=>{
+      if (!window.DEBUG_MODE) return;
+      if (!Array.isArray(window.__explicitMaintenanceAddSaveTrace)) window.__explicitMaintenanceAddSaveTrace = [];
+      window.__explicitMaintenanceAddSaveTrace.unshift({ ...trace });
+      if (window.__explicitMaintenanceAddSaveTrace.length > 50) window.__explicitMaintenanceAddSaveTrace.length = 50;
+      window.debugExplicitMaintenanceAddSaveTrace = function(){
+        return Array.isArray(window.__explicitMaintenanceAddSaveTrace)
+          ? window.__explicitMaintenanceAddSaveTrace.map(entry => ({ ...entry }))
+          : [];
+      };
+    };
+    const payload = {
+      helper: "persistExplicitMaintenanceAddSave",
+      action: "save_requested",
+      actionName,
+      taskId: taskRecord?.id || details.taskId || null,
+      legacyTaskId: taskRecord?.legacyTaskId || details.legacyTaskId || null,
+      instanceId: instance?.id || details.instanceId || null,
+      occurrenceId: occurrence?.id || details.occurrenceId || null,
+      effectiveDateISO: occurrence?.effectiveDateISO || instance?.startDateISO || details.effectiveDateISO || null,
+      saveCloudNowAvailable: typeof saveCloudNow === "function"
+    };
+    if (typeof window.recordMaintenanceV2MutationSource === "function") window.recordMaintenanceV2MutationSource(payload);
+    try {
+      if (typeof saveCloudNow === "function"){
+        trace.saveCloudNowCalled = true;
+        window.__activeExplicitMaintenanceAddSaveTrace = trace;
+        const result = saveCloudNow();
+        trace.saveCloudNowReturnedPromise = !!(result && typeof result.then === "function");
+        if (result && typeof result.then === "function") await result;
+      } else if (typeof saveCloudDebounced === "function"){
+        saveCloudDebounced();
+        if (typeof window.recordMaintenanceV2MutationSource === "function"){
+          window.recordMaintenanceV2MutationSource({ ...payload, action: "save_debounced_fallback" });
+        }
+      }
+    } catch (err){
+      trace.saveThrewError = err?.message || String(err);
+    } finally {
+      trace.saveFinishedAtISO = new Date().toISOString();
+      trace.hasPendingLocalChangesAfter = typeof hasPendingLocalChanges !== "undefined" ? Boolean(hasPendingLocalChanges) : null;
+      trace.lastDangerousSaveBlock = typeof window !== "undefined" ? (window.__lastDangerousSaveBlock || null) : null;
+      trace.lastCloudSaveBlock = typeof window !== "undefined" ? (window.__lastCloudSaveBlock || null) : null;
+      if (window.__activeExplicitMaintenanceAddSaveTrace === trace) window.__activeExplicitMaintenanceAddSaveTrace = null;
+    }
+    if (!trace.saveThrewError && trace.instanceId && trace.occurrenceId && typeof FB !== "undefined" && FB.ready && FB.docRef && typeof FB.docRef.get === "function"){
+      try {
+        trace.remoteGetAttempted = true;
+        let remoteSnap = null;
+        try {
+          remoteSnap = await FB.docRef.get({ source: "server" });
+          trace.remoteGetSource = "server";
+        } catch (serverErr){
+          trace.remoteGetSource = `fallback_after_server_get_failed:${serverErr?.message || String(serverErr)}`;
+          remoteSnap = await FB.docRef.get();
+        }
+        trace.remoteGetCompleted = true;
+        const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
+        const remoteInstances = Array.isArray(remoteData?.maintenanceCalendarInstancesV2) ? remoteData.maintenanceCalendarInstancesV2 : [];
+        const remoteOccurrences = Array.isArray(remoteData?.maintenanceOccurrencesV2) ? remoteData.maintenanceOccurrencesV2 : [];
+        trace.remoteInstancesCount = remoteInstances.length;
+        trace.remoteOccurrencesCount = remoteOccurrences.length;
+        trace.remoteInstanceFound = remoteInstances.some(entry => entry && String(entry.id || "") === String(trace.instanceId));
+        trace.remoteOccurrenceFound = remoteOccurrences.some(entry => entry && String(entry.id || "") === String(trace.occurrenceId));
+        trace.remoteVerificationPassed = trace.remoteInstanceFound && trace.remoteOccurrenceFound;
+        if (trace.remoteVerificationPassed && typeof window !== "undefined" && remoteData && typeof remoteData === "object"){
+          window.__lastLoadedCloudState = (typeof cloneStructured === "function" ? cloneStructured(remoteData) : null) || { ...remoteData };
+        }
+      } catch (err){
+        trace.remoteGetError = err?.message || String(err);
+        trace.remoteVerificationError = err?.message || String(err);
+      }
+    } else if (!trace.saveThrewError && trace.instanceId && trace.occurrenceId){
+      trace.remoteVerificationError = "FB.docRef.get unavailable for explicit maintenance add verification.";
+    } else if (!trace.instanceId && !trace.occurrenceId && !trace.saveThrewError){
+      trace.remoteVerificationPassed = true;
+    }
+    rememberTrace();
+    if (trace.saveThrewError || !trace.remoteVerificationPassed){
+      if (typeof window.recordMaintenanceV2MutationSource === "function"){
+        window.recordMaintenanceV2MutationSource({ ...payload, action: "save_remote_verification_failed", trace });
+      }
+      return trace;
+    }
+    if (typeof window.recordMaintenanceV2MutationSource === "function"){
+      window.recordMaintenanceV2MutationSource({ ...payload, action: "save_remote_verification_passed", trace });
+    }
+    if (typeof window.recordMaintenanceV2MutationSource === "function"){
+      window.recordMaintenanceV2MutationSource({
+        ...payload,
+        action: "save_completed_or_unblocked_returned",
+        pendingLocalChangesAfterSave: trace.hasPendingLocalChangesAfter
+      });
+    }
+    return trace;
+  }
+
+  taskForm?.addEventListener("submit", async (e)=>{
     e.preventDefault();
     if (!taskForm) return;
     const name = (taskNameInput?.value || "").trim();
@@ -6865,6 +7129,7 @@ function renderDashboard(){
       downtimeHours: downtimeVal
     };
     let message = "Task added";
+    let createdV2Record = null;
     if (mode === "interval"){
       let interval = Number(repeatConfig.intervalHours);
       if (!isFinite(interval) || interval <= 0) interval = 8;
@@ -6903,6 +7168,7 @@ function renderDashboard(){
         refreshDashboard: false,
         recurrence: repeatConfig
       }) || template;
+      createdV2Record = instance && instance.taskRecord ? instance : null;
       const parsed = parseDateLocal(targetISO);
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
       let dateLabel = targetISO;
@@ -6991,8 +7257,16 @@ function renderDashboard(){
     });
 
     setContextDate(calendarDateISO);
-    if (typeof saveCloudNow === "function") saveCloudNow();
-    else saveCloudDebounced();
+    toast("Saving maintenance changes…");
+    const saveTrace = await persistExplicitMaintenanceAddSave("maintenance_settings_add_task", createdV2Record, {
+      taskId: id,
+      legacyTaskId: id,
+      effectiveDateISO: targetISO || calendarDateISO || ymd(new Date())
+    });
+    if (saveTrace && saveTrace.remoteVerificationPassed === false){
+      toast("Added locally, but cloud save did not confirm. Do not refresh yet.");
+      return;
+    }
     toast(message);
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
@@ -7004,14 +7278,6 @@ function renderDashboard(){
       renderCosts();
     }
   });
-
-  async function persistDashboardOneTimeTask(){
-    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-    if (typeof saveCloudNow === "function"){
-      const result = saveCloudNow();
-      if (result && typeof result.then === "function") await result;
-    }
-  }
 
   oneTimeForm?.addEventListener("submit", async (e)=>{
     e.preventDefault();
@@ -7056,7 +7322,12 @@ function renderDashboard(){
     if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 one-time record");
     setContextDate(targetISO);
     renderCalendarPreservingScroll();
-    await persistDashboardOneTimeTask();
+    toast("Saving one-time task…");
+    const saveTrace = await persistExplicitMaintenanceAddSave("calendar_add_one_time_new_task", created, { effectiveDateISO: targetISO });
+    if (saveTrace && saveTrace.remoteVerificationPassed === false){
+      toast("Added locally, but cloud save did not confirm. Do not refresh yet.");
+      return;
+    }
     toast("One-time task added to the calendar");
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
@@ -7069,7 +7340,7 @@ function renderDashboard(){
     }
   });
 
-  taskExistingForm?.addEventListener("submit", (e)=>{
+  taskExistingForm?.addEventListener("submit", async (e)=>{
     e.preventDefault();
     const selectedId = selectedExistingTaskId;
     if (!selectedId){ alert("Select a maintenance task to schedule."); return; }
@@ -7106,6 +7377,7 @@ function renderDashboard(){
       return;
     }
     let message = "Maintenance task added";
+    let createdV2Record = null;
     if (choice === "one_time"){
       const created = createMaintenanceV2FromTemplate(task, {
         mode: "one_time",
@@ -7114,6 +7386,7 @@ function renderDashboard(){
         note: occurrenceNote
       });
       if (!created){ toast("Could not create one-time reminder in V2."); if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] V2 one-time creation failed", { taskId: task.id }); return; }
+      createdV2Record = created;
       if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 one-time record");
       const targetDate = parseDateLocal(targetISO);
       if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())){
@@ -7164,6 +7437,7 @@ function renderDashboard(){
         repeatRule: normalizedRepeatConfig
       });
       if (!created){ toast("Could not start repeat tracking in V2."); if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] V2 repeat creation failed", { taskId: task.id }); return; }
+      createdV2Record = created;
       if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 repeat record");
       if (window.DEBUG_MODE){
         console.info("[maintenance-v2] repeat created instance", {
@@ -7179,8 +7453,16 @@ function renderDashboard(){
     }
     setContextDate(targetISO);
     renderCalendarPreservingScroll();
-    if (typeof saveCloudNow === "function") saveCloudNow();
-    else saveCloudDebounced();
+    toast("Saving maintenance calendar change…");
+    const saveTrace = await persistExplicitMaintenanceAddSave(`calendar_add_existing_${choice}`, createdV2Record, {
+      taskId: task.id,
+      legacyTaskId: task.id,
+      effectiveDateISO: targetISO
+    });
+    if (saveTrace && saveTrace.remoteVerificationPassed === false){
+      toast("Added locally, but cloud save did not confirm. Do not refresh yet.");
+      return;
+    }
     if (typeof renderCalendar === "function") renderCalendar();
     toast(message);
     closeModal();
