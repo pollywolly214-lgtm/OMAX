@@ -6896,6 +6896,39 @@ function renderDashboard(){
     const taskRecord = created && created.taskRecord ? created.taskRecord : null;
     const instance = created && created.instance ? created.instance : null;
     const occurrence = created && created.occurrence ? created.occurrence : null;
+    const startedAtISO = new Date().toISOString();
+    const trace = {
+      actionName,
+      taskId: taskRecord?.id || details.taskId || null,
+      legacyTaskId: taskRecord?.legacyTaskId || details.legacyTaskId || null,
+      instanceId: instance?.id || details.instanceId || null,
+      occurrenceId: occurrence?.id || details.occurrenceId || null,
+      effectiveDateISO: occurrence?.effectiveDateISO || instance?.startDateISO || details.effectiveDateISO || null,
+      saveCloudNowCalled: false,
+      saveCloudNowReturnedPromise: false,
+      saveStartedAtISO: startedAtISO,
+      saveFinishedAtISO: null,
+      saveThrewError: null,
+      hasPendingLocalChangesBefore: typeof hasPendingLocalChanges !== "undefined" ? Boolean(hasPendingLocalChanges) : null,
+      hasPendingLocalChangesAfter: null,
+      lastDangerousSaveBlock: typeof window !== "undefined" ? (window.__lastDangerousSaveBlock || null) : null,
+      lastCloudSaveBlock: typeof window !== "undefined" ? (window.__lastCloudSaveBlock || null) : null,
+      remoteVerificationPassed: false,
+      remoteInstanceFound: false,
+      remoteOccurrenceFound: false,
+      remoteVerificationError: null
+    };
+    const rememberTrace = ()=>{
+      if (!window.DEBUG_MODE) return;
+      if (!Array.isArray(window.__explicitMaintenanceAddSaveTrace)) window.__explicitMaintenanceAddSaveTrace = [];
+      window.__explicitMaintenanceAddSaveTrace.unshift({ ...trace });
+      if (window.__explicitMaintenanceAddSaveTrace.length > 50) window.__explicitMaintenanceAddSaveTrace.length = 50;
+      window.debugExplicitMaintenanceAddSaveTrace = function(){
+        return Array.isArray(window.__explicitMaintenanceAddSaveTrace)
+          ? window.__explicitMaintenanceAddSaveTrace.map(entry => ({ ...entry }))
+          : [];
+      };
+    };
     const payload = {
       helper: "persistExplicitMaintenanceAddSave",
       action: "save_requested",
@@ -6908,24 +6941,62 @@ function renderDashboard(){
       saveCloudNowAvailable: typeof saveCloudNow === "function"
     };
     if (typeof window.recordMaintenanceV2MutationSource === "function") window.recordMaintenanceV2MutationSource(payload);
-    if (typeof saveCloudNow === "function"){
-      const result = saveCloudNow();
-      if (result && typeof result.then === "function") await result;
-      if (typeof window.recordMaintenanceV2MutationSource === "function"){
-        window.recordMaintenanceV2MutationSource({
-          ...payload,
-          action: "save_completed_or_unblocked_returned",
-          pendingLocalChangesAfterSave: typeof hasPendingLocalChanges !== "undefined" ? Boolean(hasPendingLocalChanges) : null
-        });
+    try {
+      if (typeof saveCloudNow === "function"){
+        trace.saveCloudNowCalled = true;
+        const result = saveCloudNow();
+        trace.saveCloudNowReturnedPromise = !!(result && typeof result.then === "function");
+        if (result && typeof result.then === "function") await result;
+      } else if (typeof saveCloudDebounced === "function"){
+        saveCloudDebounced();
+        if (typeof window.recordMaintenanceV2MutationSource === "function"){
+          window.recordMaintenanceV2MutationSource({ ...payload, action: "save_debounced_fallback" });
+        }
       }
-      return;
+    } catch (err){
+      trace.saveThrewError = err?.message || String(err);
+    } finally {
+      trace.saveFinishedAtISO = new Date().toISOString();
+      trace.hasPendingLocalChangesAfter = typeof hasPendingLocalChanges !== "undefined" ? Boolean(hasPendingLocalChanges) : null;
+      trace.lastDangerousSaveBlock = typeof window !== "undefined" ? (window.__lastDangerousSaveBlock || null) : null;
+      trace.lastCloudSaveBlock = typeof window !== "undefined" ? (window.__lastCloudSaveBlock || null) : null;
     }
-    if (typeof saveCloudDebounced === "function"){
-      saveCloudDebounced();
-      if (typeof window.recordMaintenanceV2MutationSource === "function"){
-        window.recordMaintenanceV2MutationSource({ ...payload, action: "save_debounced_fallback" });
+    if (!trace.saveThrewError && trace.instanceId && trace.occurrenceId && window.FB && FB.ready && FB.docRef && typeof FB.docRef.get === "function"){
+      try {
+        const remoteSnap = await FB.docRef.get();
+        const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
+        const remoteInstances = Array.isArray(remoteData?.maintenanceCalendarInstancesV2) ? remoteData.maintenanceCalendarInstancesV2 : [];
+        const remoteOccurrences = Array.isArray(remoteData?.maintenanceOccurrencesV2) ? remoteData.maintenanceOccurrencesV2 : [];
+        trace.remoteInstanceFound = remoteInstances.some(entry => entry && String(entry.id || "") === String(trace.instanceId));
+        trace.remoteOccurrenceFound = remoteOccurrences.some(entry => entry && String(entry.id || "") === String(trace.occurrenceId));
+        trace.remoteVerificationPassed = trace.remoteInstanceFound && trace.remoteOccurrenceFound;
+        if (trace.remoteVerificationPassed && typeof window !== "undefined" && remoteData && typeof remoteData === "object"){
+          window.__lastLoadedCloudState = (typeof cloneStructured === "function" ? cloneStructured(remoteData) : null) || { ...remoteData };
+        }
+      } catch (err){
+        trace.remoteVerificationError = err?.message || String(err);
       }
+    } else if (!trace.instanceId && !trace.occurrenceId && !trace.saveThrewError){
+      trace.remoteVerificationPassed = true;
     }
+    rememberTrace();
+    if (trace.saveThrewError || !trace.remoteVerificationPassed){
+      if (typeof window.recordMaintenanceV2MutationSource === "function"){
+        window.recordMaintenanceV2MutationSource({ ...payload, action: "save_remote_verification_failed", trace });
+      }
+      return trace;
+    }
+    if (typeof window.recordMaintenanceV2MutationSource === "function"){
+      window.recordMaintenanceV2MutationSource({ ...payload, action: "save_remote_verification_passed", trace });
+    }
+    if (typeof window.recordMaintenanceV2MutationSource === "function"){
+      window.recordMaintenanceV2MutationSource({
+        ...payload,
+        action: "save_completed_or_unblocked_returned",
+        pendingLocalChangesAfterSave: trace.hasPendingLocalChangesAfter
+      });
+    }
+    return trace;
   }
 
   taskForm?.addEventListener("submit", async (e)=>{
@@ -7105,11 +7176,15 @@ function renderDashboard(){
 
     setContextDate(calendarDateISO);
     toast("Saving maintenance changes…");
-    await persistExplicitMaintenanceAddSave("maintenance_settings_add_task", createdV2Record, {
+    const saveTrace = await persistExplicitMaintenanceAddSave("maintenance_settings_add_task", createdV2Record, {
       taskId: id,
       legacyTaskId: id,
       effectiveDateISO: targetISO || calendarDateISO || ymd(new Date())
     });
+    if (saveTrace && saveTrace.remoteVerificationPassed === false){
+      toast("Added locally, but cloud save did not confirm. Do not refresh yet.");
+      return;
+    }
     toast(message);
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
@@ -7166,7 +7241,11 @@ function renderDashboard(){
     setContextDate(targetISO);
     renderCalendarPreservingScroll();
     toast("Saving one-time task…");
-    await persistExplicitMaintenanceAddSave("calendar_add_one_time_new_task", created, { effectiveDateISO: targetISO });
+    const saveTrace = await persistExplicitMaintenanceAddSave("calendar_add_one_time_new_task", created, { effectiveDateISO: targetISO });
+    if (saveTrace && saveTrace.remoteVerificationPassed === false){
+      toast("Added locally, but cloud save did not confirm. Do not refresh yet.");
+      return;
+    }
     toast("One-time task added to the calendar");
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
@@ -7293,11 +7372,15 @@ function renderDashboard(){
     setContextDate(targetISO);
     renderCalendarPreservingScroll();
     toast("Saving maintenance calendar change…");
-    await persistExplicitMaintenanceAddSave(`calendar_add_existing_${choice}`, createdV2Record, {
+    const saveTrace = await persistExplicitMaintenanceAddSave(`calendar_add_existing_${choice}`, createdV2Record, {
       taskId: task.id,
       legacyTaskId: task.id,
       effectiveDateISO: targetISO
     });
+    if (saveTrace && saveTrace.remoteVerificationPassed === false){
+      toast("Added locally, but cloud save did not confirm. Do not refresh yet.");
+      return;
+    }
     if (typeof renderCalendar === "function") renderCalendar();
     toast(message);
     closeModal();

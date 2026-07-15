@@ -65,6 +65,14 @@ function setCloudLoadGate({ loadComplete = false, adoptComplete = false } = {}){
 
 function blockCloudSave(reason, details = null){
   const message = `Cloud save blocked: ${reason}`;
+  if (typeof window !== "undefined"){
+    window.__lastCloudSaveBlock = {
+      atISO: new Date().toISOString(),
+      reason,
+      details,
+      message
+    };
+  }
   if (details) console.error(message, details);
   else console.warn(message);
   try { if (typeof toast === "function") toast(message); } catch (_err){}
@@ -5638,6 +5646,9 @@ const saveCloudInternal = debounce(async ()=>{
     const writeRev = Number(snap?.syncMeta?.rev || 0);
     snap.saveMeta = { lastSavedAt: new Date().toISOString(), lastSaveStatus: "saved", lastSaveError: "", lastSaveSizeBytes: sizeBytes };
     await FB.docRef.set(snap, { merge:true });
+    if (typeof window !== "undefined"){
+      window.__lastLoadedCloudState = cloneStructured(snap) || { ...snap };
+    }
     console.info("Cloud save succeeded", {
       workspaceId: WORKSPACE_ID,
       path: FB.docRef?.path || "",
