@@ -8922,11 +8922,6 @@ function applyMaintenanceHistoryImportRows(previewRows){
       stats.failed += 1;
       return;
     }
-    if (!Array.isArray(task.completedDates)) task.completedDates = [];
-    if (!task.completedDates.includes(item.scheduled_maintenance_date)){
-      task.completedDates.push(item.scheduled_maintenance_date);
-      task.completedDates.sort();
-    }
     if (!Array.isArray(task.manualHistory)) task.manualHistory = [];
     task.manualHistory.push({
       dateISO: item.scheduled_maintenance_date,
@@ -8964,6 +8959,98 @@ function applyMaintenanceHistoryImportRows(previewRows){
   if (typeof renderCalendar === "function") renderCalendar();
   if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets();
   return { stats, before, after };
+}
+
+
+function cleanupMi02cTinyMaintenanceImportRows(){
+  const fakeImportEventIds = new Set([
+    "mi02c-tiny-001",
+    "mi02c-tiny-002",
+    "mi02c-tiny-003",
+    "mi02c-tiny-004",
+    "mi02c-tiny-005",
+    "mi02c-tiny-006"
+  ]);
+  const fakeCompletedDateByTaskId = new Map([
+    ["pump_tube_noz_filter", new Set(["2026-01-05"])],
+    ["orifice_assembly", new Set(["2026-01-06"])],
+    ["ro_micron_filter", new Set(["2026-01-07", "2026-01-08"])]
+  ]);
+  const allTasks = [
+    ...(Array.isArray(window.tasksInterval) ? window.tasksInterval : []),
+    ...(Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [])
+  ];
+  const countMatches = ()=> {
+    let manualHistory = 0;
+    let completedDates = 0;
+    allTasks.forEach(task => {
+      if (!task || typeof task !== "object") return;
+      const taskId = String(task.id || "");
+      if (Array.isArray(task.manualHistory)){
+        manualHistory += task.manualHistory.filter(entry => {
+          const importEventId = String(entry?.import_event_id || entry?.importEventId || entry?.provenance?.import_event_id || entry?.provenance?.importEventId || "");
+          return fakeImportEventIds.has(importEventId);
+        }).length;
+      }
+      const dateSet = fakeCompletedDateByTaskId.get(taskId);
+      if (dateSet && Array.isArray(task.completedDates)){
+        completedDates += task.completedDates.filter(dateISO => dateSet.has(String(dateISO || ""))).length;
+      }
+    });
+    return { manualHistory, completedDates };
+  };
+  const matches = countMatches();
+  const summary = {
+    manualHistoryRemoved: 0,
+    completedDatesRemoved: 0,
+    touchedTaskIds: [],
+    noop: matches.manualHistory === 0 && matches.completedDates === 0
+  };
+  if (summary.noop){
+    console.info("MI-02C tiny maintenance import cleanup: no matching fake rows found.", summary);
+    return summary;
+  }
+  if (typeof createMaintenanceHistoryImportBackup !== "function") throw new Error("Backup helper is unavailable; tiny cleanup was blocked.");
+  createMaintenanceHistoryImportBackup();
+  const touchedTaskIds = new Set();
+  allTasks.forEach(task => {
+    if (!task || typeof task !== "object") return;
+    const taskId = String(task.id || "");
+    if (Array.isArray(task.manualHistory)){
+      const beforeLength = task.manualHistory.length;
+      task.manualHistory = task.manualHistory.filter(entry => {
+        const importEventId = String(entry?.import_event_id || entry?.importEventId || entry?.provenance?.import_event_id || entry?.provenance?.importEventId || "");
+        return !fakeImportEventIds.has(importEventId);
+      });
+      const removed = beforeLength - task.manualHistory.length;
+      if (removed > 0){
+        summary.manualHistoryRemoved += removed;
+        touchedTaskIds.add(taskId || "(missing task id)");
+      }
+    }
+    const dateSet = fakeCompletedDateByTaskId.get(taskId);
+    if (dateSet && Array.isArray(task.completedDates)){
+      const beforeLength = task.completedDates.length;
+      task.completedDates = task.completedDates.filter(dateISO => !dateSet.has(String(dateISO || "")));
+      const removed = beforeLength - task.completedDates.length;
+      if (removed > 0){
+        summary.completedDatesRemoved += removed;
+        touchedTaskIds.add(taskId);
+      }
+    }
+  });
+  summary.touchedTaskIds = Array.from(touchedTaskIds);
+  if (typeof saveTasks === "function") saveTasks();
+  if (typeof saveCloudNow === "function") saveCloudNow();
+  else if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+  if (typeof renderCalendar === "function") renderCalendar();
+  if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets();
+  console.info("MI-02C tiny maintenance import cleanup complete.", summary);
+  return summary;
+}
+
+if (typeof window !== "undefined"){
+  window.cleanupMi02cTinyMaintenanceImportRows = cleanupMi02cTinyMaintenanceImportRows;
 }
 
 function renderMaintenanceHistoryImportPreview(container, previewRows){
