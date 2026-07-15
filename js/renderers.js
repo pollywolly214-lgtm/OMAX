@@ -999,7 +999,7 @@ function buildMaintenanceV2DuplicateCalendarSpamReport(){
     duplicateInstanceIds,
     duplicateOccurrenceIds,
     duplicateRootOccurrenceIds,
-    duplicateEquivalentScheduledGroups,
+    duplicateEquivalentScheduledGroups: equivalentScheduledGroups,
     canonicalScheduledOccurrenceIndexes,
     removableScheduledOccurrenceIndexes,
     removableScheduledOccurrenceIds: removableScheduledOccurrenceIndexes.map(entry => entry.id).filter(Boolean),
