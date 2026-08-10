@@ -1025,6 +1025,12 @@ async function repairMaintenanceV2DuplicateCalendarSpam(){
     console.info("Maintenance V2 duplicate calendar spam repair: no exact duplicate scheduled V2 records found.", beforeReport);
     return { repaired: false, saveAttempted:false, saveMethod:"none", saveCompleted:false, saveError:"", beforeCounts: beforeReport.counts, afterCounts: beforeReport.counts, beforeReport, afterReport: beforeReport, removedScheduledOccurrences: 0, removedOneTimeInstances: 0 };
   }
+  if (removableInstanceIndexes.length){
+    return { repaired:false, saveAttempted:false, saveMethod:"none", saveCompleted:false, saveError:"Instance removal requires a separate exact-instance authorization and was blocked.", beforeCounts:beforeReport.counts, afterCounts:beforeReport.counts, beforeReport, afterReport:beforeReport, removedScheduledOccurrences:0, removedOneTimeInstances:0 };
+  }
+  if (typeof authorizeMaintenanceV2DuplicateRepair !== "function") throw new Error("Exact V2 repair authorization helper is unavailable.");
+  const authorization = authorizeMaintenanceV2DuplicateRepair({ removableOccurrenceIndexes:beforeReport.removableScheduledOccurrenceIndexes });
+  if (!authorization?.authorized) throw new Error(authorization?.error || "Exact V2 duplicate repair authorization was blocked.");
   if (typeof createMaintenanceHistoryImportBackup !== "function") throw new Error("Backup helper is unavailable; V2 duplicate repair was blocked.");
   createMaintenanceHistoryImportBackup();
   if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
@@ -1035,28 +1041,17 @@ async function repairMaintenanceV2DuplicateCalendarSpam(){
     if (event && String(event.eventType || "") === "scheduled") window.maintenanceOccurrencesV2.splice(index, 1);
   });
   const removedScheduledOccurrences = beforeOccurrenceCount - collectionsLength(window.maintenanceOccurrencesV2);
-  const beforeInstanceCount = collectionsLength(window.maintenanceCalendarInstancesV2);
-  const remainingInstanceIds = new Set((Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [])
-    .map(event => String(event?.instanceId || ""))
-    .filter(Boolean));
-  removableInstanceIndexes.sort((a, b) => b - a).forEach(index => {
-    const instance = window.maintenanceCalendarInstancesV2[index];
-    if (!instance || String(instance.instanceMode || "") !== "one_time") return;
-    const instanceId = String(instance.id || "");
-    const duplicatesWithSameId = window.maintenanceCalendarInstancesV2.filter(entry => entry && String(entry.id || "") === instanceId).length;
-    if (duplicatesWithSameId > 1 || !remainingInstanceIds.has(instanceId)) window.maintenanceCalendarInstancesV2.splice(index, 1);
-  });
-  const removedOneTimeInstances = beforeInstanceCount - collectionsLength(window.maintenanceCalendarInstancesV2);
+  const removedOneTimeInstances = 0;
   const afterReport = buildMaintenanceV2DuplicateCalendarSpamReport();
   let saveAttempted = false;
   let saveMethod = "none";
   let saveCompleted = false;
   let saveError = "";
   try {
-    if (typeof persistMaintenanceV2CollectionsNow !== "function") throw new Error("Maintenance V2 persistence helper is unavailable.");
+    if (typeof persistAuthorizedMaintenanceV2RepairNow !== "function") throw new Error("Authorized Maintenance V2 repair persistence helper is unavailable.");
     saveAttempted = true;
-    saveMethod = "persistMaintenanceV2CollectionsNow -> saveCloudNow -> workspaces/{workspaceId}/app/state";
-    const saveResult = await persistMaintenanceV2CollectionsNow();
+    saveMethod = "persistAuthorizedMaintenanceV2RepairNow -> saveCloudNow -> workspaces/{workspaceId}/app/state";
+    const saveResult = await persistAuthorizedMaintenanceV2RepairNow(authorization.token);
     saveCompleted = saveResult?.saved === true;
     if (!saveCompleted) saveError = String(saveResult?.error || "Cloud save did not confirm completion.");
   } catch (err) {

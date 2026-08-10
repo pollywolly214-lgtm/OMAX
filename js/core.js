@@ -4997,24 +4997,142 @@ function adoptState(doc){
 }
 
 
-function isScheduledOnlyMaintenanceV2Reduction(baselineState, pendingState){
-  const baseline = Array.isArray(baselineState?.maintenanceOccurrencesV2) ? baselineState.maintenanceOccurrencesV2 : [];
-  const pending = Array.isArray(pendingState?.maintenanceOccurrencesV2) ? pendingState.maintenanceOccurrencesV2 : [];
-  if (pending.length >= baseline.length) return false;
-  const pendingCounts = new Map();
-  pending.forEach(entry => {
-    const key = stableStringify(entry);
-    pendingCounts.set(key, (pendingCounts.get(key) || 0) + 1);
+const maintenanceV2RepairAuthorizations = new Map();
+
+function maintenanceV2RepairValueKey(value){
+  return stableStringify(value == null ? null : value);
+}
+
+function maintenanceV2RepairDateKey(value){
+  const match = String(value || "").match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+}
+
+function maintenanceV2RepairTextKey(value){
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function buildExactMaintenanceV2DuplicateRepairPlan(state){
+  const tasks = Array.isArray(state?.maintenanceTasksV2) ? state.maintenanceTasksV2 : [];
+  const instances = Array.isArray(state?.maintenanceCalendarInstancesV2) ? state.maintenanceCalendarInstancesV2 : [];
+  const occurrences = Array.isArray(state?.maintenanceOccurrencesV2) ? state.maintenanceOccurrencesV2 : [];
+  const taskById = new Map();
+  tasks.forEach(task => {
+    const id = String(task?.id || "");
+    if (id && !taskById.has(id)) taskById.set(id, task);
   });
-  return baseline.every(entry => {
-    const key = stableStringify(entry);
-    const remaining = pendingCounts.get(key) || 0;
-    if (remaining > 0){
-      pendingCounts.set(key, remaining - 1);
+  const instanceCandidatesById = new Map();
+  instances.forEach(instance => {
+    const id = String(instance?.id || "");
+    if (!id) return;
+    const list = instanceCandidatesById.get(id) || [];
+    list.push(instance);
+    instanceCandidatesById.set(id, list);
+  });
+  const resolveInstance = event => {
+    const candidates = instanceCandidatesById.get(String(event?.instanceId || "")) || [];
+    const eventLegacy = String(event?.legacyTaskId || "");
+    const eventTask = String(event?.taskId || "");
+    const eventDate = maintenanceV2RepairDateKey(event?.effectiveDateISO || event?.dateISO);
+    return candidates.find(instance => {
+      if (String(instance?.instanceMode || "") !== "one_time") return false;
+      if (eventLegacy && String(instance?.legacyTaskId || "") !== eventLegacy) return false;
+      if (eventTask && String(instance?.taskId || "") !== eventTask) return false;
+      if (eventDate && maintenanceV2RepairDateKey(instance?.startDateISO) !== eventDate) return false;
       return true;
-    }
-    return String(entry?.eventType || "") === "scheduled";
+    }) || candidates[0] || null;
+  };
+  const groups = new Map();
+  occurrences.forEach((event, index) => {
+    const instance = resolveInstance(event);
+    if (!instance || String(instance.instanceMode || "") !== "one_time") return;
+    if (String(event?.eventType || "") !== "scheduled") return;
+    if (!(String(event?.system || "") === "v2" || Number(event?.schemaVersion || 0) >= 2)) return;
+    const task = taskById.get(String(instance.taskId || event?.taskId || ""));
+    const dateISO = maintenanceV2RepairDateKey(event?.effectiveDateISO || event?.dateISO || instance.startDateISO);
+    if (!dateISO) return;
+    const key = [
+      "one_time",
+      maintenanceV2RepairTextKey(instance.legacyTaskId || event?.legacyTaskId || task?.legacyTaskId || event?.taskId || instance.taskId),
+      maintenanceV2RepairTextKey(event?.taskName || task?.name || "Maintenance reminder"),
+      dateISO,
+      "scheduled"
+    ].join("|");
+    const list = groups.get(key) || [];
+    list.push({ index, event });
+    groups.set(key, list);
   });
+  const removableOccurrenceIndexes = [];
+  const canonicalOccurrenceIndexesByGroup = {};
+  groups.forEach((entries, groupKey) => {
+    if (entries.length < 2) return;
+    const sorted = entries.slice().sort((a, b) => {
+      const at = Date.parse(String(a.event?.recordedAtISO || ""));
+      const bt = Date.parse(String(b.event?.recordedAtISO || ""));
+      const av = Number.isFinite(at);
+      const bv = Number.isFinite(bt);
+      if (av && bv && at !== bt) return at - bt;
+      if (av && !bv) return -1;
+      if (!av && bv) return 1;
+      return a.index - b.index;
+    });
+    canonicalOccurrenceIndexesByGroup[groupKey] = sorted[0].index;
+    sorted.slice(1).forEach(entry => removableOccurrenceIndexes.push({ index:entry.index, groupKey }));
+  });
+  removableOccurrenceIndexes.sort((a, b) => a.index - b.index);
+  return { removableOccurrenceIndexes, canonicalOccurrenceIndexesByGroup };
+}
+
+function authorizeMaintenanceV2DuplicateRepair(request = {}){
+  const baseline = compactStateForStorage(snapshotState());
+  const latestLoaded = compactStateForStorage(window.__lastLoadedCloudState || {});
+  const requestedIndexes = Array.from(new Set((request.removableOccurrenceIndexes || [])
+    .map(value => Number(value?.index ?? value))
+    .filter(index => Number.isInteger(index) && index >= 0))).sort((a, b) => a - b);
+  const exactPlan = buildExactMaintenanceV2DuplicateRepairPlan(baseline);
+  const exactIndexes = exactPlan.removableOccurrenceIndexes.map(entry => entry.index);
+  if (!requestedIndexes.length || maintenanceV2RepairValueKey(requestedIndexes) !== maintenanceV2RepairValueKey(exactIndexes)){
+    return { authorized:false, error:"Repair indexes do not match the current exact duplicate-scheduled audit." };
+  }
+  if (maintenanceV2RepairValueKey(baseline.maintenanceTasksV2) !== maintenanceV2RepairValueKey(latestLoaded.maintenanceTasksV2)
+    || maintenanceV2RepairValueKey(baseline.maintenanceCalendarInstancesV2) !== maintenanceV2RepairValueKey(latestLoaded.maintenanceCalendarInstancesV2)
+    || maintenanceV2RepairValueKey(baseline.maintenanceOccurrencesV2) !== maintenanceV2RepairValueKey(latestLoaded.maintenanceOccurrencesV2)){
+    return { authorized:false, error:"Current V2 state does not match the last authoritative cloud baseline." };
+  }
+  const removalSet = new Set(exactIndexes);
+  const expectedOccurrences = baseline.maintenanceOccurrencesV2.filter((_entry, index) => !removalSet.has(index));
+  const canonicalIndexes = Object.values(exactPlan.canonicalOccurrenceIndexesByGroup);
+  if (!canonicalIndexes.every(index => !removalSet.has(index))){
+    return { authorized:false, error:"A canonical scheduled occurrence would not survive the repair." };
+  }
+  const token = `maintenance_v2_repair_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+  maintenanceV2RepairAuthorizations.clear();
+  maintenanceV2RepairAuthorizations.set(token, {
+    baselineTasksKey:maintenanceV2RepairValueKey(baseline.maintenanceTasksV2),
+    baselineInstancesKey:maintenanceV2RepairValueKey(baseline.maintenanceCalendarInstancesV2),
+    baselineOccurrencesKey:maintenanceV2RepairValueKey(baseline.maintenanceOccurrencesV2),
+    expectedOccurrencesKey:maintenanceV2RepairValueKey(expectedOccurrences),
+    expiresAt:Date.now() + 60000
+  });
+  return { authorized:true, token };
+}
+
+function consumeMaintenanceV2RepairAuthorization(token, pendingState){
+  const proof = maintenanceV2RepairAuthorizations.get(String(token || ""));
+  maintenanceV2RepairAuthorizations.delete(String(token || ""));
+  if (!proof) return { authorized:false, error:"Missing, invalid, or already-used V2 repair authorization." };
+  if (Date.now() > proof.expiresAt) return { authorized:false, error:"V2 repair authorization expired." };
+  if (maintenanceV2RepairValueKey(pendingState.maintenanceTasksV2) !== proof.baselineTasksKey) return { authorized:false, error:"maintenanceTasksV2 changed during repair." };
+  if (maintenanceV2RepairValueKey(pendingState.maintenanceCalendarInstancesV2) !== proof.baselineInstancesKey) return { authorized:false, error:"maintenanceCalendarInstancesV2 changed during repair." };
+  if (maintenanceV2RepairValueKey(pendingState.maintenanceOccurrencesV2) !== proof.expectedOccurrencesKey) return { authorized:false, error:"V2 occurrences do not match the exact audited repair result." };
+  return { authorized:true, proof };
+}
+
+function validateMaintenanceV2RepairRemoteBaseline(proof, remoteState){
+  if (!proof || !remoteState) return false;
+  return maintenanceV2RepairValueKey(remoteState.maintenanceTasksV2) === proof.baselineTasksKey
+    && maintenanceV2RepairValueKey(remoteState.maintenanceCalendarInstancesV2) === proof.baselineInstancesKey
+    && maintenanceV2RepairValueKey(remoteState.maintenanceOccurrencesV2) === proof.baselineOccurrencesKey;
 }
 
 const saveCloudInternal = debounce(async (saveOptions = {})=>{
@@ -5027,8 +5145,11 @@ const saveCloudInternal = debounce(async (saveOptions = {})=>{
     const baselineMetrics = collectMaintenanceHistoryMetrics(window.__lastLoadedCloudState || {});
     const pendingCore = logCoreBusinessDiagnostics("before-save", snap);
     const baselineCore = collectCoreBusinessMetrics(window.__lastLoadedCloudState || {});
-    const allowScheduledV2Dedupe = saveOptions?.allowMaintenanceV2ScheduledDedupe === true
-      && isScheduledOnlyMaintenanceV2Reduction(window.__lastLoadedCloudState || {}, snap);
+    const repairAuthorization = consumeMaintenanceV2RepairAuthorization(saveOptions?.maintenanceV2RepairToken, snap);
+    const allowScheduledV2Dedupe = repairAuthorization.authorized === true;
+    if (saveOptions?.maintenanceV2RepairToken && !allowScheduledV2Dedupe){
+      return { saved:false, error:repairAuthorization.error || "V2 repair authorization was rejected." };
+    }
     if (!allowScheduledV2Dedupe && (pendingMetrics.completedDatesCount + pendingMetrics.manualHistoryCount + pendingMetrics.maintenanceOccurrencesV2Count + 10) < (baselineMetrics.completedDatesCount + baselineMetrics.manualHistoryCount + baselineMetrics.maintenanceOccurrencesV2Count)){
       console.error("Cloud save blocked: maintenance completion history would be reduced unexpectedly.", { pendingMetrics, baselineMetrics });
       return { saved:false, error:"Maintenance completion history reduction was blocked." };
@@ -5058,6 +5179,9 @@ const saveCloudInternal = debounce(async (saveOptions = {})=>{
     window.__lastSnapshot = snap;
     const remoteSnap = await FB.docRef.get();
     const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
+    if (allowScheduledV2Dedupe && !validateMaintenanceV2RepairRemoteBaseline(repairAuthorization.proof, remoteData)){
+      return { saved:false, error:"Latest Firestore V2 state no longer matches the authorized repair baseline." };
+    }
     const localBackupForPreflight = readLocalStateBackup();
     const revisionConflict = remoteData && typeof remoteData === "object"
       ? detectRemoteRevisionConflict(remoteData)
@@ -5386,7 +5510,12 @@ function saveCloudNow(saveOptions = {}){
 
 async function persistMaintenanceV2CollectionsNow(){
   if (typeof saveCloudNow !== "function") return { saved:false, error:"Authoritative cloud save helper is unavailable." };
-  return await saveCloudNow({ allowMaintenanceV2ScheduledDedupe:true });
+  return await saveCloudNow();
+}
+
+async function persistAuthorizedMaintenanceV2RepairNow(token){
+  if (typeof saveCloudNow !== "function") return { saved:false, error:"Authoritative cloud save helper is unavailable." };
+  return await saveCloudNow({ maintenanceV2RepairToken:token });
 }
 
 if (typeof window !== "undefined") window.persistMaintenanceV2CollectionsNow = persistMaintenanceV2CollectionsNow;
