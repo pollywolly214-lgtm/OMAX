@@ -2637,7 +2637,9 @@ function persistDashboardLayout(state){
   const layoutSource = (state.layoutById && typeof state.layoutById === "object") ? state.layoutById : {};
   const layoutClone = cloneLayoutData(layoutSource);
   const hasLayout = layoutHasEntries(layoutClone);
+  const hadPendingLayoutChange = Boolean(state.layoutDirtyForCloud);
   const storage = dashboardLayoutStorage();
+  let localStorageUpdated = false;
   if (storage){
     try {
       if (hasLayout){
@@ -2645,6 +2647,7 @@ function persistDashboardLayout(state){
       }else{
         storage.removeItem(DASHBOARD_LAYOUT_STORAGE_KEY);
       }
+      localStorageUpdated = true;
     } catch (err){
       console.warn("Unable to persist dashboard layout", err);
     }
@@ -2654,14 +2657,27 @@ function persistDashboardLayout(state){
     state.root.classList.toggle("has-custom-layout", hasLayout);
   }
   const cloud = getCloudLayout("dashboard");
-  let changed = !cloud.loaded || !layoutsEqual(cloud.layout, layoutClone);
+  const layoutsEqualResult = layoutsEqual(cloud.layout, layoutClone);
+  let changed = !cloud.loaded || !layoutsEqualResult || hadPendingLayoutChange;
+  if (typeof recordLayoutPersistAttempt === "function"){
+    recordLayoutPersistAttempt("dashboard", {
+      action: "persistDashboardLayout_called",
+      layoutHasEntries: hasLayout,
+      localStorageUpdated,
+      cloudLoaded: cloud.loaded,
+      layoutsEqualResult,
+      changed,
+      saveLayoutCloudOnlyCalled: false
+    });
+  }
   if (!cloud.loaded || changed){
     setCloudLayout("dashboard", layoutClone);
   }
   if (!cloud.loaded) changed = true;
-  if (changed && typeof saveCloudDebounced === "function"){
-    console.info("Layout change persisted", { layout: "dashboardLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true });
-    try { saveCloudDebounced(); }
+  if (changed && typeof saveLayoutCloudOnly === "function"){
+    console.info("Layout change persisted", { layout: "dashboardLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true, savePath: "layout-only" });
+    state.layoutDirtyForCloud = false;
+    try { saveLayoutCloudOnly("dashboard", layoutClone, { persistFunctionCalled: true, layoutHasEntries: hasLayout, localStorageUpdated, cloudLoaded: cloud.loaded, layoutsEqualResult, changed }); }
     catch (err) { console.warn("Unable to schedule cloud save for dashboard layout", err); }
   }
 }
@@ -3142,6 +3158,7 @@ function startDashboardWindowDrag(state, win, event){
     setDashboardWindowStyle(win, box);
     state.layoutById[id] = { ...(state.layoutById[id] || {}), ...box };
     state.activeLayoutById[id] = box;
+    state.layoutDirtyForCloud = true;
     updateDashboardRootSize(state, state.activeLayoutById);
   };
   const stop = ()=>{
@@ -3207,6 +3224,7 @@ function startDashboardWindowResize(state, win, direction, event){
     setDashboardWindowStyle(win, box);
     state.layoutById[id] = { ...(state.layoutById[id] || {}), ...box };
     state.activeLayoutById[id] = box;
+    state.layoutDirtyForCloud = true;
     updateDashboardRootSize(state, state.activeLayoutById);
     dispatchLayoutWindowResize("dashboard", id, win, box);
   };
@@ -3866,7 +3884,9 @@ function persistCostLayout(state){
   const layoutSource = (state.layoutById && typeof state.layoutById === "object") ? state.layoutById : {};
   const layoutClone = cloneLayoutData(layoutSource);
   const hasLayout = layoutHasEntries(layoutClone);
+  const hadPendingLayoutChange = Boolean(state.layoutDirtyForCloud);
   const storage = costLayoutStorage();
+  let localStorageUpdated = false;
   if (storage){
     try {
       if (hasLayout){
@@ -3874,6 +3894,7 @@ function persistCostLayout(state){
       }else{
         storage.removeItem(COST_LAYOUT_STORAGE_KEY);
       }
+      localStorageUpdated = true;
     } catch (err){
       console.warn("Unable to persist cost layout", err);
     }
@@ -3883,14 +3904,27 @@ function persistCostLayout(state){
     state.root.classList.toggle("has-custom-layout", hasLayout);
   }
   const cloud = getCloudLayout("cost");
-  let changed = !cloud.loaded || !layoutsEqual(cloud.layout, layoutClone);
+  const layoutsEqualResult = layoutsEqual(cloud.layout, layoutClone);
+  let changed = !cloud.loaded || !layoutsEqualResult || hadPendingLayoutChange;
+  if (typeof recordLayoutPersistAttempt === "function"){
+    recordLayoutPersistAttempt("cost", {
+      action: "persistCostLayout_called",
+      layoutHasEntries: hasLayout,
+      localStorageUpdated,
+      cloudLoaded: cloud.loaded,
+      layoutsEqualResult,
+      changed,
+      saveLayoutCloudOnlyCalled: false
+    });
+  }
   if (!cloud.loaded || changed){
     setCloudLayout("cost", layoutClone);
   }
   if (!cloud.loaded) changed = true;
-  if (changed && typeof saveCloudDebounced === "function"){
-    console.info("Cost layout saved", { bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), windowCount: Object.keys(layoutClone || {}).length, saveTriggered: true });
-    try { saveCloudDebounced(); }
+  if (changed && typeof saveLayoutCloudOnly === "function"){
+    console.info("Cost layout saved", { bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), windowCount: Object.keys(layoutClone || {}).length, saveTriggered: true, savePath: "layout-only" });
+    state.layoutDirtyForCloud = false;
+    try { saveLayoutCloudOnly("cost", layoutClone, { persistFunctionCalled: true, layoutHasEntries: hasLayout, localStorageUpdated, cloudLoaded: cloud.loaded, layoutsEqualResult, changed }); }
     catch (err) { console.warn("Unable to schedule cloud save for cost layout", err); }
   }
 }
@@ -4126,6 +4160,7 @@ function startCostWindowDrag(state, win, event){
     setCostWindowStyle(win, box);
     state.layoutById[id] = { ...(state.layoutById[id] || {}), ...box };
     state.activeLayoutById[id] = box;
+    state.layoutDirtyForCloud = true;
     updateCostRootSize(state, state.activeLayoutById);
     scheduleCostLayoutRefresh(state);
   };
@@ -4192,6 +4227,7 @@ function startCostWindowResize(state, win, direction, event){
     setCostWindowStyle(win, box);
     state.layoutById[id] = { ...(state.layoutById[id] || {}), ...box };
     state.activeLayoutById[id] = box;
+    state.layoutDirtyForCloud = true;
     updateCostRootSize(state, state.activeLayoutById);
     scheduleCostLayoutRefresh(state);
     dispatchLayoutWindowResize("cost", id, win, box);
@@ -4382,7 +4418,9 @@ function persistJobLayout(state){
   const layoutSource = (state.layoutById && typeof state.layoutById === "object") ? state.layoutById : {};
   const layoutClone = cloneLayoutData(layoutSource);
   const hasLayout = layoutHasEntries(layoutClone);
+  const hadPendingLayoutChange = Boolean(state.layoutDirtyForCloud);
   const storage = jobLayoutStorage();
+  let localStorageUpdated = false;
   if (storage){
     try {
       if (hasLayout){
@@ -4390,6 +4428,7 @@ function persistJobLayout(state){
       }else{
         storage.removeItem(JOB_LAYOUT_STORAGE_KEY);
       }
+      localStorageUpdated = true;
     } catch (err){
       console.warn("Unable to persist jobs layout", err);
     }
@@ -4399,14 +4438,27 @@ function persistJobLayout(state){
     state.root.classList.toggle("has-custom-layout", hasLayout);
   }
   const cloud = getCloudLayout("jobs");
-  let changed = !cloud.loaded || !layoutsEqual(cloud.layout, layoutClone);
+  const layoutsEqualResult = layoutsEqual(cloud.layout, layoutClone);
+  let changed = !cloud.loaded || !layoutsEqualResult || hadPendingLayoutChange;
+  if (typeof recordLayoutPersistAttempt === "function"){
+    recordLayoutPersistAttempt("jobs", {
+      action: "persistJobLayout_called",
+      layoutHasEntries: hasLayout,
+      localStorageUpdated,
+      cloudLoaded: cloud.loaded,
+      layoutsEqualResult,
+      changed,
+      saveLayoutCloudOnlyCalled: false
+    });
+  }
   if (!cloud.loaded || changed){
     setCloudLayout("jobs", layoutClone);
   }
   if (!cloud.loaded) changed = true;
-  if (changed && typeof saveCloudDebounced === "function"){
-    console.info("Layout change persisted", { layout: "jobLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true });
-    try { saveCloudDebounced(); }
+  if (changed && typeof saveLayoutCloudOnly === "function"){
+    console.info("Layout change persisted", { layout: "jobLayout", bytes: (typeof estimatePayloadBytes === "function" ? estimatePayloadBytes(layoutClone) : 0), saveTriggered: true, savePath: "layout-only" });
+    state.layoutDirtyForCloud = false;
+    try { saveLayoutCloudOnly("jobs", layoutClone, { persistFunctionCalled: true, layoutHasEntries: hasLayout, localStorageUpdated, cloudLoaded: cloud.loaded, layoutsEqualResult, changed }); }
     catch (err) { console.warn("Unable to schedule cloud save for jobs layout", err); }
   }
 }
@@ -4638,6 +4690,7 @@ function startJobWindowDrag(state, win, event){
     setJobWindowStyle(win, box);
     state.layoutById[id] = { ...(state.layoutById[id] || {}), ...box };
     state.activeLayoutById[id] = box;
+    state.layoutDirtyForCloud = true;
     updateJobRootSize(state, state.activeLayoutById);
     scheduleJobLayoutRefresh(state);
   };
@@ -4704,6 +4757,7 @@ function startJobWindowResize(state, win, direction, event){
     setJobWindowStyle(win, box);
     state.layoutById[id] = { ...(state.layoutById[id] || {}), ...box };
     state.activeLayoutById[id] = box;
+    state.layoutDirtyForCloud = true;
     updateJobRootSize(state, state.activeLayoutById);
     scheduleJobLayoutRefresh(state);
     dispatchLayoutWindowResize("jobs", id, win, box);
