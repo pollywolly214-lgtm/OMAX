@@ -1013,7 +1013,7 @@ function auditMaintenanceV2DuplicateCalendarSpam(){
   return report;
 }
 
-function repairMaintenanceV2DuplicateCalendarSpam(){
+async function repairMaintenanceV2DuplicateCalendarSpam(){
   const beforeReport = buildMaintenanceV2DuplicateCalendarSpamReport();
   const removableOccurrenceIndexes = Array.from(new Set((beforeReport.removableScheduledOccurrenceIndexes || [])
     .map(entry => Number(entry.index))
@@ -1023,7 +1023,7 @@ function repairMaintenanceV2DuplicateCalendarSpam(){
     .filter(index => Number.isInteger(index) && index >= 0)));
   if (!removableOccurrenceIndexes.length && !removableInstanceIndexes.length){
     console.info("Maintenance V2 duplicate calendar spam repair: no exact duplicate scheduled V2 records found.", beforeReport);
-    return { repaired: false, beforeCounts: beforeReport.counts, afterCounts: beforeReport.counts, beforeReport, afterReport: beforeReport, removedScheduledOccurrences: 0, removedOneTimeInstances: 0 };
+    return { repaired: false, saveAttempted:false, saveMethod:"none", saveCompleted:false, saveError:"", beforeCounts: beforeReport.counts, afterCounts: beforeReport.counts, beforeReport, afterReport: beforeReport, removedScheduledOccurrences: 0, removedOneTimeInstances: 0 };
   }
   if (typeof createMaintenanceHistoryImportBackup !== "function") throw new Error("Backup helper is unavailable; V2 duplicate repair was blocked.");
   createMaintenanceHistoryImportBackup();
@@ -1048,12 +1048,28 @@ function repairMaintenanceV2DuplicateCalendarSpam(){
   });
   const removedOneTimeInstances = beforeInstanceCount - collectionsLength(window.maintenanceCalendarInstancesV2);
   const afterReport = buildMaintenanceV2DuplicateCalendarSpamReport();
-  if (typeof saveCloudNow === "function") saveCloudNow();
-  else if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+  let saveAttempted = false;
+  let saveMethod = "none";
+  let saveCompleted = false;
+  let saveError = "";
+  try {
+    if (typeof persistMaintenanceV2CollectionsNow !== "function") throw new Error("Maintenance V2 persistence helper is unavailable.");
+    saveAttempted = true;
+    saveMethod = "persistMaintenanceV2CollectionsNow -> saveCloudNow -> workspaces/{workspaceId}/app/state";
+    const saveResult = await persistMaintenanceV2CollectionsNow();
+    saveCompleted = saveResult?.saved === true;
+    if (!saveCompleted) saveError = String(saveResult?.error || "Cloud save did not confirm completion.");
+  } catch (err) {
+    saveError = String(err?.message || err);
+  }
   if (typeof renderCalendar === "function") renderCalendar();
   if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets();
   const result = {
     repaired: true,
+    saveAttempted,
+    saveMethod,
+    saveCompleted,
+    saveError,
     beforeCounts: beforeReport.counts,
     afterCounts: afterReport.counts,
     removedScheduledOccurrences,

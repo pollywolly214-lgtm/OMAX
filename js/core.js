@@ -175,6 +175,12 @@ function debounce(fn, ms=250){
     t = null;
     return fn(...(lastArgs || []));
   };
+  debounced.runNow = (...a)=>{
+    clearTimeout(t);
+    t = null;
+    lastArgs = a;
+    return fn(...a);
+  };
   debounced.cancel = ()=>{
     if (!t) return;
     clearTimeout(t);
@@ -4991,9 +4997,29 @@ function adoptState(doc){
 }
 
 
-const saveCloudInternal = debounce(async ()=>{
-  if (!FB.ready || !FB.docRef) return;
-  if (!canWriteCloud("saveCloudInternal")) return;
+function isScheduledOnlyMaintenanceV2Reduction(baselineState, pendingState){
+  const baseline = Array.isArray(baselineState?.maintenanceOccurrencesV2) ? baselineState.maintenanceOccurrencesV2 : [];
+  const pending = Array.isArray(pendingState?.maintenanceOccurrencesV2) ? pendingState.maintenanceOccurrencesV2 : [];
+  if (pending.length >= baseline.length) return false;
+  const pendingCounts = new Map();
+  pending.forEach(entry => {
+    const key = stableStringify(entry);
+    pendingCounts.set(key, (pendingCounts.get(key) || 0) + 1);
+  });
+  return baseline.every(entry => {
+    const key = stableStringify(entry);
+    const remaining = pendingCounts.get(key) || 0;
+    if (remaining > 0){
+      pendingCounts.set(key, remaining - 1);
+      return true;
+    }
+    return String(entry?.eventType || "") === "scheduled";
+  });
+}
+
+const saveCloudInternal = debounce(async (saveOptions = {})=>{
+  if (!FB.ready || !FB.docRef) return { saved:false, error:"Cloud state document is unavailable." };
+  if (!canWriteCloud("saveCloudInternal")) return { saved:false, error:"Cloud writes are currently blocked." };
   try{
     const rawSnap = snapshotState();
     const snap = compactStateForStorage(rawSnap);
@@ -5001,13 +5027,15 @@ const saveCloudInternal = debounce(async ()=>{
     const baselineMetrics = collectMaintenanceHistoryMetrics(window.__lastLoadedCloudState || {});
     const pendingCore = logCoreBusinessDiagnostics("before-save", snap);
     const baselineCore = collectCoreBusinessMetrics(window.__lastLoadedCloudState || {});
-    if ((pendingMetrics.completedDatesCount + pendingMetrics.manualHistoryCount + pendingMetrics.maintenanceOccurrencesV2Count + 10) < (baselineMetrics.completedDatesCount + baselineMetrics.manualHistoryCount + baselineMetrics.maintenanceOccurrencesV2Count)){
+    const allowScheduledV2Dedupe = saveOptions?.allowMaintenanceV2ScheduledDedupe === true
+      && isScheduledOnlyMaintenanceV2Reduction(window.__lastLoadedCloudState || {}, snap);
+    if (!allowScheduledV2Dedupe && (pendingMetrics.completedDatesCount + pendingMetrics.manualHistoryCount + pendingMetrics.maintenanceOccurrencesV2Count + 10) < (baselineMetrics.completedDatesCount + baselineMetrics.manualHistoryCount + baselineMetrics.maintenanceOccurrencesV2Count)){
       console.error("Cloud save blocked: maintenance completion history would be reduced unexpectedly.", { pendingMetrics, baselineMetrics });
-      return;
+      return { saved:false, error:"Maintenance completion history reduction was blocked." };
     }
     if (pendingCore.inventoryCount + 5 < baselineCore.inventoryCount || pendingCore.orderRequestsCount + 2 < baselineCore.orderRequestsCount || pendingCore.orderLineItemCount + 5 < baselineCore.orderLineItemCount || pendingCore.settingsFoldersCount + 1 < baselineCore.settingsFoldersCount || pendingCore.toleranceFieldCount + 1 < baselineCore.toleranceFieldCount || (!pendingCore.layoutPresent && baselineCore.layoutPresent)){
       console.error("Cloud save blocked: core business data would be reduced unexpectedly.", { pendingCore, baselineCore });
-      return;
+      return { saved:false, error:"Core business data reduction was blocked." };
     }
     const sizeBytes = estimatePayloadBytes(snap);
     if (sizeBytes >= FIRESTORE_WARN_BYTES){
@@ -5020,7 +5048,7 @@ const saveCloudInternal = debounce(async ()=>{
       logStateSizeDiagnostics(snap, "blocked-save");
       hasPendingLocalChanges = true;
       persistLocalStateBackup(snap);
-      return;
+      return { saved:false, error:"State payload is too large." };
     }
     try {
       recordDataFlowEvent("cloud_save", snap);
@@ -5037,12 +5065,21 @@ const saveCloudInternal = debounce(async ()=>{
     const allowFirstRunPreflight = Boolean(remoteSnap && !remoteSnap.exists)
       && !stateHasMeaningfulData(window.__lastLoadedCloudState || {})
       && !stateHasMeaningfulData(localBackupForPreflight || {});
+    const safetyBaseline = allowScheduledV2Dedupe
+      ? { ...(window.__lastLoadedCloudState || {}), maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 }
+      : (window.__lastLoadedCloudState || null);
+    const safetyRemote = allowScheduledV2Dedupe && remoteData
+      ? { ...remoteData, maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 }
+      : remoteData;
+    const safetyLocalBackup = allowScheduledV2Dedupe && localBackupForPreflight
+      ? { ...localBackupForPreflight, maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 }
+      : localBackupForPreflight;
     const registryPreflight = validateProtectedSavePreflight({
-      baselineState: window.__lastLoadedCloudState || null,
+      baselineState: safetyBaseline,
       pendingState: snap,
-      latestRemoteState: remoteData,
-      localBackupState: localBackupForPreflight,
-      reason: "saveCloudInternal",
+      latestRemoteState: safetyRemote,
+      localBackupState: safetyLocalBackup,
+      reason: allowScheduledV2Dedupe ? "maintenance V2 scheduled duplicate repair" : "saveCloudInternal",
       revisionConflict,
       allowFirstRun: allowFirstRunPreflight
     });
@@ -5054,19 +5091,19 @@ const saveCloudInternal = debounce(async ()=>{
       });
       hasPendingLocalChanges = true;
       await writeBlockedSaveLog(registryPreflight, { reason: "saveCloudInternal" });
-      return;
+      return { saved:false, error:"Protected-state save preflight blocked the write." };
     }
     if (remoteData && typeof remoteData === "object"){
       if (revisionConflict.blocked){
         blockCloudSave("remote state is newer than this client. Export/reload/merge review before saving.", revisionConflict);
         hasPendingLocalChanges = true;
-        return;
+        return { saved:false, error:"Remote state is newer than this client." };
       }
-      const dangerous = detectDangerousProtectedFieldReduction(remoteData, snap);
+      const dangerous = detectDangerousProtectedFieldReduction(safetyRemote, snap);
       if (dangerous.blocked){
         blockCloudSave("protected field reduction detected.", dangerous.issues);
         hasPendingLocalChanges = true;
-        return;
+        return { saved:false, error:"Protected field reduction was blocked." };
       }
       snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
       snap.dailyCutHours = mergeDailyCutHoursForSave(snap.dailyCutHours, remoteData.dailyCutHours);
@@ -5104,8 +5141,11 @@ const saveCloudInternal = debounce(async ()=>{
         lastTouchedAt: new Date().toISOString()
       });
     }
+    window.__lastLoadedCloudState = { ...snap };
+    return { saved:true, path:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state` };
   }catch(e){
     console.error("Cloud save failed:", e);
+    return { saved:false, error:String(e?.message || e) };
   }
 }, 1800);
 function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
@@ -5306,12 +5346,12 @@ function saveCloudDebounced(){
   }
   saveCloudInternal();
 }
-function saveCloudNow(){
-  if (!canWriteCloud("saveCloudNow")) return;
+function saveCloudNow(saveOptions = {}){
+  if (!canWriteCloud("saveCloudNow")) return Promise.resolve({ saved:false, error:"Cloud writes are currently blocked." });
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
     console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
-    return;
+    return Promise.resolve({ saved:false, error:"Cloud save is disabled in preview read-only mode." });
   }
   hasPendingLocalChanges = true;
   lastLocalMutationAt = Date.now();
@@ -5325,21 +5365,31 @@ function saveCloudNow(){
   } catch (err) {
     console.warn("History capture before save failed:", err);
   }
+  if (typeof saveCloudInternal.runNow === "function"){
+    return saveCloudInternal.runNow(saveOptions);
+  }
   if (typeof saveCloudInternal.flushResult === "function"){
     const result = saveCloudInternal.flushResult();
     if (result !== false) return result;
-    return saveCloudInternal();
+    return saveCloudInternal(saveOptions);
   }
   if (typeof saveCloudInternal.flush === "function"){
     const flushed = saveCloudInternal.flush();
     if (!flushed){
-      return saveCloudInternal();
+      return saveCloudInternal(saveOptions);
     }
     return flushed;
   }else{
-    return saveCloudInternal();
+    return saveCloudInternal(saveOptions);
   }
 }
+
+async function persistMaintenanceV2CollectionsNow(){
+  if (typeof saveCloudNow !== "function") return { saved:false, error:"Authoritative cloud save helper is unavailable." };
+  return await saveCloudNow({ allowMaintenanceV2ScheduledDedupe:true });
+}
+
+if (typeof window !== "undefined") window.persistMaintenanceV2CollectionsNow = persistMaintenanceV2CollectionsNow;
 
 if (typeof window !== "undefined"){
   window.addEventListener("visibilitychange", ()=>{
