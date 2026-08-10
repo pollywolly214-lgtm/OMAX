@@ -680,52 +680,21 @@ function ensureMaintenanceV2Collections(){
   };
 }
 
-function recordMaintenanceV2MutationSource(entry = {}){
-  if (!window.DEBUG_MODE) return;
-  if (!Array.isArray(window.__maintenanceV2MutationSources)) window.__maintenanceV2MutationSources = [];
-  const phase = window.__maintenanceV2RenderRepairActive
-    ? "render_repair"
-    : (window.__initialAdoptComplete ? "post_load_or_user_action" : "initial_load_or_adopt");
-  window.__maintenanceV2MutationSources.unshift({
-    atISO: new Date().toISOString(),
-    phase,
-    ...entry
-  });
-  if (window.__maintenanceV2MutationSources.length > 120) window.__maintenanceV2MutationSources.length = 120;
-}
-window.recordMaintenanceV2MutationSource = recordMaintenanceV2MutationSource;
-
-function uniqueMaintenanceV2Id(prefix, collections){
-  const used = new Set();
-  (Array.isArray(collections?.tasks) ? collections.tasks : []).forEach(entry => { if (entry && entry.id != null) used.add(String(entry.id)); });
-  (Array.isArray(collections?.instances) ? collections.instances : []).forEach(entry => { if (entry && entry.id != null) used.add(String(entry.id)); });
-  (Array.isArray(collections?.occurrences) ? collections.occurrences : []).forEach(entry => { if (entry && entry.id != null) used.add(String(entry.id)); });
-  let id = genId(prefix);
-  const baseId = String(id);
-  let guard = 0;
-  while (used.has(String(id)) && guard < 20){
-    guard += 1;
-    id = `${baseId}_${guard}`;
-  }
-  return id;
+function createMaintenanceV2StablePart(value){
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "item";
 }
 
-function findEquivalentMaintenanceV2Instance(collections, taskRecord, legacyTaskId, mode, effectiveDateISO){
-  return (Array.isArray(collections.instances) ? collections.instances : []).find(entry => entry
-    && String(entry.taskId || "") === String(taskRecord.id || "")
-    && String(entry.legacyTaskId || "") === String(legacyTaskId || "")
-    && String(entry.instanceMode || "") === String(mode || "")
-    && normalizeDateKey(entry.startDateISO || null) === normalizeDateKey(effectiveDateISO || null)
-    && !["archived","deleted"].includes(String(entry.status || "active").toLowerCase())) || null;
-}
-
-function findEquivalentMaintenanceV2Occurrence(collections, instance, taskRecord, legacyTaskId, eventType, effectiveDateISO){
-  return (Array.isArray(collections.occurrences) ? collections.occurrences : []).find(entry => entry
-    && String(entry.instanceId || "") === String(instance.id || "")
-    && String(entry.taskId || "") === String(taskRecord.id || "")
-    && String(entry.legacyTaskId || "") === String(legacyTaskId || "")
-    && String(entry.eventType || "") === String(eventType || "")
-    && normalizeDateKey(entry.effectiveDateISO || null) === normalizeDateKey(effectiveDateISO || null)) || null;
+function stringifyMaintenanceV2RepeatRule(rule){
+  if (!rule || typeof rule !== "object") return "";
+  const keys = Object.keys(rule).sort();
+  return JSON.stringify(keys.reduce((out, key) => {
+    out[key] = rule[key];
+    return out;
+  }, {}));
 }
 
 function createMaintenanceV2FromTemplate(task, opts = {}){
@@ -757,10 +726,57 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   }else{
     taskRecord.updatedAtISO = nowISO;
   }
-  let instance = findEquivalentMaintenanceV2Instance(collections, taskRecord, legacyTaskId, mode, effectiveDateISO);
-  const reusedInstance = !!instance;
-  if (!instance) instance = {
-    id: uniqueMaintenanceV2Id("maintenance_instance_v2", collections),
+
+  const normalizedRepeatRule = mode === "repeat" ? (opts.repeatRule || null) : null;
+  const occurrenceHasRemovedLifecycle = (occurrence)=> {
+    const occurrenceId = String(occurrence?.id || "");
+    if (!occurrenceId) return false;
+    return collections.occurrences.some(event => {
+      if (!event || event === occurrence) return false;
+      const eventType = String(event.eventType || "");
+      if (eventType !== "removed" && eventType !== "skipped") return false;
+      return String(event.rootOccurrenceId || event.supersedesEventId || "") === occurrenceId;
+    });
+  };
+  const equivalentInstance = collections.instances.find(instance => {
+    if (!instance || typeof instance !== "object") return false;
+    if (String(instance.system || "") !== "v2" && Number(instance.schemaVersion || 0) < 2) return false;
+    if (String(instance.status || "active") === "stopped") return false;
+    if (String(instance.legacyTaskId || "") !== legacyTaskId) return false;
+    if (String(instance.instanceMode || "") !== mode) return false;
+    if (normalizeDateKey(instance.startDateISO || null) !== effectiveDateISO) return false;
+    if (mode === "repeat") return stringifyMaintenanceV2RepeatRule(instance.repeatRule) === stringifyMaintenanceV2RepeatRule(normalizedRepeatRule);
+    return collections.occurrences.some(event => event
+      && String(event.system || "") === "v2"
+      && String(event.instanceId || "") === String(instance.id || "")
+      && String(event.legacyTaskId || "") === legacyTaskId
+      && String(event.eventType || "") === eventType
+      && normalizeDateKey(event.effectiveDateISO || event.dateISO || null) === effectiveDateISO
+      && !occurrenceHasRemovedLifecycle(event));
+  }) || null;
+  if (equivalentInstance){
+    const equivalentOccurrence = collections.occurrences.find(event => event
+      && String(event.system || "") === "v2"
+      && String(event.instanceId || "") === String(equivalentInstance.id || "")
+      && String(event.eventType || "") === eventType
+      && normalizeDateKey(event.effectiveDateISO || event.dateISO || null) === effectiveDateISO
+      && !occurrenceHasRemovedLifecycle(event)) || null;
+    if (window.DEBUG_MODE){
+      console.info("[maintenance-v2] reused existing equivalent records", {
+        legacyTaskId,
+        taskId: taskRecord.id,
+        instanceId: equivalentInstance.id,
+        occurrenceId: equivalentOccurrence?.id || null,
+        instanceMode: mode,
+        eventType
+      });
+    }
+    return { taskRecord, instance: equivalentInstance, occurrence: equivalentOccurrence };
+  }
+
+  const stableBaseId = `${createMaintenanceV2StablePart(legacyTaskId)}_${createMaintenanceV2StablePart(effectiveDateISO)}_${createMaintenanceV2StablePart(mode)}`;
+  const instance = {
+    id: `maintenance_instance_v2_${stableBaseId}`,
     system: "v2",
     schemaVersion: 2,
     taskId: taskRecord.id,
@@ -768,7 +784,7 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
     instanceMode: mode,
     startDateISO: effectiveDateISO,
     status: "active",
-    repeatRule: mode === "repeat" ? (opts.repeatRule || null) : null,
+    repeatRule: normalizedRepeatRule,
     createdAtISO: nowISO,
     updatedAtISO: nowISO
   };
@@ -782,11 +798,9 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
       instance.repeatRule.intervalHours = Math.max(1, Number(instance.repeatRule.every) || 1);
     }
   }
-  if (!reusedInstance) collections.instances.unshift(instance);
-  let occurrence = findEquivalentMaintenanceV2Occurrence(collections, instance, taskRecord, legacyTaskId, eventType, effectiveDateISO);
-  const reusedOccurrence = !!occurrence;
-  if (!occurrence) occurrence = {
-    id: uniqueMaintenanceV2Id("maintenance_occurrence_v2", collections),
+  collections.instances.unshift(instance);
+  const occurrence = {
+    id: `maintenance_occurrence_v2_${stableBaseId}_${createMaintenanceV2StablePart(eventType)}`,
     system: "v2",
     schemaVersion: 2,
     instanceId: instance.id,
@@ -837,6 +851,260 @@ if (window.DEBUG_MODE){
 }else{
   try { delete window.debugV2MutationSources; } catch (_err){}
 }
+
+
+function buildMaintenanceV2DuplicateCalendarSpamReport(){
+  const collections = ensureMaintenanceV2Collections();
+  const normalizeKeyPart = value => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const duplicateGroups = (items, keyFn, summarizeFn = null)=> {
+    const groups = new Map();
+    items.forEach((item, index) => {
+      const key = keyFn(item, index);
+      if (!key) return;
+      const list = groups.get(key) || [];
+      list.push({ item, index, summary: summarizeFn ? summarizeFn(item, index) : null });
+      groups.set(key, list);
+    });
+    return Array.from(groups.entries())
+      .filter(([, list]) => list.length > 1)
+      .map(([key, list]) => ({ key, count: list.length, entries: list }));
+  };
+  const taskById = new Map();
+  collections.tasks.forEach((task, index) => {
+    if (task?.id != null && !taskById.has(String(task.id))) taskById.set(String(task.id), { task, index });
+  });
+  const instanceCandidatesById = new Map();
+  collections.instances.forEach((instance, index) => {
+    const id = String(instance?.id || "");
+    if (!id) return;
+    const list = instanceCandidatesById.get(id) || [];
+    list.push({ instance, index });
+    instanceCandidatesById.set(id, list);
+  });
+  const resolveInstanceForEvent = (event)=> {
+    const instanceId = String(event?.instanceId || "");
+    const candidates = instanceCandidatesById.get(instanceId) || [];
+    if (!candidates.length) return null;
+    const eventLegacy = String(event?.legacyTaskId || "");
+    const eventTask = String(event?.taskId || "");
+    const eventDate = normalizeDateKey(event?.effectiveDateISO || event?.dateISO || null);
+    return candidates.find(({ instance }) => {
+      if (!instance || String(instance.instanceMode || "") !== "one_time") return false;
+      if (eventLegacy && String(instance.legacyTaskId || "") !== eventLegacy) return false;
+      if (eventTask && String(instance.taskId || "") !== eventTask) return false;
+      if (eventDate && normalizeDateKey(instance.startDateISO || null) !== eventDate) return false;
+      return true;
+    }) || candidates[0];
+  };
+  const scheduledOneTimeEvents = collections.occurrences
+    .map((event, index)=>({ event, index, instanceRef: resolveInstanceForEvent(event) }))
+    .filter(({ event, instanceRef }) => event
+      && instanceRef
+      && (String(event.system || "") === "v2" || Number(event.schemaVersion || 0) >= 2)
+      && String(event.eventType || "") === "scheduled"
+      && String(instanceRef.instance?.instanceMode || "") === "one_time");
+  const equivalentScheduledGroups = duplicateGroups(
+    scheduledOneTimeEvents,
+    ({ event, instanceRef }) => {
+      const taskRef = taskById.get(String(instanceRef?.instance?.taskId || event.taskId || ""));
+      const task = taskRef?.task || null;
+      const dateISO = normalizeDateKey(event.effectiveDateISO || event.dateISO || instanceRef?.instance?.startDateISO || null);
+      const taskName = normalizeKeyPart(event.taskName || task?.name || "Maintenance reminder");
+      const legacyTaskId = normalizeKeyPart(instanceRef?.instance?.legacyTaskId || event.legacyTaskId || task?.legacyTaskId || event.taskId || instanceRef?.instance?.taskId || "");
+      return dateISO ? ["one_time", legacyTaskId, taskName, dateISO, String(event.eventType || "")].join("|") : "";
+    },
+    ({ event, instanceRef }) => ({
+      occurrenceId: String(event?.id || ""),
+      instanceId: String(event?.instanceId || ""),
+      taskId: String(event?.taskId || instanceRef?.instance?.taskId || ""),
+      legacyTaskId: String(event?.legacyTaskId || instanceRef?.instance?.legacyTaskId || ""),
+      dateISO: normalizeDateKey(event?.effectiveDateISO || event?.dateISO || instanceRef?.instance?.startDateISO || null) || "",
+      eventType: String(event?.eventType || "")
+    })
+  );
+  const removableScheduledOccurrenceIndexes = [];
+  const canonicalScheduledOccurrenceIndexes = [];
+  equivalentScheduledGroups.forEach(group => {
+    const sorted = group.entries.slice().sort((a, b) => {
+      const at = Date.parse(String(a.item.event.recordedAtISO || ""));
+      const bt = Date.parse(String(b.item.event.recordedAtISO || ""));
+      const av = Number.isFinite(at);
+      const bv = Number.isFinite(bt);
+      if (av && bv && at !== bt) return at - bt;
+      if (av && !bv) return -1;
+      if (!av && bv) return 1;
+      return a.item.index - b.item.index;
+    });
+    if (sorted[0]) canonicalScheduledOccurrenceIndexes.push(sorted[0].item.index);
+    sorted.slice(1).forEach(entry => {
+      removableScheduledOccurrenceIndexes.push({
+        index: entry.item.index,
+        id: String(entry.item.event?.id || ""),
+        instanceId: String(entry.item.event?.instanceId || ""),
+        groupKey: group.key
+      });
+    });
+  });
+  const removableOccurrenceIndexSet = new Set(removableScheduledOccurrenceIndexes.map(entry => Number(entry.index)));
+  const remainingOccurrenceInstanceIds = new Set();
+  collections.occurrences.forEach((event, index) => {
+    if (removableOccurrenceIndexSet.has(index)) return;
+    const instanceId = String(event?.instanceId || "");
+    if (instanceId) remainingOccurrenceInstanceIds.add(instanceId);
+  });
+  const duplicateTaskIds = duplicateGroups(
+    collections.tasks,
+    task => task?.id != null ? String(task.id) : "",
+    task => ({ id: String(task?.id || ""), legacyTaskId: String(task?.legacyTaskId || ""), name: String(task?.name || "") })
+  );
+  const duplicateInstanceIds = duplicateGroups(
+    collections.instances,
+    instance => instance?.id != null ? String(instance.id) : "",
+    instance => ({ id: String(instance?.id || ""), legacyTaskId: String(instance?.legacyTaskId || ""), taskId: String(instance?.taskId || ""), instanceMode: String(instance?.instanceMode || ""), startDateISO: String(instance?.startDateISO || "") })
+  );
+  const removableInstanceIndexes = [];
+  duplicateInstanceIds.forEach(group => {
+    const oneTimeEntries = group.entries.filter(({ item }) => item && String(item.instanceMode || "") === "one_time");
+    if (oneTimeEntries.length < 2) return;
+    const equivalentBuckets = new Map();
+    oneTimeEntries.forEach(entry => {
+      const instance = entry.item;
+      const key = [
+        String(instance.id || ""),
+        String(instance.legacyTaskId || ""),
+        String(instance.taskId || ""),
+        normalizeDateKey(instance.startDateISO || null) || "",
+        String(instance.status || "active")
+      ].join("|");
+      const list = equivalentBuckets.get(key) || [];
+      list.push(entry);
+      equivalentBuckets.set(key, list);
+    });
+    equivalentBuckets.forEach(list => {
+      if (list.length < 2) return;
+      list.slice(1).forEach(entry => {
+        const instanceId = String(entry.item?.id || "");
+        removableInstanceIndexes.push({
+          index: entry.index,
+          id: instanceId,
+          groupKey: group.key,
+          remainingOccurrencesShareId: remainingOccurrenceInstanceIds.has(instanceId)
+        });
+      });
+    });
+  });
+  const duplicateOccurrenceIds = duplicateGroups(
+    collections.occurrences,
+    event => event?.id != null ? String(event.id) : "",
+    event => ({ id: String(event?.id || ""), eventType: String(event?.eventType || ""), taskId: String(event?.taskId || ""), instanceId: String(event?.instanceId || ""), effectiveDateISO: String(event?.effectiveDateISO || "") })
+  );
+  const duplicateRootOccurrenceIds = duplicateGroups(
+    collections.occurrences,
+    event => event?.rootOccurrenceId != null ? String(event.rootOccurrenceId) : "",
+    event => ({ rootOccurrenceId: String(event?.rootOccurrenceId || ""), eventType: String(event?.eventType || ""), taskId: String(event?.taskId || ""), instanceId: String(event?.instanceId || ""), effectiveDateISO: String(event?.effectiveDateISO || "") })
+  );
+  return {
+    generatedAtISO: new Date().toISOString(),
+    counts: {
+      maintenanceTasksV2: collections.tasks.length,
+      maintenanceCalendarInstancesV2: collections.instances.length,
+      maintenanceOccurrencesV2: collections.occurrences.length,
+      duplicateTaskIdGroups: duplicateTaskIds.length,
+      duplicateInstanceIdGroups: duplicateInstanceIds.length,
+      duplicateOccurrenceIdGroups: duplicateOccurrenceIds.length,
+      duplicateRootOccurrenceIdGroups: duplicateRootOccurrenceIds.length,
+      duplicateEquivalentScheduledGroups: equivalentScheduledGroups.length,
+      removableScheduledOccurrences: removableScheduledOccurrenceIndexes.length,
+      removableScheduledOccurrenceIndexes: removableScheduledOccurrenceIndexes.length,
+      removableOneTimeInstanceIndexes: removableInstanceIndexes.length
+    },
+    duplicateTaskIds,
+    duplicateInstanceIds,
+    duplicateOccurrenceIds,
+    duplicateRootOccurrenceIds,
+    duplicateEquivalentScheduledGroups: equivalentScheduledGroups,
+    canonicalScheduledOccurrenceIndexes,
+    removableScheduledOccurrenceIndexes,
+    removableScheduledOccurrenceIds: removableScheduledOccurrenceIndexes.map(entry => entry.id).filter(Boolean),
+    removableInstanceIndexes
+  };
+}
+
+function auditMaintenanceV2DuplicateCalendarSpam(){
+  const report = buildMaintenanceV2DuplicateCalendarSpamReport();
+  console.info("Maintenance V2 duplicate calendar spam audit", report);
+  return report;
+}
+
+async function repairMaintenanceV2DuplicateCalendarSpam(){
+  const beforeReport = buildMaintenanceV2DuplicateCalendarSpamReport();
+  const removableOccurrenceIndexes = Array.from(new Set((beforeReport.removableScheduledOccurrenceIndexes || [])
+    .map(entry => Number(entry.index))
+    .filter(index => Number.isInteger(index) && index >= 0)));
+  const removableInstanceIndexes = Array.from(new Set((beforeReport.removableInstanceIndexes || [])
+    .map(entry => Number(entry.index))
+    .filter(index => Number.isInteger(index) && index >= 0)));
+  if (!removableOccurrenceIndexes.length && !removableInstanceIndexes.length){
+    console.info("Maintenance V2 duplicate calendar spam repair: no exact duplicate scheduled V2 records found.", beforeReport);
+    return { repaired: false, saveAttempted:false, saveMethod:"none", saveCompleted:false, saveError:"", beforeCounts: beforeReport.counts, afterCounts: beforeReport.counts, beforeReport, afterReport: beforeReport, removedScheduledOccurrences: 0, removedOneTimeInstances: 0 };
+  }
+  if (removableInstanceIndexes.length){
+    return { repaired:false, saveAttempted:false, saveMethod:"none", saveCompleted:false, saveError:"Instance removal requires a separate exact-instance authorization and was blocked.", beforeCounts:beforeReport.counts, afterCounts:beforeReport.counts, beforeReport, afterReport:beforeReport, removedScheduledOccurrences:0, removedOneTimeInstances:0 };
+  }
+  if (typeof authorizeMaintenanceV2DuplicateRepair !== "function") throw new Error("Exact V2 repair authorization helper is unavailable.");
+  const authorization = authorizeMaintenanceV2DuplicateRepair({ removableOccurrenceIndexes:beforeReport.removableScheduledOccurrenceIndexes });
+  if (!authorization?.authorized) throw new Error(authorization?.error || "Exact V2 duplicate repair authorization was blocked.");
+  if (typeof createMaintenanceHistoryImportBackup !== "function") throw new Error("Backup helper is unavailable; V2 duplicate repair was blocked.");
+  createMaintenanceHistoryImportBackup();
+  if (!Array.isArray(window.maintenanceOccurrencesV2)) window.maintenanceOccurrencesV2 = [];
+  if (!Array.isArray(window.maintenanceCalendarInstancesV2)) window.maintenanceCalendarInstancesV2 = [];
+  const beforeOccurrenceCount = collectionsLength(window.maintenanceOccurrencesV2);
+  removableOccurrenceIndexes.sort((a, b) => b - a).forEach(index => {
+    const event = window.maintenanceOccurrencesV2[index];
+    if (event && String(event.eventType || "") === "scheduled") window.maintenanceOccurrencesV2.splice(index, 1);
+  });
+  const removedScheduledOccurrences = beforeOccurrenceCount - collectionsLength(window.maintenanceOccurrencesV2);
+  const removedOneTimeInstances = 0;
+  const afterReport = buildMaintenanceV2DuplicateCalendarSpamReport();
+  let saveAttempted = false;
+  let saveMethod = "none";
+  let saveCompleted = false;
+  let saveError = "";
+  try {
+    if (typeof persistAuthorizedMaintenanceV2RepairNow !== "function") throw new Error("Authorized Maintenance V2 repair persistence helper is unavailable.");
+    saveAttempted = true;
+    saveMethod = "persistAuthorizedMaintenanceV2RepairNow -> saveCloudNow -> workspaces/{workspaceId}/app/state";
+    const saveResult = await persistAuthorizedMaintenanceV2RepairNow(authorization.token);
+    saveCompleted = saveResult?.saved === true;
+    if (!saveCompleted) saveError = String(saveResult?.error || "Cloud save did not confirm completion.");
+  } catch (err) {
+    saveError = String(err?.message || err);
+  }
+  if (typeof renderCalendar === "function") renderCalendar();
+  if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets();
+  const result = {
+    repaired: true,
+    saveAttempted,
+    saveMethod,
+    saveCompleted,
+    saveError,
+    beforeCounts: beforeReport.counts,
+    afterCounts: afterReport.counts,
+    removedScheduledOccurrences,
+    removedOneTimeInstances,
+    beforeReport,
+    afterReport
+  };
+  console.info("Maintenance V2 duplicate calendar spam repair complete", result);
+  return result;
+}
+
+function collectionsLength(value){
+  return Array.isArray(value) ? value.length : 0;
+}
+
+window.auditMaintenanceV2DuplicateCalendarSpam = auditMaintenanceV2DuplicateCalendarSpam;
+window.repairMaintenanceV2DuplicateCalendarSpam = repairMaintenanceV2DuplicateCalendarSpam;
 
 function scheduleExistingIntervalTask(task, { dateISO = null, note = "", refreshDashboard = true, recurrence = null } = {}){
   if (!task || task.mode !== "interval") return null;
@@ -8965,6 +9233,488 @@ function ensureMaintenanceTaskModalAPI(){
   }
 }
 
+
+function normalizeMaintenanceImportTaskName(value){
+  return String(value || "")
+    .trim()
+    .replace(/[\u2010-\u2015]/g, "-")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+const MAINTENANCE_HISTORY_IMPORT_ALLOWED_TASKS = new Set([
+  "pump tube & nozzle filter life",
+  "orifice assembly (jewel)",
+  "ro micron filter",
+  "replace hopper pinch valve",
+  "pump rebuild"
+].map(normalizeMaintenanceImportTaskName));
+
+function isCanonicalMaintenanceImportDateISO(value){
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const [year, month, day] = text.split("-").map(Number);
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  return dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1 && dt.getUTCDate() === day;
+}
+
+const MAINTENANCE_HISTORY_IMPORT_EXCLUDED_TASKS = new Set([
+  "mixing tube rotation",
+  "jewell orifice & nozzle body cleaning (weekly)",
+  "drain hopper regulator water bowl",
+  "lubricate z-axis rail shafts & lead screw (annually)",
+  "purge hopper pressure pot",
+  "abrasive tubing inspection",
+  "clean x-rails & y-bridge rails",
+  "clean & lubricate ball screws",
+  "clean x- & y-axis magnetic encoder strips",
+  "ro / softener feed pressure & water quality - daily",
+  "check hopper bonding strap (annually)",
+  "inspect pressure relief valve (<=90 psi)",
+  "inspect pressure relief valve (≤90 psi)",
+  "check hopper pinch valve & air regulator connection"
+].map(normalizeMaintenanceImportTaskName));
+
+function parseMaintenanceHistoryImportCSV(text){
+  const rows = [];
+  let row = [];
+  let value = "";
+  let quoted = false;
+  const src = String(text || "").replace(/^\uFEFF/, "");
+  for (let i = 0; i < src.length; i += 1){
+    const ch = src[i];
+    const next = src[i + 1];
+    if (quoted){
+      if (ch === '"' && next === '"'){
+        value += '"';
+        i += 1;
+      }else if (ch === '"'){
+        quoted = false;
+      }else{
+        value += ch;
+      }
+    }else if (ch === '"'){
+      quoted = true;
+    }else if (ch === ','){
+      row.push(value);
+      value = "";
+    }else if (ch === '\n'){
+      row.push(value);
+      rows.push(row);
+      row = [];
+      value = "";
+    }else if (ch !== '\r'){
+      value += ch;
+    }
+  }
+  row.push(value);
+  rows.push(row);
+  const nonEmptyRows = rows.filter(items => items.some(item => String(item || "").trim() !== ""));
+  if (!nonEmptyRows.length) return [];
+  const headers = nonEmptyRows[0].map(item => String(item || "").trim());
+  return nonEmptyRows.slice(1).map(items => {
+    const out = {};
+    headers.forEach((header, index) => { if (header) out[header] = items[index] != null ? String(items[index]) : ""; });
+    return out;
+  });
+}
+
+function parseMaintenanceHistoryImportText(text, filename = ""){
+  const raw = String(text || "").trim();
+  if (!raw) return [];
+  const lowerName = String(filename || "").toLowerCase();
+  if (lowerName.endsWith(".json") || raw.startsWith("[") || raw.startsWith("{")){
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed.rows)) return parsed.rows;
+    if (Array.isArray(parsed.events)) return parsed.events;
+    throw new Error("JSON import must be an array, or an object with rows/events array.");
+  }
+  return parseMaintenanceHistoryImportCSV(raw);
+}
+
+function getMaintenanceHistoryImportTaskList(){
+  const out = [];
+  const add = (task, mode, index)=> {
+    if (!task || typeof task !== "object") return;
+    out.push({ task, mode, index, id: task.id != null ? String(task.id) : "", name: String(task.name || "") });
+  };
+  (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).forEach((task, index)=>add(task, "interval", index));
+  (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []).forEach((task, index)=>add(task, "asreq", index));
+  return out;
+}
+
+function resolveMaintenanceHistoryImportTask(taskName){
+  const normalized = normalizeMaintenanceImportTaskName(taskName);
+  const all = getMaintenanceHistoryImportTaskList();
+  let matches = all.filter(item => normalizeMaintenanceImportTaskName(item.name) === normalized);
+  if (normalized === "pump rebuild"){
+    const pumpMatches = all.filter(item => {
+      const id = String(item.id || "").trim().toLowerCase();
+      const name = normalizeMaintenanceImportTaskName(item.name);
+      return id === "pump_rebuild" || name === "pump rebuild" || (name.includes("pump") && name.includes("rebuild"));
+    });
+    const seen = new Set(matches.map(item => `${item.mode}:${item.index}:${item.id}`));
+    pumpMatches.forEach(item => {
+      const key = `${item.mode}:${item.index}:${item.id}`;
+      if (!seen.has(key)) matches.push(item);
+    });
+  }
+  if (matches.length === 1) return { status: "ready", match: matches[0], matches };
+  if (matches.length > 1) return { status: "ambiguous", match: null, matches };
+  return { status: "unresolved", match: null, matches: [] };
+}
+
+function maintenanceHistoryImportHasDuplicate(importEventId){
+  const wanted = String(importEventId || "").trim();
+  if (!wanted) return false;
+  const hasInTask = task => Array.isArray(task?.manualHistory) && task.manualHistory.some(entry => {
+    if (!entry || typeof entry !== "object") return false;
+    return String(entry.import_event_id || entry.importEventId || entry.provenance?.import_event_id || entry.provenance?.importEventId || "").trim() === wanted;
+  });
+  if ((Array.isArray(window.tasksInterval) ? window.tasksInterval : []).some(hasInTask)) return true;
+  if ((Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []).some(hasInTask)) return true;
+  return (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : []).some(event => {
+    if (!event || typeof event !== "object") return false;
+    return String(event.import_event_id || event.importEventId || event.payload?.import_event_id || event.payload?.importEventId || event.provenance?.import_event_id || event.provenance?.importEventId || "").trim() === wanted;
+  });
+}
+
+function buildMaintenanceHistoryImportPreview(rows){
+  const seenImportEventIds = new Set();
+  return (Array.isArray(rows) ? rows : []).map((row, index) => {
+    const eventId = String(row?.import_event_id || "").trim();
+    const dateISO = String(row?.scheduled_maintenance_date || "").trim();
+    const taskName = String(row?.exact_website_task || "").trim();
+    const normalizedTask = normalizeMaintenanceImportTaskName(taskName);
+    let status = "ready";
+    let reason = "Ready to append legacy completed history.";
+    let match = null;
+    let matchedTaskId = "";
+    if (!eventId){
+      status = "invalid";
+      reason = "Missing required import_event_id.";
+    }else if (!isCanonicalMaintenanceImportDateISO(dateISO)){
+      status = "invalid date";
+      reason = "scheduled_maintenance_date must be a real canonical YYYY-MM-DD date.";
+    }else if (!taskName){
+      status = "invalid";
+      reason = "Missing required exact_website_task.";
+    }else if (MAINTENANCE_HISTORY_IMPORT_EXCLUDED_TASKS.has(normalizedTask)){
+      status = "excluded";
+      reason = "Task is explicitly excluded from purchase-driven import.";
+    }else if (!MAINTENANCE_HISTORY_IMPORT_ALLOWED_TASKS.has(normalizedTask)){
+      status = "excluded";
+      reason = "Task is not in the allowed purchase-proven import list.";
+    }else{
+      const resolved = resolveMaintenanceHistoryImportTask(taskName);
+      if (resolved.status === "ready"){
+        match = resolved.match;
+        matchedTaskId = String(match.id || "");
+        if (seenImportEventIds.has(eventId)){
+          status = "duplicate";
+          reason = "Another row in this preview already uses this import_event_id.";
+        }else if (maintenanceHistoryImportHasDuplicate(eventId)){
+          status = "duplicate";
+          reason = "An existing legacy manualHistory or V2 occurrence already has this import_event_id.";
+        }
+      }else if (resolved.status === "ambiguous"){
+        status = "ambiguous";
+        reason = `Matched ${resolved.matches.length} tasks; manual review required.`;
+      }else{
+        status = "unresolved";
+        reason = "No existing task matched; importer will not create tasks.";
+      }
+    }
+    if (eventId && status !== "invalid") seenImportEventIds.add(eventId);
+    return { index, raw: row, import_event_id: eventId, scheduled_maintenance_date: dateISO, exact_website_task: taskName, status, reason, match, matchedTaskId };
+  });
+}
+
+function countMaintenanceHistoryImportProtectedState(){
+  const nestedCount = (list, key)=> (Array.isArray(list) ? list : []).reduce((sum, task)=> sum + (Array.isArray(task?.[key]) ? task[key].length : 0), 0);
+  return {
+    cuttingJobs: Array.isArray(window.cuttingJobs) ? window.cuttingJobs.length : 0,
+    completedCuttingJobs: Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.length : 0,
+    tasksInterval: Array.isArray(window.tasksInterval) ? window.tasksInterval.length : 0,
+    tasksAsReq: Array.isArray(window.tasksAsReq) ? window.tasksAsReq.length : 0,
+    settingsFolders: Array.isArray(window.settingsFolders) ? window.settingsFolders.length : 0,
+    inventory: Array.isArray(window.inventory) ? window.inventory.length : 0,
+    inventoryFolders: Array.isArray(window.inventoryFolders) ? window.inventoryFolders.length : 0,
+    inventoryMaterials: Array.isArray(window.inventoryMaterials) ? window.inventoryMaterials.length : 0,
+    receiptTrackerWeeks: Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks.length : 0,
+    orderRequests: Array.isArray(window.orderRequests) ? window.orderRequests.length : 0,
+    dailyCutHours: Array.isArray(window.dailyCutHours) ? window.dailyCutHours.length : 0,
+    garnetCleanings: Array.isArray(window.garnetCleanings) ? window.garnetCleanings.length : 0,
+    maintenanceTasksV2: Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2.length : 0,
+    maintenanceCalendarInstancesV2: Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2.length : 0,
+    maintenanceOccurrencesV2: Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2.length : 0,
+    intervalCompletedDates: nestedCount(window.tasksInterval, "completedDates"),
+    intervalManualHistory: nestedCount(window.tasksInterval, "manualHistory"),
+    asReqCompletedDates: nestedCount(window.tasksAsReq, "completedDates"),
+    asReqManualHistory: nestedCount(window.tasksAsReq, "manualHistory")
+  };
+}
+
+function findMaintenanceHistoryImportDrops(before, after){
+  const allowedIncreases = new Set(["intervalCompletedDates", "intervalManualHistory", "asReqCompletedDates", "asReqManualHistory"]);
+  return Object.keys(before || {}).filter(key => !allowedIncreases.has(key) && Number(after?.[key] || 0) < Number(before?.[key] || 0));
+}
+
+function createMaintenanceHistoryImportBackup(){
+  if (typeof exportJsonDownload !== "function") throw new Error("exportJsonDownload is not available.");
+  const state = typeof getCurrentAppStateForDiagnostics === "function" ? getCurrentAppStateForDiagnostics() : null;
+  if (!state || typeof state !== "object") throw new Error("Current app state snapshot is unavailable.");
+  const ok = exportJsonDownload(`omax-maintenance-history-import-backup-${Date.now()}.json`, state);
+  if (!ok) throw new Error("Backup download did not start.");
+  return true;
+}
+
+function applyMaintenanceHistoryImportRows(previewRows){
+  const before = countMaintenanceHistoryImportProtectedState();
+  createMaintenanceHistoryImportBackup();
+  const stats = { imported: 0, duplicate: 0, unresolved: 0, ambiguous: 0, excluded: 0, invalid: 0, failed: 0 };
+  const nowISO = new Date().toISOString();
+  (Array.isArray(previewRows) ? previewRows : []).forEach(item => {
+    if (!item || item.status !== "ready"){
+      if (item?.status === "duplicate") stats.duplicate += 1;
+      else if (item?.status === "unresolved") stats.unresolved += 1;
+      else if (item?.status === "ambiguous") stats.ambiguous += 1;
+      else if (item?.status === "excluded") stats.excluded += 1;
+      else stats.invalid += 1;
+      return;
+    }
+    if (maintenanceHistoryImportHasDuplicate(item.import_event_id)){
+      stats.duplicate += 1;
+      return;
+    }
+    const task = item.match?.task;
+    if (!task || typeof task !== "object"){
+      stats.failed += 1;
+      return;
+    }
+    if (!Array.isArray(task.manualHistory)) task.manualHistory = [];
+    task.manualHistory.push({
+      dateISO: item.scheduled_maintenance_date,
+      status: "completed",
+      source: "history_import",
+      recordedAtISO: nowISO,
+      hoursAtEntry: null,
+      estimatedDailyHours: null,
+      import_event_id: item.import_event_id,
+      note: "Imported from reviewed purchase-proven maintenance history",
+      provenance: {
+        import_event_id: item.import_event_id,
+        matchedTaskName: item.exact_website_task,
+        matchedTaskId: String(task.id || ""),
+        source: "reviewed_purchase_history",
+        sourcePurchaseDate: String(item.raw?.source_purchase_date || ""),
+        orderNumber: String(item.raw?.order_number || ""),
+        purchaseDescription: String(item.raw?.purchase_description || ""),
+        matchedPart: String(item.raw?.matched_part || ""),
+        quantityInstance: String(item.raw?.quantity_instance || ""),
+        quantitySource: String(item.raw?.quantity_source || ""),
+        confidence: String(item.raw?.confidence || ""),
+        notes: String(item.raw?.notes || "")
+      }
+    });
+    task.manualHistory.sort((a, b)=> String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")) || String(a?.import_event_id || "").localeCompare(String(b?.import_event_id || "")));
+    stats.imported += 1;
+  });
+  const after = countMaintenanceHistoryImportProtectedState();
+  const drops = findMaintenanceHistoryImportDrops(before, after);
+  if (drops.length) throw new Error(`Protected data count dropped unexpectedly: ${drops.join(", ")}`);
+  if (typeof saveTasks === "function") saveTasks();
+  if (typeof saveCloudNow === "function") saveCloudNow();
+  else if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+  if (typeof renderCalendar === "function") renderCalendar();
+  if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets();
+  return { stats, before, after };
+}
+
+
+function cleanupMi02cTinyMaintenanceImportRows(){
+  const fakeImportEventIds = new Set([
+    "mi02c-tiny-001",
+    "mi02c-tiny-002",
+    "mi02c-tiny-003",
+    "mi02c-tiny-004",
+    "mi02c-tiny-005",
+    "mi02c-tiny-006"
+  ]);
+  const fakeCompletedDateByTaskId = new Map([
+    ["pump_tube_noz_filter", new Set(["2026-01-05"])],
+    ["orifice_assembly", new Set(["2026-01-06"])],
+    ["ro_micron_filter", new Set(["2026-01-07", "2026-01-08"])]
+  ]);
+  const allTasks = [
+    ...(Array.isArray(window.tasksInterval) ? window.tasksInterval : []),
+    ...(Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [])
+  ];
+  const countMatches = ()=> {
+    let manualHistory = 0;
+    let completedDates = 0;
+    allTasks.forEach(task => {
+      if (!task || typeof task !== "object") return;
+      const taskId = String(task.id || "");
+      if (Array.isArray(task.manualHistory)){
+        manualHistory += task.manualHistory.filter(entry => {
+          const importEventId = String(entry?.import_event_id || entry?.importEventId || entry?.provenance?.import_event_id || entry?.provenance?.importEventId || "");
+          return fakeImportEventIds.has(importEventId);
+        }).length;
+      }
+      const dateSet = fakeCompletedDateByTaskId.get(taskId);
+      if (dateSet && Array.isArray(task.completedDates)){
+        completedDates += task.completedDates.filter(dateISO => dateSet.has(String(dateISO || ""))).length;
+      }
+    });
+    return { manualHistory, completedDates };
+  };
+  const matches = countMatches();
+  const summary = {
+    manualHistoryRemoved: 0,
+    completedDatesRemoved: 0,
+    touchedTaskIds: [],
+    noop: matches.manualHistory === 0 && matches.completedDates === 0
+  };
+  if (summary.noop){
+    console.info("MI-02C tiny maintenance import cleanup: no matching fake rows found.", summary);
+    return summary;
+  }
+  if (typeof createMaintenanceHistoryImportBackup !== "function") throw new Error("Backup helper is unavailable; tiny cleanup was blocked.");
+  createMaintenanceHistoryImportBackup();
+  const touchedTaskIds = new Set();
+  allTasks.forEach(task => {
+    if (!task || typeof task !== "object") return;
+    const taskId = String(task.id || "");
+    if (Array.isArray(task.manualHistory)){
+      const beforeLength = task.manualHistory.length;
+      task.manualHistory = task.manualHistory.filter(entry => {
+        const importEventId = String(entry?.import_event_id || entry?.importEventId || entry?.provenance?.import_event_id || entry?.provenance?.importEventId || "");
+        return !fakeImportEventIds.has(importEventId);
+      });
+      const removed = beforeLength - task.manualHistory.length;
+      if (removed > 0){
+        summary.manualHistoryRemoved += removed;
+        touchedTaskIds.add(taskId || "(missing task id)");
+      }
+    }
+    const dateSet = fakeCompletedDateByTaskId.get(taskId);
+    if (dateSet && Array.isArray(task.completedDates)){
+      const beforeLength = task.completedDates.length;
+      task.completedDates = task.completedDates.filter(dateISO => !dateSet.has(String(dateISO || "")));
+      const removed = beforeLength - task.completedDates.length;
+      if (removed > 0){
+        summary.completedDatesRemoved += removed;
+        touchedTaskIds.add(taskId);
+      }
+    }
+  });
+  summary.touchedTaskIds = Array.from(touchedTaskIds);
+  if (typeof saveTasks === "function") saveTasks();
+  if (typeof saveCloudNow === "function") saveCloudNow();
+  else if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+  if (typeof renderCalendar === "function") renderCalendar();
+  if (typeof refreshDashboardWidgets === "function") refreshDashboardWidgets();
+  console.info("MI-02C tiny maintenance import cleanup complete.", summary);
+  return summary;
+}
+
+if (typeof window !== "undefined"){
+  window.cleanupMi02cTinyMaintenanceImportRows = cleanupMi02cTinyMaintenanceImportRows;
+}
+
+function renderMaintenanceHistoryImportPreview(container, previewRows){
+  if (!container) return;
+  const rows = Array.isArray(previewRows) ? previewRows : [];
+  const counts = rows.reduce((acc, row)=> {
+    const key = row.status === "invalid date" ? "invalid" : String(row.status || "invalid");
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const body = rows.map(row => {
+    const ref = [row.raw?.source_purchase_date, row.raw?.order_number].map(value => String(value || "").trim()).filter(Boolean).join(" / ");
+    return `<tr>
+      <td>${escapeHtml(row.import_event_id)}</td>
+      <td>${escapeHtml(row.scheduled_maintenance_date)}</td>
+      <td>${escapeHtml(row.exact_website_task)}</td>
+      <td>${escapeHtml(row.matchedTaskId || "—")}</td>
+      <td>${escapeHtml(ref || "—")}</td>
+      <td><strong>${escapeHtml(row.status)}</strong></td>
+      <td>${escapeHtml(row.reason)}</td>
+    </tr>`;
+  }).join("");
+  container.innerHTML = `
+    <div class="history-import-summary">
+      Ready: ${counts.ready || 0} · Duplicate: ${counts.duplicate || 0} · Unresolved: ${counts.unresolved || 0} · Ambiguous: ${counts.ambiguous || 0} · Excluded: ${counts.excluded || 0} · Invalid: ${(counts.invalid || 0) + (counts["invalid date"] || 0)}
+    </div>
+    <div class="history-import-table-wrap">
+      <table class="cost-table history-import-table">
+        <thead><tr><th>import_event_id</th><th>Scheduled date</th><th>Task</th><th>Matched task id</th><th>Purchase/order</th><th>Status</th><th>Reason</th></tr></thead>
+        <tbody>${body || '<tr><td colspan="7">No rows parsed.</td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
+
+function wireMaintenanceHistoryImportTool(root){
+  const fileInput = root?.querySelector?.("#maintenanceHistoryImportFile");
+  const previewBtn = root?.querySelector?.("#maintenanceHistoryImportPreviewBtn");
+  const importBtn = root?.querySelector?.("#maintenanceHistoryImportRunBtn");
+  const confirmInput = root?.querySelector?.("#maintenanceHistoryImportConfirm");
+  const previewEl = root?.querySelector?.("#maintenanceHistoryImportPreview");
+  const statusEl = root?.querySelector?.("#maintenanceHistoryImportStatus");
+  const setStatus = (message, isError = false)=> {
+    if (!statusEl) return;
+    statusEl.textContent = message || "";
+    statusEl.classList.toggle("danger", !!isError);
+  };
+  const hasReadyPreviewRows = ()=> (Array.isArray(window.__maintenanceHistoryImportPreviewRows) ? window.__maintenanceHistoryImportPreviewRows : []).some(row => row.status === "ready");
+  const confirmationIsExact = ()=> String(confirmInput?.value || "") === "IMPORT REVIEWED MAINTENANCE";
+  const updateImportButtonState = ()=> {
+    if (importBtn) importBtn.disabled = !(hasReadyPreviewRows() && confirmationIsExact());
+  };
+  if (!fileInput || !previewBtn || !importBtn || !confirmInput || !previewEl) return;
+  updateImportButtonState();
+  confirmInput.addEventListener("input", updateImportButtonState);
+  previewBtn.addEventListener("click", async ()=> {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file){ setStatus("Choose a reviewed JSON or CSV file first.", true); return; }
+    try {
+      const text = await file.text();
+      const rows = parseMaintenanceHistoryImportText(text, file.name);
+      const previewRows = buildMaintenanceHistoryImportPreview(rows);
+      window.__maintenanceHistoryImportPreviewRows = previewRows;
+      renderMaintenanceHistoryImportPreview(previewEl, previewRows);
+      updateImportButtonState();
+      setStatus(`Preview parsed ${previewRows.length} row${previewRows.length === 1 ? "" : "s"}. Review statuses before importing.`);
+    } catch (err){
+      window.__maintenanceHistoryImportPreviewRows = [];
+      updateImportButtonState();
+      previewEl.innerHTML = "";
+      setStatus(`Preview failed: ${err && err.message ? err.message : err}`, true);
+    }
+  });
+  importBtn.addEventListener("click", ()=> {
+    const previewRows = Array.isArray(window.__maintenanceHistoryImportPreviewRows) ? window.__maintenanceHistoryImportPreviewRows : [];
+    if (!previewRows.some(row => row.status === "ready")){ setStatus("No ready rows to import.", true); return; }
+    if (String(confirmInput.value || "") !== "IMPORT REVIEWED MAINTENANCE"){
+      setStatus('Type "IMPORT REVIEWED MAINTENANCE" to confirm the append-only import.', true);
+      return;
+    }
+    try {
+      const result = applyMaintenanceHistoryImportRows(previewRows);
+      const stats = result.stats || {};
+      setStatus(`Import complete. Imported ${stats.imported || 0}; duplicates ${stats.duplicate || 0}; unresolved ${stats.unresolved || 0}; ambiguous ${stats.ambiguous || 0}; excluded ${stats.excluded || 0}; invalid ${stats.invalid || 0}; failed ${stats.failed || 0}. Protected top-level counts did not drop.`);
+      const refreshed = buildMaintenanceHistoryImportPreview(previewRows.map(row => row.raw));
+      window.__maintenanceHistoryImportPreviewRows = refreshed;
+      renderMaintenanceHistoryImportPreview(previewEl, refreshed);
+      updateImportButtonState();
+    } catch (err){
+      setStatus(`Import blocked: ${err && err.message ? err.message : err}`, true);
+    }
+  });
+}
+
 function renderSettings(){
   ensureMaintenanceTaskModalAPI();
   // === Explorer-style Maintenance Settings ===
@@ -9135,6 +9885,15 @@ function renderSettings(){
       #explorer .toolbar-search button:disabled{opacity:.5;cursor:default}
       #explorer .toolbar .hint{flex:1 1 auto;text-align:center;width:100%}
       #explorer .hint{font-size:.8rem;color:#666}
+      #explorer .history-import-admin{margin-top:1rem;border:1px solid #d7e1f1;background:#f8fbff;border-radius:10px;padding:12px}
+      #explorer .history-import-admin h4{margin:.1rem 0 .35rem}
+      #explorer .history-import-controls{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.6rem 0}
+      #explorer .history-import-controls input[type="text"]{min-width:280px;max-width:100%;padding:.4rem .5rem;border:1px solid #cbd5e1;border-radius:8px}
+      #explorer .history-import-status{font-size:.85rem;color:#31547f;margin:.45rem 0}
+      #explorer .history-import-status.danger{color:#b00020;font-weight:700}
+      #explorer .history-import-summary{font-size:.85rem;font-weight:700;margin:.5rem 0;color:#0f1e3a}
+      #explorer .history-import-table-wrap{max-height:360px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;background:#fff}
+      #explorer .history-import-table{min-width:980px;margin:0}
       #explorer .tree{border:1px solid #e5e5e5;background:#fff;border-radius:10px;padding:6px}
       #explorer details{margin:4px 0;border:1px solid #eee;border-radius:8px;background:#fafafa}
       #explorer details>summary{position:relative;display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:grab;user-select:none}
@@ -9802,6 +10561,20 @@ function renderSettings(){
           ${searchEmpty ? `<div class="empty">No maintenance tasks match your search.</div>` : ``}
           ${(window.settingsFolders.length === 0 && window.tasksInterval.length + window.tasksAsReq.length === 0) ? `<div class="empty">No tasks yet. Add one to get started.</div>` : ``}
         </div>
+        <section class="history-import-admin" aria-labelledby="maintenanceHistoryImportTitle">
+          <h4 id="maintenanceHistoryImportTitle">Reviewed maintenance history import</h4>
+          <p class="hint">Temporary admin tool. It previews reviewed JSON/CSV rows first, then appends legacy completed history only after confirmation. It does not alter prices, purchases, inventory, machine-hour anchors, recurrence settings, or V2 arrays.</p>
+          <div class="history-import-controls">
+            <input type="file" id="maintenanceHistoryImportFile" accept=".json,.csv,application/json,text/csv">
+            <button type="button" id="maintenanceHistoryImportPreviewBtn">Preview import</button>
+          </div>
+          <div id="maintenanceHistoryImportPreview" aria-live="polite"></div>
+          <div class="history-import-controls">
+            <input type="text" id="maintenanceHistoryImportConfirm" placeholder="Type IMPORT REVIEWED MAINTENANCE to enable final import" aria-label="Maintenance import confirmation text">
+            <button type="button" id="maintenanceHistoryImportRunBtn" class="danger" disabled>Append ready rows</button>
+          </div>
+          <div class="history-import-status" id="maintenanceHistoryImportStatus" aria-live="polite"></div>
+        </section>
       </div>
     </div>
     <div class="modal-backdrop" id="taskModal" hidden>
@@ -9875,6 +10648,7 @@ function renderSettings(){
   const saveInventoryLinkBtn = inventoryLinkModal?.querySelector("[data-save-inventory-link]");
   const closeInventoryLinkBtn = inventoryLinkModal?.querySelector("[data-close-inventory-link]");
   const contextMenu = document.getElementById("maintenanceContextMenu");
+  wireMaintenanceHistoryImportTool(root);
   let contextTarget = null;
   let occurrenceNotesTaskId = null;
   let inventoryLinkTask = null;

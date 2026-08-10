@@ -5567,7 +5567,145 @@ function adoptState(doc){
 }
 
 
-const saveCloudInternal = debounce(async ()=>{
+const maintenanceV2RepairAuthorizations = new Map();
+
+function maintenanceV2RepairValueKey(value){
+  return stableStringify(value == null ? null : value);
+}
+
+function maintenanceV2RepairDateKey(value){
+  const match = String(value || "").match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+}
+
+function maintenanceV2RepairTextKey(value){
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function buildExactMaintenanceV2DuplicateRepairPlan(state){
+  const tasks = Array.isArray(state?.maintenanceTasksV2) ? state.maintenanceTasksV2 : [];
+  const instances = Array.isArray(state?.maintenanceCalendarInstancesV2) ? state.maintenanceCalendarInstancesV2 : [];
+  const occurrences = Array.isArray(state?.maintenanceOccurrencesV2) ? state.maintenanceOccurrencesV2 : [];
+  const taskById = new Map();
+  tasks.forEach(task => {
+    const id = String(task?.id || "");
+    if (id && !taskById.has(id)) taskById.set(id, task);
+  });
+  const instanceCandidatesById = new Map();
+  instances.forEach(instance => {
+    const id = String(instance?.id || "");
+    if (!id) return;
+    const list = instanceCandidatesById.get(id) || [];
+    list.push(instance);
+    instanceCandidatesById.set(id, list);
+  });
+  const resolveInstance = event => {
+    const candidates = instanceCandidatesById.get(String(event?.instanceId || "")) || [];
+    const eventLegacy = String(event?.legacyTaskId || "");
+    const eventTask = String(event?.taskId || "");
+    const eventDate = maintenanceV2RepairDateKey(event?.effectiveDateISO || event?.dateISO);
+    return candidates.find(instance => {
+      if (String(instance?.instanceMode || "") !== "one_time") return false;
+      if (eventLegacy && String(instance?.legacyTaskId || "") !== eventLegacy) return false;
+      if (eventTask && String(instance?.taskId || "") !== eventTask) return false;
+      if (eventDate && maintenanceV2RepairDateKey(instance?.startDateISO) !== eventDate) return false;
+      return true;
+    }) || candidates[0] || null;
+  };
+  const groups = new Map();
+  occurrences.forEach((event, index) => {
+    const instance = resolveInstance(event);
+    if (!instance || String(instance.instanceMode || "") !== "one_time") return;
+    if (String(event?.eventType || "") !== "scheduled") return;
+    if (!(String(event?.system || "") === "v2" || Number(event?.schemaVersion || 0) >= 2)) return;
+    const task = taskById.get(String(instance.taskId || event?.taskId || ""));
+    const dateISO = maintenanceV2RepairDateKey(event?.effectiveDateISO || event?.dateISO || instance.startDateISO);
+    if (!dateISO) return;
+    const key = [
+      "one_time",
+      maintenanceV2RepairTextKey(instance.legacyTaskId || event?.legacyTaskId || task?.legacyTaskId || event?.taskId || instance.taskId),
+      maintenanceV2RepairTextKey(event?.taskName || task?.name || "Maintenance reminder"),
+      dateISO,
+      "scheduled"
+    ].join("|");
+    const list = groups.get(key) || [];
+    list.push({ index, event });
+    groups.set(key, list);
+  });
+  const removableOccurrenceIndexes = [];
+  const canonicalOccurrenceIndexesByGroup = {};
+  groups.forEach((entries, groupKey) => {
+    if (entries.length < 2) return;
+    const sorted = entries.slice().sort((a, b) => {
+      const at = Date.parse(String(a.event?.recordedAtISO || ""));
+      const bt = Date.parse(String(b.event?.recordedAtISO || ""));
+      const av = Number.isFinite(at);
+      const bv = Number.isFinite(bt);
+      if (av && bv && at !== bt) return at - bt;
+      if (av && !bv) return -1;
+      if (!av && bv) return 1;
+      return a.index - b.index;
+    });
+    canonicalOccurrenceIndexesByGroup[groupKey] = sorted[0].index;
+    sorted.slice(1).forEach(entry => removableOccurrenceIndexes.push({ index:entry.index, groupKey }));
+  });
+  removableOccurrenceIndexes.sort((a, b) => a.index - b.index);
+  return { removableOccurrenceIndexes, canonicalOccurrenceIndexesByGroup };
+}
+
+function authorizeMaintenanceV2DuplicateRepair(request = {}){
+  const baseline = compactStateForStorage(snapshotState());
+  const latestLoaded = compactStateForStorage(window.__lastLoadedCloudState || {});
+  const requestedIndexes = Array.from(new Set((request.removableOccurrenceIndexes || [])
+    .map(value => Number(value?.index ?? value))
+    .filter(index => Number.isInteger(index) && index >= 0))).sort((a, b) => a - b);
+  const exactPlan = buildExactMaintenanceV2DuplicateRepairPlan(baseline);
+  const exactIndexes = exactPlan.removableOccurrenceIndexes.map(entry => entry.index);
+  if (!requestedIndexes.length || maintenanceV2RepairValueKey(requestedIndexes) !== maintenanceV2RepairValueKey(exactIndexes)){
+    return { authorized:false, error:"Repair indexes do not match the current exact duplicate-scheduled audit." };
+  }
+  if (maintenanceV2RepairValueKey(baseline.maintenanceTasksV2) !== maintenanceV2RepairValueKey(latestLoaded.maintenanceTasksV2)
+    || maintenanceV2RepairValueKey(baseline.maintenanceCalendarInstancesV2) !== maintenanceV2RepairValueKey(latestLoaded.maintenanceCalendarInstancesV2)
+    || maintenanceV2RepairValueKey(baseline.maintenanceOccurrencesV2) !== maintenanceV2RepairValueKey(latestLoaded.maintenanceOccurrencesV2)){
+    return { authorized:false, error:"Current V2 state does not match the last authoritative cloud baseline." };
+  }
+  const removalSet = new Set(exactIndexes);
+  const expectedOccurrences = baseline.maintenanceOccurrencesV2.filter((_entry, index) => !removalSet.has(index));
+  const canonicalIndexes = Object.values(exactPlan.canonicalOccurrenceIndexesByGroup);
+  if (!canonicalIndexes.every(index => !removalSet.has(index))){
+    return { authorized:false, error:"A canonical scheduled occurrence would not survive the repair." };
+  }
+  const token = `maintenance_v2_repair_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+  maintenanceV2RepairAuthorizations.clear();
+  maintenanceV2RepairAuthorizations.set(token, {
+    baselineTasksKey:maintenanceV2RepairValueKey(baseline.maintenanceTasksV2),
+    baselineInstancesKey:maintenanceV2RepairValueKey(baseline.maintenanceCalendarInstancesV2),
+    baselineOccurrencesKey:maintenanceV2RepairValueKey(baseline.maintenanceOccurrencesV2),
+    expectedOccurrencesKey:maintenanceV2RepairValueKey(expectedOccurrences),
+    expiresAt:Date.now() + 60000
+  });
+  return { authorized:true, token };
+}
+
+function consumeMaintenanceV2RepairAuthorization(token, pendingState){
+  const proof = maintenanceV2RepairAuthorizations.get(String(token || ""));
+  maintenanceV2RepairAuthorizations.delete(String(token || ""));
+  if (!proof) return { authorized:false, error:"Missing, invalid, or already-used V2 repair authorization." };
+  if (Date.now() > proof.expiresAt) return { authorized:false, error:"V2 repair authorization expired." };
+  if (maintenanceV2RepairValueKey(pendingState.maintenanceTasksV2) !== proof.baselineTasksKey) return { authorized:false, error:"maintenanceTasksV2 changed during repair." };
+  if (maintenanceV2RepairValueKey(pendingState.maintenanceCalendarInstancesV2) !== proof.baselineInstancesKey) return { authorized:false, error:"maintenanceCalendarInstancesV2 changed during repair." };
+  if (maintenanceV2RepairValueKey(pendingState.maintenanceOccurrencesV2) !== proof.expectedOccurrencesKey) return { authorized:false, error:"V2 occurrences do not match the exact audited repair result." };
+  return { authorized:true, proof };
+}
+
+function validateMaintenanceV2RepairRemoteBaseline(proof, remoteState){
+  if (!proof || !remoteState) return false;
+  return maintenanceV2RepairValueKey(remoteState.maintenanceTasksV2) === proof.baselineTasksKey
+    && maintenanceV2RepairValueKey(remoteState.maintenanceCalendarInstancesV2) === proof.baselineInstancesKey
+    && maintenanceV2RepairValueKey(remoteState.maintenanceOccurrencesV2) === proof.baselineOccurrencesKey;
+}
+
+const saveCloudInternal = debounce(async (saveOptions = {})=>{
   const explicitTrace = (typeof window !== "undefined" && window.__activeExplicitMaintenanceAddSaveTrace && typeof window.__activeExplicitMaintenanceAddSaveTrace === "object")
     ? window.__activeExplicitMaintenanceAddSaveTrace
     : null;
@@ -5620,7 +5758,12 @@ const saveCloudInternal = debounce(async ()=>{
     const baselineMetrics = collectMaintenanceHistoryMetrics(window.__lastLoadedCloudState || {});
     const pendingCore = logCoreBusinessDiagnostics("before-save", snap);
     const baselineCore = collectCoreBusinessMetrics(window.__lastLoadedCloudState || {});
-    if ((pendingMetrics.completedDatesCount + pendingMetrics.manualHistoryCount + pendingMetrics.maintenanceOccurrencesV2Count + 10) < (baselineMetrics.completedDatesCount + baselineMetrics.manualHistoryCount + baselineMetrics.maintenanceOccurrencesV2Count)){
+    const repairAuthorization = consumeMaintenanceV2RepairAuthorization(saveOptions?.maintenanceV2RepairToken, snap);
+    const allowScheduledV2Dedupe = repairAuthorization.authorized === true;
+    if (saveOptions?.maintenanceV2RepairToken && !allowScheduledV2Dedupe){
+      return { saved:false, error:repairAuthorization.error || "V2 repair authorization was rejected." };
+    }
+    if (!allowScheduledV2Dedupe && (pendingMetrics.completedDatesCount + pendingMetrics.manualHistoryCount + pendingMetrics.maintenanceOccurrencesV2Count + 10) < (baselineMetrics.completedDatesCount + baselineMetrics.manualHistoryCount + baselineMetrics.maintenanceOccurrencesV2Count)){
       if (explicitTrace){
         explicitTrace.maintenanceHistoryReductionBlocked = true;
         explicitTrace.saveCloudInternalReturnValue = "maintenance_history_reduction_blocked";
@@ -5628,7 +5771,7 @@ const saveCloudInternal = debounce(async ()=>{
         explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
       }
       console.error("Cloud save blocked: maintenance completion history would be reduced unexpectedly.", { pendingMetrics, baselineMetrics });
-      return;
+      return { saved:false, error:"Maintenance completion history reduction was blocked." };
     }
     if (pendingCore.inventoryCount + 5 < baselineCore.inventoryCount || pendingCore.orderRequestsCount + 2 < baselineCore.orderRequestsCount || pendingCore.orderLineItemCount + 5 < baselineCore.orderLineItemCount || pendingCore.settingsFoldersCount + 1 < baselineCore.settingsFoldersCount || pendingCore.toleranceFieldCount + 1 < baselineCore.toleranceFieldCount || (!pendingCore.layoutPresent && baselineCore.layoutPresent)){
       if (explicitTrace){
@@ -5638,7 +5781,7 @@ const saveCloudInternal = debounce(async ()=>{
         explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
       }
       console.error("Cloud save blocked: core business data would be reduced unexpectedly.", { pendingCore, baselineCore });
-      return;
+      return { saved:false, error:"Core business data reduction was blocked." };
     }
     const sizeBytes = estimatePayloadBytes(snap);
     if (sizeBytes >= FIRESTORE_WARN_BYTES){
@@ -5657,7 +5800,7 @@ const saveCloudInternal = debounce(async ()=>{
       logStateSizeDiagnostics(snap, "blocked-save");
       hasPendingLocalChanges = true;
       persistLocalStateBackup(snap);
-      return;
+      return { saved:false, error:"State payload is too large." };
     }
     try {
       recordDataFlowEvent("cloud_save", snap);
@@ -5667,6 +5810,9 @@ const saveCloudInternal = debounce(async ()=>{
     window.__lastSnapshot = snap;
     const remoteSnap = await FB.docRef.get();
     const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
+    if (allowScheduledV2Dedupe && !validateMaintenanceV2RepairRemoteBaseline(repairAuthorization.proof, remoteData)){
+      return { saved:false, error:"Latest Firestore V2 state no longer matches the authorized repair baseline." };
+    }
     const localBackupForPreflight = readLocalStateBackup();
     const revisionConflict = remoteData && typeof remoteData === "object"
       ? detectRemoteRevisionConflict(remoteData)
@@ -5680,15 +5826,24 @@ const saveCloudInternal = debounce(async ()=>{
     const allowFirstRunPreflight = Boolean(remoteSnap && !remoteSnap.exists)
       && !stateHasMeaningfulData(window.__lastLoadedCloudState || {})
       && !stateHasMeaningfulData(localBackupForPreflight || {});
+    const safetyBaseline = allowScheduledV2Dedupe
+      ? { ...(window.__lastLoadedCloudState || {}), maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 }
+      : (window.__lastLoadedCloudState || null);
+    const safetyRemote = allowScheduledV2Dedupe && remoteData
+      ? { ...remoteData, maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 }
+      : remoteData;
+    const safetyLocalBackup = allowScheduledV2Dedupe && localBackupForPreflight
+      ? { ...localBackupForPreflight, maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 }
+      : localBackupForPreflight;
     const saveSchemaCoverage = getSaveSchemaCoverageReport({ pendingSnapshot: snap });
     const registryPreflight = validateProtectedSavePreflight({
-      baselineState: window.__lastLoadedCloudState || null,
+      baselineState: safetyBaseline,
       pendingState: snap,
-      latestRemoteState: remoteData,
-      localBackupState: localBackupForPreflight,
+      latestRemoteState: safetyRemote,
+      localBackupState: safetyLocalBackup,
       windowState: buildWindowProtectedStateForCoverage(),
       coverageReport: saveSchemaCoverage,
-      reason: "saveCloudInternal",
+      reason: allowScheduledV2Dedupe ? "maintenance V2 scheduled duplicate repair" : "saveCloudInternal",
       revisionConflict,
       allowFirstRun: allowFirstRunPreflight
     });
@@ -5706,7 +5861,7 @@ const saveCloudInternal = debounce(async ()=>{
       });
       hasPendingLocalChanges = true;
       await writeBlockedSaveLog(registryPreflight, { reason: "saveCloudInternal" });
-      return;
+      return { saved:false, error:"Protected-state save preflight blocked the write." };
     }
     if (remoteData && typeof remoteData === "object"){
       if (revisionConflict.blocked){
@@ -5717,9 +5872,9 @@ const saveCloudInternal = debounce(async ()=>{
         }
         blockCloudSave("remote state is newer than this client. Export/reload/merge review before saving.", revisionConflict);
         hasPendingLocalChanges = true;
-        return;
+        return { saved:false, error:"Remote state is newer than this client." };
       }
-      const dangerous = detectDangerousProtectedFieldReduction(remoteData, snap);
+      const dangerous = detectDangerousProtectedFieldReduction(safetyRemote, snap);
       if (dangerous.blocked){
         if (explicitTrace){
           explicitTrace.dangerousReductionBlocked = true;
@@ -5729,7 +5884,7 @@ const saveCloudInternal = debounce(async ()=>{
         }
         blockCloudSave("protected field reduction detected.", dangerous.issues);
         hasPendingLocalChanges = true;
-        return;
+        return { saved:false, error:"Protected field reduction was blocked." };
       }
       snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
       snap.dailyCutHours = mergeDailyCutHoursForSave(snap.dailyCutHours, remoteData.dailyCutHours);
@@ -5789,6 +5944,8 @@ const saveCloudInternal = debounce(async ()=>{
         lastTouchedAt: new Date().toISOString()
       });
     }
+    window.__lastLoadedCloudState = { ...snap };
+    return { saved:true, path:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state` };
   }catch(e){
     if (explicitTrace){
       explicitTrace.firestoreSetError = e?.message || String(e);
@@ -5797,6 +5954,7 @@ const saveCloudInternal = debounce(async ()=>{
       explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
     }
     console.error("Cloud save failed:", e);
+    return { saved:false, error:String(e?.message || e) };
   }
 }, 1800);
 function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
@@ -5997,12 +6155,12 @@ function saveCloudDebounced(){
   }
   saveCloudInternal();
 }
-function saveCloudNow(){
-  if (!canWriteCloud("saveCloudNow")) return;
+function saveCloudNow(saveOptions = {}){
+  if (!canWriteCloud("saveCloudNow")) return Promise.resolve({ saved:false, error:"Cloud writes are currently blocked." });
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
     console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
-    return;
+    return Promise.resolve({ saved:false, error:"Cloud save is disabled in preview read-only mode." });
   }
   hasPendingLocalChanges = true;
   lastLocalMutationAt = Date.now();
@@ -6017,23 +6175,35 @@ function saveCloudNow(){
     console.warn("History capture before save failed:", err);
   }
   if (typeof saveCloudInternal.now === "function"){
-    return saveCloudInternal.now();
+    return saveCloudInternal.now(saveOptions);
   }
   if (typeof saveCloudInternal.flushResult === "function"){
     const result = saveCloudInternal.flushResult();
     if (result !== false) return result;
-    return saveCloudInternal();
+    return saveCloudInternal(saveOptions);
   }
   if (typeof saveCloudInternal.flush === "function"){
     const flushed = saveCloudInternal.flush();
     if (!flushed){
-      return saveCloudInternal();
+      return saveCloudInternal(saveOptions);
     }
     return flushed;
   }else{
-    return saveCloudInternal();
+    return saveCloudInternal(saveOptions);
   }
 }
+
+async function persistMaintenanceV2CollectionsNow(){
+  if (typeof saveCloudNow !== "function") return { saved:false, error:"Authoritative cloud save helper is unavailable." };
+  return await saveCloudNow();
+}
+
+async function persistAuthorizedMaintenanceV2RepairNow(token){
+  if (typeof saveCloudNow !== "function") return { saved:false, error:"Authoritative cloud save helper is unavailable." };
+  return await saveCloudNow({ maintenanceV2RepairToken:token });
+}
+
+if (typeof window !== "undefined") window.persistMaintenanceV2CollectionsNow = persistMaintenanceV2CollectionsNow;
 
 if (typeof window !== "undefined"){
   window.addEventListener("visibilitychange", ()=>{
