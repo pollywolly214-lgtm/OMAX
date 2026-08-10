@@ -3314,6 +3314,8 @@ function renderCalendar(){
   });
   const oneTimeLookup = {};
   const seenV2ChipKeys = new Set();
+  const seenV2ScheduledEquivalentKeys = new Set();
+  const makeV2CalendarEquivalentKey = (parts)=> parts.map(part => String(part || "").trim().toLowerCase().replace(/\s+/g, " ")).join("|");
   (Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : []).forEach(event => {
     if (!event || event.id == null) return;
     if (String(event.system || "") !== "v2" && Number(event.schemaVersion || 0) < 2) return;
@@ -3333,7 +3335,11 @@ function renderCalendar(){
     if (!resolvedDateISO) return;
     const mapKey = `${occurrenceId}:${dateISO}`;
     if (seenV2ChipKeys.has(mapKey)) return;
+    if (status === "removed" || status === "skipped") return;
+    const equivalentKey = makeV2CalendarEquivalentKey(["v2", "one_time", String(instance.legacyTaskId || event.legacyTaskId || instance.taskId || event.taskId || ""), name, resolvedDateISO, eventType]);
+    if (seenV2ScheduledEquivalentKeys.has(equivalentKey)) return;
     seenV2ChipKeys.add(mapKey);
+    seenV2ScheduledEquivalentKeys.add(equivalentKey);
     oneTimeLookup[occurrenceId] = {
       occurrenceId,
       eventType,
@@ -3345,7 +3351,6 @@ function renderCalendar(){
       hours,
       status
     };
-    if (status === "removed" || status === "skipped") return;
     (dueMap[resolvedDateISO] ||= []).push({
       type: "v2task",
       id: `v2-one-time:${occurrenceId}`,
@@ -3364,6 +3369,7 @@ function renderCalendar(){
       && String(entry.instanceMode || "") === "repeat"
       && String(entry.status || "active") !== "stopped"
       && (String(entry.system || "") === "v2" || Number(entry.schemaVersion || 0) >= 2));
+  const seenV2RepeatProjectionKeys = new Set();
   repeatInstances.forEach(instance => {
     const dates = projectV2RepeatDates(instance);
     dates.forEach(slot => {
@@ -3377,14 +3383,20 @@ function renderCalendar(){
       const state = resolveV2RepeatOccurrenceStateWithCompat({ instanceId: String(instance.id || ""), rootOccurrenceId, fallbackDateISO: dateISO, occurrenceIndex });
       if (["removed","skipped"].includes(String(state.lifecycleStatus || "")) || state.isMoved) return;
       const task = v2TaskLookup.get(String(instance.taskId || "")) || null;
+      const taskName = String((task && task.name) || "Maintenance repeat");
       const renderDateISO = state.displayDateISO || dateISO;
+      const repeatEquivalentKey = makeV2CalendarEquivalentKey(["v2", "repeat", String(instance.legacyTaskId || instance.taskId || ""), taskName, renderDateISO, String(instance.repeatRule?.basis || ""), String(instance.repeatRule?.every || instance.repeatRule?.intervalHours || "")]);
+      if (state.lifecycleStatus !== "completed"){
+        if (seenV2RepeatProjectionKeys.has(repeatEquivalentKey)) return;
+        seenV2RepeatProjectionKeys.add(repeatEquivalentKey);
+      }
       (dueMap[renderDateISO] ||= []).push({
         type: "v2repeat",
         id: rootOccurrenceId,
         instanceId: String(instance.id),
         taskId: String(instance.taskId || ""),
         dateISO: renderDateISO,
-        name: String((task && task.name) || "Maintenance repeat"),
+        name: taskName,
         status: state.lifecycleStatus === "completed" ? "completed" : "manual",
         mode: "repeat_v2",
         repeatView: {
@@ -3395,7 +3407,7 @@ function renderCalendar(){
           displayDateISO: renderDateISO,
           dateISO: renderDateISO,
           occurrenceIndex: Number.isFinite(occurrenceIndex) ? occurrenceIndex : null,
-          name: String((task && task.name) || "Maintenance repeat"),
+          name: taskName,
           note: state.note,
           hours: state.hours,
           status: state.lifecycleStatus,
@@ -3432,19 +3444,25 @@ function renderCalendar(){
     const instanceId = String(entry.instanceId || "");
     const taskId = String(entry.taskId || "");
     const task = v2TaskLookup.get(taskId) || null;
+    const taskName = String((task && task.name) || "Maintenance repeat");
     const state = resolveV2RepeatOccurrenceStateByRoot(rootId, dateISO);
     if (["removed","skipped"].includes(String(state.lifecycleStatus || ""))) return;
     const resolvedDateISO = normalizeDateKey(state.displayDateISO || dateISO || null);
     if (!resolvedDateISO) return;
     const exists = (dueMap[resolvedDateISO] || []).some(item => item && item.type === "v2repeat" && String(item.id || "") === rootId);
     if (exists) return;
+    const repeatEquivalentKey = makeV2CalendarEquivalentKey(["v2", "repeat_history", String(entry.legacyTaskId || taskId || ""), taskName, resolvedDateISO, latestType]);
+    if (state.lifecycleStatus !== "completed"){
+      if (seenV2RepeatProjectionKeys.has(repeatEquivalentKey)) return;
+      seenV2RepeatProjectionKeys.add(repeatEquivalentKey);
+    }
     (dueMap[resolvedDateISO] ||= []).push({
       type: "v2repeat",
       id: rootId,
       instanceId,
       taskId,
       dateISO: resolvedDateISO,
-      name: String((task && task.name) || "Maintenance repeat"),
+      name: taskName,
       status: state.lifecycleStatus === "completed" ? "completed" : "manual",
       mode: "repeat_v2",
       repeatView: {
@@ -3454,7 +3472,7 @@ function renderCalendar(){
         originalDateISO: dateISO,
         displayDateISO: resolvedDateISO,
         dateISO: resolvedDateISO,
-        name: String((task && task.name) || "Maintenance repeat"),
+        name: taskName,
         note: state.note,
         hours: state.hours,
         status: state.lifecycleStatus === "completed" ? "completed" : "scheduled",
