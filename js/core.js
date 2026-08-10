@@ -5706,6 +5706,8 @@ function validateMaintenanceV2RepairRemoteBaseline(proof, remoteState){
 }
 
 const saveCloudInternal = debounce(async (saveOptions = {})=>{
+  let authoritativeStateWriteAttempted = false;
+  let authoritativeStateWriteCompleted = false;
   const explicitTrace = (typeof window !== "undefined" && window.__activeExplicitMaintenanceAddSaveTrace && typeof window.__activeExplicitMaintenanceAddSaveTrace === "object")
     ? window.__activeExplicitMaintenanceAddSaveTrace
     : null;
@@ -5900,7 +5902,9 @@ const saveCloudInternal = debounce(async (saveOptions = {})=>{
       explicitTrace.firestoreWritePayloadInstanceFound = Array.isArray(snap.maintenanceCalendarInstancesV2) && snap.maintenanceCalendarInstancesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
       explicitTrace.firestoreWritePayloadOccurrenceFound = Array.isArray(snap.maintenanceOccurrencesV2) && snap.maintenanceOccurrencesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
     }
+    authoritativeStateWriteAttempted = true;
     await FB.docRef.set(snap, { merge:true });
+    authoritativeStateWriteCompleted = true;
     if (explicitTrace) explicitTrace.firestoreSetCompleted = true;
     if (typeof window !== "undefined"){
       window.__loadedCloudRevisionForSaveGuard = Number(snap?.syncMeta?.rev || 0);
@@ -5938,14 +5942,27 @@ const saveCloudInternal = debounce(async (saveOptions = {})=>{
       explicitTrace.saveCloudInternalReturnValue = "completed";
       explicitTrace.saveCloudInternalReturnType = "resolved";
     }
+    const warnings = [];
     if (FB.workspaceDoc){
-      await updateWorkspaceMetadata({
-        workspaceId: WORKSPACE_ID,
-        lastTouchedAt: new Date().toISOString()
-      });
+      try {
+        await updateWorkspaceMetadata({
+          workspaceId: WORKSPACE_ID,
+          lastTouchedAt: new Date().toISOString()
+        });
+      } catch (metadataError){
+        const warning = `Authoritative state was saved, but workspace metadata was not updated: ${String(metadataError?.message || metadataError)}`;
+        warnings.push(warning);
+        console.warn(warning, metadataError);
+      }
     }
     window.__lastLoadedCloudState = { ...snap };
-    return { saved:true, path:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state` };
+    return {
+      saved:true,
+      stateWriteAttempted:true,
+      stateWriteCompleted:true,
+      path:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
+      warnings
+    };
   }catch(e){
     if (explicitTrace){
       explicitTrace.firestoreSetError = e?.message || String(e);
@@ -5954,7 +5971,22 @@ const saveCloudInternal = debounce(async (saveOptions = {})=>{
       explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
     }
     console.error("Cloud save failed:", e);
-    return { saved:false, error:String(e?.message || e) };
+    if (authoritativeStateWriteCompleted){
+      return {
+        saved:true,
+        stateWriteAttempted:true,
+        stateWriteCompleted:true,
+        path:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
+        warnings:[`Authoritative state was saved, but post-write bookkeeping failed: ${String(e?.message || e)}`]
+      };
+    }
+    return {
+      saved:false,
+      stateWriteAttempted:authoritativeStateWriteAttempted,
+      stateWriteCompleted:authoritativeStateWriteCompleted,
+      indeterminate:authoritativeStateWriteAttempted && !authoritativeStateWriteCompleted,
+      error:String(e?.message || e)
+    };
   }
 }, 1800);
 function recordDataFlowEvent(trigger = "save", nextSnapshot = null){
