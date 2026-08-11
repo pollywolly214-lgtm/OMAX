@@ -9480,13 +9480,16 @@ function maintenanceHistoryImportValueKey(value){
 }
 
 function captureMaintenanceHistoryImportManualHistory(){
-  return getMaintenanceHistoryImportTaskList().map(item => ({
+  const snapshot = getMaintenanceHistoryImportTaskList().map(item => ({
     mode:item.mode,
     index:item.index,
     task:item.task,
     hadManualHistory:Object.prototype.hasOwnProperty.call(item.task, "manualHistory"),
     manualHistory:cloneMaintenanceHistoryImportValue(item.task.manualHistory)
   }));
+  snapshot.intervalTaskRefs = (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).slice();
+  snapshot.asReqTaskRefs = (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []).slice();
+  return snapshot;
 }
 
 function restoreMaintenanceHistoryImportManualHistory(snapshot){
@@ -9502,6 +9505,12 @@ function restoreMaintenanceHistoryImportManualHistory(snapshot){
 }
 
 function verifyMaintenanceHistoryImportMutation(historySnapshot, touchedTasks, plannedIds){
+  const sameTaskRefs = (current, before)=> Array.isArray(current) && Array.isArray(before)
+    && current.length === before.length && current.every((task, index)=>task === before[index]);
+  if (!sameTaskRefs(window.tasksInterval, historySnapshot?.intervalTaskRefs)
+    || !sameTaskRefs(window.tasksAsReq, historySnapshot?.asReqTaskRefs)){
+    throw new Error("Unexpected task collection mutation: additions, removals, or reordering are forbidden during history import.");
+  }
   const planned = new Set(plannedIds);
   (Array.isArray(historySnapshot) ? historySnapshot : []).forEach(item => {
     const beforeHistory = Array.isArray(item.manualHistory) ? item.manualHistory : [];
@@ -11561,6 +11570,11 @@ function renderSettings(){
     const name = (data.get("taskName")||"").toString().trim();
     const mode = (data.get("taskType")||"interval").toString();
     if (!name){ alert("Task name is required."); return; }
+    const submitButton = form.querySelector('[type="submit"]');
+    const actionToken = form.dataset.creationActionToken || (form.dataset.creationActionToken = `task_create_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+    if (form.dataset.creationPending === "1") return;
+    form.dataset.creationPending = "1";
+    if (submitButton) submitButton.disabled = true;
     const rootId = (typeof window !== "undefined" && typeof window.ROOT_FOLDER_ID === "string") ? window.ROOT_FOLDER_ID : "root";
     const catRaw = (data.get("taskCategory")||"").toString().trim();
     const catId = catRaw ? catRaw : rootId;
@@ -11592,14 +11606,31 @@ function renderSettings(){
       const curHours = getCurrentMachineHours();
       const baselineHours = parseBaselineHours(data.get("taskLastServiced"));
       applyIntervalBaseline(task, { baselineHours, currentHours: curHours });
-      window.tasksInterval.unshift(task);
-      createdTask = task;
+      const creation = typeof window.createMaintenanceTaskOnce === "function"
+        ? window.createMaintenanceTaskOnce(actionToken, task, ()=>{ window.tasksInterval.unshift(task); return task; })
+        : { created:true, task:(window.tasksInterval.unshift(task), task) };
+      if (!creation.created){
+        delete form.dataset.creationPending;
+        if (submitButton) submitButton.disabled = false;
+        return;
+      }
+      createdTask = creation.task;
     }else{
       const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
       const task = Object.assign(base, { mode:"asreq", condition, variant: "template", templateId: id });
-      (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = [])).unshift(task);
+      const creation = typeof window.createMaintenanceTaskOnce === "function"
+        ? window.createMaintenanceTaskOnce(actionToken, task, ()=>{
+            (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = [])).unshift(task);
+            return task;
+          })
+        : { created:true, task:((Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = [])).unshift(task), task) };
+      if (!creation.created){
+        delete form.dataset.creationPending;
+        if (submitButton) submitButton.disabled = false;
+        return;
+      }
       tasksAsReq = window.tasksAsReq;
-      createdTask = task;
+      createdTask = creation.task;
     }
 
     if (createdTask){
@@ -11642,6 +11673,11 @@ function renderSettings(){
         if (typeof fn === "function") fn(createdTask);
       }, 60);
     }
+    delete form.dataset.creationPending;
+    if (submitButton) submitButton.disabled = false;
+    setTimeout(()=>{
+      if (form.dataset.creationActionToken === actionToken) delete form.dataset.creationActionToken;
+    }, 1000);
   });
 
   const pendingFocus = window.pendingMaintenanceFocus;
@@ -16619,8 +16655,19 @@ function computeCostModel(){
     return false;
   };
 
-  const intervalTasks = intervalTasksAll.filter(isTaskActive);
-  const asReqTasks = asReqTasksAll.filter(isTaskActive);
+  const dedupeEquivalentTasks = list => {
+    const seen = new Set();
+    return list.filter(task => {
+      const identity = typeof window.normalizeMaintenanceTaskIdentity === "function"
+        ? window.normalizeMaintenanceTaskIdentity(task).equivalentKey
+        : String(task?.id || "");
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
+  };
+  const intervalTasks = dedupeEquivalentTasks(intervalTasksAll.filter(isTaskActive));
+  const asReqTasks = dedupeEquivalentTasks(asReqTasksAll.filter(isTaskActive));
   const taskCostFromSettingsById = new Map();
   const registerTaskCostFromSettings = (task)=>{
     if (!task || task.id == null) return;

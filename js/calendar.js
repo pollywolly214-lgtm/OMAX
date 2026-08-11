@@ -2950,7 +2950,14 @@ function restoreCriticalIntervalTasks(){
   if (restoreFromTrash((id,name)=> id.includes("mixing_tube_rotation") || name.includes("mixing tube rotation"))) changed = true;
   if (restoreFromTrash((id,name)=> id.includes("pump_tube_noz_filter") || (name.includes("mixing tube") && name.includes("replace")) || (name.includes("pump tube") && name.includes("nozzle filter")))) changed = true;
   if (restoreFromTrash((id,name)=> id.includes("jewel_nozzle_clean") || (name.includes("jew") && name.includes("orifice") && name.includes("nozzle")))) changed = true;
-  if (restoreFromTrash((id,name)=> id.includes("pump_rebuild") || (name.includes("pump") && name.includes("rebuild")))) changed = true;
+  const activePumpEquivalent = tasks.some(task => {
+    if (typeof window.normalizeMaintenanceTaskIdentity !== "function"){
+      return String(task?.name || "").trim().toLowerCase() === "pump rebuild" && String(task?.mode || "interval") === "interval" && Number(task?.interval) === 500;
+    }
+    return window.normalizeMaintenanceTaskIdentity(task).equivalentKey === "pump rebuild|interval|500";
+  });
+  // Recovery is by task identity/configuration, never by a deleted object's old ID.
+  if (!activePumpEquivalent && restoreFromTrash((id,name)=> id.includes("pump_rebuild") || (name.includes("pump") && name.includes("rebuild")))) changed = true;
   const matched = [];
   tasks.forEach(task => {
     if (!task) return;
@@ -3016,9 +3023,7 @@ function restoreCriticalIntervalTasks(){
 }
 
 function renderCalendar(){
-  if (restoreCriticalIntervalTasks()){
-    if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-  }
+  // Rendering is read-only. Recovery runs only from explicit load/recovery flows.
   const container = $("#months");
   if (!container) return;
   let showAll = Boolean(window.__calendarShowAllMonths);

@@ -25,7 +25,7 @@ function createHarness(saveCloudNow){
     getCurrentAppStateForDiagnostics:()=>structuredClone(window)
   };
   vm.createContext(context);
-  vm.runInContext(rendererSource.slice(start, end) + "\nthis.api={applyMaintenanceHistoryImportRows,buildMaintenanceHistoryImportPreview,countMaintenanceHistoryImportProtectedState,findMaintenanceHistoryImportDrops};", context);
+  vm.runInContext(rendererSource.slice(start, end) + "\nthis.api={applyMaintenanceHistoryImportRows,buildMaintenanceHistoryImportPreview,countMaintenanceHistoryImportProtectedState,findMaintenanceHistoryImportDrops,captureMaintenanceHistoryImportManualHistory,verifyMaintenanceHistoryImportMutation};", context);
   return { window, api:context.api };
 }
 
@@ -100,6 +100,12 @@ async function run(){
     h.window.inventory.length = 0;
     const after = h.api.countMaintenanceHistoryImportProtectedState();
     assert.deepEqual(Array.from(h.api.findMaintenanceHistoryImportDrops(before, after)), ["inventory"], "protected collection reduction is detected");
+  }
+  {
+    const h = createHarness(async()=>({ saved:true, stateWriteCompleted:true }));
+    const snapshot = h.api.captureMaintenanceHistoryImportManualHistory();
+    h.window.tasksInterval.push({ id:"unexpected", name:"Pump Rebuild", interval:500, mode:"interval", manualHistory:[], completedDates:[] });
+    assert.throws(()=>h.api.verifyMaintenanceHistoryImportMutation(snapshot, new Map(), []), /Unexpected task collection mutation/);
   }
   const wireSection = rendererSource.slice(rendererSource.indexOf("function wireMaintenanceHistoryImportTool"), rendererSource.indexOf("function renderSettings"));
   assert.match(wireSection, /if \(importRunning\) return;/, "concurrent import attempts are ignored");
