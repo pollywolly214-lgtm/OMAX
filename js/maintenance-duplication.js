@@ -6,7 +6,9 @@
 (function maintenanceDuplicationSafety(global){
   const CANONICAL_ID = "pump_rebuild_msnpt6hi";
   const DUPLICATE_ID = "pump_rebuild_msnpt6gs";
+  const INVENTORY_ID = "inventory_msnpt6ic";
   const IMPORT_IDS = ["OMAX-2067268-302701-01", "OMAX-2070032-302701-01"];
+  const AUTHORITATIVE_INVENTORY = { id:INVENTORY_ID, name:"Pump Rebuild", linkedTaskId:DUPLICATE_ID, qty:0, qtyNew:0, price:null, pn:"", folderId:null };
 
   const clone = value => typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
   const key = value => JSON.stringify(value);
@@ -57,7 +59,8 @@
   }
 
   function auditPumpRebuildTaskDuplication(){
-    const tasks = (Array.isArray(global.tasksInterval) ? global.tasksInterval : []).filter(isPumpRebuild);
+    const intervalTasks = Array.isArray(global.tasksInterval) ? global.tasksInterval : [];
+    const tasks = intervalTasks.filter(isPumpRebuild);
     const inventory = Array.isArray(global.inventory) ? global.inventory : [];
     const deleted = Array.isArray(global.deletedItems) ? global.deletedItems : [];
     const records = tasks.map((task, index)=>({
@@ -68,19 +71,46 @@
     }));
     const groups = {};
     records.forEach(record => { (groups[record.normalized.equivalentKey] ||= []).push(record.id); });
-    const canonical = tasks.find(task => String(task.id) === CANONICAL_ID);
-    const duplicate = tasks.find(task => String(task.id) === DUPLICATE_ID);
+    const allLiveTasks = intervalTasks.concat(Array.isArray(global.tasksAsReq) ? global.tasksAsReq : []);
+    const canonicalMatches = allLiveTasks.filter(task => String(task?.id || "") === CANONICAL_ID);
+    const duplicateMatches = allLiveTasks.filter(task => String(task?.id || "") === DUPLICATE_ID);
+    const canonical = canonicalMatches[0];
+    const duplicate = duplicateMatches[0];
+    const matchingInventory = inventory.filter(item => String(item?.id || "") === INVENTORY_ID);
+    const inventoryRecord = matchingInventory[0];
     const liveCollections = ["inventory", "maintenanceCalendarInstancesV2", "maintenanceOccurrencesV2", "maintenanceTasksV2", "tasksAsReq"];
-    const unexpectedLiveReferences = liveCollections.flatMap(name => findReferences(global[name], DUPLICATE_ID, name));
-    (Array.isArray(global.tasksInterval) ? global.tasksInterval : []).forEach((task, index)=>{
+    const allLiveReferences = liveCollections.flatMap(name => findReferences(global[name], DUPLICATE_ID, name));
+    intervalTasks.forEach((task, index)=>{
       if (String(task?.id || "") === DUPLICATE_ID) return;
-      findReferences(task, DUPLICATE_ID, `tasksInterval[${index}]`, unexpectedLiveReferences);
+      findReferences(task, DUPLICATE_ID, `tasksInterval[${index}]`, allLiveReferences);
     });
-    const removableCandidateIds = canonical && duplicate && isEquivalentPump(canonical) && isEquivalentPump(duplicate)
-      && count(duplicate.manualHistory) === 0 && count(duplicate.completedDates) === 0 && !unexpectedLiveReferences.length ? [DUPLICATE_ID] : [];
+    const intendedReferencePath = matchingInventory.length === 1 ? `inventory[${inventory.indexOf(inventoryRecord)}].linkedTaskId` : "";
+    const unexpectedLiveReferences = allLiveReferences.filter(reference => reference.path !== intendedReferencePath);
+    const current = stateForRepair();
+    const baseline = global.__lastLoadedCloudState;
+    const currentComparison = current ? clone(current) : null;
+    const baselineComparison = baseline ? clone(baseline) : null;
+    if (currentComparison) delete currentComparison.saveMeta;
+    if (baselineComparison) delete baselineComparison.saveMeta;
+    const baselineMatches = Boolean(currentComparison && baselineComparison && key(currentComparison) === key(baselineComparison));
+    const refusalReasons = [];
+    if (canonicalMatches.length !== 1 || duplicateMatches.length !== 1) refusalReasons.push("Both exact task IDs must exist exactly once.");
+    if (!canonical || !duplicate || !isEquivalentPump(canonical) || !isEquivalentPump(duplicate)) refusalReasons.push("Both exact tasks must be equivalent 500-hour interval Pump Rebuild tasks.");
+    if (String(canonical?.inventoryId || "") !== INVENTORY_ID || String(duplicate?.inventoryId || "") !== INVENTORY_ID) refusalReasons.push("Both tasks must point to the exact shared inventory ID.");
+    if (count(canonical?.manualHistory) !== 2 || count(canonical?.completedDates) !== 0 || key(historyIds(canonical)) !== key(IMPORT_IDS)) refusalReasons.push("Canonical task history does not contain exactly the two protected imports.");
+    if (count(duplicate?.manualHistory) !== 0 || count(duplicate?.completedDates) !== 0) refusalReasons.push("Duplicate task is not empty.");
+    if (matchingInventory.length !== 1) refusalReasons.push("Exactly one matching live inventory record is required.");
+    if (!inventoryRecord || key(inventoryRecord) !== key(AUTHORITATIVE_INVENTORY)) refusalReasons.push("Shared inventory record differs from the authoritative configuration.");
+    if (unexpectedLiveReferences.length) refusalReasons.push("Unexpected additional live references target the duplicate task.");
+    if (!baselineMatches) refusalReasons.push("Current state does not match the latest authoritative Firestore-loaded baseline.");
+    const inventoryRelinkRequired = Boolean(inventoryRecord && inventoryRecord.linkedTaskId === DUPLICATE_ID);
+    const inventoryRelinkSafe = inventoryRelinkRequired && matchingInventory.length === 1 && !unexpectedLiveReferences.length && key(inventoryRecord) === key(AUTHORITATIVE_INVENTORY);
+    const inventoryRelinkPlan = inventoryRelinkSafe ? { inventoryId:INVENTORY_ID, fromTaskId:DUPLICATE_ID, toTaskId:CANONICAL_ID } : null;
+    const removableCandidateIds = refusalReasons.length === 0 ? [DUPLICATE_ID] : [];
     return { records, equivalentGroups:Object.entries(groups).map(([configuration, ids])=>({ configuration, ids })), removableCandidateIds,
-      liveReferences:unexpectedLiveReferences, deletedItemsLinks:findReferences(deleted, DUPLICATE_ID, "deletedItems"),
-      repairSafe:removableCandidateIds.length === 1 };
+      inventoryRelinkRequired, inventoryRelinkSafe, inventoryRelinkPlan, refusalReasons,
+      liveReferences:allLiveReferences, unexpectedLiveReferences, deletedItemsLinks:findReferences(deleted, DUPLICATE_ID, "deletedItems"),
+      repairSafe:removableCandidateIds.length === 1 && inventoryRelinkSafe };
   }
 
   function stateForRepair(){
@@ -94,24 +124,26 @@
     if (typeof tasksInterval !== "undefined") tasksInterval = list;
   }
 
+  function setInventory(list){
+    global.inventory = list;
+    if (typeof inventory !== "undefined") inventory = list;
+  }
+
   async function repairExactPumpRebuildTaskDuplication(){
     const result = { repaired:false, saveAttempted:false, saveMethod:"saveCloudNow", stateWriteAttempted:false, stateWriteCompleted:false,
       saveCompleted:false, saveIndeterminate:false, saveError:"", saveWarnings:[], backupCreated:false, canonicalTaskId:CANONICAL_ID,
-      removedTaskId:DUPLICATE_ID, beforeCounts:null, afterCounts:null, preservedImportEventIds:[], refusedReason:"" };
+      removedTaskId:DUPLICATE_ID, beforeCounts:null, afterCounts:null, preservedImportEventIds:[], refusedReason:"",
+      inventoryRelinkRequired:false, inventoryRelinkCompleted:false, relinkedInventoryIds:[], beforeInventoryLink:null, afterInventoryLink:null };
     const refuse = reason => { result.refusedReason = reason; return result; };
     const current = stateForRepair();
     const baseline = global.__lastLoadedCloudState;
     if (!current || !baseline) return refuse("Current state or last authoritative Firestore baseline is unavailable.");
-    const comparisonCurrent = clone(current);
-    const comparisonBaseline = clone(baseline);
-    delete comparisonCurrent.saveMeta; delete comparisonBaseline.saveMeta;
-    const baselineMatches = typeof getTrackedStateSignature === "function"
-      ? getTrackedStateSignature(comparisonCurrent) === getTrackedStateSignature(comparisonBaseline)
-      : key(comparisonCurrent) === key(comparisonBaseline);
-    if (!baselineMatches) return refuse("Current state does not match the last authoritative Firestore baseline.");
     const audit = auditPumpRebuildTaskDuplication();
     if (!audit.repairSafe || key(audit.removableCandidateIds) !== key([DUPLICATE_ID])) return refuse("Exact duplicate preconditions or live-reference audit failed.");
+    const authorization = { used:false, state:key(current), plan:key(audit.inventoryRelinkPlan) };
+    result.inventoryRelinkRequired = audit.inventoryRelinkRequired;
     const tasks = global.tasksInterval;
+    const inventoryBefore = global.inventory;
     const canonical = tasks.find(task => String(task?.id) === CANONICAL_ID);
     const duplicate = tasks.find(task => String(task?.id) === DUPLICATE_ID);
     if (!canonical || !duplicate) return refuse("Both exact Pump Rebuild task IDs are required.");
@@ -122,18 +154,34 @@
       if (typeof exportJsonDownload !== "function" || !exportJsonDownload(`omax-pump-rebuild-duplicate-backup-${Date.now()}.json`, clone(current))) return refuse("Full-state backup download did not start.");
       result.backupCreated = true;
     } catch (error){ return refuse(`Full-state backup failed: ${String(error?.message || error)}`); }
+    const revalidation = auditPumpRebuildTaskDuplication();
+    const revalidatedState = stateForRepair();
+    if (authorization.used || !revalidation.repairSafe || key(revalidation.inventoryRelinkPlan) !== authorization.plan || key(revalidatedState) !== authorization.state) return refuse("Exact repair authorization became stale before mutation.");
+    authorization.used = true;
     result.beforeCounts = { tasksInterval:tasks.length, manualHistory:count(canonical.manualHistory) + count(duplicate.manualHistory), completedDates:count(canonical.completedDates) + count(duplicate.completedDates) };
+    const inventoryIndex = inventoryBefore.findIndex(item => String(item?.id || "") === INVENTORY_ID);
+    const originalInventoryRecord = inventoryBefore[inventoryIndex];
+    const relinkedInventoryRecord = { ...originalInventoryRecord, linkedTaskId:CANONICAL_ID };
+    const inventoryAfter = inventoryBefore.slice();
+    inventoryAfter[inventoryIndex] = relinkedInventoryRecord;
+    result.beforeInventoryLink = originalInventoryRecord.linkedTaskId;
+    result.afterInventoryLink = relinkedInventoryRecord.linkedTaskId;
     setIntervalTasks(tasks.filter(task => String(task?.id) !== DUPLICATE_ID));
+    setInventory(inventoryAfter);
     const afterState = stateForRepair();
     const expected = clone(protectedBefore);
     expected.tasksInterval = expected.tasksInterval.filter(task => String(task?.id) !== DUPLICATE_ID);
+    expected.inventory[inventoryIndex] = { ...expected.inventory[inventoryIndex], linkedTaskId:CANONICAL_ID };
     if (key(afterState) !== key(expected) || key(canonical.manualHistory) !== key(canonicalHistory)){
       setIntervalTasks(tasks);
+      setInventory(inventoryBefore);
       return refuse("Intended-only verification failed before save.");
     }
     result.afterCounts = { tasksInterval:global.tasksInterval.length, manualHistory:count(canonical.manualHistory), completedDates:count(canonical.completedDates) };
     result.preservedImportEventIds = historyIds(canonical);
-    if (typeof saveCloudNow !== "function"){ setIntervalTasks(tasks); return refuse("Authoritative full-state save is unavailable."); }
+    result.inventoryRelinkCompleted = true;
+    result.relinkedInventoryIds = [INVENTORY_ID];
+    if (typeof saveCloudNow !== "function"){ setIntervalTasks(tasks); setInventory(inventoryBefore); result.inventoryRelinkCompleted=false; result.relinkedInventoryIds=[]; return refuse("Authoritative full-state save is unavailable."); }
     result.saveAttempted = true;
     try {
       const saved = await saveCloudNow();
@@ -144,8 +192,13 @@
       result.saveIndeterminate = saved?.indeterminate === true;
       result.saveCompleted = saved?.saved === true && result.stateWriteCompleted;
       result.repaired = result.saveCompleted;
-      if (!result.saveCompleted && !result.saveIndeterminate) setIntervalTasks(tasks);
-    } catch (error){ result.saveError = String(error?.message || error); setIntervalTasks(tasks); }
+      if (!result.saveCompleted && !result.saveIndeterminate && !result.stateWriteAttempted){ setIntervalTasks(tasks); setInventory(inventoryBefore); result.inventoryRelinkCompleted=false; result.relinkedInventoryIds=[]; }
+    } catch (error){
+      result.saveError = String(error?.message || error);
+      result.saveIndeterminate = error?.indeterminate === true;
+      result.stateWriteAttempted = error?.stateWriteAttempted === true;
+      if (!result.saveIndeterminate && !result.stateWriteAttempted){ setIntervalTasks(tasks); setInventory(inventoryBefore); result.inventoryRelinkCompleted=false; result.relinkedInventoryIds=[]; }
+    }
     return result;
   }
 
