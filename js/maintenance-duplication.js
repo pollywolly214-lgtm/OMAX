@@ -13,6 +13,10 @@
 
   const clone = value => typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
   const key = value => JSON.stringify(value);
+  const stableKey = value => JSON.stringify(value, (_field, child) => {
+    if (!child || Array.isArray(child) || typeof child !== "object") return child;
+    return Object.keys(child).sort().reduce((copy, field) => { copy[field] = child[field]; return copy; }, {});
+  });
   const normalizeName = value => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const normalizeMode = task => String(task?.mode || "interval").trim().toLowerCase();
   const taskIdentity = task => normalizeName(task?.name);
@@ -169,18 +173,67 @@
     if (typeof inventory !== "undefined") inventory = list;
   }
 
+  // Deliberately exclude snapshotState's generated saveMeta/syncMeta and every
+  // other unrelated diagnostic field. The selected collections are the exact
+  // business-data boundary enforced by the authoritative-baseline audit.
+  function repairAuthorizationPayload(state, plan){
+    const interval = Array.isArray(state?.tasksInterval) ? state.tasksInterval : [];
+    const inventoryState = Array.isArray(state?.inventory) ? state.inventory : [];
+    const canonical = interval.find(task => String(task?.id || "") === CANONICAL_ID);
+    return clone({
+      plan,
+      relevantTasks:interval,
+      relevantInventory:inventoryState,
+      protectedState:{
+        tasksAsReq:Array.isArray(state?.tasksAsReq) ? state.tasksAsReq : [],
+        deletedItems:Array.isArray(state?.deletedItems) ? state.deletedItems : [],
+        maintenanceTasksV2:Array.isArray(state?.maintenanceTasksV2) ? state.maintenanceTasksV2 : [],
+        maintenanceCalendarInstancesV2:Array.isArray(state?.maintenanceCalendarInstancesV2) ? state.maintenanceCalendarInstancesV2 : [],
+        maintenanceOccurrencesV2:Array.isArray(state?.maintenanceOccurrencesV2) ? state.maintenanceOccurrencesV2 : []
+      },
+      canonicalImportedEventIds:historyIds(canonical)
+    });
+  }
+
+  const repairAuthorizations = new WeakMap();
+  function createPumpRebuildRepairAuthorization(state, plan, lifetimeMs = 30000){
+    const token = Object.freeze({});
+    const payload = repairAuthorizationPayload(state, plan);
+    repairAuthorizations.set(token, { payload, fingerprint:stableKey(payload), expiresAt:Date.now() + Math.max(0, Number(lifetimeMs) || 0), used:false });
+    return token;
+  }
+
+  function validatePumpRebuildRepairAuthorization(token, state, plan){
+    const proof = token && repairAuthorizations.get(token);
+    if (!proof) return { valid:false, mismatchPaths:["authorization.token"], reason:"unknown" };
+    if (proof.used) return { valid:false, mismatchPaths:["authorization.used"], reason:"used" };
+    if (Date.now() > proof.expiresAt) return { valid:false, mismatchPaths:["authorization.expiresAt"], reason:"expired" };
+    const payload = repairAuthorizationPayload(state, plan);
+    const paths = mismatchPaths(payload, proof.payload, "authorization", []);
+    return { valid:paths.length === 0 && stableKey(payload) === proof.fingerprint, mismatchPaths:paths, reason:paths.length ? "mismatch" : "" };
+  }
+
+  function consumePumpRebuildRepairAuthorization(token, state, plan){
+    const validation = validatePumpRebuildRepairAuthorization(token, state, plan);
+    if (!validation.valid) return validation;
+    repairAuthorizations.get(token).used = true;
+    return { ...validation, consumed:true };
+  }
+
   async function repairExactPumpRebuildTaskDuplication(){
     const result = { repaired:false, saveAttempted:false, saveMethod:"saveCloudNow", stateWriteAttempted:false, stateWriteCompleted:false,
       saveCompleted:false, saveIndeterminate:false, saveError:"", saveWarnings:[], backupCreated:false, canonicalTaskId:CANONICAL_ID,
       removedTaskId:DUPLICATE_ID, beforeCounts:null, afterCounts:null, preservedImportEventIds:[], refusedReason:"",
-      inventoryRelinkRequired:false, inventoryRelinkCompleted:false, relinkedInventoryIds:[], beforeInventoryLink:null, afterInventoryLink:null };
+      inventoryRelinkRequired:false, inventoryRelinkCompleted:false, relinkedInventoryIds:[], beforeInventoryLink:null, afterInventoryLink:null,
+      authorizationCreated:false, authorizationValidated:false, authorizationConsumed:false, authorizationFailureStage:"", authorizationMismatchPaths:[] };
     const refuse = reason => { result.refusedReason = reason; return result; };
     const current = stateForRepair();
     const baseline = global.__lastLoadedCloudState;
     if (!current || !baseline) return refuse("Current state or last authoritative Firestore baseline is unavailable.");
     const audit = auditPumpRebuildTaskDuplication();
     if (!audit.repairSafe || key(audit.removableCandidateIds) !== key([DUPLICATE_ID])) return refuse("Exact duplicate preconditions or live-reference audit failed.");
-    const authorization = { used:false, state:key(current), plan:key(audit.inventoryRelinkPlan) };
+    const authorization = createPumpRebuildRepairAuthorization(current, audit.inventoryRelinkPlan);
+    result.authorizationCreated = true;
     result.inventoryRelinkRequired = audit.inventoryRelinkRequired;
     const tasks = global.tasksInterval;
     const inventoryBefore = global.inventory;
@@ -196,8 +249,14 @@
     } catch (error){ return refuse(`Full-state backup failed: ${String(error?.message || error)}`); }
     const revalidation = auditPumpRebuildTaskDuplication();
     const revalidatedState = stateForRepair();
-    if (authorization.used || !revalidation.repairSafe || key(revalidation.inventoryRelinkPlan) !== authorization.plan || key(revalidatedState) !== authorization.state) return refuse("Exact repair authorization became stale before mutation.");
-    authorization.used = true;
+    if (!revalidation.repairSafe){ result.authorizationFailureStage="audit-revalidation"; result.authorizationMismatchPaths=clone(revalidation.baselineMismatchPaths); return refuse("Exact repair authorization became stale before mutation."); }
+    const validation = validatePumpRebuildRepairAuthorization(authorization, revalidatedState, revalidation.inventoryRelinkPlan);
+    result.authorizationValidated = validation.valid;
+    result.authorizationMismatchPaths = clone(validation.mismatchPaths);
+    if (!validation.valid){ result.authorizationFailureStage="pre-mutation-validation"; return refuse("Exact repair authorization became stale before mutation."); }
+    const consumption = consumePumpRebuildRepairAuthorization(authorization, revalidatedState, revalidation.inventoryRelinkPlan);
+    if (!consumption.valid){ result.authorizationFailureStage="mutation-consumption"; result.authorizationMismatchPaths=clone(consumption.mismatchPaths); return refuse("Exact repair authorization could not be consumed."); }
+    result.authorizationConsumed = true;
     result.beforeCounts = { tasksInterval:tasks.length, manualHistory:count(canonical.manualHistory) + count(duplicate.manualHistory), completedDates:count(canonical.completedDates) + count(duplicate.completedDates) };
     const inventoryIndex = inventoryBefore.findIndex(item => String(item?.id || "") === INVENTORY_ID);
     const originalInventoryRecord = inventoryBefore[inventoryIndex];
@@ -209,10 +268,11 @@
     setIntervalTasks(tasks.filter(task => String(task?.id) !== DUPLICATE_ID));
     setInventory(inventoryAfter);
     const afterState = stateForRepair();
-    const expected = clone(protectedBefore);
-    expected.tasksInterval = expected.tasksInterval.filter(task => String(task?.id) !== DUPLICATE_ID);
-    expected.inventory[inventoryIndex] = { ...expected.inventory[inventoryIndex], linkedTaskId:CANONICAL_ID };
-    if (key(afterState) !== key(expected) || key(canonical.manualHistory) !== key(canonicalHistory)){
+    const expected = repairAuthorizationPayload(protectedBefore, audit.inventoryRelinkPlan);
+    expected.relevantTasks = expected.relevantTasks.filter(task => String(task?.id) !== DUPLICATE_ID);
+    expected.relevantInventory[inventoryIndex] = { ...expected.relevantInventory[inventoryIndex], linkedTaskId:CANONICAL_ID };
+    const verified = repairAuthorizationPayload(afterState, audit.inventoryRelinkPlan);
+    if (stableKey(verified) !== stableKey(expected) || key(canonical.manualHistory) !== key(canonicalHistory)){
       setIntervalTasks(tasks);
       setInventory(inventoryBefore);
       return refuse("Intended-only verification failed before save.");
@@ -242,5 +302,6 @@
     return result;
   }
 
-  Object.assign(global, { normalizeMaintenanceTaskIdentity, createMaintenanceTaskOnce, auditPumpRebuildTaskDuplication, repairExactPumpRebuildTaskDuplication });
+  Object.assign(global, { normalizeMaintenanceTaskIdentity, createMaintenanceTaskOnce, auditPumpRebuildTaskDuplication, repairExactPumpRebuildTaskDuplication,
+    createPumpRebuildRepairAuthorization, validatePumpRebuildRepairAuthorization, consumePumpRebuildRepairAuthorization });
 })(window);
