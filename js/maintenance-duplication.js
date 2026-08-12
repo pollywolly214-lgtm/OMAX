@@ -8,7 +8,8 @@
   const DUPLICATE_ID = "pump_rebuild_msnpt6gs";
   const INVENTORY_ID = "inventory_msnpt6ic";
   const IMPORT_IDS = ["OMAX-2067268-302701-01", "OMAX-2070032-302701-01"];
-  const AUTHORITATIVE_INVENTORY = { id:INVENTORY_ID, name:"Pump Rebuild", linkedTaskId:DUPLICATE_ID, qty:0, qtyNew:0, price:null, pn:"", folderId:null };
+  const REQUIRED_INVENTORY_CONFIGURATION = { id:INVENTORY_ID, name:"Pump Rebuild", linkedTaskId:DUPLICATE_ID, qty:0, qtyNew:0, qtyOld:0, price:null, pn:"", folderId:null, unit:"pcs", link:"", note:"" };
+  const BASELINE_FIELDS = ["tasksInterval", "inventory", "tasksAsReq", "deletedItems", "maintenanceTasksV2", "maintenanceCalendarInstancesV2", "maintenanceOccurrencesV2"];
 
   const clone = value => typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
   const key = value => JSON.stringify(value);
@@ -21,6 +22,26 @@
   const isEquivalentPump = task => isPumpRebuild(task) && normalizeMode(task) === "interval" && Number(task?.interval) === 500;
   const historyIds = task => (Array.isArray(task?.manualHistory) ? task.manualHistory : []).map(entry => String(entry?.import_event_id || entry?.importEventId || entry?.provenance?.import_event_id || entry?.provenance?.importEventId || "")).filter(Boolean);
   const count = value => Array.isArray(value) ? value.length : 0;
+
+  // Compare JSON data structurally rather than relying on insertion order in
+  // JSON.stringify. Paths are retained so a refusal identifies what changed.
+  function mismatchPaths(actual, expected, path = "", found = []){
+    if (Object.is(actual, expected)) return found;
+    if (Array.isArray(actual) || Array.isArray(expected)){
+      if (!Array.isArray(actual) || !Array.isArray(expected)){ found.push(path || "$"); return found; }
+      if (actual.length !== expected.length) found.push(`${path}.length`);
+      for (let index = 0; index < Math.max(actual.length, expected.length); index++)
+        mismatchPaths(actual[index], expected[index], `${path}[${index}]`, found);
+      return found;
+    }
+    if (actual && expected && typeof actual === "object" && typeof expected === "object"){
+      [...new Set([...Object.keys(actual), ...Object.keys(expected)])].sort().forEach(field =>
+        mismatchPaths(actual[field], expected[field], path ? `${path}.${field}` : field, found));
+      return found;
+    }
+    found.push(path || "$");
+    return found;
+  }
 
   function normalizeMaintenanceTaskIdentity(task){
     return { identity:taskIdentity(task), mode:normalizeMode(task), interval:Number(task?.interval) || 0, configuration:taskConfiguration(task), equivalentKey:equivalentKey(task) };
@@ -88,11 +109,28 @@
     const unexpectedLiveReferences = allLiveReferences.filter(reference => reference.path !== intendedReferencePath);
     const current = stateForRepair();
     const baseline = global.__lastLoadedCloudState;
-    const currentComparison = current ? clone(current) : null;
-    const baselineComparison = baseline ? clone(baseline) : null;
-    if (currentComparison) delete currentComparison.saveMeta;
-    if (baselineComparison) delete baselineComparison.saveMeta;
-    const baselineMatches = Boolean(currentComparison && baselineComparison && key(currentComparison) === key(baselineComparison));
+    const baselineMismatchPaths = [];
+    if (!current || !baseline) baselineMismatchPaths.push("baseline");
+    else BASELINE_FIELDS.forEach(field => mismatchPaths(current[field], baseline[field], field, baselineMismatchPaths));
+    const tasksIntervalMismatchPaths = current && baseline ? mismatchPaths(current.tasksInterval, baseline.tasksInterval, "tasksInterval") : ["tasksInterval"];
+    const inventoryBaselineMismatchPaths = current && baseline ? mismatchPaths(current.inventory, baseline.inventory, "inventory") : ["inventory"];
+    const tasksIntervalBaselineMatched = tasksIntervalMismatchPaths.length === 0;
+    const inventoryBaselineMatched = inventoryBaselineMismatchPaths.length === 0;
+    const baselineMatches = baselineMismatchPaths.length === 0;
+    const baselineInventoryMatches = Array.isArray(baseline?.inventory) ? baseline.inventory.filter(item => String(item?.id || "") === INVENTORY_ID) : [];
+    const authoritativeInventoryRecord = baselineInventoryMatches[0];
+    const authoritativeInventoryIndex = Array.isArray(baseline?.inventory) ? baseline.inventory.indexOf(authoritativeInventoryRecord) : -1;
+    // The baseline position provides a diagnostic candidate when the ID itself
+    // was changed, without authorizing it as the required live record.
+    const configurationCandidates = inventory.filter(item => item?.name === "Pump Rebuild" && item?.linkedTaskId === DUPLICATE_ID);
+    const inventoryConfigurationRecord = inventoryRecord || (authoritativeInventoryIndex >= 0 ? inventory[authoritativeInventoryIndex] : null) || (configurationCandidates.length === 1 ? configurationCandidates[0] : null);
+    const inventoryConfigurationMismatchPaths = [];
+    if (inventoryConfigurationRecord) Object.entries(REQUIRED_INVENTORY_CONFIGURATION).forEach(([field, expected]) =>
+      mismatchPaths(inventoryConfigurationRecord[field], expected, `inventory.${field}`, inventoryConfigurationMismatchPaths));
+    else inventoryConfigurationMismatchPaths.push("inventory");
+    const authoritativeRecordMismatchPaths = inventoryConfigurationRecord && authoritativeInventoryRecord
+      ? mismatchPaths(inventoryConfigurationRecord, authoritativeInventoryRecord, "inventory", []) : ["inventory"];
+    const authoritativeBaselineMatched = baselineInventoryMatches.length === 1 && inventoryConfigurationMismatchPaths.length === 0 && authoritativeRecordMismatchPaths.length === 0;
     const refusalReasons = [];
     if (canonicalMatches.length !== 1 || duplicateMatches.length !== 1) refusalReasons.push("Both exact task IDs must exist exactly once.");
     if (!canonical || !duplicate || !isEquivalentPump(canonical) || !isEquivalentPump(duplicate)) refusalReasons.push("Both exact tasks must be equivalent 500-hour interval Pump Rebuild tasks.");
@@ -100,15 +138,17 @@
     if (count(canonical?.manualHistory) !== 2 || count(canonical?.completedDates) !== 0 || key(historyIds(canonical)) !== key(IMPORT_IDS)) refusalReasons.push("Canonical task history does not contain exactly the two protected imports.");
     if (count(duplicate?.manualHistory) !== 0 || count(duplicate?.completedDates) !== 0) refusalReasons.push("Duplicate task is not empty.");
     if (matchingInventory.length !== 1) refusalReasons.push("Exactly one matching live inventory record is required.");
-    if (!inventoryRecord || key(inventoryRecord) !== key(AUTHORITATIVE_INVENTORY)) refusalReasons.push("Shared inventory record differs from the authoritative configuration.");
+    if (inventoryConfigurationMismatchPaths.length || baselineInventoryMatches.length !== 1) refusalReasons.push("Shared inventory record differs from the authoritative configuration.");
+    if (authoritativeRecordMismatchPaths.length) refusalReasons.push("Shared inventory record differs from the authoritative cloud-loaded record.");
     if (unexpectedLiveReferences.length) refusalReasons.push("Unexpected additional live references target the duplicate task.");
     if (!baselineMatches) refusalReasons.push("Current state does not match the latest authoritative Firestore-loaded baseline.");
     const inventoryRelinkRequired = Boolean(inventoryRecord && inventoryRecord.linkedTaskId === DUPLICATE_ID);
-    const inventoryRelinkSafe = inventoryRelinkRequired && matchingInventory.length === 1 && !unexpectedLiveReferences.length && key(inventoryRecord) === key(AUTHORITATIVE_INVENTORY);
+    const inventoryRelinkSafe = inventoryRelinkRequired && matchingInventory.length === 1 && !unexpectedLiveReferences.length && authoritativeBaselineMatched;
     const inventoryRelinkPlan = inventoryRelinkSafe ? { inventoryId:INVENTORY_ID, fromTaskId:DUPLICATE_ID, toTaskId:CANONICAL_ID } : null;
     const removableCandidateIds = refusalReasons.length === 0 ? [DUPLICATE_ID] : [];
     return { records, equivalentGroups:Object.entries(groups).map(([configuration, ids])=>({ configuration, ids })), removableCandidateIds,
       inventoryRelinkRequired, inventoryRelinkSafe, inventoryRelinkPlan, refusalReasons,
+      authoritativeBaselineMatched, tasksIntervalBaselineMatched, inventoryBaselineMatched, baselineMismatchPaths, inventoryConfigurationMismatchPaths,
       liveReferences:allLiveReferences, unexpectedLiveReferences, deletedItemsLinks:findReferences(deleted, DUPLICATE_ID, "deletedItems"),
       repairSafe:removableCandidateIds.length === 1 && inventoryRelinkSafe };
   }

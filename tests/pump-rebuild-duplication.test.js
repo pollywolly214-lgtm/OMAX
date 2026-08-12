@@ -9,7 +9,7 @@ function harness(overrides={}){
   const imported = id => ({ dateISO:"2025-01-01", import_event_id:id, payload:{ exact:id } });
   const canonical = task("pump_rebuild_msnpt6hi", [imported("OMAX-2067268-302701-01"), imported("OMAX-2070032-302701-01")]);
   const duplicate = task("pump_rebuild_msnpt6gs");
-  const sharedInventory={ id:"inventory_msnpt6ic", name:"Pump Rebuild", linkedTaskId:duplicate.id, qty:0, qtyNew:0, price:null, pn:"", folderId:null };
+  const sharedInventory={ folderId:null, id:"inventory_msnpt6ic", link:"", linkedTaskId:duplicate.id, name:"Pump Rebuild", note:"", pn:"", price:null, qty:0, qtyNew:0, qtyOld:0, unit:"pcs" };
   const window = Object.assign({ tasksInterval:[canonical, duplicate], tasksAsReq:[], inventory:[{id:"first",name:"Other"},sharedInventory,{id:"last",name:"Other 2"}], deletedItems:[{ payload:{ name:"Pump Rebuild" }, linkedTaskId:duplicate.id }], maintenanceTasksV2:[], maintenanceCalendarInstancesV2:[], maintenanceOccurrencesV2:[] }, overrides);
   const state = ()=>structuredClone({ tasksInterval:window.tasksInterval, tasksAsReq:window.tasksAsReq, inventory:window.inventory, deletedItems:window.deletedItems, maintenanceTasksV2:window.maintenanceTasksV2, maintenanceCalendarInstancesV2:window.maintenanceCalendarInstancesV2, maintenanceOccurrencesV2:window.maintenanceOccurrencesV2 });
   window.__lastLoadedCloudState = state();
@@ -32,6 +32,8 @@ function harness(overrides={}){
     const h=harness(); const audit=h.window.auditPumpRebuildTaskDuplication();
     assert.deepEqual(Array.from(audit.removableCandidateIds),["pump_rebuild_msnpt6gs"]); assert.equal(audit.repairSafe,true);
     assert.equal(audit.inventoryRelinkRequired,true); assert.equal(audit.inventoryRelinkSafe,true);
+    assert.equal(audit.authoritativeBaselineMatched,true); assert.equal(audit.tasksIntervalBaselineMatched,true); assert.equal(audit.inventoryBaselineMatched,true);
+    assert.deepEqual(Array.from(audit.baselineMismatchPaths),[]); assert.deepEqual(Array.from(audit.inventoryConfigurationMismatchPaths),[]);
     assert.deepEqual({...audit.inventoryRelinkPlan},{inventoryId:"inventory_msnpt6ic",fromTaskId:"pump_rebuild_msnpt6gs",toTaskId:"pump_rebuild_msnpt6hi"});
     const beforeTasks=structuredClone(h.window.tasksInterval); const beforeInventory=structuredClone(h.window.inventory); const beforeDeleted=structuredClone(h.window.deletedItems);
     const beforeHistory=structuredClone(h.canonical.manualHistory); const beforeV2=structuredClone([h.window.maintenanceTasksV2,h.window.maintenanceCalendarInstancesV2,h.window.maintenanceOccurrencesV2]);
@@ -58,7 +60,16 @@ function harness(overrides={}){
   { const h=harness(); h.window.inventory.push({ id:"another", linkedTaskId:h.duplicate.id }); h.window.__lastLoadedCloudState=h.state(); const audit=h.window.auditPumpRebuildTaskDuplication(); assert.equal(audit.repairSafe,false); assert.match(audit.refusalReasons.join(" "),/additional live references/); }
   { const h=harness(); h.canonical.inventoryId="different"; h.window.__lastLoadedCloudState=h.state(); assert.equal(h.window.auditPumpRebuildTaskDuplication().repairSafe,false,"different inventory ID blocks repair"); }
   { const h=harness(); h.window.inventory.push(structuredClone(h.sharedInventory)); h.window.__lastLoadedCloudState=h.state(); assert.equal(h.window.auditPumpRebuildTaskDuplication().repairSafe,false,"multiple inventory records block repair"); }
-  { const h=harness(); h.window.inventory[1].qty=1; h.window.__lastLoadedCloudState=h.state(); assert.match(h.window.auditPumpRebuildTaskDuplication().refusalReasons.join(" "),/authoritative configuration/); }
+  { const h=harness(); h.window.inventory[1].qty=1; h.window.__lastLoadedCloudState=h.state(); const audit=h.window.auditPumpRebuildTaskDuplication(); assert.match(audit.refusalReasons.join(" "),/authoritative configuration/); assert.deepEqual(Array.from(audit.inventoryConfigurationMismatchPaths),["inventory.qty"]); }
+  {
+    const criticalFields={id:"wrong",name:"Wrong",linkedTaskId:"wrong",qty:1,qtyNew:1,qtyOld:1,price:1,pn:"x",folderId:"x",unit:"ea",link:"x",note:"x"};
+    for (const [field,value] of Object.entries(criticalFields)){ const h=harness(); h.window.inventory[1][field]=value; h.window.__lastLoadedCloudState=h.state(); assert.ok(h.window.auditPumpRebuildTaskDuplication().inventoryConfigurationMismatchPaths.includes(`inventory.${field}`),`${field} is diagnosed`); }
+  }
+  { const h=harness(); h.window.inventory[1].extraLegitimateField="cloud-value"; h.window.__lastLoadedCloudState=h.state(); assert.equal(h.window.auditPumpRebuildTaskDuplication().repairSafe,true,"cloud-matched extra fields are retained and accepted"); }
+  { const h=harness(); h.window.__lastLoadedCloudState.inventory[1]=Object.fromEntries(Object.entries(h.window.__lastLoadedCloudState.inventory[1]).reverse()); const audit=h.window.auditPumpRebuildTaskDuplication(); assert.equal(audit.inventoryBaselineMatched,true,"object insertion order is not a data mismatch"); assert.equal(audit.repairSafe,true); }
+  { const h=harness(); h.window.inventory[1].note="changed"; const audit=h.window.auditPumpRebuildTaskDuplication(); assert.equal(audit.inventoryBaselineMatched,false); assert.ok(audit.baselineMismatchPaths.includes("inventory[1].note")); }
+  { const h=harness(); h.window.inventory[1].nonTarget="changed"; const audit=h.window.auditPumpRebuildTaskDuplication(); assert.equal(audit.authoritativeBaselineMatched,false); assert.ok(audit.baselineMismatchPaths.includes("inventory[1].nonTarget")); }
+  { const h=harness(); h.window.tasksInterval[0].cat="changed"; const audit=h.window.auditPumpRebuildTaskDuplication(); assert.equal(audit.tasksIntervalBaselineMatched,false); assert.ok(audit.baselineMismatchPaths.includes("tasksInterval[0].cat")); }
   { const h=harness(); h.window.inventory.push({id:"changed"}); assert.match((await h.window.repairExactPumpRebuildTaskDuplication()).refusedReason,/preconditions/); }
   {
     const h=harness(); const beforeTasks=h.state().tasksInterval; const beforeInventory=h.state().inventory;
