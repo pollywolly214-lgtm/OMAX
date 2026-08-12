@@ -11,11 +11,13 @@ function harness(overrides={}){
   const duplicate = task("pump_rebuild_msnpt6gs");
   const sharedInventory={ folderId:null, id:"inventory_msnpt6ic", link:"", linkedTaskId:duplicate.id, name:"Pump Rebuild", note:"", pn:"", price:null, qty:0, qtyNew:0, qtyOld:0, unit:"pcs" };
   const window = Object.assign({ tasksInterval:[canonical, duplicate], tasksAsReq:[], inventory:[{id:"first",name:"Other"},sharedInventory,{id:"last",name:"Other 2"}], deletedItems:[{ payload:{ name:"Pump Rebuild" }, linkedTaskId:duplicate.id }], maintenanceTasksV2:[], maintenanceCalendarInstancesV2:[], maintenanceOccurrencesV2:[] }, overrides);
-  const state = ()=>structuredClone({ tasksInterval:window.tasksInterval, tasksAsReq:window.tasksAsReq, inventory:window.inventory, deletedItems:window.deletedItems, maintenanceTasksV2:window.maintenanceTasksV2, maintenanceCalendarInstancesV2:window.maintenanceCalendarInstancesV2, maintenanceOccurrencesV2:window.maintenanceOccurrencesV2 });
+  let snapshots=0; let backups=0;
+  const state = ()=>structuredClone({ tasksInterval:window.tasksInterval, tasksAsReq:window.tasksAsReq, inventory:window.inventory, deletedItems:window.deletedItems, maintenanceTasksV2:window.maintenanceTasksV2, maintenanceCalendarInstancesV2:window.maintenanceCalendarInstancesV2, maintenanceOccurrencesV2:window.maintenanceOccurrencesV2,
+    saveMeta:{lastSavedAt:`generated-${++snapshots}`,lastSaveStatus:"pending"}, syncMeta:{rev:snapshots,updatedAtISO:`generated-${snapshots}`}, diagnostic:{auditTimestamp:snapshots} });
   window.__lastLoadedCloudState = state();
-  const context = { window, structuredClone, JSON, Date, setTimeout, snapshotState:state, exportJsonDownload:()=>true, saveCloudNow:async()=>({ saved:true, stateWriteAttempted:true, stateWriteCompleted:true }) };
+  const context = { window, structuredClone, JSON, Date, setTimeout, snapshotState:state, exportJsonDownload:()=>{ backups++; return true; }, saveCloudNow:async()=>({ saved:true, stateWriteAttempted:true, stateWriteCompleted:true }) };
   vm.createContext(context); vm.runInContext(source, context);
-  return { window, context, canonical, duplicate, sharedInventory, state };
+  return { window, context, canonical, duplicate, sharedInventory, state, backupCount:()=>backups };
 }
 (async()=>{
   {
@@ -38,6 +40,9 @@ function harness(overrides={}){
     const beforeTasks=structuredClone(h.window.tasksInterval); const beforeInventory=structuredClone(h.window.inventory); const beforeDeleted=structuredClone(h.window.deletedItems);
     const beforeHistory=structuredClone(h.canonical.manualHistory); const beforeV2=structuredClone([h.window.maintenanceTasksV2,h.window.maintenanceCalendarInstancesV2,h.window.maintenanceOccurrencesV2]);
     const result=await h.window.repairExactPumpRebuildTaskDuplication();
+    assert.equal(h.backupCount(),1,"full-state backup precedes repair");
+    assert.equal(result.backupCreated,true); assert.equal(result.authorizationCreated,true); assert.equal(result.authorizationValidated,true); assert.equal(result.authorizationConsumed,true);
+    assert.equal(result.authorizationFailureStage,""); assert.deepEqual(Array.from(result.authorizationMismatchPaths),[]);
     assert.equal(result.repaired,true); assert.deepEqual(h.window.tasksInterval.map(x=>x.id),["pump_rebuild_msnpt6hi"]);
     assert.deepEqual(h.window.tasksInterval[0],beforeTasks[0],"canonical task remains byte-equivalent");
     assert.deepEqual(h.canonical.manualHistory,beforeHistory,"both imported events stay byte-for-byte");
@@ -49,6 +54,29 @@ function harness(overrides={}){
     assert.equal(JSON.stringify(h.window.inventory[1]),JSON.stringify({...beforeInventory[1],linkedTaskId:"pump_rebuild_msnpt6hi"}),"only inventory link changes");
     assert.deepEqual([h.window.maintenanceTasksV2,h.window.maintenanceCalendarInstancesV2,h.window.maintenanceOccurrencesV2],beforeV2);
     assert.deepEqual(h.window.deletedItems,beforeDeleted,"trash lifecycle entry is not rewritten");
+  }
+  {
+    const h=harness(); const audit=h.window.auditPumpRebuildTaskDuplication(); const token=h.window.createPumpRebuildRepairAuthorization(h.state(),audit.inventoryRelinkPlan);
+    const first=h.window.validatePumpRebuildRepairAuthorization(token,h.state(),audit.inventoryRelinkPlan);
+    const second=h.window.validatePumpRebuildRepairAuthorization(token,h.state(),audit.inventoryRelinkPlan);
+    assert.equal(first.valid,true,"generated snapshot timestamps and diagnostics are excluded"); assert.equal(second.valid,true,"validation does not consume authorization");
+    assert.equal(h.window.consumePumpRebuildRepairAuthorization(token,h.state(),audit.inventoryRelinkPlan).valid,true);
+    const reused=h.window.consumePumpRebuildRepairAuthorization(token,h.state(),audit.inventoryRelinkPlan);
+    assert.equal(reused.valid,false); assert.equal(reused.reason,"used","mutation token is single use");
+  }
+  {
+    const mutations=[
+      h=>{ h.canonical.cat="changed"; },
+      h=>{ h.window.inventory[1].note="changed"; },
+      h=>{ h.canonical.manualHistory[0].payload.exact="changed"; },
+      h=>{ h.window.deletedItems[0].payload.name="changed"; }
+    ];
+    for (const mutate of mutations){ const h=harness(); const audit=h.window.auditPumpRebuildTaskDuplication(); const token=h.window.createPumpRebuildRepairAuthorization(h.state(),audit.inventoryRelinkPlan); mutate(h); const validation=h.window.validatePumpRebuildRepairAuthorization(token,h.state(),audit.inventoryRelinkPlan); assert.equal(validation.valid,false); assert.ok(validation.mismatchPaths.length,"business-data changes report exact mismatch paths"); }
+  }
+  {
+    const h=harness(); const audit=h.window.auditPumpRebuildTaskDuplication(); const token=h.window.createPumpRebuildRepairAuthorization(h.state(),audit.inventoryRelinkPlan,0);
+    await new Promise(resolve=>setTimeout(resolve,2));
+    const expired=h.window.validatePumpRebuildRepairAuthorization(token,h.state(),audit.inventoryRelinkPlan); assert.equal(expired.valid,false); assert.equal(expired.reason,"expired");
   }
   {
     const h=harness(); const first={id:"first-task",name:"Other",interval:100}; const last={id:"last-task",name:"Other 2",interval:200};
@@ -86,7 +114,8 @@ function harness(overrides={}){
   {
     const h=harness(); h.context.exportJsonDownload=()=>{ h.window.inventory[1].qty=9; return true; };
     const result=await h.window.repairExactPumpRebuildTaskDuplication();
-    assert.match(result.refusedReason,/authorization became stale/); assert.equal(result.saveAttempted,false,"authorization cannot be reused after state changes");
+    assert.match(result.refusedReason,/authorization became stale/); assert.equal(result.saveAttempted,false,"pre-mutation refusal never saves");
+    assert.equal(result.authorizationConsumed,false,"failed validation does not consume"); assert.ok(result.authorizationFailureStage); assert.equal(h.window.tasksInterval.length,2,"failed validation does not mutate tasks"); assert.equal(h.window.inventory[1].linkedTaskId,h.duplicate.id,"failed validation does not mutate inventory");
   }
 
   const calendar=fs.readFileSync("js/calendar.js","utf8");
