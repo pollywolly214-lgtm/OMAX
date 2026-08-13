@@ -4206,6 +4206,75 @@ function getCloudCutFileStorageDiagnostics(){
 
 window.auditCuttingFileContentExposure = auditCuttingFileContentExposure;
 window.getCloudCutFileStorageDiagnostics = getCloudCutFileStorageDiagnostics;
+window.getWorkspaceAuthorizationDiagnostics = function(){
+  const api = window.Cfr04WorkspaceMetadata;
+  const uid = FB.user?.uid || "";
+  let membershipDocRef = null;
+  if (uid && FB.db && api){
+    try { membershipDocRef = FB.db.doc(api.membershipPath(WORKSPACE_ID, uid)); }
+    catch (_error) { membershipDocRef = null; }
+  }
+  return api.getWorkspaceAuthorizationDiagnostics({ uid, workspaceId:WORKSPACE_ID, membershipDocRef });
+};
+const cfr05SessionGates = window.Cfr05CloudCuttingFiles?.createSessionGates();
+window.configureCfr05OperatorSession = function(confirmation, confirmations = {}){
+  return cfr05SessionGates.configureOperatorSession({ ...confirmations, confirmation, hostname:window.location.hostname });
+};
+window.clearCfr05OperatorSession = function(){ return cfr05SessionGates.clear(); };
+window.cfr05CloudCuttingFiles = window.Cfr05CloudCuttingFiles?.createApi(window, {
+  foundation:window.Cfr04WorkspaceMetadata,
+  gates:cfr05SessionGates
+});
+window.uploadCfr05CuttingFile = async function(jobId, file){
+  const uid=FB.user?.uid||"", workspaceId=WORKSPACE_ID, api=window.Cfr04WorkspaceMetadata;
+  let membership={valid:false,active:false,role:null,path:null};
+  if(uid&&FB.db&&api){
+    const path=api.membershipPath(workspaceId,uid),snap=await FB.db.doc(path).get(),data=snap.exists?snap.data():null;
+    const validation=api.validateWorkspaceMembershipRecord(data,{uid,workspaceId});
+    membership={valid:validation.valid,active:data?.active===true,role:data?.role||null,path};
+  }
+  return window.cfr05CloudCuttingFiles.upload({uid,workspaceId,jobId,file,membership,storage:FB.storage,firestore:FB.db,
+    jobExists:id=>(Array.isArray(window.cuttingJobs)&&window.cuttingJobs.some(job=>String(job?.id)===String(id)))||(Array.isArray(window.completedCuttingJobs)&&window.completedCuttingJobs.some(job=>String(job?.id)===String(id)))});
+};
+window.getCfr05Membership = async function(){
+  const uid=FB.user?.uid||"",workspaceId=WORKSPACE_ID,api=window.Cfr04WorkspaceMetadata;
+  if(!uid||!FB.db||!api)return{uid,workspaceId,membership:{valid:false,active:false,role:null,path:null}};
+  const path=api.membershipPath(workspaceId,uid),snap=await FB.db.doc(path).get(),data=snap.exists?snap.data():null,validation=api.validateWorkspaceMembershipRecord(data,{uid,workspaceId});
+  return{uid,workspaceId,membership:{valid:validation.valid,active:data?.active===true,role:data?.role||null,path}};
+};
+window.listCfr05CloudFiles = async function(jobId){const auth=await window.getCfr05Membership();return window.cfr05CloudCuttingFiles.listJobFiles({...auth,jobId,firestore:FB.db});};
+window.openCfr05CloudFile = async function(jobId,fileId,callbacks = {}){
+  const auth=await window.getCfr05Membership(),path=window.Cfr04WorkspaceMetadata.filePath(auth.workspaceId,jobId,fileId);
+  return window.cfr05CloudCuttingFiles.download({...auth,fileDocRef:FB.db.doc(path),expected:{workspaceId:auth.workspaceId,jobId,fileId},storage:FB.storage,fetch:window.fetch.bind(window),AbortController:window.AbortController,setTimeout:window.setTimeout.bind(window),clearTimeout:window.clearTimeout.bind(window),URL:window.URL,openObjectUrl:callbacks.openObjectUrl,displayPreview:callbacks.displayPreview,
+    previewDispatch:(extension,buffer)=>{if(extension==="dxf"&&window.dxfPreview){const text=window.dxfPreview.arrayBufferToText(buffer);return window.dxfPreview.renderCadToSvgDataUrl(text)||null;}return null;}});
+};
+
+function getCuttingJobImporterState(){
+  const state={};
+  Object.defineProperties(state,{
+    cuttingJobs:{get:()=>window.cuttingJobs,set:value=>{window.cuttingJobs=value;cuttingJobs=value;}},
+    completedCuttingJobs:{get:()=>window.completedCuttingJobs,set:value=>{window.completedCuttingJobs=value;completedCuttingJobs=value;}}
+  });
+  ["purchases","inventory","inventoryFolders","inventoryMaterials","receiptTrackerWeeks","orderRequests","dailyCutHours","totalHistory","garnetCleanings","pumpEff","maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","dashboardLayout","costLayout","jobLayout","deletedItems"].forEach(key=>Object.defineProperty(state,key,{get:()=>window[key]}));
+  return state;
+}
+window.cuttingJobImporter = window.CuttingJobImporter?.createApi({
+  xlsx:window.CjiXlsxParser,
+  state:getCuttingJobImporterState,
+  categories:()=>Array.isArray(window.jobFolders)?window.jobFolders:[],
+  materials:()=>{try{return JSON.parse(localStorage.getItem("job_material_pricing_v1")||"null")?.materials||[];}catch(_){return[];}},
+  authenticatedBaseline:()=>Boolean(FB.ready&&FB.user&&FB.docRef&&window.__lastLoadedCloudState&&!window.__localBackupOnlyMode),
+  backup:async()=>{const state=snapshotState({skipLocalFileCacheSync:true});if(!exportJsonDownload(`omax-cutting-job-import-backup-${Date.now()}.json`,state))throw new Error("Full-state backup download did not start.");return true;},
+  saveCloudNow:()=>saveCloudNow()
+});
+(function installCuttingJobImporterAdmin(){
+  const file=document.getElementById("cuttingJobImportFile"),previewBtn=document.getElementById("cuttingJobImportPreview"),confirm=document.getElementById("cuttingJobImportConfirm"),run=document.getElementById("cuttingJobImportRun"),status=document.getElementById("cuttingJobImportStatus"),rows=document.getElementById("cuttingJobImportRows");
+  if(!file||!previewBtn||!confirm||!run||!status||!rows||!window.cuttingJobImporter)return;let parsed=null;const safe=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
+  const lock=value=>{file.disabled=value;previewBtn.disabled=value;confirm.disabled=value;run.disabled=value||confirm.value!==window.CuttingJobImporter.CONFIRMATION;};
+  confirm.addEventListener("input",()=>{run.disabled=confirm.value!==window.CuttingJobImporter.CONFIRMATION||!parsed||window.cuttingJobImporter.isBusy();});
+  previewBtn.addEventListener("click",async()=>{if(!file.files?.[0]){status.textContent="Choose an import file.";return;}lock(true);try{parsed=await window.cuttingJobImporter.parseFile(file.files[0]);const classified=window.cuttingJobImporter.preview(parsed);rows.innerHTML=`<table><thead><tr><th>Row</th><th>Event</th><th>Status</th><th>Reasons</th></tr></thead><tbody>${classified.map(x=>`<tr><td>${x.index+1}</td><td>${safe(x.row.import_event_id)}</td><td>${safe(x.status)}</td><td>${safe(x.reasons.join(" "))}</td></tr>`).join("")}</tbody></table>`;status.textContent=`Parsed ${classified.length} rows. ${classified.filter(x=>x.status==="ready").length} ready.`;}catch(error){parsed=null;status.textContent=String(error?.message||error);}finally{lock(false);}});
+  run.addEventListener("click",async()=>{if(!parsed)return;lock(true);status.textContent="Revalidating and saving…";try{const result=await window.cuttingJobImporter.submit(parsed,confirm.value);status.textContent=result.saveCompleted?`Imported ${result.importedEventIds.length} reviewed jobs.`:result.saveIndeterminate?"Save outcome indeterminate. Refresh and read-verify before any retry.":`Import not completed: ${result.saveError}`;rows.dataset.lastImportResult=JSON.stringify({...result,saveError:String(result.saveError||"")});}finally{lock(false);}});
+})();
 
 /* ======================== HISTORY ========================= */
 const HISTORY_LIMIT = 50;

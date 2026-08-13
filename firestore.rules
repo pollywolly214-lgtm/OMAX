@@ -1,0 +1,71 @@
+rules_version = '2';
+
+// CFR-05B reviewed proposal. DO NOT DEPLOY from this implementation task.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function validWorkspaceId(id) { return id.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'); }
+    function validId(id) { return id.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$'); }
+    function membershipPath(workspaceId) { return /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid); }
+    function validMemberData(data, workspaceId, uid) {
+      return data.keys().hasOnly(['schemaVersion','uid','workspaceId','role','active','createdAtISO','updatedAtISO','email'])
+        && data.keys().hasAll(['schemaVersion','uid','workspaceId','role','active','createdAtISO','updatedAtISO'])
+        && data.schemaVersion == 1 && data.uid == uid && data.workspaceId == workspaceId
+        && data.active == true && data.role in ['owner','admin','operator','viewer']
+        && data.createdAtISO is string && data.createdAtISO.size() <= 30
+        && data.updatedAtISO is string && data.updatedAtISO.size() <= 30
+        && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 254));
+    }
+    function activeMember(workspaceId) {
+      return signedIn() && validWorkspaceId(workspaceId) && exists(membershipPath(workspaceId))
+        && validMemberData(get(membershipPath(workspaceId)).data, workspaceId, request.auth.uid);
+    }
+    function writer(workspaceId) { return activeMember(workspaceId) && get(membershipPath(workspaceId)).data.role in ['owner','admin','operator']; }
+    function validJob(data, workspaceId, jobId) {
+      return data.keys().hasOnly(['schemaVersion','workspaceId','jobId','authoritativeStatePath','createdBy','createdAtISO'])
+        && data.keys().hasAll(['schemaVersion','workspaceId','jobId','authoritativeStatePath','createdBy','createdAtISO'])
+        && data.schemaVersion == 1 && data.workspaceId == workspaceId && data.jobId == jobId
+        && data.authoritativeStatePath == 'workspaces/' + workspaceId + '/app/state'
+        && validId(data.createdBy) && data.createdAtISO is string && data.createdAtISO.size() <= 30;
+    }
+    function validFile(data, workspaceId, jobId, fileId) {
+      return data.keys().hasOnly(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','storagePath','sha256','status','createdBy','createdAtISO'])
+        && data.keys().hasAll(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','storagePath','sha256','status','createdBy','createdAtISO'])
+        && data.schemaVersion == 1 && data.workspaceId == workspaceId && data.jobId == jobId && data.fileId == fileId
+        && validId(jobId) && validId(fileId) && data.originalName is string && data.originalName.size() > 0 && data.originalName.size() <= 255
+        && data.safeFileName is string && data.safeFileName.size() > 0 && data.safeFileName.size() <= 120
+        && data.extension in ['dxf','ord','omx']
+        && ((data.extension == 'dxf' && data.contentType == 'application/dxf') || (data.extension in ['ord','omx'] && data.contentType == 'application/octet-stream'))
+        && data.sizeBytes is int && data.sizeBytes > 0 && data.sizeBytes <= 52428800
+        && data.storagePath == 'workspaces/' + workspaceId + '/cutting-jobs/' + jobId + '/files/' + fileId + '/' + data.safeFileName
+        && data.sha256 is string && data.sha256.matches('^[a-f0-9]{64}$') && data.status == 'ready'
+        && validId(data.createdBy) && data.createdAtISO is string && data.createdAtISO.size() <= 30;
+    }
+
+    // Preserve the deployed authoritative app-state behavior exactly.
+    match /workspaces/{workspaceId}/app/{document=**} {
+      allow read, write: if signedIn();
+    }
+    match /workspaces/{workspaceId}/members/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid && validWorkspaceId(workspaceId);
+      allow list, create, update, delete: if false;
+    }
+    match /workspaces/{workspaceId}/cuttingJobs/{jobId} {
+      allow get: if activeMember(workspaceId) && validJob(resource.data, workspaceId, jobId);
+      allow list: if false;
+      allow create: if writer(workspaceId) && validJob(request.resource.data, workspaceId, jobId)
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if false;
+      match /files/{fileId} {
+        allow get, list: if activeMember(workspaceId) && validFile(resource.data, workspaceId, jobId, fileId);
+        allow create: if writer(workspaceId) && validFile(request.resource.data, workspaceId, jobId, fileId)
+          && request.resource.data.createdBy == request.auth.uid
+          && existsAfter(/databases/$(database)/documents/workspaces/$(workspaceId)/cuttingJobs/$(jobId))
+          && validJob(getAfter(/databases/$(database)/documents/workspaces/$(workspaceId)/cuttingJobs/$(jobId)).data, workspaceId, jobId);
+        allow update, delete: if false;
+      }
+      match /logs/{logId} { allow read, write: if false; }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

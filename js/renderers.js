@@ -22862,6 +22862,21 @@ function renderJobs(){
 
   const handleCuttingJobFileActionClick = async (e)=>{
     const act = (matched)=>{ if (!matched) return false; e.preventDefault(); e.stopPropagation(); if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation(); return true; };
+    const cloudFiles = e.target.closest("[data-cloud-files]");
+    if(cloudFiles){
+      e.preventDefault(); e.stopPropagation(); const jobId=String(cloudFiles.getAttribute("data-cloud-files")||""); cloudFiles.disabled=true;
+      try{const result=await window.listCfr05CloudFiles(jobId),dialog=document.createElement("dialog");dialog.setAttribute("data-cfr05-cloud-dialog","");const rows=result.files.map(file=>`<li><strong>${escapeHtml(file.originalName)}</strong> · ${escapeHtml(file.extension.toUpperCase())}/${escapeHtml(file.contentType)} · ${(Number(file.sizeBytes)/1024).toFixed(1)} KB · verified <button type="button" data-cfr05-open="${escapeHtml(file.fileId)}">Preview/Open</button></li>`).join("");dialog.innerHTML=`<h3>Cloud files</h3><p>${result.cloudFileCount} verified; ${result.rejectedMetadataDocumentCount} rejected.</p><ul>${rows||"<li>No verified cloud files.</li>"}</ul><button type="button" data-cfr05-close>Close</button>`;document.body.appendChild(dialog);dialog.addEventListener("click",async event=>{if(event.target.closest("[data-cfr05-close]")){dialog.close();dialog.remove();return;}const download=event.target.closest("[data-cfr05-download]");if(download){download.disabled=true;try{await window.openCfr05CloudFile(jobId,download.getAttribute("data-cfr05-download"),{openObjectUrl:async(url,metadata)=>{const anchor=document.createElement("a");anchor.href=url;anchor.download=metadata.safeFileName;document.body.appendChild(anchor);anchor.click();anchor.remove();}});}catch(err){toast(err?.message||"Cloud file could not be downloaded.");}finally{download.disabled=false;}return;}const open=event.target.closest("[data-cfr05-open]");if(open){open.disabled=true;try{const fileId=open.getAttribute("data-cfr05-open"),outcome=await window.openCfr05CloudFile(jobId,fileId,{displayPreview:async preview=>{if(!/^data:image\/svg\+xml/i.test(preview))return false;let image=dialog.querySelector("[data-cfr05-preview]");if(!image){image=document.createElement("img");image.setAttribute("data-cfr05-preview","");image.alt="Verified DXF preview";image.style.maxWidth="100%";dialog.appendChild(image);}image.src=preview;return true;}});if(!outcome.previewAvailable){toast(`${outcome.previewRoute.toUpperCase()} browser preview unavailable; use explicit Download/Open.`);open.textContent="Download/Open";open.removeAttribute("data-cfr05-open");open.setAttribute("data-cfr05-download",fileId);}}catch(err){toast(err?.message||"Cloud file could not be opened.");}finally{open.disabled=false;}}});dialog.showModal();}
+      catch(err){toast(err?.message||"Cloud files are blocked or unavailable.");}finally{cloudFiles.disabled=false;}return true;
+    }
+    const cloudUpload = e.target.closest("[data-cloud-file-upload]");
+    if (cloudUpload){
+      e.preventDefault(); e.stopPropagation();
+      if (cloudUpload.disabled) return true;
+      const jobId=String(cloudUpload.getAttribute("data-cloud-file-upload")||"");
+      const input=document.createElement("input"); input.type="file"; input.accept=".dxf,.ord,.omx";
+      input.onchange=async()=>{const file=input.files?.[0];if(!file)return;cloudUpload.disabled=true;cloudUpload.textContent="Validating and uploading…";try{const outcome=await window.uploadCfr05CuttingFile(jobId,file);if(outcome.stage==="completed"){toast(`Cloud file verified: ${file.name}`);await window.listCfr05CloudFiles(jobId);}else if(outcome.indeterminate)toast(`Cloud upload indeterminate; manual review required${outcome.possibleOrphanPath?`: ${outcome.possibleOrphanPath}`:""}.`);else toast(`Cloud upload blocked/failed at ${outcome.stage}: ${outcome.error?.message||"Unknown error"}`);}catch(err){toast(err?.message||"Secure cloud upload failed.");}finally{cloudUpload.disabled=false;cloudUpload.textContent="Upload secure cloud file";}};
+      input.click(); return true;
+    }
     const fileMenuAdd = e.target.closest("[data-job-file-add]");
     if (fileMenuAdd){
       await handleReferenceFolderAttachButtonClick(e, fileMenuAdd);
@@ -22885,7 +22900,7 @@ function renderJobs(){
   const handleRootFileActionClick = (e)=>{
     const target = e.target;
     if (!(target instanceof Element)) return;
-    const fileAction = target.closest("[data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
+    const fileAction = target.closest("[data-cloud-files], [data-cloud-file-upload], [data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
     if (!fileAction || !content.contains(fileAction)) return;
     handleCuttingJobFileActionClick(e).catch(err => {
       console.error("Cutting job file action failed", err);
