@@ -4243,10 +4243,10 @@ window.getCfr05Membership = async function(){
   return{uid,workspaceId,membership:{valid:validation.valid,active:data?.active===true,role:data?.role||null,path}};
 };
 window.listCfr05CloudFiles = async function(jobId){const auth=await window.getCfr05Membership();return window.cfr05CloudCuttingFiles.listJobFiles({...auth,jobId,firestore:FB.db});};
-window.openCfr05CloudFile = async function(jobId,fileId,openObjectUrl){
+window.openCfr05CloudFile = async function(jobId,fileId,callbacks = {}){
   const auth=await window.getCfr05Membership(),path=window.Cfr04WorkspaceMetadata.filePath(auth.workspaceId,jobId,fileId);
-  return window.cfr05CloudCuttingFiles.download({...auth,fileDocRef:FB.db.doc(path),expected:{workspaceId:auth.workspaceId,jobId,fileId},storage:FB.storage,fetch:window.fetch.bind(window),AbortController:window.AbortController,setTimeout:window.setTimeout.bind(window),clearTimeout:window.clearTimeout.bind(window),URL:window.URL,openObjectUrl,
-    previewDispatch:(extension,buffer)=>{if(["dxf","ord","omx"].includes(extension)&&window.dxfPreview){const text=window.dxfPreview.arrayBufferToText(buffer);return window.dxfPreview.renderCadToSvgDataUrl(text)||null;}return null;}});
+  return window.cfr05CloudCuttingFiles.download({...auth,fileDocRef:FB.db.doc(path),expected:{workspaceId:auth.workspaceId,jobId,fileId},storage:FB.storage,fetch:window.fetch.bind(window),AbortController:window.AbortController,setTimeout:window.setTimeout.bind(window),clearTimeout:window.clearTimeout.bind(window),URL:window.URL,openObjectUrl:callbacks.openObjectUrl,displayPreview:callbacks.displayPreview,
+    previewDispatch:(extension,buffer)=>{if(extension==="dxf"&&window.dxfPreview){const text=window.dxfPreview.arrayBufferToText(buffer);return window.dxfPreview.renderCadToSvgDataUrl(text)||null;}return null;}});
 };
 
 /* ======================== HISTORY ========================= */

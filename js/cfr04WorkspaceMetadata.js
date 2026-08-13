@@ -110,16 +110,17 @@
     if(!validateId(record.createdByUid,"uid").valid)reasons.push("created_by_uid_invalid"); if(!validISO(record.createdAtISO))reasons.push("created_at_invalid"); return result(reasons);
   }
   function validateFileMetadata(record){
-    const keys=["schemaVersion","fileId","jobId","workspaceId","originalName","safeFileName","extension","mimeType","sizeBytes","storagePath","checksum","uploadState","createdByUid","createdAtISO","updatedAtISO"];
+    const keys=["schemaVersion","workspaceId","jobId","fileId","originalName","safeFileName","extension","contentType","sizeBytes","storagePath","sha256","status","createdBy","createdAtISO"];
     const reasons=commonMetadata(record,keys); if(!plain(record))return result(reasons);
+    if(Object.keys(record).length!==keys.length)reasons.push("metadata_schema_invalid");
     if(record.schemaVersion!==1)reasons.push("schema_version_invalid"); if(!validateFileId(record.fileId).valid)reasons.push("file_id_invalid"); if(!validateJobId(record.jobId).valid)reasons.push("job_id_invalid"); if(!validateWorkspaceId(record.workspaceId).valid)reasons.push("workspace_id_invalid");
-    if(!bounded(record.originalName,255))reasons.push("original_name_invalid"); const safe=validateSafeFileName(record.safeFileName); reasons.push(...safe.reasons);
-    const ext=typeof record.extension==="string"?record.extension.toLowerCase():""; const policy=FILE_TYPES[ext]; if(!policy)reasons.push("file_extension_not_allowed");
-    if(record.safeFileName && record.safeFileName.split(".").pop().toLowerCase()!==ext)reasons.push("extension_mismatch");
-    if(!policy || !policy.mime.includes(record.mimeType))reasons.push("mime_type_not_allowed"); if(!Number.isSafeInteger(record.sizeBytes)||record.sizeBytes<1||!policy||record.sizeBytes>policy.maxBytes)reasons.push("file_size_invalid");
+    if(!bounded(record.originalName,255))reasons.push("original_name_invalid"); reasons.push(...validateSafeFileName(record.safeFileName).reasons);
+    const ext=typeof record.extension==="string"?record.extension.toLowerCase():"",canonical=ext==="dxf"?"application/dxf":(["ord","omx"].includes(ext)?"application/octet-stream":"");
+    if(!canonical)reasons.push("file_extension_not_allowed"); if(record.safeFileName&&record.safeFileName.split(".").pop().toLowerCase()!==ext)reasons.push("extension_mismatch");
+    if(record.contentType!==canonical)reasons.push("content_type_not_canonical"); if(!Number.isSafeInteger(record.sizeBytes)||record.sizeBytes<1||record.sizeBytes>50*1024*1024)reasons.push("file_size_invalid");
     let expected=""; try{expected=storagePath(record.workspaceId,record.jobId,record.fileId,record.safeFileName);}catch(_error){} if(record.storagePath!==expected)reasons.push("storage_path_mismatch");
-    if(typeof record.checksum!=="string"||!CHECKSUM.test(record.checksum))reasons.push("checksum_invalid"); if(!UPLOAD_STATES.includes(record.uploadState))reasons.push("upload_state_invalid");
-    if(!validateId(record.createdByUid,"uid").valid)reasons.push("created_by_uid_invalid"); if(!validISO(record.createdAtISO))reasons.push("created_at_invalid"); if(!validISO(record.updatedAtISO))reasons.push("updated_at_invalid"); return result(reasons);
+    if(typeof record.sha256!=="string"||!/^[a-f0-9]{64}$/.test(record.sha256))reasons.push("sha256_invalid"); if(record.status!=="ready")reasons.push("status_invalid");
+    if(!validateId(record.createdBy,"uid").valid)reasons.push("created_by_invalid"); if(!validISO(record.createdAtISO))reasons.push("created_at_invalid"); return result(reasons);
   }
 
   async function getWorkspaceAuthorizationDiagnostics(options = {}){

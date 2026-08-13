@@ -9,6 +9,7 @@ service firebase.storage {
     }
     function activeRole(workspaceId, roles) {
       return request.auth != null
+        && firestore.exists(/databases/(default)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid))
         && member(workspaceId).uid == request.auth.uid
         && member(workspaceId).workspaceId == workspaceId
         && member(workspaceId).active == true
@@ -26,8 +27,8 @@ service firebase.storage {
     function validCreate(workspaceId, jobId, fileId, safeFileName) {
       return bucket == 'omax-maintenance.firebasestorage.app'
         && request.resource.size > 0 && request.resource.size <= 52428800
-        && request.resource.contentType in ['application/dxf', 'application/x-dxf', 'application/octet-stream', 'text/plain']
-        && request.resource.metadata.keys().hasOnly(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','sha256','createdBy'])
+        && request.resource.contentType in ['application/dxf', 'application/octet-stream']
+        && request.resource.metadata.keys().hasOnly(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','storagePath','sha256','status','createdBy','createdAtISO'])
         && request.resource.metadata.schemaVersion == '1'
         && request.resource.metadata.workspaceId == workspaceId
         && request.resource.metadata.jobId == jobId
@@ -37,23 +38,32 @@ service firebase.storage {
         && request.resource.metadata.safeFileName == safeFileName
         && request.resource.metadata.extension in ['dxf','ord','omx']
         && safeFileName.matches('^.*\\.' + request.resource.metadata.extension + '$')
-        && ((request.resource.metadata.extension == 'dxf' && request.resource.contentType in ['application/dxf','application/x-dxf','text/plain'])
-          || (request.resource.metadata.extension in ['ord','omx'] && request.resource.contentType in ['application/octet-stream','text/plain']))
+        && ((request.resource.metadata.extension == 'dxf' && request.resource.contentType == 'application/dxf')
+          || (request.resource.metadata.extension in ['ord','omx'] && request.resource.contentType == 'application/octet-stream'))
         && request.resource.metadata.contentType == request.resource.contentType
         && request.resource.metadata.sizeBytes == string(request.resource.size)
-        && request.resource.metadata.sha256.matches('^[a-f0-9]{64}$')
+        && request.resource.metadata.storagePath == 'workspaces/' + workspaceId + '/cutting-jobs/' + jobId + '/files/' + fileId + '/' + safeFileName
+        && request.resource.metadata.sha256.matches('^[a-f0-9]{64}$') && request.resource.metadata.status == 'ready'
+        && request.resource.metadata.createdAtISO.size() <= 30
         && request.resource.metadata.createdBy == request.auth.uid;
     }
     function validExisting(workspaceId, jobId, fileId, safeFileName) {
       return bucket == 'omax-maintenance.firebasestorage.app'
         && resource.size > 0 && resource.size <= 52428800
+        && resource.metadata.keys().hasOnly(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','storagePath','sha256','status','createdBy','createdAtISO'])
+        && resource.metadata.schemaVersion == '1'
+        && resource.metadata.originalName.size() > 0 && resource.metadata.originalName.size() <= 255
         && resource.metadata.workspaceId == workspaceId && resource.metadata.jobId == jobId
         && resource.metadata.fileId == fileId && resource.metadata.safeFileName == safeFileName
         && resource.metadata.extension in ['dxf','ord','omx']
+        && ((resource.metadata.extension == 'dxf' && resource.contentType == 'application/dxf')
+          || (resource.metadata.extension in ['ord','omx'] && resource.contentType == 'application/octet-stream'))
         && safeFileName.matches('^.*\\.' + resource.metadata.extension + '$')
         && resource.metadata.contentType == resource.contentType
         && resource.metadata.sizeBytes == string(resource.size)
-        && resource.metadata.sha256.matches('^[a-f0-9]{64}$')
+        && resource.metadata.storagePath == 'workspaces/' + workspaceId + '/cutting-jobs/' + jobId + '/files/' + fileId + '/' + safeFileName
+        && resource.metadata.sha256.matches('^[a-f0-9]{64}$') && resource.metadata.status == 'ready'
+        && resource.metadata.createdAtISO.size() <= 30
         && resource.metadata.createdBy.matches('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
     }
     match /workspaces/{workspaceId}/cutting-jobs/{jobId}/files/{fileId}/{safeFileName} {
