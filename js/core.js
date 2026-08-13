@@ -4206,6 +4206,16 @@ function getCloudCutFileStorageDiagnostics(){
 
 window.auditCuttingFileContentExposure = auditCuttingFileContentExposure;
 window.getCloudCutFileStorageDiagnostics = getCloudCutFileStorageDiagnostics;
+window.getWorkspaceAuthorizationDiagnostics = function(){
+  const api = window.Cfr04WorkspaceMetadata;
+  const uid = FB.user?.uid || "";
+  let membershipDocRef = null;
+  if (uid && FB.db && api){
+    try { membershipDocRef = FB.db.doc(api.membershipPath(WORKSPACE_ID, uid)); }
+    catch (_error) { membershipDocRef = null; }
+  }
+  return api.getWorkspaceAuthorizationDiagnostics({ uid, workspaceId:WORKSPACE_ID, membershipDocRef });
+};
 
 /* ======================== HISTORY ========================= */
 const HISTORY_LIMIT = 50;
