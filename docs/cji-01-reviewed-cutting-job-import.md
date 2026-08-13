@@ -32,9 +32,9 @@ Blank optional values remain blank/null-equivalent and no missing shop values ar
 
 ## Parsing and reviewed workflow
 
-CSV uses a local RFC-style quoted parser and JSON accepts an array or `{rows:[]}`. XLSX uses the repository-local, dependency-free **CJI XLSX Parser 1.0.0**, licensed MIT. It reads OOXML ZIP worksheets in-browser and selects only `Cutting Jobs` or `Blank Import Template`; Pump Readings, Maintenance Notes, Cached Files, Recovery Summary, and every other sheet are ignored. No executable spreadsheet code loads from a CDN.
+CSV uses a local RFC-style quoted parser and JSON accepts an array or `{rows:[]}`. XLSX uses the repository-local, dependency-free **CJI XLSX Parser 1.1.0**, licensed MIT. It reads OOXML ZIP worksheets in-browser and selects only `Cutting Jobs` or `Blank Import Template`; Pump Readings, Maintenance Notes, Cached Files, Recovery Summary, and every other sheet are ignored. No executable spreadsheet code loads from a CDN.
 
-The temporary admin section previews every row and exact reasons. Final submission re-runs validation and requires exactly `IMPORT REVIEWED CUTTING JOBS`. Controls lock during parsing/saving and the API rejects concurrency.
+The temporary admin section previews every row and exact reasons. Final submission re-runs validation and requires the reviewed checkbox plus a final browser confirmation. Controls lock during parsing/saving and the API rejects concurrency.
 
 ## Persistence, rollback, and safety
 
@@ -47,3 +47,11 @@ No purchase, inventory, receipt, order, daily hours, total history, pump, mainte
 ## Browser/Vercel boundary
 
 Browser testing must validate a real copy of the absent workbook, XLSX deflate support, backup download UX, admin table usability, baseline gating, and a mocked/non-production save. A real production import requires a separately reviewed preview and operator action; this implementation did not execute one.
+
+## CJI-01A real-workbook compatibility correction
+
+The local parser is now version 1.1.0. It matches OOXML elements by namespace-independent local name, resolves arbitrary relationship IDs, normalizes absolute `/xl/...`, package-relative `xl/...`, and workbook-relative `worksheets/...` targets, and supports shared, inline, `t="str"`, numeric, blank, and entity-encoded cells. When both supported sheets exist it always chooses `Cutting Jobs`; `Blank Import Template` is fallback-only. It searches the first 25 non-empty rows for a header containing at least `import_event_id`, `record_status`, and `job_name`, retains the physical worksheet row number as `__sourceRowNumber`, and parses only following nonblank rows. Errors distinguish malformed ZIP/workbook, missing allowed sheet, unresolved relationship, and missing importer header.
+
+The typed phrase was removed. The admin UI now uses the checkbox **“I reviewed the preview and want to import all ready rows.”** It enables import only after a successful preview has at least one ready row and no import is active. It is cleared on file selection, every preview attempt/failure, and import completion. The final browser dialog states total/active/completed append counts; cancel returns before mutation, backup, or save. This is an operator interlock only; all final revalidation and persistence safety checks remain authoritative.
+
+The deterministic namespace-prefixed fixture mirrors the confirmed recovery workbook shape: six named sheets, arbitrary relationship IDs, absolute targets, empty shared strings, `t="str"` values, three presentation rows, row-4 headers, and data from row 5. The actual production workbook was still not executed or imported by this correction.

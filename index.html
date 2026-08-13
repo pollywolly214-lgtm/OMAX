@@ -144,7 +144,7 @@
     <p>Preview only until every row is reviewed. Accepts .xlsx, .csv, or .json; no files or cloud attachments are imported.</p>
     <input id="cuttingJobImportFile" type="file" accept=".xlsx,.csv,.json">
     <button id="cuttingJobImportPreview" type="button">Preview import</button>
-    <input id="cuttingJobImportConfirm" type="text" placeholder="Type IMPORT REVIEWED CUTTING JOBS">
+    <label><input id="cuttingJobImportReviewed" type="checkbox"> I reviewed the preview and want to import all ready rows.</label>
     <button id="cuttingJobImportRun" type="button" disabled>Import reviewed jobs</button>
     <div id="cuttingJobImportStatus" aria-live="polite"></div>
     <div id="cuttingJobImportRows"></div>
