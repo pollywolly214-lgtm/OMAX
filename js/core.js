@@ -4178,6 +4178,16 @@ function getCloudCutFileStorageDiagnostics(){
   const location = typeof window.location === "object" ? window.location : { hostname:"", href:"" };
   const currentFirewall = scanAuthoritativeCutFileContent(snapshotState({ skipLocalFileCacheSync:true }), "$.currentSnapshot");
   const projectId = String(FB.app?.options?.projectId || window.FIREBASE_CONFIG?.projectId || "");
+  const cfr03 = typeof window.getCfr03StorageRoundTripDiagnostics === "function"
+    ? window.getCfr03StorageRoundTripDiagnostics()
+    : {
+        storageRulesExpectedVersion:"CFR-03A-deny-all-v1", productionUploadsEnabled:false,
+        productionDownloadsEnabled:false, cfr03TestHelperAvailable:false,
+        cfr03TestNamespace:"workspaces/{workspaceId}/cfr03-tests/{uid}/{testId}/cfr03-test.json",
+        workspaceMembershipMechanism:"none-authoritative-found", productionAuthorizationReady:false,
+        productionAuthorizationBlockers:["No authoritative workspace membership record, role, or custom claim is available to Storage rules."],
+        lastCfr03TestResult:null
+      };
   return {
     generatedAtISO:new Date().toISOString(), hostname:String(location.hostname || ""), url:String(location.href || ""),
     isVercelPreviewHostname:/\.vercel\.app$/i.test(String(location.hostname || "")),
@@ -4189,7 +4199,8 @@ function getCloudCutFileStorageDiagnostics(){
     authoritativeFirestoreDocumentPath:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
     pointsToProductionFirebase:projectId === "omax-maintenance", uploadsEnabled:false, downloadsEnabled:false,
     storageRulesActuallyTested:false, firewallAvailable:typeof window.CuttingFileContentFirewall?.scanCuttingFileContent === "function",
-    currentSnapshotFirewallSummary:{ contaminated:currentFirewall.contaminated, blockingFindingCount:currentFirewall.blockingFindingCount, wouldPass:!currentFirewall.contaminated }
+    currentSnapshotFirewallSummary:{ contaminated:currentFirewall.contaminated, blockingFindingCount:currentFirewall.blockingFindingCount, wouldPass:!currentFirewall.contaminated },
+    ...cfr03
   };
 }
 
