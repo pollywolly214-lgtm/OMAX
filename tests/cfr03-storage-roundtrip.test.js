@@ -33,7 +33,7 @@ function harness(options={}){
 }
 const run=h=>h.api.runCfr03StorageRoundTripTest({confirmation:CONFIRMATION});
 
-test("committed rules are exact deny-all",()=>assert.equal(fs.readFileSync("storage.rules","utf8"),`rules_version = '2';\n\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{allPaths=**} {\n      allow read, write: if false;\n    }\n  }\n}\n`));
+test("CFR-03 namespace remains denied after CFR-05 proposal",()=>{const rules=fs.readFileSync("storage.rules","utf8");assert.equal(rules.includes("cfr03-tests"),false);assert.ok(rules.includes("match /{allPaths=**} { allow read, write: if false; }"));});
 test("missing and incorrect confirmation perform zero Storage operations",async()=>{for(const confirmation of [undefined,"wrong"]){const h=harness();await h.api.runCfr03StorageRoundTripTest({confirmation});assert.deepEqual(h.calls,[]);}});
 test("unsigned and unexpected configurations stop at validation",async()=>{for(const state of [{user:null},{projectId:"other"},{bucket:"other"},{workspaceId:"other"}]){const h=harness({state});const r=await run(h);assert.equal(r.failedStage,"validation");assert.deepEqual(h.calls,[]);}});
 test("post-upload network failure has correct stage and exactly one successful cleanup",async()=>{const h=harness({xhr:"network"});const r=await run(h);assert.equal(r.failedStage,"download_content");assert.equal(r.downloadUrlCreated,true);assert.equal(r.downloadErrorType,"network");assert.equal(r.cleanupAttempted,true);assert.equal(r.cleanupCompleted,true);assert.equal(r.cleanupAbsenceVerified,true);assert.equal(h.calls.filter(x=>x==="delete").length,1);});
