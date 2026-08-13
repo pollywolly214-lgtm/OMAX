@@ -9,8 +9,9 @@ The legacy arrays in `workspaces/github-prod/app/state` remain authoritative. CF
 The implementation has independent gates for upload implementation, download implementation, valid/active membership and role, confirmed Firestore membership write protection, and confirmed CFR-05 rules deployment. The final two default false after every page load. For an operator-controlled Vercel test session only, run:
 
 ```js
-configureCfr05OperatorSession({
+configureCfr05OperatorSession("CFR05 VERCEL TEST", {
   firestoreMembershipWriteProtectionConfirmed: true,
+  firestoreFileAccessConfirmed: true,
   productionRulesConfirmedDeployed: true
 })
 ```
@@ -63,3 +64,15 @@ For an orphan, record only its path/stage/time/UID, inspect exact Storage object
 Use Framework Preset **Other**, empty Build and Install commands, and Output Directory `.`. Sign in with the provisioned test operator, inspect `getWorkspaceAuthorizationDiagnostics()` and `cfr05CloudCuttingFiles.diagnostics(...)`, explicitly set session confirmations only after deployed-rule verification, exercise one approved disposable file from the UI, test phone download/preview, then clear the session and artifacts. This implementation run did not produce a preview URL or conduct those browser/live steps.
 
 A later cutting-job Excel importer is separate work. It must define backed-up, idempotent reconciliation and cutover rules; it must not infer that CFR-05 metadata documents are authoritative, upload existing caches, or restructure/migrate the full-state job arrays.
+
+## CFR-05A persistent listing and Firebase v8 correction
+
+Cloud metadata is not copied into either legacy job array. The visible **Cloud files** action issues one exact-job query against `workspaces/{workspaceId}/cuttingJobs/{jobId}/files`, validates document ID plus every bounded field, displays only accepted records, and reports rejected record counts/reasons. This makes the listing reconstructible after navigation, refresh, or a new phone/shop session without local cache. Upload success re-runs that job query. No permanent-delete control exists.
+
+Production download uses the Firebase v8 `Reference.getDownloadURL()` followed by a credential-less, abortable 15-second `fetch`. It checks HTTP status and declared and actual response size against 50 MiB. The transient token URL stays inside the request function and is never returned, logged, diagnosed, or persisted. Bytes remain in memory. DXF/ORD/OMX dispatch to the existing browser CAD preview surface by extension; because the existing parser is limited, an honest Open/Download fallback is shown when it produces no preview. Temporary object URLs are always revoked.
+
+Empty browser MIME is accepted for approved extensions and canonicalized to `application/dxf` for DXF or `application/octet-stream` for ORD/OMX. Conflicting non-empty types fail. JavaScript, Firestore metadata, Storage custom metadata, and proposed rules enforce these canonical values.
+
+Compatibility-job and file metadata creation is one non-retrying Firestore write batch after both documents are read. Existing compatibility documents must contain only `schemaVersion`, `workspaceId`, `jobId`, `authoritativeStatePath`, and `createdAtISO`, with exact identity/path agreement. The batch never overwrites an existing file. A definite batch failure leaves neither document from that batch and triggers the one-object compensation protocol; an indeterminate batch is never retried or cleaned automatically.
+
+The temporary Vercel gate now requires the exact phrase `CFR05 VERCEL TEST`, a `.vercel.app` hostname, and explicit confirmations for membership write protection, individual job/file Firestore access, and deployed Storage rules. This memory gate is merely an operator interlock—not a security boundary. Firestore and Storage rules remain the security boundary. When publishing Storage rules that call `firestore.get()`, the operator must also confirm Firebase's required cross-service permissions/service-agent access for Storage Rules to read Firestore, and must roll back if those checks fail. The proposal remains undeployed.
