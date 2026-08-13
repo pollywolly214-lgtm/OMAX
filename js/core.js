@@ -589,6 +589,9 @@ let FB = {
   app: null,
   auth: null,
   db: null,
+  storage: null,
+  storageInitializationAttempted: false,
+  storageInitializationError: "",
   user: null,
   docRef: null,
   workspaceRef: null,
@@ -605,6 +608,7 @@ let hasPendingLocalChanges = false;
 let lastLocalMutationAt = 0;
 const CLOUD_SYNC_CLIENT_KEY = "cloud_sync_client_id_v1";
 const LOCAL_STATE_BACKUP_KEY = "omax_local_state_backup_v1";
+const CUT_FILE_STORAGE_BUCKET = "omax-maintenance.firebasestorage.app";
 
 
 const FIRESTORE_WARN_BYTES = 850000;
@@ -1782,13 +1786,13 @@ function getSaveSchemaCoverageReport(options = {}){
   const sanitizerRiskPaths = [
     {
       path: "cuttingJobs.files.*",
-      risk: "stripJobFileDataUrls removes embedded file/data-url/content fields before save; job metadata and manualLogs are expected to remain.",
-      source: "stripJobFileDataUrls"
+      risk: "The CFR-02 firewall blocks embedded file/data-url/content fields before an authoritative write; it does not remove them.",
+      source: "scanAuthoritativeCutFileContent"
     },
     {
       path: "completedCuttingJobs.files.*",
-      risk: "stripJobFileDataUrls removes embedded file/data-url/content fields before save; completed job metadata and manualLogs are expected to remain.",
-      source: "stripJobFileDataUrls"
+      risk: "The CFR-02 firewall blocks embedded file/data-url/content fields before an authoritative write; it does not remove them.",
+      source: "scanAuthoritativeCutFileContent"
     },
     {
       path: "cuttingJobs / completedCuttingJobs",
@@ -2490,6 +2494,17 @@ async function initFirebase(){
   FB.app  = existingApp || firebase.initializeApp(window.FIREBASE_CONFIG);
   FB.auth = firebase.auth();
   FB.db   = firebase.firestore();
+  FB.storageInitializationAttempted = true;
+  try {
+    FB.storage = typeof firebase.storage === "function"
+      ? FB.app.storage(`gs://${CUT_FILE_STORAGE_BUCKET}`)
+      : null;
+    FB.storageInitializationError = FB.storage ? "" : "Firebase Storage SDK is unavailable.";
+  } catch (err) {
+    FB.storage = null;
+    FB.storageInitializationError = String(err?.message || err || "Storage initialization failed.");
+    console.warn("Firebase Storage service initialization failed; state loading will continue without Storage.", err);
+  }
   applyFirestoreSettings(FB.db);
 
   // Persist login across refreshes
@@ -2824,6 +2839,9 @@ if (!Array.isArray(window.deletedItems)) window.deletedItems = [];
 
 function cloneStructured(value){
   if (value == null) return value;
+  if (typeof structuredClone === "function"){
+    try { return structuredClone(value); } catch (_){ }
+  }
   try {
     return JSON.parse(JSON.stringify(value));
   } catch (err) {
@@ -3988,32 +4006,14 @@ function applyJobFileCacheToJobs(jobs, cache){
   });
 }
 
-function stripJobFileDataUrls(jobs, tracker = null){
-  if (!Array.isArray(jobs)) return [];
-  return jobs.map(job => {
-    if (!job || typeof job !== "object") return job;
-    const files = Array.isArray(job.files)
-      ? job.files.map(file => {
-          if (!file || typeof file !== "object") return file;
-          const rest = {};
-          for (const [k,v] of Object.entries(file)){
-            if (typeof v === "string" && isLikelyEmbeddedFileContent(k, v)){ if (tracker) tracker.count += 1; continue; }
-            rest[k] = v;
-          }
-          return rest;
-        })
-      : [];
-    return { ...job, files };
-  });
-}
-
-function snapshotState(){
+function snapshotState(options = {}){
   refreshGlobalCollections();
-  const strippedTracker = { count: 0 };
-  const jobFileCache = readJobFileCache();
-  syncJobFileCacheFromJobs(cuttingJobs, jobFileCache);
-  syncJobFileCacheFromJobs(completedCuttingJobs, jobFileCache);
-  writeJobFileCache(jobFileCache);
+  if (!options.skipLocalFileCacheSync){
+    const jobFileCache = readJobFileCache();
+    syncJobFileCacheFromJobs(cuttingJobs, jobFileCache);
+    syncJobFileCacheFromJobs(completedCuttingJobs, jobFileCache);
+    writeJobFileCache(jobFileCache);
+  }
   const safePumpEff = (typeof window.pumpEff !== "undefined") ? window.pumpEff : null;
   const foldersSnapshot = snapshotSettingsFolders();
   const trashSnapshot = deletedItems.map(entry => ({
@@ -4054,8 +4054,8 @@ function snapshotState(){
     inventoryTransactions: inventoryTransactionsSource.map(entry => (entry && typeof entry === "object" ? { ...entry } : entry)),
     inventorySection: String(window.inventorySection || "items") === "material" ? "material" : "items",
     cuttingJobDatabase: cloneStructured(cuttingJobDatabaseSource) || {},
-    cuttingJobs: stripJobFileDataUrls(cuttingJobs, strippedTracker),
-    completedCuttingJobs: stripJobFileDataUrls(completedCuttingJobs, strippedTracker),
+    cuttingJobs: cloneStructured(cuttingJobs),
+    completedCuttingJobs: cloneStructured(completedCuttingJobs),
     orderRequests,
     receiptTrackerWeeks: Array.isArray(window.receiptTrackerWeeks)
       ? window.receiptTrackerWeeks.map(entry => ({ ...entry }))
@@ -4101,9 +4101,100 @@ function snapshotState(){
       updatedBy: getCloudSyncClientId()
     }
   };
-  if (typeof window !== "undefined") window.__lastStrippedHeavyFields = strippedTracker.count;
   return result;
 }
+
+function scanAuthoritativeCutFileContent(state, rootPath = "$"){
+  const scanner = window.CuttingFileContentFirewall?.scanCuttingFileContent;
+  if (typeof scanner !== "function"){
+    return { scannedRootPath:rootPath, contaminated:true, blockingFindingCount:1, findings:[{
+      path:rootPath, reason:"firewall_unavailable", detectedType:"FirewallAvailability",
+      approximateSize:null, sizeUnit:null, parentRootCollection:"$", blocksAuthoritativeSave:true
+    }] };
+  }
+  return scanner(state, { rootPath });
+}
+
+async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true }){
+  const writer = window.CuttingFileContentFirewall?.writeAuthoritativeState;
+  if (typeof writer !== "function"){
+    return { saved:false, blocked:true, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
+  }
+  return writer(FB.docRef, state, setOptions);
+}
+
+function inspectLocalJsonCache(key, rootPath, unavailable){
+  try {
+    if (!window.localStorage) { unavailable.push(key); return null; }
+    const raw = window.localStorage.getItem(key);
+    if (raw == null) return null;
+    try { return { value:JSON.parse(raw), rootPath }; }
+    catch (_) { return { value:raw, rootPath }; }
+  } catch (_) { unavailable.push(key); return null; }
+}
+
+function auditCuttingFileContentExposure(){
+  const unavailableCaches = [];
+  const sources = [
+    { name:"currentSnapshot", value:snapshotState({ skipLocalFileCacheSync:true }), rootPath:"$.currentSnapshot", localOnly:false },
+    { name:"cuttingJobs", value:window.cuttingJobs, rootPath:"$.cuttingJobs", localOnly:false },
+    { name:"completedCuttingJobs", value:window.completedCuttingJobs, rootPath:"$.completedCuttingJobs", localOnly:false },
+    { name:"deletedItems", value:window.deletedItems, rootPath:"$.deletedItems", localOnly:false },
+    { name:"lastLoadedAuthoritativeCloudBaseline", value:window.__lastLoadedCloudState, rootPath:"$.lastLoadedAuthoritativeCloudBaseline", localOnly:false }
+  ];
+  [
+    [JOB_FILE_CACHE_KEY, "jobFileCache"],
+    ["cutting_job_onedrive_preview_cache_v1", "oneDrivePreviewCache"],
+    [LOCAL_STATE_BACKUP_KEY, "localStateBackup"]
+  ].forEach(([key,name])=>{
+    const inspected = inspectLocalJsonCache(key, `$.${name}`, unavailableCaches);
+    if (inspected) sources.push({ name, value:inspected.value, rootPath:inspected.rootPath, localOnly:true });
+  });
+  const findingsBySource = {};
+  let blockingFindingCount = 0;
+  let localCacheFindingCount = 0;
+  let authoritativeSnapshotWouldPass = false;
+  sources.forEach(source=>{
+    const result = scanAuthoritativeCutFileContent(source.value, source.rootPath);
+    findingsBySource[source.name] = result.findings;
+    blockingFindingCount += result.blockingFindingCount;
+    if (source.localOnly) localCacheFindingCount += result.blockingFindingCount;
+    if (source.name === "currentSnapshot") authoritativeSnapshotWouldPass = !result.contaminated;
+  });
+  return {
+    generatedAtISO:new Date().toISOString(),
+    contaminated:blockingFindingCount > 0,
+    blockingFindingCount,
+    findingsBySource,
+    authoritativeSnapshotWouldPass,
+    findingExistsOnlyInLocalCache:localCacheFindingCount > 0 && blockingFindingCount === localCacheFindingCount,
+    localCacheFindingCount,
+    cachesThatCouldNotBeInspected:unavailableCaches.sort(),
+    automaticCleanupActions:[]
+  };
+}
+
+function getCloudCutFileStorageDiagnostics(){
+  const location = typeof window.location === "object" ? window.location : { hostname:"", href:"" };
+  const currentFirewall = scanAuthoritativeCutFileContent(snapshotState({ skipLocalFileCacheSync:true }), "$.currentSnapshot");
+  const projectId = String(FB.app?.options?.projectId || window.FIREBASE_CONFIG?.projectId || "");
+  return {
+    generatedAtISO:new Date().toISOString(), hostname:String(location.hostname || ""), url:String(location.href || ""),
+    isVercelPreviewHostname:/\.vercel\.app$/i.test(String(location.hostname || "")),
+    firebaseProjectId:projectId, configuredStorageBucket:CUT_FILE_STORAGE_BUCKET,
+    storageSdkAvailable:typeof window.firebase?.storage === "function",
+    storageServiceInitializationAttempted:Boolean(FB.storageInitializationAttempted),
+    storageServiceInitialized:Boolean(FB.storage), storageInitializationError:FB.storageInitializationError || "",
+    signedIn:Boolean(FB.user), uid:FB.user?.uid || null, workspaceId:WORKSPACE_ID,
+    authoritativeFirestoreDocumentPath:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
+    pointsToProductionFirebase:projectId === "omax-maintenance", uploadsEnabled:false, downloadsEnabled:false,
+    storageRulesActuallyTested:false, firewallAvailable:typeof window.CuttingFileContentFirewall?.scanCuttingFileContent === "function",
+    currentSnapshotFirewallSummary:{ contaminated:currentFirewall.contaminated, blockingFindingCount:currentFirewall.blockingFindingCount, wouldPass:!currentFirewall.contaminated }
+  };
+}
+
+window.auditCuttingFileContentExposure = auditCuttingFileContentExposure;
+window.getCloudCutFileStorageDiagnostics = getCloudCutFileStorageDiagnostics;
 
 /* ======================== HISTORY ========================= */
 const HISTORY_LIMIT = 50;
@@ -5739,6 +5830,24 @@ const saveCloudInternal = debounce(async (saveOptions = {})=>{
   }
   try{
     const rawSnap = snapshotState();
+    const rawFirewall = scanAuthoritativeCutFileContent(rawSnap);
+    if (rawFirewall.contaminated){
+      hasPendingLocalChanges = true;
+      const blocked = {
+        saved:false, blocked:true,
+        error:"Embedded cutting-file content was blocked from authoritative state.",
+        errorCode:"embedded_cutting_file_content_blocked",
+        stateWriteAttempted:false, stateWriteCompleted:false,
+        findings:rawFirewall.findings
+      };
+      if (explicitTrace){
+        explicitTrace.saveCloudInternalReturnValue = blocked.errorCode;
+        explicitTrace.saveCloudInternalReturnType = "early_return";
+        explicitTrace.firestoreSetAttempted = false;
+      }
+      console.error("Cloud save blocked by cutting-file content firewall.", blocked);
+      return blocked;
+    }
     if (explicitTrace){
       const rawInstances = Array.isArray(rawSnap?.maintenanceCalendarInstancesV2) ? rawSnap.maintenanceCalendarInstancesV2 : [];
       const rawOccurrences = Array.isArray(rawSnap?.maintenanceOccurrencesV2) ? rawSnap.maintenanceOccurrencesV2 : [];
@@ -5896,15 +6005,19 @@ const saveCloudInternal = debounce(async (saveOptions = {})=>{
     const writeRev = Number(snap?.syncMeta?.rev || 0);
     snap.saveMeta = { lastSavedAt: new Date().toISOString(), lastSaveStatus: "saved", lastSaveError: "", lastSaveSizeBytes: sizeBytes };
     if (explicitTrace){
-      explicitTrace.firestoreSetAttempted = true;
       explicitTrace.firestoreWritePayloadInstancesCount = Array.isArray(snap.maintenanceCalendarInstancesV2) ? snap.maintenanceCalendarInstancesV2.length : 0;
       explicitTrace.firestoreWritePayloadOccurrencesCount = Array.isArray(snap.maintenanceOccurrencesV2) ? snap.maintenanceOccurrencesV2.length : 0;
       explicitTrace.firestoreWritePayloadInstanceFound = Array.isArray(snap.maintenanceCalendarInstancesV2) && snap.maintenanceCalendarInstancesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
       explicitTrace.firestoreWritePayloadOccurrenceFound = Array.isArray(snap.maintenanceOccurrencesV2) && snap.maintenanceOccurrencesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
     }
-    authoritativeStateWriteAttempted = true;
-    await FB.docRef.set(snap, { merge:true });
-    authoritativeStateWriteCompleted = true;
+    const writeResult = await writeAuthoritativeStateSnapshot(snap, { merge:true });
+    authoritativeStateWriteAttempted = writeResult.stateWriteAttempted;
+    authoritativeStateWriteCompleted = writeResult.stateWriteCompleted;
+    if (explicitTrace) explicitTrace.firestoreSetAttempted = writeResult.stateWriteAttempted;
+    if (!writeResult.saved){
+      hasPendingLocalChanges = true;
+      return writeResult;
+    }
     if (explicitTrace) explicitTrace.firestoreSetCompleted = true;
     if (typeof window !== "undefined"){
       window.__loadedCloudRevisionForSaveGuard = Number(snap?.syncMeta?.rev || 0);
@@ -6319,6 +6432,8 @@ async function loadFromCloud(){
       if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
       showLocalBackupConflictWarning({ cloudRev:0, backupRev:loadedRev, backupOnly:true });
     }else{
+      const previousLoadedCloudState = window.__lastLoadedCloudState;
+      const previousLoadedCloudRevision = window.__loadedCloudRevisionForSaveGuard;
       const pe = (typeof window.pumpEff === "object" && window.pumpEff)
         ? window.pumpEff
         : (window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] });
@@ -6367,7 +6482,14 @@ async function loadFromCloud(){
         console.warn("Recovery Mode: seed/default Firestore write skipped.");
       } else {
         setCloudLoadGate({ loadComplete:true, adoptComplete:true });
-        await FB.docRef.set(seeded, { merge:true });
+        const seedWrite = await writeAuthoritativeStateSnapshot(seeded, { merge:true });
+        if (!seedWrite.saved){
+          console.error("Initial authoritative state write blocked by cutting-file content firewall.", seedWrite);
+          window.__lastLoadedCloudState = previousLoadedCloudState;
+          window.__loadedCloudRevisionForSaveGuard = previousLoadedCloudRevision;
+          hasPendingLocalChanges = true;
+          return seedWrite;
+        }
         hasPendingLocalChanges = false;
         if (FB.workspaceDoc){
           await updateWorkspaceMetadata({
@@ -6405,7 +6527,11 @@ async function migrateLegacyWorkspaceDoc(){
     delete stateData.createdAt;
     delete stateData.lastStateMigrationAt;
     delete stateData.lastStateDocPath;
-    await FB.docRef.set(stateData, { merge:true });
+    const migrationWrite = await writeAuthoritativeStateSnapshot(stateData, { merge:true });
+    if (!migrationWrite.saved){
+      console.error("Legacy authoritative state migration blocked by cutting-file content firewall.", migrationWrite);
+      return null;
+    }
     const meta = {
       workspaceId: WORKSPACE_ID,
       lastStateMigrationAt: new Date().toISOString(),
@@ -6683,7 +6809,8 @@ async function clearAllAppData(){
   try {
     if (FB.ready && FB.docRef) {
       if (!canWriteCloud("clearAllAppData")) return defaults;
-      await FB.docRef.set(snapshotState());
+      const clearWrite = await writeAuthoritativeStateSnapshot(snapshotState(), null);
+      if (!clearWrite.saved) console.error("Cleared authoritative state write blocked by cutting-file content firewall.", clearWrite);
     } else {
       saveCloudDebounced();
     }
