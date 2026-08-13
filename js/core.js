@@ -4181,7 +4181,7 @@ function getCloudCutFileStorageDiagnostics(){
   const cfr03 = typeof window.getCfr03StorageRoundTripDiagnostics === "function"
     ? window.getCfr03StorageRoundTripDiagnostics()
     : {
-        storageRulesExpectedVersion:"CFR-03-v1", productionUploadsEnabled:false,
+        storageRulesExpectedVersion:"CFR-03A-deny-all-v1", productionUploadsEnabled:false,
         productionDownloadsEnabled:false, cfr03TestHelperAvailable:false,
         cfr03TestNamespace:"workspaces/{workspaceId}/cfr03-tests/{uid}/{testId}/cfr03-test.json",
         workspaceMembershipMechanism:"none-authoritative-found", productionAuthorizationReady:false,
