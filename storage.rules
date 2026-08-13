@@ -1,0 +1,34 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // CFR-03 permits only a 2 KiB, generated JSON probe. Production file paths
+    // and every path not matched here remain denied by the final catch-all.
+    match /workspaces/{workspaceId}/cfr03-tests/{uid}/{testId}/{fileName} {
+      function ownedSafeTestPath() {
+        return request.auth != null
+          && request.auth.uid == uid
+          && workspaceId.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
+          && uid.matches('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$')
+          && testId.matches('^[a-f0-9]{32}$')
+          && fileName == 'cfr03-test.json';
+      }
+
+      allow create: if ownedSafeTestPath()
+        && resource == null
+        && request.resource.size > 0
+        && request.resource.size <= 2048
+        && request.resource.contentType == 'application/json'
+        && request.resource.metadata.keys().hasOnly(['uid', 'workspaceId', 'testId'])
+        && request.resource.metadata.uid == uid
+        && request.resource.metadata.workspaceId == workspaceId
+        && request.resource.metadata.testId == testId;
+      allow get: if ownedSafeTestPath();
+      allow delete: if ownedSafeTestPath();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
