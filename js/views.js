@@ -4024,7 +4024,7 @@ function viewJobs(){
             </div>
             <label class="job-edit-note">Notes<textarea data-history-field="notes" data-history-id="${job.id}" rows="3" placeholder="Notes...">${textEsc(job?.notes || "")}</textarea></label>
             <div class="job-edit-files">
-              <div class="job-edit-files-actions"><button type="button" data-job-file-add="${job.id}" data-job-file-source="history">Attach from Reference Folder</button><button type="button" data-upload-job="${job.id}">Temporary local upload — not saved</button><button type="button" data-link-job-file="${job.id}">Link OneDrive URL</button></div>
+              <div class="job-edit-files-actions"><button type="button" data-cloud-file-upload="${job.id}">Upload secure cloud file</button><button type="button" data-job-file-add="${job.id}" data-job-file-source="history">Attach from Reference Folder</button><button type="button" data-upload-job="${job.id}">Temporary local upload — not saved</button><button type="button" data-link-job-file="${job.id}">Link OneDrive URL</button></div>
               <input type="file" data-job-file-input="${job.id}" multiple style="display:none">
               <ul class="job-file-list">
                 ${jobFiles.length ? jobFiles.map((f, idx)=>{
@@ -4160,7 +4160,7 @@ function viewJobs(){
           return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
         }).join("")
       : "";
-    const fileMenuActions = `<div class="job-file-menu-actions"><button type="button" class="job-file-menu-action" data-job-file-add="${j.id}">+ Add files</button></div>
+    const fileMenuActions = `<div class="job-file-menu-actions"><button type="button" class="job-file-menu-action" data-cloud-file-upload="${j.id}">Upload secure cloud file</button><button type="button" class="job-file-menu-action" data-job-file-add="${j.id}">+ Add local reference</button></div>
     <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
       <div class="cost-receipt-backdrop" data-order-repair-close></div>
       <div class="cost-receipt-card" role="document">
@@ -4460,7 +4460,7 @@ function viewJobs(){
             </div>
               <label class="job-edit-note">Notes<textarea data-j="notes" data-id="${j.id}" rows="3" placeholder="Notes...">${j.notes||""}</textarea></label>
               <div class="job-edit-files">
-                <div class="job-edit-files-actions"><button type="button" data-job-file-add="${j.id}" data-job-file-source="active">Attach from Reference Folder</button><button type="button" data-upload-job="${j.id}">Temporary local upload — not saved</button><button type="button" data-link-job-file="${j.id}">Link OneDrive URL</button></div>
+                <div class="job-edit-files-actions"><button type="button" data-cloud-file-upload="${j.id}">Upload secure cloud file</button><button type="button" data-job-file-add="${j.id}" data-job-file-source="active">Attach from Reference Folder</button><button type="button" data-upload-job="${j.id}">Temporary local upload — not saved</button><button type="button" data-link-job-file="${j.id}">Link OneDrive URL</button></div>
                 <input type="file" data-job-file-input="${j.id}" multiple style="display:none">
                 <ul class="job-file-list">
                   ${jobFiles.length ? jobFiles.map((f, idx)=>{

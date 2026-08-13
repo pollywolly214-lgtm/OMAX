@@ -7,7 +7,7 @@
   "use strict";
 
   const SCHEMA_VERSION = 1;
-  const ROLES = Object.freeze(["viewer", "operator", "admin"]);
+  const ROLES = Object.freeze(["owner", "admin", "operator", "viewer"]);
   const FILE_TYPES = Object.freeze({
     dxf:{ mime:["application/dxf", "application/x-dxf", "text/plain"], maxBytes:50 * 1024 * 1024 },
     ord:{ mime:["application/octet-stream", "text/plain"], maxBytes:50 * 1024 * 1024 },

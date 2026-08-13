@@ -4216,6 +4216,26 @@ window.getWorkspaceAuthorizationDiagnostics = function(){
   }
   return api.getWorkspaceAuthorizationDiagnostics({ uid, workspaceId:WORKSPACE_ID, membershipDocRef });
 };
+const cfr05SessionGates = window.Cfr05CloudCuttingFiles?.createSessionGates();
+window.configureCfr05OperatorSession = function(confirmations){
+  return cfr05SessionGates.configureOperatorSession(confirmations);
+};
+window.clearCfr05OperatorSession = function(){ return cfr05SessionGates.clear(); };
+window.cfr05CloudCuttingFiles = window.Cfr05CloudCuttingFiles?.createApi(window, {
+  foundation:window.Cfr04WorkspaceMetadata,
+  gates:cfr05SessionGates
+});
+window.uploadCfr05CuttingFile = async function(jobId, file){
+  const uid=FB.user?.uid||"", workspaceId=WORKSPACE_ID, api=window.Cfr04WorkspaceMetadata;
+  let membership={valid:false,active:false,role:null,path:null};
+  if(uid&&FB.db&&api){
+    const path=api.membershipPath(workspaceId,uid),snap=await FB.db.doc(path).get(),data=snap.exists?snap.data():null;
+    const validation=api.validateWorkspaceMembershipRecord(data,{uid,workspaceId});
+    membership={valid:validation.valid,active:data?.active===true,role:data?.role||null,path};
+  }
+  return window.cfr05CloudCuttingFiles.upload({uid,workspaceId,jobId,file,membership,storage:FB.storage,firestore:FB.db,
+    jobExists:id=>(Array.isArray(window.cuttingJobs)&&window.cuttingJobs.some(job=>String(job?.id)===String(id)))||(Array.isArray(window.completedCuttingJobs)&&window.completedCuttingJobs.some(job=>String(job?.id)===String(id)))});
+};
 
 /* ======================== HISTORY ========================= */
 const HISTORY_LIMIT = 50;

@@ -1,9 +1,60 @@
 rules_version = '2';
 
+// CFR-05 production proposal. DO NOT DEPLOY until deployed Firestore rules prove
+// that ordinary clients cannot create, activate, or promote membership records.
 service firebase.storage {
   match /b/{bucket}/o {
-    match /{allPaths=**} {
-      allow read, write: if false;
+    function member(workspaceId) {
+      return firestore.get(/databases/(default)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid)).data;
     }
+    function activeRole(workspaceId, roles) {
+      return request.auth != null
+        && member(workspaceId).uid == request.auth.uid
+        && member(workspaceId).workspaceId == workspaceId
+        && member(workspaceId).active == true
+        && member(workspaceId).schemaVersion == 1
+        && member(workspaceId).role in roles;
+    }
+    function safeIds(workspaceId, jobId, fileId) {
+      return workspaceId.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
+        && jobId.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$')
+        && fileId.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$');
+    }
+    function allowedName(name) {
+      return name.size() <= 120 && name.matches('^[A-Za-z0-9][A-Za-z0-9._-]*\\.(dxf|ord|omx)$');
+    }
+    function validCreate(workspaceId, jobId, fileId, safeFileName) {
+      return request.resource.size > 0 && request.resource.size <= 52428800
+        && request.resource.contentType in ['application/dxf', 'application/x-dxf', 'application/octet-stream', 'text/plain']
+        && request.resource.metadata.keys().hasOnly(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','sha256','createdBy'])
+        && request.resource.metadata.schemaVersion == '1'
+        && request.resource.metadata.workspaceId == workspaceId
+        && request.resource.metadata.jobId == jobId
+        && request.resource.metadata.fileId == fileId
+        && request.resource.metadata.originalName.size() > 0
+        && request.resource.metadata.originalName.size() <= 255
+        && request.resource.metadata.safeFileName == safeFileName
+        && request.resource.metadata.extension in ['dxf','ord','omx']
+        && safeFileName.matches('^.*\\.' + request.resource.metadata.extension + '$')
+        && ((request.resource.metadata.extension == 'dxf' && request.resource.contentType in ['application/dxf','application/x-dxf','text/plain'])
+          || (request.resource.metadata.extension in ['ord','omx'] && request.resource.contentType in ['application/octet-stream','text/plain']))
+        && request.resource.metadata.contentType == request.resource.contentType
+        && request.resource.metadata.sizeBytes == string(request.resource.size)
+        && request.resource.metadata.sha256.matches('^[a-f0-9]{64}$')
+        && request.resource.metadata.createdBy == request.auth.uid;
+    }
+    match /workspaces/{workspaceId}/cutting-jobs/{jobId}/files/{fileId}/{safeFileName} {
+      allow create: if safeIds(workspaceId, jobId, fileId) && allowedName(safeFileName)
+        && activeRole(workspaceId, ['owner','admin','operator'])
+        && validCreate(workspaceId, jobId, fileId, safeFileName);
+      allow get: if safeIds(workspaceId, jobId, fileId) && allowedName(safeFileName)
+        && activeRole(workspaceId, ['owner','admin','operator','viewer']);
+      allow delete: if safeIds(workspaceId, jobId, fileId)
+        && activeRole(workspaceId, ['owner','admin','operator'])
+        && (member(workspaceId).role in ['owner','admin'] || resource.metadata.createdBy == request.auth.uid)
+        && resource.metadata.workspaceId == workspaceId && resource.metadata.jobId == jobId && resource.metadata.fileId == fileId;
+      allow update, list: if false;
+    }
+    match /{allPaths=**} { allow read, write: if false; }
   }
 }

@@ -27,7 +27,7 @@ The repository has no `firestore.rules` and `firebase.json` configures only `sto
 
 Path: `workspaces/{workspaceId}/members/{uid}`.
 
-The bounded schema is exactly `schemaVersion: 1`, `uid`, `workspaceId`, `role`, `active`, `createdAtISO`, `updatedAtISO`, plus optional informational `email`. Allowed roles are `viewer`, `operator`, and `admin`. UID must match the document ID; workspace must match the parent path; timestamps are UTC ISO strings. Email is never authorization. Unknown fields, inactive records, mismatches, malformed IDs, and unknown roles fail closed.
+The bounded schema is exactly `schemaVersion: 1`, `uid`, `workspaceId`, `role`, `active`, `createdAtISO`, `updatedAtISO`, plus optional informational `email`. Allowed roles are `owner`, `admin`, `operator`, and `viewer`. UID must match the document ID; workspace must match the parent path; timestamps are UTC ISO strings. Email is never authorization. Unknown fields, inactive records, mismatches, malformed IDs, and unknown roles fail closed.
 
 Ordinary client code has no membership create/update/promote method and never self-enrolls. A missing record is reported as `membership_document_missing`. `getWorkspaceAuthorizationDiagnostics()` reports signed-in state/UID, workspace, expected path, existence, structural validity, role, active status, readiness and stable blocker codes. It returns no token, credential, URL, or file content.
 
