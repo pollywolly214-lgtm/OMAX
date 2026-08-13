@@ -139,8 +139,11 @@
     <button id="btnSignIn" class="auth-button auth-button-primary">Sign In</button>
     <button id="btnSignOut" class="auth-button auth-button-secondary" style="display:none;">Sign Out</button>
   </div>
-  <details id="cuttingJobImportAdmin" class="history-import-admin">
-    <summary>Reviewed cutting-job import (admin)</summary>
+  <dialog id="cuttingJobImportAdmin" class="history-import-admin cutting-job-import-dialog" aria-labelledby="cuttingJobImportTitle">
+    <div class="cutting-job-import-dialog-header">
+      <h3 id="cuttingJobImportTitle">Reviewed cutting-job import</h3>
+      <button id="cuttingJobImportClose" type="button" aria-label="Close reviewed cutting-job import">Close</button>
+    </div>
     <p>Preview only until every row is reviewed. Accepts .xlsx, .csv, or .json; no files or cloud attachments are imported.</p>
     <input id="cuttingJobImportFile" type="file" accept=".xlsx,.csv,.json">
     <button id="cuttingJobImportPreview" type="button">Preview import</button>
@@ -148,7 +151,7 @@
     <button id="cuttingJobImportRun" type="button" disabled>Import reviewed jobs</button>
     <div id="cuttingJobImportStatus" aria-live="polite"></div>
     <div id="cuttingJobImportRows"></div>
-  </details>
+  </dialog>
 
   <div id="authModal" class="auth-modal-backdrop" style="display:none;">
     <div class="auth-modal-dialog">
