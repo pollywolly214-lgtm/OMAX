@@ -34,7 +34,7 @@ Blank optional values remain blank/null-equivalent and no missing shop values ar
 
 CSV uses a local RFC-style quoted parser and JSON accepts an array or `{rows:[]}`. XLSX uses the repository-local, dependency-free **CJI XLSX Parser 1.1.0**, licensed MIT. It reads OOXML ZIP worksheets in-browser and selects only `Cutting Jobs` or `Blank Import Template`; Pump Readings, Maintenance Notes, Cached Files, Recovery Summary, and every other sheet are ignored. No executable spreadsheet code loads from a CDN.
 
-The temporary admin section previews every row and exact reasons. Final submission re-runs validation and requires the reviewed checkbox plus a final browser confirmation. Controls lock during parsing/saving and the API rejects concurrency.
+The temporary admin section previews every row with separate blocking reasons and nonblocking warnings. Final submission re-runs validation and requires the reviewed checkbox plus a final browser confirmation. Controls lock during parsing/saving and the API rejects concurrency.
 
 ## Persistence, rollback, and safety
 
@@ -59,3 +59,9 @@ The deterministic namespace-prefixed fixture mirrors the confirmed recovery work
 ## CJI-01B normal Cutting Jobs entry point
 
 The normal Cutting Jobs toolbar now includes **Import reviewed jobs** beside the Add Job controls. It opens the one existing importer as a viewport-bounded modal dialog labeled **Reviewed cutting-job import**; it does not create or reset a second importer. The visible Close button and Escape cancellation only close the dialog and return focus to the toolbar trigger. They do not parse, preview, back up, mutate, or save. Reopening retains the existing selected file/preview state and works through the same entry point without console or DOM commands. The dialog is attached to the document modal layer rather than the page's nested scroll content, so it opens immediately inside the visible viewport.
+
+## CJI-01C Excel dates and optional historical details
+
+Only the `start_date`, `due_date`, and `completed_date` worksheet columns convert numeric Excel serials. Conversion supports the 1900 system (including its conventional 1899-12-30 epoch) and the workbook `date1904` flag, discards time fractions, and uses `Date.UTC`/ISO output so browser timezone cannot shift the calendar day. Thus `46189.5` deterministically becomes `2026-06-16`. Text ISO dates remain unchanged; negative, excessive, or malformed serials remain raw and subsequently receive the normal exact invalid-date reason. Ordinary numeric columns are never date-converted.
+
+Blank start/due dates are accepted because the current authoritative job records safely carry empty `startISO`/`dueISO`; no date is invented. Completed rows still require a real `completed_date`. Blank category/material values link nothing. A unique exact existing match links normally. A nonblank unmatched historical value now produces a visible nonblocking warning, leaves the operational `cat`/`material` blank, and remains preserved verbatim in `importProvenance`. Multiple exact matches remain unresolved, definitions are never created or substituted, and `review_status=needs_review` remains blocking.
