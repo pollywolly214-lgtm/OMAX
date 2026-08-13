@@ -28,6 +28,8 @@ One controlled Vercel test previously confirmed upload and metadata verification
 
 The old result also reported a combined protected-state fingerprint mismatch but did not retain root-level comparisons or paths. It is therefore impossible to identify the historical differing root honestly. `cutting_job_files_v1` was separately measured and matched. The exact uploaded object was manually deleted, Firebase Storage was confirmed empty, and deployed rules were restored to deny-all.
 
+A later authenticated controlled round trip completed upload, metadata verification, XHR download with HTTP 200, exact-content verification, deletion, and absence verification without an indeterminate operation or Firestore write. Every protected business root and `cutting_job_files_v1` matched. Only the browser-local backup changed at `$.localStateBackup.value`. The previous result model included that independently writable cache among business roots, so it incorrectly set `protectedStateMatched` false and `appStateMutationDetected` true.
+
 ## Corrected state machine
 
 `runCfr03StorageRoundTripTest(options)` remains manually gated by exact confirmation `CFR03 STORAGE TEST`. With deny-all rules deployed it will fail at upload; it does not provide production file capability. Internally it now tracks these explicit stages:
@@ -51,9 +53,15 @@ Once upload completion is confirmed, success or any later determinate failure tr
 
 ## Protected-state comparison
 
-Before and after the asynchronous test, the helper captures the same protected roots without calling `snapshotState()`, save/sync code, or a localStorage writer. Canonicalization preserves array order, sorts object keys recursively, represents explicit `undefined`, distinguishes missing properties, and represents ancestor cycles deterministically. Only the named transient containers `saveMeta`, `syncMeta`, `diagnostic`, `diagnostics`, `cfr03Diagnostics`, and `lastCfr03TestResult` are excluded.
+Before and after the asynchronous test, the helper captures the same protected business roots without calling `snapshotState()`, save/sync code, or a localStorage writer. Canonicalization preserves array order, sorts object keys recursively, represents explicit `undefined`, distinguishes missing properties, and represents ancestor cycles deterministically. Only the named transient containers `saveMeta`, `syncMeta`, `diagnostic`, `diagnostics`, `cfr03Diagnostics`, and `lastCfr03TestResult` are excluded.
 
-Results contain exact `protectedStateMismatchPaths`, per-root `protectedStateRootResults`, and separate `localJobFileCacheMismatchPaths`. `appStateMutationDetected` is based only on protected-root differences; `cutting_job_files_v1` remains a separate byte-equivalence comparison. The local backup is a protected root and is read without mutation.
+The result deliberately separates three observations:
+
+- **Protected business state:** `protectedStateMatched`, `protectedStateMismatchPaths`, and per-root `protectedStateRootResults`. `appStateMutationDetected` is based only on these roots.
+- **Browser-local full-state backup:** `localStateBackupMatched`, `localStateBackupMismatchPaths`, and `localStateBackupDriftObserved`. Backup drift remains visible but cannot alone mark business state as mutated.
+- **Browser-local cutting-file cache:** `localJobFileCacheMatched` and `localJobFileCacheMismatchPaths`, compared separately and without changing its existing entries.
+
+The local backup can change independently while the helper awaits Storage operations. The normal debounced `saveCloudInternal()` pipeline calls `persistLocalStateBackup()` before its Firestore write and also when an oversized state blocks the Firestore write. An already scheduled save or unrelated application interaction can therefore rewrite `omax_local_state_backup_v1` during the round trip even when the CFR-03 helper caused no state or Firestore mutation. The helper does not pause, disable, rewrite, or force this backup comparison to pass; it reads the raw localStorage value before and after and reports actual drift.
 
 ## CORS limitation
 

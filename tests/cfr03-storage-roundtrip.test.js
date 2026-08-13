@@ -16,12 +16,12 @@ function harness(options={}){
     async delete(){calls.push("delete");if(options.deleteError)throw options.deleteError;deleted=true;}
   };
   const state={user:{uid:"user_1"},projectId:"omax-maintenance",bucket:"omax-maintenance.firebasestorage.app",workspaceId:"github-prod",storage:{ref(requested){calls.push("ref");assert.equal(requested,path);return ref;}},...(options.state||{})};
-  const cache="47-local-data-urls-byte-equivalent"; const backup="protected-backup";
+  const cache="47-local-data-urls-byte-equivalent"; let backup="protected-backup";
   const env={cuttingJobs:[{id:"job",config:{b:2,a:1}}],completedCuttingJobs:[],deletedItems:[],inventory:[{id:"part"}],maintenanceOccurrencesV2:[{id:"occurrence"}],localStorage:{getItem:key=>key==="cutting_job_files_v1"?cache:key==="omax_local_state_backup_v1"?backup:null}};
   class XHR {
     open(method,url){calls.push("xhr_open");this.url=url;assert.equal(method,"GET");}
     send(){
-      calls.push("xhr_send"); if(options.mutateDuringDownload)options.mutateDuringDownload(env);
+      calls.push("xhr_send"); if(options.mutateDuringDownload)options.mutateDuringDownload(env); if(options.localBackupDrift)backup=options.localBackupDrift;
       queueMicrotask(()=>{
         if(options.xhr==="network")return this.onerror(); if(options.xhr==="timeout")return this.ontimeout(); if(options.xhr==="abort")return this.onabort();
         this.status=options.httpStatus ?? 200; this.responseText=options.content ?? payload; this.onload();
@@ -52,6 +52,7 @@ test("value changes report exact paths",async()=>{const r=await run(harness({mut
 test("property presence changes report exact paths",async()=>{const r=await run(harness({mutateDuringDownload(env){env.cuttingJobs[0].optional=undefined;}}));assert.deepEqual(r.protectedStateMismatchPaths,["$.cuttingJobs[0].optional"]);});
 test("array order changes report exact paths",async()=>{const h=harness({mutateDuringDownload(env){env.completedCuttingJobs.push({id:"b"},{id:"a"});env.completedCuttingJobs.reverse();}});const r=await run(h);assert.ok(r.protectedStateMismatchPaths.some(path=>path.startsWith("$.completedCuttingJobs")));});
 test("diagnostic session fields are excluded",async()=>{const h=harness({mutateDuringDownload(env){env.inventory[0].diagnostic={generatedAtISO:"later"};env.lastCfr03TestResult={anything:true};}});const r=await run(h);assert.equal(r.protectedStateMatched,true);});
+test("independent local-backup drift is reported without a false business-state mutation",async()=>{const h=harness({localBackupDrift:"independently-refreshed-backup"});h.env.saveCloudNow=()=>{throw new Error("must not run")};h.env.saveCloudDebounced=h.env.saveCloudNow;h.env.snapshotState=h.env.saveCloudNow;const r=await run(h);assert.equal(r.uploadCompleted,true);assert.equal(r.downloadCompleted,true);assert.equal(r.contentVerified,true);assert.equal(r.cleanupAbsenceVerified,true);assert.equal(r.firestoreWriteAttempted,false);assert.equal(r.protectedStateMatched,true);assert.equal(r.appStateMutationDetected,false);assert.deepEqual(r.protectedStateMismatchPaths,[]);assert.equal(r.localStateBackupMatched,false);assert.equal(r.localStateBackupDriftObserved,true);assert.deepEqual(r.localStateBackupMismatchPaths,["$.localStateBackup.value"]);assert.equal(r.localJobFileCacheMatched,true);assert.deepEqual(r.localJobFileCacheMismatchPaths,[]);});
 test("job file cache remains byte-equivalent and separate",async()=>{const h=harness();const r=await run(h);assert.equal(r.localJobFileCacheMatched,true);assert.deepEqual(r.localJobFileCacheMismatchPaths,[]);assert.equal(h.env.localStorage.getItem("cutting_job_files_v1"),h.cache);});
 test("no Firestore save occurs and production flags remain false",async()=>{const h=harness();h.env.saveCloudNow=()=>{throw new Error("called")};h.env.saveCloudDebounced=h.env.saveCloudNow;const r=await run(h);assert.equal(r.firestoreWriteAttempted,false);const d=h.api.getDiagnostics();assert.equal(d.productionUploadsEnabled,false);assert.equal(d.productionDownloadsEnabled,false);assert.equal(d.storageRulesExpectedVersion,"CFR-03A-deny-all-v1");});
 

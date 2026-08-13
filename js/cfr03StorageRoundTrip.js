@@ -25,7 +25,7 @@
     "receiptTrackerWeeks", "orderRequests", "weeklyCostReports", "dailyCutHours",
     "totalHistory", "pumpEff", "garnetCleanings", "appConfig", "dashboardLayout",
     "costLayout", "jobLayout", "maintenanceTasksV2", "maintenanceCalendarInstancesV2",
-    "maintenanceOccurrencesV2", "localStateBackup"
+    "maintenanceOccurrencesV2"
   ];
   let lastResult = null;
 
@@ -81,12 +81,14 @@
   function captureSafetyState(env){
     const roots = {};
     PROTECTED_KEYS.forEach(key=>{
-      const value = key === "localStateBackup"
-        ? readLocalStorage(env, "omax_local_state_backup_v1")
-        : (Object.prototype.hasOwnProperty.call(env, key) ? env[key] : { $cfr03Type:"missing-property" });
+      const value = Object.prototype.hasOwnProperty.call(env, key) ? env[key] : { $cfr03Type:"missing-property" };
       roots[key] = canonical(value, `$.${key}`);
     });
-    return { roots, jobFileCache:canonical(readLocalStorage(env, "cutting_job_files_v1"), "$.cutting_job_files_v1") };
+    return {
+      roots,
+      localStateBackup:canonical(readLocalStorage(env, "omax_local_state_backup_v1"), "$.localStateBackup"),
+      jobFileCache:canonical(readLocalStorage(env, "cutting_job_files_v1"), "$.cutting_job_files_v1")
+    };
   }
 
   function compareSafetyState(before, after){
@@ -97,8 +99,9 @@
       protectedStateRootResults[key] = { matched:paths.length === 0, mismatchPaths:paths };
       protectedStateMismatchPaths.push(...paths);
     });
+    const localStateBackupMismatchPaths = mismatchPaths(before.localStateBackup, after.localStateBackup, "$.localStateBackup");
     const localJobFileCacheMismatchPaths = mismatchPaths(before.jobFileCache, after.jobFileCache, "$.cutting_job_files_v1");
-    return { protectedStateRootResults, protectedStateMismatchPaths, localJobFileCacheMismatchPaths };
+    return { protectedStateRootResults, protectedStateMismatchPaths, localStateBackupMismatchPaths, localJobFileCacheMismatchPaths };
   }
 
   function newResult(now){
@@ -110,6 +113,7 @@
       absenceVerified:false, cleanupAttempted:false, cleanupCompleted:false, cleanupAbsenceVerified:false, possibleOrphanPath:"",
       manualCleanupRequired:false, operationIndeterminate:false, failedStage:"", error:null, warnings:[], firestoreWriteAttempted:false,
       appStateMutationDetected:false, protectedStateMatched:false, protectedStateMismatchPaths:[], protectedStateRootResults:{},
+      localStateBackupMatched:false, localStateBackupMismatchPaths:[], localStateBackupDriftObserved:false,
       localJobFileCacheMatched:false, localJobFileCacheMismatchPaths:[]
     };
   }
@@ -160,6 +164,8 @@
         Object.assign(result, comparison);
         result.protectedStateMatched = comparison.protectedStateMismatchPaths.length === 0;
         result.appStateMutationDetected = !result.protectedStateMatched;
+        result.localStateBackupMatched = comparison.localStateBackupMismatchPaths.length === 0;
+        result.localStateBackupDriftObserved = !result.localStateBackupMatched;
         result.localJobFileCacheMatched = comparison.localJobFileCacheMismatchPaths.length === 0;
         lastResult = summarize(result); return result;
       };
