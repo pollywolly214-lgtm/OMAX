@@ -4226,7 +4226,14 @@ window.configureCfr05OperatorSession = function(confirmation, confirmations = {}
 window.clearCfr05OperatorSession = function(){ return cfr05SessionGates.clear(); };
 window.cfr05CloudCuttingFiles = window.Cfr05CloudCuttingFiles?.createApi(window, {
   foundation:window.Cfr04WorkspaceMetadata,
-  gates:cfr05SessionGates
+  gates:cfr05SessionGates,
+  environment:()=>({
+    firebaseInitialized:Boolean(FB.app&&FB.db&&FB.storage),
+    projectId:String(FB.app?.options?.projectId||window.FIREBASE_CONFIG?.projectId||""),
+    bucket:String(FB.app?.options?.storageBucket||CUT_FILE_STORAGE_BUCKET||""),
+    workspaceId:WORKSPACE_ID,
+    authenticated:Boolean(FB.user)
+  })
 });
 window.uploadCfr05CuttingFile = async function(jobId, file, onStage){
   const uid=FB.user?.uid||"", workspaceId=WORKSPACE_ID, api=window.Cfr04WorkspaceMetadata;
