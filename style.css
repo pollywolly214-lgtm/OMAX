@@ -1539,17 +1539,41 @@ body.modal-open .auth-bar {
 }
 
 .cutting-job-import-dialog {
-  width: min(960px, calc(100vw - 32px));
+  width: min(1180px, calc(100vw - 24px));
+  height: auto;
   max-height: calc(100vh - 32px);
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid #ccd7e7;
   border-radius: 12px;
-  padding: 20px;
+  padding: 0;
   box-shadow: 0 24px 64px rgba(10, 32, 68, 0.3);
 }
 .cutting-job-import-dialog::backdrop { background: rgba(16, 28, 48, 0.58); }
+.cutting-job-import-controls { padding: 12px 14px 10px; border-bottom: 1px solid #d8e0ec; }
 .cutting-job-import-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .cutting-job-import-dialog-header h3 { margin: 0; }
+.cutting-job-import-controls p { margin: 5px 0 8px; line-height: 1.35; }
+.cutting-job-import-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.cutting-job-import-actions label { line-height: 1.3; }
+.cutting-job-import-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 4px 10px; margin-top: 8px; line-height: 1.3; }
+.cutting-job-import-summary-item { min-width: 0; }
+.cutting-job-import-table-scroll { overflow: auto; max-height: min(58vh, 560px); overscroll-behavior: contain; }
+.cutting-job-import-table-scroll table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; }
+.cutting-job-import-table-scroll thead th { position: sticky; top: 0; z-index: 1; background: #eef3fa; }
+.cutting-job-import-table-scroll th,
+.cutting-job-import-table-scroll td { height: auto; padding: 5px 7px; line-height: 1.25; text-align: left; vertical-align: top; white-space: normal; border-bottom: 1px solid #e2e7ef; }
+.cutting-job-import-table-scroll tbody tr { height: auto; }
+.cutting-job-import-table-scroll .cji-col-number { min-width: 62px; white-space: nowrap; }
+.cutting-job-import-table-scroll .cji-col-material { min-width: 150px; }
+.cutting-job-import-table-scroll .cji-col-text { min-width: 260px; max-width: 380px; }
+.cutting-job-import-table-scroll .cji-material-kind { display: inline-block; margin-top: 3px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #40516b; }
+@media (max-width: 640px) {
+  .cutting-job-import-dialog { width: calc(100vw - 12px); max-height: calc(100vh - 12px); }
+  .cutting-job-import-controls { padding: 10px; }
+  .cutting-job-import-actions { align-items: stretch; }
+  .cutting-job-import-actions input[type="file"] { max-width: 100%; }
+  .cutting-job-import-table-scroll { max-height: 52vh; }
+}
 
 .auth-form {
   display: grid;
