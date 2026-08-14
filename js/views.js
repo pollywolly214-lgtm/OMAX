@@ -4534,6 +4534,7 @@ function viewJobs(){
               aria-expanded="${addFormOpen ? "true" : "false"}"
               aria-controls="jobAddPanel"
             >${addFormOpen ? "Hide add job form" : "+ New cutting job"}</button>
+            <button type="button" class="job-history-button" data-cutting-job-import-open>Import reviewed jobs</button>
             <button type="button" class="job-history-button" data-job-onedrive-setup>OneDrive setup</button>
             <button type="button" class="job-history-button" data-job-naming-open>Open Naming Widget</button>
             <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
