@@ -22418,6 +22418,7 @@ function renderJobs(){
       return { wasteFactor: Number(parsed.wasteFactor) >= 0 ? Number(parsed.wasteFactor) : fallback.wasteFactor, materials };
     } catch(_){ return defaultMaterialSettings(); }
   };
+  window.getLiveJobMaterialSettings = loadMaterialSettings;
   const saveMaterialSettings = (settings)=> localStorage.setItem(MATERIAL_SETTINGS_KEY, JSON.stringify(settings));
   let materialSettings = loadMaterialSettings();
   const gcd = (a, b)=> b ? gcd(b, a % b) : a;
@@ -22458,10 +22459,12 @@ function renderJobs(){
       qtyEl.textContent = "0.00";
       return;
     }
-    const baseWeight = thickness * areaSqIn * Number(selected.density || 0);
-    const wasteMultiplier = 1 + (Math.max(0, Number(materialSettings.wasteFactor) || 0) / 100);
-    const weight = baseWeight * wasteMultiplier;
-    const totalCost = weight * Number(selected.pricePerLb || 0);
+    const calculated = window.JobMaterialCalculator?.calculate({
+      material:selected, thicknessInches:thickness, pathLengthFt:lengthFt,
+      pathWidthFt:widthFt, wasteFactor:materialSettings.wasteFactor
+    });
+    if(!calculated){ costEl.value = ""; qtyEl.textContent = "0.00"; return; }
+    const {weight,totalCost}=calculated;
     qtyEl.textContent = weight.toFixed(2);
     costEl.value = totalCost.toFixed(2);
   };
@@ -22613,7 +22616,12 @@ function renderJobs(){
       ensureJobCategoryFolderOpen(categoryId);
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material, materialCost, materialQty, materialWeight, chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
+    const thickness = fractionToNumber(document.getElementById("jobMaterialThickness")?.value);
+    const pathLength = Number(document.getElementById("jobMaterialLengthFt")?.value);
+    const pathWidth = Number(document.getElementById("jobMaterialWidthFt")?.value);
+    const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material,
+      thickness, pathLength, pathWidth, materialCost, materialQty, materialWeight, materialCostComplete:materialCostRaw !== "",
+      chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
     cuttingJobs.push(newJob);
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
