@@ -23,7 +23,9 @@
   <script src="js/cfr05CloudCuttingFiles.js"></script>
   <script src="assets/vendor/cji-xlsx-parser.js"></script>
   <script src="js/materialCalculator.js"></script>
+  <script src="js/cuttingJobHistory.js"></script>
   <script src="js/cuttingJobImporter.js"></script>
+  <script src="js/cuttingJobRepair.js"></script>
   <script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js"></script>
   <script src="https://js.live.net/v8.0/OneDrive.js"></script>
   <script>/* prevent bfcache for easier debug refresh */ window.onpageshow = e=>{ if(e.persisted) location.reload(); };</script>
@@ -150,6 +152,8 @@
       <div class="cutting-job-import-actions">
         <input id="cuttingJobImportFile" type="file" accept=".xlsx,.csv,.json">
         <button id="cuttingJobImportPreview" type="button">Preview import</button>
+        <button id="cuttingJobRepairAudit" type="button">Audit 67-job repair</button>
+        <button id="cuttingJobRepairRun" type="button" disabled>Repair audited history</button>
         <label><input id="cuttingJobImportReviewed" type="checkbox"> I reviewed the preview and want to import all ready rows.</label>
         <button id="cuttingJobImportRun" type="button" disabled>Import reviewed jobs</button>
       </div>

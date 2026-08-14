@@ -3089,7 +3089,7 @@ function viewJobs(){
     categoryCounts.set(catKey, nextCat);
     jobCategoryCutMap.set(key, String(nextCat));
   });
-  const jobCutLabel = (job)=> jobCutMap.get(String(job?.id || "")) || "C000";
+  const jobCutLabel = (job)=> String(job?.cutNumber || jobCutMap.get(String(job?.id || "")) || "C000");
   const jobCategoryCutLabel = (job)=> jobCategoryCutMap.get(String(job?.id || "")) || "0";
   const cutNumberValue = (job)=> {
     const label = jobCutLabel(job);
