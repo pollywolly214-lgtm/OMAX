@@ -34,13 +34,23 @@
     return{status:matches.length?"ambiguous":"missing",projectNumber:key,canonicalName:canonical,folder:null,reason:matches.length?`Project category ${key} is ambiguous.`:`Missing project category ${canonical}.`};
   }
 
-  // Stable same-day order: preserved source cut_sequence/current cutNumber first,
-  // then immutable job id. Completed jobs use completedAtISO; active jobs use startISO.
-  const sequenceHint=job=>{const raw=job?.importProvenance?.cut_sequence??job?.cutNumber;const n=Number.parseInt(String(raw??"").replace(/\D/g,""),10);return Number.isFinite(n)?n:Number.MAX_SAFE_INTEGER;};
+  // Same-day imported groups use their original worksheet row, explicit source
+  // sequence, or a validated CUTPDF date/ordinal (in that order). Import/run
+  // timestamps are deliberately ignored. Non-imported jobs retain cutNumber order.
+  const positiveInteger=value=>{const text=String(value??"").trim();if(!/^\d+$/.test(text))return null;const number=Number(text);return Number.isSafeInteger(number)&&number>0?number:null;};
+  const imported=job=>Boolean(String(job?.import_event_id||job?.importProvenance?.import_event_id||"").trim());
+  const sourceRow=job=>positiveInteger(job?.importProvenance?.sourceRowNumber??job?.importProvenance?.source_row_number??job?.importProvenance?.__sourceRowNumber);
+  const sourceSequence=job=>positiveInteger(job?.importProvenance?.sourceSequence??job?.importProvenance?.source_sequence);
+  const legacyCutSequence=job=>positiveInteger(job?.importProvenance?.cut_sequence);
+  const currentSequence=job=>positiveInteger(String(job?.cutNumber??"").replace(/^C/i,""));
+  const cutPdfOrdinal=(job,date)=>{const eventId=String(job?.import_event_id||job?.importProvenance?.import_event_id||"").trim(),match=/^CUTPDF-(\d{8})-(\d{3})$/.exec(eventId);if(!match||match[1]!==String(date).replaceAll("-",""))return null;return positiveInteger(match[2]);};
   const historicalDate=(job,completed)=>clean(completed?job?.completedAtISO:job?.startISO).slice(0,10)||"9999-12-31";
   function orderedJobs(active,completed){
-    return [...(Array.isArray(active)?active:[]).map(job=>({job,completed:false})),...(Array.isArray(completed)?completed:[]).map(job=>({job,completed:true}))]
-      .sort((a,b)=>historicalDate(a.job,a.completed).localeCompare(historicalDate(b.job,b.completed))||sequenceHint(a.job)-sequenceHint(b.job)||String(a.job?.id||"").localeCompare(String(b.job?.id||"")));
+    const entries=[...(Array.isArray(active)?active:[]).map(job=>({job,completed:false})),...(Array.isArray(completed)?completed:[]).map(job=>({job,completed:true}))];
+    const completeForAll=(items,read,{unique=false}={})=>{const values=items.map(read);return items.length&&values.every(Number.isFinite)&&(!unique||new Set(values).size===values.length)?values:null;};
+    const groups=new Map();for(const entry of entries){entry.date=historicalDate(entry.job,entry.completed);if(!groups.has(entry.date))groups.set(entry.date,[]);groups.get(entry.date).push(entry);}
+    for(const[date,group]of groups){const imports=group.filter(entry=>imported(entry.job));let values=completeForAll(imports,entry=>sourceRow(entry.job));if(!values)values=completeForAll(imports,entry=>sourceSequence(entry.job));if(!values)values=completeForAll(imports,entry=>cutPdfOrdinal(entry.job,date),{unique:true});if(!values)values=completeForAll(imports,entry=>legacyCutSequence(entry.job));imports.forEach((entry,index)=>{entry.sameDayOrder=values?values[index]:Number.MAX_SAFE_INTEGER;});group.filter(entry=>!imported(entry.job)).forEach(entry=>{entry.sameDayOrder=currentSequence(entry.job)??Number.MAX_SAFE_INTEGER;});}
+    return entries.sort((a,b)=>a.date.localeCompare(b.date)||a.sameDayOrder-b.sameDayOrder||String(a.job?.id||"").localeCompare(String(b.job?.id||"")));
   }
   function resequence(active,completed){const ordered=orderedJobs(active,completed),changed=[];ordered.forEach(({job},index)=>{const value=`C${String(index+1).padStart(3,"0")}`;if(job.cutNumber!==value){changed.push({id:String(job.id),from:job.cutNumber??null,to:value});job.cutNumber=value;}});return{total:ordered.length,changed,sequence:ordered.map(({job})=>({id:String(job.id),cutNumber:job.cutNumber}))};}
   function audit(state,folders){const jobs=[...(state?.cuttingJobs||[]),...(state?.completedCuttingJobs||[])],assignments=jobs.map(job=>{const resolution=resolveProjectCategory(job?.projectNumber,folders);return{id:String(job?.id||""),projectNumber:projectKey(job?.projectNumber),currentCategoryId:String(job?.cat||""),targetCategoryId:resolution.folder?String(resolution.folder.id):null,status:resolution.status,missingCategory:resolution.status==="missing"?resolution.canonicalName:null};});return{readOnly:true,jobCount:jobs.length,expectedCategoryNames:PROJECT_CATEGORIES.map(x=>x[1]),assignments,unresolved:assignments.filter(x=>x.status!=="matched"),numbering:orderedJobs(state?.cuttingJobs,state?.completedCuttingJobs).map(({job},index)=>({id:String(job.id),current:job.cutNumber??null,expected:`C${String(index+1).padStart(3,"0")}`}))};}
