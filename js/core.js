@@ -4228,7 +4228,7 @@ window.cfr05CloudCuttingFiles = window.Cfr05CloudCuttingFiles?.createApi(window,
   foundation:window.Cfr04WorkspaceMetadata,
   gates:cfr05SessionGates
 });
-window.uploadCfr05CuttingFile = async function(jobId, file){
+window.uploadCfr05CuttingFile = async function(jobId, file, onStage){
   const uid=FB.user?.uid||"", workspaceId=WORKSPACE_ID, api=window.Cfr04WorkspaceMetadata;
   let membership={valid:false,active:false,role:null,path:null};
   if(uid&&FB.db&&api){
@@ -4236,7 +4236,7 @@ window.uploadCfr05CuttingFile = async function(jobId, file){
     const validation=api.validateWorkspaceMembershipRecord(data,{uid,workspaceId});
     membership={valid:validation.valid,active:data?.active===true,role:data?.role||null,path};
   }
-  return window.cfr05CloudCuttingFiles.upload({uid,workspaceId,jobId,file,membership,storage:FB.storage,firestore:FB.db,
+  return window.cfr05CloudCuttingFiles.upload({uid,workspaceId,jobId,file,membership,storage:FB.storage,firestore:FB.db,onStage,
     jobExists:id=>(Array.isArray(window.cuttingJobs)&&window.cuttingJobs.some(job=>String(job?.id)===String(id)))||(Array.isArray(window.completedCuttingJobs)&&window.completedCuttingJobs.some(job=>String(job?.id)===String(id)))});
 };
 window.getCfr05Membership = async function(){
