@@ -2971,7 +2971,7 @@ function viewJobs(){
   };
   const buildFileCellMarkup = (jobId, files)=>{
     const previews = (Array.isArray(files) ? files : []).map(filePreviewModel);
-    if (!previews.length) return '<div class="job-file-preview-empty small muted">No files attached</div>';
+    if (!previews.length) return '<div class="job-file-preview-empty small muted">Use Cloud files to view verified attachments</div>';
     const first = previews[0] || { name: "Attached file", mode: "message", content: "Preview unavailable", href: "", expectedPath: "", rootLocation: "" };
     const selectId = `jobFileSelect_${esc(jobId)}`;
     return `
@@ -3834,7 +3834,7 @@ function viewJobs(){
       : "";
     const fileMenu = fileCount
       ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
-      : `<p class="job-file-menu-empty small muted">No files attached</p>`;
+      : `<p class="job-file-menu-empty small muted">Use Cloud files to view verified attachments</p>`;
 
     const matCost = Number(job?.materialCost || 0);
     const matQty = Number(job?.materialQty || 0);
@@ -4024,8 +4024,7 @@ function viewJobs(){
             </div>
             <label class="job-edit-note">Notes<textarea data-history-field="notes" data-history-id="${job.id}" rows="3" placeholder="Notes...">${textEsc(job?.notes || "")}</textarea></label>
             <div class="job-edit-files">
-              <div class="job-edit-files-actions"><button type="button" data-cloud-files="${job.id}">Cloud files</button><button type="button" data-cloud-file-upload="${job.id}">Upload secure cloud file</button><button type="button" data-job-file-add="${job.id}" data-job-file-source="history">Attach from Reference Folder</button><button type="button" data-upload-job="${job.id}">Temporary local upload — not saved</button><button type="button" data-link-job-file="${job.id}">Link OneDrive URL</button></div>
-              <input type="file" data-job-file-input="${job.id}" multiple style="display:none">
+              <div class="job-edit-files-actions"><button type="button" data-cloud-files="${job.id}">Cloud files</button><button type="button" data-cloud-file-upload="${job.id}">Upload secure cloud file</button></div>
               <ul class="job-file-list">
                 ${jobFiles.length ? jobFiles.map((f, idx)=>{
                   const safeName = f.name || `file_${idx+1}`;
@@ -4044,7 +4043,7 @@ function viewJobs(){
                   const pathAction = expectedPath ? `<button type="button" class="link" data-preview-path-btn data-preview-expected-path="${esc(expectedPath)}" data-preview-root-location="${esc(rootLabel)}" data-preview-root-id="${esc(String(f?.rootId || 'Not verified'))}" data-preview-root-hint="${esc(String(f?.rootLocationHint || ''))}">Show path</button>` : "";
                   const linkAction = !isRef ? `<button type="button" class="link" data-edit-file-link="${job.id}" data-file-index="${idx}">Link</button>` : "";
                   return `<li>${link} ${sourceTag} ${statusTag} ${expectedPath ? `<span class="small muted">— Root: ${esc(rootLabel)} · Relative path: ${esc(expectedPath)} · Root ID: ${esc(String(f?.rootId || "Not verified").slice(0,16))}</span>` : ""} ${pathAction} ${linkAction} <button type="button" class="link" data-remove-file="${job.id}" data-file-index="${idx}">Remove</button></li>`;
-                }).join("") : `<li class="muted">No files attached</li>`}
+                }).join("") : `<li class="muted">Use Cloud files to view verified attachments</li>`}
               </ul>
             </div>
             <div class="job-edit-actions">
@@ -4160,7 +4159,7 @@ function viewJobs(){
           return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
         }).join("")
       : "";
-    const fileMenuActions = `<div class="job-file-menu-actions"><button type="button" class="job-file-menu-action" data-cloud-files="${j.id}">Cloud files</button><button type="button" class="job-file-menu-action" data-cloud-file-upload="${j.id}">Upload secure cloud file</button><button type="button" class="job-file-menu-action" data-job-file-add="${j.id}">+ Add local reference</button></div>
+    const fileMenuActions = `<div class="job-file-menu-actions"><button type="button" class="job-file-menu-action" data-cloud-files="${j.id}">Cloud files</button><button type="button" class="job-file-menu-action" data-cloud-file-upload="${j.id}">Upload secure cloud file</button></div>
     <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
       <div class="cost-receipt-backdrop" data-order-repair-close></div>
       <div class="cost-receipt-card" role="document">
@@ -4175,7 +4174,7 @@ function viewJobs(){
 `;
     const fileMenu = (fileCount
       ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
-      : `<p class="job-file-menu-empty small muted">No files attached</p>`)
+      : `<p class="job-file-menu-empty small muted">Use Cloud files to view verified attachments</p>`)
       + fileMenuActions;
     const editing = editingJobs.has(j.id);
     const jobId = j?.id != null ? String(j.id) : "";
@@ -4460,8 +4459,7 @@ function viewJobs(){
             </div>
               <label class="job-edit-note">Notes<textarea data-j="notes" data-id="${j.id}" rows="3" placeholder="Notes...">${j.notes||""}</textarea></label>
               <div class="job-edit-files">
-                <div class="job-edit-files-actions"><button type="button" data-cloud-files="${j.id}">Cloud files</button><button type="button" data-cloud-file-upload="${j.id}">Upload secure cloud file</button><button type="button" data-job-file-add="${j.id}" data-job-file-source="active">Attach from Reference Folder</button><button type="button" data-upload-job="${j.id}">Temporary local upload — not saved</button><button type="button" data-link-job-file="${j.id}">Link OneDrive URL</button></div>
-                <input type="file" data-job-file-input="${j.id}" multiple style="display:none">
+                <div class="job-edit-files-actions"><button type="button" data-cloud-files="${j.id}">Cloud files</button><button type="button" data-cloud-file-upload="${j.id}">Upload secure cloud file</button></div>
                 <ul class="job-file-list">
                   ${jobFiles.length ? jobFiles.map((f, idx)=>{
                     const safeName = f.name || `file_${idx+1}`;
@@ -4480,7 +4478,7 @@ function viewJobs(){
                     const pathAction = expectedPath ? `<button type="button" class="link" data-preview-path-btn data-preview-expected-path="${esc(expectedPath)}" data-preview-root-location="${esc(rootLabel)}" data-preview-root-id="${esc(String(f?.rootId || 'Not verified'))}" data-preview-root-hint="${esc(String(f?.rootLocationHint || ''))}">Show path</button>` : "";
                     const linkAction = !isRef ? `<button type="button" class="link" data-edit-file-link="${j.id}" data-file-index="${idx}">Link</button>` : "";
                     return `<li>${link} ${sourceTag} ${statusTag} ${expectedPath ? `<span class="small muted">— Root: ${esc(rootLabel)} · Relative path: ${esc(expectedPath)} · Root ID: ${esc(String(f?.rootId || "Not verified").slice(0,16))}</span>` : ""} ${pathAction} ${linkAction} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
-                  }).join("") : `<li class=\"muted\">No files attached</li>`}
+                  }).join("") : `<li class=\"muted\">Use Cloud files to view verified attachments</li>`}
                 </ul>
               </div>
               <div class="job-edit-actions">
@@ -4500,12 +4498,6 @@ function viewJobs(){
     </div>
 
     ${avgBanner}
-    <div class="job-onedrive-permission-banner small" data-wjcuts-permission-banner hidden>
-      <span data-wjcuts-permission-text>WJ Cuts file references need folder permission before previews/opening files will work. Grant access to this computer’s WJ Cuts root folder.</span>
-      <button type="button" data-wjcuts-grant-permission>Grant permission</button>
-      <button type="button" data-wjcuts-open-setup>Open WJ Cuts setup</button>
-    </div>
-
     <div class="dashboard-layout job-layout" id="jobLayout">
       <div class="dashboard-window" data-job-window="categories">
         <div class="block job-category-panel" data-job-category-panel>
@@ -4535,12 +4527,10 @@ function viewJobs(){
               aria-controls="jobAddPanel"
             >${addFormOpen ? "Hide add job form" : "+ New cutting job"}</button>
             <button type="button" class="job-history-button" data-cutting-job-import-open>Import reviewed jobs</button>
-            <button type="button" class="job-history-button" data-job-onedrive-setup>OneDrive setup</button>
             <button type="button" class="job-history-button" data-job-naming-open>Open Naming Widget</button>
             <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
           </div>
         </div>
-        <div class="job-onedrive-status small muted">${esc(oneDriveStatusLabel)}</div>
         ${!addFormOpen && pendingFiles.length
           ? `<div class="job-add-indicator" role="status" aria-live="polite">${pendingSummary}</div>`
           : ""}
@@ -4626,11 +4616,10 @@ function viewJobs(){
           <button type="button" id="jobMaterialSettingsBtn">Material settings</button>
           </div>
           <div class="job-add-actions">
-            <button type="button" id="jobFilesBtn">Attach Files</button>
-            <button type="button" id="jobOneDriveLibraryAddBtn">Add from this computer OneDrive folder</button>
+            <button type="button" id="jobSecureCloudFilesBtn">Upload secure cloud file</button>
             <button type="submit">Add Job</button>
           </div>
-          <input type="file" id="jobFiles" multiple style="display:none">
+          <input type="file" id="jobSecureCloudFiles" accept=".dxf,.ord,.omx" multiple style="display:none">
           <datalist id="jobMaterialOptions">${materialInventoryOptionsMarkup}</datalist>
         </form>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
@@ -4707,72 +4696,6 @@ function viewJobs(){
             <label><input type="checkbox" id="jobFlowHidePreviews"> Hide previews</label>
           </div>
           <div class="job-flow-chart" id="jobFlowChart"></div>
-        </div>
-      </div>
-      <div class="job-note-modal-backdrop" id="jobOneDriveModal" hidden>
-        <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobOneDriveModalTitle" aria-describedby="jobOneDriveModalDescription">
-          <div class="job-note-modal-header">
-            <h4 id="jobOneDriveModalTitle">WJ Cuts Root Folder Setup</h4>
-            <button type="button" class="job-note-modal-close" data-onedrive-cancel aria-label="Close OneDrive setup">×</button>
-          </div>
-          <div class="job-note-modal-body">
-            <p id="jobOneDriveModalDescription" class="job-note-modal-description small muted">Choose this browser’s local OneDrive-synced WJ Cuts root folder. The app saves file references, not file contents.</p>
-            <p class="small muted" data-onedrive-setup-reason hidden></p>
-            <div class="job-onedrive-status-grid small muted" data-onedrive-status-grid>
-              <div>Status: <span data-onedrive-connection-status>Not linked</span></div>
-              <div>Selected folder: <span data-onedrive-root-status>Not selected</span></div>
-              <div>Root ID: <span data-onedrive-library-status>Not verified</span></div>
-              <div>Browser/device ID: <span data-onedrive-device-status>Not set</span></div>
-              <div>Manual hint: <span data-onedrive-root-path>Not set</span></div>
-            </div>
-            <div class="job-onedrive-current small muted" data-onedrive-current-computer></div>
-            <label class="job-edit-note">Manual hint (optional)
-              <input type="text" id="jobOneDriveFolderHint" placeholder="Shop drawings" value="${esc(oneDriveConfig.folderHint || "")}">
-            </label>
-            <div class="small muted">Manual hint only — the browser uses the selected local folder handle, not this text.</div>
-            <div class="job-onedrive-sync-actions">
-              <button type="button" class="job-note-modal-secondary" id="jobOneDriveRootPickerBtn">Select / re-authorize WJ Cuts root</button>
-              <button type="button" class="job-note-modal-secondary" data-wjcuts-modal-grant-permission hidden>Grant permission</button>
-            </div>
-            <details class="job-onedrive-advanced-diagnostics">
-              <summary>Advanced diagnostics</summary>
-              <div class="job-onedrive-profile-controls" hidden>
-                <label class="job-edit-note">Selected computer profile
-                  <select id="jobOneDriveComputerProfile"></select>
-                </label>
-                <label class="job-edit-note">New/rename profile label
-                  <input type="text" id="jobOneDriveProfileLabel" placeholder="Shop PC">
-                </label>
-                <div class="job-onedrive-sync-actions">
-                  <button type="button" class="job-note-modal-secondary" id="jobOneDriveProfileUseBtn">Use selected profile</button>
-                  <button type="button" class="job-note-modal-secondary" id="jobOneDriveProfileSaveBtn">Save PC name / hint</button>
-                </div>
-              </div>
-              <div class="job-onedrive-known" hidden>
-                <div class="small"><strong>Known computer root folders</strong></div>
-                <table class="small">
-                  <thead><tr><th>PC/profile</th><th>Root folder</th><th>Root hint</th><th>Root ID</th><th>Last verified</th><th>Last browser/device</th></tr></thead>
-                  <tbody data-onedrive-known-devices></tbody>
-                </table>
-              </div>
-            </details>
-          </div>
-          <div class="job-note-modal-actions">
-            <button type="button" class="job-note-modal-secondary" data-onedrive-cancel>Close</button>
-            <button type="button" class="job-note-modal-primary" data-onedrive-save>Save hint</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="job-naming-modal-backdrop" id="jobNamingModal" hidden>
-        <div class="job-naming-modal" role="dialog" aria-modal="true" aria-labelledby="jobNamingModalTitle" tabindex="-1">
-          <div class="job-note-modal-header">
-            <h4 id="jobNamingModalTitle">File Naming Widget</h4>
-            <button type="button" class="job-note-modal-close" data-naming-close aria-label="Close naming widget">×</button>
-          </div>
-          <div class="job-naming-modal-body">
-            <iframe src="naming-widget.html" title="File naming widget" loading="lazy"></iframe>
-          </div>
         </div>
       </div>
       <div class="job-note-modal-backdrop" id="jobNoteModal" hidden>

@@ -4226,9 +4226,16 @@ window.configureCfr05OperatorSession = function(confirmation, confirmations = {}
 window.clearCfr05OperatorSession = function(){ return cfr05SessionGates.clear(); };
 window.cfr05CloudCuttingFiles = window.Cfr05CloudCuttingFiles?.createApi(window, {
   foundation:window.Cfr04WorkspaceMetadata,
-  gates:cfr05SessionGates
+  gates:cfr05SessionGates,
+  environment:()=>({
+    firebaseInitialized:Boolean(FB.app&&FB.db&&FB.storage),
+    projectId:String(FB.app?.options?.projectId||window.FIREBASE_CONFIG?.projectId||""),
+    bucket:String(FB.app?.options?.storageBucket||CUT_FILE_STORAGE_BUCKET||""),
+    workspaceId:WORKSPACE_ID,
+    authenticated:Boolean(FB.user)
+  })
 });
-window.uploadCfr05CuttingFile = async function(jobId, file){
+window.uploadCfr05CuttingFile = async function(jobId, file, onStage){
   const uid=FB.user?.uid||"", workspaceId=WORKSPACE_ID, api=window.Cfr04WorkspaceMetadata;
   let membership={valid:false,active:false,role:null,path:null};
   if(uid&&FB.db&&api){
@@ -4236,7 +4243,7 @@ window.uploadCfr05CuttingFile = async function(jobId, file){
     const validation=api.validateWorkspaceMembershipRecord(data,{uid,workspaceId});
     membership={valid:validation.valid,active:data?.active===true,role:data?.role||null,path};
   }
-  return window.cfr05CloudCuttingFiles.upload({uid,workspaceId,jobId,file,membership,storage:FB.storage,firestore:FB.db,
+  return window.cfr05CloudCuttingFiles.upload({uid,workspaceId,jobId,file,membership,storage:FB.storage,firestore:FB.db,onStage,
     jobExists:id=>(Array.isArray(window.cuttingJobs)&&window.cuttingJobs.some(job=>String(job?.id)===String(id)))||(Array.isArray(window.completedCuttingJobs)&&window.completedCuttingJobs.some(job=>String(job?.id)===String(id)))});
 };
 window.getCfr05Membership = async function(){

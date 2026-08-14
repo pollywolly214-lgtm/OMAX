@@ -68,15 +68,19 @@ service firebase.storage {
     }
     match /workspaces/{workspaceId}/cutting-jobs/{jobId}/files/{fileId}/{safeFileName} {
       allow create: if safeIds(workspaceId, jobId, fileId) && allowedName(safeFileName)
+        && resource == null
         && activeRole(workspaceId, ['owner','admin','operator'])
         && validCreate(workspaceId, jobId, fileId, safeFileName);
       allow get: if safeIds(workspaceId, jobId, fileId) && allowedName(safeFileName)
         && activeRole(workspaceId, ['owner','admin','operator','viewer'])
-        && validExisting(workspaceId, jobId, fileId, safeFileName);
-      allow delete: if safeIds(workspaceId, jobId, fileId)
+        && (resource == null || validExisting(workspaceId, jobId, fileId, safeFileName));
+      // Client deletion exists only for immediate compensation of the uploader's
+      // own definitely failed upload. It is not a permanent deletion facility.
+      allow delete: if safeIds(workspaceId, jobId, fileId) && allowedName(safeFileName)
         && activeRole(workspaceId, ['owner','admin','operator'])
-        && (member(workspaceId).role in ['owner','admin'] || resource.metadata.createdBy == request.auth.uid)
-        && validExisting(workspaceId, jobId, fileId, safeFileName);
+        && resource.metadata.createdBy == request.auth.uid
+        && validExisting(workspaceId, jobId, fileId, safeFileName)
+        && request.time < resource.timeCreated + duration.value(15, 'm');
       allow update, list: if false;
     }
     match /{allPaths=**} { allow read, write: if false; }

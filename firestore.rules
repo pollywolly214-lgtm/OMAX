@@ -51,13 +51,14 @@ service cloud.firestore {
       allow list, create, update, delete: if false;
     }
     match /workspaces/{workspaceId}/cuttingJobs/{jobId} {
-      allow get: if activeMember(workspaceId) && validJob(resource.data, workspaceId, jobId);
+      allow get: if activeMember(workspaceId) && (resource == null || validJob(resource.data, workspaceId, jobId));
       allow list: if false;
       allow create: if writer(workspaceId) && validJob(request.resource.data, workspaceId, jobId)
         && request.resource.data.createdBy == request.auth.uid;
       allow update, delete: if false;
       match /files/{fileId} {
-        allow get, list: if activeMember(workspaceId) && validFile(resource.data, workspaceId, jobId, fileId);
+        allow get: if activeMember(workspaceId) && validFile(resource.data, workspaceId, jobId, fileId);
+        allow list: if activeMember(workspaceId);
         allow create: if writer(workspaceId) && validFile(request.resource.data, workspaceId, jobId, fileId)
           && request.resource.data.createdBy == request.auth.uid
           && existsAfter(/databases/$(database)/documents/workspaces/$(workspaceId)/cuttingJobs/$(jobId))

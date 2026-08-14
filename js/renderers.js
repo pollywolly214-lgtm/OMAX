@@ -1675,12 +1675,12 @@ function verifyRootSignatureMatches(signature){
 function describeLocalRootPreviewError(err){
   const msg = String(err?.message || err || "").toLowerCase();
   if (msg.includes("notallowederror") || msg.includes("permission") || msg.includes("denied")){
-    return "Preview unavailable: this browser lost access to your WJ Cuts root folder. Re-open OneDrive setup and re-select the root folder.";
+    return "Preview unavailable: this browser lost access to your WJ Cuts root folder. Re-open retired local folder setup and re-select the root folder.";
   }
   if (msg.includes("notfounderror") || msg.includes("not found")){
     return "Preview unavailable: this file was not found under your selected WJ Cuts root folder. Verify the same shared root folder is selected.";
   }
-  return "Preview unavailable: unable to read this file from your WJ Cuts root folder. Re-open OneDrive setup and verify root folder access.";
+  return "Preview unavailable: unable to read this file from your WJ Cuts root folder. Re-open retired local folder setup and verify root folder access.";
 }
 
 async function resolveLocalFileFromRelativePath(relativePath){
@@ -2192,7 +2192,7 @@ function readFileAsDataUrl(file){
 async function filesToAttachments(fileList){
   const files = Array.from(fileList || []);
   if (files.length){
-    toast("Local uploads are temporary and not saved as durable cloud file references. Use Attach from Reference Folder.");
+    toast("Local uploads are temporary and not saved as durable cloud file references. Use retired local reference workflow.");
   }
   return [];
 }
@@ -20215,82 +20215,7 @@ function renderJobs(){
   };
   applyPendingJobHighlight();
 
-  const pendingJobFocus = window.pendingJobFocus;
-  if (pendingJobFocus){
-    window.pendingJobFocus = null;
-    if (pendingJobFocus.type === "jobAddFiles" && pendingJobFocus.id != null){
-      requestAnimationFrame(()=>{
-        const addButton = content.querySelector(`[data-upload-job="${pendingJobFocus.id}"]`);
-        if (addButton){
-          try {
-            addButton.focus({ preventScroll: true });
-          } catch (_err) {
-            addButton.focus();
-          }
-          addButton.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
-        }
-      });
-    } else if (pendingJobFocus.type === "jobRow" && pendingJobFocus.id != null){
-      requestAnimationFrame(()=>{
-        const targetId = String(pendingJobFocus.id);
-        const maxAttempts = 45;
-        const retryDelayMs = 160;
-        const scrollLockEvents = ["wheel", "touchmove"];
-        const scrollKeyCodes = new Set(["ArrowUp","ArrowDown","PageUp","PageDown","Home","End","Space"]);
-        const preventScroll = (ev)=>{ ev.preventDefault(); };
-        const preventScrollKeys = (ev)=>{ if (scrollKeyCodes.has(ev.code || "")) ev.preventDefault(); };
-        const lockUserScroll = ()=>{
-          scrollLockEvents.forEach(name=> window.addEventListener(name, preventScroll, { passive:false, capture:true }));
-          window.addEventListener("keydown", preventScrollKeys, { capture:true });
-        };
-        const unlockUserScroll = ()=>{
-          scrollLockEvents.forEach(name=> window.removeEventListener(name, preventScroll, { capture:true }));
-          window.removeEventListener("keydown", preventScrollKeys, { capture:true });
-        };
-        let unlocked = false;
-        const safeUnlock = ()=>{ if (!unlocked){ unlocked = true; unlockUserScroll(); } };
-        lockUserScroll();
-        const releaseTimer = setTimeout(()=> safeUnlock(), 6000);
-        const forceCenter = (el)=>{
-          const rect = el.getBoundingClientRect();
-          const viewportMid = window.innerHeight / 2;
-          const targetY = window.scrollY + rect.top - (viewportMid - (rect.height / 2));
-          window.scrollTo({ top: Math.max(0, targetY), behavior: "auto" });
-        };
-        const focusJobRowWithRetry = (attempt = 0)=>{
-          const targetSelectorId = (typeof escapeForSelector === "function")
-            ? escapeForSelector(targetId)
-            : ((typeof CSS !== "undefined" && typeof CSS.escape === "function") ? CSS.escape(targetId) : targetId);
-          const targetRow = content.querySelector(`[data-job-row="${targetSelectorId}"], [data-history-row="${targetSelectorId}"]`);
-          if (targetRow instanceof HTMLElement){
-            window.pendingJobRowHighlight = { id: targetId, untilMs: Date.now() + 5000 };
-            const parentDetails = targetRow.closest("details");
-            if (parentDetails instanceof HTMLElement) parentDetails.open = true;
-            targetRow.classList.remove("job-row-link-highlight");
-            void targetRow.offsetWidth;
-            targetRow.classList.add("job-row-link-highlight");
-            try { targetRow.scrollIntoView({ behavior: "auto", block: "center" }); } catch (_err){ try { targetRow.scrollIntoView(); } catch(__){} }
-            forceCenter(targetRow);
-            const pinMs = 1800;
-            const pinStart = Date.now();
-            const pinTimer = setInterval(()=>{
-              if (!targetRow.isConnected || (Date.now() - pinStart) > pinMs){
-                clearInterval(pinTimer);
-                return;
-              }
-              forceCenter(targetRow);
-            }, 120);
-            setTimeout(()=> targetRow.classList.remove("job-row-link-highlight"), 2600);
-            setTimeout(()=>{ clearInterval(pinTimer); clearTimeout(releaseTimer); safeUnlock(); }, pinMs + 120);
-            return;
-          }
-          if (attempt >= maxAttempts){ clearTimeout(releaseTimer); safeUnlock(); return; }
-          setTimeout(()=> focusJobRowWithRetry(attempt + 1), retryDelayMs);
-        };
-        focusJobRowWithRetry(0);
-      });
-    }
-  }
+  window.pendingJobFocus = null;
 
   const readOpenFolderSet = ()=>{
     const raw = Array.isArray(window.jobCategoryOpenFolders) ? window.jobCategoryOpenFolders : [];
@@ -21219,9 +21144,24 @@ function renderJobs(){
   }
 
   const addFormToggle = content.querySelector("[data-job-add-toggle]");
-  const newFilesBtn = document.getElementById("jobFilesBtn");
-  const newFilesInput = document.getElementById("jobFiles");
-  const oneDriveSetupBtn = content.querySelector("[data-job-onedrive-setup]");
+  const newFilesInput = document.getElementById("jobSecureCloudFiles");
+  const newFilesBtn = document.getElementById("jobSecureCloudFilesBtn");
+  newFilesBtn?.addEventListener("click",()=>newFilesInput?.click());
+  newFilesInput?.addEventListener("change",()=>{
+    const selected=Array.from(newFilesInput.files||[]);
+    const accepted=[];
+    for(const file of selected){
+      const validation=window.cfr05CloudCuttingFiles?.validateLocalFile(file);
+      if(validation?.valid)accepted.push({file,name:file.name,size:file.size,pending:true});
+      else toast(`${file.name}: not accepted (${(validation?.reasons||["invalid file"]).join(", ")}).`);
+    }
+    pendingNewJobFiles.splice(0,pendingNewJobFiles.length,...accepted.slice(0,10));
+    newFilesInput.value="";
+    toast(accepted.length?`${Math.min(accepted.length,10)} secure cloud file${accepted.length===1?"":"s"} pending — not uploaded until Add Job succeeds.`:"No files pending.");
+    window.jobAddFormOpen=true;
+    renderJobs();
+  });
+  const oneDriveSetupBtn = null;
   const oneDriveModal = document.querySelector("#jobOneDriveModal");
   const oneDriveFolderHintInput = document.querySelector("#jobOneDriveFolderHint");
   const oneDriveEnabledInput = document.querySelector("#jobOneDriveEnabled");
@@ -21236,7 +21176,7 @@ function renderJobs(){
   const oneDriveCurrentComputer = document.querySelector("[data-onedrive-current-computer]");
   const oneDriveKnownDevices = document.querySelector("[data-onedrive-known-devices]");
   const oneDriveSetupReason = document.querySelector("[data-onedrive-setup-reason]");
-  const oneDriveLibraryAddToJobBtn = document.getElementById("jobOneDriveLibraryAddBtn");
+  const oneDriveLibraryAddToJobBtn = null;
   const oneDriveRootPickerBtn = document.getElementById("jobOneDriveRootPickerBtn");
   const permissionBanner = content.querySelector("[data-wjcuts-permission-banner]");
   const permissionBannerText = content.querySelector("[data-wjcuts-permission-text]");
@@ -21877,23 +21817,6 @@ function renderJobs(){
         }
       }
     });
-  });
-
-  newFilesBtn?.addEventListener("click", ()=>{ newFilesInput?.click(); });
-  newFilesInput?.addEventListener("change", async (e)=>{
-    const files = e.target.files;
-    if (!files || !files.length) return;
-    const formState = captureNewJobFormState();
-    const attachments = await filesToAttachments(files);
-    e.target.value = "";
-    if (!attachments.length){
-      restoreNewJobFormState(formState);
-      return;
-    }
-    toast("Use Attach from Reference Folder so this file can be saved as a WJ Cuts relative path.");
-    window.jobAddFormOpen = true;
-    renderJobs();
-    requestAnimationFrame(()=> restoreNewJobFormState(formState));
   });
 
   const addRootCategoryBtn = content.querySelector("[data-job-folder-add-root]");
@@ -22565,7 +22488,7 @@ function renderJobs(){
   });
   refreshEstimateBreakdown(addJobEstHoursInput, addJobEstBreakdown);
 
-  document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
+  document.getElementById("addJobForm")?.addEventListener("submit",async (e)=>{
     e.preventDefault();
     recalcMaterialTotals();
     const name  = document.getElementById("jobName").value.trim();
@@ -22616,21 +22539,39 @@ function renderJobs(){
       categoryId = String(folder.id);
       ensureJobCategoryFolderOpen(categoryId);
     }
-    const attachments = pendingNewJobFiles.map(f=>({ ...f }));
+    const pendingCloudFiles = pendingNewJobFiles.map(entry=>entry?.file).filter(file=>file && typeof file.arrayBuffer === "function");
     const thickness = fractionToNumber(document.getElementById("jobMaterialThickness")?.value);
     const pathLength = Number(document.getElementById("jobMaterialLengthFt")?.value);
     const pathWidth = Number(document.getElementById("jobMaterialWidthFt")?.value);
     const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material,
       thickness, pathLength, pathWidth, materialCost, materialQty, materialWeight, materialCostComplete:materialCostRaw !== "",
-      chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
+      chargeRate, costRate, priority, notes:"", manualLogs:[], files:[], cat: categoryId };
     cuttingJobs.push(newJob);
     window.CuttingJobHistory?.resequence(window.cuttingJobs,window.completedCuttingJobs);
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
-    pendingNewJobFiles.length = 0;
-    window.jobAddDraft = {};
     window.jobCategoryFilter = previousCategoryFilter;
-    persistJobChanges();
+    let saved;
+    try { saved = await saveCloudNow(); }
+    catch (error) { saved = { saved:false, error:String(error?.message || error) }; }
+    if (saved?.saved !== true || saved?.stateWriteCompleted !== true){
+      toast(`Job was not authoritatively saved; pending cloud files were not uploaded. ${saved?.error || ""}`.trim());
+      renderCalendarPreservingScroll();
+      renderJobs();
+      return;
+    }
+    window.jobAddDraft = {};
+    const attachmentFailures=[];
+    for (const file of pendingCloudFiles){
+      const outcome=await window.uploadCfr05CuttingFile(newJob.id,file,stage=>toast(`${file.name}: ${stage.replaceAll("_"," ")}`));
+      if (outcome.stage!=="completed") attachmentFailures.push({name:file.name,stage:outcome.stage,error:outcome.error,indeterminate:outcome.indeterminate,possibleOrphanPath:outcome.possibleOrphanPath});
+    }
+    pendingNewJobFiles.length = 0;
+    if (attachmentFailures.length){
+      const first=attachmentFailures[0];
+      toast(`Job created, but ${attachmentFailures.length} cloud file upload${attachmentFailures.length===1?"":"s"} failed at ${first.stage}${first.indeterminate?" (indeterminate; do not retry automatically)":""}.`);
+      content.dataset.cfr05LastResult=JSON.stringify({jobId:newJob.id,created:true,attachmentFailures:attachmentFailures.slice(0,10)});
+    } else if (pendingCloudFiles.length) toast(`Job created and ${pendingCloudFiles.length} cloud file${pendingCloudFiles.length===1?"":"s"} verified.`);
     renderCalendarPreservingScroll();
     renderJobs();
   });
@@ -22718,7 +22659,7 @@ function renderJobs(){
       j.files = Array.isArray(j.files) ? j.files : [];
       j.files.push(...attachments);
       saveCloudDebounced();
-      toast("Files added. For durable cross-device links, use Attach from Reference Folder.");
+      toast("Files added. For durable cross-device links, use retired local reference workflow.");
       renderJobs();
     }
   });
@@ -22829,88 +22770,41 @@ function renderJobs(){
     }
   };
 
-  const handleReferenceFolderAttachButtonClick = async (event, button)=>{
-    const btn = button || event?.target?.closest?.("[data-job-file-add]");
-    if (!btn) return false;
-    if (event){
-      event.preventDefault();
-      event.stopPropagation();
-      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
-      event.__wjCutsReferenceAttachHandled = true;
-    }
-    closeFileMenu(); closeActionMenu(); closeHistoryActionMenu();
-    const jobId = String(btn.getAttribute("data-job-file-add") || "");
-    const inHistoryRow = !!btn.closest("[data-history-row]");
-    const inActiveRow = !!btn.closest("[data-job-row]");
-    const activeCache = cachedActiveWJCutsRoot;
-    if (window.DEBUG_MODE) console.info("[cutting-job-files] reference attach button clicked", {
-      jobId,
-      inHistoryRow,
-      inActiveRow,
-      buttonText: String(btn.textContent || "").trim()
-    });
-    if (window.DEBUG_MODE) console.info("[cutting-job-files] attach click cached root", { jobId, cacheOk: !!activeCache?.ok, cacheReason: activeCache?.reason || "", hasHandle: !!activeCache?.handle });
-    if (!jobId){
-      toast("Unable to attach file: missing job id.");
-      return true;
-    }
-    toast("Opening WJ Cuts reference picker…");
-    if (typeof window !== "undefined") window.__wjCutsReferencePickerCanceled = false;
-    try {
-      const completed = await attachFromLocalOneDriveRoot(jobId);
-      const modalOpen = oneDriveModal && !oneDriveModal.hasAttribute("hidden");
-      const pickerCanceled = typeof window !== "undefined" && window.__wjCutsReferencePickerCanceled === true;
-      if (!completed && !modalOpen && !pickerCanceled){
-        toast("Reference folder attach did not complete.");
-      }
-    } catch (err){
-      console.error("Cutting job reference attach failed", err);
-      toast("Unable to attach WJ Cuts file reference.");
-    }
-    return true;
-  };
-
   const handleCuttingJobFileActionClick = async (e)=>{
     const act = (matched)=>{ if (!matched) return false; e.preventDefault(); e.stopPropagation(); if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation(); return true; };
     const cloudFiles = e.target.closest("[data-cloud-files]");
     if(cloudFiles){
       e.preventDefault(); e.stopPropagation(); const jobId=String(cloudFiles.getAttribute("data-cloud-files")||""); cloudFiles.disabled=true;
-      try{const result=await window.listCfr05CloudFiles(jobId),dialog=document.createElement("dialog");dialog.setAttribute("data-cfr05-cloud-dialog","");const rows=result.files.map(file=>`<li><strong>${escapeHtml(file.originalName)}</strong> · ${escapeHtml(file.extension.toUpperCase())}/${escapeHtml(file.contentType)} · ${(Number(file.sizeBytes)/1024).toFixed(1)} KB · verified <button type="button" data-cfr05-open="${escapeHtml(file.fileId)}">Preview/Open</button></li>`).join("");dialog.innerHTML=`<h3>Cloud files</h3><p>${result.cloudFileCount} verified; ${result.rejectedMetadataDocumentCount} rejected.</p><ul>${rows||"<li>No verified cloud files.</li>"}</ul><button type="button" data-cfr05-close>Close</button>`;document.body.appendChild(dialog);dialog.addEventListener("click",async event=>{if(event.target.closest("[data-cfr05-close]")){dialog.close();dialog.remove();return;}const download=event.target.closest("[data-cfr05-download]");if(download){download.disabled=true;try{await window.openCfr05CloudFile(jobId,download.getAttribute("data-cfr05-download"),{openObjectUrl:async(url,metadata)=>{const anchor=document.createElement("a");anchor.href=url;anchor.download=metadata.safeFileName;document.body.appendChild(anchor);anchor.click();anchor.remove();}});}catch(err){toast(err?.message||"Cloud file could not be downloaded.");}finally{download.disabled=false;}return;}const open=event.target.closest("[data-cfr05-open]");if(open){open.disabled=true;try{const fileId=open.getAttribute("data-cfr05-open"),outcome=await window.openCfr05CloudFile(jobId,fileId,{displayPreview:async preview=>{if(!/^data:image\/svg\+xml/i.test(preview))return false;let image=dialog.querySelector("[data-cfr05-preview]");if(!image){image=document.createElement("img");image.setAttribute("data-cfr05-preview","");image.alt="Verified DXF preview";image.style.maxWidth="100%";dialog.appendChild(image);}image.src=preview;return true;}});if(!outcome.previewAvailable){toast(`${outcome.previewRoute.toUpperCase()} browser preview unavailable; use explicit Download/Open.`);open.textContent="Download/Open";open.removeAttribute("data-cfr05-open");open.setAttribute("data-cfr05-download",fileId);}}catch(err){toast(err?.message||"Cloud file could not be opened.");}finally{open.disabled=false;}}});dialog.showModal();}
-      catch(err){toast(err?.message||"Cloud files are blocked or unavailable.");}finally{cloudFiles.disabled=false;}return true;
+      const listingHost=cloudFiles.closest("[data-job-edit-row], .job-edit, dialog")||content;
+      try{const result=await window.listCfr05CloudFiles(jobId),dialog=document.createElement("dialog");listingHost.dataset.cfr05LastListingResult=JSON.stringify(result);dialog.setAttribute("data-cfr05-cloud-dialog","");const rows=result.files.map(file=>`<li><strong>${escapeHtml(file.originalName)}</strong> · ${escapeHtml(file.extension.toUpperCase())}/${escapeHtml(file.contentType)} · ${(Number(file.sizeBytes)/1024).toFixed(1)} KB · verified <button type="button" data-cfr05-open="${escapeHtml(file.fileId)}">Preview/Open</button></li>`).join("");const listingError=result.error?`<p role="alert">Cloud Files listing failed: ${escapeHtml(result.error.message||result.error.code||"Unknown error")}</p>`:(result.blockers?.length?`<p role="alert">Cloud Files listing blocked: ${escapeHtml(result.blockers.join(", "))}</p>`:"");dialog.innerHTML=`<h3>Cloud files</h3>${listingError}<p>${result.cloudFileCount} verified; ${result.rejectedMetadataDocumentCount} rejected.</p><ul>${rows||"<li>No verified cloud files.</li>"}</ul><button type="button" data-cfr05-close>Close</button>`;document.body.appendChild(dialog);dialog.addEventListener("click",async event=>{if(event.target.closest("[data-cfr05-close]")){dialog.close();dialog.remove();return;}const download=event.target.closest("[data-cfr05-download]");if(download){download.disabled=true;try{await window.openCfr05CloudFile(jobId,download.getAttribute("data-cfr05-download"),{openObjectUrl:async(url,metadata)=>{const anchor=document.createElement("a");anchor.href=url;anchor.download=metadata.safeFileName;document.body.appendChild(anchor);anchor.click();anchor.remove();}});}catch(err){toast(err?.message||"Cloud file could not be downloaded.");}finally{download.disabled=false;}return;}const open=event.target.closest("[data-cfr05-open]");if(open){open.disabled=true;try{const fileId=open.getAttribute("data-cfr05-open"),outcome=await window.openCfr05CloudFile(jobId,fileId,{displayPreview:async preview=>{if(!/^data:image\/svg\+xml/i.test(preview))return false;let image=dialog.querySelector("[data-cfr05-preview]");if(!image){image=document.createElement("img");image.setAttribute("data-cfr05-preview","");image.alt="Verified DXF preview";image.style.maxWidth="100%";dialog.appendChild(image);}image.src=preview;return true;}});if(!outcome.previewAvailable){toast(`${outcome.previewRoute.toUpperCase()} browser preview unavailable; use explicit Download/Open.`);open.textContent="Download/Open";open.removeAttribute("data-cfr05-open");open.setAttribute("data-cfr05-download",fileId);}}catch(err){toast(err?.message||"Cloud file could not be opened.");}finally{open.disabled=false;}}});dialog.showModal();if(result.error||result.blockers?.length)toast("Cloud Files listing failed. See the Cloud Files dialog for details.");}
+      catch(err){const failure={jobId,error:{code:String(err?.code||"listingFailure"),message:String(err?.message||err)}};listingHost.dataset.cfr05LastListingResult=JSON.stringify(failure);const dialog=document.createElement("dialog");dialog.setAttribute("data-cfr05-cloud-dialog","");dialog.innerHTML=`<h3>Cloud files</h3><p role="alert">Cloud Files listing failed: ${escapeHtml(failure.error.message)}</p><button type="button">Close</button>`;dialog.querySelector("button").addEventListener("click",()=>{dialog.close();dialog.remove();});document.body.appendChild(dialog);dialog.showModal();toast("Cloud Files listing failed. See the Cloud Files dialog for details.");}finally{cloudFiles.disabled=false;}return true;
     }
     const cloudUpload = e.target.closest("[data-cloud-file-upload]");
     if (cloudUpload){
       e.preventDefault(); e.stopPropagation();
       if (cloudUpload.disabled) return true;
       const jobId=String(cloudUpload.getAttribute("data-cloud-file-upload")||"");
-      const input=document.createElement("input"); input.type="file"; input.accept=".dxf,.ord,.omx";
-      input.onchange=async()=>{const file=input.files?.[0];if(!file)return;cloudUpload.disabled=true;cloudUpload.textContent="Validating and uploading…";try{const outcome=await window.uploadCfr05CuttingFile(jobId,file);if(outcome.stage==="completed"){toast(`Cloud file verified: ${file.name}`);await window.listCfr05CloudFiles(jobId);}else if(outcome.indeterminate)toast(`Cloud upload indeterminate; manual review required${outcome.possibleOrphanPath?`: ${outcome.possibleOrphanPath}`:""}.`);else toast(`Cloud upload blocked/failed at ${outcome.stage}: ${outcome.error?.message||"Unknown error"}`);}catch(err){toast(err?.message||"Secure cloud upload failed.");}finally{cloudUpload.disabled=false;cloudUpload.textContent="Upload secure cloud file";}};
+      if (!jobId || !findJobRecord(jobId)?.job){ toast("Secure cloud upload blocked: this job has no persistent immutable ID."); return true; }
+      const input=document.createElement("input"); input.type="file"; input.accept=".dxf,.ord,.omx"; input.hidden=true; document.body.appendChild(input);
+      const host=cloudUpload.closest("[data-job-edit-row], .job-edit, dialog")||content;
+      const reportUpload=(value)=>{try{const bounded=JSON.stringify(value);host.dataset.cfr05LastUploadResult=bounded;host.dataset.cfr05LastResult=bounded;}catch(_){host.dataset.cfr05LastUploadResult='{"error":"diagnostic serialization failed"}';}};const reportListing=(value)=>{try{host.dataset.cfr05LastListingResult=JSON.stringify(value);}catch(_){host.dataset.cfr05LastListingResult='{"error":"diagnostic serialization failed"}';}};
+      input.addEventListener("change",async()=>{const file=input.files?.[0];if(!file){input.remove();return;}cloudUpload.disabled=true;try{
+        const validation=window.cfr05CloudCuttingFiles?.validateLocalFile(file);if(!validation?.valid){const result={stage:"local_file_validation",error:{code:validation?.reasons?.[0]||"invalidFile",message:(validation?.reasons||[]).join(", ")}};reportUpload(result);toast(`Secure cloud upload blocked: ${result.error.message}.`);return;}
+        const labels={membership_validation:"Checking membership…",job_validation:"Checking job ID…",local_file_validation:"Validating…",sha256_calculation:"Hashing…",immutable_path_creation:"Finalizing path…",storage_upload:"Uploading…",uploaded_metadata_verification:"Verifying Storage metadata…",firestore_metadata_creation:"Finalizing metadata…",final_verification:"Verifying…",completed:"Complete"};
+        const outcome=await window.uploadCfr05CuttingFile(jobId,file,(stage,partial)=>{cloudUpload.textContent=labels[stage]||stage;reportUpload(partial);});reportUpload(outcome);
+        if(outcome.stage==="completed"){toast(`Cloud file verified: ${file.name}`);try{const listing=await window.listCfr05CloudFiles(jobId);reportListing(listing);if(listing.error||listing.blockers?.length)toast("Upload succeeded; Cloud Files refresh failed. Do not upload the file again.");else toast("Cloud Files refreshed.");}catch(listingError){reportListing({jobId,error:{code:String(listingError?.code||"listingRefreshFailure"),message:String(listingError?.message||listingError)}});toast("Upload succeeded; Cloud Files refresh failed. Do not upload the file again.");}}
+        else if(outcome.indeterminate)toast(`Cloud upload indeterminate; do not retry automatically. Manual inspection required${outcome.possibleOrphanPath?`: ${outcome.possibleOrphanPath}`:""}.`);
+        else toast(`Cloud upload blocked/failed at ${outcome.stage}: ${outcome.error?.message||"Unknown error"}`);
+      }catch(err){const result={stage:"unexpected_failure",error:{code:String(err?.code||"unexpected"),message:String(err?.message||err)}};reportUpload(result);toast(`Secure cloud upload failed: ${result.error.message}`);}finally{input.remove();cloudUpload.disabled=false;cloudUpload.textContent="Upload secure cloud file";}} ,{once:true});
       input.click(); return true;
     }
-    const fileMenuAdd = e.target.closest("[data-job-file-add]");
-    if (fileMenuAdd){
-      await handleReferenceFolderAttachButtonClick(e, fileMenuAdd);
-      return true;
-    }
-    const previewPathBtn = e.target.closest("[data-preview-path-btn]");
-    if (previewPathBtn && act(true)){ const expected = previewPathBtn.getAttribute("data-preview-expected-path") || ""; const rootLocation = previewPathBtn.getAttribute("data-preview-root-location") || "WJ Cuts"; const rootId = previewPathBtn.getAttribute("data-preview-root-id") || "Not verified"; const manualHint = previewPathBtn.getAttribute("data-preview-root-hint") || ""; if (expected && navigator?.clipboard?.writeText){ navigator.clipboard.writeText(expected).catch(()=>{}); } const msg = `Root:\n${rootLocation || "WJ Cuts"}\n\nRoot ID:\n${rootId || "Not verified"}\n\nRelative path under root:\n${expected || "Unavailable"}\n\nHow to find it:\nOpen the selected WJ Cuts root folder on this computer, then follow the relative path above.${manualHint ? `\n\nOptional hint:\n${manualHint} (Manual hint, not verified full path)` : ""}`; if (window.alert) window.alert(msg); else toast(msg); return true; }
-    const localFileBtn = e.target.closest("[data-open-local-file]");
-    if (localFileBtn && act(true)){ await openLocalRootAttachment(localFileBtn.getAttribute("data-job-id"), localFileBtn.getAttribute("data-file-index")); return true; }
-    const upload = e.target.closest("[data-upload-job]");
-    if (upload && act(true)){ const id = upload.getAttribute("data-upload-job"); closeActionMenu(); closeHistoryActionMenu(); content.querySelector(`input[data-job-file-input="${id}"]`)?.click(); return true; }
-    const linkJobFile = e.target.closest("[data-link-job-file]");
-    if (linkJobFile && act(true)){ const idStr = String(linkJobFile.getAttribute("data-link-job-file") || ""); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; if (!j) return true; try { const picked = await window.oneDrivePicker.openOneDriveDxfPicker(); if (!picked) return true; j.files = Array.isArray(j.files) ? j.files : []; j.files.push({ id: genId(picked.fileName || "job_file"), name: picked.fileName || "Linked file", type: "", size: null, source: "onedrive", driveId: picked.driveId || "", itemId: picked.itemId || "", eTag: picked.eTag || "", lastModifiedDateTime: picked.lastModifiedDateTime || "", webUrl: picked.webUrl || "", url: picked.webUrl || "", addedAt: new Date().toISOString() }); saveCloudDebounced(); toast("OneDrive DXF linked"); renderJobs(); } catch (err){ toast(err?.message || "Unable to link OneDrive DXF."); } return true; }
-    const editFileLink = e.target.closest("[data-edit-file-link]");
-    if (editFileLink && act(true)){ const idStr = String(editFileLink.getAttribute("data-edit-file-link") || ""); const idx = Number(editFileLink.getAttribute("data-file-index")); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null; if (!file) return true; const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || ""); if (url == null) return true; file.url = url; file.source = "onedrive"; saveCloudDebounced(); toast(url ? "File link updated" : "File link cleared"); renderJobs(); return true; }
-    const removeFile = e.target.closest("[data-remove-file]");
-    if (removeFile && act(true)){ const idStr = String(removeFile.getAttribute("data-remove-file") || ""); const idx = Number(removeFile.getAttribute("data-file-index")); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; if (j && Array.isArray(j.files) && idx >= 0 && idx < j.files.length){ j.files.splice(idx, 1); saveCloudDebounced(); toast("File removed"); renderJobs(); } return true; }
     return false;
   };
 
   const handleRootFileActionClick = (e)=>{
     const target = e.target;
     if (!(target instanceof Element)) return;
-    const fileAction = target.closest("[data-cloud-files], [data-cloud-file-upload], [data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
+    const fileAction = target.closest("[data-cloud-files], [data-cloud-file-upload]");
     if (!fileAction || !content.contains(fileAction)) return;
     handleCuttingJobFileActionClick(e).catch(err => {
       console.error("Cutting job file action failed", err);
@@ -22922,35 +22816,6 @@ function renderJobs(){
   }
   content.__jobFileActionClickHandler = handleRootFileActionClick;
   content.addEventListener("click", handleRootFileActionClick, true);
-
-  const handleDocumentReferenceAttachClick = (event)=>{
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const btn = target.closest("[data-job-file-add]");
-    if (!btn) return;
-    handleReferenceFolderAttachButtonClick(event, btn).catch(err => {
-      console.error("Cutting job document reference attach failed", err);
-      toast("Unable to attach WJ Cuts file reference.");
-    });
-  };
-  if (typeof document !== "undefined"){
-    if (window.__cuttingJobReferenceAttachDocumentHandler){
-      document.removeEventListener("click", window.__cuttingJobReferenceAttachDocumentHandler, true);
-    }
-    window.__cuttingJobReferenceAttachDocumentHandler = handleDocumentReferenceAttachClick;
-    document.addEventListener("click", handleDocumentReferenceAttachClick, true);
-    document.querySelectorAll("[data-job-file-add]").forEach(btn => {
-      if (!(btn instanceof HTMLElement)) return;
-      if (btn.dataset.referenceAttachBound === "1") return;
-      btn.dataset.referenceAttachBound = "1";
-      btn.addEventListener("click", event => {
-        handleReferenceFolderAttachButtonClick(event, btn).catch(err => {
-          console.error("Cutting job direct reference attach failed", err);
-          toast("Unable to attach WJ Cuts file reference.");
-        });
-      });
-    });
-  }
 
   historyBody?.addEventListener("click", async (e)=>{
     if (await handleCuttingJobFileActionClick(e)) return;
