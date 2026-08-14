@@ -7,9 +7,13 @@ const renderers=fs.readFileSync("js/renderers.js","utf8");
 const service=fs.readFileSync("js/cfr05CloudCuttingFiles.js","utf8");
 const deletion=rules.slice(rules.indexOf("allow delete:"),rules.indexOf("allow update, list:"));
 const creation=rules.slice(rules.indexOf("allow create:"),rules.indexOf("allow get:"));
+const reading=rules.slice(rules.indexOf("allow get:"),rules.indexOf("// Client deletion"));
 
 assert.match(creation,/resource == null/,"create must reject an existing object rather than authorize overwrite");
 assert.match(rules,/allow update, list: if false;/,"an existing-object put is denied as update and cannot be listed");
+assert.match(reading,/safeIds\(workspaceId, jobId, fileId\) && allowedName\(safeFileName\)/,"absence checks require the exact validated cryptographic path");
+assert.match(reading,/activeRole\(workspaceId, \['owner','admin','operator','viewer'\]\)/,"absence checks remain membership gated");
+assert.match(reading,/resource == null \|\| validExisting\(workspaceId, jobId, fileId, safeFileName\)/,"missing objects are readable while invalid existing metadata remains denied");
 
 assert.match(deletion,/safeIds\(workspaceId, jobId, fileId\) && allowedName\(safeFileName\)/,"invalid paths and filenames must be denied");
 assert.match(deletion,/activeRole\(workspaceId, \['owner','admin','operator'\]\)/,"cleanup still requires an authorized active member");

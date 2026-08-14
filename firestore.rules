@@ -51,7 +51,7 @@ service cloud.firestore {
       allow list, create, update, delete: if false;
     }
     match /workspaces/{workspaceId}/cuttingJobs/{jobId} {
-      allow get: if activeMember(workspaceId) && validJob(resource.data, workspaceId, jobId);
+      allow get: if activeMember(workspaceId) && (resource == null || validJob(resource.data, workspaceId, jobId));
       allow list: if false;
       allow create: if writer(workspaceId) && validJob(request.resource.data, workspaceId, jobId)
         && request.resource.data.createdBy == request.auth.uid;
