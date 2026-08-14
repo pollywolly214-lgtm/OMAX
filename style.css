@@ -1538,6 +1538,19 @@ body.modal-open .auth-bar {
   line-height: 1.45;
 }
 
+.cutting-job-import-dialog {
+  width: min(960px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border: 1px solid #ccd7e7;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 24px 64px rgba(10, 32, 68, 0.3);
+}
+.cutting-job-import-dialog::backdrop { background: rgba(16, 28, 48, 0.58); }
+.cutting-job-import-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.cutting-job-import-dialog-header h3 { margin: 0; }
+
 .auth-form {
   display: grid;
   gap: 10px;
