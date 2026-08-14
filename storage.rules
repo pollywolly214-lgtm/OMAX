@@ -68,6 +68,7 @@ service firebase.storage {
     }
     match /workspaces/{workspaceId}/cutting-jobs/{jobId}/files/{fileId}/{safeFileName} {
       allow create: if safeIds(workspaceId, jobId, fileId) && allowedName(safeFileName)
+        && resource == null
         && activeRole(workspaceId, ['owner','admin','operator'])
         && validCreate(workspaceId, jobId, fileId, safeFileName);
       allow get: if safeIds(workspaceId, jobId, fileId) && allowedName(safeFileName)
