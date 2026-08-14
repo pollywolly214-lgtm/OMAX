@@ -1,0 +1,1460 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/assets/vendor/cji-xlsx-parser.LICENSE b/assets/vendor/cji-xlsx-parser.LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..5fcf11f56f2a4fd1dda9ae788cd38d37238501d0
+--- /dev/null
++++ b/assets/vendor/cji-xlsx-parser.LICENSE
+@@ -0,0 +1,4 @@
++MIT License
++Copyright (c) 2026 OMAX project contributors
++Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, subject to the standard MIT conditions.
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+diff --git a/assets/vendor/cji-xlsx-parser.js b/assets/vendor/cji-xlsx-parser.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..46d1558dfdea1c1cdf5af54513aead6ba064e524
+--- /dev/null
++++ b/assets/vendor/cji-xlsx-parser.js
+@@ -0,0 +1,15 @@
++/* CJI XLSX Parser 1.1.0 | MIT | local, dependency-free OOXML worksheet reader */
++(function(root,factory){"use strict";const api=factory();if(typeof module==="object"&&module.exports)module.exports=api;if(root)root.CjiXlsxParser=api;})(typeof globalThis!=="undefined"?globalThis:this,function(){"use strict";
++const text=b=>new TextDecoder("utf-8").decode(b),u16=(b,o)=>b[o]|b[o+1]<<8,u32=(b,o)=>(b[o]|b[o+1]<<8|b[o+2]<<16|b[o+3]<<24)>>>0;
++async function inflate(bytes){if(typeof DecompressionStream!=="function")throw new Error("XLSX decompression is unavailable in this browser.");const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));return new Uint8Array(await new Response(stream).arrayBuffer());}
++async function unzip(buffer){try{const b=new Uint8Array(buffer),files=new Map();let end=-1;for(let i=Math.max(0,b.length-65557);i<=b.length-22;i++)if(u32(b,i)===0x06054b50)end=i;if(end<0)throw 0;const count=u16(b,end+10);let p=u32(b,end+16);for(let n=0;n<count;n++){if(u32(b,p)!==0x02014b50)throw 0;const method=u16(b,p+10),size=u32(b,p+20),nameLen=u16(b,p+28),extra=u16(b,p+30),comment=u16(b,p+32),local=u32(b,p+42),name=text(b.slice(p+46,p+46+nameLen));if(u32(b,local)!==0x04034b50)throw 0;const ln=u16(b,local+26),le=u16(b,local+28),start=local+30+ln+le,raw=b.slice(start,start+size);files.set(name,method===0?raw:method===8?await inflate(raw):(()=>{throw 0;})());p+=46+nameLen+extra+comment;}return files;}catch(error){if(error instanceof Error&&/decompression/.test(error.message))throw error;throw new Error("Malformed XLSX workbook or ZIP package.");}}
++function decodeXml(v){return String(v||"").replace(/&#x([0-9a-f]+);/gi,(_,x)=>String.fromCodePoint(parseInt(x,16))).replace(/&#(\d+);/g,(_,x)=>String.fromCodePoint(Number(x))).replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,"&");}
++function attrs(tag){const out={};String(tag).match(/^<[^>]+>/)?.[0].replace(/([\w:.-]+)\s*=\s*(["'])(.*?)\2/g,(_,k,_q,v)=>(out[k]=decodeXml(v)));return out;}
++const elements=(xml,name)=>[...String(xml).matchAll(new RegExp(`<(?:[\\w.-]+:)?${name}\\b[^>]*?(?:\\/\\s*>|>[\\s\\S]*?<\\/(?:[\\w.-]+:)?${name}\\s*>)`,"gi"))].map(m=>m[0]);
++const body=(xml,name)=>String(xml).match(new RegExp(`<(?:[\\w.-]+:)?${name}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${name}\\s*>`,"i"))?.[1]??"";
++function col(ref){let n=0;for(const c of String(ref).toUpperCase().match(/^[A-Z]+/)?.[0]||"")n=n*26+c.charCodeAt(0)-64;return n-1;}
++function packagePath(target){const clean=String(target||"").replace(/\\/g,"/");if(clean.startsWith("/"))return clean.slice(1);if(clean.startsWith("xl/"))return clean;return`xl/${clean.replace(/^\.\//,"")}`;}
++function excelSerialDate(value,date1904){const raw=String(value??"").trim();if(!/^-?\d+(?:\.\d+)?$/.test(raw))return raw;const serial=Number(raw),whole=Math.floor(serial);if(!Number.isFinite(serial)||whole<0||whole>2958465)return raw;const epoch=date1904?Date.UTC(1904,0,1):Date.UTC(1899,11,30),millis=epoch+whole*86400000,date=new Date(millis);return Number.isNaN(date.getTime())?raw:date.toISOString().slice(0,10);}
++function cellValue(cell,shared){const a=attrs(cell),value=decodeXml(body(cell,"v"));if(a.t==="s")return shared[Number(value)]??"";if(a.t==="inlineStr")return elements(body(cell,"is"),"t").map(x=>decodeXml(body(x,"t"))).join("");if(a.t==="str")return value;return value;}
++async function parse(buffer,allowed=["Cutting Jobs","Blank Import Template"]){const z=await unzip(buffer),wbBytes=z.get("xl/workbook.xml"),relBytes=z.get("xl/_rels/workbook.xml.rels");if(!wbBytes)throw new Error("Malformed XLSX workbook: workbook.xml is missing.");const wb=text(wbBytes),rels=text(relBytes||new Uint8Array()),relMap={};for(const tag of elements(rels,"Relationship")){const a=attrs(tag);if(a.Id)relMap[a.Id]=a.Target;}const sheets=elements(wb,"sheet").map(tag=>{const a=attrs(tag),relationshipId=a["r:id"]||Object.entries(a).find(([k])=>k.endsWith(":id"))?.[1];return{name:a.name||"",relationshipId,target:relMap[relationshipId]};});const chosen=allowed.map(name=>sheets.find(s=>s.name===name)).find(Boolean);if(!chosen)throw new Error("Allowed worksheet missing: expected Cutting Jobs or Blank Import Template.");if(!chosen.relationshipId||!chosen.target)throw new Error(`Worksheet relationship unresolved for ${chosen.name}.`);const sheetBytes=z.get(packagePath(chosen.target));if(!sheetBytes)throw new Error(`Worksheet relationship unresolved for ${chosen.name}.`);const shared=[];for(const si of elements(text(z.get("xl/sharedStrings.xml")||new Uint8Array()),"si"))shared.push(elements(si,"t").map(x=>decodeXml(body(x,"t"))).join(""));const parsed=[];for(const rowTag of elements(text(sheetBytes),"row")){const a=attrs(rowTag),row=[];for(const cell of elements(rowTag,"c")){const ca=attrs(cell),index=col(ca.r);if(index>=0)row[index]=cellValue(cell,shared);}if(row.some(v=>String(v??"").trim()))parsed.push({sourceRowNumber:Number(a.r)||null,values:row});}const required=["import_event_id","record_status","job_name"];let headerIndex=-1;for(let i=0,nonEmpty=0;i<parsed.length&&nonEmpty<25;i++,nonEmpty++){const normalized=parsed[i].values.map(v=>String(v??"").trim().toLowerCase());if(required.every(key=>normalized.includes(key))){headerIndex=i;break;}}if(headerIndex<0)throw new Error(`Importer header row missing in ${chosen.name}; required import_event_id, record_status, and job_name.`);const header=parsed[headerIndex].values.map(v=>String(v??"").trim().toLowerCase()),date1904=/<(?:[\w.-]+:)?workbookPr\b[^>]*date1904=["'](?:1|true)["']/i.test(wb),dateColumns=new Set(["start_date","due_date","completed_date"]),rows=parsed.slice(headerIndex+1).map(entry=>({...Object.fromEntries(header.map((h,i)=>[h,dateColumns.has(h)?excelSerialDate(entry.values[i],date1904):String(entry.values[i]??"")]).filter(([h])=>h)),__sourceRowNumber:entry.sourceRowNumber}));return{sheetName:chosen.name,headerRowNumber:parsed[headerIndex].sourceRowNumber,date1904,rows};}
++return Object.freeze({version:"1.1.0",excelSerialDate,parse});});
+diff --git a/docs/cfr-04-workspace-membership-job-metadata.md b/docs/cfr-04-workspace-membership-job-metadata.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4a265c142869b7abaca6500d48d98620ee12103e
+--- /dev/null
++++ b/docs/cfr-04-workspace-membership-job-metadata.md
+@@ -0,0 +1,59 @@
++# CFR-04 — authoritative membership and cutting-job metadata foundation
++
++**Inspection date:** 2026-08-13. **Scope:** static repository work only. No browser, Firebase session, production read/write, rule deployment, Storage operation, cache mutation, or migration was performed.
++
++## Pre-edit inspection and planned files
++
++Before editing, the repository was inspected for `AGENTS.md` (none exists), package configuration (`package.json` is absent), Git state, Firebase configuration, Storage rules, Vercel configuration, authentication/workspace code, all cutting-job/file/log/cache references, and CFR-01 through CFR-03 code, tests, and documents. The exact planned change set was: add `js/cfr04WorkspaceMetadata.js`, add `tests/cfr04-workspace-metadata.test.js`, add this document, load the module from `index.html`, and expose its read-only diagnostic from `js/core.js`. `storage.rules` and `vercel.json` were explicitly excluded from modification.
++
++## Confirmed architecture
++
++The static site loads Firebase 8.10.1 namespaced/compat SDKs. `initFirebase` initializes the configured app, Auth, Firestore and an explicitly selected `gs://omax-maintenance.firebasestorage.app` Storage service. Auth uses local persistence and `onAuthStateChanged`; `FB.user.uid` is the identity. The existing sign-in UI still creates a Firebase Auth account after `auth/user-not-found`. That creates only an Auth identity—it does **not** create membership and grants no CFR-04 authorization.
++
++`WORKSPACE_ID` is the validated constant `github-prod`. Signed-in state continues to point `FB.docRef` at the authoritative `workspaces/github-prod/app/state` document. CFR-04 does not change its reads, writes, schema, or authority. The new membership diagnostic reads only the exact current user's membership document.
++
++The repository has no `firestore.rules` and `firebase.json` configures only `storage.rules`; therefore the deployed Firestore policy cannot be established from this repository. CFR-04 neither invents nor deploys rules. A future reviewed Firestore proposal must preserve existing `app/state` access while making membership client-read-only and operator/server-write-only; it must not weaken existing access.
++
++`storage.rules` remains byte-for-byte deny-all. Production upload/download flags remain false. The confirmed bucket CORS configuration is external and unchanged.
++
++## Existing cutting-job and file structures
++
++* Active `window.cuttingJobs` and `window.completedCuttingJobs` are embedded in the full-state document. Jobs contain business fields, `manualLogs: [{dateISO, completedHours}]`, and `files` attachment entries. Completion retains the ID and shallow-copies logs/files. Deletion may clone jobs into `deletedItems.payload`; `cuttingJobDatabase` and state/undo/import flows can also carry job-shaped data.
++* Existing attachments include legacy `{name,dataUrl,type,size,addedAt}` and local WJ Cuts references (IDs/names/types/sizes, relative paths, root IDs/signatures, timestamps). OneDrive entries can carry drive/item/eTag references and generated `preview.content`. Browser preview code uses `ArrayBuffer`, decoded DXF/ORD/OMX-like text, SVG data URLs, transient Blob URLs, and local/OneDrive sources.
++* `cutting_job_files_v1` retains local attachment `dataUrl` values and is reapplied during state adoption. `cutting_job_onedrive_preview_cache_v1` stores generated SVG data URLs. `omax_local_state_backup_v1` stores a compact full-state backup. CFR-04 does not read, clear, migrate, rewrite, reorder, or normalize any of them.
++* CFR-01 documented the full architecture/threat model. CFR-02 added the recursive content firewall and deterministic tests. CFR-03 added an explicitly confirmed isolated test round trip and diagnostics. CFR-04 does not call CFR-03 and performs zero Storage operations.
++
++## Authoritative membership schema
++
++Path: `workspaces/{workspaceId}/members/{uid}`.
++
++The bounded schema is exactly `schemaVersion: 1`, `uid`, `workspaceId`, `role`, `active`, `createdAtISO`, `updatedAtISO`, plus optional informational `email`. Allowed roles are `owner`, `admin`, `operator`, and `viewer`. UID must match the document ID; workspace must match the parent path; timestamps are UTC ISO strings. Email is never authorization. Unknown fields, inactive records, mismatches, malformed IDs, and unknown roles fail closed.
++
++Ordinary client code has no membership create/update/promote method and never self-enrolls. A missing record is reported as `membership_document_missing`. `getWorkspaceAuthorizationDiagnostics()` reports signed-in state/UID, workspace, expected path, existence, structural validity, role, active status, readiness and stable blocker codes. It returns no token, credential, URL, or file content.
++
++### Future trusted bootstrap (not performed)
++
++After reviewed Firestore rules exist, a trusted operator must use the Firebase Admin SDK or Firebase Console while authenticated as an authorized project administrator—not this web client—to create `workspaces/github-prod/members/{exactFirebaseAuthUid}` with all schema fields. The operator must copy the UID from Firebase Authentication, set the same UID and `github-prod` in the record, choose one allowed least-privilege role, set `active: true`, use server/audited current UTC ISO creation/update times, optionally add email only for display, then independently read and validate the exact document. No production membership document was created here.
++
++## Additive metadata and path map
++
++| Kind | Path |
++|---|---|
++| Authoritative legacy state (unchanged) | `workspaces/{workspaceId}/app/state` |
++| Membership | `workspaces/{workspaceId}/members/{uid}` |
++| Future job metadata | `workspaces/{workspaceId}/cuttingJobs/{jobId}` |
++| Future manual-log metadata | `workspaces/{workspaceId}/cuttingJobs/{jobId}/logs/{logId}` |
++| Future file metadata | `workspaces/{workspaceId}/cuttingJobs/{jobId}/files/{fileId}` |
++| Future immutable object | `workspaces/{workspaceId}/cutting-jobs/{jobId}/files/{fileId}/{safeFileName}` |
++
++All IDs are bounded path segments (`[A-Za-z0-9][A-Za-z0-9_-]{0,127}`, workspace maximum 64 characters). Builders reject slashes, traversal, controls, empty segments, and overlong IDs. Safe names are NFKC-normalized, basename-only ASCII, maximum 120 characters, and restricted to DXF/ORD/OMX.
++
++Job metadata is bounded to identity, workspace, name (200 characters), `active|completed`, creator UID and timestamps. Log metadata is bounded to identity/workspace/job, date, 0–24 finite completed hours, creator and timestamp. The canonical production file schema is exactly `schemaVersion`, `workspaceId`, `jobId`, `fileId`, `originalName`, `safeFileName`, `extension`, `contentType`, `sizeBytes`, `storagePath`, `sha256`, `status`, `createdBy`, and `createdAtISO`; it uses canonical MIME values, a 50 MiB maximum, an exact immutable object path, a 64-character lowercase SHA-256, and `status: ready`. Validators reject unknown fields and all File/Blob, ArrayBuffer/view, base64, data/blob URL, raw CAD text, preview markup, and other embedded content representations.
++
++These collections are definitions only. No job/log/file document is read, written, mirrored, or made authoritative in CFR-04.
++
++## Blockers and CFR-05 boundary
++
++Production file authorization is blocked until (1) a trusted operator creates a valid active membership, (2) reviewed Firestore access permits the necessary membership read without permitting client enrollment/promotion, and (3) CFR-05 reviews and deploys production Storage rules. Current deny-all Storage rules independently block every transfer.
++
++CFR-05—not CFR-04—will create/review production Storage rules and connect upload, download, and preview behavior only after authoritative membership exists. It must preserve the full-state authority until a separately reviewed migration, retain local caches, and validate immutable object metadata. CFR-04 performs no production mutation and does not alter CORS.
+diff --git a/docs/cfr-05-secure-production-cutting-files.md b/docs/cfr-05-secure-production-cutting-files.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4b0c66c497b62b62f362754d5159b43eea768fbd
+--- /dev/null
++++ b/docs/cfr-05-secure-production-cutting-files.md
+@@ -0,0 +1,86 @@
++# CFR-05 — secure production cutting-file workflow
++
++**Implementation date:** 2026-08-13. This is a static, mocked implementation. No live Firebase read/write, upload, download, browser preview, rules deployment, CORS change, cache mutation, or data migration was performed.
++
++## Architecture and fail-closed gates
++
++The legacy arrays in `workspaces/github-prod/app/state` remain authoritative. CFR-05 never calls `saveCloudNow` or `snapshotState` and never inserts cloud metadata or bytes into `cuttingJobs`, `completedCuttingJobs`, manual logs, deleted items, backups, or local storage. It creates only a compatibility job document and child file metadata after a successful immutable Storage create. Existing local references remain available and `cutting_job_files_v1`, including the 47 production-origin entries reported by the operator, is neither read nor changed.
++
++The implementation has independent gates for upload implementation, download implementation, valid/active membership and role, confirmed Firestore membership write protection, and confirmed CFR-05 rules deployment. The final two default false after every page load. For an operator-controlled Vercel test session only, run:
++
++```js
++configureCfr05OperatorSession("CFR05 VERCEL TEST", {
++  firestoreMembershipWriteProtectionConfirmed: true,
++  firestoreFileAccessConfirmed: true,
++  productionRulesConfirmedDeployed: true
++})
++```
++
++This is memory-only and never writes Firestore or localStorage. `clearCfr05OperatorSession()` immediately restores both confirmations to false. The diagnostic blocker is exactly `firestoreMembershipWriteProtectionUnconfirmed`.
++
++## Authorization assumption that must be verified
++
++Before enabling or deploying Storage rules, export and review the **currently deployed Firestore rules**, their deployment project/database, and any functions they call. Prove that `workspaces/{workspaceId}/members/{uid}` permits `get` only as intentionally required and denies ordinary web clients every `create`, `update`, `delete`, batch write, wildcard-parent write, and field-transform route. Prove no broader recursive match grants those writes; UID and document ID/workspace must agree; clients cannot change `active`, `role`, `uid`, or `workspaceId`; and only a trusted Admin SDK/operator path can bootstrap or promote membership. Emulator tests must demonstrate denial for self-enrollment, activation, role promotion, cross-UID, and cross-workspace writes while preserving the existing `app/state` policy. Until this evidence is reviewed, transfers stay blocked and `storage.rules` must not be deployed.
++
++The exact bootstrap document, created only with Firebase Admin SDK or Console by a trusted project operator, is:
++
++```json
++{
++  "schemaVersion": 1,
++  "uid": "<exact Firebase Authentication UID and document ID>",
++  "workspaceId": "github-prod",
++  "role": "owner | admin | operator | viewer",
++  "active": true,
++  "createdAtISO": "<audited UTC ISO timestamp>",
++  "updatedAtISO": "<same or later audited UTC ISO timestamp>",
++  "email": "<optional informational email>"
++}
++```
++
++Owner/admin/operator may upload; every active role may download/preview. No client membership editor exists.
++
++## Paths, schemas, and state machines
++
++Objects use `workspaces/{workspaceId}/cutting-jobs/{jobId}/files/{cryptographicFileId}/{safeFileName}`. IDs and filenames are bounded CFR-04 path segments. The single maximum is **52,428,800 bytes (50 MiB)** in both JavaScript and Storage rules. Only DXF, ORD, and OMX names and their documented MIME allowlist pass.
++
++The create-only file document at `workspaces/{workspaceId}/cuttingJobs/{jobId}/files/{fileId}` contains exactly: `schemaVersion`, `workspaceId`, `jobId`, `fileId`, `originalName`, `safeFileName`, `extension`, `contentType`, `sizeBytes`, `storagePath`, `sha256`, `status`, `createdBy`, and `createdAtISO`. The compatibility document at `workspaces/{workspaceId}/cuttingJobs/{jobId}` contains only schema/workspace/job identity, the authoritative state path, exact creator UID, and creation time. Neither is a replacement for the full-state job.
++
++Upload is a single awaited pass: preflight → membership validation → authoritative job validation → local File validation → SHA-256 → cryptographic ID/immutable path → existence check and Storage create → uploaded metadata verification → additive Firestore create → final read/validation → completed. It never retries. A definite failure after a confirmed upload but before file-reference creation triggers one exact-object delete and one absence check. An indeterminate Storage/Firestore outcome is never retried or deleted and reports its exact possible orphan path for manual review. Diagnostics omit content, tokens and URLs.
++
++Download is: gates/membership → metadata read → strict metadata/path revalidation → exact Storage object → bounded in-memory Blob/ArrayBuffer → parser handoff or temporary object URL → unconditional URL revocation. Firebase v8's transient download URL may be used internally to fetch the Blob, but is never persisted or returned in diagnostics. Local safe references may still be preferred by the existing UI; cloud is the cross-device fallback.
++
++The UI adds an explicit “Upload secure cloud file” action, accepts one selected DXF/ORD/OMX, disables the initiating control during the awaited operation, prevents concurrent uploads, and reports blocked, failed, indeterminate/orphan, or verified results. It does not add permanent deletion. A cloud success is announced only after final metadata verification; the legacy job object is deliberately not mutated.
++
++## Rules proposal, publication, rollback, and orphan handling
++
++`storage.rules` is a **blocked production proposal**, not deployed here. It defaults all unrelated paths to deny, allows no list/update, scopes create/get/delete to the immutable path, validates authentication/membership/roles/path/custom metadata/type/50-MiB limit, and does not restore CFR-03. Delete exists solely for failed-upload compensation and requires the uploader or owner/admin.
++
++Publication procedure: (1) export/version the live Storage and Firestore rules; (2) complete the Firestore review/emulator denial matrix above; (3) bootstrap and independently validate the least-privilege member; (4) run Storage emulator tests; (5) deploy only the reviewed `storage.rules` to `omax-maintenance`; (6) verify the deployed rules hash/version; (7) set the two session gates only in an approved Vercel preview; (8) upload a disposable file, verify metadata/download/preview, and remove test artifacts through an operator-controlled process. Rollback immediately by redeploying the saved deny-all rules, clearing session gates, recording possible orphan paths, and avoiding retries/deletes until Firebase consoles/logs establish object and document state.
++
++For an orphan, record only its path/stage/time/UID, inspect exact Storage object metadata and exact Firestore file document as a trusted operator, reconcile checksum and IDs, then either preserve the referenced object or delete the confirmed unreferenced object administratively. Never bulk-list/delete or guess after an indeterminate result.
++
++## Vercel preview and later importer boundary
++
++Use Framework Preset **Other**, empty Build and Install commands, and Output Directory `.`. Sign in with the provisioned test operator, inspect `getWorkspaceAuthorizationDiagnostics()` and `cfr05CloudCuttingFiles.diagnostics(...)`, explicitly set session confirmations only after deployed-rule verification, exercise one approved disposable file from the UI, test phone download/preview, then clear the session and artifacts. This implementation run did not produce a preview URL or conduct those browser/live steps.
++
++A later cutting-job Excel importer is separate work. It must define backed-up, idempotent reconciliation and cutover rules; it must not infer that CFR-05 metadata documents are authoritative, upload existing caches, or restructure/migrate the full-state job arrays.
++
++## CFR-05A persistent listing and Firebase v8 correction
++
++Cloud metadata is not copied into either legacy job array. The visible **Cloud files** action issues one exact-job query against `workspaces/{workspaceId}/cuttingJobs/{jobId}/files`, validates document ID plus every bounded field, displays only accepted records, and reports rejected record counts/reasons. This makes the listing reconstructible after navigation, refresh, or a new phone/shop session without local cache. Upload success re-runs that job query. No permanent-delete control exists.
++
++Production download uses the Firebase v8 `Reference.getDownloadURL()` followed by a credential-less, abortable 60-second `fetch`. It checks HTTP status and declared and actual response size against 50 MiB. The transient token URL stays inside the request function and is never returned, logged, diagnosed, or persisted. Bytes remain in memory. Only DXF is offered to the existing limited browser preview renderer. ORD and OMX are truthfully labeled Download/Open-only because the repository has no proven native browser renderer for them. A preview is reported available only after its SVG is installed in the controlled dialog. Temporary object URLs are always revoked.
++
++Empty browser MIME is accepted for approved extensions and canonicalized to `application/dxf` for DXF or `application/octet-stream` for ORD/OMX. Conflicting non-empty types fail. JavaScript, Firestore metadata, Storage custom metadata, and proposed rules enforce these canonical values.
++
++Compatibility-job and file metadata creation is one non-retrying Firestore write batch after both documents are read. Existing compatibility documents must contain only `schemaVersion`, `workspaceId`, `jobId`, `authoritativeStatePath`, `createdBy`, and `createdAtISO`, with exact identity/path agreement. The batch never overwrites an existing file. A definite batch failure leaves neither document from that batch and triggers the one-object compensation protocol; an indeterminate batch is never retried or cleaned automatically.
++
++The temporary Vercel gate now requires the exact phrase `CFR05 VERCEL TEST`, a `.vercel.app` hostname, and explicit confirmations for membership write protection, individual job/file Firestore access, and deployed Storage rules. This memory gate is merely an operator interlock—not a security boundary. Firestore and Storage rules remain the security boundary. When publishing Storage rules that call `firestore.get()`, the operator must also confirm Firebase's required cross-service permissions/service-agent access for Storage Rules to read Firestore, and must roll back if those checks fail. The proposal remains undeployed.
++
++## CFR-05B Firestore proposal and remaining production blocker
++
++`firestore.rules` is now a repository proposal wired alongside (not instead of) `storage.rules` in `firebase.json`; neither was deployed. It preserves the currently deployed authenticated access only under `workspaces/{workspaceId}/app/{document=**}`. Membership is own-document get-only, client immutable, and validated before use. Compatibility job/file documents are exact-schema, create-only, immutable, non-deletable, and writer-created; viewer listing is scoped to validated file documents. File create uses `existsAfter`/`getAfter` to require the exact valid compatibility job after the same atomic batch. Logs and unmatched paths remain denied.
++
++Before any live test, operators must review deployed Firestore membership protection and individual metadata access, publish and confirm both reviewed rulesets, confirm Storage Rules cross-service Firestore access, and create a valid membership administratively. Production currently has **zero active and zero completed cutting jobs**. Therefore the real end-to-end upload test must wait for the reviewed cutting-job importer to create the first legitimate authoritative job. The exact-job requirement must not be bypassed with a synthetic production job. Production transfer flags remain false.
++
++Before any preview/open, the client now validates Firestore metadata, reads Storage object metadata and compares the exact path, size, canonical MIME, and every required custom field, downloads with the bounded Firebase v8 path, recomputes SHA-256, and refuses every mismatch. URLs/tokens and preview payloads remain absent from returned diagnostics.
+diff --git a/docs/cji-01-reviewed-cutting-job-import.md b/docs/cji-01-reviewed-cutting-job-import.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..6d76257e2ea91ec1eae0d91b63e072c1edfa2d12
+--- /dev/null
++++ b/docs/cji-01-reviewed-cutting-job-import.md
+@@ -0,0 +1,75 @@
++# CJI-01 — reviewed full-detail cutting-job importer
++
++**Static implementation inspection:** 2026-08-13. The requested `omax_cut_tracker_recovery_review.xlsx` was not present anywhere under `/workspace`, so it was not opened and no claim is made about its actual rows. No browser, production import, Firebase operation, rules deployment, Storage operation, cache operation, or state mutation was performed.
++
++## Pre-edit inspection and planned changes
++
++Before editing, the repository was searched for `AGENTS.md` (none), `package.json` (absent), the recovery workbook (absent), spreadsheet parsers (none), job creation/completion/editing/manual-log paths, job folders, material pricing, full-state save/load/recovery code, and the reviewed maintenance importer/tests. The planned files were: local parser asset and license (`assets/vendor/cji-xlsx-parser.*`), pure importer (`js/cuttingJobImporter.js`), deterministic tests, this document, script/admin markup in `index.html`, and a narrowly scoped app adapter in `js/core.js`. Firebase/Storage rules, CFR transfer code, `vercel.json`, caches, backups, and business collections were excluded.
++
++## Confirmed schemas and mappings
++
++The authoritative arrays remain `window.cuttingJobs` and `window.completedCuttingJobs` inside `workspaces/github-prod/app/state`.
++
++The Add Job form creates active jobs with `id`, `name`, `estimateHours`, `startISO`, `dueISO`, `projectNumber`, `material`, `materialCost`, `materialQty`, `materialWeight`, `chargeRate`, `costRate`, `priority`, `notes`, `manualLogs`, `files`, and `cat`. The form requires name, positive estimate, start/due dates, a digit-only project number (preserving a string such as `0000`), and an existing category; estimate minutes are added to estimate hours. Categories are `jobFolders` records (`id`, `name`, `parent`, `order`) and are resolved only by one exact ID/name match. Material definitions come from browser-local `job_material_pricing_v1` settings (`wasteFactor`, `materials[{name,density,pricePerLb}]`) and are resolved by exact ID/name without creating or changing definitions.
++
++Completion normally copies the active identity/business fields and adds `completedAtISO`, `actualHours`, and efficiency data. Completed cutting time is represented by nested `manualLogs[{dateISO, completedHours}]`; therefore `actual_cut_minutes` maps only to `completedHours = minutes / 60`, dated with the completed date for completed rows. It is never substituted for estimate time. The importer preserves the complete submitted column set in bounded `importProvenance`, preserves `import_event_id` at job/log level, keeps project/category separate, leaves `files: []`, and adds no cloud metadata.
++
++| Input | Authoritative job mapping |
++|---|---|
++| `import_event_id` | `import_event_id`, deterministic `id`, provenance, optional manual-log ID |
++| `record_status` | target active/completed array |
++| `job_name` | `name` |
++| `project_number` | `projectNumber` string, independently of category |
++| `estimate_hours` + `add_minutes` | `estimateHours` |
++| `actual_cut_minutes` | confirmed `manualLogs[].completedHours` only |
++| `priority`, charge/cost rates | `priority`, `chargeRate`, `costRate` |
++| start/due/completed dates | `startISO`, `dueISO`, `completedAtISO` |
++| category/material | exact existing `cat` ID / material name |
++| material cost/weight | `materialCost`, `materialWeight`; `materialQty` remains form-compatible `1` |
++| remaining supported fields | exact scalar values under `importProvenance`; review notes also become `notes` |
++
++Blank optional values remain blank/null-equivalent and no missing shop values are invented. Rows are `ready`, `duplicate`, `unresolved`, `invalid`, or `excluded`; `needs_review` blocks. Existing event IDs are no-ops, repeated IDs within an operation are invalid, and identical cuts with different IDs remain distinct.
++
++## Parsing and reviewed workflow
++
++CSV uses a local RFC-style quoted parser and JSON accepts an array or `{rows:[]}`. XLSX uses the repository-local, dependency-free **CJI XLSX Parser 1.1.0**, licensed MIT. It reads OOXML ZIP worksheets in-browser and selects only `Cutting Jobs` or `Blank Import Template`; Pump Readings, Maintenance Notes, Cached Files, Recovery Summary, and every other sheet are ignored. No executable spreadsheet code loads from a CDN.
++
++The temporary admin section previews every row with separate blocking reasons and nonblocking warnings. Final submission re-runs validation and requires the reviewed checkbox plus a final browser confirmation. Controls lock during parsing/saving and the API rejects concurrency.
++
++## Persistence, rollback, and safety
++
++The adapter requires Firebase Auth, `FB.ready`, the authoritative document reference, a last-loaded cloud baseline, and no local-backup-only mode. Before mutation it downloads `snapshotState({skipLocalFileCacheSync:true})`, clones both job arrays, captures protected collection values/counts, maps exact intended arrays, and rejects unrelated changes. It appends only reviewed active/completed jobs and confirmed manual logs, then calls only `await saveCloudNow()`.
++
++Success requires both `saved === true` and `stateWriteCompleted === true`. A definite block/failure restores both arrays and verifies byte equivalence without retry. An indeterminate write is not retried or rolled back; the operator must refresh and read-verify. The structured result exposes all requested row counts, IDs, additions, backup/save/write/indeterminate/warning/error fields, rollback fields, protected mismatches, and before/after counts.
++
++No purchase, inventory, receipt, order, daily hours, total history, pump, maintenance, layout, trash, local backup, or cutting-file cache is changed. No cached file is imported or linked. CFR transfers remain disabled, rules remain undeployed, and no individual cloud job/file document is created.
++
++## Browser/Vercel boundary
++
++Browser testing must validate a real copy of the absent workbook, XLSX deflate support, backup download UX, admin table usability, baseline gating, and a mocked/non-production save. A real production import requires a separately reviewed preview and operator action; this implementation did not execute one.
++
++## CJI-01A real-workbook compatibility correction
++
++The local parser is now version 1.1.0. It matches OOXML elements by namespace-independent local name, resolves arbitrary relationship IDs, normalizes absolute `/xl/...`, package-relative `xl/...`, and workbook-relative `worksheets/...` targets, and supports shared, inline, `t="str"`, numeric, blank, and entity-encoded cells. When both supported sheets exist it always chooses `Cutting Jobs`; `Blank Import Template` is fallback-only. It searches the first 25 non-empty rows for a header containing at least `import_event_id`, `record_status`, and `job_name`, retains the physical worksheet row number as `__sourceRowNumber`, and parses only following nonblank rows. Errors distinguish malformed ZIP/workbook, missing allowed sheet, unresolved relationship, and missing importer header.
++
++The typed phrase was removed. The admin UI now uses the checkbox **“I reviewed the preview and want to import all ready rows.”** It enables import only after a successful preview has at least one ready row and no import is active. It is cleared on file selection, every preview attempt/failure, and import completion. The final browser dialog states total/active/completed append counts; cancel returns before mutation, backup, or save. This is an operator interlock only; all final revalidation and persistence safety checks remain authoritative.
++
++The deterministic namespace-prefixed fixture mirrors the confirmed recovery workbook shape: six named sheets, arbitrary relationship IDs, absolute targets, empty shared strings, `t="str"` values, three presentation rows, row-4 headers, and data from row 5. The actual production workbook was still not executed or imported by this correction.
++
++## CJI-01B normal Cutting Jobs entry point
++
++The normal Cutting Jobs toolbar now includes **Import reviewed jobs** beside the Add Job controls. It opens the one existing importer as a viewport-bounded modal dialog labeled **Reviewed cutting-job import**; it does not create or reset a second importer. The visible Close button and Escape cancellation only close the dialog and return focus to the toolbar trigger. They do not parse, preview, back up, mutate, or save. Reopening retains the existing selected file/preview state and works through the same entry point without console or DOM commands. The dialog is attached to the document modal layer rather than the page's nested scroll content, so it opens immediately inside the visible viewport.
++
++## CJI-01C Excel dates and optional historical details
++
++Only the `start_date`, `due_date`, and `completed_date` worksheet columns convert numeric Excel serials. Conversion supports the 1900 system (including its conventional 1899-12-30 epoch) and the workbook `date1904` flag, discards time fractions, and uses `Date.UTC`/ISO output so browser timezone cannot shift the calendar day. Thus `46189.5` deterministically becomes `2026-06-16`. Text ISO dates remain unchanged; negative, excessive, or malformed serials remain raw and subsequently receive the normal exact invalid-date reason. Ordinary numeric columns are never date-converted.
++
++Blank start/due dates are accepted because the current authoritative job records safely carry empty `startISO`/`dueISO`; no date is invented. Completed rows still require a real `completed_date`. Blank category/material values link nothing. A unique exact existing match links normally. A nonblank unmatched historical value now produces a visible nonblocking warning, leaves the operational `cat`/`material` blank, and remains preserved verbatim in `importProvenance`. Multiple exact matches remain unresolved, definitions are never created or substituted, and `review_status=needs_review` remains blocking.
++
++## CJI-01D reviewed category and material definitions
++
++Inspection confirmed that job categories are authoritative `jobFolders` entries shaped as `{id,name,parent,order}` (optional `color`), created by `addJobFolder()` with `genId`, root parent, and next order; jobs reference the folder ID in `cat`, and `snapshotState()`/`adoptState()` persist `jobFolders`. Material definitions are the existing New Cutting Job pricing settings in browser-local `job_material_pricing_v1`, shaped as `{wasteFactor,materials:[{name,density,pricePerLb}]}`; jobs reference the material display name. The normal UI's new-material constructor uses `density: 0.1` and `pricePerLb: 1`, so the importer reuses exactly those existing defaults rather than inventing a parallel schema. Material pricing definitions are not currently part of `app/state`; this task intentionally does not invent a second cloud material collection.
++
++Preview remains non-mutating and now publishes a definition plan for ready rows only: normalized existing category/material links, unique missing definitions, and ambiguous blockers. Matching trims, collapses whitespace, and compares case-insensitively while preserving the first workbook spelling for creation and all original cells in provenance. Blank values stay blank. Final submission rebuilds the plan against current definitions, creates each missing definition once through the existing category/material shapes, verifies append-only definition changes, links jobs through `cat` and `material`, and reports created/reused IDs and before/after definition counts.
++
++A nonblank project number is never replaced by category. Only a blank project with category exactly `ATM <digits>` derives those digits, emits a visible warning, and retains the original blank project/category cells in provenance. Definite failure restores jobs, categories, and material settings byte-for-byte (including removal of an originally absent local material-settings property); indeterminate save retains all potentially persisted/in-memory changes for refresh/read verification without retry.
+diff --git a/firebase.json b/firebase.json
+index 1bae8b3f9807393e14e28616701de3f525c71681..3b7079fe3670dc58f388a1f7988490fd101833a3 100644
+--- a/firebase.json
++++ b/firebase.json
+@@ -1,5 +1,8 @@
+ {
+   "storage": {
+     "rules": "storage.rules"
++  },
++  "firestore": {
++    "rules": "firestore.rules"
+   }
+ }
+diff --git a/firestore.rules b/firestore.rules
+new file mode 100644
+index 0000000000000000000000000000000000000000..841e94e224f59dacce2bc8aaf67ddf1fa7c2b7a4
+--- /dev/null
++++ b/firestore.rules
+@@ -0,0 +1,71 @@
++rules_version = '2';
++
++// CFR-05B reviewed proposal. DO NOT DEPLOY from this implementation task.
++service cloud.firestore {
++  match /databases/{database}/documents {
++    function signedIn() { return request.auth != null; }
++    function validWorkspaceId(id) { return id.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'); }
++    function validId(id) { return id.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$'); }
++    function membershipPath(workspaceId) { return /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid); }
++    function validMemberData(data, workspaceId, uid) {
++      return data.keys().hasOnly(['schemaVersion','uid','workspaceId','role','active','createdAtISO','updatedAtISO','email'])
++        && data.keys().hasAll(['schemaVersion','uid','workspaceId','role','active','createdAtISO','updatedAtISO'])
++        && data.schemaVersion == 1 && data.uid == uid && data.workspaceId == workspaceId
++        && data.active == true && data.role in ['owner','admin','operator','viewer']
++        && data.createdAtISO is string && data.createdAtISO.size() <= 30
++        && data.updatedAtISO is string && data.updatedAtISO.size() <= 30
++        && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 254));
++    }
++    function activeMember(workspaceId) {
++      return signedIn() && validWorkspaceId(workspaceId) && exists(membershipPath(workspaceId))
++        && validMemberData(get(membershipPath(workspaceId)).data, workspaceId, request.auth.uid);
++    }
++    function writer(workspaceId) { return activeMember(workspaceId) && get(membershipPath(workspaceId)).data.role in ['owner','admin','operator']; }
++    function validJob(data, workspaceId, jobId) {
++      return data.keys().hasOnly(['schemaVersion','workspaceId','jobId','authoritativeStatePath','createdBy','createdAtISO'])
++        && data.keys().hasAll(['schemaVersion','workspaceId','jobId','authoritativeStatePath','createdBy','createdAtISO'])
++        && data.schemaVersion == 1 && data.workspaceId == workspaceId && data.jobId == jobId
++        && data.authoritativeStatePath == 'workspaces/' + workspaceId + '/app/state'
++        && validId(data.createdBy) && data.createdAtISO is string && data.createdAtISO.size() <= 30;
++    }
++    function validFile(data, workspaceId, jobId, fileId) {
++      return data.keys().hasOnly(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','storagePath','sha256','status','createdBy','createdAtISO'])
++        && data.keys().hasAll(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','storagePath','sha256','status','createdBy','createdAtISO'])
++        && data.schemaVersion == 1 && data.workspaceId == workspaceId && data.jobId == jobId && data.fileId == fileId
++        && validId(jobId) && validId(fileId) && data.originalName is string && data.originalName.size() > 0 && data.originalName.size() <= 255
++        && data.safeFileName is string && data.safeFileName.size() > 0 && data.safeFileName.size() <= 120
++        && data.extension in ['dxf','ord','omx']
++        && ((data.extension == 'dxf' && data.contentType == 'application/dxf') || (data.extension in ['ord','omx'] && data.contentType == 'application/octet-stream'))
++        && data.sizeBytes is int && data.sizeBytes > 0 && data.sizeBytes <= 52428800
++        && data.storagePath == 'workspaces/' + workspaceId + '/cutting-jobs/' + jobId + '/files/' + fileId + '/' + data.safeFileName
++        && data.sha256 is string && data.sha256.matches('^[a-f0-9]{64}$') && data.status == 'ready'
++        && validId(data.createdBy) && data.createdAtISO is string && data.createdAtISO.size() <= 30;
++    }
++
++    // Preserve the deployed authoritative app-state behavior exactly.
++    match /workspaces/{workspaceId}/app/{document=**} {
++      allow read, write: if signedIn();
++    }
++    match /workspaces/{workspaceId}/members/{uid} {
++      allow get: if signedIn() && request.auth.uid == uid && validWorkspaceId(workspaceId);
++      allow list, create, update, delete: if false;
++    }
++    match /workspaces/{workspaceId}/cuttingJobs/{jobId} {
++      allow get: if activeMember(workspaceId) && validJob(resource.data, workspaceId, jobId);
++      allow list: if false;
++      allow create: if writer(workspaceId) && validJob(request.resource.data, workspaceId, jobId)
++        && request.resource.data.createdBy == request.auth.uid;
++      allow update, delete: if false;
++      match /files/{fileId} {
++        allow get, list: if activeMember(workspaceId) && validFile(resource.data, workspaceId, jobId, fileId);
++        allow create: if writer(workspaceId) && validFile(request.resource.data, workspaceId, jobId, fileId)
++          && request.resource.data.createdBy == request.auth.uid
++          && existsAfter(/databases/$(database)/documents/workspaces/$(workspaceId)/cuttingJobs/$(jobId))
++          && validJob(getAfter(/databases/$(database)/documents/workspaces/$(workspaceId)/cuttingJobs/$(jobId)).data, workspaceId, jobId);
++        allow update, delete: if false;
++      }
++      match /logs/{logId} { allow read, write: if false; }
++    }
++    match /{document=**} { allow read, write: if false; }
++  }
++}
+diff --git a/index.html b/index.html
+index 53d99f279946592d337a3ad733d73a19585c5769..4128eac2388804258a3d0197b3db7eb75fbd760b 100644
+--- a/index.html
++++ b/index.html
+@@ -1,46 +1,50 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta http-equiv="Cache-Control" content="no-store" />
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>OMAX 1530 Maintenance Tracker</title>
+ 
+   <link rel="icon" type="image/svg+xml" href="assets/candmlogo.svg" />
+   <link rel="alternate icon" href="assets/candmlogo.svg" />
+ 
+   <!-- Your stylesheet -->
+   <link rel="stylesheet" href="style.css" />
+ 
+ </head>
+ <body>
+   <!-- Firebase SDKs (v8 CDN for static sites) -->
+   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-storage.js"></script>
++  <script src="js/cfr04WorkspaceMetadata.js"></script>
++  <script src="js/cfr05CloudCuttingFiles.js"></script>
++  <script src="assets/vendor/cji-xlsx-parser.js"></script>
++  <script src="js/cuttingJobImporter.js"></script>
+   <script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js"></script>
+   <script src="https://js.live.net/v8.0/OneDrive.js"></script>
+   <script>/* prevent bfcache for easier debug refresh */ window.onpageshow = e=>{ if(e.persisted) location.reload(); };</script>
+ 
+   <!-- Firebase project config (correct values) -->
+   <script>
+     window.FIREBASE_CONFIG = {
+       apiKey: "AIzaSyDhUtEx4uvUN_CssllXlm5f3dE8-MTqei0",
+       authDomain: "omax-maintenance.firebaseapp.com",
+       projectId: "omax-maintenance",
+       storageBucket: "omax-maintenance.appspot.com",
+       messagingSenderId: "496764208080",
+       appId: "1:496764208080:web:43cdd192e462844f7b5335"
+     };
+   </script>
+ 
+   <header>
+     <div class="header-bar">
+       <h1><span class="brand-emblem">OMAX</span> 1530 Maintenance Tracker</h1>
+       <div class="header-brand">
+         <span class="header-motto">&ldquo;TRY HARDER SUCK LESS&rdquo;</span>
+         <img
+           class="header-logo"
+           src="assets/candmlogo.svg"
+           alt="C &amp; M Concrete Precast and Construction logo"
+@@ -113,50 +117,63 @@
+     <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px">
+       <strong>Debug Panel</strong>
+       <button type="button" id="dbgRefreshCloud">Refresh Cloud Doc</button>
+       <button type="button" id="dbgRefreshSnapshot">Show Local Snapshot</button>
+       <span id="dbgInfo" style="margin-left:auto; color:#445">WORKSPACE: <code id="dbgWs"></code></span>
+     </div>
+     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px">
+       <div>
+         <div style="font-weight:600; margin-bottom:4px">Cloud (workspaces/&lt;WORKSPACE_ID&gt;)</div>
+         <textarea id="dbgCloud" style="width:100%; height:260px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace"></textarea>
+       </div>
+       <div>
+         <div style="font-weight:600; margin-bottom:4px">Local snapshotState()</div>
+         <textarea id="dbgSnap" style="width:100%; height:260px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace"></textarea>
+       </div>
+     </div>
+     <small style="color:#556">Tip: add, edit, or complete a task/job; press <em>Show Local Snapshot</em> to verify it will be saved; then <em>Refresh Cloud Doc</em> to confirm it is stored.</small>
+   </div>
+ 
+   <!-- Auth toolbar + modal (NEW) -->
+   <div id="authBar" class="auth-bar">
+     <span id="authStatus">Not signed in</span>
+     <button id="btnSignIn" class="auth-button auth-button-primary">Sign In</button>
+     <button id="btnSignOut" class="auth-button auth-button-secondary" style="display:none;">Sign Out</button>
+   </div>
++  <dialog id="cuttingJobImportAdmin" class="history-import-admin cutting-job-import-dialog" aria-labelledby="cuttingJobImportTitle">
++    <div class="cutting-job-import-dialog-header">
++      <h3 id="cuttingJobImportTitle">Reviewed cutting-job import</h3>
++      <button id="cuttingJobImportClose" type="button" aria-label="Close reviewed cutting-job import">Close</button>
++    </div>
++    <p>Preview only until every row is reviewed. Accepts .xlsx, .csv, or .json; no files or cloud attachments are imported.</p>
++    <input id="cuttingJobImportFile" type="file" accept=".xlsx,.csv,.json">
++    <button id="cuttingJobImportPreview" type="button">Preview import</button>
++    <label><input id="cuttingJobImportReviewed" type="checkbox"> I reviewed the preview and want to import all ready rows.</label>
++    <button id="cuttingJobImportRun" type="button" disabled>Import reviewed jobs</button>
++    <div id="cuttingJobImportStatus" aria-live="polite"></div>
++    <div id="cuttingJobImportRows"></div>
++  </dialog>
+ 
+   <div id="authModal" class="auth-modal-backdrop" style="display:none;">
+     <div class="auth-modal-dialog">
+       <h3>Sign in to workspace</h3>
+       <p>Use the same email on all devices to see the same shared data.</p>
+       <form id="authForm" class="auth-form">
+         <input id="authEmail" type="email" placeholder="you@example.com" required />
+         <input id="authPass" type="password" placeholder="Password" required />
+         <button type="submit" class="auth-button auth-button-primary">Sign In</button>
+         <button type="button" id="authClose" class="auth-button auth-button-secondary">Cancel</button>
+       </form>
+       <small class="auth-modal-hint">First time with an email? The account will be created automatically.</small>
+     </div>
+   </div>
+ 
+   <div id="configModal" class="config-modal" hidden aria-hidden="true">
+     <div class="config-dialog" role="dialog" aria-modal="true" aria-labelledby="configTitle">
+       <h3 id="configTitle">Workspace configuration</h3>
+       <p class="config-description">Tune scheduling defaults for cutting work.</p>
+       <form id="configForm" class="config-form">
+         <label class="config-field" for="configDailyHours">
+           <span class="config-label">Daily cutting hours (fixed mode)</span>
+           <input type="number" id="configDailyHours" name="configDailyHours" min="0.25" max="24" step="0.25" required />
+           <small class="config-help">Used when prediction basis is set to Fixed daily hours.</small>
+         </label>
+diff --git a/js/cfr04WorkspaceMetadata.js b/js/cfr04WorkspaceMetadata.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..c653d823e5c04002b2bd4541fb85cd5e99e688c3
+--- /dev/null
++++ b/js/cfr04WorkspaceMetadata.js
+@@ -0,0 +1,141 @@
++(function(root, factory){
++  "use strict";
++  const api = factory();
++  if (typeof module === "object" && module.exports) module.exports = api;
++  if (root) root.Cfr04WorkspaceMetadata = api;
++})(typeof globalThis !== "undefined" ? globalThis : this, function(){
++  "use strict";
++
++  const SCHEMA_VERSION = 1;
++  const ROLES = Object.freeze(["owner", "admin", "operator", "viewer"]);
++  const FILE_TYPES = Object.freeze({
++    dxf:{ mime:["application/dxf", "application/x-dxf", "text/plain"], maxBytes:50 * 1024 * 1024 },
++    ord:{ mime:["application/octet-stream", "text/plain"], maxBytes:50 * 1024 * 1024 },
++    omx:{ mime:["application/octet-stream", "text/plain"], maxBytes:50 * 1024 * 1024 }
++  });
++  const UPLOAD_STATES = Object.freeze(["pending", "uploaded", "verified", "failed"]);
++  const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
++  const WORKSPACE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
++  const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
++  const CHECKSUM = /^sha256:[a-f0-9]{64}$/;
++  const allowedKeys = (value, keys)=>Object.keys(value).every(key=>keys.includes(key));
++  const plain = value=>value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
++  const bounded = (value, max)=>typeof value === "string" && value.length > 0 && value.length <= max;
++  const validISO = value=>typeof value === "string" && ISO.test(value) && !Number.isNaN(Date.parse(value));
++  const result = reasons=>Object.freeze({ valid:reasons.length === 0, reasons:Object.freeze(reasons.slice().sort()) });
++
++  function validateId(value, label, pattern = SEGMENT){
++    const reasons=[];
++    if (typeof value !== "string" || !pattern.test(value)) reasons.push(`${label}_invalid`);
++    return result(reasons);
++  }
++  function validateWorkspaceId(value){ return validateId(value, "workspace_id", WORKSPACE); }
++  function validateJobId(value){ return validateId(value, "job_id"); }
++  function validateLogId(value){ return validateId(value, "log_id"); }
++  function validateFileId(value){ return validateId(value, "file_id"); }
++
++  function normalizeSafeFileName(value){
++    if (typeof value !== "string") return "";
++    let name=value.normalize("NFKC").replace(/[\u0000-\u001f\u007f/\\]/g, "_").replace(/\s+/g, "_")
++      .replace(/[^A-Za-z0-9._-]/g, "_").replace(/_+/g, "_").replace(/^[._-]+/, "").slice(0, 120);
++    return name.replace(/[. _-]+$/, "");
++  }
++  function validateSafeFileName(value){
++    const normalized=normalizeSafeFileName(value); const reasons=[];
++    if (!normalized || normalized !== value || value === "." || value === "..") reasons.push("safe_file_name_invalid");
++    const extension=normalized.includes(".") ? normalized.split(".").pop().toLowerCase() : "";
++    if (!Object.prototype.hasOwnProperty.call(FILE_TYPES, extension)) reasons.push("file_extension_not_allowed");
++    return result(reasons);
++  }
++  function requireValid(validation){ if (!validation.valid) throw new TypeError(validation.reasons.join(",")); }
++  function membershipPath(workspaceId, uid){ requireValid(validateWorkspaceId(workspaceId)); requireValid(validateId(uid,"uid")); return `workspaces/${workspaceId}/members/${uid}`; }
++  function jobPath(workspaceId, jobId){ requireValid(validateWorkspaceId(workspaceId)); requireValid(validateJobId(jobId)); return `workspaces/${workspaceId}/cuttingJobs/${jobId}`; }
++  function logPath(workspaceId, jobId, logId){ requireValid(validateLogId(logId)); return `${jobPath(workspaceId,jobId)}/logs/${logId}`; }
++  function filePath(workspaceId, jobId, fileId){ requireValid(validateFileId(fileId)); return `${jobPath(workspaceId,jobId)}/files/${fileId}`; }
++  function storagePath(workspaceId, jobId, fileId, safeFileName){ requireValid(validateSafeFileName(safeFileName)); return `workspaces/${workspaceId}/cutting-jobs/${validateAndReturn(jobId,validateJobId)}/files/${validateAndReturn(fileId,validateFileId)}/${safeFileName}`; }
++  function validateAndReturn(value, validator){ requireValid(validator(value)); return value; }
++
++  function validateWorkspaceMembershipRecord(record, expected = {}){
++    const reasons=[]; const keys=["schemaVersion","uid","workspaceId","role","active","createdAtISO","updatedAtISO","email"];
++    if (!plain(record)) return result(["membership_not_plain_object"]);
++    if (!allowedKeys(record,keys)) reasons.push("membership_unknown_field");
++    if (record.schemaVersion !== SCHEMA_VERSION) reasons.push("schema_version_invalid");
++    if (!validateId(record.uid,"uid").valid) reasons.push("uid_invalid");
++    if (!validateWorkspaceId(record.workspaceId).valid) reasons.push("workspace_id_invalid");
++    if (expected.uid != null && record.uid !== expected.uid) reasons.push("uid_document_mismatch");
++    if (expected.workspaceId != null && record.workspaceId !== expected.workspaceId) reasons.push("workspace_document_mismatch");
++    if (!ROLES.includes(record.role)) reasons.push("role_not_allowed");
++    if (typeof record.active !== "boolean") reasons.push("active_not_boolean"); else if (!record.active) reasons.push("membership_inactive");
++    if (!validISO(record.createdAtISO)) reasons.push("created_at_invalid");
++    if (!validISO(record.updatedAtISO)) reasons.push("updated_at_invalid");
++    if (record.email != null && (!bounded(record.email,254) || !record.email.includes("@"))) reasons.push("email_metadata_invalid");
++    return result(reasons);
++  }
++
++  function embeddedReason(value){
++    if (value == null) return "";
++    const tag=Object.prototype.toString.call(value);
++    if (tag === "[object File]" || tag === "[object Blob]") return "embedded_file_or_blob";
++    if (tag === "[object ArrayBuffer]" || (typeof ArrayBuffer === "function" && ArrayBuffer.isView(value))) return "embedded_binary_content";
++    if (typeof value === "string"){
++      const text=value.trim();
++      if (/^(?:data|blob):/i.test(text)) return "embedded_url_content";
++      if (text.length >= 256 && (/^\s*SECTION[\s\S]*ENTITIES/im.test(text) || /\[(?:0|HEADER|PART|VARIABLES)\]/i.test(text))) return "embedded_cad_content";
++      if (/<(?:svg|html|canvas)\b/i.test(text)) return "embedded_preview_markup";
++      if (text.length >= 512 && text.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(text.replace(/\s/g,""))) return "embedded_base64_content";
++    }
++    return "";
++  }
++  function commonMetadata(record, keys){
++    const reasons=[];
++    if (!plain(record)) return ["metadata_not_plain_object"];
++    if (!allowedKeys(record,keys)) reasons.push("metadata_unknown_field");
++    Object.keys(record).sort().forEach(key=>{ const reason=embeddedReason(record[key]); if(reason) reasons.push(`${key}:${reason}`); });
++    return reasons;
++  }
++  function validateJobMetadata(record){
++    const reasons=commonMetadata(record,["schemaVersion","jobId","workspaceId","name","status","createdByUid","createdAtISO","updatedAtISO"]);
++    if (!plain(record)) return result(reasons);
++    if(record.schemaVersion!==1)reasons.push("schema_version_invalid"); if(!validateJobId(record.jobId).valid)reasons.push("job_id_invalid");
++    if(!validateWorkspaceId(record.workspaceId).valid)reasons.push("workspace_id_invalid"); if(!bounded(record.name,200))reasons.push("name_invalid");
++    if(!["active","completed"].includes(record.status))reasons.push("status_invalid"); if(!validateId(record.createdByUid,"uid").valid)reasons.push("created_by_uid_invalid");
++    if(!validISO(record.createdAtISO))reasons.push("created_at_invalid"); if(!validISO(record.updatedAtISO))reasons.push("updated_at_invalid"); return result(reasons);
++  }
++  function validateLogMetadata(record){
++    const reasons=commonMetadata(record,["schemaVersion","logId","jobId","workspaceId","dateISO","completedHours","createdByUid","createdAtISO"]);
++    if(!plain(record))return result(reasons); if(record.schemaVersion!==1)reasons.push("schema_version_invalid"); if(!validateLogId(record.logId).valid)reasons.push("log_id_invalid");
++    if(!validateJobId(record.jobId).valid)reasons.push("job_id_invalid"); if(!validateWorkspaceId(record.workspaceId).valid)reasons.push("workspace_id_invalid");
++    if(typeof record.dateISO!=="string" || !/^\d{4}-\d{2}-\d{2}$/.test(record.dateISO))reasons.push("date_invalid");
++    if(typeof record.completedHours!=="number" || !Number.isFinite(record.completedHours) || record.completedHours<0 || record.completedHours>24)reasons.push("completed_hours_invalid");
++    if(!validateId(record.createdByUid,"uid").valid)reasons.push("created_by_uid_invalid"); if(!validISO(record.createdAtISO))reasons.push("created_at_invalid"); return result(reasons);
++  }
++  function validateFileMetadata(record){
++    const keys=["schemaVersion","workspaceId","jobId","fileId","originalName","safeFileName","extension","contentType","sizeBytes","storagePath","sha256","status","createdBy","createdAtISO"];
++    const reasons=commonMetadata(record,keys); if(!plain(record))return result(reasons);
++    if(Object.keys(record).length!==keys.length)reasons.push("metadata_schema_invalid");
++    if(record.schemaVersion!==1)reasons.push("schema_version_invalid"); if(!validateFileId(record.fileId).valid)reasons.push("file_id_invalid"); if(!validateJobId(record.jobId).valid)reasons.push("job_id_invalid"); if(!validateWorkspaceId(record.workspaceId).valid)reasons.push("workspace_id_invalid");
++    if(!bounded(record.originalName,255))reasons.push("original_name_invalid"); reasons.push(...validateSafeFileName(record.safeFileName).reasons);
++    const ext=typeof record.extension==="string"?record.extension.toLowerCase():"",canonical=ext==="dxf"?"application/dxf":(["ord","omx"].includes(ext)?"application/octet-stream":"");
++    if(!canonical)reasons.push("file_extension_not_allowed"); if(record.safeFileName&&record.safeFileName.split(".").pop().toLowerCase()!==ext)reasons.push("extension_mismatch");
++    if(record.contentType!==canonical)reasons.push("content_type_not_canonical"); if(!Number.isSafeInteger(record.sizeBytes)||record.sizeBytes<1||record.sizeBytes>50*1024*1024)reasons.push("file_size_invalid");
++    let expected=""; try{expected=storagePath(record.workspaceId,record.jobId,record.fileId,record.safeFileName);}catch(_error){} if(record.storagePath!==expected)reasons.push("storage_path_mismatch");
++    if(typeof record.sha256!=="string"||!/^[a-f0-9]{64}$/.test(record.sha256))reasons.push("sha256_invalid"); if(record.status!=="ready")reasons.push("status_invalid");
++    if(!validateId(record.createdBy,"uid").valid)reasons.push("created_by_invalid"); if(!validISO(record.createdAtISO))reasons.push("created_at_invalid"); return result(reasons);
++  }
++
++  async function getWorkspaceAuthorizationDiagnostics(options = {}){
++    const uid=typeof options.uid==="string"?options.uid:""; const workspaceId=typeof options.workspaceId==="string"?options.workspaceId:""; const blockers=[];
++    let expectedMembershipPath=null; try{expectedMembershipPath=membershipPath(workspaceId,uid);}catch(_error){blockers.push("invalid_uid_or_workspace_id");}
++    const output={signedIn:Boolean(uid),uid:uid||null,workspaceId,expectedMembershipPath,membershipDocumentExists:false,membershipStructurallyValid:false,role:null,active:false,productionFileAuthorizationReady:false,blockerReasons:blockers,firestoreWrites:0,storageOperations:0};
++    if(!uid){blockers.push("not_signed_in"); return output;} if(!expectedMembershipPath)return output;
++    if(!options.membershipDocRef || typeof options.membershipDocRef.get!=="function"){blockers.push("membership_read_unavailable"); return output;}
++    try{const snapshot=await options.membershipDocRef.get(); output.membershipDocumentExists=Boolean(snapshot?.exists); if(!output.membershipDocumentExists){blockers.push("membership_document_missing");return output;}
++      const data=snapshot.data(); const validation=validateWorkspaceMembershipRecord(data,{uid,workspaceId}); output.membershipStructurallyValid=validation.valid; output.role=typeof data?.role==="string"?data.role:null; output.active=data?.active===true;
++      blockers.push(...validation.reasons); output.productionFileAuthorizationReady=validation.valid && data.active===true; return output;
++    }catch(_error){blockers.push("membership_read_failed");return output;}
++  }
++
++  return Object.freeze({SCHEMA_VERSION,ROLES,FILE_TYPES,UPLOAD_STATES,productionUploadsEnabled:false,productionDownloadsEnabled:false,
++    validateWorkspaceId,validateJobId,validateLogId,validateFileId,normalizeSafeFileName,validateSafeFileName,
++    membershipPath,jobPath,logPath,filePath,storagePath,validateWorkspaceMembershipRecord,validateJobMetadata,validateLogMetadata,validateFileMetadata,getWorkspaceAuthorizationDiagnostics});
++});
+diff --git a/js/cfr05CloudCuttingFiles.js b/js/cfr05CloudCuttingFiles.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..5a055ef709dbe331064874e150d2a66352280092
+--- /dev/null
++++ b/js/cfr05CloudCuttingFiles.js
+@@ -0,0 +1,31 @@
++(function(root,factory){"use strict";const api=factory(root);if(typeof module==="object"&&module.exports)module.exports=factory;if(root)root.Cfr05CloudCuttingFiles=api;})(typeof globalThis!=="undefined"?globalThis:this,function(root){
++"use strict";
++const MAX_FILE_SIZE_BYTES=52428800,DOWNLOAD_TIMEOUT_MS=60000,CONFIRMATION="CFR05 VERCEL TEST",EXPECTED_BUCKET="omax-maintenance.firebasestorage.app";
++const TYPES=Object.freeze({dxf:{canonical:"application/dxf",accepted:["application/dxf","application/x-dxf","text/plain"]},ord:{canonical:"application/octet-stream",accepted:["application/octet-stream","text/plain"]},omx:{canonical:"application/octet-stream",accepted:["application/octet-stream","text/plain"]}});
++const UPLOAD_ROLES=Object.freeze(["owner","admin","operator"]),READ_ROLES=Object.freeze([...UPLOAD_ROLES,"viewer"]);
++const STAGES=Object.freeze(["preflight","membership_validation","job_validation","local_file_validation","sha256_calculation","immutable_path_creation","storage_upload","uploaded_metadata_verification","firestore_metadata_creation","final_verification","completed"]);
++const plain=v=>v!==null&&typeof v==="object"&&!Array.isArray(v),exact=(v,keys)=>plain(v)&&Object.keys(v).length===keys.length&&Object.keys(v).every(k=>keys.includes(k));
++const errorInfo=e=>({code:String(e?.code||""),message:String(e?.message||e||"Unknown error")});
++const definite=e=>e?.indeterminate!==true&&!/unknown|timeout|network/i.test(`${e?.code||""} ${e?.message||""}`);
++const cleanResult=value=>value?JSON.parse(JSON.stringify(value,(key,item)=>/url|token|content|blob|buffer|previewdata/i.test(key)?undefined:item)):null;
++function createSessionGates(env=root){let firestore=false,firestoreFiles=false,rules=false;return Object.freeze({configureOperatorSession(value={}){const host=String(value.hostname||env?.location?.hostname||"");if(value.confirmation!==CONFIRMATION||!/\.vercel\.app$/i.test(host))return this.get();firestore=value.firestoreMembershipWriteProtectionConfirmed===true;firestoreFiles=value.firestoreFileAccessConfirmed===true;rules=value.productionRulesConfirmedDeployed===true;return this.get();},clear(){firestore=false;firestoreFiles=false;rules=false;return this.get();},get(){return Object.freeze({productionUploadImplementationAvailable:true,productionDownloadImplementationAvailable:true,cloudFileListingImplementationAvailable:true,cloudFilePreviewImplementationAvailable:true,firestoreMembershipWriteProtectionConfirmed:firestore,firestoreFileAccessConfirmed:firestoreFiles,productionRulesConfirmedDeployed:rules});}});}
++function blockers(g,membership,mode){const out=[];if(!membership?.valid)out.push("membershipInvalid");if(membership?.active!==true)out.push("membershipInactive");if(!(mode==="upload"?UPLOAD_ROLES:READ_ROLES).includes(membership?.role))out.push("roleNotAuthorized");if(!g.firestoreMembershipWriteProtectionConfirmed)out.push("firestoreMembershipWriteProtectionUnconfirmed");if(!g.firestoreFileAccessConfirmed)out.push("firestoreFileAccessUnconfirmed");if(!g.productionRulesConfirmedDeployed)out.push("productionRulesDeploymentUnconfirmed");return [...new Set(out)];}
++function safeName(name,foundation){const normalized=foundation.normalizeSafeFileName(String(name||"")),dot=normalized.lastIndexOf(".");return dot<1?"":`${normalized.slice(0,dot)}.${normalized.slice(dot+1).toLowerCase()}`;}
++function validateLocalFile(file,foundation){const reasons=[];if(!file||typeof file.arrayBuffer!=="function")reasons.push("fileRequired");const originalName=String(file?.name||""),safeFileName=safeName(originalName,foundation),extension=safeFileName.split(".").pop(),policy=TYPES[extension],browserType=String(file?.type||"");if(!safeFileName||!policy)reasons.push("extensionNotAllowed");if(!Number.isSafeInteger(file?.size)||file.size<1||file.size>MAX_FILE_SIZE_BYTES)reasons.push("fileSizeInvalid");if(browserType&&policy&&!policy.accepted.includes(browserType))reasons.push("contentTypeInvalid");return{valid:reasons.length===0,reasons,originalName,safeFileName,extension,contentType:policy?.canonical||""};}
++async function sha256Hex(buffer,cryptoApi){const digest=await cryptoApi.subtle.digest("SHA-256",buffer);return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join("");}
++function randomFileId(cryptoApi){const bytes=new Uint8Array(16);cryptoApi.getRandomValues(bytes);return Array.from(bytes,b=>b.toString(16).padStart(2,"0")).join("");}
++const FILE_KEYS=["schemaVersion","workspaceId","jobId","fileId","originalName","safeFileName","extension","contentType","sizeBytes","storagePath","sha256","status","createdBy","createdAtISO"];
++const JOB_KEYS=["schemaVersion","workspaceId","jobId","authoritativeStatePath","createdBy","createdAtISO"];
++function validateCompatibilityJob(m,expected={}){const reasons=[];if(!exact(m,JOB_KEYS))reasons.push("jobSchemaInvalid");if(m?.schemaVersion!==1)reasons.push("jobSchemaVersionInvalid");if(m?.workspaceId!==expected.workspaceId||m?.jobId!==expected.jobId||m?.authoritativeStatePath!==`workspaces/${expected.workspaceId}/app/state`)reasons.push("jobIdentityMismatch");if(!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/.test(m?.createdBy||""))reasons.push("jobCreatedByInvalid");if(!/^\d{4}-\d{2}-\d{2}T.*Z$/.test(m?.createdAtISO||""))reasons.push("jobCreatedAtInvalid");return{valid:reasons.length===0,reasons:[...new Set(reasons)].sort()};}
++function validateCloudMetadata(m,foundation,expected={}){const reasons=[];if(!exact(m,FILE_KEYS))reasons.push("metadataSchemaInvalid");try{if(m?.storagePath!==foundation.storagePath(m.workspaceId,m.jobId,m.fileId,m.safeFileName))reasons.push("storagePathMismatch");}catch(_){reasons.push("storagePathInvalid");}const policy=TYPES[m?.extension];if(m?.schemaVersion!==1)reasons.push("schemaVersionInvalid");if(!policy||m?.contentType!==policy.canonical)reasons.push("canonicalTypeMismatch");if(!Number.isSafeInteger(m?.sizeBytes)||m.sizeBytes<1||m.sizeBytes>MAX_FILE_SIZE_BYTES)reasons.push("sizeInvalid");if(!/^[a-f0-9]{64}$/.test(m?.sha256||""))reasons.push("checksumInvalid");if(m?.status!=="ready")reasons.push("statusInvalid");if(!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/.test(m?.createdBy||""))reasons.push("createdByInvalid");if(!/^\d{4}-\d{2}-\d{2}T.*Z$/.test(m?.createdAtISO||""))reasons.push("createdAtInvalid");if(expected.workspaceId&&m?.workspaceId!==expected.workspaceId)reasons.push("workspaceMismatch");if(expected.jobId&&m?.jobId!==expected.jobId)reasons.push("jobMismatch");if(expected.fileId&&m?.fileId!==expected.fileId)reasons.push("fileIdMismatch");return{valid:reasons.length===0,reasons:[...new Set(reasons)].sort()};}
++function customMetadata(m){return{schemaVersion:"1",workspaceId:m.workspaceId,jobId:m.jobId,fileId:m.fileId,originalName:m.originalName,safeFileName:m.safeFileName,extension:m.extension,contentType:m.contentType,sizeBytes:String(m.sizeBytes),storagePath:m.storagePath,sha256:m.sha256,status:m.status,createdBy:m.createdBy,createdAtISO:m.createdAtISO};}
++function storageMatches(a,m){const c=a?.customMetadata||{};return a?.fullPath===m.storagePath&&Number(a?.size)===m.sizeBytes&&a?.contentType===m.contentType&&Object.entries(customMetadata(m)).every(([k,v])=>c[k]===v);}
++async function boundedDownload(ref,options,env){const transient=await ref.getDownloadURL();const controller=new (options.AbortController||env.AbortController)(),timer=(options.setTimeout||env.setTimeout)(()=>controller.abort(),DOWNLOAD_TIMEOUT_MS);try{let response;try{response=await (options.fetch||env.fetch)(transient,{credentials:"omit",signal:controller.signal});}catch(e){if(e?.name==="AbortError")throw Object.assign(new Error("Download timed out."),{code:"downloadTimeout"});throw Object.assign(new Error("Download network failure."),{code:"downloadNetwork"});}if(!response.ok)throw Object.assign(new Error(`Download failed with HTTP ${response.status}.`),{code:"downloadHttp",status:response.status});const length=Number(response.headers?.get?.("content-length")||0);if(length>MAX_FILE_SIZE_BYTES)throw Object.assign(new Error("Download exceeds maximum size."),{code:"downloadTooLarge"});const buffer=await response.arrayBuffer();if(buffer.byteLength>MAX_FILE_SIZE_BYTES)throw Object.assign(new Error("Download exceeds maximum size."),{code:"downloadTooLarge"});return buffer;}finally{(options.clearTimeout||env.clearTimeout)(timer);}}
++function createApi(env={},injected={}){const foundation=injected.foundation||env.Cfr04WorkspaceMetadata,cryptoApi=injected.crypto||env.crypto,gates=injected.gates||createSessionGates(env),now=injected.now||(()=>new Date());let busy=false,lastUpload=null,lastListing={jobId:null,cloudFileCount:0,rejectedMetadataDocumentCount:0,rejectedMetadataReasons:[]},lastPreview={firebaseV8ProductionDownloadPathDetected:false,temporaryUrlRevoked:false};
++async function listJobFiles(options={}){const blocked=blockers(gates.get(),options.membership,"download");if(blocked.length)return{files:[],cloudFileCount:0,rejectedMetadataDocumentCount:0,rejectedMetadataReasons:[],blockers:blocked};if(!foundation.validateJobId(options.jobId).valid)return{files:[],cloudFileCount:0,rejectedMetadataDocumentCount:0,rejectedMetadataReasons:["jobInvalid"],blockers:["jobInvalid"]};const snap=await options.firestore.collection(`${foundation.jobPath(options.workspaceId,options.jobId)}/files`).get(),files=[],rejected=[];snap.forEach(doc=>{const data=doc.data(),v=validateCloudMetadata(data,foundation,{workspaceId:options.workspaceId,jobId:options.jobId,fileId:doc.id});if(v.valid)files.push(data);else rejected.push({documentId:String(doc.id),reasons:v.reasons});});files.sort((a,b)=>a.createdAtISO.localeCompare(b.createdAtISO)||a.fileId.localeCompare(b.fileId));lastListing={jobId:options.jobId,cloudFileCount:files.length,rejectedMetadataDocumentCount:rejected.length,rejectedMetadataReasons:rejected};return{files,cloudFileCount:files.length,rejectedMetadataDocumentCount:rejected.length,rejectedMetadataReasons:rejected,blockers:[]};}
++async function upload(o={}){const r={stage:"preflight",stages:[],attempted:{storageUpload:false,firestoreBatchCommit:false,cleanupDelete:false},completed:{storageUpload:false,firestoreBatchCommit:false,cleanupDelete:false,cleanupAbsenceVerified:false},warnings:[],error:null,indeterminate:false,possibleOrphanPath:"",manualReviewRequired:false,fullStateSaveCalls:0,protectedStateMutations:0,localStorageWrites:0};const enter=s=>{r.stage=s;r.stages.push(s);},finish=()=>{lastUpload=cleanResult(r);busy=false;return r;};if(busy){r.error={code:"concurrentUploadBlocked",message:"Another cutting-file upload is active."};return r;}busy=true;let objectRef=null,metadata=null;try{enter("membership_validation");const blocked=blockers(gates.get(),o.membership,"upload");if(blocked.length)throw Object.assign(Error(blocked.join(",")),{code:blocked[0]});enter("job_validation");if(!foundation.validateJobId(o.jobId).valid||!o.jobExists?.(o.jobId))throw Object.assign(Error("Authoritative job missing or invalid."),{code:"jobInvalid"});enter("local_file_validation");const fv=validateLocalFile(o.file,foundation);if(!fv.valid)throw Object.assign(Error(fv.reasons.join(",")),{code:fv.reasons[0]});enter("sha256_calculation");const bytes=await o.file.arrayBuffer();if(bytes.byteLength!==o.file.size)throw Object.assign(Error("File size changed."),{code:"fileSizeChanged"});const sha256=await sha256Hex(bytes,cryptoApi);enter("immutable_path_creation");const fileId=randomFileId(cryptoApi),storagePath=foundation.storagePath(o.workspaceId,o.jobId,fileId,fv.safeFileName),createdAtISO=now().toISOString();metadata={schemaVersion:1,workspaceId:o.workspaceId,jobId:o.jobId,fileId,originalName:fv.originalName,safeFileName:fv.safeFileName,extension:fv.extension,contentType:fv.contentType,sizeBytes:o.file.size,storagePath,sha256,status:"ready",createdBy:o.uid,createdAtISO};objectRef=o.storage.ref(storagePath);enter("storage_upload");r.attempted.storageUpload=true;const exists=await objectRef.getMetadata().then(()=>true,e=>e?.code==="storage/object-not-found"?false:Promise.reject(e));if(exists)throw Object.assign(Error("Object exists."),{code:"objectExists"});try{await objectRef.put(o.file,{contentType:metadata.contentType,customMetadata:customMetadata(metadata)});r.completed.storageUpload=true;}catch(e){if(!definite(e)){r.indeterminate=true;r.manualReviewRequired=true;r.possibleOrphanPath=storagePath;}throw e;}enter("uploaded_metadata_verification");if(!storageMatches(await objectRef.getMetadata(),metadata))throw Object.assign(Error("Uploaded metadata mismatch."),{code:"uploadedMetadataMismatch"});enter("firestore_metadata_creation");const jobRef=o.firestore.doc(foundation.jobPath(o.workspaceId,o.jobId)),fileRef=o.firestore.doc(foundation.filePath(o.workspaceId,o.jobId,fileId)),jobSnap=await jobRef.get(),fileSnap=await fileRef.get();if(jobSnap.exists&&!validateCompatibilityJob(jobSnap.data(),{workspaceId:o.workspaceId,jobId:o.jobId}).valid)throw Object.assign(Error("Existing compatibility job invalid."),{code:"compatibilityJobMismatch"});if(fileSnap.exists)throw Object.assign(Error("File metadata exists."),{code:"fileMetadataExists"});const batch=o.firestore.batch();if(!jobSnap.exists)batch.set(jobRef,{schemaVersion:1,workspaceId:o.workspaceId,jobId:o.jobId,authoritativeStatePath:`workspaces/${o.workspaceId}/app/state`,createdBy:o.uid,createdAtISO});batch.set(fileRef,metadata);r.attempted.firestoreBatchCommit=true;try{await batch.commit();r.completed.firestoreBatchCommit=true;}catch(e){if(!definite(e)){r.indeterminate=true;r.manualReviewRequired=true;r.possibleOrphanPath=storagePath;}throw e;}enter("final_verification");const final=await fileRef.get();if(!final.exists||!validateCloudMetadata(final.data(),foundation,{workspaceId:o.workspaceId,jobId:o.jobId,fileId}).valid)throw Object.assign(Error("Final verification failed."),{code:"finalVerificationFailed",indeterminate:true});enter("completed");return finish();}catch(e){r.error=errorInfo(e);if(e?.indeterminate){r.indeterminate=true;r.manualReviewRequired=true;if(metadata)r.possibleOrphanPath=metadata.storagePath;}if(r.completed.storageUpload&&!r.indeterminate&&!r.completed.firestoreBatchCommit&&objectRef){r.attempted.cleanupDelete=true;try{await objectRef.delete();r.completed.cleanupDelete=true;try{await objectRef.getMetadata();r.manualReviewRequired=true;r.possibleOrphanPath=metadata.storagePath;}catch(a){if(a?.code==="storage/object-not-found")r.completed.cleanupAbsenceVerified=true;else{r.manualReviewRequired=true;r.possibleOrphanPath=metadata.storagePath;}}}catch(_){r.manualReviewRequired=true;r.possibleOrphanPath=metadata.storagePath;}}return finish();}}
++async function download(o={}){const blocked=blockers(gates.get(),o.membership,"download");if(blocked.length)return{completed:false,blockers:blocked};const snap=await o.fileDocRef.get(),metadata=snap.exists?snap.data():null,v=validateCloudMetadata(metadata,foundation,o.expected||{});if(!snap.exists||!v.valid)return{completed:false,blockers:snap.exists?v.reasons:["fileMetadataMissing"]};const ref=o.storage.ref(metadata.storagePath),objectMetadata=await ref.getMetadata();if(!storageMatches(objectMetadata,metadata))return{completed:false,blockers:["storageMetadataMismatch"]};const buffer=await boundedDownload(ref,o,env);if(buffer.byteLength!==metadata.sizeBytes)return{completed:false,blockers:["downloadSizeMismatch"]};if(await sha256Hex(buffer,cryptoApi)!==metadata.sha256)return{completed:false,blockers:["downloadChecksumMismatch"]};lastPreview={firebaseV8ProductionDownloadPathDetected:true,temporaryUrlRevoked:false};const route=metadata.extension,previewData=o.previewDispatch?await o.previewDispatch(route,buffer,metadata):null;let previewDisplayed=false,opened=false;if(previewData&&o.displayPreview)previewDisplayed=await o.displayPreview(previewData,metadata)===true;if(o.openObjectUrl){const blob=new Blob([buffer],{type:metadata.contentType}),url=o.URL.createObjectURL(blob);try{await o.openObjectUrl(url,metadata);opened=true;}finally{o.URL.revokeObjectURL(url);lastPreview.temporaryUrlRevoked=true;}}return{completed:true,metadata:cleanResult(metadata),previewRoute:route,previewAvailable:previewDisplayed,previewDisplayed,opened};}
++function diagnostics(membership){const g=gates.get();return{...g,membershipPath:membership?.path||null,membershipValid:membership?.valid===true,membershipRole:membership?.role||null,membershipActive:membership?.active===true,effectiveUploadReady:blockers(g,membership,"upload").length===0,effectiveDownloadReady:blockers(g,membership,"download").length===0,uploadBlockers:blockers(g,membership,"upload"),downloadBlockers:blockers(g,membership,"download"),...lastListing,...lastPreview,lastUploadResult:cleanResult(lastUpload),fullStateSaveCalls:0,protectedStateMutations:0,localStorageWrites:0,permanentDeletionAvailable:false};}
++return Object.freeze({upload,download,listJobFiles,diagnostics,gates,validateLocalFile:f=>validateLocalFile(f,foundation),validateCloudMetadata:(m,e)=>validateCloudMetadata(m,foundation,e),validateCompatibilityJob,sha256Hex:b=>sha256Hex(b,cryptoApi)});}
++return Object.freeze({MAX_FILE_SIZE_BYTES,DOWNLOAD_TIMEOUT_MS,CONFIRMATION,EXPECTED_BUCKET,TYPES,UPLOAD_ROLES,READ_ROLES,STAGES,createSessionGates,createApi});
++});
+diff --git a/js/core.js b/js/core.js
+index 14b77086673c3278f3d017e4424bd72d5e0418c1..9651f56a903ece051cfcbca60296c4aef72e4ba7 100644
+--- a/js/core.js
++++ b/js/core.js
+@@ -4184,50 +4184,131 @@ function getCloudCutFileStorageDiagnostics(){
+         storageRulesExpectedVersion:"CFR-03A-deny-all-v1", productionUploadsEnabled:false,
+         productionDownloadsEnabled:false, cfr03TestHelperAvailable:false,
+         cfr03TestNamespace:"workspaces/{workspaceId}/cfr03-tests/{uid}/{testId}/cfr03-test.json",
+         workspaceMembershipMechanism:"none-authoritative-found", productionAuthorizationReady:false,
+         productionAuthorizationBlockers:["No authoritative workspace membership record, role, or custom claim is available to Storage rules."],
+         lastCfr03TestResult:null
+       };
+   return {
+     generatedAtISO:new Date().toISOString(), hostname:String(location.hostname || ""), url:String(location.href || ""),
+     isVercelPreviewHostname:/\.vercel\.app$/i.test(String(location.hostname || "")),
+     firebaseProjectId:projectId, configuredStorageBucket:CUT_FILE_STORAGE_BUCKET,
+     storageSdkAvailable:typeof window.firebase?.storage === "function",
+     storageServiceInitializationAttempted:Boolean(FB.storageInitializationAttempted),
+     storageServiceInitialized:Boolean(FB.storage), storageInitializationError:FB.storageInitializationError || "",
+     signedIn:Boolean(FB.user), uid:FB.user?.uid || null, workspaceId:WORKSPACE_ID,
+     authoritativeFirestoreDocumentPath:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
+     pointsToProductionFirebase:projectId === "omax-maintenance", uploadsEnabled:false, downloadsEnabled:false,
+     storageRulesActuallyTested:false, firewallAvailable:typeof window.CuttingFileContentFirewall?.scanCuttingFileContent === "function",
+     currentSnapshotFirewallSummary:{ contaminated:currentFirewall.contaminated, blockingFindingCount:currentFirewall.blockingFindingCount, wouldPass:!currentFirewall.contaminated },
+     ...cfr03
+   };
+ }
+ 
+ window.auditCuttingFileContentExposure = auditCuttingFileContentExposure;
+ window.getCloudCutFileStorageDiagnostics = getCloudCutFileStorageDiagnostics;
++window.getWorkspaceAuthorizationDiagnostics = function(){
++  const api = window.Cfr04WorkspaceMetadata;
++  const uid = FB.user?.uid || "";
++  let membershipDocRef = null;
++  if (uid && FB.db && api){
++    try { membershipDocRef = FB.db.doc(api.membershipPath(WORKSPACE_ID, uid)); }
++    catch (_error) { membershipDocRef = null; }
++  }
++  return api.getWorkspaceAuthorizationDiagnostics({ uid, workspaceId:WORKSPACE_ID, membershipDocRef });
++};
++const cfr05SessionGates = window.Cfr05CloudCuttingFiles?.createSessionGates();
++window.configureCfr05OperatorSession = function(confirmation, confirmations = {}){
++  return cfr05SessionGates.configureOperatorSession({ ...confirmations, confirmation, hostname:window.location.hostname });
++};
++window.clearCfr05OperatorSession = function(){ return cfr05SessionGates.clear(); };
++window.cfr05CloudCuttingFiles = window.Cfr05CloudCuttingFiles?.createApi(window, {
++  foundation:window.Cfr04WorkspaceMetadata,
++  gates:cfr05SessionGates
++});
++window.uploadCfr05CuttingFile = async function(jobId, file){
++  const uid=FB.user?.uid||"", workspaceId=WORKSPACE_ID, api=window.Cfr04WorkspaceMetadata;
++  let membership={valid:false,active:false,role:null,path:null};
++  if(uid&&FB.db&&api){
++    const path=api.membershipPath(workspaceId,uid),snap=await FB.db.doc(path).get(),data=snap.exists?snap.data():null;
++    const validation=api.validateWorkspaceMembershipRecord(data,{uid,workspaceId});
++    membership={valid:validation.valid,active:data?.active===true,role:data?.role||null,path};
++  }
++  return window.cfr05CloudCuttingFiles.upload({uid,workspaceId,jobId,file,membership,storage:FB.storage,firestore:FB.db,
++    jobExists:id=>(Array.isArray(window.cuttingJobs)&&window.cuttingJobs.some(job=>String(job?.id)===String(id)))||(Array.isArray(window.completedCuttingJobs)&&window.completedCuttingJobs.some(job=>String(job?.id)===String(id)))});
++};
++window.getCfr05Membership = async function(){
++  const uid=FB.user?.uid||"",workspaceId=WORKSPACE_ID,api=window.Cfr04WorkspaceMetadata;
++  if(!uid||!FB.db||!api)return{uid,workspaceId,membership:{valid:false,active:false,role:null,path:null}};
++  const path=api.membershipPath(workspaceId,uid),snap=await FB.db.doc(path).get(),data=snap.exists?snap.data():null,validation=api.validateWorkspaceMembershipRecord(data,{uid,workspaceId});
++  return{uid,workspaceId,membership:{valid:validation.valid,active:data?.active===true,role:data?.role||null,path}};
++};
++window.listCfr05CloudFiles = async function(jobId){const auth=await window.getCfr05Membership();return window.cfr05CloudCuttingFiles.listJobFiles({...auth,jobId,firestore:FB.db});};
++window.openCfr05CloudFile = async function(jobId,fileId,callbacks = {}){
++  const auth=await window.getCfr05Membership(),path=window.Cfr04WorkspaceMetadata.filePath(auth.workspaceId,jobId,fileId);
++  return window.cfr05CloudCuttingFiles.download({...auth,fileDocRef:FB.db.doc(path),expected:{workspaceId:auth.workspaceId,jobId,fileId},storage:FB.storage,fetch:window.fetch.bind(window),AbortController:window.AbortController,setTimeout:window.setTimeout.bind(window),clearTimeout:window.clearTimeout.bind(window),URL:window.URL,openObjectUrl:callbacks.openObjectUrl,displayPreview:callbacks.displayPreview,
++    previewDispatch:(extension,buffer)=>{if(extension==="dxf"&&window.dxfPreview){const text=window.dxfPreview.arrayBufferToText(buffer);return window.dxfPreview.renderCadToSvgDataUrl(text)||null;}return null;}});
++};
++
++function getCuttingJobImporterState(){
++  const state={};
++  Object.defineProperties(state,{
++    cuttingJobs:{get:()=>window.cuttingJobs,set:value=>{window.cuttingJobs=value;cuttingJobs=value;}},
++    completedCuttingJobs:{get:()=>window.completedCuttingJobs,set:value=>{window.completedCuttingJobs=value;completedCuttingJobs=value;}}
++  });
++  ["purchases","inventory","inventoryFolders","inventoryMaterials","receiptTrackerWeeks","orderRequests","dailyCutHours","totalHistory","garnetCleanings","pumpEff","maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","dashboardLayout","costLayout","jobLayout","deletedItems"].forEach(key=>Object.defineProperty(state,key,{get:()=>window[key]}));
++  return state;
++}
++window.cuttingJobImporter = window.CuttingJobImporter?.createApi({
++  xlsx:window.CjiXlsxParser,
++  state:getCuttingJobImporterState,
++  categories:()=>Array.isArray(window.jobFolders)?window.jobFolders:[],
++  materials:()=>{try{return JSON.parse(localStorage.getItem("job_material_pricing_v1")||"null")?.materials||[];}catch(_){return[];}},
++  createCategory:name=>addJobFolder(name,typeof window.JOB_ROOT_FOLDER_ID==="string"?window.JOB_ROOT_FOLDER_ID:"jobs_root"),
++  createMaterial:name=>{let settings;try{settings=JSON.parse(localStorage.getItem("job_material_pricing_v1")||"null");}catch(_){settings=null;}if(!settings||typeof settings!=="object")settings={wasteFactor:10,materials:[]};if(!Array.isArray(settings.materials))settings.materials=[];const material={name:String(name).trim(),density:0.1,pricePerLb:1};settings.materials.push(material);localStorage.setItem("job_material_pricing_v1",JSON.stringify(settings));return material;},
++  captureDefinitionState:()=>({categories:structuredClone(window.jobFolders||[]),materialSettingsRaw:localStorage.getItem("job_material_pricing_v1")}),
++  restoreDefinitionState:value=>{setJobFolders(value.categories);jobFolders=window.jobFolders;if(value.materialSettingsRaw==null)localStorage.removeItem("job_material_pricing_v1");else localStorage.setItem("job_material_pricing_v1",value.materialSettingsRaw);},
++  restoreCategories:value=>{setJobFolders(value);jobFolders=window.jobFolders;},
++  restoreMaterials:value=>{let settings;try{settings=JSON.parse(localStorage.getItem("job_material_pricing_v1")||"null");}catch(_){settings=null;}if(!settings||typeof settings!=="object")settings={wasteFactor:10,materials:[]};settings.materials=value;localStorage.setItem("job_material_pricing_v1",JSON.stringify(settings));},
++  authenticatedBaseline:()=>Boolean(FB.ready&&FB.user&&FB.docRef&&window.__lastLoadedCloudState&&!window.__localBackupOnlyMode),
++  revalidateBaseline:async()=>{if(!FB.docRef||!FB.user)return false;const snap=await FB.docRef.get();if(!snap.exists)return false;const latest=snap.data()||{},loaded=window.__lastLoadedCloudState||{};return Number(latest.syncMeta?.rev||0)===Number(loaded.syncMeta?.rev||0);},
++  backup:async()=>{const state=snapshotState({skipLocalFileCacheSync:true});let materialSettings=null;try{materialSettings=JSON.parse(localStorage.getItem("job_material_pricing_v1")||"null");}catch(_){}const backup={...state,cjiLocalMaterialSettings:materialSettings};if(!exportJsonDownload(`omax-cutting-job-import-backup-${Date.now()}.json`,backup))throw new Error("Full-state backup download did not start.");return true;},
++  saveCloudNow:()=>saveCloudNow()
++});
++(function installCuttingJobImporterAdmin(){
++  const dialog=document.getElementById("cuttingJobImportAdmin"),close=document.getElementById("cuttingJobImportClose"),file=document.getElementById("cuttingJobImportFile"),previewBtn=document.getElementById("cuttingJobImportPreview"),reviewed=document.getElementById("cuttingJobImportReviewed"),run=document.getElementById("cuttingJobImportRun"),status=document.getElementById("cuttingJobImportStatus"),rows=document.getElementById("cuttingJobImportRows");
++  if(!dialog||!close||!file||!previewBtn||!reviewed||!run||!status||!rows||!window.cuttingJobImporter)return;let parsed=null,classified=null,lastTrigger=null;const safe=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
++  const readyRows=()=>Array.isArray(classified)?classified.filter(x=>x.status==="ready"):[],syncRun=()=>{run.disabled=!parsed||!classified||readyRows().length===0||!reviewed.checked||window.cuttingJobImporter.isBusy();},clearReview=()=>{reviewed.checked=false;syncRun();},lock=value=>{file.disabled=value;previewBtn.disabled=value;reviewed.disabled=value;if(value)run.disabled=true;else syncRun();};
++  const openDialog=trigger=>{lastTrigger=trigger||null;if(!dialog.open)dialog.showModal();requestAnimationFrame(()=>{try{file.focus({preventScroll:true});}catch(_){file.focus();}});};
++  const closeDialog=()=>{if(dialog.open)dialog.close();if(lastTrigger?.isConnected)lastTrigger.focus();lastTrigger=null;};
++  document.addEventListener("click",event=>{const trigger=event.target?.closest?.("[data-cutting-job-import-open]");if(trigger){event.preventDefault();openDialog(trigger);}});
++  close.addEventListener("click",closeDialog);dialog.addEventListener("cancel",event=>{event.preventDefault();closeDialog();});
++  window.openReviewedCuttingJobImporter=()=>openDialog(null);window.closeReviewedCuttingJobImporter=closeDialog;
++  file.addEventListener("change",()=>{parsed=null;classified=null;rows.innerHTML="";clearReview();});reviewed.addEventListener("change",syncRun);
++  previewBtn.addEventListener("click",async()=>{clearReview();if(!file.files?.[0]){status.textContent="Choose an import file.";return;}lock(true);try{parsed=await window.cuttingJobImporter.parseFile(file.files[0]);classified=window.cuttingJobImporter.preview(parsed);rows.innerHTML=`<table><thead><tr><th>Row</th><th>Event</th><th>Status</th><th>Reasons</th><th>Warnings</th></tr></thead><tbody>${classified.map(x=>`<tr><td>${x.raw.__sourceRowNumber||x.index+1}</td><td>${safe(x.row.import_event_id)}</td><td>${safe(x.status)}</td><td>${safe(x.reasons.join(" "))}</td><td>${safe(x.warnings.join(" "))}</td></tr>`).join("")}</tbody></table>`;const plan=window.CuttingJobImporter.definitionPlan(classified),list=items=>items.map(item=>item.name).join(", ")||"none";status.textContent=`Parsed ${classified.length} rows. ${readyRows().length} ready. Categories: create ${list(plan.newCategories)}; reuse ${list(plan.existingCategories)}. Materials: create ${list(plan.newMaterials)}; reuse ${list(plan.existingMaterials)}.`;}catch(error){parsed=null;classified=null;rows.innerHTML="";status.textContent=String(error?.message||error);}finally{clearReview();lock(false);}});
++  run.addEventListener("click",async()=>{const ready=readyRows();if(!parsed||!reviewed.checked||!ready.length)return;const active=ready.filter(x=>x.row.record_status==="active").length,completed=ready.filter(x=>x.row.record_status==="completed").length,plan=window.CuttingJobImporter.definitionPlan(classified),unresolved=classified.filter(x=>x.status==="unresolved").length,message=`Append ${ready.length} ready jobs: ${active} active, ${completed} completed. Create ${plan.newCategories.length} and reuse ${plan.existingCategories.length} categories. Create ${plan.newMaterials.length} and reuse ${plan.existingMaterials.length} materials. ${unresolved} unresolved rows remain excluded. Continue?`;if(!window.confirm(message)){clearReview();return;}lock(true);status.textContent="Revalidating and saving…";try{const result=await window.cuttingJobImporter.submit(parsed);status.textContent=result.saveCompleted?`Imported ${result.importedEventIds.length} reviewed jobs.`:result.saveIndeterminate?"Save outcome indeterminate. Refresh and read-verify before any retry.":`Import not completed: ${result.saveError}`;rows.dataset.lastImportResult=JSON.stringify({...result,saveError:String(result.saveError||"")});}finally{clearReview();lock(false);}});
++})();
+ 
+ /* ======================== HISTORY ========================= */
+ const HISTORY_LIMIT = 50;
+ const undoStack = [];
+ const redoStack = [];
+ let currentSnapshotJSON = null;
+ let suppressHistory = false;
+ let skipNextHistoryCapture = false;
+ 
+ function syncRenderTotalsFromHistory(){
+   const len = Array.isArray(totalHistory) ? totalHistory.length : 0;
+   const last = len ? totalHistory[len - 1] : null;
+   const prev = len > 1 ? totalHistory[len - 2] : null;
+ 
+   const curHours = last != null ? Number(last.hours) : NaN;
+   const prevHours = prev != null ? Number(prev.hours) : NaN;
+ 
+   const cur = Number.isFinite(curHours) ? curHours : null;
+   const prevVal = Number.isFinite(prevHours) ? prevHours : null;
+   const delta = (cur != null && prevVal != null) ? Math.max(0, cur - prevVal) : null;
+ 
+   RENDER_TOTAL = cur;
+   RENDER_DELTA = delta;
+   window.RENDER_TOTAL = RENDER_TOTAL;
+   window.RENDER_DELTA = RENDER_DELTA;
+diff --git a/js/cuttingJobImporter.js b/js/cuttingJobImporter.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..c50f38ba41f89316a79b0c0c5a931bd6a85b3a8a
+--- /dev/null
++++ b/js/cuttingJobImporter.js
+@@ -0,0 +1,19 @@
++(function(root,factory){"use strict";const api=factory(root);if(typeof module==="object"&&module.exports)module.exports=factory;if(root)root.CuttingJobImporter=api;})(typeof globalThis!=="undefined"?globalThis:this,function(root){"use strict";
++const FIELDS=["import_event_id","record_status","job_name","project_number","actual_cut_minutes","estimate_hours","add_minutes","priority","charge_rate_per_hr","cost_rate_per_hr","start_date","due_date","completed_date","category","material","thickness_raw","thickness_inches","path_length_ft","path_width_ft","material_cost","material_weight_lb","source_dimensions_raw","cut_sequence","review_status","review_notes","source_file","source_text"];
++const clone=v=>typeof structuredClone==="function"?structuredClone(v):JSON.parse(JSON.stringify(v)),canonical=v=>JSON.stringify(v),date=v=>{const s=String(v||"").trim();if(!/^\d{4}-\d{2}-\d{2}$/.test(s))return"";const d=new Date(`${s}T00:00:00Z`);return Number.isNaN(d.getTime())||d.toISOString().slice(0,10)!==s?"":s;},num=(v,{min=0,integer=false}={})=>{if(String(v??"").trim()==="")return null;const n=Number(v);return Number.isFinite(n)&&n>=min&&(!integer||Number.isInteger(n))?n:NaN;};
++function csv(text){const rows=[],row=[];let current=row,value="",quoted=false;for(let i=0;i<String(text).length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){value+='"';i++;}else quoted=!quoted;}else if(c===","&&!quoted){current.push(value);value="";}else if((c==="\n"||c==="\r")&&!quoted){if(c==="\r"&&text[i+1]==="\n")i++;current.push(value);if(current.some(x=>String(x).trim()))rows.push(current);current=[];value="";}else value+=c;}current.push(value);if(current.some(x=>String(x).trim()))rows.push(current);const headers=(rows.shift()||[]).map(x=>String(x).trim());return rows.map(r=>Object.fromEntries(headers.map((h,i)=>[h,String(r[i]??"")]).filter(([h])=>h)));}
++async function parseFile(file,xlsx){const name=String(file?.name||"").toLowerCase();if(name.endsWith(".xlsx")){if(!xlsx?.parse)throw new Error("Pinned local XLSX parser unavailable.");return(await xlsx.parse(await file.arrayBuffer())).rows;}const raw=await file.text();if(name.endsWith(".csv"))return csv(raw);if(name.endsWith(".json")){const parsed=JSON.parse(raw);const rows=Array.isArray(parsed)?parsed:parsed.rows;if(!Array.isArray(rows))throw new Error("JSON must be an array or {rows:[]}.");return rows;}throw new Error("Only .xlsx, .csv, and .json are supported.");}
++function existingIds(state){const set=new Set();for(const list of [state.cuttingJobs,state.completedCuttingJobs])for(const job of Array.isArray(list)?list:[]){const id=String(job?.import_event_id||job?.importProvenance?.import_event_id||"").trim();if(id)set.add(id);}return set;}
++const normalizeDefinitionName=value=>String(value||"").trim().replace(/\s+/g," ").toLocaleLowerCase();
++function resolveExact(value,list){const wanted=String(value||"").trim(),key=normalizeDefinitionName(wanted);if(!wanted)return{value:"",status:"blank",displayName:""};const matches=(Array.isArray(list)?list:[]).filter(item=>normalizeDefinitionName(item?.name||item?.id)===key);if(matches.length===1)return{value:String(matches[0].id||matches[0].name),status:"matched",displayName:wanted};return{value:"",status:matches.length>1?"ambiguous":"missing",displayName:wanted};}
++function preview(rows,context={}){const existing=existingIds(context.state||{}),seen=new Set();return(Array.isArray(rows)?rows:[]).map((raw,index)=>{const row=Object.fromEntries(FIELDS.map(k=>[k,String(raw?.[k]??"").trim()])),reasons=[],warnings=[];let status="ready";if(!row.import_event_id)reasons.push("Missing import_event_id.");if(seen.has(row.import_event_id)&&row.import_event_id)reasons.push("Duplicate import_event_id within this operation.");if(row.import_event_id)seen.add(row.import_event_id);if(existing.has(row.import_event_id)){status="duplicate";reasons.push("Existing authoritative job has this import_event_id.");}if(!["active","completed","excluded"].includes(row.record_status))reasons.push("record_status must be active, completed, or excluded.");if(row.record_status==="excluded"){status="excluded";reasons.push("Row explicitly excluded.");}if(!row.job_name)reasons.push("Missing job_name.");if(!row.project_number){const derived=/^ATM\s+(\d{1,8})$/i.exec(row.category);if(derived){row.project_number=derived[1];warnings.push(`Project number ${row.project_number} was derived from category "${row.category}".`);}else reasons.push("project_number must be 1-8 digits, or blank only when category is exactly ATM <digits>.");}else if(!/^\d{1,8}$/.test(row.project_number))reasons.push("project_number must be 1-8 digits and remains a string.");for(const key of ["start_date","due_date"])if(row[key]&&!date(row[key]))reasons.push(`${key} must be a real YYYY-MM-DD date or blank.`);if(row.record_status==="completed"&&!date(row.completed_date))reasons.push("Completed rows require a valid completed_date.");const numeric={estimate_hours:{min:0},add_minutes:{min:0},actual_cut_minutes:{min:0},priority:{min:1,integer:true},charge_rate_per_hr:{min:0},cost_rate_per_hr:{min:0},thickness_inches:{min:0},path_length_ft:{min:0},path_width_ft:{min:0},material_cost:{min:0},material_weight_lb:{min:0}};for(const[k,o]of Object.entries(numeric))if(row[k]!==""&&Number.isNaN(num(row[k],o)))reasons.push(`${k} is invalid.`);const category=resolveExact(row.category,context.categories),material=resolveExact(row.material,context.materials);if(category.status==="ambiguous")reasons.push("Category has ambiguous exact matches.");else if(category.status==="missing")warnings.push(`Category "${row.category}" will be created and linked; raw value is preserved in provenance.`);if(material.status==="ambiguous")reasons.push("Material has ambiguous exact matches.");else if(material.status==="missing")warnings.push(`Material "${row.material}" will be created and linked; raw value is preserved in provenance.`);if(row.review_status==="needs_review")reasons.push("review_status needs_review blocks import.");if(status==="ready"&&reasons.length)status=reasons.some(r=>/ambiguous|needs_review/.test(r))?"unresolved":"invalid";return{index,raw,row,status,reasons,warnings,categoryId:category.value,materialName:material.value,categoryResolution:category,materialResolution:material};});}
++function definitionPlan(classified){const ready=(classified||[]).filter(item=>item.status==="ready"),unique=(kind,status)=>{const seen=new Set(),out=[];for(const item of ready){const raw=item.row[kind],resolved=kind==="category"?item.categoryResolution:item.materialResolution;if(resolved?.status!==status)continue;const key=normalizeDefinitionName(raw);if(!key||seen.has(key))continue;seen.add(key);out.push(status==="matched"?{name:raw,id:resolved.value}:{name:raw,normalizedName:key});}return out;};return{existingCategories:unique("category","matched"),newCategories:unique("category","missing"),existingMaterials:unique("material","matched"),newMaterials:unique("material","missing"),ambiguousCategories:(classified||[]).filter(x=>x.categoryResolution?.status==="ambiguous").map(x=>x.row.category),ambiguousMaterials:(classified||[]).filter(x=>x.materialResolution?.status==="ambiguous").map(x=>x.row.material)};}
++
++function jobId(eventId){return`cji_${String(eventId).replace(/[^A-Za-z0-9_-]/g,"_").slice(0,120)}`;}
++function map(item){const r=item.row,estimate=(num(r.estimate_hours)||0)+(num(r.add_minutes)||0)/60,completed=r.record_status==="completed",logMinutes=num(r.actual_cut_minutes)||0,logDate=date(r.completed_date)||date(r.due_date);const provenance=Object.fromEntries(FIELDS.map(k=>[k,String(item.raw?.[k]??"").trim()]));const base={id:jobId(r.import_event_id),import_event_id:r.import_event_id,name:r.job_name,estimateHours:estimate,startISO:date(r.start_date),dueISO:date(r.due_date),projectNumber:r.project_number,material:item.materialName,materialCost:num(r.material_cost)||0,materialQty:1,materialWeight:num(r.material_weight_lb)||0,chargeRate:num(r.charge_rate_per_hr)??200,costRate:num(r.cost_rate_per_hr)??45,priority:num(r.priority,{min:1,integer:true})||1,notes:r.review_notes||"",manualLogs:logMinutes>0?[{dateISO:logDate,completedHours:logMinutes/60,import_event_id:r.import_event_id}]:[],files:[],cat:item.categoryId,importProvenance:provenance};if(!completed)return base;return{...base,completedAtISO:date(r.completed_date),actualHours:logMinutes/60,efficiency:null};}
++const protectedKeys=["purchases","inventory","inventoryFolders","inventoryMaterials","receiptTrackerWeeks","orderRequests","dailyCutHours","totalHistory","garnetCleanings","pumpEff","maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","dashboardLayout","costLayout","jobLayout","deletedItems"];
++function protectedSnapshot(state){return Object.fromEntries(protectedKeys.map(k=>[k,clone(state[k])]));}
++function compareProtected(before,state){const paths=[];for(const k of protectedKeys)if(canonical(before[k])!==canonical(state[k]))paths.push(`$.${k}`);return paths;}
++function counts(state){return{cuttingJobs:Array.isArray(state.cuttingJobs)?state.cuttingJobs.length:0,completedCuttingJobs:Array.isArray(state.completedCuttingJobs)?state.completedCuttingJobs.length:0,completedTimeRecords:[...(state.cuttingJobs||[]),...(state.completedCuttingJobs||[])].reduce((n,j)=>n+(j.manualLogs?.length||0),0)};}
++function createApi(env){let busy=false;async function submit(rows){const classified=preview(rows,{state:env.state(),categories:env.categories(),materials:env.materials()}),groups=s=>classified.filter(x=>x.status===s),ready=groups("ready"),result={parsedRows:classified.length,readyRows:ready.length,duplicateRows:groups("duplicate").length,unresolvedRows:groups("unresolved").length,invalidRows:groups("invalid").length,excludedRows:groups("excluded").length,plannedImportEventIds:ready.map(x=>x.row.import_event_id),importedEventIds:[],activeJobsAdded:0,completedJobsAdded:0,completedTimeRecordsAdded:0,backupCreated:false,saveAttempted:false,stateWriteAttempted:false,stateWriteCompleted:false,saveCompleted:false,saveIndeterminate:false,saveError:"",saveWarnings:[],rollbackAttempted:false,rollbackCompleted:false,rollbackVerified:false,protectedStateMatched:false,protectedStateMismatchPaths:[],beforeCounts:null,afterCounts:null,definitionPlan:definitionPlan(classified),createdCategoryIds:[],reusedCategoryIds:[],createdMaterialIds:[],reusedMaterialIds:[]};if(busy){result.saveError="Import already in progress.";return result;}if(!env.authenticatedBaseline()){result.saveError="Authenticated current cloud baseline required.";return result;}const rechecked=preview(ready.map(x=>x.raw),{state:env.state(),categories:env.categories(),materials:env.materials()});if(rechecked.some(x=>x.status!=="ready")||rechecked.length===0){result.saveError=rechecked.length?"Submission revalidation failed.":"No ready rows to import.";return result;}busy=true;if(env.revalidateBaseline){const baseline=await env.revalidateBaseline();if(baseline!==true){busy=false;result.saveError="Latest authoritative cloud baseline revalidation failed.";return result;}}const state=env.state(),beforeActive=clone(state.cuttingJobs||[]),beforeCompleted=clone(state.completedCuttingJobs||[]),protectedBefore=protectedSnapshot(state),beforeCategories=clone(env.categories()),beforeMaterials=clone(env.materials()),beforeDefinitionState=env.captureDefinitionState?env.captureDefinitionState():null;result.beforeCounts={...counts(state),categories:beforeCategories.length,materials:beforeMaterials.length};try{await env.backup();result.backupCreated=true;const currentCategories=env.categories(),currentMaterials=env.materials(),createdCategories=new Map(),createdMaterials=new Map();for(const item of rechecked){if(item.categoryResolution.status==="missing"){const key=normalizeDefinitionName(item.row.category);if(!createdCategories.has(key)){const made=env.createCategory(item.row.category);createdCategories.set(key,made);result.createdCategoryIds.push(String(made.id));}item.categoryId=String(createdCategories.get(key).id);}else if(item.categoryResolution.status==="matched"){item.categoryId=item.categoryResolution.value;if(!result.reusedCategoryIds.includes(item.categoryId))result.reusedCategoryIds.push(item.categoryId);}if(item.materialResolution.status==="missing"){const key=normalizeDefinitionName(item.row.material);if(!createdMaterials.has(key)){const made=env.createMaterial(item.row.material);createdMaterials.set(key,made);result.createdMaterialIds.push(String(made.id||made.name));}item.materialName=String(createdMaterials.get(key).name);}else if(item.materialResolution.status==="matched"){item.materialName=String(currentMaterials.find(m=>String(m.id||m.name)===item.materialResolution.value)?.name||item.materialResolution.value);const id=String(item.materialResolution.value);if(!result.reusedMaterialIds.includes(id))result.reusedMaterialIds.push(id);}}if(canonical(env.categories().slice(0,beforeCategories.length))!==canonical(beforeCategories)||canonical(env.materials().slice(0,beforeMaterials.length))!==canonical(beforeMaterials)||env.categories().length!==beforeCategories.length+result.createdCategoryIds.length||env.materials().length!==beforeMaterials.length+result.createdMaterialIds.length)throw new Error("Definition mutation exceeded the reviewed append-only plan.");const mapped=rechecked.map(map);const active=mapped.filter((_,i)=>rechecked[i].row.record_status==="active"),completed=mapped.filter((_,i)=>rechecked[i].row.record_status==="completed");state.cuttingJobs.push(...active);state.completedCuttingJobs.push(...completed);result.activeJobsAdded=active.length;result.completedJobsAdded=completed.length;result.completedTimeRecordsAdded=mapped.reduce((n,j)=>n+j.manualLogs.length,0);result.protectedStateMismatchPaths=compareProtected(protectedBefore,state);result.protectedStateMatched=result.protectedStateMismatchPaths.length===0;if(!result.protectedStateMatched)throw new Error("Protected state mutation rejected.");result.saveAttempted=true;const saved=await env.saveCloudNow();result.stateWriteAttempted=saved?.stateWriteAttempted===true;result.stateWriteCompleted=saved?.stateWriteCompleted===true;result.saveCompleted=saved?.saved===true&&result.stateWriteCompleted;result.saveIndeterminate=!result.saveCompleted&&saved?.indeterminate===true;result.saveWarnings=Array.isArray(saved?.warnings)?saved.warnings.slice():[];result.saveError=String(saved?.error||"");if(result.saveCompleted){result.importedEventIds=result.plannedImportEventIds.slice();result.afterCounts={...counts(state),categories:env.categories().length,materials:env.materials().length};return result;}if(result.saveIndeterminate){result.afterCounts={...counts(state),categories:env.categories().length,materials:env.materials().length};return result;}throw new Error(result.saveError||"Authoritative save did not complete.");}catch(error){result.saveError=result.saveError||String(error?.message||error);if(!result.saveIndeterminate){result.rollbackAttempted=true;state.cuttingJobs=clone(beforeActive);state.completedCuttingJobs=clone(beforeCompleted);if(env.restoreDefinitionState&&beforeDefinitionState)env.restoreDefinitionState(beforeDefinitionState);else{env.restoreCategories(beforeCategories);env.restoreMaterials(beforeMaterials);}result.rollbackCompleted=true;result.rollbackVerified=canonical(state.cuttingJobs)===canonical(beforeActive)&&canonical(state.completedCuttingJobs)===canonical(beforeCompleted)&&canonical(env.categories())===canonical(beforeCategories)&&canonical(env.materials())===canonical(beforeMaterials);}result.afterCounts={...counts(state),categories:env.categories().length,materials:env.materials().length};return result;}finally{busy=false;}}return Object.freeze({parseFile:(f)=>parseFile(f,env.xlsx),preview:(rows)=>preview(rows,{state:env.state(),categories:env.categories(),materials:env.materials()}),submit,isBusy:()=>busy});}
++return Object.freeze({FIELDS,normalizeDefinitionName,csv,parseFile,preview,definitionPlan,map,createApi});});
+diff --git a/js/renderers.js b/js/renderers.js
+index b5cde5e79495cf4c4a11ad9d90a23ba254618a70..1fa8aed78867dc1e5c63473e0fe9b39e044095da 100644
+--- a/js/renderers.js
++++ b/js/renderers.js
+@@ -22840,74 +22840,89 @@ function renderJobs(){
+       buttonText: String(btn.textContent || "").trim()
+     });
+     if (window.DEBUG_MODE) console.info("[cutting-job-files] attach click cached root", { jobId, cacheOk: !!activeCache?.ok, cacheReason: activeCache?.reason || "", hasHandle: !!activeCache?.handle });
+     if (!jobId){
+       toast("Unable to attach file: missing job id.");
+       return true;
+     }
+     toast("Opening WJ Cuts reference picker…");
+     if (typeof window !== "undefined") window.__wjCutsReferencePickerCanceled = false;
+     try {
+       const completed = await attachFromLocalOneDriveRoot(jobId);
+       const modalOpen = oneDriveModal && !oneDriveModal.hasAttribute("hidden");
+       const pickerCanceled = typeof window !== "undefined" && window.__wjCutsReferencePickerCanceled === true;
+       if (!completed && !modalOpen && !pickerCanceled){
+         toast("Reference folder attach did not complete.");
+       }
+     } catch (err){
+       console.error("Cutting job reference attach failed", err);
+       toast("Unable to attach WJ Cuts file reference.");
+     }
+     return true;
+   };
+ 
+   const handleCuttingJobFileActionClick = async (e)=>{
+     const act = (matched)=>{ if (!matched) return false; e.preventDefault(); e.stopPropagation(); if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation(); return true; };
++    const cloudFiles = e.target.closest("[data-cloud-files]");
++    if(cloudFiles){
++      e.preventDefault(); e.stopPropagation(); const jobId=String(cloudFiles.getAttribute("data-cloud-files")||""); cloudFiles.disabled=true;
++      try{const result=await window.listCfr05CloudFiles(jobId),dialog=document.createElement("dialog");dialog.setAttribute("data-cfr05-cloud-dialog","");const rows=result.files.map(file=>`<li><strong>${escapeHtml(file.originalName)}</strong> · ${escapeHtml(file.extension.toUpperCase())}/${escapeHtml(file.contentType)} · ${(Number(file.sizeBytes)/1024).toFixed(1)} KB · verified <button type="button" data-cfr05-open="${escapeHtml(file.fileId)}">Preview/Open</button></li>`).join("");dialog.innerHTML=`<h3>Cloud files</h3><p>${result.cloudFileCount} verified; ${result.rejectedMetadataDocumentCount} rejected.</p><ul>${rows||"<li>No verified cloud files.</li>"}</ul><button type="button" data-cfr05-close>Close</button>`;document.body.appendChild(dialog);dialog.addEventListener("click",async event=>{if(event.target.closest("[data-cfr05-close]")){dialog.close();dialog.remove();return;}const download=event.target.closest("[data-cfr05-download]");if(download){download.disabled=true;try{await window.openCfr05CloudFile(jobId,download.getAttribute("data-cfr05-download"),{openObjectUrl:async(url,metadata)=>{const anchor=document.createElement("a");anchor.href=url;anchor.download=metadata.safeFileName;document.body.appendChild(anchor);anchor.click();anchor.remove();}});}catch(err){toast(err?.message||"Cloud file could not be downloaded.");}finally{download.disabled=false;}return;}const open=event.target.closest("[data-cfr05-open]");if(open){open.disabled=true;try{const fileId=open.getAttribute("data-cfr05-open"),outcome=await window.openCfr05CloudFile(jobId,fileId,{displayPreview:async preview=>{if(!/^data:image\/svg\+xml/i.test(preview))return false;let image=dialog.querySelector("[data-cfr05-preview]");if(!image){image=document.createElement("img");image.setAttribute("data-cfr05-preview","");image.alt="Verified DXF preview";image.style.maxWidth="100%";dialog.appendChild(image);}image.src=preview;return true;}});if(!outcome.previewAvailable){toast(`${outcome.previewRoute.toUpperCase()} browser preview unavailable; use explicit Download/Open.`);open.textContent="Download/Open";open.removeAttribute("data-cfr05-open");open.setAttribute("data-cfr05-download",fileId);}}catch(err){toast(err?.message||"Cloud file could not be opened.");}finally{open.disabled=false;}}});dialog.showModal();}
++      catch(err){toast(err?.message||"Cloud files are blocked or unavailable.");}finally{cloudFiles.disabled=false;}return true;
++    }
++    const cloudUpload = e.target.closest("[data-cloud-file-upload]");
++    if (cloudUpload){
++      e.preventDefault(); e.stopPropagation();
++      if (cloudUpload.disabled) return true;
++      const jobId=String(cloudUpload.getAttribute("data-cloud-file-upload")||"");
++      const input=document.createElement("input"); input.type="file"; input.accept=".dxf,.ord,.omx";
++      input.onchange=async()=>{const file=input.files?.[0];if(!file)return;cloudUpload.disabled=true;cloudUpload.textContent="Validating and uploading…";try{const outcome=await window.uploadCfr05CuttingFile(jobId,file);if(outcome.stage==="completed"){toast(`Cloud file verified: ${file.name}`);await window.listCfr05CloudFiles(jobId);}else if(outcome.indeterminate)toast(`Cloud upload indeterminate; manual review required${outcome.possibleOrphanPath?`: ${outcome.possibleOrphanPath}`:""}.`);else toast(`Cloud upload blocked/failed at ${outcome.stage}: ${outcome.error?.message||"Unknown error"}`);}catch(err){toast(err?.message||"Secure cloud upload failed.");}finally{cloudUpload.disabled=false;cloudUpload.textContent="Upload secure cloud file";}};
++      input.click(); return true;
++    }
+     const fileMenuAdd = e.target.closest("[data-job-file-add]");
+     if (fileMenuAdd){
+       await handleReferenceFolderAttachButtonClick(e, fileMenuAdd);
+       return true;
+     }
+     const previewPathBtn = e.target.closest("[data-preview-path-btn]");
+     if (previewPathBtn && act(true)){ const expected = previewPathBtn.getAttribute("data-preview-expected-path") || ""; const rootLocation = previewPathBtn.getAttribute("data-preview-root-location") || "WJ Cuts"; const rootId = previewPathBtn.getAttribute("data-preview-root-id") || "Not verified"; const manualHint = previewPathBtn.getAttribute("data-preview-root-hint") || ""; if (expected && navigator?.clipboard?.writeText){ navigator.clipboard.writeText(expected).catch(()=>{}); } const msg = `Root:\n${rootLocation || "WJ Cuts"}\n\nRoot ID:\n${rootId || "Not verified"}\n\nRelative path under root:\n${expected || "Unavailable"}\n\nHow to find it:\nOpen the selected WJ Cuts root folder on this computer, then follow the relative path above.${manualHint ? `\n\nOptional hint:\n${manualHint} (Manual hint, not verified full path)` : ""}`; if (window.alert) window.alert(msg); else toast(msg); return true; }
+     const localFileBtn = e.target.closest("[data-open-local-file]");
+     if (localFileBtn && act(true)){ await openLocalRootAttachment(localFileBtn.getAttribute("data-job-id"), localFileBtn.getAttribute("data-file-index")); return true; }
+     const upload = e.target.closest("[data-upload-job]");
+     if (upload && act(true)){ const id = upload.getAttribute("data-upload-job"); closeActionMenu(); closeHistoryActionMenu(); content.querySelector(`input[data-job-file-input="${id}"]`)?.click(); return true; }
+     const linkJobFile = e.target.closest("[data-link-job-file]");
+     if (linkJobFile && act(true)){ const idStr = String(linkJobFile.getAttribute("data-link-job-file") || ""); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; if (!j) return true; try { const picked = await window.oneDrivePicker.openOneDriveDxfPicker(); if (!picked) return true; j.files = Array.isArray(j.files) ? j.files : []; j.files.push({ id: genId(picked.fileName || "job_file"), name: picked.fileName || "Linked file", type: "", size: null, source: "onedrive", driveId: picked.driveId || "", itemId: picked.itemId || "", eTag: picked.eTag || "", lastModifiedDateTime: picked.lastModifiedDateTime || "", webUrl: picked.webUrl || "", url: picked.webUrl || "", addedAt: new Date().toISOString() }); saveCloudDebounced(); toast("OneDrive DXF linked"); renderJobs(); } catch (err){ toast(err?.message || "Unable to link OneDrive DXF."); } return true; }
+     const editFileLink = e.target.closest("[data-edit-file-link]");
+     if (editFileLink && act(true)){ const idStr = String(editFileLink.getAttribute("data-edit-file-link") || ""); const idx = Number(editFileLink.getAttribute("data-file-index")); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null; if (!file) return true; const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || ""); if (url == null) return true; file.url = url; file.source = "onedrive"; saveCloudDebounced(); toast(url ? "File link updated" : "File link cleared"); renderJobs(); return true; }
+     const removeFile = e.target.closest("[data-remove-file]");
+     if (removeFile && act(true)){ const idStr = String(removeFile.getAttribute("data-remove-file") || ""); const idx = Number(removeFile.getAttribute("data-file-index")); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; if (j && Array.isArray(j.files) && idx >= 0 && idx < j.files.length){ j.files.splice(idx, 1); saveCloudDebounced(); toast("File removed"); renderJobs(); } return true; }
+     return false;
+   };
+ 
+   const handleRootFileActionClick = (e)=>{
+     const target = e.target;
+     if (!(target instanceof Element)) return;
+-    const fileAction = target.closest("[data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
++    const fileAction = target.closest("[data-cloud-files], [data-cloud-file-upload], [data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
+     if (!fileAction || !content.contains(fileAction)) return;
+     handleCuttingJobFileActionClick(e).catch(err => {
+       console.error("Cutting job file action failed", err);
+       toast("Unable to attach WJ Cuts file reference.");
+     });
+   };
+   if (content.__jobFileActionClickHandler){
+     content.removeEventListener("click", content.__jobFileActionClickHandler, true);
+   }
+   content.__jobFileActionClickHandler = handleRootFileActionClick;
+   content.addEventListener("click", handleRootFileActionClick, true);
+ 
+   const handleDocumentReferenceAttachClick = (event)=>{
+     const target = event.target;
+     if (!(target instanceof Element)) return;
+     const btn = target.closest("[data-job-file-add]");
+     if (!btn) return;
+     handleReferenceFolderAttachButtonClick(event, btn).catch(err => {
+       console.error("Cutting job document reference attach failed", err);
+       toast("Unable to attach WJ Cuts file reference.");
+     });
+   };
+   if (typeof document !== "undefined"){
+     if (window.__cuttingJobReferenceAttachDocumentHandler){
+       document.removeEventListener("click", window.__cuttingJobReferenceAttachDocumentHandler, true);
+diff --git a/js/views.js b/js/views.js
+index 23735c02f8d968db6f31d00731b7c89f78d2f563..ef42b0611ae956cdef71d13434d4b9f1800a5969 100644
+--- a/js/views.js
++++ b/js/views.js
+@@ -4002,51 +4002,51 @@ function viewJobs(){
+                   <div class="job-metric">
+                     <span class="job-metric-label">Charge rate</span>
+                     <span class="job-metric-value">${chargeDisplay}</span>
+                   </div>
+                   <div class="job-metric">
+                     <span class="job-metric-label">Cost rate</span>
+                     <span class="job-metric-value">${costDisplay}</span>
+                   </div>
+                   <div class="job-metric">
+                     <span class="job-metric-label">Net profit / hr</span>
+                     <span class="job-metric-value ${netClass}">${netDisplay}</span>
+                   </div>
+                   <div class="job-metric">
+                     <span class="job-metric-label">Net total</span>
+                     <span class="job-metric-value ${impactClass}">${netTotalDisplay}</span>
+                   </div>
+                   <div class="job-metric">
+                     <span class="job-metric-label">Completed</span>
+                     <span class="job-metric-value small muted">${completedTxt}</span>
+                   </div>
+                 </div>
+               </aside>
+             </div>
+             <label class="job-edit-note">Notes<textarea data-history-field="notes" data-history-id="${job.id}" rows="3" placeholder="Notes...">${textEsc(job?.notes || "")}</textarea></label>
+             <div class="job-edit-files">
+-              <div class="job-edit-files-actions"><button type="button" data-job-file-add="${job.id}" data-job-file-source="history">Attach from Reference Folder</button><button type="button" data-upload-job="${job.id}">Temporary local upload — not saved</button><button type="button" data-link-job-file="${job.id}">Link OneDrive URL</button></div>
++              <div class="job-edit-files-actions"><button type="button" data-cloud-files="${job.id}">Cloud files</button><button type="button" data-cloud-file-upload="${job.id}">Upload secure cloud file</button><button type="button" data-job-file-add="${job.id}" data-job-file-source="history">Attach from Reference Folder</button><button type="button" data-upload-job="${job.id}">Temporary local upload — not saved</button><button type="button" data-link-job-file="${job.id}">Link OneDrive URL</button></div>
+               <input type="file" data-job-file-input="${job.id}" multiple style="display:none">
+               <ul class="job-file-list">
+                 ${jobFiles.length ? jobFiles.map((f, idx)=>{
+                   const safeName = f.name || `file_${idx+1}`;
+                   const href = f.dataUrl || f.url || f.externalUrl || f.downloadUrl || f.oneDriveUrl || "";
+                   const usableLink = !!href && !/^data:(image|application)\//i.test(String(href || "")) && /^https?:\/\//i.test(String(href || ""));
+                   const isRef = f?.source === "wj_cuts_reference" && !!f?.relativePath;
+                   const expectedPath = isRef ? `${String(f.relativePath || "").replace(/^\\+/, "").replace(/\//g, "\\")}` : "";
+                   const link = isRef
+                     ? `<button type="button" class="link" data-open-local-file data-job-id="${job.id}" data-file-index="${idx}">${safeName}</button>`
+                     : (usableLink ? `<a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a>` : `${safeName} <span class="small muted">— File metadata saved only — original file content is not stored.</span>`);
+                   const sourceTag = f?.source === "wj_cuts_reference"
+                     ? `<span class="job-file-source-badge">Reference folder</span>`
+                     : (f?.source === "onedrive" ? `<span class="job-file-source-badge">OneDrive</span>` : "");
+                   const statusTag = jobFileStatusMarkup(f);
+                   const rootLabel = `WJ Cuts / ${String(f?.computerProfileId || "selected profile")}`;
+                   const pathAction = expectedPath ? `<button type="button" class="link" data-preview-path-btn data-preview-expected-path="${esc(expectedPath)}" data-preview-root-location="${esc(rootLabel)}" data-preview-root-id="${esc(String(f?.rootId || 'Not verified'))}" data-preview-root-hint="${esc(String(f?.rootLocationHint || ''))}">Show path</button>` : "";
+                   const linkAction = !isRef ? `<button type="button" class="link" data-edit-file-link="${job.id}" data-file-index="${idx}">Link</button>` : "";
+                   return `<li>${link} ${sourceTag} ${statusTag} ${expectedPath ? `<span class="small muted">— Root: ${esc(rootLabel)} · Relative path: ${esc(expectedPath)} · Root ID: ${esc(String(f?.rootId || "Not verified").slice(0,16))}</span>` : ""} ${pathAction} ${linkAction} <button type="button" class="link" data-remove-file="${job.id}" data-file-index="${idx}">Remove</button></li>`;
+                 }).join("") : `<li class="muted">No files attached</li>`}
+               </ul>
+             </div>
+             <div class="job-edit-actions">
+               <button type="button" data-history-save="${job.id}">Save</button>
+               <button type="button" class="danger" data-history-cancel="${job.id}">Cancel</button>
+@@ -4138,51 +4138,51 @@ function viewJobs(){
+     : null;
+   const rows = jobsForCategory.map(j => {
+     const jobFiles = Array.isArray(j.files) ? j.files : [];
+     const fileCount = jobFiles.length;
+     const fileMenuId = `jobFileMenu_${j.id}`;
+     const actionMenuId = `jobActionsMenu_${j.id}`;
+     const fileLabel = fileCount
+       ? `${fileCount} file${fileCount === 1 ? "" : "s"}`
+       : "No files";
+     const fileMenuItems = fileCount
+       ? jobFiles.map((f, idx) => {
+           const safeName = esc(f?.name || `file_${idx + 1}`);
+           if (f?.source === "wj_cuts_reference" && f?.relativePath){
+             return `<li class="job-file-menu-item"><button type="button" class="link" data-open-local-file data-job-id="${esc(String(j.id || ""))}" data-file-index="${idx}">${safeName}</button></li>`;
+           }
+           const hrefRaw = f?.dataUrl || f?.url || f?.externalUrl || f?.downloadUrl || f?.oneDriveUrl || "";
+           const href = esc(hrefRaw);
+           const usableLink = !!hrefRaw && !/^data:(image|application)\//i.test(String(hrefRaw || "")) && /^https?:\/\//i.test(String(hrefRaw || ""));
+           if (!hrefRaw){
+             return `<li class="job-file-menu-item">${safeName}<span class="small muted"> — File metadata saved only — original file content is not stored.</span></li>`;
+           }
+           if (!usableLink) return `<li class="job-file-menu-item">${safeName}<span class="small muted"> — File metadata saved only — original file content is not stored.</span></li>`;
+           return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
+         }).join("")
+       : "";
+-    const fileMenuActions = `<div class="job-file-menu-actions"><button type="button" class="job-file-menu-action" data-job-file-add="${j.id}">+ Add files</button></div>
++    const fileMenuActions = `<div class="job-file-menu-actions"><button type="button" class="job-file-menu-action" data-cloud-files="${j.id}">Cloud files</button><button type="button" class="job-file-menu-action" data-cloud-file-upload="${j.id}">Upload secure cloud file</button><button type="button" class="job-file-menu-action" data-job-file-add="${j.id}">+ Add local reference</button></div>
+     <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+       <div class="cost-receipt-backdrop" data-order-repair-close></div>
+       <div class="cost-receipt-card" role="document">
+         <div class="cost-receipt-card-body">
+           <h3>Repair Purchase-to-Inventory Links</h3>
+           <button type="button" class="cost-receipt-close" data-order-repair-close>×</button>
+           <div data-order-repair-table></div>
+           <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
+         </div>
+       </div>
+     </div>
+ `;
+     const fileMenu = (fileCount
+       ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
+       : `<p class="job-file-menu-empty small muted">No files attached</p>`)
+       + fileMenuActions;
+     const editing = editingJobs.has(j.id);
+     const jobId = j?.id != null ? String(j.id) : "";
+     const priorityValue = priorityForJob(j);
+     const cachedEff = jobId && efficiencyCache instanceof Map ? efficiencyCache.get(jobId) : null;
+     const eff = cachedEff || computeJobEfficiency(j);
+     if (jobId && efficiencyCache instanceof Map && !efficiencyCache.has(jobId)){
+       efficiencyCache.set(jobId, eff);
+     }
+     const backlogRaw = jobId && backlogById instanceof Map ? backlogById.get(jobId) : 0;
+@@ -4438,51 +4438,51 @@ function viewJobs(){
+                   <div class="job-metric">
+                     <span class="job-metric-label">Net profit / hr</span>
+                     <span class="job-metric-value ${netClass}">${netDisplay}</span>
+                   </div>
+                   <div class="job-metric">
+                     <span class="job-metric-label">Net total</span>
+                     <span class="job-metric-value ${impactClass}">${netTotalDisplay}</span>
+                   </div>
+                   <div class="job-metric">
+                     <span class="job-metric-label">Queue ahead</span>
+                     <span class="job-metric-value">${backlogHours > 0 ? `${backlogHours.toFixed(1)} hr` : 'None'}</span>
+                   </div>
+                   <div class="job-metric">
+                     <span class="job-metric-label">Queue total</span>
+                     <span class="job-metric-value">${esc(queueTotalDisplay)}</span>
+                   </div>
+                   <div class="job-metric">
+                     <span class="job-metric-label">Schedule</span>
+                     <span class="job-metric-value small muted">${startTxt} → ${dueTxt}</span>
+                   </div>
+                 </div>
+               </aside>
+             </div>
+               <label class="job-edit-note">Notes<textarea data-j="notes" data-id="${j.id}" rows="3" placeholder="Notes...">${j.notes||""}</textarea></label>
+               <div class="job-edit-files">
+-                <div class="job-edit-files-actions"><button type="button" data-job-file-add="${j.id}" data-job-file-source="active">Attach from Reference Folder</button><button type="button" data-upload-job="${j.id}">Temporary local upload — not saved</button><button type="button" data-link-job-file="${j.id}">Link OneDrive URL</button></div>
++                <div class="job-edit-files-actions"><button type="button" data-cloud-files="${j.id}">Cloud files</button><button type="button" data-cloud-file-upload="${j.id}">Upload secure cloud file</button><button type="button" data-job-file-add="${j.id}" data-job-file-source="active">Attach from Reference Folder</button><button type="button" data-upload-job="${j.id}">Temporary local upload — not saved</button><button type="button" data-link-job-file="${j.id}">Link OneDrive URL</button></div>
+                 <input type="file" data-job-file-input="${j.id}" multiple style="display:none">
+                 <ul class="job-file-list">
+                   ${jobFiles.length ? jobFiles.map((f, idx)=>{
+                     const safeName = f.name || `file_${idx+1}`;
+                     const href = f.dataUrl || f.url || f.externalUrl || f.downloadUrl || f.oneDriveUrl || "";
+                     const usableLink = !!href && !/^data:(image|application)\//i.test(String(href || "")) && /^https?:\/\//i.test(String(href || ""));
+                     const isRef = f?.source === "wj_cuts_reference" && !!f?.relativePath;
+                     const expectedPath = isRef ? `${String(f.relativePath || "").replace(/^\\+/, "").replace(/\//g, "\\")}` : "";
+                     const link = isRef
+                       ? `<button type="button" class="link" data-open-local-file data-job-id="${j.id}" data-file-index="${idx}">${safeName}</button>`
+                       : (usableLink ? `<a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a>` : `${safeName} <span class="small muted">— File metadata saved only — original file content is not stored.</span>`);
+                     const sourceTag = f?.source === "wj_cuts_reference"
+                       ? `<span class="job-file-source-badge">Reference folder</span>`
+                       : (f?.source === "onedrive" ? `<span class="job-file-source-badge">OneDrive</span>` : "");
+                     const statusTag = jobFileStatusMarkup(f);
+                     const rootLabel = `WJ Cuts / ${String(f?.computerProfileId || "selected profile")}`;
+                     const pathAction = expectedPath ? `<button type="button" class="link" data-preview-path-btn data-preview-expected-path="${esc(expectedPath)}" data-preview-root-location="${esc(rootLabel)}" data-preview-root-id="${esc(String(f?.rootId || 'Not verified'))}" data-preview-root-hint="${esc(String(f?.rootLocationHint || ''))}">Show path</button>` : "";
+                     const linkAction = !isRef ? `<button type="button" class="link" data-edit-file-link="${j.id}" data-file-index="${idx}">Link</button>` : "";
+                     return `<li>${link} ${sourceTag} ${statusTag} ${expectedPath ? `<span class="small muted">— Root: ${esc(rootLabel)} · Relative path: ${esc(expectedPath)} · Root ID: ${esc(String(f?.rootId || "Not verified").slice(0,16))}</span>` : ""} ${pathAction} ${linkAction} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
+                   }).join("") : `<li class=\"muted\">No files attached</li>`}
+                 </ul>
+               </div>
+               <div class="job-edit-actions">
+                 <button type="button" data-save-job="${j.id}">Save</button>
+                 <button type="button" class="danger" data-cancel-job="${j.id}">Cancel</button>
+@@ -4512,50 +4512,51 @@ function viewJobs(){
+           <div class="job-category-header">
+             <h3>Job Categories</h3>
+             <button type="button" class="small" data-job-folder-add-root>+ Add Category</button>
+           </div>
+           <div class="job-category-tree">
+             ${folderTreeMarkup}
+           </div>
+           <p class="small muted">Select a category to focus the job list or create sub-categories to organize further.</p>
+         </div>
+       </div>
+     </div>
+ 
+     <div class="block job-main-block">
+       <div class="job-page-topbar">
+         <div class="job-page-toolbar">
+           <h3>Cutting Jobs</h3>
+           <div class="job-toolbar-actions">
+             <button type="button" class="job-show-all-button" data-job-show-all>Show all jobs</button>
+             <button
+               type="button"
+               class="job-add-button"
+               data-job-add-toggle
+               aria-expanded="${addFormOpen ? "true" : "false"}"
+               aria-controls="jobAddPanel"
+             >${addFormOpen ? "Hide add job form" : "+ New cutting job"}</button>
++            <button type="button" class="job-history-button" data-cutting-job-import-open>Import reviewed jobs</button>
+             <button type="button" class="job-history-button" data-job-onedrive-setup>OneDrive setup</button>
+             <button type="button" class="job-history-button" data-job-naming-open>Open Naming Widget</button>
+             <button type="button" class="job-history-button" data-job-history-trigger>Jump to history</button>
+           </div>
+         </div>
+         <div class="job-onedrive-status small muted">${esc(oneDriveStatusLabel)}</div>
+         ${!addFormOpen && pendingFiles.length
+           ? `<div class="job-add-indicator" role="status" aria-live="polite">${pendingSummary}</div>`
+           : ""}
+       </div>
+       ${overlapAlertMarkup}
+       <section
+         class="job-add-panel${addFormOpen ? " is-open" : ""}"
+         data-job-add-panel
+         id="jobAddPanel"
+         ${addFormOpen ? "" : "hidden"}
+         aria-hidden="${addFormOpen ? "false" : "true"}"
+       >
+         <form id="addJobForm" class="mini-form job-add-form">
+           <div class="job-add-column">
+           <label>Job name
+             <input type="text" id="jobName" placeholder="Job name" required value="${esc(addJobDraftField("name"))}">
+           </label>
+           <label class="job-estimate-label-group">
+             <span class="small muted" id="jobEstBreakdown">0 hrs = 0 hrs 0 min</span>
+diff --git a/storage.rules b/storage.rules
+index 8863e61acd652eec42bc82336764cc25e7d97f8c..c491ad9caa66d05cb61618713b525c25e1f551d0 100644
+--- a/storage.rules
++++ b/storage.rules
+@@ -1,9 +1,84 @@
+ rules_version = '2';
+ 
++// CFR-05 production proposal. DO NOT DEPLOY until deployed Firestore rules prove
++// that ordinary clients cannot create, activate, or promote membership records.
+ service firebase.storage {
+   match /b/{bucket}/o {
+-    match /{allPaths=**} {
+-      allow read, write: if false;
++    function member(workspaceId) {
++      return firestore.get(/databases/(default)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid)).data;
+     }
++    function activeRole(workspaceId, roles) {
++      return request.auth != null
++        && firestore.exists(/databases/(default)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid))
++        && member(workspaceId).uid == request.auth.uid
++        && member(workspaceId).workspaceId == workspaceId
++        && member(workspaceId).active == true
++        && member(workspaceId).schemaVersion == 1
++        && member(workspaceId).role in roles;
++    }
++    function safeIds(workspaceId, jobId, fileId) {
++      return workspaceId.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
++        && jobId.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$')
++        && fileId.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$');
++    }
++    function allowedName(name) {
++      return name.size() <= 120 && name.matches('^[A-Za-z0-9][A-Za-z0-9._-]*\\.(dxf|ord|omx)$');
++    }
++    function validCreate(workspaceId, jobId, fileId, safeFileName) {
++      return bucket == 'omax-maintenance.firebasestorage.app'
++        && request.resource.size > 0 && request.resource.size <= 52428800
++        && request.resource.contentType in ['application/dxf', 'application/octet-stream']
++        && request.resource.metadata.keys().hasOnly(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','storagePath','sha256','status','createdBy','createdAtISO'])
++        && request.resource.metadata.schemaVersion == '1'
++        && request.resource.metadata.workspaceId == workspaceId
++        && request.resource.metadata.jobId == jobId
++        && request.resource.metadata.fileId == fileId
++        && request.resource.metadata.originalName.size() > 0
++        && request.resource.metadata.originalName.size() <= 255
++        && request.resource.metadata.safeFileName == safeFileName
++        && request.resource.metadata.extension in ['dxf','ord','omx']
++        && safeFileName.matches('^.*\\.' + request.resource.metadata.extension + '$')
++        && ((request.resource.metadata.extension == 'dxf' && request.resource.contentType == 'application/dxf')
++          || (request.resource.metadata.extension in ['ord','omx'] && request.resource.contentType == 'application/octet-stream'))
++        && request.resource.metadata.contentType == request.resource.contentType
++        && request.resource.metadata.sizeBytes == string(request.resource.size)
++        && request.resource.metadata.storagePath == 'workspaces/' + workspaceId + '/cutting-jobs/' + jobId + '/files/' + fileId + '/' + safeFileName
++        && request.resource.metadata.sha256.matches('^[a-f0-9]{64}$') && request.resource.metadata.status == 'ready'
++        && request.resource.metadata.createdAtISO.size() <= 30
++        && request.resource.metadata.createdBy == request.auth.uid;
++    }
++    function validExisting(workspaceId, jobId, fileId, safeFileName) {
++      return bucket == 'omax-maintenance.firebasestorage.app'
++        && resource.size > 0 && resource.size <= 52428800
++        && resource.metadata.keys().hasOnly(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','storagePath','sha256','status','createdBy','createdAtISO'])
++        && resource.metadata.schemaVersion == '1'
++        && resource.metadata.originalName.size() > 0 && resource.metadata.originalName.size() <= 255
++        && resource.metadata.workspaceId == workspaceId && resource.metadata.jobId == jobId
++        && resource.metadata.fileId == fileId && resource.metadata.safeFileName == safeFileName
++        && resource.metadata.extension in ['dxf','ord','omx']
++        && ((resource.metadata.extension == 'dxf' && resource.contentType == 'application/dxf')
++          || (resource.metadata.extension in ['ord','omx'] && resource.contentType == 'application/octet-stream'))
++        && safeFileName.matches('^.*\\.' + resource.metadata.extension + '$')
++        && resource.metadata.contentType == resource.contentType
++        && resource.metadata.sizeBytes == string(resource.size)
++        && resource.metadata.storagePath == 'workspaces/' + workspaceId + '/cutting-jobs/' + jobId + '/files/' + fileId + '/' + safeFileName
++        && resource.metadata.sha256.matches('^[a-f0-9]{64}$') && resource.metadata.status == 'ready'
++        && resource.metadata.createdAtISO.size() <= 30
++        && resource.metadata.createdBy.matches('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
++    }
++    match /workspaces/{workspaceId}/cutting-jobs/{jobId}/files/{fileId}/{safeFileName} {
++      allow create: if safeIds(workspaceId, jobId, fileId) && allowedName(safeFileName)
++        && activeRole(workspaceId, ['owner','admin','operator'])
++        && validCreate(workspaceId, jobId, fileId, safeFileName);
++      allow get: if safeIds(workspaceId, jobId, fileId) && allowedName(safeFileName)
++        && activeRole(workspaceId, ['owner','admin','operator','viewer'])
++        && validExisting(workspaceId, jobId, fileId, safeFileName);
++      allow delete: if safeIds(workspaceId, jobId, fileId)
++        && activeRole(workspaceId, ['owner','admin','operator'])
++        && (member(workspaceId).role in ['owner','admin'] || resource.metadata.createdBy == request.auth.uid)
++        && validExisting(workspaceId, jobId, fileId, safeFileName);
++      allow update, list: if false;
++    }
++    match /{allPaths=**} { allow read, write: if false; }
+   }
+ }
+diff --git a/style.css b/style.css
+index c3cfcf378a59520dc8e0679c0ff32a7e058872c1..13231baa4ddb2cd243250dbab2460206d2499b25 100644
+--- a/style.css
++++ b/style.css
+@@ -1516,50 +1516,63 @@ body.modal-open .auth-bar {
+   color: #082149;
+   position: relative;
+ }
+ 
+ .auth-modal-dialog::before {
+   content: "";
+   position: absolute;
+   inset: 12px;
+   border-radius: 14px;
+   border: 1px solid rgba(255, 255, 255, 0.5);
+   pointer-events: none;
+ }
+ 
+ .auth-modal-dialog h3 {
+   margin: 0 0 10px;
+   font-size: 22px;
+   color: #04245b;
+ }
+ 
+ .auth-modal-dialog p {
+   margin: 0 0 14px;
+   color: #0a2f62;
+   line-height: 1.45;
+ }
+ 
++.cutting-job-import-dialog {
++  width: min(960px, calc(100vw - 32px));
++  max-height: calc(100vh - 32px);
++  overflow: auto;
++  border: 1px solid #ccd7e7;
++  border-radius: 12px;
++  padding: 20px;
++  box-shadow: 0 24px 64px rgba(10, 32, 68, 0.3);
++}
++.cutting-job-import-dialog::backdrop { background: rgba(16, 28, 48, 0.58); }
++.cutting-job-import-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
++.cutting-job-import-dialog-header h3 { margin: 0; }
++
+ .auth-form {
+   display: grid;
+   gap: 10px;
+ }
+ 
+ .auth-form input {
+   padding: 10px 12px;
+   border-radius: 10px;
+   border: 1px solid rgba(9, 55, 128, 0.28);
+   font-size: 15px;
+   color: #041b44;
+   background: rgba(255, 255, 255, 0.94);
+   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+ }
+ 
+ .auth-form input:focus-visible {
+   outline: none;
+   border-color: #0a63c2;
+   box-shadow: 0 0 0 3px rgba(61, 165, 245, 0.35);
+ }
+ 
+ .auth-modal-hint {
+   display: block;
+   margin-top: 14px;
+   color: #1b335e;
+diff --git a/tests/cfr03-storage-roundtrip.test.js b/tests/cfr03-storage-roundtrip.test.js
+index fc630b93ec8dc6c94c26147615e569176cf9c91d..18dcd35eb3f4d17f39806acab7a63135e9b6d28e 100644
+--- a/tests/cfr03-storage-roundtrip.test.js
++++ b/tests/cfr03-storage-roundtrip.test.js
+@@ -11,49 +11,49 @@ function harness(options={}){
+   const payload=JSON.stringify({testId,timestamp:now().toISOString()}); let deleted=false;
+   const ref={
+     async put(){calls.push("put");if(options.uploadError)throw options.uploadError;},
+     async getMetadata(){calls.push("metadata");if(deleted && options.absenceError)throw options.absenceError;if(deleted)throw Object.assign(new Error("not found"),{code:"storage/object-not-found"});if(options.metadataError)throw options.metadataError;return {fullPath:path,size:new TextEncoder().encode(payload).byteLength,contentType:"application/json",customMetadata:{uid:"user_1",workspaceId:"github-prod",testId}};},
+     async getDownloadURL(){calls.push("download_url");if(options.urlError)throw options.urlError;return "https://secret-token.invalid/object?token=SECRET";},
+     async delete(){calls.push("delete");if(options.deleteError)throw options.deleteError;deleted=true;}
+   };
+   const state={user:{uid:"user_1"},projectId:"omax-maintenance",bucket:"omax-maintenance.firebasestorage.app",workspaceId:"github-prod",storage:{ref(requested){calls.push("ref");assert.equal(requested,path);return ref;}},...(options.state||{})};
+   const cache="47-local-data-urls-byte-equivalent"; let backup="protected-backup";
+   const env={cuttingJobs:[{id:"job",config:{b:2,a:1}}],completedCuttingJobs:[],deletedItems:[],inventory:[{id:"part"}],maintenanceOccurrencesV2:[{id:"occurrence"}],localStorage:{getItem:key=>key==="cutting_job_files_v1"?cache:key==="omax_local_state_backup_v1"?backup:null}};
+   class XHR {
+     open(method,url){calls.push("xhr_open");this.url=url;assert.equal(method,"GET");}
+     send(){
+       calls.push("xhr_send"); if(options.mutateDuringDownload)options.mutateDuringDownload(env); if(options.localBackupDrift)backup=options.localBackupDrift;
+       queueMicrotask(()=>{
+         if(options.xhr==="network")return this.onerror(); if(options.xhr==="timeout")return this.ontimeout(); if(options.xhr==="abort")return this.onabort();
+         this.status=options.httpStatus ?? 200; this.responseText=options.content ?? payload; this.onload();
+       });
+     }
+   }
+   const api=factory(env).createForTests(env,{now,crypto:cryptoMock,XMLHttpRequest:XHR,firebaseState:()=>state});
+   return {api,calls,env,path,cache};
+ }
+ const run=h=>h.api.runCfr03StorageRoundTripTest({confirmation:CONFIRMATION});
+ 
+-test("committed rules are exact deny-all",()=>assert.equal(fs.readFileSync("storage.rules","utf8"),`rules_version = '2';\n\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{allPaths=**} {\n      allow read, write: if false;\n    }\n  }\n}\n`));
++test("CFR-03 namespace remains denied after CFR-05 proposal",()=>{const rules=fs.readFileSync("storage.rules","utf8");assert.equal(rules.includes("cfr03-tests"),false);assert.ok(rules.includes("match /{allPaths=**} { allow read, write: if false; }"));});
+ test("missing and incorrect confirmation perform zero Storage operations",async()=>{for(const confirmation of [undefined,"wrong"]){const h=harness();await h.api.runCfr03StorageRoundTripTest({confirmation});assert.deepEqual(h.calls,[]);}});
+ test("unsigned and unexpected configurations stop at validation",async()=>{for(const state of [{user:null},{projectId:"other"},{bucket:"other"},{workspaceId:"other"}]){const h=harness({state});const r=await run(h);assert.equal(r.failedStage,"validation");assert.deepEqual(h.calls,[]);}});
+ test("post-upload network failure has correct stage and exactly one successful cleanup",async()=>{const h=harness({xhr:"network"});const r=await run(h);assert.equal(r.failedStage,"download_content");assert.equal(r.downloadUrlCreated,true);assert.equal(r.downloadErrorType,"network");assert.equal(r.cleanupAttempted,true);assert.equal(r.cleanupCompleted,true);assert.equal(r.cleanupAbsenceVerified,true);assert.equal(h.calls.filter(x=>x==="delete").length,1);});
+ test("download URL failure is staged and cleaned",async()=>{const h=harness({urlError:new Error("url failed")});const r=await run(h);assert.equal(r.failedStage,"download_url");assert.equal(r.downloadUrlCreated,false);assert.equal(r.cleanupAbsenceVerified,true);});
+ test("failed cleanup is never retried and reports exact possible orphan",async()=>{const h=harness({xhr:"network",deleteError:new Error("unknown delete outcome")});const r=await run(h);assert.equal(h.calls.filter(x=>x==="delete").length,1);assert.equal(r.operationIndeterminate,true);assert.equal(r.manualCleanupRequired,true);assert.equal(r.possibleOrphanPath,h.path);});
+ test("indeterminate absence verification is never retried",async()=>{const h=harness({absenceError:new Error("unknown metadata outcome")});const r=await run(h);assert.equal(h.calls.filter(x=>x==="delete").length,1);assert.equal(h.calls.filter(x=>x==="metadata").length,2);assert.equal(r.operationIndeterminate,true);assert.equal(r.manualCleanupRequired,true);assert.equal(r.possibleOrphanPath,h.path);});
+ test("indeterminate upload is not automatically deleted",async()=>{const h=harness({uploadError:new Error("unknown upload outcome")});const r=await run(h);assert.equal(r.failedStage,"upload");assert.equal(r.cleanupAttempted,false);assert.equal(h.calls.includes("delete"),false);assert.equal(r.possibleOrphanPath,h.path);});
+ test("returned result never contains URL or token",async()=>{const h=harness({xhr:"network"});const r=await run(h);const serialized=JSON.stringify(r);assert.doesNotMatch(serialized,/https:|SECRET|token=/);assert.equal(r.downloadMethod,"XMLHttpRequest");});
+ test("HTTP status failure is classified and status retained",async()=>{const r=await run(harness({httpStatus:403}));assert.equal(r.failedStage,"download_content");assert.equal(r.downloadErrorType,"http_status");assert.equal(r.downloadHttpStatus,403);assert.equal(r.corsFailureSuspected,false);});
+ test("timeout is classified without claiming CORS",async()=>{const r=await run(harness({xhr:"timeout"}));assert.equal(r.downloadErrorType,"timeout");assert.equal(r.networkFailureSuspected,true);assert.equal(r.corsFailureSuspected,false);});
+ test("opaque browser network error honestly suspects CORS and network",async()=>{const r=await run(harness({xhr:"network"}));assert.equal(r.corsFailureSuspected,true);assert.equal(r.networkFailureSuspected,true);});
+ test("successful download verifies exact content and cleanup",async()=>{const r=await run(harness());assert.equal(r.downloadCompleted,true);assert.equal(r.contentVerified,true);assert.equal(r.failedStage,"");assert.equal(r.cleanupAbsenceVerified,true);});
+ test("content mismatch has exact stage and is cleaned",async()=>{const r=await run(harness({content:"different"}));assert.equal(r.failedStage,"content_verification");assert.equal(r.contentVerified,false);assert.equal(r.cleanupAbsenceVerified,true);});
+ test("canonical object-key ordering does not cause mismatch",async()=>{const h=harness({mutateDuringDownload(env){env.cuttingJobs[0].config={a:1,b:2};}});const r=await run(h);assert.equal(r.protectedStateMatched,true);assert.deepEqual(r.protectedStateMismatchPaths,[]);});
+ test("value changes report exact paths",async()=>{const r=await run(harness({mutateDuringDownload(env){env.inventory[0].id="changed";}}));assert.equal(r.appStateMutationDetected,true);assert.deepEqual(r.protectedStateMismatchPaths,["$.inventory[0].id"]);assert.equal(r.protectedStateRootResults.inventory.matched,false);});
+ test("property presence changes report exact paths",async()=>{const r=await run(harness({mutateDuringDownload(env){env.cuttingJobs[0].optional=undefined;}}));assert.deepEqual(r.protectedStateMismatchPaths,["$.cuttingJobs[0].optional"]);});
+ test("array order changes report exact paths",async()=>{const h=harness({mutateDuringDownload(env){env.completedCuttingJobs.push({id:"b"},{id:"a"});env.completedCuttingJobs.reverse();}});const r=await run(h);assert.ok(r.protectedStateMismatchPaths.some(path=>path.startsWith("$.completedCuttingJobs")));});
+ test("diagnostic session fields are excluded",async()=>{const h=harness({mutateDuringDownload(env){env.inventory[0].diagnostic={generatedAtISO:"later"};env.lastCfr03TestResult={anything:true};}});const r=await run(h);assert.equal(r.protectedStateMatched,true);});
+ test("independent local-backup drift is reported without a false business-state mutation",async()=>{const h=harness({localBackupDrift:"independently-refreshed-backup"});h.env.saveCloudNow=()=>{throw new Error("must not run")};h.env.saveCloudDebounced=h.env.saveCloudNow;h.env.snapshotState=h.env.saveCloudNow;const r=await run(h);assert.equal(r.uploadCompleted,true);assert.equal(r.downloadCompleted,true);assert.equal(r.contentVerified,true);assert.equal(r.cleanupAbsenceVerified,true);assert.equal(r.firestoreWriteAttempted,false);assert.equal(r.protectedStateMatched,true);assert.equal(r.appStateMutationDetected,false);assert.deepEqual(r.protectedStateMismatchPaths,[]);assert.equal(r.localStateBackupMatched,false);assert.equal(r.localStateBackupDriftObserved,true);assert.deepEqual(r.localStateBackupMismatchPaths,["$.localStateBackup.value"]);assert.equal(r.localJobFileCacheMatched,true);assert.deepEqual(r.localJobFileCacheMismatchPaths,[]);});
+ test("job file cache remains byte-equivalent and separate",async()=>{const h=harness();const r=await run(h);assert.equal(r.localJobFileCacheMatched,true);assert.deepEqual(r.localJobFileCacheMismatchPaths,[]);assert.equal(h.env.localStorage.getItem("cutting_job_files_v1"),h.cache);});
+ test("no Firestore save occurs and production flags remain false",async()=>{const h=harness();h.env.saveCloudNow=()=>{throw new Error("called")};h.env.saveCloudDebounced=h.env.saveCloudNow;const r=await run(h);assert.equal(r.firestoreWriteAttempted,false);const d=h.api.getDiagnostics();assert.equal(d.productionUploadsEnabled,false);assert.equal(d.productionDownloadsEnabled,false);assert.equal(d.storageRulesExpectedVersion,"CFR-03A-deny-all-v1");});
+ 
+ (async()=>{for(const {name,fn} of tests){await fn();process.stdout.write(`ok - ${name}\n`);}process.stdout.write(`1..${tests.length}\n`);})().catch(error=>{console.error(error);process.exitCode=1;});
+diff --git a/tests/cfr04-workspace-metadata.test.js b/tests/cfr04-workspace-metadata.test.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..7b44427f71a96789c832621813a2dfaaf2d21fa5
+--- /dev/null
++++ b/tests/cfr04-workspace-metadata.test.js
+@@ -0,0 +1,16 @@
++"use strict";
++const assert=require("node:assert/strict"); const fs=require("node:fs"); const api=require("../js/cfr04WorkspaceMetadata.js");
++const tests=[]; const test=(name,fn)=>tests.push([name,fn]); const iso="2026-08-13T12:00:00.000Z";
++const member={schemaVersion:1,uid:"user_1",workspaceId:"github-prod",role:"operator",active:true,createdAtISO:iso,updatedAtISO:iso,email:"operator@example.com"};
++const file={schemaVersion:1,fileId:"file_1",jobId:"job_1",workspaceId:"github-prod",originalName:"Part One.dxf",safeFileName:"Part_One.dxf",extension:"dxf",contentType:"application/dxf",sizeBytes:1024,storagePath:"workspaces/github-prod/cutting-jobs/job_1/files/file_1/Part_One.dxf",sha256:"a".repeat(64),status:"ready",createdBy:"user_1",createdAtISO:iso};
++test("valid membership and fixed roles",()=>{assert.equal(api.validateWorkspaceMembershipRecord(member,{uid:"user_1",workspaceId:"github-prod"}).valid,true);assert.deepEqual(api.ROLES,["owner","admin","operator","viewer"]);});
++test("invalid, inactive, mismatched and promoted membership fails",()=>{for(const change of [{active:false},{role:"superadmin"},{uid:"other"},{workspaceId:"other"},{extra:true}])assert.equal(api.validateWorkspaceMembershipRecord({...member,...change},{uid:"user_1",workspaceId:"github-prod"}).valid,false);});
++test("read-only missing membership is blocked and never enrolls",async()=>{let gets=0;const d=await api.getWorkspaceAuthorizationDiagnostics({uid:"user_1",workspaceId:"github-prod",membershipDocRef:{async get(){gets++;return{exists:false};},set(){throw Error("write");}}});assert.equal(gets,1);assert.equal(d.productionFileAuthorizationReady,false);assert.deepEqual(d.blockerReasons,["membership_document_missing"]);assert.equal(d.firestoreWrites,0);assert.equal(d.storageOperations,0);});
++test("valid membership diagnostic becomes structurally ready",async()=>{const d=await api.getWorkspaceAuthorizationDiagnostics({uid:"user_1",workspaceId:"github-prod",membershipDocRef:{async get(){return{exists:true,data:()=>member};}}});assert.equal(d.productionFileAuthorizationReady,true);assert.equal(d.expectedMembershipPath,"workspaces/github-prod/members/user_1");});
++test("safe paths reject traversal and malformed ids",()=>{assert.equal(api.jobPath("github-prod","job_1"),"workspaces/github-prod/cuttingJobs/job_1");assert.equal(api.logPath("github-prod","job_1","log-1"),"workspaces/github-prod/cuttingJobs/job_1/logs/log-1");assert.equal(api.filePath("github-prod","job_1","file_1"),"workspaces/github-prod/cuttingJobs/job_1/files/file_1");for(const bad of ["../x","a/b","",`.${"a".repeat(130)}`])assert.throws(()=>api.jobPath("github-prod",bad));});
++test("safe names normalize deterministically",()=>{assert.equal(api.normalizeSafeFileName(" ../Pärt One\\x.DXF "),"P_rt_One_x.DXF");assert.equal(api.validateSafeFileName("Part_One.dxf").valid,true);assert.equal(api.validateSafeFileName("../part.dxf").valid,false);});
++test("metadata schemas and size bounds",()=>{assert.equal(api.validateFileMetadata(file).valid,true);assert.equal(api.validateFileMetadata({...file,sizeBytes:60*1024*1024}).valid,false);const job={schemaVersion:1,jobId:"job_1",workspaceId:"github-prod",name:"Job",status:"active",createdByUid:"user_1",createdAtISO:iso,updatedAtISO:iso};assert.equal(api.validateJobMetadata(job).valid,true);const log={schemaVersion:1,logId:"log_1",jobId:"job_1",workspaceId:"github-prod",dateISO:"2026-08-13",completedHours:2,createdByUid:"user_1",createdAtISO:iso};assert.equal(api.validateLogMetadata(log).valid,true);});
++test("all embedded content forms are rejected",()=>{const variants=[new Blob(["x"]),new ArrayBuffer(2),new Uint8Array(2),"data:text/plain,x","blob:https://example/x","<svg><path/></svg>","SECTION\n"+"x".repeat(256)+"\nENTITIES", "A".repeat(512)];for(const value of variants){const r=api.validateFileMetadata({...file,unexpected:value});assert.equal(r.valid,false);}});
++test("validation is stable and input remains unchanged",()=>{const before=JSON.stringify(file);assert.deepEqual(api.validateFileMetadata(file),api.validateFileMetadata(file));assert.equal(JSON.stringify(file),before);});
++test("flags and protected caches remain unchanged",()=>{assert.equal(api.productionUploadsEnabled,false);assert.equal(api.productionDownloadsEnabled,false);assert.ok(fs.readFileSync("storage.rules","utf8").includes("match /{allPaths=**} { allow read, write: if false; }"));assert.equal(fs.readFileSync("vercel.json","utf8"),`{\n  "cleanUrls": true\n}\n`);const source=fs.readFileSync("js/cfr04WorkspaceMetadata.js","utf8");assert.equal(/\.set\(|\.add\(|\.put\(|\.delete\(|\.list\(|getDownloadURL/.test(source),false);assert.equal(/localStorage/.test(source),false);});
++(async()=>{for(const [name,fn] of tests){await fn();console.log(`ok - ${name}`);}console.log(`1..${tests.length}`);})().catch(error=>{console.error(error);process.exitCode=1;});
+diff --git a/tests/cfr05-cloud-cutting-files.test.js b/tests/cfr05-cloud-cutting-files.test.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..191e0560bd8878e92102d94d379588eed3908d58
+--- /dev/null
++++ b/tests/cfr05-cloud-cutting-files.test.js
+@@ -0,0 +1,21 @@
++"use strict";
++const assert=require("node:assert/strict"),fs=require("node:fs"),factory=require("../js/cfr05CloudCuttingFiles.js"),foundation=require("../js/cfr04WorkspaceMetadata.js"),crypto=require("node:crypto").webcrypto;
++const C=factory(globalThis),tests=[],test=(n,f)=>tests.push([n,f]),now=()=>new Date("2026-08-13T12:00:00.000Z"),active=role=>({valid:true,active:true,role,path:"workspaces/github-prod/members/u1"});
++function file(ext="dxf",type="",size=4){const bytes=new Uint8Array(size).fill(65);return{name:`part.${ext}`,type,size,arrayBuffer:async()=>bytes.buffer};}
++function harness(opts={}){const calls=[],docs=new Map(),objects=new Map(),gates=C.createSessionGates({location:{hostname:"test.vercel.app"}});gates.configureOperatorSession({confirmation:C.CONFIRMATION,hostname:"test.vercel.app",firestoreMembershipWriteProtectionConfirmed:true,firestoreFileAccessConfirmed:true,productionRulesConfirmedDeployed:true});
++ const storage={ref(path){return{async getMetadata(){calls.push(`meta:${path}`);if(!objects.has(path))throw Object.assign(Error("not found"),{code:"storage/object-not-found"});return objects.get(path).meta;},async put(value,o){calls.push(`put:${path}`);if(opts.uploadError)throw opts.uploadError;objects.set(path,{bytes:await value.arrayBuffer(),meta:{fullPath:path,size:value.size,contentType:o.contentType,customMetadata:o.customMetadata}});},async delete(){calls.push(`delete:${path}`);objects.delete(path);},async getDownloadURL(){calls.push(`url:${path}`);return"https://secret.invalid/file?token=SECRET";}};}};
++ const firestore={doc(path){return{path,async get(){calls.push(`get:${path}`);return{exists:docs.has(path),data:()=>docs.get(path)};}};},collection(path){return{async get(){calls.push(`query:${path}`);const found=[...docs].filter(([k])=>k.startsWith(`${path}/`));return{forEach(fn){found.forEach(([k,v])=>fn({id:k.split("/").pop(),data:()=>v}));}};}};},batch(){const pending=[];return{set(ref,value){pending.push([ref.path,value]);},async commit(){calls.push("batchCommit");if(opts.batchError)throw opts.batchError;pending.forEach(([k,v])=>docs.set(k,v));}};}};
++ const fetch=opts.fetch||(async()=>({ok:true,status:200,headers:{get:()=>"4"},arrayBuffer:async()=>new Uint8Array(4).fill(65).buffer}));const api=C.createApi({fetch,AbortController,setTimeout,clearTimeout},{foundation,crypto,gates,now});return{api,gates,calls,docs,objects,storage,firestore,fetch,base:{uid:"u1",workspaceId:"github-prod",jobId:"job_1",file:file(),membership:active("operator"),storage,firestore,jobExists:()=>true}};}
++test("exact Vercel confirmation gate and all authorization blockers",()=>{const g=C.createSessionGates({location:{hostname:"localhost"}});assert.equal(g.configureOperatorSession({confirmation:C.CONFIRMATION,hostname:"localhost",firestoreMembershipWriteProtectionConfirmed:true}).firestoreMembershipWriteProtectionConfirmed,false);assert.equal(g.configureOperatorSession({confirmation:"wrong",hostname:"x.vercel.app",firestoreMembershipWriteProtectionConfirmed:true}).firestoreMembershipWriteProtectionConfirmed,false);assert.equal(g.configureOperatorSession({confirmation:C.CONFIRMATION,hostname:"x.vercel.app",firestoreMembershipWriteProtectionConfirmed:true,firestoreFileAccessConfirmed:true,productionRulesConfirmedDeployed:true}).productionRulesConfirmedDeployed,true);});
++test("empty MIME canonicalizes DXF ORD OMX; conflicts reject",()=>{const h=harness();for(const [ext,type] of [["dxf","application/dxf"],["ord","application/octet-stream"],["omx","application/octet-stream"]]){const v=h.api.validateLocalFile(file(ext,""));assert.equal(v.valid,true);assert.equal(v.contentType,type);}assert.equal(h.api.validateLocalFile(file("dxf","text/html")).valid,false);assert.equal(h.api.validateLocalFile(file("dxf","",C.MAX_FILE_SIZE_BYTES)).valid,true);assert.equal(h.api.validateLocalFile(file("dxf","",C.MAX_FILE_SIZE_BYTES+1)).valid,false);});
++test("atomic batch succeeds and new session exact per-job listing reloads",async()=>{const h=harness(),legacy=[{id:"job_1"}],before=JSON.stringify(legacy);const r=await h.api.upload(h.base);assert.equal(r.stage,"completed");assert.equal(h.calls.filter(x=>x==="batchCommit").length,1);const fresh=C.createApi({fetch:h.fetch,AbortController,setTimeout,clearTimeout},{foundation,crypto,gates:h.gates,now});const listed=await fresh.listJobFiles({workspaceId:"github-prod",jobId:"job_1",membership:active("viewer"),firestore:h.firestore});assert.equal(listed.cloudFileCount,1);assert.equal(h.calls.filter(x=>x==="query:workspaces/github-prod/cuttingJobs/job_1/files").length,1);assert.equal(JSON.stringify(legacy),before);});
++test("invalid listing metadata rejected and phone session needs no cache",async()=>{const h=harness();h.docs.set("workspaces/github-prod/cuttingJobs/job_1/files/bad",{jobId:"other"});const result=await h.api.listJobFiles({workspaceId:"github-prod",jobId:"job_1",membership:active("viewer"),firestore:h.firestore});assert.equal(result.cloudFileCount,0);assert.equal(result.rejectedMetadataDocumentCount,1);assert.ok(result.rejectedMetadataReasons[0].reasons.length);});
++test("existing compatibility mismatch refuses and cleans",async()=>{const h=harness();h.docs.set(foundation.jobPath("github-prod","job_1"),{schemaVersion:1,workspaceId:"other"});const r=await h.api.upload(h.base);assert.equal(r.error.code,"compatibilityJobMismatch");assert.equal(h.calls.filter(x=>x.startsWith("delete:")).length,1);assert.equal(h.calls.includes("batchCommit"),false);});
++test("definite batch failure is atomic and cleans exactly once",async()=>{const h=harness({batchError:Object.assign(Error("denied"),{code:"permission-denied"})}),r=await h.api.upload(h.base);assert.equal(h.docs.size,0);assert.equal(h.calls.filter(x=>x==="batchCommit").length,1);assert.equal(h.calls.filter(x=>x.startsWith("delete:")).length,1);assert.equal(r.completed.cleanupAbsenceVerified,true);});
++test("indeterminate batch has no retry or deletion",async()=>{const h=harness({batchError:Object.assign(Error("network unknown"),{indeterminate:true})}),r=await h.api.upload(h.base);assert.equal(r.indeterminate,true);assert.equal(h.calls.filter(x=>x==="batchCommit").length,1);assert.equal(h.calls.some(x=>x.startsWith("delete:")),false);});
++test("Firebase v8 getDownloadURL bounded fetch routes formats and revokes",async()=>{for(const ext of ["dxf","ord","omx"]){const h=harness(),up=await h.api.upload({...h.base,file:file(ext)}),entry=[...h.docs].find(([k])=>k.includes("/files/")),metadata=entry[1];let route,revoked=false;const r=await h.api.download({membership:active("viewer"),fileDocRef:{get:async()=>({exists:true,data:()=>metadata})},expected:{workspaceId:"github-prod",jobId:"job_1",fileId:metadata.fileId},storage:h.storage,fetch:h.fetch,AbortController,setTimeout,clearTimeout,previewDispatch:(x)=>{route=x;return"ok";},openObjectUrl:async()=>{},URL:{createObjectURL:()=>"blob:temp",revokeObjectURL:()=>{revoked=true;}}});assert.equal(r.completed,true);assert.equal(route,ext);assert.equal(revoked,true);assert.equal(h.calls.filter(x=>x.startsWith("url:")).length,1);assert.equal(JSON.stringify(r).includes("SECRET"),false);}});
++test("download refuses Storage metadata and checksum mismatch",async()=>{const h=harness();await h.api.upload(h.base);const m=[...h.docs].find(([k])=>k.includes("/files/"))[1],ref=h.storage.ref(m.storagePath),saved=h.objects.get(m.storagePath).meta;h.objects.get(m.storagePath).meta={...saved,size:99};let r=await h.api.download({membership:active("viewer"),fileDocRef:{get:async()=>({exists:true,data:()=>m})},storage:h.storage,fetch:h.fetch,AbortController,setTimeout,clearTimeout});assert.deepEqual(r.blockers,["storageMetadataMismatch"]);h.objects.get(m.storagePath).meta=saved;const corrupt=async()=>({ok:true,status:200,headers:{get:()=>"4"},arrayBuffer:async()=>new Uint8Array([1,2,3,4]).buffer});r=await h.api.download({membership:active("viewer"),fileDocRef:{get:async()=>({exists:true,data:()=>m})},storage:h.storage,fetch:corrupt,AbortController,setTimeout,clearTimeout});assert.deepEqual(r.blockers,["downloadChecksumMismatch"]);});
++test("compatibility document includes canonical createdBy",async()=>{const h=harness();await h.api.upload(h.base);const job=h.docs.get(foundation.jobPath("github-prod","job_1"));assert.equal(job.createdBy,"u1");assert.equal(h.api.validateCompatibilityJob(job,{workspaceId:"github-prod",jobId:"job_1"}).valid,true);assert.equal(h.api.validateCompatibilityJob({...job,extra:true},{workspaceId:"github-prod",jobId:"job_1"}).valid,false);});
++test("HTTP network timeout size and metadata failures",async()=>{async function outcome(fetch){const h=harness({fetch});await h.api.upload(h.base);const m=[...h.docs].find(([k])=>k.includes("/files/"))[1];return h.api.download({membership:active("viewer"),fileDocRef:{get:async()=>({exists:true,data:()=>m})},storage:h.storage,fetch,AbortController,setTimeout,clearTimeout});}await assert.rejects(()=>outcome(async()=>({ok:false,status:403,headers:{get:()=>"0"}})),/HTTP 403/);await assert.rejects(()=>outcome(async()=>{throw Error("network")}),/network/);await assert.rejects(()=>outcome(async()=>({ok:true,headers:{get:()=>String(C.MAX_FILE_SIZE_BYTES+1)}})),/maximum/);const h=harness();const bad=await h.api.download({membership:active("viewer"),fileDocRef:{get:async()=>({exists:true,data:()=>({bad:true})})},storage:h.storage});assert.equal(bad.completed,false);});
++test("no full-state/cache writes or permanent delete UI and strengthened rules",()=>{for(const p of ["js/cfr05CloudCuttingFiles.js"]){const s=fs.readFileSync(p,"utf8");assert.equal(/localStorage\.setItem/.test(s),false);}const views=fs.readFileSync("js/views.js","utf8"),rules=fs.readFileSync("storage.rules","utf8");assert.ok(views.includes("Cloud files"));assert.equal(views.includes("data-cloud-delete"),false);for(const x of ["omax-maintenance.firebasestorage.app","validExisting","allow update, list: if false","match /{allPaths=**} { allow read, write: if false; }"])assert.ok(rules.includes(x));assert.equal(rules.includes("cfr03-tests"),false);});
++(async()=>{for(const[n,f]of tests){await f();console.log(`ok - ${n}`);}console.log(`1..${tests.length}`);})().catch(e=>{console.error(e);process.exitCode=1;});
+diff --git a/tests/cfr05b-firestore-rules.test.js b/tests/cfr05b-firestore-rules.test.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..5c941eb952557bf822fabd64058b0b653bdee395
+--- /dev/null
++++ b/tests/cfr05b-firestore-rules.test.js
+@@ -0,0 +1,16 @@
++"use strict";
++const assert=require("node:assert/strict"),fs=require("node:fs");
++const rules=fs.readFileSync("firestore.rules","utf8"),storage=fs.readFileSync("storage.rules","utf8"),firebase=JSON.parse(fs.readFileSync("firebase.json","utf8"));
++const checks=[
++  ["firebase config retains both rule files",()=>{assert.equal(firebase.firestore.rules,"firestore.rules");assert.equal(firebase.storage.rules,"storage.rules");}],
++  ["authoritative app access remains authenticated and scoped",()=>assert.ok(rules.includes("match /workspaces/{workspaceId}/app/{document=**} {\n      allow read, write: if signedIn();"))],
++  ["membership is own-get only and client immutable",()=>{assert.ok(rules.includes("request.auth.uid == uid"));assert.ok(rules.includes("allow list, create, update, delete: if false;"));}],
++  ["membership validates exact bounded identity role and active state",()=>{for(const text of ["validMemberData","data.uid == uid","data.workspaceId == workspaceId","data.active == true","['owner','admin','operator','viewer']","hasOnly"])assert.ok(rules.includes(text));}],
++  ["job and file metadata are create-only exact schemas",()=>{assert.ok(rules.includes("function validJob"));assert.ok(rules.includes("function validFile"));assert.ok(rules.includes("allow update, delete: if false;"));assert.ok(rules.includes("request.resource.data.createdBy == request.auth.uid"));}],
++  ["atomic file create requires after-state compatibility job",()=>{assert.ok(rules.includes("existsAfter("));assert.ok(rules.includes("getAfter("));assert.ok(rules.includes("validJob(getAfter"));}],
++  ["viewer listing is membership-gated while job list and logs are denied",()=>{assert.ok(rules.includes("allow get, list: if activeMember(workspaceId) && validFile"));assert.ok(rules.includes("allow list: if false;"));assert.ok(rules.includes("match /logs/{logId} { allow read, write: if false; }"));}],
++  ["default deny catches every unmatched path",()=>assert.ok(rules.includes("match /{document=**} { allow read, write: if false; }"))],
++  ["canonical contract and exact identifiers are enforced",()=>{for(const text of ["application/dxf","application/octet-stream","data.fileId == fileId","data.jobId == jobId","data.workspaceId == workspaceId","data.sha256.matches","data.storagePath =="])assert.ok(rules.includes(text));}],
++  ["Storage proposal uses canonical types and complete metadata",()=>{assert.equal(storage.includes("text/plain"),false);assert.equal(storage.includes("application/x-dxf"),false);for(const text of ["application/dxf","application/octet-stream","storagePath","status","createdAtISO","firestore.exists","allow update, list: if false"])assert.ok(storage.includes(text));}]
++];
++for(const[name,fn]of checks){fn();console.log(`ok - ${name}`);}console.log(`1..${checks.length}`);
+diff --git a/tests/cutting-job-import.test.js b/tests/cutting-job-import.test.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..c32a60b27dd3003f0b5898f0a93245dc1fbc1b6e
+--- /dev/null
++++ b/tests/cutting-job-import.test.js
+@@ -0,0 +1,32 @@
++"use strict";
++const assert=require("node:assert/strict"),crypto=require("node:crypto"),factory=require("../js/cuttingJobImporter.js"),xlsx=require("../assets/vendor/cji-xlsx-parser.js"),api=factory(globalThis),tests=[],test=(n,f)=>tests.push([n,f]);
++const headers=api.FIELDS,base={import_event_id:"evt-1",record_status:"active",job_name:"Part",project_number:"0000",actual_cut_minutes:"",estimate_hours:"2",add_minutes:"30",priority:"1",charge_rate_per_hr:"200",cost_rate_per_hr:"45",start_date:"2026-01-01",due_date:"2026-01-02",completed_date:"",category:"cat1",material:"Steel",thickness_raw:"1/4",thickness_inches:"0.25",path_length_ft:"4",path_width_ft:"2",material_cost:"20",material_weight_lb:"10",source_dimensions_raw:"4x2",cut_sequence:"1",review_status:"reviewed",review_notes:"ok",source_file:"recovery",source_text:"original"};
++const context={state:{cuttingJobs:[],completedCuttingJobs:[]},categories:[{id:"cat1",name:"ATM 1251"}],materials:[{id:"steel",name:"Steel"}]};
++function zip(files){const chunks=[],central=[];let offset=0;for(const[name,value]of Object.entries(files)){const data=Buffer.from(value),nb=Buffer.from(name),local=Buffer.alloc(30);local.writeUInt32LE(0x04034b50);local.writeUInt16LE(20,4);local.writeUInt32LE(0,14);local.writeUInt32LE(data.length,18);local.writeUInt32LE(data.length,22);local.writeUInt16LE(nb.length,26);chunks.push(local,nb,data);const c=Buffer.alloc(46);c.writeUInt32LE(0x02014b50);c.writeUInt16LE(20,4);c.writeUInt16LE(20,6);c.writeUInt32LE(0,16);c.writeUInt32LE(data.length,20);c.writeUInt32LE(data.length,24);c.writeUInt16LE(nb.length,28);c.writeUInt32LE(offset,42);central.push(c,nb);offset+=local.length+nb.length+data.length;}const cd=Buffer.concat(central),end=Buffer.alloc(22);end.writeUInt32LE(0x06054b50);end.writeUInt16LE(Object.keys(files).length,8);end.writeUInt16LE(Object.keys(files).length,10);end.writeUInt32LE(cd.length,12);end.writeUInt32LE(offset,16);return Buffer.concat([...chunks,cd,end]);}
++function workbook(){const letter=i=>{let s="";for(i++;i;i=Math.floor((i-1)/26))s=String.fromCharCode(65+(i-1)%26)+s;return s;},row=(values,n)=>`<x:row r="${n}">${values.map((value,i)=>`<x:c r="${letter(i)}${n}" t="str"><x:v>${value}</x:v></x:c>`).join("")}</x:row>`,data=[headers.map(h=>h==="start_date"?"46189.5":h==="due_date"?"":base[h]),headers.map(h=>h==="import_event_id"?"evt-1251":h==="project_number"?"1251":h==="category"?"ATM 1251":base[h])];return zip({"xl/workbook.xml":`<x:workbook xmlns:x="main" xmlns:r="rels"><x:workbookPr date1904="false"/><x:sheets><x:sheet name="Recovery Summary" r:id="summary"/><x:sheet name="Blank Import Template" r:id="template"/><x:sheet name="Cutting Jobs" sheetId="2" r:id="Reb02910f4c5e4d6e"/><x:sheet name="Pump Readings" r:id="pump"/><x:sheet name="Maintenance Notes" r:id="notes"/><x:sheet name="Cached Files" r:id="cached"/></x:sheets></x:workbook>`,"xl/_rels/workbook.xml.rels":`<r:Relationships xmlns:r="pkg"><r:Relationship Id="summary" Target="/xl/worksheets/sheet1.xml"/><r:Relationship Id="template" Target="worksheets/sheet6.xml"/><r:Relationship Id="Reb02910f4c5e4d6e" Target="/xl/worksheets/sheet2.xml"/><r:Relationship Id="pump" Target="worksheets/sheet3.xml"/><r:Relationship Id="notes" Target="worksheets/sheet4.xml"/><r:Relationship Id="cached" Target="worksheets/sheet5.xml"/></r:Relationships>`,"xl/sharedStrings.xml":"<x:sst xmlns:x=\"main\"></x:sst>","xl/worksheets/sheet1.xml":"<x:worksheet xmlns:x=\"main\"><x:sheetData><x:row r=\"1\"><x:c r=\"A1\" t=\"str\"><x:v>forbidden</x:v></x:c></x:row></x:sheetData></x:worksheet>","xl/worksheets/sheet2.xml":`<x:worksheet xmlns:x="main"><x:sheetData>${row(["Recovery cutting jobs"],1)}${row(["Review before import"],2)}<x:row r="3"></x:row>${row(headers,4)}${row(data[0],5)}${row(data[1],6)}</x:sheetData></x:worksheet>`,"xl/worksheets/sheet3.xml":"<x:worksheet xmlns:x=\"main\"><x:sheetData/></x:worksheet>","xl/worksheets/sheet4.xml":"<x:worksheet xmlns:x=\"main\"><x:sheetData/></x:worksheet>","xl/worksheets/sheet5.xml":"<x:worksheet xmlns:x=\"main\"><x:sheetData/></x:worksheet>","xl/worksheets/sheet6.xml":`<x:worksheet xmlns:x="main"><x:sheetData>${row(headers,1)}</x:sheetData></x:worksheet>`});}
++function env(options={}){const state={cuttingJobs:[],completedCuttingJobs:[],inventory:[{id:"safe"}],deletedItems:[]},calls=[],categories=structuredClone(options.categories||context.categories),materials=structuredClone(options.materials||context.materials);let next=1;const config={xlsx,state:()=>state,categories:()=>categories,materials:()=>materials,createCategory:name=>{const value={id:`cat_new_${next++}`,name,parent:"jobs_root",order:categories.length+1};categories.push(value);return value;},createMaterial:name=>{const value={name,density:0.1,pricePerLb:1};materials.push(value);return value;},restoreCategories:value=>{categories.splice(0,categories.length,...structuredClone(value));},restoreMaterials:value=>{materials.splice(0,materials.length,...structuredClone(value));},authenticatedBaseline:()=>options.auth!==false,revalidateBaseline:async()=>true,backup:async()=>{calls.push("backup");},saveCloudNow:async()=>{calls.push("save");return options.save||{saved:true,stateWriteAttempted:true,stateWriteCompleted:true};}};return{state,calls,categories,materials,api:api.createApi(config)};}
++test("full XLSX selects only Cutting Jobs",async()=>{const book=workbook(),parsed=await xlsx.parse(book.buffer.slice(book.byteOffset,book.byteOffset+book.byteLength));assert.equal(parsed.sheetName,"Cutting Jobs");assert.equal(parsed.headerRowNumber,4);assert.equal(parsed.rows.length,2);assert.equal(parsed.rows[0].project_number,"0000");assert.equal(parsed.rows[0].start_date,"2026-06-16");assert.equal(parsed.rows[0].due_date,"");assert.equal(parsed.rows[1].project_number,"1251");assert.equal(parsed.rows[1].category,"ATM 1251");});
++test("Excel serial conversion is timezone-independent and rejects out-of-range values",()=>{const before=process.env.TZ;try{for(const zone of ["UTC","America/Los_Angeles","Pacific/Auckland"]){process.env.TZ=zone;assert.equal(xlsx.excelSerialDate("46189.5",false),"2026-06-16");}assert.equal(xlsx.excelSerialDate("-1",false),"-1");assert.equal(xlsx.excelSerialDate("9999999",false),"9999999");}finally{process.env.TZ=before;}});
++test("date1904 serial conversion is UTC and numeric non-date columns stay numeric text",async()=>{const original=workbook(),files={};/* rebuild via fixture byte substitutions to preserve ZIP structure */const altered=Buffer.from(original);const oldWorkbook=Buffer.from('<x:workbookPr date1904="false"/>'),newWorkbook=Buffer.from('<x:workbookPr date1904="true" />');assert.equal(oldWorkbook.length,newWorkbook.length);let offset=altered.indexOf(oldWorkbook);assert.ok(offset>=0);newWorkbook.copy(altered,offset);const oldSerial=Buffer.from("46189.5"),newSerial=Buffer.from("44727.5");assert.equal(oldSerial.length,newSerial.length);offset=altered.indexOf(oldSerial);assert.ok(offset>=0);newSerial.copy(altered,offset);const parsed=await xlsx.parse(altered.buffer.slice(altered.byteOffset,altered.byteOffset+altered.byteLength));assert.equal(parsed.date1904,true);assert.equal(parsed.rows[0].start_date,"2026-06-16");assert.equal(parsed.rows[0].estimate_hours,"2");});
++test("CSV and JSON parse complete and sparse rows",async()=>{const csv=`${headers.join(",")}\n${headers.map(h=>base[h]).join(",")}`;assert.equal(api.csv(csv)[0].project_number,"0000");for(const [name,text]of [["x.csv",csv],["x.json",JSON.stringify([base])]]){const rows=await api.parseFile({name,text:async()=>text},xlsx);assert.equal(rows.length,1);}});
++test("project and category stay separate with exact resolution",()=>{const p=api.preview([{...base,project_number:"1251",category:"ATM 1251"}],context)[0];assert.equal(p.status,"ready");const j=api.map(p);assert.equal(j.projectNumber,"1251");assert.equal(j.cat,"cat1");});
++test("invalid dates numerics and needs review block while blank dates are optional",()=>{for(const change of [{start_date:"bad"},{priority:"x"},{review_status:"needs_review"}])assert.notEqual(api.preview([{...base,...change}],context)[0].status,"ready");assert.equal(api.preview([{...base,start_date:"",due_date:""}],context)[0].status,"ready");assert.notEqual(api.preview([{...base,record_status:"completed",completed_date:""}],context)[0].status,"ready");});
++test("unmatched optional definitions warn while ambiguous matches block",()=>{let p=api.preview([{...base,category:"Historic Cat",material:"Historic Alloy"}],context)[0];assert.equal(p.status,"ready");assert.equal(p.warnings.length,2);const mapped=api.map(p);assert.equal(mapped.cat,"");assert.equal(mapped.material,"");assert.equal(mapped.importProvenance.category,"Historic Cat");assert.equal(mapped.importProvenance.material,"Historic Alloy");assert.equal(context.categories.length,1);assert.equal(context.materials.length,1);p=api.preview([{...base,category:"Duplicate"}],{...context,categories:[{id:"a",name:"Duplicate"},{id:"b",name:"Duplicate"}]})[0];assert.equal(p.status,"unresolved");});
++test("preview definition planning is non-mutating",()=>{const categories=structuredClone(context.categories),materials=structuredClone(context.materials),before=JSON.stringify({categories,materials}),classified=api.preview([{...base,category:"New Category",material:"New Material"}],{...context,categories,materials}),plan=api.definitionPlan(classified);assert.equal(plan.newCategories.length,1);assert.equal(plan.newMaterials.length,1);assert.equal(JSON.stringify({categories,materials}),before);});
++test("definition plan creates unique ready definitions and excludes unresolved rows",()=>{const rows=[{...base,category:"ATM 1251",material:"A36"},{...base,import_event_id:"evt-2",category:" atm   1251 ",material:"a36"},{...base,import_event_id:"evt-3",category:"Blocked",material:"RC50",review_status:"needs_review"}],classified=api.preview(rows,{...context,categories:[],materials:[]}),plan=api.definitionPlan(classified);assert.equal(plan.newCategories.length,1);assert.equal(plan.newCategories[0].name,"ATM 1251");assert.equal(plan.newMaterials.length,1);assert.equal(plan.newMaterials[0].name,"A36");assert.equal(plan.newMaterials.some(x=>x.name==="RC50"),false);});
++test("import creates missing definitions once, links jobs, reports IDs, and reimport is definition no-op",async()=>{const h=env({categories:[{id:"jobs_root",name:"All Jobs"}],materials:[]}),rows=[{...base,category:"ATM 1251",material:"A36"},{...base,import_event_id:"evt-2",category:" ATM   1251 ",material:"a36"}],r=await h.api.submit(rows);assert.equal(r.saveCompleted,true);assert.equal(r.createdCategoryIds.length,1);assert.equal(r.createdMaterialIds.length,1);assert.equal(r.beforeCounts.categories,1);assert.equal(r.afterCounts.categories,2);assert.equal(r.beforeCounts.materials,0);assert.equal(r.afterCounts.materials,1);assert.equal(h.categories.length,2);assert.equal(h.materials.length,1);assert.equal(h.state.cuttingJobs[0].cat,r.createdCategoryIds[0]);assert.equal(h.state.cuttingJobs[1].cat,r.createdCategoryIds[0]);assert.equal(h.state.cuttingJobs[0].material,"A36");const again=await h.api.submit(rows);assert.equal(again.readyRows,0);assert.equal(h.categories.length,2);assert.equal(h.materials.length,1);});
++test("existing normalized definitions reuse and project/category remain separate",async()=>{const h=env({categories:[{id:"jobs_root",name:"All Jobs"},{id:"atm",name:"ATM 1251"}],materials:[{name:"A36",density:0.1,pricePerLb:1}]}),r=await h.api.submit([{...base,project_number:"1251",category:" atm   1251 ",material:" a36 ",import_event_id:"reuse"}]);assert.equal(r.createdCategoryIds.length,0);assert.deepEqual(r.reusedCategoryIds,["atm"]);assert.deepEqual(r.reusedMaterialIds,["A36"]);assert.equal(h.state.cuttingJobs[0].projectNumber,"1251");assert.equal(h.state.cuttingJobs[0].cat,"atm");});
++test("blank definitions stay blank and ATM category derives only blank project with provenance",()=>{let p=api.preview([{...base,category:"",material:""}],context)[0],mapped=api.map(p);assert.equal(mapped.cat,"");assert.equal(mapped.material,"");p=api.preview([{...base,project_number:"",category:"ATM 1251"}],context)[0];mapped=api.map(p);assert.equal(p.status,"ready");assert.equal(mapped.projectNumber,"1251");assert.equal(mapped.importProvenance.project_number,"");assert.ok(p.warnings.some(x=>x.includes("derived")));});
++test("definition rollback is exact and indeterminate retains definitions",async()=>{let h=env({categories:[{id:"jobs_root",name:"All Jobs"}],materials:[],save:{saved:false,stateWriteAttempted:false,stateWriteCompleted:false,error:"blocked"}}),beforeC=JSON.stringify(h.categories),beforeM=JSON.stringify(h.materials),r=await h.api.submit([{...base,category:"ATM 1251",material:"A36"}]);assert.equal(r.rollbackVerified,true);assert.equal(JSON.stringify(h.categories),beforeC);assert.equal(JSON.stringify(h.materials),beforeM);h=env({categories:[{id:"jobs_root",name:"All Jobs"}],materials:[],save:{saved:false,stateWriteAttempted:true,stateWriteCompleted:false,indeterminate:true}});r=await h.api.submit([{...base,category:"ATM 1251",material:"A36"}]);assert.equal(r.rollbackAttempted,false);assert.equal(h.categories.length,2);assert.equal(h.materials.length,1);});
++test("active completed and actual minutes map through manualLogs",()=>{let p=api.preview([base],context)[0],j=api.map(p);assert.equal(j.estimateHours,2.5);assert.equal(j.manualLogs.length,0);p=api.preview([{...base,record_status:"completed",completed_date:"2026-01-03",actual_cut_minutes:"90",import_event_id:"evt-2"}],context)[0];j=api.map(p);assert.equal(j.completedAtISO,"2026-01-03");assert.equal(j.manualLogs[0].completedHours,1.5);});
++test("event id idempotency and semantic duplicates",()=>{const duplicateContext={...context,state:{cuttingJobs:[{import_event_id:"evt-1"}],completedCuttingJobs:[]}};assert.equal(api.preview([base],duplicateContext)[0].status,"duplicate");const rows=api.preview([base,{...base,import_event_id:"evt-2"}],context);assert.deepEqual(rows.map(x=>x.status),["ready","ready"]);assert.equal(api.preview([base,base],context)[1].status,"invalid");});
++test("confirmed save appends only jobs and reimport is no-op",async()=>{const h=env(),before=JSON.stringify(h.state.inventory),r=await h.api.submit([base],undefined);assert.equal(r.saveCompleted,true);assert.equal(r.activeJobsAdded,1);assert.equal(JSON.stringify(h.state.inventory),before);const again=await h.api.submit([base],undefined);assert.equal(again.readyRows,0);assert.equal(h.calls.filter(x=>x==="save").length,1);});
++test("definite failure rolls back byte-equivalent",async()=>{const h=env({save:{saved:false,stateWriteAttempted:false,stateWriteCompleted:false,error:"blocked"}}),before=JSON.stringify(h.state.cuttingJobs),r=await h.api.submit([base],undefined);assert.equal(r.rollbackVerified,true);assert.equal(JSON.stringify(h.state.cuttingJobs),before);});
++test("indeterminate outcome does not retry or rollback",async()=>{const h=env({save:{saved:false,stateWriteAttempted:true,stateWriteCompleted:false,indeterminate:true}}),r=await h.api.submit([base],undefined);assert.equal(r.saveIndeterminate,true);assert.equal(r.rollbackAttempted,false);assert.equal(h.state.cuttingJobs.length,1);assert.equal(h.calls.filter(x=>x==="save").length,1);});
++test("protected mutation is rejected and rolled back",async()=>{const h=env();h.api=api.createApi({xlsx,state:()=>h.state,categories:()=>h.categories,materials:()=>h.materials,createCategory:name=>{const x={id:"new",name};h.categories.push(x);return x;},createMaterial:name=>{const x={name,density:0.1,pricePerLb:1};h.materials.push(x);return x;},restoreCategories:value=>h.categories.splice(0,h.categories.length,...value),restoreMaterials:value=>h.materials.splice(0,h.materials.length,...value),authenticatedBaseline:()=>true,revalidateBaseline:async()=>true,backup:async()=>{h.state.inventory.push({id:"unexpected"});},saveCloudNow:async()=>{throw Error("must not save");}});const r=await h.api.submit([base],undefined);assert.equal(r.protectedStateMatched,false);assert.deepEqual(r.protectedStateMismatchPaths,["$.inventory"]);assert.equal(r.rollbackVerified,true);});
++test("concurrent submission is blocked",async()=>{const state={cuttingJobs:[],completedCuttingJobs:[]};let release;const categories=structuredClone(context.categories),materials=structuredClone(context.materials),importer=api.createApi({xlsx,state:()=>state,categories:()=>categories,materials:()=>materials,createCategory:name=>{const x={id:"new",name};categories.push(x);return x;},createMaterial:name=>{const x={name,density:0.1,pricePerLb:1};materials.push(x);return x;},restoreCategories:value=>categories.splice(0,categories.length,...value),restoreMaterials:value=>materials.splice(0,materials.length,...value),authenticatedBaseline:()=>true,revalidateBaseline:async()=>true,backup:()=>new Promise(resolve=>{release=resolve;}),saveCloudNow:async()=>({saved:true,stateWriteAttempted:true,stateWriteCompleted:true})});const first=importer.submit([base],undefined);await Promise.resolve();const second=await importer.submit([{...base,import_event_id:"evt-2"}],undefined);assert.match(second.saveError,/progress/);release();await first;});
++test("authenticated baseline remains required",async()=>{const h=env({auth:false});assert.match((await h.api.submit([base])).saveError,/baseline/);});
++test("checkbox replaces typed confirmation and cancel precedes submit",()=>{const html=require("node:fs").readFileSync("index.html","utf8"),core=require("node:fs").readFileSync("js/core.js","utf8");assert.ok(html.includes('id="cuttingJobImportReviewed" type="checkbox"'));assert.equal(html.includes("cuttingJobImportConfirm"),false);assert.ok(core.includes("if(!window.confirm(message))"));assert.ok(core.indexOf("if(!window.confirm(message))")<core.indexOf("window.cuttingJobImporter.submit(parsed)"));});
++test("normal Cutting Jobs entry opens existing dialog and close is non-mutating",()=>{const views=require("node:fs").readFileSync("js/views.js","utf8"),html=require("node:fs").readFileSync("index.html","utf8"),core=require("node:fs").readFileSync("js/core.js","utf8");assert.ok(views.includes('data-cutting-job-import-open>Import reviewed jobs</button>'));assert.equal((html.match(/id="cuttingJobImportAdmin"/g)||[]).length,1);assert.ok(html.includes('id="cuttingJobImportClose"'));assert.ok(core.includes('dialog.showModal()'));assert.ok(core.includes('if(dialog.open)dialog.close()'));const closeBody=core.slice(core.indexOf("const closeDialog="),core.indexOf("document.addEventListener",core.indexOf("const closeDialog=")));for(const forbidden of ["submit(","saveCloudNow","backup(","cuttingJobs.push","completedCuttingJobs.push"])assert.equal(closeBody.includes(forbidden),false);assert.ok(core.includes("[data-cutting-job-import-open]"));assert.ok(core.includes("window.openReviewedCuttingJobImporter"));});
++test("implementation has no Storage membership cache or rules operation",()=>{const source=require("node:fs").readFileSync("js/cuttingJobImporter.js","utf8");for(const forbidden of ["firebase.storage","cutting_job_files_v1","members/","storage.rules","firestore.rules","saveCloudDebounced"])assert.equal(source.includes(forbidden),false);});
++(async()=>{for(const[n,f]of tests){await f();console.log(`ok - ${n}`);}console.log(`1..${tests.length}`);})().catch(e=>{console.error(e);process.exitCode=1;});
+ 
+EOF
+)
