@@ -25,7 +25,7 @@ service firebase.storage {
       return name.size() <= 120 && name.matches('^[A-Za-z0-9][A-Za-z0-9._-]*\\.(dxf|ord|omx)$');
     }
     function validCreate(workspaceId, jobId, fileId, safeFileName) {
-      return bucket == 'omax-maintenance.firebasestorage.app'
+      return bucket == 'wj-tracker-v2.firebasestorage.app'
         && request.resource.size > 0 && request.resource.size <= 52428800
         && request.resource.contentType in ['application/dxf', 'application/octet-stream']
         && request.resource.metadata.keys().hasOnly(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','storagePath','sha256','status','createdBy','createdAtISO'])
@@ -48,7 +48,7 @@ service firebase.storage {
         && request.resource.metadata.createdBy == request.auth.uid;
     }
     function validExisting(workspaceId, jobId, fileId, safeFileName) {
-      return bucket == 'omax-maintenance.firebasestorage.app'
+      return bucket == 'wj-tracker-v2.firebasestorage.app'
         && resource.size > 0 && resource.size <= 52428800
         && resource.metadata.keys().hasOnly(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','storagePath','sha256','status','createdBy','createdAtISO'])
         && resource.metadata.schemaVersion == '1'
