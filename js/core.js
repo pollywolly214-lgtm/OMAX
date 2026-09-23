@@ -608,7 +608,7 @@ let hasPendingLocalChanges = false;
 let lastLocalMutationAt = 0;
 const CLOUD_SYNC_CLIENT_KEY = "cloud_sync_client_id_v1";
 const LOCAL_STATE_BACKUP_KEY = "omax_local_state_backup_v1";
-const CUT_FILE_STORAGE_BUCKET = "omax-maintenance.firebasestorage.app";
+const CUT_FILE_STORAGE_BUCKET = "wj-tracker-v2.firebasestorage.app";
 
 
 const FIRESTORE_WARN_BYTES = 850000;
@@ -2529,17 +2529,8 @@ async function initFirebase(){
 
   async function ensureEmailPassword(email, password){
     if (!email || !password) throw new Error("Email and password required.");
-    try{
-      const cred = await FB.auth.signInWithEmailAndPassword(email,password);
-      return cred.user;
-    }catch(e){
-      if (e && e.code === "auth/user-not-found"){
-        await FB.auth.createUserWithEmailAndPassword(email,password);
-        const cred = await FB.auth.signInWithEmailAndPassword(email,password);
-        return cred.user;
-      }
-      throw e;
-    }
+    const cred = await FB.auth.signInWithEmailAndPassword(email,password);
+    return cred.user;
   }
 
   if (btnIn)  btnIn.onclick  = showModal;
@@ -2550,52 +2541,12 @@ async function initFirebase(){
     form.onsubmit = async (e)=>{
       e.preventDefault();
       try{
-        await ensureEmailPassword((emailEl.value||"").trim(), (passEl.value||"").trim());
+        await ensureEmailPassword((emailEl.value||"").trim(), (passEl.value||""));
         hideModal();
       }catch(err){ console.error(err); alert(err.message || "Sign-in failed"); }
     };
   }
 
-  const loginShortcutCredentials = {
-    email: "ryder@candmprecast.com",
-    password: "Matthew7:21",
-  };
-
-  let loginShortcutSigningIn = false;
-
-  const handleLoginShortcut = async (event)=>{
-    if (!(event && (event.ctrlKey || event.metaKey))) return;
-    const key = (event.key || "").toLowerCase();
-    if (key !== "s") return;
-    if (FB.user) return;
-    event.preventDefault();
-
-    if (loginShortcutSigningIn) return;
-    loginShortcutSigningIn = true;
-
-    try {
-      const { email, password } = loginShortcutCredentials;
-      if (emailEl) {
-        emailEl.value = email;
-        emailEl.focus();
-        emailEl.select();
-      }
-      if (passEl) {
-        passEl.value = password;
-      }
-
-      showModal();
-      await ensureEmailPassword(email, password);
-      hideModal();
-    } catch (err) {
-      console.error("Login shortcut failed", err);
-      toast(err?.message || "Login shortcut failed");
-    } finally {
-      loginShortcutSigningIn = false;
-    }
-  };
-
-  window.addEventListener("keydown", handleLoginShortcut);
 
   FB.auth.onAuthStateChanged(async (user)=>{
     FB.user = user || null;
@@ -4200,7 +4151,7 @@ function getCloudCutFileStorageDiagnostics(){
     storageServiceInitialized:Boolean(FB.storage), storageInitializationError:FB.storageInitializationError || "",
     signedIn:Boolean(FB.user), uid:FB.user?.uid || null, workspaceId:WORKSPACE_ID,
     authoritativeFirestoreDocumentPath:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
-    pointsToProductionFirebase:projectId === "omax-maintenance", uploadsEnabled:false, downloadsEnabled:false,
+    pointsToProductionFirebase:projectId === "wj-tracker-v2", uploadsEnabled:false, downloadsEnabled:false,
     storageRulesActuallyTested:false, firewallAvailable:typeof window.CuttingFileContentFirewall?.scanCuttingFileContent === "function",
     currentSnapshotFirewallSummary:{ contaminated:currentFirewall.contaminated, blockingFindingCount:currentFirewall.blockingFindingCount, wouldPass:!currentFirewall.contaminated },
     ...cfr03
