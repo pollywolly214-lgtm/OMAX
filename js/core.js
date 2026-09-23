@@ -2529,17 +2529,8 @@ async function initFirebase(){
 
   async function ensureEmailPassword(email, password){
     if (!email || !password) throw new Error("Email and password required.");
-    try{
-      const cred = await FB.auth.signInWithEmailAndPassword(email,password);
-      return cred.user;
-    }catch(e){
-      if (e && e.code === "auth/user-not-found"){
-        await FB.auth.createUserWithEmailAndPassword(email,password);
-        const cred = await FB.auth.signInWithEmailAndPassword(email,password);
-        return cred.user;
-      }
-      throw e;
-    }
+    const cred = await FB.auth.signInWithEmailAndPassword(email,password);
+    return cred.user;
   }
 
   if (btnIn)  btnIn.onclick  = showModal;
