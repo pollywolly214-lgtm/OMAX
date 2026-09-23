@@ -2550,52 +2550,12 @@ async function initFirebase(){
     form.onsubmit = async (e)=>{
       e.preventDefault();
       try{
-        await ensureEmailPassword((emailEl.value||"").trim(), (passEl.value||"").trim());
+        await ensureEmailPassword((emailEl.value||"").trim(), (passEl.value||""));
         hideModal();
       }catch(err){ console.error(err); alert(err.message || "Sign-in failed"); }
     };
   }
 
-  const loginShortcutCredentials = {
-    email: "ryder@candmprecast.com",
-    password: "Matthew7:21",
-  };
-
-  let loginShortcutSigningIn = false;
-
-  const handleLoginShortcut = async (event)=>{
-    if (!(event && (event.ctrlKey || event.metaKey))) return;
-    const key = (event.key || "").toLowerCase();
-    if (key !== "s") return;
-    if (FB.user) return;
-    event.preventDefault();
-
-    if (loginShortcutSigningIn) return;
-    loginShortcutSigningIn = true;
-
-    try {
-      const { email, password } = loginShortcutCredentials;
-      if (emailEl) {
-        emailEl.value = email;
-        emailEl.focus();
-        emailEl.select();
-      }
-      if (passEl) {
-        passEl.value = password;
-      }
-
-      showModal();
-      await ensureEmailPassword(email, password);
-      hideModal();
-    } catch (err) {
-      console.error("Login shortcut failed", err);
-      toast(err?.message || "Login shortcut failed");
-    } finally {
-      loginShortcutSigningIn = false;
-    }
-  };
-
-  window.addEventListener("keydown", handleLoginShortcut);
 
   FB.auth.onAuthStateChanged(async (user)=>{
     FB.user = user || null;
