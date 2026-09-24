@@ -15,7 +15,7 @@ function harness(options={}){
     async getDownloadURL(){calls.push("download_url");if(options.urlError)throw options.urlError;return "https://secret-token.invalid/object?token=SECRET";},
     async delete(){calls.push("delete");if(options.deleteError)throw options.deleteError;deleted=true;}
   };
-  const state={user:{uid:"user_1"},projectId:"omax-maintenance",bucket:"omax-maintenance.firebasestorage.app",workspaceId:"github-prod",storage:{ref(requested){calls.push("ref");assert.equal(requested,path);return ref;}},...(options.state||{})};
+  const state={user:{uid:"user_1"},projectId:"wj-tracker-v2",bucket:"wj-tracker-v2.firebasestorage.app",workspaceId:"github-prod",storage:{ref(requested){calls.push("ref");assert.equal(requested,path);return ref;}},...(options.state||{})};
   const cache="47-local-data-urls-byte-equivalent"; let backup="protected-backup";
   const env={cuttingJobs:[{id:"job",config:{b:2,a:1}}],completedCuttingJobs:[],deletedItems:[],inventory:[{id:"part"}],maintenanceOccurrencesV2:[{id:"occurrence"}],localStorage:{getItem:key=>key==="cutting_job_files_v1"?cache:key==="omax_local_state_backup_v1"?backup:null}};
   class XHR {

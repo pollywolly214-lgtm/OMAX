@@ -10,8 +10,8 @@
   "use strict";
 
   const CONFIRMATION = "CFR03 STORAGE TEST";
-  const PROJECT_ID = "omax-maintenance";
-  const BUCKET = "omax-maintenance.firebasestorage.app";
+  const PROJECT_ID = "wj-tracker-v2";
+  const BUCKET = "wj-tracker-v2.firebasestorage.app";
   const WORKSPACE_ID = "github-prod";
   const NAMESPACE = "workspaces/{workspaceId}/cfr03-tests/{uid}/{testId}/cfr03-test.json";
   const CONTENT_TYPE = "application/json";

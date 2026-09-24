@@ -608,7 +608,7 @@ let hasPendingLocalChanges = false;
 let lastLocalMutationAt = 0;
 const CLOUD_SYNC_CLIENT_KEY = "cloud_sync_client_id_v1";
 const LOCAL_STATE_BACKUP_KEY = "omax_local_state_backup_v1";
-const CUT_FILE_STORAGE_BUCKET = "omax-maintenance.firebasestorage.app";
+const CUT_FILE_STORAGE_BUCKET = "wj-tracker-v2.firebasestorage.app";
 
 
 const FIRESTORE_WARN_BYTES = 850000;
@@ -4200,7 +4200,7 @@ function getCloudCutFileStorageDiagnostics(){
     storageServiceInitialized:Boolean(FB.storage), storageInitializationError:FB.storageInitializationError || "",
     signedIn:Boolean(FB.user), uid:FB.user?.uid || null, workspaceId:WORKSPACE_ID,
     authoritativeFirestoreDocumentPath:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
-    pointsToProductionFirebase:projectId === "omax-maintenance", uploadsEnabled:false, downloadsEnabled:false,
+    pointsToProductionFirebase:projectId === "wj-tracker-v2", uploadsEnabled:false, downloadsEnabled:false,
     storageRulesActuallyTested:false, firewallAvailable:typeof window.CuttingFileContentFirewall?.scanCuttingFileContent === "function",
     currentSnapshotFirewallSummary:{ contaminated:currentFirewall.contaminated, blockingFindingCount:currentFirewall.blockingFindingCount, wouldPass:!currentFirewall.contaminated },
     ...cfr03

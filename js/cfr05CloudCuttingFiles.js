@@ -1,6 +1,6 @@
 (function(root,factory){"use strict";const api=factory(root);if(typeof module==="object"&&module.exports)module.exports=factory;if(root)root.Cfr05CloudCuttingFiles=api;})(typeof globalThis!=="undefined"?globalThis:this,function(root){
 "use strict";
-const MAX_FILE_SIZE_BYTES=52428800,DOWNLOAD_TIMEOUT_MS=60000,CONFIRMATION="CFR05 VERCEL TEST",EXPECTED_PROJECT="omax-maintenance",EXPECTED_BUCKET="omax-maintenance.firebasestorage.app",EXPECTED_WORKSPACE="github-prod";
+const MAX_FILE_SIZE_BYTES=52428800,DOWNLOAD_TIMEOUT_MS=60000,CONFIRMATION="CFR05 VERCEL TEST",EXPECTED_PROJECT="wj-tracker-v2",EXPECTED_BUCKET="wj-tracker-v2.firebasestorage.app",EXPECTED_WORKSPACE="github-prod";
 const TYPES=Object.freeze({dxf:{canonical:"application/dxf",accepted:["application/dxf","application/x-dxf","text/plain"]},ord:{canonical:"application/octet-stream",accepted:["application/octet-stream","text/plain"]},omx:{canonical:"application/octet-stream",accepted:["application/octet-stream","text/plain"]}});
 const UPLOAD_ROLES=Object.freeze(["owner","admin","operator"]),READ_ROLES=Object.freeze([...UPLOAD_ROLES,"viewer"]);
 const STAGES=Object.freeze(["preflight","membership_validation","job_validation","local_file_validation","sha256_calculation","immutable_path_creation","storage_upload","uploaded_metadata_verification","firestore_metadata_creation","final_verification","completed"]);
