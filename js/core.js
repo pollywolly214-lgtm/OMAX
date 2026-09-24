@@ -4232,7 +4232,8 @@ window.cfr05CloudCuttingFiles = window.Cfr05CloudCuttingFiles?.createApi(window,
     projectId:String(FB.app?.options?.projectId||window.FIREBASE_CONFIG?.projectId||""),
     bucket:String(FB.app?.options?.storageBucket||CUT_FILE_STORAGE_BUCKET||""),
     workspaceId:WORKSPACE_ID,
-    authenticated:Boolean(FB.user)
+    authenticated:Boolean(FB.user),
+    uid:String(FB.user?.uid||"")
   })
 });
 window.uploadCfr05CuttingFile = async function(jobId, file, onStage){

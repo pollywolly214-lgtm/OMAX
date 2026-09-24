@@ -9,6 +9,9 @@ const deletion=rules.slice(rules.indexOf("allow delete:"),rules.indexOf("allow u
 const creation=rules.slice(rules.indexOf("allow create:"),rules.indexOf("allow get:"));
 const reading=rules.slice(rules.indexOf("allow get:"),rules.indexOf("// Client deletion"));
 
+assert.match(rules,/request\.auth\.uid == 'GntsaU7i2tXdDf05ds8cws5dfi63'/,"Storage access must retain the production UID lock");
+assert.match(rules,/workspaceId == 'github-prod'/,"Storage access must remain in the production workspace");
+
 assert.match(creation,/resource == null/,"create must reject an existing object rather than authorize overwrite");
 assert.match(rules,/allow update, list: if false;/,"an existing-object put is denied as update and cannot be listed");
 assert.match(reading,/safeIds\(workspaceId, jobId, fileId\) && allowedName\(safeFileName\)/,"absence checks require the exact validated cryptographic path");

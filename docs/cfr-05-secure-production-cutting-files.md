@@ -6,7 +6,7 @@
 
 The legacy arrays in `workspaces/github-prod/app/state` remain authoritative. CFR-05 never calls `saveCloudNow` or `snapshotState` and never inserts cloud metadata or bytes into `cuttingJobs`, `completedCuttingJobs`, manual logs, deleted items, backups, or local storage. It creates only a compatibility job document and child file metadata after a successful immutable Storage create. Existing local references remain available and `cutting_job_files_v1`, including the 47 production-origin entries reported by the operator, is neither read nor changed.
 
-Normal readiness is persistent and fail-closed. It requires initialized Firebase services, the exact `wj-tracker-v2` project, exact `wj-tracker-v2.firebasestorage.app` bucket, exact `github-prod` workspace, an authenticated user, and a structurally valid active membership with the required role. Upload accepts owner/admin/operator; listing and download also accept viewer. `configureCfr05OperatorSession()` remains only as deprecated memory-only diagnostic compatibility and does not control readiness or use hostname as a security boundary.
+Normal readiness is persistent and fail-closed. It requires initialized Firebase services, the exact `wj-tracker-v2` project, exact `wj-tracker-v2.firebasestorage.app` bucket, exact `github-prod` workspace, the production Firebase Auth UID `GntsaU7i2tXdDf05ds8cws5dfi63`, and a structurally valid active membership with the required role. Upload accepts owner/admin/operator; listing and download also accept viewer. `configureCfr05OperatorSession()` remains only as deprecated memory-only diagnostic compatibility and does not control readiness or use hostname as a security boundary.
 
 ## Authorization assumption that must be verified
 
@@ -17,7 +17,7 @@ The exact bootstrap document, created only with Firebase Admin SDK or Console by
 ```json
 {
   "schemaVersion": 1,
-  "uid": "<exact Firebase Authentication UID and document ID>",
+  "uid": "GntsaU7i2tXdDf05ds8cws5dfi63",
   "workspaceId": "github-prod",
   "role": "owner | admin | operator | viewer",
   "active": true,
@@ -35,7 +35,7 @@ Objects use `workspaces/{workspaceId}/cutting-jobs/{jobId}/files/{cryptographicF
 
 The create-only file document at `workspaces/{workspaceId}/cuttingJobs/{jobId}/files/{fileId}` contains exactly: `schemaVersion`, `workspaceId`, `jobId`, `fileId`, `originalName`, `safeFileName`, `extension`, `contentType`, `sizeBytes`, `storagePath`, `sha256`, `status`, `createdBy`, and `createdAtISO`. The compatibility document at `workspaces/{workspaceId}/cuttingJobs/{jobId}` contains only schema/workspace/job identity, the authoritative state path, exact creator UID, and creation time. Neither is a replacement for the full-state job.
 
-Upload is a single awaited pass: preflight → membership validation → authoritative job validation → local File validation → SHA-256 → cryptographic ID/immutable path → existence check and Storage create → uploaded metadata verification → additive Firestore create → final read/validation → completed. It never retries. A definite failure after a confirmed upload but before file-reference creation triggers one exact-object delete and one absence check. An indeterminate Storage/Firestore outcome is never retried or deleted and reports its exact possible orphan path for manual review. Diagnostics omit content, tokens and URLs.
+Upload is a single awaited pass: preflight → membership validation → authoritative job validation → local File validation → SHA-256 → cryptographic ID/immutable path → direct create-only Storage upload → uploaded metadata verification → additive Firestore create → final read/validation → completed. It never retries. A definite failure after a confirmed upload but before file-reference creation triggers one exact-object delete and one absence check. An indeterminate Storage/Firestore outcome is never retried or deleted and reports its exact possible orphan path for manual review. Diagnostics omit content, tokens and URLs.
 
 Download is: gates/membership → metadata read → strict metadata/path revalidation → exact Storage object → bounded in-memory Blob/ArrayBuffer → parser handoff or temporary object URL → unconditional URL revocation. Firebase v8's transient download URL may be used internally to fetch the Blob, but is never persisted or returned in diagnostics. Local safe references may still be preferred by the existing UI; cloud is the cross-device fallback.
 

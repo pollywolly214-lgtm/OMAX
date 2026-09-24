@@ -3,7 +3,10 @@ rules_version = '2';
 // CFR-05B reviewed proposal. DO NOT DEPLOY from this implementation task.
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
+    function authorized() {
+      return request.auth != null
+        && request.auth.uid == 'GntsaU7i2tXdDf05ds8cws5dfi63';
+    }
     function validWorkspaceId(id) { return id.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'); }
     function validId(id) { return id.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$'); }
     function membershipPath(workspaceId) { return /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid); }
@@ -17,7 +20,7 @@ service cloud.firestore {
         && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 254));
     }
     function activeMember(workspaceId) {
-      return signedIn() && validWorkspaceId(workspaceId) && exists(membershipPath(workspaceId))
+      return authorized() && workspaceId == 'github-prod' && exists(membershipPath(workspaceId))
         && validMemberData(get(membershipPath(workspaceId)).data, workspaceId, request.auth.uid);
     }
     function writer(workspaceId) { return activeMember(workspaceId) && get(membershipPath(workspaceId)).data.role in ['owner','admin','operator']; }
@@ -42,12 +45,12 @@ service cloud.firestore {
         && validId(data.createdBy) && data.createdAtISO is string && data.createdAtISO.size() <= 30;
     }
 
-    // Preserve the deployed authoritative app-state behavior exactly.
-    match /workspaces/{workspaceId}/app/{document=**} {
-      allow read, write: if signedIn();
+    // Preserve the current production UID lock for authoritative app state.
+    match /workspaces/github-prod/app/{document=**} {
+      allow read, write: if authorized();
     }
     match /workspaces/{workspaceId}/members/{uid} {
-      allow get: if signedIn() && request.auth.uid == uid && validWorkspaceId(workspaceId);
+      allow get: if authorized() && workspaceId == 'github-prod' && request.auth.uid == uid;
       allow list, create, update, delete: if false;
     }
     match /workspaces/{workspaceId}/cuttingJobs/{jobId} {

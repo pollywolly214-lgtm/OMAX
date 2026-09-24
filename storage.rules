@@ -4,11 +4,16 @@ rules_version = '2';
 // that ordinary clients cannot create, activate, or promote membership records.
 service firebase.storage {
   match /b/{bucket}/o {
+    function authorized() {
+      return request.auth != null
+        && request.auth.uid == 'GntsaU7i2tXdDf05ds8cws5dfi63';
+    }
     function member(workspaceId) {
       return firestore.get(/databases/(default)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid)).data;
     }
     function activeRole(workspaceId, roles) {
-      return request.auth != null
+      return authorized()
+        && workspaceId == 'github-prod'
         && firestore.exists(/databases/(default)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid))
         && member(workspaceId).uid == request.auth.uid
         && member(workspaceId).workspaceId == workspaceId
