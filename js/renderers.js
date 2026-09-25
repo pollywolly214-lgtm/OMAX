@@ -3,6 +3,10 @@ if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 const pendingNewJobFiles = window.pendingNewJobFiles;
 if (!Array.isArray(window.pendingSecureCloudJobFiles)) window.pendingSecureCloudJobFiles = [];
 const pendingSecureCloudJobFiles = window.pendingSecureCloudJobFiles;
+if (!window.cfr05CloudPresentation && window.Cfr05CloudFilePresentation){
+  window.cfr05CloudPresentation = window.Cfr05CloudFilePresentation.createCache();
+}
+const cfr05CloudPresentation = window.cfr05CloudPresentation;
 if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
 const orderPartialSelection = window.orderPartialSelection;
 const timeEfficiencyWidgets = [];
@@ -20090,6 +20094,27 @@ let cachedActiveWJCutsRoot = null;
 let isRenderingJobs = false;
 let rootStatusRefreshInFlight = null;
 
+async function refreshCfr05CloudPresentation(jobId, options = {}){
+  const id = String(jobId || "").trim();
+  if (!id || !cfr05CloudPresentation || typeof window.listCfr05CloudFiles !== "function") return null;
+  return cfr05CloudPresentation.load(id, value=>window.listCfr05CloudFiles(value), { force:options.force === true });
+}
+window.refreshCfr05CloudPresentation = refreshCfr05CloudPresentation;
+
+function hydrateVisibleCfr05CloudFiles(content){
+  if (!content || !cfr05CloudPresentation || typeof window.listCfr05CloudFiles !== "function") return;
+  const ids = new Set();
+  content.querySelectorAll("[data-cloud-files]").forEach(node=>{
+    const id = String(node.getAttribute("data-cloud-files") || "").trim();
+    if (id) ids.add(id);
+  });
+  const missing = [...ids].filter(id=>!cfr05CloudPresentation.has(id) && !cfr05CloudPresentation.isLoading(id));
+  if (!missing.length) return;
+  Promise.allSettled(missing.map(id=>refreshCfr05CloudPresentation(id))).then(()=>{
+    if (document.getElementById("content") === content && typeof renderJobs === "function") renderJobs();
+  });
+}
+
 function renderJobs(){
   const content = document.getElementById("content");
   if (!content) return;
@@ -20147,6 +20172,7 @@ function renderJobs(){
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
   setupJobLayout();
+  hydrateVisibleCfr05CloudFiles(content);
 
   const inlineOneDriveModal = content.querySelector("#jobOneDriveModal");
   if (inlineOneDriveModal && inlineOneDriveModal.parentElement !== document.body){
@@ -22674,6 +22700,8 @@ function renderJobs(){
       if (outcome.stage !== "completed") attachmentFailures.push({ name:file.name, stage:outcome.stage, error:outcome.error, indeterminate:outcome.indeterminate, possibleOrphanPath:outcome.possibleOrphanPath });
     }
     pendingSecureCloudJobFiles.length = 0;
+    try { await refreshCfr05CloudPresentation(newJob.id,{force:true}); }
+    catch (_) { /* the job remains saved; presentation hydration can retry on the next page load */ }
     if (attachmentFailures.length){
       const first = attachmentFailures[0];
       toast(`Job created, but ${attachmentFailures.length} cloud file upload${attachmentFailures.length === 1 ? "" : "s"} failed at ${first.stage}${first.indeterminate ? " (indeterminate; do not retry automatically)" : ""}.`);
@@ -22920,14 +22948,103 @@ function renderJobs(){
     return true;
   };
 
+  const safeCloudActionError = error => String(error?.message || error || "Unknown error").replace(/https?:\/\/\S+/gi, "[redacted URL]").slice(0, 500);
+  const reportCloudOpenResult = (host, result)=>{
+    try { host.dataset.cfr05LastOpenResult = JSON.stringify(result); }
+    catch (_) { host.dataset.cfr05LastOpenResult = '{"completed":false,"error":{"code":"diagnosticSerializationFailed","message":"Diagnostic serialization failed."}}'; }
+  };
+  const openVerifiedCloudFile = async (jobId, fileId, dialog, host)=>{
+    let status = dialog.querySelector("[data-cfr05-action-status]");
+    if (!status){ status=document.createElement("p"); status.setAttribute("data-cfr05-action-status",""); status.setAttribute("role","status"); dialog.appendChild(status); }
+    status.textContent = "Validating and downloading verified cloud file…";
+    try {
+      const outcome = await window.openCfr05CloudFile(jobId, fileId, {
+        displayPreview:async preview=>{
+          if (!/^data:image\/svg\+xml/i.test(preview)) return false;
+          let image=dialog.querySelector("[data-cfr05-preview]");
+          if(!image){ image=document.createElement("img"); image.setAttribute("data-cfr05-preview",""); image.alt="Verified DXF preview"; image.style.maxWidth="100%"; dialog.appendChild(image); }
+          image.src=preview;
+          return true;
+        },
+        openObjectUrl:async (url,metadata)=>{
+          const anchor=document.createElement("a");
+          anchor.href=url; anchor.download=metadata.safeFileName; anchor.rel="noopener";
+          document.body.appendChild(anchor); anchor.click(); anchor.remove();
+        }
+      });
+      reportCloudOpenResult(host,outcome);
+      if (!outcome.completed){
+        status.setAttribute("role","alert");
+        status.textContent=`Cloud file blocked: ${(outcome.blockers||["unknown failure"]).join(", ")}.`;
+      } else if (outcome.previewDisplayed){
+        status.textContent="Verified DXF preview displayed.";
+      } else if (outcome.opened && outcome.previewRoute === "dxf"){
+        status.textContent="DXF browser preview is unavailable for this file. The verified file was opened/downloaded instead.";
+      } else if (outcome.opened){
+        status.textContent=`Verified ${String(outcome.previewRoute||"file").toUpperCase()} opened/downloaded.`;
+      } else {
+        status.setAttribute("role","alert");
+        status.textContent="The verified file could not be previewed or opened.";
+      }
+      return outcome;
+    } catch (error){
+      const failure={completed:false,blockers:[],previewRoute:"",previewAvailable:false,previewDisplayed:false,opened:false,error:{code:String(error?.code||"cloudOpenFailure"),message:safeCloudActionError(error)}};
+      reportCloudOpenResult(host,failure);
+      status.setAttribute("role","alert"); status.textContent=`Cloud file open failed: ${failure.error.message}`;
+      toast(status.textContent);
+      return failure;
+    }
+  };
+  const showCloudFilesDialog = async (jobId, host, options={})=>{
+    const dialog=document.createElement("dialog"); dialog.setAttribute("data-cfr05-cloud-dialog","");
+    dialog.innerHTML='<h3>Cloud files</h3><p data-cfr05-dialog-loading>Loading verified cloud files…</p><button type="button" data-cfr05-close>Close</button>';
+    document.body.appendChild(dialog); dialog.showModal();
+    dialog.addEventListener("click",async event=>{
+      const close=event.target.closest("[data-cfr05-close]"); if(close){dialog.close();dialog.remove();return;}
+      const action=event.target.closest("[data-cfr05-action-open]"); if(!action)return;
+      action.disabled=true; try{await openVerifiedCloudFile(jobId,action.getAttribute("data-cfr05-action-open"),dialog,host);}finally{action.disabled=false;}
+    });
+    try {
+      const result=await refreshCfr05CloudPresentation(jobId,{force:options.force!==false});
+      host.dataset.cfr05LastListingResult=JSON.stringify(result);
+      const rows=(result?.files||[]).map(file=>{const label=file.extension==="dxf"?"Preview/Open":"Download/Open";return `<li><strong>${escapeHtml(file.originalName)}</strong> · Secure cloud · ${escapeHtml(file.extension.toUpperCase())}/${escapeHtml(file.contentType)} · ${(Number(file.sizeBytes)/1024).toFixed(1)} KB · verified <button type="button" data-cfr05-action-open="${escapeHtml(file.fileId)}">${label}</button></li>`;}).join("");
+      const listingError=result?.error?`<p role="alert">Cloud Files listing failed: ${escapeHtml(result.error.message||result.error.code||"Unknown error")}</p>`:(result?.blockers?.length?`<p role="alert">Cloud Files listing blocked: ${escapeHtml(result.blockers.join(", "))}</p>`:"");
+      dialog.querySelector("[data-cfr05-dialog-loading]").outerHTML=`${listingError}<p>${result?.cloudFileCount||0} verified; ${result?.rejectedMetadataDocumentCount||0} rejected.</p><ul>${rows||"<li>No verified cloud files.</li>"}</ul><p data-cfr05-action-status role="status"></p>`;
+      renderJobs();
+    } catch(error){
+      const failure={jobId,error:{code:String(error?.code||"listingFailure"),message:safeCloudActionError(error)}};
+      host.dataset.cfr05LastListingResult=JSON.stringify(failure);
+      dialog.querySelector("[data-cfr05-dialog-loading]").outerHTML=`<p role="alert">Cloud Files listing failed: ${escapeHtml(failure.error.message)}</p><p data-cfr05-action-status role="status"></p>`;
+    }
+    return dialog;
+  };
+
   const handleCuttingJobFileActionClick = async (e)=>{
     const act = (matched)=>{ if (!matched) return false; e.preventDefault(); e.stopPropagation(); if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation(); return true; };
     const cloudFiles = e.target.closest("[data-cloud-files]");
     if(cloudFiles){
-      e.preventDefault(); e.stopPropagation(); const jobId=String(cloudFiles.getAttribute("data-cloud-files")||""); cloudFiles.disabled=true;
+      e.preventDefault(); e.stopPropagation();
+      const jobId=String(cloudFiles.getAttribute("data-cloud-files")||"");
       const listingHost=cloudFiles.closest("[data-job-edit-row], .job-edit, dialog")||content;
-      try{const result=await window.listCfr05CloudFiles(jobId),dialog=document.createElement("dialog");listingHost.dataset.cfr05LastListingResult=JSON.stringify(result);dialog.setAttribute("data-cfr05-cloud-dialog","");const rows=result.files.map(file=>`<li><strong>${escapeHtml(file.originalName)}</strong> · ${escapeHtml(file.extension.toUpperCase())}/${escapeHtml(file.contentType)} · ${(Number(file.sizeBytes)/1024).toFixed(1)} KB · verified <button type="button" data-cfr05-open="${escapeHtml(file.fileId)}">Preview/Open</button></li>`).join("");const listingError=result.error?`<p role="alert">Cloud Files listing failed: ${escapeHtml(result.error.message||result.error.code||"Unknown error")}</p>`:(result.blockers?.length?`<p role="alert">Cloud Files listing blocked: ${escapeHtml(result.blockers.join(", "))}</p>`:"");dialog.innerHTML=`<h3>Cloud files</h3>${listingError}<p>${result.cloudFileCount} verified; ${result.rejectedMetadataDocumentCount} rejected.</p><ul>${rows||"<li>No verified cloud files.</li>"}</ul><button type="button" data-cfr05-close>Close</button>`;document.body.appendChild(dialog);dialog.addEventListener("click",async event=>{if(event.target.closest("[data-cfr05-close]")){dialog.close();dialog.remove();return;}const download=event.target.closest("[data-cfr05-download]");if(download){download.disabled=true;try{await window.openCfr05CloudFile(jobId,download.getAttribute("data-cfr05-download"),{openObjectUrl:async(url,metadata)=>{const anchor=document.createElement("a");anchor.href=url;anchor.download=metadata.safeFileName;document.body.appendChild(anchor);anchor.click();anchor.remove();}});}catch(err){toast(err?.message||"Cloud file could not be downloaded.");}finally{download.disabled=false;}return;}const open=event.target.closest("[data-cfr05-open]");if(open){open.disabled=true;try{const fileId=open.getAttribute("data-cfr05-open"),outcome=await window.openCfr05CloudFile(jobId,fileId,{displayPreview:async preview=>{if(!/^data:image\/svg\+xml/i.test(preview))return false;let image=dialog.querySelector("[data-cfr05-preview]");if(!image){image=document.createElement("img");image.setAttribute("data-cfr05-preview","");image.alt="Verified DXF preview";image.style.maxWidth="100%";dialog.appendChild(image);}image.src=preview;return true;}});if(!outcome.previewAvailable){toast(`${outcome.previewRoute.toUpperCase()} browser preview unavailable; use explicit Download/Open.`);open.textContent="Download/Open";open.removeAttribute("data-cfr05-open");open.setAttribute("data-cfr05-download",fileId);}}catch(err){toast(err?.message||"Cloud file could not be opened.");}finally{open.disabled=false;}}});dialog.showModal();if(result.error||result.blockers?.length)toast("Cloud Files listing failed. See the Cloud Files dialog for details.");}
-      catch(err){const failure={jobId,error:{code:String(err?.code||"listingFailure"),message:String(err?.message||err)}};listingHost.dataset.cfr05LastListingResult=JSON.stringify(failure);const dialog=document.createElement("dialog");dialog.setAttribute("data-cfr05-cloud-dialog","");dialog.innerHTML=`<h3>Cloud files</h3><p role="alert">Cloud Files listing failed: ${escapeHtml(failure.error.message)}</p><button type="button">Close</button>`;dialog.querySelector("button").addEventListener("click",()=>{dialog.close();dialog.remove();});document.body.appendChild(dialog);dialog.showModal();toast("Cloud Files listing failed. See the Cloud Files dialog for details.");}finally{cloudFiles.disabled=false;}return true;
+      cloudFiles.disabled=true;
+      try { await showCloudFilesDialog(jobId,listingHost,{force:true}); }
+      finally { cloudFiles.disabled=false; }
+      return true;
+    }
+    const presentedCloudFile=e.target.closest("[data-cfr05-presented-open]");
+    if(presentedCloudFile){
+      e.preventDefault(); e.stopPropagation();
+      const jobId=String(presentedCloudFile.getAttribute("data-cfr05-job-id")||"");
+      const fileId=String(presentedCloudFile.getAttribute("data-cfr05-presented-open")||"");
+      const host=presentedCloudFile.closest("[data-job-edit-row], [data-job-row], [data-history-row]")||content;
+      const dialog=document.createElement("dialog"); dialog.setAttribute("data-cfr05-cloud-dialog","");
+      dialog.innerHTML='<h3>Verified cloud file</h3><p data-cfr05-action-status role="status"></p><button type="button" data-cfr05-close>Close</button>';
+      dialog.querySelector("[data-cfr05-close]").addEventListener("click",()=>{dialog.close();dialog.remove();});
+      document.body.appendChild(dialog); dialog.showModal();
+      presentedCloudFile.disabled=true;
+      try { await openVerifiedCloudFile(jobId,fileId,dialog,host); }
+      finally { presentedCloudFile.disabled=false; }
+      return true;
     }
     const cloudUpload = e.target.closest("[data-cloud-file-upload]");
     if (cloudUpload){
@@ -22942,7 +23059,7 @@ function renderJobs(){
         const validation=window.cfr05CloudCuttingFiles?.validateLocalFile(file);if(!validation?.valid){const result={stage:"local_file_validation",error:{code:validation?.reasons?.[0]||"invalidFile",message:(validation?.reasons||[]).join(", ")}};reportUpload(result);toast(`Secure cloud upload blocked: ${result.error.message}.`);return;}
         const labels={membership_validation:"Checking membership…",job_validation:"Checking job ID…",local_file_validation:"Validating…",sha256_calculation:"Hashing…",immutable_path_creation:"Finalizing path…",storage_upload:"Uploading…",uploaded_metadata_verification:"Verifying Storage metadata…",firestore_metadata_creation:"Finalizing metadata…",final_verification:"Verifying…",completed:"Complete"};
         const outcome=await window.uploadCfr05CuttingFile(jobId,file,(stage,partial)=>{cloudUpload.textContent=labels[stage]||stage;reportUpload(partial);});reportUpload(outcome);
-        if(outcome.stage==="completed"){toast(`Cloud file verified: ${file.name}`);try{const listing=await window.listCfr05CloudFiles(jobId);reportListing(listing);if(listing.error||listing.blockers?.length)toast("Upload succeeded; Cloud Files refresh failed. Do not upload the file again.");else toast("Cloud Files refreshed.");}catch(listingError){reportListing({jobId,error:{code:String(listingError?.code||"listingRefreshFailure"),message:String(listingError?.message||listingError)}});toast("Upload succeeded; Cloud Files refresh failed. Do not upload the file again.");}}
+        if(outcome.stage==="completed"){toast(`Cloud file verified: ${file.name}`);try{const listing=await refreshCfr05CloudPresentation(jobId,{force:true});reportListing(listing);if(listing.error||listing.blockers?.length)toast("Upload succeeded; Cloud Files refresh failed. Do not upload the file again.");else{toast("Cloud Files refreshed.");renderJobs();}}catch(listingError){reportListing({jobId,error:{code:String(listingError?.code||"listingRefreshFailure"),message:String(listingError?.message||listingError)}});toast("Upload succeeded; Cloud Files refresh failed. Do not upload the file again.");}}
         else if(outcome.indeterminate)toast(`Cloud upload indeterminate; do not retry automatically. Manual inspection required${outcome.possibleOrphanPath?`: ${outcome.possibleOrphanPath}`:""}.`);
         else toast(`Cloud upload blocked/failed at ${outcome.stage}: ${outcome.error?.message||"Unknown error"}`);
       }catch(err){const result={stage:"unexpected_failure",error:{code:String(err?.code||"unexpected"),message:String(err?.message||err)}};reportUpload(result);toast(`Secure cloud upload failed: ${result.error.message}`);}finally{input.remove();cloudUpload.disabled=false;cloudUpload.textContent="Upload secure cloud file";}} ,{once:true});
@@ -22971,7 +23088,7 @@ function renderJobs(){
   const handleRootFileActionClick = (e)=>{
     const target = e.target;
     if (!(target instanceof Element)) return;
-    const fileAction = target.closest("[data-cloud-files], [data-cloud-file-upload], [data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
+    const fileAction = target.closest("[data-cloud-files], [data-cloud-file-upload], [data-cfr05-presented-open], [data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
     if (!fileAction || !content.contains(fileAction)) return;
     handleCuttingJobFileActionClick(e).catch(err => {
       console.error("Cutting job file action failed", err);

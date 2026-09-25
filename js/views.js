@@ -2969,9 +2969,28 @@ function viewJobs(){
     }
     return { name, href, mode: "message", content: "Preview unavailable for this file type.", expectedPath, rootLocation, source, rootId, rootHint };
   };
+  const cloudPresentationForJob = jobId => window.cfr05CloudPresentation?.peek?.(String(jobId || "")) || null;
+  const buildCloudFileMarkup = jobId => {
+    const state = cloudPresentationForJob(jobId);
+    if (!state){
+      return '<div class="job-cloud-files small muted" data-cloud-files-presentation>Checking secure cloud files…</div>';
+    }
+    if (state.error || state.blockers?.length){
+      return '<div class="job-cloud-files small muted" data-cloud-files-presentation>Secure cloud files unavailable — open Cloud files for details.</div>';
+    }
+    if (!state.files?.length) return "";
+    const rows = state.files.map(file => {
+      const size = Number(file.sizeBytes) / 1024;
+      const sizeLabel = Number.isFinite(size) ? `${size.toFixed(1)} KB` : "size unavailable";
+      const actionLabel = file.extension === "dxf" ? "Preview/Open" : "Download/Open";
+      return `<li class="job-cloud-file-item"><button type="button" class="link" data-cfr05-presented-open="${esc(file.fileId)}" data-cfr05-job-id="${esc(jobId)}">${esc(file.originalName)}</button><span class="small muted"> — Secure cloud · ${esc(String(file.extension || "").toUpperCase())} · ${esc(sizeLabel)} · verified</span><button type="button" class="link" data-cfr05-presented-open="${esc(file.fileId)}" data-cfr05-job-id="${esc(jobId)}">${actionLabel}</button></li>`;
+    }).join("");
+    return `<div class="job-cloud-files" data-cloud-files-presentation><div class="job-file-source-badge">Secure cloud</div><ul class="job-file-list">${rows}</ul></div>`;
+  };
   const buildFileCellMarkup = (jobId, files)=>{
     const previews = (Array.isArray(files) ? files : []).map(filePreviewModel);
-    if (!previews.length) return '<div class="job-file-preview-empty small muted">No files attached</div>';
+    const cloudMarkup = buildCloudFileMarkup(jobId);
+    if (!previews.length) return cloudMarkup || '<div class="job-file-preview-empty small muted">No files attached</div>';
     const first = previews[0] || { name: "Attached file", mode: "message", content: "Preview unavailable", href: "", expectedPath: "", rootLocation: "" };
     const selectId = `jobFileSelect_${esc(jobId)}`;
     return `
@@ -2994,6 +3013,7 @@ function viewJobs(){
           </div>
         </div>
       </div>
+      ${cloudMarkup}
     `;
   };
   const hoursPerDay = typeof getConfiguredDailyHours === "function"
@@ -3832,9 +3852,10 @@ function viewJobs(){
           return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
         }).join("")
       : "";
-    const fileMenu = fileCount
+    const fileMenu = (fileCount
       ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
-      : `<p class="job-file-menu-empty small muted">No files attached</p>`;
+      : (cloudPresentationForJob(job.id)?.files?.length ? "" : `<p class="job-file-menu-empty small muted">No local/reference files attached</p>`))
+      + buildCloudFileMarkup(job.id);
 
     const matCost = Number(job?.materialCost || 0);
     const matQty = Number(job?.materialQty || 0);
@@ -4044,8 +4065,9 @@ function viewJobs(){
                   const pathAction = expectedPath ? `<button type="button" class="link" data-preview-path-btn data-preview-expected-path="${esc(expectedPath)}" data-preview-root-location="${esc(rootLabel)}" data-preview-root-id="${esc(String(f?.rootId || 'Not verified'))}" data-preview-root-hint="${esc(String(f?.rootLocationHint || ''))}">Show path</button>` : "";
                   const linkAction = !isRef ? `<button type="button" class="link" data-edit-file-link="${job.id}" data-file-index="${idx}">Link</button>` : "";
                   return `<li>${link} ${sourceTag} ${statusTag} ${expectedPath ? `<span class="small muted">— Root: ${esc(rootLabel)} · Relative path: ${esc(expectedPath)} · Root ID: ${esc(String(f?.rootId || "Not verified").slice(0,16))}</span>` : ""} ${pathAction} ${linkAction} <button type="button" class="link" data-remove-file="${job.id}" data-file-index="${idx}">Remove</button></li>`;
-                }).join("") : `<li class="muted">No files attached</li>`}
+                }).join("") : (cloudPresentationForJob(job.id)?.files?.length ? "" : `<li class="muted">No local/reference files attached</li>`)}
               </ul>
+              ${buildCloudFileMarkup(job.id)}
             </div>
             <div class="job-edit-actions">
               <button type="button" data-history-save="${job.id}">Save</button>
@@ -4175,7 +4197,8 @@ function viewJobs(){
 `;
     const fileMenu = (fileCount
       ? `<ul class="job-file-menu-list">${fileMenuItems}</ul>`
-      : `<p class="job-file-menu-empty small muted">No files attached</p>`)
+      : (cloudPresentationForJob(j.id)?.files?.length ? "" : `<p class="job-file-menu-empty small muted">No local/reference files attached</p>`))
+      + buildCloudFileMarkup(j.id)
       + fileMenuActions;
     const editing = editingJobs.has(j.id);
     const jobId = j?.id != null ? String(j.id) : "";
@@ -4480,8 +4503,9 @@ function viewJobs(){
                     const pathAction = expectedPath ? `<button type="button" class="link" data-preview-path-btn data-preview-expected-path="${esc(expectedPath)}" data-preview-root-location="${esc(rootLabel)}" data-preview-root-id="${esc(String(f?.rootId || 'Not verified'))}" data-preview-root-hint="${esc(String(f?.rootLocationHint || ''))}">Show path</button>` : "";
                     const linkAction = !isRef ? `<button type="button" class="link" data-edit-file-link="${j.id}" data-file-index="${idx}">Link</button>` : "";
                     return `<li>${link} ${sourceTag} ${statusTag} ${expectedPath ? `<span class="small muted">— Root: ${esc(rootLabel)} · Relative path: ${esc(expectedPath)} · Root ID: ${esc(String(f?.rootId || "Not verified").slice(0,16))}</span>` : ""} ${pathAction} ${linkAction} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
-                  }).join("") : `<li class=\"muted\">No files attached</li>`}
+                  }).join("") : (cloudPresentationForJob(j.id)?.files?.length ? "" : `<li class=\"muted\">No local/reference files attached</li>`)}
                 </ul>
+                ${buildCloudFileMarkup(j.id)}
               </div>
               <div class="job-edit-actions">
                 <button type="button" data-save-job="${j.id}">Save</button>
